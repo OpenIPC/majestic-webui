@@ -1,0 +1,62 @@
+#!/bin/sh
+[ -e "/etc/webui/telegram.conf" ] && source /etc/webui/telegram.conf
+
+if [ "$telegram_enabled" != "true" ]; then
+	echo "Sending to Telegram is not enabled"
+	exit 1
+fi
+
+if [ -z "$telegram_token" ]; then
+	echo "Telegram token not found"
+	exit 1
+fi
+
+if [ -z "$telegram_channel" ]; then
+	echo "Telegram channel not found"
+	exit 1
+fi
+
+if [ -z "$telegram_message" ]; then
+	telegram_message="$(hostname -s), $(date +'%F %T')"
+fi
+
+if [ "$openwall_use_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
+	snapshot=/tmp/snapshot.heif
+	wget -q -T1 localhost/image.heif -O "$snapshot"
+else
+	snapshot=/tmp/snapshot.jpg
+	wget -q -T1 localhost/image.jpg -O "$snapshot"
+fi
+
+if [ ! -e "$snapshot" ]; then
+	echo "Snapshot file not found"
+	exit 1
+fi
+
+command="curl --verbose"
+command="${command} --connect-timeout 100"
+command="${command} --max-time 100"
+
+if [ "$openwall_proxy_enabled" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
+	source /etc/webui/proxy.conf
+	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
+	command="${command} --proxy-user ${socks5_login}:${socks5_password}"
+fi
+
+command="${command} -F 'chat_id=${telegram_channel}'"
+command="${command} --url https://api.telegram.org/bot${telegram_token}"
+
+if [ "$telegram_document" = "true" ]; then
+	command="${command}/sendDocument"
+	command="${command} -F 'document=@${snapshot}'"
+	command="${command} -F 'caption=${telegram_message}'"
+else
+	command="${command}/sendPhoto"
+	command="${command} -F 'photo=@${snapshot}'"
+	command="${command} -F 'caption=${telegram_message}'"
+fi
+
+echo "$command"
+eval "$command"
+
+exit 0

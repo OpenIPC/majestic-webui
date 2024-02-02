@@ -1,0 +1,146 @@
+#!/bin/sh
+TEMPLATE_COMMON="iface %s inet %s\n"
+
+TEMPLATE_MAC="    hwaddress ether \$(fw_printenv -n ethaddr || echo 00:00:23:34:45:66)\n"
+TEMPLATE_STATIC="    address %s\n    netmask %s\n"
+
+TEMPLATE_WIRELESS="    pre-up wpa_passphrase \"\$(fw_printenv -n wlanssid)\" \"\$(fw_printenv -n wlanpass)\" > /tmp/wpa_supplicant.conf
+    pre-up sed -i 's/#psk.*/scan_ssid=1/g' /tmp/wpa_supplicant.conf
+    pre-up wpa_supplicant -B -i wlan0 -D nl80211,wext -c /tmp/wpa_supplicant.conf
+    post-down killall -q wpa_supplicant
+"
+
+show_help() {
+	echo "Usage: $0 [OPTIONS]"
+	echo "  -i iface       Network interface"
+	echo "  -m mode        Mode [dhcp, static]"
+	echo "  -h name        Hostname"
+	echo
+	echo "For wireless interface:"
+	echo "  -s SSID        WiFi network SSID"
+	echo "  -p password    WiFi passphrase"
+	echo
+	echo "For static mode:"
+	echo "  -a address     Interface IP address"
+	echo "  -n netmask     Network mask"
+	echo "  -g address     Gateway IP address"
+	echo "  -d address     DNS IP address"
+	echo
+	exit 0
+}
+
+while getopts "a:d:g:h:i:m:n:p:s:" flag; do
+	case "$flag" in
+		a)
+			network_address=$OPTARG
+			;;
+
+		d)
+			network_nameserver=$OPTARG
+			;;
+
+		g)
+			network_gateway=$OPTARG
+			;;
+
+		h)
+			network_hostname=$OPTARG
+			;;
+
+		i)
+			network_interface=$OPTARG
+			;;
+
+		m)
+			network_mode=$OPTARG
+			;;
+
+		n)
+			network_netmask=$OPTARG
+			;;
+
+		p)
+			network_password=$OPTARG
+			;;
+
+		s)
+			network_ssid=$OPTARG
+			;;
+
+		*)
+			;;
+	esac
+done
+
+if [ $# -eq 0 ]; then
+	show_help
+	exit 1
+fi
+
+if [ -z "$network_interface" ]; then
+	echo "Network interface is not set"
+	exit 1
+fi
+
+if [ "$network_interface" = "wlan0" ]; then
+	if [ -z "$network_ssid" ]; then
+		echo "Wireless network SSID is not set"
+		exit 1
+	fi
+
+	if [ -z "$network_password" ]; then
+		echo "Wireless network passphrase is not set"
+		exit 1
+	fi
+fi
+
+if [ -z "$network_mode" ]; then
+	echo "Network mode is not set"
+	exit 1
+fi
+
+if [ "$network_mode" = "static" ]; then
+	if [ -z "$network_address" ]; then
+		echo "Interface IP address is not set"
+		exit 1
+	fi
+
+	if [ -z "$network_netmask" ]; then
+		echo "Netmask is not set"
+		exit 1
+	fi
+fi
+
+iface_file="/etc/network/interfaces.d/${network_interface}"
+printf "$TEMPLATE_COMMON" $network_interface $network_mode > "$iface_file"
+
+if [ "$network_interface" = "eth0" ]; then
+	printf "$TEMPLATE_MAC" >> "$iface_file"
+fi
+
+if [ "$network_mode" = "static" ]; then
+	printf "$TEMPLATE_STATIC" "$network_address" "$network_netmask" >> "$iface_file"
+
+	if [ -n "$network_gateway" ]; then
+		echo "    gateway ${network_gateway}" >> "$iface_file"
+	fi
+
+	if [ -n "$network_nameserver" ]; then
+		echo "    pre-up echo nameserver ${network_nameserver} > /tmp/resolv.conf" >> "$iface_file"
+	fi
+fi
+
+if [ "$network_interface" = "wlan0" ]; then
+	fw_setenv wlanssid "$network_ssid"
+	fw_setenv wlanpass "$network_password"
+	printf "$TEMPLATE_WIRELESS" $network_ssid $network_password >> "$iface_file"
+fi
+
+if [ -n "$network_hostname" ] && [ "$network_hostname" != "$(hostname)" ]; then
+	hostname "$network_hostname"
+	echo "$network_hostname" > /etc/hostname
+	echo "127.0.0.1 localhost" > /etc/hosts
+	echo "127.0.1.1 ${network_hostname}" >> /etc/hosts
+fi
+
+exit 0
