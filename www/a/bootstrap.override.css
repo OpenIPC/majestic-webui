@@ -1,0 +1,131 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=PT+Mono&display=swap');
+
+:root {
+	--bs-font-sans-serif: 'Montserrat', sans-serif;
+	--bs-font-monospace: 'PT Mono', monospace;
+}
+
+.col > h3 {
+	color: var(--bs-secondary-color);
+	font-size: 1.3rem;
+	margin-bottom: 1.3rem;
+}
+
+.cp2cb {
+    cursor: pointer;
+}
+
+.dropdown-item {
+	font-size: 0.9rem;
+}
+
+.ex > h6 {
+	font-weight: 500;
+	color: var(--bs-tertiary-color);
+}
+
+.form-control::placeholder {
+	color: #c2c2d9;
+}
+
+.form-label {
+	margin-bottom: 0.125rem;
+}
+
+.form-range {
+	height: 2.5rem;
+}
+
+.hint {
+	font-size: 0.875rem;
+	margin-top: 0.2rem;
+	margin-bottom: 0;
+}
+
+.range span.show-value {
+    display: block;
+    min-width: 3rem;
+    text-align: center;
+}
+
+.x-small {
+	font-size: 0.8125rem;
+}
+
+body > main > .container > h2 {
+	color: var(--bs-primary);
+	margin: 2rem 0 1.5rem;
+}
+
+dl.list {
+	display: flex;
+	flex-flow: row wrap;
+	justify-content: space-between;
+	align-items: baseline;
+}
+
+dl.list dt {
+	flex-grow: 1;
+	width: 33%;
+}
+
+dl.list dd {
+	flex-grow: 2;
+	width: 66%;
+}
+
+pre {
+	background: var(--bs-secondary-bg);
+	font-size: 0.8125rem;
+	padding: 1rem;
+}
+
+textarea {
+	font-family: var(--bs-font-monospace);
+	height: 60vh;
+	white-space: pre;
+}
+
+#pb-memory, #pb-overlay {
+	height: 4px;
+	cursor: pointer;
+}
+
+pre#output[data-cmd] {
+	background-color: rgb(0, 0, 0);
+	color: rgba(170, 170, 170, 0.8);
+}
+
+.navbar-nav,
+[data-bs-theme=light] .navbar-nav {
+	--bs-nav-link-color: white;
+}
+
+[data-bs-theme=light] {
+	--bs-primary: rgb(76, 96, 216);
+	--bs-secondary: rgb(76, 96, 216);
+	--bs-tertiary-bg-rgb: 76, 96, 216;
+}
+
+[data-bs-theme=dark] {
+	--bs-primary: rgb(76, 96, 216);
+	--bs-secondary: rgb(138, 159, 208);
+}
+
+[data-bs-theme=dark] .btn-primary {
+	--bs-btn-color: #fff;
+	--bs-btn-bg: rgba(13, 110, 253, 0.5);
+	--bs-btn-border-color: rgba(13, 110, 253, 0.5);
+	--bs-btn-hover-color: #fff;
+	--bs-btn-hover-bg: rgba(11, 94, 215, 0.5);
+	--bs-btn-hover-border-color: rgba(10, 88, 202, 0.5);
+	--bs-btn-focus-shadow-rgb: 49,132,253;
+	--bs-btn-active-color: rgba(255, 255, 255, 0.5);
+	--bs-btn-active-bg: rgba(10, 88, 202, 0.5);
+	--bs-btn-active-border-color: rgba(10, 83, 190, 0.5);
+	--bs-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
+	--bs-btn-disabled-color: rgba(255, 255, 255, 0.5);
+	--bs-btn-disabled-bg: rgba(13, 110, 253, 0.5);
+	--bs-btn-disabled-border-color: rgba(13, 110, 253, 0.5);
+}

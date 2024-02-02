@@ -1,0 +1,29 @@
+#!/bin/sh
+head=master
+repo=majestic-webui
+url="https://github.com/openipc/$repo/archive/refs/heads/$head.zip"
+
+update() {
+	for upd_file in $(find "$1" -type f -or -type l); do
+		ovl_file=${2}${upd_file#${1}}
+		if [ ! -f "$ovl_file" ] || ! diff -q "$ovl_file" "$upd_file"; then
+			[ ! -d "${ovl_file%/*}" ] && mkdir -p "$(dirname "$ovl_file")"
+			cp -f "$upd_file" "$ovl_file"
+		fi
+	done
+}
+
+tmp_file="$(mktemp -u)"
+curl -s -L -k -f -o $tmp_file $url
+
+unzip_dir=$(mktemp -d)
+unzip -q -o -d $unzip_dir $tmp_file
+
+upd_dir=$unzip_dir/$repo-$head
+echo "Copy files from $upd_dir to web directory"
+update "$upd_dir/sbin" "/usr/sbin"
+update "$upd_dir/www" "/var/www"
+
+echo "Delete temp files"
+rm -f "$tmp_file"
+rm -rf "$unzip_dir"

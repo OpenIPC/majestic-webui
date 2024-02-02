@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="960" x="0" y="0" version="1.1">
+	<style>
+		.st0{fill:#666}
+		.st1{fill:#bfbfbf}
+		.st15{fill:#262626}
+		.st16{fill:#fff}
+	</style>
+	<g>
+		<path d="M0 0h1920v960H0z"/>
+		<path d="M0 0h240v630H0z" class="st0"/>
+		<path d="M240 0h205v630H240z" class="st1"/>
+		<path d="M445 0h206v630H445z" fill="#bfbf00"/>
+		<path d="M651 0h206v630H651z" fill="#00bfbf"/>
+		<path d="M857 0h206v630H857z" fill="#00bf00"/>
+		<path d="M1063 0h206v630h-206z" fill="#bf00bf"/>
+		<path d="M1269 0h206v630h-206z" fill="#bf0000"/>
+		<path d="M1475 0h205v630h-205z" fill="#0000bf"/>
+		<path d="M1680 0h240v630h-240z" class="st1"/>
+		<path d="M0 630h240v90H0z" fill="#0ff"/>
+		<path d="M1680 630h240v90h-240z" fill="#00f"/>
+		<path d="M0 720h240v90H0z" fill="#ff0"/>
+		<linearGradient id="r1" x1="1450" x2="450" y1="16000" y2="16000" gradientTransform="matrix(1 0 0 1 7 15000)" gradientUnits="userSpaceOnUse">
+			<stop offset="0"/>
+			<stop offset="1" stop-color="#fff"/>
+		</linearGradient>
+		<linearGradient id="r2" x1="450" x2="1450" y1="16000" y2="16000" gradientTransform="matrix(1 0 0 1 7 15000)" gradientUnits="userSpaceOnUse">
+			<stop offset="0"/>
+			<stop offset="1" stop-color="#fff"/>
+		</linearGradient>
+		<path d="M240 630h1440v90H240z" fill="url(#r1)"/>
+		<path d="M240 720h1440v90H240z" fill="url(#r2)"/>
+		<path d="M1680 720h240v90h-240z" fill="red"/>
+	</g>
+</svg>
