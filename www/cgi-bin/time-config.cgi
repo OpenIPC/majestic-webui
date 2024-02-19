@@ -2,8 +2,6 @@
 <%in p/common.cgi %>
 <%
 page_title="Time Settings"
-
-seq=$(seq 0 3)
 tz_data=$(cat /etc/TZ)
 tz_name=$(cat /etc/timezone)
 
@@ -14,15 +12,6 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			[ -z "$POST_tz_data" ] && redirect_to $SCRIPT_NAME "warning" "Empty timezone value. Skipping."
 			[ "$tz_data" != "$POST_tz_data" ] && echo "${POST_tz_data}" > /etc/TZ
 			[ "$tz_name" != "$POST_tz_name" ] && echo "${POST_tz_name}" > /etc/timezone
-
-			tmp_file=/tmp/ntp.conf
-			:>$tmp_file
-			for i in $seq; do
-				eval s="\$POST_ntp_server_${i}"
-				[ -n "$s" ] && echo "server ${s} iburst" >> $tmp_file
-			done
-			unset i; unset s
-			mv $tmp_file /etc/ntp.conf
 			redirect_back "success" "Configuration updated."
 			;;
 	esac
@@ -42,32 +31,20 @@ fi
 			<p class="string">
 				<label for="tz_name" class="form-label">Zone name</label>
 				<input type="text" id="tz_name" name="tz_name" value="<%= $tz_name %>" class="form-control" list="tz_list">
-				<span class="hint text-secondary">Start typing the name of the nearest large city in the box above then select from available variants.</span>
+				<span class="hint text-secondary">Type the name of the nearest large city.</span>
 			</p>
 			<p class="string">
 				<label for="tz_data" class="form-label">Zone string</label>
 				<input type="text" id="tz_data" name="tz_data" value="<%= $tz_data %>" class="form-control" readonly>
-				<span class="hint text-secondary">Control string of the timezone selected above. Read-only field, only for monitoring.</span>
+				<span class="hint text-secondary">Control string of the timezone selected above.</span>
 			</p>
 			<p><a href="#" id="frombrowser">Pick up timezone from browser</a></p>
 		</div>
 
 		<div class="col">
-		<h3>Time Synchronization</h3>
-			<%
-			for i in $seq; do
-				x=$(expr $i + 1)
-				eval ntp_server_${i}="$(sed -n ${x}p /etc/ntp.conf | cut -d' ' -f2)"
-				field_text "ntp_server_${i}" "NTP Server $(( i + 1 ))"
-			done; unset i; unset x
-			%>
-		</div>
-
-		<div class="col">
+		<h3>Configuration</h3>
 			<% ex "cat /etc/timezone" %>
 			<% ex "cat /etc/TZ" %>
-			<%# ex "echo \$TZ" %>
-			<% ex "cat /etc/ntp.conf" %>
 			<p id="sync-time-wrapper"><a href="#" id="sync-time">Sync time</a></p>
 		</div>
 	</div>
@@ -76,18 +53,6 @@ fi
 
 <script src="/a/timezone.js"></script>
 <script>
-	$('#sync-time').addEventListener('click', event => {
-		event.preventDefault();
-		fetch('/cgi-bin/j/time.cgi')
-			.then((response) => response.json())
-			.then((json) => {
-				p = document.createElement('p');
-				p.classList.add('alert', 'alert-' + json.result);
-				p.textContent = json.message;
-				$('#sync-time-wrapper').replaceWith(p);
-			})
-	});
-
 	function findTimezone(tz) {
 		return tz.n == $("#tz_name").value;
 	}
@@ -131,6 +96,18 @@ fi
 		tzn.addEventListener("selectionchange", updateTimezone);
 		tzn.addEventListener("change", updateTimezone);
 		$("#frombrowser").addEventListener("click", useBrowserTimezone);
+	});
+
+	$('#sync-time').addEventListener('click', event => {
+		event.preventDefault();
+		fetch('/cgi-bin/j/time.cgi')
+			.then((response) => response.json())
+			.then((json) => {
+				p = document.createElement('p');
+				p.classList.add('alert', 'alert-' + json.result);
+				p.textContent = json.message;
+				$('#sync-time-wrapper').replaceWith(p);
+			})
 	});
 </script>
 

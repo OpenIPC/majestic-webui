@@ -1,0 +1,72 @@
+#!/bin/sh
+[ -e "/etc/webui/openwall.conf" ] && source /etc/webui/openwall.conf
+
+flash_size=$(awk '{sum+=sprintf("0x%s", $2);} END{print sum/1048576;}' /proc/mtd)
+fw_variant=$(grep "BUILD_OPTION" /etc/os-release | cut -d= -f2 | tr -d '"')
+fw_version=$(grep "OPENIPC_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
+
+network_hostname=$(hostname -s)
+network_interface=$(ip route | awk '/default/ {print $5}')
+network_macaddr=$(cat "/sys/class/net/${network_interface}/address")
+
+if [ "$(ipcinfo -v)" = "sigmastar" ]; then
+	soc=$(fw_printenv -n soc)
+else
+	soc=$(ipcinfo --chip-name)
+fi
+
+sensor=$(ipcinfo --short-sensor)
+streamer=$(basename $(ipcinfo --streamer))
+temperature=$(ipcinfo --temp)
+uptime=$(uptime | sed -r 's/^.+ up ([^,]+), .+$/\1/')
+
+if [ "$openwall_enabled" != "true" ]; then
+	echo "Sending to OpenIPC Wall is not enabled"
+	exit 1
+fi
+
+if [ "$openwall_use_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
+	snapshot=/tmp/snapshot.heif
+	wget -T1 -q localhost/image.heif -O "$snapshot"
+else
+	snapshot=/tmp/snapshot.jpg
+	wget -T1 -q localhost/image.jpg -O "$snapshot"
+fi
+
+if [ ! -e "$snapshot" ]; then
+	echo "Snapshot file not found"
+	exit 1
+fi
+
+if [ -z "$network_macaddr" ]; then
+	echo "MAC address not found"
+	exit 1
+fi
+
+command="curl --verbose"
+command="${command} --connect-timeout 100"
+command="${command} --max-time 100"
+
+if [ "$openwall_proxy_enabled" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
+	source /etc/webui/proxy.conf
+	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
+	command="${command} --proxy-user ${socks5_login}:${socks5_password}"
+fi
+
+command="${command} --url https://openipc.org/snapshots"
+command="${command} -F 'mac_address=${network_macaddr}'"
+command="${command} -F 'firmware=${fw_version}-${fw_variant:-lite}'"
+command="${command} -F 'flash_size=${flash_size}'"
+command="${command} -F 'hostname=${network_hostname}'"
+command="${command} -F 'caption=${openwall_caption}'"
+command="${command} -F 'sensor=${sensor}'"
+command="${command} -F 'soc=${soc}'"
+command="${command} -F 'soc_temperature=${temperature}'"
+command="${command} -F 'streamer=${streamer}'"
+command="${command} -F 'uptime=${uptime}'"
+command="${command} -F 'file=@${snapshot}'"
+
+echo "$command"
+eval "$command"
+
+exit 0

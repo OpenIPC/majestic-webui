@@ -31,25 +31,9 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownInformation" class="dropdown-menu">
 							<li><a class="dropdown-item" href="status.cgi">Status</a></li>
 							<li><hr class="dropdown-divider"></li>
-							<li><a class="dropdown-item" href="info-overlay.cgi">Overlay</a></li>
-							<li><a class="dropdown-item" href="info-dmesg.cgi">Kernel</a></li>
 							<li><a class="dropdown-item" href="info-majestic.cgi">Majestic</a></li>
-						</ul>
-					</li>
-					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownUpdates" role="button">Updates</a>
-						<ul aria-labelledby="dropdownUpdates" class="dropdown-menu">
-							<li><a class="dropdown-item" href="firmware.cgi">Firmware</a></li>
-						</ul>
-					</li>
-					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownSettings" role="button">Settings</a>
-						<ul aria-labelledby="dropdownSettings" class="dropdown-menu">
-							<li><a class="dropdown-item" href="network.cgi">Network</a></li>
-							<li><a class="dropdown-item" href="time-config.cgi">Time</a></li>
-							<li><a class="dropdown-item" href="webui-settings.cgi">WebUI</a></li>
-							<li><hr class="dropdown-divider"></li>
-							<li><a class="dropdown-item" href="maintenance.cgi">Maintenance</a></li>
+							<li><a class="dropdown-item" href="info-kernel.cgi">Kernel</a></li>
+							<li><a class="dropdown-item" href="info-overlay.cgi">Overlay</a></li>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
@@ -62,6 +46,17 @@ Pragma: no-cache
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
+						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownSettings" role="button">Settings</a>
+						<ul aria-labelledby="dropdownSettings" class="dropdown-menu">
+							<li><a class="dropdown-item" href="network.cgi">Network</a></li>
+							<li><a class="dropdown-item" href="time-config.cgi">Time</a></li>
+							<li><a class="dropdown-item" href="webui-settings.cgi">WebUI</a></li>
+							<li><hr class="dropdown-divider"></li>
+							<li><a class="dropdown-item" href="firmware.cgi">Firmware</a></li>
+							<li><a class="dropdown-item" href="maintenance.cgi">Maintenance</a></li>
+						</ul>
+					</li>
+					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownTools" role="button">Tools</a>
 						<ul aria-labelledby="dropdownTools" class="dropdown-menu">
 							<li><a class="dropdown-item" href="console.cgi">Console</a></li>
@@ -71,14 +66,16 @@ Pragma: no-cache
 							<% fi %>
 						</ul>
 					</li>
-					<li class="nav-item"><a class="nav-link" href="preview.cgi">Preview</a></li>
 					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownHelp" role="button">Help</a>
-						<ul aria-labelledby="dropdownHelp" class="dropdown-menu dropdown-menu-lg-end">
-							<li><a class="dropdown-item" href="https://openipc.org/">About OpenIPC</a></li>
-							<li><a class="dropdown-item" href="https://openipc.org/wiki/">OpenIPC Wiki</a></li>
+						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownExtensions" role="button">Extensions</a>
+						<ul aria-labelledby="dropdownExtensions" class="dropdown-menu dropdown-menu-lg-end">
+							<li><a class="dropdown-item" href="ext-openwall.cgi">OpenWall</a></li>
+							<li><a class="dropdown-item" href="ext-tunnel.cgi">Tunnel</a></li>
+							<li><hr class="dropdown-divider"></li>
+							<li><a class="dropdown-item" href="ext-proxy.cgi">Proxy</a></li>
 						</ul>
-					</li>
+					</li>	
+					<li class="nav-item"><a class="nav-link" href="preview.cgi">Preview</a></li>
 				</ul>
 			</div>
 		</div>
@@ -98,7 +95,7 @@ Pragma: no-cache
 
 				<div class="col-1" id="daynight_value"></div>
 				<div class="col-md-4 col-lg-3 mb-2 text-end">
-					<div><a href="/cgi-bin/time-config.cgi" id="time-now" class="link-underline link-underline-opacity-0 link-underline-opacity-75-hover"></a></div>
+					<div class="text-secondary" id="time-now"></div>
 					<div id="soc-temp"></div>
 				</div>
 			</div>
@@ -122,4 +119,4 @@ Pragma: no-cache
 <% fi %>
 
 <h2><%= $page_title %></h2>
-<% flash_read %>
+<% log_read %>

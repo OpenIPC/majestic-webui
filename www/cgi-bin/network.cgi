@@ -13,7 +13,7 @@ network_dhcp="$(cat /etc/network/interfaces.d/${network_interface} | grep -q dhc
 network_wifi_device="$(fw_printenv -n wlandev)"
 network_wifi_ssid="$(fw_printenv -n wlanssid)"
 network_wifi_password="$(fw_printenv -n wlanpass)"
-profiles="$(echo unknown-device && grep -r '$1..=' /etc/wireless | cut -d '"' -f 4 | sort | grep -e ${soc} -e ${soc_family} -e generic)"
+profiles="$(grep -r '$1..=' /etc/wireless | cut -d '"' -f 4 | sort | grep -e ${soc} -e ${soc_family} -e generic)"
 
 if [ "POST" = "$REQUEST_METHOD" ]; then
 	case "$POST_action" in
@@ -27,7 +27,8 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			;;
 
 		reset)
-			cp -rf /rom/etc/network/interfaces.d /etc/network
+			rm -f /etc/network/interfaces.d/*
+			cp -f /rom/etc/network/interfaces.d/* /etc/network/interfaces.d
 			redirect_back
 			;;
 
@@ -115,7 +116,9 @@ fi
 		<% for dev in $network_list; do %>
 			<% ex "cat /etc/network/interfaces.d/$dev" %>
 		<% done %>
-		<% ex "fw_printenv | grep wlan" %>
+		<% if [ -n "$(fw_printenv -n wlandev)" ]; then %>
+			<% ex "fw_printenv | grep wlan" %>
+		<% fi %>
 		<% ex "ifconfig" %>
 	</div>
 </div>

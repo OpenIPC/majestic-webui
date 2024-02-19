@@ -1,4 +1,3 @@
-// based on https://raw.githubusercontent.com/openwrt/luci/master/modules/luci-base/luasrc/sys/zoneinfo/tzdata.lua
 const TZ = [
 	{n:'Africa/Abidjan',v:'GMT0'},
 	{n:'Africa/Accra',v:'GMT0'},

@@ -2,7 +2,7 @@
 <%in p/common.cgi %>
 <%
 	page_title="Erasing Overlay"
-	c="/usr/sbin/sysupgrade -s -x -n"
+	c="/usr/sbin/sysupgrade -s -n -x"
 	r="true"
 %>
 

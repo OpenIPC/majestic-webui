@@ -1,29 +1,18 @@
 #!/bin/sh
-head=master
-repo=majestic-webui
-url="https://github.com/openipc/$repo/archive/refs/heads/$head.zip"
+url="https://github.com/openipc/majestic-webui/archive/refs/heads/master.zip"
 
-update() {
-	for upd_file in $(find "$1" -type f -or -type l); do
-		ovl_file=${2}${upd_file#${1}}
-		if [ ! -f "$ovl_file" ] || ! diff -q "$ovl_file" "$upd_file"; then
-			[ ! -d "${ovl_file%/*}" ] && mkdir -p "$(dirname "$ovl_file")"
-			cp -f "$upd_file" "$ovl_file"
-		fi
-	done
-}
+tmp_zip=$(mktemp -u)
+curl -s -L $url -o $tmp_zip
 
-tmp_file="$(mktemp -u)"
-curl -s -L -k -f -o $tmp_file $url
+tmp_dir=$(mktemp -d)
+unzip -q -o -d $tmp_dir $tmp_zip
 
-unzip_dir=$(mktemp -d)
-unzip -q -o -d $unzip_dir $tmp_file
+repo=$(ls $tmp_dir)
+rm -f $(find /var/www -type f)
 
-upd_dir=$unzip_dir/$repo-$head
-echo "Copy files from $upd_dir to web directory"
-update "$upd_dir/sbin" "/usr/sbin"
-update "$upd_dir/www" "/var/www"
+echo "Copy files to web directory"
+cp -rf $tmp_dir/$repo/sbin/* /usr/sbin
+cp -rf $tmp_dir/$repo/www/* /var/www
 
-echo "Delete temp files"
-rm -f "$tmp_file"
-rm -rf "$unzip_dir"
+echo "Delete temporary files"
+rm -rf $tmp_dir $tmp_zip

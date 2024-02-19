@@ -121,7 +121,7 @@ fi
 	</div>
 
 	<div class="col">
-		<h3>Related settings</h3>
+		<h3>Related Settings</h3>
 		<pre><% echo -e "$config" %></pre>
 	</div>
 

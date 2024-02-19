@@ -48,7 +48,7 @@ page_title="Majestic Endpoints"
 	</div>
 
 	<div class="col">
-		<h3>Still Images</h3>
+		<h3>Images</h3>
 		<dl>
 			<dt class="cp2cb">http://<%= $network_address %>/image.jpg</dt>
 			<dd>Snapshot in JPEG format.</dd>

@@ -13,7 +13,7 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 	case "$POST_action" in
 		save)
 			if [ -z "$editor_text" ]; then
-				flash_save "warning" "Empty payload. File not saved!"
+				log_create "warning" "Empty payload. File not saved!"
 			else
 				[ -f "${editor_file}.backup" ] && rm "${editor_file}.backup"
 				echo "$editor_text" > "$editor_file"
@@ -22,18 +22,18 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			;;
 
 		*)
-			flash_save "danger" "UNKNOWN ACTION: $POST_action"
+			log_create "danger" "UNKNOWN ACTION: $POST_action"
 			;;
 	esac
 else
 	editor_file="$GET_f"
 	if [ ! -f "$editor_file" ]; then
-		flash_save "danger" "File not found!"
+		log_create "danger" "File not found!"
 	elif [ -n "$editor_file" ]; then
 		if [ "b" = "$( (cat -v "$editor_file" | grep -q "\^@") && echo "b" )" ]; then
-			flash_save "danger" "Not a text file!"
+			log_create "danger" "Not a text file!"
 		elif [ "$(stat -c%s $editor_file)" -gt "102400" ]; then
-			flash_save "danger" "Uploded file is too large!"
+			log_create "danger" "Uploaded file is too large!"
 		else
 			editor_text="$(cat $editor_file | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g")"
 		fi

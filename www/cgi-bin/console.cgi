@@ -8,7 +8,7 @@ page_title="Console"
 <form>
 <div class="row">
 	<div class="col-10">
-		<% field_text "command" "Type a command:" %>
+		<% field_text "command" "Enter command:" %>
 	</div>
 	<div class="col align-self-center">
 		<% button_submit "Run" "secondary" %>

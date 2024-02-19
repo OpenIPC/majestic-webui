@@ -2,5 +2,5 @@
 <%in p/common.cgi %>
 <% page_title="Kernel Messages" %>
 <%in p/header.cgi %>
-<% ex "/bin/dmesg" %>
+<% ex "dmesg" %>
 <%in p/footer.cgi %>

@@ -44,7 +44,7 @@
 <div class="row g-4 mb-4 ui-expert">
 	<div class="col ">
 		<h3>Resources</h3>
-		<% ex "/usr/bin/uptime" %>
+		<% ex "uptime" %>
 		<% ex "df -T" %>
 		<% ex "cat /proc/meminfo | grep Mem" %>
 	</div>

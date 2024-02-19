@@ -105,7 +105,7 @@ button_restore_from_rom() {
 # button_submit "text" "type" "extras"
 button_submit() {
 	local t="$1"
-	[ -z "$t" ] && t="Save changes"
+	[ -z "$t" ] && t="Save Changes"
 	local c="$2"
 	[ -z "$c" ] && c="primary"
 	local x="$3"
@@ -183,11 +183,12 @@ field_range() {
 	local x="$4"
 	local y="$5"
 	local h="$6"
+	[ "${n:8:3}" = "gop" ] && local r="0.1"
 	echo "<p class=\"range\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<span class=\"input-group\">"
 	echo "<input type=\"hidden\" id=\"${n}\" name=\"${n}\" value=\"${v}\">"
-	echo "<input type=\"range\" class=\"form-control form-range\" id=\"${n}-range\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step="1">"
+	echo "<input type=\"range\" class=\"form-control form-range\" id=\"${n}-range\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step=\"${r:-1}\">"
 	echo "<span class=\"input-group-text show-value\" id=\"${n}-show\">${v}</span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
@@ -334,37 +335,6 @@ field_textedit() {
 	echo "</p>"
 }
 
-flash_append() {
-	echo "$1:$2" >> "$flash_file"
-}
-
-flash_delete() {
-	:>"$flash_file"
-}
-
-flash_read() {
-	[ ! -f "$flash_file" ] && return
-	[ -z "$(cat $flash_file)" ] && return
-	local c
-	local m
-	local l
-	OIFS="$IFS"
-	IFS=$'\n'
-	for l in $(cat "$flash_file"); do
-		c="$(echo $l | cut -d':' -f1)"
-		m="$(echo $l | cut -d':' -f2-)"
-		echo "<div class=\"alert alert-${c} alert-dismissible fade show\" role=\"alert\">${m}" \
-			"<button type=\"button\" class=\"btn btn-close\" data-bs-dismiss=\"alert\" aria-label=\"Close\"></button>" \
-			"</div>"
-	done
-	IFS=$OIFS
-	flash_delete
-}
-
-flash_save() {
-	echo "${1}:${2}" > $flash_file
-}
-
 get_config() {
 	echo ${1}/etc/majestic.yaml
 }
@@ -402,6 +372,34 @@ get_yaml() {
 	else
 		echo 0
 	fi
+}
+
+log_create() {
+	echo "${1}:${2}" > "$log_file"
+}
+
+log_read() {
+	[ ! -f "$log_file" ] && return
+	[ -z "$(cat $log_file)" ] && return
+	local c
+	local m
+	local l
+	OIFS="$IFS"
+	IFS=$'\n'
+	for l in $(cat "$log_file"); do
+		c="$(echo $l | cut -d':' -f1)"
+		m="$(echo $l | cut -d':' -f2-)"
+		echo "<div class=\"alert alert-${c} alert-dismissible fade show\" role=\"alert\">${m}" \
+			"<button type=\"button\" class=\"btn btn-close\" data-bs-dismiss=\"alert\" aria-label=\"Close\"></button>" \
+			"</div>"
+	done
+	IFS=$OIFS
+	rm -f "$log_file"
+}
+
+set_error_flag() {
+	echo "danger:${1}" >> "$log_file"
+	error=1
 }
 
 html_title() {
@@ -460,7 +458,7 @@ redirect_back() {
 
 # redirect_to "url" "flash class" "flash text"
 redirect_to() {
-	[ -n "$3" ] && flash_save "$2" "$3"
+	[ -n "$3" ] && log_create "$2" "$3"
 	echo "HTTP/1.1 303 See Other"
 	echo "Content-type: text/html; charset=UTF-8"
 	echo "Cache-Control: no-store"
@@ -500,11 +498,6 @@ report_error() {
 # report_log "text" "extras"
 report_log() {
 	pre "$1" "small" "$2"
-}
-
-set_error_flag() {
-	flash_append "danger" "$1"
-	error=1
 }
 
 generate_signature() {
@@ -593,7 +586,7 @@ update_caminfo() {
 }
 
 mj_bin_file=/usr/bin/majestic
-flash_file=/tmp/webui-flash.txt
+log_file=/tmp/webui/logfile.txt
 signature_file=/tmp/webui/signature.txt
 sysinfo_file=/tmp/sysinfo.txt
 
