@@ -13,7 +13,7 @@
 }
 
 .cp2cb {
-    cursor: pointer;
+	cursor: pointer;
 }
 
 .dropdown-item {
@@ -44,9 +44,9 @@
 }
 
 .range span.show-value {
-    display: block;
-    min-width: 3.5rem;
-    text-align: center;
+	display: block;
+	min-width: 3.5rem;
+	text-align: center;
 }
 
 .x-small {
@@ -95,6 +95,13 @@ textarea {
 pre#output[data-cmd] {
 	background-color: rgb(0, 0, 0);
 	color: rgba(170, 170, 170, 0.8);
+}
+
+.btn-motor {
+	font-size: 2.5rem;
+	--bs-btn-border-width: 0;
+	--bs-btn-padding-x: 0;
+	--bs-btn-padding-y: 0;
 }
 
 .navbar-nav,

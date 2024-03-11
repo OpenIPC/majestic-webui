@@ -34,6 +34,10 @@
 					<a href="majestic-settings.cgi?tab=nightMode" title="Night mode settings"><img src="/a/gear.svg" alt="Gear"></a>
 				</div>
 			</div>
+
+			<% if fw_printenv wlandev | grep -q foscam; then %>
+				<%in p/motor.cgi %>
+			<% fi %>
 		</div>
 	</div>
 </div>
@@ -46,7 +50,7 @@
 <% echo "\$('#toggle-light').disabled = !$(get_yaml .nightMode.backlightPin);" %>
 
 $("#toggle-night").addEventListener("click", ev => {
-	fetch("/night/toggle").then(api => api.json()).then(data => {
+	fetch('/night/toggle').then(api => api.json()).then(data => {
 		ev.checked = data;
 		if (!$('#toggle-ircut').disabled) {
 			$('#toggle-ircut').checked = data;
@@ -58,13 +62,13 @@ $("#toggle-night").addEventListener("click", ev => {
 });
 
 $("#toggle-ircut").addEventListener("click", ev => {
-	fetch("/night/ircut").then(api => api.json()).then(data => {
+	fetch('/night/ircut').then(api => api.json()).then(data => {
 		ev.checked = data;
 	});
 });
 
 $("#toggle-light").addEventListener("click", ev => {
-	fetch("/night/light").then(api => api.json()).then(data => {
+	fetch('/night/light').then(api => api.json()).then(data => {
 		ev.checked = data;
 	});
 });
