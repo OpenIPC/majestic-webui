@@ -22,7 +22,7 @@ function control(dir) {
 	let step = 3;
 	let x = dir.includes("l") ? -step : dir.includes("r") ? step : 0;
 	let y = dir.includes("d") ? -step : dir.includes("u") ? step : 0;
-	fetch('/cgi-bin/j/run.cgi?web=' + btoa('motor' + ' ' + x + ' ' + y));
+	fetch('/cgi-bin/j/run.cgi?web=' + btoa('motor ' + x + ' ' + y));
 }
 
 $$(".motor button").forEach(el => {

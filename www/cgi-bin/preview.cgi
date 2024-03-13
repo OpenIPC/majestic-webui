@@ -35,7 +35,7 @@
 				</div>
 			</div>
 
-			<% if fw_printenv wlandev | grep -q foscam; then %>
+			<% if fw_printenv -n wlandev | grep -q foscam; then %>
 				<%in p/motor.cgi %>
 			<% fi %>
 		</div>
