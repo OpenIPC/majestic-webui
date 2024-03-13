@@ -34,6 +34,7 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			;;
 	esac
 
+	rm -f "$json_conf"
 	redirect_to "$HTTP_REFERER"
 fi
 %>

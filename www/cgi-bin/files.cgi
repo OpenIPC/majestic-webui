@@ -31,7 +31,7 @@
 		if [ -d "${path}" ]; then
 			echo "<a href=\"?cd=${path}\" class=\"fw-bold\">${name}</a>"
 		else
-			echo "<a href=\"download.cgi?file=${path}\" class=\"fst-italic\">${name}</a>"
+			echo "<a href=\"${path}\" class=\"fst-italic\">${name}</a>"
 		fi
 
 		echo "</div>"

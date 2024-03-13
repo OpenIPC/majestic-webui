@@ -95,8 +95,8 @@ Pragma: no-cache
 
 				<div class="col-1" id="daynight_value"></div>
 				<div class="col-md-4 col-lg-3 mb-2 text-end">
-					<div class="text-secondary" id="time-now"></div>
-					<div id="soc-temp"></div>
+					<div id="time-now"></div>
+					<div class="text-secondary" id="soc-temp"></div>
 				</div>
 			</div>
 

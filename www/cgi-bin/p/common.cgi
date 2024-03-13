@@ -113,10 +113,6 @@ button_submit() {
 	echo "<div class=\"mt-2\"><input type=\"submit\" class=\"btn btn-${c}\"${x} value=\"${t}\"></div>"
 }
 
-check_file_exist() {
-	[ ! -f "$1" ] && redirect_back "danger" "File ${1} not found"
-}
-
 check_password() {
 	local p="/cgi-bin/webui-settings.cgi"
 	[ "0${debug}" -ge "1" ] && return
@@ -356,6 +352,12 @@ get_metrics() {
 	fi
 }
 
+get_ptz() {
+	if [ -e /usr/bin/motor ]; then
+		motor list | grep "$wlan_device"
+	fi
+}
+
 get_schema() {
 	local m=/tmp/webui/schema.json
 	if [ ! -e "$m" ]; then
@@ -364,13 +366,13 @@ get_schema() {
 	echo "$m"
 }
 
-get_yaml() {
+get_night() {
 	local m=$(pidof majestic)
-	local v=$(yaml-cli -g $1)
-	if [ -n "$m" ] && [ -n "$v" ]; then
-		echo 1
+	local v=$(yaml-cli -g .nightMode.$1)
+	if [ -n "$m" ] && [ -n "$v" ] && [ "$v" != "true" ]; then
+		echo true
 	else
-		echo 0
+		echo false
 	fi
 }
 
@@ -553,6 +555,7 @@ update_caminfo() {
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow|cut -d: -f2)
+	wlan_device=$(fw_printenv -n wlandev)
 
 	# Network
 	network_interface=$(ip route | awk '/default/ {print $5}')
@@ -573,8 +576,8 @@ update_caminfo() {
 	fi
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
-		network_gateway network_hostname network_interface network_macaddr overlay_root sensor
-		sensor_ini soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
+		network_gateway network_hostname network_interface network_macaddr overlay_root sensor sensor_ini
+		soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password wlan_device"
 	rm -f ${sysinfo_file}
 
 	local v
@@ -588,7 +591,7 @@ update_caminfo() {
 mj_bin_file=/usr/bin/majestic
 log_file=/tmp/webui/logfile.txt
 signature_file=/tmp/webui/signature.txt
-sysinfo_file=/tmp/sysinfo.txt
+sysinfo_file=/tmp/webui/sysinfo.txt
 
 [ ! -d /etc/webui ] && mkdir -p /etc/webui
 [ ! -d /tmp/webui ] && mkdir -p /tmp/webui

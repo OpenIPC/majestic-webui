@@ -35,7 +35,13 @@
 				</div>
 			</div>
 
-			<% if fw_printenv wlandev | grep -q foscam; then %>
+			<% if [ "$(get_night enabled)" != "true" ]; then %>
+				<div class="container">
+					<p class="small text-body-secondary">Nightmode is controlled by a sensor.</p>
+				</div>
+			<% fi %>
+
+			<% if [ -n "$(get_ptz)" ]; then %>
 				<%in p/motor.cgi %>
 			<% fi %>
 		</div>
@@ -46,8 +52,10 @@
 <% echo "\$('#toggle-night').checked = $(get_metrics night_enabled);" %>
 <% echo "\$('#toggle-ircut').checked = $(get_metrics ircut_enabled);" %>
 <% echo "\$('#toggle-light').checked = $(get_metrics light_enabled);" %>
-<% echo "\$('#toggle-ircut').disabled = !$(get_yaml .nightMode.irCutPin1);" %>
-<% echo "\$('#toggle-light').disabled = !$(get_yaml .nightMode.backlightPin);" %>
+
+<% echo "\$('#toggle-night').disabled = !$(get_night enabled);" %>
+<% echo "\$('#toggle-ircut').disabled = !$(get_night enabled) || !$(get_night irCutPin1);" %>
+<% echo "\$('#toggle-light').disabled = !$(get_night enabled) || !$(get_night backlightPin);" %>
 
 $("#toggle-night").addEventListener("click", ev => {
 	fetch('/night/toggle').then(api => api.json()).then(data => {
@@ -75,4 +83,3 @@ $("#toggle-light").addEventListener("click", ev => {
 </script>
 
 <%in p/footer.cgi %>
-
