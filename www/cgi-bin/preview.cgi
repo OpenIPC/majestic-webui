@@ -4,38 +4,27 @@
 <%in p/header.cgi %>
 
 <div class="row preview">
-	<div class="col-md-8 col-xl-9 col-xxl-9 position-relative mb-3">
+	<div class="col">
 		<% preview %>
-		<p class="small text-body-secondary"><a href="majestic-endpoints.cgi">Majestic Endpoints</a></p>
+		<p class="small"><a href="majestic-endpoints.cgi">Majestic Endpoints</a></p>
 	</div>
 
-	<div class="col-md-4 col-xl-3 col-xxl-3">
-		<div class="d-grid gap-2 mb-3">
-			<div class="btn-group">
-				<input type="checkbox" class="btn-check" id="toggle-night">
-				<label class="btn btn-primary text-start" for="toggle-night">Day/Night Toggle</label>
-				<div class="input-group-text">
-					<a href="majestic-settings.cgi?tab=nightMode" title="Night mode settings"><img src="/a/gear.svg" alt="Gear"></a>
-				</div>
-			</div>
+	<div class="col-auto">
+		<% if [ "$(get_night lightMonitor)" = "true" ]; then %>
+			<p class="small"><a href="majestic-settings.cgi?tab=nightMode">Light monitor is active</a></p>
+		<% fi %>
 
-			<div class="btn-group">
-				<input type="checkbox" class="btn-check" id="toggle-ircut">
-				<label class="btn btn-primary text-start" for="toggle-ircut">IRcut Toggle</label>
-				<div class="input-group-text">
-					<a href="majestic-settings.cgi?tab=nightMode" title="Night mode settings"><img src="/a/gear.svg" alt="Gear"></a>
-				</div>
-			</div>
+		<div class="d-grid gap-3">
+			<input type="checkbox" class="btn-check" id="toggle-night">
+			<label class="btn btn-primary" for="toggle-night">Night Toggle</label>
 
-			<div class="btn-group">
-				<input type="checkbox" class="btn-check" id="toggle-light">
-				<label class="btn btn-primary text-start" for="toggle-light">Light Toggle</label>
-				<div class="input-group-text">
-					<a href="majestic-settings.cgi?tab=nightMode" title="Night mode settings"><img src="/a/gear.svg" alt="Gear"></a>
-				</div>
-			</div>
+			<input type="checkbox" class="btn-check" id="toggle-ircut">
+			<label class="btn btn-primary" for="toggle-ircut">IRcut Toggle</label>
 
-			<% if fw_printenv wlandev | grep -q foscam; then %>
+			<input type="checkbox" class="btn-check" id="toggle-light">
+			<label class="btn btn-primary" for="toggle-light">Light Toggle</label>
+
+			<% if [ -n "$(get_ptz)" ]; then %>
 				<%in p/motor.cgi %>
 			<% fi %>
 		</div>
@@ -46,8 +35,10 @@
 <% echo "\$('#toggle-night').checked = $(get_metrics night_enabled);" %>
 <% echo "\$('#toggle-ircut').checked = $(get_metrics ircut_enabled);" %>
 <% echo "\$('#toggle-light').checked = $(get_metrics light_enabled);" %>
-<% echo "\$('#toggle-ircut').disabled = !$(get_yaml .nightMode.irCutPin1);" %>
-<% echo "\$('#toggle-light').disabled = !$(get_yaml .nightMode.backlightPin);" %>
+
+<% echo "\$('#toggle-night').disabled = $(get_night lightMonitor);" %>
+<% echo "\$('#toggle-ircut').disabled = $(get_night lightMonitor) || !$(get_night irCutPin1);" %>
+<% echo "\$('#toggle-light').disabled = $(get_night lightMonitor) || !$(get_night backlightPin);" %>
 
 $("#toggle-night").addEventListener("click", ev => {
 	fetch('/night/toggle').then(api => api.json()).then(data => {
@@ -75,4 +66,3 @@ $("#toggle-light").addEventListener("click", ev => {
 </script>
 
 <%in p/footer.cgi %>
-

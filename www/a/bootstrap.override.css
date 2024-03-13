@@ -98,14 +98,13 @@ pre#output[data-cmd] {
 }
 
 .btn-motor {
-	font-size: 2.5rem;
+	font-size: 2.3rem;
 	--bs-btn-border-width: 0;
 	--bs-btn-padding-x: 0;
 	--bs-btn-padding-y: 0;
 }
 
-.navbar-nav,
-[data-bs-theme=light] .navbar-nav {
+.navbar-nav {
 	--bs-nav-link-color: white;
 }
 

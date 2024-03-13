@@ -6,10 +6,10 @@ Cache-Control: no-store
 Pragma: no-cache
 
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="<%= ${webui_theme:=light} %>">
+<html lang="en" data-bs-theme="<%= ${webui_theme:=dark} %>">
 <head>
 	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title><% html_title %></title>
 	<link rel="stylesheet" href="/a/bootstrap.min.css">
 	<link rel="stylesheet" href="/a/bootstrap.override.css">
@@ -95,8 +95,8 @@ Pragma: no-cache
 
 				<div class="col-1" id="daynight_value"></div>
 				<div class="col-md-4 col-lg-3 mb-2 text-end">
-					<div class="text-secondary" id="time-now"></div>
-					<div id="soc-temp"></div>
+					<div id="time-now"></div>
+					<div class="text-secondary" id="soc-temp"></div>
 				</div>
 			</div>
 

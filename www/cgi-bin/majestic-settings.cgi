@@ -4,7 +4,6 @@
 <%
 page_title="Majestic Settings"
 json_load_file $(get_schema)
-json_conf=$(get_json)
 
 label="$GET_tab"
 [ -z "$label" ] && label="system"
@@ -75,6 +74,7 @@ fi
 				json_select "$label"
 				json_select "properties"
 				json_get_keys "keys"
+				json_conf=$(wget -q -T1 localhost/api/v1/config.json -O -)
 				for key in $keys; do
 					json_select "$key"
 					json_get_var "desc" "description"
@@ -86,8 +86,7 @@ fi
 
 					param="_${label}_${key}"
 					setting=${param//_/.}
-					default=$(cat "$json_conf" | jsonfilter -e "@$setting")
-					value=$(yaml-cli -g "$setting" || echo "$default")
+					value=$(yaml-cli -g "$setting")
 					config="${config}\n$(echo $setting: $value)"
 
 					case "$type" in
@@ -97,6 +96,9 @@ fi
 
 						integer)
 							if [ -n "$max" ] && [ "$max" -le "100" ]; then
+								if [ -z "$value" ]; then
+									value=$(echo "$json_conf" | jsonfilter -e "@$setting")
+								fi
 								field_range "$desc" "$param" "$value" "$min" "$max"
 							else
 								field_integer "$desc" "$param" "$value" "$min" "$max"

@@ -3,17 +3,15 @@
 
 <%
 page_title="Network Settings"
-params="address dhcp gateway hostname nameserver netmask interface wifi_device wifi_ssid wifi_password"
+params="address dhcp gateway hostname nameserver netmask interface wlan_ssid wlan_password"
 
 network_list="$(ls /sys/class/net | grep -e eth0 -e wlan0)"
 network_nameserver="$(cat /etc/resolv.conf | grep nameserver | cut -d' ' -f2)"
 network_netmask="$(ifconfig ${network_interface} | grep Mask | cut -d: -f4)"
 network_dhcp="$(cat /etc/network/interfaces.d/${network_interface} | grep -q dhcp && echo true)"
 
-network_wifi_device="$(fw_printenv -n wlandev)"
-network_wifi_ssid="$(fw_printenv -n wlanssid)"
-network_wifi_password="$(fw_printenv -n wlanpass)"
-profiles="$(grep -r '$1..=' /etc/wireless | cut -d '"' -f 4 | sort | grep -e ${soc} -e ${soc_family} -e generic)"
+network_wlan_ssid="$(fw_printenv -n wlanssid)"
+network_wlan_password="$(fw_printenv -n wlanpass)"
 
 if [ "POST" = "$REQUEST_METHOD" ]; then
 	case "$POST_action" in
@@ -40,9 +38,8 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			[ -z "$network_interface" ] && set_error_flag "Default network interface cannot be empty."
 
 			if [ "$network_interface" = "wlan0" ]; then
-				[ -z "$network_wifi_device" ] && set_error_flag "WLAN Device cannot be empty."
-				[ -z "$network_wifi_ssid" ] && set_error_flag"WLAN SSID cannot be empty."
-				[ -z "$network_wifi_password" ] && set_error_flag "WLAN Password cannot be empty."
+				[ -z "$network_wlan_ssid" ] && set_error_flag"WLAN SSID cannot be empty."
+				[ -z "$network_wlan_password" ] && set_error_flag "WLAN Password cannot be empty."
 			fi
 
 			if [ "$network_dhcp" = "false" ]; then
@@ -60,9 +57,8 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 				command="${command} -h $network_hostname"
 
 				if [ "$network_interface" = "wlan0" ]; then
-					command="${command} -r $network_wifi_device"
-					command="${command} -s $network_wifi_ssid"
-					command="${command} -p $network_wifi_password"
+					command="${command} -s $network_wlan_ssid"
+					command="${command} -p $network_wlan_password"
 				fi
 
 				if [ "$network_mode" != "dhcp" ]; then
@@ -90,9 +86,8 @@ fi
 			<% field_hidden "action" "update" %>
 			<% field_text "network_hostname" "Hostname" %>
 			<% field_select "network_interface" "Network interface" "$network_list" %>
-			<% field_select "network_wifi_device" "WLAN Device" "$profiles" %>
-			<% field_text "network_wifi_ssid" "WLAN SSID" %>
-			<% field_text "network_wifi_password" "WLAN Password" %>
+			<% field_text "network_wlan_ssid" "WLAN SSID" %>
+			<% field_text "network_wlan_password" "WLAN Password" %>
 
 			<% field_switch "network_dhcp" "Use DHCP" %>
 			<% field_text "network_address" "IP Address" %>
@@ -135,7 +130,7 @@ fi
 	}
 
 	function toggleInterface() {
-		const ids = ['network_wifi_device','network_wifi_ssid','network_wifi_password'];
+		const ids = ['network_wlan_ssid','network_wlan_password'];
 		if ($('#network_interface').value == 'wlan0') {
 			ids.forEach(id => $('#' + id + '_wrap').classList.remove('d-none'));
 		} else {

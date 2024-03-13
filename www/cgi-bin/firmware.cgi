@@ -7,8 +7,10 @@
 		if [ "$soc_vendor" = "ingenic" ]; then
 			fw_soc=$soc_family
 		fi
+
+		builder=$(fw_printenv -n upgrade)
 		url="https://github.com/openipc/firmware/releases/download/latest/openipc.${fw_soc}-${flash_type}-${fw_variant}.tgz"
-		ver=$(curl -m 3 -ILs "$url" | grep Last-Modified | cut -d' ' -f2-)
+		ver=$(curl -m 3 -ILs "${builder:-$url}" | grep Last-Modified | cut -d' ' -f2-)
 	fi
 
 	if [ -n "$ver" ]; then

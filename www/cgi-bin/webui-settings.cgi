@@ -50,7 +50,7 @@ ui_username="$USER"
 		<h3>Interface</h3>
 		<form action="<%= $SCRIPT_NAME %>" method="post">
 			<% field_hidden "action" "theme" %>
-			<% field_select "webui_theme" "Theme" "light,dark" %>
+			<% field_select "webui_theme" "Theme" "dark,light" %>
 			<% button_submit %>
 		</form>
 	</div>

@@ -45,8 +45,8 @@
 	<div class="col ">
 		<h3>Resources</h3>
 		<% ex "uptime" %>
-		<% ex "df -T" %>
-		<% ex "cat /proc/meminfo | grep Mem" %>
+		<% ex "df -hT" %>
+		<% ex "free -h" %>
 	</div>
 </div>
 

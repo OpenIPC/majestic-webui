@@ -3,7 +3,7 @@
 <%
 page_title="OpenWall"
 config_file=/etc/webui/openwall.conf
-params="enabled caption interval proxy use_heif"
+params="enabled interval caption heif proxy"
 
 if [ "POST" = "$REQUEST_METHOD" ]; then
 	for p in $params; do
@@ -33,16 +33,14 @@ fi
 
 [ -e "$config_file" ] && include $config_file
 [ -z "$openwall_interval" ] && openwall_interval="15"
-[ -z "$openwall_use_heif" ] && openwall_use_heif="false"
 %>
 
 <%in p/header.cgi %>
 
 <div class="alert alert-info">
-<p>This plugin allows you to share images from your OpenIPC camera on the <a href="https://openipc.org/open-wall">Open Wall</a>
-	page of our website. But that's not all. It's a metrics agent with meaning. The images you share will allow us to determine
-	the quality of images from different cameras. We also collect your MAC address, SoC model, sensor model, flash chip size,
-	firmware version, and camera uptime to do this.</p>
+<p>This extension allows you to share images from your OpenIPC camera on the <a href="https://openipc.org/open-wall">Open Wall</a>
+	page of our website. The images you share will allow us to determine the quality of images from different cameras.
+	We also collect your MAC address, chipset, sensor, flashsize, firmware version, and uptime.</p>
 </div>
 
 <form action="<%= $SCRIPT_NAME %>" method="post">
@@ -51,8 +49,8 @@ fi
 			<% field_switch "openwall_enabled" "Enable sending to OpenWall" %>
 			<% field_select "openwall_interval" "Interval in minutes" "15,30,60" "Time between submissions, 15 minutes or longer." %>
 			<% field_text "openwall_caption" "Caption" "Location or short description." %>
-			<% field_switch "openwall_use_heif" "Use HEIF format." "Requires H.265 codec on Video0." %>
-			<% field_switch "openwall_proxy_enabled" "Use SOCKS5" "<a href=\"ext-proxy.cgi\">Configure</a> proxy access." %>
+			<% field_switch "openwall_heif" "Use HEIF format" "Requires H265 codec on Video0." %>
+			<% field_switch "openwall_proxy" "Use SOCKS5" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
 		</div>
 
 		<div class="col">
@@ -63,10 +61,10 @@ fi
 	<% button_submit %>
 </form>
 
-<% if [ "h265" != "$(yaml-cli -g .video0.codec)" ]; then %>
+<% if [ "$(yaml-cli -g .video0.codec)" != "h265" ]; then %>
 <script>
-	$('#openwall_use_heif').checked = false;
-	$('#openwall_use_heif').disabled = true;
+	$('#openwall_heif').checked = false;
+	$('#openwall_heif').disabled = true;
 </script>
 <% fi %>
 

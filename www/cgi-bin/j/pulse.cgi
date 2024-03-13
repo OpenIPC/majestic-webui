@@ -3,7 +3,7 @@ web=$(pidof majestic)
 temp=$(ipcinfo --temp 2> /dev/null)
 
 if [ -n "$web" ]; then
-	daynight_value=$(wget -T1 -q -O - localhost/metrics/isp?value=isp_again)
+	daynight_value=$(wget -q -T1 localhost/metrics/isp?value=isp_again -O -)
 fi
 
 if [ -n "$temp" ]; then
