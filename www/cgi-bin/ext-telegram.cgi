@@ -3,7 +3,7 @@
 <%
 page_title="Telegram"
 config_file=/etc/webui/telegram.conf
-params="enabled token channel interval caption document heif proxy"
+params="enabled token channel interval caption crontab document heif proxy"
 
 if [ "POST" = "$REQUEST_METHOD" ]; then
 	for p in $params; do
@@ -21,8 +21,8 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			echo "telegram_${p}=\"$(eval echo \$telegram_${p})\"" >> "$config_file"
 		done
 
-		sed -i /telegram/d /etc/crontabs/root
-		if [ "$telegram_enabled" = "true" ]; then
+		if [ "$telegram_enabled" = "true" && "$telegram_crontab" = "true" ]; then
+			sed -i /telegram/d /etc/crontabs/root
 			echo "*/${telegram_interval} * * * * /usr/sbin/telegram" >> /etc/crontabs/root
 		fi
 
@@ -33,23 +33,25 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 fi
 
 [ -e "$config_file" ] && include $config_file
+[ -z "$telegram_crontab" ] && telegram_crontab="true"
 [ -z "$telegram_interval" ] && telegram_interval="15"
 %>
 
 <%in p/header.cgi %>
 
 <form action="<%= $SCRIPT_NAME %>" method="post">
-	<% field_switch "telegram_enabled" "Enable sending to Telegram" %>
+	<% field_switch "telegram_enabled" "Enable Telegram" %>
 	<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
 		<div class="col">
 			<% field_text "telegram_token" "Token" "Telegram bot authentication token." %>
 			<% field_text "telegram_channel" "Channel" "Channel to post the images to." %>
-			<% field_select "telegram_interval" "Interval" "15,30,60" "Minutes between submissions." %>
+			<% field_select "telegram_interval" "Interval" "15,30,60,120" "Minutes between submissions." %>
 			<% field_text "telegram_caption" "Caption" "Location or short description." %>
 		</div>
 
 		<div class="col">
-			<% field_switch "telegram_document" "Send as document." %>
+			<% field_switch "telegram_crontab" "Add to Crontab" "Send pictures timed by interval." %>
+			<% field_switch "telegram_document" "Send as document" "Attach picture as general file." %>
 			<% field_switch "telegram_heif" "Use HEIF format" "Requires H265 codec on Video0." %>
 			<% field_switch "telegram_proxy" "Use SOCKS5" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
 		</div>
@@ -63,6 +65,10 @@ fi
 </form>
 
 <script>
+<% if [ "$telegram_crontab" = "true" ]; then %>
+	$('#telegram_crontab').checked = true;
+<% fi %>
+
 <% if [ "$(yaml-cli -g .video0.codec)" != "h265" ]; then %>
 	$('#telegram_heif').checked = false;
 	$('#telegram_heif').disabled = true;

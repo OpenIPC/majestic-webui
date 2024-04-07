@@ -35,7 +35,7 @@ else
 		elif [ "$(stat -c%s $editor_file)" -gt "102400" ]; then
 			log_create "danger" "Uploaded file is too large!"
 		else
-			editor_text="$(cat $editor_file | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g")"
+			editor_text="$(cat $editor_file)"
 		fi
 	fi
 fi

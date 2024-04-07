@@ -1,6 +1,6 @@
 <h3>This camera uses MAC address <b>00:00:23:34:45:66</b> which is a placeholder.</h3>
 <p>You need to replace it with the original MAC address from your stock firmware backup or <a href="#" id="generate-mac-address">generate a random valid MAC address</a>.</p>
-<form action="network.cgi" method="POST" class="row gy-2 gx-3 align-items-center mb-3">
+<form action="fw-network.cgi" method="POST" class="row gy-2 gx-3 align-items-center mb-3">
 	<input type="hidden" name="action" value="changemac">
 	<div class="col-auto"><label class="form-label" for="mac_address">New MAC Address</label></div>
 	<div class="col-auto"><input class="form-control" id="mac_address" name="mac_address"type="text"></div>

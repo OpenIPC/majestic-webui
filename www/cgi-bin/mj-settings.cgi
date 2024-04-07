@@ -58,7 +58,7 @@ fi
 		json_select ..
 		c="class=\"nav-link\""
 		[ "$label" = "$key" ] && title="$locale" && c="class=\"nav-link active\" aria-current=\"true\""
-		echo "<li class=\"nav-item\"><a ${c} href=\"majestic-settings.cgi?tab=${key}\">${locale}</a></li>"
+		echo "<li class=\"nav-item\"><a ${c} href=\"mj-settings.cgi?tab=${key}\">${locale}</a></li>"
 	done
 	%>
 </ul>
@@ -129,8 +129,8 @@ fi
 
 	<div class="col">
 		<h3>Quick Links</h3>
-		<p><a href="majestic-configuration.cgi">Majestic Configuration</a></p>
-		<p><a href="majestic-endpoints.cgi">Majestic Endpoints</a></p>
+		<p><a href="mj-configuration.cgi">Majestic Configuration</a></p>
+		<p><a href="mj-endpoints.cgi">Majestic Endpoints</a></p>
 	</div>
 </div>
 
@@ -138,7 +138,7 @@ fi
 
 <div class="alert alert-danger">
 	<h4>Setting is not available.</h4>
-	<p><a href="majestic-settings.cgi">Majestic Settings</a></p>
+	<p><a href="mj-settings.cgi">Majestic Settings</a></p>
 </div>
 
 <% fi %>

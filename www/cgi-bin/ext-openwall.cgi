@@ -3,7 +3,7 @@
 <%
 page_title="OpenWall"
 config_file=/etc/webui/openwall.conf
-params="enabled interval caption heif proxy"
+params="enabled crontab caption interval heif proxy"
 
 if [ "POST" = "$REQUEST_METHOD" ]; then
 	for p in $params; do
@@ -20,8 +20,8 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			echo "openwall_${p}=\"$(eval echo \$openwall_${p})\"" >> "$config_file"
 		done
 
-		sed -i /openwall/d /etc/crontabs/root
-		if [ "$openwall_enabled" = "true" ]; then
+		if [ "$openwall_enabled" = "true" && "$openwall_crontab" = "true" ]; then
+			sed -i /openwall/d /etc/crontabs/root
 			echo "*/${openwall_interval} * * * * /usr/sbin/openwall" >> /etc/crontabs/root
 		fi
 
@@ -32,6 +32,7 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 fi
 
 [ -e "$config_file" ] && include $config_file
+[ -z "$openwall_crontab" ] && openwall_crontab="true"
 [ -z "$openwall_interval" ] && openwall_interval="15"
 %>
 
@@ -44,11 +45,15 @@ fi
 </div>
 
 <form action="<%= $SCRIPT_NAME %>" method="post">
+	<% field_switch "openwall_enabled" "Enable OpenWall" %>
 	<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
 		<div class="col">
-			<% field_switch "openwall_enabled" "Enable sending to OpenWall" %>
-			<% field_select "openwall_interval" "Interval" "15,30,60" "Minutes between submissions." %>
+			<% field_select "openwall_interval" "Interval" "15,30,60,120" "Minutes between submissions." %>
 			<% field_text "openwall_caption" "Caption" "Location or short description." %>
+		</div>
+
+		<div class="col">
+			<% field_switch "openwall_crontab" "Add to Crontab" "Send pictures timed by interval." %>
 			<% field_switch "openwall_heif" "Use HEIF format" "Requires H265 codec on Video0." %>
 			<% field_switch "openwall_proxy" "Use SOCKS5" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
 		</div>
@@ -62,6 +67,10 @@ fi
 </form>
 
 <script>
+<% if [ "$openwall_crontab" = "true" ]; then %>
+	$('#openwall_crontab').checked = true;
+<% fi %>
+
 <% if [ "$(yaml-cli -g .video0.codec)" != "h265" ]; then %>
 	$('#openwall_heif').checked = false;
 	$('#openwall_heif').disabled = true;

@@ -39,7 +39,7 @@
 	<div class="col">
 		<h3>Upgrade</h3>
 		<% if [ -n "$network_gateway" ]; then %>
-			<form action="firmware-update.cgi" method="post">
+			<form action="fw-system.cgi" method="post">
 				<% field_checkbox "fw_kernel" "Upgrade kernel." %>
 				<% field_checkbox "fw_rootfs" "Upgrade rootfs." %>
 				<% field_checkbox "fw_reboot" "Restart after upgrade." %>

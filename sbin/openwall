@@ -21,7 +21,7 @@ temperature=$(ipcinfo --temp)
 uptime=$(uptime | sed -r 's/^.+ up ([^,]+), .+$/\1/')
 
 if [ "$openwall_enabled" != "true" ]; then
-	echo "Sending to OpenIPC Wall is not enabled"
+	echo "Sending to Openwall is not enabled"
 	exit 1
 fi
 

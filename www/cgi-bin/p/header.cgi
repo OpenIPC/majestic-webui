@@ -1,7 +1,5 @@
 #!/usr/bin/haserl
 Content-type: text/html; charset=UTF-8
-Date: $(TZ=GMT0 date +'%a, %d %b %Y %T %Z')
-Server: <%= $SERVER_SOFTWARE %>
 Cache-Control: no-store
 Pragma: no-cache
 
@@ -39,30 +37,30 @@ Pragma: no-cache
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownMajestic" role="button">Majestic</a>
 						<ul aria-labelledby="dropdownMajestic" class="dropdown-menu">
-							<li><a class="dropdown-item" href="majestic-settings.cgi">Settings</a></li>
+							<li><a class="dropdown-item" href="mj-settings.cgi">Settings</a></li>
 							<li><hr class="dropdown-divider"></li>
-							<li><a class="dropdown-item" href="majestic-configuration.cgi">Configuration</a></li>
-							<li><a class="dropdown-item" href="majestic-endpoints.cgi">Endpoints</a></li>
+							<li><a class="dropdown-item" href="mj-configuration.cgi">Configuration</a></li>
+							<li><a class="dropdown-item" href="mj-endpoints.cgi">Endpoints</a></li>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownSettings" role="button">Settings</a>
+						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownSettings" role="button">Firmware</a>
 						<ul aria-labelledby="dropdownSettings" class="dropdown-menu">
-							<li><a class="dropdown-item" href="network.cgi">Network</a></li>
-							<li><a class="dropdown-item" href="time-config.cgi">Time</a></li>
-							<li><a class="dropdown-item" href="webui-settings.cgi">WebUI</a></li>
+							<li><a class="dropdown-item" href="fw-network.cgi">Network</a></li>
+							<li><a class="dropdown-item" href="fw-time.cgi">Time</a></li>
+							<li><a class="dropdown-item" href="fw-webui.cgi">WebUI</a></li>
 							<li><hr class="dropdown-divider"></li>
-							<li><a class="dropdown-item" href="firmware.cgi">Firmware</a></li>
-							<li><a class="dropdown-item" href="maintenance.cgi">Maintenance</a></li>
+							<li><a class="dropdown-item" href="fw-update.cgi">Update</a></li>
+							<li><a class="dropdown-item" href="fw-settings.cgi">Settings</a></li>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownTools" role="button">Tools</a>
 						<ul aria-labelledby="dropdownTools" class="dropdown-menu">
-							<li><a class="dropdown-item" href="console.cgi">Console</a></li>
-							<li><a class="dropdown-item" href="files.cgi">Files</a></li>
+							<li><a class="dropdown-item" href="fw-console.cgi">Console</a></li>
+							<li><a class="dropdown-item" href="fw-files.cgi">Files</a></li>
 							<% if [ -e /dev/mmcblk0 ]; then %>
-								<li><a class="dropdown-item" href="sdcard.cgi">SDcard</a></li>
+								<li><a class="dropdown-item" href="fw-sdcard.cgi">SDcard</a></li>
 							<% fi %>
 						</ul>
 					</li>
@@ -103,7 +101,7 @@ Pragma: no-cache
 
 <% if [ -z "$network_gateway" ]; then %>
 <div class="alert alert-warning">
-	<p class="mb-0">No Internet connection, please <a href="network.cgi">check your network settings</a>.</p>
+	<p class="mb-0">Internet connection not available, please <a href="fw-network.cgi">check your network settings</a>.</p>
 </div>
 <% fi %>
 
@@ -115,7 +113,7 @@ Pragma: no-cache
 
 <% if [ ! -e $(get_config) ]; then %>
 <div class="alert alert-danger">
-	<p class="mb-0">Majestic configuration not found, please <a href="info-majestic.cgi">check your Majestic settings</a>.</p>
+	<p class="mb-0">Majestic configuration not found, please <a href="mj-configuration.cgi">check your Majestic settings</a>.</p>
 </div>
 <% fi %>
 

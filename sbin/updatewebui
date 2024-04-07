@@ -1,5 +1,5 @@
 #!/bin/sh
-url="https://github.com/openipc/majestic-webui/archive/refs/heads/master.zip"
+url="https://github.com/openipc/majestic-webui/archive/refs/heads/${1:-master}.zip"
 
 tmp_zip=$(mktemp -u)
 curl -s -L $url -o $tmp_zip

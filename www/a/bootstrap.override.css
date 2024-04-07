@@ -120,18 +120,6 @@ pre#output[data-cmd] {
 }
 
 [data-bs-theme=dark] .btn-primary {
-	--bs-btn-color: #fff;
 	--bs-btn-bg: rgba(13, 110, 253, 0.5);
 	--bs-btn-border-color: rgba(13, 110, 253, 0.5);
-	--bs-btn-hover-color: #fff;
-	--bs-btn-hover-bg: rgba(11, 94, 215, 0.5);
-	--bs-btn-hover-border-color: rgba(10, 88, 202, 0.5);
-	--bs-btn-focus-shadow-rgb: 49,132,253;
-	--bs-btn-active-color: rgba(255, 255, 255, 0.5);
-	--bs-btn-active-bg: rgba(10, 88, 202, 0.5);
-	--bs-btn-active-border-color: rgba(10, 83, 190, 0.5);
-	--bs-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-	--bs-btn-disabled-color: rgba(255, 255, 255, 0.5);
-	--bs-btn-disabled-bg: rgba(13, 110, 253, 0.5);
-	--bs-btn-disabled-border-color: rgba(13, 110, 253, 0.5);
 }

@@ -11,8 +11,8 @@
 			ex "cat /tmp/majestic.patch"
 		%>
 		<div class="row">
-			<p><a class="btn btn-secondary" href="texteditor.cgi?f=<%= $(get_config) %>">Edit Configuration</a></p>
-			<p><a class="btn btn-danger" href="restore.cgi?f=<%= $(get_config) %>">Reset Configuration</a></p>
+			<p><a class="btn btn-secondary" href="fw-editor.cgi?f=<%= $(get_config) %>">Edit Configuration</a></p>
+			<p><a class="btn btn-danger" href="fw-restore.cgi?f=<%= $(get_config) %>">Reset Configuration</a></p>
 		</div>
 	</div>
 </div>

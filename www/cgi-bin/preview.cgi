@@ -1,17 +1,18 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
+
 <% page_title="Camera Preview" %>
 <%in p/header.cgi %>
 
 <div class="row preview">
 	<div class="col">
 		<% preview %>
-		<p class="small"><a href="majestic-endpoints.cgi">Majestic Endpoints</a></p>
+		<p class="small"><a href="mj-endpoints.cgi">Majestic Endpoints</a></p>
 	</div>
 
 	<div class="col-auto">
 		<% if [ "$(get_night lightMonitor)" = "true" ]; then %>
-			<p class="small"><a href="majestic-settings.cgi?tab=nightMode">Light monitor is active</a></p>
+			<p class="small"><a href="mj-settings.cgi?tab=nightMode">Light monitor is active</a></p>
 		<% fi %>
 
 		<div class="d-grid gap-3">

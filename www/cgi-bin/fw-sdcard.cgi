@@ -1,5 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
+
 <% page_title="SDcard" %>
 <%in p/header.cgi %>
 
@@ -78,7 +79,7 @@
 	IFS=$'\n'
 	for i in $partitions; do
 		_mount=$(echo $i | awk '{print $6}')
-		echo "<a href=\"files.cgi?cd=${_mount}\" class=\"btn btn-primary\">${_mount}</a>"
+		echo "<a href=\"fw-files.cgi?cd=${_mount}\" class=\"btn btn-primary\">${_mount}</a>"
 		unset _mount
 	done
 	IFS=$IFS_ORIG

@@ -92,16 +92,6 @@ alert() {
 	echo "<div class=\"alert alert-${2}\" ${3}>${1}</div>"
 }
 
-button_restore_from_rom() {
-	local file="$1"
-	[ ! -f "/rom/${file}" ] && return
-	if [ -z "$(diff "/rom/${file}" "${file}")" ]; then
-		echo "<p class=\"small fst-italic\">File matches the version in ROM.</p>"
-		return
-	fi
-	echo "<p><a class=\"btn btn-danger\" href=\"restore.cgi?f=${file}\">Replace ${file} with defaults</a></p>"
-}
-
 # button_submit "text" "type" "extras"
 button_submit() {
 	local t="$1"
@@ -114,8 +104,7 @@ button_submit() {
 }
 
 check_password() {
-	local p="/cgi-bin/webui-settings.cgi"
-	[ "0${debug}" -ge "1" ] && return
+	local p="/cgi-bin/fw-webui.cgi"
 	[ -z "$SCRIPT_NAME" ] || [ "$SCRIPT_NAME" = "${p}" ] && return
 	if [ ! -f /etc/shadow- ] || [ -z $(grep root /etc/shadow- | cut -d: -f2) ]; then
 		redirect_to "${p}" "danger" "You must set your own secure password!"
@@ -433,7 +422,7 @@ preview() {
 	if [ "true" = "$(yaml-cli -g .jpeg.enabled)" ]; then
 		echo "<video poster=\"/mjpeg\" style=\"background:url(/a/preview.svg); background-size:cover; width:100%\"></video>"
 	else
-		echo "<p class=\"alert alert-warning\"><a href=\"majestic-settings.cgi?tab=jpeg\">Enable JPEG support</a> to see the preview.</p>"
+		echo "<p class=\"alert alert-warning\"><a href=\"mj-settings.cgi?tab=jpeg\">Enable JPEG support</a> to see the preview.</p>"
 	fi
 }
 
@@ -457,8 +446,6 @@ redirect_to() {
 	echo "Content-type: text/html; charset=UTF-8"
 	echo "Cache-Control: no-store"
 	echo "Pragma: no-cache"
-	echo "Date: $(TZ=GMT0 date +'%a, %d %b %Y %T %Z')"
-	echo "Server: $SERVER_SOFTWARE"
 	echo "Location: $1"
 	echo
 	exit 0

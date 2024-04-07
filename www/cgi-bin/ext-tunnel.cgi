@@ -6,8 +6,8 @@ conf_file=/tmp/vtund.conf
 init_file=/etc/init.d/S98vtun
 
 if [ -n "$POST_action" ] && [ "$POST_action" = "reset" ]; then
-	killall tunnel
-	killall vtund
+	killall -q tunnel
+	killall -q vtund
 	rm -f "$conf_file"
 	rm -f "$init_file"
 	redirect_to "$SCRIPT_NAME" "danger" "Tunnel is down"
@@ -29,7 +29,7 @@ fi
 	<% if [ -e "$conf_file" ]; then %>
 		<div class="alert alert-success">
 		<h4>Virtual Tunnel is up</h4>
-		<p>Use the following credentials to set up remote access via active virtual tunnel:</p>
+		<p>Use the following credentials to set up remote access via virtual tunnel:</p>
 		<dl class="mb-0">
 			<dt>Tunnel ID</dt>
 			<dd><%= ${network_macaddr//:/} | tr a-z A-Z %></dd>

@@ -1,7 +1,7 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-	page_title="Upgrading Firmware"
+	page_title="System Upgrade"
 	c="/usr/sbin/sysupgrade -s"
 	[ "$POST_fw_kernel" = "true" ] && c="${c} -k"
 	[ "$POST_fw_rootfs" = "true" ] && c="${c} -r"

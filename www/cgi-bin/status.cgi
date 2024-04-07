@@ -1,5 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
+
 <% page_title="Device Status" %>
 <%in p/header.cgi %>
 

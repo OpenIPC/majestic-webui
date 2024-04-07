@@ -21,8 +21,6 @@ payload=$(printf '{"soc_temp":"%s","time_now":"%s","timezone":"%s","mem_used":"%
 echo "HTTP/1.1 200 OK
 Content-type: application/json
 Pragma: no-cache
-Expires: $(TZ=GMT0 date +'%a, %d %b %Y %T %Z')
-Etag: \"$(cat /proc/sys/kernel/random/uuid)\"
 
 ${payload}
 "
