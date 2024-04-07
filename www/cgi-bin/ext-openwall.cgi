@@ -47,7 +47,7 @@ fi
 	<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
 		<div class="col">
 			<% field_switch "openwall_enabled" "Enable sending to OpenWall" %>
-			<% field_select "openwall_interval" "Interval in minutes" "15,30,60" "Time between submissions, 15 minutes or longer." %>
+			<% field_select "openwall_interval" "Interval" "15,30,60" "Minutes between submissions." %>
 			<% field_text "openwall_caption" "Caption" "Location or short description." %>
 			<% field_switch "openwall_heif" "Use HEIF format" "Requires H265 codec on Video0." %>
 			<% field_switch "openwall_proxy" "Use SOCKS5" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
@@ -61,11 +61,11 @@ fi
 	<% button_submit %>
 </form>
 
-<% if [ "$(yaml-cli -g .video0.codec)" != "h265" ]; then %>
 <script>
+<% if [ "$(yaml-cli -g .video0.codec)" != "h265" ]; then %>
 	$('#openwall_heif').checked = false;
 	$('#openwall_heif').disabled = true;
-</script>
 <% fi %>
+</script>
 
 <%in p/footer.cgi %>

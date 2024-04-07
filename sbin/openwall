@@ -27,10 +27,10 @@ fi
 
 if [ "$openwall_use_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
 	snapshot=/tmp/snapshot.heif
-	wget -T1 -q localhost/image.heif -O "$snapshot"
+	wget -q -T1 localhost/image.heif -O "$snapshot"
 else
 	snapshot=/tmp/snapshot.jpg
-	wget -T1 -q localhost/image.jpg -O "$snapshot"
+	wget -q -T1 localhost/image.jpg -O "$snapshot"
 fi
 
 if [ ! -e "$snapshot" ]; then

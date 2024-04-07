@@ -70,6 +70,7 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownExtensions" role="button">Extensions</a>
 						<ul aria-labelledby="dropdownExtensions" class="dropdown-menu dropdown-menu-lg-end">
 							<li><a class="dropdown-item" href="ext-openwall.cgi">OpenWall</a></li>
+							<li><a class="dropdown-item" href="ext-telegram.cgi">Telegram</a></li>
 							<li><a class="dropdown-item" href="ext-tunnel.cgi">Tunnel</a></li>
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="ext-proxy.cgi">Proxy</a></li>
