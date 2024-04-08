@@ -4,19 +4,18 @@
 page_title="Tunnel"
 conf_file=/tmp/vtund.conf
 init_file=/etc/init.d/S98vtun
+env_host=$(fw_printenv -n vtund)
 
 if [ -n "$POST_action" ] && [ "$POST_action" = "reset" ]; then
 	killall -q tunnel
 	killall -q vtund
 	rm -f "$conf_file"
-	rm -f "$init_file"
+	fw_setenv vtund ""
 	redirect_to "$SCRIPT_NAME" "danger" "Tunnel is down"
 fi
 
 if [ -n "$POST_vtun_host" ]; then
-	echo "#!/bin/sh" > "$init_file"
-	echo "tunnel $POST_vtun_host" >> "$init_file"
-	chmod 755 "$init_file"
+	fw_setenv vtund "$POST_vtun_host"
 	$init_file
 	redirect_to "$SCRIPT_NAME" "success" "Tunnel is up"
 fi
@@ -41,7 +40,7 @@ fi
 
 	<h3>Settings</h3>
 	<form action="<%= $SCRIPT_NAME %>" method="post">
-		<% if [ -e "$init_file" ]; then %>
+		<% if [ ! -z "$env_host" ]; then %>
 			<% field_hidden "action" "reset" %>
 			<% button_submit "Reset configuration" %>
 		<% else %>
@@ -54,7 +53,7 @@ fi
 	<div class="col col-lg-8">
 		<h3>Configuration</h3>
 		<%
-			[ -e "$init_file" ] && ex "cat $init_file"
+			[ ! -z "$env_host" ] &&  echo "<dt>Host:</dt> <pre class="small">$env_host</pre>"
 			[ -e "$conf_file" ] && ex "cat $conf_file"
 			ex "ps | grep tunnel"
 			ex "ps | grep vtund"
