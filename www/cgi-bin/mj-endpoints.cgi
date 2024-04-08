@@ -18,10 +18,8 @@ page_title="Majestic Endpoints"
 			<dd>MP4 video stream.</dd>		
 			<dt class="cp2cb">http://<%= $network_address %>/hls</dt>
 			<dd>HLS live-streaming in web browser.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/webrtc</dt>
-			<dd>WebRTC live-streaming in web browser.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/mjpeg.html</dt>
-			<dd>MJPEG &amp; MP3 live-streaming in web browser.</dd>
+			<dd>MJPEG live-streaming in web browser.</dd>
 		</dl>
 	</div>
 
@@ -34,8 +32,6 @@ page_title="Majestic Endpoints"
 			<dd>Raw PCM audio stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/audio.m4a</dt>
 			<dd>AAC audio stream.</dd>
-			<dt class="cp2cb ult">http://<%= $network_address %>/audio.mp3</dt>
-			<dd class="ult">MP3 audio stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/audio.alaw</dt>
 			<dd>A-law compressed audio stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/audio.ulaw</dt>

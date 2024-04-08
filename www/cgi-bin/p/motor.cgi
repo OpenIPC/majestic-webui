@@ -21,7 +21,7 @@
 function control(dir) {
 	let x = dir.includes("l") ? -1 : dir.includes("r") ? 1 : 0;
 	let y = dir.includes("d") ? -1 : dir.includes("u") ? 1 : 0;
-	fetch('/cgi-bin/j/run.cgi?web=' + btoa('motor ' + '<%= $wlan_device %> ' + x + ' ' + y));
+	fetch('/cgi-bin/j/run.cgi?web=' + btoa('motor ' + '<%= $ptz_support %> ' + x + ' ' + y));
 }
 
 $$(".motor button").forEach(el => {

@@ -1,13 +1,13 @@
 #!/bin/sh
 web=$(pidof majestic)
-temp=$(ipcinfo --temp 2> /dev/null)
+temp=$(ipcinfo -t 2> /dev/null)
 
 if [ -n "$web" ]; then
 	daynight_value=$(wget -q -T1 localhost/metrics/isp?value=isp_again -O -)
 fi
 
 if [ -n "$temp" ]; then
-	soc_temp="${temp}°C"
+	soc_temp="${temp%.*}°C"
 fi
 
 mem_total=$(awk '/MemTotal/ {print $2}' /proc/meminfo)

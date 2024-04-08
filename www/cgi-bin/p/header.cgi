@@ -48,7 +48,7 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownSettings" class="dropdown-menu">
 							<li><a class="dropdown-item" href="fw-network.cgi">Network</a></li>
 							<li><a class="dropdown-item" href="fw-time.cgi">Time</a></li>
-							<li><a class="dropdown-item" href="fw-webui.cgi">WebUI</a></li>
+							<li><a class="dropdown-item" href="fw-interface.cgi">Interface</a></li>
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="fw-update.cgi">Update</a></li>
 							<li><a class="dropdown-item" href="fw-settings.cgi">Settings</a></li>

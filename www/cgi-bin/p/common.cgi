@@ -26,6 +26,14 @@ Z() {
 	echo "</${1}>"
 }
 
+d() {
+	echo "$1" >&2
+}
+
+e() {
+	echo -e -n "$1"
+}
+
 # tag "text" "classes" "extras"
 div() {
 	tag "div" "$1" "$2" "$3"
@@ -79,6 +87,20 @@ _div() {
 	Z "div"
 }
 
+row_() {
+	echo "<div class\"row ${1}\" ${2}>"
+}
+
+_row() {
+	echo "</div>"
+}
+
+row() {
+	row_ "$2"
+	echo "$1"
+	_row
+}
+
 span_() {
 	A "span" "$1" "$2"
 }
@@ -104,7 +126,7 @@ button_submit() {
 }
 
 check_password() {
-	local p="/cgi-bin/fw-webui.cgi"
+	local p="/cgi-bin/fw-interface.cgi"
 	[ -z "$SCRIPT_NAME" ] || [ "$SCRIPT_NAME" = "${p}" ] && return
 	if [ ! -f /etc/shadow- ] || [ -z $(grep root /etc/shadow- | cut -d: -f2) ]; then
 		redirect_to "${p}" "danger" "You must set your own secure password!"
@@ -113,14 +135,6 @@ check_password() {
 
 checked_if() {
 	[ "$1" = "$2" ] && echo -n " checked"
-}
-
-d() {
-	echo "$1" >&2
-}
-
-e() {
-	echo -e -n "$1"
 }
 
 ex() {
@@ -190,7 +204,6 @@ field_string() {
 		echo "<p class=\"select\" id=\"${n}_wrap\">" \
 			"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 			"<select class=\"form-select\" id=\"${n}\" name=\"${n}\">"
-		[ -z "$v" ] && echo "<option value=\"\">Select from options</option>"
 		for e in $e; do
 			echo -n "<option value=\"${e}\""
 			[ "$v" = "$e" ] && echo -n " selected"
@@ -256,7 +269,6 @@ field_select() {
 	echo "<p class=\"select\" id=\"${1}_wrap\">" \
 		"<label for=\"${1}\" class=\"form-label\">${l}</label>" \
 		"<select class=\"form-select\" id=\"${1}\" name=\"${1}\">"
-	[ -z "$(t_value "$1")" ] && echo "<option value=\"\">Select from available options</option>"
 	for o in $o; do
 		v="${o%:*}"
 		n="${o#*:}"
@@ -330,12 +342,6 @@ get_metrics() {
 		echo 0
 	else
 		wget -q -T1 localhost/metrics/night?value=${1} -O -
-	fi
-}
-
-get_ptz() {
-	if [ -e /usr/bin/motor ]; then
-		motor list | grep "$wlan_device"
 	fi
 }
 
@@ -451,21 +457,6 @@ redirect_to() {
 	exit 0
 }
 
-# row_ "class"
-row_() {
-	echo "<div class\"row ${1}\" ${2}>"
-}
-
-_row() {
-	echo "</div>"
-}
-
-row() {
-	row_ "$2"
-	echo "$1"
-	_row
-}
-
 report_command() {
 	echo "<h4># ${1}</h4>"
 	echo "<pre class=\"small\">${2}</pre>"
@@ -534,10 +525,10 @@ update_caminfo() {
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow|cut -d: -f2)
-	wlan_device=$(fw_printenv -n wlandev)
+	ptz_support=$(fw_printenv -n ptz)
 
 	# Network
-	network_interface=$(ip route | awk '/default/ {print $5}')
+	network_interface=$(ip route | awk '/link/ {print $3}' | head -n1)
 	network_address=$(ip route | grep ${network_interface} | awk '/src/ {print $7}')
 	network_gateway=$(ip route | awk '/default/ {print $3}')
 	network_hostname=$(hostname -s)
@@ -555,8 +546,8 @@ update_caminfo() {
 	fi
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
-		network_gateway network_hostname network_interface network_macaddr overlay_root sensor sensor_ini
-		soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password wlan_device"
+		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
+		sensor sensor_ini soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
 	rm -f ${sysinfo_file}
 
 	local v
