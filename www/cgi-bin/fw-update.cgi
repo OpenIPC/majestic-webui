@@ -10,7 +10,7 @@
 
 		builder=$(fw_printenv -n upgrade)
 		url="https://github.com/openipc/firmware/releases/download/latest/openipc.${fw_soc}-${flash_type}-${fw_variant}.tgz"
-		ver=$(curl -m 3 -ILs "${builder:-$url}" | grep Last-Modified | cut -d' ' -f2-)
+		ver=$(curl -m5 -ILs "${builder:-$url}" | grep Last-Modified | cut -d' ' -f2-)
 	fi
 
 	if [ -n "$ver" ]; then
@@ -38,7 +38,7 @@
 
 	<div class="col">
 		<h3>Upgrade</h3>
-		<% if [ -n "$network_gateway" ]; then %>
+		<% if [ -n "$ver" ]; then %>
 			<form action="fw-system.cgi" method="post">
 				<% field_checkbox "fw_kernel" "Upgrade kernel." %>
 				<% field_checkbox "fw_rootfs" "Upgrade rootfs." %>
@@ -48,7 +48,7 @@
 				<% button_submit "Install update from GitHub" "warning" %>
 			</form>
 		<% else %>
-			<p class="alert alert-danger">Upgrading requires access to GitHub.</p>
+			<p class="alert alert-danger">Updating requires access to GitHub.</p>
 		<% fi %>
 	</div>
 </div>

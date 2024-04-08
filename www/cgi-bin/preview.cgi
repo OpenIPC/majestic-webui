@@ -12,7 +12,7 @@
 
 	<div class="col-auto">
 		<% if [ "$(get_night lightMonitor)" = "true" ]; then %>
-			<p class="small"><a href="mj-settings.cgi?tab=nightMode">Light monitor is active</a></p>
+			<p class="small"><a href="mj-settings.cgi?tab=nightMode">Light monitor active</a></p>
 		<% fi %>
 
 		<div class="d-grid gap-3">
@@ -25,7 +25,7 @@
 			<input type="checkbox" class="btn-check" id="toggle-light">
 			<label class="btn btn-primary" for="toggle-light">Light Toggle</label>
 
-			<% if [ -n "$(get_ptz)" ]; then %>
+			<% if [ -n "$ptz_support" ]; then %>
 				<%in p/motor.cgi %>
 			<% fi %>
 		</div>

@@ -21,8 +21,8 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			echo "telegram_${p}=\"$(eval echo \$telegram_${p})\"" >> "$config_file"
 		done
 
-		if [ "$telegram_enabled" = "true" && "$telegram_crontab" = "true" ]; then
-			sed -i /telegram/d /etc/crontabs/root
+		sed -i /telegram/d /etc/crontabs/root
+		if [ "$telegram_enabled" = "true" ] && [ "$telegram_crontab" = "true" ]; then
 			echo "*/${telegram_interval} * * * * /usr/sbin/telegram" >> /etc/crontabs/root
 		fi
 

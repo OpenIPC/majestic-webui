@@ -20,8 +20,8 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			echo "openwall_${p}=\"$(eval echo \$openwall_${p})\"" >> "$config_file"
 		done
 
-		if [ "$openwall_enabled" = "true" && "$openwall_crontab" = "true" ]; then
-			sed -i /openwall/d /etc/crontabs/root
+		sed -i /openwall/d /etc/crontabs/root
+		if [ "$openwall_enabled" = "true" ] && [ "$openwall_crontab" = "true" ]; then
 			echo "*/${openwall_interval} * * * * /usr/sbin/openwall" >> /etc/crontabs/root
 		fi
 

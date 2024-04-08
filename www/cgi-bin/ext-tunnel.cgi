@@ -3,20 +3,19 @@
 <%
 page_title="Tunnel"
 conf_file=/tmp/vtund.conf
-init_file=/etc/init.d/S98vtun
 env_host=$(fw_printenv -n vtund)
 
 if [ -n "$POST_action" ] && [ "$POST_action" = "reset" ]; then
 	killall -q tunnel
 	killall -q vtund
 	rm -f "$conf_file"
-	fw_setenv vtund ""
+	fw_setenv vtund
 	redirect_to "$SCRIPT_NAME" "danger" "Tunnel is down"
 fi
 
 if [ -n "$POST_vtun_host" ]; then
 	fw_setenv vtund "$POST_vtun_host"
-	$init_file
+	/etc/init.d/S98vtun start
 	redirect_to "$SCRIPT_NAME" "success" "Tunnel is up"
 fi
 %>
@@ -40,7 +39,7 @@ fi
 
 	<h3>Settings</h3>
 	<form action="<%= $SCRIPT_NAME %>" method="post">
-		<% if [ ! -z "$env_host" ]; then %>
+		<% if [ -n "$env_host" ]; then %>
 			<% field_hidden "action" "reset" %>
 			<% button_submit "Reset configuration" %>
 		<% else %>
@@ -53,10 +52,9 @@ fi
 	<div class="col col-lg-8">
 		<h3>Configuration</h3>
 		<%
-			[ ! -z "$env_host" ] &&  echo "<dt>Host:</dt> <pre class="small">$env_host</pre>"
 			[ -e "$conf_file" ] && ex "cat $conf_file"
-			ex "ps | grep tunnel"
-			ex "ps | grep vtund"
+			[ -n "$env_host" ] && ex "fw_printenv | grep vtund"
+			ex "pgrep -a vtund"
 		%>
 	</div>
 </div>

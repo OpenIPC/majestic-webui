@@ -39,7 +39,7 @@ fi
 
 <%in p/header.cgi %>
 
-<% if [ -z $(pidof majestic) ]; then %>
+<% if [ -z "$(pidof majestic)" ]; then %>
 
 <div class="alert alert-danger">
 	<h4>Majestic is not running.</h4>

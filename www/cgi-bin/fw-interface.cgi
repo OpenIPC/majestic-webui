@@ -1,7 +1,7 @@
 #!/usr/bin/haserl --upload-limit=100 --upload-dir=/tmp
 <%in p/common.cgi %>
 <%
-page_title="WebUI Settings"
+page_title="Interface Settings"
 config_file="/etc/webui/webui.conf"
 
 if [ "POST" = "$REQUEST_METHOD" ]; then
@@ -18,7 +18,7 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			eval webui_theme=\$POST_webui_theme
 			echo webui_theme=\"$webui_theme\" >  $config_file
 			update_caminfo
-			redirect_back "success" "WebUI settings updated."
+			redirect_back "success" "Settings updated."
 			;;
 
 		*)
@@ -47,7 +47,7 @@ ui_username="$USER"
 	</div>
 
 	<div class="col">
-		<h3>Interface</h3>
+		<h3>Theme</h3>
 		<form action="<%= $SCRIPT_NAME %>" method="post">
 			<% field_hidden "action" "theme" %>
 			<% field_select "webui_theme" "Theme" "dark,light" %>
