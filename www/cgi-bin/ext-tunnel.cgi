@@ -3,7 +3,7 @@
 <%
 page_title="Tunnel"
 conf_file=/tmp/vtund.conf
-env_host=$(fw_printenv -n vtund)
+env_host=$(fw_printenv -n vtun)
 
 if [ -n "$POST_action" ] && [ "$POST_action" = "reset" ]; then
 	killall -q tunnel
