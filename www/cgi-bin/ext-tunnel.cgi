@@ -9,12 +9,12 @@ if [ -n "$POST_action" ] && [ "$POST_action" = "reset" ]; then
 	killall -q tunnel
 	killall -q vtund
 	rm -f "$conf_file"
-	fw_setenv vtund
+	fw_setenv vtun
 	redirect_to "$SCRIPT_NAME" "danger" "Tunnel is down"
 fi
 
 if [ -n "$POST_vtun_host" ]; then
-	fw_setenv vtund "$POST_vtun_host"
+	fw_setenv vtun "$POST_vtun_host"
 	/etc/init.d/S98vtun start
 	redirect_to "$SCRIPT_NAME" "success" "Tunnel is up"
 fi
@@ -53,8 +53,8 @@ fi
 		<h3>Configuration</h3>
 		<%
 			[ -e "$conf_file" ] && ex "cat $conf_file"
-			[ -n "$env_host" ] && ex "fw_printenv | grep vtund"
-			ex "pgrep -a vtund"
+			[ -n "$env_host" ] && ex "fw_printenv | grep vtun"
+			ex "pgrep -a vtun"
 		%>
 	</div>
 </div>
