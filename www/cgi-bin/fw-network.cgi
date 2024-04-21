@@ -13,12 +13,14 @@ network_dhcp="$(cat /etc/network/interfaces.d/${network_interface} | grep -q dhc
 network_wlan_ssid="$(fw_printenv -n wlanssid)"
 network_wlan_password="$(fw_printenv -n wlanpass)"
 
-if [ "POST" = "$REQUEST_METHOD" ]; then
+if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
 		changemac)
 			if echo "$POST_mac_address" | grep -Eiq '^([0-9a-f]{2}[:-]){5}([0-9a-f]{2})$'; then
 				fw_setenv ethaddr "$POST_mac_address"
 				update_caminfo
+				touch /tmp/system-reboot
+				redirect_back "success" "MAC address updated."
 			else
 				redirect_back "warning" "Invalid MAC address: ${POST_mac_address}"
 			fi
@@ -36,7 +38,6 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			done
 
 			[ -z "$network_interface" ] && set_error_flag "Default network interface cannot be empty."
-
 			if [ "$network_interface" = "wlan0" ]; then
 				[ -z "$network_wlan_ssid" ] && set_error_flag"WLAN SSID cannot be empty."
 				[ -z "$network_wlan_password" ] && set_error_flag "WLAN Password cannot be empty."
@@ -85,11 +86,11 @@ fi
 		<form action="<%= $SCRIPT_NAME %>" method="post">
 			<% field_hidden "action" "update" %>
 			<% field_text "network_hostname" "Hostname" %>
-			<% field_select "network_interface" "Network interface" "$network_list" %>
+			<% field_string "network_interface" "Network interface" "eval" "$network_list" %>
 			<% field_text "network_wlan_ssid" "WLAN SSID" %>
 			<% field_text "network_wlan_password" "WLAN Password" %>
 
-			<% field_switch "network_dhcp" "Use DHCP" %>
+			<% field_switch "network_dhcp" "Use DHCP" "eval" %>
 			<% field_text "network_address" "IP Address" %>
 			<% field_text "network_netmask" "IP Netmask" %>
 			<% field_text "network_gateway" "Gateway" %>

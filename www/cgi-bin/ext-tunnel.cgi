@@ -5,18 +5,22 @@ page_title="Tunnel"
 conf_file=/tmp/vtund.conf
 env_host=$(fw_printenv -n vtun)
 
-if [ -n "$POST_action" ] && [ "$POST_action" = "reset" ]; then
-	killall -q tunnel
-	killall -q vtund
-	rm -f "$conf_file"
-	fw_setenv vtun
-	redirect_to "$SCRIPT_NAME" "danger" "Tunnel is down"
-fi
+if [ "$REQUEST_METHOD" = "POST" ]; then
+	if [ "$POST_action" = "reset" ]; then
+		killall -q tunnel
+		killall -q vtund
+		rm -f "$conf_file"
+		fw_setenv vtun
+		sleep 1
+		redirect_to "$SCRIPT_NAME" "danger" "Tunnel is down"
+	fi
 
-if [ -n "$POST_vtun_host" ]; then
-	fw_setenv vtun "$POST_vtun_host"
-	/etc/init.d/S98vtun start
-	redirect_to "$SCRIPT_NAME" "success" "Tunnel is up"
+	if [ -n "$POST_vtun_host" ]; then
+		fw_setenv vtun "$POST_vtun_host"
+		/etc/init.d/S98vtun start
+		sleep 1
+		redirect_to "$SCRIPT_NAME" "success" "Tunnel is up"
+	fi
 fi
 %>
 
@@ -54,7 +58,7 @@ fi
 		<%
 			[ -e "$conf_file" ] && ex "cat $conf_file"
 			[ -n "$env_host" ] && ex "fw_printenv | grep vtun"
-			ex "pgrep -a vtun"
+			ex "pgrep -a vtund"
 		%>
 	</div>
 </div>

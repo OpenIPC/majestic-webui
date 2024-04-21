@@ -5,7 +5,7 @@ page_title="OpenWall"
 config_file=/etc/webui/openwall.conf
 params="enabled crontab caption interval heif proxy"
 
-if [ "POST" = "$REQUEST_METHOD" ]; then
+if [ "$REQUEST_METHOD" = "POST" ]; then
 	for p in $params; do
 		eval openwall_${p}=\$POST_openwall_${p}
 	done
@@ -28,7 +28,7 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 		redirect_back "success" "OpenWall config updated."
 	fi
 
-	redirect_to $SCRIPT_NAME
+	redirect_to "$SCRIPT_NAME"
 fi
 
 [ -e "$config_file" ] && include $config_file
@@ -45,17 +45,17 @@ fi
 </div>
 
 <form action="<%= $SCRIPT_NAME %>" method="post">
-	<% field_switch "openwall_enabled" "Enable OpenWall" %>
+	<% field_switch "openwall_enabled" "Enable OpenWall" "eval" %>
 	<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
 		<div class="col">
-			<% field_select "openwall_interval" "Interval" "15,30,60,120" "Minutes between submissions." %>
+			<% field_string "openwall_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
 			<% field_text "openwall_caption" "Caption" "Location or short description." %>
 		</div>
 
 		<div class="col">
-			<% field_switch "openwall_crontab" "Add to Crontab" "Send pictures timed by interval." %>
-			<% field_switch "openwall_heif" "Use HEIF format" "Requires H265 codec on Video0." %>
-			<% field_switch "openwall_proxy" "Use SOCKS5" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
+			<% field_switch "openwall_crontab" "Add to Crontab" "eval" "Send pictures timed by interval." %>
+			<% field_switch "openwall_heif" "Use HEIF format" "eval" "Requires H265 codec on Video0." %>
+			<% field_switch "openwall_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
 		</div>
 
 		<div class="col">

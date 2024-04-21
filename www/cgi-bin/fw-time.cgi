@@ -5,19 +5,25 @@ page_title="Time Settings"
 tz_data=$(cat /etc/TZ)
 tz_name=$(cat /etc/timezone)
 
-if [ "POST" = "$REQUEST_METHOD" ]; then
+if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
 		update)
-			[ -z "$POST_tz_name" ] && redirect_to $SCRIPT_NAME "warning" "Empty timezone name. Skipping."
-			[ -z "$POST_tz_data" ] && redirect_to $SCRIPT_NAME "warning" "Empty timezone value. Skipping."
+			[ -z "$POST_tz_name" ] && redirect_to "$SCRIPT_NAME" "warning" "Empty timezone name. Skipping."
+			[ -z "$POST_tz_data" ] && redirect_to "$SCRIPT_NAME" "warning" "Empty timezone value. Skipping."
 			[ "$tz_data" != "$POST_tz_data" ] && echo "${POST_tz_data}" > /etc/TZ
 			[ "$tz_name" != "$POST_tz_name" ] && echo "${POST_tz_name}" > /etc/timezone
+
+			rm -f /etc/ntp.conf
+			for i in $(seq 0 3); do
+				eval ntp="\$POST_server_${i}"
+				[ -n "$ntp" ] && echo "server $ntp iburst" >> /etc/ntp.conf
+			done
 			redirect_back "success" "Configuration updated."
 			;;
 	esac
 
 	update_caminfo
-	redirect_to $SCRIPT_NAME "success" "Timezone updated."
+	redirect_to "$SCRIPT_NAME" "success" "Timezone updated."
 fi
 %>
 
@@ -42,10 +48,21 @@ fi
 		</div>
 
 		<div class="col">
+		<h3>Synchronization</h3>
+			<%
+			for i in $(seq 0 3); do
+				eval server_${i}=$(sed -n $((i + 1))p /etc/ntp.conf | awk '{print $2}')
+				field_text "server_${i}" "Server $((i + 1))"
+			done
+			%>
+			<p id="sync-time-wrapper"><a href="#" id="sync-time">Sync time</a></p>
+		</div>
+
+		<div class="col">
 		<h3>Configuration</h3>
 			<% ex "cat /etc/timezone" %>
 			<% ex "cat /etc/TZ" %>
-			<p id="sync-time-wrapper"><a href="#" id="sync-time">Sync time</a></p>
+			<% ex "cat /etc/ntp.conf" %>
 		</div>
 	</div>
 	<% button_submit %>

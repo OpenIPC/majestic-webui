@@ -3,12 +3,14 @@
 
 <%
 page_title="Majestic Settings"
-json_load_file $(get_schema)
-
 label="$GET_tab"
 [ -z "$label" ] && label="system"
 
-if [ "POST" = "$REQUEST_METHOD" ]; then
+json_conf=$(wget -q -T1 localhost/api/v1/config.json -O -)
+json_schema=$(cat $(get_schema) | jsonfilter -e "@.properties.$label")
+json_load "$json_schema"
+
+if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
 		restart)
 			killall -1 majestic
@@ -50,12 +52,10 @@ fi
 
 <ul class="nav nav-underline small mb-4 d-lg-flex">
 	<%
-	json_select "properties"
-	json_get_keys "keys"
-	for key in $keys; do
-		json_select "$key"
-		json_get_var "locale" "locale"
-		json_select ..
+	include j/locale.cgi
+	eval $(cat $(get_schema) | jsonfilter -e "section=@.properties")
+	for key in $section; do
+		locale=$(eval echo \$mj_${key})
 		c="class=\"nav-link\""
 		[ "$label" = "$key" ] && title="$locale" && c="class=\"nav-link active\" aria-current=\"true\""
 		echo "<li class=\"nav-item\"><a ${c} href=\"mj-settings.cgi?tab=${key}\">${locale}</a></li>"
@@ -63,7 +63,7 @@ fi
 	%>
 </ul>
 
-<% if json_is_a "$label" "object"; then %>
+<% if json_is_a "properties" "object"; then %>
 
 <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
 	<div class="col">
@@ -71,10 +71,8 @@ fi
 		<div class="d-grid gap-2">
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<%
-				json_select "$label"
 				json_select "properties"
 				json_get_keys "keys"
-				json_conf=$(wget -q -T1 localhost/api/v1/config.json -O -)
 				for key in $keys; do
 					json_select "$key"
 					json_get_var "desc" "description"
@@ -87,26 +85,24 @@ fi
 					param="_${label}_${key}"
 					setting=${param//_/.}
 					value=$(yaml-cli -g "$setting")
+					default=${value:-$(echo "$json_conf" | jsonfilter -e "@$setting")}
 					config="${config}\n$(echo $setting: $value)"
 
 					case "$type" in
 						boolean)
-							field_boolean "$desc" "$param" "$value"
+							field_switch "$param" "$desc" "$default"
 							;;
 
 						integer)
 							if [ -n "$max" ] && [ "$max" -le "100" ]; then
-								if [ -z "$value" ]; then
-									value=$(echo "$json_conf" | jsonfilter -e "@$setting")
-								fi
-								field_range "$desc" "$param" "$value" "$min" "$max"
+								field_range "$param" "$desc" "$default" "$min" "$max"
 							else
-								field_integer "$desc" "$param" "$value" "$min" "$max"
+								field_integer "$param" "$desc" "$default" "$min" "$max"
 							fi
 							;;
 
 						string)
-							field_string "$desc" "$param" "$value" "$enum"
+							field_string "$param" "$desc" "$default" "$enum"
 							;;
 					esac
 				done

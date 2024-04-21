@@ -6,8 +6,7 @@
 
 <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
 	<div class="col">
-		<h3>Camera</h3>
-		<h5>Hardware</h5>
+		<h3>Hardware</h3>
 		<dl class="small list">
 			<dt>Processor</dt>
 			<dd><%= $soc %></dd>
@@ -21,8 +20,7 @@
 	</div>
 
 	<div class="col">
-		<h3>System</h3>
-		<h5>Firmware</h5>
+		<h3>Firmware</h3>
 		<dl class="small list">
 			<dt>Version</dt>
 			<dd><%= "${fw_version}-${fw_variant}" %></dd>
@@ -34,15 +32,13 @@
 				<dt>U-Boot</dt>
 				<dd><%= $uboot_version %></dd>
 			<% fi %>
+			<dt>Time</dt>
+			<dd><%= $(date -d @$fw_time) %></dd>
 		</dl>
-	</div>
-
-	<div class="col">
-		<% ex "cat /etc/os-release" %>
 	</div>
 </div>
 
-<div class="row g-4 mb-4 ui-expert">
+<div class="row g-4 mb-4">
 	<div class="col ">
 		<h3>Resources</h3>
 		<% ex "uptime" %>

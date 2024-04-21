@@ -5,13 +5,13 @@ page_title="Proxy"
 config_file=/etc/webui/proxy.conf
 params="host port username password"
 
-if [ "POST" = "$REQUEST_METHOD" ]; then
+if [ "$REQUEST_METHOD" = "POST" ]; then
 	rm -f "$config_file"
 	for p in $params; do
 		echo "socks5_${p}=\"$(eval echo \$POST_socks5_${p})\"" >> "$config_file"
 	done
 
-	redirect_to $SCRIPT_NAME
+	redirect_to "$SCRIPT_NAME"
 fi
 
 [ -e "$config_file" ] && include $config_file

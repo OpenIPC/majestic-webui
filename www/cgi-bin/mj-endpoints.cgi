@@ -1,9 +1,9 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<%
-page_title="Majestic Endpoints"
-%>
+<% page_title="Majestic Endpoints" %>
+
 <%in p/header.cgi %>
+
 <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4 mb-4">
 	<div class="col">
 		<h3>Video</h3>
@@ -28,10 +28,10 @@ page_title="Majestic Endpoints"
 		<dl>
 			<dt class="cp2cb">http://<%= $network_address %>/audio.opus</dt>
 			<dd>Opus audio stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/audio.pcm</dt>
-			<dd>Raw PCM audio stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/audio.m4a</dt>
 			<dd>AAC audio stream.</dd>
+			<dt class="cp2cb">http://<%= $network_address %>/audio.pcm</dt>
+			<dd>Raw PCM audio stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/audio.alaw</dt>
 			<dd>A-law compressed audio stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/audio.ulaw</dt>
@@ -56,16 +56,16 @@ page_title="Majestic Endpoints"
 	</div>
 
 	<div class="col">
-		<h3>Night API</h3>
+		<h3>Night</h3>
 		<dl>
 			<dt class="cp2cb">http://<%= $network_address %>/night/on</dt>
 			<dd>Turn on night mode.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/night/off</dt>
 			<dd>Turn off night mode.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/night/toggle</dt>
-			<dd>Toggle current night mode.</dd>
+			<dd>Toggle night mode.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/night/ircut</dt>
-			<dd>Toggle camera IRcut.</dd>
+			<dd>Toggle camera ircut.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/night/light</dt>
 			<dd>Toggle camera light.</dd>
 		</dl>
@@ -83,8 +83,6 @@ page_title="Majestic Endpoints"
 		</dl>
 	</div>
 </div>
-
-<p class="text-body-secondary">More information on the <a href="https://github.com/OpenIPC/wiki/blob/master/en/majestic-streamer.md">OpenIPC wiki</a>.</p>
 
 <script>
 	function initializeCopyToClipboard() {

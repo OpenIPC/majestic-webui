@@ -62,7 +62,7 @@ async function* makeTextFileLineIterator(url) {
 	}
 
 	if (el.dataset['reboot'] === "true") {
-		location.href = '/cgi-bin/restart.cgi'
+		location.href = '/cgi-bin/fw-restart.cgi'
 	}
 
 	if ($('form input[type=submit]')) {

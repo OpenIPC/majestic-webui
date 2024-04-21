@@ -2,6 +2,11 @@
 <%
 IFS_ORIG=$IFS
 
+# tag "text" "classes" "extras"
+div() {
+	tag "div" "$1" "$2" "$3"
+}
+
 # tag "tag" "text" "css" "extras"
 tag() {
 	local t="$1"
@@ -32,11 +37,6 @@ d() {
 
 e() {
 	echo -e -n "$1"
-}
-
-# tag "text" "classes" "extras"
-div() {
-	tag "div" "$1" "$2" "$3"
 }
 
 h1() {
@@ -133,34 +133,38 @@ check_password() {
 	fi
 }
 
-checked_if() {
-	[ "$1" = "$2" ] && echo -n " checked"
-}
-
 ex() {
 	echo "<div class=\"${2:-ex}\"><h6># ${1}</h6><pre class=\"small\">"
 	eval "$1" | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g"
 	echo "</pre></div>"
 }
 
-# field_boolean "label" "name" "value" "hint"
-field_boolean() {
-	local l="$1"
-	local n="$2"
-	local v="$3"
-	local h="$4"
-	echo "<p class=\"boolean\"><span class=\"form-check form-switch\">" \
-		"<input type=\"hidden\" id=\"${n}-false\" name=\"${n}\" value="false">" \
-		"<input type=\"checkbox\" id=\"${n}\" name=\"${n}\" value="true" class=\"form-check-input\"$(checked_if "true" "$v")>" \
-		"<label for=\"${n}\" class=\"form-check-label\">${l}</label></span>"
-	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
+# field_checkbox "name" "label" "hint"
+field_checkbox() {
+	local n="$1"
+	local l="$2"
+	local h="$3"
+	local v=$(t_value "$n")
+	[ "$v" = "true" ] && v="checked"
+	echo "<p class=\"boolean form-check\">" \
+		"<input type=\"hidden\" id=\"${n}-false\" name=\"${n}\" value=\"false\">" \
+		"<input type=\"checkbox\" id=\"${n}\" name=\"${n}\" value=\"true\" class=\"form-check-input\" ${v}>" \
+		"<label for=\"${n}\" class=\"form-label\">${l}</label>"
+	[ -n "$h" ] && echo "<span class=\"hint text-secondary d-block mb-2\">${h}</span>"
 	echo "</p>"
 }
 
-# field_integer "label" "name" "value" "min" "max" "hint"
+# field_hidden "name" "value"
+field_hidden() {
+	local n="$1"
+	local v="$2"
+	echo "<input type=\"hidden\" name=\"${n}\" id=\"${n}\" value=\"${v}\" class=\"form-hidden\">"
+}
+
+# field_integer "name" "label" "value" "min" "max" "hint"
 field_integer() {
-	local l="$1"
-	local n="$2"
+	local n="$1"
+	local l="$2"
 	local v="$3"
 	local x="$4"
 	local y="$5"
@@ -168,38 +172,70 @@ field_integer() {
 	echo "<p class=\"number\">" \
 		"<label class=\"form-label\" for=\"${n}\">${l}</label>" \
 		"<span class=\"input-group\">"
-	echo "<input type=\"number\" id=\"${n}\" name=\"${n}\" class=\"form-control text-end\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step="1">" \
+	echo "<input type=\"number\" id=\"${n}\" name=\"${n}\" class=\"form-control text-end\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step=\"1\">" \
 		"</span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }
 
-# field_range "label" "name" "value" "min" "max" "hint"
+# field_password "name" "label" "hint"
+field_password() {
+	local n="$1"
+	local l="$2"
+	local h="$3"
+	local v=$(t_value "$n")
+	echo "<p class=\"password\" id=\"${n}_wrap\">" \
+		"<label for=\"${n}\" class=\"form-label\">${l}</label><span class=\"input-group\">" \
+		"<input type=\"password\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+		"<label class=\"input-group-text\">" \
+		"<input type=\"checkbox\" class=\"form-check-input me-1\" data-for=\"${n}\"> show" \
+		"</label></span>"
+	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
+	echo "</p>"
+}
+
+# field_range "name" "label" "value" "min" "max" "hint"
 field_range() {
-	local l="$1"
-	local n="$2"
+	local n="$1"
+	local l="$2"
 	local v="$3"
 	local x="$4"
 	local y="$5"
 	local h="$6"
-	[ "${n:8:3}" = "gop" ] && local r="0.1"
 	echo "<p class=\"range\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<span class=\"input-group\">"
 	echo "<input type=\"hidden\" id=\"${n}\" name=\"${n}\" value=\"${v}\">"
-	echo "<input type=\"range\" class=\"form-control form-range\" id=\"${n}-range\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step=\"${r:-1}\">"
+	echo "<input type=\"range\" class=\"form-control form-range\" id=\"${n}-range\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step=\"1\">"
 	echo "<span class=\"input-group-text show-value\" id=\"${n}-show\">${v}</span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }
 
-# field_string "label" "name" "value" "enum" "hint"
+# field_switch "name" "label" "value" "hint"
+field_switch() {
+	local n="$1"
+	local l="$2"
+	local v="$3"
+	local h="$4"
+	[ "$v" = "eval" ] && v=$(t_value "$n")
+	[ "$v" = "true" ] && v="checked"
+	echo "<p class=\"boolean\"><span class=\"form-check form-switch\">" \
+		"<input type=\"hidden\" id=\"${n}-false\" name=\"${n}\" value=\"false\">" \
+		"<input type=\"checkbox\" id=\"${n}\" name=\"${n}\" value=\"true\" class=\"form-check-input\" ${v}>" \
+		"<label for=\"${n}\" class=\"form-check-label\">${l}</label></span>"
+	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
+	echo "</p>"
+}
+
+# field_string "name" "label" "value" "enum" "hint"
 field_string() {
-	local l="$1"
-	local n="$2"
+	local n="$1"
+	local l="$2"
 	local v="$3"
 	local e="$4"
 	local h="$5"
+	[ "$v" = "eval" ] && v=$(t_value "$n")
 	if [ -n "$e" ]; then
 		echo "<p class=\"select\" id=\"${n}_wrap\">" \
 			"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
@@ -219,116 +255,27 @@ field_string() {
 	echo "</p>"
 }
 
-# field_checkbox "name" "label" "hint"
-field_checkbox() {
-	local l=$2
-	[ -z "$l" ] && l="$(t_label "$1")"
-	[ -z "$l" ] && l="<span class=\"bg-warning\">${1}</span>"
-	local h=$3
-	local v=$(t_value "$1")
-	[ -z "$v" ] && v="false"
-	echo "<p class=\"boolean form-check\">" \
-		"<input type=\"hidden\" id=\"${1}-false\" name=\"${1}\" value=\"false\">" \
-		"<input type=\"checkbox\" name=\"${1}\" id=\"${1}\" value=\"true\" class=\"form-check-input\"$(checked_if "true" "$v")>" \
-		"<label for=\"${1}\" class=\"form-label\">${l}</label>"
-	[ -n "$h" ] && echo "<span class=\"hint text-secondary d-block mb-2\">${h}</span>"
-	echo "</p>"
-}
-
-# field_hidden "name" "value"
-field_hidden() {
-	echo "<input type=\"hidden\" name=\"${1}\" id=\"${1}\" value=\"${2}\" class=\"form-hidden\">"
-}
-
-# field_password "name" "label" "hint"
-field_password() {
-	local l=$2
-	[ -z "$l" ] && l="$(t_label "$1")"
-	[ -z "$l" ] && l="<span class=\"bg-warning\">${1}</span>"
-	local h=$3
-	local v=$(t_value "$1")
-	echo "<p class=\"password\" id=\"${1}_wrap\">" \
-		"<label for=\"${1}\" class=\"form-label\">${l}</label><span class=\"input-group\">" \
-		"<input type=\"password\" id=\"${1}\" name=\"${1}\" class=\"form-control\" value=\"${v}\" placeholder=\"K3wLHaZk3R!\">" \
-		"<label class=\"input-group-text\">" \
-		"<input type=\"checkbox\" class=\"form-check-input me-1\" data-for=\"${1}\"> show" \
-		"</label></span>"
-	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
-	echo "</p>"
-}
-
-# field_select "name" "label" "options" "hint" "units"
-field_select() {
-	local l=$2
-	[ -z "$l" ] && l="$(t_label "$1")"
-	[ -z "$l" ] && l="<span class=\"bg-warning\">${1}</span>"
-	local o=$3
-	o=${o//,/ }
-	local h=$4
-	local u=$5
-	echo "<p class=\"select\" id=\"${1}_wrap\">" \
-		"<label for=\"${1}\" class=\"form-label\">${l}</label>" \
-		"<select class=\"form-select\" id=\"${1}\" name=\"${1}\">"
-	for o in $o; do
-		v="${o%:*}"
-		n="${o#*:}"
-		echo -n "<option value=\"${v}\""
-		[ "$(t_value "$1")" = "$v" ] && echo -n " selected"
-		echo ">${n}</option>"
-		unset v; unset n
-	done
-	echo "</select>"
-	[ -n "$u" ] && echo "<span class=\"input-group-text\">${u}</span>"
-	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
-	echo "</p>"
-}
-
-# field_swith "name" "label" "hint" "options"
-field_switch() {
-	local l=$2
-	[ -z "$l" ] && l="$(t_label "$1")"
-	[ -z "$l" ] && l="<span class=\"bg-warning\">$1</span>"
-	local v=$(t_value "$1")
-	[ -z "$v" ] && v="false"
-	local h="$3"
-	local o=$4
-	[ -z "$o" ] && o="true,false"
-	local o1=$(echo "$o" | cut -d, -f1)
-	local o2=$(echo "$o" | cut -d, -f2)
-	echo "<p class=\"boolean\">" \
-		"<span class=\"form-check form-switch\">" \
-		"<input type=\"hidden\" id=\"${1}-false\" name=\"${1}\" value=\"${o2}\">" \
-		"<input type=\"checkbox\" id=\"${1}\" name=\"${1}\" value=\"${o1}\" role=\"switch\" class=\"form-check-input\"$(checked_if "$o1" "$v")>" \
-		"<label for=\"$1\" class=\"form-check-label\">${l}</label>" \
-		"</span>"
-	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
-	echo "</p>"
-}
-
-# field_text "name" "label" "hint" "placeholder"
+# field_text "name" "label" "hint"
 field_text() {
-	local l=$2
-	[ -z "$l" ] && l="$(t_label "$1")"
-	[ -z "$l" ] && l="<span class=\"bg-warning\">$1</span>"
-	local v="$(t_value "$1")"
+	local n="$1"
+	local l="$2"
 	local h="$3"
-	local p="$4"
-	echo "<p class=\"string\" id=\"${1}_wrap\">" \
-		"<label for=\"${1}\" class=\"form-label\">${l}</label>" \
-		"<input type=\"text\" id=\"${1}\" name=\"${1}\" class=\"form-control\" value=\"${v}\" placeholder=\"${p}\">"
+	local v=$(t_value "$n")
+	echo "<p class=\"string\" id=\"${n}_wrap\">" \
+		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
+		"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }
 
-# field_textedit "name" "file" "label"
+# field_textedit "name" "label" "file"
 field_textedit() {
-	local l=$3
-	[ -z "$l" ] && l="$(t_label "$1")"
-	[ -z "$l" ] && l="<span class=\"bg-warning\">$1</span>"
-	local v=$(cat "$2")
-	echo "<p class=\"textarea\" id=\"${1}_wrap\">" \
-		"<label for=\"${1}\" class=\"form-label\">${l}</label>" \
-		"<textarea id=\"${1}\" name=\"${1}\" class=\"form-control\">${v}</textarea>"
+	local n="$1"
+	local l="$2"
+	local v=$(cat "$3")
+	echo "<p class=\"textarea\" id=\"${n}_wrap\">" \
+		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
+		"<textarea id=\"${n}\" name=\"${n}\" class=\"form-control\">${v}</textarea>"
 	echo "</p>"
 }
 
@@ -414,10 +361,6 @@ label() {
 	echo "<label for=\"${1}\" class=\"${c}\"${x}>${l}</label>"
 }
 
-link_to() {
-	echo "<a href=\"${2}\">${1}</a>"
-}
-
 # pre "text" "classes" "extras"
 pre() {
 	# replace <, >, &, ", and ' with HTML entities
@@ -486,8 +429,7 @@ t_label() {
 }
 
 t_value() {
-	# eval "echo \"\$${1}\""
-	eval echo '$'${1}
+	eval "echo \$${1}"
 }
 
 update_caminfo() {
@@ -520,11 +462,12 @@ update_caminfo() {
 	fw_version=$(grep "OPENIPC_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
 	fw_variant=$(grep "BUILD_OPTION" /etc/os-release | cut -d= -f2 | tr -d '"')
 	fw_build=$(grep "GITHUB_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
+	fw_time=$(grep "TIME_STAMP" /etc/os-release | cut -d= -f2 | tr -d '"')
 	mj_version=$($mj_bin_file -v)
 	uboot_version=$(fw_printenv -n ver)
 
 	# WebUI
-	ui_password=$(grep root /etc/shadow|cut -d: -f2)
+	ui_password=$(grep root /etc/shadow | cut -d: -f2)
 	ptz_support=$(fw_printenv -n ptz)
 
 	# Network
@@ -545,7 +488,7 @@ update_caminfo() {
 		tz_name="Etc/GMT"; echo "$tz_name" > /etc/timezone
 	fi
 
-	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
+	local variables="flash_size flash_type fw_build fw_time fw_variant fw_version mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		sensor sensor_ini soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
 	rm -f ${sysinfo_file}

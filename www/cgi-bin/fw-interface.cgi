@@ -4,12 +4,20 @@
 page_title="Interface Settings"
 config_file="/etc/webui/webui.conf"
 
-if [ "POST" = "$REQUEST_METHOD" ]; then
+if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
 		access)
-			new_password="$POST_ui_password_new"
-			[ -z "$new_password" ] && redirect_to $SCRIPT_NAME "danger" "Password cannot be empty!"
-			echo "root:${new_password}" | chpasswd
+			password_default="$POST_password_default"
+			if [ -z "$password_default" ]; then
+				redirect_to "$SCRIPT_NAME" "danger" "Password cannot be empty!"
+			fi
+
+			password_confirm="$POST_password_confirm"
+			if [ "$password_default" != "$password_confirm" ]; then
+				redirect_to "$SCRIPT_NAME" "danger" "Password does not match!"
+			fi
+
+			echo "root:${password_default}" | chpasswd
 			update_caminfo
 			redirect_to "/" "success" "Password updated."
 			;;
@@ -22,7 +30,7 @@ if [ "POST" = "$REQUEST_METHOD" ]; then
 			;;
 
 		*)
-			redirect_to $SCRIPT_NAME "danger" "UNKNOWN ACTION: $POST_action"
+			redirect_to "$SCRIPT_NAME" "danger" "UNKNOWN ACTION: $POST_action"
 			;;
 	esac
 fi
@@ -41,7 +49,8 @@ ui_username="$USER"
 				<label for="ui_username" class="form-label">Username</label>
 				<input type="text" id="ui_username" name="ui_username" value="<%= $ui_username %>" class="form-control" autocomplete="username" disabled>
 			</p>
-			<% field_password "ui_password_new" "Password" %>
+			<% field_password "password_default" "Password" %>
+			<% field_password "password_confirm" "Confirm Password" %>
 			<% button_submit %>
 		</form>
 	</div>
@@ -50,7 +59,7 @@ ui_username="$USER"
 		<h3>Theme</h3>
 		<form action="<%= $SCRIPT_NAME %>" method="post">
 			<% field_hidden "action" "theme" %>
-			<% field_select "webui_theme" "Theme" "dark,light" %>
+			<% field_string "webui_theme" "Theme" "eval" "dark light" %>
 			<% button_submit %>
 		</form>
 	</div>

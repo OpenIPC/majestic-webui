@@ -57,10 +57,10 @@ Pragma: no-cache
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownTools" role="button">Tools</a>
 						<ul aria-labelledby="dropdownTools" class="dropdown-menu">
-							<li><a class="dropdown-item" href="fw-console.cgi">Console</a></li>
-							<li><a class="dropdown-item" href="fw-files.cgi">Files</a></li>
+							<li><a class="dropdown-item" href="tool-console.cgi">Console</a></li>
+							<li><a class="dropdown-item" href="tool-files.cgi">Files</a></li>
 							<% if [ -e /dev/mmcblk0 ]; then %>
-								<li><a class="dropdown-item" href="fw-sdcard.cgi">SDcard</a></li>
+								<li><a class="dropdown-item" href="tool-sdcard.cgi">SDcard</a></li>
 							<% fi %>
 						</ul>
 					</li>
@@ -114,6 +114,16 @@ Pragma: no-cache
 <% if [ ! -e $(get_config) ]; then %>
 <div class="alert alert-danger">
 	<p class="mb-0">Majestic configuration not found, please <a href="mj-configuration.cgi">check your Majestic settings</a>.</p>
+</div>
+<% fi %>
+
+<% if [ "$(cat /etc/TZ)" != "$TZ" ] || [ -e /tmp/system-reboot ]; then %>
+<div class="alert alert-danger">
+	<h3>Warning.</h3>
+	<p>System settings have been updated, restart the system to apply changes.</p>
+	<span class="d-flex gap-3">
+		<a class="btn btn-danger" href="fw-restart.cgi">Restart camera</a>
+	</span>
 </div>
 <% fi %>
 

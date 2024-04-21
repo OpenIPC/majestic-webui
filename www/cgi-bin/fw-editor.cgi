@@ -3,7 +3,7 @@
 <%
 page_title="Text Editor"
 
-if [ "POST" = "$REQUEST_METHOD" ]; then
+if [ "$REQUEST_METHOD" = "POST" ]; then
 	editor_file="$POST_editor_file"
 	editor_text="$POST_editor_text"
 
@@ -45,7 +45,7 @@ fi
 <form action="<%= $SCRIPT_NAME %>" method="post">
 	<% field_hidden "action" "save" %>
 	<% field_hidden "editor_file" "$editor_file" %>
-	<% field_textedit "editor_text" "$editor_file" "File content" %>
+	<% field_textedit "editor_text" "File content" "$editor_file" %>
 	<% button_submit %>
 </form>
 
