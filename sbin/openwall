@@ -15,7 +15,7 @@ else
 	soc=$(ipcinfo --chip-name)
 fi
 
-sensor=$(ipcinfo --short-sensor)
+sensor=$(ipcinfo --short-sensor && sleep 1)
 streamer=$(basename $(ipcinfo --streamer))
 temperature=$(ipcinfo --temp)
 uptime=$(uptime | sed -r 's/^.+ up ([^,]+), .+$/\1/')
