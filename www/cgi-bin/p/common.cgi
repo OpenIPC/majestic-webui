@@ -471,7 +471,7 @@ update_caminfo() {
 	ptz_support=$(fw_printenv -n ptz)
 
 	# Network
-	network_interface=$(ip route | awk '/link/ {print $3}' | head -n1)
+	network_interface=$(ip route | awk -F 'dev ' '/default/ {print $2}' | head -n1)
 	network_address=$(ip route | grep ${network_interface} | awk '/src/ {print $7}')
 	network_gateway=$(ip route | awk '/default/ {print $3}')
 	network_hostname=$(hostname -s)
