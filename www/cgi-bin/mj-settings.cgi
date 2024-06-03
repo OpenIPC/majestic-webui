@@ -107,6 +107,29 @@ fi
 					esac
 				done
 				%>
+        <% if test $title = "Motion"; then %>
+        <div class="d-grid gap-2">
+            <span class="form-check form-switch">
+            <input type="checkbox" id="_fill_field" name="_fill_field_selector" value="true" class="form-check-input" checked="true" onchange="document.getElementById('_fill_field_label').innerHTML = (document.getElementById('_fill_field').checked == true) ? 'fill Region of interest (green)' : 'fill Region excluded from detection (red)';">
+            <label for="_fill_field" id="_fill_field_label" class="form-check-label">Fill  Region of interest (green)</label>
+            </span>
+        </div>
+        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4" id="_row">
+            <div class="col">
+                <iframe id="_iframe" src="/m/img.html" frameborder="0" style="padding:0;margin:0;border:1px solid #4c60d8;">
+                </iframe>
+            <input type="button" class="btn btn-light btn-sm" onclick="_clear();" value="Clear regions of interest/excluded">
+            </div>
+        </div>
+        <script>
+        function _clear() {
+            document.getElementById('_iframe').contentWindow.location.reload();
+            document.getElementById('_motionDetect_roi').value = '';
+            document.getElementById('_motionDetect_skipIn').value = '';
+        }
+        </script>
+        <% fi %>
+
 				<input type="hidden" name="action" value="update">
 				<% button_submit %>
 			</form>
