@@ -1,0 +1,34 @@
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4" id="_row">
+	<div class="col">
+		<center>
+		<iframe id="_iframe" src="/m/img.html" frameborder="0" style="padding:0;margin:0;border:1px solid #4c60d8;">
+		</iframe>
+		</center>
+	</div>
+</div>
+
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
+	<div class="col">
+		<span class="form-check form-switch">
+		<input type="checkbox" id="_fill_field" name="_fill_field_selector" value="true" class="form-check-input" checked="true" onchange="document.getElementById('_fill_field_label').innerHTML = (document.getElementById('_fill_field').checked == true) ? 'fill Region of interest (green)' : 'fill Region excluded from detection (red)';">
+		<label for="_fill_field" id="_fill_field_label" class="form-check-label">Fill  Region of interest (green)</label>
+		</span>
+	</div>
+
+	<div class="col" id="debug">
+		<input type="button" class="btn btn-primary" onclick="_clear();" value="Clear">
+	</div>
+</div>
+
+<!-- remove this before integration -->
+<p class="string" id="_motionDetect_roi_wrap"> <label for="_motionDetect_roi" class="form-label">Region of interest</label> <input type="text" id="_motionDetect_roi" name="_motionDetect_roi" class="form-control" value=""> </p>
+<p class="string" id="_motionDetect_skipIn_wrap"> <label for="_motionDetect_skipIn" class="form-label">Region excluded from detection</label> <input type="text" id="_motionDetect_skipIn" name="_motionDetect_skipIn" class="form-control" value=""> </p>
+<!-- remove this before integration -->
+
+<script> 
+function _clear() {
+	document.getElementById('_iframe').contentWindow.location.reload();
+	document.getElementById('_motionDetect_roi').value = '';
+	document.getElementById('_motionDetect_skipIn').value = '';
+}
+</script>
