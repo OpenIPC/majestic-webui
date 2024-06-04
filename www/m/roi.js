@@ -1,5 +1,4 @@
-const IMG_WIDTH = parent.document.getElementById('_row').offsetWidth * 0.99;
-//const IMG_WIDTH = 800;
+const IMG_WIDTH = Math.round(parent.document.getElementById('_row').offsetWidth * 0.99);
 const MOTION_SIZE = _motion_size();
 const COEFF = MOTION_SIZE[0] / IMG_WIDTH;
 const GRN = 'rgba(0,255,0,0.5)';
@@ -14,9 +13,9 @@ function _motion_size() {
 
 function set_canvas_size() {
 	document.getElementById('canvas').style.width = IMG_WIDTH + 'px';
-	document.getElementById('canvas').style.height = (MOTION_SIZE[1] / COEFF) + 'px';
+	document.getElementById('canvas').style.height = Math.round((MOTION_SIZE[1] / COEFF)) + 'px';
 	parent.document.getElementById('_iframe').style.width = IMG_WIDTH + 2 + 'px';
-	parent.document.getElementById('_iframe').style.height = (MOTION_SIZE[1] / COEFF) + 2 + 'px';
+	parent.document.getElementById('_iframe').style.height = Math.round((MOTION_SIZE[1] / COEFF)) + 2 + 'px';
 }
 
 function initDraw(canvas) {
