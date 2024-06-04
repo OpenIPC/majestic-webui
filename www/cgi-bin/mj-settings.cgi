@@ -107,29 +107,6 @@ fi
 					esac
 				done
 				%>
-        <% if test $title = "Motion"; then %>
-        <div class="d-grid gap-2">
-            <span class="form-check form-switch">
-            <input type="checkbox" id="_fill_field" name="_fill_field_selector" value="true" class="form-check-input" checked="true" onchange="document.getElementById('_fill_field_label').innerHTML = (document.getElementById('_fill_field').checked == true) ? 'fill Region of interest (green)' : 'fill Region excluded from detection (red)';">
-            <label for="_fill_field" id="_fill_field_label" class="form-check-label">Fill  Region of interest (green)</label>
-            </span>
-        </div>
-        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4" id="_row">
-            <div class="col">
-                <iframe id="_iframe" src="/m/img.html" frameborder="0" style="padding:0;margin:0;border:1px solid #4c60d8;">
-                </iframe>
-            <input type="button" class="btn btn-light btn-sm" onclick="_clear();" value="Clear regions of interest/excluded">
-            </div>
-        </div>
-        <script>
-        function _clear() {
-            document.getElementById('_iframe').contentWindow.location.reload();
-            document.getElementById('_motionDetect_roi').value = '';
-            document.getElementById('_motionDetect_skipIn').value = '';
-        }
-        </script>
-        <% fi %>
-
 				<input type="hidden" name="action" value="update">
 				<% button_submit %>
 			</form>
@@ -152,6 +129,40 @@ fi
 		<p><a href="mj-endpoints.cgi">Majestic Endpoints</a></p>
 	</div>
 </div>
+
+	<% if test $title = "Motion"; then %><!-- VisEd -->
+<h2>Visual ROI/ROE editor</h2>
+<div class="row justify-content-center">
+	<div class="col col-md-auto">
+		Region excluded from detection (red)
+	</div>
+	<div class="col col-md-auto">
+		<span class="form-check form-switch"><input type="checkbox" id="_fill_field" name="_fill_field_selector" value="true" class="form-check-input" checked="true" ></span>
+	</div>
+	<div class="col col-md-auto">
+		Region of interest (green)
+	</div>
+	<div class="col">
+	</div>
+	<div class="col col-auto">
+		<input type="button" class="btn btn-primary btn-sm" onclick="_clear();" value="Clear all regions">
+	</div>
+</div>
+<p></p>
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4" id="_row">
+	<div class="col">
+		<iframe id="_iframe" src="/m/img.html" frameborder="0" style="padding: 0px; margin: 0px; border: 1px solid rgb(76, 96, 216); width: 437.6px; height: 257.444px;"> </iframe>
+	</div>
+</div>
+<script>
+function _clear() {
+	document.getElementById('_iframe').contentWindow.location.reload();
+	document.getElementById('_motionDetect_roi').value = '';
+	document.getElementById('_motionDetect_skipIn').value = '';
+}
+</script>
+<!--/VisEd --><% fi %>
+
 
 <% else %>
 
