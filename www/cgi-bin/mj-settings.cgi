@@ -184,7 +184,7 @@ function _clear() {
 			sel.id=inp.id;
 			sel.options.add(new Option());
 			let opt;
-			<% for i in $(find /etc/sensors -type f); do %>
+			<% for i in $(find /etc/sensors -type f  | grep -v '/etc/sensors/iq/'); do %>
 				opt = new Option("<%= $i %>");
 				opt.selected = ("<%= $i %>" == inp.value);
 				sel.options.add(opt);
