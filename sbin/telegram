@@ -20,7 +20,7 @@ if [ -z "$telegram_message" ]; then
 	telegram_message="$(hostname -s), $(date +'%F %T')"
 fi
 
-if [ "$openwall_use_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
+if [ "$telegram_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
 	snapshot=/tmp/snapshot.heif
 	wget -q -T1 localhost/image.heif -O "$snapshot"
 else
