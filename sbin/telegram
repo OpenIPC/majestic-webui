@@ -16,8 +16,10 @@ if [ -z "$telegram_channel" ]; then
 	exit 1
 fi
 
-if [ -z "$telegram_message" ]; then
+if [ -z "$telegram_caption" ]; then
 	telegram_message="$(hostname -s), $(date +'%F %T')"
+else
+	telegram_message="$(echo "$telegram_caption" | sed "s/%hostname/$(hostname -s)/;s/%datetime/$(date +"%F %T")/;s/%soctemp/$(ipcinfo --temp)/")"
 fi
 
 if [ "$openwall_use_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
