@@ -6,7 +6,6 @@ mj_image=Image
 mj_ipeye=IPEYE
 mj_isp=ISP
 mj_jpeg=JPEG
-mj_mjpeg=MJPEG
 mj_motionDetect=Motion
 mj_netip=NETIP
 mj_nightMode=Night

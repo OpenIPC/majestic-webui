@@ -17,13 +17,13 @@
 
 		<div class="d-grid gap-3">
 			<input type="checkbox" class="btn-check" id="toggle-night">
-			<label class="btn btn-primary" for="toggle-night">Night Toggle</label>
+			<label class="btn btn-primary" for="toggle-night">Night</label>
 
 			<input type="checkbox" class="btn-check" id="toggle-ircut">
-			<label class="btn btn-primary" for="toggle-ircut">IRcut Toggle</label>
+			<label class="btn btn-primary" for="toggle-ircut">IRcut</label>
 
 			<input type="checkbox" class="btn-check" id="toggle-light">
-			<label class="btn btn-primary" for="toggle-light">Light Toggle</label>
+			<label class="btn btn-primary" for="toggle-light">Light</label>
 
 			<% if [ -n "$ptz_support" ]; then %>
 				<%in p/motor.cgi %>

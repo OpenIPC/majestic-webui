@@ -139,21 +139,6 @@ ex() {
 	echo "</pre></div>"
 }
 
-# field_checkbox "name" "label" "hint"
-field_checkbox() {
-	local n="$1"
-	local l="$2"
-	local h="$3"
-	local v=$(t_value "$n")
-	[ "$v" = "true" ] && v="checked"
-	echo "<p class=\"boolean form-check\">" \
-		"<input type=\"hidden\" id=\"${n}-false\" name=\"${n}\" value=\"false\">" \
-		"<input type=\"checkbox\" id=\"${n}\" name=\"${n}\" value=\"true\" class=\"form-check-input\" ${v}>" \
-		"<label for=\"${n}\" class=\"form-label\">${l}</label>"
-	[ -n "$h" ] && echo "<span class=\"hint text-secondary d-block mb-2\">${h}</span>"
-	echo "</p>"
-}
-
 # field_hidden "name" "value"
 field_hidden() {
 	local n="$1"
@@ -438,9 +423,7 @@ update_caminfo() {
 	flash_size=$(awk '{sum+=$1} END{print sum/1024/1024}' $mtd_size)
 
 	sensor_ini=$(ipcinfo --long-sensor)
-	[ -z "$sensor_ini" ] && sensor_ini=$(fw_printenv -n sensor)
-
-	sensor=$(ipcinfo --short-sensor)
+	sensor=$(fw_printenv -n sensor)
 	[ -z "$sensor" ] && sensor=$(echo $sensor_ini | cut -d_ -f1)
 
 	soc_vendor=$(ipcinfo --vendor)
@@ -462,7 +445,6 @@ update_caminfo() {
 	fw_version=$(grep "OPENIPC_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
 	fw_variant=$(grep "BUILD_OPTION" /etc/os-release | cut -d= -f2 | tr -d '"')
 	fw_build=$(grep "GITHUB_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
-	fw_time=$(grep "TIME_STAMP" /etc/os-release | cut -d= -f2 | tr -d '"')
 	mj_version=$($mj_bin_file -v)
 	uboot_version=$(fw_printenv -n ver)
 
@@ -471,11 +453,11 @@ update_caminfo() {
 	ptz_support=$(fw_printenv -n ptz)
 
 	# Network
-	network_interface=$(ip route | awk -F 'dev ' '/default/ {print $2}' | head -n1)
-	network_address=$(ip route | grep ${network_interface} | awk '/src/ {print $7}')
+	network_interface=$(ip route | awk '/default/ {print $5}' | head -n1)
+	network_address=$(ip route | grep ${network_interface:-eth0} | awk '/src/ {print $7}')
 	network_gateway=$(ip route | awk '/default/ {print $3}')
 	network_hostname=$(hostname -s)
-	network_macaddr=$(cat /sys/class/net/${network_interface}/address)
+	network_macaddr=$(cat /sys/class/net/${network_interface:-eth0}/address)
 
 	# Overlay
 	overlay_root="/overlay"
@@ -488,7 +470,7 @@ update_caminfo() {
 		tz_name="Etc/GMT"; echo "$tz_name" > /etc/timezone
 	fi
 
-	local variables="flash_size flash_type fw_build fw_time fw_variant fw_version mj_version network_address
+	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		sensor sensor_ini soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
 	rm -f ${sysinfo_file}

@@ -8,9 +8,10 @@
 		.rectangle { position: absolute; }
 	</style>
 </head>
-<body style="margin:0;padding:0">
 
-<div id="canvas"> </div>
+<body style="margin:0; padding:0;">
+<div id="canvas"></div>
+
 <script>
 const IMG_WIDTH = Math.round(parent.document.getElementById('_row').offsetWidth * 0.99);
 const MOTION_SIZE = _motion_size();
@@ -51,22 +52,25 @@ function initDraw(canvas) {
 		startX: 0,
 		startY: 0
 	};
+
 	let element = null;
 
 	function draw_rectangle(s, color) {
 		e= document.createElement('div');
 		e.className = 'rectangle'
-		e.style.left =	(s[0] / COEFF) + 'px'; e.style.top =	(s[1] / COEFF) + 'px';
-		e.style.width =	(s[2] / COEFF) + 'px'; e.style.height =	(s[3] / COEFF) + 'px';
-		e.style.background = color; 
+		e.style.left = (s[0] / COEFF) + 'px'; e.style.top = (s[1] / COEFF) + 'px';
+		e.style.width = (s[2] / COEFF) + 'px'; e.style.height = (s[3] / COEFF) + 'px';
+		e.style.background = color;
 		canvas.appendChild(e)
 		e = null;
 	}
+
 	// draw current regions
-	for ( v of (parent.document.getElementById('_motionDetect_roi').value).split(', ') )	{
+	for (v of (parent.document.getElementById('_motionDetect_roi').value).split(', ')) {
 		draw_rectangle (v.split('x'), GRN);
 	}
-	for ( v of (parent.document.getElementById('_motionDetect_skipIn').value).split(', ') )	{
+
+	for (v of (parent.document.getElementById('_motionDetect_skipIn').value).split(', ')) {
 		draw_rectangle (v.split('x'), RED);
 	}
 
@@ -83,8 +87,7 @@ function initDraw(canvas) {
 	}
 
 	canvas.onclick = function (e) {
-		if (element == null) {	// start
-
+		if (element == null) {
 			mouse.startX = mouse.x;
 			mouse.startY = mouse.y;
 			element = document.createElement('div');
@@ -99,28 +102,23 @@ function initDraw(canvas) {
 			} else {
 				element.style.background = RED;
 			}
-
-		} else {	// finish
-
+		} else {
 			canvas.style.cursor = "default";
 			let rect = element.getBoundingClientRect(),
 				rX = Math.round(rect.left * COEFF),
 				rY = Math.round(rect.top * COEFF),
-				rW = Math.round( (rect.right - rect.left) * COEFF),
-				rH = Math.round( (rect.bottom - rect.top) * COEFF);
+				rW = Math.round((rect.right - rect.left) * COEFF),
+				rH = Math.round((rect.bottom - rect.top) * COEFF);
 			rect = element = null;
-
 			let fill_form = (parent.document.getElementById('_fill_field').checked == true) ? '_motionDetect_roi' : '_motionDetect_skipIn';
 			let dimensions = rX + 'x' + rY + 'x' + rW + 'x' + rH;
 			dimensions = (parent.document.getElementById(fill_form).value == '') ? dimensions : ', ' + dimensions;
 			parent.document.getElementById(fill_form).value += dimensions;
-
 		}
 	}
 }
 
 initDraw(document.getElementById('canvas'));
 </script>
-
 </body>
 </html>

@@ -40,11 +40,11 @@
 		<h3>Upgrade</h3>
 		<% if [ -n "$ver" ]; then %>
 			<form action="fw-system.cgi" method="post">
-				<% field_checkbox "fw_kernel" "Upgrade kernel." %>
-				<% field_checkbox "fw_rootfs" "Upgrade rootfs." %>
-				<% field_checkbox "fw_reboot" "Restart after upgrade." %>
-				<% field_checkbox "fw_reset" "Reset firmware." %>
-				<% field_checkbox "fw_force" "Reflash installed version." %>
+				<% field_switch "fw_kernel" "Upgrade kernel." "eval" %>
+				<% field_switch "fw_rootfs" "Upgrade rootfs." "eval" %>
+				<% field_switch "fw_reboot" "Restart after upgrade." "eval" %>
+				<% field_switch "fw_reset" "Reset firmware." "eval" %>
+				<% field_switch "fw_force" "Reflash installed version." "eval" %>
 				<% button_submit "Install update from GitHub" "warning" %>
 			</form>
 		<% else %>

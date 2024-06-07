@@ -1,24 +1,25 @@
-<h3>Visual editor</h3>
-<div class="row justify-content-center">
-	<div class="col col-md-auto">
-		Region excluded from detection (red)
+<div class="col-10" id="_row">
+	<h3>Visual editor</h3>
+	<div class="row mb-3 align-items-center">
+		<div class="col-auto">
+			Region excluded from detection (red)
+		</div>
+
+		<div class="col-auto">
+			<span class="form-check form-switch"><input type="checkbox" id="_fill_field" name="_fill_field_selector" value="true" class="form-check-input" checked="true"></span>
+		</div>
+
+		<div class="col-auto">
+			Region of interest (green)
+		</div>
+
+		<div class="col">
+			<input type="button" class="btn btn-primary btn-sm" onclick="_clear();" value="Clear all regions">
+		</div>
 	</div>
-	<div class="col col-md-auto">
-		<span class="form-check form-switch"><input type="checkbox" id="_fill_field" name="_fill_field_selector" value="true" class="form-check-input" checked="true" ></span>
-	</div>
-	<div class="col col-md-auto">
-		Region of interest (green)
-	</div>
+
 	<div class="col">
-	</div>
-	<div class="col col-auto">
-		<input type="button" class="btn btn-primary btn-sm" onclick="_clear();" value="Clear all regions">
-	</div>
-</div>
-<p></p>
-<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4" id="_row">
-	<div class="col">
-		<iframe id="_iframe" src="/m/img.html" frameborder="0" style="padding: 0px; margin: 0px; border: 1px solid rgb(76, 96, 216); width: 437.6px; height: 257.444px;"> </iframe>
+		<iframe id="_iframe" src="/m/img.html" frameborder="0" style="padding: 0px; margin: 0px; border: 1px solid rgb(76, 96, 216);"></iframe>
 	</div>
 </div>
 

@@ -22,7 +22,11 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				touch /tmp/system-reboot
 				redirect_back "success" "MAC address updated."
 			else
-				redirect_back "warning" "Invalid MAC address: ${POST_mac_address}"
+				if [ -z "$POST_mac_address" ]; then
+					redirect_back "warning" "Empty MAC address."
+				else
+					redirect_back "warning" "Invalid MAC address: ${POST_mac_address}"
+				fi
 			fi
 			;;
 

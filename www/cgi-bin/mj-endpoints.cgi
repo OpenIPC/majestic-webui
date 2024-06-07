@@ -15,7 +15,7 @@
 			<dt class="cp2cb">http://<%= $network_address %>/mjpeg</dt>
 			<dd>MJPEG video stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/video.mp4</dt>
-			<dd>MP4 video stream.</dd>		
+			<dd>MP4 video stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/hls</dt>
 			<dd>HLS live-streaming in web browser.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/mjpeg.html</dt>
@@ -78,6 +78,8 @@
 			<dd>Default Majestic config in JSON format.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/api/v1/config.schema.json</dt>
 			<dd>Available Majestic settings in JSON format.</dd>
+			<dt><a href="https://github.com/openipc/wiki/blob/master/en/majestic-config.md">https://github.com/openipc/wiki</a></dt>
+			<dd>Available Majestic settings in YAML format.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/metrics</dt>
 			<dd>Node exporter for <a href="https://prometheus.io">Prometheus</a>.</dd>
 		</dl>

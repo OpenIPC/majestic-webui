@@ -120,7 +120,7 @@ Pragma: no-cache
 <% if [ "$(cat /etc/TZ)" != "$TZ" ] || [ -e /tmp/system-reboot ]; then %>
 <div class="alert alert-danger">
 	<h3>Warning.</h3>
-	<p>System settings have been updated, restart the system to apply changes.</p>
+	<p>System settings have been updated, restart to apply pending changes.</p>
 	<span class="d-flex gap-3">
 		<a class="btn btn-danger" href="fw-restart.cgi">Restart camera</a>
 	</span>

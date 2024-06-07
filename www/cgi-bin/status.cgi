@@ -32,8 +32,6 @@
 				<dt>U-Boot</dt>
 				<dd><%= $uboot_version %></dd>
 			<% fi %>
-			<dt>Time</dt>
-			<dd><%= $(date -d @$fw_time) %></dd>
 		</dl>
 	</div>
 </div>
