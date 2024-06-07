@@ -56,14 +56,16 @@ fi
 	eval $(cat $(get_schema) | jsonfilter -e "section=@.properties")
 	for key in $section; do
 		locale=$(eval echo \$mj_${key})
-		c="class=\"nav-link\""
-		[ "$label" = "$key" ] && title="$locale" && c="class=\"nav-link active\" aria-current=\"true\""
-		echo "<li class=\"nav-item\"><a ${c} href=\"mj-settings.cgi?tab=${key}\">${locale}</a></li>"
+		if [ -n "$locale" ]; then
+			c="class=\"nav-link\""
+			[ "$label" = "$key" ] && title="$locale" && c="class=\"nav-link active\" aria-current=\"true\""
+			echo "<li class=\"nav-item\"><a ${c} href=\"mj-settings.cgi?tab=${key}\">${locale}</a></li>"
+		fi
 	done
 	%>
 </ul>
 
-<% if json_is_a "properties" "object"; then %>
+<% if [ -n "$title" ]; then %>
 
 <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
 	<div class="col">
