@@ -36,7 +36,7 @@
 	fi
 
 	if [ -z "$error" ]; then
-		_c="mkfs.exfat $card_partition"
+		_c="mkfs.vfat $card_partition"
 		_o="${_o}\n${_c}\n$($_c 2>&1)"
 		[ $? -ne 0 ] && error="Cannot format SDcard partition."
 	fi
@@ -48,7 +48,7 @@
 	fi
 
 	if [ -z "$error" ]; then
-		_c="mount -t exfat $card_partition $mount_point"
+		_c="mount -t vfat $card_partition $mount_point"
 		_o="${_o}\n${_c}\n$($_c 2>&1)"
 		[ $? -ne 0 ] && error="Cannot remount SDcard partition."
 	fi
