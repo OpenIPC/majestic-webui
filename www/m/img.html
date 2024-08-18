@@ -21,7 +21,7 @@ const RED = 'rgba(255,0,0,0.5)';
 
 function _motion_size() {
 	const xhr = new XMLHttpRequest();
-	xhr.open("GET", "/api/v1/config.json", false); // synchronous
+	xhr.open("GET", "/api/v1/config.json", false);
 	xhr.send(null);
 	return JSON.parse(xhr.responseText).video0.size.split('x');
 }
@@ -54,7 +54,6 @@ function initDraw(canvas) {
 	};
 
 	let element = null;
-
 	function draw_rectangle(s, color) {
 		e= document.createElement('div');
 		e.className = 'rectangle'
@@ -68,10 +67,6 @@ function initDraw(canvas) {
 	// draw current regions
 	for (v of (parent.document.getElementById('_motionDetect_roi').value).split(', ')) {
 		draw_rectangle (v.split('x'), GRN);
-	}
-
-	for (v of (parent.document.getElementById('_motionDetect_skipIn').value).split(', ')) {
-		draw_rectangle (v.split('x'), RED);
 	}
 
 	canvas.onmousemove = function (e) {
@@ -97,11 +92,7 @@ function initDraw(canvas) {
 			element.style.left = (mouse.x - mouse.startX < 0) ? mouse.x + 'px' : mouse.startX + 'px';
 			canvas.appendChild(element)
 			canvas.style.cursor = "crosshair";
-			if (parent.document.getElementById('_fill_field').checked == true) {
-				element.style.background = GRN;
-			} else {
-				element.style.background = RED;
-			}
+			element.style.background = GRN;
 		} else {
 			canvas.style.cursor = "default";
 			let rect = element.getBoundingClientRect(),
@@ -110,9 +101,9 @@ function initDraw(canvas) {
 				rW = Math.round((rect.right - rect.left) * COEFF),
 				rH = Math.round((rect.bottom - rect.top) * COEFF);
 			rect = element = null;
-			let fill_form = (parent.document.getElementById('_fill_field').checked == true) ? '_motionDetect_roi' : '_motionDetect_skipIn';
+			let fill_form = '_motionDetect_roi';
 			let dimensions = rX + 'x' + rY + 'x' + rW + 'x' + rH;
-			dimensions = (parent.document.getElementById(fill_form).value == '') ? dimensions : ', ' + dimensions;
+			dimensions = (parent.document.getElementById(fill_form).value == '') ? dimensions : ',' + dimensions;
 			parent.document.getElementById(fill_form).value += dimensions;
 		}
 	}
