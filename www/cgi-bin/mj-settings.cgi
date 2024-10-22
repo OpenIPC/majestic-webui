@@ -86,6 +86,7 @@ fi
 
 					param="_${label}_${key}"
 					setting=${param//_/.}
+					[ -e j/exclude.lst ] && grep -q "$setting" j/exclude.lst && continue
 					value=$(yaml-cli -g "$setting")
 					default=${value:-$(echo "$json_conf" | jsonfilter -e "@$setting")}
 					config="${config}\n$(echo $setting: $value)"
