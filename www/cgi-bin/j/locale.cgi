@@ -18,4 +18,4 @@ mj_system=System
 mj_video0=Video0
 mj_video1=Video1
 mj_watchdog=Watchdog
-mj_youtube=Youtube
+# mj_youtube=Youtube
