@@ -22,11 +22,12 @@ else
 	telegram_message="$(echo "$telegram_caption" | sed "s/%hostname/$(hostname -s)/;s/%datetime/$(date +"%F %T")/;s/%soctemp/$(ipcinfo --temp)/")"
 fi
 
+filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
 if [ "$telegram_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
-	snapshot=/tmp/snapshot.heif
+	snapshot=/tmp/${filename}.heif
 	wget -q -T1 localhost/image.heif -O "$snapshot"
 else
-	snapshot=/tmp/snapshot.jpg
+	snapshot=/tmp/${filename}.jpg
 	wget -q -T1 localhost/image.jpg -O "$snapshot"
 fi
 
@@ -60,5 +61,6 @@ fi
 
 echo "$command"
 eval "$command"
+rm -f "$snapshot"
 
 exit 0
