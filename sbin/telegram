@@ -61,5 +61,5 @@ fi
 
 echo "$command"
 eval "$command"
-
+rm -f $snapshot
 exit 0
