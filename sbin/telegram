@@ -21,6 +21,7 @@ if [ -z "$telegram_caption" ]; then
 else
 	telegram_message="$(echo "$telegram_caption" | sed "s/%hostname/$(hostname -s)/;s/%datetime/$(date +"%F %T")/;s/%soctemp/$(ipcinfo --temp)/")"
 fi
+
 filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
 if [ "$telegram_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
 	snapshot=/tmp/${filename}.heif
