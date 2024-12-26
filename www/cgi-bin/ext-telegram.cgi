@@ -3,7 +3,15 @@
 <%
 page_title="Telegram"
 config_file=/etc/webui/telegram.conf
-params="enabled token channel interval caption crontab document heif proxy"
+params="enabled token channel thread_id interval caption crontab document heif proxy"
+
+# webhook for remote send, returns [t|f]
+if [ "$GET_send" = "image" ]; then
+	echo "Content-type: text/html; charset=UTF-8"
+	echo
+	telegram | grep -v curl | jsonfilter -e '@.ok'
+	exit 0
+fi
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	for p in $params; do
@@ -38,6 +46,12 @@ fi
 %>
 
 <%in p/header.cgi %>
+	<div class="alert alert-info">
+		<dl>
+			<dt class="cp2cb">http://root:12345@<%= $network_address %>/cgi-bin/ext-telegram.cgi?send=image</dt>
+			<dd>Use this webhook url for remote call to send image.</dd>
+		</dl>
+	</div>
 
 <form action="<%= $SCRIPT_NAME %>" method="post">
 	<% field_switch "telegram_enabled" "Enable Telegram" "eval" %>
@@ -45,6 +59,7 @@ fi
 		<div class="col">
 			<% field_text "telegram_token" "Token" "Telegram bot authentication token." %>
 			<% field_text "telegram_channel" "Channel" "Channel to post the images to." %>
+			<% field_text "telegram_thread_id" "Message_thread_id" "Topic to post the images to. (for forum supergroups only)" %>
 			<% field_string "telegram_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
 			<% field_text "telegram_caption" "Caption" "Location or short description." %>
 		</div>

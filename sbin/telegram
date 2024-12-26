@@ -47,6 +47,9 @@ if [ "$openwall_proxy_enabled" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; the
 fi
 
 command="${command} -F 'chat_id=${telegram_channel}'"
+if [ -n "$telegram_thread_id" ]; then
+	command="${command} -F 'message_thread_id=${telegram_thread_id}'"
+fi 
 command="${command} --url https://api.telegram.org/bot${telegram_token}"
 
 if [ "$telegram_document" = "true" ]; then
