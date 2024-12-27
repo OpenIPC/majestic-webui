@@ -74,7 +74,7 @@ fi
 			<p>2. run:<br>
 			<b>cd / && zcat /tmp/_backup_.tgz | tar x --overwrite && sh /etc/webui/backup.conf</b></p>
 			<p class="text-danger">This action removes all current settings!</p>
-			<a class="btn btn-danger disabled" href="ext-backuper.cgi?backup=restore">Restore from Backup</a>
+			<!--<a class="btn btn-danger disabled" href="ext-backuper.cgi?backup=restore">Restore from Backup</a>-->
 		</div>
 	</div>
 
