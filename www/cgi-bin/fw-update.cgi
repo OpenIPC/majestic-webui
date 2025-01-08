@@ -14,7 +14,7 @@
 	fi
 
 	if [ -n "$ver" ]; then
-		fw_date=$(date -D "%a, %d %b %Y %T GMT" +"2.4.%m.%d" --date "$ver")
+		fw_date=$(date -D "%a, %d %b %Y %T GMT" +"$(date +%y | sed 's/.$/.&/').%m.%d" --date "$ver")
 	else
 		fw_date="<span class=\"text-danger\">- no access to GitHub -</span>"
 	fi
