@@ -12,6 +12,8 @@
 			<dd>RTSP main stream.</dd>
 			<dt class="cp2cb">rtsp://root:12345@<%= $network_address %>/stream=1</dt>
 			<dd>RTSP sub stream.</dd>
+			<dt class="cp2cb">rtsp://root:12345@<%= $network_address %>/stream=2</dt>
+			<dd>RTSP JPEG stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/mjpeg</dt>
 			<dd>MJPEG video stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/video.mp4</dt>
