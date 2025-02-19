@@ -31,7 +31,7 @@ fi
 			ex "cat /etc/rc.local"
 		%>
 		<div class="row">
-			<p><a class="btn btn-secondary" href="fw-editor.cgi?f=<%= /etc/rc.local %>">Edit Boot Script</a></p>
+			<p><a class="btn btn-secondary" href="fw-editor.cgi?f=<%= /etc/rc.local %>">Edit Boot script</a></p>
 		</div>
 	</div>
 	<div class="col">
@@ -39,7 +39,7 @@ fi
 			ex "cat /etc/wireguard.conf"
 		%>
 		<div class="row">
-			<p><a class="btn btn-secondary" href="fw-editor.cgi?f=<%= /etc/wireguard.conf %>">Edit WireGuard Configuration</a></p>
+			<p><a class="btn btn-secondary" href="fw-editor.cgi?f=<%= /etc/wireguard.conf %>">Edit WireGuard configuration</a></p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<input type="hidden" name="action" value="reload">
 				<% button_submit "Reload WireGuard configuration" "success" %>
