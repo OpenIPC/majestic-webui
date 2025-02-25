@@ -422,9 +422,8 @@ update_caminfo() {
 	mtd_size=$(grep -E "nor|nand" $(ls /sys/class/mtd/mtd*/type) | sed -E "s|type.+|size|g")
 	flash_size=$(awk '{sum+=$1} END{print sum/1024/1024}' $mtd_size)
 
-	sensor_ini=$(ipcinfo --long-sensor)
 	sensor=$(fw_printenv -n sensor)
-	[ -z "$sensor" ] && sensor=$(echo $sensor_ini | cut -d_ -f1)
+	[ -z "$sensor" ] && sensor="unknown"
 
 	soc_vendor=$(ipcinfo --vendor)
 	soc_family=$(ipcinfo --family)
