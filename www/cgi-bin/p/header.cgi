@@ -72,6 +72,7 @@ Pragma: no-cache
 							<li><a class="dropdown-item" href="ext-tunnel.cgi">Tunnel</a></li>
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="ext-proxy.cgi">Proxy</a></li>
+							<li><a class="dropdown-item" href="ext-wireguard.cgi">WireGuard</a></li>
 						</ul>
 					</li>	
 					<li class="nav-item"><a class="nav-link" href="preview.cgi">Preview</a></li>
