@@ -13,7 +13,7 @@
 			<dt>Family</dt>
 			<dd><%= $soc_family %></dd>
 			<dt>Sensor</dt>
-			<dd><%= $sensor_ini %></dd>
+			<dd><%= $sensor %></dd>
 			<dt>Flash</dt>
 			<dd><%= $flash_size %> MB</dd>
 		</dl>

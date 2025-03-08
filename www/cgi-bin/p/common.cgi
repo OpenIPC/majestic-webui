@@ -471,7 +471,7 @@ update_caminfo() {
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		sensor sensor_ini soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
+		sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
 	rm -f ${sysinfo_file}
 
 	local v
