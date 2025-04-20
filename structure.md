@@ -3,6 +3,7 @@
 ```
 ├── LICENSE
 ├── README.md
+├── structure.md                          # General list of files in the majestic-webui project and their description
 ├── sbin
 │   ├── openwall
 │   ├── setnetwork
@@ -23,6 +24,7 @@
     │   ├── ext-proxy.cgi
     │   ├── ext-telegram.cgi
     │   ├── ext-tunnel.cgi
+    │   ├── fpv-wfb.cgi                   # WFB-NG editor (backwards compat with legacy wfb.conf)
     │   ├── fw-editor.cgi
     │   ├── fw-interface.cgi
     │   ├── fw-network.cgi
@@ -38,6 +40,7 @@
     │   ├── info-overlay.cgi
     │   ├── j
     │   │   ├── locale.cgi
+    │   │   ├── locale_fpv.cgi            # FPV version of majestic menu
     │   │   ├── pulse.cgi
     │   │   ├── run.cgi
     │   │   └── time.cgi
@@ -49,6 +52,7 @@
     │   │   ├── common.cgi
     │   │   ├── footer.cgi
     │   │   ├── header.cgi
+    │   │   ├── header_fpv.cgi            # FPV version of general menu
     │   │   ├── motor.cgi
     │   │   └── roi.cgi
     │   ├── preview.cgi
