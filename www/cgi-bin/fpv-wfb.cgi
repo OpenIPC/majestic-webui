@@ -1,5 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
+<%in p/fpv_common.cgi %>
 <%
 set -x
 
@@ -8,9 +9,6 @@ set -x
 page_title="WFB Settings"
 label="$GET_tab"
 [ -z "$label" ] && label="wireless"
-
-# Source the config utilities to handle either YAML or legacy configs
-. /usr/lib/openipc/config-utils.sh
 
 # Check if we're using YAML or legacy configuration
 using_yaml_config=0
