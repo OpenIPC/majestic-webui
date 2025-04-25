@@ -765,6 +765,5 @@ if is_using_yaml; then
     config_format="YAML configuration format"
 fi
 
-check_password
 
 %>
