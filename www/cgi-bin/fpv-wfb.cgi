@@ -430,9 +430,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             <% field_select_tooltip "mcs_index" "MCS Index" "$wfb_mcs_index" "MCS (Modulation and Coding Scheme) index determines bitrate and robustness. Lower values are more reliable in poor conditions but have lower throughput." 1 10 1 %>
 
-            <% if [ "$using_yaml_config" = "1" ]; then %>
             <% field_select_tooltip "tun_index" "TUN Index" "$wfb_tun_index" "Tunnel interface index for wifibroadcast. Multiple interfaces allow multiple video streams. Most setups use index 1 for the primary video." 1 10 1 %>
-            <% fi %>
 
             <% field_select_tooltip "fec_k" "FEC K" "$wfb_fec_k" "Forward Error Correction K parameter - number of data packets per FEC block. Lower values provide better redundancy but lower efficiency." 1 15 1 %>
             
@@ -446,22 +444,10 @@ document.addEventListener('DOMContentLoaded', function() {
             
         <%  elif [ "$label" = "telemetry" ]; then %>
             <h3>Telemetry</h3>
-            <% if [ "$using_yaml_config" = "1" ]; then %>
+
             <% field_string_tooltip "router" "Router" "$wfb_router" "Telemetry router type: mavfwd (basic forwarding), mavrouter (routing between interfaces), msposd (MultiWii Serial Protocol for OSD), or ground" "mavfwd mavrouter msposd ground" %>
-            <% else %>
-            <!-- For legacy config, we need to show the string values but save numeric values -->
-            <p class="select" id="router_wrap">
-                <% tooltip_label "router" "Router" "Telemetry router type: mavfwd (basic forwarding), mavrouter (routing between interfaces), or msposd (MultiWii Serial Protocol for OSD" %>
-                <select class="form-select" id="router" name="router">
-                    <option value="mavfwd" <% [ "$wfb_router" = "mavfwd" ] && echo "selected" %>>mavfwd</option>
-                    <option value="mavrouter" <% [ "$wfb_router" = "mavrouter" ] && echo "selected" %>>mavrouter</option>
-                    <option value="msposd" <% [ "$wfb_router" = "msposd" ] && echo "selected" %>>msposd</option>
-                    <option value="ground" <% [ "$wfb_router" = "ground" ] && echo "selected" %>>ground</option>
-                </select>
-            </p>
-            <% fi %>
             
-            <% field_string_tooltip "serial" "Serial Port" "$wfb_serial" "Serial port for telemetry data (e.g., ttyS0, ttyS1, ttyS2, ttyAMA0). Check your hardware documentation for the correct port." "" %>
+            <%# <% field_string_tooltip "serial" "Serial Port" "$wfb_serial" "Serial port for telemetry data (e.g., ttyS0, ttyS1, ttyS2, ttyAMA0). Check your hardware documentation for the correct port." "" %> %>
             
             <p class="select" id="serial_port_wrap">
                 <% tooltip_label "serial_port" "Serial Port" "Serial port for telemetry data (e.g., ttyS0, ttyS1, ttyS2, ttyAMA0). Check your hardware documentation for the correct port." %>
@@ -470,6 +456,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <option value="ttyS1" <% [ "$wfb_serial" = "ttyS1" ] && echo "selected" %>>ttyS1</option>
                     <option value="ttyS2" <% [ "$wfb_serial" = "ttyS2" ] && echo "selected" %>>ttyS2</option>
                     <option value="ttyAMA0" <% [ "$wfb_serial" = "ttyAMA0" ] && echo "selected" %>>ttyAMA0</option>
+                    <option value="ttyAMA0" <% [ "$wfb_serial" = "ttyAMA1" ] && echo "selected" %>>ttyAMA1</option>
                 </select>
             </p>
 
