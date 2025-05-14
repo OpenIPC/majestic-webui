@@ -1,4 +1,4 @@
-#!/usr/bin/haserl
+#!/usr/bin/haserl --upload-dir=/tmp --upload-limit=10000
 <%in p/common.cgi %>
 <% page_title="File Manager" %>
 <%
@@ -33,15 +33,46 @@
 		mkdir -p "$POST_dir/$POST_name" 2>/dev/null
 	elif [ "$action" = "newfile" ] && [ -n "$POST_dir" ] && [ -n "$POST_name" ]; then
 		touch "$POST_dir/$POST_name" 2>/dev/null
+	elif [ "$action" = "upload" ] && [ -n "$POST_dir" ]; then
+		# Improved file upload handling
+		upload_successful="false"
+		upload_filename=""
+		
+		# Debug information for upload
+		echo "<!-- Debug: Upload attempted to directory $POST_dir -->" >/dev/null
+		echo "<!-- Debug: FORM_MAX_FILE_COUNT = $FORM_MAX_FILE_COUNT -->" >/dev/null
+		
+		# Check if we have uploaded files
+		if [ "${HASERL_count_files:-0}" -gt 0 ]; then
+			# Process all uploaded files
+			for i in $(seq 0 $((${HASERL_count_files:-0} - 1))); do
+				varname="HASERL_${i}_name"
+				filepath="HASERL_${i}_path"
+				filename="${!varname}"
+				temppath="${!filepath}"
+				
+				# Debug info
+				echo "<!-- Debug: Found file $filename at $temppath -->" >/dev/null
+				
+				if [ -n "$filename" ] && [ -n "$temppath" ] && [ -f "$temppath" ]; then
+					# Move file to destination
+					if mv "$temppath" "$POST_dir/$filename" 2>/dev/null; then
+						upload_successful="true"
+						upload_filename="$filename"
+					fi
+				fi
+			done
+		fi
+		
+		# Set status for UI feedback
+		if [ "$upload_successful" = "true" ]; then
+			upload_status="success"
+		else
+			upload_status="failed"
+		fi
 	elif [ "$action" = "rename" ] && [ -n "$POST_path" ] && [ -n "$POST_newname" ]; then
 		dir=$(dirname "$POST_path")
 		mv "$POST_path" "$dir/$POST_newname" 2>/dev/null
-	elif [ "$action" = "upload" ] && [ -n "$POST_dir" ]; then
-		# Basic file upload handling
-		while [ -n "$HASERL_uploadfile_0" ]; do
-			mv "$HASERL_uploadfile_0_path" "$POST_dir/$HASERL_uploadfile_0_name" 2>/dev/null
-			break # Only handle one file for simplicity
-		done
 	fi
 
 	# Navigation
@@ -89,6 +120,18 @@
 	elif [ "$delete_status" = "failed" ]; then
 		echo "<div class=\"alert alert-danger alert-dismissible fade show\" role=\"alert\">"
 		echo "  Failed to delete file or directory. Check permissions."
+		echo "  <button type=\"button\" class=\"btn-close\" data-bs-dismiss=\"alert\" aria-label=\"Close\"></button>"
+		echo "</div>"
+	fi
+	
+	if [ "$upload_status" = "success" ]; then 
+		echo "<div class=\"alert alert-success alert-dismissible fade show\" role=\"alert\">"
+		echo "  File '$upload_filename' uploaded successfully."
+		echo "  <button type=\"button\" class=\"btn-close\" data-bs-dismiss=\"alert\" aria-label=\"Close\"></button>"
+		echo "</div>"
+	elif [ "$upload_status" = "failed" ]; then
+		echo "<div class=\"alert alert-danger alert-dismissible fade show\" role=\"alert\">"
+		echo "  Failed to upload file. Check permissions and file size."
 		echo "  <button type=\"button\" class=\"btn-close\" data-bs-dismiss=\"alert\" aria-label=\"Close\"></button>"
 		echo "</div>"
 	fi
