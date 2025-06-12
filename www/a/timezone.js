@@ -280,7 +280,7 @@ const TZ = [
 	{n:'Asia/Taipei',v:'CST-8'},
 	{n:'Asia/Tashkent',v:'<+05>-5'},
 	{n:'Asia/Tbilisi',v:'<+04>-4'},
-	{n:'Asia/Tehran',v:'<+0330>-3:30<+0430>,J79/24,J263/24'},
+	{n:'Asia/Tehran',v:'IRST-3:30'},
 	{n:'Asia/Thimphu',v:'<+06>-6'},
 	{n:'Asia/Tokyo',v:'JST-9'},
 	{n:'Asia/Tomsk',v:'<+07>-7'},
