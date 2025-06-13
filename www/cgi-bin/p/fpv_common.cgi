@@ -16,9 +16,6 @@ CONFIG_DEBUG=${CONFIG_DEBUG:-0}
 
 # Config file locations
 WFB_YAML="/etc/wfb.yaml"
-WFB_CONF="/etc/wfb.conf"
-TELEMETRY_CONF="/etc/telemetry.conf"
-DATALINK_CONF="/etc/datalink.conf"
 MAJESTIC_YAML="/etc/majestic.yaml"
 
 # Ensure directory exists
@@ -45,16 +42,7 @@ ensure_directory() {
     fi
 }
 
-# Check if we're using the YAML or legacy configuration
-is_using_yaml() {
-    if [ -f "$WFB_YAML" ]; then
-        log_debug "Using YAML configuration (wfb.yaml exists)"
-        return 0  # True in shell
-    else
-        log_debug "Using legacy configuration (wfb.conf)"
-        return 1  # False in shell
-    fi
-}
+
 
 # Get config value - automatically determines source and handles both YAML and conf formats
 get_config_value() {
@@ -64,42 +52,9 @@ get_config_value() {
     
     log_debug "Getting config value for key: $key"
     
-    if is_using_yaml; then
-        # Get from YAML
-        value=$(yaml_get_value "$WFB_YAML" "$key")
-    else
-        # Try to get from legacy conf files
-        case "$key" in
-            # WFB settings
-            unit|wlan|region|channel|frequency|txpower|driver_txpower_override|bandwidth|stbc|ldpc|mcs_index|stream|link_id|udp_port|rcv_buf|frame_type|fec_k|fec_n|pool_timeout|guard_interval)
-                value=$(legacy_get_value "$WFB_CONF" "$key")
-                ;;
-                
-            # Telemetry settings
-            serial|baud|router|stream_rx|stream_tx|port_rx|port_tx|one_way|aggregate|channels|fps|ahi)
-                value=$(legacy_get_value "$TELEMETRY_CONF" "$key")
-                ;;
-                
-            # Datalink settings
-            daemon|telemetry|tunnel|usb_modem|gs_ipaddr|gs_port|use_zt|zt_netid)
-                value=$(legacy_get_value "$DATALINK_CONF" "$key")
-                ;;
-                
-            # Majestic settings - these would normally come from majestic.yaml but covering legacy case
-            bitrate|resolution|*)
-                # Default case - try each file
-                value=$(legacy_get_value "$WFB_CONF" "$key")
-                
-                if [ -z "$value" ]; then
-                    value=$(legacy_get_value "$TELEMETRY_CONF" "$key")
-                fi
-                
-                if [ -z "$value" ]; then
-                    value=$(legacy_get_value "$DATALINK_CONF" "$key")
-                fi
-                ;;
-        esac
-    fi
+    # Get from YAML
+    value=$(yaml_get_value "$WFB_YAML" "$key")
+
     
     # Return the found value or default
     if [ -n "$value" ]; then
@@ -116,33 +71,9 @@ set_config_value() {
     
     log_debug "Setting config value for key: $key = $value"
     
-    if is_using_yaml; then
-        # Set in YAML
-        yaml_set_value "$WFB_YAML" "$key" "$value"
-    else
-        # Set in legacy conf files
-        case "$key" in
-            # WFB settings
-            unit|wlan|region|channel|frequency|txpower|driver_txpower_override|bandwidth|stbc|ldpc|mcs_index|stream|link_id|udp_port|rcv_buf|frame_type|fec_k|fec_n|pool_timeout|guard_interval)
-                legacy_set_value "$WFB_CONF" "$key" "$value"
-                ;;
-                
-            # Telemetry settings
-            serial|baud|router|stream_rx|stream_tx|port_rx|port_tx|one_way|aggregate|channels|fps|ahi)
-                legacy_set_value "$TELEMETRY_CONF" "$key" "$value"
-                ;;
-                
-            # Datalink settings
-            daemon|telemetry|tunnel|usb_modem|gs_ipaddr|gs_port|use_zt|zt_netid)
-                legacy_set_value "$DATALINK_CONF" "$key" "$value"
-                ;;
-                
-            # Majestic settings or unknown - add to WFB
-            *)
-                legacy_set_value "$WFB_CONF" "$key" "$value"
-                ;;
-        esac
-    fi
+    # Set in YAML
+    yaml_set_value "$WFB_YAML" "$key" "$value"
+
 }
 
 # Check if yaml-cli exists
@@ -211,38 +142,7 @@ yaml_set_value() {
     fi
 }
 
-# Read a value from legacy conf file (key=value format)
-legacy_get_value() {
-    local file="$1"
-    local key="$2"
-    
-    [ -f "$file" ] || return 1
-    
-    # Handle comments and extract value
-    grep "^[[:space:]]*$key=" "$file" 2>/dev/null | \
-        grep -v "^#" | cut -d'=' -f2- | head -n 1
-}
 
-# Set a value in legacy conf file (key=value format)
-legacy_set_value() {
-    local file="$1"
-    local key="$2"
-    local value="$3"
-    
-    # Create file if it doesn't exist
-    if [ ! -f "$file" ]; then
-        ensure_directory "$(dirname "$file")"
-        touch "$file"
-    fi
-    
-    if grep -q "^[[:space:]]*$key=" "$file" 2>/dev/null; then
-        # Update existing value
-        sed -i "s|^[[:space:]]*$key=.*|$key=$value|" "$file"
-    else
-        # Add new key-value pair
-        echo "$key=$value" >> "$file"
-    fi
-}
 
 # Apply preset file
 apply_preset_file() {
@@ -302,19 +202,7 @@ apply_preset_file() {
             fi
             ;;
             
-        conf)
-            # For conf files, apply line by line
-            while IFS='=' read -r key value; do
-                # Skip empty lines and comments
-                [ -z "$key" ] || [ "${key:0:1}" = "#" ] && continue
-                
-                # Clean up key
-                key=$(echo "$key" | tr -d ' ')
-                
-                # Set the value
-                legacy_set_value "$target_file" "$key" "$value"
-            done < "$preset_file"
-            ;;
+    
             
         *)
             log_debug "Unknown file type: $file_type"
@@ -331,46 +219,39 @@ apply_preset() {
     
     log_debug "Applying preset from directory: $preset_dir"
     
-    # Check if using YAML or legacy config and apply appropriate files
-    if is_using_yaml; then
-        # Apply YAML configs
-        [ -f "$preset_dir/wfb.yaml" ] && apply_preset_file "$preset_dir/wfb.yaml" "$WFB_YAML" "yaml"
-        [ -f "$preset_dir/majestic.yaml" ] && apply_preset_file "$preset_dir/majestic.yaml" "$MAJESTIC_YAML" "yaml"
+    # Apply YAML configs
+    [ -f "$preset_dir/wfb.yaml" ] && apply_preset_file "$preset_dir/wfb.yaml" "$WFB_YAML" "yaml"
+    [ -f "$preset_dir/majestic.yaml" ] && apply_preset_file "$preset_dir/majestic.yaml" "$MAJESTIC_YAML" "yaml"
+    
+    # If the preset only has legacy files but we're in YAML mode,
+    # we need to apply the legacy files to maintain preset functionality
+    if [ ! -f "$preset_dir/wfb.yaml" ] && [ -f "$preset_dir/wfb.conf" ]; then
+        log_debug "Preset contains only legacy files but system uses YAML format"
         
-        # If the preset only has legacy files but we're in YAML mode,
-        # we need to apply the legacy files to maintain preset functionality
-        if [ ! -f "$preset_dir/wfb.yaml" ] && [ -f "$preset_dir/wfb.conf" ]; then
-            log_debug "Preset contains only legacy files but system uses YAML format"
-            
-            # Create a temporary YAML file to hold the converted settings
-            tmp_yaml="/tmp/wfb_preset_temp.yaml"
-            > "$tmp_yaml"
-            
-            # Process legacy config files and extract settings to temp YAML
-            for conf_file in "$preset_dir/wfb.conf" "$preset_dir/telemetry.conf" "$preset_dir/datalink.conf"; do
-                if [ -f "$conf_file" ]; then
-                    log_debug "Processing legacy file for YAML mode: $conf_file"
-                    while IFS='=' read -r key value; do
-                        # Skip empty lines and comments
-                        [ -z "$key" ] || [ "${key:0:1}" = "#" ] && continue
-                        # Clean up key
-                        key=$(echo "$key" | tr -d ' ')
-                        # Add to temp YAML
-                        yaml_set_value "$tmp_yaml" "$key" "$value"
-                    done < "$conf_file"
-                fi
-            done
-            
-            # Apply the temp YAML to the real YAML config
-            apply_preset_file "$tmp_yaml" "$WFB_YAML" "yaml"
-            rm -f "$tmp_yaml"
-        fi
-    else
-        # Apply legacy configs
-        [ -f "$preset_dir/wfb.conf" ] && apply_preset_file "$preset_dir/wfb.conf" "$WFB_CONF" "conf"
-        [ -f "$preset_dir/telemetry.conf" ] && apply_preset_file "$preset_dir/telemetry.conf" "$TELEMETRY_CONF" "conf"
-        [ -f "$preset_dir/datalink.conf" ] && apply_preset_file "$preset_dir/datalink.conf" "$DATALINK_CONF" "conf"
+        # Create a temporary YAML file to hold the converted settings
+        tmp_yaml="/tmp/wfb_preset_temp.yaml"
+        > "$tmp_yaml"
+        
+        # Process legacy config files and extract settings to temp YAML
+        for conf_file in "$preset_dir/wfb.conf" "$preset_dir/telemetry.conf" "$preset_dir/datalink.conf"; do
+            if [ -f "$conf_file" ]; then
+                log_debug "Processing legacy file for YAML mode: $conf_file"
+                while IFS='=' read -r key value; do
+                    # Skip empty lines and comments
+                    [ -z "$key" ] || [ "${key:0:1}" = "#" ] && continue
+                    # Clean up key
+                    key=$(echo "$key" | tr -d ' ')
+                    # Add to temp YAML
+                    yaml_set_value "$tmp_yaml" "$key" "$value"
+                done < "$conf_file"
+            fi
+        done
+        
+        # Apply the temp YAML to the real YAML config
+        apply_preset_file "$tmp_yaml" "$WFB_YAML" "yaml"
+        rm -f "$tmp_yaml"
     fi
+    
     
     return 0
 }
@@ -476,7 +357,7 @@ get_setting_description() {
             echo "Serial baudrate"
             ;;
         router)
-            echo "Telemetry router type (0=mavfwd, 1=mavlink-routerd, 2=msposd)"
+            echo "Telemetry router type (mavfwd, mavlink-routerd, msposd, ground)"
             ;;
         stream_rx)
             echo "Telemetry receiving stream ID"
@@ -759,12 +640,6 @@ display_system_actions() {
     echo "</form>"
 }
 
-# Determine if using YAML or legacy format
-config_format="Legacy configuration format"
-if is_using_yaml; then
-    config_format="YAML configuration format"
-fi
 
-check_password
 
 %>
