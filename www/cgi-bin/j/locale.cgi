@@ -1,6 +1,5 @@
 #!/bin/sh
 mj_audio=Audio
-mj_cloud=Cloud
 mj_hls=HLS
 mj_image=Image
 mj_ipeye=IPEYE
@@ -18,4 +17,5 @@ mj_system=System
 mj_video0=Video0
 mj_video1=Video1
 mj_watchdog=Watchdog
+# mj_cloud=Cloud
 # mj_youtube=Youtube
