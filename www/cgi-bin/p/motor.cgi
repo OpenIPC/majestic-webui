@@ -19,9 +19,9 @@
 
 <script>
 function control(dir) {
-	let x = dir.includes("l") ? -1 : dir.includes("r") ? 1 : 0;
-	let y = dir.includes("d") ? -1 : dir.includes("u") ? 1 : 0;
-	fetch('/cgi-bin/j/run.cgi?web=' + btoa('motor ' + '<%= $ptz_support %> ' + x + ' ' + y));
+	let x = dir.includes("l") ? -5 : dir.includes("r") ? 5 : 0;
+	let y = dir.includes("d") ? -5 : dir.includes("u") ? 5 : 0;
+	fetch('/cgi-bin/j/run.cgi?web=' + btoa('gpio-motors ' + x + ' ' + y + ' 10'));
 }
 
 $$(".motor button").forEach(el => {

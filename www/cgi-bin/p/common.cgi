@@ -449,7 +449,7 @@ update_caminfo() {
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow | cut -d: -f2)
-	ptz_support=$(fw_printenv -n ptz)
+	ptz_support=$(fw_printenv -n gpio_motors)
 
 	# Network
 	network_interface=$(ip route | awk '/default/ {print $5}' | head -n1)
