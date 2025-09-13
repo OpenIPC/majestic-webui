@@ -58,7 +58,7 @@ fi
    <% field_text "wg_allowed" "Allowed IPs (e.g. 10.0.0.0/24)" %>
    <% field_text "wg_endpoint" "Peer Endpoint (IP:Port)" %>
    <% field_text "wg_alive" "Persistent Keepalive (e.g. 25)" %>
-   <% field_text "wg_address" "Address (e.g. 10.0.0.2/32)" %>
+   <% field_text "wg_address" "Address (e.g. 10.0.0.2/24)" %>
    <% button_submit "Save Changes" %>
   <% fi %>
  </form>
