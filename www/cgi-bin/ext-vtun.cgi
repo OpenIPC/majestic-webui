@@ -1,7 +1,7 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="Tunnel"
+page_title="VTun"
 conf_file=/tmp/vtund.conf
 env_host=$(fw_printenv -n vtun)
 
@@ -12,14 +12,14 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		rm -f "$conf_file"
 		fw_setenv vtun
 		sleep 1
-		redirect_to "$SCRIPT_NAME" "danger" "Tunnel is down"
+		redirect_to "$SCRIPT_NAME" "danger" "VTun is down"
 	fi
 
 	if [ -n "$POST_vtun_host" ]; then
 		fw_setenv vtun "$POST_vtun_host"
 		/etc/init.d/S98vtun start
 		sleep 1
-		redirect_to "$SCRIPT_NAME" "success" "Tunnel is up"
+		redirect_to "$SCRIPT_NAME" "success" "VTun is up"
 	fi
 fi
 %>
@@ -30,10 +30,10 @@ fi
 	<div class="col">
 	<% if [ -e "$conf_file" ]; then %>
 		<div class="alert alert-success">
-		<h4>Virtual Tunnel is up</h4>
-		<p>Use the following credentials to set up remote access via virtual tunnel:</p>
+		<h4>VTun is up</h4>
+		<p>Use the following credentials to set up remote access via VTun:</p>
 		<dl class="mb-0">
-			<dt>Tunnel ID</dt>
+			<dt>VTun ID</dt>
 			<dd><%= ${network_macaddr//:/} | tr a-z A-Z %></dd>
 			<dt>Password</dt>
 			<dd><% grep password $conf_file | xargs | cut -d' ' -f2 | sed 's/;$//' %>
@@ -47,7 +47,7 @@ fi
 			<% field_hidden "action" "reset" %>
 			<% button_submit "Reset configuration" %>
 		<% else %>
-			<% field_text "vtun_host" "Virtual Tunnel address" %>
+			<% field_text "vtun_host" "VTun address" %>
 			<% button_submit %>
 		<% fi %>
 	</form>
