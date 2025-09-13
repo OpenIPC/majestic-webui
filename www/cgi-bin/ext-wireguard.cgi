@@ -21,7 +21,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
    fw_setenv "$var" "$val"
   done
  
-  /usr/sbin/wg-start
+  /usr/sbin/wireguard
 
   sleep 1
   redirect_to "$SCRIPT_NAME" "success" "WireGuard is up"
