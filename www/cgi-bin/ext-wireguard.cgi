@@ -1,7 +1,7 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="WireGuard Tunnel"
+page_title="WireGuard"
 env_set=$(fw_printenv | grep -c ^wg_)
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
@@ -12,7 +12,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
   done
   rm -f /tmp/wireguard.conf
   sleep 1
-  redirect_to "$SCRIPT_NAME" "danger" "WireGuard Tunnel is down"
+  redirect_to "$SCRIPT_NAME" "danger" "WireGuard is down"
  fi
 
  if [ -n "$POST_wg_privkey" ] && [ -n "$POST_wg_pubkey" ]; then
@@ -24,7 +24,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
   /usr/sbin/wg-start
 
   sleep 1
-  redirect_to "$SCRIPT_NAME" "success" "WireGuard tunnel is up"
+  redirect_to "$SCRIPT_NAME" "success" "WireGuard is up"
  fi
 fi
 %>
@@ -35,7 +35,7 @@ fi
  <div class="col">
  <% if ip link show wg0 >/dev/null 2>&1; then %>
   <div class="alert alert-success">
-  <h4>WireGuard Tunnel is up</h4>
+  <h4>WireGuard is up</h4>
   <p>Tunnel is active and running.</p>
   <dl class="mb-0">
    <dt>Endpoint</dt>
