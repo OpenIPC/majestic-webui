@@ -70,6 +70,7 @@ Pragma: no-cache
 							<li><a class="dropdown-item" href="ext-openwall.cgi">OpenWall</a></li>
 							<li><a class="dropdown-item" href="ext-telegram.cgi">Telegram</a></li>
 							<li><a class="dropdown-item" href="ext-tunnel.cgi">Tunnel</a></li>
+							<li><a class="dropdown-item" href="ext-wgtunnel.cgi">WireGuard</a></li>
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="ext-proxy.cgi">Proxy</a></li>
 						</ul>
