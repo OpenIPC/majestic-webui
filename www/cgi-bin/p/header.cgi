@@ -69,6 +69,7 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownExtensions" class="dropdown-menu dropdown-menu-lg-end">
 							<li><a class="dropdown-item" href="ext-openwall.cgi">OpenWall</a></li>
 							<li><a class="dropdown-item" href="ext-telegram.cgi">Telegram</a></li>
+							<li><a class="dropdown-item" href="ext-ntfy.cgi">Ntfy</a></li>
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="https://openipc.cloud">P2P network</a></li>
 							<li><a class="dropdown-item" href="ext-vtun.cgi">VTun</a></li>
