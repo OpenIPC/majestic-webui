@@ -5,6 +5,7 @@
 ├── README.md
 ├── structure.md                          # General list of files in the majestic-webui project and their description
 ├── sbin
+│   ├── ntfy
 │   ├── openwall
 │   ├── setnetwork
 │   ├── telegram
@@ -20,6 +21,7 @@
     │   └── timezone.js
     ├── cgi-bin
     │   ├── ext-backuper.cgi
+    │   ├── ext-ntfy.cgi
     │   ├── ext-openwall.cgi
     │   ├── ext-proxy.cgi
     │   ├── ext-telegram.cgi
