@@ -21,7 +21,7 @@
 function control(dir) {
 	let x = dir.includes("l") ? -5 : dir.includes("r") ? 5 : 0;
 	let y = dir.includes("d") ? -5 : dir.includes("u") ? 5 : 0;
-	fetch('/cgi-bin/j/run.cgi?web=' + btoa('gpio-motors ' + x + ' ' + y + ' 10'));
+	fetch('/cgi-bin/j/ptz.cgi?h=' + encodeURIComponent(x) + '&v=' + encodeURIComponent(y), { credentials: 'same-origin' });
 }
 
 $$(".motor button").forEach(el => {

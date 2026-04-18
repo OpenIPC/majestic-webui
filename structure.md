@@ -44,6 +44,7 @@
     │   │   ├── locale.cgi
     │   │   ├── locale_fpv.cgi            # FPV version of majestic menu
     │   │   ├── pulse.cgi
+    │   │   ├── ptz.cgi                   # PTZ step (gpio-motors or motor + U-Boot ptz=)
     │   │   ├── run.cgi
     │   │   └── time.cgi
     │   ├── mj-configuration.cgi
