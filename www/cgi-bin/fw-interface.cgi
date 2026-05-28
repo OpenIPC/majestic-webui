@@ -18,6 +18,8 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			fi
 
 			echo "root:${password_default}" | chpasswd
+			printf "root:%s\n" "$password_default" > /etc/onvif.passwd
+			chmod 600 /etc/onvif.passwd
 			update_caminfo
 			redirect_to "/" "success" "Password updated."
 			;;
