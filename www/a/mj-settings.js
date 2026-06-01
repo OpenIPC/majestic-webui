@@ -12,11 +12,11 @@
 		return;
 	}
 
-	const TAB = boot.tab;
 	const EXCLUDE = new Set(boot.exclude || []);
 	const SENSORS = boot.sensors || [];
 
 	const state = {
+		tab: boot.tab,
 		schema: null,
 		config: null,
 		fields: [],
@@ -24,50 +24,82 @@
 	};
 
 	if (document.readyState === 'loading') {
-		document.addEventListener('DOMContentLoaded', load);
+		document.addEventListener('DOMContentLoaded', init);
 	} else {
-		load();
+		init();
 	}
 
-	async function load() {
+	async function init() {
+		wireNav();
+		window.addEventListener('popstate', onPopState);
+		await load(state.tab, /*push*/ false);
+	}
+
+	function wireNav() {
+		document.querySelectorAll('#mj-settings-nav .nav-link').forEach(link => {
+			link.addEventListener('click', ev => {
+				const u = new URL(link.href);
+				const newTab = u.searchParams.get('tab');
+				if (!newTab) return;
+				ev.preventDefault();
+				if (newTab === state.tab) return;
+				if (hasDirty() && !confirm('You have unsaved changes. Discard and switch tabs?')) return;
+				load(newTab, /*push*/ true);
+			});
+		});
+	}
+
+	function onPopState(ev) {
+		const tabFromUrl = new URLSearchParams(location.search).get('tab') || 'system';
+		if (tabFromUrl === state.tab) return;
+		load(tabFromUrl, /*push*/ false);
+	}
+
+	async function load(tab, push) {
+		state.tab = tab;
+
+		setActiveNav(tab);
+		setTitle(tab);
+		toggleRoi(tab);
+		if (push) {
+			history.pushState({ tab }, '', 'mj-settings.cgi?tab=' + encodeURIComponent(tab));
+		}
+
 		const form = document.getElementById('mj-settings-form');
 		if (!form) return;
 		form.innerHTML = '';
-		form.addEventListener('submit', onSubmit);
+		if (!form.dataset.bound) {
+			form.addEventListener('submit', onSubmit);
+			form.dataset.bound = '1';
+		}
 
 		const err = document.createElement('div');
 		err.className = 'mj-error alert alert-danger d-none';
 		err.role = 'alert';
 		form.appendChild(err);
 
-		let schema, config;
 		try {
-			[schema, config] = await Promise.all([
-				fetchJson('/api/v1/config.schema.json'),
-				fetchJson('/api/v1/config.json'),
-			]);
+			if (!state.schema) state.schema = await fetchJson('/api/v1/config.schema.json');
+			if (!state.config) state.config = await fetchJson('/api/v1/config.json');
 		} catch (e) {
 			showFatal(form, 'Failed to load schema or config: ' + e.message);
 			return;
 		}
 
-		state.schema = schema;
-		state.config = config;
-
-		const props = ((schema.properties || {})[TAB] || {}).properties;
+		const props = ((state.schema.properties || {})[tab] || {}).properties;
 		if (!props) {
-			showFatal(form, 'Schema has no properties for tab "' + TAB + '".');
+			showFatal(form, 'Schema has no properties for tab "' + tab + '".');
 			return;
 		}
 
 		state.fields = [];
 		state.initial = {};
 		for (const key of Object.keys(props)) {
-			const dot = TAB + '.' + key;
+			const dot = tab + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
 
 			const sub = props[key];
-			const eff = getDotted(config, dot);
+			const eff = getDotted(state.config, dot);
 			const field = renderField(form, dot, key, sub, eff);
 			if (field) {
 				state.fields.push(field);
@@ -83,6 +115,61 @@
 		form.appendChild(toolbar);
 
 		updateDirty();
+	}
+
+	function setActiveNav(tab) {
+		document.querySelectorAll('#mj-settings-nav .nav-link').forEach(link => {
+			const u = new URL(link.href);
+			const t = u.searchParams.get('tab');
+			const active = t === tab;
+			link.classList.toggle('active', active);
+			if (active) link.setAttribute('aria-current', 'page');
+			else link.removeAttribute('aria-current');
+		});
+	}
+
+	function setTitle(tab) {
+		const h = document.querySelector('#mj-settings-form-col h3');
+		if (!h) return;
+		const active = document.querySelector('#mj-settings-nav .nav-link.active');
+		if (active) h.textContent = active.textContent.trim();
+	}
+
+	function toggleRoi(tab) {
+		const id = 'mj-roi-inset';
+		const existing = document.getElementById(id);
+		if (tab === 'motionDetect') {
+			if (existing) return;
+			const wrap = document.createElement('div');
+			wrap.id = id;
+			wrap.className = 'mt-4';
+			wrap.innerHTML =
+				'<h3>Visual editor</h3>' +
+				'<iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" style="padding:0;margin:0;border:1px solid rgb(76,96,216);width:100%;aspect-ratio:16/9;"></iframe>' +
+				'<div class="row mb-3 mt-2 align-items-center">' +
+				'<div class="col"><input type="button" class="btn btn-primary" id="mj-roi-clear" value="Clear all regions"></div>' +
+				'</div>';
+			const col = document.getElementById('mj-settings-form-col');
+			if (col) col.appendChild(wrap);
+			const clearBtn = document.getElementById('mj-roi-clear');
+			if (clearBtn) {
+				clearBtn.addEventListener('click', () => {
+					const ifr = document.getElementById('mj-roi-iframe');
+					if (ifr) ifr.contentWindow.location.reload();
+					const roiField = state.fields.find(f => f.dot === 'motionDetect.roi');
+					if (roiField) {
+						roiField.setValue('');
+						updateDirty();
+					}
+				});
+			}
+		} else if (existing) {
+			existing.remove();
+		}
+	}
+
+	function hasDirty() {
+		return state.fields.some(f => f.getValue() !== state.initial[f.dot]);
 	}
 
 	function renderField(form, dot, key, sub, eff) {
@@ -263,10 +350,9 @@
 	}
 
 	async function refresh() {
-		const config = await fetchJson('/api/v1/config.json');
-		state.config = config;
+		state.config = await fetchJson('/api/v1/config.json');
 		for (const f of state.fields) {
-			const eff = getDotted(config, f.dot);
+			const eff = getDotted(state.config, f.dot);
 			f.setValue(eff);
 			state.initial[f.dot] = f.getValue();
 		}
