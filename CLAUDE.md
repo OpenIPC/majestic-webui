@@ -84,10 +84,7 @@ The settings page is split: `www/cgi-bin/mj-settings.cgi` renders the page chrom
     - `sensors` ← `find /etc/sensors -maxdepth 1 -type f` (only if the directory exists).
     - Emitted inside `<script type="application/json" id="mj-settings-boot">…</script>`. JS reads it via `JSON.parse(document.getElementById('mj-settings-boot').textContent)`.
 
-5. Emit the page skeleton — a three-column layout with placeholders that JS fills:
-    - `#mj-settings-form-col .d-grid` → contains `<form id="mj-settings-form">` (JS-managed) and the Restart Majestic `<form action="/cgi-bin/j/mj-restart.cgi" method="post">`.
-    - `#mj-settings-related-col` → contains a placeholder `<pre>` that JS fills with the "Related Settings" diff view.
-    - Static Quick Links column.
+5. Emit the page skeleton — a single column with `#mj-settings-form-col .d-grid` containing `<form id="mj-settings-form">` (JS-managed) and the Restart Majestic `<form action="/cgi-bin/j/mj-restart.cgi" method="post">`.
 6. If `$label = motionDetect`, include `p/roi.cgi` after the layout (unchanged from before).
 7. `<script src="/a/mj-settings.js" defer></script>` at the end.
 
@@ -118,8 +115,6 @@ One IIFE, vanilla JS, no dependencies beyond `fetch` and the boot JSON tag.
 4. **Save.** Submitting the form filters `state.fields` for `getValue() !== initial[dot]`, builds a **nested** JSON tree from the dot paths (`{audio:{volume:"55"}, isp:{sensorConfig:"…"}}`), and `POST /api/v1/config` with `Content-Type: application/json`. That shape is the literal input of majestic's `apply_config_subtree` walker. Values are always sent as strings — `config_set_universal` takes a `const char *` either way and the C-side `json_object_get_string` coerces booleans/numbers transparently. On 200, re-fetch `config.json`, push the new values back into each control, and reset `initial` so the page is clean again. On non-200, surface the body in an inline `.alert-danger` and leave dirty state intact — note that the server aborts at the first rejected leaf, so earlier leaves in the batch did *not* persist.
 
 5. **Reset.** Per-field `↺` button calls `GET /api/v1/reset?key=<dot>` after a `confirm()`. On 200, refresh the config and re-render. On 404, the key has no recorded default — the button gets disabled with an explanatory tooltip.
-
-6. **Related Settings pane.** For each rendered field where `schema.default` is set, compare it to the effective value from `config.json`. Print `setting: value` for any that differ. This is the "what's overridden in YAML" diagnostic the old haserl `$config` accumulator produced, now computed client-side without any server round-trip.
 
 **Restart Majestic** uses a separate small form posting to `j/mj-restart.cgi` (4 lines of haserl: `killall -1 majestic`, write a flash to `/tmp/webui/logfile.txt`, 303 back to the referer).
 

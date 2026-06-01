@@ -82,7 +82,6 @@
 			'<button type="submit" class="btn btn-primary" id="mj-save" disabled>Save Changes</button>';
 		form.appendChild(toolbar);
 
-		renderRelated();
 		updateDirty();
 	}
 
@@ -271,24 +270,7 @@
 			f.setValue(eff);
 			state.initial[f.dot] = f.getValue();
 		}
-		renderRelated();
 		updateDirty();
-	}
-
-	function renderRelated() {
-		const pre = document.querySelector('#mj-settings-related-col pre');
-		if (!pre) return;
-		const lines = [];
-		for (const f of state.fields) {
-			const def = f.schema.default;
-			if (def === undefined) continue;
-			const eff = getDotted(state.config, f.dot);
-			if (eff === undefined) continue;
-			if (String(eff) !== String(def)) {
-				lines.push('.' + f.dot + ': ' + String(eff));
-			}
-		}
-		pre.textContent = lines.length ? lines.join('\n') : '—';
 	}
 
 	/* helpers */
