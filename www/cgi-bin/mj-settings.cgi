@@ -56,24 +56,26 @@ fi
 
 <% else %>
 
-<ul class="nav nav-underline small mb-4 d-lg-flex">
-	<%
-	for key in $section; do
-		loc=$(eval echo \$mj_${key})
-		[ -z "$loc" ] && continue
-		c="class=\"nav-link\""
-		[ "$label" = "$key" ] && c="class=\"nav-link active\" aria-current=\"true\""
-		echo "<li class=\"nav-item\"><a ${c} href=\"mj-settings.cgi?tab=${key}\">${loc}</a></li>"
-	done
-	%>
-</ul>
-
-<% if [ -n "$title" ]; then %>
-
-<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>]}</script>
-
 <div class="row g-4 mb-4">
-	<div class="col col-md-8 col-lg-6" id="mj-settings-form-col">
+	<div class="col-12 col-md-3 col-lg-2">
+		<ul class="nav nav-pills flex-column small sticky-md-top" id="mj-settings-nav">
+			<%
+			for key in $section; do
+				loc=$(eval echo \$mj_${key})
+				[ -z "$loc" ] && continue
+				c="class=\"nav-link\""
+				[ "$label" = "$key" ] && c="class=\"nav-link active\" aria-current=\"page\""
+				echo "<li class=\"nav-item\"><a ${c} href=\"mj-settings.cgi?tab=${key}\">${loc}</a></li>"
+			done
+			%>
+		</ul>
+	</div>
+
+	<% if [ -n "$title" ]; then %>
+
+	<div class="col-12 col-md-9 col-lg-6" id="mj-settings-form-col">
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>]}</script>
+
 		<h3><%= $title %></h3>
 		<div class="d-grid gap-2">
 			<form id="mj-settings-form" action="javascript:void(0)" autocomplete="off">
@@ -85,22 +87,27 @@ fi
 			</form>
 		</div>
 	</div>
+
+	<% else %>
+
+	<div class="col-12 col-md-9 col-lg-10">
+		<div class="alert alert-danger">
+			<h4>Setting is not available.</h4>
+			<p><a href="mj-settings.cgi">Majestic Settings</a></p>
+		</div>
+	</div>
+
+	<% fi %>
 </div>
 
-<% if [ "$label" = "motionDetect" ]; then %>
+<% if [ "$label" = "motionDetect" ] && [ -n "$title" ]; then %>
 	<%in p/roi.cgi %>
 <% fi %>
 
+<% if [ -n "$title" ]; then %>
 <script src="/a/mj-settings.js" defer></script>
-
-<% else %>
-
-<div class="alert alert-danger">
-	<h4>Setting is not available.</h4>
-	<p><a href="mj-settings.cgi">Majestic Settings</a></p>
-</div>
-
 <% fi %>
+
 <% fi %>
 
 <%in p/footer.cgi %>

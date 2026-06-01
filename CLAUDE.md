@@ -84,7 +84,7 @@ The settings page is split: `www/cgi-bin/mj-settings.cgi` renders the page chrom
     - `sensors` ← `find /etc/sensors -maxdepth 1 -type f` (only if the directory exists).
     - Emitted inside `<script type="application/json" id="mj-settings-boot">…</script>`. JS reads it via `JSON.parse(document.getElementById('mj-settings-boot').textContent)`.
 
-5. Emit the page skeleton — a single column with `#mj-settings-form-col .d-grid` containing `<form id="mj-settings-form">` (JS-managed) and the Restart Majestic `<form action="/cgi-bin/j/mj-restart.cgi" method="post">`.
+5. Emit the page skeleton — two columns: a sticky vertical `nav-pills flex-column` on the left (one `<li>` per schema section that has a `mj_<key>` label, with the active class on the current `$label`), and `#mj-settings-form-col` on the right containing `<form id="mj-settings-form">` (JS-managed) plus the Restart Majestic `<form action="/cgi-bin/j/mj-restart.cgi" method="post">`. On `<md` the columns stack.
 6. If `$label = motionDetect`, include `p/roi.cgi` after the layout (unchanged from before).
 7. `<script src="/a/mj-settings.js" defer></script>` at the end.
 
