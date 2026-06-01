@@ -10,8 +10,14 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		update)
 			[ -z "$POST_tz_name" ] && redirect_to "$SCRIPT_NAME" "warning" "Empty timezone name. Skipping."
 			[ -z "$POST_tz_data" ] && redirect_to "$SCRIPT_NAME" "warning" "Empty timezone value. Skipping."
-			[ "$tz_data" != "$POST_tz_data" ] && echo "${POST_tz_data}" > /etc/TZ
-			[ "$tz_name" != "$POST_tz_name" ] && echo "${POST_tz_name}" > /etc/timezone
+			if [ "$tz_data" != "$POST_tz_data" ]; then
+				echo "${POST_tz_data}" > /etc/TZ
+				touch /tmp/system-reboot
+			fi
+			if [ "$tz_name" != "$POST_tz_name" ]; then
+				echo "${POST_tz_name}" > /etc/timezone
+				touch /tmp/system-reboot
+			fi
 
 			rm -f /etc/ntp.conf
 			for i in $(seq 0 3); do

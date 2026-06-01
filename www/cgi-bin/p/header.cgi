@@ -121,7 +121,7 @@ Pragma: no-cache
 </div>
 <% fi %>
 
-<% if [ "$(cat /etc/TZ)" != "$TZ" ] || [ -e /tmp/system-reboot ]; then %>
+<% if [ -e /tmp/system-reboot ]; then %>
 <div class="alert alert-danger">
 	<h3>Warning.</h3>
 	<p>System settings have been updated, restart to apply pending changes.</p>
