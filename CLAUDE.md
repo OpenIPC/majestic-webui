@@ -63,7 +63,7 @@ Majestic is the camera daemon and exposes a local HTTP API. Read it, don't reimp
 - `POST /api/v1/config` (≤1 MiB JSON body) — batch write. Server walks every leaf via `config_set_universal`, then runs `sdk_reload()` + `config_save()` exactly once. Aborts on first rejected leaf and returns its HTTP code; *no* persistence partial-credit. Used by the Save button in `mj-settings.js`.
 - `GET /api/v1/set?<dotted>=<v>` — single-key variant of the above. Same reload + save. Used externally (CLI/webhooks); not currently called by the WebUI but kept compatible.
 - `GET /api/v1/reset?key=A[&key=B]` — multi-reset; restores each key to its declared `config_default_*` value, single reload + save, 404 if a key has no recorded default. Used by per-field reset buttons in `mj-settings.js`.
-- `killall -1 majestic` — hard reload, used by `j/mj-restart.cgi` (the only thing the "Restart Majestic" button still needs since `/api/v1/config` already does a soft `sdk_reload()` automatically; the hard restart is reserved for changes that need hardware re-init, e.g. codec switch on `video0`).
+- `killall -1 majestic` — SIGHUP triggers Majestic's `sdk_reload()`. The WebUI doesn't expose this any more because every `/api/v1/{set,config,reset}` already does the same `sdk_reload()` automatically. For hardware re-init that a soft reload can't cover (e.g. codec switch on `video0`), reach for the device-level `fw-restart.cgi`.
 
 #### `mj-settings.cgi` + `a/mj-settings.js` in detail
 
@@ -84,7 +84,7 @@ The settings page is split: `www/cgi-bin/mj-settings.cgi` renders the page chrom
     - `sensors` ← `find /etc/sensors -maxdepth 1 -type f` (only if the directory exists).
     - Emitted inside `<script type="application/json" id="mj-settings-boot">…</script>`. JS reads it via `JSON.parse(document.getElementById('mj-settings-boot').textContent)`.
 
-5. Emit the page skeleton — two columns: a sticky vertical `nav-pills flex-column` on the left (one `<li>` per schema section that has a `mj_<key>` label, with the active class on the current `$label`), and `#mj-settings-form-col` on the right containing `<form id="mj-settings-form">` (JS-managed) plus the Restart Majestic `<form action="/cgi-bin/j/mj-restart.cgi" method="post">`. On `<md` the columns stack.
+5. Emit the page skeleton — two columns: a sticky vertical `nav-pills flex-column` on the left (one `<li>` per schema section that has a `mj_<key>` label, with the active class on the current `$label`), and `#mj-settings-form-col` on the right containing `<form id="mj-settings-form">` (JS-managed). On `<md` the columns stack. There is no "Restart Majestic" button — Save already SIGHUPs the daemon via the API.
 6. If `$label = motionDetect`, include `p/roi.cgi` after the layout (unchanged from before).
 7. `<script src="/a/mj-settings.js" defer></script>` at the end.
 
@@ -116,7 +116,7 @@ One IIFE, vanilla JS, no dependencies beyond `fetch` and the boot JSON tag.
 
 5. **Reset.** Per-field `↺` button calls `GET /api/v1/reset?key=<dot>` after a `confirm()`. On 200, refresh the config and re-render. On 404, the key has no recorded default — the button gets disabled with an explanatory tooltip.
 
-**Restart Majestic** uses a separate small form posting to `j/mj-restart.cgi` (4 lines of haserl: `killall -1 majestic`, write a flash to `/tmp/webui/logfile.txt`, 303 back to the referer).
+There is no separate "Restart Majestic" affordance: every `/api/v1/{config,set,reset}` round-trip already calls `sdk_reload()` server-side, so Save *is* the reload. Settings that need true hardware re-init still want the device-level `fw-restart.cgi`.
 
 Why this design holds together:
 
