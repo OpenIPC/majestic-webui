@@ -6,42 +6,48 @@ page_title="Majestic Settings"
 label="$GET_tab"
 [ -z "$label" ] && label="system"
 
-json_conf=$(wget -q -T1 localhost/api/v1/config.json -O -)
-json_schema=$(cat $(get_schema) | jsonfilter -e "@.properties.$label")
-json_load "$json_schema"
+include j/locale.cgi
 
-if [ "$REQUEST_METHOD" = "POST" ]; then
-	case "$POST_action" in
-		restart)
-			killall -1 majestic
-			;;
+section=""
+if [ -f "$(get_schema)" ]; then
+	eval $(jsonfilter -e "section=@.properties" < $(get_schema) 2>/dev/null)
+fi
 
-		update)
-			OIFS=$IFS
-			IFS=$'\n'
-			for yaml_param in $(printenv | grep POST__ | sort); do
-				param=$(echo ${yaml_param#POST_} | cut -d= -f1)
-				newval=$(echo ${yaml_param#POST_} | cut -d= -f2)
-				setting=${param//_/.}
-				oldval=$(yaml-cli -g "$setting")
+title=""
+for key in $section; do
+	loc=$(eval echo \$mj_${key})
+	if [ -n "$loc" ] && [ "$label" = "$key" ]; then
+		title="$loc"
+		break
+	fi
+done
 
-				if [ -z "$newval" ] && [ -n "$oldval" ]; then
-					yaml-cli -d "$setting"
-				elif [ "$newval" != "$oldval" ]; then
-					yaml-cli -s "$setting" "$newval"
-				fi
-			done
-			IFS=$OIFS
-			;;
-	esac
+mj_json_escape() {
+	sed 's/\\/\\\\/g; s/"/\\"/g'
+}
 
-	redirect_to "$HTTP_REFERER"
+boot_exclude=""
+if [ -e j/exclude.lst ]; then
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+		line="${line#.}"
+		e=$(echo -n "$line" | mj_json_escape)
+		boot_exclude="${boot_exclude}${boot_exclude:+,}\"${e}\""
+	done < j/exclude.lst
+fi
+
+boot_sensors=""
+if [ -d /etc/sensors ]; then
+	for f in $(find /etc/sensors -maxdepth 1 -type f 2>/dev/null); do
+		e=$(echo -n "$f" | mj_json_escape)
+		boot_sensors="${boot_sensors}${boot_sensors:+,}\"${e}\""
+	done
 fi
 %>
 
 <%in p/header.cgi %>
 
-<% if [ -z "$(pidof majestic)" ]; then %>
+<% if [ -z "$(pidof majestic majestic.new)" ]; then %>
 
 <div class="alert alert-danger">
 	<h4>Majestic is not running.</h4>
@@ -52,78 +58,37 @@ fi
 
 <ul class="nav nav-underline small mb-4 d-lg-flex">
 	<%
-	include j/locale.cgi
-	eval $(cat $(get_schema) | jsonfilter -e "section=@.properties")
 	for key in $section; do
-		locale=$(eval echo \$mj_${key})
-		if [ -n "$locale" ]; then
-			c="class=\"nav-link\""
-			[ "$label" = "$key" ] && title="$locale" && c="class=\"nav-link active\" aria-current=\"true\""
-			echo "<li class=\"nav-item\"><a ${c} href=\"mj-settings.cgi?tab=${key}\">${locale}</a></li>"
-		fi
+		loc=$(eval echo \$mj_${key})
+		[ -z "$loc" ] && continue
+		c="class=\"nav-link\""
+		[ "$label" = "$key" ] && c="class=\"nav-link active\" aria-current=\"true\""
+		echo "<li class=\"nav-item\"><a ${c} href=\"mj-settings.cgi?tab=${key}\">${loc}</a></li>"
 	done
 	%>
 </ul>
 
 <% if [ -n "$title" ]; then %>
 
+<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>]}</script>
+
 <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-	<div class="col">
+	<div class="col" id="mj-settings-form-col">
 		<h3><%= $title %></h3>
 		<div class="d-grid gap-2">
-			<form action="<%= $SCRIPT_NAME %>" method="post">
-				<%
-				json_select "properties"
-				json_get_keys "keys"
-				for key in $keys; do
-					json_select "$key"
-					json_get_var "desc" "description"
-					json_get_var "type" "type"
-					json_get_values "enum" "enum"
-					json_get_var "min" "minimum"
-					json_get_var "max" "maximum"
-					json_select ..
-
-					param="_${label}_${key}"
-					setting=${param//_/.}
-					[ -e j/exclude.lst ] && grep -q "$setting" j/exclude.lst && continue
-					value=$(yaml-cli -g "$setting")
-					default=${value:-$(echo "$json_conf" | jsonfilter -e "@$setting")}
-					config="${config}\n$(echo $setting: $value)"
-
-					case "$type" in
-						boolean)
-							field_switch "$param" "$desc" "$default"
-							;;
-
-						integer)
-							if [ -n "$max" ] && [ "$max" -le "100" ]; then
-								field_range "$param" "$desc" "$default" "$min" "$max"
-							else
-								field_integer "$param" "$desc" "$default" "$min" "$max"
-							fi
-							;;
-
-						string)
-							field_string "$param" "$desc" "$default" "$enum"
-							;;
-					esac
-				done
-				%>
-				<input type="hidden" name="action" value="update">
-				<% button_submit %>
+			<form id="mj-settings-form" action="javascript:void(0)" autocomplete="off">
+				<p class="text-secondary small mb-0">Loading settings…</p>
 			</form>
 
-			<form action="<%= $SCRIPT_NAME %>" method="post">
-				<input type="hidden" name="action" value="restart">
-				<% button_submit "Restart Majestic" "secondary" %>
+			<form action="/cgi-bin/j/mj-restart.cgi" method="post">
+				<div class="mt-2"><input type="submit" class="btn btn-secondary" value="Restart Majestic"></div>
 			</form>
 		</div>
 	</div>
 
-	<div class="col">
+	<div class="col" id="mj-settings-related-col">
 		<h3>Related Settings</h3>
-		<pre><% echo -e "$config" %></pre>
+		<pre class="small mb-0">—</pre>
 	</div>
 
 	<div class="col">
@@ -137,6 +102,8 @@ fi
 	<%in p/roi.cgi %>
 <% fi %>
 
+<script src="/a/mj-settings.js" defer></script>
+
 <% else %>
 
 <div class="alert alert-danger">
@@ -146,25 +113,5 @@ fi
 
 <% fi %>
 <% fi %>
-
-<script>
-	<% if [ -e /etc/sensors ]; then %>
-		if ($("#_isp_sensorConfig")) {
-			const inp = $("#_isp_sensorConfig");
-			const sel = document.createElement("select");
-			sel.classList.add("form-select");
-			sel.name=inp.name;
-			sel.id=inp.id;
-			sel.options.add(new Option());
-			let opt;
-			<% for i in $(find /etc/sensors -type f -maxdepth 1); do %>
-				opt = new Option("<%= $i %>");
-				opt.selected = ("<%= $i %>" == inp.value);
-				sel.options.add(opt);
-			<% done %>
-			inp.replaceWith(sel);
-		}
-	<% fi %>
-</script>
 
 <%in p/footer.cgi %>
