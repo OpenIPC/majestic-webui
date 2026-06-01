@@ -60,7 +60,7 @@
 
 		setActiveNav(tab);
 		setTitle(tab);
-		toggleRoi(tab);
+		if (tab !== 'motionDetect') toggleRoi(tab);
 		if (push) {
 			history.pushState({ tab }, '', 'mj-settings.cgi?tab=' + encodeURIComponent(tab));
 		}
@@ -113,6 +113,8 @@
 			'<span class="me-auto text-secondary small" id="mj-dirty-count">No changes.</span>' +
 			'<button type="submit" class="btn btn-primary" id="mj-save" disabled>Save Changes</button>';
 		form.appendChild(toolbar);
+
+		if (tab === 'motionDetect') toggleRoi(tab);
 
 		updateDirty();
 	}

@@ -13,7 +13,10 @@
 <div id="canvas"></div>
 
 <script>
-const IMG_WIDTH = Math.round(parent.document.getElementById('_row').offsetWidth * 0.99);
+const ROI_INPUT_ID = 'mjf-motionDetect-roi';
+const IFRAME = window.frameElement;
+const HOST = IFRAME ? IFRAME.parentElement : null;
+const IMG_WIDTH = Math.round((HOST ? HOST.offsetWidth : window.innerWidth) * 0.99);
 const MOTION_SIZE = _motion_size();
 const COEFF = MOTION_SIZE[0] / IMG_WIDTH;
 const GRN = 'rgba(0,255,0,0.5)';
@@ -26,11 +29,25 @@ function _motion_size() {
 	return JSON.parse(xhr.responseText).video0.size.split('x');
 }
 
+function _roi_input() {
+	return parent.document.getElementById(ROI_INPUT_ID);
+}
+
+function _update_roi_value(next) {
+	const input = _roi_input();
+	if (!input) return;
+	input.value = next;
+	input.dispatchEvent(new Event('input', { bubbles: true }));
+	input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function set_canvas_size() {
 	document.getElementById('canvas').style.width = IMG_WIDTH + 'px';
 	document.getElementById('canvas').style.height = Math.round((MOTION_SIZE[1] / COEFF)) + 'px';
-	parent.document.getElementById('_iframe').style.width = IMG_WIDTH + 2 + 'px';
-	parent.document.getElementById('_iframe').style.height = Math.round((MOTION_SIZE[1] / COEFF)) + 2 + 'px';
+	if (IFRAME) {
+		IFRAME.style.width = (IMG_WIDTH + 2) + 'px';
+		IFRAME.style.height = (Math.round(MOTION_SIZE[1] / COEFF) + 2) + 'px';
+	}
 }
 
 function initDraw(canvas) {
@@ -65,8 +82,11 @@ function initDraw(canvas) {
 	}
 
 	// draw current regions
-	for (v of (parent.document.getElementById('_motionDetect_roi').value).split(', ')) {
-		draw_rectangle (v.split('x'), GRN);
+	const seed = _roi_input();
+	if (seed && seed.value) {
+		for (v of seed.value.split(', ')) {
+			draw_rectangle(v.split('x'), GRN);
+		}
 	}
 
 	canvas.onmousemove = function (e) {
@@ -101,10 +121,10 @@ function initDraw(canvas) {
 				rW = Math.round((rect.right - rect.left) * COEFF),
 				rH = Math.round((rect.bottom - rect.top) * COEFF);
 			rect = element = null;
-			let fill_form = '_motionDetect_roi';
+			const input = _roi_input();
+			if (!input) return;
 			let dimensions = rX + 'x' + rY + 'x' + rW + 'x' + rH;
-			dimensions = (parent.document.getElementById(fill_form).value == '') ? dimensions : ',' + dimensions;
-			parent.document.getElementById(fill_form).value += dimensions;
+			_update_roi_value(input.value === '' ? dimensions : input.value + ',' + dimensions);
 		}
 	}
 }
