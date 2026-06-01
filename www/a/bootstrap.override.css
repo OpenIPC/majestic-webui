@@ -94,6 +94,21 @@ pre#output[data-cmd] {
 	color: rgba(170, 170, 170, 0.8);
 }
 
+.mj-row {
+	border-left: 2px solid transparent;
+	padding-left: 0.5rem;
+	transition: border-color 120ms ease;
+}
+
+.mj-row.mj-dirty {
+	border-left-color: var(--bs-warning);
+}
+
+.mj-reset {
+	margin-top: 0.25rem;
+	text-decoration: none;
+}
+
 .btn-motor {
 	font-size: 2.3rem;
 	--bs-btn-border-width: 0;
