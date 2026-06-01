@@ -100,10 +100,6 @@ fi
 	<% fi %>
 </div>
 
-<% if [ "$label" = "motionDetect" ] && [ -n "$title" ]; then %>
-	<%in p/roi.cgi %>
-<% fi %>
-
 <% if [ -n "$title" ]; then %>
 <script src="/a/mj-settings.js" defer></script>
 <% fi %>
