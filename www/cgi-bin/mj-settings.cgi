@@ -77,15 +77,9 @@ fi
 		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>]}</script>
 
 		<h3><%= $title %></h3>
-		<div class="d-grid gap-2">
-			<form id="mj-settings-form" action="javascript:void(0)" autocomplete="off">
-				<p class="text-secondary small mb-0">Loading settings…</p>
-			</form>
-
-			<form action="/cgi-bin/j/mj-restart.cgi" method="post">
-				<div class="mt-2"><input type="submit" class="btn btn-secondary" value="Restart Majestic"></div>
-			</form>
-		</div>
+		<form id="mj-settings-form" action="javascript:void(0)" autocomplete="off">
+			<p class="text-secondary small mb-0">Loading settings…</p>
+		</form>
 	</div>
 
 	<% else %>

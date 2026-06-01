@@ -45,7 +45,6 @@
     │   ├── j
     │   │   ├── locale.cgi
     │   │   ├── locale_fpv.cgi            # FPV version of majestic menu
-    │   │   ├── mj-restart.cgi            # SIGHUP majestic and redirect_back
     │   │   ├── pulse.cgi
     │   │   ├── run.cgi
     │   │   └── time.cgi
