@@ -13,7 +13,7 @@ if [ "$GET_send" = "test" ]; then
     # Run the sending script.
     # Redirect the output to /dev/null so as not to clog up the response.
     # Check the return code (exit code). 0 = success.
-    if /usr/sbin/ntfy > /dev/null 2>&1; then
+    if /usr/bin/ntfy.sh > /dev/null 2>&1; then
         echo "OK"
     else
         echo "FAIL"
