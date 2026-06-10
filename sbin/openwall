@@ -25,7 +25,7 @@ if [ "$openwall_enabled" != "true" ]; then
 	exit 1
 fi
 
-if [ "$openwall_use_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
+if [ "$openwall_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
 	snapshot=/tmp/snapshot.heif
 	wget -q -T1 localhost/image.heif -O "$snapshot"
 else
@@ -47,10 +47,10 @@ command="curl --verbose"
 command="${command} --connect-timeout 100"
 command="${command} --max-time 100"
 
-if [ "$openwall_proxy_enabled" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
+if [ "$openwall_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
 	source /etc/webui/proxy.conf
 	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
-	command="${command} --proxy-user ${socks5_login}:${socks5_password}"
+	command="${command} --proxy-user ${socks5_username}:${socks5_password}"
 fi
 
 command="${command} --url https://openipc.org/snapshots"
