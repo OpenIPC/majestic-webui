@@ -40,10 +40,10 @@ command="curl --verbose"
 command="${command} --connect-timeout 100"
 command="${command} --max-time 100"
 
-if [ "$openwall_proxy_enabled" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
+if [ "$telegram_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
 	source /etc/webui/proxy.conf
 	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
-	command="${command} --proxy-user ${socks5_login}:${socks5_password}"
+	command="${command} --proxy-user ${socks5_username}:${socks5_password}"
 fi
 
 command="${command} -F 'chat_id=${telegram_channel}'"
