@@ -17,13 +17,13 @@
 
 		<div class="d-grid gap-3">
 			<input type="checkbox" class="btn-check" id="toggle-night">
-			<label class="btn btn-primary" for="toggle-night">Night</label>
+			<label class="btn btn-outline-success" for="toggle-night">Night</label>
 
 			<input type="checkbox" class="btn-check" id="toggle-ircut">
-			<label class="btn btn-primary" for="toggle-ircut">IRcut</label>
+			<label class="btn btn-outline-success" for="toggle-ircut">IRcut</label>
 
 			<input type="checkbox" class="btn-check" id="toggle-light">
-			<label class="btn btn-primary" for="toggle-light">Light</label>
+			<label class="btn btn-outline-success" for="toggle-light">Light</label>
 
 			<% if [ -n "$ptz_support" ]; then %>
 				<%in p/motor.cgi %>
@@ -41,9 +41,9 @@
 <% echo "\$('#toggle-ircut').disabled = $(get_night lightMonitor) || !$(get_night irCutPin1);" %>
 <% echo "\$('#toggle-light').disabled = $(get_night lightMonitor) || !$(get_night backlightPin);" %>
 
-$("#toggle-night").addEventListener("click", ev => {
+$("#toggle-night").addEventListener("click", () => {
 	fetch('/night/toggle').then(api => api.json()).then(data => {
-		ev.checked = data;
+		$('#toggle-night').checked = data;
 		if (!$('#toggle-ircut').disabled) {
 			$('#toggle-ircut').checked = data;
 		}
@@ -53,15 +53,15 @@ $("#toggle-night").addEventListener("click", ev => {
 	});
 });
 
-$("#toggle-ircut").addEventListener("click", ev => {
+$("#toggle-ircut").addEventListener("click", () => {
 	fetch('/night/ircut').then(api => api.json()).then(data => {
-		ev.checked = data;
+		$('#toggle-ircut').checked = data;
 	});
 });
 
-$("#toggle-light").addEventListener("click", ev => {
+$("#toggle-light").addEventListener("click", () => {
 	fetch('/night/light').then(api => api.json()).then(data => {
-		ev.checked = data;
+		$('#toggle-light').checked = data;
 	});
 });
 </script>
