@@ -449,7 +449,13 @@ update_caminfo() {
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow | cut -d: -f2)
-	ptz_support=$(fw_printenv -n gpio_motors)
+	# PTZ preview controls: GPIO motors (gpio_motors + gpio-motors) or motor profile (ptz + /usr/bin/motor).
+	if { [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ] && command -v gpio-motors >/dev/null 2>&1; } ||
+		{ [ -x /usr/bin/motor ] && [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; }; then
+		ptz_support="1"
+	else
+		ptz_support=""
+	fi
 
 	# Network
 	network_interface=$(ip route | awk '/default/ {print $5}' | head -n1)

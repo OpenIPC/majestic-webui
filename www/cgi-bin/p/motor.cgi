@@ -20,7 +20,6 @@
 <script>
 (function () {
 	const STEP = 5;
-	const PHASE_MS = 10;
 	const TICK_MS = 250;
 
 	let inflight = false;
@@ -31,7 +30,7 @@
 		const x = dir.includes("l") ? -STEP : dir.includes("r") ? STEP : 0;
 		const y = dir.includes("d") ? -STEP : dir.includes("u") ? STEP : 0;
 		inflight = true;
-		fetch('/cgi-bin/j/run.cgi?web=' + btoa('gpio-motors ' + x + ' ' + y + ' ' + PHASE_MS))
+		fetch('/cgi-bin/j/ptz.cgi?h=' + x + '&v=' + y, { credentials: 'same-origin' })
 			.finally(() => { inflight = false; });
 	}
 
