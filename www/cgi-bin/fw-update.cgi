@@ -2,15 +2,22 @@
 <%in p/common.cgi %>
 <%
 	page_title="Firmware Update"
-	if [ -n "$network_gateway" ]; then
-		fw_soc=$soc
-		if [ "$soc_vendor" = "ingenic" ]; then
-			fw_soc=$soc_family
-		fi
 
+	github_ver() {
+		[ -z "$network_gateway" ] && return
+		fw_soc=$soc
+		[ "$soc_vendor" = "ingenic" ] && fw_soc=$soc_family
 		builder=$(fw_printenv -n upgrade)
-		url="https://github.com/openipc/firmware/releases/download/latest/openipc.${fw_soc}-${flash_type}-${fw_variant}.tgz"
-		ver=$(curl -m5 -ILs "${builder:-$url}" | grep Last-Modified | cut -d' ' -f2-)
+		fw_url="${builder:-https://github.com/openipc/firmware/releases/download/latest/openipc.${fw_soc}-${flash_type}-${fw_variant}.tgz}"
+		curl -m5 -ILs "$fw_url" | grep -i last-modified | cut -d' ' -f2-
+	}
+
+	ver=$(github_ver)
+	# Issue #44: a fresh flash boots with a stale clock so the HTTPS check
+	# fails; sync time once (NTP, else HTTP Date header) and retry.
+	if [ -z "$ver" ] && [ -n "$network_gateway" ]; then
+		synctime
+		ver=$(github_ver)
 	fi
 
 	if [ -n "$ver" ]; then
@@ -18,39 +25,45 @@
 	else
 		fw_date="<span class=\"text-danger\">- no access to GitHub -</span>"
 	fi
-
 	fw_kernel="true"
 	fw_rootfs="true"
-	fw_reboot="true"
 %>
 <%in p/header.cgi %>
 
-<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-	<div class="col">
-		<h3>Version</h3>
-			<dl class="list small">
-			<dt>Installed</dt>
-			<dd><%= $fw_version %></dd>
-			<dt>On GitHub</dt>
-			<dd id="firmware-master-ver"><%= $fw_date %></dd>
-		</dl>
+<div id="fw-status" class="alert alert-secondary">
+	Installed <b><%= $fw_version %></b> &middot; On GitHub <span id="firmware-master-ver"><%= $fw_date %></span>
+</div>
+
+<div id="fw-controls">
+	<div class="alert alert-warning">The camera stops video and reboots to upgrade. <b>Do not power off</b> during the process.</div>
+
+	<div class="mb-3" style="max-width:32rem">
+		<% field_switch "fw_kernel" "Upgrade kernel" "true" %>
+		<% field_switch "fw_rootfs" "Upgrade rootfs" "true" %>
+		<% field_switch "fw_reset" "Reset config (wipe overlay)" "false" %>
+		<% field_switch "fw_force" "Reflash even if the same version" "false" %>
 	</div>
 
-	<div class="col">
-		<h3>Upgrade</h3>
-		<% if [ -n "$ver" ]; then %>
-			<form action="fw-system.cgi" method="post">
-				<% field_switch "fw_kernel" "Upgrade kernel." "eval" %>
-				<% field_switch "fw_rootfs" "Upgrade rootfs." "eval" %>
-				<% field_switch "fw_reboot" "Restart after upgrade." "eval" %>
-				<% field_switch "fw_reset" "Reset firmware." "eval" %>
-				<% field_switch "fw_force" "Reflash installed version." "eval" %>
-				<% button_submit "Install update from GitHub" "warning" %>
-			</form>
-		<% else %>
-			<p class="alert alert-danger">Updating requires access to GitHub.</p>
-		<% fi %>
+	<div class="row row-cols-1 row-cols-md-2 g-4">
+		<div class="col">
+			<h5>From GitHub</h5>
+			<% if [ -n "$ver" ]; then %>
+				<button id="fw-install-github" type="button" class="btn btn-warning">Install update from GitHub</button>
+			<% else %>
+				<p class="text-danger mb-0">Requires access to GitHub.</p>
+			<% fi %>
+		</div>
+		<div class="col">
+			<h5>From file</h5>
+			<input id="fw-file" type="file" accept=".tgz,.gz" class="form-control mb-2">
+			<button id="fw-install-upload" type="button" class="btn btn-warning">Upload &amp; install</button>
+		</div>
 	</div>
 </div>
 
+<div id="fw-progress" style="display:none">
+	<pre id="fw-output" class="border rounded p-2 bg-body-tertiary" style="height:60vh;overflow:auto;white-space:pre-wrap;font-size:12px"></pre>
+</div>
+
+<script src="/a/fw-update.js"></script>
 <%in p/footer.cgi %>

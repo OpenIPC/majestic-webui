@@ -15,6 +15,7 @@
     │   ├── bootstrap.bundle.min.js
     │   ├── bootstrap.min.css
     │   ├── bootstrap.override.css
+    │   ├── fw-update.js                 # Firmware update over majestic /ws/upgrade WebSocket (fw-update.cgi)
     │   ├── logo.svg
     │   ├── logs.js                      # Live log viewer (majestic /ws/logs WebSocket) for info-logs.cgi
     │   ├── main.js

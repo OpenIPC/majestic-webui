@@ -268,6 +268,22 @@ get_config() {
 	echo ${1}/etc/majestic.yaml
 }
 
+# Best-effort clock fix for HTTPS (issue #44): a fresh flash boots with the
+# stale build timestamp until ntpd converges, so HTTPS to GitHub fails
+# ("certificate not yet valid"). Try a quick blocking NTP sync; if that is
+# unreachable, set the clock from a plain-HTTP Date header (no TLS needed).
+synctime() {
+	timeout 8 ntpd -n -q -N >/dev/null 2>&1 && return 0
+	local h d e
+	for h in http://github.com http://deb.debian.org; do
+		d=$(curl -m5 -sI "$h" | sed -n 's/^[Dd]ate: //p' | head -1 | tr -d '\r')
+		[ -z "$d" ] && continue
+		e=$(date -D "%a, %d %b %Y %T GMT" -d "$d" +%s 2>/dev/null)
+		[ -n "$e" ] && date -s @"$e" >/dev/null 2>&1 && return 0
+	done
+	return 1
+}
+
 get_metrics() {
 	local m=$(pidof majestic)
 	if [ -z "$m" ]; then
