@@ -14,6 +14,10 @@
 			<dd>RTSP sub stream.</dd>
 			<dt class="cp2cb">rtsp://root:12345@<%= $network_address %>/stream=2</dt>
 			<dd>RTSP JPEG stream.</dd>
+			<dt class="cp2cb">ws://<%= $network_address %>/ws/video?stream=0</dt>
+			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by Preview).</dd>
+			<dt class="cp2cb">ws://<%= $network_address %>/ws/video?stream=1</dt>
+			<dd>Low-latency H.264/H.265 sub stream (fMP4/MSE).</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/mjpeg</dt>
 			<dd>MJPEG video stream.</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/video.mp4</dt>
