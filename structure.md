@@ -20,6 +20,7 @@
     │   ├── logs.js                      # Live log viewer (majestic /ws/logs WebSocket) for info-logs.cgi
     │   ├── main.js
     │   ├── mj-settings.js               # Client-side renderer + saver for Majestic settings
+    │   ├── preview.js                   # Low-latency H.264/H.265 live player (MSE/fMP4 over majestic /ws/video) for preview.cgi
     │   ├── preview.svg
     │   └── timezone.js
     ├── cgi-bin
