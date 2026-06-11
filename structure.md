@@ -16,6 +16,7 @@
     │   ├── bootstrap.min.css
     │   ├── bootstrap.override.css
     │   ├── logo.svg
+    │   ├── logs.js                      # Live log viewer (majestic /ws/logs WebSocket) for info-logs.cgi
     │   ├── main.js
     │   ├── mj-settings.js               # Client-side renderer + saver for Majestic settings
     │   ├── preview.svg
@@ -39,8 +40,7 @@
     │   ├── fw-system.cgi
     │   ├── fw-time.cgi
     │   ├── fw-update.cgi
-    │   ├── info-kernel.cgi
-    │   ├── info-majestic.cgi
+    │   ├── info-logs.cgi                # Unified live log viewer (Majestic / Kernel / Everything)
     │   ├── info-overlay.cgi
     │   ├── j
     │   │   ├── locale.cgi
