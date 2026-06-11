@@ -63,7 +63,7 @@
     │   │   └── roi.cgi
     │   ├── preview.cgi
     │   ├── status.cgi
-    │   ├── tool-console.cgi
+    │   ├── tool-console.cgi             # Interactive shell terminal (xterm.js over majestic /ws/terminal)
     │   ├── tool-files.cgi
     │   └── tool-sdcard.cgi
     ├── favicon.ico
