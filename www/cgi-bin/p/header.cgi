@@ -29,8 +29,7 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownInformation" class="dropdown-menu">
 							<li><a class="dropdown-item" href="status.cgi">Status</a></li>
 							<li><hr class="dropdown-divider"></li>
-							<li><a class="dropdown-item" href="info-majestic.cgi">Majestic</a></li>
-							<li><a class="dropdown-item" href="info-kernel.cgi">Kernel</a></li>
+							<li><a class="dropdown-item" href="info-logs.cgi">Logs</a></li>
 							<li><a class="dropdown-item" href="info-overlay.cgi">Overlay</a></li>
 						</ul>
 					</li>
