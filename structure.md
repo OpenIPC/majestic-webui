@@ -43,6 +43,7 @@
     │   ├── info-logs.cgi                # Unified live log viewer (Majestic / Kernel / Everything)
     │   ├── info-overlay.cgi
     │   ├── j
+    │   │   ├── dmesg.cgi                 # Full kernel ring buffer (dmesg) for the Logs page
     │   │   ├── locale.cgi
     │   │   ├── locale_fpv.cgi            # FPV version of majestic menu
     │   │   ├── pulse.cgi
