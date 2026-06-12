@@ -1,6 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="Firmware Settings & Backuper" %>
+<% page_title="Firmware & Backup" %>
 <%in p/header.cgi %>
 <% config_file=/etc/webui/backup.conf
 
@@ -41,48 +41,52 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 fi
 %>
 
-<div class="alert alert-info">
-	<p>Create backup remotely, e.g. from script:</p>
-	<dt class="cp2cb"> wget --content-disposition http://root:12345@<%= $network_address %>/cgi-bin/ext-backuper.cgi?backup=create </dt>
-</div>
+<div class="row g-4">
+	<div class="col-12 col-lg-6">
+		<div class="card mb-4"><div class="card-body">
+			<h3>Backup &amp; Restore</h3>
+			<p class="small text-secondary">Download a <code>.tgz</code> of the files listed in the backuper configuration.</p>
+			<a class="btn btn-primary" href="ext-backuper.cgi?backup=create">Create backup</a>
 
-<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-	<div class="col">
-		<div class="alert alert-danger">
-			<h4>Restart Camera</h4>
-			<p>Reboot camera to apply new settings and reset temporary files.</p>
-			<a class="btn btn-danger" href="fw-restart.cgi">Restart Camera</a>
-		</div>
-		<div class="alert alert-danger">
-			<h4>Reset Firmware</h4>
-			<p>Revert firmware to original state by resetting the overlay partition.</p>
-			<a class="btn btn-danger" href="fw-reset.cgi">Reset Firmware</a>
-		</div>
+			<hr class="my-3">
+			<p class="small text-secondary mb-1">Or create one remotely (click to copy):</p>
+			<pre class="cp2cb small mb-0">wget --content-disposition http://root:12345@<%= $network_address %>/cgi-bin/ext-backuper.cgi?backup=create</pre>
+
+			<details class="mt-3">
+				<summary class="small">Restore from a backup (manual)</summary>
+				<ol class="small text-secondary mt-2 mb-1">
+					<li>Place <code>_backup_.tgz</code> in <code>/tmp</code> on the camera.</li>
+					<li>Run: <code>cd / &amp;&amp; zcat /tmp/_backup_.tgz | tar x --overwrite &amp;&amp; sh /etc/webui/backup.conf</code></li>
+				</ol>
+				<p class="x-small text-danger mb-0">This overwrites your current settings.</p>
+			</details>
+		</div></div>
+
+		<div class="card"><div class="card-body">
+			<h3>Maintenance</h3>
+			<div class="d-flex flex-wrap gap-4">
+				<div>
+					<a class="btn btn-outline-secondary confirm" href="fw-restart.cgi">Restart camera</a>
+					<p class="x-small text-secondary mt-1 mb-0">Reboot to apply settings and clear temporary files.</p>
+				</div>
+				<div>
+					<a class="btn btn-danger" href="fw-reset.cgi">Reset firmware</a>
+					<p class="x-small text-secondary mt-1 mb-0">Revert to factory state by wiping the overlay. <span class="text-danger">Destroys all changes.</span></p>
+				</div>
+			</div>
+		</div></div>
 	</div>
 
-	<div class="col">
-		<div class="alert alert-success">
-			<h4>Backup files</h4>
-			<p>Create backup of files, listed in backuper configuration.</p>
-			<a class="btn btn-primary" href="ext-backuper.cgi?backup=create">Create Backup</a>
-		</div>
-		<div class="alert alert-info">
-			<h4>Restore from a backup</h4>
-			<p>Currently, only manual recovery is available.</p>
-			<p>To restore files from a previously created backup to the camera, follow these steps:</p>
-			<p>1. place the _backup_.tgz file in /tmp on the camera</p>
-			<p>2. run:<br>
-			<b>cd / && zcat /tmp/_backup_.tgz | tar x --overwrite && sh /etc/webui/backup.conf</b></p>
-			<p class="text-danger">This action removes all current settings!</p>
-			<!--<a class="btn btn-danger disabled" href="ext-backuper.cgi?backup=restore">Restore from Backup</a>-->
-		</div>
-	</div>
-
-	<div class="col">
-		<h4>Backuper configuration</h4>
-		<% [ -e "$config_file" ] && ex "cat $config_file" %>
-		<p><a class="btn btn-secondary" href="fw-editor.cgi?f=<%= $config_file %>">Edit Configuration</a></p>
-		<form action="<%= $SCRIPT_NAME %>" method="POST">
+	<div class="col-12 col-lg-6">
+		<div class="card h-100"><div class="card-body">
+			<h3>Backuper configuration</h3>
+			<p class="small text-secondary mb-2">Lines starting <code>#/</code> are files to back up; <code>cli -s …</code> lines run after a restore.</p>
+			<form action="<%= $SCRIPT_NAME %>" method="post">
+				<% field_hidden "action" "save" %>
+				<textarea name="editor_text" class="form-control font-monospace small" style="height:20rem;white-space:pre;overflow-wrap:normal" spellcheck="false"><%= $(sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' "$config_file") %></textarea>
+				<% button_submit "Save configuration" %>
+			</form>
+		</div></div>
 	</div>
 </div>
 
