@@ -138,6 +138,36 @@ textarea {
 	box-shadow: inset 0 0 0 1px var(--bs-border-color);
 }
 
+.fm-drop {
+	border: 2px dashed transparent;
+	border-radius: 6px;
+	transition: border-color 120ms ease, background 120ms ease;
+}
+
+.fm-drop.fm-dragover {
+	border-color: var(--bs-primary);
+	background: rgba(76, 96, 216, 0.06);
+}
+
+.fm-sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+.fm-sortable:hover {
+	color: var(--bs-primary);
+}
+
+#fm-breadcrumb .breadcrumb-item + .breadcrumb-item::before {
+	content: "";
+	padding: 0;
+}
+
+.CodeMirror {
+	height: 60vh;
+	border: 0;
+}
+
 pre#output[data-cmd] {
 	background-color: rgb(0, 0, 0);
 	color: rgba(170, 170, 170, 0.8);
