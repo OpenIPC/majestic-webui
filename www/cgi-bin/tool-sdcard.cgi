@@ -1,105 +1,22 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-
-<% page_title="SDcard" %>
+<% page_title="SD Card" %>
+<% hide_title=1 %>
 <%in p/header.cgi %>
 
-<% if [ ! -e /dev/mmcblk0 ]; then %>
+<div id="sd"><div class="text-secondary small">loading…</div></div>
 
-<div class="alert alert-danger">
-	<h4>SDcard is not available.</h4>
-	<p>Make sure the card is correctly inserted.</p>
-</div>
+<div class="modal fade" id="sd-format" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+	<div class="modal-header"><h5 class="modal-title text-danger">Format SD card</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+	<div class="modal-body">
+		<div class="alert alert-danger mb-3"><strong>This erases everything on the card.</strong> Make a backup first.</div>
+		<label class="form-label" for="sd-format-fs">Filesystem</label>
+		<select id="sd-format-fs" class="form-select mb-3"></select>
+		<pre id="sd-format-log" class="small d-none mb-0" style="max-height:30vh;overflow:auto"></pre>
+	</div>
+	<div class="modal-footer"><span class="small text-secondary me-auto" id="sd-format-status"></span><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-danger" id="sd-format-go" type="button">Format</button></div>
+</div></div></div>
 
-<% else %>
-
-<%
-	card_device="/dev/mmcblk0"
-	card_partition="${card_device}p1"
-	mount_point="${card_partition//dev/mnt}"
-	error=""
-	_o=""
-%>
-
-<% if [ -n "$POST_doFormatCard" ]; then %>
-
-<div class="alert alert-danger">
-	<h4>SDcard formatting takes time.</h4>
-	<p>Please do not refresh this page. Wait until partition formatting is finished!</p>
-</div>
-
-<%
-	if [ "$(grep $card_partition /etc/mtab)" ]; then
-		_c="umount $card_partition"
-		_o="${_o}\n${_c}\n$($_c 2>&1)"
-		[ $? -ne 0 ] && error="Cannot unmount SDcard partition."
-	fi
-
-	if [ -z "$error" ]; then
-		_c="mkfs.vfat $card_partition"
-		_o="${_o}\n${_c}\n$($_c 2>&1)"
-		[ $? -ne 0 ] && error="Cannot format SDcard partition."
-	fi
-
-	if [ -z "$error" ] && [ ! -d "$mount_point" ]; then
-		_c="mkdir -p $mount_point"
-		_o="${_o}\n${_c}\n$($_c 2>&1)"
-		[ $? -ne 0 ] && error="Cannot create SDcard mount point."
-	fi
-
-	if [ -z "$error" ]; then
-		_c="mount -t vfat $card_partition $mount_point"
-		_o="${_o}\n${_c}\n$($_c 2>&1)"
-		[ $? -ne 0 ] && error="Cannot remount SDcard partition."
-	fi
-
-	if [ -n "$error" ]; then
-		report_error "$error"
-		[ -n "$_c" ] && report_command "$_c" "$_o"
-	else
-		report_log "$_o"
-	fi
-%>
-
-<a class="btn btn-primary" href="/">Return</a>
-
-<% else %>
-
-<h4>SDcard partitions</h4>
-<%
-	partitions=$(df -h | grep 'dev/mmc')
-	echo "<pre class=\"small\">${partitions}</pre>"
-%>
-
-<% if [ -n "$partitions" ]; then %>
-
-<h4>Browse files on these partitions</h4>
-<div class="mb-4">
-<%
-	IFS=$'\n'
-	for i in $partitions; do
-		_mount=$(echo $i | awk '{print $6}')
-		echo "<a href=\"tool-files.cgi?cd=${_mount}\" class=\"btn btn-primary\">${_mount}</a>"
-		unset _mount
-	done
-	IFS=$IFS_ORIG
-	unset _partitions
-%>
-</div>
-
-<% fi %>
-
-<h4>Format SDcard</h4>
-<div class="alert alert-danger">
-	<h4>ATTENTION! Formatting will destroy all data on the SDcard.</h4>
-	<p>Make sure you have a backup copy if you are going to use the data in the future.</p>
-	<form action="<%= $SCRIPT_NAME %>" method="post">
-	<% field_hidden "doFormatCard" "true" %>
-	<% button_submit "Format SDcard" "danger" %>
-	</form>
-</div>
-
-<% fi %>
-<% fi %>
+<script src="/a/sdcard.js" defer></script>
 
 <%in p/footer.cgi %>
