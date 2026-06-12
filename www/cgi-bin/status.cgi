@@ -2,6 +2,7 @@
 <%in p/common.cgi %>
 
 <% page_title="Device Status" %>
+<% hide_signature=1 %>
 <%in p/header.cgi %>
 
 <% overlay_use=$(df -h /overlay 2>/dev/null | awk 'NR==2{print $3" of "$2" used"}') %>

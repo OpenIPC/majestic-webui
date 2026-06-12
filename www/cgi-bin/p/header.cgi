@@ -91,7 +91,7 @@ Pragma: no-cache
 				</div>
 
 				<div class="col-md-6 mb-2">
-					<%= $(signature) %>
+					<% [ -z "$hide_signature" ] && signature %>
 				</div>
 
 				<div class="col-1" id="daynight_value"></div>
