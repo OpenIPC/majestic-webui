@@ -110,9 +110,49 @@
 		return !!(group && group.sections && group.sections.includes('motionDetect'));
 	}
 
+	// A group has a live preview when any of its fields are x-live (the
+	// HiSilicon image CSC knobs) — so the user can see the effect while dragging.
+	function groupHasLive(group) {
+		if (!group) return false;
+		const props = (state.schema && state.schema.properties) || {};
+		return group.sections.some(s => {
+			const sp = (props[s] || {}).properties || {};
+			return Object.keys(sp).some(k => sp[k] && sp[k]['x-live']);
+		});
+	}
+
+	function stopLivePreview() {
+		if (state.previewPlayer) {
+			state.previewPlayer.destroy();
+			state.previewPlayer = null;
+		}
+	}
+
+	// Debounced live apply: on any x-live field change, POST the current value
+	// of ALL x-live fields to /api/v1/image at once. Sending them together lets
+	// the backend apply combined settings (e.g. mirror+flip need both). Sliders
+	// send their number; booleans send 1/0.
+	let liveTimer = null;
+	function pushLive() {
+		if (liveTimer) clearTimeout(liveTimer);
+		liveTimer = setTimeout(() => {
+			const parts = [];
+			for (const f of state.fields) {
+				if (!f.schema || !f.schema['x-live']) continue;
+				const name = f.dot.split('.').pop();
+				const val = f.type === 'boolean' ? (f.control.checked ? 1 : 0) : f.control.value;
+				parts.push(encodeURIComponent(name) + '=' + encodeURIComponent(val));
+			}
+			if (parts.length)
+				fetch('/api/v1/image?' + parts.join('&'),
+					{ method: 'POST', credentials: 'same-origin' }).catch(() => {});
+		}, 120);
+	}
+
 	async function load(tab, push) {
 		const form = document.getElementById('mj-settings-form');
 		if (!form) return;
+		stopLivePreview();
 
 		// schema/config must be loaded before we can resolve groups.
 		try {
@@ -147,6 +187,21 @@
 		err.className = 'mj-error alert alert-danger d-none';
 		err.role = 'alert';
 		form.appendChild(err);
+
+		// Live preview pinned at the top so slider changes are visible as you
+		// drag — reuses the low-latency /ws/video MSE player (a/preview.js).
+		if (groupHasLive(group) && window.MajesticVideo) {
+			const pv = el('div', 'mb-3');
+			pv.id = 'mj-live-preview';
+			pv.innerHTML =
+				'<div class="text-secondary small mb-1">Live preview</div>' +
+				'<video id="mj-live-video" autoplay muted playsinline ' +
+				'style="width:100%;max-width:640px;border:1px solid rgb(76,96,216);' +
+				'border-radius:4px;aspect-ratio:16/9;background:#000;"></video>';
+			form.appendChild(pv);
+			state.previewPlayer =
+				window.MajesticVideo.attach(pv.querySelector('#mj-live-video'), { stream: 0 });
+		}
 
 		state.fields = [];
 		state.initial = {};
@@ -408,6 +463,14 @@
 
 		control.addEventListener('input', updateDirty);
 		control.addEventListener('change', updateDirty);
+
+		// Live-tunable fields (schema "x-live", e.g. HiSilicon image knobs):
+		// apply to the SDK on change via POST /api/v1/image — instant, no
+		// save/reinit. The value still persists only on the page's Save.
+		if (sub && sub['x-live']) {
+			control.addEventListener('input', pushLive);
+			control.addEventListener('change', pushLive);
+		}
 
 		// array fields canonicalise to a comma-joined string so dirty-tracking
 		// (a plain !== against state.initial) keeps working; onSubmit splits it
