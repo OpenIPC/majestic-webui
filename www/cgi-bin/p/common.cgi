@@ -362,14 +362,6 @@ preview() {
 EOF
 }
 
-progressbar() {
-	local c="primary"
-	[ "$1" -ge "75" ] && c="danger"
-	echo "<div class=\"progress\" role=\"progressbar\" aria-valuenow=\"${1}\" aria-valuemin=\"0\" aria-valuemax=\"100\">" \
-		"<div class=\"progress-bar progress-bar-striped progress-bar-animated bg-${c}\" style=\"width:${1}%\"></div>" \
-		"</div>"
-}
-
 # redirect_back "flash class" "flash text"
 redirect_back() {
 	redirect_to "${HTTP_REFERER:-/}" "$1" "$2"

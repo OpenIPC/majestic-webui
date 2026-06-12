@@ -30,7 +30,6 @@ Pragma: no-cache
 							<li><a class="dropdown-item" href="status.cgi">Status</a></li>
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="info-logs.cgi">Logs</a></li>
-							<li><a class="dropdown-item" href="info-overlay.cgi">Overlay</a></li>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
@@ -92,7 +91,7 @@ Pragma: no-cache
 				</div>
 
 				<div class="col-md-6 mb-2">
-					<%= $(signature) %>
+					<% [ -z "$hide_signature" ] && signature %>
 				</div>
 
 				<div class="col-1" id="daynight_value"></div>
@@ -130,5 +129,5 @@ Pragma: no-cache
 </div>
 <% fi %>
 
-<h2><%= $page_title %></h2>
+<% if [ -z "$hide_title" ]; then %><h2><%= $page_title %></h2><% fi %>
 <% log_read %>
