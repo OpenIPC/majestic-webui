@@ -71,10 +71,7 @@ fi
 	$('#openwall_crontab').checked = true;
 <% fi %>
 
-<% if [ "$(yaml-cli -g .video0.codec)" != "h265" ]; then %>
-	$('#openwall_heif').checked = false;
-	$('#openwall_heif').disabled = true;
-<% fi %>
+mjHeifGate('#openwall_heif');
 </script>
 
 <%in p/footer.cgi %>

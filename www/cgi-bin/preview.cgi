@@ -11,9 +11,7 @@
 	</div>
 
 	<div class="col-auto">
-		<% if [ "$(get_night lightMonitor)" = "true" ]; then %>
-			<p class="small"><a href="mj-settings.cgi?tab=nightMode">Light monitor active</a></p>
-		<% fi %>
+		<p class="small" id="mj-lightmon" hidden><a href="mj-settings.cgi?tab=nightMode">Light monitor active</a></p>
 
 		<div class="d-grid gap-3">
 			<input type="checkbox" class="btn-check" id="toggle-night">
@@ -33,13 +31,18 @@
 </div>
 
 <script>
-<% echo "\$('#toggle-night').checked = $(get_metrics night_enabled);" %>
-<% echo "\$('#toggle-ircut').checked = $(get_metrics ircut_enabled);" %>
-<% echo "\$('#toggle-light').checked = $(get_metrics light_enabled);" %>
-
-<% echo "\$('#toggle-night').disabled = $(get_night lightMonitor);" %>
-<% echo "\$('#toggle-ircut').disabled = $(get_night lightMonitor) || !$(get_night irCutPin1);" %>
-<% echo "\$('#toggle-light').disabled = $(get_night lightMonitor) || !$(get_night backlightPin);" %>
+mjConfig().then(cfg => {
+	const active = v => v !== false && v != null;
+	const lm = active(mjGet(cfg, 'nightMode.lightMonitor'));
+	$('#toggle-night').disabled = lm;
+	$('#toggle-ircut').disabled = lm || !active(mjGet(cfg, 'nightMode.irCutPin1'));
+	$('#toggle-light').disabled = lm || !active(mjGet(cfg, 'nightMode.backlightPin'));
+	if (lm) $('#mj-lightmon').hidden = false;
+});
+['night', 'ircut', 'light'].forEach(n =>
+	fetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
+		.then(r => r.text()).then(v => { $('#toggle-' + n).checked = +v > 0; })
+		.catch(() => {}));
 
 $("#toggle-night").addEventListener("click", () => {
 	fetch('/night/toggle').then(api => api.json()).then(data => {
@@ -72,7 +75,11 @@ $("#toggle-light").addEventListener("click", () => {
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), img = $('#live-mjpeg'), note = $('#mj-note');
-	const jpegOn = initial.closest('.mj-player').dataset.jpeg === 'true';
+	let jpegOn = false;
+	mjConfig().then(cfg => {
+		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
+		if (mjGet(cfg, 'video1.enabled') === true) $('#mj-sub').hidden = false;
+	});
 	const cur = () => $('#live-video');
 
 	const BARS = '#000 url(/a/preview.svg)';

@@ -284,25 +284,6 @@ synctime() {
 	return 1
 }
 
-get_metrics() {
-	local m=$(pidof majestic)
-	if [ -z "$m" ]; then
-		echo 0
-	else
-		wget -q -T1 localhost/metrics/night?value=${1} -O -
-	fi
-}
-
-get_night() {
-	local m=$(pidof majestic)
-	local v=$(yaml-cli -g .nightMode.$1)
-	if [ -n "$m" ] && [ -n "$v" ] && [ "$v" != "false" ]; then
-		echo true
-	else
-		echo false
-	fi
-}
-
 log_create() {
 	echo "${1}:${2}" > "$log_file"
 }
@@ -361,18 +342,14 @@ pre() {
 }
 
 preview() {
-	local jpeg_enabled="$(yaml-cli -g .jpeg.enabled)"
 	local bg="background:#000; background-size:cover; width:100%"
-	local sub=""
-	if [ "true" = "$(yaml-cli -g .video1.enabled)" ]; then
-		sub='<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-1" autocomplete="off"><label class="btn btn-outline-primary" for="mj-stream-1">Sub</label>'
-	fi
 	cat <<EOF
-<div class="mj-player" data-jpeg="$jpeg_enabled">
+<div class="mj-player">
 	<div class="btn-group btn-group-sm mb-2" role="group" aria-label="Stream">
 		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-0" autocomplete="off" checked>
 		<label class="btn btn-outline-primary" for="mj-stream-0">Main</label>
-		$sub
+		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-1" autocomplete="off">
+		<label class="btn btn-outline-primary" for="mj-stream-1" id="mj-sub" hidden>Sub</label>
 		<span id="mj-badge" class="badge text-bg-secondary align-self-center ms-2">connecting…</span>
 	</div>
 	<video id="live-video" autoplay muted playsinline style="$bg"></video>
