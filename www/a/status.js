@@ -139,11 +139,11 @@
 				const size = mjGet(cfg, s + '.size') || '?';
 				const fps = mjGet(cfg, s + '.fps');
 				const br = mjGet(cfg, s + '.bitrate');
-				html += '<div class="d-flex align-items-center">'
+				html += '<div>'
 					+ '<span class="badge text-bg-primary me-2">' + (i ? 'Sub' : 'Main') + '</span>'
-					+ '<span class="fw-semibold me-2">' + size + '</span>'
-					+ '<span class="badge text-bg-light border me-2">' + codec + '</span>'
-					+ '<span class="text-secondary small ms-auto">' + (fps ? fps + ' fps' : '') + (br ? ' · ' + br + ' kbit/s' : '') + '</span>'
+					+ '<span class="fw-semibold me-1">' + size + '</span>'
+					+ '<span class="badge text-bg-light border">' + codec + '</span>'
+					+ '<div class="x-small text-secondary mt-1">' + (fps ? fps + ' fps' : '') + (br ? ' · ' + br + ' kbit/s' : '') + '</div>'
 					+ '</div>';
 			});
 			if (mjGet(cfg, 'jpeg.enabled') === true)
