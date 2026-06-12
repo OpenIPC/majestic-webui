@@ -130,26 +130,6 @@
 	</div>
 </div>
 
-<!-- Advanced / Diagnostics -->
-<div class="accordion mt-4 mb-2" id="adv">
-	<div class="accordion-item">
-		<h2 class="accordion-header">
-			<button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#adv-body" aria-expanded="false" aria-controls="adv-body">
-				Advanced / Diagnostics
-			</button>
-		</h2>
-		<div id="adv-body" class="accordion-collapse collapse" data-bs-parent="#adv">
-			<div class="accordion-body">
-				<% ex "uptime" %>
-				<% ex "df -hT" %>
-				<% ex "free -h" %>
-				<% ex "ls -Rl /overlay" %>
-				<p class="small mb-0"><a href="info-logs.cgi">View system logs →</a> · <a href="mj-endpoints.cgi">Stream endpoints →</a></p>
-			</div>
-		</div>
-	</div>
-</div>
-
 <link rel="stylesheet" href="/a/uPlot.min.css">
 <script src="/a/uPlot.iife.min.js"></script>
 <script src="/a/status.js" defer></script>
