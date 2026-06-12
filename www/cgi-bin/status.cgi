@@ -138,6 +138,7 @@
 				<% ex "uptime" %>
 				<% ex "df -hT" %>
 				<% ex "free -h" %>
+				<% ex "ls -Rl /overlay" %>
 				<p class="small mb-0"><a href="info-logs.cgi">View system logs →</a> · <a href="mj-endpoints.cgi">Stream endpoints →</a></p>
 			</div>
 		</div>

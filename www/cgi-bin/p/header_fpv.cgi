@@ -31,7 +31,6 @@ Pragma: no-cache
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="info-majestic.cgi">Majestic</a></li>
 							<li><a class="dropdown-item" href="info-kernel.cgi">Kernel</a></li>
-							<li><a class="dropdown-item" href="info-overlay.cgi">Overlay</a></li>
 						</ul>
 					</li>
 

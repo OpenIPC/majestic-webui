@@ -30,7 +30,6 @@ Pragma: no-cache
 							<li><a class="dropdown-item" href="status.cgi">Status</a></li>
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="info-logs.cgi">Logs</a></li>
-							<li><a class="dropdown-item" href="info-overlay.cgi">Overlay</a></li>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
