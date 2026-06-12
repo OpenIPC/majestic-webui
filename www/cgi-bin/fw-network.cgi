@@ -43,7 +43,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 
 			[ -z "$network_interface" ] && set_error_flag "Default network interface cannot be empty."
 			if [ "$network_interface" = "wlan0" ]; then
-				[ -z "$network_wlan_ssid" ] && set_error_flag"WLAN SSID cannot be empty."
+				[ -z "$network_wlan_ssid" ] && set_error_flag "WLAN SSID cannot be empty."
 				[ -z "$network_wlan_password" ] && set_error_flag "WLAN Password cannot be empty."
 			fi
 
@@ -86,68 +86,91 @@ fi
 <%in p/header.cgi %>
 
 <div class="row g-4">
-	<div class="col col-md-6 col-lg-4 mb-4">
-		<form action="<%= $SCRIPT_NAME %>" method="post">
-			<% field_hidden "action" "update" %>
-			<% field_text "network_hostname" "Hostname" %>
-			<% field_string "network_interface" "Network interface" "eval" "$network_list" %>
-			<% field_text "network_wlan_ssid" "WLAN SSID" %>
-			<% field_text "network_wlan_password" "WLAN Password" %>
-
-			<% field_switch "network_dhcp" "Use DHCP" "eval" %>
-			<% field_text "network_address" "IP Address" %>
-			<% field_text "network_netmask" "IP Netmask" %>
-			<% field_text "network_gateway" "Gateway" %>
-			<% field_text "network_nameserver" "DNS" %>
-			<% button_submit %>
-		</form>
-
-		<div class="alert alert-danger mt-4">
-			<h5>Reset network configuration</h5>
-			<p>Restore the config file bundled with firmware. All changes to the default configuration will be lost!</p>
+	<div class="col-12 col-lg-7">
+		<div class="card h-100"><div class="card-body">
+			<h3>Network settings</h3>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
-				<% field_hidden "action" "reset" %>
-				<% button_submit "Reset config" "danger" %>
+				<% field_hidden "action" "update" %>
+
+				<div class="text-uppercase x-small text-secondary mb-2">General</div>
+				<% field_text "network_hostname" "Hostname" %>
+				<% field_string "network_interface" "Network interface" "eval" "$network_list" %>
+
+				<div id="wifi-section">
+					<div class="text-uppercase x-small text-secondary mt-3 mb-2">Wi-Fi</div>
+					<% field_text "network_wlan_ssid" "WLAN SSID" %>
+					<div class="mb-3">
+						<button type="button" class="btn btn-sm btn-outline-secondary" id="wifi-scan">Scan for networks</button>
+						<span id="wifi-scan-status" class="small text-secondary ms-2"></span>
+						<select id="wifi-results" class="form-select form-select-sm mt-2 d-none"></select>
+					</div>
+					<% field_password "network_wlan_password" "WLAN Password" %>
+				</div>
+
+				<div class="text-uppercase x-small text-secondary mt-3 mb-2">IP</div>
+				<% field_switch "network_dhcp" "Use DHCP" "eval" %>
+				<% field_text "network_address" "IP Address" %>
+				<% field_text "network_netmask" "IP Netmask" %>
+				<% field_text "network_gateway" "Gateway" %>
+				<% field_text "network_nameserver" "DNS" %>
+				<% button_submit %>
 			</form>
-		</div>
+		</div></div>
 	</div>
 
-	<div class="col col-md-6 col-lg-8">
-		<% for dev in $network_list; do %>
-			<% ex "cat /etc/network/interfaces.d/$dev" %>
-		<% done %>
-		<% if [ -n "$(fw_printenv -n wlandev)" ]; then %>
-			<% ex "fw_printenv | grep wlan" %>
-		<% fi %>
-		<% ex "ifconfig" %>
+	<div class="col-12 col-lg-5">
+		<div class="card h-100"><div class="card-body">
+			<h3>Current connection</h3>
+			<dl class="small list mb-0">
+				<dt>Hostname</dt><dd><%= $network_hostname %></dd>
+				<dt>Interface</dt><dd><%= $network_interface %></dd>
+				<dt>Mode</dt><dd><%= $([ "$network_dhcp" = "true" ] && echo DHCP || echo Static) %></dd>
+				<dt>IP</dt><dd><%= $network_address %></dd>
+				<dt>Netmask</dt><dd><%= ${network_netmask:-—} %></dd>
+				<dt>Gateway</dt><dd><%= ${network_gateway:-—} %></dd>
+				<dt>DNS</dt><dd><%= ${network_nameserver:-—} %></dd>
+				<dt>MAC</dt><dd class="text-break"><%= $network_macaddr %></dd>
+			</dl>
+		</div></div>
 	</div>
 </div>
 
-<script>
-	function toggleStatic() {
-		const c = $('#network_dhcp').checked;
-		const ids = ['network_address','network_netmask','network_gateway','network_nameserver'];
-		ids.forEach(id => {
-			$('#' + id).disabled = c;
-			let el = $('#' + id + '_wrap');
-			c ? el.classList.add('d-none') : el.classList.remove('d-none');
-		});
-	}
+<details class="mt-4">
+	<summary>Advanced</summary>
+	<div class="row g-4 mt-1">
+		<div class="col-12 col-lg-6">
+			<div class="card"><div class="card-body">
+				<h3>Change MAC address</h3>
+				<p class="small text-secondary">Override the Ethernet MAC address. <span class="text-danger">Requires a reboot.</span></p>
+				<form action="<%= $SCRIPT_NAME %>" method="post">
+					<% field_hidden "action" "changemac" %>
+					<% field_string "mac_address" "MAC address" "$network_macaddr" %>
+					<% button_submit "Update MAC" "danger" %>
+				</form>
 
-	function toggleInterface() {
-		const ids = ['network_wlan_ssid','network_wlan_password'];
-		if ($('#network_interface').value == 'wlan0') {
-			ids.forEach(id => $('#' + id + '_wrap').classList.remove('d-none'));
-		} else {
-			ids.forEach(id => $('#' + id + '_wrap').classList.add('d-none'));
-		}
-	}
+				<hr class="my-3">
+				<h3 class="fs-6">Reset network configuration</h3>
+				<p class="small text-secondary">Restore the config bundled with the firmware. All changes are lost.</p>
+				<form action="<%= $SCRIPT_NAME %>" method="post">
+					<% field_hidden "action" "reset" %>
+					<% button_submit "Reset config" "outline-danger confirm" %>
+				</form>
+			</div></div>
+		</div>
 
-	$('#network_interface').addEventListener('change', toggleInterface);
-	$('#network_dhcp').addEventListener('change', toggleStatic);
+		<div class="col-12 col-lg-6">
+			<div class="card"><div class="card-body">
+				<h3>Diagnostics</h3>
+				<% for dev in $network_list; do %>
+					<% ex "cat /etc/network/interfaces.d/$dev" %>
+				<% done %>
+				<% [ -n "$(fw_printenv -n wlandev)" ] && ex "fw_printenv | grep wlan" %>
+				<% ex "ifconfig" %>
+			</div></div>
+		</div>
+	</div>
+</details>
 
-	toggleInterface();
-	toggleStatic();
-</script>
+<script src="/a/fw-network.js" defer></script>
 
 <%in p/footer.cgi %>
