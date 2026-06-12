@@ -135,5 +135,5 @@ Pragma: no-cache
 </div>
 <% fi %>
 
-<h2><%= $page_title %></h2>
+<% if [ -z "$hide_title" ]; then %><h2><%= $page_title %></h2><% fi %>
 <% log_read %>

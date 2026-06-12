@@ -3,6 +3,7 @@
 
 <% page_title="Device Status" %>
 <% hide_signature=1 %>
+<% hide_title=1 %>
 <%in p/header.cgi %>
 
 <% overlay_use=$(df -h /overlay 2>/dev/null | awk 'NR==2{print $3" of "$2" used"}') %>
@@ -14,7 +15,8 @@
 <% ov_cats=$(du -sk "$ovd"/* 2>/dev/null | sort -rn | awk '{n=$2; sub(/.*\//,"",n); printf "%s{\"name\":\"%s\",\"kb\":%d}",(NR>1?",":""),n,$1}') %>
 <% sd_rows=$(df -h 2>/dev/null | awk '/mmcblk|\/mnt\/|\/media\/|\/sdcard/{print $6"|"$3" / "$2"|"$5}') %>
 
-<div class="mb-3 mt-n3">
+<div class="d-flex align-items-center gap-3 flex-wrap" style="margin:2rem 0 1.5rem">
+	<h2 class="text-primary m-0"><%= $page_title %></h2>
 	<span id="st-badge" class="badge rounded-pill text-bg-secondary" role="status" aria-live="polite">checking…</span>
 </div>
 
