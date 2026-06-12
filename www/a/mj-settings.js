@@ -174,8 +174,6 @@
 			const clearBtn = document.getElementById('mj-roi-clear');
 			if (clearBtn) {
 				clearBtn.addEventListener('click', () => {
-					const ifr = document.getElementById('mj-roi-iframe');
-					if (ifr) ifr.contentWindow.location.reload();
 					const roiField = state.fields.find(f => f.dot === 'motionDetect.roi');
 					if (roiField) {
 						roiField.setValue('');
@@ -302,6 +300,54 @@
 				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
 				'<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">';
 			control = p.querySelector('input');
+		} else if (type === 'array') {
+			// MultiRect fields (motionDetect.roi, crop, privacyMasks) are a list of
+			// "AxBxCxD" regions: render one editable row per region, not a single
+			// comma-joined string. The Visual editor (m/img.html) adds/reads rows
+			// through the window.mjRoi* hooks exposed below.
+			p = el('p', 'array mj-row');
+			p.innerHTML =
+				'<label class="form-label">' + esc(desc) + '</label>' +
+				'<div class="mj-array" id="' + id + '"></div>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-array-add">+ Add region</button>';
+			control = p.querySelector('.mj-array');
+			// Re-render the Visual editor's canvas whenever the list changes
+			// (add/delete/edit/reset), so drawn rectangles track the rows.
+			const syncEditor = () => {
+				if (dot !== 'motionDetect.roi') return;
+				const ifr = document.getElementById('mj-roi-iframe');
+				if (ifr && ifr.contentWindow && ifr.contentWindow.mjRoiRedraw)
+					ifr.contentWindow.mjRoiRedraw();
+			};
+			const onChange = () => { updateDirty(); syncEditor(); };
+			control._sync = syncEditor;
+			const addRow = (val) => {
+				const row = el('div', 'input-group input-group-sm mb-1 mj-array-row');
+				const inp = el('input', 'form-control');
+				inp.type = 'text';
+				inp.placeholder = 'XxYxWxH';
+				inp.value = val || '';
+				inp.addEventListener('input', onChange);
+				inp.addEventListener('change', onChange);
+				const del = el('button', 'btn btn-outline-danger mj-array-del');
+				del.type = 'button';
+				del.textContent = '×';
+				del.addEventListener('click', () => { row.remove(); onChange(); });
+				row.appendChild(inp);
+				row.appendChild(del);
+				control.appendChild(row);
+				return inp;
+			};
+			control._addRow = addRow;
+			control._rows = () => Array.from(control.querySelectorAll('.mj-array-row input'))
+				.map(i => i.value.trim()).filter(s => s.length);
+			(Array.isArray(eff) ? eff : (eff ? String(eff).split(/\s*,\s*/) : []))
+				.forEach(x => { if (x) addRow(x); });
+			p.querySelector('.mj-array-add').addEventListener('click', () => { addRow(''); onChange(); });
+			if (dot === 'motionDetect.roi') {
+				window.mjRoiAdd = (dim) => { if (dim) { addRow(dim); onChange(); } };
+				window.mjRoiList = () => control._rows();
+			}
 		} else {
 			return null;
 		}
@@ -324,13 +370,23 @@
 		control.addEventListener('input', updateDirty);
 		control.addEventListener('change', updateDirty);
 
+		// array fields canonicalise to a comma-joined string so dirty-tracking
+		// (a plain !== against state.initial) keeps working; onSubmit splits it
+		// back into a list before POSTing.
 		const getValue = type === 'boolean'
 			? () => control.checked ? 'true' : 'false'
+			: type === 'array'
+			? () => control._rows().join(', ')
 			: () => String(control.value);
 
 		const setValue = (v) => {
 			if (type === 'boolean') {
 				control.checked = toBool(v);
+			} else if (type === 'array') {
+				control.querySelectorAll('.mj-array-row').forEach(r => r.remove());
+				const arr = Array.isArray(v) ? v : (v ? String(v).split(/\s*,\s*/) : []);
+				arr.forEach(x => { if (x) control._addRow(x); });
+				if (control._sync) control._sync();
 			} else {
 				control.value = v !== undefined && v !== null ? String(v) : '';
 				const show = p.querySelector('.show-value');
@@ -360,7 +416,14 @@
 		if (!dirty.length) return;
 
 		const body = {};
-		for (const f of dirty) setDotted(body, f.dot, f.getValue());
+		for (const f of dirty) {
+			let val = f.getValue();
+			// array-typed schema fields (MultiRect: roi/crop/privacyMasks) post as a
+			// list of strings, not a comma-joined scalar.
+			if (f.schema && f.schema.type === 'array')
+				val = String(val).split(',').map(s => s.trim()).filter(s => s.length);
+			setDotted(body, f.dot, val);
+		}
 
 		const btn = document.getElementById('mj-save');
 		btn.disabled = true;
