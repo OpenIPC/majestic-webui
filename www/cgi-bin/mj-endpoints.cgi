@@ -92,35 +92,4 @@
 	</div>
 </div>
 
-<script>
-	function initializeCopyToClipboard() {
-		document.querySelectorAll(".cp2cb").forEach(function (element) {
-			element.title = "Click to copy to clipboard";
-			element.addEventListener("click", function (event) {
-				event.target.preventDefault;
-				event.target.animate({ color: 'red' }, 500);
-				if (navigator.clipboard && window.isSecureContext) {
-					navigator.clipboard.writeText(event.target.textContent).then(r => playChime(r));
-				} else {
-					let textArea = document.createElement("textarea");
-					textArea.value = event.target.textContent;
-					textArea.style.position = "fixed";
-					textArea.style.left = "-999999px";
-					textArea.style.top = "-999999px";
-					document.body.appendChild(textArea);
-					textArea.focus();
-					textArea.select();
-					return new Promise((res, rej) => {
-						document.execCommand('copy') ? res() : rej();
-						textArea.remove();
-					});
-				}
-			})
-		})
-	}
-
-	window.onload = function () {
-		initializeCopyToClipboard();
-	}
-</script>
 <%in p/footer.cgi %>

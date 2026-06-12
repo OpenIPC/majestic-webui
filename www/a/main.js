@@ -171,6 +171,25 @@ function initAll() {
 		});
 	});
 
+	// click-to-copy for .cp2cb snippets (HTTPS uses the clipboard API, plain
+	// http falls back to a hidden textarea + execCommand)
+	$$('.cp2cb').forEach(el => {
+		el.title = 'Click to copy';
+		el.addEventListener('click', () => {
+			const text = el.textContent.trim();
+			const flash = () => { el.title = 'Copied!'; setTimeout(() => el.title = 'Click to copy', 1000); };
+			if (navigator.clipboard && window.isSecureContext) {
+				navigator.clipboard.writeText(text).then(flash).catch(() => {});
+			} else {
+				const ta = document.createElement('textarea');
+				ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+				document.body.appendChild(ta); ta.focus(); ta.select();
+				try { document.execCommand('copy'); flash(); } catch (e) {}
+				document.body.removeChild(ta);
+			}
+		});
+	});
+
 	heartbeat();
 }
 
