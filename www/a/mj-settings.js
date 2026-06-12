@@ -47,17 +47,38 @@
 			(key ? key.charAt(0).toUpperCase() + key.slice(1) : key);
 	}
 
+	// Tabs are the schema's x-groups manifest (Image/Video/Events/...), each
+	// merging several config sections. Only sections present in the live schema
+	// (and groups with >=1 such section) are shown — unsupported features hide.
+	function groups() {
+		const xg = (state.schema && state.schema['x-groups']) || [];
+		const props = (state.schema && state.schema.properties) || {};
+		const out = [];
+		for (const g of xg) {
+			const secs = (g.sections || []).filter(s => props[s] && props[s].properties);
+			if (secs.length) out.push({ id: g.id, label: g.label, sections: secs });
+		}
+		return out;
+	}
+
+	function groupForTab(tab) {
+		const gs = groups();
+		return gs.find(g => g.id === tab) ||           // group id
+			gs.find(g => g.sections.includes(tab)) ||  // old ?tab=<section> bookmark
+			gs[0];                                      // default: first group
+	}
+
 	function buildNav() {
 		const nav = document.getElementById('mj-settings-nav');
 		if (!nav) return;
 		nav.innerHTML = '';
-		for (const key of Object.keys(state.schema.properties || {})) {
+		for (const g of groups()) {
 			const li = document.createElement('li');
 			li.className = 'nav-item';
 			const a = document.createElement('a');
 			a.className = 'nav-link';
-			a.href = 'mj-settings.cgi?tab=' + encodeURIComponent(key);
-			a.textContent = label(key);
+			a.href = 'mj-settings.cgi?tab=' + encodeURIComponent(g.id);
+			a.textContent = g.label;
 			li.appendChild(a);
 			nav.appendChild(li);
 		}
@@ -79,23 +100,43 @@
 	}
 
 	function onPopState(ev) {
-		const tabFromUrl = new URLSearchParams(location.search).get('tab') || 'system';
-		if (tabFromUrl === state.tab) return;
+		const tabFromUrl = new URLSearchParams(location.search).get('tab');
+		const g = groupForTab(tabFromUrl);
+		if (g && g.id === state.tab) return;
 		load(tabFromUrl, /*push*/ false);
 	}
 
+	function groupHasMotion(group) {
+		return !!(group && group.sections && group.sections.includes('motionDetect'));
+	}
+
 	async function load(tab, push) {
-		state.tab = tab;
-
-		setActiveNav(tab);
-		setTitle(tab);
-		if (tab !== 'motionDetect') toggleRoi(tab);
-		if (push) {
-			history.pushState({ tab }, '', 'mj-settings.cgi?tab=' + encodeURIComponent(tab));
-		}
-
 		const form = document.getElementById('mj-settings-form');
 		if (!form) return;
+
+		// schema/config must be loaded before we can resolve groups.
+		try {
+			if (!state.schema) state.schema = await fetchJson('/api/v1/config.schema.json');
+			if (!state.config) state.config = await fetchJson('/api/v1/config.json');
+		} catch (e) {
+			showFatal(form, 'Failed to load schema or config: ' + e.message);
+			return;
+		}
+
+		const group = groupForTab(tab);
+		if (!group) {
+			showFatal(form, 'No settings groups in schema.');
+			return;
+		}
+		state.tab = group.id;
+
+		setActiveNav(group.id);
+		setTitle(group.label);
+		if (!groupHasMotion(group)) toggleRoi(group);
+		if (push) {
+			history.pushState({ tab: group.id }, '', 'mj-settings.cgi?tab=' + encodeURIComponent(group.id));
+		}
+
 		form.innerHTML = '';
 		if (!form.dataset.bound) {
 			form.addEventListener('submit', onSubmit);
@@ -107,23 +148,21 @@
 		err.role = 'alert';
 		form.appendChild(err);
 
-		try {
-			if (!state.schema) state.schema = await fetchJson('/api/v1/config.schema.json');
-			if (!state.config) state.config = await fetchJson('/api/v1/config.json');
-		} catch (e) {
-			showFatal(form, 'Failed to load schema or config: ' + e.message);
-			return;
-		}
-
-		const props = ((state.schema.properties || {})[tab] || {}).properties;
-		if (!props) {
-			showFatal(form, 'Schema has no properties for tab "' + tab + '".');
-			return;
-		}
-
 		state.fields = [];
 		state.initial = {};
-		renderProps(form, tab, props);
+		// Render each merged section. Multi-section groups get a subheader per
+		// section; a single-section group needs none (the tab title says it).
+		const multi = group.sections.length > 1;
+		for (const section of group.sections) {
+			const props = ((state.schema.properties || {})[section] || {}).properties;
+			if (!props) continue;
+			if (multi) {
+				const h = el('h5', 'mt-4 mb-2 text-secondary');
+				h.textContent = label(section);
+				form.appendChild(h);
+			}
+			renderProps(form, section, props);
+		}
 
 		const toolbar = document.createElement('div');
 		toolbar.className = 'mj-toolbar d-flex align-items-center mt-3 gap-2';
@@ -132,7 +171,7 @@
 			'<button type="submit" class="btn btn-primary" id="mj-save" disabled>Save Changes</button>';
 		form.appendChild(toolbar);
 
-		if (tab === 'motionDetect') toggleRoi(tab);
+		if (groupHasMotion(group)) toggleRoi(group);
 
 		applyVisibility();
 
@@ -150,15 +189,15 @@
 		});
 	}
 
-	function setTitle(tab) {
+	function setTitle(title) {
 		const h = document.getElementById('mj-settings-title');
-		if (h) h.textContent = label(tab);
+		if (h) h.textContent = title;
 	}
 
-	function toggleRoi(tab) {
+	function toggleRoi(group) {
 		const id = 'mj-roi-inset';
 		const existing = document.getElementById(id);
-		if (tab === 'motionDetect') {
+		if (groupHasMotion(group)) {
 			if (existing) return;
 			const wrap = document.createElement('div');
 			wrap.id = id;
