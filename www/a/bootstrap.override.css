@@ -105,6 +105,39 @@ textarea {
 	margin-bottom: 1rem;
 }
 
+.storage-bar {
+	display: flex;
+	height: 14px;
+	border-radius: 4px;
+	overflow: hidden;
+	background: var(--bs-secondary-bg);
+}
+
+.storage-bar .seg {
+	flex: 0 0 auto;
+	box-shadow: inset -1.5px 0 0 var(--bs-body-bg);
+}
+
+.storage-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.1rem 0.6rem;
+}
+
+.storage-legend .dot {
+	display: inline-block;
+	width: 0.55rem;
+	height: 0.55rem;
+	border-radius: 50%;
+	margin-right: 0.3rem;
+	vertical-align: middle;
+}
+
+.storage-legend .dot-free {
+	background: var(--bs-secondary-bg);
+	box-shadow: inset 0 0 0 1px var(--bs-border-color);
+}
+
 pre#output[data-cmd] {
 	background-color: rgb(0, 0, 0);
 	color: rgba(170, 170, 170, 0.8);

@@ -152,7 +152,41 @@
 		});
 	}
 
+	function humanKB(kb) {
+		return kb >= 1024 ? (kb / 1024).toFixed(kb >= 10240 ? 0 : 1) + ' MB' : (kb | 0) + ' KB';
+	}
+	function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+	function renderOverlay() {
+		const el = $('#overlay-data'); if (!el) return;
+		let d; try { d = JSON.parse(el.textContent); } catch (e) { return; }
+		const bar = $('#overlay-bar'), leg = $('#overlay-legend');
+		if (!bar || !d.total) return;
+		const palette = ['#e0544e', '#e08a3c', '#e8c84a', '#4ca36a', '#4c60d8', '#8a5cd8', '#3ca3a3'];
+		let cats = (d.cats || []).filter(c => c.kb > 0).sort((a, b) => b.kb - a.kb);
+		if (cats.length > 6) {
+			const tail = cats.slice(6), sum = tail.reduce((s, c) => s + c.kb, 0);
+			cats = cats.slice(0, 6);
+			if (sum > 0) cats.push({ name: 'other', kb: sum });
+		}
+		// du reports uncompressed sizes; df.used is real (compressed) flash usage.
+		// Use du only for the relative split, scaled onto the actual used space.
+		const sumCats = cats.reduce((s, c) => s + c.kb, 0);
+		const scale = sumCats > 0 ? d.used / sumCats : 0;
+		const segs = cats.map((c, i) => ({ name: c.name, kb: c.kb * scale, color: palette[i % palette.length] }))
+			.filter(s => s.kb >= 1);
+		if (!segs.length && d.used > 0) segs.push({ name: 'used', kb: d.used, color: '#7a7a8c' });
+		bar.innerHTML = segs.map(s =>
+			'<div class="seg" style="width:' + (s.kb / d.total * 100).toFixed(2) + '%;background:' + s.color + '" title="' + cap(s.name) + ' ' + humanKB(s.kb) + '"></div>'
+		).join('');
+		const free = Math.max(0, d.total - d.used);
+		leg.innerHTML = segs.map(s =>
+			'<span><i class="dot" style="background:' + s.color + '"></i>' + cap(s.name) + ' <span class="text-secondary">' + humanKB(s.kb) + '</span></span>'
+		).join('') + '<span><i class="dot dot-free"></i>Free <span class="text-secondary">' + humanKB(free) + '</span></span>';
+	}
+
 	function init() {
+		renderOverlay();
 		sparks.cpu = makeSpark('#spark-cpu', '#4c60d8', 0, 100);
 		sparks.ram = makeSpark('#spark-ram', '#4c60d8', 0, 100);
 		sparks.temp = makeSpark('#spark-temp', '#d87f4c', null, null);

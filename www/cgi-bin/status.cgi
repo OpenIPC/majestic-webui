@@ -4,8 +4,13 @@
 <% page_title="Device Status" %>
 <%in p/header.cgi %>
 
-<% overlay_pct=$(df /overlay 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}') %>
-<% overlay_use=$(df -h /overlay 2>/dev/null | awk 'NR==2{print $3" / "$2}') %>
+<% overlay_use=$(df -h /overlay 2>/dev/null | awk 'NR==2{print $3" of "$2" used"}') %>
+<% ovd=/overlay/root; [ -d "$ovd" ] || ovd=/overlay/upper; [ -d "$ovd" ] || ovd=/overlay %>
+<% ov_df=$(df -k /overlay 2>/dev/null | awk 'NR==2{printf "%d %d %d",$2,$3,$4}') %>
+<% ov_total=$(echo $ov_df | cut -d' ' -f1) %>
+<% ov_used=$(echo $ov_df | cut -d' ' -f2) %>
+<% ov_avail=$(echo $ov_df | cut -d' ' -f3) %>
+<% ov_cats=$(du -sk "$ovd"/* 2>/dev/null | sort -rn | awk '{n=$2; sub(/.*\//,"",n); printf "%s{\"name\":\"%s\",\"kb\":%d}",(NR>1?",":""),n,$1}') %>
 <% sd_rows=$(df -h 2>/dev/null | awk '/mmcblk|\/mnt\/|\/media\/|\/sdcard/{print $6"|"$3" / "$2"|"$5}') %>
 
 <div class="mb-3 mt-n3">
@@ -105,12 +110,12 @@
 			<dl class="small list mb-2">
 				<dt>Flash</dt><dd><%= $flash_size %> MB <span class="text-secondary"><%= $flash_type %></span></dd>
 			</dl>
-			<div class="d-flex justify-content-between x-small">
-				<span>Overlay</span><span class="text-secondary"><%= ${overlay_use:-n/a} %></span>
+			<div class="d-flex justify-content-between x-small mb-1">
+				<span class="fw-semibold">Overlay</span><span class="text-secondary"><%= ${overlay_use:-n/a} %></span>
 			</div>
-			<div class="progress mb-3" style="height:6px">
-				<div class="progress-bar<% [ "${overlay_pct:-0}" -ge 90 ] && echo " bg-danger"; [ "${overlay_pct:-0}" -ge 75 ] && [ "${overlay_pct:-0}" -lt 90 ] && echo " bg-warning" %>" style="width:<%= ${overlay_pct:-0} %>%"></div>
-			</div>
+			<div id="overlay-bar" class="storage-bar mb-2"></div>
+			<div id="overlay-legend" class="storage-legend x-small mb-3"></div>
+			<script type="application/json" id="overlay-data">{"total":<%= ${ov_total:-0} %>,"used":<%= ${ov_used:-0} %>,"avail":<%= ${ov_avail:-0} %>,"cats":[<%= $ov_cats %>]}</script>
 			<% if [ -n "$sd_rows" ]; then %>
 				<% echo "$sd_rows" | while IFS='|' read mnt use pct; do %>
 					<div class="d-flex justify-content-between x-small">
