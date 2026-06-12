@@ -293,14 +293,6 @@ get_metrics() {
 	fi
 }
 
-get_schema() {
-	local m=/tmp/webui/schema.json
-	if [ ! -e "$m" ]; then
-		wget -q -T1 localhost/api/v1/config.schema.json -O "$m"
-	fi
-	echo "$m"
-}
-
 get_night() {
 	local m=$(pidof majestic)
 	local v=$(yaml-cli -g .nightMode.$1)
@@ -368,17 +360,9 @@ pre() {
 	tag "pre" "$(echo -e "$1" | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g")" "$2" "$3"
 }
 
-# Live preview player: low-latency H.264/H.265 over the /ws/video WebSocket,
-# played in a <video> via Media Source Extensions (see www/a/preview.js). Falls
-# back to an MJPEG <img> when MSE (or the codec) isn't supported; the wiring
-# lives in preview.cgi. The player needs only encoded video (always on), so it
-# renders regardless of jpeg.enabled — jpeg only gates the MJPEG fallback.
 preview() {
 	local jpeg_enabled="$(yaml-cli -g .jpeg.enabled)"
-	# Plain black while starting up; the colorbars test pattern (preview.svg) is
-	# applied by preview.js only on genuine "no signal".
 	local bg="background:#000; background-size:cover; width:100%"
-	# Only offer the Sub toggle when the sub stream is actually encoding.
 	local sub=""
 	if [ "true" = "$(yaml-cli -g .video1.enabled)" ]; then
 		sub='<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-1" autocomplete="off"><label class="btn btn-outline-primary" for="mj-stream-1">Sub</label>'

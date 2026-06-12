@@ -30,9 +30,38 @@
 	}
 
 	async function init() {
-		wireNav();
+		try {
+			state.schema = await fetchJson('/api/v1/config.schema.json');
+		} catch (e) {
+			const form = document.getElementById('mj-settings-form');
+			if (form) showFatal(form, 'Failed to load schema: ' + e.message);
+			return;
+		}
+		buildNav();
 		window.addEventListener('popstate', onPopState);
 		await load(state.tab, /*push*/ false);
+	}
+
+	function label(key) {
+		return (boot.labels && boot.labels[key]) ||
+			(key ? key.charAt(0).toUpperCase() + key.slice(1) : key);
+	}
+
+	function buildNav() {
+		const nav = document.getElementById('mj-settings-nav');
+		if (!nav) return;
+		nav.innerHTML = '';
+		for (const key of Object.keys(state.schema.properties || {})) {
+			const li = document.createElement('li');
+			li.className = 'nav-item';
+			const a = document.createElement('a');
+			a.className = 'nav-link';
+			a.href = 'mj-settings.cgi?tab=' + encodeURIComponent(key);
+			a.textContent = label(key);
+			li.appendChild(a);
+			nav.appendChild(li);
+		}
+		wireNav();
 	}
 
 	function wireNav() {
@@ -94,18 +123,7 @@
 
 		state.fields = [];
 		state.initial = {};
-		for (const key of Object.keys(props)) {
-			const dot = tab + '.' + key;
-			if (EXCLUDE.has(dot)) continue;
-
-			const sub = props[key];
-			const eff = getDotted(state.config, dot);
-			const field = renderField(form, dot, key, sub, eff);
-			if (field) {
-				state.fields.push(field);
-				state.initial[dot] = field.getValue();
-			}
-		}
+		renderProps(form, tab, props);
 
 		const toolbar = document.createElement('div');
 		toolbar.className = 'mj-toolbar d-flex align-items-center mt-3 gap-2';
@@ -115,6 +133,8 @@
 		form.appendChild(toolbar);
 
 		if (tab === 'motionDetect') toggleRoi(tab);
+
+		applyVisibility();
 
 		updateDirty();
 	}
@@ -131,10 +151,8 @@
 	}
 
 	function setTitle(tab) {
-		const h = document.querySelector('#mj-settings-form-col h3');
-		if (!h) return;
-		const active = document.querySelector('#mj-settings-nav .nav-link.active');
-		if (active) h.textContent = active.textContent.trim();
+		const h = document.getElementById('mj-settings-title');
+		if (h) h.textContent = label(tab);
 	}
 
 	function toggleRoi(tab) {
@@ -172,6 +190,51 @@
 
 	function hasDirty() {
 		return state.fields.some(f => f.getValue() !== state.initial[f.dot]);
+	}
+
+	function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+	function renderProps(form, basePath, props) {
+		for (const key of Object.keys(props)) {
+			const dot = basePath + '.' + key;
+			if (EXCLUDE.has(dot)) continue;
+			const sub = props[key];
+			if (sub && sub.type === 'object' && sub.properties) {
+				const h = el('h5', 'mt-4 mb-2 text-secondary');
+				h.textContent = sub.title || titleCase(key);
+				form.appendChild(h);
+				renderProps(form, dot, sub.properties);
+				continue;
+			}
+			const eff = getDotted(state.config, dot);
+			const field = renderField(form, dot, key, sub, eff);
+			if (field) {
+				state.fields.push(field);
+				state.initial[dot] = field.getValue();
+			}
+		}
+	}
+
+	function applyVisibility() {
+		state.visUpdaters = [];
+		const byDot = {};
+		for (const f of state.fields) byDot[f.dot] = f;
+		for (const f of state.fields) {
+			const vw = f.schema && f.schema.visibleWhen;
+			if (!vw || !vw.field) continue;
+			const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
+			const ctrl = byDot[parent + '.' + vw.field];
+			if (!ctrl) continue;
+			const update = () => { f.p.style.display = String(ctrl.getValue()) === String(vw.equals) ? '' : 'none'; };
+			ctrl.control.addEventListener('change', update);
+			ctrl.control.addEventListener('input', update);
+			state.visUpdaters.push(update);
+			update();
+		}
+	}
+
+	function runVisibility() {
+		(state.visUpdaters || []).forEach(u => u());
 	}
 
 	function renderField(form, dot, key, sub, eff) {
@@ -358,6 +421,7 @@
 			f.setValue(eff);
 			state.initial[f.dot] = f.getValue();
 		}
+		runVisibility();
 		updateDirty();
 	}
 
