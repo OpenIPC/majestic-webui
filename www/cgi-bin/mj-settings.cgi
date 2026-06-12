@@ -4,7 +4,7 @@
 <%
 page_title="Majestic Settings"
 label="$GET_tab"
-[ -z "$label" ] && label="system"
+[ -z "$label" ] && label="image"
 
 mj_json_escape() {
 	sed 's/\\/\\\\/g; s/"/\\"/g'
