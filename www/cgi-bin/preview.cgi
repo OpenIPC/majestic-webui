@@ -73,17 +73,16 @@ $("#toggle-light").addEventListener("click", () => {
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), img = $('#live-mjpeg'), note = $('#mj-note');
 	const jpegOn = initial.closest('.mj-player').dataset.jpeg === 'true';
-	const cur = () => $('#live-video'); // preview.js swaps the element per connection
+	const cur = () => $('#live-video');
 
 	const BARS = '#000 url(/a/preview.svg)';
 	function showVideo() {
 		const v = cur();
-		if (v) { v.style.display = ''; v.style.background = '#000'; } // video paints over; no colorbars while live
+		if (v) { v.style.display = ''; v.style.background = '#000'; }
 		if (img) { img.style.display = 'none'; img.src = ''; }
 		if (note) note.style.display = 'none';
 	}
 	function showNoSignal() {
-		// genuine lack of signal from the camera: show the colorbars test pattern
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = BARS; }
 		if (img) { img.style.display = 'none'; img.src = ''; }

@@ -1,24 +1,7 @@
-// Low-latency H.264/H.265 live player over the majestic /ws/video WebSocket.
-// majestic re-wraps the encoded stream as fragmented MP4; this feeds it to a
-// <video> element via Media Source Extensions (MSE). MSE works over plain
-// http:// on a camera (unlike WebCodecs, which is secure-context-only), so this
-// is the path that actually plays on an IP camera with no TLS cert. Falls back
-// to MJPEG when MSE or the codec isn't supported. No third-party library.
-//
-// Reusable: MajesticVideo.attach(videoEl, opts) returns a small handle so the
-// Preview page (and later the motionDetect ROI editor) can share one player.
-//   opts.stream  : 0 main (default) | 1 sub
-//   opts.onState : (state, detail) => {}   // 'connecting'|'playing'|'mjpeg'|'error'
-//   opts.onCodec : (codec, codecString, width, height) => {}
-// handle: { setStream(n), requestIdr(), destroy(), supported }
-//
-// Wire format (see src/websrv/ws.c on_ws_video):
-//   text   : {type:"init",codec,codecString,mime,width,height,stream}
-//   binary : first frame = fMP4 init segment (ftyp+moov); then one moof+mdat
-//            fragment per access unit.
+// Low-latency H.264/H.265 MSE player over the majestic /ws/video WebSocket.
 window.MajesticVideo = (function () {
-	const MAX_QUEUE = 240;     // drop oldest fragments if the tab stalls
-	const LIVE_EDGE = 1.0;     // seconds of buffer ahead before we snap to live
+	const MAX_QUEUE = 240;
+	const LIVE_EDGE = 1.0;
 
 	function attach(video, opts) {
 		opts = opts || {};
@@ -31,7 +14,7 @@ window.MajesticVideo = (function () {
 		let gotSignal = false, signalTimer = null, failCount = 0;
 
 		const mseOk = ('MediaSource' in window);
-		const NO_SIGNAL_MS = 4000;  // WS open but no stream this long => no signal
+		const NO_SIGNAL_MS = 4000;
 
 		function armSignalTimer() {
 			clearTimeout(signalTimer);
@@ -65,19 +48,13 @@ window.MajesticVideo = (function () {
 			if (objUrl) { try { URL.revokeObjectURL(objUrl); } catch (e) {} objUrl = null; }
 		}
 
-		// Chrome wedges a <video>'s decoder when a new MediaSource with a
-		// different resolution/codec is bound to the SAME element (switching
-		// streams) -> MEDIA_ERR_DECODE that survives until the element is
-		// recreated. So hand each connection a brand-new element cloned from the
-		// original (preserving id / classes / inline style / autoplay attrs).
-		// The page re-queries #live-video for show/hide.
 		function onVideoError(e) {
 			if (!closed && e.target === video) reconnect();
 		}
 		function freshVideo() {
 			const old = video;
 			const nv = old.cloneNode(false);
-			nv.removeAttribute('src'); // don't inherit the old (revoked) blob: URL
+			nv.removeAttribute('src');
 			nv.muted = true;
 			if (old.parentNode) old.parentNode.replaceChild(nv, old);
 			old.removeEventListener('error', onVideoError);
@@ -87,8 +64,8 @@ window.MajesticVideo = (function () {
 		}
 
 		function onInit(info) {
-			markSignal(); /* a stream description means the camera has signal */
-			failCount = 0; /* a healthy connection resets the give-up counter */
+			markSignal();
+			failCount = 0;
 			onCodec(info.codec, info.codecString, info.width, info.height);
 			mime = info.mime || ('video/mp4; codecs="' + info.codecString + '"');
 			if (!mseOk || !MediaSource.isTypeSupported(mime)) {
@@ -111,11 +88,6 @@ window.MajesticVideo = (function () {
 			}, { once: true });
 		}
 
-		// Keep playback inside the live buffered range. Critically this also
-		// handles a stream switch: the new MediaSource's timeline starts near 0,
-		// but the <video>'s currentTime is still in the OLD stream's frame (e.g.
-		// 1s or 6s), so it lands outside the new buffer and stalls to black. Snap
-		// in whenever currentTime is before the buffer, past it, or drifting.
 		function syncLive() {
 			try {
 				if (!video.buffered.length) return;
@@ -137,7 +109,7 @@ window.MajesticVideo = (function () {
 
 		function open() {
 			if (closed) return;
-			freshVideo(); // clean decoder for every (re)connect / stream switch
+			freshVideo();
 			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 			onState('connecting');
 			ws = new WebSocket(proto + '://' + location.host + '/ws/video?stream=' + stream);
@@ -159,9 +131,6 @@ window.MajesticVideo = (function () {
 		function reconnect() {
 			teardownMse();
 			if (closed || reconnectTimer) return;
-			// Give up after a run of failures that never delivered a stream
-			// (server busy / 503, or endpoint unavailable) and fall back to MJPEG
-			// instead of storming the reconnect loop.
 			if (++failCount >= 6) { onState('mjpeg', 'live stream unavailable'); stop(); return; }
 			reconnectTimer = setTimeout(function () {
 				reconnectTimer = null;
@@ -187,9 +156,6 @@ window.MajesticVideo = (function () {
 			backoff = 1000;
 			failCount = 0;
 			stop();
-			// Let the old MediaSource/decoder fully release before binding a new
-			// one — Chrome decode-errors if a new (different-resolution) decoder
-			// spins up while the previous one is still being torn down.
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			reconnectTimer = setTimeout(function () { reconnectTimer = null; open(); }, 300);
 		}
