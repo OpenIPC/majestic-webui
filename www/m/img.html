@@ -13,7 +13,6 @@
 <div id="canvas"></div>
 
 <script>
-const ROI_INPUT_ID = 'mjf-motionDetect-roi';
 const IFRAME = window.frameElement;
 const HOST = IFRAME ? IFRAME.parentElement : null;
 const IMG_WIDTH = Math.round((HOST ? HOST.offsetWidth : window.innerWidth) * 0.99);
@@ -29,17 +28,37 @@ function _motion_size() {
 	return JSON.parse(xhr.responseText).video0.size.split('x');
 }
 
-function _roi_input() {
-	return parent.document.getElementById(ROI_INPUT_ID);
+// The settings form (a/mj-settings.js) renders motionDetect.roi as a list of
+// region rows and exposes these hooks; the editor adds/reads regions through
+// them rather than manipulating a string input.
+function _roi_list() {
+	return parent.mjRoiList ? parent.mjRoiList() : [];
 }
 
-function _update_roi_value(next) {
-	const input = _roi_input();
-	if (!input) return;
-	input.value = next;
-	input.dispatchEvent(new Event('input', { bubbles: true }));
-	input.dispatchEvent(new Event('change', { bubbles: true }));
+function _roi_add(dim) {
+	if (parent.mjRoiAdd) parent.mjRoiAdd(dim);
 }
+
+function draw_rectangle(s, color) {
+	const canvas = document.getElementById('canvas');
+	const e = document.createElement('div');
+	e.className = 'rectangle';
+	e.style.left = (s[0] / COEFF) + 'px'; e.style.top = (s[1] / COEFF) + 'px';
+	e.style.width = (s[2] / COEFF) + 'px'; e.style.height = (s[3] / COEFF) + 'px';
+	e.style.background = color;
+	canvas.appendChild(e);
+}
+
+// Re-render every region from the parent's current list. Exposed so the
+// settings form can re-sync the canvas after a row is added/deleted/reset/edited.
+function redraw_regions() {
+	const canvas = document.getElementById('canvas');
+	canvas.querySelectorAll('.rectangle').forEach(el => el.remove());
+	for (const v of _roi_list()) {
+		if (v) draw_rectangle(v.split('x'), GRN);
+	}
+}
+window.mjRoiRedraw = redraw_regions;
 
 function set_canvas_size() {
 	document.getElementById('canvas').style.width = IMG_WIDTH + 'px';
@@ -71,23 +90,9 @@ function initDraw(canvas) {
 	};
 
 	let element = null;
-	function draw_rectangle(s, color) {
-		e= document.createElement('div');
-		e.className = 'rectangle'
-		e.style.left = (s[0] / COEFF) + 'px'; e.style.top = (s[1] / COEFF) + 'px';
-		e.style.width = (s[2] / COEFF) + 'px'; e.style.height = (s[3] / COEFF) + 'px';
-		e.style.background = color;
-		canvas.appendChild(e)
-		e = null;
-	}
 
 	// draw current regions
-	const seed = _roi_input();
-	if (seed && seed.value) {
-		for (v of seed.value.split(', ')) {
-			draw_rectangle(v.split('x'), GRN);
-		}
-	}
+	redraw_regions();
 
 	canvas.onmousemove = function (e) {
 		setMousePosition(e);
@@ -121,10 +126,7 @@ function initDraw(canvas) {
 				rW = Math.round((rect.right - rect.left) * COEFF),
 				rH = Math.round((rect.bottom - rect.top) * COEFF);
 			rect = element = null;
-			const input = _roi_input();
-			if (!input) return;
-			let dimensions = rX + 'x' + rY + 'x' + rW + 'x' + rH;
-			_update_roi_value(input.value === '' ? dimensions : input.value + ',' + dimensions);
+			_roi_add(rX + 'x' + rY + 'x' + rW + 'x' + rH);
 		}
 	}
 }
