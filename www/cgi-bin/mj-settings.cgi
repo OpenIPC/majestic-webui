@@ -57,6 +57,7 @@ fi
 	</div>
 </div>
 
+<script src="/a/preview.js"></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>
