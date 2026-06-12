@@ -84,10 +84,7 @@ fi
 	$('#telegram_crontab').checked = true;
 <% fi %>
 
-<% if [ "$(yaml-cli -g .video0.codec)" != "h265" ]; then %>
-	$('#telegram_heif').checked = false;
-	$('#telegram_heif').disabled = true;
-<% fi %>
+mjHeifGate('#telegram_heif');
 </script>
 
 <%in p/footer.cgi %>

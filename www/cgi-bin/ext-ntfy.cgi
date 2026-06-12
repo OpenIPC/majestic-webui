@@ -114,11 +114,7 @@ function sendTestNtfy() {
         });
 }
 
-// Logic for disabling HEIF if the codec is not h265
-<% if [ "$(yaml-cli -g .video0.codec)" != "h265" ]; then %>
-    $('#ntfy_heif').checked = false;
-    $('#ntfy_heif').disabled = true;
-<% fi %>
+mjHeifGate('#ntfy_heif');
 </script>
 
 <%in p/footer.cgi %>

@@ -14,6 +14,27 @@ function sleep(ms) {
 	return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+let _mjCfg;
+function mjConfig() {
+	if (!_mjCfg)
+		_mjCfg = fetch('/api/v1/config.json', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.json() : {}).catch(() => ({}));
+	return _mjCfg;
+}
+
+function mjGet(cfg, dot) {
+	return dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg);
+}
+
+function mjHeifGate(sel) {
+	mjConfig().then(cfg => {
+		if (mjGet(cfg, 'video0.codec') !== 'h265') {
+			const el = $(sel);
+			if (el) { el.checked = false; el.disabled = true; }
+		}
+	});
+}
+
 function setProgressBar(id, value, name) {
 	$(id).setAttribute('aria-valuenow', value);
 	$(id).title = name + ': ' + value + '%'
