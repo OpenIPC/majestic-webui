@@ -25,11 +25,13 @@ if [ "$openwall_enabled" != "true" ]; then
 	exit 1
 fi
 
-if [ "$openwall_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
+if [ "$openwall_heif" = "true" ]; then
 	snapshot=/tmp/snapshot.heif
+	content_type="image/heif"
 	wget -q -T1 localhost/image.heif -O "$snapshot"
 else
 	snapshot=/tmp/snapshot.jpg
+	content_type="image/jpeg"
 	wget -q -T1 localhost/image.jpg -O "$snapshot"
 fi
 
@@ -64,7 +66,7 @@ command="${command} -F 'soc=${soc}'"
 command="${command} -F 'soc_temperature=${temperature}'"
 command="${command} -F 'streamer=${streamer}'"
 command="${command} -F 'uptime=${uptime}'"
-command="${command} -F 'file=@${snapshot}'"
+command="${command} -F 'file=@${snapshot};type=${content_type}'"
 
 echo "$command"
 eval "$command"

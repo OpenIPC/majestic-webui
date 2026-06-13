@@ -35,11 +35,13 @@ fi
 filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
 
 # Format verification (HEIF or JPG)
-if [ "$ntfy_heif" = "true" ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
+if [ "$ntfy_heif" = "true" ]; then
     snapshot=/tmp/${filename}.heif
+    content_type="image/heif"
     wget -q -T1 localhost/image.heif -O "$snapshot"
 else
     snapshot=/tmp/${filename}.jpg
+    content_type="image/jpeg"
     wget -q -T1 localhost/image.jpg -O "$snapshot"
 fi
 
@@ -76,6 +78,7 @@ command="${command} -H 'Priority: ${ntfy_priority}'"
 command="${command} -H 'Tags: warning,rotating_light'"
 command="${command} -H 'Message: ${ntfy_message}'"
 command="${command} -H 'Filename: $(basename $snapshot)'"
+command="${command} -H 'Content-Type: ${content_type}'"
 
 # Sending a file
 command="${command} -T '${snapshot}'"

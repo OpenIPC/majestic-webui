@@ -70,7 +70,7 @@ fi
 				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Message</div>
 				<% field_text "ntfy_caption" "Caption" "Supports %hostname, %datetime, %soctemp." %>
 				<% field_string "ntfy_priority" "Priority" "eval" "1 2 3 4 5" "1 = min, 5 = max (urgent)." %>
-				<% field_switch "ntfy_heif" "Use HEIF format" "eval" "Smaller files than JPEG." %>
+				<% field_switch "ntfy_heif" "Use HEIF format" "eval" "Smaller files (best with H265)." %>
 				<% button_submit %>
 			</form>
 		</div></div>
