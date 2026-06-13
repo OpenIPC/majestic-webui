@@ -50,7 +50,7 @@ fi
 				<% field_switch "openwall_crontab" "Add to crontab" "eval" "Send pictures timed by interval." %>
 				<% field_text "openwall_caption" "Caption" "Location or short description." %>
 				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Options</div>
-				<% field_switch "openwall_heif" "Use HEIF format" "eval" "Smaller files than JPEG." %>
+				<% field_switch "openwall_heif" "Use HEIF format" "eval" "Smaller files (best with H265)." %>
 				<% field_switch "openwall_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
 				<% button_submit %>
 			</form>

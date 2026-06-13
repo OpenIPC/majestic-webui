@@ -23,7 +23,7 @@ else
 fi
 
 filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
-if [ "$telegram_heif" = "true"  ] && [ "$(yaml-cli -g .video0.codec)" = "h265" ]; then
+if [ "$telegram_heif" = "true" ]; then
 	snapshot=/tmp/${filename}.heif
 	wget -q -T1 localhost/image.heif -O "$snapshot"
 else
@@ -52,7 +52,9 @@ if [ -n "$telegram_thread_id" ]; then
 fi 
 command="${command} --url https://api.telegram.org/bot${telegram_token}"
 
-if [ "$telegram_document" = "true" ]; then
+# HEIF is not a valid sendPhoto format (Telegram only accepts JPEG/PNG/GIF/WEBP),
+# so always send it via sendDocument.
+if [ "$telegram_document" = "true" ] || [ "${snapshot##*.}" = "heif" ]; then
 	command="${command}/sendDocument"
 	command="${command} -F 'document=@${snapshot}'"
 	command="${command} -F 'caption=${telegram_message}'"
