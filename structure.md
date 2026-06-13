@@ -39,7 +39,6 @@
     │   ├── fw-restart.cgi
     │   ├── fw-restore.cgi
     │   ├── fw-settings.cgi
-    │   ├── fw-system.cgi
     │   ├── fw-time.cgi
     │   ├── fw-update.cgi
     │   ├── info-logs.cgi                # Unified live log viewer (Majestic / Kernel / Everything)
