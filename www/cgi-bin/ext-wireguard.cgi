@@ -31,48 +31,47 @@ fi
 
 <%in p/header.cgi %>
 
-<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
- <div class="col">
- <% if ip link show wg0 >/dev/null 2>&1; then %>
-  <div class="alert alert-success">
-  <h4>WireGuard is up</h4>
-  <p>Tunnel is active and running.</p>
-  <dl class="mb-0">
-   <dt>Endpoint</dt>
-   <dd><%= fw_printenv -n wg_endpoint %></dd>
-   <dt>Interface Address</dt>
-   <dd><%= fw_printenv -n wg_address %></dd>
-  </dl>
-  </div>
- <% fi %>
-
- <h3>Settings</h3>
- <form action="<%= $SCRIPT_NAME %>" method="post">
-  <% if [ "$env_set" -gt 0 ]; then %>
-   <% field_hidden "action" "reset" %>
-   <% button_submit "Reset configuration" %>
-  <% else %>
-   <% field_text "wg_privkey" "Private Key" %>
-   <% field_text "wg_pubkey" "Public Key" %>
-   <% field_text "wg_sharkey" "Preshared Key" %>
-   <% field_text "wg_allowed" "Allowed IPs (e.g. 10.0.0.0/24)" %>
-   <% field_text "wg_endpoint" "Peer Endpoint (IP:Port)" %>
-   <% field_text "wg_alive" "Persistent Keepalive (e.g. 25)" %>
-   <% field_text "wg_address" "Address (e.g. 10.0.0.2/24)" %>
-   <% button_submit "Save Changes" %>
-  <% fi %>
- </form>
- </div>
-
- <div class="col col-lg-8">
-  <h3>Configuration</h3>
-  <%
-   [ -e /tmp/wireguard.conf ] && ex "cat /tmp/wireguard.conf"
-   ex "fw_printenv | grep ^wg_"
-   ex "ip link show wg0"
-   ex "ip addr show wg0"
-  %>
- </div>
+<div class="row g-4">
+	<div class="col-12 col-lg-7">
+		<div class="card h-100"><div class="card-body">
+			<h3>WireGuard</h3>
+			<p class="small text-secondary">WireGuard VPN tunnel for secure remote access.</p>
+			<% if ip link show wg0 >/dev/null 2>&1; then %>
+				<dl class="small list">
+					<dt>Status</dt><dd><span class="text-success">Up</span></dd>
+					<dt>Endpoint</dt><dd class="text-break"><%= $(fw_printenv -n wg_endpoint) %></dd>
+					<dt>Address</dt><dd class="text-break"><%= $(fw_printenv -n wg_address) %></dd>
+				</dl>
+			<% fi %>
+			<form action="<%= $SCRIPT_NAME %>" method="post">
+				<% if [ "$env_set" -gt 0 ]; then %>
+					<% field_hidden "action" "reset" %>
+					<% button_submit "Reset configuration" "danger" %>
+				<% else %>
+					<% field_text "wg_privkey" "Private key" %>
+					<% field_text "wg_pubkey" "Public key" %>
+					<% field_text "wg_sharkey" "Preshared key" %>
+					<% field_text "wg_allowed" "Allowed IPs (e.g. 10.0.0.0/24)" %>
+					<% field_text "wg_endpoint" "Peer endpoint (IP:Port)" %>
+					<% field_text "wg_alive" "Persistent keepalive (e.g. 25)" %>
+					<% field_text "wg_address" "Address (e.g. 10.0.0.2/24)" %>
+					<% button_submit "Save Changes" %>
+				<% fi %>
+			</form>
+		</div></div>
+	</div>
 </div>
+
+<details class="mt-4">
+	<summary class="text-secondary small">Advanced — raw configuration</summary>
+	<div class="mt-3">
+		<%
+			[ -e /tmp/wireguard.conf ] && ex "cat /tmp/wireguard.conf"
+			ex "fw_printenv | grep ^wg_"
+			ex "ip link show wg0"
+			ex "ip addr show wg0"
+		%>
+	</div>
+</details>
 
 <%in p/footer.cgi %>
