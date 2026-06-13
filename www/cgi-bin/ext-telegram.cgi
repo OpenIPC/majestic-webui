@@ -46,45 +46,51 @@ fi
 %>
 
 <%in p/header.cgi %>
-	<div class="alert alert-info">
-		<dl>
-			<dt class="cp2cb">http://root:12345@<%= $network_address %>/cgi-bin/ext-telegram.cgi?send=image</dt>
-			<dd>Use this webhook url for remote call to send image.</dd>
-		</dl>
+
+<div class="row g-4">
+	<div class="col-12 col-lg-8">
+		<div class="card h-100"><div class="card-body">
+			<h3>Telegram</h3>
+			<p class="small text-secondary">Post snapshots to a Telegram channel, on a schedule or via the webhook.</p>
+			<form action="<%= $SCRIPT_NAME %>" method="post">
+				<% field_switch "telegram_enabled" "Enable Telegram" "eval" %>
+				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Bot</div>
+				<% field_text "telegram_token" "Token" "Telegram bot authentication token." %>
+				<% field_text "telegram_channel" "Channel" "Channel to post the images to." %>
+				<% field_text "telegram_thread_id" "Message thread id" "Topic to post to (forum supergroups only)." %>
+				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Submission</div>
+				<% field_string "telegram_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
+				<% field_switch "telegram_crontab" "Add to crontab" "eval" "Send pictures timed by interval." %>
+				<% field_text "telegram_caption" "Caption" "Location or short description." %>
+				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Options</div>
+				<% field_switch "telegram_document" "Send as document" "eval" "Attach picture as general file." %>
+				<% field_switch "telegram_heif" "Use HEIF format" "eval" "Requires H265 codec on Video0." %>
+				<% field_switch "telegram_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
+				<% button_submit %>
+			</form>
+		</div></div>
 	</div>
 
-<form action="<%= $SCRIPT_NAME %>" method="post">
-	<% field_switch "telegram_enabled" "Enable Telegram" "eval" %>
-	<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-		<div class="col">
-			<% field_text "telegram_token" "Token" "Telegram bot authentication token." %>
-			<% field_text "telegram_channel" "Channel" "Channel to post the images to." %>
-			<% field_text "telegram_thread_id" "Message_thread_id" "Topic to post the images to. (for forum supergroups only)" %>
-			<% field_string "telegram_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
-			<% field_text "telegram_caption" "Caption" "Location or short description." %>
-		</div>
-
-		<div class="col">
-			<% field_switch "telegram_crontab" "Add to Crontab" "eval" "Send pictures timed by interval." %>
-			<% field_switch "telegram_document" "Send as document" "eval" "Attach picture as general file." %>
-			<% field_switch "telegram_heif" "Use HEIF format" "eval" "Requires H265 codec on Video0." %>
-			<% field_switch "telegram_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
-		</div>
-
-		<div class="col">
-			<% [ -e "$config_file" ] && ex "cat $config_file" %>
-			<% ex "grep telegram /etc/crontabs/root" %>
-		</div>
+	<div class="col-12 col-lg-4">
+		<div class="card h-100"><div class="card-body">
+			<h3>Remote send</h3>
+			<dl class="small list mb-0">
+				<dt>Webhook</dt>
+				<dd class="text-break cp2cb">http://root:12345@<%= $network_address %>/cgi-bin/ext-telegram.cgi?send=image</dd>
+			</dl>
+			<p class="small text-secondary mt-2">Call this URL to trigger an image send. Click to copy.</p>
+		</div></div>
 	</div>
-	<% button_submit %>
-</form>
+</div>
 
-<script>
-<% if [ "$telegram_crontab" = "true" ]; then %>
-	$('#telegram_crontab').checked = true;
-<% fi %>
+<details class="mt-4">
+	<summary class="text-secondary small">Advanced — raw configuration</summary>
+	<div class="mt-3">
+		<% [ -e "$config_file" ] && ex "cat $config_file" %>
+		<% ex "grep telegram /etc/crontabs/root" %>
+	</div>
+</details>
 
-mjHeifGate('#telegram_heif');
-</script>
+<script>mjHeifGate('#telegram_heif');</script>
 
 <%in p/footer.cgi %>
