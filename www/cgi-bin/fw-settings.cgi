@@ -83,7 +83,7 @@ fi
 			<p class="small text-secondary mb-2">Lines starting <code>#/</code> are files to back up; <code>cli -s …</code> lines run after a restore.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_hidden "action" "save" %>
-				<textarea name="editor_text" class="form-control font-monospace small" style="height:20rem;white-space:pre;overflow-wrap:normal" spellcheck="false"><%= $(sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' "$config_file") %></textarea>
+				<textarea name="editor_text" class="form-control font-monospace small" style="height:20rem;white-space:pre;overflow-wrap:normal" spellcheck="false"><% sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' "$config_file" %></textarea>
 				<% button_submit "Save configuration" %>
 			</form>
 		</div></div>
