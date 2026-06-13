@@ -1,6 +1,27 @@
 :root {
-	--bs-font-sans-serif: 'Montserrat', sans-serif;
-	--bs-font-monospace: 'PT Mono', monospace;
+	/* brand fonts first (loaded from the CDN <link> in header.cgi), with a
+	   modern system fallback for offline/LAN cameras that can't reach the CDN */
+	--bs-font-sans-serif: 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+	--bs-font-monospace: 'PT Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+	/* ── modern "soft & elevated" theme tokens ─────────────────────────────
+	   Everything here is a Bootstrap 5.3 custom property, so the refresh is a
+	   pure token layer that applies to every page. Softer corners: */
+	--bs-border-radius: 0.5rem;
+	--bs-border-radius-sm: 0.375rem;
+	--bs-border-radius-lg: 0.75rem;
+	--bs-border-radius-xl: 1rem;
+
+	/* layered elevation scale (cards/buttons float above the page) */
+	--bs-box-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.12);
+	--bs-box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+	--bs-box-shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.22);
+
+	/* accent-tinted focus ring (indigo brand colour) */
+	--bs-focus-ring-color: rgba(76, 96, 216, 0.35);
+	--bs-focus-ring-width: 0.2rem;
+
+	--mj-ease: 140ms ease;
 }
 
 .col > h3 {
@@ -338,16 +359,66 @@ pre#output[data-cmd] {
 }
 
 [data-bs-theme=light] {
+	color-scheme: light;
 	--bs-primary: rgb(76, 96, 216);
+	--bs-primary-rgb: 76, 96, 216;
 	--bs-secondary: rgb(76, 96, 216);
+	/* soft off-white page so white cards visibly lift off it */
+	--bs-body-bg: #f4f5f9;
+	--bs-body-color: #1f2430;
+	--bs-secondary-bg: #eceef4;
+	--bs-card-bg: #ffffff;
+	--bs-border-color: #e2e5ee;
 }
 
 [data-bs-theme=dark] {
-	--bs-primary: rgb(76, 96, 216);
+	color-scheme: dark;
+	/* accent nudged a touch brighter for contrast on dark surfaces */
+	--bs-primary: rgb(92, 112, 232);
+	--bs-primary-rgb: 92, 112, 232;
 	--bs-secondary: rgb(138, 159, 208);
+	/* cool, layered neutrals (not pure black) so cards float above the page */
+	--bs-body-bg: #14161c;
+	--bs-body-color: #e6e8ee;
+	--bs-secondary-bg: #1c1f27;
+	--bs-tertiary-bg: #232734;
+	--bs-card-bg: #1c1f27;
+	--bs-border-color: #2c313d;
+	--bs-focus-ring-color: rgba(92, 112, 232, 0.4);
 }
 
+/* solid accent primary button in dark (replaces the old washed-out translucent
+   generic blue), with a brighter hover */
 [data-bs-theme=dark] .btn-primary {
-	--bs-btn-bg: rgba(13, 110, 253, 0.5);
-	--bs-btn-border-color: rgba(13, 110, 253, 0.5);
+	--bs-btn-bg: var(--bs-primary);
+	--bs-btn-border-color: var(--bs-primary);
+	--bs-btn-hover-bg: rgb(110, 130, 245);
+	--bs-btn-hover-border-color: rgb(110, 130, 245);
+	--bs-btn-active-bg: rgb(78, 98, 218);
+	--bs-btn-active-border-color: rgb(78, 98, 218);
+}
+
+/* ── soft & elevated components (token-driven, applies to every page) ───── */
+.card {
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: var(--bs-box-shadow-sm);
+	transition: box-shadow var(--mj-ease);
+}
+
+.card:hover {
+	box-shadow: var(--bs-box-shadow);
+}
+
+.btn {
+	transition: background-color var(--mj-ease), border-color var(--mj-ease),
+		box-shadow var(--mj-ease), filter var(--mj-ease);
+}
+
+.btn-primary {
+	box-shadow: var(--bs-box-shadow-sm);
+}
+
+.form-control,
+.form-select {
+	transition: border-color var(--mj-ease), box-shadow var(--mj-ease);
 }
