@@ -206,6 +206,13 @@
 		grid.id = 'mj-settings-grid';
 		form.appendChild(grid);
 
+		// Plain section cards pack into a CSS-column masonry below the grid, so
+		// unequal card heights don't leave chessboard gaps. The grid above keeps
+		// the wide interactive panels (live preview, live-adjust, ROI editor) and
+		// the lone full-width card, which want a flex row.
+		const cards = el('div', 'mj-cards');
+		form.appendChild(cards);
+
 		state.fields = [];
 		state.initial = {};
 
@@ -237,11 +244,13 @@
 		// Multi-card groups flow 2-up; a lone card (e.g. Recording — no preview,
 		// no ROI mate) is centred so it reads as one panel, not a left-stranded half.
 		const lone = group.sections.length === 1 && !groupHasMotion(group) && !live;
+		// plain/live groups masonry their cards; the lone card and the motion group
+		// (its card pairs with the ROI editor) stay in the flex grid as before.
+		const useMasonry = !lone && !groupHasMotion(group);
 		const colCls = lone ? 'col-12' : 'col-12 col-lg-6';
 		for (const section of group.sections) {
 			const props = ((state.schema.properties || {})[section] || {}).properties;
 			if (!props) continue;
-			const col = el('div', colCls);
 			const card = el('div', 'card');
 			const body = el('div', 'card-body');
 			const h = el('h3');
@@ -252,16 +261,31 @@
 			const target = lone ? el('div', 'mj-cols') : body;
 			if (lone) body.appendChild(target);
 			card.appendChild(body);
-			col.appendChild(card);
 			renderProps(target, section, props);
 			// a section whose only fields were x-live (moved to the panel) is empty
 			// apart from its heading — don't show an empty card.
 			const filled = lone ? target.childElementCount > 0 : body.childElementCount > 1;
 			if (!filled) continue;
-			grid.appendChild(col);
+			// the video channels (video0 = main, video1 = sub) stay a side-by-side
+			// pair at the top, in the flex grid, so users can compare the two
+			// channels; everything else flows into the masonry below.
+			const pinned = /^video\d+$/.test(section);
+			if (useMasonry && !pinned) {
+				// bare card; .mj-cards > .card supplies break-inside + spacing
+				cards.appendChild(card);
+			} else {
+				const col = el('div', colCls);
+				col.appendChild(card);
+				grid.appendChild(col);
+			}
 		}
 
 		if (groupHasMotion(group)) toggleRoi(group);
+
+		// Plain tabs route every card to the masonry, leaving the flex grid empty.
+		// An empty Bootstrap `.row` keeps its negative top margin and would pull the
+		// masonry up over the page heading — drop it when nothing used it.
+		if (!grid.childElementCount) grid.remove();
 
 		const toolbar = document.createElement('div');
 		toolbar.className = 'mj-toolbar d-flex align-items-center gap-2';
@@ -448,9 +472,10 @@
 	function renderField(container, dot, key, sub, eff, opts) {
 		opts = opts || {};
 		const live = !!opts.live;
-		const desc = sub.description || key;
+		// the field's `title` is the short label; older schemas only had `description`
+		const desc = sub.title || sub.description || key;
 		const meta = LIVE_META[key];
-		// live knobs show an emoji + short label; everything else uses the schema desc
+		// live knobs show an emoji + short label; everything else uses the title
 		const labelHtml = (live && meta)
 			? '<span class="mj-live-ico">' + meta.icon + '</span> ' + esc(meta.label)
 			: esc(desc);
@@ -586,6 +611,25 @@
 				reset.addEventListener('click', () => onReset(dot, reset));
 			}
 			p.appendChild(reset);
+		}
+
+		// detailed help under the control (skipped on the compact live-panel rows):
+		// the authored `hint` plus auto-context (value range for bounded integers).
+		if (!live) {
+			const hintParts = [];
+			if (sub.hint) hintParts.push(esc(sub.hint));
+			// only plain number inputs gain a range hint; sliders (max ≤ 100)
+			// already show their bounds via the track and the live value box
+			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
+			if (type === 'integer' && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
+				hintParts.push(esc(sub.minimum + '–' + sub.maximum));
+			if (hintParts.length) {
+				// block-level so it sits on its own line below the control and the
+				// inline "↺ reset" link (a span would flow into it, e.g. "reset0–32")
+				const hint = el('div', 'hint text-secondary');
+				hint.innerHTML = hintParts.join(' · ');
+				p.appendChild(hint);
+			}
 		}
 
 		container.appendChild(p);

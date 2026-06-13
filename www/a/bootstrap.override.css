@@ -273,6 +273,24 @@ pre#output[data-cmd] {
 	}
 }
 
+/* section cards pack as a masonry so unequal heights don't leave chessboard
+   gaps (cards flow top-to-bottom, then into the next column) */
+.mj-cards {
+	column-count: 2;
+	column-gap: 1.5rem;
+}
+
+.mj-cards > .card {
+	break-inside: avoid;
+	margin-bottom: 1.5rem;
+}
+
+@media (max-width: 991.98px) {
+	.mj-cards {
+		column-count: 1;
+	}
+}
+
 .mj-live-video {
 	width: 100%;
 	max-width: 640px;
