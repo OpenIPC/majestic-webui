@@ -355,7 +355,7 @@
 			col.innerHTML =
 				'<div class="card"><div class="card-body">' +
 				'<h3>Visual editor</h3>' +
-				'<iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" class="mj-roi-iframe"></iframe>' +
+				'<div class="mj-roi-wrap"><iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" class="mj-roi-iframe"></iframe></div>' +
 				'<button type="button" class="btn btn-outline-secondary mt-2" id="mj-roi-clear">Clear all regions</button>' +
 				'</div></div>';
 			grid.appendChild(col);
