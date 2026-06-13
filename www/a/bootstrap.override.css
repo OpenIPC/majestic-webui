@@ -173,6 +173,32 @@ pre#output[data-cmd] {
 	color: rgba(170, 170, 170, 0.8);
 }
 
+/* live log console (info-logs.cgi) */
+#log {
+	height: 70vh;
+	overflow-y: auto;
+	font-family: var(--bs-font-monospace);
+	font-size: 12px;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.log-line {
+	padding: 0 .25rem;
+}
+
+.log-err {
+	color: #dc3545;
+}
+
+.log-warn {
+	color: #fd7e14;
+}
+
+.log-debug {
+	opacity: .6;
+}
+
 .mj-row {
 	border-left: 2px solid transparent;
 	padding-left: 0.5rem;
