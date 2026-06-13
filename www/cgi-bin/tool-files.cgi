@@ -7,9 +7,9 @@
 	<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
 		<nav id="fm-breadcrumb" aria-label="path" class="me-auto"><ol class="breadcrumb m-0"></ol></nav>
 		<div class="btn-group btn-group-sm">
-			<button id="fm-newfolder" class="btn btn-outline-primary" type="button">New folder</button>
-			<button id="fm-newfile" class="btn btn-outline-primary" type="button">New file</button>
-			<button id="fm-upload-btn" class="btn btn-outline-primary" type="button">Upload</button>
+			<button id="fm-newfolder" class="btn btn-outline-secondary" type="button">New folder</button>
+			<button id="fm-newfile" class="btn btn-outline-secondary" type="button">New file</button>
+			<button id="fm-upload-btn" class="btn btn-outline-secondary" type="button">Upload</button>
 		</div>
 	</div>
 

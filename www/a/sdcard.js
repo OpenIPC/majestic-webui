@@ -69,7 +69,7 @@
 		const rp = recPrefix(), recEnabled = mjGet(cfg, 'records.enabled') === true;
 		const onThisCard = d.mounted && rp === d.mountpoint;
 
-		let acts = '<button class="btn btn-sm btn-outline-primary" data-act="browse"' + (d.mounted ? '' : ' disabled') + '>Browse files</button>';
+		let acts = '<button class="btn btn-sm btn-outline-secondary" data-act="browse"' + (d.mounted ? '' : ' disabled') + '>Browse files</button>';
 		if (d.mounted) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="unmount">Unmount</button>';
 		else if (d.fs) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="mount">Mount</button>';
 		if (d.canFsck) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="fsck">Check</button>';

@@ -447,7 +447,7 @@ update_wfbinfo
             </form>
             <hr class="my-3">
             <p class="small text-secondary mb-2">Reboot to apply new WFB settings.</p>
-            <a class="btn btn-sm btn-danger" href="fw-restart.cgi">Restart camera</a>
+            <a class="btn btn-sm btn-outline-secondary confirm" href="fw-restart.cgi">Restart camera</a>
         </div></div>
     </div>
 
