@@ -1,9 +1,7 @@
-// Ntfy extension page: gate the HEIF switch and send a test notification
+// Ntfy extension page: send a test notification
 // (via ?send=test, which runs /usr/bin/ntfy.sh against the saved config).
-// `$` and mjHeifGate are globals from main.js.
+// `$` is a global from main.js.
 (function () {
-	mjHeifGate('#ntfy_heif');
-
 	const btn = $('#ntfy-test');
 	const out = $('#ntfy-status');
 	if (!btn) return;
