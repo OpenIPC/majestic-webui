@@ -64,7 +64,7 @@ fi
 				<% field_text "telegram_caption" "Caption" "Location or short description." %>
 				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Options</div>
 				<% field_switch "telegram_document" "Send as document" "eval" "Attach picture as general file." %>
-				<% field_switch "telegram_heif" "Use HEIF format" "eval" "Requires H265 codec on Video0." %>
+				<% field_switch "telegram_heif" "Use HEIF format" "eval" "Smaller files than JPEG." %>
 				<% field_switch "telegram_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
 				<% button_submit %>
 			</form>
@@ -90,7 +90,5 @@ fi
 		<% ex "grep telegram /etc/crontabs/root" %>
 	</div>
 </details>
-
-<script>mjHeifGate('#telegram_heif');</script>
 
 <%in p/footer.cgi %>
