@@ -301,6 +301,14 @@ pre#output[data-cmd] {
 	column-gap: 1.5rem;
 }
 
+/* separate the masonry from whatever sits above it (the live-preview / live-
+   adjust row on the Image tab, or the page heading on plain tabs) so the first
+   card doesn't butt up against it. :not(:empty) avoids a phantom gap on the
+   motion/lone tabs where the masonry container is created but unused. */
+.mj-cards:not(:empty) {
+	margin-top: 1.5rem;
+}
+
 .mj-cards > .card {
 	break-inside: avoid;
 	margin-bottom: 1.5rem;
