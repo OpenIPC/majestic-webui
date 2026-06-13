@@ -389,13 +389,15 @@
 			control = p.querySelector('input');
 		} else if (type === 'string' && enumVals && enumVals.length) {
 			p = el('p', 'select mj-row');
+			// short enums get a moderate width cap; long-option enums stay full-width
+			if (enumVals.some(o => String(o).length > 14)) p.classList.add('mj-wide');
 			const opts = enumVals.map(o => option(o, String(eff) === String(o))).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
 		} else if (type === 'string' && isSensorPath) {
-			p = el('p', 'select mj-row');
+			p = el('p', 'select mj-row mj-wide');
 			const opts = '<option value=""></option>' + SENSORS.map(s => option(s, String(eff) === s)).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
