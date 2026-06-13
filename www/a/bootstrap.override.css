@@ -337,18 +337,32 @@ pre#output[data-cmd] {
 }
 
 .mj-live-video {
+	display: block; /* avoid the inline baseline gap below the <video> */
 	width: 100%;
 	max-width: 640px;
 	aspect-ratio: 16/9;
 	background: #000;
 	border: 1px solid var(--bs-primary);
-	border-radius: 4px;
+	border-radius: var(--bs-border-radius);
+}
+
+/* Responsive-embed wrapper: a plain block div sizes width:100% correctly to the
+   card-body content box, whereas the iframe (a replaced element with
+   aspect-ratio) mis-resolves it and overflows. The iframe absolutely fills the
+   wrapper. */
+.mj-roi-wrap {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 16/9;
 }
 
 .mj-roi-iframe {
+	position: absolute;
+	inset: 0;
 	width: 100%;
-	aspect-ratio: 16/9;
+	height: 100%;
 	border: 1px solid var(--bs-primary);
+	border-radius: var(--bs-border-radius);
 	padding: 0;
 	margin: 0;
 }
