@@ -119,8 +119,8 @@
 			<script type="application/json" id="overlay-data">{"total":<%= ${ov_total:-0} %>,"used":<%= ${ov_used:-0} %>,"avail":<%= ${ov_avail:-0} %>,"cats":[<%= $ov_cats %>]}</script>
 			<% if [ -n "$sd_rows" ]; then %>
 				<% echo "$sd_rows" | while IFS='|' read mnt use pct; do %>
-					<div class="d-flex justify-content-between x-small">
-						<span class="badge text-bg-success">SD</span>
+					<div class="d-flex align-items-center gap-2 x-small">
+						<span class="badge text-bg-success flex-shrink-0">SD</span>
 						<span class="text-secondary"><%= "$mnt — $use ($pct)" %></span>
 					</div>
 				<% done %>
