@@ -221,7 +221,7 @@
 			const props = ((state.schema.properties || {})[section] || {}).properties;
 			if (!props) continue;
 			const col = el('div', colCls);
-			const card = el('div', 'card h-100');
+			const card = el('div', 'card');
 			const body = el('div', 'card-body');
 			const h = el('h3');
 			h.textContent = label(section);
@@ -273,7 +273,7 @@
 			col.id = id;
 			col.className = 'col-12 col-lg-6';
 			col.innerHTML =
-				'<div class="card h-100"><div class="card-body">' +
+				'<div class="card"><div class="card-body">' +
 				'<h3>Visual editor</h3>' +
 				'<iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" class="mj-roi-iframe"></iframe>' +
 				'<button type="button" class="btn btn-outline-secondary mt-2" id="mj-roi-clear">Clear all regions</button>' +
