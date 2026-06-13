@@ -35,10 +35,13 @@
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		const ws = new WebSocket(proto + '://' + location.host + '/ws/upgrade');
 		ws.binaryType = 'arraybuffer';
-		ws.onopen = () => { ws.send(JSON.stringify(p)); status('warning', 'Upgrading — do not power off…'); };
+		let opened = false;
+		ws.onopen = () => { opened = true; ws.send(JSON.stringify(p)); status('warning', 'Upgrading — do not power off…'); };
 		ws.onmessage = e => append(dec.decode(new Uint8Array(e.data), { stream: true }));
-		ws.onclose = () => { status('warning', 'Flashing & rebooting — do not power off. Waiting for the camera…'); pollBack(); };
-		ws.onerror = () => {};
+		// A flash only happens after the socket opened; a close without ever
+		// opening means the handshake failed (let onerror report it).
+		ws.onclose = () => { if (!opened) return; status('warning', 'Flashing & rebooting — do not power off. Waiting for the camera…'); pollBack(); };
+		ws.onerror = () => { if (!opened) status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.'); };
 	}
 
 	// After the WS drops (majestic killed at flash) poll until the camera is back.
