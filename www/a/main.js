@@ -121,6 +121,12 @@ function heartbeat() {
 			if (typeof(json.uptime) !== 'undefined' && json.uptime !== '') {
 				$('#uptime').textContent = 'Uptime:️ ' + json.uptime;
 			}
+
+			// Majestic's own uptime, shown in the status-page Uptime card (if present)
+			if (typeof(json.mj_uptime) !== 'undefined') {
+				const mj = $('#st-uptime-mj');
+				if (mj) mj.textContent = json.mj_uptime || '–';
+			}
 		})
 		.then(setTimeout(heartbeat, 2000));
 }
