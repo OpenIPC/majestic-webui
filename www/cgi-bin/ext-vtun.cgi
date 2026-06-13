@@ -26,41 +26,41 @@ fi
 
 <%in p/header.cgi %>
 
-<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-	<div class="col">
-	<% if [ -e "$conf_file" ]; then %>
-		<div class="alert alert-success">
-		<h4>VTun is up</h4>
-		<p>Use the following credentials to set up remote access via VTun:</p>
-		<dl class="mb-0">
-			<dt>VTun ID</dt>
-			<dd><%= ${network_macaddr//:/} | tr a-z A-Z %></dd>
-			<dt>Password</dt>
-			<dd><% grep password $conf_file | xargs | cut -d' ' -f2 | sed 's/;$//' %>
-		</dl>
-		</div>
-	<% fi %>
-
-	<h3>Settings</h3>
-	<form action="<%= $SCRIPT_NAME %>" method="post">
-		<% if [ -n "$env_host" ]; then %>
-			<% field_hidden "action" "reset" %>
-			<% button_submit "Reset configuration" %>
-		<% else %>
-			<% field_text "vtun_host" "VTun address" %>
-			<% button_submit %>
-		<% fi %>
-	</form>
+<div class="row g-4">
+	<div class="col-12 col-lg-6">
+		<div class="card h-100"><div class="card-body">
+			<h3>VTun</h3>
+			<p class="small text-secondary">Virtual tunnel for remote access to the camera.</p>
+			<% if [ -e "$conf_file" ]; then %>
+				<dl class="small list">
+					<dt>Status</dt><dd><span class="text-success">Up</span></dd>
+					<dt>VTun ID</dt><dd class="text-break"><%= ${network_macaddr//:/} | tr a-z A-Z %></dd>
+					<dt>Password</dt><dd class="text-break"><% grep password $conf_file | xargs | cut -d' ' -f2 | sed 's/;$//' %></dd>
+				</dl>
+				<p class="small text-secondary">Use these credentials to set up remote access.</p>
+			<% fi %>
+			<form action="<%= $SCRIPT_NAME %>" method="post">
+				<% if [ -n "$env_host" ]; then %>
+					<% field_hidden "action" "reset" %>
+					<% button_submit "Reset configuration" "danger" %>
+				<% else %>
+					<% field_text "vtun_host" "VTun address" %>
+					<% button_submit %>
+				<% fi %>
+			</form>
+		</div></div>
 	</div>
+</div>
 
-	<div class="col col-lg-8">
-		<h3>Configuration</h3>
+<details class="mt-4">
+	<summary class="text-secondary small">Advanced — raw configuration</summary>
+	<div class="mt-3">
 		<%
 			[ -e "$conf_file" ] && ex "cat $conf_file"
 			[ -n "$env_host" ] && ex "fw_printenv | grep vtun"
 			ex "pgrep -a vtund"
 		%>
 	</div>
-</div>
+</details>
 
 <%in p/footer.cgi %>
