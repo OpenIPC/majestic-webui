@@ -311,10 +311,17 @@ pre#output[data-cmd] {
 	--bs-nav-link-color: white;
 }
 
+/* Brand the navbar blue in light theme with an explicit colour (dark theme keeps
+   Bootstrap's default dark bar). Doing it here instead of via --bs-tertiary-bg-rgb
+   keeps .bg-body-tertiary neutral for the log/output console panels — otherwise
+   those panels rendered dark text on a blue background in light theme. */
+[data-bs-theme=light] .navbar.bg-body-tertiary {
+	background-color: var(--bs-primary) !important;
+}
+
 [data-bs-theme=light] {
 	--bs-primary: rgb(76, 96, 216);
 	--bs-secondary: rgb(76, 96, 216);
-	--bs-tertiary-bg-rgb: 76, 96, 216;
 }
 
 [data-bs-theme=dark] {
