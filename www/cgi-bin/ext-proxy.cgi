@@ -19,21 +19,28 @@ fi
 
 <%in p/header.cgi %>
 
-<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-	<div class="col">
-	<form action="<%= $SCRIPT_NAME %>" method="post">
-		<% field_hidden "action" "update" %>
-		<% field_text "socks5_host" "SOCKS5 host" %>
-		<% field_text "socks5_port" "SOCKS5 port" "1080" %>
-		<% field_text "socks5_username" "SOCKS5 username" %>
-		<% field_password "socks5_password" "SOCKS5 password" %>
-		<% button_submit %>
-	</form>
-	</div>
-
-	<div class="col">
-		<% [ -e "$config_file" ] && ex "cat $config_file" %>
+<div class="row g-4">
+	<div class="col-12 col-lg-6">
+		<div class="card h-100"><div class="card-body">
+			<h3>SOCKS5 proxy</h3>
+			<p class="small text-secondary">Route extension traffic (OpenWall, Telegram) through a SOCKS5 proxy.</p>
+			<form action="<%= $SCRIPT_NAME %>" method="post">
+				<% field_hidden "action" "update" %>
+				<% field_text "socks5_host" "SOCKS5 host" %>
+				<% field_text "socks5_port" "SOCKS5 port" "1080" %>
+				<% field_text "socks5_username" "SOCKS5 username" %>
+				<% field_password "socks5_password" "SOCKS5 password" %>
+				<% button_submit %>
+			</form>
+		</div></div>
 	</div>
 </div>
+
+<details class="mt-4">
+	<summary class="text-secondary small">Advanced — raw configuration</summary>
+	<div class="mt-3">
+		<% [ -e "$config_file" ] && ex "cat $config_file" %>
+	</div>
+</details>
 
 <%in p/footer.cgi %>
