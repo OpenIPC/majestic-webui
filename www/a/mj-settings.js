@@ -512,10 +512,14 @@
 		const hasDefault = Object.prototype.hasOwnProperty.call(sub, 'default');
 		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
-		// resolution picker for the *.size fields: a dropdown of named presets
-		// + a "Custom…" escape hatch. Selected by the backend's x-resolution
-		// flag, or by the dotted path so it still works against older firmware.
-		const isResolution = type === 'string' && (sub['x-resolution'] || /\.size$/.test(dot));
+		// resolution picker for the video/jpeg size fields: a dropdown of named
+		// presets + a "Custom…" escape hatch. Selected by the backend's
+		// x-resolution flag, or by an explicit path allow-list so it still works
+		// against older firmware (NOT a /\.size$/ match — that caught osd.size,
+		// which is a font scale, not a resolution).
+		const isResolution = type === 'string' &&
+			(sub['x-resolution'] ||
+				dot === 'video0.size' || dot === 'video1.size' || dot === 'jpeg.size');
 
 		let p, control;
 
@@ -825,12 +829,74 @@
 				return;
 			}
 			await refresh();
+			// Image knobs (x-live) apply instantly; everything structural
+			// (resolution, codec, fps, ...) only takes effect after majestic
+			// reloads its pipeline. Offer that as an explicit step.
+			if (dirty.some(f => !(f.schema && f.schema['x-live'])))
+				showApplyBanner();
 		} catch (e) {
 			showError('Save failed: ' + e.message);
 		} finally {
 			btn.textContent = 'Save Changes';
 			updateDirty();
 		}
+	}
+
+	// majestic is the HTTP server, so we don't restart the process — we SIGHUP
+	// it (via j/mj-apply.cgi) for an in-process reload that rebuilds the encoder
+	// pipeline while the web server stays up, then poll until it answers again.
+	function showApplyBanner() {
+		const form = document.getElementById('mj-settings-form');
+		if (!form) return;
+		let bar = document.getElementById('mj-apply-bar');
+		if (!bar) {
+			bar = el('div', 'alert alert-warning d-flex align-items-center gap-2 mb-3');
+			bar.id = 'mj-apply-bar';
+			form.insertBefore(bar, form.children[1] || null);
+		} else {
+			bar.className = 'alert alert-warning d-flex align-items-center gap-2 mb-3';
+		}
+		bar.innerHTML =
+			'<span class="me-auto">Saved. Resolution, codec and frame-rate changes take effect after a pipeline reload (the video streams will blink briefly).</span>' +
+			'<button type="button" class="btn btn-sm btn-warning flex-shrink-0" id="mj-apply-btn">Apply now</button>';
+		document.getElementById('mj-apply-btn').addEventListener('click', applyReload);
+	}
+
+	async function pollUp(maxMs) {
+		const deadline = Date.now() + maxMs;
+		while (Date.now() < deadline) {
+			try {
+				const ctl = new AbortController();
+				const t = setTimeout(() => ctl.abort(), 3000);
+				const r = await fetch('/api/v1/config.json',
+					{ cache: 'no-store', credentials: 'same-origin', signal: ctl.signal });
+				clearTimeout(t);
+				if (r.ok) return true;
+			} catch (e) { /* loop is busy reloading / connection blipped */ }
+			await new Promise(res => setTimeout(res, 1000));
+		}
+		return false;
+	}
+
+	async function applyReload() {
+		const bar = document.getElementById('mj-apply-bar');
+		const btn = document.getElementById('mj-apply-btn');
+		if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+		stopLivePreview();   // the stream drops while the pipeline rebuilds
+		try {
+			await fetch('j/mj-apply.cgi', { credentials: 'same-origin' });
+		} catch (e) { /* the reload may sever this request — expected */ }
+		const up = await pollUp(30000);
+		if (up) {
+			location.reload();   // clean re-fetch of schema/config + preview
+			return;
+		}
+		if (bar) {
+			bar.className = 'alert alert-danger d-flex align-items-center gap-2 mb-3';
+			bar.querySelector('span').textContent =
+				'The reload is taking longer than expected — the camera may still be applying changes.';
+		}
+		if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
 	}
 
 	async function onReset(dot, btn) {
