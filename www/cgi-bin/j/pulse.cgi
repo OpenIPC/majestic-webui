@@ -10,9 +10,14 @@ if [ -n "$temp" ]; then
 	soc_temp="${temp%.*}°C"
 fi
 
-mem_total=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-mem_free=$(awk '/MemFree/ {print $2}' /proc/meminfo)
-mem_used=$(( 100 - (mem_free / (mem_total / 100)) ))
+mem_total=$(awk '/^MemTotal/ {print $2}' /proc/meminfo)
+# MemAvailable counts reclaimable cache/buffers as available, so this is real
+# usage — not MemFree, which treats the kernel's page cache as "used" and reads
+# alarmingly high (~94%). Matches the status dashboard. Fall back to MemFree on
+# kernels too old to report MemAvailable.
+mem_avail=$(awk '/^MemAvailable/ {print $2}' /proc/meminfo)
+[ -z "$mem_avail" ] && mem_avail=$(awk '/^MemFree/ {print $2}' /proc/meminfo)
+mem_used=$(( 100 - (mem_avail * 100 / mem_total) ))
 overlay_used=$(df | grep /overlay | xargs | cut -d' ' -f5)
 uptime=$(awk '{m=$1/60; h=m/60; printf "%sd %sh %sm %ss\n", int(h/24), int(h%24), int(m%60), int($1%60) }' /proc/uptime)
 
