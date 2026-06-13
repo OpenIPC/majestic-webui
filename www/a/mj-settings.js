@@ -448,9 +448,10 @@
 	function renderField(container, dot, key, sub, eff, opts) {
 		opts = opts || {};
 		const live = !!opts.live;
-		const desc = sub.description || key;
+		// the field's `title` is the short label; older schemas only had `description`
+		const desc = sub.title || sub.description || key;
 		const meta = LIVE_META[key];
-		// live knobs show an emoji + short label; everything else uses the schema desc
+		// live knobs show an emoji + short label; everything else uses the title
 		const labelHtml = (live && meta)
 			? '<span class="mj-live-ico">' + meta.icon + '</span> ' + esc(meta.label)
 			: esc(desc);
@@ -586,6 +587,25 @@
 				reset.addEventListener('click', () => onReset(dot, reset));
 			}
 			p.appendChild(reset);
+		}
+
+		// detailed help under the control (skipped on the compact live-panel rows):
+		// the authored `hint` plus auto-context (value range for bounded integers).
+		if (!live) {
+			const hintParts = [];
+			if (sub.hint) hintParts.push(esc(sub.hint));
+			// only plain number inputs gain a range hint; sliders (max ≤ 100)
+			// already show their bounds via the track and the live value box
+			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
+			if (type === 'integer' && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
+				hintParts.push(esc(sub.minimum + '–' + sub.maximum));
+			if (hintParts.length) {
+				// block-level so it sits on its own line below the control and the
+				// inline "↺ reset" link (a span would flow into it, e.g. "reset0–32")
+				const hint = el('div', 'hint text-secondary');
+				hint.innerHTML = hintParts.join(' · ');
+				p.appendChild(hint);
+			}
 		}
 
 		container.appendChild(p);
