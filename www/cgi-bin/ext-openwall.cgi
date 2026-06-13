@@ -38,40 +38,34 @@ fi
 
 <%in p/header.cgi %>
 
-<div class="alert alert-info">
-<p>This extension allows you to share images from your OpenIPC camera on the <a href="https://openipc.org/open-wall">Open Wall</a>
-	page of our website. The images you share will allow us to determine the quality of images from different cameras.
-	We also collect your MAC address, chipset, sensor, flashsize, firmware version, and uptime.</p>
+<div class="row g-4">
+	<div class="col-12 col-lg-8">
+		<div class="card h-100"><div class="card-body">
+			<h3>OpenWall</h3>
+			<p class="small text-secondary">Share snapshots on the <a href="https://openipc.org/open-wall">Open Wall</a> to help compare image quality across cameras. Also sends your MAC address, chipset, sensor, flash size, firmware version and uptime.</p>
+			<form action="<%= $SCRIPT_NAME %>" method="post">
+				<% field_switch "openwall_enabled" "Enable OpenWall" "eval" %>
+				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Submission</div>
+				<% field_string "openwall_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
+				<% field_switch "openwall_crontab" "Add to crontab" "eval" "Send pictures timed by interval." %>
+				<% field_text "openwall_caption" "Caption" "Location or short description." %>
+				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Options</div>
+				<% field_switch "openwall_heif" "Use HEIF format" "eval" "Requires H265 codec on Video0." %>
+				<% field_switch "openwall_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
+				<% button_submit %>
+			</form>
+		</div></div>
+	</div>
 </div>
 
-<form action="<%= $SCRIPT_NAME %>" method="post">
-	<% field_switch "openwall_enabled" "Enable OpenWall" "eval" %>
-	<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-		<div class="col">
-			<% field_string "openwall_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
-			<% field_text "openwall_caption" "Caption" "Location or short description." %>
-		</div>
-
-		<div class="col">
-			<% field_switch "openwall_crontab" "Add to Crontab" "eval" "Send pictures timed by interval." %>
-			<% field_switch "openwall_heif" "Use HEIF format" "eval" "Requires H265 codec on Video0." %>
-			<% field_switch "openwall_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
-		</div>
-
-		<div class="col">
-			<% [ -e "$config_file" ] && ex "cat $config_file" %>
-			<% ex "grep openwall /etc/crontabs/root" %>
-		</div>
+<details class="mt-4">
+	<summary class="text-secondary small">Advanced — raw configuration</summary>
+	<div class="mt-3">
+		<% [ -e "$config_file" ] && ex "cat $config_file" %>
+		<% ex "grep openwall /etc/crontabs/root" %>
 	</div>
-	<% button_submit %>
-</form>
+</details>
 
-<script>
-<% if [ "$openwall_crontab" = "true" ]; then %>
-	$('#openwall_crontab').checked = true;
-<% fi %>
-
-mjHeifGate('#openwall_heif');
-</script>
+<script>mjHeifGate('#openwall_heif');</script>
 
 <%in p/footer.cgi %>
