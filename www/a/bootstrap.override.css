@@ -51,6 +51,16 @@
 	max-width: 10rem;
 }
 
+/* moderate cap for short enum selects in Majestic settings; long-option
+   selects (e.g. the sensor-config file list) opt out via .mj-wide */
+.mj-row.select .form-select {
+	max-width: 16rem;
+}
+
+.mj-row.select.mj-wide .form-select {
+	max-width: none;
+}
+
 .x-small {
 	font-size: 0.8125rem;
 }
