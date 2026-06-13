@@ -15,8 +15,23 @@ mem_free=$(awk '/MemFree/ {print $2}' /proc/meminfo)
 mem_used=$(( 100 - (mem_free / (mem_total / 100)) ))
 overlay_used=$(df | grep /overlay | xargs | cut -d' ' -f5)
 uptime=$(awk '{m=$1/60; h=m/60; printf "%sd %sh %sm %ss\n", int(h/24), int(h%24), int(m%60), int($1%60) }' /proc/uptime)
-payload=$(printf '{"soc_temp":"%s","time_now":"%s","timezone":"%s","mem_used":"%d","overlay_used":"%d","daynight_value":"%d","uptime":"%s"}' \
-	"${soc_temp}" "$(date +%s)" "$(cat /etc/timezone)" "${mem_used}" "${overlay_used//%/}" "${daynight_value:=-1}" "$uptime")
+
+# Majestic's own uptime: system uptime minus the process start time (field 22 of
+# /proc/<pid>/stat is starttime in clock ticks since boot). Computed live each
+# poll, so it stays correct even if majestic restarts on its own. Formatted
+# without seconds to match the status card's system-uptime line.
+mj_uptime=""
+mjpid=$(echo "$web" | awk '{print $1}')
+if [ -n "$mjpid" ] && [ -r "/proc/$mjpid/stat" ]; then
+	mj_uptime=$(awk -v hz="$(getconf CLK_TCK 2>/dev/null || echo 100)" \
+		-v up="$(awk '{print $1}' /proc/uptime)" \
+		'{ s = up - $22/hz; if (s<0) s=0;
+		   d=int(s/86400); h=int((s%86400)/3600); m=int((s%3600)/60);
+		   printf "%s%s%sm", (d? d"d ":""), (h||d? h"h ":""), m }' "/proc/$mjpid/stat")
+fi
+
+payload=$(printf '{"soc_temp":"%s","time_now":"%s","timezone":"%s","mem_used":"%d","overlay_used":"%d","daynight_value":"%d","uptime":"%s","mj_uptime":"%s"}' \
+	"${soc_temp}" "$(date +%s)" "$(cat /etc/timezone)" "${mem_used}" "${overlay_used//%/}" "${daynight_value:=-1}" "$uptime" "$mj_uptime")
 
 echo "HTTP/1.1 200 OK
 Content-type: application/json

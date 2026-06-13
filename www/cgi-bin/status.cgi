@@ -53,7 +53,7 @@
 		<div class="card h-100"><div class="card-body py-2">
 			<div class="x-small text-uppercase text-secondary">Uptime</div>
 			<div class="lh-1 my-1"><span class="fs-5 fw-semibold" id="st-uptime">–</span></div>
-			<div class="x-small text-secondary mt-1">since boot</div>
+			<div class="x-small text-secondary mt-1">Majestic <span id="st-uptime-mj">–</span></div>
 		</div></div>
 	</div>
 </div>
