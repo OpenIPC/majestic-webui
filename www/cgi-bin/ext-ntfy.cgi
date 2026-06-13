@@ -55,66 +55,44 @@ fi
 
 <%in p/header.cgi %>
 
-    <!-- A block with a button and a status -->
-    <div class="alert alert-info">
-        <button type="button" class="btn btn-primary btn-sm" onclick="sendTestNtfy()">Send Test Notification</button>
-        <span id="ntfy-status" style="margin-left: 15px; font-weight: bold;"></span>
-    </div>
+<div class="row g-4">
+	<div class="col-12 col-lg-8">
+		<div class="card h-100"><div class="card-body">
+			<h3>Ntfy notifications</h3>
+			<p class="small text-secondary">Push a snapshot notification to an <a href="https://ntfy.sh">ntfy</a> topic.</p>
+			<form action="<%= $SCRIPT_NAME %>" method="post">
+				<% field_switch "ntfy_enabled" "Enable Ntfy" "eval" %>
+				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Connection</div>
+				<% field_text "ntfy_server" "Server URL" "e.g. https://ntfy.sh" %>
+				<% field_text "ntfy_topic" "Topic" "Unique topic name for notifications." %>
+				<% field_text "ntfy_user" "Username" "Leave empty if no auth." %>
+				<% field_text "ntfy_pass" "Password" "Leave empty if no auth." %>
+				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Message</div>
+				<% field_text "ntfy_caption" "Caption" "Supports %hostname, %datetime, %soctemp." %>
+				<% field_string "ntfy_priority" "Priority" "eval" "1 2 3 4 5" "1 = min, 5 = max (urgent)." %>
+				<% field_switch "ntfy_heif" "Use HEIF format" "eval" "Requires H265 codec on Video0." %>
+				<% button_submit %>
+			</form>
+		</div></div>
+	</div>
 
-<form action="<%= $SCRIPT_NAME %>" method="post">
-    <% field_switch "ntfy_enabled" "Enable Ntfy" "eval" %>
-    
-    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-        <div class="col">
-            <h6>Connection Settings</h6>
-            <% field_text "ntfy_server" "Server URL" "e.g., https://ntfy.sh" %>
-            <% field_text "ntfy_topic" "Topic" "Unique topic name for notifications" %>
-            <% field_text "ntfy_user" "Username" "Leave empty if no auth" %>
-            <% field_text "ntfy_pass" "Password" "Leave empty if no auth" %>
-        </div>
+	<div class="col-12 col-lg-4">
+		<div class="card h-100"><div class="card-body">
+			<h3>Test</h3>
+			<p class="small text-secondary">Send a test notification using the saved settings.</p>
+			<button type="button" id="ntfy-test" class="btn btn-sm btn-outline-secondary">Send test notification</button>
+			<span id="ntfy-status" class="small ms-2"></span>
+		</div></div>
+	</div>
+</div>
 
-        <div class="col">
-            <h6>Message Settings</h6>
-            <% field_text "ntfy_caption" "Caption" "Supports: %hostname, %datetime, %soctemp" %>
-            <% field_string "ntfy_priority" "Priority" "eval" "1 2 3 4 5" "1=Min, 5=Max (Urgent)" %>
-            <% field_switch "ntfy_heif" "Use HEIF format" "eval" "Requires H265 codec on Video0." %>
-        </div>
+<details class="mt-4">
+	<summary class="text-secondary small">Advanced — raw configuration</summary>
+	<div class="mt-3">
+		<% [ -e "$config_file" ] && ex "cat $config_file" %>
+	</div>
+</details>
 
-        <div class="col">
-            <h6>Current Config File</h6>
-            <% [ -e "$config_file" ] && ex "cat $config_file" %>
-        </div>
-    </div>
-
-    <% button_submit %>
-</form>
-
-<script>
-// Function for sending a test notification via AJAX
-function sendTestNtfy() {
-    var statusSpan = document.getElementById('ntfy-status');
-    statusSpan.innerText = 'Sending...';
-    statusSpan.style.color = 'blue';
-
-    fetch('?send=test')
-        .then(response => response.text())
-        .then(data => {
-            // data contains the response from the server ("OK" or "FAIL")
-            if (data.trim() === 'OK') {
-                statusSpan.innerText = 'Success: Test notification sent!';
-                statusSpan.style.color = 'green';
-            } else {
-                statusSpan.innerText = 'Error: Failed to send (check script path).';
-                statusSpan.style.color = 'red';
-            }
-        })
-        .catch(error => {
-            statusSpan.innerText = 'Request error!';
-            statusSpan.style.color = 'red';
-        });
-}
-
-mjHeifGate('#ntfy_heif');
-</script>
+<script src="/a/ext-ntfy.js"></script>
 
 <%in p/footer.cgi %>
