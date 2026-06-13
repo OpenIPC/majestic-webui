@@ -15,6 +15,18 @@
 	const EXCLUDE = new Set(boot.exclude || []);
 	const SENSORS = boot.sensors || [];
 
+	// Emoji + short label + display order for the x-live image knobs shown in the
+	// "Live adjustments" panel beside the preview (keyed by the field's dot tail).
+	const LIVE_META = {
+		luminance:  { icon: '☀', label: 'Brightness' },
+		contrast:   { icon: '🌗', label: 'Contrast' },
+		saturation: { icon: '💧', label: 'Saturation' },
+		hue:        { icon: '🌈', label: 'Hue' },
+		mirror:     { icon: '⇄', label: 'Mirror' },
+		flip:       { icon: '⇅', label: 'Flip' },
+	};
+	const LIVE_ORDER = ['luminance', 'contrast', 'saturation', 'hue', 'mirror', 'flip'];
+
 	const state = {
 		tab: boot.tab,
 		schema: null,
@@ -194,28 +206,37 @@
 		grid.id = 'mj-settings-grid';
 		form.appendChild(grid);
 
-		// Live preview pinned full-width at the top so slider changes are visible
-		// as you drag — reuses the low-latency /ws/video MSE player (a/preview.js).
-		if (groupHasLive(group) && window.MajesticVideo) {
-			const col = el('div', 'col-12');
-			col.id = 'mj-live-preview';
-			col.innerHTML =
-				'<div class="card"><div class="card-body">' +
-				'<div class="text-secondary small mb-1">Live preview</div>' +
-				'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
-				'</div></div>';
-			grid.appendChild(col);
-			state.previewPlayer =
-				window.MajesticVideo.attach(col.querySelector('#mj-live-video'), { stream: 0 });
-		}
-
 		state.fields = [];
 		state.initial = {};
+
+		// Live-tunable groups (image): the preview and a "Live adjustments" panel of
+		// the x-live knobs sit side by side at the top, so dragging a knob shows its
+		// effect without scrolling. The knobs are registered here and skipped in the
+		// section cards below to avoid duplicate controls.
+		const live = groupHasLive(group);
+		if (live) {
+			if (window.MajesticVideo) {
+				const pv = el('div', 'col-12 col-lg-7');
+				pv.id = 'mj-live-preview';
+				pv.innerHTML =
+					'<div class="card"><div class="card-body">' +
+					'<div class="text-secondary small mb-1">Live preview</div>' +
+					'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
+					'</div></div>';
+				grid.appendChild(pv);
+				state.previewPlayer =
+					window.MajesticVideo.attach(pv.querySelector('#mj-live-video'), { stream: 0 });
+				renderLivePanel(grid, group, 'col-12 col-lg-5');
+			} else {
+				renderLivePanel(grid, group, 'col-12 col-lg-6');
+			}
+		}
+
 		// One card per merged section; renderProps fills the card body (nested
 		// object sub-properties still get an <h5> subheader inside the card).
 		// Multi-card groups flow 2-up; a lone card (e.g. Recording — no preview,
 		// no ROI mate) is centred so it reads as one panel, not a left-stranded half.
-		const lone = group.sections.length === 1 && !groupHasMotion(group) && !groupHasLive(group);
+		const lone = group.sections.length === 1 && !groupHasMotion(group) && !live;
 		const colCls = lone ? 'col-12 col-lg-8 mx-auto' : 'col-12 col-lg-6';
 		for (const section of group.sections) {
 			const props = ((state.schema.properties || {})[section] || {}).properties;
@@ -228,8 +249,11 @@
 			body.appendChild(h);
 			card.appendChild(body);
 			col.appendChild(card);
-			grid.appendChild(col);
 			renderProps(body, section, props);
+			// a section whose only fields were x-live (moved to the panel) is empty
+			// apart from its heading — don't show an empty card.
+			if (body.childElementCount <= 1) continue;
+			grid.appendChild(col);
 		}
 
 		if (groupHasMotion(group)) toggleRoi(group);
@@ -300,11 +324,84 @@
 
 	function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
+	// Render the x-live knobs of a live group into a "Live adjustments" card next to
+	// the preview, with one "Reset all" (no per-knob resets). The knobs still register
+	// in state.fields, so the page Save + dirty tracking cover them.
+	function renderLivePanel(grid, group, colCls) {
+		const col = el('div', colCls);
+		col.id = 'mj-live-panel';
+		const card = el('div', 'card');
+		const body = el('div', 'card-body');
+		const head = el('div', 'd-flex align-items-center mb-2');
+		head.innerHTML =
+			'<h3 class="mb-0 me-auto">Live adjustments</h3>' +
+			'<button type="button" class="btn btn-sm btn-link p-0 mj-reset" id="mj-live-reset">↺ Reset all</button>';
+		body.appendChild(head);
+
+		const props = state.schema.properties || {};
+		const found = [];
+		for (const section of group.sections) {
+			const sp = (props[section] || {}).properties || {};
+			for (const key of Object.keys(sp)) {
+				if (sp[key] && sp[key]['x-live']) found.push({ section, key, sub: sp[key] });
+			}
+		}
+		found.sort((a, b) => {
+			const ia = LIVE_ORDER.indexOf(a.key), ib = LIVE_ORDER.indexOf(b.key);
+			return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+		});
+
+		const dots = [];
+		for (const f of found) {
+			const dot = f.section + '.' + f.key;
+			if (EXCLUDE.has(dot)) continue;
+			const eff = getDotted(state.config, dot);
+			const field = renderField(body, dot, f.key, f.sub, eff, { live: true });
+			if (field) {
+				state.fields.push(field);
+				state.initial[dot] = field.getValue();
+				dots.push(dot);
+			}
+		}
+
+		card.appendChild(body);
+		col.appendChild(card);
+		grid.appendChild(col);
+
+		const rb = document.getElementById('mj-live-reset');
+		if (rb) rb.addEventListener('click', () => onResetLive(dots, rb));
+	}
+
+	async function onResetLive(dots, btn) {
+		if (!dots.length) return;
+		if (!confirm('Reset all live image adjustments to their defaults?')) return;
+		btn.disabled = true;
+		const orig = btn.textContent;
+		btn.textContent = '…';
+		clearError();
+		try {
+			const q = dots.map(d => 'key=' + encodeURIComponent(d)).join('&');
+			const res = await fetch('/api/v1/reset?' + q, { credentials: 'same-origin' });
+			if (!res.ok) {
+				const txt = await safeText(res);
+				showError('Reset failed (HTTP ' + res.status + '). ' + txt);
+				return;
+			}
+			await refresh();
+		} catch (e) {
+			showError('Reset failed: ' + e.message);
+		} finally {
+			btn.textContent = orig;
+			btn.disabled = false;
+		}
+	}
+
 	function renderProps(container, basePath, props) {
 		for (const key of Object.keys(props)) {
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
 			const sub = props[key];
+			if (sub && sub['x-live']) continue;   // live knobs render in the side panel
 			if (sub && sub.type === 'object' && sub.properties) {
 				const h = el('h5', 'mt-4 mb-2 text-secondary');
 				h.textContent = sub.title || titleCase(key);
@@ -343,8 +440,16 @@
 		(state.visUpdaters || []).forEach(u => u());
 	}
 
-	function renderField(container, dot, key, sub, eff) {
+	function renderField(container, dot, key, sub, eff, opts) {
+		opts = opts || {};
+		const live = !!opts.live;
 		const desc = sub.description || key;
+		const meta = LIVE_META[key];
+		// live knobs show an emoji + short label; everything else uses the schema desc
+		const labelHtml = (live && meta)
+			? '<span class="mj-live-ico">' + meta.icon + '</span> ' + esc(meta.label)
+			: esc(desc);
+		const liveCls = live ? ' mj-live-row' : '';
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
 		const hasDefault = Object.prototype.hasOwnProperty.call(sub, 'default');
@@ -354,21 +459,21 @@
 		let p, control;
 
 		if (type === 'boolean') {
-			p = el('p', 'boolean mj-row');
+			p = el('p', 'boolean mj-row' + liveCls);
 			p.innerHTML =
 				'<span class="form-check form-switch">' +
 				'<input type="checkbox" id="' + id + '" class="form-check-input">' +
-				'<label for="' + id + '" class="form-check-label">' + esc(desc) + '</label>' +
+				'<label for="' + id + '" class="form-check-label">' + labelHtml + '</label>' +
 				'</span>';
 			control = p.querySelector('input');
 			control.checked = toBool(eff);
 		} else if (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100) {
-			p = el('p', 'range mj-row');
+			p = el('p', 'range mj-row' + liveCls);
 			const min = isNum(sub.minimum) ? sub.minimum : 0;
 			const max = sub.maximum;
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
-				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
 				'<input type="range" id="' + id + '" class="form-control form-range" min="' + min + '" max="' + max + '" step="1" value="' + esc(v) + '">' +
 				'<span class="input-group-text show-value">' + esc(v) + '</span>' +
@@ -462,18 +567,21 @@
 			return null;
 		}
 
-		const reset = document.createElement('button');
-		reset.type = 'button';
-		reset.className = 'btn btn-sm btn-link p-0 ms-2 mj-reset';
-		reset.textContent = '↺ reset';
-		if (!hasDefault) {
-			reset.disabled = true;
-			reset.title = 'Server has no recorded default for this key.';
-		} else {
-			reset.title = 'Reset to default: ' + String(sub.default);
-			reset.addEventListener('click', () => onReset(dot, reset));
+		// live knobs share one "Reset all" in the panel header — no per-knob reset
+		if (!live) {
+			const reset = document.createElement('button');
+			reset.type = 'button';
+			reset.className = 'btn btn-sm btn-link p-0 ms-2 mj-reset';
+			reset.textContent = '↺ reset';
+			if (!hasDefault) {
+				reset.disabled = true;
+				reset.title = 'Server has no recorded default for this key.';
+			} else {
+				reset.title = 'Reset to default: ' + String(sub.default);
+				reset.addEventListener('click', () => onReset(dot, reset));
+			}
+			p.appendChild(reset);
 		}
-		p.appendChild(reset);
 
 		container.appendChild(p);
 
