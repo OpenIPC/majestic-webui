@@ -47,7 +47,7 @@ fi
 		<ul class="nav nav-pills flex-column small sticky-md-top" id="mj-settings-nav"></ul>
 	</div>
 
-	<div class="col-12 col-md-9 col-lg-6" id="mj-settings-form-col">
+	<div class="col-12 col-md-9 col-lg-10" id="mj-settings-form-col">
 		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>]}</script>
 
 		<h3 id="mj-settings-title"></h3>

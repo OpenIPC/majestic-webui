@@ -214,6 +214,33 @@ pre#output[data-cmd] {
 	text-decoration: none;
 }
 
+.mj-live-video {
+	width: 100%;
+	max-width: 640px;
+	aspect-ratio: 16/9;
+	background: #000;
+	border: 1px solid var(--bs-primary);
+	border-radius: 4px;
+}
+
+.mj-roi-iframe {
+	width: 100%;
+	aspect-ratio: 16/9;
+	border: 1px solid var(--bs-primary);
+	padding: 0;
+	margin: 0;
+}
+
+.mj-toolbar {
+	position: sticky;
+	bottom: 0;
+	z-index: 5;
+	margin-top: 1rem;
+	padding: 0.75rem 0;
+	background: var(--bs-body-bg);
+	border-top: 1px solid var(--bs-border-color);
+}
+
 .btn-motor {
 	font-size: 2.3rem;
 	--bs-btn-border-width: 0;
