@@ -46,6 +46,11 @@
 	text-align: center;
 }
 
+/* small integers (ports, timeouts, sizes…) don't need the full card width */
+.number .input-group {
+	max-width: 10rem;
+}
+
 .x-small {
 	font-size: 0.8125rem;
 }
