@@ -1,4 +1,4 @@
-#!/usr/bin/haserl --upload-limit=200 --upload-dir=/tmp
+#!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
 config_file=/etc/webui/backup.conf
@@ -24,9 +24,7 @@ if [ "$GET_backup" = "create" ]; then
 	exit 0
 fi
 
-if [ "$GET_backup" = "restore" ]; then
-	# temporary stub, until file upload is fixed
-	redirect_back
-	exit 0
-fi
+# This endpoint only serves the backup download; send any other request back to
+# the page that owns the backuper configuration.
+redirect_to "fw-settings.cgi"
 %>
