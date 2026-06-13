@@ -27,7 +27,7 @@ fi
 <%in p/header.cgi %>
 
 <div class="row g-4">
-	<div class="col-12 col-lg-6">
+	<div class="col-12 col-lg-8">
 		<div class="card h-100"><div class="card-body">
 			<h3>VTun</h3>
 			<p class="small text-secondary">Virtual tunnel for remote access to the camera.</p>

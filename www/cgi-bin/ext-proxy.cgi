@@ -20,7 +20,7 @@ fi
 <%in p/header.cgi %>
 
 <div class="row g-4">
-	<div class="col-12 col-lg-6">
+	<div class="col-12 col-lg-8">
 		<div class="card h-100"><div class="card-body">
 			<h3>SOCKS5 proxy</h3>
 			<p class="small text-secondary">Route extension traffic (OpenWall, Telegram) through a SOCKS5 proxy.</p>
