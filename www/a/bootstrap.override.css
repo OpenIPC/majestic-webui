@@ -229,6 +229,32 @@ pre#output[data-cmd] {
 	text-decoration: none;
 }
 
+/* "Live adjustments" panel beside the image preview */
+.mj-live-ico {
+	display: inline-block;
+	width: 1.5em;
+	text-align: center;
+}
+
+.mj-live-row {
+	margin-bottom: 0.5rem;
+}
+
+.mj-live-row.range {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.mj-live-row.range > .form-label {
+	flex: 0 0 8rem;
+	margin: 0;
+}
+
+.mj-live-row.range > .input-group {
+	flex: 1 1 auto;
+}
+
 .mj-live-video {
 	width: 100%;
 	max-width: 640px;
