@@ -9,6 +9,7 @@ Pragma: no-cache
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title><% html_title %></title>
+	<script>if(document.documentElement.getAttribute('data-bs-theme')==='auto')document.documentElement.setAttribute('data-bs-theme',matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');</script>
 	<link rel="stylesheet" href="/a/bootstrap.min.css">
 	<link rel="stylesheet" href="/a/bootstrap.override.css">
 	<script src="/a/bootstrap.bundle.min.js"></script>
