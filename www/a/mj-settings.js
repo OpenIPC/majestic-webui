@@ -27,6 +27,33 @@
 	};
 	const LIVE_ORDER = ['luminance', 'contrast', 'saturation', 'hue', 'mirror', 'flip'];
 
+	// Curated resolution presets (the de-facto set the firmware assumes), used
+	// to build the resolution dropdown for the *.size fields. Options are
+	// labelled "name · W×H · AR"; the backend's per-channel x-min/x-max/x-native
+	// (when present) filter this to what the sensor/channel supports, and the
+	// sub stream is additionally capped at the main stream's resolution.
+	const RES_PRESETS = [
+		[3840, 2160, '4K'], [2592, 1944, '5 MP'], [2560, 1440, '4 MP'],
+		[2304, 1296, '3 MP'], [2048, 1536, '3 MP'], [1920, 1080, '1080p'],
+		[1600, 1200, '2 MP'], [1280, 960, '1.3 MP'], [1280, 720, '720p'],
+		[1024, 576, ''], [704, 576, 'D1'], [640, 480, 'VGA'],
+		[640, 360, 'nHD'], [352, 288, 'CIF'],
+	];
+	const RES_CUSTOM = '__custom__';
+	function gcdInt(a, b) { return b ? gcdInt(b, a % b) : a; }
+	function resAR(w, h) { const g = gcdInt(w, h) || 1; return (w / g) + ':' + (h / g); }
+	function resName(w, h) {
+		const p = RES_PRESETS.find(r => r[0] === w && r[1] === h);
+		if (p && p[2]) return p[2];
+		const mp = w * h / 1e6;
+		return (mp >= 10 ? mp.toFixed(0) : mp.toFixed(1)) + ' MP';
+	}
+	function resLabel(w, h) { return resName(w, h) + ' · ' + w + '×' + h + ' · ' + resAR(w, h); }
+	function parseWH(s) {
+		const m = /^\s*(\d+)\s*x\s*(\d+)\s*$/i.exec(String(s == null ? '' : s));
+		return m ? { w: +m[1], h: +m[2] } : null;
+	}
+
 	const state = {
 		tab: boot.tab,
 		schema: null,
@@ -485,6 +512,14 @@
 		const hasDefault = Object.prototype.hasOwnProperty.call(sub, 'default');
 		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
+		// resolution picker for the video/jpeg size fields: a dropdown of named
+		// presets + a "Custom…" escape hatch. Selected by the backend's
+		// x-resolution flag, or by an explicit path allow-list so it still works
+		// against older firmware (NOT a /\.size$/ match — that caught osd.size,
+		// which is a font scale, not a resolution).
+		const isResolution = type === 'string' &&
+			(sub['x-resolution'] ||
+				dot === 'video0.size' || dot === 'video1.size' || dot === 'jpeg.size');
 
 		let p, control;
 
@@ -522,6 +557,81 @@
 				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + ' step="1" value="' + esc(v) + '">' +
 				'</span>';
 			control = p.querySelector('input');
+		} else if (isResolution) {
+			p = el('p', 'select mj-row mj-wide');
+			const cur = eff !== undefined && eff !== null ? String(eff) : '';
+			const max = parseWH(sub['x-max']);
+			const min = parseWH(sub['x-min']);
+			const native = parseWH(sub['x-native']);
+			const arRef = native;                 // AR comes only from the real sensor native
+			const nativeKey = native ? native.w + 'x' + native.h : '';
+			// curated list filtered by the published caps (+ an optional extra
+			// cap, used to keep the sub stream <= the live main resolution)
+			const buildList = (extraMax) => {
+				let list = RES_PRESETS.map(r => ({ w: r[0], h: r[1] }));
+				if (max) list = list.filter(o => o.w <= max.w && o.h <= max.h);
+				if (min) list = list.filter(o => o.w >= min.w && o.h >= min.h);
+				// the sub stream has no x-native, so it inherits the main stream's
+				// aspect ratio; jpeg (no native, no main) is left unfiltered by AR
+				const arSrc = arRef || extraMax;
+				if (arSrc) { const a = resAR(arSrc.w, arSrc.h); list = list.filter(o => resAR(o.w, o.h) === a); }
+				if (extraMax) list = list.filter(o => o.w <= extraMax.w && o.h <= extraMax.h);
+				const c = parseWH(cur);   // always keep the current value selectable
+				if (c && !list.some(o => o.w === c.w && o.h === c.h)) list.push(c);
+				list.sort((a, b) => b.w * b.h - a.w * a.h);
+				return list;
+			};
+			const optsHtml = (list, selVal) => list.map(o => {
+				const val = o.w + 'x' + o.h;
+				const lbl = resLabel(o.w, o.h) + (val === nativeKey ? ' · Native' : '');
+				return '<option value="' + esc(val) + '"' + (val === selVal ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+			}).join('') + '<option value="' + RES_CUSTOM + '">Custom…</option>';
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
+				'<select class="form-select" id="' + id + '">' + optsHtml(buildList(), cur) + '</select>' +
+				'<input type="text" class="form-control mt-1 mj-res-custom" placeholder="custom, e.g. 1920x1080" value="' + esc(cur) + '" style="display:none">';
+			control = p.querySelector('select');
+			const txt = p.querySelector('.mj-res-custom');
+			const inList = (v) => Array.from(control.options).some(o => o.value === v && o.value !== RES_CUSTOM);
+			const syncCustom = () => {
+				const custom = control.value === RES_CUSTOM;
+				txt.style.display = custom ? '' : 'none';
+				if (custom) txt.focus();
+			};
+			// an empty or off-list current value starts in Custom mode, so an
+			// unset field (e.g. jpeg.size = "") round-trips as "" and stays clean
+			if (!cur || !inList(cur)) { control.value = RES_CUSTOM; }
+			syncCustom();
+			control.addEventListener('change', syncCustom);
+			txt.addEventListener('input', updateDirty);
+			txt.addEventListener('change', updateDirty);
+			// text box wins when Custom is active; otherwise the select value
+			control._get = () => control.value === RES_CUSTOM ? String(txt.value).trim() : control.value;
+			control._set = (v) => {
+				const s = v == null ? '' : String(v);
+				txt.value = s;
+				control.value = (s && inList(s)) ? s : RES_CUSTOM;
+				syncCustom();
+			};
+			// the sub stream is downscaled from the main, so it can't exceed it:
+			// re-prune its options whenever the main resolution changes.
+			if (dot === 'video1.size') {
+				const rebuild = () => {
+					const mainF = (state.fields || []).find(f => f.dot === 'video0.size');
+					const mainWH = parseWH(mainF ? mainF.getValue() : (state.config.video0 || {}).size);
+					const keep = control._get();
+					control.innerHTML = optsHtml(buildList(mainWH), keep);
+					control._set(keep);
+				};
+				p._rebuildRes = rebuild;
+				rebuild();
+			}
+			if (dot === 'video0.size') {
+				control.addEventListener('change', () => {
+					const subF = (state.fields || []).find(f => f.dot === 'video1.size');
+					if (subF && subF.p._rebuildRes) subF.p._rebuildRes();
+				});
+			}
 		} else if (type === 'string' && enumVals && enumVals.length) {
 			p = el('p', 'select mj-row');
 			// short enums get a moderate width cap; long-option enums stay full-width
@@ -648,13 +758,15 @@
 		// array fields canonicalise to a comma-joined string so dirty-tracking
 		// (a plain !== against state.initial) keeps working; onSubmit splits it
 		// back into a list before POSTing.
-		const getValue = type === 'boolean'
+		const getValue = control._get
+			? control._get
+			: type === 'boolean'
 			? () => control.checked ? 'true' : 'false'
 			: type === 'array'
 			? () => control._rows().join(', ')
 			: () => String(control.value);
 
-		const setValue = (v) => {
+		const setValue = control._set ? control._set : (v) => {
 			if (type === 'boolean') {
 				control.checked = toBool(v);
 			} else if (type === 'array') {
@@ -717,12 +829,74 @@
 				return;
 			}
 			await refresh();
+			// Image knobs (x-live) apply instantly; everything structural
+			// (resolution, codec, fps, ...) only takes effect after majestic
+			// reloads its pipeline. Offer that as an explicit step.
+			if (dirty.some(f => !(f.schema && f.schema['x-live'])))
+				showApplyBanner();
 		} catch (e) {
 			showError('Save failed: ' + e.message);
 		} finally {
 			btn.textContent = 'Save Changes';
 			updateDirty();
 		}
+	}
+
+	// majestic is the HTTP server, so we don't restart the process — we SIGHUP
+	// it (via j/mj-apply.cgi) for an in-process reload that rebuilds the encoder
+	// pipeline while the web server stays up, then poll until it answers again.
+	function showApplyBanner() {
+		const form = document.getElementById('mj-settings-form');
+		if (!form) return;
+		let bar = document.getElementById('mj-apply-bar');
+		if (!bar) {
+			bar = el('div', 'alert alert-warning d-flex align-items-center gap-2 mb-3');
+			bar.id = 'mj-apply-bar';
+			form.insertBefore(bar, form.children[1] || null);
+		} else {
+			bar.className = 'alert alert-warning d-flex align-items-center gap-2 mb-3';
+		}
+		bar.innerHTML =
+			'<span class="me-auto">Saved. Resolution, codec and frame-rate changes take effect after a pipeline reload (the video streams will blink briefly).</span>' +
+			'<button type="button" class="btn btn-sm btn-warning flex-shrink-0" id="mj-apply-btn">Apply now</button>';
+		document.getElementById('mj-apply-btn').addEventListener('click', applyReload);
+	}
+
+	async function pollUp(maxMs) {
+		const deadline = Date.now() + maxMs;
+		while (Date.now() < deadline) {
+			try {
+				const ctl = new AbortController();
+				const t = setTimeout(() => ctl.abort(), 3000);
+				const r = await fetch('/api/v1/config.json',
+					{ cache: 'no-store', credentials: 'same-origin', signal: ctl.signal });
+				clearTimeout(t);
+				if (r.ok) return true;
+			} catch (e) { /* loop is busy reloading / connection blipped */ }
+			await new Promise(res => setTimeout(res, 1000));
+		}
+		return false;
+	}
+
+	async function applyReload() {
+		const bar = document.getElementById('mj-apply-bar');
+		const btn = document.getElementById('mj-apply-btn');
+		if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+		stopLivePreview();   // the stream drops while the pipeline rebuilds
+		try {
+			await fetch('j/mj-apply.cgi', { credentials: 'same-origin' });
+		} catch (e) { /* the reload may sever this request — expected */ }
+		const up = await pollUp(30000);
+		if (up) {
+			location.reload();   // clean re-fetch of schema/config + preview
+			return;
+		}
+		if (bar) {
+			bar.className = 'alert alert-danger d-flex align-items-center gap-2 mb-3';
+			bar.querySelector('span').textContent =
+				'The reload is taking longer than expected — the camera may still be applying changes.';
+		}
+		if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
 	}
 
 	async function onReset(dot, btn) {
