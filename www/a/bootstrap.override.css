@@ -67,6 +67,22 @@
 	text-align: center;
 }
 
+/* A range slider is itself a `.form-control`, so Bootstrap boxes the track (and
+   its value chip) in a bordered "pill". That reads heavy for a slider — drop the
+   box so it's a bare track + plain value. The thumb still shows focus. */
+.range .form-range {
+	border: 0;
+	background-color: transparent;
+	box-shadow: none;
+}
+
+.range .input-group > .show-value {
+	border: 0;
+	background-color: transparent;
+	color: var(--bs-secondary-color);
+	padding-left: 0.25rem;
+}
+
 /* small integers (ports, timeouts, sizes…) don't need the full card width */
 .number .input-group {
 	max-width: 10rem;
