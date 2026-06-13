@@ -188,45 +188,58 @@
 		err.role = 'alert';
 		form.appendChild(err);
 
-		// Live preview pinned at the top so slider changes are visible as you
-		// drag — reuses the low-latency /ws/video MSE player (a/preview.js).
+		// Each section renders as its own card; the cards flow in a responsive
+		// 2-column grid that fills the page width.
+		const grid = el('div', 'row g-4');
+		grid.id = 'mj-settings-grid';
+		form.appendChild(grid);
+
+		// Live preview pinned full-width at the top so slider changes are visible
+		// as you drag — reuses the low-latency /ws/video MSE player (a/preview.js).
 		if (groupHasLive(group) && window.MajesticVideo) {
-			const pv = el('div', 'mb-3');
-			pv.id = 'mj-live-preview';
-			pv.innerHTML =
+			const col = el('div', 'col-12');
+			col.id = 'mj-live-preview';
+			col.innerHTML =
+				'<div class="card"><div class="card-body">' +
 				'<div class="text-secondary small mb-1">Live preview</div>' +
-				'<video id="mj-live-video" autoplay muted playsinline ' +
-				'style="width:100%;max-width:640px;border:1px solid rgb(76,96,216);' +
-				'border-radius:4px;aspect-ratio:16/9;background:#000;"></video>';
-			form.appendChild(pv);
+				'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
+				'</div></div>';
+			grid.appendChild(col);
 			state.previewPlayer =
-				window.MajesticVideo.attach(pv.querySelector('#mj-live-video'), { stream: 0 });
+				window.MajesticVideo.attach(col.querySelector('#mj-live-video'), { stream: 0 });
 		}
 
 		state.fields = [];
 		state.initial = {};
-		// Render each merged section. Multi-section groups get a subheader per
-		// section; a single-section group needs none (the tab title says it).
-		const multi = group.sections.length > 1;
+		// One card per merged section; renderProps fills the card body (nested
+		// object sub-properties still get an <h5> subheader inside the card).
+		// Multi-card groups flow 2-up; a lone card (e.g. Recording — no preview,
+		// no ROI mate) is centred so it reads as one panel, not a left-stranded half.
+		const lone = group.sections.length === 1 && !groupHasMotion(group) && !groupHasLive(group);
+		const colCls = lone ? 'col-12 col-lg-8 mx-auto' : 'col-12 col-lg-6';
 		for (const section of group.sections) {
 			const props = ((state.schema.properties || {})[section] || {}).properties;
 			if (!props) continue;
-			if (multi) {
-				const h = el('h5', 'mt-4 mb-2 text-secondary');
-				h.textContent = label(section);
-				form.appendChild(h);
-			}
-			renderProps(form, section, props);
+			const col = el('div', colCls);
+			const card = el('div', 'card h-100');
+			const body = el('div', 'card-body');
+			const h = el('h3');
+			h.textContent = label(section);
+			body.appendChild(h);
+			card.appendChild(body);
+			col.appendChild(card);
+			grid.appendChild(col);
+			renderProps(body, section, props);
 		}
 
+		if (groupHasMotion(group)) toggleRoi(group);
+
 		const toolbar = document.createElement('div');
-		toolbar.className = 'mj-toolbar d-flex align-items-center mt-3 gap-2';
+		toolbar.className = 'mj-toolbar d-flex align-items-center gap-2';
 		toolbar.innerHTML =
 			'<span class="me-auto text-secondary small" id="mj-dirty-count">No changes.</span>' +
 			'<button type="submit" class="btn btn-primary" id="mj-save" disabled>Save Changes</button>';
 		form.appendChild(toolbar);
-
-		if (groupHasMotion(group)) toggleRoi(group);
 
 		applyVisibility();
 
@@ -254,17 +267,18 @@
 		const existing = document.getElementById(id);
 		if (groupHasMotion(group)) {
 			if (existing) return;
-			const wrap = document.createElement('div');
-			wrap.id = id;
-			wrap.className = 'mt-4';
-			wrap.innerHTML =
+			const grid = document.getElementById('mj-settings-grid');
+			if (!grid) return;
+			const col = document.createElement('div');
+			col.id = id;
+			col.className = 'col-12 col-lg-6';
+			col.innerHTML =
+				'<div class="card h-100"><div class="card-body">' +
 				'<h3>Visual editor</h3>' +
-				'<iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" style="padding:0;margin:0;border:1px solid rgb(76,96,216);width:100%;aspect-ratio:16/9;"></iframe>' +
-				'<div class="row mb-3 mt-2 align-items-center">' +
-				'<div class="col"><input type="button" class="btn btn-primary" id="mj-roi-clear" value="Clear all regions"></div>' +
-				'</div>';
-			const col = document.getElementById('mj-settings-form-col');
-			if (col) col.appendChild(wrap);
+				'<iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" class="mj-roi-iframe"></iframe>' +
+				'<button type="button" class="btn btn-outline-secondary mt-2" id="mj-roi-clear">Clear all regions</button>' +
+				'</div></div>';
+			grid.appendChild(col);
 			const clearBtn = document.getElementById('mj-roi-clear');
 			if (clearBtn) {
 				clearBtn.addEventListener('click', () => {
@@ -286,7 +300,7 @@
 
 	function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-	function renderProps(form, basePath, props) {
+	function renderProps(container, basePath, props) {
 		for (const key of Object.keys(props)) {
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
@@ -294,12 +308,12 @@
 			if (sub && sub.type === 'object' && sub.properties) {
 				const h = el('h5', 'mt-4 mb-2 text-secondary');
 				h.textContent = sub.title || titleCase(key);
-				form.appendChild(h);
-				renderProps(form, dot, sub.properties);
+				container.appendChild(h);
+				renderProps(container, dot, sub.properties);
 				continue;
 			}
 			const eff = getDotted(state.config, dot);
-			const field = renderField(form, dot, key, sub, eff);
+			const field = renderField(container, dot, key, sub, eff);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -329,7 +343,7 @@
 		(state.visUpdaters || []).forEach(u => u());
 	}
 
-	function renderField(form, dot, key, sub, eff) {
+	function renderField(container, dot, key, sub, eff) {
 		const desc = sub.description || key;
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
@@ -459,7 +473,7 @@
 		}
 		p.appendChild(reset);
 
-		form.appendChild(p);
+		container.appendChild(p);
 
 		control.addEventListener('input', updateDirty);
 		control.addEventListener('change', updateDirty);
