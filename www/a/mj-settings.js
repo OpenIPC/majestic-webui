@@ -237,7 +237,7 @@
 		// Multi-card groups flow 2-up; a lone card (e.g. Recording — no preview,
 		// no ROI mate) is centred so it reads as one panel, not a left-stranded half.
 		const lone = group.sections.length === 1 && !groupHasMotion(group) && !live;
-		const colCls = lone ? 'col-12 col-lg-8 mx-auto' : 'col-12 col-lg-6';
+		const colCls = lone ? 'col-12' : 'col-12 col-lg-6';
 		for (const section of group.sections) {
 			const props = ((state.schema.properties || {})[section] || {}).properties;
 			if (!props) continue;
@@ -247,12 +247,17 @@
 			const h = el('h3');
 			h.textContent = label(section);
 			body.appendChild(h);
+			// a lone full-width card flows its fields in two columns so it fills the
+			// width instead of stranding a half-card or stretching single-column inputs.
+			const target = lone ? el('div', 'mj-cols') : body;
+			if (lone) body.appendChild(target);
 			card.appendChild(body);
 			col.appendChild(card);
-			renderProps(body, section, props);
+			renderProps(target, section, props);
 			// a section whose only fields were x-live (moved to the panel) is empty
 			// apart from its heading — don't show an empty card.
-			if (body.childElementCount <= 1) continue;
+			const filled = lone ? target.childElementCount > 0 : body.childElementCount > 1;
+			if (!filled) continue;
 			grid.appendChild(col);
 		}
 

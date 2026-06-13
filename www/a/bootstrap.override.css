@@ -255,6 +255,23 @@ pre#output[data-cmd] {
 	flex: 1 1 auto;
 }
 
+/* a lone full-width section card (e.g. Recording) flows its fields in 2 columns */
+.mj-cols {
+	column-count: 2;
+	column-gap: 2.5rem;
+}
+
+.mj-cols .mj-row,
+.mj-cols h5 {
+	break-inside: avoid;
+}
+
+@media (max-width: 767.98px) {
+	.mj-cols {
+		column-count: 1;
+	}
+}
+
 .mj-live-video {
 	width: 100%;
 	max-width: 640px;
