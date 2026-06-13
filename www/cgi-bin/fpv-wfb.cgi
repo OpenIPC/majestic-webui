@@ -2,17 +2,14 @@
 <%in p/common.cgi %>
 <%in p/fpv_common.cgi %>
 <%
-set -x
-
-
 # Set page title and determine active tab
 page_title="WFB Settings"
 label="$GET_tab"
 [ -z "$label" ] && label="wireless"
 
-# Debug function to log form submission data
+# Debug logging disabled (kept as a no-op so existing call sites are harmless).
 debug_log() {
-    echo "$1" >> /tmp/wfb_debug.log
+    :
 }
 
 # Function to determine if a channel is in the 2.4GHz range
@@ -363,27 +360,14 @@ fi
 update_wfbinfo
 
 %>
-<%in p/header.cgi %><!-- Initialize Bootstrap tooltips -->
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-  var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-    return new bootstrap.Tooltip(tooltipTriggerEl)
-  })
-});
+<%in p/header.cgi %>
 
-</script>
-
-<!-- Navigation Tabs -->
 <ul class="nav nav-underline small mb-4 d-lg-flex">
-    
     <%
-    # Manually set sections
     section="wireless broadcast telemetry"
     for key in $section; do
         locale=$(eval echo \$wfb_${key})
         if [ -z "$locale" ]; then
-            # If no locale found, use capitalized key as fallback
             locale=$(echo "$key" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
         fi
         c="class=\"nav-link\""
@@ -394,121 +378,86 @@ document.addEventListener('DOMContentLoaded', function() {
 </ul>
 
 <div class="row g-4">
-    <div class="col col-md-6 col-lg-4 mb-4">
-        
+    <div class="col-12 col-lg-5">
+        <div class="card h-100"><div class="card-body">
             <form action="<%= $SCRIPT_NAME %>" method="post">
-            <% field_hidden "action" "update" %>
-            <% field_hidden "current_tab" "$label" %>
+                <% field_hidden "action" "update" %>
+                <% field_hidden "current_tab" "$label" %>
 
-        
-        <%  if [ "$label" = "wireless" ]; then %>
-            <div>
-                <h3>Wireless</h3>
+                <%  if [ "$label" = "wireless" ]; then %>
+                    <h3>Wireless</h3>
 
-                <% field_channel_select "channel" "Wireless Channel" "$wfb_channel" "WiFi channel used for transmission. 2.4GHz (1-14) have better penetration, 5GHz (36-165) have less interference. Choose based on local conditions and regulations." %>
-            
-                <p class="range" id="txpower_wrap">
-                    <% tooltip_label "txpower" "TX Power" "Transmit power in dBm. Higher values increase range but consume more power and may cause interference. Check local regulations for maximum allowed values." %>
-                    <span class="input-group">
-                        <input type="hidden" id="txpower" name="txpower" value="<%= $wfb_txpower %>">
-                        <input type="range" class="form-control form-range" id="txpower-range" value="<%= $wfb_txpower %>" min="0" max="55" step="1">
-                        <span class="input-group-text show-value" id="txpower-show"><%= $wfb_txpower %></span>
-                    </span>
-                </p>
-                
-                <p class="select" id="width_wrap">
-                    <% tooltip_label "width" "Bandwidth" "Channel width in MHz. Wider channels (40/80) provide higher throughput but are more susceptible to interference. 20MHz is most reliable for long-range links." %>
-                    <select class="form-select" id="width" name="width">
-                        <option value="20" <% [ "$wfb_width" = "20" ] && echo "selected" %>>20 MHz</option>
-                        <option value="40" <% [ "$wfb_width" = "40" ] && echo "selected" %>>40 MHz</option>
-                    </select>
-                </p>
+                    <% field_channel_select "channel" "Wireless Channel" "$wfb_channel" "WiFi channel used for transmission. 2.4GHz (1-14) have better penetration, 5GHz (36-165) have less interference. Choose based on local conditions and regulations." %>
 
-            </div>
-        <%  elif [ "$label" = "broadcast" ]; then %>
-            <h3>Broadcast</h3>
-            
-            <% field_select_tooltip "mcs_index" "MCS Index" "$wfb_mcs_index" "MCS (Modulation and Coding Scheme) index determines bitrate and robustness. Lower values are more reliable in poor conditions but have lower throughput." 1 10 1 %>
+                    <p class="range" id="txpower_wrap">
+                        <% tooltip_label "txpower" "TX Power" "Transmit power in dBm. Higher values increase range but consume more power and may cause interference. Check local regulations for maximum allowed values." %>
+                        <span class="input-group">
+                            <input type="hidden" id="txpower" name="txpower" value="<%= $wfb_txpower %>">
+                            <input type="range" class="form-control form-range" id="txpower-range" value="<%= $wfb_txpower %>" min="0" max="55" step="1">
+                            <span class="input-group-text show-value" id="txpower-show"><%= $wfb_txpower %></span>
+                        </span>
+                    </p>
 
-            <% field_select_tooltip "tun_index" "TUN Index" "$wfb_tun_index" "Tunnel interface index for wifibroadcast. Multiple interfaces allow multiple video streams. Most setups use index 1 for the primary video." 1 10 1 %>
+                    <p class="select" id="width_wrap">
+                        <% tooltip_label "width" "Bandwidth" "Channel width in MHz. Wider channels (40/80) provide higher throughput but are more susceptible to interference. 20MHz is most reliable for long-range links." %>
+                        <select class="form-select" id="width" name="width">
+                            <option value="20" <% [ "$wfb_width" = "20" ] && echo "selected" %>>20 MHz</option>
+                            <option value="40" <% [ "$wfb_width" = "40" ] && echo "selected" %>>40 MHz</option>
+                        </select>
+                    </p>
+                <%  elif [ "$label" = "broadcast" ]; then %>
+                    <h3>Broadcast</h3>
 
-            <% field_select_tooltip "fec_k" "FEC K" "$wfb_fec_k" "Forward Error Correction K parameter - number of data packets per FEC block. Lower values provide better redundancy but lower efficiency." 1 15 1 %>
-            
-            <% field_select_tooltip "fec_n" "FEC N" "$wfb_fec_n" "Forward Error Correction N parameter - total number of packets per FEC block. The difference (N-K) determines redundant packets. Higher difference provides better error correction." 1 15 1 %>
-            
-            <% field_numeric_switch_tooltip "stbc" "STBC Enabled" "$wfb_stbc" "Space-Time Block Coding improves signal reliability in challenging environments by using multiple antennas. Enable for better range and resilience against interference." %>
-            
-            <% field_numeric_switch_tooltip "ldpc" "LDPC Enabled" "$wfb_ldpc" "Low-Density Parity-Check coding provides better error correction than standard coding. Enable for improved link quality at longer ranges." %>
-            
-            <% field_string_tooltip "link_id" "Link ID" "$wfb_link_id" "Unique identifier for this link. Must match between transmitter and receiver. Use different values for separate links to avoid interference." "" %>
-            
-        <%  elif [ "$label" = "telemetry" ]; then %>
-            <h3>Telemetry</h3>
+                    <% field_select_tooltip "mcs_index" "MCS Index" "$wfb_mcs_index" "MCS (Modulation and Coding Scheme) index determines bitrate and robustness. Lower values are more reliable in poor conditions but have lower throughput." 1 10 1 %>
+                    <% field_select_tooltip "tun_index" "TUN Index" "$wfb_tun_index" "Tunnel interface index for wifibroadcast. Multiple interfaces allow multiple video streams. Most setups use index 1 for the primary video." 1 10 1 %>
+                    <% field_select_tooltip "fec_k" "FEC K" "$wfb_fec_k" "Forward Error Correction K parameter - number of data packets per FEC block. Lower values provide better redundancy but lower efficiency." 1 15 1 %>
+                    <% field_select_tooltip "fec_n" "FEC N" "$wfb_fec_n" "Forward Error Correction N parameter - total number of packets per FEC block. The difference (N-K) determines redundant packets. Higher difference provides better error correction." 1 15 1 %>
+                    <% field_numeric_switch_tooltip "stbc" "STBC Enabled" "$wfb_stbc" "Space-Time Block Coding improves signal reliability in challenging environments by using multiple antennas. Enable for better range and resilience against interference." %>
+                    <% field_numeric_switch_tooltip "ldpc" "LDPC Enabled" "$wfb_ldpc" "Low-Density Parity-Check coding provides better error correction than standard coding. Enable for improved link quality at longer ranges." %>
+                    <% field_string_tooltip "link_id" "Link ID" "$wfb_link_id" "Unique identifier for this link. Must match between transmitter and receiver. Use different values for separate links to avoid interference." "" %>
+                <%  elif [ "$label" = "telemetry" ]; then %>
+                    <h3>Telemetry</h3>
 
-            <% field_string_tooltip "router" "Router" "$wfb_router" "Telemetry router type: mavfwd (basic forwarding), mavrouter (routing between interfaces), msposd (MultiWii Serial Protocol for OSD), or ground" "mavfwd mavrouter msposd ground" %>
-            
-            <%# <% field_string_tooltip "serial" "Serial Port" "$wfb_serial" "Serial port for telemetry data (e.g., ttyS0, ttyS1, ttyS2, ttyAMA0). Check your hardware documentation for the correct port." "" %> %>
-            
-            <p class="select" id="serial_port_wrap">
-                <% tooltip_label "serial_port" "Serial Port" "Serial port for telemetry data (e.g., ttyS0, ttyS1, ttyS2, ttyAMA0). Check your hardware documentation for the correct port." %>
-                <select class="form-select" id="serial_port" name="serial_port">
-                    <option value="ttyS0" <% [ "$wfb_serial" = "ttyS0" ] && echo "selected" %>>ttyS0</option>
-                    <option value="ttyS1" <% [ "$wfb_serial" = "ttyS1" ] && echo "selected" %>>ttyS1</option>
-                    <option value="ttyS2" <% [ "$wfb_serial" = "ttyS2" ] && echo "selected" %>>ttyS2</option>
-                    <option value="ttyAMA0" <% [ "$wfb_serial" = "ttyAMA0" ] && echo "selected" %>>ttyAMA0</option>
-                    <option value="ttyAMA0" <% [ "$wfb_serial" = "ttyAMA1" ] && echo "selected" %>>ttyAMA1</option>
-                </select>
-            </p>
+                    <% field_string_tooltip "router" "Router" "$wfb_router" "Telemetry router type: mavfwd (basic forwarding), mavrouter (routing between interfaces), msposd (MultiWii Serial Protocol for OSD), or ground" "mavfwd mavrouter msposd ground" %>
 
-            <p class="select" id="osd_fps_wrap">
-                <% tooltip_label "osd_fps" "OSD FPS" "On-Screen Display refresh rate. Higher values provide smoother OSD updates but use more bandwidth. 20-30 FPS is suitable for most applications." %>
-                <select class="form-select" id="osd_fps" name="osd_fps">
-                    <option value="10" <% [ "$wfb_osd_fps" = "10" ] && echo "selected" %>>10</option>
-                    <option value="15" <% [ "$wfb_osd_fps" = "15" ] && echo "selected" %>>15</option>
-                    <option value="20" <% [ "$wfb_osd_fps" = "20" ] && echo "selected" %>>20</option>
-                    <option value="25" <% [ "$wfb_osd_fps" = "25" ] && echo "selected" %>>25</option>
-                    <option value="30" <% [ "$wfb_osd_fps" = "30" ] && echo "selected" %>>30</option>
-                </select>
-            </p>
-        <% fi %>
-        
-        <% button_submit %>
-        
-    </form>
-    <br/>
-    <div class="alert alert-danger">
-        <h4>Restart Camera</h4>
-        <p>Reboot camera to apply new settings and reset temporary files.</p>
-        <a class="btn btn-danger" href="fw-restart.cgi">Restart Camera</a>
+                    <p class="select" id="serial_port_wrap">
+                        <% tooltip_label "serial_port" "Serial Port" "Serial port for telemetry data (e.g., ttyS0, ttyS1, ttyS2, ttyAMA0). Check your hardware documentation for the correct port." %>
+                        <select class="form-select" id="serial_port" name="serial_port">
+                            <option value="ttyS0" <% [ "$wfb_serial" = "ttyS0" ] && echo "selected" %>>ttyS0</option>
+                            <option value="ttyS1" <% [ "$wfb_serial" = "ttyS1" ] && echo "selected" %>>ttyS1</option>
+                            <option value="ttyS2" <% [ "$wfb_serial" = "ttyS2" ] && echo "selected" %>>ttyS2</option>
+                            <option value="ttyAMA0" <% [ "$wfb_serial" = "ttyAMA0" ] && echo "selected" %>>ttyAMA0</option>
+                            <option value="ttyAMA1" <% [ "$wfb_serial" = "ttyAMA1" ] && echo "selected" %>>ttyAMA1</option>
+                        </select>
+                    </p>
+
+                    <p class="select" id="osd_fps_wrap">
+                        <% tooltip_label "osd_fps" "OSD FPS" "On-Screen Display refresh rate. Higher values provide smoother OSD updates but use more bandwidth. 20-30 FPS is suitable for most applications." %>
+                        <select class="form-select" id="osd_fps" name="osd_fps">
+                            <option value="10" <% [ "$wfb_osd_fps" = "10" ] && echo "selected" %>>10</option>
+                            <option value="15" <% [ "$wfb_osd_fps" = "15" ] && echo "selected" %>>15</option>
+                            <option value="20" <% [ "$wfb_osd_fps" = "20" ] && echo "selected" %>>20</option>
+                            <option value="25" <% [ "$wfb_osd_fps" = "25" ] && echo "selected" %>>25</option>
+                            <option value="30" <% [ "$wfb_osd_fps" = "30" ] && echo "selected" %>>30</option>
+                        </select>
+                    </p>
+                <% fi %>
+
+                <% button_submit %>
+            </form>
+            <hr class="my-3">
+            <p class="small text-secondary mb-2">Reboot to apply new WFB settings.</p>
+            <a class="btn btn-sm btn-danger" href="fw-restart.cgi">Restart camera</a>
+        </div></div>
+    </div>
+
+    <div class="col-12 col-lg-7">
+        <div class="card h-100"><div class="card-body">
+            <h3>Current configuration</h3>
+            <% ex "cat $WFB_YAML" %>
+        </div></div>
     </div>
 </div>
 
-<div class="col col-md-6 col-lg-8">
-    <h4>Current Configuration</h4>
-        <% ex "cat $WFB_YAML" %>
-
-</div>
-
-<!-- JavaScript for Range Sliders -->
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Function to update the text display when a range slider changes
-    function setupRangeSlider(sliderId, displayId, hiddenId) {
-        const slider = document.getElementById(sliderId);
-        const display = document.getElementById(displayId);
-        const hidden = document.getElementById(hiddenId);
-        
-        if (!slider || !display || !hidden) return;
-        
-        slider.addEventListener('input', function() {
-            display.textContent = this.value;
-            hidden.value = this.value;
-        });
-    }
-    
-    // Setup each range slider
-    setupRangeSlider('txpower-range', 'txpower-show', 'txpower');
-});
-</script>
-
+<script src="/a/fpv-wfb.js"></script>
 <%in p/footer.cgi %>
