@@ -7,8 +7,11 @@
 %>
 
 <%in p/header.cgi %>
-<h3 class="alert alert-warning">DO NOT CLOSE, REFRESH, OR NAVIGATE AWAY FROM THIS PAGE UNTIL THE PROCESS IS FINISHED!</h3>
-<pre id="output" data-cmd="<%= $c %>" data-reboot="<%= $r %>"></pre>
+<div class="alert alert-warning">Do not close, refresh, or navigate away from this page until the process finishes. The camera will reboot automatically.</div>
+<div class="card"><div class="card-body">
+	<h3>Progress</h3>
+	<pre id="output" class="mb-0" data-cmd="<%= $c %>" data-reboot="<%= $r %>"></pre>
+</div></div>
 
 <script>
 	const el = $('pre#output');
