@@ -42,11 +42,14 @@ fi
 %>
 
 <%in p/header.cgi %>
-<form action="<%= $SCRIPT_NAME %>" method="post">
-	<% field_hidden "action" "save" %>
-	<% field_hidden "editor_file" "$editor_file" %>
-	<% field_textedit "editor_text" "File content" "$editor_file" %>
-	<% button_submit %>
-</form>
+<div class="card"><div class="card-body">
+	<h3 class="text-break">Text editor<% [ -n "$editor_file" ] && echo " — <code>${editor_file}</code>" %></h3>
+	<form action="<%= $SCRIPT_NAME %>" method="post">
+		<% field_hidden "action" "save" %>
+		<% field_hidden "editor_file" "$editor_file" %>
+		<% field_textedit "editor_text" "File content" "$editor_file" %>
+		<% button_submit %>
+	</form>
+</div></div>
 
 <%in p/footer.cgi %>
