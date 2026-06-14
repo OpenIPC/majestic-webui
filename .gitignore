@@ -2,3 +2,6 @@
 
 
 **/fpv-test.cgi
+/node_modules/
+/majestic-webui-dist.tar.gz
+*.sqsh
