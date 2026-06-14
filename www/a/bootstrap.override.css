@@ -148,8 +148,10 @@ textarea {
 	overflow: hidden;
 }
 
-.spark .uplot, .spark canvas {
-	width: 100% !important;
+.spark svg {
+	display: block;
+	width: 100%;
+	height: 38px;
 }
 
 .card > .card-body h3 {

@@ -56,25 +56,49 @@
 		el.className = 'progress-bar' + (pct >= danger ? ' bg-danger' : pct >= warn ? ' bg-warning' : '');
 	}
 
+	// Lightweight inline-SVG sparkline (replaces uPlot — same look, ~50 KB less on
+	// flash). A single area+line path stretched to the card width via a fixed
+	// viewBox + preserveAspectRatio=none; the 1.5px stroke stays crisp through
+	// vector-effect, so no per-resize redraw is needed.
+	const SVG_NS = 'http://www.w3.org/2000/svg';
 	function makeSpark(id, color, lo, hi) {
 		const el = $(id);
-		if (!el || !window.uPlot) return null;
-		const data = [[], []];
-		const u = new uPlot({
-			width: el.clientWidth || 200, height: 38,
-			cursor: { show: false }, legend: { show: false },
-			scales: { x: { time: false }, y: { range: (s, dmin, dmax) => [lo != null ? lo : dmin, hi != null ? hi : dmax] } },
-			axes: [{ show: false }, { show: false }],
-			series: [{}, { stroke: color, width: 1.5, fill: color + '22', points: { show: false } }],
-		}, data, el);
-		return { u: u, data: data };
+		if (!el) return null;
+		const svg = document.createElementNS(SVG_NS, 'svg');
+		svg.setAttribute('viewBox', '0 0 100 38');
+		svg.setAttribute('preserveAspectRatio', 'none');
+		const fill = document.createElementNS(SVG_NS, 'path');
+		fill.setAttribute('fill', color + '22');
+		const line = document.createElementNS(SVG_NS, 'path');
+		line.setAttribute('fill', 'none');
+		line.setAttribute('stroke', color);
+		line.setAttribute('stroke-width', '1.5');
+		line.setAttribute('stroke-linejoin', 'round');
+		line.setAttribute('vector-effect', 'non-scaling-stroke');
+		svg.appendChild(fill);
+		svg.appendChild(line);
+		el.textContent = '';
+		el.appendChild(svg);
+		return { fill: fill, line: line, lo: lo, hi: hi, ys: [] };
 	}
 	function pushSpark(s, y) {
 		if (!s) return;
-		const xs = s.data[0], ys = s.data[1];
-		xs.push(xs.length); ys.push(y);
-		if (xs.length > HISTORY) { xs.shift(); ys.shift(); for (let i = 0; i < xs.length; i++) xs[i] = i; }
-		s.u.setData(s.data);
+		const ys = s.ys;
+		ys.push(y);
+		if (ys.length > HISTORY) ys.shift();
+		const n = ys.length, W = 100, H = 38;
+		let lo = s.lo != null ? s.lo : Math.min.apply(null, ys);
+		let hi = s.hi != null ? s.hi : Math.max.apply(null, ys);
+		if (hi - lo < 1e-9) hi = lo + 1;
+		const dx = n > 1 ? W / (n - 1) : 0;
+		let d = '';
+		for (let i = 0; i < n; i++) {
+			let yy = H - ((ys[i] - lo) / (hi - lo)) * H;
+			yy = yy < 0 ? 0 : yy > H ? H : yy;
+			d += (i ? 'L' : 'M') + (i * dx).toFixed(2) + ' ' + yy.toFixed(2);
+		}
+		s.line.setAttribute('d', d);
+		s.fill.setAttribute('d', n ? d + 'L' + ((n - 1) * dx).toFixed(2) + ' ' + H + 'L0 ' + H + 'Z' : '');
 	}
 
 	function badge(level, text) {
@@ -194,12 +218,7 @@
 		renderStreams();
 		tick();
 		setInterval(tick, POLL);
-		window.addEventListener('resize', () => {
-			for (const k in sparks) if (sparks[k]) {
-				const el = sparks[k].u.root.parentNode;
-				sparks[k].u.setSize({ width: (el && el.clientWidth) || 200, height: 38 });
-			}
-		});
+		// SVG sparklines stretch to their container automatically — no resize redraw.
 	}
 
 	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

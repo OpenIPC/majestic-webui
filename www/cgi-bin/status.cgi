@@ -131,8 +131,6 @@
 	</div>
 </div>
 
-<link rel="stylesheet" href="/a/uPlot.min.css">
-<script src="/a/uPlot.iife.min.js"></script>
 <script src="/a/status.js" defer></script>
 
 <%in p/footer.cgi %>
