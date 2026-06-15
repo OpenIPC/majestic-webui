@@ -1,0 +1,14 @@
+{
+  "name": "majestic-webui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenIPC majestic web UI — dev tooling that builds the minified distribution tarball consumed by the firmware. The shipped source stays unminified and readable; minification happens only in CI.",
+  "license": "MIT",
+  "scripts": {
+    "build:dist": "sh tools/build-dist.sh"
+  },
+  "devDependencies": {
+    "clean-css-cli": "5.6.3",
+    "terser": "5.37.0"
+  }
+}
