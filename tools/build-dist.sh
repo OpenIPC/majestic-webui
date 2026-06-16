@@ -23,6 +23,12 @@ cp -r www LICENSE "$PKG"/
 [ -d sbin ] && cp -r sbin "$PKG"/ || true
 [ -d bin ]  && cp -r bin  "$PKG"/ || true
 
+# CGIs are exec'd directly by majestic, so a non-executable one 500s the page.
+# Guarantee the exec bit here even if a file was committed without it (a recurring
+# slip) — defence in depth on top of the repo's own modes. Same for sbin helpers.
+find "$PKG/www" -name '*.cgi' -exec chmod 0755 {} +
+[ -d "$PKG/sbin" ] && chmod 0755 "$PKG"/sbin/* 2>/dev/null || true
+
 # minify hand-written JS (skip already-minified vendored libs); fail loudly if a
 # minified file is ever not valid JS.
 find "$PKG/www" -name '*.js' ! -name '*.min.js' | while IFS= read -r f; do
