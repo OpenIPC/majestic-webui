@@ -30,8 +30,7 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownInformation" class="dropdown-menu">
 							<li><a class="dropdown-item" href="status.cgi">Status</a></li>
 							<li><hr class="dropdown-divider"></li>
-							<li><a class="dropdown-item" href="info-majestic.cgi">Majestic</a></li>
-							<li><a class="dropdown-item" href="info-kernel.cgi">Kernel</a></li>
+							<li><a class="dropdown-item" href="info-logs.cgi">Logs</a></li>
 						</ul>
 					</li>
 
@@ -78,7 +77,11 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownExtensions" class="dropdown-menu dropdown-menu-lg-end">
 							<li><a class="dropdown-item" href="ext-openwall.cgi">OpenWall</a></li>
 							<li><a class="dropdown-item" href="ext-telegram.cgi">Telegram</a></li>
-							<li><a class="dropdown-item" href="ext-tunnel.cgi">Tunnel</a></li>
+							<li><a class="dropdown-item" href="ext-ntfy.cgi">Ntfy</a></li>
+							<li><hr class="dropdown-divider"></li>
+							<li><a class="dropdown-item" href="https://openipc.cloud">P2P network</a></li>
+							<li><a class="dropdown-item" href="ext-vtun.cgi">VTun</a></li>
+							<li><a class="dropdown-item" href="ext-wireguard.cgi">WireGuard</a></li>
 							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="ext-proxy.cgi">Proxy</a></li>
 						</ul>
