@@ -3,25 +3,24 @@
 <%
 	page_title="Firmware Update"
 
-	github_ver() {
+	# Latest build available for THIS board, via sysupgrade — the same updater the
+	# Install button drives over /ws/upgrade. It reads OpenIPC's manifest.flat
+	# (firmware or builder repo, chosen by model) with `curl -k`, so unlike the old
+	# verifying HTTPS HEAD it is not defeated by a fresh flash's stale clock
+	# (issue #44/#121: BADCERT_FUTURE made curl fail while sysupgrade updated fine).
+	# `timeout` bounds it so a dead network cannot hang the page.
+	latest_build() {
 		[ -z "$network_gateway" ] && return
-		fw_soc=$soc
-		[ "$soc_vendor" = "ingenic" ] && fw_soc=$soc_family
-		builder=$(fw_printenv -n upgrade)
-		fw_url="${builder:-https://github.com/openipc/firmware/releases/download/latest/openipc.${fw_soc}-${flash_type}-${fw_variant}.tgz}"
-		curl -m5 -ILs "$fw_url" | grep -i last-modified | cut -d' ' -f2-
+		command -v sysupgrade >/dev/null 2>&1 || return
+		timeout 15 sysupgrade --list-builds 2>/dev/null \
+			| grep -Eo '[A-Za-z0-9._]+-[0-9]{8}-[0-9a-f]+' | head -1
 	}
 
-	ver=$(github_ver)
-	# Issue #44: a fresh flash boots with a stale clock so the HTTPS check
-	# fails; sync time once (NTP, else HTTP Date header) and retry.
-	if [ -z "$ver" ] && [ -n "$network_gateway" ]; then
-		synctime
-		ver=$(github_ver)
-	fi
-
+	ver=$(latest_build)
 	if [ -n "$ver" ]; then
-		fw_date=$(date -D "%a, %d %b %Y %T GMT" +"$(date +%y | sed 's/.$/.&/').%m.%d" --date "$ver")
+		# nightly-20260717-027aae1 -> 2026-07-17
+		fw_date=$(echo "$ver" | grep -Eo '[0-9]{8}' | head -1 | sed -E 's/(....)(..)(..)/\1-\2-\3/')
+		[ -z "$fw_date" ] && fw_date="$ver"
 	else
 		fw_date=""
 	fi
