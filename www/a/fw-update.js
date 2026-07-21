@@ -8,13 +8,21 @@
 	const ansi = /[][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
 	const dec = new TextDecoder('utf-8');
 
+	// sysupgrade prints one of these only after the (silent) download, once it is
+	// into the point-of-no-return flash. Seeing one lets us tell a real flash
+	// apart from an idle-timeout disconnect during the quiet download/time-sync.
+	const flashMarker = /Received and unpacked|Kernel updated|RootFS updated|Unmounting|Unconditional reboot|Protected: flashing/i;
+	let sawFlash = false;
+
 	function status(cls, msg) {
 		const s = $('#fw-status');
 		s.className = 'alert alert-' + cls;
 		s.textContent = msg;
 	}
 	function append(t) {
-		out.textContent += t.replace(ansi, '');
+		const s = t.replace(ansi, '');
+		if (!sawFlash && flashMarker.test(s)) sawFlash = true;
+		out.textContent += s;
 		out.scrollTop = out.scrollHeight;
 	}
 	function showProgress() {
@@ -31,6 +39,7 @@
 		const p = params(source);
 		if (!p.kernel && !p.rootfs) { status('danger', 'Select kernel and/or rootfs.'); return; }
 		showProgress();
+		sawFlash = false;
 		status('warning', 'Preparing — freeing memory…');
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		const ws = new WebSocket(proto + '://' + location.host + '/ws/upgrade');
@@ -38,23 +47,51 @@
 		let opened = false;
 		ws.onopen = () => { opened = true; ws.send(JSON.stringify(p)); status('warning', 'Upgrading — do not power off…'); };
 		ws.onmessage = e => append(dec.decode(new Uint8Array(e.data), { stream: true }));
-		// A flash only happens after the socket opened; a close without ever
-		// opening means the handshake failed (let onerror report it).
-		ws.onclose = () => { if (!opened) return; status('warning', 'Flashing & rebooting — do not power off. Waiting for the camera…'); pollBack(); };
+		// The socket can close because majestic was killed at the reboot, or
+		// because it idled out during a quiet phase (download / time-sync). Either
+		// way the flash may still be running, so confirm an actual reboot
+		// (down-then-up) before declaring anything — never assume a close means
+		// success. (Keeping the socket alive through the quiet phases is a
+		// server-side concern: majestic pings /ws/upgrade while the child is idle.)
+		ws.onclose = () => {
+			if (!opened) return;   // handshake failed → onerror reports it
+			status('warning', 'Waiting for the camera to reboot — do not power off…');
+			pollBack();
+		};
 		ws.onerror = () => { if (!opened) status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.'); };
 	}
 
-	// After the WS drops (majestic killed at flash) poll until the camera is back.
+	// Confirm a real reboot before reporting done: the camera must first go
+	// UNREACHABLE, then come back. A dropped socket alone is not proof — on a
+	// failed upgrade the camera stays up, and blindly reloading would report a
+	// success that never happened (issue #120, t31x).
 	function pollBack() {
-		let tries = 0;
-		const t = setInterval(() => {
-			if (++tries > 150) { clearInterval(t); status('danger', 'The camera has not returned. Check it manually.'); return; }
+		function ping() {
 			const ctl = new AbortController();
-			setTimeout(() => ctl.abort(), 2500);
-			fetch('/?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal })
-				.then(() => { clearInterval(t); status('success', 'Camera is back online.'); setTimeout(() => location.href = 'status.cgi', 1500); })
-				.catch(() => {});
-		}, 3000);
+			const to = setTimeout(() => ctl.abort(), 2500);
+			return fetch('/?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal })
+				.then(() => { clearTimeout(to); return true; })
+				.catch(() => { clearTimeout(to); return false; });
+		}
+		let downSeen = false, tries = 0;
+		const DOWN_TRIES = 160;   // ~8 min: silent download (≤2 min) + verify + flash + reboot
+		const UP_TRIES = 200;     // ~10 min: a stale-clock first boot can fsck and take minutes
+		async function tick() {
+			const up = await ping();
+			if (!downSeen) {
+				if (!up) { downSeen = true; tries = 0; status('warning', 'Camera is rebooting — waiting for it to come back…'); }
+				else if (++tries > DOWN_TRIES) {
+					if (sawFlash) status('warning', 'Still flashing — the camera has not rebooted yet. Give it a few minutes, then reload.');
+					else status('danger', 'The camera never rebooted — the update may have failed. Check the log above and try again.');
+					return;
+				}
+			} else {
+				if (up) { status('success', 'Camera is back online.'); setTimeout(() => location.href = 'status.cgi', 1500); return; }
+				if (++tries > UP_TRIES) { status('danger', 'The camera has not returned. Check it manually.'); return; }
+			}
+			setTimeout(tick, 3000);
+		}
+		tick();
 	}
 
 	const g = $('#fw-install-github');
