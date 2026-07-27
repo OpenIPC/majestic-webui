@@ -16,6 +16,7 @@ mj_rtsp=RTSP
 mj_system=System
 mj_video0=Main stream
 mj_video1=Sub stream
+mj_usbcam=USB camera
 mj_watchdog=Watchdog
 mj_sip=SIP
 mj_cloud=Cloud (WebRTC)
