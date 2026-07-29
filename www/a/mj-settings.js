@@ -40,6 +40,19 @@
 		[640, 360, 'nHD'], [352, 288, 'CIF'],
 	];
 	const RES_CUSTOM = '__custom__';
+	// Sizes an unset field falls back to, per the firmware's own defaulting, so
+	// "no value" reads as a deliberate choice instead of an empty Custom box.
+	const RES_AUTO_LABEL = {
+		'video0.size': 'Auto · sensor native',
+		'jpeg.size': 'Auto · follows the main stream',
+	};
+	// Aspect ratios are compared as numbers with a small tolerance, never as
+	// reduced "W:H" strings: sensor natives are often near but not exactly 16:9
+	// (imx335 4M is 2592x1520 = 1.705, 4.3 % off, reducing to "162:95"), and an
+	// exact match then rejects every curated preset and empties the dropdown.
+	// 4:3 sits 25 % away from 16:9, so the two buckets stay well separated.
+	const AR_TOL = 0.06;
+	function arNear(a, b) { return Math.abs(a - b) / b <= AR_TOL; }
 	function gcdInt(a, b) { return b ? gcdInt(b, a % b) : a; }
 	function resAR(w, h) { const g = gcdInt(w, h) || 1; return (w / g) + ':' + (h / g); }
 	function resName(w, h) {
@@ -572,16 +585,32 @@
 				if (max) list = list.filter(o => o.w <= max.w && o.h <= max.h);
 				if (min) list = list.filter(o => o.w >= min.w && o.h >= min.h);
 				// the sub stream has no x-native, so it inherits the main stream's
-				// aspect ratio; jpeg (no native, no main) is left unfiltered by AR
+				// aspect ratio; jpeg (no native, no main) is left unfiltered by AR.
+				// A sensor whose AR matches nothing at all keeps the whole list —
+				// an advisory filter must never leave the user with no choice.
 				const arSrc = arRef || extraMax;
-				if (arSrc) { const a = resAR(arSrc.w, arSrc.h); list = list.filter(o => resAR(o.w, o.h) === a); }
+				if (arSrc) {
+					const target = arSrc.w / arSrc.h;
+					const near = list.filter(o => arNear(o.w / o.h, target));
+					if (near.length) list = near;
+				}
 				if (extraMax) list = list.filter(o => o.w <= extraMax.w && o.h <= extraMax.h);
+				// the sensor native stays selectable even once it is no longer the
+				// current value, so a stream can always be put back to full frame
+				if (native && !list.some(o => o.w === native.w && o.h === native.h))
+					list.push({ w: native.w, h: native.h });
 				const c = parseWH(cur);   // always keep the current value selectable
 				if (c && !list.some(o => o.w === c.w && o.h === c.h)) list.push(c);
 				list.sort((a, b) => b.w * b.h - a.w * a.h);
 				return list;
 			};
-			const optsHtml = (list, selVal) => list.map(o => {
+			// An empty value means "let the firmware decide" for the fields that
+			// document a fallback; elsewhere it is only offered when the field is
+			// already unset, so the UI can show that state without inventing it.
+			const autoLabel = RES_AUTO_LABEL[dot] || (cur ? '' : 'Auto · unset');
+			const optsHtml = (list, selVal) => (autoLabel
+				? '<option value=""' + (selVal === '' ? ' selected' : '') + '>' + esc(autoLabel) + '</option>'
+				: '') + list.map(o => {
 				const val = o.w + 'x' + o.h;
 				const lbl = resLabel(o.w, o.h) + (val === nativeKey ? ' · Native' : '');
 				return '<option value="' + esc(val) + '"' + (val === selVal ? ' selected' : '') + '>' + esc(lbl) + '</option>';
@@ -593,15 +622,24 @@
 			control = p.querySelector('select');
 			const txt = p.querySelector('.mj-res-custom');
 			const inList = (v) => Array.from(control.options).some(o => o.value === v && o.value !== RES_CUSTOM);
-			const syncCustom = () => {
-				const custom = control.value === RES_CUSTOM;
-				txt.style.display = custom ? '' : 'none';
-				if (custom) txt.focus();
+			// the value an empty field selects: the Auto entry where one exists,
+			// Custom (with an empty box) otherwise
+			const emptyVal = () => autoLabel ? '' : RES_CUSTOM;
+			const syncDisplay = () => {
+				txt.style.display = control.value === RES_CUSTOM ? '' : 'none';
 			};
-			// an empty or off-list current value starts in Custom mode, so an
-			// unset field (e.g. jpeg.size = "") round-trips as "" and stays clean
-			if (!cur || !inList(cur)) { control.value = RES_CUSTOM; }
-			syncCustom();
+			// focus belongs to syncCustom, which only ever runs from the select's
+			// change event. Focusing from _set() would drag the viewport to
+			// whichever custom box was refreshed last after every save (#127).
+			const syncCustom = () => {
+				syncDisplay();
+				if (control.value === RES_CUSTOM) txt.focus();
+			};
+			// an off-list current value starts in Custom mode; an unset one
+			// round-trips as "" and stays clean either way
+			if (!cur) { control.value = emptyVal(); }
+			else if (!inList(cur)) { control.value = RES_CUSTOM; }
+			syncDisplay();
 			control.addEventListener('change', syncCustom);
 			txt.addEventListener('input', updateDirty);
 			txt.addEventListener('change', updateDirty);
@@ -610,8 +648,8 @@
 			control._set = (v) => {
 				const s = v == null ? '' : String(v);
 				txt.value = s;
-				control.value = (s && inList(s)) ? s : RES_CUSTOM;
-				syncCustom();
+				control.value = s ? (inList(s) ? s : RES_CUSTOM) : emptyVal();
+				syncDisplay();
 			};
 			// the sub stream is downscaled from the main, so it can't exceed it:
 			// re-prune its options whenever the main resolution changes.
