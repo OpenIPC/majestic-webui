@@ -1,18 +1,30 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="Majestic Endpoints" %>
+<% page_title="Majestic Endpoints"
+
+# system.unsafe switches authentication off for every HTTP and RTSP endpoint, so
+# the credentials note below would be wrong. Ask the live config rather than
+# majestic.yaml, which omits keys left at their default.
+mj_unsafe=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null | jsonfilter -e '@.system.unsafe' 2>/dev/null)
+%>
 
 <%in p/header.cgi %>
+
+<% if [ "$mj_unsafe" = "true" ]; then %>
+<p class="small text-danger">Authentication is switched off for every endpoint (<code>system.unsafe</code>) — anyone who can reach the camera can open these URLs.</p>
+<% else %>
+<p class="small text-secondary">These endpoints authenticate as user <code>root</code> with the same password you use for this WebUI. Players such as VLC ask for it when you open a bare URL.</p>
+<% fi %>
 
 <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4 mb-4">
 	<div class="col">
 		<h3>Video</h3>
 		<dl>
-			<dt class="cp2cb">rtsp://root:12345@<%= $network_address %>/stream=0</dt>
+			<dt class="cp2cb">rtsp://<%= $network_address %>/stream=0</dt>
 			<dd>RTSP main stream.</dd>
-			<dt class="cp2cb">rtsp://root:12345@<%= $network_address %>/stream=1</dt>
+			<dt class="cp2cb">rtsp://<%= $network_address %>/stream=1</dt>
 			<dd>RTSP sub stream.</dd>
-			<dt class="cp2cb">rtsp://root:12345@<%= $network_address %>/stream=2</dt>
+			<dt class="cp2cb">rtsp://<%= $network_address %>/stream=2</dt>
 			<dd>RTSP JPEG stream.</dd>
 			<dt class="cp2cb">ws://<%= $network_address %>/ws/video?stream=0</dt>
 			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by Preview).</dd>

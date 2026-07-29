@@ -76,9 +76,9 @@ fi
 			<h3>Remote send</h3>
 			<dl class="small list mb-0">
 				<dt>Webhook</dt>
-				<dd class="text-break cp2cb">http://root:12345@<%= $network_address %>/cgi-bin/ext-telegram.cgi?send=image</dd>
+				<dd class="text-break cp2cb">http://root:PASSWORD@<%= $network_address %>/cgi-bin/ext-telegram.cgi?send=image</dd>
 			</dl>
-			<p class="small text-secondary mt-2">Call this URL to trigger an image send. Click to copy.</p>
+			<p class="small text-secondary mt-2">Call this URL to trigger an image send. Click to copy, then replace <code>PASSWORD</code> with your WebUI password.</p>
 		</div></div>
 	</div>
 </div>

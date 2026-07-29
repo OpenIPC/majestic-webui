@@ -32,8 +32,11 @@
 				else if (key === 'node_load1') m.load1 = val;
 				else if (key === 'node_time_seconds') m.nodeTime = val;
 				else if (key === 'node_boot_time_seconds') m.nodeBoot = val;
+				// night_enabled starts with 'n' too, so it has to be matched
+				// inside this branch — a metric caught by the charCode dispatch
+				// never reaches the tests below it.
+				else if (key === 'night_enabled') m.night = val;
 			} else if (key === 'hls_clients_total') m.hls = val;
-			else if (key === 'night_enabled') m.night = val;
 			else if (key === 'ircut_enabled') m.ircut = val;
 		}
 		return m;
