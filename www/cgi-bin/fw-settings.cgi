@@ -49,8 +49,8 @@ fi
 			<a class="btn btn-primary" href="ext-backuper.cgi?backup=create">Create backup</a>
 
 			<hr class="my-3">
-			<p class="small text-secondary mb-1">Or create one remotely (click to copy):</p>
-			<pre class="cp2cb small mb-0">wget --content-disposition http://root:12345@<%= $network_address %>/cgi-bin/ext-backuper.cgi?backup=create</pre>
+			<p class="small text-secondary mb-1">Or create one remotely (click to copy, then replace <code>PASSWORD</code> with your WebUI password):</p>
+			<pre class="cp2cb small mb-0">wget --content-disposition http://root:PASSWORD@<%= $network_address %>/cgi-bin/ext-backuper.cgi?backup=create</pre>
 
 			<details class="mt-3">
 				<summary class="small">Restore from a backup (manual)</summary>
