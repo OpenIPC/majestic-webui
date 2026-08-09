@@ -5,10 +5,27 @@
 	const sel = new Set();
 	const EDIT = /\.(ya?ml|conf|txt|sh|cgi|html?|css|js|json|xml|md|log|ini|cfg)$/i;
 	const ARC = /\.(tar\.gz|tgz|tar|zip|gz)$/i;
+	const VID = /\.(mp4|m4v|mov|mkv|webm|ts|avi)$/i;
+	const IMG = /\.(jpe?g|png|gif|webp|bmp|svg|heic|heif)$/i;
+	const AUD = /\.(mp3|m4a|aac|wav|opus|ogg)$/i;
 
 	function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 	function attr(s) { return String(s).replace(/["&<>]/g, c => ({ '"': '&quot;', '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 	function join(d, n) { return (d.replace(/\/+$/, '') + '/' + n).replace(/\/{2,}/g, '/'); }
+	// Serve files straight off the filesystem instead of through download.cgi:
+	// majestic's static handler falls back to the absolute path and streams it
+	// with sendfile, where the CGI would cat a whole recording into the
+	// connection buffer and take the camera's RAM with it.
+	function fileUrl(p) { return p.split('/').map(encodeURIComponent).join('/'); }
+	function isMedia(n) { return VID.test(n) || IMG.test(n) || AUD.test(n); }
+	function download(path, name) {
+		const a = document.createElement('a');
+		a.href = fileUrl(path);
+		a.download = name; // same-origin, so this wins over an inline media type
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+	}
 	function b64(s) { return btoa(unescape(encodeURIComponent(s))); }
 	function humanSize(n) { n = +n || 0; if (n >= 1048576) return (n / 1048576).toFixed(1) + ' M'; if (n >= 1024) return (n / 1024).toFixed(0) + ' K'; return n + ' B'; }
 	function fmtTime(s) { try { return new Date(s * 1000).toLocaleString(); } catch (e) { return ''; } }
@@ -56,12 +73,14 @@
 	}
 
 	function rowHtml(f) {
-		const isdir = f.type === 'dir', icon = isdir ? '📁' : f.type === 'link' ? '🔗' : '📄';
+		const isdir = f.type === 'dir', media = !isdir && isMedia(f.name);
+		const icon = isdir ? '📁' : media ? (VID.test(f.name) ? '🎬' : IMG.test(f.name) ? '🖼️' : '🎵') : f.type === 'link' ? '🔗' : '📄';
 		const a = attr(f.name), nm = esc(f.name) + (isdir ? '/' : '');
-		const nameCell = isdir
-			? '<a href="#" class="fm-nav text-decoration-none" data-name="' + a + '">' + icon + ' ' + nm + '</a>'
-			: '<a href="#" class="fm-dl text-decoration-none" data-name="' + a + '">' + icon + ' ' + nm + '</a>';
-		let acts = '<li><a class="dropdown-item fm-act" data-act="download" href="#">Download</a></li>';
+		const cls = isdir ? 'fm-nav' : media ? 'fm-view' : 'fm-dl';
+		const nameCell = '<a href="#" class="' + cls + ' text-decoration-none" data-name="' + a + '">' + icon + ' ' + nm + '</a>';
+		let acts = '';
+		if (media) acts += '<li><a class="dropdown-item fm-act" data-act="view" href="#">Play / view</a></li>';
+		acts += '<li><a class="dropdown-item fm-act" data-act="download" href="#">Download</a></li>';
 		if (!isdir && EDIT.test(f.name)) acts += '<li><a class="dropdown-item fm-act" data-act="edit" href="#">Edit</a></li>';
 		if (!isdir && ARC.test(f.name)) acts += '<li><a class="dropdown-item fm-act" data-act="extract" href="#">Extract here</a></li>';
 		acts += '<li><a class="dropdown-item fm-act" data-act="rename" href="#">Rename</a></li>'
@@ -112,7 +131,11 @@
 	function rowAction(act, name) {
 		const f = entry(name), path = join(cwd, name);
 		if (act === 'download') {
-			location = '/cgi-bin/j/download.cgi?' + (f.type === 'dir' ? 'tgz=1&' : '') + 'path=' + encodeURIComponent(path);
+			// a folder still has to be packed server-side; a plain file does not
+			if (f.type === 'dir') location = '/cgi-bin/j/download.cgi?tgz=1&path=' + encodeURIComponent(path);
+			else download(path, name);
+		} else if (act === 'view') {
+			openPreview(path, name);
 		} else if (act === 'edit') {
 			openEditor(path, name);
 		} else if (act === 'extract') {
@@ -143,6 +166,148 @@
 			xhr.onload = next; xhr.onerror = next;
 			xhr.send(file);
 		})();
+	}
+
+	// ---- codec probe ----
+	// A recording is .mp4 whether it holds H.264 or H.265, and canPlayType()
+	// on the container alone always answers "maybe", so the extension tells us
+	// nothing. Read the codec out of the file: 16 KiB covers ftyp + moov on
+	// everything majestic writes.
+	function fourcc(u8, i) {
+		return String.fromCharCode(u8[i], u8[i + 1], u8[i + 2], u8[i + 3]);
+	}
+	function be32(u8, i) { return (u8[i] << 24 | u8[i + 1] << 16 | u8[i + 2] << 8 | u8[i + 3]) >>> 0; }
+
+	// Search only inside moov: mdat payload can spell 'hvc1' by chance.
+	function codecFromHeader(u8) {
+		let off = 0, moov = null;
+		while (off + 8 <= u8.length) {
+			const size = be32(u8, off), type = fourcc(u8, off + 4);
+			if (size < 8) break;
+			if (type === 'moov') { moov = [off + 8, Math.min(off + size, u8.length)]; break; }
+			off += size;
+		}
+		if (!moov) return null;
+
+		const hex = n => n.toString(16).padStart(2, '0');
+		for (let i = moov[0]; i < moov[1] - 4; i++) {
+			const t = fourcc(u8, i);
+			if (t === 'hvc1' || t === 'hev1') return t + '.1.6.L93.B0';
+			if (t === 'av01') return 'av01.0.05M.08';
+			if (t === 'avc1' || t === 'avc3') {
+				// the avcC that follows carries profile/compat/level verbatim
+				for (let j = i; j < moov[1] - 8; j++) {
+					if (fourcc(u8, j) === 'avcC') {
+						return t + '.' + hex(u8[j + 5]) + hex(u8[j + 6]) + hex(u8[j + 7]);
+					}
+				}
+				return t + '.42E01E';
+			}
+		}
+		return null;
+	}
+
+	function probeCodec(path) {
+		// no-store: this 16 KiB slice is not a copy of the file worth keeping
+		// around under the URL the <video> is about to request.
+		return fetch(fileUrl(path), {
+			credentials: 'same-origin', cache: 'no-store', headers: { Range: 'bytes=0-16383' },
+		}).then(res => {
+			if (!res.ok || !res.body) return null;
+			// Firmware without Range support answers 200 with the whole file,
+			// so read a header's worth and drop the rest on the floor.
+			const reader = res.body.getReader();
+			const chunks = [];
+			let total = 0;
+			const pump = () => reader.read().then(({ done, value }) => {
+				if (done) return;
+				chunks.push(value); total += value.length;
+				if (total < 16384) return pump();
+				reader.cancel().catch(() => {});
+			});
+			return pump().then(() => {
+				const u8 = new Uint8Array(total);
+				let at = 0;
+				for (const c of chunks) { u8.set(c, at); at += c.length; }
+				return codecFromHeader(u8);
+			});
+		}).catch(() => null);
+	}
+
+	// ---- media preview (plays straight off the card, nothing downloaded) ----
+	function openPreview(path, name) {
+		const body = $('#fm-preview-body'), st = $('#fm-preview-status');
+		const url = fileUrl(path);
+		$('#fm-preview-title').textContent = name;
+		$('#fm-preview-dl').href = url;
+		$('#fm-preview-dl').download = name;
+		st.textContent = '';
+
+		let el;
+		if (VID.test(name)) {
+			el = document.createElement('video');
+			el.controls = true;
+			el.playsInline = true; // keeps iOS from hijacking it fullscreen
+			el.preload = 'metadata';
+			el.className = 'w-100';
+			el.style.maxHeight = '70vh';
+		} else if (AUD.test(name)) {
+			el = document.createElement('audio');
+			el.controls = true;
+			el.className = 'w-100 my-3';
+		} else {
+			el = document.createElement('img');
+			el.className = 'mw-100';
+			el.style.maxHeight = '70vh';
+		}
+		el.addEventListener('error', () => {
+			st.textContent = 'Cannot play this file in the browser — download it instead.';
+		});
+
+		body.innerHTML = ""; body.appendChild(el);
+		const modal = bootstrap.Modal.getOrCreateInstance('#fm-preview');
+		let stall = null;
+		$('#fm-preview').addEventListener('hidden.bs.modal', () => {
+			// drop the source, or the browser keeps pulling from the card
+			clearTimeout(stall);
+			if (el.pause) el.pause();
+			el.removeAttribute('src');
+			if (el.load) el.load();
+			body.innerHTML = "";
+		}, { once: true });
+		modal.show();
+
+		if (!VID.test(name)) { el.src = url; return; }
+
+		// An unplayable codec does NOT raise `error` on a <video>: H.265 parses
+		// fine, reports a duration, then sits at videoWidth 0 fetching ranges
+		// forever. So ask first, and keep a stall timer for the cases a codec
+		// string can't settle (HEVC Main10 on a Main-only decoder, say).
+		st.textContent = 'Checking codec…';
+		probeCodec(path).then(codec => {
+			if (codec && !el.canPlayType('video/mp4; codecs="' + codec + '"')) {
+				const family = /^(hvc1|hev1)/.test(codec) ? 'H.265 (HEVC)' : codec.split('.')[0];
+				st.textContent = family + ' — this browser cannot decode it. Download the clip and play it in VLC, or open this page on a device with ' + family + ' support.';
+				body.innerHTML = '';
+				return;
+			}
+			st.textContent = '';
+			el.src = url;
+			// Deliberately tentative: over a slow link a perfectly good clip can
+			// still be loading here, and the codec check above already caught
+			// the cases we can name.
+			stall = setTimeout(() => {
+				if (!el.videoWidth) {
+					st.textContent = 'Still loading… if no picture appears, download the clip and play it in VLC.';
+				}
+			}, 30000);
+			// clear the timer *and* the notice: a 4K clip over a slow link can
+			// trip the warning and then load perfectly well a moment later
+			el.addEventListener('loadedmetadata', () => {
+				clearTimeout(stall);
+				st.textContent = '';
+			}, { once: true });
+		});
 	}
 
 	// ---- inline editor (CodeMirror from CDN, falls back to textarea) ----
@@ -191,8 +356,10 @@
 		ROWS.addEventListener('click', e => {
 			const nav = e.target.closest('.fm-nav');
 			if (nav) { e.preventDefault(); load(join(cwd, nav.dataset.name)); return; }
+			const view = e.target.closest('.fm-view');
+			if (view) { e.preventDefault(); openPreview(join(cwd, view.dataset.name), view.dataset.name); return; }
 			const dl = e.target.closest('.fm-dl');
-			if (dl) { e.preventDefault(); location = '/cgi-bin/j/download.cgi?path=' + encodeURIComponent(join(cwd, dl.dataset.name)); return; }
+			if (dl) { e.preventDefault(); download(join(cwd, dl.dataset.name), dl.dataset.name); return; }
 			const act = e.target.closest('.fm-act');
 			if (act) { e.preventDefault(); rowAction(act.dataset.act, act.closest('tr').dataset.name); }
 		});
