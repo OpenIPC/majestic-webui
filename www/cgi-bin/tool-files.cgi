@@ -46,6 +46,12 @@
 	<div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="fm-prompt-ok" type="button">OK</button></div>
 </div></div></div>
 
+<div class="modal fade" id="fm-preview" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content">
+	<div class="modal-header"><h5 class="modal-title text-break" id="fm-preview-title"></h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+	<div class="modal-body text-center p-0" id="fm-preview-body"></div>
+	<div class="modal-footer"><span class="small text-danger me-auto" id="fm-preview-status"></span><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button><a class="btn btn-primary" id="fm-preview-dl" href="#" download>Download</a></div>
+</div></div></div>
+
 <div class="modal fade" id="fm-editor" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
 	<div class="modal-header"><h5 class="modal-title" id="fm-editor-title"></h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
 	<div class="modal-body p-0"><textarea id="fm-editor-text" class="form-control border-0 rounded-0" spellcheck="false" style="height:60vh;font-family:var(--bs-font-monospace);white-space:pre;overflow-wrap:normal"></textarea></div>
