@@ -125,10 +125,40 @@ button_submit() {
 	echo "<div class=\"mt-2\"><input type=\"submit\" class=\"btn btn-${c}\"${x} value=\"${t}\"></div>"
 }
 
+# Is root still on the password the firmware ships with?
+#
+# The stored hash is salted, so comparing it against a fixed string cannot
+# work — two hashes of "12345" differ by their salt. Re-hash the default with
+# the salt actually in use and compare that against the live hash.
+#
+# Stays quiet whenever the answer cannot be established (locked account, a
+# crypt scheme mkpasswd cannot reproduce, mkpasswd missing). A false positive
+# here redirects every page to the interface settings and locks the operator
+# out of their own camera, and this is advice rather than an access control.
+uses_default_password() {
+	local hash method salt
+	hash=$(sed -n 's/^root:\([^:]*\):.*/\1/p' /etc/shadow)
+
+	case "$hash" in
+		"") return 0;;		# no password at all is worse than the default
+		'$1$'*) method=md5;;
+		'$5$'*) method=sha256;;
+		'$6$'*) method=sha512;;
+		*) return 1;;		# locked (! or *), or a scheme we cannot rebuild
+	esac
+
+	salt=$(echo "$hash" | cut -d'$' -f3)
+	case "$salt" in
+		""|rounds=*) return 1;;	# mkpasswd has no way to set a round count
+	esac
+
+	[ "$(mkpasswd -m "$method" -S "$salt" 12345 2>/dev/null)" = "$hash" ]
+}
+
 check_password() {
 	local p="/cgi-bin/fw-interface.cgi"
 	[ -z "$SCRIPT_NAME" ] || [ "$SCRIPT_NAME" = "${p}" ] && return
-	if [ ! -f /etc/shadow- ] || [ -z $(grep root /etc/shadow- | cut -d: -f2) ]; then
+	if uses_default_password; then
 		redirect_to "${p}" "danger" "You must set your own secure password!"
 	fi
 }
