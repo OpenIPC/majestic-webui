@@ -18,7 +18,23 @@
 	// connection buffer and take the camera's RAM with it.
 	function fileUrl(p) { return p.split('/').map(encodeURIComponent).join('/'); }
 	function isMedia(n) { return VID.test(n) || IMG.test(n) || AUD.test(n); }
+	// Types the browser would execute in the camera's own origin if it ever
+	// rendered them inline instead of saving them.
+	const ACTIVE = /\.(x?html?|xht|svg|xml)$/i;
+	// Above this, an active file goes direct like everything else. Firmware
+	// carrying the CGI flow-control fix caps the buffer at 1 MiB, but this UI
+	// still has to be safe on the builds that predate it — which is the whole
+	// reason downloads went direct in the first place — and there the CGI
+	// holds the entire file in RAM.
+	const CGI_ATTACH_MAX = 1048576;
 	function download(path, name) {
+		const f = entry(name);
+		if (ACTIVE.test(name) && f && f.size <= CGI_ATTACH_MAX) {
+			// download.cgi pins Content-Disposition: attachment, which the
+			// static handler cannot.
+			location = '/cgi-bin/j/download.cgi?path=' + encodeURIComponent(path);
+			return;
+		}
 		const a = document.createElement('a');
 		a.href = fileUrl(path);
 		a.download = name; // same-origin, so this wins over an inline media type
@@ -207,11 +223,12 @@
 		return null;
 	}
 
-	function probeCodec(path) {
+	function probeCodec(path, signal) {
 		// no-store: this 16 KiB slice is not a copy of the file worth keeping
 		// around under the URL the <video> is about to request.
 		return fetch(fileUrl(path), {
-			credentials: 'same-origin', cache: 'no-store', headers: { Range: 'bytes=0-16383' },
+			credentials: 'same-origin', cache: 'no-store', signal,
+			headers: { Range: 'bytes=0-16383' },
 		}).then(res => {
 			if (!res.ok || !res.body) return null;
 			// Firmware without Range support answers 200 with the whole file,
@@ -266,9 +283,12 @@
 
 		body.innerHTML = ""; body.appendChild(el);
 		const modal = bootstrap.Modal.getOrCreateInstance('#fm-preview');
-		let stall = null;
+		let stall = null, closed = false;
+		const abort = new AbortController();
 		$('#fm-preview').addEventListener('hidden.bs.modal', () => {
 			// drop the source, or the browser keeps pulling from the card
+			closed = true;
+			abort.abort();
 			clearTimeout(stall);
 			if (el.pause) el.pause();
 			el.removeAttribute('src');
@@ -284,7 +304,11 @@
 		// forever. So ask first, and keep a stall timer for the cases a codec
 		// string can't settle (HEVC Main10 on a Main-only decoder, say).
 		st.textContent = 'Checking codec…';
-		probeCodec(path).then(codec => {
+		probeCodec(path, abort.signal).then(codec => {
+			// The probe outlives a quick close. Assigning src to a detached
+			// element still loads it, so a closed preview would go on pulling
+			// the clip off the card with nothing on screen.
+			if (closed) return;
 			if (codec && !el.canPlayType('video/mp4; codecs="' + codec + '"')) {
 				const family = /^(hvc1|hev1)/.test(codec) ? 'H.265 (HEVC)' : codec.split('.')[0];
 				st.textContent = family + ' — this browser cannot decode it. Download the clip and play it in VLC, or open this page on a device with ' + family + ' support.';
