@@ -90,8 +90,32 @@ async function runCmd(msg) {
 	}
 }
 
+// Every tick spawns j/pulse.cgi, which forks a dozen more processes and makes a
+// loopback request to /metrics/isp. That is fine on an idle camera and ruinous
+// on one that is flashing itself, so pages that take the camera over can switch
+// it off (see fw-update.js, issue #120).
+let heartbeatStopped = false;
+let heartbeatTimer = null;
+
+function stopHeartbeat() {
+	heartbeatStopped = true;
+	clearTimeout(heartbeatTimer);
+	heartbeatTimer = null;
+}
+
+function startHeartbeat() {
+	if (!heartbeatStopped) return;
+	heartbeatStopped = false;
+	heartbeat();
+}
+
 function heartbeat() {
-	fetch('/cgi-bin/j/pulse.cgi')
+	// Bound the request. The next tick is armed when this one settles, so a
+	// fetch left hanging by a camera that is busy or half-rebooted would
+	// otherwise stop the heartbeat for the rest of the page's life.
+	const ctl = new AbortController();
+	const to = setTimeout(() => ctl.abort(), 5000);
+	fetch('/cgi-bin/j/pulse.cgi', { signal: ctl.signal })
 		.then((response) => response.json())
 		.then((json) => {
 			if (json.soc_temp !== '') {
@@ -128,7 +152,15 @@ function heartbeat() {
 				if (mj) mj.textContent = json.mj_uptime || '–';
 			}
 		})
-		.then(setTimeout(heartbeat, 2000));
+		.finally(() => {
+			clearTimeout(to);
+			// Re-arm once the poll has settled. The old `.then(setTimeout(...))`
+			// ran setTimeout immediately and passed .then the timer id, so ticks
+			// were scheduled 2s apart no matter how long the CGI took — they piled
+			// up on exactly the busy camera that could least afford it.
+			if (!heartbeatStopped)
+				heartbeatTimer = setTimeout(heartbeat, 2000);
+		});
 }
 
 function initAll() {

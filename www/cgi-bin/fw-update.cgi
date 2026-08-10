@@ -34,7 +34,10 @@
 		<div class="card h-100"><div class="card-body">
 			<h3>Firmware</h3>
 			<dl class="small list mb-0">
-				<dt>Installed</dt><dd><%= "${fw_version}-${fw_variant}" %></dd>
+				<%# id is a contract with fw-update.js: after the camera reboots it
+				    re-fetches this page and compares the value to decide whether the
+				    upgrade actually applied (issue #120). %>
+				<dt>Installed</dt><dd id="fw-installed"><%= "${fw_version}-${fw_variant}" %></dd>
 				<dt>Latest on GitHub</dt>
 				<dd><span id="firmware-master-ver"><% if [ -n "$fw_date" ]; then %><%= $fw_date %><% else %><span class="text-secondary">— no access to GitHub —</span><% fi %></span></dd>
 				<dt>SoC</dt><dd><%= $soc %> <span class="text-secondary">(<%= $soc_family %>)</span></dd>
