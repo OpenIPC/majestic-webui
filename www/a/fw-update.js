@@ -45,6 +45,13 @@
 		s.className = 'alert alert-' + cls;
 		s.textContent = msg;
 	}
+	// Give the header widgets back to a page that is going to stay put. Called on
+	// every outcome that leaves the user on this page with a camera that is idle
+	// again — but deliberately NOT when we last saw it mid-flash, where polling it
+	// is the thing we were trying to avoid.
+	function resumeHeartbeat() {
+		if (typeof startHeartbeat === 'function') startHeartbeat();
+	}
 	// Markers can straddle two frames, so match against a rolling window of the
 	// recent stream rather than each chunk in isolation.
 	let recent = '';
@@ -65,6 +72,7 @@
 				// Nothing reached flash, so no reboot is coming and the log above is
 				// the whole story. Say so now instead of waiting out pollBack.
 				status('danger', 'The upgrade was aborted — see the log below. Nothing was written to flash, so the camera is unchanged.');
+				resumeHeartbeat();
 			}
 		}
 	}
@@ -110,7 +118,7 @@
 			status('warning', 'Waiting for the camera to reboot — do not power off…');
 			pollBack();
 		};
-		ws.onerror = () => { if (!opened) status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.'); };
+		ws.onerror = () => { if (!opened) { status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.'); resumeHeartbeat(); } };
 	}
 
 	// Read the version the camera is running NOW. Re-fetches this page instead of
@@ -151,6 +159,7 @@
 		if (now && installedBefore && now === installedBefore && !forced) {
 			status('danger', 'The camera rebooted but is still running ' + now +
 				' — the update did not apply. Check the log above and try again.');
+			resumeHeartbeat();
 			return;
 		}
 		status('success', now ? 'Updated — now running ' + now + '.' : 'Camera is back online.');
@@ -177,12 +186,12 @@
 				if (!up) { downSeen = true; tries = 0; status('warning', 'Camera is rebooting — waiting for it to come back…'); }
 				else if (++tries > DOWN_TRIES) {
 					if (sawFlash) status('warning', 'Still flashing — the camera has not rebooted yet. Give it a few minutes, then reload.');
-					else status('danger', 'The camera never rebooted — the update may have failed. Check the log above and try again.');
+					else { status('danger', 'The camera never rebooted — the update may have failed. Check the log above and try again.'); resumeHeartbeat(); }
 					return;
 				}
 			} else {
 				if (up) { confirmUpgrade(); return; }
-				if (++tries > UP_TRIES) { status('danger', 'The camera has not returned. Check it manually.'); return; }
+				if (++tries > UP_TRIES) { status('danger', 'The camera has not returned. Check it manually.'); resumeHeartbeat(); return; }
 			}
 			setTimeout(tick, 3000);
 		}
@@ -201,11 +210,12 @@
 		status('warning', 'Uploading firmware…');
 		try {
 			const r = await fetch('/upload', { method: 'POST', headers: { 'File-Location': '/tmp/firmware.tgz' }, body: f });
-			if (!r.ok) { status('danger', 'Upload failed (' + r.status + ').'); return; }
+			if (!r.ok) { status('danger', 'Upload failed (' + r.status + ').'); resumeHeartbeat(); return; }
 			append('Uploaded ' + f.name + ' (' + f.size + ' bytes)\n');
 			startUpgrade('/tmp/firmware.tgz');
 		} catch (err) {
 			status('danger', 'Upload error: ' + err);
+			resumeHeartbeat();
 		}
 	});
 })();
