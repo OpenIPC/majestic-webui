@@ -52,13 +52,54 @@
 	function resumeHeartbeat() {
 		if (typeof startHeartbeat === 'function') startHeartbeat();
 	}
+	// This pane is a <pre>, but everything writing into it assumes a terminal:
+	// curl's download meter and flashcp's progress both redraw one line in place
+	// with a bare \r. Appended verbatim, each redraw lands after the last instead
+	// of replacing it, and the bar smears across the pane in unreadable columns
+	// (issue #134). Stripping ANSI does not help — \r is a control character, not
+	// an escape sequence, so it survives the regex above.
+	//
+	// So be just enough of a terminal for that: \n commits the line, \r returns
+	// the cursor to column 0, anything else overwrites at the cursor. Overwriting
+	// rather than clearing matters — a redraw shorter than the one before it
+	// leaves the tail of the longer line visible, which is what a real terminal
+	// does and what makes curl's meter look right as it shrinks.
+	//
+	// Two text nodes keep it cheap: finished lines are appended once and never
+	// touched again, and only the line still being drawn is rewritten. The
+	// console page has an actual terminal (xterm.js) and needs none of this.
+	const doneNode = document.createTextNode('');
+	const lineNode = document.createTextNode('');
+	out.appendChild(doneNode);
+	out.appendChild(lineNode);
+	let line = '';   // the line currently being drawn, after the last \n
+	let col = 0;     // cursor position within it
+
 	// Markers can straddle two frames, so match against a rolling window of the
 	// recent stream rather than each chunk in isolation.
 	let recent = '';
 	function append(t) {
 		const s = t.replace(ansi, '');
-		out.textContent += s;
+		let commit = '';
+		for (let i = 0; i < s.length; i++) {
+			const ch = s[i];
+			if (ch === '\n') {
+				commit += line + '\n';
+				line = '';
+				col = 0;
+			} else if (ch === '\r') {
+				col = 0;
+			} else {
+				line = line.slice(0, col) + ch + line.slice(col + 1);
+				col++;
+			}
+		}
+		if (commit) doneNode.appendData(commit);
+		lineNode.data = line;
 		out.scrollTop = out.scrollHeight;
+		// Deliberately still the raw stream: the markers below are whole-line
+		// messages, and matching them on what was received rather than on what
+		// survived the redraws keeps this decoupled from the rendering.
 		recent = (recent + s).slice(-512);
 		if (!sawFlash && flashMarker.test(recent)) sawFlash = true;
 		if (!aborted && abortMarker.test(recent)) {
