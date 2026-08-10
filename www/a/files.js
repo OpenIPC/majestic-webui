@@ -21,12 +21,17 @@
 	// Types the browser would execute in the camera's own origin if it ever
 	// rendered them inline instead of saving them.
 	const ACTIVE = /\.(x?html?|xht|svg|xml)$/i;
+	// Above this, an active file goes direct like everything else. Firmware
+	// carrying the CGI flow-control fix caps the buffer at 1 MiB, but this UI
+	// still has to be safe on the builds that predate it — which is the whole
+	// reason downloads went direct in the first place — and there the CGI
+	// holds the entire file in RAM.
+	const CGI_ATTACH_MAX = 1048576;
 	function download(path, name) {
-		if (ACTIVE.test(name)) {
+		const f = entry(name);
+		if (ACTIVE.test(name) && f && f.size <= CGI_ATTACH_MAX) {
 			// download.cgi pins Content-Disposition: attachment, which the
-			// static handler cannot. These are small text files, so the CGI's
-			// buffering — the whole reason the rest of this goes direct —
-			// does not matter here.
+			// static handler cannot.
 			location = '/cgi-bin/j/download.cgi?path=' + encodeURIComponent(path);
 			return;
 		}
