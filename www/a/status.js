@@ -56,6 +56,12 @@
 		// the awk in cgi-bin/j/pulse.cgi.
 		if (m.memAvail === null)
 			m.memAvail = m.memFree + m.memActFile + m.memInactFile + m.memSReclaim;
+		// That estimate has no watermark discount, so a big reclaimable slab could
+		// push it past memTotal. Clamp here rather than at each consumer: it keeps
+		// the percentage and the "x / y MB" readout from disagreeing (a clamped 0%
+		// next to a negative used-MB), and it makes memAvail <= memTotal an
+		// invariant every reader below can rely on.
+		if (m.memTotal && m.memAvail > m.memTotal) m.memAvail = m.memTotal;
 		return m;
 	}
 
@@ -139,11 +145,7 @@
 					const dt = m.cpuTotal - prev.cpuTotal, di = m.cpuIdle - prev.cpuIdle;
 					cpu = Math.max(0, Math.min(100, (1 - di / dt) * 100));
 				}
-				// Clamped because the estimate above carries no watermark discount,
-				// so a large reclaimable slab could push it past memTotal and make
-				// this negative. setBar clamps already; the readout and the badge
-				// thresholds below do not.
-				const ram = m.memTotal ? Math.max(0, Math.min(100, (1 - m.memAvail / m.memTotal) * 100)) : null;
+				const ram = m.memTotal ? (1 - m.memAvail / m.memTotal) * 100 : null;
 
 				if (cpu != null) { $('#st-cpu').textContent = cpu.toFixed(0); setBar('#bar-cpu', cpu, 75, 90); pushSpark(sparks.cpu, cpu); }
 				if (ram != null) {
