@@ -26,6 +26,25 @@ function mjGet(cfg, dot) {
 	return dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg);
 }
 
+// Camera wall clock. /etc/timezone is a display label, not an IANA name --
+// fw-time.js writes it de-underscored ("America/New York"), which
+// Intl.DateTimeFormat rejects with a RangeError. So the camera's zone is applied
+// as the numeric offset pulse.cgi reports, and the result is formatted as if it
+// were UTC. Loaded on every page (p/header.cgi), so fw-time.js reuses both.
+// null, not 0, when the offset is missing or malformed: callers that can hold
+// off (logs.js keeps lines raw until it knows the zone) must be able to tell
+// "unknown" from a genuine +0000, or a camera on +0300 would silently render
+// every log line three hours out.
+function parseTzOffsetMs(s) {
+	const m = /^([+-])(\d{2})(\d{2})$/.exec(s || '');
+	if (!m || +m[3] > 59) return null;
+	return (m[1] === '-' ? -1 : 1) * (+m[2] * 3600000 + +m[3] * 60000);
+}
+
+function fmtDeviceTime(epochMs, offsetMs) {
+	return new Date(epochMs + offsetMs).toLocaleString(undefined, { timeZone: 'UTC' });
+}
+
 function setProgressBar(id, value, name) {
 	$(id).setAttribute('aria-valuenow', value);
 	$(id).title = name + ': ' + value + '%'
@@ -125,9 +144,28 @@ function heartbeat() {
 				st.title = 'SoC temperature ' + json.soc_temp;
 			}
 
+			// Device time, deliberately -- log rows render in the viewer's zone
+			// (logs.js), so these two disagree by design. This bar is the one
+			// place a camera whose clock is actually wrong must look wrong, so
+			// flag real drift rather than hiding it behind the browser's clock.
+			// (Skew is zone-independent: a correct camera reads 0 whatever the
+			// timezones are, so anything here is a genuine clock problem.)
 			if (json.time_now !== '') {
-				const d = new Date(json.time_now * 1000);
-				$('#time-now').textContent = d.toLocaleString() + ' ' + json.timezone;
+				const epochMs = json.time_now * 1000;
+				// Unlike the log rows there is no raw form to fall back to here, so
+				// an unknown offset renders as UTC rather than blanking the bar.
+				const text = fmtDeviceTime(epochMs, parseTzOffsetMs(json.utc_offset) || 0) + ' ' + json.timezone;
+				const skew = epochMs - Date.now();
+				const el = $('#time-now');
+				if (Math.abs(skew) > 60000) {
+					const mins = Math.round(skew / 60000);
+					el.textContent = text + ' ⚠ ' + (mins > 0 ? '+' : '') + mins + 'm';
+					el.title = 'Camera clock is ' + Math.abs(mins) + ' minutes ' +
+						(mins > 0 ? 'ahead of' : 'behind') + ' this browser. Check Time Settings.';
+				} else {
+					el.textContent = text;
+					el.title = '';
+				}
 			}
 
 			if (json.mem_used !== '') {

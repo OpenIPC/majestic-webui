@@ -40,6 +40,7 @@ SYSLOG_SIZE=64
 		</div>
 	</div>
 	<div id="log" class="border rounded bg-body-tertiary"></div>
+	<p class="text-secondary small mt-1 mb-0">Times are shown in your browser's timezone. The clock in the top bar is the camera's.</p>
 	<details class="mt-3">
 		<summary class="text-secondary small">Log buffer size — currently <%= $SYSLOG_SIZE %> KiB</summary>
 		<form action="<%= $SCRIPT_NAME %>" method="post" class="row g-2 align-items-end mt-1" style="max-width:30rem">
