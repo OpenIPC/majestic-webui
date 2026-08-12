@@ -14,9 +14,15 @@
 # WORKING DIRECTORY, not to the including file — undocumented in the manpage,
 # and the reason every page 404s its include if you invoke haserl from the repo
 # root. majestic execs the CGIs with that same cwd, so this matches production.
-cd "$(CDPATH= cd -- "$(dirname -- "$0")/../www/cgi-bin" && pwd)"
+#
+# Both of these are checked rather than assumed: this is a gate, and a gate that
+# cannot run has to say so instead of reaching the "templates ok" line. An
+# unguarded cd would silently lint the wrong directory (or none), and an
+# unguarded mktemp would drop every finding on the floor.
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../www/cgi-bin" && pwd) || exit 1
+cd "$DIR" || exit 1
 
-FAILS=$(mktemp)
+FAILS=$(mktemp) || exit 1
 trap 'rm -f "$FAILS"' EXIT
 
 # --- 1. syntax --------------------------------------------------------------
@@ -48,10 +54,25 @@ done
 # <%= %> is sugar for echo, so request data goes to the page verbatim — an
 # unescaped one is stored XSS, not a style nit. p/common.cgi provides ex and pre
 # for this; they belong in a plain <% %> block, as in <% ex "$POST_x" %>.
-if hits=$(grep -rnE '<%=[^%]*\$\{?(POST|GET)_' --include='*.cgi' .); then
+#
+# grep exits 0 for a match, 1 for a clean run and 2+ for an error. `if
+# hits=$(grep ...)` conflates 1 and 2, so a grep that failed outright would look
+# exactly like "no violations" and the script would still print templates ok —
+# the guard silently disabling itself is the one outcome worse than not having
+# it. -r and --include are GNU extensions (CLAUDE.md rules them out), so the
+# file list comes from find; globbing is off because it is expanded unquoted.
+set -f
+set -- $(find . -name '*.cgi' | sort)
+set +f
+hits=$(grep -nE '<%=[^%]*\$\{?(POST|GET)_' /dev/null "$@")
+case $? in
+0)
 	printf '%s\n' "$hits" >> "$FAILS"
 	echo "^ request data rendered unescaped via <%= — use ex or pre (p/common.cgi)" >> "$FAILS"
-fi
+	;;
+1) ;;
+*) echo "lint: grep failed, escaping guard did not run" >> "$FAILS" ;;
+esac
 
 if [ -s "$FAILS" ]; then
 	cat "$FAILS"
