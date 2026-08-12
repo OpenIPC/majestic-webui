@@ -52,8 +52,15 @@ if [ -n "$mjpid" ] && [ -r "/proc/$mjpid/stat" ]; then
 		   printf "%s%s%sm", (d? d"d ":""), (h||d? h"h ":""), m }' "/proc/$mjpid/stat")
 fi
 
-payload=$(printf '{"soc_temp":"%s","time_now":"%s","timezone":"%s","mem_used":"%d","overlay_used":"%d","daynight_value":"%d","uptime":"%s","mj_uptime":"%s"}' \
-	"${soc_temp}" "$(date +%s)" "$(cat /etc/timezone)" "${mem_used}" "${overlay_used//%/}" "${daynight_value:=-1}" "$uptime" "$mj_uptime")
+# Epoch and UTC offset in one date(1), split with parameter expansion, so the
+# 2s heartbeat gains no extra fork. The header needs both: /etc/timezone is only
+# a display label (fw-time.js writes it de-underscored, e.g. "America/New York",
+# which Intl.DateTimeFormat rejects), so the numeric offset is what actually
+# renders the camera's wall clock.
+now=$(date '+%s %z')
+
+payload=$(printf '{"soc_temp":"%s","time_now":"%s","timezone":"%s","utc_offset":"%s","mem_used":"%d","overlay_used":"%d","daynight_value":"%d","uptime":"%s","mj_uptime":"%s"}' \
+	"${soc_temp}" "${now% *}" "$(cat /etc/timezone)" "${now#* }" "${mem_used}" "${overlay_used//%/}" "${daynight_value:=-1}" "$uptime" "$mj_uptime")
 
 echo "HTTP/1.1 200 OK
 Content-type: application/json

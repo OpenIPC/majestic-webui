@@ -35,10 +35,13 @@
 
 	// Live device clock: grab the device epoch once, keep the offset to the
 	// browser clock, then tick locally (no second 2s poller vs the header).
-	let skew = 0, zone = '';
+	let skew = 0, zone = '', offsetMs = 0;
 	function tick() {
 		const el = $('#tz-now');
-		if (el) el.textContent = new Date(Date.now() + skew).toLocaleString() + (zone ? ' ' + zone : '');
+		// Device wall clock, so it has to go through the camera's UTC offset:
+		// toLocaleString() alone renders the *browser's* zone under the
+		// camera's label. fmtDeviceTime/parseTzOffsetMs come from main.js.
+		if (el) el.textContent = fmtDeviceTime(Date.now() + skew, offsetMs) + (zone ? ' ' + zone : '');
 	}
 
 	function init() {
@@ -79,7 +82,14 @@
 
 		fetch('/cgi-bin/j/pulse.cgi')
 			.then(r => r.json())
-			.then(j => { skew = (Number(j.time_now) * 1000) - Date.now(); zone = j.timezone || ''; })
+			// skew = device epoch minus browser epoch, so `Date.now() + skew` is
+			// the camera's clock. Same quantity and sign the header bar reports
+			// as drift; here it is used to tick, not to warn.
+			.then(j => {
+				skew = (Number(j.time_now) * 1000) - Date.now();
+				zone = j.timezone || '';
+				offsetMs = parseTzOffsetMs(j.utc_offset);
+			})
 			.catch(() => {})
 			.finally(() => { tick(); setInterval(tick, 1000); });
 	}
