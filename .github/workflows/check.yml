@@ -1,0 +1,36 @@
+name: check
+
+# Gate pull requests on the same minification the release build runs: terser over
+# every hand-written .js followed by `node --check` on the result, plus clean-css
+# over the CSS.
+#
+# dist.yml only fires on push to master, so before this nothing ran on a PR at
+# all — a syntax error or a construct terser choked on reached master unnoticed
+# and broke the rolling dist release the firmware buildroot package fetches.
+#
+# This deliberately runs `npm run build:dist`, the very script dist.yml uses,
+# rather than reimplementing the terser invocation: a gate that duplicated the
+# build would be free to drift away from it. Node is pinned to the same version
+# for the same reason.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build:dist
