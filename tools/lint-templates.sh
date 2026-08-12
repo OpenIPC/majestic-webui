@@ -111,11 +111,11 @@ esac
 # /etc/network/interfaces.d and sbin/updatewebui is the deploy path, so a syntax
 # error in either misconfigures or bricks the camera it runs on.
 #
-# Selection is by shebang. That is why j/locale.cgi and j/locale_fpv.cgi no
-# longer carry one: they are data files parsed with sed (mj-settings.cgi), never
-# sourced or executed, and `mj_cloud=Cloud (WebRTC)` is not valid shell. Quoting
-# that value would not help — the sed captures \(.*\) straight into JSON, so the
-# quotes would end up inside the label.
+# Selection is by shebang. That is why j/locale.cgi does not carry one: it is a
+# data file parsed with sed (mj-settings.cgi), never sourced or executed, and
+# `mj_cloud=Cloud (WebRTC)` is not valid shell. Quoting that value would not
+# help — the sed captures \(.*\) straight into JSON, so the quotes would end up
+# inside the label.
 find www sbin -type f 2>/dev/null | sort | while IFS= read -r s; do
 	if ! first_line "$s"; then
 		printf '%s: cannot read\n' "$s" >> "$FAILS"
