@@ -7,7 +7,11 @@
 	function parseMetrics(text) {
 		const m = {
 			cpuIdle: 0, cpuTotal: 0, rx: 0, tx: 0,
-			memTotal: 0, memAvail: 0, temp: null, load1: null,
+			memTotal: 0, memAvail: null, temp: null, load1: null,
+			// Addends for the pre-3.14 MemAvailable estimate below. They init to
+			// 0, not null, so a field the kernel doesn't report contributes
+			// nothing instead of turning the whole sum into NaN.
+			memFree: 0, memActFile: 0, memInactFile: 0, memSReclaim: 0,
 			hls: 0, night: 0, ircut: 0, nodeTime: 0, nodeBoot: 0,
 		};
 		const lines = text.split('\n');
@@ -28,6 +32,10 @@
 					if (key.indexOf('device="lo"') < 0) m.tx += val;
 				} else if (key === 'node_memory_MemTotal_bytes') m.memTotal = val;
 				else if (key === 'node_memory_MemAvailable_bytes') m.memAvail = val;
+				else if (key === 'node_memory_MemFree_bytes') m.memFree = val;
+				else if (key === 'node_memory_Active_file_bytes') m.memActFile = val;
+				else if (key === 'node_memory_Inactive_file_bytes') m.memInactFile = val;
+				else if (key === 'node_memory_SReclaimable_bytes') m.memSReclaim = val;
 				else if (key === 'node_hwmon_temp_celsius') m.temp = val;
 				else if (key === 'node_load1') m.load1 = val;
 				else if (key === 'node_time_seconds') m.nodeTime = val;
@@ -39,6 +47,21 @@
 			} else if (key === 'hls_clients_total') m.hls = val;
 			else if (key === 'ircut_enabled') m.ircut = val;
 		}
+		// Kernels older than 3.14 omit MemAvailable, and /metrics mirrors
+		// /proc/meminfo verbatim (as node_exporter does), so the metric is absent
+		// rather than zero — leaving memAvail at 0 read as 100% used and pinned
+		// the badge to "Critical" (issue #116). Rebuild the kernel's own
+		// si_mem_available() estimate from the parts that are present. wmark_low
+		// is not in /proc/meminfo, so this runs ~2% optimistic. Keep in sync with
+		// the awk in cgi-bin/j/pulse.cgi.
+		if (m.memAvail === null)
+			m.memAvail = m.memFree + m.memActFile + m.memInactFile + m.memSReclaim;
+		// That estimate has no watermark discount, so a big reclaimable slab could
+		// push it past memTotal. Clamp here rather than at each consumer: it keeps
+		// the percentage and the "x / y MB" readout from disagreeing (a clamped 0%
+		// next to a negative used-MB), and it makes memAvail <= memTotal an
+		// invariant every reader below can rely on.
+		if (m.memTotal && m.memAvail > m.memTotal) m.memAvail = m.memTotal;
 		return m;
 	}
 
