@@ -12,14 +12,17 @@
 # artifact rather than a haserl bug, but it does mean on-device linting is out.
 #
 # The cd and the mktemp below are checked rather than assumed: this is a gate,
-# and a gate that cannot run has to say so instead of reaching the "templates
-# ok" line. An unguarded cd would silently lint the wrong tree, or none at all,
+# and a gate that cannot run has to say so instead of reaching the success
+# line. An unguarded cd would silently lint the wrong tree, or none at all,
 # and an unguarded mktemp would drop every finding on the floor.
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit 1
 cd "$ROOT" || exit 1
 
 FAILS=$(mktemp) || exit 1
-trap 'rm -f "$FAILS"' EXIT
+# What actually got inspected, so the summary can report real counts. A gate
+# that checked nothing should not be indistinguishable from a gate that passed.
+SEEN=$(mktemp) || exit 1
+trap 'rm -f "$FAILS" "$SEEN"' EXIT
 
 # --- 1. syntax --------------------------------------------------------------
 # Shell constructs legally span <% %> blocks here: status.cgi opens `if ...;
@@ -48,6 +51,7 @@ if ! (
 	cd www/cgi-bin || exit 1
 	find . -name '*.cgi' | sed 's|^\./||' | sort | while IFS= read -r f; do
 		head -1 "$f" | grep -q haserl || continue
+		echo "t" >> "$SEEN"
 		if ! out=$(haserl -d "$f" < /dev/null 2>&1); then
 			printf 'www/cgi-bin/%s: haserl: %s\n' "$f" "$(printf '%s' "$out" | tail -1)" >> "$FAILS"
 			continue
@@ -69,7 +73,7 @@ fi
 #
 # grep exits 0 for a match, 1 for a clean run and 2+ for an error. `if
 # hits=$(grep ...)` conflates 1 and 2, so a grep that failed outright would look
-# exactly like "no violations" and the script would still print templates ok —
+# exactly like "no violations" and the script would still report success —
 # the guard silently disabling itself is the one outcome worse than not having
 # it. -r and --include are GNU extensions (CLAUDE.md rules them out), so the
 # file list comes from find; globbing is off because it is expanded unquoted.
@@ -99,13 +103,23 @@ esac
 # quotes would end up inside the label.
 find www sbin -type f 2>/dev/null | sort | while IFS= read -r s; do
 	head -1 "$s" | grep -qE '^#!.*/(sh|ash|dash)$' || continue
+	echo "s" >> "$SEEN"
 	if ! err=$(sh -n "$s" 2>&1); then
 		printf '%s: %s\n' "$s" "$err" >> "$FAILS"
 	fi
 done
 
+ntpl=$(grep -c '^t$' "$SEEN")
+nsh=$(grep -c '^s$' "$SEEN")
+
+# Nothing to check is a broken selector, not a clean tree — the repo always has
+# both kinds of file. Without this, a find or shebang test that stopped matching
+# would report a confident pass over zero files.
+[ "$ntpl" -gt 0 ] || echo "lint: no haserl templates matched, selection is broken" >> "$FAILS"
+[ "$nsh" -gt 0 ] || echo "lint: no shell scripts matched, selection is broken" >> "$FAILS"
+
 if [ -s "$FAILS" ]; then
 	cat "$FAILS"
 	exit 1
 fi
-echo "templates ok"
+echo "ok: $ntpl haserl templates, $nsh shell scripts"
