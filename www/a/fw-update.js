@@ -30,6 +30,15 @@
 	const abortMarker = /Aborting\./;
 	let aborted = false;
 
+	// compare_versions() prints this when the image on offer is the one already
+	// installed, and then nothing is written. Reflashing the same build is a
+	// reasonable thing to do, but the version check below cannot tell that apart
+	// from a flash that silently did nothing — both end on the version they
+	// started on. Without this, "nothing needed doing" is reported as "the update
+	// did not apply", which reads as a failure (issue #120).
+	const noopMarker = /Same version, nothing to update/i;
+	let noop = false;
+
 	// Whether --force_ver was requested. It reflashes the same version on purpose,
 	// so an unchanged version afterwards is a success, not a failure.
 	let forced = false;
@@ -72,8 +81,13 @@
 	const lineNode = document.createTextNode('');
 	out.appendChild(doneNode);
 	out.appendChild(lineNode);
-	let line = '';   // the line currently being drawn, after the last \n
-	let col = 0;     // cursor position within it
+	// The line being drawn is an array of characters, not a string: the cursor can
+	// land anywhere in it, and rebuilding a string per character (slice + concat +
+	// slice) is quadratic in the line length. curl's meter is short enough not to
+	// care, but a tool emitting a long line with no newline would have made this
+	// the slowest thing on the page.
+	let lineArr = [];   // the line currently being drawn, after the last \n
+	let col = 0;        // cursor position within it
 
 	// Markers can straddle two frames, so match against a rolling window of the
 	// recent stream rather than each chunk in isolation.
@@ -84,24 +98,26 @@
 		for (let i = 0; i < s.length; i++) {
 			const ch = s[i];
 			if (ch === '\n') {
-				commit += line + '\n';
-				line = '';
+				commit += lineArr.join('') + '\n';
+				lineArr = [];
 				col = 0;
 			} else if (ch === '\r') {
 				col = 0;
 			} else {
-				line = line.slice(0, col) + ch + line.slice(col + 1);
-				col++;
+				lineArr[col++] = ch;
 			}
 		}
+		// One join per frame rather than a string rebuild per character; finished
+		// lines leave through appendData and are never re-copied.
 		if (commit) doneNode.appendData(commit);
-		lineNode.data = line;
+		lineNode.data = lineArr.join('');
 		out.scrollTop = out.scrollHeight;
 		// Deliberately still the raw stream: the markers below are whole-line
 		// messages, and matching them on what was received rather than on what
 		// survived the redraws keeps this decoupled from the rendering.
 		recent = (recent + s).slice(-512);
 		if (!sawFlash && flashMarker.test(recent)) sawFlash = true;
+		if (!noop && noopMarker.test(recent)) noop = true;
 		if (!aborted && abortMarker.test(recent)) {
 			aborted = true;
 			if (sawFlash) {
@@ -140,6 +156,7 @@
 		aborted = false;
 		recent = '';
 		forced = p.force;
+		noop = false;
 		status('warning', 'Preparing — freeing memory…');
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		const ws = new WebSocket(proto + '://' + location.host + '/ws/upgrade');
@@ -198,6 +215,13 @@
 			now = await installedNow();
 		}
 		if (now && installedBefore && now === installedBefore && !forced) {
+			if (noop) {
+				// sysupgrade said so itself: the image offered was the one already
+				// installed, so it wrote nothing. Nothing failed.
+				status('success', 'Already running ' + now + ' — nothing to update.');
+				setTimeout(() => location.href = 'status.cgi', 1500);
+				return;
+			}
 			status('danger', 'The camera rebooted but is still running ' + now +
 				' — the update did not apply. Check the log above and try again.');
 			resumeHeartbeat();
