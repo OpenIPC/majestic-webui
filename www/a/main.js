@@ -31,9 +31,13 @@ function mjGet(cfg, dot) {
 // Intl.DateTimeFormat rejects with a RangeError. So the camera's zone is applied
 // as the numeric offset pulse.cgi reports, and the result is formatted as if it
 // were UTC. Loaded on every page (p/header.cgi), so fw-time.js reuses both.
+// null, not 0, when the offset is missing or malformed: callers that can hold
+// off (logs.js keeps lines raw until it knows the zone) must be able to tell
+// "unknown" from a genuine +0000, or a camera on +0300 would silently render
+// every log line three hours out.
 function parseTzOffsetMs(s) {
 	const m = /^([+-])(\d{2})(\d{2})$/.exec(s || '');
-	if (!m) return 0;
+	if (!m || +m[3] > 59) return null;
 	return (m[1] === '-' ? -1 : 1) * (+m[2] * 3600000 + +m[3] * 60000);
 }
 
@@ -148,7 +152,9 @@ function heartbeat() {
 			// timezones are, so anything here is a genuine clock problem.)
 			if (json.time_now !== '') {
 				const epochMs = json.time_now * 1000;
-				const text = fmtDeviceTime(epochMs, parseTzOffsetMs(json.utc_offset)) + ' ' + json.timezone;
+				// Unlike the log rows there is no raw form to fall back to here, so
+				// an unknown offset renders as UTC rather than blanking the bar.
+				const text = fmtDeviceTime(epochMs, parseTzOffsetMs(json.utc_offset) || 0) + ' ' + json.timezone;
 				const skew = epochMs - Date.now();
 				const el = $('#time-now');
 				if (Math.abs(skew) > 60000) {

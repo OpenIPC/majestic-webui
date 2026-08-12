@@ -78,7 +78,9 @@
 	}
 
 	fetch('/cgi-bin/j/logmeta.cgi').then(r => r.json()).then(meta => {
-		tzOffsetMs = parseTzOffsetMs(meta.tz_offset); // main.js
+		const off = parseTzOffsetMs(meta.tz_offset); // main.js; null if unusable
+		if (off === null) return; // leave tzOffsetMs null: raw beats wrongly shifted
+		tzOffsetMs = off;
 		deviceSkewMs = (Number(meta.time_now) * 1000) - Date.now();
 		render(); // redraw whatever arrived while this was in flight
 	}).catch(() => {});
@@ -135,9 +137,11 @@
 	});
 	elClear.addEventListener('click', () => { lines.length = 0; render(); });
 	elDownload.addEventListener('click', () => {
-		// What is on screen, not the raw buffer -- the raw form is what `logread`
-		// over SSH already gives you.
-		const blob = new Blob([lines.map(l => fmtLine(l)).join('\n') + '\n'], { type: 'text/plain' });
+		// Exactly what is on screen: same filter as render(), same localised
+		// stamps. Dumping the whole buffer would hand back lines the user had
+		// deliberately filtered out, which is a surprising thing to then share.
+		// The raw, unfiltered form is what `logread` over SSH already gives you.
+		const blob = new Blob([lines.filter(matches).map(l => fmtLine(l)).join('\n') + '\n'], { type: 'text/plain' });
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(blob);
 		a.download = 'majestic-logs.txt';

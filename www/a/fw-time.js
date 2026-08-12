@@ -88,7 +88,7 @@
 			.then(j => {
 				skew = (Number(j.time_now) * 1000) - Date.now();
 				zone = j.timezone || '';
-				offsetMs = parseTzOffsetMs(j.utc_offset);
+				offsetMs = parseTzOffsetMs(j.utc_offset) || 0;
 			})
 			.catch(() => {})
 			.finally(() => { tick(); setInterval(tick, 1000); });
