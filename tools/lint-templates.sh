@@ -15,8 +15,19 @@
 # and a gate that cannot run has to say so instead of reaching the success
 # line. An unguarded cd would silently lint the wrong tree, or none at all,
 # and an unguarded mktemp would drop every finding on the floor.
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit 1
+ROOT=$(CDPATH= cd "$(dirname "$0")/.." && pwd) || exit 1
 cd "$ROOT" || exit 1
+
+# POSIX `read` rather than `head -1 | grep`: head's -1 form is obsolescent (POSIX
+# spells it -n 1) and the pipeline forked twice per file across the whole tree.
+# Returning non-zero for an unreadable file matters — the old `|| continue` let
+# one drop silently out of the run, which is the same class of hole as the
+# guards above.
+first_line() {
+	[ -r "$1" ] || return 1
+	IFS= read -r first_line < "$1" || first_line=''
+	return 0
+}
 
 FAILS=$(mktemp) || exit 1
 # What actually got inspected, so the summary can report real counts. A gate
@@ -50,7 +61,11 @@ trap 'rm -f "$FAILS" "$SEEN"' EXIT
 if ! (
 	cd www/cgi-bin || exit 1
 	find . -name '*.cgi' | sed 's|^\./||' | sort | while IFS= read -r f; do
-		head -1 "$f" | grep -q haserl || continue
+		if ! first_line "$f"; then
+			printf 'www/cgi-bin/%s: cannot read\n' "$f" >> "$FAILS"
+			continue
+		fi
+		case $first_line in *haserl*) ;; *) continue ;; esac
 		echo "t" >> "$SEEN"
 		if ! out=$(haserl -d "$f" < /dev/null 2>&1); then
 			printf 'www/cgi-bin/%s: haserl: %s\n' "$f" "$(printf '%s' "$out" | tail -1)" >> "$FAILS"
@@ -102,7 +117,14 @@ esac
 # that value would not help — the sed captures \(.*\) straight into JSON, so the
 # quotes would end up inside the label.
 find www sbin -type f 2>/dev/null | sort | while IFS= read -r s; do
-	head -1 "$s" | grep -qE '^#!.*/(sh|ash|dash)$' || continue
+	if ! first_line "$s"; then
+		printf '%s: cannot read\n' "$s" >> "$FAILS"
+		continue
+	fi
+	case $first_line in
+	'#!'*/sh|'#!'*/ash|'#!'*/dash) ;;
+	*) continue ;;
+	esac
 	echo "s" >> "$SEEN"
 	if ! err=$(sh -n "$s" 2>&1); then
 		printf '%s: %s\n' "$s" "$err" >> "$FAILS"
