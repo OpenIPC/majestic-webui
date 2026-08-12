@@ -31,7 +31,7 @@
     │   ├── ext-telegram.cgi
     │   ├── ext-vtun.cgi
     │   ├── ext-wireguard.cgi
-    │   ├── fpv-wfb.cgi                   # WFB-NG editor (backwards compat with legacy wfb.conf)
+    │   ├── fpv-wfb.cgi                   # WFB-NG editor (legacy wfb.conf compat); not in any nav, URL only
     │   ├── fw-editor.cgi
     │   ├── fw-interface.cgi
     │   ├── fw-network.cgi
@@ -46,7 +46,6 @@
     │   ├── j
     │   │   ├── dmesg.cgi                 # Full kernel ring buffer (dmesg) for the Logs page
     │   │   ├── locale.cgi
-    │   │   ├── locale_fpv.cgi            # FPV version of majestic menu
     │   │   ├── pulse.cgi
     │   │   ├── ptz.cgi                   # PTZ step (gpio-motors or motor + U-Boot ptz=)
     │   │   ├── run.cgi
@@ -60,7 +59,6 @@
     │   │   ├── footer.cgi
     │   │   ├── fpv_common.cgi            # FPV yaml helpers shared by fpv-wfb.cgi
     │   │   ├── header.cgi
-    │   │   ├── header_fpv.cgi            # FPV version of general menu
     │   │   ├── motor.cgi
     │   │   └── roi.cgi
     │   ├── preview.cgi

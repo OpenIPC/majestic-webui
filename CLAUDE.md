@@ -72,7 +72,7 @@ The settings page is split: `www/cgi-bin/mj-settings.cgi` renders the page chrom
 **Server side — `mj-settings.cgi`.**
 
 1. Pick the tab: `label="$GET_tab"`, default `system`.
-2. Iterate `properties` from `$(get_schema)` (cached at `/tmp/webui/schema.json`), and source `j/locale.cgi` to map each property to its English label. Render the underlined tab strip server-side — sections with no `mj_<key>` label entry are hidden (still how `cloud`/`youtube` are suppressed).
+2. Iterate `properties` from `$(get_schema)` (cached at `/tmp/webui/schema.json`), and scrape `j/locale.cgi` with `sed` to map each property to its English label. Render the underlined tab strip server-side — sections with no `mj_<key>` label entry are hidden (still how `youtube` is suppressed). Note `j/locale.cgi` is parsed, *not* sourced: it is a plain `key=value` data file with no shebang, and sourcing it would fail anyway because values like `mj_cloud=Cloud (WebRTC)` are not valid shell.
 3. Compute `$title` for the active tab — server-rendered as the form column's `<h3>`.
 4. Build a small JSON bootstrap blob:
 
@@ -151,8 +151,14 @@ Small `#!/bin/sh` scripts that emit JSON for the front-end. `pulse.cgi` is polle
 
 The repo serves two flavours of firmware selected by `$fw_variant` (read from `/etc/os-release:BUILD_OPTION`):
 
-- Standard build uses `p/header.cgi` + `p/common.cgi` + `j/locale.cgi`.
-- FPV build includes `p/header_fpv.cgi` + `p/fpv_common.cgi` + `j/locale_fpv.cgi` and surfaces `fpv-wfb.cgi` (WFB-NG wireless settings, with legacy `wfb.conf` ↔ YAML compatibility). When touching FPV pages, keep both code paths working — `fpv_common.cgi` provides its own `yaml_get_value`/`yaml_set_value`/`yaml_get_nested` helpers used by `fpv-wfb.cgi`.
+In practice the split is much smaller than it looks. **Every** page — `fpv-wfb.cgi` included — uses `p/header.cgi`, `p/common.cgi` and `j/locale.cgi`. `$fw_variant` only drives cosmetics (a `<body>` class and the brand label).
+
+The FPV-specific code is exactly two files:
+
+- `p/fpv_common.cgi` — its own `yaml_get_value`/`yaml_set_value`/`yaml_get_nested` helpers, included by `fpv-wfb.cgi` only.
+- `fpv-wfb.cgi` — WFB-NG wireless settings, with legacy `wfb.conf` ↔ YAML compatibility.
+
+`fpv-wfb.cgi` is not linked from any navigation; it is reachable only by URL. The only link to it ever written lived in `p/header_fpv.cgi`, which no page ever included — that file and `j/locale_fpv.cgi` (a variant tab-label set nothing ever read) were removed rather than left to imply a code path that never existed. Git history has them if the FPV nav is ever built for real.
 
 ### Extensions (`ext-*.cgi` + `sbin/*`)
 
