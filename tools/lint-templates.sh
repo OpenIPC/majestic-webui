@@ -1,5 +1,6 @@
 #!/bin/sh
-# Validate the haserl CGI templates under www/cgi-bin.
+# Validate the haserl CGI templates under www/cgi-bin, plus the ordinary shell
+# scripts under www/ and sbin/.
 #
 # Run from CI (.github/workflows/check.yml); also fine by hand. Needs haserl on
 # PATH — Ubuntu ships it in universe, so `apt-get install haserl` is enough.
@@ -10,17 +11,12 @@
 # upstream 0.9.36 built on x86 has no such problem, so it is a buildroot
 # artifact rather than a haserl bug, but it does mean on-device linting is out.
 #
-# Runs from www/cgi-bin because <%in %> resolves relative to the CURRENT
-# WORKING DIRECTORY, not to the including file — undocumented in the manpage,
-# and the reason every page 404s its include if you invoke haserl from the repo
-# root. majestic execs the CGIs with that same cwd, so this matches production.
-#
-# Both of these are checked rather than assumed: this is a gate, and a gate that
-# cannot run has to say so instead of reaching the "templates ok" line. An
-# unguarded cd would silently lint the wrong directory (or none), and an
-# unguarded mktemp would drop every finding on the floor.
-DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../www/cgi-bin" && pwd) || exit 1
-cd "$DIR" || exit 1
+# The cd and the mktemp below are checked rather than assumed: this is a gate,
+# and a gate that cannot run has to say so instead of reaching the "templates
+# ok" line. An unguarded cd would silently lint the wrong tree, or none at all,
+# and an unguarded mktemp would drop every finding on the floor.
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit 1
+cd "$ROOT" || exit 1
 
 FAILS=$(mktemp) || exit 1
 trap 'rm -f "$FAILS"' EXIT
@@ -38,16 +34,32 @@ trap 'rm -f "$FAILS"' EXIT
 # so the obvious `haserl -d "$f" | sh -n` discards that status and then hands
 # the message to the shell, which finds it a perfectly valid command — leaving a
 # broken template reported as clean. Hence capturing the codegen first.
-find . -name '*.cgi' | sed 's|^\./||' | sort | while IFS= read -r f; do
-	head -1 "$f" | grep -q haserl || continue
-	if ! out=$(haserl -d "$f" < /dev/null 2>&1); then
-		printf '%s: haserl: %s\n' "$f" "$(printf '%s' "$out" | tail -1)" >> "$FAILS"
-		continue
-	fi
-	if ! err=$(printf '%s\n' "$out" | sh -n 2>&1); then
-		printf '%s: %s\n' "$f" "$err" >> "$FAILS"
-	fi
-done
+#
+# The subshell is because <%in %> resolves relative to the CURRENT WORKING
+# DIRECTORY rather than to the including file — undocumented in the manpage, and
+# the reason every page fails to find its include if haserl is invoked from the
+# repo root. majestic execs the CGIs with this same cwd, so it matches
+# production.
+#
+# The subshell's status is checked for the same reason as the cd above: `cd ...
+# || exit 1` inside it only leaves the subshell, so on its own it would skip
+# every template while the script carried on to report success.
+if ! (
+	cd www/cgi-bin || exit 1
+	find . -name '*.cgi' | sed 's|^\./||' | sort | while IFS= read -r f; do
+		head -1 "$f" | grep -q haserl || continue
+		if ! out=$(haserl -d "$f" < /dev/null 2>&1); then
+			printf 'www/cgi-bin/%s: haserl: %s\n' "$f" "$(printf '%s' "$out" | tail -1)" >> "$FAILS"
+			continue
+		fi
+		if ! err=$(printf '%s\n' "$out" | sh -n 2>&1); then
+			printf 'www/cgi-bin/%s: %s\n' "$f" "$err" >> "$FAILS"
+		fi
+	done
+	exit 0
+); then
+	echo "lint: could not enter www/cgi-bin, templates unchecked" >> "$FAILS"
+fi
 
 # --- 2. escaping ------------------------------------------------------------
 # CLAUDE.md: "Never <%= $userInput %> for anything that came from POST_/GET_."
@@ -62,7 +74,7 @@ done
 # it. -r and --include are GNU extensions (CLAUDE.md rules them out), so the
 # file list comes from find; globbing is off because it is expanded unquoted.
 set -f
-set -- $(find . -name '*.cgi' | sort)
+set -- $(find www/cgi-bin -name '*.cgi' | sort)
 set +f
 hits=$(grep -nE '<%=[^%]*\$\{?(POST|GET)_' /dev/null "$@")
 case $? in
@@ -73,6 +85,24 @@ case $? in
 1) ;;
 *) echo "lint: grep failed, escaping guard did not run" >> "$FAILS" ;;
 esac
+
+# --- 3. plain shell ---------------------------------------------------------
+# Everything that is not a template: the j/*.cgi JSON endpoints and the sbin
+# helpers. Worth checking because nothing else does — sbin/setnetwork writes
+# /etc/network/interfaces.d and sbin/updatewebui is the deploy path, so a syntax
+# error in either misconfigures or bricks the camera it runs on.
+#
+# Selection is by shebang. That is why j/locale.cgi and j/locale_fpv.cgi no
+# longer carry one: they are data files parsed with sed (mj-settings.cgi), never
+# sourced or executed, and `mj_cloud=Cloud (WebRTC)` is not valid shell. Quoting
+# that value would not help — the sed captures \(.*\) straight into JSON, so the
+# quotes would end up inside the label.
+find www sbin -type f 2>/dev/null | sort | while IFS= read -r s; do
+	head -1 "$s" | grep -qE '^#!.*/(sh|ash|dash)$' || continue
+	if ! err=$(sh -n "$s" 2>&1); then
+		printf '%s: %s\n' "$s" "$err" >> "$FAILS"
+	fi
+done
 
 if [ -s "$FAILS" ]; then
 	cat "$FAILS"

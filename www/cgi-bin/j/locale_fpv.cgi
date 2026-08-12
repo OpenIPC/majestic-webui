@@ -1,4 +1,3 @@
-#!/bin/sh
 mj_audio=Audio
 mj_cloud=Cloud
 #mj_hls=HLS
