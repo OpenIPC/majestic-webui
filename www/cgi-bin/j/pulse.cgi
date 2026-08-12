@@ -10,14 +10,31 @@ if [ -n "$temp" ]; then
 	soc_temp="${temp%.*}°C"
 fi
 
-mem_total=$(awk '/^MemTotal/ {print $2}' /proc/meminfo)
 # MemAvailable counts reclaimable cache/buffers as available, so this is real
 # usage — not MemFree, which treats the kernel's page cache as "used" and reads
-# alarmingly high (~94%). Matches the status dashboard. Fall back to MemFree on
-# kernels too old to report MemAvailable.
-mem_avail=$(awk '/^MemAvailable/ {print $2}' /proc/meminfo)
-[ -z "$mem_avail" ] && mem_avail=$(awk '/^MemFree/ {print $2}' /proc/meminfo)
-mem_used=$(( 100 - (mem_avail * 100 / mem_total) ))
+# alarmingly high. Matches the status dashboard.
+#
+# Kernels older than 3.14 have no MemAvailable line at all (the T31 runs 3.10),
+# so rebuild the kernel's own si_mem_available() estimate from the parts that
+# are there. Bare MemFree is not a usable substitute: on a T31 it reads ~90%
+# used at idle, which trips the amber branch of setProgressBar (issue #116).
+# wmark_low lives in /proc/zoneinfo, not here, so this runs ~2% optimistic.
+# Keep this formula in sync with parseMetrics() in www/a/status.js.
+mem_used=$(awk '
+	/^MemTotal:/         { t = $2 }
+	/^MemAvailable:/     { a = $2 }
+	/^MemFree:/          { f = $2 }
+	/^Active\(file\):/   { af = $2 }
+	/^Inactive\(file\):/ { inf = $2 }
+	/^SReclaimable:/     { sr = $2 }
+	END {
+		if (t <= 0) { printf "0"; exit }
+		if (a == "") a = f + af + inf + sr
+		pct = 100 - (a * 100 / t)
+		if (pct < 0) pct = 0
+		if (pct > 100) pct = 100
+		printf "%d", pct
+	}' /proc/meminfo)
 overlay_used=$(df | grep /overlay | xargs | cut -d' ' -f5)
 uptime=$(awk '{m=$1/60; h=m/60; printf "%sd %sh %sm %ss\n", int(h/24), int(h%24), int(m%60), int($1%60) }' /proc/uptime)
 
