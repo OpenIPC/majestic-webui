@@ -44,7 +44,53 @@
 	}
 	function b64(s) { return btoa(unescape(encodeURIComponent(s))); }
 	function humanSize(n) { n = +n || 0; if (n >= 1048576) return (n / 1048576).toFixed(1) + ' M'; if (n >= 1024) return (n / 1024).toFixed(0) + ' K'; return n + ' B'; }
-	function fmtTime(s) { try { return new Date(s * 1000).toLocaleString(); } catch (e) { return ''; } }
+	// Modified times render in the *camera's* zone, unlike the log viewer, because
+	// everything else on this screen is already stamped in it: majestic writes
+	// recordings to records.path "/mnt/mmcblk0p1/%F" with records.filename
+	// "%H-%M", so the directory and the file name are both strftime in device
+	// local time. Showing the browser's clock next to a folder called 2026-08-12
+	// holding 20-00.mp4 can disagree on the hour and, far enough east or west, on
+	// the date. The viewer's own equivalent stays one hover away.
+	//
+	// Conversion prefers Intl with the camera's real IANA zone over the flat
+	// offset the header bar uses, because these timestamps are historical. A flat
+	// offset is the *current* one, so on a DST zone every file written the other
+	// side of a transition renders an hour off the %H-%M in its own name — and an
+	// SD card holds months where the log ring holds minutes. /etc/timezone is
+	// stored de-underscored (fw-time.js:13 writes "America/New York"), so putting
+	// the underscores back recovers the name Intl wants; the flat offset stays as
+	// the fallback for a label it will not accept.
+	let devOffsetMs = null, devZone = '', devIana = null;
+	function ianaOrNull(label) {
+		try {
+			const z = String(label).replace(/ /g, '_');
+			new Intl.DateTimeFormat('en', { timeZone: z }).format(0);
+			return z;
+		} catch (e) { return null; }
+	}
+	function fmtTime(s) {
+		const ms = s * 1000;
+		if (!ms) return '';
+		if (devIana) return new Date(ms).toLocaleString(undefined, { timeZone: devIana });
+		if (devOffsetMs !== null) return fmtDeviceTime(ms, devOffsetMs); // main.js
+		return new Date(ms).toLocaleString(); // pre-pulse
+	}
+	function titleTime(s) {
+		const ms = s * 1000;
+		if (!ms || (devIana === null && devOffsetMs === null)) return '';
+		return attr(devZone + ' — ' + new Date(ms).toLocaleString() + ' your time');
+	}
+
+	fetch('/cgi-bin/j/pulse.cgi').then(r => r.json()).then(j => {
+		devZone = j.timezone || '';
+		devIana = ianaOrNull(devZone);
+		devOffsetMs = parseTzOffsetMs(j.utc_offset); // main.js; null if unusable
+		// Neither usable: keep the browser rendering rather than a wrong one.
+		if (devIana === null && devOffsetMs === null) return;
+		// Only restamp an existing listing; rendering an empty one would replace
+		// the "loading…" placeholder with "empty" before the first load lands.
+		if (entries.length) render();
+	}).catch(() => {});
 	function api(qs) { return fetch('/cgi-bin/j/files.cgi?' + qs, { credentials: 'same-origin' }).then(r => r.json()); }
 	function op(p) {
 		return fetch('/cgi-bin/j/files.cgi', {
@@ -107,7 +153,7 @@
 			+ '<td class="fm-name text-break">' + nameCell + '</td>'
 			+ '<td class="text-end font-monospace small">' + (isdir ? '' : humanSize(f.size)) + '</td>'
 			+ '<td class="text-center font-monospace small d-none d-md-table-cell">' + esc(f.mode) + '</td>'
-			+ '<td class="text-end font-monospace small d-none d-md-table-cell">' + fmtTime(f.mtime) + '</td>'
+			+ '<td class="text-end font-monospace small d-none d-md-table-cell" title="' + titleTime(f.mtime) + '">' + esc(fmtTime(f.mtime)) + '</td>'
 			+ '<td class="text-end"><div class="dropdown"><button class="btn btn-sm btn-link link-secondary p-0 px-2" type="button" data-bs-toggle="dropdown">⋯</button>'
 			+ '<ul class="dropdown-menu dropdown-menu-end">' + acts + '</ul></div></td></tr>';
 	}

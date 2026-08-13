@@ -28,7 +28,7 @@
 				<th class="fm-sortable" data-sort="name">Name</th>
 				<th class="fm-sortable text-end" data-sort="size">Size</th>
 				<th class="fm-sortable text-center d-none d-md-table-cell" data-sort="mode">Perms</th>
-				<th class="fm-sortable text-end d-none d-md-table-cell" data-sort="mtime">Modified</th>
+				<th class="fm-sortable text-end d-none d-md-table-cell" data-sort="mtime" title="Camera time, so it agrees with the dates in recording paths and names. Hover a row for your own timezone.">Modified</th>
 				<th style="width:1%"></th>
 			</tr></thead>
 			<tbody id="fm-rows"><tr><td colspan="6" class="text-secondary small">loading…</td></tr></tbody>
