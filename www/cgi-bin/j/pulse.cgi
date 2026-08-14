@@ -38,6 +38,14 @@ mem_used=$(awk '
 overlay_used=$(df | grep /overlay | xargs | cut -d' ' -f5)
 uptime=$(awk '{m=$1/60; h=m/60; printf "%sd %sh %sm %ss\n", int(h/24), int(h%24), int(m%60), int($1%60) }' /proc/uptime)
 
+# The same value in raw seconds. fw-update.js compares it against how long the
+# upgrade has been running to establish that the camera really did reboot;
+# recovering that from the "0d 0h 1m 2s" label above would mean parsing a string
+# written for humans. `read` is a builtin, so this costs the 2s heartbeat no
+# extra fork.
+read -r uptime_s _ </proc/uptime
+uptime_s=${uptime_s%.*}
+
 # Majestic's own uptime: system uptime minus the process start time (field 22 of
 # /proc/<pid>/stat is starttime in clock ticks since boot). Computed live each
 # poll, so it stays correct even if majestic restarts on its own. Formatted
@@ -59,8 +67,8 @@ fi
 # renders the camera's wall clock.
 now=$(date '+%s %z')
 
-payload=$(printf '{"soc_temp":"%s","time_now":"%s","timezone":"%s","utc_offset":"%s","mem_used":"%d","overlay_used":"%d","daynight_value":"%d","uptime":"%s","mj_uptime":"%s"}' \
-	"${soc_temp}" "${now% *}" "$(cat /etc/timezone)" "${now#* }" "${mem_used}" "${overlay_used//%/}" "${daynight_value:=-1}" "$uptime" "$mj_uptime")
+payload=$(printf '{"soc_temp":"%s","time_now":"%s","timezone":"%s","utc_offset":"%s","mem_used":"%d","overlay_used":"%d","daynight_value":"%d","uptime":"%s","uptime_s":%d,"mj_uptime":"%s"}' \
+	"${soc_temp}" "${now% *}" "$(cat /etc/timezone)" "${now#* }" "${mem_used}" "${overlay_used//%/}" "${daynight_value:=-1}" "$uptime" "${uptime_s:-0}" "$mj_uptime")
 
 echo "HTTP/1.1 200 OK
 Content-type: application/json

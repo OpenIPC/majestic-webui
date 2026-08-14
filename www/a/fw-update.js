@@ -43,6 +43,10 @@
 	// so an unchanged version afterwards is a success, not a failure.
 	let forced = false;
 
+	// When this run began, so a camera's own uptime can be read as "it booted
+	// during this upgrade". See rebootedAlready().
+	let startedAt = 0;
+
 	// The version this page was rendered with, compared against the rebooted
 	// camera's. A failed sysupgrade reboots too, so "it answered again" is not
 	// evidence that anything was flashed (issue #120, t31x).
@@ -157,6 +161,7 @@
 		recent = '';
 		forced = p.force;
 		noop = false;
+		startedAt = Date.now();
 		status('warning', 'Preparing — freeing memory…');
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		const ws = new WebSocket(proto + '://' + location.host + '/ws/upgrade');
@@ -173,7 +178,11 @@
 		ws.onclose = () => {
 			if (!opened) return;   // handshake failed → onerror reports it
 			if (aborted && !sawFlash) return;   // gave up before touching flash; no reboot is coming
-			status('warning', 'Waiting for the camera to reboot — do not power off…');
+			// "do not power off" is a warning about an interrupted flash, so do not
+			// say it when sysupgrade has already told us it wrote nothing.
+			status('warning', noop
+				? 'Already up to date — waiting for the camera to come back…'
+				: 'Waiting for the camera to reboot — do not power off…');
 			pollBack();
 		};
 		ws.onerror = () => { if (!opened) { status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.'); resumeHeartbeat(); } };
@@ -231,9 +240,42 @@
 		setTimeout(() => location.href = 'status.cgi', 1500);
 	}
 
-	// Confirm a real reboot before reporting done: the camera must first go
-	// UNREACHABLE, then come back — and then confirmUpgrade checks what it came
-	// back as.
+	// Positive evidence that the camera restarted, instead of inferring it from a
+	// gap in our own polling. The camera's uptime is compared against how long
+	// this run has been going: anything smaller means it booted during the
+	// upgrade, and anything larger means the boot predates it.
+	//
+	// The down-then-up watch below cannot see a reboot it was not awake for. When
+	// nothing is flashed (a same-version run) majestic is never disturbed, so the
+	// hard `reboot -f` closes no sockets: the browser only learns the connection
+	// died when the REBOOTED camera resets it — measured at 30s after
+	// "Unconditional reboot" on an av300, by which point the camera is already
+	// back. downSeen then never flips, and a perfectly good upgrade was reported
+	// as "the camera never rebooted".
+	//
+	// Returns false, never throws: on an older camera whose pulse.cgi predates
+	// uptime_s this is simply unavailable, and the watch below still applies.
+	async function rebootedAlready() {
+		const ctl = new AbortController();
+		const to = setTimeout(() => ctl.abort(), 2500);
+		try {
+			const r = await fetch('/cgi-bin/j/pulse.cgi?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
+			if (!r.ok) return false;
+			const up = Number((await r.json()).uptime_s);
+			if (!isFinite(up)) return false;
+			// 5s of slack so a camera that booted moments before this page loaded
+			// is not mistaken for one that rebooted just now.
+			return up < (Date.now() - startedAt) / 1000 - 5;
+		} catch (err) {
+			return false;
+		} finally {
+			clearTimeout(to);
+		}
+	}
+
+	// Confirm a real reboot before reporting done: the camera must either go
+	// UNREACHABLE and come back, or tell us its uptime is younger than this run —
+	// and then confirmUpgrade checks what it came back as.
 	function pollBack() {
 		function ping() {
 			const ctl = new AbortController();
@@ -245,12 +287,25 @@
 		let downSeen = false, tries = 0;
 		const DOWN_TRIES = 160;   // ~8 min: silent download (≤2 min) + verify + flash + reboot
 		const UP_TRIES = 200;     // ~10 min: a stale-clock first boot can fsck and take minutes
+		// A same-version run writes nothing, so there is no download or flash to
+		// wait out — only the reboot itself. Giving that the full 8 minutes would
+		// leave the page sitting on a camera that finished in seconds.
+		const downTries = noop ? 20 : DOWN_TRIES;   // ~60s when nothing is being written
 		async function tick() {
 			const up = await ping();
 			if (!downSeen) {
 				if (!up) { downSeen = true; tries = 0; status('warning', 'Camera is rebooting — waiting for it to come back…'); }
-				else if (++tries > DOWN_TRIES) {
+				// It is answering, which is either "has not rebooted yet" or "already
+				// finished and came back while we were not looking". Ask it directly,
+				// but not on every tick — pulse.cgi forks a dozen processes, and the
+				// whole point of stopHeartbeat() was to stop hammering it.
+				else if (tries % 4 === 0 && await rebootedAlready()) { confirmUpgrade(); return; }
+				else if (++tries > downTries) {
 					if (sawFlash) status('warning', 'Still flashing — the camera has not rebooted yet. Give it a few minutes, then reload.');
+					// Nothing was written, so "we never saw it go down" is not evidence
+					// of a failure — there was nothing that could have failed. Take
+					// sysupgrade at its word rather than crying wolf.
+					else if (noop) { confirmUpgrade(); }
 					else { status('danger', 'The camera never rebooted — the update may have failed. Check the log above and try again.'); resumeHeartbeat(); }
 					return;
 				}
