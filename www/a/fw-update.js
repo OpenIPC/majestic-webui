@@ -45,6 +45,12 @@
 
 	// When this run began, so a camera's own uptime can be read as "it booted
 	// during this upgrade". See rebootedAlready().
+	//
+	// performance.now(), not Date.now(): this is a duration, and the wall clock
+	// is the one thing that cannot be trusted to hold still here. sysupgrade
+	// synchronises time mid-run, and the browser's own clock can be stepped by
+	// NTP at any moment — either would move this baseline under us and turn the
+	// comparison into a false "it rebooted" or a missed one.
 	let startedAt = 0;
 
 	// The version this page was rendered with, compared against the rebooted
@@ -161,7 +167,7 @@
 		recent = '';
 		forced = p.force;
 		noop = false;
-		startedAt = Date.now();
+		startedAt = performance.now();
 		status('warning', 'Preparing — freeing memory…');
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		const ws = new WebSocket(proto + '://' + location.host + '/ws/upgrade');
@@ -265,7 +271,7 @@
 			if (!isFinite(up)) return false;
 			// 5s of slack so a camera that booted moments before this page loaded
 			// is not mistaken for one that rebooted just now.
-			return up < (Date.now() - startedAt) / 1000 - 5;
+			return up < (performance.now() - startedAt) / 1000 - 5;
 		} catch (err) {
 			return false;
 		} finally {
