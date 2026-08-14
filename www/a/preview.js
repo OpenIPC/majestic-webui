@@ -91,6 +91,12 @@ window.MajesticVideo = (function () {
 			// a mic that is off or not producing. Report it either way so the
 			// page can say so rather than leave a dead unmute button.
 			onAudio(wantAudio ? (info.audioCodec || null) : null);
+			// We asked for audio and got a video-only stream: stop wanting it, so
+			// state stays consistent with the (now video-only) connection and a
+			// later unmute actually flips wantAudio and reconnects rather than
+			// no-opping. No reconnect here — this stream is already what a mute
+			// would have produced.
+			if (wantAudio && !info.audioCodec) { wantAudio = false; video.muted = true; }
 			mime = info.mime || ('video/mp4; codecs="' + info.codecString + '"');
 			if (!mseOk || !MediaSource.isTypeSupported(mime)) {
 				onState('mjpeg', 'codec ' + info.codec + ' not playable here');
