@@ -3,15 +3,31 @@ window.MajesticVideo = (function () {
 	const MAX_QUEUE = 240;
 	const LIVE_EDGE = 1.0;
 
+	// Audio is opt-in per connection: the camera only encodes it while someone
+	// is listening, so unmuting reconnects with &audio=<what this browser can
+	// decode>. The list is probed rather than sniffed from the user agent,
+	// because the answer is a browser-version detail: Opus in MP4 plays in
+	// Chrome and Firefox, Safari needs AAC. Order is only a hint — the camera
+	// prefers whichever of these it is already encoding.
+	const AUDIO_CODECS = ['opus', 'mp4a.40.2'];
+	const audioPrefs = (function () {
+		if (!('MediaSource' in window)) return '';
+		return AUDIO_CODECS.filter(function (c) {
+			return MediaSource.isTypeSupported('audio/mp4; codecs="' + c + '"');
+		}).join(',');
+	})();
+
 	function attach(video, opts) {
 		opts = opts || {};
 		const onState = opts.onState || function () {};
 		const onCodec = opts.onCodec || function () {};
+		const onAudio = opts.onAudio || function () {};
 		let stream = opts.stream | 0;
 		let ws = null, ms = null, sb = null, objUrl = null;
 		let queue = [], started = false, mime = null;
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let gotSignal = false, signalTimer = null, failCount = 0;
+		let wantAudio = false, volume = 1;
 
 		const mseOk = ('MediaSource' in window);
 		const NO_SIGNAL_MS = 4000;
@@ -51,11 +67,15 @@ window.MajesticVideo = (function () {
 		function onVideoError(e) {
 			if (!closed && e.target === video) reconnect();
 		}
+		// The element is replaced on every (re)connect, so mute and volume have
+		// to be re-applied — cloneNode does not carry them, and defaulting to
+		// muted would silence the stream the user just asked to hear.
 		function freshVideo() {
 			const old = video;
 			const nv = old.cloneNode(false);
 			nv.removeAttribute('src');
-			nv.muted = true;
+			nv.muted = !wantAudio;
+			nv.volume = volume;
 			if (old.parentNode) old.parentNode.replaceChild(nv, old);
 			old.removeEventListener('error', onVideoError);
 			try { old.removeAttribute('src'); old.load(); } catch (e) {}
@@ -67,6 +87,10 @@ window.MajesticVideo = (function () {
 			markSignal();
 			failCount = 0;
 			onCodec(info.codec, info.codecString, info.width, info.height);
+			// Null when we asked for audio and the camera has none to give —
+			// a mic that is off or not producing. Report it either way so the
+			// page can say so rather than leave a dead unmute button.
+			onAudio(wantAudio ? (info.audioCodec || null) : null);
 			mime = info.mime || ('video/mp4; codecs="' + info.codecString + '"');
 			if (!mseOk || !MediaSource.isTypeSupported(mime)) {
 				onState('mjpeg', 'codec ' + info.codec + ' not playable here');
@@ -112,7 +136,9 @@ window.MajesticVideo = (function () {
 			freshVideo();
 			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 			onState('connecting');
-			ws = new WebSocket(proto + '://' + location.host + '/ws/video?stream=' + stream);
+			let url = proto + '://' + location.host + '/ws/video?stream=' + stream;
+			if (wantAudio && audioPrefs) url += '&audio=' + audioPrefs;
+			ws = new WebSocket(url);
 			ws.binaryType = 'arraybuffer';
 			gotSignal = false;
 			ws.onopen = function () { backoff = 1000; armSignalTimer(); };
@@ -149,16 +175,40 @@ window.MajesticVideo = (function () {
 			if (ws && ws.readyState === 1) ws.send(JSON.stringify({ request: 'idr' }));
 		}
 
-		function setStream(n) {
-			n = n | 0;
-			if (n === stream) return;
-			stream = n;
+		function reopen() {
 			backoff = 1000;
 			failCount = 0;
 			stop();
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			reconnectTimer = setTimeout(function () { reconnectTimer = null; open(); }, 300);
 		}
+
+		function setStream(n) {
+			n = n | 0;
+			if (n === stream) return;
+			stream = n;
+			reopen();
+		}
+
+		// Whether the stream carries an audio track is fixed when the socket
+		// opens, so toggling it reconnects — the same brief cut as switching
+		// Main/Sub. Muting is not just an element flag: it drops the
+		// subscription so the camera stops encoding audio for nobody. Must be
+		// called from a click, or autoplay policy blocks unmuted playback.
+		function setAudio(on) {
+			on = !!on && !!audioPrefs;
+			if (on === wantAudio) return;
+			wantAudio = on;
+			video.muted = !on;
+			reopen();
+		}
+
+		function setVolume(v) {
+			volume = Math.max(0, Math.min(1, +v || 0));
+			try { video.volume = volume; } catch (e) {}
+		}
+
+		function audioSupported() { return !!audioPrefs; }
 
 		function destroy() {
 			closed = true;
@@ -168,11 +218,21 @@ window.MajesticVideo = (function () {
 
 		if (!mseOk) {
 			onState('mjpeg', 'MSE unavailable');
-			return { setStream: function () {}, requestIdr: function () {}, destroy: function () {}, supported: false };
+			return {
+				setStream: function () {}, requestIdr: function () {},
+				setAudio: function () {}, setVolume: function () {},
+				audioSupported: function () { return false; },
+				destroy: function () {}, supported: false,
+			};
 		}
 
 		open();
-		return { setStream: setStream, requestIdr: requestIdr, destroy: destroy, supported: true };
+		return {
+			setStream: setStream, requestIdr: requestIdr,
+			setAudio: setAudio, setVolume: setVolume,
+			audioSupported: audioSupported,
+			destroy: destroy, supported: true,
+		};
 	}
 
 	return { attach: attach };

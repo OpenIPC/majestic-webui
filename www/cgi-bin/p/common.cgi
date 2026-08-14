@@ -394,6 +394,11 @@ preview() {
 		<label class="btn btn-outline-primary" for="mj-stream-1" id="mj-sub" hidden>Sub</label>
 		<span id="mj-badge" class="badge text-bg-secondary align-self-center ms-2">connecting…</span>
 	</div>
+	<div class="btn-group btn-group-sm mb-2" role="group" aria-label="Audio" id="mj-audio-ctl" hidden>
+		<input type="checkbox" class="btn-check" id="mj-mute" autocomplete="off">
+		<label class="btn btn-outline-primary" for="mj-mute" id="mj-mute-lbl">🔇 Muted</label>
+		<input type="range" id="mj-vol" min="0" max="100" value="100" class="form-range align-self-center ms-2" style="width:6rem" disabled aria-label="Volume">
+	</div>
 	<video id="live-video" autoplay muted playsinline style="$bg"></video>
 	<img id="live-mjpeg" alt="" style="display:none; $bg">
 	<p id="mj-note" class="alert alert-warning" style="display:none">

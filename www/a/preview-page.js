@@ -65,6 +65,8 @@
 		if (badge) badge.textContent = 'MJPEG';
 	}
 
+	const mute = $('#mj-mute'), muteLbl = $('#mj-mute-lbl'), vol = $('#mj-vol');
+
 	const player = MajesticVideo.attach(initial, {
 		stream: 0,
 		onState: (s, d) => {
@@ -74,9 +76,36 @@
 			else if (badge) badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
 		},
 		onCodec: (codec, cs, w, h) => { if (badge) badge.textContent = codec.toUpperCase() + ' ' + w + '×' + h; },
+		// null means we asked for audio and the camera had none to give (mic off
+		// or not producing). Reflect that on the control rather than leaving the
+		// user staring at an unmute button that does nothing.
+		onAudio: (codec) => {
+			if (!mute) return;
+			if (mute.checked && !codec) {
+				muteLbl.textContent = '🔇 No audio';
+				mute.checked = false;
+				if (vol) vol.disabled = true;
+			}
+		},
 	});
 
 	const s0 = $('#mj-stream-0'), s1 = $('#mj-stream-1');
 	if (s0) s0.addEventListener('change', () => player.setStream(0));
 	if (s1) s1.addEventListener('change', () => player.setStream(1));
+
+	// Audio: reveal only when the camera has it configured and this browser can
+	// play a codec the camera can produce — otherwise the button is a dead end.
+	const audioCtl = $('#mj-audio-ctl');
+	if (audioCtl && mute && player.audioSupported()) {
+		mjConfig().then(cfg => {
+			if (mjGet(cfg, 'audio.enabled') === true) audioCtl.hidden = false;
+		});
+		mute.addEventListener('change', () => {
+			const on = mute.checked;
+			player.setAudio(on);
+			muteLbl.textContent = on ? '🔊 Listening' : '🔇 Muted';
+			if (vol) vol.disabled = !on;
+		});
+		if (vol) vol.addEventListener('input', () => player.setVolume(vol.value / 100));
+	}
 })();
