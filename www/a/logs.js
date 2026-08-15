@@ -77,7 +77,7 @@
 		return new Date(ms).toLocaleString() + ' ' + raw.slice(m[0].length);
 	}
 
-	fetch('/cgi-bin/j/logmeta.cgi').then(r => r.json()).then(meta => {
+	fetch('/cgi-bin/j/logmeta.cgi', { credentials: 'same-origin' }).then(r => r.json()).then(meta => {
 		const off = parseTzOffsetMs(meta.tz_offset); // main.js; null if unusable
 		if (off === null) return; // leave tzOffsetMs null: raw beats wrongly shifted
 		tzOffsetMs = off;

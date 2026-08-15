@@ -62,7 +62,7 @@ function setProgressBar(id, value, name) {
 
 async function* makeTextFileLineIterator(url) {
 	const td = new TextDecoder('utf-8');
-	const response = await fetch(url);
+	const response = await fetch(url, { credentials: 'same-origin' });
 	const rd = response.body.getReader();
 	let { value: chunk, done: readerDone } = await rd.read();
 	chunk = chunk ? td.decode(chunk) : '';
@@ -134,7 +134,7 @@ function heartbeat() {
 	// otherwise stop the heartbeat for the rest of the page's life.
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
-	fetch('/cgi-bin/j/pulse.cgi', { signal: ctl.signal })
+	fetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin', signal: ctl.signal })
 		.then((response) => response.json())
 		.then((json) => {
 			if (json.soc_temp !== '') {
