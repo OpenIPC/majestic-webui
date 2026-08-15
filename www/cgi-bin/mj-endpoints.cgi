@@ -27,7 +27,7 @@ mj_unsafe=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null | jsonfilt
 			<dt class="cp2cb">rtsp://<%= $network_address %>/stream=2</dt>
 			<dd>RTSP JPEG stream.</dd>
 			<dt class="cp2cb">ws://<%= $network_address %>/ws/video?stream=0</dt>
-			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by Preview).</dd>
+			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by Preview). Append <code>&amp;audio=opus,mp4a.40.2</code> to mux in an audio track for the codecs your player accepts.</dd>
 			<dt class="cp2cb">ws://<%= $network_address %>/ws/video?stream=1</dt>
 			<dd>Low-latency H.264/H.265 sub stream (fMP4/MSE).</dd>
 			<dt class="cp2cb">http://<%= $network_address %>/mjpeg</dt>
