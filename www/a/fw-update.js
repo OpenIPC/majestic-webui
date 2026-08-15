@@ -210,6 +210,13 @@
 			} else {
 				// Nothing reached flash, so no reboot is coming and the log above is
 				// the whole story. Say so now instead of waiting out pollBack.
+				//
+				// This is the one exit that leaves the socket open: sysupgrade gave up
+				// without rebooting, so the `tail -F` behind it never emits again and
+				// ws.onclose may never fire. Nothing else will stop the quiet timer,
+				// and it would otherwise tick for the life of the tab.
+				if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
+				commitLine();
 				status('danger', 'The upgrade was aborted — see the log below. Nothing was written to flash, so the camera is unchanged.');
 				resumeHeartbeat();
 			}
@@ -283,7 +290,14 @@
 			endLog();
 			beginPollBack();
 		};
-		ws.onerror = () => { if (!opened) { status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.'); resumeHeartbeat(); } };
+		// Same cleanup as the pre-flash abort above: the timer is armed before the
+		// socket is, so a handshake that never completes would leave it ticking.
+		ws.onerror = () => {
+			if (opened) return;
+			if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
+			status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.');
+			resumeHeartbeat();
+		};
 	}
 
 	// Read the version the camera is running NOW. Re-fetches this page instead of
