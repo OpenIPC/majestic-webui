@@ -81,7 +81,7 @@
 		return attr(devZone + ' — ' + new Date(ms).toLocaleString() + ' your time');
 	}
 
-	fetch('/cgi-bin/j/pulse.cgi').then(r => r.json()).then(j => {
+	fetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin' }).then(r => r.json()).then(j => {
 		devZone = j.timezone || '';
 		devIana = ianaOrNull(devZone);
 		devOffsetMs = parseTzOffsetMs(j.utc_offset); // main.js; null if unusable

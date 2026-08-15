@@ -19,17 +19,17 @@
 			.catch(() => {}));
 
 	$('#toggle-night').addEventListener('click', () => {
-		fetch('/night/toggle').then(api => api.json()).then(data => {
+		fetch('/night/toggle', { credentials: 'same-origin' }).then(api => api.json()).then(data => {
 			$('#toggle-night').checked = data;
 			if (!$('#toggle-ircut').disabled) $('#toggle-ircut').checked = data;
 			if (!$('#toggle-light').disabled) $('#toggle-light').checked = data;
 		});
 	});
 	$('#toggle-ircut').addEventListener('click', () => {
-		fetch('/night/ircut').then(api => api.json()).then(data => { $('#toggle-ircut').checked = data; });
+		fetch('/night/ircut', { credentials: 'same-origin' }).then(api => api.json()).then(data => { $('#toggle-ircut').checked = data; });
 	});
 	$('#toggle-light').addEventListener('click', () => {
-		fetch('/night/light').then(api => api.json()).then(data => { $('#toggle-light').checked = data; });
+		fetch('/night/light', { credentials: 'same-origin' }).then(api => api.json()).then(data => { $('#toggle-light').checked = data; });
 	});
 
 	// --- Live MSE player (with MJPEG / no-signal fallback) ---

@@ -39,6 +39,12 @@
 	const noopMarker = /Same version, nothing to update/i;
 	let noop = false;
 
+	// sysupgrade announces the reboot before taking it. That announcement is the
+	// earliest honest moment to start watching for the camera to come back, and
+	// waiting for anything later is what made this page sit doing nothing while
+	// the camera was already serving again in another tab.
+	const rebootMarker = /Unconditional reboot|Rebooting now/i;
+
 	// Whether --force_ver was requested. It reflashes the same version on purpose,
 	// so an unchanged version afterwards is a success, not a failure.
 	let forced = false;
@@ -52,6 +58,17 @@
 	// NTP at any moment — either would move this baseline under us and turn the
 	// comparison into a false "it rebooted" or a missed one.
 	let startedAt = 0;
+
+	// When the last byte of log arrived, and whether the watch for the camera's
+	// return has already been started. See beginPollBack().
+	let lastData = 0;
+	let polling = false;
+	let quietTimer = null;
+	// How long the log may go silent, once the flash is under way, before the
+	// camera is assumed to have gone. Generous, because a quiet stretch is normal
+	// during the download and the time sync — but those happen before any write,
+	// so this only ever arms itself after sawFlash.
+	const QUIET_MS = 15000;
 
 	// The version this page was rendered with, compared against the rebooted
 	// camera's. A failed sysupgrade reboots too, so "it answered again" is not
@@ -102,7 +119,59 @@
 	// Markers can straddle two frames, so match against a rolling window of the
 	// recent stream rather than each chunk in isolation.
 	let recent = '';
+	// The stream stops wherever the camera happened to die, which is almost never
+	// on a line boundary: flashcp redraws its meter with \r and no trailing
+	// newline, so the last thing written stays half-drawn ("Verifying kb:
+	// 4648/4836 (96%)") and the pane reads as hung rather than finished.
+	function commitLine() {
+		if (!lineArr.length) return;
+		doneNode.appendData(lineArr.join('') + '\n');
+		lineArr = [];
+		col = 0;
+		lineNode.data = '';
+		out.scrollTop = out.scrollHeight;
+	}
+
+	// Only ws.onclose knows the stream is really over. The reboot announcement
+	// and the silence heuristic both start the watch while the socket may still
+	// deliver more, so writing this there would let genuine output land
+	// underneath a note claiming the connection had already ended.
+	let logClosed = false;
+	function endLog() {
+		if (logClosed) return;
+		logClosed = true;
+		commitLine();
+		doneNode.appendData('--- connection to the camera ended here; it is rebooting ---\n');
+		out.scrollTop = out.scrollHeight;
+	}
+
+	// Start watching for the camera to come back. Three things can get us here
+	// and whichever happens first wins: sysupgrade announced the reboot, the log
+	// went quiet after the flash had started, or the socket closed.
+	//
+	// Waiting on the socket alone was the mistake. A reboot that never disturbs
+	// majestic — a same-version run writes nothing — closes no sockets, so the
+	// browser is not told until the rebooted camera resets the stale connection,
+	// about 30s later. Starting early costs nothing when the camera is still
+	// working: pollBack only watches, and rebootedAlready() keeps answering false
+	// while the reported uptime is older than this run.
+	function beginPollBack() {
+		if (polling) return;
+		polling = true;
+		if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
+		// Tidy the half-drawn meter, but do NOT declare the stream over: the
+		// socket can still be open here and more output may yet arrive.
+		commitLine();
+		// "do not power off" is a warning about an interrupted flash, so do not
+		// say it when sysupgrade has already told us it wrote nothing.
+		status('warning', noop
+			? 'Already up to date — waiting for the camera to come back…'
+			: 'Waiting for the camera to reboot — do not power off…');
+		pollBack();
+	}
+
 	function append(t) {
+		lastData = performance.now();
 		const s = t.replace(ansi, '');
 		let commit = '';
 		for (let i = 0; i < s.length; i++) {
@@ -128,6 +197,9 @@
 		recent = (recent + s).slice(-512);
 		if (!sawFlash && flashMarker.test(recent)) sawFlash = true;
 		if (!noop && noopMarker.test(recent)) noop = true;
+		// Said out loud by sysupgrade immediately before it reboots, so there is
+		// nothing left to wait for.
+		if (rebootMarker.test(recent)) beginPollBack();
 		if (!aborted && abortMarker.test(recent)) {
 			aborted = true;
 			if (sawFlash) {
@@ -168,6 +240,18 @@
 		forced = p.force;
 		noop = false;
 		startedAt = performance.now();
+		lastData = startedAt;
+		polling = false;
+		logClosed = false;
+		if (quietTimer) clearInterval(quietTimer);
+		// The log dying mid-flash is the other way the camera leaves without
+		// saying so — majestic is simply overwritten, and "Unconditional reboot"
+		// never reaches us. Only armed once a write has actually started, so the
+		// naturally quiet download and time-sync phases cannot trip it.
+		quietTimer = setInterval(() => {
+			if (polling) { clearInterval(quietTimer); quietTimer = null; return; }
+			if (sawFlash && performance.now() - lastData > QUIET_MS) beginPollBack();
+		}, 3000);
 		status('warning', 'Preparing — freeing memory…');
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		const ws = new WebSocket(proto + '://' + location.host + '/ws/upgrade');
@@ -183,13 +267,21 @@
 		// server-side concern: majestic pings /ws/upgrade while the child is idle.)
 		ws.onclose = () => {
 			if (!opened) return;   // handshake failed → onerror reports it
-			if (aborted && !sawFlash) return;   // gave up before touching flash; no reboot is coming
-			// "do not power off" is a warning about an interrupted flash, so do not
-			// say it when sysupgrade has already told us it wrote nothing.
-			status('warning', noop
-				? 'Already up to date — waiting for the camera to come back…'
-				: 'Waiting for the camera to reboot — do not power off…');
-			pollBack();
+			if (aborted && !sawFlash) {
+				// Gave up before touching flash; no reboot is coming, and the log
+				// above is the whole story.
+				if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
+				commitLine();
+				return;
+			}
+			// Usually last of the three triggers rather than first — by the time a
+			// hard reboot resets this socket, beginPollBack() has normally already
+			// run. Kept because it is the only one that fires when the camera goes
+			// without a word.
+			// The socket is genuinely closed now, so the transcript can be
+			// closed off too — whichever trigger already started the watch.
+			endLog();
+			beginPollBack();
 		};
 		ws.onerror = () => { if (!opened) { status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.'); resumeHeartbeat(); } };
 	}
@@ -204,7 +296,7 @@
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 5000);
 		try {
-			const r = await fetch('fw-update.cgi?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
+			const r = await fetch('fw-update.cgi?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
 			if (!r.ok) return null;
 			const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
 			const el = doc.getElementById('fw-installed');
@@ -265,7 +357,7 @@
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 2500);
 		try {
-			const r = await fetch('/cgi-bin/j/pulse.cgi?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
+			const r = await fetch('/cgi-bin/j/pulse.cgi?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
 			if (!r.ok) return false;
 			const up = Number((await r.json()).uptime_s);
 			if (!isFinite(up)) return false;
@@ -286,7 +378,7 @@
 		function ping() {
 			const ctl = new AbortController();
 			const to = setTimeout(() => ctl.abort(), 2500);
-			return fetch('/?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal })
+			return fetch('/?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal })
 				.then(() => { clearTimeout(to); return true; })
 				.catch(() => { clearTimeout(to); return false; });
 		}
@@ -335,7 +427,7 @@
 		showProgress();
 		status('warning', 'Uploading firmware…');
 		try {
-			const r = await fetch('/upload', { method: 'POST', headers: { 'File-Location': '/tmp/firmware.tgz' }, body: f });
+			const r = await fetch('/upload', { method: 'POST', credentials: 'same-origin', headers: { 'File-Location': '/tmp/firmware.tgz' }, body: f });
 			if (!r.ok) { status('danger', 'Upload failed (' + r.status + ').'); resumeHeartbeat(); return; }
 			append('Uploaded ' + f.name + ' (' + f.size + ' bytes)\n');
 			startUpgrade('/tmp/firmware.tgz');
