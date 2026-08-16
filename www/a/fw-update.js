@@ -339,13 +339,14 @@
 		for (let i = 0; i < 5 && now === null; i++) {
 			if (i) await new Promise(r => setTimeout(r, 2000));
 			const res = await installedNow();
-			// The reboot invalidated the session (majestic keeps sessions in RAM),
-			// so re-login is required before any authenticated page will load. Hand
-			// the user to the sign-in form rather than the version comparison — the
-			// upgrade itself is already done. Landing back on status.cgi would only
-			// bounce here anyway.
+			// We only get here once a reboot is established, and the reboot cleared
+			// the session (majestic keeps them in RAM), so the version page will not
+			// load until the user signs in again. Send them to the form. Deliberately
+			// neutral wording, not "Updated": a failed sysupgrade reboots too, and
+			// with the session gone we cannot read the version to tell which — the
+			// status page will show what actually installed once they are back in.
 			if (res.needsAuth) {
-				status('success', 'Updated — please sign in again.');
+				status('warning', 'Camera is back — please sign in again to continue.');
 				setTimeout(() => location.href =
 					'/login.html?next=' + encodeURIComponent('/cgi-bin/status.cgi'), 1500);
 				return;
@@ -389,10 +390,11 @@
 		const to = setTimeout(() => ctl.abort(), 2500);
 		try {
 			const r = await fetch('/cgi-bin/j/pulse.cgi?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
-			// Our session was valid when the upgrade began, so pulse.cgi turning us
-			// away now means the camera rebooted and cleared it — positive evidence
-			// of the reboot even though we cannot read the uptime through the 401.
-			if (r.status === 401 || r.status === 403) return true;
+			// A 401 here is ambiguous — the session can be dropped without a reboot
+			// (it expires, or another tab signs out) — so it is not proof of one.
+			// Treat it as "can't tell" and let the unauthenticated / ping below be
+			// the reboot detector; confirmUpgrade() handles the lost session once a
+			// reboot is actually established.
 			if (!r.ok) return false;
 			const up = Number((await r.json()).uptime_s);
 			if (!isFinite(up)) return false;

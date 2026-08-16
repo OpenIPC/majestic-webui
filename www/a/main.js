@@ -224,10 +224,17 @@ function initAll() {
 	// re-login is required.
 	const logout = $('#nav-logout');
 	if (logout) {
-		logout.addEventListener('click', ev => {
+		logout.addEventListener('click', async ev => {
 			ev.preventDefault();
-			fetch('/logout', { method: 'POST', credentials: 'same-origin' })
-				.finally(() => location.href = '/login.html');
+			try {
+				const r = await fetch('/logout', { method: 'POST', credentials: 'same-origin' });
+				// 200 cleared the session, 204 means there was none to clear — either
+				// way the session is gone, so it is safe to leave. Only a network error
+				// or a 5xx leaves it possibly alive: keep the user here to retry rather
+				// than send them to the login page implying a sign-out that didn't take.
+				if (r.ok) { location.href = '/login.html'; return; }
+			} catch (e) { /* fall through to the error path */ }
+			alert('Sign out failed — please try again.');
 		});
 	}
 
