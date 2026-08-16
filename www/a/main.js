@@ -217,6 +217,27 @@ function initAll() {
 
 	$$('.refresh').forEach(el => el.addEventListener('click', refresh));
 
+	// Sign out: drop the server-side session, then land on the login page.
+	// We navigate to /login.html rather than reloading, because a reload could
+	// silently re-authenticate via any Basic credentials the browser still has
+	// cached (and mint a fresh cookie) — from the login page a deliberate
+	// re-login is required.
+	const logout = $('#nav-logout');
+	if (logout) {
+		logout.addEventListener('click', async ev => {
+			ev.preventDefault();
+			try {
+				const r = await fetch('/logout', { method: 'POST', credentials: 'same-origin' });
+				// 200 cleared the session, 204 means there was none to clear — either
+				// way the session is gone, so it is safe to leave. Only a network error
+				// or a 5xx leaves it possibly alive: keep the user here to retry rather
+				// than send them to the login page implying a sign-out that didn't take.
+				if (r.ok) { location.href = '/login.html'; return; }
+			} catch (e) { /* fall through to the error path */ }
+			alert('Sign out failed — please try again.');
+		});
+	}
+
 	// open links to external resources in a new window.
 	$$('a[href^=http]').forEach(el => el.target = '_blank');
 

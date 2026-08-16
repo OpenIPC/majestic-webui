@@ -10,6 +10,12 @@ Web interface uses system credentials for access. Default username is _root_,
 and password is _12345_. You will be asked to change the password at the first login.
 Please note that this will also affect your login via ssh!
 
+Signing in through the web form issues a session cookie; that cookie is what
+lets the live preview, log viewer and firmware-update progress work in every
+browser (Safari does not attach HTTP Basic credentials to a WebSocket
+handshake). HTTP Basic still works for `curl`/CLI/webhook access, and the
+navigation bar's **Sign out** link ends the session.
+
 ### Support
 
 OpenIPC offers two levels of support.
