@@ -83,6 +83,7 @@ Pragma: no-cache
 						</ul>
 					</li>	
 					<li class="nav-item"><a class="nav-link" href="preview.cgi">Preview</a></li>
+					<li class="nav-item"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
 				</ul>
 			</div>
 		</div>

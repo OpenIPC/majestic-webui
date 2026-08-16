@@ -8,6 +8,15 @@ WebUI for [OpenIPC Firmware](https://github.com/openipc/firmware) — served on 
 
 Authentication is HTTP Basic against `/etc/shadow` (user `root`, default password `12345`); `common.cgi:check_password` forces a redirect to `fw-interface.cgi` until the default password is changed.
 
+**Session cookies (browser auth).** Majestic (the daemon serving port 80) also mints a `session` cookie so that browser flows Basic composes badly with — most visibly **WebSocket handshakes in Safari**, which never carry a Basic credential — keep working. The pieces:
+
+- `www/login.html` — a **self-contained** login page (inline CSS/JS; it can't pull `/a/*` because those need auth). It `POST`s `username`/`password` to majestic's `/login`, which validates against `/etc/shadow` and returns `Set-Cookie: session=…; HttpOnly; SameSite=Strict`. On success it redirects to the sanitised `?next=` path (default `status.cgi`).
+- Majestic redirects an **unauthenticated browser navigation** (a `GET` that `Accept`s `text/html` and isn't a WS handshake) to `/login.html?next=…` instead of answering `401 WWW-Authenticate: Basic`, so the native Basic dialog never pops. `curl`/CLI/XHR/WebSocket requests still get the `401`+Basic challenge, so scripted access is unchanged. It also auto-mints the cookie on any successful **root** Basic auth, so a client that still sends Basic transparently gets a session too.
+- The cookie rides every later request (same-origin `fetch` with `credentials: 'same-origin'`, and — the whole point — the three WebSocket handshakes `/ws/{upgrade,video,logs}`).
+- **Sign out** — a nav item in `p/header.cgi` (`#nav-logout`), wired in `main.js` to `POST /logout` (invalidates the server session) then navigate to `/login.html`.
+
+This is a majestic-side feature; the WebUI just provides the login page and the logout control. Older majestic builds without the `/login` cookie path fall back to plain Basic (the WS flows then fail only in Safari, as before).
+
 ## Deploying / running
 
 - `sbin/updatewebui [branch]` — fetches a branch zip from GitHub, wipes `/var/www`, then copies `sbin/*` → `/usr/sbin` and `www/*` → `/var/www`. This is the canonical "deploy from source" path. Default branch is `master`.

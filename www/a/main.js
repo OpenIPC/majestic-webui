@@ -217,6 +217,20 @@ function initAll() {
 
 	$$('.refresh').forEach(el => el.addEventListener('click', refresh));
 
+	// Sign out: drop the server-side session, then land on the login page.
+	// We navigate to /login.html rather than reloading, because a reload could
+	// silently re-authenticate via any Basic credentials the browser still has
+	// cached (and mint a fresh cookie) — from the login page a deliberate
+	// re-login is required.
+	const logout = $('#nav-logout');
+	if (logout) {
+		logout.addEventListener('click', ev => {
+			ev.preventDefault();
+			fetch('/logout', { method: 'POST', credentials: 'same-origin' })
+				.finally(() => location.href = '/login.html');
+		});
+	}
+
 	// open links to external resources in a new window.
 	$$('a[href^=http]').forEach(el => el.target = '_blank');
 

@@ -311,12 +311,17 @@
 		const to = setTimeout(() => ctl.abort(), 5000);
 		try {
 			const r = await fetch('fw-update.cgi?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
-			if (!r.ok) return null;
+			// Reachable, but our session no longer authenticates: the reboot cleared
+			// it and a form login left no Basic to fall back on. That is itself proof
+			// the camera came back — report it so the caller sends us to sign in,
+			// rather than treating it as "still unknown" like an unreachable camera.
+			if (r.status === 401 || r.status === 403) return { needsAuth: true };
+			if (!r.ok) return { version: null };
 			const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
 			const el = doc.getElementById('fw-installed');
-			return el ? el.textContent.trim() : null;
+			return { version: el ? el.textContent.trim() : null };
 		} catch (err) {
-			return null;
+			return { version: null };
 		} finally {
 			clearTimeout(to);
 		}
@@ -333,7 +338,19 @@
 		let now = null;
 		for (let i = 0; i < 5 && now === null; i++) {
 			if (i) await new Promise(r => setTimeout(r, 2000));
-			now = await installedNow();
+			const res = await installedNow();
+			// The reboot invalidated the session (majestic keeps sessions in RAM),
+			// so re-login is required before any authenticated page will load. Hand
+			// the user to the sign-in form rather than the version comparison — the
+			// upgrade itself is already done. Landing back on status.cgi would only
+			// bounce here anyway.
+			if (res.needsAuth) {
+				status('success', 'Updated — please sign in again.');
+				setTimeout(() => location.href =
+					'/login.html?next=' + encodeURIComponent('/cgi-bin/status.cgi'), 1500);
+				return;
+			}
+			now = res.version;
 		}
 		if (now && installedBefore && now === installedBefore && !forced) {
 			if (noop) {
@@ -372,6 +389,10 @@
 		const to = setTimeout(() => ctl.abort(), 2500);
 		try {
 			const r = await fetch('/cgi-bin/j/pulse.cgi?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
+			// Our session was valid when the upgrade began, so pulse.cgi turning us
+			// away now means the camera rebooted and cleared it — positive evidence
+			// of the reboot even though we cannot read the uptime through the 401.
+			if (r.status === 401 || r.status === 403) return true;
 			if (!r.ok) return false;
 			const up = Number((await r.json()).uptime_s);
 			if (!isFinite(up)) return false;
