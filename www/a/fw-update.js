@@ -303,9 +303,13 @@
 	// Read the version the camera is running NOW. Re-fetches this page instead of
 	// adding an endpoint — fw-update.cgi already renders it, and the value has to
 	// come from the rebooted camera rather than from this stale document.
-	// Returns null if it cannot be established (camera still coming up, or a
-	// --reset run bounced us to the password page), which callers treat as
-	// "unknown", not as "failed".
+	// Returns an object:
+	//   { needsAuth: true }  — reachable but the session is gone (the reboot
+	//                          cleared it); the caller must send the user to log in.
+	//   { version: string }  — the version string it came back on.
+	//   { version: null }    — reachable but the version couldn't be established
+	//                          (camera still coming up), which callers treat as
+	//                          "unknown", not "failed".
 	async function installedNow() {
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 5000);
