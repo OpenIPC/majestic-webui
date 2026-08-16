@@ -338,6 +338,16 @@ pre#output[data-cmd] {
 	}
 }
 
+/* The 2.5rem `.form-range` above is sized for the settings form, where a slider
+   is a row of its own. On the live player the volume slider shares a
+   `.btn-group` with the mute button, and a 40px-tall item stretched the group:
+   the button grew to match while its text stayed on the first line, which read
+   as a label stuck to the top of an over-tall button (OpenIPC/majestic#291).
+   Back to Bootstrap's own height, so the group matches the Stream one. */
+#mj-audio-ctl .form-range {
+	height: 1.5rem;
+}
+
 .mj-live-video {
 	display: block; /* avoid the inline baseline gap below the <video> */
 	width: 100%;

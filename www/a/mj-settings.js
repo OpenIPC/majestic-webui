@@ -674,14 +674,25 @@
 			p = el('p', 'select mj-row');
 			// short enums get a moderate width cap; long-option enums stay full-width
 			if (enumVals.some(o => String(o).length > 14)) p.classList.add('mj-wide');
-			const opts = enumVals.map(o => option(o, String(eff) === String(o))).join('');
+			// A select can only show a value it has an option for. majestic narrows
+			// some enums to what that consumer can actually carry (outgoing.audioCodec
+			// drops opus, which FLV cannot frame), but a hand-written majestic.yaml
+			// can still pin one — and the daemon honours it deliberately. Without a
+			// place to hold it the browser falls back to the first option and the page
+			// reports a codec that is not the one in effect, so carry the live value
+			// as an explicitly-unsupported entry instead.
+			const cur = eff === undefined || eff === null ? '' : String(eff);
+			const unlisted = cur !== '' && !enumVals.some(o => String(o) === cur);
+			const opts =
+				(unlisted ? option(cur, true, cur + ' (unsupported)') : '') +
+				enumVals.map(o => option(o, !unlisted && cur === String(o))).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
 		} else if (type === 'string' && isSensorPath) {
 			p = el('p', 'select mj-row mj-wide');
-			const opts = '<option value=""></option>' + SENSORS.map(s => option(s, String(eff) === s)).join('');
+			const opts = option('', !eff) + SENSORS.map(s => option(s, String(eff) === s)).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
@@ -1021,8 +1032,16 @@
 		return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 	}
 
-	function option(v, selected) {
-		return '<option value="' + esc(v) + '"' + (selected ? ' selected' : '') + '>' + esc(v) + '</option>';
+	// An empty enum member is a real choice — majestic uses it for "inherit"
+	// (outgoing/records audioCodec follow audio.codec) and for "auto-detect"
+	// (isp.sensorConfig). Rendered verbatim it is an invisible blank row that
+	// reads as a separator, so give it the same word the resolution pickers
+	// use for the same idea (OpenIPC/majestic#291). `label` overrides the text
+	// for callers that need to say more about the value than its own name.
+	function option(v, selected, label) {
+		const text = label !== undefined ? label : (String(v) === '' ? 'Auto' : v);
+		return '<option value="' + esc(v) + '"' + (selected ? ' selected' : '') + '>' +
+			esc(text) + '</option>';
 	}
 
 	function showError(msg) {
