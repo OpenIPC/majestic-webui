@@ -681,7 +681,7 @@
 			control = p.querySelector('select');
 		} else if (type === 'string' && isSensorPath) {
 			p = el('p', 'select mj-row mj-wide');
-			const opts = '<option value=""></option>' + SENSORS.map(s => option(s, String(eff) === s)).join('');
+			const opts = option('', !eff) + SENSORS.map(s => option(s, String(eff) === s)).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
@@ -1021,8 +1021,14 @@
 		return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 	}
 
+	// An empty enum member is a real choice — majestic uses it for "inherit"
+	// (outgoing/records audioCodec follow audio.codec) and for "auto-detect"
+	// (isp.sensorConfig). Rendered verbatim it is an invisible blank row that
+	// reads as a separator, so give it the same word the resolution pickers
+	// use for the same idea (OpenIPC/majestic#291).
 	function option(v, selected) {
-		return '<option value="' + esc(v) + '"' + (selected ? ' selected' : '') + '>' + esc(v) + '</option>';
+		return '<option value="' + esc(v) + '"' + (selected ? ' selected' : '') + '>' +
+			(String(v) === '' ? 'Auto' : esc(v)) + '</option>';
 	}
 
 	function showError(msg) {
