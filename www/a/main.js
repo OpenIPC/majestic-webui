@@ -26,16 +26,23 @@ function sleep(ms) {
 // quietly does nothing — so catch it in one place and go to the login page with
 // somewhere to come back to.
 //
-// Deliberately NOT a patch over window.fetch. fw-update.js expects a 401 while
-// the camera reboots mid-upgrade and handles it itself, with wording that
-// depends on knowing an upgrade was in flight; a blanket redirect would race it
-// and throw the transcript away. Anything that wants that behaviour opts in.
+// Deliberately NOT a patch over window.fetch. The pages that deliberately
+// outlive their own session must not be redirected out from under: fw-update.js
+// expects a 401 while the camera reboots mid-upgrade and handles it itself, with
+// wording that depends on knowing an upgrade was in flight, and
+// makeTextFileLineIterator below streams the factory reset that destroys the
+// session in the first place. A blanket redirect would race both and throw the
+// transcript away. Anything that wants this behaviour opts in.
 function apiFetch(url, init) {
 	const opts = Object.assign({ credentials: 'same-origin' }, init || {});
 	return fetch(url, opts).then(r => {
 		if (r.status !== 401) return r;
-		location.href = '/login.html?next=' +
-			encodeURIComponent(location.pathname + location.search);
+		// replace(), not href: this document is already dead — the promise below
+		// never settles, so anything awaiting it stays awaiting forever. Leaving a
+		// history entry lets Back restore exactly that from the bfcache after the
+		// user signs in, giving them a page that looks alive and is not.
+		location.replace('/login.html?next=' +
+			encodeURIComponent(location.pathname + location.search));
 		// Never settles. The navigation is already under way, and letting a
 		// caller run its .then() on a 401 body would paint an error onto a page
 		// that is in the middle of leaving.
@@ -89,9 +96,17 @@ function setProgressBar(id, value, name) {
 	}
 }
 
+// Plain fetch, not apiFetch, and it has to stay that way. Its only caller is
+// runCmd() on fw-reset.cgi, which streams `sysupgrade -s -n -x` — the factory
+// reset that erases the overlay, /etc/majestic.token with it, and then reboots.
+// Losing the session is the EXPECTED end of this request, not an error, and the
+// whole point of the page is to show the log until the camera goes. Redirecting
+// on a 401 here would blank the transcript at the moment it matters most, and
+// the never-settling promise apiFetch hands back would strand the loop below
+// before it could run the fw-restart.cgi hop at the end.
 async function* makeTextFileLineIterator(url) {
 	const td = new TextDecoder('utf-8');
-	const response = await apiFetch(url, { credentials: 'same-origin' });
+	const response = await fetch(url, { credentials: 'same-origin' });
 	const rd = response.body.getReader();
 	let { value: chunk, done: readerDone } = await rd.read();
 	chunk = chunk ? td.decode(chunk) : '';
