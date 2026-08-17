@@ -31,6 +31,11 @@
 			border: 1px solid #495057; border-radius: .375rem; font-size: 1rem;
 		}
 		input:focus { outline: none; border-color: #6ea8fe; box-shadow: 0 0 0 .2rem rgba(110,168,254,.25); }
+		.check {
+			display: flex; align-items: center; gap: .5rem;
+			margin-bottom: 1rem; font-size: .875rem; color: #adb5bd; cursor: pointer;
+		}
+		.check input { width: auto; margin: 0; accent-color: #0d6efd; }
 		button {
 			width: 100%; padding: .5rem .75rem;
 			background: #0d6efd; color: #fff; border: 0; border-radius: .375rem;
@@ -54,6 +59,10 @@
 		<input id="username" name="username" value="root" autocapitalize="none" autocomplete="username" spellcheck="false">
 		<label for="password">Password</label>
 		<input id="password" name="password" type="password" autocomplete="current-password" autofocus>
+		<!-- Sets a persistent token so a majestic restart (firmware upgrade,
+		     reboot) recovers the session silently instead of landing back here.
+		     Server-side feature: older majestic ignores the extra field. -->
+		<label class="check"><input id="remember" name="remember" type="checkbox"> Stay signed in on this device</label>
 		<button id="submit" type="submit">Sign in</button>
 	</form>
 	<script>
@@ -88,6 +97,7 @@
 				var u = document.getElementById('username').value;
 				var p = document.getElementById('password').value;
 				var body = 'username=' + encodeURIComponent(u) + '&password=' + encodeURIComponent(p);
+				if (document.getElementById('remember').checked) body += '&remember=1';
 
 				fetch('/login', {
 					method: 'POST',
