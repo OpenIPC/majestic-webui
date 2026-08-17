@@ -10,7 +10,7 @@
 		btn.disabled = true;
 		out.className = 'small ms-2 text-secondary';
 		out.textContent = 'Sending…';
-		fetch('?send=test', { credentials: 'same-origin' })
+		apiFetch('?send=test', { credentials: 'same-origin' })
 			.then(r => r.text())
 			.then(d => {
 				const ok = d.trim() === 'OK';

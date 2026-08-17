@@ -135,7 +135,7 @@
 	}
 
 	function tick() {
-		fetch('/metrics', { credentials: 'same-origin' })
+		apiFetch('/metrics', { credentials: 'same-origin' })
 			.then(r => r.ok ? r.text() : Promise.reject(r.status))
 			.then(text => {
 				fails = 0;

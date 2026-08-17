@@ -13,16 +13,16 @@
 	}
 	function recPrefix() { return (mjGet(cfg, 'records.path') || '').split('%')[0].replace(/\/+$/, ''); }
 
-	function api(qs) { return fetch('/cgi-bin/j/sdcard.cgi' + (qs ? '?' + qs : ''), { credentials: 'same-origin' }).then(r => r.json()); }
+	function api(qs) { return apiFetch('/cgi-bin/j/sdcard.cgi' + (qs ? '?' + qs : ''), { credentials: 'same-origin' }).then(r => r.json()); }
 	function op(p) {
-		return fetch('/cgi-bin/j/sdcard.cgi', {
+		return apiFetch('/cgi-bin/j/sdcard.cgi', {
 			method: 'POST', credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 			body: new URLSearchParams(p).toString(),
 		}).then(r => r.json());
 	}
 	function setConfig(obj) {
-		return fetch('/api/v1/config', {
+		return apiFetch('/api/v1/config', {
 			method: 'POST', credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(obj),
@@ -31,7 +31,7 @@
 
 	function load() {
 		// fetch config fresh each time (so record-toggle changes show immediately)
-		return fetch('/api/v1/config.json', { credentials: 'same-origin' })
+		return apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
 			.then(r => r.ok ? r.json() : {}).catch(() => ({}))
 			.then(c => { cfg = c; const rp = recPrefix(); return api(rp ? 'rec=' + encodeURIComponent(rp) : ''); })
 			.then(d => { state = d; render(); })

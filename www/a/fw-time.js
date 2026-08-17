@@ -20,7 +20,7 @@
 		btn.disabled = true;
 		s.className = 'small text-secondary';
 		s.textContent = 'working…';
-		fetch(url, { credentials: 'same-origin' })
+		apiFetch(url, { credentials: 'same-origin' })
 			.then(r => r.json())
 			.then(j => {
 				s.className = 'small alert alert-' + j.result + ' py-1 px-2 mb-0';
@@ -80,7 +80,7 @@
 		const set = $('#set-time');
 		if (set) set.addEventListener('click', e => call('/cgi-bin/j/time.cgi?set=' + Math.floor(Date.now() / 1000), e.currentTarget));
 
-		fetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin' })
+		apiFetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin' })
 			.then(r => r.json())
 			// skew = device epoch minus browser epoch, so `Date.now() + skew` is
 			// the camera's clock. Same quantity and sign the header bar reports

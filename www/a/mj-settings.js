@@ -196,7 +196,7 @@
 				parts.push(encodeURIComponent(name) + '=' + encodeURIComponent(val));
 			}
 			if (parts.length)
-				fetch('/api/v1/image?' + parts.join('&'),
+				apiFetch('/api/v1/image?' + parts.join('&'),
 					{ method: 'POST', credentials: 'same-origin' }).catch(() => {});
 		}, 120);
 	}
@@ -450,7 +450,7 @@
 		clearError();
 		try {
 			const q = dots.map(d => 'key=' + encodeURIComponent(d)).join('&');
-			const res = await fetch('/api/v1/reset?' + q, { credentials: 'same-origin' });
+			const res = await apiFetch('/api/v1/reset?' + q, { credentials: 'same-origin' });
 			if (!res.ok) {
 				const txt = await safeText(res);
 				showError('Reset failed (HTTP ' + res.status + '). ' + txt);
@@ -866,7 +866,7 @@
 		btn.textContent = 'Saving…';
 		clearError();
 		try {
-			const res = await fetch('/api/v1/config', {
+			const res = await apiFetch('/api/v1/config', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				credentials: 'same-origin',
@@ -917,7 +917,7 @@
 			try {
 				const ctl = new AbortController();
 				const t = setTimeout(() => ctl.abort(), 3000);
-				const r = await fetch('/api/v1/config.json',
+				const r = await apiFetch('/api/v1/config.json',
 					{ cache: 'no-store', credentials: 'same-origin', signal: ctl.signal });
 				clearTimeout(t);
 				if (r.ok) return true;
@@ -933,7 +933,7 @@
 		if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
 		stopLivePreview();   // the stream drops while the pipeline rebuilds
 		try {
-			await fetch('j/mj-apply.cgi', { credentials: 'same-origin' });
+			await apiFetch('j/mj-apply.cgi', { credentials: 'same-origin' });
 		} catch (e) { /* the reload may sever this request — expected */ }
 		const up = await pollUp(30000);
 		if (up) {
@@ -955,7 +955,7 @@
 		btn.textContent = '…';
 		clearError();
 		try {
-			const res = await fetch('/api/v1/reset?key=' + encodeURIComponent(dot), { credentials: 'same-origin' });
+			const res = await apiFetch('/api/v1/reset?key=' + encodeURIComponent(dot), { credentials: 'same-origin' });
 			if (!res.ok) {
 				if (res.status === 404) {
 					btn.title = 'Server has no recorded default for this key.';
@@ -989,7 +989,7 @@
 	/* helpers */
 
 	async function fetchJson(url) {
-		const r = await fetch(url, { credentials: 'same-origin' });
+		const r = await apiFetch(url, { credentials: 'same-origin' });
 		if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url);
 		return r.json();
 	}
