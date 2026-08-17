@@ -14,22 +14,22 @@
 	});
 
 	['night', 'ircut', 'light'].forEach(n =>
-		fetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
+		apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
 			.then(r => r.text()).then(v => { $('#toggle-' + n).checked = +v > 0; })
 			.catch(() => {}));
 
 	$('#toggle-night').addEventListener('click', () => {
-		fetch('/night/toggle', { credentials: 'same-origin' }).then(api => api.json()).then(data => {
+		apiFetch('/night/toggle', { credentials: 'same-origin' }).then(api => api.json()).then(data => {
 			$('#toggle-night').checked = data;
 			if (!$('#toggle-ircut').disabled) $('#toggle-ircut').checked = data;
 			if (!$('#toggle-light').disabled) $('#toggle-light').checked = data;
 		});
 	});
 	$('#toggle-ircut').addEventListener('click', () => {
-		fetch('/night/ircut', { credentials: 'same-origin' }).then(api => api.json()).then(data => { $('#toggle-ircut').checked = data; });
+		apiFetch('/night/ircut', { credentials: 'same-origin' }).then(api => api.json()).then(data => { $('#toggle-ircut').checked = data; });
 	});
 	$('#toggle-light').addEventListener('click', () => {
-		fetch('/night/light', { credentials: 'same-origin' }).then(api => api.json()).then(data => { $('#toggle-light').checked = data; });
+		apiFetch('/night/light', { credentials: 'same-origin' }).then(api => api.json()).then(data => { $('#toggle-light').checked = data; });
 	});
 
 	// --- Live MSE player (with MJPEG / no-signal fallback) ---

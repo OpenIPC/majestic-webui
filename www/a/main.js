@@ -14,10 +14,39 @@ function sleep(ms) {
 	return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+// Every same-origin request the UI makes should go through here.
+//
+// majestic answers an unauthenticated in-page fetch with a BARE 401 — no
+// WWW-Authenticate — so the browser has nothing to raise a native Basic dialog
+// from. That is the right thing for the server to do: the dialog cannot say
+// where you were going, and Safari used to pop it every couple of seconds off
+// the heartbeat alone once a session lapsed (issue #154).
+//
+// The cost is that the failure is now silent — a stale header bar, a save that
+// quietly does nothing — so catch it in one place and go to the login page with
+// somewhere to come back to.
+//
+// Deliberately NOT a patch over window.fetch. fw-update.js expects a 401 while
+// the camera reboots mid-upgrade and handles it itself, with wording that
+// depends on knowing an upgrade was in flight; a blanket redirect would race it
+// and throw the transcript away. Anything that wants that behaviour opts in.
+function apiFetch(url, init) {
+	const opts = Object.assign({ credentials: 'same-origin' }, init || {});
+	return fetch(url, opts).then(r => {
+		if (r.status !== 401) return r;
+		location.href = '/login.html?next=' +
+			encodeURIComponent(location.pathname + location.search);
+		// Never settles. The navigation is already under way, and letting a
+		// caller run its .then() on a 401 body would paint an error onto a page
+		// that is in the middle of leaving.
+		return new Promise(() => {});
+	});
+}
+
 let _mjCfg;
 function mjConfig() {
 	if (!_mjCfg)
-		_mjCfg = fetch('/api/v1/config.json', { credentials: 'same-origin' })
+		_mjCfg = apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
 			.then(r => r.ok ? r.json() : {}).catch(() => ({}));
 	return _mjCfg;
 }
@@ -62,7 +91,7 @@ function setProgressBar(id, value, name) {
 
 async function* makeTextFileLineIterator(url) {
 	const td = new TextDecoder('utf-8');
-	const response = await fetch(url, { credentials: 'same-origin' });
+	const response = await apiFetch(url, { credentials: 'same-origin' });
 	const rd = response.body.getReader();
 	let { value: chunk, done: readerDone } = await rd.read();
 	chunk = chunk ? td.decode(chunk) : '';
@@ -134,7 +163,7 @@ function heartbeat() {
 	// otherwise stop the heartbeat for the rest of the page's life.
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
-	fetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin', signal: ctl.signal })
+	apiFetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin', signal: ctl.signal })
 		.then((response) => response.json())
 		.then((json) => {
 			if (json.soc_temp !== '') {
@@ -227,7 +256,7 @@ function initAll() {
 		logout.addEventListener('click', async ev => {
 			ev.preventDefault();
 			try {
-				const r = await fetch('/logout', { method: 'POST', credentials: 'same-origin' });
+				const r = await apiFetch('/logout', { method: 'POST', credentials: 'same-origin' });
 				// 200 cleared the session, 204 means there was none to clear — either
 				// way the session is gone, so it is safe to leave. Only a network error
 				// or a 5xx leaves it possibly alive: keep the user here to retry rather

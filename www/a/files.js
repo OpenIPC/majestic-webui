@@ -81,7 +81,7 @@
 		return attr(devZone + ' — ' + new Date(ms).toLocaleString() + ' your time');
 	}
 
-	fetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin' }).then(r => r.json()).then(j => {
+	apiFetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin' }).then(r => r.json()).then(j => {
 		devZone = j.timezone || '';
 		devIana = ianaOrNull(devZone);
 		devOffsetMs = parseTzOffsetMs(j.utc_offset); // main.js; null if unusable
@@ -91,9 +91,9 @@
 		// the "loading…" placeholder with "empty" before the first load lands.
 		if (entries.length) render();
 	}).catch(() => {});
-	function api(qs) { return fetch('/cgi-bin/j/files.cgi?' + qs, { credentials: 'same-origin' }).then(r => r.json()); }
+	function api(qs) { return apiFetch('/cgi-bin/j/files.cgi?' + qs, { credentials: 'same-origin' }).then(r => r.json()); }
 	function op(p) {
-		return fetch('/cgi-bin/j/files.cgi', {
+		return apiFetch('/cgi-bin/j/files.cgi', {
 			method: 'POST', credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 			body: new URLSearchParams(p).toString(),
@@ -272,7 +272,7 @@
 	function probeCodec(path, signal) {
 		// no-store: this 16 KiB slice is not a copy of the file worth keeping
 		// around under the URL the <video> is about to request.
-		return fetch(fileUrl(path), {
+		return apiFetch(fileUrl(path), {
 			credentials: 'same-origin', cache: 'no-store', signal,
 			headers: { Range: 'bytes=0-16383' },
 		}).then(res => {
@@ -402,7 +402,7 @@
 		st.textContent = 'loading…'; ta.value = '';
 		if (cm) { cm.toTextArea(); cm = null; }
 		bootstrap.Modal.getOrCreateInstance('#fm-editor').show();
-		fetch('/cgi-bin/j/files.cgi?cat=' + encodeURIComponent(path), { credentials: 'same-origin' })
+		apiFetch('/cgi-bin/j/files.cgi?cat=' + encodeURIComponent(path), { credentials: 'same-origin' })
 			.then(r => r.ok ? r.text() : Promise.reject()).then(text => {
 				ta.value = text; st.textContent = '';
 				loadCM().then(ok => {
@@ -415,7 +415,7 @@
 		$('#fm-editor-save').onclick = () => {
 			const content = cm ? cm.getValue() : ta.value;
 			st.textContent = 'saving…';
-			fetch('/cgi-bin/j/save.cgi?path=' + encodeURIComponent(path), { method: 'POST', credentials: 'same-origin', body: content })
+			apiFetch('/cgi-bin/j/save.cgi?path=' + encodeURIComponent(path), { method: 'POST', credentials: 'same-origin', body: content })
 				.then(r => r.json()).then(d => { st.textContent = d.ok ? 'saved' : ('error: ' + (d.error || '')); if (d.ok) reload(); })
 				.catch(() => { st.textContent = 'save failed'; });
 		};

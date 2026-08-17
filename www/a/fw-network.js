@@ -21,7 +21,7 @@
 	function scan() {
 		const btn = $('#wifi-scan'), st = $('#wifi-scan-status'), sel = $('#wifi-results');
 		btn.disabled = true; st.textContent = 'scanning…'; sel.classList.add('d-none'); sel.innerHTML = '';
-		fetch('/cgi-bin/j/network.cgi?scan=1', { credentials: 'same-origin' })
+		apiFetch('/cgi-bin/j/network.cgi?scan=1', { credentials: 'same-origin' })
 			.then(r => r.json()).then(d => {
 				btn.disabled = false;
 				const nets = (d.networks || []).sort((a, b) => b.signal - a.signal);
