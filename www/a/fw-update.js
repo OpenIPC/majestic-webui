@@ -155,13 +155,30 @@
 	// about 30s later. Starting early costs nothing when the camera is still
 	// working: pollBack only watches, and rebootedAlready() keeps answering false
 	// while the reported uptime is older than this run.
-	function beginPollBack() {
+	function beginPollBack(quiet) {
 		if (polling) return;
 		polling = true;
 		if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
 		// Tidy the half-drawn meter, but do NOT declare the stream over: the
 		// socket can still be open here and more output may yet arrive.
 		commitLine();
+		// Getting here on silence rather than on a reboot announcement means the
+		// transcript stops mid-flash, at whatever byte the camera reached — issue
+		// #120 has it ending on "Verifying kb: 1056/4844 (21%)". That is expected:
+		// majestic streams this log while its own text is paged in from the rootfs
+		// partition sysupgrade is overwriting, and free_resources dropped the page
+		// cache first, so the next fault it takes reads the new image at a stale
+		// offset and kills it. The upgrade is fine — sysupgrade is detached and
+		// carries on from RAM — but a pane that just freezes looks like one that
+		// has hung, so mark the gap rather than leaving it unexplained.
+		//
+		// Worded as a gap, not as an ending: the socket may still be open, and
+		// output that resumes must not land under a note saying it had stopped.
+		if (quiet) {
+			doneNode.appendData('--- no output for ' + (QUIET_MS / 1000) +
+				's; the camera is busy flashing ---\n');
+			out.scrollTop = out.scrollHeight;
+		}
 		// "do not power off" is a warning about an interrupted flash, so do not
 		// say it when sysupgrade has already told us it wrote nothing.
 		status('warning', noop
@@ -257,7 +274,7 @@
 		// naturally quiet download and time-sync phases cannot trip it.
 		quietTimer = setInterval(() => {
 			if (polling) { clearInterval(quietTimer); quietTimer = null; return; }
-			if (sawFlash && performance.now() - lastData > QUIET_MS) beginPollBack();
+			if (sawFlash && performance.now() - lastData > QUIET_MS) beginPollBack(true);
 		}, 3000);
 		status('warning', 'Preparing — freeing memory…');
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -360,8 +377,11 @@
 		if (now && installedBefore && now === installedBefore && !forced) {
 			if (noop) {
 				// sysupgrade said so itself: the image offered was the one already
-				// installed, so it wrote nothing. Nothing failed.
-				status('success', 'Already running ' + now + ' — nothing to update.');
+				// installed, so it wrote nothing. Nothing failed — so lead with the
+				// good news. "Already running X — nothing to update" put the negative
+				// first and read as a refusal to somebody who had just asked for an
+				// upgrade (issue #120).
+				status('success', 'Already up to date — running ' + now + '.');
 				setTimeout(() => location.href = 'status.cgi', 1500);
 				return;
 			}
