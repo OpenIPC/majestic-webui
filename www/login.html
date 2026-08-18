@@ -88,6 +88,12 @@
 				if (raw.charAt(0) !== '/' || raw.charAt(1) === '/' || raw.indexOf('\\') !== -1) {
 					return '/cgi-bin/status.cgi';
 				}
+				// Never point back at this page. The already-signed-in check below
+				// acts on it, so a ?next= aimed here would spin: probe says OK,
+				// replace() lands here again, probe says OK…
+				if (raw.split(/[?#]/)[0] === location.pathname) {
+					return '/cgi-bin/status.cgi';
+				}
 				return raw;
 			}
 
@@ -96,6 +102,31 @@
 				err.classList.add('show');
 				btn.disabled = false;
 			}
+
+			// Nothing to ask for if the session is already good. This page can be
+			// reached holding a valid one from a bookmark, the Back button, or a
+			// restored tab — Safari's History > Recently Closed Tabs reopens the
+			// URL the tab last held, and before the replace() below that was this
+			// page, so signing in landed the user right back on the sign-in form
+			// (issue #120).
+			//
+			// Asks as a NAVIGATION (Accept: text/html) with redirect: 'manual', so a
+			// logged-out camera answers 302 to this very page rather than 401. That
+			// matters for the dialog: an older majestic decides whether to send
+			// WWW-Authenticate from Sec-Fetch-Dest alone, which JS cannot set and
+			// Safari below 16.4 does not send — asking as a plain fetch would raise
+			// the native prompt on the sign-in page itself against such a build. The
+			// redirect branch is taken by every version, so this never can.
+			//
+			// A 3xx arrives as an opaque redirect: status 0, ok false. Only a real
+			// 200 means the session is live.
+			fetch('/cgi-bin/j/pulse.cgi', {
+				credentials: 'same-origin',
+				redirect: 'manual',
+				headers: { 'Accept': 'text/html' }
+			}).then(function (r) {
+				if (r.ok) location.replace(safeNext());
+			}).catch(function () { /* offline: show the form */ });
 
 			form.addEventListener('submit', function (ev) {
 				ev.preventDefault();
@@ -114,7 +145,12 @@
 					body: body
 				}).then(function (r) {
 					if (r.ok) {
-						location.href = safeNext();
+						// replace(), not href: this page has served its purpose, and
+						// leaving it in the tab's history is what let a restored tab
+						// or Back put the sign-in form back in front of a user who is
+						// already signed in (issue #120). apiFetch() takes the same
+						// care for the same reason.
+						location.replace(safeNext());
 					} else if (r.status === 403) {
 						fail('Invalid username or password.');
 					} else {
