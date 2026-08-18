@@ -35,6 +35,20 @@ function sleep(ms) {
 // transcript away. Anything that wants this behaviour opts in.
 function apiFetch(url, init) {
 	const opts = Object.assign({ credentials: 'same-origin' }, init || {});
+	// Declare ourselves rather than leaving majestic to infer it. The signal it
+	// had to work from — Sec-Fetch-Dest — is attached by the browser, not by us:
+	// Safari only sends it from 16.4, and browsers withhold it from origins they
+	// do not consider trustworthy, which is the plain-HTTP address a camera is
+	// normally reached at. So the dialog this helper exists to prevent was still
+	// firing after a reboot with "stay signed in" unticked (issue #120). A header
+	// we set ourselves does not depend on either.
+	//
+	// Headers, not Object.assign: callers pass plain objects today, but a Headers
+	// instance has no own enumerable properties, so assigning over one would
+	// silently drop everything it carries. new Headers() accepts both.
+	const headers = new Headers(opts.headers || {});
+	headers.set('X-Requested-With', 'XMLHttpRequest');
+	opts.headers = headers;
 	return fetch(url, opts).then(r => {
 		if (r.status !== 401) return r;
 		// replace(), not href: this document is already dead — the promise below
