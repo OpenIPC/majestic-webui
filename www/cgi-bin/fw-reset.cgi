@@ -2,7 +2,23 @@
 <%in p/common.cgi %>
 <%
 	page_title="Erasing Overlay"
-	c="/usr/sbin/sysupgrade -s -n -x"
+	# --web is not optional here, despite there being no WebSocket in sight.
+	#
+	# free_resources() opens with `killall -q -3 majestic` unless web_update is
+	# set — and majestic is the server running this very CGI, whose stdout is the
+	# stream feeding the box below. Without the flag the reset kills its own
+	# progress log: the transcript stops dead on "Stop services, sync files, free
+	# up memory", the line printed immediately before the signal, and the page
+	# then sits there while the camera wipes and reboots underneath it (#154).
+	#
+	# The flag reads as upgrade-specific because /ws/upgrade needed it first, but
+	# what it means to sysupgrade is "majestic is streaming this, leave it
+	# alone", which is just as true of the run.cgi flow. Besides skipping the
+	# sysupgrade self-update it gates nothing else, and nothing later in the run
+	# touches majestic: that killall is the only one in the script, and -n
+	# rewrites rootfs_data, not the rootfs majestic runs from. So the log now
+	# survives all the way to the reboot.
+	c="/usr/sbin/sysupgrade -s -n -x --web"
 	r="true"
 %>
 
