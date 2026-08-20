@@ -111,8 +111,8 @@ function setProgressBar(id, value, name) {
 }
 
 // Plain fetch, not apiFetch, and it has to stay that way. Its only caller is
-// runCmd() on fw-reset.cgi, which streams `sysupgrade -s -n -x` — the factory
-// reset that erases the overlay, /etc/majestic.token with it, and then reboots.
+// runCmd() on fw-reset.cgi, which streams `sysupgrade -s -n -x --web` — the
+// factory reset that erases the overlay, /etc/majestic.token with it, and reboots.
 // Losing the session is the EXPECTED end of this request, not an error, and the
 // whole point of the page is to show the log until the camera goes. Redirecting
 // on a 401 here would blank the transcript at the moment it matters most, and
