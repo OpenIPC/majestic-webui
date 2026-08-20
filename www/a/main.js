@@ -263,14 +263,32 @@ function initAll() {
 	$$('form').forEach(el => el.autocomplete = 'off');
 
 	// For .warning and .danger buttons, ask confirmation on action.
+	//
+	// data-confirm overrides the wording. One shared "Are you sure?" meant that
+	// rebooting the camera and wiping it back to factory asked the identical
+	// question, on two buttons sitting next to each other — so the prompt carried
+	// no information and became something to click through (issue #160). The
+	// generic text stays for everything that has not said otherwise.
 	$$('.btn-danger, .btn-warning, .confirm').forEach(el => {
+		const ask = el.dataset.confirm || "Are you sure?";
 		// for input, find its parent form and attach listener to it submit event
 		if (el.nodeName === "INPUT") {
 			while (el.nodeName !== "FORM") el = el.parentNode
-			el.addEventListener('submit', ev => (!confirm("Are you sure?")) ? ev.preventDefault() : null)
+			el.addEventListener('submit', ev => (!confirm(ask)) ? ev.preventDefault() : null)
 		} else {
-			el.addEventListener('click', ev => (!confirm("Are you sure?")) ? ev.preventDefault() : null)
+			el.addEventListener('click', ev => (!confirm(ask)) ? ev.preventDefault() : null)
 		}
+	});
+
+	// A destructive switch has nothing to intercept at click time: it arms
+	// something that happens later, when the form is submitted, so by the time
+	// the real action runs the user is looking at a different button. Ask as it
+	// is turned ON, and put it back if the answer is no. Turning one OFF is
+	// always safe and never asks.
+	$$('input[type=checkbox][data-confirm]').forEach(el => {
+		el.addEventListener('change', () => {
+			if (el.checked && !confirm(el.dataset.confirm)) el.checked = false;
+		});
 	});
 
 	$$('.refresh').forEach(el => el.addEventListener('click', refresh));

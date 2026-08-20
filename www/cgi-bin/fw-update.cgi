@@ -57,7 +57,7 @@
 		<details class="mt-2">
 			<summary class="text-secondary small">Advanced options</summary>
 			<div class="mt-2">
-				<% field_switch "fw_reset" "Reset config (wipe overlay)" "false" "Erases all your settings — equivalent to a fresh flash." %>
+				<% field_switch "fw_reset" "Reset config (wipe overlay)" "false" "Erases every setting on this camera; it comes back as a fresh flash. <span class='text-danger'>Destroys all changes, and cannot be undone.</span>" "Wipe ALL settings during this upgrade?&#10;&#10;Every configuration change on this camera is erased: network and Wi-Fi, video and image settings, timezone, passwords, and every extension you have configured.&#10;&#10;It comes back as if freshly flashed. This cannot be undone.&#10;&#10;Leave this off unless you specifically want a factory reset." %>
 				<% field_switch "fw_force" "Reflash even if the same version" "false" "Re-writes flash even when installed and target versions match." %>
 			</div>
 		</details>

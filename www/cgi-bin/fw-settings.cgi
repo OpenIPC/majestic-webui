@@ -64,15 +64,24 @@ fi
 
 		<div class="card"><div class="card-body">
 			<h3>Maintenance</h3>
-			<div class="d-flex flex-wrap gap-4">
-				<div>
-					<a class="btn btn-outline-secondary confirm" href="fw-restart.cgi">Restart camera</a>
-					<p class="x-small text-secondary mt-1 mb-0">Reboot to apply settings and clear temporary files.</p>
-				</div>
-				<div>
-					<a class="btn btn-danger" href="fw-reset.cgi">Reset firmware</a>
-					<p class="x-small text-secondary mt-1 mb-0">Revert to factory state by wiping the overlay. <span class="text-danger">Destroys all changes.</span></p>
-				</div>
+			<div>
+				<a class="btn btn-outline-secondary confirm" href="fw-restart.cgi"
+					data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>
+				<p class="x-small text-secondary mt-1 mb-0">Reboot to apply settings and clear temporary files.</p>
+			</div>
+			<%
+				# Deliberately not beside "Restart camera" any more. The two sat in one
+				# flex row, a gap apart, and asked the identical "Are you sure?" — so the
+				# only thing separating a reboot from a factory wipe was reading the
+				# button (issue #160). A rule and a heading break the run of controls, so
+				# the destructive one has to be arrived at rather than landed on.
+			%>
+			<hr class="my-4">
+			<h4 class="h6 text-danger mb-1">Danger zone</h4>
+			<div>
+				<a class="btn btn-danger" href="fw-reset.cgi"
+					data-confirm="Reset this camera to factory state?&#10;&#10;Every configuration change is erased: network and Wi-Fi, video and image settings, timezone, passwords, and every extension you have configured.&#10;&#10;You will need to set the camera up again from scratch, and reach it on whatever address DHCP gives it. This cannot be undone.">Reset firmware</a>
+				<p class="x-small text-secondary mt-1 mb-0">Revert to factory state by wiping the overlay. <span class="text-danger">Destroys all changes, and cannot be undone.</span></p>
 			</div>
 		</div></div>
 	</div>
