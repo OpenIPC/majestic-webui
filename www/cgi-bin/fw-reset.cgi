@@ -31,6 +31,13 @@
 
 <script>
 	const el = $('pre#output');
+	// Stop the header heartbeat for the same reason fw-update.js does: every tick
+	// forks a dozen processes and makes a loopback request into the majestic that
+	// is streaming this log. Fine on an idle camera, ruinous on one erasing its
+	// own flash — and only now worth saying, because until --web above kept
+	// majestic alive these ticks died against a stopped server anyway. Keeping it
+	// running would trade one bug for a quieter one.
+	if (typeof stopHeartbeat === 'function') stopHeartbeat();
 	runCmd("cmd")
 </script>
 <%in p/footer.cgi %>
