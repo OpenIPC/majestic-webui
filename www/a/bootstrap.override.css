@@ -472,3 +472,26 @@ pre#output[data-cmd] {
 .form-select {
 	transition: border-color var(--mj-ease), box-shadow var(--mj-ease);
 }
+
+/* Destructive switches (issue #160).
+ *
+ * "Reset config (wipe overlay)" sat in Advanced options rendered exactly like
+ * "Upgrade kernel" directly above it — same weight, same colour, one click, no
+ * question asked. Nothing about it looked like the thing that throws away every
+ * setting on the camera. field_switch marks such a row .destructive when it is
+ * given a confirm message; this is what makes it read as one.
+ */
+.boolean.destructive .form-check-label {
+	color: var(--bs-danger);
+	font-weight: 500;
+}
+
+.boolean.destructive .form-check-input:checked {
+	background-color: var(--bs-danger);
+	border-color: var(--bs-danger);
+}
+
+.boolean.destructive .form-check-input:focus {
+	border-color: var(--bs-danger);
+	box-shadow: 0 0 0 .25rem rgba(var(--bs-danger-rgb), .25);
+}

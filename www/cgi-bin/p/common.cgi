@@ -239,17 +239,35 @@ field_range() {
 	echo "</p>"
 }
 
-# field_switch "name" "label" "value" "hint"
+# field_switch "name" "label" "value" "hint" "confirm"
+#
+# A non-empty "confirm" marks the switch destructive: the row is styled in red
+# (see .boolean.destructive in bootstrap.override.css) and main.js asks the given
+# question as it is switched ON. Use it for anything that throws away data —
+# a toggle that wipes the camera must not read like the one above it that
+# upgrades the kernel (issue #160). Use &#10; for a line break in the prompt;
+# the attribute is HTML, so the entity is what reaches confirm() as a newline.
 field_switch() {
 	local n="$1"
 	local l="$2"
 	local v="$3"
 	local h="$4"
+	local c="$5"
+	local extra=""
 	[ "$v" = "eval" ] && v=$(t_value "$n")
-	[ "$v" = "true" ] && v="checked"
-	echo "<p class=\"boolean\"><span class=\"form-check form-switch\">" \
+	# Anything that is not "true" contributes no attribute at all. Testing only
+	# for true left the value itself in the tag, so every switch in the off state
+	# rendered as <input ... class="form-check-input" false> — a stray boolean
+	# attribute literally named "false". Harmless, since nothing reads it, but it
+	# is invalid and it is the sort of thing that makes a later selector lie.
+	case "$v" in
+		true) v="checked" ;;
+		*)    v="" ;;
+	esac
+	[ -n "$c" ] && extra=" data-confirm=\"${c}\""
+	echo "<p class=\"boolean$([ -n "$c" ] && echo ' destructive')\"><span class=\"form-check form-switch\">" \
 		"<input type=\"hidden\" id=\"${n}-false\" name=\"${n}\" value=\"false\">" \
-		"<input type=\"checkbox\" id=\"${n}\" name=\"${n}\" value=\"true\" class=\"form-check-input\" ${v}>" \
+		"<input type=\"checkbox\" id=\"${n}\" name=\"${n}\" value=\"true\" class=\"form-check-input\" ${v}${extra}>" \
 		"<label for=\"${n}\" class=\"form-check-label\">${l}</label></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"

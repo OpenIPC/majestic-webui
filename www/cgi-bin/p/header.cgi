@@ -131,7 +131,8 @@ Pragma: no-cache
 	<h3>Warning.</h3>
 	<p>System settings have been updated, restart to apply pending changes.</p>
 	<span class="d-flex gap-3">
-		<a class="btn btn-danger" href="fw-restart.cgi">Restart camera</a>
+		<a class="btn btn-danger" href="fw-restart.cgi"
+			data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>
 	</span>
 </div>
 <% fi %>
