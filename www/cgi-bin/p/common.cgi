@@ -239,14 +239,33 @@ field_range() {
 	echo "</p>"
 }
 
+# Escape a string for use inside a double-quoted HTML attribute.
+#
+# Numeric character references are restored on the way out, deliberately: the
+# confirm prompts use &#10; for their line breaks, and escaping the ampersand
+# would put the entity on screen instead of breaking the line. Everything else
+# that could close the attribute or open a tag is neutralised, so a prompt is
+# free to contain a quote without silently truncating the element it lives in.
+attr_escape() {
+	printf '%s' "$1" | sed \
+		-e 's/&/\&amp;/g' \
+		-e 's/</\&lt;/g' \
+		-e 's/>/\&gt;/g' \
+		-e 's/"/\&quot;/g' \
+		-e 's/&amp;#\([0-9][0-9]*\);/\&#\1;/g'
+}
+
 # field_switch "name" "label" "value" "hint" "confirm"
 #
 # A non-empty "confirm" marks the switch destructive: the row is styled in red
 # (see .boolean.destructive in bootstrap.override.css) and main.js asks the given
 # question as it is switched ON. Use it for anything that throws away data —
 # a toggle that wipes the camera must not read like the one above it that
-# upgrades the kernel (issue #160). Use &#10; for a line break in the prompt;
-# the attribute is HTML, so the entity is what reaches confirm() as a newline.
+# upgrades the kernel (issue #160). Use &#10; for a line break in the prompt.
+#
+# Unlike "hint", which is interpolated raw so it can carry a link, this goes
+# through attr_escape: it is an attribute value rather than markup, so a stray
+# quote would end the tag early rather than merely look wrong.
 field_switch() {
 	local n="$1"
 	local l="$2"
@@ -264,7 +283,7 @@ field_switch() {
 		true) v="checked" ;;
 		*)    v="" ;;
 	esac
-	[ -n "$c" ] && extra=" data-confirm=\"${c}\""
+	[ -n "$c" ] && extra=" data-confirm=\"$(attr_escape "$c")\""
 	echo "<p class=\"boolean$([ -n "$c" ] && echo ' destructive')\"><span class=\"form-check form-switch\">" \
 		"<input type=\"hidden\" id=\"${n}-false\" name=\"${n}\" value=\"false\">" \
 		"<input type=\"checkbox\" id=\"${n}\" name=\"${n}\" value=\"true\" class=\"form-check-input\" ${v}${extra}>" \
