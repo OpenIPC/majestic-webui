@@ -98,7 +98,9 @@
 			}
 
 			function addressHref(address) {
-				if (!address) return null;
+				// A non-string reaches split() and colon tests below and throws,
+				// so anything that is not a string is simply not an address.
+				if (typeof address !== 'string' || !address) return null;
 				if (isIPv4(address)) return 'http://' + address + '/';
 				var v6 = ipv6Host(address);
 				return v6 ? 'http://' + v6 + '/' : null;
@@ -145,6 +147,12 @@
 				var ul = document.createElement('ul');
 
 				cameras.forEach(function (cam) {
+					// The array was checked, but its entries were not: a null or a
+					// non-object among them would throw on cam.address and put an
+					// internal error on screen, the very thing the array check
+					// above was there to avoid.
+					if (!cam || typeof cam !== 'object') return;
+
 					// Addressed numerically rather than by name: a camera's own
 					// .local name only resolves in a browser that speaks mDNS, while
 					// the address came out of the packet it announced itself in.
