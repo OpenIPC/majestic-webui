@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="darkreader-lock">
+	<meta name="robots" content="noindex">
+	<title>Cameras · OpenIPC</title>
+	<!-- Self-contained on purpose, like login.html: majestic serves this page
+	     without authentication (you have not chosen a camera to sign in to yet),
+	     so it cannot pull /a/*.css or /a/*.js, which require a valid session. -->
+	<style>
+		:root { color-scheme: dark; }
+		* { box-sizing: border-box; }
+		body {
+			margin: 0; min-height: 100vh; padding: 2rem 1rem;
+			display: flex; align-items: flex-start; justify-content: center;
+			background: #1a1d20; color: #dee2e6;
+			font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		}
+		.card {
+			width: 100%; max-width: 32rem;
+			background: #212529; border: 1px solid #343a40; border-radius: .5rem;
+			padding: 2rem 1.75rem;
+		}
+		h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 .35rem; text-align: center; }
+		h1 span { color: #6ea8fe; }
+		.sub { margin: 0 0 1.5rem; text-align: center; font-size: .875rem; color: #adb5bd; }
+		ul { list-style: none; margin: 0; padding: 0; }
+		li { margin-bottom: .5rem; }
+		a.cam {
+			display: flex; align-items: baseline; gap: .75rem;
+			padding: .7rem .85rem; text-decoration: none;
+			background: #2b3035; color: #dee2e6;
+			border: 1px solid #495057; border-radius: .375rem;
+		}
+		a.cam:hover { border-color: #6ea8fe; background: #31373d; }
+		.name { font-weight: 500; }
+		.addr { margin-left: auto; font-size: .875rem; color: #adb5bd; font-variant-numeric: tabular-nums; }
+		.quiet { font-size: .75rem; color: #ffda6a; }
+		.here {
+			font-size: .6875rem; text-transform: uppercase; letter-spacing: .04em;
+			color: #75b798; border: 1px solid #2f6f52; border-radius: .25rem;
+			padding: .1rem .35rem;
+		}
+		.msg { text-align: center; color: #adb5bd; font-size: .875rem; padding: 1rem 0; }
+		.msg.bad { color: #ea868f; }
+	</style>
+</head>
+<body>
+	<main class="card">
+		<h1>Open<span>IPC</span></h1>
+		<p class="sub">Cameras on this network</p>
+		<div id="out"><p class="msg">Looking…</p></div>
+	</main>
+	<script>
+		(function () {
+			var out = document.getElementById('out');
+
+			function msg(text, bad) {
+				var p = document.createElement('p');
+				p.className = bad ? 'msg bad' : 'msg';
+				p.textContent = text;
+				out.replaceChildren(p);
+			}
+
+			// A camera stays listed until it has been silent long enough to expire,
+			// so one that was unplugged is still here for a couple of minutes. Say
+			// so rather than offer it as though it were up.
+			var QUIET_AFTER = 60;
+
+			// Everything in the roster reached this camera over the network, so a
+			// link is only built once its target is confirmed to be a literal IP
+			// address — not merely a string of address-shaped characters. "evil"
+			// or "deadbeef" would pass a loose test and resolve as a DNS name;
+			// "10.0.0.1@host" or "10.0.0.1/.." would send the click off the list
+			// entirely. These check structure, not just the alphabet.
+
+			function isIPv4(s) {
+				var p = s.split('.');
+				return p.length === 4 && p.every(function (o) {
+					// No leading zeros: "010" is octal to some URL parsers, so a
+					// value that looks like the shown address could resolve to a
+					// different host in the click. Canonical dotted-decimal only.
+					return /^(0|[1-9]\d{0,2})$/.test(o) && +o <= 255;
+				});
+			}
+
+			// The address field is a host on its own, never host:port, so any bare
+			// colon makes it an IPv6 address. Returns the parser's own bracketed
+			// form when it is one, so uppercase or uncompressed spellings are
+			// accepted rather than dropped for not matching character-for-character
+			// — and null otherwise. The parser only reads brackets as an IPv6 host,
+			// so nothing else can slip a different authority through here.
+			function ipv6Host(s) {
+				if (s.indexOf(':') === -1) return null;
+				try {
+					var h = new URL('http://[' + s + ']/').hostname;
+					return h.charAt(0) === '[' ? h : null;
+				} catch (e) { return null; }
+			}
+
+			function addressHref(address) {
+				// A non-string reaches split() and colon tests below and throws,
+				// so anything that is not a string is simply not an address.
+				if (typeof address !== 'string' || !address) return null;
+				if (isIPv4(address)) return 'http://' + address + '/';
+				var v6 = ipv6Host(address);
+				return v6 ? 'http://' + v6 + '/' : null;
+			}
+
+			// The camera's own URL is preferred when it is plainly http or https,
+			// and used exactly as sent: an authority on its own is already a valid
+			// URL, and appending to one that carried a path or a query would
+			// corrupt it.
+			//
+			// Its host must be a literal address, carry no userinfo, and be the
+			// same address the entry displays. Without that last check a hostile
+			// announcement could show one camera's IP and send the click to
+			// another: the roster is untrusted network input, and the whole point
+			// of this page is that the address you see is the camera you reach.
+			function cameraHref(cam) {
+				var shown = addressHref(cam.address);
+				if (cam.url && /^https?:\/\//i.test(cam.url)) {
+					try {
+						var u = new URL(cam.url);
+						var host = u.hostname.replace(/^\[|\]$/g, '');
+						var canon = isIPv4(host) ? host : ipv6Host(host);
+						// Compare on the address's own canonical href, so an
+						// equivalent v6 spelling still counts as the same host.
+						if (!u.username && !u.password && canon
+								&& addressHref(host) === shown) {
+							return cam.url;
+						}
+					} catch (e) { /* unparseable: fall through to the address */ }
+				}
+				return shown;
+			}
+
+			function render(cameras) {
+				// The API is trusted to be majestic, but a malformed or truncated
+				// response should show the empty state, not throw an internal error
+				// at the reader — so anything that is not an array is treated as no
+				// cameras rather than assumed to have .forEach.
+				if (!Array.isArray(cameras) || !cameras.length) {
+					msg('No cameras answered.');
+					return;
+				}
+
+				var ul = document.createElement('ul');
+
+				cameras.forEach(function (cam) {
+					// The array was checked, but its entries were not: a null or a
+					// non-object among them would throw on cam.address and put an
+					// internal error on screen, the very thing the array check
+					// above was there to avoid.
+					if (!cam || typeof cam !== 'object') return;
+
+					// Addressed numerically rather than by name: a camera's own
+					// .local name only resolves in a browser that speaks mDNS, while
+					// the address came out of the packet it announced itself in.
+					// An entry with nothing safe to point at is left out — a link
+					// that goes somewhere else is worse than one that is missing.
+					var href = cameraHref(cam);
+					if (!href) return;
+
+					var a = document.createElement('a');
+					a.className = 'cam';
+					a.href = href;
+
+					var name = document.createElement('span');
+					name.className = 'name';
+					name.textContent = cam.name || cam.address;
+					a.appendChild(name);
+
+					// The camera serving this page is in the list like any other,
+					// and is worth pointing out only so the reader knows which one
+					// they are already talking to. It still takes one click, and it
+					// is addressed here by its own address rather than the shared
+					// name, so the session it issues stays with it.
+					if (cam.self) {
+						var here = document.createElement('span');
+						here.className = 'here';
+						here.textContent = 'you are here';
+						a.appendChild(here);
+					}
+
+					// A finite number only: the comparison alone would let a
+					// string or a missing value through and print "no reply for
+					// undefineds".
+					if (typeof cam.quietFor === 'number' && isFinite(cam.quietFor)
+							&& cam.quietFor > QUIET_AFTER) {
+						var q = document.createElement('span');
+						q.className = 'quiet';
+						q.textContent = 'no reply for ' + Math.round(cam.quietFor) + 's';
+						a.appendChild(q);
+					}
+
+					var addr = document.createElement('span');
+					addr.className = 'addr';
+					addr.textContent = cam.address;
+					a.appendChild(addr);
+
+					var li = document.createElement('li');
+					li.appendChild(a);
+					ul.appendChild(li);
+				});
+
+				// Every entry may have been dropped for having nothing safe to
+				// link to, which leaves an empty list — say so rather than replace
+				// the page with a blank box.
+				if (!ul.childNodes.length) {
+					msg('No cameras with a usable address.');
+					return;
+				}
+
+				out.replaceChildren(ul);
+			}
+
+			// Deliberately a plain fetch. main.js's apiFetch sends a 401 to the
+			// login page, which is the wrong move here: this page is reached before
+			// signing in to anything, so an empty list belongs on screen rather
+			// than a redirect to a camera the user has not chosen.
+			//
+			// And deliberately without credentials. The roster needs none — the
+			// camera decides on the caller's address, not a session — while the
+			// origin here is the shared name, which every camera answers. Sending
+			// the cookie would hand a session minted by one camera to whichever
+			// one happens to reply next.
+			//
+			// Bounded, like every other request in this UI: a camera that accepts
+			// the connection and then says nothing would otherwise leave the page
+			// on "Looking…" for as long as the tab is open.
+			var ctl = new AbortController();
+			var giveUp = setTimeout(function () { ctl.abort(); }, 5000);
+
+			fetch('/api/v1/peers', {
+				credentials: 'omit',
+				signal: ctl.signal,
+				headers: { 'Accept': 'application/json' }
+			})
+				.then(function (r) {
+					if (r.status === 404) throw new Error('This camera does not publish a camera list.');
+					if (!r.ok) throw new Error('The camera list is not available here.');
+					// Not cleared yet: the deadline has to cover reading the body
+					// too, or a response that stalls after the headers would leave
+					// the page waiting forever.
+					return r.json();
+				})
+				.then(function (data) {
+					clearTimeout(giveUp);
+					render((data && data.cameras) || []);
+				})
+				.catch(function (e) {
+					clearTimeout(giveUp);
+					msg(e.name === 'AbortError'
+						? 'This camera did not answer in time.'
+						: (e.message || 'Could not reach this camera.'), true);
+				});
+		}());
+	</script>
+</body>
+</html>
