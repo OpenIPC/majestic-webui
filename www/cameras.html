@@ -69,30 +69,47 @@
 			// so rather than offer it as though it were up.
 			var QUIET_AFTER = 60;
 
-			// Where a link is allowed to point. Everything in the roster reached
-			// this camera over the network, so an entry is only turned into an href
-			// once it is known to name a host and nothing else: "10.0.0.1@evil.tld"
-			// or "10.0.0.1/../.." in an address would send the click somewhere the
-			// list never mentioned. Digits, dots and colons are the whole of an
-			// IPv4 or IPv6 literal, and none of them can start userinfo, a path, a
-			// query or a fragment.
+			// Everything in the roster reached this camera over the network, so a
+			// link is only built once its target is confirmed to be a literal IP
+			// address — not merely a string of address-shaped characters. "evil"
+			// or "deadbeef" would pass a loose test and resolve as a DNS name;
+			// "10.0.0.1@host" or "10.0.0.1/.." would send the click off the list
+			// entirely. These check structure, not just the alphabet.
+
+			function isIPv4(s) {
+				var p = s.split('.');
+				return p.length === 4 && p.every(function (o) {
+					return /^\d{1,3}$/.test(o) && +o <= 255;
+				});
+			}
+
+			// A bracketed literal only — the address field is a host on its own,
+			// never host:port, so any bare colon here is part of an IPv6 address.
+			function isIPv6(s) {
+				if (s.indexOf(':') === -1) return false;
+				try { return new URL('http://[' + s + ']/').hostname === '[' + s + ']'; }
+				catch (e) { return false; }
+			}
+
 			function addressHref(address) {
-				if (!address || !/^[0-9a-fA-F.:]+$/.test(address)) return null;
-				var literal6 = address.indexOf(':') !== -1;
-				return 'http://' + (literal6 ? '[' + address + ']' : address) + '/';
+				if (!address) return null;
+				if (isIPv4(address)) return 'http://' + address + '/';
+				if (isIPv6(address)) return 'http://[' + address + ']/';
+				return null;
 			}
 
 			// The camera's own URL is preferred when it is plainly http or https,
-			// and is used exactly as sent: an authority on its own is already a
-			// valid URL, and appending to one that carried a path or a query would
-			// corrupt it. Its host is checked the same way as an address, so a
-			// published URL cannot point the link at another origin either.
+			// and used exactly as sent: an authority on its own is already a valid
+			// URL, and appending to one that carried a path or a query would
+			// corrupt it. Its host must still be a literal address and carry no
+			// userinfo, so a published URL cannot point the link at another origin.
 			function cameraHref(cam) {
 				if (cam.url && /^https?:\/\//i.test(cam.url)) {
 					try {
 						var u = new URL(cam.url);
-						if (/^[0-9a-fA-F.:\[\]]+$/.test(u.hostname) && !u.username
-								&& !u.password) {
+						var host = u.hostname.replace(/^\[|\]$/g, '');
+						if (!u.username && !u.password
+								&& (isIPv4(host) || isIPv6(host))) {
 							return cam.url;
 						}
 					} catch (e) { /* unparseable: fall through to the address */ }
