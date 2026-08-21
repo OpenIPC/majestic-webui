@@ -84,8 +84,12 @@
 					// the camera published is preferred, but only if it is plain
 					// http/https — it arrives over the network like everything else
 					// here, and javascript: in an href would run on this page.
+					//
+					// Used as sent, not with a slash appended: an authority on its
+					// own is already a valid URL, and appending to one that turned
+					// out to carry a path, a query or a fragment would corrupt it.
 					var href = 'http://' + cam.address + '/';
-					if (cam.url && /^https?:\/\//i.test(cam.url)) href = cam.url + '/';
+					if (cam.url && /^https?:\/\//i.test(cam.url)) href = cam.url;
 
 					var a = document.createElement('a');
 					a.className = 'cam';
@@ -132,7 +136,13 @@
 			// login page, which is the wrong move here: this page is reached before
 			// signing in to anything, so an empty list belongs on screen rather
 			// than a redirect to a camera the user has not chosen.
-			fetch('/api/v1/peers', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+			//
+			// And deliberately without credentials. The roster needs none — the
+			// camera decides on the caller's address, not a session — while the
+			// origin here is the shared name, which every camera answers. Sending
+			// the cookie would hand a session minted by one camera to whichever
+			// one happens to reply next.
+			fetch('/api/v1/peers', { credentials: 'omit', headers: { 'Accept': 'application/json' } })
 				.then(function (r) {
 					if (r.status === 404) throw new Error('This camera does not publish a camera list.');
 					if (!r.ok) throw new Error('The camera list is not available here.');
