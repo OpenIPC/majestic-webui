@@ -79,7 +79,10 @@
 			function isIPv4(s) {
 				var p = s.split('.');
 				return p.length === 4 && p.every(function (o) {
-					return /^\d{1,3}$/.test(o) && +o <= 255;
+					// No leading zeros: "010" is octal to some URL parsers, so a
+					// value that looks like the shown address could resolve to a
+					// different host in the click. Canonical dotted-decimal only.
+					return /^(0|[1-9]\d{0,2})$/.test(o) && +o <= 255;
 				});
 			}
 
@@ -182,10 +185,14 @@
 						a.appendChild(here);
 					}
 
-					if (cam.quietFor > QUIET_AFTER) {
+					// A finite number only: the comparison alone would let a
+					// string or a missing value through and print "no reply for
+					// undefineds".
+					if (typeof cam.quietFor === 'number' && isFinite(cam.quietFor)
+							&& cam.quietFor > QUIET_AFTER) {
 						var q = document.createElement('span');
 						q.className = 'quiet';
-						q.textContent = 'no reply for ' + cam.quietFor + 's';
+						q.textContent = 'no reply for ' + Math.round(cam.quietFor) + 's';
 						a.appendChild(q);
 					}
 
