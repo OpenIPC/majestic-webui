@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="darkreader-lock">
+	<meta name="robots" content="noindex">
+	<title>Cameras · OpenIPC</title>
+	<!-- Self-contained on purpose, like login.html: majestic serves this page
+	     without authentication (you have not chosen a camera to sign in to yet),
+	     so it cannot pull /a/*.css or /a/*.js, which require a valid session. -->
+	<style>
+		:root { color-scheme: dark; }
+		* { box-sizing: border-box; }
+		body {
+			margin: 0; min-height: 100vh; padding: 2rem 1rem;
+			display: flex; align-items: flex-start; justify-content: center;
+			background: #1a1d20; color: #dee2e6;
+			font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		}
+		.card {
+			width: 100%; max-width: 32rem;
+			background: #212529; border: 1px solid #343a40; border-radius: .5rem;
+			padding: 2rem 1.75rem;
+		}
+		h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 .35rem; text-align: center; }
+		h1 span { color: #6ea8fe; }
+		.sub { margin: 0 0 1.5rem; text-align: center; font-size: .875rem; color: #adb5bd; }
+		ul { list-style: none; margin: 0; padding: 0; }
+		li { margin-bottom: .5rem; }
+		a.cam {
+			display: flex; align-items: baseline; gap: .75rem;
+			padding: .7rem .85rem; text-decoration: none;
+			background: #2b3035; color: #dee2e6;
+			border: 1px solid #495057; border-radius: .375rem;
+		}
+		a.cam:hover { border-color: #6ea8fe; background: #31373d; }
+		.name { font-weight: 500; }
+		.addr { margin-left: auto; font-size: .875rem; color: #adb5bd; font-variant-numeric: tabular-nums; }
+		.quiet { font-size: .75rem; color: #ffda6a; }
+		.here {
+			font-size: .6875rem; text-transform: uppercase; letter-spacing: .04em;
+			color: #75b798; border: 1px solid #2f6f52; border-radius: .25rem;
+			padding: .1rem .35rem;
+		}
+		.msg { text-align: center; color: #adb5bd; font-size: .875rem; padding: 1rem 0; }
+		.msg.bad { color: #ea868f; }
+	</style>
+</head>
+<body>
+	<main class="card">
+		<h1>Open<span>IPC</span></h1>
+		<p class="sub">Cameras on this network</p>
+		<div id="out"><p class="msg">Looking…</p></div>
+	</main>
+	<script>
+		(function () {
+			var out = document.getElementById('out');
+
+			function msg(text, bad) {
+				var p = document.createElement('p');
+				p.className = bad ? 'msg bad' : 'msg';
+				p.textContent = text;
+				out.replaceChildren(p);
+			}
+
+			// A camera stays listed until it has been silent long enough to expire,
+			// so one that was unplugged is still here for a couple of minutes. Say
+			// so rather than offer it as though it were up.
+			var QUIET_AFTER = 60;
+
+			function render(cameras) {
+				if (!cameras.length) {
+					msg('No cameras answered.');
+					return;
+				}
+
+				var ul = document.createElement('ul');
+
+				cameras.forEach(function (cam) {
+					// Built from the address rather than the name: a camera's own
+					// .local name only resolves if this browser does mDNS, while the
+					// address came from the packet it announced itself in. The URL
+					// the camera published is preferred, but only if it is plain
+					// http/https — it arrives over the network like everything else
+					// here, and javascript: in an href would run on this page.
+					var href = 'http://' + cam.address + '/';
+					if (cam.url && /^https?:\/\//i.test(cam.url)) href = cam.url + '/';
+
+					var a = document.createElement('a');
+					a.className = 'cam';
+					a.href = href;
+
+					var name = document.createElement('span');
+					name.className = 'name';
+					name.textContent = cam.name || cam.address;
+					a.appendChild(name);
+
+					// The camera serving this page is in the list like any other,
+					// and is worth pointing out only so the reader knows which one
+					// they are already talking to. It still takes one click, and it
+					// is addressed here by its own address rather than the shared
+					// name, so the session it issues stays with it.
+					if (cam.self) {
+						var here = document.createElement('span');
+						here.className = 'here';
+						here.textContent = 'you are here';
+						a.appendChild(here);
+					}
+
+					if (cam.quietFor > QUIET_AFTER) {
+						var q = document.createElement('span');
+						q.className = 'quiet';
+						q.textContent = 'no reply for ' + cam.quietFor + 's';
+						a.appendChild(q);
+					}
+
+					var addr = document.createElement('span');
+					addr.className = 'addr';
+					addr.textContent = cam.address;
+					a.appendChild(addr);
+
+					var li = document.createElement('li');
+					li.appendChild(a);
+					ul.appendChild(li);
+				});
+
+				out.replaceChildren(ul);
+			}
+
+			// Deliberately a plain fetch. main.js's apiFetch sends a 401 to the
+			// login page, which is the wrong move here: this page is reached before
+			// signing in to anything, so an empty list belongs on screen rather
+			// than a redirect to a camera the user has not chosen.
+			fetch('/api/v1/peers', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+				.then(function (r) {
+					if (r.status === 404) throw new Error('This camera does not publish a camera list.');
+					if (!r.ok) throw new Error('The camera list is not available here.');
+					return r.json();
+				})
+				.then(function (data) { render((data && data.cameras) || []); })
+				.catch(function (e) { msg(e.message || 'Could not reach this camera.', true); });
+		}());
+	</script>
+</body>
+</html>
