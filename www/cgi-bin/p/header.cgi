@@ -19,6 +19,7 @@ Pragma: no-cache
 	<link rel="stylesheet" href="/a/bootstrap.override.css">
 	<script src="/a/bootstrap.bundle.min.js"></script>
 	<script src="/a/main.js"></script>
+	<script src="/a/cameras-switch.js" defer></script>
 </head>
 
 <body id="page-<%= $pagename %>" class="<%= $fw_variant %>">
@@ -83,6 +84,27 @@ Pragma: no-cache
 						</ul>
 					</li>	
 					<li class="nav-item"><a class="nav-link" href="preview.cgi">Preview</a></li>
+					<!-- Other OpenIPC cameras on this link. Hidden until
+					     /a/cameras-switch.js confirms there are peers; inert
+					     markup, filled by JS with textContent (peer names are
+					     untrusted), so nothing is interpolated server-side. -->
+					<li class="nav-item dropdown d-none" id="cam-switch">
+						<!-- The label is this camera's own hostname, which the user
+						     can set to anything, so it is coloured with the brand
+						     accent and given a camera glyph to read as "the device
+						     you are on" rather than another menu word. -->
+						<a aria-expanded="false" class="nav-link dropdown-toggle d-inline-flex align-items-center gap-1 text-primary" data-bs-toggle="dropdown" href="#" id="cam-switch-toggle" role="button">
+							<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+								<path d="M0 5a2 2 0 0 1 2-2h7.5a2 2 0 0 1 1.983 1.738l3.11-1.382A1 1 0 0 1 16 4.269v7.462a1 1 0 0 1-1.406.913l-3.111-1.382A2 2 0 0 1 9.5 13H2a2 2 0 0 1-2-2z"/>
+							</svg>
+							<span class="fw-semibold" id="cam-switch-name">This camera</span>
+							<!-- "+N" for the other cameras: reads as "N more" rather
+							     than a bare count, and stays muted so it does not
+							     compete with the accented hostname. -->
+							<span class="small fw-normal text-body-secondary" id="cam-switch-count"></span>
+						</a>
+						<ul aria-labelledby="cam-switch-toggle" class="dropdown-menu dropdown-menu-end" id="cam-switch-menu"></ul>
+					</li>
 					<li class="nav-item"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
 				</ul>
 			</div>
