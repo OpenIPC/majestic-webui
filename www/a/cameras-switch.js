@@ -100,10 +100,13 @@
 			var a = document.createElement('a');
 			a.className = 'dropdown-item d-flex align-items-center gap-2';
 			a.href = entry.href;
-			// main.js forces every http(s) link to target=_blank, so these
-			// cross-origin peer links open in a new tab. Sever the opener so the
-			// peer page cannot reach back through window.opener and navigate this
-			// admin tab (tabnabbing).
+			// Open peers in a new tab, matching how the rest of the UI treats
+			// external http links. main.js sets target=_blank on the anchors
+			// present at load, but the switcher builds these later (async, and
+			// again on every refresh), so set it here rather than rely on that
+			// one-time pass. rel=noopener severs window.opener so the peer page
+			// cannot reach back and navigate this admin tab (tabnabbing).
+			a.target = '_blank';
 			a.rel = 'noopener noreferrer';
 
 			var label = document.createElement('span');
