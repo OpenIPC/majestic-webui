@@ -83,19 +83,25 @@
 				});
 			}
 
-			// A bracketed literal only — the address field is a host on its own,
-			// never host:port, so any bare colon here is part of an IPv6 address.
-			function isIPv6(s) {
-				if (s.indexOf(':') === -1) return false;
-				try { return new URL('http://[' + s + ']/').hostname === '[' + s + ']'; }
-				catch (e) { return false; }
+			// The address field is a host on its own, never host:port, so any bare
+			// colon makes it an IPv6 address. Returns the parser's own bracketed
+			// form when it is one, so uppercase or uncompressed spellings are
+			// accepted rather than dropped for not matching character-for-character
+			// — and null otherwise. The parser only reads brackets as an IPv6 host,
+			// so nothing else can slip a different authority through here.
+			function ipv6Host(s) {
+				if (s.indexOf(':') === -1) return null;
+				try {
+					var h = new URL('http://[' + s + ']/').hostname;
+					return h.charAt(0) === '[' ? h : null;
+				} catch (e) { return null; }
 			}
 
 			function addressHref(address) {
 				if (!address) return null;
 				if (isIPv4(address)) return 'http://' + address + '/';
-				if (isIPv6(address)) return 'http://[' + address + ']/';
-				return null;
+				var v6 = ipv6Host(address);
+				return v6 ? 'http://' + v6 + '/' : null;
 			}
 
 			// The camera's own URL is preferred when it is plainly http or https,
@@ -109,7 +115,7 @@
 						var u = new URL(cam.url);
 						var host = u.hostname.replace(/^\[|\]$/g, '');
 						if (!u.username && !u.password
-								&& (isIPv4(host) || isIPv6(host))) {
+								&& (isIPv4(host) || ipv6Host(host))) {
 							return cam.url;
 						}
 					} catch (e) { /* unparseable: fall through to the address */ }
