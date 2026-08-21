@@ -134,13 +134,29 @@
 		var box = document.getElementById('cam-switch');
 		if (!box) return;
 
-		// apiFetch (main.js) carries the session and never 401s this endpoint —
-		// 200 on-link, 404 off-link or on a majestic without it. Anything but a
-		// good JSON body leaves the switcher hidden.
-		apiFetch('/api/v1/peers', { headers: { 'Accept': 'application/json' } })
+		// Plain fetch, not apiFetch, and without credentials — matching
+		// www/cameras.html. The roster needs no session (the camera answers on
+		// the caller's address, and the endpoint is subnet-gated, not
+		// auth-gated), and on the shared openipc.local origin a cookie could
+		// otherwise be handed to whichever camera replies next. apiFetch's only
+		// extra — a redirect to login on 401 — is wrong here anyway: this runs
+		// unprompted in the background, not on a user action.
+		//
+		// Bounded so a stalled reply self-terminates well before the next tick
+		// rather than piling up behind the timer. 200 on-link, 404 off it or on
+		// a majestic without the endpoint; anything else hides the switcher.
+		var ctl = new AbortController();
+		var giveUp = setTimeout(function () { ctl.abort(); }, 5000);
+
+		fetch('/api/v1/peers', {
+			credentials: 'omit',
+			signal: ctl.signal,
+			headers: { 'Accept': 'application/json' }
+		})
 			.then(function (r) { return r.ok ? r.json() : null; })
 			.then(function (data) { build(box, data && data.cameras); })
-			.catch(function () { hide(box); });
+			.catch(function () { hide(box); })
+			.finally(function () { clearTimeout(giveUp); });
 	}
 
 	function start() {
