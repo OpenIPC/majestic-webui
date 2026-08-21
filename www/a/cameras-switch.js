@@ -100,6 +100,11 @@
 			var a = document.createElement('a');
 			a.className = 'dropdown-item d-flex align-items-center gap-2';
 			a.href = entry.href;
+			// main.js forces every http(s) link to target=_blank, so these
+			// cross-origin peer links open in a new tab. Sever the opener so the
+			// peer page cannot reach back through window.opener and navigate this
+			// admin tab (tabnabbing).
+			a.rel = 'noopener noreferrer';
 
 			var label = document.createElement('span');
 			label.textContent = entry.cam.name || entry.cam.address;
@@ -130,6 +135,13 @@
 		box.classList.remove('d-none');
 	}
 
+	// The interval, so a definitive 404 can stop it (see refresh()).
+	var timer = null;
+
+	function stop() {
+		if (timer) { clearInterval(timer); timer = null; }
+	}
+
 	function refresh() {
 		var box = document.getElementById('cam-switch');
 		if (!box) return;
@@ -153,7 +165,14 @@
 			signal: ctl.signal,
 			headers: { 'Accept': 'application/json' }
 		})
-			.then(function (r) { return r.ok ? r.json() : null; })
+			.then(function (r) {
+				// A 404 is definitive: either this majestic has no peers
+				// endpoint (older build) or we are off its subnet. Neither
+				// changes while the page is open, so stop the timer rather than
+				// 404 every minute for the life of the tab.
+				if (r.status === 404) { stop(); return null; }
+				return r.ok ? r.json() : null;
+			})
 			.then(function (data) { build(box, data && data.cameras); })
 			.catch(function () { hide(box); })
 			.finally(function () { clearTimeout(giveUp); });
@@ -161,7 +180,7 @@
 
 	function start() {
 		refresh();
-		setInterval(refresh, REFRESH_MS);
+		timer = setInterval(refresh, REFRESH_MS);
 	}
 
 	if (document.readyState === 'loading') {
