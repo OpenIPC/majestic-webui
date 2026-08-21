@@ -225,12 +225,17 @@
 				headers: { 'Accept': 'application/json' }
 			})
 				.then(function (r) {
-					clearTimeout(giveUp);
 					if (r.status === 404) throw new Error('This camera does not publish a camera list.');
 					if (!r.ok) throw new Error('The camera list is not available here.');
+					// Not cleared yet: the deadline has to cover reading the body
+					// too, or a response that stalls after the headers would leave
+					// the page waiting forever.
 					return r.json();
 				})
-				.then(function (data) { render((data && data.cameras) || []); })
+				.then(function (data) {
+					clearTimeout(giveUp);
+					render((data && data.cameras) || []);
+				})
 				.catch(function (e) {
 					clearTimeout(giveUp);
 					msg(e.name === 'AbortError'
