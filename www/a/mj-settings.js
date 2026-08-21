@@ -487,6 +487,19 @@
 		}
 	}
 
+	// Evaluate a visibleWhen condition against the controlling field's value.
+	// Supports equals (v === value), notEquals (v !== value) and in (v is one
+	// of a list). An unrecognised operator returns true — a field is shown
+	// rather than stranded invisible when a newer schema uses a condition this
+	// build does not know yet.
+	function visMatches(vw, v) {
+		v = String(v);
+		if ('equals' in vw) return v === String(vw.equals);
+		if ('notEquals' in vw) return v !== String(vw.notEquals);
+		if (Array.isArray(vw.in)) return vw.in.map(String).includes(v);
+		return true;
+	}
+
 	function applyVisibility() {
 		state.visUpdaters = [];
 		const byDot = {};
@@ -497,7 +510,7 @@
 			const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
 			const ctrl = byDot[parent + '.' + vw.field];
 			if (!ctrl) continue;
-			const update = () => { f.p.style.display = String(ctrl.getValue()) === String(vw.equals) ? '' : 'none'; };
+			const update = () => { f.p.style.display = visMatches(vw, ctrl.getValue()) ? '' : 'none'; };
 			ctrl.control.addEventListener('change', update);
 			ctrl.control.addEventListener('input', update);
 			state.visUpdaters.push(update);
