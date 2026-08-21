@@ -118,7 +118,11 @@
 			}
 
 			function render(cameras) {
-				if (!cameras.length) {
+				// The API is trusted to be majestic, but a malformed or truncated
+				// response should show the empty state, not throw an internal error
+				// at the reader — so anything that is not an array is treated as no
+				// cameras rather than assumed to have .forEach.
+				if (!Array.isArray(cameras) || !cameras.length) {
 					msg('No cameras answered.');
 					return;
 				}
@@ -171,6 +175,14 @@
 					li.appendChild(a);
 					ul.appendChild(li);
 				});
+
+				// Every entry may have been dropped for having nothing safe to
+				// link to, which leaves an empty list — say so rather than replace
+				// the page with a blank box.
+				if (!ul.childNodes.length) {
+					msg('No cameras with a usable address.');
+					return;
+				}
 
 				out.replaceChildren(ul);
 			}
