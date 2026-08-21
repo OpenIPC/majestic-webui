@@ -107,20 +107,29 @@
 			// The camera's own URL is preferred when it is plainly http or https,
 			// and used exactly as sent: an authority on its own is already a valid
 			// URL, and appending to one that carried a path or a query would
-			// corrupt it. Its host must still be a literal address and carry no
-			// userinfo, so a published URL cannot point the link at another origin.
+			// corrupt it.
+			//
+			// Its host must be a literal address, carry no userinfo, and be the
+			// same address the entry displays. Without that last check a hostile
+			// announcement could show one camera's IP and send the click to
+			// another: the roster is untrusted network input, and the whole point
+			// of this page is that the address you see is the camera you reach.
 			function cameraHref(cam) {
+				var shown = addressHref(cam.address);
 				if (cam.url && /^https?:\/\//i.test(cam.url)) {
 					try {
 						var u = new URL(cam.url);
 						var host = u.hostname.replace(/^\[|\]$/g, '');
-						if (!u.username && !u.password
-								&& (isIPv4(host) || ipv6Host(host))) {
+						var canon = isIPv4(host) ? host : ipv6Host(host);
+						// Compare on the address's own canonical href, so an
+						// equivalent v6 spelling still counts as the same host.
+						if (!u.username && !u.password && canon
+								&& addressHref(host) === shown) {
 							return cam.url;
 						}
 					} catch (e) { /* unparseable: fall through to the address */ }
 				}
-				return addressHref(cam.address);
+				return shown;
 			}
 
 			function render(cameras) {
