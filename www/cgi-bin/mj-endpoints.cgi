@@ -14,10 +14,17 @@ mj_unsafe=$(echo "$mj_config" | jsonfilter -e '@.system.unsafe' 2>/dev/null)
 # on the WebUI's own origin, so main.js overwrites the .ep-* spans with the
 # address the browser actually used. RTSP is the exception — its port is its
 # own, and only the default 554 may be left out of the URL.
+#
+# Majestic only range-checks rtsp.port on the write path, so a hand-edited
+# majestic.yaml can leave a port no URL can use. Anything outside 1-65535 falls
+# back to the default a bare rtsp:// implies. The ?????? arm drops 6-digit and
+# longer values before the numeric test, which has no defined behaviour once
+# the operand no longer fits a long.
 rtsp_port=$(echo "$mj_config" | jsonfilter -e '@.rtsp.port' 2>/dev/null)
 case "$rtsp_port" in
-	''|*[!0-9]*) rtsp_port=554 ;;
+	''|*[!0-9]*|??????*) rtsp_port=554 ;;
 esac
+[ "$rtsp_port" -ge 1 ] && [ "$rtsp_port" -le 65535 ] || rtsp_port=554
 [ "$rtsp_port" = "554" ] && rtsp_suffix= || rtsp_suffix=":$rtsp_port"
 %>
 
