@@ -33,7 +33,13 @@ function sleep(ms) {
 // makeTextFileLineIterator below streams the factory reset that destroys the
 // session in the first place. A blanket redirect would race both and throw the
 // transcript away. Anything that wants this behaviour opts in.
-function apiFetch(url, init) {
+//
+// Those pages still need the HEADER, though, and that is the half that was
+// missed: suppressing the dialog and redirecting on 401 are separate concerns,
+// and only the second is what they opt out of. rawFetch is the first half on its
+// own — every same-origin request that can be answered 401 goes through one of
+// the two, or Safari raises the native prompt this pair exists to prevent.
+function rawFetch(url, init) {
 	const opts = Object.assign({ credentials: 'same-origin' }, init || {});
 	// Declare ourselves rather than leaving majestic to infer it. The signal it
 	// had to work from — Sec-Fetch-Dest — is attached by the browser, not by us:
@@ -49,7 +55,11 @@ function apiFetch(url, init) {
 	const headers = new Headers(opts.headers || {});
 	headers.set('X-Requested-With', 'XMLHttpRequest');
 	opts.headers = headers;
-	return fetch(url, opts).then(r => {
+	return fetch(url, opts);
+}
+
+function apiFetch(url, init) {
+	return rawFetch(url, init).then(r => {
 		if (r.status !== 401) return r;
 		// replace(), not href: this document is already dead — the promise below
 		// never settles, so anything awaiting it stays awaiting forever. Leaving a
@@ -110,7 +120,7 @@ function setProgressBar(id, value, name) {
 	}
 }
 
-// Plain fetch, not apiFetch, and it has to stay that way. Its only caller is
+// rawFetch, not apiFetch, and it has to stay that way. Its only caller is
 // runCmd() on fw-reset.cgi, which streams `sysupgrade -s -n -x --web` — the
 // factory reset that erases the overlay, /etc/majestic.token with it, and reboots.
 // Losing the session is the EXPECTED end of this request, not an error, and the
@@ -118,9 +128,14 @@ function setProgressBar(id, value, name) {
 // on a 401 here would blank the transcript at the moment it matters most, and
 // the never-settling promise apiFetch hands back would strand the loop below
 // before it could run the fw-restart.cgi hop at the end.
+//
+// rawFetch rather than a bare fetch, though: the wipe destroys the session this
+// stream is running on, so the reconnect after it is exactly the request that
+// gets a 401 — and without the header majestic attaches WWW-Authenticate to it
+// and Safari prompts on top of the transcript.
 async function* makeTextFileLineIterator(url) {
 	const td = new TextDecoder('utf-8');
-	const response = await fetch(url, { credentials: 'same-origin' });
+	const response = await rawFetch(url);
 	const rd = response.body.getReader();
 	let { value: chunk, done: readerDone } = await rd.read();
 	chunk = chunk ? td.decode(chunk) : '';
