@@ -57,10 +57,21 @@
 			border: 1px solid #842029; border-radius: .375rem; font-size: .875rem;
 		}
 		.alert.show { display: block; }
+		/* Held back until the already-signed-in probe below has had its say, so a
+		   browser that arrives here holding a good session never paints a sign-in
+		   form it is about to be redirected away from. Current majestic decides
+		   this before the page is sent and this never matters; it is what stops
+		   the flash on a camera whose majestic predates that. */
+		#login[hidden] { display: none; }
 	</style>
+	<noscript>
+		<!-- No script means no probe to wait for, and no redirect either. The
+		     form is all there is, so show it. -->
+		<style>#login[hidden] { display: block; }</style>
+	</noscript>
 </head>
 <body>
-	<form class="card" id="login" autocomplete="on">
+	<form class="card" id="login" autocomplete="on" hidden>
 		<h1>Open<span>IPC</span></h1>
 		<div class="alert" id="err" role="alert"></div>
 		<label for="username">Username</label>
@@ -120,13 +131,35 @@
 			//
 			// A 3xx arrives as an opaque redirect: status 0, ok false. Only a real
 			// 200 means the session is live.
+			// Reveal the form only once the probe has ruled out "already signed
+			// in". Anything but a live session shows it — including a camera that
+			// cannot be reached at all, where the form is the only useful thing
+			// this page has. The timer is the backstop: a probe that neither
+			// resolves nor rejects (a half-open socket to a rebooting camera) must
+			// not leave a blank card on screen for ever.
+			var shown = false;
+			function showForm() {
+				if (shown) return;
+				shown = true;
+				form.hidden = false;
+				// autofocus is evaluated at parse time, when the form was hidden.
+				document.getElementById('password').focus();
+			}
+			var revealTimer = setTimeout(showForm, 1500);
+
 			fetch('/cgi-bin/j/pulse.cgi', {
 				credentials: 'same-origin',
 				redirect: 'manual',
 				headers: { 'Accept': 'text/html' }
 			}).then(function (r) {
-				if (r.ok) location.replace(safeNext());
-			}).catch(function () { /* offline: show the form */ });
+				if (r.ok) {
+					// Signed in already — leave the form hidden, we are navigating.
+					clearTimeout(revealTimer);
+					location.replace(safeNext());
+					return;
+				}
+				showForm();
+			}).catch(function () { /* offline: show the form */ showForm(); });
 
 			form.addEventListener('submit', function (ev) {
 				ev.preventDefault();

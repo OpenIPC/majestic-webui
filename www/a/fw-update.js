@@ -331,7 +331,7 @@
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 5000);
 		try {
-			const r = await fetch('fw-update.cgi?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
+			const r = await rawFetch('fw-update.cgi?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
 			// Reachable, but our session no longer authenticates: the reboot cleared
 			// it and a form login left no Basic to fall back on. That is itself proof
 			// the camera came back — report it so the caller sends us to sign in,
@@ -413,7 +413,7 @@
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 2500);
 		try {
-			const r = await fetch('/cgi-bin/j/pulse.cgi?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
+			const r = await rawFetch('/cgi-bin/j/pulse.cgi?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
 			// A 401 here is ambiguous — the session can be dropped without a reboot
 			// (it expires, or another tab signs out) — so it is not proof of one.
 			// Treat it as "can't tell" and let the unauthenticated / ping below be
@@ -439,7 +439,12 @@
 		function ping() {
 			const ctl = new AbortController();
 			const to = setTimeout(() => ctl.abort(), 2500);
-			return fetch('/?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal })
+			// Only reachability is asked here, and "/" is one of the few paths
+			// majestic serves without auth, so any answer at all — including a 401
+			// a future build might start sending — means the camera is back.
+			// rawFetch all the same: it costs nothing, and it leaves no bare
+			// same-origin fetch in this file for the next reader to copy.
+			return rawFetch('/?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal })
 				.then(() => { clearTimeout(to); return true; })
 				.catch(() => { clearTimeout(to); return false; });
 		}
@@ -488,7 +493,7 @@
 		showProgress();
 		status('warning', 'Uploading firmware…');
 		try {
-			const r = await fetch('/upload', { method: 'POST', credentials: 'same-origin', headers: { 'File-Location': '/tmp/firmware.tgz' }, body: f });
+			const r = await rawFetch('/upload', { method: 'POST', headers: { 'File-Location': '/tmp/firmware.tgz' }, body: f });
 			if (!r.ok) { status('danger', 'Upload failed (' + r.status + ').'); resumeHeartbeat(); return; }
 			append('Uploaded ' + f.name + ' (' + f.size + ' bytes)\n');
 			startUpgrade('/tmp/firmware.tgz');
