@@ -2,10 +2,23 @@
 <%in p/common.cgi %>
 <% page_title="Majestic Endpoints"
 
+# Ask the live config rather than majestic.yaml, which omits keys left at their
+# default.
+mj_config=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null)
+
 # system.unsafe switches authentication off for every HTTP and RTSP endpoint, so
-# the credentials note below would be wrong. Ask the live config rather than
-# majestic.yaml, which omits keys left at their default.
-mj_unsafe=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null | jsonfilter -e '@.system.unsafe' 2>/dev/null)
+# the credentials note below would be wrong.
+mj_unsafe=$(echo "$mj_config" | jsonfilter -e '@.system.unsafe' 2>/dev/null)
+
+# Hosts below are placeholders: every HTTP and WebSocket endpoint here is served
+# on the WebUI's own origin, so main.js overwrites the .ep-* spans with the
+# address the browser actually used. RTSP is the exception — its port is its
+# own, and only the default 554 may be left out of the URL.
+rtsp_port=$(echo "$mj_config" | jsonfilter -e '@.rtsp.port' 2>/dev/null)
+case "$rtsp_port" in
+	''|*[!0-9]*) rtsp_port=554 ;;
+esac
+[ "$rtsp_port" = "554" ] && rtsp_suffix= || rtsp_suffix=":$rtsp_port"
 %>
 
 <%in p/header.cgi %>
@@ -20,23 +33,23 @@ mj_unsafe=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null | jsonfilt
 	<div class="col">
 		<h3>Video</h3>
 		<dl>
-			<dt class="cp2cb">rtsp://<%= $network_address %>/stream=0</dt>
+			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><%= $rtsp_suffix %>/stream=0</dt>
 			<dd>RTSP main stream.</dd>
-			<dt class="cp2cb">rtsp://<%= $network_address %>/stream=1</dt>
+			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><%= $rtsp_suffix %>/stream=1</dt>
 			<dd>RTSP sub stream.</dd>
-			<dt class="cp2cb">rtsp://<%= $network_address %>/stream=2</dt>
+			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><%= $rtsp_suffix %>/stream=2</dt>
 			<dd>RTSP JPEG stream.</dd>
-			<dt class="cp2cb">ws://<%= $network_address %>/ws/video?stream=0</dt>
+			<dt class="cp2cb"><span class="ep-ws">ws</span>://<span class="ep-host"><%= $network_address %></span>/ws/video?stream=0</dt>
 			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by Preview). Append <code>&amp;audio=opus,mp4a.40.2</code> to mux in an audio track for the codecs your player accepts.</dd>
-			<dt class="cp2cb">ws://<%= $network_address %>/ws/video?stream=1</dt>
+			<dt class="cp2cb"><span class="ep-ws">ws</span>://<span class="ep-host"><%= $network_address %></span>/ws/video?stream=1</dt>
 			<dd>Low-latency H.264/H.265 sub stream (fMP4/MSE).</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/mjpeg</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/mjpeg</dt>
 			<dd>MJPEG video stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/video.mp4</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/video.mp4</dt>
 			<dd>MP4 video stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/hls</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/hls</dt>
 			<dd>HLS live-streaming in web browser.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/mjpeg.html</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/mjpeg.html</dt>
 			<dd>MJPEG live-streaming in web browser.</dd>
 		</dl>
 	</div>
@@ -44,19 +57,19 @@ mj_unsafe=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null | jsonfilt
 	<div class="col">
 		<h3>Audio</h3>
 		<dl>
-			<dt class="cp2cb">http://<%= $network_address %>/audio.opus</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/audio.opus</dt>
 			<dd>Opus audio stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/audio.m4a</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/audio.m4a</dt>
 			<dd>AAC audio stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/audio.pcm</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/audio.pcm</dt>
 			<dd>Raw PCM audio stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/audio.alaw</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/audio.alaw</dt>
 			<dd>A-law compressed audio stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/audio.ulaw</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/audio.ulaw</dt>
 			<dd>μ-law compressed audio stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/audio.g711a</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/audio.g711a</dt>
 			<dd>G.711 A-law audio stream.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/play_audio</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/play_audio</dt>
 			<dd>Play audio file on camera speaker.</dd>
 		</dl>
 	</div>
@@ -64,11 +77,11 @@ mj_unsafe=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null | jsonfilt
 	<div class="col">
 		<h3>Images</h3>
 		<dl>
-			<dt class="cp2cb">http://<%= $network_address %>/image.jpg</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/image.jpg</dt>
 			<dd>Snapshot in JPEG format.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/image.heif</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/image.heif</dt>
 			<dd>Snapshot in HEIF format.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/image.yuv420</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/image.yuv420</dt>
 			<dd>Snapshot in YUV420 format.</dd>
 		</dl>
 	</div>
@@ -76,15 +89,15 @@ mj_unsafe=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null | jsonfilt
 	<div class="col">
 		<h3>Night</h3>
 		<dl>
-			<dt class="cp2cb">http://<%= $network_address %>/night/on</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/night/on</dt>
 			<dd>Turn on night mode.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/night/off</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/night/off</dt>
 			<dd>Turn off night mode.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/night/toggle</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/night/toggle</dt>
 			<dd>Toggle night mode.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/night/ircut</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/night/ircut</dt>
 			<dd>Toggle camera ircut.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/night/light</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/night/light</dt>
 			<dd>Toggle camera light.</dd>
 		</dl>
 	</div>
@@ -92,13 +105,13 @@ mj_unsafe=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null | jsonfilt
 	<div class="col">
 		<h3>Monitoring</h3>
 		<dl>
-			<dt class="cp2cb">http://<%= $network_address %>/api/v1/config.json</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/api/v1/config.json</dt>
 			<dd>Default Majestic config in JSON format.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/api/v1/config.schema.json</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/api/v1/config.schema.json</dt>
 			<dd>Available Majestic settings in JSON format.</dd>
 			<dt><a href="https://github.com/openipc/wiki/blob/master/en/majestic-config.md">https://github.com/openipc/wiki</a></dt>
 			<dd>Available Majestic settings in YAML format.</dd>
-			<dt class="cp2cb">http://<%= $network_address %>/metrics</dt>
+			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><%= $network_address %></span>/metrics</dt>
 			<dd>Node exporter for <a href="https://prometheus.io">Prometheus</a>.</dd>
 		</dl>
 	</div>
