@@ -335,6 +335,20 @@ function initAll() {
 		});
 	});
 
+	// Endpoint URLs are rendered server-side against the camera's default-route
+	// address, which is wrong the moment the WebUI is reached over a VPN, a
+	// reverse proxy or a hostname (issue #164). Rewrite them to the address the
+	// browser actually used. This has to happen here rather than in the haserl:
+	// majestic's CGI bridge passes neither the port nor the scheme, and libevent
+	// strips the port off HTTP_HOST. Runs before the .cp2cb wiring below so a
+	// copy picks up the rewritten text.
+	const epTls = location.protocol === 'https:';
+	$$('.ep-http').forEach(el => el.textContent = epTls ? 'https' : 'http');
+	$$('.ep-ws').forEach(el => el.textContent = epTls ? 'wss' : 'ws');
+	// host and hostname both keep the brackets an IPv6 literal needs in a URL
+	$$('.ep-host').forEach(el => el.textContent = location.host);      // host[:port]
+	$$('.ep-addr').forEach(el => el.textContent = location.hostname);  // RTSP has its own port
+
 	// click-to-copy for .cp2cb snippets (HTTPS uses the clipboard API, plain
 	// http falls back to a hidden textarea + execCommand)
 	$$('.cp2cb').forEach(el => {
