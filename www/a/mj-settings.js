@@ -172,14 +172,19 @@
 	const RENDERABLE = new Set(['boolean', 'integer', 'string', 'array']);
 
 	// A field hidden by visibleWhen is not on the page, so a search must not
-	// count it. Same rule the rendered page applies (visMatches), evaluated
-	// against the saved config rather than the DOM because the controlling
-	// section may not be mounted.
+	// count it. Same rule the rendered page applies (visMatches) — and against
+	// the same value: the mounted control when the controlling field is on
+	// screen, including an edit that has not been saved yet, falling back to the
+	// saved config and then the schema default for sections that are not
+	// rendered. Reading only the config made the count disagree with the page
+	// as soon as someone touched a controller.
 	function fieldVisible(f) {
 		const vw = f.sub && f.sub.visibleWhen;
 		if (!vw || !vw.field) return true;
 		const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
 		const sibDot = parent + '.' + vw.field;
+		const mounted = (state.fields || []).find(x => x.dot === sibDot);
+		if (mounted) return visMatches(vw, mounted.getValue());
 		let v = getDotted(state.config, sibDot);
 		if (v === undefined) {
 			const sib = sectionFields(f.dot.split('.')[0]).find(x => x.dot === sibDot);
@@ -555,6 +560,11 @@
 
 		applyVisibility();
 
+		// renderField writes labels as plain text; with a query already active,
+		// the section just mounted has to pick up the marks too, or navigating
+		// to a hit highlights its hints and not its field names.
+		highlightPanel();
+
 		updateDirty();
 	}
 
@@ -729,6 +739,7 @@
 
 	function applyVisibility() {
 		state.visUpdaters = [];
+		const controllers = new Set();
 		const byDot = {};
 		for (const f of state.fields) byDot[f.dot] = f;
 		for (const f of state.fields) {
@@ -742,6 +753,14 @@
 			ctrl.control.addEventListener('input', update);
 			state.visUpdaters.push(update);
 			update();
+			// flipping a controller changes which rows exist, so a live search
+			// has to recount. Once per controller, not once per dependent field.
+			if (!controllers.has(ctrl)) {
+				controllers.add(ctrl);
+				const recount = () => { if (state.q.trim()) buildNav(); };
+				ctrl.control.addEventListener('change', recount);
+				ctrl.control.addEventListener('input', recount);
+			}
 		}
 	}
 
@@ -1119,15 +1138,19 @@
 			// nothing pending: leave the hidden bar empty rather than parked on a
 			// stale message
 			lbl.textContent = n
-				? (n + ' change' + (n === 1 ? '' : 's') + ' pending.')
+				? (n + ' change' + (n === 1 ? '' : 's') + ' pending.' +
+					(apply ? ' A pipeline reload is still due.' : ''))
 				: (apply
 					? 'Saved. Resolution, codec and frame-rate changes take effect after a pipeline reload (the video streams will blink briefly).'
 					: '');
 		}
 		const save = document.getElementById('mj-save');
 		if (save) save.classList.toggle('d-none', n === 0);
+		// Apply reloads the pipeline and the page with it, which would throw
+		// away unsaved edits — and two buttons at once is a fourth state the
+		// three-state model does not have. Save first; Apply comes back after.
 		const applyBtn = document.getElementById('mj-apply-btn');
-		if (applyBtn) applyBtn.classList.toggle('d-none', !apply);
+		if (applyBtn) applyBtn.classList.toggle('d-none', !(apply && n === 0));
 	}
 
 	// A message that outranks the computed status until it is cleared (the
