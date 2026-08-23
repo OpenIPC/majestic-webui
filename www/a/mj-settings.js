@@ -77,6 +77,11 @@
 		fields: [],
 		initial: {},
 		fieldCache: {},
+		dirtyN: 0,
+		// a save whose changes need a pipeline reload leaves this set until the
+		// reload actually runs, so Apply survives switching sections
+		applyPending: false,
+		toolbarMsg: '',
 	};
 
 	// synthetic leaves: the live-preview panel and the ROI canvas are not config
@@ -534,12 +539,19 @@
 			renderProps(cols, sec, props);
 		}
 
+		// Save and Apply share this bar, and each is present only while its own
+		// action is available — so with nothing pending the bar is not there at
+		// all. Built once and toggled by renderToolbar(); rebuilding it would
+		// throw away the transient "Saving…"/"Applying…" labels mid-flight.
 		const toolbar = document.createElement('div');
-		toolbar.className = 'mj-toolbar d-flex align-items-center gap-2';
+		toolbar.id = 'mj-toolbar';
+		toolbar.className = 'mj-toolbar d-none align-items-center gap-2';
 		toolbar.innerHTML =
-			'<span class="me-auto text-secondary small" id="mj-dirty-count">No changes.</span>' +
-			'<button type="submit" class="btn btn-primary" id="mj-save" disabled>Save Changes</button>';
+			'<span class="me-auto small" id="mj-dirty-count"></span>' +
+			'<button type="button" class="btn btn-warning d-none" id="mj-apply-btn">Apply now</button>' +
+			'<button type="submit" class="btn btn-primary d-none" id="mj-save">Save Changes</button>';
 		form.appendChild(toolbar);
+		document.getElementById('mj-apply-btn').addEventListener('click', applyReload);
 
 		applyVisibility();
 
@@ -1084,10 +1096,50 @@
 			f.p.classList.toggle('mj-dirty', d);
 			if (d) n++;
 		}
+		state.dirtyN = n;
+		renderToolbar();
+	}
+
+	// One visibility rule for both buttons: show each only while its action can
+	// actually be taken. A save that needs a pipeline reload leaves applyPending
+	// set, so Save stands down and Apply takes its place until the reload runs.
+	function renderToolbar() {
+		const bar = document.getElementById('mj-toolbar');
+		if (!bar) return;
+		const n = state.dirtyN || 0;
+		const apply = !!state.applyPending;
+		bar.classList.toggle('d-flex', !!(n || apply));
+		bar.classList.toggle('d-none', !(n || apply));
+
 		const lbl = document.getElementById('mj-dirty-count');
-		const btn = document.getElementById('mj-save');
-		if (lbl) lbl.textContent = n ? (n + ' change' + (n === 1 ? '' : 's') + ' pending.') : 'No changes.';
-		if (btn) btn.disabled = n === 0;
+		if (lbl && !state.toolbarMsg) {
+			// mj-apply-note rather than Bootstrap's text-warning: that utility is
+			// not in the PurgeCSS subset we ship (tools/purgecss.config.cjs)
+			lbl.className = 'me-auto small ' + (apply && !n ? 'mj-apply-note' : 'text-secondary');
+			// nothing pending: leave the hidden bar empty rather than parked on a
+			// stale message
+			lbl.textContent = n
+				? (n + ' change' + (n === 1 ? '' : 's') + ' pending.')
+				: (apply
+					? 'Saved. Resolution, codec and frame-rate changes take effect after a pipeline reload (the video streams will blink briefly).'
+					: '');
+		}
+		const save = document.getElementById('mj-save');
+		if (save) save.classList.toggle('d-none', n === 0);
+		const applyBtn = document.getElementById('mj-apply-btn');
+		if (applyBtn) applyBtn.classList.toggle('d-none', !apply);
+	}
+
+	// A message that outranks the computed status until it is cleared (the
+	// reload-took-too-long case, which has nowhere else to go now the banner
+	// is gone).
+	function setToolbarMsg(text, cls) {
+		state.toolbarMsg = text || '';
+		const lbl = document.getElementById('mj-dirty-count');
+		if (!lbl) return;
+		if (!text) { renderToolbar(); return; }
+		lbl.className = 'me-auto small ' + (cls || 'text-danger');
+		lbl.textContent = text;
 	}
 
 	async function onSubmit(ev) {
@@ -1108,6 +1160,7 @@
 		const btn = document.getElementById('mj-save');
 		btn.disabled = true;
 		btn.textContent = 'Saving…';
+		setToolbarMsg('');
 		clearError();
 		try {
 			const res = await apiFetch('/api/v1/config', {
@@ -1124,12 +1177,14 @@
 			await refresh();
 			// Image knobs (x-live) apply instantly; everything structural
 			// (resolution, codec, fps, ...) only takes effect after majestic
-			// reloads its pipeline. Offer that as an explicit step.
+			// reloads its pipeline. Offer that as an explicit step, in the same
+			// bar the Save was just pressed in.
 			if (dirty.some(f => !(f.schema && f.schema['x-live'])))
-				showApplyBanner();
+				state.applyPending = true;
 		} catch (e) {
 			showError('Save failed: ' + e.message);
 		} finally {
+			btn.disabled = false;
 			btn.textContent = 'Save Changes';
 			updateDirty();
 		}
@@ -1138,23 +1193,6 @@
 	// majestic is the HTTP server, so we don't restart the process — we SIGHUP
 	// it (via j/mj-apply.cgi) for an in-process reload that rebuilds the encoder
 	// pipeline while the web server stays up, then poll until it answers again.
-	function showApplyBanner() {
-		const form = document.getElementById('mj-settings-form');
-		if (!form) return;
-		let bar = document.getElementById('mj-apply-bar');
-		if (!bar) {
-			bar = el('div', 'alert alert-warning d-flex align-items-center gap-2 mb-3');
-			bar.id = 'mj-apply-bar';
-			form.insertBefore(bar, form.children[1] || null);
-		} else {
-			bar.className = 'alert alert-warning d-flex align-items-center gap-2 mb-3';
-		}
-		bar.innerHTML =
-			'<span class="me-auto">Saved. Resolution, codec and frame-rate changes take effect after a pipeline reload (the video streams will blink briefly).</span>' +
-			'<button type="button" class="btn btn-sm btn-warning flex-shrink-0" id="mj-apply-btn">Apply now</button>';
-		document.getElementById('mj-apply-btn').addEventListener('click', applyReload);
-	}
-
 	async function pollUp(maxMs) {
 		const deadline = Date.now() + maxMs;
 		while (Date.now() < deadline) {
@@ -1172,23 +1210,20 @@
 	}
 
 	async function applyReload() {
-		const bar = document.getElementById('mj-apply-bar');
 		const btn = document.getElementById('mj-apply-btn');
 		if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+		setToolbarMsg('');
 		stopLivePreview();   // the stream drops while the pipeline rebuilds
 		try {
 			await apiFetch('j/mj-apply.cgi', { credentials: 'same-origin' });
 		} catch (e) { /* the reload may sever this request — expected */ }
 		const up = await pollUp(30000);
 		if (up) {
+			state.applyPending = false;
 			location.reload();   // clean re-fetch of schema/config + preview
 			return;
 		}
-		if (bar) {
-			bar.className = 'alert alert-danger d-flex align-items-center gap-2 mb-3';
-			bar.querySelector('span').textContent =
-				'The reload is taking longer than expected — the camera may still be applying changes.';
-		}
+		setToolbarMsg('The reload is taking longer than expected — the camera may still be applying changes.');
 		if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
 	}
 
