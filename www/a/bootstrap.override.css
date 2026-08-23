@@ -99,6 +99,43 @@
 	max-width: none;
 }
 
+/* mj-settings rows put the per-field reset on the same line as the control
+   (.mj-ctl), so the caps above have to move onto the wrapper — capping only the
+   inner control would let .mj-ctl-in keep the full width and strand the ↺ out at
+   the card edge, attached to nothing. */
+.mj-ctl {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.mj-ctl-in {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.number .mj-ctl-in {
+	max-width: 10rem;
+}
+
+.select .mj-ctl-in {
+	max-width: 16rem;
+}
+
+.select.mj-wide .mj-ctl-in {
+	max-width: none;
+}
+
+.array .mj-ctl-in {
+	max-width: 20rem;
+}
+
+/* a switch is as wide as its own label, so the glyph hugs the text instead of
+   sitting a card-width away from it */
+.boolean .mj-ctl-in {
+	flex: 0 0 auto;
+}
+
 .x-small {
 	font-size: 0.8125rem;
 }
@@ -264,9 +301,143 @@ pre#output[data-cmd] {
 	border-left-color: var(--bs-warning);
 }
 
+/* The per-field reset is a bare ↺ beside its control. It used to be a "↺ reset"
+   link on a line of its own, which cost a row per field — about 160px over a
+   section the size of ISP / Exposure — and repeated the word 150-odd times down
+   the page. Muted until hovered so it never competes with the value. */
 .mj-reset {
-	margin-top: 0.25rem;
+	flex: 0 0 auto;
+	line-height: 1;
 	text-decoration: none;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-reset:hover:not(:disabled) {
+	color: var(--bs-primary);
+}
+
+.mj-reset:disabled {
+	opacity: 0.35;
+}
+
+/* "Reset all" in the live-adjustments header keeps its words: one control acting
+   on six knobs, where a lone glyph would read as "reset this one thing". */
+.mj-live-reset {
+	text-decoration: none;
+}
+
+/* ── settings navigation tree ───────────────────────────────────────────────
+   Categories are static headings on >=md and accordion toggles below it, where
+   the rail is full width and 21 sections would otherwise be a screen and a half
+   of scrolling before any setting. */
+.mj-search .form-control {
+	font-size: 0.875rem;
+}
+
+.mj-tree-cat {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	width: 100%;
+	padding: 0.25rem 0.5rem;
+	border: 0;
+	background: none;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	text-align: left;
+}
+
+/* 21 items of link-blue is a wall of colour; the tree reads as a list with one
+   thing selected, so the rest sit back at body weight */
+.mj-tree-sub .nav-link {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding-left: 1.4rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-tree-sub .nav-link:hover {
+	color: var(--bs-body-color);
+	background: var(--bs-tertiary-bg);
+}
+
+.mj-tree-sub .nav-link.active,
+.mj-tree-sub .nav-link.active:hover {
+	color: #fff;
+	background: var(--bs-primary);
+}
+
+/* the count of fields a search matched inside a section: without it a section
+   kept because of a match in a field's description looks like it matched on
+   nothing at all */
+.mj-tree-n {
+	margin-left: auto;
+	font-size: 0.75rem;
+	font-weight: 400;
+	color: var(--bs-tertiary-color);
+}
+
+.nav-link.active .mj-tree-n {
+	color: rgba(255, 255, 255, 0.75);
+}
+
+.mj-tree-caret {
+	flex: 0 0 auto;
+	width: 0;
+	height: 0;
+	border-left: 0.3rem solid currentColor;
+	border-top: 0.25rem solid transparent;
+	border-bottom: 0.25rem solid transparent;
+	transition: transform var(--mj-ease);
+}
+
+.mj-tree-group.mj-open > .mj-tree-cat .mj-tree-caret {
+	transform: rotate(90deg);
+}
+
+.mj-tree-sub {
+	display: none;
+}
+
+.mj-tree-group.mj-open > .mj-tree-sub {
+	display: flex;
+}
+
+.mj-tree-empty {
+	padding: 0.25rem 0.5rem;
+	color: var(--bs-tertiary-color);
+}
+
+/* From md up the rail is a column beside the form: the whole tree stays open and
+   the category is a label rather than a control. */
+@media (min-width: 768px) {
+	.mj-tree-sub {
+		display: flex;
+	}
+
+	.mj-tree-cat {
+		pointer-events: none;
+	}
+
+	.mj-tree-caret {
+		display: none;
+	}
+}
+
+/* search hits, in the tree and in the field labels/hints of the open section */
+mark {
+	padding: 0 0.1em;
+	border-radius: 0.15rem;
+	background: rgba(255, 193, 7, 0.3);
+	color: inherit;
+}
+
+.nav-link.active mark {
+	background: rgba(255, 255, 255, 0.28);
 }
 
 /* "Live adjustments" panel beside the image preview */
