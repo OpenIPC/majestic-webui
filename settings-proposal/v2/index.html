@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Majestic Settings navigation — proposal for issue #163</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
+<style>
+/* ── tokens lifted from www/a/bootstrap.override.css ───────────────────── */
+:root {
+  --bg: #14161c; --fg: #e6e8ee; --sec-bg: #1c1f27; --ter-bg: #232734;
+  --card: #1c1f27; --border: #2c313d;
+  --primary: rgb(92, 112, 232); --primary-hi: rgb(110, 130, 245);
+  --sec-color: rgba(230, 232, 238, .75); --ter-color: rgba(230, 232, 238, .5);
+  --navbar: #232734; --warning: #ffc107; --danger: #dc3545;
+  --knob-off: rgba(255, 255, 255, .25);
+  --font: 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+[data-t="light"] {
+  --bg: #f4f5f9; --fg: #1f2430; --sec-bg: #eceef4; --ter-bg: #f8f9fa;
+  --card: #ffffff; --border: #e2e5ee;
+  --primary: rgb(76, 96, 216); --primary-hi: rgb(60, 80, 200);
+  --sec-color: rgba(31, 36, 48, .75); --ter-color: rgba(31, 36, 48, .5);
+  --navbar: rgb(76, 96, 216); --knob-off: rgba(0, 0, 0, .25);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #0e1014; color: #e6e8ee; font-family: var(--font); }
+
+/* ── the chooser bar; not part of the proposal, just the harness ───────── */
+.bar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 10px 18px; padding: 12px 18px; background: #0e1014; border-bottom: 1px solid #262b36; }
+.bar h1 { margin: 0 12px 0 0; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+.bar .lede { flex: 1 1 100%; order: 9; margin: 0; font-size: 13px; line-height: 19px; color: #8c93a3; }
+.bar .lede a { color: #7f8ff0; }
+.seg { display: inline-flex; border: 1px solid #2c313d; border-radius: 8px; overflow: hidden; }
+.seg button { appearance: none; border: 0; background: transparent; color: #b9bfcc;
+  font: inherit; font-size: 13px; padding: 6px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid #2c313d; }
+.seg button[aria-pressed="true"] { background: rgb(92,112,232); color: #fff; }
+.note { padding: 14px 18px; font-size: 13px; line-height: 20px; color: #98a0b0;
+  background: #12151b; border-bottom: 1px solid #262b36; }
+.note b { color: #d6dbe6; font-weight: 600; }
+
+.stage { display: flex; justify-content: center; padding: 28px 18px 60px; overflow-x: auto; }
+.frame { flex: 0 0 auto; border: 1px solid #262b36; border-radius: 12px; overflow: hidden; }
+
+/* ── the mockup itself ─────────────────────────────────────────────────── */
+.mj { background: var(--bg); color: var(--fg); font-size: 16px; line-height: 1.5; }
+.mj a { color: var(--primary); text-decoration: none; }
+.mj .nav { background: var(--navbar); padding: 8px 0; }
+.mj .wrap { max-width: 1320px; margin: 0 auto; padding: 0 12px; }
+.mj .navrow { display: flex; align-items: center; }
+.mj .navitem { padding: 8px; color: #fff; font-size: 16px; }
+.mj .caret { width: 0; height: 0; border-top: 5px solid #fff; border-left: 5px solid transparent;
+  border-right: 5px solid transparent; margin: 0 8px 0 -4px; }
+.mj .sig { display: flex; align-items: flex-start; gap: 24px; font-size: 13px; margin-top: 4px; }
+.mj .pb { height: 4px; border-radius: 8px; background: var(--sec-bg); margin: 4px 0; }
+.mj .pb > i { display: block; height: 4px; border-radius: 8px; background: var(--primary); }
+.mj h2 { color: var(--primary); font-size: 32px; font-weight: 500; line-height: 1.2; margin: 32px 0 24px; }
+.mj .cols { display: flex; align-items: flex-start; gap: 24px; }
+
+.mj .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.12); padding: 16px; margin-bottom: 24px; }
+.mj .card > h3 { margin: 0 0 16px; font-size: 18.4px; font-weight: 500; line-height: 1.2; color: var(--sec-color); }
+.mj .mj-cols { column-count: 2; column-gap: 40px; }
+.mj h5 { break-inside: avoid; margin: 24px 0 8px; font-size: 20px; font-weight: 500;
+  line-height: 1.2; color: var(--sec-color); }
+
+.mj .row { break-inside: avoid; border-left: 2px solid transparent; padding-left: 8px; margin: 0 0 16px; }
+.mj .row.dirty { border-left-color: var(--warning); }
+.mj .row > label { display: block; margin-bottom: 2px; font-size: 16px; line-height: 24px; color: var(--fg); }
+.mj .ctlrow { display: flex; align-items: center; gap: 8px; }
+.mj .ctlrow > .ctl { flex: 1 1 auto; min-width: 0; }
+.mj .reset { flex: 0 0 auto; font-size: 15px; line-height: 24px; color: var(--ter-color);
+  cursor: pointer; background: none; border: 0; padding: 0; font-family: inherit; }
+.mj .reset:hover { color: var(--primary); }
+.mj .box { height: 38px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--fg); font-size: 16px; line-height: 24px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mj .num { text-align: right; }
+.mj .sel { position: relative; }
+.mj .sel .box { padding-right: 36px; }
+.mj .sel svg { position: absolute; right: 12px; top: 15px; color: var(--sec-color); }
+.mj .hint { font-size: 14px; line-height: 21px; margin-top: 3px; color: var(--sec-color); text-wrap: pretty; }
+.mj .sw { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.mj .sw .track { flex: 0 0 auto; width: 32px; height: 16px; border-radius: 16px;
+  border: 1px solid var(--knob-off); background: transparent; position: relative; }
+.mj .sw .track > i { position: absolute; top: 1px; left: 1px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--knob-off); }
+.mj .sw.on .track { border-color: var(--primary); background: var(--primary); }
+.mj .sw.on .track > i { left: 17px; background: #fff; }
+.mj .rng { display: flex; align-items: center; height: 40px; }
+.mj .rng .trk { flex: 1 1 auto; position: relative; height: 40px; display: flex; align-items: center; }
+.mj .rng .trk > u { width: 100%; height: 8px; border-radius: 16px; background: var(--ter-bg); }
+.mj .rng .trk > b { position: absolute; top: 12px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--primary); box-shadow: 0 1.6px 4px rgba(0,0,0,.1); }
+.mj .rng .val { flex: 0 0 56px; text-align: center; padding-left: 4px; font-size: 16px; color: var(--sec-color); }
+.mj .arr { display: flex; margin-bottom: 4px; }
+.mj .arr .box { flex: 1 1 auto; height: 31px; padding: 4px 8px; border-right: 0;
+  border-radius: 6px 0 0 6px; font-size: 14px; line-height: 21px; }
+.mj .arr .del { flex: 0 0 auto; height: 31px; padding: 4px 10px; border: 1px solid var(--danger);
+  border-radius: 0 6px 6px 0; color: var(--danger); font-size: 14px; line-height: 21px; }
+.mj .ghost { display: inline-block; padding: 4px 8px; border: 1px solid var(--sec-color);
+  border-radius: 6px; color: var(--sec-color); font-size: 14px; line-height: 21px; }
+.mj .roi { position: relative; width: 100%; aspect-ratio: 16/9; border: 1px solid var(--primary);
+  border-radius: 8px; background: #0b0d12; overflow: hidden; }
+.mj .roi > i { position: absolute; border: 2px solid var(--warning); background: rgba(255,193,7,.12); }
+.mj .video { width: 100%; aspect-ratio: 16/9; background: #000; border: 1px solid var(--primary); border-radius: 8px; }
+
+.mj .search { position: relative; margin-bottom: 14px; }
+.mj .search input { width: 100%; height: 38px; padding: 6px 32px 6px 34px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg); color: var(--fg); font-family: inherit; font-size: 15px;
+  line-height: 24px; outline: none; }
+.mj .search input:focus { border-color: var(--primary); box-shadow: 0 0 0 .2rem rgba(92,112,232,.35); }
+.mj .search input::placeholder { color: var(--ter-color); }
+.mj .search .ico { position: absolute; left: 11px; top: 11px; color: var(--ter-color); }
+.mj .search .clr { position: absolute; right: 10px; top: 7px; color: var(--sec-color); cursor: pointer; }
+.mj mark { background: rgba(255,193,7,.28); color: inherit; border-radius: 2px; padding: 0 1px; }
+[data-t="light"] .mj mark, .mj[data-t="light"] mark { background: rgba(255,193,7,.55); }
+.mj .navlink.sub { padding-left: 22px; display: flex; align-items: center; gap: 8px; }
+.mj .navlink .n { margin-left: auto; font-size: 12px; color: var(--ter-color); }
+.mj .navlink.on .n { color: rgba(255,255,255,.8); }
+.mj .btn.warn { background: var(--warning); color: #1f2430; }
+.mj .btn { border: 0; font-family: inherit; cursor: pointer; }
+.mj .btn.off { cursor: default; }
+.mj .empty { padding: 6px 10px; font-size: 14px; color: var(--ter-color); }
+.mj .cap { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ter-color); padding: 0 10px; margin-bottom: 5px; }
+.mj .navlink { display: block; padding: 5px 10px; margin-bottom: 2px; border-radius: 8px;
+  font-size: 14px; line-height: 21px; color: var(--sec-color); cursor: pointer; }
+.mj .navlink:hover { background: var(--ter-bg); color: var(--fg); }
+.mj .navlink.on { background: var(--primary); color: #fff; font-weight: 500; }
+.mj .navlink.on:hover { background: var(--primary); color: #fff; }
+.mj .rail .navlink { padding: 8px 16px; }
+.mj .hit { display: block; padding: 6px 10px; margin-bottom: 2px; border-radius: 8px; cursor: pointer; }
+.mj .hit:hover { background: var(--ter-bg); }
+.mj .hit b { display: block; font-size: 14px; line-height: 20px; font-weight: 400; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mj .hit s { display: block; font-size: 12px; line-height: 18px; color: var(--ter-color); text-decoration: none; }
+.mj .hit.on { background: var(--primary); }
+.mj .hit.on b { color: #fff; font-weight: 500; }
+.mj .hit.on s { color: rgba(255,255,255,.8); }
+.mj .tabs { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0 20px;
+  border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.mj .tab { padding: 8px 0; margin-bottom: -1px; border-bottom: 2px solid transparent;
+  font-size: 15px; line-height: 22px; color: var(--sec-color); cursor: pointer; }
+.mj .tab:hover { color: var(--fg); }
+.mj .tab.on { border-bottom-color: var(--primary); color: var(--fg); font-weight: 600; }
+.mj .toolbar { padding: 12px 0; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.mj .toolbar span { margin-right: auto; font-size: 14px; color: var(--sec-color); }
+.mj .btn { padding: 6px 12px; border-radius: 8px; background: var(--primary); color: #fff;
+  font-size: 16px; line-height: 24px; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.mj .btn.off { opacity: .65; }
+.mj .acc { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px;
+  font-size: 14px; line-height: 21px; font-weight: 600; color: var(--fg); cursor: pointer; }
+.mj .acc:hover { background: var(--ter-bg); }
+.mj .acc .tri { flex: 0 0 auto; width: 0; height: 0; border-left: 5px solid currentColor;
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent; opacity: .55; }
+.mj .acc.open .tri { transform: rotate(90deg); }
+.mj .acc .n { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--ter-color); }
+
+/* ── mobile overrides ──────────────────────────────────────────────────── */
+.mj.m { font-size: 16px; }
+.mj.m .wrap { padding: 0 12px; }
+.mj.m h2 { font-size: 25px; margin: 22px 0 16px; }
+.mj.m .mj-cols { column-count: 1; }
+.mj.m .card { padding: 14px; margin-bottom: 20px; }
+.mj.m .card > h3 { font-size: 17px; margin-bottom: 14px; }
+.mj.m h5 { font-size: 18px; margin: 22px 0 8px; }
+.mj.m .row { margin-bottom: 18px; }
+.mj.m .box { height: 44px; padding: 9px 12px; }
+.mj.m .sel svg { top: 18px; }
+.mj.m .rng, .mj.m .rng .trk { height: 44px; }
+.mj.m .rng .trk > b { width: 20px; height: 20px; top: 12px; }
+.mj.m .reset { width: 44px; height: 44px; margin-right: -10px; display: flex;
+  align-items: center; justify-content: center; }
+.mj.m .search input { height: 44px; font-size: 16px; padding: 9px 34px 9px 36px; }
+.mj.m .search .ico { top: 14px; }
+.mj.m .search .clr { top: 10px; }
+.mj.m .listrow { display: flex; align-items: center; gap: 10px; min-height: 46px;
+  border-bottom: 1px solid var(--border); cursor: pointer; }
+.mj.m .listrow > b { flex: 1 1 auto; font-size: 16px; line-height: 22px; font-weight: 400; color: var(--fg); }
+.mj.m .listrow > i { flex: 0 0 auto; font-size: 13px; font-style: normal; color: var(--ter-color); }
+.mj.m .hitrow { display: flex; align-items: center; gap: 10px; padding: 8px 0;
+  border-bottom: 1px solid var(--border); cursor: pointer; }
+.mj.m .hitrow b { display: block; font-size: 16px; line-height: 22px; font-weight: 400; color: var(--fg); }
+.mj.m .hitrow s { display: block; font-size: 13px; line-height: 19px; color: var(--ter-color); text-decoration: none; }
+.mj.m .back { display: inline-flex; align-items: center; gap: 6px; height: 44px;
+  margin: -10px 0 4px; font-size: 16px; color: var(--primary); cursor: pointer; }
+.mj.m .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.mj.m .tabs::-webkit-scrollbar { display: none; }
+.mj.m .tab { flex: 0 0 auto; padding: 10px 0; white-space: nowrap; }
+.mj.m .btn { padding: 10px 16px; line-height: 22px; }
+.mj.m .toolbar span { font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>Majestic Settings — navigation proposal</h1>
+  <div class="seg" id="dir">
+    <button data-v="A" aria-pressed="true">A · Tree + search</button>
+    <button data-v="B" aria-pressed="false">B · Rail + tabs</button>
+    <button data-v="C" aria-pressed="false">C · Search-first</button>
+  </div>
+  <div class="seg" id="dev">
+    <button data-v="d" aria-pressed="true">Desktop</button>
+    <button data-v="m" aria-pressed="false">Mobile</button>
+  </div>
+  <div class="seg" id="thm">
+    <button data-v="dark" aria-pressed="true">Dark</button>
+    <button data-v="light" aria-pressed="false">Light</button>
+  </div>
+  <p class="lede">Three ways to make individual sections directly selectable, for
+    <a href="https://github.com/OpenIPC/majestic-webui/issues/163">OpenIPC/majestic-webui#163</a>.
+    Clickable: search, pick a section, toggle a switch to see the dirty state and the Save button wake up.</p>
+</div>
+
+<div class="note" id="note"></div>
+<div class="stage"><div class="frame" id="stage"></div></div>
+
+<script>
+/* Sections, labels, hints, enums and current values are generated from a real
+   camera's /api/v1/config.schema.json + config.json (hi3516av300 / imx415),
+   through the same widget dispatch www/a/mj-settings.js uses. */
+const MODEL = [
+      { id: "image", label: "Image", sections: [
+        { id: "live", label: "Live adjustments", fields: [
+          {"k":"range","n":"luminance","l":"Brightness","lo":0,"hi":100,"v":50,"h":""},
+          {"k":"range","n":"contrast","l":"Contrast","lo":0,"hi":100,"v":50,"h":""},
+          {"k":"range","n":"saturation","l":"Saturation","lo":0,"hi":100,"v":50,"h":""},
+          {"k":"range","n":"hue","l":"Hue","lo":0,"hi":100,"v":50,"h":""},
+          {"k":"switch","n":"mirror","l":"Mirror","on":false,"h":""},
+          {"k":"switch","n":"flip","l":"Flip","on":false,"h":""}
+        ] },
+        { id: "image", label: "Image", fields: [
+          {"k":"select","n":"rotate","l":"Rotate image clockwise","v":"0","wide":false,"h":""},
+          {"k":"switch","n":"tuning","l":"Automatic image tuning","on":false,"h":""}
+        ] },
+        { id: "isp", label: "ISP / Exposure", fields: [
+          {"k":"select","n":"antiFlicker","l":"Anti-flicker","v":"disabled","wide":false,"h":"Match your mains frequency (50/60 Hz) to remove the rolling banding seen under artificial light."},
+          {"k":"number","n":"drc","l":"Dynamic range compression","v":"","h":""},
+          {"k":"select","n":"sensorConfig","l":"Sensor configuration file, by path or by sensor name","v":"Auto","wide":true,"h":""},
+          {"k":"text","n":"iqProfile","l":"Set image quality profile","v":"","h":""},
+          {"k":"select","n":"slowShutter","l":"Slow shutter mode","v":"medium","wide":false,"h":""},
+          {"k":"select","n":"rawMode","l":"Mode for capturing RAW images","v":"slow","wide":false,"h":""},
+          {"k":"switch","n":"dis","l":"Digital image stabilization","on":false,"h":""},
+          {"k":"select","n":"memMode","l":"Reduce memory usage","v":"reduction","wide":false,"h":""},
+          {"k":"switch","n":"lowDelay","l":"Reduce sensor-to-network delay","on":false,"h":""},
+          {"k":"select","n":"yuvCompression","l":"VPSS frame buffer compression","v":"auto","wide":false,"h":"seg saves about a third of the main frame buffer; ignored when rotate, mirror or privacy masks are set"},
+          {"k":"head","n":"iris","l":"Iris"},
+          {"k":"select","n":"type","l":"Iris type","v":"none","wide":false,"h":""},
+          {"k":"number","n":"blkCnt","l":"Memory blocks for hardware encoder","v":"7","h":""}
+        ] },
+        { id: "nightMode", label: "Day / Night", fields: [
+          {"k":"switch","n":"colorToGray","l":"Colorless night mode","on":true,"h":""},
+          {"k":"number","n":"irCutPin1","l":"GPIO pin1 for IRcut","v":"","h":""},
+          {"k":"switch","n":"irCutSingleInvert","l":"Single IRcut is inverted","on":false,"h":""},
+          {"k":"number","n":"irCutPin2","l":"GPIO pin2 for IRcut","v":"","h":""},
+          {"k":"number","n":"backlightPin","l":"GPIO pin for camera light","v":"","h":""},
+          {"k":"number","n":"overrideDrc","l":"DRC value in night mode","v":"","h":"Dynamic-range-compression strength applied while in night mode (overrides isp.drc). Higher lifts shadows more."},
+          {"k":"switch","n":"lightMonitor","l":"Enable light monitor","on":false,"h":""},
+          {"k":"number","n":"lightSensorPin","l":"GPIO pin for light sensor","v":"","h":""},
+          {"k":"switch","n":"lightSensorInvert","l":"Light sensor is inverted","on":false,"h":""},
+          {"k":"range","n":"monitorDelay","l":"Delay before switching day/night mode","lo":0,"hi":60,"v":0,"h":"Seconds between light checks before flipping day/night (software light monitor)."},
+          {"k":"number","n":"minThreshold","l":"Minimum sensor threshold for day","v":"","h":"Compared against the sensor's analog gain (the isp_again metric). In night mode, switches back to day when gain drops below this. Units are sensor-specific — watch the live isp_again value to pick a level. Keep below maxThreshold for hysteresis."},
+          {"k":"number","n":"maxThreshold","l":"Maximum sensor threshold for night","v":"","h":"Compared against the sensor's analog gain (the isp_again metric). In day mode, switches to night when gain rises above this (a darker scene needs more gain). Keep above minThreshold for hysteresis."}
+        ] }
+      ] },
+      { id: "video", label: "Video & Audio", sections: [
+        { id: "video0", label: "Main stream", fields: [
+          {"k":"switch","n":"enabled","l":"Enable video","on":true,"h":""},
+          {"k":"select","n":"codec","l":"Video codec","v":"h264","wide":false,"h":""},
+          {"k":"select","n":"size","l":"Video resolution","v":"4K · 3840×2160 · 16:9","wide":true,"h":""},
+          {"k":"number","n":"fps","l":"Video frame rate","v":"20","h":"1–120"},
+          {"k":"number","n":"bitrate","l":"Video bitrate","v":"4096","h":"Target bitrate in kbit/s (e.g. 4096 = 4 Mbit/s)."},
+          {"k":"select","n":"rcMode","l":"Rate control mode","v":"vbr","wide":false,"h":""},
+          {"k":"select","n":"profile","l":"Video profile","v":"main","wide":false,"h":""},
+          {"k":"text","n":"gopSize","l":"Keyframe interval (s)","v":"1","h":"Seconds between keyframes (I-frames): 1.0 = one per second, 2.0 = every two seconds. Larger lowers bitrate but slows seeking and error recovery."},
+          {"k":"array","n":"crop","l":"Crop video to size","rows":[],"h":"Crop to one region written as XxYxWxH (top-left offset, then size). Empty = full frame."},
+          {"k":"select","n":"gopMode","l":"Group of pictures mode","v":"normal","wide":false,"h":""},
+          {"k":"select","n":"svct","l":"Temporal scalability layers (off, 2x, 4x)","v":"off","wide":false,"h":""},
+          {"k":"range","n":"refEnhance","l":"Reference enhancement layers","lo":0,"hi":3,"v":"","h":"Raw VENC reference structure. 0 with reference prediction off makes every P frame reference the keyframe, so one lost frame costs only itself — pair it with a short keyframe interval. Needs a decoder and link that expect it; overridden by temporal scalability layers."},
+          {"k":"switch","n":"refPred","l":"Reference prediction between base frames","on":false,"h":""},
+          {"k":"range","n":"sliceUnits","l":"Slice size in rows","lo":0,"hi":32,"v":0,"h":"Macroblock rows (H.264) / LCU rows (H.265) per slice. 0 = disabled. Overridden by sliceBytes when that is set."},
+          {"k":"number","n":"sliceBytes","l":"Target bytes per NAL slice","v":"0","h":"Splits each frame into roughly N-byte NAL slices for lower latency and loss tolerance. 0 = disabled (one slice per frame). Takes precedence over sliceUnits. · 0–2000"}
+        ] },
+        { id: "video1", label: "Sub stream", fields: [
+          {"k":"switch","n":"enabled","l":"Enable video","on":false,"h":""},
+          {"k":"select","n":"codec","l":"Video codec","v":"h264","wide":false,"h":""},
+          {"k":"select","n":"size","l":"Video resolution","v":"D1 · 704×576 · 11:9","wide":true,"h":""},
+          {"k":"number","n":"fps","l":"Video frame rate","v":"15","h":"1–120"},
+          {"k":"number","n":"bitrate","l":"Video bitrate","v":"1024","h":"Target bitrate in kbit/s (e.g. 4096 = 4 Mbit/s)."},
+          {"k":"select","n":"rcMode","l":"Rate control mode","v":"vbr","wide":false,"h":""},
+          {"k":"select","n":"profile","l":"Video profile","v":"main","wide":false,"h":""},
+          {"k":"text","n":"gopSize","l":"Keyframe interval (s)","v":"","h":"Seconds between keyframes (I-frames): 1.0 = one per second, 2.0 = every two seconds. Larger lowers bitrate but slows seeking and error recovery."},
+          {"k":"array","n":"crop","l":"Crop video to size","rows":[],"h":"Crop to one region written as XxYxWxH (top-left offset, then size). Empty = full frame."}
+        ] },
+        { id: "audio", label: "Audio", fields: [
+          {"k":"switch","n":"enabled","l":"Enable microphone","on":false,"h":""},
+          {"k":"range","n":"volume","l":"Microphone volume (0 mutes the input)","lo":0,"hi":100,"v":30,"h":""},
+          {"k":"select","n":"srate","l":"Audio sampling rate","v":"8000","wide":false,"h":""},
+          {"k":"select","n":"codec","l":"Codec for RTSP and MP4 encoding","v":"opus","wide":false,"h":""},
+          {"k":"switch","n":"outputEnabled","l":"Enable speaker","on":false,"h":""},
+          {"k":"range","n":"outputVolume","l":"Speaker volume","lo":0,"hi":100,"v":30,"h":""},
+          {"k":"number","n":"speakerPin","l":"GPIO pin to control speaker","v":"","h":""},
+          {"k":"switch","n":"speakerPinInvert","l":"Speaker control is inverted","on":false,"h":""},
+          {"k":"number","n":"jitterBufferMs","l":"Inbound de-jitter buffer (ms)","v":"0","h":"G.711 talkback only. 0 = passthrough (LAN-only). Typical: 60 over Wi-Fi, 100–120 over 4G/LTE. · 0–500"},
+          {"k":"switch","n":"dual","l":"Dual microphone","on":false,"h":""}
+        ] },
+        { id: "jpeg", label: "MJPEG", fields: [
+          {"k":"switch","n":"enabled","l":"Enable JPEG support","on":true,"h":""},
+          {"k":"select","n":"size","l":"JPEG resolution","v":"Auto · follows the main stream","wide":true,"h":""},
+          {"k":"range","n":"qfactor","l":"JPEG quality level","lo":1,"hi":100,"v":50,"h":""},
+          {"k":"range","n":"fps","l":"JPEG frames per second","lo":1,"hi":20,"v":5,"h":""},
+          {"k":"switch","n":"osd","l":"Enable OSD for MJPEG","on":true,"h":""},
+          {"k":"switch","n":"rtsp","l":"Enable MJPEG over RTSP","on":false,"h":""},
+          {"k":"text","n":"tuned","l":"Largest parameterised snapshot to serve (WxH, or off)","v":"off","h":""}
+        ] },
+        { id: "osd", label: "OSD", fields: [
+          {"k":"switch","n":"enabled","l":"Enable On-Screen Display","on":false,"h":""},
+          {"k":"text","n":"template","l":"OSD template","v":"%d.%m.%Y %H:%M:%S","h":"strftime date/time format, e.g. %d.%m.%Y %H:%M:%S."},
+          {"k":"text","n":"font","l":"Path to font file","v":"/usr/share/fonts/truetype/UbuntuMono-Regular.ttf","h":""},
+          {"k":"text","n":"size","l":"OSD font size","v":"1.0","h":"Font scale factor; 1.0 is the default size."},
+          {"k":"select","n":"weight","l":"OSD font stroke weight","v":"normal","wide":false,"h":"Stroke weight: normal, or thin for a lighter face."},
+          {"k":"switch","n":"outline","l":"OSD font outline","on":true,"h":"Draw a dark halo around each glyph so the text stays readable over bright or busy scenes."},
+          {"k":"select","n":"anchor","l":"OSD position anchor","v":"proportional","wide":false,"h":"The point the OSD position is measured from. Set to proportional to use the older posX/posY instead of the offsets. (The earlier name 'auto' is still accepted for proportional.)"},
+          {"k":"text","n":"offsetX","l":"Horizontal OSD offset","v":"0","h":"Distance inward from the anchor. A bare number or 20px is pixels; 2% is a share of the frame; 1.5em is a multiple of the text size, which keeps the same placement on streams of different resolution. When anchor is proportional this is ignored and posX applies."},
+          {"k":"text","n":"offsetY","l":"Vertical OSD offset","v":"0","h":"As offsetX, vertically. When anchor is proportional this is ignored and posY applies."},
+          {"k":"number","n":"posX","l":"Horizontal position of OSD","v":"16","h":"Used only while anchor is proportional: -16 at the right edge to 16 at the left."},
+          {"k":"number","n":"posY","l":"Vertical position of OSD","v":"16","h":"Used only while anchor is proportional: -16 at the bottom to 16 at the top."},
+          {"k":"range","n":"bgAlpha","l":"Opacity of the plate behind OSD text","lo":0,"hi":100,"v":25,"h":"Opacity of the black plate behind the text, in percent. 0 = none, the text sits straight on the video; 100 = solid bar."},
+          {"k":"array","n":"privacyMasks","l":"Privacy masks","rows":[],"h":""}
+        ] }
+      ] },
+      { id: "events", label: "Events", sections: [
+        { id: "motionDetect", label: "Motion detection", fields: [
+          {"k":"switch","n":"enabled","l":"Enable motion detection","on":false,"h":""},
+          {"k":"switch","n":"visualize","l":"Visualize motion detection","on":false,"h":"Draws motion rectangles onto the stream; requires OSD to be enabled."},
+          {"k":"switch","n":"debug","l":"Enable debugging","on":false,"h":""},
+          {"k":"array","n":"roi","l":"Region of interest","rows":[],"h":"Limit detection to one or more XxYxWxH regions. Empty = whole frame."},
+          {"k":"range","n":"sensitivity","l":"Motion Detect Sensitivity","lo":0,"hi":8,"v":3,"h":"0-8, higher = more sensitive"}
+        ] },
+        { id: "roiEditor", label: "Visual editor", fields: [
+          {"k":"frame","n":"editor","l":"","h":""}
+        ] }
+      ] },
+      { id: "records", label: "Recording", sections: [
+        { id: "records", label: "Record", fields: [
+          {"k":"switch","n":"enabled","l":"Enable recording","on":false,"h":""},
+          {"k":"text","n":"path","l":"Recording path","v":"/mnt/mmcblk0p1/%F","h":"strftime path; %F expands to YYYY-MM-DD, so /mnt/mmcblk0p1/%F writes a folder per day."},
+          {"k":"text","n":"filename","l":"Recording filename","v":"%H-%M","h":"strftime filename; %H-%M writes two digit hour and minute."},
+          {"k":"number","n":"split","l":"File limit in minutes","v":"20","h":""},
+          {"k":"number","n":"maxUsage","l":"Limit of available space usage","v":"95","h":"Percent of the storage volume; recording rotates/stops once usage exceeds this."},
+          {"k":"switch","n":"substream","l":"Record substream","on":false,"h":""},
+          {"k":"select","n":"audioCodec","l":"Audio codec for MP4 records","v":"Auto","wide":false,"h":"Also used for HLS (it shares the MP4 muxer). Auto follows the main audio.codec."}
+        ] }
+      ] },
+      { id: "network", label: "Network & Integrations", sections: [
+        { id: "rtsp", label: "RTSP", fields: [
+          {"k":"switch","n":"enabled","l":"Enable RTSP","on":true,"h":""},
+          {"k":"number","n":"port","l":"Port for RTSP protocol","v":"554","h":"1–65535"},
+          {"k":"switch","n":"backchannel","l":"Enable RTSP back-channel","on":false,"h":"Two-way audio (talkback) per ONVIF Profile T."},
+          {"k":"switch","n":"fec","l":"Enable FlexFEC repair flow for RTSP video","on":false,"h":"FlexFEC (RFC 8627) repair packets for the video stream, on the same RTP session under their own SSRC. Receivers that do not implement FEC ignore them."},
+          {"k":"range","n":"fecRate","l":"FlexFEC interleaved subsets per group (0 disables)","lo":0,"hi":8,"v":2,"h":"Interleaved subsets per protection group, and so repair packets per group. A burst of N consecutive losses puts one in each of N subsets, where each is recoverable. Sets burst tolerance, not overhead: N subsets of fecGroup packets emit N repair packets."},
+          {"k":"number","n":"fecGroup","l":"FlexFEC source packets per repair packet","v":"8","h":"Source packets per repair packet, so overhead is 1/fecGroup. Smaller is stronger and costs more bitrate. Bounding this is what keeps the code rate uniform: without it a group covers one slice, and a keyframe slice of 26 packets ends up with the same single repair packet as an inter slice of one. · 1–110"},
+          {"k":"number","n":"fecFirstSliceGroup","l":"FlexFEC source packets per repair packet, first slice","v":"2","h":"Source packets per repair packet for the first slice of each picture; 0 to treat it like any other. Losing that slice costs the whole picture on every decoder tested, so it is worth a smaller group — which is what protecting it harder actually means, since more repair packets over a proportionally larger group would leave the ratio where it was. · 0–110"},
+          {"k":"number","n":"fecRepairMs","l":"How long a receiver should hold packets awaiting repair","v":"200","h":"Advertised repair window: how long a receiver must keep packets before it can give up on recovering them. Bounds receiver latency, so keep it near one GOP rather than generous. · 10–2000"},
+          {"k":"switch","n":"fecAdaptive","l":"Adapt FEC strength to RTCP-reported loss; PLI forces a keyframe","on":false,"h":"Track the client's RTCP receiver reports: move the group size between fecGroup (idle) and fecMinGroup (strongest) as loss rises, and turn a Picture Loss Indication into an immediate keyframe. The loss signal is only as fast as the client's RTCP interval, so this is slow rate control, not per-frame."},
+          {"k":"number","n":"fecMinGroup","l":"Strongest (smallest) FlexFEC group when adapting to loss","v":"2","h":"The strongest protection fecAdaptive will apply — the smallest group, so the highest overhead. Reached only under heavy loss. · 1–110"},
+          {"k":"select","n":"audioCodec","l":"Audio codec for RTSP & ONVIF","v":"Auto","wide":false,"h":"Auto follows the main audio.codec. Per-connection override via the RTSP query string ?audio=alaw|ulaw|pcm|aac|opus|mp3."}
+        ] },
+        { id: "onvif", label: "ONVIF", fields: [
+          {"k":"switch","n":"enabled","l":"Enable ONVIF protocol support","on":true,"h":""},
+          {"k":"text","n":"username","l":"Username","v":"root","h":"Matched against the cleartext password below when set; otherwise falls back to the /etc/shadow lookup."},
+          {"k":"text","n":"password","l":"Cleartext password","v":"","h":"Opt-in, default empty. When set, unlocks WSSE PasswordDigest and HTTP Digest auth so legacy clients (e.g. ODM v2.2.x) work. Stored as cleartext in this config file — only enable if you accept that."}
+        ] },
+        { id: "hls", label: "HLS", fields: [
+          {"k":"switch","n":"enabled","l":"Enable HTTP Live Streaming","on":false,"h":""}
+        ] },
+        { id: "outgoing", label: "Outgoing", fields: [
+          {"k":"switch","n":"enabled","l":"Enable outgoing streams","on":false,"h":""},
+          {"k":"text","n":"server","l":"Address for outgoing stream","v":"","h":""},
+          {"k":"number","n":"naluSize","l":"RTP packet size","v":"1200","h":"Maximum RTP payload in bytes when fragmenting NAL units / JPEG. ~1400 suits the public-Internet MTU; up to ~4000 on WFB/Realtek links."},
+          {"k":"switch","n":"substream","l":"RTMP substream","on":false,"h":""},
+          {"k":"select","n":"audioCodec","l":"Audio codec for outgoing RTMP","v":"Auto","wide":false,"h":"Only what FLV can frame is offered. Auto follows the main audio.codec, substituting AAC when that codec has no FLV mapping."},
+          {"k":"select","n":"audioSource","l":"Audio for outgoing RTMP","v":"auto","wide":false,"h":"auto uses the microphone when there is one, and silence for destinations that insist on an audio track."}
+        ] },
+        { id: "netip", label: "NETIP", fields: [
+          {"k":"switch","n":"enabled","l":"Enable NETIP protocol support","on":false,"h":""},
+          {"k":"text","n":"user","l":"NETIP username","v":"","h":""},
+          {"k":"text","n":"password","l":"Hash of password","v":"","h":"Checked verbatim against the credential NETIP/Sofia clients send."},
+          {"k":"number","n":"port","l":"NETIP port","v":"","h":""},
+          {"k":"switch","n":"snapshots","l":"NETIP snapshots","on":false,"h":""},
+          {"k":"switch","n":"ignoreSetTime","l":"Ignore set time","on":false,"h":""}
+        ] },
+        { id: "ipeye", label: "IPEYE", fields: [
+          {"k":"switch","n":"enabled","l":"Enable IPEYE protocol support","on":false,"h":""}
+        ] },
+        { id: "sip", label: "SIP", fields: [
+          {"k":"switch","n":"enabled","l":"Enable SIP client (UAC)","on":false,"h":"Outbound SIP calls (user-agent client) — e.g. a doorbell that dials an intercom or softphone."},
+          {"k":"text","n":"server","l":"SIP registrar / proxy host","v":"","h":""},
+          {"k":"number","n":"port","l":"Remote SIP UDP port","v":"5060","h":"1–65535"},
+          {"k":"text","n":"username","l":"SIP auth username","v":"","h":""},
+          {"k":"text","n":"password","l":"SIP auth password","v":"","h":""},
+          {"k":"text","n":"localUri","l":"Local address-of-record","v":"","h":"This camera's SIP identity, e.g. sip:camera@pbx.local."},
+          {"k":"text","n":"callTarget","l":"Call target","v":"","h":"SIP URI dialled on a button press, e.g. sip:1001@pbx.local."},
+          {"k":"text","n":"localIp","l":"Local IP address","v":"","h":"Written into the Via/Contact headers; must be an address the peer can route back to."},
+          {"k":"number","n":"localPort","l":"Local SIP signalling UDP port","v":"5060","h":"1–65535"},
+          {"k":"switch","n":"doRegister","l":"REGISTER with the SIP server","on":true,"h":""},
+          {"k":"number","n":"registerExpires","l":"REGISTER expiry (s)","v":"3600","h":"Registration lifetime in seconds; the client refreshes at expires − 60. · 60–86400"},
+          {"k":"number","n":"buttonPin","l":"GPIO pin wired to the doorbell button","v":"","h":""},
+          {"k":"switch","n":"buttonActiveLow","l":"Button is active-low","on":true,"h":"For pull-up + normally-open wiring: a press pulls the GPIO low."},
+          {"k":"number","n":"rtpPortHint","l":"Start of the local RTP port scan","v":"5004","h":"1024–65535"}
+        ] }
+      ] },
+      { id: "system", label: "System", sections: [
+        { id: "system", label: "System", fields: [
+          {"k":"number","n":"webPort","l":"Port for HTTP access","v":"80","h":"1–65535"},
+          {"k":"number","n":"httpsPort","l":"Port for HTTPS access","v":"443","h":"1–65535"},
+          {"k":"text","n":"httpsCertificate","l":"Path to public SSL certificate","v":"","h":""},
+          {"k":"text","n":"httpsCertificateKey","l":"Path to private SSL key","v":"","h":""},
+          {"k":"select","n":"logLevel","l":"Severity of logging","v":"debug","wide":false,"h":""},
+          {"k":"switch","n":"unsafe","l":"Disable authentication","on":false,"h":"Turns off HTTP authentication for every endpoint — anyone who can reach the camera can view and control it. Use only on a trusted network or for local debugging."},
+          {"k":"number","n":"buffer","l":"Maximum buffer size","v":"1024","h":"Per-client send-buffer cap in KiB (RTSP, HTTP, WebSocket, NETIP). Default 1024 = 1 MiB."},
+          {"k":"switch","n":"plugins","l":"Enable plugin support","on":false,"h":""},
+          {"k":"switch","n":"telemetry","l":"Enable anonymous telemetry","on":true,"h":""}
+        ] },
+        { id: "watchdog", label: "Watchdog", fields: [
+          {"k":"switch","n":"enabled","l":"Enable Watchdog","on":true,"h":""},
+          {"k":"number","n":"timeout","l":"Watchdog timeout","v":"300","h":"Seconds without a healthy frame before the watchdog restarts majestic."}
+        ] }
+      ] }
+    ];
+
+const NOTES = {
+  A: '<b>A · Tree + search — the direction chosen in the issue.</b> The full tree stays the primary navigation; the search box <i>filters</i> it rather than replacing it. A category that matches keeps all its subsections; a subsection is kept when its own name matches or when any of its fields\u2019 names or descriptions do. Matches are highlighted in the tree and again in the panel. Subsections are indented so the hierarchy reads at a glance. Try <b>codec</b>, <b>gain</b> or <b>rtsp</b>.',
+  B: '<b>B · Rail + section tabs — smallest change to what ships.</b> The category rail is untouched; the right column gains a tab strip, and <i>All</i> stacks the category the way the page does today. Tradeoff: two clicks across categories, and the strip runs long on Network &amp; Integrations.',
+  C: '<b>C · Search-first — answers the actual complaint.</b> One flat index over every field in every section; browse collapses to an accordion. Tradeoff: furthest from today’s UI, and it only helps if you roughly know the setting’s name — which is why A and B carry the same search beside a full tree.'
+};
+
+const S = { dir: 'A', dev: 'd', theme: 'dark', active: 'isp', cat: 'image',
+  open: 'video', q: '', view: 'list', catOpen: false, dirty: {}, saved: false,
+  openA: { image: true } };
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const flat = () => MODEL.flatMap((g) => g.sections.map((s) => ({ g: g, s: s })));
+const find = (id) => (flat().find((x) => x.s.id === id) || flat()[0]).s;
+const groupOf = (id) => (flat().find((x) => x.s.id === id) || flat()[0]).g;
+const isMobile = () => S.dev === 'm';
+const nFields = (s) => s.fields.filter((f) => f.k !== 'head' && f.k !== 'frame').length;
+
+const norm = (s) => String(s == null ? '' : s).toLowerCase();
+const q_ = () => S.q.trim().toLowerCase();
+
+/* escape, then wrap the matched run in <mark> */
+function mark(text, q) {
+  const t = String(text == null ? '' : text);
+  if (!q) return esc(t);
+  const i = norm(t).indexOf(q);
+  if (i < 0) return esc(t);
+  return esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) +
+    '</mark>' + esc(t.slice(i + q.length));
+}
+
+const fieldMatches = (s, q) => s.fields.filter((f) => f.k !== 'head' && f.k !== 'frame' &&
+  (norm(f.l).includes(q) || norm(f.h).includes(q))).length;
+const secMatchesField = (s, q) => fieldMatches(s, q) > 0;
+
+/* the reporter's rule: a category that matches keeps all of its subsections;
+   otherwise keep a subsection when its own name matches, or when any of its
+   fields' names or descriptions do */
+function filterTree(q) {
+  if (!q) return MODEL.map((g) => ({ g: g, sections: g.sections }));
+  const out = [];
+  for (const g of MODEL) {
+    const gm = norm(g.label).includes(q);
+    const secs = gm ? g.sections
+      : g.sections.filter((s) => norm(s.label).includes(q) || secMatchesField(s, q));
+    if (gm || secs.length) out.push({ g: g, sections: secs });
+  }
+  return out;
+}
+
+function hits() {
+  const q = S.q.trim().toLowerCase();
+  if (!q) return [];
+  const out = [];
+  for (const g of MODEL) for (const s of g.sections) for (const f of s.fields) {
+    if (f.k === 'head' || f.k === 'frame') continue;
+    if ((f.l + ' ' + f.n + ' ' + s.label).toLowerCase().includes(q)) out.push({ g: g, s: s, f: f });
+  }
+  return out;
+}
+
+/* ── one field ─────────────────────────────────────────────────────────── */
+function field(sec, f) {
+  const key = sec.id + '.' + f.n;
+  if (f.k === 'head') return '<h5>' + esc(f.l) + '</h5>';
+  if (f.k === 'frame') return '<div class="row"><div class="roi">' +
+    '<i style="left:6%;top:10%;width:34%;height:46%"></i>' +
+    '<i style="left:58%;top:44%;width:28%;height:38%"></i></div>' +
+    '<div class="ghost" style="margin-top:10px;padding:6px 12px;font-size:16px;line-height:24px">Clear all regions</div></div>';
+
+  const dirty = S.dirty[key] !== undefined;
+  const reset = '<button class="reset" title="Reset to default" data-act="reset">↺</button>';
+  const q = q_();
+  const hint = f.h ? '<div class="hint">' + mark(f.h, q) + '</div>' : '';
+  let inner;
+
+  if (f.k === 'switch') {
+    const on = dirty ? S.dirty[key] : f.on;
+    inner = '<div class="ctlrow"><div class="ctl"><div class="sw' + (on ? ' on' : '') +
+      '" data-act="toggle:' + esc(key) + '"><span class="track"><i></i></span>' +
+      '<span>' + mark(f.l, q) + '</span></div></div>' + reset + '</div>';
+  } else {
+    let c;
+    if (f.k === 'range') {
+      const pct = Math.round(((f.v - f.lo) / ((f.hi - f.lo) || 1)) * 100);
+      c = '<div class="rng"><div class="trk"><u></u><b style="left:calc(' + pct +
+        '% - 8px)"></b></div><div class="val">' + esc(f.v) + '</div></div>';
+    } else if (f.k === 'number') {
+      c = '<div class="box num">' + esc(f.v) + '</div>';
+    } else if (f.k === 'select') {
+      c = '<div class="sel"><div class="box">' + esc(f.v) + '</div>' +
+        '<svg width="12" height="8" viewBox="0 0 12 8" fill="none"><path d="M1 1.5 6 6.5 11 1.5" ' +
+        'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>';
+    } else if (f.k === 'array') {
+      c = '<div>' + (f.rows || []).map((r) => '<div class="arr"><div class="box">' + esc(r.v) +
+        '</div><div class="del">×</div></div>').join('') +
+        '<div class="ghost" style="margin-top:4px">+ Add region</div></div>';
+    } else {
+      c = '<div class="box">' + esc(f.v) + '</div>';
+    }
+    /* the control keeps its own width cap so the reset glyph lands right
+       after it, not stranded at the column edge */
+    const cap = isMobile()
+      ? (f.k === 'number' ? '160px' : 'none')
+      : (f.k === 'number' ? '160px' : f.k === 'array' ? '320px'
+        : (f.k === 'select' && !f.wide) ? '256px' : 'none');
+    inner = '<label>' + mark(f.l, q) + '</label><div class="ctlrow">' +
+      '<div class="ctl" style="max-width:' + cap + '">' + c + '</div>' + reset + '</div>';
+  }
+  return '<div class="row' + (dirty ? ' dirty' : '') + '">' + inner + hint + '</div>';
+}
+
+function panel(sec) {
+  if (sec.id === 'live') {
+    const knobs = sec.fields.map((f) => field(sec, f)).join('');
+    if (isMobile())
+      return '<div class="card"><div class="hint" style="margin:0 0 6px">Live preview</div>' +
+        '<div class="video" style="margin-bottom:14px"></div>' +
+        '<h3 style="margin-bottom:8px">Live adjustments</h3>' + knobs + '</div>';
+    return '<div style="display:flex;gap:24px;align-items:flex-start">' +
+      '<div style="flex:1 1 58%;min-width:0" class="card"><div class="hint" style="margin:0 0 6px">Live preview</div>' +
+      '<div class="video"></div></div>' +
+      '<div style="flex:1 1 42%;min-width:0" class="card"><h3>Live adjustments</h3>' + knobs + '</div></div>';
+  }
+  return '<div class="card"><h3>' + esc(sec.label) + '</h3><div class="mj-cols">' +
+    sec.fields.map((f) => field(sec, f)).join('') + '</div></div>';
+}
+
+/* Save and Apply live together in the sticky bar. Today Save is pinned to the
+   bottom while the "Apply now" banner appears at the top of the form
+   (mj-settings.js: form.insertBefore(bar, form.children[1])), so applying a
+   saved change means scrolling back up. */
+function toolbar() {
+  const n = Object.keys(S.dirty).length;
+  /* one rule for both buttons: each is present only while its action is
+     available, so the bar itself is absent until there is something to do */
+  if (!n && !S.saved) return '';
+  const msg = S.saved
+    ? 'Saved. Resolution, codec and frame-rate changes need a pipeline reload.'
+    : n + ' change' + (n === 1 ? '' : 's') + ' pending.';
+  return '<div class="toolbar"><span>' + msg + '</span>' +
+    (S.saved ? '<button class="btn warn" data-act="apply">Apply now</button>' : '') +
+    (n ? '<button class="btn" data-act="save">Save Changes</button>' : '') + '</div>';
+}
+
+const SEARCH_BOX = () => '<div class="search">' +
+  '<svg class="ico" width="15" height="15" viewBox="0 0 16 16" fill="none">' +
+  '<circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.6"/>' +
+  '<path d="M10.8 10.8 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' +
+  '<input id="q" type="text" placeholder="Search settings…" value="' + esc(S.q) + '">' +
+  (S.q ? '<span class="clr" data-act="clear">×</span>' : '') + '</div>';
+
+const RESULTS = () => {
+  const h = hits();
+  const secs = new Set(h.map((x) => x.s.id));
+  return '<div class="cap">' + h.length + (h.length === 1 ? ' setting' : ' settings') +
+    ' in ' + secs.size + ' sections</div>' +
+    h.slice(0, 12).map((x) => '<div class="hit' + (x.s.id === S.active ? ' on' : '') +
+      '" data-act="sec:' + esc(x.s.id) + '"><b>' + esc(x.f.l) + '</b><s>' +
+      esc(x.g.label) + ' › ' + esc(x.s.label) + '</s></div>').join('');
+};
+
+const CHROME = () => isMobile()
+  ? '<div class="nav"><div class="wrap navrow"><img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjMyIiBoZWlnaHQ9IjY0IiB2aWV3Qm94PSIwIDAgMjMyIDY0IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHN0eWxlPSJiYWNrZ3JvdW5kLWNvbG9yOnRyYW5zcGFyZW50OyIgZmlsbD0iI2ZmZmZmZiI+Cgk8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLjMzMzMzMzMsMCwwLC0xLjMzMzMzMzMsMCwyNjkuMTMzMzMpIj4KCQk8cGF0aCBkPSJtIDE5LjA5MjUzNiwxNjEuOTA5OSAtMi45NDE1LC0zLjQzMTAyIDEuNTcyOTk0LC0xLjM0ODI4IGMgMi41NTA4NzgsLTIuMTg3MzIgNS42NzcxODQsLTMuMjgwNiA4LjgwNDI3MiwtMy4yODA2IDMuMTI2MzMyLDAgNi4yNTMxNjEsMS4wOTM1NCA4LjgwMzUzNywzLjI3OTg2IGwgMS41NDc5ODQsMS4zMjczMiAtMi45NDE1LDMuNDMxMDIgLTEuNTQ3OTg0LC0xLjMyNzMyIGMgLTMuMzk3MjQxLC0yLjkxMjE4IC04LjMyNzgyMywtMi45MTIzIC0xMS43MjQ4MTEsMy44ZS00IHoiIC8+CgkJPHBhdGggZD0ibSAxMTkuNjIwMjcsMTgzLjA3NzQ0IGMgLTEuMTU5NDUsMCAtMi4wODE1MSwtMC4yODYxNCAtMi43NDAzMiwtMC44NTEwNCAtMC42MzY0NywtMC41NDUzMiAtMS4wOTM1NywtMS4xOTcyOCAtMS4zNTg5NSwtMS45MzgyIGwgLTAuMDA1LDIuNDU4MjQgaCAtNC4yNzU0NCBWIDE2OC4wNTg4IGggNC4yNzU0NCB2IDkuNDgzOTIgYyAwLDAuMzMyNDIgMC4wNzA4LDAuNjI4NDIgMC4yMDk2MywwLjg3OTc0IDAuMTM5NiwwLjI1MzU4IDAuMzMwNzMsMC40NzEwNiAwLjU2NzQ5LDAuNjQ2NTYgMC4yMzg1MiwwLjE3NjIgMC41MTExOSwwLjMwNTcyIDAuODEwMjIsMC4zODUwNiAwLjMwMzU0LDAuMDgwNCAwLjYyMDM3LDAuMTIxIDAuOTQyMjUsMC4xMjEgMC43MTczMSwwIDEuMjIwNDcsLTAuMjEzMjYgMS40OTUzOSwtMC42MzQwNiAwLjI4Mjk2LC0wLjQzNDEgMC40MjY2MiwtMS4xMTg0MiAwLjQyNjYyLC0yLjAzMzgyIHYgLTguODQ4NCBoIDQuMjc1ODEgdiA5LjE4MDE0IGMgMCwxLjg1MzQgLTAuMzkyMiwzLjMwMzU4IC0xLjE2NTUsNC4zMTAzOCAtMC43Nzk1NywxLjAxMzgyIC0xLjk0MjY1LDEuNTI4MTIgLTMuNDU3ODYsMS41MjgxMiB6IiAvPgoJCTxwYXRoIGQ9Im0gMTAyLjA5NTIxLDE4My4wNzc0NCBjIC0xLjA5NDE3LDAgLTIuMDgxODQsLTAuMTgzOCAtMi45MzU5NzUsLTAuNTQ2MTYgLTAuODU2MTUsLTAuMzYyNzggLTEuNTg3OTMsLTAuODg2NTYgLTIuMTc0NjgsLTEuNTU3MTYgLTAuNTg1NzUsLTAuNjY5NjIgLTEuMDMzOTgsLTEuNDg0NTggLTEuMzMxLC0yLjQyMjU4IC0wLjI5NjAxLC0wLjkzNDIyIC0wLjQ0NjExLC0xLjk4OTE4IC0wLjQ0NjExLC0zLjEzNTMyIDAsLTEuMTY0MiAwLjE1NDc4LC0yLjIzMzM0IDAuNDYwMDksLTMuMTc3NiAwLjMwNjgxLC0wLjk0ODMgMC43NjkzMywtMS43NjM1IDEuMzczNjUsLTIuNDIzMyAwLjYwNDMzLC0wLjY2MDgyIDEuMzU0MjcsLTEuMTgwMDQgMi4yMjg3NSwtMS41NDI4NCAwLjg3MjcxNSwtMC4zNjIwNCAxLjg3OTI2NSwtMC41NDU0MiAyLjk5MTUxNSwtMC41NDU0MiAxLjMzMTQyLDAgMi41Mzc0MSwwLjIxNjU0IDMuNTg0MzcsMC42NDM2MiAxLjA0OTIzLDAuNDI4NTggMS45MTE3OCwxLjAzMzggMi41NjMwNiwxLjc5ODggbCAwLjA1MDgsMC4wNTg4IC0yLjE1OTIzLDIuNjkxNzggLTAuMDc0MywtMC4wNzY0IGMgLTAuNDUzNDQsLTAuNDY3MjYgLTAuOTQ5NjksLTAuODcyNjggLTEuNDc0NDMsLTEuMjA0ODYgLTAuNTE2MiwtMC4zMjY2NCAtMS4xOTY0MywtMC40OTIwOCAtMi4wMjA5NSwtMC40OTIwOCAtMS4wNzI4MiwwIC0xLjg2NzA0LDAuMjcwNzggLTIuMzYxMTQsMC44MDUwNiAtMC40OTY2MTUsMC41MzYwNCAtMC43NDg0MjUsMS4yNzQ3MiAtMC43NDg0MjUsMi4xOTU2NCB2IDAuMTI1IGggOS4zMDczODUgdiAxLjMwOTI4IGMgMCwwLjk3OTQ0IC0wLjEyNjgsMS45MzE1MiAtMC4zNzY2LDIuODI4NiAtMC4yNTA4MiwwLjkwMDg0IC0wLjY1NTg5LDEuNzA2MTggLTEuMjA0NDgsMi4zOTQ2MiAtMC41NDk4NSwwLjY4OTE4IC0xLjI2NzMzLDEuMjQ2ODYgLTIuMTMyMDIsMS42NTYxIC0wLjg2NTY5LDAuNDA5IC0xLjkxNTM1LDAuNjE2NCAtMy4xMjAyNCwwLjYxNjQgeiBtIDAuMDgzMSwtMy4xOTg1OCBjIDAuNzkyMTMsMCAxLjM4NDcxLC0wLjI2MTA2IDEuNzYwNTYsLTAuNzc2MDIgMC4zODIxMywtMC41MjQ0OCAwLjU3NTU4LC0xLjIyNjAyIDAuNTc1NTgsLTIuMDg0OTQgdiAtMC4xNTQ0IGggLTQuODkzMzA1IHYgMC4xMjY4IGMgMCwwLjg3NDQ4IDAuMjI5MiwxLjU4MzY2IDAuNjgxMTI1LDIuMTA2NjQgMC40NDg5MSwwLjUxODk2IDEuMDgwMTUsMC43ODE5IDEuODc2MDQsMC43ODE5IHoiIC8+CgkJPHBhdGggZD0ibSA4Ny40Mzg0NjgsMTgzLjA3NzQ0IGMgLTAuOTU0MzIsMCAtMS44MTM0NTQsLTAuMjY1ODggLTIuNTUzODYsLTAuNzkwMzYgLTAuNjkwOTQ4LC0wLjQ4OTg0IC0xLjE1NTQ4MiwtMS4xMTg2OCAtMS4zODM5NTYsLTEuODcwOSB2IDIuMzMwMjYgSCA3OS4yMjQ4NSB2IC0yMC4yMTEzMiBoIDQuMjc1ODAyIHYgNy44NzE1OCBjIDAuMTEzOTgsLTAuMzQxMiAwLjI3ODY5OCwtMC42NjY2OCAwLjQ5MTM1NCwtMC45Njg3MiAwLjI0MzAzNiwtMC4zNDY5OCAwLjU0MzUxNCwtMC42NTE3NiAwLjg5MTQ5OCwtMC45MDU4NCAwLjM0Njk3OCwtMC4yNTMwOCAwLjc0MTM5MiwtMC40NTI4OCAxLjE3MjQ4LC0wLjU5MzI0IDAuNDMwODM4LC0wLjE0MDYgMC44OTYxNiwtMC4yMTE4NCAxLjM4MjQ4NCwtMC4yMTE4NCAxLjg2NDQ1LDAgMy4yOTMxODIsMC42Njg0IDQuMjQ2NzQ4LDEuOTg2MDIgMC45NDY1MzgsMS4zMDgzMiAxLjQyNjI1LDMuMjI2NzIgMS40MjYyNSw1LjcwMjc4IDAsMi40NzU4IC0wLjQ3OTgyOCw0LjM5IC0xLjQyNjYxNiw1LjY4OTU0IC0wLjk1MzU2OCwxLjMwODU4IC0yLjM4MjE4MiwxLjk3MjA0IC00LjI0NjM4MiwxLjk3MjA0IHogbSAtMS4zNTMwNjIsLTMuNTAyMzYgYyAwLjc0MTkxNCwwIDEuMzY0NDc2LC0wLjI2NDEyIDEuODUwMjk4LC0wLjc4NDg0IDAuNDg3MzMsLTAuNTIyNzQgMC43MzQ0NTYsLTEuMjM5NzQgMC43MzQ0NTYsLTIuMTMxMjggdiAtMi41MTM0MiBjIDAsLTAuODkyMDQgLTAuMjQ3MDEsLTEuNjA4OCAtMC43MzQwODgsLTIuMTMxMjggLTAuNDg1NTcsLTAuNTIwNzIgLTEuMTA4MjQ4LC0wLjc4NDg0IC0xLjg1MDY2NiwtMC43ODQ4NCAtMC43NDkxOTYsMCAtMS4zNzYwOTQsMC4xODQgLTEuODYzMTcsMC41NDc2MiAtMC40ODU1NzIsMC4zNjE1NiAtMC43MjE1ODQsMC44NDcxNCAtMC43MjE1ODQsMS40ODUxIHYgNC4yODA1OCBjIDAsMC42MzcyMiAwLjIzNjAxMiwxLjEyMzA2IDAuNzIxNTg0LDEuNDg1MSAwLjQ4NzU3OCwwLjM2MzMgMS4xMTQ0NzgsMC41NDcyNiAxLjg2MzE3LDAuNTQ3MjYgeiIgLz4KCQk8cGF0aCBkPSJtIDI2LjUyOTAzNiwxODYuMzg2MzYgYyAtNC43MTQ2MDYsMCAtOC41MzYxNiwtMy44MjE1NiAtOC41MzYxNiwtOC41MzYxNiAwLC00LjcxNDM2IDMuODIxNTU0LC04LjUzNjU0IDguNTM2MTYsLTguNTM2NTQgNC43MTQzNTYsMCA4LjUzNjUzMSwzLjgyMjE4IDguNTM2NTMxLDguNTM2NTQgMCw0LjcxNDYgLTMuODIyMTc1LDguNTM2MTYgLTguNTM2NTMxLDguNTM2MTYgeiIgLz4KCQk8cGF0aCBkPSJtIDE0MC41NjAxNiwxODcuNTIzOSB2IC0xOS40NjUxIGggNC4zODY1MSB2IDYuOTU5MTIgaCA0LjgyMTU5IGMgMC45MTA2MywwIDEuNzQwNzEsMC4xNTYgMi40NjcwNiwwLjQ2MzQgMC43MjY4NSwwLjMwNzU2IDEuMzU1MjcsMC43Mzc2IDEuODY3OTUsMS4yNzg0IDAuNTEyOTQsMC41NDA4MiAwLjkxNDg2LDEuMjAyMDQgMS4xOTQ1NSwxLjk2NTc4IDAuMjc4NDQsMC43NjE1IDAuNDE5NjQsMS42MTgwNiAwLjQxOTY0LDIuNTQ1NzggMCwwLjkwODYyIC0wLjE0MTIsMS43NjAwMiAtMC40MTk2NCwyLjUzMTA2IC0wLjI3OTY5LDAuNzcyMjggLTAuNjgxMzYsMS40Mzg3IC0xLjE5NDU1LDEuOTc5NzYgLTAuNTEzNDQsMC41NDEwNCAtMS4xNDE4NSwwLjk3MTQ2IC0xLjg2Nzk1LDEuMjc4NzYgLTAuNzI2MzUsMC4zMDcwNiAtMS41NTY0MywwLjQ2MzA0IC0yLjQ2NzA2LDAuNDYzMDQgeiBtIDQuMzg2NTEsLTMuODMzNzQgaCA0LjMyNDcyIGMgMC41OTg1NSwwIDEuMDc0NjYsLTAuMTU0NiAxLjQxNDExLC0wLjQ1OTM2IDAuMzM2OTQsLTAuMzAyMDQgMC41MDc5LC0wLjc1NzA0IDAuNTA3OSwtMS4zNTIzMiB2IC0xLjIxNTE0IGMgMCwtMC41OTU1NCAtMC4xNzA5NiwtMS4wNTA0MiAtMC41MDc5LC0xLjM1MTk2IC0wLjMzODk1LC0wLjMwNDggLTAuODE0ODEsLTAuNDU5MzYgLTEuNDE0MTEsLTAuNDU5MzYgaCAtNC4zMjQ3MiB6IiAvPgoJCTxwYXRoIGQ9Im0gMTI3LjUzMDEsMTg3LjUyNDI2IHYgLTMuNTMwMzIgaCAyLjQ4NTQ2IHYgLTEyLjQwNTU2IGggLTIuNDg1NDYgdiAtMy41Mjk1OCBoIDkuMzU3NDIgdiAzLjUyOTU4IGggLTIuNDg1NDYgdiAxMi40MDU1NiBoIDIuNDg1NDYgdiAzLjUzMDMyIHoiIC8+CgkJPHBhdGggZD0ibSA2Ny45NTMxNDMsMTg3Ljg1NTI2IGMgLTEuMjc2MTk0LDAgLTIuNDU4OTgyLC0wLjIxNjA4IC0zLjUxNTIzOCwtMC42NDIxNCAtMS4wNTkwMTYsLTAuNDI3NTggLTEuOTcyMDQ2LC0xLjA3MjUyIC0yLjcxNDIxMiwtMS45MTY4NiAtMC43NDE5MTQsLTAuODQzODYgLTEuMzI0NDAyLC0xLjkwNDg4IC0xLjczMTEzOCwtMy4xNTM3MiAtMC40MDYyMzIsLTEuMjQ1OCAtMC42MTIzNTIsLTIuNzA5NyAtMC42MTIzNTIsLTQuMzUxMiAwLC0xLjY0MTc0IDAuMjA2MTIsLTMuMTA1NzQgMC42MTIzNTIsLTQuMzUxNTYgMC40MDY5ODYsLTEuMjQ5MzIgMC45ODk0NzYsLTIuMzEwMzYgMS43MzExMzgsLTMuMTUzNyAwLjc0MTkxNCwtMC44NDQ2MiAxLjY1NTE5NiwtMS40ODk1NiAyLjcxNDIxMiwtMS45MTY4OCAxLjA1NjI1NiwtMC40MjYwNiAyLjIzOTA0NCwtMC42NDIxNCAzLjUxNTIzOCwtMC42NDIxNCAxLjI3NjQ0NCwwIDIuNDU4ODY0LDAuMjE2MDggMy41MTQ4NjgsMC42NDIxNCAxLjA1ODUxNCwwLjQyNzA4IDEuOTcxOTEzLDEuMDcyMDIgMi43MTQ1ODEsMS45MTY4OCAwLjc0MTE2LDAuODQzMzQgMS4zMjM2NSwxLjkwNDM4IDEuNzMxMTM4LDMuMTUzNyAwLjQwNjIzMiwxLjI0NzMyIDAuNjEyMzUyLDIuNzExMzIgMC42MTIzNTIsNC4zNTE1NiAwLDEuNjQwMjYgLTAuMjA2MTIsMy4xMDQxNCAtMC42MTIzNTIsNC4zNTEyIC0wLjQwNzIzOCwxLjI0ODg0IC0wLjk4OTcyNiwyLjMwOTg2IC0xLjczMTEzOCwzLjE1MzcyIC0wLjc0MjY2OCwwLjg0NDg0IC0xLjY1NjA2NywxLjQ4OTggLTIuNzE0NTgxLDEuOTE2ODYgLTEuMDU2MDA0LDAuNDI2MDYgLTIuMjM4Njc2LDAuNjQyMTQgLTMuNTE0ODY4LDAuNjQyMTQgeiBtIDAsLTMuOTE2NDggYyAxLjIzNTc3LDAgMi4yMTA0MzYsLTAuNDA3MDYgMi44OTczNjYsLTEuMjEgMC42OTA0NDYsLTAuODA3NDQgMS4wNDA4MTYsLTEuOTg1NTQgMS4wNDA4MTYsLTMuNTAxMjYgdiAtMi44NzIzNiBjIDAsLTEuNTE1OTYgLTAuMzUwMzcsLTIuNjkzOTIgLTEuMDQwODE2LC0zLjUwMTYyIC0wLjY4NzE4LC0wLjgwMjY4IC0xLjY2MTU5NiwtMS4yMDk2MiAtMi44OTczNjYsLTEuMjA5NjIgLTEuMjM1NzcyLDAgLTIuMjEwNDM4LDAuNDA2OTQgLTIuODk3MzY4LDEuMjA5NjIgLTAuNjkwNDQ0LDAuODA3MiAtMS4wNDA4MTQsMS45ODUxNiAtMS4wNDA4MTQsMy41MDE2MiB2IDIuODcyMzYgYyAwLDEuNTE2NDggMC4zNTAzNywyLjY5NDMyIDEuMDQwODE0LDMuNTAxMjYgMC42ODY2OCwwLjgwMjk0IDEuNjYxNTk2LDEuMjEgMi44OTczNjgsMS4yMSB6IiAvPgoJCTxwYXRoIGQ9Im0gMTY2LjE2MDU1LDE4Ny44NTU2NCBjIC0xLjMxMzYsMCAtMi41MTU1LC0wLjIyNTU4IC0zLjU3MTUsLTAuNjcwNDYgLTEuMDU5MDIsLTAuNDQ1OTIgLTEuOTcxOTMsLTEuMTA5NDggLTIuNzEzODUsLTEuOTcyNDIgLTAuNzQxNDEsLTAuODYxNjYgLTEuMzIzNDEsLTEuOTQxNDYgLTEuNzMwNCwtMy4yMDg4NiAtMC40MDYyMywtMS4yNjM5IC0wLjYxMjM1LC0yLjcyNzY2IC0wLjYxMjM1LC00LjM1MDg0IDAsLTEuNjQxNzQgMC4yMDYxMiwtMy4wOTY3NCAwLjYxMjM1LC00LjMyMzk4IDAuNDA3MjQsLTEuMjMxNSAwLjk4OTk2LC0yLjI3NDE0IDEuNzMxODcsLTMuMDk4OTIgMC43NDIxNywtMC44MjYwMiAxLjY1NTIsLTEuNDU2OSAyLjcxNDIyLC0xLjg3NDk0IDEuMDU1NSwtMC40MTY3NiAyLjI1NjU2LC0wLjYyODE2IDMuNTY5NjYsLTAuNjI4MTYgMS43OTY5MiwwIDMuMzA2MjgsMC40MDk1MiA0LjQ4NTgxLDEuMjE3NzIgMS4xNzc3NywwLjgwNjk0IDIuMTQwODUsMS45NjY2NCAyLjg2MjQzLDMuNDQ3MiBsIDAuMDM4MiwwLjA3OSAtMy41OTY4OSwyLjA4ODI2IC0wLjAzOSwtMC4xMDQ4IGMgLTAuMjg4MjIsLTAuNzczOCAtMC43Mzk0NSwtMS40NDQ0IC0xLjM0MjAyLC0xLjk5MyAtMC41OTYzLC0wLjU0MjggLTEuNDA2NTcsLTAuODE3NTYgLTIuNDA4NTksLTAuODE3NTYgLTEuMjAwNjIsMCAtMi4xNzYzNSwwLjM5NDA2IC0yLjg5OTk0LDEuMTcxMzggLTAuNzI1MzQsMC43NzkwNiAtMS4wOTM0MSwxLjkzMjc4IC0xLjA5MzQxLDMuNDI5MTYgdiAzLjA5MzA0IGMgMCwxLjQ5NjM4IDAuMzY4MDcsMi42NTA0NiAxLjA5MzQxLDMuNDI5NTQgMC43MjM1OSwwLjc3NzU2IDEuNjk5MzIsMS4xNzE3NCAyLjg5OTk0LDEuMTcxNzQgMS4wMjAzNSwwIDEuODAyNjEsLTAuMjM4MSAyLjMyNTg0LC0wLjcwNzYgMC41Mjc1LC0wLjQ3NDU0IDAuOTIzMjMsLTEuMTE1NzIgMS4xNzUwNSwtMS45MDU4NCBsIDAuMDMzNSwtMC4xMDY2IDMuNzk2NTksMS45NzA1NiAtMC4wMzY4LDAuMDgxIGMgLTAuNzA0NSwxLjU3NTIyIC0xLjY1NTA0LDIuNzQ2MDQgLTIuODI1MjgsMy40Nzk5MiAtMS4xNjk5OSwwLjczMzY0IC0yLjY3MzQ4LDEuMTA1NTYgLTQuNDY4ODksMS4xMDU1NiB6IiAvPgoJCTxwYXRoIGQ9Ik0gMTYuMTQwNzM4LDE5MS42ODkgMCwxNzcuODUwNTYgMTYuMTQ1MTUyLDE2NC4wMDc3IGwgMi45NDE1LDMuNDMwNjYgLTEyLjE0MzM0MzMsMTAuNDEyMiAxMi4xMzg5MjkzLDEwLjQwNzQyIHoiIC8+CgkJPHBhdGggZD0ibSAzNi44OTU2MzksMTkxLjcwNjI4IC0yLjk0MTEzNCwtMy40MzEzOCAxMi4xNjAyNiwtMTAuNDI0NyAtMTIuMTY1NDEsLTEwLjQyOTUgMi45NDExMzQsLTMuNDMxMDIgMTYuMTY3OTUyLDEzLjg2MDUyIHoiIC8+CgkJPHBhdGggZD0ibSAyNi41Mjc1NjYsMjAxLjg1IGMgLTMuMTI2NjQ2LC0xLjJlLTQgLTYuMjUzMjc2LC0xLjA5MzUyIC04LjgwMzkwNiwtMy4yODAyMiBsIC0xLjU3NDQ2MiwtMS4zNTAxMiAyLjk0MTUsLTMuNDMwNjQgMS41NzQ0NjQsMS4zNTAxMiBjIDMuMzk2OTg4LDIuOTExNjYgOC4zMjgxOSwyLjkxMjc4IDExLjcyNTE3NywzLjhlLTQgbCAxLjU1MzUwMiwtMS4zMzIxIDIuOTQxNDk4LDMuNDMxMzggLTEuNTUzNSwxLjMzMTcyIGMgLTIuNTUwODgsMi4xODY0NCAtNS42Nzc2MjcsMy4yNzk2MiAtOC44MDQyNzMsMy4yNzk0OCB6IiAvPgoJPC9nPgo8L3N2Zz4K" alt="OpenIPC" style="height:28px">' +
+    '<span style="font-size:12px;color:#fff;margin-left:4px">lite</span>' +
+    '<span style="margin-left:auto;display:inline-flex;flex-direction:column;gap:5px;padding:8px 4px">' +
+    '<i style="width:22px;height:2px;background:#fff;border-radius:2px"></i>'.repeat(3) +
+    '</span></div></div>' +
+    '<div class="wrap" style="padding-top:6px;font-size:12px;line-height:18px">' +
+    '<div class="pb"><i style="width:61%"></i></div><div class="pb" style="margin-bottom:6px"><i style="width:23%"></i></div>' +
+    '<div>hi3516av300 (hi3516cv500 family), imx415, 32 MB nor flash, 2.6.08.21-lite</div>' +
+    '<div style="display:flex;margin-top:2px;color:var(--sec-color)"><span>22.08.2026 11:42</span>' +
+    '<span style="margin-left:auto">46.2 °C</span></div></div>'
+  : '<div class="nav"><div class="wrap navrow"><img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjMyIiBoZWlnaHQ9IjY0IiB2aWV3Qm94PSIwIDAgMjMyIDY0IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHN0eWxlPSJiYWNrZ3JvdW5kLWNvbG9yOnRyYW5zcGFyZW50OyIgZmlsbD0iI2ZmZmZmZiI+Cgk8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLjMzMzMzMzMsMCwwLC0xLjMzMzMzMzMsMCwyNjkuMTMzMzMpIj4KCQk8cGF0aCBkPSJtIDE5LjA5MjUzNiwxNjEuOTA5OSAtMi45NDE1LC0zLjQzMTAyIDEuNTcyOTk0LC0xLjM0ODI4IGMgMi41NTA4NzgsLTIuMTg3MzIgNS42NzcxODQsLTMuMjgwNiA4LjgwNDI3MiwtMy4yODA2IDMuMTI2MzMyLDAgNi4yNTMxNjEsMS4wOTM1NCA4LjgwMzUzNywzLjI3OTg2IGwgMS41NDc5ODQsMS4zMjczMiAtMi45NDE1LDMuNDMxMDIgLTEuNTQ3OTg0LC0xLjMyNzMyIGMgLTMuMzk3MjQxLC0yLjkxMjE4IC04LjMyNzgyMywtMi45MTIzIC0xMS43MjQ4MTEsMy44ZS00IHoiIC8+CgkJPHBhdGggZD0ibSAxMTkuNjIwMjcsMTgzLjA3NzQ0IGMgLTEuMTU5NDUsMCAtMi4wODE1MSwtMC4yODYxNCAtMi43NDAzMiwtMC44NTEwNCAtMC42MzY0NywtMC41NDUzMiAtMS4wOTM1NywtMS4xOTcyOCAtMS4zNTg5NSwtMS45MzgyIGwgLTAuMDA1LDIuNDU4MjQgaCAtNC4yNzU0NCBWIDE2OC4wNTg4IGggNC4yNzU0NCB2IDkuNDgzOTIgYyAwLDAuMzMyNDIgMC4wNzA4LDAuNjI4NDIgMC4yMDk2MywwLjg3OTc0IDAuMTM5NiwwLjI1MzU4IDAuMzMwNzMsMC40NzEwNiAwLjU2NzQ5LDAuNjQ2NTYgMC4yMzg1MiwwLjE3NjIgMC41MTExOSwwLjMwNTcyIDAuODEwMjIsMC4zODUwNiAwLjMwMzU0LDAuMDgwNCAwLjYyMDM3LDAuMTIxIDAuOTQyMjUsMC4xMjEgMC43MTczMSwwIDEuMjIwNDcsLTAuMjEzMjYgMS40OTUzOSwtMC42MzQwNiAwLjI4Mjk2LC0wLjQzNDEgMC40MjY2MiwtMS4xMTg0MiAwLjQyNjYyLC0yLjAzMzgyIHYgLTguODQ4NCBoIDQuMjc1ODEgdiA5LjE4MDE0IGMgMCwxLjg1MzQgLTAuMzkyMiwzLjMwMzU4IC0xLjE2NTUsNC4zMTAzOCAtMC43Nzk1NywxLjAxMzgyIC0xLjk0MjY1LDEuNTI4MTIgLTMuNDU3ODYsMS41MjgxMiB6IiAvPgoJCTxwYXRoIGQ9Im0gMTAyLjA5NTIxLDE4My4wNzc0NCBjIC0xLjA5NDE3LDAgLTIuMDgxODQsLTAuMTgzOCAtMi45MzU5NzUsLTAuNTQ2MTYgLTAuODU2MTUsLTAuMzYyNzggLTEuNTg3OTMsLTAuODg2NTYgLTIuMTc0NjgsLTEuNTU3MTYgLTAuNTg1NzUsLTAuNjY5NjIgLTEuMDMzOTgsLTEuNDg0NTggLTEuMzMxLC0yLjQyMjU4IC0wLjI5NjAxLC0wLjkzNDIyIC0wLjQ0NjExLC0xLjk4OTE4IC0wLjQ0NjExLC0zLjEzNTMyIDAsLTEuMTY0MiAwLjE1NDc4LC0yLjIzMzM0IDAuNDYwMDksLTMuMTc3NiAwLjMwNjgxLC0wLjk0ODMgMC43NjkzMywtMS43NjM1IDEuMzczNjUsLTIuNDIzMyAwLjYwNDMzLC0wLjY2MDgyIDEuMzU0MjcsLTEuMTgwMDQgMi4yMjg3NSwtMS41NDI4NCAwLjg3MjcxNSwtMC4zNjIwNCAxLjg3OTI2NSwtMC41NDU0MiAyLjk5MTUxNSwtMC41NDU0MiAxLjMzMTQyLDAgMi41Mzc0MSwwLjIxNjU0IDMuNTg0MzcsMC42NDM2MiAxLjA0OTIzLDAuNDI4NTggMS45MTE3OCwxLjAzMzggMi41NjMwNiwxLjc5ODggbCAwLjA1MDgsMC4wNTg4IC0yLjE1OTIzLDIuNjkxNzggLTAuMDc0MywtMC4wNzY0IGMgLTAuNDUzNDQsLTAuNDY3MjYgLTAuOTQ5NjksLTAuODcyNjggLTEuNDc0NDMsLTEuMjA0ODYgLTAuNTE2MiwtMC4zMjY2NCAtMS4xOTY0MywtMC40OTIwOCAtMi4wMjA5NSwtMC40OTIwOCAtMS4wNzI4MiwwIC0xLjg2NzA0LDAuMjcwNzggLTIuMzYxMTQsMC44MDUwNiAtMC40OTY2MTUsMC41MzYwNCAtMC43NDg0MjUsMS4yNzQ3MiAtMC43NDg0MjUsMi4xOTU2NCB2IDAuMTI1IGggOS4zMDczODUgdiAxLjMwOTI4IGMgMCwwLjk3OTQ0IC0wLjEyNjgsMS45MzE1MiAtMC4zNzY2LDIuODI4NiAtMC4yNTA4MiwwLjkwMDg0IC0wLjY1NTg5LDEuNzA2MTggLTEuMjA0NDgsMi4zOTQ2MiAtMC41NDk4NSwwLjY4OTE4IC0xLjI2NzMzLDEuMjQ2ODYgLTIuMTMyMDIsMS42NTYxIC0wLjg2NTY5LDAuNDA5IC0xLjkxNTM1LDAuNjE2NCAtMy4xMjAyNCwwLjYxNjQgeiBtIDAuMDgzMSwtMy4xOTg1OCBjIDAuNzkyMTMsMCAxLjM4NDcxLC0wLjI2MTA2IDEuNzYwNTYsLTAuNzc2MDIgMC4zODIxMywtMC41MjQ0OCAwLjU3NTU4LC0xLjIyNjAyIDAuNTc1NTgsLTIuMDg0OTQgdiAtMC4xNTQ0IGggLTQuODkzMzA1IHYgMC4xMjY4IGMgMCwwLjg3NDQ4IDAuMjI5MiwxLjU4MzY2IDAuNjgxMTI1LDIuMTA2NjQgMC40NDg5MSwwLjUxODk2IDEuMDgwMTUsMC43ODE5IDEuODc2MDQsMC43ODE5IHoiIC8+CgkJPHBhdGggZD0ibSA4Ny40Mzg0NjgsMTgzLjA3NzQ0IGMgLTAuOTU0MzIsMCAtMS44MTM0NTQsLTAuMjY1ODggLTIuNTUzODYsLTAuNzkwMzYgLTAuNjkwOTQ4LC0wLjQ4OTg0IC0xLjE1NTQ4MiwtMS4xMTg2OCAtMS4zODM5NTYsLTEuODcwOSB2IDIuMzMwMjYgSCA3OS4yMjQ4NSB2IC0yMC4yMTEzMiBoIDQuMjc1ODAyIHYgNy44NzE1OCBjIDAuMTEzOTgsLTAuMzQxMiAwLjI3ODY5OCwtMC42NjY2OCAwLjQ5MTM1NCwtMC45Njg3MiAwLjI0MzAzNiwtMC4zNDY5OCAwLjU0MzUxNCwtMC42NTE3NiAwLjg5MTQ5OCwtMC45MDU4NCAwLjM0Njk3OCwtMC4yNTMwOCAwLjc0MTM5MiwtMC40NTI4OCAxLjE3MjQ4LC0wLjU5MzI0IDAuNDMwODM4LC0wLjE0MDYgMC44OTYxNiwtMC4yMTE4NCAxLjM4MjQ4NCwtMC4yMTE4NCAxLjg2NDQ1LDAgMy4yOTMxODIsMC42Njg0IDQuMjQ2NzQ4LDEuOTg2MDIgMC45NDY1MzgsMS4zMDgzMiAxLjQyNjI1LDMuMjI2NzIgMS40MjYyNSw1LjcwMjc4IDAsMi40NzU4IC0wLjQ3OTgyOCw0LjM5IC0xLjQyNjYxNiw1LjY4OTU0IC0wLjk1MzU2OCwxLjMwODU4IC0yLjM4MjE4MiwxLjk3MjA0IC00LjI0NjM4MiwxLjk3MjA0IHogbSAtMS4zNTMwNjIsLTMuNTAyMzYgYyAwLjc0MTkxNCwwIDEuMzY0NDc2LC0wLjI2NDEyIDEuODUwMjk4LC0wLjc4NDg0IDAuNDg3MzMsLTAuNTIyNzQgMC43MzQ0NTYsLTEuMjM5NzQgMC43MzQ0NTYsLTIuMTMxMjggdiAtMi41MTM0MiBjIDAsLTAuODkyMDQgLTAuMjQ3MDEsLTEuNjA4OCAtMC43MzQwODgsLTIuMTMxMjggLTAuNDg1NTcsLTAuNTIwNzIgLTEuMTA4MjQ4LC0wLjc4NDg0IC0xLjg1MDY2NiwtMC43ODQ4NCAtMC43NDkxOTYsMCAtMS4zNzYwOTQsMC4xODQgLTEuODYzMTcsMC41NDc2MiAtMC40ODU1NzIsMC4zNjE1NiAtMC43MjE1ODQsMC44NDcxNCAtMC43MjE1ODQsMS40ODUxIHYgNC4yODA1OCBjIDAsMC42MzcyMiAwLjIzNjAxMiwxLjEyMzA2IDAuNzIxNTg0LDEuNDg1MSAwLjQ4NzU3OCwwLjM2MzMgMS4xMTQ0NzgsMC41NDcyNiAxLjg2MzE3LDAuNTQ3MjYgeiIgLz4KCQk8cGF0aCBkPSJtIDI2LjUyOTAzNiwxODYuMzg2MzYgYyAtNC43MTQ2MDYsMCAtOC41MzYxNiwtMy44MjE1NiAtOC41MzYxNiwtOC41MzYxNiAwLC00LjcxNDM2IDMuODIxNTU0LC04LjUzNjU0IDguNTM2MTYsLTguNTM2NTQgNC43MTQzNTYsMCA4LjUzNjUzMSwzLjgyMjE4IDguNTM2NTMxLDguNTM2NTQgMCw0LjcxNDYgLTMuODIyMTc1LDguNTM2MTYgLTguNTM2NTMxLDguNTM2MTYgeiIgLz4KCQk8cGF0aCBkPSJtIDE0MC41NjAxNiwxODcuNTIzOSB2IC0xOS40NjUxIGggNC4zODY1MSB2IDYuOTU5MTIgaCA0LjgyMTU5IGMgMC45MTA2MywwIDEuNzQwNzEsMC4xNTYgMi40NjcwNiwwLjQ2MzQgMC43MjY4NSwwLjMwNzU2IDEuMzU1MjcsMC43Mzc2IDEuODY3OTUsMS4yNzg0IDAuNTEyOTQsMC41NDA4MiAwLjkxNDg2LDEuMjAyMDQgMS4xOTQ1NSwxLjk2NTc4IDAuMjc4NDQsMC43NjE1IDAuNDE5NjQsMS42MTgwNiAwLjQxOTY0LDIuNTQ1NzggMCwwLjkwODYyIC0wLjE0MTIsMS43NjAwMiAtMC40MTk2NCwyLjUzMTA2IC0wLjI3OTY5LDAuNzcyMjggLTAuNjgxMzYsMS40Mzg3IC0xLjE5NDU1LDEuOTc5NzYgLTAuNTEzNDQsMC41NDEwNCAtMS4xNDE4NSwwLjk3MTQ2IC0xLjg2Nzk1LDEuMjc4NzYgLTAuNzI2MzUsMC4zMDcwNiAtMS41NTY0MywwLjQ2MzA0IC0yLjQ2NzA2LDAuNDYzMDQgeiBtIDQuMzg2NTEsLTMuODMzNzQgaCA0LjMyNDcyIGMgMC41OTg1NSwwIDEuMDc0NjYsLTAuMTU0NiAxLjQxNDExLC0wLjQ1OTM2IDAuMzM2OTQsLTAuMzAyMDQgMC41MDc5LC0wLjc1NzA0IDAuNTA3OSwtMS4zNTIzMiB2IC0xLjIxNTE0IGMgMCwtMC41OTU1NCAtMC4xNzA5NiwtMS4wNTA0MiAtMC41MDc5LC0xLjM1MTk2IC0wLjMzODk1LC0wLjMwNDggLTAuODE0ODEsLTAuNDU5MzYgLTEuNDE0MTEsLTAuNDU5MzYgaCAtNC4zMjQ3MiB6IiAvPgoJCTxwYXRoIGQ9Im0gMTI3LjUzMDEsMTg3LjUyNDI2IHYgLTMuNTMwMzIgaCAyLjQ4NTQ2IHYgLTEyLjQwNTU2IGggLTIuNDg1NDYgdiAtMy41Mjk1OCBoIDkuMzU3NDIgdiAzLjUyOTU4IGggLTIuNDg1NDYgdiAxMi40MDU1NiBoIDIuNDg1NDYgdiAzLjUzMDMyIHoiIC8+CgkJPHBhdGggZD0ibSA2Ny45NTMxNDMsMTg3Ljg1NTI2IGMgLTEuMjc2MTk0LDAgLTIuNDU4OTgyLC0wLjIxNjA4IC0zLjUxNTIzOCwtMC42NDIxNCAtMS4wNTkwMTYsLTAuNDI3NTggLTEuOTcyMDQ2LC0xLjA3MjUyIC0yLjcxNDIxMiwtMS45MTY4NiAtMC43NDE5MTQsLTAuODQzODYgLTEuMzI0NDAyLC0xLjkwNDg4IC0xLjczMTEzOCwtMy4xNTM3MiAtMC40MDYyMzIsLTEuMjQ1OCAtMC42MTIzNTIsLTIuNzA5NyAtMC42MTIzNTIsLTQuMzUxMiAwLC0xLjY0MTc0IDAuMjA2MTIsLTMuMTA1NzQgMC42MTIzNTIsLTQuMzUxNTYgMC40MDY5ODYsLTEuMjQ5MzIgMC45ODk0NzYsLTIuMzEwMzYgMS43MzExMzgsLTMuMTUzNyAwLjc0MTkxNCwtMC44NDQ2MiAxLjY1NTE5NiwtMS40ODk1NiAyLjcxNDIxMiwtMS45MTY4OCAxLjA1NjI1NiwtMC40MjYwNiAyLjIzOTA0NCwtMC42NDIxNCAzLjUxNTIzOCwtMC42NDIxNCAxLjI3NjQ0NCwwIDIuNDU4ODY0LDAuMjE2MDggMy41MTQ4NjgsMC42NDIxNCAxLjA1ODUxNCwwLjQyNzA4IDEuOTcxOTEzLDEuMDcyMDIgMi43MTQ1ODEsMS45MTY4OCAwLjc0MTE2LDAuODQzMzQgMS4zMjM2NSwxLjkwNDM4IDEuNzMxMTM4LDMuMTUzNyAwLjQwNjIzMiwxLjI0NzMyIDAuNjEyMzUyLDIuNzExMzIgMC42MTIzNTIsNC4zNTE1NiAwLDEuNjQwMjYgLTAuMjA2MTIsMy4xMDQxNCAtMC42MTIzNTIsNC4zNTEyIC0wLjQwNzIzOCwxLjI0ODg0IC0wLjk4OTcyNiwyLjMwOTg2IC0xLjczMTEzOCwzLjE1MzcyIC0wLjc0MjY2OCwwLjg0NDg0IC0xLjY1NjA2NywxLjQ4OTggLTIuNzE0NTgxLDEuOTE2ODYgLTEuMDU2MDA0LDAuNDI2MDYgLTIuMjM4Njc2LDAuNjQyMTQgLTMuNTE0ODY4LDAuNjQyMTQgeiBtIDAsLTMuOTE2NDggYyAxLjIzNTc3LDAgMi4yMTA0MzYsLTAuNDA3MDYgMi44OTczNjYsLTEuMjEgMC42OTA0NDYsLTAuODA3NDQgMS4wNDA4MTYsLTEuOTg1NTQgMS4wNDA4MTYsLTMuNTAxMjYgdiAtMi44NzIzNiBjIDAsLTEuNTE1OTYgLTAuMzUwMzcsLTIuNjkzOTIgLTEuMDQwODE2LC0zLjUwMTYyIC0wLjY4NzE4LC0wLjgwMjY4IC0xLjY2MTU5NiwtMS4yMDk2MiAtMi44OTczNjYsLTEuMjA5NjIgLTEuMjM1NzcyLDAgLTIuMjEwNDM4LDAuNDA2OTQgLTIuODk3MzY4LDEuMjA5NjIgLTAuNjkwNDQ0LDAuODA3MiAtMS4wNDA4MTQsMS45ODUxNiAtMS4wNDA4MTQsMy41MDE2MiB2IDIuODcyMzYgYyAwLDEuNTE2NDggMC4zNTAzNywyLjY5NDMyIDEuMDQwODE0LDMuNTAxMjYgMC42ODY2OCwwLjgwMjk0IDEuNjYxNTk2LDEuMjEgMi44OTczNjgsMS4yMSB6IiAvPgoJCTxwYXRoIGQ9Im0gMTY2LjE2MDU1LDE4Ny44NTU2NCBjIC0xLjMxMzYsMCAtMi41MTU1LC0wLjIyNTU4IC0zLjU3MTUsLTAuNjcwNDYgLTEuMDU5MDIsLTAuNDQ1OTIgLTEuOTcxOTMsLTEuMTA5NDggLTIuNzEzODUsLTEuOTcyNDIgLTAuNzQxNDEsLTAuODYxNjYgLTEuMzIzNDEsLTEuOTQxNDYgLTEuNzMwNCwtMy4yMDg4NiAtMC40MDYyMywtMS4yNjM5IC0wLjYxMjM1LC0yLjcyNzY2IC0wLjYxMjM1LC00LjM1MDg0IDAsLTEuNjQxNzQgMC4yMDYxMiwtMy4wOTY3NCAwLjYxMjM1LC00LjMyMzk4IDAuNDA3MjQsLTEuMjMxNSAwLjk4OTk2LC0yLjI3NDE0IDEuNzMxODcsLTMuMDk4OTIgMC43NDIxNywtMC44MjYwMiAxLjY1NTIsLTEuNDU2OSAyLjcxNDIyLC0xLjg3NDk0IDEuMDU1NSwtMC40MTY3NiAyLjI1NjU2LC0wLjYyODE2IDMuNTY5NjYsLTAuNjI4MTYgMS43OTY5MiwwIDMuMzA2MjgsMC40MDk1MiA0LjQ4NTgxLDEuMjE3NzIgMS4xNzc3NywwLjgwNjk0IDIuMTQwODUsMS45NjY2NCAyLjg2MjQzLDMuNDQ3MiBsIDAuMDM4MiwwLjA3OSAtMy41OTY4OSwyLjA4ODI2IC0wLjAzOSwtMC4xMDQ4IGMgLTAuMjg4MjIsLTAuNzczOCAtMC43Mzk0NSwtMS40NDQ0IC0xLjM0MjAyLC0xLjk5MyAtMC41OTYzLC0wLjU0MjggLTEuNDA2NTcsLTAuODE3NTYgLTIuNDA4NTksLTAuODE3NTYgLTEuMjAwNjIsMCAtMi4xNzYzNSwwLjM5NDA2IC0yLjg5OTk0LDEuMTcxMzggLTAuNzI1MzQsMC43NzkwNiAtMS4wOTM0MSwxLjkzMjc4IC0xLjA5MzQxLDMuNDI5MTYgdiAzLjA5MzA0IGMgMCwxLjQ5NjM4IDAuMzY4MDcsMi42NTA0NiAxLjA5MzQxLDMuNDI5NTQgMC43MjM1OSwwLjc3NzU2IDEuNjk5MzIsMS4xNzE3NCAyLjg5OTk0LDEuMTcxNzQgMS4wMjAzNSwwIDEuODAyNjEsLTAuMjM4MSAyLjMyNTg0LC0wLjcwNzYgMC41Mjc1LC0wLjQ3NDU0IDAuOTIzMjMsLTEuMTE1NzIgMS4xNzUwNSwtMS45MDU4NCBsIDAuMDMzNSwtMC4xMDY2IDMuNzk2NTksMS45NzA1NiAtMC4wMzY4LDAuMDgxIGMgLTAuNzA0NSwxLjU3NTIyIC0xLjY1NTA0LDIuNzQ2MDQgLTIuODI1MjgsMy40Nzk5MiAtMS4xNjk5OSwwLjczMzY0IC0yLjY3MzQ4LDEuMTA1NTYgLTQuNDY4ODksMS4xMDU1NiB6IiAvPgoJCTxwYXRoIGQ9Ik0gMTYuMTQwNzM4LDE5MS42ODkgMCwxNzcuODUwNTYgMTYuMTQ1MTUyLDE2NC4wMDc3IGwgMi45NDE1LDMuNDMwNjYgLTEyLjE0MzM0MzMsMTAuNDEyMiAxMi4xMzg5MjkzLDEwLjQwNzQyIHoiIC8+CgkJPHBhdGggZD0ibSAzNi44OTU2MzksMTkxLjcwNjI4IC0yLjk0MTEzNCwtMy40MzEzOCAxMi4xNjAyNiwtMTAuNDI0NyAtMTIuMTY1NDEsLTEwLjQyOTUgMi45NDExMzQsLTMuNDMxMDIgMTYuMTY3OTUyLDEzLjg2MDUyIHoiIC8+CgkJPHBhdGggZD0ibSAyNi41Mjc1NjYsMjAxLjg1IGMgLTMuMTI2NjQ2LC0xLjJlLTQgLTYuMjUzMjc2LC0xLjA5MzUyIC04LjgwMzkwNiwtMy4yODAyMiBsIC0xLjU3NDQ2MiwtMS4zNTAxMiAyLjk0MTUsLTMuNDMwNjQgMS41NzQ0NjQsMS4zNTAxMiBjIDMuMzk2OTg4LDIuOTExNjYgOC4zMjgxOSwyLjkxMjc4IDExLjcyNTE3NywzLjhlLTQgbCAxLjU1MzUwMiwtMS4zMzIxIDIuOTQxNDk4LDMuNDMxMzggLTEuNTUzNSwxLjMzMTcyIGMgLTIuNTUwODgsMi4xODY0NCAtNS42Nzc2MjcsMy4yNzk2MiAtOC44MDQyNzMsMy4yNzk0OCB6IiAvPgoJPC9nPgo8L3N2Zz4K" alt="OpenIPC" style="height:32px">' +
+    '<span style="font-size:13px;color:#fff;margin-left:4px">lite</span>' +
+    '<span style="margin-left:auto;display:flex;align-items:center">' +
+    ['Information', 'Majestic', 'Firmware', 'Tools', 'Extensions'].map((t) =>
+      '<span class="navitem">' + t + '</span><span class="caret"></span>').join('') +
+    '<span class="navitem">Preview</span><span class="navitem">Sign out</span></span></div></div>' +
+    '<div class="wrap sig"><div style="flex:0 0 194px">' +
+    '<div class="pb"><i style="width:61%"></i></div><div class="pb"><i style="width:23%"></i></div></div>' +
+    '<div style="flex:1 1 auto">hi3516av300 (hi3516cv500 family), imx415, 32 MB nor flash, 2.6.08.21-lite, hi3516av300-imx415, 2c:6f:51:10:e7:da</div>' +
+    '<div style="flex:0 0 260px;text-align:right"><div>22.08.2026 11:42:07</div>' +
+    '<div style="color:var(--sec-color)">46.2 °C</div></div></div>';
+
+const chev = '<svg width="8" height="12" viewBox="0 0 8 12" fill="none" style="color:var(--ter-color)">' +
+  '<path d="M1.5 1 6.5 6 1.5 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/* ── desktop sidebars, one per direction ───────────────────────────────── */
+function sidebar() {
+  if (S.dir === 'A') {
+    const q = q_();
+    const t = filterTree(q);
+    return SEARCH_BOX() + (t.length
+      ? t.map((x) => '<div style="margin-bottom:10px"><div class="cap">' +
+          mark(x.g.label, q) + '</div>' + x.sections.map((s) => {
+            const n = q ? fieldMatches(s, q) : 0;
+            return '<div class="navlink sub' + (s.id === S.active ? ' on' : '') +
+              '" data-act="sec:' + esc(s.id) + '">' + mark(s.label, q) +
+              (n ? '<span class="n">' + n + '</span>' : '') + '</div>';
+          }).join('') + '</div>').join('')
+      : '<div class="empty">Nothing matches “' + esc(S.q) + '”.</div>');
+  }
+  if (S.q) return SEARCH_BOX() + RESULTS();
+  if (S.dir === 'B')
+    return SEARCH_BOX() + '<div class="rail">' + MODEL.map((g) => '<div class="navlink' +
+      (g.id === S.cat ? ' on' : '') + '" data-act="cat:' + esc(g.id) + '">' +
+      esc(g.label) + '</div>').join('') + '</div>';
+  return SEARCH_BOX() + MODEL.map((g) => {
+    const open = S.open === g.id;
+    return '<div style="margin-bottom:2px"><div class="acc' + (open ? ' open' : '') +
+      '" data-act="grp:' + esc(g.id) + '"><span class="tri"></span><span>' + esc(g.label) +
+      '</span><span class="n">' + g.sections.length + '</span></div>' +
+      (open ? '<div style="padding-left:13px">' + g.sections.map((s) => '<div class="navlink' +
+        (s.id === S.active ? ' on' : '') + '" data-act="sec:' + esc(s.id) + '">' + esc(s.label) +
+        '</div>').join('') + '</div>' : '') + '</div>';
+  }).join('');
+}
+
+function renderDesktop() {
+  const sec = find(S.active);
+  let right = '';
+  if (S.dir === 'B') {
+    const g = MODEL.find((x) => x.id === S.cat) || MODEL[0];
+    const all = S.active === '__all__';
+    right += '<div class="tabs"><div class="tab' + (all ? ' on' : '') + '" data-act="sec:__all__">All</div>' +
+      g.sections.map((s) => '<div class="tab' + (s.id === S.active ? ' on' : '') +
+        '" data-act="sec:' + esc(s.id) + '">' + esc(s.label) + '</div>').join('') + '</div>';
+    right += all
+      ? g.sections.filter((s) => s.id !== 'live').map(panel).join('')
+      : panel(g.sections.find((s) => s.id === S.active) || g.sections[0]);
+  } else {
+    right += panel(sec);
+  }
+  const navW = S.dir === 'A' ? 280 : S.dir === 'B' ? 260 : 300;
+  return '<div class="mj" data-t="' + S.theme + '" style="width:1440px">' + CHROME() +
+    '<div class="wrap"><h2>Majestic Settings</h2><div class="cols">' +
+    '<div style="flex:0 0 ' + navW + 'px">' + sidebar() + '</div>' +
+    '<div style="flex:1 1 auto;min-width:0">' + right + toolbar() + '</div>' +
+    '</div></div></div>';
+}
+
+function renderMobile() {
+  const sec = find(S.active);
+  let body = '';
+  if (S.dir === 'B') {
+    const g = MODEL.find((x) => x.id === S.cat) || MODEL[0];
+    body += SEARCH_BOX();
+    if (S.q) body += RESULTS();
+    else {
+      body += '<div class="box" style="display:flex;align-items:center;margin-bottom:12px;cursor:pointer" data-act="catopen">' +
+        '<span style="flex:1 1 auto">' + esc(g.label) + '</span>' +
+        '<svg width="12" height="8" viewBox="0 0 12 8" fill="none" style="color:var(--sec-color)' +
+        (S.catOpen ? ';transform:rotate(180deg)' : '') + '"><path d="M1 1.5 6 6.5 11 1.5" stroke="currentColor" ' +
+        'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>';
+      if (S.catOpen)
+        body += '<div style="margin:-6px 0 12px;border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
+          MODEL.map((x) => '<div style="display:flex;align-items:center;min-height:46px;padding:0 12px;cursor:pointer' +
+            (x.id === S.cat ? ';background:var(--primary);color:#fff' : '') + '" data-act="cat:' + esc(x.id) + '">' +
+            esc(x.label) + '</div>').join('') + '</div>';
+      body += '<div class="tabs">' + g.sections.map((s) => '<div class="tab' +
+        (s.id === S.active ? ' on' : '') + '" data-act="sec:' + esc(s.id) + '">' +
+        esc(s.label) + '</div>').join('') + '</div>';
+      body += panel(g.sections.find((s) => s.id === S.active) || g.sections[0]);
+    }
+    if (!S.q) body += toolbar();
+  } else if (S.view === 'detail') {
+    body += '<div class="back" data-act="back">' +
+      '<svg width="8" height="12" viewBox="0 0 8 12" fill="none"><path d="M6.5 1 1.5 6 6.5 11" ' +
+      'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      (S.dir === 'C' ? 'Search' : 'All settings') + '</div>' + panel(sec) + toolbar();
+  } else {
+    body += SEARCH_BOX();
+    if (S.dir === 'A') {
+      /* mobile keeps the same tree, but collapsed: the reporter asked for an
+         accordion here and the full tree on desktop. A search auto-opens the
+         categories that still have matches. */
+      const q = q_();
+      const t = filterTree(q);
+      body += t.length ? t.map((x) => {
+        const open = q ? true : !!S.openA[x.g.id];
+        return '<div><div class="acc' + (open ? ' open' : '') + '" style="padding:9px 0" data-act="grpA:' +
+          esc(x.g.id) + '"><span class="tri"></span><span>' + mark(x.g.label, q) +
+          '</span><span class="n">' + x.sections.length + '</span></div>' +
+          (open ? x.sections.map((sec) => {
+            const n = q ? fieldMatches(sec, q) : nFields(sec);
+            return '<div class="listrow" style="padding-left:16px" data-act="sec:' + esc(sec.id) +
+              '"><b>' + mark(sec.label, q) + '</b>' + (n ? '<i>' + n + '</i>' : '') + chev + '</div>';
+          }).join('') : '') +
+          '</div>';
+      }).join('') : '<div class="empty">Nothing matches “' + esc(S.q) + '”.</div>';
+    } else if (S.q) {
+      const h = hits();
+      const secs = new Set(h.map((x) => x.s.id));
+      body += '<div class="cap" style="padding:0">' + h.length +
+        (h.length === 1 ? ' setting' : ' settings') + ' in ' + secs.size + ' sections</div>' +
+        h.slice(0, 12).map((x) => '<div class="hitrow" data-act="sec:' + esc(x.s.id) + '">' +
+          '<span style="flex:1 1 auto;min-width:0"><b>' + esc(x.f.l) + '</b><s>' +
+          esc(x.g.label) + ' › ' + esc(x.s.label) + '</s></span>' + chev + '</div>').join('');
+    } else {
+      body += MODEL.map((g) => {
+        const open = S.open === g.id;
+        return '<div><div class="acc' + (open ? ' open' : '') + '" style="padding:7px 0" data-act="grp:' +
+          esc(g.id) + '"><span class="tri"></span><span>' + esc(g.label) +
+          '</span><span class="n">' + g.sections.length + '</span></div>' +
+          (open ? '<div style="padding-left:16px">' + g.sections.map((s) =>
+            '<div class="listrow" data-act="sec:' + esc(s.id) + '"><b>' + esc(s.label) + '</b>' + chev +
+            '</div>').join('') + '</div>' : '') + '</div>';
+      }).join('');
+    }
+  }
+  return '<div class="mj m" data-t="' + S.theme + '" style="width:390px">' + CHROME() +
+    '<div class="wrap" style="padding-bottom:20px"><h2>Majestic Settings</h2>' + body + '</div></div>';
+}
+
+function render() {
+  const stage = document.getElementById('stage');
+  const focus = document.activeElement && document.activeElement.id === 'q';
+  const caret = focus ? document.activeElement.selectionStart : null;
+  stage.innerHTML = isMobile() ? renderMobile() : renderDesktop();
+  document.getElementById('note').innerHTML = NOTES[S.dir];
+  if (focus) {
+    const q = document.getElementById('q');
+    if (q) { q.focus(); try { q.setSelectionRange(caret, caret); } catch (e) {} }
+  }
+}
+
+document.addEventListener('click', (ev) => {
+  const seg = ev.target.closest('.seg button');
+  if (seg) {
+    const which = seg.parentElement.id;
+    if (which === 'dir') { S.dir = seg.dataset.v; S.view = 'list'; S.catOpen = false;
+      S.active = S.dir === 'C' ? 'video0' : 'isp'; S.q = S.dir === 'C' ? 'codec' : '';
+      S.open = S.dir === 'C' ? 'video' : S.open; S.cat = groupOf(S.active).id; }
+    if (which === 'dev') { S.dev = seg.dataset.v; S.view = 'list'; S.catOpen = false; }
+    if (which !== 'thm') { S.dirty = {}; S.saved = false; }
+    if (which === 'thm') S.theme = seg.dataset.v;
+    [...seg.parentElement.children].forEach((b) =>
+      b.setAttribute('aria-pressed', String(b === seg)));
+    render();
+    return;
+  }
+  const el = ev.target.closest('[data-act]');
+  if (!el) return;
+  const [act, arg] = el.dataset.act.split(':');
+  if (act === 'sec') {
+    S.active = arg;
+    if (arg !== '__all__') S.cat = groupOf(arg).id;
+    if (isMobile() && S.dir !== 'B') S.view = 'detail';
+  } else if (act === 'cat') {
+    const g = MODEL.find((x) => x.id === arg);
+    S.cat = arg; S.active = g.sections[0].id; S.catOpen = false;
+  } else if (act === 'grp') {
+    S.open = S.open === arg ? '' : arg;
+  } else if (act === 'toggle') {
+    const k = el.dataset.act.slice(7);
+    const f = flat().flatMap((x) => x.s.fields.map((y) => ({ id: x.s.id, f: y })))
+      .find((x) => x.id + '.' + x.f.n === k);
+    if (S.dirty[k] !== undefined) delete S.dirty[k]; else S.dirty[k] = !(f && f.f.on);
+  } else if (act === 'back') {
+    S.view = 'list';
+  } else if (act === 'catopen') {
+    S.catOpen = !S.catOpen;
+  } else if (act === 'clear') {
+    S.q = '';
+  } else if (act === 'grpA') {
+    S.openA = Object.assign({}, S.openA);
+    S.openA[arg] = !S.openA[arg];
+  } else if (act === 'save') {
+    if (Object.keys(S.dirty).length) { S.dirty = {}; S.saved = true; }
+  } else if (act === 'apply') {
+    S.saved = false;
+  }
+  render();
+});
+
+document.addEventListener('input', (ev) => {
+  if (ev.target.id !== 'q') return;
+  S.q = ev.target.value;
+  render();
+});
+
+/* deep link: #<dir>/<device>/<theme>, e.g. #B/m/dark — so a link can point
+   straight at one variant; a 4th segment presets the search box */
+function applyHash() {
+  const p = location.hash.replace('#', '').split('/');
+  if (['A', 'B', 'C'].includes(p[0])) S.dir = p[0];
+  if (['d', 'm'].includes(p[1])) S.dev = p[1];
+  if (['dark', 'light'].includes(p[2])) S.theme = p[2];
+  S.active = S.dir === 'C' ? 'video0' : 'isp';
+  S.q = p[3] !== undefined && p[3] !== '' ? decodeURIComponent(p[3]) : (S.dir === 'C' ? 'codec' : '');
+  if (p[4]) { const m = flat().find((x) => x.s.id === p[4]); if (m) S.active = m.s.id; }
+  S.cat = groupOf(S.active).id;
+  S.view = 'list'; S.dirty = {};
+  S.saved = p[5] === 'saved';
+  const set = (id, v) => [...document.getElementById(id).children].forEach(
+    (b) => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+  set('dir', S.dir); set('dev', S.dev); set('thm', S.theme);
+}
+
+window.addEventListener('hashchange', () => { applyHash(); render(); });
+applyHash();
+render();
+</script>
+</body>
+</html>
