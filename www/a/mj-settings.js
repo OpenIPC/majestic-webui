@@ -67,13 +67,26 @@
 		return m ? { w: +m[1], h: +m[2] } : null;
 	}
 
+	// `sec` is the section being shown — the page renders exactly one at a time.
+	// `q` is the live search term; it filters the tree rather than replacing it.
 	const state = {
-		tab: boot.tab,
+		sec: boot.tab,
+		q: '',
 		schema: null,
 		config: null,
 		fields: [],
 		initial: {},
+		fieldCache: {},
 	};
+
+	// synthetic leaves: the live-preview panel and the ROI canvas are not config
+	// sections, but they are things you navigate to, so the tree carries them
+	const LIVE_ID = 'live';
+	const ROI_ID = 'roi';
+	const ROI_DOT = 'motionDetect.roi';
+	// matches the col-md-3 stacking point: below it the rail is full width and
+	// the categories collapse to an accordion
+	const WIDE = window.matchMedia('(min-width: 768px)');
 
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', init);
@@ -83,15 +96,24 @@
 
 	async function init() {
 		try {
+			// both up front: the tree needs the schema to list sections, and the
+			// search needs the config to know which visibleWhen rows are on the page
 			state.schema = await fetchJson('/api/v1/config.schema.json');
+			state.config = await fetchJson('/api/v1/config.json');
 		} catch (e) {
 			const form = document.getElementById('mj-settings-form');
 			if (form) showFatal(form, 'Failed to load schema: ' + e.message);
 			return;
 		}
 		buildNav();
+		wireSearch();
+		// the rail is a tree on >=md and an accordion below it; re-render rather
+		// than try to keep both shapes live at once
+		const onWidth = () => buildNav();
+		if (WIDE.addEventListener) WIDE.addEventListener('change', onWidth);
+		else if (WIDE.addListener) WIDE.addListener(onWidth);
 		window.addEventListener('popstate', onPopState);
-		await load(state.tab, /*push*/ false);
+		await load(state.sec, /*push*/ false);
 	}
 
 	function label(key) {
@@ -113,28 +135,200 @@
 		return out;
 	}
 
-	function groupForTab(tab) {
-		const gs = groups();
-		return gs.find(g => g.id === tab) ||           // group id
-			gs.find(g => g.sections.includes(tab)) ||  // old ?tab=<section> bookmark
-			gs[0];                                      // default: first group
+	// Every leaf a section can render, flattened from the schema once and cached:
+	// {key, dot, title, hint} for each field renderProps would draw, so the search
+	// can match on the same words the page shows. Nested objects recurse and
+	// x-live knobs are lifted out, exactly as renderProps does.
+	function sectionFields(section) {
+		if (state.fieldCache[section]) return state.fieldCache[section];
+		const out = [];
+		const walk = (basePath, props) => {
+			for (const key of Object.keys(props)) {
+				const dot = basePath + '.' + key;
+				if (EXCLUDE.has(dot)) continue;
+				const sub = props[key];
+				if (!sub || sub['x-live']) continue;
+				if (sub.type === 'object' && sub.properties) {
+					walk(dot, sub.properties);
+					continue;
+				}
+				if (!RENDERABLE.has(sub.type)) continue;
+				out.push({ key, dot, sub, title: sub.title || sub.description || key, hint: sub.hint || '' });
+			}
+		};
+		const props = ((state.schema.properties || {})[section] || {}).properties;
+		if (props) walk(section, props);
+		state.fieldCache[section] = out;
+		return out;
+	}
+
+	// The types renderField actually draws — number/object fall through its
+	// dispatch and return null, so they must not make a section look non-empty.
+	const RENDERABLE = new Set(['boolean', 'integer', 'string', 'array']);
+
+	// A field hidden by visibleWhen is not on the page, so a search must not
+	// count it. Same rule the rendered page applies (visMatches), evaluated
+	// against the saved config rather than the DOM because the controlling
+	// section may not be mounted.
+	function fieldVisible(f) {
+		const vw = f.sub && f.sub.visibleWhen;
+		if (!vw || !vw.field) return true;
+		const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
+		const sibDot = parent + '.' + vw.field;
+		let v = getDotted(state.config, sibDot);
+		if (v === undefined) {
+			const sib = sectionFields(f.dot.split('.')[0]).find(x => x.dot === sibDot);
+			v = sib && sib.sub ? sib.sub.default : undefined;
+		}
+		return visMatches(vw, v);
+	}
+
+	// The navigable leaves of one group, in the order the tree lists them.
+	function groupSections(g) {
+		const out = [];
+		if (groupHasLive(g)) out.push({ id: LIVE_ID, label: 'Live adjustments' });
+		for (const s of g.sections) {
+			if (!leafFields(s).length) continue;   // e.g. a section that is all x-live
+			out.push({ id: s, label: label(s) });
+		}
+		if (groupHasMotion(g)) out.push({ id: ROI_ID, label: 'Visual editor' });
+		return out;
+	}
+
+	function tree() {
+		return groups().map(g => ({ id: g.id, label: g.label, group: g, sections: groupSections(g) }))
+			.filter(t => t.sections.length);
+	}
+
+	function leaves() {
+		return tree().reduce((acc, t) => acc.concat(t.sections.map(s => s.id)), []);
+	}
+
+	function groupOf(secId) {
+		return tree().find(t => t.sections.some(s => s.id === secId));
+	}
+
+	// ?tab= carries a section id. A group id still resolves — old bookmarks from
+	// when the tabs were categories land on that category's first section.
+	function sectionForTab(tab) {
+		const t = tree();
+		if (!t.length) return null;
+		if (tab) {
+			if (leaves().includes(tab)) return tab;
+			const g = t.find(x => x.id === tab);
+			if (g) return g.sections[0].id;
+		}
+		return t[0].sections[0].id;
+	}
+
+	// The reporter's filtering rule (issue #163): a category whose own name
+	// matches keeps ALL of its subsections; otherwise a subsection survives on
+	// its own label or on any of its fields' names/descriptions. The field count
+	// is what tells you why a section kept only by its field text is still listed.
+	function filterTree() {
+		const q = state.q.trim().toLowerCase();
+		const t = tree();
+		if (!q) return t.map(x => ({ ...x, sections: x.sections.map(s => ({ ...s, n: 0 })) }));
+		const out = [];
+		for (const x of t) {
+			const gm = x.label.toLowerCase().includes(q);
+			const secs = [];
+			for (const s of x.sections) {
+				const n = matchCount(s.id, q);
+				if (gm || s.label.toLowerCase().includes(q) || n) secs.push({ ...s, n });
+			}
+			if (secs.length) out.push({ ...x, sections: secs });
+		}
+		return out;
+	}
+
+	// What a given leaf actually renders. The synthetic leaves have no schema
+	// section of their own, and motionDetect.roi belongs to the Visual editor
+	// rather than to Motion detection, so it is subtracted here exactly as
+	// renderProps skips it.
+	function leafFields(secId) {
+		if (secId === LIVE_ID) return liveFields().map(f =>
+			({ sub: f.sub, dot: f.dot, title: liveLabel(f.key, f.sub), hint: f.sub.hint || '' }));
+		if (secId === ROI_ID) return roiFields();
+		const fields = sectionFields(secId);
+		return secId === 'motionDetect' ? fields.filter(f => f.dot !== ROI_DOT) : fields;
+	}
+
+	function matchCount(secId, q) {
+		return leafFields(secId).filter(f => fieldVisible(f) &&
+			((f.title || '').toLowerCase().includes(q) ||
+				(f.hint || '').toLowerCase().includes(q) ||
+				// four of ~170 fields ship no title; renderField falls back to the
+				// key for display, so the search matches it too
+				f.dot.split('.').pop().toLowerCase().includes(q))).length;
 	}
 
 	function buildNav() {
 		const nav = document.getElementById('mj-settings-nav');
 		if (!nav) return;
+		const q = state.q.trim();
+		const t = filterTree();
 		nav.innerHTML = '';
-		for (const g of groups()) {
-			const li = document.createElement('li');
-			li.className = 'nav-item';
-			const a = document.createElement('a');
-			a.className = 'nav-link';
-			a.href = 'mj-settings.cgi?tab=' + encodeURIComponent(g.id);
-			a.textContent = g.label;
-			li.appendChild(a);
+
+		if (!t.length) {
+			const li = el('li', 'nav-item mj-tree-empty');
+			li.textContent = 'Nothing matches “' + q + '”.';
+			nav.appendChild(li);
+			return;
+		}
+
+		for (const g of t) {
+			const li = el('li', 'nav-item mj-tree-group');
+			li.dataset.group = g.id;
+			// open on desktop (the whole tree stays visible), and on mobile only
+			// while a search is narrowing it or this is the group you are in
+			if (WIDE.matches || q) li.classList.add('mj-open');
+
+			const cat = el('button', 'mj-tree-cat');
+			cat.type = 'button';
+			cat.innerHTML = '<span class="mj-tree-caret"></span>';
+			cat.appendChild(hi(g.label));
+			cat.setAttribute('aria-expanded', String(li.classList.contains('mj-open')));
+			cat.addEventListener('click', () => toggleGroup(li));
+			li.appendChild(cat);
+
+			const sub = el('ul', 'nav flex-column mj-tree-sub');
+			for (const s of g.sections) {
+				const item = el('li', 'nav-item');
+				const a = el('a', 'nav-link');
+				a.href = 'mj-settings.cgi?tab=' + encodeURIComponent(s.id);
+				a.appendChild(hi(s.label));
+				if (s.n) {
+					const n = el('span', 'mj-tree-n');
+					n.textContent = String(s.n);
+					n.title = s.n + (s.n === 1 ? ' matching setting' : ' matching settings');
+					a.appendChild(n);
+				}
+				item.appendChild(a);
+				sub.appendChild(item);
+			}
+			li.appendChild(sub);
 			nav.appendChild(li);
 		}
 		wireNav();
+		setActiveNav(state.sec);
+	}
+
+	// Mobile is a true accordion: opening one category closes the others, so the
+	// rail never carries a section you are not looking at. On >=md the sub-lists
+	// are forced open by CSS and the header is inert.
+	function toggleGroup(li) {
+		const open = li.classList.contains('mj-open');
+		if (!open) {
+			li.parentElement.querySelectorAll('.mj-tree-group.mj-open').forEach(o => {
+				o.classList.remove('mj-open');
+				const b = o.querySelector('.mj-tree-cat');
+				if (b) b.setAttribute('aria-expanded', 'false');
+			});
+		}
+		li.classList.toggle('mj-open', !open);
+		const b = li.querySelector('.mj-tree-cat');
+		if (b) b.setAttribute('aria-expanded', String(!open));
 	}
 
 	function wireNav() {
@@ -144,8 +338,8 @@
 				const newTab = u.searchParams.get('tab');
 				if (!newTab) return;
 				ev.preventDefault();
-				if (newTab === state.tab) return;
-				if (hasDirty() && !confirm('You have unsaved changes. Discard and switch tabs?')) return;
+				if (newTab === state.sec) return;
+				if (hasDirty() && !confirm('You have unsaved changes. Discard and switch sections?')) return;
 				load(newTab, /*push*/ true);
 			});
 		});
@@ -153,9 +347,51 @@
 
 	function onPopState(ev) {
 		const tabFromUrl = new URLSearchParams(location.search).get('tab');
-		const g = groupForTab(tabFromUrl);
-		if (g && g.id === state.tab) return;
+		const sec = sectionForTab(tabFromUrl);
+		if (sec === state.sec) return;
 		load(tabFromUrl, /*push*/ false);
+	}
+
+	// Escape `text`, wrapping the run that matches the live query in <mark>.
+	// Returns a fragment: slicing the raw string and escaping each piece keeps
+	// the mark outside the escaped text instead of escaping markup we just added.
+	function hi(text) {
+		const t = String(text == null ? '' : text);
+		const frag = document.createDocumentFragment();
+		const q = state.q.trim().toLowerCase();
+		const i = q ? t.toLowerCase().indexOf(q) : -1;
+		if (i < 0) {
+			frag.appendChild(document.createTextNode(t));
+			return frag;
+		}
+		frag.appendChild(document.createTextNode(t.slice(0, i)));
+		const m = document.createElement('mark');
+		m.textContent = t.slice(i, i + q.length);
+		frag.appendChild(m);
+		frag.appendChild(document.createTextNode(t.slice(i + q.length)));
+		return frag;
+	}
+
+	function wireSearch() {
+		const wrap = document.getElementById('mj-search-wrap');
+		const input = document.getElementById('mj-search');
+		if (!wrap || !input) return;
+		wrap.classList.remove('d-none');
+		input.addEventListener('input', () => {
+			state.q = input.value;
+			buildNav();
+			highlightPanel();
+		});
+	}
+
+	// Re-mark the open section's labels and hints in place. Deliberately NOT a
+	// re-render: rebuilding the form on every keystroke would reset every control
+	// to its saved value and silently throw away unsaved edits.
+	function highlightPanel() {
+		document.querySelectorAll('#mj-settings-form [data-hl]').forEach(n => {
+			n.textContent = '';
+			n.appendChild(hi(n.dataset.hl));
+		});
 	}
 
 	function groupHasMotion(group) {
@@ -166,11 +402,47 @@
 	// HiSilicon image CSC knobs) — so the user can see the effect while dragging.
 	function groupHasLive(group) {
 		if (!group) return false;
+		// only the first such group owns the leaf: the tree keys on section id
+		// and two "Live adjustments" entries would collide
+		const owner = groups().find(g => groupLiveFields(g).length);
+		return !!owner && owner.id === group.id;
+	}
+
+	function groupLiveFields(group) {
 		const props = (state.schema && state.schema.properties) || {};
-		return group.sections.some(s => {
-			const sp = (props[s] || {}).properties || {};
-			return Object.keys(sp).some(k => sp[k] && sp[k]['x-live']);
+		const out = [];
+		if (!group) return out;
+		for (const section of group.sections) {
+			const sp = (props[section] || {}).properties || {};
+			for (const key of Object.keys(sp)) {
+				if (!sp[key] || !sp[key]['x-live']) continue;
+				if (EXCLUDE.has(section + '.' + key)) continue;
+				out.push({ section, key, sub: sp[key], dot: section + '.' + key });
+			}
+		}
+		out.sort((a, b) => {
+			const ia = LIVE_ORDER.indexOf(a.key), ib = LIVE_ORDER.indexOf(b.key);
+			return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
 		});
+		return out;
+	}
+
+	// the x-live knobs of whichever group owns the Live adjustments leaf
+	function liveFields() {
+		const owner = groups().find(g => groupLiveFields(g).length);
+		return owner ? groupLiveFields(owner) : [];
+	}
+
+	function liveLabel(key, sub) {
+		const meta = LIVE_META[key];
+		return meta ? meta.label : (sub.title || sub.description || key);
+	}
+
+	// The Visual editor leaf owns motionDetect.roi: the region list belongs with
+	// the canvas that draws it, and m/img.html reaches window.mjRoiAdd/mjRoiList,
+	// which only exist while the field is mounted.
+	function roiFields() {
+		return sectionFields('motionDetect').filter(f => f.dot === ROI_DOT);
 	}
 
 	function stopLivePreview() {
@@ -215,18 +487,16 @@
 			return;
 		}
 
-		const group = groupForTab(tab);
-		if (!group) {
+		const sec = sectionForTab(tab);
+		if (!sec) {
 			showFatal(form, 'No settings groups in schema.');
 			return;
 		}
-		state.tab = group.id;
+		state.sec = sec;
 
-		setActiveNav(group.id);
-		setTitle(group.label);
-		if (!groupHasMotion(group)) toggleRoi(group);
+		setActiveNav(sec);
 		if (push) {
-			history.pushState({ tab: group.id }, '', 'mj-settings.cgi?tab=' + encodeURIComponent(group.id));
+			history.pushState({ tab: sec }, '', 'mj-settings.cgi?tab=' + encodeURIComponent(sec));
 		}
 
 		form.innerHTML = '';
@@ -240,92 +510,29 @@
 		err.role = 'alert';
 		form.appendChild(err);
 
-		// Each section renders as its own card; the cards flow in a responsive
-		// 2-column grid that fills the page width.
-		const grid = el('div', 'row g-4');
-		grid.id = 'mj-settings-grid';
-		form.appendChild(grid);
-
-		// Plain section cards pack into a CSS-column masonry below the grid, so
-		// unequal card heights don't leave chessboard gaps. The grid above keeps
-		// the wide interactive panels (live preview, live-adjust, ROI editor) and
-		// the lone full-width card, which want a flex row.
-		const cards = el('div', 'mj-cards');
-		form.appendChild(cards);
-
 		state.fields = [];
 		state.initial = {};
 
-		// Live-tunable groups (image): the preview and a "Live adjustments" panel of
-		// the x-live knobs sit side by side at the top, so dragging a knob shows its
-		// effect without scrolling. The knobs are registered here and skipped in the
-		// section cards below to avoid duplicate controls.
-		const live = groupHasLive(group);
-		if (live) {
-			if (window.MajesticVideo) {
-				const pv = el('div', 'col-12 col-lg-7');
-				pv.id = 'mj-live-preview';
-				pv.innerHTML =
-					'<div class="card"><div class="card-body">' +
-					'<div class="text-secondary small mb-1">Live preview</div>' +
-					'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
-					'</div></div>';
-				grid.appendChild(pv);
-				state.previewPlayer =
-					window.MajesticVideo.attach(pv.querySelector('#mj-live-video'), { stream: 0 });
-				renderLivePanel(grid, group, 'col-12 col-lg-5');
-			} else {
-				renderLivePanel(grid, group, 'col-12 col-lg-6');
-			}
-		}
-
-		// One card per merged section; renderProps fills the card body (nested
-		// object sub-properties still get an <h5> subheader inside the card).
-		// Multi-card groups flow 2-up; a lone card (e.g. Recording — no preview,
-		// no ROI mate) is centred so it reads as one panel, not a left-stranded half.
-		const lone = group.sections.length === 1 && !groupHasMotion(group) && !live;
-		// plain/live groups masonry their cards; the lone card and the motion group
-		// (its card pairs with the ROI editor) stay in the flex grid as before.
-		const useMasonry = !lone && !groupHasMotion(group);
-		const colCls = lone ? 'col-12' : 'col-12 col-lg-6';
-		for (const section of group.sections) {
-			const props = ((state.schema.properties || {})[section] || {}).properties;
-			if (!props) continue;
+		// Exactly one section on the page, so it gets the whole width — and its
+		// fields flow in the same two columns .mj-cols already gave the lone
+		// Record card, rather than a single strip of controls down the left.
+		if (sec === LIVE_ID) {
+			renderLive(form);
+		} else if (sec === ROI_ID) {
+			renderRoi(form);
+		} else {
 			const card = el('div', 'card');
 			const body = el('div', 'card-body');
 			const h = el('h3');
-			h.textContent = label(section);
+			h.textContent = label(sec);
 			body.appendChild(h);
-			// a lone full-width card flows its fields in two columns so it fills the
-			// width instead of stranding a half-card or stretching single-column inputs.
-			const target = lone ? el('div', 'mj-cols') : body;
-			if (lone) body.appendChild(target);
+			const cols = el('div', 'mj-cols');
+			body.appendChild(cols);
 			card.appendChild(body);
-			renderProps(target, section, props);
-			// a section whose only fields were x-live (moved to the panel) is empty
-			// apart from its heading — don't show an empty card.
-			const filled = lone ? target.childElementCount > 0 : body.childElementCount > 1;
-			if (!filled) continue;
-			// the video channels (video0 = main, video1 = sub) stay a side-by-side
-			// pair at the top, in the flex grid, so users can compare the two
-			// channels; everything else flows into the masonry below.
-			const pinned = /^video\d+$/.test(section);
-			if (useMasonry && !pinned) {
-				// bare card; .mj-cards > .card supplies break-inside + spacing
-				cards.appendChild(card);
-			} else {
-				const col = el('div', colCls);
-				col.appendChild(card);
-				grid.appendChild(col);
-			}
+			form.appendChild(card);
+			const props = ((state.schema.properties || {})[sec] || {}).properties || {};
+			renderProps(cols, sec, props);
 		}
-
-		if (groupHasMotion(group)) toggleRoi(group);
-
-		// Plain tabs route every card to the masonry, leaving the flex grid empty.
-		// An empty Bootstrap `.row` keeps its negative top margin and would pull the
-		// masonry up over the page heading — drop it when nothing used it.
-		if (!grid.childElementCount) grid.remove();
 
 		const toolbar = document.createElement('div');
 		toolbar.className = 'mj-toolbar d-flex align-items-center gap-2';
@@ -350,40 +557,44 @@
 		});
 	}
 
-	function setTitle(title) {
-		const h = document.getElementById('mj-settings-title');
-		if (h) h.textContent = title;
-	}
+	// The Visual editor leaf: the ROI canvas plus the region list it edits. The
+	// list is rendered here rather than under Motion detection because
+	// m/img.html calls back into window.mjRoiAdd/mjRoiList, which renderField
+	// only installs while motionDetect.roi is mounted — and only one section is
+	// mounted at a time now.
+	function renderRoi(form) {
+		const card = el('div', 'card');
+		const body = el('div', 'card-body');
+		body.innerHTML =
+			'<h3>Visual editor</h3>' +
+			'<div class="mj-roi-wrap"><iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" class="mj-roi-iframe"></iframe></div>';
+		card.appendChild(body);
+		form.appendChild(card);
 
-	function toggleRoi(group) {
-		const id = 'mj-roi-inset';
-		const existing = document.getElementById(id);
-		if (groupHasMotion(group)) {
-			if (existing) return;
-			const grid = document.getElementById('mj-settings-grid');
-			if (!grid) return;
-			const col = document.createElement('div');
-			col.id = id;
-			col.className = 'col-12 col-lg-6';
-			col.innerHTML =
-				'<div class="card"><div class="card-body">' +
-				'<h3>Visual editor</h3>' +
-				'<div class="mj-roi-wrap"><iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" class="mj-roi-iframe"></iframe></div>' +
-				'<button type="button" class="btn btn-outline-secondary mt-2" id="mj-roi-clear">Clear all regions</button>' +
-				'</div></div>';
-			grid.appendChild(col);
-			const clearBtn = document.getElementById('mj-roi-clear');
-			if (clearBtn) {
-				clearBtn.addEventListener('click', () => {
-					const roiField = state.fields.find(f => f.dot === 'motionDetect.roi');
-					if (roiField) {
-						roiField.setValue('');
-						updateDirty();
-					}
-				});
+		// canvas, then the list it writes into, then the control that empties it
+		for (const f of roiFields()) {
+			const field = renderField(body, f.dot, f.key, f.sub, getDotted(state.config, f.dot));
+			if (field) {
+				state.fields.push(field);
+				state.initial[f.dot] = field.getValue();
 			}
-		} else if (existing) {
-			existing.remove();
+		}
+
+		const clear = el('button', 'btn btn-outline-secondary');
+		clear.type = 'button';
+		clear.id = 'mj-roi-clear';
+		clear.textContent = 'Clear all regions';
+		body.appendChild(clear);
+
+		const clearBtn = document.getElementById('mj-roi-clear');
+		if (clearBtn) {
+			clearBtn.addEventListener('click', () => {
+				const roiField = state.fields.find(f => f.dot === ROI_DOT);
+				if (roiField) {
+					roiField.setValue('');
+					updateDirty();
+				}
+			});
 		}
 	}
 
@@ -393,49 +604,52 @@
 
 	function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-	// Render the x-live knobs of a live group into a "Live adjustments" card next to
-	// the preview, with one "Reset all" (no per-knob resets). The knobs still register
-	// in state.fields, so the page Save + dirty tracking cover them.
-	function renderLivePanel(grid, group, colCls) {
-		const col = el('div', colCls);
+	// The Live adjustments leaf: the preview and the x-live knobs side by side, so
+	// dragging one shows its effect without scrolling. One "Reset all" rather than
+	// a per-knob reset. The knobs register in state.fields, so the page Save and
+	// dirty tracking cover them like any other field.
+	function renderLive(form) {
+		const row = el('div', 'row g-4');
+		form.appendChild(row);
+
+		const withVideo = !!window.MajesticVideo;
+		if (withVideo) {
+			const pv = el('div', 'col-12 col-lg-7');
+			pv.id = 'mj-live-preview';
+			pv.innerHTML =
+				'<div class="card"><div class="card-body">' +
+				'<div class="text-secondary small mb-1">Live preview</div>' +
+				'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
+				'</div></div>';
+			row.appendChild(pv);
+			state.previewPlayer =
+				window.MajesticVideo.attach(pv.querySelector('#mj-live-video'), { stream: 0 });
+		}
+
+		const col = el('div', withVideo ? 'col-12 col-lg-5' : 'col-12 col-lg-6');
 		col.id = 'mj-live-panel';
 		const card = el('div', 'card');
 		const body = el('div', 'card-body');
 		const head = el('div', 'd-flex align-items-center mb-2');
 		head.innerHTML =
 			'<h3 class="mb-0 me-auto">Live adjustments</h3>' +
-			'<button type="button" class="btn btn-sm btn-link p-0 mj-reset" id="mj-live-reset">↺ Reset all</button>';
+			'<button type="button" class="btn btn-sm btn-link p-0 mj-live-reset" id="mj-live-reset">↺ Reset all</button>';
 		body.appendChild(head);
 
-		const props = state.schema.properties || {};
-		const found = [];
-		for (const section of group.sections) {
-			const sp = (props[section] || {}).properties || {};
-			for (const key of Object.keys(sp)) {
-				if (sp[key] && sp[key]['x-live']) found.push({ section, key, sub: sp[key] });
-			}
-		}
-		found.sort((a, b) => {
-			const ia = LIVE_ORDER.indexOf(a.key), ib = LIVE_ORDER.indexOf(b.key);
-			return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
-		});
-
 		const dots = [];
-		for (const f of found) {
-			const dot = f.section + '.' + f.key;
-			if (EXCLUDE.has(dot)) continue;
-			const eff = getDotted(state.config, dot);
-			const field = renderField(body, dot, f.key, f.sub, eff, { live: true });
+		for (const f of liveFields()) {
+			const eff = getDotted(state.config, f.dot);
+			const field = renderField(body, f.dot, f.key, f.sub, eff, { live: true });
 			if (field) {
 				state.fields.push(field);
-				state.initial[dot] = field.getValue();
-				dots.push(dot);
+				state.initial[f.dot] = field.getValue();
+				dots.push(f.dot);
 			}
 		}
 
 		card.appendChild(body);
 		col.appendChild(card);
-		grid.appendChild(col);
+		row.appendChild(col);
 
 		const rb = document.getElementById('mj-live-reset');
 		if (rb) rb.addEventListener('click', () => onResetLive(dots, rb));
@@ -469,8 +683,9 @@
 		for (const key of Object.keys(props)) {
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
+			if (dot === ROI_DOT) continue;        // renders on the Visual editor leaf
 			const sub = props[key];
-			if (sub && sub['x-live']) continue;   // live knobs render in the side panel
+			if (sub && sub['x-live']) continue;   // live knobs render on their own leaf
 			if (sub && sub.type === 'object' && sub.properties) {
 				const h = el('h5', 'mt-4 mb-2 text-secondary');
 				h.textContent = sub.title || titleCase(key);
@@ -529,9 +744,13 @@
 		const desc = sub.title || sub.description || key;
 		const meta = LIVE_META[key];
 		// live knobs show an emoji + short label; everything else uses the title
+		// data-hl carries the raw text so highlightPanel() can re-mark the label
+		// in place when the search term changes, without re-rendering the control
+		// (which would throw away unsaved edits)
+		const hlSpan = (t) => '<span data-hl="' + esc(t) + '">' + esc(t) + '</span>';
 		const labelHtml = (live && meta)
-			? '<span class="mj-live-ico">' + meta.icon + '</span> ' + esc(meta.label)
-			: esc(desc);
+			? '<span class="mj-live-ico">' + meta.icon + '</span> ' + hlSpan(meta.label)
+			: hlSpan(desc);
 		const liveCls = live ? ' mj-live-row' : '';
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
@@ -578,7 +797,7 @@
 			const maxA = isNum(sub.maximum) ? ' max="' + sub.maximum + '"' : '';
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
-				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
 				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + ' step="1" value="' + esc(v) + '">' +
 				'</span>';
@@ -629,7 +848,7 @@
 				return '<option value="' + esc(val) + '"' + (val === selVal ? ' selected' : '') + '>' + esc(lbl) + '</option>';
 			}).join('') + '<option value="' + RES_CUSTOM + '">Custom…</option>';
 			p.innerHTML =
-				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + optsHtml(buildList(), cur) + '</select>' +
 				'<input type="text" class="form-control mt-1 mj-res-custom" placeholder="custom, e.g. 1920x1080" value="' + esc(cur) + '" style="display:none">';
 			control = p.querySelector('select');
@@ -700,21 +919,21 @@
 				(unlisted ? option(cur, true, cur + ' (unsupported)') : '') +
 				enumVals.map(o => option(o, !unlisted && cur === String(o))).join('');
 			p.innerHTML =
-				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
 		} else if (type === 'string' && isSensorPath) {
 			p = el('p', 'select mj-row mj-wide');
 			const opts = option('', !eff) + SENSORS.map(s => option(s, String(eff) === s)).join('');
 			p.innerHTML =
-				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
 		} else if (type === 'string') {
 			p = el('p', 'string mj-row');
 			const v = eff !== undefined && eff !== null ? String(eff) : '';
 			p.innerHTML =
-				'<label for="' + id + '" class="form-label">' + esc(desc) + '</label>' +
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">';
 			control = p.querySelector('input');
 		} else if (type === 'array') {
@@ -724,7 +943,7 @@
 			// through the window.mjRoi* hooks exposed below.
 			p = el('p', 'array mj-row');
 			p.innerHTML =
-				'<label class="form-label">' + esc(desc) + '</label>' +
+				'<label class="form-label">' + labelHtml + '</label>' +
 				'<div class="mj-array" id="' + id + '"></div>' +
 				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-array-add">+ Add region</button>';
 			control = p.querySelector('.mj-array');
@@ -773,8 +992,9 @@
 		if (!live) {
 			const reset = document.createElement('button');
 			reset.type = 'button';
-			reset.className = 'btn btn-sm btn-link p-0 ms-2 mj-reset';
-			reset.textContent = '↺ reset';
+			reset.className = 'btn btn-sm btn-link p-0 mj-reset';
+			reset.textContent = '↺';
+			reset.setAttribute('aria-label', 'Reset ' + desc + ' to default');
 			if (!hasDefault) {
 				reset.disabled = true;
 				reset.title = 'Server has no recorded default for this key.';
@@ -782,24 +1002,35 @@
 				reset.title = 'Reset to default: ' + String(sub.default);
 				reset.addEventListener('click', () => onReset(dot, reset));
 			}
-			p.appendChild(reset);
+			// Put the glyph on the control's own line instead of below it. The
+			// live rows are left alone: .mj-live-row.range > .input-group is a
+			// direct-child selector that this wrapper would break.
+			const ctl = el('span', 'mj-ctl');
+			const inner = el('span', 'mj-ctl-in');
+			const kids = Array.from(p.children);
+			const first = kids[0] && kids[0].tagName === 'LABEL' ? 1 : 0;
+			kids.slice(first).forEach(n => inner.appendChild(n));
+			ctl.appendChild(inner);
+			ctl.appendChild(reset);
+			p.appendChild(ctl);
 		}
 
 		// detailed help under the control (skipped on the compact live-panel rows):
 		// the authored `hint` plus auto-context (value range for bounded integers).
 		if (!live) {
 			const hintParts = [];
-			if (sub.hint) hintParts.push(esc(sub.hint));
+			if (sub.hint) hintParts.push('<span data-hl="' + esc(sub.hint) + '"></span>');
 			// only plain number inputs gain a range hint; sliders (max ≤ 100)
 			// already show their bounds via the track and the live value box
 			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
 			if (type === 'integer' && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
 				hintParts.push(esc(sub.minimum + '–' + sub.maximum));
 			if (hintParts.length) {
-				// block-level so it sits on its own line below the control and the
-				// inline "↺ reset" link (a span would flow into it, e.g. "reset0–32")
+				// block-level so it sits on its own line below the control row
 				const hint = el('div', 'hint text-secondary');
 				hint.innerHTML = hintParts.join(' · ');
+				const authored = hint.querySelector('[data-hl]');
+				if (authored) authored.appendChild(hi(sub.hint));
 				p.appendChild(hint);
 			}
 		}

@@ -80,10 +80,9 @@ The settings page is split: `www/cgi-bin/mj-settings.cgi` renders the page chrom
 
 **Server side — `mj-settings.cgi`.**
 
-1. Pick the tab: `label="$GET_tab"`, default `system`.
-2. Iterate `properties` from `$(get_schema)` (cached at `/tmp/webui/schema.json`), and scrape `j/locale.cgi` with `sed` to map each property to its English label. Render the underlined tab strip server-side — sections with no `mj_<key>` label entry are hidden (still how `youtube` is suppressed). Note `j/locale.cgi` is parsed, *not* sourced: it is a plain `key=value` data file with no shebang, and sourcing it would fail anyway because values like `mj_cloud=Cloud (WebRTC)` are not valid shell.
-3. Compute `$title` for the active tab — server-rendered as the form column's `<h3>`.
-4. Build a small JSON bootstrap blob:
+1. Pick the section: `label="$GET_tab"`. `?tab=` names a **section** (`isp`, `video0`, the synthetic `live`/`roi`), not a category. Left empty the client lands on the first leaf of the first group; a stale `?tab=<group>` bookmark still resolves to that group's first section.
+2. Scrape `j/locale.cgi` with `sed` into the `labels` map the boot blob carries, so the client can title each section. Note `j/locale.cgi` is parsed, *not* sourced: it is a plain `key=value` data file with no shebang, and sourcing it would fail anyway because values like `mj_cloud=Cloud (WebRTC)` are not valid shell.
+3. Build a small JSON bootstrap blob:
 
     ```json
     {"tab":"isp","exclude":["audio.volume",…],"sensors":["/etc/sensors/imx415.bin",…]}
@@ -93,9 +92,8 @@ The settings page is split: `www/cgi-bin/mj-settings.cgi` renders the page chrom
     - `sensors` ← `find /etc/sensors -maxdepth 1 -type f` (only if the directory exists).
     - Emitted inside `<script type="application/json" id="mj-settings-boot">…</script>`. JS reads it via `JSON.parse(document.getElementById('mj-settings-boot').textContent)`.
 
-5. Emit the page skeleton — two columns: a sticky vertical `nav-pills flex-column` on the left (one `<li>` per schema section that has a `mj_<key>` label, with the active class on the current `$label`), and `#mj-settings-form-col` on the right containing `<form id="mj-settings-form">` (JS-managed). On `<md` the columns stack. There is no "Restart Majestic" button — Save already SIGHUPs the daemon via the API.
-6. If `$label = motionDetect`, include `p/roi.cgi` after the layout (unchanged from before).
-7. `<script src="/a/mj-settings.js" defer></script>` at the end.
+4. Emit the page skeleton — two columns: `col-md-3` on the left holding the search box (`#mj-search`, hidden until JS unhides it) above the empty `<ul id="mj-settings-nav">` the tree is built into, and `#mj-settings-form-col` (`col-md-9`) on the right containing `<form id="mj-settings-form">` (JS-managed). On `<md` the columns stack. The rail keeps `col-md-3` at every width rather than narrowing to `col-lg-2`: the tree is two levels deep and needs the room, and `col-md-8` is **not** in the PurgeCSS subset (`tools/purgecss.config.cjs`), so widening the other way would have meant regenerating `bootstrap.min.css`. There is no page-level `<h3>` — one section shows at a time and its card carries its own heading. There is no "Restart Majestic" button — Save already SIGHUPs the daemon via the API.
+5. `<script src="/a/mj-settings.js" defer></script>` at the end.
 
 The haserl never reads `/api/v1/config.json`, never calls `yaml-cli`, and never handles a POST — every dynamic value lives in JS.
 
@@ -105,7 +103,9 @@ One IIFE, vanilla JS, no dependencies beyond `fetch` and the boot JSON tag.
 
 1. **Load.** On `DOMContentLoaded`, fetch `/api/v1/config.schema.json` and `/api/v1/config.json` in parallel with `credentials: 'same-origin'` (cached HTTP-Basic creds auto-attach). Cache both in `state`. If either fails (camera down, schema missing, unknown tab), render a fatal alert in place of the form.
 
-2. **Render fields.** Walk `schema.properties[TAB].properties`. For each key, build a dotted path `TAB + '.' + key`, skip if `EXCLUDE.has(dot)`, otherwise dispatch on `type` to match the old `field_*` widget mapping (so existing CSS in `bootstrap.override.css` continues to apply unchanged):
+2. **Navigation + search.** `buildNav()` renders a two-level tree into `#mj-settings-nav` from the schema's `x-groups`: categories as headings, sections indented and directly selectable. Two leaves are synthetic — `live` (the preview plus the `x-live` knobs lifted out of their sections) and `roi` (the ROI canvas, which owns `motionDetect.roi` because `m/img.html` calls back into `window.mjRoiAdd`/`mjRoiList` and only a mounted field installs those). `#mj-search` filters the tree rather than replacing it: a category whose name matches keeps all of its subsections, otherwise a subsection survives on its own label or on any of its fields' `title`/`hint`/key, with a count of the matches and `<mark>` on the matched run. `visibleWhen`-hidden fields do not count — `fieldVisible()` evaluates the same `visMatches()` rule against `state.config`. On `<md` the categories become a true accordion: all collapsed on load, opening one closes the rest; a query force-expands whatever still matches. Highlighting the open section is done **in place** by `highlightPanel()` over `[data-hl]` — re-rendering the form per keystroke would reset every control and lose unsaved edits.
+
+3. **Render fields.** The page shows exactly **one section**, as a single full-width card whose body is a `.mj-cols` two-column flow. Walk `schema.properties[SECTION].properties`. For each key, build a dotted path `SECTION + '.' + key`, skip if `EXCLUDE.has(dot)`, otherwise dispatch on `type` to match the old `field_*` widget mapping (so existing CSS in `bootstrap.override.css` continues to apply unchanged):
 
     | `schema.type` | extra condition | widget |
     |---|---|---|
@@ -117,13 +117,13 @@ One IIFE, vanilla JS, no dependencies beyond `fetch` and the boot JSON tag.
     | `string` | else | `<input type="text">`. |
     | `number`/`array`/`object` | — | skipped (matches the legacy `case "$type"` dispatch). |
 
-    Each row is wrapped in `<p class="<type> mj-row">` exactly like the old `field_*` helpers emitted, plus an inline `↺ reset` button (`.mj-reset`) wired to per-field reset. The reset button is disabled when the schema has no `default` for that key.
+    Each row is wrapped in `<p class="<type> mj-row">` exactly like the old `field_*` helpers emitted. The control and a bare `↺` reset button (`.mj-reset`) then share one flex line, `<span class="mj-ctl"><span class="mj-ctl-in">…control…</span><button class="mj-reset">↺</button></span>` — which is why the width caps live on `.mj-ctl-in` rather than on the control itself, or the glyph would strand at the card edge. The reset button is disabled when the schema has no `default` for that key. Live-panel rows are **not** wrapped: `.mj-live-row.range > .input-group` is a direct-child selector.
 
-3. **Dirty tracking.** After rendering, `state.initial[dot] = field.getValue()` snapshots each control. On every `input`/`change`, `updateDirty()` recomputes which fields differ, toggles a `.mj-dirty` class on the row (left border highlight from `bootstrap.override.css`), updates the toolbar counter, and enables/disables the Save button.
+4. **Dirty tracking.** After rendering, `state.initial[dot] = field.getValue()` snapshots each control. On every `input`/`change`, `updateDirty()` recomputes which fields differ, toggles a `.mj-dirty` class on the row (left border highlight from `bootstrap.override.css`), updates the toolbar counter, and enables/disables the Save button.
 
-4. **Save.** Submitting the form filters `state.fields` for `getValue() !== initial[dot]`, builds a **nested** JSON tree from the dot paths (`{audio:{volume:"55"}, isp:{sensorConfig:"…"}}`), and `POST /api/v1/config` with `Content-Type: application/json`. That shape is the literal input of majestic's `apply_config_subtree` walker. Values are always sent as strings — `config_set_universal` takes a `const char *` either way and the C-side `json_object_get_string` coerces booleans/numbers transparently. On 200, re-fetch `config.json`, push the new values back into each control, and reset `initial` so the page is clean again. On non-200, surface the body in an inline `.alert-danger` and leave dirty state intact — note that the server aborts at the first rejected leaf, so earlier leaves in the batch did *not* persist.
+5. **Save.** Submitting the form filters `state.fields` for `getValue() !== initial[dot]`, builds a **nested** JSON tree from the dot paths (`{audio:{volume:"55"}, isp:{sensorConfig:"…"}}`), and `POST /api/v1/config` with `Content-Type: application/json`. That shape is the literal input of majestic's `apply_config_subtree` walker. Values are always sent as strings — `config_set_universal` takes a `const char *` either way and the C-side `json_object_get_string` coerces booleans/numbers transparently. On 200, re-fetch `config.json`, push the new values back into each control, and reset `initial` so the page is clean again. On non-200, surface the body in an inline `.alert-danger` and leave dirty state intact — note that the server aborts at the first rejected leaf, so earlier leaves in the batch did *not* persist.
 
-5. **Reset.** Per-field `↺` button calls `GET /api/v1/reset?key=<dot>` after a `confirm()`. On 200, refresh the config and re-render. On 404, the key has no recorded default — the button gets disabled with an explanatory tooltip.
+6. **Reset.** Per-field `↺` button calls `GET /api/v1/reset?key=<dot>` after a `confirm()`. On 200, refresh the config and re-render. On 404, the key has no recorded default — the button gets disabled with an explanatory tooltip.
 
 There is no separate "Restart Majestic" affordance: every `/api/v1/{config,set,reset}` round-trip already calls `sdk_reload()` server-side, so Save *is* the reload. Settings that need true hardware re-init still want the device-level `fw-restart.cgi`.
 
