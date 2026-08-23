@@ -565,6 +565,11 @@
 		// to a hit highlights its hints and not its field names.
 		highlightPanel();
 
+		// Counts are read off the mounted controls, so swapping sections changes
+		// what they are read from — including when the swap discarded unsaved
+		// edits, which is exactly when the old numbers are wrong.
+		if (state.q.trim()) buildNav();
+
 		updateDirty();
 	}
 
