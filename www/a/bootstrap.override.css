@@ -550,6 +550,10 @@ mark {
 	margin: 0;
 }
 
+/* Save and Apply live here together, and the bar is only in the document while
+   one of them has something to do. It is the form's last child, so appearing
+   and disappearing costs nothing above it — measured: the section card's top
+   is identical with the bar shown and hidden. */
 .mj-toolbar {
 	position: sticky;
 	bottom: 0;
@@ -558,6 +562,12 @@ mark {
 	padding: 0.75rem 0;
 	background: var(--bs-body-bg);
 	border-top: 1px solid var(--bs-border-color);
+}
+
+/* the "needs a pipeline reload" status. Not Bootstrap's .text-warning: that
+   utility is not in the PurgeCSS subset we ship. */
+.mj-apply-note {
+	color: var(--bs-warning);
 }
 
 .btn-motor {
