@@ -385,17 +385,23 @@ function initAll() {
 		if (Number.isInteger(port) && port >= 1 && port <= 65535 && port !== 554)
 			$$('.ep-rtsp').forEach(el => el.textContent = ':' + port);
 
-		// The string form is accepted alongside the boolean on purpose. majestic
-		// reports unsafe as a JSON boolean, but jsonfilter printed `true` for
-		// either, and the two notes are not symmetric: failing to warn that
-		// authentication is off is the harmful direction, so anything that used to
-		// warn still warns. A key majestic is too old to report stays undefined
-		// and keeps the authenticated note, as before.
-		const unsafe = mjGet(cfg, 'system.unsafe');
-		if (unsafe === true || unsafe === 'true') {
-			const authNote = $('#ep-auth'), unsafeNote = $('#ep-unsafe');
-			if (authNote) authNote.hidden = true;
-			if (unsafeNote) unsafeNote.hidden = false;
+		// Both notes start hidden, so this reveals exactly one -- and only once the
+		// config is real. mjConfig() turns a failed or non-OK fetch into {}, which
+		// is indistinguishable from "unsafe is off" if you only test the leaf, and
+		// answering that with the authenticated note would be a security warning
+		// failing open. The old server-side read did fail open that way (an empty
+		// jsonfilter result rendered the authenticated note), but the read lived on
+		// the camera, where the only way to come back empty was localhost failing.
+		// From the browser the ways to come back empty are far broader, so the
+		// section has to be present before either note is trusted.
+		//
+		// The string form is accepted alongside the boolean because jsonfilter
+		// printed `true` for either. A majestic too old to report the key at all
+		// still has a system section, so it keeps the authenticated note, as before.
+		if (mjGet(cfg, 'system')) {
+			const unsafe = mjGet(cfg, 'system.unsafe');
+			const note = $(unsafe === true || unsafe === 'true' ? '#ep-unsafe' : '#ep-auth');
+			if (note) note.hidden = false;
 		}
 	});
 

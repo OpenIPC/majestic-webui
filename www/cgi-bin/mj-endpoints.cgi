@@ -4,11 +4,13 @@
 
 <%in p/header.cgi %>
 
-<!-- Both notes ship and main.js unhides the right one from majestic's config.
-     system.unsafe defaults to false, so the authenticated note is what renders
-     before — and if — that config arrives, which is exactly where the old
-     server-side read landed when it came back empty. -->
-<p id="ep-auth" class="small text-secondary">These endpoints authenticate as user <code>root</code> with the same password you use for this WebUI. Players such as VLC ask for it when you open a bare URL.</p>
+<!-- Both notes ship hidden and main.js unhides whichever majestic's config says
+     is true. Neither is the default on purpose: claiming these endpoints are
+     authenticated when the config never arrived would be a security warning
+     failing open, and defaulting the other way would flash a red banner at every
+     visitor whose camera is fine. Saying nothing until it knows is the only
+     honest default. -->
+<p id="ep-auth" class="small text-secondary" hidden>These endpoints authenticate as user <code>root</code> with the same password you use for this WebUI. Players such as VLC ask for it when you open a bare URL.</p>
 <p id="ep-unsafe" class="small text-danger" hidden>Authentication is switched off for every endpoint (<code>system.unsafe</code>) — anyone who can reach the camera can open these URLs.</p>
 
 <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4 mb-4">
