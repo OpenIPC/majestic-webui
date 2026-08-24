@@ -255,6 +255,29 @@ attr_escape() {
 		-e 's/&amp;#\([0-9][0-9]*\);/\&#\1;/g'
 }
 
+# Escape a string for use as HTML text content.
+#
+# Not `pre` or `ex`: both wrap what they are given in a block element -- a <pre>,
+# and a <div> carrying a visible "# command" heading -- which is no use for a
+# value sitting inside a <dt> or mid-sentence. Escaping the endpoint addresses
+# with either would have put a <pre> inside every <dt> on mj-endpoints.cgi and
+# taken the click-to-copy wiring with it.
+#
+# Not `attr_escape` either. That one deliberately puts numeric character
+# references back after escaping, so the confirm prompts can carry a &#10; line
+# break; for text read off the device that is exactly backwards, because it hands
+# the value a way to emit an entity of its own choosing.
+#
+# printf rather than echo, so nothing re-interprets a backslash on the way out
+# and no trailing newline lands in the middle of an inline element.
+esc() {
+	printf '%s' "$1" | sed \
+		-e 's/&/\&amp;/g' \
+		-e 's/</\&lt;/g' \
+		-e 's/>/\&gt;/g' \
+		-e 's/"/\&quot;/g'
+}
+
 # field_switch "name" "label" "value" "hint" "confirm"
 #
 # A non-empty "confirm" marks the switch destructive: the row is styled in red
