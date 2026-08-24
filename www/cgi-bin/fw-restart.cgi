@@ -4,6 +4,13 @@ Cache-Control: no-store
 Pragma: no-cache
 
 <!DOCTYPE html>
+<!-- Not escaped, and the include that would make escaping possible is not
+     wanted here. This page carries no includes at all: it runs reboot below and
+     has to render while the system is going down, so it pulls in no auth gate
+     and sources nothing. That also means webui_theme is never set on this page
+     and the := always supplies the literal "dark" - there is no device-derived
+     value here to escape. Note haserl expands an include tag even inside an
+     HTML comment, so this note cannot name the tag it is talking about. -->
 <html lang="en" data-bs-theme="<%= ${webui_theme:=dark} %>">
 <head>
 	<meta charset="utf-8">

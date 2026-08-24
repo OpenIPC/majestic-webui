@@ -44,9 +44,9 @@ ntp_summary=$(echo $server_0 $server_1 $server_2 $server_3 | sed 's/ /, /g')
 			<h3>Current</h3>
 			<dl class="small list mb-0">
 				<dt>Device time</dt><dd id="tz-now">—</dd>
-				<dt>Zone name</dt><dd><%= $tz_name %></dd>
-				<dt>POSIX string</dt><dd class="text-break"><%= $tz_data %></dd>
-				<dt>NTP servers</dt><dd><%= "${ntp_summary:-—}" %></dd>
+				<dt>Zone name</dt><dd><% esc "$tz_name" %></dd>
+				<dt>POSIX string</dt><dd class="text-break"><% esc "$tz_data" %></dd>
+				<dt>NTP servers</dt><dd><% esc "${ntp_summary:-—}" %></dd>
 			</dl>
 		</div></div>
 	</div>
@@ -61,12 +61,12 @@ ntp_summary=$(echo $server_0 $server_1 $server_2 $server_3 | sed 's/ /, /g')
 				<datalist id="tz_list"></datalist>
 				<p class="string" id="tz_name_wrap">
 					<label for="tz_name" class="form-label">Zone name</label>
-					<input type="text" id="tz_name" name="tz_name" value="<%= $tz_name %>" class="form-control" list="tz_list">
+					<input type="text" id="tz_name" name="tz_name" value="<% attr_escape "$tz_name" %>" class="form-control" list="tz_list">
 					<span class="hint text-secondary">Type the name of the nearest large city.</span>
 				</p>
 				<p class="string" id="tz_data_wrap">
 					<label for="tz_data" class="form-label">Zone string</label>
-					<input type="text" id="tz_data" name="tz_data" value="<%= $tz_data %>" class="form-control" readonly>
+					<input type="text" id="tz_data" name="tz_data" value="<% attr_escape "$tz_data" %>" class="form-control" readonly>
 					<span class="hint text-secondary">Control string of the timezone selected above.</span>
 				</p>
 				<button type="button" class="btn btn-sm btn-outline-secondary" id="frombrowser">Use browser timezone</button>

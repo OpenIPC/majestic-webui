@@ -4,7 +4,7 @@ Cache-Control: no-store
 Pragma: no-cache
 
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="<%= ${webui_theme:=dark} %>">
+<html lang="en" data-bs-theme="<% attr_escape "${webui_theme:=dark}" %>">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
@@ -22,7 +22,7 @@ Pragma: no-cache
 	<script src="/a/cameras-switch.js" defer></script>
 </head>
 
-<body id="page-<%= $pagename %>" class="<%= $fw_variant %>">
+<body id="page-<% attr_escape "$pagename" %>" class="<% attr_escape "$fw_variant" %>">
 	<nav class="navbar navbar-expand-lg bg-body-tertiary">
 		<div class="container">
 			<a class="navbar-brand" href="status.cgi"><img alt="Image: OpenIPC logo" height="32" src="/a/logo.svg"><span class="x-small ms-1"><% esc "$fw_variant" %></span></a>

@@ -392,9 +392,9 @@ update_wfbinfo
                     <p class="range" id="txpower_wrap">
                         <% tooltip_label "txpower" "TX Power" "Transmit power in dBm. Higher values increase range but consume more power and may cause interference. Check local regulations for maximum allowed values." %>
                         <span class="input-group">
-                            <input type="hidden" id="txpower" name="txpower" value="<%= $wfb_txpower %>">
-                            <input type="range" class="form-control form-range" id="txpower-range" value="<%= $wfb_txpower %>" min="0" max="55" step="1">
-                            <span class="input-group-text show-value" id="txpower-show"><%= $wfb_txpower %></span>
+                            <input type="hidden" id="txpower" name="txpower" value="<% attr_escape "$wfb_txpower" %>">
+                            <input type="range" class="form-control form-range" id="txpower-range" value="<% attr_escape "$wfb_txpower" %>" min="0" max="55" step="1">
+                            <span class="input-group-text show-value" id="txpower-show"><% esc "$wfb_txpower" %></span>
                         </span>
                     </p>
 
