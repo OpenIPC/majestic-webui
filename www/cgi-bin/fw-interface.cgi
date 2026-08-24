@@ -52,7 +52,7 @@ tcur=${webui_theme:-dark}
 				<% field_hidden "action" "access" %>
 				<p class="string">
 					<label for="ui_username" class="form-label">Username</label>
-					<input type="text" id="ui_username" name="ui_username" value="<%= $ui_username %>" class="form-control" autocomplete="username" disabled>
+					<input type="text" id="ui_username" name="ui_username" value="<% attr_escape "$ui_username" %>" class="form-control" autocomplete="username" disabled>
 				</p>
 				<% field_password "password_default" "Password" %>
 				<% field_password "password_confirm" "Confirm password" %>
