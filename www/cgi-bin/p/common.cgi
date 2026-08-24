@@ -581,7 +581,6 @@ pagename=$(basename "$SCRIPT_NAME")
 pagename="${pagename%%.*}"
 
 include /etc/webui/webui.conf
-include /usr/share/libubox/jshn.sh
 
 check_password
 %>

@@ -64,8 +64,27 @@ else
 	command="${command} -F 'caption=${telegram_message}'"
 fi
 
-echo "$command"
-eval "$command"
-rm -f "$snapshot"
+# The response body still goes to stdout for anyone running this by hand or out
+# of cron. What is new is the exit status: this used to `exit 0` unconditionally,
+# so a rejected send reported success and ext-telegram.cgi's ?send=image webhook
+# had to dig `ok` out of the JSON body with jsonfilter to find out otherwise.
+# Telegram answers a rejected send with 4xx, so the HTTP code alone settles it
+# and the camera no longer needs a JSON parser on flash for this.
+#
+# --write-out rather than --fail-with-body: curl is pinned at 7.76.0 in the
+# firmware, the very release that added --fail-with-body, so going through the
+# status code leaves no version floor to trip over later.
+#
+# The command line is no longer echoed. It carries the bot token, and printing it
+# was the only reason the webhook had to filter its own output before parsing it.
+body=/tmp/telegram-response.$$
+command="${command} --output ${body} --write-out '%{http_code}'"
 
-exit 0
+http=$(eval "$command")
+[ -s "$body" ] && cat "$body"
+rm -f "$body" "$snapshot"
+
+case "$http" in
+200) exit 0 ;;
+*) exit 1 ;;
+esac

@@ -364,6 +364,41 @@ function initAll() {
 	$$('.ep-host').forEach(el => el.textContent = location.host);      // host[:port]
 	$$('.ep-addr').forEach(el => el.textContent = location.hostname);  // RTSP has its own port
 
+	// ...and RTSP's own port is the one value on that page location cannot
+	// supply, along with whether majestic is serving everything unauthenticated.
+	// Both used to be read server-side out of /api/v1/config.json with
+	// jsonfilter, which cost the camera a shell-out to a JSON parser -- and the
+	// firmware a 63KB libubox -- to do what JSON.parse does here for nothing.
+	// Guarded on the spans so only mj-endpoints.cgi pays for the config fetch;
+	// mjConfig() caches, so a page that already asked does not ask twice.
+	//
+	// Majestic only range-checks rtsp.port on the write path, so a hand-edited
+	// majestic.yaml can leave a port no URL can use. Anything outside 1-65535 is
+	// ignored in favour of the default a bare rtsp:// implies, and 554 is left
+	// off the URL entirely.
+	if ($('.ep-rtsp') || $('#ep-unsafe')) mjConfig().then(cfg => {
+		// The old server-side read saw every value as a string, so a port that
+		// arrived quoted still worked. Coercing number|string (and nothing else,
+		// so a stray `true` cannot become port 1) keeps that latitude.
+		const raw = mjGet(cfg, 'rtsp.port');
+		const port = (typeof raw === 'number' || typeof raw === 'string') ? Number(raw) : NaN;
+		if (Number.isInteger(port) && port >= 1 && port <= 65535 && port !== 554)
+			$$('.ep-rtsp').forEach(el => el.textContent = ':' + port);
+
+		// The string form is accepted alongside the boolean on purpose. majestic
+		// reports unsafe as a JSON boolean, but jsonfilter printed `true` for
+		// either, and the two notes are not symmetric: failing to warn that
+		// authentication is off is the harmful direction, so anything that used to
+		// warn still warns. A key majestic is too old to report stays undefined
+		// and keeps the authenticated note, as before.
+		const unsafe = mjGet(cfg, 'system.unsafe');
+		if (unsafe === true || unsafe === 'true') {
+			const authNote = $('#ep-auth'), unsafeNote = $('#ep-unsafe');
+			if (authNote) authNote.hidden = true;
+			if (unsafeNote) unsafeNote.hidden = false;
+		}
+	});
+
 	// click-to-copy for .cp2cb snippets (HTTPS uses the clipboard API, plain
 	// http falls back to a hidden textarea + execCommand)
 	$$('.cp2cb').forEach(el => {

@@ -21,7 +21,7 @@ This is a majestic-side feature; the WebUI just provides the login page and the 
 
 - `sbin/updatewebui [branch]` — fetches a branch zip from GitHub, wipes `/var/www`, then copies `sbin/*` → `/usr/sbin` and `www/*` → `/var/www`. This is the canonical "deploy from source" path. Default branch is `master`.
 - Edits to a running camera can also be made directly under `/var/www/cgi-bin/` and `/usr/sbin/`.
-- There is no local way to run the UI off-camera — every script assumes camera-side binaries (`majestic`, `yaml-cli`, `ipcinfo`, `fw_printenv`, `haserl`, `jsonfilter`, `jshn.sh`, `chpasswd`, `sysupgrade`).
+- There is no local way to run the UI off-camera — every script assumes camera-side binaries (`majestic`, `yaml-cli`, `ipcinfo`, `fw_printenv`, `haserl`, `chpasswd`, `sysupgrade`).
 
 ## Architecture
 
