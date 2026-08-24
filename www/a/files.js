@@ -18,26 +18,19 @@
 	// connection buffer and take the camera's RAM with it.
 	function fileUrl(p) { return p.split('/').map(encodeURIComponent).join('/'); }
 	function isMedia(n) { return VID.test(n) || IMG.test(n) || AUD.test(n); }
-	// Types the browser would execute in the camera's own origin if it ever
-	// rendered them inline instead of saving them.
-	const ACTIVE = /\.(x?html?|xht|svg|xml)$/i;
-	// Above this, an active file goes direct like everything else. Firmware
-	// carrying the CGI flow-control fix caps the buffer at 1 MiB, but this UI
-	// still has to be safe on the builds that predate it — which is the whole
-	// reason downloads went direct in the first place — and there the CGI
-	// holds the entire file in RAM.
-	const CGI_ATTACH_MAX = 1048576;
+	// Everything goes direct now, including the types a browser would execute
+	// in the camera's own origin. Those used to detour through download.cgi
+	// for its Content-Disposition: attachment, which the static handler could
+	// not send — but that only covered files up to a size cap, and only a
+	// click, never a pasted URL or a new tab. majestic pins the disposition
+	// itself now, for anything outside the web root that is not media, so the
+	// cases this could not reach are covered and the detour is not needed.
+	// The download attribute stays: the server sends no filename with the
+	// disposition, leaving the name to the client that knows it.
 	function download(path, name) {
-		const f = entry(name);
-		if (ACTIVE.test(name) && f && f.size <= CGI_ATTACH_MAX) {
-			// download.cgi pins Content-Disposition: attachment, which the
-			// static handler cannot.
-			location = '/cgi-bin/j/download.cgi?path=' + encodeURIComponent(path);
-			return;
-		}
 		const a = document.createElement('a');
 		a.href = fileUrl(path);
-		a.download = name; // same-origin, so this wins over an inline media type
+		a.download = name;
 		document.body.appendChild(a);
 		a.click();
 		a.remove();
