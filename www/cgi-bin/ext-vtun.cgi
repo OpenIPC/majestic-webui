@@ -34,7 +34,7 @@ fi
 			<% if [ -e "$conf_file" ]; then %>
 				<dl class="small list">
 					<dt>Status</dt><dd><span class="text-success">Up</span></dd>
-					<dt>VTun ID</dt><dd class="text-break"><%= ${network_macaddr//:/} | tr a-z A-Z %></dd>
+					<dt>VTun ID</dt><dd class="text-break"><% esc "$(echo "${network_macaddr//:/}" | tr a-z A-Z)" %></dd>
 					<dt>Password</dt><dd class="text-break"><% grep password $conf_file | xargs | cut -d' ' -f2 | sed 's/;$//' %></dd>
 				</dl>
 				<p class="small text-secondary">Use these credentials to set up remote access.</p>

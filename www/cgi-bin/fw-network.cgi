@@ -122,14 +122,14 @@ fi
 		<div class="card h-100"><div class="card-body">
 			<h3>Current connection</h3>
 			<dl class="small list mb-0">
-				<dt>Hostname</dt><dd><%= $network_hostname %></dd>
-				<dt>Interface</dt><dd><%= $network_interface %></dd>
+				<dt>Hostname</dt><dd><% esc "$network_hostname" %></dd>
+				<dt>Interface</dt><dd><% esc "$network_interface" %></dd>
 				<dt>Mode</dt><dd><%= $([ "$network_dhcp" = "true" ] && echo DHCP || echo Static) %></dd>
-				<dt>IP</dt><dd><%= $network_address %></dd>
-				<dt>Netmask</dt><dd><%= ${network_netmask:-—} %></dd>
-				<dt>Gateway</dt><dd><%= ${network_gateway:-—} %></dd>
-				<dt>DNS</dt><dd><%= ${network_nameserver:-—} %></dd>
-				<dt>MAC</dt><dd class="text-break"><%= $network_macaddr %></dd>
+				<dt>IP</dt><dd><% esc "$network_address" %></dd>
+				<dt>Netmask</dt><dd><% esc "${network_netmask:-—}" %></dd>
+				<dt>Gateway</dt><dd><% esc "${network_gateway:-—}" %></dd>
+				<dt>DNS</dt><dd><% esc "${network_nameserver:-—}" %></dd>
+				<dt>MAC</dt><dd class="text-break"><% esc "$network_macaddr" %></dd>
 			</dl>
 		</div></div>
 	</div>

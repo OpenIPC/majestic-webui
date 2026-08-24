@@ -78,13 +78,13 @@
 		<div class="card h-100"><div class="card-body">
 			<h3>Device</h3>
 			<dl class="small list mb-0">
-				<dt>SoC</dt><dd><%= $soc %> <span class="text-secondary">(<%= $soc_family %>)</span></dd>
-				<dt>Sensor</dt><dd><%= $sensor %></dd>
-				<dt>Firmware</dt><dd><%= "${fw_version}-${fw_variant}" %></dd>
-				<dt>Build</dt><dd class="text-break"><%= $fw_build %></dd>
-				<dt>Majestic</dt><dd><%= $mj_version %></dd>
+				<dt>SoC</dt><dd><% esc "$soc" %> <span class="text-secondary">(<% esc "$soc_family" %>)</span></dd>
+				<dt>Sensor</dt><dd><% esc "$sensor" %></dd>
+				<dt>Firmware</dt><dd><% esc "${fw_version}-${fw_variant}" %></dd>
+				<dt>Build</dt><dd class="text-break"><% esc "$fw_build" %></dd>
+				<dt>Majestic</dt><dd><% esc "$mj_version" %></dd>
 				<% if [ -n "$uboot_version" ]; then %>
-					<dt>U-Boot</dt><dd><%= $uboot_version %></dd>
+					<dt>U-Boot</dt><dd><% esc "$uboot_version" %></dd>
 				<% fi %>
 			</dl>
 		</div></div>
@@ -95,11 +95,11 @@
 		<div class="card h-100"><div class="card-body">
 			<h3>Network</h3>
 			<dl class="small list mb-0">
-				<dt>Host</dt><dd><%= $network_hostname %></dd>
-				<dt>Address</dt><dd><%= $network_address %></dd>
-				<dt>MAC</dt><dd class="text-break"><%= $network_macaddr %></dd>
-				<dt>Link</dt><dd><%= $network_interface %></dd>
-				<dt>Gateway</dt><dd><%= $network_gateway %></dd>
+				<dt>Host</dt><dd><% esc "$network_hostname" %></dd>
+				<dt>Address</dt><dd><% esc "$network_address" %></dd>
+				<dt>MAC</dt><dd class="text-break"><% esc "$network_macaddr" %></dd>
+				<dt>Link</dt><dd><% esc "$network_interface" %></dd>
+				<dt>Gateway</dt><dd><% esc "$network_gateway" %></dd>
 			</dl>
 		</div></div>
 	</div>
@@ -109,10 +109,10 @@
 		<div class="card h-100"><div class="card-body">
 			<h3>Storage</h3>
 			<dl class="small list mb-2">
-				<dt>Flash</dt><dd><%= $flash_size %> MB <span class="text-secondary"><%= $flash_type %></span></dd>
+				<dt>Flash</dt><dd><% esc "$flash_size" %> MB <span class="text-secondary"><% esc "$flash_type" %></span></dd>
 			</dl>
 			<div class="d-flex justify-content-between x-small mb-1">
-				<span class="fw-semibold">Overlay</span><span class="text-secondary"><%= ${overlay_use:-n/a} %></span>
+				<span class="fw-semibold">Overlay</span><span class="text-secondary"><% esc "${overlay_use:-n/a}" %></span>
 			</div>
 			<div id="overlay-bar" class="storage-bar mb-2"></div>
 			<div id="overlay-legend" class="storage-legend x-small mb-3"></div>
@@ -121,7 +121,7 @@
 				<% echo "$sd_rows" | while IFS='|' read mnt use pct; do %>
 					<div class="d-flex align-items-center gap-2 x-small">
 						<span class="badge text-bg-success flex-shrink-0">SD</span>
-						<span class="text-secondary"><%= "$mnt — $use ($pct)" %></span>
+						<span class="text-secondary"><% esc "$mnt — $use ($pct)" %></span>
 					</div>
 				<% done %>
 			<% else %>
