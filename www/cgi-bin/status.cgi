@@ -27,7 +27,12 @@
 			<div class="x-small text-uppercase text-secondary">CPU</div>
 			<div class="lh-1 my-1"><span class="fs-3 fw-semibold" id="st-cpu">–</span><span class="x-small text-secondary"> %</span></div>
 			<div class="progress" style="height:4px"><div id="bar-cpu" class="progress-bar" style="width:0"></div></div>
-			<div class="x-small text-secondary mt-1">load <span id="st-load">–</span></div>
+			<div class="x-small text-secondary mt-1">load <span id="st-load">–</span>
+				<a href="https://github.com/OpenIPC/wiki/blob/master/en/trouble-load-average.md"
+				   class="text-secondary text-decoration-none"
+				   aria-label="Why is the load average high?"
+				   title="1-minute load average — not a CPU-usage figure. Linux counts tasks in uninterruptible sleep as well as runnable ones, and vendor SDK driver threads stay in that state permanently, so on SigmaStar SoCs this reads 12-13 even on an idle camera. Judge the CPU by the percentage above. Click for details.">ⓘ</a>
+			</div>
 			<div id="spark-cpu" class="spark mt-1"></div>
 		</div></div>
 	</div>
