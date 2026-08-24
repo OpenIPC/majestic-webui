@@ -1,50 +1,27 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="Majestic Endpoints"
-
-# Ask the live config rather than majestic.yaml, which omits keys left at their
-# default.
-mj_config=$(wget -q -T1 -O - localhost/api/v1/config.json 2>/dev/null)
-
-# system.unsafe switches authentication off for every HTTP and RTSP endpoint, so
-# the credentials note below would be wrong.
-mj_unsafe=$(echo "$mj_config" | jsonfilter -e '@.system.unsafe' 2>/dev/null)
-
-# Hosts below are placeholders: every HTTP and WebSocket endpoint here is served
-# on the WebUI's own origin, so main.js overwrites the .ep-* spans with the
-# address the browser actually used. RTSP is the exception — its port is its
-# own, and only the default 554 may be left out of the URL.
-#
-# Majestic only range-checks rtsp.port on the write path, so a hand-edited
-# majestic.yaml can leave a port no URL can use. Anything outside 1-65535 falls
-# back to the default a bare rtsp:// implies. The ?????? arm drops 6-digit and
-# longer values before the numeric test, which has no defined behaviour once
-# the operand no longer fits a long.
-rtsp_port=$(echo "$mj_config" | jsonfilter -e '@.rtsp.port' 2>/dev/null)
-case "$rtsp_port" in
-	''|*[!0-9]*|??????*) rtsp_port=554 ;;
-esac
-[ "$rtsp_port" -ge 1 ] && [ "$rtsp_port" -le 65535 ] || rtsp_port=554
-[ "$rtsp_port" = "554" ] && rtsp_suffix= || rtsp_suffix=":$rtsp_port"
-%>
+<% page_title="Majestic Endpoints" %>
 
 <%in p/header.cgi %>
 
-<% if [ "$mj_unsafe" = "true" ]; then %>
-<p class="small text-danger">Authentication is switched off for every endpoint (<code>system.unsafe</code>) — anyone who can reach the camera can open these URLs.</p>
-<% else %>
-<p class="small text-secondary">These endpoints authenticate as user <code>root</code> with the same password you use for this WebUI. Players such as VLC ask for it when you open a bare URL.</p>
-<% fi %>
+<!-- Both notes ship hidden and main.js unhides whichever majestic's config says
+     is true. Neither is the default on purpose: claiming these endpoints are
+     authenticated when the config never arrived would be a security warning
+     failing open, and defaulting the other way would flash a red banner at every
+     visitor whose camera is fine. Saying nothing until it knows is the only
+     honest default. -->
+<p id="ep-auth" class="small text-secondary" hidden>These endpoints authenticate as user <code>root</code> with the same password you use for this WebUI. Players such as VLC ask for it when you open a bare URL.</p>
+<p id="ep-unsafe" class="small text-danger" hidden>Authentication is switched off for every endpoint (<code>system.unsafe</code>) — anyone who can reach the camera can open these URLs.</p>
 
 <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4 mb-4">
 	<div class="col">
 		<h3>Video</h3>
 		<dl>
-			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><%= $rtsp_suffix %>/stream=0</dt>
+			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><span class="ep-rtsp"></span>/stream=0</dt>
 			<dd>RTSP main stream.</dd>
-			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><%= $rtsp_suffix %>/stream=1</dt>
+			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><span class="ep-rtsp"></span>/stream=1</dt>
 			<dd>RTSP sub stream.</dd>
-			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><%= $rtsp_suffix %>/stream=2</dt>
+			<dt class="cp2cb">rtsp://<span class="ep-addr"><%= $network_address %></span><span class="ep-rtsp"></span>/stream=2</dt>
 			<dd>RTSP JPEG stream.</dd>
 			<dt class="cp2cb"><span class="ep-ws">ws</span>://<span class="ep-host"><%= $network_address %></span>/ws/video?stream=0</dt>
 			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by Preview). Append <code>&amp;audio=opus,mp4a.40.2</code> to mux in an audio track for the codecs your player accepts.</dd>

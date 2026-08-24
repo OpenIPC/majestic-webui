@@ -22,12 +22,21 @@ else
 	telegram_message="$(echo "$telegram_caption" | sed "s/%hostname/$(hostname -s)/;s/%datetime/$(date +"%F %T")/;s/%soctemp/$(ipcinfo --temp)/")"
 fi
 
+# Both files below live in a private directory rather than straight in /tmp.
+# This script runs as root, from cron and from a webhook anyone who can reach the
+# camera can fire, and the old paths were fully predictable -- hostname and
+# timestamp for the snapshot, the pid for the response -- so a symlink planted at
+# either path would have been followed and clobbered. mktemp -d keeps the
+# snapshot's basename, which is what Telegram shows as the document name.
+workdir=$(mktemp -d /tmp/telegram.XXXXXX) || exit 1
+trap 'rm -rf "$workdir"' EXIT INT TERM
+
 filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
 if [ "$telegram_heif" = "true" ]; then
-	snapshot=/tmp/${filename}.heif
+	snapshot=$workdir/${filename}.heif
 	wget -q -T1 localhost/image.heif -O "$snapshot"
 else
-	snapshot=/tmp/${filename}.jpg
+	snapshot=$workdir/${filename}.jpg
 	wget -q -T1 localhost/image.jpg -O "$snapshot"
 fi
 
@@ -64,8 +73,26 @@ else
 	command="${command} -F 'caption=${telegram_message}'"
 fi
 
-echo "$command"
-eval "$command"
-rm -f "$snapshot"
+# The response body still goes to stdout for anyone running this by hand or out
+# of cron. What is new is the exit status: this used to `exit 0` unconditionally,
+# so a rejected send reported success and ext-telegram.cgi's ?send=image webhook
+# had to dig `ok` out of the JSON body with jsonfilter to find out otherwise.
+# Telegram answers a rejected send with 4xx, so the HTTP code alone settles it
+# and the camera no longer needs a JSON parser on flash for this.
+#
+# --write-out rather than --fail-with-body: curl is pinned at 7.76.0 in the
+# firmware, the very release that added --fail-with-body, so going through the
+# status code leaves no version floor to trip over later.
+#
+# The command line is no longer echoed. It carries the bot token, and printing it
+# was the only reason the webhook had to filter its own output before parsing it.
+body=$workdir/response.json
+command="${command} --output '${body}' --write-out '%{http_code}'"
 
-exit 0
+http=$(eval "$command")
+[ -s "$body" ] && cat "$body"
+
+case "$http" in
+200) exit 0 ;;
+*) exit 1 ;;
+esac

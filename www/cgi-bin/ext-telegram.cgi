@@ -6,10 +6,16 @@ config_file=/etc/webui/telegram.conf
 params="enabled token channel thread_id interval caption crontab document heif proxy"
 
 # webhook for remote send, returns [t|f]
+#
+# sbin/telegram now reports the send through its exit status, so the answer no
+# longer means parsing Telegram's JSON reply with jsonfilter. It also means the
+# failure path finally answers: the old pipeline emitted an EMPTY body whenever
+# telegram bailed out before curl ran (unconfigured, no token, no channel),
+# because there was no JSON for jsonfilter to find an `ok` in.
 if [ "$GET_send" = "image" ]; then
 	echo "Content-type: text/html; charset=UTF-8"
 	echo
-	telegram | grep -v curl | jsonfilter -e '@.ok'
+	if telegram >/dev/null 2>&1; then echo true; else echo false; fi
 	exit 0
 fi
 
