@@ -268,14 +268,20 @@ attr_escape() {
 # break; for text read off the device that is exactly backwards, because it hands
 # the value a way to emit an entity of its own choosing.
 #
-# printf rather than echo, so nothing re-interprets a backslash on the way out
-# and no trailing newline lands in the middle of an inline element.
+# Substitution rather than a sed pipeline, unlike attr_escape and pre next door.
+# Those run once or twice per page; this one runs 56 times, and a fork and exec of
+# sed per endpoint URL is a poor trade on a camera. Ampersand goes first so the
+# entities the later rounds insert are not themselves re-escaped.
+#
+# printf rather than echo for the result, so nothing re-interprets a backslash and
+# no trailing newline lands in the middle of an inline element.
 esc() {
-	printf '%s' "$1" | sed \
-		-e 's/&/\&amp;/g' \
-		-e 's/</\&lt;/g' \
-		-e 's/>/\&gt;/g' \
-		-e 's/"/\&quot;/g'
+	local s="$1"
+	s=${s//&/&amp;}
+	s=${s//</&lt;}
+	s=${s//>/&gt;}
+	s=${s//\"/&quot;}
+	printf '%s' "$s"
 }
 
 # field_switch "name" "label" "value" "hint" "confirm"
