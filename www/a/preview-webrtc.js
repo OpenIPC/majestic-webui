@@ -18,6 +18,10 @@
 // the same browser that plays that stream over MSE refuses it here. Which is
 // why failure reports 'fallback' rather than 'mjpeg': the caller should try
 // MSE, which negotiates nothing, before giving up on video.
+//
+// 'busy' is the same instruction with a shorter shelf life — the camera is out
+// of session slots rather than unable to serve this browser — so a caller that
+// remembers 'fallback' should not remember this one.
 window.MajesticWebRTC = (function () {
 	// How long to wait for media before saying so. Longer than MSE's 4 s: ICE
 	// and DTLS happen first, and on a camera gathering a reflexive address
@@ -344,6 +348,15 @@ window.MajesticWebRTC = (function () {
 					// all three reach ICE.
 					pc.addIceCandidate({ candidate: m.data, sdpMid: m.mid })
 						.catch(function () {});
+				} else if (m.reply === 'busy') {
+					// Full, not incapable — every slot is taken and this same
+					// offer would be answered once one frees. Same move as a
+					// refusal, MSE now rather than a frozen page, but reported
+					// apart from one so the caller does not conclude anything
+					// lasting about this browser. No retry either: hammering a
+					// camera that just said it is out of room helps nobody.
+					onState('busy', m.data || 'the camera is serving as many viewers as it can');
+					stop();
 				} else if (m.reply === 'error') {
 					// The camera could not answer. Much the commonest cause is
 					// a profile this browser will not take — see
