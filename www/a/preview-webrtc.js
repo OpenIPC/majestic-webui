@@ -52,10 +52,6 @@ window.MajesticWebRTC = (function () {
 		let attempt = 0;
 		const current = (my) => !closed && my === attempt;
 
-		// Whether the camera actually gave us the audio we asked for. The page
-		// needs to be told when it did not, which is the contract preview.js
-		// keeps by passing null.
-		let sawAudioTrack = false;
 
 		// What to tell the page if the attempts run out. Which of the ways this
 		// can fail it was is worth carrying: "no media arrived" and "could not
@@ -129,6 +125,18 @@ window.MajesticWebRTC = (function () {
 			}).catch(function () {});
 		}
 
+		// Whether the answer actually carried the audio we asked to receive.
+		// 'inactive' or an unset direction means the camera declined it — mic
+		// off, or not producing.
+		function negotiatedAudio() {
+			if (!pc || !pc.getTransceivers) return false;
+			return pc.getTransceivers().some(function (t) {
+				return t.receiver && t.receiver.track &&
+					t.receiver.track.kind === 'audio' &&
+					t.currentDirection && t.currentDirection !== 'inactive';
+			});
+		}
+
 		function teardownPc() {
 			clearInterval(statsTimer); statsTimer = null;
 			if (pc) {
@@ -164,7 +172,6 @@ window.MajesticWebRTC = (function () {
 			onState('connecting');
 			teardownPc();
 			dropSocket();
-			sawAudioTrack = false;
 
 			try {
 				pc = new RTCPeerConnection({ iceServers: [] });
@@ -191,21 +198,26 @@ window.MajesticWebRTC = (function () {
 				if (ev.streams && ev.streams[0]) video.srcObject = ev.streams[0];
 				video.muted = !wantAudio;
 				try { video.volume = volume; } catch (e) {}
-				video.play().catch(function () {
-					// Autoplay policy can refuse unmuted playback. A paused
-					// video and no explanation is the worst of the outcomes
-					// available, so take the picture over the sound and say
-					// which was lost rather than swallowing the rejection.
+				video.play().catch(function (err) {
+					// Only one rejection means the sound is the problem.
+					// NotAllowedError is autoplay policy refusing unmuted
+					// playback, and leaving a paused video with no explanation
+					// is the worst outcome available — so take the picture over
+					// the sound and say which was lost.
+					//
+					// Every other rejection is ordinary. ontrack fires once per
+					// track, so the audio track's call reassigns srcObject and
+					// aborts the video track's play() with AbortError: treating
+					// that as an autoplay refusal reports "no audio" over a
+					// working Opus stream, which is exactly what it did.
 					if (!current(my) || video.muted) return;
+					if (!err || err.name !== 'NotAllowedError') return;
 					video.muted = true;
 					wantAudio = false;
 					video.play().catch(function () {});
 					onAudio(null);
 				});
-				if (ev.track && ev.track.kind === 'audio') {
-					sawAudioTrack = true;
-					onAudio('opus');
-				}
+				if (ev.track && ev.track.kind === 'audio') onAudio('opus');
 			};
 			pc.onicecandidate = function (ev) {
 				if (ev.candidate) send('candidate', ev.candidate.candidate);
@@ -253,13 +265,19 @@ window.MajesticWebRTC = (function () {
 					pc.setRemoteDescription({ type: 'answer', sdp: m.data })
 						.then(function () {
 							if (!current(my)) return;
-							// ontrack has already run for everything this
-							// answer accepted, so an audio track that is not
-							// here now is not coming. Mirror preview.js: stop
-							// wanting it, so the element's state matches the
-							// video-only session and a later unmute really does
-							// flip and renegotiate rather than no-op.
-							if (wantAudio && !sawAudioTrack) {
+							// Did the camera take the audio we offered to
+							// receive? Ask the transceivers rather than
+							// watching for an ontrack that may not have fired
+							// yet: the track events are queued tasks and this
+							// promise is another, and assuming an order between
+							// them reports "no audio" over a working Opus
+							// stream. currentDirection is the negotiated answer
+							// and is settled by the time we are here.
+							if (wantAudio && !negotiatedAudio()) {
+								// Mirror preview.js: stop wanting it, so the
+								// element matches the video-only session it
+								// actually has and a later unmute really does
+								// flip and renegotiate rather than no-op.
 								wantAudio = false;
 								video.muted = true;
 								onAudio(null);
