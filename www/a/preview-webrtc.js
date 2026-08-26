@@ -52,6 +52,11 @@ window.MajesticWebRTC = (function () {
 		let attempt = 0;
 		const current = (my) => !closed && my === attempt;
 
+		// Whether the camera actually gave us the audio we asked for. The page
+		// needs to be told when it did not, which is the contract preview.js
+		// keeps by passing null.
+		let sawAudioTrack = false;
+
 		// What to tell the page if the attempts run out. Which of the ways this
 		// can fail it was is worth carrying: "no media arrived" and "could not
 		// establish a session" send whoever reads the tooltip to different
@@ -159,6 +164,7 @@ window.MajesticWebRTC = (function () {
 			onState('connecting');
 			teardownPc();
 			dropSocket();
+			sawAudioTrack = false;
 
 			try {
 				pc = new RTCPeerConnection({ iceServers: [] });
@@ -185,8 +191,21 @@ window.MajesticWebRTC = (function () {
 				if (ev.streams && ev.streams[0]) video.srcObject = ev.streams[0];
 				video.muted = !wantAudio;
 				try { video.volume = volume; } catch (e) {}
-				video.play().catch(function () {});
-				if (ev.track && ev.track.kind === 'audio') onAudio('opus');
+				video.play().catch(function () {
+					// Autoplay policy can refuse unmuted playback. A paused
+					// video and no explanation is the worst of the outcomes
+					// available, so take the picture over the sound and say
+					// which was lost rather than swallowing the rejection.
+					if (!current(my) || video.muted) return;
+					video.muted = true;
+					wantAudio = false;
+					video.play().catch(function () {});
+					onAudio(null);
+				});
+				if (ev.track && ev.track.kind === 'audio') {
+					sawAudioTrack = true;
+					onAudio('opus');
+				}
 			};
 			pc.onicecandidate = function (ev) {
 				if (ev.candidate) send('candidate', ev.candidate.candidate);
@@ -232,10 +251,31 @@ window.MajesticWebRTC = (function () {
 				if (!m) return;
 				if (m.reply === 'answer') {
 					pc.setRemoteDescription({ type: 'answer', sdp: m.data })
+						.then(function () {
+							if (!current(my)) return;
+							// ontrack has already run for everything this
+							// answer accepted, so an audio track that is not
+							// here now is not coming. Mirror preview.js: stop
+							// wanting it, so the element's state matches the
+							// video-only session and a later unmute really does
+							// flip and renegotiate rather than no-op.
+							if (wantAudio && !sawAudioTrack) {
+								wantAudio = false;
+								video.muted = true;
+								onAudio(null);
+							}
+						})
 						.catch(function () {
 							if (current(my)) onState('fallback', 'answer rejected');
 						});
 				} else if (m.reply === 'candidate') {
+					// Handed over without waiting for the answer to be applied,
+					// which is safe rather than sloppy: addIceCandidate chains
+					// onto the same operations queue as setRemoteDescription,
+					// so one queued behind a pending answer runs after it.
+					// Measured on this camera — it trickles three candidates and
+					// one of them does arrive before the answer is installed;
+					// all three reach ICE.
 					pc.addIceCandidate({ candidate: m.data, sdpMid: m.mid })
 						.catch(function () {});
 				} else if (m.reply === 'error') {
