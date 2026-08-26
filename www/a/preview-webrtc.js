@@ -52,10 +52,31 @@ window.MajesticWebRTC = (function () {
 		let attempt = 0;
 		const current = (my) => !closed && my === attempt;
 
+		// What to tell the page if the attempts run out. Which of the ways this
+		// can fail it was is worth carrying: "no media arrived" and "could not
+		// establish a session" send whoever reads the tooltip to different
+		// halves of docs/webrtc-browser-interop.md. Phrased to follow the
+		// page's own "WebRTC: " prefix rather than to repeat it.
+		let lastFailure = 'could not establish a session';
+
+		// Why this ends the attempt rather than just reporting it: a session can
+		// negotiate perfectly and still never deliver a byte — a middlebox that
+		// passes DTLS and drops SRTP, an encoder that never emits a keyframe —
+		// and nothing else in here would ever notice. The socket is open, so no
+		// onclose; ICE is connected, so no failure; the offer was answered. The
+		// page would sit on the no-signal bars for as long as the tab stayed
+		// open, when MSE might well have worked.
+		//
+		// So say so, then retire the attempt. The existing escalation does the
+		// rest: three fruitless attempts and the page is told to change
+		// transport.
 		function armSignalTimer(my) {
 			clearTimeout(signalTimer);
 			signalTimer = setTimeout(function () {
-				if (!gotMedia && current(my)) onState('nosignal');
+				if (gotMedia || !current(my)) return;
+				onState('nosignal');
+				lastFailure = 'negotiated but no media arrived';
+				reconnect();
 			}, NO_SIGNAL_MS);
 		}
 
@@ -93,6 +114,7 @@ window.MajesticWebRTC = (function () {
 					gotMedia = true;
 					clearTimeout(signalTimer);
 					failCount = 0;
+					lastFailure = 'could not establish a session';
 					onState('playing', codec);
 				}
 				if (w && h && (codec !== lastCodec || w !== lastW || h !== lastH)) {
@@ -252,7 +274,7 @@ window.MajesticWebRTC = (function () {
 			// establish on the fourth try either, and every attempt costs a
 			// full ICE and DTLS exchange.
 			if (++failCount >= 3) {
-				onState('fallback', 'WebRTC could not establish a session');
+				onState('fallback', lastFailure);
 				stop();
 				return;
 			}
@@ -329,7 +351,7 @@ window.MajesticWebRTC = (function () {
 		}
 
 		if (!rtcOk) {
-			onState('fallback', 'WebRTC unavailable');
+			onState('fallback', 'unavailable in this browser');
 			return {
 				setStream: function () {}, requestIdr: function () {},
 				setAudio: function () {}, setVolume: function () {},
