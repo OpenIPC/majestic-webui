@@ -101,7 +101,7 @@
 	//
 	// Two kinds of "not WebRTC", kept apart on purpose:
 	//
-	//   mj-transport      — what the person chose. Permanent until they choose
+	//   mj-transport-pick — what the person chose. Permanent until they choose
 	//                       again, in either direction.
 	//   mj-transport-auto — what a failure decided for them, with the time it
 	//                       was decided. Expires, because the reasons expire:
@@ -110,7 +110,15 @@
 	//                       the expiry, one bad session would demote a browser
 	//                       for good and nobody would ever know why their
 	//                       preview was a second behind.
-	const PREF_KEY = 'mj-transport';
+	//
+	// mj-transport is the previous release's single key, and it is read once
+	// and thrown away. It could not hold this distinction: a fallback wrote
+	// 'mse' into it and so did unticking the box, so every browser that had
+	// ever fallen back looks, to the code above, exactly like someone who
+	// chose MSE on purpose. Carrying those forward would pin them off the new
+	// default permanently — the precise outcome the split exists to prevent.
+	const OLD_KEY = 'mj-transport';
+	const PICK_KEY = 'mj-transport-pick';
 	const AUTO_KEY = 'mj-transport-auto';
 	// Long enough not to re-annoy someone whose camera genuinely cannot serve
 	// their browser, short enough that fixing the camera shows up the same day.
@@ -127,12 +135,29 @@
 		} catch (e) {}
 	}
 
-	// A demotion that has not expired. Anything unparseable counts as expired,
-	// so a stored value from another version cannot pin the transport for ever.
+	// 'webrtc' under the old key was unambiguous — only the toggle wrote it —
+	// so it survives as a choice. 'mse' was not, so it becomes a demotion:
+	// nothing changes for that browser today, and in six hours it tries WebRTC
+	// again instead of never.
+	function migrateOldPref() {
+		const old = readPref(OLD_KEY);
+		if (old === null) return;
+		writePref(OLD_KEY, null);
+		if (readPref(PICK_KEY) !== null || readPref(AUTO_KEY) !== null) return;
+		if (old === 'webrtc') writePref(PICK_KEY, 'webrtc');
+		else if (old === 'mse') writePref(AUTO_KEY, String(Date.now()));
+	}
+
+	// A demotion that has not expired. The window is bounded at both ends:
+	// a timestamp in the future is not "very fresh", it is a clock that moved
+	// or a value this code did not write, and either way honouring it would
+	// suppress WebRTC for far longer than the six hours advertised.
 	function autoDemoted() {
-		const at = parseInt(readPref(AUTO_KEY), 10);
-		if (!at || Date.now() - at > AUTO_FOR_MS) {
-			if (readPref(AUTO_KEY) !== null) writePref(AUTO_KEY, null);
+		const raw = readPref(AUTO_KEY);
+		const at = /^\d+$/.test(raw || '') ? parseInt(raw, 10) : 0;
+		const age = Date.now() - at;
+		if (!at || age < 0 || age > AUTO_FOR_MS) {
+			if (raw !== null) writePref(AUTO_KEY, null);
 			return false;
 		}
 		return true;
@@ -140,7 +165,8 @@
 
 	function wantWebRTC() {
 		if (!webrtcAvailable) return false;
-		const chosen = readPref(PREF_KEY);
+		migrateOldPref();
+		const chosen = readPref(PICK_KEY);
 		if (chosen === 'webrtc') return true;
 		if (chosen === 'mse') return false;
 		return !autoDemoted();
@@ -148,15 +174,16 @@
 
 	// The person picked a transport: that outranks anything a failure decided.
 	function rememberTransport(t) {
-		writePref(PREF_KEY, t);
+		writePref(PICK_KEY, t);
 		writePref(AUTO_KEY, null);
+		writePref(OLD_KEY, null);
 	}
 
 	// A failure picked one. Recorded separately and with an expiry, and never
 	// against an explicit choice to use WebRTC — someone who ticked the box
 	// gets it back on the next load rather than being quietly overruled.
 	function rememberDemotion() {
-		if (readPref(PREF_KEY) === 'webrtc') return;
+		if (readPref(PICK_KEY) === 'webrtc') return;
 		writePref(AUTO_KEY, String(Date.now()));
 	}
 
