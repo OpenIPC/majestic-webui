@@ -24,6 +24,19 @@ window.MajesticWebRTC = (function () {
 	// that is a round trip to a STUN server before anything can flow.
 	const NO_SIGNAL_MS = 8000;
 
+	// How long media may stop arriving before the session counts as dead, and
+	// how often to look.
+	//
+	// Needed here in a way it is not on the MSE path, where media rides the
+	// signalling socket: if that camera stops sending, the socket closes or the
+	// element errors, and either one reconnects. WebRTC's media is out-of-band,
+	// so a stalled stream is invisible to signalling — ICE stays connected, the
+	// socket stays open, and the viewer keeps a frozen frame for as long as the
+	// tab is left alone. A camera disappearing under a SIGHUP reload does
+	// exactly this.
+	const STALL_MS = 8000;
+	const STATS_MS = 1000;
+
 	// A browser without these cannot be helped by trying.
 	const rtcOk = typeof window.RTCPeerConnection === 'function';
 
@@ -52,6 +65,9 @@ window.MajesticWebRTC = (function () {
 		let attempt = 0;
 		const current = (my) => !closed && my === attempt;
 
+		// Progress, not totals: bytesReceived only ever climbs, so "greater
+		// than zero" says a session once worked, not that it still does.
+		let lastBytes = 0, stalledMs = 0, healthyMs = 0;
 
 		// What to tell the page if the attempts run out. Which of the ways this
 		// can fail it was is worth carrying: "no media arrived" and "could not
@@ -114,9 +130,31 @@ window.MajesticWebRTC = (function () {
 				if (bytes > 0 && !gotMedia) {
 					gotMedia = true;
 					clearTimeout(signalTimer);
-					failCount = 0;
-					lastFailure = 'could not establish a session';
 					onState('playing', codec);
+				}
+				if (gotMedia) {
+					// The no-signal watchdog was disarmed when the first bytes
+					// arrived and nothing else is watching, so this is what
+					// notices a stream that stops. Retire the attempt on a
+					// stall and let the usual escalation decide between another
+					// try and another transport.
+					if (bytes > lastBytes) {
+						lastBytes = bytes;
+						stalledMs = 0;
+						// Forgive the earlier failures only once this session
+						// has held up for as long as it would take to call it
+						// stalled. Crediting the first byte instead lets a
+						// session that starts and dies over and over reset the
+						// count every time and retry for ever, which is the
+						// one outcome the escalation exists to prevent.
+						if ((healthyMs += STATS_MS) >= STALL_MS) {
+							failCount = 0;
+							lastFailure = 'could not establish a session';
+						}
+					} else if ((stalledMs += STATS_MS) >= STALL_MS) {
+						lastFailure = 'media stopped arriving';
+						reconnect();
+					}
 				}
 				if (w && h && (codec !== lastCodec || w !== lastW || h !== lastH)) {
 					lastCodec = codec; lastW = w; lastH = h;
@@ -172,6 +210,7 @@ window.MajesticWebRTC = (function () {
 			onState('connecting');
 			teardownPc();
 			dropSocket();
+			lastBytes = 0; stalledMs = 0; healthyMs = 0;
 
 			try {
 				pc = new RTCPeerConnection({ iceServers: [] });
@@ -313,7 +352,7 @@ window.MajesticWebRTC = (function () {
 			sock.onerror = function () { try { sock.close(); } catch (e) {} };
 
 			clearInterval(statsTimer);
-			statsTimer = setInterval(pollStats, 1000);
+			statsTimer = setInterval(pollStats, STATS_MS);
 		}
 
 		function reconnect() {
