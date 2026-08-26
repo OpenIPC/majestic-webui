@@ -5,8 +5,10 @@
 //
 // TWO TRANSPORTS, ONE FAÇADE. MajesticVideo (MSE) and MajesticWebRTC return
 // the same object, so everything below is written once and the choice is made
-// in attachPlayer(). MSE stays the default; WebRTC is opt-in and remembered,
-// until it has had enough field time to earn the other way round.
+// in attachPlayer(). WebRTC is the default now: sub-second where MSE is about
+// a second behind, audio in both directions, and a receiver whose reports let
+// the camera match the encoder to the link. MSE is a tick away for the
+// browsers and cameras where negotiation cannot be made to work.
 //
 // The chain is WebRTC -> MSE -> MJPEG -> note, and the middle step is
 // load-bearing rather than tidy. WebRTC negotiates and can therefore fail
@@ -14,6 +16,12 @@
 // its decoder can do, so a camera on `profile: main` has nothing to give it —
 // the same browser plays that stream over MSE without complaint. A player
 // reporting 'fallback' is asking for the other transport, not for MJPEG.
+//
+// Now that the chain runs by default rather than on request, what it remembers
+// matters more than it did. A refusal is recorded with a timestamp and expires;
+// a camera that is merely full ('busy') is not recorded at all; and an explicit
+// choice beats both. Otherwise the first bad afternoon would quietly park a
+// browser on the slower transport for good.
 (function () {
 	// --- Night / IRcut / Light toggles ---
 	mjConfig().then(cfg => {
@@ -82,17 +90,74 @@
 	const transportCtl = $('#mj-transport'), transportGrp = $('#mj-transport-ctl');
 	const s0 = $('#mj-stream-0'), s1 = $('#mj-stream-1');
 
-	// Which transport to try. Remembered per browser rather than per camera:
-	// what decides it is what this browser can negotiate, and that travels with
-	// the browser.
+	// Which transport to try. WebRTC unless something says otherwise: it is
+	// sub-second where MSE is about a second behind, it carries audio, and its
+	// receiver reports let the camera match the encoder to the link. MSE stays
+	// one tick away for the browsers and cameras where negotiation cannot be
+	// made to work.
+	//
+	// Remembered per browser rather than per camera, because what decides it is
+	// what this browser can negotiate, and that travels with the browser.
+	//
+	// Two kinds of "not WebRTC", kept apart on purpose:
+	//
+	//   mj-transport      — what the person chose. Permanent until they choose
+	//                       again, in either direction.
+	//   mj-transport-auto — what a failure decided for them, with the time it
+	//                       was decided. Expires, because the reasons expire:
+	//                       a camera switched to H.265, a stream that stalled,
+	//                       a network that was having a bad afternoon. Without
+	//                       the expiry, one bad session would demote a browser
+	//                       for good and nobody would ever know why their
+	//                       preview was a second behind.
 	const PREF_KEY = 'mj-transport';
+	const AUTO_KEY = 'mj-transport-auto';
+	// Long enough not to re-annoy someone whose camera genuinely cannot serve
+	// their browser, short enough that fixing the camera shows up the same day.
+	const AUTO_FOR_MS = 6 * 60 * 60 * 1000;
+
 	const webrtcAvailable = !!(window.MajesticWebRTC && MajesticWebRTC.available);
+
+	function readPref(k) {
+		try { return localStorage.getItem(k); } catch (e) { return null; }
+	}
+	function writePref(k, v) {
+		try {
+			if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v);
+		} catch (e) {}
+	}
+
+	// A demotion that has not expired. Anything unparseable counts as expired,
+	// so a stored value from another version cannot pin the transport for ever.
+	function autoDemoted() {
+		const at = parseInt(readPref(AUTO_KEY), 10);
+		if (!at || Date.now() - at > AUTO_FOR_MS) {
+			if (readPref(AUTO_KEY) !== null) writePref(AUTO_KEY, null);
+			return false;
+		}
+		return true;
+	}
+
 	function wantWebRTC() {
 		if (!webrtcAvailable) return false;
-		try { return localStorage.getItem(PREF_KEY) === 'webrtc'; } catch (e) { return false; }
+		const chosen = readPref(PREF_KEY);
+		if (chosen === 'webrtc') return true;
+		if (chosen === 'mse') return false;
+		return !autoDemoted();
 	}
+
+	// The person picked a transport: that outranks anything a failure decided.
 	function rememberTransport(t) {
-		try { localStorage.setItem(PREF_KEY, t); } catch (e) {}
+		writePref(PREF_KEY, t);
+		writePref(AUTO_KEY, null);
+	}
+
+	// A failure picked one. Recorded separately and with an expiry, and never
+	// against an explicit choice to use WebRTC — someone who ticked the box
+	// gets it back on the next load rather than being quietly overruled.
+	function rememberDemotion() {
+		if (readPref(PREF_KEY) === 'webrtc') return;
+		writePref(AUTO_KEY, String(Date.now()));
 	}
 
 	let player = null, usingWebRTC = false;
@@ -164,7 +229,7 @@
 				if (s === 'playing') showVideo();
 				else if (s === 'nosignal') showNoSignal();
 				else if (s === 'mjpeg') showFallback();
-				else if (s === 'fallback') {
+				else if (s === 'fallback' || s === 'busy') {
 					// WebRTC gave up. Drop to MSE rather than to MJPEG: MSE
 					// plays what this browser's decoder takes rather than what
 					// its WebRTC stack will negotiate, which is a strictly
@@ -176,7 +241,11 @@
 							const lbl = transportCtl.nextElementSibling;
 							if (lbl) lbl.title = 'WebRTC: ' + why;
 						}
-						rememberTransport('mse');
+						// 'busy' says the camera is full, which will not be
+						// true for long — take MSE now and try WebRTC again on
+						// the next load. Only a real refusal is worth
+						// remembering, and even that one expires.
+						if (s === 'fallback') rememberDemotion();
 						attachPlayer(false);
 					} else {
 						showFallback();

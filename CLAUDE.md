@@ -162,8 +162,13 @@ Small `#!/bin/sh` scripts that emit JSON for the front-end. `pulse.cgi` is polle
   (`MajesticWebRTC`, WebRTC over `/ws/webrtc`) return the same object —
   `setStream`, `requestIdr`, `setAudio`, `setVolume`, `audioSupported`,
   `destroy`, `supported` — so `preview-page.js` is written once and picks a
-  transport at attach time. MSE is the default; WebRTC is opt-in via the
-  `#mj-transport` toggle and remembered in `localStorage` under `mj-transport`.
+  transport at attach time. **WebRTC is the default**; the `#mj-transport`
+  toggle switches to MSE. What is remembered is split in two on purpose:
+  `mj-transport` is the person's explicit choice and is permanent, while
+  `mj-transport-auto` is a demotion a failure decided for them and carries a
+  timestamp so it expires (6 h) — otherwise one bad session parks a browser on
+  the slower transport for good. A camera that is merely out of session slots
+  answers `busy` rather than `error`, and that is not remembered at all.
   The fallback chain is **WebRTC → MSE → MJPEG → note**, and the middle step
   matters: WebRTC negotiates, so it can fail where MSE cannot (Firefox offers
   only H.264 Baseline whatever it can decode), which is why a player reporting
