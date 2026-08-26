@@ -428,6 +428,51 @@ pre#output[data-cmd] {
 	}
 }
 
+/* Below md the rail stops being a rail. It is full width, it is the page's
+   primary navigation, and it sits directly under the navbar's own accordion —
+   so it should read like that one rather than like a column label (#183).
+   The 11px uppercase category is an affordance for a 25%-width sidebar; at
+   full width it is just small. Matching the navbar's own scale: a category
+   reads like .navbar-nav .nav-link (1rem), a section like .dropdown-item
+   (0.9rem), and both get a 44px row so they are honest touch targets. */
+@media (max-width: 767.98px) {
+	#mj-settings-nav {
+		font-size: 1rem;
+	}
+
+	.mj-tree-cat {
+		min-height: 2.75rem;
+		padding: 0.5rem 0.25rem;
+		font-size: 1rem;
+		font-weight: 400;
+		letter-spacing: normal;
+		text-transform: none;
+		color: var(--bs-body-color);
+	}
+
+	.mj-tree-sub .nav-link {
+		min-height: 2.75rem;
+		padding: 0.5rem 0.75rem 0.5rem 1.75rem;
+		font-size: 0.9rem;
+	}
+
+	.mj-tree-n {
+		font-size: 0.8125rem;
+	}
+
+	.mj-tree-caret {
+		border-left-width: 0.35rem;
+		border-top-width: 0.3rem;
+		border-bottom-width: 0.3rem;
+	}
+
+	/* 16px keeps iOS from zooming the page when the box takes focus, and the
+	   search sits in the same list it filters — it should not be smaller. */
+	.mj-search .form-control {
+		font-size: 1rem;
+	}
+}
+
 /* search hits, in the tree and in the field labels/hints of the open section */
 mark {
 	padding: 0 0.1em;
