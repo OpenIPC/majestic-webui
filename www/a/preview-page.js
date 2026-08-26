@@ -101,6 +101,25 @@
 	let stream = 0, audioOn = false, vol = 1;
 	let audioConfigured = false;
 
+	// Which attachment is the live one. Two things need it, and neither is
+	// hypothetical:
+	//
+	// A player can report 'fallback' from inside attach() — MajesticWebRTC does
+	// exactly that when RTCPeerConnection or addTransceiver throws — so the
+	// handler runs, attaches MSE, and then the outer `player = impl.attach(…)`
+	// assignment completes and overwrites the working MSE player with the dead
+	// WebRTC façade nobody can now destroy.
+	//
+	// And a destroyed player is not a silent one. WebRTC's createOffer and
+	// getStats continuations settle after close, so a transport switched away
+	// from can still call onState and, seeing a `usingWebRTC` that has since
+	// flipped, hide a video that is playing perfectly well.
+	//
+	// So the generation is stamped at attach and captured by that attachment's
+	// handlers: a callback from a superseded player is dropped rather than
+	// interpreted as if the current one had sent it.
+	let attachSeq = 0;
+
 	// Whether to offer the audio control at all: the camera has to have audio
 	// configured and this transport has to be able to carry it. MSE can only
 	// when the browser decodes a codec majestic can produce, so the answer
@@ -114,6 +133,7 @@
 	// own different machinery, and the state worth carrying over is three
 	// values.
 	function attachPlayer(webrtc) {
+		const gen = ++attachSeq;
 		if (player) { try { player.destroy(); } catch (e) {} player = null; }
 		usingWebRTC = !!webrtc;
 		// MSE leaves a MediaSource object URL on the element; WebRTC's
@@ -122,55 +142,69 @@
 		const v = cur();
 		try { v.removeAttribute('src'); v.srcObject = null; } catch (e) {}
 		const impl = usingWebRTC ? MajesticWebRTC : MajesticVideo;
-		player = impl.attach(v, Object.assign({ stream: stream }, handlers));
+		const p = impl.attach(v, Object.assign({ stream: stream }, handlersFor(gen)));
+		// attach() reported 'fallback' before returning and something else is
+		// now playing. Drop what we just built rather than letting this
+		// assignment bury it.
+		if (gen !== attachSeq) {
+			try { p.destroy(); } catch (e) {}
+			return;
+		}
+		player = p;
 		if (audioOn && player.audioSupported()) player.setAudio(true);
 		player.setVolume(vol);
 		syncAudioCtl();
 	}
 
-	const handlers = {
-		onState: (s, d) => {
-			if (s === 'playing') showVideo();
-			else if (s === 'nosignal') showNoSignal();
-			else if (s === 'mjpeg') showFallback();
-			else if (s === 'fallback') {
-				// WebRTC gave up. Drop to MSE rather than to MJPEG: MSE plays
-				// what this browser's decoder takes rather than what its WebRTC
-				// stack will negotiate, which is a strictly larger set.
-				if (usingWebRTC) {
-					const why = d || 'unavailable';
-					if (transportCtl) {
-						transportCtl.checked = false;
-						const lbl = transportCtl.nextElementSibling;
-						if (lbl) lbl.title = 'WebRTC: ' + why;
+	function handlersFor(gen) {
+		const live = () => gen === attachSeq;
+		return {
+			onState: (s, d) => {
+				if (!live()) return;
+				if (s === 'playing') showVideo();
+				else if (s === 'nosignal') showNoSignal();
+				else if (s === 'mjpeg') showFallback();
+				else if (s === 'fallback') {
+					// WebRTC gave up. Drop to MSE rather than to MJPEG: MSE
+					// plays what this browser's decoder takes rather than what
+					// its WebRTC stack will negotiate, which is a strictly
+					// larger set.
+					if (usingWebRTC) {
+						const why = d || 'unavailable';
+						if (transportCtl) {
+							transportCtl.checked = false;
+							const lbl = transportCtl.nextElementSibling;
+							if (lbl) lbl.title = 'WebRTC: ' + why;
+						}
+						rememberTransport('mse');
+						attachPlayer(false);
+					} else {
+						showFallback();
 					}
-					rememberTransport('mse');
-					attachPlayer(false);
-				} else {
-					showFallback();
 				}
-			}
-			else if (badge) badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
-		},
-		onCodec: (codec, cs, w, h) => {
-			if (badge) {
-				badge.textContent = codec.toUpperCase() + ' ' + w + '×' + h +
-					(usingWebRTC ? ' · WebRTC' : '');
-			}
-		},
-		// null means we asked for audio and the camera had none to give (mic off
-		// or not producing). Reflect that on the control rather than leaving the
-		// user staring at an unmute button that does nothing.
-		onAudio: (codec) => {
-			if (!mute) return;
-			if (mute.checked && !codec) {
-				muteLbl.textContent = '🔇 No audio';
-				mute.checked = false;
-				audioOn = false;
-				if (volCtl) volCtl.disabled = true;
-			}
-		},
-	};
+				else if (badge) badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
+			},
+			onCodec: (codec, cs, w, h) => {
+				if (!live()) return;
+				if (badge) {
+					badge.textContent = codec.toUpperCase() + ' ' + w + '×' + h +
+						(usingWebRTC ? ' · WebRTC' : '');
+				}
+			},
+			// null means we asked for audio and the camera had none to give (mic
+			// off or not producing). Reflect that on the control rather than
+			// leaving the user staring at an unmute button that does nothing.
+			onAudio: (codec) => {
+				if (!live() || !mute) return;
+				if (mute.checked && !codec) {
+					muteLbl.textContent = '🔇 No audio';
+					mute.checked = false;
+					audioOn = false;
+					if (volCtl) volCtl.disabled = true;
+				}
+			},
+		};
+	}
 
 	attachPlayer(wantWebRTC());
 

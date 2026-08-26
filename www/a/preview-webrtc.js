@@ -40,10 +40,22 @@ window.MajesticWebRTC = (function () {
 		let wantAudio = false, volume = 1;
 		let lastCodec = '', lastW = 0, lastH = 0;
 
-		function armSignalTimer() {
+		// Which connection attempt is current. Everything asynchronous here
+		// outlives the attempt that started it — createOffer and getStats
+		// settle after the peer connection is closed, and a WebSocket goes on
+		// firing onclose after nothing is listening — so each attempt stamps
+		// itself and its continuations check before touching shared state.
+		//
+		// Without it a socket from a dead attempt clears `ws` on its way out
+		// and takes the live attempt's signalling with it: the offer goes
+		// nowhere, no answer comes back, and the page just sits there.
+		let attempt = 0;
+		const current = (my) => !closed && my === attempt;
+
+		function armSignalTimer(my) {
 			clearTimeout(signalTimer);
 			signalTimer = setTimeout(function () {
-				if (!gotMedia && !closed) onState('nosignal');
+				if (!gotMedia && current(my)) onState('nosignal');
 			}, NO_SIGNAL_MS);
 		}
 
@@ -59,7 +71,9 @@ window.MajesticWebRTC = (function () {
 		// no event for "the encoder changed resolution".
 		function pollStats() {
 			if (!pc) return;
+			const my = attempt;
 			pc.getStats().then(function (report) {
+				if (!current(my)) return;
 				let codec = '', w = 0, h = 0, bytes = 0;
 				const codecs = {};
 				report.forEach(function (r) {
@@ -91,7 +105,11 @@ window.MajesticWebRTC = (function () {
 		function teardownPc() {
 			clearInterval(statsTimer); statsTimer = null;
 			if (pc) {
-				try { pc.ontrack = null; pc.onicecandidate = null; } catch (e) {}
+				try {
+					pc.ontrack = null;
+					pc.onicecandidate = null;
+					pc.oniceconnectionstatechange = null;
+				} catch (e) {}
 				try { pc.close(); } catch (e) {}
 				pc = null;
 			}
@@ -100,10 +118,25 @@ window.MajesticWebRTC = (function () {
 			lastCodec = ''; lastW = 0; lastH = 0;
 		}
 
+		// Detach before closing. A socket closes asynchronously, and until it
+		// does its handlers are still live on a connection nobody wants any
+		// more — including the onclose that would call reconnect() a second
+		// time and the one that would null out a socket the next attempt has
+		// already opened.
+		function dropSocket() {
+			if (!ws) return;
+			const dead = ws;
+			ws = null;
+			try { dead.onopen = dead.onmessage = dead.onclose = dead.onerror = null; } catch (e) {}
+			try { dead.close(); } catch (e) {}
+		}
+
 		function open() {
 			if (closed) return;
+			const my = ++attempt;
 			onState('connecting');
 			teardownPc();
+			dropSocket();
 
 			try {
 				pc = new RTCPeerConnection({ iceServers: [] });
@@ -137,35 +170,48 @@ window.MajesticWebRTC = (function () {
 				if (ev.candidate) send('candidate', ev.candidate.candidate);
 			};
 			pc.oniceconnectionstatechange = function () {
-				if (!pc) return;
+				if (!pc || !current(my)) return;
 				const s = pc.iceConnectionState;
 				if (s === 'failed' || s === 'closed') reconnect();
 				else if (s === 'disconnected') onState('error');
 			};
 
 			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-			ws = new WebSocket(
+			// Held in a local as well, so every handler below acts on the
+			// socket it was installed on rather than on whatever `ws` happens
+			// to point at by the time it fires.
+			const sock = new WebSocket(
 				proto + '://' + location.host + '/ws/webrtc?stream=' + stream);
+			ws = sock;
 			gotMedia = false;
 
-			ws.onopen = function () {
+			sock.onopen = function () {
+				if (!current(my)) return;
 				backoff = 1000;
-				armSignalTimer();
+				armSignalTimer(my);
 				pc.createOffer()
 					.then(function (offer) {
+						if (!current(my)) return;
 						return pc.setLocalDescription(offer).then(function () {
+							if (!current(my)) return;
 							send('offer', pc.localDescription.sdp);
 						});
 					})
-					.catch(function () { onState('fallback', 'offer failed'); });
+					.catch(function () {
+						// A closed peer connection rejects whatever was in
+						// flight, so this fires on every ordinary teardown too.
+						// Only a live attempt has actually failed to offer.
+						if (current(my)) onState('fallback', 'offer failed');
+					});
 			};
-			ws.onmessage = function (e) {
+			sock.onmessage = function (e) {
+				if (!current(my)) return;
 				let m; try { m = JSON.parse(e.data); } catch (_) { return; }
 				if (!m) return;
 				if (m.reply === 'answer') {
 					pc.setRemoteDescription({ type: 'answer', sdp: m.data })
 						.catch(function () {
-							onState('fallback', 'answer rejected');
+							if (current(my)) onState('fallback', 'answer rejected');
 						});
 				} else if (m.reply === 'candidate') {
 					pc.addIceCandidate({ candidate: m.data, sdpMid: m.mid })
@@ -180,15 +226,25 @@ window.MajesticWebRTC = (function () {
 					stop();
 				}
 			};
-			ws.onclose = function () { ws = null; if (!closed) reconnect(); };
-			ws.onerror = function () { try { ws.close(); } catch (e) {} };
+			sock.onclose = function () {
+				if (ws === sock) ws = null;
+				if (current(my)) reconnect();
+			};
+			sock.onerror = function () { try { sock.close(); } catch (e) {} };
 
 			clearInterval(statsTimer);
 			statsTimer = setInterval(pollStats, 1000);
 		}
 
 		function reconnect() {
+			// Retire the attempt before dismantling it. Closing a peer
+			// connection rejects whatever it had in flight, and a rejection
+			// that arrives while its own attempt still looks current would be
+			// reported as a genuine failure to offer.
+			attempt++;
+			clearTimeout(signalTimer);
 			teardownPc();
+			dropSocket();
 			if (closed || reconnectTimer) return;
 			// Fewer attempts than the MSE path allows itself. Its failures are
 			// transient by nature — a socket dropped, a keyframe missed —
@@ -208,9 +264,13 @@ window.MajesticWebRTC = (function () {
 		}
 
 		function stop() {
+			// Past this point nothing in flight belongs to anyone: bumping the
+			// attempt is what makes the continuations above return instead of
+			// reporting a failure that no longer has a session to fail.
+			attempt++;
 			clearTimeout(signalTimer);
 			clearInterval(statsTimer); statsTimer = null;
-			if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+			dropSocket();
 			teardownPc();
 		}
 
