@@ -157,6 +157,19 @@ Small `#!/bin/sh` scripts that emit JSON for the front-end. `pulse.cgi` is polle
 - `main.js:initAll` runs on `load`: wires `.btn-danger`/`.btn-warning`/`.confirm` to `confirm()`, links `input[type=range]` to a sibling `…-show` and hidden input, makes external links open in a new tab, and starts the heartbeat.
 - `main.js:runCmd(msg)` streams `/cgi-bin/j/run.cgi` line-by-line via `fetch`/`ReadableStream` and appends to a `pre#output` element whose `data-cmd` carries the base64-encoded command; used by `fw-reset.cgi` (overlay erase).
 - `timezone.js` holds the `TZ` array used by `fw-time.cgi` for the city → `TZ` string mapping.
+- **The live player is two implementations behind one façade.** `preview.js`
+  (`MajesticVideo`, MSE over `/ws/video`) and `preview-webrtc.js`
+  (`MajesticWebRTC`, WebRTC over `/ws/webrtc`) return the same object —
+  `setStream`, `requestIdr`, `setAudio`, `setVolume`, `audioSupported`,
+  `destroy`, `supported` — so `preview-page.js` is written once and picks a
+  transport at attach time. MSE is the default; WebRTC is opt-in via the
+  `#mj-transport` toggle and remembered in `localStorage` under `mj-transport`.
+  The fallback chain is **WebRTC → MSE → MJPEG → note**, and the middle step
+  matters: WebRTC negotiates, so it can fail where MSE cannot (Firefox offers
+  only H.264 Baseline whatever it can decode), which is why a player reporting
+  `'fallback'` asks for the other transport rather than for MJPEG. `mj-settings.cgi`
+  shares the `preview()` markup but loads `preview.js` alone, so the toggle
+  stays hidden there.
 
 ### FPV variant
 

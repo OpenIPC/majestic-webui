@@ -460,6 +460,13 @@ preview() {
 		<label class="btn btn-outline-primary" for="mj-stream-1" id="mj-sub" hidden>Sub</label>
 		<span id="mj-badge" class="badge text-bg-secondary align-self-center ms-2">connecting…</span>
 	</div>
+	<!-- Unhidden by preview-page.js only where preview-webrtc.js is loaded and
+	     the browser has WebRTC; mj-settings.cgi shares this markup and offers
+	     the MSE player alone. -->
+	<div class="btn-group btn-group-sm mb-2 ms-2" role="group" aria-label="Transport" id="mj-transport-ctl" hidden>
+		<input type="checkbox" class="btn-check" id="mj-transport" autocomplete="off">
+		<label class="btn btn-outline-primary" for="mj-transport">WebRTC</label>
+	</div>
 	<div class="btn-group btn-group-sm mb-2" role="group" aria-label="Audio" id="mj-audio-ctl" hidden>
 		<input type="checkbox" class="btn-check" id="mj-mute" autocomplete="off">
 		<label class="btn btn-outline-primary" for="mj-mute" id="mj-mute-lbl">🔇 Muted</label>
