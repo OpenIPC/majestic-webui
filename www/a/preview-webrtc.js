@@ -251,10 +251,19 @@ window.MajesticWebRTC = (function () {
 					// working Opus stream, which is exactly what it did.
 					if (!current(my) || video.muted) return;
 					if (!err || err.name !== 'NotAllowedError') return;
-					video.muted = true;
-					wantAudio = false;
-					video.play().catch(function () {});
 					onAudio(null);
+					// Renegotiate rather than just muting. The audio
+					// transceiver is only ever added when wantAudio is set,
+					// precisely so the camera does not encode for nobody — and
+					// a track the browser has refused to play is nobody.
+					// Dropping the flag alone would leave the camera sending
+					// Opus into a muted element until something else happened
+					// to reconnect.
+					//
+					// wantAudio is necessarily true here: the element was
+					// unmuted, which only happens when it is. So this is a real
+					// transition and setAudio does the mute and the reopen.
+					setAudio(false);
 				});
 				if (ev.track && ev.track.kind === 'audio') onAudio('opus');
 			};
