@@ -130,10 +130,15 @@
 	max-width: 20rem;
 }
 
-/* a switch is as wide as its own label, so the glyph hugs the text instead of
-   sitting a card-width away from it */
+/* A switch is as wide as its own label, so the glyph hugs the text instead of
+   sitting a card-width away from it. Shrink stays enabled (0 *1* auto): a
+   switch carries its label inline, unlike every other row where the <label> is
+   a block above the control and wraps on its own, so a no-shrink wrapper would
+   size to the unwrapped text and spill out of the column — which the 63-char
+   rtsp.fecAdaptive title did. min-width comes from .mj-ctl-in above, without
+   which flex-shrink alone still cannot go under the content width. */
 .boolean .mj-ctl-in {
-	flex: 0 0 auto;
+	flex: 0 1 auto;
 }
 
 .x-small {
