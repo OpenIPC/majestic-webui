@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-WebUI for [OpenIPC Firmware](https://github.com/openipc/firmware) — served on port 80 of the camera by an embedded httpd that runs `haserl` CGI scripts. There is no compile step, no package manager, no test suite. "Building" means copying the tree onto a running camera.
+WebUI for [OpenIPC Firmware](https://github.com/openipc/firmware) — served on port 80 of the camera by an embedded httpd that runs `haserl` CGI scripts. There is no compile step and nothing the browser loads comes from a package manager. "Building" means copying the tree onto a running camera.
+
+`npm test` runs what tests there are: plain Node, no framework, no dependency — `tests/talkback.test.js` drives the WebRTC player's microphone lifecycle against stubs, and `tests/transport.test.js` covers the STUN/TURN list built for `RTCPeerConnection`. Both exist because their subject is timing or configuration parsing that a browser cannot be made to reproduce on demand, and because getting either wrong is silent: a microphone that stays captured, or a session that negotiates and carries nothing. Most of this repo is CGI and DOM wiring that these cannot reach; do not read the suite as coverage of the WebUI.
 
 Authentication is HTTP Basic against `/etc/shadow` (user `root`, default password `12345`); `common.cgi:check_password` forces a redirect to `fw-interface.cgi` until the default password is changed.
 
