@@ -677,25 +677,48 @@
 	function attachLivePreview(video) {
 		const stream = getDotted(state.config, 'video1.enabled') === true ? 1 : 0;
 
+		// Which attachment is the live one. MajesticWebRTC can report 'fallback'
+		// from inside attach() — it does exactly that when RTCPeerConnection or
+		// addTransceiver throws — so the handler below runs, installs MSE, and
+		// then the outer assignment completes and buries it under the façade
+		// that just failed. The picture would look right and the handle would be
+		// wrong, which is worse: state.previewPlayer is what the tab teardown
+		// destroys, so every visit would leave a live socket behind.
+		let gen = 0;
+
 		function attach(kind) {
+			const mine = ++gen;
+
+			// Whatever is running loses its handle here, so it has to be closed
+			// here. In the synchronous case there is nothing yet to close.
+			if (state.previewPlayer) {
+				try { state.previewPlayer.destroy(); } catch (e) {}
+				state.previewPlayer = null;
+			}
+
 			const impl = window.MajesticTransport.impl(kind);
 			if (!impl) return;
-			state.previewPlayer = impl.attach(video, {
+
+			const p = impl.attach(video, {
 				stream: stream,
-				onState: (st, detail) => {
-					if (kind !== 'webrtc') return;
+				onState: (st) => {
+					if (mine !== gen || kind !== 'webrtc') return;
 					// 'fallback' is durable and worth remembering; 'busy' says
 					// the camera is full, which it will not be for long.
 					if (st === 'fallback' || st === 'busy') {
 						if (st === 'fallback') window.MajesticTransport.demote();
-						if (state.previewPlayer) {
-							try { state.previewPlayer.destroy(); } catch (e) {}
-							state.previewPlayer = null;
-						}
 						attach('mse');
 					}
 				},
 			});
+
+			// Superseded while attach() was still running: something else is
+			// playing now, so drop what we just built rather than bury it.
+			if (mine !== gen) {
+				try { p.destroy(); } catch (e) {}
+				return;
+			}
+			state.previewPlayer = p;
 		}
 
 		attach(window.MajesticTransport.preferred());
