@@ -675,7 +675,15 @@
 	// diverge is which transport to prefer and what to remember, and that is
 	// preview-transport.js.
 	function attachLivePreview(video) {
-		const stream = getDotted(state.config, 'video1.enabled') === true ? 1 : 0;
+		// The same channel the Preview page would open, remembered choice and
+		// all. This panel has no Main/Sub control of its own, so without the
+		// shared answer someone who chose Main there — because video0 is the
+		// cropped one, say — gets the substream here and no way to say
+		// otherwise.
+		const subAvailable = getDotted(state.config, 'video1.enabled') === true;
+		const remembered = window.MajesticTransport.chosenStream();
+		const stream = (remembered === null ? 1 : remembered) === 1 && subAvailable
+			? 1 : 0;
 
 		// Which attachment is the live one. MajesticWebRTC can report 'fallback'
 		// from inside attach() — it does exactly that when RTCPeerConnection or

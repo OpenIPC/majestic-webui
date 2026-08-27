@@ -396,8 +396,20 @@
 	// Whether the deadline won and we picked a stream without being told.
 	let attachedBlind = false;
 
+	// Which channel to open on: what this browser last chose, or the substream.
+	//
+	// A remembered choice outranks the default but not reality — a browser that
+	// picked Sub on a camera which has since lost video1 opens on Main rather
+	// than on nothing. Returns true if the channel moved off Main.
 	function chooseSub(cfg) {
-		if (mjGet(cfg, 'video1.enabled') !== true) return false;
+		const subAvailable = mjGet(cfg, 'video1.enabled') === true;
+		const remembered = MajesticTransport.chosenStream();
+		const want = remembered === null ? 1 : remembered;
+		if (want !== 1 || !subAvailable) {
+			stream = 0;
+			if (s0) s0.checked = true;
+			return false;
+		}
 		stream = 1;
 		if (s1) s1.checked = true;
 		return true;
@@ -452,8 +464,16 @@
 	// that is the one they want — would otherwise look identical to someone who
 	// pressed nothing, and a late config answer would move them to Sub. A click
 	// is an expression of intent whether or not it alters anything.
-	[s0, s1].forEach(el => {
-		if (el) el.addEventListener('click', () => { userPickedStream = true; });
+	// Recorded on click for the same reason the flag is: pressing the radio that
+	// is already selected is still an answer, and it is the one that has to be
+	// remembered — someone whose camera crops video0, or whose substream is
+	// sized nothing like the preview box, wants Main and should say so once
+	// rather than on every page load.
+	[s0, s1].forEach((el, n) => {
+		if (el) el.addEventListener('click', () => {
+			userPickedStream = true;
+			MajesticTransport.chooseStream(n);
+		});
 	});
 	if (s0) s0.addEventListener('change', () => {
 		stream = 0;
