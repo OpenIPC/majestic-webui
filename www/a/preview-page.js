@@ -213,6 +213,9 @@
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
+	// Set once the Main/Sub control has been touched, so a slow config answer
+	// cannot undo it.
+	let userPickedStream = false;
 	let audioConfigured = false;
 
 	// Which attachment is the live one. Two things need it, and neither is
@@ -330,19 +333,90 @@
 		};
 	}
 
-	attachPlayer(wantWebRTC());
+	// Start on the substream, which is the convention this equipment is built
+	// around: the main channel carries the best picture the sensor can give and
+	// is what an NVR or the SD card records, while the substream exists to be
+	// watched over whatever link happens to be available. Previewing the
+	// channel that is being recorded, and then adapting its bitrate down to
+	// suit one browser, is the wrong way round.
+	//
+	// It also settles most of what a bitrate opt-out would have been for: the
+	// adaptation now lands on the channel whose job is preview. Main is one
+	// click away for anyone who wants to look closely, and the note under the
+	// toggle says what that costs.
+	//
+	// Gated on video1.enabled rather than assumed, because the two transports
+	// disagree about what a missing stream means. WebRTC treats ?stream=N as a
+	// preference and falls back to a channel it can serve; /ws/video subscribes
+	// to whatever number it is given and simply delivers nothing, which reads
+	// as "no signal" rather than as a misconfiguration.
+	// ...but not at the cost of starting at all. mjConfig() is memoised and the
+	// night-mode controls asked for it before this ran, so in practice the
+	// answer is already here. On the link this default exists for it might not
+	// be, and /api/v1/config.json has no timeout of its own — a request that
+	// hangs would leave the page blank for as long as the tab is open, which is
+	// a worse failure than starting on the wrong channel.
+	//
+	// So: attach as soon as we know, or after this deadline regardless.
+	const CONFIG_WAIT_MS = 1500;
+
+	// Whether the deadline won and we picked a stream without being told.
+	let attachedBlind = false;
+
+	function chooseSub(cfg) {
+		if (mjGet(cfg, 'video1.enabled') !== true) return false;
+		stream = 1;
+		if (s1) s1.checked = true;
+		return true;
+	}
+
+	Promise.race([
+		mjConfig(),
+		new Promise(done => setTimeout(() => done(null), CONFIG_WAIT_MS)),
+	]).then(cfg => {
+		if (cfg) chooseSub(cfg); else attachedBlind = true;
+		attachPlayer(wantWebRTC());
+	});
+
+	// If the deadline won, put it right when the answer turns up — but not if
+	// the person watching has since chosen a stream themselves. Correcting a
+	// default is helpful; overriding a decision is not.
+	mjConfig().then(cfg => {
+		if (!attachedBlind || userPickedStream) return;
+		if (chooseSub(cfg) && player) player.setStream(stream);
+	});
 
 	if (transportCtl && transportGrp && webrtcAvailable) {
 		transportGrp.hidden = false;
-		transportCtl.checked = usingWebRTC;
+		// From the preference rather than from usingWebRTC, which the deferred
+		// attach above has not set yet.
+		transportCtl.checked = wantWebRTC();
 		transportCtl.addEventListener('change', () => {
 			rememberTransport(transportCtl.checked ? 'webrtc' : 'mse');
 			attachPlayer(transportCtl.checked);
 		});
 	}
 
-	if (s0) s0.addEventListener('change', () => { stream = 0; player.setStream(0); });
-	if (s1) s1.addEventListener('change', () => { stream = 1; player.setStream(1); });
+	// Guarded because the first attach waits on the config fetch, and nothing
+	// stops a fast set of fingers reaching these first.
+	//
+	// The flag is armed on click rather than on change, and that distinction is
+	// the whole point of it: clicking the radio that is already selected fires
+	// no change event, so someone who starts on Main and presses Main — because
+	// that is the one they want — would otherwise look identical to someone who
+	// pressed nothing, and a late config answer would move them to Sub. A click
+	// is an expression of intent whether or not it alters anything.
+	[s0, s1].forEach(el => {
+		if (el) el.addEventListener('click', () => { userPickedStream = true; });
+	});
+	if (s0) s0.addEventListener('change', () => {
+		stream = 0;
+		if (player) player.setStream(0);
+	});
+	if (s1) s1.addEventListener('change', () => {
+		stream = 1;
+		if (player) player.setStream(1);
+	});
 
 	// Audio: revealed only when the camera has it configured and the transport
 	// in use can carry it — otherwise the button is a dead end.
@@ -354,13 +428,15 @@
 		mute.addEventListener('change', () => {
 			const on = mute.checked;
 			audioOn = on;
+			if (!player) return;
 			player.setAudio(on);
 			muteLbl.textContent = on ? '🔊 Listening' : '🔇 Muted';
 			if (volCtl) volCtl.disabled = !on;
 		});
 		if (volCtl) volCtl.addEventListener('input', () => {
 			vol = volCtl.value / 100;
-			player.setVolume(vol);
+			// Kept even with no player yet: attachPlayer() applies it.
+			if (player) player.setVolume(vol);
 		});
 	}
 })();
