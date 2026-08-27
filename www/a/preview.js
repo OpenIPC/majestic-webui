@@ -228,6 +228,7 @@ window.MajesticVideo = (function () {
 				setStream: function () {}, requestIdr: function () {},
 				setAudio: function () {}, setVolume: function () {},
 				audioSupported: function () { return false; },
+				setMic: function () {}, micSupported: function () { return false; },
 				destroy: function () {}, supported: false,
 			};
 		}
@@ -237,6 +238,10 @@ window.MajesticVideo = (function () {
 			setStream: setStream, requestIdr: requestIdr,
 			setAudio: setAudio, setVolume: setVolume,
 			audioSupported: audioSupported,
+			// MSE carries one direction only: there is no way to send a
+			// microphone up a media-source stream. The façade keeps the shape
+			// so the page never asks which transport it attached.
+			setMic: function () {}, micSupported: function () { return false; },
 			destroy: destroy, supported: true,
 		};
 	}

@@ -480,6 +480,51 @@ preview() {
 		<label class="btn btn-outline-primary" for="mj-mute" id="mj-mute-lbl">🔇 Muted</label>
 		<input type="range" id="mj-vol" min="0" max="100" value="100" class="form-range align-self-center ms-2" style="width:6rem" disabled aria-label="Volume">
 	</div>
+	<!-- Talkback. Revealed only over WebRTC, only where the camera has
+	     audio.outputEnabled, and only in a secure context: a browser hands over
+	     no microphone on plain HTTP, so the button would be a dead end. -->
+	<div class="btn-group btn-group-sm mb-2 ms-2" role="group" aria-label="Talkback" id="mj-talk-ctl" hidden>
+		<input type="checkbox" class="btn-check" id="mj-talk" autocomplete="off">
+		<label class="btn btn-outline-primary" for="mj-talk" id="mj-talk-lbl"
+			title="Send this browser's microphone to the camera's speaker. The camera will not take audio in one direction only, so talking also opens its audio to you.">🎤 Talk</label>
+	</div>
+	<div class="btn-group btn-group-sm mb-2 ms-2" role="group" aria-label="Statistics" id="mj-stats-ctl" hidden>
+		<input type="checkbox" class="btn-check" id="mj-stats-btn" autocomplete="off">
+		<label class="btn btn-outline-secondary" for="mj-stats-btn"
+			title="Per-second measurements from both ends of the session.">Stats</label>
+	</div>
+	<!-- Two columns because the two ends disagree in the cases worth looking
+	     at: the browser can be losing packets the camera never sees dropped,
+	     and REMB is the camera's opinion of the link rather than a measurement
+	     of it. -->
+	<div id="mj-stats" class="small text-body-secondary mb-2" hidden>
+		<div class="row g-3">
+			<div class="col-auto">
+				<div class="fw-semibold">This browser</div>
+				<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
+					<tbody>
+						<tr><td class="pe-3 text-body-secondary">picture</td><td id="mj-st-pic">-</td></tr>
+						<tr><td class="pe-3 text-body-secondary">receiving</td><td id="mj-st-rx">-</td></tr>
+						<tr><td class="pe-3 text-body-secondary">lost / jitter</td><td id="mj-st-loss">-</td></tr>
+						<tr><td class="pe-3 text-body-secondary">round trip</td><td id="mj-st-rtt">-</td></tr>
+						<tr><td class="pe-3 text-body-secondary">recovery</td><td id="mj-st-recov">-</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<div class="col-auto">
+				<div class="fw-semibold">This camera</div>
+				<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
+					<tbody>
+						<tr><td class="pe-3 text-body-secondary">session</td><td id="mj-st-cam">-</td></tr>
+						<tr><td class="pe-3 text-body-secondary">estimate</td><td id="mj-st-remb">-</td></tr>
+						<tr><td class="pe-3 text-body-secondary">keyframes</td><td id="mj-st-pli">-</td></tr>
+						<tr><td class="pe-3 text-body-secondary">audio in</td><td id="mj-st-ain">-</td></tr>
+						<tr><td class="pe-3 text-body-secondary">talkback</td><td id="mj-st-talk">-</td></tr>
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
 	<video id="live-video" autoplay muted playsinline style="$bg"></video>
 	<img id="live-mjpeg" alt="" style="display:none; $bg">
 	<p id="mj-note" class="alert alert-warning" style="display:none">
