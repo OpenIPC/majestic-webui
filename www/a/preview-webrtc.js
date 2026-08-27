@@ -68,6 +68,8 @@ window.MajesticWebRTC = (function () {
 		// it not at all, so without this two clicks start two grants and the
 		// second orphans the first — a capture nothing is left holding.
 		let wantMic = false, micTrack = null, micBusy = false;
+		// A getStats() call that has not settled yet; see pollStats().
+		let statsBusy = false;
 
 		// The camera's own view, pushed over the signalling socket once a
 		// second. Worth having beside the browser's: they disagree in the
@@ -132,7 +134,15 @@ window.MajesticWebRTC = (function () {
 		// what the badge is for. Polled because it is the only way — there is
 		// no event for "the encoder changed resolution".
 		function pollStats() {
-			if (!pc) return;
+			if (!pc || statsBusy) return;
+			// One poll at a time. getStats() is asynchronous and the interval
+			// is not: a slow call and a fast one can settle out of order, and
+			// the second to arrive would then write an older byte total over a
+			// newer baseline. That does not just misdraw the panel — rateBytes
+			// is the divisor for the next tick, so a stale one prints a bitrate
+			// of zero or of twice the truth. Skipping a tick loses a sample;
+			// interleaving them corrupts every sample after it.
+			statsBusy = true;
 			const my = attempt;
 			pc.getStats().then(function (report) {
 				if (!current(my)) return;
@@ -219,7 +229,7 @@ window.MajesticWebRTC = (function () {
 					lastCodec = codec; lastW = w; lastH = h;
 					onCodec(codec, codec, w, h);
 				}
-			}).catch(function () {});
+			}).catch(function () {}).then(function () { statsBusy = false; });
 		}
 
 		// kbit/s between two byte totals one STATS_MS tick apart. Negative
@@ -340,9 +350,17 @@ window.MajesticWebRTC = (function () {
 						reopen();
 					};
 					wantMic = true;
-					// Two-way or not at all — see above.
-					wantAudio = true;
-					video.muted = false;
+					// Note what is NOT done here: wantAudio is left alone and
+					// the element stays muted. Talkback does open the camera's
+					// audio — it refuses a one-way section — but that is
+					// something the answer establishes, not the grant. Unmuting
+					// now means a camera that then declines our microphone
+					// leaves sound playing that the Listen control still calls
+					// muted, and nothing on the page can account for it.
+					//
+					// The offer does not need it either: open() adds the
+					// sendrecv transceiver from wantMic, not from wantAudio.
+					//
 					// 'live', not 'on': the microphone is capturing, but this
 					// session has not offered the track yet, let alone had it
 					// accepted. Saying "Talking" here would be a claim about
@@ -541,6 +559,13 @@ window.MajesticWebRTC = (function () {
 							// lit for a camera that is not listening.
 							if (wantMic) {
 								if (micSending()) {
+									// Accepted, so the camera's audio comes
+									// with it. Now is when the element may be
+									// unmuted: the direction is settled and the
+									// page is told in the same breath, so the
+									// Listen control and the sound agree.
+									wantAudio = true;
+									video.muted = false;
 									onMic('on', '');
 								} else {
 									releaseMic();
