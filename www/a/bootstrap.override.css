@@ -516,20 +516,35 @@ mark {
 	flex: 1 1 auto;
 }
 
-/* a lone full-width section card (e.g. Recording) flows its fields in 2 columns */
+/* The section card lays its fields out in 2 columns. Two real columns, dealt by
+   mj-settings.js, rather than a CSS multi-column box: a column box re-balances
+   itself whenever a visibleWhen row appears or disappears, which shuffles
+   unrelated rows across the fold — see layoutCols() (#189). */
 .mj-cols {
-	column-count: 2;
-	column-gap: 2.5rem;
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	gap: 2.5rem;
 }
 
-.mj-cols .mj-row,
-.mj-cols h5 {
-	break-inside: avoid;
+/* basis 0 so both columns are the same width whatever they hold, and min-width
+   so a long label wraps inside its column instead of widening it */
+.mj-cols > .mj-col {
+	flex: 1 1 0;
+	min-width: 0;
 }
 
+/* below md the two columns stack, which reads exactly like the single column
+   this used to collapse to: the deal keeps the fields in document order */
 @media (max-width: 767.98px) {
 	.mj-cols {
-		column-count: 1;
+		flex-direction: column;
+		gap: 0;
+	}
+
+	.mj-cols > .mj-col {
+		flex: 0 1 auto;
+		width: 100%;
 	}
 }
 
