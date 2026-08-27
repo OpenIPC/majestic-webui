@@ -60,6 +60,10 @@
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
 		if (mjGet(cfg, 'video1.enabled') === true) $('#mj-sub').hidden = false;
+		ice = MajesticTransport.iceServers(
+			mjGet(cfg, 'webrtc.iceServers'),
+			mjGet(cfg, 'webrtc.turnUsername'),
+			mjGet(cfg, 'webrtc.turnCredential'));
 	});
 	const cur = () => $('#live-video');
 
@@ -127,6 +131,11 @@
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
+	// The camera's STUN/TURN configuration, filled when the config lands. Read
+	// through a getter at every open(), so an attach that beat the fetch is
+	// corrected by the first reconnect rather than staying host-candidates-only
+	// for the life of the page.
+	let ice = [];
 	// Talkback is deliberately NOT carried across a transport switch or a
 	// reattach. Everything else here is a preference; this one holds a live
 	// microphone, and silently reopening it because the page rebuilt a player
@@ -228,7 +237,8 @@
 		const v = cur();
 		try { v.removeAttribute('src'); v.srcObject = null; } catch (e) {}
 		const impl = usingWebRTC ? MajesticWebRTC : MajesticVideo;
-		const p = impl.attach(v, Object.assign({ stream: stream }, handlersFor(gen)));
+		const p = impl.attach(v, Object.assign(
+			{ stream: stream, iceServers: () => ice }, handlersFor(gen)));
 		// attach() reported 'fallback' before returning and something else is
 		// now playing. Drop what we just built rather than letting this
 		// assignment bury it.

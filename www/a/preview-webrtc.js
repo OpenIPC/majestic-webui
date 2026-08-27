@@ -398,8 +398,18 @@ window.MajesticWebRTC = (function () {
 			lastBytes = 0; stalledMs = 0; healthyMs = 0;
 			rateBytes = 0; rateAudioBytes = 0; camLine = '';
 
+			// Read at open() rather than at attach(): the list comes from the
+			// camera's config, the first attach can win a race against that
+			// fetch, and a reconnect should use the answer once it lands
+			// instead of repeating the empty list it started with.
+			let ice = [];
 			try {
-				pc = new RTCPeerConnection({ iceServers: [] });
+				ice = (typeof opts.iceServers === 'function'
+					? opts.iceServers() : opts.iceServers) || [];
+			} catch (e) { ice = []; }
+
+			try {
+				pc = new RTCPeerConnection({ iceServers: ice });
 			} catch (e) {
 				onState('fallback', 'RTCPeerConnection failed');
 				return;
