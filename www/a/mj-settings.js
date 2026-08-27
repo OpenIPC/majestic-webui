@@ -77,6 +77,8 @@
 		fields: [],
 		initial: {},
 		fieldCache: {},
+		// the mounted section's .mj-cols box, or null on the live/ROI leaves
+		cols: null,
 		dirtyN: 0,
 		// a save whose changes need a pipeline reload leaves this set until the
 		// reload actually runs, so Apply survives switching sections
@@ -118,6 +120,14 @@
 		if (WIDE.addEventListener) WIDE.addEventListener('change', onWidth);
 		else if (WIDE.addListener) WIDE.addListener(onWidth);
 		window.addEventListener('popstate', onPopState);
+		// the column split depends on how tall each row renders, so it is worth
+		// redoing when the width changes — but only then, never on a visibility
+		// change (#189). Debounced: a drag fires resize continuously.
+		let rt = 0;
+		window.addEventListener('resize', () => {
+			clearTimeout(rt);
+			rt = setTimeout(layoutCols, 120);
+		});
 		await load(state.sec, /*push*/ false);
 	}
 
@@ -522,10 +532,11 @@
 
 		state.fields = [];
 		state.initial = {};
+		state.cols = null;
 
 		// Exactly one section on the page, so it gets the whole width — and its
-		// fields flow in the same two columns .mj-cols already gave the lone
-		// Record card, rather than a single strip of controls down the left.
+		// fields are dealt into the two columns of .mj-cols, rather than run
+		// down the left as a single strip of controls.
 		if (sec === LIVE_ID) {
 			renderLive(form);
 		} else if (sec === ROI_ID) {
@@ -537,11 +548,16 @@
 			h.textContent = label(sec);
 			body.appendChild(h);
 			const cols = el('div', 'mj-cols');
+			cols.appendChild(el('div', 'mj-col'));
+			cols.appendChild(el('div', 'mj-col'));
+			state.cols = cols;
 			body.appendChild(cols);
 			card.appendChild(body);
 			form.appendChild(card);
 			const props = ((state.schema.properties || {})[sec] || {}).properties || {};
-			renderProps(cols, sec, props);
+			// all rows into the first column; layoutCols() deals the tail over
+			// into the second once applyVisibility() has settled what is on screen
+			renderProps(cols.firstElementChild, sec, props);
 		}
 
 		// Save and Apply share this bar, and each is present only while its own
@@ -559,6 +575,7 @@
 		document.getElementById('mj-apply-btn').addEventListener('click', applyReload);
 
 		applyVisibility();
+		layoutCols();
 
 		// renderField writes labels as plain text; with a query already active,
 		// the section just mounted has to pick up the marks too, or navigating
@@ -771,6 +788,87 @@
 
 	function runVisibility() {
 		(state.visUpdaters || []).forEach(u => u());
+	}
+
+	// Deal the section's rows into the two columns of .mj-cols.
+	//
+	// The rows used to flow through a CSS multi-column box, which re-balances
+	// itself every time a visibleWhen row is shown or hidden: flipping one
+	// select pushed unrelated rows across the fold, and at some widths pushed
+	// the very select being edited across it (#189). So the split is decided
+	// here instead — at mount and on resize, never while a row toggles. Showing
+	// or hiding a row then only moves what is under it in its own column, which
+	// is what makes the form predictable to edit.
+	function layoutCols() {
+		const box = state.cols;
+		// below md the columns stack, and every split reads the same stacked
+		if (!box || !WIDE.matches) return;
+		const a = box.children[0], b = box.children[1];
+		if (!a || !b) return;
+		// document order, wherever the last deal left them
+		const items = Array.from(a.children).concat(Array.from(b.children));
+		if (!items.length) return;
+
+		// Both columns are flex: 1 1 0, so each row already measures at the
+		// width it keeps on either side of the fold — nothing has to be moved
+		// to size it first.
+		const h = rowSteps(box, items);
+		const total = h.reduce((sum, x) => sum + x, 0);
+
+		// the cut that leaves the taller column as short as it can be
+		let acc = 0, best = Infinity, cut = items.length;
+		for (let i = 1; i <= items.length; i++) {
+			acc += h[i - 1];
+			// a group heading belongs to the rows under it, so it must not be
+			// left as the last thing in a column
+			if (i < items.length && items[i - 1].tagName === 'H5') continue;
+			const taller = Math.max(acc, total - acc);
+			if (taller < best) { best = taller; cut = i; }
+		}
+		if (cut === a.children.length) return;   // already dealt this way
+
+		// re-parenting blurs whatever control the user is in, which resizing
+		// the window mid-edit would otherwise do
+		const held = grabFocus(box);
+		items.forEach((it, i) => (i < cut ? a : b).appendChild(it));
+		restoreFocus(held);
+	}
+
+	// What a row costs its column is the step down to the row under it, not its
+	// own box: short switch rows are mostly the margin between them, which
+	// offsetHeight leaves out. Hidden rows take up no space at all, so the step
+	// runs to the next *visible* row and they come out free.
+	function rowSteps(box, items) {
+		const h = items.map(() => 0);
+		const top = it => it.getBoundingClientRect().top;
+		for (const col of Array.from(box.children)) {
+			const vis = Array.from(col.children).filter(it => it.offsetHeight);
+			const end = col.getBoundingClientRect().bottom;
+			vis.forEach((it, i) => {
+				const next = i + 1 < vis.length ? top(vis[i + 1]) : end;
+				h[items.indexOf(it)] = Math.max(0, next - top(it));
+			});
+		}
+		return h;
+	}
+
+	// Moving a node re-parents it, so anything focused inside has to be picked
+	// up and put back — text selection included, or a caret mid-word jumps to
+	// the end of the field.
+	function grabFocus(box) {
+		const node = document.activeElement;
+		if (!node || !box.contains(node)) return null;
+		let sel = null;
+		// number and range inputs throw on .selectionStart rather than answer null
+		try { sel = [node.selectionStart, node.selectionEnd]; } catch (e) { /* no selection */ }
+		return { node, sel };
+	}
+
+	function restoreFocus(held) {
+		if (!held) return;
+		held.node.focus();
+		if (!held.sel || held.sel[0] == null) return;
+		try { held.node.setSelectionRange(held.sel[0], held.sel[1]); } catch (e) { /* no selection */ }
 	}
 
 	function renderField(container, dot, key, sub, eff, opts) {
