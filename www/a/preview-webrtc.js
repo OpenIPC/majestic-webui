@@ -258,12 +258,21 @@ window.MajesticWebRTC = (function () {
 		// a camera with audio.outputEnabled off answers `sendonly`, which lands
 		// here as `recvonly` — it sends, it does not receive. That is the
 		// difference between talkback working and a microphone lit for nothing.
+		//
+		// Both of the directions that contain "send" count, not just sendrecv.
+		// Today's camera answers sendrecv or sendonly and never recvonly, so
+		// this end never actually settles on sendonly — but that is a fact
+		// about one answerer, not about the negotiation. A camera with no audio
+		// source that still takes talkback would correctly answer recvonly and
+		// leave us sendonly, and testing for sendrecv alone would read the one
+		// legitimate microphone-only session as a refusal and stop the capture.
 		function micSending() {
 			if (!pc || !pc.getTransceivers) return false;
 			return pc.getTransceivers().some(function (t) {
 				return t.sender && t.sender.track &&
 					t.sender.track.kind === 'audio' &&
-					t.currentDirection === 'sendrecv';
+					(t.currentDirection === 'sendrecv' ||
+						t.currentDirection === 'sendonly');
 			});
 		}
 
@@ -334,7 +343,11 @@ window.MajesticWebRTC = (function () {
 					// Two-way or not at all — see above.
 					wantAudio = true;
 					video.muted = false;
-					onMic('on', '');
+					// 'live', not 'on': the microphone is capturing, but this
+					// session has not offered the track yet, let alone had it
+					// accepted. Saying "Talking" here would be a claim about
+					// the camera made before asking it.
+					onMic('live', '');
 					reopen();
 				})
 				.catch(function (e) {
@@ -526,10 +539,14 @@ window.MajesticWebRTC = (function () {
 							// is audio.outputEnabled being off. Say so and let
 							// the capture go, rather than leaving a microphone
 							// lit for a camera that is not listening.
-							if (wantMic && !micSending()) {
-								releaseMic();
-								onMic('off',
-									'the camera is not accepting audio');
+							if (wantMic) {
+								if (micSending()) {
+									onMic('on', '');
+								} else {
+									releaseMic();
+									onMic('off',
+										'the camera is not accepting audio');
+								}
 							}
 							if (wantAudio && !negotiatedAudio()) {
 								// Mirror preview.js: stop wanting it, so the

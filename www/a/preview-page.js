@@ -183,14 +183,24 @@
 		if (!talkCtl) return;
 		const ok = talkbackConfigured && player && player.micSupported();
 		talkCtl.hidden = !ok;
-		if (!ok && talk) talk.checked = false;
+		// Put the control back to rest, every time. A player destroyed while
+		// its permission prompt was still up never reports an ending — the
+		// grant lands in a closed player, which releases it silently — so
+		// anything left over from 'asking' has to be cleared here or the
+		// button stays disabled on "Asking…" until the page is reloaded.
+		if (talk) { talk.checked = false; talk.disabled = false; }
+		if (talkLbl) { talkLbl.textContent = '🎤 Talk'; talkLbl.title = TALK_TITLE; }
 	}
 
 	// The stats panel follows the transport rather than the person: MSE has
-	// none of these numbers, so the button would open an empty box.
+	// none of these numbers, so the button would open an empty box. The
+	// checkbox keeps the person's answer across a transport switch, so the
+	// panel has to come back with it rather than needing a second click.
 	function syncStatsCtl() {
 		if (statsCtl) statsCtl.hidden = !usingWebRTC;
-		if (!usingWebRTC && statsBox) statsBox.hidden = true;
+		if (statsBox) {
+			statsBox.hidden = !(usingWebRTC && statsBtn && statsBtn.checked);
+		}
 	}
 
 	function showStats(s) {
@@ -252,7 +262,6 @@
 		syncAudioCtl();
 		// The old player's destroy() released the microphone, so the control
 		// has to come back up in the state the new one is actually in.
-		if (talk) talk.checked = false;
 		syncTalkCtl();
 		syncStatsCtl();
 		syncTransportNote();
@@ -319,18 +328,30 @@
 			// ends — refused, unplugged, revoked, or declined by a camera with
 			// audio.outputEnabled off. The reason rides along and goes in the
 			// tooltip, which is the only place it lives.
+			// Four states, and the middle one earns its place: 'asking' while
+			// the browser's prompt is up, 'live' once the microphone is
+			// capturing but the camera has not answered yet, 'on' when it has
+			// accepted, 'off' for every ending. Reporting 'on' at the moment
+			// of capture would say "Talking" over a session that has not
+			// offered the track yet, and might still be refused.
+			//
+			// 'live' leaves the button enabled, unlike 'asking': the
+			// microphone is running by then, and a control that cannot stop a
+			// running microphone is the wrong control.
 			onMic: (state, why) => {
 				if (!live() || !talk) return;
-				talk.checked = state === 'on';
+				talk.checked = state === 'on' || state === 'live';
 				talk.disabled = state === 'asking';
 				if (talkLbl) {
 					talkLbl.textContent = state === 'asking' ? '🎤 Asking…'
+						: state === 'live' ? '🎤 Connecting…'
 						: state === 'on' ? '🎤 Talking' : '🎤 Talk';
 					talkLbl.title = why ? why + '\n\n' + TALK_TITLE : TALK_TITLE;
 				}
-				// Talking opens the camera's audio too — the camera refuses a
-				// one-way audio section — so the listen control has to show
-				// what actually happened rather than what it was last set to.
+				// Only once the camera has accepted. Talking opens its audio
+				// too — it refuses a one-way audio section — so the listen
+				// control follows what was negotiated rather than what was
+				// asked for.
 				if (state === 'on' && mute && !mute.checked) {
 					mute.checked = true;
 					audioOn = true;
@@ -394,8 +415,21 @@
 	// the person watching has since chosen a stream themselves. Correcting a
 	// default is helpful; overriding a decision is not.
 	mjConfig().then(cfg => {
-		if (!attachedBlind || userPickedStream) return;
-		if (chooseSub(cfg) && player) player.setStream(stream);
+		if (!attachedBlind) return;
+		// The stream, unless the person has since chosen one themselves:
+		// correcting a default is helpful, overriding a decision is not.
+		const moved = !userPickedStream && chooseSub(cfg);
+		if (moved && player) player.setStream(stream);
+
+		// The ICE list, unconditionally. A blind attach opened with an empty
+		// one, and the getter is only read when a session opens — so without
+		// this the first session runs on host candidates alone until something
+		// else happens to reconnect it. Off-LAN that session cannot work: it
+		// negotiates, carries nothing, and spends the full no-signal timeout
+		// finding out, which is exactly the sequence that demotes a browser to
+		// MSE. Skipped when setStream() has already reopened for the stream
+		// change, and when there is nothing to apply.
+		if (!moved && player && usingWebRTC && ice.length) attachPlayer(true);
 	});
 
 	if (transportCtl && transportGrp && webrtcAvailable) {
@@ -473,8 +507,8 @@
 	}
 
 	if (statsBtn && statsBox) {
-		statsBtn.addEventListener('change', () => {
-			statsBox.hidden = !statsBtn.checked;
-		});
+		// Through the same helper the transport switch uses, so "is the panel
+		// showing" has one answer and not two that have to agree.
+		statsBtn.addEventListener('change', syncStatsCtl);
 	}
 })();
