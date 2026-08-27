@@ -122,9 +122,9 @@ window.MajesticTransport = (function () {
 	// but off one, neither end ever learns a routable address for the other and
 	// the session dies having negotiated perfectly.
 	//
-	// This mirrors majestic_stun_ice_js() in include/majestic/stun_default.h,
-	// which built the same list for the debug page this replaced. Keep the two
-	// in step: same default, same off-words, same rule about relays.
+	// The camera applies the same rules to the same setting on its own side,
+	// and used to build this very list for the debug page this replaced. Keep
+	// the two in step: same default, same off-words, same rule about relays.
 	function iceServers(configured, user, cred) {
 		configured = (configured === null || configured === undefined ||
 			configured === '') ? STUN_DEFAULT : String(configured);
