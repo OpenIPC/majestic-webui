@@ -701,6 +701,14 @@
 
 			const p = impl.attach(video, {
 				stream: stream,
+				// Same list the Preview page builds, and for the same reason:
+				// without it the browser offers host candidates only, and a
+				// session opened from anywhere but the same LAN negotiates
+				// cleanly and then never carries a packet.
+				iceServers: () => window.MajesticTransport.iceServers(
+					getDotted(state.config, 'webrtc.iceServers'),
+					getDotted(state.config, 'webrtc.turnUsername'),
+					getDotted(state.config, 'webrtc.turnCredential')),
 				onState: (st) => {
 					if (mine !== gen || kind !== 'webrtc') return;
 					// 'fallback' is durable and worth remembering; 'busy' says

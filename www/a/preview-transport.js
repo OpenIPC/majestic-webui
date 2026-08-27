@@ -106,11 +106,53 @@ window.MajesticTransport = (function () {
 		return kind === 'webrtc' ? window.MajesticWebRTC : window.MajesticVideo;
 	}
 
+	// What the camera falls back to when webrtc.iceServers is unset, and every
+	// spelling of "I really do want none". More than one because YAML 1.1
+	// decides what these words mean before majestic sees them: `iceServers: off`
+	// reaches the config as the string "false", and so do `no` and `false`.
+	const STUN_DEFAULT = 'stun:stun.cloudflare.com:3478';
+	const OFF_WORDS = ['none', 'off', 'no', 'false', 'disabled'];
+
+	// The camera's webrtc.* settings as an RTCPeerConnection iceServers list.
+	//
+	// Both pages need it and neither can do without it: with an empty list the
+	// browser gathers host candidates only, and Chromium anonymises those to
+	// <uuid>.local, which the camera cannot resolve. On a LAN it still works —
+	// the browser's own checks teach the camera its address peer-reflexively —
+	// but off one, neither end ever learns a routable address for the other and
+	// the session dies having negotiated perfectly.
+	//
+	// This mirrors majestic_stun_ice_js() in include/majestic/stun_default.h,
+	// which built the same list for the debug page this replaced. Keep the two
+	// in step: same default, same off-words, same rule about relays.
+	function iceServers(configured, user, cred) {
+		configured = (configured === null || configured === undefined ||
+			configured === '') ? STUN_DEFAULT : String(configured);
+		if (OFF_WORDS.indexOf(configured.toLowerCase()) >= 0) return [];
+		const haveCreds = !!(user && cred);
+		const out = [];
+		configured.split(/[\s,]+/).forEach(function (url) {
+			if (!url) return;
+			const isTurn = /^turns?:/i.test(url);
+			// A relay entry missing either credential makes RTCPeerConnection
+			// throw InvalidAccessError — before the page opens its signalling
+			// socket, so the camera sees no attempt at all and the failure
+			// reads as "signalling never happened". Drop that entry and keep
+			// the rest: it costs the relay and nothing else.
+			if (isTurn && !haveCreds) return;
+			out.push(isTurn
+				? { urls: url, username: String(user), credential: String(cred) }
+				: { urls: url });
+		});
+		return out;
+	}
+
 	return {
 		available: available,
 		preferred: preferred,
 		choose: choose,
 		demote: demote,
 		impl: impl,
+		iceServers: iceServers,
 	};
 })();

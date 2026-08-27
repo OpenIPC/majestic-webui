@@ -49,6 +49,11 @@ window.MajesticWebRTC = (function () {
 		const onState = opts.onState || function () {};
 		const onCodec = opts.onCodec || function () {};
 		const onAudio = opts.onAudio || function () {};
+		// Talkback state, and the per-second measurement feed behind the stats
+		// panel. Both are no-ops on the MSE player, which is why they are
+		// callbacks the caller may omit rather than something it must handle.
+		const onMic = opts.onMic || function () {};
+		const onStats = opts.onStats || function () {};
 		let stream = opts.stream | 0;
 
 		let pc = null, ws = null, statsTimer = null, signalTimer = null;
@@ -56,6 +61,23 @@ window.MajesticWebRTC = (function () {
 		let failCount = 0, gotMedia = false;
 		let wantAudio = false, volume = 1;
 		let lastCodec = '', lastW = 0, lastH = 0;
+
+		// Talkback. micTrack is the capture; wantMic is what the person asked
+		// for, which survives the reconnects that renegotiation is made of.
+		// micBusy covers the permission prompt: it blocks the page underneath
+		// it not at all, so without this two clicks start two grants and the
+		// second orphans the first — a capture nothing is left holding.
+		let wantMic = false, micTrack = null, micBusy = false;
+		// A getStats() call that has not settled yet; see pollStats().
+		let statsBusy = false;
+
+		// The camera's own view, pushed over the signalling socket once a
+		// second. Worth having beside the browser's: they disagree in the
+		// interesting cases, and REMB and audio-in are only visible from there.
+		let camLine = '';
+		// Byte counters for a rate. bytesReceived is a total, and lastBytes
+		// above only moves when it grows, so a rate needs its own pair.
+		let rateBytes = 0, rateAudioBytes = 0;
 
 		// Which connection attempt is current. Everything asynchronous here
 		// outlives the attempt that started it — createOffer and getStats
@@ -112,11 +134,20 @@ window.MajesticWebRTC = (function () {
 		// what the badge is for. Polled because it is the only way — there is
 		// no event for "the encoder changed resolution".
 		function pollStats() {
-			if (!pc) return;
+			if (!pc || statsBusy) return;
+			// One poll at a time. getStats() is asynchronous and the interval
+			// is not: a slow call and a fast one can settle out of order, and
+			// the second to arrive would then write an older byte total over a
+			// newer baseline. That does not just misdraw the panel — rateBytes
+			// is the divisor for the next tick, so a stale one prints a bitrate
+			// of zero or of twice the truth. Skipping a tick loses a sample;
+			// interleaving them corrupts every sample after it.
+			statsBusy = true;
 			const my = attempt;
 			pc.getStats().then(function (report) {
 				if (!current(my)) return;
 				let codec = '', w = 0, h = 0, bytes = 0;
+				const s = { cam: parseCam(camLine) };
 				const codecs = {};
 				report.forEach(function (r) {
 					if (r.type === 'codec') codecs[r.id] = r;
@@ -130,7 +161,41 @@ window.MajesticWebRTC = (function () {
 					if (c && c.mimeType) {
 						codec = c.mimeType.replace(/^video\//i, '').toLowerCase();
 					}
+					s.fps = r.framesPerSecond || 0;
+					s.framesDecoded = r.framesDecoded || 0;
+					s.framesDropped = r.framesDropped || 0;
+					// Cumulative on purpose. A per-second loss figure spends
+					// most of its life at zero and spikes to noise; the total
+					// since the session started is what says whether this link
+					// is losing packets at all.
+					s.packetsLost = r.packetsLost || 0;
+					s.packetsReceived = r.packetsReceived || 0;
+					s.jitterMs = Math.round((r.jitter || 0) * 1000);
+					s.nack = r.nackCount || 0;
+					s.pli = r.pliCount || 0;
 				});
+				report.forEach(function (r) {
+					if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+						s.audioKbps = rate(r.bytesReceived || 0, rateAudioBytes);
+						rateAudioBytes = r.bytesReceived || 0;
+						s.audioPackets = r.packetsReceived || 0;
+					} else if (r.type === 'outbound-rtp' && r.kind === 'audio') {
+						// This browser's microphone, as the browser counts it.
+						// The camera's audio-in counter is the other half: one
+						// says we sent, the other says it arrived.
+						s.micPackets = r.packetsSent || 0;
+					} else if (
+						r.type === 'candidate-pair' && r.nominated &&
+						r.state === 'succeeded') {
+						s.rttMs = Math.round((r.currentRoundTripTime || 0) * 1000);
+					}
+				});
+				s.codec = codec; s.width = w; s.height = h;
+				s.kbps = rate(bytes, rateBytes);
+				rateBytes = bytes;
+				s.micWanted = wantMic;
+				s.micSending = micSending();
+				onStats(s);
 				if (bytes > 0 && !gotMedia) {
 					gotMedia = true;
 					clearTimeout(signalTimer);
@@ -164,7 +229,154 @@ window.MajesticWebRTC = (function () {
 					lastCodec = codec; lastW = w; lastH = h;
 					onCodec(codec, codec, w, h);
 				}
-			}).catch(function () {});
+			}).catch(function () {}).then(function () { statsBusy = false; });
+		}
+
+		// kbit/s between two byte totals one STATS_MS tick apart. Negative
+		// deltas are a counter that reset under us — a new session — not a
+		// camera sending backwards.
+		function rate(now, before) {
+			const d = now - before;
+			return d > 0 ? Math.round((d * 8) / STATS_MS) : 0;
+		}
+
+		// The camera's line is `key=value` pairs separated by spaces, with a
+		// couple of composites (`rtcp=recv/rejected`, `pli=n(+suppressed)`).
+		// Split on the first `=` only and hand the values over as text: the
+		// page renders them, and inventing a schema here would mean changing
+		// two files every time the camera adds a counter.
+		function parseCam(line) {
+			const out = {};
+			(line || '').split(' ').forEach(function (kv) {
+				const i = kv.indexOf('=');
+				if (i > 0) out[kv.slice(0, i)] = kv.slice(i + 1);
+			});
+			return out;
+		}
+
+		// ---- talkback ------------------------------------------------------
+		//
+		// The camera will not take a send-only audio section:
+		// rtc_sdp_dir_allows_us_to_send() accepts `recvonly` and `sendrecv` and
+		// refuses `sendonly`, because it reads the direction as what it may
+		// send into. So talkback is necessarily two-way — turning the
+		// microphone on opens the camera's audio as well, and setMic() unmutes
+		// to match rather than leaving the camera encoding Opus into a muted
+		// element.
+
+		// Did the camera accept what we offered to send? We offer `sendrecv`;
+		// a camera with audio.outputEnabled off answers `sendonly`, which lands
+		// here as `recvonly` — it sends, it does not receive. That is the
+		// difference between talkback working and a microphone lit for nothing.
+		//
+		// Both of the directions that contain "send" count, not just sendrecv.
+		// Today's camera answers sendrecv or sendonly and never recvonly, so
+		// this end never actually settles on sendonly — but that is a fact
+		// about one answerer, not about the negotiation. A camera with no audio
+		// source that still takes talkback would correctly answer recvonly and
+		// leave us sendonly, and testing for sendrecv alone would read the one
+		// legitimate microphone-only session as a refusal and stop the capture.
+		function micSending() {
+			if (!pc || !pc.getTransceivers) return false;
+			return pc.getTransceivers().some(function (t) {
+				return t.sender && t.sender.track &&
+					t.sender.track.kind === 'audio' &&
+					(t.currentDirection === 'sendrecv' ||
+						t.currentDirection === 'sendonly');
+			});
+		}
+
+		// Stop the capture. Deliberately does not renegotiate: the callers want
+		// different things after it, and one of them is already inside a fresh
+		// session.
+		function releaseMic() {
+			if (!micTrack) return;
+			try { micTrack.onended = null; micTrack.stop(); } catch (e) {}
+			micTrack = null;
+			wantMic = false;
+		}
+
+		function micSupported() {
+			return rtcOk && !!(navigator.mediaDevices &&
+				navigator.mediaDevices.getUserMedia);
+		}
+
+		function setMic(on) {
+			on = !!on;
+			// micBusy rather than a disabled button: the button is the page's
+			// business, and a second call while a prompt is up is the bug.
+			if (micBusy || on === wantMic) return;
+			if (!on) {
+				releaseMic();
+				onMic('off', '');
+				reopen();
+				return;
+			}
+			if (!micSupported()) {
+				// Absent rather than refused: getUserMedia does not exist
+				// outside a secure context, so over plain HTTP there is nothing
+				// to ask. Those send you to different places.
+				onMic('off', window.isSecureContext
+					? 'no microphone available'
+					: 'a browser only grants microphone access over HTTPS');
+				return;
+			}
+			micBusy = true;
+			onMic('asking', '');
+			navigator.mediaDevices.getUserMedia({ audio: true })
+				.then(function (st) {
+					micBusy = false;
+					// The prompt blocks this function, not the page: the
+					// transport can be switched or the player destroyed while
+					// it is up. A grant nobody can now use has to be released,
+					// not parked — a live capture with no control attached to
+					// it is a recording light nobody asked for.
+					if (closed) {
+						st.getTracks().forEach(function (t) { t.stop(); });
+						return;
+					}
+					micTrack = st.getAudioTracks()[0];
+					if (!micTrack) {
+						onMic('off', 'no microphone available');
+						return;
+					}
+					// A track can end with nobody pressing anything: the device
+					// is unplugged, or the permission is revoked from the
+					// browser's own UI. Showing 'on' over it would be the same
+					// lie in a slower form.
+					micTrack.onended = function () {
+						releaseMic();
+						onMic('off', 'the microphone stopped');
+						reopen();
+					};
+					wantMic = true;
+					// Note what is NOT done here: wantAudio is left alone and
+					// the element stays muted. Talkback does open the camera's
+					// audio — it refuses a one-way section — but that is
+					// something the answer establishes, not the grant. Unmuting
+					// now means a camera that then declines our microphone
+					// leaves sound playing that the Listen control still calls
+					// muted, and nothing on the page can account for it.
+					//
+					// The offer does not need it either: open() adds the
+					// sendrecv transceiver from wantMic, not from wantAudio.
+					//
+					// 'live', not 'on': the microphone is capturing, but this
+					// session has not offered the track yet, let alone had it
+					// accepted. Saying "Talking" here would be a claim about
+					// the camera made before asking it.
+					onMic('live', '');
+					reopen();
+				})
+				.catch(function (e) {
+					micBusy = false;
+					const name = e && e.name;
+					onMic('off', name === 'NotAllowedError'
+						? 'permission refused'
+						: name === 'NotFoundError'
+							? 'no microphone available'
+							: 'the microphone could not be opened');
+				});
 		}
 
 		// Whether the answer actually carried the audio we asked to receive.
@@ -215,9 +427,20 @@ window.MajesticWebRTC = (function () {
 			teardownPc();
 			dropSocket();
 			lastBytes = 0; stalledMs = 0; healthyMs = 0;
+			rateBytes = 0; rateAudioBytes = 0; camLine = '';
+
+			// Read at open() rather than at attach(): the list comes from the
+			// camera's config, the first attach can win a race against that
+			// fetch, and a reconnect should use the answer once it lands
+			// instead of repeating the empty list it started with.
+			let ice = [];
+			try {
+				ice = (typeof opts.iceServers === 'function'
+					? opts.iceServers() : opts.iceServers) || [];
+			} catch (e) { ice = []; }
 
 			try {
-				pc = new RTCPeerConnection({ iceServers: [] });
+				pc = new RTCPeerConnection({ iceServers: ice });
 			} catch (e) {
 				onState('fallback', 'RTCPeerConnection failed');
 				return;
@@ -229,7 +452,11 @@ window.MajesticWebRTC = (function () {
 			// path's opt-in, arrived at from the other end.
 			try {
 				pc.addTransceiver('video', { direction: 'recvonly' });
-				if (wantAudio) {
+				if (wantMic && micTrack) {
+					// One section carrying both directions, not two: the camera
+					// answers a single audio m-line.
+					pc.addTransceiver(micTrack, { direction: 'sendrecv' });
+				} else if (wantAudio) {
 					pc.addTransceiver('audio', { direction: 'recvonly' });
 				}
 			} catch (e) {
@@ -325,6 +552,27 @@ window.MajesticWebRTC = (function () {
 							// them reports "no audio" over a working Opus
 							// stream. currentDirection is the negotiated answer
 							// and is settled by the time we are here.
+							// Talkback first: the camera can accept the audio
+							// section and still decline our half of it, which
+							// is audio.outputEnabled being off. Say so and let
+							// the capture go, rather than leaving a microphone
+							// lit for a camera that is not listening.
+							if (wantMic) {
+								if (micSending()) {
+									// Accepted, so the camera's audio comes
+									// with it. Now is when the element may be
+									// unmuted: the direction is settled and the
+									// page is told in the same breath, so the
+									// Listen control and the sound agree.
+									wantAudio = true;
+									video.muted = false;
+									onMic('on', '');
+								} else {
+									releaseMic();
+									onMic('off',
+										'the camera is not accepting audio');
+								}
+							}
 							if (wantAudio && !negotiatedAudio()) {
 								// Mirror preview.js: stop wanting it, so the
 								// element matches the video-only session it
@@ -348,6 +596,11 @@ window.MajesticWebRTC = (function () {
 					// all three reach ICE.
 					pc.addIceCandidate({ candidate: m.data, sdpMid: m.mid })
 						.catch(function () {});
+				} else if (m.reply === 'stats') {
+					// The camera's own counters, once a second. Kept as text
+					// and parsed at the next poll, so the two sides are read
+					// out together rather than a tick apart.
+					camLine = m.data || '';
 				} else if (m.reply === 'busy') {
 					// Full, not incapable — every slot is taken and this same
 					// offer would be answered once one frees. Same move as a
@@ -465,6 +718,11 @@ window.MajesticWebRTC = (function () {
 
 		function destroy() {
 			closed = true;
+			// Before anything else. A player is destroyed on every transport
+			// switch and on leaving the page, and a capture that outlives the
+			// only control able to stop it is the worst of the failures this
+			// file guards against.
+			releaseMic();
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			stop();
 		}
@@ -475,6 +733,7 @@ window.MajesticWebRTC = (function () {
 				setStream: function () {}, requestIdr: function () {},
 				setAudio: function () {}, setVolume: function () {},
 				audioSupported: function () { return false; },
+				setMic: function () {}, micSupported: function () { return false; },
 				destroy: function () {}, supported: false,
 			};
 		}
@@ -484,6 +743,7 @@ window.MajesticWebRTC = (function () {
 			setStream: setStream, requestIdr: requestIdr,
 			setAudio: setAudio, setVolume: setVolume,
 			audioSupported: audioSupported,
+			setMic: setMic, micSupported: micSupported,
 			destroy: destroy, supported: true,
 		};
 	}

@@ -60,6 +60,10 @@
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
 		if (mjGet(cfg, 'video1.enabled') === true) $('#mj-sub').hidden = false;
+		ice = MajesticTransport.iceServers(
+			mjGet(cfg, 'webrtc.iceServers'),
+			mjGet(cfg, 'webrtc.turnUsername'),
+			mjGet(cfg, 'webrtc.turnCredential'));
 	});
 	const cur = () => $('#live-video');
 
@@ -87,6 +91,9 @@
 
 	const mute = $('#mj-mute'), muteLbl = $('#mj-mute-lbl'), volCtl = $('#mj-vol');
 	const audioCtl = $('#mj-audio-ctl');
+	const talkCtl = $('#mj-talk-ctl'), talk = $('#mj-talk'), talkLbl = $('#mj-talk-lbl');
+	const statsCtl = $('#mj-stats-ctl'), statsBtn = $('#mj-stats-btn'), statsBox = $('#mj-stats');
+	const TALK_TITLE = talkLbl ? talkLbl.title : '';
 	const transportCtl = $('#mj-transport'), transportGrp = $('#mj-transport-ctl');
 	const transportLbl = $('#mj-transport-lbl'), transportNote = $('#mj-transport-note');
 
@@ -124,6 +131,16 @@
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
+	// The camera's STUN/TURN configuration, filled when the config lands. Read
+	// through a getter at every open(), so an attach that beat the fetch is
+	// corrected by the first reconnect rather than staying host-candidates-only
+	// for the life of the page.
+	let ice = [];
+	// Talkback is deliberately NOT carried across a transport switch or a
+	// reattach. Everything else here is a preference; this one holds a live
+	// microphone, and silently reopening it because the page rebuilt a player
+	// is not a thing to do on a user's behalf.
+	let talkbackConfigured = false;
 	// Set once the Main/Sub control has been touched, so a slow config answer
 	// cannot undo it.
 	let userPickedStream = false;
@@ -157,6 +174,66 @@
 		audioCtl.hidden = !(audioConfigured && player && player.audioSupported());
 	}
 
+	// Talkback needs three things at once, and each of them can be absent on
+	// its own: the camera configured to play received audio, a transport that
+	// carries a direction MSE has no concept of, and a secure context — a
+	// browser hands over no microphone on plain HTTP, so the button would ask
+	// for something it can never get.
+	function syncTalkCtl() {
+		if (!talkCtl) return;
+		const ok = talkbackConfigured && player && player.micSupported();
+		talkCtl.hidden = !ok;
+		// Put the control back to rest, every time. A player destroyed while
+		// its permission prompt was still up never reports an ending — the
+		// grant lands in a closed player, which releases it silently — so
+		// anything left over from 'asking' has to be cleared here or the
+		// button stays disabled on "Asking…" until the page is reloaded.
+		if (talk) { talk.checked = false; talk.disabled = false; }
+		if (talkLbl) { talkLbl.textContent = '🎤 Talk'; talkLbl.title = TALK_TITLE; }
+	}
+
+	// The stats panel follows the transport rather than the person: MSE has
+	// none of these numbers, so the button would open an empty box. The
+	// checkbox keeps the person's answer across a transport switch, so the
+	// panel has to come back with it rather than needing a second click.
+	function syncStatsCtl() {
+		if (statsCtl) statsCtl.hidden = !usingWebRTC;
+		if (statsBox) {
+			statsBox.hidden = !(usingWebRTC && statsBtn && statsBtn.checked);
+		}
+	}
+
+	function showStats(s) {
+		const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+		const cam = s.cam || {};
+		set('#mj-st-pic', s.width
+			? s.width + '×' + s.height + ' ' + (s.codec || '').toUpperCase() +
+				' · ' + Math.round(s.fps || 0) + ' fps'
+			: '-');
+		set('#mj-st-rx', s.kbps + ' kbit/s' +
+			(s.audioKbps ? ' · audio ' + s.audioKbps : ''));
+		// Lost is cumulative and jitter is instantaneous, which is why they are
+		// labelled rather than run together into one figure.
+		set('#mj-st-loss', (s.packetsLost || 0) + ' pkt · ' + (s.jitterMs || 0) + ' ms');
+		set('#mj-st-rtt', s.rttMs ? s.rttMs + ' ms' : '-');
+		set('#mj-st-recov', (s.nack || 0) + ' nack · ' + (s.pli || 0) + ' keyframe req');
+		set('#mj-st-cam', cam.ice
+			? 'ice ' + cam.ice + ' · dtls ' + cam.dtls + ' · media ' + cam.media
+			: '-');
+		// The camera's own estimate of what this link will carry, which is what
+		// it sets the encoder from — not a measurement of what arrived.
+		set('#mj-st-remb', cam.remb || '-');
+		set('#mj-st-pli', cam.pli || '-');
+		set('#mj-st-ain', cam['audio-in'] || '-');
+		// Both halves, because they answer different questions: the browser
+		// says it sent, the camera says it arrived. A microphone that is on
+		// with the camera's counter stuck at zero is the case worth seeing.
+		set('#mj-st-talk', s.micWanted
+			? (s.micSending ? 'sending' : 'offered, not accepted') +
+				' · ' + (s.micPackets || 0) + ' pkt out'
+			: 'off');
+	}
+
 	// Rebuilt rather than mutated when the transport changes: the two players
 	// own different machinery, and the state worth carrying over is three
 	// values.
@@ -170,7 +247,8 @@
 		const v = cur();
 		try { v.removeAttribute('src'); v.srcObject = null; } catch (e) {}
 		const impl = usingWebRTC ? MajesticWebRTC : MajesticVideo;
-		const p = impl.attach(v, Object.assign({ stream: stream }, handlersFor(gen)));
+		const p = impl.attach(v, Object.assign(
+			{ stream: stream, iceServers: () => ice }, handlersFor(gen)));
 		// attach() reported 'fallback' before returning and something else is
 		// now playing. Drop what we just built rather than letting this
 		// assignment bury it.
@@ -182,6 +260,10 @@
 		if (audioOn && player.audioSupported()) player.setAudio(true);
 		player.setVolume(vol);
 		syncAudioCtl();
+		// The old player's destroy() released the microphone, so the control
+		// has to come back up in the state the new one is actually in.
+		syncTalkCtl();
+		syncStatsCtl();
 		syncTransportNote();
 	}
 
@@ -241,6 +323,46 @@
 					if (volCtl) volCtl.disabled = true;
 				}
 			},
+			// 'asking' while the browser's permission prompt is up, 'on' once
+			// the camera has accepted the direction, 'off' for every way it
+			// ends — refused, unplugged, revoked, or declined by a camera with
+			// audio.outputEnabled off. The reason rides along and goes in the
+			// tooltip, which is the only place it lives.
+			// Four states, and the middle one earns its place: 'asking' while
+			// the browser's prompt is up, 'live' once the microphone is
+			// capturing but the camera has not answered yet, 'on' when it has
+			// accepted, 'off' for every ending. Reporting 'on' at the moment
+			// of capture would say "Talking" over a session that has not
+			// offered the track yet, and might still be refused.
+			//
+			// 'live' leaves the button enabled, unlike 'asking': the
+			// microphone is running by then, and a control that cannot stop a
+			// running microphone is the wrong control.
+			onMic: (state, why) => {
+				if (!live() || !talk) return;
+				talk.checked = state === 'on' || state === 'live';
+				talk.disabled = state === 'asking';
+				if (talkLbl) {
+					talkLbl.textContent = state === 'asking' ? '🎤 Asking…'
+						: state === 'live' ? '🎤 Connecting…'
+						: state === 'on' ? '🎤 Talking' : '🎤 Talk';
+					talkLbl.title = why ? why + '\n\n' + TALK_TITLE : TALK_TITLE;
+				}
+				// Only once the camera has accepted. Talking opens its audio
+				// too — it refuses a one-way audio section — so the listen
+				// control follows what was negotiated rather than what was
+				// asked for.
+				if (state === 'on' && mute && !mute.checked) {
+					mute.checked = true;
+					audioOn = true;
+					muteLbl.textContent = '🔊 Listening';
+					if (volCtl) volCtl.disabled = false;
+				}
+			},
+			onStats: (s) => {
+				if (!live() || !statsBox || statsBox.hidden) return;
+				showStats(s);
+			},
 		};
 	}
 
@@ -293,8 +415,21 @@
 	// the person watching has since chosen a stream themselves. Correcting a
 	// default is helpful; overriding a decision is not.
 	mjConfig().then(cfg => {
-		if (!attachedBlind || userPickedStream) return;
-		if (chooseSub(cfg) && player) player.setStream(stream);
+		if (!attachedBlind) return;
+		// The stream, unless the person has since chosen one themselves:
+		// correcting a default is helpful, overriding a decision is not.
+		const moved = !userPickedStream && chooseSub(cfg);
+		if (moved && player) player.setStream(stream);
+
+		// The ICE list, unconditionally. A blind attach opened with an empty
+		// one, and the getter is only read when a session opens — so without
+		// this the first session runs on host candidates alone until something
+		// else happens to reconnect it. Off-LAN that session cannot work: it
+		// negotiates, carries nothing, and spends the full no-signal timeout
+		// finding out, which is exactly the sequence that demotes a browser to
+		// MSE. Skipped when setStream() has already reopened for the stream
+		// change, and when there is nothing to apply.
+		if (!moved && player && usingWebRTC && ice.length) attachPlayer(true);
 	});
 
 	if (transportCtl && transportGrp && webrtcAvailable) {
@@ -349,5 +484,31 @@
 			// Kept even with no player yet: attachPlayer() applies it.
 			if (player) player.setVolume(vol);
 		});
+	}
+
+	// Talkback: the camera has to be configured to play what it receives.
+	// audio.enabled alone is the microphone; outputEnabled is the speaker, and
+	// this is the one that decides whether the far end has anywhere to put our
+	// audio. A camera with it off answers the session without our direction and
+	// the player reports that back through onMic.
+	if (talkCtl && talk) {
+		mjConfig().then(cfg => {
+			talkbackConfigured = mjGet(cfg, 'audio.outputEnabled') === true;
+			syncTalkCtl();
+		});
+		talk.addEventListener('change', () => {
+			if (!player) { talk.checked = false; return; }
+			// The player owns the answer, not the checkbox: a refused
+			// permission or a camera that declines leaves this unchecked
+			// again through onMic, and setting the label here would flash a
+			// state that never happened.
+			player.setMic(talk.checked);
+		});
+	}
+
+	if (statsBtn && statsBox) {
+		// Through the same helper the transport switch uses, so "is the panel
+		// showing" has one answer and not two that have to agree.
+		statsBtn.addEventListener('change', syncStatsCtl);
 	}
 })();
