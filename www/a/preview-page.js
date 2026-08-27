@@ -330,19 +330,52 @@
 		};
 	}
 
-	attachPlayer(wantWebRTC());
+	// Start on the substream, which is the convention this equipment is built
+	// around: the main channel carries the best picture the sensor can give and
+	// is what an NVR or the SD card records, while the substream exists to be
+	// watched over whatever link happens to be available. Previewing the
+	// channel that is being recorded, and then adapting its bitrate down to
+	// suit one browser, is the wrong way round.
+	//
+	// It also settles most of what a bitrate opt-out would have been for: the
+	// adaptation now lands on the channel whose job is preview. Main is one
+	// click away for anyone who wants to look closely, and the note under the
+	// toggle says what that costs.
+	//
+	// Gated on video1.enabled rather than assumed, because the two transports
+	// disagree about what a missing stream means. WebRTC treats ?stream=N as a
+	// preference and falls back to a channel it can serve; /ws/video subscribes
+	// to whatever number it is given and simply delivers nothing, which reads
+	// as "no signal" rather than as a misconfiguration.
+	mjConfig().then(cfg => {
+		if (mjGet(cfg, 'video1.enabled') === true) {
+			stream = 1;
+			if (s1) s1.checked = true;
+		}
+		attachPlayer(wantWebRTC());
+	});
 
 	if (transportCtl && transportGrp && webrtcAvailable) {
 		transportGrp.hidden = false;
-		transportCtl.checked = usingWebRTC;
+		// From the preference rather than from usingWebRTC, which the deferred
+		// attach above has not set yet.
+		transportCtl.checked = wantWebRTC();
 		transportCtl.addEventListener('change', () => {
 			rememberTransport(transportCtl.checked ? 'webrtc' : 'mse');
 			attachPlayer(transportCtl.checked);
 		});
 	}
 
-	if (s0) s0.addEventListener('change', () => { stream = 0; player.setStream(0); });
-	if (s1) s1.addEventListener('change', () => { stream = 1; player.setStream(1); });
+	// Guarded because the first attach waits on the config fetch, and nothing
+	// stops a fast set of fingers reaching these first.
+	if (s0) s0.addEventListener('change', () => {
+		stream = 0;
+		if (player) player.setStream(0);
+	});
+	if (s1) s1.addEventListener('change', () => {
+		stream = 1;
+		if (player) player.setStream(1);
+	});
 
 	// Audio: revealed only when the camera has it configured and the transport
 	// in use can carry it — otherwise the button is a dead end.
@@ -354,13 +387,15 @@
 		mute.addEventListener('change', () => {
 			const on = mute.checked;
 			audioOn = on;
+			if (!player) return;
 			player.setAudio(on);
 			muteLbl.textContent = on ? '🔊 Listening' : '🔇 Muted';
 			if (volCtl) volCtl.disabled = !on;
 		});
 		if (volCtl) volCtl.addEventListener('input', () => {
 			vol = volCtl.value / 100;
-			player.setVolume(vol);
+			// Kept even with no player yet: attachPlayer() applies it.
+			if (player) player.setVolume(vol);
 		});
 	}
 })();
