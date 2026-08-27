@@ -812,17 +812,40 @@
 		// Both columns are flex: 1 1 0, so each row already measures at the
 		// width it keeps on either side of the fold — nothing has to be moved
 		// to size it first.
-		const h = rowSteps(box, items);
-		const total = h.reduce((sum, x) => sum + x, 0);
+		const rows = rowBoxes(items);
+		if (!rows.length) return;
 
-		// the cut that leaves the taller column as short as it can be
-		let acc = 0, best = Infinity, cut = items.length;
+		// Where each row would sit if they all ran down one column, so that a
+		// candidate's two column heights can be read off as differences. Facing
+		// margins between two rows in the same column collapse to the larger of
+		// the pair; the top margin of the first row and the bottom margin of the
+		// last are kept whole, because a flex item is its own block formatting
+		// context and cannot collapse them away.
+		const y = [];
+		let run = rows[0].mt;
+		rows.forEach((r, i) => {
+			y.push(run);
+			run += r.h + (i + 1 < rows.length ? Math.max(r.mb, rows[i + 1].mt) : r.mb);
+		});
+		const total = run;
+
+		// visible rows lying to the left of each possible cut
+		const seen = [0];
+		items.forEach(it => seen.push(seen[seen.length - 1] + (it.offsetHeight ? 1 : 0)));
+
+		// The cut that leaves the taller column as short as it can be. Both
+		// heights come from the rows' own boxes rather than from where the last
+		// deal put them, so a given width always picks the same cut however the
+		// rows are arranged when this runs.
+		let best = Infinity, cut = items.length;
 		for (let i = 1; i <= items.length; i++) {
-			acc += h[i - 1];
 			// a group heading belongs to the rows under it, so it must not be
 			// left as the last thing in a column
 			if (i < items.length && items[i - 1].tagName === 'H5') continue;
-			const taller = Math.max(acc, total - acc);
+			const n = seen[i];
+			const left = n ? y[n - 1] + rows[n - 1].h + rows[n - 1].mb : 0;
+			const right = n < rows.length ? rows[n].mt + total - y[n] : 0;
+			const taller = Math.max(left, right);
 			if (taller < best) { best = taller; cut = i; }
 		}
 		if (cut === a.children.length) return;   // already dealt this way
@@ -834,22 +857,20 @@
 		restoreFocus(held);
 	}
 
-	// What a row costs its column is the step down to the row under it, not its
-	// own box: short switch rows are mostly the margin between them, which
-	// offsetHeight leaves out. Hidden rows take up no space at all, so the step
-	// runs to the next *visible* row and they come out free.
-	function rowSteps(box, items) {
-		const h = items.map(() => 0);
-		const top = it => it.getBoundingClientRect().top;
-		for (const col of Array.from(box.children)) {
-			const vis = Array.from(col.children).filter(it => it.offsetHeight);
-			const end = col.getBoundingClientRect().bottom;
-			vis.forEach((it, i) => {
-				const next = i + 1 < vis.length ? top(vis[i + 1]) : end;
-				h[items.indexOf(it)] = Math.max(0, next - top(it));
-			});
-		}
-		return h;
+	// The visible rows with the box each one occupies. A row costs its column
+	// more than offsetHeight — a column of short switch rows is mostly the
+	// margins between them — so the margins are read too. Hidden rows are left
+	// out entirely: they take up no space, and dropping them here is what keeps
+	// them free on whichever side of the fold they fall.
+	function rowBoxes(items) {
+		return items.filter(it => it.offsetHeight).map(it => {
+			const cs = getComputedStyle(it);
+			return {
+				h: it.offsetHeight,
+				mt: parseFloat(cs.marginTop) || 0,
+				mb: parseFloat(cs.marginBottom) || 0,
+			};
+		});
 	}
 
 	// Moving a node re-parents it, so anything focused inside has to be picked
