@@ -82,6 +82,8 @@ fi
 </div>
 
 <script src="/a/preview.js"></script>
+<script src="/a/preview-webrtc.js"></script>
+<script src="/a/preview-transport.js"></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>

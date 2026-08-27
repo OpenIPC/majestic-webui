@@ -648,6 +648,59 @@
 
 	function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
+	// The preview beside the live knobs, on the transport with the least lag.
+	//
+	// WebRTC, because this is the one page where latency is the feature: someone
+	// is dragging a saturation slider and watching for the effect, and MSE is
+	// about a second behind where WebRTC is not. The earlier reasoning for
+	// keeping this page on MSE — that a WebRTC viewer joins the encoder's
+	// bitrate loop and would disturb a judgement about image quality — does not
+	// survive looking at what the page actually offers. Brightness, contrast,
+	// saturation, hue, mirror and flip are ISP knobs; nothing here judges an
+	// encoder setting, and whoever is tuning videoN.bitrate is on another tab
+	// with no preview at all.
+	//
+	// The substream, by the same convention the Preview page follows: the main
+	// channel is what an NVR or the SD card records, and this preview only has
+	// to show what the ISP is doing — which looks the same on either channel,
+	// because both are the same picture scaled. Main where no substream is
+	// configured, because /ws/video subscribes to whatever number it is handed
+	// and then quietly delivers nothing, which reads as "no signal" rather than
+	// as a misconfiguration. state.config is loaded by the time this runs; the
+	// knobs beside the preview are rendered from it.
+	//
+	// The fallback is a dozen lines rather than a call into shared code, because
+	// what the Preview page does on a fallback — badge, MJPEG, keeping a toggle
+	// in step — has nothing to do with this panel. The part that must not
+	// diverge is which transport to prefer and what to remember, and that is
+	// preview-transport.js.
+	function attachLivePreview(video) {
+		const stream = getDotted(state.config, 'video1.enabled') === true ? 1 : 0;
+
+		function attach(kind) {
+			const impl = window.MajesticTransport.impl(kind);
+			if (!impl) return;
+			state.previewPlayer = impl.attach(video, {
+				stream: stream,
+				onState: (st, detail) => {
+					if (kind !== 'webrtc') return;
+					// 'fallback' is durable and worth remembering; 'busy' says
+					// the camera is full, which it will not be for long.
+					if (st === 'fallback' || st === 'busy') {
+						if (st === 'fallback') window.MajesticTransport.demote();
+						if (state.previewPlayer) {
+							try { state.previewPlayer.destroy(); } catch (e) {}
+							state.previewPlayer = null;
+						}
+						attach('mse');
+					}
+				},
+			});
+		}
+
+		attach(window.MajesticTransport.preferred());
+	}
+
 	// The Live adjustments leaf: the preview and the x-live knobs side by side, so
 	// dragging one shows its effect without scrolling. One "Reset all" rather than
 	// a per-knob reset. The knobs register in state.fields, so the page Save and
@@ -666,8 +719,7 @@
 				'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
 				'</div></div>';
 			row.appendChild(pv);
-			state.previewPlayer =
-				window.MajesticVideo.attach(pv.querySelector('#mj-live-video'), { stream: 0 });
+			attachLivePreview(pv.querySelector('#mj-live-video'));
 		}
 
 		const col = el('div', withVideo ? 'col-12 col-lg-5' : 'col-12 col-lg-6');

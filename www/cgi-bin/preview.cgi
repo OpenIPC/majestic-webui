@@ -36,6 +36,7 @@
 
 <script src="/a/preview.js"></script>
 <script src="/a/preview-webrtc.js"></script>
+<script src="/a/preview-transport.js"></script>
 <script src="/a/preview-page.js"></script>
 
 <%in p/footer.cgi %>
