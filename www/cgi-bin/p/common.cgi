@@ -465,8 +465,16 @@ preview() {
 	     the MSE player alone. -->
 	<div class="btn-group btn-group-sm mb-2 ms-2" role="group" aria-label="Transport" id="mj-transport-ctl" hidden>
 		<input type="checkbox" class="btn-check" id="mj-transport" autocomplete="off">
-		<label class="btn btn-outline-primary" for="mj-transport">WebRTC</label>
+		<label class="btn btn-outline-primary" for="mj-transport" id="mj-transport-lbl"
+			title="Sub-second video and two-way audio, and the camera fits the stream to your connection — which changes it for everyone else watching that stream too.">WebRTC</label>
 	</div>
+	<!-- Shown only while WebRTC is the live transport. The tooltip above cannot
+	     be the whole disclosure: it needs a pointer to find, and the thing being
+	     disclosed reaches past the person reading it. -->
+	<p id="mj-transport-note" class="small text-body-secondary mb-2" hidden>
+		The camera is adapting this stream's bitrate to your connection. Anyone
+		else watching the same stream sees that too.
+	</p>
 	<div class="btn-group btn-group-sm mb-2" role="group" aria-label="Audio" id="mj-audio-ctl" hidden>
 		<input type="checkbox" class="btn-check" id="mj-mute" autocomplete="off">
 		<label class="btn btn-outline-primary" for="mj-mute" id="mj-mute-lbl">🔇 Muted</label>

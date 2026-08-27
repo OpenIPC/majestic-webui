@@ -88,6 +88,28 @@
 	const mute = $('#mj-mute'), muteLbl = $('#mj-mute-lbl'), volCtl = $('#mj-vol');
 	const audioCtl = $('#mj-audio-ctl');
 	const transportCtl = $('#mj-transport'), transportGrp = $('#mj-transport-ctl');
+	const transportLbl = $('#mj-transport-lbl'), transportNote = $('#mj-transport-note');
+
+	// What the toggle says when nothing has gone wrong. Kept because a failure
+	// replaces it with the reason, and switching back has to put the explanation
+	// there again rather than leave the tooltip stuck on a complaint about a
+	// session that is long over.
+	const TRANSPORT_TITLE = transportLbl ? transportLbl.title : '';
+
+	// The bitrate adaptation is the thing worth disclosing. It is what makes
+	// WebRTC work on a thin link, and it reaches past the person who switched it
+	// on: the encoder is shared with everyone else watching that stream, and
+	// with whatever is recording it. So say it where it cannot be missed, and
+	// only while it is actually happening — a tooltip needs a pointer to find,
+	// and this is not a detail for people who happen to own a mouse.
+	function syncTransportNote() {
+		if (transportNote) {
+			transportNote.hidden = !usingWebRTC;
+		}
+		if (transportLbl && usingWebRTC) {
+			transportLbl.title = TRANSPORT_TITLE;
+		}
+	}
 	const s0 = $('#mj-stream-0'), s1 = $('#mj-stream-1');
 
 	// Which transport to try. WebRTC unless something says otherwise: it is
@@ -246,6 +268,7 @@
 		if (audioOn && player.audioSupported()) player.setAudio(true);
 		player.setVolume(vol);
 		syncAudioCtl();
+		syncTransportNote();
 	}
 
 	function handlersFor(gen) {
@@ -265,8 +288,13 @@
 						const why = d || 'unavailable';
 						if (transportCtl) {
 							transportCtl.checked = false;
-							const lbl = transportCtl.nextElementSibling;
-							if (lbl) lbl.title = 'WebRTC: ' + why;
+						}
+						// The reason first, because it is the news, then the
+						// standing explanation — the tooltip is the only place
+						// either of them lives.
+						if (transportLbl) {
+							transportLbl.title =
+								'WebRTC: ' + why + '\n\n' + TRANSPORT_TITLE;
 						}
 						// 'busy' says the camera is full, which will not be
 						// true for long — take MSE now and try WebRTC again on
