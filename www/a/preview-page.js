@@ -213,6 +213,9 @@
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
+	// Set once the Main/Sub control has been touched, so a slow config answer
+	// cannot undo it.
+	let userPickedStream = false;
 	let audioConfigured = false;
 
 	// Which attachment is the live one. Two things need it, and neither is
@@ -347,12 +350,40 @@
 	// preference and falls back to a channel it can serve; /ws/video subscribes
 	// to whatever number it is given and simply delivers nothing, which reads
 	// as "no signal" rather than as a misconfiguration.
-	mjConfig().then(cfg => {
-		if (mjGet(cfg, 'video1.enabled') === true) {
-			stream = 1;
-			if (s1) s1.checked = true;
-		}
+	// ...but not at the cost of starting at all. mjConfig() is memoised and the
+	// night-mode controls asked for it before this ran, so in practice the
+	// answer is already here. On the link this default exists for it might not
+	// be, and /api/v1/config.json has no timeout of its own — a request that
+	// hangs would leave the page blank for as long as the tab is open, which is
+	// a worse failure than starting on the wrong channel.
+	//
+	// So: attach as soon as we know, or after this deadline regardless.
+	const CONFIG_WAIT_MS = 1500;
+
+	// Whether the deadline won and we picked a stream without being told.
+	let attachedBlind = false;
+
+	function chooseSub(cfg) {
+		if (mjGet(cfg, 'video1.enabled') !== true) return false;
+		stream = 1;
+		if (s1) s1.checked = true;
+		return true;
+	}
+
+	Promise.race([
+		mjConfig(),
+		new Promise(done => setTimeout(() => done(null), CONFIG_WAIT_MS)),
+	]).then(cfg => {
+		if (cfg) chooseSub(cfg); else attachedBlind = true;
 		attachPlayer(wantWebRTC());
+	});
+
+	// If the deadline won, put it right when the answer turns up — but not if
+	// the person watching has since chosen a stream themselves. Correcting a
+	// default is helpful; overriding a decision is not.
+	mjConfig().then(cfg => {
+		if (!attachedBlind || userPickedStream) return;
+		if (chooseSub(cfg) && player) player.setStream(stream);
 	});
 
 	if (transportCtl && transportGrp && webrtcAvailable) {
@@ -368,6 +399,16 @@
 
 	// Guarded because the first attach waits on the config fetch, and nothing
 	// stops a fast set of fingers reaching these first.
+	//
+	// The flag is armed on click rather than on change, and that distinction is
+	// the whole point of it: clicking the radio that is already selected fires
+	// no change event, so someone who starts on Main and presses Main — because
+	// that is the one they want — would otherwise look identical to someone who
+	// pressed nothing, and a late config answer would move them to Sub. A click
+	// is an expression of intent whether or not it alters anything.
+	[s0, s1].forEach(el => {
+		if (el) el.addEventListener('click', () => { userPickedStream = true; });
+	});
 	if (s0) s0.addEventListener('change', () => {
 		stream = 0;
 		if (player) player.setStream(0);
