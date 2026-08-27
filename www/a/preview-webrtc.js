@@ -256,13 +256,12 @@ window.MajesticWebRTC = (function () {
 
 		// ---- talkback ------------------------------------------------------
 		//
-		// The camera will not take a send-only audio section:
-		// rtc_sdp_dir_allows_us_to_send() accepts `recvonly` and `sendrecv` and
-		// refuses `sendonly`, because it reads the direction as what it may
-		// send into. So talkback is necessarily two-way — turning the
-		// microphone on opens the camera's audio as well, and setMic() unmutes
-		// to match rather than leaving the camera encoding Opus into a muted
-		// element.
+		// The camera will not take a send-only audio section. It reads the
+		// direction as what it may send into, so it answers `recvonly` and
+		// `sendrecv` and refuses `sendonly`. Talkback is therefore necessarily
+		// two-way — turning the microphone on opens the camera's audio as well,
+		// and setMic() unmutes to match rather than leaving the camera encoding
+		// Opus into a muted element.
 
 		// Did the camera accept what we offered to send? We offer `sendrecv`;
 		// a camera with audio.outputEnabled off answers `sendonly`, which lands

@@ -1,14 +1,14 @@
 // MajesticTransport.iceServers() — the browser's half of the camera's
 // STUN/TURN configuration.
 //
-// This exists because the camera used to build this list in C and had tests
-// for it there. The page that consumed it is gone, majestic_stun_ice_js() went
-// with it, and the rules moved here — so the coverage has to move too, or the
-// only thing standing between an operator's `iceServers` setting and a
+// This exists because the camera used to build this list itself, for the debug
+// page that has since been retired, and was tested where it was built. The
+// rules moved here with the job — so the coverage had to move too, or the only
+// thing standing between an operator's `iceServers` setting and an
 // RTCPeerConnection that throws is someone remembering.
 //
-// The rules mirror include/majestic/stun_default.h in the majestic tree.
-// Change one, change both; these are the cases that say what "both" means.
+// The camera still applies the same rules on its own side. Change one, change
+// both; these are the cases that say what "both" means.
 'use strict';
 
 const fs = require('fs');
