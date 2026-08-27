@@ -106,6 +106,36 @@ window.MajesticTransport = (function () {
 		return kind === 'webrtc' ? window.MajesticWebRTC : window.MajesticVideo;
 	}
 
+	// Which encoder channel the person last picked, or null if they never have.
+	//
+	// The default is the substream, which is right for the common case — the
+	// main channel carries the recording, the substream exists to be watched
+	// over whatever link is available. It is wrong for at least two:
+	//
+	//   - videoN.crop is per channel, so someone who has cropped video0 and
+	//     wants to see the result of that cropping needs the main stream
+	//     specifically. A substream preview shows a different picture, not a
+	//     smaller one.
+	//   - a substream sized well away from what the preview box wants, when
+	//     the main stream happens to be closer.
+	//
+	// Neither is a reason to change the default, and both are a reason to
+	// remember the answer: without this, anyone those cases apply to re-picks
+	// Main on every page load, for ever. Remembered per browser rather than on
+	// the camera because it is a viewing preference, like the transport beside
+	// it — the same camera watched from a phone and a desk may want different
+	// answers, and neither should overwrite the other.
+	const STREAM_KEY = 'mj-preview-stream';
+
+	function chosenStream() {
+		const v = read(STREAM_KEY);
+		return v === '0' ? 0 : v === '1' ? 1 : null;
+	}
+
+	function chooseStream(n) {
+		write(STREAM_KEY, (n | 0) === 1 ? '1' : '0');
+	}
+
 	// What the camera falls back to when webrtc.iceServers is unset, and every
 	// spelling of "I really do want none". More than one because YAML 1.1
 	// decides what these words mean before majestic sees them: `iceServers: off`
@@ -154,5 +184,7 @@ window.MajesticTransport = (function () {
 		demote: demote,
 		impl: impl,
 		iceServers: iceServers,
+		chosenStream: chosenStream,
+		chooseStream: chooseStream,
 	};
 })();

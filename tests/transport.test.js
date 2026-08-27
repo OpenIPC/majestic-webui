@@ -18,13 +18,26 @@ const { check, group, done } = require('./assert');
 
 const SRC = path.join(__dirname, '..', 'www', 'a', 'preview-transport.js');
 
-// The module only needs a window to hang itself off. localStorage is absent
-// here on purpose: every read and write in it is wrapped, and a module that
-// threw without storage would fail in a private window too.
-const ctx = { window: {}, console: console };
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
-const iceServers = ctx.window.MajesticTransport.iceServers;
+// A browser's worth of storage, and no more. Two contexts: one with it, one
+// without — every read and write in the module is wrapped, and a module that
+// threw without storage would fail in a private window too, which is a real
+// browser state and not a hypothetical one.
+function load(withStorage) {
+	const store = {};
+	const ctx = { window: {}, console: console };
+	if (withStorage) {
+		ctx.localStorage = {
+			getItem: (k) => (k in store ? store[k] : null),
+			setItem: (k, v) => { store[k] = String(v); },
+			removeItem: (k) => { delete store[k]; },
+		};
+	}
+	vm.createContext(ctx);
+	vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
+	return ctx.window.MajesticTransport;
+}
+
+const iceServers = load(false).iceServers;
 
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const is = (name, got, want) =>
@@ -71,5 +84,24 @@ is('half a credential is no credential',
 is('and the STUN entries beside it still survive that',
 	iceServers('stun:a:1,turn:b:2,stun:c:3', 'u', ''),
 	[{ urls: 'stun:a:1' }, { urls: 'stun:c:3' }]);
+
+group('the remembered Main/Sub choice');
+// Someone whose video0 is cropped, or whose substream is sized nothing like
+// the preview box, wants Main. The default is still Sub — that is the common
+// case — but the answer has to survive a page load or they re-pick it for ever.
+const t = load(true);
+check('nothing remembered to begin with', t.chosenStream() === null);
+t.chooseStream(0);
+check('Main is remembered', t.chosenStream() === 0);
+t.chooseStream(1);
+check('and so is Sub', t.chosenStream() === 1);
+
+// A private window, or a browser set to block site data. The module must come
+// back "no preference" rather than throw, or the preview does not start at all.
+const noStore = load(false);
+check('no storage reads as no preference', noStore.chosenStream() === null);
+let threw = false;
+try { noStore.chooseStream(1); } catch (e) { threw = true; }
+check('and writing without storage does not throw', !threw);
 
 done();
