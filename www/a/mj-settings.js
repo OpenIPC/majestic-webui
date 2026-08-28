@@ -675,14 +675,12 @@
 	// diverge is which transport to prefer and what to remember, and that is
 	// preview-transport.js.
 	function attachLivePreview(video) {
-		// The same channel the Preview page would open, remembered choice and
-		// all. This panel has no Main/Sub control of its own, so without the
-		// shared answer someone who chose Main there — because video0 is the
-		// cropped one, say — gets the substream here and no way to say
-		// otherwise.
+		// This page's own remembered choice, defaulting to the substream. Not
+		// the Preview page's: the two are looked at for different reasons and
+		// can reasonably want different channels.
 		const subAvailable = getDotted(state.config, 'video1.enabled') === true;
-		const remembered = window.MajesticTransport.chosenStream();
-		const stream = (remembered === null ? 1 : remembered) === 1 && subAvailable
+		const remembered = window.MajesticTransport.chosenStream('live');
+		let stream = (remembered === null ? 1 : remembered) === 1 && subAvailable
 			? 1 : 0;
 
 		// Which attachment is the live one. MajesticWebRTC can report 'fallback'
@@ -738,6 +736,27 @@
 		}
 
 		attach(window.MajesticTransport.preferred());
+
+		// Sub is offered only where there is one; `stream` above has already
+		// fallen back to Main if not, so the control shows what is playing.
+		const s0 = document.getElementById('mj-live-s0');
+		const s1 = document.getElementById('mj-live-s1');
+		const subLbl = document.getElementById('mj-live-sub');
+		if (subLbl && subAvailable) subLbl.hidden = false;
+		if (s0) s0.checked = stream === 0;
+		if (s1) s1.checked = stream === 1;
+		[s0, s1].forEach(function (elm, n) {
+			if (!elm) return;
+			// On click rather than change, for the reason the Preview page
+			// records it that way: pressing the one already selected fires no
+			// change event and is still an answer worth remembering.
+			elm.addEventListener('click', function () {
+				window.MajesticTransport.chooseStream('live', n);
+				if (n === stream) return;
+				stream = n;
+				if (state.previewPlayer) state.previewPlayer.setStream(n);
+			});
+		});
 	}
 
 	// The Live adjustments leaf: the preview and the x-live knobs side by side, so
@@ -752,9 +771,21 @@
 		if (withVideo) {
 			const pv = el('div', 'col-12 col-lg-7');
 			pv.id = 'mj-live-preview';
+			// Its own Main/Sub control, because the remembered choice is
+			// per page: without one here this panel could only ever be the
+			// substream, and the case that makes the choice worth having —
+			// video0 cropped and video1 not — is exactly the case where that
+			// is the wrong picture.
 			pv.innerHTML =
 				'<div class="card"><div class="card-body">' +
-				'<div class="text-secondary small mb-1">Live preview</div>' +
+				'<div class="d-flex align-items-center mb-1">' +
+				'<div class="text-secondary small me-auto">Live preview</div>' +
+				'<div class="btn-group btn-group-sm" role="group" aria-label="Stream">' +
+				'<input type="radio" class="btn-check" name="mj-live-stream" id="mj-live-s0" autocomplete="off">' +
+				'<label class="btn btn-outline-primary" for="mj-live-s0">Main</label>' +
+				'<input type="radio" class="btn-check" name="mj-live-stream" id="mj-live-s1" autocomplete="off">' +
+				'<label class="btn btn-outline-primary" for="mj-live-s1" id="mj-live-sub" hidden>Sub</label>' +
+				'</div></div>' +
 				'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
 				'</div></div>';
 			row.appendChild(pv);

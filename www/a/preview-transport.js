@@ -125,15 +125,23 @@ window.MajesticTransport = (function () {
 	// the camera because it is a viewing preference, like the transport beside
 	// it — the same camera watched from a phone and a desk may want different
 	// answers, and neither should overwrite the other.
+	// Per page, not one answer for both. The two are looked at for different
+	// reasons — Preview to watch, Live adjustments to judge an ISP knob while
+	// dragging it — and someone can reasonably want Main on one and Sub on the
+	// other. `where` is the page asking: 'preview' or 'live'.
 	const STREAM_KEY = 'mj-preview-stream';
 
-	function chosenStream() {
-		const v = read(STREAM_KEY);
+	function streamKey(where) {
+		return STREAM_KEY + ':' + (where || 'preview');
+	}
+
+	function chosenStream(where) {
+		const v = read(streamKey(where));
 		return v === '0' ? 0 : v === '1' ? 1 : null;
 	}
 
-	function chooseStream(n) {
-		write(STREAM_KEY, (n | 0) === 1 ? '1' : '0');
+	function chooseStream(where, n) {
+		write(streamKey(where), (n | 0) === 1 ? '1' : '0');
 	}
 
 	// What the camera falls back to when webrtc.iceServers is unset, and every

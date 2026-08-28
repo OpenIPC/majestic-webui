@@ -90,18 +90,28 @@ group('the remembered Main/Sub choice');
 // the preview box, wants Main. The default is still Sub — that is the common
 // case — but the answer has to survive a page load or they re-pick it for ever.
 const t = load(true);
-check('nothing remembered to begin with', t.chosenStream() === null);
-t.chooseStream(0);
-check('Main is remembered', t.chosenStream() === 0);
-t.chooseStream(1);
-check('and so is Sub', t.chosenStream() === 1);
+check('nothing remembered to begin with', t.chosenStream('preview') === null);
+t.chooseStream('preview', 0);
+check('Main is remembered', t.chosenStream('preview') === 0);
+t.chooseStream('preview', 1);
+check('and so is Sub', t.chosenStream('preview') === 1);
+
+// Separate per page: the two are looked at for different reasons, and someone
+// can reasonably want Main on one and Sub on the other. Sharing one key would
+// mean choosing on either page silently changed the other.
+check('the live page starts with no preference of its own',
+	t.chosenStream('live') === null);
+t.chooseStream('live', 0);
+check('the live page remembers its own answer', t.chosenStream('live') === 0);
+check('and the preview page keeps its own', t.chosenStream('preview') === 1);
 
 // A private window, or a browser set to block site data. The module must come
 // back "no preference" rather than throw, or the preview does not start at all.
 const noStore = load(false);
-check('no storage reads as no preference', noStore.chosenStream() === null);
+check('no storage reads as no preference',
+	noStore.chosenStream('preview') === null);
 let threw = false;
-try { noStore.chooseStream(1); } catch (e) { threw = true; }
+try { noStore.chooseStream('preview', 1); } catch (e) { threw = true; }
 check('and writing without storage does not throw', !threw);
 
 done();

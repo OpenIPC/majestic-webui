@@ -403,7 +403,7 @@
 	// than on nothing. Returns true if the channel moved off Main.
 	function chooseSub(cfg) {
 		const subAvailable = mjGet(cfg, 'video1.enabled') === true;
-		const remembered = MajesticTransport.chosenStream();
+		const remembered = MajesticTransport.chosenStream('preview');
 		const want = remembered === null ? 1 : remembered;
 		if (want !== 1 || !subAvailable) {
 			stream = 0;
@@ -472,7 +472,7 @@
 	[s0, s1].forEach((el, n) => {
 		if (el) el.addEventListener('click', () => {
 			userPickedStream = true;
-			MajesticTransport.chooseStream(n);
+			MajesticTransport.chooseStream('preview', n);
 		});
 	});
 	if (s0) s0.addEventListener('change', () => {

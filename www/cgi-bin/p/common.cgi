@@ -453,7 +453,13 @@ preview() {
 	local bg="background:#000; background-size:cover; width:100%"
 	cat <<EOF
 <div class="mj-player">
-	<div class="btn-group btn-group-sm mb-2" role="group" aria-label="Stream">
+	<!-- Every control on one line: each was its own block before, and the
+	     stats toggle in particular cost a whole row of vertical space on a
+	     page whose point is the picture below it. Stats is pushed to the far
+	     end because it is the only one of them that opens a panel rather than
+	     changing what is playing. -->
+	<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+	<div class="btn-group btn-group-sm" role="group" aria-label="Stream">
 		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-0" autocomplete="off" checked>
 		<label class="btn btn-outline-primary" for="mj-stream-0">Main</label>
 		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-1" autocomplete="off">
@@ -463,19 +469,12 @@ preview() {
 	<!-- Unhidden by preview-page.js only where preview-webrtc.js is loaded and
 	     the browser has WebRTC; mj-settings.cgi shares this markup and offers
 	     the MSE player alone. -->
-	<div class="btn-group btn-group-sm mb-2 ms-2" role="group" aria-label="Transport" id="mj-transport-ctl" hidden>
+	<div class="btn-group btn-group-sm" role="group" aria-label="Transport" id="mj-transport-ctl" hidden>
 		<input type="checkbox" class="btn-check" id="mj-transport" autocomplete="off">
 		<label class="btn btn-outline-primary" for="mj-transport" id="mj-transport-lbl"
 			title="Sub-second video and two-way audio, and the camera fits the stream to your connection — which changes it for everyone else watching that stream too.">WebRTC</label>
 	</div>
-	<!-- Shown only while WebRTC is the live transport. The tooltip above cannot
-	     be the whole disclosure: it needs a pointer to find, and the thing being
-	     disclosed reaches past the person reading it. -->
-	<p id="mj-transport-note" class="small text-body-secondary mb-2" hidden>
-		The camera is adapting this stream's bitrate to your connection. Anyone
-		else watching the same stream sees that too.
-	</p>
-	<div class="btn-group btn-group-sm mb-2" role="group" aria-label="Audio" id="mj-audio-ctl" hidden>
+	<div class="btn-group btn-group-sm" role="group" aria-label="Audio" id="mj-audio-ctl" hidden>
 		<input type="checkbox" class="btn-check" id="mj-mute" autocomplete="off">
 		<label class="btn btn-outline-primary" for="mj-mute" id="mj-mute-lbl">🔇 Muted</label>
 		<input type="range" id="mj-vol" min="0" max="100" value="100" class="form-range align-self-center ms-2" style="width:6rem" disabled aria-label="Volume">
@@ -483,16 +482,25 @@ preview() {
 	<!-- Talkback. Revealed only over WebRTC, only where the camera has
 	     audio.outputEnabled, and only in a secure context: a browser hands over
 	     no microphone on plain HTTP, so the button would be a dead end. -->
-	<div class="btn-group btn-group-sm mb-2 ms-2" role="group" aria-label="Talkback" id="mj-talk-ctl" hidden>
+	<div class="btn-group btn-group-sm" role="group" aria-label="Talkback" id="mj-talk-ctl" hidden>
 		<input type="checkbox" class="btn-check" id="mj-talk" autocomplete="off">
 		<label class="btn btn-outline-primary" for="mj-talk" id="mj-talk-lbl"
 			title="Send this browser's microphone to the camera's speaker. The camera will not take audio in one direction only, so talking also opens its audio to you.">🎤 Talk</label>
 	</div>
-	<div class="btn-group btn-group-sm mb-2 ms-2" role="group" aria-label="Statistics" id="mj-stats-ctl" hidden>
+	<div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Statistics" id="mj-stats-ctl" hidden>
 		<input type="checkbox" class="btn-check" id="mj-stats-btn" autocomplete="off">
 		<label class="btn btn-outline-secondary" for="mj-stats-btn"
 			title="Per-second measurements from both ends of the session.">Stats</label>
 	</div>
+	</div>
+	<!-- Shown only while WebRTC is the live transport, and a block of its own
+	     because it is a sentence rather than a control. The tooltip above cannot
+	     be the whole disclosure: it needs a pointer to find, and the thing being
+	     disclosed reaches past the person reading it. -->
+	<p id="mj-transport-note" class="small text-body-secondary mb-2" hidden>
+		The camera is adapting this stream's bitrate to your connection. Anyone
+		else watching the same stream sees that too.
+	</p>
 	<!-- Two columns because the two ends disagree in the cases worth looking
 	     at: the browser can be losing packets the camera never sees dropped,
 	     and REMB is the camera's opinion of the link rather than a measurement
@@ -500,7 +508,7 @@ preview() {
 	<div id="mj-stats" class="small text-body-secondary mb-2" hidden>
 		<div class="row g-3">
 			<div class="col-auto">
-				<div class="fw-semibold">This browser</div>
+				<div class="fw-semibold">Browser</div>
 				<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
 					<tbody>
 						<tr><td class="pe-3 text-body-secondary">picture</td><td id="mj-st-pic">-</td></tr>
@@ -512,7 +520,7 @@ preview() {
 				</table>
 			</div>
 			<div class="col-auto">
-				<div class="fw-semibold">This camera</div>
+				<div class="fw-semibold">Camera</div>
 				<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
 					<tbody>
 						<tr><td class="pe-3 text-body-secondary">session</td><td id="mj-st-cam">-</td></tr>
