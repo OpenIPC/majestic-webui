@@ -12,8 +12,9 @@
 // with a bare \r — hence the terminal writer. And when the stream ended it
 // navigated straight to fw-restart.cgi, on the assumption that sysupgrade had
 // been told -x and had left the rebooting to us. It hasn't for a while:
-// wiping rootfs_data rewrites the flash the camera is running from, so
-// sysupgrade reboots regardless and says so. Two things followed from that.
+// rootfs_data is the upper layer of the overlay the running root is assembled
+// from, so erasing it takes the live filesystem with it and sysupgrade reboots
+// regardless, saying so as it goes. Two things followed from that.
 // The hop landed on a camera that was already going down — and it would have
 // asked for a *second* reboot if it had arrived. And it never even ran: the
 // stream does not end, it dies with the camera, so the read rejects and the
@@ -44,6 +45,9 @@
 	// Markers can straddle two frames, so match against a rolling window rather
 	// than each chunk in isolation.
 	let recent = '';
+	// Whether the watch for the camera's return has already been started, so the
+	// marker and the end of the stream can both ask for it.
+	let polling = false;
 
 	function status(cls, msg) {
 		const s = $('#fw-reset-status');
@@ -63,8 +67,21 @@
 		// whole-line messages and must not depend on how the redraws rendered.
 		recent = (recent + term.write(t)).slice(-512);
 		if (!sawFlash && flashMarker.test(recent)) sawFlash = true;
-		if (!sawReboot && rebootMarker.test(recent)) sawReboot = true;
 		if (!aborted && abortMarker.test(recent)) aborted = true;
+		// Start watching the moment sysupgrade says it is rebooting, not when the
+		// stream finally dies. Those are not the same instant: measured on a
+		// hi3516ev300 reset, "Unconditional reboot" arrived at 34.6s and the read
+		// did not reject until 81.2s — 46 seconds of a page still saying "do not
+		// navigate away" about a camera that had already gone. The socket only
+		// fails once something notices the connection is dead, which can be long
+		// after the camera stopped being on the other end of it.
+		//
+		// Starting early is free: pollBack() only watches, and it will not act on
+		// an "up" until it has seen the camera go down first.
+		if (!sawReboot && rebootMarker.test(recent)) {
+			sawReboot = true;
+			beginPollBack();
+		}
 	}
 
 	// rawFetch, not apiFetch, here and in ping() below — and never a bare fetch.
@@ -120,12 +137,23 @@
 		setTimeout(() => location.replace('/cgi-bin/status.cgi'), 1500);
 	}
 
-	// Confirm the camera actually went before declaring it back, so a poll that
-	// starts a moment too early cannot mistake the still-running camera for the
-	// rebooted one and navigate into a connection that is about to be cut.
+	// Whichever of the two triggers gets here first wins: sysupgrade announced the
+	// reboot, or the stream died. Tidies the half-drawn redraw the announcement
+	// interrupted, but does NOT declare the stream over — more output can still
+	// arrive, and usually does.
+	function beginPollBack() {
+		if (polling) return;
+		polling = true;
+		term.commit();
+		pollBack();
+	}
+
+	// Confirm the camera actually went before declaring it back, so a watch that
+	// starts while it is still serving cannot mistake that for the rebooted
+	// camera and navigate into a connection about to be cut.
 	function pollBack() {
 		let downSeen = false, tries = 0;
-		const DOWN_TRIES = 30;   // ~90s; reboot -d 1 -f follows the announcement at once
+		const DOWN_TRIES = 60;   // ~3 min; the announcement can lead the reboot by a while
 		const UP_TRIES = 200;    // ~10 min; a first boot onto a fresh overlay is slow
 		status('warning', 'The camera is rebooting — waiting for it to come back…');
 		async function tick() {
@@ -153,8 +181,12 @@
 		// Tidy whatever redraw the stream stopped in the middle of.
 		term.commit();
 		if (sawReboot || (streamFailed && sawFlash)) {
+			// Only here is the stream genuinely over, so only here may the transcript
+			// be closed off — beginPollBack() may have run a minute ago on the
+			// marker, and output that arrived since must not sit under a note
+			// claiming the connection had already ended.
 			term.note('--- connection to the camera ended here; it is rebooting ---');
-			pollBack();
+			beginPollBack();
 			return;
 		}
 		if (aborted) {
