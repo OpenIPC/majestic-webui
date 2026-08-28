@@ -18,26 +18,36 @@
 	# touches majestic: that killall is the only one in the script, and -n
 	# rewrites rootfs_data, not the rootfs majestic runs from. So the log now
 	# survives all the way to the reboot.
-	c="/usr/sbin/sysupgrade -s -n -x --web"
-	r="true"
+	#
+	# What is NOT passed any more, and why:
+	#
+	#   -x (--no_reboot) — asked sysupgrade to leave the reboot to us, back when
+	#   this page hopped to fw-restart.cgi at the end to take it. sysupgrade
+	#   cannot honour that here: rootfs_data is the upper layer of the overlay
+	#   the running root is assembled from, so erasing it takes the live
+	#   filesystem with it and only a reboot puts one back. It says as much —
+	#   four lines of NOTICE and a five-second wait for a Ctrl-C nobody watching
+	#   a web page can send — and then reboots anyway. So the flag bought a
+	#   warning about itself and a stall, and asked for a reboot that had already
+	#   been decided (#154). fw-reset.js waits that reboot out rather than
+	#   ordering one.
+	#
+	#   -s — sysupgrade's silent mode, which pipes every progress meter through
+	#   `awk '{print NR, $1}'`. flash_eraseall redraws one line with a bare \r
+	#   and never emits a newline until it is done, so awk saw the whole erase as
+	#   a single record and printed the whole of it as "1 Erasing" — after the
+	#   fact. Dropping it puts the real meter back: one redraw per erase block,
+	#   about five a second, which on a camera whose overlay takes half a minute
+	#   to erase is the difference between progress and a frozen page (#154).
+	c="/usr/sbin/sysupgrade -n --web"
 %>
 
 <%in p/header.cgi %>
-<div class="alert alert-warning">Do not close, refresh, or navigate away from this page until the process finishes. The camera will reboot automatically.</div>
+<div id="fw-reset-status" class="alert alert-warning">Do not close, refresh, or navigate away from this page until the process finishes. The camera will reboot automatically.</div>
 <div class="card"><div class="card-body">
 	<h3>Progress</h3>
-	<pre id="output" class="mb-0" data-cmd="<%= $c %>" data-reboot="<%= $r %>"></pre>
+	<pre id="output" class="mb-0" data-cmd="<%= $c %>"></pre>
 </div></div>
 
-<script>
-	const el = $('pre#output');
-	// Stop the header heartbeat for the same reason fw-update.js does: every tick
-	// forks a dozen processes and makes a loopback request into the majestic that
-	// is streaming this log. Fine on an idle camera, ruinous on one erasing its
-	// own flash — and only now worth saying, because until --web above kept
-	// majestic alive these ticks died against a stopped server anyway. Keeping it
-	// running would trade one bug for a quieter one.
-	if (typeof stopHeartbeat === 'function') stopHeartbeat();
-	runCmd("cmd")
-</script>
+<script src="/a/fw-reset.js" defer></script>
 <%in p/footer.cgi %>

@@ -7,7 +7,6 @@
 // --archive. Vanilla JS; `$` is the querySelector helper from main.js.
 (function () {
 	const out = $('#fw-output');
-	const ansi = /[][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
 	const dec = new TextDecoder('utf-8');
 
 	// sysupgrade prints "Protected: flashing continues…" at its point of no
@@ -88,50 +87,15 @@
 	function resumeHeartbeat() {
 		if (typeof startHeartbeat === 'function') startHeartbeat();
 	}
-	// This pane is a <pre>, but everything writing into it assumes a terminal:
-	// curl's download meter and flashcp's progress both redraw one line in place
-	// with a bare \r. Appended verbatim, each redraw lands after the last instead
-	// of replacing it, and the bar smears across the pane in unreadable columns
-	// (issue #134). Stripping ANSI does not help — \r is a control character, not
-	// an escape sequence, so it survives the regex above.
-	//
-	// So be just enough of a terminal for that: \n commits the line, \r returns
-	// the cursor to column 0, anything else overwrites at the cursor. Overwriting
-	// rather than clearing matters — a redraw shorter than the one before it
-	// leaves the tail of the longer line visible, which is what a real terminal
-	// does and what makes curl's meter look right as it shrinks.
-	//
-	// Two text nodes keep it cheap: finished lines are appended once and never
-	// touched again, and only the line still being drawn is rewritten. The
-	// console page has an actual terminal (xterm.js) and needs none of this.
-	const doneNode = document.createTextNode('');
-	const lineNode = document.createTextNode('');
-	out.appendChild(doneNode);
-	out.appendChild(lineNode);
-	// The line being drawn is an array of characters, not a string: the cursor can
-	// land anywhere in it, and rebuilding a string per character (slice + concat +
-	// slice) is quadratic in the line length. curl's meter is short enough not to
-	// care, but a tool emitting a long line with no newline would have made this
-	// the slowest thing on the page.
-	let lineArr = [];   // the line currently being drawn, after the last \n
-	let col = 0;        // cursor position within it
+	// Rendered through the shared <pre>-as-terminal writer in main.js: the meters
+	// sysupgrade streams redraw one line in place with a bare \r, which a bare
+	// <pre> smears across the pane unless something plays the cursor back
+	// (issue #134).
+	const term = termWriter(out);
 
 	// Markers can straddle two frames, so match against a rolling window of the
 	// recent stream rather than each chunk in isolation.
 	let recent = '';
-	// The stream stops wherever the camera happened to die, which is almost never
-	// on a line boundary: flashcp redraws its meter with \r and no trailing
-	// newline, so the last thing written stays half-drawn ("Verifying kb:
-	// 4648/4836 (96%)") and the pane reads as hung rather than finished.
-	function commitLine() {
-		if (!lineArr.length) return;
-		doneNode.appendData(lineArr.join('') + '\n');
-		lineArr = [];
-		col = 0;
-		lineNode.data = '';
-		out.scrollTop = out.scrollHeight;
-	}
-
 	// Only ws.onclose knows the stream is really over. The reboot announcement
 	// and the silence heuristic both start the watch while the socket may still
 	// deliver more, so writing this there would let genuine output land
@@ -140,9 +104,7 @@
 	function endLog() {
 		if (logClosed) return;
 		logClosed = true;
-		commitLine();
-		doneNode.appendData('--- connection to the camera ended here; it is rebooting ---\n');
-		out.scrollTop = out.scrollHeight;
+		term.note('--- connection to the camera ended here; it is rebooting ---');
 	}
 
 	// Start watching for the camera to come back. Three things can get us here
@@ -161,7 +123,7 @@
 		if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
 		// Tidy the half-drawn meter, but do NOT declare the stream over: the
 		// socket can still be open here and more output may yet arrive.
-		commitLine();
+		term.commit();
 		// Getting here on silence rather than on a reboot announcement means the
 		// transcript stops mid-flash, at whatever byte the camera reached — issue
 		// #120 has it ending on "Verifying kb: 1056/4844 (21%)". That is expected:
@@ -175,9 +137,8 @@
 		// Worded as a gap, not as an ending: the socket may still be open, and
 		// output that resumes must not land under a note saying it had stopped.
 		if (quiet) {
-			doneNode.appendData('--- no output for ' + (QUIET_MS / 1000) +
-				's; the camera is busy flashing ---\n');
-			out.scrollTop = out.scrollHeight;
+			term.note('--- no output for ' + (QUIET_MS / 1000) +
+				's; the camera is busy flashing ---');
 		}
 		// "do not power off" is a warning about an interrupted flash, so do not
 		// say it when sysupgrade has already told us it wrote nothing.
@@ -189,29 +150,12 @@
 
 	function append(t) {
 		lastData = performance.now();
-		const s = t.replace(ansi, '');
-		let commit = '';
-		for (let i = 0; i < s.length; i++) {
-			const ch = s[i];
-			if (ch === '\n') {
-				commit += lineArr.join('') + '\n';
-				lineArr = [];
-				col = 0;
-			} else if (ch === '\r') {
-				col = 0;
-			} else {
-				lineArr[col++] = ch;
-			}
-		}
-		// One join per frame rather than a string rebuild per character; finished
-		// lines leave through appendData and are never re-copied.
-		if (commit) doneNode.appendData(commit);
-		lineNode.data = lineArr.join('');
-		out.scrollTop = out.scrollHeight;
-		// Deliberately still the raw stream: the markers below are whole-line
-		// messages, and matching them on what was received rather than on what
-		// survived the redraws keeps this decoupled from the rendering.
-		recent = (recent + s).slice(-512);
+		// term.write() hands back the chunk with ANSI stripped and nothing else
+		// done to it. Deliberately the raw stream, not what ended up on screen:
+		// the markers below are whole-line messages, and matching them on what was
+		// received rather than on what survived the redraws keeps this decoupled
+		// from the rendering.
+		recent = (recent + term.write(t)).slice(-512);
 		if (!sawFlash && flashMarker.test(recent)) sawFlash = true;
 		if (!noop && noopMarker.test(recent)) noop = true;
 		// Said out loud by sysupgrade immediately before it reboots, so there is
@@ -233,7 +177,7 @@
 				// ws.onclose may never fire. Nothing else will stop the quiet timer,
 				// and it would otherwise tick for the life of the tab.
 				if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
-				commitLine();
+				term.commit();
 				status('danger', 'The upgrade was aborted — see the log below. Nothing was written to flash, so the camera is unchanged.');
 				resumeHeartbeat();
 			}
@@ -295,7 +239,7 @@
 				// Gave up before touching flash; no reboot is coming, and the log
 				// above is the whole story.
 				if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
-				commitLine();
+				term.commit();
 				return;
 			}
 			// Usually last of the three triggers rather than first — by the time a

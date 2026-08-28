@@ -29,10 +29,10 @@ function sleep(ms) {
 // Deliberately NOT a patch over window.fetch. The pages that deliberately
 // outlive their own session must not be redirected out from under: fw-update.js
 // expects a 401 while the camera reboots mid-upgrade and handles it itself, with
-// wording that depends on knowing an upgrade was in flight, and
-// makeTextFileLineIterator below streams the factory reset that destroys the
-// session in the first place. A blanket redirect would race both and throw the
-// transcript away. Anything that wants this behaviour opts in.
+// wording that depends on knowing an upgrade was in flight, and fw-reset.js
+// streams the factory reset that destroys the session in the first place. A
+// blanket redirect would race both and throw the transcript away. Anything that
+// wants this behaviour opts in.
 //
 // Those pages still need the HEADER, though, and that is the half that was
 // missed: suppressing the dialog and redirecting on 401 are separate concerns,
@@ -120,66 +120,90 @@ function setProgressBar(id, value, name) {
 	}
 }
 
-// rawFetch, not apiFetch, and it has to stay that way. Its only caller is
-// runCmd() on fw-reset.cgi, which streams `sysupgrade -s -n -x --web` — the
-// factory reset that erases the overlay, /etc/majestic.token with it, and reboots.
-// Losing the session is the EXPECTED end of this request, not an error, and the
-// whole point of the page is to show the log until the camera goes. Redirecting
-// on a 401 here would blank the transcript at the moment it matters most, and
-// the never-settling promise apiFetch hands back would strand the loop below
-// before it could run the fw-restart.cgi hop at the end.
+// A <pre> is not a terminal, but everything sysupgrade streams into one assumes
+// it is: curl's download meter, flashcp's progress and flash_eraseall's erase
+// counter all redraw a single line in place with a bare \r. Appended verbatim,
+// each redraw lands after the last instead of replacing it, and the meter smears
+// across the pane in unreadable columns (issue #134). Stripping ANSI does not
+// help — \r is a control character, not an escape sequence, so it survives that
+// regex.
 //
-// rawFetch rather than a bare fetch, though: the wipe destroys the session this
-// stream is running on, so the reconnect after it is exactly the request that
-// gets a 401 — and without the header majestic attaches WWW-Authenticate to it
-// and Safari prompts on top of the transcript.
-async function* makeTextFileLineIterator(url) {
-	const td = new TextDecoder('utf-8');
-	const response = await rawFetch(url);
-	const rd = response.body.getReader();
-	let { value: chunk, done: readerDone } = await rd.read();
-	chunk = chunk ? td.decode(chunk) : '';
-	const re = /\r?\n/gm;
-	let startIndex = 0;
-	let result;
+// So be just enough of a terminal for that: \n commits the line, \r returns the
+// cursor to column 0, anything else overwrites at the cursor. Overwriting rather
+// than clearing matters — a redraw shorter than the one before it leaves the
+// tail of the longer line visible, which is what a real terminal does and what
+// makes curl's meter look right as it shrinks.
+//
+// Two text nodes keep it cheap: finished lines are appended once and never
+// touched again, and only the line still being drawn is rewritten. The console
+// page has an actual terminal (xterm.js) and needs none of this.
+//
+// Shared by the two pages that stream sysupgrade — fw-update.js over /ws/upgrade
+// and fw-reset.js over j/run.cgi. They render the identical output, so the
+// lesson above only wants learning once.
+function termWriter(el) {
+	// \u001b/\u009b escaped rather than written as the literal ESC and CSI bytes
+	// the two copies of this carried: an invisible control character in a source
+	// file survives only as long as nothing greps, copies or re-encodes the line.
+	const ansi = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+	const doneNode = document.createTextNode('');
+	const lineNode = document.createTextNode('');
+	el.appendChild(doneNode);
+	el.appendChild(lineNode);
+	// The line being drawn is an array of characters, not a string: the cursor can
+	// land anywhere in it, and rebuilding a string per character (slice + concat +
+	// slice) is quadratic in the line length. curl's meter is short enough not to
+	// care, but a tool emitting a long line with no newline would have made this
+	// the slowest thing on the page.
+	let lineArr = [];   // the line currently being drawn, after the last \n
+	let col = 0;        // cursor position within it
 
-	for (;;) {
-		result = re.exec(chunk);
-		if (!result) {
-			if (readerDone) {
-				break;
+	return {
+		// Returns the chunk with ANSI removed, so a caller matching markers can
+		// feed its rolling window the same text that was rendered rather than
+		// stripping the stream a second time.
+		write(t) {
+			const s = t.replace(ansi, '');
+			let commit = '';
+			for (let i = 0; i < s.length; i++) {
+				const ch = s[i];
+				if (ch === '\n') {
+					commit += lineArr.join('') + '\n';
+					lineArr = [];
+					col = 0;
+				} else if (ch === '\r') {
+					col = 0;
+				} else {
+					lineArr[col++] = ch;
+				}
 			}
-
-			let remainder = chunk.substr(startIndex);
-			({ value: chunk, done: readerDone } = await rd.read());
-			chunk = remainder + (chunk ? td.decode(chunk) : '');
-			startIndex = re.lastIndex = 0;
-			continue;
-		}
-
-		yield chunk.substring(startIndex, result.index);
-		startIndex = re.lastIndex;
-	}
-
-	if (startIndex < chunk.length) {
-		yield chunk.substr(startIndex);
-	}
-
-	if (el.dataset['reboot'] === "true") {
-		location.href = '/cgi-bin/fw-restart.cgi'
-	}
-
-	if ($('form input[type=submit]')) {
-		$('form input[type=submit]').disabled = false;
-	}
-}
-
-async function runCmd(msg) {
-	for await (let line of makeTextFileLineIterator('/cgi-bin/j/run.cgi?' + msg + '=' + btoa(el.dataset['cmd']))) {
-		const regex = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
-		line = line.replace(regex, '');
-		el.innerHTML += line + '\n';
-	}
+			// One join per frame rather than a string rebuild per character; finished
+			// lines leave through appendData and are never re-copied.
+			if (commit) doneNode.appendData(commit);
+			lineNode.data = lineArr.join('');
+			el.scrollTop = el.scrollHeight;
+			return s;
+		},
+		// The stream stops wherever the camera happened to die, which is almost
+		// never on a line boundary: the meters redraw with \r and no trailing
+		// newline, so the last thing written stays half-drawn ("Verifying kb:
+		// 4648/4836 (96%)") and the pane reads as hung rather than finished.
+		commit() {
+			if (!lineArr.length) return;
+			doneNode.appendData(lineArr.join('') + '\n');
+			lineArr = [];
+			col = 0;
+			lineNode.data = '';
+			el.scrollTop = el.scrollHeight;
+		},
+		// A line of our own rather than the camera's. Commits whatever was
+		// half-drawn first, so a note cannot land in the middle of a redraw.
+		note(text) {
+			this.commit();
+			doneNode.appendData(text + '\n');
+			el.scrollTop = el.scrollHeight;
+		},
+	};
 }
 
 // Every tick spawns j/pulse.cgi, which forks a dozen more processes and makes a
