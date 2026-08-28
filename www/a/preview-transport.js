@@ -44,10 +44,22 @@ window.MajesticTransport = (function () {
 	function migrate() {
 		const old = read(OLD_KEY);
 		if (old === null) return;
-		write(OLD_KEY, null);
-		if (read(PICK_KEY) !== null || read(AUTO_KEY) !== null) return;
-		if (old === 'webrtc') write(PICK_KEY, 'webrtc');
-		else if (old === 'mse') write(AUTO_KEY, String(Date.now()));
+		if (read(PICK_KEY) !== null || read(AUTO_KEY) !== null) {
+			write(OLD_KEY, null);
+			return;
+		}
+		// Same order as migrateStream(), for the same reason: the replacement
+		// has to be readable before the original is thrown away.
+		let carried = true;
+		if (old === 'webrtc') {
+			write(PICK_KEY, 'webrtc');
+			carried = read(PICK_KEY) === 'webrtc';
+		} else if (old === 'mse') {
+			const at = String(Date.now());
+			write(AUTO_KEY, at);
+			carried = read(AUTO_KEY) === at;
+		}
+		if (carried) write(OLD_KEY, null);
 	}
 
 	// A demotion that has not expired. The window is bounded at both ends: a
@@ -144,14 +156,24 @@ window.MajesticTransport = (function () {
 	// the substream default — and the reason to choose Main is that the
 	// substream shows the wrong picture, so the setting would be lost by
 	// exactly the people who needed it.
+	// New keys first, old key last, and only once the new ones read back.
+	// write() swallows storage failures by design — a private window must not
+	// break the page — so "it did not throw" is no evidence the value landed.
+	// Deleting first and then failing to write would lose the choice for good.
 	function migrateStream() {
 		const old = read(STREAM_KEY);
 		if (old === null) return;
-		write(STREAM_KEY, null);
-		if (old !== '0' && old !== '1') return;
+		if (old !== '0' && old !== '1') {
+			write(STREAM_KEY, null);
+			return;
+		}
+		let carried = true;
 		['preview', 'live'].forEach(function (w) {
-			if (read(streamKey(w)) === null) write(streamKey(w), old);
+			if (read(streamKey(w)) !== null) return;
+			write(streamKey(w), old);
+			if (read(streamKey(w)) !== old) carried = false;
 		});
+		if (carried) write(STREAM_KEY, null);
 	}
 
 	function chosenStream(where) {

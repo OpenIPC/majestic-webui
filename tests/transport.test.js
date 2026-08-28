@@ -22,19 +22,27 @@ const SRC = path.join(__dirname, '..', 'www', 'a', 'preview-transport.js');
 // without — every read and write in the module is wrapped, and a module that
 // threw without storage would fail in a private window too, which is a real
 // browser state and not a hypothetical one.
-function load(withStorage, seed) {
+function load(withStorage, seed, refuseWrites) {
 	const store = Object.assign({}, seed || {});
 	const ctx = { window: {}, console: console };
 	if (withStorage) {
 		ctx.localStorage = {
 			getItem: (k) => (k in store ? store[k] : null),
-			setItem: (k, v) => { store[k] = String(v); },
+			setItem: (k, v) => {
+				// A full quota throws on set while remove still works, which is
+				// the sequence that can lose a value mid-migration.
+				if (refuseWrites) throw new Error('QuotaExceededError');
+				store[k] = String(v);
+			},
 			removeItem: (k) => { delete store[k]; },
 		};
 	}
+
 	vm.createContext(ctx);
 	vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
-	return ctx.window.MajesticTransport;
+	const mod = ctx.window.MajesticTransport;
+	mod.store = store;   // for asserting what survived
+	return mod;
 }
 
 const iceServers = load(false).iceServers;
@@ -134,5 +142,15 @@ const both = load(true, {
 check('an existing per-page choice is not overwritten',
 	both.chosenStream('preview') === 1);
 check('while the page without one still inherits', both.chosenStream('live') === 0);
+
+// If the new keys cannot be written, the old one must survive to be tried
+// again — deleting it first would lose the choice permanently, and write()
+// swallows storage failures so nothing else would notice.
+const stuck = load(true, { 'mj-preview-stream': '0' }, true);
+check('a refused write leaves no preference rather than a wrong one',
+	stuck.chosenStream('preview') === null);
+check('and the legacy key is kept for the next attempt',
+	stuck.store['mj-preview-stream'] === '0',
+	JSON.stringify(stuck.store));
 
 done();
