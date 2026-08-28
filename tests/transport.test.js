@@ -22,8 +22,8 @@ const SRC = path.join(__dirname, '..', 'www', 'a', 'preview-transport.js');
 // without — every read and write in the module is wrapped, and a module that
 // threw without storage would fail in a private window too, which is a real
 // browser state and not a hypothetical one.
-function load(withStorage) {
-	const store = {};
+function load(withStorage, seed) {
+	const store = Object.assign({}, seed || {});
 	const ctx = { window: {}, console: console };
 	if (withStorage) {
 		ctx.localStorage = {
@@ -113,5 +113,26 @@ check('no storage reads as no preference',
 let threw = false;
 try { noStore.chooseStream('preview', 1); } catch (e) { threw = true; }
 check('and writing without storage does not throw', !threw);
+
+group('upgrading from the single shared key');
+// A previous release wrote one key for both pages. Both inherit it — that is
+// what the person was looking at — and it is then thrown away. Dropping it
+// instead would return anyone who had chosen Main to the substream default,
+// and the reason to choose Main is that the substream shows the wrong picture.
+const up = load(true, { 'mj-preview-stream': '0' });
+check('preview inherits the old choice', up.chosenStream('preview') === 0);
+check('so does live', up.chosenStream('live') === 0);
+// Read once: choosing on one page afterwards must not be undone by the old
+// value coming back the next time the other page asks.
+up.chooseStream('live', 1);
+check('and the old key does not resurrect', up.chosenStream('live') === 1);
+check('while preview keeps what it inherited', up.chosenStream('preview') === 0);
+
+// A per-page answer already recorded wins over the legacy one.
+const both = load(true, {
+	'mj-preview-stream': '0', 'mj-preview-stream:preview': '1' });
+check('an existing per-page choice is not overwritten',
+	both.chosenStream('preview') === 1);
+check('while the page without one still inherits', both.chosenStream('live') === 0);
 
 done();

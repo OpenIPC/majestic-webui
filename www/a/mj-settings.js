@@ -743,6 +743,10 @@
 		const s1 = document.getElementById('mj-live-s1');
 		const subLbl = document.getElementById('mj-live-sub');
 		if (subLbl && subAvailable) subLbl.hidden = false;
+		// Hiding the label leaves the input focusable — Bootstrap's btn-check
+		// keeps it in the tab order — so arrow-key navigation could select a
+		// stream that does not exist and land the panel on "no signal".
+		if (s1) s1.disabled = !subAvailable;
 		if (s0) s0.checked = stream === 0;
 		if (s1) s1.checked = stream === 1;
 		[s0, s1].forEach(function (elm, n) {

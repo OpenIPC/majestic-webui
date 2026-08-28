@@ -135,7 +135,27 @@ window.MajesticTransport = (function () {
 		return STREAM_KEY + ':' + (where || 'preview');
 	}
 
+	// The unsuffixed key a previous release wrote, when one answer served both
+	// pages. Both inherit it, because that is what the person was actually
+	// looking at; from then on they diverge as each is chosen. Read once and
+	// thrown away, like the transport migration above.
+	//
+	// Dropping it instead would silently return anyone who had chosen Main to
+	// the substream default — and the reason to choose Main is that the
+	// substream shows the wrong picture, so the setting would be lost by
+	// exactly the people who needed it.
+	function migrateStream() {
+		const old = read(STREAM_KEY);
+		if (old === null) return;
+		write(STREAM_KEY, null);
+		if (old !== '0' && old !== '1') return;
+		['preview', 'live'].forEach(function (w) {
+			if (read(streamKey(w)) === null) write(streamKey(w), old);
+		});
+	}
+
 	function chosenStream(where) {
+		migrateStream();
 		const v = read(streamKey(where));
 		return v === '0' ? 0 : v === '1' ? 1 : null;
 	}
