@@ -22,19 +22,27 @@ const SRC = path.join(__dirname, '..', 'www', 'a', 'preview-transport.js');
 // without — every read and write in the module is wrapped, and a module that
 // threw without storage would fail in a private window too, which is a real
 // browser state and not a hypothetical one.
-function load(withStorage) {
-	const store = {};
+function load(withStorage, seed, refuseWrites) {
+	const store = Object.assign({}, seed || {});
 	const ctx = { window: {}, console: console };
 	if (withStorage) {
 		ctx.localStorage = {
 			getItem: (k) => (k in store ? store[k] : null),
-			setItem: (k, v) => { store[k] = String(v); },
+			setItem: (k, v) => {
+				// A full quota throws on set while remove still works, which is
+				// the sequence that can lose a value mid-migration.
+				if (refuseWrites) throw new Error('QuotaExceededError');
+				store[k] = String(v);
+			},
 			removeItem: (k) => { delete store[k]; },
 		};
 	}
+
 	vm.createContext(ctx);
 	vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
-	return ctx.window.MajesticTransport;
+	const mod = ctx.window.MajesticTransport;
+	mod.store = store;   // for asserting what survived
+	return mod;
 }
 
 const iceServers = load(false).iceServers;
@@ -90,18 +98,59 @@ group('the remembered Main/Sub choice');
 // the preview box, wants Main. The default is still Sub — that is the common
 // case — but the answer has to survive a page load or they re-pick it for ever.
 const t = load(true);
-check('nothing remembered to begin with', t.chosenStream() === null);
-t.chooseStream(0);
-check('Main is remembered', t.chosenStream() === 0);
-t.chooseStream(1);
-check('and so is Sub', t.chosenStream() === 1);
+check('nothing remembered to begin with', t.chosenStream('preview') === null);
+t.chooseStream('preview', 0);
+check('Main is remembered', t.chosenStream('preview') === 0);
+t.chooseStream('preview', 1);
+check('and so is Sub', t.chosenStream('preview') === 1);
+
+// Separate per page: the two are looked at for different reasons, and someone
+// can reasonably want Main on one and Sub on the other. Sharing one key would
+// mean choosing on either page silently changed the other.
+check('the live page starts with no preference of its own',
+	t.chosenStream('live') === null);
+t.chooseStream('live', 0);
+check('the live page remembers its own answer', t.chosenStream('live') === 0);
+check('and the preview page keeps its own', t.chosenStream('preview') === 1);
 
 // A private window, or a browser set to block site data. The module must come
 // back "no preference" rather than throw, or the preview does not start at all.
 const noStore = load(false);
-check('no storage reads as no preference', noStore.chosenStream() === null);
+check('no storage reads as no preference',
+	noStore.chosenStream('preview') === null);
 let threw = false;
-try { noStore.chooseStream(1); } catch (e) { threw = true; }
+try { noStore.chooseStream('preview', 1); } catch (e) { threw = true; }
 check('and writing without storage does not throw', !threw);
+
+group('upgrading from the single shared key');
+// A previous release wrote one key for both pages. Both inherit it — that is
+// what the person was looking at — and it is then thrown away. Dropping it
+// instead would return anyone who had chosen Main to the substream default,
+// and the reason to choose Main is that the substream shows the wrong picture.
+const up = load(true, { 'mj-preview-stream': '0' });
+check('preview inherits the old choice', up.chosenStream('preview') === 0);
+check('so does live', up.chosenStream('live') === 0);
+// Read once: choosing on one page afterwards must not be undone by the old
+// value coming back the next time the other page asks.
+up.chooseStream('live', 1);
+check('and the old key does not resurrect', up.chosenStream('live') === 1);
+check('while preview keeps what it inherited', up.chosenStream('preview') === 0);
+
+// A per-page answer already recorded wins over the legacy one.
+const both = load(true, {
+	'mj-preview-stream': '0', 'mj-preview-stream:preview': '1' });
+check('an existing per-page choice is not overwritten',
+	both.chosenStream('preview') === 1);
+check('while the page without one still inherits', both.chosenStream('live') === 0);
+
+// If the new keys cannot be written, the old one must survive to be tried
+// again — deleting it first would lose the choice permanently, and write()
+// swallows storage failures so nothing else would notice.
+const stuck = load(true, { 'mj-preview-stream': '0' }, true);
+check('a refused write leaves no preference rather than a wrong one',
+	stuck.chosenStream('preview') === null);
+check('and the legacy key is kept for the next attempt',
+	stuck.store['mj-preview-stream'] === '0',
+	JSON.stringify(stuck.store));
 
 done();

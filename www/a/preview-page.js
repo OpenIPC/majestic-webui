@@ -59,7 +59,12 @@
 	let jpegOn = false;
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
-		if (mjGet(cfg, 'video1.enabled') === true) $('#mj-sub').hidden = false;
+		const subOk = mjGet(cfg, 'video1.enabled') === true;
+		if (subOk) $('#mj-sub').hidden = false;
+		// Same reason as the settings panel: the label is what gets hidden, and
+		// the radio behind it stays in the tab order, so without this the
+		// keyboard can pick a stream the camera does not have.
+		if (s1) s1.disabled = !subOk;
 		ice = MajesticTransport.iceServers(
 			mjGet(cfg, 'webrtc.iceServers'),
 			mjGet(cfg, 'webrtc.turnUsername'),
@@ -403,7 +408,7 @@
 	// than on nothing. Returns true if the channel moved off Main.
 	function chooseSub(cfg) {
 		const subAvailable = mjGet(cfg, 'video1.enabled') === true;
-		const remembered = MajesticTransport.chosenStream();
+		const remembered = MajesticTransport.chosenStream('preview');
 		const want = remembered === null ? 1 : remembered;
 		if (want !== 1 || !subAvailable) {
 			stream = 0;
@@ -472,7 +477,7 @@
 	[s0, s1].forEach((el, n) => {
 		if (el) el.addEventListener('click', () => {
 			userPickedStream = true;
-			MajesticTransport.chooseStream(n);
+			MajesticTransport.chooseStream('preview', n);
 		});
 	});
 	if (s0) s0.addEventListener('change', () => {
