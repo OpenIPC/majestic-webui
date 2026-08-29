@@ -26,7 +26,7 @@
 	let zoom = 2;                     // index into ZOOMS -> one hour
 
 	const state = {
-		cfg: {}, prefix: '', split: 1200, enabled: false,
+		cfg: {}, prefix: '', split: 1200, enabled: false, card: null,
 		offsetMs: 0, nowSec: null, today: '',
 		days: [], dayName: '', day: { clips: [], unplaced: [] },
 		view: { from: 0, to: 3600, width: 3600 },
@@ -399,51 +399,111 @@
 
 	// ---- storage ---------------------------------------------------------
 
+	// The card behind the archive, fetched once. It answers two questions on
+	// this page: how much room is left (the storage bar at the bottom), and
+	// whether anything can still be written at all (the banner at the top).
+	// The second is why this is loaded before the page decides it has nothing
+	// to show: "nothing recorded yet" and "the card went read-only at 12:04"
+	// look identical from the clip list alone.
+	function loadCard() {
+		if (!state.prefix) return Promise.resolve();
+		return apiFetch('/cgi-bin/j/sdcard.cgi?rec=' + encodeURIComponent(state.prefix),
+			{ credentials: 'same-origin' })
+			.then(function (r) { return r.json(); })
+			.then(function (d) { state.card = d; })
+			.catch(function () { /* the page is useful without it */ });
+	}
+
+	// Why there is no new footage, said on the page people actually arrive at.
+	// Returns '' while the card is fine — including while it is merely full,
+	// which is normal operation: majestic deletes the oldest clips at
+	// records.maxUsage and carries on.
+	function cardTrouble() {
+		const d = state.card;
+		if (!d) return '';
+		switch (d.health) {
+		case 'readonly':
+			return '<strong>The SD card is mounted read-only — nothing is being recorded.</strong> ' +
+				'It reports free space and its older clips still play, but the camera cannot write to it. ' +
+				'The kernel drops a card to read-only as soon as its filesystem stops making sense, ' +
+				'so expect a damaged filesystem rather than a full one.';
+		case 'unreadable':
+			return '<strong>The SD card has no readable filesystem — nothing is being recorded.</strong> ' +
+				'A partition is there but nothing on the camera can read it, so it is either damaged or was never formatted.';
+		case 'unformatted':
+			return '<strong>The SD card is not formatted — nothing is being recorded.</strong>';
+		case 'unmounted':
+			return '<strong>The SD card is not mounted — nothing is being recorded.</strong> ' +
+				'The filesystem is intact; it just is not attached to <code>' + esc(d.mountpoint || '') + '</code>.';
+		case 'absent':
+			return '<strong>There is no SD card in the camera — nothing is being recorded.</strong>';
+		default:
+			return '';
+		}
+	}
+
+	// Kernel complaints about the card, when the endpoint found any. Never
+	// rendered as reassurance: the ring buffer is small, so an error that
+	// stopped recording this morning has usually scrolled out of it by now.
+	function cardKernelLines() {
+		const d = state.card;
+		if (!d || !d.fsErrors || !d.fsErrors.length) return '';
+		return '<div class="mt-2"><div class="x-small text-secondary mb-1">Recent kernel messages about this card:</div>' +
+			'<pre class="x-small mb-0" style="white-space:pre-wrap">' + esc(d.fsErrors.join('\n')) + '</pre></div>';
+	}
+
+	function renderHealth() {
+		const el = $id('rec-health');
+		if (!el) return;
+		const msg = cardTrouble();
+		if (!msg) { el.className = 'd-none'; el.innerHTML = ''; return; }
+		el.className = 'alert alert-danger';
+		el.innerHTML = msg + cardKernelLines() +
+			'<div class="mt-2"><a class="btn btn-sm btn-danger" href="tool-sdcard.cgi">Open the SD card page</a></div>';
+	}
+
 	// Same numbers and the same bar as the SD card page, because it is the same
 	// question asked from the other side: how much footage is there, and how
 	// much room is left before the oldest of it is deleted.
-	function loadStorage() {
-		if (!state.prefix) return;
-		apiFetch('/cgi-bin/j/sdcard.cgi?rec=' + encodeURIComponent(state.prefix),
-			{ credentials: 'same-origin' })
-			.then(function (r) { return r.json(); })
-			.then(function (d) {
-				if (!d || !d.mounted || !d.totalKb) return;
-				const card = $id('rec-storage-card'), el = $id('rec-storage');
-				if (!card || !el) return;
-				const total = d.totalKb * 1024, used = d.usedKb * 1024;
-				const rec = Math.min(d.recBytes || 0, used);
-				const other = Math.max(0, used - rec), free = Math.max(0, total - used);
-				const seg = function (b, c) {
-					return b > 0 ? '<div class="seg" style="width:' + (b / total * 100).toFixed(2) +
-						'%;background:' + c + '"></div>' : '';
-				};
-				const dot = function (c) {
-					return '<span class="dot" style="background:' + c + '"></span>';
-				};
-				// How much longer the card can record, from what this day's
-				// footage actually costs per second.
-				const day = state.day.clips.reduce(function (a, c) { return a + c.dur; }, 0);
-				const bytes = state.day.clips.reduce(function (a, c) { return a + c.size; }, 0);
-				const left = (day > 0 && bytes > 0)
-					? ' · about ' + TL.duration(free / (bytes / day)) + ' of footage left' : '';
+	function renderStorage() {
+		const d = state.card;
+		if (!d || !d.mounted || !d.totalKb) return;
+		const card = $id('rec-storage-card'), el = $id('rec-storage');
+		if (!card || !el) return;
+		const total = d.totalKb * 1024, used = d.usedKb * 1024;
+		const rec = Math.min(d.recBytes || 0, used);
+		const other = Math.max(0, used - rec), free = Math.max(0, total - used);
+		const seg = function (b, c) {
+			return b > 0 ? '<div class="seg" style="width:' + (b / total * 100).toFixed(2) +
+				'%;background:' + c + '"></div>' : '';
+		};
+		const dot = function (c) {
+			return '<span class="dot" style="background:' + c + '"></span>';
+		};
+		// How much longer the card can record, from what this day's
+		// footage actually costs per second.
+		const day = state.day.clips.reduce(function (a, c) { return a + c.dur; }, 0);
+		const bytes = state.day.clips.reduce(function (a, c) { return a + c.size; }, 0);
+		// A projection of how long the card will last is a promise about future
+		// writes, so it is only offered while future writes are possible.
+		const left = (d.health === 'ok' && day > 0 && bytes > 0)
+			? ' · about ' + TL.duration(free / (bytes / day)) + ' of footage left' : '';
 
-				card.hidden = false;
-				el.innerHTML =
-					'<div class="d-flex justify-content-between x-small mb-1">' +
-					'<span class="fw-semibold">Storage</span>' +
-					'<span class="text-secondary">' + TL.bytes(used) + ' of ' + TL.bytes(total) + ' used' +
-					esc(left) + '</span></div>' +
-					'<div class="storage-bar mb-2">' + seg(rec, '#4c60d8') + seg(other, '#e08a3c') + '</div>' +
-					'<div class="storage-legend x-small">' +
-					'<span>' + dot('#4c60d8') + 'Recordings <span class="text-secondary">' + TL.bytes(rec) + '</span></span>' +
-					'<span>' + dot('#e08a3c') + 'Other <span class="text-secondary">' + TL.bytes(other) + '</span></span>' +
-					'<span><span class="dot dot-free"></span>Free <span class="text-secondary">' + TL.bytes(free) + '</span></span>' +
-					(mjGet(state.cfg, 'records.maxUsage')
-						? '<span class="text-secondary">oldest clips deleted at ' +
-						esc(String(mjGet(state.cfg, 'records.maxUsage'))) + ' %</span>' : '') +
-					'</div>';
-			}).catch(function () { /* the page is useful without it */ });
+		card.hidden = false;
+		el.innerHTML =
+			'<div class="d-flex justify-content-between x-small mb-1">' +
+			'<span class="fw-semibold">Storage</span>' +
+			'<span class="text-secondary">' + TL.bytes(used) + ' of ' + TL.bytes(total) + ' used' +
+			esc(left) + '</span></div>' +
+			'<div class="storage-bar mb-2">' + seg(rec, '#4c60d8') + seg(other, '#e08a3c') + '</div>' +
+			'<div class="storage-legend x-small">' +
+			'<span>' + dot('#4c60d8') + 'Recordings <span class="text-secondary">' + TL.bytes(rec) + '</span></span>' +
+			'<span>' + dot('#e08a3c') + 'Other <span class="text-secondary">' + TL.bytes(other) + '</span></span>' +
+			'<span><span class="dot dot-free"></span>Free <span class="text-secondary">' + TL.bytes(free) + '</span></span>' +
+			(mjGet(state.cfg, 'records.maxUsage')
+				? '<span class="text-secondary">oldest clips deleted at ' +
+				esc(String(mjGet(state.cfg, 'records.maxUsage'))) + ' %</span>' : '') +
+			'</div>';
 	}
 
 	// Where a day should open: the freshest footage in it, not the oldest.
@@ -620,6 +680,11 @@
 			return;
 		}
 		let h = '';
+		// timeline.js calls the newest clip "recording" when it ends about now,
+		// which is a statement about the clock and cannot know the card stopped
+		// accepting writes. On a card that cannot be written the last clip is
+		// not growing — it is the truncated one the failure interrupted.
+		const writable = !cardTrouble();
 		// newest first: that is the one people want
 		list.slice().reverse().forEach(function (c, i, arr) {
 			const prev = arr[i + 1];
@@ -629,11 +694,12 @@
 			}
 			const on = state.clip && state.clip.name === c.name;
 			h += '<button type="button" class="rec-clip' + (on ? ' active' : '') + '" data-clip="' + esc(c.name) + '">' +
-				'<span class="rec-poster"' + (c.recording ? ' data-live="1"' : '') + '>' +
+				'<span class="rec-poster"' + (c.recording && writable ? ' data-live="1"' : '') + '>' +
 				'<span class="rec-poster-t">' + TL.hhmm(c.start) + '</span></span>' +
 				'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + TL.hhmm(c.start) + '</span>' +
 				'<span class="x-small text-secondary">' +
-				(c.recording ? 'recording' : (c.estimated ? '≈ ' : '') + TL.duration(c.dur)) +
+				(c.recording && writable ? 'recording'
+					: (c.estimated ? '≈ ' : '') + TL.duration(c.dur)) +
 				' · ' + TL.bytes(c.size) + '</span></span></button>';
 		});
 		if (state.day.unplaced.length) {
@@ -670,9 +736,14 @@
 			'<button class="btn btn-sm btn-outline-secondary" id="rec-next" type="button"' +
 			(next ? '' : ' disabled') + ' aria-label="Next day">&rsaquo;</button>' +
 			'<span class="small text-secondary">' + state.day.clips.length + ' clips · ' + TL.duration(total) + '</span>' +
-			(state.enabled
-				? '<span class="mj-push-end badge text-bg-success">Recording</span>'
-				: '<span class="mj-push-end badge text-bg-secondary">Recording off</span>') +
+			// Three states, not two: the switch being on is a setting, and a
+			// card that cannot be written to makes a green "Recording" badge
+			// the loudest wrong thing on the page.
+			(!state.enabled
+				? '<span class="mj-push-end badge text-bg-secondary">Recording off</span>'
+				: cardTrouble()
+					? '<span class="mj-push-end badge text-bg-danger">Cannot record</span>'
+					: '<span class="mj-push-end badge text-bg-success">Recording</span>') +
 			'<span class="small text-secondary">' + esc(label) + '</span>';
 
 		if (prev) $id('rec-prev').addEventListener('click', function () { goDay(prev); });
@@ -892,9 +963,9 @@
 
 	// ---- boot ------------------------------------------------------------
 
-	function empty(msg, cta) {
+	function empty(msg, cta, kind) {
 		$id('rec-main').className = 'd-none';
-		note(msg + (cta || ''), 'secondary');
+		note(msg + (cta || ''), kind || 'secondary');
 	}
 
 	Promise.all([loadConfig(), loadPulse()]).then(function () {
@@ -902,12 +973,19 @@
 			return empty('<strong>Recording is not configured.</strong> No recording path is set, so there is nothing to browse. ',
 				'<a href="tool-sdcard.cgi">Set up the SD card</a>.');
 		}
-		return loadDays().then(function () {
+		return Promise.all([loadDays(), loadCard()]).then(function () {
 			if (!state.days.length) {
-				return empty(state.enabled
-					? '<strong>Nothing recorded yet.</strong> Recording is on, but no clips have been written to <code>' + esc(state.prefix) + '</code> yet. '
-					: '<strong>Recording is off.</strong> The camera is not writing to the card, so there is nothing to browse. ',
-					'<a href="tool-sdcard.cgi">SD card</a>');
+				// The card gets the first word: "nothing recorded yet" is a
+				// guess, and a read-only or unreadable card is the answer.
+				// Only when the card is fine is an empty archive really about
+				// whether recording is switched on.
+				const bad = cardTrouble();
+				return empty(bad ||
+					(state.enabled
+						? '<strong>Nothing recorded yet.</strong> Recording is on, but no clips have been written to <code>' + esc(state.prefix) + '</code> yet.'
+						: '<strong>Recording is off.</strong> The camera is not writing to the card, so there is nothing to browse.'),
+					' <a href="tool-sdcard.cgi">SD card</a>' + (bad ? cardKernelLines() : ''),
+					bad ? 'danger' : 'secondary');
 			}
 			const want = (/[?&]day=([^&]*)/.exec(location.search) || [])[1];
 			const asked = want ? decodeURIComponent(want) : '';
@@ -918,7 +996,8 @@
 				wire();
 				renderDayNav();
 				renderClips();
-				loadStorage();
+				renderHealth();
+				renderStorage();
 				centreView(freshest());
 				goTo(freshest());     // opens the clip, so the page is not a black box
 			});

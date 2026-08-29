@@ -162,6 +162,10 @@ When you'd touch this code:
 
 Small `#!/bin/sh` scripts that emit JSON for the front-end. `pulse.cgi` is polled every 2s by `main.js:heartbeat` and fills the top bar (SoC temp, memory, overlay, uptime, day/night). `run.cgi` streams the output of a base64-encoded shell command (`cmd=` for trusted local, `web=` adds `timeout 3` for the console page).
 
+`sdcard.cgi` reports the card and runs its management ops, and it is read by two pages — `a/sdcard.js` and `a/recordings.js`. The judgement of whether a card is usable is made **once, server-side**, in its `health` field (`ok`, `readonly`, `unmounted`, `unreadable`, `unformatted`, `absent`); the pages only choose wording. `readonly` is the one that matters and the one nothing else can show: a card the kernel dropped to read-only (`errors=remount-ro`) still reports its old free space through `df`, so capacity, the storage bar and the clip list all read exactly as they did before recording stopped. `fsErrors` carries up to three matching `dmesg` lines and is gathered only in the unhealthy states — the endpoint is polled every 5 s and `dmesg` is ~80 KB on a running camera. It is corroboration only: the ring buffer is small and chatty enough that an error that stopped recording hours ago has usually scrolled out of it, so an empty list must never be rendered as a clean bill of health.
+
+`canFsck` exists because busybox ships the generic `fsck` wrapper on every build but it only execs `fsck.<fs>`, and a build without dosfstools has no `fsck.vfat` for it to find. The pages hide the Check action and say "reformat" instead when it is false, rather than offering a repair the firmware cannot perform.
+
 ### Front-end — `www/a/`
 
 - Pure JS, no framework. `$`/`$$` are `querySelector` wrappers. Don't introduce jQuery or any bundler — the README is explicit about keeping this small.
