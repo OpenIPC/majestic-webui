@@ -131,7 +131,7 @@
 
 	function render() {
 		const d = state;
-		const head = '<div class="d-flex align-items-center gap-3 mb-4 mt-n3"><h2 class="text-primary m-0">SD Card</h2>' + badge(d || {}) + '</div>';
+		const head = '<div class="d-flex align-items-center gap-3 mb-4"><h2 class="text-primary m-0">SD Card</h2>' + badge(d || {}) + '</div>';
 		if (!d || !d.present) {
 			SD.innerHTML = head + '<div class="alert alert-secondary">No SD card detected. Insert a card and reload.</div>';
 			return;

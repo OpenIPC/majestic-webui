@@ -925,7 +925,7 @@
 			'<div class="x-small text-secondary" id="rec-sel-note">' + TL.duration(s.seconds) +
 			' · about ' + TL.bytes(s.bytes) + ' · saved without re-encoding' +
 			(s.clipped ? ' · trimmed to this clip' : '') + '</div></div>' +
-			'<div class="mj-push-end d-flex gap-2">' +
+			'<div class="ms-auto d-flex gap-2">' +
 			'<button class="btn btn-sm btn-outline-secondary" id="rec-sel-clear" type="button">Clear</button>' +
 			'<button class="btn btn-sm btn-primary" id="rec-sel-save" type="button">Save clip</button></div>';
 		$id('rec-sel-clear').addEventListener('click', function () { state.sel = null; renderTimeline(); });
@@ -1036,12 +1036,12 @@
 			// loudest wrong thing on the page. The fourth is the card we could
 			// not ask — still not green, because green is a claim.
 			(!state.enabled
-				? '<span class="mj-push-end badge text-bg-secondary">Recording off</span>'
+				? '<span class="ms-auto badge text-bg-secondary">Recording off</span>'
 				: cardTrouble()
-					? '<span class="mj-push-end badge text-bg-danger">Cannot record</span>'
+					? '<span class="ms-auto badge text-bg-danger">Cannot record</span>'
 					: cardWritable()
-						? '<span class="mj-push-end badge text-bg-success">Recording</span>'
-						: '<span class="mj-push-end badge text-bg-secondary" ' +
+						? '<span class="ms-auto badge text-bg-success">Recording</span>'
+						: '<span class="ms-auto badge text-bg-secondary" ' +
 							'title="Recording is switched on, but the SD card\'s state could not be read">' +
 							'Recording — card unknown</span>') +
 			'<span class="small text-secondary">' + zoneNote + '</span>';

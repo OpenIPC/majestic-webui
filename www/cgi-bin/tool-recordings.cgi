@@ -33,7 +33,7 @@
 
 				<div class="d-flex flex-wrap align-items-center gap-2 mt-2">
 					<span class="small text-secondary" id="rec-status"></span>
-					<button class="btn btn-sm btn-outline-secondary mj-push-end" id="rec-dl" type="button">Save whole clip</button>
+					<button class="btn btn-sm btn-outline-secondary ms-auto" id="rec-dl" type="button">Save whole clip</button>
 				</div>
 
 				<div class="rec-lbl mt-3">Whole day</div>

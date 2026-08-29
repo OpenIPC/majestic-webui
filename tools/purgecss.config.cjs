@@ -4,12 +4,15 @@
 // the purged subset so the rootfs fits the smallest-flash boards (e.g. a 5120 KB
 // rootfs partition, where the full file alone is the difference between fit and
 // overflow). Regenerate with tools/regen-bootstrap-css.sh whenever you add Bootstrap
-// classes to a page or bump the Bootstrap version.
+// classes to a page or bump the Bootstrap version — CI diffs a fresh regeneration
+// against the committed file, so a stale bootstrap.min.css fails the PR rather than
+// shipping classes that silently do nothing (ms-auto and col-md-8 both did, for
+// months).
 //
-// content scans every page (.cgi/.html) AND all JS — including bootstrap.bundle.min.js,
-// so the classes Bootstrap's own JS toggles at runtime (show/fade/collapsing/…)
-// survive. The safelist below only needs to cover classes built by string
-// concatenation that the scanner can't see literally.
+// content scans every page (.cgi/.html) and our JS. There is no vendor JS any more —
+// the Bootstrap bundle is gone — so everything the scanner sees is markup or code
+// this tree owns, and the safelist below only needs to cover class names built by
+// string concatenation that the scanner cannot see literally.
 module.exports = {
 	content: [
 		'www/**/*.cgi',
@@ -21,16 +24,21 @@ module.exports = {
 	keyframes: false,
 	fontFace: false,
 	safelist: {
-		// `'alert alert-' + result` (fw-time.js / fw-update.js) — never appears as a literal token.
+		// `'alert alert-' + result` (fw-reset.js / fw-update.js) — never appears as a literal token.
 		standard: [
 			'alert-success', 'alert-danger', 'alert-warning', 'alert-info',
 			'alert-primary', 'alert-secondary', 'alert-light', 'alert-dark',
 		],
-		// Belt-and-suspenders for JS component state + concatenated utility families.
+		// Only what is genuinely built by concatenation. Every state class our
+		// JS toggles (show, active, disabled…) appears as a literal string in
+		// that JS, so the content scan keeps it; the old greedy entries for
+		// modal/offcanvas/dropdown/tooltip/popover/carousel/collaps… covered
+		// the Bootstrap JS bundle this tree no longer ships, and each of them
+		// also dragged whole unused components back in (a greedy match keeps
+		// every selector the class appears in — /(^|-)show$/ alone preserved
+		// the offcanvas and modal-backdrop machinery).
 		greedy: [
-			/(^|-)show$/, /fade/, /collaps/, /modal/, /offcanvas/, /dropdown/,
-			/tooltip/, /popover/, /carousel/, /tab-pane/, /(^|-)active$/, /disabled/,
-			/alert-/, /text-bg-/,
+			/text-bg-/,        // 'text-bg-' + tone (status.js badge())
 		],
 	},
 };
