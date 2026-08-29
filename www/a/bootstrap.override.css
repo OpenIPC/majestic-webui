@@ -484,6 +484,13 @@ pre#output[data-cmd] {
 	   is a breathing gap rather than a chrome offset. */
 	#mj-settings-form-col {
 		scroll-margin-top: 1rem;
+		/* And the room to get there. The rail above the form is most of a screen,
+		   so a short section leaves too little page below it to scroll with, and
+		   the browser clamps you part of the way down: measured at 500x844 on an
+		   hi3516av300, half the sections stopped between 27 and 576px short of the
+		   top. Reserving a screen for the column costs some empty space under a
+		   short card and makes every section land in the same place. */
+		min-height: 100vh;
 	}
 }
 
