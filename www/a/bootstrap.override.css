@@ -1056,3 +1056,12 @@ mark {
 		margin-left: auto;
 	}
 }
+
+/* The peer count beside the camera name ("+5"), subordinate to it on either
+   navbar. It carried text-body-secondary, which is not in the PurgeCSS subset
+   this tree ships — so it was never muted at all, in any theme. A translucent
+   white works against both bars: the dark grey one and the brand-coloured one
+   the light theme paints. */
+#cam-switch-count {
+	color: rgba(255, 255, 255, 0.7);
+}
