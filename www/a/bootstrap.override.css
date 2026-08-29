@@ -766,3 +766,17 @@ mark {
 .mj-push-end {
 	margin-left: auto;
 }
+
+/* revealSection() moves focus to the section's heading when you pick one, so
+   that a tap which neither navigates nor opens anything still announces the
+   section to a screen reader (#199). A heading is not a control, though, and a
+   pointer user has no reason to see a focus ring on it — it read as the title
+   having been selected, or as a stray border round the card (#184).
+
+   So the ring goes for pointer focus and stays for keyboard focus, which is the
+   one case where it is doing its job: :focus-visible is exactly that
+   distinction, and the heading is only ever focused programmatically, so
+   nothing else can put a ring here. */
+#mj-settings-form h3[tabindex]:focus:not(:focus-visible) {
+	outline: none;
+}
