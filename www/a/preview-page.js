@@ -514,14 +514,22 @@
 		if (!want) return null;   // not laid out yet; ask again later
 		const options = [];
 		for (let n = 0; n < 2; n++) {
-			if (sizeOf[n] && (n === 0 || subAvailable)) {
-				options.push({ n: n, area: sizeOf[n] });
-			}
+			if (n === 1 && !subAvailable) continue;
+			// An unset size is not a missing channel — video0.size ships with no
+			// default at all, and empty means "whatever the sensor gives",
+			// which is the largest picture the camera has. Treating it as
+			// unknown-and-excluded left Auto on the substream for ever on every
+			// camera whose main stream had never been set by hand, which is
+			// most of them.
+			options.push({ n: n, area: sizeOf[n] === null ? Infinity : sizeOf[n] });
 		}
 		if (!options.length) return null;
 		const atLeast = options.filter(o => o.area >= want);
+		// Ties go to the later option, which is the substream: two channels the
+		// same size, or two unknown ones, cost the same to decode and the
+		// cheaper one to carry.
 		if (atLeast.length) {
-			return atLeast.reduce((a, b) => (b.area < a.area ? b : a)).n;
+			return atLeast.reduce((a, b) => (b.area <= a.area ? b : a)).n;
 		}
 		return options.reduce((a, b) => (b.area > a.area ? b : a)).n;
 	}
@@ -669,15 +677,29 @@
 		});
 	});
 
-	// Follow the window. Debounced because a drag fires this continuously, and
-	// the rate limit in autoApply() is what keeps the session from being cut
-	// more than once a second even so.
+	// Follow the size, debounced — a drag fires continuously, and the rate limit
+	// in autoApply() is what keeps the session from being cut more than once a
+	// second even then.
+	//
+	// The element, not the window: this page is responsive, so a column
+	// reflowing or something above it changing height resizes the player
+	// without the viewport moving at all. Watching only the window would leave
+	// Auto on the wrong stream until the viewer happened to drag the browser.
+	// The window listener stays as the fallback where ResizeObserver does not.
 	let resizeTimer = null;
-	window.addEventListener('resize', () => {
+	const onResize = () => {
 		if (!autoOn) return;
 		clearTimeout(resizeTimer);
 		resizeTimer = setTimeout(autoApply, 250);
-	});
+	};
+	if (typeof ResizeObserver === 'function') {
+		const ro = new ResizeObserver(onResize);
+		[$('#live-video'), $('#live-video-b')].forEach(el => {
+			if (el) { try { ro.observe(el); } catch (e) {} }
+		});
+	} else {
+		window.addEventListener('resize', onResize);
+	}
 
 	// Audio: revealed only when the camera has it configured and the transport
 	// in use can carry it — otherwise the button is a dead end.

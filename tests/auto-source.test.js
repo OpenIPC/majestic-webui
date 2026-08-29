@@ -38,7 +38,7 @@ function makeEl(id) {
 
 // cfg: { box: [w,h], main: 'WxH', sub: 'WxH', subEnabled: bool, picked: choice }
 function load(cfg) {
-	const env = { made: [], els: {} };
+	const env = { made: [], els: {}, observed: [] };
 	IDS.forEach((id) => { env.els['#' + id] = makeEl(id); });
 	// As the markup ships them: the Sub and Auto labels start hidden and are
 	// revealed only where a second stream exists.
@@ -70,10 +70,12 @@ function load(cfg) {
 	}
 	const impls = { mse: impl('mse'), webrtc: impl('webrtc') };
 
+	// `|| default` would turn an intentionally empty size back into a set one,
+	// which is exactly the case the unset-Main test exists for.
 	const conf = {
 		'video1.enabled': cfg.subEnabled !== false,
-		'video0.size': cfg.main || '1920x1080',
-		'video1.size': cfg.sub || '640x360',
+		'video0.size': cfg.main === undefined ? '1920x1080' : cfg.main,
+		'video1.size': cfg.sub === undefined ? '640x360' : cfg.sub,
 	};
 
 	const win = {
@@ -94,6 +96,12 @@ function load(cfg) {
 
 	const ctx = {
 		window: win, console: console,
+		// The page prefers this over the window event, so the stub has to
+		// provide it or the tests would only ever cover the fallback.
+		ResizeObserver: function (fn) {
+			this.observe = function (el) { env.observed.push(el); win.roFire = fn; };
+			this.disconnect = function () {};
+		},
 		MajesticVideo: impls.mse, MajesticWebRTC: impls.webrtc,
 		MajesticTransport: win.MajesticTransport,
 		$: (sel) => env.els[sel],
@@ -170,7 +178,7 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		[env.el('live-video'), env.el('live-video-b')].forEach((e) => {
 			e.clientWidth = 320; e.clientHeight = 180;
 		});
-		env.win.fire('resize');
+		if (env.win.roFire) env.win.roFire(); else env.win.fire('resize');
 		await tick(300);
 		check('the first change goes through', live.streamSet === 1,
 			'streamSet=' + live.streamSet);
@@ -180,13 +188,44 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		[env.el('live-video'), env.el('live-video-b')].forEach((e) => {
 			e.clientWidth = 1920; e.clientHeight = 1080;
 		});
-		env.win.fire('resize');
+		if (env.win.roFire) env.win.roFire(); else env.win.fire('resize');
 		await tick(300);
 		check('a change inside the window is not applied yet',
 			live.streamSet === 1, 'streamSet=' + live.streamSet);
 		await tick(900);
 		check('but it is applied once the window passes',
 			live.streamSet === 0, 'streamSet=' + live.streamSet);
+	}
+
+	group('the player element is watched, not only the window');
+	{
+		const env = load({ box: [640, 360], picked: 'auto' });
+		await tick();
+		check('both video elements are observed', env.observed.length === 2,
+			String(env.observed.length));
+	}
+
+	group('an unset main size means sensor native, not "no such stream"');
+	{
+		// video0.size ships with no default at all: empty means whatever the
+		// sensor gives, which is the largest picture the camera has. Excluding
+		// it would leave Auto on the substream for ever.
+		const env = load({
+			box: [1600, 900], main: '', sub: '640x360', picked: 'auto',
+		});
+		await tick();
+		check('Auto took Main for a box bigger than the substream',
+			env.made[0].opts.stream === 0, 'stream=' + env.made[0].opts.stream);
+	}
+
+	group('and a small box still prefers the substream');
+	{
+		const env = load({
+			box: [320, 180], main: '', sub: '640x360', picked: 'auto',
+		});
+		await tick();
+		check('Auto took Sub', env.made[0].opts.stream === 1,
+			'stream=' + env.made[0].opts.stream);
 	}
 
 	group('choosing Auto is remembered as a choice of its own');
