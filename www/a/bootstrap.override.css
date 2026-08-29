@@ -757,3 +757,12 @@ mark {
 	border-color: var(--bs-danger);
 	box-shadow: 0 0 0 .25rem rgba(var(--bs-danger-rgb), .25);
 }
+
+/* Pushes a flex item to the far end of its row. Bootstrap's own ms-auto is not
+   in the trimmed build this tree ships, so the class silently did nothing —
+   the stats toggle sat against the buttons it was supposed to be separated
+   from. Named for the job rather than the direction, since the row is the only
+   place it is used. */
+.mj-push-end {
+	margin-left: auto;
+}
