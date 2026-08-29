@@ -29,7 +29,10 @@
 
 				<div class="rec-lbl mt-3">Whole day</div>
 				<div class="rec-strip" id="rec-strip"></div>
-				<div class="rec-hours">
+				<!-- The camera's own 24 hours. Relabelled by recordings.js when the
+				     viewer asks to read the day on their clock instead; left exactly
+				     as written here when the two zones agree, which is most cameras. -->
+				<div class="rec-hours" id="rec-hours">
 					<span>00</span><span>02</span><span>04</span><span>06</span><span>08</span><span>10</span>
 					<span>12</span><span>14</span><span>16</span><span>18</span><span>20</span><span>22</span><span>24</span>
 				</div>
