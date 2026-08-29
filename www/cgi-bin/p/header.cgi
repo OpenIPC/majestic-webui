@@ -84,6 +84,15 @@ Pragma: no-cache
 						</ul>
 					</li>	
 					<li class="nav-item"><a class="nav-link" href="preview.cgi">Preview</a></li>
+					<!-- Top level rather than under Tools: browsing an archive is a
+					     viewing job like Preview, not a maintenance one, and the
+					     File Manager route it replaces was the thing nobody found.
+					     Same card guard as the SDcard entry below — a camera with
+					     no card cannot record, so the page would only ever show its
+					     empty state. -->
+					<% if [ -e /dev/mmcblk0 ]; then %>
+						<li class="nav-item"><a class="nav-link" href="tool-recordings.cgi">Recordings</a></li>
+					<% fi %>
 					<!-- Other OpenIPC cameras on this link. Hidden until
 					     /a/cameras-switch.js confirms there are peers; inert
 					     markup, filled by JS with textContent (peer names are
