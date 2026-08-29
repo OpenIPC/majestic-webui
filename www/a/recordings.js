@@ -35,6 +35,11 @@
 	};
 
 
+	// Bumped on every seek: a drag fires overlapping lookups and only the
+	// newest may move the picture.
+	let seekToken = 0;
+	let player = null;
+
 	const $id = function (s) { return document.getElementById(s); };
 	function esc(s) {
 		return String(s).replace(/[&<>"]/g, function (c) {
@@ -114,21 +119,168 @@
 
 	// ---- the player ------------------------------------------------------
 	//
-	// A plain <video> element pointed at the clip's own URL, seeking on its own
-	// over the Range requests majestic serves.
+	// MSE fed from byte offsets the index works out, so a seek fetches the
+	// fragment holding that second instead of asking the browser to find it.
 	//
-	// An MSE path aimed by the fragment index would seek by byte offset rather
-	// than by asking the browser to find the moment, and it is a reasonable
-	// next step — but only reasonable, not necessary. A recording carries a
-	// tfdt in every fragment, so the element has the decode times it needs to
-	// seek without walking the file, and a plain element is a great deal less
-	// machinery to get wrong.
+	// Every fragment states its own start in tfdt, and that is what makes this
+	// simple rather than fiddly. SourceBuffer stays in its default 'segments'
+	// mode, where an appended fragment lands at the time it claims: append the
+	// fragments for 5s..9s and `buffered` reads 5.00-9.00, whatever was or was
+	// not appended before them. So there is no timestampOffset to maintain, no
+	// anchor to re-establish per seek, and the media timeline is clip time —
+	// video.currentTime is just the second being watched.
 	//
-	// What is worth remembering is why this is not MSE already: a SourceBuffer
-	// refuses a media segment that has no tfdt, outright and with an empty
-	// buffer. Recordings written before that box was added cannot be appended
-	// at all, however they are fed in — no mode, timestampOffset or codec
-	// string changes it — while the same files play in a plain element.
+	// ('sequence' mode is the wrong tool here for exactly that reason: it
+	// re-times each append to follow the last, so the same fragments land at
+	// 0.00-4.00 and every position on the timeline means something else.)
+	//
+	// DEPRECATED PATH, REMOVE AFTER 2029-01: recordings written before majestic
+	// emitted tfdt cannot be played this way at all — a SourceBuffer refuses a
+	// media segment without one, leaving `buffered` empty and no error worth
+	// reading. Cameras write tfdt now, so this only matters for clips already
+	// sitting on cards when that shipped. Once those have rotated away (a card
+	// fills and recycles in days; a few years is generous), delete plainFallback
+	// and the watchdog below with it, and let a clip that will not append fail
+	// honestly.
+	function mkPlayer(video, onFallback) {
+		let ms = null, sb = null, objUrl = null;
+		let read = null, size = 0, headerLen = 0;
+		let cursor = 0, dead = false, busy = false, reset = false;
+		let want = null, watchdog = null;
+		// A fragment is ~340 KB and at most ~730 KB on an av300 at 4K, so one
+		// read usually swallows a whole one; when it does not, the remainder
+		// costs one extra request rather than a wrong append.
+		const WINDOW = 1024 * 1024, AHEAD = 12, BEHIND = 30;
+
+		function bufferedAhead() {
+			try {
+				const t = video.currentTime;
+				for (let i = 0; i < sb.buffered.length; i++) {
+					if (t >= sb.buffered.start(i) - 0.25 && t <= sb.buffered.end(i))
+						return sb.buffered.end(i) - t;
+				}
+			} catch (e) { /* not ready */ }
+			return 0;
+		}
+
+		function covers(sec) {
+			try {
+				for (let i = 0; i < sb.buffered.length; i++)
+					if (sec >= sb.buffered.start(i) && sec < sb.buffered.end(i)) return true;
+			} catch (e) {}
+			return false;
+		}
+
+		function evict() {
+			try {
+				if (!sb.buffered.length) return;
+				const keep = video.currentTime - BEHIND;
+				if (keep > sb.buffered.start(0)) sb.remove(sb.buffered.start(0), keep);
+			} catch (e) { /* nothing to drop */ }
+		}
+
+		function fill() {
+			if (dead || !sb || sb.updating || busy) return;
+			if (reset) {
+				reset = false;
+				try { sb.remove(0, Infinity); return; } catch (e) { /* fall through */ }
+			}
+			if (want !== null && covers(want)) {
+				try { video.currentTime = want; } catch (e) {}
+				want = null;
+			}
+			if (cursor + 16 > size) {
+				// Every fragment is in. Say so, or the element treats the
+				// media as open-ended: currentTime runs on past the last
+				// buffered second, the page follows it out of the clip
+				// entirely, and a scrub back into the clip then looks like it
+				// was ignored.
+				try { if (ms && ms.readyState === 'open') ms.endOfStream(); } catch (e) {}
+				return;
+			}
+			if (bufferedAhead() > AHEAD) return;
+
+			busy = true;
+			const at = cursor;
+			read(at, Math.min(at + WINDOW, size) - 1).then(function (buf) {
+				if (dead || !sb) { busy = false; return; }
+				const f = IDX.parseFragment(buf);
+				// The tail of a clip still being recorded: headers on the card,
+				// payload not yet. Stop rather than append something partial.
+				if (!f || f.short || !f.total || at + f.total > size) { busy = false; return; }
+				const whole = f.total <= buf.length
+					? Promise.resolve(buf.subarray(0, f.total))
+					: read(at, at + f.total - 1);
+				return whole.then(function (bytes) {
+					if (dead || !sb) { busy = false; return; }
+					cursor = at + f.total;
+					try { sb.appendBuffer(bytes); } catch (e) { evict(); }
+					busy = false;
+				});
+			}).catch(function () { busy = false; });
+		}
+
+		return {
+			attach: function (url, initInfo, clipSize, mime) {
+				read = IDX.reader(url); size = clipSize;
+				headerLen = initInfo.headerLength; cursor = initInfo.firstMoof;
+				dead = false; busy = false; reset = false; want = null;
+				ms = new MediaSource();
+				objUrl = URL.createObjectURL(ms);
+				video.src = objUrl;
+				ms.addEventListener('sourceopen', function () {
+					try { sb = ms.addSourceBuffer(mime); } catch (e) { return onFallback(); }
+					sb.addEventListener('updateend', function () { evict(); fill(); });
+					read(0, headerLen - 1).then(function (head) {
+						if (dead || !sb) return;
+						try { sb.appendBuffer(head); } catch (e) { onFallback(); }
+					});
+				}, { once: true });
+
+				// A pre-tfdt recording buffers nothing and says almost nothing
+				// about why. What it does NOT do is fail the append: appendBuffer
+				// returns fine and the parse gives up afterwards, so "did we
+				// append" is not the question — "is there anything in the
+				// buffer" is. Give it a moment, then hand the clip to a plain
+				// element rather than leave a black frame and no explanation.
+				watchdog = setTimeout(function () {
+					if (dead) return;
+					let has = 0;
+					try { has = sb ? sb.buffered.length : 0; } catch (e) {}
+					if (!has) onFallback();
+				}, 5000);
+			},
+			// Whether the SourceBuffer ever accepted anything. The difference
+			// between "this media is not appendable" and "something went wrong
+			// just now" — only the first is worth abandoning MSE over.
+			hasData: function () {
+				try { return sb ? sb.buffered.length > 0 : false; } catch (e) { return false; }
+			},
+			seekTo: function (off, sec) {
+				want = sec;
+				if (covers(sec)) {
+					try { video.currentTime = sec; } catch (e) {}
+					want = null;
+					return;
+				}
+				cursor = off;
+				reset = true;
+				fill();
+			},
+			destroy: function () {
+				dead = true;
+				clearTimeout(watchdog);
+				try { if (sb && ms && ms.readyState === 'open') ms.removeSourceBuffer(sb); } catch (e) {}
+				try { if (ms && ms.readyState === 'open') ms.endOfStream(); } catch (e) {}
+				if (objUrl) { try { URL.revokeObjectURL(objUrl); } catch (e) {} }
+				sb = null; ms = null; objUrl = null;
+				// Let go of the revoked blob too, or the element raises an
+				// error for a source that no longer exists — which the page
+				// would otherwise read as the clip being unplayable.
+				try { video.removeAttribute('src'); video.load(); } catch (e) {}
+			},
+		};
+	}
 
 	// ---- opening a clip --------------------------------------------------
 
@@ -140,6 +292,7 @@
 		state.hint = null;
 		const url = fileUrl(clipPath(clip.name));
 
+		if (player) { player.destroy(); player = null; }
 		setStatus('Reading clip header…');
 
 		const read = IDX.reader(url);
@@ -169,7 +322,12 @@
 			state.mime = mime;
 			setStatus('');
 
-			video.src = url;
+			if ('MediaSource' in window && MediaSource.isTypeSupported(mime)) {
+				player = mkPlayer(video, function () { plainFallback(clip, url); });
+				player.attach(url, init, clip.size, mime);
+			} else {
+				video.src = url;
+			}
 			positionAt(atSec || 0);
 			video.play().catch(function () { /* autoplay policy; controls remain */ });
 
@@ -182,13 +340,45 @@
 		});
 	}
 
-	// Move to a moment inside the clip that is already open. The element does
-	// its own seeking over Range; the clips carry no index, so how quickly it
-	// gets there is the browser's business and not something the page can aim.
+	// Move to a moment inside the clip that is already open.
+	//
+	// With a player attached this is a lookup, not a request to search: locate()
+	// reads tfdt to find the byte the fragment starts at, in about ten range
+	// reads, and the player appends from there. Without one — no MSE, or a
+	// pre-tfdt recording that fell back — the element seeks for itself.
 	function positionAt(sec) {
 		const video = $id('rec-video');
 		if (!video) return;
-		try { video.currentTime = Math.max(0, sec); } catch (e) { /* not ready yet */ }
+		if (!player || !state.init) {
+			try { video.currentTime = Math.max(0, sec); } catch (e) { /* not ready */ }
+			return;
+		}
+		const clip = state.clip, init = state.init;
+		const per = state.hint ? state.hint.perFragment : 1;
+		const token = ++seekToken;
+		IDX.locate(IDX.reader(fileUrl(clipPath(clip.name))), clip.size, init, sec, per)
+			.then(function (hit) {
+				// A drag fires many of these; only the newest may move the
+				// picture, or it lands wherever the slowest lookup finished.
+				if (token !== seekToken || state.clip !== clip || !player) return;
+				player.seekTo(hit.off, Math.max(sec, hit.approxSec));
+			}).catch(function () { /* stay where we are */ });
+	}
+
+	// DEPRECATED, REMOVE AFTER 2029-01 — see the note above mkPlayer.
+	//
+	// A recording with no tfdt cannot go through a SourceBuffer at all. Hand it
+	// to the element instead of leaving a black frame: it plays these fine, it
+	// just has to find its own way to a seek.
+	function plainFallback(clip, url) {
+		if (!player || state.clip !== clip) return;
+		player.destroy();
+		player = null;
+		const video = $id('rec-video');
+		if (!video) return;
+		const at = video.currentTime || 0;
+		video.src = url + (at > 0.5 ? '#t=' + at.toFixed(2) : '');
+		video.play().catch(function () {});
 	}
 
 	// ---- storage ---------------------------------------------------------
@@ -255,9 +445,19 @@
 		IDX.durationHint(IDX.reader(url), clip.size, init).then(function (h) {
 			if (!h || state.clip !== clip) return;
 			state.hint = h;
-			if (TL.applyExactDuration(state.day, clip.name, h.seconds)) {
-				renderClips();
-				renderTimeline();
+			if (!TL.applyExactDuration(state.day, clip.name, h.seconds)) return;
+			renderClips();
+			renderTimeline();
+
+			// Until this landed the clip's length was a guess — the configured
+			// split, or the gap to the next clip. A clip cut short by a reboot
+			// is much shorter than that guess, so the playhead can be sitting
+			// past the end of footage that does not exist. Pull it back to the
+			// last moment there is, and re-aim the player at it.
+			if (state.playhead > clip.end - 0.5) {
+				state.playhead = Math.max(clip.start, clip.end - 0.5);
+				centreView(state.playhead);
+				positionAt(state.playhead - clip.start);
 			}
 		});
 	}
@@ -631,8 +831,15 @@
 		});
 		v.addEventListener('error', function () {
 			if (!state.clip) return;
+			const url = fileUrl(clipPath(state.clip.name));
+			// While MSE is driving and nothing has ever buffered, the
+			// SourceBuffer could not make sense of the media — a pre-tfdt
+			// recording, most likely — and the plain element has no such
+			// trouble. If data HAS buffered, the error is something else and
+			// throwing away a working player would only make it worse.
+			if (player && !player.hasData()) { plainFallback(state.clip, url); return; }
 			note('Playback stopped on <code>' + esc(state.clip.name) + '</code>. ' +
-				'<a href="' + esc(fileUrl(clipPath(state.clip.name))) + '" download>Save the clip</a> instead.', 'danger');
+				'<a href="' + esc(url) + '" download>Save the clip</a> instead.', 'danger');
 		});
 
 		const dl = $id('rec-dl');

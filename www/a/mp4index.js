@@ -6,10 +6,15 @@
 // byte a given second starts at; that has to be recovered from outside.
 //
 // Each fragment does state its own start, in tfdt, and everything here is built
-// on that. Recordings written before majestic wrote tfdt have only
-// mfhd.sequence_number to go on, which counts writes rather than fragments —
-// it ran 71 ahead over 300 fragments on an av300 — so on those files a seek can
-// only be approximate, and says so.
+// on that.
+//
+// DEPRECATED FALLBACK, REMOVE AFTER 2029-01: recordings written before majestic
+// wrote tfdt have only mfhd.sequence_number to go on, which counts writes rather
+// than fragments — it ran 71 ahead over 300 fragments on an av300 — so on those
+// files a lookup can only be approximate, and says so through `approximate` on
+// durationHint and `exact` on locate. Cameras write tfdt now, so this is only
+// for clips already on cards when that shipped; once those have rotated away,
+// drop the seq branches and let both simply require tfdt.
 //
 // Everything here is therefore about recovering that index from outside the
 // file, over HTTP Range — which majestic does serve properly (206 with
