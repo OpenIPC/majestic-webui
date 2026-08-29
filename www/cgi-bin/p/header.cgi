@@ -24,7 +24,9 @@ Pragma: no-cache
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=PT+Mono&display=swap" media="print" onload="this.onload=null;this.media='all'">
 	<link rel="stylesheet" href="/a/bootstrap.min.css">
 	<link rel="stylesheet" href="/a/bootstrap.override.css">
-	<script src="/a/bootstrap.bundle.min.js"></script>
+	<!-- No bootstrap.bundle.min.js: the few behaviours the UI used from it
+	     (modals, dropdowns, the navbar toggler, alert dismiss) live in main.js
+	     against the same markup and CSS. -->
 	<script src="/a/main.js"></script>
 	<script src="/a/cameras-switch.js" defer></script>
 </head>

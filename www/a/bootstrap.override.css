@@ -1117,3 +1117,53 @@ mark {
 		vertical-align: bottom;
 	}
 }
+
+/* --- Native <dialog> modals.
+   The Bootstrap JS bundle is gone: modals are <dialog> elements now, with
+   Escape, focus and centring supplied by the platform. The header/body/footer
+   inside still wear Bootstrap's modal classes, and those rules read
+   --bs-modal-* tokens that upstream defines on the .modal wrapper this markup
+   no longer has — so the subset they need is declared here instead. */
+dialog.mj-modal {
+	--bs-modal-padding: 1rem;
+	--bs-modal-header-padding: 1rem 1rem;
+	/* the split pair too: .modal-header .btn-close margins read these, and
+	   with them undefined the whole margin — auto push-right included — is
+	   discarded, leaving the close button glued to the title */
+	--bs-modal-header-padding-x: 1rem;
+	--bs-modal-header-padding-y: 1rem;
+	--bs-modal-header-border-color: var(--bs-border-color);
+	--bs-modal-header-border-width: var(--bs-border-width);
+	--bs-modal-title-line-height: 1.5;
+	--bs-modal-footer-gap: 0.5rem;
+	--bs-modal-footer-bg: transparent;
+	--bs-modal-footer-border-color: var(--bs-border-color);
+	--bs-modal-footer-border-width: var(--bs-border-width);
+	--bs-modal-inner-border-radius: calc(var(--bs-border-radius-lg) - var(--bs-border-width));
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-lg);
+	background: var(--bs-body-bg);
+	color: var(--bs-body-color);
+	box-shadow: var(--bs-box-shadow);
+	width: min(500px, calc(100vw - 2rem));
+	max-height: calc(100vh - 3.5rem);
+}
+
+dialog.mj-modal.mj-modal-lg {
+	width: min(800px, calc(100vw - 2rem));
+}
+
+/* Flex only while open — an unconditional display would override the UA's
+   display:none and leave every closed modal sitting in the page. The column
+   layout is what lets a tall .modal-body scroll inside max-height. */
+dialog.mj-modal[open] {
+	display: flex;
+	flex-direction: column;
+}
+
+/* ::backdrop cannot reliably read :root tokens, so the colour is literal —
+   the same 50% black Bootstrap's own backdrop used in both themes. */
+dialog.mj-modal::backdrop {
+	background: rgba(0, 0, 0, 0.5);
+}
