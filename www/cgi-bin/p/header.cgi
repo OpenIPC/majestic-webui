@@ -19,9 +19,9 @@ Pragma: no-cache
 	     instead of refusing — must not hold first paint on fonts.googleapis.com.
 	     media="print" keeps the fetch off the render path; onload promotes the
 	     sheet once it actually arrives, and until then the system stack from
-	     bootstrap.override.css is what you read. -->
+	     bootstrap.override.css is what you read. No <noscript> twin: it would
+	     be render-blocking again, and without JS this UI is inert anyway. -->
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=PT+Mono&display=swap" media="print" onload="this.onload=null;this.media='all'">
-	<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=PT+Mono&display=swap"></noscript>
 	<link rel="stylesheet" href="/a/bootstrap.min.css">
 	<link rel="stylesheet" href="/a/bootstrap.override.css">
 	<script src="/a/bootstrap.bundle.min.js"></script>

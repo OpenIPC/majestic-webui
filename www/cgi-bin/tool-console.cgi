@@ -6,15 +6,13 @@ page_title="Console"
 
 <%in p/header.cgi %>
 <!-- Two consoles share this page: the interactive xterm.js terminal over
-     /ws/terminal, and a one-command-at-a-time runner over j/run.cgi. Which one
-     you get depends only on whether the CDN answered — everything below is
-     inert until the loader script at the bottom decides. -->
-<p class="text-secondary" id="console-loading">Loading terminal&hellip;</p>
-
+     /ws/terminal, and a one-command-at-a-time runner over j/run.cgi. The
+     runner is local and live from first paint; the terminal comes from a CDN
+     and takes over if and when it arrives. -->
 <div id="terminal" class="border rounded mb-3 d-none" style="height:72vh"></div>
 
-<div id="console-fallback" class="d-none">
-	<p class="text-secondary small">The interactive terminal loads from a CDN this camera cannot reach right now, so commands run one at a time, each with a 3-second timeout.</p>
+<div id="console-fallback">
+	<p class="text-secondary small">The full terminal loads from a CDN; until it arrives &mdash; and without internet it never does &mdash; commands run one at a time, each with a 3-second timeout.</p>
 	<form id="console-form" class="row g-2 mb-3">
 		<div class="col-10">
 			<input autocomplete="off" class="form-control" id="command" placeholder="Command" type="text">
@@ -33,10 +31,10 @@ page_title="Console"
 	// because the smallest boards have no flash to spare for it. The price is
 	// that the load can fail (no internet) or stall for minutes (a route that
 	// blackholes instead of refusing — the case #31 was opened on), so the
-	// scripts are injected with an error path and a deadline instead of being
-	// <script src> tags that would gate the whole page on the CDN.
+	// local console works from first paint and the scripts are injected with
+	// an error path, never as <script src> tags that would gate the page on
+	// the CDN.
 	const CDN = 'https://cdn.jsdelivr.net/npm/';
-	let mode = null;
 
 	function load(src) {
 		return new Promise(res => {
@@ -55,29 +53,18 @@ page_title="Console"
 	css.href = CDN + '@xterm/xterm@5.5.0/css/xterm.min.css';
 	document.head.appendChild(css);
 
-	const scripts = load(CDN + '@xterm/xterm@5.5.0/lib/xterm.min.js')
+	load(CDN + '@xterm/xterm@5.5.0/lib/xterm.min.js')
 		.then(ok => ok && load(CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.min.js'))
-		.then(ok => ok && !!(window.Terminal && window.FitAddon));
-
-	// Nobody watches a blank page while a blackholed connection waits out the
-	// browser's own timeout. Eight seconds is enough for a slow but working
-	// link to win the race, and losing it only costs the richer console: the
-	// fallback still runs commands, and if the scripts land late a switch is
-	// offered rather than forced.
-	const deadline = new Promise(res => setTimeout(res, 8000, false));
-
-	Promise.race([scripts, deadline]).then(ok => {
-		if (ok) startTerminal();
-		else {
-			startFallback();
-			scripts.then(late => { if (late && mode !== 'terminal') offerTerminal(); });
-		}
-	});
+		.then(ok => {
+			if (!(ok && window.Terminal && window.FitAddon)) return;
+			// Take over silently only while the runner is untouched; once a
+			// command or half-typed input is on screen, switching would flush
+			// it, so it becomes the user's call.
+			if (!$('#command').value && !$('#console-output').childNodes.length) startTerminal();
+			else offerTerminal();
+		});
 
 	function startTerminal() {
-		mode = 'terminal';
-		const loading = $('#console-loading');
-		if (loading) loading.remove();
 		$('#console-fallback').classList.add('d-none');
 		$('#terminal').classList.remove('d-none');
 
@@ -105,12 +92,18 @@ page_title="Console"
 		addEventListener('resize', () => fit.fit());
 	}
 
-	function startFallback() {
-		mode = 'fallback';
-		const loading = $('#console-loading');
-		if (loading) loading.remove();
-		$('#console-fallback').classList.remove('d-none');
+	function offerTerminal() {
+		const p = document.createElement('p');
+		const b = document.createElement('button');
+		b.type = 'button';
+		b.className = 'btn btn-sm btn-outline-secondary';
+		b.textContent = 'The full terminal has finished loading — switch to it';
+		b.addEventListener('click', () => { p.remove(); startTerminal(); });
+		p.appendChild(b);
+		$('#console-fallback').prepend(p);
+	}
 
+	(function startFallback() {
 		const form = $('#console-form'), input = $('#command'), out = $('#console-output');
 		const dec = new TextDecoder();
 
@@ -145,9 +138,12 @@ page_title="Console"
 			btn.disabled = true;
 			out.textContent = '';
 			try {
-				// Not encodeURIComponent()'d: run.cgi reads QUERY_STRING raw,
-				// so base64's + / = must arrive as they are (see fw-reset.js).
-				const r = await apiFetch('/cgi-bin/j/run.cgi?web=' + btoa(c));
+				// UTF-8 through btoa as in files.js b64(): btoa alone throws
+				// on anything outside Latin-1, e.g. a non-Latin filename. Not
+				// encodeURIComponent()'d on top: run.cgi reads QUERY_STRING
+				// raw, so base64's + / = must arrive as they are (see
+				// fw-reset.js).
+				const r = await apiFetch('/cgi-bin/j/run.cgi?web=' + btoa(unescape(encodeURIComponent(c))));
 				if (!r.ok) throw new Error('run.cgi answered ' + r.status);
 				const rd = r.body.getReader();
 				for (;;) {
@@ -163,21 +159,7 @@ page_title="Console"
 			input.select();
 		});
 		input.focus();
-	}
-
-	// The deadline fired but the CDN answered afterwards — a slow link, not a
-	// dead one. Switching flushes whatever the one-shot console shows, so it
-	// is the user's call, not ours.
-	function offerTerminal() {
-		const p = document.createElement('p');
-		const b = document.createElement('button');
-		b.type = 'button';
-		b.className = 'btn btn-sm btn-outline-secondary';
-		b.textContent = 'The full terminal has finished loading — switch to it';
-		b.addEventListener('click', () => { p.remove(); startTerminal(); });
-		p.appendChild(b);
-		$('#console-fallback').prepend(p);
-	}
+	})();
 })();
 </script>
 
