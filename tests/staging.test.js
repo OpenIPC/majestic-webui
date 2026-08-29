@@ -15,7 +15,10 @@ const path = require('path');
 const vm = require('vm');
 const { check, group, done } = require('./assert');
 
-const SRC = path.join(__dirname, '..', 'www', 'a', 'preview-page.js');
+const A = (f) => path.join(__dirname, '..', 'www', 'a', f);
+// The swap machinery is a module of its own now; the page is what decides what
+// its outcomes mean, and that division is part of what these check.
+const SRCS = [A('preview-swap.js'), A('preview-page.js')];
 
 const IDS = [
 	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
@@ -79,6 +82,7 @@ function load(pickedTransport) {
 
 	const ctx = {
 		window: win,
+		MajesticSwap: null,   // preview-swap.js assigns it onto window below
 		console: console,
 		MajesticVideo: impls.mse,
 		MajesticWebRTC: impls.webrtc,
@@ -93,7 +97,11 @@ function load(pickedTransport) {
 		Promise: Promise,
 	};
 	vm.createContext(ctx);
-	vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
+	vm.runInContext(fs.readFileSync(SRCS[0], 'utf8'), ctx);
+	// The browser reaches window.MajesticSwap through the global scope; a vm
+	// context has no such link, so hand it over explicitly.
+	ctx.MajesticSwap = win.MajesticSwap;
+	vm.runInContext(fs.readFileSync(SRCS[1], 'utf8'), ctx);
 	env.el = (id) => env.els['#' + id];
 	return env;
 }
