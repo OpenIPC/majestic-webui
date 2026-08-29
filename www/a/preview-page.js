@@ -453,6 +453,11 @@
 		// correcting a default is helpful, overriding a decision is not.
 		const moved = !userPickedStream && chooseSub(cfg);
 		if (moved && player) player.setStream(stream);
+		// The note follows the channel, and this is the one path that changes
+		// the channel without going through attachPlayer(). A camera whose two
+		// channels differ would otherwise disclose Main's setting while playing
+		// Sub, until something else happened to re-sync it.
+		syncTransportNote();
 
 		// The ICE list, unconditionally. A blind attach opened with an empty
 		// one, and the getter is only read when a session opens — so without
