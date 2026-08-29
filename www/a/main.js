@@ -105,6 +105,29 @@ function fmtDeviceTime(epochMs, offsetMs) {
 	return new Date(epochMs + offsetMs).toLocaleString(undefined, { timeZone: 'UTC' });
 }
 
+// ...and the reader's own clock, which is the one the signature bar shows. Not
+// polled: the browser already knows the time, and it knows it in the zone the
+// person is actually in, which is more than the camera can say. Time only —
+// today's date is in the tooltip, because the bar is glanced at rather than
+// read and the full "8/29/2026, 5:47:07 PM" it used to carry crowded the row.
+function localClock() {
+	const el = $('#time-local');
+	if (!el) return;
+	const tick = () => {
+		const d = new Date();
+		el.textContent = d.toLocaleTimeString();
+		el.dateTime = d.toISOString();
+		el.title = d.toLocaleDateString(undefined, {
+			weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+		});
+		// Re-armed on the next second boundary rather than every 1000 ms: a fixed
+		// interval started mid-second slides against the wall clock and makes the
+		// display visibly skip a second every minute or so.
+		setTimeout(tick, 1000 - (Date.now() % 1000));
+	};
+	tick();
+}
+
 function setProgressBar(id, value, name) {
 	$(id).setAttribute('aria-valuenow', value);
 	$(id).title = name + ': ' + value + '%'
@@ -241,27 +264,49 @@ function heartbeat() {
 				st.title = 'SoC temperature ' + json.soc_temp;
 			}
 
-			// Device time, deliberately -- log rows render in the viewer's zone
-			// (logs.js), so these two disagree by design. This bar is the one
-			// place a camera whose clock is actually wrong must look wrong, so
-			// flag real drift rather than hiding it behind the browser's clock.
-			// (Skew is zone-independent: a correct camera reads 0 whatever the
-			// timezones are, so anything here is a genuine clock problem.)
+			// The camera's clock is worth a line only when it is wrong. It used to
+			// be printed in full on every page, in the camera's own zone, which is
+			// the one zone nobody reading the page is in — and on a camera whose
+			// timezone was never set that reads "Etc/GMT", i.e. the time in
+			// London. What device time is genuinely good for is catching a camera
+			// that has drifted, because recordings and log rows are stamped by it
+			// and nothing else on the page would show it. So only the drift is
+			// left. (Skew is zone-independent: a correct camera reads 0 whatever
+			// either timezone is, so anything here is a real clock problem.)
 			if (json.time_now !== '') {
-				const epochMs = json.time_now * 1000;
-				// Unlike the log rows there is no raw form to fall back to here, so
-				// an unknown offset renders as UTC rather than blanking the bar.
-				const text = fmtDeviceTime(epochMs, parseTzOffsetMs(json.utc_offset) || 0) + ' ' + json.timezone;
-				const skew = epochMs - Date.now();
-				const el = $('#time-now');
-				if (Math.abs(skew) > 60000) {
-					const mins = Math.round(skew / 60000);
-					el.textContent = text + ' ⚠ ' + (mins > 0 ? '+' : '') + mins + 'm';
-					el.title = 'Camera clock is ' + Math.abs(mins) + ' minutes ' +
-						(mins > 0 ? 'ahead of' : 'behind') + ' this browser. Check Time Settings.';
-				} else {
+				const skew = json.time_now * 1000 - Date.now();
+				const mins = Math.round(skew / 60000);
+				const el = $('#clock-drift');
+				// Cleared when the clocks agree, not left standing: the camera's
+				// clock can be corrected while the page is open, and a stale warning
+				// would outlive the fault it describes.
+				const text = Math.abs(skew) > 60000
+					? '⚠ camera ' + (mins > 0 ? '+' : '') + mins + 'm' : '';
+				// Written only when it actually changes. The element is a live
+				// region, and re-setting textContent to the same string still
+				// replaces the text node — a screen reader would hear the same
+				// warning read out afresh every two seconds for as long as the page
+				// stayed open. (A plain `return` here would be worse than the noise
+				// it saves: this runs inside the heartbeat's one handler, so it
+				// would take memory, overlay and uptime down with it.)
+				if (el.textContent !== text) {
 					el.textContent = text;
-					el.title = '';
+					// Colour comes from #clock-drift in bootstrap.override.css, which
+					// is theme-aware; .text-danger is one red for both themes and
+					// fails contrast on each. Only the spacing is a utility.
+					el.className = text ? 'ms-1' : '';
+					if (text) {
+						// The glyph and "+12m" are a shorthand that only reads next to
+						// the clock beside it, and title is not exposed on a span nobody
+						// can focus — so the sentence is what is announced.
+						const why = 'Camera clock is ' + Math.abs(mins) + ' minutes ' +
+							(mins > 0 ? 'ahead of' : 'behind') + ' this browser. Check Time Settings.';
+						el.title = why;
+						el.setAttribute('aria-label', why);
+					} else {
+						el.title = '';
+						el.removeAttribute('aria-label');
+					}
 				}
 			}
 
@@ -448,6 +493,7 @@ function initAll() {
 		});
 	});
 
+	localClock();
 	heartbeat();
 }
 
