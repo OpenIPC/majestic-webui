@@ -288,6 +288,7 @@
 		if (!nav) return;
 		const q = state.q.trim();
 		const t = filterTree();
+		const cur = groupOf(state.sec);
 		nav.innerHTML = '';
 
 		if (!t.length) {
@@ -302,7 +303,7 @@
 			li.dataset.group = g.id;
 			// open on desktop (the whole tree stays visible), and on mobile only
 			// while a search is narrowing it or this is the group you are in
-			if (WIDE.matches || q) li.classList.add('mj-open');
+			if (WIDE.matches || q || (cur && cur.id === g.id)) li.classList.add('mj-open');
 
 			const cat = el('button', 'mj-tree-cat');
 			cat.type = 'button';
