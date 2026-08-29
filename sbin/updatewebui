@@ -1,18 +1,439 @@
 #!/bin/sh
-url="https://github.com/openipc/majestic-webui/archive/refs/heads/${1:-master}.zip"
+# Install the WebUI from GitHub over the copy the firmware already ships.
+#
+# The camera boots a read-only squashfs, pivots it to /rom and mounts a
+# writable overlay on top, so every file written here becomes an overlay copy
+# that hides the firmware's own file underneath it. Two consequences shape this
+# script:
+#
+#   * an overlay copy outlives the firmware upgrade that would have replaced
+#     it, and goes on hiding the newer file that upgrade delivered. So only
+#     files that genuinely differ from the firmware's are left in the overlay,
+#     and --restore takes even those away.
+#   * deleting through the merged path (a plain `rm /var/www/x`) writes a
+#     whiteout that hides the firmware's copy for good. So nothing here removes
+#     a WebUI file that way; removals are made in the overlay directory itself.
+#
+# Nothing on the camera is touched until the download has been fetched,
+# verified and unpacked, so a failed or interrupted download leaves the running
+# WebUI exactly as it was.
 
-tmp_zip=$(mktemp -u)
-curl -s -L $url -o $tmp_zip
+scr_name=updatewebui
+scr_version=2
 
-tmp_dir=$(mktemp -d)
-unzip -q -o -d $tmp_dir $tmp_zip
+REPO=openipc/majestic-webui
+STATE_DIR=/etc/webui
+MANIFEST=$STATE_DIR/updatewebui.manifest
+KEEP_BACKUPS=3
 
-repo=$(ls $tmp_dir)
-rm -f $(find /var/www -type f)
+# What the firmware's own buildroot package installs, and where it puts it.
+# Kept in step with tools/build-dist.sh, which is what buildroot consumes.
+PAYLOAD='www:/var/www sbin:/usr/sbin bin:/usr/bin'
 
-echo "Copy files to web directory"
-cp -rf $tmp_dir/$repo/sbin/* /usr/sbin
-cp -rf $tmp_dir/$repo/www/* /var/www
+# Everything this project has ever installed outside /var/www. A camera updated
+# by the manifest-less version of this script left no record of what it copied
+# there, and --restore exists largely for those, so it falls back to this list.
+LEGACY_SHARED='/usr/sbin/openwall /usr/sbin/setnetwork /usr/sbin/telegram
+/usr/sbin/updatewebui /usr/bin/ntfy.sh'
 
-echo "Delete temporary files"
-rm -rf $tmp_dir $tmp_zip
+branch=
+zip_url=
+mode=install
+dry_run=0
+do_backup=1
+
+die() {
+	echo "$scr_name: $1" >&2
+	exit 1
+}
+
+print_usage() {
+	cat <<EOF
+OpenIPC WebUI installer v$scr_version
+
+Usage: $scr_name [options] [branch]
+Where:
+  -b, --branch=NAME  Install this branch of $REPO
+                     (default: master). A bare argument still works too.
+      --url=URL      Install from this zip instead of GitHub. It must unpack
+                     to a single directory holding www/, sbin/ and bin/.
+  -r, --restore      Remove everything a previous run installed and go back to
+                     the WebUI the firmware itself ships. Downloads nothing.
+  -n, --dry-run      Report what would change, then exit without touching
+                     anything.
+      --no-backup    Do not archive locally modified files before they are
+                     replaced.
+  -h, --help         Display this help and exit.
+
+Notes:
+  The root filesystem is a read-only squashfs with a writable overlay on top,
+  so anything installed here is a copy that hides the firmware's own file
+  underneath. Such a copy survives a firmware upgrade and keeps hiding the
+  newer file that upgrade delivered. This is why only files that actually
+  differ from the firmware's are kept, and why --restore exists.
+
+  Local edits to installed files are replaced, not merged: this installs a
+  released tree, it does not merge into one. They are archived under $STATE_DIR
+  first (see --no-backup), and --dry-run lists them before anything happens.
+  To keep a change for good, send it upstream to
+  https://github.com/$REPO.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	-b)
+		[ $# -ge 2 ] || die "-b needs a branch name"
+		branch=$2
+		shift
+		;;
+	--branch=*) branch=${1#*=} ;;
+	--url=*) zip_url=${1#*=} ;;
+	-r | --restore) mode=restore ;;
+	-n | --dry-run) dry_run=1 ;;
+	--no-backup) do_backup=0 ;;
+	-h | --help)
+		print_usage
+		exit 0
+		;;
+	-*)
+		echo "$scr_name: unknown option: $1" >&2
+		echo "Try '$scr_name --help'." >&2
+		exit 1
+		;;
+	*) branch=$1 ;;
+	esac
+	shift
+done
+[ -n "$branch" ] || branch=master
+
+# Where a write to / physically lands, and where the firmware's own copy of a
+# file lives. /init mounts the overlay two ways depending on the kernel: the
+# modern "overlay" with upperdir=/overlay/root, and the 3.10 out-of-tree
+# "overlayfs" with upperdir=/overlay. Both pivot the squashfs to /rom. Without
+# an overlay (NFS or RAM root) there is nothing to shadow and no upper layer to
+# clean, and the script degrades to a plain install.
+upper=$(awk '$2 == "/" && ($3 == "overlay" || $3 == "overlayfs") {
+	n = split($4, o, ",")
+	for (i = 1; i <= n; i++)
+		if (o[i] ~ /^upperdir=/) { print substr(o[i], 10); exit }
+}' /proc/mounts)
+[ -n "$upper" ] && [ -d "$upper" ] || upper=
+lower=/rom
+{ [ -n "$upper" ] && [ -d "$lower/var/www" ]; } || lower=
+
+tmp=$(mktemp -d) || die "cannot create a temporary directory"
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# sync + drop_caches because the kernel keeps serving a cached merged view of a
+# directory whose upper layer was edited underneath it. On the 4.x "overlay"
+# this settles it; on the 3.10 "overlayfs" only a reboot does, which is what
+# verify_view() falls back to telling the user.
+settle_view() {
+	sync
+	[ -w /proc/sys/vm/drop_caches ] && echo 3 >/proc/sys/vm/drop_caches
+	return 0
+}
+
+# $1 is a md5sum-format list of what every path should now hold. Anything that
+# disagrees means the merged view has not caught up with the overlay, which the
+# kernel makes no promise about while the overlay is mounted.
+verify_view() {
+	[ -s "$1" ] || return 0
+	md5sum -c "$1" 2>/dev/null | sed -n 's/: FAILED.*$//p' >"$tmp/stale"
+	[ -s "$tmp/stale" ] || return 0
+	echo
+	echo "The kernel is still serving a cached view of these files:"
+	sed 's/^/  /' "$tmp/stale"
+	if grep -qxF "/usr/sbin/$scr_name" "$tmp/stale"; then
+		echo "One of them is this script, whose own installed copy it just replaced;"
+		echo "a running program keeps the view of its own file alive."
+	fi
+	echo "Flash is already correct. Reboot the camera to pick the changes up."
+	return 0
+}
+
+fetch_tree() {
+	if [ -n "$zip_url" ]; then
+		source_name=$zip_url
+	else
+		zip_url="https://github.com/$REPO/archive/refs/heads/$branch.zip"
+		source_name=$branch
+	fi
+	echo "Fetch $zip_url"
+	curl -fsSL --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
+		die "download failed, nothing has been changed"
+	# Unpacking into the scratch directory is the whole validation: it rejects
+	# what is not a zip and what is a truncated one, and it needs no option
+	# beyond the four busybox unzip has always had.
+	mkdir -p "$tmp/x"
+	unzip -qo -d "$tmp/x" "$tmp/webui.zip" >/dev/null 2>&1 ||
+		die "downloaded file is not a usable zip archive, nothing has been changed"
+	set -- "$tmp/x"/*
+	{ [ $# -eq 1 ] && [ -d "$1" ]; } ||
+		die "expected one directory in the archive, nothing has been changed"
+	src=$1
+	[ -f "$src/www/cgi-bin/p/common.cgi" ] ||
+		die "the archive does not hold a WebUI tree, nothing has been changed"
+
+	# busybox unzip applies the caller's umask, which is 0077 on OpenIPC, so
+	# everything would land root-only. Restore the modes the firmware ships.
+	find "$src" -type d -exec chmod 0755 {} +
+	find "$src" -type f -exec chmod 0644 {} +
+	find "$src/www" -name '*.cgi' -exec chmod 0755 {} +
+	for d in sbin bin; do
+		[ -d "$src/$d" ] && chmod 0755 "$src/$d"/*
+	done
+	return 0
+}
+
+# write:  mode, source and destination of every file that has to be installed
+# drop:   overlay copies to delete because the firmware's own file is identical
+# prune:  overlay copies to delete because this release no longer has the file
+# keep:   every destination this release owns
+# want:   md5sum-format list of what the install should leave behind
+build_plan() {
+	for f in write drop prune keep want local; do : >"$tmp/$f"; done
+
+	for pair in $PAYLOAD; do
+		sub=${pair%%:*}
+		root=${pair#*:}
+		[ -d "$src/$sub" ] || continue
+		(cd "$src/$sub" && find . ! -type d) | sed 's|^\./||' |
+			while read -r rel; do
+				s=$src/$sub/$rel
+				d=$root/$rel
+				echo "$d" >>"$tmp/keep"
+				md5sum "$s" | sed "s|  .*|  $d|" >>"$tmp/want"
+				# The firmware already has this exact file: an overlay
+				# copy of it would buy nothing and hide the next one.
+				if [ -n "$lower" ] && cmp -s "$s" "$lower$d"; then
+					[ -e "$upper$d" ] && echo "$upper$d" >>"$tmp/drop"
+					continue
+				fi
+				if cmp -s "$s" "$d" 2>/dev/null &&
+					[ "$(stat -c %a "$d")" = "$(stat -c %a "$s")" ]; then
+					continue
+				fi
+				echo "$(stat -c %a "$s") $s $d" >>"$tmp/write"
+			done
+	done
+
+	# /var/www belongs to the WebUI alone, so anything left in the overlay
+	# that this release does not have is stale and goes. This is also what
+	# clears the whiteouts an older updatewebui left behind, which is why the
+	# search is for anything that is not a directory rather than for files.
+	if [ -n "$upper" ] && [ -d "$upper/var/www" ]; then
+		find "$upper/var/www" ! -type d | while read -r u; do
+			grep -qxF "${u#$upper}" "$tmp/keep" || echo "$u" >>"$tmp/prune"
+		done
+	fi
+
+	# /usr/sbin and /usr/bin are shared with the rest of the firmware, so only
+	# the files a previous run of this script installed may be removed there.
+	if [ -f "$MANIFEST" ]; then
+		while read -r _ d; do
+			case $d in
+			/var/www/*) continue ;;
+			esac
+			grep -qxF "$d" "$tmp/keep" && continue
+			if [ -n "$upper" ] && [ -e "$upper$d" ]; then
+				echo "$upper$d" >>"$tmp/prune"
+			elif [ -z "$upper" ] && [ -e "$d" ]; then
+				echo "$d" >>"$tmp/prune"
+			fi
+		done <"$MANIFEST"
+	fi
+
+	# Anything that no longer matches the manifest was edited on the camera.
+	# Without a manifest there is nothing to compare against, so a local edit
+	# cannot be told apart from a file this release simply changed.
+	if [ -f "$MANIFEST" ]; then
+		md5sum -c "$MANIFEST" 2>/dev/null | sed -n 's/: FAILED.*$//p' |
+			while read -r d; do [ -f "$d" ] && echo "$d"; done >"$tmp/local"
+	fi
+	return 0
+}
+
+count() { wc -l <"$1" | tr -d ' '; }
+
+report_plan() {
+	echo
+	if [ -n "$upper" ]; then
+		echo "Install $source_name over the WebUI this firmware ships"
+	else
+		echo "Install $source_name (no overlay is mounted, this rootfs is writable)"
+	fi
+	echo "  $(count "$tmp/write") file(s) to write"
+	[ -n "$upper" ] &&
+		echo "  $(count "$tmp/drop") overlay copy(ies) to drop, identical to the firmware's own"
+	echo "  $(count "$tmp/prune") stale entry(ies) to remove"
+	if [ -s "$tmp/local" ]; then
+		echo
+		echo "Locally modified, will be replaced:"
+		sed 's/^/  /' "$tmp/local"
+	elif [ ! -f "$MANIFEST" ]; then
+		echo
+		echo "No manifest from an earlier run, so local edits to WebUI files"
+		echo "cannot be recognised this time and are replaced without a backup."
+	fi
+	if [ "$dry_run" = 1 ]; then
+		echo
+		[ -s "$tmp/write" ] && { echo "Write:"; cut -d' ' -f3 "$tmp/write" | sed 's/^/  /'; }
+		[ -s "$tmp/drop" ] && { echo "Drop:"; sed "s|^$upper|  |" "$tmp/drop"; }
+		[ -s "$tmp/prune" ] && { echo "Remove:"; sed "s|^$upper|  |" "$tmp/prune"; }
+	fi
+	return 0
+}
+
+# Runs before anything is written, so refusing here still leaves the camera
+# untouched. An archive that failed is worth stopping for: the whole point of it
+# is that the run is about to replace work that exists nowhere else.
+backup_local() {
+	[ -s "$tmp/local" ] || return 0
+	if [ "$do_backup" != 1 ]; then
+		echo "Replacing $(count "$tmp/local") locally modified file(s) unarchived (--no-backup)"
+		return 0
+	fi
+	mkdir -p "$STATE_DIR" ||
+		die "cannot create $STATE_DIR to archive your changes, nothing has been changed"
+	archive=$STATE_DIR/updatewebui-local-$(date +%Y%m%d-%H%M%S).tar.gz
+	sed 's|^/||' "$tmp/local" >"$tmp/local.rel"
+	# busybox tar has no -z, and a shell pipeline reports only its last command,
+	# so the archive is built and compressed as two separately checked steps.
+	tar cf "$tmp/local.tar" -C / -T "$tmp/local.rel" ||
+		die "cannot archive your changes, nothing has been changed"
+	gzip -9 -c "$tmp/local.tar" >"$archive" || {
+		rm -f "$archive"
+		die "cannot write $archive, nothing has been changed"
+	}
+	echo "Archived $(count "$tmp/local") locally modified file(s) to $archive"
+	# shellcheck disable=SC2012
+	ls -t "$STATE_DIR"/updatewebui-local-*.tar.gz 2>/dev/null |
+		tail -n +$((KEEP_BACKUPS + 1)) | xargs rm -f 2>/dev/null
+	return 0
+}
+
+# Writes land on a temporary name and are renamed into place, so a file that is
+# being executed right now - this script itself, on its way to /usr/sbin - is
+# replaced rather than rewritten under the shell reading it.
+apply_writes() {
+	[ -s "$tmp/write" ] || return 0
+	echo "Write $(count "$tmp/write") file(s)"
+	# This script last, so it stays whole for as long as possible.
+	sort -k3 "$tmp/write" | sed "\\|/$scr_name\$|d" >"$tmp/write.ordered"
+	sed -n "\\|/$scr_name\$|p" "$tmp/write" >>"$tmp/write.ordered"
+	while read -r m s d; do
+		mkdir -p "${d%/*}" || die "cannot create ${d%/*}"
+		cp -f "$s" "$d.updatewebui.tmp" || die "cannot write to ${d%/*}"
+		chmod "$m" "$d.updatewebui.tmp"
+		mv -f "$d.updatewebui.tmp" "$d" || die "cannot install $d"
+	done <"$tmp/write.ordered"
+	return 0
+}
+
+# Entries are unlinked in the overlay itself, and only ever entries - never the
+# directories holding them. Removing a directory from the upper layer leaves the
+# merged parent listing empty until the next reboot, with the files underneath
+# still readable one by one, so nothing short of a directory listing notices.
+# An emptied upper directory costs one inode and hides nothing.
+remove_entries() {
+	: >"$tmp/failed"
+	cat "$@" | while read -r u; do
+		rm -f "$u" 2>/dev/null
+		[ -e "$u" ] && echo "$u" >>"$tmp/failed"
+	done
+	[ -s "$tmp/failed" ] || return 0
+	echo "Could not remove:" >&2
+	sed 's/^/  /' "$tmp/failed" >&2
+	return 1
+}
+
+apply_removals() {
+	{ [ -s "$tmp/drop" ] || [ -s "$tmp/prune" ]; } || return 0
+	echo "Drop $(count "$tmp/drop") redundant and $(count "$tmp/prune") stale overlay entry(ies)"
+	remove_entries "$tmp/drop" "$tmp/prune"
+}
+
+# The manifest is what the next run compares against to tell a local edit apart
+# from a file the release simply changed, so recording it is part of installing,
+# not a footnote to it - including on the run that had nothing to install, which
+# is otherwise the one case that never gets a baseline.
+write_manifest() {
+	mkdir -p "$STATE_DIR" && cp -f "$tmp/want" "$MANIFEST" ||
+		die "the files are installed but $MANIFEST could not be written, so a later run cannot recognise your own edits"
+}
+
+do_install() {
+	fetch_tree
+	build_plan
+	report_plan
+	[ "$dry_run" = 1 ] && exit 0
+	if [ ! -s "$tmp/write" ] && [ ! -s "$tmp/drop" ] && [ ! -s "$tmp/prune" ]; then
+		echo
+		echo "Already up to date."
+		write_manifest
+		return 0
+	fi
+	echo
+	backup_local
+	apply_writes
+	apply_removals ||
+		die "the overlay did not end up as planned, so the manifest was left alone"
+	settle_view
+	write_manifest
+	echo
+	echo "WebUI updated to $source_name."
+	verify_view "$tmp/want"
+}
+
+do_restore() {
+	[ -n "$upper" ] ||
+		die "no overlay is mounted, so there is no installed copy to remove"
+	: >"$tmp/prune"
+	[ -d "$upper/var/www" ] && find "$upper/var/www" ! -type d >>"$tmp/prune"
+	if [ -f "$MANIFEST" ]; then
+		while read -r _ d; do
+			case $d in
+			/var/www/*) continue ;;
+			esac
+			[ -e "$upper$d" ] && echo "$upper$d" >>"$tmp/prune"
+		done <"$MANIFEST"
+	fi
+	# Nothing outside /var/www is recorded for a camera the manifest-less
+	# version of this script updated, and those are the ones with most to
+	# restore. Only where the firmware has its own copy to reveal: an overlay
+	# file with nothing underneath is somebody's own, not ours to delete.
+	for d in $LEGACY_SHARED; do
+		grep -qxF "$upper$d" "$tmp/prune" && continue
+		{ [ -e "$upper$d" ] && [ -n "$lower" ] && [ -f "$lower$d" ]; } &&
+			echo "$upper$d" >>"$tmp/prune"
+	done
+	if [ ! -s "$tmp/prune" ]; then
+		echo "Nothing is installed over the firmware's WebUI."
+		return 0
+	fi
+	echo "Remove $(count "$tmp/prune") installed file(s), revealing the firmware's WebUI:"
+	sed "s|^$upper|  |" "$tmp/prune"
+	if [ "$dry_run" = 1 ]; then
+		return 0
+	fi
+	remove_entries "$tmp/prune" ||
+		die "the overlay did not end up as planned, so the manifest was left alone"
+	rm -f "$MANIFEST"
+	settle_view
+	# Everything restored must now read back as the firmware's own copy.
+	: >"$tmp/want"
+	[ -n "$lower" ] && sed "s|^$upper||" "$tmp/prune" | while read -r d; do
+		[ -f "$lower$d" ] && md5sum "$lower$d" | sed "s|  .*|  $d|" >>"$tmp/want"
+	done
+	echo
+	echo "Restored the WebUI the firmware ships."
+	verify_view "$tmp/want"
+}
+
+echo "OpenIPC WebUI installer v$scr_version"
+case $mode in
+restore) do_restore ;;
+*) do_install ;;
+esac
