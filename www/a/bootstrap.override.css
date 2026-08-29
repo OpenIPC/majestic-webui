@@ -1031,3 +1031,28 @@ mark {
 	height: 1px;
 	background: var(--bs-border-color);
 }
+
+/* The navbar used to carry justify-content-end, which pushed the whole menu to
+   the right edge and left a long gap after the logo — the eye had to cross it
+   before finding anything, and "Sign out" sat in the middle of the run rather
+   than apart from it. The menu now starts beside the brand and only Sign out is
+   pushed away, so the destructive action is the one thing not in the reading
+   order of the rest.
+
+   Not Bootstrap's ms-auto: that class is not in the PurgeCSS subset this tree
+   ships, so it would silently do nothing (see .mj-push-end). Scoped to the
+   expanded breakpoint because navbar-expand-lg stacks the menu vertically below
+   it, where an auto left margin only shunts one item to the right of a column. */
+@media (min-width: 992px) {
+	/* The auto margin needs somewhere to push into: the ul is a flex item that
+	   otherwise shrinks to its own contents, leaving no free space inside it
+	   however wide the bar is. Letting it span the collapse is what turns the
+	   margin into a gap. */
+	#navbarNav .navbar-nav {
+		flex-grow: 1;
+	}
+
+	.navbar-nav .nav-push-end {
+		margin-left: auto;
+	}
+}

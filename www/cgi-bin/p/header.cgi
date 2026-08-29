@@ -29,7 +29,7 @@ Pragma: no-cache
 			<button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
 				<span class="navbar-toggler-icon"></span>
 			</button>
-			<div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+			<div class="collapse navbar-collapse" id="navbarNav">
 				<ul class="navbar-nav">
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownInformation" role="button">Information</a>
@@ -114,7 +114,7 @@ Pragma: no-cache
 						</a>
 						<ul aria-labelledby="cam-switch-toggle" class="dropdown-menu dropdown-menu-end" id="cam-switch-menu"></ul>
 					</li>
-					<li class="nav-item"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
+					<li class="nav-item nav-push-end"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
 				</ul>
 			</div>
 		</div>
