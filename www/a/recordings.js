@@ -28,7 +28,7 @@
 	const state = {
 		cfg: {}, prefix: '', split: 1200, enabled: false, card: null,
 		offsetMs: 0, offsetKnown: false, zone: null, nowSec: null, today: '',
-		tzAt: 0, tzCamOff: 0, tzMyOff: 0, tzDiffers: false, tzOn: false,
+		tzSamples: [], tzDiffers: false, tzOn: false,
 		days: [], dayName: '', day: { clips: [], unplaced: [] },
 		view: { from: 0, to: 3600, width: 3600 },
 		playhead: 0, sel: null,
@@ -96,7 +96,11 @@
 	// reach and the only thing that can answer for a date that is not today —
 	// the camera ships a POSIX TZ string ("EST5EDT,M3.2.0,M11.1.0") that nothing
 	// in a browser will evaluate, and pulse.cgi's %z is one number for now.
-	const dtfCache = {};
+	// A bare object, not {}: the key is /etc/timezone, which fw-time.cgi writes
+	// from a POST, and on a plain object `'constructor' in cache` is true. That
+	// hands back Object as though it were a cached formatter, which ianaZone
+	// then accepts and zoneOffsetMs calls formatToParts on.
+	const dtfCache = Object.create(null);
 	function zoneFmt(zone) {
 		if (!(zone in dtfCache)) {
 			try {
@@ -178,22 +182,49 @@
 	}
 	function hhmm(sec) { return clock(sec).slice(0, 5); }
 
-	// What the two clocks were doing in the middle of the day being read — the
-	// only honest place to sample them for a label, since either may change
-	// during it. Recomputed per day, not per timestamp, because it answers
-	// "is there a choice here", not "what time is this".
+	// What the two clocks were doing across the day being read. Sampled hourly
+	// rather than once, because one reading cannot answer for a day on which
+	// either zone changed — and that is exactly the day whose ribbon most needs
+	// explaining. Hourly is a sample and not a proof: two zones that diverge for
+	// less than an hour can slip between the marks. Missing one costs a toggle
+	// that was not offered, never a time printed wrong, because the conversion
+	// itself never consults this.
 	function refreshTz() {
-		const at = instantOf(DAY / 2);
-		state.tzAt = at === null ? Date.now() : at;
-		state.tzCamOff = camOffsetAt(state.tzAt);
-		state.tzMyOff = -new Date(state.tzAt).getTimezoneOffset() * 60000;
+		const out = [];
+		for (let h = 0; h <= 24; h++) {
+			const ms = instantOf(h * 3600);
+			if (ms === null) { out.length = 0; break; }
+			out.push({ cam: camOffsetAt(ms), me: -new Date(ms).getTimezoneOffset() * 60000 });
+		}
+		state.tzSamples = out;
 		// A camera we were never told the zone of cannot be compared. With pulse
 		// unread or malformed, offsetMs is a default of zero, and treating that
 		// as a verified UTC would have the page both claim a zone nobody reported
-		// and offer a conversion computed from the claim. `at` being null is the
-		// flat records.path with no %F: no date, so nothing to convert against.
-		state.tzDiffers = tzUsable() && at !== null && state.tzCamOff !== state.tzMyOff;
+		// and offer a conversion computed from the claim. An empty sample list is
+		// the flat records.path with no %F: no date, so nothing to convert.
+		state.tzDiffers = tzUsable() && out.length > 0 &&
+			out.some(function (x) { return x.cam !== x.me; });
 		state.tzOn = tzWanted === 'local' && state.tzDiffers;
+	}
+
+	// One offset if the zone held all day, both ends if it changed. Naming a
+	// single offset for a day that had two is the same overclaim as converting
+	// the day by a single shift.
+	function zoneSpan(which) {
+		const s = state.tzSamples || [];
+		if (!s.length) return '';
+		let lo = s[0][which], hi = s[0][which];
+		s.forEach(function (x) { if (x[which] < lo) lo = x[which]; if (x[which] > hi) hi = x[which]; });
+		return lo === hi ? offsetLabel(lo)
+			: offsetLabel(lo) + '→' + offsetLabel(hi).slice(3);
+	}
+	// Whether the gap between the two held all day, and what it was. A day with
+	// a changeover in it has no single answer, and says so instead.
+	function zoneGap() {
+		const s = state.tzSamples || [];
+		if (!s.length) return null;
+		const d = s[0].me - s[0].cam;
+		return s.every(function (x) { return x.me - x.cam === d; }) ? d : null;
 	}
 
 	// The date an exported cut is stamped with. It follows what was on screen,
@@ -960,8 +991,8 @@
 		// a switch between two identical readings would be inventing a question.
 		const differs = state.tzDiffers;
 		const local = state.tzOn;
-		const camZone = offsetLabel(state.tzCamOff);
-		const myZone = offsetLabel(state.tzMyOff);
+		const camZone = zoneSpan('cam');
+		const myZone = zoneSpan('me');
 		const tz = !differs ? '' :
 			'<span class="btn-group" role="group" aria-label="Which clock times are shown in">' +
 			'<button type="button" class="btn btn-sm ' +
@@ -975,14 +1006,17 @@
 		// always was. With them apart it is the one line that explains why the
 		// ribbon reads the way it does — including, in the viewer's own clock,
 		// that a camera day no longer starts at midnight.
-		const deltaMs = state.tzMyOff - state.tzCamOff;
+		const gap = zoneGap();
 		const zoneNote = !differs ? esc(label)
 			: local
 				? 'your time (' + esc(myZone) + ') · camera day ' + esc(label) +
 					' starts ' + hhmm(0) + ' here'
-				: 'camera time (' + esc(camZone) + '), ' +
-					(deltaMs > 0 ? 'behind' : 'ahead of') + ' yours by ' +
-					TL.duration(Math.abs(deltaMs) / 1000);
+				: 'camera time (' + esc(camZone) + ')' + (gap === null
+					// A day with a changeover in it has no single gap, so it is
+					// not given one — the ribbon is relabelled either way.
+					? ' · clocks change during this day'
+					: ', ' + (gap > 0 ? 'behind' : 'ahead of') + ' yours by ' +
+						TL.duration(Math.abs(gap) / 1000));
 
 		el.innerHTML =
 			'<button class="btn btn-sm btn-outline-secondary" id="rec-prev" type="button"' +

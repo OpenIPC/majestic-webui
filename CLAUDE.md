@@ -217,8 +217,12 @@ Small `#!/bin/sh` scripts that emit JSON for the front-end. `pulse.cgi` is polle
   everything the page says out loud about zones is gated on `tzUsable()`, so a
   failed or malformed pulse offers no toggle and claims no zone.
 
-  The toggle appears only when the two zones actually differ, but the day nav's
-  trailing note names the zone either way — not knowing which clock you were
+  The toggle appears only when the two zones actually differ somewhere in the
+  day — sampled hourly by `refreshTz()`, which is a sample and not a proof, and
+  costs at worst a toggle that was not offered rather than a time printed
+  wrong. The same samples give the note its zone labels, which show both ends
+  (`UTC+01:00→+02:00`) on a day a clock changed rather than naming one offset
+  the day did not keep. The day nav's trailing note names the zone either way — not knowing which clock you were
   reading was the original bug. Read on another clock a camera day no longer
   starts at midnight, so the whole-day axis is relabelled (`renderHours`, which
   wraps and falls back to `hh:mm` for zones offset by minutes) rather than
