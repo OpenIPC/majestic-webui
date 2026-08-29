@@ -59,7 +59,13 @@ window.MajesticWebRTC = (function () {
 		let pc = null, ws = null, statsTimer = null, signalTimer = null;
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let failCount = 0, gotMedia = false;
-		let wantAudio = false, volume = 1;
+		// From the caller, not fixed at false: a player staged as a replacement
+		// has to negotiate the audio the outgoing one already had. Applying it
+		// after the swap instead would have setAudio() renegotiate a session
+		// that had just proved itself, blanking the picture — the very flicker
+		// staging exists to remove.
+		let wantAudio = !!opts.audio;
+		let volume = opts.volume === undefined ? 1 : opts.volume;
 		let lastCodec = '', lastW = 0, lastH = 0;
 
 		// Talkback. micTrack is the capture; wantMic is what the person asked

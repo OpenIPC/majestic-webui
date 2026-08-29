@@ -27,7 +27,11 @@ window.MajesticVideo = (function () {
 		let queue = [], started = false, mime = null;
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let gotSignal = false, signalTimer = null, failCount = 0;
-		let wantAudio = false, volume = 1;
+		// From the caller: this player is also staged as a replacement now, and
+		// a session that proved itself must not be reopened just to turn on the
+		// audio the outgoing one already had. See preview-swap.js.
+		let wantAudio = !!opts.audio;
+		let volume = opts.volume === undefined ? 1 : opts.volume;
 
 		const mseOk = ('MediaSource' in window);
 		const NO_SIGNAL_MS = 4000;

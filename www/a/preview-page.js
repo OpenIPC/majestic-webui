@@ -252,7 +252,8 @@
 	// controls into the state it is actually in.
 	function settle() {
 		if (!player) return;
-		if (audioOn && player.audioSupported()) player.setAudio(true);
+		// No setAudio() here: the player was opened with it. Calling it now
+		// would be a no-op at best and a renegotiation at worst.
 		player.setVolume(vol);
 		syncAudioCtl();
 		// The outgoing player's destroy() released the microphone, so talkback
@@ -267,9 +268,19 @@
 	// page does about the outcome, which is the part the settings panel does
 	// differently.
 	const swap = MajesticSwap({
-		elements: [$('#live-video'), $('#live-video-b')],
+		// Resolved on every use, never stored: the MSE player replaces its
+		// element on each reconnect, so a node captured here would be detached
+		// within a session and every show/hide would write to nothing.
+		elements: [() => $('#live-video'), () => $('#live-video-b')],
+		// audio and volume go in at attach rather than after promotion.
+		// Applying them later means renegotiating a session that has just
+		// proved itself, which blanks the picture for anyone who was listening
+		// — the flicker this whole change removes, reintroduced at the last
+		// step.
 		open: (kind, el, id, onState) => MajesticVideoImpl(kind).attach(
-			el, Object.assign({ stream: stream, iceServers: () => ice },
+			el, Object.assign(
+				{ stream: stream, iceServers: () => ice,
+					audio: audioOn, volume: vol },
 				handlersFor(id, onState))),
 		onPromoted: (kind) => {
 			player = swap.player();
@@ -281,7 +292,18 @@
 		// A trial was dropped and the screen is untouched. All that changes is
 		// the toggle, which has to come back up carrying the reason.
 		onFailed: (kind, why, permanent) => {
-			if (kind !== 'webrtc') return;
+			// The trial is gone and the live player is whatever it was. The
+			// toggle has to describe that, not the transport that just failed
+			// — including when the failure was MSE and WebRTC is still playing,
+			// where leaving it unchecked would report the opposite of the truth
+			// and make the stored preference retry the failure next load.
+			if (kind !== 'webrtc') {
+				if (swap.kind() === 'webrtc' && transportCtl) {
+					transportCtl.checked = true;
+					rememberTransport('webrtc');
+				}
+				return;
+			}
 			if (transportCtl) transportCtl.checked = false;
 			// The reason first, because it is the news, then the standing
 			// explanation — the tooltip is the only place either of them lives.
@@ -478,7 +500,12 @@
 		// finding out, which is exactly the sequence that demotes a browser to
 		// MSE. Skipped when setStream() has already reopened for the stream
 		// change, and when there is nothing to apply.
-		if (!moved && player && usingWebRTC && ice.length) attachPlayer(true);
+		// Not while a trial is being judged: that trial is the viewer's own
+		// choice in flight, and it was opened after `ice` was filled anyway, so
+		// restarting WebRTC here would both undo their click and re-do work.
+		if (!moved && player && !swap.trial() && usingWebRTC && ice.length) {
+			attachPlayer(true);
+		}
 	});
 
 	if (transportCtl && transportGrp && webrtcAvailable) {
@@ -512,14 +539,17 @@
 			MajesticTransport.chooseStream('preview', n);
 		});
 	});
-	if (s0) s0.addEventListener('change', () => {
-		stream = 0;
-		if (player) player.setStream(0);
-	});
-	if (s1) s1.addEventListener('change', () => {
-		stream = 1;
-		if (player) player.setStream(1);
-	});
+	// Both the player on screen and any trial being judged. A trial keeps the
+	// stream it was opened with, so without this it would be promoted onto the
+	// channel the viewer had already moved away from.
+	function goToStream(n) {
+		stream = n;
+		if (player) player.setStream(n);
+		const t = swap.trial();
+		if (t) t.setStream(n);
+	}
+	if (s0) s0.addEventListener('change', () => goToStream(0));
+	if (s1) s1.addEventListener('change', () => goToStream(1));
 
 	// Audio: revealed only when the camera has it configured and the transport
 	// in use can carry it — otherwise the button is a dead end.

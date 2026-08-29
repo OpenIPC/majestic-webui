@@ -27,16 +27,23 @@
 // What stays with the caller is every decision: what to try next, what to put
 // on the badge, what a failure means. This owns only the swap.
 window.MajesticSwap = function (opts) {
-	// opts.elements   [visible, spare] — two video elements, the second hidden
+	// opts.elements   [get, get] — two functions, each returning a video
+	//                 element. Functions rather than nodes: the MSE player
+	//                 replaces its element on every reconnect (cloneNode plus
+	//                 replaceChild, keeping the id), so a stored reference
+	//                 becomes a detached node that can still be written to and
+	//                 shows nothing. Everything here resolves by slot instead.
 	// opts.open       (kind, el, id, onState) -> player
 	// opts.onLive     (state, detail, kind) — from the player on screen
 	// opts.onPromoted (kind) — a trial has taken over
 	// opts.onFailed   (kind, detail, permanent) — trial dropped, screen intact
 	// opts.onExhausted(kind, detail, permanent) — trial dropped, nothing left
 	const els = opts.elements;
-	let live = null;     // { id, p, el, kind, dead }
-	let staging = null;  // { id, p, el, kind }
+	let live = null;     // { id, p, slot, kind, dead }
+	let staging = null;  // { id, p, slot, kind }
 	let seq = 0;
+
+	function node(slot) { return els[slot](); }
 
 	// Which callbacks a caller's own handlers should answer to. Everything but
 	// the state feed belongs to the player on screen alone: a trial has no
@@ -44,12 +51,11 @@ window.MajesticSwap = function (opts) {
 	function isLive(id) { return live !== null && live.id === id; }
 	function isStaging(id) { return staging !== null && staging.id === id; }
 
-	function spare() {
-		return live && live.el === els[0] ? els[1] : els[0];
-	}
+	function spareSlot() { return live && live.slot === 0 ? 1 : 0; }
 
-	function show(el, on) {
-		try { el.style.display = on ? '' : 'none'; } catch (e) {}
+	function show(slot, on) {
+		const el = node(slot);
+		if (el) { try { el.style.display = on ? '' : 'none'; } catch (e) {} }
 	}
 
 	function kill(entry) {
@@ -61,10 +67,10 @@ window.MajesticSwap = function (opts) {
 		staging = null;
 		if (live) {
 			kill(live);
-			show(live.el, false);
+			show(live.slot, false);
 		}
 		live = s;
-		show(s.el, true);
+		show(s.slot, true);
 		opts.onPromoted(s.kind);
 	}
 
@@ -88,13 +94,14 @@ window.MajesticSwap = function (opts) {
 		if (staging) { kill(staging); staging = null; }
 
 		const id = ++seq;
-		const el = live ? spare() : els[0];
+		const slot = live ? spareSlot() : 0;
+		const el = node(slot);
 		// The other transport may have used this element a moment ago, and an
 		// element carrying both a MediaSource url and a srcObject is a
 		// confusing thing to debug.
 		try { el.removeAttribute('src'); el.srcObject = null; } catch (e) {}
 
-		staging = { id: id, p: null, el: el, kind: kind };
+		staging = { id: id, p: null, slot: slot, kind: kind };
 
 		const onState = function (state, detail) {
 			if (isStaging(id)) {
@@ -147,7 +154,12 @@ window.MajesticSwap = function (opts) {
 		stop: stop,
 		isLive: isLive,
 		player: function () { return live && live.p; },
-		element: function () { return live && live.el; },
+		// Resolved now, not remembered: see the note on opts.elements.
+		element: function () { return live && node(live.slot); },
 		kind: function () { return live && live.kind; },
+		// The trial, for a caller that has to keep it in step with a control
+		// the viewer moved while it was being judged — a stream change applied
+		// only to the visible player would be promoted away a moment later.
+		trial: function () { return staging && staging.p; },
 	};
 };

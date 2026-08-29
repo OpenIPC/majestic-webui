@@ -46,9 +46,16 @@ function makePlayers(env) {
 	function impl(kind) {
 		return {
 			attach(el, opts) {
+				// The real MSE player replaces its element on every reconnect
+				// (cloneNode plus replaceChild, keeping the id), so anything
+				// holding the old node is holding a detached one. Model that.
+				if (kind === 'mse') el = env.replaceNode(el.id);
 				const p = {
 					kind: kind, el: el, destroyed: false, opts: opts,
-					setStream() {}, setVolume() {}, setAudio() {}, setMic() {},
+					streamSet: null, audioCalls: 0,
+					setStream(n) { this.streamSet = n; },
+					setVolume() {}, setMic() {},
+					setAudio() { this.audioCalls++; },
 					audioSupported: () => true, micSupported: () => true,
 					destroy() { this.destroyed = true; },
 					say(state, detail) { opts.onState(state, detail); },
@@ -65,6 +72,13 @@ function makePlayers(env) {
 function load(pickedTransport) {
 	const env = { made: [], els: {} };
 	IDS.forEach((id) => { env.els['#' + id] = makeEl(id); });
+	// Swap in a fresh node under the same id, as replaceChild does.
+	env.replaceNode = (id) => {
+		const fresh = makeEl(id);
+		fresh.style = Object.assign({}, env.els['#' + id].style);
+		env.els['#' + id] = fresh;
+		return fresh;
+	};
 	const impls = makePlayers(env);
 
 	const win = {
@@ -222,6 +236,69 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		check('and the page falls through to MJPEG',
 			env.el('mj-badge').textContent === 'MJPEG',
 			env.el('mj-badge').textContent);
+	}
+
+	group('a cloned MSE element does not strand the swap');
+	{
+		const env = load('mse');
+		await tick();
+		const first = env.made[0];
+		first.say('playing');
+		// MSE has since replaced its node; the swap must not be holding the
+		// detached one when it picks a spare.
+		check('the live player is on the current node',
+			first.el === env.el('live-video'), 'stale');
+
+		env.el('mj-transport').checked = true;
+		env.el('mj-transport').fire('change');
+		const trial = env.made[1];
+		check('the trial went to the spare, not the visible element',
+			trial.el.id === 'live-video-b', trial.el.id);
+
+		trial.say('playing');
+		check('and the promoted one is visible',
+			env.el('live-video-b').style.display === '',
+			env.el('live-video-b').style.display);
+		check('while the old node is hidden',
+			env.el('live-video').style.display === 'none',
+			env.el('live-video').style.display);
+	}
+
+	group('a trial is opened with the audio already wanted');
+	{
+		const env = load('mse');
+		await tick();
+		env.made[0].say('playing');
+		// The viewer is listening.
+		env.el('mj-mute').checked = true;
+		env.el('mj-mute').fire('change');
+
+		env.el('mj-transport').checked = true;
+		env.el('mj-transport').fire('change');
+		const trial = env.made[1];
+		check('the trial negotiates audio from the start',
+			trial.opts.audio === true, JSON.stringify(trial.opts.audio));
+		trial.say('playing');
+		// setAudio after promotion would renegotiate a session that just
+		// proved itself, which is the flicker coming back by another route.
+		check('and is not told to turn audio on afterwards',
+			trial.audioCalls === undefined || trial.audioCalls === 0,
+			String(trial.audioCalls));
+	}
+
+	group('a stream change reaches the trial as well');
+	{
+		const env = load('mse');
+		await tick();
+		env.made[0].say('playing');
+		env.el('mj-transport').checked = true;
+		env.el('mj-transport').fire('change');
+		const trial = env.made[1];
+		env.el('mj-stream-1').fire('change');
+		check('the live player followed the viewer to Sub',
+			env.made[0].streamSet === 1, 'live=' + env.made[0].streamSet);
+		check('the trial followed the viewer to Sub',
+			trial.streamSet === 1, 'trial=' + trial.streamSet);
 	}
 
 	done();

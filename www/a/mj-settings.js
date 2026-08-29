@@ -742,11 +742,22 @@
 		// second copy of it would drift in ways that look like a picture rather
 		// than an error.
 		const swap = window.MajesticSwap({
-			elements: [video, document.getElementById('mj-live-video-b')],
+			// Getters, not nodes: the MSE player replaces its element on every
+			// reconnect (cloneNode plus replaceChild, keeping the id), so a
+			// captured node is detached within a session and every show or hide
+			// afterwards writes to something nobody can see.
+			elements: [
+				() => document.getElementById('mj-live-video'),
+				() => document.getElementById('mj-live-video-b'),
+			],
 			open: (kind, el, id, onState) => {
 				const impl = window.MajesticTransport.impl(kind);
 				return impl.attach(el, {
 					stream: stream,
+					// Opened with the volume it should have rather than given
+					// it afterwards; see preview-swap.js on why applying
+					// preferences post-promotion undoes the staging.
+					volume: 1,
 					// Same list the Preview page builds, and for the same
 					// reason: without it the browser offers host candidates
 					// only, and a session opened from anywhere but the same LAN
@@ -815,6 +826,11 @@
 				if (n === stream) return;
 				stream = n;
 				if (state.previewPlayer) state.previewPlayer.setStream(n);
+				// And the trial, if one is being judged: it keeps the stream it
+				// was opened with, so it would otherwise be promoted onto the
+				// channel just moved away from.
+				const t = swap.trial();
+				if (t) t.setStream(n);
 			});
 		});
 	}
