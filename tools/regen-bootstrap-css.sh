@@ -6,6 +6,9 @@
 # bump BS_VERSION. Requires node/npx (purgecss is fetched on demand) and curl.
 set -e
 BS_VERSION=5.3.3
+# Pinned: CI regenerates and diffs against the committed file, so an unpinned
+# purgecss would turn its own releases into spurious drift failures.
+PURGECSS_VERSION=8.0.0
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 tmp=$(mktemp -d)
@@ -16,7 +19,7 @@ curl -fsSL "https://cdn.jsdelivr.net/npm/bootstrap@${BS_VERSION}/dist/css/bootst
 	-o "$tmp/bootstrap.min.css"
 
 echo "purging unused classes …"
-npx --yes purgecss --config tools/purgecss.config.cjs \
+npx --yes "purgecss@${PURGECSS_VERSION}" --config tools/purgecss.config.cjs \
 	--css "$tmp/bootstrap.min.css" --output "$tmp/out/"
 
 before=$(wc -c < "$tmp/bootstrap.min.css")

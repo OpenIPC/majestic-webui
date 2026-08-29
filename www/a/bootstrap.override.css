@@ -758,15 +758,6 @@ mark {
 	box-shadow: 0 0 0 .25rem rgba(var(--bs-danger-rgb), .25);
 }
 
-/* Pushes a flex item to the far end of its row. Bootstrap's own ms-auto is not
-   in the trimmed build this tree ships, so the class silently did nothing —
-   the stats toggle sat against the buttons it was supposed to be separated
-   from. Named for the job rather than the direction, since the row is the only
-   place it is used. */
-.mj-push-end {
-	margin-left: auto;
-}
-
 /* revealSection() moves focus to the section's heading when you pick one, so
    that a tap which neither navigates nor opens anything still announces the
    section to a screen reader (#199). A heading is not a control, though, and a
@@ -788,10 +779,10 @@ mark {
    which is near-white on dark and near-black on light. Hard-coding either way
    round produces a playhead that vanishes into the bar it sits on.
 
-   These are .rec-* rather than Bootstrap utilities because the utilities they
-   would need — position-relative, overflow-hidden, w-100 — are not in the
-   PurgeCSS subset this tree ships (see tools/purgecss.config.cjs), so they
-   would silently do nothing. Same reason .mj-push-end exists above. */
+   These are .rec-* rather than Bootstrap utilities because utilities they
+   would need — position-relative, overflow-hidden — are not in the PurgeCSS
+   subset this tree ships (tools/purgecss.config.cjs keeps only classes the
+   markup uses), so they would silently do nothing. */
 .rec-stage {
 	position: relative;
 	aspect-ratio: 16 / 9;
@@ -1039,10 +1030,10 @@ mark {
    pushed away, so the destructive action is the one thing not in the reading
    order of the rest.
 
-   Not Bootstrap's ms-auto: that class is not in the PurgeCSS subset this tree
-   ships, so it would silently do nothing (see .mj-push-end). Scoped to the
-   expanded breakpoint because navbar-expand-lg stacks the menu vertically below
-   it, where an auto left margin only shunts one item to the right of a column. */
+   Not Bootstrap's ms-auto, because it must be scoped to the expanded
+   breakpoint: navbar-expand-lg stacks the menu vertically below it, where an
+   unconditional auto left margin only shunts one item to the right of a
+   column (the breakpoint-scoped ms-lg-auto is not in the purged subset). */
 @media (min-width: 992px) {
 	/* The auto margin needs somewhere to push into: the ul is a flex item that
 	   otherwise shrinks to its own contents, leaving no free space inside it
