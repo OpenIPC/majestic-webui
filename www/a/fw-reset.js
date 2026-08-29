@@ -48,6 +48,21 @@
 	// Whether the watch for the camera's return has already been started, so the
 	// marker and the end of the stream can both ask for it.
 	let polling = false;
+	// When the last byte arrived, and the timer watching for it to stop.
+	//
+	// The third trigger, and the one this page was missing. The other two are the
+	// reboot announcement and the stream settling, and a hard reboot can deny us
+	// both at once: "Unconditional reboot" is printed microseconds before the
+	// kernel goes, so it can still be in a socket buffer when the camera stops
+	// being on the other end of it — and a machine that has gone sends no FIN, so
+	// the read that follows neither resolves nor rejects. Reported on a
+	// gk7205v300 whose transcript stopped on the last erase line: overlay wiped,
+	// camera rebooted, page left sitting on "do not navigate away" for good
+	// (issue #154). fw-update.js has had this timer since #120; the reset page was
+	// written with the other two triggers and not this one.
+	let lastData = 0;
+	let quietTimer = null;
+	const QUIET_MS = 15000;
 
 	function status(cls, msg) {
 		const s = $('#fw-reset-status');
@@ -62,6 +77,7 @@
 	if (typeof stopHeartbeat === 'function') stopHeartbeat();
 
 	function append(t) {
+		lastData = performance.now();
 		// term.write() returns the chunk with ANSI stripped and nothing else done
 		// to it — the raw stream, not what ended up on screen. The markers are
 		// whole-line messages and must not depend on how the redraws rendered.
@@ -141,10 +157,19 @@
 	// reboot, or the stream died. Tidies the half-drawn redraw the announcement
 	// interrupted, but does NOT declare the stream over — more output can still
 	// arrive, and usually does.
-	function beginPollBack() {
+	function beginPollBack(quiet) {
 		if (polling) return;
 		polling = true;
+		if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
 		term.commit();
+		// Worded as a gap rather than an ending, and for the same reason the
+		// commit above does not close the transcript: the stream may still be
+		// alive, and output that resumes must not land under a note saying it had
+		// stopped. If it really has gone, the `.then` below adds the ending.
+		if (quiet) {
+			term.note('--- no output for ' + (QUIET_MS / 1000) +
+				's; the camera is erasing and about to reboot ---');
+		}
 		pollBack();
 	}
 
@@ -177,10 +202,29 @@
 		tick();
 	}
 
+	// Armed before the request rather than on first output, so a run that never
+	// produces any is still bounded — but it only ever acts once sawFlash, so the
+	// naturally quiet stretches before the point of no return (service shutdown,
+	// the SD unmount, staging the RAM root) cannot trip it.
+	lastData = performance.now();
+	quietTimer = setInterval(() => {
+		if (polling) { clearInterval(quietTimer); quietTimer = null; return; }
+		if (sawFlash && performance.now() - lastData > QUIET_MS) beginPollBack(true);
+	}, 3000);
+
 	stream().then(() => false, () => true).then(streamFailed => {
+		if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
 		// Tidy whatever redraw the stream stopped in the middle of.
 		term.commit();
-		if (sawReboot || (streamFailed && sawFlash)) {
+		// sawFlash alone, not `streamFailed && sawFlash`. How the stream ended says
+		// nothing about whether a reboot is coming: past "Protected: flashing" the
+		// camera is going down whatever happens next — a reset erases the overlay
+		// the live root is assembled from, and even die() reboots from there. So a
+		// stream that ends CLEANLY after that point used to fall through to "the
+		// reset finished without rebooting the camera" and leave the page sitting
+		// there, which is the same stuck page as the lost-marker case and reachable
+		// whenever majestic closes the response as its CGI child dies (issue #154).
+		if (sawReboot || sawFlash) {
 			// Only here is the stream genuinely over, so only here may the transcript
 			// be closed off — beginPollBack() may have run a minute ago on the
 			// marker, and output that arrived since must not sit under a note
