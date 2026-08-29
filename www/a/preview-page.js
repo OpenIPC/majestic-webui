@@ -65,7 +65,19 @@
 		// Auto only where there are two streams to choose between: with one
 		// encoder configured there is nothing for it to decide.
 		if (subOk && autoLbl) autoLbl.hidden = false;
-		if (autoCtl) autoCtl.disabled = !subOk;
+		if (autoCtl) {
+			autoCtl.disabled = !subOk;
+			// A camera with one stream has nothing for Auto to decide, so a
+			// choice made before that was known — or carried over from a camera
+			// that did have two — has to be undone rather than left running
+			// behind a control nobody can see or clear.
+			if (!subOk && (autoOn || autoCtl.checked)) {
+				autoOn = false;
+				autoCtl.checked = false;
+				if (s0) s0.checked = true;
+				stream = 0;
+			}
+		}
 		// "WxH" per channel. Auto compares areas, so parse once.
 		sizeOf = [0, 1].map(n => {
 			const v = mjGet(cfg, 'video' + n + '.size');

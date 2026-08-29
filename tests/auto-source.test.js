@@ -43,6 +43,11 @@ function load(cfg) {
 	// As the markup ships them: the Sub and Auto labels start hidden and are
 	// revealed only where a second stream exists.
 	['mj-sub', 'mj-auto'].forEach((id) => { env.els['#' + id].hidden = true; });
+	// And as the markup ships the inputs: unreachable until the configuration
+	// says there is a second stream.
+	['mj-stream-1', 'mj-stream-auto'].forEach((id) => {
+		env.els['#' + id].disabled = true;
+	});
 	if (cfg.box) {
 		// The container is what Auto measures; the video elements are sized by
 		// the stream, which is exactly why they are not the input.
@@ -107,7 +112,12 @@ function load(cfg) {
 		MajesticVideo: impls.mse, MajesticWebRTC: impls.webrtc,
 		MajesticTransport: win.MajesticTransport,
 		$: (sel) => env.els[sel],
-		mjConfig: () => Promise.resolve(conf),
+		// Delayed when a test needs to act in the window before the
+		// configuration lands — which is where the "selected an invisible
+		// control" case lives.
+		mjConfig: () => (cfg.configDelay
+			? new Promise((r) => setTimeout(() => r(conf), cfg.configDelay))
+			: Promise.resolve(conf)),
 		mjGet: (c, k) => c[k],
 		apiFetch: () => Promise.reject(new Error('no network in tests')),
 		setTimeout, clearTimeout, setInterval, clearInterval, Promise: Promise,
@@ -174,10 +184,24 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 
 	group('Auto is not offered without a second stream');
 	{
-		const env = load({ subEnabled: false, picked: 'auto' });
-		await tick();
+		// A keyboard can reach an input whose label is hidden, so the markup
+		// ships both disabled and the page enables them once it knows. Here the
+		// viewer manages it anyway — or arrives with it remembered — and the
+		// configuration then says there is only one stream.
+		const env = load({ subEnabled: false, picked: 'auto', configDelay: 40 });
+		check('the input starts unreachable',
+			env.el('mj-stream-auto').disabled === true);
+		env.el('mj-stream-auto').checked = true;
+		env.el('mj-stream-auto').fire('change');
+		await tick(1700);
 		check('the control stays hidden', env.el('mj-auto').hidden === true);
 		check('and it is disabled', env.el('mj-stream-auto').disabled === true);
+		// It was the remembered choice, so it also has to be cleared, or Auto
+		// runs on behind a control nobody can see or unset.
+		check('the stale Auto choice is cleared',
+			env.el('mj-stream-auto').checked === false);
+		check('and Main is shown as selected',
+			env.el('mj-stream-0').checked === true);
 		check('the player is on Main', env.made[0].opts.stream === 0,
 			'stream=' + env.made[0].opts.stream);
 	}
