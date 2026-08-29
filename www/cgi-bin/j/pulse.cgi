@@ -61,10 +61,15 @@ if [ -n "$mjpid" ] && [ -r "/proc/$mjpid/stat" ]; then
 fi
 
 # Epoch and UTC offset in one date(1), split with parameter expansion, so the
-# 2s heartbeat gains no extra fork. The header needs both: /etc/timezone is only
-# a display label (fw-time.js writes it de-underscored, e.g. "America/New York",
-# which Intl.DateTimeFormat rejects), so the numeric offset is what actually
-# renders the camera's wall clock.
+# 2s heartbeat gains no extra fork. The header uses only the epoch now, and only
+# to notice a camera whose clock has drifted — it shows the reader's own clock,
+# not this one. The offset and the label are for the pages that must speak the
+# camera's wall clock because the filesystem does: fw-time.cgi, the File Manager
+# (mtimes) and Recordings (clips are named by the camera's strftime). Those
+# fetch this once on load rather than on the heartbeat. /etc/timezone is a
+# display label only — fw-time.js writes it de-underscored, e.g. "America/New
+# York", which Intl.DateTimeFormat rejects — so the numeric offset is what
+# actually renders a wall clock.
 now=$(date '+%s %z')
 
 payload=$(printf '{"soc_temp":"%s","time_now":"%s","timezone":"%s","utc_offset":"%s","mem_used":"%d","overlay_used":"%d","daynight_value":"%d","uptime":"%s","uptime_s":%d,"mj_uptime":"%s"}' \

@@ -136,7 +136,14 @@ Pragma: no-cache
 
 				<div class="col-1" id="daynight_value"></div>
 				<div class="col-md-4 col-lg-3 mb-2 text-end">
-					<div id="time-now"></div>
+					<!-- The reader's clock, not the camera's. This bar used to print
+					     the camera's wall time and its timezone label — "8/29/2026,
+					     5:47:07 PM Etc/GMT" — which is a time nobody looking at the
+					     page is in: a camera whose zone was never set says GMT, and
+					     the reader is wherever they are. Both spans are filled by
+					     main.js; the camera's clock survives only as the drift
+					     warning, which appears when it is actually wrong. -->
+					<div id="time-now"><time id="time-local"></time><span id="clock-drift"></span></div>
 					<div class="text-secondary" id="soc-temp"></div>
 				</div>
 			</div>

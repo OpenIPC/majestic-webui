@@ -1076,6 +1076,20 @@ mark {
 	color: rgba(255, 255, 255, 0.9);
 }
 
+/* The camera-clock drift warning in the signature bar. Bootstrap's .text-danger
+   would be the obvious class and is the wrong one: it is #dc3545 in both themes,
+   which is 4.2:1 on the light page ground and 4.0:1 on the dark one — under the
+   4.5:1 this text needs at normal size and weight, and failing it on the one
+   line that exists to be noticed. So each theme gets a red that clears it on the
+   ground it is actually drawn on. */
+#clock-drift {
+	color: #ea868f;   /* 7.2:1 on #14161c */
+}
+
+[data-bs-theme=light] #clock-drift {
+	color: #b02a37;   /* 6.0:1 on #f4f5f9 */
+}
+
 /* Links never wrap. With a peer camera on the link the expanded row is tight
    between the breakpoint and about 1300px, and letting "Sign out" break onto a
    second line does not make the bar narrower — it makes it taller, which is the
