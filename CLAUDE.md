@@ -194,6 +194,26 @@ Small `#!/bin/sh` scripts that emit JSON for the front-end. `pulse.cgi` is polle
   `'fallback'` asks for the other transport rather than for MJPEG. `mj-settings.cgi`
   shares the `preview()` markup but loads `preview.js` alone, so the toggle
   stays hidden there.
+- **Two clocks, and the page says which one it is printing.** Every second in
+  `recordings.js` and `timeline.js` is **camera-local** and must stay that way:
+  clips are named by the camera's own strftime, so day folders, the ribbon and
+  the clip list are all read out of filenames. That is what is on the card and
+  what VLC and the File Manager agree with. On a camera whose timezone was
+  never set it is also the time somewhere the viewer is not — `Etc/GMT` — so
+  `state.shift` (seconds to add to a camera-local second to read it on the
+  viewer's clock) moves the **printing** only, via the local `hhmm`/`clock`
+  wrappers. Nothing in the model, the playhead, the selection or the export
+  arithmetic ever leaves camera time. The `mj-rec-tz` toggle in the day nav
+  picks the mode and is only offered when the two zones actually differ; the
+  trailing note in the day nav names the zone either way, because not knowing
+  which clock you were reading was the original bug. Shifted, a camera day runs
+  03:00 to 03:00, so `wrapSec` wraps where `TL.clock` clamps, and the whole-day
+  axis is relabelled (`renderHours`) instead of using the static `00…24` the
+  page ships. An exported cut is named after what was displayed, date included
+  (`stampDate`), or the filename would pair the camera's date with the viewer's
+  time. The header's clock is a different question and is answered differently:
+  it is the **browser's**, because nothing there is stamped by the camera —
+  device time survives only as `#clock-drift`.
 
 ### FPV variant
 

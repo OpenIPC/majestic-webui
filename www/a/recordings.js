@@ -27,7 +27,7 @@
 
 	const state = {
 		cfg: {}, prefix: '', split: 1200, enabled: false, card: null,
-		offsetMs: 0, nowSec: null, today: '',
+		offsetMs: 0, nowSec: null, today: '', shift: 0,
 		days: [], dayName: '', day: { clips: [], unplaced: [] },
 		view: { from: 0, to: 3600, width: 3600 },
 		playhead: 0, sel: null,
@@ -60,6 +60,75 @@
 		if (!n) return;
 		n.className = html ? 'alert alert-' + (kind || 'secondary') : 'd-none';
 		n.innerHTML = html || '';
+	}
+
+	// ---- which clock this page prints ------------------------------------
+	//
+	// Every second here is camera-local, and has to be: clips are named by the
+	// camera's own strftime, so the day folders, the ribbon and the clip list
+	// are all read out of filenames. That is the truth on the card, the reading
+	// VLC and the file manager agree with, and the one an exported cut is named
+	// after. It is also, on a camera whose timezone was never set, the time
+	// somewhere the viewer is not — which is how you end up looking at footage
+	// you shot at twenty to nine and being told it is quarter to six.
+	//
+	// So the model stays camera-local end to end and only the printing moves.
+	// state.shift is the seconds to add to a camera-local second to read it on
+	// the viewer's clock, and it is 0 unless the viewer asked for their own
+	// clock AND the two zones actually differ.
+	const TZ_KEY = 'mj-rec-tz';
+
+	function tzMode() {
+		// Storage throws outright in some privacy modes, so this can never be
+		// the thing that stops the page rendering.
+		try { return localStorage.getItem(TZ_KEY) === 'local' ? 'local' : 'camera'; }
+		catch (e) { return 'camera'; }
+	}
+	function setTzMode(m) {
+		try { localStorage.setItem(TZ_KEY, m); } catch (e) { /* remembered for this visit only */ }
+	}
+
+	// The viewer's offset on the day being read rather than today's: browsing
+	// last week's footage across a daylight-saving change would otherwise be an
+	// hour out. The camera's offset can only ever be today's — pulse.cgi reports
+	// a number, not a zone, so there is no asking it what it was in March.
+	function viewerOffsetMs(dayName) {
+		const d = /^\d{4}-\d{2}-\d{2}$/.test(dayName)
+			? new Date(dayName + 'T12:00:00') : new Date();
+		return isNaN(d.getTime()) ? 0 : -d.getTimezoneOffset() * 60000;
+	}
+	function tzDeltaSec() {
+		return Math.round((viewerOffsetMs(state.dayName) - state.offsetMs) / 1000);
+	}
+	function updateShift() {
+		state.shift = tzMode() === 'local' ? tzDeltaSec() : 0;
+	}
+	function offsetLabel(ms) {
+		const m = Math.round(ms / 60000), a = Math.abs(m);
+		return 'UTC' + (m < 0 ? '-' : '+') + String(Math.floor(a / 60)).padStart(2, '0') +
+			':' + String(a % 60).padStart(2, '0');
+	}
+
+	// The wrap is why these exist instead of calling timeline.js directly:
+	// shifted, a camera day runs 03:00 to 03:00, and TL.clock clamps to the day
+	// rather than wrapping — it would flatten both ends onto midnight.
+	function wrapSec(sec) { return ((sec + state.shift) % DAY + DAY) % DAY; }
+	function hhmm(sec) { return TL.hhmm(wrapSec(sec)); }
+	function clock(sec) { return TL.clock(wrapSec(sec)); }
+
+	// The date an exported cut is stamped with. It follows what was on screen,
+	// or the file would carry neither reading: a cut labelled 20:47 saved as
+	// 2026-08-29_17-47 is the camera's date beside the viewer's time. Where the
+	// shift carries the selection past midnight the date goes with it — noon UTC
+	// is only a handle to add whole days to, so no zone or DST rule touches it.
+	function stampDate(sec) {
+		if (state.dayName === '.') return '';
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(state.dayName)) return state.dayName + '_';
+		const roll = Math.floor((sec + state.shift) / DAY);
+		if (!roll) return state.dayName + '_';
+		const d = new Date(state.dayName + 'T12:00:00Z');
+		d.setUTCDate(d.getUTCDate() + roll);
+		return d.toISOString().slice(0, 10) + '_';
 	}
 
 	// ---- loading ---------------------------------------------------------
@@ -659,21 +728,47 @@
 		}
 		if (state.playhead >= view.from && state.playhead <= view.to) {
 			b += '<div class="rec-head" style="left:' + pct(state.playhead, view).toFixed(3) + '%">' +
-				'<span class="rec-head-t">' + TL.hhmm(state.playhead) + '</span></div>';
+				'<span class="rec-head-t">' + hhmm(state.playhead) + '</span></div>';
 		}
 		band.innerHTML = b;
 
 		renderTicks();
 		renderSelection();
 		const lbl = $id('rec-view-label');
-		if (lbl) lbl.textContent = TL.hhmm(view.from) + ' – ' + TL.hhmm(view.to);
+		if (lbl) lbl.textContent = hhmm(view.from) + ' – ' + hhmm(view.to);
 	}
 
 	function renderTicks() {
 		const el = $id('rec-ticks');
 		if (!el) return;
 		const view = state.view, out = [];
-		for (let i = 0; i <= 4; i++) out.push(TL.hhmm(view.from + view.width * i / 4));
+		for (let i = 0; i <= 4; i++) out.push(hhmm(view.from + view.width * i / 4));
+		el.innerHTML = out.map(function (t) { return '<span>' + t + '</span>'; }).join('');
+	}
+
+	// The whole-day axis under the ribbon. Unshifted it is the 00…24 the page
+	// ships in its markup, and this reproduces it exactly rather than leaving
+	// two spellings of the same axis to drift apart. Shifted, it wraps: a camera
+	// day read on another clock begins and ends at the same hour, which is what
+	// a 24-hour span looks like from a zone that is not the camera's.
+	//
+	// A zone offset by whole hours keeps the two-digit labels the strip was
+	// designed for. One offset by minutes (+05:30, +05:45, and Nepal's +05:45)
+	// cannot say anything true in two digits, so it gets hh:mm — and half as
+	// many labels, because thirteen five-character labels do not fit the strip
+	// on a phone.
+	function renderHours() {
+		const el = $id('rec-hours');
+		if (!el) return;
+		const fine = (state.shift % 3600) !== 0;
+		const out = [];
+		for (let i = 0; i <= 24; i += (fine ? 4 : 2)) {
+			// The last tick is midnight either way; unshifted the axis has always
+			// called it 24, which reads as "the end of this day" rather than as
+			// the start of the next one.
+			out.push(i === 24 && !state.shift ? '24'
+				: fine ? hhmm(i * 3600) : hhmm(i * 3600).slice(0, 2));
+		}
 		el.innerHTML = out.map(function (t) { return '<span>' + t + '</span>'; }).join('');
 	}
 
@@ -709,7 +804,7 @@
 			return;
 		}
 		bar.innerHTML =
-			'<div><div class="font-monospace fw-semibold">' + TL.clock(s.from) + ' – ' + TL.clock(s.to) + '</div>' +
+			'<div><div class="font-monospace fw-semibold">' + clock(s.from) + ' – ' + clock(s.to) + '</div>' +
 			'<div class="x-small text-secondary" id="rec-sel-note">' + TL.duration(s.seconds) +
 			' · about ' + TL.bytes(s.bytes) + ' · saved without re-encoding' +
 			(s.clipped ? ' · trimmed to this clip' : '') + '</div></div>' +
@@ -739,13 +834,13 @@
 			const prev = arr[i + 1];
 			if (prev && c.start - prev.end > TL.JOIN_TOLERANCE) {
 				h += '<div class="rec-gap"><span>not recording · ' +
-					TL.hhmm(prev.end) + ' – ' + TL.hhmm(c.start) + '</span></div>';
+					hhmm(prev.end) + ' – ' + hhmm(c.start) + '</span></div>';
 			}
 			const on = state.clip && state.clip.name === c.name;
 			h += '<button type="button" class="rec-clip' + (on ? ' active' : '') + '" data-clip="' + esc(c.name) + '">' +
 				'<span class="rec-poster"' + (c.recording && writable ? ' data-live="1"' : '') + '>' +
-				'<span class="rec-poster-t">' + TL.hhmm(c.start) + '</span></span>' +
-				'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + TL.hhmm(c.start) + '</span>' +
+				'<span class="rec-poster-t">' + hhmm(c.start) + '</span></span>' +
+				'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + hhmm(c.start) + '</span>' +
 				'<span class="x-small text-secondary">' +
 				(c.recording && writable ? 'recording'
 					: (c.estimated ? '≈ ' : '') + TL.duration(c.dur)) +
@@ -767,11 +862,39 @@
 	function renderDayNav() {
 		const el = $id('rec-daynav');
 		if (!el) return;
+		updateShift();
 		const i = state.days.map(function (d) { return d.name; }).indexOf(state.dayName);
 		const prev = i > 0 ? state.days[i - 1].name : '';
 		const next = i >= 0 && i < state.days.length - 1 ? state.days[i + 1].name : '';
 		const label = state.dayName === '.' ? 'All recordings' : state.dayName;
 		const total = state.day.clips.reduce(function (a, c) { return a + c.dur; }, 0);
+
+		// The choice only exists when there is something to choose: a camera set
+		// to the viewer's own zone prints the same times either way, and offering
+		// a switch between two identical readings would be inventing a question.
+		const delta = tzDeltaSec();
+		const local = state.shift !== 0;
+		const camZone = offsetLabel(state.offsetMs);
+		const myZone = offsetLabel(viewerOffsetMs(state.dayName));
+		const tz = !delta ? '' :
+			'<span class="btn-group" role="group" aria-label="Which clock times are shown in">' +
+			'<button type="button" class="btn btn-sm ' +
+			(local ? 'btn-outline-secondary' : 'btn-primary') + '" id="rec-tz-cam"' +
+			' aria-pressed="' + (local ? 'false' : 'true') + '">camera</button>' +
+			'<button type="button" class="btn btn-sm ' +
+			(local ? 'btn-primary' : 'btn-outline-secondary') + '" id="rec-tz-loc"' +
+			' aria-pressed="' + (local ? 'true' : 'false') + '">your zone</button></span>';
+
+		// What the trailing note says. With the zones agreed it stays what it
+		// always was. With them apart it is the one line that explains why the
+		// ribbon reads the way it does — including, in the viewer's own clock,
+		// that a camera day no longer starts at midnight.
+		const zoneNote = !delta ? esc(label)
+			: local
+				? 'your time (' + esc(myZone) + ') · camera day ' + esc(label) +
+					' starts ' + hhmm(0) + ' here'
+				: 'camera time (' + esc(camZone) + '), ' +
+					(delta > 0 ? 'behind' : 'ahead of') + ' yours by ' + TL.duration(Math.abs(delta));
 
 		el.innerHTML =
 			'<button class="btn btn-sm btn-outline-secondary" id="rec-prev" type="button"' +
@@ -785,6 +908,7 @@
 			'<button class="btn btn-sm btn-outline-secondary" id="rec-next" type="button"' +
 			(next ? '' : ' disabled') + ' aria-label="Next day">&rsaquo;</button>' +
 			'<span class="small text-secondary">' + state.day.clips.length + ' clips · ' + TL.duration(total) + '</span>' +
+			tz +
 			// Four states, not two: the switch being on is a setting, and a card
 			// that cannot be written to makes a green "Recording" badge the
 			// loudest wrong thing on the page. The fourth is the card we could
@@ -798,11 +922,28 @@
 						: '<span class="mj-push-end badge text-bg-secondary" ' +
 							'title="Recording is switched on, but the SD card\'s state could not be read">' +
 							'Recording — card unknown</span>') +
-			'<span class="small text-secondary">' + esc(label) + '</span>';
+			'<span class="small text-secondary">' + zoneNote + '</span>';
 
 		if (prev) $id('rec-prev').addEventListener('click', function () { goDay(prev); });
 		if (next) $id('rec-next').addEventListener('click', function () { goDay(next); });
 		$id('rec-daysel').addEventListener('change', function (e) { goDay(e.target.value); });
+		if (delta) {
+			$id('rec-tz-cam').addEventListener('click', function () { setTz('camera'); });
+			$id('rec-tz-loc').addEventListener('click', function () { setTz('local'); });
+		}
+		renderHours();
+	}
+
+	// Only the printing changes, so nothing is reloaded and nothing is re-seeked
+	// — the playhead, the selection and the clip that is playing are all held in
+	// camera-local seconds and do not move. Every surface that prints a time is
+	// redrawn, which is the whole list: the ribbon and its axis, the detail band
+	// and its ticks, the clip list, and the export bar.
+	function setTz(mode) {
+		setTzMode(mode);
+		renderDayNav();     // updates the shift, the buttons and the axis
+		renderTimeline();   // band, ticks, playhead label, and the selection
+		renderClips();
 	}
 
 	// ---- export ----------------------------------------------------------
@@ -848,9 +989,9 @@
 			const blob = new Blob(o.parts, { type: 'video/mp4' });
 			const a = document.createElement('a');
 			a.href = URL.createObjectURL(blob);
-			a.download = (state.dayName === '.' ? '' : state.dayName + '_') +
-				TL.hhmm(s.from).replace(':', '-') + '_' +
-				TL.hhmm(s.from + o.span.duration).replace(':', '-') + '.mp4';
+			a.download = stampDate(s.from) +
+				hhmm(s.from).replace(':', '-') + '_' +
+				hhmm(s.from + o.span.duration).replace(':', '-') + '.mp4';
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
