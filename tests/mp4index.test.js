@@ -393,7 +393,7 @@ function runCheap() {
 		check('and it really is wrong, because the write counter drifts',
 			h.seconds !== n, 'got ' + h.seconds + ' — suspiciously exact');
 		return null;
-	}).then(runLocateExact).then(runSpan);
+	}).then(runLocateExact).then(runBigFragments).then(runSpan);
 }
 
 function runLocateExact() {
@@ -432,6 +432,47 @@ function runLocateExact() {
 		return M.locate(readerFor(old), old.length, oi, 300, 1).then(hit => {
 			check('a pre-tfdt recording still resolves to a fragment', hit.off > 0);
 			check('but does not claim to be exact', hit.exact === false);
+		});
+	});
+}
+
+// The window a probe reads only answers if a moof falls inside it, and a
+// fragment is not a fixed size: 730 KB on one clip from an av300, 1.1 MB on the
+// next from the same camera at a higher bitrate. A window sized from a sample
+// silently contains no boundary at all, and every lookup built on it returns
+// nothing — which is exactly what happened before the window learned to widen.
+function runBigFragments() {
+	group('fragments wider than the probe window');
+
+	// 1.2 MB of payload each, comfortably past the 768 KB starting window
+	const specs = evenSpecs(6);
+	specs.forEach(f => { f.payload = 1200000; });
+	const buf = clip(1000000, specs);
+	const init = M.parseInit(u8of(buf));
+	const log = [];
+	const read = readerFor(buf, log);
+
+	return M.buildIndex(read, buf.length, init).then(full => {
+		check('the fixture really is wider than the starting window',
+			full.fragments[0].len > 768 * 1024, 'len ' + full.fragments[0].len);
+
+		log.length = 0;
+		return M.durationHint(read, buf.length, init).then(h => {
+			check('durationHint still finds the last fragment',
+				h !== null && h.seconds === 6, 'got ' + (h && h.seconds));
+			check('and still reports it as exact', h && h.approximate === false);
+			check('paying only a couple of extra reads to widen',
+				log.length <= 5, 'reads: ' + log.length);
+		});
+	}).then(() => {
+		return M.buildIndex(read, buf.length, init).then(full => {
+			log.length = 0;
+			return M.locate(read, buf.length, init, 3, 1).then(hit => {
+				const exact = M.fragmentAt(full, 3);
+				check('locate finds the fragment despite the narrow first window',
+					hit.off === exact.off, 'off ' + hit.off + ' want ' + exact.off);
+				check('and it is still exact', hit.exact === true);
+			});
 		});
 	});
 }

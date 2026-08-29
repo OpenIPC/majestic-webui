@@ -51,9 +51,15 @@ window.MajesticMp4Index = (function () {
 	// a short read rather than guessing, so being wrong here is slow, not
 	// incorrect.
 	const STEP = 1024;
-	// Widest fragment seen on an av300 at 4K/20fps is ~730 KB; a probe window
-	// has to be wide enough that a moof is certain to fall inside it.
+	// A probe window only answers if a moof falls inside it, so it has to be
+	// wider than a fragment — and a fragment is not a fixed size. 730 KB was the
+	// widest on one av300 clip and 1.1 MB on the next from the same camera, so a
+	// constant picked from a sample is a bug waiting for a higher bitrate: the
+	// window silently contains no moof, and every lookup built on it fails.
+	// PROBE is therefore only where the search STARTS; widen() doubles it on a
+	// miss, up to a cap that no sane fragment reaches.
 	const PROBE = 768 * 1024;
+	const PROBE_MAX = 16 * 1024 * 1024;
 
 	function be32(u8, i) {
 		return (u8[i] << 24 | u8[i + 1] << 16 | u8[i + 2] << 8 | u8[i + 3]) >>> 0;
@@ -345,12 +351,19 @@ window.MajesticMp4Index = (function () {
 			return { sec: seq * per, exact: false };
 		}
 
-		function probeAt(pos) {
+		function probeAt(pos, win) {
+			const w = win || PROBE;
 			const start = Math.max(init.firstMoof, Math.min(pos, size - 1));
-			const want = Math.min(PROBE, size - start);
+			const want = Math.min(w, size - start);
 			return read(start, start + want - 1).then(function (buf) {
 				const i = findMoof(buf, 0);
-				if (i < 0) return null;
+				if (i < 0) {
+					// No fragment boundary in the window — it is narrower than a
+					// fragment. Widen rather than report "nothing here", which
+					// would walk the search off in the wrong direction.
+					if (w < PROBE_MAX && start + want < size) return probeAt(pos, w * 2);
+					return null;
+				}
 				const t = timeAt(buf, i);
 				return t === null ? null : { off: start + i, sec: t.sec, exact: t.exact };
 			});
@@ -370,10 +383,13 @@ window.MajesticMp4Index = (function () {
 		// enough to hold several — so finish by walking it. Without this the
 		// answer is only ever as precise as PROBE is wide, which is a couple of
 		// seconds on a real recording and much worse on small fragments.
-		function refine() {
+		function refine(win) {
+			const w = win || PROBE;
 			const start = Math.max(init.firstMoof, Math.min(lo, size - 1));
-			const want = Math.min(PROBE, size - start);
+			const want = Math.min(w, size - start);
 			return read(start, start + want - 1).then(function (buf) {
+				if (findMoof(buf, 0) < 0 && w < PROBE_MAX && start + want < size)
+					return refine(w * 2);
 				let at = findMoof(buf, 0);
 				while (at >= 0 && at + 16 <= buf.length) {
 					const t = timeAt(buf, at);
@@ -417,41 +433,51 @@ window.MajesticMp4Index = (function () {
 	// every fragment is as long as the first. Flagged `approximate` so a caller
 	// can say so rather than present a guess as a measurement.
 	function durationHint(read, size, init) {
-		const tailFrom = Math.max(init.firstMoof, size - PROBE);
-		return Promise.all([
-			read(init.firstMoof, init.firstMoof + STEP - 1),
-			read(tailFrom, size - 1),
-		]).then(function (r) {
-			const first = parseFragment(r[0]);
+		return read(init.firstMoof, init.firstMoof + STEP - 1).then(function (head) {
+			const first = parseFragment(head);
 			if (!first || first.short || !first.durTicks || !init.timescale) return null;
 			const per = first.durTicks / init.timescale;
+			// The first fragment is the best available guess at how wide the
+			// tail window must be, and it has already been read.
+			return tail(Math.max(PROBE, (first.total || 0) * 2)).then(function (buf) {
+				if (!buf) return null;
 
-			const tail = r[1];
-			let last = -1, at = 0;
-			for (;;) {
-				const i = findMoof(tail, at);
-				if (i < 0) break;
-				last = i;
-				// Past this box's type field. findMoof takes the offset to start
-				// looking for the *type* at, and this box's type sits at i + 4 —
-				// so anything less than i + 8 finds the same box forever.
-				at = i + 8;
+				// The LAST moof in the file: where it starts plus how long it
+				// runs is the clip's length, exactly.
+				let last = -1, at = 0;
+				for (;;) {
+					const i = findMoof(buf, at);
+					if (i < 0) break;
+					last = i;
+					// Past this box's type field: findMoof takes the offset to
+					// start looking for the *type* at, and this box's type sits
+					// at i + 4, so anything less than i + 8 finds it forever.
+					at = i + 8;
+				}
+				if (last < 0) return null;
+
+				const ticks = fragDecodeTicks(buf, last, buf.length);
+				if (ticks !== null) {
+					const dur = fragDurationTicks(buf, last, buf.length);
+					return {
+						seconds: (ticks + (dur || 0)) / init.timescale,
+						perFragment: per,
+						approximate: false,
+					};
+				}
+				const seq = moofSeq(buf, last);
+				if (seq === null) return null;
+				return { seconds: (seq + 1) * per, perFragment: per, approximate: true };
+			});
+
+			function tail(win) {
+				const from = Math.max(init.firstMoof, size - win);
+				return read(from, size - 1).then(function (buf) {
+					if (findMoof(buf, 0) >= 0) return buf;
+					if (win >= PROBE_MAX || from <= init.firstMoof) return buf;
+					return tail(win * 2);
+				});
 			}
-			if (last < 0) return null;
-
-			const ticks = fragDecodeTicks(tail, last, tail.length);
-			if (ticks !== null) {
-				const dur = fragDurationTicks(tail, last, tail.length);
-				return {
-					seconds: (ticks + (dur || 0)) / init.timescale,
-					perFragment: per,
-					approximate: false,
-				};
-			}
-
-			const seq = moofSeq(tail, last);
-			if (seq === null) return null;
-			return { seconds: (seq + 1) * per, perFragment: per, approximate: true };
 		}).catch(function () { return null; });
 	}
 
