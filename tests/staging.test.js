@@ -32,6 +32,7 @@ const IDS = [
 function makeEl(id) {
 	return {
 		id: id, style: {}, hidden: false, checked: false, disabled: false,
+		clientWidth: 640, clientHeight: 360,
 		textContent: '', title: '', value: 100, src: '', srcObject: null,
 		handlers: {},
 		addEventListener(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); },
@@ -82,6 +83,12 @@ function load(pickedTransport) {
 	const impls = makePlayers(env);
 
 	const win = {
+		// The page follows the window for its Auto source, so the stub needs a
+		// listener registry and a size the elements can be measured against.
+		listeners: {},
+		addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); },
+		fire(ev) { (this.listeners[ev] || []).forEach((f) => f()); },
+		devicePixelRatio: 1,
 		MajesticVideo: impls.mse,
 		MajesticWebRTC: impls.webrtc,
 		MajesticTransport: {

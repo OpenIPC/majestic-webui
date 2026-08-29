@@ -181,14 +181,18 @@ window.MajesticTransport = (function () {
 		if (carried) write(STREAM_KEY, null);
 	}
 
+	// 0, 1, 'auto', or null for "never chosen". 'auto' is a choice like the
+	// other two rather than a mode on top of them: it says which stream to
+	// watch, it is just answered per resize instead of once.
 	function chosenStream(where) {
 		migrateStream();
 		const v = read(streamKey(where));
-		return v === '0' ? 0 : v === '1' ? 1 : null;
+		return v === '0' ? 0 : v === '1' ? 1 : v === 'auto' ? 'auto' : null;
 	}
 
 	function chooseStream(where, n) {
-		write(streamKey(where), (n | 0) === 1 ? '1' : '0');
+		write(streamKey(where),
+			n === 'auto' ? 'auto' : (n | 0) === 1 ? '1' : '0');
 	}
 
 	// What the camera falls back to when webrtc.iceServers is unset, and every
