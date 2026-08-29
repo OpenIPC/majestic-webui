@@ -1281,44 +1281,152 @@
 	// ---- boot ------------------------------------------------------------
 
 	function empty(msg, cta, kind) {
-		$id('rec-main').className = 'd-none';
+		$id('rec-main').hidden = true;
 		note(msg + (cta || ''), kind || 'secondary');
 	}
+	// The page arrives hidden (see tool-recordings.cgi) and is shown once it has
+	// something in it, so the ribbon and the clip list appear filled rather than
+	// blank and then filled.
+	function reveal() {
+		$id('rec-main').hidden = false;
+	}
 
-	Promise.all([loadConfig(), loadPulse()]).then(function () {
-		if (!state.prefix) {
-			return empty('<strong>Recording is not configured.</strong> No recording path is set, so there is nothing to browse. ',
-				'<a href="tool-sdcard.cgi">Set up the SD card</a>.');
-		}
-		return Promise.all([loadDays(), loadCard()]).then(function () {
-			if (!state.days.length) {
-				// The card gets the first word: "nothing recorded yet" is a
-				// guess, and a read-only or unreadable card is the answer.
-				// Only when the card is fine is an empty archive really about
-				// whether recording is switched on.
-				const bad = cardTrouble();
-				return empty(bad ||
-					(state.enabled
-						? '<strong>Nothing recorded yet.</strong> Recording is on, but no clips have been written to <code>' + esc(state.prefix) + '</code> yet.'
-						: '<strong>Recording is off.</strong> The camera is not writing to the card, so there is nothing to browse.'),
-					' <a href="tool-sdcard.cgi">SD card</a>' + (bad ? cardKernelLines() : ''),
-					bad ? 'danger' : 'secondary');
-			}
-			const want = (/[?&]day=([^&]*)/.exec(location.search) || [])[1];
-			const asked = want ? decodeURIComponent(want) : '';
-			const names = state.days.map(function (d) { return d.name; });
-			const pick = names.indexOf(asked) >= 0 ? asked : names[names.length - 1];
+	// Recording being off is the one empty state with a cure that fits on this
+	// page: the card is fine, the path is set, and all that stands between here
+	// and an archive is a setting. Sending someone to another page to flip it,
+	// and back here to find out whether it took, is a lot of ceremony for a
+	// checkbox — so the checkbox is here.
+	function enableSwitch() {
+		return '<div class="form-check form-switch mt-3 mb-0">' +
+			'<input class="form-check-input" type="checkbox" role="switch" id="rec-enable">' +
+			'<label class="form-check-label" for="rec-enable">Start recording to the SD card</label>' +
+			'</div><div class="small mt-1" id="rec-enable-err"></div>';
+	}
 
-			return loadDay(pick).then(function () {
-				wire();
-				renderDayNav();
-				renderClips();
-				renderHealth();
-				renderStorage();
-				watchCard();
-				centreView(freshest());
-				goTo(freshest());     // opens the clip, so the page is not a black box
+	// One POST, which is what majestic's write-back API is for: it walks the
+	// tree, reloads the pipeline and saves the file in a single round trip. The
+	// value goes as a string like every other write from this WebUI — the C side
+	// coerces it — and a non-200 means nothing persisted. Resolves to '' when it
+	// worked and to a reason when it did not.
+	function setRecording() {
+		return apiFetch('/api/v1/config', {
+			method: 'POST', credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ records: { enabled: 'true' } }),
+		}).then(function (r) {
+			if (r.ok) return '';
+			return r.text().then(function (t) {
+				return 'The camera refused the change' +
+					(t ? ': <code>' + esc(t.slice(0, 160)) + '</code>' : ' (HTTP ' + r.status + ').');
+			});
+		}).catch(function () {
+			return 'The camera did not answer — check that it is still reachable.';
+		});
+	}
+
+	function wireEnable() {
+		const el = $id('rec-enable');
+		if (!el) return;
+		el.addEventListener('change', function () {
+			if (!el.checked) return;      // nothing here switches recording back off
+			el.disabled = true;
+			const err = $id('rec-enable-err');
+			if (err) err.innerHTML = '<span class="text-secondary">Switching recording on…</span>';
+			setRecording().then(function (why) {
+				// Put the switch back where it was on failure: leaving it on
+				// would claim a change the camera did not make.
+				if (why) {
+					el.disabled = false;
+					el.checked = false;
+					if (err) err.innerHTML = '<span class="text-danger">' + why + '</span>';
+					return;
+				}
+				waitStep = 0;
+				start();
 			});
 		});
+	}
+
+	// Recording is on and the card is fine, but nothing has been written yet —
+	// either it was just switched on, or the first file is still being opened.
+	// A page that fills itself is the difference between "it worked" and "did
+	// it?". Backs off rather than hammering, stops as soon as there is a day,
+	// and does not poll a tab nobody is looking at.
+	const WAITS = [4000, 4000, 8000, 16000, 30000];
+	let waitTimer = null, waitStep = 0;
+	function waitForFirstClip() {
+		clearTimeout(waitTimer);
+		const ms = WAITS[Math.min(waitStep, WAITS.length - 1)];
+		waitStep++;
+		waitTimer = setTimeout(function () {
+			if (document.hidden) { waitForFirstClip(); return; }
+			loadDays().then(function () {
+				if (!state.days.length) { waitForFirstClip(); return; }
+				waitStep = 0;
+				start();
+			});
+		}, ms);
+	}
+
+	// wire() binds to document, so it must run once however many times the page
+	// re-reads itself — after recording is switched on, or when the first clip
+	// finally lands.
+	let wired = false;
+
+	function start() {
+		return Promise.all([loadConfig(), loadPulse()]).then(function () {
+			if (!state.prefix) {
+				return empty('<strong>Recording is not configured.</strong> No recording path is set, so there is nothing to browse. ',
+					'<a href="tool-sdcard.cgi">Set up the SD card</a>.');
+			}
+			return Promise.all([loadDays(), loadCard()]).then(function () {
+				if (!state.days.length) {
+					// The card gets the first word: "nothing recorded yet" is a
+					// guess, and a read-only or unreadable card is the answer.
+					// Only when the card is fine is an empty archive really about
+					// whether recording is switched on.
+					const bad = cardTrouble();
+					// A switch is only worth offering where flipping it would
+					// actually produce recordings: a card that cannot be written
+					// to would take the setting and still record nothing.
+					const canStart = !bad && !state.enabled;
+					empty(bad ||
+						(state.enabled
+							? '<strong>Nothing recorded yet.</strong> Recording is on, but no clips have been written to <code>' + esc(state.prefix) + '</code> yet.'
+							: '<strong>Recording is off.</strong> The camera is not writing to the card, so there is nothing to browse.'),
+						' <a href="tool-sdcard.cgi">SD card</a>' + (bad ? cardKernelLines() : '') +
+						(canStart ? enableSwitch() : ''),
+						bad ? 'danger' : 'secondary');
+					if (canStart) wireEnable();
+					else if (!bad && state.enabled) waitForFirstClip();
+					return;
+				}
+				const want = (/[?&]day=([^&]*)/.exec(location.search) || [])[1];
+				const asked = want ? decodeURIComponent(want) : '';
+				const names = state.days.map(function (d) { return d.name; });
+				const pick = names.indexOf(asked) >= 0 ? asked : names[names.length - 1];
+
+				return loadDay(pick).then(function () {
+					if (!wired) { wire(); watchCard(); wired = true; }
+					renderDayNav();
+					renderClips();
+					renderHealth();
+					renderStorage();
+					centreView(freshest());
+					goTo(freshest());     // opens the clip, so the page is not a black box
+					// Last, so what appears is already drawn.
+					reveal();
+				});
+			});
+		});
+	}
+
+	// Anything that got past the loaders' own catches — a render that threw, a
+	// browser missing something this leans on. The page stays hidden rather than
+	// showing a shell that is never going to fill.
+	start().catch(function (e) {
+		empty('<strong>The recordings page could not start.</strong> Reload the page, or ',
+			'<a href="tool-sdcard.cgi">check the SD card</a>.', 'danger');
+		if (window.console && console.error) console.error(e);
 	});
 })();
