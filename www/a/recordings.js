@@ -27,7 +27,8 @@
 
 	const state = {
 		cfg: {}, prefix: '', split: 1200, enabled: false, card: null,
-		offsetMs: 0, nowSec: null, today: '', shift: 0,
+		offsetMs: 0, offsetKnown: false, zone: null, nowSec: null, today: '',
+		tzSamples: [], tzDiffers: false, tzOn: false,
 		days: [], dayName: '', day: { clips: [], unplaced: [] },
 		view: { from: 0, to: 3600, width: 3600 },
 		playhead: 0, sel: null,
@@ -72,63 +73,172 @@
 	// somewhere the viewer is not — which is how you end up looking at footage
 	// you shot at twenty to nine and being told it is quarter to six.
 	//
-	// So the model stays camera-local end to end and only the printing moves.
-	// state.shift is the seconds to add to a camera-local second to read it on
-	// the viewer's clock, and it is 0 unless the viewer asked for their own
-	// clock AND the two zones actually differ.
+	// So the model stays camera-local end to end and only the printing moves:
+	// a camera-local second is resolved to the instant it happened, and that
+	// instant is read on the viewer's clock. Per second, not per day — a single
+	// offset for the whole day is wrong on the two days a year one of the two
+	// zones changes, and states an hour that never existed.
 	const TZ_KEY = 'mj-rec-tz';
 
-	function tzMode() {
-		// Storage throws outright in some privacy modes, so this can never be
-		// the thing that stops the page rendering.
-		try { return localStorage.getItem(TZ_KEY) === 'local' ? 'local' : 'camera'; }
-		catch (e) { return 'camera'; }
-	}
+	// Held here rather than read back out of storage on every call. Storage
+	// throws outright in some privacy configurations, and a setter that failed
+	// silently would leave the button snapping back to camera on every click:
+	// storage is where the choice is remembered, not where it lives.
+	let tzWanted = 'camera';
+	try { if (localStorage.getItem(TZ_KEY) === 'local') tzWanted = 'local'; } catch (e) {}
+
 	function setTzMode(m) {
-		try { localStorage.setItem(TZ_KEY, m); } catch (e) { /* remembered for this visit only */ }
+		tzWanted = m === 'local' ? 'local' : 'camera';
+		try { localStorage.setItem(TZ_KEY, tzWanted); } catch (e) { /* this visit only */ }
 	}
 
-	// The viewer's offset on the day being read rather than today's: browsing
-	// last week's footage across a daylight-saving change would otherwise be an
-	// hour out. The camera's offset can only ever be today's — pulse.cgi reports
-	// a number, not a zone, so there is no asking it what it was in March.
-	function viewerOffsetMs(dayName) {
-		const d = /^\d{4}-\d{2}-\d{2}$/.test(dayName)
-			? new Date(dayName + 'T12:00:00') : new Date();
-		return isNaN(d.getTime()) ? 0 : -d.getTimezoneOffset() * 60000;
+	// A zone's offset at a given instant. Intl is the only timezone database in
+	// reach and the only thing that can answer for a date that is not today —
+	// the camera ships a POSIX TZ string ("EST5EDT,M3.2.0,M11.1.0") that nothing
+	// in a browser will evaluate, and pulse.cgi's %z is one number for now.
+	// A bare object, not {}: the key is /etc/timezone, which fw-time.cgi writes
+	// from a POST, and on a plain object `'constructor' in cache` is true. That
+	// hands back Object as though it were a cached formatter, which ianaZone
+	// then accepts and zoneOffsetMs calls formatToParts on.
+	const dtfCache = Object.create(null);
+	function zoneFmt(zone) {
+		if (!(zone in dtfCache)) {
+			try {
+				dtfCache[zone] = new Intl.DateTimeFormat('en-US', {
+					timeZone: zone, hourCycle: 'h23',
+					year: 'numeric', month: '2-digit', day: '2-digit',
+					hour: '2-digit', minute: '2-digit', second: '2-digit',
+				});
+			} catch (e) { dtfCache[zone] = null; }   // not a name this browser knows
+		}
+		return dtfCache[zone];
 	}
-	function tzDeltaSec() {
-		return Math.round((viewerOffsetMs(state.dayName) - state.offsetMs) / 1000);
+	function zoneOffsetMs(zone, ms) {
+		const f = zoneFmt(zone);
+		if (!f) return null;
+		const p = {};
+		f.formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
+		// The wall clock read back as if it were UTC. Its distance from the
+		// instant is the offset — the only way to get a number out of Intl
+		// without parsing a localised "GMT+3".
+		return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - ms;
 	}
-	function updateShift() {
-		state.shift = tzMode() === 'local' ? tzDeltaSec() : 0;
+
+	// /etc/timezone as a name the browser's database will accept. fw-time.cgi
+	// writes it de-underscored out of the bundled table ("America/New York"),
+	// which Intl rejects; no zone name contains a space, so putting them back is
+	// exact. Without it the camera side falls back to pulse.cgi's single number,
+	// which is right except across a change in the camera's own zone.
+	function ianaZone(s) {
+		const z = String(s || '').trim().replace(/ /g, '_');
+		return z && zoneFmt(z) ? z : null;
 	}
+	function camOffsetAt(ms) {
+		if (state.zone) {
+			const o = zoneOffsetMs(state.zone, ms);
+			if (o !== null) return o;
+		}
+		return state.offsetMs;
+	}
+	function tzUsable() { return !!state.zone || state.offsetKnown; }
+
 	function offsetLabel(ms) {
 		const m = Math.round(ms / 60000), a = Math.abs(m);
 		return 'UTC' + (m < 0 ? '-' : '+') + String(Math.floor(a / 60)).padStart(2, '0') +
 			':' + String(a % 60).padStart(2, '0');
 	}
 
-	// The wrap is why these exist instead of calling timeline.js directly:
-	// shifted, a camera day runs 03:00 to 03:00, and TL.clock clamps to the day
-	// rather than wrapping — it would flatten both ends onto midnight.
-	function wrapSec(sec) { return ((sec + state.shift) % DAY + DAY) % DAY; }
-	function hhmm(sec) { return TL.hhmm(wrapSec(sec)); }
-	function clock(sec) { return TL.clock(wrapSec(sec)); }
+	// The instant a camera-local second on the day being browsed happened.
+	// Solved rather than computed: the offset depends on the instant and the
+	// instant depends on the offset. One correction settles it everywhere except
+	// inside the hour a spring-forward skips, which no wall clock names anyway.
+	function dayBaseUtc() {
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(state.dayName)) return null;
+		const t = Date.parse(state.dayName + 'T00:00:00Z');
+		return isNaN(t) ? null : t;
+	}
+	function instantOf(sec) {
+		const base = dayBaseUtc();
+		if (base === null) return null;
+		const naive = base + sec * 1000;
+		return naive - camOffsetAt(naive - camOffsetAt(naive));
+	}
+	// That instant read on the viewer's clock. Date's local getters are the
+	// browser's own timezone database, so this is exact through a change in the
+	// viewer's zone as well — including the two days a year it happens mid-day.
+	function viewerAt(sec) {
+		const ms = instantOf(sec);
+		if (ms === null) return null;
+		const d = new Date(ms);
+		return { ms: ms, sec: d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() };
+	}
+
+	// Camera mode leaves timeline.js to print, exactly as before this existed.
+	// Its clamp is what gives the last tick of the day "24" rather than "00".
+	function clock(sec) {
+		if (!state.tzOn) return TL.clock(sec);
+		const v = viewerAt(sec);
+		return TL.clock(v === null ? sec : v.sec);
+	}
+	function hhmm(sec) { return clock(sec).slice(0, 5); }
+
+	// What the two clocks were doing across the day being read. Sampled hourly
+	// rather than once, because one reading cannot answer for a day on which
+	// either zone changed — and that is exactly the day whose ribbon most needs
+	// explaining. Hourly is a sample and not a proof: two zones that diverge for
+	// less than an hour can slip between the marks. Missing one costs a toggle
+	// that was not offered, never a time printed wrong, because the conversion
+	// itself never consults this.
+	function refreshTz() {
+		const out = [];
+		for (let h = 0; h <= 24; h++) {
+			const ms = instantOf(h * 3600);
+			if (ms === null) { out.length = 0; break; }
+			out.push({ cam: camOffsetAt(ms), me: -new Date(ms).getTimezoneOffset() * 60000 });
+		}
+		state.tzSamples = out;
+		// A camera we were never told the zone of cannot be compared. With pulse
+		// unread or malformed, offsetMs is a default of zero, and treating that
+		// as a verified UTC would have the page both claim a zone nobody reported
+		// and offer a conversion computed from the claim. An empty sample list is
+		// the flat records.path with no %F: no date, so nothing to convert.
+		state.tzDiffers = tzUsable() && out.length > 0 &&
+			out.some(function (x) { return x.cam !== x.me; });
+		state.tzOn = tzWanted === 'local' && state.tzDiffers;
+	}
+
+	// One offset if the zone held all day, both ends if it changed. Naming a
+	// single offset for a day that had two is the same overclaim as converting
+	// the day by a single shift.
+	function zoneSpan(which) {
+		const s = state.tzSamples || [];
+		if (!s.length) return '';
+		let lo = s[0][which], hi = s[0][which];
+		s.forEach(function (x) { if (x[which] < lo) lo = x[which]; if (x[which] > hi) hi = x[which]; });
+		return lo === hi ? offsetLabel(lo)
+			: offsetLabel(lo) + '→' + offsetLabel(hi).slice(3);
+	}
+	// Whether the gap between the two held all day, and what it was. A day with
+	// a changeover in it has no single answer, and says so instead.
+	function zoneGap() {
+		const s = state.tzSamples || [];
+		if (!s.length) return null;
+		const d = s[0].me - s[0].cam;
+		return s.every(function (x) { return x.me - x.cam === d; }) ? d : null;
+	}
 
 	// The date an exported cut is stamped with. It follows what was on screen,
 	// or the file would carry neither reading: a cut labelled 20:47 saved as
-	// 2026-08-29_17-47 is the camera's date beside the viewer's time. Where the
-	// shift carries the selection past midnight the date goes with it — noon UTC
-	// is only a handle to add whole days to, so no zone or DST rule touches it.
+	// 2026-08-29_17-47 is the camera's date beside the viewer's time. Read off
+	// the instant itself, so a selection the shift carries over midnight lands
+	// on the date the viewer would call it.
 	function stampDate(sec) {
 		if (state.dayName === '.') return '';
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(state.dayName)) return state.dayName + '_';
-		const roll = Math.floor((sec + state.shift) / DAY);
-		if (!roll) return state.dayName + '_';
-		const d = new Date(state.dayName + 'T12:00:00Z');
-		d.setUTCDate(d.getUTCDate() + roll);
-		return d.toISOString().slice(0, 10) + '_';
+		const v = state.tzOn ? viewerAt(sec) : null;
+		if (!v) return state.dayName + '_';
+		const d = new Date(v.ms), p = function (n) { return String(n).padStart(2, '0'); };
+		return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_';
 	}
 
 	// ---- loading ---------------------------------------------------------
@@ -138,7 +248,12 @@
 			.then(function (r) { return r.json(); })
 			.then(function (j) {
 				const off = parseTzOffsetMs(j.utc_offset);   // main.js; null if unusable
+				// Zero is the fallback the day arithmetic below has always used,
+				// but it must not be mistaken for a camera that reported UTC:
+				// everything the page says out loud about zones is gated on this.
+				state.offsetKnown = off !== null;
 				state.offsetMs = off === null ? 0 : off;
+				state.zone = ianaZone(j.timezone);
 				const nowMs = (+j.time_now || 0) * 1000 + state.offsetMs;
 				const d = new Date(nowMs);
 				// Read the shifted instant as if it were UTC — the camera's wall
@@ -760,14 +875,16 @@
 	function renderHours() {
 		const el = $id('rec-hours');
 		if (!el) return;
-		const fine = (state.shift % 3600) !== 0;
+		// Labelled first, thinned second: whether two digits can say anything
+		// true is a property of the labels, not of a number this can assume.
+		// In camera mode the last one is "24" by TL.clock's clamp, which reads
+		// as the end of this day rather than the start of the next.
+		const all = [];
+		for (let i = 0; i <= 24; i++) all.push(hhmm(i * 3600));
+		const fine = all.some(function (t) { return t.slice(3) !== '00'; });
 		const out = [];
 		for (let i = 0; i <= 24; i += (fine ? 4 : 2)) {
-			// The last tick is midnight either way; unshifted the axis has always
-			// called it 24, which reads as "the end of this day" rather than as
-			// the start of the next one.
-			out.push(i === 24 && !state.shift ? '24'
-				: fine ? hhmm(i * 3600) : hhmm(i * 3600).slice(0, 2));
+			out.push(fine ? all[i] : all[i].slice(0, 2));
 		}
 		el.innerHTML = out.map(function (t) { return '<span>' + t + '</span>'; }).join('');
 	}
@@ -862,7 +979,7 @@
 	function renderDayNav() {
 		const el = $id('rec-daynav');
 		if (!el) return;
-		updateShift();
+		refreshTz();
 		const i = state.days.map(function (d) { return d.name; }).indexOf(state.dayName);
 		const prev = i > 0 ? state.days[i - 1].name : '';
 		const next = i >= 0 && i < state.days.length - 1 ? state.days[i + 1].name : '';
@@ -872,11 +989,11 @@
 		// The choice only exists when there is something to choose: a camera set
 		// to the viewer's own zone prints the same times either way, and offering
 		// a switch between two identical readings would be inventing a question.
-		const delta = tzDeltaSec();
-		const local = state.shift !== 0;
-		const camZone = offsetLabel(state.offsetMs);
-		const myZone = offsetLabel(viewerOffsetMs(state.dayName));
-		const tz = !delta ? '' :
+		const differs = state.tzDiffers;
+		const local = state.tzOn;
+		const camZone = zoneSpan('cam');
+		const myZone = zoneSpan('me');
+		const tz = !differs ? '' :
 			'<span class="btn-group" role="group" aria-label="Which clock times are shown in">' +
 			'<button type="button" class="btn btn-sm ' +
 			(local ? 'btn-outline-secondary' : 'btn-primary') + '" id="rec-tz-cam"' +
@@ -889,12 +1006,17 @@
 		// always was. With them apart it is the one line that explains why the
 		// ribbon reads the way it does — including, in the viewer's own clock,
 		// that a camera day no longer starts at midnight.
-		const zoneNote = !delta ? esc(label)
+		const gap = zoneGap();
+		const zoneNote = !differs ? esc(label)
 			: local
 				? 'your time (' + esc(myZone) + ') · camera day ' + esc(label) +
 					' starts ' + hhmm(0) + ' here'
-				: 'camera time (' + esc(camZone) + '), ' +
-					(delta > 0 ? 'behind' : 'ahead of') + ' yours by ' + TL.duration(Math.abs(delta));
+				: 'camera time (' + esc(camZone) + ')' + (gap === null
+					// A day with a changeover in it has no single gap, so it is
+					// not given one — the ribbon is relabelled either way.
+					? ' · clocks change during this day'
+					: ', ' + (gap > 0 ? 'behind' : 'ahead of') + ' yours by ' +
+						TL.duration(Math.abs(gap) / 1000));
 
 		el.innerHTML =
 			'<button class="btn btn-sm btn-outline-secondary" id="rec-prev" type="button"' +
@@ -927,7 +1049,7 @@
 		if (prev) $id('rec-prev').addEventListener('click', function () { goDay(prev); });
 		if (next) $id('rec-next').addEventListener('click', function () { goDay(next); });
 		$id('rec-daysel').addEventListener('change', function (e) { goDay(e.target.value); });
-		if (delta) {
+		if (differs) {
 			$id('rec-tz-cam').addEventListener('click', function () { setTz('camera'); });
 			$id('rec-tz-loc').addEventListener('click', function () { setTz('local'); });
 		}
