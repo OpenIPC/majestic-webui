@@ -70,7 +70,10 @@
 			mjGet(cfg, 'webrtc.turnUsername'),
 			mjGet(cfg, 'webrtc.turnCredential'));
 	});
-	const cur = () => $('#live-video');
+	// The element the visible player owns. Swapped, not reassigned to a fixed
+	// id, because both elements are real and either can be the live one.
+	let liveEl = $('#live-video'), spareEl = $('#live-video-b');
+	const cur = () => liveEl;
 
 	const BARS = '#000 url(/a/preview.svg)';
 	function showVideo() {
@@ -132,7 +135,22 @@
 	const rememberTransport = t => MajesticTransport.choose(t);
 	const rememberDemotion = () => MajesticTransport.demote();
 
+	// What is on screen, and what is being tried out of sight.
+	//
+	// A transport switch used to tear down the working player before anything
+	// knew whether its replacement would run, so a refusal cost a blank element
+	// and a visible reconnect on the way back. Now the new player attaches to
+	// the idle element and the old one keeps playing until the new one has a
+	// picture: a success looks like nothing happened, and a failure looks like
+	// nothing happened either, because nothing did.
+	//
+	// Each attachment carries its own id rather than sharing one counter. Both
+	// players are live at once during a swap, and the outgoing one has to go on
+	// working — a single "is this the current generation" test cannot say that
+	// about two things at the same time.
 	let player = null, usingWebRTC = false;
+	let attach = null;   // { id, p, el, webrtc } — on screen
+	let staging = null;  // { id, p, el, webrtc } — on trial, hidden
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
@@ -242,66 +260,148 @@
 	// Rebuilt rather than mutated when the transport changes: the two players
 	// own different machinery, and the state worth carrying over is three
 	// values.
-	function attachPlayer(webrtc) {
-		const gen = ++attachSeq;
-		if (player) { try { player.destroy(); } catch (e) {} player = null; }
-		usingWebRTC = !!webrtc;
-		// MSE leaves a MediaSource object URL on the element; WebRTC's
-		// srcObject would win anyway, but an element carrying both is a
-		// confusing thing to debug.
-		const v = cur();
-		try { v.removeAttribute('src'); v.srcObject = null; } catch (e) {}
-		const impl = usingWebRTC ? MajesticWebRTC : MajesticVideo;
-		const p = impl.attach(v, Object.assign(
-			{ stream: stream, iceServers: () => ice }, handlersFor(gen)));
-		// attach() reported 'fallback' before returning and something else is
-		// now playing. Drop what we just built rather than letting this
-		// assignment bury it.
-		if (gen !== attachSeq) {
-			try { p.destroy(); } catch (e) {}
-			return;
-		}
-		player = p;
+	// Apply the preferences a fresh player does not know about, and put the
+	// controls into the state it is actually in.
+	function settle() {
+		if (!player) return;
 		if (audioOn && player.audioSupported()) player.setAudio(true);
 		player.setVolume(vol);
 		syncAudioCtl();
-		// The old player's destroy() released the microphone, so the control
-		// has to come back up in the state the new one is actually in.
+		// The outgoing player's destroy() released the microphone, so talkback
+		// comes back up off whatever the new one is doing.
 		syncTalkCtl();
 		syncStatsCtl();
 		syncTransportNote();
 	}
 
-	function handlersFor(gen) {
-		const live = () => gen === attachSeq;
+	// Take over the screen. The outgoing player is destroyed only here, once
+	// its replacement has a picture — which is the whole point.
+	function promote() {
+		const s = staging;
+		staging = null;
+		if (attach) {
+			try { attach.p.destroy(); } catch (e) {}
+			attach.el.style.display = 'none';
+		}
+		attach = s;
+		player = s.p;
+		usingWebRTC = s.webrtc;
+		liveEl = s.el;
+		spareEl = (s.el === $('#live-video')) ? $('#live-video-b') : $('#live-video');
+		settle();
+		showVideo();
+	}
+
+	// The trial failed. Throw it away and leave the screen exactly as it was —
+	// unless what is on screen is already dead, in which case there is nothing
+	// left to protect and this is the end of the chain.
+	function dropStaging(why, permanent) {
+		const s = staging;
+		staging = null;
+		if (s) { try { s.p.destroy(); } catch (e) {} }
+		if (s && s.webrtc) {
+			if (transportCtl) transportCtl.checked = false;
+			// The reason first, because it is the news, then the standing
+			// explanation — the tooltip is the only place either of them lives.
+			if (transportLbl) {
+				transportLbl.title =
+					'WebRTC: ' + (why || 'unavailable') + '\n\n' + TRANSPORT_TITLE;
+			}
+			// 'busy' says the camera is full, which will not be true for long.
+			// Only a real refusal is worth remembering, and even that expires.
+			if (permanent) rememberDemotion();
+		}
+		// Is there still something worth keeping? Two ways there is not: the
+		// first attach failed, so nothing ever played; or the live player gave
+		// up and this was its replacement, so the picture on screen is a frozen
+		// last frame rather than a running session.
+		if (attach && !attach.dead) return;
+		if (attach) {
+			try { attach.p.destroy(); } catch (e) {}
+			attach = null;
+			player = null;
+		}
+		// Try the other transport, and MJPEG if that already was the other one.
+		if (s && s.webrtc) attachPlayer(false);
+		else showFallback();
+	}
+
+	function attachPlayer(webrtc) {
+		// One trial at a time: a second click while the first is still being
+		// judged would leave the first running with nothing tracking it.
+		if (staging) { try { staging.p.destroy(); } catch (e) {} staging = null; }
+
+		const id = ++attachSeq;
+		const el = attach ? spareEl : liveEl;
+		const impl = webrtc ? MajesticWebRTC : MajesticVideo;
+		// MSE leaves a MediaSource object URL behind and WebRTC uses srcObject;
+		// an element carrying both is a confusing thing to debug, and this one
+		// may have been used by the other transport a moment ago.
+		try { el.removeAttribute('src'); el.srcObject = null; } catch (e) {}
+
+		staging = { id: id, p: null, el: el, webrtc: !!webrtc };
+		const p = impl.attach(el, Object.assign(
+			{ stream: stream, iceServers: () => ice }, handlersFor(id)));
+
+		// attach() can report 'fallback' before returning — MajesticWebRTC does
+		// exactly that when RTCPeerConnection or addTransceiver throws — so the
+		// handler has already run and thrown this attempt away. Assigning now
+		// would resurrect it.
+		if (!staging || staging.id !== id) {
+			try { p.destroy(); } catch (e) {}
+			return;
+		}
+		staging.p = p;
+
+		// Nothing on screen to protect: this is the first attach, so the trial
+		// is the live player and the usual state applies to it immediately.
+		if (!attach) {
+			promote();
+		}
+	}
+	function handlersFor(id) {
+		const isLive = () => attach !== null && attach.id === id;
+		const isStaged = () => staging !== null && staging.id === id;
 		return {
+			// A staged player owns nothing on screen, so it reports only two
+			// things that matter: it worked, or it did not. Everything in
+			// between — connecting, no signal, reconnecting — is exactly what
+			// must NOT reach the page, because the whole point is that trying
+			// costs the viewer nothing until it succeeds.
 			onState: (s, d) => {
-				if (!live()) return;
+				if (isStaged()) {
+					if (s === 'playing') promote();
+					else if (s === 'fallback' || s === 'busy' || s === 'mjpeg') {
+						// 'mjpeg' is MSE saying it is out of options, which for
+						// a trial is just another way of failing.
+						dropStaging(d, s === 'fallback');
+					}
+					return;
+				}
+				if (!isLive()) return;
 				if (s === 'playing') showVideo();
 				else if (s === 'nosignal') showNoSignal();
 				else if (s === 'mjpeg') showFallback();
 				else if (s === 'fallback' || s === 'busy') {
-					// WebRTC gave up. Drop to MSE rather than to MJPEG: MSE
-					// plays what this browser's decoder takes rather than what
-					// its WebRTC stack will negotiate, which is a strictly
-					// larger set.
+					// The live player gave up mid-session. Try the other
+					// transport — from WebRTC that means MSE, which plays what
+					// this browser's decoder takes rather than what its WebRTC
+					// stack will negotiate, a strictly larger set.
+					//
+					// Staged like any other switch, so the last frame stays
+					// until the replacement has one. If MSE cannot run either,
+					// its own trial fails and lands on MJPEG.
 					if (usingWebRTC) {
-						const why = d || 'unavailable';
-						if (transportCtl) {
-							transportCtl.checked = false;
-						}
-						// The reason first, because it is the news, then the
-						// standing explanation — the tooltip is the only place
-						// either of them lives.
+						if (transportCtl) transportCtl.checked = false;
 						if (transportLbl) {
-							transportLbl.title =
-								'WebRTC: ' + why + '\n\n' + TRANSPORT_TITLE;
+							transportLbl.title = 'WebRTC: ' +
+								(d || 'unavailable') + '\n\n' + TRANSPORT_TITLE;
 						}
-						// 'busy' says the camera is full, which will not be
-						// true for long — take MSE now and try WebRTC again on
-						// the next load. Only a real refusal is worth
-						// remembering, and even that one expires.
 						if (s === 'fallback') rememberDemotion();
+						// Its picture is a frozen frame from here on. Say so,
+						// or a replacement that also fails would leave it on
+						// screen for ever with nothing to move it to MJPEG.
+						attach.dead = true;
 						attachPlayer(false);
 					} else {
 						showFallback();
@@ -310,7 +410,7 @@
 				else if (badge) badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
 			},
 			onCodec: (codec, cs, w, h) => {
-				if (!live()) return;
+				if (!isLive()) return;
 				if (badge) {
 					badge.textContent = codec.toUpperCase() + ' ' + w + '×' + h +
 						(usingWebRTC ? ' · WebRTC' : '');
@@ -320,7 +420,7 @@
 			// off or not producing). Reflect that on the control rather than
 			// leaving the user staring at an unmute button that does nothing.
 			onAudio: (codec) => {
-				if (!live() || !mute) return;
+				if (!isLive() || !mute) return;
 				if (mute.checked && !codec) {
 					muteLbl.textContent = '🔇 No audio';
 					mute.checked = false;
@@ -344,7 +444,7 @@
 			// microphone is running by then, and a control that cannot stop a
 			// running microphone is the wrong control.
 			onMic: (state, why) => {
-				if (!live() || !talk) return;
+				if (!isLive() || !talk) return;
 				talk.checked = state === 'on' || state === 'live';
 				talk.disabled = state === 'asking';
 				if (talkLbl) {
@@ -365,7 +465,7 @@
 				}
 			},
 			onStats: (s) => {
-				if (!live() || !statsBox || statsBox.hidden) return;
+				if (!isLive() || !statsBox || statsBox.hidden) return;
 				showStats(s);
 			},
 		};
