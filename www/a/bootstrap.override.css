@@ -780,3 +780,254 @@ mark {
 #mj-settings-form h3[tabindex]:focus:not(:focus-visible) {
 	outline: none;
 }
+
+/* ── recordings browser (tool-recordings.cgi) ──────────────────────────────
+   Everything here is theme-driven through Bootstrap's own custom properties,
+   because the timeline has to stay legible on both grounds: the coverage bar
+   is the accent, and the playhead and selection are drawn in the body colour,
+   which is near-white on dark and near-black on light. Hard-coding either way
+   round produces a playhead that vanishes into the bar it sits on.
+
+   These are .rec-* rather than Bootstrap utilities because the utilities they
+   would need — position-relative, overflow-hidden, w-100 — are not in the
+   PurgeCSS subset this tree ships (see tools/purgecss.config.cjs), so they
+   would silently do nothing. Same reason .mj-push-end exists above. */
+.rec-stage {
+	position: relative;
+	aspect-ratio: 16 / 9;
+	background: #000;
+	border-radius: var(--bs-border-radius);
+	overflow: hidden;
+}
+
+.rec-video {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+.rec-lbl {
+	display: block;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--bs-secondary-color);
+	margin-bottom: 0.3rem;
+}
+
+/* the whole day, as a map you move the detail window across */
+.rec-strip {
+	position: relative;
+	height: 18px;
+	border-radius: var(--bs-border-radius-sm);
+	background: var(--bs-secondary-bg);
+	overflow: hidden;
+	cursor: pointer;
+}
+
+.rec-strip .seg,
+.rec-band .seg {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	background: var(--bs-primary);
+}
+
+.rec-band .seg {
+	opacity: 0.55;
+}
+
+.rec-win {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	border: 2px solid var(--bs-body-color);
+	border-radius: 3px;
+	background: rgba(var(--bs-body-color-rgb), 0.14);
+	/* a window narrower than its own border reads as a line, not a window */
+	min-width: 6px;
+}
+
+.rec-hours,
+.rec-ticks {
+	display: flex;
+	justify-content: space-between;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.65rem;
+	font-variant-numeric: tabular-nums;
+	color: var(--bs-secondary-color);
+	margin-top: 0.25rem;
+}
+
+/* the hour (or whatever the zoom says) where the playhead and the export
+   handles actually live — a five-minute selection on a 24-hour ribbon is
+   three pixels wide, which is why this band exists at all */
+.rec-band {
+	position: relative;
+	height: 46px;
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-secondary-bg);
+	overflow: hidden;
+	cursor: ew-resize;
+	touch-action: none;
+}
+
+.rec-edge {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	/* the same colour as the track, so a boundary reads as a notch cut out of
+	   the coverage bar — and correctly disappears where there is no footage */
+	background: var(--bs-secondary-bg);
+}
+
+.rec-sel {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	background: rgba(var(--bs-body-color-rgb), 0.28);
+	border-left: 2px solid var(--bs-body-color);
+	border-right: 2px solid var(--bs-body-color);
+}
+
+.rec-head {
+	position: absolute;
+	top: -3px;
+	bottom: -3px;
+	width: 2px;
+	background: var(--bs-body-color);
+	pointer-events: none;
+}
+
+.rec-head-t {
+	position: absolute;
+	top: 12px;
+	left: 50%;
+	transform: translateX(-50%);
+	background: var(--bs-body-color);
+	color: var(--bs-body-bg);
+	font-family: var(--bs-font-monospace);
+	font-size: 0.7rem;
+	font-weight: 700;
+	padding: 2px 6px;
+	border-radius: var(--bs-border-radius-sm);
+	white-space: nowrap;
+}
+
+/* Reserved and empty on purpose. Majestic's motion detection is hardware
+   assisted but is never written to the card, so there is no event data to
+   draw — an empty labelled lane is honest where a missing one would imply
+   the feature is simply absent. */
+.rec-motion {
+	height: 14px;
+	margin-top: 0.35rem;
+	border-radius: 3px;
+	border: 1px dashed var(--bs-border-color);
+	background: repeating-linear-gradient(135deg,
+		transparent, transparent 5px,
+		rgba(var(--bs-body-color-rgb), 0.05) 5px,
+		rgba(var(--bs-body-color-rgb), 0.05) 10px);
+}
+
+.rec-export {
+	display: flex;
+	align-items: center;
+	gap: 0.875rem;
+	margin-top: 0.875rem;
+	padding: 0.75rem 0.875rem;
+	border-radius: var(--bs-border-radius);
+	background: rgba(var(--bs-primary-rgb), 0.12);
+	border: 1px solid rgba(var(--bs-primary-rgb), 0.45);
+}
+
+.rec-daypick {
+	width: auto;
+	min-width: 14rem;
+}
+
+/* ── clip list ──────────────────────────────────────────────────────────── */
+.rec-clip {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	width: 100%;
+	text-align: left;
+	padding: 0.5rem;
+	border: 1px solid transparent;
+	border-radius: var(--bs-border-radius);
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	transition: background-color var(--mj-ease), border-color var(--mj-ease);
+}
+
+.rec-clip:hover {
+	background: var(--bs-secondary-bg);
+}
+
+.rec-clip.active {
+	background: rgba(var(--bs-primary-rgb), 0.12);
+	border-color: var(--bs-primary);
+}
+
+.rec-clip-m {
+	display: flex;
+	flex-direction: column;
+	line-height: 1.35;
+}
+
+/* No poster yet: there is no ffmpeg on the camera to cut one, and decoding a
+   frame per clip in the browser costs a whole fragment each. The tile carries
+   the clip's start time so the row is still scannable, and turns into a real
+   thumbnail the day majestic writes a JPEG beside each recording. */
+.rec-poster {
+	position: relative;
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 84px;
+	height: 48px;
+	border-radius: var(--bs-border-radius-sm);
+	background: var(--bs-secondary-bg);
+	border: 1px solid var(--bs-border-color);
+}
+
+.rec-poster-t {
+	font-family: var(--bs-font-monospace);
+	font-size: 0.7rem;
+	color: var(--bs-secondary-color);
+}
+
+.rec-poster[data-live]::after {
+	content: "";
+	position: absolute;
+	left: 5px;
+	bottom: 5px;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--bs-danger);
+}
+
+/* A hole in the day is information — it says the camera was not recording,
+   which a simply-absent row does not. */
+.rec-gap {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.4rem 0.5rem;
+	font-size: 0.75rem;
+	color: var(--bs-secondary-color);
+}
+
+.rec-gap::before,
+.rec-gap::after {
+	content: "";
+	flex: 1;
+	height: 1px;
+	background: var(--bs-border-color);
+}
