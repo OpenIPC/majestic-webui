@@ -29,7 +29,7 @@ Pragma: no-cache
 			<button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
 				<span class="navbar-toggler-icon"></span>
 			</button>
-			<div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+			<div class="collapse navbar-collapse" id="navbarNav">
 				<ul class="navbar-nav">
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownInformation" role="button">Information</a>
@@ -99,10 +99,12 @@ Pragma: no-cache
 					     untrusted), so nothing is interpolated server-side. -->
 					<li class="nav-item dropdown d-none" id="cam-switch">
 						<!-- The label is this camera's own hostname, which the user
-						     can set to anything, so it is coloured with the brand
-						     accent and given a camera glyph to read as "the device
-						     you are on" rather than another menu word. -->
-						<a aria-expanded="false" class="nav-link dropdown-toggle d-inline-flex align-items-center gap-1 text-primary" data-bs-toggle="dropdown" href="#" id="cam-switch-toggle" role="button">
+						     can set to anything, so it is given a camera glyph and
+						     extra weight to read as "the device you are on" rather
+						     than another menu word. Not the brand accent: in light
+						     theme the navbar IS the brand colour, and the accent
+						     vanished into it completely. -->
+						<a aria-expanded="false" class="nav-link dropdown-toggle d-inline-flex align-items-center gap-1" data-bs-toggle="dropdown" href="#" id="cam-switch-toggle" role="button">
 							<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
 								<path d="M0 5a2 2 0 0 1 2-2h7.5a2 2 0 0 1 1.983 1.738l3.11-1.382A1 1 0 0 1 16 4.269v7.462a1 1 0 0 1-1.406.913l-3.111-1.382A2 2 0 0 1 9.5 13H2a2 2 0 0 1-2-2z"/>
 							</svg>
@@ -110,11 +112,11 @@ Pragma: no-cache
 							<!-- "+N" for the other cameras: reads as "N more" rather
 							     than a bare count, and stays muted so it does not
 							     compete with the accented hostname. -->
-							<span class="small fw-normal text-body-secondary" id="cam-switch-count"></span>
+							<span class="small fw-normal" id="cam-switch-count"></span>
 						</a>
 						<ul aria-labelledby="cam-switch-toggle" class="dropdown-menu dropdown-menu-end" id="cam-switch-menu"></ul>
 					</li>
-					<li class="nav-item"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
+					<li class="nav-item nav-push-end"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
 				</ul>
 			</div>
 		</div>

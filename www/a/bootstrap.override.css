@@ -1031,3 +1031,75 @@ mark {
 	height: 1px;
 	background: var(--bs-border-color);
 }
+
+/* The navbar used to carry justify-content-end, which pushed the whole menu to
+   the right edge and left a long gap after the logo — the eye had to cross it
+   before finding anything, and "Sign out" sat in the middle of the run rather
+   than apart from it. The menu now starts beside the brand and only Sign out is
+   pushed away, so the destructive action is the one thing not in the reading
+   order of the rest.
+
+   Not Bootstrap's ms-auto: that class is not in the PurgeCSS subset this tree
+   ships, so it would silently do nothing (see .mj-push-end). Scoped to the
+   expanded breakpoint because navbar-expand-lg stacks the menu vertically below
+   it, where an auto left margin only shunts one item to the right of a column. */
+@media (min-width: 992px) {
+	/* The auto margin needs somewhere to push into: the ul is a flex item that
+	   otherwise shrinks to its own contents, leaving no free space inside it
+	   however wide the bar is. Letting it span the collapse is what turns the
+	   margin into a gap. */
+	#navbarNav .navbar-nav {
+		flex-grow: 1;
+	}
+
+	.navbar-nav .nav-push-end {
+		margin-left: auto;
+	}
+}
+
+/* The peer count beside the camera name ("+5"), subordinate to it on either
+   navbar. It carried text-body-secondary, which is not in the PurgeCSS subset
+   this tree ships — so it was never muted at all, in any theme.
+
+   How far it can be muted depends on the bar underneath, and the two bars are
+   nothing alike. Against the dark one there is room to spare: 75% white is
+   9.0:1. Against the light one — which is the brand indigo, not a light
+   surface — the same 75% composites to #d2d7f5 and manages only 3.7:1, under
+   the 4.5:1 that small normal-weight text needs. So it is muted as far as each
+   bar allows rather than by one number that is wrong on one of them. */
+#cam-switch-count {
+	color: rgba(255, 255, 255, 0.75);
+}
+
+[data-bs-theme=light] #cam-switch-count {
+	/* 4.6:1 on rgb(76, 96, 216); 85% would still be 4.3:1. */
+	color: rgba(255, 255, 255, 0.9);
+}
+
+/* Links never wrap. With a peer camera on the link the expanded row is tight
+   between the breakpoint and about 1300px, and letting "Sign out" break onto a
+   second line does not make the bar narrower — it makes it taller, which is the
+   worse failure. The row overflows instead, which is what it already did.
+
+   A hostname is whatever someone typed, so it is capped and ellipsised rather
+   than allowed to push the row arbitrarily wide.
+
+   What is deliberately NOT done here: releasing min-width down the flex chain
+   so the row always fits. It does fit, by crushing the camera switcher to a
+   few pixels — measured at 5px wide against 226px of content — which is worse
+   than an honest overflow. Seven menus, a hostname and Sign out do not fit in
+   960px; that predates this change and wants solving by dropping something at
+   narrow widths, not by squeezing. */
+@media (min-width: 992px) {
+	.navbar-nav .nav-link {
+		white-space: nowrap;
+	}
+
+	#cam-switch-name {
+		display: inline-block;
+		max-width: 12rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		vertical-align: bottom;
+	}
+}
