@@ -1059,9 +1059,19 @@ mark {
 
 /* The peer count beside the camera name ("+5"), subordinate to it on either
    navbar. It carried text-body-secondary, which is not in the PurgeCSS subset
-   this tree ships — so it was never muted at all, in any theme. A translucent
-   white works against both bars: the dark grey one and the brand-coloured one
-   the light theme paints. */
+   this tree ships — so it was never muted at all, in any theme.
+
+   How far it can be muted depends on the bar underneath, and the two bars are
+   nothing alike. Against the dark one there is room to spare: 75% white is
+   9.0:1. Against the light one — which is the brand indigo, not a light
+   surface — the same 75% composites to #d2d7f5 and manages only 3.7:1, under
+   the 4.5:1 that small normal-weight text needs. So it is muted as far as each
+   bar allows rather than by one number that is wrong on one of them. */
 #cam-switch-count {
-	color: rgba(255, 255, 255, 0.7);
+	color: rgba(255, 255, 255, 0.75);
+}
+
+[data-bs-theme=light] #cam-switch-count {
+	/* 4.6:1 on rgb(76, 96, 216); 85% would still be 4.3:1. */
+	color: rgba(255, 255, 255, 0.9);
 }
