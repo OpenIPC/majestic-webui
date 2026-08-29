@@ -83,9 +83,22 @@ function tfhdDefaultDuration(d) {
 	return box('tfhd', u32(0x000008, 1, d));
 }
 
-function moof(seq, tfhdBox, trunBox) {
+// tfdt is a FullBox: version 1 then a 64-bit baseMediaDecodeTime, which is
+// what majestic writes. Optional here so the same builder produces both a
+// current recording and one written before the box existed.
+function tfdt(ticks) {
+	const p = Buffer.alloc(12);
+	p.writeUInt32BE(0x01000000, 0);          // version 1, flags 0
+	p.writeBigUInt64BE(BigInt(ticks), 4);
+	return box('tfdt', p);
+}
+
+function moof(seq, tfhdBox, trunBox, decodeTicks) {
 	const mfhd = box('mfhd', u32(0, seq));
-	return box('moof', Buffer.concat([mfhd, box('traf', Buffer.concat([tfhdBox, trunBox]))]));
+	const traf = decodeTicks === null
+		? [tfhdBox, trunBox]
+		: [tfhdBox, tfdt(decodeTicks), trunBox];
+	return box('moof', Buffer.concat([mfhd, box('traf', Buffer.concat(traf))]));
 }
 function mdat(len, fill) {
 	const p = Buffer.alloc(Math.max(0, len - 8), fill === undefined ? 0x41 : fill);
@@ -94,15 +107,21 @@ function mdat(len, fill) {
 
 // A whole clip. `specs` is one entry per fragment:
 //   { seq, durations:[ticks…], payload:bytes, defaultDur? }
-function clip(timescale, specs) {
+// `withTfdt` false builds a pre-tfdt recording, the shape majestic wrote when
+// records were enabled — still on plenty of cards, so both paths need cover.
+function clip(timescale, specs, withTfdt) {
 	const parts = [ftyp(), moov(timescale)];
+	let ticks = 0;
 	specs.forEach(s => {
 		const tf = s.defaultDur ? tfhdDefaultDuration(s.defaultDur) : tfhdPlain();
 		const tr = s.defaultDur
 			? box('trun', u32(0x000005, s.count, 0, 0x02000000))   // no per-sample durations
 			: trun(s.durations);
-		parts.push(moof(s.seq, tf, tr));
+		parts.push(moof(s.seq, tf, tr, withTfdt === false ? null : ticks));
 		parts.push(mdat(s.payload, s.fill));
+		ticks += s.defaultDur
+			? s.defaultDur * s.count
+			: s.durations.reduce((a, b) => a + b, 0);
 	});
 	return Buffer.concat(parts);
 }
@@ -345,75 +364,121 @@ function runCheap() {
 	group('durationHint — how long is this clip, in two reads');
 
 	const n = 250;
+	// The write counter drifts from the fragment ordinal on a real camera, so
+	// the pre-tfdt fixture drifts too — otherwise the fallback would look far
+	// better here than it is on hardware.
 	const seqs = [];
-	for (let i = 0, s = 0; i < n; i++) { seqs.push(s); if (i !== 5) s++; }
-	const buf = clip(1000000, evenSpecs(n, { seqs: seqs }));
-	const init = M.parseInit(u8of(buf));
-	const log = [];
-	const read = readerFor(buf, log);
+	for (let i = 0, k = 0; i < n; i++) { seqs.push(k); k += (i % 4 === 0) ? 2 : 1; }
 
-	return M.durationHint(read, buf.length, init).then(h => {
+	const withT = clip(1000000, evenSpecs(n, { seqs: seqs }));
+	const initT = M.parseInit(u8of(withT));
+	const log = [];
+
+	return M.durationHint(readerFor(withT, log), withT.length, initT).then(h => {
 		check('costs exactly two reads, whatever the clip length',
 			log.length === 2, 'reads: ' + log.length);
 		check('reports how long one fragment lasts', h.perFragment === 1,
 			'perFragment ' + h.perFragment);
-		// one plateau in the sequence numbers, so it reads one second short
-		check('lands within a fragment of the true length',
-			Math.abs(h.seconds - n) <= 2, 'got ' + h.seconds + ' want ~' + n);
-		check('and says it is approximate', h.approximate === true);
-		check('never over-reports — a hint that runs past the end would let the '
-			+ 'timeline offer footage that is not there', h.seconds <= n);
+		// tfdt says where the last fragment starts and trun how long it runs,
+		// so the two together are the length — not an estimate of it.
+		check('is exact when the fragments carry tfdt', h.seconds === n,
+			'got ' + h.seconds + ' want ' + n);
+		check('and does not claim to be approximate', h.approximate === false);
 
-		const tiny = clip(1000000, evenSpecs(1));
-		return M.durationHint(readerFor(tiny), tiny.length, M.parseInit(u8of(tiny)));
+		const old = clip(1000000, evenSpecs(n, { seqs: seqs }), false);
+		return M.durationHint(readerFor(old), old.length, M.parseInit(u8of(old)));
 	}).then(h => {
-		check('a single-fragment clip is one fragment long', h.seconds === 1, 'got ' + h.seconds);
+		check('a pre-tfdt recording still gets an answer', h.seconds > 0);
+		check('but says it is approximate', h.approximate === true);
+		check('and it really is wrong, because the write counter drifts',
+			h.seconds !== n, 'got ' + h.seconds + ' — suspiciously exact');
+		return null;
+	}).then(runLocateExact).then(runSpan);
+}
 
-		group('spanFrom — index only what is being exported');
+function runLocateExact() {
+	group('locate — finding the byte for a moment');
 
-		const specs = evenSpecs(300);
-		const b2 = clip(1000000, specs);
-		const i2 = M.parseInit(u8of(b2));
-		const l2 = [];
-		const r2 = readerFor(b2, l2);
+	const n = 400;
+	const sizes = [];
+	for (let i = 0; i < n; i++) sizes.push(20000 + (i % 7) * 9000);
+	const buf = clip(1000000, evenSpecs(n, { sizes: sizes }));
+	const init = M.parseInit(u8of(buf));
+	const log = [];
+	const read = readerFor(buf, log);
 
-		// walk the whole thing once to learn where second 100 really starts
-		return M.buildIndex(r2, b2.length, i2).then(full => {
-			const at100 = M.fragmentAt(full, 100);
-			l2.length = 0;
-			return M.spanFrom(r2, b2.length, i2, at100.off, 10).then(span => {
-				check('covers the seconds asked for', span.duration >= 10,
-					'got ' + span.duration);
-				check('and does not run far past them', span.duration <= 11,
-					'got ' + span.duration);
-				check('costs reads proportional to the span, not the clip',
-					l2.length <= 12, 'reads: ' + l2.length + ' for 10 s of a 300 s clip');
-				check('starts exactly where it was pointed',
-					span.fragments[0].off === at100.off);
-				check('carries the header length so exportRanges can use it',
-					span.headerLength === i2.headerLength);
+	return M.buildIndex(read, buf.length, init).then(full => {
+		log.length = 0;
+		return M.locate(read, buf.length, init, 300, 1).then(hit => {
+			const exact = M.fragmentAt(full, 300);
+			check('lands on exactly the fragment holding that second',
+				hit.off === exact.off, 'off ' + hit.off + ' want ' + exact.off);
+			check('and reports that fragment\'s real start time',
+				hit.approxSec === exact.t, hit.approxSec + ' vs ' + exact.t);
+			check('and says the answer is exact', hit.exact === true);
+			check('without walking the file', log.length < 20, 'reads: ' + log.length);
+		}).then(() => M.locate(read, buf.length, init, 300.4, 1)).then(hit => {
+			// never overshoot: starting after the moment asked for reads as the
+			// seek having been ignored, where a moment early is just lead-in
+			check('a moment mid-fragment lands on that fragment, not the next',
+				hit.approxSec === 300, 'got ' + hit.approxSec);
+		}).then(() => M.locate(read, buf.length, init, 0, 1)).then(hit => {
+			check('seeking to zero returns the first fragment',
+				hit.off === init.firstMoof, 'got ' + hit.off);
+		});
+	}).then(() => {
+		const old = clip(1000000, evenSpecs(400, { sizes: sizes }), false);
+		const oi = M.parseInit(u8of(old));
+		return M.locate(readerFor(old), old.length, oi, 300, 1).then(hit => {
+			check('a pre-tfdt recording still resolves to a fragment', hit.off > 0);
+			check('but does not claim to be exact', hit.exact === false);
+		});
+	});
+}
 
-				const r = M.exportRanges(span, 0, span.duration);
-				check('the span exports as a whole from its own first fragment',
-					r.body.start === at100.off);
-				check('and ends on a fragment boundary',
-					r.body.end === span.fragments[span.fragments.length - 1].off +
-						span.fragments[span.fragments.length - 1].len);
-				// byte-for-byte agreement with what a full index would have said
-				const fullR = M.exportRanges(full, 100, 100 + span.duration);
-				check('agrees byte-for-byte with a full-clip index',
-					fullR.body.start === r.body.start && fullR.body.end === r.body.end,
-					fullR.body.start + '..' + fullR.body.end + ' vs ' + r.body.start + '..' + r.body.end);
-			});
-		}).then(() => {
-			// asking for more than is left must stop at the end, not spin
-			const b3 = clip(1000000, evenSpecs(5));
-			const i3 = M.parseInit(u8of(b3));
-			return M.spanFrom(readerFor(b3), b3.length, i3, i3.firstMoof, 9999).then(span => {
-				check('a span running past the end stops at the last whole fragment',
-					span.fragments.length === 5 && span.duration === 5,
-					span.fragments.length + '/' + span.duration);
-			});
+function runSpan() {
+	group('spanFrom — index only what is being exported');
+
+	const buf = clip(1000000, evenSpecs(300));
+	const init = M.parseInit(u8of(buf));
+	const log = [];
+	const read = readerFor(buf, log);
+
+	return M.buildIndex(read, buf.length, init).then(full => {
+		const at100 = M.fragmentAt(full, 100);
+		log.length = 0;
+		return M.spanFrom(read, buf.length, init, at100.off, 10).then(span => {
+			check('covers the seconds asked for', span.duration >= 10,
+				'got ' + span.duration);
+			check('and does not run far past them', span.duration <= 11,
+				'got ' + span.duration);
+			check('costs reads proportional to the span, not the clip',
+				log.length <= 12, 'reads: ' + log.length + ' for 10 s of a 300 s clip');
+			check('starts exactly where it was pointed',
+				span.fragments[0].off === at100.off);
+			check('carries the header length so exportRanges can use it',
+				span.headerLength === init.headerLength);
+
+			const r = M.exportRanges(span, 0, span.duration);
+			check('the span exports as a whole from its own first fragment',
+				r.body.start === at100.off);
+			check('and ends on a fragment boundary',
+				r.body.end === span.fragments[span.fragments.length - 1].off +
+					span.fragments[span.fragments.length - 1].len);
+			// byte-for-byte agreement with what a full index would have said
+			const fullR = M.exportRanges(full, 100, 100 + span.duration);
+			check('agrees byte-for-byte with a full-clip index',
+				fullR.body.start === r.body.start && fullR.body.end === r.body.end,
+				fullR.body.start + '..' + fullR.body.end + ' vs ' + r.body.start + '..' + r.body.end);
+		});
+	}).then(() => {
+		// asking for more than is left must stop at the end, not spin
+		const b3 = clip(1000000, evenSpecs(5));
+		const i3 = M.parseInit(u8of(b3));
+		return M.spanFrom(readerFor(b3), b3.length, i3, i3.firstMoof, 9999).then(span => {
+			check('a span running past the end stops at the last whole fragment',
+				span.fragments.length === 5 && span.duration === 5,
+				span.fragments.length + '/' + span.duration);
 		});
 	});
 }

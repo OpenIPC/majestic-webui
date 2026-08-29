@@ -114,20 +114,21 @@
 
 	// ---- the player ------------------------------------------------------
 	//
-	// A plain <video> element pointed at the clip's own URL, and that is
-	// deliberate. The obvious ambition was MSE fed from the fragment index —
-	// jump the byte cursor, append from there, seek instantly. It does not work
-	// on these files: appending majestic's fragments to a SourceBuffer leaves
-	// `buffered` empty and raises an error on the SourceBuffer, in every
-	// combination of segments/sequence mode and timestampOffset tried, while an
-	// ffmpeg-authored fragmented MP4 appends to the same SourceBuffer fine. The
-	// same camera clips play perfectly in a plain element (3840x2160 decoded),
-	// and majestic serves Range properly, so the element can seek on its own.
+	// A plain <video> element pointed at the clip's own URL, seeking on its own
+	// over the Range requests majestic serves.
 	//
-	// Shipping the MSE path would have meant shipping a black player — precisely
-	// the failure this page exists to remove. The index is still what makes the
-	// page work; it just serves the timeline and the export rather than playback.
-	// See docs in mp4index.js for what each lookup costs.
+	// An MSE path aimed by the fragment index would seek by byte offset rather
+	// than by asking the browser to find the moment, and it is a reasonable
+	// next step — but only reasonable, not necessary. A recording carries a
+	// tfdt in every fragment, so the element has the decode times it needs to
+	// seek without walking the file, and a plain element is a great deal less
+	// machinery to get wrong.
+	//
+	// What is worth remembering is why this is not MSE already: a SourceBuffer
+	// refuses a media segment that has no tfdt, outright and with an empty
+	// buffer. Recordings written before that box was added cannot be appended
+	// at all, however they are fed in — no mode, timestampOffset or codec
+	// string changes it — while the same files play in a plain element.
 
 	// ---- opening a clip --------------------------------------------------
 

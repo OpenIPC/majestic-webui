@@ -1,12 +1,15 @@
 // Byte<->time for the fragmented MP4s majestic records to the SD card.
 //
 // Why this file exists at all: the clips are fragmented MP4 — ftyp, moov, then
-// a moof+mdat pair per GOP — but majestic writes no random-access index. There
-// is no `sidx`, no `mfra`/`mfro` trailer, and no `tfdt` in any fragment (the
-// boxes present are mfhd, traf, tfhd, trun and nothing else). So nothing in the
-// file says which byte a given second starts at, and a browser told to seek has
-// to walk the fragment chain from the beginning. That is the whole reason
-// dragging the scrub bar on a 400 MB recording behaves the way it does.
+// a moof+mdat pair per GOP — with no random-access index over the file as a
+// whole. There is no `sidx` and no `mfra`/`mfro` trailer, so nothing says which
+// byte a given second starts at; that has to be recovered from outside.
+//
+// Each fragment does state its own start, in tfdt, and everything here is built
+// on that. Recordings written before majestic wrote tfdt have only
+// mfhd.sequence_number to go on, which counts writes rather than fragments —
+// it ran 71 ahead over 300 fragments on an av300 — so on those files a seek can
+// only be approximate, and says so.
 //
 // Everything here is therefore about recovering that index from outside the
 // file, over HTTP Range — which majestic does serve properly (206 with
@@ -20,7 +23,7 @@
 // Hence four routes, and the page uses the cheapest that answers its question:
 //
 //   durationHint()  how long is this clip?          2 requests
-//   locate()        which byte is second N at?      ~10 requests, approximate
+//   locate()        which byte is second N at?      ~10 requests
 //   spanFrom()      index just this selection       ~1 per second exported
 //   buildIndex()    index the whole clip, exactly   ~1 per second of clip
 //
@@ -34,11 +37,15 @@
 window.MajesticMp4Index = (function () {
 	'use strict';
 
-	// A fragment's moof is 160-240 bytes on everything majestic writes. 256
-	// covers the largest observed moof plus the 8-byte mdat header that follows
-	// it, which is all a walk step needs — so one read per fragment, not two.
-	// parseFragment() reports when it was not enough rather than guessing.
-	const STEP = 256;
+	// One walk step needs the whole moof plus the 8-byte mdat header behind it.
+	// A video-only moof is 260 bytes (240 before tfdt was added), and a second
+	// traf for audio roughly doubles it. 1 KiB covers both with room to spare,
+	// and costs nothing worth counting: a range request is 32-50 ms whether it
+	// asks for 256 bytes or 256 KiB, so the only thing to optimise is the
+	// number of requests — one per fragment, never two. parseFragment() reports
+	// a short read rather than guessing, so being wrong here is slow, not
+	// incorrect.
+	const STEP = 1024;
 	// Widest fragment seen on an av300 at 4K/20fps is ~730 KB; a probe window
 	// has to be wide enough that a moof is certain to fall inside it.
 	const PROBE = 768 * 1024;
@@ -128,6 +135,31 @@ window.MajesticMp4Index = (function () {
 		return be32(u8, at + 20);
 	}
 
+	// baseMediaDecodeTime — where this fragment starts, in timescale ticks.
+	//
+	// This is the only field in the file that maps a fragment to a time
+	// honestly, which makes it what every lookup here is built on. Recordings
+	// written before majestic wrote the box have to fall back on
+	// mfhd.sequence_number, and the difference is not subtle: seq counts
+	// writes rather than fragments, running 71 ahead over 300 fragments on an
+	// av300, so a seek aimed by it landed about six seconds out.
+	function fragDecodeTicks(u8, moofAt, moofEnd) {
+		const traf = findBox(u8, moofAt + 8, moofEnd, 'traf');
+		if (!traf) return null;
+		const tfdt = findBox(u8, traf[0] + 8, traf[1], 'tfdt');
+		if (!tfdt) return null;
+		const version = u8[tfdt[0] + 8];
+		const at = tfdt[0] + 12;
+		if (version === 1) {
+			if (at + 8 > tfdt[1]) return null;
+			// Safe as a Number: a microsecond timescale needs 2^53 ticks to
+			// overflow, which is a few hundred years of recording.
+			return be32(u8, at) * 4294967296 + be32(u8, at + 4);
+		}
+		if (at + 4 > tfdt[1]) return null;
+		return be32(u8, at);
+	}
+
 	// Sum the sample durations of a fragment, in timescale ticks.
 	//
 	// trun carries them per sample when flag 0x100 is set, which is what
@@ -189,6 +221,7 @@ window.MajesticMp4Index = (function () {
 			mdatSize: mdatSize,
 			total: moofSize + mdatSize,
 			seq: moofSeq(u8, 0),
+			decodeTicks: fragDecodeTicks(u8, 0, Math.min(moofSize, u8.length)),
 			durTicks: fragDurationTicks(u8, 0, Math.min(moofSize, u8.length)),
 		};
 	}
@@ -291,9 +324,21 @@ window.MajesticMp4Index = (function () {
 	// label a timeline with.
 	function locate(read, size, init, targetSec, secPerFrag) {
 		const per = secPerFrag > 0 ? secPerFrag : 1;
-		const target = Math.max(0, targetSec) / per;
+		const ts = init.timescale || 1;
+		const target = Math.max(0, targetSec);
 
 		let lo = init.firstMoof, hi = size, best = null;
+
+		// What a probe found: its byte offset and the time it starts at.
+		// Exact from tfdt; on a pre-tfdt recording, estimated from the write
+		// counter, which is the whole reason `exact` is reported back.
+		function timeAt(buf, i) {
+			const ticks = fragDecodeTicks(buf, i, buf.length);
+			if (ticks !== null) return { sec: ticks / ts, exact: true };
+			const seq = moofSeq(buf, i);
+			if (seq === null) return null;
+			return { sec: seq * per, exact: false };
+		}
 
 		function probeAt(pos) {
 			const start = Math.max(init.firstMoof, Math.min(pos, size - 1));
@@ -301,25 +346,48 @@ window.MajesticMp4Index = (function () {
 			return read(start, start + want - 1).then(function (buf) {
 				const i = findMoof(buf, 0);
 				if (i < 0) return null;
-				return { off: start + i, seq: moofSeq(buf, i) };
+				const t = timeAt(buf, i);
+				return t === null ? null : { off: start + i, sec: t.sec, exact: t.exact };
 			});
 		}
 
 		function loop() {
-			if (hi - lo <= PROBE) return probeAt(lo).then(settle);
+			if (hi - lo <= PROBE) return refine();
 			const mid = lo + Math.floor((hi - lo) / 2);
 			return probeAt(mid).then(function (p) {
-				if (!p || p.seq === null) { hi = mid; return loop(); }
-				if (p.seq > target) { hi = mid; } else { lo = p.off; best = p; }
-				if (p.seq === target) return settle(p);
+				if (!p) { hi = mid; return loop(); }
+				if (p.sec > target) { hi = mid; } else { lo = p.off; best = p; }
 				return loop();
 			});
 		}
 
-		function settle(p) {
-			const hit = p || best;
-			if (!hit) return { off: init.firstMoof, approxSec: 0 };
-			return { off: hit.off, approxSec: (hit.seq || 0) * per };
+		// The search narrows to a window, not to a fragment — a window is wide
+		// enough to hold several — so finish by walking it. Without this the
+		// answer is only ever as precise as PROBE is wide, which is a couple of
+		// seconds on a real recording and much worse on small fragments.
+		function refine() {
+			const start = Math.max(init.firstMoof, Math.min(lo, size - 1));
+			const want = Math.min(PROBE, size - start);
+			return read(start, start + want - 1).then(function (buf) {
+				let at = findMoof(buf, 0);
+				while (at >= 0 && at + 16 <= buf.length) {
+					const t = timeAt(buf, at);
+					if (t === null || t.sec > target) break;
+					best = { off: start + at, sec: t.sec, exact: t.exact };
+					const f = parseFragment(buf.subarray(at));
+					if (!f || f.short || !f.total) break;
+					at += f.total;
+				}
+				return settle();
+			}).catch(settle);
+		}
+
+		function settle() {
+			// Land at or before the moment asked for, never after it: starting
+			// late reads as the seek having been ignored, where starting a
+			// fragment early is just a moment of lead-in.
+			if (!best) return { off: init.firstMoof, approxSec: 0, exact: false };
+			return { off: best.off, approxSec: best.sec, exact: best.exact };
 		}
 
 		return Promise.resolve().then(loop);
@@ -332,14 +400,17 @@ window.MajesticMp4Index = (function () {
 	// 1100 requests. Far too much to spend on opening a clip. These two give
 	// the page what it actually needs for a fraction of that.
 
-	// Roughly how long the clip runs, in two reads.
+	// How long the clip runs, in two reads.
 	//
-	// The last moof in the file carries a sequence_number that is very nearly
-	// the fragment ordinal, and the first fragment says how long a fragment
-	// lasts — so duration is (lastSeq + 1) x fragmentDuration. It is a hint,
-	// not a measurement: sequence_number plateaus (see moofSeq) so this reads a
-	// little short, and it assumes fragments are of equal length, which is true
-	// for a fixed GOP and not guaranteed in general.
+	// The last fragment in the file states where it begins (tfdt) and how long
+	// it lasts (trun), so the two together are the clip's length exactly — no
+	// walk, no assumption that fragments are of equal size.
+	//
+	// Without tfdt there is nothing exact to read, and the answer degrades to
+	// (lastSeq + 1) x fragmentDuration: sequence_number is not a fragment
+	// ordinal, so that runs wrong by whatever it has drifted, and it assumes
+	// every fragment is as long as the first. Flagged `approximate` so a caller
+	// can say so rather than present a guess as a measurement.
 	function durationHint(read, size, init) {
 		const tailFrom = Math.max(init.firstMoof, size - PROBE);
 		return Promise.all([
@@ -362,6 +433,17 @@ window.MajesticMp4Index = (function () {
 				at = i + 8;
 			}
 			if (last < 0) return null;
+
+			const ticks = fragDecodeTicks(tail, last, tail.length);
+			if (ticks !== null) {
+				const dur = fragDurationTicks(tail, last, tail.length);
+				return {
+					seconds: (ticks + (dur || 0)) / init.timescale,
+					perFragment: per,
+					approximate: false,
+				};
+			}
+
 			const seq = moofSeq(tail, last);
 			if (seq === null) return null;
 			return { seconds: (seq + 1) * per, perFragment: per, approximate: true };
