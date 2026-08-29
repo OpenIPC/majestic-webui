@@ -404,7 +404,29 @@ function heartbeat() {
 		}
 		t.setAttribute('aria-expanded', String(open));
 	});
-	document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+	// Keyboard parity with the Bootstrap dropdown this replaces: arrows walk
+	// the enabled items (down from the toggle enters at the top, up enters at
+	// the bottom), ends clamp, Escape closes and hands focus back to the
+	// toggle it came from.
+	document.addEventListener('keydown', e => {
+		const menu = $('.dropdown-menu.show');
+		if (!menu) return;
+		if (e.key === 'Escape') {
+			const t = menu.parentElement.querySelector('[data-bs-toggle="dropdown"]');
+			closeMenus();
+			if (t) t.focus();
+			return;
+		}
+		if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+		e.preventDefault();
+		const items = Array.from(menu.querySelectorAll('.dropdown-item:not(.disabled)'));
+		if (!items.length) return;
+		const cur = items.indexOf(document.activeElement);
+		let next;
+		if (cur === -1) next = e.key === 'ArrowDown' ? 0 : items.length - 1;
+		else next = e.key === 'ArrowDown' ? Math.min(cur + 1, items.length - 1) : Math.max(cur - 1, 0);
+		items[next].focus();
+	});
 })();
 
 // Navbar toggler (the only collapse) and dismissable pieces. The slide
