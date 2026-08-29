@@ -21,7 +21,15 @@ This is a majestic-side feature; the WebUI just provides the login page and the 
 
 ## Deploying / running
 
-- `sbin/updatewebui [branch]` — fetches a branch zip from GitHub, wipes `/var/www`, then copies `sbin/*` → `/usr/sbin` and `www/*` → `/var/www`. This is the canonical "deploy from source" path. Default branch is `master`.
+- `sbin/updatewebui [options] [branch]` — fetches a branch zip from GitHub and installs `www/*` → `/var/www`, `sbin/*` → `/usr/sbin`, `bin/*` → `/usr/bin` (the same payload `tools/build-dist.sh` hands buildroot). This is the canonical "deploy from source" path; default branch is `master`. `--help` lists the options, `--dry-run` reports what would change, and `--restore` takes the installed copies away again so the firmware's own WebUI shows through.
+
+    **It is overlay-aware, and has to be.** The rootfs is a read-only squashfs pivoted to `/rom` with a jffs2 overlay on top, so every installed file is an overlay copy that hides the firmware's own file underneath — and outlives the firmware upgrade that would have replaced it, hiding the newer file that upgrade delivered (#202). So the installer writes only the files that actually differ from `/rom`'s, drops the overlay copy of any file the firmware already has byte-identical, and prunes overlay entries this release no longer ships. On a current camera that is 37 overlay files instead of 80 — every `.cgi` matches what buildroot installed and comes straight from `/rom`.
+
+    Removals happen **in the overlay's upper directory** (`upperdir=` from `/proc/mounts`; `/overlay/root` on 4.x, `/overlay` on the 3.10 out-of-tree `overlayfs`), never through the merged path — a plain `rm /var/www/x` writes a whiteout that hides the firmware's copy for good. Only entries are unlinked, never the directories holding them: removing a directory from the upper layer leaves the merged parent listing empty until the next reboot. After the surgery the script drops caches and `md5sum -c`s every path it touched, and says so if the merged view has not caught up.
+
+    Nothing on the camera is touched until the download is fetched, verified and unpacked. The version this replaced wiped `/var/www` *before* checking anything, so `updatewebui --help` — an unknown branch — 404'd, unzipped nothing, and left the camera with no WebUI at all and whiteouts over the firmware's copies.
+
+    A manifest at `/etc/webui/updatewebui.manifest` records what was installed, which is what lets the next run tell a local edit apart from a file the release simply changed. Local edits are replaced, not merged, but they are archived to `/etc/webui/updatewebui-local-<stamp>.tar.gz` first (`--no-backup` opts out).
 - Edits to a running camera can also be made directly under `/var/www/cgi-bin/` and `/usr/sbin/`.
 - There is no local way to run the UI off-camera — every script assumes camera-side binaries (`majestic`, `yaml-cli`, `ipcinfo`, `fw_printenv`, `haserl`, `chpasswd`, `sysupgrade`).
 
