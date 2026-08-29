@@ -10,7 +10,16 @@
 <div id="rec-health" class="d-none"></div>
 <div id="rec-note" class="d-none"></div>
 
-<div id="rec-main">
+<noscript>
+	<div class="alert alert-warning">This page reads the archive off the card in the browser, so it needs JavaScript.</div>
+</noscript>
+
+<!-- Hidden until recordings.js knows there is an archive to show. Almost all of
+     this — a full-width player, a ribbon, a Clips card — means nothing until the
+     card has been read, and two fetches later it may turn out there is nothing
+     on it. Painted first and then withdrawn, it flashes a whole video player at
+     someone for a fifth of a second and takes it away again. -->
+<div id="rec-main" hidden>
 
 	<div id="rec-daynav" class="d-flex flex-wrap align-items-center gap-2 mb-3"></div>
 
