@@ -60,7 +60,19 @@
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
 		const subOk = mjGet(cfg, 'video1.enabled') === true;
+		subAvailable = subOk;
 		if (subOk) $('#mj-sub').hidden = false;
+		// Auto only where there are two streams to choose between: with one
+		// encoder configured there is nothing for it to decide.
+		if (subOk && autoLbl) autoLbl.hidden = false;
+		if (autoCtl) autoCtl.disabled = !subOk;
+		// "WxH" per channel. Auto compares areas, so parse once.
+		sizeOf = [0, 1].map(n => {
+			const v = mjGet(cfg, 'video' + n + '.size');
+			const m = /^(\d+)x(\d+)$/.exec(String(v || ''));
+			return m ? (+m[1]) * (+m[2]) : null;
+		});
+		autoApply();
 		// Same reason as the settings panel: the label is what gets hidden, and
 		// the radio behind it stays in the tab order, so without this the
 		// keyboard can pick a stream the camera does not have.
@@ -139,6 +151,7 @@
 		}
 	}
 	const s0 = $('#mj-stream-0'), s1 = $('#mj-stream-1');
+	const autoCtl = $('#mj-stream-auto'), autoLbl = $('#mj-auto');
 
 	// Which transport to try, and the memory behind it, both live in
 	// preview-transport.js — the settings page needs the same rules and two
@@ -160,6 +173,16 @@
 	// corrected by the first reconnect rather than staying host-candidates-only
 	// for the life of the page.
 	let ice = [];
+	// Auto: pick the stream closest to the size this player is drawn at, and
+	// follow the window. Sizes come from the config; sizeOf[n] is null until it
+	// lands, which is what stops Auto choosing on a guess.
+	let autoOn = false;
+	let subAvailable = false;
+	let sizeOf = [null, null];
+	// At most one change a second, the reporter's own limit. A drag across a
+	// boundary would otherwise cut the session on every frame of the resize.
+	const AUTO_MIN_GAP_MS = 1000;
+	let lastAutoAt = 0, autoTimer = null;
 	// Per channel, filled when the config lands; true until then, which is what
 	// a camera without the setting does.
 	let adapts = [true, true];
@@ -471,14 +494,74 @@
 	// Whether the deadline won and we picked a stream without being told.
 	let attachedBlind = false;
 
+	// Which stream best fits the box this player is drawn in.
+	//
+	// By area, not by width: a 704x576 substream and a 1280x720 main stream are
+	// not ordered the same way by one dimension as by the picture they carry,
+	// and it is pixels that cost bandwidth.
+	//
+	// CSS pixels rather than device pixels, deliberately. On a 2x display the
+	// larger stream is sharper, but this exists for links that cannot carry the
+	// larger stream at all, and doubling the demand on every phone is the wrong
+	// side to err on.
+	//
+	// Nearest at or above the target, else the largest below it — the
+	// reporter's rule, and the right way round: scaling a bigger picture down
+	// loses nothing visible, scaling a smaller one up does.
+	function autoPick() {
+		const el = swap.element() || cur();
+		const want = el ? el.clientWidth * el.clientHeight : 0;
+		if (!want) return null;   // not laid out yet; ask again later
+		const options = [];
+		for (let n = 0; n < 2; n++) {
+			if (sizeOf[n] && (n === 0 || subAvailable)) {
+				options.push({ n: n, area: sizeOf[n] });
+			}
+		}
+		if (!options.length) return null;
+		const atLeast = options.filter(o => o.area >= want);
+		if (atLeast.length) {
+			return atLeast.reduce((a, b) => (b.area < a.area ? b : a)).n;
+		}
+		return options.reduce((a, b) => (b.area > a.area ? b : a)).n;
+	}
+
+	// Act on it, subject to the rate limit. Called on resize and whenever the
+	// numbers behind the decision change.
+	function autoApply() {
+		if (!autoOn) return;
+		const want = autoPick();
+		if (want === null || want === stream) return;
+		const wait = AUTO_MIN_GAP_MS - (Date.now() - lastAutoAt);
+		if (wait > 0) {
+			// Not dropped, deferred: the size that triggered this is the size
+			// it still is, and forgetting it would leave the wrong stream up
+			// until the next time the window happened to move.
+			clearTimeout(autoTimer);
+			autoTimer = setTimeout(autoApply, wait);
+			return;
+		}
+		lastAutoAt = Date.now();
+		goToStream(want);
+	}
+
 	// Which channel to open on: what this browser last chose, or the substream.
 	//
 	// A remembered choice outranks the default but not reality — a browser that
 	// picked Sub on a camera which has since lost video1 opens on Main rather
 	// than on nothing. Returns true if the channel moved off Main.
 	function chooseSub(cfg) {
-		const subAvailable = mjGet(cfg, 'video1.enabled') === true;
 		const remembered = MajesticTransport.chosenStream('preview');
+		if (remembered === 'auto' && subAvailable) {
+			autoOn = true;
+			if (autoCtl) autoCtl.checked = true;
+			const pick = autoPick();
+			// A size the page cannot measure yet leaves Auto on the substream,
+			// which is the default it would otherwise have had; the first
+			// resize or the layout settling corrects it.
+			stream = pick === null ? 1 : pick;
+			return stream === 1;
+		}
 		const want = remembered === null ? 1 : remembered;
 		if (want !== 1 || !subAvailable) {
 			stream = 0;
@@ -554,12 +637,6 @@
 	// remembered — someone whose camera crops video0, or whose substream is
 	// sized nothing like the preview box, wants Main and should say so once
 	// rather than on every page load.
-	[s0, s1].forEach((el, n) => {
-		if (el) el.addEventListener('click', () => {
-			userPickedStream = true;
-			MajesticTransport.chooseStream('preview', n);
-		});
-	});
 	// Everything a channel change has to reach: the player on screen, any trial
 	// being judged — a trial keeps the stream it was opened with, so otherwise
 	// it would be promoted onto the channel the viewer had already left — and
@@ -571,8 +648,36 @@
 		if (t) t.setStream(n);
 		syncTransportNote();
 	}
-	if (s0) s0.addEventListener('change', () => goToStream(0));
-	if (s1) s1.addEventListener('change', () => goToStream(1));
+	if (s0) s0.addEventListener('change', () => { autoOn = false; goToStream(0); });
+	if (s1) s1.addEventListener('change', () => { autoOn = false; goToStream(1); });
+	if (autoCtl) autoCtl.addEventListener('change', () => {
+		autoOn = autoCtl.checked;
+		if (!autoOn) return;
+		// Acting immediately rather than waiting for a resize: the person just
+		// asked for the best fit, and the window is already the size it is.
+		lastAutoAt = 0;
+		autoApply();
+	});
+	// Recorded on click rather than change: pressing the radio that is already
+	// selected fires no change event and is still an answer — the one that has
+	// to be remembered, for someone whose video0 is cropped or whose substream
+	// is sized nothing like the preview box.
+	[s0, s1, autoCtl].forEach((el, n) => {
+		if (el) el.addEventListener('click', () => {
+			userPickedStream = true;
+			MajesticTransport.chooseStream('preview', n === 2 ? 'auto' : n);
+		});
+	});
+
+	// Follow the window. Debounced because a drag fires this continuously, and
+	// the rate limit in autoApply() is what keeps the session from being cut
+	// more than once a second even so.
+	let resizeTimer = null;
+	window.addEventListener('resize', () => {
+		if (!autoOn) return;
+		clearTimeout(resizeTimer);
+		resizeTimer = setTimeout(autoApply, 250);
+	});
 
 	// Audio: revealed only when the camera has it configured and the transport
 	// in use can carry it — otherwise the button is a dead end.

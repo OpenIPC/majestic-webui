@@ -464,6 +464,11 @@ preview() {
 		<label class="btn btn-outline-primary" for="mj-stream-0">Main</label>
 		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-1" autocomplete="off">
 		<label class="btn btn-outline-primary" for="mj-stream-1" id="mj-sub" hidden>Sub</label>
+		<!-- Revealed only where there are two streams to choose between: with one
+		     encoder configured there is nothing for Auto to decide. -->
+		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-auto" autocomplete="off">
+		<label class="btn btn-outline-primary" for="mj-stream-auto" id="mj-auto" hidden
+			title="Picks whichever stream is closest to the size this player is being shown at, and follows the window as it changes. The badge names the one in use.">Auto</label>
 		<span id="mj-badge" class="badge text-bg-secondary align-self-center ms-2">connecting…</span>
 	</div>
 	<!-- Unhidden by preview-page.js only where preview-webrtc.js is loaded and
