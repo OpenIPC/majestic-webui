@@ -38,11 +38,74 @@
 			.catch(() => { SD.innerHTML = '<div class="alert alert-danger">Failed to read SD-card status.</div>'; });
 	}
 
+	// `ok` is spelled out rather than left as the default: render() calls this
+	// with {} before the first fetch lands and after a failed one, and an
+	// unknown card must not be badged as a healthy one.
 	function badge(d) {
-		if (!d.present) return '<span class="badge text-bg-secondary">No card</span>';
-		if (d.mounted) return '<span class="badge text-bg-success">Mounted</span>';
-		if (d.fs) return '<span class="badge text-bg-warning">Not mounted</span>';
-		return '<span class="badge text-bg-danger">Unformatted</span>';
+		switch (d.health) {
+		case 'ok': return '<span class="badge text-bg-success">Mounted</span>';
+		case 'readonly': return '<span class="badge text-bg-danger">Read-only</span>';
+		case 'unreadable': return '<span class="badge text-bg-danger">No filesystem</span>';
+		case 'unformatted': return '<span class="badge text-bg-danger">Unformatted</span>';
+		case 'unmounted': return '<span class="badge text-bg-warning">Not mounted</span>';
+		default: return '<span class="badge text-bg-secondary">No card</span>';
+		}
+	}
+
+	// What to do about a card that cannot be recorded to. `fsck` is the right
+	// answer where the firmware has the helper for this filesystem, and is not
+	// an answer at all where it does not: busybox ships the generic `fsck`
+	// wrapper on every build, but it only execs `fsck.<fs>`, and a build
+	// without dosfstools has no fsck.vfat for it to find. Saying "run Check"
+	// there would send people after a button the page has not drawn.
+	function remedy(d) {
+		if (d.canFsck) {
+			return {
+				text: 'Checking the filesystem is the next step: it unmounts the card, repairs what it can and mounts it back.',
+				btn: '<button class="btn btn-sm btn-danger" data-act="fsck">Check and repair</button>',
+			};
+		}
+		return {
+			text: (d.fs
+				? 'This firmware ships no <code>fsck.' + esc(d.fs) + '</code>, so there is no repair to offer: ' +
+					'copy off anything you still need, then reformat.'
+				: 'With no filesystem to read there is nothing a repair tool could work on — the card has to be reformatted.') +
+				' A card that goes bad again soon afterwards is worn out; replace it.',
+			btn: '<button class="btn btn-sm btn-danger" data-act="format">Format the card…</button>',
+		};
+	}
+
+	// Kernel messages, when there are any. Shown as corroboration and never as
+	// a verdict: the ring buffer is small and chatty, so the errors that
+	// stopped a recording hours ago have usually scrolled out of it. An empty
+	// list means nothing was found, not that nothing happened — which is why
+	// this renders nothing at all rather than "no errors".
+	function kernelLines(d) {
+		if (!d.fsErrors || !d.fsErrors.length) return '';
+		return '<div class="mt-2"><div class="x-small text-secondary mb-1">Recent kernel messages about this card:</div>' +
+			'<pre class="x-small mb-0" style="white-space:pre-wrap">' + esc(d.fsErrors.join('\n')) + '</pre></div>';
+	}
+
+	// The one thing the rest of the page cannot tell you. Everything else here
+	// — capacity, free space, the storage bar — reads exactly the same on a
+	// card that has been read-only since lunchtime as on a healthy one.
+	function health(d) {
+		let title, body;
+		if (d.health === 'readonly') {
+			title = 'This card is mounted read-only.';
+			body = 'Nothing can be written to it, so recording is not running — whatever the free space below says. ' +
+				'The kernel drops a card to read-only the moment its filesystem stops making sense ' +
+				'(<code>errors=remount-ro</code>), so treat this as a damaged filesystem. ';
+		} else if (d.health === 'unreadable') {
+			title = 'No filesystem can be read from this card.';
+			body = 'The partition is there, but nothing on the camera recognises what is inside it — ' +
+				'it was either never formatted, or the filesystem is damaged past recognition. ';
+		} else {
+			return '';
+		}
+		const fix = remedy(d);
+		return '<div class="alert alert-danger"><strong>' + title + '</strong> ' + body + fix.text +
+			kernelLines(d) + '<div class="mt-2">' + fix.btn + '</div></div>';
 	}
 
 	function storageBar(d) {
@@ -55,7 +118,14 @@
 		const bar = segs.map(s => '<div class="seg" style="width:' + (s.b / total * 100).toFixed(2) + '%;background:' + s.c + '" title="' + s.name + ' ' + humanBytes(s.b) + '"></div>').join('');
 		const leg = segs.map(s => '<span><i class="dot" style="background:' + s.c + '"></i>' + s.name + ' <span class="text-secondary">' + humanBytes(s.b) + '</span></span>').join('')
 			+ '<span><i class="dot dot-free"></i>Free <span class="text-secondary">' + humanBytes(free) + '</span></span>';
-		return '<div class="d-flex justify-content-between x-small mb-1"><span class="fw-semibold">Storage</span><span class="text-secondary">' + humanBytes(used) + ' of ' + humanBytes(total) + ' used</span></div>'
+		// The free figure is what df reports, and df keeps reporting the space
+		// that was free at the moment the kernel stopped letting anything use
+		// it. Left unqualified it is the single most misleading number on this
+		// page — the reason a dead card reads as healthy.
+		const cap = d.health === 'readonly'
+			? '<span class="text-danger">' + humanBytes(free) + ' free, but nothing can be written</span>'
+			: '<span class="text-secondary">' + humanBytes(used) + ' of ' + humanBytes(total) + ' used</span>';
+		return '<div class="d-flex justify-content-between x-small mb-1"><span class="fw-semibold">Storage</span>' + cap + '</div>'
 			+ '<div class="storage-bar mb-2">' + bar + '</div><div class="storage-legend x-small mb-2">' + leg + '</div>';
 	}
 
@@ -75,13 +145,16 @@
 		if (d.canFsck) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="fsck">Check</button>';
 		acts += '<button class="btn btn-sm btn-outline-danger" data-act="format">Format…</button>';
 
-		SD.innerHTML = head + '<div class="row g-4">'
+		SD.innerHTML = head + health(d) + '<div class="row g-4">'
 			+ '<div class="col-12 col-lg-7"><div class="card h-100"><div class="card-body">'
 			+ '<dl class="small list mb-3">'
 			+ '<dt>Model</dt><dd>' + esc(d.model || '—') + ' <span class="text-secondary">(' + esc(d.cardtype || 'SD') + ')</span></dd>'
 			+ '<dt>Capacity</dt><dd>' + humanBytes(d.sizeBytes) + '</dd>'
-			+ '<dt>Filesystem</dt><dd>' + (d.fs ? esc(d.fs) : '<span class="text-danger">unformatted</span>') + '</dd>'
-			+ '<dt>Mount</dt><dd>' + (d.mounted ? esc(d.mountpoint) : 'not mounted') + '</dd>'
+			+ '<dt>Filesystem</dt><dd>' + (d.fs ? esc(d.fs)
+				: '<span class="text-danger">' + (d.health === 'unreadable' ? 'none readable' : 'unformatted') + '</span>') + '</dd>'
+			+ '<dt>Mount</dt><dd>' + (d.mounted
+				? esc(d.mountpoint) + (d.health === 'readonly' ? ' <span class="text-danger">— read-only</span>' : '')
+				: 'not mounted') + '</dd>'
 			+ '<dt>Manufactured</dt><dd class="text-secondary">' + esc(d.date || '—') + '</dd>'
 			+ '</dl>'
 			+ storageBar(d)
@@ -96,20 +169,29 @@
 			+ '<dt>Split</dt><dd>' + (mjGet(cfg, 'records.split') || '—') + ' min</dd>'
 			+ '<dt>Max usage</dt><dd>' + (mjGet(cfg, 'records.maxUsage') || '—') + ' %</dd>'
 			+ '</dl>'
-			+ (d.mounted && !onThisCard ? '<button class="btn btn-sm btn-primary mb-3" id="sd-use">Use this card for recording</button>'
-				: (onThisCard ? '<div class="x-small text-success mb-3">✓ Recording to this card</div>' : ''))
+			+ (onThisCard
+				// "Recording to this card" is a claim about what is happening,
+				// not about what is configured, so it has to know the card is
+				// writable before it makes it.
+				? (d.health === 'readonly'
+					? '<div class="x-small text-danger mb-3">Configured to record here, but the card is read-only — nothing is being written.</div>'
+					: '<div class="x-small text-success mb-3">✓ Recording to this card</div>')
+				: (d.mounted && d.health !== 'readonly'
+					? '<button class="btn btn-sm btn-primary mb-3" id="sd-use">Use this card for recording</button>' : ''))
 			+ '<div><a class="small" href="mj-settings.cgi?tab=records">Recording settings →</a></div>'
 			+ '</div></div></div></div>';
-
-		wire();
 	}
 
 	function busy(btn) { if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; } }
 	function after(r) { if (r && r.ok === false) alert('Failed: ' + (r.error || '')); load(); }
 
+	// Bound once, to the container the page never replaces. It used to be bound
+	// per render to #sd-actions, which was safe only because that element was
+	// thrown away each time; #sd is not, and this page re-renders every five
+	// seconds. Delegating from here also lets the health alert offer the same
+	// data-act buttons as the actions row.
 	function wire() {
-		const acts = $('#sd-actions');
-		if (acts) acts.addEventListener('click', e => {
+		SD.addEventListener('click', e => {
 			const b = e.target.closest('[data-act]'); if (!b) return;
 			const act = b.dataset.act;
 			if (act === 'browse') { location = 'tool-files.cgi?cd=' + encodeURIComponent(state.mountpoint); return; }
@@ -117,10 +199,14 @@
 			if (act === 'fsck' && !confirm('Unmount and check the filesystem?')) return;
 			busy(b); op({ op: act }).then(after);
 		});
-		const tog = $('#sd-rec-toggle');
-		if (tog) tog.addEventListener('change', () => { tog.disabled = true; setConfig({ records: { enabled: tog.checked } }).then(load); });
-		const use = $('#sd-use');
-		if (use) use.addEventListener('click', () => { busy(use); setConfig({ records: { path: state.mountpoint + '/%F', enabled: true } }).then(load); });
+		SD.addEventListener('click', e => {
+			const use = e.target.closest('#sd-use'); if (!use) return;
+			busy(use); setConfig({ records: { path: state.mountpoint + '/%F', enabled: true } }).then(load);
+		});
+		SD.addEventListener('change', e => {
+			const tog = e.target.closest('#sd-rec-toggle'); if (!tog) return;
+			tog.disabled = true; setConfig({ records: { enabled: tog.checked } }).then(load);
+		});
 	}
 
 	function openFormat() {
@@ -142,5 +228,6 @@
 		modal.show();
 	}
 
+	wire();
 	load().then(() => { clearInterval(timer); timer = setInterval(() => { if (!document.hidden) load(); }, 5000); });
 })();

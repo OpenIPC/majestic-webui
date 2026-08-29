@@ -3,6 +3,11 @@
 <% page_title="Recordings" %>
 <%in p/header.cgi %>
 
+<!-- Two banners, and they are not interchangeable. #rec-health is about the
+     card and stays put for as long as the card is in trouble; #rec-note is the
+     transient one the player writes to and clears on every clip and day change,
+     so a card warning parked in it would be wiped by the first seek. -->
+<div id="rec-health" class="d-none"></div>
 <div id="rec-note" class="d-none"></div>
 
 <div id="rec-main">
