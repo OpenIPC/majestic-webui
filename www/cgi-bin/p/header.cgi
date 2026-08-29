@@ -14,7 +14,14 @@ Pragma: no-cache
 	<script>if(document.documentElement.getAttribute('data-bs-theme')==='auto')document.documentElement.setAttribute('data-bs-theme',matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');</script>
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=PT+Mono&display=swap">
+	<!-- The brand fonts come from a CDN, but the page must paint without it
+	     (#31): a camera with no internet — or behind a route that blackholes
+	     instead of refusing — must not hold first paint on fonts.googleapis.com.
+	     media="print" keeps the fetch off the render path; onload promotes the
+	     sheet once it actually arrives, and until then the system stack from
+	     bootstrap.override.css is what you read. -->
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=PT+Mono&display=swap" media="print" onload="this.onload=null;this.media='all'">
+	<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=PT+Mono&display=swap"></noscript>
 	<link rel="stylesheet" href="/a/bootstrap.min.css">
 	<link rel="stylesheet" href="/a/bootstrap.override.css">
 	<script src="/a/bootstrap.bundle.min.js"></script>
