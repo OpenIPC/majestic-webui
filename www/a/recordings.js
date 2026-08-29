@@ -1342,7 +1342,7 @@
 					return;
 				}
 				waitStep = 0;
-				start();
+				boot();
 			});
 		});
 	}
@@ -1363,7 +1363,7 @@
 			loadDays().then(function () {
 				if (!state.days.length) { waitForFirstClip(); return; }
 				waitStep = 0;
-				start();
+				boot();
 			});
 		}, ms);
 	}
@@ -1424,9 +1424,20 @@
 	// Anything that got past the loaders' own catches — a render that threw, a
 	// browser missing something this leans on. The page stays hidden rather than
 	// showing a shell that is never going to fill.
-	start().catch(function (e) {
-		empty('<strong>The recordings page could not start.</strong> Reload the page, or ',
-			'<a href="tool-sdcard.cgi">check the SD card</a>.', 'danger');
-		if (window.console && console.error) console.error(e);
-	});
+	//
+	// Every entry into start() goes through here, not just the first. The page
+	// re-reads itself when recording is switched on and again when polling finds
+	// the first clip, and those are the runs most likely to break new ground —
+	// they are the ones that reach wire(), the renderers and playback for the
+	// first time. A catch on the boot call alone would let exactly those fail
+	// silently, leaving the page hidden behind a note that is no longer true.
+	function boot() {
+		return start().catch(function (e) {
+			empty('<strong>The recordings page could not start.</strong> Reload the page, or ',
+				'<a href="tool-sdcard.cgi">check the SD card</a>.', 'danger');
+			if (window.console && console.error) console.error(e);
+		});
+	}
+
+	boot();
 })();
