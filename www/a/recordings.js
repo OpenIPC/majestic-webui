@@ -405,14 +405,34 @@
 	// The second is why this is loaded before the page decides it has nothing
 	// to show: "nothing recorded yet" and "the card went read-only at 12:04"
 	// look identical from the clip list alone.
-	function loadCard() {
+	// `rec` asks the endpoint to du(1) the whole archive for the storage bar,
+	// which is not free on a card holding a month of clips — so the periodic
+	// refresh, which only needs the health verdict and df's numbers, leaves it
+	// off and carries the measured recBytes forward.
+	function loadCard(withRec) {
 		if (!state.prefix) return Promise.resolve();
-		return apiFetch('/cgi-bin/j/sdcard.cgi?rec=' + encodeURIComponent(state.prefix),
-			{ credentials: 'same-origin' })
+		const q = withRec === false ? '' : '?rec=' + encodeURIComponent(state.prefix);
+		return apiFetch('/cgi-bin/j/sdcard.cgi' + q, { credentials: 'same-origin' })
 			.then(function (r) { return r.json(); })
-			.then(function (d) { state.card = d; })
-			.catch(function () { /* the page is useful without it */ });
+			.then(function (d) {
+				// Asked without ?rec= the endpoint reports recBytes as 0 rather
+				// than leaving it out, so the carry-forward has to key off the
+				// question asked, not the answer given, or the storage bar's
+				// Recordings segment collapses on the first refresh.
+				if (d && withRec === false && state.card) d.recBytes = state.card.recBytes;
+				state.card = d;
+			})
+			// The page still browses the archive without this, but it must not
+			// go on claiming the camera is recording — see cardWritable().
+			.catch(function () { state.card = null; });
 	}
+
+	// Positive claims need positive evidence. A card is only known writable
+	// when the endpoint said so; a request that failed, or an answer this
+	// release does not understand, is an unknown card, and an unknown card
+	// must not be painted green — that false reassurance is the whole bug
+	// this page is here to stop telling.
+	function cardWritable() { return !!state.card && state.card.health === 'ok'; }
 
 	// Why there is no new footage, said on the page people actually arrive at.
 	// Returns '' while the card is fine — including while it is merely full,
@@ -467,9 +487,11 @@
 	// much room is left before the oldest of it is deleted.
 	function renderStorage() {
 		const d = state.card;
-		if (!d || !d.mounted || !d.totalKb) return;
 		const card = $id('rec-storage-card'), el = $id('rec-storage');
 		if (!card || !el) return;
+		// Hidden rather than left standing: a card unmounted while the page is
+		// open would otherwise keep showing the space it had when it left.
+		if (!d || !d.mounted || !d.totalKb) { card.hidden = true; return; }
 		const total = d.totalKb * 1024, used = d.usedKb * 1024;
 		const rec = Math.min(d.recBytes || 0, used);
 		const other = Math.max(0, used - rec), free = Math.max(0, total - used);
@@ -504,6 +526,33 @@
 				? '<span class="text-secondary">oldest clips deleted at ' +
 				esc(String(mjGet(state.cfg, 'records.maxUsage'))) + ' %</span>' : '') +
 			'</div>';
+	}
+
+	// The card is the one thing on this page that changes underneath it. Days
+	// and clips are history and a reload is the natural way to get more of
+	// them, but a card goes read-only mid-session — which is exactly the
+	// failure this page exists to report, and reporting it only to whoever
+	// happens to load the page afterwards would miss the person already
+	// watching. Slow on purpose: this is a viewer, sometimes left open on a
+	// wall display, not a dashboard.
+	const CARD_POLL_MS = 30000;
+
+	function watchCard() {
+		setInterval(function () {
+			if (document.hidden) return;
+			const before = state.card ? state.card.health : null;
+			loadCard(false).then(function () {
+				const after = state.card ? state.card.health : null;
+				renderStorage();
+				// Everything else only moves when the verdict itself moves —
+				// no reason to rebuild the day picker and the clip list every
+				// thirty seconds for numbers that did not change.
+				if (after === before) return;
+				renderHealth();
+				renderDayNav();
+				renderClips();
+			});
+		}, CARD_POLL_MS);
 	}
 
 	// Where a day should open: the freshest footage in it, not the oldest.
@@ -684,7 +733,7 @@
 		// which is a statement about the clock and cannot know the card stopped
 		// accepting writes. On a card that cannot be written the last clip is
 		// not growing — it is the truncated one the failure interrupted.
-		const writable = !cardTrouble();
+		const writable = cardWritable();
 		// newest first: that is the one people want
 		list.slice().reverse().forEach(function (c, i, arr) {
 			const prev = arr[i + 1];
@@ -736,14 +785,19 @@
 			'<button class="btn btn-sm btn-outline-secondary" id="rec-next" type="button"' +
 			(next ? '' : ' disabled') + ' aria-label="Next day">&rsaquo;</button>' +
 			'<span class="small text-secondary">' + state.day.clips.length + ' clips · ' + TL.duration(total) + '</span>' +
-			// Three states, not two: the switch being on is a setting, and a
-			// card that cannot be written to makes a green "Recording" badge
-			// the loudest wrong thing on the page.
+			// Four states, not two: the switch being on is a setting, and a card
+			// that cannot be written to makes a green "Recording" badge the
+			// loudest wrong thing on the page. The fourth is the card we could
+			// not ask — still not green, because green is a claim.
 			(!state.enabled
 				? '<span class="mj-push-end badge text-bg-secondary">Recording off</span>'
 				: cardTrouble()
 					? '<span class="mj-push-end badge text-bg-danger">Cannot record</span>'
-					: '<span class="mj-push-end badge text-bg-success">Recording</span>') +
+					: cardWritable()
+						? '<span class="mj-push-end badge text-bg-success">Recording</span>'
+						: '<span class="mj-push-end badge text-bg-secondary" ' +
+							'title="Recording is switched on, but the SD card\'s state could not be read">' +
+							'Recording — card unknown</span>') +
 			'<span class="small text-secondary">' + esc(label) + '</span>';
 
 		if (prev) $id('rec-prev').addEventListener('click', function () { goDay(prev); });
@@ -998,6 +1052,7 @@
 				renderClips();
 				renderHealth();
 				renderStorage();
+				watchCard();
 				centreView(freshest());
 				goTo(freshest());     // opens the clip, so the page is not a black box
 			});
