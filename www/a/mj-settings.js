@@ -358,11 +358,52 @@
 				const newTab = u.searchParams.get('tab');
 				if (!newTab) return;
 				ev.preventDefault();
-				if (newTab === state.sec) return;
+				// Picking the section that is already open is still a deliberate
+				// pick: below md it means "take me back down to it", and a control
+				// that does nothing at all reads as a dead one.
+				if (newTab === state.sec) { revealSection(); return; }
+				// Answering "no" to the prompt is choosing to stay, so nothing moves.
 				if (hasDirty() && !confirm('You have unsaved changes. Discard and switch sections?')) return;
-				load(newTab, /*push*/ true);
+				// After load(), never inside it: the section has to be in the document
+				// first, and buildNav() — which load() re-runs while a search is
+				// active, resizing the rail *above* the form — has to have finished.
+				load(newTab, /*push*/ true).then(revealSection);
 			});
 		});
+	}
+
+	// Put the person in front of the section they just picked. Below md the rail
+	// is stacked *above* the form rather than beside it, so a tap left them
+	// looking at navigation with the fields they asked for below the fold (#199).
+	// On >=md the rail is sticky-md-top and stays on screen at every offset, so
+	// there is nothing there to correct and nothing worth jumping for.
+	//
+	// The whole column rather than the section's card: the live leaf renders a
+	// row of two panels and no card at all, so there is no single card to aim at
+	// — and the column's top edge is what should end up near the top of the
+	// screen anyway. How far below the edge it lands is scroll-margin-top, in the
+	// stylesheet beside the rest of the below-md rail rules.
+	function revealSection() {
+		const form = document.getElementById('mj-settings-form');
+		const col = document.getElementById('mj-settings-form-col');
+		if (!form || !col) return;
+
+		// A tap that neither navigates nor moves focus says nothing to a screen
+		// reader, so the section's own heading takes it and announces the name.
+		// preventScroll because the scroll below is ours: focusing the live
+		// panel's heading would otherwise skip the preview sitting above it.
+		const h = form.querySelector('h3');
+		if (h) {
+			h.tabIndex = -1;
+			h.focus({ preventScroll: true });
+		}
+
+		// No behaviour argument: bootstrap's reboot already sets scroll-behavior
+		// on :root, inside @media (prefers-reduced-motion: no-preference), so a
+		// bare scrollIntoView() animates like every other scroll on the site and
+		// stops animating for anyone who asked it to. Naming 'smooth' or 'instant'
+		// here would opt this one navigation out of both.
+		if (!WIDE.matches) col.scrollIntoView();
 	}
 
 	function onPopState(ev) {

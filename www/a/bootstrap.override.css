@@ -476,6 +476,15 @@ pre#output[data-cmd] {
 	.mj-search .form-control {
 		font-size: 1rem;
 	}
+
+	/* Where a section lands when you pick it from the rail (#199). scrollIntoView
+	   aligns the border box, and the column's own 1.5rem row gutter is a margin
+	   outside it, so without this the card sits flush against the top edge of the
+	   screen. Nothing is fixed at the top here — the navbar scrolls away — so this
+	   is a breathing gap rather than a chrome offset. */
+	#mj-settings-form-col {
+		scroll-margin-top: 1rem;
+	}
 }
 
 /* search hits, in the tree and in the field labels/hints of the open section */
