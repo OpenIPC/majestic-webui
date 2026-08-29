@@ -169,7 +169,7 @@ Small `#!/bin/sh` scripts that emit JSON for the front-end. `pulse.cgi` is polle
 ### Front-end — `www/a/`
 
 - Pure JS, no framework. `$`/`$$` are `querySelector` wrappers. Don't introduce jQuery or any bundler — the README is explicit about keeping this small.
-- Bootstrap 5 (`bootstrap.bundle.min.js`, `bootstrap.min.css`) plus `bootstrap.override.css`.
+- Bootstrap 5 **CSS only** (`bootstrap.min.css`, purged, plus `bootstrap.override.css`). The JS bundle is gone: `main.js` carries the four behaviours the UI used from it — a `bootstrap.Modal`-compatible shim over native `<dialog>` (dispatching `hidden.bs.modal`), delegated dropdowns (`data-bs-popper="static"` turns on Bootstrap's own Popper-less placement CSS), the navbar toggler, and `data-bs-dismiss` for alerts/modals. Modal markup is `<dialog class="mj-modal">` with Bootstrap's `.modal-header/-body/-footer` inside; the `--bs-modal-*` tokens those rules read are declared on `dialog.mj-modal` in the override.
 - `main.js:initAll` runs on `load`: wires `.btn-danger`/`.btn-warning`/`.confirm` to `confirm()`, links `input[type=range]` to a sibling `…-show` and hidden input, makes external links open in a new tab, and starts the heartbeat.
 - `main.js:runCmd(msg)` streams `/cgi-bin/j/run.cgi` line-by-line via `fetch`/`ReadableStream` and appends to a `pre#output` element whose `data-cmd` carries the base64-encoded command; used by `fw-reset.cgi` (overlay erase).
 - `timezone.js` holds the `TZ` array used by `fw-time.cgi` for the city → `TZ` string mapping.

@@ -343,6 +343,91 @@ function heartbeat() {
 		});
 }
 
+// ---------------------------------------------------------------------------
+// The behaviour layer bootstrap.bundle.min.js used to provide. The bundle was
+// 80 KB of framework serving four modals, a handful of nav dropdowns, the
+// navbar toggler and dismissable alerts — this is those four behaviours in
+// plain JS against the same markup, so the purged Bootstrap CSS keeps styling
+// everything. Modals are native <dialog>s now (Escape, focus and centring come
+// from the platform); page code still says bootstrap.Modal.getOrCreateInstance
+// and still listens for 'hidden.bs.modal', so only the markup changed.
+
+(function () {
+	const instances = new Map();
+	function Modal(el) {
+		this._el = el;
+		// <dialog> fires 'close' for Escape, dismiss buttons and hide() alike;
+		// re-broadcast it under the name page code already listens for.
+		el.addEventListener('close', () => el.dispatchEvent(new CustomEvent('hidden.bs.modal')));
+		// A click that lands on the dialog element itself is on the backdrop —
+		// the dialog has no padding of its own. Only close when the press
+		// started there too, or selecting text in an input and releasing
+		// outside would throw the modal (and the input) away.
+		let pressOnBackdrop = false;
+		el.addEventListener('pointerdown', e => { pressOnBackdrop = e.target === el; });
+		el.addEventListener('click', e => { if (e.target === el && pressOnBackdrop) el.close(); });
+	}
+	Modal.prototype.show = function () { if (!this._el.open) this._el.showModal(); };
+	Modal.prototype.hide = function () { this._el.close(); };
+	Modal.getOrCreateInstance = function (el) {
+		const node = typeof el === 'string' ? $(el) : el;
+		if (!instances.has(node)) instances.set(node, new Modal(node));
+		return instances.get(node);
+	};
+	window.bootstrap = { Modal: Modal };
+})();
+
+// Dropdowns: delegated, one open at a time, outside click or Escape closes.
+// data-bs-popper="static" switches on the pure-CSS placement rules that
+// Bootstrap itself uses when it skips Popper in navbars — which is every
+// dropdown this UI has.
+(function () {
+	function closeMenus() {
+		$$('.dropdown-menu.show').forEach(m => {
+			m.classList.remove('show');
+			const t = m.parentElement.querySelector('[data-bs-toggle="dropdown"]');
+			if (t) { t.classList.remove('show'); t.setAttribute('aria-expanded', 'false'); }
+		});
+	}
+	document.addEventListener('click', e => {
+		const t = e.target.closest('[data-bs-toggle="dropdown"]');
+		if (!t) { closeMenus(); return; }
+		e.preventDefault();
+		const menu = t.parentElement.querySelector('.dropdown-menu');
+		if (!menu) return;
+		const open = !menu.classList.contains('show');
+		closeMenus();
+		if (open) {
+			menu.setAttribute('data-bs-popper', 'static');
+			menu.classList.add('show');
+			t.classList.add('show');
+		}
+		t.setAttribute('aria-expanded', String(open));
+	});
+	document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+})();
+
+// Navbar toggler (the only collapse) and dismissable pieces. The slide
+// animation is gone with the bundle; the toggle is instant.
+document.addEventListener('click', e => {
+	const c = e.target.closest('[data-bs-toggle="collapse"]');
+	if (c) {
+		const target = $(c.getAttribute('data-bs-target') || c.getAttribute('href'));
+		if (target) {
+			const open = target.classList.toggle('show');
+			c.classList.toggle('collapsed', !open);
+			c.setAttribute('aria-expanded', String(open));
+		}
+		return;
+	}
+	const d = e.target.closest('[data-bs-dismiss]');
+	if (d) {
+		const what = d.getAttribute('data-bs-dismiss');
+		if (what === 'alert') { const a = d.closest('.alert'); if (a) a.remove(); }
+		else if (what === 'modal') { const dlg = d.closest('dialog'); if (dlg) dlg.close(); }
+	}
+});
+
 function initAll() {
 	$$('form').forEach(el => el.autocomplete = 'off');
 

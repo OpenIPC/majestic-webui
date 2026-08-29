@@ -1,9 +1,8 @@
-// FPV WFB settings page: enable Bootstrap tooltips on the help badges and wire
-// the TX-power range slider to its hidden field + value display.
+// FPV WFB settings page: wire the TX-power range slider to its hidden field +
+// value display. The help badges carry title attributes, so the browser's own
+// tooltip covers them — no widget needed.
 (function () {
 	function init() {
-		document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
-
 		const slider = document.getElementById('txpower-range');
 		const show = document.getElementById('txpower-show');
 		const hidden = document.getElementById('txpower');
