@@ -21,7 +21,7 @@ const IDS = [
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',
 	'mj-stream-auto', 'mj-auto', 'mj-sub', 'mj-talk', 'mj-talk-ctl',
 	'mj-talk-lbl', 'mj-transport', 'mj-transport-ctl', 'mj-transport-lbl',
-	'mj-transport-note', 'mj-vol', 'toggle-ircut', 'toggle-light',
+	'mj-transport-note', 'mj-vol', 'mj-player', 'toggle-ircut', 'toggle-light',
 	'toggle-night',
 ];
 
@@ -197,12 +197,16 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 			live.streamSet === 0, 'streamSet=' + live.streamSet);
 	}
 
-	group('the player element is watched, not only the window');
+	group('the player container is watched, not only the window');
 	{
 		const env = load({ box: [640, 360], picked: 'auto' });
 		await tick();
-		check('both video elements are observed', env.observed.length === 2,
-			String(env.observed.length));
+		// The container, not the video nodes: MSE replaces those on every
+		// reconnect, so an observer on them would be watching detached
+		// elements within a session.
+		check('the container is what is observed',
+			env.observed.length === 1 && env.observed[0].id === 'mj-player',
+			env.observed.map(e => e.id).join(',') || 'nothing');
 	}
 
 	group('an unset main size means sensor native, not "no such stream"');

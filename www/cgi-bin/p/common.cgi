@@ -452,7 +452,7 @@ pre() {
 preview() {
 	local bg="background:#000; background-size:cover; width:100%"
 	cat <<EOF
-<div class="mj-player">
+<div class="mj-player" id="mj-player">
 	<!-- Every control on one line: each was its own block before, and the
 	     stats toggle in particular cost a whole row of vertical space on a
 	     page whose point is the picture below it. Stats is pushed to the far

@@ -692,11 +692,17 @@
 		clearTimeout(resizeTimer);
 		resizeTimer = setTimeout(autoApply, 250);
 	};
-	if (typeof ResizeObserver === 'function') {
-		const ro = new ResizeObserver(onResize);
-		[$('#live-video'), $('#live-video-b')].forEach(el => {
-			if (el) { try { ro.observe(el); } catch (e) {} }
-		});
+	//
+	// Watched on the container, not on the video elements: the MSE player
+	// replaces its element on every open and every reconnect, so an observer
+	// attached to the nodes would be watching detached ones within a session —
+	// the same trap the swap hit with stored element references. The container
+	// is never replaced, and its width is what moves the video's anyway.
+	const box = $('#mj-player');
+	if (typeof ResizeObserver === 'function' && box) {
+		try { new ResizeObserver(onResize).observe(box); } catch (e) {
+			window.addEventListener('resize', onResize);
+		}
 	} else {
 		window.addEventListener('resize', onResize);
 	}
