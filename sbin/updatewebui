@@ -30,6 +30,12 @@ KEEP_BACKUPS=3
 # Kept in step with tools/build-dist.sh, which is what buildroot consumes.
 PAYLOAD='www:/var/www sbin:/usr/sbin bin:/usr/bin'
 
+# Everything this project has ever installed outside /var/www. A camera updated
+# by the manifest-less version of this script left no record of what it copied
+# there, and --restore exists largely for those, so it falls back to this list.
+LEGACY_SHARED='/usr/sbin/openwall /usr/sbin/setnetwork /usr/sbin/telegram
+/usr/sbin/updatewebui /usr/bin/ntfy.sh'
+
 branch=
 zip_url=
 mode=install
@@ -157,11 +163,12 @@ fetch_tree() {
 	echo "Fetch $zip_url"
 	curl -fsSL --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
 		die "download failed, nothing has been changed"
-	unzip -t "$tmp/webui.zip" >/dev/null 2>&1 ||
-		die "downloaded file is not a zip archive, nothing has been changed"
+	# Unpacking into the scratch directory is the whole validation: it rejects
+	# what is not a zip and what is a truncated one, and it needs no option
+	# beyond the four busybox unzip has always had.
 	mkdir -p "$tmp/x"
-	unzip -qo -d "$tmp/x" "$tmp/webui.zip" >/dev/null ||
-		die "cannot unpack the archive, nothing has been changed"
+	unzip -qo -d "$tmp/x" "$tmp/webui.zip" >/dev/null 2>&1 ||
+		die "downloaded file is not a usable zip archive, nothing has been changed"
 	set -- "$tmp/x"/*
 	{ [ $# -eq 1 ] && [ -d "$1" ]; } ||
 		die "expected one directory in the archive, nothing has been changed"
@@ -279,18 +286,28 @@ report_plan() {
 	return 0
 }
 
+# Runs before anything is written, so refusing here still leaves the camera
+# untouched. An archive that failed is worth stopping for: the whole point of it
+# is that the run is about to replace work that exists nowhere else.
 backup_local() {
-	{ [ "$do_backup" = 1 ] && [ -s "$tmp/local" ]; } || return 0
-	mkdir -p "$STATE_DIR" || return 0
+	[ -s "$tmp/local" ] || return 0
+	if [ "$do_backup" != 1 ]; then
+		echo "Replacing $(count "$tmp/local") locally modified file(s) unarchived (--no-backup)"
+		return 0
+	fi
+	mkdir -p "$STATE_DIR" ||
+		die "cannot create $STATE_DIR to archive your changes, nothing has been changed"
 	archive=$STATE_DIR/updatewebui-local-$(date +%Y%m%d-%H%M%S).tar.gz
 	sed 's|^/||' "$tmp/local" >"$tmp/local.rel"
-	# busybox tar has no -z, so compress on the way out.
-	if tar cf - -C / -T "$tmp/local.rel" 2>/dev/null | gzip -9 >"$archive"; then
-		echo "Archived $(count "$tmp/local") locally modified file(s) to $archive"
-	else
+	# busybox tar has no -z, and a shell pipeline reports only its last command,
+	# so the archive is built and compressed as two separately checked steps.
+	tar cf "$tmp/local.tar" -C / -T "$tmp/local.rel" ||
+		die "cannot archive your changes, nothing has been changed"
+	gzip -9 -c "$tmp/local.tar" >"$archive" || {
 		rm -f "$archive"
-		echo "Warning: could not archive the locally modified files" >&2
-	fi
+		die "cannot write $archive, nothing has been changed"
+	}
+	echo "Archived $(count "$tmp/local") locally modified file(s) to $archive"
 	# shellcheck disable=SC2012
 	ls -t "$STATE_DIR"/updatewebui-local-*.tar.gz 2>/dev/null |
 		tail -n +$((KEEP_BACKUPS + 1)) | xargs rm -f 2>/dev/null
@@ -320,11 +337,31 @@ apply_writes() {
 # merged parent listing empty until the next reboot, with the files underneath
 # still readable one by one, so nothing short of a directory listing notices.
 # An emptied upper directory costs one inode and hides nothing.
+remove_entries() {
+	: >"$tmp/failed"
+	cat "$@" | while read -r u; do
+		rm -f "$u" 2>/dev/null
+		[ -e "$u" ] && echo "$u" >>"$tmp/failed"
+	done
+	[ -s "$tmp/failed" ] || return 0
+	echo "Could not remove:" >&2
+	sed 's/^/  /' "$tmp/failed" >&2
+	return 1
+}
+
 apply_removals() {
 	{ [ -s "$tmp/drop" ] || [ -s "$tmp/prune" ]; } || return 0
 	echo "Drop $(count "$tmp/drop") redundant and $(count "$tmp/prune") stale overlay entry(ies)"
-	cat "$tmp/drop" "$tmp/prune" | while read -r u; do rm -f "$u"; done
-	return 0
+	remove_entries "$tmp/drop" "$tmp/prune"
+}
+
+# The manifest is what the next run compares against to tell a local edit apart
+# from a file the release simply changed, so recording it is part of installing,
+# not a footnote to it - including on the run that had nothing to install, which
+# is otherwise the one case that never gets a baseline.
+write_manifest() {
+	mkdir -p "$STATE_DIR" && cp -f "$tmp/want" "$MANIFEST" ||
+		die "the files are installed but $MANIFEST could not be written, so a later run cannot recognise your own edits"
 }
 
 do_install() {
@@ -335,14 +372,16 @@ do_install() {
 	if [ ! -s "$tmp/write" ] && [ ! -s "$tmp/drop" ] && [ ! -s "$tmp/prune" ]; then
 		echo
 		echo "Already up to date."
+		write_manifest
 		return 0
 	fi
 	echo
 	backup_local
 	apply_writes
-	apply_removals
+	apply_removals ||
+		die "the overlay did not end up as planned, so the manifest was left alone"
 	settle_view
-	mkdir -p "$STATE_DIR" && cp -f "$tmp/want" "$MANIFEST"
+	write_manifest
 	echo
 	echo "WebUI updated to $source_name."
 	verify_view "$tmp/want"
@@ -361,6 +400,15 @@ do_restore() {
 			[ -e "$upper$d" ] && echo "$upper$d" >>"$tmp/prune"
 		done <"$MANIFEST"
 	fi
+	# Nothing outside /var/www is recorded for a camera the manifest-less
+	# version of this script updated, and those are the ones with most to
+	# restore. Only where the firmware has its own copy to reveal: an overlay
+	# file with nothing underneath is somebody's own, not ours to delete.
+	for d in $LEGACY_SHARED; do
+		grep -qxF "$upper$d" "$tmp/prune" && continue
+		{ [ -e "$upper$d" ] && [ -n "$lower" ] && [ -f "$lower$d" ]; } &&
+			echo "$upper$d" >>"$tmp/prune"
+	done
 	if [ ! -s "$tmp/prune" ]; then
 		echo "Nothing is installed over the firmware's WebUI."
 		return 0
@@ -370,7 +418,8 @@ do_restore() {
 	if [ "$dry_run" = 1 ]; then
 		return 0
 	fi
-	while read -r u; do rm -f "$u"; done <"$tmp/prune"
+	remove_entries "$tmp/prune" ||
+		die "the overlay did not end up as planned, so the manifest was left alone"
 	rm -f "$MANIFEST"
 	settle_view
 	# Everything restored must now read back as the firmware's own copy.
