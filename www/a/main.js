@@ -277,20 +277,36 @@ function heartbeat() {
 				const skew = json.time_now * 1000 - Date.now();
 				const mins = Math.round(skew / 60000);
 				const el = $('#clock-drift');
-				if (Math.abs(skew) > 60000) {
+				// Cleared when the clocks agree, not left standing: the camera's
+				// clock can be corrected while the page is open, and a stale warning
+				// would outlive the fault it describes.
+				const text = Math.abs(skew) > 60000
+					? '⚠ camera ' + (mins > 0 ? '+' : '') + mins + 'm' : '';
+				// Written only when it actually changes. The element is a live
+				// region, and re-setting textContent to the same string still
+				// replaces the text node — a screen reader would hear the same
+				// warning read out afresh every two seconds for as long as the page
+				// stayed open. (A plain `return` here would be worse than the noise
+				// it saves: this runs inside the heartbeat's one handler, so it
+				// would take memory, overlay and uptime down with it.)
+				if (el.textContent !== text) {
+					el.textContent = text;
 					// Colour comes from #clock-drift in bootstrap.override.css, which
-					// is theme-aware; .text-danger is one red for both and fails
-					// contrast on each. Only the spacing is a utility.
-					el.className = 'ms-1';
-					el.textContent = '⚠ camera ' + (mins > 0 ? '+' : '') + mins + 'm';
-					el.title = 'Camera clock is ' + Math.abs(mins) + ' minutes ' +
-						(mins > 0 ? 'ahead of' : 'behind') + ' this browser. Check Time Settings.';
-				} else {
-					// Cleared, not left standing: the camera's clock can be corrected
-					// while the page is open, and a stale warning would outlive the fault.
-					el.className = '';
-					el.textContent = '';
-					el.title = '';
+					// is theme-aware; .text-danger is one red for both themes and
+					// fails contrast on each. Only the spacing is a utility.
+					el.className = text ? 'ms-1' : '';
+					if (text) {
+						// The glyph and "+12m" are a shorthand that only reads next to
+						// the clock beside it, and title is not exposed on a span nobody
+						// can focus — so the sentence is what is announced.
+						const why = 'Camera clock is ' + Math.abs(mins) + ' minutes ' +
+							(mins > 0 ? 'ahead of' : 'behind') + ' this browser. Check Time Settings.';
+						el.title = why;
+						el.setAttribute('aria-label', why);
+					} else {
+						el.title = '';
+						el.removeAttribute('aria-label');
+					}
 				}
 			}
 

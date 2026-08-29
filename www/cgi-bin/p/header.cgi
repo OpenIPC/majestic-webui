@@ -143,7 +143,7 @@ Pragma: no-cache
 					     the reader is wherever they are. Both spans are filled by
 					     main.js; the camera's clock survives only as the drift
 					     warning, which appears when it is actually wrong. -->
-					<div id="time-now"><time id="time-local"></time><span id="clock-drift"></span></div>
+					<div id="time-now"><time id="time-local"></time><span id="clock-drift" role="status" aria-live="polite"></span></div>
 					<div class="text-secondary" id="soc-temp"></div>
 				</div>
 			</div>
