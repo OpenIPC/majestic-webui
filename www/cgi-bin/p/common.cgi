@@ -487,7 +487,7 @@ preview() {
 		<label class="btn btn-outline-primary" for="mj-talk" id="mj-talk-lbl"
 			title="Send this browser's microphone to the camera's speaker. The camera will not take audio in one direction only, so talking also opens its audio to you.">🎤 Talk</label>
 	</div>
-	<div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Statistics" id="mj-stats-ctl" hidden>
+	<div class="btn-group btn-group-sm mj-push-end" role="group" aria-label="Statistics" id="mj-stats-ctl" hidden>
 		<input type="checkbox" class="btn-check" id="mj-stats-btn" autocomplete="off">
 		<label class="btn btn-outline-secondary" for="mj-stats-btn"
 			title="Per-second measurements from both ends of the session.">Stats</label>
