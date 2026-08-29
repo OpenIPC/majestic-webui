@@ -65,6 +65,14 @@
 		// the radio behind it stays in the tab order, so without this the
 		// keyboard can pick a stream the camera does not have.
 		if (s1) s1.disabled = !subOk;
+		// Whether each channel will actually be adapted. Absent means an older
+		// camera that has no such setting and always adapted, so only an
+		// explicit false counts as pinned.
+		adapts = [
+			mjGet(cfg, 'video0.adjustBitrate') !== false,
+			mjGet(cfg, 'video1.adjustBitrate') !== false,
+		];
+		syncTransportNote();
 		ice = MajesticTransport.iceServers(
 			mjGet(cfg, 'webrtc.iceServers'),
 			mjGet(cfg, 'webrtc.turnUsername'),
@@ -118,8 +126,13 @@
 	// only while it is actually happening — a tooltip needs a pointer to find,
 	// and this is not a detail for people who happen to own a mouse.
 	function syncTransportNote() {
+		// Only while it is true. The note is a disclosure, and a disclosure that
+		// fires when nothing is happening teaches people to ignore it — the
+		// camera does not touch a channel whose adjustBitrate is off, so saying
+		// it is adapting that stream is simply wrong. Per channel, because the
+		// two settings are independent and Main/Sub is one click apart.
 		if (transportNote) {
-			transportNote.hidden = !usingWebRTC;
+			transportNote.hidden = !(usingWebRTC && adapts[stream ? 1 : 0]);
 		}
 		if (transportLbl && usingWebRTC) {
 			transportLbl.title = TRANSPORT_TITLE;
@@ -147,6 +160,9 @@
 	// corrected by the first reconnect rather than staying host-candidates-only
 	// for the life of the page.
 	let ice = [];
+	// Per channel, filled when the config lands; true until then, which is what
+	// a camera without the setting does.
+	let adapts = [true, true];
 	// Talkback is deliberately NOT carried across a transport switch or a
 	// reattach. Everything else here is a preference; this one holds a live
 	// microphone, and silently reopening it because the page rebuilt a player
@@ -491,6 +507,11 @@
 		// correcting a default is helpful, overriding a decision is not.
 		const moved = !userPickedStream && chooseSub(cfg);
 		if (moved && player) player.setStream(stream);
+		// The note follows the channel, and this is the one path that changes
+		// the channel without going through attachPlayer(). A camera whose two
+		// channels differ would otherwise disclose Main's setting while playing
+		// Sub, until something else happened to re-sync it.
+		syncTransportNote();
 
 		// The ICE list, unconditionally. A blind attach opened with an empty
 		// one, and the getter is only read when a session opens — so without
@@ -539,14 +560,16 @@
 			MajesticTransport.chooseStream('preview', n);
 		});
 	});
-	// Both the player on screen and any trial being judged. A trial keeps the
-	// stream it was opened with, so without this it would be promoted onto the
-	// channel the viewer had already moved away from.
+	// Everything a channel change has to reach: the player on screen, any trial
+	// being judged — a trial keeps the stream it was opened with, so otherwise
+	// it would be promoted onto the channel the viewer had already left — and
+	// the adaptation notice, which is per channel.
 	function goToStream(n) {
 		stream = n;
 		if (player) player.setStream(n);
 		const t = swap.trial();
 		if (t) t.setStream(n);
+		syncTransportNote();
 	}
 	if (s0) s0.addEventListener('change', () => goToStream(0));
 	if (s1) s1.addEventListener('change', () => goToStream(1));
