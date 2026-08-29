@@ -393,7 +393,32 @@ function runCheap() {
 		check('and it really is wrong, because the write counter drifts',
 			h.seconds !== n, 'got ' + h.seconds + ' — suspiciously exact');
 		return null;
-	}).then(runLocateExact).then(runBigFragments).then(runSpan);
+	}).then(runLiveTail).then(runLocateExact).then(runBigFragments).then(runSpan);
+}
+
+// A clip still being recorded ends with a fragment whose moof is on the card
+// and whose mdat is not. Counting it would put footage on the timeline that
+// cannot be played or exported — and the cheap probe must not be more
+// optimistic than the exact walk, which already refuses it.
+function runLiveTail() {
+	group('durationHint on a clip that is still being written');
+
+	const whole = clip(1000000, evenSpecs(8));
+	const init = M.parseInit(u8of(whole));
+	// lop the payload off the last fragment, leaving its header behind
+	const partial = whole.subarray(0, whole.length - 20000);
+
+	return M.durationHint(readerFor(partial), partial.length, init).then(h => {
+		check('stops at the last fragment that is completely on the card',
+			h !== null && h.seconds === 7, 'got ' + (h && h.seconds) + ' want 7');
+		check('and still reports that as exact — it is measured, just shorter',
+			h.approximate === false);
+
+		return M.buildIndex(readerFor(partial), partial.length, init);
+	}).then(idx => {
+		check('which is exactly what the full walk says too',
+			idx.duration === 7, 'walk says ' + idx.duration);
+	});
 }
 
 function runLocateExact() {

@@ -36,8 +36,9 @@
 
 
 	// Bumped on every seek: a drag fires overlapping lookups and only the
-	// newest may move the picture.
+	// newest may move the picture. dayToken does the same for day switches.
 	let seekToken = 0;
+	let dayToken = 0;
 	let player = null;
 
 	const $id = function (s) { return document.getElementById(s); };
@@ -98,15 +99,27 @@
 
 	function loadDays() {
 		if (!state.prefix) return Promise.resolve();
-		return api('days=1&prefix=' + encodeURIComponent(state.prefix))
-			.then(function (j) { state.days = (j && j.days) || []; })
+		// The endpoint derives the recordings root itself; take its answer as
+		// authoritative so the path this page builds media URLs from cannot
+		// drift from the one the listing came out of.
+		return api('days=1')
+			.then(function (j) {
+				state.days = (j && j.days) || [];
+				if (j && j.prefix) state.prefix = j.prefix;
+			})
 			.catch(function () { state.days = []; });
 	}
 
 	function loadDay(name) {
 		state.dayName = name;
-		return api('day=' + encodeURIComponent(name) + '&prefix=' + encodeURIComponent(state.prefix))
+		// Switching days fast enough leaves two requests in flight, and they can
+		// land out of order: the slower one for the day nobody is looking at any
+		// more would overwrite the newer model, while clip paths keep being built
+		// from the newer dayName — a listing of one day fetched from another.
+		const token = ++dayToken;
+		return api('day=' + encodeURIComponent(name))
 			.then(function (j) {
+				if (token !== dayToken) return;
 				const isToday = (name === state.today) ||
 					(name === '.' && state.nowSec !== null);
 				state.day = TL.buildDay((j && j.clips) || [], {
@@ -114,7 +127,10 @@
 					nowSec: isToday ? state.nowSec : null,
 				});
 			})
-			.catch(function () { state.day = { clips: [], unplaced: [] }; });
+			.catch(function () {
+				if (token !== dayToken) return;
+				state.day = { clips: [], unplaced: [] };
+			});
 	}
 
 	// ---- the player ------------------------------------------------------
@@ -445,7 +461,10 @@
 		IDX.durationHint(IDX.reader(url), clip.size, init).then(function (h) {
 			if (!h || state.clip !== clip) return;
 			state.hint = h;
-			if (!TL.applyExactDuration(state.day, clip.name, h.seconds)) return;
+			// h.approximate is the whole point of the flag: a pre-tfdt recording
+			// can only be guessed at, and the clip list says so with "about"
+			// rather than presenting the guess as a measurement.
+			if (!TL.applyExactDuration(state.day, clip.name, h.seconds, !h.approximate)) return;
 			renderClips();
 			renderTimeline();
 
@@ -684,7 +703,12 @@
 		const per = state.hint ? state.hint.perFragment : 1;
 
 		IDX.locate(read, clip.size, init, s.from - clip.start, per).then(function (hit) {
-			return IDX.spanFrom(read, clip.size, init, hit.off, s.seconds, function (got, want) {
+			// locate lands at or BEFORE the requested second, so the span has to
+			// be measured from where it actually landed. Walking the selection's
+			// own length from an earlier boundary would add lead-in at the front
+			// and drop exactly as much off the end that was asked for.
+			const need = (s.to - clip.start) - hit.approxSec;
+			return IDX.spanFrom(read, clip.size, init, hit.off, need, function (got, want) {
 				if (noteEl) noteEl.textContent = 'Collecting ' + TL.duration(got) + ' of ' + TL.duration(want) + '…';
 			});
 		}).then(function (span) {

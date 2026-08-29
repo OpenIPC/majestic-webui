@@ -73,15 +73,19 @@ window.MajesticTimeline = (function () {
 		return { clips: placed, unplaced: unplaced };
 	}
 
-	// Replace a clip's estimated duration with the exact one, once its index
-	// has been walked. Does not move anything else: clip starts come from
-	// filenames and are already exact.
-	function applyExactDuration(day, name, seconds) {
+	// Replace a clip's guessed duration with a measured one. Does not move
+	// anything else: clip starts come from filenames and are already exact.
+	//
+	// `exact` defaults to true but must be passed honestly. A recording with no
+	// tfdt can only be guessed at, and a guess that arrives here unlabelled
+	// silently loses the marker the clip list uses to say so — the number
+	// changes and the "about" qualifier disappears with it.
+	function applyExactDuration(day, name, seconds, exact) {
 		const c = day.clips.filter(function (x) { return x.name === name; })[0];
 		if (!c || !(seconds > 0)) return false;
 		c.dur = seconds;
 		c.end = Math.min(c.start + seconds, DAY);
-		c.estimated = false;
+		c.estimated = (exact === false);
 		return true;
 	}
 

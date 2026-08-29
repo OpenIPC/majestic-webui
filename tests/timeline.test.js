@@ -113,6 +113,11 @@ group('how long a clip is, before anything has been indexed');
 
 {
 	const day = T.buildDay([clip('12-04.mp4')], { splitSec: SPLIT, nowSec: 13 * HOUR });
+	check('a measured duration that is only a guess keeps saying so — the clip '
+		+ 'list marks it, and losing the marker presents a guess as a fact',
+		T.applyExactDuration(day, '12-04.mp4', 900, false) &&
+		day.clips[0].dur === 900 && day.clips[0].estimated === true,
+		'estimated ' + day.clips[0].estimated);
 	check('an exact duration from the index replaces the estimate',
 		T.applyExactDuration(day, '12-04.mp4', 1112) &&
 		day.clips[0].dur === 1112 && day.clips[0].estimated === false,

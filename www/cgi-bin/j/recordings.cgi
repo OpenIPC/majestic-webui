@@ -21,7 +21,14 @@ json_str() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"
 
 json_hdr
 
-prefix=$(printf '%s' "${GET_prefix:-}" | sed 's#/*$##')
+# Where recordings live is majestic's business, not the caller's. This used to
+# take the directory from ?prefix=, which made an authenticated request able to
+# enumerate MP4 names, sizes and mtimes anywhere the web process can read —
+# never mind that the page only ever sent the configured path. A filesystem
+# path arriving from a client is not a permission, so derive it here and ignore
+# what was sent. Same value the page computes for itself: records.path up to the
+# first strftime %.
+prefix=$(yaml-cli -g .records.path 2>/dev/null | sed 's/%.*//; s#/*$##')
 if [ -z "$prefix" ] || [ ! -d "$prefix" ]; then
 	printf '{"error":"no recordings directory"}'
 	exit 0

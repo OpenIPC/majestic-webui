@@ -352,7 +352,7 @@ window.MajesticMp4Index = (function () {
 		}
 
 		function probeAt(pos, win) {
-			const w = win || PROBE;
+			const w = Math.min(win || PROBE, PROBE_MAX);
 			const start = Math.max(init.firstMoof, Math.min(pos, size - 1));
 			const want = Math.min(w, size - start);
 			return read(start, start + want - 1).then(function (buf) {
@@ -361,7 +361,8 @@ window.MajesticMp4Index = (function () {
 					// No fragment boundary in the window — it is narrower than a
 					// fragment. Widen rather than report "nothing here", which
 					// would walk the search off in the wrong direction.
-					if (w < PROBE_MAX && start + want < size) return probeAt(pos, w * 2);
+					if (w < PROBE_MAX && start + want < size)
+						return probeAt(pos, Math.min(w * 2, PROBE_MAX));
 					return null;
 				}
 				const t = timeAt(buf, i);
@@ -384,12 +385,12 @@ window.MajesticMp4Index = (function () {
 		// answer is only ever as precise as PROBE is wide, which is a couple of
 		// seconds on a real recording and much worse on small fragments.
 		function refine(win) {
-			const w = win || PROBE;
+			const w = Math.min(win || PROBE, PROBE_MAX);
 			const start = Math.max(init.firstMoof, Math.min(lo, size - 1));
 			const want = Math.min(w, size - start);
 			return read(start, start + want - 1).then(function (buf) {
 				if (findMoof(buf, 0) < 0 && w < PROBE_MAX && start + want < size)
-					return refine(w * 2);
+					return refine(Math.min(w * 2, PROBE_MAX));
 				let at = findMoof(buf, 0);
 				while (at >= 0 && at + 16 <= buf.length) {
 					const t = timeAt(buf, at);
@@ -439,19 +440,24 @@ window.MajesticMp4Index = (function () {
 			const per = first.durTicks / init.timescale;
 			// The first fragment is the best available guess at how wide the
 			// tail window must be, and it has already been read.
-			return tail(Math.max(PROBE, (first.total || 0) * 2)).then(function (buf) {
+			return tail(Math.min(Math.max(PROBE, (first.total || 0) * 2), PROBE_MAX))
+				.then(function (buf) {
 				if (!buf) return null;
 
-				// The LAST moof in the file: where it starts plus how long it
-				// runs is the clip's length, exactly.
+				// The last COMPLETE moof in the file: where it starts plus how
+				// long it runs is the clip's length. Complete matters — a clip
+				// still being recorded ends with a fragment whose header is on
+				// the card and whose payload is not, and counting that one puts
+				// footage on the timeline that cannot be played or exported.
+				// buildIndex() applies the same rule; the cheap path must not
+				// be more optimistic than the exact one.
+				const base = size - buf.length;      // where this window starts
 				let last = -1, at = 0;
 				for (;;) {
 					const i = findMoof(buf, at);
 					if (i < 0) break;
-					last = i;
-					// Past this box's type field: findMoof takes the offset to
-					// start looking for the *type* at, and this box's type sits
-					// at i + 4, so anything less than i + 8 finds it forever.
+					const f = parseFragment(buf.subarray(i));
+					if (f && !f.short && f.total && base + i + f.total <= size) last = i;
 					at = i + 8;
 				}
 				if (last < 0) return null;
@@ -475,7 +481,7 @@ window.MajesticMp4Index = (function () {
 				return read(from, size - 1).then(function (buf) {
 					if (findMoof(buf, 0) >= 0) return buf;
 					if (win >= PROBE_MAX || from <= init.firstMoof) return buf;
-					return tail(win * 2);
+					return tail(Math.min(win * 2, PROBE_MAX));
 				});
 			}
 		}).catch(function () { return null; });
