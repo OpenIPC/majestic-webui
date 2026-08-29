@@ -70,7 +70,7 @@
 		sizeOf = [0, 1].map(n => {
 			const v = mjGet(cfg, 'video' + n + '.size');
 			const m = /^(\d+)x(\d+)$/.exec(String(v || ''));
-			return m ? (+m[1]) * (+m[2]) : null;
+			return m ? { w: +m[1], h: +m[2] } : null;
 		});
 		autoApply();
 		// Same reason as the settings panel: the label is what gets hidden, and
@@ -178,6 +178,7 @@
 	// lands, which is what stops Auto choosing on a guess.
 	let autoOn = false;
 	let subAvailable = false;
+	// Per channel, { w, h } or null for "not set", which means sensor native.
 	let sizeOf = [null, null];
 	// At most one change a second, the reporter's own limit. A drag across a
 	// boundary would otherwise cut the session on every frame of the resize.
@@ -496,42 +497,56 @@
 
 	// Which stream best fits the box this player is drawn in.
 	//
-	// By area, not by width: a 704x576 substream and a 1280x720 main stream are
-	// not ordered the same way by one dimension as by the picture they carry,
-	// and it is pixels that cost bandwidth.
+	// Measured on the CONTAINER'S WIDTH, and this is the part that is easy to
+	// get wrong: the video element is `width: 100%` with no height constraint,
+	// so its height is the playing stream's aspect ratio. Measuring the
+	// element's area therefore feeds the decision its own result — at 800px
+	// wide, 1280x720 renders 800x450 and points at the 704x576 substream, which
+	// renders 800x655 and points back at the main stream, once per second, for
+	// ever.
+	//
+	// With a width-constrained box the arithmetic collapses anyway: a stream is
+	// large enough exactly when its own width is, because the rendered height
+	// scales with the same factor as the rendered width. So width decides, and
+	// area only breaks ties — which keeps the reporter's point, that one
+	// dimension must not be trusted alone, where it still applies.
 	//
 	// CSS pixels rather than device pixels, deliberately. On a 2x display the
 	// larger stream is sharper, but this exists for links that cannot carry the
 	// larger stream at all, and doubling the demand on every phone is the wrong
 	// side to err on.
 	//
-	// Nearest at or above the target, else the largest below it — the
-	// reporter's rule, and the right way round: scaling a bigger picture down
-	// loses nothing visible, scaling a smaller one up does.
+	// Nearest at or above the box, else the largest below it — the reporter's
+	// rule, and the right way round: scaling a bigger picture down loses
+	// nothing visible, scaling a smaller one up does.
 	function autoPick() {
-		const el = swap.element() || cur();
-		const want = el ? el.clientWidth * el.clientHeight : 0;
+		const box = $('#mj-player');
+		const want = box ? box.clientWidth : 0;
 		if (!want) return null;   // not laid out yet; ask again later
 		const options = [];
 		for (let n = 0; n < 2; n++) {
 			if (n === 1 && !subAvailable) continue;
 			// An unset size is not a missing channel — video0.size ships with no
 			// default at all, and empty means "whatever the sensor gives",
-			// which is the largest picture the camera has. Treating it as
-			// unknown-and-excluded left Auto on the substream for ever on every
-			// camera whose main stream had never been set by hand, which is
-			// most of them.
-			options.push({ n: n, area: sizeOf[n] === null ? Infinity : sizeOf[n] });
+			// which is the largest picture the camera has.
+			const d = sizeOf[n];
+			options.push({
+				n: n,
+				w: d ? d.w : Infinity,
+				area: d ? d.w * d.h : Infinity,
+			});
 		}
 		if (!options.length) return null;
-		const atLeast = options.filter(o => o.area >= want);
+		const atLeast = options.filter(o => o.w >= want);
 		// Ties go to the later option, which is the substream: two channels the
-		// same size, or two unknown ones, cost the same to decode and the
-		// cheaper one to carry.
+		// same width cost the same to decode and the cheaper one to carry, and
+		// area is what separates them when the widths match.
 		if (atLeast.length) {
-			return atLeast.reduce((a, b) => (b.area <= a.area ? b : a)).n;
+			return atLeast.reduce(
+				(a, b) => (b.w < a.w || (b.w === a.w && b.area <= a.area) ? b : a)).n;
 		}
-		return options.reduce((a, b) => (b.area > a.area ? b : a)).n;
+		return options.reduce(
+			(a, b) => (b.w > a.w || (b.w === a.w && b.area > a.area) ? b : a)).n;
 	}
 
 	// Act on it, subject to the rate limit. Called on resize and whenever the

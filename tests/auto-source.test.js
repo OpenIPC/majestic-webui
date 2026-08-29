@@ -44,7 +44,9 @@ function load(cfg) {
 	// revealed only where a second stream exists.
 	['mj-sub', 'mj-auto'].forEach((id) => { env.els['#' + id].hidden = true; });
 	if (cfg.box) {
-		['live-video', 'live-video-b'].forEach((id) => {
+		// The container is what Auto measures; the video elements are sized by
+		// the stream, which is exactly why they are not the input.
+		['mj-player', 'live-video', 'live-video-b'].forEach((id) => {
 			env.els['#' + id].clientWidth = cfg.box[0];
 			env.els['#' + id].clientHeight = cfg.box[1];
 		});
@@ -122,17 +124,32 @@ function load(cfg) {
 const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 
 (async () => {
-	group('Auto picks by area, not by one dimension');
+	group('a stream narrower than the box loses, however its area compares');
 	{
-		// 704x576 is 405k pixels and 1280x720 is 921k. By width the substream
-		// looks the smaller of the two; by area it is still smaller, but a box
-		// of 800x450 (360k) is under both, so the nearest above wins.
+		// This is the case that used to oscillate. By rendered area the 704x576
+		// substream looked like the better fit at 800px wide — and picking it
+		// changed the element's height, which pointed back at Main, once a
+		// second for ever. A stream narrower than the box is being upscaled,
+		// which is the one thing worth avoiding, so it loses.
 		const env = load({
 			box: [800, 450], main: '1280x720', sub: '704x576', picked: 'auto',
 		});
 		await tick();
-		check('took the substream, the smaller of the two above the box',
-			env.made[0].opts.stream === 1, 'stream=' + env.made[0].opts.stream);
+		check('took Main', env.made[0].opts.stream === 0,
+			'stream=' + env.made[0].opts.stream);
+	}
+
+	group('area breaks a tie between equally wide streams');
+	{
+		// Where the reporter's point still applies: same width, different
+		// picture, so one dimension cannot separate them and the smaller of the
+		// two at or above the box wins.
+		const env = load({
+			box: [800, 450], main: '1280x720', sub: '1280x960', picked: 'auto',
+		});
+		await tick();
+		check('took the smaller-area stream', env.made[0].opts.stream === 0,
+			'stream=' + env.made[0].opts.stream);
 	}
 
 	group('a box larger than both takes the largest');
@@ -175,7 +192,7 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		check('starts on Main', live.opts.stream === 0, 'stream=' + live.opts.stream);
 
 		// Shrink the box so Sub is the better fit, twice in quick succession.
-		[env.el('live-video'), env.el('live-video-b')].forEach((e) => {
+		[env.el('mj-player'), env.el('live-video'), env.el('live-video-b')].forEach((e) => {
 			e.clientWidth = 320; e.clientHeight = 180;
 		});
 		if (env.win.roFire) env.win.roFire(); else env.win.fire('resize');
@@ -185,7 +202,7 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 
 		// Straight back up: inside the one-second window, so it must be held,
 		// not thrown away.
-		[env.el('live-video'), env.el('live-video-b')].forEach((e) => {
+		[env.el('mj-player'), env.el('live-video'), env.el('live-video-b')].forEach((e) => {
 			e.clientWidth = 1920; e.clientHeight = 1080;
 		});
 		if (env.win.roFire) env.win.roFire(); else env.win.fire('resize');
@@ -230,6 +247,37 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		await tick();
 		check('Auto took Sub', env.made[0].opts.stream === 1,
 			'stream=' + env.made[0].opts.stream);
+	}
+
+	group('the aspect ratio of what is playing cannot flip the decision');
+	{
+		// The reported loop: at 800px wide, 1280x720 renders 800x450 and by
+		// area points at a 704x576 substream, which renders 800x655 and points
+		// back — once per rate-limit interval, for ever. The decision is taken
+		// on the container's width, which does not move when the stream does.
+		const env = load({
+			box: [800, 450], main: '1280x720', sub: '704x576', picked: 'auto',
+		});
+		await tick();
+		const live = env.made[0];
+		const first = live.opts.stream;
+		check('opens on Main, the only stream at least 800 wide', first === 0,
+			'stream=' + first);
+
+		// Let the video element take the aspect ratio of whatever is playing,
+		// as the browser would, and keep poking it.
+		for (let i = 0; i < 4; i++) {
+			const playing = live.streamSet === null ? first : live.streamSet;
+			const h = playing === 0 ? 450 : 655;
+			[env.el('live-video'), env.el('live-video-b')].forEach((e) => {
+				e.clientWidth = 800; e.clientHeight = h;
+			});
+			if (env.win.roFire) env.win.roFire();
+			await tick(1100);
+		}
+		check('and never switches away from it',
+			live.streamSet === null || live.streamSet === 0,
+			'streamSet=' + live.streamSet);
 	}
 
 	group('choosing Auto is remembered as a choice of its own');
