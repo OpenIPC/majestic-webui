@@ -533,7 +533,14 @@ preview() {
 			</div>
 		</div>
 	</div>
+	<!-- Two, and only ever one of them visible. A transport switch attaches the
+	     new player to whichever is idle and leaves the other playing, so the
+	     picture only changes once the replacement has one of its own. One
+	     element cannot do that: MSE drives it through src and WebRTC through
+	     srcObject, so the incoming player would have to evict the outgoing one
+	     before anybody knows whether it works. -->
 	<video id="live-video" autoplay muted playsinline style="$bg"></video>
+	<video id="live-video-b" autoplay muted playsinline style="$bg; display:none"></video>
 	<img id="live-mjpeg" alt="" style="display:none; $bg">
 	<p id="mj-note" class="alert alert-warning" style="display:none">
 		Your browser can't play the live H.264/H.265 stream.

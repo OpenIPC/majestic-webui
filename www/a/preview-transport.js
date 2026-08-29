@@ -8,11 +8,16 @@
 // merely busy. Divergence there would show up as "the preview behaves
 // differently on the settings page", which is the kind of bug nobody files.
 //
-// What is deliberately NOT here is the attach-and-fall-back dance. The two
-// pages want different things from it — one has a badge, an MJPEG fallback and
-// a transport toggle to keep in step, the other has a bare video element — and
-// a shared version would be an abstraction over two callers with one of them
-// bent to fit. The dance is a dozen lines; the rules below are not.
+// What is deliberately NOT here is the attach-and-fall-back dance: what to try
+// next, what to put on the badge, what a failure means. The two pages want
+// different things from it — one has a badge, an MJPEG fallback and a transport
+// toggle to keep in step, the other a bare video element — and a shared version
+// would be an abstraction over two callers with one of them bent to fit.
+//
+// The swap underneath it is shared, in preview-swap.js, and the line between
+// them is worth stating: that is a state machine with invariants that are not
+// obvious, this is a set of rules, and the dance in between is a dozen lines of
+// each page's own judgement.
 window.MajesticTransport = (function () {
 	// What the person chose. Permanent until they choose again.
 	const PICK_KEY = 'mj-transport-pick';

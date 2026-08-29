@@ -508,6 +508,16 @@
 	}
 
 	function stopLivePreview() {
+		// Through the swap, which closes the trial as well as the player on
+		// screen. Destroying only state.previewPlayer would leave a transport
+		// still being judged behind on every visit — a live socket nobody has a
+		// handle to, which is the leak this used to exist to prevent.
+		if (state.previewSwap) {
+			try { state.previewSwap.stop(); } catch (e) {}
+			state.previewSwap = null;
+			state.previewPlayer = null;
+			return;
+		}
 		if (state.previewPlayer) {
 			state.previewPlayer.destroy();
 			state.previewPlayer = null;
@@ -725,57 +735,72 @@
 		let stream = (remembered === null ? 1 : remembered) === 1 && subAvailable
 			? 1 : 0;
 
-		// Which attachment is the live one. MajesticWebRTC can report 'fallback'
-		// from inside attach() — it does exactly that when RTCPeerConnection or
-		// addTransceiver throws — so the handler below runs, installs MSE, and
-		// then the outer assignment completes and buries it under the façade
-		// that just failed. The picture would look right and the handle would be
-		// wrong, which is worse: state.previewPlayer is what the tab teardown
-		// destroys, so every visit would leave a live socket behind.
-		let gen = 0;
-
-		function attach(kind) {
-			const mine = ++gen;
-
-			// Whatever is running loses its handle here, so it has to be closed
-			// here. In the synchronous case there is nothing yet to close.
-			if (state.previewPlayer) {
-				try { state.previewPlayer.destroy(); } catch (e) {}
+		// The same swap the Preview page uses, for the same reason: a transport
+		// that cannot run must not cost the viewer the picture that could. This
+		// panel wants less from the outcome — there is no badge, no MJPEG and
+		// no toggle here — but the machinery underneath is identical, and a
+		// second copy of it would drift in ways that look like a picture rather
+		// than an error.
+		const swap = window.MajesticSwap({
+			// Getters, not nodes: the MSE player replaces its element on every
+			// reconnect (cloneNode plus replaceChild, keeping the id), so a
+			// captured node is detached within a session and every show or hide
+			// afterwards writes to something nobody can see.
+			elements: [
+				() => document.getElementById('mj-live-video'),
+				() => document.getElementById('mj-live-video-b'),
+			],
+			open: (kind, el, id, onState) => {
+				const impl = window.MajesticTransport.impl(kind);
+				return impl.attach(el, {
+					stream: stream,
+					// Opened with the volume it should have rather than given
+					// it afterwards; see preview-swap.js on why applying
+					// preferences post-promotion undoes the staging.
+					volume: 1,
+					// Same list the Preview page builds, and for the same
+					// reason: without it the browser offers host candidates
+					// only, and a session opened from anywhere but the same LAN
+					// negotiates cleanly and then never carries a packet.
+					iceServers: () => window.MajesticTransport.iceServers(
+						getDotted(state.config, 'webrtc.iceServers'),
+						getDotted(state.config, 'webrtc.turnUsername'),
+						getDotted(state.config, 'webrtc.turnCredential')),
+					onState: onState,
+				});
+			},
+			// state.previewPlayer is what the tab teardown closes, so it has to
+			// name whatever is actually on screen — a stale handle there leaves
+			// a live socket behind on every visit.
+			onPromoted: () => { state.previewPlayer = swap.player(); },
+			onFailed: (kind, why, permanent) => {
+				// 'fallback' is durable and worth remembering; 'busy' says the
+				// camera is full, which it will not be for long.
+				if (kind === 'webrtc' && permanent) {
+					window.MajesticTransport.demote();
+				}
+			},
+			// Nothing on screen left to protect. MSE is the last thing to try;
+			// past that this panel simply has no preview, which is what its
+			// empty element already shows.
+			onExhausted: (kind) => {
 				state.previewPlayer = null;
-			}
+				if (kind === 'webrtc') swap.start('mse');
+			},
+			onLive: (st, d, kind) => {
+				if (kind !== 'webrtc') return;
+				if (st === 'fallback' || st === 'busy') {
+					if (st === 'fallback') window.MajesticTransport.demote();
+					// Its picture is frozen from here; the replacement is
+					// staged over it rather than blanking the panel.
+					swap.retire();
+					swap.start('mse');
+				}
+			},
+		});
+		state.previewSwap = swap;
 
-			const impl = window.MajesticTransport.impl(kind);
-			if (!impl) return;
-
-			const p = impl.attach(video, {
-				stream: stream,
-				// Same list the Preview page builds, and for the same reason:
-				// without it the browser offers host candidates only, and a
-				// session opened from anywhere but the same LAN negotiates
-				// cleanly and then never carries a packet.
-				iceServers: () => window.MajesticTransport.iceServers(
-					getDotted(state.config, 'webrtc.iceServers'),
-					getDotted(state.config, 'webrtc.turnUsername'),
-					getDotted(state.config, 'webrtc.turnCredential')),
-				onState: (st) => {
-					if (mine !== gen || kind !== 'webrtc') return;
-					// 'fallback' is durable and worth remembering; 'busy' says
-					// the camera is full, which it will not be for long.
-					if (st === 'fallback' || st === 'busy') {
-						if (st === 'fallback') window.MajesticTransport.demote();
-						attach('mse');
-					}
-				},
-			});
-
-			// Superseded while attach() was still running: something else is
-			// playing now, so drop what we just built rather than bury it.
-			if (mine !== gen) {
-				try { p.destroy(); } catch (e) {}
-				return;
-			}
-			state.previewPlayer = p;
-		}
+		function attach(kind) { swap.start(kind); }
 
 		attach(window.MajesticTransport.preferred());
 
@@ -801,6 +826,11 @@
 				if (n === stream) return;
 				stream = n;
 				if (state.previewPlayer) state.previewPlayer.setStream(n);
+				// And the trial, if one is being judged: it keeps the stream it
+				// was opened with, so it would otherwise be promoted onto the
+				// channel just moved away from.
+				const t = swap.trial();
+				if (t) t.setStream(n);
 			});
 		});
 	}
@@ -833,6 +863,7 @@
 				'<label class="btn btn-outline-primary" for="mj-live-s1" id="mj-live-sub" hidden>Sub</label>' +
 				'</div></div>' +
 				'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
+				'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
 				'</div></div>';
 			row.appendChild(pv);
 			attachLivePreview(pv.querySelector('#mj-live-video'));
