@@ -1456,6 +1456,17 @@
 			const ff = state.fields.find(f => f.dot === flip.dot);
 			if (mf && ff) renderGeometry(liveGroup(colB, 'Orientation', ''), mf, ff);
 		}
+
+		// Every group above is conditional — on the schema, and on which player
+		// scripts loaded — so an empty column is reachable rather than
+		// hypothetical: without the player there is no Luma, and a build that
+		// marks only one of mirror/flip x-live has no Orientation either, which
+		// between them leave the right column holding nothing. It is 23rem wide
+		// with a divider whether or not anything is in it, so it would squeeze
+		// the surviving controls and add a blank section once stacked. Drop
+		// whatever came out empty instead of enumerating the combinations.
+		[colA, colB].forEach(c => { if (!c.childElementCount) c.remove(); });
+		if (!deck.childElementCount) deck.remove();
 	}
 
 	function renderProps(container, basePath, props) {
