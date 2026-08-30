@@ -1,7 +1,9 @@
-// Camera Preview page glue: night/IRcut/light toggles (via the /night and
-// /metrics/night APIs) and the live player attach, with an MJPEG/no-signal
-// fallback. `$`, mjConfig and mjGet are globals from main.js; this file loads
-// after preview.js and preview-webrtc.js.
+// Live View page glue: the player attach with its MJPEG/no-signal fallback.
+// Nothing here changes the camera — the page is deliberately settings-free
+// (it is the future multi-user system's read-only view), and the night/IR/
+// light toggles that used to live here moved to mj-settings' Live section
+// (mj-settings.js). `$`, mjConfig and mjGet are globals from main.js; this
+// file loads after preview.js and preview-webrtc.js.
 //
 // TWO TRANSPORTS, ONE FAÇADE. MajesticVideo (MSE) and MajesticWebRTC return
 // the same object, so everything below is written once and the choice is made
@@ -23,35 +25,6 @@
 // choice beats both. Otherwise the first bad afternoon would quietly park a
 // browser on the slower transport for good.
 (function () {
-	// --- Night / IRcut / Light toggles ---
-	mjConfig().then(cfg => {
-		const active = v => v !== false && v != null;
-		const lm = active(mjGet(cfg, 'nightMode.lightMonitor'));
-		$('#toggle-night').disabled = lm;
-		$('#toggle-ircut').disabled = lm || !active(mjGet(cfg, 'nightMode.irCutPin1'));
-		$('#toggle-light').disabled = lm || !active(mjGet(cfg, 'nightMode.backlightPin'));
-		if (lm) $('#mj-lightmon').hidden = false;
-	});
-
-	['night', 'ircut', 'light'].forEach(n =>
-		apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
-			.then(r => r.text()).then(v => { $('#toggle-' + n).checked = +v > 0; })
-			.catch(() => {}));
-
-	$('#toggle-night').addEventListener('click', () => {
-		apiFetch('/night/toggle', { credentials: 'same-origin' }).then(api => api.json()).then(data => {
-			$('#toggle-night').checked = data;
-			if (!$('#toggle-ircut').disabled) $('#toggle-ircut').checked = data;
-			if (!$('#toggle-light').disabled) $('#toggle-light').checked = data;
-		});
-	});
-	$('#toggle-ircut').addEventListener('click', () => {
-		apiFetch('/night/ircut', { credentials: 'same-origin' }).then(api => api.json()).then(data => { $('#toggle-ircut').checked = data; });
-	});
-	$('#toggle-light').addEventListener('click', () => {
-		apiFetch('/night/light', { credentials: 'same-origin' }).then(api => api.json()).then(data => { $('#toggle-light').checked = data; });
-	});
-
 	// --- Live player (WebRTC or MSE, with MJPEG / no-signal fallback) ---
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;

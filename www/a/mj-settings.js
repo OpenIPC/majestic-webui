@@ -849,6 +849,50 @@
 		});
 	}
 
+	// The night/IR/light runtime toggles under the live preview. Moved here from
+	// the Live page, which is deliberately settings-free. Gating mirrors what
+	// that page did: the light monitor owns all three while it is active, and
+	// IR cut / light need their pins configured. State comes from the metrics
+	// endpoint because these are runtime facts, not config values.
+	function wireNightToggles(pv) {
+		const byId = id => pv.querySelector('#' + id);
+		const night = byId('toggle-night'), ircut = byId('toggle-ircut');
+		const light = byId('toggle-light'), lightmon = byId('mj-lightmon');
+		if (!night) return;
+		const active = v => v !== false && v != null;
+		const lm = active(getDotted(state.config, 'nightMode.lightMonitor'));
+		night.disabled = lm;
+		ircut.disabled = lm || !active(getDotted(state.config, 'nightMode.irCutPin1'));
+		light.disabled = lm || !active(getDotted(state.config, 'nightMode.backlightPin'));
+		if (lm) lightmon.hidden = false;
+
+		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
+			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
+				.then(r => r.text()).then(v => { el2.checked = +v > 0; })
+				.catch(() => {}));
+
+		night.addEventListener('click', () => {
+			apiFetch('/night/toggle', { credentials: 'same-origin' })
+				.then(r => r.json()).then(data => {
+					night.checked = data;
+					// Night mode drives the filter and the light where they are
+					// not independently pinned, so the controls follow it.
+					if (!ircut.disabled) ircut.checked = data;
+					if (!light.disabled) light.checked = data;
+				}).catch(() => {});
+		});
+		ircut.addEventListener('click', () => {
+			apiFetch('/night/ircut', { credentials: 'same-origin' })
+				.then(r => r.json()).then(data => { ircut.checked = data; })
+				.catch(() => {});
+		});
+		light.addEventListener('click', () => {
+			apiFetch('/night/light', { credentials: 'same-origin' })
+				.then(r => r.json()).then(data => { light.checked = data; })
+				.catch(() => {});
+		});
+	}
+
 	// The Live adjustments leaf: the preview and the x-live knobs side by side, so
 	// dragging one shows its effect without scrolling. One "Reset all" rather than
 	// a per-knob reset. The knobs register in state.fields, so the page Save and
@@ -878,9 +922,23 @@
 				'</div></div>' +
 				'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
 				'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
+				// The night/IR/light toggles live HERE, not on the Live page:
+				// that page is deliberately settings-free (the future
+				// multi-user read-only view), and these change the camera for
+				// everyone. Same ids and wiring the Live page used to carry.
+				'<div class="d-flex flex-wrap align-items-center gap-2 mt-2">' +
+				'<input type="checkbox" class="btn-check" id="toggle-night">' +
+				'<label class="btn btn-sm btn-outline-primary" for="toggle-night">🌙 Night mode</label>' +
+				'<input type="checkbox" class="btn-check" id="toggle-ircut">' +
+				'<label class="btn btn-sm btn-outline-primary" for="toggle-ircut">👁 IR filter</label>' +
+				'<input type="checkbox" class="btn-check" id="toggle-light">' +
+				'<label class="btn btn-sm btn-outline-primary" for="toggle-light">💡 Light</label>' +
+				'<span class="small" id="mj-lightmon" hidden><a href="mj-settings.cgi?tab=nightMode">Light monitor active</a></span>' +
+				'</div>' +
 				'</div></div>';
 			row.appendChild(pv);
 			attachLivePreview(pv.querySelector('#mj-live-video'));
+			wireNightToggles(pv);
 		}
 
 		const col = el('div', withVideo ? 'col-12 col-lg-5' : 'col-12 col-lg-6');
