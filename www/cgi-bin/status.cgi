@@ -75,7 +75,7 @@ done) %>
 		<div class="x-small text-secondary" id="st-temp-note">SoC</div>
 		<div id="spark-temp" class="spark st-tile-spark"></div>
 	</div>
-	<div class="st-panel st-tile">
+	<div class="st-panel st-tile" id="st-enc-tile">
 		<div class="mj-cap">Encoder out</div>
 		<div class="st-val"><span id="st-enc">&ndash;</span><span class="st-unit"> Mbit/s</span></div>
 		<div class="x-small text-secondary" id="st-enc-sub">main stream</div>
@@ -110,7 +110,7 @@ done) %>
 				<span class="st-prev-chip" id="st-prev-chip" hidden></span>
 				<span class="st-prev-bar"><span id="st-prev-note">snapshot</span><span class="st-prev-go">Open Live &rarr;</span></span>
 			</a>
-			<div class="st-panel st-chartbox">
+			<div class="st-panel st-chartbox" id="st-enc-panel">
 				<div class="st-chart-head">
 					<span class="mj-cap">Encoder output &mdash; main stream</span>
 					<span class="st-now" id="st-enc-now"></span>

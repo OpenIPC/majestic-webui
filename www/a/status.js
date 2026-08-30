@@ -353,20 +353,29 @@
 			off.textContent = 'Snapshots are disabled — open Live for video';
 			return;
 		}
-		let busy = false;
+		// `busy` is the in-flight probe's start time, not a boolean: a request
+		// the browser never settles (half-dead link) would otherwise pin it
+		// true and stop the poll for good. After 15s the probe is abandoned —
+		// the token check makes its late events no-ops, so an old load can
+		// never clobber a newer frame.
+		let busy = 0;
 		const tick = () => {
-			if (busy || document.hidden) return;
-			busy = true;
+			if (document.hidden) return;
+			if (busy && Date.now() - busy < 15000) return;
+			busy = Date.now();
+			const mine = busy;
 			const probe = new Image();
 			probe.onload = () => {
-				busy = false;
+				if (busy !== mine) return;
+				busy = 0;
 				img.src = probe.src;
 				img.hidden = false;
 				off.hidden = true;
 				if (note) note.textContent = 'snapshot · updates every 5 s';
 			};
 			probe.onerror = () => {
-				busy = false;
+				if (busy !== mine) return;
+				busy = 0;
 				if (img.hidden) off.textContent = 'Snapshot unavailable';
 				else if (note) note.textContent = 'snapshot stalled — retrying';
 			};
@@ -426,6 +435,16 @@
 			' · lamp ' + (s.light ? 'on' : 'off');
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means
 		// the encoder has stopped producing frames while all else looks alive.
+		// The encoder tile and chart obey the same rule as Wi-Fi and
+		// temperature: they mount only when this camera can actually measure.
+		// A counter stuck at 0 means the SoC's byte accounting is absent, not
+		// a silent encoder; once it has climbed past zero a genuine 0.0 rate
+		// still shows, because the counter itself stays > 0.
+		const encHas = ('venc0_rcvd_bytes' in v) && v.venc0_rcvd_bytes > 0;
+		const encTile = $('#st-enc-tile'), encPanel = $('#st-enc-panel');
+		if (encTile) encTile.hidden = !encHas;
+		if (encPanel) encPanel.hidden = !encHas;
+
 		setAlert('#st-alert-stall', v.venc_empty_frames_run > 25);
 		setAlert('#st-alert-exp', v.isp_exposureismax > 0);
 		const lum = $('#st-alert-exp-lum');
