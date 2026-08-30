@@ -131,12 +131,11 @@
 			motionSpark = ispSparks.md;
 			motionEl.parentElement.title = 'Rectangles the motion detector reported per second, and how many fell inside the ROI';
 		}
-		if (!host.children.length) {
-			const dd = document.createElement('dd');
-			dd.className = 'text-secondary';
-			dd.textContent = 'This SoC reports no ISP metrics.';
-			host.appendChild(dd);
-		}
+		if (!host.children.length)
+			// A div, not a bare dd: a dl accepts div children, while a dd
+			// without a dt is invalid structure (same for the server-rendered
+			// "loading…" placeholder this replaces).
+			host.appendChild(el('div', 'text-secondary', 'This SoC reports no ISP metrics.'));
 	}
 
 	// The Wi-Fi block in the Network card. Gauges are shown with their units;
@@ -184,8 +183,12 @@
 
 	function updateWifi(s, v) {
 		if (!wifiEls) buildWifi(v);
-		// A camera on Ethernet emits no wifi_* metrics: the block was built
-		// empty once, stays hidden, and every later tick stops here.
+		// A camera on Ethernet emits no wifi_* metrics, so the block was built
+		// empty — but a Wi-Fi link can also come up after the page loaded
+		// (driver loaded, wlan0 associated), so an empty block rebuilds the
+		// moment wifi metrics first appear rather than staying hidden forever.
+		else if (!Object.keys(wifiEls).length &&
+			WIFI_GAUGES.concat(WIFI_RATES).some(r => r[0] in v)) buildWifi(v);
 		if (!wifiEls || !Object.keys(wifiEls).length) return;
 		WIFI_GAUGES.forEach(r => {
 			const el = wifiEls[r[0]];
