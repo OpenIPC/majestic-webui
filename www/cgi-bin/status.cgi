@@ -100,7 +100,8 @@ done) %>
 				<span id="st-light" class="badge text-bg-warning" hidden>💡 Light on</span>
 			</div>
 			<div id="st-isp-warn" class="x-small text-warning mb-2" hidden>Exposure at maximum — the scene is darker than the sensor can compensate.</div>
-			<dl class="small list mb-0" id="st-isp"><div class="text-secondary">loading…</div></dl>
+			<dl class="small list mb-0" id="st-isp"></dl>
+			<div class="small text-secondary" id="st-isp-empty">loading…</div>
 		</div></div>
 	</div>
 

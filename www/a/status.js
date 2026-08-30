@@ -131,11 +131,14 @@
 			motionSpark = ispSparks.md;
 			motionEl.parentElement.title = 'Rectangles the motion detector reported per second, and how many fell inside the ROI';
 		}
-		if (!host.children.length)
-			// A div, not a bare dd: a dl accepts div children, while a dd
-			// without a dt is invalid structure (same for the server-rendered
-			// "loading…" placeholder this replaces).
-			host.appendChild(el('div', 'text-secondary', 'This SoC reports no ISP metrics.'));
+		// The placeholder lives OUTSIDE the dl — a dl only accepts divs that
+		// wrap dt/dd groups, so free text cannot validly sit inside it.
+		const empty = $('#st-isp-empty');
+		if (empty) {
+			empty.hidden = !!host.children.length;
+			if (!host.children.length)
+				empty.textContent = 'This SoC reports no ISP metrics.';
+		}
 	}
 
 	// The Wi-Fi block in the Network card. Gauges are shown with their units;
@@ -287,12 +290,15 @@
 			for (let i = 0; i < 2; i++) {
 				const brEl = $('#st-br' + i), key = 'venc' + i + '_rcvd_bytes';
 				if (!brEl) continue;
-				// Cleared, not skipped, when no valid delta exists: a daemon
-				// restart resets or removes the counter, and a skipped update
-				// would leave the last rate on screen indefinitely.
-				brEl.textContent = v[key] && (key in s.prev.v)
-					? ' · measured ' + humanRate(Math.max(0, (v[key] - s.prev.v[key]) / s.dt))
-					: '';
+				// Cleared, not skipped or clamped, when no valid delta exists:
+				// a daemon restart resets or removes the counter — a skipped
+				// update would leave the last rate on screen indefinitely, and
+				// a reset counter that has already climbed past zero yields a
+				// negative delta that clamping would render as a false
+				// "measured 0 bit/s" outage.
+				const d = v[key] && (key in s.prev.v) ? v[key] - s.prev.v[key] : null;
+				brEl.textContent = d != null && d >= 0
+					? ' · measured ' + humanRate(d / s.dt) : '';
 			}
 
 			if (motionEl && 'md_rects_recv_total' in s.prev.v) {
