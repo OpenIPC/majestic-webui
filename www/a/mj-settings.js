@@ -45,6 +45,18 @@
 		fs: '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path></svg>',
 	};
 
+	// Scene starting points, keyed by the same dot tails as LIVE_META. They are
+	// exactly that — a place to start before you tune by eye — and the panel
+	// says so, because a preset presented as an answer is worse than no preset:
+	// every install has its own light. Tone only; a preset must never quietly
+	// change which way up the picture is.
+	const LIVE_PRESETS = [
+		{ id: 'neutral',  label: 'Neutral',   v: { luminance: 50, contrast: 50, saturation: 50, hue: 50 } },
+		{ id: 'indoor',   label: 'Indoor',    v: { luminance: 52, contrast: 46, saturation: 52, hue: 50 } },
+		{ id: 'outdoor',  label: 'Outdoor',   v: { luminance: 46, contrast: 58, saturation: 54, hue: 50 } },
+		{ id: 'lowlight', label: 'Low light', v: { luminance: 60, contrast: 42, saturation: 38, hue: 50 } },
+	];
+
 	// The orientation pad's four states. mirror/flip stay two independent
 	// booleans in the config — this is only how a camera presents them, and how
 	// every camera UI worth copying does.
@@ -1188,6 +1200,130 @@
 		}
 	}
 
+	// Scene presets. Which one is "on" is DERIVED by comparing the current tone
+	// values against the table, never stored: there is no fifth piece of state
+	// to keep in step with the four that already exist, and a preset the user
+	// has since nudged reports itself as Custom without anyone having to
+	// remember to clear a flag.
+	function renderScene(container, tone) {
+		const byKey = {};
+		tone.forEach(f => { byKey[f.key] = f; });
+		// Only offer presets we can actually apply in full. A build missing one
+		// of the four knobs would otherwise get a control that half-works.
+		if (!LIVE_PRESETS.every(p => Object.keys(p.v).every(k => byKey[k]))) return;
+
+		const row = el('div', 'mj-scene-row');
+		const chips = LIVE_PRESETS.map(p => {
+			const b = el('button', 'mj-scene-chip');
+			b.type = 'button';
+			b.textContent = p.label;
+			b.addEventListener('click', () => {
+				Object.keys(p.v).forEach(k => setLive(byKey[k], p.v[k]));
+			});
+			row.appendChild(b);
+			return b;
+		});
+		container.appendChild(row);
+
+		const status = el('div', 'mj-scene-status');
+		status.innerHTML = '<span class="mj-pip"></span><span></span>';
+		container.appendChild(status);
+		const pip = status.querySelector('.mj-pip');
+		const text = status.querySelector('span:last-child');
+
+		const sync = () => {
+			const cur = {};
+			Object.keys(byKey).forEach(k => { cur[k] = Number(byKey[k].getValue()); });
+			const hit = LIVE_PRESETS.find(p =>
+				Object.keys(p.v).every(k => cur[k] === p.v[k]));
+			chips.forEach((b, i) => {
+				const on = !!hit && LIVE_PRESETS[i].id === hit.id;
+				b.classList.toggle('mj-scene-chip-on', on);
+				b.setAttribute('aria-pressed', on ? 'true' : 'false');
+			});
+			// "Stock" and "Neutral" are the same four numbers, but they are not
+			// the same statement: one says the camera is untouched, the other
+			// that a preset was chosen. The first is what somebody inheriting
+			// this camera needs to hear.
+			const off = tone.filter(f => f.schema.default !== undefined &&
+				Number(f.getValue()) !== Number(f.schema.default)).length;
+			let head, tail;
+			if (hit && hit.id === 'neutral') {
+				head = 'Stock';
+				tail = '— every value at its factory default';
+			} else if (hit) {
+				head = hit.label;
+				tail = '— unmodified preset';
+			} else {
+				head = 'Custom';
+				tail = '— ' + off + (off === 1 ? ' value differs' : ' values differ') + ' from stock';
+			}
+			pip.style.opacity = off ? '1' : '0.25';
+			text.innerHTML = '<b>' + esc(head) + '</b> ' + esc(tail);
+		};
+		tone.forEach(f => {
+			f.control.addEventListener('input', sync);
+			f.control.addEventListener('change', sync);
+		});
+		state.liveSync.push(sync);
+		sync();
+	}
+
+	// The luma histogram. Everything it needs is already in the browser — the
+	// decoded picture — so this costs the camera nothing and needs no endpoint.
+	function renderLuma(container) {
+		if (!window.MajesticLuma) return;
+		const wrap = el('div', 'mj-luma');
+		wrap.innerHTML =
+			'<div class="mj-luma-plot">' +
+			'<svg viewBox="0 0 ' + window.MajesticLuma.BINS + ' 100" preserveAspectRatio="none" aria-hidden="true">' +
+			'<path class="mj-luma-path" d=""></path>' +
+			'<path class="mj-luma-mid" d="M' + (window.MajesticLuma.BINS / 2) + ' 0 V100"></path>' +
+			'</svg>' +
+			'<span class="mj-luma-clip mj-luma-clip-l" hidden></span>' +
+			'<span class="mj-luma-clip mj-luma-clip-r" hidden></span>' +
+			'</div>' +
+			'<div class="mj-luma-read"><span class="mj-luma-verdict"></span>' +
+			'<span class="mj-luma-scale">Y&#8242; 0&#8211;255</span></div>';
+		container.appendChild(wrap);
+
+		const pathEl = wrap.querySelector('.mj-luma-path');
+		const clipL = wrap.querySelector('.mj-luma-clip-l');
+		const clipR = wrap.querySelector('.mj-luma-clip-r');
+		const verdict = wrap.querySelector('.mj-luma-verdict');
+		const meanEl = container.parentNode.querySelector('.mj-luma-mean');
+
+		const sampler = window.MajesticLuma.start({
+			video: () => {
+				// Whichever element the swap currently has on screen; the MSE
+				// player replaces its node on every reconnect.
+				const a = document.getElementById('mj-live-video');
+				const b = document.getElementById('mj-live-video-b');
+				if (a && a.style.display !== 'none' && a.readyState >= 2) return a;
+				if (b && b.style.display !== 'none' && b.readyState >= 2) return b;
+				return a || b;
+			},
+			onData: (r) => {
+				pathEl.setAttribute('d', r.path);
+				// One per cent is the threshold worth a warning: below it you
+				// are looking at a specular highlight or a genuinely black
+				// corner, not at an exposure that needs moving.
+				const lo = r.low >= 0.01, hi = r.high >= 0.01;
+				clipL.hidden = !lo;
+				clipR.hidden = !hi;
+				const parts = [];
+				if (lo) parts.push((r.low * 100).toFixed(1) + '% crushed');
+				if (hi) parts.push((r.high * 100).toFixed(1) + '% blown');
+				verdict.className = 'mj-luma-verdict' + (parts.length ? ' mj-luma-warn' : ' mj-luma-ok');
+				verdict.textContent = parts.length ? parts.join(' · ') : 'no clipping';
+				if (meanEl) meanEl.textContent = 'mean ' + Math.round(r.mean);
+			},
+		});
+		// Torn down with the rest of the leaf, so a section change does not
+		// leave a timer reading a detached element four navigations later.
+		state.liveCleanup.push(() => sampler.stop());
+	}
+
 	function renderLive(form) {
 		const fields = liveFields();
 		const withVideo = !!window.MajesticVideo;
@@ -1250,6 +1386,10 @@
 		const useGeo = !!(mirror && flip);
 
 		const hasTone = fields.some(f => f !== mirror && f !== flip);
+		// Scene above tone: it is the coarse move you make first, and the four
+		// sliders are what you refine it with.
+		const sceneBody = hasTone
+			? liveGroup(colA, 'Scene', 'starting points, then tune by eye') : null;
 		const toneBody = hasTone ? liveGroup(colA, 'Tone', 'saved with the page') : null;
 
 		for (const f of fields) {
@@ -1270,6 +1410,24 @@
 			rall.addEventListener('click', resetLiveAll);
 			foot.appendChild(rall);
 			toneBody.appendChild(foot);
+		}
+
+		// The tone fields as mounted, which is what the scene chips set and the
+		// status line reads.
+		const toneFields = state.fields.filter(f =>
+			f.schema && f.schema['x-live'] && f.type === 'integer');
+		if (sceneBody && toneFields.length) renderScene(sceneBody, toneFields);
+
+		// Analysis first in the right column: it is what you look at while the
+		// left hand is on a slider.
+		if (withVideo) {
+			// The group's note slot carries the running mean rather than a
+			// caption — a number that changes is worth more there than a word
+			// that does not.
+			const lumaBody = liveGroup(colB, 'Luma', 'mean —');
+			const note = lumaBody.parentNode.querySelector('.mj-live-note');
+			if (note) note.className = 'mj-live-note mj-luma-mean';
+			renderLuma(lumaBody);
 		}
 
 		if (useGeo) {

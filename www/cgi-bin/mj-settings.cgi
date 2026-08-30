@@ -91,6 +91,11 @@ fi
 # behaviours for the stage mj-settings.js builds client-side.
 %>
 <script src="/a/preview-hero.js"></script>
+<%
+# The luma histogram is computed in the browser off the decoded picture, so it
+# needs nothing from the camera and no endpoint of its own.
+%>
+<script src="/a/mj-luma.js"></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>
