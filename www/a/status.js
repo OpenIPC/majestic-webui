@@ -98,19 +98,25 @@
 
 	// cfg: { h, lo, hi (null = auto), ref {v,label}|null, bands [{from,to,
 	// color,label}], colors [..], fmt } — series count = colors.length.
+	//
+	// Samples are timestamped and x is elapsed time, not sample index: a
+	// failed or slow poll leaves a real hole, so the line breaks across an
+	// outage instead of bridging it, and nothing older than the labelled
+	// window is drawn as if it were recent.
+	const CHART_WINDOW = 120; // seconds of history on screen ("-2 min")
+	const CHART_GAP = 8;      // a hole longer than this breaks the line
 	function makeChart(sel, cfg) {
 		const host = $(sel);
 		if (!host) return null;
-		const ch = { host: host, cfg: cfg, data: cfg.colors.map(() => []) };
+		const ch = { host: host, cfg: cfg, pts: [] };
 		charts.push(ch);
 		return ch;
 	}
 	function pushChart(ch, vals) {
 		if (!ch) return;
-		for (let i = 0; i < ch.data.length; i++) {
-			ch.data[i].push(vals[i]);
-			if (ch.data[i].length > HISTORY) ch.data[i].shift();
-		}
+		const t = performance.now() / 1000;
+		ch.pts.push({ t: t, v: vals });
+		while (ch.pts.length && ch.pts[0].t < t - CHART_WINDOW) ch.pts.shift();
 		renderChart(ch);
 	}
 	function renderChart(ch) {
@@ -122,9 +128,10 @@
 		const plotW = W - padL - padR;
 		const lo = cfg.lo;
 		let hi = cfg.hi;
+		const pts = ch.pts, n = pts.length;
 		if (hi == null) {
 			let max = 0;
-			ch.data.forEach(d => d.forEach(v => { if (v != null && v > max) max = v; }));
+			pts.forEach(p => p.v.forEach(v => { if (v != null && v > max) max = v; }));
 			hi = niceCeil(Math.max(max * 1.15, 1));
 		}
 		const fmt = cfg.fmt || fmtNum;
@@ -132,7 +139,8 @@
 			let y = padT + (1 - (v - lo) / (hi - lo)) * H;
 			return y < padT ? padT : y > padT + H ? padT + H : y;
 		};
-		const X = (i, n) => padL + plotW - (n - 1 - i) * (plotW / (HISTORY - 1));
+		const tNow = n ? pts[n - 1].t : 0;
+		const X = t => padL + plotW * (1 - (tNow - t) / CHART_WINDOW);
 		let s = '';
 		// threshold bands (Wi-Fi grades, luminance floor) sit under everything
 		(cfg.bands || []).forEach(b => {
@@ -155,19 +163,37 @@
 				'" y2="' + y.toFixed(1) + '" stroke="' + C1 + '" stroke-width="1" opacity="0.45"/>';
 			s += '<text x="' + (padL + plotW - 4) + '" y="' + (y - 4).toFixed(1) + '" text-anchor="end">' + cfg.ref.label + '</text>';
 		}
-		for (let si = 0; si < ch.data.length; si++) {
-			const d = ch.data[si], n = d.length;
-			let p = '', started = false;
+		const yBase = (padT + H).toFixed(1);
+		for (let si = 0; si < cfg.colors.length; si++) {
+			// line and area are built per contiguous run: a null value or a
+			// gap longer than CHART_GAP closes the run, so neither the stroke
+			// nor the fill spans an outage.
+			let line = '', area = '', seg = null; // seg = [firstX, lastX]
+			const close = () => {
+				if (!seg) return;
+				area += 'L' + seg[1] + ' ' + yBase + 'L' + seg[0] + ' ' + yBase + 'Z';
+				seg = null;
+			};
 			for (let i = 0; i < n; i++) {
-				if (d[i] == null) { started = false; continue; }
-				p += (started ? 'L' : 'M') + X(i, n).toFixed(1) + ' ' + Y(d[i]).toFixed(1);
-				started = true;
+				const v = pts[i].v[si];
+				if (i && pts[i].t - pts[i - 1].t > CHART_GAP) close();
+				if (v == null) { close(); continue; }
+				const x = X(pts[i].t).toFixed(1), y = Y(v).toFixed(1);
+				if (!seg) {
+					line += 'M' + x + ' ' + y;
+					area += 'M' + x + ' ' + y;
+					seg = [x, x];
+				} else {
+					line += 'L' + x + ' ' + y;
+					area += 'L' + x + ' ' + y;
+					seg[1] = x;
+				}
 			}
-			if (!p) continue;
-			if (ch.data.length === 1)
-				s += '<path d="' + p + 'L' + X(n - 1, n).toFixed(1) + ' ' + (padT + H) +
-					'L' + (p.slice(1).split(' ')[0]) + ' ' + (padT + H) + 'Z" fill="' + cfg.colors[0] + '1A"/>';
-			s += '<path d="' + p + '" fill="none" stroke="' + cfg.colors[si] +
+			close();
+			if (!line) continue;
+			if (cfg.colors.length === 1)
+				s += '<path d="' + area + '" fill="' + cfg.colors[0] + '1A"/>';
+			s += '<path d="' + line + '" fill="none" stroke="' + cfg.colors[si] +
 				'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
 		}
 		s += '<text x="' + padL + '" y="' + (padT + H + XB - 2) + '">-2 min</text>';
