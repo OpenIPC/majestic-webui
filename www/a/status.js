@@ -256,11 +256,13 @@
 
 			// Measured encoder output next to the configured figure. venc0 is the
 			// main stream on every vendor; venc1 renders as soon as a majestic
-			// that exports it is installed.
+			// that exports it is installed. A counter still at 0 means this
+			// SoC's byte accounting is absent, not a silent encoder — printing
+			// "measured 0 bit/s" over a dead counter would read as an outage.
 			for (let i = 0; i < 2; i++) {
-				const el = $('#st-br' + i), key = 'venc' + i + '_rcvd_bytes';
-				if (!el || !(key in v) || !(key in s.prev.v)) continue;
-				el.textContent = ' · measured ' + humanRate(Math.max(0, (v[key] - s.prev.v[key]) / s.dt));
+				const brEl = $('#st-br' + i), key = 'venc' + i + '_rcvd_bytes';
+				if (!brEl || !v[key] || !(key in s.prev.v)) continue;
+				brEl.textContent = ' · measured ' + humanRate(Math.max(0, (v[key] - s.prev.v[key]) / s.dt));
 			}
 
 			if (motionEl && 'md_rects_recv_total' in s.prev.v) {
@@ -285,6 +287,16 @@
 		else badge('ok', 'All systems OK');
 	}
 
+	// One element per value, textContent throughout — these strings come from
+	// the camera's config, and device-derived text must never reach innerHTML:
+	// a hand-edited majestic.yaml would otherwise inject markup into the page.
+	function el(tag, cls, text) {
+		const e = document.createElement(tag);
+		if (cls) e.className = cls;
+		if (text != null) e.textContent = text;
+		return e;
+	}
+
 	function renderStreams() {
 		if (typeof mjConfig !== 'function') return;
 		mjConfig().then(cfg => {
@@ -295,24 +307,33 @@
 			// sample now that mdEnabled is known.
 			if (lastV) buildImaging(lastV);
 			const host = $('#streams'); if (!host) return;
-			let html = '';
+			host.textContent = '';
 			['video0', 'video1'].forEach((sname, i) => {
 				if (mjGet(cfg, sname + '.enabled') !== true) return;
-				const codec = (mjGet(cfg, sname + '.codec') || '?').toUpperCase();
+				const codec = String(mjGet(cfg, sname + '.codec') || '?').toUpperCase();
 				const size = mjGet(cfg, sname + '.size') || '?';
 				const fps = mjGet(cfg, sname + '.fps');
 				const br = mjGet(cfg, sname + '.bitrate');
-				html += '<div>'
-					+ '<span class="badge text-bg-primary me-2">' + (i ? 'Sub' : 'Main') + '</span>'
-					+ '<span class="fw-semibold me-1">' + size + '</span>'
-					+ '<span class="badge text-bg-light border">' + codec + '</span>'
-					+ '<div class="x-small text-secondary mt-1">' + (fps ? fps + ' fps' : '') + (br ? ' · ' + br + ' kbit/s' : '')
-					+ '<span id="st-br' + i + '"></span></div>'
-					+ '</div>';
+				const row = el('div');
+				row.appendChild(el('span', 'badge text-bg-primary me-2', i ? 'Sub' : 'Main'));
+				row.appendChild(el('span', 'fw-semibold me-1', size));
+				row.appendChild(el('span', 'badge text-bg-light border', codec));
+				const sub = el('div', 'x-small text-secondary mt-1',
+					(fps ? fps + ' fps' : '') + (br ? ' · ' + br + ' kbit/s' : ''));
+				const meas = el('span');
+				meas.id = 'st-br' + i;
+				sub.appendChild(meas);
+				row.appendChild(sub);
+				host.appendChild(row);
 			});
-			if (mjGet(cfg, 'jpeg.enabled') === true)
-				html += '<div class="d-flex align-items-center"><span class="badge text-bg-secondary me-2">JPEG</span><span class="text-secondary small">snapshots enabled</span></div>';
-			host.innerHTML = html || '<div class="text-secondary small">No streams enabled.</div>';
+			if (mjGet(cfg, 'jpeg.enabled') === true) {
+				const row = el('div', 'd-flex align-items-center');
+				row.appendChild(el('span', 'badge text-bg-secondary me-2', 'JPEG'));
+				row.appendChild(el('span', 'text-secondary small', 'snapshots enabled'));
+				host.appendChild(row);
+			}
+			if (!host.children.length)
+				host.appendChild(el('div', 'text-secondary small', 'No streams enabled.'));
 		});
 	}
 
