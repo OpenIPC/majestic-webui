@@ -222,11 +222,24 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   `preview-page.js` in a bare `vm` with a stubbed `$` over an `IDS` list: any
   new element preview-page.js touches must be `$`-guarded and, for coverage,
   added to both `IDS` lists. PTZ is `p/motor.cgi` (markup only, hidden) +
-  `preview-ptz.js`, which relocates the pad into the stage's `#mj-ptz` mount:
-  Pointer Events with capture for press-and-hold, arrow keys only while the
-  stage itself has focus (the bar's slider and radios own them otherwise),
-  `apiFetch` to `j/ptz.cgi?h=&v=` (which validates both as small signed
-  integers before they reach the motor binary's argv).
+  `preview-ptz.js`, which relocates the pad(s) into the stage's `#mj-ptz`
+  mount: Pointer Events with capture for press-and-hold, arrow keys only
+  while the stage itself has focus (the bar's slider and radios own them
+  otherwise), `apiFetch` to `j/ptz.cgi`. **Three PTZ backends**, detected in
+  `common.cgi:update_caminfo` into `ptz_backend` (cached in sysinfo like
+  `ptz_support`): `gpio` (U-Boot `gpio_motors` + `gpio-motors` binary) and
+  `motor` (`ptz` + `/usr/bin/motor`) are stepped eight-way pads speaking
+  `j/ptz.cgi?h=&v=` (validated as small signed ints); `pelco` (`ptz` +
+  `/usr/bin/btzoom`) is the community Pelco-D serial mod — four directions,
+  zoom and focus, each a fixed timed pulse — speaking `j/ptz.cgi?act=<verb>`
+  against a closed whitelist (btzoom execs `pelcoD_$1`, so the verb must
+  never pass through raw). `bin/btzoom` ships in this repo (adopted from
+  OpenIPC/sandbox `scripts/pelcoD`, port from U-Boot `ptz_port`, default
+  `/dev/ttyAMA0`) so a Pelco camera needs only `fw_setenv ptz true`. A held
+  Pelco button strings pulses end-to-end via the one-request-in-flight
+  guard — btzoom answers only after its pulse ends. To render either pad on
+  a camera without hardware: set the env vars, `touch`+`chmod +x` fake
+  binaries, and remove `/tmp/webui/sysinfo.txt` (no reboot needed).
 - **Two clocks, and the page says which one it is printing.** Every second in
   `recordings.js` and `timeline.js` is **camera-local** and must stay that way:
   clips are named by the camera's own strftime, so day folders, the ribbon and

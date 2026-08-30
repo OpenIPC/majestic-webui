@@ -670,12 +670,22 @@ update_caminfo() {
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow | cut -d: -f2)
-	# PTZ preview controls: GPIO motors (gpio_motors + gpio-motors) or motor profile (ptz + /usr/bin/motor).
-	if { [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ] && command -v gpio-motors >/dev/null 2>&1; } ||
-		{ [ -x /usr/bin/motor ] && [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; }; then
-		ptz_support="1"
+	# PTZ preview controls. Three backends, each needing both its switch and
+	# its binary: GPIO motors (gpio_motors + gpio-motors), a motor profile
+	# (ptz + /usr/bin/motor), or Pelco-D over serial (ptz + /usr/bin/btzoom).
+	# The backend decides which pad p/motor.cgi draws — the first two are
+	# stepped pan/tilt with diagonals, Pelco-D is four directions in timed
+	# pulses plus zoom and focus. Order matters only when a camera has
+	# several installed; the stepped backends win because their protocol
+	# carries magnitudes the Pelco pulses cannot.
+	if [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ] && command -v gpio-motors >/dev/null 2>&1; then
+		ptz_support="1"; ptz_backend="gpio"
+	elif [ -x /usr/bin/motor ] && [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; then
+		ptz_support="1"; ptz_backend="motor"
+	elif [ -x /usr/bin/btzoom ] && [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; then
+		ptz_support="1"; ptz_backend="pelco"
 	else
-		ptz_support=""
+		ptz_support=""; ptz_backend=""
 	fi
 
 	# Network
@@ -698,7 +708,7 @@ update_caminfo() {
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
+		ptz_backend sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
 	rm -f ${sysinfo_file}
 
 	local v

@@ -828,12 +828,29 @@ mark {
 	   gradient padding reaches up over the pad's lower row — at equal
 	   z-index it swallows the pointerdown that starts a hold. */
 	z-index: 7;
+	/* Pelco cameras stack a zoom/focus cluster above the direction pad. */
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 6px;
 }
 
 .mj-ptz-pad {
 	display: grid;
 	grid-template-columns: repeat(3, 2.4rem);
 	gap: 2px;
+}
+
+/* Zoom (−/+) over focus (near/far): two columns, reading left-to-right as
+   less/more like the old sandbox pad its users are coming from. */
+.mj-ptz-fn {
+	grid-template-columns: repeat(2, 2.4rem);
+}
+
+/* The empty corners of the Pelco plus-shape — grid cells, not buttons, so
+   the arrows land where the eight-way pad has its own. */
+.mj-ptz-void {
+	height: 2.4rem;
 }
 
 .mj-ptz-btn {

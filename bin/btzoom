@@ -1,0 +1,137 @@
+#!/bin/sh
+# Pelco-D lens/pan control over a serial port. Origin: the community pelcoD
+# mod from OpenIPC/sandbox (scripts/pelcoD) by @sansarus, adopted here so a
+# Pelco camera works with `fw_setenv ptz true` alone instead of hand-installed
+# scripts. Changes from the original: POSIX function syntax (busybox ash does
+# not promise the `function` keyword), and the port comes from the U-Boot
+# `ptz_port` variable so non-SigmaStar boards can point it at their UART —
+# the original hardcoded /dev/ttyAMA0, including inside start's stty call.
+#
+# Every movement is a timed pulse: command, half a second, stop. The camera
+# ends its own move, which is why the WebUI paces a held button by waiting
+# for each request to answer rather than counting ticks.
+
+PORT=$(fw_printenv -n ptz_port 2>/dev/null)
+[ -n "$PORT" ] || PORT=/dev/ttyAMA0
+DELAY='sleep .5'
+LOCK=/tmp/btzoom.lock
+
+if [ -z "$1" ]; then
+	echo "Usage: $0 [start], [stop], [day], [night], [wide], [tele], [far], [near], [up], [down], [left], [right]"
+	exit 0
+fi
+
+# One invocation on the wire at a time. Every movement is command + delay +
+# stop, and two of those interleaved from separate callers (two tabs, a
+# webhook) corrupt each other's frames and let one caller's delayed stop
+# truncate the other's move. mkdir is the portable atomic; a holder that died
+# without cleaning up must not wedge the camera, so a lock older than a
+# minute is broken open. Waiting is bounded — a caller that cannot have the
+# port within ~2s reports that rather than hanging the UI.
+i=0
+until mkdir "$LOCK" 2>/dev/null; do
+	if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+		rmdir "$LOCK" 2>/dev/null
+		continue
+	fi
+	i=$((i + 1))
+	if [ "$i" -ge 40 ]; then
+		echo "PTZ port is busy."
+		exit 1
+	fi
+	sleep .05
+done
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+# The port must be raw at the right rate before any frame goes out, and a
+# freshly booted camera has had nobody set it. Cheap and idempotent, so it
+# runs for every command rather than trusting that `start` — the long lens
+# wakeup and ICR exercise, a maintenance action nobody is required to run —
+# happened first.
+stty -F "$PORT" 115200 raw -echo -onlcr 2>/dev/null
+
+pelcoD_night() {
+	printf '\xFF\x01\x00\x09\x00\x01\x0B' > "$PORT"
+}
+
+pelcoD_day() {
+	printf '\xFF\x01\x00\x0B\x00\x01\x0D' > "$PORT"
+}
+
+pelcoD_start() {
+	stty -F "$PORT" 115200 raw -echo -onlcr
+	$DELAY
+	# Lens wakeup.
+	printf '\x51\x01\x04\x79\x01\x0D\x0A\x2E\x02\x7E\x00\x00\x00\x95' > "$PORT"
+	$DELAY
+	printf '\xFF\x01\x00\x07\x00\x53\x5B' > "$PORT"
+	$DELAY
+	printf '\xFF\x01\x00\x07\x00\x52\x5A' > "$PORT"
+	# Click-clack the ICR.
+	sleep 3
+	pelcoD_night
+	sleep 3
+	pelcoD_day
+}
+
+pelcoD_stop() {
+	printf '\xFF\x01\x00\x00\x00\x00\x01' > "$PORT"
+}
+
+pelcoD_tele() {
+	printf '\xFF\x01\x00\x20\x00\x00\x21' > "$PORT"
+	$DELAY
+	pelcoD_stop
+}
+
+pelcoD_wide() {
+	printf '\xFF\x01\x00\x40\x00\x00\x41' > "$PORT"
+	$DELAY
+	pelcoD_stop
+}
+
+pelcoD_far() {
+	printf '\xFF\x01\x00\x80\x00\x00\x81' > "$PORT"
+	$DELAY
+	pelcoD_stop
+}
+
+pelcoD_near() {
+	printf '\xFF\x01\x01\x00\x00\x00\x02' > "$PORT"
+	$DELAY
+	pelcoD_stop
+}
+
+pelcoD_up() {
+	printf '\xFF\x01\x00\x08\x00\x00\x09' > "$PORT"
+	$DELAY
+	pelcoD_stop
+}
+
+pelcoD_down() {
+	printf '\xFF\x01\x00\x10\x00\x00\x11' > "$PORT"
+	$DELAY
+	pelcoD_stop
+}
+
+pelcoD_right() {
+	printf '\xFF\x01\x00\x02\x00\x00\x03' > "$PORT"
+	$DELAY
+	pelcoD_stop
+}
+
+pelcoD_left() {
+	printf '\xFF\x01\x00\x04\x00\x00\x05' > "$PORT"
+	$DELAY
+	pelcoD_stop
+}
+
+case "$1" in
+	start|stop|day|night|wide|tele|far|near|up|down|left|right)
+		"pelcoD_$1"
+		;;
+	*)
+		echo "Unknown command: $1"
+		exit 1
+		;;
+esac

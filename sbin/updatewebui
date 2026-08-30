@@ -382,6 +382,13 @@ do_install() {
 		die "the overlay did not end up as planned, so the manifest was left alone"
 	settle_view
 	write_manifest
+	# The per-boot sysinfo cache was written by the release this one just
+	# replaced, and everything derived at detection time — PTZ backend and
+	# support, most visibly — stays frozen at the old release's answers until
+	# something regenerates it. Drop it; the next request rebuilds it with
+	# the new code. (A camera that gained /usr/bin/btzoom from this very
+	# install would otherwise hide its pad until a reboot.)
+	rm -f /tmp/webui/sysinfo.txt
 	echo
 	echo "WebUI updated to $source_name."
 	verify_view "$tmp/want"
