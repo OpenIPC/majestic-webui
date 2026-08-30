@@ -243,11 +243,26 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   `tests/auto-source.test.js` and `tests/staging.test.js` execute
   `preview-page.js` in a bare `vm` with a stubbed `$` over an `IDS` list: any
   new element preview-page.js touches must be `$`-guarded and, for coverage,
-  added to both `IDS` lists. PTZ is `p/motor.cgi` (markup only, hidden) +
+  added to both `IDS` lists. Every group in the bar is black glass with a
+  micro-caps label and, where it has state, a lit indicator — the same
+  vocabulary the Live adjustments deck uses — but the markup is still
+  input-behind-a-label, because `preview-page.js` drives `.checked`/`.disabled`
+  on those inputs and they are what keeps the groups keyboard-reachable. The
+  bar stays overlaid at **every** width, since it lives inside `.mj-stage` and
+  that is what carries it into fullscreen; below `md` it scrolls sideways
+  rather than wrapping into rows over a 186px-tall picture, with the icon
+  group `position: sticky; right: 0` so fullscreen is never what falls off the
+  scrollport. PTZ is `p/motor.cgi` (markup only, hidden) +
   `preview-ptz.js`, which relocates the pad(s) into the stage's `#mj-ptz`
   mount: Pointer Events with capture for press-and-hold, arrow keys only
   while the stage itself has focus (the bar's slider and radios own them
-  otherwise), `apiFetch` to `j/ptz.cgi`. **Three PTZ backends**, detected in
+  otherwise), `apiFetch` to `j/ptz.cgi`. **The pad is the thing that moves off
+  the picture on a phone**, because unlike the bar it is always visible: below
+  `md` it sits under the stage (`top: 100%`), the stage reserves the room with
+  a `:has()`-conditional `margin-bottom`, and — since `.mj-stage` is
+  `overflow: hidden`, which is what rounds the picture's corners — that clip
+  moves onto `.mj-stage-media` and `.mj-bar` for the duration. `:fullscreen`
+  puts the pad back on the video, the one phone case with height to spare. **Three PTZ backends**, detected in
   `common.cgi:update_caminfo` into `ptz_backend` (cached in sysinfo like
   `ptz_support`). The switch is U-Boot `ptz_control` (#227): `gpio`
   (`gpio-motors` binary; pins in `ptz_gpio` — though the binary itself still
