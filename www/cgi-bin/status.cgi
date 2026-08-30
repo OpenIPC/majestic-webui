@@ -44,7 +44,8 @@ done) %>
 	<div class="st-alert" id="st-alert-stall" hidden>
 		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
 		<span class="small"><b>Encoder stalled</b> — the encoder has stopped producing frames while everything else looks alive.</span>
-		<a class="small ms-auto" href="fw-restart.cgi">Restart camera &rarr;</a>
+		<a class="small ms-auto confirm" href="fw-restart.cgi"
+			data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera &rarr;</a>
 	</div>
 </div>
 
