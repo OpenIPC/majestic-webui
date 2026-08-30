@@ -1,14 +1,14 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 
-<% page_title="Camera Preview" %>
+<% page_title="Live View" %>
 <%in p/header.cgi %>
 
 <div class="row g-4">
 	<div class="col-12 col-lg-9">
 		<div class="card h-100"><div class="card-body">
 			<% preview %>
-			<p class="small mb-0"><a href="mj-endpoints.cgi">Majestic endpoints</a></p>
+			<p class="small mb-0"><a href="mj-endpoints.cgi">Stream URLs</a></p>
 		</div></div>
 	</div>
 

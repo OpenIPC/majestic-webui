@@ -40,68 +40,63 @@ Pragma: no-cache
 			</button>
 			<div class="collapse navbar-collapse" id="navbarNav">
 				<ul class="navbar-nav">
+					<!-- The bar is grouped by task, not by which subsystem owns the
+					     page: viewing jobs are flat links up front, then what is
+					     being configured — the camera, the box it runs on, and the
+					     optional services on top. "Majestic" the daemon is not a
+					     word here on purpose: newcomers asked what it meant, and
+					     the answer was "the settings menu". -->
+					<li class="nav-item"><a class="nav-link" href="status.cgi">Dashboard</a></li>
+					<li class="nav-item"><a class="nav-link" href="preview.cgi">Live</a></li>
+					<!-- Top level rather than under a menu: browsing an archive is
+					     a viewing job like Live, and the File Manager route it
+					     replaces was the thing nobody found. Same card guard as
+					     the SD Card entry below — a camera with no card cannot
+					     record, so the page would only ever show its empty state. -->
+					<% if [ -e /dev/mmcblk0 ]; then %>
+						<li class="nav-item"><a class="nav-link" href="tool-recordings.cgi">Recordings</a></li>
+					<% fi %>
 					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownInformation" role="button">Information</a>
-						<ul aria-labelledby="dropdownInformation" class="dropdown-menu">
-							<li><a class="dropdown-item" href="status.cgi">Status</a></li>
-							<li><hr class="dropdown-divider"></li>
-							<li><a class="dropdown-item" href="info-logs.cgi">Logs</a></li>
-						</ul>
-					</li>
-					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownMajestic" role="button">Majestic</a>
-						<ul aria-labelledby="dropdownMajestic" class="dropdown-menu">
+						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownCamera" role="button">Camera</a>
+						<ul aria-labelledby="dropdownCamera" class="dropdown-menu">
 							<li><a class="dropdown-item" href="mj-settings.cgi">Settings</a></li>
-							<li><hr class="dropdown-divider"></li>
-							<li><a class="dropdown-item" href="mj-configuration.cgi">Configuration</a></li>
-							<li><a class="dropdown-item" href="mj-endpoints.cgi">Endpoints</a></li>
+							<li><a class="dropdown-item" href="mj-endpoints.cgi">Stream URLs</a></li>
+							<li><a class="dropdown-item" href="mj-configuration.cgi">Config file</a></li>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownSettings" role="button">Firmware</a>
-						<ul aria-labelledby="dropdownSettings" class="dropdown-menu">
+						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownSystem" role="button">System</a>
+						<ul aria-labelledby="dropdownSystem" class="dropdown-menu">
+							<li><h6 class="dropdown-header">Setup</h6></li>
 							<li><a class="dropdown-item" href="fw-network.cgi">Network</a></li>
 							<li><a class="dropdown-item" href="fw-time.cgi">Time</a></li>
-							<li><a class="dropdown-item" href="fw-interface.cgi">Interface</a></li>
-							<li><hr class="dropdown-divider"></li>
+							<li><a class="dropdown-item" href="fw-interface.cgi">Access</a></li>
+							<li><h6 class="dropdown-header">Maintenance</h6></li>
 							<li><a class="dropdown-item" href="fw-update.cgi">Update</a></li>
-							<li><a class="dropdown-item" href="fw-settings.cgi">Settings</a></li>
-						</ul>
-					</li>
-					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownTools" role="button">Tools</a>
-						<ul aria-labelledby="dropdownTools" class="dropdown-menu">
+							<li><a class="dropdown-item" href="fw-settings.cgi">Backup &amp; Restore</a></li>
+							<li><h6 class="dropdown-header">Diagnostics</h6></li>
+							<li><a class="dropdown-item" href="info-logs.cgi">Logs</a></li>
 							<li><a class="dropdown-item" href="tool-console.cgi">Console</a></li>
-							<li><a class="dropdown-item" href="tool-files.cgi">Files</a></li>
+							<li><a class="dropdown-item" href="tool-files.cgi">File Manager</a></li>
 							<% if [ -e /dev/mmcblk0 ]; then %>
-								<li><a class="dropdown-item" href="tool-sdcard.cgi">SDcard</a></li>
+								<li><a class="dropdown-item" href="tool-sdcard.cgi">SD Card</a></li>
 							<% fi %>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
-						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownExtensions" role="button">Extensions</a>
-						<ul aria-labelledby="dropdownExtensions" class="dropdown-menu dropdown-menu-lg-end">
+						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownServices" role="button">Services</a>
+						<ul aria-labelledby="dropdownServices" class="dropdown-menu">
+							<li><h6 class="dropdown-header">Notifications</h6></li>
 							<li><a class="dropdown-item" href="ext-openwall.cgi">OpenWall</a></li>
 							<li><a class="dropdown-item" href="ext-telegram.cgi">Telegram</a></li>
 							<li><a class="dropdown-item" href="ext-ntfy.cgi">Ntfy</a></li>
-							<li><hr class="dropdown-divider"></li>
+							<li><h6 class="dropdown-header">Networking</h6></li>
 							<li><a class="dropdown-item" href="https://openipc.cloud">P2P network</a></li>
 							<li><a class="dropdown-item" href="ext-vtun.cgi">VTun</a></li>
 							<li><a class="dropdown-item" href="ext-wireguard.cgi">WireGuard</a></li>
-							<li><hr class="dropdown-divider"></li>
 							<li><a class="dropdown-item" href="ext-proxy.cgi">Proxy</a></li>
 						</ul>
-					</li>	
-					<li class="nav-item"><a class="nav-link" href="preview.cgi">Preview</a></li>
-					<!-- Top level rather than under Tools: browsing an archive is a
-					     viewing job like Preview, not a maintenance one, and the
-					     File Manager route it replaces was the thing nobody found.
-					     Same card guard as the SDcard entry below — a camera with
-					     no card cannot record, so the page would only ever show its
-					     empty state. -->
-					<% if [ -e /dev/mmcblk0 ]; then %>
-						<li class="nav-item"><a class="nav-link" href="tool-recordings.cgi">Recordings</a></li>
-					<% fi %>
+					</li>
 					<!-- Other OpenIPC cameras on this link. Hidden until
 					     /a/cameras-switch.js confirms there are peers; inert
 					     markup, filled by JS with textContent (peer names are
@@ -171,7 +166,7 @@ Pragma: no-cache
 
 <% if [ ! -e $(get_config) ]; then %>
 <div class="alert alert-danger">
-	<p class="mb-0">Majestic configuration not found, please <a href="mj-configuration.cgi">check your Majestic settings</a>.</p>
+	<p class="mb-0">Camera configuration not found, please <a href="mj-configuration.cgi">check the configuration file</a>.</p>
 </div>
 <% fi %>
 

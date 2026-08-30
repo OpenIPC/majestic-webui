@@ -2,7 +2,7 @@
 <%in p/common.cgi %>
 
 <%
-page_title="Majestic Settings"
+page_title="Camera Settings"
 # ?tab= now names a section, not a category. Left empty the client picks the
 # first leaf of the first group; defaulting to "image" would have resolved to
 # the section of that name rather than the group, which is a different page.

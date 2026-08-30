@@ -429,6 +429,27 @@ function heartbeat() {
 	});
 })();
 
+// Mark the nav entry for the page being viewed. The server emits none: the
+// nav is one static block shared by every page, and the hrefs already in the
+// DOM are the only list of pages there is. Scoped to #navbarNav so the brand
+// logo (also status.cgi) is not marked. A page inside a dropdown lights its
+// parent toggle too, or the collapsed menu gives no hint of where you are.
+document.addEventListener('DOMContentLoaded', () => {
+	const page = location.pathname.split('/').pop() || 'status.cgi';
+	$$('#navbarNav a[href]').forEach(a => {
+		const href = a.getAttribute('href');
+		if (href === '#' || href.includes('://')) return; // toggles, Sign out, openipc.cloud
+		if (href.split('?')[0] !== page) return;
+		a.classList.add('active');
+		a.setAttribute('aria-current', 'page');
+		const dd = a.closest('.dropdown');
+		if (dd) {
+			const t = dd.querySelector('[data-bs-toggle="dropdown"]');
+			if (t) t.classList.add('active');
+		}
+	});
+});
+
 // Navbar toggler (the only collapse) and dismissable pieces. The slide
 // animation is gone with the bundle; the toggle is instant.
 document.addEventListener('click', e => {
