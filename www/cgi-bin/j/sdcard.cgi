@@ -10,7 +10,10 @@
 # sides. One of:
 #
 #   absent       no card in the slot
-#   unformatted  a card with no partition table and nothing readable on it
+#   unformatted  a card with no partition table and nothing readable on it.
+#                A card that has stopped storing data reads exactly like this,
+#                which is why do_format verifies its own writes instead of
+#                trusting the exit status of fdisk and mkfs.
 #   unreadable   a partition is there but no filesystem can be read off it —
 #                either never formatted, or damaged past recognition
 #   unmounted    a filesystem is there, nothing has mounted it
@@ -35,6 +38,65 @@ sysf() { cat "$SYS/device/$1" 2>/dev/null; }
 # json_log's awk to turn it into a JSON escape.
 logln() { L="$L$1
 "; }
+
+# Said whenever something this script wrote comes back different. A card in
+# this state reports no I/O error at all — it acknowledges every write and
+# returns plausible-looking garbage — so nothing but a cold read-back catches
+# it, and no amount of reformatting will fix it.
+UNSTORED="the card did not keep what was written to it, so it cannot be formatted here. The card (or the slot) is failing and needs replacing."
+
+# Make the next read come from the card rather than the page cache. This is
+# defence in depth, not the whole defence: the kernel invalidates a block
+# device's cache when its last opener closes it, so a fresh dd or blkid is
+# normally cold already — but "normally" stops holding the moment something
+# (the automount, say) keeps the device open. When it cannot be done the log
+# says so, rather than letting a check look colder than it was.
+uncache() {
+	sync && echo 1 > /proc/sys/vm/drop_caches 2>/dev/null ||
+		logln "# note: could not flush caches, the checks below may be reading cached data"
+}
+
+# Is there a partition table on sector 0? The 0x55AA signature at offset 510
+# and a non-empty type byte in the first entry at 450. The signature alone will
+# not do: a vfat boot sector ends in 0x55AA as well, so a card carrying a bare
+# filesystem and no table at all would pass a signature-only test.
+#
+# Three outcomes, because "could not look" is not "looked and found nothing":
+# 0 a table is there, 1 there is not, 2 the reads came back empty and the test
+# never ran. The caller reports 2 into the log and carries on — the write probe
+# below is what actually decides whether the card is keeping anything.
+mbr_ok() {
+	sig=$(dd if="$1" bs=1 skip=510 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
+	typ=$(dd if="$1" bs=1 skip=450 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+	[ -n "$sig" ] && [ -n "$typ" ] || return 2
+	[ "$sig" = "55aa" ] && [ "$typ" != "00" ]
+}
+
+# Does this card keep a write at all? Stamp the partition's first sector and
+# read it back cold. This is a fact measured about the card rather than an
+# inference from the exit status of the tool that wrote it, and — unlike
+# comparing the volume IDs of two formats — it does not care how closely
+# together they happen.
+#
+# It is the check that catches a card gone read-only in hardware, which is the
+# ordinary way an SD card ends its life: the write is dropped without complaint
+# and the filesystem that was already there reads back intact, so every test
+# that only asks "is there a filesystem?" says yes.
+#
+# The stamp lands on the sector mkfs is about to overwrite, so a format that
+# fails after this point leaves the old filesystem damaged. Formatting was the
+# request; the old filesystem was forfeit either way.
+#
+# It is minted per run (probe_new), because a format that aborted earlier can
+# have left one of these behind: a fixed string would then be found on the card
+# without this run having written it, and a card that has stopped taking writes
+# in the meantime would read as one that took this one.
+probe_new() {
+	PROBE="MJ-PROBE $$ $(date +%s) $(dd if=/dev/urandom bs=6 count=1 2>/dev/null |
+		od -An -tx1 | tr -d ' \n')"
+}
+probe_write() { printf '%s' "$PROBE" | dd of="$1" bs=512 count=1 2>/dev/null; }
+probe_seen() { [ "$(dd if="$1" bs=1 count=${#PROBE} 2>/dev/null)" = "$PROBE" ]; }
 
 # Kernel complaints about this card, newest last. Corroborating detail only:
 # the ring buffer is small and chatty (on hi3516av300 the CMA allocator alone
@@ -144,16 +206,51 @@ do_format() {
 	case "$fs" in vfat|ext4|exfat) ;; *) err="unsupported filesystem"; return;; esac
 	command -v "mkfs.$fs" >/dev/null 2>&1 || { err="mkfs.$fs not installed"; return; }
 	umount /mnt/mmcblk0p1 2>/dev/null; umount "${DEV}p1" 2>/dev/null; umount "$DEV" 2>/dev/null
-	if ! grep -q 'mmcblk0p1$' /proc/partitions; then
+	# Look before writing, and look on every format rather than only the ones
+	# that write: the kernel can be holding an mmcblk0p1 from an earlier boot
+	# over a card whose sector 0 no longer has the table it came from, and it
+	# was skipping the check on exactly that reading that let a card storing
+	# nothing format "successfully" in the lab.
+	uncache
+	mbr_ok "$DEV"; st=$?
+	# A table is written when the card has none, and also when the one the
+	# kernel is holding is not on the card any more. That second case says
+	# nothing about the card until something has been written to it — a healthy
+	# card whose table was wiped out from under a mounted kernel needs its table
+	# put back, not condemning.
+	if [ "$st" != 0 ] || ! grep -q 'mmcblk0p1$' /proc/partitions; then
 		logln "# partition ${DEV}"
 		logln "$(printf 'o\nn\np\n1\n\n\nw\n' | fdisk "$DEV" 2>&1)"
 		partprobe "$DEV" 2>/dev/null
+		uncache
+		mbr_ok "$DEV"; st=$?
 	fi
-	ensure_node || { err="partition node mmcblk0p1 was not created"; return; }
+	# Only now can a missing table mean something about the card: one was
+	# written to it on this run and did not come back.
+	case "$st" in
+		1) err="$UNSTORED"; return;;
+		2) logln "# note: could not read the partition table back to check it";;
+	esac
+	ensure_node || { err="the partition table was written but the kernel never created ${DEV}p1 — rebooting the camera will pick it up"; return; }
 	umount "${DEV}p1" 2>/dev/null   # automount may have grabbed it
+	probe_new
+	probe_write "${DEV}p1"
+	uncache
+	probe_seen "${DEV}p1" || { err="$UNSTORED"; return; }
 	logln "# mkfs.$fs ${DEV}p1"
-	logln "$(mkfs.$fs "${DEV}p1" 2>&1)"
-	blkid "${DEV}p1" >/dev/null 2>&1 || { err="format failed"; return; }
+	o=$(mkfs.$fs "${DEV}p1" 2>&1); rc=$?
+	[ -n "$o" ] && logln "$o"
+	[ "$rc" -eq 0 ] || { err="$(first_line "${o:-mkfs.$fs failed}")"; return; }
+	uncache
+	# Past the probe the card is known to be keeping writes, so nothing below
+	# blames it. mkfs writes its superblock over the stamp, and blkid is judged
+	# on its *output*, never its exit status: busybox blkid exits 0 for a blank
+	# partition and for a device that does not exist at all, so `blkid || fail`
+	# — which is what stood here — could never fail.
+	if probe_seen "${DEV}p1" || [ -z "$(blkid "${DEV}p1" 2>/dev/null)" ]; then
+		err="mkfs.$fs reported success but no filesystem was written"
+		return
+	fi
 	mkdir -p /mnt/mmcblk0p1
 	mount "${DEV}p1" /mnt/mmcblk0p1 2>/dev/null
 	mountpoint -q /mnt/mmcblk0p1 || err="mount after format failed"
