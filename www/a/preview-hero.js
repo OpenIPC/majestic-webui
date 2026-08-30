@@ -25,7 +25,7 @@
 	});
 	stage.addEventListener('pointerdown', e => {
 		if (e.pointerType !== 'touch') return;
-		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, .mj-adapt-note')) return;
+		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-adapt')) return;
 		if (stage.classList.contains('mj-show')) {
 			stage.classList.remove('mj-show');
 			clearTimeout(hideTimer);

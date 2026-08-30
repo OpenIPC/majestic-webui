@@ -26,7 +26,7 @@ const IDS = [
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1', 'mj-sub',
 	'mj-talk', 'mj-talk-ctl', 'mj-talk-lbl', 'mj-transport-w',
 	'mj-transport-m', 'mj-transport-ctl', 'mj-transport-lbl',
-	'mj-transport-note', 'mj-note-close', 'mj-vol', 'mj-player', 'mj-stage',
+	'mj-vol', 'mj-player', 'mj-stage',
 	'toggle-ircut', 'toggle-light', 'toggle-night',
 ];
 

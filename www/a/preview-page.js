@@ -65,18 +65,13 @@
 		// the radio behind it stays in the tab order, so without this the
 		// keyboard can pick a stream the camera does not have.
 		if (s1) s1.disabled = !subOk;
-		// Whether each channel will actually be adapted. Absent means an older
-		// camera that has no such setting and always adapted, so only an
-		// explicit false counts as pinned.
-		adapts = [
-			mjGet(cfg, 'video0.adjustBitrate') !== false,
-			mjGet(cfg, 'video1.adjustBitrate') !== false,
-		];
 		// The configured frame rates, which are what the chip shows on MSE —
 		// that player measures nothing.
 		cfgFps = [+mjGet(cfg, 'video0.fps') || 0, +mjGet(cfg, 'video1.fps') || 0];
+		// The configured bitrates, which are what the adaptation toast names
+		// as the rate the encoder returns to when nothing is holding it down.
+		cfgKbps = [+mjGet(cfg, 'video0.bitrate') || 0, +mjGet(cfg, 'video1.bitrate') || 0];
 		setChip();
-		syncTransportNote();
 		ice = MajesticTransport.iceServers(
 			mjGet(cfg, 'webrtc.iceServers'),
 			mjGet(cfg, 'webrtc.turnUsername'),
@@ -120,7 +115,7 @@
 	// which is where "why am I not on WebRTC?" gets asked.
 	const transportW = $('#mj-transport-w'), transportM = $('#mj-transport-m');
 	const transportGrp = $('#mj-transport-ctl');
-	const transportLbl = $('#mj-transport-lbl'), transportNote = $('#mj-transport-note');
+	const transportLbl = $('#mj-transport-lbl');
 	function reflectTransport(kind) {
 		if (transportW) transportW.checked = kind === 'webrtc';
 		if (transportM) transportM.checked = kind === 'mse';
@@ -132,30 +127,6 @@
 	// session that is long over.
 	const TRANSPORT_TITLE = transportLbl ? transportLbl.title : '';
 
-	// The bitrate adaptation is the thing worth disclosing. It is what makes
-	// WebRTC work on a thin link, and it reaches past the person who switched it
-	// on: the encoder is shared with everyone else watching that stream, and
-	// with whatever is recording it. So say it where it cannot be missed, and
-	// only while it is actually happening — a tooltip needs a pointer to find,
-	// and this is not a detail for people who happen to own a mouse.
-	// Dismissed is for this page view: the note is a disclosure, and a person
-	// who has read it should not have it back over the picture on every
-	// channel change. A fresh load discloses again.
-	let noteDismissed = false;
-	function syncTransportNote() {
-		// Only while it is true. The note is a disclosure, and a disclosure that
-		// fires when nothing is happening teaches people to ignore it — the
-		// camera does not touch a channel whose adjustBitrate is off, so saying
-		// it is adapting that stream is simply wrong. Per channel, because the
-		// two settings are independent and Main/Sub is one click apart.
-		if (transportNote) {
-			transportNote.hidden =
-				noteDismissed || !(usingWebRTC && adapts[stream ? 1 : 0]);
-		}
-		if (transportLbl && usingWebRTC) {
-			transportLbl.title = TRANSPORT_TITLE;
-		}
-	}
 	const s0 = $('#mj-stream-0'), s1 = $('#mj-stream-1');
 	const autoCtl = $('#mj-stream-auto'), autoLbl = $('#mj-auto');
 
@@ -190,9 +161,6 @@
 	// boundary would otherwise cut the session on every frame of the resize.
 	const AUTO_MIN_GAP_MS = 1000;
 	let lastAutoAt = 0, autoTimer = null;
-	// Per channel, filled when the config lands; true until then, which is what
-	// a camera without the setting does.
-	let adapts = [true, true];
 	// The chip: what is playing, in one line — "H264 3840×2160 · 25 fps". The
 	// transport is not named here; the picker names it, once. fps has two
 	// sources that cannot be merged: WebRTC measures it every second
@@ -201,6 +169,8 @@
 	// reported about its own picture.
 	let chipMedia = null, chipFps = 0;
 	let cfgFps = [0, 0];
+	// Per channel too: videoN.bitrate, for the toast's "back to configured".
+	let cfgKbps = [0, 0];
 	// WebRTC takes ?stream= as a preference, not an order: the camera can
 	// serve the other channel — a codec its negotiation can give this
 	// browser, or a daemon fault (majestic#299 arrived as "Main selected,
@@ -314,6 +284,12 @@
 		// The camera's own estimate of what this link will carry, which is what
 		// it sets the encoder from — not a measurement of what arrived.
 		set('#mj-st-remb', cam.remb || '-');
+		// Where the shared encoder actually is. enc=0 means WebRTC has not
+		// moved it — it runs at the operator's configured rate. Absent means
+		// a majestic build without the counter, and the row claims nothing.
+		set('#mj-st-enc', cam.enc === undefined ? '-'
+			: (parseInt(cam.enc, 10) || 0) === 0 ? 'configured rate'
+			: parseInt(cam.enc, 10) + ' kbit/s · adapted');
 		set('#mj-st-pli', cam.pli || '-');
 		set('#mj-st-ain', cam['audio-in'] || '-');
 		// Both halves, because they answer different questions: the browser
@@ -338,12 +314,20 @@
 		// stats tick refills it, and until then the chip claims nothing.
 		chipFps = 0;
 		player.setVolume(vol);
+		// The toast's baseline belongs to a WebRTC session; MSE feeds it
+		// nothing, so a stale baseline (and a toast still standing) would
+		// describe a session that is gone. Back on WebRTC it re-adopts from
+		// the first tick rather than announcing whatever moved while away.
+		if (window.MajesticAdapt && !usingWebRTC) window.MajesticAdapt.reset();
 		syncAudioCtl();
 		// The outgoing player's destroy() released the microphone, so talkback
 		// comes back up off whatever the new one is doing.
 		syncTalkCtl();
 		syncStatsCtl();
-		syncTransportNote();
+		// Back on WebRTC, the toggle's tooltip goes back to the standing
+		// explanation: a failure wrote its reason there, and leaving it would
+		// keep complaining about a session that is long over.
+		if (transportLbl && usingWebRTC) transportLbl.title = TRANSPORT_TITLE;
 	}
 
 	// The swap itself lives in preview-swap.js — two elements, a trial that
@@ -546,6 +530,17 @@
 					setChip();
 				}
 				if (statsBox && !statsBox.hidden) showStats(s);
+				// The adaptation toast, fed the camera's own view of the
+				// shared encoder. Guarded: preview-adapt.js is its own file,
+				// and an older majestic sends no enc= at all — either way
+				// nothing here should ever invent a rate change.
+				if (window.MajesticAdapt && s.cam && s.cam.enc !== undefined) {
+					window.MajesticAdapt.tick({
+						enc: parseInt(s.cam.enc, 10) || 0,
+						remb: parseInt(s.cam.remb, 10) || 0,
+						configured: cfgKbps[stream ? 1 : 0],
+					});
+				}
 			},
 		};
 	}
@@ -701,11 +696,6 @@
 		// correcting a default is helpful, overriding a decision is not.
 		const moved = !userPickedStream && chooseSub(cfg);
 		if (moved && player) player.setStream(stream);
-		// The note follows the channel, and this is the one path that changes
-		// the channel without going through attachPlayer(). A camera whose two
-		// channels differ would otherwise disclose Main's setting while playing
-		// Sub, until something else happened to re-sync it.
-		syncTransportNote();
 
 		// The ICE list, unconditionally. A blind attach opened with an empty
 		// one, and the getter is only read when a session opens — so without
@@ -757,13 +747,15 @@
 	// Everything a channel change has to reach: the player on screen, any trial
 	// being judged — a trial keeps the stream it was opened with, so otherwise
 	// it would be promoted onto the channel the viewer had already left — and
-	// the adaptation notice, which is per channel.
+	// the adaptation toast's baseline, which belongs to the channel being left.
 	function goToStream(n) {
 		stream = n;
+		// The two channels are two encoders; the baseline and any toast on
+		// screen describe the one being left.
+		if (window.MajesticAdapt) window.MajesticAdapt.reset();
 		if (player) player.setStream(n);
 		const t = swap.trial();
 		if (t) t.setStream(n);
-		syncTransportNote();
 		// On MSE the chip's fps is the configured rate, which is per channel.
 		setChip();
 	}
@@ -867,13 +859,4 @@
 		// showing" has one answer and not two that have to agree.
 		statsBtn.addEventListener('change', syncStatsCtl);
 	}
-
-	// The adaptation note's dismissal. State lives beside its reader
-	// (syncTransportNote), which would otherwise re-show the note on the next
-	// channel or transport change.
-	const noteClose = $('#mj-note-close');
-	if (noteClose) noteClose.addEventListener('click', () => {
-		noteDismissed = true;
-		syncTransportNote();
-	});
 })();
