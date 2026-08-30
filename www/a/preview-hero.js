@@ -15,18 +15,26 @@
 		// Fullscreen on the STAGE rather than the video element, so the bar and
 		// everything else overlaid on the picture comes along. Hidden where the
 		// API is missing (iOS Safari) rather than shown and broken.
+		//
+		// Returns a disposer, because the listener is on `document` but closes
+		// over one stage and one button. The Live page wires this once per load
+		// and can ignore it; the settings stage is rebuilt on every visit to the
+		// leaf, so without taking the listener back off, each visit would leave
+		// another callback behind holding a detached stage.
 		wireFullscreen: function (stage, btn) {
-			if (!stage || !btn || !stage.requestFullscreen || !document.fullscreenEnabled) return;
+			if (!stage || !btn || !stage.requestFullscreen || !document.fullscreenEnabled) return null;
 			btn.hidden = false;
 			btn.addEventListener('click', () => {
 				if (document.fullscreenElement) document.exitFullscreen();
 				else stage.requestFullscreen().catch(() => {});
 			});
-			document.addEventListener('fullscreenchange', () => {
+			const onChange = () => {
 				const on = document.fullscreenElement === stage;
 				btn.setAttribute('aria-label', on ? 'Exit fullscreen' : 'Fullscreen');
 				btn.title = on ? 'Exit fullscreen' : 'Fullscreen';
-			});
+			};
+			document.addEventListener('fullscreenchange', onChange);
+			return function () { document.removeEventListener('fullscreenchange', onChange); };
 		},
 
 		// Snapshot: the camera's own /image.jpg, not a capture of the <video> —

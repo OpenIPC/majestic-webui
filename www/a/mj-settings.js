@@ -50,9 +50,9 @@
 	// every camera UI worth copying does.
 	const GEO_STATES = [
 		{ label: 'Normal', mirror: false, flip: false, tf: '' },
-		{ label: 'Mirror', mirror: true,  flip: false, tf: 'translate(26,0) scale(-1,1)' },
+		{ label: 'Mirror', mirror: true,  flip: false, tf: 'translate(20,0) scale(-1,1)' },
 		{ label: 'Flip',   mirror: false, flip: true,  tf: 'translate(0,20) scale(1,-1)' },
-		{ label: '180°',   mirror: true,  flip: true,  tf: 'translate(26,20) scale(-1,-1)' },
+		{ label: '180°',   mirror: true,  flip: true,  tf: 'translate(20,20) scale(-1,-1)' },
 	];
 
 	// Curated resolution presets (the de-facto set the firmware assumes), used
@@ -600,10 +600,19 @@
 		return parts.join('&');
 	}
 
+	// Serialised, not fire-and-forget. Hold-to-compare issues two of these — the
+	// defaults on press, the live values on release — and independent fetches
+	// have no ordering guarantee, so a short hold could let the defaults land
+	// second and leave the camera sitting at stock: precisely the state this
+	// control exists to undo. Each link swallows its own rejection, because a
+	// write that fails must not wedge every write after it.
+	let liveWrite = Promise.resolve();
 	function postLive(q) {
-		if (!q) return;
-		apiFetch('/api/v1/image?' + q,
-			{ method: 'POST', credentials: 'same-origin' }).catch(() => {});
+		if (!q) return liveWrite;
+		liveWrite = liveWrite.then(() =>
+			apiFetch('/api/v1/image?' + q, { method: 'POST', credentials: 'same-origin' })
+				.catch(() => {}));
+		return liveWrite;
 	}
 
 	// Debounced live apply: on any x-live field change, POST the current value
@@ -1127,9 +1136,9 @@
 			const b = el('button', 'mj-geo');
 			b.type = 'button';
 			b.innerHTML =
-				'<svg viewBox="0 0 26 20" width="26" height="20" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
-				'<rect x="1.4" y="1.4" width="23.2" height="17.2" rx="2" opacity="0.4"></rect>' +
-				'<g transform="' + g.tf + '"><path d="M10 5.6h6.4M10 10h4.6M10 5.6v8.8" stroke-linecap="round" stroke-width="1.7"></path></g>' +
+				'<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
+				'<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>' +
+				'<g transform="' + g.tf + '"><path d="M7.6 6.8h5.2M7.6 10h3.7M7.6 6.8v6.4" stroke-linecap="round" stroke-width="1.7"></path></g>' +
 				'</svg><span>' + esc(g.label) + '</span>';
 			b.addEventListener('click', () => {
 				setLive(mirrorField, g.mirror);
@@ -1186,9 +1195,14 @@
 		// The only place the leaf names itself — the rail's active item says it
 		// too — with the stream picker on the same line rather than in a card
 		// header of its own.
+		//
+		// An <h3> despite the micro-caps styling, and not a <span>: revealSection()
+		// focuses `form h3` after a navigation so the section announces itself to
+		// a screen reader (#222). Every other leaf has one; styling this like a
+		// group label must not cost the Live leaf its heading.
 		const head = el('div', 'mj-live-head');
 		head.innerHTML =
-			'<span class="mj-cap">Live adjustments</span>' +
+			'<h3 class="mj-cap">Live adjustments</h3>' +
 			'<span class="mj-live-rule"></span>' +
 			'<span class="mj-seg" role="group" aria-label="Stream">' +
 			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s0" autocomplete="off">' +
@@ -1207,7 +1221,10 @@
 			// naming, the jpeg.enabled gate and the delayed revokeObjectURL are
 			// details a second copy would drift on.
 			if (window.MajesticHero) {
-				window.MajesticHero.wireFullscreen(stage, stage.querySelector('#mj-live-fs'));
+				// The disposer matters here and not on the Live page: this stage
+				// is rebuilt every time the leaf is opened.
+				const offFs = window.MajesticHero.wireFullscreen(stage, stage.querySelector('#mj-live-fs'));
+				if (offFs) state.liveCleanup.push(offFs);
 				window.MajesticHero.wireSnapshot(stage.querySelector('#mj-live-snap'));
 			}
 			const note = el('p', 'mj-live-hint');

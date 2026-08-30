@@ -600,6 +600,13 @@ mark {
 	margin-bottom: 0.6rem;
 }
 
+/* The leaf's heading is a real <h3> (revealSection focuses it), so its default
+   heading margin and size have to come back off to read as a group label. */
+.mj-live-head h3 {
+	margin: 0;
+	line-height: 1.4;
+}
+
 .mj-live-grp-head {
 	align-items: baseline;
 	margin-bottom: 0.7rem;
