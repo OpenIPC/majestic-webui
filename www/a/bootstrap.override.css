@@ -1461,14 +1461,16 @@ mark {
 	top: 0.5rem;
 	right: 0.5rem;
 	z-index: 5;
-	padding: 0.15rem 0.5rem;
-	border-radius: 0.5rem;
-	background: rgba(0, 0, 0, 0.55);
-	color: #fff;
-	font-size: 0.8rem;
+	padding: 0.4rem 0.65rem;
+	border-radius: var(--bs-border-radius);
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	color: #e6e8ee;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.75rem;
 	font-variant-numeric: tabular-nums;
 	pointer-events: none;
-	backdrop-filter: blur(4px);
+	backdrop-filter: blur(10px);
 }
 
 .mj-stats-overlay {
@@ -1481,11 +1483,12 @@ mark {
 	   short viewport the numbers yield, not the picture. */
 	max-height: calc(100% - 5rem);
 	overflow: auto;
-	background: rgba(0, 0, 0, 0.6);
-	color: #fff;
-	padding: 0.5rem 0.75rem;
-	border-radius: 0.5rem;
-	backdrop-filter: blur(4px);
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	color: #e6e8ee;
+	padding: 0.6rem 0.8rem;
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
 }
 
 .mj-stats-overlay .table {
@@ -1513,10 +1516,11 @@ mark {
 	/* Room on the right for the corner-anchored ×. */
 	padding: 0.3rem 1.5rem 0.3rem 0.6rem;
 	max-width: min(75%, 22rem);
-	background: rgba(0, 0, 0, 0.65);
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
 	color: rgba(255, 255, 255, 0.9);
-	border-radius: 0.4rem;
-	backdrop-filter: blur(4px);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
 	cursor: pointer;
 	animation: mj-adapt-in 0.2s ease;
 }
@@ -1546,6 +1550,202 @@ mark {
 @keyframes mj-adapt-in {
 	from { opacity: 0; transform: translateX(0.5rem); }
 	to { opacity: 1; transform: none; }
+}
+
+/* ── on-video chrome ────────────────────────────────────────────────────────
+   The same vocabulary the Live adjustments deck uses — black glass, micro-caps
+   labels, a lit indicator where there is state, stroked 20px icons — so the
+   two pages read as one product. Deliberately identical in both themes,
+   because the background here is the picture, not the page surface.
+
+   What this replaces was seven Bootstrap btn-outline-light groups: white
+   outlines and 14px sentence case, strung across the video. */
+.mj-hud {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 3px;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
+}
+
+/* Pushes the transport group and everything after it to the far end. */
+.mj-bar-end {
+	margin-left: auto;
+}
+
+/* Segmented control (stream, transport). The inputs stay radios — they are
+   what makes the group reachable and what preview-page.js drives — but are
+   taken out of the flow rather than display:none'd, which would drop them out
+   of the tab order. */
+.mj-seg-in {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.mj-seg-lbl,
+.mj-tog {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.45rem 0.8rem;
+	border-radius: var(--bs-border-radius-sm);
+	color: #b9bec9;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	white-space: nowrap;
+	cursor: pointer;
+	user-select: none;
+	margin: 0;
+}
+
+.mj-seg-lbl:hover,
+.mj-tog:hover {
+	background: rgba(255, 255, 255, 0.07);
+	color: #fff;
+}
+
+.mj-seg-in:checked + .mj-seg-lbl,
+.mj-tog-in:checked + .mj-tog {
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+}
+
+.mj-seg-in:focus-visible + .mj-seg-lbl,
+.mj-tog-in:focus-visible + .mj-tog {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+}
+
+.mj-seg-in:disabled + .mj-seg-lbl,
+.mj-tog-in:disabled + .mj-tog {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+.mj-tog-in {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.mj-tog-wrap {
+	gap: 0;
+}
+
+/* The indicator is the point of a stateful control: what the camera is doing,
+   readable at a glance without hunting for a pressed-looking button. */
+.mj-led {
+	flex: 0 0 auto;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #6c727d;
+}
+
+.mj-tog-in:checked + .mj-tog .mj-led {
+	background: var(--bs-primary);
+	box-shadow: 0 0 8px var(--bs-primary);
+}
+
+/* Talkback is amber: it is the one control that sends something out. */
+.mj-tog-in:checked + .mj-tog-amber .mj-led {
+	background: var(--bs-warning);
+	box-shadow: 0 0 8px var(--bs-warning);
+}
+
+/* One speaker, two endings — the crossed-out strokes while muted and the
+   waves once sound is on. CSS rather than a JS icon swap, so the only thing
+   preview-page.js has to rewrite is the word. */
+.mj-ic-on,
+.mj-tog-in:checked + .mj-tog .mj-ic-off {
+	display: none;
+}
+
+.mj-tog-in:checked + .mj-tog .mj-ic-on {
+	display: inline;
+}
+
+/* Volume rides inside the audio glass, so muting and level read as one
+   control rather than two things that happen to sit next to each other. */
+.mj-vol {
+	width: 5.25rem;
+	height: 1.25rem;
+	margin: 0 0.6rem 0 0.35rem;
+	padding: 0;
+	background: transparent;
+	-webkit-appearance: none;
+	appearance: none;
+	cursor: pointer;
+}
+
+.mj-vol::-webkit-slider-runnable-track {
+	height: 4px;
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.25);
+}
+
+.mj-vol::-moz-range-track {
+	height: 4px;
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.25);
+}
+
+.mj-vol::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	width: 12px;
+	height: 12px;
+	margin-top: -4px;
+	border: 0;
+	border-radius: 50%;
+	background: #fff;
+}
+
+.mj-vol::-moz-range-thumb {
+	width: 12px;
+	height: 12px;
+	border: 0;
+	border-radius: 50%;
+	background: #fff;
+}
+
+.mj-vol:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.mj-hud-ico {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.125rem;
+	height: 2.125rem;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: transparent;
+	color: #d8dbe4;
+	cursor: pointer;
+}
+
+.mj-hud-ico:hover {
+	background: rgba(255, 255, 255, 0.07);
+	color: #fff;
+}
+
+/* An icon-only glass group collapses to nothing when both of its buttons are
+   hidden (no JPEG channel, no fullscreen API), so it does not leave an empty
+   pill floating on the picture. */
+.mj-ico-wrap:not(:has(> :not([hidden]))) {
+	display: none;
 }
 
 /* The bar: invisible until pointed at, focused into (keyboard users keep it
@@ -1590,15 +1790,62 @@ mark {
 	}
 }
 
-/* On a phone the five control groups do not fit one bar row, and letting them
-   wrap stacks the bar three rows deep over a stage that is barely 220px tall.
-   One row, scrolled sideways: the picture stays a picture. (After the base
-   .mj-bar rule — same specificity, so order is what makes it win.) */
+/* On a phone the control groups do not fit one bar row — measured at 390px the
+   stage is 330 wide and the groups want ~413 — and letting them wrap stacks the
+   bar two or three rows deep over a stage that is only 186px tall. One row,
+   scrolled sideways. (After the base .mj-bar rule — same specificity, so order
+   is what makes it win.) */
 @media (max-width: 767.98px) {
 	.mj-bar {
 		flex-wrap: nowrap;
 		overflow-x: auto;
 		padding-top: 1.25rem;
+		/* A default scrollbar draws a bright strip the width of the picture.
+		   Kept rather than hidden — with a group cut off at the right edge it
+		   is the second half of the affordance — but drawn as the glass would
+		   draw it. */
+		scrollbar-width: thin;
+		scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+	}
+
+	.mj-bar::-webkit-scrollbar {
+		height: 3px;
+	}
+
+	.mj-bar::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	.mj-bar::-webkit-scrollbar-thumb {
+		border-radius: 2px;
+		background: rgba(255, 255, 255, 0.25);
+	}
+
+	/* Fullscreen is what a phone actually needs from this bar — it is how a
+	   330px stage becomes a usable one — so the icon group is pinned to the
+	   right edge of the scrollport instead of being the thing that falls off
+	   it. What gets cut mid-group is then a stateful control that is already
+	   visible, and a group cut in half is the only scroll affordance a bar
+	   this size can carry. */
+	.mj-ico-wrap {
+		position: sticky;
+		right: 0;
+	}
+
+	/* Thumb-sized while still on the picture. The bar stays overlaid here
+	   rather than moving below it: it lives INSIDE .mj-stage, and that is what
+	   carries it into fullscreen — a bar outside the stage would vanish the
+	   moment anyone went fullscreen, and take the chip and the pad's anchoring
+	   with it. Tap-to-reveal (preview-hero.js) is what keeps the picture clear
+	   the rest of the time. */
+	.mj-seg-lbl,
+	.mj-tog {
+		min-height: 2.75rem;
+	}
+
+	.mj-hud-ico {
+		width: 2.75rem;
+		height: 2.75rem;
 	}
 }
 
@@ -1621,37 +1868,174 @@ mark {
 	gap: 6px;
 }
 
-.mj-ptz-pad {
+/* Both pads are one glass panel with the buttons inside it, rather than a
+   scatter of individually-tinted squares: the cluster reads as one control,
+   and the picture shows through one edge instead of nine. */
+.mj-ptz-pad,
+.mj-ptz-fn {
 	display: grid;
-	grid-template-columns: repeat(3, 2.4rem);
 	gap: 2px;
+	padding: 3px;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
 }
 
-/* Zoom (−/+) over focus (near/far): two columns, reading left-to-right as
-   less/more like the old sandbox pad its users are coming from. */
+.mj-ptz-pad {
+	grid-template-columns: repeat(3, 2.625rem);
+	grid-auto-rows: 2.625rem;
+}
+
+/* Zoom over focus, two columns, each row under a caption naming the pair. */
 .mj-ptz-fn {
-	grid-template-columns: repeat(2, 2.4rem);
+	grid-template-columns: repeat(2, 1fr);
+}
+
+.mj-ptz-group {
+	grid-column: span 2;
+	padding: 0.2rem 0 0.05rem;
+	text-align: center;
+	font-size: 0.5625rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.4);
 }
 
 /* The empty corners of the Pelco plus-shape — grid cells, not buttons, so
    the arrows land where the eight-way pad has its own. */
 .mj-ptz-void {
-	height: 2.4rem;
+	height: 2.625rem;
 }
 
-.mj-ptz-btn {
-	height: 2.4rem;
+.mj-ptz-btn,
+.mj-ptz-fnbtn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	border: 0;
-	border-radius: 0.4rem;
-	background: rgba(0, 0, 0, 0.5);
-	color: #fff;
-	font-size: 1rem;
+	border-radius: var(--bs-border-radius-sm);
+	background: transparent;
+	color: #c8ccd6;
 	touch-action: none;
 	user-select: none;
 }
 
-.mj-ptz-btn:active {
-	background: rgba(255, 255, 255, 0.25);
+/* Zoom and focus carry the verb they send. Held is a real state here: btzoom
+   answers only once its pulse has ended, so the button stays lit that long. */
+.mj-ptz-fnbtn {
+	flex-direction: column;
+	gap: 3px;
+	min-width: 3.875rem;
+	padding: 0.5rem 0.6rem 0.45rem;
+	color: #b9bec9;
+	font-size: 0.625rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+}
+
+.mj-ptz-stop {
+	color: rgba(255, 255, 255, 0.55);
+}
+
+.mj-ptz-btn:hover,
+.mj-ptz-fnbtn:hover {
+	background: rgba(255, 255, 255, 0.1);
+	color: #fff;
+}
+
+.mj-ptz-btn:active,
+.mj-ptz-fnbtn:active,
+.mj-ptz-btn.mj-held,
+.mj-ptz-fnbtn.mj-held {
+	background: rgba(255, 255, 255, 0.22);
+	color: #fff;
+}
+
+.mj-ptz-btn:focus-visible,
+.mj-ptz-fnbtn:focus-visible {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+}
+
+/* On a phone the pad comes off the picture and sits under it, side by side
+   with the zoom/focus cluster. At 390px the stage is 330×186, and steering
+   overlaid costs more than it is worth: a thumb-sized pad is 152px of a 186px
+   picture, and on a Pelco camera the cluster stacked above it needs another
+   130 that do not exist — it rendered over the top edge of the stage. Below
+   the picture there is room for both at full size, and the picture stays a
+   picture. The bar stays overlaid regardless: it is transient (tap to reveal),
+   the pad is not.
+
+   Reserving the space is the stage's margin, conditional on a pad that
+   preview-ptz.js actually mounted — no pad, no gap. A browser without :has()
+   simply keeps today's overlay geometry, which is why the margin and not the
+   positioning carries the condition.
+
+   These have to come AFTER the pad's own rules: same specificity, so it is
+   source order that decides. (A narrower block earlier in this file lost that
+   race silently and sized nothing.) */
+@media (max-width: 767.98px) {
+	/* The stage clips, which is what rounds the picture's corners — so letting
+	   the pad out means moving that clip onto the media and the bar. */
+	.mj-stage {
+		overflow: visible;
+	}
+
+	.mj-stage-media,
+	.mj-bar {
+		border-bottom-left-radius: var(--bs-border-radius);
+		border-bottom-right-radius: var(--bs-border-radius);
+	}
+
+	.mj-stage-media {
+		border-top-left-radius: var(--bs-border-radius);
+		border-top-right-radius: var(--bs-border-radius);
+	}
+
+	/* Measured, not guessed: the pad is 152px with its gap, and a Pelco camera
+	   stacks the zoom/focus cluster beside it at 165. */
+	.mj-stage:has(> .mj-ptz:not([hidden])) {
+		margin-bottom: 10rem;
+	}
+
+	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])) {
+		margin-bottom: 11rem;
+	}
+
+	.mj-ptz {
+		top: 100%;
+		right: 0;
+		bottom: auto;
+		left: 0;
+		flex-direction: row;
+		align-items: flex-start;
+		justify-content: center;
+		gap: 0.5rem;
+		padding-top: 0.5rem;
+	}
+
+	/* Fullscreen is the one phone case with height to spare, and a pad below
+	   the picture there would be below the screen. Put it back on the video. */
+	.mj-stage:fullscreen .mj-ptz {
+		top: auto;
+		bottom: 3.25rem;
+		left: auto;
+		right: 0.5rem;
+		flex-direction: column;
+		align-items: flex-end;
+		padding-top: 0;
+	}
+
+	/* Off the picture, the pad can have the thumb-sized grid it wants. */
+	.mj-ptz-pad {
+		grid-template-columns: repeat(3, 2.75rem);
+		grid-auto-rows: 2.75rem;
+	}
+
+	.mj-ptz-void {
+		height: 2.75rem;
+	}
 }
 
 .mj-stage:fullscreen {

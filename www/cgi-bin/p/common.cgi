@@ -535,63 +535,119 @@ preview() {
 		<div id="mj-ptz" class="mj-ptz" hidden></div>
 		<!-- The control bar. Hidden until pointed at, focused into, or tapped
 		     (preview-hero.js) — the picture is the page's point, not the
-		     chrome. Stats sits by the view controls; snapshot and fullscreen
-		     close the bar because they act on the stage itself. -->
-		<div class="mj-bar" id="mj-bar">
-			<div class="btn-group btn-group-sm" role="group" aria-label="Stream">
-				<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-0" autocomplete="off" checked>
-				<label class="btn btn-outline-light" for="mj-stream-0">Main</label>
-				<!-- Both start disabled, not merely label-hidden: a btn-check is
-				     a real radio behind CSS, so an unhidden input is in the tab
+		     chrome. It stays overlaid at every width, because it lives inside
+		     the stage and that is what carries it into fullscreen; below md it
+		     scrolls sideways rather than wrapping into rows over a 186px-tall
+		     picture. The PTZ pad is the one that moves off the video there:
+		     it is always visible, so overlaid it never gives the picture back.
+
+		     Every group is black glass with a micro-caps label and, where it
+		     has a state, a lit indicator — the same vocabulary the Live
+		     adjustments deck uses, so the two pages read as one product. The
+		     radio/checkbox-behind-a-label pattern is kept exactly as it was:
+		     preview-page.js drives .checked and .disabled on those inputs, and
+		     they are what keeps the groups reachable from a keyboard.
+
+		     Icons are inline SVG on a 20px grid. The emoji that were here
+		     (U+1F507 speaker, U+1F3A4 microphone, U+1F4F7 camera) rendered as
+		     a different picture on every machine — the same argument the
+		     fullscreen button in this very bar already won, when U+26F6 came
+		     out as a box on real hardware. -->
+	<div class="mj-bar" id="mj-bar">
+			<span class="mj-hud mj-seg" role="group" aria-label="Stream">
+				<input type="radio" class="mj-seg-in" name="mj-stream" id="mj-stream-0" autocomplete="off" checked>
+				<label class="mj-seg-lbl" for="mj-stream-0">Main</label>
+				<!-- Both start disabled, not merely label-hidden: the input is a
+				     real radio behind CSS, so an unhidden one is in the tab
 				     order and a keyboard could select a stream this camera may
 				     not have before the configuration has been read.
 				     preview-page.js enables them once it knows there is a
 				     substream. -->
-				<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-1" autocomplete="off" disabled>
-				<label class="btn btn-outline-light" for="mj-stream-1" id="mj-sub" hidden>Sub</label>
-				<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-auto" autocomplete="off" disabled>
-				<label class="btn btn-outline-light" for="mj-stream-auto" id="mj-auto" hidden
+				<input type="radio" class="mj-seg-in" name="mj-stream" id="mj-stream-1" autocomplete="off" disabled>
+				<label class="mj-seg-lbl" for="mj-stream-1" id="mj-sub" hidden>Sub</label>
+				<input type="radio" class="mj-seg-in" name="mj-stream" id="mj-stream-auto" autocomplete="off" disabled>
+				<label class="mj-seg-lbl" for="mj-stream-auto" id="mj-auto" hidden
 					title="Picks whichever stream is closest to the size this player is being shown at, and follows the window as it changes. The chip names the one in use.">Auto</label>
-			</div>
-			<div class="btn-group btn-group-sm" role="group" aria-label="Audio" id="mj-audio-ctl" hidden>
-				<input type="checkbox" class="btn-check" id="mj-mute" autocomplete="off">
-				<label class="btn btn-outline-light" for="mj-mute" id="mj-mute-lbl">🔇 Muted</label>
-				<input type="range" id="mj-vol" min="0" max="100" value="100" class="form-range align-self-center ms-2" style="width:6rem" disabled aria-label="Volume">
-			</div>
+			</span>
+
+			<!-- Muting and level are one control, so the slider rides inside
+			     the same glass rather than beside it. The speaker icon carries
+			     both states in one element: CSS shows the crossed-out ending
+			     while the input is unchecked and the waves while it is, so the
+			     word alone is what preview-page.js has to rewrite. -->
+			<span class="mj-hud mj-tog-wrap" id="mj-audio-ctl" hidden>
+				<input type="checkbox" class="mj-tog-in" id="mj-mute" autocomplete="off">
+				<label class="mj-tog" for="mj-mute" id="mj-mute-lbl">
+					<span class="mj-led"></span>
+					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M4 7.6h2.8L10.6 4.4v11.2L6.8 12.4H4z"></path>
+						<path class="mj-ic-off" d="M13.6 7.8l3.8 4.4M17.4 7.8l-3.8 4.4"></path>
+						<path class="mj-ic-on" d="M13.4 7.6a3.4 3.4 0 0 1 0 4.8M15.8 5.6a6.6 6.6 0 0 1 0 8.8"></path>
+					</svg>
+					<span class="mj-tog-t" id="mj-mute-t">Muted</span>
+				</label>
+				<input type="range" id="mj-vol" min="0" max="100" value="100" class="mj-vol" disabled aria-label="Volume">
+			</span>
+
 			<!-- Talkback. Revealed only over WebRTC, only where the camera has
 			     audio.outputEnabled, and only in a secure context: a browser
 			     hands over no microphone on plain HTTP, so the button would be
 			     a dead end. -->
-			<div class="btn-group btn-group-sm" role="group" aria-label="Talkback" id="mj-talk-ctl" hidden>
-				<input type="checkbox" class="btn-check" id="mj-talk" autocomplete="off">
-				<label class="btn btn-outline-light" for="mj-talk" id="mj-talk-lbl"
-					title="Send this browser's microphone to the camera's speaker. The camera will not take audio in one direction only, so talking also opens its audio to you.">🎤 Talk</label>
-			</div>
+			<span class="mj-hud mj-tog-wrap" id="mj-talk-ctl" hidden>
+				<input type="checkbox" class="mj-tog-in" id="mj-talk" autocomplete="off">
+				<label class="mj-tog mj-tog-amber" for="mj-talk" id="mj-talk-lbl"
+					title="Send this browser's microphone to the camera's speaker. The camera will not take audio in one direction only, so talking also opens its audio to you.">
+					<span class="mj-led"></span>
+					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<rect x="7.4" y="2.6" width="5.2" height="9" rx="2.6"></rect>
+						<path d="M4.6 9.4a5.4 5.4 0 0 0 10.8 0M10 14.8v2.6"></path>
+					</svg>
+					<span class="mj-tog-t" id="mj-talk-t">Talk</span>
+				</label>
+			</span>
+
 			<!-- The transport, named exactly once, with the alternative finally
 			     visible. Unhidden by preview-page.js only where
 			     preview-webrtc.js is loaded and the browser has WebRTC. The
 			     failure tooltip still lands on the WebRTC label
 			     (#mj-transport-lbl), which is where the question "why am I not
 			     on WebRTC?" gets asked. -->
-			<div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Transport" id="mj-transport-ctl" hidden>
-				<input type="radio" class="btn-check" name="mj-transport" id="mj-transport-w" autocomplete="off">
-				<label class="btn btn-outline-light" for="mj-transport-w" id="mj-transport-lbl"
+			<span class="mj-hud mj-seg mj-bar-end" role="group" aria-label="Transport" id="mj-transport-ctl" hidden>
+				<input type="radio" class="mj-seg-in" name="mj-transport" id="mj-transport-w" autocomplete="off">
+				<label class="mj-seg-lbl" for="mj-transport-w" id="mj-transport-lbl"
 					title="Sub-second video and two-way audio, and the camera fits the stream to your connection — which changes it for everyone else watching that stream too.">WebRTC</label>
-				<input type="radio" class="btn-check" name="mj-transport" id="mj-transport-m" autocomplete="off">
-				<label class="btn btn-outline-light" for="mj-transport-m"
+				<input type="radio" class="mj-seg-in" name="mj-transport" id="mj-transport-m" autocomplete="off">
+				<label class="mj-seg-lbl" for="mj-transport-m"
 					title="Plain buffered playback. A couple of seconds behind, but nothing adapts and nothing negotiates.">MSE</label>
-			</div>
-			<div class="btn-group btn-group-sm" role="group" aria-label="Statistics" id="mj-stats-ctl" hidden>
-				<input type="checkbox" class="btn-check" id="mj-stats-btn" autocomplete="off">
-				<label class="btn btn-outline-light" for="mj-stats-btn"
-					title="Per-second measurements from both ends of the session.">Stats</label>
-			</div>
-			<button type="button" class="btn btn-sm btn-outline-light" id="mj-snap" hidden
-				title="Download a full-resolution snapshot" aria-label="Snapshot">📷</button>
-			<!-- Inline SVG rather than U+26F6: that glyph is missing from enough
-			     fonts to render as a box on real machines. -->
-			<button type="button" class="btn btn-sm btn-outline-light" id="mj-fs" hidden
-				title="Fullscreen" aria-label="Fullscreen"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M1.5 5.5v-4h4M14.5 5.5v-4h-4M1.5 10.5v4h4M14.5 10.5v4h-4"/></svg></button>
+			</span>
+
+			<span class="mj-hud mj-tog-wrap" id="mj-stats-ctl" hidden>
+				<input type="checkbox" class="mj-tog-in" id="mj-stats-btn" autocomplete="off">
+				<label class="mj-tog" for="mj-stats-btn"
+					title="Per-second measurements from both ends of the session.">
+					<span class="mj-led"></span>
+					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+						<path d="M3.4 16.6V11M8.4 16.6V4.6M13.4 16.6V8.2M17.2 16.6v-3.4"></path>
+					</svg>
+					<span class="mj-tog-t">Stats</span>
+				</label>
+			</span>
+
+			<span class="mj-hud mj-ico-wrap">
+				<button type="button" class="mj-hud-ico" id="mj-snap" hidden
+					title="Download a full-resolution snapshot" aria-label="Snapshot">
+					<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+						<path d="M2.6 6.6h3.2l1.5-2.1h5.4l1.5 2.1h3.2v9H2.6z" stroke-linejoin="round"></path>
+						<circle cx="10" cy="10.6" r="3.1"></circle>
+					</svg>
+				</button>
+				<button type="button" class="mj-hud-ico" id="mj-fs" hidden
+					title="Fullscreen" aria-label="Fullscreen">
+					<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+						<path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path>
+					</svg>
+				</button>
+			</span>
 		</div>
 	</div>
 </div>

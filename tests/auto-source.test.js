@@ -17,10 +17,10 @@ const SRCS = [A('preview-swap.js'), A('preview-page.js')];
 
 const IDS = [
 	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
-	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-note', 'mj-stats',
+	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note', 'mj-stats',
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',
 	'mj-stream-auto', 'mj-auto', 'mj-sub', 'mj-talk', 'mj-talk-ctl',
-	'mj-talk-lbl', 'mj-transport-w', 'mj-transport-m', 'mj-transport-ctl',
+	'mj-talk-lbl', 'mj-talk-t', 'mj-transport-w', 'mj-transport-m', 'mj-transport-ctl',
 	'mj-transport-lbl', 'mj-vol',
 	'mj-player', 'mj-stage', 'toggle-ircut', 'toggle-light', 'toggle-night',
 ];
