@@ -20,9 +20,9 @@ const IDS = [
 	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-note', 'mj-stats',
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',
 	'mj-stream-auto', 'mj-auto', 'mj-sub', 'mj-talk', 'mj-talk-ctl',
-	'mj-talk-lbl', 'mj-transport', 'mj-transport-ctl', 'mj-transport-lbl',
-	'mj-transport-note', 'mj-vol', 'mj-player', 'toggle-ircut', 'toggle-light',
-	'toggle-night',
+	'mj-talk-lbl', 'mj-transport-w', 'mj-transport-m', 'mj-transport-ctl',
+	'mj-transport-lbl', 'mj-transport-note', 'mj-note-close', 'mj-vol',
+	'mj-player', 'mj-stage', 'toggle-ircut', 'toggle-light', 'toggle-night',
 ];
 
 function makeEl(id) {
@@ -49,9 +49,10 @@ function load(cfg) {
 		env.els['#' + id].disabled = true;
 	});
 	if (cfg.box) {
-		// The container is what Auto measures; the video elements are sized by
-		// the stream, which is exactly why they are not the input.
-		['mj-player', 'live-video', 'live-video-b'].forEach((id) => {
+		// The stage is what Auto measures (the viewport clamp can leave it
+		// narrower than #mj-player); the video elements are sized by the
+		// stream, which is exactly why they are not the input.
+		['mj-stage', 'mj-player', 'live-video', 'live-video-b'].forEach((id) => {
 			env.els['#' + id].clientWidth = cfg.box[0];
 			env.els['#' + id].clientHeight = cfg.box[1];
 		});
@@ -216,7 +217,7 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		check('starts on Main', live.opts.stream === 0, 'stream=' + live.opts.stream);
 
 		// Shrink the box so Sub is the better fit, twice in quick succession.
-		[env.el('mj-player'), env.el('live-video'), env.el('live-video-b')].forEach((e) => {
+		[env.el('mj-stage'), env.el('mj-player'), env.el('live-video'), env.el('live-video-b')].forEach((e) => {
 			e.clientWidth = 320; e.clientHeight = 180;
 		});
 		if (env.win.roFire) env.win.roFire(); else env.win.fire('resize');
@@ -226,7 +227,7 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 
 		// Straight back up: inside the one-second window, so it must be held,
 		// not thrown away.
-		[env.el('mj-player'), env.el('live-video'), env.el('live-video-b')].forEach((e) => {
+		[env.el('mj-stage'), env.el('mj-player'), env.el('live-video'), env.el('live-video-b')].forEach((e) => {
 			e.clientWidth = 1920; e.clientHeight = 1080;
 		});
 		if (env.win.roFire) env.win.roFire(); else env.win.fire('resize');

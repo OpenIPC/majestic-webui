@@ -651,11 +651,206 @@ mark {
 	color: var(--bs-warning);
 }
 
-.btn-motor {
-	font-size: 2.3rem;
-	--bs-btn-border-width: 0;
-	--bs-btn-padding-x: 0;
-	--bs-btn-padding-y: 0;
+/* ---- Live View stage -------------------------------------------------------
+   Everything below is on-video chrome: black glass over whatever the camera is
+   showing, deliberately identical in both themes because its background is the
+   picture, not the page surface. The stage reserves 16:9 up front
+   (preview-page.js corrects the ratio from stream metadata) so nothing that
+   appears or disappears around the video can move it. */
+.mj-stage {
+	position: relative;
+	/* Fit the viewport, not just the column: at full container width a 16:9
+	   stage is ~710px tall and a laptop has to scroll to reach the bar and
+	   the device chips. The clamp sizes the stage from the viewport height
+	   (12.5rem ≈ navbar + status strip + card chrome + chips row), and the
+	   ratio keeps width and height honest together. preview-page.js rewrites
+	   it with the stream's real ratio; dvh where the browser has it, vh
+	   otherwise. Centered when narrower than the column. */
+	width: min(100%, calc((100vh - 12.5rem) * 1.77778));
+	width: min(100%, calc((100dvh - 12.5rem) * 1.77778));
+	margin-inline: auto;
+	aspect-ratio: 16 / 9;
+	background: #000;
+	overflow: hidden;
+	border-radius: var(--bs-border-radius);
+}
+
+
+.mj-stage-media {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	/* background-size stays: preview-page.js paints the no-signal SVG through
+	   style.background on these very elements. */
+	background: #000;
+	background-size: cover;
+}
+
+.mj-stage-alert {
+	position: absolute;
+	inset: auto 1rem;
+	top: 40%;
+	z-index: 4;
+}
+
+.mj-chip {
+	position: absolute;
+	top: 0.5rem;
+	right: 0.5rem;
+	z-index: 5;
+	padding: 0.15rem 0.5rem;
+	border-radius: 0.5rem;
+	background: rgba(0, 0, 0, 0.55);
+	color: #fff;
+	font-size: 0.8rem;
+	font-variant-numeric: tabular-nums;
+	pointer-events: none;
+	backdrop-filter: blur(4px);
+}
+
+.mj-stats-overlay {
+	position: absolute;
+	top: 0.5rem;
+	left: 0.5rem;
+	z-index: 5;
+	max-width: min(90%, 34rem);
+	/* Leave the bar's strip free below, and scroll rather than grow: on a
+	   short viewport the numbers yield, not the picture. */
+	max-height: calc(100% - 5rem);
+	overflow: auto;
+	background: rgba(0, 0, 0, 0.6);
+	color: #fff;
+	padding: 0.5rem 0.75rem;
+	border-radius: 0.5rem;
+	backdrop-filter: blur(4px);
+}
+
+.mj-stats-overlay .table {
+	color: inherit;
+	--bs-table-bg: transparent;
+}
+
+.mj-stat-key {
+	color: rgba(255, 255, 255, 0.7);
+}
+
+.mj-adapt-note {
+	position: absolute;
+	left: 0.5rem;
+	bottom: 3.25rem;
+	z-index: 5;
+	margin: 0;
+	padding: 0.25rem 0.5rem;
+	background: rgba(0, 0, 0, 0.55);
+	color: rgba(255, 255, 255, 0.85);
+	border-radius: 0.4rem;
+	max-width: 75%;
+}
+
+.mj-adapt-close {
+	border: 0;
+	background: none;
+	color: inherit;
+	padding: 0 0.25rem;
+	pointer-events: auto;
+}
+
+/* The bar: invisible until pointed at, focused into (keyboard users keep it
+   while any control has focus) or tapped (.mj-show, preview-hero.js). The
+   hover rule is gated on hover:hover so a phone's sticky :hover cannot fight
+   the tap toggle. */
+.mj-bar {
+	position: absolute;
+	inset: auto 0 0 0;
+	z-index: 6;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 2rem 0.75rem 0.5rem;
+	background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.25s ease;
+}
+
+@media (hover: hover) {
+	.mj-stage:hover .mj-bar {
+		opacity: 1;
+		pointer-events: auto;
+	}
+}
+
+/* Focus on the BAR, not on the stage: the stage itself is focusable (that is
+   what scopes the PTZ arrow keys), and a touch tap focuses it too — a
+   stage-level :focus-within would pin the bar open and break tap-to-hide.
+   Tabbing into any bar control still holds it visible for keyboard users. */
+.mj-bar:focus-within,
+.mj-stage.mj-show .mj-bar {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mj-bar {
+		transition: none;
+	}
+}
+
+/* On a phone the five control groups do not fit one bar row, and letting them
+   wrap stacks the bar three rows deep over a stage that is barely 220px tall.
+   One row, scrolled sideways: the picture stays a picture. (After the base
+   .mj-bar rule — same specificity, so order is what makes it win.) */
+@media (max-width: 767.98px) {
+	.mj-bar {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		padding-top: 1.25rem;
+	}
+}
+
+/* PTZ pad, above the bar's strip so a hold cannot land on a bar control. The
+   buttons are real buttons this time — focusable, labelled, and big enough
+   that a thumb finds them on the first try. touch-action:none or a
+   press-and-hold scrolls the page instead of panning the camera. */
+.mj-ptz {
+	position: absolute;
+	right: 0.5rem;
+	bottom: 3.25rem;
+	/* Above the bar: the bar is later in the DOM and its (transparent)
+	   gradient padding reaches up over the pad's lower row — at equal
+	   z-index it swallows the pointerdown that starts a hold. */
+	z-index: 7;
+}
+
+.mj-ptz-pad {
+	display: grid;
+	grid-template-columns: repeat(3, 2.4rem);
+	gap: 2px;
+}
+
+.mj-ptz-btn {
+	height: 2.4rem;
+	border: 0;
+	border-radius: 0.4rem;
+	background: rgba(0, 0, 0, 0.5);
+	color: #fff;
+	font-size: 1rem;
+	touch-action: none;
+	user-select: none;
+}
+
+.mj-ptz-btn:active {
+	background: rgba(255, 255, 255, 0.25);
+}
+
+.mj-stage:fullscreen {
+	aspect-ratio: auto;
+	width: 100%;
+	height: 100%;
+	border-radius: 0;
 }
 
 .navbar-nav {

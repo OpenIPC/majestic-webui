@@ -96,6 +96,10 @@
 			mjGet(cfg, 'video0.adjustBitrate') !== false,
 			mjGet(cfg, 'video1.adjustBitrate') !== false,
 		];
+		// The configured frame rates, which are what the chip shows on MSE —
+		// that player measures nothing.
+		cfgFps = [+mjGet(cfg, 'video0.fps') || 0, +mjGet(cfg, 'video1.fps') || 0];
+		setChip();
 		syncTransportNote();
 		ice = MajesticTransport.iceServers(
 			mjGet(cfg, 'webrtc.iceServers'),
@@ -134,8 +138,17 @@
 	const talkCtl = $('#mj-talk-ctl'), talk = $('#mj-talk'), talkLbl = $('#mj-talk-lbl');
 	const statsCtl = $('#mj-stats-ctl'), statsBtn = $('#mj-stats-btn'), statsBox = $('#mj-stats');
 	const TALK_TITLE = talkLbl ? talkLbl.title : '';
-	const transportCtl = $('#mj-transport'), transportGrp = $('#mj-transport-ctl');
+	// The transport is a two-radio segmented picker, not a checkbox: the
+	// alternative deserves a name, and "unchecked" never said what it meant.
+	// The failure tooltip still lands on the WebRTC label (#mj-transport-lbl),
+	// which is where "why am I not on WebRTC?" gets asked.
+	const transportW = $('#mj-transport-w'), transportM = $('#mj-transport-m');
+	const transportGrp = $('#mj-transport-ctl');
 	const transportLbl = $('#mj-transport-lbl'), transportNote = $('#mj-transport-note');
+	function reflectTransport(kind) {
+		if (transportW) transportW.checked = kind === 'webrtc';
+		if (transportM) transportM.checked = kind === 'mse';
+	}
 
 	// What the toggle says when nothing has gone wrong. Kept because a failure
 	// replaces it with the reason, and switching back has to put the explanation
@@ -149,6 +162,10 @@
 	// with whatever is recording it. So say it where it cannot be missed, and
 	// only while it is actually happening — a tooltip needs a pointer to find,
 	// and this is not a detail for people who happen to own a mouse.
+	// Dismissed is for this page view: the note is a disclosure, and a person
+	// who has read it should not have it back over the picture on every
+	// channel change. A fresh load discloses again.
+	let noteDismissed = false;
 	function syncTransportNote() {
 		// Only while it is true. The note is a disclosure, and a disclosure that
 		// fires when nothing is happening teaches people to ignore it — the
@@ -156,7 +173,8 @@
 		// it is adapting that stream is simply wrong. Per channel, because the
 		// two settings are independent and Main/Sub is one click apart.
 		if (transportNote) {
-			transportNote.hidden = !(usingWebRTC && adapts[stream ? 1 : 0]);
+			transportNote.hidden =
+				noteDismissed || !(usingWebRTC && adapts[stream ? 1 : 0]);
 		}
 		if (transportLbl && usingWebRTC) {
 			transportLbl.title = TRANSPORT_TITLE;
@@ -199,6 +217,21 @@
 	// Per channel, filled when the config lands; true until then, which is what
 	// a camera without the setting does.
 	let adapts = [true, true];
+	// The chip: what is playing, in one line — "H264 3840×2160 · 25 fps". The
+	// transport is not named here; the picker names it, once. fps has two
+	// sources that cannot be merged: WebRTC measures it every second
+	// (chipFps), MSE measures nothing, so the configured rate stands in
+	// (cfgFps, per channel). chipMedia is whatever the live player last
+	// reported about its own picture.
+	let chipMedia = null, chipFps = 0;
+	let cfgFps = [0, 0];
+	function setChip() {
+		if (!badge || !chipMedia) return;
+		const fps = usingWebRTC ? chipFps : cfgFps[stream ? 1 : 0];
+		badge.textContent = (chipMedia.codec || '').toUpperCase() + ' ' +
+			chipMedia.w + '×' + chipMedia.h +
+			(fps ? ' · ' + Math.round(fps) + ' fps' : '');
+	}
 	// Talkback is deliberately NOT carried across a transport switch or a
 	// reattach. Everything else here is a preference; this one holds a live
 	// microphone, and silently reopening it because the page rebuilt a player
@@ -306,6 +339,9 @@
 		if (!player) return;
 		// No setAudio() here: the player was opened with it. Calling it now
 		// would be a no-op at best and a renegotiation at worst.
+		// The measured fps belonged to the session that just ended; the next
+		// stats tick refills it, and until then the chip claims nothing.
+		chipFps = 0;
 		player.setVolume(vol);
 		syncAudioCtl();
 		// The outgoing player's destroy() released the microphone, so talkback
@@ -350,13 +386,13 @@
 			// where leaving it unchecked would report the opposite of the truth
 			// and make the stored preference retry the failure next load.
 			if (kind !== 'webrtc') {
-				if (swap.kind() === 'webrtc' && transportCtl) {
-					transportCtl.checked = true;
+				if (swap.kind() === 'webrtc') {
+					reflectTransport('webrtc');
 					rememberTransport('webrtc');
 				}
 				return;
 			}
-			if (transportCtl) transportCtl.checked = false;
+			reflectTransport('mse');
 			// The reason first, because it is the news, then the standing
 			// explanation — the tooltip is the only place either of them lives.
 			if (transportLbl) {
@@ -385,7 +421,7 @@
 				// switch, so its last frame stays until the replacement has one
 				// of its own.
 				if (usingWebRTC) {
-					if (transportCtl) transportCtl.checked = false;
+					reflectTransport('mse');
 					if (transportLbl) {
 						transportLbl.title = 'WebRTC: ' + (d || 'unavailable') +
 							'\n\n' + TRANSPORT_TITLE;
@@ -417,10 +453,21 @@
 			onState: onState,
 			onCodec: (codec, cs, w, h) => {
 				if (!isLive()) return;
-				if (badge) {
-					badge.textContent = codec.toUpperCase() + ' ' + w + '×' + h +
-						(usingWebRTC ? ' · WebRTC' : '');
+				chipMedia = { codec: codec, w: w, h: h };
+				// Reserve the stream's true shape so the picture arriving (or a
+				// ratio change on a stream switch) never moves anything below
+				// the stage, and re-derive the viewport clamp from the same
+				// ratio — the CSS default assumes 16:9. The dvh write lands
+				// where the browser knows the unit and is ignored where it
+				// does not, leaving the vh version standing.
+				const stage = $('#mj-stage');
+				if (stage && w && h) {
+					stage.style.aspectRatio = w + ' / ' + h;
+					const r = (w / h).toFixed(5);
+					stage.style.width = 'min(100%, calc((100vh - 12.5rem) * ' + r + '))';
+					stage.style.width = 'min(100%, calc((100dvh - 12.5rem) * ' + r + '))';
 				}
+				setChip();
 			},
 			// null means we asked for audio and the camera had none to give (mic
 			// off or not producing). Reflect that on the control rather than
@@ -471,8 +518,18 @@
 				}
 			},
 			onStats: (s) => {
-				if (!isLive() || !statsBox || statsBox.hidden) return;
-				showStats(s);
+				if (!isLive()) return;
+				// The chip rides every tick, not just when the panel is open —
+				// this is where its fps comes from, and a fresh write also
+				// heals it after a transient "reconnecting…" state. The panel
+				// is filled only while someone is looking at it.
+				if (s.width) {
+					chipFps = s.fps || 0;
+					chipMedia = { codec: s.codec || (chipMedia && chipMedia.codec) || '',
+						w: s.width, h: s.height };
+					setChip();
+				}
+				if (statsBox && !statsBox.hidden) showStats(s);
 			},
 		};
 	}
@@ -532,7 +589,10 @@
 	// rule, and the right way round: scaling a bigger picture down loses
 	// nothing visible, scaling a smaller one up does.
 	function autoPick() {
-		const box = $('#mj-player');
+		// The stage, not the column: the viewport clamp can leave the stage
+		// narrower than #mj-player, and the stage's width is what the picture
+		// is actually drawn at.
+		const box = $('#mj-stage') || $('#mj-player');
 		const want = box ? box.clientWidth : 0;
 		if (!want) return null;   // not laid out yet; ask again later
 		const options = [];
@@ -647,14 +707,20 @@
 		}
 	});
 
-	if (transportCtl && transportGrp && webrtcAvailable) {
+	if (transportW && transportM && transportGrp && webrtcAvailable) {
 		transportGrp.hidden = false;
 		// From the preference rather than from usingWebRTC, which the deferred
 		// attach above has not set yet.
-		transportCtl.checked = wantWebRTC();
-		transportCtl.addEventListener('change', () => {
-			rememberTransport(transportCtl.checked ? 'webrtc' : 'mse');
-			attachPlayer(transportCtl.checked);
+		reflectTransport(wantWebRTC() ? 'webrtc' : 'mse');
+		transportW.addEventListener('change', () => {
+			if (!transportW.checked) return;
+			rememberTransport('webrtc');
+			attachPlayer(true);
+		});
+		transportM.addEventListener('change', () => {
+			if (!transportM.checked) return;
+			rememberTransport('mse');
+			attachPlayer(false);
 		});
 	}
 
@@ -682,6 +748,8 @@
 		const t = swap.trial();
 		if (t) t.setStream(n);
 		syncTransportNote();
+		// On MSE the chip's fps is the configured rate, which is per channel.
+		setChip();
 	}
 	if (s0) s0.addEventListener('change', () => { autoOn = false; goToStream(0); });
 	if (s1) s1.addEventListener('change', () => { autoOn = false; goToStream(1); });
@@ -781,4 +849,13 @@
 		// showing" has one answer and not two that have to agree.
 		statsBtn.addEventListener('change', syncStatsCtl);
 	}
+
+	// The adaptation note's dismissal. State lives beside its reader
+	// (syncTransportNote), which would otherwise re-show the note on the next
+	// channel or transport change.
+	const noteClose = $('#mj-note-close');
+	if (noteClose) noteClose.addEventListener('click', () => {
+		noteDismissed = true;
+		syncTransportNote();
+	});
 })();

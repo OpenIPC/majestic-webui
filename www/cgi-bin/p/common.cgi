@@ -450,110 +450,141 @@ pre() {
 }
 
 preview() {
-	local bg="background:#000; background-size:cover; width:100%"
 	cat <<EOF
 <div class="mj-player" id="mj-player">
-	<!-- Every control on one line: each was its own block before, and the
-	     stats toggle in particular cost a whole row of vertical space on a
-	     page whose point is the picture below it. Stats is pushed to the far
-	     end because it is the only one of them that opens a panel rather than
-	     changing what is playing. -->
-	<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-	<div class="btn-group btn-group-sm" role="group" aria-label="Stream">
-		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-0" autocomplete="off" checked>
-		<label class="btn btn-outline-primary" for="mj-stream-0">Main</label>
-		<!-- Both start disabled, not merely label-hidden: a btn-check is a real
-		     radio behind CSS, so an unhidden input is in the tab order and a
-		     keyboard could select a stream this camera may not have before the
-		     configuration has been read. preview-page.js enables them once it
-		     knows there is a substream. -->
-		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-1" autocomplete="off" disabled>
-		<label class="btn btn-outline-primary" for="mj-stream-1" id="mj-sub" hidden>Sub</label>
-		<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-auto" autocomplete="off" disabled>
-		<label class="btn btn-outline-primary" for="mj-stream-auto" id="mj-auto" hidden
-			title="Picks whichever stream is closest to the size this player is being shown at, and follows the window as it changes. The badge names the one in use.">Auto</label>
-		<span id="mj-badge" class="badge text-bg-secondary align-self-center ms-2">connecting…</span>
-	</div>
-	<!-- Unhidden by preview-page.js only where preview-webrtc.js is loaded and
-	     the browser has WebRTC; mj-settings.cgi shares this markup and offers
-	     the MSE player alone. -->
-	<div class="btn-group btn-group-sm" role="group" aria-label="Transport" id="mj-transport-ctl" hidden>
-		<input type="checkbox" class="btn-check" id="mj-transport" autocomplete="off">
-		<label class="btn btn-outline-primary" for="mj-transport" id="mj-transport-lbl"
-			title="Sub-second video and two-way audio, and the camera fits the stream to your connection — which changes it for everyone else watching that stream too.">WebRTC</label>
-	</div>
-	<div class="btn-group btn-group-sm" role="group" aria-label="Audio" id="mj-audio-ctl" hidden>
-		<input type="checkbox" class="btn-check" id="mj-mute" autocomplete="off">
-		<label class="btn btn-outline-primary" for="mj-mute" id="mj-mute-lbl">🔇 Muted</label>
-		<input type="range" id="mj-vol" min="0" max="100" value="100" class="form-range align-self-center ms-2" style="width:6rem" disabled aria-label="Volume">
-	</div>
-	<!-- Talkback. Revealed only over WebRTC, only where the camera has
-	     audio.outputEnabled, and only in a secure context: a browser hands over
-	     no microphone on plain HTTP, so the button would be a dead end. -->
-	<div class="btn-group btn-group-sm" role="group" aria-label="Talkback" id="mj-talk-ctl" hidden>
-		<input type="checkbox" class="btn-check" id="mj-talk" autocomplete="off">
-		<label class="btn btn-outline-primary" for="mj-talk" id="mj-talk-lbl"
-			title="Send this browser's microphone to the camera's speaker. The camera will not take audio in one direction only, so talking also opens its audio to you.">🎤 Talk</label>
-	</div>
-	<div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Statistics" id="mj-stats-ctl" hidden>
-		<input type="checkbox" class="btn-check" id="mj-stats-btn" autocomplete="off">
-		<label class="btn btn-outline-secondary" for="mj-stats-btn"
-			title="Per-second measurements from both ends of the session.">Stats</label>
-	</div>
-	</div>
-	<!-- Shown only while WebRTC is the live transport, and a block of its own
-	     because it is a sentence rather than a control. The tooltip above cannot
-	     be the whole disclosure: it needs a pointer to find, and the thing being
-	     disclosed reaches past the person reading it. -->
-	<p id="mj-transport-note" class="small text-body-secondary mb-2" hidden>
-		The camera is adapting this stream's bitrate to your connection. Anyone
-		else watching the same stream sees that too.
-	</p>
-	<!-- Two columns because the two ends disagree in the cases worth looking
-	     at: the browser can be losing packets the camera never sees dropped,
-	     and REMB is the camera's opinion of the link rather than a measurement
-	     of it. -->
-	<div id="mj-stats" class="small text-body-secondary mb-2" hidden>
-		<div class="row g-3">
-			<div class="col-auto">
-				<div class="fw-semibold">Browser</div>
-				<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
-					<tbody>
-						<tr><td class="pe-3 text-body-secondary">picture</td><td id="mj-st-pic">-</td></tr>
-						<tr><td class="pe-3 text-body-secondary">receiving</td><td id="mj-st-rx">-</td></tr>
-						<tr><td class="pe-3 text-body-secondary">lost / jitter</td><td id="mj-st-loss">-</td></tr>
-						<tr><td class="pe-3 text-body-secondary">round trip</td><td id="mj-st-rtt">-</td></tr>
-						<tr><td class="pe-3 text-body-secondary">recovery</td><td id="mj-st-recov">-</td></tr>
-					</tbody>
-				</table>
-			</div>
-			<div class="col-auto">
-				<div class="fw-semibold">Camera</div>
-				<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
-					<tbody>
-						<tr><td class="pe-3 text-body-secondary">session</td><td id="mj-st-cam">-</td></tr>
-						<tr><td class="pe-3 text-body-secondary">estimate</td><td id="mj-st-remb">-</td></tr>
-						<tr><td class="pe-3 text-body-secondary">keyframes</td><td id="mj-st-pli">-</td></tr>
-						<tr><td class="pe-3 text-body-secondary">audio in</td><td id="mj-st-ain">-</td></tr>
-						<tr><td class="pe-3 text-body-secondary">talkback</td><td id="mj-st-talk">-</td></tr>
-					</tbody>
-				</table>
+	<!-- The stage: everything lives ON the video. The wrapper reserves 16:9
+	     (preview-page.js corrects it to the stream's real ratio once known),
+	     so neither loading nor the stats panel nor the control bar ever moves
+	     the picture — the old layout stacked all of those above the video and
+	     opening Stats pushed a 4K frame below the fold. tabindex makes the
+	     stage itself focusable: that focus is what scopes PTZ arrow keys away
+	     from the volume slider and the radio groups in the bar. -->
+	<div class="mj-stage" id="mj-stage" tabindex="0" aria-label="Live video">
+		<!-- Two, and only ever one of them visible. A transport switch attaches
+		     the new player to whichever is idle and leaves the other playing, so
+		     the picture only changes once the replacement has one of its own.
+		     One element cannot do that: MSE drives it through src and WebRTC
+		     through srcObject, so the incoming player would have to evict the
+		     outgoing one before anybody knows whether it works. -->
+		<video id="live-video" class="mj-stage-media" autoplay muted playsinline></video>
+		<video id="live-video-b" class="mj-stage-media" autoplay muted playsinline style="display:none"></video>
+		<img id="live-mjpeg" class="mj-stage-media" alt="" style="display:none">
+		<p id="mj-note" class="alert alert-warning mj-stage-alert" style="display:none">
+			Your browser can't play the live H.264/H.265 stream.
+			<a href="mj-settings.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
+		</p>
+		<!-- The status chip. Same id as the badge it replaces, so every state
+		     write (connecting… / no signal / MJPEG / reconnecting…) keeps
+		     landing; live it reads "H264 3840×2160 · 25 fps". The transport is
+		     NOT named here — it is named exactly once, on the picker below. -->
+		<span id="mj-badge" class="mj-chip">connecting…</span>
+		<!-- Two columns because the two ends disagree in the cases worth
+		     looking at: the browser can be losing packets the camera never
+		     sees dropped, and REMB is the camera's opinion of the link rather
+		     than a measurement of it. An overlay, so looking at the numbers
+		     does not displace the picture they describe. -->
+		<div id="mj-stats" class="mj-stats-overlay small" hidden>
+			<div class="row g-3">
+				<div class="col-auto">
+					<div class="fw-semibold">Browser</div>
+					<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
+						<tbody>
+							<tr><td class="pe-3 mj-stat-key">picture</td><td id="mj-st-pic">-</td></tr>
+							<tr><td class="pe-3 mj-stat-key">receiving</td><td id="mj-st-rx">-</td></tr>
+							<tr><td class="pe-3 mj-stat-key">lost / jitter</td><td id="mj-st-loss">-</td></tr>
+							<tr><td class="pe-3 mj-stat-key">round trip</td><td id="mj-st-rtt">-</td></tr>
+							<tr><td class="pe-3 mj-stat-key">recovery</td><td id="mj-st-recov">-</td></tr>
+						</tbody>
+					</table>
+				</div>
+				<div class="col-auto">
+					<div class="fw-semibold">Camera</div>
+					<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
+						<tbody>
+							<tr><td class="pe-3 mj-stat-key">session</td><td id="mj-st-cam">-</td></tr>
+							<tr><td class="pe-3 mj-stat-key">estimate</td><td id="mj-st-remb">-</td></tr>
+							<tr><td class="pe-3 mj-stat-key">keyframes</td><td id="mj-st-pli">-</td></tr>
+							<tr><td class="pe-3 mj-stat-key">audio in</td><td id="mj-st-ain">-</td></tr>
+							<tr><td class="pe-3 mj-stat-key">talkback</td><td id="mj-st-talk">-</td></tr>
+						</tbody>
+					</table>
+				</div>
 			</div>
 		</div>
+		<!-- Shown only while WebRTC is the live transport. A sentence rather
+		     than a control, and dismissible: the tooltip on the picker cannot
+		     be the whole disclosure, because the thing being disclosed reaches
+		     past the person reading it. -->
+		<p id="mj-transport-note" class="mj-adapt-note small" hidden>
+			The camera is adapting this stream's bitrate to your connection.
+			Anyone else watching the same stream sees that too.
+			<button type="button" class="mj-adapt-close" id="mj-note-close" aria-label="Dismiss">×</button>
+		</p>
+		<!-- PTZ mount. Empty and hidden on every camera; p/motor.cgi (included
+		     by preview.cgi only when the hardware exists) emits the pad after
+		     the player and preview-ptz.js relocates it in here. -->
+		<div id="mj-ptz" class="mj-ptz" hidden></div>
+		<!-- The control bar. Hidden until pointed at, focused into, or tapped
+		     (preview-hero.js) — the picture is the page's point, not the
+		     chrome. Stats sits by the view controls; snapshot and fullscreen
+		     close the bar because they act on the stage itself. -->
+		<div class="mj-bar" id="mj-bar">
+			<div class="btn-group btn-group-sm" role="group" aria-label="Stream">
+				<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-0" autocomplete="off" checked>
+				<label class="btn btn-outline-light" for="mj-stream-0">Main</label>
+				<!-- Both start disabled, not merely label-hidden: a btn-check is
+				     a real radio behind CSS, so an unhidden input is in the tab
+				     order and a keyboard could select a stream this camera may
+				     not have before the configuration has been read.
+				     preview-page.js enables them once it knows there is a
+				     substream. -->
+				<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-1" autocomplete="off" disabled>
+				<label class="btn btn-outline-light" for="mj-stream-1" id="mj-sub" hidden>Sub</label>
+				<input type="radio" class="btn-check" name="mj-stream" id="mj-stream-auto" autocomplete="off" disabled>
+				<label class="btn btn-outline-light" for="mj-stream-auto" id="mj-auto" hidden
+					title="Picks whichever stream is closest to the size this player is being shown at, and follows the window as it changes. The chip names the one in use.">Auto</label>
+			</div>
+			<div class="btn-group btn-group-sm" role="group" aria-label="Audio" id="mj-audio-ctl" hidden>
+				<input type="checkbox" class="btn-check" id="mj-mute" autocomplete="off">
+				<label class="btn btn-outline-light" for="mj-mute" id="mj-mute-lbl">🔇 Muted</label>
+				<input type="range" id="mj-vol" min="0" max="100" value="100" class="form-range align-self-center ms-2" style="width:6rem" disabled aria-label="Volume">
+			</div>
+			<!-- Talkback. Revealed only over WebRTC, only where the camera has
+			     audio.outputEnabled, and only in a secure context: a browser
+			     hands over no microphone on plain HTTP, so the button would be
+			     a dead end. -->
+			<div class="btn-group btn-group-sm" role="group" aria-label="Talkback" id="mj-talk-ctl" hidden>
+				<input type="checkbox" class="btn-check" id="mj-talk" autocomplete="off">
+				<label class="btn btn-outline-light" for="mj-talk" id="mj-talk-lbl"
+					title="Send this browser's microphone to the camera's speaker. The camera will not take audio in one direction only, so talking also opens its audio to you.">🎤 Talk</label>
+			</div>
+			<!-- The transport, named exactly once, with the alternative finally
+			     visible. Unhidden by preview-page.js only where
+			     preview-webrtc.js is loaded and the browser has WebRTC. The
+			     failure tooltip still lands on the WebRTC label
+			     (#mj-transport-lbl), which is where the question "why am I not
+			     on WebRTC?" gets asked. -->
+			<div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Transport" id="mj-transport-ctl" hidden>
+				<input type="radio" class="btn-check" name="mj-transport" id="mj-transport-w" autocomplete="off">
+				<label class="btn btn-outline-light" for="mj-transport-w" id="mj-transport-lbl"
+					title="Sub-second video and two-way audio, and the camera fits the stream to your connection — which changes it for everyone else watching that stream too.">WebRTC</label>
+				<input type="radio" class="btn-check" name="mj-transport" id="mj-transport-m" autocomplete="off">
+				<label class="btn btn-outline-light" for="mj-transport-m"
+					title="Plain buffered playback. A couple of seconds behind, but nothing adapts and nothing negotiates.">MSE</label>
+			</div>
+			<div class="btn-group btn-group-sm" role="group" aria-label="Statistics" id="mj-stats-ctl" hidden>
+				<input type="checkbox" class="btn-check" id="mj-stats-btn" autocomplete="off">
+				<label class="btn btn-outline-light" for="mj-stats-btn"
+					title="Per-second measurements from both ends of the session.">Stats</label>
+			</div>
+			<button type="button" class="btn btn-sm btn-outline-light" id="mj-snap" hidden
+				title="Download a full-resolution snapshot" aria-label="Snapshot">📷</button>
+			<!-- Inline SVG rather than U+26F6: that glyph is missing from enough
+			     fonts to render as a box on real machines. -->
+			<button type="button" class="btn btn-sm btn-outline-light" id="mj-fs" hidden
+				title="Fullscreen" aria-label="Fullscreen"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M1.5 5.5v-4h4M14.5 5.5v-4h-4M1.5 10.5v4h4M14.5 10.5v4h-4"/></svg></button>
+		</div>
 	</div>
-	<!-- Two, and only ever one of them visible. A transport switch attaches the
-	     new player to whichever is idle and leaves the other playing, so the
-	     picture only changes once the replacement has one of its own. One
-	     element cannot do that: MSE drives it through src and WebRTC through
-	     srcObject, so the incoming player would have to evict the outgoing one
-	     before anybody knows whether it works. -->
-	<video id="live-video" autoplay muted playsinline style="$bg"></video>
-	<video id="live-video-b" autoplay muted playsinline style="$bg; display:none"></video>
-	<img id="live-mjpeg" alt="" style="display:none; $bg">
-	<p id="mj-note" class="alert alert-warning" style="display:none">
-		Your browser can't play the live H.264/H.265 stream.
-		<a href="mj-settings.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
-	</p>
 </div>
 EOF
 }
