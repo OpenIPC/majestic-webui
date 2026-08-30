@@ -184,11 +184,13 @@
 	function updateWifi(s, v) {
 		const has = WIFI_GAUGES.concat(WIFI_RATES).some(r => r[0] in v);
 		if (!wifiEls) buildWifi(v);
-		// A camera on Ethernet emits no wifi_* metrics, so the block was built
-		// empty — but a Wi-Fi link can also come up after the page loaded
-		// (driver loaded, wlan0 associated), so an empty block rebuilds the
-		// moment wifi metrics first appear rather than staying hidden forever.
-		else if (has && !Object.keys(wifiEls).length) buildWifi(v);
+		// The row set is not frozen at first sight: a camera on Ethernet builds
+		// the block empty and a Wi-Fi link arriving later must fill it, and a
+		// gauge missing from the first Wi-Fi sample (the RSSI, while the link
+		// re-associates) needs its row created when it first reports. Rebuild
+		// whenever a known metric is present but has no row yet.
+		else if (has && WIFI_GAUGES.concat(WIFI_RATES).some(r => (r[0] in v) && !wifiEls[r[0]]))
+			buildWifi(v);
 		if (!wifiEls || !Object.keys(wifiEls).length) return;
 		// ...and the reverse: a block that exists hides again when the metrics
 		// vanish (interface down), instead of overwriting its rows with the

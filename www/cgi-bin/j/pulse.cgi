@@ -18,8 +18,13 @@ overlay_used=$(df | grep /overlay | xargs | cut -d' ' -f5)
 # actually renders a wall clock.
 now=$(date '+%s %z')
 
+# /etc/timezone is device-written text landing inside a JSON string: escape
+# the two JSON-active characters the way mj-settings.cgi does, and drop
+# control characters — an embedded newline would end the response early.
+tz=$(tr -d '[:cntrl:]' < /etc/timezone 2>/dev/null | sed 's/\\/\\\\/g; s/"/\\"/g')
+
 payload=$(printf '{"time_now":"%s","timezone":"%s","utc_offset":"%s","overlay_used":"%d"}' \
-	"${now% *}" "$(cat /etc/timezone)" "${now#* }" "${overlay_used//%/}")
+	"${now% *}" "$tz" "${now#* }" "${overlay_used//%/}")
 
 echo "HTTP/1.1 200 OK
 Content-type: application/json
