@@ -447,27 +447,48 @@
 	// The page's own callbacks, all of which belong to the player on screen: a
 	// trial has no badge, no audio control and no talkback button to report to.
 	// onState is the swap's, unchanged — it decides what a trial's states mean.
+	// What the codec callback reports, applied to the chip and the stage.
+	// Reserve the stream's true shape so the picture arriving (or a ratio
+	// change on a stream switch) never moves anything below the stage, and
+	// re-derive the viewport clamp from the same ratio — the CSS default
+	// assumes 16:9. The dvh write lands where the browser knows the unit and
+	// is ignored where it does not, leaving the vh version standing.
+	function applyMedia(m) {
+		chipMedia = m;
+		const stage = $('#mj-stage');
+		if (stage && m.w && m.h) {
+			stage.style.aspectRatio = m.w + ' / ' + m.h;
+			const r = (m.w / m.h).toFixed(5);
+			stage.style.width = 'min(100%, calc((100vh - 12.5rem) * ' + r + '))';
+			stage.style.width = 'min(100%, calc((100dvh - 12.5rem) * ' + r + '))';
+		}
+		setChip();
+	}
+
 	function handlersFor(id, onState) {
 		const isLive = () => swap.isLive(id);
+		// The MSE player reports its codec once, from the init message — which
+		// for a trial arrives BEFORE it is promoted, when isLive() is still
+		// false, and it never reports again. Held here and adopted the moment
+		// this attachment goes live, or a WebRTC→MSE switch would keep the
+		// old transport's dimensions and fps on the chip for ever (WebRTC
+		// self-heals through its per-second stats; MSE has no such path).
+		let heldMedia = null;
 		return {
-			onState: onState,
-			onCodec: (codec, cs, w, h) => {
-				if (!isLive()) return;
-				chipMedia = { codec: codec, w: w, h: h };
-				// Reserve the stream's true shape so the picture arriving (or a
-				// ratio change on a stream switch) never moves anything below
-				// the stage, and re-derive the viewport clamp from the same
-				// ratio — the CSS default assumes 16:9. The dvh write lands
-				// where the browser knows the unit and is ignored where it
-				// does not, leaving the vh version standing.
-				const stage = $('#mj-stage');
-				if (stage && w && h) {
-					stage.style.aspectRatio = w + ' / ' + h;
-					const r = (w / h).toFixed(5);
-					stage.style.width = 'min(100%, calc((100vh - 12.5rem) * ' + r + '))';
-					stage.style.width = 'min(100%, calc((100dvh - 12.5rem) * ' + r + '))';
+			onState: (s, d) => {
+				onState(s, d);
+				// After the swap has judged the state: 'playing' is what
+				// promotes a trial, so this is the first moment isLive() can
+				// have flipped.
+				if (heldMedia && isLive()) {
+					applyMedia(heldMedia);
+					heldMedia = null;
 				}
-				setChip();
+			},
+			onCodec: (codec, cs, w, h) => {
+				const m = { codec: codec, w: w, h: h };
+				if (!isLive()) { heldMedia = m; return; }
+				applyMedia(m);
 			},
 			// null means we asked for audio and the camera had none to give (mic
 			// off or not producing). Reflect that on the control rather than
@@ -788,12 +809,14 @@
 		resizeTimer = setTimeout(autoApply, 250);
 	};
 	//
-	// Watched on the container, not on the video elements: the MSE player
+	// Watched on the stage, not on the video elements: the MSE player
 	// replaces its element on every open and every reconnect, so an observer
 	// attached to the nodes would be watching detached ones within a session —
-	// the same trap the swap hit with stored element references. The container
-	// is never replaced, and its width is what moves the video's anyway.
-	const box = $('#mj-player');
+	// the same trap the swap hit with stored element references. The stage is
+	// never replaced, and it is also the element the viewport clamp resizes:
+	// a height-only viewport change narrows the stage while #mj-player keeps
+	// its width, so watching the parent would miss exactly those.
+	const box = $('#mj-stage') || $('#mj-player');
 	if (typeof ResizeObserver === 'function' && box) {
 		try { new ResizeObserver(onResize).observe(box); } catch (e) {
 			window.addEventListener('resize', onResize);

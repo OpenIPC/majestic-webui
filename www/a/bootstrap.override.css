@@ -728,11 +728,16 @@ mark {
 }
 
 .mj-stats-overlay .table {
-	color: inherit;
+	/* The variable, not `color`: Bootstrap's cell rule reads
+	   --bs-table-color (emphasis-black in light theme) and would win over an
+	   inherited colour — black text on black glass. */
+	--bs-table-color: #fff;
 	--bs-table-bg: transparent;
 }
 
-.mj-stat-key {
+/* Three classes, because Bootstrap's `.table>:not(caption)>*>*` cell rule
+   outweighs a lone class and would repaint the keys full white. */
+.mj-stats-overlay .table .mj-stat-key {
 	color: rgba(255, 255, 255, 0.7);
 }
 

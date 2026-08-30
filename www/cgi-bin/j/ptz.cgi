@@ -17,10 +17,12 @@ for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 	esac
 done
 
-# Signed integers only — these become argv of a binary that drives hardware.
-# Anything else means a step of zero, same as j/time.cgi's pattern.
-echo "$HORIZONTAL" | grep -qE '^-?[0-9]{1,4}$' || HORIZONTAL=0
-echo "$VERTICAL" | grep -qE '^-?[0-9]{1,4}$' || VERTICAL=0
+# Small signed integers only — these become argv of a binary that drives
+# hardware. The pad sends ±5; ±99 leaves room for a coarser caller without
+# letting one request command a four-digit sweep. Anything else is a step of
+# zero, same as j/time.cgi's pattern.
+echo "$HORIZONTAL" | grep -qE '^-?[0-9]{1,2}$' || HORIZONTAL=0
+echo "$VERTICAL" | grep -qE '^-?[0-9]{1,2}$' || VERTICAL=0
 
 if command -v gpio-motors >/dev/null 2>&1 && [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ]; then
 	gpio-motors "$HORIZONTAL" "$VERTICAL" 10
