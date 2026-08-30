@@ -182,26 +182,43 @@
 	}
 
 	function updateWifi(s, v) {
+		const has = WIFI_GAUGES.concat(WIFI_RATES).some(r => r[0] in v);
 		if (!wifiEls) buildWifi(v);
 		// A camera on Ethernet emits no wifi_* metrics, so the block was built
 		// empty — but a Wi-Fi link can also come up after the page loaded
 		// (driver loaded, wlan0 associated), so an empty block rebuilds the
 		// moment wifi metrics first appear rather than staying hidden forever.
-		else if (!Object.keys(wifiEls).length &&
-			WIFI_GAUGES.concat(WIFI_RATES).some(r => r[0] in v)) buildWifi(v);
+		else if (has && !Object.keys(wifiEls).length) buildWifi(v);
 		if (!wifiEls || !Object.keys(wifiEls).length) return;
+		// ...and the reverse: a block that exists hides again when the metrics
+		// vanish (interface down), instead of overwriting its rows with the
+		// "undefined dBm" a missing key would format to.
+		const box = $('#st-wifi');
+		if (box) box.hidden = !has;
+		if (!has) return;
 		WIFI_GAUGES.forEach(r => {
-			const el = wifiEls[r[0]];
-			if (!el) return;
-			el.textContent = v[r[0]] + r[2];
-			pushSpark(wifiSparks[r[0]], v[r[0]]);
+			const rowEl = wifiEls[r[0]];
+			if (!rowEl) return;
+			if (r[0] in v) {
+				rowEl.textContent = v[r[0]] + r[2];
+				pushSpark(wifiSparks[r[0]], v[r[0]]);
+			} else {
+				// A single gauge can go missing on its own — the RSSI does
+				// while the link re-associates, since the collector refuses a
+				// non-negative reading.
+				rowEl.textContent = '–';
+			}
 		});
 		if (s.prev && s.dt > 0) WIFI_RATES.forEach(r => {
-			const el = wifiEls[r[0]];
-			if (!el || !(r[0] in s.prev.v)) return;
-			const rate = Math.max(0, (v[r[0]] - s.prev.v[r[0]]) / s.dt);
-			el.textContent = rate.toFixed(1) + r[2];
-			pushSpark(wifiSparks[r[0]], rate);
+			const rowEl = wifiEls[r[0]];
+			if (!rowEl) return;
+			if (r[0] in v && r[0] in s.prev.v) {
+				const rate = Math.max(0, (v[r[0]] - s.prev.v[r[0]]) / s.dt);
+				rowEl.textContent = rate.toFixed(1) + r[2];
+				pushSpark(wifiSparks[r[0]], rate);
+			} else {
+				rowEl.textContent = '–';
+			}
 		});
 		wifiGrade(v);
 	}
@@ -264,8 +281,13 @@
 			// "measured 0 bit/s" over a dead counter would read as an outage.
 			for (let i = 0; i < 2; i++) {
 				const brEl = $('#st-br' + i), key = 'venc' + i + '_rcvd_bytes';
-				if (!brEl || !v[key] || !(key in s.prev.v)) continue;
-				brEl.textContent = ' · measured ' + humanRate(Math.max(0, (v[key] - s.prev.v[key]) / s.dt));
+				if (!brEl) continue;
+				// Cleared, not skipped, when no valid delta exists: a daemon
+				// restart resets or removes the counter, and a skipped update
+				// would leave the last rate on screen indefinitely.
+				brEl.textContent = v[key] && (key in s.prev.v)
+					? ' · measured ' + humanRate(Math.max(0, (v[key] - s.prev.v[key]) / s.dt))
+					: '';
 			}
 
 			if (motionEl && 'md_rects_recv_total' in s.prev.v) {
