@@ -157,6 +157,9 @@
 	function buildWifi(v) {
 		const box = $('#st-wifi'), host = $('#st-wifi-rows');
 		if (!box || !host) return;
+		// Replace, never append: this reruns when a metric appears late, and
+		// the previous row set (and its spark registrations) must go with it.
+		host.textContent = '';
 		wifiEls = {};
 		const rows = WIFI_GAUGES.concat(WIFI_RATES).filter(r => r[0] in v);
 		rows.forEach(r => { wifiEls[r[0]] = sparkRow(host, r[1], wifiSparks, r[0]); });
