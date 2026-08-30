@@ -331,6 +331,24 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 			env.el('mj-badge').textContent);
 	}
 
+	group('Auto claims nothing over WebRTC when sizes cannot distinguish');
+	{
+		// Identically-sized channels make a WebRTC fallback undetectable, so
+		// the label would be a guess — and a guess about "which stream is
+		// this" is worse than silence (#240 tracks the authoritative fix).
+		const env = load({
+			box: [800, 450], main: '1280x720', sub: '1280x720',
+			picked: 'auto', transport: 'webrtc',
+		});
+		await tick();
+		const live = env.made[0];
+		live.say('playing');
+		live.opts.onCodec('h264', 'h264', 1280, 720);
+		check('no channel is claimed',
+			env.el('mj-badge').textContent.indexOf('stream') === -1,
+			env.el('mj-badge').textContent);
+	}
+
 	group('the chip names the channel WebRTC actually served');
 	{
 		// WebRTC takes ?stream= as a preference, and majestic#299 arrived as

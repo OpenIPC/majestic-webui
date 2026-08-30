@@ -198,9 +198,22 @@
 	function servedNote() {
 		const served = servedStream();
 		// Auto's radios never say which channel it picked, so the chip
-		// always does (#184). A manual pick speaks only on a mismatch — the
-		// radio already names the intent, so the chip only reports betrayal.
-		if (!autoOn && served === (stream ? 1 : 0)) return '';
+		// always does (#184) — but only when it can say truthfully. Over MSE
+		// the subscription is exact, so `stream` IS the served channel; over
+		// WebRTC the identity is inferred from frame size, and with a size
+		// unset or the two channels sized alike the inference proves
+		// nothing, so the chip claims nothing rather than guessing (#240
+		// tracks getting this authoritatively from the camera). A manual
+		// pick speaks only on a mismatch — the radio already names the
+		// intent, so the chip only reports betrayal.
+		if (autoOn) {
+			if (usingWebRTC && (!sizeOf[0] || !sizeOf[1] ||
+				(sizeOf[0].w === sizeOf[1].w && sizeOf[0].h === sizeOf[1].h))) {
+				return '';
+			}
+			return served === 0 ? ' · Main stream' : ' · Sub stream';
+		}
+		if (served === (stream ? 1 : 0)) return '';
 		return served === 0 ? ' · Main stream' : ' · Sub stream';
 	}
 
@@ -790,6 +803,11 @@
 		// asked for the best fit, and the window is already the size it is.
 		lastAutoAt = 0;
 		autoApply();
+		// The chip's Auto label has to appear even when Auto's pick is the
+		// stream already playing: that path changes nothing, so nothing else
+		// would redraw the chip — and MSE gives it no later chance, since it
+		// reports its codec only when a connection opens.
+		setChip();
 	});
 	// Recorded on click rather than change: pressing the radio that is already
 	// selected fires no change event and is still an answer — the one that has
