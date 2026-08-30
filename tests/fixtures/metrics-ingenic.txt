@@ -1,0 +1,280 @@
+# HELP node_uname_info Labeled system information as provided by the uname system call.
+# TYPE node_uname_info gauge
+node_uname_info{domainname="(null)",machine="mips",nodename="camera",release="3.10.14__isvp_swan_1.0__",sysname="Linux",version="#2 PREEMPT Sun Aug 30 08:33:47 UTC 2026"} 1
+# HELP node_boot_time_seconds Node boot time, in unixtime.
+# TYPE node_boot_time_seconds gauge
+node_boot_time_seconds 1788096929
+# HELP node_context_switches_total Total number of context switches.
+# TYPE node_context_switches_total counter
+node_context_switches_total 17106515
+# HELP node_cpu_seconds_total Seconds the cpus spent in each mode.
+# TYPE node_cpu_seconds_total counter
+node_cpu_seconds_total{cpu="0",mode="user"} 962.42
+node_cpu_seconds_total{cpu="0",mode="nice"} 0
+node_cpu_seconds_total{cpu="0",mode="system"} 793.71
+node_cpu_seconds_total{cpu="0",mode="idle"} 5267.62
+node_cpu_seconds_total{cpu="0",mode="iowait"} 28.76
+node_cpu_seconds_total{cpu="0",mode="irq"} 0.4
+node_cpu_seconds_total{cpu="0",mode="softirq"} 74.06
+node_cpu_seconds_total{cpu="0",mode="steal"} 0
+node_cpu_seconds_total{cpu="0",mode="guest"} 0
+node_cpu_seconds_total{cpu="0",mode="guest_nice"} 0
+# HELP node_intr_total 
+# TYPE node_intr_total counter
+node_intr_total 9996779
+# HELP node_forks_total 
+# TYPE node_forks_total counter
+node_forks_total 61129
+# HELP node_procs_running_total 
+# TYPE node_procs_running_total gauge
+node_procs_running_total 5
+# HELP node_procs_blocked_total 
+# TYPE node_procs_blocked_total gauge
+node_procs_blocked_total 0
+# HELP node_filefd_allocated File descriptor statistics: allocated.
+# TYPE node_filefd_allocated gauge
+node_filefd_allocated 117
+# HELP node_filefd_maximum File descriptor statistics: maximum.
+# TYPE node_filefd_maximum gauge
+node_filefd_maximum 8192
+# HELP node_load1 1m load average.
+# TYPE node_load1 gauge
+node_load1 1.72
+# HELP node_load5 1m load average.
+# TYPE node_load5 gauge
+node_load5 1.87
+# HELP node_load15 15m load average.
+# TYPE node_load15 gauge
+node_load15 1.85
+# TYPE node_memory_MemTotal_bytes gauge
+node_memory_MemTotal_bytes 34357248
+# TYPE node_memory_MemFree_bytes gauge
+node_memory_MemFree_bytes 1142784
+# TYPE node_memory_Buffers_bytes gauge
+node_memory_Buffers_bytes 983040
+# TYPE node_memory_Cached_bytes gauge
+node_memory_Cached_bytes 13885440
+# TYPE node_memory_SwapCached_bytes gauge
+node_memory_SwapCached_bytes 0
+# TYPE node_memory_Active_bytes gauge
+node_memory_Active_bytes 12214272
+# TYPE node_memory_Inactive_bytes gauge
+node_memory_Inactive_bytes 7553024
+# TYPE node_memory_Active_anon_bytes gauge
+node_memory_Active_anon_bytes 4911104
+# TYPE node_memory_Inactive_anon_bytes gauge
+node_memory_Inactive_anon_bytes 233472
+# TYPE node_memory_Active_file_bytes gauge
+node_memory_Active_file_bytes 7303168
+# TYPE node_memory_Inactive_file_bytes gauge
+node_memory_Inactive_file_bytes 7319552
+# TYPE node_memory_Unevictable_bytes gauge
+node_memory_Unevictable_bytes 0
+# TYPE node_memory_Mlocked_bytes gauge
+node_memory_Mlocked_bytes 0
+# TYPE node_memory_SwapTotal_bytes gauge
+node_memory_SwapTotal_bytes 0
+# TYPE node_memory_SwapFree_bytes gauge
+node_memory_SwapFree_bytes 0
+# TYPE node_memory_Dirty_bytes gauge
+node_memory_Dirty_bytes 507904
+# TYPE node_memory_Writeback_bytes gauge
+node_memory_Writeback_bytes 0
+# TYPE node_memory_AnonPages_bytes gauge
+node_memory_AnonPages_bytes 4902912
+# TYPE node_memory_Mapped_bytes gauge
+node_memory_Mapped_bytes 3428352
+# TYPE node_memory_Shmem_bytes gauge
+node_memory_Shmem_bytes 245760
+# TYPE node_memory_Slab_bytes gauge
+node_memory_Slab_bytes 6217728
+# TYPE node_memory_SReclaimable_bytes gauge
+node_memory_SReclaimable_bytes 2826240
+# TYPE node_memory_SUnreclaim_bytes gauge
+node_memory_SUnreclaim_bytes 3391488
+# TYPE node_memory_KernelStack_bytes gauge
+node_memory_KernelStack_bytes 565248
+# TYPE node_memory_PageTables_bytes gauge
+node_memory_PageTables_bytes 196608
+# TYPE node_memory_NFS_Unstable_bytes gauge
+node_memory_NFS_Unstable_bytes 0
+# TYPE node_memory_Bounce_bytes gauge
+node_memory_Bounce_bytes 0
+# TYPE node_memory_WritebackTmp_bytes gauge
+node_memory_WritebackTmp_bytes 0
+# TYPE node_memory_CommitLimit_bytes gauge
+node_memory_CommitLimit_bytes 17178624
+# TYPE node_memory_Committed_AS_bytes gauge
+node_memory_Committed_AS_bytes 11075584
+# TYPE node_memory_VmallocTotal_bytes gauge
+node_memory_VmallocTotal_bytes 1073532928
+# TYPE node_memory_VmallocUsed_bytes gauge
+node_memory_VmallocUsed_bytes 3903488
+# TYPE node_memory_VmallocChunk_bytes gauge
+node_memory_VmallocChunk_bytes 1064767488
+# TYPE node_network_receive_bytes_total counter
+node_network_receive_bytes_total{device="tunl0"} 0
+# TYPE node_network_receive_packets_total counter
+node_network_receive_packets_total{device="tunl0"} 0
+# TYPE node_network_receive_errs_total counter
+node_network_receive_errs_total{device="tunl0"} 0
+# TYPE node_network_receive_drop_total counter
+node_network_receive_drop_total{device="tunl0"} 0
+# TYPE node_network_receive_fifo_total counter
+node_network_receive_fifo_total{device="tunl0"} 0
+# TYPE node_network_receive_frame_total counter
+node_network_receive_frame_total{device="tunl0"} 0
+# TYPE node_network_receive_compressed_total counter
+node_network_receive_compressed_total{device="tunl0"} 0
+# TYPE node_network_receive_multicast_total counter
+node_network_receive_multicast_total{device="tunl0"} 0
+# TYPE node_network_transmit_bytes_total counter
+node_network_transmit_bytes_total{device="tunl0"} 0
+# TYPE node_network_transmit_packets_total counter
+node_network_transmit_packets_total{device="tunl0"} 0
+# TYPE node_network_transmit_errs_total counter
+node_network_transmit_errs_total{device="tunl0"} 0
+# TYPE node_network_transmit_drop_total counter
+node_network_transmit_drop_total{device="tunl0"} 0
+# TYPE node_network_transmit_fifo_total counter
+node_network_transmit_fifo_total{device="tunl0"} 0
+# TYPE node_network_transmit_colls_total counter
+node_network_transmit_colls_total{device="tunl0"} 0
+# TYPE node_network_transmit_carrier_total counter
+node_network_transmit_carrier_total{device="tunl0"} 0
+# TYPE node_network_transmit_compressed_total counter
+node_network_transmit_compressed_total{device="tunl0"} 0
+node_network_receive_bytes_total{device="wlan0"} 51530529
+node_network_receive_packets_total{device="wlan0"} 440964
+node_network_receive_errs_total{device="wlan0"} 0
+node_network_receive_drop_total{device="wlan0"} 2
+node_network_receive_fifo_total{device="wlan0"} 0
+node_network_receive_frame_total{device="wlan0"} 0
+node_network_receive_compressed_total{device="wlan0"} 0
+node_network_receive_multicast_total{device="wlan0"} 0
+node_network_transmit_bytes_total{device="wlan0"} 1019617239
+node_network_transmit_packets_total{device="wlan0"} 756143
+node_network_transmit_errs_total{device="wlan0"} 0
+node_network_transmit_drop_total{device="wlan0"} 1
+node_network_transmit_fifo_total{device="wlan0"} 0
+node_network_transmit_colls_total{device="wlan0"} 0
+node_network_transmit_carrier_total{device="wlan0"} 0
+node_network_transmit_compressed_total{device="wlan0"} 0
+# HELP node_time_seconds Current time.
+# TYPE node_time_seconds gauge
+node_time_seconds 1788104222
+# HELP task_seconds Seconds tasks spent in each mode.
+# TYPE task_seconds counter
+task_seconds{name="majestic",tid="6669",mode="user"} 30.22
+task_seconds{name="majestic",tid="6669",mode="system"} 17.17
+task_seconds{name="majestic",tid="6670",mode="user"} 0
+task_seconds{name="majestic",tid="6670",mode="system"} 0
+task_seconds{name="thread-pool-0",tid="6671",mode="user"} 182.09
+task_seconds{name="thread-pool-0",tid="6671",mode="system"} 4.11
+task_seconds{name="thread-pool-1",tid="6672",mode="user"} 181.74
+task_seconds{name="thread-pool-1",tid="6672",mode="system"} 4.37
+task_seconds{name="shm_thread",tid="6679",mode="user"} 0
+task_seconds{name="shm_thread",tid="6679",mode="system"} 0
+task_seconds{name="majestic",tid="6680",mode="user"} 21.33
+task_seconds{name="majestic",tid="6680",mode="system"} 19.6
+task_seconds{name="isp_tuning_deam",tid="6681",mode="user"} 0.31
+task_seconds{name="isp_tuning_deam",tid="6681",mode="system"} 0.83
+task_seconds{name="group_update",tid="6682",mode="user"} 5.09
+task_seconds{name="group_update",tid="6682",mode="system"} 5.43
+task_seconds{name="group_update",tid="6683",mode="user"} 2.7
+task_seconds{name="group_update",tid="6683",mode="system"} 3.31
+task_seconds{name="group_update",tid="6684",mode="user"} 14.19
+task_seconds{name="group_update",tid="6684",mode="system"} 12.86
+task_seconds{name="group_update",tid="6685",mode="user"} 9.66
+task_seconds{name="group_update",tid="6685",mode="system"} 8.85
+task_seconds{name="majestic",tid="6686",mode="user"} 0
+task_seconds{name="majestic",tid="6686",mode="system"} 0
+task_seconds{name="ENC(0",tid="6687",mode="user"} 2.36
+task_seconds{name="ENC(0",tid="6687",mode="system"} 2.41
+task_seconds{name="majestic",tid="6688",mode="user"} 0
+task_seconds{name="majestic",tid="6688",mode="system"} 0
+task_seconds{name="ENC(1",tid="6689",mode="user"} 1.94
+task_seconds{name="ENC(1",tid="6689",mode="system"} 1.54
+task_seconds{name="majestic",tid="6690",mode="user"} 0
+task_seconds{name="majestic",tid="6690",mode="system"} 0
+task_seconds{name="ENC(4",tid="6691",mode="user"} 0.67
+task_seconds{name="ENC(4",tid="6691",mode="system"} 0.39
+task_seconds{name="majestic",tid="6692",mode="user"} 1.1
+task_seconds{name="majestic",tid="6692",mode="system"} 0.35
+task_seconds{name="ai-_ai_record_t",tid="6693",mode="user"} 11.97
+task_seconds{name="ai-_ai_record_t",tid="6693",mode="system"} 3.3
+task_seconds{name="majestic",tid="6694",mode="user"} 7.32
+task_seconds{name="majestic",tid="6694",mode="system"} 2.83
+task_seconds{name="ao-_ao_play_thr",tid="6695",mode="user"} 0
+task_seconds{name="ao-_ao_play_thr",tid="6695",mode="system"} 0.02
+task_seconds{name="FS(0",tid="6696",mode="user"} 0.98
+task_seconds{name="FS(0",tid="6696",mode="system"} 1.41
+task_seconds{name="FS(1",tid="6697",mode="user"} 0.28
+task_seconds{name="FS(1",tid="6697",mode="system"} 0.55
+task_seconds{name="majestic",tid="6698",mode="user"} 30.37
+task_seconds{name="majestic",tid="6698",mode="system"} 59.19
+task_seconds{name="Opus",tid="thpool",mode="user"} 363.83
+task_seconds{name="Opus",tid="thpool",mode="system"} 8.48
+# HELP app_boot_time_seconds App boot time, in unixtime.
+# TYPE app_boot_time_seconds gauge
+app_boot_time_seconds 1788100489
+# HELP malloc_mp4_alloc_bytes Number of bytes allocated for MP4 buffer.
+# TYPE malloc_mp4_alloc_bytes gauge
+malloc_mp4_alloc_bytes 3144873
+# HELP jpeg_requests_total Number of JPEG requests made by clients.
+# TYPE jpeg_requests_total counter
+jpeg_requests_total 0
+# HELP jpeg_responses_total Number of JPEG correnponding responses.
+# TYPE jpeg_responses_total counter
+jpeg_responses_total 0
+# HELP http_requests_total Number of requests made to HTTP server.
+# TYPE http_requests_total counter
+http_requests_total 2343
+# HELP venc0_rcvd_bytes Number of bytes received from first venc channel
+# TYPE venc0_rcvd_bytes counter
+venc0_rcvd_bytes 1237601115
+# HELP isp_exptime Sensor exposure time
+# TYPE isp_exptime gauge
+isp_exptime 78964
+# HELP isp_again Analog Gain
+# TYPE isp_again gauge
+isp_again 126
+# HELP isp_dgain Digital Gain
+# TYPE isp_dgain gauge
+isp_dgain 61
+# HELP isp_bgain Blue Gain
+# TYPE isp_bgain gauge
+isp_bgain 182
+# HELP isp_rgain Red Gain
+# TYPE isp_rgain gauge
+isp_rgain 166
+# HELP isp_avelum Average luminance
+# TYPE isp_avelum gauge
+isp_avelum 48
+# HELP isp_afmetrics AF Metrics
+# TYPE isp_afmetrics gauge
+isp_afmetrics 1198384
+# HELP isp_exptime Sensor exposure time
+# TYPE isp_exptime gauge
+isp_exptime 39092
+# HELP isp_tgain Total Gain
+# TYPE isp_tgain gauge
+isp_tgain 14996
+# HELP night_enabled Is night mode enabled
+# TYPE night_enabled gauge
+night_enabled 0
+# HELP ircut_enabled Is ircut mode enabled
+# TYPE ircut_enabled gauge
+ircut_enabled 0
+# HELP light_enabled Is light mode enabled
+# TYPE light_enabled gauge
+light_enabled 0
+# HELP md_rects_recv_total Number of rectangles returned by HW MD algorithm.
+# TYPE md_rects_recv_total counter
+md_rects_recv_total 0
+# HELP md_rects_acc_total Number of rectangles fit into ROI.
+# TYPE md_rects_acc_total counter
+md_rects_acc_total 0
+# HELP hls_clients_total Number of connected clients by HLS protocol.
+# TYPE hls_clients_total gauge
+hls_clients_total 0

@@ -187,9 +187,9 @@
 		$('#fw-controls').style.display = 'none';
 		$('#fw-progress').style.display = '';
 		// The camera is about to spend minutes downloading and flashing, often on
-		// one core. Stop polling pulse.cgi at it — each tick forks a dozen
-		// processes and makes a loopback request into the majestic that is
-		// streaming this log (issue #120).
+		// one core. Stop the heartbeat at it — every request it can skip is one
+		// less thing asked of the majestic that is streaming this log
+		// (issue #120).
 		if (typeof stopHeartbeat === 'function') stopHeartbeat();
 	}
 	function params(source) {
@@ -351,20 +351,33 @@
 	// back. downSeen then never flips, and a perfectly good upgrade was reported
 	// as "the camera never rebooted".
 	//
-	// Returns false, never throws: on an older camera whose pulse.cgi predates
-	// uptime_s this is simply unavailable, and the watch below still applies.
+	// Returns false, never throws. The uptime is read from majestic's /metrics
+	// (node_time − node_boot) rather than a CGI: the CGI's answer came from the
+	// same /proc, one fork-chain later. Extracted with a line match, not the
+	// full parser — this path runs against a camera in an unknown state and
+	// must stay dumb. On a majestic too old to export node_* this is simply
+	// unavailable, and the watch below still applies.
 	async function rebootedAlready() {
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 2500);
 		try {
-			const r = await rawFetch('/cgi-bin/j/pulse.cgi?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
+			// No ?_= cache-buster here: majestic's /metrics routes query params
+			// into its value filter and answers 200 with an EMPTY body for an
+			// unknown key, so the buster would blind this check. cache:'no-store'
+			// alone keeps the read fresh.
+			const r = await rawFetch('/metrics', { cache: 'no-store', signal: ctl.signal });
 			// A 401 here is ambiguous — the session can be dropped without a reboot
 			// (it expires, or another tab signs out) — so it is not proof of one.
 			// Treat it as "can't tell" and let the unauthenticated / ping below be
 			// the reboot detector; confirmUpgrade() handles the lost session once a
 			// reboot is actually established.
 			if (!r.ok) return false;
-			const up = Number((await r.json()).uptime_s);
+			const txt = await r.text();
+			const num = name => {
+				const m = txt.match(new RegExp('^' + name + ' ([0-9.]+)$', 'm'));
+				return m ? Number(m[1]) : NaN;
+			};
+			const up = num('node_time_seconds') - num('node_boot_time_seconds');
 			if (!isFinite(up)) return false;
 			// 5s of slack so a camera that booted moments before this page loaded
 			// is not mistaken for one that rebooted just now.
@@ -405,8 +418,8 @@
 				if (!up) { downSeen = true; tries = 0; status('warning', 'Camera is rebooting — waiting for it to come back…'); }
 				// It is answering, which is either "has not rebooted yet" or "already
 				// finished and came back while we were not looking". Ask it directly,
-				// but not on every tick — pulse.cgi forks a dozen processes, and the
-				// whole point of stopHeartbeat() was to stop hammering it.
+				// but not on every tick — a camera mid-flash should be disturbed as
+				// little as possible, which is why stopHeartbeat() ran at all.
 				else if (tries % 4 === 0 && await rebootedAlready()) { confirmUpgrade(); return; }
 				else if (++tries > downTries) {
 					if (sawFlash) status('warning', 'Still flashing — the camera has not rebooted yet. Give it a few minutes, then reload.');

@@ -48,9 +48,9 @@
 	<div class="col">
 		<div class="card h-100"><div class="card-body py-2">
 			<div class="x-small text-uppercase text-secondary">Temperature</div>
-			<div class="lh-1 my-1"><span class="fs-3 fw-semibold" id="st-temp">–</span><span class="x-small text-secondary"> °C</span></div>
-			<div class="progress" style="height:4px"><div id="bar-temp" class="progress-bar" style="width:0"></div></div>
-			<div class="x-small text-secondary mt-1">SoC</div>
+			<div class="lh-1 my-1"><span class="fs-3 fw-semibold" id="st-temp">–</span><span class="x-small text-secondary" id="st-temp-u"> °C</span></div>
+			<div class="progress" style="height:4px" id="st-temp-meter"><div id="bar-temp" class="progress-bar" style="width:0"></div></div>
+			<div class="x-small text-secondary mt-1" id="st-temp-note">SoC</div>
 			<div id="spark-temp" class="spark mt-1"></div>
 		</div></div>
 	</div>
@@ -70,11 +70,24 @@
 			<h3>Streams</h3>
 			<div id="streams" class="d-flex flex-column gap-2"><div class="text-secondary small">loading…</div></div>
 			<div class="d-flex align-items-center flex-wrap gap-2 mt-3">
-				<span id="st-daynight" class="badge text-bg-secondary" aria-live="polite">–</span>
 				<span class="badge text-bg-light border" title="HLS clients">HLS <span id="st-hls">0</span></span>
+				<span id="st-stall" class="badge text-bg-warning" hidden>⚠ encoder stalled</span>
 			</div>
 			<div class="x-small text-secondary mt-3">Network ↓ <span id="st-rx">–</span> · ↑ <span id="st-tx">–</span></div>
 			<div id="spark-net" class="spark mt-1"></div>
+		</div></div>
+	</div>
+
+	<!-- Imaging: rows appear per what this SoC's ISP actually reports -->
+	<div class="col-12 col-md-6 col-xl-3">
+		<div class="card h-100"><div class="card-body">
+			<h3>Imaging</h3>
+			<div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+				<span id="st-daynight" class="badge text-bg-secondary" aria-live="polite">–</span>
+				<span id="st-light" class="badge text-bg-warning" hidden>💡 Light on</span>
+			</div>
+			<div id="st-isp-warn" class="x-small text-warning mb-2" hidden>Exposure at maximum — the scene is darker than the sensor can compensate.</div>
+			<dl class="small list mb-0" id="st-isp"><dd class="text-secondary">loading…</dd></dl>
 		</div></div>
 	</div>
 
@@ -106,6 +119,14 @@
 				<dt>Link</dt><dd><% esc "$network_interface" %></dd>
 				<dt>Gateway</dt><dd><% esc "$network_gateway" %></dd>
 			</dl>
+			<!-- Filled by status.js when the camera reports wifi_* metrics -->
+			<div id="st-wifi" hidden>
+				<div class="d-flex justify-content-between align-items-baseline x-small mt-3 mb-1">
+					<span class="fw-semibold">Wi-Fi</span>
+					<span id="st-wifi-grade"></span>
+				</div>
+				<dl class="small list mb-0" id="st-wifi-rows"></dl>
+			</div>
 		</div></div>
 	</div>
 

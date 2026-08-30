@@ -229,12 +229,89 @@ function termWriter(el) {
 	};
 }
 
-// Every tick spawns j/pulse.cgi, which forks a dozen more processes and makes a
-// loopback request to /metrics/isp. That is fine on an idle camera and ruinous
-// on one that is flashing itself, so pages that take the camera over can switch
-// it off (see fw-update.js, issue #120).
+// The heartbeat polls majestic's /metrics — served straight from the daemon's
+// memory, no forks — and everything the topbar shows is derived from it in the
+// browser. The one fact the daemon cannot know (overlay df) comes from the
+// slimmed j/pulse.cgi, fetched every 15th tick. Pages that take the camera
+// over can still switch the whole thing off (see fw-update.js, issue #120).
 let heartbeatStopped = false;
 let heartbeatTimer = null;
+let mjMetricsSubs = [];
+let mjMetricsLast = null;
+let mjPrevSample = null;
+let mjFails = 0;
+let mjTickN = 0;
+
+// Other scripts (status.js) consume the poll through here instead of running a
+// second one. A subscriber that registers after a tick gets the latest good
+// sample immediately; failures are announced but never remembered.
+function mjMetricsSubscribe(fn) {
+	mjMetricsSubs.push(fn);
+	if (mjMetricsLast) fn(mjMetricsLast);
+}
+
+function mjMetricsPublish(s) {
+	if (s.ok) mjMetricsLast = s;
+	mjMetricsSubs.forEach(fn => { try { fn(s); } catch (e) {} });
+}
+
+// Prometheus text → { v, cpuTotal, cpuIdle, rx, tx }. `v` maps every unlabelled
+// metric to its number; of the labelled families only cpu and net are wanted,
+// summed over their labels — the rest (task_seconds, node_uname_info) are
+// skipped unread. First write wins on a duplicated name: majestic on Ingenic
+// emits isp_exptime twice, canonical ISP block first, so first-wins reads the
+// same value before and after the daemon-side fix.
+function parseMetrics(text) {
+	const m = { v: Object.create(null), cpuTotal: 0, cpuIdle: 0, rx: 0, tx: 0 };
+	const lines = text.split('\n');
+	for (let i = 0; i < lines.length; i++) {
+		const ln = lines[i];
+		if (!ln || ln.charCodeAt(0) === 35) continue; // '#'
+		const sp = ln.lastIndexOf(' ');
+		if (sp < 0) continue;
+		// +'' is 0, not NaN, so a line that ends in a space would otherwise
+		// mint a metric with value 0 out of nothing.
+		const key = ln.slice(0, sp), vs = ln.slice(sp + 1);
+		if (!vs) continue;
+		const val = +vs;
+		if (isNaN(val)) continue;
+		if (key.indexOf('{') >= 0) {
+			if (key.startsWith('node_cpu_seconds_total')) {
+				m.cpuTotal += val;
+				if (key.indexOf('mode="idle"') >= 0) m.cpuIdle += val;
+			} else if (key.startsWith('node_network_receive_bytes_total')) {
+				if (key.indexOf('device="lo"') < 0) m.rx += val;
+			} else if (key.startsWith('node_network_transmit_bytes_total')) {
+				if (key.indexOf('device="lo"') < 0) m.tx += val;
+			}
+			continue;
+		}
+		if (!(key in m.v)) m.v[key] = val;
+	}
+	// Kernels older than 3.14 omit MemAvailable, and /metrics mirrors
+	// /proc/meminfo verbatim, so the metric is absent rather than zero — left
+	// alone that reads as 100% used (issue #116). Rebuild the kernel's own
+	// si_mem_available() estimate from the parts that are present; wmark_low is
+	// not in /proc/meminfo, so this runs ~2% optimistic. Clamped to MemTotal so
+	// memAvail <= memTotal is an invariant every consumer can rely on.
+	const v = m.v;
+	if (!('node_memory_MemAvailable_bytes' in v))
+		v.node_memory_MemAvailable_bytes =
+			(v.node_memory_MemFree_bytes || 0) +
+			(v.node_memory_Active_file_bytes || 0) +
+			(v.node_memory_Inactive_file_bytes || 0) +
+			(v.node_memory_SReclaimable_bytes || 0);
+	if (v.node_memory_MemTotal_bytes &&
+		v.node_memory_MemAvailable_bytes > v.node_memory_MemTotal_bytes)
+		v.node_memory_MemAvailable_bytes = v.node_memory_MemTotal_bytes;
+	return m;
+}
+
+function uptimeStr(s) {
+	s = Math.max(0, s | 0);
+	const d = (s / 86400) | 0, h = ((s % 86400) / 3600) | 0, m = ((s % 3600) / 60) | 0;
+	return (d ? d + 'd ' : '') + (h || d ? h + 'h ' : '') + m + 'm';
+}
 
 function stopHeartbeat() {
 	heartbeatStopped = true;
@@ -245,7 +322,99 @@ function stopHeartbeat() {
 function startHeartbeat() {
 	if (!heartbeatStopped) return;
 	heartbeatStopped = false;
+	// A resume usually follows a reboot: forget the previous sample so CPU%
+	// skips one tick instead of computing a delta across it, and refetch the
+	// overlay figure immediately rather than up to 15 ticks from now.
+	mjPrevSample = null;
+	mjTickN = 0;
 	heartbeat();
+}
+
+// Overlay usage is the one topbar figure /metrics cannot supply. It moves when
+// config is written, not per second, so the slim pulse.cgi is asked every 15th
+// tick (~30s) — fire-and-forget, never chained to the metrics fetch.
+function pulseTick() {
+	const ctl = new AbortController();
+	const to = setTimeout(() => ctl.abort(), 5000);
+	apiFetch('/cgi-bin/j/pulse.cgi', { signal: ctl.signal })
+		.then(r => r.json())
+		.then(json => {
+			if (json.overlay_used !== '' && $('#pb-overlay'))
+				setProgressBar('#pb-overlay', json.overlay_used, 'Overlay Usage');
+		})
+		.catch(() => {})
+		.finally(() => clearTimeout(to));
+}
+
+// Every element here is $-guarded: this runs before the sample is published,
+// so one absent element (a page without the full header, an older install)
+// must degrade to a missing figure, not take the status dashboard down with it.
+function renderTopbar(s) {
+	const v = s.m.v;
+	if (s.temp != null) {
+		const st = $('#soc-temp');
+		if (st) {
+			st.textContent = s.temp.toFixed(0) + '°C';
+			st.title = 'SoC temperature ' + st.textContent;
+		}
+	}
+
+	// The camera's clock is worth a line only when it is wrong. It used to
+	// be printed in full on every page, in the camera's own zone, which is
+	// the one zone nobody reading the page is in — and on a camera whose
+	// timezone was never set that reads "Etc/GMT", i.e. the time in
+	// London. What device time is genuinely good for is catching a camera
+	// that has drifted, because recordings and log rows are stamped by it
+	// and nothing else on the page would show it. So only the drift is
+	// left. (Skew is zone-independent: a correct camera reads 0 whatever
+	// either timezone is, so anything here is a real clock problem.)
+	const drift = $('#clock-drift');
+	if (s.driftMs != null && drift) {
+		const mins = Math.round(s.driftMs / 60000);
+		const el = drift;
+		// Cleared when the clocks agree, not left standing: the camera's
+		// clock can be corrected while the page is open, and a stale warning
+		// would outlive the fault it describes.
+		const text = Math.abs(s.driftMs) > 60000
+			? '⚠ camera ' + (mins > 0 ? '+' : '') + mins + 'm' : '';
+		// Written only when it actually changes. The element is a live
+		// region, and re-setting textContent to the same string still
+		// replaces the text node — a screen reader would hear the same
+		// warning read out afresh every two seconds for as long as the page
+		// stayed open. (A plain `return` here would be worse than the noise
+		// it saves: this runs inside the heartbeat's one handler, so it
+		// would take memory, day/night and uptime down with it.)
+		if (el.textContent !== text) {
+			el.textContent = text;
+			// Colour comes from #clock-drift in bootstrap.override.css, which
+			// is theme-aware; .text-danger is one red for both themes and
+			// fails contrast on each. Only the spacing is a utility.
+			el.className = text ? 'ms-1' : '';
+			if (text) {
+				// The glyph and "+12m" are a shorthand that only reads next to
+				// the clock beside it, and title is not exposed on a span nobody
+				// can focus — so the sentence is what is announced.
+				const why = 'Camera clock is ' + Math.abs(mins) + ' minutes ' +
+					(mins > 0 ? 'ahead of' : 'behind') + ' this browser. Check Time Settings.';
+				el.title = why;
+				el.setAttribute('aria-label', why);
+			} else {
+				el.title = '';
+				el.removeAttribute('aria-label');
+			}
+		}
+	}
+
+	if (s.memPct != null && $('#pb-memory'))
+		setProgressBar('#pb-memory', Math.round(s.memPct), 'Memory Usage');
+
+	const dn = $('#daynight_value');
+	if (dn && 'isp_again' in v)
+		dn.textContent = '🌟 ' + v.isp_again;
+
+	const up = $('#uptime');
+	if (up && s.sysUptimeS != null)
+		up.textContent = 'Uptime:️ ' + uptimeStr(s.sysUptimeS);
 }
 
 function heartbeat() {
@@ -254,90 +423,57 @@ function heartbeat() {
 	// otherwise stop the heartbeat for the rest of the page's life.
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
-	apiFetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin', signal: ctl.signal })
-		.then((response) => response.json())
-		.then((json) => {
-			if (json.soc_temp !== '') {
-				const st = $('#soc-temp')
-				st.textContent = json.soc_temp;
-				st.classList.add(['text-primary','bg-white','rounded','small']);
-				st.title = 'SoC temperature ' + json.soc_temp;
+	if (mjTickN++ % 15 === 0) pulseTick();
+	apiFetch('/metrics', { signal: ctl.signal })
+		.then(r => r.ok ? r.text() : Promise.reject(r.status))
+		.then(text => {
+			mjFails = 0;
+			const m = parseMetrics(text), v = m.v;
+			const t = v.node_time_seconds || (Date.now() / 1000);
+			// dt comes from the browser's monotonic clock, not from the camera's
+			// node_time_seconds: that gauge has whole-second resolution (two polls
+			// inside one second read dt=0) and moves when NTP steps the camera's
+			// clock — either way every rate derived from dt would silently stop
+			// or spike. The counters are camera-side but the clocks agree to well
+			// under the error a 2s window already carries.
+			const mono = performance.now() / 1000;
+			const prev = mjPrevSample;
+			let cpu = null;
+			if (prev && m.cpuTotal > prev.m.cpuTotal) {
+				const d = m.cpuTotal - prev.m.cpuTotal;
+				cpu = Math.max(0, Math.min(100, (1 - (m.cpuIdle - prev.m.cpuIdle) / d) * 100));
 			}
-
-			// The camera's clock is worth a line only when it is wrong. It used to
-			// be printed in full on every page, in the camera's own zone, which is
-			// the one zone nobody reading the page is in — and on a camera whose
-			// timezone was never set that reads "Etc/GMT", i.e. the time in
-			// London. What device time is genuinely good for is catching a camera
-			// that has drifted, because recordings and log rows are stamped by it
-			// and nothing else on the page would show it. So only the drift is
-			// left. (Skew is zone-independent: a correct camera reads 0 whatever
-			// either timezone is, so anything here is a real clock problem.)
-			if (json.time_now !== '') {
-				const skew = json.time_now * 1000 - Date.now();
-				const mins = Math.round(skew / 60000);
-				const el = $('#clock-drift');
-				// Cleared when the clocks agree, not left standing: the camera's
-				// clock can be corrected while the page is open, and a stale warning
-				// would outlive the fault it describes.
-				const text = Math.abs(skew) > 60000
-					? '⚠ camera ' + (mins > 0 ? '+' : '') + mins + 'm' : '';
-				// Written only when it actually changes. The element is a live
-				// region, and re-setting textContent to the same string still
-				// replaces the text node — a screen reader would hear the same
-				// warning read out afresh every two seconds for as long as the page
-				// stayed open. (A plain `return` here would be worse than the noise
-				// it saves: this runs inside the heartbeat's one handler, so it
-				// would take memory, overlay and uptime down with it.)
-				if (el.textContent !== text) {
-					el.textContent = text;
-					// Colour comes from #clock-drift in bootstrap.override.css, which
-					// is theme-aware; .text-danger is one red for both themes and
-					// fails contrast on each. Only the spacing is a utility.
-					el.className = text ? 'ms-1' : '';
-					if (text) {
-						// The glyph and "+12m" are a shorthand that only reads next to
-						// the clock beside it, and title is not exposed on a span nobody
-						// can focus — so the sentence is what is announced.
-						const why = 'Camera clock is ' + Math.abs(mins) + ' minutes ' +
-							(mins > 0 ? 'ahead of' : 'behind') + ' this browser. Check Time Settings.';
-						el.title = why;
-						el.setAttribute('aria-label', why);
-					} else {
-						el.title = '';
-						el.removeAttribute('aria-label');
-					}
-				}
-			}
-
-			if (json.mem_used !== '') {
-				setProgressBar('#pb-memory', json.mem_used, 'Memory Usage');
-			}
-
-			if (json.overlay_used !== '') {
-				setProgressBar('#pb-overlay', json.overlay_used, 'Overlay Usage');
-			}
-
-			if (json.daynight_value !== '-1') {
-				$('#daynight_value').textContent = '🌟 ' + json.daynight_value;
-			}
-
-			if (typeof(json.uptime) !== 'undefined' && json.uptime !== '') {
-				$('#uptime').textContent = 'Uptime:️ ' + json.uptime;
-			}
-
-			// Majestic's own uptime, shown in the status-page Uptime card (if present)
-			if (typeof(json.mj_uptime) !== 'undefined') {
-				const mj = $('#st-uptime-mj');
-				if (mj) mj.textContent = json.mj_uptime || '–';
-			}
+			const memTotal = v.node_memory_MemTotal_bytes || 0;
+			const memAvail = v.node_memory_MemAvailable_bytes || 0;
+			const s = {
+				ok: true, fails: 0, t, dt: prev ? mono - prev.mono : null, cpu,
+				memTotal, memAvail,
+				memPct: memTotal ? (1 - memAvail / memTotal) * 100 : null,
+				temp: ('node_hwmon_temp_celsius' in v) ? v.node_hwmon_temp_celsius : null,
+				driftMs: v.node_time_seconds ? v.node_time_seconds * 1000 - Date.now() : null,
+				sysUptimeS: v.node_boot_time_seconds ? t - v.node_boot_time_seconds : null,
+				mjUptimeS: v.app_boot_time_seconds ? t - v.app_boot_time_seconds : null,
+				night: v.night_enabled | 0, ircut: v.ircut_enabled | 0, light: v.light_enabled | 0,
+				rx: m.rx, tx: m.tx, m,
+				// Consumers do their own counter deltas (net, venc bytes, md rects)
+				// against this snapshot; CPU% is computed here because its state
+				// belongs with the poll loop (see startHeartbeat).
+				prev: prev ? { t: prev.t, rx: prev.m.rx, tx: prev.m.tx, v: prev.m.v } : null,
+			};
+			mjPrevSample = { t: t, mono: mono, m: m };
+			renderTopbar(s);
+			mjMetricsPublish(s);
+		})
+		.catch(() => {
+			mjFails++;
+			mjMetricsPublish({ ok: false, fails: mjFails });
 		})
 		.finally(() => {
 			clearTimeout(to);
 			// Re-arm once the poll has settled. The old `.then(setTimeout(...))`
 			// ran setTimeout immediately and passed .then the timer id, so ticks
-			// were scheduled 2s apart no matter how long the CGI took — they piled
-			// up on exactly the busy camera that could least afford it.
+			// were scheduled 2s apart no matter how long the fetch took — they
+			// piled up on exactly the busy camera that could least afford it.
 			if (!heartbeatStopped)
 				heartbeatTimer = setTimeout(heartbeat, 2000);
 		});
