@@ -1248,7 +1248,13 @@
 			const off = tone.filter(f => f.schema.default !== undefined &&
 				Number(f.getValue()) !== Number(f.schema.default)).length;
 			let head, tail;
-			if (hit && hit.id === 'neutral') {
+			// "Stock" is a claim about the SCHEMA's defaults, so it is answered
+			// by comparing against them — not by matching the Neutral row of a
+			// table that hard-codes 50. On a build whose defaults are not 50,
+			// matching Neutral and being at the factory setting are different
+			// facts, and saying the second when only the first is true is the
+			// one lie this line must never tell.
+			if (!off) {
 				head = 'Stock';
 				tail = '— every value at its factory default';
 			} else if (hit) {
