@@ -30,24 +30,46 @@
 		lc: [-1, 0], cc: [0, 0], rc: [1, 0],
 		dl: [-1, -1], dc: [0, -1], dr: [1, -1],
 	};
-	let inflight = false, holdTimer = null;
+	let inflight = false, holdTimer = null, queuedStop = null;
 
 	// One request in flight at a time — a hold does not queue moves behind a
 	// slow camera, it just measures out what the camera keeps up with. For
 	// Pelco this is also the pulse pacing: btzoom answers only after its
 	// pulse has ended, so a hold strings pulses end to end rather than
-	// stacking them. apiFetch rather than fetch: a lapsed session redirects
-	// to the login page instead of 401ing invisibly at 4 Hz for ever.
-	function req(query) {
-		if (inflight) return;
+	// stacking them. The one press that must NOT be droppable is stop: a
+	// Pelco pulse is in flight half the time, and a stop that vanished into
+	// that window would let the hold's next pulse move a camera the user
+	// just told to stand still — so it queues, and goes out the moment the
+	// current request answers. apiFetch rather than fetch: a lapsed session
+	// redirects to the login page instead of 401ing invisibly at 4 Hz.
+	function req(query, isStop) {
+		if (inflight) {
+			if (isStop) queuedStop = query;
+			return;
+		}
 		inflight = true;
 		apiFetch('/cgi-bin/j/ptz.cgi?' + query, { credentials: 'same-origin' })
+			// The body, not just the headers: j/ptz.cgi answers 200 before it
+			// execs anything, so the headers arrive in milliseconds while the
+			// motor is still moving. The body closes when the CGI exits —
+			// that is the end of a Pelco pulse, and it is what makes a held
+			// button string pulses end to end instead of stacking requests
+			// four times a second behind the camera's port lock.
+			.then(r => r.text())
 			.catch(() => {})
-			.finally(() => { inflight = false; });
+			.finally(() => {
+				inflight = false;
+				const q = queuedStop;
+				queuedStop = null;
+				if (q) req(q, true);
+			});
 	}
 	// What one press of this button means, from its own dataset.
 	function fire(btn) {
-		if (btn.dataset.act) { req('act=' + btn.dataset.act); return; }
+		if (btn.dataset.act) {
+			req('act=' + btn.dataset.act, btn.dataset.act === 'stop');
+			return;
+		}
 		const d = DIRS[btn.dataset.dir];
 		if (d) req('h=' + d[0] * STEP + '&v=' + d[1] * STEP);
 	}
@@ -66,7 +88,10 @@
 
 	mount.querySelectorAll('button').forEach(btn => {
 		if (isCentre(btn)) {
-			btn.addEventListener('click', () => fire(btn));
+			// Stop first kills any hold still ticking (a keyboard hold can be
+			// live while the mouse presses Stop), then fires — and for Pelco
+			// the request itself is the un-droppable kind.
+			btn.addEventListener('click', () => { stopHold(); fire(btn); });
 			return;
 		}
 		btn.addEventListener('pointerdown', e => {
