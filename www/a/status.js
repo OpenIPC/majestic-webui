@@ -447,9 +447,15 @@
 		}
 
 		if (s.prev && s.dt > 0) {
-			const rxMb = Math.max(0, (s.rx - s.prev.rx) / s.dt) * 8 / 1e6;
-			const txMb = Math.max(0, (s.tx - s.prev.tx) / s.dt) * 8 / 1e6;
-			pushChart(chNet, [txMb, rxMb]);
+			// A negative delta is a counter reset or an interface bounce, not
+			// zero traffic — null invalidates the interval so the chart breaks
+			// the run instead of plotting a false outage (same treatment as
+			// the venc byte counters below).
+			const dRx = s.rx - s.prev.rx, dTx = s.tx - s.prev.tx;
+			pushChart(chNet, [
+				dTx >= 0 ? dTx / s.dt * 8 / 1e6 : null,
+				dRx >= 0 ? dRx / s.dt * 8 / 1e6 : null,
+			]);
 
 			// Measured encoder output. A counter still at 0 means this SoC's
 			// byte accounting is absent, not a silent encoder — printing
