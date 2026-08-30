@@ -13,6 +13,13 @@
 
 PORT=$(fw_printenv -n ptz_port 2>/dev/null)
 [ -n "$PORT" ] || PORT=/dev/ttyAMA0
+SPEED=$(fw_printenv -n ptz_speed 2>/dev/null)
+case "$SPEED" in
+	# A rate stty would refuse must not kill the command whole; the popular
+	# rates are plenty, and anything else falls back to the old default.
+	1200|2400|4800|9600|19200|38400|57600|115200) ;;
+	*) SPEED=115200 ;;
+esac
 DELAY='sleep .5'
 LOCK=/tmp/btzoom.lock
 
@@ -48,7 +55,7 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 # runs for every command rather than trusting that `start` — the long lens
 # wakeup and ICR exercise, a maintenance action nobody is required to run —
 # happened first.
-stty -F "$PORT" 115200 raw -echo -onlcr 2>/dev/null
+stty -F "$PORT" "$SPEED" raw -echo -onlcr 2>/dev/null
 
 pelcoD_night() {
 	printf '\xFF\x01\x00\x09\x00\x01\x0B' > "$PORT"
@@ -59,7 +66,7 @@ pelcoD_day() {
 }
 
 pelcoD_start() {
-	stty -F "$PORT" 115200 raw -echo -onlcr
+	stty -F "$PORT" "$SPEED" raw -echo -onlcr
 	$DELAY
 	# Lens wakeup.
 	printf '\x51\x01\x04\x79\x01\x0D\x0A\x2E\x02\x7E\x00\x00\x00\x95' > "$PORT"

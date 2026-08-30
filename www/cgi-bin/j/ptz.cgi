@@ -35,14 +35,39 @@ done
 echo "$HORIZONTAL" | grep -qE '^-?[0-9]{1,2}$' || HORIZONTAL=0
 echo "$VERTICAL" | grep -qE '^-?[0-9]{1,2}$' || VERTICAL=0
 
+# The same switch update_caminfo honours (#227): ptz_control names the
+# method outright; unset falls back to the pre-#227 detection so nothing in
+# the field breaks; "none" (or an unknown method) serves nobody.
+ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 ptz=$(fw_printenv -n ptz 2>/dev/null)
+
+pelco_ok=0
+gpio_ok=0
+motor_ok=0
+profile=""
+case "$ptz_control" in
+	pelco-d) [ -x /usr/bin/btzoom ] && pelco_ok=1 ;;
+	gpio) command -v gpio-motors >/dev/null 2>&1 && gpio_ok=1 ;;
+	motor)
+		profile=$(fw_printenv -n ptz_profile 2>/dev/null)
+		[ -n "$profile" ] || profile="$ptz"
+		[ -x /usr/bin/motor ] && [ -n "$profile" ] && motor_ok=1
+		;;
+	none) ;;
+	"")
+		[ -x /usr/bin/btzoom ] && [ -n "$ptz" ] && pelco_ok=1
+		command -v gpio-motors >/dev/null 2>&1 && [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ] && gpio_ok=1
+		profile="$ptz"
+		[ -x /usr/bin/motor ] && [ -n "$profile" ] && motor_ok=1
+		;;
+esac
 
 # The verb is matched against the closed list, never passed through: btzoom
 # execs "pelcoD_$1", so an unlisted word would call whatever function the
 # query string names. (start/day/night exist in btzoom but are lens
 # maintenance, not viewing controls — not reachable from here.)
 if [ -n "$ACTION" ]; then
-	if [ -x /usr/bin/btzoom ] && [ -n "$ptz" ]; then
+	if [ "$pelco_ok" = 1 ]; then
 		case "$ACTION" in
 			up|down|left|right|stop|wide|tele|near|far)
 				/usr/bin/btzoom "$ACTION"
@@ -56,13 +81,13 @@ if [ -n "$ACTION" ]; then
 	exit 1
 fi
 
-if command -v gpio-motors >/dev/null 2>&1 && [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ]; then
+if [ "$gpio_ok" = 1 ]; then
 	gpio-motors "$HORIZONTAL" "$VERTICAL" 10
 	exit $?
 fi
 
-if [ -x /usr/bin/motor ] && [ -n "$ptz" ]; then
-	/usr/bin/motor "$ptz" "$HORIZONTAL" "$VERTICAL"
+if [ "$motor_ok" = 1 ]; then
+	/usr/bin/motor "$profile" "$HORIZONTAL" "$VERTICAL"
 	exit $?
 fi
 
