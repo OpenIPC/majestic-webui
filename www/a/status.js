@@ -600,10 +600,13 @@
 					chEnc.cfg.ref = { v: encSetMbit, label: 'set ' + encSetMbit.toFixed(1) };
 				}
 			}
-			// Snapshot chip: what the picture is.
+			// The chip names the stream the play button opens — the picture
+			// itself is the JPEG channel (the bar below it says "snapshot"),
+			// so the chip says MAIN outright instead of letting the main
+			// stream's codec and size read as facts about the shown image.
 			const chip = $('#st-prev-chip');
 			if (chip && main) {
-				chip.textContent = codec + ' ' + size + (cfgFps0 ? ' · ' + cfgFps0 + ' fps' : '');
+				chip.textContent = 'MAIN · ' + codec + ' ' + size + (cfgFps0 ? ' · ' + cfgFps0 + ' fps' : '');
 				chip.hidden = false;
 			}
 			startPreview(cfg);
