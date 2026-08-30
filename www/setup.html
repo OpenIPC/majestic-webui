@@ -4,6 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<meta name="darkreader-lock">
+	<meta http-equiv="cache-control" content="no-store">
 	<title>Set up your camera · OpenIPC</title>
 	<!-- Self-contained for the same reason login.html is, and rather more so:
 	     this page is what an unclaimed camera answers with, and an unclaimed
@@ -11,7 +12,12 @@
 	     Everything the page needs is in this file.
 
 	     majestic stops serving it the moment root has a password, so there is
-	     no "already set up" state to handle here: that request is a 404. -->
+	     no "already set up" state to handle here: that request is a 404 — and
+	     this page is the one thing on the camera that must not be shown from a
+	     cache after that, since the form it offers can no longer succeed.
+	     majestic sends Cache-Control: no-cache with it, which covers a reload;
+	     the no-store above and the pageshow handler below cover the back-forward
+	     cache, which a revalidation directive does not reach. -->
 	<style>
 		:root { color-scheme: dark; }
 		* { box-sizing: border-box; }
@@ -129,6 +135,28 @@
 				err.classList.add('show');
 				btn.disabled = false;
 			}
+
+			// Restored from the back-forward cache, this page is a form that
+			// cannot succeed any more: the camera has an owner and /setup
+			// answers 403. bfcache hands back the painted page without asking
+			// the server anything, so no cache header prevents this on its own
+			// — the page has to notice for itself.
+			//
+			// Only on a restore (event.persisted), and only the Back button can
+			// produce one: a successful claim leaves through location.replace(),
+			// which drops this page from history rather than stacking on it. The
+			// path that does stack is the <noscript> form, whose POST is answered
+			// 303 — and a browser without script never runs this either. What is
+			// left is the ordinary Back after a redirect, and a camera somebody
+			// else claimed while this tab sat open.
+			window.addEventListener('pageshow', function (ev) {
+				if (!ev.persisted) return;
+				fetch('/setup.html', { method: 'HEAD', credentials: 'same-origin' })
+					.then(function (r) {
+						if (!r.ok) location.replace('/cgi-bin/status.cgi');
+					})
+					.catch(function () { /* camera unreachable: leave the form */ });
+			});
 
 			form.addEventListener('submit', function (ev) {
 				ev.preventDefault();
