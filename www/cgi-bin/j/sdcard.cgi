@@ -98,6 +98,53 @@ probe_new() {
 probe_write() { printf '%s' "$PROBE" | dd of="$1" bs=512 count=1 2>/dev/null; }
 probe_seen() { [ "$(dd if="$1" bs=1 count=${#PROBE} 2>/dev/null)" = "$PROBE" ]; }
 
+# Stamp the partition and read it back, with the same three outcomes mbr_ok
+# has and for the same reason: "could not look" is not "looked and found the
+# wrong thing", and only the second is evidence against the card.
+#
+# A read that comes back EMPTY means the device node went away again under the
+# mdev churn that dogs every step of a format, not that the card refused the
+# write. Convicting on that put the harshest message this endpoint owns — your
+# card is failing, replace it — in front of someone holding a perfectly good
+# card, on roughly one format in five. So absence is retried, and a write that
+# fails outright is retried too rather than being read back and blamed.
+#
+# A single mismatch is not enough to convict either, and this is the subtle
+# half. Mid-churn the stamp can be written to one node and read back from
+# another after the kernel has re-created the partition, so what returns is the
+# sector that was already on the card — non-empty, and nothing like the stamp.
+# On a freshly wiped card that is random bytes, which reads exactly like a card
+# refusing writes. A card that has genuinely stopped taking them fails EVERY
+# attempt, so requiring the mismatch to repeat separates the two at no cost to
+# the diagnosis.
+#
+# 0 the stamp came back, 1 it repeatedly did not, 2 could not get a clean look.
+probe_card() {
+	pc_i=0
+	pc_miss=0
+	while [ "$pc_i" -lt 6 ]; do
+		if ensure_node; then
+			probe_new
+			if probe_write "$1"; then
+				uncache
+				got=$(dd if="$1" bs=1 count=${#PROBE} 2>/dev/null)
+				[ "$got" = "$PROBE" ] && return 0
+				# Only count it against the card if the partition is still there
+				# and full length now: a mismatch read across a node swap says
+				# nothing about whether the card kept the write.
+				if [ -n "$got" ] && node_ready; then
+					pc_miss=$((pc_miss + 1))
+					[ "$pc_miss" -ge 3 ] && return 1
+				fi
+			fi
+		fi
+		sleep 1
+		pc_i=$((pc_i + 1))
+	done
+	[ "$pc_miss" -ge 3 ] && return 1
+	return 2
+}
+
 # Kernel complaints about this card, newest last. Corroborating detail only:
 # the ring buffer is small and chatty (on hi3516av300 the CMA allocator alone
 # pushes a card error out of it within minutes), so finding nothing here proves
@@ -187,18 +234,67 @@ get_info() {
 	printf '"health":"%s","fsErrors":[%s],"mkfs":[%s]}' "$health" "$errs" "$(mkfs_list)"
 }
 
-# Ensure the /dev/mmcblk0p1 node exists: the kernel may know the partition
-# (in /proc/partitions) before mdev has created the device node. mdev -s makes
-# it (and fires the OpenIPC SD automount rule).
+# The node existing is not the same as the partition being usable, and waiting
+# only for `-b` is what made formatting a blank card fail about one run in
+# four. Writing a partition table makes the kernel drop and re-add the
+# partition, and around that pair mdev can leave a node behind whose partition
+# the kernel no longer has: it opens fine and every size query answers zero.
+# That is what reaches mkfs as "image is too small" — a complaint it makes
+# about a 59 GB card — and what reaches mount as a bare ENOENT on the device.
+#
+# So measure the partition instead of asking whether a filename exists: read
+# its far end. A sector that comes back from the last block of the partition is
+# proof the kernel has it at the size /sys claims, which is the thing mkfs and
+# mount are each about to rely on.
+node_ready() {
+	[ -b "${DEV}p1" ] || return 1
+	sz=$(cat "$SYS/mmcblk0p1/size" 2>/dev/null)
+	case "$sz" in ''|*[!0-9]*) return 1;; esac
+	[ "$sz" -gt 0 ] || return 1
+	[ "$(dd if="${DEV}p1" bs=512 skip=$((sz - 1)) count=1 2>/dev/null | wc -c)" = 512 ]
+}
+
+# Ensure /dev/mmcblk0p1 is there and usable: the kernel knows the partition
+# (it is in /proc/partitions and /sys) before the node exists in /dev.
+#
+# Make the node here, from the major:minor the kernel already publishes, rather
+# than asking mdev for it. `mdev -s` was what stood here, and it is a rescan of
+# every device in /sys that re-runs the hotplug rules for each — which for this
+# partition means /lib/mdev/automount.sh, the script whose umount pass unmounts
+# the card and rmdir's /mnt/mmcblk0p1. So the call made to recover from node
+# churn was itself a generator of it, and every retry made the next step more
+# likely to fail. mknod asks the kernel for nothing and disturbs nothing.
+# Every loop here carries its own counter. `i` was shared, and ensure_node —
+# which each of the retry helpers calls inside its own loop — resets it to 0 and
+# counts it up again, so an outer loop's remaining attempts were whatever the
+# inner one happened to leave behind. The retries added to ride out the hotplug
+# churn could therefore be skipped by the settling they were waiting on.
 ensure_node() {
-	[ -b "${DEV}p1" ] && return 0
-	i=0
-	while [ ! -b "${DEV}p1" ] && [ "$i" -lt 10 ]; do
-		mdev -s 2>/dev/null
-		[ -b "${DEV}p1" ] && break
-		sleep 1; i=$((i + 1))
+	node_ready && return 0
+	en_i=0
+	while [ "$en_i" -lt 10 ]; do
+		mm=$(cat "$SYS/mmcblk0p1/dev" 2>/dev/null)   # e.g. "179:1"
+		case "$mm" in
+			[0-9]*:[0-9]*)
+				[ -b "${DEV}p1" ] ||
+					mknod "${DEV}p1" b "${mm%%:*}" "${mm##*:}" 2>/dev/null
+				;;
+			*)
+				# The kernel has no partition at all, not merely no node for
+				# one: there is nothing in /sys to make a node from. It re-reads
+				# the table only while nothing holds the disk open, and the
+				# automount is exactly such a holder, so partprobe here can have
+				# failed with EBUSY and left the kernel on its old idea of the
+				# layout. Let go of the card and ask again.
+				umount /mnt/mmcblk0p1 2>/dev/null
+				umount "$DEV" 2>/dev/null
+				partprobe "$DEV" 2>/dev/null
+				;;
+		esac
+		node_ready && return 0
+		sleep 1; en_i=$((en_i + 1))
 	done
-	[ -b "${DEV}p1" ]
+	node_ready
 }
 
 do_format() {
@@ -206,54 +302,137 @@ do_format() {
 	case "$fs" in vfat|ext4|exfat) ;; *) err="unsupported filesystem"; return;; esac
 	command -v "mkfs.$fs" >/dev/null 2>&1 || { err="mkfs.$fs not installed"; return; }
 	umount /mnt/mmcblk0p1 2>/dev/null; umount "${DEV}p1" 2>/dev/null; umount "$DEV" 2>/dev/null
-	# Look before writing, and look on every format rather than only the ones
-	# that write: the kernel can be holding an mmcblk0p1 from an earlier boot
-	# over a card whose sector 0 no longer has the table it came from, and it
-	# was skipping the check on exactly that reading that let a card storing
-	# nothing format "successfully" in the lab.
+	# Always write the table. Format means erase, so there is no state of the
+	# card that makes writing one wrong — and deciding *not* to write it was a
+	# way to get this wrong. The test that guarded it read sector 0, and that
+	# read can come back from the page cache rather than the card (uncache is
+	# defence in depth, not a guarantee, once something holds the device open).
+	# A stale-but-valid-looking table then skipped the partitioning entirely and
+	# mkfs ran against whatever the kernel still believed the layout to be,
+	# which is a format that "succeeds" onto a partition that is not there.
+	#
+	# Writing unconditionally also subsumes the case the guard was added for —
+	# a kernel holding an mmcblk0p1 from an earlier boot over a card whose
+	# sector 0 no longer has the table it came from — without having to
+	# recognise it first.
+	logln "# partition ${DEV}"
+	logln "$(printf 'o\nn\np\n1\n\n\nw\n' | fdisk "$DEV" 2>&1)"
+	partprobe "$DEV" 2>/dev/null
 	uncache
 	mbr_ok "$DEV"; st=$?
-	# A table is written when the card has none, and also when the one the
-	# kernel is holding is not on the card any more. That second case says
-	# nothing about the card until something has been written to it — a healthy
-	# card whose table was wiped out from under a mounted kernel needs its table
-	# put back, not condemning.
-	if [ "$st" != 0 ] || ! grep -q 'mmcblk0p1$' /proc/partitions; then
-		logln "# partition ${DEV}"
-		logln "$(printf 'o\nn\np\n1\n\n\nw\n' | fdisk "$DEV" 2>&1)"
-		partprobe "$DEV" 2>/dev/null
-		uncache
-		mbr_ok "$DEV"; st=$?
-	fi
-	# Only now can a missing table mean something about the card: one was
-	# written to it on this run and did not come back.
+	# Now a missing table means something about the card: one was written to it
+	# on this run and did not come back. Before the write it would have meant
+	# only that the card had never been partitioned, which is why someone is
+	# here in the first place.
 	case "$st" in
 		1) err="$UNSTORED"; return;;
 		2) logln "# note: could not read the partition table back to check it";;
 	esac
 	ensure_node || { err="the partition table was written but the kernel never created ${DEV}p1 — rebooting the camera will pick it up"; return; }
 	umount "${DEV}p1" 2>/dev/null   # automount may have grabbed it
-	probe_new
-	probe_write "${DEV}p1"
-	uncache
-	probe_seen "${DEV}p1" || { err="$UNSTORED"; return; }
+	probe_card "${DEV}p1"; ps=$?
+	case "$ps" in
+		1) err="$UNSTORED"; return;;
+		2) logln "# note: could not read the write probe back to check it";;
+	esac
 	logln "# mkfs.$fs ${DEV}p1"
-	o=$(mkfs.$fs "${DEV}p1" 2>&1); rc=$?
+	mkfs_settled
 	[ -n "$o" ] && logln "$o"
 	[ "$rc" -eq 0 ] || { err="$(first_line "${o:-mkfs.$fs failed}")"; return; }
+	# Mounting IS the proof that a filesystem was written, and it is what the
+	# caller wanted anyway — so ask that question first and ask no other.
+	#
+	# What stood here instead was a pair of cold reads of the raw partition
+	# (probe_seen, then blkid) run immediately after mkfs. Every one of those
+	# races the mdev remove/add pair that writing the filesystem sets off, and a
+	# read landing in the gap reports a device that is briefly absent — which
+	# this then announced as "mkfs reported success but no filesystem was
+	# written", about a card carrying a perfectly good one. Between that and the
+	# mount below, a blank card failed to format on roughly one attempt in four.
+	logln "# mount ${DEV}p1 /mnt/mmcblk0p1"
+	if mount_after_format; then
+		[ -n "$o" ] && logln "$o"
+		return
+	fi
+	[ -n "$o" ] && logln "$o"
+	# It did not mount. Only now is it worth asking what mkfs actually left
+	# behind, and only now is the answer worth trusting: mount_after_format has
+	# spent its retries, so the node has stopped moving under us.
+	#
+	# blkid is judged on its *output*, never its exit status: busybox blkid
+	# exits 0 for a blank partition and for a device that does not exist at all,
+	# so `blkid || fail` — which this once was — could never fire. Nothing down
+	# here blames the card: a card that failed the write probe was reported as
+	# such above, and one that could not be probed at all was never convicted in
+	# the first place.
 	uncache
-	# Past the probe the card is known to be keeping writes, so nothing below
-	# blames it. mkfs writes its superblock over the stamp, and blkid is judged
-	# on its *output*, never its exit status: busybox blkid exits 0 for a blank
-	# partition and for a device that does not exist at all, so `blkid || fail`
-	# — which is what stood here — could never fail.
 	if probe_seen "${DEV}p1" || [ -z "$(blkid "${DEV}p1" 2>/dev/null)" ]; then
 		err="mkfs.$fs reported success but no filesystem was written"
 		return
 	fi
-	mkdir -p /mnt/mmcblk0p1
-	mount "${DEV}p1" /mnt/mmcblk0p1 2>/dev/null
-	mountpoint -q /mnt/mmcblk0p1 || err="mount after format failed"
+	err="$(first_line "${o:-mount after format failed}")"
+}
+
+# mkfs gets the same settle treatment as the probe above and the mount below,
+# because it fails the same way for the same reason: "image is too small" is
+# what mkfs.vfat says when the kernel hands it a partition that has momentarily
+# gone to zero length, and it says it about a 59 GB card. node_ready() makes
+# that rare rather than impossible — it proves the partition is there and full
+# length, but cannot hold it that way across the exec that follows.
+#
+# Only the transient complaints are retried. Matching them by message is crude,
+# and deliberately narrow for that reason: anything else mkfs says is a real
+# refusal and is reported the first time, unretried. Sets `o` and `rc` for the
+# caller, as the inline call it replaced did.
+mkfs_settled() {
+	mk_i=0
+	while [ "$mk_i" -lt 5 ]; do
+		if ensure_node; then
+			o=$(mkfs.$fs "${DEV}p1" 2>&1); rc=$?
+			[ "$rc" -eq 0 ] && return 0
+			case "$o" in
+				*"too small"*|*[Nn]"o such file"*|*"Invalid argument"*) ;;
+				*) return 1;;
+			esac
+		else
+			# Say what actually went wrong. Reporting this as "mkfs failed"
+			# blames the one step that never got to run.
+			o="the kernel did not settle on a partition to format — the table was written, so try the format once more"
+		fi
+		sleep 1
+		mk_i=$((mk_i + 1))
+	done
+	rc=${rc:-1}
+	return 1
+}
+
+# Mount the card we have just formatted, against a hotplug helper that is
+# actively fighting us. Every partition re-read fires mdev, and the remove half
+# of the pair runs /lib/mdev/automount.sh, whose my_umount both unmounts the
+# card AND rmdir's /mnt/mmcblk0p1 — so a mount can fail with ENOENT on the
+# directory created two statements earlier, or on a node mdev has dropped and
+# not yet remade. Neither is a fault of the card, and reporting either to
+# somebody who asked for a format is reporting the wrong thing: this was ~1 run
+# in 4 on a perfectly good card.
+#
+# There is no lock to take against an asynchronous helper, so the honest
+# approach is to keep asking until the kernel and mdev have settled and only
+# then believe a failure. The add half of the same pair also mounts the card
+# itself, which is why an already-mounted card counts as success here rather
+# than as a competing attempt.
+mount_after_format() {
+	mt_i=0
+	while [ "$mt_i" -lt 8 ]; do
+		mountpoint -q /mnt/mmcblk0p1 && return 0
+		if ensure_node; then
+			mkdir -p /mnt/mmcblk0p1 2>/dev/null
+			o=$(mount "${DEV}p1" /mnt/mmcblk0p1 2>&1)
+			mountpoint -q /mnt/mmcblk0p1 && return 0
+		fi
+		sleep 1
+		mt_i=$((mt_i + 1))
+	done
+	return 1
 }
 
 # What mount and umount say when they refuse is the whole diagnosis — a card
