@@ -234,15 +234,22 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   while the stage itself has focus (the bar's slider and radios own them
   otherwise), `apiFetch` to `j/ptz.cgi`. **Three PTZ backends**, detected in
   `common.cgi:update_caminfo` into `ptz_backend` (cached in sysinfo like
-  `ptz_support`): `gpio` (U-Boot `gpio_motors` + `gpio-motors` binary) and
-  `motor` (`ptz` + `/usr/bin/motor`) are stepped eight-way pads speaking
-  `j/ptz.cgi?h=&v=` (validated as small signed ints); `pelco` (`ptz` +
-  `/usr/bin/btzoom`) is the community Pelco-D serial mod — four directions,
-  zoom and focus, each a fixed timed pulse — speaking `j/ptz.cgi?act=<verb>`
-  against a closed whitelist (btzoom execs `pelcoD_$1`, so the verb must
-  never pass through raw). `bin/btzoom` ships in this repo (adopted from
-  OpenIPC/sandbox `scripts/pelcoD`, port from U-Boot `ptz_port`, default
-  `/dev/ttyAMA0`) so a Pelco camera needs only `fw_setenv ptz true`. A held
+  `ptz_support`). The switch is U-Boot `ptz_control` (#227): `gpio`
+  (`gpio-motors` binary; pins in `ptz_gpio` — though the binary itself still
+  reads legacy `gpio_motors`, so set that one until the firmware utility
+  learns the new name), `pelco-d` (`/usr/bin/btzoom`; `ptz_port` default
+  `/dev/ttyAMA0`, `ptz_speed` default 115200 from a whitelist of standard
+  rates), `motor` (`/usr/bin/motor`; profile in `ptz_profile`, legacy `ptz`
+  value as fallback), or `none`. With `ptz_control` unset the pre-#227
+  detection stands (legacy `gpio_motors`/`ptz` vars), so field cameras keep
+  their pads; `j/ptz.cgi` honours the same switch. `gpio` and `motor` are
+  stepped eight-way pads speaking `j/ptz.cgi?h=&v=` (validated as small
+  signed ints); `pelco` is the community Pelco-D serial mod — four
+  directions, zoom and focus, each a fixed timed pulse — speaking
+  `j/ptz.cgi?act=<verb>` against a closed whitelist (btzoom execs
+  `pelcoD_$1`, so the verb must never pass through raw). `bin/btzoom` ships
+  in this repo (adopted from OpenIPC/sandbox `scripts/pelcoD`) so a Pelco
+  camera needs only `fw_setenv ptz_control pelco-d`. A held
   Pelco button strings pulses end-to-end via the one-request-in-flight
   guard — btzoom answers only after its pulse ends. To render either pad on
   a camera without hardware: set the env vars, `touch`+`chmod +x` fake

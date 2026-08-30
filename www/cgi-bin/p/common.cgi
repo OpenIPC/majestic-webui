@@ -670,23 +670,55 @@ update_caminfo() {
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow | cut -d: -f2)
-	# PTZ preview controls. Three backends, each needing both its switch and
-	# its binary: GPIO motors (gpio_motors + gpio-motors), a motor profile
-	# (ptz + /usr/bin/motor), or Pelco-D over serial (ptz + /usr/bin/btzoom).
-	# The backend decides which pad p/motor.cgi draws — the first two are
-	# stepped pan/tilt with diagonals, Pelco-D is four directions in timed
-	# pulses plus zoom and focus. Order matters only when a camera has
-	# several installed; the stepped backends win because their protocol
-	# carries magnitudes the Pelco pulses cannot.
-	if [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ] && command -v gpio-motors >/dev/null 2>&1; then
-		ptz_support="1"; ptz_backend="gpio"
-	elif [ -x /usr/bin/motor ] && [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; then
-		ptz_support="1"; ptz_backend="motor"
-	elif [ -x /usr/bin/btzoom ] && [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; then
-		ptz_support="1"; ptz_backend="pelco"
-	else
-		ptz_support=""; ptz_backend=""
-	fi
+	# PTZ preview controls. The switch is the U-Boot ptz_control variable
+	# (#227): it names the method — "gpio" (gpio-motors, pins in ptz_gpio or
+	# the legacy gpio_motors, which the gpio-motors binary itself still
+	# reads), "pelco-d" (btzoom over serial, port/rate in ptz_port and
+	# ptz_speed), "motor" (a motor profile in ptz_profile or the legacy ptz
+	# value), or "none". An explicit method is trusted but still needs its
+	# binary — a pad whose every press fails is worse than no pad. With
+	# ptz_control unset, the pre-#227 detection stands so no camera in the
+	# field loses its pad: gpio wins over a profile wins over Pelco, because
+	# the stepped protocols carry magnitudes the Pelco pulses cannot.
+	# The backend decides which pad p/motor.cgi draws — gpio and motor are
+	# stepped eight-way pan/tilt, Pelco-D is four directions in timed pulses
+	# plus zoom and focus.
+	ptz_support=""; ptz_backend=""
+	ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
+	case "$ptz_control" in
+		gpio)
+			# The binary AND a pin list: gpio-motors without pins errors on
+			# every press, and the pad must not render what cannot work. The
+			# binary itself still reads the legacy name, so either satisfies.
+			if command -v gpio-motors >/dev/null 2>&1 &&
+				{ [ -n "$(fw_printenv -n ptz_gpio 2>/dev/null)" ] || [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ]; }; then
+				ptz_support="1"; ptz_backend="gpio"
+			fi
+			;;
+		pelco-d)
+			if [ -x /usr/bin/btzoom ]; then
+				ptz_support="1"; ptz_backend="pelco"
+			fi
+			;;
+		motor)
+			# Same rule: the profile is what the binary is called with, so a
+			# pad without one would render presses the endpoint refuses.
+			if [ -x /usr/bin/motor ] &&
+				{ [ -n "$(fw_printenv -n ptz_profile 2>/dev/null)" ] || [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; }; then
+				ptz_support="1"; ptz_backend="motor"
+			fi
+			;;
+		none) ;;
+		"")
+			if [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ] && command -v gpio-motors >/dev/null 2>&1; then
+				ptz_support="1"; ptz_backend="gpio"
+			elif [ -x /usr/bin/motor ] && [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; then
+				ptz_support="1"; ptz_backend="motor"
+			elif [ -x /usr/bin/btzoom ] && [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; then
+				ptz_support="1"; ptz_backend="pelco"
+			fi
+			;;
+	esac
 
 	# Network
 	network_interface=$(ip route | awk '/default/ {print $5}' | head -n1)
