@@ -319,9 +319,12 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 	{
 		// WebRTC takes ?stream= as a preference, and majestic#299 arrived as
 		// "Main selected, Sub displayed" with nothing on the page admitting
-		// it. With no remembered choice the page opens on Sub.
+		// it. With no remembered choice the page opens on Sub. Main's size is
+		// deliberately non-canonical: the settings page accepts and persists
+		// this form, and a size the preview refused to read would silence
+		// the note exactly when it was needed.
 		const env = load({
-			main: '1920x1080', sub: '800x600', transport: 'webrtc',
+			main: '1920 X 1080', sub: '800x600', transport: 'webrtc',
 		});
 		await tick();
 		const live = env.made[0];

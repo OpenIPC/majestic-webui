@@ -78,10 +78,13 @@
 				stream = 0;
 			}
 		}
-		// "WxH" per channel. Auto compares areas, so parse once.
+		// "WxH" per channel. Auto compares areas, so parse once. The same
+		// tolerant grammar as mj-settings' parseWH — that page accepts and
+		// persists "1920 X 1080", and a size the preview refused to read
+		// would silence both Auto and the served-channel note for it.
 		sizeOf = [0, 1].map(n => {
 			const v = mjGet(cfg, 'video' + n + '.size');
-			const m = /^(\d+)x(\d+)$/.exec(String(v || ''));
+			const m = /^\s*(\d+)\s*x\s*(\d+)\s*$/i.exec(String(v || ''));
 			return m ? { w: +m[1], h: +m[2] } : null;
 		});
 		autoApply();
