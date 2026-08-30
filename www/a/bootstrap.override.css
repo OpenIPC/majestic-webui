@@ -2038,6 +2038,35 @@ mark {
 	}
 }
 
+/* A Pelco camera puts two panels in that row, and at full size they need 284px
+   against a stage that is the viewport less ~56 — so from about 340px down
+   they hang over both edges of the picture (measured at 320: 284 into 264).
+   They stay side by side and give up 4px of grid instead of stacking, which
+   would put 315px of chrome under a 150px picture. 40px still clears WCAG
+   2.5.8 comfortably. Below 320 the page has other problems; Bootstrap's own
+   floor is 320 too. */
+@media (max-width: 359.98px) {
+	/* Only the pad got shorter here — the zoom/focus cluster is as tall as it
+	   was, so a Pelco camera keeps the 11rem the wider step reserved. */
+	.mj-stage:has(> .mj-ptz:not([hidden])) {
+		margin-bottom: 9.5rem;
+	}
+
+	.mj-ptz-pad {
+		grid-template-columns: repeat(3, 2.5rem);
+		grid-auto-rows: 2.5rem;
+	}
+
+	.mj-ptz-void {
+		height: 2.5rem;
+	}
+
+	.mj-ptz-fnbtn {
+		min-width: 3.25rem;
+		padding: 0.45rem 0.35rem 0.4rem;
+	}
+}
+
 .mj-stage:fullscreen {
 	aspect-ratio: auto;
 	width: 100%;
