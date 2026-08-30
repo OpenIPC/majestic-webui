@@ -120,9 +120,9 @@ probe_seen() { [ "$(dd if="$1" bs=1 count=${#PROBE} 2>/dev/null)" = "$PROBE" ]; 
 #
 # 0 the stamp came back, 1 it repeatedly did not, 2 could not get a clean look.
 probe_card() {
-	i=0
-	miss=0
-	while [ "$i" -lt 6 ]; do
+	pc_i=0
+	pc_miss=0
+	while [ "$pc_i" -lt 6 ]; do
 		if ensure_node; then
 			probe_new
 			if probe_write "$1"; then
@@ -133,15 +133,15 @@ probe_card() {
 				# and full length now: a mismatch read across a node swap says
 				# nothing about whether the card kept the write.
 				if [ -n "$got" ] && node_ready; then
-					miss=$((miss + 1))
-					[ "$miss" -ge 3 ] && return 1
+					pc_miss=$((pc_miss + 1))
+					[ "$pc_miss" -ge 3 ] && return 1
 				fi
 			fi
 		fi
 		sleep 1
-		i=$((i + 1))
+		pc_i=$((pc_i + 1))
 	done
-	[ "$miss" -ge 3 ] && return 1
+	[ "$pc_miss" -ge 3 ] && return 1
 	return 2
 }
 
@@ -264,10 +264,15 @@ node_ready() {
 # the card and rmdir's /mnt/mmcblk0p1. So the call made to recover from node
 # churn was itself a generator of it, and every retry made the next step more
 # likely to fail. mknod asks the kernel for nothing and disturbs nothing.
+# Every loop here carries its own counter. `i` was shared, and ensure_node —
+# which each of the retry helpers calls inside its own loop — resets it to 0 and
+# counts it up again, so an outer loop's remaining attempts were whatever the
+# inner one happened to leave behind. The retries added to ride out the hotplug
+# churn could therefore be skipped by the settling they were waiting on.
 ensure_node() {
 	node_ready && return 0
-	i=0
-	while [ "$i" -lt 10 ]; do
+	en_i=0
+	while [ "$en_i" -lt 10 ]; do
 		mm=$(cat "$SYS/mmcblk0p1/dev" 2>/dev/null)   # e.g. "179:1"
 		case "$mm" in
 			[0-9]*:[0-9]*)
@@ -287,7 +292,7 @@ ensure_node() {
 				;;
 		esac
 		node_ready && return 0
-		sleep 1; i=$((i + 1))
+		sleep 1; en_i=$((en_i + 1))
 	done
 	node_ready
 }
@@ -380,8 +385,8 @@ do_format() {
 # refusal and is reported the first time, unretried. Sets `o` and `rc` for the
 # caller, as the inline call it replaced did.
 mkfs_settled() {
-	i=0
-	while [ "$i" -lt 5 ]; do
+	mk_i=0
+	while [ "$mk_i" -lt 5 ]; do
 		if ensure_node; then
 			o=$(mkfs.$fs "${DEV}p1" 2>&1); rc=$?
 			[ "$rc" -eq 0 ] && return 0
@@ -395,7 +400,7 @@ mkfs_settled() {
 			o="the kernel did not settle on a partition to format — the table was written, so try the format once more"
 		fi
 		sleep 1
-		i=$((i + 1))
+		mk_i=$((mk_i + 1))
 	done
 	rc=${rc:-1}
 	return 1
@@ -416,8 +421,8 @@ mkfs_settled() {
 # itself, which is why an already-mounted card counts as success here rather
 # than as a competing attempt.
 mount_after_format() {
-	i=0
-	while [ "$i" -lt 8 ]; do
+	mt_i=0
+	while [ "$mt_i" -lt 8 ]; do
 		mountpoint -q /mnt/mmcblk0p1 && return 0
 		if ensure_node; then
 			mkdir -p /mnt/mmcblk0p1 2>/dev/null
@@ -425,7 +430,7 @@ mount_after_format() {
 			mountpoint -q /mnt/mmcblk0p1 && return 0
 		fi
 		sleep 1
-		i=$((i + 1))
+		mt_i=$((mt_i + 1))
 	done
 	return 1
 }

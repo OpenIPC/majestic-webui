@@ -1362,15 +1362,34 @@
 	// still reads /mnt/mmcblk0p1, so setting `enabled` alone would arm a
 	// recorder aimed at a directory on the overlay — which majestic refuses
 	// outright — leaving recording on and nothing written.
+	//
+	// Which is why the mountpoint is demanded rather than used if present.
+	// loadCard() swallows its own failure and resolves with state.card null, so
+	// "no mountpoint" here means the card was not asked about successfully — and
+	// enabling anyway would leave records.path at whatever it was, recreating
+	// precisely the state this exists to prevent.
+	//
+	// Resolves to '' when recording is really on, and to a reason when it is
+	// not; a write that was refused must never be reported as one that landed.
 	function useCardForRecording() {
 		return loadCard().then(function () {
-			const mp = state.card && state.card.mountpoint;
-			const rec = { enabled: 'true' };
-			if (mp) rec.path = mp + '/%F';
+			const d = state.card;
+			if (!d || !d.mounted || !d.mountpoint)
+				return 'The card was prepared, but the camera did not report where it ' +
+					'mounted, so recording was left off.';
 			return apiFetch('/api/v1/config', {
 				method: 'POST', credentials: 'same-origin',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ records: rec }),
+				body: JSON.stringify({
+					records: { enabled: 'true', path: d.mountpoint + '/%F' },
+				}),
+			}).then(function (r) {
+				if (r.ok) return '';
+				// Plain text, not markup: this is read out through alert().
+				return r.text().then(function (t) {
+					return 'The card is ready, but the camera refused to start recording' +
+						(t ? ': ' + t.slice(0, 160) : ' (HTTP ' + r.status + ').');
+				});
 			});
 		});
 	}
@@ -1398,10 +1417,19 @@
 						return;
 					}
 					say('<span class="text-secondary">Starting recording…</span>');
-					return useCardForRecording().then(function () {
+					return useCardForRecording().then(function (why) {
+						// The card really was prepared, so the page has to re-read
+						// itself either way: everything it currently says about the
+						// card is now out of date. Which is also why the failure
+						// cannot be reported in place — the re-read owns #rec-note
+						// and watchCard() refreshes it every few seconds, so a line
+						// written there is wiped almost immediately. alert() is
+						// what sdcard.js already uses to report a failed op, and it
+						// is the one surface a re-render cannot take away.
+						if (why) alert(why);
 						waitStep = 0;
 						stalled = false;
-						boot();
+						return boot();
 					});
 				})
 				.catch(function () {
