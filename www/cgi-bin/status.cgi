@@ -14,6 +14,19 @@
 <% ov_avail=$(echo $ov_df | cut -d' ' -f3) %>
 <% ov_cats=$(du -sk "$ovd"/* 2>/dev/null | sort -rn | awk '{n=$2; sub(/.*\//,"",n); printf "%s{\"name\":\"%s\",\"kb\":%d}",(NR>1?",":""),n,$1}') %>
 <% sd_rows=$(df -h 2>/dev/null | awk '/mmcblk|\/mnt\/|\/media\/|\/sdcard/{print $6"|"$3" / "$2"|"$5}') %>
+<%# One row per interface that is up and addressed — common.cgi's network_*
+    variables describe only the first default route's device, which hides the
+    second interface on a camera running eth0 and wlan0 at once. %>
+<% net_defdev=$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}') %>
+<% net_rows=$(for i in /sys/class/net/*; do
+	n=${i##*/}
+	[ "$n" = "lo" ] && continue
+	[ "$(cat $i/operstate 2>/dev/null)" = "down" ] && continue
+	a=$(ip addr show dev $n 2>/dev/null | awk '/inet /{print $2; exit}' | cut -d/ -f1)
+	[ -z "$a" ] && continue
+	echo "$n|$a|$(cat $i/address 2>/dev/null)"
+done) %>
+<% net_gw=$(ip route 2>/dev/null | awk '/^default/ && !seen[$3]++ {printf "%s%s", (n++ ? ", " : ""), $3}') %>
 
 <div class="d-flex align-items-center gap-3 flex-wrap" style="margin:2rem 0 1.5rem">
 	<h2 class="text-primary m-0"><%= $page_title %></h2>
@@ -114,10 +127,17 @@
 			<h3>Network</h3>
 			<dl class="small list mb-0">
 				<dt>Host</dt><dd><% esc "$network_hostname" %></dd>
-				<dt>Address</dt><dd><% esc "$network_address" %></dd>
-				<dt>MAC</dt><dd class="text-break"><% esc "$network_macaddr" %></dd>
-				<dt>Link</dt><dd><% esc "$network_interface" %></dd>
-				<dt>Gateway</dt><dd><% esc "$network_gateway" %></dd>
+				<% if [ -n "$net_rows" ]; then %>
+					<% echo "$net_rows" | while IFS='|' read n a m; do %>
+						<dt><% esc "$n" %><% [ "$n" = "$net_defdev" ] && echo ' <span class="text-secondary x-small">default</span>' %></dt>
+						<dd><% esc "$a" %><div class="x-small text-secondary text-break"><% esc "$m" %></div></dd>
+					<% done %>
+				<% else %>
+					<dt>Address</dt><dd><% esc "$network_address" %></dd>
+					<dt>MAC</dt><dd class="text-break"><% esc "$network_macaddr" %></dd>
+					<dt>Link</dt><dd><% esc "$network_interface" %></dd>
+				<% fi %>
+				<dt>Gateway</dt><dd><% esc "${net_gw:-$network_gateway}" %></dd>
 			</dl>
 			<!-- Filled by status.js when the camera reports wifi_* metrics -->
 			<div id="st-wifi" hidden>
