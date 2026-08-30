@@ -47,7 +47,14 @@ motor_ok=0
 profile=""
 case "$ptz_control" in
 	pelco-d) [ -x /usr/bin/btzoom ] && pelco_ok=1 ;;
-	gpio) command -v gpio-motors >/dev/null 2>&1 && gpio_ok=1 ;;
+	gpio)
+		# Binary AND a pin list (either name — the binary itself still reads
+		# the legacy one), mirroring update_caminfo.
+		if command -v gpio-motors >/dev/null 2>&1 &&
+			{ [ -n "$(fw_printenv -n ptz_gpio 2>/dev/null)" ] || [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ]; }; then
+			gpio_ok=1
+		fi
+		;;
 	motor)
 		profile=$(fw_printenv -n ptz_profile 2>/dev/null)
 		[ -n "$profile" ] || profile="$ptz"

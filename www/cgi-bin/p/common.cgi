@@ -687,7 +687,11 @@ update_caminfo() {
 	ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 	case "$ptz_control" in
 		gpio)
-			if command -v gpio-motors >/dev/null 2>&1; then
+			# The binary AND a pin list: gpio-motors without pins errors on
+			# every press, and the pad must not render what cannot work. The
+			# binary itself still reads the legacy name, so either satisfies.
+			if command -v gpio-motors >/dev/null 2>&1 &&
+				{ [ -n "$(fw_printenv -n ptz_gpio 2>/dev/null)" ] || [ -n "$(fw_printenv -n gpio_motors 2>/dev/null)" ]; }; then
 				ptz_support="1"; ptz_backend="gpio"
 			fi
 			;;
@@ -697,7 +701,10 @@ update_caminfo() {
 			fi
 			;;
 		motor)
-			if [ -x /usr/bin/motor ]; then
+			# Same rule: the profile is what the binary is called with, so a
+			# pad without one would render presses the endpoint refuses.
+			if [ -x /usr/bin/motor ] &&
+				{ [ -n "$(fw_printenv -n ptz_profile 2>/dev/null)" ] || [ -n "$(fw_printenv -n ptz 2>/dev/null)" ]; }; then
 				ptz_support="1"; ptz_backend="motor"
 			fi
 			;;
