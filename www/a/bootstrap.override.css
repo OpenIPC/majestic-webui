@@ -651,6 +651,46 @@ mark {
 	color: var(--bs-warning);
 }
 
+/* ---- Live View layout: stage + side rail -----------------------------------
+   The rail exists because p/motor.cgi is a de-facto plugin point: users
+   replace it with their own control sets built for the old ~300px Controls
+   column, and that content needs a column to land in (#184). The stage's
+   viewport clamp is what pays for it — on most screens the clamped stage
+   leaves the rail's width free. When it does not, the rail wraps below the
+   stage at its own width; stretching someone's stacked buttons across the
+   full page is exactly the breakage this fixes. */
+.mj-layout {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+	align-items: flex-start;
+}
+
+.mj-main {
+	flex: 1 1 36rem;
+	min-width: 0;
+}
+
+.mj-side {
+	flex: 1 1 12rem;
+	max-width: 19rem;
+}
+
+/* Beside the rail the stage sits left; its own width clamp still applies. */
+.mj-layout .mj-stage {
+	margin-inline: 0;
+}
+
+/* Kept for the motor.cgi replacements in the field: the stock pads stopped
+   using this class, but custom control sets built against it should not turn
+   into unstyled buttons on upgrade. */
+.btn-motor {
+	font-size: 2.3rem;
+	--bs-btn-border-width: 0;
+	--bs-btn-padding-x: 0;
+	--bs-btn-padding-y: 0;
+}
+
 /* ---- Live View stage -------------------------------------------------------
    Everything below is on-video chrome: black glass over whatever the camera is
    showing, deliberately identical in both themes because its background is the
