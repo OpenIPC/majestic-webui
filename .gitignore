@@ -5,3 +5,6 @@
 /node_modules/
 /majestic-webui-dist.tar.gz
 *.sqsh
+
+# session verification scratch — lab-camera screenshots must never be committed
+.verify-tmp/

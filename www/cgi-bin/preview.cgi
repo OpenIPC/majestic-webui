@@ -5,7 +5,15 @@
 <%in p/header.cgi %>
 <!-- No page heading: the nav underlines "Live", and the row the <h2> occupied
      is exactly the row the player needs to fit a laptop viewport without
-     scrolling. -->
+     scrolling.
+
+     This page is deliberately settings-free: it is the page every user of a
+     future multi-user system gets, read-only, so nothing on it changes the
+     camera. Every setting — including the night/IR/light toggles that used
+     to sit here — lives in mj-settings.cgi, whose Live section pairs the
+     same preview with the real-time adjustments. The one exception is the
+     PTZ pad, which steers rather than configures; it stays on the video
+     until the multi-user split decides who may steer. -->
 
 
 <div class="row g-4">
@@ -15,23 +23,7 @@
 			<% if [ -n "$ptz_support" ]; then %>
 				<%in p/motor.cgi %>
 			<% fi %>
-			<!-- Device controls, not view controls: what they switch is the
-			     camera itself, for every viewer, so they live on the page
-			     rather than in the player's bar. Same ids the wiring in
-			     preview-page.js has always used. -->
-			<div class="d-flex flex-wrap align-items-center gap-2 mt-2">
-				<input type="checkbox" class="btn-check" id="toggle-night">
-				<label class="btn btn-sm btn-outline-primary" for="toggle-night">🌙 Night mode</label>
-
-				<input type="checkbox" class="btn-check" id="toggle-ircut">
-				<label class="btn btn-sm btn-outline-primary" for="toggle-ircut">👁 IR filter</label>
-
-				<input type="checkbox" class="btn-check" id="toggle-light">
-				<label class="btn btn-sm btn-outline-primary" for="toggle-light">💡 Light</label>
-
-				<span class="small" id="mj-lightmon" hidden><a href="mj-settings.cgi?tab=nightMode">Light monitor active</a></span>
-				<a class="small ms-auto" href="mj-endpoints.cgi">Stream URLs</a>
-			</div>
+			<p class="small mb-0 mt-2"><a href="mj-endpoints.cgi">Stream URLs</a></p>
 		</div></div>
 	</div>
 </div>

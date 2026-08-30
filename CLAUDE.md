@@ -206,6 +206,13 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   built client-side by `renderLive()` in `mj-settings.js` (`.mj-live-video`
   elements), though it loads all four preview player scripts. `preview()`
   (in `p/common.cgi`) has exactly one caller: `preview.cgi`.
+- **The Live page is settings-free by design.** It is the page every user of
+  the future multi-user system gets, read-only, so nothing on it changes the
+  camera: no night/IR/light toggles (those live in mj-settings' Live section,
+  `wireNightToggles` in `mj-settings.js`), no custom control panels. The one
+  exception is the PTZ pad — steering, not configuration — kept on the video
+  until the multi-user split decides who may steer. Every setting belongs
+  under `mj-settings.cgi` only.
 - **The Live page is a hero stage.** `preview()` emits `#mj-stage` — a
   `position:relative` box that reserves the stream's aspect ratio (16:9 until
   `onCodec` reports the real one), with everything overlaid on the video so
