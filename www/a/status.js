@@ -301,11 +301,17 @@
 					? ' · measured ' + humanRate(d / s.dt) : '';
 			}
 
-			if (motionEl && 'md_rects_recv_total' in s.prev.v) {
-				const r = Math.max(0, (v.md_rects_recv_total - s.prev.v.md_rects_recv_total) / s.dt);
-				const a = Math.max(0, ((v.md_rects_acc_total || 0) - (s.prev.v.md_rects_acc_total || 0)) / s.dt);
-				motionEl.textContent = r.toFixed(1) + '/s · ' + a.toFixed(1) + ' in ROI';
-				pushSpark(motionSpark, r);
+			if (motionEl) {
+				// Both samples must carry the counter, same as every other
+				// rate here — one side missing must clear, not compute NaN.
+				if ('md_rects_recv_total' in v && 'md_rects_recv_total' in s.prev.v) {
+					const r = Math.max(0, (v.md_rects_recv_total - s.prev.v.md_rects_recv_total) / s.dt);
+					const a = Math.max(0, ((v.md_rects_acc_total || 0) - (s.prev.v.md_rects_acc_total || 0)) / s.dt);
+					motionEl.textContent = r.toFixed(1) + '/s · ' + a.toFixed(1) + ' in ROI';
+					pushSpark(motionSpark, r);
+				} else {
+					motionEl.textContent = '–';
+				}
 			}
 		}
 
