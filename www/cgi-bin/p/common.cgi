@@ -503,6 +503,7 @@ preview() {
 						<tbody>
 							<tr><td class="pe-3 mj-stat-key">session</td><td id="mj-st-cam">-</td></tr>
 							<tr><td class="pe-3 mj-stat-key">estimate</td><td id="mj-st-remb">-</td></tr>
+						<tr><td class="pe-3 mj-stat-key">encoder</td><td id="mj-st-enc">-</td></tr>
 							<tr><td class="pe-3 mj-stat-key">keyframes</td><td id="mj-st-pli">-</td></tr>
 							<tr><td class="pe-3 mj-stat-key">audio in</td><td id="mj-st-ain">-</td></tr>
 							<tr><td class="pe-3 mj-stat-key">talkback</td><td id="mj-st-talk">-</td></tr>
@@ -511,14 +512,22 @@ preview() {
 				</div>
 			</div>
 		</div>
-		<!-- Shown only while WebRTC is the live transport. A sentence rather
-		     than a control, and dismissible: the tooltip on the picker cannot
-		     be the whole disclosure, because the thing being disclosed reaches
-		     past the person reading it. -->
-		<p id="mj-transport-note" class="mj-adapt-note small" hidden>
-			The camera is adapting this stream's bitrate to your connection.
-			Anyone else watching the same stream sees that too.
-			<button type="button" class="mj-adapt-close" id="mj-note-close" aria-label="Dismiss">×</button>
+		<!-- The adaptation toast (preview-adapt.js): the whole disclosure of
+		     WebRTC's shared-encoder bitrate adaptation, made at the moment it
+		     acts rather than as a standing sentence (the always-on note this
+		     replaces taught people to ignore it, and could not tell whose
+		     connection was responsible). Names the direction and says whose
+		     link moved the encoder — a change caused by another viewer is the
+		     case nothing else on the page would explain. Below the chip so
+		     the two can show together. -->
+		<!-- role=status so the announcement reaches a screen reader when the
+		     text lands; the × is the keyboard's dismissal (click-anywhere
+		     only serves a pointer) and focusing it pins the toast the same
+		     way hovering does. -->
+		<p id="mj-adapt" class="mj-adapt-toast small" role="status" hidden>
+			<span id="mj-adapt-rates" class="mj-adapt-rates"></span>
+			<span id="mj-adapt-why" class="mj-adapt-why"></span>
+			<button type="button" class="mj-adapt-close" aria-label="Dismiss">×</button>
 		</p>
 		<!-- PTZ mount. Empty and hidden on every camera; p/motor.cgi (included
 		     by preview.cgi only when the hardware exists) emits the pad after

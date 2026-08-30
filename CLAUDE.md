@@ -219,8 +219,14 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   nothing ever displaces the picture: the status chip `#mj-badge` top-right
   (`CODEC W×H · fps`; fps is live WebRTC stats via a loosened `onStats` gate,
   or the configured `videoN.fps` on MSE, which measures nothing), the stats
-  panel top-left as translucent glass, the adaptation note (dismissible)
-  above the bar, and the auto-hiding control bar (`.mj-bar`: shown on hover /
+  panel top-left as translucent glass, the adaptation toast `#mj-adapt`
+  under the chip (`preview-adapt.js` — event-driven off the camera's `enc=`
+  stats counter, it reports the moment the shared encoder's bitrate moved,
+  in which direction, and whose connection moved it; it replaced a standing
+  "the camera is adapting" disclosure note that fired whether or not
+  anything was happening and could not name the responsible link; on a
+  majestic without the counter it stays dormant), and the auto-hiding
+  control bar (`.mj-bar`: shown on hover /
   `:focus-within` / a JS `.mj-show` tap-toggle). `preview-hero.js` owns the
   stage chrome — bar visibility, fullscreen (on the stage; hidden on iOS
   Safari which lacks the API), snapshot (`/image.jpg` → blob download, shown

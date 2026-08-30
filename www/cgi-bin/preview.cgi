@@ -32,6 +32,7 @@
 <script src="/a/preview-webrtc.js"></script>
 <script src="/a/preview-swap.js"></script>
 <script src="/a/preview-transport.js"></script>
+<script src="/a/preview-adapt.js"></script>
 <script src="/a/preview-page.js"></script>
 <script src="/a/preview-hero.js"></script>
 
