@@ -78,10 +78,13 @@
 				stream = 0;
 			}
 		}
-		// "WxH" per channel. Auto compares areas, so parse once.
+		// "WxH" per channel. Auto compares areas, so parse once. The same
+		// tolerant grammar as mj-settings' parseWH — that page accepts and
+		// persists "1920 X 1080", and a size the preview refused to read
+		// would silence both Auto and the served-channel note for it.
 		sizeOf = [0, 1].map(n => {
 			const v = mjGet(cfg, 'video' + n + '.size');
-			const m = /^(\d+)x(\d+)$/.exec(String(v || ''));
+			const m = /^\s*(\d+)\s*x\s*(\d+)\s*$/i.exec(String(v || ''));
 			return m ? { w: +m[1], h: +m[2] } : null;
 		});
 		autoApply();
@@ -225,12 +228,31 @@
 	// reported about its own picture.
 	let chipMedia = null, chipFps = 0;
 	let cfgFps = [0, 0];
+	// WebRTC takes ?stream= as a preference, not an order: the camera can
+	// serve the other channel — a codec its negotiation can give this
+	// browser, or a daemon fault (majestic#299 arrived as "Main selected,
+	// Sub displayed" with nothing on the page admitting it). The radios say
+	// what was asked; when the picture is recognisably the other channel's,
+	// the chip says what actually arrived. Only when both sizes are known
+	// and the frame matches the other channel exactly — a camera with unset
+	// (sensor-native) sizes claims nothing rather than guessing. MSE needs
+	// none of this: /ws/video serves the number it is given or nothing.
+	function servedNote() {
+		if (!usingWebRTC || !chipMedia) return '';
+		const want = sizeOf[stream ? 1 : 0], other = sizeOf[stream ? 0 : 1];
+		if (!want || !other) return '';
+		const is = d => d.w === chipMedia.w && d.h === chipMedia.h;
+		if (is(want) || !is(other)) return '';
+		return stream ? ' · Main stream' : ' · Sub stream';
+	}
+
 	function setChip() {
 		if (!badge || !chipMedia) return;
 		const fps = usingWebRTC ? chipFps : cfgFps[stream ? 1 : 0];
 		badge.textContent = (chipMedia.codec || '').toUpperCase() + ' ' +
 			chipMedia.w + '×' + chipMedia.h +
-			(fps ? ' · ' + Math.round(fps) + ' fps' : '');
+			(fps ? ' · ' + Math.round(fps) + ' fps' : '') +
+			servedNote();
 	}
 	// Talkback is deliberately NOT carried across a transport switch or a
 	// reattach. Everything else here is a preference; this one holds a live
