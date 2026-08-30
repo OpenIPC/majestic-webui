@@ -93,7 +93,7 @@ function load(cfg) {
 		MajesticVideo: impls.mse,
 		MajesticWebRTC: impls.webrtc,
 		MajesticTransport: {
-			available: () => true, preferred: () => 'mse',
+			available: () => true, preferred: () => cfg.transport || 'mse',
 			choose() {}, demote() {},
 			impl: (k) => (k === 'webrtc' ? impls.webrtc : impls.mse),
 			iceServers: () => [],
@@ -313,6 +313,34 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		await tick();
 		env.el('mj-stream-auto').fire('click');
 		check('stored as auto', env.stored === 'auto', String(env.stored));
+	}
+
+	group('the chip names the channel WebRTC actually served');
+	{
+		// WebRTC takes ?stream= as a preference, and majestic#299 arrived as
+		// "Main selected, Sub displayed" with nothing on the page admitting
+		// it. With no remembered choice the page opens on Sub.
+		const env = load({
+			main: '1920x1080', sub: '800x600', transport: 'webrtc',
+		});
+		await tick();
+		const live = env.made[0];
+		live.say('playing');
+		// The camera serves the channel that was asked for: no note.
+		live.opts.onCodec('h264', 'h264', 800, 600);
+		check('the served channel is not named when it matches',
+			env.el('mj-badge').textContent.indexOf('stream') === -1,
+			env.el('mj-badge').textContent);
+		// The camera serves Main against a Sub request: the chip says so.
+		live.opts.onCodec('h264', 'h264', 1920, 1080);
+		check('a mismatch names what arrived',
+			/ · Main stream$/.test(env.el('mj-badge').textContent),
+			env.el('mj-badge').textContent);
+		// A frame matching neither configured size claims nothing.
+		live.opts.onCodec('h264', 'h264', 1280, 720);
+		check('an unrecognised size claims nothing',
+			env.el('mj-badge').textContent.indexOf('stream') === -1,
+			env.el('mj-badge').textContent);
 	}
 
 	done();
