@@ -356,30 +356,54 @@
 		// `busy` is the in-flight probe's start time, not a boolean: a request
 		// the browser never settles (half-dead link) would otherwise pin it
 		// true and stop the poll for good. After 15s the probe is abandoned —
-		// the token check makes its late events no-ops, so an old load can
-		// never clobber a newer frame.
+		// the token check makes its late events no-ops, so an old response
+		// can never clobber a newer frame.
+		//
+		// The fetch goes through apiFetch, not Image.src: every same-origin
+		// request that can be answered 401 must ride the shared pair (the
+		// X-Requested-With declaration plus the login redirect), or an
+		// expired session turns the 5s poll into the native auth prompt that
+		// machinery exists to prevent. The blob is still decoded off-screen
+		// before the visible swap, and the superseded frame's URL is revoked.
 		let busy = 0;
+		const fail = () => {
+			if (img.hidden) off.textContent = 'Snapshot unavailable';
+			else if (note) note.textContent = 'snapshot stalled — retrying';
+		};
 		const tick = () => {
 			if (document.hidden) return;
 			if (busy && Date.now() - busy < 15000) return;
 			busy = Date.now();
 			const mine = busy;
-			const probe = new Image();
-			probe.onload = () => {
-				if (busy !== mine) return;
-				busy = 0;
-				img.src = probe.src;
-				img.hidden = false;
-				off.hidden = true;
-				if (note) note.textContent = 'snapshot · updates every 5 s';
-			};
-			probe.onerror = () => {
-				if (busy !== mine) return;
-				busy = 0;
-				if (img.hidden) off.textContent = 'Snapshot unavailable';
-				else if (note) note.textContent = 'snapshot stalled — retrying';
-			};
-			probe.src = '/image.jpg?_=' + Date.now();
+			apiFetch('/image.jpg?_=' + Date.now(), { cache: 'no-store' })
+				.then(r => r.ok ? r.blob() : Promise.reject(r.status))
+				.then(blob => {
+					if (busy !== mine) return;
+					const url = URL.createObjectURL(blob);
+					const probe = new Image();
+					probe.onload = () => {
+						if (busy !== mine) { URL.revokeObjectURL(url); return; }
+						busy = 0;
+						const old = img.src;
+						img.src = url;
+						img.hidden = false;
+						off.hidden = true;
+						if (note) note.textContent = 'snapshot · updates every 5 s';
+						if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+					};
+					probe.onerror = () => {
+						URL.revokeObjectURL(url);
+						if (busy !== mine) return;
+						busy = 0;
+						fail();
+					};
+					probe.src = url;
+				})
+				.catch(() => {
+					if (busy !== mine) return;
+					busy = 0;
+					fail();
+				});
 		};
 		tick();
 		setInterval(tick, 5000);
