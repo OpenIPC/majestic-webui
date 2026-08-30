@@ -105,8 +105,13 @@
 	}
 
 	const mute = $('#mj-mute'), muteLbl = $('#mj-mute-lbl'), volCtl = $('#mj-vol');
+	// The word only: the label also carries the LED and the speaker icon,
+	// and the icon's muted/unmuted ending is a CSS rule off #mj-mute, not
+	// something to rewrite here.
+	const muteTxt = $('#mj-mute-t') || muteLbl;
 	const audioCtl = $('#mj-audio-ctl');
 	const talkCtl = $('#mj-talk-ctl'), talk = $('#mj-talk'), talkLbl = $('#mj-talk-lbl');
+	const talkTxt = $('#mj-talk-t') || talkLbl;
 	const statsCtl = $('#mj-stats-ctl'), statsBtn = $('#mj-stats-btn'), statsBox = $('#mj-stats');
 	const TALK_TITLE = talkLbl ? talkLbl.title : '';
 	// The transport is a two-radio segmented picker, not a checkbox: the
@@ -278,7 +283,8 @@
 		// anything left over from 'asking' has to be cleared here or the
 		// button stays disabled on "Asking…" until the page is reloaded.
 		if (talk) { talk.checked = false; talk.disabled = false; }
-		if (talkLbl) { talkLbl.textContent = '🎤 Talk'; talkLbl.title = TALK_TITLE; }
+		if (talkTxt) talkTxt.textContent = 'Talk';
+		if (talkLbl) talkLbl.title = TALK_TITLE;
 	}
 
 	// The stats panel follows the transport rather than the person: MSE has
@@ -503,7 +509,7 @@
 			onAudio: (codec) => {
 				if (!isLive() || !mute) return;
 				if (mute.checked && !codec) {
-					muteLbl.textContent = '🔇 No audio';
+					muteTxt.textContent = 'No audio';
 					mute.checked = false;
 					audioOn = false;
 					if (volCtl) volCtl.disabled = true;
@@ -528,12 +534,12 @@
 				if (!isLive() || !talk) return;
 				talk.checked = state === 'on' || state === 'live';
 				talk.disabled = state === 'asking';
-				if (talkLbl) {
-					talkLbl.textContent = state === 'asking' ? '🎤 Asking…'
-						: state === 'live' ? '🎤 Connecting…'
-						: state === 'on' ? '🎤 Talking' : '🎤 Talk';
-					talkLbl.title = why ? why + '\n\n' + TALK_TITLE : TALK_TITLE;
+				if (talkTxt) {
+					talkTxt.textContent = state === 'asking' ? 'Asking…'
+						: state === 'live' ? 'Connecting…'
+						: state === 'on' ? 'Talking' : 'Talk';
 				}
+				if (talkLbl) talkLbl.title = why ? why + '\n\n' + TALK_TITLE : TALK_TITLE;
 				// Only once the camera has accepted. Talking opens its audio
 				// too — it refuses a one-way audio section — so the listen
 				// control follows what was negotiated rather than what was
@@ -541,7 +547,7 @@
 				if (state === 'on' && mute && !mute.checked) {
 					mute.checked = true;
 					audioOn = true;
-					muteLbl.textContent = '🔊 Listening';
+					muteTxt.textContent = 'Listening';
 					if (volCtl) volCtl.disabled = false;
 				}
 			},
@@ -864,7 +870,7 @@
 			audioOn = on;
 			if (!player) return;
 			player.setAudio(on);
-			muteLbl.textContent = on ? '🔊 Listening' : '🔇 Muted';
+			muteTxt.textContent = on ? 'Listening' : 'Muted';
 			if (volCtl) volCtl.disabled = !on;
 		});
 		if (volCtl) volCtl.addEventListener('input', () => {
