@@ -196,6 +196,19 @@ textarea {
 	height: 38px;
 }
 
+/* The row-sized variant the Imaging card puts beside each value: same trace,
+ * shrunk to sit on a dl.list line. Fixed width and pushed to the row's right
+ * edge, so the traces stack into one aligned column instead of each starting
+ * wherever its value happens to end. */
+.spark.spark-row,
+.spark.spark-row svg {
+	height: 14px;
+}
+.spark.spark-row {
+	flex: 0 0 7rem;
+	margin-left: auto;
+}
+
 .card > .card-body h3 {
 	color: var(--bs-secondary-color);
 	font-size: 1.15rem;

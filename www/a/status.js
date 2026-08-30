@@ -1,80 +1,25 @@
-// Live status dashboard: parses majestic /metrics + /api/v1/config.json client-side.
+// Live status dashboard. The 2s /metrics poll and its parser live in main.js
+// (one heartbeat for every page); this file subscribes via mjMetricsSubscribe
+// and only renders. Configured stream facts come from /api/v1/config.json.
 (function () {
-	const POLL = 2000, HISTORY = 60;
-	let prev = null, fails = 0;
+	const HISTORY = 60;
 	const sparks = {};
-
-	function parseMetrics(text) {
-		const m = {
-			cpuIdle: 0, cpuTotal: 0, rx: 0, tx: 0,
-			memTotal: 0, memAvail: null, temp: null, load1: null,
-			// Addends for the pre-3.14 MemAvailable estimate below. They init to
-			// 0, not null, so a field the kernel doesn't report contributes
-			// nothing instead of turning the whole sum into NaN.
-			memFree: 0, memActFile: 0, memInactFile: 0, memSReclaim: 0,
-			hls: 0, night: 0, ircut: 0, nodeTime: 0, nodeBoot: 0,
-		};
-		const lines = text.split('\n');
-		for (let i = 0; i < lines.length; i++) {
-			const ln = lines[i];
-			if (!ln || ln.charCodeAt(0) === 35) continue;
-			const sp = ln.lastIndexOf(' ');
-			if (sp < 0) continue;
-			const key = ln.slice(0, sp), val = +ln.slice(sp + 1);
-			if (isNaN(val)) continue;
-			if (key.charCodeAt(0) === 110) { // 'n' — node_*
-				if (key.startsWith('node_cpu_seconds_total')) {
-					m.cpuTotal += val;
-					if (key.indexOf('mode="idle"') >= 0) m.cpuIdle += val;
-				} else if (key.startsWith('node_network_receive_bytes_total')) {
-					if (key.indexOf('device="lo"') < 0) m.rx += val;
-				} else if (key.startsWith('node_network_transmit_bytes_total')) {
-					if (key.indexOf('device="lo"') < 0) m.tx += val;
-				} else if (key === 'node_memory_MemTotal_bytes') m.memTotal = val;
-				else if (key === 'node_memory_MemAvailable_bytes') m.memAvail = val;
-				else if (key === 'node_memory_MemFree_bytes') m.memFree = val;
-				else if (key === 'node_memory_Active_file_bytes') m.memActFile = val;
-				else if (key === 'node_memory_Inactive_file_bytes') m.memInactFile = val;
-				else if (key === 'node_memory_SReclaimable_bytes') m.memSReclaim = val;
-				else if (key === 'node_hwmon_temp_celsius') m.temp = val;
-				else if (key === 'node_load1') m.load1 = val;
-				else if (key === 'node_time_seconds') m.nodeTime = val;
-				else if (key === 'node_boot_time_seconds') m.nodeBoot = val;
-				// night_enabled starts with 'n' too, so it has to be matched
-				// inside this branch — a metric caught by the charCode dispatch
-				// never reaches the tests below it.
-				else if (key === 'night_enabled') m.night = val;
-			} else if (key === 'hls_clients_total') m.hls = val;
-			else if (key === 'ircut_enabled') m.ircut = val;
-		}
-		// Kernels older than 3.14 omit MemAvailable, and /metrics mirrors
-		// /proc/meminfo verbatim (as node_exporter does), so the metric is absent
-		// rather than zero — leaving memAvail at 0 read as 100% used and pinned
-		// the badge to "Critical" (issue #116). Rebuild the kernel's own
-		// si_mem_available() estimate from the parts that are present. wmark_low
-		// is not in /proc/meminfo, so this runs ~2% optimistic. Keep in sync with
-		// the awk in cgi-bin/j/pulse.cgi.
-		if (m.memAvail === null)
-			m.memAvail = m.memFree + m.memActFile + m.memInactFile + m.memSReclaim;
-		// That estimate has no watermark discount, so a big reclaimable slab could
-		// push it past memTotal. Clamp here rather than at each consumer: it keeps
-		// the percentage and the "x / y MB" readout from disagreeing (a clamped 0%
-		// next to a negative used-MB), and it makes memAvail <= memTotal an
-		// invariant every reader below can rely on.
-		if (m.memTotal && m.memAvail > m.memTotal) m.memAvail = m.memTotal;
-		return m;
-	}
+	let tempAbsent = false;
+	let cfgFps0 = null;
+	let mdEnabled = false;
+	let ispEls = null;    // metric name → value <span>, built on the first good sample
+	const ispSparks = {}; // metric name → sparkline in the same row
+	let motionEl = null;
+	let motionSpark = null;
+	let lastV = null;
+	let wifiEls = null;   // like ispEls, for the Network card's Wi-Fi block
+	const wifiSparks = {};
 
 	function humanRate(bps) {
 		const b = bps * 8;
 		if (b >= 1e6) return (b / 1e6).toFixed(1) + ' Mbit/s';
 		if (b >= 1e3) return (b / 1e3).toFixed(0) + ' kbit/s';
 		return Math.max(0, b | 0) + ' bit/s';
-	}
-	function uptimeStr(s) {
-		s = Math.max(0, s | 0);
-		const d = (s / 86400) | 0, h = ((s % 86400) / 3600) | 0, m = ((s % 3600) / 60) | 0;
-		return (d ? d + 'd ' : '') + (h || d ? h + 'h ' : '') + m + 'm';
 	}
 	function setBar(id, pct, warn, danger) {
 		const el = $(id); if (!el) return;
@@ -88,7 +33,7 @@
 	// vector-effect, so no per-resize redraw is needed.
 	const SVG_NS = 'http://www.w3.org/2000/svg';
 	function makeSpark(id, color, lo, hi) {
-		const el = $(id);
+		const el = typeof id === 'string' ? $(id) : id;
 		if (!el) return null;
 		const svg = document.createElementNS(SVG_NS, 'svg');
 		svg.setAttribute('viewBox', '0 0 100 38');
@@ -134,71 +79,303 @@
 		el.textContent = text;
 	}
 
-	function tick() {
-		apiFetch('/metrics', { credentials: 'same-origin' })
-			.then(r => r.ok ? r.text() : Promise.reject(r.status))
-			.then(text => {
-				fails = 0;
-				const m = parseMetrics(text), now = m.nodeTime || (Date.now() / 1000);
-				let cpu = null;
-				if (prev && m.cpuTotal > prev.cpuTotal) {
-					const dt = m.cpuTotal - prev.cpuTotal, di = m.cpuIdle - prev.cpuIdle;
-					cpu = Math.max(0, Math.min(100, (1 - di / dt) * 100));
-				}
-				const ram = m.memTotal ? (1 - m.memAvail / m.memTotal) * 100 : null;
+	// The Imaging card shows what this SoC's ISP actually reports and nothing
+	// else — the isp_* set is vendor-shaped (only again/dgain are universal) and
+	// the values are raw SDK units, deliberately not converted: they are not
+	// comparable across vendors and any unit would be a guess. Rows are created
+	// once, on the first good sample (the metric set is fixed per firmware
+	// build); only values update after that.
+	const ISP_ROWS = [
+		['isp_exptime', 'Exposure time'],
+		['isp_exposure', 'Exposure'],
+		['isp_again', 'Analog gain'],
+		['isp_dgain', 'Digital gain'],
+		['isp_ispdgain', 'ISP gain'],
+		['isp_tgain', 'Total gain'],
+		['isp_rgain', 'WB red gain'],
+		['isp_bgain', 'WB blue gain'],
+		['isp_avelum', 'Scene luminance'],
+		['isp_afmetrics', 'Focus metric'],
+		['isp_fps', 'Sensor fps'],
+	];
 
-				if (cpu != null) { $('#st-cpu').textContent = cpu.toFixed(0); setBar('#bar-cpu', cpu, 75, 90); pushSpark(sparks.cpu, cpu); }
-				if (ram != null) {
-					$('#st-ram').textContent = ram.toFixed(0); setBar('#bar-ram', ram, 75, 90); pushSpark(sparks.ram, ram);
-					$('#st-ram-mb').textContent = (((m.memTotal - m.memAvail) / 1048576) | 0) + ' / ' + ((m.memTotal / 1048576) | 0) + ' MB';
-				}
-				if (m.temp != null) {
-					$('#st-temp').textContent = m.temp.toFixed(0); setBar('#bar-temp', m.temp / 90 * 100, 72, 89); pushSpark(sparks.temp, m.temp);
-				}
-				if (m.load1 != null) $('#st-load').textContent = m.load1.toFixed(2);
-				if (m.nodeBoot) $('#st-uptime').textContent = uptimeStr(now - m.nodeBoot);
-				$('#st-hls').textContent = m.hls | 0;
-				$('#st-daynight').textContent = (m.night ? '🌙 Night' : '☀️ Day') + ' · IR-cut ' + (m.ircut ? 'on' : 'off');
+	// One row: label dt, then a dd holding the value beside a mini sparkline —
+	// the same trace the health strip draws, sized to the row. The spark is what
+	// makes a slow AE hunt, a gain creep or a sagging Wi-Fi link visible at
+	// all: the instantaneous number looks the same every tick. Returns the
+	// value span; the spark is registered under `key` in `sparks`.
+	function sparkRow(host, label, sparks, key) {
+		const dt = document.createElement('dt'); dt.textContent = label;
+		const dd = document.createElement('dd');
+		dd.className = 'd-flex align-items-center gap-2';
+		const val = document.createElement('span'); val.textContent = '–';
+		const sp = document.createElement('span'); sp.className = 'spark spark-row';
+		dd.appendChild(val); dd.appendChild(sp);
+		host.appendChild(dt); host.appendChild(dd);
+		sparks[key] = makeSpark(sp, '#8a5cd8', null, null);
+		return val;
+	}
 
-				if (prev) {
-					const dt = now - prev.t;
-					if (dt > 0) {
-						$('#st-rx').textContent = humanRate((m.rx - prev.rx) / dt);
-						$('#st-tx').textContent = humanRate((m.tx - prev.tx) / dt);
-						pushSpark(sparks.net, Math.max(0, (m.tx - prev.tx) / dt * 8 / 1e6));
-					}
-				}
-				prev = { t: now, cpuIdle: m.cpuIdle, cpuTotal: m.cpuTotal, rx: m.rx, tx: m.tx };
+	function buildImaging(v) {
+		const host = $('#st-isp'); if (!host) return;
+		host.textContent = '';
+		ispEls = {};
+		motionEl = null;
+		motionSpark = null;
+		ISP_ROWS.forEach(row => {
+			if (!(row[0] in v)) return;
+			ispEls[row[0]] = sparkRow(host, row[1], ispSparks, row[0]);
+		});
+		if (mdEnabled && 'md_rects_recv_total' in v) {
+			motionEl = sparkRow(host, 'Motion', ispSparks, 'md');
+			motionSpark = ispSparks.md;
+			motionEl.parentElement.title = 'Rectangles the motion detector reported per second, and how many fell inside the ROI';
+		}
+		// The placeholder lives OUTSIDE the dl — a dl only accepts divs that
+		// wrap dt/dd groups, so free text cannot validly sit inside it.
+		const empty = $('#st-isp-empty');
+		if (empty) {
+			empty.hidden = !!host.children.length;
+			if (!host.children.length)
+				empty.textContent = 'This SoC reports no ISP metrics.';
+		}
+	}
 
-				const t = m.temp || 0;
-				if (t >= 85 || (ram != null && ram >= 97)) badge('crit', 'Critical');
-				else if (t >= 70 || (ram != null && ram >= 90) || (cpu != null && cpu >= 92)) badge('warn', 'Warning');
-				else badge('ok', 'All systems OK');
-			})
-			.catch(() => { if (++fails >= 2) badge('stale', 'Updating…'); });
+	// The Wi-Fi block in the Network card. Gauges are shown with their units;
+	// the two counters are shown as per-second rates — a cumulative retry
+	// total says nothing, a retry *rate* climbing with a sagging RSSI is the
+	// whole "why is my connection bad" story. The grade line translates dBm
+	// into words for the person who has never seen one.
+	const WIFI_GAUGES = [
+		['wifi_rssi_dbm', 'Signal', ' dBm'],
+		['wifi_snr_db', 'SNR', ' dB'],
+		['wifi_link_quality_ratio', 'Quality', ' %'],
+		['wifi_bitrate_mbps', 'Bitrate', ' Mb/s'],
+	];
+	const WIFI_RATES = [
+		['wifi_retries_total', 'Retries', '/s'],
+		['wifi_missed_beacons_total', 'Missed beacons', '/s'],
+	];
+
+	function buildWifi(v) {
+		const box = $('#st-wifi'), host = $('#st-wifi-rows');
+		if (!box || !host) return;
+		// Replace, never append: this reruns when a metric appears late, and
+		// the previous row set (and its spark registrations) must go with it.
+		host.textContent = '';
+		wifiEls = {};
+		const rows = WIFI_GAUGES.concat(WIFI_RATES).filter(r => r[0] in v);
+		rows.forEach(r => { wifiEls[r[0]] = sparkRow(host, r[1], wifiSparks, r[0]); });
+		box.hidden = !rows.length;
+	}
+
+	function wifiGrade(v) {
+		const el = $('#st-wifi-grade'); if (!el) return;
+		let grade = null;
+		if ('wifi_rssi_dbm' in v) {
+			const r = v.wifi_rssi_dbm;
+			grade = r >= -60 ? ['good', 'text-success']
+				: r >= -75 ? ['fair', 'text-warning']
+				: ['weak — move the camera or the AP', 'text-danger'];
+		} else if ('wifi_link_quality_ratio' in v) {
+			const q = v.wifi_link_quality_ratio;
+			grade = q >= 70 ? ['good', 'text-success']
+				: q >= 40 ? ['fair', 'text-warning']
+				: ['weak — move the camera or the AP', 'text-danger'];
+		}
+		el.textContent = grade ? grade[0] : '';
+		el.className = grade ? grade[1] : '';
+	}
+
+	function updateWifi(s, v) {
+		const has = WIFI_GAUGES.concat(WIFI_RATES).some(r => r[0] in v);
+		if (!wifiEls) buildWifi(v);
+		// The row set is not frozen at first sight: a camera on Ethernet builds
+		// the block empty and a Wi-Fi link arriving later must fill it, and a
+		// gauge missing from the first Wi-Fi sample (the RSSI, while the link
+		// re-associates) needs its row created when it first reports. Rebuild
+		// whenever a known metric is present but has no row yet.
+		else if (has && WIFI_GAUGES.concat(WIFI_RATES).some(r => (r[0] in v) && !wifiEls[r[0]]))
+			buildWifi(v);
+		if (!wifiEls || !Object.keys(wifiEls).length) return;
+		// ...and the reverse: a block that exists hides again when the metrics
+		// vanish (interface down), instead of overwriting its rows with the
+		// "undefined dBm" a missing key would format to.
+		const box = $('#st-wifi');
+		if (box) box.hidden = !has;
+		if (!has) return;
+		WIFI_GAUGES.forEach(r => {
+			const rowEl = wifiEls[r[0]];
+			if (!rowEl) return;
+			if (r[0] in v) {
+				rowEl.textContent = v[r[0]] + r[2];
+				pushSpark(wifiSparks[r[0]], v[r[0]]);
+			} else {
+				// A single gauge can go missing on its own — the RSSI does
+				// while the link re-associates, since the collector refuses a
+				// non-negative reading.
+				rowEl.textContent = '–';
+			}
+		});
+		if (s.prev && s.dt > 0) WIFI_RATES.forEach(r => {
+			const rowEl = wifiEls[r[0]];
+			if (!rowEl) return;
+			if (r[0] in v && r[0] in s.prev.v) {
+				const rate = Math.max(0, (v[r[0]] - s.prev.v[r[0]]) / s.dt);
+				rowEl.textContent = rate.toFixed(1) + r[2];
+				pushSpark(wifiSparks[r[0]], rate);
+			} else {
+				rowEl.textContent = '–';
+			}
+		});
+		wifiGrade(v);
+	}
+
+	function onSample(s) {
+		if (!s.ok) {
+			if (s.fails >= 2) badge('stale', 'Updating…');
+			return;
+		}
+		const v = s.m.v;
+		lastV = v;
+		if (!ispEls) buildImaging(v);
+
+		if (s.cpu != null) {
+			$('#st-cpu').textContent = s.cpu.toFixed(0);
+			setBar('#bar-cpu', s.cpu, 75, 90);
+			pushSpark(sparks.cpu, s.cpu);
+		}
+		if (s.memPct != null) {
+			$('#st-ram').textContent = s.memPct.toFixed(0);
+			setBar('#bar-ram', s.memPct, 75, 90);
+			pushSpark(sparks.ram, s.memPct);
+			$('#st-ram-mb').textContent = (((s.memTotal - s.memAvail) / 1048576) | 0) + ' / ' + ((s.memTotal / 1048576) | 0) + ' MB';
+		}
+		if (s.temp != null) {
+			$('#st-temp').textContent = s.temp.toFixed(0);
+			setBar('#bar-temp', s.temp / 90 * 100, 72, 89);
+			pushSpark(sparks.temp, s.temp);
+		} else if (!tempAbsent) {
+			// Not every SoC can say — the Ingenic T31 exposes no temperature at
+			// all — so state that once instead of showing "–" forever.
+			tempAbsent = true;
+			$('#st-temp').textContent = 'n/a';
+			$('#st-temp-u').hidden = true;
+			$('#st-temp-meter').hidden = true;
+			$('#spark-temp').hidden = true;
+			$('#st-temp-note').textContent = 'no temperature sensor on this SoC';
+		}
+		if ('node_load1' in v) $('#st-load').textContent = v.node_load1.toFixed(2);
+		if (s.sysUptimeS != null) $('#st-uptime').textContent = uptimeStr(s.sysUptimeS);
+		$('#st-uptime-mj').textContent = s.mjUptimeS != null ? uptimeStr(s.mjUptimeS) : '–';
+		$('#st-hls').textContent = v.hls_clients_total | 0;
+
+		$('#st-daynight').textContent = (s.night ? '🌙 Night' : '☀️ Day') + ' · IR-cut ' + (s.ircut ? 'on' : 'off');
+		$('#st-light').hidden = !s.light;
+		// Only SigmaStar reports the empty-wakeup run; a sustained one means the
+		// encoder has stopped producing frames while everything else looks alive.
+		$('#st-stall').hidden = !(v.venc_empty_frames_run > 25);
+		$('#st-isp-warn').hidden = !(v.isp_exposureismax > 0);
+
+		if (s.prev && s.dt > 0) {
+			$('#st-rx').textContent = humanRate(Math.max(0, (s.rx - s.prev.rx) / s.dt));
+			$('#st-tx').textContent = humanRate(Math.max(0, (s.tx - s.prev.tx) / s.dt));
+			pushSpark(sparks.net, Math.max(0, (s.tx - s.prev.tx) / s.dt * 8 / 1e6));
+
+			// Measured encoder output next to the configured figure. venc0 is the
+			// main stream on every vendor; venc1 renders as soon as a majestic
+			// that exports it is installed. A counter still at 0 means this
+			// SoC's byte accounting is absent, not a silent encoder — printing
+			// "measured 0 bit/s" over a dead counter would read as an outage.
+			for (let i = 0; i < 2; i++) {
+				const brEl = $('#st-br' + i), key = 'venc' + i + '_rcvd_bytes';
+				if (!brEl) continue;
+				// Cleared, not skipped or clamped, when no valid delta exists:
+				// a daemon restart resets or removes the counter — a skipped
+				// update would leave the last rate on screen indefinitely, and
+				// a reset counter that has already climbed past zero yields a
+				// negative delta that clamping would render as a false
+				// "measured 0 bit/s" outage.
+				const d = v[key] && (key in s.prev.v) ? v[key] - s.prev.v[key] : null;
+				brEl.textContent = d != null && d >= 0
+					? ' · measured ' + humanRate(d / s.dt) : '';
+			}
+
+			if (motionEl) {
+				// Both samples must carry the counter, same as every other
+				// rate here — one side missing must clear, not compute NaN.
+				if ('md_rects_recv_total' in v && 'md_rects_recv_total' in s.prev.v) {
+					const r = Math.max(0, (v.md_rects_recv_total - s.prev.v.md_rects_recv_total) / s.dt);
+					const a = Math.max(0, ((v.md_rects_acc_total || 0) - (s.prev.v.md_rects_acc_total || 0)) / s.dt);
+					motionEl.textContent = r.toFixed(1) + '/s · ' + a.toFixed(1) + ' in ROI';
+					pushSpark(motionSpark, r);
+				} else {
+					motionEl.textContent = '–';
+				}
+			}
+		}
+
+		if (ispEls) Object.keys(ispEls).forEach(k => {
+			ispEls[k].textContent = k === 'isp_fps' && cfgFps0
+				? v[k] + ' (set ' + cfgFps0 + ')' : String(v[k]);
+			pushSpark(ispSparks[k], v[k]);
+		});
+
+		updateWifi(s, v);
+
+		const t = s.temp || 0;
+		if (t >= 85 || (s.memPct != null && s.memPct >= 97)) badge('crit', 'Critical');
+		else if (t >= 70 || (s.memPct != null && s.memPct >= 90) || (s.cpu != null && s.cpu >= 92)) badge('warn', 'Warning');
+		else badge('ok', 'All systems OK');
+	}
+
+	// One element per value, textContent throughout — these strings come from
+	// the camera's config, and device-derived text must never reach innerHTML:
+	// a hand-edited majestic.yaml would otherwise inject markup into the page.
+	function el(tag, cls, text) {
+		const e = document.createElement(tag);
+		if (cls) e.className = cls;
+		if (text != null) e.textContent = text;
+		return e;
 	}
 
 	function renderStreams() {
 		if (typeof mjConfig !== 'function') return;
 		mjConfig().then(cfg => {
+			cfgFps0 = mjGet(cfg, 'video0.fps') || null;
+			mdEnabled = mjGet(cfg, 'motionDetect.enabled') === true;
+			// The config may resolve after the first sample already built the
+			// Imaging card without its Motion row — rebuild against the last
+			// sample now that mdEnabled is known.
+			if (lastV) buildImaging(lastV);
 			const host = $('#streams'); if (!host) return;
-			let html = '';
-			['video0', 'video1'].forEach((s, i) => {
-				if (mjGet(cfg, s + '.enabled') !== true) return;
-				const codec = (mjGet(cfg, s + '.codec') || '?').toUpperCase();
-				const size = mjGet(cfg, s + '.size') || '?';
-				const fps = mjGet(cfg, s + '.fps');
-				const br = mjGet(cfg, s + '.bitrate');
-				html += '<div>'
-					+ '<span class="badge text-bg-primary me-2">' + (i ? 'Sub' : 'Main') + '</span>'
-					+ '<span class="fw-semibold me-1">' + size + '</span>'
-					+ '<span class="badge text-bg-light border">' + codec + '</span>'
-					+ '<div class="x-small text-secondary mt-1">' + (fps ? fps + ' fps' : '') + (br ? ' · ' + br + ' kbit/s' : '') + '</div>'
-					+ '</div>';
+			host.textContent = '';
+			['video0', 'video1'].forEach((sname, i) => {
+				if (mjGet(cfg, sname + '.enabled') !== true) return;
+				const codec = String(mjGet(cfg, sname + '.codec') || '?').toUpperCase();
+				const size = mjGet(cfg, sname + '.size') || '?';
+				const fps = mjGet(cfg, sname + '.fps');
+				const br = mjGet(cfg, sname + '.bitrate');
+				const row = el('div');
+				row.appendChild(el('span', 'badge text-bg-primary me-2', i ? 'Sub' : 'Main'));
+				row.appendChild(el('span', 'fw-semibold me-1', size));
+				row.appendChild(el('span', 'badge text-bg-light border', codec));
+				const sub = el('div', 'x-small text-secondary mt-1',
+					(fps ? fps + ' fps' : '') + (br ? ' · ' + br + ' kbit/s' : ''));
+				const meas = el('span');
+				meas.id = 'st-br' + i;
+				sub.appendChild(meas);
+				row.appendChild(sub);
+				host.appendChild(row);
 			});
-			if (mjGet(cfg, 'jpeg.enabled') === true)
-				html += '<div class="d-flex align-items-center"><span class="badge text-bg-secondary me-2">JPEG</span><span class="text-secondary small">snapshots enabled</span></div>';
-			host.innerHTML = html || '<div class="text-secondary small">No streams enabled.</div>';
+			if (mjGet(cfg, 'jpeg.enabled') === true) {
+				const row = el('div', 'd-flex align-items-center');
+				row.appendChild(el('span', 'badge text-bg-secondary me-2', 'JPEG'));
+				row.appendChild(el('span', 'text-secondary small', 'snapshots enabled'));
+				host.appendChild(row);
+			}
+			if (!host.children.length)
+				host.appendChild(el('div', 'text-secondary small', 'No streams enabled.'));
 		});
 	}
 
@@ -242,8 +419,9 @@
 		sparks.temp = makeSpark('#spark-temp', '#d87f4c', null, null);
 		sparks.net = makeSpark('#spark-net', '#4ca36a', 0, null);
 		renderStreams();
-		tick();
-		setInterval(tick, POLL);
+		// main.js is loaded without defer, so the registry exists; the poll is
+		// started by initAll on window load.
+		mjMetricsSubscribe(onSample);
 		// SVG sparklines stretch to their container automatically — no resize redraw.
 	}
 
