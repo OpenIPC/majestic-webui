@@ -359,16 +359,20 @@
 				const newTab = u.searchParams.get('tab');
 				if (!newTab) return;
 				ev.preventDefault();
+				// A keyboard-activated link fires its click with detail 0, a
+				// pointer with the tap count — decided here, where the event is,
+				// because revealSection() runs after an await and cannot ask.
+				const byPointer = ev.detail > 0;
 				// Picking the section that is already open is still a deliberate
 				// pick: below md it means "take me back down to it", and a control
 				// that does nothing at all reads as a dead one.
-				if (newTab === state.sec) { revealSection(); return; }
+				if (newTab === state.sec) { revealSection(byPointer); return; }
 				// Answering "no" to the prompt is choosing to stay, so nothing moves.
 				if (hasDirty() && !confirm('You have unsaved changes. Discard and switch sections?')) return;
 				// After load(), never inside it: the section has to be in the document
 				// first, and buildNav() — which load() re-runs while a search is
 				// active, resizing the rail *above* the form — has to have finished.
-				load(newTab, /*push*/ true).then(revealSection);
+				load(newTab, /*push*/ true).then(() => revealSection(byPointer));
 			});
 		});
 	}
@@ -384,7 +388,7 @@
 	// — and the column's top edge is what should end up near the top of the
 	// screen anyway. How far below the edge it lands is scroll-margin-top, in the
 	// stylesheet beside the rest of the below-md rail rules.
-	function revealSection() {
+	function revealSection(byPointer) {
 		const form = document.getElementById('mj-settings-form');
 		const col = document.getElementById('mj-settings-form-col');
 		if (!form || !col) return;
@@ -393,9 +397,19 @@
 		// reader, so the section's own heading takes it and announces the name.
 		// preventScroll because the scroll below is ours: focusing the live
 		// panel's heading would otherwise skip the preview sitting above it.
+		//
+		// Whether a script-set focus draws the browser's ring is a per-engine
+		// guess — Safari answers :focus-visible for it where Chrome and Firefox
+		// do not, and painted its default ring round every section title a
+		// pointer picked (#222). So the pick's own modality decides, not the
+		// heuristic: a pointer pick mutes the ring, a keyboard pick keeps it.
 		const h = form.querySelector('h3');
 		if (h) {
 			h.tabIndex = -1;
+			if (byPointer) {
+				h.classList.add('mj-focus-quiet');
+				h.addEventListener('blur', () => h.classList.remove('mj-focus-quiet'), { once: true });
+			}
 			h.focus({ preventScroll: true });
 		}
 

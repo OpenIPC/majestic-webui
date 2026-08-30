@@ -974,11 +974,16 @@ mark {
    pointer user has no reason to see a focus ring on it — it read as the title
    having been selected, or as a stray border round the card (#184).
 
-   So the ring goes for pointer focus and stays for keyboard focus, which is the
-   one case where it is doing its job: :focus-visible is exactly that
-   distinction, and the heading is only ever focused programmatically, so
-   nothing else can put a ring here. */
-#mj-settings-form h3[tabindex]:focus:not(:focus-visible) {
+   So the ring goes for pointer focus and stays for keyboard focus. The
+   :focus-visible rule below expresses that, but only where the engine agrees
+   that a script-set focus after a pointer pick is not "visible" — Chrome and
+   Firefox do, Safari answers :focus-visible for any focus() it did not watch
+   the mouse cause, and drew its default ring round every section title (#222).
+   So revealSection() also states the modality outright: a pointer pick tags
+   the heading .mj-focus-quiet (dropped again on blur), and that rule needs no
+   guessing from the engine. Keyboard picks get neither and keep the ring. */
+#mj-settings-form h3[tabindex]:focus:not(:focus-visible),
+#mj-settings-form h3.mj-focus-quiet:focus {
 	outline: none;
 }
 
