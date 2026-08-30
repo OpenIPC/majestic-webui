@@ -1332,7 +1332,14 @@
 
 	function renderLive(form) {
 		const fields = liveFields();
-		const withVideo = !!window.MajesticVideo;
+		// The whole player stack, not just the decoder. attachLivePreview()
+		// reaches for MajesticTransport and MajesticSwap as well, so a page
+		// served without them — an older install, a half-finished deploy —
+		// threw there and abandoned renderLive with the stage on screen and the
+		// deck never built, silently. Missing scripts should cost the preview,
+		// not the controls.
+		const withVideo = !!(window.MajesticVideo && window.MajesticSwap &&
+			window.MajesticTransport);
 
 		// The only place the leaf names itself — the rail's active item says it
 		// too — with the stream picker on the same line rather than in a card
@@ -1392,16 +1399,17 @@
 		const useGeo = !!(mirror && flip);
 
 		const hasTone = fields.some(f => f !== mirror && f !== flip);
-		// Tone starts the left column, with nothing above it.
+		// Tone starts the left column, with nothing above it: whatever sits
+		// between the picture and the first slider comes straight off the one
+		// guarantee this panel owes, which is that a knob and the effect it has
+		// are on screen together (#239). Scene used to be there and cost 111px,
+		// which put Brightness exactly on the fold at 1440x900.
 		//
-		// Scene reads as the coarse move you make before the fine ones, so it
-		// belongs first — but putting it there cost 111px between the picture
-		// and the first slider, and on a 1440x900 laptop that pushed Brightness
-		// exactly onto the fold. The one thing this panel has to guarantee is
-		// that a knob and the picture it changes are on screen together (#239),
-		// and reading order does not outrank it. Scene moves to the head of the
-		// right column, where it is still the first thing in the deck you read
-		// and costs the sliders nothing.
+		// Scene goes UNDER the sliders rather than into the other column. It
+		// sets those same four values, so it belongs beside them; and the two
+		// columns have to carry comparable weight or the deck is mostly empty
+		// on one side — parking it on the right left 282px of nothing under
+		// "Reset all to stock".
 		const toneBody = hasTone ? liveGroup(colA, 'Tone', 'saved with the page') : null;
 
 		for (const f of fields) {
@@ -1424,12 +1432,12 @@
 			toneBody.appendChild(foot);
 		}
 
-		// Right column, top to bottom: the coarse entry point, the reading you
-		// watch while dragging, then geometry.
+		// Under the sliders it drives, and last in the left column so it never
+		// pushes them away from the picture.
 		const toneFields = state.fields.filter(f =>
 			f.schema && f.schema['x-live'] && f.type === 'integer');
 		if (hasTone && toneFields.length) {
-			renderScene(liveGroup(colB, 'Scene', 'starting points, then tune by eye'),
+			renderScene(liveGroup(colA, 'Scene', 'starting points, then tune by eye'),
 				toneFields);
 		}
 
@@ -1448,6 +1456,17 @@
 			const ff = state.fields.find(f => f.dot === flip.dot);
 			if (mf && ff) renderGeometry(liveGroup(colB, 'Orientation', ''), mf, ff);
 		}
+
+		// Every group above is conditional — on the schema, and on which player
+		// scripts loaded — so an empty column is reachable rather than
+		// hypothetical: without the player there is no Luma, and a build that
+		// marks only one of mirror/flip x-live has no Orientation either, which
+		// between them leave the right column holding nothing. It is 23rem wide
+		// with a divider whether or not anything is in it, so it would squeeze
+		// the surviving controls and add a blank section once stacked. Drop
+		// whatever came out empty instead of enumerating the combinations.
+		[colA, colB].forEach(c => { if (!c.childElementCount) c.remove(); });
+		if (!deck.childElementCount) deck.remove();
 	}
 
 	function renderProps(container, basePath, props) {
