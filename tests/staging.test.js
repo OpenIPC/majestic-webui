@@ -24,10 +24,19 @@ const IDS = [
 	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
 	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-note', 'mj-stats',
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1', 'mj-sub',
-	'mj-talk', 'mj-talk-ctl', 'mj-talk-lbl', 'mj-transport',
-	'mj-transport-ctl', 'mj-transport-lbl', 'mj-transport-note', 'mj-vol',
+	'mj-talk', 'mj-talk-ctl', 'mj-talk-lbl', 'mj-transport-w',
+	'mj-transport-m', 'mj-transport-ctl', 'mj-transport-lbl',
+	'mj-transport-note', 'mj-note-close', 'mj-vol', 'mj-player', 'mj-stage',
 	'toggle-ircut', 'toggle-light', 'toggle-night',
 ];
+
+// The user picks WebRTC on the segmented control. The stub elements are not a
+// real radio group, so the sibling is unchecked by hand as a browser would.
+function pickWebRTC(env) {
+	env.el('mj-transport-w').checked = true;
+	env.el('mj-transport-m').checked = false;
+	env.el('mj-transport-w').fire('change');
+}
 
 function makeEl(id) {
 	return {
@@ -150,9 +159,8 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		const first = env.made[0];
 		first.say('playing');
 
-		// The user ticks WebRTC.
-		env.el('mj-transport').checked = true;
-		env.el('mj-transport').fire('change');
+		// The user picks WebRTC.
+		pickWebRTC(env);
 
 		check('a second player was made', env.made.length === 2);
 		const trial = env.made[1];
@@ -175,14 +183,15 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		await tick();
 		const first = env.made[0];
 		first.say('playing');
-		env.el('mj-transport').checked = true;
-		env.el('mj-transport').fire('change');
+		pickWebRTC(env);
 		const trial = env.made[1];
 
 		trial.say('fallback', 'no usable H.264 in the offer');
 		check('the trial was destroyed', trial.destroyed);
 		check('the working player was NOT', !first.destroyed);
-		check('the toggle came back off', env.el('mj-transport').checked === false);
+		check('the picker came back to MSE',
+			env.el('mj-transport-w').checked === false &&
+			env.el('mj-transport-m').checked === true);
 		check('and the reason is on the label',
 			/no usable H.264/.test(env.el('mj-transport-lbl').title),
 			env.el('mj-transport-lbl').title);
@@ -195,8 +204,7 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		await tick();
 		const first = env.made[0];
 		first.say('playing');
-		env.el('mj-transport').checked = true;
-		env.el('mj-transport').fire('change');
+		pickWebRTC(env);
 		const trial = env.made[1];
 
 		check('nothing destroyed yet', !first.destroyed);
@@ -214,8 +222,7 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		const env = load('mse');
 		await tick();
 		env.made[0].say('playing');
-		env.el('mj-transport').checked = true;
-		env.el('mj-transport').fire('change');
+		pickWebRTC(env);
 		env.made[1].say('busy', 'the camera is serving as many viewers as it can');
 		check('the working player is untouched', !env.made[0].destroyed);
 		check('and no demotion was recorded', env.demoted !== true);
@@ -256,8 +263,7 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		check('the live player is on the current node',
 			first.el === env.el('live-video'), 'stale');
 
-		env.el('mj-transport').checked = true;
-		env.el('mj-transport').fire('change');
+		pickWebRTC(env);
 		const trial = env.made[1];
 		check('the trial went to the spare, not the visible element',
 			trial.el.id === 'live-video-b', trial.el.id);
@@ -280,8 +286,7 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		env.el('mj-mute').checked = true;
 		env.el('mj-mute').fire('change');
 
-		env.el('mj-transport').checked = true;
-		env.el('mj-transport').fire('change');
+		pickWebRTC(env);
 		const trial = env.made[1];
 		check('the trial negotiates audio from the start',
 			trial.opts.audio === true, JSON.stringify(trial.opts.audio));
@@ -298,8 +303,7 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		const env = load('mse');
 		await tick();
 		env.made[0].say('playing');
-		env.el('mj-transport').checked = true;
-		env.el('mj-transport').fire('change');
+		pickWebRTC(env);
 		const trial = env.made[1];
 		env.el('mj-stream-1').fire('change');
 		check('the live player followed the viewer to Sub',

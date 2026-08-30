@@ -1,63 +1,18 @@
-<hr class="mb-3"/>
-<div class="motor">
-	<div class="col">
-		<button class="btn btn-motor" data-dir="ul">↖️</button>
-		<button class="btn btn-motor" data-dir="uc">⬆️</button>
-		<button class="btn btn-motor" data-dir="ur">↗️</button>
-	</div>
-	<div class="col">
-		<button class="btn btn-motor" data-dir="lc">⬅️</button>
-		<button class="btn btn-motor" data-dir="cc">🆗</button>
-		<button class="btn btn-motor" data-dir="rc">➡️</button>
-	</div>
-	<div class="col">
-		<button class="btn btn-motor" data-dir="dl">↙️</button>
-		<button class="btn btn-motor" data-dir="dc">⬇️</button>
-		<button class="btn btn-motor" data-dir="dr">↘️</button>
-	</div>
+<!-- PTZ pad. Emitted after the player (preview() has already closed the
+     stage by the time this include runs) and hidden: preview-ptz.js relocates
+     it into the stage's #mj-ptz mount and unhides it, so a failed script
+     leaves no stray pad below the video. Real buttons with names — the emoji
+     pad before this read as glyph soup to a screen reader and took no
+     keyboard at all. -->
+<div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
+	<button type="button" class="mj-ptz-btn" data-dir="ul" aria-label="Pan up-left">◤</button>
+	<button type="button" class="mj-ptz-btn" data-dir="uc" aria-label="Tilt up">▲</button>
+	<button type="button" class="mj-ptz-btn" data-dir="ur" aria-label="Pan up-right">◥</button>
+	<button type="button" class="mj-ptz-btn" data-dir="lc" aria-label="Pan left">◀</button>
+	<button type="button" class="mj-ptz-btn" data-dir="cc" aria-label="Center">●</button>
+	<button type="button" class="mj-ptz-btn" data-dir="rc" aria-label="Pan right">▶</button>
+	<button type="button" class="mj-ptz-btn" data-dir="dl" aria-label="Pan down-left">◣</button>
+	<button type="button" class="mj-ptz-btn" data-dir="dc" aria-label="Tilt down">▼</button>
+	<button type="button" class="mj-ptz-btn" data-dir="dr" aria-label="Pan down-right">◢</button>
 </div>
-
-<script>
-(function () {
-	const STEP = 5;
-	const TICK_MS = 250;
-
-	let inflight = false;
-	let holdTimer = null;
-
-	function fire(dir) {
-		if (inflight) return;
-		const x = dir.includes("l") ? -STEP : dir.includes("r") ? STEP : 0;
-		const y = dir.includes("d") ? -STEP : dir.includes("u") ? STEP : 0;
-		inflight = true;
-		fetch('/cgi-bin/j/ptz.cgi?h=' + x + '&v=' + y, { credentials: 'same-origin' })
-			.finally(() => { inflight = false; });
-	}
-
-	function startHold(dir) {
-		stopHold();
-		fire(dir);
-		holdTimer = setInterval(() => fire(dir), TICK_MS);
-	}
-
-	function stopHold() {
-		if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
-	}
-
-	$$(".motor button").forEach(el => {
-		const dir = el.dataset.dir;
-		if (dir === "cc") {
-			el.addEventListener("click", () => fire(dir));
-			return;
-		}
-		el.addEventListener("mousedown", e => { e.preventDefault(); startHold(dir); });
-		el.addEventListener("mouseup", stopHold);
-		el.addEventListener("mouseleave", stopHold);
-		el.addEventListener("touchstart", e => { e.preventDefault(); startHold(dir); }, { passive: false });
-		el.addEventListener("touchend", stopHold);
-		el.addEventListener("touchcancel", stopHold);
-	});
-
-	window.addEventListener("blur", stopHold);
-})();
-</script>
+<script src="/a/preview-ptz.js"></script>

@@ -186,8 +186,10 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   (`MajesticWebRTC`, WebRTC over `/ws/webrtc`) return the same object —
   `setStream`, `requestIdr`, `setAudio`, `setVolume`, `audioSupported`,
   `destroy`, `supported` — so `preview-page.js` is written once and picks a
-  transport at attach time. **WebRTC is the default**; the `#mj-transport`
-  toggle switches to MSE. What is remembered is split in two on purpose:
+  transport at attach time. **WebRTC is the default**; the segmented
+  `#mj-transport-w`/`#mj-transport-m` picker in the player bar switches, and
+  names the transport — the only place it is named; the status chip does not
+  repeat it. What is remembered is split in two on purpose:
   `mj-transport-pick` is the person's explicit choice and is permanent, while
   `mj-transport-auto` is a demotion a failure decided for them and carries a
   timestamp so it expires (6 h) — otherwise one bad session parks a browser on
@@ -199,9 +201,32 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   The fallback chain is **WebRTC → MSE → MJPEG → note**, and the middle step
   matters: WebRTC negotiates, so it can fail where MSE cannot (Firefox offers
   only H.264 Baseline whatever it can decode), which is why a player reporting
-  `'fallback'` asks for the other transport rather than for MJPEG. `mj-settings.cgi`
-  shares the `preview()` markup but loads `preview.js` alone, so the toggle
-  stays hidden there.
+  `'fallback'` asks for the other transport rather than for MJPEG.
+  `mj-settings.cgi` does **not** share the `preview()` markup — its live tab is
+  built client-side by `renderLive()` in `mj-settings.js` (`.mj-live-video`
+  elements), though it loads all four preview player scripts. `preview()`
+  (in `p/common.cgi`) has exactly one caller: `preview.cgi`.
+- **The Live page is a hero stage.** `preview()` emits `#mj-stage` — a
+  `position:relative` box that reserves the stream's aspect ratio (16:9 until
+  `onCodec` reports the real one), with everything overlaid on the video so
+  nothing ever displaces the picture: the status chip `#mj-badge` top-right
+  (`CODEC W×H · fps`; fps is live WebRTC stats via a loosened `onStats` gate,
+  or the configured `videoN.fps` on MSE, which measures nothing), the stats
+  panel top-left as translucent glass, the adaptation note (dismissible)
+  above the bar, and the auto-hiding control bar (`.mj-bar`: shown on hover /
+  `:focus-within` / a JS `.mj-show` tap-toggle). `preview-hero.js` owns the
+  stage chrome — bar visibility, fullscreen (on the stage; hidden on iOS
+  Safari which lacks the API), snapshot (`/image.jpg` → blob download, shown
+  only when `jpeg.enabled`) — and is a separate file because
+  `tests/auto-source.test.js` and `tests/staging.test.js` execute
+  `preview-page.js` in a bare `vm` with a stubbed `$` over an `IDS` list: any
+  new element preview-page.js touches must be `$`-guarded and, for coverage,
+  added to both `IDS` lists. PTZ is `p/motor.cgi` (markup only, hidden) +
+  `preview-ptz.js`, which relocates the pad into the stage's `#mj-ptz` mount:
+  Pointer Events with capture for press-and-hold, arrow keys only while the
+  stage itself has focus (the bar's slider and radios own them otherwise),
+  `apiFetch` to `j/ptz.cgi?h=&v=` (which validates both as small signed
+  integers before they reach the motor binary's argv).
 - **Two clocks, and the page says which one it is printing.** Every second in
   `recordings.js` and `timeline.js` is **camera-local** and must stay that way:
   clips are named by the camera's own strftime, so day folders, the ribbon and
