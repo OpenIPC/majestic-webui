@@ -15,17 +15,45 @@
 	const EXCLUDE = new Set(boot.exclude || []);
 	const SENSORS = boot.sensors || [];
 
-	// Emoji + short label + display order for the x-live image knobs shown in the
-	// "Live adjustments" panel beside the preview (keyed by the field's dot tail).
+	// Short labels + display order for the x-live image knobs in the Live
+	// adjustments deck (keyed by the field's dot tail).
+	//
+	// The emoji that used to ride in front of each label are gone. A word in
+	// small caps is denser and less ambiguous than a glyph plus the same word,
+	// and emoji are not a typeface we control: 👁, on the IR filter button, has
+	// no glyph in the stack the camera ships and rendered as an empty box on
+	// hardware. What icons remain are inline SVG on a 20px grid.
 	const LIVE_META = {
-		luminance:  { icon: '☀', label: 'Brightness' },
-		contrast:   { icon: '🌗', label: 'Contrast' },
-		saturation: { icon: '💧', label: 'Saturation' },
-		hue:        { icon: '🌈', label: 'Hue' },
-		mirror:     { icon: '⇄', label: 'Mirror' },
-		flip:       { icon: '⇅', label: 'Flip' },
+		luminance:  { label: 'Brightness' },
+		contrast:   { label: 'Contrast' },
+		saturation: { label: 'Saturation' },
+		hue:        { label: 'Hue' },
+		mirror:     { label: 'Mirror' },
+		flip:       { label: 'Flip' },
 	};
 	const LIVE_ORDER = ['luminance', 'contrast', 'saturation', 'hue', 'mirror', 'flip'];
+
+	// Stroked 20px-grid icons, currentColor, used on the stage chrome. Kept as
+	// strings because every consumer builds its markup with innerHTML.
+	const ICON = {
+		reset: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4.2 10a5.8 5.8 0 1 0 1.9-4.3"></path><path d="M3.4 3.6v3.9h3.9"></path></svg>',
+		night: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M16.4 12.3A7 7 0 0 1 7.7 3.6a7 7 0 1 0 8.7 8.7z"></path></svg>',
+		ircut: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6.6"></circle><path d="M10 3.4v13.2M4.3 6.7l11.4 6.6M4.3 13.3l11.4-6.6"></path></svg>',
+		lamp: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.6 14.4a5 5 0 1 1 4.8 0v1.7H7.6z"></path><path d="M8.2 17.6h3.6"></path></svg>',
+		compare: '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="1.6"></rect><path d="M10 4v12"></path><path d="M4.6 8.4h3M4.6 11.6h3"></path></svg>',
+		snap: '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 6.6h3.2l1.5-2.1h5.4l1.5 2.1h3.2v9H2.6z" stroke-linejoin="round"></path><circle cx="10" cy="10.6" r="3.1"></circle></svg>',
+		fs: '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path></svg>',
+	};
+
+	// The orientation pad's four states. mirror/flip stay two independent
+	// booleans in the config — this is only how a camera presents them, and how
+	// every camera UI worth copying does.
+	const GEO_STATES = [
+		{ label: 'Normal', mirror: false, flip: false, tf: '' },
+		{ label: 'Mirror', mirror: true,  flip: false, tf: 'translate(20,0) scale(-1,1)' },
+		{ label: 'Flip',   mirror: false, flip: true,  tf: 'translate(0,20) scale(1,-1)' },
+		{ label: '180°',   mirror: true,  flip: true,  tf: 'translate(20,20) scale(-1,-1)' },
+	];
 
 	// Curated resolution presets (the de-facto set the firmware assumes), used
 	// to build the resolution dropdown for the *.size fields. Options are
@@ -522,6 +550,13 @@
 	}
 
 	function stopLivePreview() {
+		// Anything this leaf wired outside its own subtree — document-level
+		// listeners for hold-to-compare, timers — is undone here. The subtree
+		// itself goes with form.innerHTML, but a listener on `document` would
+		// survive every navigation and accumulate one copy per visit.
+		(state.liveCleanup || []).forEach(fn => { try { fn(); } catch (e) { /* teardown is best-effort */ } });
+		state.liveCleanup = [];
+
 		// Through the swap, which closes the trial as well as the player on
 		// screen. Destroying only state.previewPlayer would leave a transport
 		// still being judged behind on every visit — a live socket nobody has a
@@ -538,25 +573,54 @@
 		}
 	}
 
+	// What one x-live field is worth right now, and what the schema says it
+	// should be. Sliders send their number; booleans send 1/0.
+	function liveValue(f) {
+		return f.type === 'boolean' ? (f.control.checked ? 1 : 0) : f.control.value;
+	}
+
+	function liveDefault(f) {
+		const d = f.schema ? f.schema.default : undefined;
+		if (d === undefined) return liveValue(f);
+		return f.type === 'boolean' ? (toBool(d) ? 1 : 0) : d;
+	}
+
+	// The query string /api/v1/image takes, over ALL x-live fields — sending
+	// them together is what lets the backend apply combined settings (mirror
+	// and flip need each other). `valueOf` picks what each field contributes,
+	// so hold-to-compare can post the defaults through the same builder rather
+	// than growing a second copy of it.
+	function liveQuery(valueOf) {
+		const parts = [];
+		for (const f of state.fields) {
+			if (!f.schema || !f.schema['x-live']) continue;
+			parts.push(encodeURIComponent(f.dot.split('.').pop()) + '=' +
+				encodeURIComponent(valueOf(f)));
+		}
+		return parts.join('&');
+	}
+
+	// Serialised, not fire-and-forget. Hold-to-compare issues two of these — the
+	// defaults on press, the live values on release — and independent fetches
+	// have no ordering guarantee, so a short hold could let the defaults land
+	// second and leave the camera sitting at stock: precisely the state this
+	// control exists to undo. Each link swallows its own rejection, because a
+	// write that fails must not wedge every write after it.
+	let liveWrite = Promise.resolve();
+	function postLive(q) {
+		if (!q) return liveWrite;
+		liveWrite = liveWrite.then(() =>
+			apiFetch('/api/v1/image?' + q, { method: 'POST', credentials: 'same-origin' })
+				.catch(() => {}));
+		return liveWrite;
+	}
+
 	// Debounced live apply: on any x-live field change, POST the current value
-	// of ALL x-live fields to /api/v1/image at once. Sending them together lets
-	// the backend apply combined settings (e.g. mirror+flip need both). Sliders
-	// send their number; booleans send 1/0.
+	// of every x-live field at once.
 	let liveTimer = null;
 	function pushLive() {
 		if (liveTimer) clearTimeout(liveTimer);
-		liveTimer = setTimeout(() => {
-			const parts = [];
-			for (const f of state.fields) {
-				if (!f.schema || !f.schema['x-live']) continue;
-				const name = f.dot.split('.').pop();
-				const val = f.type === 'boolean' ? (f.control.checked ? 1 : 0) : f.control.value;
-				parts.push(encodeURIComponent(name) + '=' + encodeURIComponent(val));
-			}
-			if (parts.length)
-				apiFetch('/api/v1/image?' + parts.join('&'),
-					{ method: 'POST', credentials: 'same-origin' }).catch(() => {});
-		}, 120);
+		liveTimer = setTimeout(() => { liveTimer = null; postLive(liveQuery(liveValue)); }, 120);
 	}
 
 	async function load(tab, push) {
@@ -599,6 +663,7 @@
 		state.fields = [];
 		state.initial = {};
 		state.cols = null;
+		state.liveSync = [];
 
 		// Exactly one section on the page, so it gets the whole width — and its
 		// fields are dealt into the two columns of .mj-cols, rather than run
@@ -849,22 +914,101 @@
 		});
 	}
 
-	// The night/IR/light runtime toggles under the live preview. Moved here from
+	// ── The Live adjustments leaf ─────────────────────────────────────────
+	//
+	// The picture is the hero and it owns the column; everything else is either
+	// overlaid on it or in the deck below, so nothing a control does can move
+	// it. What this replaced put a 520x292 picture in a 990px column with the
+	// knobs in a card beside it, and left roughly 60% of the content area
+	// holding nothing.
+	//
+	// Two kinds of thing live on this leaf and the layout is what tells them
+	// apart. Tone and orientation are CONFIGURATION: applied live to the
+	// preview so they can be judged by eye, staged in the form until Save
+	// writes them. Night, IR-cut and the lamp are RUNTIME: pressing one changes
+	// the camera for every viewer immediately and none of them ever reaches the
+	// save bar. So runtime sits on the picture and configuration sits in the
+	// form — which is the distinction the old panel made with a blue outline
+	// button next to a blue slider, i.e. not at all.
+
+	function runtimeHtml() {
+		// Checkbox + label rather than a <button>, so `checked` and `disabled`
+		// keep meaning what wireRuntime() has always assumed and the LED is a
+		// plain :checked rule. The input is off-screen, not display:none — a
+		// hidden input is not focusable, and these are the only controls on the
+		// stage a keyboard can reach.
+		const one = (id, icon, text, cls) =>
+			'<input type="checkbox" class="mj-hrt-in" id="' + id + '">' +
+			'<label class="mj-hrt' + (cls ? ' ' + cls : '') + '" for="' + id + '">' +
+			'<span class="mj-led"></span>' + icon + '<span>' + text + '</span></label>';
+		return '<span class="mj-hud-rt mj-glass">' +
+			one('toggle-night', ICON.night, 'Night') +
+			one('toggle-ircut', ICON.ircut, 'IR&#8209;cut') +
+			one('toggle-light', ICON.lamp, 'Lamp', 'mj-hrt-amber') +
+			'</span>' +
+			'<span class="mj-hud-chip mj-glass" id="mj-lightmon" hidden>' +
+			'<a href="mj-settings.cgi?tab=nightMode">Light monitor is driving night, IR&#8209;cut and the lamp</a>' +
+			'</span>';
+	}
+
+	function renderStage(form) {
+		const stage = el('div', 'mj-live-stage');
+		stage.id = 'mj-live-stage';
+		// Two video elements because MajesticSwap stages a replacement on the
+		// spare one and only shows it once it has a picture; it toggles them
+		// through style.display, so the second starts that way rather than with
+		// the `hidden` attribute.
+		stage.innerHTML =
+			'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
+			'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
+			'<div class="mj-live-bar">' +
+			runtimeHtml() +
+			'<button type="button" class="mj-hud-btn mj-glass" id="mj-live-compare">' +
+			ICON.compare + '<span>Hold to compare</span></button>' +
+			'<span class="mj-hud-end">' +
+			'<button type="button" class="mj-hud-ico mj-glass" id="mj-live-snap" hidden aria-label="Snapshot" title="Snapshot"></button>' +
+			'<button type="button" class="mj-hud-ico mj-glass" id="mj-live-fs" hidden aria-label="Fullscreen" title="Fullscreen"></button>' +
+			'</span>' +
+			'</div>';
+		stage.querySelector('#mj-live-snap').innerHTML = ICON.snap;
+		stage.querySelector('#mj-live-fs').innerHTML = ICON.fs;
+		form.appendChild(stage);
+		return stage;
+	}
+
+	// The night/IR/light runtime toggles. They live on this page rather than on
 	// the Live page, which is deliberately settings-free. Gating mirrors what
 	// that page did: the light monitor owns all three while it is active, and
 	// IR cut / light need their pins configured. State comes from the metrics
 	// endpoint because these are runtime facts, not config values.
-	function wireNightToggles(pv) {
-		const byId = id => pv.querySelector('#' + id);
+	function wireRuntime(root) {
+		const byId = id => root.querySelector('#' + id);
+		const lbl = id => root.querySelector('label[for="' + id + '"]');
 		const night = byId('toggle-night'), ircut = byId('toggle-ircut');
 		const light = byId('toggle-light'), lightmon = byId('mj-lightmon');
 		if (!night) return;
 		const active = v => v !== false && v != null;
 		const lm = active(getDotted(state.config, 'nightMode.lightMonitor'));
-		night.disabled = lm;
-		ircut.disabled = lm || !active(getDotted(state.config, 'nightMode.irCutPin1'));
-		light.disabled = lm || !active(getDotted(state.config, 'nightMode.backlightPin'));
-		if (lm) lightmon.hidden = false;
+
+		// The monitor is driving all three, so three dead switches say less than
+		// one sentence naming what has the wheel — and where to go to take it
+		// back. The old panel showed the switches anyway with a small link
+		// beside them.
+		if (lm) {
+			const grp = root.querySelector('.mj-hud-rt');
+			if (grp) grp.hidden = true;
+			if (lightmon) lightmon.hidden = false;
+			return;
+		}
+
+		ircut.disabled = !active(getDotted(state.config, 'nightMode.irCutPin1'));
+		light.disabled = !active(getDotted(state.config, 'nightMode.backlightPin'));
+		// A control that cannot work should say which pin is missing rather than
+		// just refusing to move.
+		if (ircut.disabled && lbl('toggle-ircut'))
+			lbl('toggle-ircut').title = 'nightMode.irCutPin1 is not configured.';
+		if (light.disabled && lbl('toggle-light'))
+			lbl('toggle-light').title = 'nightMode.backlightPin is not configured.';
 
 		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
 			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
@@ -893,104 +1037,245 @@
 		});
 	}
 
-	// The Live adjustments leaf: the preview and the x-live knobs side by side, so
-	// dragging one shows its effect without scrolling. One "Reset all" rather than
-	// a per-knob reset. The knobs register in state.fields, so the page Save and
-	// dirty tracking cover them like any other field.
-	function renderLive(form) {
-		const row = el('div', 'row g-4');
-		form.appendChild(row);
-
-		const withVideo = !!window.MajesticVideo;
-		if (withVideo) {
-			const pv = el('div', 'col-12 col-lg-7');
-			pv.id = 'mj-live-preview';
-			// Its own Main/Sub control, because the remembered choice is
-			// per page: without one here this panel could only ever be the
-			// substream, and the case that makes the choice worth having —
-			// video0 cropped and video1 not — is exactly the case where that
-			// is the wrong picture.
-			pv.innerHTML =
-				'<div class="card"><div class="card-body">' +
-				'<div class="d-flex align-items-center mb-1">' +
-				'<div class="text-secondary small me-auto">Live preview</div>' +
-				'<div class="btn-group btn-group-sm" role="group" aria-label="Stream">' +
-				'<input type="radio" class="btn-check" name="mj-live-stream" id="mj-live-s0" autocomplete="off">' +
-				'<label class="btn btn-outline-primary" for="mj-live-s0">Main</label>' +
-				'<input type="radio" class="btn-check" name="mj-live-stream" id="mj-live-s1" autocomplete="off">' +
-				'<label class="btn btn-outline-primary" for="mj-live-s1" id="mj-live-sub" hidden>Sub</label>' +
-				'</div></div>' +
-				'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
-				'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
-				// The night/IR/light toggles live HERE, not on the Live page:
-				// that page is deliberately settings-free (the future
-				// multi-user read-only view), and these change the camera for
-				// everyone. Same ids and wiring the Live page used to carry.
-				'<div class="d-flex flex-wrap align-items-center gap-2 mt-2">' +
-				'<input type="checkbox" class="btn-check" id="toggle-night">' +
-				'<label class="btn btn-sm btn-outline-primary" for="toggle-night">🌙 Night mode</label>' +
-				'<input type="checkbox" class="btn-check" id="toggle-ircut">' +
-				'<label class="btn btn-sm btn-outline-primary" for="toggle-ircut">👁 IR filter</label>' +
-				'<input type="checkbox" class="btn-check" id="toggle-light">' +
-				'<label class="btn btn-sm btn-outline-primary" for="toggle-light">💡 Light</label>' +
-				'<span class="small" id="mj-lightmon" hidden><a href="mj-settings.cgi?tab=nightMode">Light monitor active</a></span>' +
-				'</div>' +
-				'</div></div>';
-			row.appendChild(pv);
-			attachLivePreview(pv.querySelector('#mj-live-video'));
-			wireNightToggles(pv);
-		}
-
-		const col = el('div', withVideo ? 'col-12 col-lg-5' : 'col-12 col-lg-6');
-		col.id = 'mj-live-panel';
-		const card = el('div', 'card');
-		const body = el('div', 'card-body');
-		const head = el('div', 'd-flex align-items-center mb-2');
-		head.innerHTML =
-			'<h3 class="mb-0 me-auto">Live adjustments</h3>' +
-			'<button type="button" class="btn btn-sm btn-link p-0 mj-live-reset" id="mj-live-reset">↺ Reset all</button>';
-		body.appendChild(head);
-
-		const dots = [];
-		for (const f of liveFields()) {
-			const eff = getDotted(state.config, f.dot);
-			const field = renderField(body, f.dot, f.key, f.sub, eff, { live: true });
-			if (field) {
-				state.fields.push(field);
-				state.initial[f.dot] = field.getValue();
-				dots.push(f.dot);
+	// Hold to compare: post the schema defaults while the button is held, then
+	// put the live values back on release. The same endpoint the sliders already
+	// drive, so this is not a new kind of write — but it is the one control on
+	// the stage that can leave the camera somewhere nobody asked for, so the
+	// restore is guarded on every way a press can end, not just pointerup. If
+	// the browser dies mid-hold the camera stays at stock; the form is still
+	// dirty, so Save puts it right.
+	function wireCompare(btn) {
+		if (!btn) return;
+		let held = false;
+		const down = (e) => {
+			if (held) return;
+			held = true;
+			btn.classList.add('mj-hud-on');
+			// A queued push would land 120 ms later and undo the comparison.
+			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+			if (e && e.pointerId != null && btn.setPointerCapture) {
+				try { btn.setPointerCapture(e.pointerId); } catch (_) { /* the guards below still restore */ }
 			}
-		}
-
-		card.appendChild(body);
-		col.appendChild(card);
-		row.appendChild(col);
-
-		const rb = document.getElementById('mj-live-reset');
-		if (rb) rb.addEventListener('click', () => onResetLive(dots, rb));
+			postLive(liveQuery(liveDefault));
+		};
+		const up = () => {
+			if (!held) return;
+			held = false;
+			btn.classList.remove('mj-hud-on');
+			postLive(liveQuery(liveValue));
+		};
+		btn.addEventListener('pointerdown', down);
+		btn.addEventListener('pointerup', up);
+		btn.addEventListener('pointercancel', up);
+		btn.addEventListener('lostpointercapture', up);
+		btn.addEventListener('blur', up);
+		// Space and Enter on a focused button fire click, not pointerdown, so a
+		// keyboard hold needs its own pair.
+		btn.addEventListener('keydown', (e) => {
+			if (e.repeat || (e.key !== ' ' && e.key !== 'Enter')) return;
+			e.preventDefault();
+			down(null);
+		});
+		btn.addEventListener('keyup', (e) => {
+			if (e.key === ' ' || e.key === 'Enter') up();
+		});
+		// A tab switch or an alt-tab ends the press with no pointer event at all.
+		document.addEventListener('visibilitychange', up);
+		window.addEventListener('blur', up);
+		state.liveCleanup.push(() => {
+			document.removeEventListener('visibilitychange', up);
+			window.removeEventListener('blur', up);
+			up();
+		});
 	}
 
-	async function onResetLive(dots, btn) {
-		if (!dots.length) return;
-		if (!confirm('Reset all live image adjustments to their defaults?')) return;
-		btn.disabled = true;
-		const orig = btn.textContent;
-		btn.textContent = '…';
-		clearError();
-		try {
-			const q = dots.map(d => 'key=' + encodeURIComponent(d)).join('&');
-			const res = await apiFetch('/api/v1/reset?' + q, { credentials: 'same-origin' });
-			if (!res.ok) {
-				const txt = await safeText(res);
-				showError('Reset failed (HTTP ' + res.status + '). ' + txt);
-				return;
+	// A titled group inside a deck column: micro-caps label, a rule to the
+	// margin, an optional note on the right. Returns the body to fill.
+	function liveGroup(container, title, note) {
+		const g = el('div', 'mj-live-grp');
+		const h = el('div', 'mj-live-grp-head');
+		h.innerHTML = '<span class="mj-cap">' + esc(title) + '</span>' +
+			'<span class="mj-live-rule"></span>' +
+			(note ? '<span class="mj-live-note">' + esc(note) + '</span>' : '');
+		g.appendChild(h);
+		const body = el('div');
+		g.appendChild(body);
+		container.appendChild(g);
+		return body;
+	}
+
+	// Set an x-live field and let the event drive everything downstream — the
+	// row's own repaint, updateDirty, pushLive and the orientation pad all hang
+	// off `input`, so this is the single way any code here changes a value.
+	function setLive(f, v) {
+		f.setValue(v);
+		f.control.dispatchEvent(new Event('input', { bubbles: true }));
+	}
+
+	// Every x-live knob back to its schema default — staged, exactly like the
+	// per-row ↺ and for the same reason. This used to call /api/v1/reset, which
+	// wrote the camera the moment it was pressed while the sliders beside it
+	// did not: on a panel whose whole claim is that nothing is written until
+	// Save, it was the one control that broke the rule. The rest of the page
+	// keeps the server-side reset, where every row behaves that way.
+	function resetLiveAll() {
+		for (const f of state.fields) {
+			if (!f.schema || !f.schema['x-live']) continue;
+			if (f.schema.default === undefined) continue;
+			setLive(f, f.schema.default);
+		}
+	}
+
+	// Mirror and flip are two booleans in the config and four states to a
+	// person, which is how every camera UI worth copying presents them. The pad
+	// is those four states; the two checkboxes stay real fields — hidden — so
+	// Save, dirty tracking and refresh() never learn that any of this happened.
+	function renderGeometry(container, mirrorField, flipField) {
+		const row = el('div', 'mj-geo-row');
+		const btns = GEO_STATES.map(g => {
+			const b = el('button', 'mj-geo');
+			b.type = 'button';
+			b.innerHTML =
+				'<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
+				'<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>' +
+				'<g transform="' + g.tf + '"><path d="M7.6 6.8h5.2M7.6 10h3.7M7.6 6.8v6.4" stroke-linecap="round" stroke-width="1.7"></path></g>' +
+				'</svg><span>' + esc(g.label) + '</span>';
+			b.addEventListener('click', () => {
+				setLive(mirrorField, g.mirror);
+				setLive(flipField, g.flip);
+			});
+			row.appendChild(b);
+			return b;
+		});
+		container.appendChild(row);
+
+		const sync = () => {
+			const m = toBool(mirrorField.getValue()), fl = toBool(flipField.getValue());
+			GEO_STATES.forEach((g, i) => {
+				const on = g.mirror === m && g.flip === fl;
+				btns[i].classList.toggle('mj-geo-on', on);
+				btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+			});
+		};
+		[mirrorField, flipField].forEach(f => {
+			f.control.addEventListener('input', sync);
+			f.control.addEventListener('change', sync);
+		});
+		// refresh() pushes values in with setValue and fires no events, so the
+		// pad has to be told to re-read after a save or a reset.
+		state.liveSync.push(sync);
+		sync();
+
+		// The pad is only half of orientation, and without saying so it looks
+		// like all of it. Quarter turns are `rotate`, whose enum is deliberately
+		// ["0","90","270"] — 180 is absent because mirror+flip already give you
+		// that, at sensor level and for free. 90 and 270 are the ones this pad
+		// cannot reach: they are a VPSS operation that swaps the stream's width
+		// and height, so they are not x-live, do not belong on a panel whose
+		// controls all apply live, and stay on their own leaf. Point at it
+		// rather than move it here.
+		const sec = mirrorField.dot.slice(0, mirrorField.dot.lastIndexOf('.'));
+		const rotSchema = (((state.schema.properties || {})[sec] || {}).properties || {}).rotate;
+		const turns = rotSchema && Array.isArray(rotSchema.enum)
+			? rotSchema.enum.filter(v => String(v) !== '0') : [];
+		if (turns.length && !EXCLUDE.has(sec + '.rotate')) {
+			const hint = el('p', 'mj-live-hint');
+			hint.innerHTML = 'Quarter turns (' +
+				turns.map(v => esc(String(v)) + '&#176;').join(', ') +
+				') resize the stream, so they are saved and applied with a reload: ' +
+				'<a href="mj-settings.cgi?tab=' + esc(sec) + '">' + esc(label(sec)) + '</a>.';
+			container.appendChild(hint);
+		}
+	}
+
+	function renderLive(form) {
+		const fields = liveFields();
+		const withVideo = !!window.MajesticVideo;
+
+		// The only place the leaf names itself — the rail's active item says it
+		// too — with the stream picker on the same line rather than in a card
+		// header of its own.
+		//
+		// An <h3> despite the micro-caps styling, and not a <span>: revealSection()
+		// focuses `form h3` after a navigation so the section announces itself to
+		// a screen reader (#222). Every other leaf has one; styling this like a
+		// group label must not cost the Live leaf its heading.
+		const head = el('div', 'mj-live-head');
+		head.innerHTML =
+			'<h3 class="mj-cap">Live adjustments</h3>' +
+			'<span class="mj-live-rule"></span>' +
+			'<span class="mj-seg" role="group" aria-label="Stream">' +
+			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s0" autocomplete="off">' +
+			'<label class="mj-seg-lbl" for="mj-live-s0">Main</label>' +
+			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s1" autocomplete="off">' +
+			'<label class="mj-seg-lbl" for="mj-live-s1" id="mj-live-sub" hidden>Sub</label>' +
+			'</span>';
+		form.appendChild(head);
+
+		if (withVideo) {
+			const stage = renderStage(form);
+			attachLivePreview(stage.querySelector('#mj-live-video'));
+			wireRuntime(stage);
+			wireCompare(stage.querySelector('#mj-live-compare'));
+			// Shared with the Live page rather than copied: the /image.jpg
+			// naming, the jpeg.enabled gate and the delayed revokeObjectURL are
+			// details a second copy would drift on.
+			if (window.MajesticHero) {
+				// The disposer matters here and not on the Live page: this stage
+				// is rebuilt every time the leaf is opened.
+				const offFs = window.MajesticHero.wireFullscreen(stage, stage.querySelector('#mj-live-fs'));
+				if (offFs) state.liveCleanup.push(offFs);
+				window.MajesticHero.wireSnapshot(stage.querySelector('#mj-live-snap'));
 			}
-			await refresh();
-		} catch (e) {
-			showError('Reset failed: ' + e.message);
-		} finally {
-			btn.textContent = orig;
-			btn.disabled = false;
+			const note = el('p', 'mj-live-hint');
+			note.textContent = 'Night, IR-cut and the lamp are on the picture because they are runtime state: ' +
+				'pressing one changes the camera for every viewer immediately, and none of them is part of Save.';
+			form.appendChild(note);
+		}
+
+		// The deck: one card split by a rule, so tone and orientation read as
+		// one instrument rather than as two unrelated panels.
+		const deck = el('div', 'mj-live-deck');
+		const colA = el('div', 'mj-live-col');
+		const colB = el('div', 'mj-live-col mj-live-col-b');
+		deck.appendChild(colA);
+		deck.appendChild(colB);
+		form.appendChild(deck);
+
+		// The pad replaces the two switches only when BOTH halves of it are
+		// there. A build that marks just one of them x-live — or that marks some
+		// other boolean x-live — keeps the switch it has always had.
+		const mirror = fields.find(f => f.key === 'mirror' && f.sub.type === 'boolean');
+		const flip = fields.find(f => f.key === 'flip' && f.sub.type === 'boolean');
+		const useGeo = !!(mirror && flip);
+
+		const hasTone = fields.some(f => f !== mirror && f !== flip);
+		const toneBody = hasTone ? liveGroup(colA, 'Tone', 'saved with the page') : null;
+
+		for (const f of fields) {
+			const geoField = useGeo && (f === mirror || f === flip);
+			const box = geoField ? colB : (toneBody || colA);
+			const field = renderField(box, f.dot, f.key, f.sub,
+				getDotted(state.config, f.dot), { live: true, hidden: geoField });
+			if (!field) continue;
+			state.fields.push(field);
+			state.initial[f.dot] = field.getValue();
+		}
+
+		if (toneBody) {
+			const foot = el('div', 'mj-live-foot');
+			const rall = el('button', 'mj-live-linkbtn');
+			rall.type = 'button';
+			rall.innerHTML = ICON.reset + '<span>Reset all to stock</span>';
+			rall.addEventListener('click', resetLiveAll);
+			foot.appendChild(rall);
+			toneBody.appendChild(foot);
+		}
+
+		if (useGeo) {
+			const mf = state.fields.find(f => f.dot === mirror.dot);
+			const ff = state.fields.find(f => f.dot === flip.dot);
+			if (mf && ff) renderGeometry(liveGroup(colB, 'Orientation', ''), mf, ff);
 		}
 	}
 
@@ -1168,15 +1453,12 @@
 		const live = !!opts.live;
 		// the field's `title` is the short label; older schemas only had `description`
 		const desc = sub.title || sub.description || key;
-		const meta = LIVE_META[key];
-		// live knobs show an emoji + short label; everything else uses the title
+		// live knobs use the short label; everything else uses the title.
 		// data-hl carries the raw text so highlightPanel() can re-mark the label
 		// in place when the search term changes, without re-rendering the control
 		// (which would throw away unsaved edits)
 		const hlSpan = (t) => '<span data-hl="' + esc(t) + '">' + esc(t) + '</span>';
-		const labelHtml = (live && meta)
-			? '<span class="mj-live-ico">' + meta.icon + '</span> ' + hlSpan(meta.label)
-			: hlSpan(desc);
+		const labelHtml = hlSpan(live ? liveLabel(key, sub) : desc);
 		const liveCls = live ? ' mj-live-row' : '';
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
@@ -1194,7 +1476,101 @@
 
 		let p, control;
 
-		if (type === 'boolean') {
+		if (live && type === 'integer' && isNum(sub.maximum)) {
+			// The detent slider. Its fill runs from the schema's own default to
+			// the current value rather than from the minimum, so a stock camera
+			// shows no fill at all and one look down the column answers the
+			// question an installer actually has: has anyone touched this, and
+			// which way. The tick marks the default; the signed delta says how
+			// far in numbers.
+			p = el('p', 'range mj-row mj-live-row');
+			const min = isNum(sub.minimum) ? sub.minimum : 0;
+			const max = sub.maximum;
+			const span = (max - min) || 1;
+			// No declared default means no detent to run from: the fill starts
+			// at the minimum, the tick and the delta are omitted, and ↺ has
+			// nothing to reset to.
+			const hasDef = isNum(sub.default);
+			const def = hasDef ? sub.default : min;
+			const v = isNumish(eff) ? Number(eff) : def;
+			const pct = (n) => ((n - min) / span * 100);
+			const name = esc(liveLabel(key, sub));
+			p.innerHTML =
+				'<label class="mj-live-name" for="' + id + '">' + labelHtml + '</label>' +
+				'<span class="mj-live-track">' +
+				'<span class="mj-live-bg"></span>' +
+				(hasDef ? '<span class="mj-live-tick" style="left:' + pct(def).toFixed(3) + '%"></span>' : '') +
+				'<span class="mj-live-fill"></span>' +
+				'<input type="range" class="mj-live-input" id="' + id + '" min="' + min + '" max="' + max + '" step="1" value="' + v + '">' +
+				'</span>' +
+				'<input type="number" class="mj-live-num" min="' + min + '" max="' + max + '" step="1" value="' + v + '" aria-label="' + name + ' value">' +
+				'<span class="mj-live-delta" aria-hidden="true"></span>' +
+				'<button type="button" class="mj-live-rst" aria-label="Reset ' + name + ' to ' + def + '">' + ICON.reset + '</button>';
+			control = p.querySelector('.mj-live-input');
+			const num = p.querySelector('.mj-live-num');
+			const fill = p.querySelector('.mj-live-fill');
+			const delta = p.querySelector('.mj-live-delta');
+			const rst = p.querySelector('.mj-live-rst');
+
+			const paint = () => {
+				const cur = Number(control.value);
+				const lo = Math.min(cur, def), hi = Math.max(cur, def);
+				fill.style.left = pct(lo).toFixed(3) + '%';
+				fill.style.width = (pct(hi) - pct(lo)).toFixed(3) + '%';
+				const d = cur - def;
+				delta.textContent = (!hasDef || d === 0) ? '' : (d > 0 ? '+' + d : '−' + (-d));
+				p.classList.toggle('mj-live-off', hasDef && d !== 0);
+				if (num.value !== String(cur)) num.value = cur;
+				rst.disabled = !hasDef || d === 0;
+			};
+
+			// Snap to the detent, but only under a pointer. Snapping on every
+			// input would trap the arrow keys at the default (49 -> 50, 51 ->
+			// 50) and put both of those values permanently out of reach.
+			let dragging = false;
+			const endDrag = () => { dragging = false; };
+			control.addEventListener('pointerdown', () => { dragging = true; });
+			control.addEventListener('pointerup', endDrag);
+			control.addEventListener('pointercancel', endDrag);
+			// Registered before renderField's own updateDirty/pushLive listeners
+			// below, so the snapped value is what they read.
+			control.addEventListener('input', () => {
+				if (dragging && hasDef && Math.abs(Number(control.value) - def) <= 1)
+					control.value = def;
+				paint();
+			});
+
+			// The readout is an input, not a label: typing an exact value is
+			// what a number is for, and a slider alone cannot hit one.
+			const fromNum = () => {
+				if (num.value === '') return;      // mid-edit, not a value yet
+				let n = Number(num.value);
+				if (!isFinite(n)) return;
+				n = Math.max(min, Math.min(max, Math.round(n)));
+				if (String(n) === control.value) return;
+				control.value = n;
+				control.dispatchEvent(new Event('input', { bubbles: true }));
+			};
+			num.addEventListener('input', fromNum);
+			num.addEventListener('change', () => { fromNum(); paint(); });
+
+			// A LOCAL reset: put the control on its default and leave the row
+			// dirty. Everywhere else on this page ↺ calls /api/v1/reset and
+			// persists immediately — here that would be the only control on the
+			// leaf that writes the camera before Save, which is exactly the
+			// confusion the layout is trying to remove.
+			rst.addEventListener('click', () => {
+				if (!hasDef) return;
+				control.value = def;
+				control.dispatchEvent(new Event('input', { bubbles: true }));
+			});
+
+			control._set = (val) => {
+				control.value = isNumish(val) ? Number(val) : def;
+				paint();
+			};
+			paint();
+		} else if (type === 'boolean') {
 			p = el('p', 'boolean mj-row' + liveCls);
 			p.innerHTML =
 				'<span class="form-check form-switch">' +
@@ -1461,6 +1837,10 @@
 			}
 		}
 
+		// A field the orientation pad drives instead: still a real field, so
+		// Save, dirty tracking and refresh() are untouched, just not drawn.
+		if (opts.hidden) p.hidden = true;
+
 		container.appendChild(p);
 
 		control.addEventListener('input', updateDirty);
@@ -1680,6 +2060,9 @@
 			state.initial[f.dot] = f.getValue();
 		}
 		runVisibility();
+		// setValue fires no events, so anything that mirrors a field rather than
+		// owning it — the orientation pad — has to be told to re-read.
+		(state.liveSync || []).forEach(fn => fn());
 		updateDirty();
 	}
 

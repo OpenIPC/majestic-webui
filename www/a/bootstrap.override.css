@@ -325,12 +325,6 @@ pre#output[data-cmd] {
 	opacity: 0.35;
 }
 
-/* "Reset all" in the live-adjustments header keeps its words: one control acting
-   on six knobs, where a lone glyph would read as "reset this one thing". */
-.mj-live-reset {
-	text-decoration: none;
-}
-
 /* ── settings navigation tree ───────────────────────────────────────────────
    Categories are static headings on >=md and accordion toggles below it, where
    the rail is full width and 21 sections would otherwise be a screen and a half
@@ -506,32 +500,6 @@ mark {
 	background: rgba(255, 255, 255, 0.28);
 }
 
-/* "Live adjustments" panel beside the image preview */
-.mj-live-ico {
-	display: inline-block;
-	width: 1.5em;
-	text-align: center;
-}
-
-.mj-live-row {
-	margin-bottom: 0.5rem;
-}
-
-.mj-live-row.range {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-}
-
-.mj-live-row.range > .form-label {
-	flex: 0 0 8rem;
-	margin: 0;
-}
-
-.mj-live-row.range > .input-group {
-	flex: 1 1 auto;
-}
-
 /* The section card lays its fields out in 2 columns. Two real columns, dealt by
    mj-settings.js, rather than a CSS multi-column box: a column box re-balances
    itself whenever a visibleWhen row appears or disappears, which shuffles
@@ -600,16 +568,659 @@ mark {
 	height: 1.5rem;
 }
 
-.mj-live-video {
-	display: block; /* avoid the inline baseline gap below the <video> */
-	width: 100%;
-	max-width: 640px;
-	aspect-ratio: 16/9;
-	background: #000;
-	border: 1px solid var(--bs-primary);
+/* ── Live adjustments ───────────────────────────────────────────────────────
+   The picture is the hero and it owns the column; the deck sits under it. What
+   this replaced capped the video at 640px inside a 990px column and put the
+   knobs in a card beside it, which left about 60% of the content area empty.
+
+   Runtime controls (night / IR-cut / lamp) are overlaid ON the picture and
+   configuration is in the deck below, because they are not the same kind of
+   thing: pressing a runtime control changes the camera for every viewer
+   immediately, while a slider stages a value Save writes. The old panel gave
+   both the same blue and the same row. */
+
+/* Micro-caps group label — the same treatment .mj-tree-cat gives the rail's
+   category headings, so the two rails of the page speak one language. */
+.mj-cap {
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+}
+
+.mj-live-head,
+.mj-live-grp-head {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.mj-live-head {
+	margin-bottom: 0.6rem;
+}
+
+/* The leaf's heading is a real <h3> (revealSection focuses it), so its default
+   heading margin and size have to come back off to read as a group label. */
+.mj-live-head h3 {
+	margin: 0;
+	line-height: 1.4;
+}
+
+.mj-live-grp-head {
+	align-items: baseline;
+	margin-bottom: 0.7rem;
+}
+
+.mj-live-rule {
+	flex: 1 1 auto;
+	height: 1px;
+	background: var(--bs-border-color);
+}
+
+.mj-live-note {
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+}
+
+/* Segmented control (stream picker). Radio inputs kept — they are the right
+   semantics and attachLivePreview() drives .checked/.disabled — but taken out
+   of the flow rather than hidden, so they stay focusable. */
+.mj-seg {
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	background: var(--bs-tertiary-bg);
+	border: 1px solid var(--bs-border-color);
 	border-radius: var(--bs-border-radius);
 }
 
+.mj-seg-in {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.mj-seg-lbl {
+	padding: 0.3rem 0.8rem;
+	border-radius: var(--bs-border-radius-sm);
+	color: var(--bs-secondary-color);
+	font-size: 0.75rem;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.mj-seg-in:checked + .mj-seg-lbl {
+	background: var(--bs-primary);
+	color: #fff;
+}
+
+.mj-seg-in:focus-visible + .mj-seg-lbl {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+}
+
+.mj-seg-in:disabled + .mj-seg-lbl {
+	color: var(--bs-tertiary-color);
+	cursor: not-allowed;
+}
+
+/* The stage. Sized from the viewport height the same way .mj-stage is on the
+   Live page, and for the same reason turned up one notch: here the deck has to
+   stay on screen too, or you are scrolling between the slider you are dragging
+   and the picture you are dragging it for. The floor stops it collapsing on a
+   short window; the 16:9 box never changes, and a stream of another shape is
+   contained inside it rather than reflowing the page. */
+.mj-live-stage {
+	position: relative;
+	width: min(100%, max(28rem, calc((100vh - 30rem) * 1.77778)));
+	width: min(100%, max(28rem, calc((100dvh - 30rem) * 1.77778)));
+	margin-inline: auto;
+	aspect-ratio: 16 / 9;
+	background: #0d0f14;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+	overflow: hidden;
+	box-shadow: var(--bs-box-shadow);
+}
+
+/* object-fit: contain, so a 4:3 or square-cropped sensor is letterboxed in a
+   box that never moves instead of being squeezed into 16:9. */
+.mj-live-video {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	background: #0d0f14;
+}
+
+/* On-picture chrome: black glass in both themes, because its background is the
+   picture and not the page surface. */
+.mj-glass {
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
+}
+
+/* Always visible, unlike the Live page's bar: the LEDs below are camera state,
+   and state you have to wave a mouse at to read is state nobody reads. */
+.mj-live-bar {
+	position: absolute;
+	inset: auto 0.75rem 0.75rem;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+
+.mj-hud-end {
+	margin-left: auto;
+	display: flex;
+	gap: 0.5rem;
+}
+
+.mj-hud-rt {
+	display: flex;
+	gap: 2px;
+	padding: 3px;
+}
+
+.mj-hrt-in {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.mj-hrt {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.45rem 0.75rem;
+	border-radius: var(--bs-border-radius-sm);
+	color: #b9bec9;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	cursor: pointer;
+	user-select: none;
+}
+
+.mj-hrt:hover {
+	background: rgba(255, 255, 255, 0.07);
+	color: #fff;
+}
+
+.mj-hrt-in:checked + .mj-hrt {
+	background: rgba(255, 255, 255, 0.1);
+	color: #fff;
+}
+
+.mj-hrt-in:focus-visible + .mj-hrt {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+}
+
+.mj-hrt-in:disabled + .mj-hrt {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+/* The lit indicator is the point of the control: it says what the camera is
+   doing, at a glance, from across a room. */
+.mj-led {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #6c727d;
+	flex: 0 0 auto;
+}
+
+.mj-hrt-in:checked + .mj-hrt .mj-led {
+	background: var(--bs-primary);
+	box-shadow: 0 0 8px var(--bs-primary);
+}
+
+/* The illuminator is a lamp, not a mode — amber says so without a word. */
+.mj-hrt-in:checked + .mj-hrt-amber .mj-led {
+	background: var(--bs-warning);
+	box-shadow: 0 0 8px var(--bs-warning);
+}
+
+.mj-hud-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	padding: 0.5rem 0.75rem;
+	color: #d8dbe4;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	cursor: pointer;
+	user-select: none;
+}
+
+.mj-hud-btn:hover {
+	color: #fff;
+}
+
+.mj-hud-btn.mj-hud-on {
+	background: rgba(var(--bs-primary-rgb), 0.9);
+	border-color: transparent;
+	color: #fff;
+}
+
+.mj-hud-ico {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.125rem;
+	height: 2.125rem;
+	padding: 0;
+	color: #d8dbe4;
+	cursor: pointer;
+}
+
+.mj-hud-ico:hover {
+	color: #fff;
+}
+
+.mj-hud-chip {
+	padding: 0.5rem 0.75rem;
+	font-size: 0.8125rem;
+	color: #d8dbe4;
+}
+
+.mj-hud-chip a {
+	color: #fff;
+}
+
+.mj-live-hint {
+	margin: 0.5rem 0 0;
+	font-size: 0.6875rem;
+	line-height: 1.5;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-live-hint a {
+	color: var(--bs-secondary-color);
+}
+
+.mj-live-hint a:hover {
+	color: var(--bs-primary);
+}
+
+/* The deck: one card split by a rule, so tone and orientation read as one
+   instrument rather than as two unrelated panels. The background is set here
+   rather than left to .card — that rule currently resolves to the page colour,
+   so a .card on this page is an outline and not a surface. */
+.mj-live-deck {
+	display: flex;
+	margin-top: 1rem;
+	background: var(--bs-card-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: var(--bs-box-shadow-sm);
+	overflow: hidden;
+}
+
+.mj-live-col {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 1.25rem 1.5rem 1.4rem;
+}
+
+.mj-live-col-b {
+	flex: 0 0 23rem;
+	border-left: 1px solid var(--bs-border-color);
+}
+
+.mj-live-grp + .mj-live-grp {
+	margin-top: 1.25rem;
+}
+
+.mj-live-foot {
+	display: flex;
+	margin-top: 0.75rem;
+}
+
+.mj-live-linkbtn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--bs-secondary-color);
+	font-size: 0.75rem;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.mj-live-linkbtn:hover {
+	color: var(--bs-primary);
+}
+
+/* ── the detent slider ──────────────────────────────────────────────────────
+   One instrument row per knob. The fill runs from the schema's default to the
+   current value rather than from the minimum, so a stock camera shows no fill
+   at all: whether anyone has touched this camera, and in which direction, is
+   answerable by looking rather than by reading four numbers. */
+.mj-live-row {
+	display: flex;
+	align-items: center;
+	gap: 0.85rem;
+	margin: 0;
+	min-height: 2rem;
+	border-left: 0;
+	padding-left: 0;
+}
+
+.mj-live-name {
+	flex: 0 0 5.75rem;
+	margin: 0;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+}
+
+.mj-live-track {
+	position: relative;
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 1.75rem;
+	display: flex;
+	align-items: center;
+}
+
+.mj-live-bg,
+.mj-live-fill {
+	position: absolute;
+	height: 4px;
+	border-radius: 2px;
+}
+
+.mj-live-bg {
+	left: 0;
+	right: 0;
+	background: rgba(var(--bs-body-color-rgb), 0.1);
+}
+
+.mj-live-fill {
+	background: var(--bs-primary);
+}
+
+/* Sits under the translucent track, so it reads as a notch cut through it
+   rather than as a mark laid on top — and the thumb covers it exactly when the
+   value is at the detent, which is the right answer. */
+.mj-live-tick {
+	position: absolute;
+	top: 0.3rem;
+	width: 1px;
+	height: 12px;
+	margin-left: -0.5px;
+	background: var(--bs-tertiary-color);
+}
+
+/* The range input is transparent and sits on top: it keeps the drag, the
+   keyboard and the touch handling, while the three spans above draw. */
+.mj-live-input {
+	position: relative;
+	z-index: 2;
+	-webkit-appearance: none;
+	appearance: none;
+	width: 100%;
+	height: 1.75rem;
+	margin: 0;
+	padding: 0;
+	background: transparent;
+	border: 0;
+	cursor: ew-resize;
+}
+
+.mj-live-input::-webkit-slider-runnable-track {
+	height: 1.75rem;
+	background: transparent;
+}
+
+.mj-live-input::-moz-range-track {
+	height: 1.75rem;
+	background: transparent;
+}
+
+.mj-live-input::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	width: 14px;
+	height: 14px;
+	margin-top: 7px;
+	border: 0;
+	border-radius: 50%;
+	background: var(--bs-body-color);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.mj-live-input::-moz-range-thumb {
+	width: 14px;
+	height: 14px;
+	border: 0;
+	border-radius: 50%;
+	background: var(--bs-body-color);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+/* Off the detent: the thumb takes the accent. Colour carries the state, so the
+   thumb never changes size and the row never moves. */
+.mj-live-off .mj-live-input::-webkit-slider-thumb {
+	background: var(--bs-primary);
+}
+
+.mj-live-off .mj-live-input::-moz-range-thumb {
+	background: var(--bs-primary);
+}
+
+.mj-live-input:focus-visible {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+	border-radius: var(--bs-border-radius-sm);
+}
+
+/* An input rather than a readout: typing an exact value is what a number is
+   for, and a slider alone cannot hit one. Styled flat so it reads as the value
+   it is, not as another box to fill in. */
+.mj-live-num {
+	flex: 0 0 2.75rem;
+	width: 2.75rem;
+	padding: 0.1rem 0.15rem;
+	border: 1px solid transparent;
+	border-radius: var(--bs-border-radius-sm);
+	background: transparent;
+	color: var(--bs-tertiary-color);
+	font-family: var(--bs-font-monospace);
+	font-size: 0.875rem;
+	font-variant-numeric: tabular-nums;
+	text-align: right;
+	-moz-appearance: textfield;
+}
+
+.mj-live-num::-webkit-outer-spin-button,
+.mj-live-num::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+.mj-live-num:hover,
+.mj-live-num:focus {
+	border-color: var(--bs-border-color);
+	color: var(--bs-body-color);
+	outline: 0;
+}
+
+.mj-live-off .mj-live-num {
+	color: var(--bs-body-color);
+}
+
+/* Signed offset from stock, so the number beside it means something on its own
+   without holding the default in your head. */
+.mj-live-delta {
+	flex: 0 0 2rem;
+	color: var(--bs-primary);
+	font-family: var(--bs-font-monospace);
+	font-size: 0.6875rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.mj-live-rst {
+	flex: 0 0 1.25rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--bs-tertiary-color);
+	cursor: pointer;
+}
+
+.mj-live-rst:hover:not(:disabled) {
+	color: var(--bs-primary);
+}
+
+.mj-live-rst:disabled {
+	opacity: 0.22;
+	cursor: default;
+}
+
+/* ── orientation ─────────────────────────────────────────────────────────── */
+.mj-geo-row {
+	display: flex;
+	gap: 0.375rem;
+}
+
+.mj-geo {
+	flex: 1 1 0;
+	padding: 0.45rem 0.25rem 0.4rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-tertiary-bg);
+	color: var(--bs-secondary-color);
+	cursor: pointer;
+	text-align: center;
+}
+
+.mj-geo:hover {
+	border-color: var(--bs-tertiary-color);
+}
+
+.mj-geo svg {
+	display: block;
+	margin: 0 auto 0.25rem;
+}
+
+.mj-geo span {
+	font-size: 0.625rem;
+	letter-spacing: 0.02em;
+}
+
+.mj-geo-on {
+	border-color: var(--bs-primary);
+	background: rgba(var(--bs-primary-rgb), 0.13);
+	color: var(--bs-body-color);
+}
+
+/* Stacked, the deck is a single column and every control gets a touch target:
+   this panel is used up a ladder as often as at a desk. */
+@media (max-width: 991.98px) {
+	.mj-live-deck {
+		flex-direction: column;
+	}
+
+	.mj-live-col-b {
+		flex: 1 1 auto;
+		border-left: 0;
+		border-top: 1px solid var(--bs-border-color);
+	}
+
+	/* Two lines, and the track gets the whole of the second one: sharing a row
+	   with the readout left it 155px to drag on a 390px screen. Name and value
+	   read together on the first line, which is the pairing that matters. */
+	.mj-live-row {
+		flex-wrap: wrap;
+		min-height: 2.75rem;
+		padding-bottom: 0.25rem;
+	}
+
+	.mj-live-name {
+		order: 1;
+		flex: 1 1 auto;
+	}
+
+	/* 2.75rem, not just more padding: the readout shares its line with the ↺,
+	   so matching that button's height is both the touch target and the thing
+	   that keeps the line from looking ragged. */
+	.mj-live-num {
+		order: 2;
+		min-height: 2.75rem;
+		padding: 0.35rem 0.25rem;
+	}
+
+	.mj-live-delta {
+		order: 3;
+	}
+
+	.mj-live-rst {
+		order: 4;
+	}
+
+	.mj-live-track {
+		order: 5;
+		flex: 1 1 100%;
+		height: 2.75rem;
+	}
+
+	.mj-live-input {
+		height: 2.75rem;
+	}
+
+	.mj-live-input::-webkit-slider-runnable-track,
+	.mj-live-input::-moz-range-track {
+		height: 2.75rem;
+	}
+
+	.mj-live-input::-webkit-slider-thumb {
+		width: 20px;
+		height: 20px;
+		margin-top: 13px;
+	}
+
+	.mj-live-input::-moz-range-thumb {
+		width: 20px;
+		height: 20px;
+	}
+
+	.mj-live-rst {
+		flex: 0 0 2.75rem;
+		height: 2.75rem;
+	}
+
+	.mj-geo {
+		padding: 0.6rem 0.25rem;
+	}
+
+	/* On a phone this panel is used up a ladder, so everything on the stage bar
+	   gets a thumb-sized target rather than the desk-sized one. */
+	.mj-hrt,
+	.mj-hud-btn {
+		min-height: 2.75rem;
+		padding-top: 0.75rem;
+		padding-bottom: 0.75rem;
+	}
+}
 /* Responsive-embed wrapper: a plain block div sizes width:100% correctly to the
    card-body content box, whereas the iframe (a replaced element with
    aspect-ratio) mis-resolves it and overflows. The iframe absolutely fills the
