@@ -408,10 +408,6 @@ function renderTopbar(s) {
 	if (s.memPct != null && $('#pb-memory'))
 		setProgressBar('#pb-memory', Math.round(s.memPct), 'Memory Usage');
 
-	const dn = $('#daynight_value');
-	if (dn && 'isp_again' in v)
-		dn.textContent = '🌟 ' + v.isp_again;
-
 	const up = $('#uptime');
 	if (up && s.sysUptimeS != null)
 		up.textContent = 'Uptime:️ ' + uptimeStr(s.sysUptimeS);

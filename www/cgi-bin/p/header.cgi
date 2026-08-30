@@ -138,8 +138,7 @@ Pragma: no-cache
 					<% [ -z "$hide_signature" ] && signature %>
 				</div>
 
-				<div class="col-1" id="daynight_value"></div>
-				<div class="col-md-4 col-lg-3 mb-2 text-end">
+				<div class="col-md-6 col-lg-4 mb-2 text-end">
 					<!-- The reader's clock, not the camera's. This bar used to print
 					     the camera's wall time and its timezone label — "8/29/2026,
 					     5:47:07 PM Etc/GMT" — which is a time nobody looking at the
