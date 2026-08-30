@@ -101,7 +101,9 @@ done) %>
 		     no majestic session slot. Clicking goes to the Live page. -->
 		<div class="st-hero-row">
 			<a class="st-prev" id="st-prev" href="preview.cgi" aria-label="Open Live view">
-				<img id="st-prev-img" alt="" hidden>
+				<%# A src is required for valid HTML5; a blank inline SVG stands in
+				    until status.js swaps in the first successful /image.jpg. %>
+				<img id="st-prev-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'/%3E" alt="" hidden>
 				<span class="st-prev-off small" id="st-prev-off">loading&hellip;</span>
 				<span class="st-prev-play" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></span>
 				<span class="st-prev-chip" id="st-prev-chip" hidden></span>

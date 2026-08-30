@@ -352,6 +352,13 @@
 
 	function onSample(s) {
 		if (!s.ok) {
+			// With no current data there is no evidence the condition alerts
+			// still hold — clear them rather than presenting the last good
+			// sample's warnings as current next to "not responding".
+			if (s.fails >= 2) {
+				setAlert('#st-alert-exp', false);
+				setAlert('#st-alert-stall', false);
+			}
 			setAlert('#st-alert-stale', s.fails >= 2);
 			return;
 		}
