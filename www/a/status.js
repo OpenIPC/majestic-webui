@@ -139,7 +139,9 @@
 			let y = padT + (1 - (v - lo) / (hi - lo)) * H;
 			return y < padT ? padT : y > padT + H ? padT + H : y;
 		};
-		const tNow = n ? pts[n - 1].t : 0;
+		// "now" is the render moment, not the newest sample: during an outage
+		// the trace ages leftward instead of sitting pinned at the label.
+		const tNow = performance.now() / 1000;
 		const X = t => padL + plotW * (1 - (tNow - t) / CHART_WINDOW);
 		let s = '';
 		// threshold bands (Wi-Fi grades, luminance floor) sit under everything
@@ -177,7 +179,7 @@
 			for (let i = 0; i < n; i++) {
 				const v = pts[i].v[si];
 				if (i && pts[i].t - pts[i - 1].t > CHART_GAP) close();
-				if (v == null) { close(); continue; }
+				if (v == null || tNow - pts[i].t > CHART_WINDOW) { close(); continue; }
 				const x = X(pts[i].t).toFixed(1), y = Y(v).toFixed(1);
 				if (!seg) {
 					line += 'M' + x + ' ' + y;
@@ -365,7 +367,7 @@
 		// expired session turns the 5s poll into the native auth prompt that
 		// machinery exists to prevent. The blob is still decoded off-screen
 		// before the visible swap, and the superseded frame's URL is revoked.
-		let busy = 0;
+		let busy = 0, ctl = null;
 		const fail = () => {
 			if (img.hidden) off.textContent = 'Snapshot unavailable';
 			else if (note) note.textContent = 'snapshot stalled — retrying';
@@ -373,9 +375,14 @@
 		const tick = () => {
 			if (document.hidden) return;
 			if (busy && Date.now() - busy < 15000) return;
+			// Superseding a stuck probe also cancels it — abandoned fetches
+			// must not pile up on the half-dead link that stranded them. The
+			// token check keeps the aborted request's rejection a no-op.
+			if (ctl) ctl.abort();
+			ctl = new AbortController();
 			busy = Date.now();
 			const mine = busy;
-			apiFetch('/image.jpg?_=' + Date.now(), { cache: 'no-store' })
+			apiFetch('/image.jpg?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal })
 				.then(r => r.ok ? r.blob() : Promise.reject(r.status))
 				.then(blob => {
 					if (busy !== mine) return;
@@ -419,6 +426,10 @@
 				setAlert('#st-alert-stall', false);
 			}
 			setAlert('#st-alert-stale', s.fails >= 2);
+			// No new sample, but time still passes: redraw so the traces age
+			// toward the left edge instead of standing at "now" through an
+			// outage they know nothing about.
+			charts.forEach(renderChart);
 			return;
 		}
 		setAlert('#st-alert-stale', false);
