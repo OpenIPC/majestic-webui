@@ -445,14 +445,23 @@ function heartbeat() {
 			}
 			const memTotal = v.node_memory_MemTotal_bytes || 0;
 			const memAvail = v.node_memory_MemAvailable_bytes || 0;
+			const sysUp = v.node_boot_time_seconds ? t - v.node_boot_time_seconds : null;
+			// A daemon cannot have been up longer than the kernel, but its boot
+			// stamp can say so: app_boot_time_seconds is the wall clock at daemon
+			// start, and a camera without an RTC stamps it before NTP has fixed
+			// that clock — after a power cycle the stamp sits hours in the past
+			// and the "majestic uptime" dwarfs the system's. node_boot is derived
+			// from /proc/uptime against the corrected clock, so it is the bound.
+			let mjUp = v.app_boot_time_seconds ? t - v.app_boot_time_seconds : null;
+			if (mjUp != null && sysUp != null && mjUp > sysUp) mjUp = sysUp;
 			const s = {
 				ok: true, fails: 0, t, dt: prev ? mono - prev.mono : null, cpu,
 				memTotal, memAvail,
 				memPct: memTotal ? (1 - memAvail / memTotal) * 100 : null,
 				temp: ('node_hwmon_temp_celsius' in v) ? v.node_hwmon_temp_celsius : null,
 				driftMs: v.node_time_seconds ? v.node_time_seconds * 1000 - Date.now() : null,
-				sysUptimeS: v.node_boot_time_seconds ? t - v.node_boot_time_seconds : null,
-				mjUptimeS: v.app_boot_time_seconds ? t - v.app_boot_time_seconds : null,
+				sysUptimeS: sysUp,
+				mjUptimeS: mjUp,
 				night: v.night_enabled | 0, ircut: v.ircut_enabled | 0, light: v.light_enabled | 0,
 				rx: m.rx, tx: m.tx, m,
 				// Consumers do their own counter deltas (net, venc bytes, md rects)
