@@ -197,7 +197,10 @@
 
 	function servedNote() {
 		const served = servedStream();
-		if (served === (stream ? 1 : 0)) return '';
+		// Auto's radios never say which channel it picked, so the chip
+		// always does (#184). A manual pick speaks only on a mismatch — the
+		// radio already names the intent, so the chip only reports betrayal.
+		if (!autoOn && served === (stream ? 1 : 0)) return '';
 		return served === 0 ? ' · Main stream' : ' · Sub stream';
 	}
 

@@ -315,6 +315,22 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		check('stored as auto', env.stored === 'auto', String(env.stored));
 	}
 
+	group('Auto always names the channel it picked on the chip');
+	{
+		// Auto's radios never say which channel won, so the chip does — for
+		// every frame, not only on a served-channel mismatch (#184).
+		const env = load({
+			box: [800, 450], main: '1280x720', sub: '704x576', picked: 'auto',
+		});
+		await tick();
+		const live = env.made[0];
+		live.say('playing');
+		live.opts.onCodec('h264', 'h264', 1280, 720);
+		check('the picked channel is named',
+			/ · Main stream$/.test(env.el('mj-badge').textContent),
+			env.el('mj-badge').textContent);
+	}
+
 	group('the chip names the channel WebRTC actually served');
 	{
 		// WebRTC takes ?stream= as a preference, and majestic#299 arrived as
