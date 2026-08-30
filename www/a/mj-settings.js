@@ -1392,10 +1392,16 @@
 		const useGeo = !!(mirror && flip);
 
 		const hasTone = fields.some(f => f !== mirror && f !== flip);
-		// Scene above tone: it is the coarse move you make first, and the four
-		// sliders are what you refine it with.
-		const sceneBody = hasTone
-			? liveGroup(colA, 'Scene', 'starting points, then tune by eye') : null;
+		// Tone starts the left column, with nothing above it.
+		//
+		// Scene reads as the coarse move you make before the fine ones, so it
+		// belongs first — but putting it there cost 111px between the picture
+		// and the first slider, and on a 1440x900 laptop that pushed Brightness
+		// exactly onto the fold. The one thing this panel has to guarantee is
+		// that a knob and the picture it changes are on screen together (#239),
+		// and reading order does not outrank it. Scene moves to the head of the
+		// right column, where it is still the first thing in the deck you read
+		// and costs the sliders nothing.
 		const toneBody = hasTone ? liveGroup(colA, 'Tone', 'saved with the page') : null;
 
 		for (const f of fields) {
@@ -1418,14 +1424,15 @@
 			toneBody.appendChild(foot);
 		}
 
-		// The tone fields as mounted, which is what the scene chips set and the
-		// status line reads.
+		// Right column, top to bottom: the coarse entry point, the reading you
+		// watch while dragging, then geometry.
 		const toneFields = state.fields.filter(f =>
 			f.schema && f.schema['x-live'] && f.type === 'integer');
-		if (sceneBody && toneFields.length) renderScene(sceneBody, toneFields);
+		if (hasTone && toneFields.length) {
+			renderScene(liveGroup(colB, 'Scene', 'starting points, then tune by eye'),
+				toneFields);
+		}
 
-		// Analysis first in the right column: it is what you look at while the
-		// left hand is on a slider.
 		if (withVideo) {
 			// The group's note slot carries the running mean rather than a
 			// caption — a number that changes is worth more there than a word
