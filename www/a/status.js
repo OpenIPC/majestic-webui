@@ -617,7 +617,7 @@
 			const host = $('#streams'); if (!host) return;
 			host.textContent = '';
 			host.appendChild(el('div', 'x-small text-secondary', main
-				? 'Main stream is on the picture — set ' + br + ' kbit/s'
+				? 'Main stream is on the picture' + (br ? ' — set ' + br + ' kbit/s' : '')
 				: 'Main stream is disabled.'));
 			if (mjGet(cfg, 'video1.enabled') === true) {
 				const scodec = String(mjGet(cfg, 'video1.codec') || '?').toUpperCase();
