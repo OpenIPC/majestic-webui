@@ -1296,6 +1296,121 @@
 	// and an archive is a setting. Sending someone to another page to flip it,
 	// and back here to find out whether it took, is a lot of ceremony for a
 	// checkbox — so the checkbox is here.
+	// Getting from a just-inserted blank card to a recording camera is one
+	// decision — use this card — but it read as four pages: here to be told the
+	// card is not formatted, the SD card page to format it, back here to find
+	// the switch, and the settings page if the recording path did not match
+	// where the card actually mounted. None of those steps is a choice the
+	// person makes; they are all bookkeeping the page can do itself. So the
+	// whole sequence sits behind one button, on the page where the wish was
+	// expressed.
+	//
+	// Offered only for the states this page can actually cure. A read-only card
+	// is a hardware verdict and an absent one is a missing card: neither is
+	// mended by pressing anything here, and offering a button that cannot work
+	// is worse than offering none.
+	function cardFix() {
+		const d = state.card;
+		if (!d || !d.present) return null;
+		switch (d.health) {
+		case 'unformatted':
+		case 'unreadable':
+			// "unreadable" may be a filesystem this camera cannot read rather
+			// than an empty card, so the warning is as blunt for it as for a
+			// blank one — in both cases what is on the card does not survive.
+			return { op: 'format', cls: 'btn-danger',
+				label: 'Format the card and start recording',
+				ask: 'Erase everything on the SD card, format it, and start recording to it?',
+				doing: 'Formatting the card…' };
+		case 'unmounted':
+			// Nothing is lost by mounting, so nothing is asked.
+			return { op: 'mount', cls: 'btn-primary',
+				label: 'Mount the card and start recording', ask: '',
+				doing: 'Mounting the card…' };
+		default:
+			return null;
+		}
+	}
+
+	// Choosing between one option is not a choice, and on every build seen so
+	// far `mkfs` is exactly ["vfat"]. Where a firmware really does ship more,
+	// vfat stays the pick: it is the one every card reader, phone and laptop
+	// can read, which is what someone pulling the card out actually needs.
+	function fixFs() {
+		const l = (state.card && state.card.mkfs) || [];
+		return l.indexOf('vfat') >= 0 ? 'vfat' : (l[0] || 'vfat');
+	}
+
+	function fixButton(fix) {
+		return '<div class="mt-3">' +
+			'<button type="button" class="btn btn-sm ' + fix.cls + '" id="rec-fix">' +
+			esc(fix.label) + '</button>' +
+			'<span class="small ms-2" id="rec-fix-msg"></span></div>';
+	}
+
+	function sdOp(p) {
+		return apiFetch('/cgi-bin/j/sdcard.cgi', {
+			method: 'POST', credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			body: new URLSearchParams(p).toString(),
+		}).then(function (r) { return r.json(); });
+	}
+
+	// Point recording at where the card actually mounted rather than where the
+	// config guessed it would. The two differ exactly when it matters most: a
+	// card with no partition table mounts at /mnt/mmcblk0 while records.path
+	// still reads /mnt/mmcblk0p1, so setting `enabled` alone would arm a
+	// recorder aimed at a directory on the overlay — which majestic refuses
+	// outright — leaving recording on and nothing written.
+	function useCardForRecording() {
+		return loadCard().then(function () {
+			const mp = state.card && state.card.mountpoint;
+			const rec = { enabled: 'true' };
+			if (mp) rec.path = mp + '/%F';
+			return apiFetch('/api/v1/config', {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ records: rec }),
+			});
+		});
+	}
+
+	function wireFix(fix) {
+		const btn = $id('rec-fix');
+		if (!btn) return;
+		btn.addEventListener('click', function () {
+			if (fix.ask && !confirm(fix.ask)) return;
+			btn.disabled = true;
+			const msg = $id('rec-fix-msg');
+			const say = function (h) { if (msg) msg.innerHTML = h; };
+			say('<span class="text-secondary">' + esc(fix.doing) + '</span>');
+			sdOp(fix.op === 'format' ? { op: 'format', fs: fixFs() } : { op: fix.op })
+				.then(function (r) {
+					// The endpoint's own words: it is the only thing that knows
+					// whether this was a stale partition table, a card that has
+					// stopped taking writes, or a filesystem this build cannot
+					// create.
+					if (!r || r.ok === false) {
+						btn.disabled = false;
+						say('<span class="text-danger">' +
+							esc((r && r.error) || 'The camera could not prepare the card.') +
+							'</span>');
+						return;
+					}
+					say('<span class="text-secondary">Starting recording…</span>');
+					return useCardForRecording().then(function () {
+						waitStep = 0;
+						stalled = false;
+						boot();
+					});
+				})
+				.catch(function () {
+					btn.disabled = false;
+					say('<span class="text-danger">The camera did not answer — check that it is still reachable.</span>');
+				});
+		});
+	}
+
 	function enableSwitch() {
 		return '<div class="form-check form-switch mt-3 mb-0">' +
 			'<input class="form-check-input" type="checkbox" role="switch" id="rec-enable">' +
@@ -1304,10 +1419,12 @@
 	}
 
 	// One POST, which is what majestic's write-back API is for: it walks the
-	// tree, reloads the pipeline and saves the file in a single round trip. The
-	// value goes as a string like every other write from this WebUI — the C side
-	// coerces it — and a non-200 means nothing persisted. Resolves to '' when it
-	// worked and to a reason when it did not.
+	// tree, applies the change and saves the file in a single round trip —
+	// records.enabled starts the recorder there and then, with no reload and
+	// nothing for this page to follow up with. The value goes as a string like
+	// every other write from this WebUI — the C side coerces it — and a non-200
+	// means nothing persisted. Resolves to '' when it worked and to a reason
+	// when it did not.
 	function setRecording() {
 		return apiFetch('/api/v1/config', {
 			method: 'POST', credentials: 'same-origin',
@@ -1353,7 +1470,7 @@
 	// it?". Backs off rather than hammering, stops as soon as there is a day,
 	// and does not poll a tab nobody is looking at.
 	const WAITS = [4000, 4000, 8000, 16000, 30000];
-	let waitTimer = null, waitStep = 0;
+	let waitTimer = null, waitStep = 0, stalled = false;
 	function waitForFirstClip() {
 		clearTimeout(waitTimer);
 		const ms = WAITS[Math.min(waitStep, WAITS.length - 1)];
@@ -1361,11 +1478,38 @@
 		waitTimer = setTimeout(function () {
 			if (document.hidden) { waitForFirstClip(); return; }
 			loadDays().then(function () {
-				if (!state.days.length) { waitForFirstClip(); return; }
+				if (!state.days.length) {
+					// Once the backoff has run its course the wait has stopped
+					// being a wait, and saying "not yet" again would be a guess
+					// the evidence no longer supports.
+					if (waitStep > WAITS.length && !stalled) { stalled = true; stalledNote(); }
+					waitForFirstClip();
+					return;
+				}
 				waitStep = 0;
+				stalled = false;
 				boot();
 			});
 		}, ms);
+	}
+
+	// The wait above assumes the recorder is coming. When it is not, nothing
+	// about this page ever changes and "no clips yet" becomes a claim it repeats
+	// for as long as the tab is open. What it cannot do is say why: from here a
+	// recorder that never started and one that started and cannot write look
+	// identical, and the card has already been asked and answered healthy. So
+	// the note reports the fact and names the two things that produce it,
+	// without picking one. Polling carries on underneath, so a recorder that was
+	// merely slow still lands its clip and the page moves on by itself.
+	function stalledNote() {
+		empty('<strong>Recording is on, but nothing has been written.</strong> ' +
+			'No clip has reached <code>' + esc(state.prefix) + '</code>, and the card ' +
+			'reports no fault. Either the camera cannot write there, or it is running ' +
+			'a firmware that only starts recording when it starts — old enough that ' +
+			'switching records on does not take effect until it is restarted.',
+			' <a href="tool-sdcard.cgi">Check the SD card</a> or ' +
+			'<a href="fw-restart.cgi">restart the camera</a>.',
+			'warning');
 	}
 
 	// wire() binds to document, so it must run once however many times the page
@@ -1386,6 +1530,11 @@
 					// Only when the card is fine is an empty archive really about
 					// whether recording is switched on.
 					const bad = cardTrouble();
+					// A card that only needs preparing is not really an error —
+					// it is step one of setting recording up, and all of it fits
+					// here. Where that is the case the alert carries the button
+					// that does it rather than a signpost to another page.
+					const fix = bad ? cardFix() : null;
 					// A switch is only worth offering where flipping it would
 					// actually produce recordings: a card that cannot be written
 					// to would take the setting and still record nothing.
@@ -1395,8 +1544,9 @@
 							? '<strong>Nothing recorded yet.</strong> Recording is on, but no clips have been written to <code>' + esc(state.prefix) + '</code> yet.'
 							: '<strong>Recording is off.</strong> The camera is not writing to the card, so there is nothing to browse.'),
 						' <a href="tool-sdcard.cgi">SD card</a>' + (bad ? cardKernelLines() : '') +
-						(canStart ? enableSwitch() : ''),
+						(fix ? fixButton(fix) : '') + (canStart ? enableSwitch() : ''),
 						bad ? 'danger' : 'secondary');
+					if (fix) wireFix(fix);
 					if (canStart) wireEnable();
 					else if (!bad && state.enabled) waitForFirstClip();
 					return;
