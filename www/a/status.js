@@ -321,10 +321,8 @@
 	function startPreview(cfg) {
 		const img = $('#st-prev-img'), off = $('#st-prev-off'), note = $('#st-prev-note');
 		if (!img || !off) return;
-		if (mjGet(cfg, 'video0.enabled') !== true) {
-			off.textContent = 'Main stream is disabled';
-			return;
-		}
+		// /image.jpg is the independent JPEG channel — jpeg.enabled is the
+		// only gate. A camera streaming sub-only still has its snapshot.
 		if (mjGet(cfg, 'jpeg.enabled') !== true) {
 			off.textContent = 'Snapshots are disabled — open Live for video';
 			return;
@@ -479,6 +477,15 @@
 	function renderStreams() {
 		if (typeof mjConfig !== 'function') return;
 		mjConfig().then(cfg => {
+			// mjConfig resolves {} on a failed fetch. Empty is "unknown", not
+			// "everything disabled" — keep the loading states and try again
+			// rather than rendering a camera with no streams and no snapshot.
+			if (!cfg || !Object.keys(cfg).length) {
+				const off = $('#st-prev-off');
+				if (off) off.textContent = 'waiting for camera config…';
+				setTimeout(renderStreams, 10000);
+				return;
+			}
 			cfgFps0 = mjGet(cfg, 'video0.fps') || null;
 			mdEnabled = mjGet(cfg, 'motionDetect.enabled') === true;
 			// The config may resolve after the first sample already built the
