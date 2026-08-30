@@ -660,6 +660,16 @@ mark {
 
 .navbar-nav {
 	--bs-nav-link-color: white;
+	/* Bootstrap's active colour is the emphasis colour — near-black, invisible
+	   on the indigo light-theme bar. And with every link already forced white
+	   above, colour cannot mark the active page at all; the underline below
+	   does, without the width shift a weight change would cause. */
+	--bs-navbar-active-color: #fff;
+}
+
+.navbar-nav .nav-link.active {
+	text-decoration: underline;
+	text-underline-offset: 0.45em;
 }
 
 /* Brand the navbar blue in light theme with an explicit colour (dark theme keeps
@@ -1092,7 +1102,7 @@ mark {
    What is deliberately NOT done here: releasing min-width down the flex chain
    so the row always fits. It does fit, by crushing the camera switcher to a
    few pixels — measured at 5px wide against 226px of content — which is worse
-   than an honest overflow. Seven menus, a hostname and Sign out do not fit in
+   than an honest overflow. Six menus, a hostname and Sign out do not fit in
    960px; that predates this change and wants solving by dropping something at
    narrow widths, not by squeezing. */
 @media (min-width: 992px) {
