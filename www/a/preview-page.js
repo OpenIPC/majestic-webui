@@ -180,13 +180,25 @@
 	// and the frame matches the other channel exactly — a camera with unset
 	// (sensor-native) sizes claims nothing rather than guessing. MSE needs
 	// none of this: /ws/video serves the number it is given or nothing.
-	function servedNote() {
-		if (!usingWebRTC || !chipMedia) return '';
-		const want = sizeOf[stream ? 1 : 0], other = sizeOf[stream ? 0 : 1];
-		if (!want || !other) return '';
+	// Which channel the picture actually belongs to: the requested one, unless
+	// the frame provably matches the other channel exactly. The adaptation
+	// toast reads this too — enc= describes the encoder of the channel being
+	// SERVED, so on a served-channel mismatch the requested channel's
+	// configured bitrate would be the wrong endpoint for its steps.
+	function servedStream() {
+		const asked = stream ? 1 : 0;
+		if (!usingWebRTC || !chipMedia) return asked;
+		const want = sizeOf[asked], other = sizeOf[asked ? 0 : 1];
+		if (!want || !other) return asked;
 		const is = d => d.w === chipMedia.w && d.h === chipMedia.h;
-		if (is(want) || !is(other)) return '';
-		return stream ? ' · Main stream' : ' · Sub stream';
+		if (is(want) || !is(other)) return asked;
+		return asked ? 0 : 1;
+	}
+
+	function servedNote() {
+		const served = servedStream();
+		if (served === (stream ? 1 : 0)) return '';
+		return served === 0 ? ' · Main stream' : ' · Sub stream';
 	}
 
 	function setChip() {
@@ -533,12 +545,19 @@
 				// The adaptation toast, fed the camera's own view of the
 				// shared encoder. Guarded: preview-adapt.js is its own file,
 				// and an older majestic sends no enc= at all — either way
-				// nothing here should ever invent a rate change.
+				// nothing here should ever invent a rate change. The channel
+				// is the SERVED one, not the requested one: enc= describes
+				// the encoder actually feeding this picture, and the module
+				// re-adopts its baseline whenever the channel changes under
+				// it — a stream switch, or a reconnect that negotiated the
+				// other channel.
 				if (window.MajesticAdapt && s.cam && s.cam.enc !== undefined) {
+					const ch = servedStream();
 					window.MajesticAdapt.tick({
 						enc: parseInt(s.cam.enc, 10) || 0,
 						remb: parseInt(s.cam.remb, 10) || 0,
-						configured: cfgKbps[stream ? 1 : 0],
+						configured: cfgKbps[ch],
+						channel: ch,
 					});
 				}
 			},

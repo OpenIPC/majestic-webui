@@ -520,9 +520,14 @@ preview() {
 		     link moved the encoder — a change caused by another viewer is the
 		     case nothing else on the page would explain. Below the chip so
 		     the two can show together. -->
-		<p id="mj-adapt" class="mj-adapt-toast small" hidden>
+		<!-- role=status so the announcement reaches a screen reader when the
+		     text lands; the × is the keyboard's dismissal (click-anywhere
+		     only serves a pointer) and focusing it pins the toast the same
+		     way hovering does. -->
+		<p id="mj-adapt" class="mj-adapt-toast small" role="status" hidden>
 			<span id="mj-adapt-rates" class="mj-adapt-rates"></span>
 			<span id="mj-adapt-why" class="mj-adapt-why"></span>
+			<button type="button" class="mj-adapt-close" aria-label="Dismiss">×</button>
 		</p>
 		<!-- PTZ mount. Empty and hidden on every camera; p/motor.cgi (included
 		     by preview.cgi only when the hardware exists) emits the pad after

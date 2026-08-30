@@ -28,10 +28,14 @@ window.MajesticAdapt = (function () {
 	const SHOW_MS = 6000;
 
 	let el = null, ratesEl = null, whyEl = null;
-	// Last applied rate seen, in kbps, 0 = configured; null = no tick yet.
-	// Kept per channel is not needed: reset() is called on a channel switch,
-	// because the two channels' encoders move independently.
-	let last = null;
+	// The baseline: last applied rate seen (kbps, 0 = configured) and which
+	// channel it belongs to. Keyed on the channel because the two channels
+	// are two encoders: whenever ticks start describing the other one — a
+	// stream switch, or a reconnect whose negotiation landed on the other
+	// channel — the old number is the wrong encoder's and comparing across
+	// would announce a step nobody's encoder took. chan starts null, which
+	// no real channel equals, so the first tick always adopts silently.
+	let last = 0, chan = null;
 	let hideTimer = null, pinned = false, wired = false;
 
 	function fmt(kbps) {
@@ -43,23 +47,38 @@ window.MajesticAdapt = (function () {
 	function wire() {
 		if (wired || !el) return;
 		wired = true;
-		// Hover pins — someone reading it should not have it vanish mid-
-		// sentence. Click dismisses; stopPropagation keeps the tap from also
-		// toggling the control bar underneath (the stage owns that tap).
-		el.addEventListener('mouseenter', function () {
-			pinned = true;
-			clearTimeout(hideTimer);
-		});
+		// Hover or focus pins — someone reading it should not have it vanish
+		// mid-sentence, and a keyboard reaching the × deserves the same
+		// stay as a pointer resting on the text. Click anywhere dismisses;
+		// stopPropagation keeps the tap from also toggling the control bar
+		// underneath (the stage owns that tap). The × is the same dismissal
+		// for those who cannot click a paragraph: a real button, so Enter
+		// and Space work without any handler here.
+		el.addEventListener('mouseenter', pin);
+		el.addEventListener('focusin', pin);
 		el.addEventListener('click', function (ev) {
 			ev.stopPropagation();
 			hide();
 		});
 	}
 
+	function pin() {
+		pinned = true;
+		clearTimeout(hideTimer);
+	}
+
 	function hide() {
 		clearTimeout(hideTimer);
 		pinned = false;
-		if (el) el.hidden = true;
+		if (!el) return;
+		// If the keyboard was on the × when the toast went, the focus would
+		// otherwise fall to the body; the stage is where it came from and is
+		// itself focusable.
+		if (el.contains(document.activeElement)) {
+			const stage = document.getElementById('mj-stage');
+			if (stage && stage.focus) stage.focus();
+		}
+		el.hidden = true;
 	}
 
 	function show(fromK, toK, why, up) {
@@ -84,8 +103,8 @@ window.MajesticAdapt = (function () {
 	// One reading of the camera's stats line, once a second while WebRTC is
 	// the live transport. All rates in kbps; enc 0 means "at the configured
 	// rate", configured 0 means the config has not landed (or names no sane
-	// rate), and a step whose either end is unknowable is skipped rather
-	// than guessed at.
+	// rate). t.channel is the channel the picture actually belongs to, as
+	// the page best knows it.
 	function tick(t) {
 		if (!el) {
 			el = document.getElementById('mj-adapt');
@@ -94,18 +113,32 @@ window.MajesticAdapt = (function () {
 			wire();
 		}
 		const cur = t.enc | 0;
-		if (last === null) {
-			// First reading of this session or channel: adopt, don't
-			// announce. Joining a stream that is already adapted is a state,
-			// not an event — the disclosure note covers states.
+		const ch = t.channel === undefined ? -1 : t.channel | 0;
+		if (ch !== chan) {
+			// First reading, or the ticks now describe the other channel's
+			// encoder: adopt, don't announce. A state you arrive into is not
+			// an event you witnessed, and a step measured across two
+			// encoders is not a step either of them took. Any toast still
+			// standing is about the encoder being left.
+			chan = ch;
 			last = cur;
+			hide();
 			return;
 		}
 		if (cur === last) return;
-		const from = last || (t.configured | 0);
-		const to = cur || (t.configured | 0);
+		const cfg = t.configured | 0;
+		// A step to or from 0 reads "the configured rate" for that end, so
+		// without the config it cannot be described yet — the page attaches
+		// on a deadline and the stats can outrun the config fetch. Hold the
+		// baseline rather than advancing it: held, the step is still pending
+		// on the next tick and is announced once the config lands; advanced,
+		// it would be consumed silently and the return-to-configured event
+		// lost for good.
+		if ((cur === 0 || last === 0) && !cfg) return;
+		const from = last || cfg;
+		const to = cur || cfg;
 		last = cur;
-		if (!from || !to || from === to) return;
+		if (from === to) return;
 
 		const up = to > from;
 		let why;
@@ -130,9 +163,12 @@ window.MajesticAdapt = (function () {
 	}
 
 	// The channel changed, or the transport did: whatever enc we knew was
-	// the other encoder's, and the toast on screen is about it too.
+	// the other encoder's, and the toast on screen is about it too. Clearing
+	// chan (which no real channel equals) makes the next tick adopt
+	// silently, whichever channel it turns out to describe.
 	function reset() {
-		last = null;
+		chan = null;
+		last = 0;
 		hide();
 	}
 

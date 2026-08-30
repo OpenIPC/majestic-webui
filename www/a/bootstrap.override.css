@@ -749,7 +749,8 @@ mark {
 	right: 0.5rem;
 	z-index: 5;
 	margin: 0;
-	padding: 0.3rem 0.6rem;
+	/* Room on the right for the corner-anchored ×. */
+	padding: 0.3rem 1.5rem 0.3rem 0.6rem;
 	max-width: min(75%, 22rem);
 	background: rgba(0, 0, 0, 0.65);
 	color: rgba(255, 255, 255, 0.9);
@@ -757,6 +758,18 @@ mark {
 	backdrop-filter: blur(4px);
 	cursor: pointer;
 	animation: mj-adapt-in 0.2s ease;
+}
+
+/* Corner-anchored rather than flowed after the text: inline, it would wrap
+   to a line of its own whenever the last text line runs long. */
+.mj-adapt-close {
+	position: absolute;
+	top: 0.1rem;
+	right: 0.25rem;
+	border: 0;
+	background: none;
+	color: inherit;
+	padding: 0 0.25rem;
 }
 
 .mj-adapt-rates {
