@@ -671,11 +671,17 @@ mark {
    stay on screen too, or you are scrolling between the slider you are dragging
    and the picture you are dragging it for. The floor stops it collapsing on a
    short window; the 16:9 box never changes, and a stream of another shape is
-   contained inside it rather than reflowing the page. */
+   contained inside it rather than reflowing the page.
+
+   The 31rem reserve is what buys the deck its room, and it is measured rather
+   than guessed: at 30rem the fourth slider overflowed a 1280x800 window by ONE
+   pixel, which is not a margin — it is the same answer landing either way on a
+   machine whose font metrics differ slightly. 31rem puts all four knobs and the
+   picture on screen together at every common laptop size. */
 .mj-live-stage {
 	position: relative;
-	width: min(100%, max(28rem, calc((100vh - 30rem) * 1.77778)));
-	width: min(100%, max(28rem, calc((100dvh - 30rem) * 1.77778)));
+	width: min(100%, max(28rem, calc((100vh - 31rem) * 1.77778)));
+	width: min(100%, max(28rem, calc((100dvh - 31rem) * 1.77778)));
 	margin-inline: auto;
 	aspect-ratio: 16 / 9;
 	background: #0d0f14;
