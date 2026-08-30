@@ -85,6 +85,12 @@ fi
 <script src="/a/preview-webrtc.js"></script>
 <script src="/a/preview-swap.js"></script>
 <script src="/a/preview-transport.js"></script>
+<%
+# preview-hero.js publishes window.MajesticHero (fullscreen + snapshot) before
+# it looks for the Live page's own stage, so this page can share those two
+# behaviours for the stage mj-settings.js builds client-side.
+%>
+<script src="/a/preview-hero.js"></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>

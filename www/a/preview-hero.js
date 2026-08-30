@@ -5,6 +5,63 @@
 // drive the DOM lives here, where the page is guaranteed to be real.
 // `$`, `apiFetch`, `mjConfig` and `mjGet` are globals from main.js.
 (function () {
+	// Two of these are shared with mj-settings.cgi's Live adjustments stage,
+	// which builds its chrome client-side and so has no elements at load time.
+	// They are published before the early return below for exactly that reason.
+	// What is NOT shared is the bar's auto-hide: on that panel the bar carries
+	// the night/IR/lamp indicators, which are state you have to be able to read
+	// without waving a mouse at the picture first.
+	window.MajesticHero = {
+		// Fullscreen on the STAGE rather than the video element, so the bar and
+		// everything else overlaid on the picture comes along. Hidden where the
+		// API is missing (iOS Safari) rather than shown and broken.
+		wireFullscreen: function (stage, btn) {
+			if (!stage || !btn || !stage.requestFullscreen || !document.fullscreenEnabled) return;
+			btn.hidden = false;
+			btn.addEventListener('click', () => {
+				if (document.fullscreenElement) document.exitFullscreen();
+				else stage.requestFullscreen().catch(() => {});
+			});
+			document.addEventListener('fullscreenchange', () => {
+				const on = document.fullscreenElement === stage;
+				btn.setAttribute('aria-label', on ? 'Exit fullscreen' : 'Fullscreen');
+				btn.title = on ? 'Exit fullscreen' : 'Fullscreen';
+			});
+		},
+
+		// Snapshot: the camera's own /image.jpg, not a capture of the <video> —
+		// full sensor resolution, whatever size the player happens to be drawn
+		// at. That endpoint is the JPEG channel, so the button only appears when
+		// that channel is on.
+		wireSnapshot: function (btn) {
+			if (!btn) return;
+			mjConfig().then(cfg => {
+				btn.hidden = mjGet(cfg, 'jpeg.enabled') !== true;
+			});
+			btn.addEventListener('click', () => {
+				btn.disabled = true;
+				apiFetch('/image.jpg', { credentials: 'same-origin', cache: 'no-store' })
+					.then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
+					.then(b => {
+						const d = new Date(), p = n => String(n).padStart(2, '0');
+						const name = 'snapshot-' + d.getFullYear() + p(d.getMonth() + 1) +
+							p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) +
+							p(d.getSeconds()) + '.jpg';
+						const url = URL.createObjectURL(b);
+						const a = document.createElement('a');
+						a.href = url;
+						a.download = name;
+						a.click();
+						// Revoked on a delay: revoking synchronously races the
+						// download in some browsers.
+						setTimeout(() => URL.revokeObjectURL(url), 5000);
+					})
+					.catch(() => {})
+					.finally(() => { btn.disabled = false; });
+			});
+		},
+	};
+
 	const stage = $('#mj-stage'), bar = $('#mj-bar');
 	if (!stage || !bar) return;
 
@@ -34,52 +91,6 @@
 		}
 	});
 
-	// --- Fullscreen. On the stage rather than the video element, so the bar,
-	// the chip, the stats overlay and the PTZ pad all come along. Hidden where
-	// the API is missing (iOS Safari) rather than shown and broken.
-	const fs = $('#mj-fs');
-	if (fs && stage.requestFullscreen && document.fullscreenEnabled) {
-		fs.hidden = false;
-		fs.addEventListener('click', () => {
-			if (document.fullscreenElement) document.exitFullscreen();
-			else stage.requestFullscreen().catch(() => {});
-		});
-		document.addEventListener('fullscreenchange', () => {
-			const on = document.fullscreenElement === stage;
-			fs.setAttribute('aria-label', on ? 'Exit fullscreen' : 'Fullscreen');
-			fs.title = on ? 'Exit fullscreen' : 'Fullscreen';
-		});
-	}
-
-	// --- Snapshot: the camera's own /image.jpg, not a capture of the <video>
-	// — full sensor resolution, whatever size this player happens to be drawn
-	// at. That endpoint is the JPEG channel, so the button only appears when
-	// that channel is on.
-	const snap = $('#mj-snap');
-	if (snap) {
-		mjConfig().then(cfg => {
-			snap.hidden = mjGet(cfg, 'jpeg.enabled') !== true;
-		});
-		snap.addEventListener('click', () => {
-			snap.disabled = true;
-			apiFetch('/image.jpg', { credentials: 'same-origin', cache: 'no-store' })
-				.then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
-				.then(b => {
-					const d = new Date(), p = n => String(n).padStart(2, '0');
-					const name = 'snapshot-' + d.getFullYear() + p(d.getMonth() + 1) +
-						p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) +
-						p(d.getSeconds()) + '.jpg';
-					const url = URL.createObjectURL(b);
-					const a = document.createElement('a');
-					a.href = url;
-					a.download = name;
-					a.click();
-					// Revoked on a delay: revoking synchronously races the
-					// download in some browsers.
-					setTimeout(() => URL.revokeObjectURL(url), 5000);
-				})
-				.catch(() => {})
-				.finally(() => { snap.disabled = false; });
-		});
-	}
+	window.MajesticHero.wireFullscreen(stage, $('#mj-fs'));
+	window.MajesticHero.wireSnapshot($('#mj-snap'));
 })();
