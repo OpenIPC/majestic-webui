@@ -1,7 +1,7 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 
-<% page_title="Device Status" %>
+<% page_title="Dashboard" %>
 <% hide_signature=1 %>
 <% hide_title=1 %>
 <%in p/header.cgi %>
@@ -28,104 +28,143 @@
 done) %>
 <% net_gw=$(ip route 2>/dev/null | awk '/^default/ && !seen[$3]++ {printf "%s%s", (n++ ? ", " : ""), $3}') %>
 
-<div class="d-flex align-items-center gap-3 flex-wrap" style="margin:2rem 0 1.5rem">
-	<h2 class="text-primary m-0"><%= $page_title %></h2>
-	<span id="st-badge" class="badge rounded-pill text-bg-secondary" role="status" aria-live="polite">checking…</span>
-</div>
-
-<!-- Health strip -->
-<div class="row row-cols-2 row-cols-lg-4 g-3 mb-4" aria-live="polite">
-	<div class="col">
-		<div class="card h-100"><div class="card-body py-2">
-			<div class="x-small text-uppercase text-secondary">CPU</div>
-			<div class="lh-1 my-1"><span class="fs-3 fw-semibold" id="st-cpu">–</span><span class="x-small text-secondary"> %</span></div>
-			<div class="progress" style="height:4px"><div id="bar-cpu" class="progress-bar" style="width:0"></div></div>
-			<div class="x-small text-secondary mt-1">load <span id="st-load">–</span>
-				<a href="https://github.com/OpenIPC/wiki/blob/master/en/trouble-load-average.md"
-				   class="text-secondary text-decoration-none"
-				   aria-label="Why is the load average high?"
-				   title="1-minute load average — not a CPU-usage figure. Linux counts tasks in uninterruptible sleep as well as runnable ones, and vendor SDK driver threads stay in that state permanently, so on SigmaStar SoCs this reads 12-13 even on an idle camera. Judge the CPU by the percentage above. Click for details.">ⓘ</a>
-			</div>
-			<div id="spark-cpu" class="spark mt-1"></div>
-		</div></div>
+<!-- No page <h2>: the navbar's active item is the title. Alerts come first,
+     in the same slot header.cgi uses for its own banners, and render nothing
+     while the camera is healthy — space is only spent on signal. -->
+<div id="st-alerts" class="mt-3" hidden aria-live="polite">
+	<div class="st-alert" id="st-alert-stale" hidden>
+		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
+		<span class="small">Camera is not responding — retrying&hellip;</span>
 	</div>
-	<div class="col">
-		<div class="card h-100"><div class="card-body py-2">
-			<div class="x-small text-uppercase text-secondary">Memory</div>
-			<div class="lh-1 my-1"><span class="fs-3 fw-semibold" id="st-ram">–</span><span class="x-small text-secondary"> %</span></div>
-			<div class="progress" style="height:4px"><div id="bar-ram" class="progress-bar" style="width:0"></div></div>
-			<div class="x-small text-secondary mt-1"><span id="st-ram-mb">–</span></div>
-			<div id="spark-ram" class="spark mt-1"></div>
-		</div></div>
+	<div class="st-alert" id="st-alert-exp" hidden>
+		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
+		<span class="small"><b>Exposure at maximum</b> — the scene is darker than the sensor can compensate.<span id="st-alert-exp-lum"></span></span>
+		<a class="small ms-auto" href="mj-settings.cgi?tab=live">Open Live adjustments &rarr;</a>
 	</div>
-	<div class="col">
-		<div class="card h-100"><div class="card-body py-2">
-			<div class="x-small text-uppercase text-secondary">Temperature</div>
-			<div class="lh-1 my-1"><span class="fs-3 fw-semibold" id="st-temp">–</span><span class="x-small text-secondary" id="st-temp-u"> °C</span></div>
-			<div class="progress" style="height:4px" id="st-temp-meter"><div id="bar-temp" class="progress-bar" style="width:0"></div></div>
-			<div class="x-small text-secondary mt-1" id="st-temp-note">SoC</div>
-			<div id="spark-temp" class="spark mt-1"></div>
-		</div></div>
-	</div>
-	<div class="col">
-		<div class="card h-100"><div class="card-body py-2">
-			<div class="x-small text-uppercase text-secondary">Uptime</div>
-			<div class="lh-1 my-1"><span class="fs-5 fw-semibold" id="st-uptime">–</span></div>
-			<div class="x-small text-secondary mt-1">Majestic <span id="st-uptime-mj">–</span></div>
-		</div></div>
+	<div class="st-alert" id="st-alert-stall" hidden>
+		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
+		<span class="small"><b>Encoder stalled</b> — the encoder has stopped producing frames while everything else looks alive.</span>
+		<a class="small ms-auto" href="fw-restart.cgi">Restart camera &rarr;</a>
 	</div>
 </div>
 
-<div class="row g-4">
-	<!-- Streams -->
-	<div class="col-12 col-md-6 col-xl-3">
-		<div class="card h-100"><div class="card-body">
-			<h3>Streams</h3>
-			<div id="streams" class="d-flex flex-column gap-2"><div class="text-secondary small">loading…</div></div>
-			<div class="d-flex align-items-center flex-wrap gap-2 mt-3">
-				<span class="badge text-bg-light border" title="HLS clients">HLS <span id="st-hls">0</span></span>
-				<span id="st-stall" class="badge text-bg-warning" hidden>⚠ encoder stalled</span>
+<!-- KPI strip: tiles mount per what this camera reports; the grid closes up
+     around an absent one instead of holding an empty slot. -->
+<div class="st-kpis mt-3" aria-live="polite">
+	<div class="st-panel st-tile">
+		<div class="mj-cap">CPU</div>
+		<div class="st-val"><span id="st-cpu">&ndash;</span><span class="st-unit"> %</span></div>
+		<div class="x-small text-secondary">load <span id="st-load">&ndash;</span>
+			<a href="https://github.com/OpenIPC/wiki/blob/master/en/trouble-load-average.md"
+			   class="text-secondary text-decoration-none"
+			   aria-label="Why is the load average high?"
+			   title="1-minute load average — not a CPU-usage figure. Linux counts tasks in uninterruptible sleep as well as runnable ones, and vendor SDK driver threads stay in that state permanently, so on SigmaStar SoCs this reads 12-13 even on an idle camera. Judge the CPU by the percentage above. Click for details.">&#9432;</a>
+		</div>
+		<div id="spark-cpu" class="spark st-tile-spark"></div>
+	</div>
+	<div class="st-panel st-tile">
+		<div class="mj-cap">Memory</div>
+		<div class="st-val"><span id="st-ram">&ndash;</span><span class="st-unit"> %</span></div>
+		<div class="x-small text-secondary"><span id="st-ram-mb">&ndash;</span></div>
+		<div id="spark-ram" class="spark st-tile-spark"></div>
+	</div>
+	<div class="st-panel st-tile">
+		<div class="mj-cap">Temperature</div>
+		<div class="st-val"><span id="st-temp">&ndash;</span><span class="st-unit" id="st-temp-u"> &deg;C</span></div>
+		<div class="x-small text-secondary" id="st-temp-note">SoC</div>
+		<div id="spark-temp" class="spark st-tile-spark"></div>
+	</div>
+	<div class="st-panel st-tile">
+		<div class="mj-cap">Encoder out</div>
+		<div class="st-val"><span id="st-enc">&ndash;</span><span class="st-unit"> Mbit/s</span></div>
+		<div class="x-small text-secondary" id="st-enc-sub">main stream</div>
+		<div id="spark-enc" class="spark st-tile-spark"></div>
+	</div>
+	<div class="st-panel st-tile" id="st-wifi-tile" hidden>
+		<div class="mj-cap">Wi-Fi signal</div>
+		<div class="st-val"><span id="st-wifi-dbm">&ndash;</span><span class="st-unit"> dBm</span></div>
+		<div class="x-small text-secondary" id="st-wifi-grade"></div>
+		<div id="spark-wifi" class="spark st-tile-spark"></div>
+	</div>
+	<div class="st-panel st-tile">
+		<div class="mj-cap">Uptime</div>
+		<div class="st-val-sm" id="st-uptime">&ndash;</div>
+		<div class="x-small text-secondary">Majestic <span id="st-uptime-mj">&ndash;</span></div>
+		<div class="x-small text-secondary mt-2"><span id="st-hls">0</span> HLS clients</div>
+	</div>
+</div>
+
+<div class="st-grid mt-3">
+	<div class="st-charts">
+
+		<!-- The camera itself, first: a polled snapshot, not a stream — costs
+		     no majestic session slot. Clicking goes to the Live page. -->
+		<div class="st-hero-row">
+			<a class="st-prev" id="st-prev" href="preview.cgi" aria-label="Open Live view">
+				<img id="st-prev-img" alt="" hidden>
+				<span class="st-prev-off small" id="st-prev-off">loading&hellip;</span>
+				<span class="st-prev-play" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></span>
+				<span class="st-prev-chip" id="st-prev-chip" hidden></span>
+				<span class="st-prev-bar"><span id="st-prev-note">snapshot</span><span class="st-prev-go">Open Live &rarr;</span></span>
+			</a>
+			<div class="st-panel st-chartbox">
+				<div class="st-chart-head">
+					<span class="mj-cap">Encoder output &mdash; main stream</span>
+					<span class="st-now" id="st-enc-now"></span>
+				</div>
+				<div class="st-chart" id="ch-enc"></div>
 			</div>
-			<div class="x-small text-secondary mt-3">Network ↓ <span id="st-rx">–</span> · ↑ <span id="st-tx">–</span></div>
-			<div id="spark-net" class="spark mt-1"></div>
-		</div></div>
-	</div>
+		</div>
 
-	<!-- Imaging: rows appear per what this SoC's ISP actually reports -->
-	<div class="col-12 col-md-6 col-xl-3">
-		<div class="card h-100"><div class="card-body">
-			<h3>Imaging</h3>
-			<div class="d-flex align-items-center flex-wrap gap-2 mb-2">
-				<span id="st-daynight" class="badge text-bg-secondary" aria-live="polite">–</span>
-				<span id="st-light" class="badge text-bg-warning" hidden>💡 Light on</span>
+		<div class="st-chart-row">
+			<div class="st-panel st-chartbox">
+				<div class="st-chart-head">
+					<span class="mj-cap">Network (Mbit/s)</span>
+					<span class="x-small text-secondary st-legend">
+						<span><i class="st-dot st-dot-c1"></i>up</span>
+						<span><i class="st-dot st-dot-c2"></i>down</span>
+					</span>
+				</div>
+				<div class="st-chart" id="ch-net"></div>
 			</div>
-			<div id="st-isp-warn" class="x-small text-warning mb-2" hidden>Exposure at maximum — the scene is darker than the sensor can compensate.</div>
-			<dl class="small list mb-0" id="st-isp"></dl>
-			<div class="small text-secondary" id="st-isp-empty">loading…</div>
-		</div></div>
+			<div class="st-panel st-chartbox" id="st-wifi-panel" hidden>
+				<div class="st-chart-head">
+					<span class="mj-cap">Wi-Fi signal</span>
+					<span class="st-now" id="st-rssi-now"></span>
+				</div>
+				<div class="st-chart" id="ch-rssi"></div>
+				<div class="x-small text-secondary" id="st-wifi-sub"></div>
+			</div>
+		</div>
+
+		<div class="st-chart-row">
+			<div class="st-panel st-chartbox" id="st-luma-panel" hidden>
+				<div class="st-chart-head">
+					<span class="mj-cap">Scene luminance</span>
+					<span class="st-now" id="st-luma-now"></span>
+				</div>
+				<div class="st-chart" id="ch-luma"></div>
+			</div>
+			<div class="st-panel st-chartbox">
+				<div class="st-chart-head">
+					<span class="mj-cap">ISP &mdash; what this SoC reports</span>
+					<span class="x-small text-secondary">raw SDK units</span>
+				</div>
+				<dl class="small list mb-0" id="st-isp"></dl>
+				<div class="small text-secondary" id="st-isp-empty">loading&hellip;</div>
+				<div class="x-small text-secondary mt-2" id="st-daynight" aria-live="polite"></div>
+			</div>
+		</div>
 	</div>
 
-	<!-- Device -->
-	<div class="col-12 col-md-6 col-xl-3">
-		<div class="card h-100"><div class="card-body">
-			<h3>Device</h3>
-			<dl class="small list mb-0">
-				<dt>SoC</dt><dd><% esc "$soc" %> <span class="text-secondary">(<% esc "$soc_family" %>)</span></dd>
-				<dt>Sensor</dt><dd><% esc "$sensor" %></dd>
-				<dt>Firmware</dt><dd><% esc "${fw_version}-${fw_variant}" %></dd>
-				<dt>Build</dt><dd class="text-break"><% esc "$fw_build" %></dd>
-				<dt>Majestic</dt><dd><% esc "$mj_version" %></dd>
-				<% if [ -n "$uboot_version" ]; then %>
-					<dt>U-Boot</dt><dd><% esc "$uboot_version" %></dd>
-				<% fi %>
-			</dl>
-		</div></div>
-	</div>
+	<div class="st-rail">
+		<div class="st-panel">
+			<div class="mj-cap mb-2">Streams</div>
+			<div id="streams" class="d-flex flex-column gap-2"><div class="text-secondary small">loading&hellip;</div></div>
+		</div>
 
-	<!-- Network -->
-	<div class="col-12 col-md-6 col-xl-3">
-		<div class="card h-100"><div class="card-body">
-			<h3>Network</h3>
+		<div class="st-panel">
+			<div class="mj-cap mb-2">Network</div>
 			<dl class="small list mb-0">
 				<dt>Host</dt><dd><% esc "$network_hostname" %></dd>
 				<% if [ -n "$net_rows" ]; then %>
@@ -140,21 +179,10 @@ done) %>
 				<% fi %>
 				<dt>Gateway</dt><dd><% esc "${net_gw:-$network_gateway}" %></dd>
 			</dl>
-			<!-- Filled by status.js when the camera reports wifi_* metrics -->
-			<div id="st-wifi" hidden>
-				<div class="d-flex justify-content-between align-items-baseline x-small mt-3 mb-1">
-					<span class="fw-semibold">Wi-Fi</span>
-					<span id="st-wifi-grade"></span>
-				</div>
-				<dl class="small list mb-0" id="st-wifi-rows"></dl>
-			</div>
-		</div></div>
-	</div>
+		</div>
 
-	<!-- Storage -->
-	<div class="col-12 col-md-6 col-xl-3">
-		<div class="card h-100"><div class="card-body">
-			<h3>Storage</h3>
+		<div class="st-panel">
+			<div class="mj-cap mb-2">Storage</div>
 			<dl class="small list mb-2">
 				<dt>Flash</dt><dd><% esc "$flash_size" %> MB <span class="text-secondary"><% esc "$flash_type" %></span></dd>
 			</dl>
@@ -174,7 +202,21 @@ done) %>
 			<% else %>
 				<div class="x-small text-secondary">No SD card detected</div>
 			<% fi %>
-		</div></div>
+		</div>
+
+		<div class="st-panel">
+			<div class="mj-cap mb-2">Device</div>
+			<dl class="small list mb-0">
+				<dt>SoC</dt><dd><% esc "$soc" %> <span class="text-secondary">(<% esc "$soc_family" %>)</span></dd>
+				<dt>Sensor</dt><dd><% esc "$sensor" %></dd>
+				<dt>Firmware</dt><dd><% esc "${fw_version}-${fw_variant}" %></dd>
+				<dt>Build</dt><dd class="text-break"><% esc "$fw_build" %></dd>
+				<dt>Majestic</dt><dd><% esc "$mj_version" %></dd>
+				<% if [ -n "$uboot_version" ]; then %>
+					<dt>U-Boot</dt><dd><% esc "$uboot_version" %></dd>
+				<% fi %>
+			</dl>
+		</div>
 	</div>
 </div>
 
