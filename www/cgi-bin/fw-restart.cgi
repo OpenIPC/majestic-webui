@@ -15,8 +15,21 @@ Pragma: no-cache
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<!-- the page ships its own theme; tell Dark Reader to leave colours alone.
+	     Without this the extension recoloured this one page and left every
+	     other one alone, since header.cgi has carried the lock since #107 and
+	     this page does not include header.cgi. -->
+	<meta name="darkreader-lock">
 	<title>Restart - OpenIPC</title>
 	<link href="/a/bootstrap.min.css" rel="stylesheet">
+	<!-- The theme tokens, without which this page renders in stock Bootstrap
+	     dark and reads as a different product from the one that sent you here.
+	     A second render-blocking stylesheet is a fair cost even on a page that
+	     has to paint while the system goes down: it is the same file, from the
+	     same httpd, at the same moment as bootstrap.min.css above — and you
+	     arrive from a CGI page that has just loaded it, so it is normally a
+	     cache hit. If neither arrives there is no page to theme anyway. -->
+	<link href="/a/bootstrap.override.css" rel="stylesheet">
 	<style>
 		body {
 			text-align: center;
