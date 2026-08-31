@@ -29,6 +29,7 @@
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), img = $('#live-mjpeg'), note = $('#mj-note');
+	const servedEl = $('#mj-served'), servedWhy = $('#mj-served-why');
 	let jpegOn = false;
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
@@ -174,6 +175,21 @@
 	// reported about its own picture.
 	let chipMedia = null, chipFps = 0;
 	let cfgFps = [0, 0];
+	// The camera's own statement of which channel this WebRTC session serves,
+	// from the `served` signalling reply — or null on an older majestic, over
+	// MSE, and between sessions, in which case the size inference below stands
+	// in. servedShownKey remembers which mismatch the message has already
+	// announced: a reconnect or audio renegotiation re-delivers the same
+	// `served`, and the second telling would just be noise.
+	let servedCh = null;
+	let servedShownKey = '';
+	// The channel the viewer themselves asked for, distinct from `stream`:
+	// after a fallback the page and player adopt the served channel, so every
+	// internal reopen (audio, reconnect) requests it and is answered with a
+	// match — but the viewer's own ask is still unmet, and the standing
+	// explanation must not vanish on an audio toggle. null until a request is
+	// betrayed or the viewer picks; goToStream() is what changes their mind.
+	let wantedCh = null;
 	// Per channel too: videoN.bitrate, for the toast's "back to configured".
 	let cfgKbps = [0, 0];
 	// WebRTC takes ?stream= as a preference, not an order: the camera can
@@ -192,6 +208,9 @@
 	// configured bitrate would be the wrong endpoint for its steps.
 	function servedStream() {
 		const asked = stream ? 1 : 0;
+		// The camera said outright — no inference needed. Older daemons never
+		// say, and everything below is the fallback for them.
+		if (usingWebRTC && servedCh !== null) return servedCh;
 		if (!usingWebRTC || !chipMedia) return asked;
 		const want = sizeOf[asked], other = sizeOf[asked ? 0 : 1];
 		if (!want || !other) return asked;
@@ -205,14 +224,15 @@
 		// Auto's radios never say which channel it picked, so the chip
 		// always does (#184) — but only when it can say truthfully. Over MSE
 		// the subscription is exact, so `stream` IS the served channel; over
-		// WebRTC the identity is inferred from frame size, and with a size
-		// unset or the two channels sized alike the inference proves
-		// nothing, so the chip claims nothing rather than guessing (#240
-		// tracks getting this authoritatively from the camera). A manual
-		// pick speaks only on a mismatch — the radio already names the
-		// intent, so the chip only reports betrayal.
+		// WebRTC a new majestic states the channel in the signalling (#240),
+		// and only on an older one is the identity inferred from frame size —
+		// where a size unset or the two channels sized alike proves nothing,
+		// so the chip claims nothing rather than guessing. A manual pick
+		// speaks only on a mismatch — the radio already names the intent, so
+		// the chip only reports betrayal.
 		if (autoOn) {
-			if (usingWebRTC && (!sizeOf[0] || !sizeOf[1] ||
+			if (usingWebRTC && servedCh === null &&
+				(!sizeOf[0] || !sizeOf[1] ||
 				(sizeOf[0].w === sizeOf[1].w && sizeOf[0].h === sizeOf[1].h))) {
 				return '';
 			}
@@ -229,6 +249,90 @@
 			chipMedia.w + '×' + chipMedia.h +
 			(fps ? ' · ' + Math.round(fps) + ' fps' : '') +
 			servedNote();
+	}
+
+	// The served-channel message: why the channel the viewer picked is not the
+	// one playing. Unlike the adaptation toast it does not time out — the
+	// mismatch is a standing condition, not a moment — so it stays until
+	// dismissed, until the cause goes away, or until the viewer changes
+	// something (stream, transport) that makes it stale.
+	const streamName = (n) => n === 0 ? 'Main stream' : 'Sub stream';
+
+	function hideServedMsg() {
+		if (servedEl) servedEl.hidden = true;
+	}
+
+	function showServedMsg(info) {
+		if (!servedEl || !servedWhy) return;
+		const req = streamName(info.requested), got = streamName(info.channel);
+		// The page words the sentence; the camera only names the cause. An
+		// unknown code from a future daemon still gets an honest generic line.
+		servedWhy.textContent =
+			info.reason === 'unavailable'
+				? req + ' isn’t available right now — showing ' +
+					got + ' instead.'
+			: info.reason === 'undecodable'
+				? 'This browser’s WebRTC can’t decode the ' + req +
+					'’s format — showing ' + got + ' instead.'
+			: 'The camera couldn’t serve the ' + req +
+				' — showing ' + got + ' instead.';
+		servedEl.hidden = false;
+	}
+
+	// What a `served` reply from the camera does to this page: the chip, the
+	// adaptation baseline (through servedStream()), and — on a mismatch with
+	// an explicit pick — the radios and the message. The radios are moved by
+	// writing .checked, which fires no change event: goToStream() must not
+	// re-enter (it would cut the session that just told us this), and the
+	// remembered preference must stay the viewer's own — a daemon fallback is
+	// not a choice, and next page load should ask for their channel again.
+	function applyServed(info) {
+		servedCh = (info.channel === 0 || info.channel === 1)
+			? info.channel : null;
+		const mismatch = servedCh !== null && info.requested !== null &&
+			info.channel !== info.requested;
+		if (!mismatch) {
+			// A match the viewer never asked for is not good news: a reopen
+			// inside a fallen-back session requests the adopted channel and
+			// is answered with it, while the viewer's own ask stands unmet.
+			// Leave the explanation exactly as it is — up if it was up,
+			// dismissed if they dismissed it.
+			if (wantedCh !== null && servedCh !== null &&
+				servedCh !== wantedCh) {
+				setChip();
+				return;
+			}
+			// Served as the viewer asked (or nothing was asked): any
+			// standing message describes a mismatch that no longer exists.
+			servedShownKey = '';
+			hideServedMsg();
+			setChip();
+			return;
+		}
+		// The betrayed ask, remembered past the adoption below — the daemon
+		// echoes exactly what this page requested.
+		wantedCh = info.requested;
+		if (!autoOn) {
+			// The controls tell the truth: the session — player included, it
+			// adopted the channel itself — is on servedCh, so the page and
+			// the radios follow. The viewer's original radio is now
+			// genuinely unchecked, which is what makes re-picking it a real
+			// change event and a real renegotiation.
+			stream = servedCh;
+			if (s0) s0.checked = servedCh === 0;
+			if (s1) s1.checked = servedCh === 1;
+			const key = info.requested + '>' + info.channel + ':' + info.reason;
+			if (key !== servedShownKey) {
+				servedShownKey = key;
+				showServedMsg(info);
+			}
+		}
+		// In Auto the radios stay Auto's and no message shows: no explicit
+		// request was betrayed, and the chip (which in Auto always names the
+		// channel) is the disclosure. Auto's own `stream` is left alone so
+		// autoApply()'s want === stream comparison keeps meaning "nothing to
+		// do" rather than oscillating against the camera's fallback.
+		setChip();
 	}
 	// Talkback is deliberately NOT carried across a transport switch or a
 	// reattach. Everything else here is a preference; this one holds a live
@@ -353,6 +457,14 @@
 		// describe a session that is gone. Back on WebRTC it re-adopts from
 		// the first tick rather than announcing whatever moved while away.
 		if (window.MajesticAdapt && !usingWebRTC) window.MajesticAdapt.reset();
+		// Same for the served-channel answer and its message: both belong to
+		// a WebRTC session. MSE serves the number it is given or nothing.
+		if (!usingWebRTC) {
+			servedCh = null;
+			servedShownKey = '';
+			wantedCh = null;
+			hideServedMsg();
+		}
 		syncAudioCtl();
 		// The outgoing player's destroy() released the microphone, so talkback
 		// comes back up off whatever the new one is doing.
@@ -487,6 +599,11 @@
 		// old transport's dimensions and fps on the chip for ever (WebRTC
 		// self-heals through its per-second stats; MSE has no such path).
 		let heldMedia = null;
+		// The camera's served-channel answer arrives right after the SDP
+		// answer — for a trial, well before promotion. Held for the same
+		// reason heldMedia is: moving the radios for a session that may yet
+		// be thrown away would announce a switch that never happened.
+		let heldServed = null;
 		return {
 			onState: (s, d) => {
 				onState(s, d);
@@ -497,11 +614,19 @@
 					applyMedia(heldMedia);
 					heldMedia = null;
 				}
+				if (heldServed && isLive()) {
+					applyServed(heldServed);
+					heldServed = null;
+				}
 			},
 			onCodec: (codec, cs, w, h) => {
 				const m = { codec: codec, w: w, h: h };
 				if (!isLive()) { heldMedia = m; return; }
 				applyMedia(m);
+			},
+			onServed: (info) => {
+				if (!isLive()) { heldServed = info; return; }
+				applyServed(info);
 			},
 			// null means we asked for audio and the camera had none to give (mic
 			// off or not producing). Reflect that on the control rather than
@@ -794,6 +919,14 @@
 		// The two channels are two encoders; the baseline and any toast on
 		// screen describe the one being left.
 		if (window.MajesticAdapt) window.MajesticAdapt.reset();
+		// A deliberate change is the viewer changing their mind: it becomes
+		// the new ask, invalidates the camera's last served answer, and
+		// re-arms the message — the next session speaks for itself, and if
+		// it falls back again that is news worth repeating.
+		wantedCh = n;
+		servedCh = null;
+		servedShownKey = '';
+		hideServedMsg();
 		if (player) player.setStream(n);
 		const t = swap.trial();
 		if (t) t.setStream(n);
@@ -805,6 +938,11 @@
 	if (autoCtl) autoCtl.addEventListener('change', () => {
 		autoOn = autoCtl.checked;
 		if (!autoOn) return;
+		// Any standing mismatch message belonged to a manual pick; handing
+		// the choice to Auto withdraws the request it was explaining.
+		wantedCh = null;
+		servedShownKey = '';
+		hideServedMsg();
 		// Acting immediately rather than waiting for a resize: the person just
 		// asked for the best fit, and the window is already the size it is.
 		lastAutoAt = 0;
@@ -824,6 +962,16 @@
 			userPickedStream = true;
 			MajesticTransport.chooseStream('preview', n === 2 ? 'auto' : n);
 		});
+	});
+
+	// Dismissing the served-channel message. A click anywhere on it counts —
+	// the × is a real button for the keyboard, but a toast small enough to
+	// need aim is a toast that gets missed. stopPropagation for the same
+	// reason preview-adapt.js does it: a tap on the stage toggles the control
+	// bar, and dismissing a message should not also flip the chrome.
+	if (servedEl) servedEl.addEventListener('click', (ev) => {
+		if (ev && ev.stopPropagation) ev.stopPropagation();
+		hideServedMsg();
 	});
 
 	// Follow the size, debounced — a drag fires continuously, and the rate limit

@@ -211,6 +211,21 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   matters: WebRTC negotiates, so it can fail where MSE cannot (Firefox offers
   only H.264 Baseline whatever it can decode), which is why a player reporting
   `'fallback'` asks for the other transport rather than for MJPEG.
+  WebRTC's `?stream=` is a **preference, not an order** — the camera can serve
+  the other channel. An upcoming majestic states the served channel outright in
+  a `served` signalling reply (channel, requested, reason code) right after the
+  SDP answer; the player adopts it internally (so re-picking the fallen-from
+  channel is a real renegotiation, not a no-op) and hands it to the page via
+  `onServed`. The page then treats it as authoritative — the chip (including
+  Auto's always-on label, previously silent when the two channels shared a
+  size), the adaptation toast's baseline, and on a mismatch against an explicit
+  pick the radios move to the served channel (by writing `.checked`, never by
+  firing `change` — `goToStream()` must not re-enter and the remembered
+  preference must stay the viewer's own) while the dismissible `#mj-served`
+  toast names why (`unavailable` / `undecodable`; the page words the sentence).
+  In Auto the radios and message stay untouched — nothing was betrayed and the
+  chip is the disclosure. On an older majestic no `served` ever arrives and the
+  frame-size inference below stands, radios unmoved — today's behaviour.
   `mj-settings.cgi` does **not** share the `preview()` markup — its live tab is
   built client-side by `renderLive()` in `mj-settings.js` (`.mj-live-video`
   elements), though it loads all four preview player scripts. `preview()`

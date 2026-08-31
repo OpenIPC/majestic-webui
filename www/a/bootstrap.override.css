@@ -1698,6 +1698,13 @@ mark {
 	to { opacity: 1; transform: none; }
 }
 
+/* The served-channel message shares the toast's glass but its own slot,
+   below the adaptation toast, so a fallback and a rate change can both be
+   on screen without either covering the other. */
+.mj-served-toast {
+	top: 5.2rem;
+}
+
 /* ── on-video chrome ────────────────────────────────────────────────────────
    The same vocabulary the Live adjustments deck uses — black glass, micro-caps
    labels, a lit indicator where there is state, stroked 20px icons — so the
