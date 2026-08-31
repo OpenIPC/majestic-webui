@@ -25,7 +25,7 @@
 		}
 		h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 .35rem; text-align: center; }
 		h1 span { color: #5c70e8; }
-		.sub { margin: 0 0 1.5rem; text-align: center; font-size: .875rem; color: rgba(222,226,230,.5); }
+		.sub { margin: 0 0 1.5rem; text-align: center; font-size: .875rem; color: rgba(222,226,230,.75); }
 		ul { list-style: none; margin: 0; padding: 0; }
 		li { margin-bottom: .5rem; }
 		/* One surface step above the card, which is #1c1f27 — the tertiary
@@ -43,14 +43,18 @@
 		   resting tile it is meant to lift. */
 		a.cam:hover { border-color: #5c70e8; background: #2a304a; }
 		.name { font-weight: 500; }
-		.addr { margin-left: auto; font-size: .875rem; color: rgba(222,226,230,.5); font-variant-numeric: tabular-nums; }
+		/* The worst case for muted text on any of these pages: the tile is
+		   lighter than the card, so the same grey contrasts less here than
+		   anywhere in login.html. .75 measures 7.09:1; .5 measured 3.99 and
+		   failed WCAG AA on an address the reader has to be able to read. */
+		.addr { margin-left: auto; font-size: .875rem; color: rgba(222,226,230,.75); font-variant-numeric: tabular-nums; }
 		.quiet { font-size: .75rem; color: #ffda6a; }
 		.here {
 			font-size: .6875rem; text-transform: uppercase; letter-spacing: .04em;
 			color: #75b798; border: 1px solid #2f6f52; border-radius: .25rem;
 			padding: .1rem .35rem;
 		}
-		.msg { text-align: center; color: rgba(222,226,230,.5); font-size: .875rem; padding: 1rem 0; }
+		.msg { text-align: center; color: rgba(222,226,230,.75); font-size: .875rem; padding: 1rem 0; }
 		.msg.bad { color: #ea868f; }
 	</style>
 </head>
