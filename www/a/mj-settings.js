@@ -971,7 +971,11 @@
 			one('toggle-ircut', ICON.ircut, 'IR&#8209;cut') +
 			one('toggle-light', ICON.lamp, 'Lamp', 'mj-hrt-amber') +
 			'</span>' +
-			'<span class="mj-hud-chip mj-glass" id="mj-lightmon" hidden>' +
+			// A sentence in a bar that cannot wrap: on the picture it truncates
+			// with the title carrying the rest, and below md dockRuntime moves
+			// it off the picture entirely, where it has a line to itself.
+			'<span class="mj-hud-chip mj-glass" id="mj-lightmon" hidden' +
+			' title="Light monitor is driving night, IR-cut and the lamp">' +
 			'<a href="mj-settings.cgi?tab=nightMode">Light monitor is driving night, IR&#8209;cut and the lamp</a>' +
 			'</span>';
 	}
@@ -987,8 +991,25 @@
 			'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
 			'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
 			'<div class="mj-live-bar">' +
+			// The stream picker rides the picture, first in the bar, exactly
+			// where the Live page keeps it — and as the same component, not a
+			// second copy of it: `mj-hud mj-seg` is the pair of classes that
+			// page's markup carries, so the glass, the label colours and the
+			// focus ring are all inherited rather than restated. It used to sit
+			// beside the section heading, which is a different control in a
+			// different place for the same job on two pages of one product.
+			'<span class="mj-hud mj-seg" role="group" aria-label="Stream">' +
+			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s0" autocomplete="off">' +
+			'<label class="mj-seg-lbl" for="mj-live-s0">Main</label>' +
+			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s1" autocomplete="off">' +
+			'<label class="mj-seg-lbl" for="mj-live-s1" id="mj-live-sub" hidden>Sub</label>' +
+			'</span>' +
 			runtimeHtml() +
-			'<button type="button" class="mj-hud-btn mj-glass" id="mj-live-compare">' +
+			// The label is dropped below md (the bar does not wrap, and at 390px
+			// it was the one thing that did not fit), so the title has to carry
+			// it there — same trade the snapshot and fullscreen icons make.
+			'<button type="button" class="mj-hud-btn mj-glass" id="mj-live-compare"' +
+			' title="Hold to compare" aria-label="Hold to compare">' +
 			ICON.compare + '<span>Hold to compare</span></button>' +
 			'<span class="mj-hud-end">' +
 			'<button type="button" class="mj-hud-ico mj-glass" id="mj-live-snap" hidden aria-label="Snapshot" title="Snapshot"></button>' +
@@ -999,6 +1020,126 @@
 		stage.querySelector('#mj-live-fs').innerHTML = ICON.fs;
 		form.appendChild(stage);
 		return stage;
+	}
+
+	// The bar does not wrap any more — wrapping took 42% of a 290px picture on a
+	// 540px phone (#239) — so when it will not fit, the widest group moves off
+	// the picture instead of stacking on top of more of it. The runtime toggles
+	// are the ones that move: they are the widest, they are state rather than
+	// player controls, and under the picture they get full-width touch targets
+	// instead of being the thing that scrolls out of reach. What stays is the
+	// player's own row — channel, compare, snapshot, fullscreen.
+	//
+	// MEASURED, not a breakpoint. The stage's width comes from the window's
+	// HEIGHT as much as its width, and the bar holds a different set of controls
+	// on different cameras — no substream, no lamp pin, the light-monitor
+	// sentence instead of the three switches — so the width at which it stops
+	// fitting is a property of this camera in this window, and no media query
+	// knows it. Every child is flex:0 0 auto (see bootstrap.override.css), which
+	// is what makes scrollWidth its natural width rather than its squeezed one.
+	//
+	// Relocation rather than two copies, the same way preview-ptz.js moves the
+	// pad into the stage: one set of inputs means wireRuntime() keeps driving
+	// the controls the person is looking at, whichever side of the picture edge
+	// that is.
+	function dockRuntime(stage, mount) {
+		const bar = stage.querySelector('.mj-live-bar');
+		const gap = 8;
+		const movable = () => [
+			bar.querySelector('.mj-hud-rt') || mount.querySelector('.mj-hud-rt'),
+			bar.querySelector('#mj-lightmon') || mount.querySelector('#mj-lightmon'),
+		].filter(Boolean);
+
+		const move = (to) => {
+			movable().forEach(n => {
+				if (n.parentNode === to) return;
+				n.classList.toggle('mj-glass', to === bar);
+				// Before the compare button, which is where it sits in the bar;
+				// appended in the mount, which holds nothing else.
+				if (to === bar) bar.insertBefore(n, bar.querySelector('#mj-live-compare'));
+				else to.appendChild(n);
+			});
+		};
+
+		const widthOf = (nodes) => nodes.reduce((w, n) => w + n.scrollWidth + gap, 0);
+
+		// What the group costs the bar, remembered from the last time it was in
+		// it. While it is docked its width cannot be measured — in the mount the
+		// switches stretch to the full column — so this is the only figure there
+		// is, and it is why undocking is decided on a remembered number rather
+		// than a fresh one. If it has gone stale the next pass corrects it, and
+		// the stage clips rather than reflows in the meantime.
+		let cost = 0;
+		let docked = false;
+		let pending = false;
+
+		const place = () => {
+			pending = false;
+			const room = bar.clientWidth;
+			// A stage that has not been laid out yet answers 0 and would dock
+			// everything; the observers below fire again with a real width.
+			if (!room) return;
+			const extras = movable();
+			if (!docked) cost = widthOf(extras.filter(n => !n.hidden));
+			const rest = [...bar.children].filter(n => !n.hidden && extras.indexOf(n) < 0);
+			const need = rest.reduce((w, n) => w + n.scrollWidth, 0) +
+				gap * Math.max(0, rest.length - 1) + cost;
+			// Hysteresis, and it is load-bearing rather than polish: docking
+			// adds a row under the picture, the stage's reserve grows to hold
+			// it (.mj-live-docked) and the stage therefore NARROWS — so the
+			// measurement that follows a dock is taken in less room than the one
+			// that caused it. Without a band to come back through, a window
+			// sitting exactly on the boundary would dock, narrow, undock, widen,
+			// for as long as it was open.
+			const want = docked ? need > room - 24 : need > room;
+			// Nothing moves unless the answer changed. That is what makes the
+			// mutation observer below safe: a pass that writes to the DOM would
+			// wake it, and a pass woken by its own writes never stops.
+			if (want === docked) return;
+			move(want ? mount : bar);
+			docked = want;
+			mount.hidden = !want;
+			stage.classList.toggle('mj-live-docked', want);
+		};
+
+		const later = () => {
+			if (pending) return;
+			pending = true;
+			requestAnimationFrame(place);
+		};
+
+		place();
+
+		// Two things change what the bar needs without changing the bar. The
+		// snapshot and fullscreen buttons start hidden and are revealed only
+		// once preview-hero.js knows the camera has jpeg.enabled and the browser
+		// has the fullscreen API — that is +76px arriving a second late, and it
+		// is what made a 1024x700 window measure as fitting and then overflow.
+		// The brand font is the other: header.cgi loads it media="print" so a
+		// camera with no internet still paints, and Montserrat is wider than the
+		// system stack it replaces.
+		let mo = null;
+		if (window.MutationObserver) {
+			mo = new MutationObserver(later);
+			mo.observe(bar, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
+		}
+		if (document.fonts && document.fonts.ready) document.fonts.ready.then(later);
+
+		// ResizeObserver on the bar rather than on the window: the bar's width
+		// changes when the rail, the container or the stream's aspect ratio
+		// changes, none of which is a window resize.
+		let ro = null;
+		if (window.ResizeObserver) {
+			ro = new ResizeObserver(later);
+			ro.observe(bar);
+		} else {
+			window.addEventListener('resize', later);
+		}
+		return () => {
+			if (mo) mo.disconnect();
+			if (ro) ro.disconnect();
+			else window.removeEventListener('resize', later);
+		};
 	}
 
 	// The night/IR/light runtime toggles. They live on this page rather than on
@@ -1355,8 +1496,8 @@
 			window.MajesticTransport);
 
 		// The only place the leaf names itself — the rail's active item says it
-		// too — with the stream picker on the same line rather than in a card
-		// header of its own.
+		// too. The stream picker used to share this line; it is on the picture
+		// now (renderStage), so what is left is the heading and its rule.
 		//
 		// An <h3> despite the micro-caps styling, and not a <span>: revealSection()
 		// focuses `form h3` after a navigation so the section announces itself to
@@ -1365,13 +1506,7 @@
 		const head = el('div', 'mj-live-head');
 		head.innerHTML =
 			'<h3 class="mj-cap">Live adjustments</h3>' +
-			'<span class="mj-live-rule"></span>' +
-			'<span class="mj-seg" role="group" aria-label="Stream">' +
-			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s0" autocomplete="off">' +
-			'<label class="mj-seg-lbl" for="mj-live-s0">Main</label>' +
-			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s1" autocomplete="off">' +
-			'<label class="mj-seg-lbl" for="mj-live-s1" id="mj-live-sub" hidden>Sub</label>' +
-			'</span>';
+			'<span class="mj-live-rule"></span>';
 		form.appendChild(head);
 
 		if (withVideo) {
@@ -1389,20 +1524,15 @@
 				if (offFs) state.liveCleanup.push(offFs);
 				window.MajesticHero.wireSnapshot(stage.querySelector('#mj-live-snap'));
 			}
+			const rtMount = el('div', 'mj-live-rt-mount');
+			form.appendChild(rtMount);
+			state.liveCleanup.push(dockRuntime(stage, rtMount));
+
 			const note = el('p', 'mj-live-hint');
-			note.textContent = 'Night, IR-cut and the lamp are on the picture because they are runtime state: ' +
-				'pressing one changes the camera for every viewer immediately, and none of them is part of Save.';
+			note.textContent = 'Night, IR-cut and the lamp are runtime state: pressing one changes ' +
+				'the camera for every viewer immediately, and none of them is part of Save.';
 			form.appendChild(note);
 		}
-
-		// The deck: one card split by a rule, so tone and orientation read as
-		// one instrument rather than as two unrelated panels.
-		const deck = el('div', 'mj-live-deck');
-		const colA = el('div', 'mj-live-col');
-		const colB = el('div', 'mj-live-col mj-live-col-b');
-		deck.appendChild(colA);
-		deck.appendChild(colB);
-		form.appendChild(deck);
 
 		// The pad replaces the two switches only when BOTH halves of it are
 		// there. A build that marks just one of them x-live — or that marks some
@@ -1410,24 +1540,41 @@
 		const mirror = fields.find(f => f.key === 'mirror' && f.sub.type === 'boolean');
 		const flip = fields.find(f => f.key === 'flip' && f.sub.type === 'boolean');
 		const useGeo = !!(mirror && flip);
+		// The strip is for knobs, so it is integers that decide whether there is
+		// one. A build that marks only booleans x-live has no strip and loses
+		// nothing: they render in the row below, where a switch has room to be a
+		// switch rather than a fifth cell of a four-cell instrument.
+		const hasTone = fields.some(f => f.sub.type === 'integer');
 
-		const hasTone = fields.some(f => f !== mirror && f !== flip);
-		// Tone starts the left column, with nothing above it: whatever sits
-		// between the picture and the first slider comes straight off the one
-		// guarantee this panel owes, which is that a knob and the effect it has
-		// are on screen together (#239). Scene used to be there and cost 111px,
-		// which put Brightness exactly on the fold at 1440x900.
-		//
-		// Scene goes UNDER the sliders rather than into the other column. It
-		// sets those same four values, so it belongs beside them; and the two
-		// columns have to carry comparable weight or the deck is mostly empty
-		// on one side — parking it on the right left 282px of nothing under
-		// "Reset all to stock".
-		const toneBody = hasTone ? liveGroup(colA, 'Tone', 'saved with the page') : null;
+		// The deck is now two cards, not one. The first is the knob strip: the
+		// Tone rows laid ACROSS it, directly under the picture, with nothing
+		// between. Four rows stacked cost 186px and the strip costs 76, and that
+		// difference is what the picture grew by — the reserve in
+		// bootstrap.override.css holds room for this strip and nothing else, so
+		// the guarantee stays "a knob and the effect it has, together" while the
+		// picture takes everything left over (#239).
+		const strip = el('div', 'mj-live-strip');
+		if (hasTone) form.appendChild(strip);
+
+		// The second card carries what is worth having but not worth the
+		// picture's height: Scene, Luma and Orientation, side by side rather
+		// than as the 405px two-column block they used to make. Shallow enough
+		// that on a 1080p window the whole panel is on screen again.
+		const deck = el('div', 'mj-live-deck');
+		const colScene = el('div', 'mj-live-col mj-live-col-scene');
+		const colLuma = el('div', 'mj-live-col');
+		const colGeo = el('div', 'mj-live-col mj-live-col-geo');
+		deck.appendChild(colScene);
+		deck.appendChild(colLuma);
+		deck.appendChild(colGeo);
+		form.appendChild(deck);
 
 		for (const f of fields) {
 			const geoField = useGeo && (f === mirror || f === flip);
-			const box = geoField ? colB : (toneBody || colA);
+			// The geometry checkboxes stay real fields — hidden — beside the pad
+			// that replaces them, so Save and dirty tracking never learn any of
+			// this happened.
+			const box = (!geoField && f.sub.type === 'integer') ? strip : colGeo;
 			const field = renderField(box, f.dot, f.key, f.sub,
 				getDotted(state.config, f.dot), { live: true, hidden: geoField });
 			if (!field) continue;
@@ -1435,30 +1582,31 @@
 			state.initial[f.dot] = field.getValue();
 		}
 
-		if (toneBody) {
-			const foot = el('div', 'mj-live-foot');
+		// Last cell of the strip rather than a footer under it: a footer would
+		// be another line between the picture and the row below, and this is a
+		// control that belongs to the four beside it.
+		if (hasTone) {
+			const foot = el('div', 'mj-live-strip-foot');
 			const rall = el('button', 'mj-live-linkbtn');
 			rall.type = 'button';
-			rall.innerHTML = ICON.reset + '<span>Reset all to stock</span>';
+			rall.innerHTML = ICON.reset + '<span>Stock</span>';
+			rall.title = 'Reset all four to their factory defaults';
 			rall.addEventListener('click', resetLiveAll);
 			foot.appendChild(rall);
-			toneBody.appendChild(foot);
+			strip.appendChild(foot);
 		}
 
-		// Under the sliders it drives, and last in the left column so it never
-		// pushes them away from the picture.
 		const toneFields = state.fields.filter(f =>
 			f.schema && f.schema['x-live'] && f.type === 'integer');
 		if (hasTone && toneFields.length) {
-			renderScene(liveGroup(colA, 'Scene', 'starting points, then tune by eye'),
-				toneFields);
+			renderScene(liveGroup(colScene, 'Scene', 'starting points'), toneFields);
 		}
 
 		if (withVideo) {
 			// The group's note slot carries the running mean rather than a
 			// caption — a number that changes is worth more there than a word
 			// that does not.
-			const lumaBody = liveGroup(colB, 'Luma', 'mean —');
+			const lumaBody = liveGroup(colLuma, 'Luma', 'mean —');
 			const note = lumaBody.parentNode.querySelector('.mj-live-note');
 			if (note) note.className = 'mj-live-note mj-luma-mean';
 			renderLuma(lumaBody);
@@ -1467,19 +1615,29 @@
 		if (useGeo) {
 			const mf = state.fields.find(f => f.dot === mirror.dot);
 			const ff = state.fields.find(f => f.dot === flip.dot);
-			if (mf && ff) renderGeometry(liveGroup(colB, 'Orientation', ''), mf, ff);
+			if (mf && ff) renderGeometry(liveGroup(colGeo, 'Orientation', ''), mf, ff);
 		}
 
 		// Every group above is conditional — on the schema, and on which player
 		// scripts loaded — so an empty column is reachable rather than
 		// hypothetical: without the player there is no Luma, and a build that
-		// marks only one of mirror/flip x-live has no Orientation either, which
-		// between them leave the right column holding nothing. It is 23rem wide
-		// with a divider whether or not anything is in it, so it would squeeze
-		// the surviving controls and add a blank section once stacked. Drop
-		// whatever came out empty instead of enumerating the combinations.
-		[colA, colB].forEach(c => { if (!c.childElementCount) c.remove(); });
+		// marks only one of mirror/flip x-live has no Orientation either. A cell
+		// is a fixed width with a divider whether or not anything is in it, so
+		// an empty one would squeeze its neighbours and add a blank section once
+		// stacked. Drop whatever came out empty instead of enumerating the
+		// combinations. colGeo is judged on what is VISIBLE in it: with the pad
+		// mounted it holds the two hidden checkboxes as well, and without the
+		// pad it may hold nothing but them — a cell that renders as a divider
+		// and 15rem of nothing.
+		if (!colGeo.querySelector('.mj-live-grp, .mj-live-row:not([hidden])')) {
+			// The hidden fields go with it. They are detached, not destroyed:
+			// state.fields still holds them, and getValue()/Save read the
+			// control, which does not care whether it is in the document.
+			colGeo.remove();
+		}
+		[colScene, colLuma].forEach(c => { if (!c.childElementCount) c.remove(); });
 		if (!deck.childElementCount) deck.remove();
+		if (hasTone && !strip.querySelector('.mj-live-row')) strip.remove();
 	}
 
 	const isGroup = (sub) => !!(sub && sub.type === 'object' && sub.properties);

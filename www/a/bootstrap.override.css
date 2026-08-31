@@ -243,6 +243,53 @@ body > main > .container > h2 {
 	margin: 2rem 0 1.5rem;
 }
 
+/* The settings page prints its own title, at the top of the rail rather than in
+   a band above both columns — see the note in mj-settings.cgi. Smaller than the
+   page heading it replaces because it now shares a 261px column with the tree
+   it names, and because at 32px it was the loudest thing on a page whose
+   subject is a list of settings. */
+.mj-rail-title {
+	margin: 0 0 0.75rem;
+	color: var(--bs-primary);
+	font-size: 1.25rem;
+	font-weight: 500;
+	line-height: 1.3;
+}
+
+/* Only this page widens, and only because of the one thing on it that can use a
+   bigger monitor. Bootstrap's shared 1320px cap meant the Live preview was
+   exactly 966x543 on a 1080p screen and on a 1440p one alike — the container was
+   what stopped it, not the window (#239). Every other page keeps the cap; a
+   ceiling stays, because a settings form whose rows run the width of a 4K
+   monitor is not a form anyone can read. */
+#page-mj-settings > main > .container {
+	max-width: min(96vw, 2400px);
+}
+
+/* Once the container is free to grow, a quarter-width rail is 437px of mostly
+   nothing on a 1080p screen — a column of one-word labels, sized as a fraction
+   of a page whose width now comes from the monitor. So the rail takes what the
+   tree needs and the form column takes the rest, which on that screen hands the
+   picture another 60px of width. Below md the two stack and the percentages
+   never applied anyway, hence the same breakpoint Bootstrap uses. */
+@media (min-width: 768px) {
+	#page-mj-settings .row > .col-md-3 {
+		width: 20rem;
+	}
+
+	/* min-width:0 is the load-bearing half: a flex item's default min-width is
+	   auto, so the column refuses to shrink below its content's min-content
+	   width and wraps under the rail instead — which is exactly what happened
+	   at 1024, where the knob strip's four cells want more than the 663px left
+	   over. */
+	#page-mj-settings #mj-settings-form-col {
+		flex: 1 1 0;
+		width: auto;
+		max-width: none;
+		min-width: 0;
+	}
+}
+
 /* The read-out beside a form — "Current connection", the firmware versions,
    a tunnel's state. It is the same job the Live deck's readouts do, so it
    reads the same way: the term in the micro-caps every label on the page now
@@ -967,21 +1014,30 @@ mark {
 }
 
 /* The stage. Sized from the viewport height the same way .mj-stage is on the
-   Live page, and for the same reason turned up one notch: here the deck has to
-   stay on screen too, or you are scrolling between the slider you are dragging
-   and the picture you are dragging it for. The floor stops it collapsing on a
-   short window; the 16:9 box never changes, and a stream of another shape is
-   contained inside it rather than reflowing the page.
+   Live page: the floor stops it collapsing on a short window, the 16:9 box never
+   changes, and a stream of another shape is contained inside it rather than
+   reflowing the page.
 
-   The 31rem reserve is what buys the deck its room, and it is measured rather
-   than guessed: at 30rem the fourth slider overflowed a 1280x800 window by ONE
-   pixel, which is not a margin — it is the same answer landing either way on a
-   machine whose font metrics differ slightly. 31rem puts all four knobs and the
-   picture on screen together at every common laptop size. */
+   The reserve is what the picture gives back, and what it buys has changed
+   (#239). It used to be 31rem, holding room for the whole two-column deck to sit
+   under the picture — which on a 1340x708 window drove the width below the 28rem
+   floor, so the picture stopped responding to the window at all and simply
+   centred itself in 407px of empty column. It bought nothing there either: the
+   deck ran 253px past the fold regardless.
+
+   Now the deck's first row is a single 76px strip of knobs, and the reserve
+   holds room for exactly that: the picture takes whatever is left once the four
+   Tone knobs have their place on screen. That is the same guarantee as before —
+   a knob and the effect it has, visible together — but expressed as geometry
+   instead of as a constant that has to be re-derived every time the chrome above
+   the panel changes. It decomposes as the stage's own top offset (the rail and
+   form columns start at 134px now that the title band is gone, plus the section
+   head) + 12px + the 76px strip + 16px, and the fractional rem keeps that
+   arithmetic legible rather than rounded into a lie. */
 .mj-live-stage {
 	position: relative;
-	width: min(100%, max(28rem, calc((100vh - 31rem) * 1.77778)));
-	width: min(100%, max(28rem, calc((100dvh - 31rem) * 1.77778)));
+	width: min(100%, max(28rem, calc((100vh - 17.6rem) * 1.77778)));
+	width: min(100%, max(28rem, calc((100dvh - 17.6rem) * 1.77778)));
 	margin-inline: auto;
 	aspect-ratio: 16 / 9;
 	background: #0d0f14;
@@ -989,6 +1045,18 @@ mark {
 	border-radius: var(--bs-border-radius-lg);
 	overflow: hidden;
 	box-shadow: var(--bs-box-shadow);
+}
+
+/* When the runtime toggles cannot fit on the picture they take a row under it
+   (mj-settings.js:dockRuntime), and that row is 52px the reserve above does not
+   know about — at 1440x600 it put the fourth knob 31px below the fold. So the
+   reserve grows by exactly that row while it exists. The feedback is
+   stabilising rather than oscillating: docking narrows the stage, which can
+   only make the bar fit less well, so it stays docked; dockRuntime carries the
+   hysteresis that stops the boundary flip-flopping. */
+.mj-live-stage.mj-live-docked {
+	width: min(100%, max(28rem, calc((100vh - 21rem) * 1.77778)));
+	width: min(100%, max(28rem, calc((100dvh - 21rem) * 1.77778)));
 }
 
 /* object-fit: contain, so a 4:3 or square-cropped sensor is letterboxed in a
@@ -1012,14 +1080,34 @@ mark {
 }
 
 /* Always visible, unlike the Live page's bar: the LEDs below are camera state,
-   and state you have to wave a mouse at to read is state nobody reads. */
+   and state you have to wave a mouse at to read is state nobody reads.
+
+   It does not wrap. Wrapping is what took 104px of a 290px picture on a 540px
+   phone — 42% of the frame, before the light-monitor sentence was drawn at all
+   (#239) — and a bar that grows upwards over the picture defeats the point of
+   making the picture bigger. One row, and what does not fit moves off the
+   picture rather than on top of more of it. */
 .mj-live-bar {
 	position: absolute;
 	inset: auto 0.75rem 0.75rem;
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
+}
+
+/* Nothing in the bar shrinks. A shrunk group is a control with a wrapped label
+   or a clipped one, and it also hides the overflow from the only code that can
+   do anything about it: dockRuntime measures each child's scrollWidth against
+   the bar's, which is only the truth while the children are their natural
+   size. The sentence is the exception — it has an ellipsis and a title, so it
+   is allowed to give way. */
+.mj-live-bar > * {
+	flex: 0 0 auto;
+}
+
+.mj-live-bar > .mj-hud-chip {
+	flex: 0 1 auto;
 }
 
 .mj-hud-end {
@@ -1142,8 +1230,66 @@ mark {
 	color: #d8dbe4;
 }
 
+/* A sentence in a row that cannot wrap. It is the only shrinkable thing in the
+   bar, so it is the one that gives way rather than pushing the controls out of
+   reach; the title carries the rest, and below md it is off the picture
+   altogether (mj-settings.js:dockRuntime). */
+.mj-live-bar .mj-hud-chip {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
 .mj-hud-chip a {
 	color: #fff;
+}
+
+/* Where the runtime toggles go when the picture is too small to carry them —
+   mj-settings.js:dockRuntime moves the same nodes here below md. Full-width
+   targets, on a surface rather than on glass, because the ground behind them is
+   the page now and not the picture. */
+.mj-live-rt-mount {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin-top: 0.6rem;
+}
+
+.mj-live-rt-mount .mj-hud-rt {
+	flex: 1 1 auto;
+	background: var(--bs-tertiary-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+}
+
+.mj-live-rt-mount .mj-hrt {
+	flex: 1 1 0;
+	justify-content: center;
+	min-height: 2.75rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-live-rt-mount .mj-hrt:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.06);
+	color: var(--bs-body-color);
+}
+
+.mj-live-rt-mount .mj-hrt-in:checked + .mj-hrt {
+	background: rgba(var(--bs-body-color-rgb), 0.1);
+	color: var(--bs-body-color);
+}
+
+.mj-live-rt-mount .mj-hud-chip {
+	flex: 1 1 auto;
+	background: var(--bs-tertiary-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	color: var(--bs-secondary-color);
+}
+
+.mj-live-rt-mount .mj-hud-chip a {
+	color: var(--bs-body-color);
 }
 
 .mj-live-hint {
@@ -1183,6 +1329,46 @@ mark {
 
 .mj-live-col-b {
 	flex: 0 0 23rem;
+	border-left: 1px solid var(--bs-border-color);
+}
+
+/* ── the knob strip ─────────────────────────────────────────────────────────
+   The Tone group laid out across the deck instead of down it: 76px against the
+   186px the same four rows cost stacked. That difference is the picture's — it
+   is the whole reserve, and therefore the whole of what #239 asked for. The
+   strip is its own card so the row under it can be a second one, and so the
+   knobs sit directly under the picture they change with nothing between. */
+.mj-live-strip {
+	display: flex;
+	align-items: center;
+	margin-top: 0.75rem;
+	padding: 0 0.5rem;
+	background: var(--bs-card-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: var(--bs-box-shadow-sm);
+}
+
+.mj-live-strip-foot {
+	flex: 0 0 auto;
+	padding: 0 1rem 0 1.15rem;
+	border-left: 1px solid var(--bs-border-color);
+	align-self: stretch;
+	display: flex;
+	align-items: center;
+}
+
+/* The deck's second row: Scene, Luma and Orientation side by side rather than
+   the 405px two-column block they used to make. Shallow enough that on a 1080p
+   window the whole panel is on screen again, and the picture never paid for it.
+   Luma takes the slack because a histogram is the one of the three that is
+   worth more the wider it gets. */
+.mj-live-col-scene {
+	flex: 0 0 17rem;
+}
+
+.mj-live-col-geo {
+	flex: 0 0 15rem;
 	border-left: 1px solid var(--bs-border-color);
 }
 
@@ -1235,6 +1421,55 @@ mark {
 	font-weight: 600;
 	letter-spacing: 0.07em;
 	text-transform: uppercase;
+}
+
+/* In the strip the row turns a quarter: name and readout on the first line, the
+   track with the whole of the second. Beside each other in a quarter of the
+   deck's width the track would be ~90px to drag on — the same complaint the
+   stacked breakpoint already answers this way, so the shape is the one the
+   phone layout established rather than a third arrangement. Grid, not
+   flex-wrap, because the row's source order is name/track/value/delta/reset and
+   only areas can put the track last without reordering the markup. */
+@media (min-width: 992px) {
+	.mj-live-strip .mj-live-row {
+		flex: 1 1 0;
+		min-width: 0;
+		display: grid;
+		grid-template-columns: 1fr auto auto auto;
+		grid-template-areas:
+			"name num delta rst"
+			"track track track track";
+		align-items: center;
+		gap: 0.35rem 0.4rem;
+		padding: 0.85rem 1.15rem;
+	}
+
+	.mj-live-strip .mj-live-row + .mj-live-row {
+		border-left: 1px solid var(--bs-border-color);
+	}
+
+	.mj-live-strip .mj-live-name {
+		grid-area: name;
+		flex: none;
+	}
+
+	.mj-live-strip .mj-live-track {
+		grid-area: track;
+		height: 1.25rem;
+	}
+
+	.mj-live-strip .mj-live-num {
+		grid-area: num;
+		width: 2.25rem;
+	}
+
+	.mj-live-strip .mj-live-delta {
+		grid-area: delta;
+	}
+
+	.mj-live-strip .mj-live-rst {
+		grid-area: rst;
+	}
 }
 
 .mj-live-track {
@@ -1577,10 +1812,29 @@ mark {
 		flex-direction: column;
 	}
 
-	.mj-live-col-b {
+	.mj-live-col-b,
+	.mj-live-col-geo {
 		flex: 1 1 auto;
 		border-left: 0;
 		border-top: 1px solid var(--bs-border-color);
+	}
+
+	.mj-live-col-scene {
+		flex: 1 1 auto;
+	}
+
+	/* Stacked the strip is just the Tone group again, one knob per row — four
+	   quarter-width tracks are a desk layout, not a ladder one. */
+	.mj-live-strip {
+		flex-direction: column;
+		align-items: stretch;
+		padding: 0.4rem 1.5rem 0.7rem;
+	}
+
+	.mj-live-strip-foot {
+		align-self: flex-start;
+		padding: 0.4rem 0 0.2rem;
+		border-left: 0;
 	}
 
 	/* Two lines, and the track gets the whole of the second one: sharing a row
@@ -1656,6 +1910,21 @@ mark {
 		min-height: 2.75rem;
 		padding-top: 0.75rem;
 		padding-bottom: 0.75rem;
+	}
+}
+
+/* The bar does not wrap, so on a phone something has to give, and it is this
+   label: at 390px "Hold to compare" broke onto a second line and made the bar
+   30% of a 197px picture. The icon and its title carry it — the same trade the
+   snapshot and fullscreen buttons have always made, and the reason the button
+   grew a title attribute. */
+@media (max-width: 767.98px) {
+	.mj-live-bar .mj-hud-btn span {
+		display: none;
+	}
+
+	.mj-live-bar .mj-hud-btn {
+		padding-inline: 0.85rem;
 	}
 }
 /* Responsive-embed wrapper: a plain block div sizes width:100% correctly to the
