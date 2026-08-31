@@ -85,11 +85,15 @@
 	}
 
 	// The centre is a single press on both pads: the stepped backends call it
-	// home/park (board-defined), Pelco calls it stop.
-	const isCentre = btn => btn.dataset.dir === 'cc' || btn.dataset.act === 'stop';
+	// home/park (board-defined), Pelco calls it stop. AF is single-press for
+	// the opposite reason: a pass takes seconds, and a held button would
+	// queue a fresh pass the moment each one finished — "one shot" must
+	// mean one, however long the finger stays down.
+	const isSingle = btn => btn.dataset.dir === 'cc' ||
+		btn.dataset.act === 'stop' || btn.dataset.act === 'af';
 
 	mount.querySelectorAll('button').forEach(btn => {
-		if (isCentre(btn)) {
+		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco
 			// the request itself is the un-droppable kind.
