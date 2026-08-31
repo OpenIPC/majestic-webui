@@ -145,12 +145,16 @@ settle_view() {
 	return 0
 }
 
-# $1 is a md5sum-format list of what every path should now hold. Anything that
+# $1 is a md5sum-format list of what every path should now hold, $2 an
+# optional list of paths that should no longer exist at all. Anything that
 # disagrees means the merged view has not caught up with the overlay, which the
 # kernel makes no promise about while the overlay is mounted.
 verify_view() {
-	[ -s "$1" ] || return 0
-	md5sum -c "$1" 2>/dev/null | sed -n 's/: FAILED.*$//p' >"$tmp/stale"
+	: >"$tmp/stale"
+	[ -s "$1" ] &&
+		md5sum -c "$1" 2>/dev/null | sed -n 's/: FAILED.*$//p' >>"$tmp/stale"
+	[ -n "${2:-}" ] && [ -s "$2" ] &&
+		while read -r d; do [ -e "$d" ] && echo "$d"; done <"$2" >>"$tmp/stale"
 	[ -s "$tmp/stale" ] || return 0
 	echo
 	echo "The kernel is still serving a cached view of these files:"
@@ -466,7 +470,18 @@ do_install() {
 	rm -f /tmp/webui/sysinfo.txt
 	echo
 	echo "WebUI updated to $source_name."
-	verify_view "$tmp/want"
+	# What was removed must verify too - after write_manifest, so these
+	# expectations never enter the manifest. A pruned path either reveals
+	# the firmware's own file or stops existing altogether.
+	: >"$tmp/gone"
+	sed "s|^$upper||" "$tmp/prune" | while read -r d; do
+		if [ -n "$lower" ] && [ -f "$lower$d" ]; then
+			md5sum "$lower$d" | sed "s|  .*|  $d|" >>"$tmp/want"
+		else
+			echo "$d" >>"$tmp/gone"
+		fi
+	done
+	verify_view "$tmp/want" "$tmp/gone"
 }
 
 do_restore() {
@@ -504,14 +519,20 @@ do_restore() {
 		die "the overlay did not end up as planned, so the manifest was left alone"
 	rm -f "$MANIFEST"
 	settle_view
-	# Everything restored must now read back as the firmware's own copy.
+	# Everything restored must now read back as the firmware's own copy, and
+	# a path the firmware never shipped must be gone from the merged view.
 	: >"$tmp/want"
-	[ -n "$lower" ] && sed "s|^$upper||" "$tmp/prune" | while read -r d; do
-		[ -f "$lower$d" ] && md5sum "$lower$d" | sed "s|  .*|  $d|" >>"$tmp/want"
+	: >"$tmp/gone"
+	sed "s|^$upper||" "$tmp/prune" | while read -r d; do
+		if [ -n "$lower" ] && [ -f "$lower$d" ]; then
+			md5sum "$lower$d" | sed "s|  .*|  $d|" >>"$tmp/want"
+		else
+			echo "$d" >>"$tmp/gone"
+		fi
 	done
 	echo
 	echo "Restored the WebUI the firmware ships."
-	verify_view "$tmp/want"
+	verify_view "$tmp/want" "$tmp/gone"
 }
 
 echo "OpenIPC WebUI installer v$scr_version"
