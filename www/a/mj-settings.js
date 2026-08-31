@@ -154,6 +154,7 @@
 		}
 		buildNav();
 		wireSearch();
+		watchIrcut();
 		// the rail is a tree on >=md and an accordion below it; re-render rather
 		// than try to keep both shapes live at once
 		const onWidth = () => buildNav();
@@ -789,6 +790,11 @@
 			body.appendChild(head);
 			const lifted = liftedNote(sec);
 			if (lifted) body.appendChild(lifted);
+			// Above the fields, not below them: on Day / Night the verdict is
+			// what someone came to read, and the pin numbers are what they will
+			// change because of it.
+			const ircut = ircutPanel(sec);
+			if (ircut) body.appendChild(ircut);
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
@@ -819,6 +825,9 @@
 		applyVisibility();
 		layoutCols();
 		paintStock();
+		// Paints from whatever the heartbeat has already published; the
+		// subscription keeps it current from there.
+		paintFindings();
 
 		// renderField writes labels as plain text; with a query already active,
 		// the section just mounted has to pick up the marks too, or navigating
@@ -1751,6 +1760,148 @@
 			' apply as you drag them, so they are on ' +
 			'<a href="?tab=' + LIVE_ID + '">Live adjustments</a> with the picture.';
 		return p;
+	}
+
+	// ── The IR-cut panel, on Day / Night ────────────────────────────────────
+	//
+	// This section's fields are pin numbers, and a pin number is the one kind
+	// of setting whose page cannot show you whether it is right: the form will
+	// happily hold 11 for a board that wants 8 and look identical either way.
+	// So the section carries the two things the form cannot be — what the
+	// current configuration already implies (passive, always on screen) and a
+	// control that moves the filter and watches the picture change (active, on
+	// request). The verdicts are in /a/ircut-check.js; this is only their page.
+	const IRCUT = window.MajesticIrcut;
+	const ircutTrack = IRCUT ? IRCUT.tracker() : null;
+	let ircutSample = null;
+	let ircutStats = { flips: 0, conflictS: 0 };
+	let ircutBusy = false;
+
+	// Subscribed once for the page rather than once per mount: main.js keeps no
+	// unsubscribe, so re-subscribing on every visit to this section would leave
+	// a live handler behind for each one.
+	function watchIrcut() {
+		if (!IRCUT || typeof mjMetricsSubscribe !== 'function') return;
+		mjMetricsSubscribe((s) => {
+			if (!s.ok) return;
+			ircutSample = { night: s.night, ircut: s.ircut, light: s.light };
+			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
+			paintFindings();
+		});
+	}
+
+	function nightCfg() { return (state.config && state.config.nightMode) || {}; }
+
+	// Why the button cannot run, or null. Each reason is specific: a disabled
+	// control that will not say what it wants is the thing this whole panel
+	// exists to stop being.
+	function testBlocker() {
+		const nm = nightCfg();
+		if (!isNumish(nm.irCutPin1))
+			return 'nightMode.irCutPin1 is not set, so there is no filter to drive yet.';
+		if (!toBool(getDotted(state.config, 'jpeg.enabled')))
+			return 'The test reads a still from /image.jpg, and jpeg.enabled is off.';
+		// The monitor re-drives the filter on its own schedule, and a snapshot
+		// taken after it had snapped the filter back would read as "it never
+		// moved" — convicting a correctly wired camera. Refusing to run beats
+		// running and possibly lying.
+		if (toBool(nm.lightMonitor))
+			return 'The light monitor would drive the filter back mid-test. Turn it off, ' +
+				'run the test, then turn it back on.';
+		return null;
+	}
+
+	function paintFindings() {
+		const box = document.getElementById('mj-ircut-findings');
+		if (!box || !IRCUT) return;
+		const found = IRCUT.diagnose(nightCfg(), ircutSample, ircutStats);
+		box.innerHTML = '';
+		found.forEach((f) => {
+			const cls = f.level === 'danger' ? 'alert-danger'
+				: f.level === 'warning' ? 'alert-warning' : 'alert-secondary';
+			const d = el('div', 'alert ' + cls + ' py-2 px-3 mb-2 small');
+			d.innerHTML = '<b>' + esc(f.title) + '</b> ' + esc(f.detail);
+			box.appendChild(d);
+		});
+	}
+
+	const IRCUT_STEP = {
+		first: 'Reading the picture…',
+		toggle: 'Moving the filter…',
+		second: 'Reading it again…',
+		restore: 'Putting the filter back…',
+	};
+
+	function runIrcutTest(btn, status, result) {
+		if (ircutBusy) return;
+		// The filter is a physical part and the picture jumps twice while this
+		// runs, which is worth a sentence before it happens rather than an
+		// explanation afterwards.
+		if (!confirm('Move the IR-cut filter twice and compare the picture?\n\n' +
+			'The live view will flicker for a couple of seconds. The filter is ' +
+			'put back where it started.')) return;
+
+		ircutBusy = true;
+		btn.disabled = true;
+		result.hidden = true;
+		// Where the filter is NOW, so the two captures can be told apart by
+		// position rather than by the order they happened in.
+		const start = ircutSample ? (ircutSample.ircut | 0) : 0;
+
+		IRCUT.probe({
+			settleMs: 1500,
+			snap: () => IRCUT.snapshot('/image.jpg'),
+			toggle: () => apiFetch('/night/ircut', { credentials: 'same-origin' })
+				.then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
+			wait: (ms) => new Promise(r => setTimeout(r, ms)),
+			onStep: (s) => { status.textContent = IRCUT_STEP[s] || ''; },
+		}, start).then((out) => {
+			const v = out.verdict;
+			const cls = v.level === 'danger' ? 'alert-danger'
+				: v.level === 'warning' ? 'alert-warning'
+					: v.level === 'ok' ? 'alert-success' : 'alert-secondary';
+			result.className = 'alert ' + cls + ' py-2 px-3 mt-2 mb-0 small';
+			result.innerHTML = '<b>' + esc(v.title) + '</b> ' + esc(v.detail);
+			result.hidden = false;
+		}).catch((e) => {
+			result.className = 'alert alert-danger py-2 px-3 mt-2 mb-0 small';
+			// A test that could not finish reports that it could not finish. It
+			// must never fall through to a verdict — half a measurement is not
+			// evidence about the filter.
+			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
+				'. The filter was left where it started.';
+			result.hidden = false;
+		}).finally(() => {
+			ircutBusy = false;
+			btn.disabled = false;
+			status.textContent = '';
+		});
+	}
+
+	function ircutPanel(sec) {
+		if (sec !== 'nightMode' || !IRCUT) return null;
+		const box = el('div', 'mj-ircut');
+		box.innerHTML =
+			'<div id="mj-ircut-findings"></div>' +
+			'<div class="d-flex align-items-center gap-2 flex-wrap">' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">' +
+			'Test IR-cut filter</button>' +
+			'<span class="small text-secondary" id="mj-ircut-status"></span>' +
+			'</div>' +
+			'<div id="mj-ircut-result" class="small" hidden></div>';
+
+		const btn = box.querySelector('#mj-ircut-run');
+		const why = testBlocker();
+		if (why) {
+			btn.disabled = true;
+			btn.title = why;
+			box.querySelector('#mj-ircut-status').textContent = why;
+		} else {
+			btn.title = 'Moves the filter and compares the picture in both positions.';
+			btn.addEventListener('click', () => runIrcutTest(btn,
+				box.querySelector('#mj-ircut-status'), box.querySelector('#mj-ircut-result')));
+		}
+		return box;
 	}
 
 	// "all N at stock" / "N of M off stock" for the section head — the question

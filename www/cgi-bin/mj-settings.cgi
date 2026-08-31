@@ -105,6 +105,7 @@ fi
 # needs nothing from the camera and no endpoint of its own.
 %>
 <script src="/a/mj-luma.js"></script>
+<script src="/a/ircut-check.js"></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>

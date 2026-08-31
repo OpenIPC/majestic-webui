@@ -51,8 +51,39 @@
 		const el = $(id);
 		if (el) el.hidden = !on;
 		const box = $('#st-alerts');
-		if (box) box.hidden = !['#st-alert-stale', '#st-alert-exp', '#st-alert-stall']
+		if (box) box.hidden = !['#st-alert-stale', '#st-alert-exp', '#st-alert-stall', '#st-alert-ircut']
 			.some(a => { const e = $(a); return e && !e.hidden; });
+	}
+
+	// ── IR-cut ──────────────────────────────────────────────────────────────
+	// A misconfigured IR-cut filter is invisible everywhere else on this page:
+	// the camera streams, records and reports healthy counters while sending a
+	// magenta picture, and the day/night line below states the two values
+	// without ever saying they contradict each other. The verdict itself is in
+	// /a/ircut-check.js; this only decides what the dashboard says out loud.
+	//
+	// Faults only. `info` — a wired filter with the light monitor off — is a
+	// true observation and belongs on the settings page next to the switch that
+	// changes it, not in a banner someone cannot dismiss.
+	const IC = window.MajesticIrcut;
+	const ircutTrack = IC ? IC.tracker() : null;
+	let nmCfg = null;
+	if (IC) mjConfig().then(c => {
+		// mjConfig() resolves {} when the fetch failed, and an empty config
+		// would diagnose as "no IR-cut pins configured" — a fetch that did not
+		// happen must never be reported as a camera that is wired wrong.
+		if (c && Object.keys(c).length) nmCfg = c.nightMode || {};
+	}).catch(() => {});
+
+	function renderIrcut(s) {
+		if (!IC || !nmCfg) return;
+		const track = ircutTrack.push(s, performance.now() / 1000);
+		const f = IC.diagnose(nmCfg, s, track).filter(x => x.level !== 'info')[0];
+		if (f) {
+			$('#st-alert-ircut-t').textContent = f.title;
+			$('#st-alert-ircut-d').textContent = f.detail;
+		}
+		setAlert('#st-alert-ircut', !!f);
 	}
 
 	// The ISP panel shows what this SoC's ISP actually reports and nothing
@@ -266,6 +297,12 @@
 			if (s.fails >= 2) {
 				setAlert('#st-alert-exp', false);
 				setAlert('#st-alert-stall', false);
+				// Not cleared, narrowed: an unset irCutPin1 is still unset
+				// while the camera is unreachable, but a day/night
+				// disagreement is a claim about right now, and there is no
+				// right now to read. Passing no sample drops exactly the
+				// findings that needed one.
+				renderIrcut(null);
 			}
 			setAlert('#st-alert-stale', s.fails >= 2);
 			// No new sample, but time still passes: redraw so the traces age
@@ -310,6 +347,7 @@
 		const dn = $('#st-daynight');
 		if (dn) dn.textContent = (s.night ? '🌙 Night' : '☀️ Day') + ' · IR-cut ' + (s.ircut ? 'on' : 'off') +
 			' · lamp ' + (s.light ? 'on' : 'off');
+		renderIrcut(s);
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means
 		// the encoder has stopped producing frames while all else looks alive.
 		// The encoder tile and chart obey the same rule as Wi-Fi and
