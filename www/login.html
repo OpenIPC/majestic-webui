@@ -14,26 +14,33 @@
 		body {
 			margin: 0; min-height: 100vh;
 			display: flex; align-items: center; justify-content: center;
-			background: #1a1d20; color: #dee2e6;
+			background: #14161c; color: #e6e8ee;
 			font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 		}
 		.card {
 			width: 100%; max-width: 22rem; margin: 1rem;
-			background: #212529; border: 1px solid #343a40; border-radius: .5rem;
+			background: #1c1f27; border: 1px solid #2c313d; border-radius: .75rem;
 			padding: 2rem 1.75rem;
 		}
 		h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 1.5rem; text-align: center; }
-		h1 span { color: #6ea8fe; }
-		label { display: block; font-size: .875rem; margin: 0 0 .35rem; color: #adb5bd; }
+		h1 span { color: #5c70e8; }
+		/* Field labels only: .check wraps its own checkbox and reads as a
+		   sentence, not as a field name. */
+		label[for] {
+			display: block; margin: 0 0 .35rem;
+			color: rgba(222,226,230,.5);
+			font-size: .6875rem; font-weight: 600;
+			letter-spacing: .07em; text-transform: uppercase;
+		}
 		input {
 			width: 100%; padding: .5rem .75rem; margin-bottom: 1rem;
-			background: #2b3035; color: #dee2e6;
-			border: 1px solid #495057; border-radius: .375rem; font-size: 1rem;
+			background: #14161c; color: #e6e8ee;
+			border: 1px solid #2c313d; border-radius: .5rem; font-size: 1rem;
 		}
-		input:focus { outline: none; border-color: #6ea8fe; box-shadow: 0 0 0 .2rem rgba(110,168,254,.25); }
+		input:focus { outline: none; border-color: #5c70e8; box-shadow: 0 0 0 .2rem rgba(92,112,232,.35); }
 		.check {
 			display: flex; align-items: center; gap: .5rem;
-			margin-bottom: 1rem; font-size: .875rem; color: #adb5bd; cursor: pointer;
+			margin-bottom: 1rem; font-size: .875rem; color: rgba(222,226,230,.5); cursor: pointer;
 		}
 		/* The global input rule above styles text fields (full width, padding,
 		   dark background, border). A checkbox inheriting it renders as a padded
@@ -42,19 +49,19 @@
 		.check input {
 			width: 1rem; height: 1rem; flex: none; margin: 0; padding: 0;
 			background: none; border: 0; border-radius: 0; box-shadow: none;
-			accent-color: #0d6efd;
+			accent-color: #5c70e8;
 		}
 		button {
 			width: 100%; padding: .5rem .75rem;
-			background: #0d6efd; color: #fff; border: 0; border-radius: .375rem;
+			background: #5c70e8; color: #fff; border: 0; border-radius: .5rem;
 			font-size: 1rem; font-weight: 500; cursor: pointer;
 		}
-		button:hover { background: #0b5ed7; }
+		button:hover { background: #7183ec; }
 		button:disabled { opacity: .65; cursor: default; }
 		.alert {
 			display: none; margin-bottom: 1rem; padding: .6rem .75rem;
 			background: #2c0b0e; color: #ea868f;
-			border: 1px solid #842029; border-radius: .375rem; font-size: .875rem;
+			border: 1px solid #842029; border-radius: .5rem; font-size: .875rem;
 		}
 		.alert.show { display: block; }
 		/* Held back until the already-signed-in probe below has had its say, so a

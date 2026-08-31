@@ -15,7 +15,7 @@
 
 <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4 mb-4">
 	<div class="col">
-		<h3>Video</h3>
+		<% card_head "Video" %>
 		<dl>
 			<dt class="cp2cb">rtsp://<span class="ep-addr"><% esc "$network_address" %></span><span class="ep-rtsp"></span>/stream=0</dt>
 			<dd>RTSP main stream.</dd>
@@ -39,7 +39,7 @@
 	</div>
 
 	<div class="col">
-		<h3>Audio</h3>
+		<% card_head "Audio" %>
 		<dl>
 			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><% esc "$network_address" %></span>/audio.opus</dt>
 			<dd>Opus audio stream.</dd>
@@ -59,7 +59,7 @@
 	</div>
 
 	<div class="col">
-		<h3>Images</h3>
+		<% card_head "Images" %>
 		<dl>
 			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><% esc "$network_address" %></span>/image.jpg</dt>
 			<dd>Snapshot in JPEG format.</dd>
@@ -71,7 +71,7 @@
 	</div>
 
 	<div class="col">
-		<h3>Night</h3>
+		<% card_head "Night" %>
 		<dl>
 			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><% esc "$network_address" %></span>/night/on</dt>
 			<dd>Turn on night mode.</dd>
@@ -87,7 +87,7 @@
 	</div>
 
 	<div class="col">
-		<h3>Monitoring</h3>
+		<% card_head "Monitoring" %>
 		<dl>
 			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><% esc "$network_address" %></span>/api/v1/config.json</dt>
 			<dd>Default Majestic config in JSON format.</dd>
