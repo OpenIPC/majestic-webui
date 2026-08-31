@@ -91,6 +91,28 @@
 	padding-left: 0.25rem;
 }
 
+/* Bootstrap paints the track in --bs-secondary-bg, which is now what a card is
+   painted in — so on a card the track disappeared and a slider was a thumb
+   floating in nothing (fpv-wfb's TX Power, at value 1 of 55, looked like a stray
+   dot). A translucent body colour reads against either surface and in both
+   themes. The thumb takes the brand accent for the same reason the switch does:
+   the compiled subset carries #0d6efd literally and never reads --bs-primary. */
+.form-range::-webkit-slider-runnable-track {
+	background-color: rgba(var(--bs-body-color-rgb), 0.18);
+}
+
+.form-range::-moz-range-track {
+	background-color: rgba(var(--bs-body-color-rgb), 0.18);
+}
+
+.form-range::-webkit-slider-thumb {
+	background-color: var(--bs-primary);
+}
+
+.form-range::-moz-range-thumb {
+	background-color: var(--bs-primary);
+}
+
 /* small integers (ports, timeouts, sizes…) don't need the full card width */
 .number .input-group {
 	max-width: 10rem;
@@ -165,6 +187,32 @@
 /* The word beside the switch. A switch states its position; it does not state
    what the position means, and "Off" next to a lit dot is the vocabulary the
    Live bar's toggles already use. */
+/* The "?" beside a WFB label. It was a filled secondary badge carrying a
+   Bootstrap tooltip that has not worked since the JS bundle was dropped; the
+   text comes from the title attribute, and the mark now reads as part of the
+   micro-caps label rather than a chip stuck to it. */
+.mj-help {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1rem;
+	height: 1rem;
+	margin-left: 0.25rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: 50%;
+	color: var(--bs-tertiary-color);
+	font-size: 0.625rem;
+	font-weight: 600;
+	letter-spacing: 0;
+	cursor: help;
+	vertical-align: middle;
+}
+
+.mj-help:hover {
+	border-color: var(--bs-primary);
+	color: var(--bs-primary);
+}
+
 .mj-state {
 	font-size: 0.6875rem;
 	font-weight: 600;

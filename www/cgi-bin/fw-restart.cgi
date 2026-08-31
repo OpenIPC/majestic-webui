@@ -50,7 +50,7 @@ Pragma: no-cache
 <body>
 	<main>
 		<h1>OpenIPC</h1>
-		<h3>Restarting. Please wait...</h3>
+		<% card_head "Restarting. Please wait..." %>
 		<progress max="20" value="0"></progress>
 	</main>
 

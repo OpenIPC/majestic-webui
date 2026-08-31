@@ -156,9 +156,14 @@ tooltip_label() {
     local label="$2"
     local tooltip="$3"
     
+    # The badge carried data-bs-toggle="tooltip", which has done nothing since
+    # the Bootstrap JS bundle was dropped — main.js's shim covers modals,
+    # dropdowns and dismiss, not tooltips. What actually shows the text is the
+    # title attribute, so that is what it keeps, in a mark that matches the
+    # micro-caps label it sits beside rather than a filled secondary badge.
     echo "<label for=\"${name}\" class=\"form-label\">${label}"
     if [ -n "$tooltip" ]; then
-        echo " <span class=\"badge bg-secondary rounded-circle\" style=\"cursor:help;font-size:10px;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;\" data-bs-toggle=\"tooltip\" title=\"${tooltip}\">?</span>"
+        echo " <span class=\"mj-help\" title=\"${tooltip}\" aria-label=\"${tooltip}\">?</span>"
     fi
     echo "</label>"
 }
@@ -170,10 +175,10 @@ field_channel_select() {
     local selected="$3"
     local tooltip="$4"
     
-    echo "<p class=\"select\" id=\"${name}_wrap\">"
+    echo "<p class=\"select mj-row\" id=\"${name}_wrap\">"
     tooltip_label "$name" "$label" "$tooltip"
+    echo "<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">"
     echo "<select class=\"form-select\" id=\"${name}\" name=\"${name}\">"
-         
     for channel in $channels; do
         local frequency=$(get_frequency "$channel")
         local selected_attr=""
@@ -183,7 +188,7 @@ field_channel_select() {
         echo "<option value=\"${channel}\" ${selected_attr}>Channel ${channel} - ${frequency} MHz</option>"
     done
     
-    echo "</select></p>"
+    echo "</select></span></span></p>"
 }
 
 # Function for select with tooltip
@@ -196,10 +201,10 @@ field_select_tooltip() {
     local max="$6"
     local step="$7"
     
-    echo "<p class=\"select\" id=\"${name}_wrap\">"
+    echo "<p class=\"select mj-row\" id=\"${name}_wrap\">"
     tooltip_label "$name" "$label" "$tooltip"
+    echo "<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">"
     echo "<select class=\"form-select\" id=\"${name}\" name=\"${name}\">"
-    
     local current=$min
     while [ "$current" -le "$max" ]; do
         local selected_attr=""
@@ -208,7 +213,7 @@ field_select_tooltip() {
         current=$((current + step))
     done
     
-    echo "</select></p>"
+    echo "</select></span></span></p>"
 }
 
 # Custom function for boolean switches that uses numeric values (0/1)
@@ -221,11 +226,15 @@ field_numeric_switch_tooltip() {
     local checked=""
     [ "$value" = "1" ] && checked="checked"
     
-    echo "<p class=\"boolean\"><span class=\"form-check form-switch\">"
+    # Label above the switch and the lit word beside it, as field_switch does —
+    # this one keeps its own body only because WFB stores booleans as 0/1.
+    echo "<p class=\"boolean mj-row\">"
+    tooltip_label "$name" "$label" "$tooltip"
+    echo "<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">"
+    echo "<span class=\"form-check form-switch\">"
     echo "<input type=\"hidden\" id=\"${name}_off\" name=\"${name}\" value=\"0\">"
     echo "<input type=\"checkbox\" id=\"${name}\" name=\"${name}\" value=\"1\" class=\"form-check-input\" ${checked}>"
-    tooltip_label "$name" "$label" "$tooltip"
-    echo "</span></p>"
+    echo "</span><span class=\"mj-state\" aria-hidden=\"true\"></span></span></span></p>"
 }
 
 # Function for text input with tooltip
@@ -236,8 +245,9 @@ field_string_tooltip() {
     local tooltip="$4"
     local options="$5"
     
-    echo "<p class=\"string\" id=\"${name}_wrap\">"
+    echo "<p class=\"string mj-row\" id=\"${name}_wrap\">"
     tooltip_label "$name" "$label" "$tooltip"
+    echo "<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">"
     
     if [ -n "$options" ]; then
         echo "<select class=\"form-select\" id=\"${name}\" name=\"${name}\">"
@@ -250,7 +260,7 @@ field_string_tooltip() {
     else
         echo "<input type=\"text\" id=\"${name}\" name=\"${name}\" class=\"form-control\" value=\"${value}\">"
     fi
-    echo "</p>"
+    echo "</span></span></p>"
 }
 
 # Handle form submission
@@ -385,28 +395,29 @@ update_wfbinfo
                 <% field_hidden "current_tab" "$label" %>
 
                 <%  if [ "$label" = "wireless" ]; then %>
-                    <h3>Wireless</h3>
+                    <% card_head "Wireless" %>
 
                     <% field_channel_select "channel" "Wireless Channel" "$wfb_channel" "WiFi channel used for transmission. 2.4GHz (1-14) have better penetration, 5GHz (36-165) have less interference. Choose based on local conditions and regulations." %>
 
-                    <p class="range" id="txpower_wrap">
+                    <p class="range mj-row" id="txpower_wrap">
                         <% tooltip_label "txpower" "TX Power" "Transmit power in dBm. Higher values increase range but consume more power and may cause interference. Check local regulations for maximum allowed values." %>
-                        <span class="input-group">
+                        <span class="mj-ctl"><span class="mj-ctl-in"><span class="input-group">
                             <input type="hidden" id="txpower" name="txpower" value="<% attr_escape "$wfb_txpower" %>">
                             <input type="range" class="form-control form-range" id="txpower-range" value="<% attr_escape "$wfb_txpower" %>" min="0" max="55" step="1">
                             <span class="input-group-text show-value" id="txpower-show"><% esc "$wfb_txpower" %></span>
-                        </span>
+                        </span></span></span>
                     </p>
 
-                    <p class="select" id="width_wrap">
+                    <p class="select mj-row" id="width_wrap">
                         <% tooltip_label "width" "Bandwidth" "Channel width in MHz. Wider channels (40/80) provide higher throughput but are more susceptible to interference. 20MHz is most reliable for long-range links." %>
+                        <span class="mj-ctl"><span class="mj-ctl-in">
                         <select class="form-select" id="width" name="width">
                             <option value="20" <% [ "$wfb_width" = "20" ] && echo "selected" %>>20 MHz</option>
                             <option value="40" <% [ "$wfb_width" = "40" ] && echo "selected" %>>40 MHz</option>
-                        </select>
+                        </select></span></span>
                     </p>
                 <%  elif [ "$label" = "broadcast" ]; then %>
-                    <h3>Broadcast</h3>
+                    <% card_head "Broadcast" %>
 
                     <% field_select_tooltip "mcs_index" "MCS Index" "$wfb_mcs_index" "MCS (Modulation and Coding Scheme) index determines bitrate and robustness. Lower values are more reliable in poor conditions but have lower throughput." 1 10 1 %>
                     <% field_select_tooltip "tun_index" "TUN Index" "$wfb_tun_index" "Tunnel interface index for wifibroadcast. Multiple interfaces allow multiple video streams. Most setups use index 1 for the primary video." 1 10 1 %>
@@ -416,30 +427,32 @@ update_wfbinfo
                     <% field_numeric_switch_tooltip "ldpc" "LDPC Enabled" "$wfb_ldpc" "Low-Density Parity-Check coding provides better error correction than standard coding. Enable for improved link quality at longer ranges." %>
                     <% field_string_tooltip "link_id" "Link ID" "$wfb_link_id" "Unique identifier for this link. Must match between transmitter and receiver. Use different values for separate links to avoid interference." "" %>
                 <%  elif [ "$label" = "telemetry" ]; then %>
-                    <h3>Telemetry</h3>
+                    <% card_head "Telemetry" %>
 
                     <% field_string_tooltip "router" "Router" "$wfb_router" "Telemetry router type: mavfwd (basic forwarding), mavrouter (routing between interfaces), msposd (MultiWii Serial Protocol for OSD), or ground" "mavfwd mavrouter msposd ground" %>
 
-                    <p class="select" id="serial_port_wrap">
+                    <p class="select mj-row" id="serial_port_wrap">
                         <% tooltip_label "serial_port" "Serial Port" "Serial port for telemetry data (e.g., ttyS0, ttyS1, ttyS2, ttyAMA0). Check your hardware documentation for the correct port." %>
+                        <span class="mj-ctl"><span class="mj-ctl-in">
                         <select class="form-select" id="serial_port" name="serial_port">
                             <option value="ttyS0" <% [ "$wfb_serial" = "ttyS0" ] && echo "selected" %>>ttyS0</option>
                             <option value="ttyS1" <% [ "$wfb_serial" = "ttyS1" ] && echo "selected" %>>ttyS1</option>
                             <option value="ttyS2" <% [ "$wfb_serial" = "ttyS2" ] && echo "selected" %>>ttyS2</option>
                             <option value="ttyAMA0" <% [ "$wfb_serial" = "ttyAMA0" ] && echo "selected" %>>ttyAMA0</option>
                             <option value="ttyAMA1" <% [ "$wfb_serial" = "ttyAMA1" ] && echo "selected" %>>ttyAMA1</option>
-                        </select>
+                        </select></span></span>
                     </p>
 
-                    <p class="select" id="osd_fps_wrap">
+                    <p class="select mj-row" id="osd_fps_wrap">
                         <% tooltip_label "osd_fps" "OSD FPS" "On-Screen Display refresh rate. Higher values provide smoother OSD updates but use more bandwidth. 20-30 FPS is suitable for most applications." %>
+                        <span class="mj-ctl"><span class="mj-ctl-in">
                         <select class="form-select" id="osd_fps" name="osd_fps">
                             <option value="10" <% [ "$wfb_osd_fps" = "10" ] && echo "selected" %>>10</option>
                             <option value="15" <% [ "$wfb_osd_fps" = "15" ] && echo "selected" %>>15</option>
                             <option value="20" <% [ "$wfb_osd_fps" = "20" ] && echo "selected" %>>20</option>
                             <option value="25" <% [ "$wfb_osd_fps" = "25" ] && echo "selected" %>>25</option>
                             <option value="30" <% [ "$wfb_osd_fps" = "30" ] && echo "selected" %>>30</option>
-                        </select>
+                        </select></span></span>
                     </p>
                 <% fi %>
 
@@ -453,7 +466,7 @@ update_wfbinfo
 
     <div class="col-12 col-lg-7">
         <div class="card h-100"><div class="card-body">
-            <h3>Current configuration</h3>
+            <% card_head "Current configuration" %>
             <% ex "cat $WFB_YAML" %>
         </div></div>
     </div>
