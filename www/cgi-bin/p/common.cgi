@@ -525,40 +525,15 @@ preview() {
 		     landing; live it reads "H264 3840×2160 · 25 fps". The transport is
 		     NOT named here — it is named exactly once, on the picker below. -->
 		<span id="mj-badge" class="mj-chip">connecting…</span>
-		<!-- Two columns because the two ends disagree in the cases worth
-		     looking at: the browser can be losing packets the camera never
-		     sees dropped, and REMB is the camera's opinion of the link rather
-		     than a measurement of it. An overlay, so looking at the numbers
-		     does not displace the picture they describe. -->
-		<div id="mj-stats" class="mj-stats-overlay small" hidden>
-			<div class="row g-3">
-				<div class="col-auto">
-					<div class="fw-semibold">Browser</div>
-					<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
-						<tbody>
-							<tr><td class="pe-3 mj-stat-key">picture</td><td id="mj-st-pic">-</td></tr>
-							<tr><td class="pe-3 mj-stat-key">receiving</td><td id="mj-st-rx">-</td></tr>
-							<tr><td class="pe-3 mj-stat-key">lost / jitter</td><td id="mj-st-loss">-</td></tr>
-							<tr><td class="pe-3 mj-stat-key">round trip</td><td id="mj-st-rtt">-</td></tr>
-							<tr><td class="pe-3 mj-stat-key">recovery</td><td id="mj-st-recov">-</td></tr>
-						</tbody>
-					</table>
-				</div>
-				<div class="col-auto">
-					<div class="fw-semibold">Camera</div>
-					<table class="table table-sm table-borderless mb-0" style="font-variant-numeric:tabular-nums">
-						<tbody>
-							<tr><td class="pe-3 mj-stat-key">session</td><td id="mj-st-cam">-</td></tr>
-							<tr><td class="pe-3 mj-stat-key">estimate</td><td id="mj-st-remb">-</td></tr>
-						<tr><td class="pe-3 mj-stat-key">encoder</td><td id="mj-st-enc">-</td></tr>
-							<tr><td class="pe-3 mj-stat-key">keyframes</td><td id="mj-st-pli">-</td></tr>
-							<tr><td class="pe-3 mj-stat-key">audio in</td><td id="mj-st-ain">-</td></tr>
-							<tr><td class="pe-3 mj-stat-key">talkback</td><td id="mj-st-talk">-</td></tr>
-						</tbody>
-					</table>
-				</div>
-			</div>
-		</div>
+		<!-- The network story (preview-stats.js). An empty shell on purpose:
+		     the panel is meaningless without the script that measures for
+		     it, so the script owns the structure too, and the two ends'
+		     numbers still come from the two ends — the browser can be losing
+		     packets the camera never sees dropped, and the camera's remb= is
+		     its opinion of the link, not a measurement of it. An overlay, so
+		     looking at the numbers does not displace the picture they
+		     describe. -->
+		<div id="mj-stats" class="mj-stats-overlay small" hidden></div>
 		<!-- The adaptation toast (preview-adapt.js): the whole disclosure of
 		     WebRTC's shared-encoder bitrate adaptation, made at the moment it
 		     acts rather than as a standing sentence (the always-on note this
