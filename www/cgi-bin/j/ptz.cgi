@@ -90,7 +90,57 @@ has_cap() {
 # reach them raw. (start/day/night exist in btzoom but are lens maintenance,
 # not viewing controls — not reachable from here.) Both Pelco variants take
 # the same nine verbs, which is why one pad serves them both.
+af_enabled() {
+	# The same three gates the pad's af_support carries: a usable backend
+	# (unset/none ptz_control keeps every PTZ procedure inactive, the #227
+	# ruling — the engine drives a motor this camera must actually have),
+	# the focus axis, and majestic's engine turned on.
+	{ [ "$pelco_ok" = 1 ] || [ "$gpio_ok" = 1 ] || [ "$motor_ok" = 1 ]; } &&
+		has_cap focus &&
+		[ "$(yaml-cli -g .isp.autofocus.enabled 2>/dev/null)" = "true" ]
+}
+
 if [ -n "$ACTION" ]; then
+	# Autofocus is majestic's engine, not a pelco verb: the daemon reads the
+	# ISP's focus statistic and drives the same motor, holding btzoom's port
+	# lock. The request stays open while the pass runs — request lifetime is
+	# how the pad paces itself — but the trigger answers immediately, so a
+	# poll loop stands in for the pass's duration.
+	if [ "$ACTION" = "af" ]; then
+		if ! af_enabled; then
+			echo "Autofocus not available on this camera."
+			exit 1
+		fi
+		r=$(curl -s -m 2 "http://127.0.0.1/autofocus")
+		case "$r" in
+			started|busy) ;;
+			*)
+				# A transport failure is not a pass: say so and fail, or the
+				# pad reads a dead engine as instant success.
+				echo "Autofocus: engine did not answer."
+				exit 1
+				;;
+		esac
+		# Hold the request while the pass runs — request lifetime is how the
+		# pad paces itself. An empty poll is a transport blip and is retried
+		# inside the same budget, never read as completion: releasing early
+		# would let a held button fire again while the engine owns the port.
+		i=0
+		s="running"
+		while [ $i -lt 60 ]; do
+			sleep 1
+			s=$(curl -s -m 2 "http://127.0.0.1/autofocus/status")
+			case "$s" in
+				running|"") i=$((i + 1)) ;;
+				*) break ;;
+			esac
+		done
+		echo "Autofocus: ${s:-unknown}"
+		case "$s" in
+			done*) exit 0 ;;
+			*) exit 1 ;;
+		esac
+	fi
 	if [ "$pelco_ok" = 1 ]; then
 		case "$ACTION" in
 			up|down|left|right|stop|wide|tele|near|far)
@@ -107,7 +157,24 @@ if [ -n "$ACTION" ]; then
 					exit 1
 				fi
 				"$pelco_bin" "$ACTION"
-				exit $?
+				rc=$?
+				# A zoom step on a motorized lens leaves focus behind, so it
+				# books a one-shot pass. ?settle makes the engine wait for
+				# the port to go quiet first: a held button's pulse train
+				# never yields the quiet window, so the pass runs exactly
+				# once, after the zooming is over. Repeat triggers answer
+				# "busy" and collapse into that one pass.
+				if [ "$rc" = 0 ]; then
+					case "$ACTION" in
+						wide|tele)
+							af_enabled &&
+								curl -s -m 2 \
+									"http://127.0.0.1/autofocus?settle" \
+									> /dev/null
+							;;
+					esac
+				fi
+				exit $rc
 				;;
 		esac
 		echo "Unknown PTZ action."
