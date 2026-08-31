@@ -743,8 +743,20 @@ report_log() {
 	pre "$1" "small" "$2"
 }
 
+# The bar answers three questions -- which camera am I on, what hardware is
+# it, what firmware does it run -- and nothing more; MAC, flash and SoC family
+# live on the Dashboard. The stock hostname is <soc>-<sensor>, so each
+# hardware word appears only when the hostname does not already say it: a
+# renamed camera reads "front-door, hi3516av300, imx415, 2.6.08.29-lite",
+# a stock one collapses to "hi3516av300-imx415, 2.6.08.29-lite".
 generate_signature() {
-	echo "${soc} (${soc_family} family), $sensor, ${flash_size} MB ${flash_type} flash, ${fw_version}-${fw_variant}, ${network_hostname}, ${network_macaddr}" > $signature_file
+	local sig="$network_hostname"
+	local lower=$(echo "$network_hostname" | tr 'A-Z' 'a-z')
+	case "$lower" in *"$soc"*) ;; *) sig="$sig, $soc" ;; esac
+	[ "$sensor" != "unknown" ] && case "$lower" in *"$sensor"*) ;; *) sig="$sig, $sensor" ;; esac
+	sig="$sig, ${fw_version}-${fw_variant}"
+	sig="${sig#, }"
+	esc "$sig" > $signature_file
 }
 
 signature() {
