@@ -346,6 +346,15 @@ window.MajesticStats = (function () {
 			camModel = { sampling: sampling, readout: readout, pipe: camMs,
 				fps: fpsNow };
 			camMs += sampling + readout;
+		} else if (mse && frameT != null) {
+			// Sampling and readout are the sensor's, not the transport's:
+			// leaving them off the MSE floor made its headline read LOWER
+			// than WebRTC's full-path figure — the comparison inverted.
+			// Encode/send stays unmeasurable here, so the floor stays a
+			// floor.
+			camModel = { sampling: frameT / 2, readout: frameT, pipe: null,
+				fps: fpsNow };
+			camMs = frameT / 2 + frameT;
 		}
 		// On MSE the buffer leg is not a per-frame average but the DEPTH the
 		// element is sitting on — decoded future waiting to play, the number
@@ -353,7 +362,7 @@ window.MajesticStats = (function () {
 		// and network legs do not exist here: TCP tells us nothing about
 		// either, which is the finding rather than a gap.
 		const parts = mse
-			? [null, null, s.bufferedMs != null ? s.bufferedMs : null, screen]
+			? [camMs, null, s.bufferedMs != null ? s.bufferedMs : null, screen]
 			: [camMs, net, hold.buf, screen];
 		let total = null;
 		parts.forEach((v) => { if (v != null) total = (total || 0) + v; });
@@ -410,7 +419,7 @@ window.MajesticStats = (function () {
 			// over TCP, so the real figure can only be larger than this.
 			els.lat.textContent = (mse ? '≥' : '≈') + Math.round(shown);
 			els.latSub.textContent = mse
-				? 'player alone; camera and network are invisible over MSE'
+				? 'at least — includes the player buffer WebRTC skips'
 				: c2s
 				? (c2s.approx ? 'glass to glass, at least' : 'glass to glass')
 				: 'network + player; the camera’s share is not included';
@@ -420,12 +429,17 @@ window.MajesticStats = (function () {
 			lastSeen[mse ? 'mse' : 'webrtc'] = { ms: shown, at: now };
 			const other = lastSeen[mse ? 'webrtc' : 'mse'];
 			if (other && now - other.at < 15 * 60 * 1000) {
+				// The verdict in numbers, not left to inference: which
+				// transport is faster on THIS connection, and by how much.
+				const d = Math.round(shown - other.ms);
+				const rel = d > 0 ? Math.abs(d) + ' ms lower'
+					: d < 0 ? Math.abs(d) + ' ms higher' : 'the same';
 				els.vs.hidden = false;
 				els.vs.textContent = mse
 					? 'WebRTC measured ≈' + Math.round(other.ms) +
-						' ms on this connection — with the missing legs counted'
-					: 'MSE held ≥' + Math.round(other.ms) +
-						' ms here, player buffer alone';
+						' ms on this connection — ' + rel
+					: 'MSE held ≥' + Math.round(other.ms) + ' ms here — ' +
+						(d < 0 ? Math.abs(d) + ' ms more than now' : 'buffer-bound');
 			} else {
 				els.vs.hidden = true;
 			}
@@ -480,8 +494,14 @@ window.MajesticStats = (function () {
 				? (prevT.droppedFrames - p.droppedFrames) /
 					(prevT.totalFrames - p.totalFrames) * 100
 				: 0;
-			gr = now - lastStallAt < 10000 ? ['struggling', WARN]
-				: dropRate > 5 ? ['good', OK]
+			// lastStallAt is 0 until a stall really happened: near page start
+			// performance.now() itself is under ten seconds, and an
+			// unqualified age test branded every fresh session with a stall
+			// it never had. Heavy dropping is playback visibly failing, not
+			// "good" — the ladder demotes twice, like the WebRTC grade does.
+			const stalled = lastStallAt > 0 && now - lastStallAt < 10000;
+			gr = stalled || dropRate > 10 ? ['struggling', WARN]
+				: dropRate > 2 ? ['good', OK]
 				: ['excellent', OK];
 		} else {
 			gr = gradeOf(lossEma || 0, s.rttMs || 0, s.jitterMs || 0,
@@ -565,7 +585,9 @@ window.MajesticStats = (function () {
 			fp.push('camera @' + Math.round(camModel.fps) + ' fps: sampling ~' +
 				Math.round(camModel.sampling) + ' ms (\u00bd frame)' +
 				(camModel.readout ? ' + readout ~' + Math.round(camModel.readout) + ' ms' : '') +
-				' + pipeline ' + camModel.pipe + ' ms');
+				(camModel.pipe != null
+					? ' + pipeline ' + camModel.pipe + ' ms'
+					: ' + encode/send unmeasured over MSE'));
 		}
 		if (hold.dec != null || disp != null || refreshMs != null) {
 			const parts2 = [];
@@ -679,6 +701,11 @@ window.MajesticStats = (function () {
 		hold = { buf: null, dec: null };
 		lossEma = null;
 		srG2gEma = null;
+		// A stall belongs to the session that stalled; without this a real
+		// stall bled through an MSE→WebRTC→MSE round trip and branded the
+		// new session too. (lastSeen stays — the comparison line is the one
+		// thing that is SUPPOSED to outlive a switch.)
+		lastStallAt = 0;
 	}
 
 	function setOpen(o) {

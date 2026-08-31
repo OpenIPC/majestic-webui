@@ -35,9 +35,9 @@ function makeEl(id) {
 	};
 }
 
-function boot() {
+function boot(nowStart) {
 	const els = Object.create(null);
-	let nowMs = 100000;
+	let nowMs = nowStart != null ? nowStart : 100000;
 	const pushedSparks = [], pushedCharts = [];
 	let metricsFn = null;
 	const sandbox = {
@@ -410,9 +410,9 @@ g('MSE tells its own story and remembers the other transport', () => {
 		configuredKbps: 1024, channel: 1 });
 	check('MSE headline is a floor, buffer-led',
 		env.el('mj-ns-lat').textContent === '≥800');
-	check('and says what it cannot see',
+	check('and says what the floor means in plain speech',
 		env.el('mj-ns-lat-sub').textContent ===
-			'player alone; camera and network are invisible over MSE');
+			'at least — includes the player buffer WebRTC skips');
 	check('the comparison line carries the WebRTC figure',
 		env.el('mj-ns-vs').hidden === false &&
 		env.el('mj-ns-vs').textContent.indexOf('WebRTC measured ≈88 ms') >= 0);
@@ -438,6 +438,14 @@ g('MSE tells its own story and remembers the other transport', () => {
 	check('repairs count the re-buffering',
 		env.el('mj-ns-repair').textContent.indexOf('re-buffered 1×') >= 0);
 
+	// Heavy dropping is visible failure, not "good".
+	env.tickClock(1000);
+	env.stats.tick({ transport: 'mse', bufferedMs: 900, rxBytes: 300000,
+		totalFrames: 160, droppedFrames: 20, stalls: 1,
+		configuredKbps: 1024, channel: 1 });
+	check('a heavy drop rate grades struggling',
+		env.el('mj-ns-grade').textContent === 'struggling');
+
 	// Back on WebRTC, the MSE figure becomes the comparison.
 	env.stats.reset();
 	env.tickClock(2000);
@@ -445,6 +453,61 @@ g('MSE tells its own story and remembers the other transport', () => {
 	check('the WebRTC view remembers what MSE held',
 		env.el('mj-ns-vs').hidden === false &&
 		env.el('mj-ns-vs').textContent.indexOf('MSE held ≥900 ms') >= 0);
+
+	// The stall stays with the session that stalled: after the round trip a
+	// fresh MSE session is judged on its own record.
+	env.stats.reset();
+	env.tickClock(2000);
+	env.stats.tick({ transport: 'mse', bufferedMs: 300, rxBytes: 400000,
+		totalFrames: 200, droppedFrames: 20, stalls: 1,
+		configuredKbps: 1024, channel: 1 });
+	env.tickClock(1000);
+	env.stats.tick({ transport: 'mse', bufferedMs: 300, rxBytes: 500000,
+		totalFrames: 230, droppedFrames: 20, stalls: 1,
+		configuredKbps: 1024, channel: 1 });
+	check('a prior session\'s stall does not brand the new one',
+		env.el('mj-ns-grade').textContent === 'excellent');
+});
+
+g('MSE counts the sensor legs once fps is known', () => {
+	// 20 fps → sampling 25 + readout 50 join the 800 ms buffer: the floor
+	// measures a journey comparable to WebRTC's, and reads honestly worse.
+	const env = boot();
+	env.stats.tick({ transport: 'mse', bufferedMs: 800, rxBytes: 100000,
+		totalFrames: 100, droppedFrames: 0, stalls: 0,
+		configuredKbps: 1024, configuredFps: 20, channel: 1 });
+	check('the floor carries sampling + readout + buffer',
+		env.el('mj-ns-lat').textContent === '≥875');
+	check('fine print admits what stays unmeasured',
+		env.el('mj-ns-fp').textContent.indexOf('encode/send unmeasured over MSE') >= 0);
+});
+
+g('the comparison line states the delta outright', () => {
+	const env = boot();
+	env.stats.tick({ cam: { c2s: '58ms' }, rttMs: 60, transport: 'webrtc' });
+	env.stats.reset();
+	env.tickClock(2000);
+	env.stats.tick({ transport: 'mse', bufferedMs: 800, rxBytes: 100000,
+		totalFrames: 100, droppedFrames: 0, stalls: 0,
+		configuredKbps: 1024, configuredFps: 20, channel: 1 });
+	check('MSE quotes WebRTC with the difference in its favor',
+		env.el('mj-ns-vs').textContent ===
+			'WebRTC measured ≈88 ms on this connection — 787 ms lower');
+});
+
+g('a fresh page never invents a stall', () => {
+	// performance.now() is under ten seconds for the page's first ten
+	// seconds; a zero lastStallAt must not read as a recent stall.
+	const env = boot(500);
+	env.stats.tick({ transport: 'mse', bufferedMs: 300, rxBytes: 100000,
+		totalFrames: 100, droppedFrames: 0, stalls: 0,
+		configuredKbps: 1024, channel: 1 });
+	env.tickClock(1000);
+	env.stats.tick({ transport: 'mse', bufferedMs: 300, rxBytes: 200000,
+		totalFrames: 130, droppedFrames: 0, stalls: 0,
+		configuredKbps: 1024, channel: 1 });
+	check('zero stalls near page start grade excellent',
+		env.el('mj-ns-grade').textContent === 'excellent');
 });
 
 done('preview-stats');
