@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live adjustments — preview size proposal for issue #239</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&family=PT+Mono&display=swap">
+<style>
+:root { --font: 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'PT Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0e1014; color: #e6e8ee; font-family: var(--font); }
+
+/* the chooser bar; harness, not part of the proposal */
+.bar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 10px 18px; padding: 12px 18px; background: #0e1014; border-bottom: 1px solid #262b36; }
+.bar h1 { margin: 0 12px 0 0; font-size: 15px; font-weight: 600; }
+.bar .lede { flex: 1 1 100%; order: 9; margin: 0; font-size: 13px; line-height: 19px; color: #8c93a3; }
+.bar .lede a { color: #7f8ff0; }
+.seg { display: inline-flex; border: 1px solid #2c313d; border-radius: 8px; overflow: hidden; }
+.seg button { appearance: none; border: 0; background: transparent; color: #b9bfcc;
+  font: inherit; font-size: 13px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+.seg button + button { border-left: 1px solid #2c313d; }
+.seg button[aria-pressed="true"] { background: rgb(92,112,232); color: #fff; }
+.seg button[disabled] { opacity: .35; cursor: not-allowed; }
+.segl { font-size: 12px; color: #6f7789; margin-right: -10px; }
+.note { padding: 14px 18px; font-size: 13px; line-height: 20px; color: #98a0b0;
+  background: #12151b; border-bottom: 1px solid #262b36; }
+.note b { color: #d6dbe6; font-weight: 600; }
+.note .num { font-family: var(--mono); color: #d6dbe6; }
+.note .win { color: #7fd6a4; }
+.note .bad { color: #ff9ab5; }
+
+.stage { padding: 24px 18px 60px; }
+.scaler { transform-origin: top center; }
+.frame { margin: 0 auto; border: 1px solid #262b36; border-radius: 12px; overflow: hidden;
+  position: relative; background: #14161c; color: #e6e8ee; }
+.scalenote { text-align: center; font-size: 12px; color: #6f7789; margin: 0 0 12px; }
+
+/* ── the mockup ──────────────────────────────────────────────────────── */
+.mk { position: absolute; }
+.cap { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: rgba(222,226,230,.5); }
+.rule { flex: 1 1 auto; height: 1px; background: #2c313d; }
+.mono { font-family: var(--mono); }
+.nav { left: 0; top: 0; right: 0; height: 59px; background: #2b3035; display: flex; align-items: center; }
+.navin { display: flex; align-items: center; gap: 26px; width: 100%; }
+.navlink { font-size: 16px; color: #fff; }
+.sigrow { font-size: 13px; }
+.pb { height: 4px; border-radius: 2px; background: #2c313d; margin-bottom: 6px; }
+.pb > i { display: block; height: 4px; border-radius: 2px; background: #4caf6d; }
+.h2 { font-size: 32px; font-weight: 500; line-height: 38.4px; color: #5c70e8; }
+.h2s { font-size: 20px; font-weight: 500; line-height: 26px; color: #5c70e8; }
+.search { height: 31px; border: 1px solid #2c313d; border-radius: 6px; background: #14161c;
+  display: flex; align-items: center; padding: 0 8px; font-size: 14px; color: rgba(222,226,230,.5); }
+.ri { display: flex; align-items: center; height: 33px; padding-left: 22.4px;
+  border-left: 2px solid transparent; font-size: 14px; color: rgba(222,226,230,.75); }
+.ri.on { border-left-color: #5c70e8; background: #232734; border-radius: 0 8px 8px 0;
+  font-weight: 500; color: #e6e8ee; }
+.head { display: flex; align-items: center; gap: 12px; height: 34px; }
+.segm { display: flex; gap: 2px; padding: 2px; background: #232734; border: 1px solid #2c313d;
+  border-radius: 8px; }
+.segm span { padding: 5px 13px; border-radius: 6px; font-size: 12px; font-weight: 500;
+  color: rgba(222,226,230,.75); }
+.segm span.on { background: #5c70e8; color: #fff; }
+.stg { border: 1px solid #2c313d; border-radius: 12px; overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,.16); background: #0d0f14; }
+.hud { position: absolute; left: 13px; right: 13px; bottom: 13px; display: flex;
+  flex-wrap: wrap; align-items: center; gap: 8px; }
+.glass { background: rgba(13,15,20,.72); border: 1px solid rgba(255,255,255,.09);
+  border-radius: 8px; backdrop-filter: blur(10px); }
+.hrt { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 6px;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #b9bec9; }
+.led { width: 6px; height: 6px; border-radius: 50%; background: #6c727d; flex: 0 0 auto; }
+.hbtn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; font-size: 11px;
+  font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #d8dbe4; }
+.hico { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+  color: #d8dbe4; }
+.hint { font-size: 11px; line-height: 16.5px; color: rgba(222,226,230,.5); }
+.card { background: #1c1f27; border: 1px solid #2c313d; border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.gh { display: flex; align-items: baseline; gap: 12px; margin-bottom: 11px; }
+.gn { font-size: 11px; color: rgba(222,226,230,.5); }
+.sl { display: flex; align-items: center; gap: 12px; height: 32px; }
+.tr { flex: 1 1 auto; position: relative; height: 4px; border-radius: 2px;
+  background: rgba(222,226,230,.1); }
+.kb { position: absolute; left: 50%; top: -5px; width: 14px; height: 14px; margin-left: -7px;
+  border-radius: 50%; background: #e6e8ee; }
+.tick { position: absolute; left: 50%; top: -5px; width: 1px; height: 14px;
+  background: rgba(222,226,230,.3); }
+.vl { width: 44px; text-align: right; font-size: 14px; color: rgba(222,226,230,.5); }
+.chip { padding: 7px 12px; border: 1px solid #2c313d; border-radius: 6px; font-size: 12px;
+  color: rgba(222,226,230,.75); }
+.chip.on { background: #5c70e8; border-color: #5c70e8; color: #fff; }
+.zone { position: absolute; border: 1px dashed rgba(255,110,150,.75);
+  background: rgba(255,110,150,.07); border-radius: 3px; }
+.flag { position: absolute; font-size: 11px; font-weight: 600; color: #ffb3c8; background: #14161c;
+  padding: 3px 7px; border-radius: 4px; box-shadow: 0 0 0 1px rgba(255,110,150,.35); }
+.gain { position: absolute; border: 1px dashed rgba(127,214,164,.7);
+  background: rgba(127,214,164,.06); border-radius: 3px; }
+.gflag { position: absolute; font-size: 11px; font-weight: 600; color: #7fd6a4; background: #14161c;
+  padding: 3px 7px; border-radius: 4px; }
+.fold { position: absolute; height: 2px;
+  background: repeating-linear-gradient(90deg, rgba(255,110,150,.9) 0 8px, transparent 8px 16px); }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>Live adjustments — how big can the preview be?</h1>
+  <div class="seg" id="dir">
+    <button data-v="today" aria-pressed="true">Today</button>
+    <button data-v="A" aria-pressed="false">A · Take back the chrome</button>
+    <button data-v="B" aria-pressed="false">B · Knobs beside</button>
+    <button data-v="C" aria-pressed="false">C · Picture is the page</button>
+  </div>
+  <span class="segl">Window</span>
+  <div class="seg" id="vp">
+    <button data-v="1340x708" aria-pressed="true">1340 × 708</button>
+    <button data-v="1440x900" aria-pressed="false">1440 × 900</button>
+    <button data-v="1920x1080" aria-pressed="false">1920 × 1080</button>
+    <button data-v="2560x1440" aria-pressed="false">2560 × 1440</button>
+    <button data-v="540x928" aria-pressed="false">Phone</button>
+  </div>
+  <span class="segl">Page width</span>
+  <div class="seg" id="fl">
+    <button data-v="0" aria-pressed="true">1320 px cap</button>
+    <button data-v="1" aria-pressed="false">Fluid</button>
+  </div>
+  <p class="lede">Three ways to spend the empty space in <b>Camera → Settings → Live adjustments</b>, for
+    <a href="https://github.com/OpenIPC/majestic-webui/issues/239">OpenIPC/majestic-webui#239</a>.
+    Every number is measured on a real hi3516av300 running current master, and the mockup is redrawn
+    for the window size you pick — the picture is sized by the same arithmetic the page uses, so
+    <b>1340 × 708</b> is the window from the report.</p>
+</div>
+
+<div class="note" id="note"></div>
+<p class="scalenote" id="scalenote"></p>
+<div class="stage"><div class="scaler" id="scaler"><div class="frame" id="frame"></div></div></div>
+
+<script>
+/* Measured on openipc-hi3516av300 (imx415, lite) at master fbc84b9, Chromium, DPR 2.
+   Nothing below is a guess: nav 59, signature row 63..110, title band 94 (2rem margin +
+   32px h2 + 24px row gutter), section head 34 + 9.6, deck 405 tall in two columns, and
+   241.5px from the bottom of the picture down to the last Tone slider. */
+const M = {
+  navH: 59, sigTop: 63, sigH: 47, sigBottom: 110,
+  titleBand: 94, gutter: 24, headH: 34, headMB: 9.6,
+  hintH: 16.5, hintMT: 8, deckH: 405, deckMT: 16, colBW: 368,
+  toLastKnob: 241.5,          // stage bottom -> bottom of the Hue slider
+  reserveToday: 496,          // 31rem, today's (100dvh - reserve) * 16/9
+  floor: 448,                 // 28rem
+};
+
+/* container widths Bootstrap resolves to, and the fluid alternative */
+function containerW(vw, fluid) {
+  if (fluid) return Math.min(vw - 32, 2400);
+  if (vw >= 1400) return 1320;
+  if (vw >= 1200) return 1140;
+  if (vw >= 992) return 960;
+  if (vw >= 768) return 720;
+  if (vw >= 576) return 540;
+  return vw - 24;
+}
+
+const R = 16 / 9;
+
+function geom(dir, vw, vh, fluid) {
+  const cont = containerW(vw, fluid);
+  const contX = Math.round((vw - cont) / 2);
+  const railX = contX + 12, railW = cont * 0.25 - 24;
+  const colX = contX + cont * 0.25 + 12, colW = cont * 0.75 - 24;
+  const top = M.sigBottom + (dir === 'today' ? M.titleBand : M.gutter);
+  const stageTop = top + M.headH + M.headMB;
+  let sw, sh, deckX = 0, deckW = 0, stripH = 0;
+
+  if (dir === 'today') {
+    sw = Math.min(colW, Math.max(M.floor, (vh - M.reserveToday) * R));
+  } else if (dir === 'A') {
+    /* the reserve is the same rule with the title band taken out of it:
+       stageTop + 241.5 to the last knob, plus 7px of slack = 424 (26.5rem) */
+    sw = Math.min(colW, Math.max(M.floor, (vh - (stageTop + M.toLastKnob + 7)) * R));
+  } else if (dir === 'B') {
+    deckW = 320;
+    sw = Math.min(colW - deckW - 16, Math.max(360, (vh - stageTop - 16) * R));
+    deckX = colX + sw + 16;
+    deckW = colX + colW - deckX;
+  } else {
+    stripH = 76;
+    sw = Math.min(colW, Math.max(360, (vh - stageTop - 12 - stripH - 16) * R));
+  }
+  sh = sw / R;
+  const stageX = dir === 'B' ? colX : colX + (colW - sw) / 2;
+  return { cont, contX, railX, railW, colX, colW, top, stageTop, sw, sh, stageX,
+    deckX, deckW, stripH, gutterEach: dir === 'B' ? 0 : Math.round((colW - sw) / 2) };
+}
+
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const px = (n) => Math.round(n * 10) / 10 + 'px';
+
+const ICON = {
+  cmp: '<svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><path d="M10 4v12"/></svg>',
+  snap: '<svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 6.5h3l1.5-2h6l1.5 2h3v9h-15z"/><circle cx="10" cy="11" r="3"/></svg>',
+  fs: '<svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>',
+  rst: '<svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4.2 10a5.8 5.8 0 1 0 1.9-4.3"/><path d="M3.4 3.6v3.9h3.9"/></svg>',
+  logo: '<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3.4" fill="#fff" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  mirror: '<svg width="22" height="18" viewBox="0 0 24 20" fill="none" stroke="rgba(222,226,230,.75)" stroke-width="1.5"><path d="M12 2v16"/><path d="M8 6 3 10l5 4z"/><path d="M16 6l5 4-5 4z"/></svg>',
+  flip: '<svg width="18" height="22" viewBox="0 0 20 24" fill="none" stroke="rgba(222,226,230,.75)" stroke-width="1.5"><path d="M2 12h16"/><path d="M6 8l4-5 4 5z"/><path d="M6 16l4 5 4-5z"/></svg>',
+};
+
+/* a stand-in picture — no camera frames are published here */
+function scene(id) {
+  return '<svg viewBox="0 0 448 252" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">' +
+    '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1">' +
+    '<stop offset="0" stop-color="#1b2438"/><stop offset=".55" stop-color="#2d3a52"/>' +
+    '<stop offset="1" stop-color="#4a4034"/></linearGradient></defs>' +
+    '<rect width="448" height="252" fill="url(#' + id + ')"/>' +
+    '<path d="M0 168h44v-26h38v26h30v-40h52v40h44v-18h60v18h48v-34h46v34h86v84H0z" fill="#141a26"/>' +
+    '<g fill="#c8b489" opacity=".75">' +
+    [[14,180],[26,180],[14,194],[98,140],[112,152],[176,100],[190,114],[176,128],[262,164],
+     [286,164],[330,122],[344,136],[330,150],[400,150]]
+      .map(([x, y]) => '<rect x="' + x + '" y="' + y + '" width="4" height="5"/>').join('') +
+    '</g><rect y="230" width="448" height="22" fill="#0f1a12"/></svg>';
+}
+
+function hud(opts) {
+  const rt = '<span class="glass" style="display:flex;gap:2px;padding:3px">' +
+    ['Night', 'IR&#8209;cut', 'Lamp'].map(n =>
+      '<span class="hrt"><span class="led"></span>' + n + '</span>').join('') + '</span>';
+  const cmp = '<span class="glass hbtn">' + ICON.cmp + (opts.short ? 'Compare' : 'Hold to compare') + '</span>';
+  const end = '<span style="margin-left:auto;display:flex;gap:8px">' +
+    '<span class="glass hico">' + ICON.snap + '</span><span class="glass hico">' + ICON.fs + '</span></span>';
+  return '<div class="hud">' + (opts.chip || '') + rt + cmp + end + '</div>';
+}
+
+function slider(name, tick) {
+  return '<div class="sl"><span class="cap" style="width:92px">' + name + '</span>' +
+    '<span class="tr">' + (tick ? '<span class="tick"></span>' : '') + '<span class="kb"></span></span>' +
+    '<span class="mono vl">50</span></div>';
+}
+
+function chrome(g, dir, vw) {
+  const railTitle = dir === 'today' ? '' :
+    '<div class="h2s" style="margin-bottom:12px">Camera Settings</div>';
+  const rail =
+    '<div class="mk" style="left:' + px(g.railX) + ';top:' + px(g.top) + ';width:' + px(g.railW) + '">' +
+    railTitle + '<div class="search">Search settings…</div><div style="margin-top:16px">' +
+    '<div class="cap" style="padding:4px 8px">Image</div>' +
+    '<div class="ri on">Live adjustments</div><div class="ri">Image</div>' +
+    '<div class="ri">ISP / Exposure</div><div class="ri">Day / Night</div>' +
+    '<div class="cap" style="padding:4px 8px;margin-top:8px">Video &amp; Audio</div>' +
+    '<div class="ri">Main stream</div><div class="ri">Sub stream</div><div class="ri">Audio</div>' +
+    '<div class="ri">MJPEG</div><div class="ri">OSD</div></div></div>';
+
+  const nav =
+    '<div class="mk nav"><div class="navin" style="padding-left:' + px(g.railX) + ';padding-right:' + px(g.railX) + '">' +
+    '<span style="display:flex;align-items:center;gap:9px">' + ICON.logo +
+    '<span style="font-size:19px;font-weight:600;color:#fff">OpenIPC <span style="font-weight:400;font-size:13px;color:rgba(255,255,255,.6)">lite</span></span></span>' +
+    '<span style="display:flex;gap:21px" class="navlink">' +
+    '<span>Dashboard</span><span>Live</span><span>Recordings</span>' +
+    '<span style="border-bottom:1px solid rgba(255,255,255,.75)">Camera ▾</span>' +
+    '<span>System ▾</span><span>Services ▾</span></span>' +
+    '<span style="margin-left:auto" class="navlink">Sign out</span></div></div>';
+
+  const sig =
+    '<div class="mk sigrow" style="left:' + px(g.railX) + ';top:63px;width:' + px(g.cont - 24) + ';height:47px">' +
+    '<div style="position:absolute;left:0;top:8px;width:166px">' +
+    '<div class="pb"><i style="width:62%"></i></div><div class="pb"><i style="width:30%"></i></div></div>' +
+    '<div style="position:absolute;left:190px;top:3px">hi3516av300-imx415, 2.6.08.29-lite</div>' +
+    '<div style="position:absolute;right:0;top:0;text-align:right"><div>12:50:36 PM</div>' +
+    '<div style="color:rgba(222,226,230,.75);margin-top:2px">62°C</div></div></div>';
+
+  const title = dir === 'today'
+    ? '<div class="mk h2" style="left:' + px(g.railX) + ';top:142px">Camera Settings</div>' : '';
+
+  const head =
+    '<div class="mk" style="left:' + px(g.colX) + ';top:' + px(g.top) + ';width:' + px(g.colW) + '">' +
+    '<div class="head"><span class="cap">Live adjustments</span><span class="rule"></span>' +
+    '<span class="segm"><span class="on">Main</span></span></div></div>';
+
+  return nav + sig + title + rail + head;
+}
+
+function deckTwoCol(x, y, w) {
+  return '<div class="mk card" style="left:' + px(x) + ';top:' + px(y) + ';width:' + px(w) +
+    ';height:405px;display:flex;overflow:hidden">' +
+    '<div style="flex:1 1 auto;min-width:0;padding:20px 24px 22px">' +
+    '<div class="gh"><span class="cap">Tone</span><span class="rule"></span><span class="gn">saved with the page</span></div>' +
+    slider('Brightness', true) + slider('Contrast') + slider('Saturation') + slider('Hue') +
+    '<div style="display:flex;align-items:center;gap:6px;margin-top:14px" class="cap">' + ICON.rst + 'Reset all to stock</div>' +
+    '<div class="gh" style="margin-top:22px"><span class="cap">Scene</span><span class="rule"></span><span class="gn">starting points</span></div>' +
+    '<div style="display:flex;gap:8px"><span class="chip on">Neutral</span><span class="chip">Indoor</span>' +
+    '<span class="chip">Outdoor</span><span class="chip">Low light</span></div></div>' +
+    '<div style="flex:0 0 368px;border-left:1px solid #2c313d;padding:20px 24px 22px">' +
+    '<div class="gh"><span class="cap">Luma</span><span class="rule"></span><span class="gn">mean&nbsp;&nbsp;95</span></div>' +
+    '<div style="height:96px;background:#14161c;border:1px solid #2c313d;border-radius:6px"></div>' +
+    '<div class="gh" style="margin-top:22px"><span class="cap">Orientation</span><span class="rule"></span></div>' +
+    '<div style="display:flex;gap:10px">' +
+    '<div style="flex:1 1 0;height:62px;border:1px solid #2c313d;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">' + ICON.mirror + '<span class="cap" style="font-size:10px">Mirror</span></div>' +
+    '<div style="flex:1 1 0;height:62px;border:1px solid #2c313d;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">' + ICON.flip + '<span class="cap" style="font-size:10px">Flip</span></div>' +
+    '</div></div></div>';
+}
+
+const HINT = 'Night, IR-cut and the lamp are on the picture because they are runtime state: ' +
+  'pressing one changes the camera for every viewer immediately, and none of them is part of Save.';
+
+function renderDesktop(dir, vw, vh, fluid) {
+  const g = geom(dir, vw, vh, fluid);
+  let h = chrome(g, dir, vw);
+
+  h += '<div class="mk stg" style="left:' + px(g.stageX) + ';top:' + px(g.stageTop) +
+    ';width:' + px(g.sw) + ';height:' + px(g.sh) + '">' + scene('sky') +
+    hud({ short: dir === 'B' }) + '</div>';
+
+  const stageBottom = g.stageTop + g.sh;
+
+  if (dir === 'C') {
+    const y = stageBottom + 12;
+    h += '<div class="mk card" style="left:' + px(g.colX) + ';top:' + px(y) + ';width:' + px(g.colW) +
+      ';height:76px;display:flex;align-items:center;padding:0 20px">' +
+      ['Brightness', 'Contrast', 'Saturation', 'Hue'].map((n, i) =>
+        (i ? '<div style="width:1px;align-self:stretch;margin:14px 0;background:#2c313d"></div>' : '') +
+        '<div style="flex:1 1 0;padding:0 18px">' +
+        '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:11px">' +
+        '<span class="cap">' + n + '</span><span class="mono" style="font-size:13px;color:rgba(222,226,230,.5)">50</span></div>' +
+        '<div class="tr" style="flex:none">' + (i === 0 ? '<span class="tick"></span>' : '') + '<span class="kb"></span></div></div>').join('') +
+      '<div style="width:1px;align-self:stretch;margin:14px 0;background:#2c313d"></div>' +
+      '<div style="flex:0 0 auto;padding-left:18px;display:flex;align-items:center;gap:7px" class="cap">' + ICON.rst + 'Stock</div>' +
+      '</div>';
+    h += '<div class="mk hint" style="left:' + px(g.colX) + ';top:' + px(y + 76 + 10) + ';width:' + px(g.colW) + '">' + HINT + '</div>';
+  } else if (dir === 'B') {
+    h += '<div class="mk hint" style="left:' + px(g.colX) + ';top:' + px(stageBottom + 8) + ';width:' + px(g.sw) + '">' + HINT + '</div>';
+    h += '<div class="mk card" style="left:' + px(g.deckX) + ';top:' + px(g.stageTop) + ';width:' + px(g.deckW) + ';padding:18px 22px">' +
+      '<div class="gh"><span class="cap">Tone</span><span class="rule"></span><span class="gn">saved</span></div>' +
+      slider('Brightness', true) + slider('Contrast') + slider('Saturation') + slider('Hue') +
+      '<div style="display:flex;align-items:center;gap:6px;margin-top:10px" class="cap">' + ICON.rst + 'Reset all to stock</div>' +
+      '<div class="gh" style="margin-top:18px"><span class="cap">Scene</span><span class="rule"></span></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px"><span class="chip on">Neutral</span><span class="chip">Indoor</span>' +
+      '<span class="chip">Outdoor</span><span class="chip">Low light</span></div>' +
+      '<div class="gh" style="margin-top:18px"><span class="cap">Orientation</span><span class="rule"></span></div>' +
+      '<div style="display:flex;gap:10px">' +
+      '<div style="flex:1 1 0;height:62px;border:1px solid #2c313d;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">' + ICON.mirror + '<span class="cap" style="font-size:10px">Mirror</span></div>' +
+      '<div style="flex:1 1 0;height:62px;border:1px solid #2c313d;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">' + ICON.flip + '<span class="cap" style="font-size:10px">Flip</span></div>' +
+      '</div></div>';
+    /* Luma fills whatever is left under the picture rather than leaving a hole —
+       a histogram is happy to be tall, and it is the one readout that belongs
+       with the picture it is computed from. */
+    const lumaY = stageBottom + 8 + 3 * 16.5 + 16;
+    const lumaH = Math.max(150, vh - 16 - lumaY);
+    h += '<div class="mk card" style="left:' + px(g.colX) + ';top:' + px(lumaY) + ';width:' + px(g.sw) +
+      ';height:' + px(lumaH) + ';padding:18px 24px">' +
+      '<div class="gh"><span class="cap">Luma</span><span class="rule"></span><span class="gn">mean&nbsp;&nbsp;95</span></div>' +
+      '<div style="height:' + px(lumaH - 36 - 27) + ';background:#14161c;border:1px solid #2c313d;border-radius:6px"></div></div>';
+  } else {
+    const hy = stageBottom + M.hintMT;
+    h += '<div class="mk hint" style="left:' + px(g.colX) + ';top:' + px(hy) + ';width:' + px(g.colW) + '">' + HINT + '</div>';
+    const lines = g.colW < 900 ? 2 : 1;
+    h += deckTwoCol(g.colX, hy + lines * M.hintH + M.deckMT, g.colW);
+  }
+
+  /* call-outs */
+  if (dir === 'today') {
+    h += '<div class="zone" style="left:' + px(g.railX) + ';top:110px;width:' + px(g.cont - 24) + ';height:94px"></div>';
+    h += '<div class="flag" style="left:' + px(g.railX + (g.cont - 24) / 2 - 110) + ';top:145px">94 px of page chrome — the title band</div>';
+    if (g.gutterEach > 20) {
+      h += '<div class="zone" style="left:' + px(g.colX) + ';top:' + px(g.stageTop) + ';width:' + px(g.gutterEach) + ';height:' + px(g.sh) + '"></div>';
+      h += '<div class="zone" style="left:' + px(g.stageX + g.sw) + ';top:' + px(g.stageTop) + ';width:' + px(g.gutterEach) + ';height:' + px(g.sh) + '"></div>';
+    }
+  } else {
+    h += '<div class="gain" style="left:' + px(g.railX) + ';top:110px;width:' + px(g.cont - 24) + ';height:24px"></div>';
+    h += '<div class="gflag" style="left:' + px(g.colX) + ';top:113px">title band reclaimed — the page name moved into the rail</div>';
+  }
+  const foldY = vh - 2;
+  h += '<div class="fold" style="left:0;right:0;top:' + px(foldY) + '"></div>';
+  return h;
+}
+
+function renderPhone(dir) {
+  const fixed = dir !== 'today';
+  const W = 516, X = 12;
+  let h = '<div class="mk" style="left:12px;top:24px;right:12px">' +
+    '<div class="head"><span class="cap">Live adjustments</span><span class="rule"></span>' +
+    '<span class="segm"><span class="on">Main</span><span>Sub</span></span></div></div>';
+
+  h += '<div class="mk stg" style="left:12px;top:68px;width:516px;height:290px">' + scene('skyP') +
+    '<div style="position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11px;color:#fff;text-shadow:0 1px 2px #000">31.08.2026 13:25:14 Riga</div>';
+  if (!fixed) {
+    h += '<div class="hud">' +
+      '<span class="glass" style="padding:8px 12px;font-size:13px;line-height:1.35;color:#d8dbe4;width:100%">' +
+      '<span style="color:#fff;text-decoration:underline">Light monitor is driving night, IR-cut and the lamp</span></span>' +
+      '<span class="glass hbtn">' + ICON.cmp + 'Hold to compare</span>' +
+      '<span style="margin-left:auto;display:flex;gap:8px"><span class="glass hico">' + ICON.snap +
+      '</span><span class="glass hico">' + ICON.fs + '</span></span></div>';
+  }
+  h += '</div>';
+
+  let y;
+  if (fixed) {
+    h += '<div class="mk" style="left:12px;top:366px;width:516px;display:flex;gap:8px">' +
+      '<span style="flex:1 1 0;display:flex;gap:2px;padding:3px;background:#232734;border:1px solid #2c313d;border-radius:8px">' +
+      ['Night', 'IR&#8209;cut', 'Lamp'].map(n =>
+        '<span class="hrt" style="flex:1 1 0;justify-content:center;padding:10px 12px;color:rgba(222,226,230,.75)"><span class="led"></span>' + n + '</span>').join('') +
+      '</span>' +
+      '<span style="display:inline-flex;align-items:center;justify-content:center;width:44px;border:1px solid #2c313d;border-radius:8px;color:rgba(222,226,230,.75)">' + ICON.snap + '</span>' +
+      '<span style="display:inline-flex;align-items:center;justify-content:center;width:44px;border:1px solid #2c313d;border-radius:8px;color:rgba(222,226,230,.75)">' + ICON.fs + '</span></div>';
+    h += '<div class="mk" style="left:12px;top:424px;width:516px;height:44px;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid #2c313d;border-radius:8px;color:rgba(222,226,230,.75)" class="cap">' + ICON.cmp + 'Hold to compare</div>';
+    h += '<div class="mk" style="left:12px;top:482px;width:516px;font-size:12px;line-height:1.5;color:rgba(222,226,230,.5)">' +
+      '<span style="color:#e6e8ee">Light monitor is driving night, IR-cut and the lamp.</span> ' +
+      'They are runtime state: pressing one changes the camera for every viewer immediately, and none of them is part of Save.</div>';
+    y = 566;
+  } else {
+    h += '<div class="mk" style="left:12px;top:370px;width:516px;font-size:12px;line-height:1.5;color:rgba(222,226,230,.5)">' + HINT + '</div>';
+    h += '<div class="zone" style="left:12px;top:235px;width:516px;height:123px"></div>';
+    h += '<div class="flag" style="left:16px;top:206px">the bar wraps and takes 42% of the picture</div>';
+    y = 460;
+  }
+  h += '<div class="mk card" style="left:12px;top:' + y + 'px;width:516px;height:' + (928 - y - 12) + 'px;padding:22px 24px">' +
+    '<div class="gh" style="margin-bottom:18px"><span class="cap">Tone</span><span class="rule"></span><span class="gn">saved with the page</span></div>' +
+    ['Brightness', 'Contrast', 'Saturation'].map((n, i) =>
+      '<div style="display:flex;align-items:baseline;justify-content:space-between"><span class="cap">' + n +
+      '</span><span class="mono" style="font-size:15px;color:rgba(222,226,230,.5)">50</span></div>' +
+      '<div class="tr" style="flex:none;margin:22px 0 34px">' + (i === 0 ? '<span class="tick"></span>' : '') + '<span class="kb"></span></div>').join('') +
+    '</div>';
+  return h;
+}
+
+const S = { dir: 'today', vp: '1340x708', fluid: 0 };
+
+function noteFor(dir, vw, vh, fluid) {
+  if (S.vp === '540x928') {
+    return dir === 'today'
+      ? '<b class="bad">Phone, today.</b> The on-picture bar wraps at 540 px wide and takes <span class="num">104 px</span> of a <span class="num">290 px</span> picture — 42% of the frame — before the light-monitor sentence is shown at all. With it, the reported screenshot loses over half the picture.'
+      : '<b class="win">Phone, fixed.</b> Below <span class="num">md</span> the picture is too small to carry chrome, so the chrome goes under it: the runtime switches become a full-width row, Compare gets its own line, and the light-monitor sentence joins the note. Same fix whichever desktop direction wins — it is a bug, not a variant.';
+  }
+  const g = geom(dir, vw, vh, fluid);
+  const gT = geom('today', vw, vh, 0);
+  const area = (g.sw * g.sh) / (gT.sw * gT.sh);
+  const size = '<span class="num">' + Math.round(g.sw) + ' × ' + Math.round(g.sh) + '</span>';
+  const mult = '<span class="' + (area >= 1.05 ? 'win' : '') + '">' + (Math.round(area * 100) / 100) + '×</span>';
+  const total = Math.round(g.gutterEach * 2);
+  const gut = total > 120
+    ? '<span class="bad">' + total + ' px</span> of gutter still beside it'
+    : total > 0
+      ? '<span class="win">' + total + ' px</span> of gutter beside it'
+      : '<span class="win">no gutter left beside it</span>';
+  const head = {
+    today: '<b>Today.</b> The picture is sized <span class="num">(100dvh − 31rem) × 16/9</span> and floors at <span class="num">28rem</span>, so on a short window it stops shrinking and just centres — widening the page alone moves nothing. Above it, <span class="bad">94 px</span> goes to the title band.',
+    A: '<b>A · Take back the chrome.</b> The page name moves into the rail, above the tree it names, and the height reserve drops by exactly what the title band cost. The pact #242 made is kept as written: the picture and all four Tone knobs are on screen together.',
+    B: '<b>B · Knobs beside the picture.</b> Tone, Scene and Orientation move into a column beside the stage; Luma stays under the picture it measures. Co-visibility stops being arithmetic and becomes structure — but the knobs now spend the width the picture could have had.',
+    C: '<b>C · The picture is the page.</b> The stage takes the column, and the four Tone knobs ride one compact strip directly under it. Scene, Luma and Orientation move below the fold — the deliberate cost.',
+  }[dir];
+  const cap = fluid
+    ? ' Page width is <b>fluid</b>: the 1320 px container cap is lifted on this page only.'
+    : (vw >= 1400 ? ' At this width the <span class="num">1320 px</span> container is what stops the picture, not the window.' : '');
+  return head + ' → picture ' + size + ', ' + mult + " today's area, " + gut + '.' + cap;
+}
+
+function render() {
+  const [vw, vh] = S.vp.split('x').map(Number);
+  const phone = S.vp === '540x928';
+  const frame = document.getElementById('frame');
+  frame.style.width = vw + 'px';
+  frame.style.height = vh + 'px';
+  frame.innerHTML = phone ? renderPhone(S.dir) : renderDesktop(S.dir, vw, vh, S.fluid);
+  document.getElementById('note').innerHTML = noteFor(S.dir, vw, vh, S.fluid);
+
+  const avail = document.querySelector('.stage').clientWidth - 36;
+  const s = Math.min(1, avail / vw);
+  const sc = document.getElementById('scaler');
+  sc.style.transform = 'scale(' + s + ')';
+  sc.style.height = (vh * s) + 'px';
+  document.getElementById('scalenote').textContent = s < 0.999
+    ? 'shown at ' + Math.round(s * 100) + '% — the frame is a real ' + vw + ' × ' + vh + ' window'
+    : '';
+  [['dir', S.dir], ['vp', S.vp], ['fl', String(S.fluid)]].forEach(([id, v]) =>
+    [...document.getElementById(id).children].forEach(b =>
+      b.setAttribute('aria-pressed', String(b.dataset.v === v))));
+  document.getElementById('fl').querySelectorAll('button').forEach(b => { b.disabled = phone; });
+  location.replace('#' + S.dir + '/' + S.vp + '/' + S.fluid);
+}
+
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('.seg button');
+  if (!b || b.disabled) return;
+  const id = b.parentNode.id;
+  if (id === 'dir') S.dir = b.dataset.v;
+  if (id === 'vp') S.vp = b.dataset.v;
+  if (id === 'fl') S.fluid = Number(b.dataset.v);
+  render();
+});
+window.addEventListener('resize', render);
+
+(function applyHash() {
+  const p = location.hash.replace('#', '').split('/');
+  if (['today', 'A', 'B', 'C'].includes(p[0])) S.dir = p[0];
+  if (/^\d+x\d+$/.test(p[1] || '')) S.vp = p[1];
+  if (p[2] === '1') S.fluid = 1;
+})();
+render();
+</script>
+</body>
+</html>
