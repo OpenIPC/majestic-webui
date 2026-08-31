@@ -158,11 +158,20 @@ window.MajesticStats = (function () {
 			const now = performance.now();
 			while (times.length > 0 && times[0] <= now - 1000) times.shift();
 			times.push(now);
-			// Two exits: enough real time observed, or enough frames that a
-			// frozen clock (the tests' stub) cannot recurse forever.
-			if (++frames >= 180) return;
-			if (times.length > 30 && now - times[0] >= 950) {
-				refreshMs = (now - times[0]) / (times.length - 1);
+			const span = now - times[0];
+			if (times.length > 30 && span >= 950) {
+				refreshMs = span / (times.length - 1);
+				return;
+			}
+			// The frame cap exists for the tests' frozen clock, which can
+			// never satisfy the time exit. Sized so every real display
+			// reaches 950 ms first (240 Hz needs ~230 frames) — and if some
+			// future panel still outruns it, whatever real time WAS observed
+			// beats reporting nothing.
+			if (++frames >= 600) {
+				if (times.length > 30 && span > 0) {
+					refreshMs = span / (times.length - 1);
+				}
 				return;
 			}
 			requestAnimationFrame(tick);
