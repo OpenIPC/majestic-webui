@@ -490,12 +490,16 @@ document.addEventListener('click', ev => {
 });
 window.addEventListener('resize', render);
 
-(function applyHash() {
+/* deep link: #<direction>/<window>/<fluid>, e.g. #C/1920x1080/1 — so a comment
+   can point straight at one variant at one window size */
+function applyHash() {
   const p = location.hash.replace('#', '').split('/');
   if (['today', 'A', 'B', 'C'].includes(p[0])) S.dir = p[0];
   if (/^\d+x\d+$/.test(p[1] || '')) S.vp = p[1];
-  if (p[2] === '1') S.fluid = 1;
-})();
+  S.fluid = p[2] === '1' ? 1 : 0;
+}
+window.addEventListener('hashchange', () => { applyHash(); render(); });
+applyHash();
 render();
 </script>
 </body>
