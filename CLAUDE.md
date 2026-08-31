@@ -343,7 +343,15 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   in `update_caminfo`, honoured by `p/motor.cgi` (missing pelco-pad axes
   leave grid voids; a padless camera keeps its zoom/focus group thanks to
   the loosened mount guard in `preview-ptz.js`) and enforced in `j/ptz.cgi`
-  (`stop` always allowed; stepped backends zero the missing component). `bin/btzoom` and
+  (`stop` always allowed; stepped backends zero the missing component).
+  **Autofocus** is majestic's engine, not a script: with
+  `.isp.autofocus.enabled` true in majestic's config AND a focus axis,
+  `update_caminfo` sets `af_support`, the pelco pad grows an **AF** button
+  (`data-act="af"`), and `j/ptz.cgi` maps it to majestic's `GET /autofocus`
+  (polling `/autofocus/status` so the pad's request-lifetime pacing holds);
+  after a successful `wide`/`tele` it also fires `GET /autofocus?settle` —
+  the engine waits for btzoom's port lock to go quiet, so a held zoom's
+  pulse train finishes before the one queued pass runs. `bin/btzoom` and
   `bin/btzoom-xm` ship in this repo (adopted from OpenIPC/sandbox
   `scripts/pelcoD`, the xm variant hardened to btzoom's standard: shared
   `/tmp/btzoom.lock`, `ptz_port`/`ptz_speed`, idempotent per-command `stty`)

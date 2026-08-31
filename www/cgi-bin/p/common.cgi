@@ -848,6 +848,17 @@ update_caminfo() {
 	done
 	ptz_caps="${ptz_caps# }"
 
+	# Autofocus: the engine lives in majestic (GET /autofocus, #227's board
+	# being the first) and exists only when its config enables it; the pad's
+	# AF button additionally needs a focus axis to make sense. Cached like
+	# the rest so pages don't shell out per request.
+	af_support=""
+	if [ -n "$ptz_support" ] && [ "$(yaml-cli -g .isp.autofocus.enabled 2>/dev/null)" = "true" ]; then
+		case " ${ptz_caps:-focus} " in
+			*" focus "*) af_support="1" ;;
+		esac
+	fi
+
 	# Network
 	network_interface=$(ip route | awk '/default/ {print $5}' | head -n1)
 	network_address=$(ip route | grep ${network_interface:-eth0} | awk '/src/ {print $7}')
@@ -868,7 +879,7 @@ update_caminfo() {
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		ptz_backend ptz_caps sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
+		af_support ptz_backend ptz_caps sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
 	rm -f ${sysinfo_file}
 
 	local v
