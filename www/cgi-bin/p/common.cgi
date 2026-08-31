@@ -751,9 +751,13 @@ report_log() {
 # a stock one collapses to "hi3516av300-imx415, 2.6.08.29-lite".
 generate_signature() {
 	local sig="$network_hostname"
+	# Compare lowered copies on both sides -- soc and sensor come from
+	# fw_setenv-able variables, so their case is the user's, not ours.
 	local lower=$(echo "$network_hostname" | tr 'A-Z' 'a-z')
-	case "$lower" in *"$soc"*) ;; *) sig="$sig, $soc" ;; esac
-	[ "$sensor" != "unknown" ] && case "$lower" in *"$sensor"*) ;; *) sig="$sig, $sensor" ;; esac
+	local soc_l=$(echo "$soc" | tr 'A-Z' 'a-z')
+	local sensor_l=$(echo "$sensor" | tr 'A-Z' 'a-z')
+	case "$lower" in *"$soc_l"*) ;; *) sig="$sig, $soc" ;; esac
+	[ "$sensor_l" != "unknown" ] && case "$lower" in *"$sensor_l"*) ;; *) sig="$sig, $sensor" ;; esac
 	sig="$sig, ${fw_version}-${fw_variant}"
 	sig="${sig#, }"
 	esc "$sig" > $signature_file
