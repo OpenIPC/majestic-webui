@@ -3,6 +3,14 @@
 
 <%
 page_title="Camera Settings"
+# The page title is rendered by this page rather than by header.cgi, at the top
+# of the rail instead of in a full-width band above both columns. The band cost
+# 94px of every window — a 2rem margin, a 32px heading and the row's gutter —
+# and it bought a second copy of a name the rail's active item and the browser
+# tab already carry. In the rail it costs the picture nothing: the two columns
+# start at the same y, and the rail is the taller of them anyway. It is still a
+# real <h2>, so the document keeps its heading (#239).
+hide_title=1
 # ?tab= now names a section, not a category. Left empty the client picks the
 # first leaf of the first group; defaulting to "image" would have resolved to
 # the section of that name rather than the group, which is a different page.
@@ -54,6 +62,7 @@ fi
 	%>
 	<div class="col-12 col-md-3">
 		<div class="sticky-md-top" id="mj-settings-side">
+			<h2 class="mj-rail-title"><%= $page_title %></h2>
 			<%
 			# Hidden until mj-settings.js unhides it: with no JS the box would be
 			# a control that silently does nothing.
