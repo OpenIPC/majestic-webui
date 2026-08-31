@@ -687,9 +687,21 @@
 		} else {
 			const card = el('div', 'card');
 			const body = el('div', 'card-body');
-			const h = el('h3');
+			// The Live leaf's head, reused rather than imitated: micro-caps name,
+			// hairline, and a note on the right. Still an <h3> — revealSection()
+			// focuses it (#222) — with the heading's own size and margin taken off
+			// by .mj-live-head h3.
+			const head = el('div', 'mj-live-head');
+			const h = el('h3', 'mj-cap');
 			h.textContent = label(sec);
-			body.appendChild(h);
+			const note = el('span', 'mj-live-note');
+			note.id = 'mj-stock-note';
+			head.appendChild(h);
+			head.appendChild(el('span', 'mj-live-rule'));
+			head.appendChild(note);
+			body.appendChild(head);
+			const lifted = liftedNote(sec);
+			if (lifted) body.appendChild(lifted);
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
@@ -719,6 +731,7 @@
 
 		applyVisibility();
 		layoutCols();
+		paintStock();
 
 		// renderField writes labels as plain text; with a query already active,
 		// the section just mounted has to pick up the marks too, or navigating
@@ -1469,16 +1482,78 @@
 		if (!deck.childElementCount) deck.remove();
 	}
 
+	const isGroup = (sub) => !!(sub && sub.type === 'object' && sub.properties);
+
+	// A section whose knobs were lifted onto the Live leaf looks half-empty and
+	// says nothing about why: image is two rows because six of its eight are
+	// x-live and render where the picture is. Only claims what is actually on
+	// that leaf — liveFields() is the same list renderLive() mounts, so a build
+	// whose live knobs live in another group gets no note rather than a wrong one.
+	function liftedNote(sec) {
+		const mine = liveFields().filter(f => f.section === sec);
+		if (!mine.length) return null;
+		const names = mine.map(f => liveLabel(f.key, f.sub).toLowerCase());
+		const list = names.length > 1
+			? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1]
+			: names[0];
+		const p = el('p', 'mj-lifted');
+		p.innerHTML = esc(list.charAt(0).toUpperCase() + list.slice(1)) +
+			' apply as you drag them, so they are on ' +
+			'<a href="?tab=' + LIVE_ID + '">Live adjustments</a> with the picture.';
+		return p;
+	}
+
+	// "all N at stock" / "N of M off stock" for the section head — the question
+	// the per-row ↺ can only answer one row at a time. Counted over what is on
+	// screen (a visibleWhen-hidden row is not one of the section's N from here)
+	// and over fields the schema records a default for, so the sentence is
+	// provable: a key with no recorded default can never be shown to be either.
+	// Measured against the default rather than against the last save, so it goes
+	// on saying "off stock" after Save — it is a fact about the camera.
+	function paintStock() {
+		const note = document.getElementById('mj-stock-note');
+		if (!note) return;
+		let shown = 0, known = 0, off = 0;
+		for (const f of state.fields) {
+			if (!f.p || f.p.style.display === 'none') continue;
+			shown++;
+			if (!f.schema || !Object.prototype.hasOwnProperty.call(f.schema, 'default')) continue;
+			known++;
+			if (String(f.getValue()) !== String(f.schema.default)) off++;
+		}
+		// The denominator is the rows on screen, so it matches what can be
+		// counted; "all at stock" carries no number at all, because the honest
+		// one is the number of *defaulted* fields and printing "all 9" beside
+		// twelve visible rows invites exactly the wrong reading.
+		note.textContent = !known ? ''
+			: off ? off + ' of ' + shown + ' off stock'
+				: 'all at stock';
+		note.classList.toggle('mj-off-stock', off > 0);
+	}
+
 	function renderProps(container, basePath, props) {
-		for (const key of Object.keys(props)) {
+		// Scalars first, object subtrees after. An object renders as a labelled
+		// group and everything below its heading reads as part of it, so a scalar
+		// sibling that happens to come later in the schema is captured by it:
+		// isp.blkCnt — memory blocks for the encoder — read as an iris setting,
+		// which is where nobody would look for it.
+		const keys = Object.keys(props);
+		const ordered = keys.filter(k => !isGroup(props[k])).concat(keys.filter(k => isGroup(props[k])));
+		for (const key of ordered) {
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
 			if (dot === ROI_DOT) continue;        // renders on the Visual editor leaf
 			const sub = props[key];
 			if (sub && sub['x-live']) continue;   // live knobs render on their own leaf
-			if (sub && sub.type === 'object' && sub.properties) {
-				const h = el('h5', 'mt-4 mb-2 text-secondary');
-				h.textContent = sub.title || titleCase(key);
+			if (isGroup(sub)) {
+				// The Live deck's group head, verbatim: micro-caps name and a
+				// hairline to the column edge, rather than a 20px grey <h5> that
+				// outweighed every label under it.
+				const h = el('div', 'mj-live-grp-head');
+				const t = el('span', 'mj-cap');
+				t.textContent = sub.title || titleCase(key);
+				h.appendChild(t);
+				h.appendChild(el('span', 'mj-live-rule'));
 				container.appendChild(h);
 				renderProps(container, dot, sub.properties);
 				continue;
@@ -1521,20 +1596,32 @@
 			ctrl.control.addEventListener('input', update);
 			state.visUpdaters.push(update);
 			update();
-			// flipping a controller changes which rows exist, so a live search
-			// has to recount. Once per controller, not once per dependent field.
-			if (!controllers.has(ctrl)) {
-				controllers.add(ctrl);
-				const recount = () => { if (state.q.trim()) buildNav(); };
-				ctrl.control.addEventListener('change', recount);
-				ctrl.control.addEventListener('input', recount);
-			}
+			controllers.add(ctrl);
+		}
+		// Flipping a controller changes which rows exist, so anything that counts
+		// rows has to run again — once per controller, and only once every
+		// dependent row has been shown or hidden.
+		//
+		// Registered after the loop, not inside it: listeners fire in the order
+		// they were added, so attaching this beside the first dependent field's
+		// update() ran it after that one row and before the other seven. Setting
+		// isp.iris.type to DC reveals eight rows and the count read one of them —
+		// "1 of 13 off stock" against thirteen rows on a screen showing twenty.
+		for (const ctrl of controllers) {
+			const recount = () => { paintStock(); if (state.q.trim()) buildNav(); };
+			ctrl.control.addEventListener('change', recount);
+			ctrl.control.addEventListener('input', recount);
 		}
 	}
 
 	function runVisibility() {
 		(state.visUpdaters || []).forEach(u => u());
+		// what is on screen just changed, and the head counts what is on screen
+		paintStock();
 	}
+
+	// At or below this many visible rows a section stays in one column.
+	const SOLO_MAX = 4;
 
 	// Deal the section's rows into the two columns of .mj-cols.
 	//
@@ -1554,6 +1641,23 @@
 		// document order, wherever the last deal left them
 		const items = Array.from(a.children).concat(Array.from(b.children));
 		if (!items.length) return;
+
+		// A handful of rows does not want two columns. image is two rows once its
+		// six x-live knobs are on the Live leaf, and dealt in half that is one row
+		// beside one row across 966px of card. Under the cut they stay in one
+		// column at a readable measure and the second column is not drawn at all,
+		// divider included.
+		const shown = items.filter(it => it.offsetHeight).length;
+		const solo = shown <= SOLO_MAX;
+		box.classList.toggle('mj-solo', solo);
+		if (solo) {
+			if (b.childElementCount) {
+				const held = grabFocus(box);
+				items.forEach(it => a.appendChild(it));
+				restoreFocus(held);
+			}
+			return;
+		}
 
 		// Both columns are flex: 1 1 0, so each row already measures at the
 		// width it keeps on either side of the fold — nothing has to be moved
@@ -1587,7 +1691,7 @@
 		for (let i = 1; i <= items.length; i++) {
 			// a group heading belongs to the rows under it, so it must not be
 			// left as the last thing in a column
-			if (i < items.length && items[i - 1].tagName === 'H5') continue;
+			if (i < items.length && items[i - 1].classList.contains('mj-live-grp-head')) continue;
 			const n = seen[i];
 			const left = n ? y[n - 1] + rows[n - 1].h + rows[n - 1].mb : 0;
 			const right = n < rows.length ? rows[n].mt + total - y[n] : 0;
@@ -1761,14 +1865,42 @@
 			};
 			paint();
 		} else if (type === 'boolean') {
+			// The label goes above the switch, like every other type's, instead of
+			// beside it: a switch row was 26px where a select row is 64, so a
+			// column mixing the two had no rhythm, and the ↺ — which trails the
+			// control — sat at a different x on a boolean than on anything else.
+			// The lit word carries the state, the way the Live bar's toggles do:
+			// a bare switch states its position but not what the position means.
+			//
+			// Live rows keep the inline shape. They are not wrapped in .mj-ctl
+			// (see below), so the two-line form would leave the label stranded
+			// above a switch with no rail to line up against.
 			p = el('p', 'boolean mj-row' + liveCls);
-			p.innerHTML =
-				'<span class="form-check form-switch">' +
-				'<input type="checkbox" id="' + id + '" class="form-check-input">' +
-				'<label for="' + id + '" class="form-check-label">' + labelHtml + '</label>' +
-				'</span>';
+			p.innerHTML = live
+				? '<span class="form-check form-switch">' +
+					'<input type="checkbox" id="' + id + '" class="form-check-input">' +
+					'<label for="' + id + '" class="form-check-label">' + labelHtml + '</label>' +
+					'</span>'
+				: '<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+					'<span class="form-check form-switch">' +
+					'<input type="checkbox" id="' + id + '" class="form-check-input">' +
+					'</span>' +
+					'<span class="mj-state" aria-hidden="true"></span>';
 			control = p.querySelector('input');
 			control.checked = toBool(eff);
+			const word = p.querySelector('.mj-state');
+			if (word) {
+				const paintState = () => {
+					word.textContent = control.checked ? 'On' : 'Off';
+					word.classList.toggle('mj-state-on', control.checked);
+				};
+				control.addEventListener('change', paintState);
+				// refresh() and onReset() push values in through setValue and fire
+				// no events, so the word has to be repainted on that path too —
+				// the same _set hatch the detent slider uses.
+				control._set = (v) => { control.checked = toBool(v); paintState(); };
+				paintState();
+			}
 		} else if (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100) {
 			p = el('p', 'range mj-row' + liveCls);
 			const min = isNum(sub.minimum) ? sub.minimum : 0;
@@ -1984,8 +2116,10 @@
 		if (!live) {
 			const reset = document.createElement('button');
 			reset.type = 'button';
-			reset.className = 'btn btn-sm btn-link p-0 mj-reset';
-			reset.textContent = '↺';
+			reset.className = 'mj-reset';
+			// The Live deck's glyph, not U+21BA: a text arrow is a different shape
+			// in every font stack, and these two controls do the same thing.
+			reset.innerHTML = ICON.reset;
 			reset.setAttribute('aria-label', 'Reset ' + desc + ' to default');
 			if (!hasDefault) {
 				reset.disabled = true;
@@ -2082,6 +2216,7 @@
 		}
 		state.dirtyN = n;
 		renderToolbar();
+		paintStock();
 	}
 
 	// One visibility rule for both buttons: show each only while its action can

@@ -55,10 +55,15 @@
 	height: 2.5rem;
 }
 
+/* Hints sit under the control they explain and are held to a readable measure:
+   full-column-width help set at nearly the size of the label above it competes
+   with the field rather than supporting it. */
 .hint {
-	font-size: 0.875rem;
-	margin-top: 0.2rem;
+	max-width: 22rem;
+	margin-top: 0.35rem;
 	margin-bottom: 0;
+	font-size: 0.78125rem;
+	line-height: 1.45;
 }
 
 .range span.show-value {
@@ -100,9 +105,16 @@
 }
 
 /* mj-settings rows put the per-field reset on the same line as the control
-   (.mj-ctl), so the caps above have to move onto the wrapper — capping only the
-   inner control would let .mj-ctl-in keep the full width and strand the ↺ out at
-   the card edge, attached to nothing. */
+   (.mj-ctl); the width caps below are on the wrapper rather than on the control
+   itself, or a select would stretch to the card edge.
+
+   The reset used to hug the end of the control, which meant it landed wherever
+   that control's cap happened to put it — six different x-positions down one
+   ISP column, because a number stops at 10rem, a select at 16, an array at 20
+   and a switch at its own width. It is pinned to the column's right edge now
+   (margin-left: auto on .mj-reset), so a column of resets is a rail rather than
+   a scatter. That only reads as deliberate because every row shares the edge:
+   the Live deck's rows already align their ↺ the same way. */
 .mj-ctl {
 	display: flex;
 	align-items: center;
@@ -130,15 +142,37 @@
 	max-width: 20rem;
 }
 
-/* A switch is as wide as its own label, so the glyph hugs the text instead of
-   sitting a card-width away from it. Shrink stays enabled (0 *1* auto): a
-   switch carries its label inline, unlike every other row where the <label> is
-   a block above the control and wraps on its own, so a no-shrink wrapper would
-   size to the unwrapped text and spill out of the column — which the 63-char
-   rtsp.fecAdaptive title did. min-width comes from .mj-ctl-in above, without
-   which flex-shrink alone still cannot go under the content width. */
+/* A boolean's label is a block above the switch now, like every other type's,
+   so the wrapper holds the switch and the lit word and nothing else. */
 .boolean .mj-ctl-in {
+	display: flex;
 	flex: 0 1 auto;
+	align-items: center;
+	gap: 0.55rem;
+}
+
+/* The word beside the switch. A switch states its position; it does not state
+   what the position means, and "Off" next to a lit dot is the vocabulary the
+   Live bar's toggles already use. */
+.mj-state {
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-state-on {
+	color: var(--bs-body-color);
+}
+
+/* The switch is the most repeated control in the form, and it was Bootstrap's
+   stock #0d6efd rather than the brand indigo: the compiled subset carries that
+   colour literally, because the theme swaps --bs-primary at runtime and the
+   compiled rule never reads it. Every other accent on the page already does. */
+.form-check-input:checked {
+	background-color: var(--bs-primary);
+	border-color: var(--bs-primary);
 }
 
 .x-small {
@@ -319,23 +353,80 @@ pre#output[data-cmd] {
 	border-left-color: var(--bs-warning);
 }
 
-/* The per-field reset is a bare ↺ beside its control. It used to be a "↺ reset"
-   link on a line of its own, which cost a row per field — about 160px over a
-   section the size of ISP / Exposure — and repeated the word 150-odd times down
-   the page. Muted until hovered so it never competes with the value. */
+/* The field's name, in the micro-caps the Live deck names its knobs in and the
+   rail names its categories in. It was body text at 1rem — the same size as the
+   value underneath it, so a column read as an alternating list of two equals
+   rather than as labelled controls. */
+.mj-row > .form-label {
+	margin-bottom: 0.3rem;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	line-height: 1.5;
+	text-transform: uppercase;
+}
+
+.mj-row.mj-dirty > .form-label {
+	color: var(--bs-secondary-color);
+}
+
+/* Why a section is half empty, said once at the top of it rather than left for
+   the reader to wonder about: image is two rows because six of its eight knobs
+   are x-live and render on the Live leaf with the picture. */
+.mj-lifted {
+	max-width: 46rem;
+	margin: 0.9rem 0 0;
+	padding: 0.6rem 0.75rem;
+	background: var(--bs-tertiary-bg);
+	border-radius: var(--bs-border-radius);
+	color: var(--bs-secondary-color);
+	font-size: 0.8125rem;
+	line-height: 1.45;
+}
+
+/* The head's stock count goes amber for the same reason a row's rule does. */
+.mj-live-note.mj-off-stock {
+	color: var(--bs-warning);
+}
+
+/* The per-field reset. It used to be a "↺ reset" link on a line of its own,
+   which cost a row per field — about 160px over a section the size of ISP /
+   Exposure — and repeated the word 150-odd times down the page. Now it is the
+   Live deck's glyph on the control's line, pinned to the column's right edge,
+   and muted until hovered so it never competes with the value. */
 .mj-reset {
 	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.375rem;
+	height: 1.375rem;
+	margin-left: auto;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
 	line-height: 1;
 	text-decoration: none;
 	color: var(--bs-tertiary-color);
+	opacity: 0.35;
+	transition: opacity var(--mj-ease), color var(--mj-ease);
 }
 
 .mj-reset:hover:not(:disabled) {
+	background: var(--bs-tertiary-bg);
 	color: var(--bs-primary);
+	opacity: 1;
+}
+
+.mj-reset:focus-visible {
+	opacity: 1;
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
 }
 
 .mj-reset:disabled {
-	opacity: 0.35;
+	opacity: 0.12;
 }
 
 /* ── settings navigation tree ───────────────────────────────────────────────
@@ -377,10 +468,22 @@ pre#output[data-cmd] {
 	background: var(--bs-tertiary-bg);
 }
 
+/* Marked by a surface and an indigo edge rather than filled with indigo. A
+   solid 306px slab was the loudest thing on a page whose subject is a list of
+   settings, and it spent the accent colour on "you are here" — which is the one
+   thing on the page nobody has to be told twice. */
 .mj-tree-sub .nav-link.active,
 .mj-tree-sub .nav-link.active:hover {
-	color: #fff;
-	background: var(--bs-primary);
+	color: var(--bs-body-color);
+	background: var(--bs-tertiary-bg);
+	border-left: 2px solid var(--bs-primary);
+	border-radius: 0 var(--bs-border-radius) var(--bs-border-radius) 0;
+	font-weight: 500;
+}
+
+/* the 2px edge would otherwise shift the label of the active row only */
+.mj-tree-sub .nav-link {
+	border-left: 2px solid transparent;
 }
 
 /* the count of fields a search matched inside a section: without it a section
@@ -394,7 +497,7 @@ pre#output[data-cmd] {
 }
 
 .nav-link.active .mj-tree-n {
-	color: rgba(255, 255, 255, 0.75);
+	color: var(--bs-secondary-color);
 }
 
 .mj-tree-caret {
@@ -517,6 +620,15 @@ mark {
    mj-settings.js, rather than a CSS multi-column box: a column box re-balances
    itself whenever a visibleWhen row appears or disappears, which shuffles
    unrelated rows across the fold — see layoutCols() (#189). */
+/* .card resolves to the page background theme-wide — --bs-card-bg is declared
+   but nothing reaches it — so a section card reads as an outline rather than a
+   surface. Set locally, the way the Live deck already sets it, because the real
+   fix touches every page in the repo and belongs in its own change. */
+#mj-settings-form .card {
+	background: var(--bs-card-bg);
+	border-color: var(--bs-border-color);
+}
+
 .mj-cols {
 	display: flex;
 	flex-direction: row;
@@ -529,6 +641,27 @@ mark {
 .mj-cols > .mj-col {
 	flex: 1 1 0;
 	min-width: 0;
+}
+
+/* A divider in the middle of the gutter, as the Live deck has between its two
+   panels. The negative margin puts the rule at the halfway point without taking
+   width off either column, so the two stay equal. */
+@media (min-width: 768px) {
+	.mj-cols > .mj-col + .mj-col {
+		margin-left: -1.25rem;
+		padding-left: 1.25rem;
+		border-left: 1px solid var(--bs-border-color);
+	}
+
+	/* Few enough rows to stay in one column: no divider, no empty half, and a
+	   measure that does not run a two-row section across the whole card. */
+	.mj-cols.mj-solo > .mj-col {
+		flex: 0 1 28rem;
+	}
+
+	.mj-cols.mj-solo > .mj-col + .mj-col {
+		display: none;
+	}
 }
 
 /* below md the two columns stack, which reads exactly like the single column
@@ -613,10 +746,17 @@ mark {
 	margin-bottom: 0.6rem;
 }
 
-/* The leaf's heading is a real <h3> (revealSection focuses it), so its default
-   heading margin and size have to come back off to read as a group label. */
-.mj-live-head h3 {
+/* The heading is a real <h3> (revealSection focuses it), so its default heading
+   margin and size have to come back off to read as a group label. Inside a card
+   it also has to out-rank `.card > .card-body h3` — (0,2,2), which silently
+   restored 18.4px secondary text over .mj-cap on every generated section — so
+   the id is carried here rather than left to source order, which would not have
+   helped. */
+.mj-live-head h3,
+#mj-settings-form .card > .card-body .mj-live-head h3 {
 	margin: 0;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
 	line-height: 1.4;
 }
 
