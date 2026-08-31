@@ -19,7 +19,7 @@
 # WebUI exactly as it was.
 
 scr_name=updatewebui
-scr_version=2
+scr_version=3
 
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
@@ -75,8 +75,13 @@ Notes:
   Local edits to installed files are replaced, not merged: this installs a
   released tree, it does not merge into one. They are archived under $STATE_DIR
   first (see --no-backup), and --dry-run lists them before anything happens.
-  To keep a change for good, send it upstream to
-  https://github.com/$REPO.
+  Even on a first run with no manifest they are recognised, by comparing the
+  overlay against the firmware's own files. To keep a change for good, send it
+  upstream to https://github.com/$REPO.
+
+  Only the files meant for this firmware's variant (BUILD_OPTION in
+  /etc/os-release) are installed, mirroring what the firmware itself ships:
+  a standard build gets no FPV pages, an FPV build no notifier helpers.
 EOF
 }
 
@@ -121,6 +126,11 @@ upper=$(awk '$2 == "/" && ($3 == "overlay" || $3 == "overlayfs") {
 [ -n "$upper" ] && [ -d "$upper" ] || upper=
 lower=/rom
 { [ -n "$upper" ] && [ -d "$lower/var/www" ]; } || lower=
+
+# lite/ultimate/fpv - which of the release's files this firmware gets. An
+# unknown or missing value reads as a standard build, the same default
+# buildroot has.
+variant=$(sed -n 's/^BUILD_OPTION=//p' /etc/os-release 2>/dev/null | tr -d '"')
 
 tmp=$(mktemp -d) || die "cannot create a temporary directory"
 trap 'rm -rf "$tmp"' EXIT INT TERM
@@ -193,7 +203,7 @@ fetch_tree() {
 # keep:   every destination this release owns
 # want:   md5sum-format list of what the install should leave behind
 build_plan() {
-	for f in write drop prune keep want local; do : >"$tmp/$f"; done
+	for f in write drop prune keep want local skipped; do : >"$tmp/$f"; done
 
 	for pair in $PAYLOAD; do
 		sub=${pair%%:*}
@@ -203,17 +213,54 @@ build_plan() {
 			while read -r rel; do
 				s=$src/$sub/$rel
 				d=$root/$rel
+				# The release carries every variant's files; the firmware
+				# does not. Mirror the fixup lists in buildroot's
+				# majestic-webui.mk (kept in step with them): a standard
+				# build strips the FPV pages, an FPV build strips the
+				# notifier helpers. A skipped path never enters keep, so
+				# a stale overlay copy of it is pruned below.
+				case $sub/$rel in
+				www/cgi-bin/fpv-wfb.cgi | www/cgi-bin/p/fpv_common.cgi)
+					if [ "$variant" != fpv ]; then
+						echo "$d" >>"$tmp/skipped"
+						continue
+					fi
+					;;
+				sbin/telegram | sbin/openwall)
+					if [ "$variant" = fpv ]; then
+						echo "$d" >>"$tmp/skipped"
+						continue
+					fi
+					;;
+				esac
 				echo "$d" >>"$tmp/keep"
 				md5sum "$s" | sed "s|  .*|  $d|" >>"$tmp/want"
 				# The firmware already has this exact file: an overlay
 				# copy of it would buy nothing and hide the next one.
 				if [ -n "$lower" ] && cmp -s "$s" "$lower$d"; then
-					[ -e "$upper$d" ] && echo "$upper$d" >>"$tmp/drop"
+					if [ -e "$upper$d" ]; then
+						# Release and firmware agree here, so an overlay
+						# copy that differs can only be an edit made on
+						# this camera. Whiteouts and other non-files
+						# hold nothing worth saving.
+						if [ ! -f "$MANIFEST" ] && [ -f "$upper$d" ] &&
+							! cmp -s "$upper$d" "$s"; then
+							echo "$d" >>"$tmp/local"
+						fi
+						echo "$upper$d" >>"$tmp/drop"
+					fi
 					continue
 				fi
-				if cmp -s "$s" "$d" 2>/dev/null &&
-					[ "$(stat -c %a "$d")" = "$(stat -c %a "$s")" ]; then
-					continue
+				if cmp -s "$s" "$d" 2>/dev/null; then
+					[ "$(stat -c %a "$d")" = "$(stat -c %a "$s")" ] &&
+						continue
+					# Same content, wrong mode: rewritten, nothing lost.
+				elif [ ! -f "$MANIFEST" ] && [ -n "$upper" ] &&
+					[ -f "$upper$d" ]; then
+					# The rootfs is read-only, so differing content that
+					# lives in the upper layer was put there on this
+					# camera and exists nowhere else.
+					echo "$d" >>"$tmp/local"
 				fi
 				echo "$(stat -c %a "$s") $s $d" >>"$tmp/write"
 			done
@@ -224,8 +271,21 @@ build_plan() {
 	# clears the whiteouts an older updatewebui left behind, which is why the
 	# search is for anything that is not a directory rather than for files.
 	if [ -n "$upper" ] && [ -d "$upper/var/www" ]; then
+		[ -f "$MANIFEST" ] &&
+			sed 's/^[0-9a-f]*  //' "$MANIFEST" >"$tmp/manifest.paths"
 		find "$upper/var/www" ! -type d | while read -r u; do
-			grep -qxF "${u#$upper}" "$tmp/keep" || echo "$u" >>"$tmp/prune"
+			d=${u#$upper}
+			grep -qxF "$d" "$tmp/keep" && continue
+			echo "$u" >>"$tmp/prune"
+			# A stale file that is not simply the firmware's own content
+			# is work done on this camera. Paths the manifest records are
+			# judged against the manifest below instead.
+			[ -f "$u" ] || continue
+			if [ -f "$MANIFEST" ]; then
+				grep -qxF "$d" "$tmp/manifest.paths" && continue
+			fi
+			[ -n "$lower" ] && cmp -s "$u" "$lower$d" && continue
+			echo "$d" >>"$tmp/local"
 		done
 	fi
 
@@ -246,12 +306,14 @@ build_plan() {
 	fi
 
 	# Anything that no longer matches the manifest was edited on the camera.
-	# Without a manifest there is nothing to compare against, so a local edit
-	# cannot be told apart from a file this release simply changed.
+	# Without a manifest the overlay itself is the record: the rootfs is
+	# read-only, so every local edit necessarily lives in the upper layer,
+	# which is what the hooks above compare against the release and /rom.
 	if [ -f "$MANIFEST" ]; then
 		md5sum -c "$MANIFEST" 2>/dev/null | sed -n 's/: FAILED.*$//p' |
-			while read -r d; do [ -f "$d" ] && echo "$d"; done >"$tmp/local"
+			while read -r d; do [ -f "$d" ] && echo "$d"; done >>"$tmp/local"
 	fi
+	sort -u "$tmp/local" >"$tmp/local.u" && mv "$tmp/local.u" "$tmp/local"
 	return 0
 }
 
@@ -266,16 +328,29 @@ report_plan() {
 	fi
 	echo "  $(count "$tmp/write") file(s) to write"
 	[ -n "$upper" ] &&
-		echo "  $(count "$tmp/drop") overlay copy(ies) to drop, identical to the firmware's own"
+		echo "  $(count "$tmp/drop") overlay copy(ies) to drop, the firmware's own file already matches"
 	echo "  $(count "$tmp/prune") stale entry(ies) to remove"
+	[ -s "$tmp/skipped" ] &&
+		echo "  $(count "$tmp/skipped") file(s) for another firmware variant, skipped"
 	if [ -s "$tmp/local" ]; then
 		echo
-		echo "Locally modified, will be replaced:"
+		if [ ! -f "$MANIFEST" ]; then
+			echo "No manifest from an earlier run; overlay copies that differ"
+			echo "from what this install leaves behind count as local edits."
+		fi
+		echo "Locally modified, will be replaced or removed:"
 		sed 's/^/  /' "$tmp/local"
 	elif [ ! -f "$MANIFEST" ]; then
 		echo
-		echo "No manifest from an earlier run, so local edits to WebUI files"
-		echo "cannot be recognised this time and are replaced without a backup."
+		if [ -n "$upper" ]; then
+			echo "No manifest from an earlier run; overlay copies that differ"
+			echo "from what this install leaves behind would count as local"
+			echo "edits, and none were found."
+		else
+			echo "No manifest from an earlier run and no overlay to compare"
+			echo "against, so local edits cannot be recognised this time and"
+			echo "are replaced without a backup."
+		fi
 	fi
 	if [ "$dry_run" = 1 ]; then
 		echo
