@@ -263,10 +263,15 @@ window.MajesticStats = (function () {
 	// an estimate below twice the delivered rate is a fact about the link,
 	// one above it is the estimator idling — and an adaptation triggered by
 	// an idling estimator is the same false positive one step removed.
-	function gradeOf(lossPct, rtt, jitterMs, encK, cfgK, capK, recvK) {
-		const capMeaningful = capK > 0 && capK < 2 * Math.max(recvK || 0, 1);
-		const adapting = encK > 0 && capMeaningful;
-		const crushed = adapting && cfgK > 0 && capK < cfgK / 2;
+	function gradeOf(lossPct, rtt, jitterMs, encK, cfgK, rembK, recvK) {
+		// The grade reads the estimate ADAPTATION acts on — the camera-side
+		// remb — not the larger of two estimates: a high idle browser figure
+		// must not mask a binding camera one. And nothing is "tested" while
+		// nothing was delivered: recvK 0 means the stream is not flowing,
+		// which is its own story, not evidence about capacity.
+		const meaningful = recvK > 0 && rembK > 0 && rembK < 2 * recvK;
+		const adapting = encK > 0 && meaningful;
+		const crushed = adapting && cfgK > 0 && rembK < cfgK / 2;
 		if (lossPct > 5 || rtt > 500) return ['poor', BAD];
 		if (lossPct > 1 || rtt > 250 || jitterMs > 100 || crushed)
 			return ['struggling', WARN];
@@ -515,7 +520,7 @@ window.MajesticStats = (function () {
 				: ['excellent', OK];
 		} else {
 			gr = gradeOf(lossEma || 0, s.rttMs || 0, s.jitterMs || 0,
-				parseInt(cam.enc, 10) || 0, s.configuredKbps || 0, capK,
+				parseInt(cam.enc, 10) || 0, s.configuredKbps || 0, remb,
 				s.kbps || 0);
 		}
 		els.grade.textContent = gr[0];
@@ -524,7 +529,7 @@ window.MajesticStats = (function () {
 		if (capK) {
 			// A saturated link's estimate approximates capacity; an idle
 			// one only proves the link carries at least what arrived.
-			const tested = capK < 2 * Math.max(s.kbps || 0, 1);
+			const tested = (s.kbps || 0) > 0 && capK < 2 * (s.kbps || 0);
 			els.capEst.textContent = (tested ? '≈' : '≥') + fmtK(capK);
 		}
 		const cfgK = s.configuredKbps;

@@ -150,6 +150,29 @@ g('a crushed link grades struggling even with clean loss', () => {
 		env.el('mj-ns-cap-est').textContent === '≈400 kbit/s');
 });
 
+g('a high idle browser estimate cannot mask a binding camera one', () => {
+	// The camera's remb (400) is what adaptation acts on and it is genuinely
+	// binding against 350 kbit/s delivered; the browser's idle 2500 must not
+	// launder the grade back to excellent.
+	const env = boot();
+	env.stats.tick({ cam: { remb: '400kbps', enc: '512' },
+		configuredKbps: 1024, kbps: 350, availKbps: 2500, rttMs: 20, channel: 1 });
+	check('the binding camera estimate wins the grade',
+		env.el('mj-ns-grade').textContent === 'struggling');
+	check('while the display row honestly shows the larger figure as a floor',
+		env.el('mj-ns-cap-est').textContent === '≥2.5 Mbit/s');
+});
+
+g('nothing delivered means nothing tested', () => {
+	const env = boot();
+	env.stats.tick({ cam: { remb: '2kbps', enc: '512' },
+		configuredKbps: 1024, kbps: 0, rttMs: 5, channel: 1 });
+	check('a stopped stream cannot grade struggling off a tiny estimate',
+		env.el('mj-ns-grade').textContent === 'excellent');
+	check('and its estimate renders as a floor',
+		env.el('mj-ns-cap-est').textContent === '≥2 kbit/s');
+});
+
 g('an idling estimate cannot call a LAN struggling', () => {
 	// Quiet scene on a wired LAN: the stream sends a trickle, the estimator
 	// idles at a small multiple of it, a transient bind drags enc down —
