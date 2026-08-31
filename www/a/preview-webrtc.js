@@ -183,6 +183,12 @@ window.MajesticWebRTC = (function () {
 					s.jitterMs = Math.round((r.jitter || 0) * 1000);
 					s.nack = r.nackCount || 0;
 					s.pli = r.pliCount || 0;
+					// Cumulative sums for the stats panel's per-frame figures:
+					// the panel differences them itself, so a browser that
+					// omits one simply leaves that share out of the total.
+					s.jbDelay = r.jitterBufferDelay || 0;
+					s.jbEmitted = r.jitterBufferEmittedCount || 0;
+					s.decodeTime = r.totalDecodeTime || 0;
 				});
 				report.forEach(function (r) {
 					if (r.type === 'inbound-rtp' && r.kind === 'audio') {
@@ -198,6 +204,13 @@ window.MajesticWebRTC = (function () {
 						r.type === 'candidate-pair' && r.nominated &&
 						r.state === 'succeeded') {
 						s.rttMs = Math.round((r.currentRoundTripTime || 0) * 1000);
+						// The browser's own estimate of what this path can
+						// carry — the receiving end's answer to the camera's
+						// remb=, and the other half of the capacity story.
+						if (r.availableIncomingBitrate) {
+							s.availKbps =
+								Math.round(r.availableIncomingBitrate / 1000);
+						}
 					}
 				});
 				s.codec = codec; s.width = w; s.height = h;

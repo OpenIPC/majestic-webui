@@ -1765,7 +1765,7 @@ mark {
 	top: 0.5rem;
 	left: 0.5rem;
 	z-index: 5;
-	max-width: min(90%, 34rem);
+	width: min(92%, 21rem);
 	/* Leave the bar's strip free below, and scroll rather than grow: on a
 	   short viewport the numbers yield, not the picture. */
 	max-height: calc(100% - 5rem);
@@ -1773,23 +1773,145 @@ mark {
 	background: rgba(13, 15, 20, 0.72);
 	border: 1px solid rgba(255, 255, 255, 0.09);
 	color: #e6e8ee;
-	padding: 0.6rem 0.8rem;
+	padding: 0.15rem 0.8rem;
 	border-radius: var(--bs-border-radius);
 	backdrop-filter: blur(10px);
 }
 
-.mj-stats-overlay .table {
-	/* The variable, not `color`: Bootstrap's cell rule reads
-	   --bs-table-color (emphasis-black in light theme) and would win over an
-	   inherited colour — black text on black glass. */
-	--bs-table-color: #fff;
-	--bs-table-bg: transparent;
+/* The network story (preview-stats.js). Every color here is literal for the
+   same reason the glass recipe's are: the surface is the picture, not the
+   page, so the theme must not repaint the ink. Series colors live in the
+   script; these are the text tokens. */
+.mj-ns section {
+	padding: 0.55rem 0;
 }
-
-/* Three classes, because Bootstrap's `.table>:not(caption)>*>*` cell rule
-   outweighs a lone class and would repaint the keys full white. */
-.mj-stats-overlay .table .mj-stat-key {
-	color: rgba(255, 255, 255, 0.7);
+.mj-ns section + section {
+	border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+.mj-ns-cap {
+	/* The bar's micro-caps vocabulary, restated because .mj-cap reads the
+	   page theme's tertiary color — wrong on glass in light theme. */
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.55);
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 0.5rem;
+}
+.mj-ns-grade {
+	/* The word carries the meaning; the color only underlines it. */
+	letter-spacing: 0.04em;
+}
+.mj-ns-hero {
+	display: flex;
+	align-items: baseline;
+	gap: 0.3rem;
+	margin-top: 0.1rem;
+}
+.mj-ns-num {
+	font-size: 1.65rem;
+	font-weight: 600;
+	line-height: 1.1;
+	font-variant-numeric: tabular-nums;
+}
+.mj-ns-unit {
+	color: rgba(255, 255, 255, 0.55);
+	font-weight: 600;
+}
+.mj-ns-sub {
+	margin-left: auto;
+	text-align: right;
+	color: rgba(255, 255, 255, 0.55);
+	font-size: 0.72rem;
+	max-width: 55%;
+}
+/* The journey bar: four fills, 2px of glass between them so adjacent
+   segments never rely on hue alone. */
+.mj-ns-bar {
+	display: flex;
+	gap: 2px;
+	height: 6px;
+	margin: 0.45rem 0 0.3rem;
+}
+.mj-ns-bar > span {
+	border-radius: 3px;
+	min-width: 3px;
+}
+.mj-ns-legend {
+	display: flex;
+	flex-wrap: wrap;
+	column-gap: 0.7rem;
+	row-gap: 0.1rem;
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.55);
+}
+.mj-ns-legend i {
+	display: inline-block;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 2px;
+	margin-right: 0.3rem;
+}
+.mj-ns-legend b,
+.mj-ns-row b {
+	font-weight: 600;
+	color: #e6e8ee;
+	font-variant-numeric: tabular-nums;
+}
+.mj-ns-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+	margin-top: 0.25rem;
+}
+.mj-ns-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 0.75rem;
+}
+.mj-ns-row > span {
+	color: rgba(255, 255, 255, 0.62);
+	/* The label holds its line; a long value (the adaptation arrow) wraps on
+	   its own side instead of breaking the label mid-phrase. */
+	white-space: nowrap;
+}
+.mj-ns-row > b {
+	text-align: right;
+}
+.mj-ns-spark {
+	height: 24px;
+	margin-top: 0.4rem;
+}
+.mj-ns-spark svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+.mj-ns-chart {
+	margin-top: 0.45rem;
+}
+.mj-ns-chart svg {
+	display: block;
+	width: 100%;
+}
+.mj-ns-chart text {
+	font-family: var(--bs-font-monospace);
+	font-size: 9px;
+	fill: rgba(255, 255, 255, 0.5);
+}
+.mj-ns-note {
+	margin-top: 0.35rem;
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.55);
+}
+.mj-ns-fine {
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.45);
+	white-space: pre-line;
+	font-variant-numeric: tabular-nums;
 }
 
 /* The adaptation toast: under the chip, same glass. Hover pins it and click
@@ -2334,6 +2456,54 @@ mark {
 
 	.mj-ptz-void {
 		height: 2.75rem;
+	}
+}
+
+/* The stats panel below md follows the pad off the picture, and for the same
+   arithmetic: it is taller than the whole 186px stage, so overlaid it would
+   not annotate the picture, it would replace it. Same mechanism as the pad —
+   absolute at top:100%, the stage reserving the room with a :has()-guarded
+   margin — and a fixed height so the reserved margin is a measurement, not a
+   guess; the story scrolls inside it. When the pad is out too, the pad keeps
+   the first slot (it is the always-visible one) and the panel stacks below
+   it. Fullscreen has height to spare and puts the panel back on the video. */
+@media (max-width: 767.98px) {
+	.mj-stats-overlay {
+		top: 100%;
+		left: 0;
+		right: 0;
+		width: auto;
+		height: 22rem;
+		max-height: none;
+	}
+
+	.mj-stage:has(> #mj-stats:not([hidden])) {
+		margin-bottom: 22.5rem;
+	}
+
+	.mj-stage:has(> .mj-ptz:not([hidden])) .mj-stats-overlay {
+		top: calc(100% + 10rem);
+	}
+
+	.mj-stage:has(> .mj-ptz:not([hidden])):has(> #mj-stats:not([hidden])) {
+		margin-bottom: 32.5rem;
+	}
+
+	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])) .mj-stats-overlay {
+		top: calc(100% + 11rem);
+	}
+
+	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])):has(> #mj-stats:not([hidden])) {
+		margin-bottom: 33.5rem;
+	}
+
+	.mj-stage:fullscreen .mj-stats-overlay {
+		top: 0.5rem;
+		left: 0.5rem;
+		right: auto;
+		width: min(92%, 21rem);
+		height: auto;
+		max-height: calc(100% - 5rem);
 	}
 }
 

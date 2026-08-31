@@ -223,6 +223,7 @@ done) %>
 	</div>
 </div>
 
+<script src="/a/charts.js" defer></script>
 <script src="/a/status.js" defer></script>
 
 <%in p/footer.cgi %>

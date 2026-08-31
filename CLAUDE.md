@@ -244,6 +244,37 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   (`CODEC W×H · fps`; fps is live WebRTC stats via a loosened `onStats` gate,
   or the configured `videoN.fps` on MSE, which measures nothing), the stats
   panel top-left as translucent glass, the adaptation toast `#mj-adapt`
+  — **the stats panel is `preview-stats.js`**, the "network story": the CGI
+  emits only the empty `#mj-stats` shell and the module builds and fills the
+  interior (delay headline with a camera/network/buffer/screen breakdown —
+  the screen leg is decode plus the measured compositor/vsync wait from
+  `requestVideoFrameCallback`'s `expectedDisplayTime − presentationTime`,
+  falling back to half a refresh interval measured by the rAF sliding-window
+  method openipc.org's high-resolution-timer tool uses; decode, screen wait
+  and display Hz are split out in the fine print, and panel hardware latency
+  is invisible to JS, which is why the headline says "at least"; the
+  capacity story `link can carry → set to → sending at → you receive` with a
+  120 s chart; radio and per-consumer egress off the 2 s `mjMetricsSubscribe`
+  heartbeat; the old table's counters as fine print). It follows the
+  `preview-adapt.js` contract exactly — self-contained IIFE, lazy DOM, one
+  guarded `window.MajesticStats.tick()` from preview-page.js's `onStats`
+  (plus `reset()` beside every `MajesticAdapt.reset()` and `setOpen()` from
+  `syncStatsCtl`) — so the vm tests need no new `IDS` entries; its own
+  arithmetic is covered by `tests/preview-stats.test.js`. The camera's half
+  arrives in the schema-free stats line (new keys `bytes= abytes= rtx=` and
+  `c2s=` — capture→send ms, `~`-prefixed when it is an estimated lower bound
+  rather than a kernel-anchored measurement; every key absent on an older
+  majestic degrades to `-` or a hidden row), and per-consumer counts/egress
+  come from `/metrics` (`webrtc_sessions_total`, `webrtc_tx_bytes`,
+  `rtsp_clients_total`, `rtsp_tx_bytes`, `ws_video_clients_total`,
+  `outgoing_streams_total`/`outgoing_tx_bytes` for RTMP/RTP pushes; a
+  zero-count consumer gets no row — the section lists who IS being
+  served). Series
+  ink is hardcoded to the dark dashboard's `--st-c*` values (the glass is
+  theme-invariant; validated against it), drawn with `www/a/charts.js` — the
+  sparkline/axis-chart primitives extracted from `status.js`, now shared:
+  colors are per-instance arguments and the debounced resize redraw lives in
+  charts.js, so load `/a/charts.js` before any consumer —
   under the chip (`preview-adapt.js` — event-driven off the camera's `enc=`
   stats counter, it reports the moment the shared encoder's bitrate moved,
   in which direction, and whose connection moved it; it replaced a standing

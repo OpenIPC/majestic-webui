@@ -399,44 +399,11 @@
 		if (statsCtl) statsCtl.hidden = !usingWebRTC;
 		if (statsBox) {
 			statsBox.hidden = !(usingWebRTC && statsBtn && statsBtn.checked);
+			// The panel module renders its charts only while someone can see
+			// them, so it is told when that changes. Guarded like every
+			// window.Majestic* module: its file is not loaded under the tests.
+			if (window.MajesticStats) window.MajesticStats.setOpen(!statsBox.hidden);
 		}
-	}
-
-	function showStats(s) {
-		const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-		const cam = s.cam || {};
-		set('#mj-st-pic', s.width
-			? s.width + '×' + s.height + ' ' + (s.codec || '').toUpperCase() +
-				' · ' + Math.round(s.fps || 0) + ' fps'
-			: '-');
-		set('#mj-st-rx', s.kbps + ' kbit/s' +
-			(s.audioKbps ? ' · audio ' + s.audioKbps : ''));
-		// Lost is cumulative and jitter is instantaneous, which is why they are
-		// labelled rather than run together into one figure.
-		set('#mj-st-loss', (s.packetsLost || 0) + ' pkt · ' + (s.jitterMs || 0) + ' ms');
-		set('#mj-st-rtt', s.rttMs ? s.rttMs + ' ms' : '-');
-		set('#mj-st-recov', (s.nack || 0) + ' nack · ' + (s.pli || 0) + ' keyframe req');
-		set('#mj-st-cam', cam.ice
-			? 'ice ' + cam.ice + ' · dtls ' + cam.dtls + ' · media ' + cam.media
-			: '-');
-		// The camera's own estimate of what this link will carry, which is what
-		// it sets the encoder from — not a measurement of what arrived.
-		set('#mj-st-remb', cam.remb || '-');
-		// Where the shared encoder actually is. enc=0 means WebRTC has not
-		// moved it — it runs at the operator's configured rate. Absent means
-		// a majestic build without the counter, and the row claims nothing.
-		set('#mj-st-enc', cam.enc === undefined ? '-'
-			: (parseInt(cam.enc, 10) || 0) === 0 ? 'configured rate'
-			: parseInt(cam.enc, 10) + ' kbit/s · adapted');
-		set('#mj-st-pli', cam.pli || '-');
-		set('#mj-st-ain', cam['audio-in'] || '-');
-		// Both halves, because they answer different questions: the browser
-		// says it sent, the camera says it arrived. A microphone that is on
-		// with the camera's counter stuck at zero is the case worth seeing.
-		set('#mj-st-talk', s.micWanted
-			? (s.micSending ? 'sending' : 'offered, not accepted') +
-				' · ' + (s.micPackets || 0) + ' pkt out'
-			: 'off');
 	}
 
 	// Rebuilt rather than mutated when the transport changes: the two players
@@ -457,6 +424,10 @@
 		// describe a session that is gone. Back on WebRTC it re-adopts from
 		// the first tick rather than announcing whatever moved while away.
 		if (window.MajesticAdapt && !usingWebRTC) window.MajesticAdapt.reset();
+		// The stats panel's deltas belong to the session that just ended —
+		// differencing a new session's counters against them would print one
+		// tick of nonsense rates.
+		if (window.MajesticStats) window.MajesticStats.reset();
 		// Same for the served-channel answer and its message: both belong to
 		// a WebRTC session. MSE serves the number it is given or nothing.
 		if (!usingWebRTC) {
@@ -688,7 +659,18 @@
 						w: s.width, h: s.height };
 					setChip();
 				}
-				if (statsBox && !statsBox.hidden) showStats(s);
+				// The panel differences cumulative counters itself, so it is
+				// fed every tick whether or not it is open — a panel opened
+				// mid-session then starts from live history, not from zero.
+				if (window.MajesticStats) {
+					const ch = servedStream();
+					window.MajesticStats.tick(Object.assign({}, s, {
+						configuredKbps: cfgKbps[ch],
+						configuredFps: cfgFps[ch],
+						channel: ch,
+						transport: 'webrtc',
+					}));
+				}
 				// The adaptation toast, fed the camera's own view of the
 				// shared encoder. Guarded: preview-adapt.js is its own file,
 				// and an older majestic sends no enc= at all — either way
@@ -919,6 +901,7 @@
 		// The two channels are two encoders; the baseline and any toast on
 		// screen describe the one being left.
 		if (window.MajesticAdapt) window.MajesticAdapt.reset();
+		if (window.MajesticStats) window.MajesticStats.reset();
 		// A deliberate change is the viewer changing their mind: it becomes
 		// the new ask, invalidates the camera's last served answer, and
 		// re-arms the message — the next session speaks for itself, and if
