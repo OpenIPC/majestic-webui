@@ -27,9 +27,11 @@
      ptz_caps (from sysinfo, sanitised by update_caminfo) gates what is
      emitted at all: an XM zoom block accepts pan frames and ignores them,
      and a pad must not render what cannot work. Empty means every axis —
-     cameras without the variable keep today's markup byte for byte. On the
-     pelco pad a missing axis leaves a void in the 3x3 grid so the geometry
-     holds; j/ptz.cgi refuses the same verbs server-side. -->
+     cameras without the variable keep today's markup byte for byte. On
+     both pads a missing axis leaves a void in the 3x3 grid so the geometry
+     holds; the stepped pad's diagonals need both axes, and the centre
+     (stop/home) stays whenever the pad renders. j/ptz.cgi holds the same
+     line server-side. -->
 <%
 has_cap() {
 	[ -z "$ptz_caps" ] && return 0
@@ -114,34 +116,68 @@ has_cap() {
 </div>
 <% fi %>
 <% else %>
+<% if has_cap pan || has_cap tilt; then %>
 <div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
+	<% if has_cap pan && has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="ul" aria-label="Pan up-left">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.6 12.6V6.6h6"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
+	<% if has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="uc" aria-label="Tilt up">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.4 12.4 10 7.6l4.6 4.8"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
+	<% if has_cap pan && has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="ur" aria-label="Pan up-right">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.4 6.6h6v6"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
+	<% if has_cap pan; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="lc" aria-label="Pan left">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.4 5.4 7.6 10l4.8 4.6"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
 	<button type="button" class="mj-ptz-btn mj-ptz-stop" data-dir="cc" aria-label="Center" title="Centre">
 		<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="10" r="3.4"></circle></svg>
 	</button>
+	<% if has_cap pan; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="rc" aria-label="Pan right">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.6 5.4 12.4 10l-4.8 4.6"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
+	<% if has_cap pan && has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="dl" aria-label="Pan down-left">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.6 7.4v6h6"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
+	<% if has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="dc" aria-label="Tilt down">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.4 7.6 10 12.4l4.6-4.8"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
+	<% if has_cap pan && has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="dr" aria-label="Pan down-right">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 7.4v6h-6"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
 </div>
+<% fi %>
 <% fi %>
 <script src="/a/preview-ptz.js"></script>
