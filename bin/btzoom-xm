@@ -1,0 +1,217 @@
+#!/bin/sh
+# PTZ control over the XiongMai UART protocol — Pelco-D-shaped but not
+# Pelco-D: its own sync byte, direction-bit layout and mod-100 checksum.
+# Origin: OpenIPC/sandbox scripts/pelcoD/btzoom-xm (sandbox#31), whose
+# frame/checksum logic is ported 1:1 from the vendor main.c
+# (send_cmd/set_focus/init_ptz). Adopted here (#227) with the same
+# scaffolding btzoom carries, so `fw_setenv ptz_control pelco-xm` is all a
+# camera needs: the port comes from U-Boot ptz_port (default /dev/ttyAMA1,
+# the UART the origin hardcoded), the rate from ptz_speed against the same
+# whitelist, one invocation holds the wire at a time, and the port is set
+# raw before every command instead of only in `start`.
+#
+# Every movement is a timed pulse: command, half a second, stop. The camera
+# ends its own move, which is why the WebUI paces a held button by waiting
+# for each request to answer rather than counting ticks.
+
+PORT=$(fw_printenv -n ptz_port 2>/dev/null)
+[ -n "$PORT" ] || PORT=/dev/ttyAMA1
+SPEED=$(fw_printenv -n ptz_speed 2>/dev/null)
+case "$SPEED" in
+	# A rate stty would refuse must not kill the command whole; the popular
+	# rates are plenty, and anything else falls back to the old default.
+	1200|2400|4800|9600|19200|38400|57600|115200) ;;
+	*) SPEED=115200 ;;
+esac
+DELAY='sleep .5'
+# btzoom's lock, name included: the lock protects the UART wire, and only
+# one Pelco variant is ever the configured backend.
+LOCK=/tmp/btzoom.lock
+
+ADDR=1          # addressPTZ in main.c
+SYNC=197        # 0xC5 - SYNC byte used when AUTO_FOCUS is defined (main.c default)
+TERM_BYTE=92    # 0x5C - frame terminator byte
+
+if [ -z "$1" ]; then
+	echo "Usage: $0 [start], [stop], [wide], [tele], [far], [near], [up], [down], [left], [right]"
+	echo "Note: day/night switching has no known send command in main.c (XM protocol only"
+	echo "      parses incoming DAY/NIGHT reports) and is therefore not implemented here."
+	exit 0
+fi
+
+# One invocation on the wire at a time — see btzoom for the full rationale
+# (interleaved frames corrupt each other, a dead holder must not wedge the
+# camera, a caller that cannot have the port within ~2s reports that).
+i=0
+until mkdir "$LOCK" 2>/dev/null; do
+	if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+		rmdir "$LOCK" 2>/dev/null
+		continue
+	fi
+	i=$((i + 1))
+	if [ "$i" -ge 40 ]; then
+		echo "PTZ port is busy."
+		exit 1
+	fi
+	sleep .05
+done
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+# The port must be raw at the right rate before any frame goes out, and a
+# freshly booted camera has had nobody set it. Cheap and idempotent, so it
+# runs for every command. The init frame is different: main.c sends it once
+# at startup, so it stays in `start` rather than preceding every pulse.
+stty -F "$PORT" "$SPEED" raw -echo -onlcr 2>/dev/null
+
+# byte_esc <decimal value 0-255> -> literal text "\NNN" (octal, for later
+# expansion by "printf %b"). Octal \NNN is POSIX-guaranteed for %b, unlike
+# \xHH which some /bin/sh printf builtins (e.g. dash) don't support at all.
+byte_esc() {
+	printf '\\%03o' "$1"
+}
+
+# xm_send <panSpeed> <tiltSpeed> <zoomSpeed>
+#   panSpeed/tiltSpeed: -100..100, zoomSpeed: -1, 0, 1
+# Mirrors send_cmd() in main.c exactly, including the direction-bit layout.
+xm_send() {
+	panSpeed=$1
+	tiltSpeed=$2
+	zoomSpeed=$3
+
+	command1=0
+	command2=0
+
+	if [ "$panSpeed" -lt 0 ]; then
+		command2=$((command2 | 0x04))
+		panSpeed=$((0 - panSpeed))
+	elif [ "$panSpeed" -gt 0 ]; then
+		command2=$((command2 | 0x02))
+	fi
+	data1=$((panSpeed * 63 / 100))
+
+	if [ "$tiltSpeed" -lt 0 ]; then
+		command2=$((command2 | 0x10))
+		tiltSpeed=$((0 - tiltSpeed))
+	elif [ "$tiltSpeed" -gt 0 ]; then
+		command2=$((command2 | 0x08))
+	fi
+	data2=$((tiltSpeed * 63 / 100))
+
+	if [ "$zoomSpeed" -lt 0 ]; then
+		command2=$((command2 | 0x40))
+	elif [ "$zoomSpeed" -gt 0 ]; then
+		command2=$((command2 | 0x20))
+	fi
+
+	checksum=$(( (ADDR + command1 + command2 + data1 + data2) % 100 ))
+
+	frame=$(byte_esc "$SYNC")$(byte_esc "$ADDR")$(byte_esc "$command1")$(byte_esc "$command2")$(byte_esc "$data1")$(byte_esc "$data2")$(byte_esc "$checksum")$(byte_esc "$TERM_BYTE")
+	printf '%b' "$frame" > "$PORT"
+}
+
+# xm_focus near|far
+# Mirrors set_focus() in main.c - NOTE: main.c computes the checksum from
+# command1=command2=0 *before* setting the near/far bit, so the checksum
+# byte is always 1 for both directions. Reproduced as-is for wire compatibility.
+xm_focus() {
+	command1=0
+	command2=0
+	data1=0
+	data2=0
+	checksum=$(( (ADDR + command1 + command2 + data1 + data2) % 100 ))
+
+	if [ "$1" = "near" ]; then
+		command1=1
+	else
+		command2=$((0x80))
+	fi
+
+	frame=$(byte_esc "$SYNC")$(byte_esc "$ADDR")$(byte_esc "$command1")$(byte_esc "$command2")$(byte_esc "$data1")$(byte_esc "$data2")$(byte_esc "$checksum")$(byte_esc "$TERM_BYTE")
+	printf '%b' "$frame" > "$PORT"
+}
+
+# init[] array from main.c, sent once by init_ptz()
+xm_init() {
+	printf '%b' '\245\173\236\360\357\356\340\364' > "$PORT"
+}
+
+xm_stop() {
+	xm_send 0 0 0
+}
+
+xm_start() {
+	stty -F "$PORT" "$SPEED" raw -echo -onlcr
+	$DELAY
+	xm_init
+}
+
+xm_left() {
+	xm_send 100 0 0
+	$DELAY
+	xm_stop
+}
+
+xm_right() {
+	xm_send -100 0 0
+	$DELAY
+	xm_stop
+}
+
+xm_up() {
+	xm_send 0 100 0
+	$DELAY
+	xm_stop
+}
+
+xm_down() {
+	xm_send 0 -100 0
+	$DELAY
+	xm_stop
+}
+
+xm_tele() {
+	xm_send 0 0 1
+	$DELAY
+	xm_stop
+}
+
+xm_wide() {
+	xm_send 0 0 -1
+	$DELAY
+	xm_stop
+}
+
+xm_near() {
+	xm_focus near
+	$DELAY
+	xm_stop
+}
+
+xm_far() {
+	xm_focus far
+	$DELAY
+	xm_stop
+}
+
+xm_day() {
+	echo "day: not supported - main.c has no XM send-command for this" >&2
+	exit 1
+}
+
+xm_night() {
+	echo "night: not supported - main.c has no XM send-command for this" >&2
+	exit 1
+}
+
+# Closed dispatch, same stance as btzoom: the verb arrives from j/ptz.cgi's
+# whitelist, but this script must not be the layer that trusts that. The
+# origin execed "xm_$1" raw.
+case "$1" in
+	start|stop|day|night|wide|tele|far|near|up|down|left|right)
+		"xm_$1"
+		;;
+	*)
+		echo "Unknown command: $1"
+		exit 1
+		;;
+esac

@@ -45,7 +45,7 @@
 <%in p/header.cgi %>
 <div id="fw-reset-status" class="alert alert-warning">Do not close, refresh, or navigate away from this page until the process finishes. The camera will reboot automatically.</div>
 <div class="card"><div class="card-body">
-	<h3>Progress</h3>
+	<% card_head "Progress" %>
 	<pre id="output" class="mb-0" data-cmd="<%= $c %>"></pre>
 </div></div>
 

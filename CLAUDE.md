@@ -38,7 +38,7 @@ This is a majestic-side feature; the WebUI just provides the login page and the 
 
     Nothing on the camera is touched until the download is fetched, verified and unpacked. The version this replaced wiped `/var/www` *before* checking anything, so `updatewebui --help` — an unknown branch — 404'd, unzipped nothing, and left the camera with no WebUI at all and whiteouts over the firmware's copies.
 
-    A manifest at `/etc/webui/updatewebui.manifest` records what was installed, which is what lets the next run tell a local edit apart from a file the release simply changed. Local edits are replaced, not merged, but they are archived to `/etc/webui/updatewebui-local-<stamp>.tar.gz` first (`--no-backup` opts out).
+    A manifest at `/etc/webui/updatewebui.manifest` records what was installed, which is what lets the next run tell a local edit apart from a file the release simply changed. Local edits are replaced, not merged, but they are archived to `/etc/webui/updatewebui-local-<stamp>.tar.gz` first (`--no-backup` opts out). On a run with **no** manifest — every camera's first, since the firmware now ships this script — the overlay itself is the record: the rootfs is read-only, so any local edit necessarily lives in the upper layer, and an upper copy whose content differs from what the install leaves behind is archived before it is touched. The installer also mirrors the firmware's **variant** file set (`BUILD_OPTION` in `/etc/os-release`, kept in step with the fixup lists in buildroot's `majestic-webui.mk`): a standard build gets no `fpv-wfb.cgi`/`p/fpv_common.cgi`, an FPV build no `telegram`/`openwall`, and a stale overlay copy of a skipped `/var/www` file is pruned rather than reinstalled.
 - Edits to a running camera can also be made directly under `/var/www/cgi-bin/` and `/usr/sbin/`.
 - There is no local way to run the UI off-camera — every script assumes camera-side binaries (`majestic`, `yaml-cli`, `ipcinfo`, `fw_printenv`, `haserl`, `chpasswd`, `sysupgrade`).
 
@@ -78,7 +78,7 @@ This is the most important file to read before editing anything. It defines:
 - `/etc/crontabs/root` — extensions add/remove their own lines with `sed -i /name/d` then append.
 - `/tmp/webui/` — scratch (sysinfo, schema cache, flash log, signature).
 - `/tmp/system-reboot` — sentinel file; presence triggers the "restart required" banner in `header.cgi`.
-- U-Boot env via `fw_printenv -n` / `fw_setenv` for `ethaddr`, `wlanssid`, `wlanpass`, `upgrade`, `sensor`, `soc`, `gpio_motors`.
+- U-Boot env via `fw_printenv -n` / `fw_setenv` for `ethaddr`, `wlanssid`, `wlanpass`, `upgrade`, `sensor`, `soc`, and the PTZ family `ptz_control`/`ptz_gpio`/`ptz_port`/`ptz_speed`/`ptz_profile` (legacy aliases `gpio_motors`, `ptz`).
 
 ### Talking to Majestic
 
@@ -211,6 +211,21 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   matters: WebRTC negotiates, so it can fail where MSE cannot (Firefox offers
   only H.264 Baseline whatever it can decode), which is why a player reporting
   `'fallback'` asks for the other transport rather than for MJPEG.
+  WebRTC's `?stream=` is a **preference, not an order** — the camera can serve
+  the other channel. An upcoming majestic states the served channel outright in
+  a `served` signalling reply (channel, requested, reason code) right after the
+  SDP answer; the player adopts it internally (so re-picking the fallen-from
+  channel is a real renegotiation, not a no-op) and hands it to the page via
+  `onServed`. The page then treats it as authoritative — the chip (including
+  Auto's always-on label, previously silent when the two channels shared a
+  size), the adaptation toast's baseline, and on a mismatch against an explicit
+  pick the radios move to the served channel (by writing `.checked`, never by
+  firing `change` — `goToStream()` must not re-enter and the remembered
+  preference must stay the viewer's own) while the dismissible `#mj-served`
+  toast names why (`unavailable` / `undecodable`; the page words the sentence).
+  In Auto the radios and message stay untouched — nothing was betrayed and the
+  chip is the disclosure. On an older majestic no `served` ever arrives and the
+  frame-size inference below stands, radios unmoved — today's behaviour.
   `mj-settings.cgi` does **not** share the `preview()` markup — its live tab is
   built client-side by `renderLive()` in `mj-settings.js` (`.mj-live-video`
   elements), though it loads all four preview player scripts. `preview()`
@@ -229,6 +244,37 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   (`CODEC W×H · fps`; fps is live WebRTC stats via a loosened `onStats` gate,
   or the configured `videoN.fps` on MSE, which measures nothing), the stats
   panel top-left as translucent glass, the adaptation toast `#mj-adapt`
+  — **the stats panel is `preview-stats.js`**, the "network story": the CGI
+  emits only the empty `#mj-stats` shell and the module builds and fills the
+  interior (delay headline with a camera/network/buffer/screen breakdown —
+  the screen leg is decode plus the measured compositor/vsync wait from
+  `requestVideoFrameCallback`'s `expectedDisplayTime − presentationTime`,
+  falling back to half a refresh interval measured by the rAF sliding-window
+  method openipc.org's high-resolution-timer tool uses; decode, screen wait
+  and display Hz are split out in the fine print, and panel hardware latency
+  is invisible to JS, which is why the headline says "at least"; the
+  capacity story `link can carry → set to → sending at → you receive` with a
+  120 s chart; radio and per-consumer egress off the 2 s `mjMetricsSubscribe`
+  heartbeat; the old table's counters as fine print). It follows the
+  `preview-adapt.js` contract exactly — self-contained IIFE, lazy DOM, one
+  guarded `window.MajesticStats.tick()` from preview-page.js's `onStats`
+  (plus `reset()` beside every `MajesticAdapt.reset()` and `setOpen()` from
+  `syncStatsCtl`) — so the vm tests need no new `IDS` entries; its own
+  arithmetic is covered by `tests/preview-stats.test.js`. The camera's half
+  arrives in the schema-free stats line (new keys `bytes= abytes= rtx=` and
+  `c2s=` — capture→send ms, `~`-prefixed when it is an estimated lower bound
+  rather than a kernel-anchored measurement; every key absent on an older
+  majestic degrades to `-` or a hidden row), and per-consumer counts/egress
+  come from `/metrics` (`webrtc_sessions_total`, `webrtc_tx_bytes`,
+  `rtsp_clients_total`, `rtsp_tx_bytes`, `ws_video_clients_total`,
+  `outgoing_streams_total`/`outgoing_tx_bytes` for RTMP/RTP pushes; a
+  zero-count consumer gets no row — the section lists who IS being
+  served). Series
+  ink is hardcoded to the dark dashboard's `--st-c*` values (the glass is
+  theme-invariant; validated against it), drawn with `www/a/charts.js` — the
+  sparkline/axis-chart primitives extracted from `status.js`, now shared:
+  colors are per-instance arguments and the debounced resize redraw lives in
+  charts.js, so load `/a/charts.js` before any consumer —
   under the chip (`preview-adapt.js` — event-driven off the camera's `enc=`
   stats counter, it reports the moment the shared encoder's bitrate moved,
   in which direction, and whose connection moved it; it replaced a standing
@@ -243,30 +289,53 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   `tests/auto-source.test.js` and `tests/staging.test.js` execute
   `preview-page.js` in a bare `vm` with a stubbed `$` over an `IDS` list: any
   new element preview-page.js touches must be `$`-guarded and, for coverage,
-  added to both `IDS` lists. PTZ is `p/motor.cgi` (markup only, hidden) +
+  added to both `IDS` lists. Every group in the bar is black glass with a
+  micro-caps label and, where it has state, a lit indicator — the same
+  vocabulary the Live adjustments deck uses — but the markup is still
+  input-behind-a-label, because `preview-page.js` drives `.checked`/`.disabled`
+  on those inputs and they are what keeps the groups keyboard-reachable. The
+  bar stays overlaid at **every** width, since it lives inside `.mj-stage` and
+  that is what carries it into fullscreen; below `md` it scrolls sideways
+  rather than wrapping into rows over a 186px-tall picture, with the icon
+  group `position: sticky; right: 0` so fullscreen is never what falls off the
+  scrollport. PTZ is `p/motor.cgi` (markup only, hidden) +
   `preview-ptz.js`, which relocates the pad(s) into the stage's `#mj-ptz`
   mount: Pointer Events with capture for press-and-hold, arrow keys only
   while the stage itself has focus (the bar's slider and radios own them
-  otherwise), `apiFetch` to `j/ptz.cgi`. **Three PTZ backends**, detected in
+  otherwise), `apiFetch` to `j/ptz.cgi`. **The pad is the thing that moves off
+  the picture on a phone**, because unlike the bar it is always visible: below
+  `md` it sits under the stage (`top: 100%`), the stage reserves the room with
+  a `:has()`-conditional `margin-bottom`, and — since `.mj-stage` is
+  `overflow: hidden`, which is what rounds the picture's corners — that clip
+  moves onto `.mj-stage-media` and `.mj-bar` for the duration. `:fullscreen`
+  puts the pad back on the video, the one phone case with height to spare. **Four PTZ backends**, detected in
   `common.cgi:update_caminfo` into `ptz_backend` (cached in sysinfo like
   `ptz_support`). The switch is U-Boot `ptz_control` (#227): `gpio`
-  (`gpio-motors` binary; pins in `ptz_gpio` — though the binary itself still
-  reads legacy `gpio_motors`, so set that one until the firmware utility
-  learns the new name), `pelco-d` (`/usr/bin/btzoom`; `ptz_port` default
-  `/dev/ttyAMA0`, `ptz_speed` default 115200 from a whitelist of standard
-  rates), `motor` (`/usr/bin/motor`; profile in `ptz_profile`, legacy `ptz`
-  value as fallback), or `none`. With `ptz_control` unset the pre-#227
-  detection stands (legacy `gpio_motors`/`ptz` vars), so field cameras keep
-  their pads; `j/ptz.cgi` honours the same switch. `gpio` and `motor` are
+  (`gpio-motors` binary; pins in `ptz_gpio`, legacy `gpio_motors` accepted
+  as an alias on both sides since firmware#2341), `pelco-d`
+  (`/usr/bin/btzoom`; `ptz_port` default `/dev/ttyAMA0`, `ptz_speed`
+  default 115200 from a whitelist of standard rates), `pelco-xm`
+  (`/usr/bin/btzoom-xm`, the XiongMai near-Pelco UART protocol from
+  sandbox#31 — same nine verbs and the same pad, its own framing and
+  checksum, `ptz_port` default `/dev/ttyAMA1`), or `motor`
+  (`/usr/bin/motor`; profile in `ptz_profile`, legacy `ptz` value as
+  fallback). **Unset means no PTZ**, exactly like `none` — the reporter of
+  #227 ruled that a camera without `ptz_control` shows no pad, so the old
+  auto-detection from `gpio_motors`/`ptz` alone is gone and a legacy-configured
+  camera must `fw_setenv ptz_control <method>` once; `j/ptz.cgi` honours the
+  same switch. `gpio` and `motor` are
   stepped eight-way pads speaking `j/ptz.cgi?h=&v=` (validated as small
-  signed ints); `pelco` is the community Pelco-D serial mod — four
+  signed ints); `pelco` covers both serial variants — four
   directions, zoom and focus, each a fixed timed pulse — speaking
-  `j/ptz.cgi?act=<verb>` against a closed whitelist (btzoom execs
-  `pelcoD_$1`, so the verb must never pass through raw). `bin/btzoom` ships
-  in this repo (adopted from OpenIPC/sandbox `scripts/pelcoD`) so a Pelco
-  camera needs only `fw_setenv ptz_control pelco-d`. A held
+  `j/ptz.cgi?act=<verb>` against a closed whitelist (the scripts dispatch on
+  the verb, so it must never pass through raw). `bin/btzoom` and
+  `bin/btzoom-xm` ship in this repo (adopted from OpenIPC/sandbox
+  `scripts/pelcoD`, the xm variant hardened to btzoom's standard: shared
+  `/tmp/btzoom.lock`, `ptz_port`/`ptz_speed`, idempotent per-command `stty`)
+  so a Pelco camera needs only `fw_setenv ptz_control pelco-d` (or
+  `pelco-xm`). A held
   Pelco button strings pulses end-to-end via the one-request-in-flight
-  guard — btzoom answers only after its pulse ends. To render either pad on
+  guard — the script answers only after its pulse ends. To render either pad on
   a camera without hardware: set the env vars, `touch`+`chmod +x` fake
   binaries, and remove `/tmp/webui/sysinfo.txt` (no reboot needed).
 - **Two clocks, and the page says which one it is printing.** Every second in

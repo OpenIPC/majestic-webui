@@ -6,13 +6,13 @@
 <div class="row g-4">
 	<div class="col-12 col-lg-7">
 		<div class="card h-100"><div class="card-body">
-			<h3>Running configuration</h3>
+			<% card_head "Running configuration" %>
 			<% ex "cat $(get_config)" %>
 		</div></div>
 	</div>
 	<div class="col-12 col-lg-5">
 		<div class="card h-100"><div class="card-body">
-			<h3>Changes from defaults</h3>
+			<% card_head "Changes from defaults" %>
 			<%
 				diff $(get_config /rom) $(get_config) > /tmp/majestic.patch
 				ex "cat /tmp/majestic.patch"

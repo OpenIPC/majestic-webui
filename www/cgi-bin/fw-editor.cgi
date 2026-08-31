@@ -43,7 +43,9 @@ fi
 
 <%in p/header.cgi %>
 <div class="card"><div class="card-body">
-	<h3 class="text-break">Text editor<% [ -n "$editor_file" ] && echo " — <code>${editor_file}</code>" %></h3>
+	<%# the file being edited is the card's state, so it goes in the head's note
+	    rather than trailing the title and wrapping it %>
+	<% card_head "Text editor" "$(attr_escape "$editor_file")" %>
 	<form action="<%= $SCRIPT_NAME %>" method="post">
 		<% field_hidden "action" "save" %>
 		<% field_hidden "editor_file" "$editor_file" %>

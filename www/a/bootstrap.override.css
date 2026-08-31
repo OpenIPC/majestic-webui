@@ -55,10 +55,18 @@
 	height: 2.5rem;
 }
 
+/* Hints sit under the control they explain and are held to a readable measure:
+   full-column-width help set at nearly the size of the label above it competes
+   with the field rather than supporting it. */
 .hint {
-	font-size: 0.875rem;
-	margin-top: 0.2rem;
+	/* block because the CGI helpers emit it as a <span> — without this the
+	   max-width below does nothing and the hint runs the card's full width */
+	display: block;
+	max-width: 22rem;
+	margin-top: 0.35rem;
 	margin-bottom: 0;
+	font-size: 0.78125rem;
+	line-height: 1.45;
 }
 
 .range span.show-value {
@@ -83,6 +91,28 @@
 	padding-left: 0.25rem;
 }
 
+/* Bootstrap paints the track in --bs-secondary-bg, which is now what a card is
+   painted in — so on a card the track disappeared and a slider was a thumb
+   floating in nothing (fpv-wfb's TX Power, at value 1 of 55, looked like a stray
+   dot). A translucent body colour reads against either surface and in both
+   themes. The thumb takes the brand accent for the same reason the switch does:
+   the compiled subset carries #0d6efd literally and never reads --bs-primary. */
+.form-range::-webkit-slider-runnable-track {
+	background-color: rgba(var(--bs-body-color-rgb), 0.18);
+}
+
+.form-range::-moz-range-track {
+	background-color: rgba(var(--bs-body-color-rgb), 0.18);
+}
+
+.form-range::-webkit-slider-thumb {
+	background-color: var(--bs-primary);
+}
+
+.form-range::-moz-range-thumb {
+	background-color: var(--bs-primary);
+}
+
 /* small integers (ports, timeouts, sizes…) don't need the full card width */
 .number .input-group {
 	max-width: 10rem;
@@ -100,9 +130,16 @@
 }
 
 /* mj-settings rows put the per-field reset on the same line as the control
-   (.mj-ctl), so the caps above have to move onto the wrapper — capping only the
-   inner control would let .mj-ctl-in keep the full width and strand the ↺ out at
-   the card edge, attached to nothing. */
+   (.mj-ctl); the width caps below are on the wrapper rather than on the control
+   itself, or a select would stretch to the card edge.
+
+   The reset used to hug the end of the control, which meant it landed wherever
+   that control's cap happened to put it — six different x-positions down one
+   ISP column, because a number stops at 10rem, a select at 16, an array at 20
+   and a switch at its own width. It is pinned to the column's right edge now
+   (margin-left: auto on .mj-reset), so a column of resets is a rail rather than
+   a scatter. That only reads as deliberate because every row shares the edge:
+   the Live deck's rows already align their ↺ the same way. */
 .mj-ctl {
 	display: flex;
 	align-items: center;
@@ -126,19 +163,75 @@
 	max-width: none;
 }
 
+/* Text and password had no ceiling at all, which on the CGI pages meant a
+   hostname — and an IP address — in a 712px box, and in the settings form a
+   446px box holding "1". A field's width is a hint about what belongs in it. */
+.string .mj-ctl-in,
+.password .mj-ctl-in {
+	max-width: 20rem;
+}
+
 .array .mj-ctl-in {
 	max-width: 20rem;
 }
 
-/* A switch is as wide as its own label, so the glyph hugs the text instead of
-   sitting a card-width away from it. Shrink stays enabled (0 *1* auto): a
-   switch carries its label inline, unlike every other row where the <label> is
-   a block above the control and wraps on its own, so a no-shrink wrapper would
-   size to the unwrapped text and spill out of the column — which the 63-char
-   rtsp.fecAdaptive title did. min-width comes from .mj-ctl-in above, without
-   which flex-shrink alone still cannot go under the content width. */
+/* A boolean's label is a block above the switch now, like every other type's,
+   so the wrapper holds the switch and the lit word and nothing else. */
 .boolean .mj-ctl-in {
+	display: flex;
 	flex: 0 1 auto;
+	align-items: center;
+	gap: 0.55rem;
+}
+
+/* The word beside the switch. A switch states its position; it does not state
+   what the position means, and "Off" next to a lit dot is the vocabulary the
+   Live bar's toggles already use. */
+/* The "?" beside a WFB label. It was a filled secondary badge carrying a
+   Bootstrap tooltip that has not worked since the JS bundle was dropped; the
+   text comes from the title attribute, and the mark now reads as part of the
+   micro-caps label rather than a chip stuck to it. */
+.mj-help {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1rem;
+	height: 1rem;
+	margin-left: 0.25rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: 50%;
+	color: var(--bs-tertiary-color);
+	font-size: 0.625rem;
+	font-weight: 600;
+	letter-spacing: 0;
+	cursor: help;
+	vertical-align: middle;
+}
+
+.mj-help:hover {
+	border-color: var(--bs-primary);
+	color: var(--bs-primary);
+}
+
+.mj-state {
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-state-on {
+	color: var(--bs-body-color);
+}
+
+/* The switch is the most repeated control in the form, and it was Bootstrap's
+   stock #0d6efd rather than the brand indigo: the compiled subset carries that
+   colour literally, because the theme swaps --bs-primary at runtime and the
+   compiled rule never reads it. Every other accent on the page already does. */
+.form-check-input:checked {
+	background-color: var(--bs-primary);
+	border-color: var(--bs-primary);
 }
 
 .x-small {
@@ -150,21 +243,34 @@ body > main > .container > h2 {
 	margin: 2rem 0 1.5rem;
 }
 
+/* The read-out beside a form — "Current connection", the firmware versions,
+   a tunnel's state. It is the same job the Live deck's readouts do, so it
+   reads the same way: the term in the micro-caps every label on the page now
+   uses, and the value in the mono the deck sets its numbers in, right-aligned
+   so a column of addresses lines up on its own edge instead of ragging against
+   terms of different lengths. */
 dl.list {
-	display: flex;
-	flex-flow: row wrap;
-	justify-content: space-between;
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 0.55rem 1.25rem;
 	align-items: baseline;
+	margin-bottom: 0;
 }
 
 dl.list dt {
-	flex-grow: 1;
-	width: 33%;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
 }
 
 dl.list dd {
-	flex-grow: 2;
-	width: 66%;
+	margin-bottom: 0;
+	text-align: right;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.84375rem;
+	overflow-wrap: anywhere;
 }
 
 pre {
@@ -209,10 +315,59 @@ textarea {
 	margin-left: auto;
 }
 
+/* A card's heading, in the same micro-caps the settings deck and the rail's
+   categories use. It was 1.15rem secondary body text — heavier than the labels
+   under it and a second competing title beside the page's own <h2>. Restyled
+   rather than rewritten per page, so the cards that still emit a bare <h3>
+   (fw-reset, fw-editor, mj-configuration, tool-recordings) come along and no
+   page is left as the odd one out. */
 .card > .card-body h3 {
-	color: var(--bs-secondary-color);
-	font-size: 1.15rem;
 	margin-bottom: 1rem;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	line-height: 1.4;
+	text-transform: uppercase;
+}
+
+/* The foot of a card: the action at the right end, on its own surface, with an
+   optional note on the left. A save button used to sit loose under the last
+   field with nothing to separate it from one. */
+.mj-foot {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin: 1.25rem -1rem -1rem;
+	padding: 0.875rem 1rem;
+	background: var(--bs-tertiary-bg);
+	border-top: 1px solid var(--bs-border-color);
+	border-radius: 0 0 var(--bs-border-radius-lg) var(--bs-border-radius-lg);
+}
+
+.mj-foot .btn {
+	margin-left: auto;
+}
+
+.mj-foot-note {
+	font-size: 0.78125rem;
+	line-height: 1.4;
+	color: var(--bs-tertiary-color);
+}
+
+/* The switch's word. On the schema-driven form mj-settings.js writes it; these
+   pages are rendered by the server and have no JS to do it, so the span is
+   emitted empty and CSS fills it from the checkbox's own state. */
+.mj-state:empty::after {
+	content: 'Off';
+}
+
+.mj-ctl-in:has(.form-check-input:checked) .mj-state:empty::after {
+	content: 'On';
+}
+
+.mj-ctl-in:has(.form-check-input:checked) .mj-state:empty {
+	color: var(--bs-body-color);
 }
 
 .storage-bar {
@@ -319,23 +474,80 @@ pre#output[data-cmd] {
 	border-left-color: var(--bs-warning);
 }
 
-/* The per-field reset is a bare ↺ beside its control. It used to be a "↺ reset"
-   link on a line of its own, which cost a row per field — about 160px over a
-   section the size of ISP / Exposure — and repeated the word 150-odd times down
-   the page. Muted until hovered so it never competes with the value. */
+/* The field's name, in the micro-caps the Live deck names its knobs in and the
+   rail names its categories in. It was body text at 1rem — the same size as the
+   value underneath it, so a column read as an alternating list of two equals
+   rather than as labelled controls. */
+.mj-row > .form-label {
+	margin-bottom: 0.3rem;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	line-height: 1.5;
+	text-transform: uppercase;
+}
+
+.mj-row.mj-dirty > .form-label {
+	color: var(--bs-secondary-color);
+}
+
+/* Why a section is half empty, said once at the top of it rather than left for
+   the reader to wonder about: image is two rows because six of its eight knobs
+   are x-live and render on the Live leaf with the picture. */
+.mj-lifted {
+	max-width: 46rem;
+	margin: 0.9rem 0 0;
+	padding: 0.6rem 0.75rem;
+	background: var(--bs-tertiary-bg);
+	border-radius: var(--bs-border-radius);
+	color: var(--bs-secondary-color);
+	font-size: 0.8125rem;
+	line-height: 1.45;
+}
+
+/* The head's stock count goes amber for the same reason a row's rule does. */
+.mj-live-note.mj-off-stock {
+	color: var(--bs-warning);
+}
+
+/* The per-field reset. It used to be a "↺ reset" link on a line of its own,
+   which cost a row per field — about 160px over a section the size of ISP /
+   Exposure — and repeated the word 150-odd times down the page. Now it is the
+   Live deck's glyph on the control's line, pinned to the column's right edge,
+   and muted until hovered so it never competes with the value. */
 .mj-reset {
 	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.375rem;
+	height: 1.375rem;
+	margin-left: auto;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
 	line-height: 1;
 	text-decoration: none;
 	color: var(--bs-tertiary-color);
+	opacity: 0.35;
+	transition: opacity var(--mj-ease), color var(--mj-ease);
 }
 
 .mj-reset:hover:not(:disabled) {
+	background: var(--bs-tertiary-bg);
 	color: var(--bs-primary);
+	opacity: 1;
+}
+
+.mj-reset:focus-visible {
+	opacity: 1;
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
 }
 
 .mj-reset:disabled {
-	opacity: 0.35;
+	opacity: 0.12;
 }
 
 /* ── settings navigation tree ───────────────────────────────────────────────
@@ -377,10 +589,22 @@ pre#output[data-cmd] {
 	background: var(--bs-tertiary-bg);
 }
 
+/* Marked by a surface and an indigo edge rather than filled with indigo. A
+   solid 306px slab was the loudest thing on a page whose subject is a list of
+   settings, and it spent the accent colour on "you are here" — which is the one
+   thing on the page nobody has to be told twice. */
 .mj-tree-sub .nav-link.active,
 .mj-tree-sub .nav-link.active:hover {
-	color: #fff;
-	background: var(--bs-primary);
+	color: var(--bs-body-color);
+	background: var(--bs-tertiary-bg);
+	border-left: 2px solid var(--bs-primary);
+	border-radius: 0 var(--bs-border-radius) var(--bs-border-radius) 0;
+	font-weight: 500;
+}
+
+/* the 2px edge would otherwise shift the label of the active row only */
+.mj-tree-sub .nav-link {
+	border-left: 2px solid transparent;
 }
 
 /* the count of fields a search matched inside a section: without it a section
@@ -394,7 +618,7 @@ pre#output[data-cmd] {
 }
 
 .nav-link.active .mj-tree-n {
-	color: rgba(255, 255, 255, 0.75);
+	color: var(--bs-secondary-color);
 }
 
 .mj-tree-caret {
@@ -517,6 +741,23 @@ mark {
    mj-settings.js, rather than a CSS multi-column box: a column box re-balances
    itself whenever a visibleWhen row appears or disappears, which shuffles
    unrelated rows across the fold — see layoutCols() (#189). */
+/* Every .card in the repo paints as the page, and this is the mechanism:
+   Bootstrap re-declares --bs-card-bg *on .card itself*, so the theme's :root
+   value never reaches it. Measured on the running page — #1c1f27 at the root,
+   #14161c on the element — which is also why `background: var(--bs-card-bg)`
+   does not fix it: read from the card, that variable is already the body
+   background. The Live deck gets away with it only because .mj-live-deck is
+   not a .card and inherits the root value.
+
+   So take the surface from a token .card does not shadow. This was scoped to
+   the settings form when only that page needed it; every card page needs it,
+   and a card that is a surface on one page and an outline on the next is the
+   inconsistency this set of changes exists to remove. */
+.card {
+	background: var(--bs-secondary-bg);
+	border-color: var(--bs-border-color);
+}
+
 .mj-cols {
 	display: flex;
 	flex-direction: row;
@@ -529,6 +770,27 @@ mark {
 .mj-cols > .mj-col {
 	flex: 1 1 0;
 	min-width: 0;
+}
+
+/* A divider in the middle of the gutter, as the Live deck has between its two
+   panels. The negative margin puts the rule at the halfway point without taking
+   width off either column, so the two stay equal. */
+@media (min-width: 768px) {
+	.mj-cols > .mj-col + .mj-col {
+		margin-left: -1.25rem;
+		padding-left: 1.25rem;
+		border-left: 1px solid var(--bs-border-color);
+	}
+
+	/* Few enough rows to stay in one column: no divider, no empty half, and a
+	   measure that does not run a two-row section across the whole card. */
+	.mj-cols.mj-solo > .mj-col {
+		flex: 0 1 28rem;
+	}
+
+	.mj-cols.mj-solo > .mj-col + .mj-col {
+		display: none;
+	}
 }
 
 /* below md the two columns stack, which reads exactly like the single column
@@ -613,16 +875,28 @@ mark {
 	margin-bottom: 0.6rem;
 }
 
-/* The leaf's heading is a real <h3> (revealSection focuses it), so its default
-   heading margin and size have to come back off to read as a group label. */
-.mj-live-head h3 {
+/* The heading is a real <h3> (revealSection focuses it), so its default heading
+   margin has to come back off to sit on the head's baseline. Size and colour
+   now come from `.card > .card-body h3` itself, which is the same micro-caps —
+   before that, its (0,2,2) silently restored 18.4px secondary text over
+   .mj-cap on every card that carried one. */
+.mj-live-head h3,
+.card > .card-body .mj-live-head h3 {
 	margin: 0;
 	line-height: 1.4;
 }
 
 .mj-live-grp-head {
 	align-items: baseline;
-	margin-bottom: 0.7rem;
+	/* A group heading belongs to the rows under it, so it needs air above and
+	   little below. On the server-rendered pages it is often the first thing
+	   after the card's own head, where that much air would just be a gap. */
+	margin: 1.5rem 0 0.7rem;
+}
+
+.mj-live-head + .mj-live-grp-head,
+.mj-live-head + form > .mj-live-grp-head:first-child {
+	margin-top: 0.9rem;
 }
 
 .mj-live-rule {
@@ -641,6 +915,9 @@ mark {
    of the flow rather than hidden, so they stay focusable. */
 .mj-seg {
 	display: flex;
+	/* the control is as wide as its options — as a block child of .mj-ctl-in it
+	   would otherwise stretch the width of the card */
+	width: fit-content;
 	gap: 2px;
 	padding: 2px;
 	background: var(--bs-tertiary-bg);
@@ -657,12 +934,22 @@ mark {
 }
 
 .mj-seg-lbl {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin: 0;
 	padding: 0.3rem 0.8rem;
 	border-radius: var(--bs-border-radius-sm);
 	color: var(--bs-secondary-color);
 	font-size: 0.75rem;
 	font-weight: 500;
+	white-space: nowrap;
 	cursor: pointer;
+}
+
+.mj-seg-lbl:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.06);
+	color: var(--bs-body-color);
 }
 
 .mj-seg-in:checked + .mj-seg-lbl {
@@ -1461,14 +1748,16 @@ mark {
 	top: 0.5rem;
 	right: 0.5rem;
 	z-index: 5;
-	padding: 0.15rem 0.5rem;
-	border-radius: 0.5rem;
-	background: rgba(0, 0, 0, 0.55);
-	color: #fff;
-	font-size: 0.8rem;
+	padding: 0.4rem 0.65rem;
+	border-radius: var(--bs-border-radius);
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	color: #e6e8ee;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.75rem;
 	font-variant-numeric: tabular-nums;
 	pointer-events: none;
-	backdrop-filter: blur(4px);
+	backdrop-filter: blur(10px);
 }
 
 .mj-stats-overlay {
@@ -1476,30 +1765,153 @@ mark {
 	top: 0.5rem;
 	left: 0.5rem;
 	z-index: 5;
-	max-width: min(90%, 34rem);
+	width: min(92%, 21rem);
 	/* Leave the bar's strip free below, and scroll rather than grow: on a
 	   short viewport the numbers yield, not the picture. */
 	max-height: calc(100% - 5rem);
 	overflow: auto;
-	background: rgba(0, 0, 0, 0.6);
-	color: #fff;
-	padding: 0.5rem 0.75rem;
-	border-radius: 0.5rem;
-	backdrop-filter: blur(4px);
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	color: #e6e8ee;
+	padding: 0.15rem 0.8rem;
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
 }
 
-.mj-stats-overlay .table {
-	/* The variable, not `color`: Bootstrap's cell rule reads
-	   --bs-table-color (emphasis-black in light theme) and would win over an
-	   inherited colour — black text on black glass. */
-	--bs-table-color: #fff;
-	--bs-table-bg: transparent;
+/* The network story (preview-stats.js). Every color here is literal for the
+   same reason the glass recipe's are: the surface is the picture, not the
+   page, so the theme must not repaint the ink. Series colors live in the
+   script; these are the text tokens. */
+.mj-ns section {
+	padding: 0.55rem 0;
 }
-
-/* Three classes, because Bootstrap's `.table>:not(caption)>*>*` cell rule
-   outweighs a lone class and would repaint the keys full white. */
-.mj-stats-overlay .table .mj-stat-key {
-	color: rgba(255, 255, 255, 0.7);
+.mj-ns section + section {
+	border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+.mj-ns-cap {
+	/* The bar's micro-caps vocabulary, restated because .mj-cap reads the
+	   page theme's tertiary color — wrong on glass in light theme. */
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.55);
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 0.5rem;
+}
+.mj-ns-grade {
+	/* The word carries the meaning; the color only underlines it. */
+	letter-spacing: 0.04em;
+}
+.mj-ns-hero {
+	display: flex;
+	align-items: baseline;
+	gap: 0.3rem;
+	margin-top: 0.1rem;
+}
+.mj-ns-num {
+	font-size: 1.65rem;
+	font-weight: 600;
+	line-height: 1.1;
+	font-variant-numeric: tabular-nums;
+}
+.mj-ns-unit {
+	color: rgba(255, 255, 255, 0.55);
+	font-weight: 600;
+}
+.mj-ns-sub {
+	margin-left: auto;
+	text-align: right;
+	color: rgba(255, 255, 255, 0.55);
+	font-size: 0.72rem;
+	max-width: 55%;
+}
+/* The journey bar: four fills, 2px of glass between them so adjacent
+   segments never rely on hue alone. */
+.mj-ns-bar {
+	display: flex;
+	gap: 2px;
+	height: 6px;
+	margin: 0.45rem 0 0.3rem;
+}
+.mj-ns-bar > span {
+	border-radius: 3px;
+	min-width: 3px;
+}
+.mj-ns-legend {
+	display: flex;
+	flex-wrap: wrap;
+	column-gap: 0.7rem;
+	row-gap: 0.1rem;
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.55);
+}
+.mj-ns-legend i {
+	display: inline-block;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 2px;
+	margin-right: 0.3rem;
+}
+.mj-ns-legend b,
+.mj-ns-row b {
+	font-weight: 600;
+	color: #e6e8ee;
+	font-variant-numeric: tabular-nums;
+}
+.mj-ns-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+	margin-top: 0.25rem;
+}
+.mj-ns-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 0.75rem;
+}
+.mj-ns-row > span {
+	color: rgba(255, 255, 255, 0.62);
+	/* The label holds its line; a long value (the adaptation arrow) wraps on
+	   its own side instead of breaking the label mid-phrase. */
+	white-space: nowrap;
+}
+.mj-ns-row > b {
+	text-align: right;
+}
+.mj-ns-spark {
+	height: 24px;
+	margin-top: 0.4rem;
+}
+.mj-ns-spark svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+.mj-ns-chart {
+	margin-top: 0.45rem;
+}
+.mj-ns-chart svg {
+	display: block;
+	width: 100%;
+}
+.mj-ns-chart text {
+	font-family: var(--bs-font-monospace);
+	font-size: 9px;
+	fill: rgba(255, 255, 255, 0.5);
+}
+.mj-ns-note {
+	margin-top: 0.35rem;
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.55);
+}
+.mj-ns-fine {
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.45);
+	white-space: pre-line;
+	font-variant-numeric: tabular-nums;
 }
 
 /* The adaptation toast: under the chip, same glass. Hover pins it and click
@@ -1513,10 +1925,11 @@ mark {
 	/* Room on the right for the corner-anchored ×. */
 	padding: 0.3rem 1.5rem 0.3rem 0.6rem;
 	max-width: min(75%, 22rem);
-	background: rgba(0, 0, 0, 0.65);
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
 	color: rgba(255, 255, 255, 0.9);
-	border-radius: 0.4rem;
-	backdrop-filter: blur(4px);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
 	cursor: pointer;
 	animation: mj-adapt-in 0.2s ease;
 }
@@ -1546,6 +1959,214 @@ mark {
 @keyframes mj-adapt-in {
 	from { opacity: 0; transform: translateX(0.5rem); }
 	to { opacity: 1; transform: none; }
+}
+
+/* The served-channel message shares the toast's glass but its own slot,
+   below the adaptation toast, so a fallback and a rate change can both be
+   on screen without either covering the other. */
+.mj-served-toast {
+	top: 5.2rem;
+}
+
+/* ── on-video chrome ────────────────────────────────────────────────────────
+   The same vocabulary the Live adjustments deck uses — black glass, micro-caps
+   labels, a lit indicator where there is state, stroked 20px icons — so the
+   two pages read as one product. Deliberately identical in both themes,
+   because the background here is the picture, not the page surface.
+
+   What this replaces was seven Bootstrap btn-outline-light groups: white
+   outlines and 14px sentence case, strung across the video. */
+.mj-hud {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 3px;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
+}
+
+/* Pushes the transport group and everything after it to the far end. */
+.mj-bar-end {
+	margin-left: auto;
+}
+
+/* Segmented control (stream, transport). The inputs stay radios — they are
+   what makes the group reachable and what preview-page.js drives — but are
+   taken out of the flow rather than display:none'd, which would drop them out
+   of the tab order. */
+.mj-seg-in {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
+}
+
+/* Scoped to .mj-hud: these colours are literal because the ground behind them
+   is the picture, not a themed surface. Unscoped they also captured the
+   segmented controls that sit on a card — the settings stream picker and the
+   theme picker — where a hardcoded #b9bec9 is simply wrong on light. Those keep
+   the token-driven .mj-seg-lbl higher up this file. */
+.mj-hud .mj-seg-lbl,
+.mj-tog {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.45rem 0.8rem;
+	border-radius: var(--bs-border-radius-sm);
+	color: #b9bec9;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	white-space: nowrap;
+	cursor: pointer;
+	user-select: none;
+	margin: 0;
+}
+
+.mj-hud .mj-seg-lbl:hover,
+.mj-tog:hover {
+	background: rgba(255, 255, 255, 0.07);
+	color: #fff;
+}
+
+.mj-hud .mj-seg-in:checked + .mj-seg-lbl,
+.mj-tog-in:checked + .mj-tog {
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+}
+
+.mj-hud .mj-seg-in:focus-visible + .mj-seg-lbl,
+.mj-tog-in:focus-visible + .mj-tog {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+}
+
+.mj-hud .mj-seg-in:disabled + .mj-seg-lbl,
+.mj-tog-in:disabled + .mj-tog {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+.mj-tog-in {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.mj-tog-wrap {
+	gap: 0;
+}
+
+/* The indicator is the point of a stateful control: what the camera is doing,
+   readable at a glance without hunting for a pressed-looking button. */
+.mj-led {
+	flex: 0 0 auto;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #6c727d;
+}
+
+.mj-tog-in:checked + .mj-tog .mj-led {
+	background: var(--bs-primary);
+	box-shadow: 0 0 8px var(--bs-primary);
+}
+
+/* Talkback is amber: it is the one control that sends something out. */
+.mj-tog-in:checked + .mj-tog-amber .mj-led {
+	background: var(--bs-warning);
+	box-shadow: 0 0 8px var(--bs-warning);
+}
+
+/* One speaker, two endings — the crossed-out strokes while muted and the
+   waves once sound is on. CSS rather than a JS icon swap, so the only thing
+   preview-page.js has to rewrite is the word. */
+.mj-ic-on,
+.mj-tog-in:checked + .mj-tog .mj-ic-off {
+	display: none;
+}
+
+.mj-tog-in:checked + .mj-tog .mj-ic-on {
+	display: inline;
+}
+
+/* Volume rides inside the audio glass, so muting and level read as one
+   control rather than two things that happen to sit next to each other. */
+.mj-vol {
+	width: 5.25rem;
+	height: 1.25rem;
+	margin: 0 0.6rem 0 0.35rem;
+	padding: 0;
+	background: transparent;
+	-webkit-appearance: none;
+	appearance: none;
+	cursor: pointer;
+}
+
+.mj-vol::-webkit-slider-runnable-track {
+	height: 4px;
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.25);
+}
+
+.mj-vol::-moz-range-track {
+	height: 4px;
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.25);
+}
+
+.mj-vol::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	width: 12px;
+	height: 12px;
+	margin-top: -4px;
+	border: 0;
+	border-radius: 50%;
+	background: #fff;
+}
+
+.mj-vol::-moz-range-thumb {
+	width: 12px;
+	height: 12px;
+	border: 0;
+	border-radius: 50%;
+	background: #fff;
+}
+
+.mj-vol:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.mj-hud-ico {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.125rem;
+	height: 2.125rem;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: transparent;
+	color: #d8dbe4;
+	cursor: pointer;
+}
+
+.mj-hud-ico:hover {
+	background: rgba(255, 255, 255, 0.07);
+	color: #fff;
+}
+
+/* An icon-only glass group collapses to nothing when both of its buttons are
+   hidden (no JPEG channel, no fullscreen API), so it does not leave an empty
+   pill floating on the picture. */
+.mj-ico-wrap:not(:has(> :not([hidden]))) {
+	display: none;
 }
 
 /* The bar: invisible until pointed at, focused into (keyboard users keep it
@@ -1590,15 +2211,62 @@ mark {
 	}
 }
 
-/* On a phone the five control groups do not fit one bar row, and letting them
-   wrap stacks the bar three rows deep over a stage that is barely 220px tall.
-   One row, scrolled sideways: the picture stays a picture. (After the base
-   .mj-bar rule — same specificity, so order is what makes it win.) */
+/* On a phone the control groups do not fit one bar row — measured at 390px the
+   stage is 330 wide and the groups want ~413 — and letting them wrap stacks the
+   bar two or three rows deep over a stage that is only 186px tall. One row,
+   scrolled sideways. (After the base .mj-bar rule — same specificity, so order
+   is what makes it win.) */
 @media (max-width: 767.98px) {
 	.mj-bar {
 		flex-wrap: nowrap;
 		overflow-x: auto;
 		padding-top: 1.25rem;
+		/* A default scrollbar draws a bright strip the width of the picture.
+		   Kept rather than hidden — with a group cut off at the right edge it
+		   is the second half of the affordance — but drawn as the glass would
+		   draw it. */
+		scrollbar-width: thin;
+		scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+	}
+
+	.mj-bar::-webkit-scrollbar {
+		height: 3px;
+	}
+
+	.mj-bar::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	.mj-bar::-webkit-scrollbar-thumb {
+		border-radius: 2px;
+		background: rgba(255, 255, 255, 0.25);
+	}
+
+	/* Fullscreen is what a phone actually needs from this bar — it is how a
+	   330px stage becomes a usable one — so the icon group is pinned to the
+	   right edge of the scrollport instead of being the thing that falls off
+	   it. What gets cut mid-group is then a stateful control that is already
+	   visible, and a group cut in half is the only scroll affordance a bar
+	   this size can carry. */
+	.mj-ico-wrap {
+		position: sticky;
+		right: 0;
+	}
+
+	/* Thumb-sized while still on the picture. The bar stays overlaid here
+	   rather than moving below it: it lives INSIDE .mj-stage, and that is what
+	   carries it into fullscreen — a bar outside the stage would vanish the
+	   moment anyone went fullscreen, and take the chip and the pad's anchoring
+	   with it. Tap-to-reveal (preview-hero.js) is what keeps the picture clear
+	   the rest of the time. */
+	.mj-seg-lbl,
+	.mj-tog {
+		min-height: 2.75rem;
+	}
+
+	.mj-hud-ico {
+		width: 2.75rem;
+		height: 2.75rem;
 	}
 }
 
@@ -1621,37 +2289,251 @@ mark {
 	gap: 6px;
 }
 
-.mj-ptz-pad {
+/* Both pads are one glass panel with the buttons inside it, rather than a
+   scatter of individually-tinted squares: the cluster reads as one control,
+   and the picture shows through one edge instead of nine. */
+.mj-ptz-pad,
+.mj-ptz-fn {
 	display: grid;
-	grid-template-columns: repeat(3, 2.4rem);
 	gap: 2px;
+	padding: 3px;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
 }
 
-/* Zoom (−/+) over focus (near/far): two columns, reading left-to-right as
-   less/more like the old sandbox pad its users are coming from. */
+.mj-ptz-pad {
+	grid-template-columns: repeat(3, 2.625rem);
+	grid-auto-rows: 2.625rem;
+}
+
+/* Zoom over focus, two columns, each row under a caption naming the pair. */
 .mj-ptz-fn {
-	grid-template-columns: repeat(2, 2.4rem);
+	grid-template-columns: repeat(2, 1fr);
+}
+
+.mj-ptz-group {
+	grid-column: span 2;
+	padding: 0.2rem 0 0.05rem;
+	text-align: center;
+	font-size: 0.5625rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.4);
 }
 
 /* The empty corners of the Pelco plus-shape — grid cells, not buttons, so
    the arrows land where the eight-way pad has its own. */
 .mj-ptz-void {
-	height: 2.4rem;
+	height: 2.625rem;
 }
 
-.mj-ptz-btn {
-	height: 2.4rem;
+.mj-ptz-btn,
+.mj-ptz-fnbtn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	border: 0;
-	border-radius: 0.4rem;
-	background: rgba(0, 0, 0, 0.5);
-	color: #fff;
-	font-size: 1rem;
+	border-radius: var(--bs-border-radius-sm);
+	background: transparent;
+	color: #c8ccd6;
 	touch-action: none;
 	user-select: none;
 }
 
-.mj-ptz-btn:active {
-	background: rgba(255, 255, 255, 0.25);
+/* Zoom and focus carry the verb they send. Held is a real state here: btzoom
+   answers only once its pulse has ended, so the button stays lit that long. */
+.mj-ptz-fnbtn {
+	flex-direction: column;
+	gap: 3px;
+	min-width: 3.875rem;
+	padding: 0.5rem 0.6rem 0.45rem;
+	color: #b9bec9;
+	font-size: 0.625rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+}
+
+.mj-ptz-stop {
+	color: rgba(255, 255, 255, 0.55);
+}
+
+.mj-ptz-btn:hover,
+.mj-ptz-fnbtn:hover {
+	background: rgba(255, 255, 255, 0.1);
+	color: #fff;
+}
+
+.mj-ptz-btn:active,
+.mj-ptz-fnbtn:active,
+.mj-ptz-btn.mj-held,
+.mj-ptz-fnbtn.mj-held {
+	background: rgba(255, 255, 255, 0.22);
+	color: #fff;
+}
+
+.mj-ptz-btn:focus-visible,
+.mj-ptz-fnbtn:focus-visible {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+}
+
+/* On a phone the pad comes off the picture and sits under it, side by side
+   with the zoom/focus cluster. At 390px the stage is 330×186, and steering
+   overlaid costs more than it is worth: a thumb-sized pad is 152px of a 186px
+   picture, and on a Pelco camera the cluster stacked above it needs another
+   130 that do not exist — it rendered over the top edge of the stage. Below
+   the picture there is room for both at full size, and the picture stays a
+   picture. The bar stays overlaid regardless: it is transient (tap to reveal),
+   the pad is not.
+
+   Reserving the space is the stage's margin, conditional on a pad that
+   preview-ptz.js actually mounted — no pad, no gap. A browser without :has()
+   simply keeps today's overlay geometry, which is why the margin and not the
+   positioning carries the condition.
+
+   These have to come AFTER the pad's own rules: same specificity, so it is
+   source order that decides. (A narrower block earlier in this file lost that
+   race silently and sized nothing.) */
+@media (max-width: 767.98px) {
+	/* The stage clips, which is what rounds the picture's corners — so letting
+	   the pad out means moving that clip onto the media and the bar. */
+	.mj-stage {
+		overflow: visible;
+	}
+
+	.mj-stage-media,
+	.mj-bar {
+		border-bottom-left-radius: var(--bs-border-radius);
+		border-bottom-right-radius: var(--bs-border-radius);
+	}
+
+	.mj-stage-media {
+		border-top-left-radius: var(--bs-border-radius);
+		border-top-right-radius: var(--bs-border-radius);
+	}
+
+	/* Measured, not guessed: the pad is 152px with its gap, and a Pelco camera
+	   stacks the zoom/focus cluster beside it at 165. */
+	.mj-stage:has(> .mj-ptz:not([hidden])) {
+		margin-bottom: 10rem;
+	}
+
+	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])) {
+		margin-bottom: 11rem;
+	}
+
+	.mj-ptz {
+		top: 100%;
+		right: 0;
+		bottom: auto;
+		left: 0;
+		flex-direction: row;
+		align-items: flex-start;
+		justify-content: center;
+		gap: 0.5rem;
+		padding-top: 0.5rem;
+	}
+
+	/* Fullscreen is the one phone case with height to spare, and a pad below
+	   the picture there would be below the screen. Put it back on the video. */
+	.mj-stage:fullscreen .mj-ptz {
+		top: auto;
+		bottom: 3.25rem;
+		left: auto;
+		right: 0.5rem;
+		flex-direction: column;
+		align-items: flex-end;
+		padding-top: 0;
+	}
+
+	/* Off the picture, the pad can have the thumb-sized grid it wants. */
+	.mj-ptz-pad {
+		grid-template-columns: repeat(3, 2.75rem);
+		grid-auto-rows: 2.75rem;
+	}
+
+	.mj-ptz-void {
+		height: 2.75rem;
+	}
+}
+
+/* The stats panel below md follows the pad off the picture, and for the same
+   arithmetic: it is taller than the whole 186px stage, so overlaid it would
+   not annotate the picture, it would replace it. Same mechanism as the pad —
+   absolute at top:100%, the stage reserving the room with a :has()-guarded
+   margin — and a fixed height so the reserved margin is a measurement, not a
+   guess; the story scrolls inside it. When the pad is out too, the pad keeps
+   the first slot (it is the always-visible one) and the panel stacks below
+   it. Fullscreen has height to spare and puts the panel back on the video. */
+@media (max-width: 767.98px) {
+	.mj-stats-overlay {
+		top: 100%;
+		left: 0;
+		right: 0;
+		width: auto;
+		height: 22rem;
+		max-height: none;
+	}
+
+	.mj-stage:has(> #mj-stats:not([hidden])) {
+		margin-bottom: 22.5rem;
+	}
+
+	.mj-stage:has(> .mj-ptz:not([hidden])) .mj-stats-overlay {
+		top: calc(100% + 10rem);
+	}
+
+	.mj-stage:has(> .mj-ptz:not([hidden])):has(> #mj-stats:not([hidden])) {
+		margin-bottom: 32.5rem;
+	}
+
+	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])) .mj-stats-overlay {
+		top: calc(100% + 11rem);
+	}
+
+	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])):has(> #mj-stats:not([hidden])) {
+		margin-bottom: 33.5rem;
+	}
+
+	.mj-stage:fullscreen .mj-stats-overlay {
+		top: 0.5rem;
+		left: 0.5rem;
+		right: auto;
+		width: min(92%, 21rem);
+		height: auto;
+		max-height: calc(100% - 5rem);
+	}
+}
+
+/* A Pelco camera puts two panels in that row, and at full size they need 284px
+   against a stage that is the viewport less ~56 — so from about 340px down
+   they hang over both edges of the picture (measured at 320: 284 into 264).
+   They stay side by side and give up 4px of grid instead of stacking, which
+   would put 315px of chrome under a 150px picture. 40px still clears WCAG
+   2.5.8 comfortably. Below 320 the page has other problems; Bootstrap's own
+   floor is 320 too. */
+@media (max-width: 359.98px) {
+	/* Only the pad got shorter here — the zoom/focus cluster is as tall as it
+	   was, so a Pelco camera keeps the 11rem the wider step reserved. */
+	.mj-stage:has(> .mj-ptz:not([hidden])) {
+		margin-bottom: 9.5rem;
+	}
+
+	.mj-ptz-pad {
+		grid-template-columns: repeat(3, 2.5rem);
+		grid-auto-rows: 2.5rem;
+	}
+
+	.mj-ptz-void {
+		height: 2.5rem;
+	}
+
+	.mj-ptz-fnbtn {
+		min-width: 3.25rem;
+		padding: 0.45rem 0.35rem 0.4rem;
+	}
 }
 
 .mj-stage:fullscreen {
@@ -1692,8 +2574,22 @@ mark {
 	--bs-body-bg: #f4f5f9;
 	--bs-body-color: #1f2430;
 	--bs-secondary-bg: #eceef4;
+	/* The hover/active surface. The dark block has always set this and the
+	   light one never did, so every rule reaching for it here — the settings
+	   tree, the console, the recordings ribbon — fell through to Bootstrap's
+	   own near-white and marked nothing. A step down from the page, since on
+	   light the surface has to darken to stand out, not lighten. */
+	--bs-tertiary-bg: #e4e7f0;
 	--bs-card-bg: #ffffff;
 	--bs-border-color: #e2e5ee;
+	/* Dashboard chart series. Validated per theme for color-vision
+	   separation and contrast against the card surface (dataviz checks) —
+	   the two palettes are different steps of the same hues on purpose. */
+	--st-c1: #4c60d8;
+	--st-c2: #0d9488;
+	--st-c3: #c96a2e;
+	--st-c4: #8a5cd8;
+	--st-grid: #edeff5;
 }
 
 [data-bs-theme=dark] {
@@ -1710,6 +2606,11 @@ mark {
 	--bs-card-bg: #1c1f27;
 	--bs-border-color: #2c313d;
 	--bs-focus-ring-color: rgba(92, 112, 232, 0.4);
+	--st-c1: #5c70e8;
+	--st-c2: #0da893;
+	--st-c3: #d1793a;
+	--st-c4: #a06ee0;
+	--st-grid: #262b36;
 }
 
 /* solid accent primary button in dark (replaces the old washed-out translucent
@@ -1756,9 +2657,18 @@ mark {
  * setting on the camera. field_switch marks such a row .destructive when it is
  * given a confirm message; this is what makes it read as one.
  */
+/* .form-label since the switch's name moved above it; .form-check-label is the
+   pre-#248 markup, kept so the rule cannot be silently unhooked again by the
+   label moving. The lit word goes red too — on this one row "On" is the state
+   worth reading twice. */
+.boolean.destructive .form-label,
 .boolean.destructive .form-check-label {
 	color: var(--bs-danger);
 	font-weight: 500;
+}
+
+.boolean.destructive .mj-ctl-in:has(.form-check-input:checked) .mj-state:empty {
+	color: var(--bs-danger);
 }
 
 .boolean.destructive .form-check-input:checked {
@@ -2175,4 +3085,274 @@ dialog.mj-modal[open] {
    the same 50% black Bootstrap's own backdrop used in both themes. */
 dialog.mj-modal::backdrop {
 	background: rgba(0, 0, 0, 0.5);
+}
+
+/* ── Dashboard (status.cgi) ─────────────────────────────────────────────────
+   The merged "Signal Wall + Live" layout. Everything is theme-driven through
+   Bootstrap custom properties plus the --st-* series colors above; classes
+   are custom (.st-*) rather than Bootstrap utilities so the PurgeCSS subset
+   needs no additions. */
+
+/* The topbar's SoC temperature duplicates the Temperature tile on this one
+   page; content a page already carries is not repeated in the strip. */
+#page-status #soc-temp {
+	display: none;
+}
+
+.st-panel {
+	background: var(--bs-card-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: var(--bs-box-shadow-sm);
+	padding: 0.85rem 1rem;
+}
+
+/* Alerts render only while active; amber border says "warning" without a
+   filled banner shouting over the page. */
+.st-alert {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.6rem 1rem;
+	background: var(--bs-card-bg);
+	border: 1px solid rgba(var(--bs-warning-rgb), 0.45);
+	border-radius: var(--bs-border-radius-lg);
+}
+
+.st-alert + .st-alert {
+	margin-top: 0.5rem;
+}
+
+.st-alert-ico {
+	color: var(--bs-warning);
+	flex: 0 0 auto;
+}
+
+/* auto-fit, so a tile that never mounts (no temp sensor / no Wi-Fi) closes
+   the grid up instead of leaving an empty slot */
+.st-kpis {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+	gap: 0.85rem;
+}
+
+.st-tile {
+	padding: 0.7rem 0.85rem 0.5rem;
+}
+
+.st-val {
+	margin: 0.15rem 0;
+	font-size: 1.6rem;
+	font-weight: 600;
+	line-height: 1.15;
+}
+
+.st-val-sm {
+	margin: 0.3rem 0 0.15rem;
+	font-size: 1.15rem;
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.st-unit {
+	font-size: 0.8125rem;
+	font-weight: 400;
+	color: var(--bs-secondary-color);
+}
+
+.st-tile-spark {
+	margin-top: 0.35rem;
+	height: 26px;
+}
+
+.st-tile-spark svg {
+	height: 26px;
+}
+
+.st-grid {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.85rem;
+}
+
+.st-charts {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.85rem;
+}
+
+.st-rail {
+	flex: 0 0 21rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.85rem;
+}
+
+.st-hero-row,
+.st-chart-row {
+	display: flex;
+	gap: 0.85rem;
+}
+
+.st-chart-row > .st-chartbox {
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.st-hero-row > .st-chartbox {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.st-chart-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.75rem;
+	margin-bottom: 0.4rem;
+}
+
+.st-chart-head .st-now {
+	margin-left: auto;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.8125rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.st-legend {
+	margin-left: auto;
+	display: flex;
+	gap: 0.75rem;
+}
+
+.st-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	margin-right: 0.3rem;
+}
+
+.st-dot-c1 { background: var(--st-c1); }
+.st-dot-c2 { background: var(--st-c2); }
+
+.st-chart svg {
+	display: block;
+	width: 100%;
+}
+
+.st-chart text {
+	font-family: var(--bs-font-monospace);
+	font-size: 10px;
+	fill: var(--bs-tertiary-color);
+}
+
+/* The camera itself. A fixed-ratio box: the snapshot may lag or be disabled,
+   and the row must not reflow around it either way. */
+.st-prev {
+	position: relative;
+	flex: 0 0 23rem;
+	aspect-ratio: 16 / 9;
+	display: block;
+	border-radius: var(--bs-border-radius-lg);
+	overflow: hidden;
+	background: #0d0f14;
+	border: 1px solid var(--bs-border-color);
+	text-decoration: none;
+}
+
+#st-prev-img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.st-prev-off {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #b9bec9;
+	padding: 0 1rem;
+	text-align: center;
+}
+
+.st-prev-play {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 3.4rem;
+	height: 3.4rem;
+	padding-left: 3px;
+	border-radius: 50%;
+	background: rgba(13, 15, 20, 0.66);
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	color: #fff;
+	backdrop-filter: blur(6px);
+	transition: background var(--mj-ease);
+}
+
+.st-prev:hover .st-prev-play {
+	background: rgba(var(--bs-primary-rgb), 0.85);
+}
+
+.st-prev-chip {
+	position: absolute;
+	top: 0.5rem;
+	right: 0.5rem;
+	padding: 0.15rem 0.5rem;
+	border-radius: 0.5rem;
+	background: rgba(0, 0, 0, 0.55);
+	color: #fff;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.6875rem;
+	backdrop-filter: blur(4px);
+}
+
+.st-prev-bar {
+	position: absolute;
+	inset: auto 0 0 0;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 0.35rem 0.6rem;
+	background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+	font-size: 0.6875rem;
+	color: #cdd2dd;
+}
+
+.st-prev-bar .st-prev-go {
+	font-weight: 600;
+	color: #fff;
+}
+
+/* below lg the rail stacks under the charts, and the preview goes full
+   width above the encoder chart */
+@media (max-width: 991.98px) {
+	.st-grid {
+		flex-direction: column;
+	}
+
+	.st-rail {
+		flex: 1 1 auto;
+		width: 100%;
+	}
+
+	.st-hero-row,
+	.st-chart-row {
+		flex-direction: column;
+	}
+
+	.st-prev {
+		flex: 1 1 auto;
+		width: 100%;
+	}
 }

@@ -27,9 +27,9 @@ fi
 <%in p/header.cgi %>
 
 <div class="row g-4">
-	<div class="col-12 col-lg-8">
-		<div class="card h-100"><div class="card-body">
-			<h3>VTun</h3>
+	<div class="col-12 col-lg-6">
+		<div class="card"><div class="card-body">
+			<% card_head "VTun" %>
 			<p class="small text-secondary">Virtual tunnel for remote access to the camera.</p>
 			<% if [ -e "$conf_file" ]; then %>
 				<dl class="small list">

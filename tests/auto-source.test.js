@@ -17,10 +17,11 @@ const SRCS = [A('preview-swap.js'), A('preview-page.js')];
 
 const IDS = [
 	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
-	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-note', 'mj-stats',
+	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note', 'mj-stats',
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',
-	'mj-stream-auto', 'mj-auto', 'mj-sub', 'mj-talk', 'mj-talk-ctl',
-	'mj-talk-lbl', 'mj-transport-w', 'mj-transport-m', 'mj-transport-ctl',
+	'mj-stream-auto', 'mj-auto', 'mj-served', 'mj-served-why', 'mj-sub',
+	'mj-talk', 'mj-talk-ctl',
+	'mj-talk-lbl', 'mj-talk-t', 'mj-transport-w', 'mj-transport-m', 'mj-transport-ctl',
 	'mj-transport-lbl', 'mj-vol',
 	'mj-player', 'mj-stage', 'toggle-ircut', 'toggle-light', 'toggle-night',
 ];
@@ -41,8 +42,11 @@ function load(cfg) {
 	const env = { made: [], els: {}, observed: [] };
 	IDS.forEach((id) => { env.els['#' + id] = makeEl(id); });
 	// As the markup ships them: the Sub and Auto labels start hidden and are
-	// revealed only where a second stream exists.
-	['mj-sub', 'mj-auto'].forEach((id) => { env.els['#' + id].hidden = true; });
+	// revealed only where a second stream exists; the served-channel message
+	// starts hidden until a mismatch is announced.
+	['mj-sub', 'mj-auto', 'mj-served'].forEach((id) => {
+		env.els['#' + id].hidden = true;
+	});
 	// And as the markup ships the inputs: unreachable until the configuration
 	// says there is a second stream.
 	['mj-stream-1', 'mj-stream-auto'].forEach((id) => {
@@ -333,9 +337,11 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 
 	group('Auto claims nothing over WebRTC when sizes cannot distinguish');
 	{
-		// Identically-sized channels make a WebRTC fallback undetectable, so
-		// the label would be a guess — and a guess about "which stream is
-		// this" is worse than silence (#240 tracks the authoritative fix).
+		// Identically-sized channels make a WebRTC fallback undetectable to
+		// the size inference, so the label would be a guess — and a guess
+		// about "which stream is this" is worse than silence. This is the
+		// old-daemon path: a majestic with the `served` reply states the
+		// channel outright (#240), covered by the groups below.
 		const env = load({
 			box: [800, 450], main: '1280x720', sub: '1280x720',
 			picked: 'auto', transport: 'webrtc',
@@ -377,6 +383,119 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		live.opts.onCodec('h264', 'h264', 1280, 720);
 		check('an unrecognised size claims nothing',
 			env.el('mj-badge').textContent.indexOf('stream') === -1,
+			env.el('mj-badge').textContent);
+	}
+
+	group('the camera\'s own served answer beats indistinguishable sizes');
+	{
+		// The `served` signalling reply (#240): with both channels sized
+		// alike the inference above stays silent, but the camera saying
+		// "channel 0" outright is not a guess. This is Auto's case — the
+		// chip always names Auto's channel when it truthfully can.
+		const env = load({
+			box: [800, 450], main: '1280x720', sub: '1280x720',
+			picked: 'auto', transport: 'webrtc',
+		});
+		await tick();
+		const live = env.made[0];
+		live.say('playing');
+		live.opts.onCodec('h264', 'h264', 1280, 720);
+		live.opts.onServed({ channel: 0, requested: null, reason: '' });
+		check('the chip names the channel the camera stated',
+			/ · Main stream$/.test(env.el('mj-badge').textContent),
+			env.el('mj-badge').textContent);
+		check('no message without a betrayed request',
+			env.el('mj-served').hidden === true);
+	}
+
+	group('a served mismatch moves the radio and explains itself');
+	{
+		// The viewer asked for Main; the camera answered with Sub and said
+		// why. The controls follow reality — without re-entering the stream
+		// switch or overwriting the remembered preference — and the message
+		// carries the reason (#240).
+		const env = load({
+			main: '1920x1080', sub: '1920x1080', picked: 0,
+			transport: 'webrtc',
+		});
+		await tick();
+		const live = env.made[0];
+		check('opens on the remembered Main', live.opts.stream === 0,
+			'stream=' + live.opts.stream);
+		live.say('playing');
+		live.opts.onCodec('h264', 'h264', 1920, 1080);
+		live.opts.onServed({ channel: 1, requested: 0, reason: 'undecodable' });
+		check('the Sub radio is now the checked one',
+			env.el('mj-stream-1').checked === true &&
+			env.el('mj-stream-0').checked === false);
+		check('the message is shown', env.el('mj-served').hidden === false);
+		check('and names the cause',
+			env.el('mj-served-why').textContent.indexOf('decode') !== -1,
+			env.el('mj-served-why').textContent);
+		check('the player was not re-cut', live.streamSet === null,
+			'streamSet=' + live.streamSet);
+		check('the remembered preference was not overwritten',
+			env.stored === undefined, String(env.stored));
+		// The radio now tells the truth, so the chip has no betrayal to
+		// report.
+		check('the chip carries no mismatch note',
+			env.el('mj-badge').textContent.indexOf('stream') === -1,
+			env.el('mj-badge').textContent);
+
+		// A reopen inside the fallen-back session (audio toggle, network
+		// reconnect) requests the ADOPTED channel and is answered with a
+		// match — but the viewer's own ask is still unmet, so the standing
+		// explanation must not vanish on an audio toggle.
+		live.opts.onServed({ channel: 1, requested: 1, reason: '' });
+		check('a reopen echo does not clear the explanation',
+			env.el('mj-served').hidden === false);
+		check('nor move the radios',
+			env.el('mj-stream-1').checked === true);
+
+		// Dismissed is dismissed: the same session re-stating the same
+		// fallback (a reconnect, an audio renegotiation) must not resurrect
+		// the message.
+		env.el('mj-served').fire('click');
+		check('a click dismisses it', env.el('mj-served').hidden === true);
+		live.opts.onServed({ channel: 1, requested: 0, reason: 'undecodable' });
+		check('the same answer does not re-show it',
+			env.el('mj-served').hidden === true);
+		live.opts.onServed({ channel: 1, requested: 1, reason: '' });
+		check('and a reopen echo after dismissal stays dismissed',
+			env.el('mj-served').hidden === true);
+
+		// But a fresh user pick re-arms it: asking again deserves an answer
+		// again.
+		env.el('mj-stream-0').checked = true;
+		env.el('mj-stream-0').fire('change');
+		check('re-picking reaches the player', live.streamSet === 0,
+			'streamSet=' + live.streamSet);
+		live.opts.onServed({ channel: 1, requested: 0, reason: 'undecodable' });
+		check('a repeated fallback after a re-pick is news again',
+			env.el('mj-served').hidden === false);
+	}
+
+	group('in Auto a served mismatch keeps Auto checked and stays quiet');
+	{
+		// Auto delegated the choice, so nothing was betrayed: the radios stay
+		// Auto's, no message shows, and the chip (which always names Auto's
+		// channel) is the disclosure.
+		const env = load({
+			box: [320, 180], main: '1920x1080', sub: '640x360',
+			picked: 'auto', transport: 'webrtc',
+		});
+		await tick();
+		const live = env.made[0];
+		check('Auto asked for Sub', live.opts.stream === 1,
+			'stream=' + live.opts.stream);
+		live.say('playing');
+		live.opts.onCodec('h264', 'h264', 1920, 1080);
+		live.opts.onServed({ channel: 0, requested: 1, reason: 'unavailable' });
+		check('Auto stays checked',
+			env.el('mj-stream-auto').checked === true);
+		check('no message in Auto', env.el('mj-served').hidden === true);
+		check('the chip names what is actually served',
+			/ · Main stream$/.test(env.el('mj-badge').textContent),
 			env.el('mj-badge').textContent);
 	}
 

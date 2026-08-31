@@ -66,10 +66,9 @@
 
 		<div class="col-12 col-lg-4">
 			<div class="card h-100"><div class="card-body">
-				<div class="d-flex justify-content-between align-items-center">
-					<h3 class="m-0">Clips</h3>
-					<span class="x-small text-secondary">newest first</span>
-				</div>
+				<%# "newest first" is exactly what the head's note is for, so the
+				    hand-rolled flex row that held the two apart is gone %>
+				<% card_head "Clips" "newest first" %>
 				<div id="rec-clips" class="mt-3"><div class="text-secondary small">loading…</div></div>
 			</div></div>
 		</div>

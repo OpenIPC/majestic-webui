@@ -78,7 +78,14 @@ let _mjCfg;
 function mjConfig() {
 	if (!_mjCfg)
 		_mjCfg = apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
-			.then(r => r.ok ? r.json() : {}).catch(() => ({}));
+			.then(r => r.ok ? r.json() : Promise.reject(r.status))
+			.catch(() => {
+				// Resolve {} for this caller, but don't cache it: a transient
+				// failure at page load must not read as "everything disabled"
+				// for the rest of the page's life — the next call retries.
+				_mjCfg = null;
+				return {};
+			});
 	return _mjCfg;
 }
 
@@ -407,10 +414,6 @@ function renderTopbar(s) {
 
 	if (s.memPct != null && $('#pb-memory'))
 		setProgressBar('#pb-memory', Math.round(s.memPct), 'Memory Usage');
-
-	const dn = $('#daynight_value');
-	if (dn && 'isp_again' in v)
-		dn.textContent = '🌟 ' + v.isp_again;
 
 	const up = $('#uptime');
 	if (up && s.sysUptimeS != null)

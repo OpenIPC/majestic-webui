@@ -40,8 +40,8 @@ ntp_summary=$(echo $server_0 $server_1 $server_2 $server_3 | sed 's/ /, /g')
 
 <div class="row g-4">
 	<div class="col-12">
-		<div class="card h-100"><div class="card-body">
-			<h3>Current</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Current" %>
 			<dl class="small list mb-0">
 				<dt>Device time</dt><dd id="tz-now">—</dd>
 				<dt>Zone name</dt><dd><% esc "$tz_name" %></dd>
@@ -56,17 +56,24 @@ ntp_summary=$(echo $server_0 $server_1 $server_2 $server_3 | sed 's/ /, /g')
 	<% field_hidden "action" "update" %>
 	<div class="row g-4 mt-0">
 		<div class="col-12 col-lg-6">
-			<div class="card h-100"><div class="card-body">
-				<h3>Time zone</h3>
+			<div class="card"><div class="card-body">
+				<% card_head "Time zone" %>
 				<datalist id="tz_list"></datalist>
-				<p class="string" id="tz_name_wrap">
+				<%# hand-written rather than field_string because of the datalist
+				    and the readonly mirror, so the row shape is spelled out here
+				    to match what the helpers emit %>
+				<p class="string mj-row" id="tz_name_wrap">
 					<label for="tz_name" class="form-label">Zone name</label>
-					<input type="text" id="tz_name" name="tz_name" value="<% attr_escape "$tz_name" %>" class="form-control" list="tz_list">
+					<span class="mj-ctl"><span class="mj-ctl-in">
+						<input type="text" id="tz_name" name="tz_name" value="<% attr_escape "$tz_name" %>" class="form-control" list="tz_list">
+					</span></span>
 					<span class="hint text-secondary">Type the name of the nearest large city.</span>
 				</p>
-				<p class="string" id="tz_data_wrap">
+				<p class="string mj-row" id="tz_data_wrap">
 					<label for="tz_data" class="form-label">Zone string</label>
-					<input type="text" id="tz_data" name="tz_data" value="<% attr_escape "$tz_data" %>" class="form-control" readonly>
+					<span class="mj-ctl"><span class="mj-ctl-in">
+						<input type="text" id="tz_data" name="tz_data" value="<% attr_escape "$tz_data" %>" class="form-control" readonly>
+					</span></span>
 					<span class="hint text-secondary">Control string of the timezone selected above.</span>
 				</p>
 				<button type="button" class="btn btn-sm btn-outline-secondary" id="frombrowser">Use browser timezone</button>
@@ -74,8 +81,8 @@ ntp_summary=$(echo $server_0 $server_1 $server_2 $server_3 | sed 's/ /, /g')
 		</div>
 
 		<div class="col-12 col-lg-6">
-			<div class="card h-100"><div class="card-body">
-				<h3>Network time (NTP)</h3>
+			<div class="card"><div class="card-body">
+				<% card_head "Network time (NTP)" %>
 				<% for i in $(seq 0 3); do field_text "server_${i}" "Server $((i + 1))"; done %>
 				<div class="my-2 d-flex gap-2 flex-wrap">
 					<button type="button" class="btn btn-sm btn-outline-secondary" id="sync-time">Sync now</button>

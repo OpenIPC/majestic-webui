@@ -54,6 +54,10 @@ window.MajesticWebRTC = (function () {
 		// callbacks the caller may omit rather than something it must handle.
 		const onMic = opts.onMic || function () {};
 		const onStats = opts.onStats || function () {};
+		// The camera's own statement of which channel this session serves —
+		// newer daemons send it right after the answer; older ones never will,
+		// and the caller's size inference stands in.
+		const onServed = opts.onServed || function () {};
 		let stream = opts.stream | 0;
 
 		let pc = null, ws = null, statsTimer = null, signalTimer = null;
@@ -179,6 +183,12 @@ window.MajesticWebRTC = (function () {
 					s.jitterMs = Math.round((r.jitter || 0) * 1000);
 					s.nack = r.nackCount || 0;
 					s.pli = r.pliCount || 0;
+					// Cumulative sums for the stats panel's per-frame figures:
+					// the panel differences them itself, so a browser that
+					// omits one simply leaves that share out of the total.
+					s.jbDelay = r.jitterBufferDelay || 0;
+					s.jbEmitted = r.jitterBufferEmittedCount || 0;
+					s.decodeTime = r.totalDecodeTime || 0;
 				});
 				report.forEach(function (r) {
 					if (r.type === 'inbound-rtp' && r.kind === 'audio') {
@@ -194,6 +204,13 @@ window.MajesticWebRTC = (function () {
 						r.type === 'candidate-pair' && r.nominated &&
 						r.state === 'succeeded') {
 						s.rttMs = Math.round((r.currentRoundTripTime || 0) * 1000);
+						// The browser's own estimate of what this path can
+						// carry — the receiving end's answer to the camera's
+						// remb=, and the other half of the capacity story.
+						if (r.availableIncomingBitrate) {
+							s.availKbps =
+								Math.round(r.availableIncomingBitrate / 1000);
+						}
 					}
 				});
 				s.codec = codec; s.width = w; s.height = h;
@@ -606,6 +623,25 @@ window.MajesticWebRTC = (function () {
 					// and parsed at the next poll, so the two sides are read
 					// out together rather than a tick apart.
 					camLine = m.data || '';
+				} else if (m.reply === 'served') {
+					// The camera says outright which channel this session
+					// serves — ?stream= was only ever a preference. Adopt it:
+					// setStream() no-ops when asked for the channel it thinks
+					// it has, so without this a viewer re-picking the channel
+					// the camera fell back from would press a button that does
+					// nothing. Adopted, that re-pick is a real renegotiation —
+					// and a mid-session reconnect re-requests the channel that
+					// actually worked instead of replaying the fallback.
+					if (typeof m.channel === 'number') {
+						stream = m.channel | 0;
+						onServed({
+							channel: m.channel | 0,
+							requested: typeof m.requested === 'number'
+								? m.requested | 0 : null,
+							reason: typeof m.reason === 'string'
+								? m.reason : '',
+						});
+					}
 				} else if (m.reply === 'busy') {
 					// Full, not incapable — every slot is taken and this same
 					// offer would be answered once one frees. Same move as a
