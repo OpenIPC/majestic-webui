@@ -19,11 +19,12 @@
 # WebUI exactly as it was.
 
 scr_name=updatewebui
-scr_version=3
+scr_version=4
 
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
 MANIFEST=$STATE_DIR/updatewebui.manifest
+DIRS=$STATE_DIR/updatewebui.dirs
 KEEP_BACKUPS=3
 
 # What the firmware's own buildroot package installs, and where it puts it.
@@ -59,6 +60,8 @@ Where:
                      to a single directory holding www/, sbin/ and bin/.
   -r, --restore      Remove everything a previous run installed and go back to
                      the WebUI the firmware itself ships. Downloads nothing.
+                     Ends by offering to remove the directories left empty in
+                     the overlay, a step that reboots the camera.
   -n, --dry-run      Report what would change, then exit without touching
                      anything.
       --no-backup    Do not archive locally modified files before they are
@@ -207,7 +210,7 @@ fetch_tree() {
 # keep:   every destination this release owns
 # want:   md5sum-format list of what the install should leave behind
 build_plan() {
-	for f in write drop prune keep want local skipped; do : >"$tmp/$f"; done
+	for f in write drop prune keep want local skipped newdirs; do : >"$tmp/$f"; done
 
 	for pair in $PAYLOAD; do
 		sub=${pair%%:*}
@@ -309,6 +312,23 @@ build_plan() {
 		done <"$MANIFEST"
 	fi
 
+	# Directories the writes will bring into existence in the upper layer.
+	# They are invisible to the manifest - no content to hash - so they get a
+	# record of their own, which is what lets --restore offer to take the
+	# empty shells away again in a shared tree like /usr/sbin, where an
+	# unrecorded directory cannot be told from somebody else's.
+	if [ -n "$upper" ]; then
+		cut -d' ' -f3 "$tmp/write" | while read -r w; do
+			w=${w%/*}
+			while [ -n "$w" ] && [ ! -e "$upper$w" ]; do
+				echo "$w" >>"$tmp/newdirs"
+				w=${w%/*}
+			done
+		done
+		sort -u "$tmp/newdirs" >"$tmp/newdirs.u" &&
+			mv "$tmp/newdirs.u" "$tmp/newdirs"
+	fi
+
 	# Anything that no longer matches the manifest was edited on the camera.
 	# Without a manifest the overlay itself is the record: the rootfs is
 	# read-only, so every local edit necessarily lives in the upper layer,
@@ -336,6 +356,8 @@ report_plan() {
 	echo "  $(count "$tmp/prune") stale entry(ies) to remove"
 	[ -s "$tmp/skipped" ] &&
 		echo "  $(count "$tmp/skipped") file(s) for another firmware variant, skipped"
+	[ -s "$tmp/newdirs" ] &&
+		echo "  $(count "$tmp/newdirs") director(ies) to create"
 	if [ -s "$tmp/local" ]; then
 		echo
 		if [ ! -f "$MANIFEST" ]; then
@@ -415,7 +437,9 @@ apply_writes() {
 # directories holding them. Removing a directory from the upper layer leaves the
 # merged parent listing empty until the next reboot, with the files underneath
 # still readable one by one, so nothing short of a directory listing notices.
-# An emptied upper directory costs one inode and hides nothing.
+# An emptied upper directory costs one inode and hides nothing; the one
+# sanctioned way out for it is offer_dir_cleanup, which pairs the rmdir with
+# an immediate reboot and only ever runs on the user's explicit yes.
 remove_entries() {
 	: >"$tmp/failed"
 	cat "$@" | while read -r u; do
@@ -443,6 +467,20 @@ write_manifest() {
 		die "the files are installed but $MANIFEST could not be written, so a later run cannot recognise your own edits"
 }
 
+# The record of the directories this script created accumulates across runs,
+# because a directory made by one run is silently reused by the next. Losing
+# it costs only --restore's offer to clean the empty shells up, so it is a
+# warning, not a fatal error.
+write_dirs() {
+	[ -s "$tmp/newdirs" ] || return 0
+	{
+		cat "$tmp/newdirs"
+		[ -f "$DIRS" ] && cat "$DIRS"
+	} | sort -u >"$tmp/dirs.u" && cp -f "$tmp/dirs.u" "$DIRS" ||
+		echo "$scr_name: could not record the created directories in $DIRS" >&2
+	return 0
+}
+
 do_install() {
 	fetch_tree
 	build_plan
@@ -461,6 +499,7 @@ do_install() {
 		die "the overlay did not end up as planned, so the manifest was left alone"
 	settle_view
 	write_manifest
+	write_dirs
 	# The per-boot sysinfo cache was written by the release this one just
 	# replaced, and everything derived at detection time — PTZ backend and
 	# support, most visibly — stays frozen at the old release's answers until
@@ -482,6 +521,109 @@ do_install() {
 		fi
 	done
 	verify_view "$tmp/want" "$tmp/gone"
+}
+
+# The one place a directory ever leaves the upper layer. rmdir there muddles
+# the kernel's merged view of the parent until the next mount, so it happens
+# only on the user's explicit yes and the camera reboots straight after;
+# declining, or not being on a terminal, leaves everything as it was.
+#
+# What is offered follows the same ownership rule as the file removals:
+# under /var/www, which belongs to the WebUI alone, every upper directory
+# left empty - that also covers directories made by the versions of this
+# script that recorded nothing; elsewhere only the directories $DIRS records
+# this script creating. Deepest first, so a directory holding nothing but
+# removable children counts as empty itself.
+offer_dir_cleanup() {
+	[ -n "$upper" ] || return 0
+	: >"$tmp/dircand"
+	[ -d "$upper/var/www" ] &&
+		find "$upper/var/www" -type d | sed "s|^$upper||" >>"$tmp/dircand"
+	if [ -f "$DIRS" ]; then
+		while read -r d; do
+			# Only clean absolute paths, and never let a corrupt record
+			# steer the rmdir outside the upper layer through a ".."
+			# segment.
+			case $d in
+			/?*) ;;
+			*) continue ;;
+			esac
+			case $d in
+			*/.. | */../*) continue ;;
+			esac
+			[ -d "$upper$d" ] && echo "$d"
+		done <"$DIRS" >>"$tmp/dircand"
+	fi
+	# Reverse-sorted, a child always precedes its parent (the parent is a
+	# strict prefix), which is the order both the emptiness check and the
+	# rmdirs need.
+	sort -ru "$tmp/dircand" >"$tmp/dircand.r" && mv "$tmp/dircand.r" "$tmp/dircand"
+	: >"$tmp/rmdirs"
+	while read -r d; do
+		empty=1
+		for e in "$upper$d"/* "$upper$d"/.[!.]* "$upper$d"/..?*; do
+			{ [ -e "$e" ] || [ -L "$e" ]; } || continue
+			grep -qxF "${e#$upper}" "$tmp/rmdirs" && continue
+			empty=0
+			break
+		done
+		[ "$empty" = 1 ] && echo "$d" >>"$tmp/rmdirs"
+	done <"$tmp/dircand"
+	[ -s "$tmp/rmdirs" ] || return 0
+	echo
+	echo "$(count "$tmp/rmdirs") empty director(ies) are left behind in the overlay:"
+	sort "$tmp/rmdirs" | sed 's/^/  /'
+	if [ "$dry_run" = 1 ]; then
+		echo "A real run would offer to remove them, a step that ends in a reboot."
+		return 0
+	fi
+	if [ ! -t 0 ]; then
+		echo "They cost one inode each and hide nothing. Removing them needs an"
+		echo "immediate reboot, so run '$scr_name --restore' from a terminal to"
+		echo "be asked about it."
+		return 0
+	fi
+	echo "Removing a directory from a mounted overlay muddles the kernel's view"
+	echo "of its parent until the next boot, so the camera reboots right after."
+	printf "Remove them and reboot now? [y/N] "
+	read -r ans
+	case $ans in
+	[yY] | [yY][eE][sS]) ;;
+	*)
+		echo "Left in place; they cost one inode each and hide nothing."
+		echo "Run '$scr_name --restore' again to be asked again."
+		return 0
+		;;
+	esac
+	: >"$tmp/rmfail"
+	while read -r d; do
+		rmdir "$upper$d" 2>/dev/null || echo "$d" >>"$tmp/rmfail"
+	done <"$tmp/rmdirs"
+	if [ -s "$tmp/rmfail" ]; then
+		grep -vxF -f "$tmp/rmfail" "$tmp/rmdirs" >"$tmp/removed"
+		echo "Could not remove (not empty after all):"
+		sed 's/^/  /' "$tmp/rmfail"
+	else
+		cp "$tmp/rmdirs" "$tmp/removed"
+	fi
+	# What actually went also leaves the record, so a directory that stayed
+	# behind stays remembered.
+	if [ -f "$DIRS" ] && [ -s "$tmp/removed" ]; then
+		grep -vxF -f "$tmp/removed" "$DIRS" >"$tmp/dirs.left" 2>/dev/null
+		if [ -s "$tmp/dirs.left" ]; then
+			cp -f "$tmp/dirs.left" "$DIRS"
+		else
+			rm -f "$DIRS"
+		fi
+	fi
+	sync
+	echo "Rebooting."
+	# The directories are already gone from the upper layer, so a reboot
+	# that did not happen leaves the muddled merged view this whole dance
+	# exists to avoid - that must not read as success.
+	reboot ||
+		die "reboot failed; the merged view of the cleaned directories stays confused until the camera is rebooted by hand"
+	exit 0
 }
 
 do_restore() {
@@ -508,11 +650,17 @@ do_restore() {
 	done
 	if [ ! -s "$tmp/prune" ]; then
 		echo "Nothing is installed over the firmware's WebUI."
+		# The empty directories a declined earlier offer left behind can
+		# still be taken away on this path; a dry run only reports them.
+		offer_dir_cleanup
 		return 0
 	fi
 	echo "Remove $(count "$tmp/prune") installed file(s), revealing the firmware's WebUI:"
 	sed "s|^$upper|  |" "$tmp/prune"
 	if [ "$dry_run" = 1 ]; then
+		echo
+		echo "The directories this leaves empty would then be offered for"
+		echo "removal, a step that ends in a reboot."
 		return 0
 	fi
 	remove_entries "$tmp/prune" ||
@@ -533,6 +681,7 @@ do_restore() {
 	echo
 	echo "Restored the WebUI the firmware ships."
 	verify_view "$tmp/want" "$tmp/gone"
+	offer_dir_cleanup
 }
 
 echo "OpenIPC WebUI installer v$scr_version"
