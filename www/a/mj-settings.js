@@ -1519,7 +1519,16 @@
 			shown++;
 			if (!f.schema || !Object.prototype.hasOwnProperty.call(f.schema, 'default')) continue;
 			known++;
-			if (String(f.getValue()) !== String(f.schema.default)) off++;
+			// The default has to be serialised the way the control serialises its
+			// own value or the two are not comparable: an array control reads back
+			// as ", "-joined (getValue → _rows().join(', ')) while String([a,b])
+			// joins on a bare comma, so an untouched two-region default would count
+			// as off stock. Every array default majestic ships today is [], which
+			// stringifies to "" either way — this is the case that has not bitten
+			// yet, not the one that cannot.
+			const def = f.schema.default;
+			const defStr = Array.isArray(def) ? def.join(', ') : String(def);
+			if (String(f.getValue()) !== defStr) off++;
 		}
 		// The denominator is the rows on screen, so it matches what can be
 		// counted; "all at stock" carries no number at all, because the honest
@@ -1647,7 +1656,11 @@
 		// beside one row across 966px of card. Under the cut they stay in one
 		// column at a readable measure and the second column is not drawn at all,
 		// divider included.
-		const shown = items.filter(it => it.offsetHeight).length;
+		// Rows only: a group heading is not a setting, and counting it would spend
+		// a section's budget on its own furniture — four controls under one
+		// heading would be dealt into two columns while claiming to be under the
+		// limit.
+		const shown = items.filter(it => it.offsetHeight && it.classList.contains('mj-row')).length;
 		const solo = shown <= SOLO_MAX;
 		box.classList.toggle('mj-solo', solo);
 		if (solo) {
