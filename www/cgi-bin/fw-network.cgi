@@ -87,17 +87,17 @@ fi
 
 <div class="row g-4">
 	<div class="col-12 col-lg-7">
-		<div class="card h-100"><div class="card-body">
-			<h3>Network settings</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Network settings" "$([ "$network_dhcp" = "true" ] && echo DHCP || echo static) · $(attr_escape "$network_interface")" %>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_hidden "action" "update" %>
 
-				<div class="text-uppercase x-small text-secondary mb-2">General</div>
+				<% group_head "General" %>
 				<% field_text "network_hostname" "Hostname" %>
 				<% field_string "network_interface" "Network interface" "eval" "$network_list" %>
 
 				<div id="wifi-section">
-					<div class="text-uppercase x-small text-secondary mt-3 mb-2">Wi-Fi</div>
+					<% group_head "Wi-Fi" %>
 					<% field_text "network_wlan_ssid" "WLAN SSID" %>
 					<div class="mb-3">
 						<button type="button" class="btn btn-sm btn-outline-secondary" id="wifi-scan">Scan for networks</button>
@@ -107,7 +107,7 @@ fi
 					<% field_password "network_wlan_password" "WLAN Password" %>
 				</div>
 
-				<div class="text-uppercase x-small text-secondary mt-3 mb-2">IP</div>
+				<% group_head "IP" %>
 				<% field_switch "network_dhcp" "Use DHCP" "eval" %>
 				<% field_text "network_address" "IP Address" %>
 				<% field_text "network_netmask" "IP Netmask" %>
@@ -119,8 +119,8 @@ fi
 	</div>
 
 	<div class="col-12 col-lg-5">
-		<div class="card h-100"><div class="card-body">
-			<h3>Current connection</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Current connection" %>
 			<dl class="small list mb-0">
 				<dt>Hostname</dt><dd><% esc "$network_hostname" %></dd>
 				<dt>Interface</dt><dd><% esc "$network_interface" %></dd>
@@ -140,7 +140,7 @@ fi
 	<div class="row g-4 mt-1">
 		<div class="col-12 col-lg-6">
 			<div class="card"><div class="card-body">
-				<h3>Change MAC address</h3>
+				<% card_head "Change MAC address" %>
 				<p class="small text-secondary">Override the Ethernet MAC address. <span class="text-danger">Requires a reboot.</span></p>
 				<form action="<%= $SCRIPT_NAME %>" method="post">
 					<% field_hidden "action" "changemac" %>
@@ -149,7 +149,7 @@ fi
 				</form>
 
 				<hr class="my-3">
-				<h3 class="fs-6">Reset network configuration</h3>
+				<% group_head "Reset network configuration" %>
 				<p class="small text-secondary">Restore the config bundled with the firmware. All changes are lost.</p>
 				<form action="<%= $SCRIPT_NAME %>" method="post">
 					<% field_hidden "action" "reset" %>
@@ -160,7 +160,7 @@ fi
 
 		<div class="col-12 col-lg-6">
 			<div class="card"><div class="card-body">
-				<h3>Diagnostics</h3>
+				<% card_head "Diagnostics" %>
 				<% for dev in $network_list; do %>
 					<% ex "cat /etc/network/interfaces.d/$dev" %>
 				<% done %>

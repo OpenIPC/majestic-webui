@@ -20,9 +20,9 @@ fi
 <%in p/header.cgi %>
 
 <div class="row g-4">
-	<div class="col-12 col-lg-8">
-		<div class="card h-100"><div class="card-body">
-			<h3>SOCKS5 proxy</h3>
+	<div class="col-12 col-lg-6">
+		<div class="card"><div class="card-body">
+			<% card_head "SOCKS5 proxy" %>
 			<p class="small text-secondary">Route extension traffic (OpenWall, Telegram) through a SOCKS5 proxy.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_hidden "action" "update" %>

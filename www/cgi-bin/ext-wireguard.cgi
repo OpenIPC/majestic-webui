@@ -32,9 +32,9 @@ fi
 <%in p/header.cgi %>
 
 <div class="row g-4">
-	<div class="col-12 col-lg-8">
-		<div class="card h-100"><div class="card-body">
-			<h3>WireGuard</h3>
+	<div class="col-12 col-lg-6">
+		<div class="card"><div class="card-body">
+			<% card_head "WireGuard" %>
 			<p class="small text-secondary">WireGuard VPN tunnel for secure remote access.</p>
 			<% if ip link show wg0 >/dev/null 2>&1; then %>
 				<dl class="small list">

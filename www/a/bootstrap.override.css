@@ -59,6 +59,9 @@
    full-column-width help set at nearly the size of the label above it competes
    with the field rather than supporting it. */
 .hint {
+	/* block because the CGI helpers emit it as a <span> — without this the
+	   max-width below does nothing and the hint runs the card's full width */
+	display: block;
 	max-width: 22rem;
 	margin-top: 0.35rem;
 	margin-bottom: 0;
@@ -138,6 +141,14 @@
 	max-width: none;
 }
 
+/* Text and password had no ceiling at all, which on the CGI pages meant a
+   hostname — and an IP address — in a 712px box, and in the settings form a
+   446px box holding "1". A field's width is a hint about what belongs in it. */
+.string .mj-ctl-in,
+.password .mj-ctl-in {
+	max-width: 20rem;
+}
+
 .array .mj-ctl-in {
 	max-width: 20rem;
 }
@@ -184,21 +195,34 @@ body > main > .container > h2 {
 	margin: 2rem 0 1.5rem;
 }
 
+/* The read-out beside a form — "Current connection", the firmware versions,
+   a tunnel's state. It is the same job the Live deck's readouts do, so it
+   reads the same way: the term in the micro-caps every label on the page now
+   uses, and the value in the mono the deck sets its numbers in, right-aligned
+   so a column of addresses lines up on its own edge instead of ragging against
+   terms of different lengths. */
 dl.list {
-	display: flex;
-	flex-flow: row wrap;
-	justify-content: space-between;
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 0.55rem 1.25rem;
 	align-items: baseline;
+	margin-bottom: 0;
 }
 
 dl.list dt {
-	flex-grow: 1;
-	width: 33%;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
 }
 
 dl.list dd {
-	flex-grow: 2;
-	width: 66%;
+	margin-bottom: 0;
+	text-align: right;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.84375rem;
+	overflow-wrap: anywhere;
 }
 
 pre {
@@ -243,10 +267,59 @@ textarea {
 	margin-left: auto;
 }
 
+/* A card's heading, in the same micro-caps the settings deck and the rail's
+   categories use. It was 1.15rem secondary body text — heavier than the labels
+   under it and a second competing title beside the page's own <h2>. Restyled
+   rather than rewritten per page, so the cards that still emit a bare <h3>
+   (fw-reset, fw-editor, mj-configuration, tool-recordings) come along and no
+   page is left as the odd one out. */
 .card > .card-body h3 {
-	color: var(--bs-secondary-color);
-	font-size: 1.15rem;
 	margin-bottom: 1rem;
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	line-height: 1.4;
+	text-transform: uppercase;
+}
+
+/* The foot of a card: the action at the right end, on its own surface, with an
+   optional note on the left. A save button used to sit loose under the last
+   field with nothing to separate it from one. */
+.mj-foot {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin: 1.25rem -1rem -1rem;
+	padding: 0.875rem 1rem;
+	background: var(--bs-tertiary-bg);
+	border-top: 1px solid var(--bs-border-color);
+	border-radius: 0 0 var(--bs-border-radius-lg) var(--bs-border-radius-lg);
+}
+
+.mj-foot .btn {
+	margin-left: auto;
+}
+
+.mj-foot-note {
+	font-size: 0.78125rem;
+	line-height: 1.4;
+	color: var(--bs-tertiary-color);
+}
+
+/* The switch's word. On the schema-driven form mj-settings.js writes it; these
+   pages are rendered by the server and have no JS to do it, so the span is
+   emitted empty and CSS fills it from the checkbox's own state. */
+.mj-state:empty::after {
+	content: 'Off';
+}
+
+.mj-ctl-in:has(.form-check-input:checked) .mj-state:empty::after {
+	content: 'On';
+}
+
+.mj-ctl-in:has(.form-check-input:checked) .mj-state:empty {
+	color: var(--bs-body-color);
 }
 
 .storage-bar {
@@ -628,9 +701,11 @@ mark {
    background. The Live deck gets away with it only because .mj-live-deck is
    not a .card and inherits the root value.
 
-   So take the surface from a token .card does not shadow. Fixing the shadowing
-   itself touches every page in the repo and belongs in its own change. */
-#mj-settings-form .card {
+   So take the surface from a token .card does not shadow. This was scoped to
+   the settings form when only that page needed it; every card page needs it,
+   and a card that is a surface on one page and an outline on the next is the
+   inconsistency this set of changes exists to remove. */
+.card {
 	background: var(--bs-secondary-bg);
 	border-color: var(--bs-border-color);
 }
@@ -753,22 +828,27 @@ mark {
 }
 
 /* The heading is a real <h3> (revealSection focuses it), so its default heading
-   margin and size have to come back off to read as a group label. Inside a card
-   it also has to out-rank `.card > .card-body h3` — (0,2,2), which silently
-   restored 18.4px secondary text over .mj-cap on every generated section — so
-   the id is carried here rather than left to source order, which would not have
-   helped. */
+   margin has to come back off to sit on the head's baseline. Size and colour
+   now come from `.card > .card-body h3` itself, which is the same micro-caps —
+   before that, its (0,2,2) silently restored 18.4px secondary text over
+   .mj-cap on every card that carried one. */
 .mj-live-head h3,
-#mj-settings-form .card > .card-body .mj-live-head h3 {
+.card > .card-body .mj-live-head h3 {
 	margin: 0;
-	color: var(--bs-tertiary-color);
-	font-size: 0.6875rem;
 	line-height: 1.4;
 }
 
 .mj-live-grp-head {
 	align-items: baseline;
-	margin-bottom: 0.7rem;
+	/* A group heading belongs to the rows under it, so it needs air above and
+	   little below. On the server-rendered pages it is often the first thing
+	   after the card's own head, where that much air would just be a gap. */
+	margin: 1.5rem 0 0.7rem;
+}
+
+.mj-live-head + .mj-live-grp-head,
+.mj-live-head + form > .mj-live-grp-head:first-child {
+	margin-top: 0.9rem;
 }
 
 .mj-live-rule {
@@ -787,6 +867,9 @@ mark {
    of the flow rather than hidden, so they stay focusable. */
 .mj-seg {
 	display: flex;
+	/* the control is as wide as its options — as a block child of .mj-ctl-in it
+	   would otherwise stretch the width of the card */
+	width: fit-content;
 	gap: 2px;
 	padding: 2px;
 	background: var(--bs-tertiary-bg);
@@ -803,12 +886,22 @@ mark {
 }
 
 .mj-seg-lbl {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin: 0;
 	padding: 0.3rem 0.8rem;
 	border-radius: var(--bs-border-radius-sm);
 	color: var(--bs-secondary-color);
 	font-size: 0.75rem;
 	font-weight: 500;
+	white-space: nowrap;
 	cursor: pointer;
+}
+
+.mj-seg-lbl:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.06);
+	color: var(--bs-body-color);
 }
 
 .mj-seg-in:checked + .mj-seg-lbl {
@@ -1741,7 +1834,12 @@ mark {
 	pointer-events: none;
 }
 
-.mj-seg-lbl,
+/* Scoped to .mj-hud: these colours are literal because the ground behind them
+   is the picture, not a themed surface. Unscoped they also captured the
+   segmented controls that sit on a card — the settings stream picker and the
+   theme picker — where a hardcoded #b9bec9 is simply wrong on light. Those keep
+   the token-driven .mj-seg-lbl higher up this file. */
+.mj-hud .mj-seg-lbl,
 .mj-tog {
 	display: inline-flex;
 	align-items: center;
@@ -1759,24 +1857,24 @@ mark {
 	margin: 0;
 }
 
-.mj-seg-lbl:hover,
+.mj-hud .mj-seg-lbl:hover,
 .mj-tog:hover {
 	background: rgba(255, 255, 255, 0.07);
 	color: #fff;
 }
 
-.mj-seg-in:checked + .mj-seg-lbl,
+.mj-hud .mj-seg-in:checked + .mj-seg-lbl,
 .mj-tog-in:checked + .mj-tog {
 	background: rgba(255, 255, 255, 0.12);
 	color: #fff;
 }
 
-.mj-seg-in:focus-visible + .mj-seg-lbl,
+.mj-hud .mj-seg-in:focus-visible + .mj-seg-lbl,
 .mj-tog-in:focus-visible + .mj-tog {
 	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
 }
 
-.mj-seg-in:disabled + .mj-seg-lbl,
+.mj-hud .mj-seg-in:disabled + .mj-seg-lbl,
 .mj-tog-in:disabled + .mj-tog {
 	opacity: 0.35;
 	cursor: not-allowed;
@@ -2341,9 +2439,18 @@ mark {
  * setting on the camera. field_switch marks such a row .destructive when it is
  * given a confirm message; this is what makes it read as one.
  */
+/* .form-label since the switch's name moved above it; .form-check-label is the
+   pre-#248 markup, kept so the rule cannot be silently unhooked again by the
+   label moving. The lit word goes red too — on this one row "On" is the state
+   worth reading twice. */
+.boolean.destructive .form-label,
 .boolean.destructive .form-check-label {
 	color: var(--bs-danger);
 	font-weight: 500;
+}
+
+.boolean.destructive .mj-ctl-in:has(.form-check-input:checked) .mj-state:empty {
+	color: var(--bs-danger);
 }
 
 .boolean.destructive .form-check-input:checked {

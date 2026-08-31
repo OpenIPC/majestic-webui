@@ -114,7 +114,37 @@ alert() {
 	echo "<div class=\"alert alert-${2}\" ${3}>${1}</div>"
 }
 
-# button_submit "text" "type" "extras"
+# card_head "title" "note"
+#
+# The heading of a card, in the vocabulary the settings deck uses: micro-caps
+# name, a hairline to the card's edge, and an optional note on the right for
+# state the reader would otherwise have to go and find (whether an extension is
+# on, which interface is live). Still an <h3> — it is the card's heading and the
+# document outline should say so.
+card_head() {
+	echo "<div class=\"mj-live-head\">" \
+		"<h3 class=\"mj-cap\">${1}</h3>" \
+		"<span class=\"mj-live-rule\"></span>"
+	[ -n "$2" ] && echo "<span class=\"mj-live-note\">${2}</span>"
+	echo "</div>"
+}
+
+# group_head "title"
+#
+# A run of related fields inside a card. Four pages had grown their own
+# <div class="text-uppercase x-small text-secondary mt-3 mb-2"> for this; they
+# all mean the same thing, so it is one helper and one rule now.
+group_head() {
+	echo "<div class=\"mj-live-grp-head\">" \
+		"<span class=\"mj-cap\">${1}</span>" \
+		"<span class=\"mj-live-rule\"></span></div>"
+}
+
+# button_submit "text" "type" "extras" "note"
+#
+# The card's foot rather than a button loose on the page: a bar across the
+# bottom of the card, its own surface, with the action at the right end and an
+# optional note on the left saying what saving does or where it lands.
 button_submit() {
 	local t="$1"
 	[ -z "$t" ] && t="Save Changes"
@@ -122,7 +152,10 @@ button_submit() {
 	[ -z "$c" ] && c="primary"
 	local x="$3"
 	[ -z "$x" ] && x=" ${x}"
-	echo "<div class=\"mt-2\"><input type=\"submit\" class=\"btn btn-${c}\"${x} value=\"${t}\"></div>"
+	local n="$4"
+	echo "<div class=\"mj-foot\">"
+	[ -n "$n" ] && echo "<span class=\"mj-foot-note\">${n}</span>"
+	echo "<input type=\"submit\" class=\"btn btn-${c}\"${x} value=\"${t}\"></div>"
 }
 
 # Is root still on the password the firmware ships with?
@@ -196,11 +229,11 @@ field_integer() {
 	local x="$4"
 	local y="$5"
 	local h="$6"
-	echo "<p class=\"number\">" \
+	echo "<p class=\"number mj-row\">" \
 		"<label class=\"form-label\" for=\"${n}\">${l}</label>" \
-		"<span class=\"input-group\">"
+		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">"
 	echo "<input type=\"number\" id=\"${n}\" name=\"${n}\" class=\"form-control text-end\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step=\"1\">" \
-		"</span>"
+		"</span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }
@@ -211,12 +244,13 @@ field_password() {
 	local l="$2"
 	local h="$3"
 	local v=$(t_value "$n")
-	echo "<p class=\"password\" id=\"${n}_wrap\">" \
-		"<label for=\"${n}\" class=\"form-label\">${l}</label><span class=\"input-group\">" \
+	echo "<p class=\"password mj-row\" id=\"${n}_wrap\">" \
+		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
+		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\"><span class=\"input-group\">" \
 		"<input type=\"password\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
 		"<label class=\"input-group-text\">" \
 		"<input type=\"checkbox\" class=\"form-check-input me-1\" data-for=\"${n}\"> show" \
-		"</label></span>"
+		"</label></span></span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }
@@ -229,12 +263,12 @@ field_range() {
 	local x="$4"
 	local y="$5"
 	local h="$6"
-	echo "<p class=\"range\" id=\"${n}_wrap\">" \
+	echo "<p class=\"range mj-row\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
-		"<span class=\"input-group\">"
+		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\"><span class=\"input-group\">"
 	echo "<input type=\"hidden\" id=\"${n}\" name=\"${n}\" value=\"${v}\">"
 	echo "<input type=\"range\" class=\"form-control form-range\" id=\"${n}-range\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step=\"1\">"
-	echo "<span class=\"input-group-text show-value\" id=\"${n}-show\">${v}</span></span>"
+	echo "<span class=\"input-group-text show-value\" id=\"${n}-show\">${v}</span></span></span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }
@@ -313,10 +347,18 @@ field_switch() {
 		*)    v="" ;;
 	esac
 	[ -n "$c" ] && extra=" data-confirm=\"$(attr_escape "$c")\""
-	echo "<p class=\"boolean$([ -n "$c" ] && echo ' destructive')\"><span class=\"form-check form-switch\">" \
+	# The label goes above the switch, like every other row's, instead of beside
+	# it: a switch row was 24px where a text row is 64, so a card mixing the two
+	# had no rhythm. The word beside the switch says what the position means and
+	# is filled by CSS from the checkbox's own state — these pages are rendered
+	# by the server and have no JS to write it.
+	echo "<p class=\"boolean mj-row$([ -n "$c" ] && echo ' destructive')\">" \
+		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
+		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">" \
+		"<span class=\"form-check form-switch\">" \
 		"<input type=\"hidden\" id=\"${n}-false\" name=\"${n}\" value=\"false\">" \
 		"<input type=\"checkbox\" id=\"${n}\" name=\"${n}\" value=\"true\" class=\"form-check-input\" ${v}${extra}>" \
-		"<label for=\"${n}\" class=\"form-check-label\">${l}</label></span>"
+		"</span><span class=\"mj-state\" aria-hidden=\"true\"></span></span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }
@@ -330,19 +372,22 @@ field_string() {
 	local h="$5"
 	[ "$v" = "eval" ] && v=$(t_value "$n")
 	if [ -n "$e" ]; then
-		echo "<p class=\"select\" id=\"${n}_wrap\">" \
+		echo "<p class=\"select mj-row\" id=\"${n}_wrap\">" \
 			"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
+			"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">" \
 			"<select class=\"form-select\" id=\"${n}\" name=\"${n}\">"
 		for e in $e; do
 			echo -n "<option value=\"${e}\""
 			[ "$v" = "$e" ] && echo -n " selected"
 			echo ">${e}</option>"
 		done
-		echo "</select>"
+		echo "</select></span></span>"
 	else
-		echo "<p class=\"string\" id=\"${n}_wrap\">" \
+		echo "<p class=\"string mj-row\" id=\"${n}_wrap\">" \
 			"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
-			"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">"
+			"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">" \
+			"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+			"</span></span>"
 	fi
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
@@ -354,9 +399,11 @@ field_text() {
 	local l="$2"
 	local h="$3"
 	local v=$(t_value "$n")
-	echo "<p class=\"string\" id=\"${n}_wrap\">" \
+	echo "<p class=\"string mj-row\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
-		"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">"
+		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">" \
+		"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+		"</span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }

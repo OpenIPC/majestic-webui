@@ -55,20 +55,20 @@ fi
 
 <div class="row g-4">
 	<div class="col-12 col-lg-8">
-		<div class="card h-100"><div class="card-body">
-			<h3>Telegram</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Telegram" "$([ "$telegram_enabled" = "true" ] && echo on || echo off)" %>
 			<p class="small text-secondary">Post snapshots to a Telegram channel, on a schedule or via the webhook.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_switch "telegram_enabled" "Enable Telegram" "eval" %>
-				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Bot</div>
+				<% group_head "Bot" %>
 				<% field_text "telegram_token" "Token" "Telegram bot authentication token." %>
 				<% field_text "telegram_channel" "Channel" "Channel to post the images to." %>
 				<% field_text "telegram_thread_id" "Message thread id" "Topic to post to (forum supergroups only)." %>
-				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Submission</div>
+				<% group_head "Submission" %>
 				<% field_string "telegram_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
 				<% field_switch "telegram_crontab" "Add to crontab" "eval" "Send pictures timed by interval." %>
 				<% field_text "telegram_caption" "Caption" "Location or short description." %>
-				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Options</div>
+				<% group_head "Options" %>
 				<% field_switch "telegram_document" "Send as document" "eval" "Attach picture as general file." %>
 				<% field_switch "telegram_heif" "Use HEIF format" "eval" "Smaller files (best with H265); sent as a document." %>
 				<% field_switch "telegram_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
@@ -78,8 +78,8 @@ fi
 	</div>
 
 	<div class="col-12 col-lg-4">
-		<div class="card h-100"><div class="card-body">
-			<h3>Remote send</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Remote send" %>
 			<dl class="small list mb-0">
 				<dt>Webhook</dt>
 				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/ext-telegram.cgi?send=image</dd>
