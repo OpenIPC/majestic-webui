@@ -541,9 +541,17 @@ offer_dir_cleanup() {
 		find "$upper/var/www" -type d | sed "s|^$upper||" >>"$tmp/dircand"
 	if [ -f "$DIRS" ]; then
 		while read -r d; do
+			# Only clean absolute paths, and never let a corrupt record
+			# steer the rmdir outside the upper layer through a ".."
+			# segment.
 			case $d in
-			/?*) [ -d "$upper$d" ] && echo "$d" ;;
+			/?*) ;;
+			*) continue ;;
 			esac
+			case $d in
+			*/.. | */../*) continue ;;
+			esac
+			[ -d "$upper$d" ] && echo "$d"
 		done <"$DIRS" >>"$tmp/dircand"
 	fi
 	# Reverse-sorted, a child always precedes its parent (the parent is a
@@ -565,6 +573,10 @@ offer_dir_cleanup() {
 	echo
 	echo "$(count "$tmp/rmdirs") empty director(ies) are left behind in the overlay:"
 	sort "$tmp/rmdirs" | sed 's/^/  /'
+	if [ "$dry_run" = 1 ]; then
+		echo "A real run would offer to remove them, a step that ends in a reboot."
+		return 0
+	fi
 	if [ ! -t 0 ]; then
 		echo "They cost one inode each and hide nothing. Removing them needs an"
 		echo "immediate reboot, so run '$scr_name --restore' from a terminal to"
@@ -606,7 +618,11 @@ offer_dir_cleanup() {
 	fi
 	sync
 	echo "Rebooting."
-	reboot
+	# The directories are already gone from the upper layer, so a reboot
+	# that did not happen leaves the muddled merged view this whole dance
+	# exists to avoid - that must not read as success.
+	reboot ||
+		die "reboot failed; the merged view of the cleaned directories stays confused until the camera is rebooted by hand"
 	exit 0
 }
 
@@ -635,8 +651,8 @@ do_restore() {
 	if [ ! -s "$tmp/prune" ]; then
 		echo "Nothing is installed over the firmware's WebUI."
 		# The empty directories a declined earlier offer left behind can
-		# still be taken away on this path.
-		[ "$dry_run" = 1 ] || offer_dir_cleanup
+		# still be taken away on this path; a dry run only reports them.
+		offer_dir_cleanup
 		return 0
 	fi
 	echo "Remove $(count "$tmp/prune") installed file(s), revealing the firmware's WebUI:"
