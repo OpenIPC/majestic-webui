@@ -9,31 +9,78 @@
 	     (majestic redirects unauthenticated browsers here), so it cannot pull
 	     /a/*.css or /a/*.js, which require a valid session. -->
 	<style>
-		:root { color-scheme: dark; }
+		/* Palette copied from bootstrap.override.css, token name for token
+		   name, so the two can be diffed. Copying is what the self-contained
+		   rule above costs; the price of copying is drift, and this page paid
+		   it once already — written after the "soft & elevated" refresh but
+		   against stock Bootstrap dark, it spent a release looking like a
+		   different product from every page you reach after signing in.
+		   Anything not listed here (the link blue, the danger family, the
+		   checkbox accent) is stock Bootstrap dark on the CGI pages too,
+		   because the override does not redefine it. */
+		:root {
+			color-scheme: dark;
+			--bs-body-bg: #14161c;
+			--bs-body-color: #e6e8ee;
+			--bs-secondary-color: rgba(222, 226, 230, 0.75);
+			/* Not the override's --bs-card-bg (#1c1f27): Bootstrap's own .card
+			   rule redeclares --bs-card-bg: var(--bs-body-bg) on the element,
+			   which shadows a :root-level value, so a card on a CGI page is
+			   the page colour and lifts on its border and shadow rather than
+			   on a fill. Matched here as it renders, not as the override
+			   intends — making cards fill properly is a change to every page
+			   in the UI and does not belong in a consistency fix. */
+			--bs-card-bg: #14161c;
+			--bs-card-border-color: rgba(255, 255, 255, 0.15);
+			--bs-border-color: #2c313d;
+			--bs-primary: rgb(92, 112, 232);
+			/* .btn-primary's --bs-btn-hover-bg in the override; not a Bootstrap
+			   token of its own, hence the mj- prefix. */
+			--mj-primary-hover: rgb(110, 130, 245);
+			--bs-link-color: #6ea8fe;
+			--bs-border-radius-sm: 0.375rem;
+			--bs-border-radius-lg: 0.75rem;
+			--bs-box-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.12);
+			--bs-danger-bg-subtle: #2c0b0e;
+			--bs-danger-border-subtle: #842029;
+			--bs-danger-text-emphasis: #ea868f;
+			/* The override's stack minus Montserrat: that face comes from the
+			   Google Fonts CDN, which header.cgi may ask for but this page may
+			   not — it has to paint on a camera with no route off the LAN. */
+			--bs-font-sans-serif: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+		}
 		* { box-sizing: border-box; }
 		body {
 			margin: 0; min-height: 100vh;
 			display: flex; align-items: center; justify-content: center;
-			background: #1a1d20; color: #dee2e6;
-			font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+			background: var(--bs-body-bg); color: var(--bs-body-color);
+			font-family: var(--bs-font-sans-serif);
 		}
 		.card {
 			width: 100%; max-width: 22rem; margin: 1rem;
-			background: #212529; border: 1px solid #343a40; border-radius: .5rem;
+			background: var(--bs-card-bg); border: 1px solid var(--bs-card-border-color);
+			border-radius: var(--bs-border-radius-lg);
+			box-shadow: var(--bs-box-shadow-sm);
 			padding: 2rem 1.75rem;
 		}
 		h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 1.5rem; text-align: center; }
-		h1 span { color: #6ea8fe; }
-		label { display: block; font-size: .875rem; margin: 0 0 .35rem; color: #adb5bd; }
+		h1 span { color: var(--bs-link-color); }
+		label { display: block; font-size: .875rem; margin: 0 0 .35rem; color: var(--bs-secondary-color); }
+		/* .form-control is inset on the CGI pages — --bs-body-bg, darker than
+		   the card it sits on, not lighter. Matching that is most of why this
+		   page used to read as a stranger. */
 		input {
 			width: 100%; padding: .5rem .75rem; margin-bottom: 1rem;
-			background: #2b3035; color: #dee2e6;
-			border: 1px solid #495057; border-radius: .375rem; font-size: 1rem;
+			background: var(--bs-body-bg); color: var(--bs-body-color);
+			border: 1px solid var(--bs-border-color);
+			border-radius: var(--bs-border-radius-sm); font-size: 1rem;
 		}
-		input:focus { outline: none; border-color: #6ea8fe; box-shadow: 0 0 0 .2rem rgba(110,168,254,.25); }
+		/* Stock Bootstrap's .form-control:focus, which the override leaves
+		   alone — so this blue is deliberately not the theme's indigo. */
+		input:focus { outline: none; border-color: #86b7fe; box-shadow: 0 0 0 .25rem rgba(13, 110, 253, .25); }
 		.check {
 			display: flex; align-items: center; gap: .5rem;
-			margin-bottom: 1rem; font-size: .875rem; color: #adb5bd; cursor: pointer;
+			margin-bottom: 1rem; font-size: .875rem; color: var(--bs-secondary-color); cursor: pointer;
 		}
 		/* The global input rule above styles text fields (full width, padding,
 		   dark background, border). A checkbox inheriting it renders as a padded
@@ -42,19 +89,24 @@
 		.check input {
 			width: 1rem; height: 1rem; flex: none; margin: 0; padding: 0;
 			background: none; border: 0; border-radius: 0; box-shadow: none;
+			/* .form-check-input:checked, hardcoded in Bootstrap and not
+			   retinted by the override, so the CGI switches are this blue too. */
 			accent-color: #0d6efd;
 		}
 		button {
 			width: 100%; padding: .5rem .75rem;
-			background: #0d6efd; color: #fff; border: 0; border-radius: .375rem;
+			background: var(--bs-primary); color: #fff; border: 0;
+			border-radius: var(--bs-border-radius-sm);
+			box-shadow: var(--bs-box-shadow-sm);
 			font-size: 1rem; font-weight: 500; cursor: pointer;
 		}
-		button:hover { background: #0b5ed7; }
+		button:hover { background: var(--mj-primary-hover); }
 		button:disabled { opacity: .65; cursor: default; }
 		.alert {
 			display: none; margin-bottom: 1rem; padding: .6rem .75rem;
-			background: #2c0b0e; color: #ea868f;
-			border: 1px solid #842029; border-radius: .375rem; font-size: .875rem;
+			background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis);
+			border: 1px solid var(--bs-danger-border-subtle);
+			border-radius: var(--bs-border-radius-sm); font-size: .875rem;
 		}
 		.alert.show { display: block; }
 		/* Held back until the already-signed-in probe below has had its say, so a
