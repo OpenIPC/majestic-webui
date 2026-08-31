@@ -272,6 +272,15 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   served). Series
   ink is hardcoded to the dark dashboard's `--st-c*` values (the glass is
   theme-invariant; validated against it), drawn with `www/a/charts.js` — the
+  panel works on BOTH transports and is deliberately comparative: the MSE
+  player (`preview.js`) has its own `onStats` (socket bytes, buffer depth,
+  `getVideoPlaybackQuality`, a `waiting`-event stall counter), the panel's
+  MSE mode leads with `≥ buffer + screen` ("player alone; camera and network
+  are invisible over MSE"), grades from stalls and drops instead of
+  loss/rtt, drops the capacity row and estimate series (no feedback channel
+  IS the finding), and the `#mj-ns-vs` line remembers each transport's last
+  headline across switches so either view can quote the other — the A/B a
+  screenshot carries. `lastSeen` survives `reset()` on purpose —
   sparkline/axis-chart primitives extracted from `status.js`, now shared:
   colors are per-instance arguments and the debounced resize redraw lives in
   charts.js, so load `/a/charts.js` before any consumer —
