@@ -620,12 +620,18 @@ mark {
    mj-settings.js, rather than a CSS multi-column box: a column box re-balances
    itself whenever a visibleWhen row appears or disappears, which shuffles
    unrelated rows across the fold — see layoutCols() (#189). */
-/* .card resolves to the page background theme-wide — --bs-card-bg is declared
-   but nothing reaches it — so a section card reads as an outline rather than a
-   surface. Set locally, the way the Live deck already sets it, because the real
-   fix touches every page in the repo and belongs in its own change. */
+/* Every .card in the repo paints as the page, and this is the mechanism:
+   Bootstrap re-declares --bs-card-bg *on .card itself*, so the theme's :root
+   value never reaches it. Measured on the running page — #1c1f27 at the root,
+   #14161c on the element — which is also why `background: var(--bs-card-bg)`
+   does not fix it: read from the card, that variable is already the body
+   background. The Live deck gets away with it only because .mj-live-deck is
+   not a .card and inherits the root value.
+
+   So take the surface from a token .card does not shadow. Fixing the shadowing
+   itself touches every page in the repo and belongs in its own change. */
 #mj-settings-form .card {
-	background: var(--bs-card-bg);
+	background: var(--bs-secondary-bg);
 	border-color: var(--bs-border-color);
 }
 
@@ -2245,6 +2251,12 @@ mark {
 	--bs-body-bg: #f4f5f9;
 	--bs-body-color: #1f2430;
 	--bs-secondary-bg: #eceef4;
+	/* The hover/active surface. The dark block has always set this and the
+	   light one never did, so every rule reaching for it here — the settings
+	   tree, the console, the recordings ribbon — fell through to Bootstrap's
+	   own near-white and marked nothing. A step down from the page, since on
+	   light the surface has to darken to stand out, not lighten. */
+	--bs-tertiary-bg: #e4e7f0;
 	--bs-card-bg: #ffffff;
 	--bs-border-color: #e2e5ee;
 	/* Dashboard chart series. Validated per theme for color-vision
