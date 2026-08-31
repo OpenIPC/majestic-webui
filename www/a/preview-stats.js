@@ -42,9 +42,13 @@ window.MajesticStats = (function () {
 	// the headline keeps saying "at least".
 	let dispEmaMs = null;
 	let dispSeenAt = 0;
+	// The frame on the glass, named the way the camera can name it too: its
+	// RTP timestamp, plus the browser-epoch instant it became visible.
+	let shownFrame = null;
 	let refreshMs = null;
 	const armed = [];
 	let lossEma = null;
+	let srG2gEma = null;
 	let wired = false;
 	// Measured encoder output per channel, bytes/s, from the 2 s heartbeat —
 	// what the "camera sending" row shows. The configured bitrate is a
@@ -137,6 +141,13 @@ window.MajesticStats = (function () {
 				if (d >= 0 && d < 1000) {
 					dispEmaMs = dispEmaMs == null ? d : dispEmaMs + (d - dispEmaMs) / 8;
 					dispSeenAt = performance.now();
+				}
+				if (typeof md.rtpTimestamp === 'number') {
+					shownFrame = {
+						rtp: md.rtpTimestamp,
+						atEpoch: performance.timeOrigin + md.expectedDisplayTime,
+						seenAt: performance.now(),
+					};
 				}
 			}
 			v.requestVideoFrameCallback(loop);
@@ -271,6 +282,7 @@ window.MajesticStats = (function () {
 			p = null;
 			hold = { buf: null, dec: null };
 			lossEma = null;
+			srG2gEma = null;
 		}
 		const good = p && dt > 0.25 && dt < 5;
 
@@ -326,12 +338,51 @@ window.MajesticStats = (function () {
 		const parts = [camMs, net, hold.buf, screen];
 		let total = null;
 		parts.forEach((v) => { if (v != null) total = (total || 0) + v; });
+
+		// The sender-report cross-check, all in the CAMERA's clock so browser
+		// skew cancels. Three facts meet: the camera's sr= anchor pairs an
+		// RTP timestamp with its capture wall time (kernel-measured, so the
+		// key only exists on anchored cameras — self-gating); the display
+		// probe names the frame on the glass by RTP timestamp and the
+		// browser-epoch instant it appeared; and remote-outbound-rtp says
+		// what time the camera's clock read at its last sender report,
+		// against the browser-epoch arrival of that report. Then
+		// capture(frame) = anchor_wall + (rtp delta)/90 and camera-now at
+		// the display instant = remoteTs + elapsed — their difference is
+		// capture→display of the exact frame shown, biased low by one-way
+		// network delay (~rtt/2), which the ≈ owns. (The obvious spec route,
+		// inbound-rtp.estimatedPlayoutTimestamp, is obsolete and absent from
+		// current Chrome — measured, not assumed.)
+		if (cam.sr && s.remoteTs != null && s.remoteAt != null &&
+			shownFrame && performance.now() - shownFrame.seenAt < 2000) {
+			const a = /^(\d+):(\d+)$/.exec(cam.sr);
+			if (a) {
+				// 32-bit wrap-safe RTP delta, then ticks → ms at 90 kHz.
+				const dRtp = (shownFrame.rtp - (+a[1])) | 0;
+				const captureCam = (+a[2]) + dRtp / 90;
+				const camAtDisplay =
+					s.remoteTs + (shownFrame.atEpoch - s.remoteAt);
+				const g = camAtDisplay - captureCam;
+				if (isFinite(g) && g > 0 && g < 10000) {
+					srG2gEma = srG2gEma == null ? g
+						: srG2gEma + (g - srG2gEma) / 4;
+				}
+			}
+		}
+
+		// Prefer the cross-check for the headline only while the two ways of
+		// measuring agree — a sum that drifts from an independent whole-path
+		// measurement is a diagnostic, not a reason to print the larger lie.
+		// The legs keep their own numbers either way; they explain the
+		// composition, the headline states the total.
+		const srOk = srG2gEma != null && total != null &&
+			Math.abs(srG2gEma - total) <= Math.max(150, total * 0.5);
 		if (total != null && (net != null || c2s)) {
-			els.lat.textContent = '≈' + Math.round(total);
+			els.lat.textContent = '≈' + Math.round(srOk ? srG2gEma : total);
 			els.latSub.textContent = c2s
 				? (c2s.approx ? 'glass to glass, at least' : 'glass to glass')
 				: 'network + player; the camera’s share is not included';
-			window.MjCharts.pushSpark(latSpark, total);
+			window.MjCharts.pushSpark(latSpark, srOk ? srG2gEma : total);
 			// The breakdown renders only with all four legs: three segments
 			// that sum to less than the number above them would read as a
 			// mistake, not a measurement.
@@ -421,6 +472,11 @@ window.MajesticStats = (function () {
 		fp.push('jitter ' + (s.jitterMs || 0) + ' ms · round trip ' +
 			(s.rttMs != null ? s.rttMs + ' ms' : '-') +
 			' · audio in ' + (cam['audio-in'] || '-'));
+		if (srG2gEma != null) {
+			fp.push('end-to-end via sender report ' + Math.round(srG2gEma) +
+				' ms' + (srOk ? ' — headline' : ' — diverges from leg sum ' +
+				(total != null ? Math.round(total) : '-') + ' ms'));
+		}
 		if (camModel) {
 			fp.push('camera @' + Math.round(camModel.fps) + ' fps: sampling ~' +
 				Math.round(camModel.sampling) + ' ms (\u00bd frame)' +
@@ -537,6 +593,7 @@ window.MajesticStats = (function () {
 		lastTickAt = 0;
 		hold = { buf: null, dec: null };
 		lossEma = null;
+		srG2gEma = null;
 	}
 
 	function setOpen(o) {
