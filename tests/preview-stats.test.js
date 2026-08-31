@@ -234,6 +234,56 @@ g('the screen leg: measured vsync wait joins decode', () => {
 	env2.stats.tick({ cam: {}, rttMs: 60 });
 	check('a hidden element\'s frames are ignored',
 		env2.el('mj-ns-fp').textContent.indexOf('screen wait') < 0);
+	// The swap machinery hides the spare with style.display, not [hidden].
+	const env3 = boot();
+	const v3 = env3.mkEl('live-video');
+	let vfc3 = null;
+	v3.hidden = false;
+	v3.style.display = 'none';
+	v3.requestVideoFrameCallback = (fn) => { vfc3 = fn; };
+	env3.stats.tick({ cam: {}, rttMs: 60 });
+	vfc3(0, { expectedDisplayTime: 150, presentationTime: 100 });
+	env3.tickClock(1000);
+	env3.stats.tick({ cam: {}, rttMs: 60 });
+	check('a display-none element\'s frames are ignored too',
+		env3.el('mj-ns-fp').textContent.indexOf('screen wait') < 0);
+});
+
+g('a rebuilt connection is noticed by its counters going backwards', () => {
+	// preview-webrtc reconnects internally without the page's transport
+	// switch, so no reset() arrives — the regression IS the signal.
+	const env = boot();
+	env.stats.tick({ cam: {}, rttMs: 10, packetsLost: 0, packetsReceived: 5000 });
+	env.tickClock(1000);
+	env.stats.tick({ cam: {}, rttMs: 10, packetsLost: 400, packetsReceived: 5400 });
+	check('heavy loss registered on the old connection',
+		env.el('mj-ns-grade').textContent === 'poor');
+	env.tickClock(1000);
+	// New connection: counters restarted near zero. Without the regression
+	// check this tick would difference 50 against 5400.
+	env.stats.tick({ cam: {}, rttMs: 10, packetsLost: 0, packetsReceived: 50 });
+	env.tickClock(1000);
+	env.stats.tick({ cam: {}, rttMs: 10, packetsLost: 0, packetsReceived: 100 });
+	check('the rebuilt connection grades on its own history',
+		env.el('mj-ns-grade').textContent === 'excellent');
+});
+
+g('radio degrades row by row like the dashboard', () => {
+	const env = boot();
+	env.stats.tick({ cam: {} });
+	// Quality-only camera: the section mounts and the grade uses quality.
+	env.metrics({ ok: true, dt: 2, tx: 0,
+		m: { v: { wifi_link_quality_ratio: 93 } }, prev: { tx: 0, v: {} } });
+	check('quality alone keeps the section and grades it',
+		env.el('mj-ns-radio').hidden === false &&
+		env.el('mj-ns-wifi').textContent === 'quality 93 % · good');
+	// Bitrate-only camera: still worth a section.
+	const env2 = boot();
+	env2.stats.tick({ cam: {} });
+	env2.metrics({ ok: true, dt: 2, tx: 0,
+		m: { v: { wifi_bitrate_mbps: 72.2 } }, prev: { tx: 0, v: {} } });
+	check('bitrate alone still mounts the radio section',
+		env2.el('mj-ns-radio').hidden === false);
 });
 
 g('the 2 s heartbeat: radio and egress rows', () => {

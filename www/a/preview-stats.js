@@ -127,8 +127,11 @@ window.MajesticStats = (function () {
 		armed.push(v);
 		const loop = (now, md) => {
 			// The staging player also presents frames while a trial runs;
-			// only the visible element describes what the person sees.
-			if (!v.hidden && md && md.expectedDisplayTime > 0 &&
+			// only the visible element describes what the person sees. The
+			// swap machinery hides the spare with style.display, not the
+			// hidden attribute, so both spellings are checked.
+			if (!v.hidden && v.style.display !== 'none' && md &&
+				md.expectedDisplayTime > 0 &&
 				md.presentationTime > 0) {
 				const d = md.expectedDisplayTime - md.presentationTime;
 				if (d >= 0 && d < 1000) {
@@ -241,13 +244,25 @@ window.MajesticStats = (function () {
 		const now = performance.now();
 		const dt = lastTickAt ? (now - lastTickAt) / 1000 : 0;
 		lastTickAt = now;
-		const p = prevT;
+		let p = prevT;
 		prevT = {
 			jbDelay: s.jbDelay || 0, jbEmitted: s.jbEmitted || 0,
 			decodeTime: s.decodeTime || 0, framesDecoded: s.framesDecoded || 0,
 			packetsLost: s.packetsLost || 0, packetsReceived: s.packetsReceived || 0,
 			nack: s.nack || 0, rtx: parseInt(cam.rtx, 10) || 0,
 		};
+		// A cumulative counter that went BACKWARDS means the peer connection
+		// was rebuilt under us (preview-webrtc reconnects internally without
+		// passing through the page's transport switch): the old baselines,
+		// held per-frame figures and loss average all describe a connection
+		// that no longer exists. Forget them now rather than letting them
+		// decay through the new session's first seconds.
+		if (p && (prevT.packetsReceived < p.packetsReceived ||
+				prevT.jbEmitted < p.jbEmitted)) {
+			p = null;
+			hold = { buf: null, dec: null };
+			lossEma = null;
+		}
 		const good = p && dt > 0.25 && dt < 5;
 
 		// The four legs of the journey. Camera comes from the stats line;
@@ -268,7 +283,8 @@ window.MajesticStats = (function () {
 		// unknown share is left OUT of the sum rather than invented, which
 		// the "at least" caption already covers.
 		const nowMs = performance.now();
-		const disp = dispEmaMs != null && nowMs - dispSeenAt < 3000 ? dispEmaMs
+		const dispMeasured = dispEmaMs != null && nowMs - dispSeenAt < 3000;
+		const disp = dispMeasured ? dispEmaMs
 			: refreshMs != null ? refreshMs / 2
 			: null;
 		const screen = hold.dec != null || disp != null
@@ -406,7 +422,7 @@ window.MajesticStats = (function () {
 			const parts2 = [];
 			if (hold.dec != null) parts2.push('decode ' + hold.dec.toFixed(1) + ' ms');
 			if (disp != null) parts2.push('screen wait ' +
-				disp.toFixed(1) + ' ms' + (dispEmaMs == null ? ' (est.)' : ''));
+				disp.toFixed(1) + ' ms' + (dispMeasured ? '' : ' (est.)'));
 			if (refreshMs != null) parts2.push('display ' +
 				Math.round(1000 / refreshMs) + ' Hz');
 			fp.push(parts2.join(' · '));
@@ -443,17 +459,28 @@ window.MajesticStats = (function () {
 		vencRate[1] = rate('venc1_rcvd_bytes');
 
 		// Radio: words first, the dBm beside them. Rows vanish on a wired
-		// camera rather than standing full of dashes.
-		const hasWifi = 'wifi_rssi_dbm' in v || 'wifi_link_quality_ratio' in v;
+		// camera rather than standing full of dashes. Presence is judged
+		// across the whole wifi_* family and the grade falls back to the
+		// driver's relative link quality when no real dBm is reported —
+		// the same row-by-row degradation the dashboard's Network card
+		// does, with its thresholds.
+		const hasWifi = ['wifi_rssi_dbm', 'wifi_link_quality_ratio',
+			'wifi_bitrate_mbps', 'wifi_retries_total',
+			'wifi_missed_beacons_total'].some((k) => k in v);
 		els.radio.hidden = !hasWifi;
 		if (hasWifi) {
 			const r = ('wifi_rssi_dbm' in v) ? v.wifi_rssi_dbm : null;
-			// The same thresholds and words as the dashboard's Network card.
-			const g = r == null ? null
-				: r >= -60 ? ['good', OK]
-				: r >= -75 ? ['fair', WARN]
-				: ['weak', BAD];
-			els.wifi.textContent = (r != null ? r + ' dBm' : '–') +
+			const q = ('wifi_link_quality_ratio' in v)
+				? v.wifi_link_quality_ratio : null;
+			const g = r != null
+				? (r >= -60 ? ['good', OK] : r >= -75 ? ['fair', WARN]
+					: ['weak', BAD])
+				: q != null
+				? (q >= 70 ? ['good', OK] : q >= 40 ? ['fair', WARN]
+					: ['weak', BAD])
+				: null;
+			els.wifi.textContent =
+				(r != null ? r + ' dBm' : q != null ? 'quality ' + q + ' %' : '–') +
 				(g ? ' · ' + g[0] : '');
 			els.wifi.style.color = g ? g[1] : '';
 			els.rWrate.hidden = !('wifi_bitrate_mbps' in v);
