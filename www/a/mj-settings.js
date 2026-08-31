@@ -616,10 +616,18 @@
 
 	const isLive = (f) => !!(f.schema && f.schema['x-live']);
 
+	// A save that is on the wire owns the live values. It has handed the camera
+	// the dragged ones on purpose, and state.initial does not catch up until the
+	// response comes back — so for that window `liveDrift()` reports a
+	// difference that is about to stop being one, and a revert built from it
+	// would undo the save.
+	let liveSaving = 0;
+
 	// Whether the camera is running something this page has not saved. Dragging
 	// a knob POSTs it to the SDK immediately; that is a runtime write and never
 	// reaches config.json, so nothing else on the page can tell.
 	function liveDrift() {
+		if (liveSaving) return false;
 		return state.fields.some(f => isLive(f) && f.getValue() !== state.initial[f.dot]);
 	}
 
@@ -630,6 +638,11 @@
 	// browser Back, which does not even prompt — so this lives in the teardown
 	// every one of those paths already runs through rather than at any of them.
 	function revertLive() {
+		// The debounced write is the discarded edit, still 120ms from being
+		// sent. postLive serialises, so leaving it queued would put it AFTER the
+		// revert and hand the camera back the very values being thrown away —
+		// a fast navigation right after a drag would have undone the undo.
+		if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
 		if (!state.fields.length || !liveDrift()) return;
 		postLive(liveQuery(liveSaved));
 	}
@@ -645,6 +658,14 @@
 	// here would only re-create it facing the other way.
 	function wireUnloadRevert() {
 		const onHide = (ev) => {
+			// Same reason as in revertLive: a queued write would be the discarded
+			// edit arriving after the revert. There is no chaining it here — the
+			// beacon leaves outside liveWrite because nothing can be awaited on
+			// the way out — so cancelling is the whole of the ordering guarantee,
+			// and it covers everything except a write already on the wire when
+			// the tab closed. That one can still be reordered by the server, and
+			// this page has no way to stop it.
+			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
 			if (ev.persisted || !state.fields.length || !liveDrift()) return;
 			const q = liveQuery(liveSaved);
 			if (q && navigator.sendBeacon) navigator.sendBeacon('/api/v1/image?' + q);
@@ -2503,8 +2524,14 @@
 		if (!dirty.length) return;
 
 		const body = {};
+		// What each field was worth when the body was built, not when the
+		// response comes back: the snapshot below has to record what was
+		// actually sent, and a knob can be dragged again while the POST is in
+		// flight.
+		const sent = new Map();
 		for (const f of dirty) {
 			let val = f.getValue();
+			sent.set(f, val);
 			// array-typed schema fields (MultiRect: roi/crop/privacyMasks) post as a
 			// list of strings, not a comma-joined scalar.
 			if (f.schema && f.schema.type === 'array')
@@ -2517,6 +2544,7 @@
 		btn.textContent = 'Saving…';
 		setToolbarMsg('');
 		clearError();
+		liveSaving++;
 		try {
 			const res = await apiFetch('/api/v1/config', {
 				method: 'POST',
@@ -2529,6 +2557,13 @@
 				showError('Save failed (HTTP ' + res.status + '). ' + txt);
 				return;
 			}
+			// The camera now holds these, so the snapshot the revert is built
+			// from has to say so before anything can read it again. refresh()
+			// sets the same values a moment later from the config itself — but
+			// it can throw, and leaving state.initial stale through a failed
+			// refresh would let a later discard "revert" the camera to values
+			// that are no longer what was saved (#259).
+			sent.forEach((v, f) => { state.initial[f.dot] = v; });
 			await refresh();
 			// Image knobs (x-live) apply instantly; everything structural
 			// (resolution, codec, fps, ...) only takes effect after majestic
@@ -2539,6 +2574,7 @@
 		} catch (e) {
 			showError('Save failed: ' + e.message);
 		} finally {
+			liveSaving--;
 			btn.disabled = false;
 			btn.textContent = 'Save Changes';
 			updateDirty();
