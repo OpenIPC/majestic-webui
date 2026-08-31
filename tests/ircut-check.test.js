@@ -346,5 +346,83 @@ function runRest() {
 		check('they age out of the window', r.flips === 0, r.flips);
 	}
 
+	group('look: three answers, because "cannot tell" is one of them');
+	{
+		check('magenta looks open', ic.look(st(MAGENTA)) === 'open');
+		check('an ordinary frame looks coloured', ic.look(st(GREENY)) === 'colour');
+		check('a mono frame answers neither', ic.look(st(GREY)) === 'none');
+		check('a dark frame answers neither', ic.look(st([8, 8, 8])) === 'none');
+	}
+
+	group('tracker: a picture that stopped agreeing is not still agreeing');
+	{
+		const t = ic.tracker();
+		check('one open frame is a run of one', t.picture('open') === 1);
+		check('and it accumulates', t.picture('open') === 2 && t.picture('open') === 3);
+		// Reset, not decrement: an ordinary frame in the middle means the run
+		// of magenta frames ended, and starting again from 2 would let an
+		// alternating sequence reach the threshold it never actually held.
+		check('an ordinary frame resets it', t.picture('colour') === 0);
+		check('a frame that could not tell resets it too',
+			t.picture('open') === 1 && t.picture('none') === 0);
+	}
+
+	group('diagnose: the picture corroborates, it does not accuse');
+	{
+		const day = { night: 0, ircut: 0 };
+		const opened = (n) => ({ look: 'open', streak: n });
+		const wired = { irCutPin1: 11, irCutPin2: 10 };
+
+		// With no pins the picture only sharpens a finding that already stands
+		// on the configuration alone — one banner, two agreeing signals.
+		const bare = ic.diagnose({}, day, {}, opened(6));
+		check('it is still the no-pins finding', bare[0].id === 'no-pins');
+		check('and it says the picture agrees', /picture agrees/.test(bare[0].detail));
+		check('while without the picture it does not',
+			!/picture agrees/.test(ic.diagnose({}, day, {}, null)[0].detail));
+
+		// With pins set the configuration looks right, so the picture may only
+		// ask for a measurement.
+		const w = ic.diagnose(wired, day, {}, opened(6));
+		check('configured pins get their own finding',
+			w.some(x => x.id === 'picture-open' && x.level === 'warning'),
+			JSON.stringify(w.map(x => x.id)));
+		check('worded as a prompt to run the test',
+			/run the IR-cut test/.test(w.find(x => x.id === 'picture-open').detail));
+		// The innocent readings have to be named, or the banner is an
+		// accusation dressed as an observation.
+		check('and it names what it cannot rule out',
+			/IR lamp|magenta light/.test(w.find(x => x.id === 'picture-open').detail));
+	}
+
+	group('diagnose: when the picture is not allowed to speak');
+	{
+		const day = { night: 0, ircut: 0 };
+		const wired = { irCutPin1: 11 };
+		const said = (nm, s, pic) => ic.diagnose(nm, s, {}, pic)
+			.some(x => x.id === 'picture-open');
+
+		check('one open frame is not enough', !said(wired, day, { look: 'open', streak: 1 }));
+		check('nor is a run one short of the bar',
+			!said(wired, day, { look: 'open', streak: ic.PIC_STREAK - 1 }));
+		check('the bar itself is enough',
+			said(wired, day, { look: 'open', streak: ic.PIC_STREAK }));
+		// An open filter at night is the filter doing its job.
+		check('a magenta picture in NIGHT mode says nothing',
+			!said(wired, { night: 1, ircut: 1 }, { look: 'open', streak: 9 }));
+		// Without a sample there is no way to know it is not night, and
+		// guessing would turn every unreachable camera into a warning.
+		check('with no sample at all it says nothing',
+			!said(wired, null, { look: 'open', streak: 9 }));
+		check('an ordinary picture says nothing', !said(wired, day, { look: 'colour', streak: 9 }));
+		check('a frame that could not tell says nothing',
+			!said(wired, day, { look: 'none', streak: 9 }));
+		// And it must never be reported as health: there is no "the filter is
+		// fine" finding for a good-looking frame to produce.
+		check('a good picture produces no reassurance either',
+			ic.diagnose(wired, day, {}, { look: 'colour', streak: 99 })
+				.every(x => x.level !== 'ok'));
+	}
+
 	done();
 }

@@ -58,15 +58,40 @@
 	const HUNT_WINDOW_S = 300;
 	const HUNT_FLIPS = 3;
 	const CONFLICT_S = 30;
+	// Consecutive open-looking frames before the picture is allowed to say
+	// anything. The dashboard samples every 5s, so this is ~20s of agreement —
+	// enough that a frame caught mid-swing, or one magenta lorry crossing the
+	// view, cannot raise a banner on its own.
+	const PIC_STREAK = 4;
 
 	// Findings, worst first. `fix` names the section to send someone to; the
 	// consumer decides whether that becomes a link or a tab switch.
-	function diagnose(nm, sample, track) {
+	//
+	// `pic` is optional and is what the camera's own picture says: {look,
+	// streak} from look() and tracker().picture(). It is deliberately never a
+	// verdict on its own — see the note above the picture rules below.
+	function diagnose(nm, sample, track, pic) {
 		nm = nm || {};
 		track = track || {};
 		const out = [];
 		const monitor = on(nm.lightMonitor);
 		const driveable = has(nm.irCutPin1);
+
+		// The one gate the picture gets, and it is the only portable one there
+		// is. An open filter at NIGHT is correct, so the picture may only speak
+		// while majestic is in day mode.
+		//
+		// There is no brightness gate, because there is no brightness to read.
+		// isp_again would be the obvious one and it is not comparable across
+		// vendors — the same "no gain at all" reads 1024 on HiSilicon, 126 on
+		// Ingenic and 20855 on SigmaStar, and SigmaStar reports no isp_avelum
+		// to fall back on. Nor can the frame supply it: auto-exposure drives
+		// average luminance toward its target whatever the light, so a
+		// correctly exposed midnight frame and a correctly exposed noon frame
+		// have the same mean by construction. Hence the wording of the finding
+		// below names what it cannot rule out instead of pretending to.
+		const pictureOpen = !!(pic && pic.look === 'open' && pic.streak >= PIC_STREAK &&
+			sample && !(sample.night | 0));
 
 		if (!driveable) {
 			out.push({
@@ -74,7 +99,27 @@
 				title: 'Majestic cannot move the IR-cut filter',
 				detail: 'nightMode.irCutPin1 is not set, so nothing drives the ' +
 					'filter and it stays wherever it powered up. Left open in ' +
-					'daylight it makes the whole picture magenta.',
+					'daylight it makes the whole picture magenta.' +
+					// Two independent signals agreeing, so this is the one place
+					// the picture is allowed to sound certain — and it still
+					// only sharpens a finding that stands without it.
+					(pictureOpen ? ' The picture agrees: the last few frames have ' +
+						'exactly that cast, so the filter is open right now.' : ''),
+				fix: 'nightMode',
+			});
+		} else if (pictureOpen) {
+			// Pins are set, so the configuration looks right and only the
+			// picture disagrees. That is a reason to MEASURE, not to accuse:
+			// the innocent readings are named, and the answer is one button
+			// away on the section this points at.
+			out.push({
+				id: 'picture-open', level: 'warning',
+				title: 'The picture looks like an open IR-cut filter',
+				detail: 'Recent frames have the magenta cast of infrared reaching ' +
+					'the sensor while the camera is in day mode. The pins are ' +
+					'configured, so run the IR-cut test to see whether the filter ' +
+					'actually moves. A scene lit by an IR lamp, or by magenta ' +
+					'light, looks the same from here.',
 				fix: 'nightMode',
 			});
 		}
@@ -165,7 +210,16 @@
 		let flips = [];
 		let last = null;
 		let conflictAt = null;
+		let openRun = 0;
 		return {
+			// Consecutive frames that looked open. Anything else — an ordinary
+			// coloured frame, or one too dark to judge — resets the run rather
+			// than merely failing to extend it: a picture that stopped agreeing
+			// is not a picture that still agrees a bit.
+			picture: function (l) {
+				openRun = (l === 'open') ? openRun + 1 : 0;
+				return openRun;
+			},
 			push: function (sample, nowS) {
 				if (!sample) return { flips: 0, conflictS: 0 };
 				const night = sample.night | 0;
@@ -197,6 +251,10 @@
 	// Below this many usable pixels the frame is night, a lens cap or a
 	// teardown, and nothing here may be concluded from it.
 	const MIN_PX = 200;
+	// The sample is a thumbnail, not the frame: these are statistics, and
+	// 160x90 is 14,400 pixels, plenty for a percentile and small enough that
+	// neither the decode nor the readback is felt on a 5s poll.
+	const SW = 160, SH = 90;
 
 	// Two statistics over an RGBA buffer, as getImageData hands it over.
 	//
@@ -246,6 +304,30 @@
 	// green is never the valley in a monotone ramp).
 	function colourLook(st) {
 		return st.n >= MIN_PX && st.gmin < 0.6;
+	}
+	// The three answers a frame can give, including "I cannot tell" — which is
+	// what a night scene, a lens cap and a mid-swing capture all return.
+	function look(st) {
+		if (irLook(st)) return 'open';
+		if (colourLook(st)) return 'colour';
+		return 'none';
+	}
+
+	// A decoded <img>/<video> to a look, via the same downscale the probe uses.
+	// Reads an element that is already on the page, so the passive check costs
+	// no fetch, no session slot and no camera-side work at all.
+	function lookAt(src) {
+		try {
+			const c = document.createElement('canvas');
+			c.width = SW; c.height = SH;
+			const ctx = c.getContext('2d');
+			ctx.drawImage(src, 0, 0, SW, SH);
+			return look(stats(ctx.getImageData(0, 0, SW, SH).data, SW, SH));
+		} catch (e) {
+			// A frame that cannot be drawn (mid-teardown, a zero-sized element,
+			// a tainted canvas) is not a frame that says anything.
+			return 'none';
+		}
 	}
 
 	// ---------------------------------------------------------------------
@@ -338,10 +420,7 @@
 			});
 	}
 
-	// Browser-side glue: a JPEG URL to an RGBA buffer, downscaled. A statistic
-	// does not need the full frame — 160x90 is 14,400 pixels, plenty for a
-	// percentile, and small enough that the decode is not felt.
-	const SW = 160, SH = 90;
+	// Browser-side glue: a JPEG URL to a decoded frame's statistics.
 	function snapshot(url) {
 		// Through apiFetch and a blob, never Image.src, for the reason the
 		// dashboard's snapshot poller gives: a same-origin request that can be
@@ -378,8 +457,10 @@
 	const api = {
 		diagnose: diagnose, tracker: tracker,
 		stats: stats, irLook: irLook, colourLook: colourLook,
+		look: look, lookAt: lookAt,
 		verdict: verdict, probe: probe, snapshot: snapshot,
-		HUNT_WINDOW_S: HUNT_WINDOW_S, HUNT_FLIPS: HUNT_FLIPS, CONFLICT_S: CONFLICT_S,
+		HUNT_WINDOW_S: HUNT_WINDOW_S, HUNT_FLIPS: HUNT_FLIPS,
+		CONFLICT_S: CONFLICT_S, PIC_STREAK: PIC_STREAK,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticIrcut = api;

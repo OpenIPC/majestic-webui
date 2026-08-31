@@ -75,10 +75,38 @@
 		if (c && Object.keys(c).length) nmCfg = c.nightMode || {};
 	}).catch(() => {});
 
+	// What the snapshot tile's frame looks like. Kept as the last observation
+	// plus its run length, so the banner is driven by the picture the page is
+	// actually showing rather than by one lucky frame.
+	let ircutPic = null;
+	let ircutSample = null;
+	let ircutTrackNow = { flips: 0, conflictS: 0 };
+
+	function readIrcutPicture(el) {
+		if (!IC || !nmCfg) return;
+		const l = IC.lookAt(el);
+		ircutPic = { look: l, streak: ircutTrack.picture(l) };
+		// The snapshot poll is 5s and the heartbeat 2s, so repaint here rather
+		// than wait for the next sample — otherwise the picture's finding
+		// always lags a frame behind the frame that produced it.
+		paintIrcut();
+	}
+
+	// Advancing the tracker and painting are separate because they are driven
+	// by different clocks: the heartbeat advances time (flips, how long a
+	// disagreement has stood) and must be counted exactly once per sample,
+	// while the snapshot poll only ever brings new evidence. Painting from
+	// inside the push would make every repaint a second tick of the clock.
 	function renderIrcut(s) {
 		if (!IC || !nmCfg) return;
-		const track = ircutTrack.push(s, performance.now() / 1000);
-		const f = IC.diagnose(nmCfg, s, track).filter(x => x.level !== 'info')[0];
+		ircutSample = s;
+		ircutTrackNow = ircutTrack.push(s, performance.now() / 1000);
+		paintIrcut();
+	}
+
+	function paintIrcut() {
+		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
+			.filter(x => x.level !== 'info')[0];
 		if (f) {
 			$('#st-alert-ircut-t').textContent = f.title;
 			$('#st-alert-ircut-d').textContent = f.detail;
@@ -264,6 +292,12 @@
 					probe.onload = () => {
 						if (busy !== mine) { URL.revokeObjectURL(url); return; }
 						busy = 0;
+						// The frame is decoded and in hand, so the IR-cut look
+						// costs one 160x90 drawImage and nothing else — no
+						// fetch, no session slot, no camera-side work. Reading
+						// it here rather than on a timer of its own is also
+						// what keeps the streak counting real frames.
+						readIrcutPicture(probe);
 						const old = img.src;
 						img.src = url;
 						img.hidden = false;
