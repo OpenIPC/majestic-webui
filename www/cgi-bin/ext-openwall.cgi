@@ -39,17 +39,17 @@ fi
 <%in p/header.cgi %>
 
 <div class="row g-4">
-	<div class="col-12 col-lg-8">
-		<div class="card h-100"><div class="card-body">
-			<h3>OpenWall</h3>
+	<div class="col-12 col-lg-6">
+		<div class="card"><div class="card-body">
+			<% card_head "OpenWall" %>
 			<p class="small text-secondary">Share snapshots on the <a href="https://openipc.org/open-wall">Open Wall</a> to help compare image quality across cameras. Also sends your MAC address, chipset, sensor, flash size, firmware version and uptime.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_switch "openwall_enabled" "Enable OpenWall" "eval" %>
-				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Submission</div>
+				<% group_head "Submission" %>
 				<% field_string "openwall_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
 				<% field_switch "openwall_crontab" "Add to crontab" "eval" "Send pictures timed by interval." %>
 				<% field_text "openwall_caption" "Caption" "Location or short description." %>
-				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Options</div>
+				<% group_head "Options" %>
 				<% field_switch "openwall_heif" "Use HEIF format" "eval" "Smaller files (best with H265)." %>
 				<% field_switch "openwall_proxy" "Use SOCKS5" "eval" "<a href=\"ext-proxy.cgi\">Configure proxy access.</a>" %>
 				<% button_submit %>

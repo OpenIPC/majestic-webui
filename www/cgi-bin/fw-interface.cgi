@@ -46,13 +46,17 @@ tcur=${webui_theme:-dark}
 
 <div class="row g-4">
 	<div class="col-12 col-md-6">
-		<div class="card h-100"><div class="card-body">
-			<h3>Admin password</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Admin password" %>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_hidden "action" "access" %>
-				<p class="string">
+				<%# hand-written because the field is disabled — root is the only
+				    account — so the row shape is spelled out to match the helpers %>
+				<p class="string mj-row">
 					<label for="ui_username" class="form-label">Username</label>
-					<input type="text" id="ui_username" name="ui_username" value="<% attr_escape "$ui_username" %>" class="form-control" autocomplete="username" disabled>
+					<span class="mj-ctl"><span class="mj-ctl-in">
+						<input type="text" id="ui_username" name="ui_username" value="<% attr_escape "$ui_username" %>" class="form-control" autocomplete="username" disabled>
+					</span></span>
 				</p>
 				<% field_password "password_default" "Password" %>
 				<% field_password "password_confirm" "Confirm password" %>
@@ -63,8 +67,8 @@ tcur=${webui_theme:-dark}
 	</div>
 
 	<div class="col-12 col-md-6">
-		<div class="card h-100"><div class="card-body">
-			<h3>Appearance</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Appearance" %>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_hidden "action" "theme" %>
 				<label class="form-label d-block">Theme</label>

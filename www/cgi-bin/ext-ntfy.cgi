@@ -57,17 +57,17 @@ fi
 
 <div class="row g-4">
 	<div class="col-12 col-lg-8">
-		<div class="card h-100"><div class="card-body">
-			<h3>Ntfy notifications</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Ntfy notifications" %>
 			<p class="small text-secondary">Push a snapshot notification to an <a href="https://ntfy.sh">ntfy</a> topic.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_switch "ntfy_enabled" "Enable Ntfy" "eval" %>
-				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Connection</div>
+				<% group_head "Connection" %>
 				<% field_text "ntfy_server" "Server URL" "e.g. https://ntfy.sh" %>
 				<% field_text "ntfy_topic" "Topic" "Unique topic name for notifications." %>
 				<% field_text "ntfy_user" "Username" "Leave empty if no auth." %>
 				<% field_text "ntfy_pass" "Password" "Leave empty if no auth." %>
-				<div class="text-uppercase x-small text-secondary mt-3 mb-2">Message</div>
+				<% group_head "Message" %>
 				<% field_text "ntfy_caption" "Caption" "Supports %hostname, %datetime, %soctemp." %>
 				<% field_string "ntfy_priority" "Priority" "eval" "1 2 3 4 5" "1 = min, 5 = max (urgent)." %>
 				<% field_switch "ntfy_heif" "Use HEIF format" "eval" "Smaller files (best with H265)." %>
@@ -77,8 +77,8 @@ fi
 	</div>
 
 	<div class="col-12 col-lg-4">
-		<div class="card h-100"><div class="card-body">
-			<h3>Test</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Test" %>
 			<p class="small text-secondary">Send a test notification using the saved settings.</p>
 			<button type="button" id="ntfy-test" class="btn btn-sm btn-outline-secondary">Send test notification</button>
 			<span id="ntfy-status" class="small ms-2"></span>

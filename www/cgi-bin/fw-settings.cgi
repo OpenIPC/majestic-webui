@@ -44,7 +44,7 @@ fi
 <div class="row g-4">
 	<div class="col-12 col-lg-6">
 		<div class="card mb-4"><div class="card-body">
-			<h3>Backup &amp; Restore</h3>
+			<% card_head "Backup &amp; Restore" %>
 			<p class="small text-secondary">Download a <code>.tgz</code> of the files listed in the backuper configuration.</p>
 			<a class="btn btn-primary" href="ext-backuper.cgi?backup=create">Create backup</a>
 
@@ -63,7 +63,7 @@ fi
 		</div></div>
 
 		<div class="card"><div class="card-body">
-			<h3>Maintenance</h3>
+			<% card_head "Maintenance" %>
 			<div>
 				<a class="btn btn-outline-secondary confirm" href="fw-restart.cgi"
 					data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>
@@ -87,8 +87,8 @@ fi
 	</div>
 
 	<div class="col-12 col-lg-6">
-		<div class="card h-100"><div class="card-body">
-			<h3>Backuper configuration</h3>
+		<div class="card"><div class="card-body">
+			<% card_head "Backuper configuration" %>
 			<p class="small text-secondary mb-2">Lines starting <code>#/</code> are files to back up; <code>cli -s …</code> lines run after a restore.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_hidden "action" "save" %>
