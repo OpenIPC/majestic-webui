@@ -78,7 +78,7 @@ This is the most important file to read before editing anything. It defines:
 - `/etc/crontabs/root` — extensions add/remove their own lines with `sed -i /name/d` then append.
 - `/tmp/webui/` — scratch (sysinfo, schema cache, flash log, signature).
 - `/tmp/system-reboot` — sentinel file; presence triggers the "restart required" banner in `header.cgi`.
-- U-Boot env via `fw_printenv -n` / `fw_setenv` for `ethaddr`, `wlanssid`, `wlanpass`, `upgrade`, `sensor`, `soc`, `gpio_motors`.
+- U-Boot env via `fw_printenv -n` / `fw_setenv` for `ethaddr`, `wlanssid`, `wlanpass`, `upgrade`, `sensor`, `soc`, and the PTZ family `ptz_control`/`ptz_gpio`/`ptz_port`/`ptz_speed`/`ptz_profile` (legacy aliases `gpio_motors`, `ptz`).
 
 ### Talking to Majestic
 
@@ -308,26 +308,34 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   a `:has()`-conditional `margin-bottom`, and — since `.mj-stage` is
   `overflow: hidden`, which is what rounds the picture's corners — that clip
   moves onto `.mj-stage-media` and `.mj-bar` for the duration. `:fullscreen`
-  puts the pad back on the video, the one phone case with height to spare. **Three PTZ backends**, detected in
+  puts the pad back on the video, the one phone case with height to spare. **Four PTZ backends**, detected in
   `common.cgi:update_caminfo` into `ptz_backend` (cached in sysinfo like
   `ptz_support`). The switch is U-Boot `ptz_control` (#227): `gpio`
-  (`gpio-motors` binary; pins in `ptz_gpio` — though the binary itself still
-  reads legacy `gpio_motors`, so set that one until the firmware utility
-  learns the new name), `pelco-d` (`/usr/bin/btzoom`; `ptz_port` default
-  `/dev/ttyAMA0`, `ptz_speed` default 115200 from a whitelist of standard
-  rates), `motor` (`/usr/bin/motor`; profile in `ptz_profile`, legacy `ptz`
-  value as fallback), or `none`. With `ptz_control` unset the pre-#227
-  detection stands (legacy `gpio_motors`/`ptz` vars), so field cameras keep
-  their pads; `j/ptz.cgi` honours the same switch. `gpio` and `motor` are
+  (`gpio-motors` binary; pins in `ptz_gpio`, legacy `gpio_motors` accepted
+  as an alias on both sides since firmware#2341), `pelco-d`
+  (`/usr/bin/btzoom`; `ptz_port` default `/dev/ttyAMA0`, `ptz_speed`
+  default 115200 from a whitelist of standard rates), `pelco-xm`
+  (`/usr/bin/btzoom-xm`, the XiongMai near-Pelco UART protocol from
+  sandbox#31 — same nine verbs and the same pad, its own framing and
+  checksum, `ptz_port` default `/dev/ttyAMA1`), or `motor`
+  (`/usr/bin/motor`; profile in `ptz_profile`, legacy `ptz` value as
+  fallback). **Unset means no PTZ**, exactly like `none` — the reporter of
+  #227 ruled that a camera without `ptz_control` shows no pad, so the old
+  auto-detection from `gpio_motors`/`ptz` alone is gone and a legacy-configured
+  camera must `fw_setenv ptz_control <method>` once; `j/ptz.cgi` honours the
+  same switch. `gpio` and `motor` are
   stepped eight-way pads speaking `j/ptz.cgi?h=&v=` (validated as small
-  signed ints); `pelco` is the community Pelco-D serial mod — four
+  signed ints); `pelco` covers both serial variants — four
   directions, zoom and focus, each a fixed timed pulse — speaking
-  `j/ptz.cgi?act=<verb>` against a closed whitelist (btzoom execs
-  `pelcoD_$1`, so the verb must never pass through raw). `bin/btzoom` ships
-  in this repo (adopted from OpenIPC/sandbox `scripts/pelcoD`) so a Pelco
-  camera needs only `fw_setenv ptz_control pelco-d`. A held
+  `j/ptz.cgi?act=<verb>` against a closed whitelist (the scripts dispatch on
+  the verb, so it must never pass through raw). `bin/btzoom` and
+  `bin/btzoom-xm` ship in this repo (adopted from OpenIPC/sandbox
+  `scripts/pelcoD`, the xm variant hardened to btzoom's standard: shared
+  `/tmp/btzoom.lock`, `ptz_port`/`ptz_speed`, idempotent per-command `stty`)
+  so a Pelco camera needs only `fw_setenv ptz_control pelco-d` (or
+  `pelco-xm`). A held
   Pelco button strings pulses end-to-end via the one-request-in-flight
-  guard — btzoom answers only after its pulse ends. To render either pad on
+  guard — the script answers only after its pulse ends. To render either pad on
   a camera without hardware: set the env vars, `touch`+`chmod +x` fake
   binaries, and remove `/tmp/webui/sysinfo.txt` (no reboot needed).
 - **Two clocks, and the page says which one it is printing.** Every second in
