@@ -867,6 +867,9 @@ mark {
    of the flow rather than hidden, so they stay focusable. */
 .mj-seg {
 	display: flex;
+	/* the control is as wide as its options — as a block child of .mj-ctl-in it
+	   would otherwise stretch the width of the card */
+	width: fit-content;
 	gap: 2px;
 	padding: 2px;
 	background: var(--bs-tertiary-bg);
@@ -883,12 +886,22 @@ mark {
 }
 
 .mj-seg-lbl {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin: 0;
 	padding: 0.3rem 0.8rem;
 	border-radius: var(--bs-border-radius-sm);
 	color: var(--bs-secondary-color);
 	font-size: 0.75rem;
 	font-weight: 500;
+	white-space: nowrap;
 	cursor: pointer;
+}
+
+.mj-seg-lbl:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.06);
+	color: var(--bs-body-color);
 }
 
 .mj-seg-in:checked + .mj-seg-lbl {
@@ -1814,7 +1827,12 @@ mark {
 	pointer-events: none;
 }
 
-.mj-seg-lbl,
+/* Scoped to .mj-hud: these colours are literal because the ground behind them
+   is the picture, not a themed surface. Unscoped they also captured the
+   segmented controls that sit on a card — the settings stream picker and the
+   theme picker — where a hardcoded #b9bec9 is simply wrong on light. Those keep
+   the token-driven .mj-seg-lbl higher up this file. */
+.mj-hud .mj-seg-lbl,
 .mj-tog {
 	display: inline-flex;
 	align-items: center;
@@ -1832,24 +1850,24 @@ mark {
 	margin: 0;
 }
 
-.mj-seg-lbl:hover,
+.mj-hud .mj-seg-lbl:hover,
 .mj-tog:hover {
 	background: rgba(255, 255, 255, 0.07);
 	color: #fff;
 }
 
-.mj-seg-in:checked + .mj-seg-lbl,
+.mj-hud .mj-seg-in:checked + .mj-seg-lbl,
 .mj-tog-in:checked + .mj-tog {
 	background: rgba(255, 255, 255, 0.12);
 	color: #fff;
 }
 
-.mj-seg-in:focus-visible + .mj-seg-lbl,
+.mj-hud .mj-seg-in:focus-visible + .mj-seg-lbl,
 .mj-tog-in:focus-visible + .mj-tog {
 	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
 }
 
-.mj-seg-in:disabled + .mj-seg-lbl,
+.mj-hud .mj-seg-in:disabled + .mj-seg-lbl,
 .mj-tog-in:disabled + .mj-tog {
 	opacity: 0.35;
 	cursor: not-allowed;
