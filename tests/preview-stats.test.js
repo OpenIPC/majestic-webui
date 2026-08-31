@@ -262,6 +262,17 @@ g('the sender-report cross-check: one clock, both ends', () => {
 		remoteTs: 5002000, remoteAt: 100000 });
 	check('no anchor key, no SR figure',
 		env3.el('mj-ns-fp').textContent.indexOf('sender report') < 0);
+
+	// Staleness: six seconds without a new sample forgets the figure — a
+	// frozen stream must not wear a current measurement's label. (The
+	// screen-wait sample ages out on its own 3 s window too, so the sum
+	// left standing is camera 58 + network 30.)
+	env.tickClock(6000);
+	env.stats.tick({ cam: { c2s: '58ms', sr: '900000:5000000' }, rttMs: 60,
+		remoteTs: 5002000, remoteAt: 100000 });
+	check('a stale cross-check is forgotten, headline falls back to the sum',
+		env.el('mj-ns-fp').textContent.indexOf('sender report') < 0 &&
+		env.el('mj-ns-lat').textContent === '≈88');
 });
 
 g('the screen leg: measured vsync wait joins decode', () => {

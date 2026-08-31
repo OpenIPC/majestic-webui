@@ -49,6 +49,7 @@ window.MajesticStats = (function () {
 	const armed = [];
 	let lossEma = null;
 	let srG2gEma = null;
+	let srSeenAt = 0;
 	let wired = false;
 	// Measured encoder output per channel, bytes/s, from the 2 s heartbeat —
 	// what the "camera sending" row shows. The configured bitrate is a
@@ -366,8 +367,16 @@ window.MajesticStats = (function () {
 				if (isFinite(g) && g > 0 && g < 10000) {
 					srG2gEma = srG2gEma == null ? g
 						: srG2gEma + (g - srG2gEma) / 4;
+					srSeenAt = nowMs;
 				}
 			}
+		}
+		// A cross-check that stopped updating — the video froze, the anchor
+		// or the SR went away — is not a current measurement and must not
+		// keep wearing one's label. Forgotten, not merely hidden: an old
+		// average blended into a resumed stream would describe neither.
+		if (srG2gEma != null && nowMs - srSeenAt > 5000) {
+			srG2gEma = null;
 		}
 
 		// Prefer the cross-check for the headline only while the two ways of
