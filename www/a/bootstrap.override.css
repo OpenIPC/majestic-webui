@@ -2432,9 +2432,18 @@ mark {
  * setting on the camera. field_switch marks such a row .destructive when it is
  * given a confirm message; this is what makes it read as one.
  */
+/* .form-label since the switch's name moved above it; .form-check-label is the
+   pre-#248 markup, kept so the rule cannot be silently unhooked again by the
+   label moving. The lit word goes red too — on this one row "On" is the state
+   worth reading twice. */
+.boolean.destructive .form-label,
 .boolean.destructive .form-check-label {
 	color: var(--bs-danger);
 	font-weight: 500;
+}
+
+.boolean.destructive .mj-ctl-in:has(.form-check-input:checked) .mj-state:empty {
+	color: var(--bs-danger);
 }
 
 .boolean.destructive .form-check-input:checked {
