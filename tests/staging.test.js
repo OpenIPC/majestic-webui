@@ -23,7 +23,8 @@ const SRCS = [A('preview-swap.js'), A('preview-page.js')];
 const IDS = [
 	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
 	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note', 'mj-stats',
-	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1', 'mj-sub',
+	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',
+	'mj-served', 'mj-served-why', 'mj-sub',
 	'mj-talk', 'mj-talk-ctl', 'mj-talk-lbl', 'mj-talk-t', 'mj-transport-w',
 	'mj-transport-m', 'mj-transport-ctl', 'mj-transport-lbl',
 	'mj-vol', 'mj-player', 'mj-stage',
@@ -310,6 +311,32 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.made[0].streamSet === 1, 'live=' + env.made[0].streamSet);
 		check('the trial followed the viewer to Sub',
 			trial.streamSet === 1, 'trial=' + trial.streamSet);
+	}
+
+	group('a served mismatch moves the radios without cutting anything');
+	{
+		// The camera's `served` reply moves the radios by writing .checked,
+		// which fires no change event. The regression this guards: a reflect
+		// that re-entered goToStream() would setStream() the session that
+		// just answered — cutting it — and could loop against the camera's
+		// next fallback.
+		const env = load('webrtc');
+		await tick();
+		const live = env.made[0];
+		live.say('playing');
+		const before = env.made.length;
+		env.el('mj-stream-0').checked = true;
+		// As the markup ships it, so "is up" below means it was shown here.
+		env.el('mj-served').hidden = true;
+		live.opts.onServed({ channel: 1, requested: 0, reason: 'unavailable' });
+		check('the radios follow the camera',
+			env.el('mj-stream-1').checked === true &&
+			env.el('mj-stream-0').checked === false);
+		check('the session was not re-cut', live.streamSet === null,
+			'streamSet=' + live.streamSet);
+		check('no new player was made', env.made.length === before,
+			'made=' + env.made.length);
+		check('the message is up', env.el('mj-served').hidden === false);
 	}
 
 	done();

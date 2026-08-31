@@ -529,6 +529,16 @@ preview() {
 			<span id="mj-adapt-why" class="mj-adapt-why"></span>
 			<button type="button" class="mj-adapt-close" aria-label="Dismiss">×</button>
 		</p>
+		<!-- The served-channel message (preview-page.js): why the channel the
+		     viewer picked is not the one playing, from the camera's own
+		     `served` signalling reply on a new enough majestic. Unlike the
+		     adaptation toast it does not time out — the mismatch stands for
+		     the whole session — so it stays until dismissed or stale. Slotted
+		     below the adaptation toast so all three overlays can show. -->
+		<p id="mj-served" class="mj-adapt-toast mj-served-toast small" role="status" hidden>
+			<span id="mj-served-why"></span>
+			<button type="button" class="mj-adapt-close" aria-label="Dismiss">×</button>
+		</p>
 		<!-- PTZ mount. Empty and hidden on every camera; p/motor.cgi (included
 		     by preview.cgi only when the hardware exists) emits the pad after
 		     the player and preview-ptz.js relocates it in here. -->
