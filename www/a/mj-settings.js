@@ -562,6 +562,11 @@
 	}
 
 	function stopLivePreview() {
+		// The camera is the first thing this leaf changed outside its own
+		// subtree, and it used to be the one thing teardown left behind (#259).
+		// Before the fields go, put it back where they say it is.
+		revertLive();
+
 		// Anything this leaf wired outside its own subtree — document-level
 		// listeners for hold-to-compare, timers — is undone here. The subtree
 		// itself goes with form.innerHTML, but a listener on `document` would
@@ -595,6 +600,57 @@
 		const d = f.schema ? f.schema.default : undefined;
 		if (d === undefined) return liveValue(f);
 		return f.type === 'boolean' ? (toBool(d) ? 1 : 0) : d;
+	}
+
+	// What the config says this knob is, as /api/v1/image wants it. state.initial
+	// is snapshotted from config.json at mount, so it is at once what the
+	// controls will read after a re-render and what the camera has to be put
+	// back to. It holds getValue()'s strings — 'true'/'false' for a switch —
+	// while the endpoint wants 1/0, which is the whole reason this is not just
+	// `state.initial[f.dot]`.
+	function liveSaved(f) {
+		const v = state.initial[f.dot];
+		if (v === undefined) return liveValue(f);
+		return f.type === 'boolean' ? (toBool(v) ? 1 : 0) : v;
+	}
+
+	const isLive = (f) => !!(f.schema && f.schema['x-live']);
+
+	// Whether the camera is running something this page has not saved. Dragging
+	// a knob POSTs it to the SDK immediately; that is a runtime write and never
+	// reaches config.json, so nothing else on the page can tell.
+	function liveDrift() {
+		return state.fields.some(f => isLive(f) && f.getValue() !== state.initial[f.dot]);
+	}
+
+	// Put the camera back where the controls say it is. Discarding used to drop
+	// the FORM and nothing else: the sliders came back at their saved values
+	// while the ISP kept the dragged ones, and the controls were the ones lying
+	// (#259). Reported for the section switch, but the same hole was open on
+	// browser Back, which does not even prompt — so this lives in the teardown
+	// every one of those paths already runs through rather than at any of them.
+	function revertLive() {
+		if (!state.fields.length || !liveDrift()) return;
+		postLive(liveQuery(liveSaved));
+	}
+
+	// A reload, or a closed tab, abandons the edit exactly as a section switch
+	// does — and it is the one path a normal request cannot cover, because the
+	// fetch dies with the document. sendBeacon is queued by the browser and
+	// outlives it.
+	//
+	// Not on a bfcache hide: that page is coming back with its controls still
+	// where they were dragged to, so the camera should be waiting for it. The
+	// bug this fixes is the controls and the camera disagreeing, and reverting
+	// here would only re-create it facing the other way.
+	function wireUnloadRevert() {
+		const onHide = (ev) => {
+			if (ev.persisted || !state.fields.length || !liveDrift()) return;
+			const q = liveQuery(liveSaved);
+			if (q && navigator.sendBeacon) navigator.sendBeacon('/api/v1/image?' + q);
+		};
+		window.addEventListener('pagehide', onHide);
+		return () => window.removeEventListener('pagehide', onHide);
 	}
 
 	// The query string /api/v1/image takes, over ALL x-live fields — sending
@@ -1545,6 +1601,11 @@
 		// nothing: they render in the row below, where a switch has room to be a
 		// switch rather than a fifth cell of a four-cell instrument.
 		const hasTone = fields.some(f => f.sub.type === 'integer');
+
+		// Out here rather than beside the stage: the knobs write to the camera
+		// whether or not the player scripts loaded, so the promise to put it
+		// back is not the picture's to keep.
+		state.liveCleanup.push(wireUnloadRevert());
 
 		// The deck is now two cards, not one. The first is the knob strip: the
 		// Tone rows laid ACROSS it, directly under the picture, with nothing
