@@ -22,9 +22,25 @@
      landscape MODES on a stills camera, not "pull focus nearer" on a moving
      lens — so NEAR and FAR carry it, with the icon holding only the idea of
      focus: one bracket frame, its subject large for near and small for far.
-     Those four words are literally what the buttons send. -->
+     Those four words are literally what the buttons send.
+
+     ptz_caps (from sysinfo, sanitised by update_caminfo) gates what is
+     emitted at all: an XM zoom block accepts pan frames and ignores them,
+     and a pad must not render what cannot work. Empty means every axis —
+     cameras without the variable keep today's markup byte for byte. On the
+     pelco pad a missing axis leaves a void in the 3x3 grid so the geometry
+     holds; j/ptz.cgi refuses the same verbs server-side. -->
+<%
+has_cap() {
+	[ -z "$ptz_caps" ] && return 0
+	case " $ptz_caps " in *" $1 "*) return 0 ;; esac
+	return 1
+}
+%>
 <% if [ "$ptz_backend" = "pelco" ]; then %>
+<% if has_cap zoom || has_cap focus; then %>
 <div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom and focus" hidden>
+	<% if has_cap zoom; then %>
 	<span class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
@@ -38,6 +54,8 @@
 		</svg>
 		<span>Tele</span>
 	</button>
+	<% fi %>
+	<% if has_cap focus; then %>
 	<span class="mj-ptz-group">Focus</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="near" aria-label="Focus near" title="Pull focus nearer">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -53,28 +71,48 @@
 		</svg>
 		<span>Far</span>
 	</button>
+	<% fi %>
 </div>
+<% fi %>
+<% if has_cap pan || has_cap tilt; then %>
 <div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
 	<span class="mj-ptz-void"></span>
+	<% if has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-act="up" aria-label="Tilt up">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.4 12.4 10 7.6l4.6 4.8"></path></svg>
 	</button>
+	<% else %>
 	<span class="mj-ptz-void"></span>
+	<% fi %>
+	<span class="mj-ptz-void"></span>
+	<% if has_cap pan; then %>
 	<button type="button" class="mj-ptz-btn" data-act="left" aria-label="Pan left">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.4 5.4 7.6 10l4.8 4.6"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
 	<button type="button" class="mj-ptz-btn mj-ptz-stop" data-act="stop" aria-label="Stop" title="Stop">
 		<svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="1.4" fill="currentColor"></rect></svg>
 	</button>
+	<% if has_cap pan; then %>
 	<button type="button" class="mj-ptz-btn" data-act="right" aria-label="Pan right">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.6 5.4 12.4 10l-4.8 4.6"></path></svg>
 	</button>
+	<% else %>
 	<span class="mj-ptz-void"></span>
+	<% fi %>
+	<span class="mj-ptz-void"></span>
+	<% if has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-act="down" aria-label="Tilt down">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.4 7.6 10 12.4l4.6-4.8"></path></svg>
 	</button>
+	<% else %>
+	<span class="mj-ptz-void"></span>
+	<% fi %>
 	<span class="mj-ptz-void"></span>
 </div>
+<% fi %>
 <% else %>
 <div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
 	<button type="button" class="mj-ptz-btn" data-dir="ul" aria-label="Pan up-left">

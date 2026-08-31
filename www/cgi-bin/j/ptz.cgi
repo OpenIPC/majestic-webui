@@ -68,6 +68,23 @@ case "$ptz_control" in
 		;;
 esac
 
+# ptz_caps mirrors update_caminfo's sanitising: it declares which axes the
+# hardware actually has (an XM zoom block accepts pan frames and ignores
+# them), and the endpoint must refuse what the pad no longer draws — the
+# pad is a convenience, this is the contract. Empty means every axis.
+ptz_caps=""
+for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
+	case "$cap" in
+		pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
+	esac
+done
+
+has_cap() {
+	[ -z "$ptz_caps" ] && return 0
+	case " $ptz_caps " in *" $1 "*) return 0 ;; esac
+	return 1
+}
+
 # The verb is matched against the closed list, never passed through: the
 # scripts dispatch on the verb ("pelcoD_$1"), so an unlisted word must never
 # reach them raw. (start/day/night exist in btzoom but are lens maintenance,
@@ -77,6 +94,18 @@ if [ -n "$ACTION" ]; then
 	if [ "$pelco_ok" = 1 ]; then
 		case "$ACTION" in
 			up|down|left|right|stop|wide|tele|near|far)
+				# stop is always allowed — a caps change must never take
+				# away the one verb that halts a motor already moving.
+				case "$ACTION" in
+					wide|tele) has_cap zoom || ACTION="" ;;
+					near|far) has_cap focus || ACTION="" ;;
+					up|down) has_cap tilt || ACTION="" ;;
+					left|right) has_cap pan || ACTION="" ;;
+				esac
+				if [ -z "$ACTION" ]; then
+					echo "Not supported by this camera's PTZ."
+					exit 1
+				fi
 				"$pelco_bin" "$ACTION"
 				exit $?
 				;;
@@ -87,6 +116,11 @@ if [ -n "$ACTION" ]; then
 	echo "Pelco PTZ not available on this device."
 	exit 1
 fi
+
+# The stepped backends take magnitudes, so a missing axis zeroes its
+# component rather than refusing the request whole.
+has_cap pan || HORIZONTAL=0
+has_cap tilt || VERTICAL=0
 
 if [ "$gpio_ok" = 1 ]; then
 	gpio-motors "$HORIZONTAL" "$VERTICAL" 10

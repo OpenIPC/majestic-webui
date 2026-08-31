@@ -18,10 +18,12 @@
 (function () {
 	const pad = $('#mj-ptz-pad'), fn = $('#mj-ptz-fn');
 	const mount = $('#mj-ptz'), stage = $('#mj-stage');
-	if (!pad || !mount) return;
+	// Either piece may be absent on its own: ptz_caps can leave a camera
+	// with only the zoom/focus group (an XM zoom block has no pan/tilt) —
+	// the pad must not be the thing the whole mount hinges on.
+	if (!mount || (!pad && !fn)) return;
 	if (fn) { mount.appendChild(fn); fn.hidden = false; }
-	mount.appendChild(pad);
-	pad.hidden = false;
+	if (pad) { mount.appendChild(pad); pad.hidden = false; }
 	mount.hidden = false;
 
 	const STEP = 5, TICK_MS = 250;
@@ -109,9 +111,10 @@
 		btn.addEventListener('click', e => { if (e.detail === 0) fire(btn); });
 	});
 
-	if (stage) {
+	if (stage && pad) {
 		// Arrows resolve to whatever button the pad actually has for that
-		// direction, so the same keys drive both protocols.
+		// direction, so the same keys drive both protocols. No pad — a
+		// zoom/focus-only camera — means the arrows have nothing to say.
 		const KEYS = {
 			ArrowUp: '[data-dir="uc"],[data-act="up"]',
 			ArrowDown: '[data-dir="dc"],[data-act="down"]',
