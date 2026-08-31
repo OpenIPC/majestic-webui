@@ -42,7 +42,7 @@ function boot() {
 	let metricsFn = null;
 	const sandbox = {
 		window: {},
-		performance: { now: () => nowMs },
+		performance: { now: () => nowMs, timeOrigin: 0 },
 		requestAnimationFrame: (f) => f(),
 		document: {
 			getElementById(id) { return els[id] || (els[id] = makeEl(id)); },
@@ -198,6 +198,81 @@ g('the camera leg carries sampling and readout once fps is known', () => {
 	env3.stats.tick({ cam: { c2s: '~2ms' }, rttMs: 60 });
 	check('no fps, no model — the bare pipeline stands',
 		env3.el('mj-ns-lat').textContent === '≈' + Math.round(2 + 30));
+});
+
+g('the sender-report cross-check: one clock, both ends', () => {
+	// The camera's sr= anchor says RTP 900000 was captured at camera-clock
+	// 5,000,000 ms. The frame on the glass is RTP 1,080,000 — 2000 ms of
+	// 90 kHz later — so it was captured at 5,002,000. The camera's clock
+	// read 5,002,000 at its last SR (browser epoch 100,000), and the frame
+	// appeared at browser epoch 100,160 → camera-now 5,002,160. The frame
+	// on the glass is 160 ms old; the leg sum (58+30) agrees within
+	// tolerance, so the whole-path figure takes the headline.
+	const env = boot();
+	const v = env.mkEl('live-video');
+	v.hidden = false;
+	let vfc = null;
+	v.requestVideoFrameCallback = (fn) => { vfc = fn; };
+	env.stats.tick({ cam: { c2s: '58ms', sr: '900000:5000000' }, rttMs: 60,
+		remoteTs: 5002000, remoteAt: 100000 });
+	vfc(0, { expectedDisplayTime: 100160, presentationTime: 100150,
+		rtpTimestamp: 1080000 });
+	env.tickClock(500);
+	env.stats.tick({ cam: { c2s: '58ms', sr: '900000:5000000' }, rttMs: 60,
+		remoteTs: 5002000, remoteAt: 100000 });
+	check('the SR figure takes the headline when the two agree',
+		env.el('mj-ns-lat').textContent === '≈160');
+	check('and the fine print names it as the headline source',
+		env.el('mj-ns-fp').textContent.indexOf(
+			'end-to-end via sender report 160 ms — headline') >= 0);
+
+	// Divergent: a frame a full second old against a ~100 ms leg sum (58
+	// camera + 30 network + the probe's own 10 ms screen wait) stays a
+	// diagnostic and leaves the sum on the headline.
+	const env2 = boot();
+	const v2 = env2.mkEl('live-video');
+	v2.hidden = false;
+	let vfc2 = null;
+	v2.requestVideoFrameCallback = (fn) => { vfc2 = fn; };
+	env2.stats.tick({ cam: { c2s: '58ms', sr: '900000:5000000' }, rttMs: 60,
+		remoteTs: 5002000, remoteAt: 100000 });
+	vfc2(0, { expectedDisplayTime: 101000, presentationTime: 100990,
+		rtpTimestamp: 1080000 });
+	env2.tickClock(500);
+	env2.stats.tick({ cam: { c2s: '58ms', sr: '900000:5000000' }, rttMs: 60,
+		remoteTs: 5002000, remoteAt: 100000 });
+	check('a divergent SR figure leaves the sum on the headline',
+		env2.el('mj-ns-lat').textContent === '≈98');
+	check('and is disclosed as diverging',
+		env2.el('mj-ns-fp').textContent.indexOf('diverges from leg sum 98 ms') >= 0);
+
+	// No sr= key — an estimated camera never emits one — no figure at all,
+	// however many browser-side pieces exist.
+	const env3 = boot();
+	const v3 = env3.mkEl('live-video');
+	v3.hidden = false;
+	let vfc3 = null;
+	v3.requestVideoFrameCallback = (fn) => { vfc3 = fn; };
+	env3.stats.tick({ cam: { c2s: '~58ms' }, rttMs: 60,
+		remoteTs: 5002000, remoteAt: 100000 });
+	vfc3(0, { expectedDisplayTime: 100160, presentationTime: 100150,
+		rtpTimestamp: 1080000 });
+	env3.tickClock(500);
+	env3.stats.tick({ cam: { c2s: '~58ms' }, rttMs: 60,
+		remoteTs: 5002000, remoteAt: 100000 });
+	check('no anchor key, no SR figure',
+		env3.el('mj-ns-fp').textContent.indexOf('sender report') < 0);
+
+	// Staleness: six seconds without a new sample forgets the figure — a
+	// frozen stream must not wear a current measurement's label. (The
+	// screen-wait sample ages out on its own 3 s window too, so the sum
+	// left standing is camera 58 + network 30.)
+	env.tickClock(6000);
+	env.stats.tick({ cam: { c2s: '58ms', sr: '900000:5000000' }, rttMs: 60,
+		remoteTs: 5002000, remoteAt: 100000 });
+	check('a stale cross-check is forgotten, headline falls back to the sum',
+		env.el('mj-ns-fp').textContent.indexOf('sender report') < 0 &&
+		env.el('mj-ns-lat').textContent === '≈88');
 });
 
 g('the screen leg: measured vsync wait joins decode', () => {

@@ -201,6 +201,17 @@ window.MajesticWebRTC = (function () {
 						// says we sent, the other says it arrived.
 						s.micPackets = r.packetsSent || 0;
 					} else if (
+						r.type === 'remote-outbound-rtp' && r.kind === 'video') {
+						// The camera's clock as of its last sender report,
+						// and when that report landed here — the pair that
+						// lets the panel say what time it is on the camera
+						// without trusting the browser's own wall clock.
+						if (typeof r.remoteTimestamp === 'number' &&
+							typeof r.timestamp === 'number') {
+							s.remoteTs = r.remoteTimestamp;
+							s.remoteAt = r.timestamp;
+						}
+					} else if (
 						r.type === 'candidate-pair' && r.nominated &&
 						r.state === 'succeeded') {
 						s.rttMs = Math.round((r.currentRoundTripTime || 0) * 1000);
