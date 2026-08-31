@@ -50,6 +50,11 @@ window.MajesticStats = (function () {
 	let lossEma = null;
 	let srG2gEma = null;
 	let srSeenAt = 0;
+	// Each transport's last settled headline, kept ACROSS transport switches
+	// and resets: putting the other protocol's number next to this one's is
+	// the comparison the whole panel exists for.
+	const lastSeen = { webrtc: null, mse: null };
+	let lastStallAt = 0;
 	let wired = false;
 	// Measured encoder output per channel, bytes/s, from the 2 s heartbeat —
 	// what the "camera sending" row shows. The configured bitrate is a
@@ -82,6 +87,7 @@ window.MajesticStats = (function () {
 			'<div class="mj-ns-hero"><span class="mj-ns-num" id="mj-ns-lat">–</span>' +
 				'<span class="mj-ns-unit">ms</span>' +
 				'<span class="mj-ns-sub" id="mj-ns-lat-sub">measuring…</span></div>' +
+			'<div class="mj-ns-note" id="mj-ns-vs" hidden></div>' +
 			'<div class="mj-ns-bar" id="mj-ns-bar" hidden>' +
 				'<span id="mj-ns-seg-cam" style="background:' + C1 + '"></span>' +
 				'<span id="mj-ns-seg-net" style="background:' + C2 + '"></span>' +
@@ -105,7 +111,7 @@ window.MajesticStats = (function () {
 			'<div class="mj-ns-chart" id="mj-ns-bw"></div>' +
 			'<div class="mj-ns-legend">' +
 				'<span>' + seg(C1) + 'received</span>' +
-				'<span>' + seg(C2) + 'link estimate</span></div>' +
+				'<span id="mj-ns-leg-est">' + seg(C2) + 'link estimate</span></div>' +
 			'<div class="mj-ns-note" id="mj-ns-repair"></div>' +
 		'</section>' +
 		'<section class="mj-ns-sec" id="mj-ns-radio" hidden>' +
@@ -204,7 +210,8 @@ window.MajesticStats = (function () {
 			segBuf: g('mj-ns-seg-buf'), segDec: g('mj-ns-seg-dec'),
 			lCam: g('mj-ns-l-cam'), lNet: g('mj-ns-l-net'),
 			lBuf: g('mj-ns-l-buf'), lDec: g('mj-ns-l-dec'),
-			grade: g('mj-ns-grade'),
+			grade: g('mj-ns-grade'), vs: g('mj-ns-vs'),
+			legEst: g('mj-ns-leg-est'),
 			rCap: g('mj-ns-r-cap'), capEst: g('mj-ns-cap-est'),
 			rSet: g('mj-ns-r-set'), set: g('mj-ns-set'),
 			send: g('mj-ns-send'), recv: g('mj-ns-recv'),
@@ -262,6 +269,7 @@ window.MajesticStats = (function () {
 		armDisplayProbe(document.getElementById('live-video'));
 		armDisplayProbe(document.getElementById('live-video-b'));
 		const cam = s.cam || {};
+		const mse = s.transport === 'mse';
 		const now = performance.now();
 		const dt = lastTickAt ? (now - lastTickAt) / 1000 : 0;
 		lastTickAt = now;
@@ -271,6 +279,8 @@ window.MajesticStats = (function () {
 			decodeTime: s.decodeTime || 0, framesDecoded: s.framesDecoded || 0,
 			packetsLost: s.packetsLost || 0, packetsReceived: s.packetsReceived || 0,
 			nack: s.nack || 0, rtx: parseInt(cam.rtx, 10) || 0,
+			rxBytes: s.rxBytes || 0, totalFrames: s.totalFrames || 0,
+			droppedFrames: s.droppedFrames || 0, stalls: s.stalls || 0,
 		};
 		// A cumulative counter that went BACKWARDS means the peer connection
 		// was rebuilt under us (preview-webrtc reconnects internally without
@@ -279,7 +289,8 @@ window.MajesticStats = (function () {
 		// that no longer exists. Forget them now rather than letting them
 		// decay through the new session's first seconds.
 		if (p && (prevT.packetsReceived < p.packetsReceived ||
-				prevT.jbEmitted < p.jbEmitted)) {
+				prevT.jbEmitted < p.jbEmitted ||
+				prevT.rxBytes < p.rxBytes)) {
 			p = null;
 			hold = { buf: null, dec: null };
 			lossEma = null;
@@ -336,7 +347,14 @@ window.MajesticStats = (function () {
 				fps: fpsNow };
 			camMs += sampling + readout;
 		}
-		const parts = [camMs, net, hold.buf, screen];
+		// On MSE the buffer leg is not a per-frame average but the DEPTH the
+		// element is sitting on — decoded future waiting to play, the number
+		// that separates this transport from WebRTC's jitter buffer. Camera
+		// and network legs do not exist here: TCP tells us nothing about
+		// either, which is the finding rather than a gap.
+		const parts = mse
+			? [null, null, s.bufferedMs != null ? s.bufferedMs : null, screen]
+			: [camMs, net, hold.buf, screen];
 		let total = null;
 		parts.forEach((v) => { if (v != null) total = (total || 0) + v; });
 
@@ -386,12 +404,31 @@ window.MajesticStats = (function () {
 		// composition, the headline states the total.
 		const srOk = srG2gEma != null && total != null &&
 			Math.abs(srG2gEma - total) <= Math.max(150, total * 0.5);
-		if (total != null && (net != null || c2s)) {
-			els.lat.textContent = '≈' + Math.round(srOk ? srG2gEma : total);
-			els.latSub.textContent = c2s
+		if (total != null && (net != null || c2s || mse)) {
+			const shown = srOk ? srG2gEma : total;
+			// '≥' on MSE, honestly: two of the four legs are unmeasurable
+			// over TCP, so the real figure can only be larger than this.
+			els.lat.textContent = (mse ? '≥' : '≈') + Math.round(shown);
+			els.latSub.textContent = mse
+				? 'player alone; camera and network are invisible over MSE'
+				: c2s
 				? (c2s.approx ? 'glass to glass, at least' : 'glass to glass')
 				: 'network + player; the camera’s share is not included';
-			window.MjCharts.pushSpark(latSpark, srOk ? srG2gEma : total);
+			window.MjCharts.pushSpark(latSpark, shown);
+			// The other transport's last figure, right under this one's:
+			// the A/B a screenshot can carry.
+			lastSeen[mse ? 'mse' : 'webrtc'] = { ms: shown, at: now };
+			const other = lastSeen[mse ? 'webrtc' : 'mse'];
+			if (other && now - other.at < 15 * 60 * 1000) {
+				els.vs.hidden = false;
+				els.vs.textContent = mse
+					? 'WebRTC measured ≈' + Math.round(other.ms) +
+						' ms on this connection — with the missing legs counted'
+					: 'MSE held ≥' + Math.round(other.ms) +
+						' ms here, player buffer alone';
+			} else {
+				els.vs.hidden = true;
+			}
 			// The breakdown renders only with all four legs: three segments
 			// that sum to less than the number above them would read as a
 			// mistake, not a measurement.
@@ -413,6 +450,7 @@ window.MajesticStats = (function () {
 			els.latSub.textContent = 'measuring…';
 			els.bar.hidden = true;
 			els.legend.hidden = true;
+			els.vs.hidden = true;
 		}
 
 		// Loss as a smoothed percentage of the last ticks, not the cumulative
@@ -431,8 +469,24 @@ window.MajesticStats = (function () {
 		// actually emits, what arrives.
 		const remb = parseInt(cam.remb, 10) || 0;
 		const capK = Math.max(s.availKbps || 0, remb);
-		const gr = gradeOf(lossEma || 0, s.rttMs || 0, s.jitterMs || 0,
-			parseInt(cam.enc, 10) || 0, s.configuredKbps || 0, capK);
+		// MSE has no loss counter and no round trip — TCP converts both into
+		// waiting. So the grade reads the two symptoms this transport CAN
+		// show: playback having stalled recently, and the element dropping
+		// frames to catch up.
+		let gr;
+		if (mse) {
+			if (good && prevT.stalls > p.stalls) lastStallAt = now;
+			const dropRate = good && prevT.totalFrames > p.totalFrames
+				? (prevT.droppedFrames - p.droppedFrames) /
+					(prevT.totalFrames - p.totalFrames) * 100
+				: 0;
+			gr = now - lastStallAt < 10000 ? ['struggling', WARN]
+				: dropRate > 5 ? ['good', OK]
+				: ['excellent', OK];
+		} else {
+			gr = gradeOf(lossEma || 0, s.rttMs || 0, s.jitterMs || 0,
+				parseInt(cam.enc, 10) || 0, s.configuredKbps || 0, capK);
+		}
 		els.grade.textContent = gr[0];
 		els.grade.style.color = gr[1];
 		els.rCap.hidden = !capK;
@@ -452,14 +506,28 @@ window.MajesticStats = (function () {
 		}
 		const vr = s.channel != null ? vencRate[s.channel] : null;
 		els.send.textContent = vr != null ? fmtBps(vr) : '-';
-		els.recv.textContent = fmtK(s.kbps || 0) +
-			(s.audioKbps ? ' + audio ' + fmtK(s.audioKbps) : '');
+		let recvK = s.kbps || 0;
+		if (mse) {
+			recvK = good && prevT.rxBytes >= p.rxBytes
+				? Math.round((prevT.rxBytes - p.rxBytes) * 8 / 1000 / dt)
+				: 0;
+		}
+		els.recv.textContent = fmtK(recvK) +
+			(!mse && s.audioKbps ? ' + audio ' + fmtK(s.audioKbps) : '');
+		// No estimate series on MSE: this transport HAS no feedback channel,
+		// and an empty legend chip would imply one is merely quiet.
+		if (els.legEst) els.legEst.hidden = mse;
 		window.MjCharts.pushChart(bwChart, [
-			(s.kbps || 0) / 1000, capK ? capK / 1000 : null,
+			recvK / 1000, !mse && capK ? capK / 1000 : null,
 		]);
 
 		// Repairs as rates: recovery working is the good news worth telling.
-		if (good) {
+		// On MSE there is nothing to repair — TCP already repaired it, and
+		// the price appears as buffering, which is what gets counted.
+		if (good && mse) {
+			els.repair.textContent = 're-buffered ' + (s.stalls || 0) +
+				'\u00d7 \u00b7 frames dropped ' + (prevT.droppedFrames || 0);
+		} else if (good) {
 			const rep = [];
 			rep.push('lost ' + (lossEma != null ? lossEma.toFixed(1) : '0.0') + '%');
 			const dNack = Math.max(0, prevT.nack - p.nack);
@@ -475,12 +543,19 @@ window.MajesticStats = (function () {
 		// Fine print: the counters the old table carried, for whoever is
 		// triaging an issue rather than reading the story.
 		const fp = [];
-		if (cam.ice) fp.push('ice ' + cam.ice + ' · dtls ' + cam.dtls + ' · media ' + cam.media);
-		fp.push((cam.remb ? 'estimate ' + cam.remb : 'estimate -') +
-			' · rtcp ' + (cam.rtcp || '-') + ' · keyframes ' + (cam.pli || '-'));
-		fp.push('jitter ' + (s.jitterMs || 0) + ' ms · round trip ' +
-			(s.rttMs != null ? s.rttMs + ' ms' : '-') +
-			' · audio in ' + (cam['audio-in'] || '-'));
+		if (mse) {
+			fp.push('transport MSE — fMP4 over WebSocket/TCP · no feedback channel');
+			fp.push('buffered ' + (s.bufferedMs != null ? Math.round(s.bufferedMs) : '-') +
+				' ms · re-buffered ' + (s.stalls || 0) + '\u00d7 · dropped ' +
+				(s.droppedFrames || 0) + ' of ' + (s.totalFrames || 0) + ' frames');
+		} else {
+			if (cam.ice) fp.push('ice ' + cam.ice + ' · dtls ' + cam.dtls + ' · media ' + cam.media);
+			fp.push((cam.remb ? 'estimate ' + cam.remb : 'estimate -') +
+				' · rtcp ' + (cam.rtcp || '-') + ' · keyframes ' + (cam.pli || '-'));
+			fp.push('jitter ' + (s.jitterMs || 0) + ' ms · round trip ' +
+				(s.rttMs != null ? s.rttMs + ' ms' : '-') +
+				' · audio in ' + (cam['audio-in'] || '-'));
+		}
 		if (srG2gEma != null) {
 			fp.push('end-to-end via sender report ' + Math.round(srG2gEma) +
 				' ms' + (srOk ? ' — headline' : ' — diverges from leg sum ' +
@@ -501,10 +576,11 @@ window.MajesticStats = (function () {
 				Math.round(1000 / refreshMs) + ' Hz');
 			fp.push(parts2.join(' · '));
 		}
-		fp.push('talkback ' + (s.micWanted
-			? (s.micSending ? 'sending' : 'offered, not accepted') +
-				' · ' + (s.micPackets || 0) + ' pkt'
-			: 'off'));
+		fp.push(mse ? 'talkback unavailable — MSE carries one direction'
+			: 'talkback ' + (s.micWanted
+				? (s.micSending ? 'sending' : 'offered, not accepted') +
+					' · ' + (s.micPackets || 0) + ' pkt'
+				: 'off'));
 		els.fp.textContent = fp.join('\n');
 	}
 

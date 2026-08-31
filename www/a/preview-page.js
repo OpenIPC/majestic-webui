@@ -395,10 +395,13 @@
 	// none of these numbers, so the button would open an empty box. The
 	// checkbox keeps the person's answer across a transport switch, so the
 	// panel has to come back with it rather than needing a second click.
+	// Both transports have a story to tell now — MSE measures its own shape
+	// (buffer depth, stalls, delivered rate) and the camera-side sections
+	// come off /metrics either way — so the control follows only the person.
 	function syncStatsCtl() {
-		if (statsCtl) statsCtl.hidden = !usingWebRTC;
+		if (statsCtl) statsCtl.hidden = false;
 		if (statsBox) {
-			statsBox.hidden = !(usingWebRTC && statsBtn && statsBtn.checked);
+			statsBox.hidden = !(statsBtn && statsBtn.checked);
 			// The panel module renders its charts only while someone can see
 			// them, so it is told when that changes. Guarded like every
 			// window.Majestic* module: its file is not loaded under the tests.
@@ -668,7 +671,7 @@
 						configuredKbps: cfgKbps[ch],
 						configuredFps: cfgFps[ch],
 						channel: ch,
-						transport: 'webrtc',
+						transport: s.transport || 'webrtc',
 					}));
 				}
 				// The adaptation toast, fed the camera's own view of the

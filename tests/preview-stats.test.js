@@ -394,4 +394,57 @@ g('the 2 s heartbeat: radio and egress rows', () => {
 		rowsAll.some((t) => t === 'WebRTC × 1') && rowsAll.some((t) => t === 'RTSP × 2'));
 });
 
+g('MSE tells its own story and remembers the other transport', () => {
+	const env = boot();
+	// A WebRTC session settles at ≈88 (58 camera + 30 network)…
+	env.stats.tick({ cam: { c2s: '58ms' }, rttMs: 60, transport: 'webrtc' });
+	check('webrtc headline first', env.el('mj-ns-lat').textContent === '≈88');
+	check('no comparison line before the other transport ran',
+		env.el('mj-ns-vs').hidden === true);
+	// …the person switches transports (the page resets the module)…
+	env.stats.reset();
+	env.tickClock(2000);
+	// …and MSE reports an 800 ms buffer.
+	env.stats.tick({ transport: 'mse', bufferedMs: 800, rxBytes: 100000,
+		totalFrames: 100, droppedFrames: 0, stalls: 0,
+		configuredKbps: 1024, channel: 1 });
+	check('MSE headline is a floor, buffer-led',
+		env.el('mj-ns-lat').textContent === '≥800');
+	check('and says what it cannot see',
+		env.el('mj-ns-lat-sub').textContent ===
+			'player alone; camera and network are invisible over MSE');
+	check('the comparison line carries the WebRTC figure',
+		env.el('mj-ns-vs').hidden === false &&
+		env.el('mj-ns-vs').textContent.indexOf('WebRTC measured ≈88 ms') >= 0);
+	check('no capacity row without a feedback channel',
+		env.el('mj-ns-r-cap').hidden === true);
+	check('the estimate legend chip is gone too',
+		env.el('mj-ns-leg-est').hidden === true);
+	check('MSE fine print names the transport and the buffer',
+		env.el('mj-ns-fp').textContent.indexOf('transport MSE') >= 0 &&
+		env.el('mj-ns-fp').textContent.indexOf('buffered 800 ms') >= 0);
+	check('talkback is honestly one-way',
+		env.el('mj-ns-fp').textContent.indexOf('one direction') >= 0);
+
+	// Rates and the stall grade need a second tick.
+	env.tickClock(1000);
+	env.stats.tick({ transport: 'mse', bufferedMs: 900, rxBytes: 228000,
+		totalFrames: 120, droppedFrames: 0, stalls: 1,
+		configuredKbps: 1024, channel: 1 });
+	check('delivered rate is the socket byte delta',
+		env.el('mj-ns-recv').textContent === '1.0 Mbit/s');
+	check('a fresh stall grades struggling',
+		env.el('mj-ns-grade').textContent === 'struggling');
+	check('repairs count the re-buffering',
+		env.el('mj-ns-repair').textContent.indexOf('re-buffered 1×') >= 0);
+
+	// Back on WebRTC, the MSE figure becomes the comparison.
+	env.stats.reset();
+	env.tickClock(2000);
+	env.stats.tick({ cam: { c2s: '58ms' }, rttMs: 60, transport: 'webrtc' });
+	check('the WebRTC view remembers what MSE held',
+		env.el('mj-ns-vs').hidden === false &&
+		env.el('mj-ns-vs').textContent.indexOf('MSE held ≥900 ms') >= 0);
+});
+
 done('preview-stats');

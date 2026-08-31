@@ -22,6 +22,7 @@ window.MajesticVideo = (function () {
 		const onState = opts.onState || function () {};
 		const onCodec = opts.onCodec || function () {};
 		const onAudio = opts.onAudio || function () {};
+		const onStats = opts.onStats || null;
 		let stream = opts.stream | 0;
 		let ws = null, ms = null, sb = null, objUrl = null;
 		let queue = [], started = false, mime = null;
@@ -32,6 +33,13 @@ window.MajesticVideo = (function () {
 		// audio the outgoing one already had. See preview-swap.js.
 		let wantAudio = !!opts.audio;
 		let volume = opts.volume === undefined ? 1 : opts.volume;
+		// Player-lifetime counters for the stats panel, deliberately NOT
+		// reset on the internal reconnects: the panel differences them and
+		// treats a regression as "the session was rebuilt".
+		let statsTimer = null;
+		let rxBytes = 0;
+		let stallCount = 0;
+		function onWaiting() { stallCount++; }
 
 		const mseOk = ('MediaSource' in window);
 		const NO_SIGNAL_MS = 4000;
@@ -82,9 +90,13 @@ window.MajesticVideo = (function () {
 			nv.volume = volume;
 			if (old.parentNode) old.parentNode.replaceChild(nv, old);
 			old.removeEventListener('error', onVideoError);
+			old.removeEventListener('waiting', onWaiting);
 			try { old.removeAttribute('src'); old.load(); } catch (e) {}
 			video = nv;
 			video.addEventListener('error', onVideoError);
+			// A stall is the shape TCP loss takes on this transport: the
+			// picture waits for the retransmission WebRTC would have skipped.
+			video.addEventListener('waiting', onWaiting);
 		}
 
 		function onInit(info) {
@@ -134,6 +146,7 @@ window.MajesticVideo = (function () {
 		}
 
 		function onBinary(buf) {
+			rxBytes += buf.byteLength || 0;
 			queue.push(new Uint8Array(buf));
 			if (queue.length > MAX_QUEUE) queue.splice(0, queue.length - MAX_QUEUE);
 			pump();
@@ -220,8 +233,39 @@ window.MajesticVideo = (function () {
 
 		function audioSupported() { return !!audioPrefs; }
 
+		// What this transport can honestly measure about itself, once a
+		// second: the bytes the socket delivered, how much decoded future the
+		// element is sitting on (the number that separates it from WebRTC's
+		// jitter buffer), the element's own dropped-frame accounting, and how
+		// often playback had to wait. No RTT, no loss counter, no capacity
+		// estimate — TCP hides all three, which is not a measurement gap but
+		// the finding.
+		function statsTick() {
+			if (!started || closed) return;
+			const s = { transport: 'mse', rxBytes: rxBytes, stalls: stallCount };
+			try {
+				const q = video.getVideoPlaybackQuality &&
+					video.getVideoPlaybackQuality();
+				if (q) {
+					s.totalFrames = q.totalVideoFrames;
+					s.droppedFrames = q.droppedVideoFrames;
+				}
+			} catch (e) {}
+			try {
+				if (video.buffered.length) {
+					s.bufferedMs = Math.max(0,
+						(video.buffered.end(video.buffered.length - 1) -
+							video.currentTime) * 1000);
+				}
+			} catch (e) {}
+			s.width = video.videoWidth || 0;
+			s.height = video.videoHeight || 0;
+			onStats(s);
+		}
+
 		function destroy() {
 			closed = true;
+			if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			stop();
 		}
@@ -238,6 +282,7 @@ window.MajesticVideo = (function () {
 		}
 
 		open();
+		if (onStats) statsTimer = setInterval(statsTick, 1000);
 		return {
 			setStream: setStream, requestIdr: requestIdr,
 			setAudio: setAudio, setVolume: setVolume,
