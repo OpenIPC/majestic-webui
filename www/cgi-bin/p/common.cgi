@@ -832,6 +832,22 @@ update_caminfo() {
 		# "none", unset and anything unrecognised all land here: no pad.
 	esac
 
+	# ptz_caps declares which axes the hardware actually has, in the same
+	# declarative U-Boot family as the rest (#227): fw_setenv ptz_caps
+	# 'zoom focus', tokens from pan/tilt/zoom/focus. The 85H50AI-style XM
+	# zoom blocks accept pan frames and silently ignore them, and a pad
+	# must not render what cannot work. Unknown words are dropped; unset —
+	# or nothing recognisable — means full capability for the backend, so
+	# no camera configured before this variable changes behaviour.
+	ptz_caps=""
+	local cap
+	for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
+		case "$cap" in
+			pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
+		esac
+	done
+	ptz_caps="${ptz_caps# }"
+
 	# Network
 	network_interface=$(ip route | awk '/default/ {print $5}' | head -n1)
 	network_address=$(ip route | grep ${network_interface:-eth0} | awk '/src/ {print $7}')
@@ -852,7 +868,7 @@ update_caminfo() {
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		ptz_backend sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
+		ptz_backend ptz_caps sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
 	rm -f ${sysinfo_file}
 
 	local v

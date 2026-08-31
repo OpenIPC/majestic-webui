@@ -78,7 +78,7 @@ This is the most important file to read before editing anything. It defines:
 - `/etc/crontabs/root` — extensions add/remove their own lines with `sed -i /name/d` then append.
 - `/tmp/webui/` — scratch (sysinfo, schema cache, flash log, signature).
 - `/tmp/system-reboot` — sentinel file; presence triggers the "restart required" banner in `header.cgi`.
-- U-Boot env via `fw_printenv -n` / `fw_setenv` for `ethaddr`, `wlanssid`, `wlanpass`, `upgrade`, `sensor`, `soc`, and the PTZ family `ptz_control`/`ptz_gpio`/`ptz_port`/`ptz_speed`/`ptz_profile` (legacy aliases `gpio_motors`, `ptz`).
+- U-Boot env via `fw_printenv -n` / `fw_setenv` for `ethaddr`, `wlanssid`, `wlanpass`, `upgrade`, `sensor`, `soc`, and the PTZ family `ptz_control`/`ptz_gpio`/`ptz_port`/`ptz_speed`/`ptz_profile`/`ptz_caps` (legacy aliases `gpio_motors`, `ptz`).
 
 ### Talking to Majestic
 
@@ -328,7 +328,13 @@ The decisive check is `probe_write`/`probe_seen`: a stamp written to the partiti
   signed ints); `pelco` covers both serial variants — four
   directions, zoom and focus, each a fixed timed pulse — speaking
   `j/ptz.cgi?act=<verb>` against a closed whitelist (the scripts dispatch on
-  the verb, so it must never pass through raw). `bin/btzoom` and
+  the verb, so it must never pass through raw). `ptz_caps` narrows the pad
+  to the axes the hardware actually has (`fw_setenv ptz_caps 'zoom focus'`
+  for an XM zoom block, tokens pan/tilt/zoom/focus; unset = all): sanitised
+  in `update_caminfo`, honoured by `p/motor.cgi` (missing pelco-pad axes
+  leave grid voids; a padless camera keeps its zoom/focus group thanks to
+  the loosened mount guard in `preview-ptz.js`) and enforced in `j/ptz.cgi`
+  (`stop` always allowed; stepped backends zero the missing component). `bin/btzoom` and
   `bin/btzoom-xm` ship in this repo (adopted from OpenIPC/sandbox
   `scripts/pelcoD`, the xm variant hardened to btzoom's standard: shared
   `/tmp/btzoom.lock`, `ptz_port`/`ptz_speed`, idempotent per-command `stty`)
