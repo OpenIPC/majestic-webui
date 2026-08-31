@@ -442,6 +442,16 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 			env.el('mj-badge').textContent.indexOf('stream') === -1,
 			env.el('mj-badge').textContent);
 
+		// A reopen inside the fallen-back session (audio toggle, network
+		// reconnect) requests the ADOPTED channel and is answered with a
+		// match — but the viewer's own ask is still unmet, so the standing
+		// explanation must not vanish on an audio toggle.
+		live.opts.onServed({ channel: 1, requested: 1, reason: '' });
+		check('a reopen echo does not clear the explanation',
+			env.el('mj-served').hidden === false);
+		check('nor move the radios',
+			env.el('mj-stream-1').checked === true);
+
 		// Dismissed is dismissed: the same session re-stating the same
 		// fallback (a reconnect, an audio renegotiation) must not resurrect
 		// the message.
@@ -449,6 +459,9 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		check('a click dismisses it', env.el('mj-served').hidden === true);
 		live.opts.onServed({ channel: 1, requested: 0, reason: 'undecodable' });
 		check('the same answer does not re-show it',
+			env.el('mj-served').hidden === true);
+		live.opts.onServed({ channel: 1, requested: 1, reason: '' });
+		check('and a reopen echo after dismissal stays dismissed',
 			env.el('mj-served').hidden === true);
 
 		// But a fresh user pick re-arms it: asking again deserves an answer

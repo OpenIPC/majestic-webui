@@ -183,6 +183,13 @@
 	// `served`, and the second telling would just be noise.
 	let servedCh = null;
 	let servedShownKey = '';
+	// The channel the viewer themselves asked for, distinct from `stream`:
+	// after a fallback the page and player adopt the served channel, so every
+	// internal reopen (audio, reconnect) requests it and is answered with a
+	// match — but the viewer's own ask is still unmet, and the standing
+	// explanation must not vanish on an audio toggle. null until a request is
+	// betrayed or the viewer picks; goToStream() is what changes their mind.
+	let wantedCh = null;
 	// Per channel too: videoN.bitrate, for the toast's "back to configured".
 	let cfgKbps = [0, 0];
 	// WebRTC takes ?stream= as a preference, not an order: the camera can
@@ -285,13 +292,26 @@
 		const mismatch = servedCh !== null && info.requested !== null &&
 			info.channel !== info.requested;
 		if (!mismatch) {
-			// Served as asked (or nothing was asked): any standing message
-			// now describes a session that no longer exists.
+			// A match the viewer never asked for is not good news: a reopen
+			// inside a fallen-back session requests the adopted channel and
+			// is answered with it, while the viewer's own ask stands unmet.
+			// Leave the explanation exactly as it is — up if it was up,
+			// dismissed if they dismissed it.
+			if (wantedCh !== null && servedCh !== null &&
+				servedCh !== wantedCh) {
+				setChip();
+				return;
+			}
+			// Served as the viewer asked (or nothing was asked): any
+			// standing message describes a mismatch that no longer exists.
 			servedShownKey = '';
 			hideServedMsg();
 			setChip();
 			return;
 		}
+		// The betrayed ask, remembered past the adoption below — the daemon
+		// echoes exactly what this page requested.
+		wantedCh = info.requested;
 		if (!autoOn) {
 			// The controls tell the truth: the session — player included, it
 			// adopted the channel itself — is on servedCh, so the page and
@@ -442,6 +462,7 @@
 		if (!usingWebRTC) {
 			servedCh = null;
 			servedShownKey = '';
+			wantedCh = null;
 			hideServedMsg();
 		}
 		syncAudioCtl();
@@ -898,9 +919,11 @@
 		// The two channels are two encoders; the baseline and any toast on
 		// screen describe the one being left.
 		if (window.MajesticAdapt) window.MajesticAdapt.reset();
-		// A deliberate change invalidates the camera's last served answer and
-		// re-arms the message: the next session speaks for itself, and if it
-		// falls back again that is news worth repeating.
+		// A deliberate change is the viewer changing their mind: it becomes
+		// the new ask, invalidates the camera's last served answer, and
+		// re-arms the message — the next session speaks for itself, and if
+		// it falls back again that is news worth repeating.
+		wantedCh = n;
 		servedCh = null;
 		servedShownKey = '';
 		hideServedMsg();
@@ -917,6 +940,7 @@
 		if (!autoOn) return;
 		// Any standing mismatch message belonged to a manual pick; handing
 		// the choice to Auto withdraws the request it was explaining.
+		wantedCh = null;
 		servedShownKey = '';
 		hideServedMsg();
 		// Acting immediately rather than waiting for a resize: the person just
