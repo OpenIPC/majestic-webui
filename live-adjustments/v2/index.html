@@ -131,13 +131,14 @@ body { margin: 0; background: #0e1014; color: #e6e8ee; font-family: var(--font);
     <button data-v="0" aria-pressed="true">1320 px cap</button>
     <button data-v="1" aria-pressed="false">Fluid</button>
   </div>
-  <p class="lede"><b>A + C</b> is the proposal, built from @usa-'s pick in
-    <a href="https://github.com/OpenIPC/majestic-webui/issues/239">OpenIPC/majestic-webui#239</a>:
-    C's use of the width, under A's guarantee that the four Tone knobs never leave the screen —
-    plus the channel switch moved onto the video, the same component and the same place the Live
-    page puts it. Today and the three v1 directions are kept for comparison. Every number is
-    measured on a real hi3516av300 running current master, and the mockup is redrawn for the
-    window size you pick; <b>1340 × 708</b> is the window from the report.</p>
+  <p class="lede"><b>A + C</b> was @usa-'s pick in
+    <a href="https://github.com/OpenIPC/majestic-webui/issues/239">OpenIPC/majestic-webui#239</a>
+    and is now <b>built</b> —
+    <a href="https://github.com/OpenIPC/majestic-webui/pull/263">PR #263</a>, drawn here to the
+    shipped rule and measured on a real hi3516av300: C's use of the width under A's guarantee that
+    the four Tone knobs never leave the screen, the channel switch on the video, the container cap
+    gone. Today and the three v1 directions are kept for comparison; the mockup is redrawn for the
+    window size you pick, and <b>1340 × 708</b> is the window from the report.</p>
 </div>
 
 <div class="note" id="note"></div>
@@ -172,10 +173,17 @@ function containerW(vw, fluid) {
 const R = 16 / 9;
 
 function geom(dir, vw, vh, fluid) {
-  const cont = containerW(vw, fluid);
+  /* The final direction is what shipped, so it is drawn to the shipped rule:
+     the container is always fluid on this page, and the rail is a fixed 20rem
+     instead of a quarter of it — a quarter of a fluid page is 437px of
+     one-word labels, and the column takes what that gives back. */
+  const shipped = dir === 'final';
+  const cont = shipped ? Math.min(vw * 0.96, 2400) : containerW(vw, fluid);
   const contX = Math.round((vw - cont) / 2);
-  const railX = contX + 12, railW = cont * 0.25 - 24;
-  const colX = contX + cont * 0.25 + 12, colW = cont * 0.75 - 24;
+  const railW = shipped ? 320 - 24 : cont * 0.25 - 24;
+  const railX = contX + 12;
+  const colX = shipped ? contX + 320 + 12 : contX + cont * 0.25 + 12;
+  const colW = shipped ? cont - 320 - 24 : cont * 0.75 - 24;
   const top = M.sigBottom + (dir === 'today' ? M.titleBand : M.gutter);
   const stageTop = top + M.headH + M.headMB;
   let sw, sh, deckX = 0, deckW = 0, stripH = 0;
@@ -518,9 +526,11 @@ function noteFor(dir, vw, vh, fluid) {
     B: '<b>B · Knobs beside the picture.</b> Tone, Scene and Orientation move into a column beside the stage; Luma stays under the picture it measures. Co-visibility stops being arithmetic and becomes structure — but the knobs now spend the width the picture could have had.',
     C: '<b>C · The picture is the page.</b> The stage takes the column, and the four Tone knobs ride one compact strip directly under it. Scene, Luma and Orientation move below the fold — the deliberate cost.',
   }[dir];
-  const cap = fluid
-    ? ' Page width is <b>fluid</b>: the 1320 px container cap is lifted on this page only.'
-    : (vw >= 1400 ? ' At this width the <span class="num">1320 px</span> container is what stops the picture, not the window — try <b>Fluid</b>.' : '');
+  const cap = dir === 'final'
+    ? ' The 1320 px container cap is lifted on the settings page, and the rail is a fixed 20 rem rather than a quarter of it — both as shipped, so the page-width toggle does not apply here.'
+    : fluid
+      ? ' Page width is <b>fluid</b>: the 1320 px container cap is lifted on this page only.'
+      : (vw >= 1400 ? ' At this width the <span class="num">1320 px</span> container is what stops the picture, not the window — try <b>Fluid</b>.' : '');
 
   /* What the picture costs, stated rather than implied: whether the rest of
      the panel still fits under it at this window. */
@@ -559,7 +569,10 @@ function render() {
   [['dir', S.dir], ['vp', S.vp], ['fl', String(S.fluid)]].forEach(([id, v]) =>
     [...document.getElementById(id).children].forEach(b =>
       b.setAttribute('aria-pressed', String(b.dataset.v === v))));
-  document.getElementById('fl').querySelectorAll('button').forEach(b => { b.disabled = phone; });
+  // The shipped direction has no cap to toggle, and the phone frame has no
+  // container to speak of.
+  document.getElementById('fl').querySelectorAll('button')
+    .forEach(b => { b.disabled = phone || S.dir === 'final'; });
   location.replace('#' + S.dir + '/' + S.vp + '/' + S.fluid);
 }
 
