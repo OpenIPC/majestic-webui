@@ -446,10 +446,20 @@
 		const h = form.querySelector('h3');
 		if (h) {
 			h.tabIndex = -1;
-			if (byPointer) {
-				h.classList.add('mj-focus-quiet');
-				h.addEventListener('blur', () => h.classList.remove('mj-focus-quiet'), { once: true });
-			}
+			// Set to match this pick, every time, and never taken off on blur.
+			//
+			// Blur was the obvious moment to drop it and it is the wrong one:
+			// switching browser tabs blurs the heading, and coming back focuses
+			// it again with no new intent from anyone in between. The tag was
+			// gone by then, so the ring reappeared on return — and only
+			// sometimes, because it depends on whether the tab was switched with
+			// the keyboard, which is what makes the engine call the restored
+			// focus "visible" (#222).
+			//
+			// Leaving it costs nothing. tabindex -1 keeps the heading out of the
+			// tab order, so nothing but this function can focus it, and this
+			// function sets the tag both ways on every pick.
+			h.classList.toggle('mj-focus-quiet', !!byPointer);
 			h.focus({ preventScroll: true });
 		}
 
