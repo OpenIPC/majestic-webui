@@ -51,8 +51,67 @@
 		const el = $(id);
 		if (el) el.hidden = !on;
 		const box = $('#st-alerts');
-		if (box) box.hidden = !['#st-alert-stale', '#st-alert-exp', '#st-alert-stall']
+		if (box) box.hidden = !['#st-alert-stale', '#st-alert-exp', '#st-alert-stall', '#st-alert-ircut']
 			.some(a => { const e = $(a); return e && !e.hidden; });
+	}
+
+	// ── IR-cut ──────────────────────────────────────────────────────────────
+	// A misconfigured IR-cut filter is invisible everywhere else on this page:
+	// the camera streams, records and reports healthy counters while sending a
+	// magenta picture, and the day/night line below states the two values
+	// without ever saying they contradict each other. The verdict itself is in
+	// /a/ircut-check.js; this only decides what the dashboard says out loud.
+	//
+	// Faults only. `info` — a wired filter with the light monitor off — is a
+	// true observation and belongs on the settings page next to the switch that
+	// changes it, not in a banner someone cannot dismiss.
+	const IC = window.MajesticIrcut;
+	const ircutTrack = IC ? IC.tracker() : null;
+	let nmCfg = null;
+	if (IC) mjConfig().then(c => {
+		// mjConfig() resolves {} when the fetch failed, and an empty config
+		// would diagnose as "no IR-cut pins configured" — a fetch that did not
+		// happen must never be reported as a camera that is wired wrong.
+		if (c && Object.keys(c).length) nmCfg = c.nightMode || {};
+	}).catch(() => {});
+
+	// What the snapshot tile's frame looks like. Kept as the last observation
+	// plus its run length, so the banner is driven by the picture the page is
+	// actually showing rather than by one lucky frame.
+	let ircutPic = null;
+	let ircutSample = null;
+	let ircutTrackNow = { flips: 0, conflictS: 0 };
+
+	function readIrcutPicture(el) {
+		if (!IC || !nmCfg) return;
+		const l = IC.lookAt(el);
+		ircutPic = { look: l, streak: ircutTrack.picture(l) };
+		// The snapshot poll is 5s and the heartbeat 2s, so repaint here rather
+		// than wait for the next sample — otherwise the picture's finding
+		// always lags a frame behind the frame that produced it.
+		paintIrcut();
+	}
+
+	// Advancing the tracker and painting are separate because they are driven
+	// by different clocks: the heartbeat advances time (flips, how long a
+	// disagreement has stood) and must be counted exactly once per sample,
+	// while the snapshot poll only ever brings new evidence. Painting from
+	// inside the push would make every repaint a second tick of the clock.
+	function renderIrcut(s) {
+		if (!IC || !nmCfg) return;
+		ircutSample = s;
+		ircutTrackNow = ircutTrack.push(s, performance.now() / 1000);
+		paintIrcut();
+	}
+
+	function paintIrcut() {
+		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
+			.filter(x => x.level !== 'info')[0];
+		if (f) {
+			$('#st-alert-ircut-t').textContent = f.title;
+			$('#st-alert-ircut-d').textContent = f.detail;
+		}
+		setAlert('#st-alert-ircut', !!f);
 	}
 
 	// The ISP panel shows what this SoC's ISP actually reports and nothing
@@ -233,6 +292,12 @@
 					probe.onload = () => {
 						if (busy !== mine) { URL.revokeObjectURL(url); return; }
 						busy = 0;
+						// The frame is decoded and in hand, so the IR-cut look
+						// costs one 160x90 drawImage and nothing else — no
+						// fetch, no session slot, no camera-side work. Reading
+						// it here rather than on a timer of its own is also
+						// what keeps the streak counting real frames.
+						readIrcutPicture(probe);
 						const old = img.src;
 						img.src = url;
 						img.hidden = false;
@@ -266,6 +331,12 @@
 			if (s.fails >= 2) {
 				setAlert('#st-alert-exp', false);
 				setAlert('#st-alert-stall', false);
+				// Not cleared, narrowed: an unset irCutPin1 is still unset
+				// while the camera is unreachable, but a day/night
+				// disagreement is a claim about right now, and there is no
+				// right now to read. Passing no sample drops exactly the
+				// findings that needed one.
+				renderIrcut(null);
 			}
 			setAlert('#st-alert-stale', s.fails >= 2);
 			// No new sample, but time still passes: redraw so the traces age
@@ -308,8 +379,13 @@
 		$('#st-hls').textContent = v.hls_clients_total | 0;
 
 		const dn = $('#st-daynight');
-		if (dn) dn.textContent = (s.night ? '🌙 Night' : '☀️ Day') + ' · IR-cut ' + (s.ircut ? 'on' : 'off') +
-			' · lamp ' + (s.light ? 'on' : 'off');
+		// A gauge this majestic does not publish reads as "not reported", never
+		// as day with the filter closed.
+		if (dn) dn.textContent = s.night == null ? 'Day / night not reported'
+			: (s.night ? '🌙 Night' : '☀️ Day') +
+				' · IR-cut ' + (s.ircut == null ? '?' : (s.ircut ? 'on' : 'off')) +
+				' · lamp ' + (s.light == null ? '?' : (s.light ? 'on' : 'off'));
+		renderIrcut(s);
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means
 		// the encoder has stopped producing frames while all else looks alive.
 		// The encoder tile and chart obey the same rule as Wi-Fi and

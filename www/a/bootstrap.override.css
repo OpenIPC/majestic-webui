@@ -3631,3 +3631,254 @@ dialog.mj-modal::backdrop {
 		width: 100%;
 	}
 }
+
+/* ── the IR-cut pin map ─────────────────────────────────────────────────────
+   Replaces four number fields on the Day / Night section. Pads are numbered
+   the way majestic's config numbers them — plain running integers — because a
+   second numbering nobody can map onto the one they must type is worse than
+   the harder one alone. The grid grows a row per bank the kernel reports
+   rather than drawing a package outline: pad count is a property of the SoC
+   (9 banks on most HiSilicon V2/V3, 17 on a 3516AV100, base 224 on Novatek),
+   and on a BGA the package's own pin numbers would be a fiction anyway. */
+.mj-ircut-wire {
+	display: flex;
+	gap: 1.5rem;
+	align-items: flex-start;
+	margin: 0.75rem 0 1rem;
+}
+
+.mj-ircut-map {
+	flex: 0 0 auto;
+}
+
+.mj-ircut-roles {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.mj-pinmap-chip {
+	position: relative;
+}
+
+.mj-pinmap-body {
+	position: absolute;
+	top: 0;
+	border-radius: 0.5rem;
+	background: linear-gradient(145deg, #2b303c 0%, #1c2029 100%);
+	border: 1px solid #10131a;
+}
+
+.mj-pinmap-cap {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0.4rem;
+	text-align: center;
+	color: #656b7a;
+	font-size: 0.5625rem;
+	letter-spacing: 0.07em;
+}
+
+.mj-pinmap-row {
+	position: absolute;
+	left: 0;
+	width: 2.375rem;
+	text-align: right;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.5625rem;
+	color: var(--bs-tertiary-color);
+	line-height: 24px;
+}
+
+.mj-pin {
+	position: absolute;
+	width: 28px;
+	height: 24px;
+	padding: 0;
+	border: 1px solid #dfe2ec;
+	border-radius: 4px;
+	background: #f1f2f6;
+	color: #767b8a;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.5625rem;
+	line-height: 1;
+	cursor: pointer;
+	transition: box-shadow var(--mj-ease);
+}
+
+.mj-pin:hover:not(:disabled) {
+	border-color: var(--bs-primary);
+}
+
+.mj-pin-on {
+	color: #fff;
+}
+
+/* Two different absences, and they must not look alike: a pad with an owner
+   is unavailable, a pad the mux has as something else is not a GPIO at all. */
+.mj-pin-owned {
+	background: var(--bs-tertiary-bg);
+	border-color: var(--bs-border-color);
+	color: var(--bs-tertiary-color);
+	cursor: not-allowed;
+}
+
+.mj-pin-off {
+	background: var(--bs-body-bg);
+	border-color: var(--bs-border-color);
+	color: var(--bs-tertiary-color);
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.mj-pin-try {
+	background: #1f2430;
+	border-color: #1f2430;
+	color: #fff;
+	box-shadow: 0 0 0 3px rgba(31, 36, 48, 0.18);
+}
+
+.mj-pin-sel {
+	border-color: var(--bs-primary);
+	box-shadow: 0 0 0 3px var(--bs-focus-ring-color);
+}
+
+.mj-pinmap-pop {
+	position: absolute;
+	z-index: 5;
+	width: 14.5rem;
+	padding: 0.6rem;
+	background: var(--bs-card-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	box-shadow: var(--bs-box-shadow-lg);
+}
+
+.mj-pinmap-pop-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	padding: 0 0.25rem 0.5rem;
+	border-bottom: 1px solid var(--bs-border-color);
+	margin-bottom: 0.35rem;
+}
+
+.mj-pinmap-pop-head span {
+	font-size: 0.625rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-pinmap-role {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	width: 100%;
+	padding: 0.4rem 0.5rem;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
+	color: var(--bs-body-color);
+	font-size: 0.75rem;
+	text-align: left;
+	cursor: pointer;
+}
+
+.mj-pinmap-role:hover {
+	background: var(--bs-tertiary-bg);
+}
+
+.mj-pinmap-role em {
+	font-style: normal;
+	font-size: 0.625rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-pinmap-role span:nth-child(2) {
+	flex: 1 1 auto;
+}
+
+.mj-pinmap-dot {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+	background: var(--bs-border-color);
+}
+
+/* The role list beside the map: same four colours, so a row and its pad are
+   obviously the same object. */
+.mj-ircut-role {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.65rem;
+	width: 100%;
+	margin-bottom: 0.3rem;
+	padding: 0.55rem 0.7rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-card-bg);
+	text-align: left;
+	cursor: pointer;
+}
+
+.mj-ircut-role:hover {
+	border-color: var(--bs-primary);
+}
+
+.mj-ircut-role-unset {
+	background: var(--bs-secondary-bg);
+}
+
+.mj-ircut-rdot {
+	flex: 0 0 auto;
+	width: 10px;
+	height: 10px;
+	margin-top: 0.2rem;
+	border-radius: 3px;
+	background: var(--bs-border-color);
+}
+
+.mj-ircut-rtext {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.mj-ircut-rtext b {
+	display: block;
+	font-size: 0.8125rem;
+	font-weight: 500;
+}
+
+.mj-ircut-rtext em {
+	display: block;
+	margin-top: 0.1rem;
+	font-style: normal;
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-ircut-rpin {
+	flex: 0 0 auto;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.8125rem;
+	font-weight: 600;
+}
+
+.mj-ircut-role-unset .mj-ircut-rpin {
+	font-weight: 400;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-ircut-acts {
+	display: flex;
+	gap: 0.5rem;
+	margin-top: 0.75rem;
+}
+
+
+/* Below md the map would push the roles off the card. */
+@media (max-width: 767.98px) {
+	.mj-ircut-wire {
+		flex-direction: column;
+	}
+}

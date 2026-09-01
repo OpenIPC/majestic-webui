@@ -154,6 +154,7 @@
 		}
 		buildNav();
 		wireSearch();
+		watchIrcut();
 		// the rail is a tree on >=md and an accordion below it; re-render rather
 		// than try to keep both shapes live at once
 		const onWidth = () => buildNav();
@@ -789,6 +790,11 @@
 			body.appendChild(head);
 			const lifted = liftedNote(sec);
 			if (lifted) body.appendChild(lifted);
+			// Above the fields, not below them: on Day / Night the verdict is
+			// what someone came to read, and the pin numbers are what they will
+			// change because of it.
+			const ircut = ircutPanel(sec);
+			if (ircut) body.appendChild(ircut);
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
@@ -819,6 +825,9 @@
 		applyVisibility();
 		layoutCols();
 		paintStock();
+		// Paints from whatever the heartbeat has already published; the
+		// subscription keeps it current from there.
+		paintFindings();
 
 		// renderField writes labels as plain text; with a query already active,
 		// the section just mounted has to pick up the marks too, or navigating
@@ -1259,9 +1268,9 @@
 		// A control that cannot work should say which pin is missing rather than
 		// just refusing to move.
 		if (ircut.disabled && lbl('toggle-ircut'))
-			lbl('toggle-ircut').title = 'nightMode.irCutPin1 is not configured.';
+			lbl('toggle-ircut').title = 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
-			lbl('toggle-light').title = 'nightMode.backlightPin is not configured.';
+			lbl('toggle-light').title = 'Nothing is connected to the infrared lamp.';
 
 		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
 			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
@@ -1753,6 +1762,288 @@
 		return p;
 	}
 
+	// ── The IR-cut panel, on Day / Night ────────────────────────────────────
+	//
+	// This section's fields are pin numbers, and a pin number is the one kind
+	// of setting whose page cannot show you whether it is right: the form will
+	// happily hold 11 for a board that wants 8 and look identical either way.
+	// So the section carries the two things the form cannot be — what the
+	// current configuration already implies (passive, always on screen) and a
+	// control that moves the filter and watches the picture change (active, on
+	// request). The verdicts are in /a/ircut-check.js; this is only their page.
+	const IRCUT = window.MajesticIrcut;
+	const ircutTrack = IRCUT ? IRCUT.tracker() : null;
+	let ircutSample = null;
+	let ircutStats = { flips: 0, conflictS: 0 };
+	let ircutBusy = false;
+
+	// Subscribed once for the page rather than once per mount: main.js keeps no
+	// unsubscribe, so re-subscribing on every visit to this section would leave
+	// a live handler behind for each one.
+	function watchIrcut() {
+		if (!IRCUT || typeof mjMetricsSubscribe !== 'function') return;
+		mjMetricsSubscribe((s) => {
+			if (!s.ok) return;
+			ircutSample = { night: s.night, ircut: s.ircut, light: s.light };
+			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
+			paintFindings();
+		});
+	}
+
+	function nightCfg() { return (state.config && state.config.nightMode) || {}; }
+
+	// Why the button cannot run, or null. Each reason is specific: a disabled
+	// control that will not say what it wants is the thing this whole panel
+	// exists to stop being.
+	function testBlocker() {
+		const nm = nightCfg();
+		if (!isNumish(nm.irCutPin1))
+			return 'Nothing is connected to the filter yet, so there is nothing to test.';
+		if (!toBool(getDotted(state.config, 'jpeg.enabled')))
+			return 'The test reads a still picture, and this camera has JPEG snapshots turned off.';
+		// The monitor re-drives the filter on its own schedule, and a snapshot
+		// taken after it had snapped the filter back would read as "it never
+		// moved" — convicting a correctly wired camera. Refusing to run beats
+		// running and possibly lying.
+		if (toBool(nm.lightMonitor))
+			return 'The light monitor would drive the filter back mid-test. Turn it off, ' +
+				'run the test, then turn it back on.';
+		return null;
+	}
+
+	// Re-reads testBlocker() against the current config and dresses the button
+	// accordingly. Asked at mount, whenever the map changes, and after a save:
+	// the answer goes stale the moment a save gives the camera the pins the
+	// button was refusing for want of.
+	function syncTestBtn() {
+		const btn = document.getElementById('mj-ircut-run');
+		if (!btn) return;
+		const why = testBlocker();
+		btn.disabled = !!why;
+		btn.title = why || 'Moves the filter and compares the picture in both positions.';
+	}
+
+	function paintFindings() {
+		const box = document.getElementById('mj-ircut-findings');
+		if (!box || !IRCUT) return;
+		const found = IRCUT.diagnose(nightCfg(), ircutSample, ircutStats);
+		box.innerHTML = '';
+		found.forEach((f) => {
+			const cls = f.level === 'danger' ? 'alert-danger'
+				: f.level === 'warning' ? 'alert-warning' : 'alert-secondary';
+			const d = el('div', 'alert ' + cls + ' py-2 px-3 mb-2 small');
+			d.innerHTML = '<b>' + esc(f.title) + '</b> ' + esc(f.detail);
+			box.appendChild(d);
+		});
+	}
+
+	const IRCUT_STEP = {
+		first: 'Reading the picture…',
+		toggle: 'Moving the filter…',
+		second: 'Reading it again…',
+		restore: 'Putting the filter back…',
+	};
+
+	function runIrcutTest(btn, status, result) {
+		if (ircutBusy) return;
+		// The filter is a physical part and the picture jumps twice while this
+		// runs, which is worth a sentence before it happens rather than an
+		// explanation afterwards.
+		if (!confirm('Move the IR-cut filter twice and compare the picture?\n\n' +
+			'The live view will flicker for a couple of seconds. The filter is ' +
+			'put back where it started.')) return;
+
+		ircutBusy = true;
+		btn.disabled = true;
+		result.hidden = true;
+		// The heartbeat's last sample is only a fallback — probe() reads the
+		// filter's position from the camera itself, because which capture is
+		// the day one turns on it and a stale answer does not mis-word the
+		// verdict, it inverts it.
+		const start = ircutSample ? (ircutSample.ircut | 0) : 0;
+
+		IRCUT.probe({
+			settleMs: 1500,
+			snap: () => IRCUT.snapshot('/image.jpg'),
+			state: () => apiFetch('/metrics/night?value=ircut_enabled',
+				{ credentials: 'same-origin' })
+				.then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
+				.then(t => (+t > 0 ? 1 : 0)),
+			toggle: () => apiFetch('/night/ircut', { credentials: 'same-origin' })
+				.then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
+			wait: (ms) => new Promise(r => setTimeout(r, ms)),
+			onStep: (s) => { status.textContent = IRCUT_STEP[s] || ''; },
+		}, start).then((out) => {
+			const v = out.verdict;
+			// A test that could not put the filter back outranks whatever it
+			// found: the camera is sitting in the wrong position right now, and
+			// on a board that holds its filter electrically that means daylight
+			// is magenta until somebody fixes it.
+			const cls = out.restored === false ? 'alert-danger'
+				: v.level === 'danger' ? 'alert-danger'
+					: v.level === 'warning' ? 'alert-warning'
+						: v.level === 'ok' ? 'alert-success' : 'alert-secondary';
+			result.className = 'alert ' + cls + ' py-2 px-3 mt-2 mb-0 small';
+			result.innerHTML = (out.restored === false
+				? '<b>The filter could not be put back.</b> It is still in the ' +
+				'position the test left it in &mdash; use the IR-cut switch on ' +
+				'Live adjustments to move it back. The test itself found: '
+				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail);
+			result.hidden = false;
+		}).catch((e) => {
+			result.className = 'alert alert-danger py-2 px-3 mt-2 mb-0 small';
+			// A test that could not finish reports that it could not finish. It
+			// must never fall through to a verdict — half a measurement is not
+			// evidence about the filter.
+			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
+				'. The filter was left where it started.';
+			result.hidden = false;
+		}).finally(() => {
+			ircutBusy = false;
+			btn.disabled = false;
+			status.textContent = '';
+		});
+	}
+
+	// The four wiring pins, by the name majestic's config gives them. Numbers
+	// are plain running integers everywhere in the UI — the same 11 that goes
+	// into nightMode.irCutPin1 and the same 11 the wiki's GPIO table lists. The
+	// kernel's bank_pin spelling is deliberately never shown: a second
+	// numbering nobody can map onto the one they have to type is worse than the
+	// harder one alone.
+	const PIN_KEYS = ['irCutPin1', 'irCutPin2', 'backlightPin', 'lightSensorPin'];
+	const PIN_DOTS = {};
+	PIN_KEYS.forEach((k) => { PIN_DOTS['nightMode.' + k] = 1; });
+
+	function pinField(key) {
+		return state.fields.filter((f) => f.dot === 'nightMode.' + key)[0];
+	}
+
+	// The map reports; this writes what it reports into the real fields, so the
+	// save bar appears exactly as it would have for a typed number.
+	function pushAssign(a) {
+		PIN_KEYS.forEach((k) => {
+			const f = pinField(k);
+			if (f) f.setValue(a[k] === undefined ? '' : String(a[k]));
+		});
+		updateDirty();
+	}
+
+	function currentAssign() {
+		const a = {};
+		PIN_KEYS.forEach((k) => {
+			const v = getDotted(state.config, 'nightMode.' + k);
+			if (isNumish(v)) a[k] = Number(v);
+		});
+		return a;
+	}
+
+	function ircutPanel(sec) {
+		if (sec !== 'nightMode' || !IRCUT) return null;
+		const box = el('div', 'mj-ircut');
+		box.innerHTML =
+			'<div id="mj-ircut-findings"></div>' +
+			'<div class="mj-ircut-wire">' +
+			'<div class="mj-ircut-map" id="mj-ircut-map"></div>' +
+			'<div class="mj-ircut-roles">' +
+			'<div class="mj-live-grp-head"><span class="mj-cap">Connected to</span>' +
+			'<span class="mj-live-rule"></span></div>' +
+			'<div id="mj-ircut-rolelist"></div>' +
+			'<div class="mj-ircut-acts">' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
+			'</div>' +
+			'<div class="small text-secondary mt-2" id="mj-ircut-status"></div>' +
+			'<div id="mj-ircut-result" class="small" hidden></div>' +
+			'</div></div>';
+
+		// Wired once, gated every time.
+		const btn = box.querySelector('#mj-ircut-run');
+		btn.addEventListener('click', () => {
+			if (btn.disabled) return;
+			runIrcutTest(btn, box.querySelector('#mj-ircut-status'),
+				box.querySelector('#mj-ircut-result'));
+		});
+		syncTestBtn();
+		// The map needs the camera's real pad list, which is a fetch, so it
+		// mounts late. Everything else on the section is already usable.
+		mountPinMap(box);
+		return box;
+	}
+
+	// The pad map, plus the role list beside it. Both are driven by one
+	// assignment object; clicking either side moves the same thing.
+	async function mountPinMap(box) {
+		const host = box.querySelector('#mj-ircut-map');
+		const list = box.querySelector('#mj-ircut-rolelist');
+		if (!host || !window.MajesticIrcutMap) return;
+		let info;
+		try {
+			const r = await apiFetch('/cgi-bin/j/gpio.cgi', { credentials: 'same-origin' });
+			info = await r.json();
+		} catch (e) {
+			// No pad list, no map. The hidden number fields are still there, so
+			// nothing is unreachable — say which door is shut and unhide them.
+			host.innerHTML = '<p class="small text-secondary mb-0">' +
+				'Could not read this camera\'s GPIO list, so the pin map is not available. ' +
+				'The pin numbers below can still be set by hand.</p>';
+			PIN_KEYS.forEach((k) => { const f = pinField(k); if (f) f.p.hidden = false; });
+			layoutCols();
+			return;
+		}
+
+		state.ircutInfo = info;
+		const map = window.MajesticIrcutMap.mount(host, {
+			info: info,
+			assign: currentAssign(),
+			soc: (window.mjSoc || '') + (info.banks ? ' · ' + info.banks.length + ' banks' : ''),
+			onChange: (a) => { pushAssign(a); paintRoles(); },
+		});
+		state.ircutMap = map;
+
+		function paintRoles() {
+			syncTestBtn();
+			const a = map.get();
+			list.innerHTML = '';
+			map.roles.forEach((r) => {
+				const row = el('button', 'mj-ircut-role');
+				row.type = 'button';
+				const set = a[r.key] !== undefined;
+				if (!set) row.classList.add('mj-ircut-role-unset');
+				const dot = el('span', 'mj-ircut-rdot');
+				dot.style.background = set ? r.color : '';
+				row.appendChild(dot);
+				const t = el('span', 'mj-ircut-rtext');
+				const l = el('b');
+				l.textContent = r.label;
+				t.appendChild(l);
+				const h = el('em');
+				h.textContent = r.hint;
+				t.appendChild(h);
+				row.appendChild(t);
+				const onChip = set && map.has(a[r.key]);
+				const pin = el('span', 'mj-ircut-rpin');
+				pin.textContent = set ? String(a[r.key]) : 'not set';
+				row.appendChild(pin);
+				if (set && !onChip) {
+					// Configured, but this kernel reports no such pad — a config
+					// from another SoC, or a hand-edited yaml. Saying so beats a
+					// row that points at a pad which is not drawn.
+					row.classList.add('mj-ircut-role-unset');
+					const h = row.querySelector('.mj-ircut-rtext em');
+					if (h) h.textContent = 'not a pin on this processor';
+				}
+				// Clicking a role selects its pad, so the two halves of the
+				// panel always point at the same thing.
+				row.addEventListener('click', () => {
+					if (onChip) map.select(a[r.key]);
+				});
+				list.appendChild(row);
+			});
+		}
+		paintRoles();
+
+	}
+
 	// "all N at stock" / "N of M off stock" for the section head — the question
 	// the per-row ↺ can only answer one row at a time. Counted over what is on
 	// screen (a visibleWhen-hidden row is not one of the section's N from here)
@@ -1818,7 +2109,12 @@
 				continue;
 			}
 			const eff = getDotted(state.config, dot);
-			const field = renderField(container, dot, key, sub, eff);
+			// The four wiring pins render hidden rather than not at all: the pin
+			// map above the form is what edits them, but they stay real fields
+			// so dirty tracking, Save and the per-row reset keep working on them
+			// without knowing a map exists.
+			const field = renderField(container, dot, key, sub, eff,
+				PIN_DOTS[dot] ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -2666,6 +2962,12 @@
 		// setValue fires no events, so anything that mirrors a field rather than
 		// owning it — the orientation pad — has to be told to re-read.
 		(state.liveSync || []).forEach(fn => fn());
+		// The map holds its own copy of the assignments, taken once at mount.
+		// A save or a per-row reset changes the fields underneath it, and the
+		// next edit on the map would push its whole stale set back — restoring
+		// pins the refresh had just removed.
+		if (state.ircutMap) state.ircutMap.set(currentAssign(), { quiet: true });
+		syncTestBtn();
 		updateDirty();
 	}
 

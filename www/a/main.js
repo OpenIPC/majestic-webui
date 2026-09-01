@@ -465,7 +465,13 @@ function heartbeat() {
 				driftMs: v.node_time_seconds ? v.node_time_seconds * 1000 - Date.now() : null,
 				sysUptimeS: sysUp,
 				mjUptimeS: mjUp,
-				night: v.night_enabled | 0, ircut: v.ircut_enabled | 0, light: v.light_enabled | 0,
+				// null, not 0, when the gauge is absent. A camera whose majestic
+				// does not publish these is not a camera reporting day with the
+				// filter closed, and anything reasoning about day/night has to be
+				// able to tell those apart.
+				night: ('night_enabled' in v) ? (v.night_enabled | 0) : null,
+				ircut: ('ircut_enabled' in v) ? (v.ircut_enabled | 0) : null,
+				light: ('light_enabled' in v) ? (v.light_enabled | 0) : null,
 				rx: m.rx, tx: m.tx, m,
 				// Consumers do their own counter deltas (net, venc bytes, md rects)
 				// against this snapshot; CPU% is computed here because its state

@@ -41,6 +41,15 @@ done) %>
 		<span class="small"><b>Exposure at maximum</b> — the scene is darker than the sensor can compensate.<span id="st-alert-exp-lum"></span></span>
 		<a class="small ms-auto" href="mj-settings.cgi?tab=live">Open Live adjustments &rarr;</a>
 	</div>
+	<!-- The wording is written by status.js from the finding it is reporting:
+	     one banner covers a missing pin, a light monitor with nothing to watch,
+	     thresholds with no hysteresis and a day/night disagreement, and each
+	     needs its own sentence. -->
+	<div class="st-alert" id="st-alert-ircut" hidden>
+		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
+		<span class="small"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></span>
+		<a class="small ms-auto" href="mj-settings.cgi?tab=nightMode">Open Day / Night &rarr;</a>
+	</div>
 	<div class="st-alert" id="st-alert-stall" hidden>
 		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
 		<span class="small"><b>Encoder stalled</b> — the encoder has stopped producing frames while everything else looks alive.</span>
@@ -224,6 +233,7 @@ done) %>
 </div>
 
 <script src="/a/charts.js" defer></script>
+<script src="/a/ircut-check.js" defer></script>
 <script src="/a/status.js" defer></script>
 
 <%in p/footer.cgi %>
