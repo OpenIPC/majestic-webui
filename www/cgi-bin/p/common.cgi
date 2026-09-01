@@ -595,6 +595,15 @@ preview() {
 		     looking at the numbers does not displace the picture they
 		     describe. -->
 		<div id="mj-stats" class="mj-stats-overlay small" hidden></div>
+		<!-- The toast stack. A flex column rather than two boxes at hardcoded
+		     offsets under the chip: the chip's height is not a constant (its
+		     text is "MJPEG" on one camera and "H265 3840×2160 · 25 fps · 36% ·
+		     Sub stream" on another, which wraps on a phone), so anything
+		     measured from the top of the stage sat too close to it or on top of
+		     it. preview-zoom.js publishes the chip's measured height and the
+		     stack starts below it; a hidden toast takes no room, so the served
+		     message moves up when there is no adaptation toast above it. -->
+		<div class="mj-toasts" id="mj-toasts">
 		<!-- The adaptation toast (preview-adapt.js): the whole disclosure of
 		     WebRTC's shared-encoder bitrate adaptation, made at the moment it
 		     acts rather than as a standing sentence (the always-on note this
@@ -622,6 +631,7 @@ preview() {
 			<span id="mj-served-why"></span>
 			<button type="button" class="mj-adapt-close" aria-label="Dismiss">×</button>
 		</p>
+		</div>
 		<!-- PTZ mount. Empty and hidden on every camera; p/motor.cgi (included
 		     by preview.cgi only when the hardware exists) emits the pad after
 		     the player and preview-ptz.js relocates it in here. -->

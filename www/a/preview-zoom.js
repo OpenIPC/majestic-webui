@@ -32,7 +32,7 @@
 	const MODES = ['fit', 'fill', 'one'];
 	const RADIOS = { fit: '#mj-view-fit', fill: '#mj-view-fill', one: '#mj-view-one' };
 	// Where a press belongs to the control under it rather than to the picture.
-	const CHROME = '.mj-bar, .mj-ptz, #mj-stats, #mj-adapt, #mj-served';
+	const CHROME = '.mj-bar, .mj-ptz, #mj-stats, #mj-toasts';
 
 	function read(k) {
 		try { return localStorage.getItem(k); } catch (e) { return null; }
@@ -87,6 +87,12 @@
 		const badge = $('#mj-badge');
 		const cw = (badge && badge.offsetWidth) || 210;
 		const ch = (badge && badge.offsetHeight) || 30;
+		// Published for the toast stack, which hangs under the chip: the chip's
+		// height is not a constant -- "MJPEG" against "H265 3840×2160 · 25 fps ·
+		// 36% · Sub stream", which wraps to two lines on a phone -- so a toast
+		// at a fixed offset from the top of the stage is either crowding it or
+		// sitting on it.
+		if (ch) stage.style.setProperty('--mj-chip-h', ch + 'px');
 		const visW = Math.min(sw, picW), visH = Math.min(sh, picH);
 		// A picture too small to carry the chip without the chip dominating it
 		// hands the chrome back to the stage: a 390 x 219 phone in Fit, where

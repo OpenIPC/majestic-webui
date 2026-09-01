@@ -327,6 +327,17 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   dominating — measured against the chip's own `offsetWidth`, not a constant —
   hands the insets back to the stage. A 390 × 219 phone in Fit is that case;
   1841 × 1381 with 359px of gutter is not, so it keeps its chip on the picture.
+- **The two toasts are a stack, not two fixed offsets.** `#mj-toasts` is a flex
+  column hung under the chip at `--mj-chip-h`, the chip's *measured* height,
+  because that height is not a constant — "MJPEG" against "H265 3840×2160 · 25
+  fps · 36% · Sub stream", which wraps to two lines below ~300px — and at the
+  old hardcoded `top: 2.4rem` the adaptation toast started 2.6px **above** the
+  chip's bottom edge. A hidden toast takes no room, so the served message rises
+  into the adaptation toast's place when there is none. The chip also gained
+  `max-width: calc(100% - 1rem)`: right-anchored inside an `overflow: hidden`
+  stage, an uncapped long line ran off the *left* edge and lost its first
+  words. Wrapping is safe precisely because the stack measures rather than
+  assumes.
 - Everything is still overlaid on the video so nothing ever displaces the
   picture: the status chip `#mj-badge` top-right
   (`CODEC W×H · fps · scale`; fps is live WebRTC stats via a loosened `onStats` gate,

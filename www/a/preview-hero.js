@@ -96,7 +96,7 @@
 	let tapId = null, tapX = 0, tapY = 0;
 	stage.addEventListener('pointerdown', e => {
 		if (e.pointerType !== 'touch') return;
-		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-adapt, #mj-served')) return;
+		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-toasts')) return;
 		tapId = e.pointerId;
 		tapX = e.clientX;
 		tapY = e.clientY;
