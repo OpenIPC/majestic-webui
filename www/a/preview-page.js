@@ -98,15 +98,26 @@
 	// this: the chip must stop describing a session that ended, and the
 	// controls that retargeted that player have to restart the chain instead.
 	let fellBack = null;
+	// What the fallback has put on the stage — 'mjpeg', 'note', or null — as
+	// distinct from `fellBack`, which is cleared the moment a retry starts.
+	// They part company for the length of that retry, and that gap is the
+	// point: the picture stays until the replacement has one of its own.
+	let holdingFallback = null;
 	function showVideo() {
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = '#000'; }
 		if (img) { img.style.display = 'none'; img.src = ''; }
 		if (note) note.style.display = 'none';
 		fellBack = null;
+		holdingFallback = null;
 		hideStageMsg('fallback');
 	}
 	function showNoSignal() {
+		// 'no signal' is a stage of a retry, not its outcome. While the
+		// fallback picture is being held, taking it away for one would cost
+		// the viewer what they had in exchange for a session that may yet
+		// fail — and MSE reaches 'unreachable' only after six of these.
+		if (holdingFallback) return;
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = BARS; }
 		if (img) { img.style.display = 'none'; img.src = ''; }
@@ -154,12 +165,24 @@
 		chipFps = 0;
 		if (window.MajesticAdapt) window.MajesticAdapt.reset();
 		if (window.MajesticStats) window.MajesticStats.reset();
+		// The camera's served-channel answer belonged to the session that just
+		// died, and settle() only clears it on a promotion to MSE — so a retry
+		// that landed back on WebRTC used to inherit it, naming the wrong
+		// channel on the chip and handing the adaptation toast the wrong
+		// channel's configured bitrate, with no new `served` ever due on a
+		// daemon that does not send one. The message goes with it, whoever
+		// owns the slot: a mismatch toast standing over the fallback describes
+		// a session that no longer exists.
+		servedCh = null;
+		servedShownKey = '';
+		hideStageMsg();
 		const sentence = fallbackSentence(fellBack);
 		if (jpegOn && img) {
 			img.src = '/mjpeg';
 			img.style.display = '';
 			if (note) note.style.display = 'none';
 			if (badge) badge.textContent = 'MJPEG';
+			holdingFallback = 'mjpeg';
 			showStageMsg('fallback', sentence + ' Showing the MJPEG fallback.');
 		} else {
 			// No fallback to show, so the note carries the explanation and the
@@ -168,7 +191,7 @@
 			if (noteWhy) noteWhy.textContent = sentence;
 			if (note) note.style.display = '';
 			if (badge) badge.textContent = 'unavailable';
-			hideStageMsg('fallback');
+			holdingFallback = 'note';
 		}
 		// Neither transport is carrying the picture, so neither is lit. It is
 		// also what makes the retry work: with the group cleared, pressing the
@@ -176,22 +199,31 @@
 		reflectTransport(null);
 	}
 
-	// Back to the top of the chain. The transport picker gets here on its own
-	// (nothing is checked, so any press is a change), so this is for the stream
-	// picker, where a channel is still a request worth honouring: the Sub
-	// stream can be a codec this browser plays where the Main stream was not.
-	function retryFromFallback() {
+	// Back to the top of the chain, from either picker: `webrtc` is the
+	// transport group naming one, and undefined is the stream group leaving
+	// the choice to the stored preference.
+	//
+	// What it does NOT do is clear the stage. showFallback() stops the swap,
+	// so there is no live entry left for it to protect and the next attach is
+	// promoted the instant it is made — which meant a press of a transport
+	// button traded a working MJPEG picture for a black stage and a
+	// negotiation that could still fail, inverting the one rule
+	// preview-swap.js exists to enforce. The picture is the page's to hold
+	// now, and it is handed over in onPromoted, on a promotion that was
+	// earned by a picture rather than by there being nothing in the way.
+	function retryFromFallback(webrtc) {
 		// Guarded because one press can arrive twice: the click handler
 		// retries, and the change event that follows a radio that did move
 		// reaches goToStream(), which would otherwise restart the session
 		// that the click has just opened.
 		if (!fellBack) return;
 		fellBack = null;
-		hideStageMsg('fallback');
-		if (note) note.style.display = 'none';
-		if (img) { img.style.display = 'none'; img.src = ''; }
-		if (badge) badge.textContent = 'connecting…';
-		attachPlayer(wantWebRTC());
+		hideStageMsg();
+		if (badge) {
+			badge.textContent = holdingFallback === 'mjpeg'
+				? 'MJPEG · retrying…' : 'retrying…';
+		}
+		attachPlayer(webrtc === undefined ? wantWebRTC() : webrtc);
 	}
 
 	// The player names the cause in a code and the page words it — the same
@@ -361,7 +393,7 @@
 		// chipMedia is cleared with it, so this is belt and braces — but the
 		// bug it guards, a control repainting the chip with the codec of the
 		// stream that failed, is exactly the one #274 photographed.
-		if (!badge || !chipMedia || fellBack) return;
+		if (!badge || !chipMedia || fellBack || holdingFallback) return;
 		const fps = usingWebRTC ? chipFps : cfgFps[stream ? 1 : 0];
 		badge.textContent = (chipMedia.codec || '').toUpperCase() + ' ' +
 			chipMedia.w + '×' + chipMedia.h +
@@ -601,7 +633,7 @@
 				{ stream: stream, iceServers: () => ice,
 					audio: audioOn, volume: vol },
 				handlersFor(id, onState))),
-		onPromoted: (kind) => {
+		onPromoted: (kind, proven) => {
 			player = swap.player();
 			usingWebRTC = kind === 'webrtc';
 			liveEl = swap.element();
@@ -611,7 +643,11 @@
 			// left with nothing lit.
 			reflectTransport(kind);
 			settle();
-			showVideo();
+			// Only when this promotion means a picture. Holding the fallback,
+			// an unproven one is just the swap saying it had nothing of its
+			// own in the way — and showing the empty video element for it
+			// would take away the picture the viewer still has.
+			if (proven || !holdingFallback) showVideo();
 		},
 		// A trial was dropped and the screen is untouched. All that changes is
 		// the toggle, which has to come back up carrying the reason.
@@ -669,7 +705,11 @@
 					showFallback(d);
 				}
 			}
-			else if (badge) badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
+			// Not while the fallback picture is being held: these describe the
+			// attempt, and the chip has to go on describing the stage.
+			else if (badge && !holdingFallback) {
+				badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
+			}
 		},
 	});
 
@@ -1006,14 +1046,20 @@
 		// From the preference rather than from usingWebRTC, which the deferred
 		// attach above has not set yet.
 		reflectTransport(wantWebRTC() ? 'webrtc' : 'mse');
+		// Out of a fallback these go through the retry, so the picture that is
+		// on the stage is held for the attempt exactly as it is for a channel
+		// press. Playing, they are an ordinary transport switch and the swap
+		// protects the picture itself.
 		transportW.addEventListener('change', () => {
 			if (!transportW.checked) return;
 			rememberTransport('webrtc');
+			if (fellBack) { retryFromFallback(true); return; }
 			attachPlayer(true);
 		});
 		transportM.addEventListener('change', () => {
 			if (!transportM.checked) return;
 			rememberTransport('mse');
+			if (fellBack) { retryFromFallback(false); return; }
 			attachPlayer(false);
 		});
 	}

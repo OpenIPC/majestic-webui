@@ -334,6 +334,8 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		env.el('mj-transport-m').fire('change');
 		check('MSE was tried again', env.made.length === 2,
 			'made=' + env.made.length);
+		check('and the picture is held while it is judged',
+			env.el('live-mjpeg').src === '/mjpeg', env.el('live-mjpeg').src);
 		env.made[1].say('playing');
 		check('and once it works the fallback picture is gone',
 			env.el('live-mjpeg').src === '', env.el('live-mjpeg').src);
@@ -358,8 +360,71 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			'made=' + env.made.length);
 		check('on the same channel', env.made[1].opts.stream === 0,
 			String(env.made[1].opts.stream));
-		check('and the fallback picture is gone',
+		check('and the picture is held for the attempt',
+			env.el('live-mjpeg').src === '/mjpeg', env.el('live-mjpeg').src);
+		env.made[1].say('playing');
+		check('handed over only once the replacement has one of its own',
 			env.el('live-mjpeg').src === '', env.el('live-mjpeg').src);
+	}
+
+	// showFallback() stops the swap, so there is no live entry left for it to
+	// protect and the next attach is promoted the instant it is made. Without
+	// this the retry traded a working picture for a black stage and a
+	// negotiation that could still fail.
+	group('a retry does not cost the viewer the picture they had');
+	{
+		const env = load('mse', { 'jpeg.enabled': true });
+		await tick();
+		env.made[0].say('mjpeg', 'undecodable h265');
+		// The transport group is unlit, so this is what a press looks like.
+		env.el('mj-transport-w').checked = true;
+		env.el('mj-transport-w').fire('change');
+		check('a player was made', env.made.length === 2);
+		check('the MJPEG picture is still up',
+			env.el('live-mjpeg').style.display === '',
+			env.el('live-mjpeg').style.display);
+		check('and the chip says so, and that it is trying',
+			env.el('mj-badge').textContent === 'MJPEG · retrying…',
+			env.el('mj-badge').textContent);
+		// Everything short of a picture must leave the stage alone.
+		env.made[1].say('connecting');
+		env.made[1].say('nosignal');
+		check('a connecting attempt does not take the picture',
+			env.el('live-mjpeg').style.display === '',
+			env.el('live-mjpeg').style.display);
+		check('nor rewrite the chip out from under it',
+			env.el('mj-badge').textContent === 'MJPEG · retrying…',
+			env.el('mj-badge').textContent);
+		// And when it fails, the fallback simply carries on.
+		env.made[1].say('fallback', 'no usable H.264 in the offer');
+		check('the MSE attempt that follows is made', env.made.length === 3);
+		env.made[2].say('mjpeg', 'undecodable h265');
+		check('the picture was never interrupted',
+			env.el('live-mjpeg').style.display === '',
+			env.el('live-mjpeg').style.display);
+		check('and the chip is back to naming it plainly',
+			env.el('mj-badge').textContent === 'MJPEG',
+			env.el('mj-badge').textContent);
+	}
+
+	// The served-channel answer belonged to the session that died. settle()
+	// only clears it on a promotion to MSE, so a retry that landed back on
+	// WebRTC used to inherit it.
+	group('the camera\u2019s served answer does not outlive its session');
+	{
+		const env = load('webrtc', { 'jpeg.enabled': true });
+		await tick();
+		const live = env.made[0];
+		live.say('playing');
+		env.el('mj-served').hidden = true;
+		live.opts.onServed({ channel: 1, requested: 0, reason: 'unavailable' });
+		check('the mismatch message is up', env.el('mj-served').hidden === false);
+		live.say('fallback', 'media stopped arriving');
+		env.made[1].say('mjpeg', 'undecodable h265');
+		check('and it is replaced, not left standing over the fallback',
+			env.el('mj-served').hidden === false &&
+			/can.t decode/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
 	}
 
 	group('a channel that does move retries exactly once');
