@@ -1880,6 +1880,12 @@
 		// the day one turns on it and a stale answer does not mis-word the
 		// verdict, it inverts it.
 		const start = ircutSample ? (ircutSample.ircut | 0) : 0;
+		// Snapshot the wiring now, not when the probe returns: it takes seconds
+		// and the map stays live throughout, so reading the fields at the end
+		// would stamp the verdict with an assignment it was never measured
+		// against — and syncVerdict() would then find them matching and keep a
+		// stale verdict on screen.
+		const testedOn = fieldAssign();
 
 		IRCUT.probe({
 			settleMs: 1500,
@@ -1909,6 +1915,10 @@
 				'Live adjustments to move it back. The test itself found: '
 				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail);
 			result.hidden = false;
+			state.ircutTestedOn = testedOn;
+			// Edited while the probe ran: the verdict describes wiring that is
+			// no longer on screen, so it goes straight back out.
+			syncVerdict();
 		}).catch((e) => {
 			result.className = 'alert alert-danger py-2 px-3 mt-2 mb-0 small';
 			// A test that could not finish reports that it could not finish. It
@@ -1917,6 +1927,10 @@
 			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
 				'. The filter was left where it started.';
 			result.hidden = false;
+			state.ircutTestedOn = testedOn;
+			// Edited while the probe ran: the verdict describes wiring that is
+			// no longer on screen, so it goes straight back out.
+			syncVerdict();
 		}).finally(() => {
 			ircutBusy = false;
 			btn.disabled = false;
@@ -1980,6 +1994,36 @@
 			.filter((k) => isNumish(getDotted(state.config, 'nightMode.' + k)))
 			.map(roleName)
 			.filter(Boolean);
+	}
+
+	// The filter test's verdict names a wiring and a fix for it ("swap the two
+	// coils"), so it stops being true the moment the wiring is edited — and it
+	// is worst when it stays: a stale "wired backwards" tells someone to undo a
+	// swap they have already made. It is remembered as the assignment it was
+	// measured against and dropped as soon as that stops matching, which covers
+	// a map edit, a save, a per-row reset and the scan's proposal alike (#273).
+	function fieldAssign() {
+		const a = {};
+		PIN_KEYS.forEach((k) => {
+			const f = pinField(k);
+			a[k] = f ? String(f.getValue()) : '';
+		});
+		return JSON.stringify(a);
+	}
+
+	function syncVerdict() {
+		const r = document.getElementById('mj-ircut-result');
+		if (!r || r.hidden || !state.ircutTestedOn) return;
+		// The scan borrows this same element, and its own hit writes the pins
+		// it found — which lands here as a changed assignment. Hiding it then
+		// would take the Stop button away from a sweep that is still driving
+		// pads, on the one control in this UI that can stop a camera
+		// answering. Only ever hide a verdict.
+		if (r.classList.contains('mj-ircut-scan')) return;
+		if (state.ircutTestedOn !== fieldAssign()) {
+			r.hidden = true;
+			state.ircutTestedOn = null;
+		}
 	}
 
 	function currentAssign() {
@@ -2107,7 +2151,26 @@
 		paintRoles();
 
 		const find = box.querySelector('#mj-ircut-find');
-		if (find) find.addEventListener('click', () => openScan(box, map, info));
+		// Re-read the pads rather than reusing the mount-time snapshot. That
+		// snapshot carries `assigned`, and pairs() skips every pad in it — so
+		// after clearing the pins and saving, the scan went on skipping the two
+		// pads it was being asked to find, and reported nothing. Reloading the
+		// page "fixed" it, which is the tell that the staleness was in here and
+		// not on the camera (#273). The pad list can also move underneath the
+		// page for reasons of its own, majestic releasing an export among them.
+		if (find) find.addEventListener('click', async () => {
+			let fresh = info;
+			try {
+				const r = await apiFetch('/cgi-bin/j/gpio.cgi',
+					{ credentials: 'same-origin' });
+				fresh = await r.json();
+				state.ircutInfo = fresh;
+			} catch (e) {
+				// The cached list is stale, not wrong: every pad it names is
+				// still a pad. Scanning with it beats refusing to scan.
+			}
+			openScan(box, map, fresh);
+		});
 
 		// A camera that came back from the dead mid-scan says so before anything
 		// else — the pad that did it is named and excluded.
@@ -2138,6 +2201,9 @@
 		const SCAN = window.MajesticIrcutScan;
 		if (!SCAN) return;
 		const host = box.querySelector('#mj-ircut-result');
+		// Taking the element over destroys whatever verdict was in it, so the
+		// assignment that verdict was measured against stops meaning anything.
+		state.ircutTestedOn = null;
 		const status = box.querySelector('#mj-ircut-status');
 		const list = SCAN.pairs(info, { exclude: state.ircutExclude || [] });
 		let stop = false;
@@ -2996,6 +3062,10 @@
 		state.dirtyN = n;
 		renderToolbar();
 		paintStock();
+		// Every edit funnels through here — the map, a save, a per-row reset,
+		// and the four pin fields directly, which is the path that matters when
+		// the pad map could not be read and they are exposed as plain numbers.
+		syncVerdict();
 	}
 
 	// One visibility rule for both buttons: show each only while its action can
