@@ -1909,6 +1909,7 @@
 				'Live adjustments to move it back. The test itself found: '
 				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail);
 			result.hidden = false;
+			state.ircutTestedOn = fieldAssign();
 		}).catch((e) => {
 			result.className = 'alert alert-danger py-2 px-3 mt-2 mb-0 small';
 			// A test that could not finish reports that it could not finish. It
@@ -1917,6 +1918,7 @@
 			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
 				'. The filter was left where it started.';
 			result.hidden = false;
+			state.ircutTestedOn = fieldAssign();
 		}).finally(() => {
 			ircutBusy = false;
 			btn.disabled = false;
@@ -1946,6 +1948,7 @@
 			if (f) f.setValue(a[k] === undefined ? '' : String(a[k]));
 		});
 		updateDirty();
+		syncVerdict();
 	}
 
 	// A pin the save cleared has to be GONE from the config, not set to
@@ -1980,6 +1983,30 @@
 			.filter((k) => isNumish(getDotted(state.config, 'nightMode.' + k)))
 			.map(roleName)
 			.filter(Boolean);
+	}
+
+	// The filter test's verdict names a wiring and a fix for it ("swap the two
+	// coils"), so it stops being true the moment the wiring is edited — and it
+	// is worst when it stays: a stale "wired backwards" tells someone to undo a
+	// swap they have already made. It is remembered as the assignment it was
+	// measured against and dropped as soon as that stops matching, which covers
+	// a map edit, a save, a per-row reset and the scan's proposal alike (#273).
+	function fieldAssign() {
+		const a = {};
+		PIN_KEYS.forEach((k) => {
+			const f = pinField(k);
+			a[k] = f ? String(f.getValue()) : '';
+		});
+		return JSON.stringify(a);
+	}
+
+	function syncVerdict() {
+		const r = document.getElementById('mj-ircut-result');
+		if (!r || r.hidden || !state.ircutTestedOn) return;
+		if (state.ircutTestedOn !== fieldAssign()) {
+			r.hidden = true;
+			state.ircutTestedOn = null;
+		}
 	}
 
 	function currentAssign() {
@@ -2107,7 +2134,26 @@
 		paintRoles();
 
 		const find = box.querySelector('#mj-ircut-find');
-		if (find) find.addEventListener('click', () => openScan(box, map, info));
+		// Re-read the pads rather than reusing the mount-time snapshot. That
+		// snapshot carries `assigned`, and pairs() skips every pad in it — so
+		// after clearing the pins and saving, the scan went on skipping the two
+		// pads it was being asked to find, and reported nothing. Reloading the
+		// page "fixed" it, which is the tell that the staleness was in here and
+		// not on the camera (#273). The pad list can also move underneath the
+		// page for reasons of its own, majestic releasing an export among them.
+		if (find) find.addEventListener('click', async () => {
+			let fresh = info;
+			try {
+				const r = await apiFetch('/cgi-bin/j/gpio.cgi',
+					{ credentials: 'same-origin' });
+				fresh = await r.json();
+				state.ircutInfo = fresh;
+			} catch (e) {
+				// The cached list is stale, not wrong: every pad it names is
+				// still a pad. Scanning with it beats refusing to scan.
+			}
+			openScan(box, map, fresh);
+		});
 
 		// A camera that came back from the dead mid-scan says so before anything
 		// else — the pad that did it is named and excluded.
@@ -3211,6 +3257,7 @@
 		// The pads are only half of it; the role list is drawn from onChange,
 		// which `quiet` just skipped.
 		if (state.ircutRoles) state.ircutRoles();
+		syncVerdict();
 		syncTestBtn();
 		updateDirty();
 	}
