@@ -88,15 +88,32 @@
 	stage.addEventListener('pointermove', e => {
 		if (e.pointerType === 'mouse') show(2500);
 	});
+	// A pan is not a tap. Dragging the picture (preview-zoom.js) begins with a
+	// pointerdown on the stage as well, so the toggle waits for the pointer to
+	// come back up and fires only if it barely moved — on the pointerdown it
+	// flashed the bar at the start of every drag. 8px rather than 0 because a
+	// finger never lifts from exactly where it landed.
+	let tapId = null, tapX = 0, tapY = 0;
 	stage.addEventListener('pointerdown', e => {
 		if (e.pointerType !== 'touch') return;
 		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-adapt, #mj-served')) return;
+		tapId = e.pointerId;
+		tapX = e.clientX;
+		tapY = e.clientY;
+	});
+	stage.addEventListener('pointerup', e => {
+		if (e.pointerId !== tapId) return;
+		tapId = null;
+		if (Math.abs(e.clientX - tapX) + Math.abs(e.clientY - tapY) > 8) return;
 		if (stage.classList.contains('mj-show')) {
 			stage.classList.remove('mj-show');
 			clearTimeout(hideTimer);
 		} else {
 			show(4000);
 		}
+	});
+	stage.addEventListener('pointercancel', e => {
+		if (e.pointerId === tapId) tapId = null;
 	});
 
 	window.MajesticHero.wireFullscreen(stage, $('#mj-fs'));

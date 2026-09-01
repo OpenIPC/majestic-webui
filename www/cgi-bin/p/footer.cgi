@@ -1,5 +1,8 @@
+<% if [ -z "$full_bleed" ]; then %>
 </div>
+<% fi %>
 </main>
+<% if [ -z "$full_bleed" ]; then %>
 <footer class="x-small">
 <div class="container pt-3">
 <div class="row">
@@ -12,5 +15,6 @@
 </div>
 </div>
 </footer>
+<% fi %>
 </body>
 </html>

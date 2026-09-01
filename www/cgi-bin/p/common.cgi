@@ -530,13 +530,27 @@ pre() {
 preview() {
 	cat <<EOF
 <div class="mj-player" id="mj-player">
-	<!-- The stage: everything lives ON the video. The wrapper reserves 16:9
-	     (preview-page.js corrects it to the stream's real ratio once known),
-	     so neither loading nor the stats panel nor the control bar ever moves
-	     the picture — the old layout stacked all of those above the video and
-	     opening Stats pushed a 4K frame below the fold. tabindex makes the
-	     stage itself focusable: that focus is what scopes PTZ arrow keys away
-	     from the volume slider and the radio groups in the bar. -->
+	<!-- The stage: everything lives ON the video, and the stage is the page.
+	     It takes the whole window under the navbar — no container, no card, no
+	     footer — because the picture is what this page is for, and the frame
+	     around it was costing a 4:3 sensor two thirds of a 1440p screen.
+
+	     It is a VIEWPORT, not a box that reserves the stream's shape:
+	     preview-zoom.js sizes and positions the picture inside it (Fill covers
+	     the window, Fit shows the whole frame, 1:1 shows real pixels) and pans
+	     whatever does not fit. Without that module the media keep their CSS
+	     `inset: 0` and `object-fit: contain`, which is Fit.
+
+	     tabindex makes the stage itself focusable: that focus is what scopes
+	     the PTZ arrow keys away from the volume slider and the radio groups in
+	     the bar. -->
+	<!-- --mj-pic-*: the insets of the picture inside the stage, written by
+	     preview-zoom.js so the chrome that ANNOTATES the picture (the chip, the
+	     stats panel, the toasts) sits on it rather than floating in a
+	     letterbox band beside it. Zero here so the page is right before — and
+	     without — that module. The bar and the PTZ pad deliberately do not read
+	     them: they are the player's furniture, not annotation, and furniture
+	     that jumps when you change zoom is worse than furniture on black. -->
 	<div class="mj-stage" id="mj-stage" tabindex="0" aria-label="Live video">
 		<!-- Two, and only ever one of them visible. A transport switch attaches
 		     the new player to whichever is idle and leaves the other playing, so
@@ -633,6 +647,32 @@ preview() {
 		     fullscreen button in this very bar already won, when U+26F6 came
 		     out as a box on real hardware. -->
 	<div class="mj-bar" id="mj-bar">
+			<!-- How the frame is fitted to the window. First in the bar, and that
+			     is not arbitrary: on a camera with an optical zoom the page
+			     carries two zooms, and this one must not sit next to the pad's
+			     Wide/Tele. The pad owns the lens, the stage owns the picture.
+
+			     Hidden until preview-zoom.js takes it: without that module the
+			     media elements keep their CSS `inset: 0` and `object-fit:
+			     contain`, which is exactly Fit — a working page with one fewer
+			     control rather than a control that does nothing.
+
+			     No caption above the group, like Stream and Transport beside it:
+			     a segmented picker's options say what it is, and aria-label says
+			     it for a screen reader. Only the stateful toggles carry a word,
+			     because a lit dot alone does not say what is lit. -->
+			<span class="mj-hud mj-seg" role="group" aria-label="View" id="mj-view-ctl" hidden>
+				<input type="radio" class="mj-seg-in" name="mj-view" id="mj-view-fit" autocomplete="off">
+				<label class="mj-seg-lbl" for="mj-view-fit"
+					title="The whole frame. Letterboxed where its shape does not match the window's.">Fit</label>
+				<input type="radio" class="mj-seg-in" name="mj-view" id="mj-view-fill" autocomplete="off" checked>
+				<label class="mj-seg-lbl" for="mj-view-fill"
+					title="Cover the window: no part of the screen is spent on black. Whatever does not fit is one drag away.">Fill</label>
+				<input type="radio" class="mj-seg-in" name="mj-view" id="mj-view-one" autocomplete="off">
+				<label class="mj-seg-lbl" for="mj-view-one"
+					title="One stream pixel per screen pixel — what to judge focus on.">1:1</label>
+			</span>
+
 			<span class="mj-hud mj-seg" role="group" aria-label="Stream">
 				<input type="radio" class="mj-seg-in" name="mj-stream" id="mj-stream-0" autocomplete="off" checked>
 				<label class="mj-seg-lbl" for="mj-stream-0">Main</label>
