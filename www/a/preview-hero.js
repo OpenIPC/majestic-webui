@@ -93,15 +93,25 @@
 	// come back up and fires only if it barely moved — on the pointerdown it
 	// flashed the bar at the start of every drag. 8px rather than 0 because a
 	// finger never lifts from exactly where it landed.
-	let tapId = null, tapX = 0, tapY = 0;
+	// A second finger cancels the tap outright, whatever the first one does. In
+	// a pinch the finger that is not driving the zoom can easily stay inside
+	// the 8px threshold, and lifting it would then toggle the bar as though
+	// nobody had zoomed at all. Counted here rather than asked of
+	// preview-zoom.js: the two hold their own pointer state, and a shared one
+	// is a third thing to keep in step.
+	let tapId = null, tapX = 0, tapY = 0, touching = 0;
 	stage.addEventListener('pointerdown', e => {
 		if (e.pointerType !== 'touch') return;
+		touching++;
+		if (touching > 1) tapId = null;
 		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-toasts')) return;
+		if (touching > 1) return;
 		tapId = e.pointerId;
 		tapX = e.clientX;
 		tapY = e.clientY;
 	});
 	stage.addEventListener('pointerup', e => {
+		if (e.pointerType === 'touch') touching = Math.max(0, touching - 1);
 		if (e.pointerId !== tapId) return;
 		tapId = null;
 		if (Math.abs(e.clientX - tapX) + Math.abs(e.clientY - tapY) > 8) return;
@@ -113,6 +123,7 @@
 		}
 	});
 	stage.addEventListener('pointercancel', e => {
+		if (e.pointerType === 'touch') touching = Math.max(0, touching - 1);
 		if (e.pointerId === tapId) tapId = null;
 	});
 

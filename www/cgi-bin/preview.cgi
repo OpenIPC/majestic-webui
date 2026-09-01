@@ -41,8 +41,13 @@ page_title="Live View"; hide_title=1; full_bleed=1
 <script src="/a/charts.js"></script>
 <script src="/a/preview-adapt.js"></script>
 <script src="/a/preview-stats.js"></script>
-<script src="/a/preview-page.js"></script>
+<!-- preview-zoom.js before preview-page.js, and that order is load-bearing:
+     the page registers a chip repaint with the module, so the module has to
+     exist by the time the page runs. The dependency is one-way and guarded --
+     the module needs nothing from the page, and the page checks before it
+     asks -- so a build missing either file still works. -->
 <script src="/a/preview-zoom.js"></script>
+<script src="/a/preview-page.js"></script>
 <script src="/a/preview-hero.js"></script>
 
 <%in p/footer.cgi %>

@@ -47,9 +47,24 @@
 	let scale = 1;         // the scale in force
 	let ox = 0, oy = 0;    // the picture's left/top inside the stage
 	let placed = false;    // has a layout run against a known frame
+	let onScale = null;    // who to tell when the scale moves
 
 	const saved = read(KEY);
 	if (MODES.indexOf(saved) >= 0) mode = saved;
+	// The preset a free zoom falls back to. It has to track setMode(), not the
+	// value read at startup: pick Fit, pinch, then change channel, and the
+	// startup value would put you back on whatever you were using yesterday.
+	let lastPreset = mode;
+
+	// The chip prints the scale, and the scale moves without the player saying
+	// anything — a preset, a pinch, a window resize. Over MSE the codec is
+	// reported once when the connection opens, so a chip repainted only by
+	// player events would carry the opening percentage for the whole session.
+	function announce(prev) {
+		if (onScale && prev !== scale) {
+			try { onScale(); } catch (e) {}
+		}
+	}
 
 	// ---- laying the picture out -------------------------------------------
 
@@ -123,13 +138,10 @@
 			cy = (sh / 2 - oy) / (frame.h * scale);
 		}
 
-		// Free zoom is bounded by what is worth looking at: no further out than
-		// the whole frame (or native, when the frame is smaller than the stage
-		// -- past that it is only black), no further in than 3x native. The
-		// presets are not clamped, because 1:1 means 1:1.
+		const prev = scale;
 		scale = mode === 'fit' ? kFit
 			: mode === 'one' ? 1
-			: mode === 'free' ? clamp(scale, Math.min(kFit, 1), Math.max(kFill, 1) * 3)
+			: mode === 'free' ? clamp(scale, zoomFloor(kFit), zoomCeiling(kFill))
 			: kFill;
 
 		const picW = frame.w * scale, picH = frame.h * scale;
@@ -140,7 +152,18 @@
 		place(picW, picH);
 		annotate(sw, sh, picW, picH);
 		stage.classList.toggle('mj-pannable', picW > sw + 1 || picH > sh + 1);
+		announce(prev);
 	}
+
+	// Free zoom is bounded by what is worth looking at. Out: no further than
+	// the whole frame, or native when the frame is smaller than the stage --
+	// past either it is only black. In: 3x native, EXCEPT that Fill itself can
+	// need more than that (a 704x576 substream on a 1440p monitor is 364%), and
+	// a bound below the preset in force would drag the picture back the moment
+	// you touched it. Not `kFill * 3`: that read the enlargement Fill already
+	// needed as the thing to triple, and offered 1092% on that substream.
+	function zoomFloor(kFit) { return Math.min(kFit, 1); }
+	function zoomCeiling(kFill) { return Math.max(kFill, 3); }
 
 	function panBy(dx, dy) {
 		if (!frame || !placed) return;
@@ -162,8 +185,9 @@
 
 		const kFit = Math.min(sw / frame.w, sh / frame.h);
 		const kFill = Math.max(sw / frame.w, sh / frame.h);
-		const next = clamp(scale * factor, Math.min(kFit, 1), Math.max(kFill, 1) * 3);
+		const next = clamp(scale * factor, zoomFloor(kFit), zoomCeiling(kFill));
 		if (next === scale) return;
+		const prev = scale;
 		scale = next;
 		mode = 'free';
 
@@ -175,6 +199,7 @@
 		annotate(sw, sh, picW, picH);
 		stage.classList.toggle('mj-pannable', picW > sw + 1 || picH > sh + 1);
 		syncRadios();
+		announce(prev);
 	}
 
 	// ---- the control -------------------------------------------------------
@@ -191,9 +216,40 @@
 
 	function setMode(m) {
 		mode = m;
+		lastPreset = m;
 		write(KEY, m);
 		syncRadios();
 		layout();
+	}
+
+	// The stream's real pixel size. A change of channel lands here too, and it
+	// drops a free zoom back to the preset chosen most recently: a scale
+	// arrived at by pinching a 3840-wide frame means nothing against a
+	// 704-wide one.
+	function setFrame(w, h) {
+		if (!w || !h) return;
+		const changed = !frame || frame.w !== w || frame.h !== h;
+		frame = { w: w, h: h };
+		if (changed && mode === 'free') {
+			mode = lastPreset;
+			syncRadios();
+		}
+		layout();
+	}
+
+	// The MJPEG fallback is a different picture with its own resolution --
+	// jpeg.size is configured separately from video0.size -- and place() sizes
+	// every media element from one frame. Without this the fallback inherits
+	// the box computed for the video stream that just failed, so Fill leaves
+	// black bars and panning reaches places the image does not occupy. The
+	// stream is multipart and fires load per frame in some browsers, hence the
+	// dimension guard; hidden means preview-page.js has taken the stage back.
+	const mjpeg = $('#live-mjpeg');
+	if (mjpeg) {
+		mjpeg.addEventListener('load', () => {
+			if (mjpeg.style.display === 'none') return;
+			setFrame(mjpeg.naturalWidth, mjpeg.naturalHeight);
+		});
 	}
 
 	MODES.forEach((m) => {
@@ -308,20 +364,13 @@
 	// ---- what the page tells this module -----------------------------------
 
 	window.MajesticZoom = {
-		// The stream's real pixel size, from the player's codec report. A
-		// change of channel lands here too, and it drops a free zoom back to
-		// the remembered preset: a scale chosen by pinching a 3840-wide frame
-		// means nothing against a 704-wide one.
-		setFrame: function (w, h) {
-			if (!w || !h) return;
-			const changed = !frame || frame.w !== w || frame.h !== h;
-			frame = { w: w, h: h };
-			if (changed && mode === 'free') {
-				mode = MODES.indexOf(saved) >= 0 ? saved : 'fill';
-				syncRadios();
-			}
-			layout();
-		},
+		// The stream's real pixel size, from the player's codec report.
+		setFrame: setFrame,
+
+		// Called whenever the scale moves for a reason the player does not know
+		// about — a preset, a pinch, a resize. preview-page.js repaints the
+		// chip from it.
+		onScale: function (fn) { onScale = fn; },
 
 		// For the chip, which prints it: Fill covers the window by enlarging
 		// the picture when the stream is smaller than the screen -- a 1080p

@@ -1421,6 +1421,13 @@
 		});
 	}
 
+	// The chip prints the scale, and the scale moves for reasons no player
+	// event reports: a preset, a pinch, a window resize. Over MSE the codec is
+	// reported once when the connection opens, so without this the percentage
+	// would be the one the session started with for as long as it lasted.
+	// (preview-zoom.js is loaded before this file so that it is here to ask.)
+	if (window.MajesticZoom) window.MajesticZoom.onScale(setChip);
+
 	if (statsBtn && statsBox) {
 		// Through the same helper the transport switch uses, so "is the panel
 		// showing" has one answer and not two that have to agree.
