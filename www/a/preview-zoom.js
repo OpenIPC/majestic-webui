@@ -174,6 +174,46 @@
 		place(picW, picH);
 	}
 
+	// Zoom to a rectangle drawn on the picture. The scale falls out of the
+	// rectangle rather than being chosen, which is the point: a pinch is a
+	// trackpad gesture and a mouse has no equivalent, and neither of them lets
+	// you say WHICH part of the scene you meant.
+	//
+	// The rectangle is converted to frame coordinates first. Stage pixels mean
+	// nothing across a scale change, and the scale is about to change.
+	function zoomToRect(rx, ry, rw, rh) {
+		if (!frame || !placed || rw <= 0 || rh <= 0) return;
+		const sw = stage.clientWidth, sh = stage.clientHeight;
+		const fx = (rx - ox) / scale, fy = (ry - oy) / scale;
+		const fw = rw / scale, fh = rh / scale;
+
+		const kFit = Math.min(sw / frame.w, sh / frame.h);
+		const kFill = Math.max(sw / frame.w, sh / frame.h);
+		// A little room around the selection, so what was asked for is not
+		// flush against the edges of the window. Not much: drawing a rectangle
+		// is a request for that rectangle, and the sibling project's 20% puts
+		// a fifth of the screen back into context nobody asked to see.
+		const PAD = 1.08;
+		const prev = scale;
+		scale = clamp(Math.min(sw / (fw * PAD), sh / (fh * PAD)),
+			zoomFloor(kFit), zoomCeiling(kFill));
+		mode = 'free';
+
+		const picW = frame.w * scale, picH = frame.h * scale;
+		// The selection's middle goes to the middle of the stage, then the
+		// ordinary clamp pulls it back if that would show black. A rectangle
+		// drawn in a corner therefore lands in that corner, not off the edge.
+		const mx = fx + fw / 2, my = fy + fh / 2;
+		ox = picW <= sw ? (sw - picW) / 2 : clamp(sw / 2 - mx * scale, sw - picW, 0);
+		oy = picH <= sh ? (sh - picH) / 2 : clamp(sh / 2 - my * scale, sh - picH, 0);
+
+		place(picW, picH);
+		annotate(sw, sh, picW, picH);
+		stage.classList.toggle('mj-pannable', picW > sw + 1 || picH > sh + 1);
+		syncRadios();
+		announce(prev);
+	}
+
 	// Zoom about a point on the screen -- the pointer, or the midpoint between
 	// two fingers -- so what is under them stays under them.
 	function zoomAt(factor, clientX, clientY) {
@@ -261,6 +301,8 @@
 	// do nothing, and the page is correct (and Fit) without it.
 	const ctl = $('#mj-view-ctl');
 	if (ctl) ctl.hidden = false;
+	const areaCtl = $('#mj-area-ctl');
+	if (areaCtl) areaCtl.hidden = false;
 	syncRadios();
 
 	// ---- gestures ----------------------------------------------------------
@@ -274,10 +316,43 @@
 	let pinchDist = 0, pinchX = 0, pinchY = 0;
 	let lastType = 'mouse';
 
+	// Zoom-to-area. `armed` is the button's state; `band` is the drag in
+	// progress, in stage coordinates.
+	const areaBtn = $('#mj-area'), band = $('#mj-marquee');
+	let armed = false, drawing = null;
+
+	function setArmed(on) {
+		armed = !!on && !!band;
+		drawing = null;
+		if (band) band.hidden = true;
+		stage.classList.toggle('mj-armed', armed);
+		// The checkbox is the control's state, so it is written rather than
+		// asked -- Esc and the end of a drag both disarm without touching it.
+		if (areaBtn && areaBtn.checked !== armed) areaBtn.checked = armed;
+	}
+	if (areaBtn) areaBtn.addEventListener('change', () => setArmed(areaBtn.checked));
+
+	function bandRect(e) {
+		const r = stage.getBoundingClientRect();
+		const x = clamp(e.clientX - r.left, 0, r.width), y = clamp(e.clientY - r.top, 0, r.height);
+		return {
+			x: Math.min(drawing.x, x), y: Math.min(drawing.y, y),
+			w: Math.abs(x - drawing.x), h: Math.abs(y - drawing.y),
+		};
+	}
+
 	stage.addEventListener('pointerdown', (e) => {
 		lastType = e.pointerType;
 		if (e.button != null && e.button > 0) return;
 		if (e.target.closest && e.target.closest(CHROME)) return;
+
+		if (armed) {
+			const r = stage.getBoundingClientRect();
+			drawing = { x: e.clientX - r.left, y: e.clientY - r.top };
+			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+			return;
+		}
+
 		pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
 		if (pts.size === 1 && stage.classList.contains('mj-pannable')) {
 			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
@@ -287,6 +362,15 @@
 	});
 
 	stage.addEventListener('pointermove', (e) => {
+		if (drawing) {
+			const b = bandRect(e);
+			band.hidden = false;
+			band.style.left = b.x + 'px';
+			band.style.top = b.y + 'px';
+			band.style.width = b.w + 'px';
+			band.style.height = b.h + 'px';
+			return;
+		}
 		const p = pts.get(e.pointerId);
 		if (!p) return;
 		const dx = e.clientX - p.x, dy = e.clientY - p.y;
@@ -307,6 +391,23 @@
 	});
 
 	function endPointer(e) {
+		if (drawing) {
+			const b = bandRect(e);
+			try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
+			// A rectangle has to be deliberate. Below this it is a slip or a
+			// click, and zooming 40x into a stray 3px drag is the worst
+			// possible answer to one. The floor is a share of the stage with
+			// an absolute minimum, so it means the same thing on a 2560px
+			// monitor and a 390px phone.
+			const minW = Math.max(16, stage.clientWidth * 0.02);
+			const minH = Math.max(16, stage.clientHeight * 0.02);
+			if (b.w >= minW && b.h >= minH) zoomToRect(b.x, b.y, b.w, b.h);
+			// One drag, then it disarms itself: a mode you can forget you are
+			// in is the wrong thing to leave over a picture that also steers a
+			// camera.
+			setArmed(false);
+			return;
+		}
 		pts.delete(e.pointerId);
 		if (pts.size < 2) pinchDist = 0;
 		if (!pts.size) {
@@ -317,18 +418,16 @@
 	stage.addEventListener('pointerup', endPointer);
 	stage.addEventListener('pointercancel', endPointer);
 
-	// Wheel pans; ctrl+wheel zooms, which is also what a trackpad pinch sends.
-	// preventDefault only where the gesture was actually taken, so a browser
-	// that would have done something useful with it still can.
+	// The wheel zooms, about the pointer. It used to pan the overflowing axis,
+	// which is what a Mac trackpad's two fingers want -- but a mouse wheel is
+	// the only zoom a Windows or Linux viewer has without knowing that
+	// ctrl+wheel is a thing, and the same input cannot mean pan on a picture
+	// that overflows and zoom on one that does not without changing meaning
+	// under the hand mid-gesture. Panning is the drag, on every platform and on
+	// touch. ctrl+wheel is kept because that is what a trackpad pinch sends.
 	stage.addEventListener('wheel', (e) => {
 		if (e.target.closest && e.target.closest(CHROME)) return;
-		if (e.ctrlKey) {
-			zoomAt(Math.exp(-e.deltaY / 300), e.clientX, e.clientY);
-			e.preventDefault();
-			return;
-		}
-		if (!stage.classList.contains('mj-pannable')) return;
-		panBy(-e.deltaX, -e.deltaY);
+		zoomAt(Math.exp(-e.deltaY / (e.ctrlKey ? 300 : 500)), e.clientX, e.clientY);
 		e.preventDefault();
 	}, { passive: false });
 
@@ -359,6 +458,19 @@
 		if (!stage.classList.contains('mj-pannable')) return;
 		e.preventDefault();
 		panBy(d[0] * 80, d[1] * 80);
+	});
+
+	// Escape is the way back out, and it is on the document rather than the
+	// stage because arming is the closest thing this page has to a mode: it has
+	// to be cancellable from wherever the pointer went after the button was
+	// pressed. Armed, it disarms; free-zoomed, it returns to the preset in
+	// force -- which is what the View group would do, one key instead of aiming
+	// at a control that auto-hides. In fullscreen the browser takes the key
+	// first and this never runs, which is the right precedence.
+	document.addEventListener('keydown', (e) => {
+		if (e.key !== 'Escape') return;
+		if (armed) { setArmed(false); return; }
+		if (mode === 'free') setMode(lastPreset);
 	});
 
 	// ---- what the page tells this module -----------------------------------

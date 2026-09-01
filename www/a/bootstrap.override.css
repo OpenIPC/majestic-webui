@@ -2109,6 +2109,28 @@ mark {
 	cursor: grabbing;
 }
 
+/* Zoom to an area. Armed, the whole stage is a crosshair — including where the
+   picture is pannable, because while the rectangle is being drawn that is what
+   the drag means. */
+.mj-stage.mj-armed,
+.mj-stage.mj-armed .mj-stage-media {
+	cursor: crosshair;
+}
+
+/* The rubber band. The 9999px shadow spread dims everything outside the
+   rectangle in one element rather than four, and the stage's overflow is what
+   trims it. pointer-events: none because the drag belongs to the stage — the
+   band is drawn under the pointer and must never become its target. */
+.mj-marquee {
+	position: absolute;
+	z-index: 6;
+	border: 1px dashed rgba(255, 255, 255, 0.9);
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.06);
+	box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+	pointer-events: none;
+}
+
 .mj-stage-media {
 	position: absolute;
 	/* The fallback, and it is a real one: with no preview-zoom.js the media
