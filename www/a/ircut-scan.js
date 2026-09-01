@@ -219,6 +219,11 @@
 			irCutPin1: otherPad,
 			irCutPin2: closeHigh,
 			brakeHeld: null,
+			// The pair is a measurement and stands on its own — it was watched
+			// moving the picture. Everything after it (classifying the filter,
+			// leaving it closed) can still fail, and when it does the caller
+			// has to be told rather than shown a clean "Found it".
+			settled: false,
 		};
 
 		const ensureClosed = () => hit.opens
@@ -239,7 +244,7 @@
 				// Put it back where daylight wants it either way.
 				return io.drive(closeHigh, otherPad);
 			})
-			.then(() => out)
+			.then(() => { out.settled = true; return out; })
 			.catch(() => out);
 	}
 

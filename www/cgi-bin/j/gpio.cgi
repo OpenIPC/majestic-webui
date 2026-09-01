@@ -166,7 +166,16 @@ boot_epoch() {
 }
 
 read_state() {
-	[ -r "$STATE" ] && cat "$STATE" || echo '{}'
+	# Anything that is not a plausible object is reported as no journal at all:
+	# this value is interpolated straight into the response, so a truncated file
+	# would take the whole document's JSON down with it.
+	if [ -r "$STATE" ] && [ -s "$STATE" ]; then
+		j=$(tr -d '[:cntrl:]' < "$STATE")
+		case "$j" in
+			'{'*'}') echo "$j"; return ;;
+		esac
+	fi
+	echo '{}'
 }
 
 if [ "$CLEAR" = "1" ]; then
@@ -208,10 +217,26 @@ if [ -n "$DRIVE" ] && [ -n "$LOWPAD" ]; then
 	flock -n 9 2>/dev/null || deny "another actuation is already running"
 
 	# Journal both pads before either is touched, and get it onto flash. The
-	# journal that matters describes a camera that has stopped answering.
-	printf '{"pins":[%s,%s],"started":%s,"boot":%s}\n' \
-		"$DRIVE" "$LOWPAD" "$(date +%s)" "$(boot_epoch)" > "$STATE"
-	sync
+	# journal that matters describes a camera that has stopped answering, so
+	# this is the one write whose failure must stop the actuation: with a full
+	# or read-only overlay there would be no record, and the pair that took the
+	# camera down would be offered again on the next scan.
+	#
+	# Written to a temporary file and renamed, never truncated in place. The
+	# enumeration path reads this file, and a reader that arrives between the
+	# truncate and the write gets an empty one — which lands in its response as
+	# a bare `"scan":` and makes the whole JSON unparseable.
+	journal() {
+		printf '{"pins":[%s,%s],"started":%s,"boot":%s%s}\n' \
+			"$DRIVE" "$LOWPAD" "$(date +%s)" "$(boot_epoch)" "$1" > "$STATE.tmp" 2>/dev/null ||
+			return 1
+		[ -s "$STATE.tmp" ] || return 1
+		sync
+		mv "$STATE.tmp" "$STATE" 2>/dev/null || return 1
+		sync
+		return 0
+	}
+	journal "" || deny "could not record which pads are about to be driven"
 
 	# How each pad was being held, so it can be handed back the same way. On a
 	# brake-held board the difference between "driven low" and "floating" IS the
@@ -298,9 +323,7 @@ if [ -n "$DRIVE" ] && [ -n "$LOWPAD" ]; then
 		brake
 	fi
 
-	printf '{"pins":[%s,%s],"started":%s,"boot":%s,"survived":true}\n' \
-		"$DRIVE" "$LOWPAD" "$(date +%s)" "$(boot_epoch)" > "$STATE"
-	sync
+	journal ',"survived":true'
 
 	# A winding needs time to shed the heat of the last actuation before the
 	# next, and a scan works through pairs without pausing to think.

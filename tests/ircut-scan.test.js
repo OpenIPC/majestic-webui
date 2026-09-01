@@ -201,6 +201,7 @@ group('run: it finds the pair, and only the pair');
 		return scan.run(brake.io, [[11, 10]], { settleMs: 0 }).then((r) => {
 			check('a filter that springs open when floated is brake-held',
 				r.pins.brakeHeld === true, String(r.pins.brakeHeld));
+			check('a clean finish is marked settled', r.pins.settled === true);
 			const latch = camera(11, 10, { latching: true });
 			return scan.run(latch.io, [[11, 10]], { settleMs: 0 }).then((r2) => {
 				check('one that holds through a float is latching',
@@ -249,6 +250,25 @@ group('run: it finds the pair, and only the pair');
 	}
 
 	function ninth() {
+		group('finish: an unfinished follow-up is not a clean find');
+		// The pair was watched moving the picture, so it stands. Classifying the
+		// filter and leaving it closed can still fail, and presenting that as
+		// "Found it" would stage a mapping whose filter is sitting open.
+		const c = camera(11, 10);
+		let n = 0;
+		const io = Object.assign({}, c.io, {
+			release: (a, b) => { n++; return n > 0 ? Promise.reject(new Error('gone')) : c.io.release(a, b); },
+		});
+		return scan.run(io, [[11, 10]], { settleMs: 0 }).then((r) => {
+			check('the pair is still reported', r.pins && r.pins.irCutPin1 === 11,
+				JSON.stringify(r.pins));
+			check('but it is not marked settled', r.pins.settled === false,
+				String(r.pins.settled));
+			return tenth();
+		});
+	}
+
+	function tenth() {
 		group('casualty: the pair that stopped the camera answering');
 		const hung = scan.casualty({ boot: 2000, scan: { pins: [47, 48], started: 1900 } });
 		check('an actuation predating this boot names both pads',

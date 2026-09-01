@@ -2157,16 +2157,24 @@
 						'Try again in daylight, or set the pins by hand.</div>';
 					return;
 				}
+				// The pair itself was watched moving the picture, so it is
+				// reported either way; what may be missing is the classification
+				// and the guarantee that the filter was left closed.
+				const tail = found.settled
+					? (found.brakeHeld
+						? 'It springs open when the pins are released, so they have to stay driven.'
+						: 'It holds its position on its own.')
+					: 'The checks after that did not finish, so the filter may not have ' +
+					'been left closed &mdash; look at the picture before trusting it.';
 				host.innerHTML = '<div class="mj-live-grp-head">' +
 					'<span class="mj-cap">Find the pins</span>' +
 					'<span class="mj-live-rule"></span></div>' +
-					'<div class="alert alert-success py-2 px-3 mb-2 small"><b>Found it.</b> ' +
+					'<div class="alert ' + (found.settled ? 'alert-success' : 'alert-warning') +
+					' py-2 px-3 mb-2 small"><b>' +
+					(found.settled ? 'Found it.' : 'Found the pins, but not cleanly.') + '</b> ' +
 					'Pins ' + esc(String(found.irCutPin1)) + ' and ' + esc(String(found.irCutPin2)) +
 					' drive the filter &mdash; ' + esc(String(found.closesWhenHigh)) +
-					' is the one that closes it. ' +
-					(found.brakeHeld
-						? 'It springs open when the pins are released, so they have to stay driven.'
-						: 'It holds its position on its own.') +
+					' is the one that closes it. ' + tail +
 					'</div><button type="button" class="btn btn-primary btn-sm" id="mj-scan-use">' +
 					'Use these pins</button>';
 				host.querySelector('#mj-scan-use').addEventListener('click', () => {
