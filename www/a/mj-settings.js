@@ -2073,33 +2073,41 @@
 
 		host.hidden = false;
 		host.className = 'mj-ircut-scan';
+		// Dressed as a group of this section, not as an announcement inside it:
+		// micro-caps head, hairline to the margin, note on the right, small body
+		// — the same head the deck gives Wiring and Connected to. A lead
+		// paragraph at full body size was the only 1rem text on the page.
 		host.innerHTML =
-			'<p class="mb-2"><b>Find the pins by trying them.</b> Each pad is driven ' +
-			'against another while the picture is watched for the filter to move. ' +
-			'An IR-cut filter is driven across two pads, so pairs are what get ' +
-			'tried; the pairs other boards use go first, so this usually ends in ' +
-			'seconds.</p>' +
+			'<div class="mj-live-grp-head"><span class="mj-cap">Find the pins</span>' +
+			'<span class="mj-live-rule"></span>' +
+			'<span class="mj-live-note" id="mj-scan-n"></span></div>' +
+			'<p class="small mb-2">Each pad is driven against another while the ' +
+			'picture is watched for the filter to move. An IR-cut filter is driven ' +
+			'across two pads, so pairs are what get tried; the pairs other boards ' +
+			'use go first, so this usually ends in seconds.</p>' +
 			'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
 			'<b>This drives pads whose job is unknown.</b> One of them may reset the ' +
 			'network, cut power to the sensor, or stop the camera answering. That risk ' +
 			'cannot be removed &mdash; only made survivable: each pad is written to flash ' +
 			'before it is driven, so a camera that has to be restarted comes back knowing ' +
 			'which pad did it.</div>' +
-			'<p class="small text-secondary mb-2">Pads already spoken for are skipped. ' +
+			'<p class="x-small text-secondary mb-2">Pads already spoken for are skipped. ' +
 			'This reads the picture, so it needs daylight &mdash; at night nothing will ' +
 			'look like it moved.</p>' +
 			'<div class="d-flex gap-2 align-items-center">' +
 			'<button type="button" class="btn btn-primary btn-sm" id="mj-scan-go">Start</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-no">Cancel</button>' +
-			'<span class="small text-secondary" id="mj-scan-n"></span></div>';
+			'</div>';
 		host.querySelector('#mj-scan-n').textContent = list.length + ' pairs to try';
 		host.querySelector('#mj-scan-no').addEventListener('click', () => {
 			stop = true; host.hidden = true;
 		});
 		host.querySelector('#mj-scan-go').addEventListener('click', () => {
 			host.innerHTML =
-				'<p class="mb-2"><b id="mj-scan-t">Starting…</b></p>' +
-				'<p class="small text-secondary mb-2" id="mj-scan-s"></p>' +
+				'<div class="mj-live-grp-head"><span class="mj-cap">Scanning</span>' +
+				'<span class="mj-live-rule"></span>' +
+				'<span class="mj-live-note" id="mj-scan-s"></span></div>' +
+				'<p class="small mb-2" id="mj-scan-t">Starting&hellip;</p>' +
 				'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-stop">Stop</button>';
 			const t = host.querySelector('#mj-scan-t');
 			const s = host.querySelector('#mj-scan-s');
@@ -2122,13 +2130,19 @@
 				map.sweep(null);
 				const found = res.pins;
 				if (!found) {
-					host.innerHTML = '<div class="alert alert-secondary py-2 px-3 mb-0 small">' +
+					host.innerHTML = '<div class="mj-live-grp-head">' +
+						'<span class="mj-cap">Find the pins</span>' +
+						'<span class="mj-live-rule"></span></div>' +
+						'<div class="alert alert-secondary py-2 px-3 mb-0 small">' +
 						'<b>Nothing moved the picture.</b> Either the filter is on a pair this ' +
 						'scan did not reach, or there is not enough light to see it move. ' +
 						'Try again in daylight, or set the pins by hand.</div>';
 					return;
 				}
-				host.innerHTML = '<div class="alert alert-success py-2 px-3 mb-2 small"><b>Found it.</b> ' +
+				host.innerHTML = '<div class="mj-live-grp-head">' +
+					'<span class="mj-cap">Find the pins</span>' +
+					'<span class="mj-live-rule"></span></div>' +
+					'<div class="alert alert-success py-2 px-3 mb-2 small"><b>Found it.</b> ' +
 					'Pins ' + esc(String(found.irCutPin1)) + ' and ' + esc(String(found.irCutPin2)) +
 					' drive the filter &mdash; ' + esc(String(found.closesWhenHigh)) +
 					' is the one that closes it. ' +
@@ -2151,7 +2165,10 @@
 				});
 			}).catch((e) => {
 				map.sweep(null);
-				host.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0 small">' +
+				host.innerHTML = '<div class="mj-live-grp-head">' +
+					'<span class="mj-cap">Find the pins</span>' +
+					'<span class="mj-live-rule"></span></div>' +
+					'<div class="alert alert-danger py-2 px-3 mb-0 small">' +
 					'The scan could not finish: ' + esc(e && e.message ? e.message : String(e)) +
 					'</div>';
 			});
