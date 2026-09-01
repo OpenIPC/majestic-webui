@@ -60,8 +60,8 @@
 	// The four things a pad can be. Colours are the dashboard's validated
 	// series set, so a pad and its row in the list always agree.
 	const ROLES = [
-		{ key: 'irCutPin1', label: 'Filter, closing coil', hint: 'pulls the shutter in for daylight', color: '#4c60d8' },
-		{ key: 'irCutPin2', label: 'Filter, opening coil', hint: 'lets infrared through at night', color: '#0d9488' },
+		{ key: 'irCutPin1', label: 'IR-cut filter, closing coil', hint: 'pulls the shutter in for daylight', color: '#4c60d8' },
+		{ key: 'irCutPin2', label: 'IR-cut filter, opening coil', hint: 'lets infrared through at night', color: '#0d9488' },
 		{ key: 'backlightPin', label: 'Infrared lamp', hint: 'the illuminator ring', color: '#c96a2e' },
 		{ key: 'lightSensorPin', label: 'Daylight sensor', hint: 'photocell that says when it is dark', color: '#8a5cd8' },
 	];
@@ -168,6 +168,8 @@
 			if (opts.onChange) opts.onChange(Object.assign({}, assign));
 		}
 
+		function close() { sel = null; paint(); }
+
 		function buildPop(pin) {
 			pop.innerHTML = '';
 			const head = el('div', 'mj-pinmap-pop-head');
@@ -178,6 +180,15 @@
 			note.textContent = notGpio[pin] ? ('carries ' + notGpio[pin] + ' right now')
 				: (owned[pin] || 'free');
 			head.appendChild(note);
+			// Somewhere to press. Clicking the pad again closes it too and
+			// Escape works, but neither is discoverable, and a panel with no
+			// visible way out reads as stuck.
+			const x = el('button', 'mj-pinmap-x');
+			x.type = 'button';
+			x.setAttribute('aria-label', 'Close');
+			x.innerHTML = '&times;';
+			x.addEventListener('click', close);
+			head.appendChild(x);
 			pop.appendChild(head);
 			ROLES.forEach((r) => {
 				const b = el('button', 'mj-pinmap-role');
@@ -256,6 +267,23 @@
 			pop.hidden = false;
 		}
 
+		// Escape and a click outside, the two things anyone tries first. The
+		// listeners live on the document because the click that dismisses is by
+		// definition not on the popover; both no-op once the map is gone.
+		const onKey = (e) => {
+			if (e.key === 'Escape' && sel !== null) { e.stopPropagation(); close(); }
+		};
+		const onDown = (e) => {
+			if (sel === null) return;
+			if (pop.contains(e.target)) return;
+			// A pad handles its own click, and swallowing it here would make
+			// selecting a different pad take two presses.
+			if (e.target.closest && e.target.closest('.mj-pin')) return;
+			close();
+		};
+		document.addEventListener('keydown', onKey);
+		document.addEventListener('pointerdown', onDown);
+
 		paint();
 		host.appendChild(wrap);
 
@@ -284,6 +312,13 @@
 			// map the person is about to click.
 			sweep: (pin) => { sweeping = pin; paint(); },
 			select: (pin) => { sel = pin; paint(); },
+			close: close,
+			// The map outlives a section change only if nothing tears it down,
+			// so hand the caller the way to unhook the document listeners.
+			destroy: () => {
+				document.removeEventListener('keydown', onKey);
+				document.removeEventListener('pointerdown', onDown);
+			},
 		};
 	}
 

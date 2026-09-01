@@ -17,6 +17,13 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			else
 				[ -f "${editor_file}.backup" ] && rm "${editor_file}.backup"
 				echo "$editor_text" > "$editor_file"
+				# Majestic's own file is the one case where writing it is not
+				# the whole job - see majestic_reload in p/common.cgi. Without
+				# this the edit sat there unread until a reboot, and the next
+				# save from the settings page overwrote it first.
+				if [ "$editor_file" = "$(get_config)" ] && majestic_reload; then
+					redirect_to "${SCRIPT_NAME}?f=${editor_file}" "success" "File saved. Majestic is picking it up now, so video restarts in a moment."
+				fi
 				redirect_to "${SCRIPT_NAME}?f=${editor_file}" "success" "File saved."
 			fi
 			;;
