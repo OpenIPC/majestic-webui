@@ -57,12 +57,21 @@
 
 /* Hints sit under the control they explain and are held to a readable measure:
    full-column-width help set at nearly the size of the label above it competes
-   with the field rather than supporting it. */
+   with the field rather than supporting it.
+
+   The measure is in characters, because that is what a measure is. It used to be
+   22rem, and a pixel guess cannot know what it is guessing at: 352px is 42
+   characters of this type, which held the sentence well short of its own column
+   and read as a hard-wrapped poem next to the empty two thirds of a wide one
+   (#239). 66ch never binds inside a settings column — those are 451 and 472px
+   at the cap, and the hint simply fills them — and still holds a paragraph on
+   the extension and firmware pages, where a row runs 822px and an unbounded
+   hint would be 99 characters to a line. */
 .hint {
 	/* block because the CGI helpers emit it as a <span> — without this the
 	   max-width below does nothing and the hint runs the card's full width */
 	display: block;
-	max-width: 22rem;
+	max-width: 66ch;
 	margin-top: 0.35rem;
 	margin-bottom: 0;
 	font-size: 0.78125rem;
