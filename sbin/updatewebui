@@ -777,7 +777,11 @@ restore_local() {
 		# A path still carrying live work on the camera is newer than any
 		# archived copy of it, and is left exactly as it is.
 		grep -qxF "$d" "$tmp/kept" && continue
-		cmp -s "$s" "$d" 2>/dev/null && continue
+		# cmp reads through a symlink, so it would call one equal to a
+		# plain file holding the same bytes and leave the link unmade.
+		if [ ! -L "$s" ] && cmp -s "$s" "$d" 2>/dev/null; then
+			continue
+		fi
 		echo "$m $s $d" >>"$tmp/putback.do"
 	done <"$tmp/putback"
 	[ -s "$tmp/putback.do" ] || return 0
