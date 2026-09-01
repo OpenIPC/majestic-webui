@@ -347,12 +347,33 @@
 	}
 	if (areaBtn) areaBtn.addEventListener('change', () => setArmed(areaBtn.checked));
 
-	function bandRect(e) {
-		const r = stage.getBoundingClientRect();
-		const x = clamp(e.clientX - r.left, 0, r.width), y = clamp(e.clientY - r.top, 0, r.height);
+	// The visible picture, in stage coordinates. Under Fit — and under 1:1 on a
+	// frame smaller than the window — the rest of the stage is black, and a
+	// rectangle drawn on black is not a rectangle on the picture: converted to
+	// frame coordinates it comes out negative or past the far edge, and the
+	// clamp then lands the view on some edge as though that had been asked for.
+	// Where the picture overflows this is the whole stage and clamping to it
+	// does nothing.
+	function picRect() {
+		const sw = stage.clientWidth, sh = stage.clientHeight;
+		if (!frame || !placed) return { x: 0, y: 0, r: sw, b: sh };
 		return {
-			x: Math.min(drawing.x, x), y: Math.min(drawing.y, y),
-			w: Math.abs(x - drawing.x), h: Math.abs(y - drawing.y),
+			x: Math.max(0, ox), y: Math.max(0, oy),
+			r: Math.min(sw, ox + frame.w * scale),
+			b: Math.min(sh, oy + frame.h * scale),
+		};
+	}
+
+	// Both ends held inside the picture, so the band shows exactly what will be
+	// selected — and a drag that never leaves the letterbox collapses to
+	// nothing, which the minimum-size test then throws away.
+	function bandRect(e) {
+		const s = stage.getBoundingClientRect(), p = picRect();
+		const x = clamp(e.clientX - s.left, p.x, p.r), y = clamp(e.clientY - s.top, p.y, p.b);
+		const x0 = clamp(drawing.x, p.x, p.r), y0 = clamp(drawing.y, p.y, p.b);
+		return {
+			x: Math.min(x0, x), y: Math.min(y0, y),
+			w: Math.abs(x - x0), h: Math.abs(y - y0),
 		};
 	}
 
@@ -360,11 +381,15 @@
 		lastType = e.pointerType;
 		if (e.button != null && e.button > 0) return;
 		if (e.target.closest && e.target.closest(CHROME)) return;
+		// A rectangle belongs to the pointer that began it. A second finger
+		// arriving mid-drag is not a new origin, and it must not start a pan
+		// either.
+		if (drawing) return;
 
 		// Armed, or simply nothing to pan: either way the drag draws.
 		if (armed || stage.classList.contains('mj-drawable')) {
 			const r = stage.getBoundingClientRect();
-			drawing = { x: e.clientX - r.left, y: e.clientY - r.top };
+			drawing = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
 			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
 			return;
 		}
@@ -379,6 +404,7 @@
 
 	stage.addEventListener('pointermove', (e) => {
 		if (drawing) {
+			if (e.pointerId !== drawing.id) return;
 			const b = bandRect(e);
 			band.hidden = false;
 			band.style.left = b.x + 'px';
@@ -406,10 +432,16 @@
 		panBy(dx, dy);
 	});
 
-	function endPointer(e) {
-		if (drawing) {
-			const b = bandRect(e);
-			try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
+	// `commit` is false for pointercancel: the browser took the gesture away —
+	// a system edge swipe, a device rotation, another element capturing the
+	// pointer — and a gesture that was interrupted is not a gesture that was
+	// completed. It cleans up and zooms nothing.
+	function finishDraw(e, commit) {
+		if (!drawing || e.pointerId !== drawing.id) return false;
+		const b = commit ? bandRect(e) : null;
+		try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
+		drawing = null;
+		if (b) {
 			// A rectangle has to be deliberate. Below this it is a slip or a
 			// click, and zooming 40x into a stray 3px drag is the worst
 			// possible answer to one. The floor is a share of the stage with
@@ -418,12 +450,14 @@
 			const minW = Math.max(16, stage.clientWidth * 0.02);
 			const minH = Math.max(16, stage.clientHeight * 0.02);
 			if (b.w >= minW && b.h >= minH) zoomToRect(b.x, b.y, b.w, b.h);
-			// One drag, then it disarms itself: a mode you can forget you are
-			// in is the wrong thing to leave over a picture that also steers a
-			// camera.
-			setArmed(false);
-			return;
 		}
+		// One drag, then it disarms itself: a mode you can forget you are in is
+		// the wrong thing to leave over a picture that also steers a camera.
+		setArmed(false);
+		return true;
+	}
+
+	function endPointer(e) {
 		pts.delete(e.pointerId);
 		if (pts.size < 2) pinchDist = 0;
 		if (!pts.size) {
@@ -431,8 +465,8 @@
 			try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
 		}
 	}
-	stage.addEventListener('pointerup', endPointer);
-	stage.addEventListener('pointercancel', endPointer);
+	stage.addEventListener('pointerup', (e) => { if (!finishDraw(e, true)) endPointer(e); });
+	stage.addEventListener('pointercancel', (e) => { if (!finishDraw(e, false)) endPointer(e); });
 
 	// The wheel zooms, about the pointer. It used to pan the overflowing axis,
 	// which is what a Mac trackpad's two fingers want -- but a mouse wheel is
