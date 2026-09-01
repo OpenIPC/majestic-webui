@@ -32,7 +32,13 @@ window.MajesticWasm = (function () {
 	// module's own imports resolve against the blob's useless base URL, so the
 	// base is injected rather than left to relative resolution.
 	let workerBlob = null;
+	// Remembered for the session once the module has failed to arrive. Without
+	// it every fallback pays the same doomed round trip again, and on a camera
+	// with no route out that is a timeout each time — the rung has to be cheap
+	// to not have, because not having it is the common case.
+	let loadFailed = false;
 	function workerUrl() {
+		if (loadFailed) return Promise.reject(new Error('unavailable'));
 		if (workerBlob) return Promise.resolve(workerBlob);
 		const ctl = new AbortController();
 		const bail = setTimeout(() => ctl.abort(), LOAD_TIMEOUT_MS);
@@ -45,7 +51,8 @@ window.MajesticWasm = (function () {
 					{ type: 'text/javascript' });
 				workerBlob = URL.createObjectURL(blob);
 				return workerBlob;
-			});
+			})
+			.catch((e) => { loadFailed = true; throw e; });
 	}
 
 	// Only what this decoder actually handles. The chain gates on this before
