@@ -182,20 +182,16 @@ done) %>
 		</div>
 
 		<div class="st-panel">
-			<div class="mj-cap mb-2">Network</div>
+			<div class="mj-cap mb-2">Device</div>
 			<dl class="small list mb-0">
-				<dt>Host</dt><dd><% esc "$network_hostname" %></dd>
-				<% if [ -n "$net_rows" ]; then %>
-					<% echo "$net_rows" | while IFS='|' read n a m; do %>
-						<dt><% esc "$n" %><% [ "$n" = "$net_defdev" ] && echo ' <span class="text-secondary x-small">default</span>' %></dt>
-						<dd><% esc "$a" %><div class="x-small text-secondary text-break"><% esc "$m" %></div></dd>
-					<% done %>
-				<% else %>
-					<dt>Address</dt><dd><% esc "$network_address" %></dd>
-					<dt>MAC</dt><dd class="text-break"><% esc "$network_macaddr" %></dd>
-					<dt>Link</dt><dd><% esc "$network_interface" %></dd>
+				<dt>SoC</dt><dd><% esc "$soc" %> <span class="text-secondary">(<% esc "$soc_family" %>)</span></dd>
+				<dt>Sensor</dt><dd><% esc "$sensor" %></dd>
+				<dt>Firmware</dt><dd><% esc "${fw_version}-${fw_variant}" %></dd>
+				<dt>Build</dt><dd class="text-break"><% esc "$fw_build" %></dd>
+				<dt>Majestic</dt><dd><% esc "$mj_version" %></dd>
+				<% if [ -n "$uboot_version" ]; then %>
+					<dt>U-Boot</dt><dd><% esc "$uboot_version" %></dd>
 				<% fi %>
-				<dt>Gateway</dt><dd><% esc "${net_gw:-$network_gateway}" %></dd>
 			</dl>
 		</div>
 
@@ -223,16 +219,20 @@ done) %>
 		</div>
 
 		<div class="st-panel">
-			<div class="mj-cap mb-2">Device</div>
+			<div class="mj-cap mb-2">Network</div>
 			<dl class="small list mb-0">
-				<dt>SoC</dt><dd><% esc "$soc" %> <span class="text-secondary">(<% esc "$soc_family" %>)</span></dd>
-				<dt>Sensor</dt><dd><% esc "$sensor" %></dd>
-				<dt>Firmware</dt><dd><% esc "${fw_version}-${fw_variant}" %></dd>
-				<dt>Build</dt><dd class="text-break"><% esc "$fw_build" %></dd>
-				<dt>Majestic</dt><dd><% esc "$mj_version" %></dd>
-				<% if [ -n "$uboot_version" ]; then %>
-					<dt>U-Boot</dt><dd><% esc "$uboot_version" %></dd>
+				<dt>Host</dt><dd><% esc "$network_hostname" %></dd>
+				<% if [ -n "$net_rows" ]; then %>
+					<% echo "$net_rows" | while IFS='|' read n a m; do %>
+						<dt><% esc "$n" %><% [ "$n" = "$net_defdev" ] && echo ' <span class="text-secondary x-small">default</span>' %></dt>
+						<dd><% esc "$a" %><div class="x-small text-secondary text-break"><% esc "$m" %></div></dd>
+					<% done %>
+				<% else %>
+					<dt>Address</dt><dd><% esc "$network_address" %></dd>
+					<dt>MAC</dt><dd class="text-break"><% esc "$network_macaddr" %></dd>
+					<dt>Link</dt><dd><% esc "$network_interface" %></dd>
 				<% fi %>
+				<dt>Gateway</dt><dd><% esc "${net_gw:-$network_gateway}" %></dd>
 			</dl>
 		</div>
 	</div>
