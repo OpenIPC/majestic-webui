@@ -1846,24 +1846,39 @@
 		ircutBusy = true;
 		btn.disabled = true;
 		result.hidden = true;
-		// Where the filter is NOW, so the two captures can be told apart by
-		// position rather than by the order they happened in.
+		// The heartbeat's last sample is only a fallback — probe() reads the
+		// filter's position from the camera itself, because which capture is
+		// the day one turns on it and a stale answer does not mis-word the
+		// verdict, it inverts it.
 		const start = ircutSample ? (ircutSample.ircut | 0) : 0;
 
 		IRCUT.probe({
 			settleMs: 1500,
 			snap: () => IRCUT.snapshot('/image.jpg'),
+			state: () => apiFetch('/metrics/night?value=ircut_enabled',
+				{ credentials: 'same-origin' })
+				.then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
+				.then(t => (+t > 0 ? 1 : 0)),
 			toggle: () => apiFetch('/night/ircut', { credentials: 'same-origin' })
 				.then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
 			wait: (ms) => new Promise(r => setTimeout(r, ms)),
 			onStep: (s) => { status.textContent = IRCUT_STEP[s] || ''; },
 		}, start).then((out) => {
 			const v = out.verdict;
-			const cls = v.level === 'danger' ? 'alert-danger'
-				: v.level === 'warning' ? 'alert-warning'
-					: v.level === 'ok' ? 'alert-success' : 'alert-secondary';
+			// A test that could not put the filter back outranks whatever it
+			// found: the camera is sitting in the wrong position right now, and
+			// on a board that holds its filter electrically that means daylight
+			// is magenta until somebody fixes it.
+			const cls = out.restored === false ? 'alert-danger'
+				: v.level === 'danger' ? 'alert-danger'
+					: v.level === 'warning' ? 'alert-warning'
+						: v.level === 'ok' ? 'alert-success' : 'alert-secondary';
 			result.className = 'alert ' + cls + ' py-2 px-3 mt-2 mb-0 small';
-			result.innerHTML = '<b>' + esc(v.title) + '</b> ' + esc(v.detail);
+			result.innerHTML = (out.restored === false
+				? '<b>The filter could not be put back.</b> It is still in the ' +
+				'position the test left it in &mdash; use the IR-cut switch on ' +
+				'Live adjustments to move it back. The test itself found: '
+				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail);
 			result.hidden = false;
 		}).catch((e) => {
 			result.className = 'alert alert-danger py-2 px-3 mt-2 mb-0 small';

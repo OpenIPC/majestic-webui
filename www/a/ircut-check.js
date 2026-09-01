@@ -383,43 +383,61 @@
 
 	// The sequence, with its I/O injected so the ordering can be tested without
 	// a camera. `io.snap()` resolves to a stats object, `io.toggle()` flips the
-	// filter and resolves to the new ircut state, `io.wait(ms)` settles.
+	// filter, `io.state()` reads where the filter is RIGHT NOW, `io.wait(ms)`
+	// settles.
 	//
-	// The restore is guarded the way wireCompare's is: this control moves a
-	// physical part of the camera, and every exit path — a failed snapshot, a
-	// rejected toggle — has to put it back. Leaving a camera open in daylight
-	// is precisely the fault this feature exists to find, and shipping a test
-	// that can CAUSE it would be worse than shipping nothing.
+	// Two things here are about not lying rather than about working.
+	//
+	// WHERE IT STARTED is read from the camera, not from whatever the 2s
+	// heartbeat last published. Which capture is the day one depends on it, so
+	// a stale or absent sample does not produce a slightly-off label — it
+	// silently swaps the two frames and reports correct wiring as backwards.
+	//
+	// WHETHER IT GOT BACK is part of the answer. The restore used to be
+	// swallowed so that its failure could not replace the verdict; but a test
+	// that moved the filter, failed to put it back, and then said "wired
+	// correctly" has left a camera magenta in daylight — precisely the fault
+	// this feature exists to find. The verdict is still returned, with
+	// `restored: false` beside it, and the caller has to say so.
 	function probe(io, startIrcut) {
 		const settle = io.settleMs || 1500;
 		let moved = false;
 		const step = (s) => { if (io.onStep) io.onStep(s); };
 
-		return Promise.resolve()
-			.then(() => { step('first'); return io.snap(); })
-			.then((first) => {
-				step('toggle');
-				return io.toggle()
-					.then(() => { moved = true; return io.wait(settle); })
-					.then(() => { step('second'); return io.snap(); })
-					.then((second) => ({ first: first, second: second }));
-			})
-			.then((pair) => {
-				// Which of the two was the day position depends on where the
-				// filter started, not on the order they were captured in.
-				const day = startIrcut ? pair.second : pair.first;
-				const other = startIrcut ? pair.first : pair.second;
-				return { verdict: verdict(day, other), day: day, other: other };
-			})
-			.finally(() => {
-				if (!moved) return;
-				step('restore');
-				// Swallowed on purpose: the caller is about to be handed either
-				// a verdict or the original failure, and a restore that also
-				// failed must not replace either with its own error. The camera
-				// state is reported by the heartbeat within 2s regardless.
-				return io.toggle().catch(() => {});
-			});
+		const restore = () => {
+			if (!moved) return Promise.resolve(true);
+			step('restore');
+			return io.toggle().then(() => true, () => false);
+		};
+
+		const where = io.state
+			? Promise.resolve().then(io.state).catch(() => null)
+			: Promise.resolve(null);
+
+		return where.then((live) => {
+			// The live reading wins; the caller's guess is the fallback for a
+			// camera that cannot answer.
+			const start = (live === null || live === undefined) ? startIrcut : live;
+			return Promise.resolve()
+				.then(() => { step('first'); return io.snap(); })
+				.then((first) => {
+					step('toggle');
+					return io.toggle()
+						.then(() => { moved = true; return io.wait(settle); })
+						.then(() => { step('second'); return io.snap(); })
+						.then((second) => ({ first: first, second: second }));
+				})
+				.then((pair) => {
+					// Which of the two was the day position depends on where the
+					// filter started, not on the order they were captured in.
+					const day = start ? pair.second : pair.first;
+					const other = start ? pair.first : pair.second;
+					const v = verdict(day, other);
+					return restore().then((ok) => ({
+						verdict: v, day: day, other: other, restored: ok,
+					}));
+				}, (err) => restore().then(() => { throw err; }));
+		});
 	}
 
 	// Browser-side glue: a JPEG URL to a decoded frame's statistics.

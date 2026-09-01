@@ -215,7 +215,89 @@ group('probe: the sequence, and which frame was the day one');
 			() => check('a failed first snapshot must not resolve', false),
 			() => check('a failed first snapshot touches nothing',
 				e.log.join(',') === 'snap', e.log.join(',')));
-	}).then(runRest);
+	}).then(next5);
+
+	function next5() {
+		group('probe: where the filter started is read, not assumed');
+		// The caller's guess is the 2s heartbeat's last sample, which can be
+		// absent or stale. Which capture is the DAY one turns on it, so a wrong
+		// answer does not mis-word the verdict — it swaps the two frames and
+		// calls correct wiring backwards.
+		const frames = [st(MAGENTA), st(GREENY)];   // open first, then closed
+		const mk = (live) => ({
+			snap: () => Promise.resolve(frames.shift()),
+			toggle: () => Promise.resolve(1),
+			wait: () => Promise.resolve(),
+			state: () => Promise.resolve(live),
+			settleMs: 0,
+		});
+		// Camera says it started OPEN, so the SECOND capture is the day one:
+		// coloured in day, magenta at night = correct.
+		return ic.probe(mk(1), 0).then((r) => {
+			check('the live reading decides, not the caller\'s guess',
+				r.verdict.id === 'ok', r.verdict.id);
+			// Same frames, same wrong guess, but no live reading available:
+			// the guess is all there is and the verdict flips.
+			const f2 = [st(MAGENTA), st(GREENY)];
+			const io2 = {
+				snap: () => Promise.resolve(f2.shift()),
+				toggle: () => Promise.resolve(1),
+				wait: () => Promise.resolve(),
+				settleMs: 0,
+			};
+			return ic.probe(io2, 0).then((r2) => {
+				check('with no live reading the caller\'s guess is the fallback',
+					r2.verdict.id === 'inverted', r2.verdict.id);
+				// A camera that cannot answer must not abort the test.
+				const f3 = [st(GREENY), st(MAGENTA)];
+				const io3 = {
+					snap: () => Promise.resolve(f3.shift()),
+					toggle: () => Promise.resolve(1),
+					wait: () => Promise.resolve(),
+					state: () => Promise.reject(new Error('down')),
+					settleMs: 0,
+				};
+				return ic.probe(io3, 0).then((r3) => {
+					check('a failed state read falls back rather than throwing',
+						r3.verdict.id === 'ok', r3.verdict.id);
+					return next6();
+				});
+			});
+		});
+	}
+
+	function next6() {
+		group('probe: a restore that failed is part of the answer');
+		// The filter has been moved. If it cannot be moved back, the camera is
+		// sitting in the wrong position RIGHT NOW — on a board that holds its
+		// filter electrically, that is daylight rendered magenta. Reporting
+		// "wired correctly" and nothing else would be a lie of omission.
+		let n = 0;
+		const io = {
+			snap: () => Promise.resolve(n++ === 0 ? st(GREENY) : st(MAGENTA)),
+			toggle: () => (n >= 2 ? Promise.reject(new Error('busy')) : Promise.resolve(1)),
+			wait: () => Promise.resolve(),
+			state: () => Promise.resolve(0),
+			settleMs: 0,
+		};
+		return ic.probe(io, 0).then((r) => {
+			check('the verdict still comes back', r.verdict.id === 'ok', r.verdict.id);
+			check('but the failed restore is reported', r.restored === false, String(r.restored));
+			// The happy path must say so too, or the caller cannot tell the
+			// difference between "restored" and "never asked".
+			const ok = {
+				snap: () => Promise.resolve(st(GREENY)),
+				toggle: () => Promise.resolve(1),
+				wait: () => Promise.resolve(),
+				state: () => Promise.resolve(0),
+				settleMs: 0,
+			};
+			return ic.probe(ok, 0).then((r2) => {
+				check('a successful restore is reported as such', r2.restored === true);
+				runRest();
+			});
+		});
+	}
 }
 
 // ---------------------------------------------------------------------------
