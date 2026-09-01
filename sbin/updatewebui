@@ -720,6 +720,7 @@ unpack_archives() {
 	narchives=0
 	archives_bad=0
 	: >"$tmp/putback"
+	: >"$tmp/putback.skip"
 	[ "$do_backup" = 1 ] || return 0
 	set -- "$STATE_DIR"/updatewebui-local-*.tar.gz
 	[ -f "$1" ] || return 0
@@ -755,7 +756,10 @@ unpack_archives() {
 			"${pair#*:}"/*) mine=1 ;;
 			esac
 		done
-		[ "$mine" = 1 ] || continue
+		[ "$mine" = 1 ] || {
+			echo "$d" >>"$tmp/putback.skip"
+			continue
+		}
 		echo "$(stat -c %a "$s") $s $d" >>"$tmp/putback"
 	done
 	return 0
@@ -799,6 +803,14 @@ drop_archives() {
 	[ "${narchives:-0}" -gt 0 ] || return 0
 	if [ "$archives_bad" -gt 0 ]; then
 		echo "Keeping the archive(s) in $STATE_DIR: $archives_bad of $narchives could not be read."
+		return 0
+	fi
+	# Nothing this script wrote holds a path outside the three trees it
+	# installs, so an archive that does was not made here - and deleting it
+	# with "everything they held is on the camera again" would be a lie
+	# about a file that was never put anywhere.
+	if [ -s "$tmp/putback.skip" ]; then
+		echo "Keeping the $narchives archive(s) in $STATE_DIR: $(count "$tmp/putback.skip") path(s) in them lie outside the trees this script installs."
 		return 0
 	fi
 	if [ -s "$tmp/restored" ] && [ -s "$tmp/stale" ] &&
