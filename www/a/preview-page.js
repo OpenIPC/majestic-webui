@@ -158,6 +158,15 @@
 		// 'connecting…' seconds after the fallback appeared.
 		swap.stop();
 		player = null;
+		// The kind goes with the player. Left standing it names a session that
+		// ended, and every `liveKind === …` test below is then answering about
+		// something that is not on screen.
+		liveKind = null;
+		// And the software-decode disclosure's latch. hideStageMsg() above
+		// takes the message down, but the latch is what stops it being raised
+		// twice — so leaving it set means a later software session plays with
+		// no disclosure at all, which is the one thing this rung must never do.
+		swNoteKey = '';
 		syncAudioCtl();
 		syncTalkCtl();
 		// Both describe the session that just ended.
@@ -211,7 +220,7 @@
 	// preview-swap.js exists to enforce. The picture is the page's to hold
 	// now, and it is handed over in onPromoted, on a promotion that was
 	// earned by a picture rather than by there being nothing in the way.
-	function retryFromFallback(webrtc) {
+	function retryFromFallback(kind) {
 		// Guarded because one press can arrive twice: the click handler
 		// retries, and the change event that follows a radio that did move
 		// reaches goToStream(), which would otherwise restart the session
@@ -223,7 +232,7 @@
 			badge.textContent = holdingFallback === 'mjpeg'
 				? 'MJPEG · retrying…' : 'retrying…';
 		}
-		attachPlayer(webrtc === undefined ? wantWebRTC() : webrtc);
+		attachPlayer(kind === undefined ? wantWebRTC() : kind);
 	}
 
 	// The player names the cause in a code and the page words it — the same
@@ -244,6 +253,14 @@
 		}
 		if (bits[0] === 'unreachable') {
 			return 'The camera stopped sending the ' + ch + '.';
+		}
+		// The software-decode rung could not fetch its decoder — no route out
+		// of the network, most likely, which is an ordinary state for a camera
+		// rather than a fault. Say what happened rather than blaming the
+		// stream, which is fine and would play anywhere else.
+		if (bits[0] === 'decoder-unavailable' || bits[0] === 'no-offscreen') {
+			return 'This browser can’t decode the ' + ch + ', and the software ' +
+				'decoder could not be loaded.';
 		}
 		return 'The ' + ch + ' could not be played in this browser.';
 	}
@@ -293,7 +310,11 @@
 	// The player on screen and which transport it is, both kept in step by the
 	// swap's onPromoted. Read by the controls, which act on what is playing
 	// rather than on what is being tried.
-	let player = null, usingWebRTC = false;
+	// A KIND, not a boolean. There are three now, and every place that read
+	// "not WebRTC" and meant "therefore MSE" is a place a third one would
+	// inherit assumptions nobody checked. Each site below says which kind it
+	// means; the three that are not mechanical are called out where they are.
+	let player = null, liveKind = null;
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
@@ -356,8 +377,13 @@
 		const asked = stream ? 1 : 0;
 		// The camera said outright — no inference needed. Older daemons never
 		// say, and everything below is the fallback for them.
-		if (usingWebRTC && servedCh !== null) return servedCh;
-		if (!usingWebRTC || !chipMedia) return asked;
+		if (liveKind === 'webrtc' && servedCh !== null) return servedCh;
+		// Deliberately `!== 'webrtc'` and not a list. The frame-size inference
+		// exists because WebRTC's ?stream= is a preference the camera may not
+		// honour; /ws/video serves the number it is given or nothing, so both
+		// the MSE and the software-decode rungs get the exact channel they
+		// asked for and must NOT be guessed about.
+		if (liveKind !== 'webrtc' || !chipMedia) return asked;
 		const want = sizeOf[asked], other = sizeOf[asked ? 0 : 1];
 		if (!want || !other) return asked;
 		const is = d => d.w === chipMedia.w && d.h === chipMedia.h;
@@ -377,7 +403,7 @@
 		// speaks only on a mismatch — the radio already names the intent, so
 		// the chip only reports betrayal.
 		if (autoOn) {
-			if (usingWebRTC && servedCh === null &&
+			if (liveKind === 'webrtc' && servedCh === null &&
 				(!sizeOf[0] || !sizeOf[1] ||
 				(sizeOf[0].w === sizeOf[1].w && sizeOf[0].h === sizeOf[1].h))) {
 				return '';
@@ -394,7 +420,12 @@
 		// bug it guards, a control repainting the chip with the codec of the
 		// stream that failed, is exactly the one #274 photographed.
 		if (!badge || !chipMedia || fellBack || holdingFallback) return;
-		const fps = usingWebRTC ? chipFps : cfgFps[stream ? 1 : 0];
+		// WebRTC measures its own rate, MSE measures nothing so the configured
+		// rate stands in — and software decode measures, which is the entire
+		// point of that rung. Leaving it on the configured rate would make the
+		// chip claim 25 fps while the client managed 9, in exactly the case
+		// this exists to expose.
+		const fps = liveKind === 'mse' ? cfgFps[stream ? 1 : 0] : chipFps;
 		badge.textContent = (chipMedia.codec || '').toUpperCase() + ' ' +
 			chipMedia.w + '×' + chipMedia.h +
 			(fps ? ' · ' + Math.round(fps) + ' fps' : '') +
@@ -427,6 +458,38 @@
 		if (servedEl) servedEl.hidden = true;
 	}
 	function hideServedMsg() { hideStageMsg('served'); }
+
+	// Nobody asked for software decoding — the chain chose it after the browser
+	// refused the stream — so the page owes the viewer the fact, in the slot
+	// that already carries standing conditions. It is said once, and upgraded
+	// in place if the client turns out not to keep up.
+	//
+	// The "cannot keep up" test is the DROP COUNT and how far behind the
+	// camera we are, never achieved-versus-configured fps: a VBR encoder on a
+	// quiet scene legitimately sends 12 frames where 30 were configured, and
+	// grading on that would accuse the client of a fault the camera committed.
+	let swNoteKey = '';
+	function softwareNote(s) {
+		// A PROPORTION, and a standing delay — not "has ever dropped a frame".
+		// A drop or two while the first GOP is found is not a client that
+		// cannot cope, and latching the accusation on one of them would be the
+		// same unfairness as grading on configured fps.
+		const seen = s.framesDecoded + s.framesDropped;
+		const behind = s.queuedMs > 400 ||
+			(seen > 60 && s.framesDropped / seen > 0.1);
+		const key = behind ? 'behind' : 'plain';
+		if (key === swNoteKey) return;
+		// Never re-raise a message the viewer dismissed, unless the news
+		// actually changed — going from coping to not coping is news.
+		if (swNoteKey && key === 'plain') return;
+		swNoteKey = key;
+		showStageMsg('software',
+			behind
+				? 'This browser can’t decode H.265, so the page is decoding it in ' +
+					'software — and cannot keep up at this size. Try the Sub stream.'
+				: 'This browser can’t decode H.265, so the page is decoding it in ' +
+					'software.');
+	}
 
 	function showServedMsg(info) {
 		const req = streamName(info.requested), got = streamName(info.channel);
@@ -590,14 +653,16 @@
 		// nothing, so a stale baseline (and a toast still standing) would
 		// describe a session that is gone. Back on WebRTC it re-adopts from
 		// the first tick rather than announcing whatever moved while away.
-		if (window.MajesticAdapt && !usingWebRTC) window.MajesticAdapt.reset();
+		if (window.MajesticAdapt && liveKind !== 'webrtc') window.MajesticAdapt.reset();
 		// The stats panel's deltas belong to the session that just ended —
 		// differencing a new session's counters against them would print one
 		// tick of nonsense rates.
 		if (window.MajesticStats) window.MajesticStats.reset();
 		// Same for the served-channel answer and its message: both belong to
 		// a WebRTC session. MSE serves the number it is given or nothing.
-		if (!usingWebRTC) {
+		// The software-decode disclosure belongs to a software-decode session.
+		if (liveKind !== 'wasm') { swNoteKey = ''; hideStageMsg('software'); }
+		if (liveKind !== 'webrtc') {
 			servedCh = null;
 			servedShownKey = '';
 			wantedCh = null;
@@ -611,7 +676,7 @@
 		// Back on WebRTC, the toggle's tooltip goes back to the standing
 		// explanation: a failure wrote its reason there, and leaving it would
 		// keep complaining about a session that is long over.
-		if (transportLbl && usingWebRTC) transportLbl.title = TRANSPORT_TITLE;
+		if (transportLbl && liveKind === 'webrtc') transportLbl.title = TRANSPORT_TITLE;
 	}
 
 	// The swap itself lives in preview-swap.js — two elements, a trial that
@@ -622,7 +687,12 @@
 		// Resolved on every use, never stored: the MSE player replaces its
 		// element on each reconnect, so a node captured here would be detached
 		// within a session and every show/hide would write to nothing.
-		elements: [() => $('#live-video'), () => $('#live-video-b')],
+		// Four elements, two slots. The kind decides which pair, because
+		// software decode paints a canvas and the other two drive a video.
+		elements: [
+			(kind) => $(kind === 'wasm' ? '#live-canvas' : '#live-video'),
+			(kind) => $(kind === 'wasm' ? '#live-canvas-b' : '#live-video-b'),
+		],
 		// audio and volume go in at attach rather than after promotion.
 		// Applying them later means renegotiating a session that has just
 		// proved itself, which blanks the picture for anyone who was listening
@@ -635,13 +705,18 @@
 				handlersFor(id, onState))),
 		onPromoted: (kind, proven) => {
 			player = swap.player();
-			usingWebRTC = kind === 'webrtc';
+			liveKind = kind;
 			liveEl = swap.element();
 			// From what is playing rather than from what was clicked: a retry
 			// out of the fallback starts the chain from the preferred
 			// transport without anyone having touched this group, and it was
 			// left with nothing lit.
-			reflectTransport(kind);
+			// Software decode rides the MSE transport's socket, so MSE is what
+			// is carrying the picture and MSE is what stays lit. Leaving the
+			// group dark would collide with the meaning #280 gave it — neither
+			// transport carrying anything — and would make a press of either
+			// radio tear down a working session.
+			reflectTransport(kind === 'wasm' ? 'mse' : kind);
 			settle();
 			// Only when this promotion means a picture. Holding the fallback,
 			// an unproven one is just the swap saying it had nothing of its
@@ -691,18 +766,25 @@
 		// set — and MJPEG if that already was the other transport.
 		onExhausted: (kind, detail) => {
 			player = null;
-			if (kind === 'webrtc') attachPlayer(false);
-			else showFallback(detail);
+			nextRung(kind, detail);
 		},
 		onLive: (s, d) => {
 			if (s === 'playing') showVideo();
 			else if (s === 'nosignal') showNoSignal();
-			else if (s === 'mjpeg') showFallback(d);
+			// Through the chain, not straight to the floor. This is the path a
+			// first attach takes — it is promoted immediately, so its giving up
+			// arrives here rather than as a dropped trial — and sending it
+			// directly to showFallback() skipped every rung below the one that
+			// failed.
+			else if (s === 'mjpeg') { swap.retire(); nextRung(liveKind, d); }
 			else if (s === 'fallback' || s === 'busy') {
 				// The live player gave up mid-session. Staged like any other
 				// switch, so its last frame stays until the replacement has one
 				// of its own.
-				if (usingWebRTC) {
+				// `=== 'webrtc'`, never `!== 'mse'`: a software-decode session
+				// reporting `fallback` has already been reached THROUGH both
+				// transports failing, so re-running them would loop.
+				if (liveKind === 'webrtc') {
 					reflectTransport('mse');
 					if (transportLbl) {
 						transportLbl.title = 'WebRTC: ' + (d || 'unavailable') +
@@ -710,7 +792,7 @@
 					}
 					if (s === 'fallback') rememberDemotion();
 					swap.retire();
-					attachPlayer(false);
+					attachPlayer('mse');
 				} else {
 					showFallback(d);
 				}
@@ -724,10 +806,58 @@
 	});
 
 	const MajesticVideoImpl = (kind) =>
-		kind === 'webrtc' ? MajesticWebRTC : MajesticVideo;
+		kind === 'webrtc' ? MajesticWebRTC
+		: kind === 'wasm' ? window.MajesticWasm
+		: MajesticVideo;
 
-	function attachPlayer(webrtc) {
-		swap.start(webrtc ? 'webrtc' : 'mse');
+	function attachPlayer(kind) {
+		swap.start(kind === true ? 'webrtc' : kind === false ? 'mse' : kind);
+	}
+
+	// The chain, as an ordered walk rather than the pair of `kind === 'webrtc'`
+	// tests it used to be:
+	//
+	//     WebRTC -> MSE -> [software decode] -> MJPEG -> note
+	//
+	// The third rung is not a transport and gets no radio. It is the same
+	// /ws/video bytes the MSE player just failed on, decoded in WebAssembly
+	// instead of by the browser — so the picker goes on naming the transport
+	// exactly once, and a codec problem never touches the viewer's remembered
+	// preference.
+	function nextRung(kind, detail) {
+		// A channel change can change the CODEC, and the failure that put us on
+		// this rung was about the channel we have just left. So this is not the
+		// chain running out — it is a different question, asked again from the
+		// top: an H.264 substream may well play over WebRTC or MSE natively,
+		// and falling to MJPEG here would hand the viewer the worst option
+		// available for a stream the browser can decode perfectly.
+		//
+		// It cannot loop: the rung only stands down for a codec it does not
+		// handle, and if the new one is refused too the reason will name that
+		// codec, which the gate below rejects.
+		if (String(detail || '').split(' ')[0] === 'codec-changed') {
+			attachPlayer(wantWebRTC());
+			return;
+		}
+		if (kind === 'webrtc') { attachPlayer('mse'); return; }
+		if (kind === 'mse' && wasmRungFor(detail)) { attachPlayer('wasm'); return; }
+		showFallback(detail);
+	}
+
+	// Entered only when the BROWSER refused the codec, and only for a codec the
+	// decoder can actually take. `unreachable` and `no-mse` are not decoding
+	// problems, and an H.264 High 10 refusal reports `undecodable` too — sending
+	// it to an H.265 decoder would be a slower way to fail, after a network
+	// round trip for the module.
+	//
+	// `detail` here is the PLAYER's reason code (preview.js). The camera's
+	// served-channel reply also has a reason spelled `undecodable`, meaning
+	// something else entirely; the two vocabularies must not be crossed.
+	function wasmRungFor(detail) {
+		const bits = String(detail || '').split(' ');
+		return bits[0] === 'undecodable' &&
+			!!(window.MajesticWasm && window.MajesticWasm.available &&
+				window.MajesticWasm.handles(bits[1]));
 	}
 
 	// The page's own callbacks, all of which belong to the player on screen: a
@@ -854,6 +984,7 @@
 			},
 			onStats: (s) => {
 				if (!isLive()) return;
+				if (s.transport === 'wasm') softwareNote(s);
 				// The chip rides every tick, not just when the panel is open —
 				// this is where its fps comes from, and a fresh write also
 				// heals it after a transient "reconnecting…" state. The panel
@@ -1061,7 +1192,7 @@
 		// Not while a trial is being judged: that trial is the viewer's own
 		// choice in flight, and it was opened after `ice` was filled anyway, so
 		// restarting WebRTC here would both undo their click and re-do work.
-		if (!moved && player && !swap.trial() && usingWebRTC && ice.length) {
+		if (!moved && player && !swap.trial() && liveKind === 'webrtc' && ice.length) {
 			attachPlayer(true);
 		}
 	});

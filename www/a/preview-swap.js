@@ -43,7 +43,22 @@ window.MajesticSwap = function (opts) {
 	let staging = null;  // { id, p, slot, kind }
 	let seq = 0;
 
-	function node(slot) { return els[slot](); }
+	// Which kind a slot currently holds. The getter needs it because not every
+	// player paints a <video>: software decode paints a <canvas>, so "the
+	// element for slot 1" is not one answer.
+	//
+	// It has to be per SLOT and not one latched value, because promote() hides
+	// the outgoing slot before it swaps `live` — and the outgoing slot's kind
+	// is not the incoming one. Latching the incoming kind globally would hide
+	// the wrong element and leave a frozen canvas over live video, which is
+	// exactly the failure this file's header warns about.
+	function kindOf(slot) {
+		if (staging && staging.slot === slot) return staging.kind;
+		if (live && live.slot === slot) return live.kind;
+		return null;
+	}
+
+	function node(slot) { return els[slot](kindOf(slot)); }
 
 	// Which callbacks a caller's own handlers should answer to. Everything but
 	// the state feed belongs to the player on screen alone: a trial has no
@@ -101,13 +116,18 @@ window.MajesticSwap = function (opts) {
 
 		const id = ++seq;
 		const slot = live ? spareSlot() : 0;
+		// Registered before the element is resolved: node() asks kindOf(), and
+		// without this the incoming attach would be handed the outgoing kind's
+		// element.
+		staging = { id: id, p: null, slot: slot, kind: kind };
 		const el = node(slot);
 		// The other transport may have used this element a moment ago, and an
 		// element carrying both a MediaSource url and a srcObject is a
 		// confusing thing to debug.
+		// Harmless on a canvas, which has neither; the point is that a video
+		// element carrying both a MediaSource url and a srcObject is a
+		// confusing thing to debug.
 		try { el.removeAttribute('src'); el.srcObject = null; } catch (e) {}
-
-		staging = { id: id, p: null, slot: slot, kind: kind };
 
 		const onState = function (state, detail) {
 			if (isStaging(id)) {

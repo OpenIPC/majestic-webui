@@ -21,7 +21,8 @@ const A = (f) => path.join(__dirname, '..', 'www', 'a', f);
 const SRCS = [A('preview-swap.js'), A('preview-page.js')];
 
 const IDS = [
-	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
+	'live-mjpeg', 'live-video', 'live-video-b', 'live-canvas', 'live-canvas-b',
+	'mj-audio-ctl', 'mj-badge',
 	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note',
 	'mj-note-why', 'mj-stats',
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',
@@ -79,7 +80,7 @@ function makePlayers(env) {
 			available: kind === 'webrtc',
 		};
 	}
-	return { mse: impl('mse'), webrtc: impl('webrtc') };
+	return { mse: impl('mse'), webrtc: impl('webrtc'), wasm: impl('wasm') };
 }
 
 // `cfg` is a flat map of dotted keys, or omitted for the historic behaviour:
@@ -88,7 +89,7 @@ function makePlayers(env) {
 // reads jpeg.enabled and behaves differently on each answer, so it needs one.
 // `cfgDelay` puts the answer past the page's CONFIG_WAIT_MS deadline, which is
 // the case where jpegOn is false only because nothing is known yet.
-function load(pickedTransport, cfg, cfgDelay) {
+function load(pickedTransport, cfg, cfgDelay, wasmOk) {
 	const env = { made: [], els: {} };
 	IDS.forEach((id) => { env.els['#' + id] = makeEl(id); });
 	// Swap in a fresh node under the same id, as replaceChild does.
@@ -109,6 +110,14 @@ function load(pickedTransport, cfg, cfgDelay) {
 		devicePixelRatio: 1,
 		MajesticVideo: impls.mse,
 		MajesticWebRTC: impls.webrtc,
+		// Absent unless a test asks for it, which is also the real camera with
+		// no route to the CDN: the rung is simply not there and the chain is
+		// what it always was. Every group written for #279/#280 depends on
+		// that, since they all reach MJPEG through `undecodable h265`.
+		MajesticWasm: wasmOk ? Object.assign({}, impls.wasm, {
+			available: true,
+			handles: (c) => /^h265$|^hevc$/i.test(String(c || '')),
+		}) : undefined,
 		MajesticTransport: {
 			available: () => true,
 			preferred: () => pickedTransport || 'mse',
@@ -125,6 +134,7 @@ function load(pickedTransport, cfg, cfgDelay) {
 		console: console,
 		MajesticVideo: impls.mse,
 		MajesticWebRTC: impls.webrtc,
+		MajesticWasm: win.MajesticWasm,
 		MajesticTransport: win.MajesticTransport,
 		$: (sel) => env.els[sel],
 		// Never resolves unless a test asked for one: every test here drives
@@ -424,10 +434,16 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 	{
 		const env = load('webrtc', { 'jpeg.enabled': true });
 		await tick();
-		env.made[0].say('mjpeg', 'undecodable h265');
+		// The real sequence to the floor, now that the chain is a walk rather
+		// than a pair of tests: WebRTC gives up with `fallback` (it has no
+		// concept of `mjpeg`), MSE is tried and refuses the codec, and with no
+		// software rung available that is the end of it.
+		env.made[0].say('fallback', 'no usable H.264 in the offer');
+		env.made[1].say('mjpeg', 'undecodable h265');
 		env.el('mj-stream-0').fire('click');
-		const retry = env.made[1];
-		check('the retry is in flight', env.made.length === 2);
+		const retry = env.made[2];
+		check('the retry is in flight', env.made.length === 3,
+			'made=' + env.made.length);
 
 		// The camera answers the offer before any media arrives, and says it
 		// is serving the other channel.
@@ -528,6 +544,118 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.el('mj-note').style.display === 'none');
 		check('nothing was re-attached behind it', env.made.length === 1,
 			'made=' + env.made.length);
+	}
+
+	// The software-decode rung: WebRTC -> MSE -> wasm -> MJPEG, entered only
+	// when the BROWSER refused the codec and only for a codec it can take.
+	group('a browser that cannot decode the stream gets the software rung');
+	{
+		const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'undecodable h265');
+		check('a third player was made', env.made.length === 2,
+			'made=' + env.made.length);
+		check('and it is the software decoder',
+			env.made[1] && env.made[1].kind === 'wasm', env.made[1] && env.made[1].kind);
+		check('the fallback picture is not up yet',
+			env.el('live-mjpeg').src === '', env.el('live-mjpeg').src);
+		// It rides the MSE socket, so MSE is what is carrying the picture.
+		env.made[1].say('playing');
+		check('MSE stays lit, because that is the transport underneath',
+			env.el('mj-transport-m').checked === true &&
+			env.el('mj-transport-w').checked === false);
+	}
+
+	group('the rung is not taken for a failure that is not about the codec');
+	{
+		for (const reason of ['unreachable', 'no-mse', 'mse-error']) {
+			const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+			await tick();
+			env.made[0].say('mjpeg', reason);
+			check('`' + reason + '` goes straight to MJPEG',
+				env.made.length === 1 && env.el('live-mjpeg').src === '/mjpeg',
+				'made=' + env.made.length);
+		}
+	}
+
+	group('the rung is not taken for a codec it cannot decode');
+	{
+		const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+		await tick();
+		// A browser refusing H.264 High 10 reports the same code. Sending that
+		// to an H.265 decoder would be a slower way to fail.
+		env.made[0].say('mjpeg', 'undecodable h264');
+		check('h264 does not launch the H.265 decoder',
+			env.made.length === 1, 'made=' + env.made.length);
+		check('and the fallback is up', env.el('live-mjpeg').src === '/mjpeg');
+	}
+
+	group('the software rung is never tried twice');
+	{
+		const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'undecodable h265');
+		const wasm = env.made[1];
+		wasm.say('playing');
+		// Its own failure has already been through both transports.
+		wasm.say('mjpeg', 'undecodable h265');
+		check('it falls to MJPEG rather than round again',
+			env.made.length === 2 && env.el('live-mjpeg').src === '/mjpeg',
+			'made=' + env.made.length);
+	}
+
+	// The disclosure is latched so it is not raised twice in one session. That
+	// latch has to die with the session, or the NEXT software session plays
+	// with nothing saying so — which is the one thing this rung must not do.
+	group('the software-decode disclosure returns after a fallback');
+	{
+		const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'undecodable h265');
+		const wasm = env.made[1];
+		wasm.say('playing');
+		wasm.opts.onStats({ transport: 'wasm', width: 1920, height: 1080,
+			framesDecoded: 100, framesDropped: 0, queuedMs: 50 });
+		check('it says software decoding is happening',
+			/decoding it in software/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+
+		// The session dies and the chain runs out.
+		wasm.say('mjpeg', 'decoder-error');
+		check('the fallback took the stage',
+			env.el('live-mjpeg').src === '/mjpeg', env.el('live-mjpeg').src);
+
+		// A retry gets back to software decode.
+		env.el('mj-stream-0').fire('click');
+		const again = env.made[env.made.length - 1];
+		again.say('playing');
+		again.opts.onStats({ transport: 'wasm', width: 1920, height: 1080,
+			framesDecoded: 100, framesDropped: 0, queuedMs: 50 });
+		check('and it says so again',
+			/decoding it in software/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+	}
+
+	// A channel change can change the codec, and the failure that put us on the
+	// software rung was about the channel we just left. An H.264 substream
+	// plays natively, so falling to MJPEG there would hand the viewer the worst
+	// option available for a stream the browser decodes perfectly.
+	group('a codec change asks the whole chain again, not the floor');
+	{
+		const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'undecodable h265');
+		const wasm = env.made[1];
+		check('the software rung took it', wasm.kind === 'wasm', wasm.kind);
+		wasm.say('playing');
+		// The viewer picks a channel the camera encodes as H.264.
+		wasm.say('mjpeg', 'codec-changed h264');
+		const after = env.made[env.made.length - 1];
+		check('a fresh attempt was made, not a fallback',
+			env.made.length === 3 && env.el('live-mjpeg').src === '',
+			'made=' + env.made.length + ' img=' + env.el('live-mjpeg').src);
+		check('and it starts from a real transport, not the rung again',
+			after.kind !== 'wasm', after.kind);
 	}
 
 	group('a cloned MSE element does not strand the swap');
