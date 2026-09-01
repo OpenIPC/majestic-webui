@@ -1950,6 +1950,7 @@
 			'<span class="mj-live-rule"></span></div>' +
 			'<div id="mj-ircut-rolelist"></div>' +
 			'<div class="mj-ircut-acts">' +
+			'<button type="button" class="btn btn-primary btn-sm" id="mj-ircut-find">Find them for me</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
 			'</div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-status"></div>' +
@@ -2042,6 +2043,119 @@
 		}
 		paintRoles();
 
+		const find = box.querySelector('#mj-ircut-find');
+		if (find) find.addEventListener('click', () => openScan(box, map, info));
+
+		// A camera that came back from the dead mid-scan says so before anything
+		// else — the pad that did it is named and excluded.
+		const dead = window.MajesticIrcutScan &&
+			window.MajesticIrcutScan.casualty(info);
+		if (dead) {
+			const w = el('div', 'alert alert-warning py-2 px-3 mb-2 small');
+			w.innerHTML = '<b>The last pin scan stopped the camera.</b> It was driving pin ' +
+				esc(String(dead.pin)) + ' when it stopped answering, and the watchdog ' +
+				'restarted it. That pin has been excluded from further scans.';
+			box.querySelector('#mj-ircut-findings').appendChild(w);
+			state.ircutExclude = (state.ircutExclude || []).concat([dead.pin]);
+		}
+	}
+
+	// Finding the pins by driving them. This is the only control in the WebUI
+	// that can stop a camera answering, so it asks first, in those words, and
+	// the endpoint behind it journals each pad to flash before touching it.
+	function openScan(box, map, info) {
+		const SCAN = window.MajesticIrcutScan;
+		if (!SCAN) return;
+		const host = box.querySelector('#mj-ircut-result');
+		const status = box.querySelector('#mj-ircut-status');
+		const list = SCAN.pairs(info, { exclude: state.ircutExclude || [] });
+		let stop = false;
+
+		host.hidden = false;
+		host.className = 'mj-ircut-scan';
+		host.innerHTML =
+			'<p class="mb-2"><b>Find the pins by trying them.</b> Each pad is driven ' +
+			'against another while the picture is watched for the filter to move. ' +
+			'An IR-cut filter is driven across two pads, so pairs are what get ' +
+			'tried; the pairs other boards use go first, so this usually ends in ' +
+			'seconds.</p>' +
+			'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
+			'<b>This drives pads whose job is unknown.</b> One of them may reset the ' +
+			'network, cut power to the sensor, or stop the camera answering. That risk ' +
+			'cannot be removed &mdash; only made survivable: each pad is written to flash ' +
+			'before it is driven, so a camera that has to be restarted comes back knowing ' +
+			'which pad did it.</div>' +
+			'<p class="small text-secondary mb-2">Pads already spoken for are skipped. ' +
+			'This reads the picture, so it needs daylight &mdash; at night nothing will ' +
+			'look like it moved.</p>' +
+			'<div class="d-flex gap-2 align-items-center">' +
+			'<button type="button" class="btn btn-primary btn-sm" id="mj-scan-go">Start</button>' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-no">Cancel</button>' +
+			'<span class="small text-secondary" id="mj-scan-n"></span></div>';
+		host.querySelector('#mj-scan-n').textContent = list.length + ' pairs to try';
+		host.querySelector('#mj-scan-no').addEventListener('click', () => {
+			stop = true; host.hidden = true;
+		});
+		host.querySelector('#mj-scan-go').addEventListener('click', () => {
+			host.innerHTML =
+				'<p class="mb-2"><b id="mj-scan-t">Starting…</b></p>' +
+				'<p class="small text-secondary mb-2" id="mj-scan-s"></p>' +
+				'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-stop">Stop</button>';
+			const t = host.querySelector('#mj-scan-t');
+			const s = host.querySelector('#mj-scan-s');
+			host.querySelector('#mj-scan-stop').addEventListener('click', () => { stop = true; });
+
+			SCAN.run({
+				drive: (a, b) => apiFetch('/cgi-bin/j/gpio.cgi?pair=' + a + ',' + b,
+					{ credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({ done: false })),
+				release: (a, b) => apiFetch('/cgi-bin/j/gpio.cgi?park=' + a + ',' + b + '&mode=float',
+					{ credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({ done: false })),
+				look: () => IRCUT.snapshot('/image.jpg'),
+				wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+				stopped: () => stop,
+				onStep: (st) => {
+					t.textContent = 'Trying pins ' + st.a + ' and ' + st.b;
+					s.textContent = (st.index + 1) + ' of ' + st.total;
+					map.sweep(st.a);
+				},
+			}, list).then((res) => {
+				map.sweep(null);
+				const found = res.pins;
+				if (!found) {
+					host.innerHTML = '<div class="alert alert-secondary py-2 px-3 mb-0 small">' +
+						'<b>Nothing moved the picture.</b> Either the filter is on a pair this ' +
+						'scan did not reach, or there is not enough light to see it move. ' +
+						'Try again in daylight, or set the pins by hand.</div>';
+					return;
+				}
+				host.innerHTML = '<div class="alert alert-success py-2 px-3 mb-2 small"><b>Found it.</b> ' +
+					'Pins ' + esc(String(found.irCutPin1)) + ' and ' + esc(String(found.irCutPin2)) +
+					' drive the filter &mdash; ' + esc(String(found.closesWhenHigh)) +
+					' is the one that closes it. ' +
+					(found.brakeHeld
+						? 'It springs open when the pins are released, so they have to stay driven.'
+						: 'It holds its position on its own.') +
+					'</div><button type="button" class="btn btn-primary btn-sm" id="mj-scan-use">' +
+					'Use these pins</button>';
+				host.querySelector('#mj-scan-use').addEventListener('click', () => {
+					// Staged, never written behind the person's back: the map
+					// fills the fields and the save bar appears like any edit.
+					const a = map.get();
+					a.irCutPin1 = found.irCutPin1;
+					a.irCutPin2 = found.irCutPin2;
+					// set() fires onChange, which pushes the fields and repaints
+					// the roles — no second push needed.
+					map.set(a);
+					host.hidden = true;
+					if (status) status.textContent = 'Pins staged — Save, then test the filter.';
+				});
+			}).catch((e) => {
+				map.sweep(null);
+				host.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0 small">' +
+					'The scan could not finish: ' + esc(e && e.message ? e.message : String(e)) +
+					'</div>';
+			});
+		});
 	}
 
 	// "all N at stock" / "N of M off stock" for the section head — the question
