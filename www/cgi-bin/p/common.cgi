@@ -547,8 +547,15 @@ preview() {
 		<video id="live-video" class="mj-stage-media" autoplay muted playsinline></video>
 		<video id="live-video-b" class="mj-stage-media" autoplay muted playsinline style="display:none"></video>
 		<img id="live-mjpeg" class="mj-stage-media" alt="" style="display:none">
+		<!-- Shown only when there is no MJPEG fallback to show, so it carries
+		     both halves: why the stream could not be played (preview-page.js
+		     rewrites the span from the player's reason code) and the one thing
+		     that would give this browser a picture. With jpeg.enabled on, the
+		     picture arrives instead and the reason goes to the #mj-served
+		     toast — the explanation must not be the thing that disappears the
+		     moment the fallback works. -->
 		<p id="mj-note" class="alert alert-warning mj-stage-alert" style="display:none">
-			Your browser can't play the live H.264/H.265 stream.
+			<span id="mj-note-why">Your browser can't play the live video stream.</span>
 			<a href="mj-settings.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
 		</p>
 		<!-- The status chip. Same id as the badge it replaces, so every state

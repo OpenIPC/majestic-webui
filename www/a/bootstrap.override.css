@@ -1070,6 +1070,24 @@ mark {
 	background: #0d0f14;
 }
 
+/* What the panel says when neither transport could play the camera. There is
+   no MJPEG fallback here and there is not going to be one, so this is the whole
+   of the account — centred on the empty picture rather than tucked under it,
+   because the empty picture is the thing being explained. Its own rule rather
+   than Bootstrap's .alert: the backdrop is the black stage, not the page. */
+.mj-live-alert {
+	position: absolute;
+	inset: auto 1.25rem;
+	top: 50%;
+	transform: translateY(-50%);
+	margin: 0;
+	z-index: 3;
+	text-align: center;
+	color: rgba(255, 255, 255, 0.85);
+	font-size: 0.9375rem;
+	line-height: 1.5;
+}
+
 /* On-picture chrome: black glass in both themes, because its background is the
    picture and not the page surface. */
 .mj-glass {

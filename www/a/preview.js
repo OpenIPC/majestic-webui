@@ -17,6 +17,15 @@ window.MajesticVideo = (function () {
 		}).join(',');
 	})();
 
+	// Why a session ended, as a code rather than a sentence — the same
+	// division the camera's `served` reply uses (#240): this file names the
+	// cause, the page words it for the viewer, and a code it does not know
+	// still gets an honest generic line. `undecodable` carries the codec
+	// after a space, because "which codec" is the one actionable part of it.
+	//
+	//   undecodable <codec>  the browser will not take this stream's mime
+	//   no-mse               no Media Source Extensions in this browser
+	//   unreachable          /ws/video would not stay open
 	function attach(video, opts) {
 		opts = opts || {};
 		const onState = opts.onState || function () {};
@@ -115,7 +124,7 @@ window.MajesticVideo = (function () {
 			if (wantAudio && !info.audioCodec) { wantAudio = false; video.muted = true; }
 			mime = info.mime || ('video/mp4; codecs="' + info.codecString + '"');
 			if (!mseOk || !MediaSource.isTypeSupported(mime)) {
-				onState('mjpeg', 'codec ' + info.codec + ' not playable here');
+				onState('mjpeg', 'undecodable ' + info.codec);
 				stop();
 				return;
 			}
@@ -125,7 +134,7 @@ window.MajesticVideo = (function () {
 			video.src = objUrl;
 			ms.addEventListener('sourceopen', function () {
 				try { sb = ms.addSourceBuffer(mime); }
-				catch (e) { onState('mjpeg', 'addSourceBuffer failed'); stop(); return; }
+				catch (e) { onState('mjpeg', 'undecodable ' + info.codec); stop(); return; }
 				try { sb.mode = 'segments'; } catch (e) {}
 				sb.addEventListener('updateend', pump);
 				started = true;
@@ -180,7 +189,7 @@ window.MajesticVideo = (function () {
 		function reconnect() {
 			teardownMse();
 			if (closed || reconnectTimer) return;
-			if (++failCount >= 6) { onState('mjpeg', 'live stream unavailable'); stop(); return; }
+			if (++failCount >= 6) { onState('mjpeg', 'unreachable'); stop(); return; }
 			reconnectTimer = setTimeout(function () {
 				reconnectTimer = null;
 				backoff = Math.min(backoff * 2, 8000);
@@ -271,7 +280,7 @@ window.MajesticVideo = (function () {
 		}
 
 		if (!mseOk) {
-			onState('mjpeg', 'MSE unavailable');
+			onState('mjpeg', 'no-mse');
 			return {
 				setStream: function () {}, requestIdr: function () {},
 				setAudio: function () {}, setVolume: function () {},
