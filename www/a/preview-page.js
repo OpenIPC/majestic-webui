@@ -285,6 +285,13 @@
 	const transportW = $('#mj-transport-w'), transportM = $('#mj-transport-m');
 	const transportGrp = $('#mj-transport-ctl');
 	const transportLbl = $('#mj-transport-lbl');
+	function hideOtherKind(kind) {
+		(kind === 'wasm'
+			? ['#live-video', '#live-video-b']
+			: ['#live-canvas', '#live-canvas-b']
+		).forEach((sel) => { const e = $(sel); if (e) e.style.display = 'none'; });
+	}
+
 	function reflectTransport(kind) {
 		if (transportW) transportW.checked = kind === 'webrtc';
 		if (transportM) transportM.checked = kind === 'mse';
@@ -717,6 +724,12 @@
 			// transport carrying anything — and would make a press of either
 			// radio tear down a working session.
 			reflectTransport(kind === 'wasm' ? 'mse' : kind);
+			// The idle pair belonging to the OTHER kind is hidden by nobody:
+			// the swap only ever touches the slot it is using, so an empty
+			// <video> sits visible underneath a canvas that is painting over
+			// it. That is harmless only because the canvas is opaque and later
+			// in DOM order, which is not a thing to rely on.
+			hideOtherKind(kind);
 			settle();
 			// Only when this promotion means a picture. Holding the fallback,
 			// an unproven one is just the swap saying it had nothing of its
@@ -840,25 +853,13 @@
 			return;
 		}
 		if (kind === 'webrtc') { attachPlayer('mse'); return; }
-		if (kind === 'mse' && wasmRungFor(detail)) { attachPlayer('wasm'); return; }
+		if (kind === 'mse' && MajesticTransport.softwareRungFor(detail)) {
+			attachPlayer('wasm');
+			return;
+		}
 		showFallback(detail);
 	}
 
-	// Entered only when the BROWSER refused the codec, and only for a codec the
-	// decoder can actually take. `unreachable` and `no-mse` are not decoding
-	// problems, and an H.264 High 10 refusal reports `undecodable` too — sending
-	// it to an H.265 decoder would be a slower way to fail, after a network
-	// round trip for the module.
-	//
-	// `detail` here is the PLAYER's reason code (preview.js). The camera's
-	// served-channel reply also has a reason spelled `undecodable`, meaning
-	// something else entirely; the two vocabularies must not be crossed.
-	function wasmRungFor(detail) {
-		const bits = String(detail || '').split(' ');
-		return bits[0] === 'undecodable' &&
-			!!(window.MajesticWasm && window.MajesticWasm.available &&
-				window.MajesticWasm.handles(bits[1]));
-	}
 
 	// The page's own callbacks, all of which belong to the player on screen: a
 	// trial has no badge, no audio control and no talkback button to report to.

@@ -24,7 +24,14 @@ const SRC = path.join(__dirname, '..', 'www', 'a', 'preview-transport.js');
 // browser state and not a hypothetical one.
 function load(withStorage, seed, refuseWrites) {
 	const store = Object.assign({}, seed || {});
-	const ctx = { window: {}, console: console };
+	// The three players the module dispatches between. Named objects rather
+	// than stubs with behaviour: impl() is a lookup, and what is asserted is
+	// which one comes back.
+	const ctx = { window: {
+		MajesticWebRTC: { name: 'webrtc' },
+		MajesticVideo: { name: 'mse' },
+		MajesticWasm: { name: 'wasm' },
+	}, console: console };
 	if (withStorage) {
 		ctx.localStorage = {
 			getItem: (k) => (k in store ? store[k] : null),
@@ -42,12 +49,69 @@ function load(withStorage, seed, refuseWrites) {
 	vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
 	const mod = ctx.window.MajesticTransport;
 	mod.store = store;   // for asserting what survived
+	mod.__ctx = ctx;     // for varying the globals the module reads
 	return mod;
 }
 
 const iceServers = load(false).iceServers;
 
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// impl() had no coverage at all, and it is the one line that decides what BOTH
+// pages can attach — the Live page has its own copy of the lookup, but the
+// settings panel goes through this one.
+// The gate that decides whether the software rung is worth a network round
+// trip. It moved here from the two pages precisely so it could be tested once
+// instead of drifting in two copies.
+group('softwareRungFor() gates the software rung');
+{
+	const t = load(true);
+	const setWasm = (w) => { t.__ctx.window.MajesticWasm = w; };
+	const h265 = { available: true, handles: (c) => /^h265$|^hevc$/i.test(c || '') };
+
+	setWasm(h265);
+	check('a refused H.265 stream opens it',
+		t.softwareRungFor('undecodable h265') === true);
+	check('so does hevc spelled out',
+		t.softwareRungFor('undecodable hevc') === true);
+	// A browser refusing H.264 High 10 reports the same code; sending that to
+	// an H.265 decoder would be a slower way to fail.
+	check('a refused H.264 stream does not',
+		t.softwareRungFor('undecodable h264') === false);
+	// These are not decoding problems at all.
+	check('an unreachable camera does not',
+		t.softwareRungFor('unreachable') === false);
+	check('a browser without MSE does not',
+		t.softwareRungFor('no-mse') === false);
+	check('a source-buffer failure does not',
+		t.softwareRungFor('mse-error') === false);
+	check('and neither does nothing at all',
+		t.softwareRungFor() === false);
+
+	// The common case: no decoder module in the page at all, which is every
+	// camera whose browser never loaded one.
+	setWasm(undefined);
+	check('with no decoder present it is never worth trying',
+		t.softwareRungFor('undecodable h265') === false);
+
+	setWasm({ available: false, handles: () => true });
+	check('nor when the browser cannot run one',
+		t.softwareRungFor('undecodable h265') === false);
+}
+
+group('impl() maps a kind to a player');
+{
+	const t = load(true);
+	check('webrtc', t.impl('webrtc').name === 'webrtc', t.impl('webrtc').name);
+	check('mse', t.impl('mse').name === 'mse', t.impl('mse').name);
+	check('wasm', t.impl('wasm').name === 'wasm', t.impl('wasm').name);
+	// MSE is the floor on purpose: it plays whatever the browser can decode,
+	// so an unrecognised kind lands somewhere that works rather than on
+	// undefined.
+	check('anything else falls to MSE', t.impl('nonsense').name === 'mse',
+		t.impl('nonsense').name);
+	check('and so does nothing at all', t.impl().name === 'mse');
+}
 const is = (name, got, want) =>
 	check(name, eq(got, want), 'got ' + JSON.stringify(got));
 

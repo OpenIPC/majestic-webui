@@ -103,6 +103,14 @@ function load(cfg) {
 			choose() {}, demote() {},
 			impl: (k) => (k === 'webrtc' ? impls.webrtc : impls.mse),
 			iceServers: () => [],
+			// The real rule lives in preview-transport.js and is tested there;
+			// this mirrors it so the page's chain can be driven here.
+			softwareRungFor: (d) => {
+				const bits = String(d || '').split(' ');
+				const w = win.MajesticWasm;
+				return bits[0] === 'undecodable' &&
+					!!(w && w.available && w.handles && w.handles(bits[1]));
+			},
 			chosenStream: () => (cfg.picked === undefined ? null : cfg.picked),
 			chooseStream(where, n) { env.stored = n; },
 		},

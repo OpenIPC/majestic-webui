@@ -965,6 +965,11 @@
 			if (bits[0] === 'unreachable') {
 				return 'The camera stopped sending the ' + ch + ' stream.';
 			}
+			if (bits[0] === 'decoder-unavailable' || bits[0] === 'no-offscreen') {
+				return 'This browser can’t decode the ' + ch + ' stream, and ' +
+					'the software decoder could not be loaded, so there is no ' +
+					'preview here.';
+			}
 			return 'The ' + ch + ' stream could not be played in this browser.';
 		}
 		function showAlert(why) {
@@ -977,6 +982,41 @@
 			const a = document.getElementById('mj-live-alert');
 			if (a) a.hidden = true;
 		}
+
+		// The same walk the Live page makes, for the same reasons — see
+		// preview-page.js:nextRung. Kept as its own dozen lines rather than
+		// shared, on the standing division in this file: what the two pages DO
+		// about an outcome differs (one has an MJPEG picture to fall to, this
+		// one has an empty box and a sentence), while the rules about which
+		// transport to prefer live in preview-transport.js.
+		function nextRung(kind, detail) {
+			// A channel change can change the codec, and the failure that put
+			// us on the software rung was about the channel we left. Ask the
+			// whole chain again rather than giving up: an H.264 substream
+			// plays natively, and this panel exists to be looked at.
+			if (String(detail || '').split(' ')[0] === 'codec-changed') {
+				swap.start(window.MajesticTransport.preferred());
+				return;
+			}
+			if (kind === 'webrtc') { swap.start('mse'); return; }
+			if (kind === 'mse' &&
+				window.MajesticTransport.softwareRungFor(detail)) {
+				swap.start('wasm');
+				return;
+			}
+			exhausted = true;
+			// A canvas that has stopped being painted keeps its last frame and
+			// nothing hides it, so the luma sampler would go on reporting a
+			// frozen picture as the current one — a stale measurement dressed
+			// as a live one, which is worse than none. Withdrawing the claim
+			// is what makes the histogram fall silent.
+			['mj-live-canvas', 'mj-live-canvas-b'].forEach((id) => {
+				const e = document.getElementById(id);
+				if (e) e.__mjPainted = false;
+			});
+			showAlert(detail);
+		}
+
 
 		// This page's own remembered choice, defaulting to the substream. Not
 		// the Preview page's: the two are looked at for different reasons and
@@ -998,12 +1038,33 @@
 			// captured node is detached within a session and every show or hide
 			// afterwards writes to something nobody can see.
 			elements: [
-				() => document.getElementById('mj-live-video'),
-				() => document.getElementById('mj-live-video-b'),
+				(kind) => document.getElementById(
+					kind === 'wasm' ? 'mj-live-canvas' : 'mj-live-video'),
+				(kind) => document.getElementById(
+					kind === 'wasm' ? 'mj-live-canvas-b' : 'mj-live-video-b'),
 			],
 			open: (kind, el, id, onState) => {
 				const impl = window.MajesticTransport.impl(kind);
+				// A canvas is 300x150 the moment it exists and reports a size
+				// before anything has been decoded into it, so its dimensions
+				// prove nothing — sampling one would publish a black histogram
+				// for a preview that is merely starting, and "the picture is
+				// black" is the exact lie the sampler's guard exists to
+				// prevent. A frame is the only proof of a frame.
+				//
+				// The mark is an expando, not a data attribute, and resolved
+				// through swap.element() rather than through `el`. Both matter:
+				// the software player REPLACES its canvas on attach (the handle
+				// from transferControlToOffscreen is spent once posted), so `el`
+				// is a detached node by the time a frame arrives — and
+				// cloneNode copies attributes, so a data-* mark would be
+				// inherited by the fresh canvas and declare it painted before
+				// it was. An expando is copied by neither.
 				return impl.attach(el, {
+					onCodec: () => {
+						const live = swap.element();
+						if (live) live.__mjPainted = true;
+					},
 					stream: stream,
 					// Opened with the volume it should have rather than given
 					// it afterwards; see preview-swap.js on why applying
@@ -1023,10 +1084,20 @@
 			// state.previewPlayer is what the tab teardown closes, so it has to
 			// name whatever is actually on screen — a stale handle there leaves
 			// a live socket behind on every visit.
-			onPromoted: () => {
+			onPromoted: (kind) => {
 				state.previewPlayer = swap.player();
 				exhausted = false;
 				hideAlert();
+				// The idle pair of the other kind is hidden by nobody — the
+				// swap only touches the slot it is using — so an empty <video>
+				// would sit visible under a painting canvas.
+				(kind === 'wasm'
+					? ['mj-live-video', 'mj-live-video-b']
+					: ['mj-live-canvas', 'mj-live-canvas-b']
+				).forEach((id) => {
+					const e = document.getElementById(id);
+					if (e) e.style.display = 'none';
+				});
 			},
 			onFailed: (kind, why, permanent) => {
 				// 'fallback' is durable and worth remembering; 'busy' says the
@@ -1042,9 +1113,7 @@
 			// black box is indistinguishable from a camera that is off.
 			onExhausted: (kind, detail) => {
 				state.previewPlayer = null;
-				if (kind === 'webrtc') { swap.start('mse'); return; }
-				exhausted = true;
-				showAlert(detail);
+				nextRung(kind, detail);
 			},
 			onLive: (st, d, kind) => {
 				if (kind !== 'webrtc') {
@@ -1060,8 +1129,7 @@
 						// reconnect ladder for a session already given up on.
 						swap.stop();
 						state.previewPlayer = null;
-						exhausted = true;
-						showAlert(d);
+						nextRung(kind, d);
 					}
 					return;
 				}
@@ -1171,6 +1239,13 @@
 		stage.innerHTML =
 			'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
 			'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
+			// The software-decode rung paints a canvas rather than a video, so
+			// the panel needs its own pair the way the Live page does. Without
+			// them `impl()` knowing the kind would be worse than useless: it
+			// would attach a canvas painter to a <video> and paint nothing,
+			// with no error anywhere.
+			'<canvas id="mj-live-canvas" class="mj-live-video" style="display:none"></canvas>' +
+			'<canvas id="mj-live-canvas-b" class="mj-live-video" style="display:none"></canvas>' +
 			// When neither transport can play the camera, this panel has no
 			// MJPEG fallback to drop to and simply went black — the emptiest
 			// possible account of what happened (#274). It says so instead.
@@ -1642,11 +1717,24 @@
 			video: () => {
 				// Whichever element the swap currently has on screen; the MSE
 				// player replaces its node on every reconnect.
-				const a = document.getElementById('mj-live-video');
-				const b = document.getElementById('mj-live-video-b');
-				if (a && a.style.display !== 'none' && a.readyState >= 2) return a;
-				if (b && b.style.display !== 'none' && b.readyState >= 2) return b;
-				return a || b;
+				// Four candidates now, not two: the software rung paints a
+				// canvas. Filtering on readyState alone would have skipped
+				// both canvases for ever — they do not have one — and the
+				// histogram would simply have stopped on an H.265 camera,
+				// silently, which is the failure this panel can least afford.
+				// Videos know their own readiness; a canvas does not, so the
+				// player marks it when it has actually decoded a frame. Until
+				// then this returns a video that will fail the sampler's own
+				// guard, which keeps the measurement UNKNOWN rather than
+				// reporting black.
+				const ready = (e) => e && e.style.display !== 'none' &&
+					(e.tagName === 'CANVAS'
+						? e.__mjPainted === true
+						: e.readyState >= 2);
+				const els = ['mj-live-video', 'mj-live-video-b',
+					'mj-live-canvas', 'mj-live-canvas-b']
+					.map((id) => document.getElementById(id));
+				return els.find(ready) || els[0] || els[1];
 			},
 			onData: (r) => {
 				pathEl.setAttribute('d', r.path);
