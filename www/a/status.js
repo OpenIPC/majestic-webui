@@ -379,8 +379,12 @@
 		$('#st-hls').textContent = v.hls_clients_total | 0;
 
 		const dn = $('#st-daynight');
-		if (dn) dn.textContent = (s.night ? '🌙 Night' : '☀️ Day') + ' · IR-cut ' + (s.ircut ? 'on' : 'off') +
-			' · lamp ' + (s.light ? 'on' : 'off');
+		// A gauge this majestic does not publish reads as "not reported", never
+		// as day with the filter closed.
+		if (dn) dn.textContent = s.night == null ? 'Day / night not reported'
+			: (s.night ? '🌙 Night' : '☀️ Day') +
+				' · IR-cut ' + (s.ircut == null ? '?' : (s.ircut ? 'on' : 'off')) +
+				' · lamp ' + (s.light == null ? '?' : (s.light ? 'on' : 'off'));
 		renderIrcut(s);
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means
 		// the encoder has stopped producing frames while all else looks alive.

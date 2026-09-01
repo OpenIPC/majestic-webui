@@ -368,6 +368,11 @@ function runRest() {
 				.some(x => x.id === 'conflict'));
 		// With the monitor off every switch on the Live tab is manual, and
 		// someone holding the filter open to check an IR lamp is not a bug.
+		// Same rule for the disagreement check: two absent gauges coerced to 0
+		// agree with each other perfectly and mean nothing.
+		check('a camera reporting neither gauge raises no conflict',
+			!ic.diagnose(cfg, { night: null, ircut: null }, { conflictS: 600, flips: 0 })
+				.some(x => x.id === 'conflict'));
 		check('a manual disagreement is never a fault',
 			!ic.diagnose({ irCutPin1: 11 }, conflicted, { conflictS: 600, flips: 0 })
 				.some(x => x.id === 'conflict'));
@@ -497,6 +502,14 @@ function runRest() {
 		check('with no sample at all it says nothing',
 			!said(wired, null, { look: 'open', streak: 9 }));
 		check('an ordinary picture says nothing', !said(wired, day, { look: 'colour', streak: 9 }));
+		// An absent gauge is not a camera reporting day. main.js publishes null
+		// for a majestic that does not emit night_enabled, and coercing that to
+		// 0 would let the picture warn about an open filter on a camera that
+		// never reported day or night at all.
+		check('a camera that reports no day/night state says nothing',
+			!said(wired, { night: null, ircut: null }, { look: 'open', streak: 9 }));
+		check('...nor one reporting undefined',
+			!said(wired, { ircut: 0 }, { look: 'open', streak: 9 }));
 		check('a frame that could not tell says nothing',
 			!said(wired, day, { look: 'none', streak: 9 }));
 		// And it must never be reported as health: there is no "the filter is

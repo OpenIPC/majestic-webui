@@ -235,8 +235,13 @@
 				if (sel === p.pin) b.classList.add('mj-pin-sel');
 			});
 			if (sel === null) { pop.hidden = true; return; }
-			buildPop(sel);
 			const p = geo.pads.filter((x) => x.pin === sel)[0];
+			// A pin can be configured that this kernel never reported — a
+			// config carried between SoCs, or a hand-edited yaml. It has a row
+			// in the role list and no pad on the chip, and selecting it used to
+			// dereference the pad that is not there and take the panel down.
+			if (!p) { sel = null; pop.hidden = true; return; }
+			buildPop(sel);
 			// Clamped so the panel never starts off the chip; it is allowed to
 			// hang over the column to its right, which is what a popover does.
 			pop.style.left = Math.max(0, Math.min(p.x, geo.w - 90)) + 'px';
@@ -250,6 +255,9 @@
 		return {
 			el: wrap,
 			roles: ROLES,
+			// Whether a pin is on this chip at all, so callers can tell a pad
+			// apart from a number that merely appears in the config.
+			has: (pin) => geo.pads.some((x) => x.pin === pin),
 			get: () => Object.assign({}, assign),
 			set: (a) => { assign = Object.assign({}, a || {}); sel = null; paint(); },
 			// Called by the scan so the pad being driven lights up on the same

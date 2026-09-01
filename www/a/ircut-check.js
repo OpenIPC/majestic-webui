@@ -51,6 +51,14 @@
 	// filter and the same daylight scene turns magenta. So night and ircut
 	// agree when they are equal — 0/0 is day with the filter closed, 1/1 is
 	// night with it open.
+	// Only meaningful when the camera actually reported both. An absent gauge
+	// is not a zero: coercing one made a camera that publishes neither look
+	// like day with the filter closed — a state that agrees with itself
+	// perfectly and means nothing.
+	function known(s) {
+		return !!s && s.night !== null && s.night !== undefined &&
+			s.ircut !== null && s.ircut !== undefined;
+	}
 	function agrees(s) {
 		return (s.night | 0) === (s.ircut | 0);
 	}
@@ -90,8 +98,11 @@
 		// correctly exposed midnight frame and a correctly exposed noon frame
 		// have the same mean by construction. Hence the wording of the finding
 		// below names what it cannot rule out instead of pretending to.
+		// The day gate needs a camera that SAID it is day. Coercing an absent
+		// gauge to 0 would let the picture warn about an open filter on a
+		// camera that never reported day or night at all.
 		const pictureOpen = !!(pic && pic.look === 'open' && pic.streak >= PIC_STREAK &&
-			sample && !(sample.night | 0));
+			sample && sample.night === 0);
 
 		if (!driveable) {
 			out.push({
@@ -172,7 +183,7 @@
 		// driving. With it off, every switch on the Live tab is manual and a
 		// deliberate disagreement — filter open in daylight to check an IR
 		// lamp, say — is exactly what someone might be doing right now.
-		if (monitor && driveable && sample) {
+		if (monitor && driveable && known(sample)) {
 			if (!agrees(sample) && track.conflictS >= CONFLICT_S) {
 				out.push({
 					id: 'conflict', level: 'danger',
@@ -222,7 +233,7 @@
 				return openRun;
 			},
 			push: function (sample, nowS) {
-				if (!sample) return { flips: 0, conflictS: 0 };
+				if (!known(sample)) return { flips: 0, conflictS: 0 };
 				const night = sample.night | 0;
 				if (last !== null && last !== night) flips.push(nowS);
 				last = night;

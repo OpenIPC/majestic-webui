@@ -2010,13 +2010,22 @@
 				h.textContent = r.hint;
 				t.appendChild(h);
 				row.appendChild(t);
+				const onChip = set && map.has(a[r.key]);
 				const pin = el('span', 'mj-ircut-rpin');
 				pin.textContent = set ? String(a[r.key]) : 'not set';
 				row.appendChild(pin);
+				if (set && !onChip) {
+					// Configured, but this kernel reports no such pad — a config
+					// from another SoC, or a hand-edited yaml. Saying so beats a
+					// row that points at a pad which is not drawn.
+					row.classList.add('mj-ircut-role-unset');
+					const h = row.querySelector('.mj-ircut-rtext em');
+					if (h) h.textContent = 'not a pin on this processor';
+				}
 				// Clicking a role selects its pad, so the two halves of the
 				// panel always point at the same thing.
 				row.addEventListener('click', () => {
-					if (set) map.select(a[r.key]);
+					if (onChip) map.select(a[r.key]);
 				});
 				list.appendChild(row);
 			});
