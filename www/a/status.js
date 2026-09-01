@@ -75,6 +75,21 @@
 		if (c && Object.keys(c).length) nmCfg = c.nightMode || {};
 	}).catch(() => {});
 
+	// "This camera has no IR-cut filter", as recorded on the camera itself.
+	// Nothing measurable separates a filter nobody wired from a camera that
+	// has none, so the owner says which — once, for every browser that opens
+	// the page, which is why it is not localStorage.
+	//
+	// Starts false: a fetch that did not happen must not silence a fault. The
+	// cost of getting that wrong in this direction is a banner someone
+	// dismisses again; the other way it is a magenta picture nobody is told
+	// about.
+	let noFilter = false;
+	apiFetch('/cgi-bin/j/ircut.cgi', { credentials: 'same-origin' })
+		.then(r => r.json())
+		.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
+		.catch(() => {});
+
 	// What the snapshot tile's frame looks like. Kept as the last observation
 	// plus its run length, so the banner is driven by the picture the page is
 	// actually showing rather than by one lucky frame.
@@ -105,13 +120,51 @@
 	}
 
 	function paintIrcut() {
-		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
+		let f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
 			.filter(x => x.level !== 'info')[0];
+
+		// Configuring a pin contradicts "there is no filter here", so the claim
+		// is dropped the moment one appears. That is what keeps a dismissal
+		// from outliving its own premise: someone who says no filter, then
+		// wires one, then has it fail, is told — the promise the dismissal
+		// made was to silence "you have not set this up", not "the one you set
+		// up has stopped working".
+		if (noFilter && IC.wired && IC.wired(nmCfg)) {
+			noFilter = false;
+			apiFetch('/cgi-bin/j/ircut.cgi?clear=1', { credentials: 'same-origin' })
+				.catch(() => {});
+		}
+
+		// Only the missing-pin finding can be waved away. Every other one is
+		// about a filter that IS configured, and a camera whose filter is
+		// wired backwards is not a camera without one.
+		const canDismiss = !!f && f.id === 'no-pins';
+		if (canDismiss && noFilter) f = null;
+
 		if (f) {
 			$('#st-alert-ircut-t').textContent = f.title;
 			$('#st-alert-ircut-d').textContent = f.detail;
 		}
+		const no = $('#st-alert-ircut-no');
+		if (no) no.hidden = !(f && canDismiss);
 		setAlert('#st-alert-ircut', !!f);
+	}
+
+	function wireIrcutDismiss() {
+		const no = $('#st-alert-ircut-no');
+		if (!no) return;
+		no.addEventListener('click', () => {
+			if (!confirm('Hide this warning for good?\n\nSay yes only if this ' +
+				'camera has no IR-cut filter fitted. If it has one and it is ' +
+				'simply not set up yet, the picture will go magenta in ' +
+				'daylight and nothing will tell you why.')) return;
+			no.disabled = true;
+			apiFetch('/cgi-bin/j/ircut.cgi?dismiss=1', { credentials: 'same-origin' })
+				.then(r => r.json())
+				.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
+				.catch(() => {})
+				.then(() => { no.disabled = false; });
+		});
 	}
 
 	// The ISP panel shows what this SoC's ISP actually reports and nothing
@@ -607,6 +660,7 @@
 		// main.js is loaded without defer, so the registry exists; the poll is
 		// started by initAll on window load.
 		mjMetricsSubscribe(onSample);
+		wireIrcutDismiss();
 		// Resize redraws are charts.js's job — one debounced listener for
 		// every chart on the page.
 	}

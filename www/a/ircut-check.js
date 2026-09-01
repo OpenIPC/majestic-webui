@@ -46,6 +46,14 @@
 		return isNaN(n) ? null : n;
 	}
 	const has = (v) => pin(v) !== null;
+
+	// Is anything wired to the filter at all? The same question the missing-pin
+	// finding asks, exported because the dashboard's "no filter here" dismissal
+	// has to be dropped the moment the answer becomes yes — a claim that the
+	// camera has no filter cannot outlive someone configuring one.
+	function wired(nm) {
+		return has((nm || {}).irCutPin1);
+	}
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and yaml-cli does not normalise it.
 	const on = (v) => v === true || v === 'true' || v === 1 || v === '1';
@@ -505,7 +513,7 @@
 		diagnose: diagnose, tracker: tracker,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
-		verdict: verdict, probe: probe, snapshot: snapshot,
+		verdict: verdict, probe: probe, snapshot: snapshot, wired: wired,
 		HUNT_WINDOW_S: HUNT_WINDOW_S, HUNT_FLIPS: HUNT_FLIPS,
 		CONFLICT_S: CONFLICT_S, PIC_STREAK: PIC_STREAK,
 	};
