@@ -1880,6 +1880,12 @@
 		// the day one turns on it and a stale answer does not mis-word the
 		// verdict, it inverts it.
 		const start = ircutSample ? (ircutSample.ircut | 0) : 0;
+		// Snapshot the wiring now, not when the probe returns: it takes seconds
+		// and the map stays live throughout, so reading the fields at the end
+		// would stamp the verdict with an assignment it was never measured
+		// against — and syncVerdict() would then find them matching and keep a
+		// stale verdict on screen.
+		const testedOn = fieldAssign();
 
 		IRCUT.probe({
 			settleMs: 1500,
@@ -1909,7 +1915,10 @@
 				'Live adjustments to move it back. The test itself found: '
 				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail);
 			result.hidden = false;
-			state.ircutTestedOn = fieldAssign();
+			state.ircutTestedOn = testedOn;
+			// Edited while the probe ran: the verdict describes wiring that is
+			// no longer on screen, so it goes straight back out.
+			syncVerdict();
 		}).catch((e) => {
 			result.className = 'alert alert-danger py-2 px-3 mt-2 mb-0 small';
 			// A test that could not finish reports that it could not finish. It
@@ -1918,7 +1927,10 @@
 			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
 				'. The filter was left where it started.';
 			result.hidden = false;
-			state.ircutTestedOn = fieldAssign();
+			state.ircutTestedOn = testedOn;
+			// Edited while the probe ran: the verdict describes wiring that is
+			// no longer on screen, so it goes straight back out.
+			syncVerdict();
 		}).finally(() => {
 			ircutBusy = false;
 			btn.disabled = false;
@@ -1948,7 +1960,6 @@
 			if (f) f.setValue(a[k] === undefined ? '' : String(a[k]));
 		});
 		updateDirty();
-		syncVerdict();
 	}
 
 	// A pin the save cleared has to be GONE from the config, not set to
@@ -2003,6 +2014,12 @@
 	function syncVerdict() {
 		const r = document.getElementById('mj-ircut-result');
 		if (!r || r.hidden || !state.ircutTestedOn) return;
+		// The scan borrows this same element, and its own hit writes the pins
+		// it found — which lands here as a changed assignment. Hiding it then
+		// would take the Stop button away from a sweep that is still driving
+		// pads, on the one control in this UI that can stop a camera
+		// answering. Only ever hide a verdict.
+		if (r.classList.contains('mj-ircut-scan')) return;
 		if (state.ircutTestedOn !== fieldAssign()) {
 			r.hidden = true;
 			state.ircutTestedOn = null;
@@ -2184,6 +2201,9 @@
 		const SCAN = window.MajesticIrcutScan;
 		if (!SCAN) return;
 		const host = box.querySelector('#mj-ircut-result');
+		// Taking the element over destroys whatever verdict was in it, so the
+		// assignment that verdict was measured against stops meaning anything.
+		state.ircutTestedOn = null;
 		const status = box.querySelector('#mj-ircut-status');
 		const list = SCAN.pairs(info, { exclude: state.ircutExclude || [] });
 		let stop = false;
@@ -3042,6 +3062,10 @@
 		state.dirtyN = n;
 		renderToolbar();
 		paintStock();
+		// Every edit funnels through here — the map, a save, a per-row reset,
+		// and the four pin fields directly, which is the path that matters when
+		// the pad map could not be read and they are exposed as plain numbers.
+		syncVerdict();
 	}
 
 	// One visibility rule for both buttons: show each only while its action can
@@ -3257,7 +3281,6 @@
 		// The pads are only half of it; the role list is drawn from onChange,
 		// which `quiet` just skipped.
 		if (state.ircutRoles) state.ircutRoles();
-		syncVerdict();
 		syncTestBtn();
 		updateDirty();
 	}
