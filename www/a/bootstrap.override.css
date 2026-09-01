@@ -3875,6 +3875,19 @@ dialog.mj-modal::backdrop {
 	margin-top: 0.75rem;
 }
 
+.mj-ircut-scan {
+	margin-top: 0.75rem;
+	padding: 0.85rem 1rem 1rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-card-bg);
+}
+
+/* .mj-live-grp-head carries top margin for use partway down a column; as this
+   panel's first child that reads as a gap above the rule. */
+.mj-ircut-scan > .mj-live-grp-head:first-child {
+	margin-top: 0;
+}
 
 /* Below md the map would push the roles off the card. */
 @media (max-width: 767.98px) {
