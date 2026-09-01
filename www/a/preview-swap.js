@@ -62,7 +62,13 @@ window.MajesticSwap = function (opts) {
 		if (entry && entry.p) { try { entry.p.destroy(); } catch (e) {} }
 	}
 
-	function promote() {
+	// `proven` says whether this promotion was earned by a picture. A trial
+	// is promoted because it reported 'playing', so the answer is yes; a first
+	// attach is promoted because there was nothing to protect, which is not
+	// the same claim at all. Callers that have something of their own on the
+	// stage — the Preview page holds an MJPEG fallback the swap knows nothing
+	// about — need to tell the two apart before they tear it down.
+	function promote(proven) {
 		const s = staging;
 		staging = null;
 		if (live) {
@@ -71,7 +77,7 @@ window.MajesticSwap = function (opts) {
 		}
 		live = s;
 		show(s.slot, true);
-		opts.onPromoted(s.kind);
+		opts.onPromoted(s.kind, proven === true);
 	}
 
 	// The trial failed. Leave the screen exactly as it was — unless what is on
@@ -110,7 +116,7 @@ window.MajesticSwap = function (opts) {
 				// connecting, no signal, reconnecting — is exactly what must
 				// not reach the page, because the point is that trying costs
 				// the viewer nothing until it succeeds.
-				if (state === 'playing') promote();
+				if (state === 'playing') promote(true);
 				else if (state === 'fallback' || state === 'busy' ||
 					state === 'mjpeg') {
 					drop(detail, state === 'fallback');
@@ -133,9 +139,10 @@ window.MajesticSwap = function (opts) {
 		}
 		staging.p = p;
 
-		// Nothing on screen to protect: this is the first attach, so the trial
-		// is the live player and the caller hears about it immediately.
-		if (!live) promote();
+		// Nothing the SWAP is protecting: this is the first attach, so the trial
+		// is the live player and the caller hears about it immediately — but
+		// unproven, because nothing has reported a picture yet.
+		if (!live) promote(false);
 	}
 
 	// The player on screen has given up. Its picture is a frozen frame from

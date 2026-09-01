@@ -26,6 +26,14 @@ window.MajesticVideo = (function () {
 	//   undecodable <codec>  the browser will not take this stream's mime
 	//   no-mse               no Media Source Extensions in this browser
 	//   unreachable          /ws/video would not stay open
+	//   mse-error            MediaSource refused a mime it said it supported
+	//
+	// The last one is deliberately vague, because so is the fact: it is only
+	// reached AFTER isTypeSupported() returned true, so the throw is a source
+	// buffer limit, a MediaSource that is no longer open, quota — anything but
+	// the decoder. Reporting it as `undecodable` would have the page state
+	// something false about the browser, which is the failure this whole
+	// vocabulary exists to prevent.
 	function attach(video, opts) {
 		opts = opts || {};
 		const onState = opts.onState || function () {};
@@ -134,7 +142,7 @@ window.MajesticVideo = (function () {
 			video.src = objUrl;
 			ms.addEventListener('sourceopen', function () {
 				try { sb = ms.addSourceBuffer(mime); }
-				catch (e) { onState('mjpeg', 'undecodable ' + info.codec); stop(); return; }
+				catch (e) { onState('mjpeg', 'mse-error'); stop(); return; }
 				try { sb.mode = 'segments'; } catch (e) {}
 				sb.addEventListener('updateend', pump);
 				started = true;
