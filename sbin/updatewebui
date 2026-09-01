@@ -163,9 +163,27 @@ variant=$(sed -n 's/^BUILD_OPTION=//p' /etc/os-release 2>/dev/null | tr -d '"')
 # already fetched, staged in this directory together with the script now being
 # executed. Its presence is also what stops a second handover: one hop is the
 # whole feature, and a loop here would be a camera that never installs anything.
+#
+# The value comes from the environment, which is to say from whoever started
+# this run, and it is both an archive to install from and an rm -rf target. So
+# it is accepted only in the one shape hand_over() writes: a direct child of
+# /tmp - no slash in the name, which is what rules out "/tmp/../etc" and every
+# other way back out of /tmp - carrying the prefix used below. A future version
+# that renames its staging directory has to keep that prefix, or the run it
+# hands over to will quietly re-download instead of using the staged copy.
 handover=
-case ${UPDATEWEBUI_HANDOVER:-} in
-/tmp/?*) [ -d "$UPDATEWEBUI_HANDOVER" ] && handover=$UPDATEWEBUI_HANDOVER ;;
+handover_name=${UPDATEWEBUI_HANDOVER:-}
+case $handover_name in
+/tmp/?*)
+	handover_name=${handover_name#/tmp/}
+	case $handover_name in
+	*/*) ;;
+	"$scr_name.handover."?*)
+		[ -d "/tmp/$handover_name" ] &&
+			handover=/tmp/$handover_name
+		;;
+	esac
+	;;
 esac
 unset UPDATEWEBUI_HANDOVER
 
@@ -622,10 +640,14 @@ hand_over() {
 
 	# Staged outside the scratch directory because exec runs no EXIT trap:
 	# this run's scratch goes now, and what is staged here is handed to the
-	# new script to remove with its own.
-	keep=/tmp/$scr_name.handover.$$
-	rm -rf "$keep"
-	mkdir -p "$keep" && cp "$tmp/webui.zip" "$keep/webui.zip" &&
+	# new script to remove with its own. Named by mktemp rather than after
+	# the pid, so nothing can have the name waiting in /tmp beforehand; the
+	# prefix is what the run being handed over checks for.
+	keep=$(mktemp -d "/tmp/$scr_name.handover.XXXXXX") || {
+		echo "$scr_name: cannot stage installer v$newv, doing the install with v$scr_version" >&2
+		return 0
+	}
+	cp "$tmp/webui.zip" "$keep/webui.zip" &&
 		cp "$new" "$keep/$scr_name" || {
 		rm -rf "$keep"
 		echo "$scr_name: cannot stage installer v$newv, doing the install with v$scr_version" >&2
@@ -984,10 +1006,16 @@ drop_archives() {
 		echo "Keeping the $narchives archive(s) in $STATE_DIR: $(count "$tmp/putback.skip") path(s) in them lie outside the trees this script installs."
 		return 0
 	fi
-	if [ -s "$tmp/restored" ] && [ -s "$tmp/stale" ] &&
-		grep -qxF -f "$tmp/restored" "$tmp/stale"; then
-		echo "Keeping the $narchives archive(s) in $STATE_DIR until the camera reads those files back."
-		return 0
+	# Every path the archives hold, not just the ones written back: one that
+	# was left alone because the firmware already serves that content is on
+	# the camera in the same sense, and until the merged view says so the
+	# archive is still the only copy anybody can read.
+	if [ -s "$tmp/stale" ] && [ -s "$tmp/putback" ]; then
+		cut -d' ' -f3 "$tmp/putback" >"$tmp/putback.paths"
+		if grep -qxF -f "$tmp/putback.paths" "$tmp/stale"; then
+			echo "Keeping the $narchives archive(s) in $STATE_DIR until the camera reads those files back."
+			return 0
+		fi
 	fi
 	rm -f "$STATE_DIR"/updatewebui-local-*.tar.gz
 	echo "Removed $narchives archive(s) from $STATE_DIR; everything they held is on the camera again."
