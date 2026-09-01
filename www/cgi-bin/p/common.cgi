@@ -546,6 +546,15 @@ preview() {
 		     outgoing one before anybody knows whether it works. -->
 		<video id="live-video" class="mj-stage-media" autoplay muted playsinline></video>
 		<video id="live-video-b" class="mj-stage-media" autoplay muted playsinline style="display:none"></video>
+		<!-- The software-decode rung paints here instead. Two, for the same
+		     reason the videos are two: a trial has to prove itself on an idle
+		     element before it takes the stage. Hidden to start with, because
+		     nothing hides them but the swap and the swap only touches the slot
+		     it is using. WebCodecs and MediaStreamTrackGenerator would let a
+		     decoder feed a real <video>, and both are secure-context-only,
+		     which a camera on plain HTTP is not -- hence a canvas. -->
+		<canvas id="live-canvas" class="mj-stage-media" style="display:none"></canvas>
+		<canvas id="live-canvas-b" class="mj-stage-media" style="display:none"></canvas>
 		<img id="live-mjpeg" class="mj-stage-media" alt="" style="display:none">
 		<!-- Shown only when there is no MJPEG fallback to show, so it carries
 		     both halves: why the stream could not be played (preview-page.js

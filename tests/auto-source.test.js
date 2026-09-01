@@ -16,7 +16,8 @@ const A = (f) => path.join(__dirname, '..', 'www', 'a', f);
 const SRCS = [A('preview-swap.js'), A('preview-page.js')];
 
 const IDS = [
-	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
+	'live-mjpeg', 'live-video', 'live-video-b', 'live-canvas', 'live-canvas-b',
+	'mj-audio-ctl', 'mj-badge',
 	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note',
 	'mj-note-why', 'mj-stats',
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',

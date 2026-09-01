@@ -31,6 +31,7 @@
 <script src="/a/preview.js"></script>
 <script src="/a/preview-webrtc.js"></script>
 <script src="/a/preview-swap.js"></script>
+<script src="/a/preview-wasm.js"></script>
 <script src="/a/preview-transport.js"></script>
 <script src="/a/charts.js"></script>
 <script src="/a/preview-adapt.js"></script>
