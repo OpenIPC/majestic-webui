@@ -52,7 +52,14 @@
 	// has to be dropped the moment the answer becomes yes — a claim that the
 	// camera has no filter cannot outlive someone configuring one.
 	function wired(nm) {
-		return has((nm || {}).irCutPin1);
+		// EITHER coil. The filter is an H-bridge across two pads and the map
+		// assigns them independently, so a camera with only the opening coil
+		// set is half-configured, not unfitted — and it is exactly the camera
+		// that needs the missing-pin banner rather than a claim that there is
+		// no filter here. diagnose() still decides separately whether the
+		// wiring can actually drive anything.
+		const n = nm || {};
+		return has(n.irCutPin1) || has(n.irCutPin2);
 	}
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and yaml-cli does not normalise it.

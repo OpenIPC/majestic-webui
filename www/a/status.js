@@ -73,6 +73,10 @@
 		// would diagnose as "no IR-cut pins configured" — a fetch that did not
 		// happen must never be reported as a camera that is wired wrong.
 		if (c && Object.keys(c).length) nmCfg = c.nightMode || {};
+		// The banner is gated on this having arrived, so it has to repaint the
+		// moment it does; otherwise a camera whose heartbeat is down shows
+		// nothing at all.
+		paintIrcut();
 	}).catch(() => {});
 
 	// "This camera has no IR-cut filter", as recorded on the camera itself.
@@ -85,6 +89,7 @@
 	// dismisses again; the other way it is a magenta picture nobody is told
 	// about.
 	let noFilter = false;
+	let noFilterCleared = false;
 	apiFetch('/cgi-bin/j/ircut.cgi', { credentials: 'same-origin' })
 		.then(r => r.json())
 		.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
@@ -120,6 +125,13 @@
 	}
 
 	function paintIrcut() {
+		// Not before the config has loaded. diagnose() reads a null config as an
+		// empty one and an empty one has no pins, so painting early accuses a
+		// correctly wired camera of having nothing connected — and the accusation
+		// stands until something else repaints, which on a camera whose heartbeat
+		// is down is never. Every other caller already refused to paint here;
+		// this refuses centrally so a new one cannot forget.
+		if (!IC || !nmCfg) return;
 		let f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
 			.filter(x => x.level !== 'info')[0];
 
@@ -129,9 +141,16 @@
 		// wires one, then has it fail, is told — the promise the dismissal
 		// made was to silence "you have not set this up", not "the one you set
 		// up has stopped working".
-		if (noFilter && IC.wired && IC.wired(nmCfg)) {
-			noFilter = false;
+		if (noFilter && !noFilterCleared && IC.wired && IC.wired(nmCfg)) {
+			// Once per load, and the answer comes from the file rather than from
+			// having asked: a delete the flash refused would otherwise leave the
+			// page believing the claim was dropped while it survives on the
+			// camera, ready to suppress the banner after the pin is taken away
+			// again. Retried on the next load, which is when it can differ.
+			noFilterCleared = true;
 			apiFetch('/cgi-bin/j/ircut.cgi?clear=1', { credentials: 'same-origin' })
+				.then(r => r.json())
+				.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
 				.catch(() => {});
 		}
 
