@@ -97,9 +97,9 @@
 			out.push({
 				id: 'no-pins', level: 'danger',
 				title: 'Majestic cannot move the IR-cut filter',
-				detail: 'nightMode.irCutPin1 is not set, so nothing drives the ' +
-					'filter and it stays wherever it powered up. Left open in ' +
-					'daylight it makes the whole picture magenta.' +
+				detail: 'Nothing is connected to the filter, so nothing moves it ' +
+					'and it stays wherever it powered up. Left open in daylight ' +
+					'it makes the whole picture magenta.' +
 					// Two independent signals agreeing, so this is the one place
 					// the picture is allowed to sound certain — and it still
 					// only sharpens a finding that stands without it.
@@ -133,9 +133,9 @@
 			out.push({
 				id: 'monitor-blind', level: 'warning',
 				title: 'The light monitor has nothing to watch',
-				detail: 'nightMode.lightMonitor is on, but there is no ' +
-					'lightSensorPin and no minThreshold/maxThreshold pair, so it ' +
-					'has no input to switch on.',
+				detail: 'The light monitor is on, but nothing tells it how dark ' +
+					'it is: no daylight sensor is connected, and no day or night ' +
+					'threshold is set.',
 				fix: 'nightMode',
 			});
 		}
@@ -148,9 +148,10 @@
 			out.push({
 				id: 'thresholds', level: 'warning',
 				title: 'Day and night thresholds leave no hysteresis',
-				detail: 'minThreshold (' + lo + ') is not below maxThreshold (' +
-					hi + '), so there is no gain band between switching to night ' +
-					'and switching back. Expect the camera to oscillate at dusk.',
+				detail: 'The day threshold (' + lo + ') is not below the night ' +
+					'threshold (' + hi + '), so there is no band between switching ' +
+					'to night and switching back. Expect the camera to oscillate ' +
+					'at dusk.',
 				fix: 'nightMode',
 			});
 		}
@@ -159,8 +160,8 @@
 			out.push({
 				id: 'manual-only', level: 'info',
 				title: 'Day/night switching is manual',
-				detail: 'The filter is wired but nightMode.lightMonitor is off, ' +
-					'so nothing moves it at dusk. That is a valid setup for a ' +
+				detail: 'The filter is wired but the light monitor is off, so ' +
+					'nothing moves it at dusk. That is a valid setup for a ' +
 					'camera driven over the API; it is a fault if you expected ' +
 					'the camera to switch itself.',
 				fix: 'nightMode',
@@ -180,8 +181,8 @@
 						(sample.night ? 'night' : 'day') + ', but the filter has ' +
 						'been in the ' + (sample.ircut ? 'night (open)' : 'day (closed)') +
 						' position for ' + Math.round(track.conflictS) + 's. The ' +
-						'monitor drives both, so they should not differ — the pin ' +
-						'numbers are the first thing to check.',
+						'monitor drives both, so they should not differ — which ' +
+						'pads are connected is the first thing to check.',
 					fix: 'nightMode',
 				});
 			}
@@ -190,8 +191,8 @@
 					id: 'hunting', level: 'warning',
 					title: 'The camera keeps switching between day and night',
 					detail: track.flips + ' switches in the last ' +
-						(HUNT_WINDOW_S / 60) + ' minutes. Widen the gap between ' +
-						'minThreshold and maxThreshold so dusk cannot sit on the ' +
+						(HUNT_WINDOW_S / 60) + ' minutes. Widen the gap between the ' +
+						'day and night thresholds so dusk cannot sit on the ' +
 						'boundary.',
 					fix: 'nightMode',
 				});
@@ -352,23 +353,24 @@
 			id: 'inverted', level: 'danger',
 			title: 'The IR-cut filter is wired backwards',
 			detail: 'The picture goes magenta in the DAY position, so the filter ' +
-				'opens when it should close. Swap nightMode.irCutPin1 and ' +
-				'irCutPin2, or flip nightMode.irCutSingleInvert on a single-pin ' +
-				'board.',
+				'opens when it should close. Swap the two coils on the pin map. ' +
+				'On a board with only one coil pad, turn on "Single IRcut is ' +
+				'inverted" instead.',
 		};
 		if (dOpen && oOpen) return {
 			id: 'stuck-open', level: 'danger',
 			title: 'The filter did not move — it is stuck open',
 			detail: 'Both positions gave a magenta picture, so the pulse is not ' +
-				'reaching the solenoid. Check the irCutPin1/irCutPin2 numbers ' +
-				'against the board.',
+				'reaching the solenoid. Check which pads the two coils are ' +
+				'connected to.',
 		};
 		if (dCol && oCol) return {
 			id: 'stuck-closed', level: 'warning',
 			title: 'The filter did not move — it is stuck closed',
 			detail: 'Both positions gave the same coloured picture. Daylight ' +
 				'will look right and night will be almost black, because the ' +
-				'filter is blocking the IR lamp. Check the pin numbers.',
+				'filter is blocking the infrared lamp. Check which pads the two ' +
+				'coils are connected to.',
 		};
 		return {
 			id: 'unclear', level: 'info',

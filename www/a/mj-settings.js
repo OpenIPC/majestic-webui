@@ -1258,9 +1258,9 @@
 		// A control that cannot work should say which pin is missing rather than
 		// just refusing to move.
 		if (ircut.disabled && lbl('toggle-ircut'))
-			lbl('toggle-ircut').title = 'nightMode.irCutPin1 is not configured.';
+			lbl('toggle-ircut').title = 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
-			lbl('toggle-light').title = 'nightMode.backlightPin is not configured.';
+			lbl('toggle-light').title = 'Nothing is connected to the infrared lamp.';
 
 		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
 			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
@@ -1788,9 +1788,9 @@
 	function testBlocker() {
 		const nm = nightCfg();
 		if (!isNumish(nm.irCutPin1))
-			return 'nightMode.irCutPin1 is not set, so there is no filter to drive yet.';
+			return 'Nothing is connected to the filter yet, so there is nothing to test.';
 		if (!toBool(getDotted(state.config, 'jpeg.enabled')))
-			return 'The test reads a still from /image.jpg, and jpeg.enabled is off.';
+			return 'The test reads a still picture, and this camera has JPEG snapshots turned off.';
 		// The monitor re-drives the filter on its own schedule, and a snapshot
 		// taken after it had snapped the filter back would read as "it never
 		// moved" — convicting a correctly wired camera. Refusing to run beats
