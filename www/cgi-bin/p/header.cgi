@@ -126,6 +126,17 @@ Pragma: no-cache
 		</div>
 	</nav>
 
+<% if [ -n "$full_bleed" ]; then %>
+	<!-- A page that IS its content (preview.cgi, and so far only it). <main> is
+	     a flex column: this container holds whatever banners the camera has to
+	     raise and collapses to nothing when it has none, and the page body
+	     below it takes the rest of the window. Every reading the status strip
+	     carries is on the Dashboard, so none of it is lost by leaving it out.
+	     The heartbeat writes each of those through a `$('#…')` guard, so an
+	     absent strip and an absent footer are already accounted for. -->
+	<main class="mj-fullbleed">
+		<div class="container">
+<% else %>
 	<main class="pb-4">
 		<div class="container" style="min-height: 85vh">
 			<div class="row mt-1 x-small">
@@ -150,6 +161,7 @@ Pragma: no-cache
 					<div class="text-secondary" id="soc-temp"></div>
 				</div>
 			</div>
+<% fi %>
 
 <% if [ -z "$network_gateway" ]; then %>
 <div class="alert alert-warning">
@@ -182,3 +194,9 @@ Pragma: no-cache
 
 <% if [ -z "$hide_title" ]; then %><h2><%= $page_title %></h2><% fi %>
 <% log_read %>
+<% if [ -n "$full_bleed" ]; then %>
+	<!-- Banners and flash messages end here; what follows is the page body,
+	     which on a full-bleed page is a sibling of this container rather than
+	     a child of it, and takes the height the banners did not. -->
+	</div>
+<% fi %>

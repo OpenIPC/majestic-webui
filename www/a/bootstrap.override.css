@@ -2009,30 +2009,114 @@ mark {
 /* ---- Live View stage -------------------------------------------------------
    Everything below is on-video chrome: black glass over whatever the camera is
    showing, deliberately identical in both themes because its background is the
-   picture, not the page surface. The stage reserves 16:9 up front
-   (preview-page.js corrects the ratio from stream metadata) so nothing that
-   appears or disappears around the video can move it. */
+   picture, not the page surface.
+
+   The stage used to reserve the stream's shape inside the page's container and
+   size itself from the viewport HEIGHT less 12.5rem of chrome. Measured on a
+   2560x1440 monitor that gave a 4:3 sensor 1264 x 948 -- 32% of the screen,
+   the sensor drawn at 49% -- with 632px of empty page on each side and 254px
+   below the card, because .container (1320px) decided and the screen got no
+   vote. It is now a VIEWPORT: it takes the whole window under the navbar, and
+   preview-zoom.js sizes the picture inside it. Same window, same camera: 2560
+   x 1920 at 1:1.
+
+   These rules only ever apply to preview.cgi -- p/common.cgi's preview() is
+   the only thing that emits .mj-stage, and preview.cgi is its only caller.
+   mj-settings.cgi's Live section builds its own stage client-side out of
+   .mj-live-video, which is why none of this reaches it. */
 .mj-stage {
 	position: relative;
-	/* Fit the viewport, not just the column: at full container width a 16:9
-	   stage is ~710px tall and a laptop has to scroll to reach the bar and
-	   the device chips. The clamp sizes the stage from the viewport height
-	   (12.5rem ≈ navbar + status strip + card chrome + chips row), and the
-	   ratio keeps width and height honest together. preview-page.js rewrites
-	   it with the stream's real ratio; dvh where the browser has it, vh
-	   otherwise. Centered when narrower than the column. */
-	width: min(100%, calc((100vh - 12.5rem) * 1.77778));
-	width: min(100%, calc((100dvh - 12.5rem) * 1.77778));
-	margin-inline: auto;
-	aspect-ratio: 16 / 9;
 	background: #000;
 	overflow: hidden;
-	border-radius: var(--bs-border-radius);
+	/* The picture's gestures are this page's, not the browser's: a one-finger
+	   drag pans it and two fingers zoom it, and neither survives the browser
+	   deciding mid-gesture that it was a scroll. There is nothing to scroll
+	   here anyway — the page is exactly the viewport. The children that DO
+	   scroll take it back below. */
+	touch-action: none;
+	/* The insets of the picture inside the stage, written by preview-zoom.js
+	   and read by the chrome that annotates the picture. Declared here so that
+	   chrome is positioned correctly before -- and entirely without -- that
+	   module. */
+	--mj-pic-top: 0px;
+	--mj-pic-left: 0px;
+	--mj-pic-right: 0px;
 }
 
+/* The full-bleed page: body is the viewport, navbar and <main> are its rows,
+   and the stage takes what is left. No hardcoded navbar height anywhere -- the
+   column measures it -- so a wrapped nav on a narrow window shortens the
+   picture instead of pushing it off the bottom.
+
+   min-height: 0 on every flex item in the chain is the load-bearing half: a
+   flex item's default min-height is auto, so without it the stage refuses to
+   shrink below its content and the page scrolls after all. */
+#page-preview {
+	height: 100vh;
+	height: 100dvh;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+#page-preview > .navbar {
+	flex: none;
+}
+
+#page-preview > main.mj-fullbleed {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	/* Banners are the pathological case: three of them on a short window can
+	   leave the stage nothing. They scroll rather than squeezing the picture
+	   to a sliver, and the stage keeps a floor. */
+	overflow-y: auto;
+}
+
+/* Nothing hides the banner container when the camera has raised no banners:
+   .container carries horizontal padding only, so with nothing in it it is 0px
+   tall on its own. (`:empty` would not have done it anyway — the whitespace
+   between the haserl conditionals is a text node, and `:empty` counts those.) */
+
+#page-preview .mj-player {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+}
+
+#page-preview .mj-stage {
+	flex: 1 1 auto;
+	min-width: 0;
+	min-height: 12rem;
+}
+
+/* The two overlays that scroll inside themselves — the bar sideways on a
+   phone, the stats panel down — take their gestures back from the stage. */
+.mj-bar,
+.mj-stats-overlay {
+	touch-action: auto;
+}
+
+/* Grab-to-pan, and only while there is something to pan to: a cursor that
+   promises movement over a picture that cannot move is a lie the pointer
+   tells before the hand does. preview-zoom.js owns the class. */
+.mj-stage.mj-pannable {
+	cursor: grab;
+}
+
+.mj-stage.mj-panning {
+	cursor: grabbing;
+}
 
 .mj-stage-media {
 	position: absolute;
+	/* The fallback, and it is a real one: with no preview-zoom.js the media
+	   fill the stage and object-fit letterboxes them, which is exactly Fit.
+	   The module overrides left/top/width/height with pixels; left+right+width
+	   over-constrained resolves in favour of left and width, so `inset` does
+	   not have to be unset for that to work -- but the module unsets it
+	   anyway, because relying on that is a detail of the writing mode. */
 	inset: 0;
 	width: 100%;
 	height: 100%;
@@ -2050,11 +2134,22 @@ mark {
 	z-index: 4;
 }
 
+/* Anchored to the PICTURE, not to the stage. Fill leaves the two the same, so
+   this changes nothing in the ordinary case; on a letterboxed view a chip at
+   the stage's corner floats in black, describing nothing. preview-zoom.js
+   zeroes the insets again when the picture is too small to carry the chrome
+   without it dominating -- a 390 x 219 phone in Fit -- so a band that exists
+   is not by itself a reason to use it. */
 .mj-chip {
 	position: absolute;
-	top: 0.5rem;
-	right: 0.5rem;
+	top: calc(var(--mj-pic-top, 0px) + 0.5rem);
+	right: calc(var(--mj-pic-right, 0px) + 0.5rem);
 	z-index: 5;
+	/* It had no cap at all, and it is right-anchored with the stage clipping:
+	   a long line ("H265 3840×2160 · 25 fps · 36% · Sub stream") ran off the
+	   left edge and lost its first words rather than wrapping. Wrapping is
+	   fine here because the toasts below are hung off its MEASURED height. */
+	max-width: calc(100% - 1rem);
 	padding: 0.4rem 0.65rem;
 	border-radius: var(--bs-border-radius);
 	background: rgba(13, 15, 20, 0.72);
@@ -2069,8 +2164,8 @@ mark {
 
 .mj-stats-overlay {
 	position: absolute;
-	top: 0.5rem;
-	left: 0.5rem;
+	top: calc(var(--mj-pic-top, 0px) + 0.5rem);
+	left: calc(var(--mj-pic-left, 0px) + 0.5rem);
 	z-index: 5;
 	width: min(92%, 21rem);
 	/* Leave the bar's strip free below, and scroll rather than grow: on a
@@ -2223,15 +2318,39 @@ mark {
 
 /* The adaptation toast: under the chip, same glass. Hover pins it and click
    dismisses (preview-adapt.js), so unlike the chip it takes the pointer. */
-.mj-adapt-toast {
+/* The toast stack, hung under the chip rather than measured from the top of
+   the stage. --mj-chip-h is the chip's own rendered height (preview-zoom.js
+   measures it; the fallback is what it comes to at the default font size), so
+   a chip that grows a scale readout, or wraps to two lines on a phone, pushes
+   the toasts down instead of being crowded by them. A flex column, so a hidden
+   toast takes no room and the served message rises into the adaptation
+   toast's place when there is none. */
+.mj-toasts {
 	position: absolute;
-	top: 2.4rem;
-	right: 0.5rem;
+	top: calc(var(--mj-pic-top, 0px) + var(--mj-chip-h, 1.75rem) + 1rem);
+	right: calc(var(--mj-pic-right, 0px) + 0.5rem);
 	z-index: 5;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 0.5rem;
+	max-width: min(75%, 22rem);
+	/* The stack is a container, not a surface: only the toasts in it take a
+	   click. Otherwise the gap between two of them would eat the tap that
+	   toggles the control bar. */
+	pointer-events: none;
+}
+
+.mj-toasts > * {
+	pointer-events: auto;
+}
+
+.mj-adapt-toast {
+	position: relative;
 	margin: 0;
 	/* Room on the right for the corner-anchored ×. */
 	padding: 0.3rem 1.5rem 0.3rem 0.6rem;
-	max-width: min(75%, 22rem);
+	max-width: 100%;
 	background: rgba(13, 15, 20, 0.72);
 	border: 1px solid rgba(255, 255, 255, 0.09);
 	color: rgba(255, 255, 255, 0.9);
@@ -2271,9 +2390,9 @@ mark {
 /* The served-channel message shares the toast's glass but its own slot,
    below the adaptation toast, so a fallback and a rate change can both be
    on screen without either covering the other. */
-.mj-served-toast {
-	top: 5.2rem;
-}
+/* .mj-served-toast has nothing left to set — the stack spaces both toasts and
+   document order is what puts the served message below the adaptation one —
+   so the class stays on the markup as a label and carries no rule. */
 
 /* ── on-video chrome ────────────────────────────────────────────────────────
    The same vocabulary the Live adjustments deck uses — black glass, micro-caps
@@ -2487,6 +2606,12 @@ mark {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
+	/* One centred cluster rather than a row spanning the stage. Left-aligned
+	   groups with the icons pushed to the far edge was fine in a 1264px card;
+	   on a 2560px stage it is half a metre of eye travel between the stream
+	   picker and the fullscreen button, which is the complaint that closed
+	   #239 wearing different clothes. */
+	justify-content: center;
 	gap: 0.5rem;
 	padding: 2rem 0.75rem 0.5rem;
 	background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
@@ -2526,6 +2651,10 @@ mark {
 @media (max-width: 767.98px) {
 	.mj-bar {
 		flex-wrap: nowrap;
+		/* Back to the start edge: a centred flex row that overflows puts its
+		   first group off the left of the scrollport, where no scroll gesture
+		   reaches it. */
+		justify-content: flex-start;
 		overflow-x: auto;
 		padding-top: 1.25rem;
 		/* A default scrollbar draws a bright strip the width of the picture.
@@ -2686,76 +2815,18 @@ mark {
 	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
 }
 
-/* On a phone the pad comes off the picture and sits under it, side by side
-   with the zoom/focus cluster. At 390px the stage is 330×186, and steering
-   overlaid costs more than it is worth: a thumb-sized pad is 152px of a 186px
-   picture, and on a Pelco camera the cluster stacked above it needs another
-   130 that do not exist — it rendered over the top edge of the stage. Below
-   the picture there is room for both at full size, and the picture stays a
-   picture. The bar stays overlaid regardless: it is transient (tap to reveal),
-   the pad is not.
-
-   Reserving the space is the stage's margin, conditional on a pad that
-   preview-ptz.js actually mounted — no pad, no gap. A browser without :has()
-   simply keeps today's overlay geometry, which is why the margin and not the
-   positioning carries the condition.
-
-   These have to come AFTER the pad's own rules: same specificity, so it is
-   source order that decides. (A narrower block earlier in this file lost that
-   race silently and sized nothing.) */
+/* On a phone the pad and the stats panel used to come off the picture and sit
+   under it: at 390px the stage was 330x186, a thumb-sized pad is 152px of that
+   and the stats panel is taller than the whole stage, so overlaid they did not
+   annotate the picture, they replaced it. The stage is now the window less the
+   navbar -- 390x785 on that same phone -- so the pad covers 6% of it and the
+   panel has room, and there is no page below the stage to move anything onto.
+   Both are back on the picture at every width, and the margin reservations,
+   the :has() guards and the corner-radius shuffle they needed are gone with
+   them. What stays is the part that was about thumbs rather than about space:
+   a bigger grid on a touch screen. */
 @media (max-width: 767.98px) {
-	/* The stage clips, which is what rounds the picture's corners — so letting
-	   the pad out means moving that clip onto the media and the bar. */
-	.mj-stage {
-		overflow: visible;
-	}
-
-	.mj-stage-media,
-	.mj-bar {
-		border-bottom-left-radius: var(--bs-border-radius);
-		border-bottom-right-radius: var(--bs-border-radius);
-	}
-
-	.mj-stage-media {
-		border-top-left-radius: var(--bs-border-radius);
-		border-top-right-radius: var(--bs-border-radius);
-	}
-
-	/* Measured, not guessed: the pad is 152px with its gap, and a Pelco camera
-	   stacks the zoom/focus cluster beside it at 165. */
-	.mj-stage:has(> .mj-ptz:not([hidden])) {
-		margin-bottom: 10rem;
-	}
-
-	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])) {
-		margin-bottom: 11rem;
-	}
-
-	.mj-ptz {
-		top: 100%;
-		right: 0;
-		bottom: auto;
-		left: 0;
-		flex-direction: row;
-		align-items: flex-start;
-		justify-content: center;
-		gap: 0.5rem;
-		padding-top: 0.5rem;
-	}
-
-	/* Fullscreen is the one phone case with height to spare, and a pad below
-	   the picture there would be below the screen. Put it back on the video. */
-	.mj-stage:fullscreen .mj-ptz {
-		top: auto;
-		bottom: 3.25rem;
-		left: auto;
-		right: 0.5rem;
-		flex-direction: column;
-		align-items: flex-end;
-		padding-top: 0;
-	}
-
-	/* Off the picture, the pad can have the thumb-sized grid it wants. */
+	/* Off a mouse, the pad wants a thumb-sized grid. */
 	.mj-ptz-pad {
 		grid-template-columns: repeat(3, 2.75rem);
 		grid-auto-rows: 2.75rem;
@@ -2766,68 +2837,12 @@ mark {
 	}
 }
 
-/* The stats panel below md follows the pad off the picture, and for the same
-   arithmetic: it is taller than the whole 186px stage, so overlaid it would
-   not annotate the picture, it would replace it. Same mechanism as the pad —
-   absolute at top:100%, the stage reserving the room with a :has()-guarded
-   margin — and a fixed height so the reserved margin is a measurement, not a
-   guess; the story scrolls inside it. When the pad is out too, the pad keeps
-   the first slot (it is the always-visible one) and the panel stacks below
-   it. Fullscreen has height to spare and puts the panel back on the video. */
-@media (max-width: 767.98px) {
-	.mj-stats-overlay {
-		top: 100%;
-		left: 0;
-		right: 0;
-		width: auto;
-		height: 22rem;
-		max-height: none;
-	}
-
-	.mj-stage:has(> #mj-stats:not([hidden])) {
-		margin-bottom: 22.5rem;
-	}
-
-	.mj-stage:has(> .mj-ptz:not([hidden])) .mj-stats-overlay {
-		top: calc(100% + 10rem);
-	}
-
-	.mj-stage:has(> .mj-ptz:not([hidden])):has(> #mj-stats:not([hidden])) {
-		margin-bottom: 32.5rem;
-	}
-
-	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])) .mj-stats-overlay {
-		top: calc(100% + 11rem);
-	}
-
-	.mj-stage:has(> .mj-ptz .mj-ptz-fn:not([hidden])):has(> #mj-stats:not([hidden])) {
-		margin-bottom: 33.5rem;
-	}
-
-	.mj-stage:fullscreen .mj-stats-overlay {
-		top: 0.5rem;
-		left: 0.5rem;
-		right: auto;
-		width: min(92%, 21rem);
-		height: auto;
-		max-height: calc(100% - 5rem);
-	}
-}
-
-/* A Pelco camera puts two panels in that row, and at full size they need 284px
-   against a stage that is the viewport less ~56 — so from about 340px down
-   they hang over both edges of the picture (measured at 320: 284 into 264).
-   They stay side by side and give up 4px of grid instead of stacking, which
-   would put 315px of chrome under a 150px picture. 40px still clears WCAG
-   2.5.8 comfortably. Below 320 the page has other problems; Bootstrap's own
-   floor is 320 too. */
+/* A Pelco camera puts two panels in that column, and at full size they need
+   284px of height against a stage that is now the whole window -- so the
+   squeeze the narrowest phones used to face is gone. What is left is width:
+   below 320 the buttons themselves are what does not fit. 40px still clears
+   WCAG 2.5.8 comfortably. Bootstrap's own floor is 320 too. */
 @media (max-width: 359.98px) {
-	/* Only the pad got shorter here — the zoom/focus cluster is as tall as it
-	   was, so a Pelco camera keeps the 11rem the wider step reserved. */
-	.mj-stage:has(> .mj-ptz:not([hidden])) {
-		margin-bottom: 9.5rem;
-	}
-
 	.mj-ptz-pad {
 		grid-template-columns: repeat(3, 2.5rem);
 		grid-auto-rows: 2.5rem;
@@ -2843,11 +2858,13 @@ mark {
 	}
 }
 
+/* Fullscreen takes the stage out of the page's flex column, so it has to be
+   told its size again. The view rule then applies to the screen instead of to
+   the window, which is the whole reason the button is on the stage rather than
+   on the video: preview-zoom.js re-lays out on the resize this causes. */
 .mj-stage:fullscreen {
-	aspect-ratio: auto;
 	width: 100%;
 	height: 100%;
-	border-radius: 0;
 }
 
 .navbar-nav {

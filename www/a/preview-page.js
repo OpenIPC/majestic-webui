@@ -433,10 +433,21 @@
 		// chip claim 25 fps while the client managed 9, in exactly the case
 		// this exists to expose.
 		const fps = liveKind === 'mse' ? cfgFps[stream ? 1 : 0] : chipFps;
+		// The scale the picture is drawn at, because Fill covers the window by
+		// enlarging a stream smaller than the screen — a 1080p main on a 1440p
+		// monitor is 133%, the substream far more — and a soft picture with no
+		// number beside it reads as a soft camera. 1:1 is the one that never
+		// has to be explained. Absent where the module is (no zoom, no scale),
+		// which is also the bare-vm case the tests run.
+		const pct = window.MajesticZoom ? window.MajesticZoom.scalePct() : 0;
 		badge.textContent = (chipMedia.codec || '').toUpperCase() + ' ' +
 			chipMedia.w + '×' + chipMedia.h +
 			(fps ? ' · ' + Math.round(fps) + ' fps' : '') +
+			(pct ? ' · ' + pct + '%' : '') +
 			servedNote();
+		// Its width is what decides whether the chrome fits on the picture, and
+		// it has just changed.
+		if (window.MajesticZoom) window.MajesticZoom.refresh();
 	}
 
 	// The served-channel message: why the channel the viewer picked is not the
@@ -864,21 +875,18 @@
 	// The page's own callbacks, all of which belong to the player on screen: a
 	// trial has no badge, no audio control and no talkback button to report to.
 	// onState is the swap's, unchanged — it decides what a trial's states mean.
-	// What the codec callback reports, applied to the chip and the stage.
-	// Reserve the stream's true shape so the picture arriving (or a ratio
-	// change on a stream switch) never moves anything below the stage, and
-	// re-derive the viewport clamp from the same ratio — the CSS default
-	// assumes 16:9. The dvh write lands where the browser knows the unit and
-	// is ignored where it does not, leaving the vh version standing.
+	//
+	// What the codec callback reports, applied to the chip and to the view
+	// rule. The stage no longer reserves the stream's shape — it is the window
+	// under the navbar and its size is the page's, not the stream's — so the
+	// only thing the frame size decides here is how preview-zoom.js lays the
+	// picture out inside it. Guarded because this file is executed in a bare vm
+	// by two of the tests, and because the module is one <script> the page can
+	// be served without: with no module the media keep the stylesheet's
+	// `inset: 0` and letterbox, which is Fit.
 	function applyMedia(m) {
 		chipMedia = m;
-		const stage = $('#mj-stage');
-		if (stage && m.w && m.h) {
-			stage.style.aspectRatio = m.w + ' / ' + m.h;
-			const r = (m.w / m.h).toFixed(5);
-			stage.style.width = 'min(100%, calc((100vh - 12.5rem) * ' + r + '))';
-			stage.style.width = 'min(100%, calc((100dvh - 12.5rem) * ' + r + '))';
-		}
+		if (window.MajesticZoom) window.MajesticZoom.setFrame(m.w, m.h);
 		setChip();
 	}
 
@@ -1412,6 +1420,13 @@
 			player.setMic(talk.checked);
 		});
 	}
+
+	// The chip prints the scale, and the scale moves for reasons no player
+	// event reports: a preset, a pinch, a window resize. Over MSE the codec is
+	// reported once when the connection opens, so without this the percentage
+	// would be the one the session started with for as long as it lasted.
+	// (preview-zoom.js is loaded before this file so that it is here to ask.)
+	if (window.MajesticZoom) window.MajesticZoom.onScale(setChip);
 
 	if (statsBtn && statsBox) {
 		// Through the same helper the transport switch uses, so "is the panel

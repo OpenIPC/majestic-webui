@@ -127,8 +127,11 @@
 		};
 		stage.addEventListener('keydown', e => {
 			// Only when the stage ITSELF is focused — focus on any control in
-			// the bar means the arrows are that control's.
-			if (e.target !== stage || !KEYS[e.key]) return;
+			// the bar means the arrows are that control's. Shift is not ours
+			// either: on a camera with a pad the plain arrows steer and shift
+			// asks preview-zoom.js for the picture instead, so the keyboard
+			// keeps both without either taking the other's keys.
+			if (e.target !== stage || e.shiftKey || !KEYS[e.key]) return;
 			e.preventDefault();
 			if (e.repeat) return;
 			const btn = pad.querySelector(KEYS[e.key]);
