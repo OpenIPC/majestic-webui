@@ -1821,6 +1821,15 @@
 		const why = testBlocker();
 		btn.disabled = !!why;
 		btn.title = why || 'Moves the filter and compares the picture in both positions.';
+		// The reason goes on the page, not only in the title. A tooltip is not
+		// an explanation on a touchscreen, where there is no hover at all, and
+		// a control that refuses without saying why is the thing this whole
+		// panel exists to stop happening.
+		const note = document.getElementById('mj-ircut-why');
+		if (note) {
+			note.textContent = why || '';
+			note.hidden = !why;
+		}
 	}
 
 	function paintFindings() {
@@ -1929,6 +1938,29 @@
 		updateDirty();
 	}
 
+	// Majestic's config API can set a key but not remove one: POSTing "" or null
+	// to an integer writes 0, and 0 is a real GPIO. So "not connected" saved
+	// through the ordinary form produced a camera configured to drive pad 0,
+	// with no missing-pin warning anywhere because the key was, technically,
+	// set. The save writes what is set; this removes what is not, and waits for
+	// majestic to re-read the file so the refresh that follows sees the truth.
+	async function ircutUnsetCleared() {
+		if (state.sec !== 'nightMode') return;
+		const gone = PIN_KEYS.filter((k) => {
+			const f = pinField(k);
+			return f && String(f.getValue()) === '' && isNumish(getDotted(state.config, 'nightMode.' + k));
+		});
+		if (!gone.length) return;
+		try {
+			await apiFetch('/cgi-bin/j/gpio.cgi?unset=' + gone.join(','),
+				{ credentials: 'same-origin' });
+			// The endpoint signals majestic a second later — it is the httpd
+			// answering the request and cannot be reloaded inline — so the
+			// config is only true after that lands.
+			await new Promise((r) => setTimeout(r, 1600));
+		} catch (e) { /* the save itself stood; refresh will show what took */ }
+	}
+
 	function currentAssign() {
 		const a = {};
 		PIN_KEYS.forEach((k) => {
@@ -1953,6 +1985,7 @@
 			'<button type="button" class="btn btn-primary btn-sm" id="mj-ircut-find">Find them for me</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
 			'</div>' +
+			'<div class="small text-secondary mt-2" id="mj-ircut-why" hidden></div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-status"></div>' +
 			'<div id="mj-ircut-result" class="small" hidden></div>' +
 			'</div></div>';
@@ -1999,6 +2032,9 @@
 			soc: (window.mjSoc || '') + (info.banks ? ' · ' + info.banks.length + ' banks' : ''),
 			onChange: (a) => { pushAssign(a); paintRoles(); },
 		});
+		// load() rebuilds the panel on every section change, so the previous
+		// map's document listeners have to come off with it.
+		if (state.ircutMap && state.ircutMap.destroy) state.ircutMap.destroy();
 		state.ircutMap = map;
 
 		function paintRoles() {
@@ -3027,6 +3063,7 @@
 			// refresh would let a later discard "revert" the camera to values
 			// that are no longer what was saved (#259).
 			sent.forEach((v, f) => { state.initial[f.dot] = v; });
+			await ircutUnsetCleared();
 			await refresh();
 			// Image knobs (x-live) apply instantly; everything structural
 			// (resolution, codec, fps, ...) only takes effect after majestic

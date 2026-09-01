@@ -3895,3 +3895,22 @@ dialog.mj-modal::backdrop {
 		flex-direction: column;
 	}
 }
+
+/* The pin popover's close control. Clicking the pad again dismisses it and so
+   does Escape, but neither is discoverable, and a panel with no visible way out
+   reads as stuck (#273). */
+.mj-pinmap-x {
+	flex: 0 0 auto;
+	margin-left: auto;
+	padding: 0 0.25rem;
+	border: 0;
+	background: none;
+	color: var(--bs-tertiary-color);
+	font-size: 1rem;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.mj-pinmap-x:hover {
+	color: var(--bs-body-color);
+}

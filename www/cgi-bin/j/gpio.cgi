@@ -4,6 +4,7 @@
 # Two jobs the browser cannot do for itself:
 #
 #   (no query)         enumerate the pads and say what each one already is
+#   ?unset=<keys>      remove nightMode pin keys from the config outright
 #   ?pair=<a>,<b>      drive a high against b low, then brake both
 #   ?park=<a>,<b>      brake both (mode=brake) or release both (mode=float)
 #
@@ -38,6 +39,7 @@ PARK=""
 MODE=""
 MS=""
 CLEAR=""
+UNSET=""
 for param in $(echo "$QS" | tr '&' ' '); do
 	case "$param" in
 		pair=*) PAIR="${param#*=}" ;;
@@ -45,6 +47,7 @@ for param in $(echo "$QS" | tr '&' ' '); do
 		mode=*) MODE="${param#*=}" ;;
 		ms=*) MS="${param#*=}" ;;
 		clear=*) CLEAR="${param#*=}" ;;
+		unset=*) UNSET="${param#*=}" ;;
 	esac
 done
 
@@ -183,6 +186,37 @@ if [ "$CLEAR" = "1" ]; then
 	sync
 	json_head
 	echo '{"cleared":true}'
+	exit 0
+fi
+
+# ── unset pin keys ──────────────────────────────────────────────────────────
+# Majestic's config API can set a key but not remove one. POSTing "" or null to
+# an integer writes **0** — and 0 is a real GPIO — so "not connected" saved
+# through the ordinary form gives you a camera configured to drive pad 0, with
+# no missing-pin warning anywhere because the key is, technically, set.
+#
+# yaml-cli is the sanctioned way to edit that file, so removal goes through it
+# here. The key list is a CLOSED whitelist: these names reach a command line,
+# and the four pin keys are the only ones this endpoint has any business
+# removing.
+if [ -n "$UNSET" ]; then
+	json_head
+	done_keys=""
+	for k in $(echo "$UNSET" | tr ',' ' '); do
+		case "$k" in
+			irCutPin1|irCutPin2|backlightPin|lightSensorPin)
+				yaml-cli -d ".nightMode.$k" >/dev/null 2>&1
+				done_keys="$done_keys $k"
+				;;
+		esac
+	done
+	# Majestic re-reads the file on SIGHUP; without it the daemon keeps driving
+	# the pads the deleted keys named. Backgrounded behind a short sleep,
+	# because majestic is the httpd serving THIS request — signalling it inline
+	# reloads the process mid-response and the caller gets nothing back.
+	[ -n "$done_keys" ] && (sleep 1; killall -1 majestic) >/dev/null 2>&1 &
+	u=$(for k in $done_keys; do printf '"%s",' "$k"; done)
+	printf '{"unset":[%s]}\n' "${u%,}"
 	exit 0
 fi
 
