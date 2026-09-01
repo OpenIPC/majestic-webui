@@ -202,11 +202,23 @@ fi
 if [ -n "$UNSET" ]; then
 	json_head
 	done_keys=""
+	failed_keys=""
 	for k in $(echo "$UNSET" | tr ',' ' '); do
 		case "$k" in
 			irCutPin1|irCutPin2|backlightPin|lightSensorPin)
 				yaml-cli -d ".nightMode.$k" >/dev/null 2>&1
-				done_keys="$done_keys $k"
+				# Judged on the file, not on the exit status. `yaml-cli -d`
+				# returns 1 for a key that was already absent as well as for one
+				# it could not remove, so the status cannot tell success from
+				# failure — but reading the key back can. A delete that did not
+				# take must not be reported as one, or the caller carries on
+				# believing a coil is disconnected while it is still configured
+				# as pad 0.
+				if yaml-cli -g ".nightMode.$k" >/dev/null 2>&1; then
+					failed_keys="$failed_keys $k"
+				else
+					done_keys="$done_keys $k"
+				fi
 				;;
 		esac
 	done
@@ -216,7 +228,8 @@ if [ -n "$UNSET" ]; then
 	# reloads the process mid-response and the caller gets nothing back.
 	[ -n "$done_keys" ] && (sleep 1; killall -1 majestic) >/dev/null 2>&1 &
 	u=$(for k in $done_keys; do printf '"%s",' "$k"; done)
-	printf '{"unset":[%s]}\n' "${u%,}"
+	fl=$(for k in $failed_keys; do printf '"%s",' "$k"; done)
+	printf '{"unset":[%s],"failed":[%s]}\n' "${u%,}" "${fl%,}"
 	exit 0
 fi
 

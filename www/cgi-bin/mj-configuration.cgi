@@ -19,7 +19,8 @@
 			%>
 			<div class="d-flex gap-2 mt-3">
 				<a class="btn btn-outline-secondary" href="fw-editor.cgi?f=<%= $(get_config) %>">Edit</a>
-				<a class="btn btn-danger" href="fw-restore.cgi?f=<%= $(get_config) %>">Reset to defaults</a>
+				<a class="btn btn-danger" href="fw-restore.cgi?f=<%= $(get_config) %>"
+					data-confirm="Put every camera setting back to what the firmware shipped?&#10;&#10;This takes effect at once: video restarts on the default settings and everything configured since is gone.">Reset to defaults</a>
 			</div>
 		</div></div>
 	</div>

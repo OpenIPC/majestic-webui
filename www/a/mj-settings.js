@@ -585,6 +585,15 @@
 		(state.liveCleanup || []).forEach(fn => { try { fn(); } catch (e) { /* teardown is best-effort */ } });
 		state.liveCleanup = [];
 
+		// The pin map puts keydown and pointerdown on `document`, which is
+		// exactly the kind of listener the comment above is about: it has to
+		// come off when the section goes, not when a replacement happens to
+		// mount, or Escape keeps being intercepted from another tab entirely.
+		if (state.ircutMap && state.ircutMap.destroy) {
+			try { state.ircutMap.destroy(); } catch (e) { /* best-effort */ }
+			state.ircutMap = null;
+		}
+
 		// Through the swap, which closes the trial as well as the player on
 		// screen. Destroying only state.previewPlayer would leave a transport
 		// still being judged behind on every visit — a live socket nobody has a
@@ -1944,21 +1953,25 @@
 	// with no missing-pin warning anywhere because the key was, technically,
 	// set. The save writes what is set; this removes what is not, and waits for
 	// majestic to re-read the file so the refresh that follows sees the truth.
-	async function ircutUnsetCleared() {
+	async function ircutUnsetCleared(cleared) {
 		if (state.sec !== 'nightMode') return;
-		const gone = PIN_KEYS.filter((k) => {
-			const f = pinField(k);
-			return f && String(f.getValue()) === '' && isNumish(getDotted(state.config, 'nightMode.' + k));
-		});
+		const gone = (cleared || []).map((f) => f.dot.slice('nightMode.'.length))
+			.filter((k) => PIN_KEYS.indexOf(k) >= 0 &&
+				isNumish(getDotted(state.config, 'nightMode.' + k)));
 		if (!gone.length) return;
-		try {
-			await apiFetch('/cgi-bin/j/gpio.cgi?unset=' + gone.join(','),
-				{ credentials: 'same-origin' });
-			// The endpoint signals majestic a second later — it is the httpd
-			// answering the request and cannot be reloaded inline — so the
-			// config is only true after that lands.
-			await new Promise((r) => setTimeout(r, 1600));
-		} catch (e) { /* the save itself stood; refresh will show what took */ }
+		const r = await apiFetch('/cgi-bin/j/gpio.cgi?unset=' + gone.join(','),
+			{ credentials: 'same-origin' });
+		if (!r.ok) throw new Error('HTTP ' + r.status);
+		const out = await r.json();
+		// The endpoint judges each removal by reading the key back, so `failed`
+		// means the key is still there. Saying nothing would leave someone
+		// believing a coil is disconnected while it is still configured.
+		if (out.failed && out.failed.length)
+			throw new Error('these could not be cleared: ' + out.failed.join(', '));
+		// It signals majestic a second later — it is the httpd answering the
+		// request and cannot be reloaded inline — so the config is only true
+		// after that lands.
+		await new Promise((res) => setTimeout(res, 1600));
 	}
 
 	function currentAssign() {
@@ -2032,9 +2045,10 @@
 			soc: (window.mjSoc || '') + (info.banks ? ' · ' + info.banks.length + ' banks' : ''),
 			onChange: (a) => { pushAssign(a); paintRoles(); },
 		});
-		// load() rebuilds the panel on every section change, so the previous
-		// map's document listeners have to come off with it.
-		if (state.ircutMap && state.ircutMap.destroy) state.ircutMap.destroy();
+		// Leaving the section while this fetch was in flight means the panel
+		// this map belongs to is already gone; mounting it now would strand a
+		// second set of document listeners with nothing to remove them.
+		if (state.sec !== 'nightMode') { map.destroy(); return; }
 		state.ircutMap = map;
 
 		function paintRoles() {
@@ -3019,8 +3033,15 @@
 
 	async function onSubmit(ev) {
 		ev.preventDefault();
-		const dirty = state.fields.filter(f => f.getValue() !== state.initial[f.dot]);
-		if (!dirty.length) return;
+		const all = state.fields.filter(f => f.getValue() !== state.initial[f.dot]);
+		// A cleared pin must never be SENT. Majestic writes "" as 0, applies it
+		// on the same round trip, and 0 is a real pad — the wiki lists it as
+		// RESET on several boards — so posting the clear and tidying up
+		// afterwards drives pad 0 for as long as the cleanup takes. These are
+		// removed from the config instead, by ircutUnsetCleared() below.
+		const cleared = all.filter(f => PIN_DOTS[f.dot] && String(f.getValue()) === '');
+		const dirty = all.filter(f => cleared.indexOf(f) < 0);
+		if (!all.length) return;
 
 		const body = {};
 		// What each field was worth when the body was built, not when the
@@ -3045,16 +3066,18 @@
 		clearError();
 		liveSaving++;
 		try {
-			const res = await apiFetch('/api/v1/config', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				credentials: 'same-origin',
-				body: JSON.stringify(body),
-			});
-			if (!res.ok) {
-				const txt = await safeText(res);
-				showError('Save failed (HTTP ' + res.status + '). ' + txt);
-				return;
+			if (dirty.length) {
+				const res = await apiFetch('/api/v1/config', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'same-origin',
+					body: JSON.stringify(body),
+				});
+				if (!res.ok) {
+					const txt = await safeText(res);
+					showError('Save failed (HTTP ' + res.status + '). ' + txt);
+					return;
+				}
 			}
 			// The camera now holds these, so the snapshot the revert is built
 			// from has to say so before anything can read it again. refresh()
@@ -3063,7 +3086,13 @@
 			// refresh would let a later discard "revert" the camera to values
 			// that are no longer what was saved (#259).
 			sent.forEach((v, f) => { state.initial[f.dot] = v; });
-			await ircutUnsetCleared();
+			try {
+				await ircutUnsetCleared(cleared);
+			} catch (e) {
+				showError('Saved, but clearing a pin failed: ' +
+					(e && e.message ? e.message : e) +
+					'. The camera may still be configured to drive it.');
+			}
 			await refresh();
 			// Image knobs (x-live) apply instantly; everything structural
 			// (resolution, codec, fps, ...) only takes effect after majestic

@@ -423,6 +423,37 @@ get_config() {
 	echo ${1}/etc/majestic.yaml
 }
 
+# Make Majestic re-read its configuration file (issue #308).
+#
+# Majestic parses the file once and then holds the whole configuration in
+# memory, and config_save() writes that whole tree back. So a file replaced
+# underneath it is not merely invisible - the settings page keeps serving the
+# values Majestic still holds - it is temporary: the next save from anywhere,
+# a field on the settings page or an ONVIF client, puts the old values back on
+# disk and the edit is gone with no sign that it ever happened.
+#
+# SIGHUP is what re-reads it: reload_sdk() parses the file from scratch (built-
+# in defaults first, then whatever the file says) and rebuilds the pipeline on
+# the result. /api/v1/{config,set,reset} already do this for their own writes;
+# anything that writes the file directly has to say so here.
+#
+# Detached and delayed, because tearing the pipeline down closes every
+# connection the web server holds - and that includes the one this CGI's own
+# answer is still travelling on. Signalling in line restored the file and then
+# left the browser hanging on two of three cameras, which reads exactly like
+# the camera having crashed. Two seconds is several times what a page on these
+# boards takes to finish, so the redirect and the page it lands on are both
+# served before anything is torn down.
+#
+# The redirections are not tidiness either: the background job inherits the
+# pipe the web server reads this CGI's output from, and while it holds that
+# pipe open the answer is never finished at all.
+majestic_reload() {
+	pidof majestic >/dev/null 2>&1 || return 1
+	(sleep 2; killall -1 majestic) </dev/null >/dev/null 2>&1 &
+	return 0
+}
+
 # Best-effort clock fix for HTTPS (issue #44): a fresh flash boots with the
 # stale build timestamp until ntpd converges, so HTTPS to GitHub fails
 # ("certificate not yet valid"). Try a quick blocking NTP sync; if that is
