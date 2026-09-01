@@ -305,7 +305,19 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   100%`): Fill covers the window by enlarging a stream smaller than the screen
   — a 1080p main on a 1440p monitor is 133%, the 704×576 substream 364% — and a
   soft picture with no number beside it reads as a soft camera.
-- **Zoom to an area is the discoverable zoom-in.** `#mj-area` arms one drag;
+- **A drag always does something, and which thing is decided by whether
+  anything is hidden.** `setAffordance()` sets `.mj-pannable` and
+  `.mj-drawable` — mutually exclusive by construction, since a picture with
+  nothing off-screen has nothing to pan. The stylesheet reads them for the
+  cursor (`grab` / `crosshair`) and the pointer handler reads them for the
+  gesture. So in **Fit** a drag draws a zoom rectangle with no control to visit
+  first, which is what makes Fit the state you can react from: see something
+  happen, drag a box round it, you are on it. Zooming in makes the picture
+  pannable, so the next drag moves it — the cursor changes at the same moment,
+  which is the disclosure.
+- **Zoom to an area is the discoverable zoom-in.** `#mj-area` arms one drag,
+  and is the way to draw a rectangle while the picture *is* pannable (where a
+  bare drag would move it instead);
   the rubber band is `#mj-marquee` (a single element — its 9999px box-shadow
   spread is what dims everything outside it), and on release `zoomToRect()`
   converts the rectangle to *frame* coordinates before changing the scale,

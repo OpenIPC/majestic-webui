@@ -700,7 +700,7 @@ preview() {
 			<span class="mj-hud mj-tog-wrap" id="mj-area-ctl" hidden>
 				<input type="checkbox" class="mj-tog-in" id="mj-area" autocomplete="off">
 				<label class="mj-tog" for="mj-area" id="mj-area-lbl"
-					title="Draw a rectangle on the picture to enlarge that part of it. Esc cancels; Fit or Fill comes back out.">
+					title="Draw a rectangle on the picture to enlarge that part of it. Where nothing is hidden — Fit, mostly — you can just drag; this is for when the picture is already zoomed in and a drag would move it instead. Esc cancels; Fit or Fill comes back out.">
 					<span class="mj-led"></span>
 					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 						<rect x="3" y="4.4" width="14" height="11.2" rx="1.2" stroke-dasharray="3 2.2"></rect>

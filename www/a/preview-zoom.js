@@ -122,6 +122,21 @@
 		set('--mj-pic-right', sw - (ox + picW));
 	}
 
+	// What a drag on the picture means, as two classes: the stylesheet reads
+	// them for the cursor and the pointer handler reads them for the gesture.
+	// They are mutually exclusive by construction, which is the whole idea --
+	// a picture with nothing hidden has nothing to pan, so the drag is free,
+	// and the useful thing to do with it is draw a rectangle to zoom into.
+	// That is what makes Fit the state you can react from: see something
+	// happen, drag a box round it, and you are on it, no control to visit
+	// first. Where the picture DOES overflow the drag is the pan, and the Area
+	// button is how you ask for a rectangle instead.
+	function setAffordance(sw, sh, picW, picH) {
+		const pannable = picW > sw + 1 || picH > sh + 1;
+		stage.classList.toggle('mj-pannable', pannable);
+		stage.classList.toggle('mj-drawable', placed && !pannable);
+	}
+
 	function layout() {
 		const sw = stage.clientWidth, sh = stage.clientHeight;
 		if (!frame || !frame.w || !frame.h || !sw || !sh) return;
@@ -151,7 +166,7 @@
 
 		place(picW, picH);
 		annotate(sw, sh, picW, picH);
-		stage.classList.toggle('mj-pannable', picW > sw + 1 || picH > sh + 1);
+		setAffordance(sw, sh, picW, picH);
 		announce(prev);
 	}
 
@@ -209,7 +224,7 @@
 
 		place(picW, picH);
 		annotate(sw, sh, picW, picH);
-		stage.classList.toggle('mj-pannable', picW > sw + 1 || picH > sh + 1);
+		setAffordance(sw, sh, picW, picH);
 		syncRadios();
 		announce(prev);
 	}
@@ -237,7 +252,7 @@
 
 		place(picW, picH);
 		annotate(sw, sh, picW, picH);
-		stage.classList.toggle('mj-pannable', picW > sw + 1 || picH > sh + 1);
+		setAffordance(sw, sh, picW, picH);
 		syncRadios();
 		announce(prev);
 	}
@@ -346,7 +361,8 @@
 		if (e.button != null && e.button > 0) return;
 		if (e.target.closest && e.target.closest(CHROME)) return;
 
-		if (armed) {
+		// Armed, or simply nothing to pan: either way the drag draws.
+		if (armed || stage.classList.contains('mj-drawable')) {
 			const r = stage.getBoundingClientRect();
 			drawing = { x: e.clientX - r.left, y: e.clientY - r.top };
 			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
