@@ -1801,6 +1801,18 @@
 		return null;
 	}
 
+	// Re-reads testBlocker() against the current config and dresses the button
+	// accordingly. Asked at mount, whenever the map changes, and after a save:
+	// the answer goes stale the moment a save gives the camera the pins the
+	// button was refusing for want of.
+	function syncTestBtn() {
+		const btn = document.getElementById('mj-ircut-run');
+		if (!btn) return;
+		const why = testBlocker();
+		btn.disabled = !!why;
+		btn.title = why || 'Moves the filter and compares the picture in both positions.';
+	}
+
 	function paintFindings() {
 		const box = document.getElementById('mj-ircut-findings');
 		if (!box || !IRCUT) return;
@@ -1919,16 +1931,14 @@
 			'<div id="mj-ircut-result" class="small" hidden></div>' +
 			'</div></div>';
 
+		// Wired once, gated every time.
 		const btn = box.querySelector('#mj-ircut-run');
-		const why = testBlocker();
-		if (why) {
-			btn.disabled = true;
-			btn.title = why;
-		} else {
-			btn.title = 'Moves the filter and compares the picture in both positions.';
-			btn.addEventListener('click', () => runIrcutTest(btn,
-				box.querySelector('#mj-ircut-status'), box.querySelector('#mj-ircut-result')));
-		}
+		btn.addEventListener('click', () => {
+			if (btn.disabled) return;
+			runIrcutTest(btn, box.querySelector('#mj-ircut-status'),
+				box.querySelector('#mj-ircut-result'));
+		});
+		syncTestBtn();
 		// The map needs the camera's real pad list, which is a fetch, so it
 		// mounts late. Everything else on the section is already usable.
 		mountPinMap(box);
@@ -1966,6 +1976,7 @@
 		state.ircutMap = map;
 
 		function paintRoles() {
+			syncTestBtn();
 			const a = map.get();
 			list.innerHTML = '';
 			map.roles.forEach((r) => {
@@ -2917,6 +2928,7 @@
 		// setValue fires no events, so anything that mirrors a field rather than
 		// owning it — the orientation pad — has to be told to re-read.
 		(state.liveSync || []).forEach(fn => fn());
+		syncTestBtn();
 		updateDirty();
 	}
 
