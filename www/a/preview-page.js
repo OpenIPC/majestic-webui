@@ -657,8 +657,18 @@
 			// — including when the failure was MSE and WebRTC is still playing,
 			// where leaving it unchecked would report the opposite of the truth
 			// and make the stored preference retry the failure next load.
+			//
+			// playing(), not kind(): the question is whether WebRTC is still
+			// carrying the picture, and a retired player occupies the live
+			// slot with a frozen frame while carrying nothing. Asked the wider
+			// question, an MSE failure arriving after WebRTC had already given
+			// up took this branch on the way to the end of the chain — and
+			// wrote the viewer's PERMANENT choice from a failure path,
+			// erasing the demotion the WebRTC refusal had recorded a moment
+			// earlier. showFallback() unlights both radios straight after, so
+			// nothing on screen said so; the storage was wrong for good (#269).
 			if (kind !== 'webrtc') {
-				if (swap.kind() === 'webrtc') {
+				if (swap.playing() === 'webrtc') {
 					reflectTransport('webrtc');
 					rememberTransport('webrtc');
 				}
