@@ -158,6 +158,15 @@
 		// 'connecting…' seconds after the fallback appeared.
 		swap.stop();
 		player = null;
+		// The kind goes with the player. Left standing it names a session that
+		// ended, and every `liveKind === …` test below is then answering about
+		// something that is not on screen.
+		liveKind = null;
+		// And the software-decode disclosure's latch. hideStageMsg() above
+		// takes the message down, but the latch is what stops it being raised
+		// twice — so leaving it set means a later software session plays with
+		// no disclosure at all, which is the one thing this rung must never do.
+		swNoteKey = '';
 		syncAudioCtl();
 		syncTalkCtl();
 		// Both describe the session that just ended.

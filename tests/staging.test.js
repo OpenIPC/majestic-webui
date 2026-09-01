@@ -604,6 +604,38 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			'made=' + env.made.length);
 	}
 
+	// The disclosure is latched so it is not raised twice in one session. That
+	// latch has to die with the session, or the NEXT software session plays
+	// with nothing saying so — which is the one thing this rung must not do.
+	group('the software-decode disclosure returns after a fallback');
+	{
+		const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'undecodable h265');
+		const wasm = env.made[1];
+		wasm.say('playing');
+		wasm.opts.onStats({ transport: 'wasm', width: 1920, height: 1080,
+			framesDecoded: 100, framesDropped: 0, queuedMs: 50 });
+		check('it says software decoding is happening',
+			/decoding it in software/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+
+		// The session dies and the chain runs out.
+		wasm.say('mjpeg', 'decoder-error');
+		check('the fallback took the stage',
+			env.el('live-mjpeg').src === '/mjpeg', env.el('live-mjpeg').src);
+
+		// A retry gets back to software decode.
+		env.el('mj-stream-0').fire('click');
+		const again = env.made[env.made.length - 1];
+		again.say('playing');
+		again.opts.onStats({ transport: 'wasm', width: 1920, height: 1080,
+			framesDecoded: 100, framesDropped: 0, queuedMs: 50 });
+		check('and it says so again',
+			/decoding it in software/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+	}
+
 	group('a cloned MSE element does not strand the swap');
 	{
 		const env = load('mse');
