@@ -742,7 +742,22 @@
 	}
 
 	function handlersFor(id, onState) {
-		const isLive = () => swap.isLive(id);
+		// "Is this attachment the one the page is showing" — which is not the
+		// same question as "has the swap made it live". A retry out of the
+		// fallback is promoted unproven, because the swap had nothing of its
+		// own in the way, while the stage still holds the MJPEG picture from
+		// the session before it. Everything below belongs to whatever is on
+		// screen, so during that hold this attachment owns nothing yet: its
+		// codec and its served-channel answer are held exactly as a trial's
+		// are, and adopted by the onState handler at the moment showVideo()
+		// hands the stage over.
+		//
+		// Without the second clause a retry that never produced a frame could
+		// move the radios to the camera's served channel and replace the
+		// fallback's explanation with a mismatch toast, announcing a switch to
+		// a stream nobody was being shown — over an MJPEG picture belonging to
+		// a session that had already died.
+		const isLive = () => swap.isLive(id) && !holdingFallback;
 		// The MSE player reports its codec once, from the init message — which
 		// for a trial arrives BEFORE it is promoted, when isLive() is still
 		// false, and it never reports again. Held here and adopted the moment

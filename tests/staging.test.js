@@ -407,6 +407,44 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.el('mj-badge').textContent);
 	}
 
+	// Two ways an unproven promotion used to let a session with no picture
+	// speak for the stage: the chip and the served-channel answer.
+	group('a retry says nothing until it has a picture');
+	{
+		const env = load('webrtc', { 'jpeg.enabled': true });
+		await tick();
+		env.made[0].say('mjpeg', 'undecodable h265');
+		env.el('mj-stream-0').fire('click');
+		const retry = env.made[1];
+		check('the retry is in flight', env.made.length === 2);
+
+		// The camera answers the offer before any media arrives, and says it
+		// is serving the other channel.
+		retry.opts.onServed({ channel: 1, requested: 0, reason: 'unavailable' });
+		check('the radios have not moved for a session with no picture',
+			env.el('mj-stream-0').checked === true &&
+			env.el('mj-stream-1').checked === false);
+		check('and the fallback still owns the message',
+			/can.t decode/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+
+		// MSE reports its codec once, from the init message, before playing.
+		retry.opts.onCodec('h264', 'avc1.640028', 640, 360);
+		check('the chip still describes the stage, not the attempt',
+			env.el('mj-badge').textContent === 'MJPEG · retrying…',
+			env.el('mj-badge').textContent);
+
+		// And now it plays: everything held is adopted at once.
+		retry.say('playing');
+		check('the picture is handed over',
+			env.el('live-mjpeg').src === '', env.el('live-mjpeg').src);
+		check('the chip names what is actually playing',
+			/H264 640/.test(env.el('mj-badge').textContent),
+			env.el('mj-badge').textContent);
+		check('and the radios follow the camera now that there is a picture',
+			env.el('mj-stream-1').checked === true);
+	}
+
 	// The served-channel answer belonged to the session that died. settle()
 	// only clears it on a promotion to MSE, so a retry that landed back on
 	// WebRTC used to inherit it.
