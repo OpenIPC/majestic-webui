@@ -19,7 +19,7 @@
 # WebUI exactly as it was.
 
 scr_name=updatewebui
-scr_version=4
+scr_version=5
 
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
@@ -58,14 +58,17 @@ Where:
                      (default: master). A bare argument still works too.
       --url=URL      Install from this zip instead of GitHub. It must unpack
                      to a single directory holding www/, sbin/ and bin/.
-  -r, --restore      Remove everything a previous run installed and go back to
-                     the WebUI the firmware itself ships. Downloads nothing.
-                     Ends by offering to remove the directories left empty in
-                     the overlay, a step that reboots the camera.
+  -r, --restore      Remove what a previous run installed and go back to the
+                     WebUI the firmware itself ships, putting back the edits
+                     an install archived. Your own work is left where it is,
+                     so this is repeatable. Downloads nothing. Ends by
+                     offering to remove the directories left empty in the
+                     overlay, a step that reboots the camera.
   -n, --dry-run      Report what would change, then exit without touching
                      anything.
       --no-backup    Do not archive locally modified files before they are
-                     replaced.
+                     replaced, and with --restore do not put archived files
+                     back either.
   -h, --help         Display this help and exit.
 
 Notes:
@@ -81,6 +84,12 @@ Notes:
   Even on a first run with no manifest they are recognised, by comparing the
   overlay against the firmware's own files. To keep a change for good, send it
   upstream to https://github.com/$REPO.
+
+  --restore is the other half of that: it puts those archives back, so the
+  camera ends up as it was before the first install rather than merely
+  stripped, and removes each archive once its contents read back from the
+  camera itself. It removes only files that still hold what an install put
+  there, so anything edited since is recognised as yours and left alone.
 
   Only the files meant for this firmware's variant (BUILD_OPTION in
   /etc/os-release) are installed, mirroring what the firmware itself ships:
@@ -250,7 +259,7 @@ build_plan() {
 						# copy that differs can only be an edit made on
 						# this camera. Whiteouts and other non-files
 						# hold nothing worth saving.
-						if [ ! -f "$MANIFEST" ] && [ -f "$upper$d" ] &&
+						if [ ! -s "$MANIFEST" ] && [ -f "$upper$d" ] &&
 							! cmp -s "$upper$d" "$s"; then
 							echo "$d" >>"$tmp/local"
 						fi
@@ -262,7 +271,7 @@ build_plan() {
 					[ "$(stat -c %a "$d")" = "$(stat -c %a "$s")" ] &&
 						continue
 					# Same content, wrong mode: rewritten, nothing lost.
-				elif [ ! -f "$MANIFEST" ] && [ -n "$upper" ] &&
+				elif [ ! -s "$MANIFEST" ] && [ -n "$upper" ] &&
 					[ -f "$upper$d" ]; then
 					# The rootfs is read-only, so differing content that
 					# lives in the upper layer was put there on this
@@ -278,7 +287,7 @@ build_plan() {
 	# clears the whiteouts an older updatewebui left behind, which is why the
 	# search is for anything that is not a directory rather than for files.
 	if [ -n "$upper" ] && [ -d "$upper/var/www" ]; then
-		[ -f "$MANIFEST" ] &&
+		[ -s "$MANIFEST" ] &&
 			sed 's/^[0-9a-f]*  //' "$MANIFEST" >"$tmp/manifest.paths"
 		find "$upper/var/www" ! -type d | while read -r u; do
 			d=${u#$upper}
@@ -288,7 +297,7 @@ build_plan() {
 			# is work done on this camera. Paths the manifest records are
 			# judged against the manifest below instead.
 			[ -f "$u" ] || continue
-			if [ -f "$MANIFEST" ]; then
+			if [ -s "$MANIFEST" ]; then
 				grep -qxF "$d" "$tmp/manifest.paths" && continue
 			fi
 			[ -n "$lower" ] && cmp -s "$u" "$lower$d" && continue
@@ -298,7 +307,7 @@ build_plan() {
 
 	# /usr/sbin and /usr/bin are shared with the rest of the firmware, so only
 	# the files a previous run of this script installed may be removed there.
-	if [ -f "$MANIFEST" ]; then
+	if [ -s "$MANIFEST" ]; then
 		while read -r _ d; do
 			case $d in
 			/var/www/*) continue ;;
@@ -333,7 +342,7 @@ build_plan() {
 	# Without a manifest the overlay itself is the record: the rootfs is
 	# read-only, so every local edit necessarily lives in the upper layer,
 	# which is what the hooks above compare against the release and /rom.
-	if [ -f "$MANIFEST" ]; then
+	if [ -s "$MANIFEST" ]; then
 		md5sum -c "$MANIFEST" 2>/dev/null | sed -n 's/: FAILED.*$//p' |
 			while read -r d; do [ -f "$d" ] && echo "$d"; done >>"$tmp/local"
 	fi
@@ -360,20 +369,20 @@ report_plan() {
 		echo "  $(count "$tmp/newdirs") director(ies) to create"
 	if [ -s "$tmp/local" ]; then
 		echo
-		if [ ! -f "$MANIFEST" ]; then
-			echo "No manifest from an earlier run; overlay copies that differ"
+		if [ ! -s "$MANIFEST" ]; then
+			echo "No record of an earlier install; overlay copies that differ"
 			echo "from what this install leaves behind count as local edits."
 		fi
 		echo "Locally modified, will be replaced or removed:"
 		sed 's/^/  /' "$tmp/local"
-	elif [ ! -f "$MANIFEST" ]; then
+	elif [ ! -s "$MANIFEST" ]; then
 		echo
 		if [ -n "$upper" ]; then
-			echo "No manifest from an earlier run; overlay copies that differ"
+			echo "No record of an earlier install; overlay copies that differ"
 			echo "from what this install leaves behind would count as local"
 			echo "edits, and none were found."
 		else
-			echo "No manifest from an earlier run and no overlay to compare"
+			echo "No record of an earlier install and no overlay to compare"
 			echo "against, so local edits cannot be recognised this time and"
 			echo "are replaced without a backup."
 		fi
@@ -418,19 +427,30 @@ backup_local() {
 # Writes land on a temporary name and are renamed into place, so a file that is
 # being executed right now - this script itself, on its way to /usr/sbin - is
 # replaced rather than rewritten under the shell reading it.
+# $1 holds "mode source destination" per line. Everything a release ships is a
+# regular file, but a local edit put back from an archive can be a symlink -
+# somebody pointing a page at persistent storage - and cp without -d would write
+# the target's content over the path instead, or fail outright where the target
+# is gone, which after the removals is the worst moment to stop.
+install_files() {
+	while read -r m s d; do
+		mkdir -p "${d%/*}" || die "cannot create ${d%/*}"
+		cp -df "$s" "$d.updatewebui.tmp" || die "cannot write to ${d%/*}"
+		# chmod follows a symlink, so it would land on whatever the link
+		# points at rather than on the link this run is putting back.
+		[ -L "$s" ] || chmod "$m" "$d.updatewebui.tmp"
+		mv -f "$d.updatewebui.tmp" "$d" || die "cannot install $d"
+	done <"$1"
+	return 0
+}
+
 apply_writes() {
 	[ -s "$tmp/write" ] || return 0
 	echo "Write $(count "$tmp/write") file(s)"
 	# This script last, so it stays whole for as long as possible.
 	sort -k3 "$tmp/write" | sed "\\|/$scr_name\$|d" >"$tmp/write.ordered"
 	sed -n "\\|/$scr_name\$|p" "$tmp/write" >>"$tmp/write.ordered"
-	while read -r m s d; do
-		mkdir -p "${d%/*}" || die "cannot create ${d%/*}"
-		cp -f "$s" "$d.updatewebui.tmp" || die "cannot write to ${d%/*}"
-		chmod "$m" "$d.updatewebui.tmp"
-		mv -f "$d.updatewebui.tmp" "$d" || die "cannot install $d"
-	done <"$tmp/write.ordered"
-	return 0
+	install_files "$tmp/write.ordered"
 }
 
 # Entries are unlinked in the overlay itself, and only ever entries - never the
@@ -626,61 +646,261 @@ offer_dir_cleanup() {
 	exit 0
 }
 
+# What --restore may take away, and what it must not touch. With a manifest the
+# answer is exact: a path it records whose overlay copy still holds what the
+# install put there is this script's to remove, while the same path holding
+# something else is work done on the camera since, and stays. That is what makes
+# --restore repeatable - run twice it does the same thing twice, rather than
+# quietly eating on the second run what the first one handed back.
+#
+# Without a manifest there is nothing to consult: the camera was last updated by
+# a version of this script that recorded nothing, and /var/www belongs to the
+# WebUI alone, so all of it goes. That is the one path on which a local edit can
+# still be lost, and one install of this version closes it for good.
+plan_removals() {
+	: >"$tmp/prune"
+	: >"$tmp/kept"
+	# The manifest existing is the record, empty or not: emptied is what a
+	# previous --restore leaves behind and it means nothing is installed,
+	# while absent means no version that kept a record has ever run here.
+	if [ -f "$MANIFEST" ]; then
+		while read -r h d; do
+			[ -e "$upper$d" ] || continue
+			if [ -f "$upper$d" ] &&
+				[ "$(md5sum "$upper$d" | cut -d' ' -f1)" != "$h" ]; then
+				echo "$d" >>"$tmp/kept"
+				continue
+			fi
+			echo "$upper$d" >>"$tmp/prune"
+		done <"$MANIFEST"
+		# Nothing records the whiteouts an older version of this script
+		# wrote, and they still hide the firmware's own files.
+		if [ -d "$upper/var/www" ]; then
+			find "$upper/var/www" ! -type d ! -type f >>"$tmp/prune"
+			# A file in the WebUI's own tree that no install ever put
+			# there is somebody's own doing. It is already safe - only
+			# what the manifest records is removed - but saying so is
+			# the whole reassurance this report exists to give.
+			sed 's/^[0-9a-f]*  //' "$MANIFEST" >"$tmp/manifest.paths"
+			find "$upper/var/www" -type f | sed "s|^$upper||" |
+				while read -r d; do
+					grep -qxF "$d" "$tmp/manifest.paths" ||
+						echo "$d" >>"$tmp/kept"
+				done
+		fi
+	else
+		[ -d "$upper/var/www" ] && find "$upper/var/www" ! -type d >>"$tmp/prune"
+		# Nothing outside /var/www is recorded for a camera the
+		# manifest-less version of this script updated, and those are
+		# the ones with most to restore, so the fallback is this list of
+		# every path the project has ever installed there. It is a
+		# fallback and nothing more: once a manifest exists it names
+		# what we put outside /var/www, and guessing on top of it is how
+		# a second --restore came to delete an edited /usr/sbin/telegram
+		# that the first had just reported as the user's own. Only where
+		# the firmware has its own copy to reveal: an overlay file with
+		# nothing underneath is somebody's own, not ours to delete.
+		for d in $LEGACY_SHARED; do
+			grep -qxF "$upper$d" "$tmp/prune" && continue
+			{ [ -e "$upper$d" ] && [ -n "$lower" ] && [ -f "$lower$d" ]; } &&
+				echo "$upper$d" >>"$tmp/prune"
+		done
+	fi
+	return 0
+}
+
+# Read every archive an install left behind into one staging tree. The names
+# carry a timestamp, so the glob expands oldest first and a path edited again
+# between two installs comes back as its latest version. Extraction goes to the
+# scratch directory rather than over /, and the destination of each member is
+# recomposed from PAYLOAD afterwards: busybox tar drops a leading / or ../ from
+# a member name, so nothing can leave the staging tree, and anything that lands
+# outside the three trees this script owns never leaves it.
+unpack_archives() {
+	narchives=0
+	archives_bad=0
+	: >"$tmp/putback"
+	: >"$tmp/putback.skip"
+	[ "$do_backup" = 1 ] || return 0
+	set -- "$STATE_DIR"/updatewebui-local-*.tar.gz
+	[ -f "$1" ] || return 0
+	narchives=$#
+	mkdir -p "$tmp/back" || {
+		archives_bad=$narchives
+		return 0
+	}
+	for a in "$@"; do
+		rm -rf "$tmp/one"
+		# Each archive is unpacked on its own and merged into the staging
+		# tree only once it has been read whole: tar writes the members
+		# it has already read before it fails on a truncated one, and
+		# straight into the staging tree those half-archives would be put
+		# back by the very run that has just said it could not read them.
+		# busybox tar has no -z either, and a pipeline reports only its
+		# last command, so the decompression is its own checked step.
+		if mkdir -p "$tmp/one" &&
+			gzip -dc "$a" >"$tmp/one.tar" 2>/dev/null &&
+			tar xf "$tmp/one.tar" -C "$tmp/one" 2>/dev/null &&
+			cp -a "$tmp/one/." "$tmp/back/" 2>/dev/null; then
+			continue
+		fi
+		echo "$scr_name: cannot read $a, what it holds is not put back" >&2
+		archives_bad=$((archives_bad + 1))
+	done
+	rm -rf "$tmp/one"
+	find "$tmp/back" ! -type d 2>/dev/null | while read -r s; do
+		d=${s#$tmp/back}
+		mine=0
+		for pair in $PAYLOAD; do
+			case $d in
+			"${pair#*:}"/*) mine=1 ;;
+			esac
+		done
+		[ "$mine" = 1 ] || {
+			echo "$d" >>"$tmp/putback.skip"
+			continue
+		}
+		echo "$(stat -c %a "$s") $s $d" >>"$tmp/putback"
+	done
+	return 0
+}
+
+# Runs after the removals, so what it writes is the last word on every path it
+# touches. A file the archive holds that the firmware already serves byte for
+# byte is left alone rather than copied into the overlay: putting it back would
+# hide the firmware's own file for nothing, which is the very thing --restore
+# is for.
+restore_local() {
+	[ -s "$tmp/putback" ] || return 0
+	: >"$tmp/putback.do"
+	while read -r m s d; do
+		# A path still carrying live work on the camera is newer than any
+		# archived copy of it, and is left exactly as it is.
+		grep -qxF "$d" "$tmp/kept" && continue
+		# cmp reads through a symlink, so it would call one equal to a
+		# plain file holding the same bytes and leave the link unmade.
+		if [ ! -L "$s" ] && cmp -s "$s" "$d" 2>/dev/null; then
+			continue
+		fi
+		echo "$m $s $d" >>"$tmp/putback.do"
+	done <"$tmp/putback"
+	[ -s "$tmp/putback.do" ] || return 0
+	echo "Put $(count "$tmp/putback.do") locally modified file(s) back:"
+	cut -d' ' -f3 "$tmp/putback.do" | sed 's/^/  /'
+	install_files "$tmp/putback.do"
+	cut -d' ' -f3 "$tmp/putback.do" >"$tmp/restored"
+	# A symlink holds no content of its own, and md5sum would read
+	# whatever it points at, so only regular files carry an expectation.
+	while read -r _ s d; do
+		[ -L "$s" ] && continue
+		md5sum "$s" | sed "s|  .*|  $d|"
+	done <"$tmp/putback.do" >"$tmp/restored.md5"
+	return 0
+}
+
+# An archive exists to survive exactly one round trip: an install replaced work
+# that existed nowhere else, --restore puts it back, and from then on the camera
+# holds it again and the archive is the redundant copy. So it goes - but only
+# once every path it held has been read back from the merged view, and never
+# while an archive that could not even be opened is sitting beside it.
+drop_archives() {
+	[ "${narchives:-0}" -gt 0 ] || return 0
+	if [ "$archives_bad" -gt 0 ]; then
+		echo "Keeping the archive(s) in $STATE_DIR: $archives_bad of $narchives could not be read."
+		return 0
+	fi
+	# Nothing this script wrote holds a path outside the three trees it
+	# installs, so an archive that does was not made here - and deleting it
+	# with "everything they held is on the camera again" would be a lie
+	# about a file that was never put anywhere.
+	if [ -s "$tmp/putback.skip" ]; then
+		echo "Keeping the $narchives archive(s) in $STATE_DIR: $(count "$tmp/putback.skip") path(s) in them lie outside the trees this script installs."
+		return 0
+	fi
+	if [ -s "$tmp/restored" ] && [ -s "$tmp/stale" ] &&
+		grep -qxF -f "$tmp/restored" "$tmp/stale"; then
+		echo "Keeping the $narchives archive(s) in $STATE_DIR until the camera reads those files back."
+		return 0
+	fi
+	rm -f "$STATE_DIR"/updatewebui-local-*.tar.gz
+	echo "Removed $narchives archive(s) from $STATE_DIR; everything they held is on the camera again."
+	return 0
+}
+
 do_restore() {
 	[ -n "$upper" ] ||
 		die "no overlay is mounted, so there is no installed copy to remove"
-	: >"$tmp/prune"
-	[ -d "$upper/var/www" ] && find "$upper/var/www" ! -type d >>"$tmp/prune"
-	if [ -f "$MANIFEST" ]; then
-		while read -r _ d; do
-			case $d in
-			/var/www/*) continue ;;
-			esac
-			[ -e "$upper$d" ] && echo "$upper$d" >>"$tmp/prune"
-		done <"$MANIFEST"
-	fi
-	# Nothing outside /var/www is recorded for a camera the manifest-less
-	# version of this script updated, and those are the ones with most to
-	# restore. Only where the firmware has its own copy to reveal: an overlay
-	# file with nothing underneath is somebody's own, not ours to delete.
-	for d in $LEGACY_SHARED; do
-		grep -qxF "$upper$d" "$tmp/prune" && continue
-		{ [ -e "$upper$d" ] && [ -n "$lower" ] && [ -f "$lower$d" ]; } &&
-			echo "$upper$d" >>"$tmp/prune"
-	done
-	if [ ! -s "$tmp/prune" ]; then
+	for f in restored restored.md5 stale want gone; do : >"$tmp/$f"; done
+	plan_removals
+	unpack_archives
+
+	if [ -s "$tmp/prune" ]; then
+		echo "Remove $(count "$tmp/prune") installed file(s), revealing the firmware's WebUI:"
+		sed "s|^$upper|  |" "$tmp/prune"
+	else
 		echo "Nothing is installed over the firmware's WebUI."
-		# The empty directories a declined earlier offer left behind can
-		# still be taken away on this path; a dry run only reports them.
-		offer_dir_cleanup
-		return 0
 	fi
-	echo "Remove $(count "$tmp/prune") installed file(s), revealing the firmware's WebUI:"
-	sed "s|^$upper|  |" "$tmp/prune"
-	if [ "$dry_run" = 1 ]; then
+	if [ -s "$tmp/kept" ]; then
 		echo
-		echo "The directories this leaves empty would then be offered for"
-		echo "removal, a step that ends in a reboot."
+		echo "Your own work, left exactly where it is:"
+		sed 's/^/  /' "$tmp/kept"
+	fi
+	if [ -s "$tmp/putback" ]; then
+		echo
+		echo "Held in $narchives archive(s) an install made, to be put back:"
+		cut -d' ' -f3 "$tmp/putback" | sed 's/^/  /'
+	fi
+	if [ "$dry_run" = 1 ]; then
+		# With the files still in place the directories holding them are
+		# not empty yet, so what the offer would find can only be
+		# described. With nothing to remove it is what it would find now.
+		if [ -s "$tmp/prune" ]; then
+			echo
+			echo "The directories this leaves empty would then be offered for"
+			echo "removal, a step that ends in a reboot."
+		else
+			offer_dir_cleanup
+		fi
 		return 0
 	fi
-	remove_entries "$tmp/prune" ||
-		die "the overlay did not end up as planned, so the manifest was left alone"
-	rm -f "$MANIFEST"
+	if [ -s "$tmp/prune" ]; then
+		echo
+		remove_entries "$tmp/prune" ||
+			die "the overlay did not end up as planned, so the manifest was left alone"
+	fi
+	# Emptied rather than deleted. Nothing this script installed is left, and
+	# recording that is not the same as recording nothing: an absent manifest
+	# means the camera was last touched by a version that kept no record, and
+	# sends the next --restore down the blanket sweep of /var/www that cannot
+	# tell your files from ours.
+	mkdir -p "$STATE_DIR" && : >"$MANIFEST" ||
+		echo "$scr_name: could not empty $MANIFEST" >&2
 	settle_view
-	# Everything restored must now read back as the firmware's own copy, and
-	# a path the firmware never shipped must be gone from the merged view.
-	: >"$tmp/want"
-	: >"$tmp/gone"
+	restore_local
+	settle_view
+	# Everything removed must now read back as the firmware's own copy, and a
+	# path the firmware never shipped must be gone from the merged view -
+	# except where an archived edit was put back on top, which is then what
+	# the path is expected to hold.
 	sed "s|^$upper||" "$tmp/prune" | while read -r d; do
+		grep -qxF "$d" "$tmp/restored" && continue
 		if [ -n "$lower" ] && [ -f "$lower$d" ]; then
 			md5sum "$lower$d" | sed "s|  .*|  $d|" >>"$tmp/want"
 		else
 			echo "$d" >>"$tmp/gone"
 		fi
 	done
-	echo
-	echo "Restored the WebUI the firmware ships."
-	verify_view "$tmp/want" "$tmp/gone"
+	cat "$tmp/restored.md5" >>"$tmp/want"
+	if [ -s "$tmp/prune" ] || [ -s "$tmp/restored" ]; then
+		echo
+		if [ -s "$tmp/restored" ]; then
+			echo "Restored the WebUI the firmware ships, with your own $(count "$tmp/restored") file(s) back on top of it."
+		else
+			echo "Restored the WebUI the firmware ships."
+		fi
+		verify_view "$tmp/want" "$tmp/gone"
+	fi
+	drop_archives
 	offer_dir_cleanup
 }
 
