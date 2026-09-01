@@ -447,20 +447,10 @@
 		const h = form.querySelector('h3');
 		if (h) {
 			h.tabIndex = -1;
-			// Set to match this pick, every time, and never taken off on blur.
-			//
-			// Blur was the obvious moment to drop it and it is the wrong one:
-			// switching browser tabs blurs the heading, and coming back focuses
-			// it again with no new intent from anyone in between. The tag was
-			// gone by then, so the ring reappeared on return — and only
-			// sometimes, because it depends on whether the tab was switched with
-			// the keyboard, which is what makes the engine call the restored
-			// focus "visible" (#222).
-			//
-			// Leaving it costs nothing. tabindex -1 keeps the heading out of the
-			// tab order, so nothing but this function can focus it, and this
-			// function sets the tag both ways on every pick.
-			h.classList.toggle('mj-focus-quiet', !!byPointer);
+			if (byPointer) {
+				h.classList.add('mj-focus-quiet');
+				h.addEventListener('blur', () => h.classList.remove('mj-focus-quiet'), { once: true });
+			}
 			h.focus({ preventScroll: true });
 		}
 
@@ -1878,30 +1868,135 @@
 		});
 	}
 
+	// The four wiring pins, by the name majestic's config gives them. Numbers
+	// are plain running integers everywhere in the UI — the same 11 that goes
+	// into nightMode.irCutPin1 and the same 11 the wiki's GPIO table lists. The
+	// kernel's bank_pin spelling is deliberately never shown: a second
+	// numbering nobody can map onto the one they have to type is worse than the
+	// harder one alone.
+	const PIN_KEYS = ['irCutPin1', 'irCutPin2', 'backlightPin', 'lightSensorPin'];
+	const PIN_DOTS = {};
+	PIN_KEYS.forEach((k) => { PIN_DOTS['nightMode.' + k] = 1; });
+
+	function pinField(key) {
+		return state.fields.filter((f) => f.dot === 'nightMode.' + key)[0];
+	}
+
+	// The map reports; this writes what it reports into the real fields, so the
+	// save bar appears exactly as it would have for a typed number.
+	function pushAssign(a) {
+		PIN_KEYS.forEach((k) => {
+			const f = pinField(k);
+			if (f) f.setValue(a[k] === undefined ? '' : String(a[k]));
+		});
+		updateDirty();
+	}
+
+	function currentAssign() {
+		const a = {};
+		PIN_KEYS.forEach((k) => {
+			const v = getDotted(state.config, 'nightMode.' + k);
+			if (isNumish(v)) a[k] = Number(v);
+		});
+		return a;
+	}
+
 	function ircutPanel(sec) {
 		if (sec !== 'nightMode' || !IRCUT) return null;
 		const box = el('div', 'mj-ircut');
 		box.innerHTML =
 			'<div id="mj-ircut-findings"></div>' +
-			'<div class="d-flex align-items-center gap-2 flex-wrap">' +
-			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">' +
-			'Test IR-cut filter</button>' +
-			'<span class="small text-secondary" id="mj-ircut-status"></span>' +
+			'<div class="mj-ircut-wire">' +
+			'<div class="mj-ircut-map" id="mj-ircut-map"></div>' +
+			'<div class="mj-ircut-roles">' +
+			'<div class="mj-live-grp-head"><span class="mj-cap">Connected to</span>' +
+			'<span class="mj-live-rule"></span></div>' +
+			'<div id="mj-ircut-rolelist"></div>' +
+			'<div class="mj-ircut-acts">' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
 			'</div>' +
-			'<div id="mj-ircut-result" class="small" hidden></div>';
+			'<div class="small text-secondary mt-2" id="mj-ircut-status"></div>' +
+			'<div id="mj-ircut-result" class="small" hidden></div>' +
+			'</div></div>';
 
 		const btn = box.querySelector('#mj-ircut-run');
 		const why = testBlocker();
 		if (why) {
 			btn.disabled = true;
 			btn.title = why;
-			box.querySelector('#mj-ircut-status').textContent = why;
 		} else {
 			btn.title = 'Moves the filter and compares the picture in both positions.';
 			btn.addEventListener('click', () => runIrcutTest(btn,
 				box.querySelector('#mj-ircut-status'), box.querySelector('#mj-ircut-result')));
 		}
+		// The map needs the camera's real pad list, which is a fetch, so it
+		// mounts late. Everything else on the section is already usable.
+		mountPinMap(box);
 		return box;
+	}
+
+	// The pad map, plus the role list beside it. Both are driven by one
+	// assignment object; clicking either side moves the same thing.
+	async function mountPinMap(box) {
+		const host = box.querySelector('#mj-ircut-map');
+		const list = box.querySelector('#mj-ircut-rolelist');
+		if (!host || !window.MajesticIrcutMap) return;
+		let info;
+		try {
+			const r = await apiFetch('/cgi-bin/j/gpio.cgi', { credentials: 'same-origin' });
+			info = await r.json();
+		} catch (e) {
+			// No pad list, no map. The hidden number fields are still there, so
+			// nothing is unreachable — say which door is shut and unhide them.
+			host.innerHTML = '<p class="small text-secondary mb-0">' +
+				'Could not read this camera\'s GPIO list, so the pin map is not available. ' +
+				'The pin numbers below can still be set by hand.</p>';
+			PIN_KEYS.forEach((k) => { const f = pinField(k); if (f) f.p.hidden = false; });
+			layoutCols();
+			return;
+		}
+
+		state.ircutInfo = info;
+		const map = window.MajesticIrcutMap.mount(host, {
+			info: info,
+			assign: currentAssign(),
+			soc: (window.mjSoc || '') + (info.banks ? ' · ' + info.banks.length + ' banks' : ''),
+			onChange: (a) => { pushAssign(a); paintRoles(); },
+		});
+		state.ircutMap = map;
+
+		function paintRoles() {
+			const a = map.get();
+			list.innerHTML = '';
+			map.roles.forEach((r) => {
+				const row = el('button', 'mj-ircut-role');
+				row.type = 'button';
+				const set = a[r.key] !== undefined;
+				if (!set) row.classList.add('mj-ircut-role-unset');
+				const dot = el('span', 'mj-ircut-rdot');
+				dot.style.background = set ? r.color : '';
+				row.appendChild(dot);
+				const t = el('span', 'mj-ircut-rtext');
+				const l = el('b');
+				l.textContent = r.label;
+				t.appendChild(l);
+				const h = el('em');
+				h.textContent = r.hint;
+				t.appendChild(h);
+				row.appendChild(t);
+				const pin = el('span', 'mj-ircut-rpin');
+				pin.textContent = set ? String(a[r.key]) : 'not set';
+				row.appendChild(pin);
+				// Clicking a role selects its pad, so the two halves of the
+				// panel always point at the same thing.
+				row.addEventListener('click', () => {
+					if (set) map.select(a[r.key]);
+				});
+				list.appendChild(row);
+			});
+		}
+		paintRoles();
+
 	}
 
 	// "all N at stock" / "N of M off stock" for the section head — the question
@@ -1969,7 +2064,12 @@
 				continue;
 			}
 			const eff = getDotted(state.config, dot);
-			const field = renderField(container, dot, key, sub, eff);
+			// The four wiring pins render hidden rather than not at all: the pin
+			// map above the form is what edits them, but they stay real fields
+			// so dirty tracking, Save and the per-row reset keep working on them
+			// without knowing a map exists.
+			const field = renderField(container, dot, key, sub, eff,
+				PIN_DOTS[dot] ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();

@@ -106,6 +106,7 @@ fi
 %>
 <script src="/a/mj-luma.js"></script>
 <script src="/a/ircut-check.js"></script>
+<script src="/a/ircut-map.js"></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>
