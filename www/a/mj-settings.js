@@ -3258,8 +3258,11 @@
 			// ignores it — and nothing else on the page would ever say so.
 			const kept = stillSet(cleared);
 			if (kept.length)
+				// Joined with semicolons, because the role names have commas in
+				// them: "IR-cut filter, closing coil, IR-cut filter, opening
+				// coil" reads as four things and names none of them.
 				showError('Saved, but these could not be disconnected: ' +
-					kept.join(', ') + '. The camera is still configured to ' +
+					kept.join('; ') + '. The camera is still configured to ' +
 					'drive them; its firmware may be too old to clear a setting.');
 			// Image knobs (x-live) apply instantly; everything structural
 			// (resolution, codec, fps, ...) only takes effect after majestic

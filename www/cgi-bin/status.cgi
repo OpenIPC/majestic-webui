@@ -45,10 +45,16 @@ done) %>
 	     one banner covers a missing pin, a light monitor with nothing to watch,
 	     thresholds with no hysteresis and a day/night disagreement, and each
 	     needs its own sentence. -->
+	<!-- "No filter here" is offered only for the missing-pin finding, and
+	     status.js unhides it: nothing the camera can measure separates a
+	     filter nobody wired from a camera that has none, so the owner is the
+	     only one who can say. Every other finding is about a filter that is
+	     configured, and none of them can be waved away. -->
 	<div class="st-alert" id="st-alert-ircut" hidden>
 		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
 		<span class="small"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></span>
 		<a class="small ms-auto" href="mj-settings.cgi?tab=nightMode">Open Day / Night &rarr;</a>
+		<button type="button" class="btn btn-link btn-sm small p-0 ms-3" id="st-alert-ircut-no" hidden>No filter here</button>
 	</div>
 	<div class="st-alert" id="st-alert-stall" hidden>
 		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
