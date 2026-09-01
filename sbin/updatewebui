@@ -427,12 +427,18 @@ backup_local() {
 # Writes land on a temporary name and are renamed into place, so a file that is
 # being executed right now - this script itself, on its way to /usr/sbin - is
 # replaced rather than rewritten under the shell reading it.
-# $1 holds "mode source destination" per line.
+# $1 holds "mode source destination" per line. Everything a release ships is a
+# regular file, but a local edit put back from an archive can be a symlink -
+# somebody pointing a page at persistent storage - and cp without -d would write
+# the target's content over the path instead, or fail outright where the target
+# is gone, which after the removals is the worst moment to stop.
 install_files() {
 	while read -r m s d; do
 		mkdir -p "${d%/*}" || die "cannot create ${d%/*}"
-		cp -f "$s" "$d.updatewebui.tmp" || die "cannot write to ${d%/*}"
-		chmod "$m" "$d.updatewebui.tmp"
+		cp -df "$s" "$d.updatewebui.tmp" || die "cannot write to ${d%/*}"
+		# chmod follows a symlink, so it would land on whatever the link
+		# points at rather than on the link this run is putting back.
+		[ -L "$s" ] || chmod "$m" "$d.updatewebui.tmp"
 		mv -f "$d.updatewebui.tmp" "$d" || die "cannot install $d"
 	done <"$1"
 	return 0
@@ -684,17 +690,22 @@ plan_removals() {
 		fi
 	else
 		[ -d "$upper/var/www" ] && find "$upper/var/www" ! -type d >>"$tmp/prune"
+		# Nothing outside /var/www is recorded for a camera the
+		# manifest-less version of this script updated, and those are
+		# the ones with most to restore, so the fallback is this list of
+		# every path the project has ever installed there. It is a
+		# fallback and nothing more: once a manifest exists it names
+		# what we put outside /var/www, and guessing on top of it is how
+		# a second --restore came to delete an edited /usr/sbin/telegram
+		# that the first had just reported as the user's own. Only where
+		# the firmware has its own copy to reveal: an overlay file with
+		# nothing underneath is somebody's own, not ours to delete.
+		for d in $LEGACY_SHARED; do
+			grep -qxF "$upper$d" "$tmp/prune" && continue
+			{ [ -e "$upper$d" ] && [ -n "$lower" ] && [ -f "$lower$d" ]; } &&
+				echo "$upper$d" >>"$tmp/prune"
+		done
 	fi
-	# Nothing outside /var/www is recorded for a camera the manifest-less
-	# version of this script updated, and those are the ones with most to
-	# restore. Only where the firmware has its own copy to reveal: an overlay
-	# file with nothing underneath is somebody's own, not ours to delete.
-	for d in $LEGACY_SHARED; do
-		grep -qxF "$upper$d" "$tmp/prune" && continue
-		grep -qxF "$d" "$tmp/kept" && continue
-		{ [ -e "$upper$d" ] && [ -n "$lower" ] && [ -f "$lower$d" ]; } &&
-			echo "$upper$d" >>"$tmp/prune"
-	done
 	return 0
 }
 
@@ -718,15 +729,24 @@ unpack_archives() {
 		return 0
 	}
 	for a in "$@"; do
-		# busybox tar has no -z, and a pipeline reports only its last
-		# command, so this is two separately checked steps as well.
-		if gzip -dc "$a" >"$tmp/back.tar" 2>/dev/null &&
-			tar xf "$tmp/back.tar" -C "$tmp/back" 2>/dev/null; then
+		rm -rf "$tmp/one"
+		# Each archive is unpacked on its own and merged into the staging
+		# tree only once it has been read whole: tar writes the members
+		# it has already read before it fails on a truncated one, and
+		# straight into the staging tree those half-archives would be put
+		# back by the very run that has just said it could not read them.
+		# busybox tar has no -z either, and a pipeline reports only its
+		# last command, so the decompression is its own checked step.
+		if mkdir -p "$tmp/one" &&
+			gzip -dc "$a" >"$tmp/one.tar" 2>/dev/null &&
+			tar xf "$tmp/one.tar" -C "$tmp/one" 2>/dev/null &&
+			cp -a "$tmp/one/." "$tmp/back/" 2>/dev/null; then
 			continue
 		fi
 		echo "$scr_name: cannot read $a, what it holds is not put back" >&2
 		archives_bad=$((archives_bad + 1))
 	done
+	rm -rf "$tmp/one"
 	find "$tmp/back" ! -type d 2>/dev/null | while read -r s; do
 		d=${s#$tmp/back}
 		mine=0
@@ -761,7 +781,10 @@ restore_local() {
 	cut -d' ' -f3 "$tmp/putback.do" | sed 's/^/  /'
 	install_files "$tmp/putback.do"
 	cut -d' ' -f3 "$tmp/putback.do" >"$tmp/restored"
+	# A symlink holds no content of its own, and md5sum would read
+	# whatever it points at, so only regular files carry an expectation.
 	while read -r _ s d; do
+		[ -L "$s" ] && continue
 		md5sum "$s" | sed "s|  .*|  $d|"
 	done <"$tmp/putback.do" >"$tmp/restored.md5"
 	return 0
