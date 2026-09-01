@@ -211,6 +211,44 @@ group('run: it finds the pair, and only the pair');
 	}
 
 	function eighth() {
+		group('run: a failed request stops the sweep, a refusal does not');
+		// The endpoint guards pads with owners and says so with done:false —
+		// skip that pair and carry on. A request that never arrives is a camera
+		// that has stopped answering; treating it as "this pair moved nothing"
+		// kept the scan firing GPIO writes at a dead camera for the rest of the
+		// list and then reported that nothing moved.
+		const refused = [];
+		const ioRefuse = {
+			drive: (a, b) => { refused.push(a + ',' + b); return Promise.resolve({ done: false, error: 'pad is already assigned' }); },
+			release: () => Promise.resolve({ done: true }),
+			look: () => Promise.resolve(OPEN),
+			wait: () => Promise.resolve(),
+		};
+		return scan.run(ioRefuse, [[1, 2], [3, 4]], { settleMs: 0 }).then((r) => {
+			check('a refused pair is skipped and the sweep continues',
+				r.found === null && r.done === true, JSON.stringify(r));
+			check('both pairs were offered', refused.length >= 2, refused.join(' | '));
+
+			let n = 0;
+			const ioDead = {
+				drive: () => { n++; return n > 1 ? Promise.reject(new Error('HTTP 502')) : Promise.resolve({ done: true }); },
+				release: () => Promise.resolve({ done: true }),
+				look: () => Promise.resolve(OPEN),
+				wait: () => Promise.resolve(),
+			};
+			return scan.run(ioDead, [[1, 2], [3, 4], [5, 6], [7, 8]], { settleMs: 0 }).then(
+				() => check('a dead camera must not resolve as a finished scan', false),
+				(e) => {
+					check('the failure reaches the caller', /502/.test(e.message), e.message);
+					// Four pairs, two orderings each, would be eight drives if
+					// the sweep had carried on regardless.
+					check('and the sweep stopped rather than working the list', n <= 2, 'drives=' + n);
+					return ninth();
+				});
+		});
+	}
+
+	function ninth() {
 		group('casualty: the pair that stopped the camera answering');
 		const hung = scan.casualty({ boot: 2000, scan: { pins: [47, 48], started: 1900 } });
 		check('an actuation predating this boot names both pads',

@@ -2051,12 +2051,20 @@
 		const dead = window.MajesticIrcutScan &&
 			window.MajesticIrcutScan.casualty(info);
 		if (dead) {
+			// The journal records the PAIR that was being driven, because a pair
+			// is what an actuation takes. Reading one pin off it printed
+			// "undefined" and excluded nothing, which left the pair that
+			// rebooted the camera free to be tried again on the next scan —
+			// the exact outcome the journal exists to prevent.
+			const pins = (dead.pins || []).map(Number).filter((n) => !isNaN(n));
 			const w = el('div', 'alert alert-warning py-2 px-3 mb-2 small');
-			w.innerHTML = '<b>The last pin scan stopped the camera.</b> It was driving pin ' +
-				esc(String(dead.pin)) + ' when it stopped answering, and the watchdog ' +
-				'restarted it. That pin has been excluded from further scans.';
+			w.innerHTML = '<b>The last pin scan stopped the camera.</b> It was driving ' +
+				(pins.length > 1 ? 'pins ' + esc(pins.join(' and ')) : 'pin ' + esc(String(pins[0]))) +
+				' when it stopped answering, and the watchdog restarted it. ' +
+				(pins.length > 1 ? 'Those pins have' : 'That pin has') +
+				' been excluded from further scans.';
 			box.querySelector('#mj-ircut-findings').appendChild(w);
-			state.ircutExclude = (state.ircutExclude || []).concat([dead.pin]);
+			state.ircutExclude = (state.ircutExclude || []).concat(pins);
 		}
 	}
 
@@ -2114,10 +2122,20 @@
 			host.querySelector('#mj-scan-stop').addEventListener('click', () => { stop = true; });
 
 			SCAN.run({
+				// A refusal and a failure are not the same answer. The endpoint
+				// guards pads with owners and says so with a 200 carrying
+				// done:false — that pair is skipped and the sweep goes on. A
+				// request that does not arrive at all is a camera that has
+				// stopped answering, and flattening it into "this pair did not
+				// move anything" made the scan keep firing GPIO writes at a dead
+				// camera for another two hundred pairs and then report that
+				// nothing moved. It rejects now, and the sweep stops.
 				drive: (a, b) => apiFetch('/cgi-bin/j/gpio.cgi?pair=' + a + ',' + b,
-					{ credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({ done: false })),
+					{ credentials: 'same-origin' })
+					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
 				release: (a, b) => apiFetch('/cgi-bin/j/gpio.cgi?park=' + a + ',' + b + '&mode=float',
-					{ credentials: 'same-origin' }).then((r) => r.json()).catch(() => ({ done: false })),
+					{ credentials: 'same-origin' })
+					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
 				look: () => IRCUT.snapshot('/image.jpg'),
 				wait: (ms) => new Promise((r) => setTimeout(r, ms)),
 				stopped: () => stop,
