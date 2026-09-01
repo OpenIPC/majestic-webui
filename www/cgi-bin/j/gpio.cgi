@@ -4,7 +4,6 @@
 # Two jobs the browser cannot do for itself:
 #
 #   (no query)         enumerate the pads and say what each one already is
-#   ?unset=<keys>      remove nightMode pin keys from the config outright
 #   ?pair=<a>,<b>      drive a high against b low, then brake both
 #   ?park=<a>,<b>      brake both (mode=brake) or release both (mode=float)
 #
@@ -39,7 +38,6 @@ PARK=""
 MODE=""
 MS=""
 CLEAR=""
-UNSET=""
 for param in $(echo "$QS" | tr '&' ' '); do
 	case "$param" in
 		pair=*) PAIR="${param#*=}" ;;
@@ -47,7 +45,6 @@ for param in $(echo "$QS" | tr '&' ' '); do
 		mode=*) MODE="${param#*=}" ;;
 		ms=*) MS="${param#*=}" ;;
 		clear=*) CLEAR="${param#*=}" ;;
-		unset=*) UNSET="${param#*=}" ;;
 	esac
 done
 
@@ -186,50 +183,6 @@ if [ "$CLEAR" = "1" ]; then
 	sync
 	json_head
 	echo '{"cleared":true}'
-	exit 0
-fi
-
-# ── unset pin keys ──────────────────────────────────────────────────────────
-# Majestic's config API can set a key but not remove one. POSTing "" or null to
-# an integer writes **0** — and 0 is a real GPIO — so "not connected" saved
-# through the ordinary form gives you a camera configured to drive pad 0, with
-# no missing-pin warning anywhere because the key is, technically, set.
-#
-# yaml-cli is the sanctioned way to edit that file, so removal goes through it
-# here. The key list is a CLOSED whitelist: these names reach a command line,
-# and the four pin keys are the only ones this endpoint has any business
-# removing.
-if [ -n "$UNSET" ]; then
-	json_head
-	done_keys=""
-	failed_keys=""
-	for k in $(echo "$UNSET" | tr ',' ' '); do
-		case "$k" in
-			irCutPin1|irCutPin2|backlightPin|lightSensorPin)
-				yaml-cli -d ".nightMode.$k" >/dev/null 2>&1
-				# Judged on the file, not on the exit status. `yaml-cli -d`
-				# returns 1 for a key that was already absent as well as for one
-				# it could not remove, so the status cannot tell success from
-				# failure — but reading the key back can. A delete that did not
-				# take must not be reported as one, or the caller carries on
-				# believing a coil is disconnected while it is still configured
-				# as pad 0.
-				if yaml-cli -g ".nightMode.$k" >/dev/null 2>&1; then
-					failed_keys="$failed_keys $k"
-				else
-					done_keys="$done_keys $k"
-				fi
-				;;
-		esac
-	done
-	# Majestic re-reads the file on SIGHUP; without it the daemon keeps driving
-	# the pads the deleted keys named. Backgrounded behind a short sleep,
-	# because majestic is the httpd serving THIS request — signalling it inline
-	# reloads the process mid-response and the caller gets nothing back.
-	[ -n "$done_keys" ] && (sleep 1; killall -1 majestic) >/dev/null 2>&1 &
-	u=$(for k in $done_keys; do printf '"%s",' "$k"; done)
-	fl=$(for k in $failed_keys; do printf '"%s",' "$k"; done)
-	printf '{"unset":[%s],"failed":[%s]}\n' "${u%,}" "${fl%,}"
 	exit 0
 fi
 

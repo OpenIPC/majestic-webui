@@ -592,6 +592,7 @@
 		if (state.ircutMap && state.ircutMap.destroy) {
 			try { state.ircutMap.destroy(); } catch (e) { /* best-effort */ }
 			state.ircutMap = null;
+			state.ircutRoles = null;
 		}
 
 		// Through the swap, which closes the trial as well as the player on
@@ -1947,31 +1948,38 @@
 		updateDirty();
 	}
 
-	// Majestic's config API can set a key but not remove one: POSTing "" or null
-	// to an integer writes 0, and 0 is a real GPIO. So "not connected" saved
-	// through the ordinary form produced a camera configured to drive pad 0,
-	// with no missing-pin warning anywhere because the key was, technically,
-	// set. The save writes what is set; this removes what is not, and waits for
-	// majestic to re-read the file so the refresh that follows sees the truth.
-	async function ircutUnsetCleared(cleared) {
-		if (state.sec !== 'nightMode') return;
-		const gone = (cleared || []).map((f) => f.dot.slice('nightMode.'.length))
-			.filter((k) => PIN_KEYS.indexOf(k) >= 0 &&
-				isNumish(getDotted(state.config, 'nightMode.' + k)));
-		if (!gone.length) return;
-		const r = await apiFetch('/cgi-bin/j/gpio.cgi?unset=' + gone.join(','),
-			{ credentials: 'same-origin' });
-		if (!r.ok) throw new Error('HTTP ' + r.status);
-		const out = await r.json();
-		// The endpoint judges each removal by reading the key back, so `failed`
-		// means the key is still there. Saying nothing would leave someone
-		// believing a coil is disconnected while it is still configured.
-		if (out.failed && out.failed.length)
-			throw new Error('these could not be cleared: ' + out.failed.join(', '));
-		// It signals majestic a second later — it is the httpd answering the
-		// request and cannot be reloaded inline — so the config is only true
-		// after that lands.
-		await new Promise((res) => setTimeout(res, 1600));
+	// A pin the save cleared has to be GONE from the config, not set to
+	// something: majestic stores "" in an integer as 0, and 0 is a real GPIO —
+	// the wiki lists it as RESET on several boards — so a camera whose coil was
+	// "not connected" ended up configured to drive pad 0, with no missing-pin
+	// warning anywhere because the key was, technically, set.
+	//
+	// A JSON null leaf in the ordinary save batch is how that is said now:
+	// majestic removes the key, in the same round trip that writes the others,
+	// so there is no window in which pad 0 is configured and no second endpoint
+	// to keep in step. It replaced a `j/gpio.cgi?unset=` call that edited the
+	// file with yaml-cli behind majestic's back and then waited out a deferred
+	// SIGHUP.
+	//
+	// A majestic without that fix answers 202 and does nothing, so the check
+	// below is what keeps this honest — the whole point of the feature is that
+	// a coil reading "not connected" is not connected, and a save that silently
+	// failed to clear one would say the opposite.
+	// The name the page puts on screen, never the config key: a key is a second
+	// vocabulary, readable only by someone who already knows the answer, and
+	// this sentence is being read by someone who does not.
+	function roleName(key) {
+		const m = window.MajesticIrcutMap;
+		const r = m && m.ROLES && m.ROLES.filter((x) => x.key === key)[0];
+		return r ? r.label : '';
+	}
+
+	function stillSet(cleared) {
+		return (cleared || [])
+			.map((f) => f.dot.slice('nightMode.'.length))
+			.filter((k) => isNumish(getDotted(state.config, 'nightMode.' + k)))
+			.map(roleName)
+			.filter(Boolean);
 	}
 
 	function currentAssign() {
@@ -2050,6 +2058,11 @@
 		// second set of document listeners with nothing to remove them.
 		if (state.sec !== 'nightMode') { map.destroy(); return; }
 		state.ircutMap = map;
+		// refresh() re-syncs the map from config with `quiet`, which suppresses
+		// onChange — and onChange is what repaints this list. Without a handle
+		// to it the pads moved and the roles beside them did not, so a coil the
+		// camera still drives could sit under the word "not set".
+		state.ircutRoles = paintRoles;
 
 		function paintRoles() {
 			syncTestBtn();
@@ -3034,13 +3047,12 @@
 	async function onSubmit(ev) {
 		ev.preventDefault();
 		const all = state.fields.filter(f => f.getValue() !== state.initial[f.dot]);
-		// A cleared pin must never be SENT. Majestic writes "" as 0, applies it
-		// on the same round trip, and 0 is a real pad — the wiki lists it as
-		// RESET on several boards — so posting the clear and tidying up
-		// afterwards drives pad 0 for as long as the cleanup takes. These are
-		// removed from the config instead, by ircutUnsetCleared() below.
+		// A cleared pin rides the same batch as everything else, as a null —
+		// which majestic removes rather than stores. Withholding it and tidying
+		// up afterwards was the older shape, and it left the two halves of one
+		// save able to disagree.
 		const cleared = all.filter(f => PIN_DOTS[f.dot] && String(f.getValue()) === '');
-		const dirty = all.filter(f => cleared.indexOf(f) < 0);
+		const dirty = all;
 		if (!all.length) return;
 
 		const body = {};
@@ -3056,6 +3068,10 @@
 			// list of strings, not a comma-joined scalar.
 			if (f.schema && f.schema.type === 'array')
 				val = String(val).split(',').map(s => s.trim()).filter(s => s.length);
+			// null is "remove this key". Only a cleared pin means it — an empty
+			// string field is an empty string, which is a value someone chose.
+			else if (cleared.indexOf(f) >= 0)
+				val = null;
 			setDotted(body, f.dot, val);
 		}
 
@@ -3086,14 +3102,16 @@
 			// refresh would let a later discard "revert" the camera to values
 			// that are no longer what was saved (#259).
 			sent.forEach((v, f) => { state.initial[f.dot] = v; });
-			try {
-				await ircutUnsetCleared(cleared);
-			} catch (e) {
-				showError('Saved, but clearing a pin failed: ' +
-					(e && e.message ? e.message : e) +
-					'. The camera may still be configured to drive it.');
-			}
 			await refresh();
+			// refresh() has just re-read the config, so this asks the camera
+			// rather than the form. A pin still holding a number here means the
+			// null did not take — an older majestic, which answers 202 and
+			// ignores it — and nothing else on the page would ever say so.
+			const kept = stillSet(cleared);
+			if (kept.length)
+				showError('Saved, but these could not be disconnected: ' +
+					kept.join(', ') + '. The camera is still configured to ' +
+					'drive them; its firmware may be too old to clear a setting.');
 			// Image knobs (x-live) apply instantly; everything structural
 			// (resolution, codec, fps, ...) only takes effect after majestic
 			// reloads its pipeline. Offer that as an explicit step, in the same
@@ -3190,6 +3208,9 @@
 		// next edit on the map would push its whole stale set back — restoring
 		// pins the refresh had just removed.
 		if (state.ircutMap) state.ircutMap.set(currentAssign(), { quiet: true });
+		// The pads are only half of it; the role list is drawn from onChange,
+		// which `quiet` just skipped.
+		if (state.ircutRoles) state.ircutRoles();
 		syncTestBtn();
 		updateDirty();
 	}
