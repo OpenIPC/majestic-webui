@@ -2109,6 +2109,32 @@ mark {
 	cursor: grabbing;
 }
 
+/* Zoom to an area: a crosshair while the Area button is armed, and also
+   wherever the picture has nothing to pan — Fit, and Fill on a camera whose
+   shape matches the window. A drag there was doing nothing at all, which is
+   the one state where the picture is whole and the thing you want next is to
+   get closer to part of it. */
+.mj-stage.mj-armed,
+.mj-stage.mj-armed .mj-stage-media,
+.mj-stage.mj-drawable,
+.mj-stage.mj-drawable .mj-stage-media {
+	cursor: crosshair;
+}
+
+/* The rubber band. The 9999px shadow spread dims everything outside the
+   rectangle in one element rather than four, and the stage's overflow is what
+   trims it. pointer-events: none because the drag belongs to the stage — the
+   band is drawn under the pointer and must never become its target. */
+.mj-marquee {
+	position: absolute;
+	z-index: 6;
+	border: 1px dashed rgba(255, 255, 255, 0.9);
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.06);
+	box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+	pointer-events: none;
+}
+
 .mj-stage-media {
 	position: absolute;
 	/* The fallback, and it is a real one: with no preview-zoom.js the media

@@ -305,6 +305,43 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   100%`): Fill covers the window by enlarging a stream smaller than the screen
   — a 1080p main on a 1440p monitor is 133%, the 704×576 substream 364% — and a
   soft picture with no number beside it reads as a soft camera.
+- **A drag always does something, and which thing is decided by whether
+  anything is hidden.** `setAffordance()` sets `.mj-pannable` and
+  `.mj-drawable` — mutually exclusive by construction, since a picture with
+  nothing off-screen has nothing to pan. The stylesheet reads them for the
+  cursor (`grab` / `crosshair`) and the pointer handler reads them for the
+  gesture. So in **Fit** a drag draws a zoom rectangle with no control to visit
+  first, which is what makes Fit the state you can react from: see something
+  happen, drag a box round it, you are on it. Zooming in makes the picture
+  pannable, so the next drag moves it — the cursor changes at the same moment,
+  which is the disclosure.
+- **Zoom to an area is the discoverable zoom-in.** `#mj-area` arms one drag,
+  and is the way to draw a rectangle while the picture *is* pannable (where a
+  bare drag would move it instead);
+  the rubber band is `#mj-marquee` (a single element — its 9999px box-shadow
+  spread is what dims everything outside it), and on release `zoomToRect()`
+  converts the rectangle to *frame* coordinates before changing the scale,
+  because stage pixels mean nothing across the change that is about to happen.
+  The scale falls out of the rectangle (`min(sw/fw, sh/fh)` with 8% padding,
+  through the same floor and ceiling as every other zoom), and the selection's
+  middle goes to the middle of the stage before the ordinary pan clamp pulls it
+  back — so a rectangle drawn in a corner lands in that corner. A drag under
+  `max(16px, 2% of the stage)` in either dimension is a slip, not a request, and
+  zooms nothing. It disarms after one drag: a mode you can forget you are in is
+  the wrong thing to leave over a picture that also steers a camera. Borrowed
+  from the QA video comparison in the sibling `rnd-player` (`docs/quality-compare.md`),
+  which draws the same rectangle for the same reason; the spotlight and the
+  persistent highlight are not, since this picture is live rather than paused.
+- **The wheel zooms, and used to pan.** Panning the overflowing axis is what a
+  Mac trackpad's two fingers want, but a mouse wheel is the only zoom a Windows
+  or Linux viewer has without knowing `ctrl`+wheel exists — and one input cannot
+  mean pan on a picture that overflows and zoom on one that does not without
+  changing meaning under the hand mid-gesture. Panning is the drag, on every
+  platform and on touch. `ctrl`+wheel is kept because that is what a trackpad
+  pinch sends. **Esc** is the way back out: armed, it disarms; free-zoomed, it
+  returns to the preset in force. Document-level, so it works wherever the
+  pointer went after the button was pressed; in fullscreen the browser takes it
+  first, which is the right precedence.
 - **Two zooms, and they never share a control, a label or a gesture.** On a
   Pelco camera the pad's `Zoom · Wide/Tele` drives a motor: it changes the
   field of view for every viewer and for the recording, with no undo. The View

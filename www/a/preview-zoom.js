@@ -122,6 +122,21 @@
 		set('--mj-pic-right', sw - (ox + picW));
 	}
 
+	// What a drag on the picture means, as two classes: the stylesheet reads
+	// them for the cursor and the pointer handler reads them for the gesture.
+	// They are mutually exclusive by construction, which is the whole idea --
+	// a picture with nothing hidden has nothing to pan, so the drag is free,
+	// and the useful thing to do with it is draw a rectangle to zoom into.
+	// That is what makes Fit the state you can react from: see something
+	// happen, drag a box round it, and you are on it, no control to visit
+	// first. Where the picture DOES overflow the drag is the pan, and the Area
+	// button is how you ask for a rectangle instead.
+	function setAffordance(sw, sh, picW, picH) {
+		const pannable = picW > sw + 1 || picH > sh + 1;
+		stage.classList.toggle('mj-pannable', pannable);
+		stage.classList.toggle('mj-drawable', placed && !pannable);
+	}
+
 	function layout() {
 		const sw = stage.clientWidth, sh = stage.clientHeight;
 		if (!frame || !frame.w || !frame.h || !sw || !sh) return;
@@ -151,7 +166,7 @@
 
 		place(picW, picH);
 		annotate(sw, sh, picW, picH);
-		stage.classList.toggle('mj-pannable', picW > sw + 1 || picH > sh + 1);
+		setAffordance(sw, sh, picW, picH);
 		announce(prev);
 	}
 
@@ -172,6 +187,46 @@
 		if (picW > sw) ox = clamp(ox + dx, sw - picW, 0);
 		if (picH > sh) oy = clamp(oy + dy, sh - picH, 0);
 		place(picW, picH);
+	}
+
+	// Zoom to a rectangle drawn on the picture. The scale falls out of the
+	// rectangle rather than being chosen, which is the point: a pinch is a
+	// trackpad gesture and a mouse has no equivalent, and neither of them lets
+	// you say WHICH part of the scene you meant.
+	//
+	// The rectangle is converted to frame coordinates first. Stage pixels mean
+	// nothing across a scale change, and the scale is about to change.
+	function zoomToRect(rx, ry, rw, rh) {
+		if (!frame || !placed || rw <= 0 || rh <= 0) return;
+		const sw = stage.clientWidth, sh = stage.clientHeight;
+		const fx = (rx - ox) / scale, fy = (ry - oy) / scale;
+		const fw = rw / scale, fh = rh / scale;
+
+		const kFit = Math.min(sw / frame.w, sh / frame.h);
+		const kFill = Math.max(sw / frame.w, sh / frame.h);
+		// A little room around the selection, so what was asked for is not
+		// flush against the edges of the window. Not much: drawing a rectangle
+		// is a request for that rectangle, and the sibling project's 20% puts
+		// a fifth of the screen back into context nobody asked to see.
+		const PAD = 1.08;
+		const prev = scale;
+		scale = clamp(Math.min(sw / (fw * PAD), sh / (fh * PAD)),
+			zoomFloor(kFit), zoomCeiling(kFill));
+		mode = 'free';
+
+		const picW = frame.w * scale, picH = frame.h * scale;
+		// The selection's middle goes to the middle of the stage, then the
+		// ordinary clamp pulls it back if that would show black. A rectangle
+		// drawn in a corner therefore lands in that corner, not off the edge.
+		const mx = fx + fw / 2, my = fy + fh / 2;
+		ox = picW <= sw ? (sw - picW) / 2 : clamp(sw / 2 - mx * scale, sw - picW, 0);
+		oy = picH <= sh ? (sh - picH) / 2 : clamp(sh / 2 - my * scale, sh - picH, 0);
+
+		place(picW, picH);
+		annotate(sw, sh, picW, picH);
+		setAffordance(sw, sh, picW, picH);
+		syncRadios();
+		announce(prev);
 	}
 
 	// Zoom about a point on the screen -- the pointer, or the midpoint between
@@ -197,7 +252,7 @@
 
 		place(picW, picH);
 		annotate(sw, sh, picW, picH);
-		stage.classList.toggle('mj-pannable', picW > sw + 1 || picH > sh + 1);
+		setAffordance(sw, sh, picW, picH);
 		syncRadios();
 		announce(prev);
 	}
@@ -261,6 +316,8 @@
 	// do nothing, and the page is correct (and Fit) without it.
 	const ctl = $('#mj-view-ctl');
 	if (ctl) ctl.hidden = false;
+	const areaCtl = $('#mj-area-ctl');
+	if (areaCtl) areaCtl.hidden = false;
 	syncRadios();
 
 	// ---- gestures ----------------------------------------------------------
@@ -274,10 +331,69 @@
 	let pinchDist = 0, pinchX = 0, pinchY = 0;
 	let lastType = 'mouse';
 
+	// Zoom-to-area. `armed` is the button's state; `band` is the drag in
+	// progress, in stage coordinates.
+	const areaBtn = $('#mj-area'), band = $('#mj-marquee');
+	let armed = false, drawing = null;
+
+	function setArmed(on) {
+		armed = !!on && !!band;
+		drawing = null;
+		if (band) band.hidden = true;
+		stage.classList.toggle('mj-armed', armed);
+		// The checkbox is the control's state, so it is written rather than
+		// asked -- Esc and the end of a drag both disarm without touching it.
+		if (areaBtn && areaBtn.checked !== armed) areaBtn.checked = armed;
+	}
+	if (areaBtn) areaBtn.addEventListener('change', () => setArmed(areaBtn.checked));
+
+	// The visible picture, in stage coordinates. Under Fit — and under 1:1 on a
+	// frame smaller than the window — the rest of the stage is black, and a
+	// rectangle drawn on black is not a rectangle on the picture: converted to
+	// frame coordinates it comes out negative or past the far edge, and the
+	// clamp then lands the view on some edge as though that had been asked for.
+	// Where the picture overflows this is the whole stage and clamping to it
+	// does nothing.
+	function picRect() {
+		const sw = stage.clientWidth, sh = stage.clientHeight;
+		if (!frame || !placed) return { x: 0, y: 0, r: sw, b: sh };
+		return {
+			x: Math.max(0, ox), y: Math.max(0, oy),
+			r: Math.min(sw, ox + frame.w * scale),
+			b: Math.min(sh, oy + frame.h * scale),
+		};
+	}
+
+	// Both ends held inside the picture, so the band shows exactly what will be
+	// selected — and a drag that never leaves the letterbox collapses to
+	// nothing, which the minimum-size test then throws away.
+	function bandRect(e) {
+		const s = stage.getBoundingClientRect(), p = picRect();
+		const x = clamp(e.clientX - s.left, p.x, p.r), y = clamp(e.clientY - s.top, p.y, p.b);
+		const x0 = clamp(drawing.x, p.x, p.r), y0 = clamp(drawing.y, p.y, p.b);
+		return {
+			x: Math.min(x0, x), y: Math.min(y0, y),
+			w: Math.abs(x - x0), h: Math.abs(y - y0),
+		};
+	}
+
 	stage.addEventListener('pointerdown', (e) => {
 		lastType = e.pointerType;
 		if (e.button != null && e.button > 0) return;
 		if (e.target.closest && e.target.closest(CHROME)) return;
+		// A rectangle belongs to the pointer that began it. A second finger
+		// arriving mid-drag is not a new origin, and it must not start a pan
+		// either.
+		if (drawing) return;
+
+		// Armed, or simply nothing to pan: either way the drag draws.
+		if (armed || stage.classList.contains('mj-drawable')) {
+			const r = stage.getBoundingClientRect();
+			drawing = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
+			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+			return;
+		}
+
 		pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
 		if (pts.size === 1 && stage.classList.contains('mj-pannable')) {
 			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
@@ -287,6 +403,16 @@
 	});
 
 	stage.addEventListener('pointermove', (e) => {
+		if (drawing) {
+			if (e.pointerId !== drawing.id) return;
+			const b = bandRect(e);
+			band.hidden = false;
+			band.style.left = b.x + 'px';
+			band.style.top = b.y + 'px';
+			band.style.width = b.w + 'px';
+			band.style.height = b.h + 'px';
+			return;
+		}
 		const p = pts.get(e.pointerId);
 		if (!p) return;
 		const dx = e.clientX - p.x, dy = e.clientY - p.y;
@@ -306,6 +432,31 @@
 		panBy(dx, dy);
 	});
 
+	// `commit` is false for pointercancel: the browser took the gesture away —
+	// a system edge swipe, a device rotation, another element capturing the
+	// pointer — and a gesture that was interrupted is not a gesture that was
+	// completed. It cleans up and zooms nothing.
+	function finishDraw(e, commit) {
+		if (!drawing || e.pointerId !== drawing.id) return false;
+		const b = commit ? bandRect(e) : null;
+		try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
+		drawing = null;
+		if (b) {
+			// A rectangle has to be deliberate. Below this it is a slip or a
+			// click, and zooming 40x into a stray 3px drag is the worst
+			// possible answer to one. The floor is a share of the stage with
+			// an absolute minimum, so it means the same thing on a 2560px
+			// monitor and a 390px phone.
+			const minW = Math.max(16, stage.clientWidth * 0.02);
+			const minH = Math.max(16, stage.clientHeight * 0.02);
+			if (b.w >= minW && b.h >= minH) zoomToRect(b.x, b.y, b.w, b.h);
+		}
+		// One drag, then it disarms itself: a mode you can forget you are in is
+		// the wrong thing to leave over a picture that also steers a camera.
+		setArmed(false);
+		return true;
+	}
+
 	function endPointer(e) {
 		pts.delete(e.pointerId);
 		if (pts.size < 2) pinchDist = 0;
@@ -314,21 +465,19 @@
 			try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
 		}
 	}
-	stage.addEventListener('pointerup', endPointer);
-	stage.addEventListener('pointercancel', endPointer);
+	stage.addEventListener('pointerup', (e) => { if (!finishDraw(e, true)) endPointer(e); });
+	stage.addEventListener('pointercancel', (e) => { if (!finishDraw(e, false)) endPointer(e); });
 
-	// Wheel pans; ctrl+wheel zooms, which is also what a trackpad pinch sends.
-	// preventDefault only where the gesture was actually taken, so a browser
-	// that would have done something useful with it still can.
+	// The wheel zooms, about the pointer. It used to pan the overflowing axis,
+	// which is what a Mac trackpad's two fingers want -- but a mouse wheel is
+	// the only zoom a Windows or Linux viewer has without knowing that
+	// ctrl+wheel is a thing, and the same input cannot mean pan on a picture
+	// that overflows and zoom on one that does not without changing meaning
+	// under the hand mid-gesture. Panning is the drag, on every platform and on
+	// touch. ctrl+wheel is kept because that is what a trackpad pinch sends.
 	stage.addEventListener('wheel', (e) => {
 		if (e.target.closest && e.target.closest(CHROME)) return;
-		if (e.ctrlKey) {
-			zoomAt(Math.exp(-e.deltaY / 300), e.clientX, e.clientY);
-			e.preventDefault();
-			return;
-		}
-		if (!stage.classList.contains('mj-pannable')) return;
-		panBy(-e.deltaX, -e.deltaY);
+		zoomAt(Math.exp(-e.deltaY / (e.ctrlKey ? 300 : 500)), e.clientX, e.clientY);
 		e.preventDefault();
 	}, { passive: false });
 
@@ -359,6 +508,19 @@
 		if (!stage.classList.contains('mj-pannable')) return;
 		e.preventDefault();
 		panBy(d[0] * 80, d[1] * 80);
+	});
+
+	// Escape is the way back out, and it is on the document rather than the
+	// stage because arming is the closest thing this page has to a mode: it has
+	// to be cancellable from wherever the pointer went after the button was
+	// pressed. Armed, it disarms; free-zoomed, it returns to the preset in
+	// force -- which is what the View group would do, one key instead of aiming
+	// at a control that auto-hides. In fullscreen the browser takes the key
+	// first and this never runs, which is the right precedence.
+	document.addEventListener('keydown', (e) => {
+		if (e.key !== 'Escape') return;
+		if (armed) { setArmed(false); return; }
+		if (mode === 'free') setMode(lastPreset);
 	});
 
 	// ---- what the page tells this module -----------------------------------
