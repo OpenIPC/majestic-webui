@@ -254,6 +254,14 @@
 		if (bits[0] === 'unreachable') {
 			return 'The camera stopped sending the ' + ch + '.';
 		}
+		// The software-decode rung could not fetch its decoder — no route out
+		// of the network, most likely, which is an ordinary state for a camera
+		// rather than a fault. Say what happened rather than blaming the
+		// stream, which is fine and would play anywhere else.
+		if (bits[0] === 'decoder-unavailable' || bits[0] === 'no-offscreen') {
+			return 'This browser can’t decode the ' + ch + ', and the software ' +
+				'decoder could not be loaded.';
+		}
 		return 'The ' + ch + ' could not be played in this browser.';
 	}
 

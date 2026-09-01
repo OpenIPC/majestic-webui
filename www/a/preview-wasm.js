@@ -24,7 +24,17 @@ window.MajesticWasm = (function () {
 	// fetched, version-pinned, with an error path — and a camera with no route
 	// to it simply does not get this rung. The chain carries on to MJPEG and
 	// says why, which is what it was taught to do in #279.
-	const BASE = (window.MJ_WASM_BASE || '/a/hevc/');
+	// Version-pinned, like @xterm/xterm@5.5.0 in tool-console.cgi and
+	// codemirror@5.65.16 in files.js. jsDelivr serves the tag straight from the
+	// repository, so there is no npm step between a release and this URL — and
+	// it serves the .wasm as application/wasm, which the camera cannot: its
+	// static table knows no such type, so a camera-hosted copy would arrive as
+	// application/octet-stream and streaming instantiation would reject it.
+	//
+	// MJ_WASM_BASE overrides it, for a development build or an operator who
+	// would rather host it themselves.
+	const BASE = (window.MJ_WASM_BASE ||
+		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.1.0/dist/');
 	const LOAD_TIMEOUT_MS = 8000;
 
 	// A Worker cannot be constructed from a cross-origin URL, so the worker
