@@ -107,13 +107,22 @@
 			// Nothing to read: the tab is hidden, the player has not attached
 			// yet, or the stream dropped. Say nothing rather than draw a lie —
 			// an empty histogram would read as "the picture is black".
-			// A canvas is as good a drawImage source as a video and has
-			// neither readyState nor videoWidth, so the guard asks each what it
-			// can answer. Without this the sampler no-ops for ever against the
+			// A canvas is as good a drawImage source as a video and has neither
+			// readyState nor videoWidth, so the guard asks each what it can
+			// answer. Without it the sampler no-ops for ever against the
 			// software-decode rung, and an empty histogram reads as "the
 			// picture is black" rather than as "nothing is being measured".
+			//
+			// But a canvas's SIZE is not the answer: one is 300x150 from the
+			// moment it exists, so width alone would accept a surface nothing
+			// has been decoded into yet and publish black as a measurement.
+			// Only whoever paints it knows, so it must say so — `__mjPainted`,
+			// an expando rather than an attribute because cloneNode copies
+			// attributes and a replaced canvas would inherit a claim it has
+			// not earned. Unmarked means unknown, and unknown means silent.
 			const drawable = v && (v.tagName === 'CANVAS'
-				? v.width > 0 : (v.readyState >= 2 && v.videoWidth > 0));
+				? v.__mjPainted === true
+				: (v.readyState >= 2 && v.videoWidth > 0));
 			if (!document.hidden && drawable) {
 				try {
 					ctx.drawImage(v, 0, 0, SW, SH);

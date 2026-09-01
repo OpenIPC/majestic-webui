@@ -1005,6 +1005,15 @@
 				return;
 			}
 			exhausted = true;
+			// A canvas that has stopped being painted keeps its last frame and
+			// nothing hides it, so the luma sampler would go on reporting a
+			// frozen picture as the current one — a stale measurement dressed
+			// as a live one, which is worse than none. Withdrawing the claim
+			// is what makes the histogram fall silent.
+			['mj-live-canvas', 'mj-live-canvas-b'].forEach((id) => {
+				const e = document.getElementById(id);
+				if (e) e.__mjPainted = false;
+			});
 			showAlert(detail);
 		}
 
