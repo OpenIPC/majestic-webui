@@ -163,7 +163,15 @@ window.MajesticSwap = function (opts) {
 		player: function () { return live && live.p; },
 		// Resolved now, not remembered: see the note on opts.elements.
 		element: function () { return live && node(live.slot); },
-		kind: function () { return live && live.kind; },
+		// The transport on screen AND still moving, which is the only form of
+		// this question with a safe answer. Its predecessor `kind()` reported
+		// the live slot's transport whether or not it had been retired, and a
+		// retired player is a frozen frame carrying nothing — so every caller
+		// that used it to name the transport in use was wrong exactly when
+		// something had gone wrong. There is deliberately no accessor for the
+		// wider question: player() and element() already serve the cases that
+		// are about the picture rather than the transport.
+		playing: function () { return live && !live.dead ? live.kind : null; },
 		// The trial, for a caller that has to keep it in step with a control
 		// the viewer moved while it was being judged — a stream change applied
 		// only to the visible player would be promoted away a moment later.

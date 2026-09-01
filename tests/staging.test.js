@@ -112,7 +112,7 @@ function load(pickedTransport, cfg, cfgDelay) {
 		MajesticTransport: {
 			available: () => true,
 			preferred: () => pickedTransport || 'mse',
-			choose() {}, demote() { env.demoted = true; },
+			choose(k) { env.chosen = k; }, demote() { env.demoted = true; },
 			impl: (k) => (k === 'webrtc' ? impls.webrtc : impls.mse),
 			iceServers: () => [],
 			chosenStream: () => null, chooseStream() {},
@@ -275,6 +275,17 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		check('neither transport is lit any more',
 			env.el('mj-transport-w').checked === false &&
 			env.el('mj-transport-m').checked === false);
+		// #269: what the page REMEMBERS about this browser, which nothing on
+		// screen can correct. The MSE failure arrives after WebRTC has been
+		// retired, and onFailed used to read that retired entry as "WebRTC is
+		// still playing" — writing the permanent choice key from a failure
+		// path and wiping the six-hour demotion recorded moments before. The
+		// browser then re-ran the whole failing negotiation on every load, for
+		// ever, because a stored choice outranks a demotion and demote() will
+		// not overwrite one.
+		check('the refusal is still what is remembered', env.demoted === true);
+		check('and nothing was recorded as the viewer’s own choice',
+			env.chosen === undefined, String(env.chosen));
 	}
 
 	// #274: the page reached the end of the chain and went on describing the
