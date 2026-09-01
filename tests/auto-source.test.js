@@ -17,7 +17,8 @@ const SRCS = [A('preview-swap.js'), A('preview-page.js')];
 
 const IDS = [
 	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
-	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note', 'mj-stats',
+	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note',
+	'mj-note-why', 'mj-stats',
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',
 	'mj-stream-auto', 'mj-auto', 'mj-served', 'mj-served-why', 'mj-sub',
 	'mj-talk', 'mj-talk-ctl',

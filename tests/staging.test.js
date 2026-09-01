@@ -22,7 +22,8 @@ const SRCS = [A('preview-swap.js'), A('preview-page.js')];
 
 const IDS = [
 	'live-mjpeg', 'live-video', 'live-video-b', 'mj-audio-ctl', 'mj-badge',
-	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note', 'mj-stats',
+	'mj-lightmon', 'mj-mute', 'mj-mute-lbl', 'mj-mute-t', 'mj-note',
+	'mj-note-why', 'mj-stats',
 	'mj-stats-btn', 'mj-stats-ctl', 'mj-stream-0', 'mj-stream-1',
 	'mj-served', 'mj-served-why', 'mj-sub',
 	'mj-talk', 'mj-talk-ctl', 'mj-talk-lbl', 'mj-talk-t', 'mj-transport-w',
@@ -80,7 +81,11 @@ function makePlayers(env) {
 	return { mse: impl('mse'), webrtc: impl('webrtc') };
 }
 
-function load(pickedTransport) {
+// `cfg` is a flat map of dotted keys, or omitted for the historic behaviour:
+// a config that never lands. Most tests want that — a config arriving would
+// re-attach underneath the players they are driving by hand — but the fallback
+// reads jpeg.enabled and behaves differently on each answer, so it needs one.
+function load(pickedTransport, cfg) {
 	const env = { made: [], els: {} };
 	IDS.forEach((id) => { env.els['#' + id] = makeEl(id); });
 	// Swap in a fresh node under the same id, as replaceChild does.
@@ -119,10 +124,12 @@ function load(pickedTransport) {
 		MajesticWebRTC: impls.webrtc,
 		MajesticTransport: win.MajesticTransport,
 		$: (sel) => env.els[sel],
-		// Never resolves: every test here drives the players directly, and a
-		// config that landed would re-attach underneath them.
-		mjConfig: () => new Promise(() => {}),
-		mjGet: () => undefined,
+		// Never resolves unless a test asked for one: every test here drives
+		// the players directly, and a config that landed would re-attach
+		// underneath them. When one is supplied it wins the first attach's
+		// race, so nothing re-attaches later either.
+		mjConfig: () => (cfg ? Promise.resolve(cfg) : new Promise(() => {})),
+		mjGet: (c, k) => (cfg ? cfg[k] : undefined),
 		apiFetch: () => Promise.reject(new Error('no network in tests')),
 		setTimeout, clearTimeout, setInterval, clearInterval,
 		Promise: Promise,
@@ -245,12 +252,87 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		check('the dead player still holds the screen for now', !first.destroyed);
 
 		// And MSE cannot run either.
-		second.say('mjpeg');
+		second.say('mjpeg', 'undecodable h265');
 		check('the dead player is finally released', first.destroyed);
 		check('the failed replacement too', second.destroyed);
-		check('and the page falls through to MJPEG',
-			env.el('mj-badge').textContent === 'MJPEG',
+		// No JPEG channel on this camera, so there is no picture to fall
+		// through to and the chip must not name a format nothing is sending.
+		check('the chip says the stream is unavailable',
+			env.el('mj-badge').textContent === 'unavailable',
 			env.el('mj-badge').textContent);
+		check('the note is showing', env.el('mj-note').style.display === '',
+			env.el('mj-note').style.display);
+		check('and it carries the reason, codec and all',
+			/H265/.test(env.el('mj-note-why').textContent),
+			env.el('mj-note-why').textContent);
+		check('neither transport is lit any more',
+			env.el('mj-transport-w').checked === false &&
+			env.el('mj-transport-m').checked === false);
+	}
+
+	// #274: the page reached the end of the chain and went on describing the
+	// session it had lost — MJPEG on the chip, MSE still lit, no reason given
+	// anywhere, and a press of Main repainting the chip with the codec of the
+	// stream that had just failed.
+	group('at the end of the chain, with an MJPEG channel to fall back to');
+	{
+		const env = load('mse', { 'jpeg.enabled': true });
+		await tick();
+		const first = env.made[0];
+		// The chip is filled the way the real MSE player fills it: the codec
+		// arrives from the init message, and only then is the mime refused.
+		first.opts.onCodec('h265', 'hvc1.1.6.L120.90', 3840, 2160);
+		first.say('mjpeg', 'undecodable h265');
+
+		check('the fallback picture is up',
+			env.el('live-mjpeg').src === '/mjpeg', env.el('live-mjpeg').src);
+		check('the chip names it', env.el('mj-badge').textContent === 'MJPEG',
+			env.el('mj-badge').textContent);
+		check('the message says why, in words',
+			env.el('mj-served').hidden === false &&
+			/can.t decode/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+		check('and names the codec the browser refused',
+			/H265/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+		check('the note stays down — the fallback is the explanation now',
+			env.el('mj-note').style.display === 'none');
+
+		// The regression in the report: this repainted the chip from the
+		// failed stream's codec, over the MJPEG label, while MJPEG played.
+		const made = env.made.length;
+		env.el('mj-stream-0').fire('change');
+		check('picking a channel does not repaint the chip with a dead codec',
+			env.el('mj-badge').textContent !== 'H265 3840×2160',
+			env.el('mj-badge').textContent);
+		check('it retries the chain instead of doing nothing',
+			env.made.length === made + 1,
+			'made=' + env.made.length);
+		check('and the retried player is asked for that channel',
+			env.made[made].opts.stream === 0,
+			String(env.made[made].opts.stream));
+		check('the dead player was not reopened',
+			first.streamSet === null, 'streamSet=' + first.streamSet);
+	}
+
+	group('the transport the fallback came through can be pressed again');
+	{
+		const env = load('mse', { 'jpeg.enabled': true });
+		await tick();
+		env.made[0].say('mjpeg', 'unreachable');
+		check('nothing is lit, so a press is a real change',
+			env.el('mj-transport-m').checked === false);
+		// What a browser does when the label is clicked.
+		env.el('mj-transport-m').checked = true;
+		env.el('mj-transport-m').fire('change');
+		check('MSE was tried again', env.made.length === 2,
+			'made=' + env.made.length);
+		env.made[1].say('playing');
+		check('and once it works the fallback picture is gone',
+			env.el('live-mjpeg').src === '', env.el('live-mjpeg').src);
+		check('with the message withdrawn', env.el('mj-served').hidden === true);
+		check('and the picker naming what is playing',
+			env.el('mj-transport-m').checked === true);
 	}
 
 	group('a cloned MSE element does not strand the swap');

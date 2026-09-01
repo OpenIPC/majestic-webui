@@ -29,6 +29,7 @@
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), img = $('#live-mjpeg'), note = $('#mj-note');
+	const noteWhy = $('#mj-note-why');
 	const servedEl = $('#mj-served'), servedWhy = $('#mj-served-why');
 	let jpegOn = false;
 	mjConfig().then(cfg => {
@@ -84,25 +85,122 @@
 	const cur = () => liveEl;
 
 	const BARS = '#000 url(/a/preview.svg)';
+	// Why the page is showing something other than a live player, or null while
+	// one is on screen. Everything that used to assume a player exists reads
+	// this: the chip must stop describing a session that ended, and the
+	// controls that retargeted that player have to restart the chain instead.
+	let fellBack = null;
 	function showVideo() {
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = '#000'; }
 		if (img) { img.style.display = 'none'; img.src = ''; }
 		if (note) note.style.display = 'none';
+		fellBack = null;
+		hideStageMsg('fallback');
 	}
 	function showNoSignal() {
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = BARS; }
 		if (img) { img.style.display = 'none'; img.src = ''; }
 		if (note) note.style.display = 'none';
+		fellBack = null;
+		hideStageMsg('fallback');
 		if (badge) badge.textContent = 'no signal';
 	}
-	function showFallback() {
+	// The end of the chain: both transports are gone and what is left is the
+	// camera's JPEG channel, or nothing at all. Saying so takes more than a
+	// word on the chip, which is the whole of #274 — the page arrived here and
+	// then went on describing the session it had lost:
+	//
+	//   - the reason was known and dropped. The player had just said why it
+	//     stopped and this function took no argument at all.
+	//   - the chip said MJPEG while `chipMedia` still held the failed stream's
+	//     codec, so the next setChip() — pressing Main, say — put `H265
+	//     3840x2160` back over the label, naming a stream nobody was watching.
+	//   - the one explanation the page owns was gated on jpeg.enabled being
+	//     OFF, i.e. shown only when there was no fallback to explain.
+	//   - MSE stayed lit on the picker although MSE was not carrying the
+	//     picture, and pressing it again fired no change event, so the
+	//     obvious retry was the one control on the bar that did nothing.
+	//   - the audio and talkback buttons stayed up for a player that had
+	//     stopped, and `player` still held it: a stream click would have
+	//     called setStream() on it and reopened its socket.
+	function showFallback(why) {
 		const v = cur();
 		if (v) v.style.display = 'none';
-		if (jpegOn && img) { img.src = '/mjpeg'; img.style.display = ''; if (note) note.style.display = 'none'; }
-		else if (note) note.style.display = '';
-		if (badge) badge.textContent = 'MJPEG';
+		fellBack = why || 'unknown';
+		// Destroyed, not merely retired. A refused MSE player has stopped its
+		// socket but not closed itself — only destroy() sets its `closed`
+		// flag, so the socket's own onclose starts the reconnect ladder again
+		// and the session it has already declared unusable goes on reporting
+		// 'connecting' from the grave. The swap still routes a retired live
+		// player's states to the page (dead marks the picture stale, not the
+		// handler), so those writes landed on the chip and replaced MJPEG with
+		// 'connecting…' seconds after the fallback appeared.
+		swap.stop();
+		player = null;
+		syncAudioCtl();
+		syncTalkCtl();
+		// Both describe the session that just ended.
+		chipMedia = null;
+		chipFps = 0;
+		if (window.MajesticAdapt) window.MajesticAdapt.reset();
+		if (window.MajesticStats) window.MajesticStats.reset();
+		const sentence = fallbackSentence(fellBack);
+		if (jpegOn && img) {
+			img.src = '/mjpeg';
+			img.style.display = '';
+			if (note) note.style.display = 'none';
+			if (badge) badge.textContent = 'MJPEG';
+			showStageMsg('fallback', sentence + ' Showing the MJPEG fallback.');
+		} else {
+			// No fallback to show, so the note carries the explanation and the
+			// remedy together and the toast would only repeat it. Nothing is
+			// playing, so the chip names no format either.
+			if (noteWhy) noteWhy.textContent = sentence;
+			if (note) note.style.display = '';
+			if (badge) badge.textContent = 'unavailable';
+			hideStageMsg('fallback');
+		}
+		// Neither transport is carrying the picture, so neither is lit. It is
+		// also what makes the retry work: with the group cleared, pressing the
+		// transport that just failed is a real change event again.
+		reflectTransport(null);
+	}
+
+	// Back to the top of the chain. The transport picker gets here on its own
+	// (nothing is checked, so any press is a change), so this is for the stream
+	// picker, where a channel is still a request worth honouring: the Sub
+	// stream can be a codec this browser plays where the Main stream was not.
+	function retryFromFallback() {
+		fellBack = null;
+		hideStageMsg('fallback');
+		if (note) note.style.display = 'none';
+		if (img) { img.style.display = 'none'; img.src = ''; }
+		if (badge) badge.textContent = 'connecting…';
+		attachPlayer(wantWebRTC());
+	}
+
+	// The player names the cause in a code and the page words it — the same
+	// division as the camera's `served` reply, including its rule for a code
+	// this version has never heard of: say something true and general rather
+	// than print an identifier at the viewer.
+	function fallbackSentence(why) {
+		const bits = String(why || '').split(' ');
+		const ch = streamName(stream ? 1 : 0);
+		if (bits[0] === 'undecodable') {
+			const codec = bits[1] ? bits[1].toUpperCase() : '';
+			return 'This browser can’t decode the ' + ch +
+				(codec ? '’s ' + codec + ' video' : '') + '.';
+		}
+		if (bits[0] === 'no-mse') {
+			return 'This browser has no Media Source Extensions, so it cannot ' +
+				'play the ' + ch + '.';
+		}
+		if (bits[0] === 'unreachable') {
+			return 'The camera stopped sending the ' + ch + '.';
+		}
+		return 'The ' + ch + ' could not be played in this browser.';
 	}
 
 	const mute = $('#mj-mute'), muteLbl = $('#mj-mute-lbl'), volCtl = $('#mj-vol');
@@ -119,6 +217,9 @@
 	// alternative deserves a name, and "unchecked" never said what it meant.
 	// The failure tooltip still lands on the WebRTC label (#mj-transport-lbl),
 	// which is where "why am I not on WebRTC?" gets asked.
+	//
+	// It has a third state, and it is the honest one at the end of the chain:
+	// null, nothing lit, because neither transport is carrying the picture.
 	const transportW = $('#mj-transport-w'), transportM = $('#mj-transport-m');
 	const transportGrp = $('#mj-transport-ctl');
 	const transportLbl = $('#mj-transport-lbl');
@@ -243,7 +344,11 @@
 	}
 
 	function setChip() {
-		if (!badge || !chipMedia) return;
+		// The fallback owns the chip until a player takes the stage back.
+		// chipMedia is cleared with it, so this is belt and braces — but the
+		// bug it guards, a control repainting the chip with the codec of the
+		// stream that failed, is exactly the one #274 photographed.
+		if (!badge || !chipMedia || fellBack) return;
 		const fps = usingWebRTC ? chipFps : cfgFps[stream ? 1 : 0];
 		badge.textContent = (chipMedia.codec || '').toUpperCase() + ' ' +
 			chipMedia.w + '×' + chipMedia.h +
@@ -258,16 +363,31 @@
 	// something (stream, transport) that makes it stale.
 	const streamName = (n) => n === 0 ? 'Main stream' : 'Sub stream';
 
-	function hideServedMsg() {
+	// One message slot, two authors. The served-channel mismatch and the
+	// fallback are both standing conditions rather than moments, and they
+	// cannot be true at once — a mismatch needs a session playing, the
+	// fallback means there is none — so they share the element. Who wrote it
+	// is tracked all the same, or "a player is back on screen" would wipe a
+	// served message belonging to that very player.
+	let msgOwner = null;
+	function showStageMsg(owner, text) {
+		if (!servedEl || !servedWhy) return;
+		msgOwner = owner;
+		servedWhy.textContent = text;
+		servedEl.hidden = false;
+	}
+	function hideStageMsg(owner) {
+		if (owner && msgOwner !== owner) return;
+		msgOwner = null;
 		if (servedEl) servedEl.hidden = true;
 	}
+	function hideServedMsg() { hideStageMsg('served'); }
 
 	function showServedMsg(info) {
-		if (!servedEl || !servedWhy) return;
 		const req = streamName(info.requested), got = streamName(info.channel);
 		// The page words the sentence; the camera only names the cause. An
 		// unknown code from a future daemon still gets an honest generic line.
-		servedWhy.textContent =
+		showStageMsg('served',
 			info.reason === 'unavailable'
 				? req + ' isn’t available right now — showing ' +
 					got + ' instead.'
@@ -275,8 +395,7 @@
 				? 'This browser’s WebRTC can’t decode the ' + req +
 					'’s format — showing ' + got + ' instead.'
 			: 'The camera couldn’t serve the ' + req +
-				' — showing ' + got + ' instead.';
-		servedEl.hidden = false;
+				' — showing ' + got + ' instead.');
 	}
 
 	// What a `served` reply from the camera does to this page: the chip, the
@@ -473,6 +592,11 @@
 			player = swap.player();
 			usingWebRTC = kind === 'webrtc';
 			liveEl = swap.element();
+			// From what is playing rather than from what was clicked: a retry
+			// out of the fallback starts the chain from the preferred
+			// transport without anyone having touched this group, and it was
+			// left with nothing lit.
+			reflectTransport(kind);
 			settle();
 			showVideo();
 		},
@@ -506,15 +630,15 @@
 		// WebRTC that means MSE, which plays what this browser's decoder takes
 		// rather than what its WebRTC stack will negotiate, a strictly larger
 		// set — and MJPEG if that already was the other transport.
-		onExhausted: (kind) => {
+		onExhausted: (kind, detail) => {
 			player = null;
 			if (kind === 'webrtc') attachPlayer(false);
-			else showFallback();
+			else showFallback(detail);
 		},
 		onLive: (s, d) => {
 			if (s === 'playing') showVideo();
 			else if (s === 'nosignal') showNoSignal();
-			else if (s === 'mjpeg') showFallback();
+			else if (s === 'mjpeg') showFallback(d);
 			else if (s === 'fallback' || s === 'busy') {
 				// The live player gave up mid-session. Staged like any other
 				// switch, so its last frame stays until the replacement has one
@@ -529,7 +653,7 @@
 					swap.retire();
 					attachPlayer(false);
 				} else {
-					showFallback();
+					showFallback(d);
 				}
 			}
 			else if (badge) badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
@@ -913,6 +1037,14 @@
 		servedCh = null;
 		servedShownKey = '';
 		hideServedMsg();
+		// Nothing is attached: the chain ran out and the stage is showing the
+		// MJPEG fallback or the note. The pick is still a request worth
+		// honouring — an H.264 substream plays in a browser that refused an
+		// H.265 main, which is the camera in #274 — so it starts the chain
+		// again rather than doing nothing at all. Before this it did nothing
+		// visible and, on the fallback reached through onLive, called
+		// setStream() on a stopped player, reopening its socket.
+		if (fellBack) { retryFromFallback(); return; }
 		if (player) player.setStream(n);
 		const t = swap.trial();
 		if (t) t.setStream(n);

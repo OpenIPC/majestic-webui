@@ -936,6 +936,47 @@
 	// diverge is which transport to prefer and what to remember, and that is
 	// preview-transport.js.
 	function attachLivePreview(video) {
+		// True once both transports have been tried and nothing is attached.
+		// The stream picker reads it: with no player its clicks used to reach
+		// nothing at all, and a channel is still a request worth honouring —
+		// an H.264 substream plays in a browser that refused an H.265 main.
+		let exhausted = false;
+
+		// The reason codes preview.js emits, worded for this panel. The Live
+		// page has its own copy in preview-page.js, deliberately: it has an
+		// MJPEG picture to explain and this panel has an empty box, so the
+		// sentences differ past the first clause. A code neither of them
+		// knows still gets an honest general line. Keep the two in step when
+		// a code is added to preview.js.
+		function alertText(why) {
+			const bits = String(why || '').split(' ');
+			const ch = stream === 1 ? 'Sub' : 'Main';
+			if (bits[0] === 'undecodable') {
+				const codec = bits[1] ? bits[1].toUpperCase() : '';
+				return 'This browser can’t decode the ' + ch + ' stream' +
+					(codec ? '’s ' + codec + ' video' : '') +
+					', so there is no preview here.';
+			}
+			if (bits[0] === 'no-mse') {
+				return 'This browser has no Media Source Extensions, so it ' +
+					'cannot play the ' + ch + ' stream.';
+			}
+			if (bits[0] === 'unreachable') {
+				return 'The camera stopped sending the ' + ch + ' stream.';
+			}
+			return 'The ' + ch + ' stream could not be played in this browser.';
+		}
+		function showAlert(why) {
+			const a = document.getElementById('mj-live-alert');
+			if (!a) return;
+			a.textContent = alertText(why);
+			a.hidden = false;
+		}
+		function hideAlert() {
+			const a = document.getElementById('mj-live-alert');
+			if (a) a.hidden = true;
+		}
+
 		// This page's own remembered choice, defaulting to the substream. Not
 		// the Preview page's: the two are looked at for different reasons and
 		// can reasonably want different channels.
@@ -981,7 +1022,11 @@
 			// state.previewPlayer is what the tab teardown closes, so it has to
 			// name whatever is actually on screen — a stale handle there leaves
 			// a live socket behind on every visit.
-			onPromoted: () => { state.previewPlayer = swap.player(); },
+			onPromoted: () => {
+				state.previewPlayer = swap.player();
+				exhausted = false;
+				hideAlert();
+			},
 			onFailed: (kind, why, permanent) => {
 				// 'fallback' is durable and worth remembering; 'busy' says the
 				// camera is full, which it will not be for long.
@@ -990,14 +1035,35 @@
 				}
 			},
 			// Nothing on screen left to protect. MSE is the last thing to try;
-			// past that this panel simply has no preview, which is what its
-			// empty element already shows.
-			onExhausted: (kind) => {
+			// past that this panel has no preview at all — there is no MJPEG
+			// fallback here and there is not going to be one — so what it owes
+			// the viewer is the reason, which it used to withhold: an empty
+			// black box is indistinguishable from a camera that is off.
+			onExhausted: (kind, detail) => {
 				state.previewPlayer = null;
-				if (kind === 'webrtc') swap.start('mse');
+				if (kind === 'webrtc') { swap.start('mse'); return; }
+				exhausted = true;
+				showAlert(detail);
 			},
 			onLive: (st, d, kind) => {
-				if (kind !== 'webrtc') return;
+				if (kind !== 'webrtc') {
+					// MSE is the last thing to try, so its giving up ends the
+					// chain — and it says so on the live player's own channel
+					// rather than as a dropped trial whenever it was the first
+					// thing attached, which is the ordinary case here. Nothing
+					// read that state, so the panel sat black for ever with
+					// nothing said and no way back (#274).
+					if (st === 'mjpeg') {
+						// stop(), not retire(): a refused MSE player has not
+						// closed itself, and its socket's onclose restarts the
+						// reconnect ladder for a session already given up on.
+						swap.stop();
+						state.previewPlayer = null;
+						exhausted = true;
+						showAlert(d);
+					}
+					return;
+				}
 				if (st === 'fallback' || st === 'busy') {
 					if (st === 'fallback') window.MajesticTransport.demote();
 					// Its picture is frozen from here; the replacement is
@@ -1032,8 +1098,17 @@
 			// change event and is still an answer worth remembering.
 			elm.addEventListener('click', function () {
 				window.MajesticTransport.chooseStream('live', n);
-				if (n === stream) return;
+				// Not `if (n === stream) return` any more: with the chain out
+				// there is nothing on screen, and pressing the channel that is
+				// already selected is the only retry this panel offers.
+				if (n === stream && !exhausted) return;
 				stream = n;
+				if (exhausted) {
+					exhausted = false;
+					hideAlert();
+					swap.start(window.MajesticTransport.preferred());
+					return;
+				}
 				if (state.previewPlayer) state.previewPlayer.setStream(n);
 				// And the trial, if one is being judged: it keeps the stream it
 				// was opened with, so it would otherwise be promoted onto the
@@ -1095,6 +1170,10 @@
 		stage.innerHTML =
 			'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
 			'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
+			// When neither transport can play the camera, this panel has no
+			// MJPEG fallback to drop to and simply went black — the emptiest
+			// possible account of what happened (#274). It says so instead.
+			'<p class="mj-live-alert" id="mj-live-alert" hidden></p>' +
 			'<div class="mj-live-bar">' +
 			// The stream picker rides the picture, first in the bar, exactly
 			// where the Live page keeps it — and as the same component, not a
