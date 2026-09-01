@@ -36,7 +36,12 @@
 	// GPIO 0 is a real pin (the wiki lists RESET=0 on several XM boards), so
 	// nothing here may test a pin for truthiness. Absent means absent.
 	function pin(v) {
+		// Number(false) is 0 and GPIO 0 is a real pin, so a boolean would sail
+		// through as a configured pad and silence the missing-pin finding. Only
+		// a number, or a string that is one, is a pin.
+		if (typeof v === 'boolean') return null;
 		if (v === null || v === undefined || v === '') return null;
+		if (typeof v !== 'number' && typeof v !== 'string') return null;
 		const n = Number(v);
 		return isNaN(n) ? null : n;
 	}
@@ -233,7 +238,18 @@
 				return openRun;
 			},
 			push: function (sample, nowS) {
-				if (!known(sample)) return { flips: 0, conflictS: 0 };
+				// An unreachable camera is not a camera holding still. Returning
+				// zeroes without forgetting what came before let the next good
+				// sample bill the whole offline gap as one continuing
+				// disagreement, and a state that differed across the gap counted
+				// as a switch that was never seen. Nothing observed, nothing
+				// carried: the run starts again from the first sample back.
+				if (!known(sample)) {
+					last = null;
+					conflictAt = null;
+					flips = [];
+					return { flips: 0, conflictS: 0 };
+				}
 				const night = sample.night | 0;
 				if (last !== null && last !== night) flips.push(nowS);
 				last = night;

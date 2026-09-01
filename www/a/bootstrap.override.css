@@ -2962,8 +2962,14 @@ mark {
    Firefox do, Safari answers :focus-visible for any focus() it did not watch
    the mouse cause, and drew its default ring round every section title (#222).
    So revealSection() also states the modality outright: a pointer pick tags
-   the heading .mj-focus-quiet (dropped again on blur), and that rule needs no
-   guessing from the engine. Keyboard picks get neither and keep the ring. */
+   the heading .mj-focus-quiet, and that rule needs no guessing from the
+   engine. Keyboard picks get neither and keep the ring.
+
+   The tag is set on every pick and never removed on blur, which is what the
+   second report on #222 was: switching browser tabs blurs the heading and
+   focuses it again on return, so a tag dropped at blur left the ring to come
+   back — and only for people who switch tabs with the keyboard, since that is
+   what makes the engine call the restored focus "visible". */
 #mj-settings-form h3[tabindex]:focus:not(:focus-visible),
 #mj-settings-form h3.mj-focus-quiet:focus {
 	outline: none;

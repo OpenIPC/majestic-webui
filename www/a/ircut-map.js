@@ -229,7 +229,14 @@
 					b.style.background = byKey[role].color;
 					b.style.borderColor = byKey[role].color;
 					b.title = 'Pin ' + p.pin + ' — ' + byKey[role].label;
-					b.disabled = false;
+					// Showing the role does not grant the pad back. A line the
+					// kernel hands to a driver stays refused even when the
+					// config points a role at it, or the picker would let a
+					// second IR-cut role be assigned to a reset or a regulator.
+					if (!notGpio[p.pin] && !owned[p.pin]) b.disabled = false;
+					else b.title += ' — ' + (notGpio[p.pin]
+						? 'but it carries ' + notGpio[p.pin] + ' right now'
+						: owned[p.pin]);
 				}
 				if (sweeping === p.pin) b.classList.add('mj-pin-try');
 				if (sel === p.pin) b.classList.add('mj-pin-sel');

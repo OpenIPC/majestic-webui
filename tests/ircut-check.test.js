@@ -420,6 +420,40 @@ function runRest() {
 			t.push({ night: 1, ircut: 0 }, 170).conflictS === 10);
 	}
 
+	group('tracker: an outage is not something that was observed');
+	{
+		const t = ic.tracker();
+		// A disagreement standing when the camera went away, then a gap, then
+		// the same disagreement back. Carrying the timer across would bill the
+		// whole offline stretch as one continuing fault and alert immediately.
+		t.push({ night: 0, ircut: 1 }, 100);
+		check('the conflict starts accruing', t.push({ night: 0, ircut: 1 }, 120).conflictS === 20);
+		t.push(null, 130);
+		check('an unreachable camera clears it',
+			t.push({ night: 0, ircut: 1 }, 400).conflictS === 0);
+		// And a state that differed across the gap is not a switch anybody saw.
+		const t2 = ic.tracker();
+		t2.push({ night: 0, ircut: 0 }, 0);
+		t2.push(null, 10);
+		check('nor does the gap invent a flip',
+			t2.push({ night: 1, ircut: 1 }, 20).flips === 0);
+	}
+
+	group('diagnose: a boolean is not GPIO zero');
+	{
+		// Number(false) is 0 and GPIO 0 is a real pin, so a hand-edited yaml
+		// carrying `irCutPin1: false` used to read as a configured pad and
+		// silence the very finding that would have explained the picture.
+		check('false does not count as a configured pin',
+			ic.diagnose({ irCutPin1: false }, null, null).some(x => x.id === 'no-pins'));
+		check('true does not either',
+			ic.diagnose({ irCutPin1: true }, null, null).some(x => x.id === 'no-pins'));
+		check('but pin 0 still does count',
+			!ic.diagnose({ irCutPin1: 0 }, null, null).some(x => x.id === 'no-pins'));
+		check('and a numeric string counts',
+			!ic.diagnose({ irCutPin1: '11' }, null, null).some(x => x.id === 'no-pins'));
+	}
+
 	group('tracker: flips age out of the window');
 	{
 		const t = ic.tracker();
