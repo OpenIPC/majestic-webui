@@ -24,7 +24,14 @@ const SRC = path.join(__dirname, '..', 'www', 'a', 'preview-transport.js');
 // browser state and not a hypothetical one.
 function load(withStorage, seed, refuseWrites) {
 	const store = Object.assign({}, seed || {});
-	const ctx = { window: {}, console: console };
+	// The three players the module dispatches between. Named objects rather
+	// than stubs with behaviour: impl() is a lookup, and what is asserted is
+	// which one comes back.
+	const ctx = { window: {
+		MajesticWebRTC: { name: 'webrtc' },
+		MajesticVideo: { name: 'mse' },
+		MajesticWasm: { name: 'wasm' },
+	}, console: console };
 	if (withStorage) {
 		ctx.localStorage = {
 			getItem: (k) => (k in store ? store[k] : null),
@@ -48,6 +55,23 @@ function load(withStorage, seed, refuseWrites) {
 const iceServers = load(false).iceServers;
 
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// impl() had no coverage at all, and it is the one line that decides what BOTH
+// pages can attach — the Live page has its own copy of the lookup, but the
+// settings panel goes through this one.
+group('impl() maps a kind to a player');
+{
+	const t = load(true);
+	check('webrtc', t.impl('webrtc').name === 'webrtc', t.impl('webrtc').name);
+	check('mse', t.impl('mse').name === 'mse', t.impl('mse').name);
+	check('wasm', t.impl('wasm').name === 'wasm', t.impl('wasm').name);
+	// MSE is the floor on purpose: it plays whatever the browser can decode,
+	// so an unrecognised kind lands somewhere that works rather than on
+	// undefined.
+	check('anything else falls to MSE', t.impl('nonsense').name === 'mse',
+		t.impl('nonsense').name);
+	check('and so does nothing at all', t.impl().name === 'mse');
+}
 const is = (name, got, want) =>
 	check(name, eq(got, want), 'got ' + JSON.stringify(got));
 

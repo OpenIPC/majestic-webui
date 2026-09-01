@@ -285,6 +285,13 @@
 	const transportW = $('#mj-transport-w'), transportM = $('#mj-transport-m');
 	const transportGrp = $('#mj-transport-ctl');
 	const transportLbl = $('#mj-transport-lbl');
+	function hideOtherKind(kind) {
+		(kind === 'wasm'
+			? ['#live-video', '#live-video-b']
+			: ['#live-canvas', '#live-canvas-b']
+		).forEach((sel) => { const e = $(sel); if (e) e.style.display = 'none'; });
+	}
+
 	function reflectTransport(kind) {
 		if (transportW) transportW.checked = kind === 'webrtc';
 		if (transportM) transportM.checked = kind === 'mse';
@@ -717,6 +724,12 @@
 			// transport carrying anything — and would make a press of either
 			// radio tear down a working session.
 			reflectTransport(kind === 'wasm' ? 'mse' : kind);
+			// The idle pair belonging to the OTHER kind is hidden by nobody:
+			// the swap only ever touches the slot it is using, so an empty
+			// <video> sits visible underneath a canvas that is painting over
+			// it. That is harmless only because the canvas is opaque and later
+			// in DOM order, which is not a thing to rely on.
+			hideOtherKind(kind);
 			settle();
 			// Only when this promotion means a picture. Holding the fallback,
 			// an unproven one is just the swap saying it had nothing of its

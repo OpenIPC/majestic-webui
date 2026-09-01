@@ -965,6 +965,11 @@
 			if (bits[0] === 'unreachable') {
 				return 'The camera stopped sending the ' + ch + ' stream.';
 			}
+			if (bits[0] === 'decoder-unavailable' || bits[0] === 'no-offscreen') {
+				return 'This browser can’t decode the ' + ch + ' stream, and ' +
+					'the software decoder could not be loaded, so there is no ' +
+					'preview here.';
+			}
 			return 'The ' + ch + ' stream could not be played in this browser.';
 		}
 		function showAlert(why) {
@@ -976,6 +981,37 @@
 		function hideAlert() {
 			const a = document.getElementById('mj-live-alert');
 			if (a) a.hidden = true;
+		}
+
+		// The same walk the Live page makes, for the same reasons — see
+		// preview-page.js:nextRung. Kept as its own dozen lines rather than
+		// shared, on the standing division in this file: what the two pages DO
+		// about an outcome differs (one has an MJPEG picture to fall to, this
+		// one has an empty box and a sentence), while the rules about which
+		// transport to prefer live in preview-transport.js.
+		function nextRung(kind, detail) {
+			// A channel change can change the codec, and the failure that put
+			// us on the software rung was about the channel we left. Ask the
+			// whole chain again rather than giving up: an H.264 substream
+			// plays natively, and this panel exists to be looked at.
+			if (String(detail || '').split(' ')[0] === 'codec-changed') {
+				swap.start(window.MajesticTransport.preferred());
+				return;
+			}
+			if (kind === 'webrtc') { swap.start('mse'); return; }
+			if (kind === 'mse' && wasmRungFor(detail)) { swap.start('wasm'); return; }
+			exhausted = true;
+			showAlert(detail);
+		}
+
+		// Only when the browser refused the codec, and only for a codec the
+		// decoder handles — an unreachable camera is not a decoding problem,
+		// and an H.264 refusal must not spend a round trip on an H.265 decoder.
+		function wasmRungFor(detail) {
+			const bits = String(detail || '').split(' ');
+			return bits[0] === 'undecodable' &&
+				!!(window.MajesticWasm && window.MajesticWasm.available &&
+					window.MajesticWasm.handles(bits[1]));
 		}
 
 		// This page's own remembered choice, defaulting to the substream. Not
@@ -998,8 +1034,10 @@
 			// captured node is detached within a session and every show or hide
 			// afterwards writes to something nobody can see.
 			elements: [
-				() => document.getElementById('mj-live-video'),
-				() => document.getElementById('mj-live-video-b'),
+				(kind) => document.getElementById(
+					kind === 'wasm' ? 'mj-live-canvas' : 'mj-live-video'),
+				(kind) => document.getElementById(
+					kind === 'wasm' ? 'mj-live-canvas-b' : 'mj-live-video-b'),
 			],
 			open: (kind, el, id, onState) => {
 				const impl = window.MajesticTransport.impl(kind);
@@ -1023,10 +1061,20 @@
 			// state.previewPlayer is what the tab teardown closes, so it has to
 			// name whatever is actually on screen — a stale handle there leaves
 			// a live socket behind on every visit.
-			onPromoted: () => {
+			onPromoted: (kind) => {
 				state.previewPlayer = swap.player();
 				exhausted = false;
 				hideAlert();
+				// The idle pair of the other kind is hidden by nobody — the
+				// swap only touches the slot it is using — so an empty <video>
+				// would sit visible under a painting canvas.
+				(kind === 'wasm'
+					? ['mj-live-video', 'mj-live-video-b']
+					: ['mj-live-canvas', 'mj-live-canvas-b']
+				).forEach((id) => {
+					const e = document.getElementById(id);
+					if (e) e.style.display = 'none';
+				});
 			},
 			onFailed: (kind, why, permanent) => {
 				// 'fallback' is durable and worth remembering; 'busy' says the
@@ -1042,9 +1090,7 @@
 			// black box is indistinguishable from a camera that is off.
 			onExhausted: (kind, detail) => {
 				state.previewPlayer = null;
-				if (kind === 'webrtc') { swap.start('mse'); return; }
-				exhausted = true;
-				showAlert(detail);
+				nextRung(kind, detail);
 			},
 			onLive: (st, d, kind) => {
 				if (kind !== 'webrtc') {
@@ -1060,8 +1106,7 @@
 						// reconnect ladder for a session already given up on.
 						swap.stop();
 						state.previewPlayer = null;
-						exhausted = true;
-						showAlert(d);
+						nextRung(kind, d);
 					}
 					return;
 				}
@@ -1171,6 +1216,13 @@
 		stage.innerHTML =
 			'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
 			'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
+			// The software-decode rung paints a canvas rather than a video, so
+			// the panel needs its own pair the way the Live page does. Without
+			// them `impl()` knowing the kind would be worse than useless: it
+			// would attach a canvas painter to a <video> and paint nothing,
+			// with no error anywhere.
+			'<canvas id="mj-live-canvas" class="mj-live-video" style="display:none"></canvas>' +
+			'<canvas id="mj-live-canvas-b" class="mj-live-video" style="display:none"></canvas>' +
 			// When neither transport can play the camera, this panel has no
 			// MJPEG fallback to drop to and simply went black — the emptiest
 			// possible account of what happened (#274). It says so instead.
@@ -1642,11 +1694,17 @@
 			video: () => {
 				// Whichever element the swap currently has on screen; the MSE
 				// player replaces its node on every reconnect.
-				const a = document.getElementById('mj-live-video');
-				const b = document.getElementById('mj-live-video-b');
-				if (a && a.style.display !== 'none' && a.readyState >= 2) return a;
-				if (b && b.style.display !== 'none' && b.readyState >= 2) return b;
-				return a || b;
+				// Four candidates now, not two: the software rung paints a
+				// canvas. Filtering on readyState alone would have skipped
+				// both canvases for ever — they do not have one — and the
+				// histogram would simply have stopped on an H.265 camera,
+				// silently, which is the failure this panel can least afford.
+				const ready = (e) => e && e.style.display !== 'none' &&
+					(e.tagName === 'CANVAS' ? e.width > 0 : e.readyState >= 2);
+				const els = ['mj-live-video', 'mj-live-video-b',
+					'mj-live-canvas', 'mj-live-canvas-b']
+					.map((id) => document.getElementById(id));
+				return els.find(ready) || els[0] || els[1];
 			},
 			onData: (r) => {
 				pathEl.setAttribute('d', r.path);

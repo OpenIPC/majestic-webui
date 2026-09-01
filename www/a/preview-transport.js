@@ -119,8 +119,15 @@ window.MajesticTransport = (function () {
 	}
 
 	// The implementation behind a name, for a caller doing its own attaching.
+	// MSE stays the else-branch, because it is the floor: `preferred()` and
+	// `choose()` only ever name a transport, and the software rung is not one —
+	// it is reached by the chain, never remembered, never picked. So a caller
+	// asking for 'wasm' has decided already, and an unknown string still lands
+	// on the player that plays anything the browser can decode.
 	function impl(kind) {
-		return kind === 'webrtc' ? window.MajesticWebRTC : window.MajesticVideo;
+		return kind === 'webrtc' ? window.MajesticWebRTC
+			: kind === 'wasm' ? window.MajesticWasm
+			: window.MajesticVideo;
 	}
 
 	// Which encoder channel the person last picked, or null if they never have.

@@ -107,7 +107,14 @@
 			// Nothing to read: the tab is hidden, the player has not attached
 			// yet, or the stream dropped. Say nothing rather than draw a lie —
 			// an empty histogram would read as "the picture is black".
-			if (!document.hidden && v && v.readyState >= 2 && v.videoWidth > 0) {
+			// A canvas is as good a drawImage source as a video and has
+			// neither readyState nor videoWidth, so the guard asks each what it
+			// can answer. Without this the sampler no-ops for ever against the
+			// software-decode rung, and an empty histogram reads as "the
+			// picture is black" rather than as "nothing is being measured".
+			const drawable = v && (v.tagName === 'CANVAS'
+				? v.width > 0 : (v.readyState >= 2 && v.videoWidth > 0));
+			if (!document.hidden && drawable) {
 				try {
 					ctx.drawImage(v, 0, 0, SW, SH);
 					const d = ctx.getImageData(0, 0, SW, SH).data;
