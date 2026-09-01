@@ -999,20 +999,15 @@
 				return;
 			}
 			if (kind === 'webrtc') { swap.start('mse'); return; }
-			if (kind === 'mse' && wasmRungFor(detail)) { swap.start('wasm'); return; }
+			if (kind === 'mse' &&
+				window.MajesticTransport.softwareRungFor(detail)) {
+				swap.start('wasm');
+				return;
+			}
 			exhausted = true;
 			showAlert(detail);
 		}
 
-		// Only when the browser refused the codec, and only for a codec the
-		// decoder handles — an unreachable camera is not a decoding problem,
-		// and an H.264 refusal must not spend a round trip on an H.265 decoder.
-		function wasmRungFor(detail) {
-			const bits = String(detail || '').split(' ');
-			return bits[0] === 'undecodable' &&
-				!!(window.MajesticWasm && window.MajesticWasm.available &&
-					window.MajesticWasm.handles(bits[1]));
-		}
 
 		// This page's own remembered choice, defaulting to the substream. Not
 		// the Preview page's: the two are looked at for different reasons and
@@ -1041,7 +1036,26 @@
 			],
 			open: (kind, el, id, onState) => {
 				const impl = window.MajesticTransport.impl(kind);
+				// A canvas is 300x150 the moment it exists and reports a size
+				// before anything has been decoded into it, so its dimensions
+				// prove nothing — sampling one would publish a black histogram
+				// for a preview that is merely starting, and "the picture is
+				// black" is the exact lie the sampler's guard exists to
+				// prevent. A frame is the only proof of a frame.
+				//
+				// The mark is an expando, not a data attribute, and resolved
+				// through swap.element() rather than through `el`. Both matter:
+				// the software player REPLACES its canvas on attach (the handle
+				// from transferControlToOffscreen is spent once posted), so `el`
+				// is a detached node by the time a frame arrives — and
+				// cloneNode copies attributes, so a data-* mark would be
+				// inherited by the fresh canvas and declare it painted before
+				// it was. An expando is copied by neither.
 				return impl.attach(el, {
+					onCodec: () => {
+						const live = swap.element();
+						if (live) live.__mjPainted = true;
+					},
 					stream: stream,
 					// Opened with the volume it should have rather than given
 					// it afterwards; see preview-swap.js on why applying
@@ -1699,8 +1713,15 @@
 				// both canvases for ever — they do not have one — and the
 				// histogram would simply have stopped on an H.265 camera,
 				// silently, which is the failure this panel can least afford.
+				// Videos know their own readiness; a canvas does not, so the
+				// player marks it when it has actually decoded a frame. Until
+				// then this returns a video that will fail the sampler's own
+				// guard, which keeps the measurement UNKNOWN rather than
+				// reporting black.
 				const ready = (e) => e && e.style.display !== 'none' &&
-					(e.tagName === 'CANVAS' ? e.width > 0 : e.readyState >= 2);
+					(e.tagName === 'CANVAS'
+						? e.__mjPainted === true
+						: e.readyState >= 2);
 				const els = ['mj-live-video', 'mj-live-video-b',
 					'mj-live-canvas', 'mj-live-canvas-b']
 					.map((id) => document.getElementById(id));

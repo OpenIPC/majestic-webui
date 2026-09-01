@@ -853,25 +853,13 @@
 			return;
 		}
 		if (kind === 'webrtc') { attachPlayer('mse'); return; }
-		if (kind === 'mse' && wasmRungFor(detail)) { attachPlayer('wasm'); return; }
+		if (kind === 'mse' && MajesticTransport.softwareRungFor(detail)) {
+			attachPlayer('wasm');
+			return;
+		}
 		showFallback(detail);
 	}
 
-	// Entered only when the BROWSER refused the codec, and only for a codec the
-	// decoder can actually take. `unreachable` and `no-mse` are not decoding
-	// problems, and an H.264 High 10 refusal reports `undecodable` too — sending
-	// it to an H.265 decoder would be a slower way to fail, after a network
-	// round trip for the module.
-	//
-	// `detail` here is the PLAYER's reason code (preview.js). The camera's
-	// served-channel reply also has a reason spelled `undecodable`, meaning
-	// something else entirely; the two vocabularies must not be crossed.
-	function wasmRungFor(detail) {
-		const bits = String(detail || '').split(' ');
-		return bits[0] === 'undecodable' &&
-			!!(window.MajesticWasm && window.MajesticWasm.available &&
-				window.MajesticWasm.handles(bits[1]));
-	}
 
 	// The page's own callbacks, all of which belong to the player on screen: a
 	// trial has no badge, no audio control and no talkback button to report to.

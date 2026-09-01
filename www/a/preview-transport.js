@@ -124,6 +124,23 @@ window.MajesticTransport = (function () {
 	// it is reached by the chain, never remembered, never picked. So a caller
 	// asking for 'wasm' has decided already, and an unknown string still lands
 	// on the player that plays anything the browser can decode.
+	// Whether the software-decode rung is worth trying for a given failure.
+	// Here rather than in either page because it is a RULE, which is what this
+	// module is for — and because two copies of it would drift: the Live page
+	// and the settings panel differ in what they do about the outcome, not in
+	// what makes the attempt worth a network round trip.
+	//
+	// `detail` is the player's reason code. Only a codec the browser refused,
+	// and only one this decoder speaks: an unreachable camera is not a decoding
+	// problem, and an H.264 High 10 refusal reports the same code, where
+	// launching an H.265 decoder would be a slower way to fail.
+	function softwareRungFor(detail) {
+		const bits = String(detail || '').split(' ');
+		const w = window.MajesticWasm;
+		return bits[0] === 'undecodable' &&
+			!!(w && w.available && w.handles && w.handles(bits[1]));
+	}
+
 	function impl(kind) {
 		return kind === 'webrtc' ? window.MajesticWebRTC
 			: kind === 'wasm' ? window.MajesticWasm
@@ -249,6 +266,7 @@ window.MajesticTransport = (function () {
 		choose: choose,
 		demote: demote,
 		impl: impl,
+		softwareRungFor: softwareRungFor,
 		iceServers: iceServers,
 		chosenStream: chosenStream,
 		chooseStream: chooseStream,
