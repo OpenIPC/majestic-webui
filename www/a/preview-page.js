@@ -34,6 +34,14 @@
 	let jpegOn = false;
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
+		// The first attach does not wait for this fetch past CONFIG_WAIT_MS,
+		// and a player can refuse before it even starts — MSE reports 'no-mse'
+		// from inside attach(). Until this line runs, jpegOn is false because
+		// nothing is known, not because the channel is off, and a fallback
+		// decided on it would offer "Enable JPEG" for a camera that has JPEG
+		// enabled and would leave the picture it could have shown unshown.
+		// Re-decided here against the real answer; harmless when it agrees.
+		if (fellBack) showFallback(fellBack);
 		const subOk = mjGet(cfg, 'video1.enabled') === true;
 		subAvailable = subOk;
 		if (subOk) $('#mj-sub').hidden = false;
@@ -173,6 +181,11 @@
 	// picker, where a channel is still a request worth honouring: the Sub
 	// stream can be a codec this browser plays where the Main stream was not.
 	function retryFromFallback() {
+		// Guarded because one press can arrive twice: the click handler
+		// retries, and the change event that follows a radio that did move
+		// reaches goToStream(), which would otherwise restart the session
+		// that the click has just opened.
+		if (!fellBack) return;
 		fellBack = null;
 		hideStageMsg('fallback');
 		if (note) note.style.display = 'none';
@@ -1075,21 +1088,52 @@
 	// selected fires no change event and is still an answer — the one that has
 	// to be remembered, for someone whose video0 is cropped or whose substream
 	// is sized nothing like the preview box.
+	//
+	// That same silence is why the retry lives here too. Unlike the transport
+	// group, these radios keep their selection through a fallback — they say
+	// what was ASKED for, which is still true and is the channel the message
+	// names ("can't decode the Main stream's H265 video"), where the transport
+	// group says what is CARRYING the picture, which is nothing. So the
+	// channel a viewer wants to retry is usually the one already lit, no
+	// change event will ever come for it, and a retry that only hung off
+	// goToStream() could be reached solely by picking a channel they did not
+	// want. Auto has the same hole twice over: autoApply() returns before
+	// goToStream() whenever its pick equals the current stream.
+	//
+	// Click runs before the activation behaviour fires change, so when the
+	// radio does move the later goToStream() finds fellBack already cleared
+	// and does the ordinary thing to the player this just attached.
 	[s0, s1, autoCtl].forEach((el, n) => {
 		if (el) el.addEventListener('click', () => {
 			userPickedStream = true;
 			MajesticTransport.chooseStream('preview', n === 2 ? 'auto' : n);
+			if (!fellBack) return;
+			if (n === 2) {
+				autoOn = true;
+				lastAutoAt = 0;
+				const pick = autoPick();
+				if (pick !== null) stream = pick;
+				wantedCh = null;
+			} else {
+				autoOn = false;
+				stream = n;
+				wantedCh = n;
+			}
+			retryFromFallback();
 		});
 	});
 
-	// Dismissing the served-channel message. A click anywhere on it counts —
+	// Dismissing whatever is in the stage message slot. A click anywhere counts —
 	// the × is a real button for the keyboard, but a toast small enough to
 	// need aim is a toast that gets missed. stopPropagation for the same
 	// reason preview-adapt.js does it: a tap on the stage toggles the control
 	// bar, and dismissing a message should not also flip the chrome.
 	if (servedEl) servedEl.addEventListener('click', (ev) => {
 		if (ev && ev.stopPropagation) ev.stopPropagation();
-		hideServedMsg();
+		// Whatever is in the slot, not just a served message: the fallback
+		// borrows the same element and a dismissal that checked the owner
+		// would leave its sentence stuck on the picture for good.
+		hideStageMsg();
 	});
 
 	// Follow the size, debounced — a drag fires continuously, and the rate limit
