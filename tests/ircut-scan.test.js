@@ -206,7 +206,23 @@ group('run: it finds the pair, and only the pair');
 			return scan.run(latch.io, [[11, 10]], { settleMs: 0 }).then((r2) => {
 				check('one that holds through a float is latching',
 					r2.pins.brakeHeld === false, String(r2.pins.brakeHeld));
-				return eighth();
+				// The case the lab camera could not catch. Starting CLOSED makes
+				// the hit the OPENING direction, and the classification then has
+				// to compare against the picture after the filter is closed
+				// again — not against the frame the hit left behind. The bug
+				// only ever erred towards brake-held, which is what that camera
+				// is, so the fixture agreed with it.
+				const latchOpen = camera(11, 10, { latching: true, startClosed: true });
+				return scan.run(latchOpen.io, [[11, 10]], { settleMs: 0 }).then((r3) => {
+					check('a latching filter found by its OPENING direction is still latching',
+						r3.pins.brakeHeld === false, String(r3.pins.brakeHeld));
+					const brakeOpen = camera(11, 10, { startClosed: true });
+					return scan.run(brakeOpen.io, [[11, 10]], { settleMs: 0 }).then((r4) => {
+						check('and a brake-held one found the same way is still brake-held',
+							r4.pins.brakeHeld === true, String(r4.pins.brakeHeld));
+						return eighth();
+					});
+				});
 			});
 		});
 	}

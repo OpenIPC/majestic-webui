@@ -270,11 +270,15 @@
 			// scan fills these in on the person's behalf. Without it the pads
 			// recoloured and the role list beside them did not, which is the
 			// sort of half-update that makes someone doubt the whole panel.
-			set: (a) => {
+			set: (a, o) => {
 				assign = Object.assign({}, a || {});
 				sel = null;
 				paint();
-				if (opts.onChange) opts.onChange(Object.assign({}, assign));
+				// `quiet` is for re-syncing from config after a save or a reset.
+				// Announcing that would push the values straight back into the
+				// fields refresh() has just settled — and on a save that means
+				// the form goes dirty again the instant it goes clean.
+				if (opts.onChange && !(o && o.quiet)) opts.onChange(Object.assign({}, assign));
 			},
 			// Called by the scan so the pad being driven lights up on the same
 			// map the person is about to click.

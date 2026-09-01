@@ -230,20 +230,26 @@
 			? io.drive(closeHigh, otherPad).then(() => io.wait(settle))
 			: Promise.resolve();
 
+		// The classification compares the CLOSED picture against the floated
+		// one, so it has to read the closed picture rather than reuse the frame
+		// the hit produced. When the hit was the opening direction that frame is
+		// the OPEN image, and comparing a float against it inverts the answer: a
+		// latching filter that stays shut looks like a change and is reported
+		// brake-held. It only ever erred one way, towards brake-held, which is
+		// what this camera happens to be — so the fixture agreed with the bug.
 		return ensureClosed()
-			// Float the pair and look: a filter that springs open is brake-held
-			// and its pads must stay driven for the day position to survive; one
-			// that stays closed is a latching type and can be let go.
-			.then(() => io.release(closeHigh, otherPad))
-			.then(() => io.wait(settle))
 			.then(() => io.look())
-			.then((floated) => {
-				out.brakeHeld = classify(base.gmin, floated.gmin) !== null
-					? true
-					: (floated.gmin >= 0.9 ? true : false);
-				// Put it back where daylight wants it either way.
-				return io.drive(closeHigh, otherPad);
-			})
+			.then((closed) => io.release(closeHigh, otherPad)
+				.then(() => io.wait(settle))
+				.then(() => io.look())
+				.then((floated) => {
+					// Floating releases the brake. A filter that moves was being
+					// held there and its pads must stay driven; one that does
+					// not is latching and can be let go.
+					out.brakeHeld = classify(closed.gmin, floated.gmin) !== null;
+					// Put it back where daylight wants it either way.
+					return io.drive(closeHigh, otherPad);
+				}))
 			.then(() => { out.settled = true; return out; })
 			.catch(() => out);
 	}
