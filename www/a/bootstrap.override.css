@@ -57,12 +57,21 @@
 
 /* Hints sit under the control they explain and are held to a readable measure:
    full-column-width help set at nearly the size of the label above it competes
-   with the field rather than supporting it. */
+   with the field rather than supporting it.
+
+   The measure is in characters, because that is what a measure is. It used to be
+   22rem, and a pixel guess cannot know what it is guessing at: 352px is 42
+   characters of this type, which held the sentence well short of its own column
+   and read as a hard-wrapped poem next to the empty two thirds of a wide one
+   (#239). 66ch never binds inside a settings column — those are 451 and 472px
+   at the cap, and the hint simply fills them — and still holds a paragraph on
+   the extension and firmware pages, where a row runs 822px and an unbounded
+   hint would be 99 characters to a line. */
 .hint {
 	/* block because the CGI helpers emit it as a <span> — without this the
 	   max-width below does nothing and the hint runs the card's full width */
 	display: block;
-	max-width: 22rem;
+	max-width: 66ch;
 	margin-top: 0.35rem;
 	margin-bottom: 0;
 	font-size: 0.78125rem;
@@ -256,22 +265,33 @@ body > main > .container > h2 {
 	line-height: 1.3;
 }
 
-/* Only this page widens, and only because of the one thing on it that can use a
-   bigger monitor. Bootstrap's shared 1320px cap meant the Live preview was
-   exactly 966x543 on a 1080p screen and on a 1440p one alike — the container was
-   what stopped it, not the window (#239). Every other page keeps the cap; a
-   ceiling stays, because a settings form whose rows run the width of a 4K
-   monitor is not a form anyone can read. */
+/* This page is capped at the same 1320px as every other page, and the cap is
+   written out rather than left to Bootstrap's `.container` — that is a five-step
+   ladder (540/720/960/1140/1320), and its step below 1400px is 1140, so simply
+   deleting this rule would leave a 1340px window NARROWER than it is today
+   (434px columns down to 361). `min()` keeps the 96vw floor that made the page
+   fit small windows and puts the ceiling back where the rest of the UI has it.
+
+   The ceiling had been lifted to 2400px so the Live preview could use a big
+   monitor (#239). Measured on a hi3516av300 at 2560x1440, that bought the form
+   nothing: the same seventeen rows, the same 1068px of page — and it hung 540px
+   past the navbar and the footer, which are 1320px on every page including this
+   one. It bought the picture 2056x1157 instead of 976x549, at the price of the
+   panel it belongs to: the stage below sizes itself from the window's HEIGHT and
+   reserves room for the Tone strip and nothing else, so the wider the picture
+   the further Scene/Luma/Orientation fall past the bottom — about 240px at every
+   window size. Stop the picture at 976 and the whole panel is on one screen for
+   the first time: 8px to spare at 1080p, 368px at 1440p. Below 1375px, where
+   96vw already wins, nothing about this changes. */
 #page-mj-settings > main > .container {
-	max-width: min(96vw, 2400px);
+	max-width: min(96vw, 1320px);
 }
 
-/* Once the container is free to grow, a quarter-width rail is 437px of mostly
-   nothing on a 1080p screen — a column of one-word labels, sized as a fraction
-   of a page whose width now comes from the monitor. So the rail takes what the
-   tree needs and the form column takes the rest, which on that screen hands the
-   picture another 60px of width. Below md the two stack and the percentages
-   never applied anyway, hence the same breakpoint Bootstrap uses. */
+/* A quarter-width rail is a fraction of a page, and this page's width is now a
+   constant — so make the rail one too. It takes what the tree needs (a column of
+   one-word labels) and the form column takes the rest, which is 976px at the cap
+   against the 966px a col-md-3 would leave. Below md the two stack and the
+   percentages never applied anyway, hence the same breakpoint Bootstrap uses. */
 @media (min-width: 768px) {
 	#page-mj-settings .row > .col-md-3 {
 		width: 20rem;
