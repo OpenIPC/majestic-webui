@@ -128,7 +128,11 @@
 		     pre-auth whitelist) and an old firmware 404s it, and in both of
 		     those worlds on_setup() enforces nothing, so the script hides the
 		     block and drops `required` rather than pointing a checkbox at
-		     nothing — which is the same judgement the placeholder made. -->
+		     nothing — which is the same judgement the placeholder made. Any
+		     other failure proves nothing about enforcement, so the gate stays
+		     and the language links carry the text instead. The checkbox is
+		     script-disabled until a document is readable, so acceptance can
+		     never be ticked ahead of the text it accepts. -->
 		<div id="eulabox">
 			<pre id="eulatext" hidden></pre>
 			<p class="hint">Majestic End-User License Agreement:
@@ -174,10 +178,18 @@
 			var eula = document.getElementById('eula');
 			var eulatext = document.getElementById('eulatext');
 			var eulalang = document.getElementById('eulalang');
+			var eulaseq = 0;
 
 			// Nothing in this file ever sets eula.checked, and nothing may:
 			// ticking that box IS the acceptance, and it belongs to the person
 			// at the keyboard.
+
+			// Held down until a document is actually on screen (or provably
+			// only reachable through the links), so acceptance cannot be
+			// ticked ahead of the text it accepts. Disabled here rather than
+			// in the markup because without script the links are the display,
+			// and a markup-disabled control would never post at all.
+			eula.disabled = true;
 
 			// First language the visitor's browser prefers that the camera
 			// ships; the links above let them overrule it.
@@ -192,18 +204,29 @@
 			}
 
 			// No document, no gate: an old majestic answers 401, an old
-			// firmware 404, and in both of those worlds on_setup() enforces
+			// firmware 404, and in exactly those worlds on_setup() enforces
 			// nothing, so the honest page is the one without the block.
 			// `required` has to go with it — a required checkbox inside a
 			// hidden block does not become optional, it makes the whole form
-			// unsubmittable ("not focusable").
+			// unsubmittable ("not focusable"). Only those two definitive
+			// answers reach here: anything else proves nothing about the
+			// server, which may well still require the fields.
 			function degrade() {
 				eulabox.hidden = true;
 				eula.required = false;
 				eula.disabled = true;
 			}
 
+			// The inline pane failed for a reason that says nothing about
+			// enforcement — a transient network error, a proxy answering with
+			// HTML. Keep the gate: the raw links stay the way to read the
+			// document, and the server remains the judge of the fields.
+			function linksOnly() {
+				eula.disabled = false;
+			}
+
 			function loadEula(lang, initial) {
+				var seq = ++eulaseq;
 				// X-Requested-With marks this as an in-page fetch: an old
 				// majestic would otherwise attach WWW-Authenticate to its 401,
 				// and Safari over plain HTTP answers that with a Basic dialog
@@ -219,13 +242,22 @@
 					if (!r.ok || ct.indexOf('text/plain') !== 0) throw r;
 					return r.text();
 				}).then(function (t) {
+					// A slower response from an earlier click must not replace
+					// the text somebody is reading, nor relabel the language
+					// the form reports alongside their acceptance.
+					if (seq !== eulaseq) return;
 					eulatext.textContent = t;
 					eulatext.hidden = false;
 					eulalang.value = lang;
-				}).catch(function () {
+					eula.disabled = false;
+				}).catch(function (r) {
+					if (seq !== eulaseq) return;
 					// A failed language switch keeps whatever text is already
-					// up; only the first load decides whether the gate exists.
-					if (initial) degrade();
+					// up; only the first load decides the shape of the gate.
+					if (initial) {
+						if (r && (r.status === 401 || r.status === 404)) degrade();
+						else linksOnly();
+					}
 				});
 			}
 
