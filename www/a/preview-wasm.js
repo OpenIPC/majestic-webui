@@ -87,13 +87,24 @@ window.MajesticWasm = (function () {
 			if (reason) onState('mjpeg', reason);
 		}
 
-		// transferControlToOffscreen is one-way and permanent: a second call on
-		// the same element throws. The two canvas slots are reused across every
-		// attach, so the handle is cached on the element itself.
+		// transferControlToOffscreen() is one-way and permanent, and the
+		// OffscreenCanvas it returns is DETACHED the moment it is posted in a
+		// transfer list. So the handle cannot be cached and reused either --
+		// caching it only moves the failure from the second transfer to the
+		// second postMessage, where it is quieter.
+		//
+		// The element itself is replaced instead, which is what preview.js
+		// already does to its <video> on every open (cloneNode + replaceChild,
+		// keeping the id). It is safe here for the same reason it is safe
+		// there: the swap resolves its elements through getters by id and
+		// never holds a node. Done before the worker exists, so a session
+		// never sees its canvas swapped underneath it.
 		let off;
 		try {
-			off = el.__mjOffscreen ||
-				(el.__mjOffscreen = el.transferControlToOffscreen());
+			const fresh = el.cloneNode(false);
+			if (el.parentNode) el.parentNode.replaceChild(fresh, el);
+			el = fresh;
+			off = el.transferControlToOffscreen();
 		} catch (e) {
 			onState('mjpeg', 'no-offscreen');
 			return facade();
@@ -146,9 +157,6 @@ window.MajesticWasm = (function () {
 				url: proto + '://' + location.host + '/ws/video?stream=' + stream,
 				canvas: off,
 			}, [off]);
-			// Once transferred the handle is spent; a later attach to this
-			// element reuses the cached OffscreenCanvas rather than the element.
-			el.__mjOffscreenSent = true;
 			if (onStats) statsTimer = setInterval(() => {
 				if (worker) worker.postMessage({ type: 'stats' });
 			}, 1000);
@@ -160,11 +168,13 @@ window.MajesticWasm = (function () {
 					n = n | 0;
 					if (n === stream || dead) return;
 					stream = n;
-					// A channel change is a new socket; the worker owns it, so
-					// this is a restart rather than a message. The page stages
-					// attaches through preview-swap, which will destroy this one.
-					die(null);
-					onState('mjpeg', 'restart');
+					// The worker owns the socket, so a channel change is its
+					// business and the page never hears about it. Reporting a
+					// state here instead -- which the first cut did, as
+					// `mjpeg restart` -- was read by the chain as this rung
+					// giving up, so picking Sub while software decoding dropped
+					// a working picture to MJPEG.
+					if (worker) worker.postMessage({ type: 'setStream', stream: n });
 				},
 				requestIdr: function () { if (worker) worker.postMessage({ type: 'idr' }); },
 				setAudio: function () {},

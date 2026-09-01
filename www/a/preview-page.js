@@ -817,6 +817,20 @@
 	// exactly once, and a codec problem never touches the viewer's remembered
 	// preference.
 	function nextRung(kind, detail) {
+		// A channel change can change the CODEC, and the failure that put us on
+		// this rung was about the channel we have just left. So this is not the
+		// chain running out — it is a different question, asked again from the
+		// top: an H.264 substream may well play over WebRTC or MSE natively,
+		// and falling to MJPEG here would hand the viewer the worst option
+		// available for a stream the browser can decode perfectly.
+		//
+		// It cannot loop: the rung only stands down for a codec it does not
+		// handle, and if the new one is refused too the reason will name that
+		// codec, which the gate below rejects.
+		if (String(detail || '').split(' ')[0] === 'codec-changed') {
+			attachPlayer(wantWebRTC());
+			return;
+		}
 		if (kind === 'webrtc') { attachPlayer('mse'); return; }
 		if (kind === 'mse' && wasmRungFor(detail)) { attachPlayer('wasm'); return; }
 		showFallback(detail);

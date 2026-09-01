@@ -636,6 +636,28 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.el('mj-served-why').textContent);
 	}
 
+	// A channel change can change the codec, and the failure that put us on the
+	// software rung was about the channel we just left. An H.264 substream
+	// plays natively, so falling to MJPEG there would hand the viewer the worst
+	// option available for a stream the browser decodes perfectly.
+	group('a codec change asks the whole chain again, not the floor');
+	{
+		const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'undecodable h265');
+		const wasm = env.made[1];
+		check('the software rung took it', wasm.kind === 'wasm', wasm.kind);
+		wasm.say('playing');
+		// The viewer picks a channel the camera encodes as H.264.
+		wasm.say('mjpeg', 'codec-changed h264');
+		const after = env.made[env.made.length - 1];
+		check('a fresh attempt was made, not a fallback',
+			env.made.length === 3 && env.el('live-mjpeg').src === '',
+			'made=' + env.made.length + ' img=' + env.el('live-mjpeg').src);
+		check('and it starts from a real transport, not the rung again',
+			after.kind !== 'wasm', after.kind);
+	}
+
 	group('a cloned MSE element does not strand the swap');
 	{
 		const env = load('mse');
