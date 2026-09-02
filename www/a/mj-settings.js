@@ -1952,7 +1952,7 @@
 				del.innerHTML = '&times;';
 				del.title = 'Remove region ' + (i + 1);
 				del.setAttribute('aria-label', 'Remove region ' + (i + 1));
-				del.addEventListener('click', () => ctl._drop(i));
+				del.addEventListener('click', () => removeAt(i));
 				row.appendChild(chip);
 				row.appendChild(co);
 
@@ -2076,7 +2076,9 @@
 		// somebody who came looking for a control, not a gate.
 		function setArmed(on) {
 			armed = !!on;
-			gesture = null;
+			// Deliberately does NOT clear `gesture`: dropping one without
+			// putting back what it had already written is exactly the bug
+			// cancelGesture() exists for. The gesture's own lifecycle owns it.
 			band.hidden = true;
 			btn.classList.toggle('mj-hud-on', armed);
 			btn.setAttribute('aria-pressed', armed ? 'true' : 'false');
@@ -2100,17 +2102,18 @@
 				// that had a selection to clear, so the key looked like it had
 				// done nothing. There is no reading of Escape under which some
 				// of the temporary state should stay.
-				if (sel < 0 && !armed) return;
+				if (sel < 0 && !armed && !gesture) return;
 				e.preventDefault();
+				// The drag first, and restoring rather than dropping it: by now
+				// it has already written a half-finished rectangle into the row.
+				cancelGesture();
 				select(-1);
 				setArmed(false);
 				return;
 			}
 			if ((e.key === 'Delete' || e.key === 'Backspace') && sel >= 0 && !typing) {
 				e.preventDefault();
-				const i = sel;
-				sel = -1;
-				ctl._drop(i);
+				removeAt(sel);
 			}
 		};
 		document.addEventListener('keydown', onKey);
@@ -2164,7 +2167,7 @@
 		// Write a region back, live. The row's own box shows the numbers changing
 		// under the drag, because those numbers ARE the thing being edited and
 		// watching them move is how you land on a round one.
-		function put(i, r, b) {
+		function put(i, r) {
 			const v = Math.round(r.x) + 'x' + Math.round(r.y) + 'x' +
 				Math.round(r.w) + 'x' + Math.round(r.h);
 			const src = inputs()[i];
@@ -2174,10 +2177,35 @@
 			return v;
 		}
 
+		// Removing a region renumbers every one after it, and the selection is an
+		// index — so deleting row 1 of 3 while row 2 is selected would hand the
+		// handles and the Delete key to what used to be row 3. Every delete goes
+		// through here.
+		function removeAt(i) {
+			if (sel === i) sel = -1;
+			else if (sel > i) sel -= 1;
+			ctl._drop(i);
+		}
+
 		function select(i) {
 			if (sel === i) return;
 			sel = i;
 			paintBoxes();
+		}
+
+		// Put back what a gesture had already written. Move and resize edit the
+		// row LIVE — that is the point, the numbers move under the drag — so
+		// abandoning one is not just forgetting it: the model already holds the
+		// half-finished rectangle. Both ways out land here, a pointercancel
+		// (the browser took the gesture: an edge swipe, a rotation, another
+		// element capturing the pointer) and Escape mid-drag.
+		function cancelGesture() {
+			const g = gesture;
+			gesture = null;
+			band.hidden = true;
+			if (!g || g.kind === 'new' || !g.moved || !g.orig) return;
+			put(g.i, g.orig);
+			paint();
 		}
 
 		// What the press landed on decides the gesture.
@@ -2235,27 +2263,36 @@
 			if (gesture.kind === 'move') {
 				// Clamped as a whole rather than per edge: a region dragged at the
 				// frame edge should stop, not squash.
-				const x = Math.min(Math.max(o.x + d.dx, 0), b.w - o.w);
-				const y = Math.min(Math.max(o.y + d.dy, 0), b.h - o.h);
-				put(gesture.i, { x: x, y: y, w: o.w, h: o.h }, b);
+				//
+				// Every upper bound is floored at 0, because a region can be
+				// LARGER than the frame — the resolution was reduced under it, or
+				// the coordinates were typed by hand — and `b.w - o.w` is then
+				// negative, so the clamp would drive x below zero and store a
+				// negative origin. Pinned to the top-left instead, which is at
+				// least a rectangle you can see and drag back.
+				const x = Math.min(Math.max(o.x + d.dx, 0), Math.max(0, b.w - o.w));
+				const y = Math.min(Math.max(o.y + d.dy, 0), Math.max(0, b.h - o.h));
+				put(gesture.i, { x: x, y: y, w: o.w, h: o.h });
 			} else {
 				let x = o.x, y = o.y, w = o.w, h = o.h;
 				const g = gesture.grip;
 				if (g.indexOf('w') >= 0) {
-					const nx = Math.min(Math.max(o.x + d.dx, 0), o.x + o.w - MIN_PX);
+					const nx = Math.min(Math.max(o.x + d.dx, 0), Math.max(0, o.x + o.w - MIN_PX));
 					w = o.x + o.w - nx; x = nx;
 				}
 				if (g.indexOf('e') >= 0) {
-					w = Math.min(Math.max(o.w + d.dx, MIN_PX), b.w - o.x);
+					// Same flooring, and at MIN_PX rather than 0: a width clamped
+					// to a negative bound would come out negative.
+					w = Math.min(Math.max(o.w + d.dx, MIN_PX), Math.max(MIN_PX, b.w - o.x));
 				}
 				if (g.indexOf('n') >= 0) {
-					const ny = Math.min(Math.max(o.y + d.dy, 0), o.y + o.h - MIN_PX);
+					const ny = Math.min(Math.max(o.y + d.dy, 0), Math.max(0, o.y + o.h - MIN_PX));
 					h = o.y + o.h - ny; y = ny;
 				}
 				if (g.indexOf('s') >= 0) {
-					h = Math.min(Math.max(o.h + d.dy, MIN_PX), b.h - o.y);
+					h = Math.min(Math.max(o.h + d.dy, MIN_PX), Math.max(MIN_PX, b.h - o.y));
 				}
-				put(gesture.i, { x: x, y: y, w: w, h: h }, b);
+				put(gesture.i, { x: x, y: y, w: w, h: h });
 			}
 			paintBoxes();
 		}
@@ -2266,8 +2303,9 @@
 		function finish(e, commit, surface) {
 			if (!gesture || e.pointerId !== gesture.id) return;
 			const g = gesture;
-			const r = (commit && g.kind === 'new') ? bandRect(e) : null;
 			try { surface.releasePointerCapture(e.pointerId); } catch (err) {}
+			if (!commit) { cancelGesture(); return; }
+			const r = g.kind === 'new' ? bandRect(e) : null;
 			gesture = null;
 			band.hidden = true;
 
@@ -2318,8 +2356,7 @@
 			const x = e.target.closest && e.target.closest('.mj-md-x');
 			if (!x) return;
 			e.preventDefault();
-			sel = -1;
-			ctl._drop(+x.dataset.del);
+			removeAt(+x.dataset.del);
 		});
 
 
