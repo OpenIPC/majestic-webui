@@ -94,6 +94,11 @@ window.MajesticWasm = (function () {
 			dead = true;
 			if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
 			if (worker) { try { worker.terminate(); } catch (e) {} worker = null; }
+			// The worker is gone but its last frame stays on the canvas, and a
+			// frozen frame is not a measurement of anything current. Withdraw
+			// the claim rather than leave whatever is sampling it reading a
+			// still picture as live evidence.
+			try { el.__mjPainted = false; } catch (e) {}
 			if (reason) onState('mjpeg', reason);
 		}
 
@@ -128,7 +133,24 @@ window.MajesticWasm = (function () {
 				const m = e.data;
 				if (m.type === 'state') {
 					if (m.state === 'mjpeg') die(m.detail || 'decoder-error');
-					else onState(m.state, m.detail);
+					else {
+						// Whoever paints a canvas is the only one who can say
+						// it has been painted, and here that is a worker
+						// holding an OffscreenCanvas: the main thread never
+						// sees a frame land, and the placeholder element is
+						// 300x150 and blank-looking from the moment it exists.
+						// mj-luma.js reads this expando before it will measure
+						// a canvas, and without it anything sampling the
+						// software-decode rung silently measures nothing --
+						// which for the black-picture check is the difference
+						// between "no fault" and "never looked".
+						//
+						// 'playing' is the claim, because that is already what
+						// this contract means by it: the swap puts the canvas
+						// on screen on the strength of the same message.
+						if (m.state === 'playing') el.__mjPainted = true;
+						onState(m.state, m.detail);
+					}
 				} else if (m.type === 'codec') {
 					onCodec('h265', '', m.width, m.height);
 				} else if (m.type === 'stats' && onStats) {

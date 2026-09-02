@@ -96,7 +96,18 @@
 			const a = $('#st-alert-novideo-a');
 			if (t) t.textContent = f.title;
 			if (d) d.textContent = f.detail;
-			if (a) { a.textContent = f.act.label + ' →'; a.href = f.act.href; }
+			if (a) {
+				a.textContent = f.act.label + ' →';
+				a.href = f.act.href;
+				// Assigned, not added: this anchor is rewritten on every
+				// finding and addEventListener would stack a prompt per
+				// repaint. main.js cannot help here — it wires `.confirm` once
+				// at load and this link does not exist in its final form until
+				// long after.
+				a.onclick = f.act.confirm
+					? (ev) => { if (!confirm(f.act.confirm)) ev.preventDefault(); }
+					: null;
+			}
 			const h = $('#st-alert-novideo-h');
 			if (h) {
 				h.hidden = !f.help;
@@ -461,15 +472,23 @@
 
 	function onSample(s) {
 		if (!s.ok) {
+			// Tracking consumes EVERY sample, failures included, and is not
+			// inside the two-failure gate below. The blind run is a duration
+			// measured from when it started, so a poll that is merely skipped
+			// leaves the clock running: one failed heartbeat in the middle of a
+			// dark stretch would have had the next good sample bill the whole
+			// outage as blindness nobody watched, and ten seconds of that is a
+			// finding. An unreachable camera is not a camera reporting
+			// darkness — the same reasoning as the IR-cut tracker's.
+			if (vidTrack) vidTrackNow = vidTrack.push(s, performance.now() / 1000);
+			// What is DISPLAYED still waits for the second failure, so a single
+			// dropped poll does not flap a banner off and on again.
+			//
 			// With no current data there is no evidence the condition alerts
 			// still hold — clear them rather than presenting the last good
 			// sample's warnings as current next to "not responding".
 			if (s.fails >= 2) {
 				setAlert('#st-alert-exp', false);
-				// Same reasoning as the IR-cut line below: an unreachable
-				// camera is not a camera reporting darkness, so the run is
-				// broken rather than carried across the gap.
-				if (vidTrack) vidTrackNow = vidTrack.push(s, performance.now() / 1000);
 				renderNoVideo(s);
 				// Not cleared, narrowed: an unset irCutPin1 is still unset
 				// while the camera is unreachable, but a day/night

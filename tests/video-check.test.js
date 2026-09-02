@@ -140,6 +140,15 @@ group('what it does say');
 		hold(st, sample({ venc_empty_frames_run: 40 }), 2), null);
 	check('a stalled encoder is a finding', !!stall && stall.code === 'stall');
 	check('and it offers a restart', !!stall && /fw-restart/.test(stall.act.href));
+	// The banner this replaced carried .confirm + data-confirm, which main.js
+	// wires at load — and the anchor it lands on now is written at runtime, so
+	// that wiring would never see it. The prompt travels with the action
+	// instead, or one click restarts the camera.
+	check('and restarting asks first',
+		!!stall && typeof stall.act.confirm === 'string' &&
+		/Restart the camera/.test(stall.act.confirm));
+	check('while a settings link does not ask',
+		!!off && !off.act.confirm);
 
 	const tr = vc.tracker();
 	const blind = vc.diagnose(BOTH_ON, sample(BLIND), hold(tr, sample(BLIND), 12), null);
@@ -166,7 +175,13 @@ group('what it does say');
 		{ blackS: 12 });
 	check('with both signals the sentence says both',
 		!!both && /picture is completely black/.test(both.detail) &&
-		/maximum\s+exposure and gain/.test(both.detail));
+		/longest\s+exposure/.test(both.detail));
+	// The predicate never looks at isp_again — the gain scale is vendor
+	// specific and has no portable ceiling — so no sentence may claim it.
+	// Stating an observation the code did not make is the same failure as
+	// convicting on a test that could not look.
+	check('and neither sentence claims anything about gain',
+		!!both && !/gain/.test(both.detail) && !!blind && !/gain/.test(blind.detail));
 }
 
 group('the picture alone, where the camera cannot say');

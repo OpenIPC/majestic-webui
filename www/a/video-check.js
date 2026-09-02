@@ -20,9 +20,17 @@
 //   isp_exposureismax    0                   1
 //   /image.jpg       392 KB               62 KB, solid black
 //
+// Only two of those are tested. isp_again moved further than anything else and
+// is deliberately not in the predicate: the scale is vendor-specific -- the
+// same idle state reads 1024 on HiSilicon, 126 on Ingenic and 20855 on
+// SigmaStar -- so there is no portable way to ask whether a gain is at its
+// ceiling, and a threshold picked from one board would fire on another camera
+// doing nothing wrong. It is recorded here because it is what the fault looked
+// like, not because anything reads it.
+//
 // Two independent signals, and they answer different halves. The camera's own
-// gauges say it is straining -- exposure and gain wide open -- and reading
-// nothing. The decoded picture says the frame that came out the far end is
+// gauges say it is holding the shutter open as long as it can and still
+// reading nothing. The decoded picture says the frame that came out the far end is
 // black. Either alone has an innocent explanation; together they do not.
 //
 // A separate file, and tested, for the same reason ircut-check.js is: this
@@ -167,7 +175,18 @@
 				title: 'The encoder has stopped',
 				detail: 'The camera is running, but the encoder has stopped ' +
 					'producing frames while everything else looks alive.',
-				act: { href: 'fw-restart.cgi', label: 'Restart camera' },
+				// The confirmation travels WITH the action, because the anchor
+				// it lands on is written at runtime and main.js wired
+				// `.confirm` once at load — so the class the banner this
+				// replaced carried would never have been seen, and the link
+				// restarted the camera on one click. Whoever renders a finding
+				// is responsible for asking; both consumers do.
+				act: {
+					href: 'fw-restart.cgi', label: 'Restart camera',
+					confirm: 'Restart the camera now?\n\nSettings are kept. ' +
+						'Video and recording stop for about half a minute ' +
+						'while it comes back.',
+				},
 				help: HELP,
 			};
 		}
@@ -189,12 +208,20 @@
 		const cause = ' On a newly flashed camera this is usually the wrong ' +
 			'sensor driver for the board; it can also be a lens cap, or a ' +
 			'scene with no light in it at all.';
+		// Only what the predicate actually tested. The measured signature had
+		// gain pinned at maximum too (32381 against a healthy 1024), and the
+		// first draft of these sentences said so -- but ispBlind() never looks
+		// at isp_again, and it cannot: the gain scale is vendor-specific, the
+		// same idle state reads 1024 on HiSilicon, 126 on Ingenic and 20855 on
+		// SigmaStar, and there is no portable "is this its ceiling" test. A
+		// sentence that states an observation the code did not make is the
+		// same failure as a finding reached from a test that could not look.
 		const both = ispSays === true && ispHeld && picHeld;
 		const detail = both
-			? 'The picture is completely black, and the sensor is at maximum ' +
-				'exposure and gain while still reading no light.' + cause
+			? 'The picture is completely black, and the sensor is at its ' +
+				'longest exposure and still reading no light.' + cause
 			: ispSays === true
-				? 'The sensor is at maximum exposure and gain and reporting no ' +
+				? 'The sensor is at its longest exposure and reporting no ' +
 					'light at all.' + cause
 				: 'Every frame is completely black. This camera does not report ' +
 					'its own exposure, so the cause is not certain.' + cause;
