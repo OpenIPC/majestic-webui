@@ -167,7 +167,11 @@ window.MajesticPreview = (function () {
 		// delivers nothing — which reads as "no signal" rather than as a
 		// misconfiguration.
 		const where = opts.where || 'preview';
-		const subAvailable = get('video1.enabled') === true;
+		// Not const: on a settings page, enabling the substream is a thing you
+		// do on another section of the same page, so this can become true (or
+		// false) while the stage is mounted. syncConfig() is how a caller says
+		// the config has moved.
+		let subAvailable = get('video1.enabled') === true;
 		const remembered = window.MajesticTransport.chosenStream(where);
 		let stream = (remembered === null ? 1 : remembered) === 1 && subAvailable
 			? 1 : 0;
@@ -178,6 +182,46 @@ window.MajesticPreview = (function () {
 		// in a browser that refused an H.265 main.
 		let exhausted = false;
 		let frame = null;
+
+		// What the most recent attachment has reported about its picture, and
+		// which attachment that was. It is held rather than published because a
+		// TRIAL reports too: preview-swap.js deliberately keeps the current
+		// player on screen while a replacement is judged, so a trial's codec
+		// event describes something nobody can see — and if that trial then
+		// fails, publishing it would leave frame() describing a player that
+		// never appeared. One slot is enough: the swap runs at most one trial
+		// and one live player, and a newer report supersedes an older one.
+		let pending = null;
+
+		// Which transport the caller was last told is playing, so onPlaying is
+		// an event about a picture rather than about an attempt.
+		let announced = null;
+
+		function announcePlaying(kind) {
+			if (announced === kind) return;
+			announced = kind;
+			if (opts.onPlaying) opts.onPlaying(kind);
+		}
+
+		// Publish what `pending` says, if the attachment that said it is the one
+		// on screen. Both halves of that are about the same mistake: the
+		// `__mjPainted` mark is resolved through swap.element() — it has to be,
+		// because the software player replaces its canvas and the node handed to
+		// open() is detached by the time a frame arrives — and swap.element() is
+		// the LIVE element, so a trial calling this would mark a player that has
+		// shown nothing.
+		function adoptPending() {
+			if (!pending || !swap.isLive(pending.id)) return;
+			const live = swap.element();
+			if (live) live.__mjPainted = true;
+			const p = pending;
+			pending = null;
+			if (!p.w || !p.h) return;
+			const same = frame && frame.w === p.w && frame.h === p.h &&
+				frame.codec === p.codec;
+			frame = { w: p.w, h: p.h, codec: p.codec };
+			if (!same && opts.onFrame) opts.onFrame(p.w, p.h, p.codec);
+		}
 
 		// ── What it says when there is no picture ────────────────────────────
 		//
@@ -243,6 +287,12 @@ window.MajesticPreview = (function () {
 			// one is worse than none, so the claim is withdrawn here and
 			// `media()` stops offering it.
 			canvases().forEach((c) => { c.__mjPainted = false; });
+			// And the same withdrawal for what the picture WAS: with nothing on
+			// screen, frame() describing the last thing that played would have
+			// an overlay laid out over an empty stage.
+			frame = null;
+			pending = null;
+			announced = null;
 			showAlert(detail);
 			if (opts.onLost) opts.onLost(detail);
 		}
@@ -273,12 +323,10 @@ window.MajesticPreview = (function () {
 					// which is also why the slot identity above can safely be an
 					// attribute and this cannot.
 					onCodec: (codec, cs, w, h) => {
-						const live = swap.element();
-						if (live) live.__mjPainted = true;
-						if (w && h) {
-							frame = { w: w, h: h, codec: codec };
-							if (opts.onFrame) opts.onFrame(w, h, codec);
-						}
+						pending = { id: attachId, w: w, h: h, codec: codec };
+						// Only if this attachment is the one on screen; a trial
+						// is adopted by onPromoted instead, once it is.
+						adoptPending();
 					},
 					stream: stream,
 					// Opened with the volume it should have rather than given it
@@ -296,7 +344,11 @@ window.MajesticPreview = (function () {
 					onState: onState,
 				});
 			},
-			onPromoted: (kind) => {
+			// `proven` says whether this promotion was earned by a picture. A
+			// trial is promoted because it reported 'playing', so yes; a first
+			// attach is promoted because there was nothing to protect, which is
+			// not the same claim — it is still connecting, and may yet fail.
+			onPromoted: (kind, proven) => {
 				exhausted = false;
 				hideAlert();
 				// The idle pair of the other kind is hidden by nobody — the swap
@@ -306,7 +358,13 @@ window.MajesticPreview = (function () {
 				stage.querySelectorAll('[data-kind="' + idle + '"]').forEach((n) => {
 					n.style.display = 'none';
 				});
-				if (opts.onPlaying) opts.onPlaying(kind);
+				// A trial that reported its codec while it was still being
+				// judged: now it is on screen, what it said is worth publishing.
+				adoptPending();
+				// Only on a promotion a picture earned. The unproven case is
+				// announced by onLive('playing') below instead, which is where
+				// a first attach reports the same news once it is true.
+				if (proven) announcePlaying(kind);
 			},
 			onFailed: (kind, why, permanent) => {
 				// 'fallback' is durable and worth remembering; 'busy' says the
@@ -318,6 +376,11 @@ window.MajesticPreview = (function () {
 			// empty black box is indistinguishable from a camera that is off.
 			onExhausted: (kind, detail) => { nextRung(kind, detail); },
 			onLive: (st, d, kind) => {
+				// The live player's own report that it is playing. This is the
+				// only place a FIRST attach can say so — it was promoted before
+				// it had anything, so its picture arrives here rather than as a
+				// second promotion.
+				if (st === 'playing') announcePlaying(kind);
 				if (kind !== 'webrtc') {
 					// MSE is the last thing to try, so its giving up ends the
 					// chain — and it says so on the live player's own channel
@@ -434,9 +497,23 @@ window.MajesticPreview = (function () {
 		// ── The handle ───────────────────────────────────────────────────────
 
 		function goToStream(n) {
+			// Only when it actually moves. The channels are different pictures —
+			// different size, often a different codec — so what was true of the
+			// old one is not a description of the new one, it is a wrong
+			// description of it, and frame() should answer "not known yet" until
+			// the new channel reports. But asking for the channel already
+			// playing is a no-op the player has no reason to answer, so
+			// discarding on that would leave frame() empty for as long as the
+			// session lasted.
+			const moved = n !== stream;
 			stream = n;
 			if (s0) s0.checked = n === 0;
 			if (s1) s1.checked = n === 1;
+			if (moved) {
+				frame = null;
+				pending = null;
+				announced = null;
+			}
 			if (exhausted) {
 				exhausted = false;
 				hideAlert();
@@ -496,6 +573,31 @@ window.MajesticPreview = (function () {
 			// 300x150 while this already said 3840x2160. An overlay laid out
 			// from the element in that window is laid out from a default.
 			frame: function () { return frame; },
+
+			// The config has moved — re-read what it decides. Only the channel
+			// picker, because it is the only thing here settled once at mount:
+			// the ICE settings are read through the getter at attach time and
+			// are therefore already current.
+			//
+			// A caller has to say so rather than this polling, because the
+			// config object is theirs and only they know when it has been
+			// replaced. mj-settings.js calls it from refresh(), which is the
+			// one place state.config is swapped.
+			syncConfig: function () {
+				const now = get('video1.enabled') === true;
+				if (now === subAvailable) return;
+				subAvailable = now;
+				if (!s1) return;
+				s1.disabled = !subAvailable;
+				const lbl = bar.querySelector('label[for="' + id + '-s1"]');
+				if (lbl) lbl.hidden = !subAvailable;
+				// A channel that has just gone away cannot stay selected: the
+				// socket subscribes to whatever number it is handed and then
+				// delivers nothing, which reads as a dead camera. The reverse is
+				// deliberately not symmetric — a substream appearing is an offer,
+				// not a reason to move the picture somebody is looking at.
+				if (!subAvailable && stream === 1) goToStream(0);
+			},
 
 			stream: function () { return stream; },
 			// Programmatic channel change. Writes `.checked` rather than firing

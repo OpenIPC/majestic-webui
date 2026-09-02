@@ -1099,11 +1099,18 @@ mark {
 /* Over the picture, under the bar: where a consumer draws on the frame —
    regions, masks, a crop rectangle. Empty and pointer-transparent, so a stage
    nobody draws on behaves exactly as it did before this layer existed; a
-   consumer that wants the pointer takes it back on its own children. */
+   consumer that wants the pointer takes it back on its own children.
+
+   "Under the bar" has to be said in numbers, and every layer in the stage now
+   says so. A positive z-index paints above a z-index:auto sibling whatever the
+   DOM order, so an overlay at 2 with the bar left on auto put a consumer's
+   regions over the channel picker and the icons — and, the moment that consumer
+   took the pointer back on its children, over the controls as inputs too. The
+   media are auto, so the overlay only has to clear them. */
 .mj-pv-overlay {
 	position: absolute;
 	inset: 0;
-	z-index: 2;
+	z-index: 1;
 	pointer-events: none;
 }
 
@@ -1156,6 +1163,10 @@ mark {
 .mj-pv-bar {
 	position: absolute;
 	inset: auto 0.75rem 0.75rem;
+	/* Above the overlay (1) and the failure sentence (3): the controls are the
+	   last thing that may be covered, since covering them is indistinguishable
+	   from removing them. See the note on .mj-pv-overlay. */
+	z-index: 4;
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;

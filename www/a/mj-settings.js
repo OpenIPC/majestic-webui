@@ -3138,6 +3138,11 @@
 		// setValue fires no events, so anything that mirrors a field rather than
 		// owning it — the orientation pad — has to be told to re-read.
 		(state.liveSync || []).forEach(fn => fn());
+		// The stage settles one thing at mount that this may have just changed:
+		// whether there is a substream to offer. Enabling video1 is done on
+		// another section of this same page, so the picker would otherwise go on
+		// refusing a channel that now exists until the leaf was re-opened.
+		if (state.preview) state.preview.syncConfig();
 		// The map holds its own copy of the assignments, taken once at mount.
 		// A save or a per-row reset changes the fields underneath it, and the
 		// next edit on the map would push its whole stale set back — restoring
