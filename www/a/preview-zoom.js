@@ -307,6 +307,38 @@
 		});
 	}
 
+	// And the same thing for video, which is where it actually mattered. The
+	// size used to arrive only through preview-page.js's onCodec, and on the
+	// WebRTC path that is fed by the once-a-second getStats() poll -- so the
+	// picture was already on screen, in the stylesheet's inset:0/contain
+	// fallback, for up to a poll interval before anything laid it out.
+	// Measured on an av300 at 1600x900: loadedmetadata, resize and playing all
+	// at t=4752ms with videoWidth already 3840x2160, and the placement at
+	// t=5500ms -- 748ms of picture drawn as Fit and then jumping to Fill. (The
+	// MSE path never showed it: preview.js reports the codec from the init
+	// segment, before a frame exists.) The element knows its own size the
+	// moment it has one, so ask it instead of waiting to be told.
+	//
+	// Capture, because neither event bubbles -- but both pass through the
+	// stage on the way down -- and delegated rather than bound, because the
+	// media elements come and go: the MSE player replaces its <video> on every
+	// reconnect and the transport swap has two slots.
+	//
+	// The display guard is the swap's invariant, not tidiness: a trial attaches
+	// to the hidden slot and reports metadata there, and resizing the live
+	// picture to a channel nobody has agreed to yet is exactly what "nothing on
+	// screen changes until the replacement is known to work" forbids. The
+	// promotion carries its own report -- the stats tick that says `playing`
+	// is the one that names the size -- so nothing is lost by ignoring this.
+	function fromMedia(e) {
+		const el = e.target;
+		if (!el || !el.videoWidth) return;
+		if (getComputedStyle(el).display === 'none') return;
+		setFrame(el.videoWidth, el.videoHeight);
+	}
+	stage.addEventListener('loadedmetadata', fromMedia, true);
+	stage.addEventListener('resize', fromMedia, true);
+
 	MODES.forEach((m) => {
 		const el = $(RADIOS[m]);
 		if (el) el.addEventListener('change', () => { if (el.checked) setMode(m); });

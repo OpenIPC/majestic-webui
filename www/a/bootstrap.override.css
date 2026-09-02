@@ -3567,6 +3567,14 @@ dialog.mj-modal::backdrop {
 	align-items: baseline;
 	gap: 0.75rem;
 	margin-bottom: 0.4rem;
+	/* The live readout beside the caption is empty until the first sample, and
+	   its line box is the taller of the two -- 0.8125rem monospace against the
+	   caption's 11px, both at 1.5 -- so the head grew 3px the moment a number
+	   landed in it, and the whole hero row with it. That was the last thing on
+	   the Dashboard still moving after the page had opened. Reserved from the
+	   readout's own size rather than from a measurement, so it tracks the rule
+	   below instead of recording what that rule produced one afternoon. */
+	min-height: calc(0.8125rem * 1.5);
 }
 
 .st-chart-head .st-now {
@@ -3605,10 +3613,24 @@ dialog.mj-modal::backdrop {
 }
 
 /* The camera itself. A fixed-ratio box: the snapshot may lag or be disabled,
-   and the row must not reflow around it either way. */
+   and the row must not reflow around it either way.
+
+   align-self is what makes that true, and it is not a tidy-up. A flex row's
+   default `align-items: stretch` gives its items a DEFINITE cross size, and a
+   definite cross size overrides `aspect-ratio` outright -- so the ratio
+   declared above held only for as long as this tile happened to be the tallest
+   thing on the row. Its rowmate is a chart that draws nothing until the
+   heartbeat has fed it a sample; when it arrived the row grew to 224px and
+   took the tile with it, and the camera picture changed shape a few seconds
+   after the page opened, from 16:9 to 1.64:1 with `object-fit: cover`
+   re-cropping it. Reserving the chart's height (charts.js) stops the row
+   moving, but only this stops the ratio being something the neighbours get a
+   vote on. The row is a picture beside a graph: the picture's shape is a fact
+   about the camera, and the graph is the elastic one. */
 .st-prev {
 	position: relative;
 	flex: 0 0 23rem;
+	align-self: start;
 	aspect-ratio: 16 / 9;
 	display: block;
 	border-radius: var(--bs-border-radius-lg);
@@ -3710,6 +3732,10 @@ dialog.mj-modal::backdrop {
 	.st-prev {
 		flex: 1 1 auto;
 		width: 100%;
+		/* Stacked, the row is a column and the cross axis is the horizontal
+		   one, where start would shrink the tile to its content. The width
+		   above already prevents that; this says so. */
+		align-self: stretch;
 	}
 }
 

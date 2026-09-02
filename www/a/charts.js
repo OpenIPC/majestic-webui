@@ -77,9 +77,27 @@ window.MjCharts = (function () {
 	// window is drawn as if it were recent.
 	const CHART_WINDOW = 120; // seconds of history on screen ("-2 min")
 	const CHART_GAP = 8;      // a hole longer than this breaks the line
+	// The plot's vertical furniture, hoisted out of renderChart so that the
+	// height a chart is GOING to draw at can be known before it has any samples
+	// to draw. Everything horizontal stays in there: it depends on the host's
+	// measured width, which is not knowable this early.
+	const PAD_T = 5;  // headroom above the top gridline
+	const X_BAND = 14; // the "-2 min / now" strip below the plot
+	function chartHeight(cfg) { return PAD_T + cfg.h + X_BAND; }
 	function makeChart(sel, cfg) {
 		const host = typeof sel === 'string' ? $(sel) : sel;
 		if (!host) return null;
+		// Reserve the height now. A chart draws nothing until it has been
+		// pushed a sample, which on the dashboard is one heartbeat away, so its
+		// box was 0px tall through the first seconds of the page and then
+		// sprang to its full height -- taking everything below it down the page
+		// and, on the Dashboard's hero row, stretching the camera tile out of
+		// the 16:9 it declares (a flex row's default `align-items: stretch`
+		// gives an item a definite cross size, which overrides `aspect-ratio`;
+		// the tile went 368x207 to 368x224 about four seconds in). The number
+		// is not a guess or a duplicate: it is the same arithmetic the render
+		// uses, so the reservation cannot drift from what lands in it.
+		host.style.minHeight = chartHeight(cfg) + 'px';
 		const ch = { host: host, cfg: cfg, pts: [] };
 		charts.push(ch);
 		return ch;
@@ -96,7 +114,7 @@ window.MjCharts = (function () {
 		const W = ch.host.clientWidth;
 		if (!W) return;
 		const cfg = ch.cfg;
-		const padL = 30, padR = 6, padT = 5, H = cfg.h, XB = 14;
+		const padL = 30, padR = 6, padT = PAD_T, H = cfg.h, XB = X_BAND;
 		const plotW = W - padL - padR;
 		const lo = cfg.lo;
 		let hi = cfg.hi;
