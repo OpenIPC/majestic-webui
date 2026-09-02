@@ -25,27 +25,38 @@ const root = path.join(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'www/setup.html'), 'utf8');
 const logo = fs.readFileSync(path.join(root, 'www/a/logo.svg'), 'utf8');
 
-group('setup.html carries the real logo');
+group('every pre-auth page carries the real logo');
 {
-	// Compared as path data rather than as bytes: the file is a standalone
-	// document with its own width/height/style attributes, and the page's copy
-	// is sized by CSS and labelled for assistive tech. What must not drift is
-	// the artwork.
+	// majestic's pre-auth whitelist is exactly /, /favicon.ico and these three
+	// self-contained pages; /a/* answers 401 to a request without a session —
+	// on an unclaimed camera AND on a claimed one being shown the sign-in page.
+	// So each of them has to carry the artwork itself, and each copy can drift
+	// away from a/logo.svg on its own. Nothing on the camera notices: the pages
+	// still render, just with last year's mark, and the only way to see it is
+	// to sign out or factory-reset.
+	const PREAUTH = ['www/setup.html', 'www/login.html', 'www/cameras.html'];
 	const paths = (s) => (s.match(/ d="[^"]+"/g) || []).map((d) => d.trim());
 	const inFile = paths(logo);
-	const inPage = paths(page);
 
 	check('the logo file has path data to compare', inFile.length > 0,
 		'www/a/logo.svg has no <path d="…">');
-	check('setup.html carries every path of www/a/logo.svg',
-		inFile.length === inPage.length && inFile.every((d, i) => d === inPage[i]),
-		`logo.svg has ${inFile.length} paths, setup.html has ${inPage.length}` +
-		(inFile.length === inPage.length
-			? '; the data differs — re-copy the <path> elements'
-			: ''));
-	check('the copy is inline, not a request to /a/',
-		!/<img[^>]+\/a\/logo\.svg/.test(page),
-		'an unclaimed camera answers 401 to /a/*, so this would be a broken image');
+
+	for (const f of PREAUTH) {
+		const src = fs.readFileSync(path.join(root, f), 'utf8');
+		const mine = paths(src);
+		check(`${f} carries every path of www/a/logo.svg`,
+			inFile.length === mine.length && inFile.every((d, i) => d === mine[i]),
+			`logo.svg has ${inFile.length} paths, ${f} has ${mine.length}` +
+			(inFile.length === mine.length
+				? '; the data differs — re-copy the <path> elements'
+				: ''));
+		check(`${f} inlines it rather than requesting /a/`,
+			!/<img[^>]+\/a\/logo\.svg/.test(src) && !/href="\/a\/logo\.svg"/.test(src),
+			'/a/* answers 401 without a session, so this would be a broken image');
+		check(`${f} no longer shows the text wordmark`,
+			!/Open<span>IPC<\/span>/.test(src),
+			'the real mark exists; a hand-set one beside it is the bug being fixed');
+	}
 }
 
 group('acceptance belongs to the person at the keyboard');
@@ -88,16 +99,21 @@ group('the reading gate holds both controls, not just the box');
 		'both degrade() and linksOnly() must turn it off');
 }
 
-group('the page stays self-contained');
+group('the pre-auth pages stay self-contained');
 {
-	// Anything the browser would have to fetch to render this page is a request
-	// an unclaimed camera answers 401 to. The document and the capability probe
-	// are fetched by script and degrade on their own; markup may not.
-	const externals = (page.match(/<(?:link|script|img)\b[^>]*/g) || [])
-		.filter((t) => /\b(?:src|href)="(?!#)/.test(t))
-		.filter((t) => !/href="\/eula\./.test(t)); // the raw no-script links
-	check('no stylesheet, script or image is loaded from the camera',
-		externals.length === 0, externals.join(' | '));
+	// Anything the browser must fetch to RENDER one of these is a request that
+	// answers 401 without a session — which is every request these pages can
+	// make, since they are what is shown when there is no session yet. Fetches
+	// made by script (the agreement, the capability probe) degrade on their
+	// own; markup cannot.
+	for (const f of ['www/setup.html', 'www/login.html', 'www/cameras.html']) {
+		const src = fs.readFileSync(path.join(root, f), 'utf8');
+		const externals = (src.match(/<(?:link|script|img)\b[^>]*/g) || [])
+			.filter((t) => /\b(?:src|href)="(?!#)/.test(t))
+			.filter((t) => !/href="\/eula\./.test(t)); // the raw no-script links
+		check(`${f} loads no stylesheet, script or image from the camera`,
+			externals.length === 0, externals.join(' | '));
+	}
 }
 
 group('both steps live in one form');
