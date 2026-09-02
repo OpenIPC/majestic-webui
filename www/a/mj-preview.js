@@ -93,7 +93,10 @@ window.MajesticPreview = (function () {
 	//   onLost     (detail) — every transport has been tried and none of them
 	//              played. The stage says so itself; this is for a caller that
 	//              wants to say more, or to stop measuring something.
-	//   onFrame    (w, h, codec) — the picture's natural size, once known.
+	//   onFrame    (w, h, codec) — the picture's natural size, once known, and
+	//              (null) when it stops being known: a channel change, or a
+	//              chain that has run out. Anything positioned against the
+	//              picture has to hear the second one too.
 	//
 	// Returns a handle, or null when `available()` is false — in which case
 	// nothing has been appended to `host` and the caller renders the rest of its
@@ -197,6 +200,23 @@ window.MajesticPreview = (function () {
 		// an event about a picture rather than about an attempt.
 		let announced = null;
 
+		// Forgetting the frame is news. Everything laid out against the picture —
+		// an overlay's rectangles, a tool that needs to map a drag into it — is
+		// wrong the moment the frame is unknown, and it had no way to hear about
+		// it: onFrame fired only when a size ARRIVED, so a channel change or a
+		// dead chain left consumers drawing over a picture that had gone, with
+		// their controls still enabled and silently rejecting every gesture.
+		//
+		// So onFrame(null) means "no longer known", and every caller has to
+		// handle it — the same null frame() already returns before the first
+		// frame of a session, so it is a state they must handle anyway.
+		function forgetFrame() {
+			pending = null;
+			if (!frame) return;
+			frame = null;
+			if (opts.onFrame) opts.onFrame(null);
+		}
+
 		function announcePlaying(kind) {
 			if (announced === kind) return;
 			announced = kind;
@@ -290,8 +310,7 @@ window.MajesticPreview = (function () {
 			// And the same withdrawal for what the picture WAS: with nothing on
 			// screen, frame() describing the last thing that played would have
 			// an overlay laid out over an empty stage.
-			frame = null;
-			pending = null;
+			forgetFrame();
 			announced = null;
 			showAlert(detail);
 			if (opts.onLost) opts.onLost(detail);
@@ -510,8 +529,7 @@ window.MajesticPreview = (function () {
 			if (s0) s0.checked = n === 0;
 			if (s1) s1.checked = n === 1;
 			if (moved) {
-				frame = null;
-				pending = null;
+				forgetFrame();
 				announced = null;
 			}
 			if (exhausted) {

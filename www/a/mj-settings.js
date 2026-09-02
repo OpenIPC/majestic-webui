@@ -1671,6 +1671,19 @@
 
 		if (roiField && preview) {
 			repaint = mountRegions(preview, roiField, regionBody, regionNote);
+			// The field's own reset, MOVED into the group head rather than made
+			// again — the same relocation dockRuntime does with the runtime
+			// toggles, and for the same reason: one control, with its real
+			// handler and its real disabled-when-there-is-no-default state.
+			//
+			// Hiding the row hid this with it, and nothing else on the page can
+			// do what it does. "Clear all" stages an empty list for the next
+			// Save; this asks the camera to put the key back to unconfigured,
+			// which is a different state and the only way to recover a recorded
+			// default that is not empty.
+			const rst = roiField.p.querySelector('.mj-reset');
+			const gh = colRegions.querySelector('.mj-live-grp-head');
+			if (rst && gh) gh.appendChild(rst);
 		} else if (roiField) {
 			// No picture to draw on: say why once, rather than leaving the
 			// coordinate boxes to be explained by nothing.
@@ -1759,10 +1772,18 @@
 		preview.overlay.appendChild(layer);
 
 		// The overlay is pointer-transparent by design, so the picture keeps its
-		// own gestures; this is the child that takes the pointer back, and only
-		// while the mode is on.
+		// own gestures; this is the child that takes the pointer back.
+		//
+		// It is ALWAYS live, not only while the button is armed, and that is the
+		// other half of mirroring zoom-to-area. On the Live View page a drag
+		// draws whenever the picture is not pannable — `armed ||
+		// stage.classList.contains('mj-drawable')` — and it is the Area button
+		// that exists for the case where a bare drag would pan instead. This
+		// stage never pans: nothing here zooms it, so a drag on it has nothing
+		// else it could mean, which is exactly the drawable state. Requiring the
+		// button first was a control standing in front of a gesture that had
+		// nothing to compete with.
 		const catcher = el('div', 'mj-md-catch');
-		catcher.hidden = true;
 		preview.overlay.appendChild(catcher);
 
 		// The rubber band, mirroring the Live View page's #mj-marquee exactly:
@@ -1836,9 +1857,11 @@
 			view.innerHTML = '';
 			if (!rows.length) {
 				const empty = el('p', 'mj-live-hint mj-md-empty');
-				empty.textContent = armed
-					? 'Drag a rectangle on the picture.'
-					: 'No regions — the whole picture is watched.';
+				// Says the gesture, because the gesture is the only thing there
+				// is to find: with nothing drawn there is no rectangle on the
+				// picture to suggest that rectangles are what this page is for.
+				empty.textContent =
+					'No regions — the whole picture is watched. Drag one on the picture to watch part of it instead.';
 				view.appendChild(empty);
 			}
 
@@ -1861,8 +1884,15 @@
 					const src = inputs()[i];
 					if (src) src.value = co.value;
 					updateDirty();
-					// Only the rectangles. Repainting the list would rebuild the
-					// input being typed into and take the caret with it.
+					// Only the rectangles and this row's own verdict. Repainting
+					// the whole list would rebuild the input being typed into
+					// and take the caret with it — but repainting NOTHING but
+					// the rectangles left the verdict behind, so a corrected
+					// value still read "not XxYxWxH" and a resized one still
+					// showed the share of the frame it used to have. Both are
+					// the row saying something about text that is no longer in
+					// it.
+					says(parse(co.value));
 					paintBoxes();
 				});
 				const del = el('button', 'mj-md-del');
@@ -1874,21 +1904,31 @@
 				row.appendChild(chip);
 				row.appendChild(co);
 
-				// A region whose numbers do not parse is the one thing the old
-				// editor could not show at all: it drew what it understood and
-				// left the rest to be a silently missing rectangle. It is said
-				// here instead, next to the box you would fix it in.
-				if (!r) {
-					const bad = el('span', 'mj-md-bad');
-					bad.textContent = 'not XxYxWxH';
-					row.appendChild(bad);
-				} else if (b) {
-					const pctEl = el('span', 'mj-md-pct');
-					pctEl.textContent =
-						Math.round(r.w * r.h / (b.w * b.h) * 100) + '%';
-					pctEl.title = 'share of the frame';
-					row.appendChild(pctEl);
-				}
+				// What this row makes of its own text. A region whose numbers do
+				// not parse is the one thing the old editor could not show at
+				// all — it drew what it understood and left the rest to be a
+				// silently missing rectangle — so it is said here, beside the
+				// box you would fix it in. Built once and rewritten in place,
+				// because it has to keep up with typing.
+				const verdict = el('span', 'mj-md-pct');
+				verdict.title = 'share of the frame';
+				row.appendChild(verdict);
+				const says = (rr) => {
+					if (!rr) {
+						verdict.className = 'mj-md-bad';
+						verdict.textContent = 'not XxYxWxH';
+						verdict.removeAttribute('title');
+					} else if (b) {
+						verdict.className = 'mj-md-pct';
+						verdict.textContent =
+							Math.round(rr.w * rr.h / (b.w * b.h) * 100) + '%';
+						verdict.title = 'share of the frame';
+					} else {
+						verdict.className = 'mj-md-pct';
+						verdict.textContent = '';
+					}
+				};
+				says(r);
 				row.appendChild(del);
 				view.appendChild(row);
 
@@ -1924,13 +1964,19 @@
 					'no main resolution set. Switch the picture to Main to draw them.'
 				: '';
 			warn.hidden = !noBase;
-			btn.disabled = !p || noBase;
+			const usable = !!p && !noBase;
+			btn.disabled = !usable;
 			btn.title = noBase ? warn.textContent
-				: (!p ? 'Waiting for the picture' : 'Draw regions');
-			// Nothing left to draw on, so the tool cannot stay armed: a lit
-			// button and a crosshair over a picture that has gone promise a
-			// drag that would now do nothing.
-			if (btn.disabled && armed) setArmed(false);
+				: (!p ? 'Waiting for the picture' : 'Drag a rectangle on the picture');
+			// The crosshair is the disclosure that a bare drag does something,
+			// so it tracks whether a drag CAN do something rather than whether
+			// the button has been pressed. On the stage as well as the media, so
+			// it reads the same over the letterbox.
+			preview.stage.classList.toggle('mj-md-armed', usable);
+			catcher.hidden = !usable;
+			// Nothing left to draw on, so the button cannot stay lit: it would
+			// promise a drag that now does nothing.
+			if (!usable && armed) setArmed(false);
 		}
 
 		// Clear-all, beside the field's own "+ Add region" — the two ways of
@@ -1964,17 +2010,15 @@
 		ctl._sync = paint;
 
 		// ── the mode ──────────────────────────────────────────────────────
+		// `armed` is now only the button's own lit state. The drag does not need
+		// it — see the catcher above — so this is a highlight and a shortcut for
+		// somebody who came looking for a control, not a gate.
 		function setArmed(on) {
 			armed = !!on;
 			drawing = null;
 			band.hidden = true;
-			catcher.hidden = !armed;
 			btn.classList.toggle('mj-hud-on', armed);
 			btn.setAttribute('aria-pressed', armed ? 'true' : 'false');
-			// The cursor is the other half of the affordance, and it belongs on
-			// the stage rather than on the catcher alone so it reads the same
-			// over the letterbox as over the picture.
-			preview.stage.classList.toggle('mj-md-armed', armed);
 			paint();
 		}
 		btn.addEventListener('click', () => setArmed(!armed));
@@ -2002,7 +2046,13 @@
 		// at the end, as this did first, draws a rectangle over the black and
 		// then stores a smaller one: the band was a promise the result broke.
 		function bandRect(e) {
+			// Null mid-drag is reachable: a channel change or a dead chain
+			// forgets the frame while a pointer is down. Throwing here would
+			// take the pointermove or pointerup handler with it — capture never
+			// released, `drawing` never cleared, the tool never disarmed — so
+			// the gesture is abandoned rather than completed.
 			const p = pic();
+			if (!p) return null;
 			const r = catcher.getBoundingClientRect();
 			const cx = (v) => Math.min(Math.max(v, p.x), p.x + p.w);
 			const cy = (v) => Math.min(Math.max(v, p.y), p.y + p.h);
@@ -2015,9 +2065,13 @@
 		}
 
 		catcher.addEventListener('pointerdown', (e) => {
+			// No `armed` test: the picture is drawable in its own right. What
+			// still stops a drag is having nowhere to put the result — no frame
+			// size, or no base to write the coordinates in — which is the same
+			// thing that disables the button.
 			// A rectangle belongs to the pointer that began it: a second finger
 			// arriving mid-drag is not a new origin.
-			if (!armed || e.button || drawing || !pic()) return;
+			if (e.button || drawing || !pic() || !base()) return;
 			const r = catcher.getBoundingClientRect();
 			drawing = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
 			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
@@ -2027,6 +2081,7 @@
 		catcher.addEventListener('pointermove', (e) => {
 			if (!drawing || e.pointerId !== drawing.id) return;
 			const b = bandRect(e);
+			if (!b) { band.hidden = true; return; }
 			band.hidden = false;
 			band.style.left = b.x + 'px';
 			band.style.top = b.y + 'px';
@@ -2039,7 +2094,7 @@
 		// pointer — and an interrupted gesture is not a completed one.
 		function finishDraw(e, commit) {
 			if (!drawing || e.pointerId !== drawing.id) return;
-			const r = commit ? bandRect(e) : null;
+			const r = commit ? bandRect(e) : null;   // null if the picture went
 			try { catcher.releasePointerCapture(e.pointerId); } catch (err) {}
 			drawing = null;
 			band.hidden = true;
