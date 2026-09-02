@@ -581,6 +581,23 @@ preview() {
 			<span id="mj-note-why">Your browser can't play the live video stream.</span>
 			<a href="mj-settings.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
 		</p>
+		<!-- The other half of "there is nothing to see", and the one #mj-note
+		     cannot reach: a camera on the wrong sensor driver PLAYS, so the
+		     player never fails and never writes the note. preview-health.js
+		     owns this one and writes both the sentence and the link from the
+		     finding, because one banner covers a black picture, a stopped
+		     encoder and a camera with no channel enabled, and each of those
+		     wants its own words and its own destination. Usually the viewer has
+		     already been handed to the Dashboard by the time it renders; this
+		     is what the page says when that hand-off has been spent. -->
+		<p id="mj-blind" class="alert alert-warning mj-stage-alert" style="display:none">
+			<span id="mj-blind-why"></span>
+			<a id="mj-blind-act" href="mj-settings.cgi?tab=isp"></a>
+			<!-- Hidden until a finding says it applies: a hardware fault is the
+			     one an owner cannot fix from a settings page, and the log is
+			     what they can screenshot for whoever sold them the camera. -->
+			<a id="mj-blind-help" href="info-logs.cgi" hidden></a>
+		</p>
 		<!-- The status chip. Same id as the badge it replaces, so every state
 		     write (connecting… / no signal / MJPEG / reconnecting…) keeps
 		     landing; live it reads "H264 3840×2160 · 25 fps". The transport is

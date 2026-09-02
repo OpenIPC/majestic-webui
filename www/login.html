@@ -130,15 +130,15 @@
 			// which would turn ?next= into an open redirect.
 			function safeNext() {
 				var raw = new URLSearchParams(location.search).get('next');
-				if (!raw) return '/cgi-bin/status.cgi';
+				if (!raw) return '/cgi-bin/preview.cgi';
 				if (raw.charAt(0) !== '/' || raw.charAt(1) === '/' || raw.indexOf('\\') !== -1) {
-					return '/cgi-bin/status.cgi';
+					return '/cgi-bin/preview.cgi';
 				}
 				// Never point back at this page. The already-signed-in check below
 				// acts on it, so a ?next= aimed here would spin: probe says OK,
 				// replace() lands here again, probe says OK…
 				if (raw.split(/[?#]/)[0] === location.pathname) {
-					return '/cgi-bin/status.cgi';
+					return '/cgi-bin/preview.cgi';
 				}
 				return raw;
 			}

@@ -49,5 +49,15 @@ page_title="Live View"; hide_title=1; full_bleed=1
 <script src="/a/preview-zoom.js"></script>
 <script src="/a/preview-page.js"></script>
 <script src="/a/preview-hero.js"></script>
+<!-- Is the camera seeing anything? Nothing the player can answer — a camera on
+     the wrong sensor driver plays perfectly and plays black — so this reads the
+     exposure gauges off the heartbeat and the picture off the decoded frame,
+     and hands the viewer to the Dashboard when neither has anything in it.
+     mj-luma.js is the histogram it measures the frame with, the same one the
+     Live adjustments panel uses; video-check.js is the verdict. Both before it,
+     and both guarded, so a build missing either leaves the page as it was. -->
+<script src="/a/mj-luma.js"></script>
+<script src="/a/video-check.js"></script>
+<script src="/a/preview-health.js"></script>
 
 <%in p/footer.cgi %>

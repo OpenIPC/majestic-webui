@@ -51,8 +51,72 @@
 		const el = $(id);
 		if (el) el.hidden = !on;
 		const box = $('#st-alerts');
-		if (box) box.hidden = !['#st-alert-stale', '#st-alert-exp', '#st-alert-stall', '#st-alert-ircut']
+		if (box) box.hidden = !['#st-alert-stale', '#st-alert-exp', '#st-alert-novideo',
+			'#st-alert-wasnovideo', '#st-alert-ircut']
 			.some(a => { const e = $(a); return e && !e.hidden; });
+	}
+
+	// ── nothing to see ──────────────────────────────────────────────────────
+	// The verdict is in /a/video-check.js; this only decides what the dashboard
+	// says out loud, the same split as the IR-cut banner below. No picture is
+	// measured here — the Dashboard has no decoded frame, only a snapshot in a
+	// tile — so the finding rests on the camera's own exposure gauges alone,
+	// and on a camera that does not publish them there is simply no finding.
+	// That is the honest answer rather than a gap: it is the Live page, which
+	// has the frame, that can still tell.
+	const VC = window.MajesticVideoCheck;
+	const vidTrack = VC ? VC.tracker() : null;
+	let vidTrackNow = { blindS: 0, blind: null };
+	// Set by the Live page's hand-off. Cleared the moment a finding renders —
+	// the banner then IS the explanation and two of them would be one too many.
+	let cameFromLive = false;
+	try {
+		cameFromLive = new URLSearchParams(location.search).has('novideo');
+	} catch (e) {}
+	// Its own copy rather than a read of nmCfg: that one is narrowed to
+	// .nightMode, and diagnose() asks about the video channels. {} is the right
+	// starting value — every test in there is `=== false`, so an unfetched
+	// config declines to answer instead of reporting both channels off.
+	let cfgNow = {};
+	// When this page first heard from the camera, so the all-clear above can
+	// tell "checked and found nothing" from "has not looked yet".
+	let vidFirstS = null;
+	if (VC && typeof mjConfig === 'function') {
+		mjConfig().then(c => {
+			if (c && Object.keys(c).length) cfgNow = c;
+		}).catch(() => {});
+	}
+
+	function renderNoVideo(s) {
+		if (!VC) return;
+		const f = VC.diagnose(cfgNow, s, vidTrackNow, null);
+		if (f) {
+			cameFromLive = false;
+			const t = $('#st-alert-novideo-t'), d = $('#st-alert-novideo-d');
+			const a = $('#st-alert-novideo-a');
+			if (t) t.textContent = f.title;
+			if (d) d.textContent = f.detail;
+			if (a) { a.textContent = f.act.label + ' →'; a.href = f.act.href; }
+			const h = $('#st-alert-novideo-h');
+			if (h) {
+				h.hidden = !f.help;
+				if (f.help) { h.textContent = f.help.label + ' →'; h.href = f.help.href; }
+			}
+		}
+		setAlert('#st-alert-novideo', !!f);
+		// Only once the camera has actually been heard from. Saying anything
+		// about the hand-off off an unanswered poll would be a claim made from
+		// nothing.
+		const heard = !!s && s.ok;
+		if (heard && vidFirstS === null) vidFirstS = performance.now() / 1000;
+		// The all-clear is earned, not assumed: this page's own blind run has
+		// to have had time to fire and not fired. Before that the banner states
+		// the hand-off and stops there.
+		const settled = vidFirstS !== null &&
+			performance.now() / 1000 - vidFirstS >= (VC ? VC.BLIND_S : 10);
+		const ok = $('#st-alert-wasnovideo-ok');
+		if (ok) ok.textContent = settled ? ' It looks fine now.' : '';
+		setAlert('#st-alert-wasnovideo', cameFromLive && heard);
 	}
 
 	// ── IR-cut ──────────────────────────────────────────────────────────────
@@ -402,7 +466,11 @@
 			// sample's warnings as current next to "not responding".
 			if (s.fails >= 2) {
 				setAlert('#st-alert-exp', false);
-				setAlert('#st-alert-stall', false);
+				// Same reasoning as the IR-cut line below: an unreachable
+				// camera is not a camera reporting darkness, so the run is
+				// broken rather than carried across the gap.
+				if (vidTrack) vidTrackNow = vidTrack.push(s, performance.now() / 1000);
+				renderNoVideo(s);
 				// Not cleared, narrowed: an unset irCutPin1 is still unset
 				// while the camera is unreachable, but a day/night
 				// disagreement is a claim about right now, and there is no
@@ -470,7 +538,12 @@
 		if (encTile) encTile.hidden = !encHas;
 		if (encPanel) encPanel.hidden = !encHas;
 
-		setAlert('#st-alert-stall', v.venc_empty_frames_run > 25);
+		if (vidTrack) vidTrackNow = vidTrack.push(s, performance.now() / 1000);
+		renderNoVideo(s);
+		// Kept alongside, and it is not the same statement. This one says the
+		// scene is darker than the sensor can compensate for, which is a true
+		// and ordinary thing at dusk; the banner above only speaks when the
+		// metered luminance is zero as well, which no scene produces.
 		setAlert('#st-alert-exp', v.isp_exposureismax > 0);
 		const lum = $('#st-alert-exp-lum');
 		if (lum) lum.textContent = ('isp_avelum' in v) ? ' Scene luminance ' + v.isp_avelum + ' of 255.' : '';
