@@ -40,6 +40,11 @@
 		night: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M16.4 12.3A7 7 0 0 1 7.7 3.6a7 7 0 1 0 8.7 8.7z"></path></svg>',
 		ircut: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6.6"></circle><path d="M10 3.4v13.2M4.3 6.7l11.4 6.6M4.3 13.3l11.4-6.6"></path></svg>',
 		lamp: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.6 14.4a5 5 0 1 1 4.8 0v1.7H7.6z"></path><path d="M8.2 17.6h3.6"></path></svg>',
+		// A rectangle being drawn: dashed, with the crosshair centre that says
+		// the next drag lands one.
+		draw: '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4.5" width="14" height="11" rx="1.4" stroke-dasharray="2.6 2.2"></rect><path d="M10 8v4M8 10h4"></path></svg>',
+		plus: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"></path></svg>',
+		trash: '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6h11M8 6V4.2h4V6M6.3 6l.7 9.6h6l.7-9.6"></path></svg>',
 		compare: '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="1.6"></rect><path d="M10 4v12"></path><path d="M4.6 8.4h3M4.6 11.6h3"></path></svg>',
 		// The snapshot and fullscreen glyphs went with the buttons they sit on,
 		// into mj-preview.js: a caller asking the stage for a snapshot button
@@ -257,7 +262,6 @@
 			if (!leafFields(s).length) continue;   // e.g. a section that is all x-live
 			out.push({ id: s, label: label(s) });
 		}
-		if (groupHasMotion(g)) out.push({ id: ROI_ID, label: 'Visual editor' });
 		return out;
 	}
 
@@ -280,6 +284,10 @@
 		const t = tree();
 		if (!t.length) return null;
 		if (tab) {
+			// The Visual editor was its own leaf until the regions moved onto
+			// Motion detection's picture. A bookmark to it is not a dead link:
+			// it names a thing that still exists, on the page that now holds it.
+			if (tab === ROI_ID) tab = 'motionDetect';
 			if (leaves().includes(tab)) return tab;
 			const g = t.find(x => x.id === tab);
 			if (g) return g.sections[0].id;
@@ -308,16 +316,14 @@
 		return out;
 	}
 
-	// What a given leaf actually renders. The synthetic leaves have no schema
-	// section of their own, and motionDetect.roi belongs to the Visual editor
-	// rather than to Motion detection, so it is subtracted here exactly as
-	// renderProps skips it.
+	// What a given leaf actually renders. The Live leaf has no schema section of
+	// its own; every other leaf renders its whole section, motionDetect.roi
+	// included — the regions are drawn on that section's own picture now, so
+	// searching for "region" has one place to land instead of two.
 	function leafFields(secId) {
 		if (secId === LIVE_ID) return liveFields().map(f =>
 			({ sub: f.sub, dot: f.dot, title: liveLabel(f.key, f.sub), hint: f.sub.hint || '' }));
-		if (secId === ROI_ID) return roiFields();
-		const fields = sectionFields(secId);
-		return secId === 'motionDetect' ? fields.filter(f => f.dot !== ROI_DOT) : fields;
+		return sectionFields(secId);
 	}
 
 	function matchCount(secId, q) {
@@ -526,10 +532,6 @@
 		});
 	}
 
-	function groupHasMotion(group) {
-		return !!(group && group.sections && group.sections.includes('motionDetect'));
-	}
-
 	// A group has a live preview when any of its fields are x-live (the
 	// HiSilicon image CSC knobs) — so the user can see the effect while dragging.
 	function groupHasLive(group) {
@@ -568,13 +570,6 @@
 	function liveLabel(key, sub) {
 		const meta = LIVE_META[key];
 		return meta ? meta.label : (sub.title || sub.description || key);
-	}
-
-	// The Visual editor leaf owns motionDetect.roi: the region list belongs with
-	// the canvas that draws it, and m/img.html reaches window.mjRoiAdd/mjRoiList,
-	// which only exist while the field is mounted.
-	function roiFields() {
-		return sectionFields('motionDetect').filter(f => f.dot === ROI_DOT);
 	}
 
 	function stopLivePreview() {
@@ -778,8 +773,8 @@
 		// down the left as a single strip of controls.
 		if (sec === LIVE_ID) {
 			renderLive(form);
-		} else if (sec === ROI_ID) {
-			renderRoi(form);
+		} else if (sec === 'motionDetect') {
+			renderMotion(form);
 		} else {
 			const card = el('div', 'card');
 			const body = el('div', 'card-body');
@@ -859,47 +854,6 @@
 			if (active) link.setAttribute('aria-current', 'page');
 			else link.removeAttribute('aria-current');
 		});
-	}
-
-	// The Visual editor leaf: the ROI canvas plus the region list it edits. The
-	// list is rendered here rather than under Motion detection because
-	// m/img.html calls back into window.mjRoiAdd/mjRoiList, which renderField
-	// only installs while motionDetect.roi is mounted — and only one section is
-	// mounted at a time now.
-	function renderRoi(form) {
-		const card = el('div', 'card');
-		const body = el('div', 'card-body');
-		body.innerHTML =
-			'<h3>Visual editor</h3>' +
-			'<div class="mj-roi-wrap"><iframe id="mj-roi-iframe" src="/m/img.html" frameborder="0" class="mj-roi-iframe"></iframe></div>';
-		card.appendChild(body);
-		form.appendChild(card);
-
-		// canvas, then the list it writes into, then the control that empties it
-		for (const f of roiFields()) {
-			const field = renderField(body, f.dot, f.key, f.sub, getDotted(state.config, f.dot));
-			if (field) {
-				state.fields.push(field);
-				state.initial[f.dot] = field.getValue();
-			}
-		}
-
-		const clear = el('button', 'btn btn-outline-secondary');
-		clear.type = 'button';
-		clear.id = 'mj-roi-clear';
-		clear.textContent = 'Clear all regions';
-		body.appendChild(clear);
-
-		const clearBtn = document.getElementById('mj-roi-clear');
-		if (clearBtn) {
-			clearBtn.addEventListener('click', () => {
-				const roiField = state.fields.find(f => f.dot === ROI_DOT);
-				if (roiField) {
-					roiField.setValue('');
-					updateDirty();
-				}
-			});
-		}
 	}
 
 	function hasDirty() {
@@ -1613,6 +1567,583 @@
 		if (hasTone && !strip.querySelector('.mj-live-row')) strip.remove();
 	}
 
+	// ── The Motion detection leaf ─────────────────────────────────────────
+	//
+	// One page where there were two. Motion detection carried the four settings
+	// and a separate "Visual editor" leaf carried the regions — drawn on a STILL
+	// /image.jpg inside an iframe (www/m/img.html), which blocked on its own
+	// synchronous fetch of a config the parent already had, never refreshed, and
+	// showed nothing at all on a camera with the JPEG channel off. The regions
+	// are the shape of what the settings beside them do, so splitting them
+	// across two rail entries asked people to hold one in their head while
+	// looking at the other.
+	//
+	// It is laid out as the Live adjustments leaf is, because it is the same
+	// kind of page: a picture you change things against. Head, then the picture,
+	// then the strip for the one knob worth dragging while you watch, then the
+	// deck. And it keeps that leaf's rule about what may sit on the glass —
+	// RUNTIME on the picture, CONFIGURATION in the form. All four motionDetect
+	// fields go through Save, so none of them is a lit toggle on the bar; the
+	// only thing added there is Draw regions, which is a tool rather than a
+	// setting, exactly as Zoom to an area is on the Live View page.
+	function renderMotion(form) {
+		const fields = sectionFields('motionDetect');
+
+		const head = el('div', 'mj-live-head');
+		head.innerHTML = '<h3 class="mj-cap">' + esc(label('motionDetect')) + '</h3>' +
+			'<span class="mj-live-rule"></span>';
+		const note = el('span', 'mj-live-note');
+		head.appendChild(note);
+		form.appendChild(head);
+
+		// The frame size arrives a beat after the picture does (it comes from
+		// the player's codec event), and every rectangle's geometry depends on
+		// it — so the overlay has to be repainted when it lands rather than
+		// drawn once at mount. Assigned below; a no-op until then.
+		let repaint = () => {};
+		const preview = window.MajesticPreview &&
+			window.MajesticPreview.mount(form, {
+				config: () => state.config,
+				// Its own remembered channel. Regions are judged against the
+				// whole field of view, and the sub stream is the cheaper way to
+				// look at it — but this is not the Live leaf's question and does
+				// not share its answer.
+				where: 'motion',
+				onFrame: () => repaint(),
+			});
+		state.preview = preview;
+
+		const sens = fields.find(f => f.key === 'sensitivity' &&
+			f.sub.type === 'integer' && isNum(f.sub.maximum));
+		const strip = el('div', 'mj-live-strip');
+		if (sens) form.appendChild(strip);
+
+		const deck = el('div', 'mj-live-deck');
+		const colRegions = el('div', 'mj-live-col');
+		const colDetect = el('div', 'mj-live-col mj-live-col-b');
+		deck.appendChild(colRegions);
+		deck.appendChild(colDetect);
+		form.appendChild(deck);
+
+		// Seeded with the count it will carry rather than with '': liveGroup only
+		// builds the note span when there is something to put in it, so an empty
+		// string here leaves paint() with nowhere to write and the count silently
+		// never appears.
+		const regionBody = liveGroup(colRegions, 'Regions', 'none');
+		const regionNote = colRegions.querySelector('.mj-live-grp-head .mj-live-note');
+		const detectBody = liveGroup(colDetect, 'Detection', '');
+
+		// The regions field renders HIDDEN rather than not at all — the same
+		// pattern the nightMode pin map uses. It stays a real field, so dirty
+		// tracking, Save and the per-row reset keep working on it without
+		// knowing an editor exists, and a camera where the editor cannot mount
+		// (no player scripts, no readable frame size) gets its plain list of
+		// coordinate boxes back instead of losing the setting.
+		let roiField = null;
+		for (const f of fields) {
+			const isRoi = f.dot === ROI_DOT;
+			const box = f === sens ? strip : (isRoi ? regionBody : detectBody);
+			const opt = isRoi ? { hidden: true } : (f === sens ? { live: true } : undefined);
+			const field = renderField(box, f.dot, f.key, f.sub,
+				getDotted(state.config, f.dot), opt);
+			if (!field) continue;
+			state.fields.push(field);
+			state.initial[f.dot] = field.getValue();
+			if (isRoi) roiField = field;
+		}
+
+		// The strip's last cell, as on the Live leaf: a control that belongs to
+		// the knob beside it rather than a footer under it.
+		if (sens) {
+			const foot = el('div', 'mj-live-strip-foot');
+			const rall = el('button', 'mj-live-linkbtn');
+			rall.type = 'button';
+			rall.innerHTML = ICON.reset + '<span>Stock</span>';
+			rall.title = 'Reset sensitivity to its factory default';
+			rall.addEventListener('click', () => {
+				const f = state.fields.find(x => x.dot === 'motionDetect.sensitivity');
+				if (f && isNum(sens.sub.default)) { f.setValue(sens.sub.default); updateDirty(); }
+			});
+			foot.appendChild(rall);
+			strip.appendChild(foot);
+			if (!strip.querySelector('.mj-live-row')) strip.remove();
+		}
+
+		if (roiField && preview) {
+			repaint = mountRegions(preview, roiField, regionBody, regionNote);
+			// The field's own reset, MOVED into the group head rather than made
+			// again — the same relocation dockRuntime does with the runtime
+			// toggles, and for the same reason: one control, with its real
+			// handler and its real disabled-when-there-is-no-default state.
+			//
+			// Hiding the row hid this with it, and nothing else on the page can
+			// do what it does. "Clear all" stages an empty list for the next
+			// Save; this asks the camera to put the key back to unconfigured,
+			// which is a different state and the only way to recover a recorded
+			// default that is not empty.
+			const rst = roiField.p.querySelector('.mj-reset');
+			const gh = colRegions.querySelector('.mj-live-grp-head');
+			if (rst && gh) gh.appendChild(rst);
+		} else if (roiField) {
+			// No picture to draw on: say why once, rather than leaving the
+			// coordinate boxes to be explained by nothing.
+			roiField.p.hidden = false;
+			const p = el('p', 'mj-live-hint');
+			p.textContent = 'The preview could not be loaded, so regions can only be ' +
+				'given as coordinates here.';
+			regionBody.appendChild(p);
+		}
+
+		// What the page is doing right now, in the head's own note slot. A
+		// camera with detection off keeps every region and the sensitivity it
+		// was given — and uses none of them, which is worth a sentence where
+		// somebody is about to spend time drawing.
+		const enabled = state.fields.find(f => f.dot === 'motionDetect.enabled');
+		const paintNote = () => {
+			const off = enabled && enabled.getValue() === 'false';
+			note.textContent = off
+				? 'Detection is off — regions and sensitivity are saved, not used.'
+				: '';
+			note.classList.toggle('mj-md-warn', !!off);
+		};
+		if (enabled) {
+			enabled.control.addEventListener('change', paintNote);
+			state.liveSync.push(paintNote);
+		}
+		paintNote();
+	}
+
+	// The region editor: rectangles on the picture, the list beside it, and one
+	// mode that turns a drag into a new region.
+	//
+	// Returns its repaint function, which renderMotion hands to the stage's
+	// onFrame — the geometry below cannot be computed until a frame has said how
+	// big it is.
+	function mountRegions(preview, field, listBox, noteEl) {
+		const ctl = field.control;
+
+		// ── coordinates ───────────────────────────────────────────────────
+		//
+		// Regions are stored in the MAIN stream's pixels, which is what
+		// majestic.yaml holds and what the old editor computed against
+		// video0.size. The picture on screen may be the sub stream — a different
+		// resolution of the same field of view — so the mapping goes through
+		// fractions of the frame rather than through either size directly.
+		//
+		// video0.size can also be unset, meaning "sensor native", which the
+		// config does not spell out. Then the only honest base is the frame
+		// itself, and only while the frame IS the main stream; on the sub
+		// stream there is nothing to scale by and the editor says so instead of
+		// drawing rectangles in the wrong places.
+		function base() {
+			const cfg = parseWH(getDotted(state.config, 'video0.size'));
+			if (cfg) return cfg;
+			const f = preview.frame();
+			return (f && preview.stream() === 0) ? { w: f.w, h: f.h } : null;
+		}
+
+		// Where the picture actually is inside the stage. object-fit: contain
+		// letterboxes anything that is not the stage's 16/9, and a rectangle
+		// drawn against the stage rather than against the picture would sit off
+		// the scene by the size of the letterbox.
+		function pic() {
+			const f = preview.frame();
+			const w = preview.stage.clientWidth, h = preview.stage.clientHeight;
+			if (!f || !f.w || !f.h || !w || !h) return null;
+			const s = Math.min(w / f.w, h / f.h);
+			return { x: (w - f.w * s) / 2, y: (h - f.h * s) / 2, w: f.w * s, h: f.h * s };
+		}
+
+		const parse = (s) => {
+			const p = String(s).split('x').map(Number);
+			return p.length === 4 && p.every(n => isFinite(n))
+				? { x: p[0], y: p[1], w: p[2], h: p[3] } : null;
+		};
+		// The underlying inputs, empties INCLUDED — _rows() drops those, and an
+		// empty row is exactly the one somebody is about to type coordinates
+		// into. Read from the DOM rather than kept alongside it: the field's
+		// rows are the model, and a second copy is a thing to keep in step.
+		const inputs = () => Array.prototype.slice.call(
+			ctl.querySelectorAll('.mj-array-row input'));
+		const list = () => inputs().map(i => i.value.trim());
+
+		// ── the layers ────────────────────────────────────────────────────
+		const layer = el('div', 'mj-md-layer');
+		preview.overlay.appendChild(layer);
+
+		// The overlay is pointer-transparent by design, so the picture keeps its
+		// own gestures; this is the child that takes the pointer back.
+		//
+		// It is ALWAYS live, not only while the button is armed, and that is the
+		// other half of mirroring zoom-to-area. On the Live View page a drag
+		// draws whenever the picture is not pannable — `armed ||
+		// stage.classList.contains('mj-drawable')` — and it is the Area button
+		// that exists for the case where a bare drag would pan instead. This
+		// stage never pans: nothing here zooms it, so a drag on it has nothing
+		// else it could mean, which is exactly the drawable state. Requiring the
+		// button first was a control standing in front of a gesture that had
+		// nothing to compete with.
+		const catcher = el('div', 'mj-md-catch');
+		preview.overlay.appendChild(catcher);
+
+		// The rubber band, mirroring the Live View page's #mj-marquee exactly:
+		// ONE element, hidden between drags, whose 9999px shadow spread dims
+		// everything outside the rectangle rather than four elements fenced
+		// around it. The stage's overflow trims the spread, and the bar sits
+		// above the overlay so the controls stay lit while the picture dims.
+		const band = el('div', 'mj-md-band');
+		band.hidden = true;
+		preview.overlay.appendChild(band);
+
+		const btn = el('button', 'mj-hud-btn mj-glass mj-md-draw');
+		btn.type = 'button';
+		btn.innerHTML = ICON.draw + '<span>Draw regions</span>';
+		btn.title = 'Draw regions';
+		preview.barInsert(btn);
+
+		let armed = false;
+
+		// ── painting ──────────────────────────────────────────────────────
+		//
+		// Declared before paint() rather than after it: paint is hoisted and the
+		// boxes are not, so a call added above them later would fail on a name
+		// that reads as though it is in scope.
+		const view = el('div', 'mj-md-list');
+		const warn = el('p', 'mj-live-hint mj-md-warn');
+		warn.hidden = true;
+		listBox.appendChild(view);
+		listBox.appendChild(warn);
+
+		// The rectangles alone. Split out because typing in a coordinate box has
+		// to move its rectangle without rebuilding the box being typed into.
+		function paintBoxes() {
+			const p = pic(), b = base();
+			layer.innerHTML = '';
+			if (!p || !b) return;
+			list().forEach((raw, i) => {
+				const r = parse(raw);
+				if (!r) return;
+				const box = el('div', 'mj-md-rgn');
+				box.dataset.i = String(i);
+				box.style.left = (p.x + r.x / b.w * p.w) + 'px';
+				box.style.top = (p.y + r.y / b.h * p.h) + 'px';
+				box.style.width = (r.w / b.w * p.w) + 'px';
+				box.style.height = (r.h / b.h * p.h) + 'px';
+				const n = el('span', 'mj-md-rgn-n');
+				n.textContent = String(i + 1);
+				box.appendChild(n);
+				layer.appendChild(box);
+			});
+		}
+
+		function paint() {
+			const p = pic(), b = base();
+			paintBoxes();
+			const rows = list();
+
+			// Counts what is actually a region: a row you have just opened to
+			// type into is not one yet, and saying "1 region" over an empty box
+			// would be the page agreeing with something nobody has said.
+			const n = rows.filter(Boolean).length;
+			if (noteEl) {
+				noteEl.textContent = n
+					? (n === 1 ? '1 region' : n + ' regions')
+					: 'none';
+			}
+
+			// The list beside the picture is a VIEW of the field, rebuilt from
+			// it, never a second copy kept in step by hand: the hidden field is
+			// the only model, and every edit below goes back through it.
+			view.innerHTML = '';
+			if (!rows.length) {
+				const empty = el('p', 'mj-live-hint mj-md-empty');
+				// Says the gesture, because the gesture is the only thing there
+				// is to find: with nothing drawn there is no rectangle on the
+				// picture to suggest that rectangles are what this page is for.
+				empty.textContent =
+					'No regions — the whole picture is watched. Drag one on the picture to watch part of it instead.';
+				view.appendChild(empty);
+			}
+
+			rows.forEach((raw, i) => {
+				const r = parse(raw);
+
+				const row = el('div', 'mj-md-row');
+				const chip = el('span', 'mj-md-chip');
+				chip.textContent = String(i + 1);
+				// An input, not a label. Typing coordinates is how this setting
+				// has always been editable, and hiding the field that used to
+				// carry them would have quietly taken that away — an installer
+				// working from a spec has numbers, not a mouse.
+				const co = el('input', 'mj-md-co');
+				co.type = 'text';
+				co.value = raw;
+				co.placeholder = 'XxYxWxH';
+				co.setAttribute('aria-label', 'Region ' + (i + 1) + ' coordinates');
+				co.addEventListener('input', () => {
+					const src = inputs()[i];
+					if (src) src.value = co.value;
+					updateDirty();
+					// Only the rectangles and this row's own verdict. Repainting
+					// the whole list would rebuild the input being typed into
+					// and take the caret with it — but repainting NOTHING but
+					// the rectangles left the verdict behind, so a corrected
+					// value still read "not XxYxWxH" and a resized one still
+					// showed the share of the frame it used to have. Both are
+					// the row saying something about text that is no longer in
+					// it.
+					says(parse(co.value));
+					paintBoxes();
+				});
+				const del = el('button', 'mj-md-del');
+				del.type = 'button';
+				del.innerHTML = '&times;';
+				del.title = 'Remove region ' + (i + 1);
+				del.setAttribute('aria-label', 'Remove region ' + (i + 1));
+				del.addEventListener('click', () => ctl._drop(i));
+				row.appendChild(chip);
+				row.appendChild(co);
+
+				// What this row makes of its own text. A region whose numbers do
+				// not parse is the one thing the old editor could not show at
+				// all — it drew what it understood and left the rest to be a
+				// silently missing rectangle — so it is said here, beside the
+				// box you would fix it in. Built once and rewritten in place,
+				// because it has to keep up with typing.
+				const verdict = el('span', 'mj-md-pct');
+				verdict.title = 'share of the frame';
+				row.appendChild(verdict);
+				const says = (rr) => {
+					if (!rr) {
+						verdict.className = 'mj-md-bad';
+						verdict.textContent = 'not XxYxWxH';
+						verdict.removeAttribute('title');
+					} else if (b) {
+						verdict.className = 'mj-md-pct';
+						verdict.textContent =
+							Math.round(rr.w * rr.h / (b.w * b.h) * 100) + '%';
+						verdict.title = 'share of the frame';
+					} else {
+						verdict.className = 'mj-md-pct';
+						verdict.textContent = '';
+					}
+				};
+				says(r);
+				row.appendChild(del);
+				view.appendChild(row);
+
+				// The pairing is the point of the merge: the row and the
+				// rectangle are the same region, so hovering either says so.
+				// By index rather than by a captured node — paintBoxes() rebuilds
+				// them on every keystroke, and a held reference would be stale
+				// by the second character.
+				const lit = (on) => {
+					const box = layer.querySelector('[data-i="' + i + '"]');
+					if (box) box.classList.toggle('mj-md-on', on);
+				};
+				row.addEventListener('mouseenter', () => lit(true));
+				row.addEventListener('mouseleave', () => lit(false));
+			});
+
+			// A rectangle needs two things to be placed: the size of the frame on
+			// screen, and the size the coordinates are written in. Neither is
+			// known at mount — the frame size arrives from the player's codec
+			// event, which on WebRTC is the 1s getStats poll, well after the
+			// video element reports it can play.
+			//
+			// So the tool is DISABLED until they are, rather than left pressable
+			// over a picture that cannot yet take a drag. That second is easy to
+			// be inside: press Draw the moment the picture appears, drag, and
+			// the old shape of this code silently did nothing and said nothing —
+			// the exact failure the rest of this page is written to avoid. Only
+			// the base problem is worth a printed line; waiting for a frame
+			// resolves itself and would be a warning that flashes.
+			const noBase = !!p && !b;
+			warn.textContent = noBase
+				? 'Regions are stored in the main stream’s pixels, and this camera has ' +
+					'no main resolution set. Switch the picture to Main to draw them.'
+				: '';
+			warn.hidden = !noBase;
+			const usable = !!p && !noBase;
+			btn.disabled = !usable;
+			btn.title = noBase ? warn.textContent
+				: (!p ? 'Waiting for the picture' : 'Drag a rectangle on the picture');
+			// The crosshair is the disclosure that a bare drag does something,
+			// so it tracks whether a drag CAN do something rather than whether
+			// the button has been pressed. On the stage as well as the media, so
+			// it reads the same over the letterbox.
+			preview.stage.classList.toggle('mj-md-armed', usable);
+			catcher.hidden = !usable;
+			// Nothing left to draw on, so the button cannot stay lit: it would
+			// promise a drag that now does nothing.
+			if (!usable && armed) setArmed(false);
+		}
+
+		// Clear-all, beside the field's own "+ Add region" — the two ways of
+		// editing the list that are not the picture.
+		const foot = el('div', 'mj-md-foot');
+		const byNum = el('button', 'mj-live-linkbtn');
+		byNum.type = 'button';
+		byNum.innerHTML = ICON.plus + '<span>Add by coordinates</span>';
+		byNum.title = 'Add an empty region to type numbers into';
+		byNum.addEventListener('click', () => {
+			ctl._add('');
+			const boxes = view.querySelectorAll('.mj-md-co');
+			const last = boxes[boxes.length - 1];
+			if (last) last.focus();
+		});
+		foot.appendChild(byNum);
+		const clear = el('button', 'mj-live-linkbtn');
+		clear.type = 'button';
+		clear.innerHTML = ICON.trash + '<span>Clear all</span>';
+		clear.addEventListener('click', () => {
+			if (!list().length) return;
+			if (!confirm('Remove every region? The whole picture will be watched.')) return;
+			field.setValue('');
+			updateDirty();
+		});
+		foot.appendChild(clear);
+		listBox.appendChild(foot);
+
+		// Whatever moves the list — typing in a box, the field's own Add, a
+		// per-row reset, refresh() after a save — repaints both halves.
+		ctl._sync = paint;
+
+		// ── the mode ──────────────────────────────────────────────────────
+		// `armed` is now only the button's own lit state. The drag does not need
+		// it — see the catcher above — so this is a highlight and a shortcut for
+		// somebody who came looking for a control, not a gate.
+		function setArmed(on) {
+			armed = !!on;
+			drawing = null;
+			band.hidden = true;
+			btn.classList.toggle('mj-hud-on', armed);
+			btn.setAttribute('aria-pressed', armed ? 'true' : 'false');
+			paint();
+		}
+		btn.addEventListener('click', () => setArmed(!armed));
+
+		// Document-level, because the pointer is wherever the last click left
+		// it — and taken off again in the teardown below, or Escape keeps being
+		// swallowed from another section entirely.
+		const onKey = (e) => {
+			if (e.key === 'Escape' && armed) { e.preventDefault(); setArmed(false); }
+		};
+		document.addEventListener('keydown', onKey);
+
+		// ── drawing ───────────────────────────────────────────────────────
+		//
+		// The Live View page's zoom-to-area, doing a different thing with the
+		// same gesture: press the tool, drag a rectangle, done. Everything below
+		// is that control's shape (preview-zoom.js), and the parts that look
+		// like detail are the parts that make it cost one drag instead of three
+		// decisions.
+		let drawing = null;
+
+		// Both ends held inside the PICTURE, so the band shows exactly what will
+		// be stored — and a drag that never leaves the letterbox collapses to
+		// nothing, which the minimum size below then throws away. Clamping only
+		// at the end, as this did first, draws a rectangle over the black and
+		// then stores a smaller one: the band was a promise the result broke.
+		function bandRect(e) {
+			// Null mid-drag is reachable: a channel change or a dead chain
+			// forgets the frame while a pointer is down. Throwing here would
+			// take the pointermove or pointerup handler with it — capture never
+			// released, `drawing` never cleared, the tool never disarmed — so
+			// the gesture is abandoned rather than completed.
+			const p = pic();
+			if (!p) return null;
+			const r = catcher.getBoundingClientRect();
+			const cx = (v) => Math.min(Math.max(v, p.x), p.x + p.w);
+			const cy = (v) => Math.min(Math.max(v, p.y), p.y + p.h);
+			const x = cx(e.clientX - r.left), y = cy(e.clientY - r.top);
+			const x0 = cx(drawing.x), y0 = cy(drawing.y);
+			return {
+				x: Math.min(x0, x), y: Math.min(y0, y),
+				w: Math.abs(x - x0), h: Math.abs(y - y0),
+			};
+		}
+
+		catcher.addEventListener('pointerdown', (e) => {
+			// No `armed` test: the picture is drawable in its own right. What
+			// still stops a drag is having nowhere to put the result — no frame
+			// size, or no base to write the coordinates in — which is the same
+			// thing that disables the button.
+			// A rectangle belongs to the pointer that began it: a second finger
+			// arriving mid-drag is not a new origin.
+			if (e.button || drawing || !pic() || !base()) return;
+			const r = catcher.getBoundingClientRect();
+			drawing = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
+			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
+			e.preventDefault();
+		});
+
+		catcher.addEventListener('pointermove', (e) => {
+			if (!drawing || e.pointerId !== drawing.id) return;
+			const b = bandRect(e);
+			if (!b) { band.hidden = true; return; }
+			band.hidden = false;
+			band.style.left = b.x + 'px';
+			band.style.top = b.y + 'px';
+			band.style.width = b.w + 'px';
+			band.style.height = b.h + 'px';
+		});
+
+		// `commit` is false for pointercancel: the browser took the gesture away
+		// — a system edge swipe, a rotation, another element capturing the
+		// pointer — and an interrupted gesture is not a completed one.
+		function finishDraw(e, commit) {
+			if (!drawing || e.pointerId !== drawing.id) return;
+			const r = commit ? bandRect(e) : null;   // null if the picture went
+			try { catcher.releasePointerCapture(e.pointerId); } catch (err) {}
+			drawing = null;
+			band.hidden = true;
+
+			const p = pic(), b = base();
+			if (r && p && b) {
+				// A rectangle has to be deliberate. Per AXIS, and a share of the
+				// stage with an absolute floor, so it means the same thing on a
+				// 2560px monitor and a 390px phone.
+				const minW = Math.max(16, preview.stage.clientWidth * 0.02);
+				const minH = Math.max(16, preview.stage.clientHeight * 0.02);
+				if (r.w >= minW && r.h >= minH) {
+					const px = (v, o, sz, n) => Math.round((v - o) / sz * n);
+					const X = px(r.x, p.x, p.w, b.w), Y = px(r.y, p.y, p.h, b.h);
+					const W = px(r.x + r.w, p.x, p.w, b.w) - X;
+					const H = px(r.y + r.h, p.y, p.h, b.h) - Y;
+					if (W > 0 && H > 0) ctl._add(X + 'x' + Y + 'x' + W + 'x' + H);
+				}
+			}
+			// One drag, then it disarms itself — the whole of what makes this
+			// cost one press. It is also the reason there is no banner and no
+			// Done: there is no mode left to be in, so there is nothing to
+			// announce and nothing to leave.
+			setArmed(false);
+		}
+		catcher.addEventListener('pointerup', (e) => finishDraw(e, true));
+		catcher.addEventListener('pointercancel', (e) => finishDraw(e, false));
+
+		// The stage resizes with the window, the rail and the docked bar, none
+		// of which is a window resize — so watch the stage itself, as the Live
+		// leaf's bar does.
+		let ro = null;
+		if (window.ResizeObserver) {
+			ro = new ResizeObserver(() => paint());
+			ro.observe(preview.stage);
+		} else {
+			window.addEventListener('resize', paint);
+		}
+
+		state.liveCleanup.push(() => {
+			document.removeEventListener('keydown', onKey);
+			if (ro) ro.disconnect();
+			else window.removeEventListener('resize', paint);
+		});
+
+		paint();
+		return paint;
+	}
+
 	const isGroup = (sub) => !!(sub && sub.type === 'object' && sub.properties);
 
 	// A section whose knobs were lifted onto the Live leaf looks half-empty and
@@ -2240,7 +2771,6 @@
 		for (const key of ordered) {
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
-			if (dot === ROI_DOT) continue;        // renders on the Visual editor leaf
 			const sub = props[key];
 			if (sub && sub['x-live']) continue;   // live knobs render on their own leaf
 			if (isGroup(sub)) {
@@ -2770,24 +3300,21 @@
 		} else if (type === 'array') {
 			// MultiRect fields (motionDetect.roi, crop, privacyMasks) are a list of
 			// "AxBxCxD" regions: render one editable row per region, not a single
-			// comma-joined string. The Visual editor (m/img.html) adds/reads rows
-			// through the window.mjRoi* hooks exposed below.
+			// comma-joined string.
 			p = el('p', 'array mj-row');
 			p.innerHTML =
 				'<label class="form-label">' + labelHtml + '</label>' +
 				'<div class="mj-array" id="' + id + '"></div>' +
 				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-array-add">+ Add region</button>';
 			control = p.querySelector('.mj-array');
-			// Re-render the Visual editor's canvas whenever the list changes
-			// (add/delete/edit/reset), so drawn rectangles track the rows.
-			const syncEditor = () => {
-				if (dot !== 'motionDetect.roi') return;
-				const ifr = document.getElementById('mj-roi-iframe');
-				if (ifr && ifr.contentWindow && ifr.contentWindow.mjRoiRedraw)
-					ifr.contentWindow.mjRoiRedraw();
-			};
-			const onChange = () => { updateDirty(); syncEditor(); };
-			control._sync = syncEditor;
+			// Whoever is drawing these rectangles wants to know when the list
+			// moves — added, deleted, edited, reset. It used to be a reach into
+			// a named iframe's window (`mj-roi-iframe`), which meant this field
+			// could only ever be drawn by one thing, in one place, under one id.
+			// A plain assignable hook says the same thing without knowing who
+			// is listening, and stays a no-op where nobody is.
+			control._sync = () => {};
+			const onChange = () => { updateDirty(); control._sync(); };
 			const addRow = (val) => {
 				const row = el('div', 'input-group input-group-sm mb-1 mj-array-row');
 				const inp = el('input', 'form-control');
@@ -2811,10 +3338,13 @@
 			(Array.isArray(eff) ? eff : (eff ? String(eff).split(/\s*,\s*/) : []))
 				.forEach(x => { if (x) addRow(x); });
 			p.querySelector('.mj-array-add').addEventListener('click', () => { addRow(''); onChange(); });
-			if (dot === 'motionDetect.roi') {
-				window.mjRoiAdd = (dim) => { if (dim) { addRow(dim); onChange(); } };
-				window.mjRoiList = () => control._rows();
-			}
+			// Adding one from outside — a rectangle dragged on the picture — is
+			// the same edit as typing one, so it goes through the same pair.
+			control._add = (v) => { addRow(v || ''); onChange(); };
+			control._drop = (i) => {
+				const rows = Array.from(control.querySelectorAll('.mj-array-row'));
+				if (rows[i]) { rows[i].remove(); onChange(); }
+			};
 		} else {
 			return null;
 		}
