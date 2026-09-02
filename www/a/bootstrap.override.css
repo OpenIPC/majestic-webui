@@ -4312,3 +4312,320 @@ dialog.mj-modal::backdrop {
 .mj-pinmap-x:hover {
 	color: var(--bs-body-color);
 }
+
+/* ── Overlay leaf: placing the burned-in text ────────────────────────────
+   Everything here lives on mj-preview.js's overlay layer. The stand-in is
+   DASHED on purpose: it is the browser's approximation of a line the camera
+   draws in its own font, and the one thing it must never do is look like the
+   result. */
+.mj-osd-layer,
+.mj-osd-catch {
+	position: absolute;
+	inset: 0;
+}
+
+.mj-osd-catch {
+	pointer-events: auto;
+	cursor: move;
+	touch-action: none;
+}
+
+.mj-osd-guides {
+	position: absolute;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 120ms ease;
+}
+
+.mj-osd-guides.mj-osd-on {
+	opacity: 1;
+}
+
+/* The edges and middles the overlay sticks to. Every layout tool has these and
+   they are not decoration here: a NAMED anchor survives a change of resolution
+   where a raw pixel offset does not, so snapping is what turns a drag into a
+   position that still means something at another size. */
+.mj-osd-g {
+	position: absolute;
+	background: rgba(255, 255, 255, 0.25);
+}
+
+.mj-osd-v { top: 0; bottom: 0; width: 1px; }
+.mj-osd-h { left: 0; right: 0; height: 1px; }
+.gx-l { left: 0; }
+.gx-c { left: 50%; }
+.gx-r { right: 0; }
+.gy-t { top: 0; }
+.gy-c { top: 50%; }
+.gy-b { bottom: 0; }
+
+.mj-osd-g.mj-osd-lit {
+	background: #5c70e8;
+	box-shadow: 0 0 6px rgba(92, 112, 232, 0.8);
+}
+
+.mj-osd-ghost {
+	position: absolute;
+	padding: 3px 7px;
+	border: 1.5px dashed rgba(255, 255, 255, 0.85);
+	border-radius: 3px;
+	background: rgba(92, 112, 232, 0.16);
+	color: #fff;
+	font-family: var(--bs-font-monospace);
+	white-space: nowrap;
+	pointer-events: none;
+	line-height: 1.25;
+}
+
+.mj-osd-read {
+	position: absolute;
+	display: flex;
+	gap: 8px;
+	padding: 3px 8px;
+	border-radius: 5px;
+	background: rgba(13, 15, 20, 0.85);
+	color: #fff;
+	font-size: 0.6875rem;
+	white-space: nowrap;
+	pointer-events: none;
+}
+
+.mj-osd-read b {
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+
+.mj-osd-read span {
+	color: #b6b9c2;
+	font-family: var(--bs-font-monospace);
+}
+
+/* ── Overlay leaf: the text, as pieces ───────────────────────────────── */
+.mj-tpl {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	margin-bottom: 0.9rem;
+}
+
+.mj-tpl-row {
+	position: relative;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.7rem;
+	border: 1px dashed var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	min-height: 3.4rem;
+}
+
+.mj-tpl-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	padding: 0.35rem 0.55rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: 0.4375rem;
+	background: var(--bs-tertiary-bg);
+	font-size: 0.8125rem;
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+}
+
+.mj-tpl-chip.mj-tpl-lit {
+	border-style: dashed;
+	background: var(--bs-card-bg);
+}
+
+.mj-tpl-chip.mj-tpl-sel {
+	border-color: var(--bs-primary);
+	box-shadow: 0 0 0 1px rgba(var(--bs-primary-rgb), 0.35);
+}
+
+.mj-tpl-k {
+	font-size: 0.625rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--bs-secondary);
+}
+
+.mj-tpl-v {
+	font-family: var(--bs-font-monospace);
+	font-size: 0.75rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-tpl-grip {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.mj-tpl-grip i {
+	display: block;
+	width: 9px;
+	height: 1.5px;
+	background: #4a5163;
+}
+
+.mj-tpl-x {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.125rem;
+	height: 1.125rem;
+	padding: 0;
+	border: 0;
+	border-radius: 3px;
+	background: none;
+	color: var(--bs-tertiary-color);
+	font-size: 0.875rem;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.mj-tpl-x:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.1);
+	color: var(--bs-body-color);
+}
+
+.mj-tpl-add {
+	position: relative;
+	border-style: dashed;
+	background: transparent;
+	color: var(--bs-secondary);
+	cursor: pointer;
+}
+
+/* Where a dragged chip will land. */
+.mj-tpl-caret {
+	width: 2px;
+	align-self: stretch;
+	border-radius: 1px;
+	background: var(--bs-primary);
+}
+
+.mj-tpl-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 5;
+	min-width: 13rem;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-tertiary-bg);
+	box-shadow: var(--bs-box-shadow-lg);
+	overflow: hidden;
+}
+
+.mj-tpl-mi {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.55rem 0.8rem;
+	border: 0;
+	background: none;
+	color: var(--bs-body-color);
+	font-size: 0.8125rem;
+	text-align: left;
+	cursor: pointer;
+}
+
+.mj-tpl-mi + .mj-tpl-mi {
+	border-top: 1px solid var(--bs-border-color);
+}
+
+.mj-tpl-mi:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.06);
+}
+
+.mj-tpl-mi-s {
+	margin-left: auto;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-tpl-mi-hint {
+	margin: 0;
+	padding: 0.5rem 0.8rem 0.65rem;
+	border-top: 1px solid var(--bs-border-color);
+	font-size: 0.6875rem;
+	line-height: 1.5;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-tpl-opts {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	padding: 0.75rem 0.9rem 0.85rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-card-bg);
+}
+
+.mj-tpl-opt {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.4rem 0.55rem;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
+	color: var(--bs-body-color);
+	font-size: 0.8125rem;
+	text-align: left;
+	cursor: pointer;
+}
+
+.mj-tpl-opt:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.06);
+}
+
+.mj-tpl-opt.mj-tpl-on {
+	background: rgba(var(--bs-primary-rgb), 0.16);
+}
+
+.mj-tpl-opt code {
+	margin-left: auto;
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-tpl-dot {
+	flex: 0 0 auto;
+	width: 13px;
+	height: 13px;
+	border: 1.5px solid #4a5163;
+	border-radius: 50%;
+}
+
+.mj-tpl-opt.mj-tpl-on .mj-tpl-dot {
+	border-color: var(--bs-primary);
+	background: radial-gradient(circle, var(--bs-primary) 45%, transparent 47%);
+}
+
+/* The string underneath. It is how you learn what the chips did, and the only
+   place an unknown code can be named before the camera swallows the line. */
+.mj-tpl-rawline {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+}
+
+.mj-tpl-code {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: 0.75rem;
+	color: var(--bs-tertiary-color);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
