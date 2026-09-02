@@ -205,15 +205,24 @@
 	// {key, dot, title, hint} for each field renderProps would draw, so the search
 	// can match on the same words the page shows. Nested objects recurse and
 	// x-live knobs are lifted out, exactly as renderProps does.
-	function sectionFields(section) {
-		if (state.fieldCache[section]) return state.fieldCache[section];
+	// `withLive` keeps the x-live fields in. They are normally left out because
+	// the Live adjustments leaf lifts them out of their sections and renders
+	// them beside the picture — but that leaf only lifts from the group that
+	// owns it, so a section elsewhere whose keys became live has to render its
+	// own. The Overlay leaf is that case: the camera classes its placement keys
+	// live (it can move the region without a rebuild), and without this they
+	// would be lifted nowhere and simply disappear from the settings page.
+	function sectionFields(section, withLive) {
+		const ck = withLive ? section + '\u0000live' : section;
+		if (state.fieldCache[ck]) return state.fieldCache[ck];
 		const out = [];
 		const walk = (basePath, props) => {
 			for (const key of Object.keys(props)) {
 				const dot = basePath + '.' + key;
 				if (EXCLUDE.has(dot)) continue;
 				const sub = props[key];
-				if (!sub || sub['x-live']) continue;
+				if (!sub) continue;
+				if (sub['x-live'] && !withLive) continue;
 				if (sub.type === 'object' && sub.properties) {
 					walk(dot, sub.properties);
 					continue;
@@ -224,7 +233,7 @@
 		};
 		const props = ((state.schema.properties || {})[section] || {}).properties;
 		if (props) walk(section, props);
-		state.fieldCache[section] = out;
+		state.fieldCache[ck] = out;
 		return out;
 	}
 
@@ -323,7 +332,7 @@
 	function leafFields(secId) {
 		if (secId === LIVE_ID) return liveFields().map(f =>
 			({ sub: f.sub, dot: f.dot, title: liveLabel(f.key, f.sub), hint: f.sub.hint || '' }));
-		return sectionFields(secId);
+		return sectionFields(secId, secId === 'osd');
 	}
 
 	function matchCount(secId, q) {
@@ -2474,7 +2483,7 @@
 	];
 
 	function renderOsd(form) {
-		const fields = sectionFields('osd');
+		const fields = sectionFields('osd', true);
 		const byKey = {};
 		fields.forEach(f => { byKey[f.key] = f; });
 
@@ -2624,30 +2633,24 @@
 		if (!maskField) maskDeck.remove();
 	}
 
-	// Write straight to the camera, now, and treat the fields as saved.
+	// Placement is a LIVE knob, and that is the whole difference.
 	//
-	// Placing is the one thing on this page that cannot wait for Save: only the
-	// camera can draw the overlay, so a position you have not sent is a position
-	// you cannot see, and a position you cannot see is not one you can judge.
-	// Everything else on the leaf still stages normally — which is why the head
-	// says so while a drag is in flight.
-	function applyNow(pairs) {
-		const tree = {};
-		Object.keys(pairs).forEach((dot) => {
-			const parts = dot.split('.');
-			let n = tree;
-			parts.forEach((k, i) => {
-				if (i === parts.length - 1) n[k] = String(pairs[dot]);
-				else n = n[k] = n[k] || {};
-			});
-		});
-		return apiFetch('/api/v1/config', {
-			method: 'POST',
-			credentials: 'same-origin',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(tree),
-		});
-	}
+	// It used to POST /api/v1/config on every drop, which saves and reloads —
+	// and a reload was a full pipeline rebuild, so moving the overlay tore the
+	// stream down and put it back. Every viewer dropped, every recording cut,
+	// because a text moved sixteen pixels. Unusable, and impossible to do
+	// per-pointermove at all.
+	//
+	// The camera now classes osd.anchor/offsetX/offsetY as live and moves the
+	// region with one MPI call per attached encoder, so this pushes them the
+	// way the tone sliders push theirs: POST /api/v1/image, nothing saved,
+	// nothing rebuilt. The fields stage until Save like everything else on the
+	// page, and abandoning the drag reverts through the same path every other
+	// live knob already uses.
+	const osdLiveQuery = (name, ox, oy) =>
+		'anchor=' + encodeURIComponent(name) +
+		'&offsetX=' + encodeURIComponent(ox) +
+		'&offsetY=' + encodeURIComponent(oy);
 
 	// The nine named anchors, as majestic orders them. -1 is the near edge (left
 	// or top), 0 centred, 1 the far edge — the same two tables src/osd/text.c
@@ -2888,7 +2891,16 @@
 			const p = pic(), b = base();
 			if (!p || !b) return;
 			const n = at(e);
-			preview_(place(n.x - drag.dx, n.y - drag.dy, p, b), p);
+			const r = place(n.x - drag.dx, n.y - drag.dy, p, b);
+			preview_(r, p);
+			// The camera follows the pointer. postLive serialises and swallows
+			// its own failures, so a move that cannot land does not wedge the
+			// ones after it or interrupt the drag.
+			const name = anchorName(r.sx, r.sy);
+			if (name !== drag.lastName || r.ox !== drag.lastOx || r.oy !== drag.lastOy) {
+				drag.lastName = name; drag.lastOx = r.ox; drag.lastOy = r.oy;
+				postLive(osdLiveQuery(name, r.ox, r.oy));
+			}
 		});
 
 		function done(e, commit) {
@@ -2900,40 +2912,21 @@
 			guides.classList.remove('mj-osd-on');
 			if (!n || !p || !b) { paint(); return; }
 
-			const r = place(n.x - 0, n.y - 0, p, b);
+			const r = place(n.x, n.y, p, b);
 			const name = anchorName(r.sx, r.sy);
-			const pairs = {
-				'osd.anchor': name,
-				'osd.offsetX': String(r.ox),
-				'osd.offsetY': String(r.oy),
-			};
-			// The fields first, so the form agrees with the picture even if the
-			// write fails; then the camera, which is the only thing that can
-			// actually move it.
+			// Staged, not saved. The camera is already showing it — that
+			// happened on the way here, one push per move — so all that is left
+			// is for the form to agree, and for Save to mean what it means
+			// everywhere else on the page.
 			if (held.anchor) held.anchor.setValue(name);
 			if (held.offsetX) held.offsetX.setValue(String(r.ox));
 			if (held.offsetY) held.offsetY.setValue(String(r.oy));
 			runVisibility();
-
-			if (headNote) headNote.textContent = 'Sending the position to the camera…';
-			applyNow(pairs).then((res) => {
-				if (!res.ok) return res.text().then(t => { throw new Error(t || res.status); });
-				// Applied means saved: these three are no longer pending, and
-				// leaving them dirty would offer a Save that would do nothing.
-				Object.keys(pairs).forEach((dot) => {
-					const f = state.fields.find(x => x.dot === dot);
-					if (f) state.initial[dot] = f.getValue();
-					setDotted(state.config, dot, pairs[dot]);
-				});
-				updateDirty();
-				if (headNote) headNote.textContent = '';
-			}).catch((err) => {
-				if (headNote) {
-					headNote.textContent = 'The camera did not take the position: ' +
-						String(err.message || err).slice(0, 80);
-					headNote.classList.add('mj-md-warn');
-				}
-			});
+			updateDirty();
+			// One last push at the resting place: the drag may have ended
+			// between debounces, and the pointer's last position is the one that
+			// counts.
+			postLive(osdLiveQuery(name, r.ox, r.oy));
 			paint();
 		}
 		catcher.addEventListener('pointerup', (e) => done(e, true));
