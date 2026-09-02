@@ -56,11 +56,37 @@ done) %>
 		<a class="small ms-auto" href="mj-settings.cgi?tab=nightMode">Open Day / Night &rarr;</a>
 		<button type="button" class="btn btn-link btn-sm small p-0 ms-3" id="st-alert-ircut-no" hidden>No filter here</button>
 	</div>
-	<div class="st-alert" id="st-alert-stall" hidden>
+	<!-- Nothing to see, and the wording is written by status.js from the finding
+	     (video-check.js), because one banner covers three of them: a camera
+	     reading no light at all, an encoder that has stopped, and a camera with
+	     no channel enabled. This replaced a fixed "Encoder stalled" banner that
+	     could only ever fire on SigmaStar, and that said nothing about the
+	     fault a newly flashed camera actually has — the wrong sensor driver,
+	     which streams perfectly and streams black. -->
+	<div class="st-alert" id="st-alert-novideo" hidden>
 		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
-		<span class="small"><b>Encoder stalled</b> — the encoder has stopped producing frames while everything else looks alive.</span>
-		<a class="small ms-auto confirm" href="fw-restart.cgi"
-			data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera &rarr;</a>
+		<span class="small"><b id="st-alert-novideo-t"></b> &mdash; <span id="st-alert-novideo-d"></span></span>
+		<a class="small ms-auto" id="st-alert-novideo-a" href="mj-settings.cgi?tab=isp"></a>
+		<!-- Only on a hardware finding. What this page can say is worked out
+		     from two gauges; the log is where majestic says what happened when
+		     it brought the sensor up, and it is what an owner can screenshot
+		     for whoever sold them the camera. -->
+		<a class="small ms-3" id="st-alert-novideo-h" href="info-logs.cgi" hidden></a>
+	</div>
+	<!-- Why you are here, when the Live page sent you and the fault has since
+	     cleared. Being moved to another page for no visible reason is worse
+	     than the fault it was moving you away from. -->
+	<div class="st-alert" id="st-alert-wasnovideo" hidden>
+		<span class="st-alert-ico" aria-hidden="true">&#8505;</span>
+		<!-- Two states, because this page needs its own ten seconds to reach a
+		     verdict and during them it knows nothing. Saying "it looks fine
+		     now" on arrival would be a reassurance issued before anything had
+		     been measured — and on the camera this feature exists for, it would
+		     be contradicted by the banner above a few seconds later. So the
+		     sentence starts as the bare fact of the hand-off and only earns its
+		     second half (status.js) once the check has run and found nothing. -->
+		<span class="small">Live video was not available a moment ago, so you were brought here.<span id="st-alert-wasnovideo-ok"></span></span>
+		<a class="small ms-auto" href="preview.cgi">Open Live &rarr;</a>
 	</div>
 </div>
 
@@ -240,6 +266,7 @@ done) %>
 
 <script src="/a/charts.js" defer></script>
 <script src="/a/ircut-check.js" defer></script>
+<script src="/a/video-check.js" defer></script>
 <script src="/a/status.js" defer></script>
 
 <%in p/footer.cgi %>

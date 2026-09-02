@@ -921,7 +921,7 @@
 				if (!ev.persisted) return;
 				fetch('/setup.html', { method: 'HEAD', credentials: 'same-origin' })
 					.then(function (r) {
-						if (!r.ok) location.replace('/cgi-bin/status.cgi');
+						if (!r.ok) location.replace('/cgi-bin/preview.cgi');
 					})
 					.catch(function () { /* camera unreachable: leave the form */ });
 			});
@@ -988,13 +988,16 @@
 								return;
 							}
 							// Signed in already — /setup minted the session on its
-							// way out, so the status page opens without a second
-							// sign-in. replace(), not href: this page no longer
+							// way out, so the Live page opens without a second
+							// sign-in. The picture is what somebody who has just
+							// claimed a camera came for; if there is nothing to
+							// see, that page hands them on to the Dashboard with
+							// the reason. replace(), not href: this page no longer
 							// exists on the camera, and leaving it in history
 							// means Back lands on a 404.
-							location.replace('/cgi-bin/status.cgi');
+							location.replace('/cgi-bin/preview.cgi');
 						}).catch(function () {
-							location.replace('/cgi-bin/status.cgi');
+							location.replace('/cgi-bin/preview.cgi');
 						});
 					}
 					// The endpoint answers in plain text and says something useful
