@@ -41,8 +41,9 @@
 		ircut: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6.6"></circle><path d="M10 3.4v13.2M4.3 6.7l11.4 6.6M4.3 13.3l11.4-6.6"></path></svg>',
 		lamp: '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.6 14.4a5 5 0 1 1 4.8 0v1.7H7.6z"></path><path d="M8.2 17.6h3.6"></path></svg>',
 		compare: '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="1.6"></rect><path d="M10 4v12"></path><path d="M4.6 8.4h3M4.6 11.6h3"></path></svg>',
-		snap: '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 6.6h3.2l1.5-2.1h5.4l1.5 2.1h3.2v9H2.6z" stroke-linejoin="round"></path><circle cx="10" cy="10.6" r="3.1"></circle></svg>',
-		fs: '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path></svg>',
+		// The snapshot and fullscreen glyphs went with the buttons they sit on,
+		// into mj-preview.js: a caller asking the stage for a snapshot button
+		// should not also have to supply its icon.
 	};
 
 	// Scene starting points, keyed by the same dot tails as LIVE_META. They are
@@ -119,6 +120,10 @@
 		fieldCache: {},
 		// the mounted section's .mj-cols box, or null on the live/ROI leaves
 		cols: null,
+		// the mj-preview.js handle for whatever section is showing a picture,
+		// or null. One at a time only because one section is mounted at a time —
+		// the stage itself no longer cares how many of it there are.
+		preview: null,
 		dirtyN: 0,
 		// a save whose changes need a pipeline reload leaves this set until the
 		// reload actually runs, so Apply survives switching sections
@@ -595,19 +600,12 @@
 			state.ircutRoles = null;
 		}
 
-		// Through the swap, which closes the trial as well as the player on
-		// screen. Destroying only state.previewPlayer would leave a transport
-		// still being judged behind on every visit — a live socket nobody has a
-		// handle to, which is the leak this used to exist to prevent.
-		if (state.previewSwap) {
-			try { state.previewSwap.stop(); } catch (e) {}
-			state.previewSwap = null;
-			state.previewPlayer = null;
-			return;
-		}
-		if (state.previewPlayer) {
-			state.previewPlayer.destroy();
-			state.previewPlayer = null;
+		// The stage closes its own transports — including a trial still being
+		// judged, which is the leak this has always been about: a live socket
+		// nobody holds a handle to, left behind on every visit.
+		if (state.preview) {
+			try { state.preview.destroy(); } catch (e) { /* best-effort */ }
+			state.preview = null;
 		}
 	}
 
@@ -910,284 +908,6 @@
 
 	function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-	// The preview beside the live knobs, on the transport with the least lag.
-	//
-	// WebRTC, because this is the one page where latency is the feature: someone
-	// is dragging a saturation slider and watching for the effect, and MSE is
-	// about a second behind where WebRTC is not. The earlier reasoning for
-	// keeping this page on MSE — that a WebRTC viewer joins the encoder's
-	// bitrate loop and would disturb a judgement about image quality — does not
-	// survive looking at what the page actually offers. Brightness, contrast,
-	// saturation, hue, mirror and flip are ISP knobs; nothing here judges an
-	// encoder setting, and whoever is tuning videoN.bitrate is on another tab
-	// with no preview at all.
-	//
-	// The substream, by the same convention the Preview page follows: the main
-	// channel is what an NVR or the SD card records, and this preview only has
-	// to show what the ISP is doing — which looks the same on either channel,
-	// because both are the same picture scaled. Main where no substream is
-	// configured, because /ws/video subscribes to whatever number it is handed
-	// and then quietly delivers nothing, which reads as "no signal" rather than
-	// as a misconfiguration. state.config is loaded by the time this runs; the
-	// knobs beside the preview are rendered from it.
-	//
-	// The fallback is a dozen lines rather than a call into shared code, because
-	// what the Preview page does on a fallback — badge, MJPEG, keeping a toggle
-	// in step — has nothing to do with this panel. The part that must not
-	// diverge is which transport to prefer and what to remember, and that is
-	// preview-transport.js.
-	function attachLivePreview(video) {
-		// True once both transports have been tried and nothing is attached.
-		// The stream picker reads it: with no player its clicks used to reach
-		// nothing at all, and a channel is still a request worth honouring —
-		// an H.264 substream plays in a browser that refused an H.265 main.
-		let exhausted = false;
-
-		// The reason codes preview.js emits, worded for this panel. The Live
-		// page has its own copy in preview-page.js, deliberately: it has an
-		// MJPEG picture to explain and this panel has an empty box, so the
-		// sentences differ past the first clause. A code neither of them
-		// knows still gets an honest general line. Keep the two in step when
-		// a code is added to preview.js.
-		function alertText(why) {
-			const bits = String(why || '').split(' ');
-			const ch = stream === 1 ? 'Sub' : 'Main';
-			if (bits[0] === 'undecodable') {
-				const codec = bits[1] ? bits[1].toUpperCase() : '';
-				return 'This browser can’t decode the ' + ch + ' stream' +
-					(codec ? '’s ' + codec + ' video' : '') +
-					', so there is no preview here.';
-			}
-			if (bits[0] === 'no-mse') {
-				return 'This browser has no Media Source Extensions, so it ' +
-					'cannot play the ' + ch + ' stream.';
-			}
-			if (bits[0] === 'unreachable') {
-				return 'The camera stopped sending the ' + ch + ' stream.';
-			}
-			if (bits[0] === 'decoder-unavailable' || bits[0] === 'no-offscreen') {
-				return 'This browser can’t decode the ' + ch + ' stream, and ' +
-					'the software decoder could not be loaded, so there is no ' +
-					'preview here.';
-			}
-			return 'The ' + ch + ' stream could not be played in this browser.';
-		}
-		function showAlert(why) {
-			const a = document.getElementById('mj-live-alert');
-			if (!a) return;
-			a.textContent = alertText(why);
-			a.hidden = false;
-		}
-		function hideAlert() {
-			const a = document.getElementById('mj-live-alert');
-			if (a) a.hidden = true;
-		}
-
-		// The same walk the Live page makes, for the same reasons — see
-		// preview-page.js:nextRung. Kept as its own dozen lines rather than
-		// shared, on the standing division in this file: what the two pages DO
-		// about an outcome differs (one has an MJPEG picture to fall to, this
-		// one has an empty box and a sentence), while the rules about which
-		// transport to prefer live in preview-transport.js.
-		function nextRung(kind, detail) {
-			// A channel change can change the codec, and the failure that put
-			// us on the software rung was about the channel we left. Ask the
-			// whole chain again rather than giving up: an H.264 substream
-			// plays natively, and this panel exists to be looked at.
-			if (String(detail || '').split(' ')[0] === 'codec-changed') {
-				swap.start(window.MajesticTransport.preferred());
-				return;
-			}
-			if (kind === 'webrtc') { swap.start('mse'); return; }
-			if (kind === 'mse' &&
-				window.MajesticTransport.softwareRungFor(detail)) {
-				swap.start('wasm');
-				return;
-			}
-			exhausted = true;
-			// A canvas that has stopped being painted keeps its last frame and
-			// nothing hides it, so the luma sampler would go on reporting a
-			// frozen picture as the current one — a stale measurement dressed
-			// as a live one, which is worse than none. Withdrawing the claim
-			// is what makes the histogram fall silent.
-			['mj-live-canvas', 'mj-live-canvas-b'].forEach((id) => {
-				const e = document.getElementById(id);
-				if (e) e.__mjPainted = false;
-			});
-			showAlert(detail);
-		}
-
-
-		// This page's own remembered choice, defaulting to the substream. Not
-		// the Preview page's: the two are looked at for different reasons and
-		// can reasonably want different channels.
-		const subAvailable = getDotted(state.config, 'video1.enabled') === true;
-		const remembered = window.MajesticTransport.chosenStream('live');
-		let stream = (remembered === null ? 1 : remembered) === 1 && subAvailable
-			? 1 : 0;
-
-		// The same swap the Preview page uses, for the same reason: a transport
-		// that cannot run must not cost the viewer the picture that could. This
-		// panel wants less from the outcome — there is no badge, no MJPEG and
-		// no toggle here — but the machinery underneath is identical, and a
-		// second copy of it would drift in ways that look like a picture rather
-		// than an error.
-		const swap = window.MajesticSwap({
-			// Getters, not nodes: the MSE player replaces its element on every
-			// reconnect (cloneNode plus replaceChild, keeping the id), so a
-			// captured node is detached within a session and every show or hide
-			// afterwards writes to something nobody can see.
-			elements: [
-				(kind) => document.getElementById(
-					kind === 'wasm' ? 'mj-live-canvas' : 'mj-live-video'),
-				(kind) => document.getElementById(
-					kind === 'wasm' ? 'mj-live-canvas-b' : 'mj-live-video-b'),
-			],
-			open: (kind, el, id, onState) => {
-				const impl = window.MajesticTransport.impl(kind);
-				// A canvas is 300x150 the moment it exists and reports a size
-				// before anything has been decoded into it, so its dimensions
-				// prove nothing — sampling one would publish a black histogram
-				// for a preview that is merely starting, and "the picture is
-				// black" is the exact lie the sampler's guard exists to
-				// prevent. A frame is the only proof of a frame.
-				//
-				// The mark is an expando, not a data attribute, and resolved
-				// through swap.element() rather than through `el`. Both matter:
-				// the software player REPLACES its canvas on attach (the handle
-				// from transferControlToOffscreen is spent once posted), so `el`
-				// is a detached node by the time a frame arrives — and
-				// cloneNode copies attributes, so a data-* mark would be
-				// inherited by the fresh canvas and declare it painted before
-				// it was. An expando is copied by neither.
-				return impl.attach(el, {
-					onCodec: () => {
-						const live = swap.element();
-						if (live) live.__mjPainted = true;
-					},
-					stream: stream,
-					// Opened with the volume it should have rather than given
-					// it afterwards; see preview-swap.js on why applying
-					// preferences post-promotion undoes the staging.
-					volume: 1,
-					// Same list the Preview page builds, and for the same
-					// reason: without it the browser offers host candidates
-					// only, and a session opened from anywhere but the same LAN
-					// negotiates cleanly and then never carries a packet.
-					iceServers: () => window.MajesticTransport.iceServers(
-						getDotted(state.config, 'webrtc.iceServers'),
-						getDotted(state.config, 'webrtc.turnUsername'),
-						getDotted(state.config, 'webrtc.turnCredential')),
-					onState: onState,
-				});
-			},
-			// state.previewPlayer is what the tab teardown closes, so it has to
-			// name whatever is actually on screen — a stale handle there leaves
-			// a live socket behind on every visit.
-			onPromoted: (kind) => {
-				state.previewPlayer = swap.player();
-				exhausted = false;
-				hideAlert();
-				// The idle pair of the other kind is hidden by nobody — the
-				// swap only touches the slot it is using — so an empty <video>
-				// would sit visible under a painting canvas.
-				(kind === 'wasm'
-					? ['mj-live-video', 'mj-live-video-b']
-					: ['mj-live-canvas', 'mj-live-canvas-b']
-				).forEach((id) => {
-					const e = document.getElementById(id);
-					if (e) e.style.display = 'none';
-				});
-			},
-			onFailed: (kind, why, permanent) => {
-				// 'fallback' is durable and worth remembering; 'busy' says the
-				// camera is full, which it will not be for long.
-				if (kind === 'webrtc' && permanent) {
-					window.MajesticTransport.demote();
-				}
-			},
-			// Nothing on screen left to protect. MSE is the last thing to try;
-			// past that this panel has no preview at all — there is no MJPEG
-			// fallback here and there is not going to be one — so what it owes
-			// the viewer is the reason, which it used to withhold: an empty
-			// black box is indistinguishable from a camera that is off.
-			onExhausted: (kind, detail) => {
-				state.previewPlayer = null;
-				nextRung(kind, detail);
-			},
-			onLive: (st, d, kind) => {
-				if (kind !== 'webrtc') {
-					// MSE is the last thing to try, so its giving up ends the
-					// chain — and it says so on the live player's own channel
-					// rather than as a dropped trial whenever it was the first
-					// thing attached, which is the ordinary case here. Nothing
-					// read that state, so the panel sat black for ever with
-					// nothing said and no way back (#274).
-					if (st === 'mjpeg') {
-						// stop(), not retire(): a refused MSE player has not
-						// closed itself, and its socket's onclose restarts the
-						// reconnect ladder for a session already given up on.
-						swap.stop();
-						state.previewPlayer = null;
-						nextRung(kind, d);
-					}
-					return;
-				}
-				if (st === 'fallback' || st === 'busy') {
-					if (st === 'fallback') window.MajesticTransport.demote();
-					// Its picture is frozen from here; the replacement is
-					// staged over it rather than blanking the panel.
-					swap.retire();
-					swap.start('mse');
-				}
-			},
-		});
-		state.previewSwap = swap;
-
-		function attach(kind) { swap.start(kind); }
-
-		attach(window.MajesticTransport.preferred());
-
-		// Sub is offered only where there is one; `stream` above has already
-		// fallen back to Main if not, so the control shows what is playing.
-		const s0 = document.getElementById('mj-live-s0');
-		const s1 = document.getElementById('mj-live-s1');
-		const subLbl = document.getElementById('mj-live-sub');
-		if (subLbl && subAvailable) subLbl.hidden = false;
-		// Hiding the label leaves the input focusable — Bootstrap's btn-check
-		// keeps it in the tab order — so arrow-key navigation could select a
-		// stream that does not exist and land the panel on "no signal".
-		if (s1) s1.disabled = !subAvailable;
-		if (s0) s0.checked = stream === 0;
-		if (s1) s1.checked = stream === 1;
-		[s0, s1].forEach(function (elm, n) {
-			if (!elm) return;
-			// On click rather than change, for the reason the Preview page
-			// records it that way: pressing the one already selected fires no
-			// change event and is still an answer worth remembering.
-			elm.addEventListener('click', function () {
-				window.MajesticTransport.chooseStream('live', n);
-				// Not `if (n === stream) return` any more: with the chain out
-				// there is nothing on screen, and pressing the channel that is
-				// already selected is the only retry this panel offers.
-				if (n === stream && !exhausted) return;
-				stream = n;
-				if (exhausted) {
-					exhausted = false;
-					hideAlert();
-					swap.start(window.MajesticTransport.preferred());
-					return;
-				}
-				if (state.previewPlayer) state.previewPlayer.setStream(n);
-				// And the trial, if one is being judged: it keeps the stream it
-				// was opened with, so it would otherwise be promoted onto the
-				// channel just moved away from.
-				const t = swap.trial();
-				if (t) t.setStream(n);
-			});
-		});
-	}
-
 	// ── The Live adjustments leaf ─────────────────────────────────────────
 	//
 	// The picture is the hero and it owns the column; everything else is either
@@ -1229,59 +949,6 @@
 			'</span>';
 	}
 
-	function renderStage(form) {
-		const stage = el('div', 'mj-live-stage');
-		stage.id = 'mj-live-stage';
-		// Two video elements because MajesticSwap stages a replacement on the
-		// spare one and only shows it once it has a picture; it toggles them
-		// through style.display, so the second starts that way rather than with
-		// the `hidden` attribute.
-		stage.innerHTML =
-			'<video id="mj-live-video" autoplay muted playsinline class="mj-live-video"></video>' +
-			'<video id="mj-live-video-b" autoplay muted playsinline class="mj-live-video" style="display:none"></video>' +
-			// The software-decode rung paints a canvas rather than a video, so
-			// the panel needs its own pair the way the Live page does. Without
-			// them `impl()` knowing the kind would be worse than useless: it
-			// would attach a canvas painter to a <video> and paint nothing,
-			// with no error anywhere.
-			'<canvas id="mj-live-canvas" class="mj-live-video" style="display:none"></canvas>' +
-			'<canvas id="mj-live-canvas-b" class="mj-live-video" style="display:none"></canvas>' +
-			// When neither transport can play the camera, this panel has no
-			// MJPEG fallback to drop to and simply went black — the emptiest
-			// possible account of what happened (#274). It says so instead.
-			'<p class="mj-live-alert" id="mj-live-alert" hidden></p>' +
-			'<div class="mj-live-bar">' +
-			// The stream picker rides the picture, first in the bar, exactly
-			// where the Live page keeps it — and as the same component, not a
-			// second copy of it: `mj-hud mj-seg` is the pair of classes that
-			// page's markup carries, so the glass, the label colours and the
-			// focus ring are all inherited rather than restated. It used to sit
-			// beside the section heading, which is a different control in a
-			// different place for the same job on two pages of one product.
-			'<span class="mj-hud mj-seg" role="group" aria-label="Stream">' +
-			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s0" autocomplete="off">' +
-			'<label class="mj-seg-lbl" for="mj-live-s0">Main</label>' +
-			'<input type="radio" class="mj-seg-in" name="mj-live-stream" id="mj-live-s1" autocomplete="off">' +
-			'<label class="mj-seg-lbl" for="mj-live-s1" id="mj-live-sub" hidden>Sub</label>' +
-			'</span>' +
-			runtimeHtml() +
-			// The label is dropped below md (the bar does not wrap, and at 390px
-			// it was the one thing that did not fit), so the title has to carry
-			// it there — same trade the snapshot and fullscreen icons make.
-			'<button type="button" class="mj-hud-btn mj-glass" id="mj-live-compare"' +
-			' title="Hold to compare" aria-label="Hold to compare">' +
-			ICON.compare + '<span>Hold to compare</span></button>' +
-			'<span class="mj-hud-end">' +
-			'<button type="button" class="mj-hud-ico mj-glass" id="mj-live-snap" hidden aria-label="Snapshot" title="Snapshot"></button>' +
-			'<button type="button" class="mj-hud-ico mj-glass" id="mj-live-fs" hidden aria-label="Fullscreen" title="Fullscreen"></button>' +
-			'</span>' +
-			'</div>';
-		stage.querySelector('#mj-live-snap').innerHTML = ICON.snap;
-		stage.querySelector('#mj-live-fs').innerHTML = ICON.fs;
-		form.appendChild(stage);
-		return stage;
-	}
-
 	// The bar does not wrap any more — wrapping took 42% of a 290px picture on a
 	// 540px phone (#239) — so when it will not fit, the widest group moves off
 	// the picture instead of stacking on top of more of it. The runtime toggles
@@ -1302,8 +969,9 @@
 	// pad into the stage: one set of inputs means wireRuntime() keeps driving
 	// the controls the person is looking at, whichever side of the picture edge
 	// that is.
-	function dockRuntime(stage, mount) {
-		const bar = stage.querySelector('.mj-live-bar');
+	function dockRuntime(preview, mount) {
+		const stage = preview.stage;
+		const bar = preview.bar;
 		const gap = 8;
 		const movable = () => [
 			bar.querySelector('.mj-hud-rt') || mount.querySelector('.mj-hud-rt'),
@@ -1315,8 +983,10 @@
 				if (n.parentNode === to) return;
 				n.classList.toggle('mj-glass', to === bar);
 				// Before the compare button, which is where it sits in the bar;
-				// appended in the mount, which holds nothing else.
-				if (to === bar) bar.insertBefore(n, bar.querySelector('#mj-live-compare'));
+				// appended in the mount, which holds nothing else. By class and
+				// not by id: the bar belongs to a component that can be mounted
+				// more than once on a page, and an id would name the wrong one.
+				if (to === bar) bar.insertBefore(n, bar.querySelector('.mj-live-compare'));
 				else to.appendChild(n);
 			});
 		};
@@ -1691,7 +1361,7 @@
 
 	// The luma histogram. Everything it needs is already in the browser — the
 	// decoded picture — so this costs the camera nothing and needs no endpoint.
-	function renderLuma(container) {
+	function renderLuma(container, preview) {
 		if (!window.MajesticLuma) return;
 		const wrap = el('div', 'mj-luma');
 		wrap.innerHTML =
@@ -1714,28 +1384,14 @@
 		const meanEl = container.parentNode.querySelector('.mj-luma-mean');
 
 		const sampler = window.MajesticLuma.start({
-			video: () => {
-				// Whichever element the swap currently has on screen; the MSE
-				// player replaces its node on every reconnect.
-				// Four candidates now, not two: the software rung paints a
-				// canvas. Filtering on readyState alone would have skipped
-				// both canvases for ever — they do not have one — and the
-				// histogram would simply have stopped on an H.265 camera,
-				// silently, which is the failure this panel can least afford.
-				// Videos know their own readiness; a canvas does not, so the
-				// player marks it when it has actually decoded a frame. Until
-				// then this returns a video that will fail the sampler's own
-				// guard, which keeps the measurement UNKNOWN rather than
-				// reporting black.
-				const ready = (e) => e && e.style.display !== 'none' &&
-					(e.tagName === 'CANVAS'
-						? e.__mjPainted === true
-						: e.readyState >= 2);
-				const els = ['mj-live-video', 'mj-live-video-b',
-					'mj-live-canvas', 'mj-live-canvas-b']
-					.map((id) => document.getElementById(id));
-				return els.find(ready) || els[0] || els[1];
-			},
+			// Whichever element the stage currently has a picture on. It was a
+			// scan of four document ids here, which is the same fact the stage
+			// already knows and the reason it could only ever be mounted once;
+			// media() is that scan, kept where the slots are — including the
+			// part that makes it honest, that a canvas is only offered once the
+			// player has marked it painted, so a histogram measures UNKNOWN
+			// rather than black while the picture is merely starting.
+			video: () => preview.media(),
 			onData: (r) => {
 				pathEl.setAttribute('d', r.path);
 				// One per cent is the threshold worth a warning: below it you
@@ -1759,18 +1415,11 @@
 
 	function renderLive(form) {
 		const fields = liveFields();
-		// The whole player stack, not just the decoder. attachLivePreview()
-		// reaches for MajesticTransport and MajesticSwap as well, so a page
-		// served without them — an older install, a half-finished deploy —
-		// threw there and abandoned renderLive with the stage on screen and the
-		// deck never built, silently. Missing scripts should cost the preview,
-		// not the controls.
-		const withVideo = !!(window.MajesticVideo && window.MajesticSwap &&
-			window.MajesticTransport);
 
 		// The only place the leaf names itself — the rail's active item says it
 		// too. The stream picker used to share this line; it is on the picture
-		// now (renderStage), so what is left is the heading and its rule.
+		// now, and the picture is mj-preview.js's, so what is left here is the
+		// heading and its rule.
 		//
 		// An <h3> despite the micro-caps styling, and not a <span>: revealSection()
 		// focuses `form h3` after a navigation so the section announces itself to
@@ -1782,24 +1431,70 @@
 			'<span class="mj-live-rule"></span>';
 		form.appendChild(head);
 
-		if (withVideo) {
-			const stage = renderStage(form);
-			attachLivePreview(stage.querySelector('#mj-live-video'));
-			wireRuntime(stage);
-			wireCompare(stage.querySelector('#mj-live-compare'));
-			// Shared with the Live page rather than copied: the /image.jpg
-			// naming, the jpeg.enabled gate and the delayed revokeObjectURL are
-			// details a second copy would drift on.
-			if (window.MajesticHero) {
-				// The disposer matters here and not on the Live page: this stage
-				// is rebuilt every time the leaf is opened.
-				const offFs = window.MajesticHero.wireFullscreen(stage, stage.querySelector('#mj-live-fs'));
-				if (offFs) state.liveCleanup.push(offFs);
-				window.MajesticHero.wireSnapshot(stage.querySelector('#mj-live-snap'));
-			}
+		// The picture, on the transport with the least lag — which is the
+		// stage's own default and is deliberately not overridden here.
+		//
+		// This is the one panel where latency IS the feature: someone is
+		// dragging a saturation slider and watching for the effect, and MSE is
+		// about a second behind where WebRTC is not. The earlier reasoning for
+		// pinning this panel to MSE — that a WebRTC viewer joins the encoder's
+		// bitrate loop and would disturb a judgement about image quality — does
+		// not survive looking at what the panel actually offers: brightness,
+		// contrast, saturation, hue, mirror and flip are ISP knobs, nothing here
+		// judges an encoder setting, and whoever is tuning videoN.bitrate is on
+		// another section with no preview at all.
+		//
+		// Null when the player stack is not on the page — an older install, a
+		// half-finished deploy. Everything below is written to survive that,
+		// because the knobs write to the camera whether or not there is a
+		// picture to judge them by: missing scripts should cost the preview,
+		// not the controls. It used to be an inline check of the same three
+		// globals, which mount() now makes on the caller's behalf.
+		const preview = window.MajesticPreview &&
+			window.MajesticPreview.mount(form, {
+				// A getter, not state.config itself: a save re-fetches the
+				// config, and the channel picker should notice a substream
+				// that has just been enabled without re-mounting the picture.
+				config: () => state.config,
+				// This panel's own remembered channel, not the Live View
+				// page's: the two are looked at for different reasons and can
+				// reasonably want different channels.
+				where: 'live',
+			});
+		state.preview = preview;
+
+		if (preview) {
+			// The runtime toggles and hold-to-compare are this leaf's, not the
+			// stage's — one is camera state that never reaches Save, the other
+			// is about the x-live knobs below — so they are handed to the bar
+			// rather than built into it. They land to the left of the snapshot
+			// and fullscreen icons, which is where they were.
+			const holder = el('div');
+			holder.innerHTML = runtimeHtml();
+			Array.prototype.slice.call(holder.children)
+				.forEach(n => preview.barInsert(n));
+
+			// The label is dropped below md (the bar does not wrap, and at
+			// 390px it was the one thing that did not fit), so the title has to
+			// carry it there — same trade the snapshot and fullscreen icons
+			// make.
+			const cmp = el('button', 'mj-hud-btn mj-glass mj-live-compare');
+			cmp.type = 'button';
+			cmp.title = 'Hold to compare';
+			cmp.setAttribute('aria-label', 'Hold to compare');
+			cmp.innerHTML = ICON.compare + '<span>Hold to compare</span>';
+			preview.barInsert(cmp);
+
+			// Before dockRuntime, which MOVES these same nodes rather than
+			// making a second set of them: both of these capture the nodes they
+			// wire, so wiring them while they are still in the bar is what keeps
+			// working after they have been docked under the picture.
+			wireRuntime(preview.stage);
+			wireCompare(cmp);
+
 			const rtMount = el('div', 'mj-live-rt-mount');
 			form.appendChild(rtMount);
-			state.liveCleanup.push(dockRuntime(stage, rtMount));
+			state.liveCleanup.push(dockRuntime(preview, rtMount));
 
 			const note = el('p', 'mj-live-hint');
 			note.textContent = 'Night, IR-cut and the lamp are runtime state: pressing one changes ' +
@@ -1880,14 +1575,14 @@
 			renderScene(liveGroup(colScene, 'Scene', 'starting points'), toneFields);
 		}
 
-		if (withVideo) {
+		if (preview) {
 			// The group's note slot carries the running mean rather than a
 			// caption — a number that changes is worth more there than a word
 			// that does not.
 			const lumaBody = liveGroup(colLuma, 'Luma', 'mean —');
 			const note = lumaBody.parentNode.querySelector('.mj-live-note');
 			if (note) note.className = 'mj-live-note mj-luma-mean';
-			renderLuma(lumaBody);
+			renderLuma(lumaBody, preview);
 		}
 
 		if (useGeo) {

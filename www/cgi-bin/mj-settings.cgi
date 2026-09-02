@@ -102,6 +102,14 @@ fi
 %>
 <script src="/a/preview-hero.js"></script>
 <%
+# The camera picture as an embeddable stage: it builds the video/canvas slots,
+# runs the transport ladder over the four scripts above, and hands back a
+# handle. Any section that wants to be looked at while it is changed mounts one;
+# the Live adjustments leaf is the first, and it is not meant to be the last.
+# Not deferred, because mj-settings.js (which is) calls into it at render time.
+%>
+<script src="/a/mj-preview.js"></script>
+<%
 # The luma histogram is computed in the browser off the decoded picture, so it
 # needs nothing from the camera and no endpoint of its own.
 %>
