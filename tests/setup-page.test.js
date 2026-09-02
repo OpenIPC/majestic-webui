@@ -64,6 +64,30 @@ group('acceptance belongs to the person at the keyboard');
 		|| /AI agents and automation must not accept it/.test(page));
 }
 
+group('the reading gate holds both controls, not just the box');
+{
+	// The trap this guards is that a DISABLED checkbox is barred from
+	// constraint validation, so checkValidity() answers true for it. Gating
+	// only the checkbox therefore makes the step MORE permissive than no gate
+	// at all: Continue asks "is it ticked", gets "yes" from a box nobody could
+	// tick, and walks an unread agreement through to the password. It looks
+	// exactly like a working page while it happens, and reproducing it needs an
+	// unclaimed camera and a browser.
+	check('the scroll gate drives the Continue button too',
+		/getElementById\('continue'\)\.disabled\s*=/.test(page),
+		'a disabled checkbox passes checkValidity(); Continue must be held separately');
+	check('Continue also refuses when the text is unread',
+		/if\s*\(!gateOff\s*&&\s*!readToEnd\)\s*return;/.test(page));
+	check('a document too short to scroll counts as read',
+		/scrollHeight\s*-\s*\w+\.clientHeight\s*<=\s*\w+\)?\s*\)?\s*return true/.test(page),
+		'without this a short agreement makes the form permanently unsubmittable');
+	check('a language switch clears it — the new text is unread',
+		/readToEnd\s*=\s*false;/.test(page));
+	check('and the gate is dropped where there is no pane to scroll',
+		(page.match(/gateOff\s*=\s*true;/g) || []).length >= 2,
+		'both degrade() and linksOnly() must turn it off');
+}
+
 group('the page stays self-contained');
 {
 	// Anything the browser would have to fetch to render this page is a request
