@@ -93,6 +93,33 @@ window.MajesticVideo = (function () {
 			if (objUrl) { try { URL.revokeObjectURL(objUrl); } catch (e) {} objUrl = null; }
 		}
 
+		// Give up a socket, for good. Both halves of this matter, and for
+		// different reasons.
+		//
+		// Closing it is what stops the camera serving it. An abandoned
+		// /ws/video session is a live subscription: the camera goes on
+		// encoding for it and sending to it for as long as the tab is open,
+		// and counts it among the viewers it is serving. That is #298 — ten
+		// sessions, one per blink, on a link that could not carry two, each
+		// new one competing with the ones it was meant to replace.
+		//
+		// Dropping the handlers is what stops a socket speaking for the player
+		// after it has been replaced. They close over `ws`, the slot, and not
+		// over the socket they belong to, so a close event that lands after
+		// the slot has moved on nulls the socket now carrying the picture and
+		// starts a reconnect on top of it — orphaning that one in turn. On a
+		// LAN the close lands well inside reopen()'s 300 ms gap and nothing
+		// shows; add a second of latency and pressing Main/Sub leaks a session
+		// every other press.
+		function discard(sock) {
+			if (!sock) return;
+			sock.onopen = null;
+			sock.onmessage = null;
+			sock.onclose = null;
+			sock.onerror = null;
+			try { sock.close(); } catch (e) {}
+		}
+
 		function onVideoError(e) {
 			if (!closed && e.target === video) reconnect();
 		}
@@ -173,16 +200,23 @@ window.MajesticVideo = (function () {
 
 		function open() {
 			if (closed) return;
+			// One socket per player, held where the sockets are made rather
+			// than trusted of every caller that leads here.
+			discard(ws);
 			freshVideo();
 			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 			onState('connecting');
 			let url = proto + '://' + location.host + '/ws/video?stream=' + stream;
 			if (wantAudio && audioPrefs) url += '&audio=' + audioPrefs;
-			ws = new WebSocket(url);
-			ws.binaryType = 'arraybuffer';
+			// Each handler is bound to its own socket, so an error late in a
+			// session's life closes the session that raised it and not
+			// whichever one happens to be in the slot by then.
+			const sock = new WebSocket(url);
+			ws = sock;
+			sock.binaryType = 'arraybuffer';
 			gotSignal = false;
-			ws.onopen = function () { backoff = 1000; armSignalTimer(); };
-			ws.onmessage = function (e) {
+			sock.onopen = function () { backoff = 1000; armSignalTimer(); };
+			sock.onmessage = function (e) {
 				if (typeof e.data === 'string') {
 					let info; try { info = JSON.parse(e.data); } catch (_) { return; }
 					if (info && info.type === 'init') onInit(info);
@@ -190,11 +224,17 @@ window.MajesticVideo = (function () {
 				}
 				onBinary(e.data);
 			};
-			ws.onclose = function () { ws = null; if (!closed) reconnect(); };
-			ws.onerror = function () { try { ws.close(); } catch (e) {} };
+			sock.onclose = function () { ws = null; if (!closed) reconnect(); };
+			sock.onerror = function () { try { sock.close(); } catch (e) {} };
 		}
 
 		function reconnect() {
+			// Before the backoff rather than after it: until this socket is
+			// closed the camera is still encoding and sending for it, and the
+			// reconnect is about to ask for a second one. The video element
+			// raising an error is the path that used to skip this.
+			discard(ws);
+			ws = null;
 			teardownMse();
 			if (closed || reconnectTimer) return;
 			if (++failCount >= 6) { onState('mjpeg', 'unreachable'); stop(); return; }
@@ -207,7 +247,8 @@ window.MajesticVideo = (function () {
 
 		function stop() {
 			clearTimeout(signalTimer);
-			if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+			discard(ws);
+			ws = null;
 			teardownMse();
 		}
 
