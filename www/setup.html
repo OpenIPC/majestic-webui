@@ -798,12 +798,21 @@
 				return { ok: true, type: NICE[f[0]] || f[0], comment: f.slice(2).join(' ') };
 			}
 
+			// Set while a claim is in flight, and left set once one has
+			// succeeded. /setup is one-shot — it stops existing the moment it
+			// works — so a second POST is never useful and, arriving while the
+			// first is still running, is a race against the camera's own
+			// password write. sayAboutKey() runs on every keystroke in the key
+			// box AND on every language change (applyStrings calls it), so
+			// without this it hands the button back mid-request.
+			var busy = false;
+
 			function sayAboutKey() {
 				var v = readKey();
 				sshsay.textContent = '';
 				sshsay.className = '';
 				sshkey.classList.remove('bad');
-				btn.disabled = false;
+				btn.disabled = busy;
 				if (!v) return;
 				if (v.bad) {
 					sshkey.classList.add('bad');
@@ -892,7 +901,7 @@
 				// that sayAboutKey() had just disabled and the two would
 				// disagree about the same paste.
 				var k = readKey();
-				btn.disabled = !!(k && k.fatal);
+				btn.disabled = busy || !!(k && k.fatal);
 			}
 
 			// Restored from the back-forward cache, this page is a form that
@@ -934,6 +943,7 @@
 				var key = readKey();
 				if (key && key.fatal) return fail(T().keyPrivate);
 
+				busy = true;
 				btn.disabled = true;
 				var body = 'password=' + encodeURIComponent(pw.value) +
 					'&confirm=' + encodeURIComponent(cf.value) +
@@ -944,8 +954,18 @@
 					(eula.disabled ? '' :
 						'&eula=' + (eula.checked ? 'accepted' : '') +
 						'&eula_lang=' + encodeURIComponent(eulalang.value));
-				if (sshbox.style.display === 'block' && key && key.ok) {
-					body += '&sshkey=' + encodeURIComponent(sshkey.value.replace(/^\s+|\s+$/g, ''));
+				// Sent whenever there is something in the box — NOT only when
+				// this page liked the look of it. The reading above is
+				// advisory and the server is the judge; dropping a key our
+				// own guess called malformed would claim the camera without
+				// it, and /setup is gone by then, so there is no second
+				// chance to install one. A key the server refuses costs a 400
+				// on a camera that is still unclaimed, which is a form you can
+				// correct. The one exception is the private key already
+				// returned above: that must not leave the machine at all.
+				var typed = sshkey.value.replace(/^\s+|\s+$/g, '');
+				if (sshbox.style.display === 'block' && typed) {
+					body += '&sshkey=' + encodeURIComponent(typed);
 				}
 
 				fetch('/setup', {
@@ -980,12 +1000,16 @@
 					// The endpoint answers in plain text and says something useful
 					// (too short, no match, not a public key), so show what it
 					// said rather than inventing a message from the status code.
+					// Refused: the camera is still unclaimed and the form can be
+					// corrected and sent again, so the guard comes back off.
+					busy = false;
 					return r.text().then(function (t) {
 						fail(t.replace(/^\s+|\s+$/g, '') || fmt(T().failed, r.status));
 					}).catch(function () {
 						fail(fmt(T().failed, r.status));
 					});
 				}).catch(function () {
+					busy = false;
 					fail(T().unreachable);
 				});
 			});

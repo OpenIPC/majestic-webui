@@ -99,6 +99,29 @@ group('the reading gate holds both controls, not just the box');
 		'both degrade() and linksOnly() must turn it off');
 }
 
+group('the optional key is the server\'s to judge');
+{
+	// /setup stops existing the moment it works, so a key dropped during the
+	// claim can never be installed through this flow again. This page's reading
+	// of a key is a guess made to be helpful; it must not be what decides
+	// whether the key is offered at all. A key the SERVER refuses costs a 400
+	// on a camera that is still unclaimed — a form you can correct.
+	check('the key is sent on there being one, not on this page approving it',
+		/if \(sshbox\.style\.display === 'block' && typed\)/.test(page),
+		'gating the send on the client verdict silently drops keys');
+	check('a private key is the one thing held back',
+		/if \(key && key\.fatal\) return fail/.test(page));
+
+	// /setup is one-shot, so a second POST is never useful and, in flight, is a
+	// race against the camera's own password write. sayAboutKey() runs on every
+	// keystroke in the key box and on every language change.
+	check('an in-flight or finished claim keeps the button down',
+		/btn\.disabled = busy;/.test(page) && /busy = true;/.test(page),
+		'sayAboutKey() must not hand the button back mid-request');
+	check('and a refusal hands it back, since that camera is still unclaimed',
+		(page.match(/busy = false;/g) || []).length >= 2);
+}
+
 group('the pre-auth pages stay self-contained');
 {
 	// Anything the browser must fetch to RENDER one of these is a request that
