@@ -2004,25 +2004,207 @@ mark {
 		padding-inline: 0.85rem;
 	}
 }
-/* Responsive-embed wrapper: a plain block div sizes width:100% correctly to the
-   card-body content box, whereas the iframe (a replaced element with
-   aspect-ratio) mis-resolves it and overflows. The iframe absolutely fills the
-   wrapper. */
-.mj-roi-wrap {
-	position: relative;
-	width: 100%;
-	aspect-ratio: 16/9;
-}
-
-.mj-roi-iframe {
+/* ── Motion detection: regions on the picture ────────────────────────────
+   What replaced the Visual editor's iframe. Everything here lives inside
+   mj-preview.js's stage — the rectangles and the drag catcher on its overlay
+   layer, the mode banner on the stage itself — so nothing needs a size of its
+   own: the layer is the picture's box and the geometry is written by
+   mj-settings.js:mountRegions from the frame size the player reports. */
+.mj-md-layer,
+.mj-md-catch {
 	position: absolute;
 	inset: 0;
-	width: 100%;
-	height: 100%;
-	border: 1px solid var(--bs-primary);
-	border-radius: var(--bs-border-radius);
+}
+
+/* The overlay is pointer-transparent so the picture keeps its own gestures;
+   this is the one child that takes the pointer, and only while the mode is on
+   (mountRegions hides it otherwise). */
+.mj-md-catch {
+	/* The overlay's `none` is inherited, so taking the pointer back has to be
+	   said here — without it the layer looks armed, the cursor never changes
+	   and a drag lands on the picture behind it with nothing to catch it. */
+	pointer-events: auto;
+	cursor: crosshair;
+	/* or a touch drag scrolls the page instead of drawing */
+	touch-action: none;
+}
+
+.mj-md-rgn {
+	position: absolute;
+	border: 2px solid rgba(var(--bs-primary-rgb), 0.85);
+	background: rgba(var(--bs-primary-rgb), 0.13);
+	border-radius: 3px;
+	pointer-events: none;
+}
+
+/* The accent rather than the old editor's rgba(0,255,0,.5): these rectangles
+   are this UI's own marks on the picture, and green read as something the
+   camera was doing to the image rather than something the page had drawn. */
+.mj-md-rgn.mj-md-on {
+	border-color: rgb(var(--bs-primary-rgb));
+	background: rgba(var(--bs-primary-rgb), 0.22);
+}
+
+/* The number is the whole of the pairing between a rectangle and its row, so it
+   sits in the corner where it cannot be mistaken for part of the scene. */
+.mj-md-rgn-n {
+	position: absolute;
+	top: -1px;
+	left: -1px;
+	min-width: 20px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 5px;
+	background: rgba(var(--bs-primary-rgb), 0.85);
+	color: #fff;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	border-radius: 2px 0 3px 0;
+}
+
+.mj-md-rgn.mj-md-on .mj-md-rgn-n {
+	background: rgb(var(--bs-primary-rgb));
+}
+
+/* The rubber band, and it is the Live View page's #mj-marquee — same element,
+   same 9999px shadow spread dimming everything outside the rectangle in ONE
+   element rather than four fenced around it, same dashed white edge so the
+   thing being dragged never reads as a region that already exists. The stage's
+   overflow trims the spread; the bar sits above this layer, so the controls
+   stay lit while the picture dims under them.
+
+   z-index above the rectangles, which is the whole point of the dimming: what
+   you are drawing has to be legible against what is already there. */
+.mj-md-band {
+	position: absolute;
+	z-index: 2;
+	border: 1px dashed rgba(255, 255, 255, 0.9);
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.06);
+	box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+	pointer-events: none;
+}
+
+/* Armed. The lit button and this cursor are the whole of the state, as they are
+   for zoom-to-area on the Live View page — there is no banner because the tool
+   disarms itself after one drag, so there is never a mode to have forgotten
+   you are in. On the stage as well as the media, so it reads the same over the
+   letterbox as over the picture. */
+.mj-pv-stage.mj-md-armed,
+.mj-pv-stage.mj-md-armed .mj-pv-media {
+	cursor: crosshair;
+}
+
+/* ── the list beside the picture ─────────────────────────────────────── */
+.mj-md-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+}
+
+.mj-md-row {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.3rem 0.4rem;
+	border-radius: var(--bs-border-radius-sm);
+}
+
+.mj-md-row:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.05);
+}
+
+.mj-md-chip {
+	flex: 0 0 auto;
+	min-width: 1.25rem;
+	height: 1.25rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 4px;
+	background: rgba(var(--bs-primary-rgb), 0.85);
+	color: #fff;
+	font-size: 0.6875rem;
+	font-weight: 600;
+}
+
+/* An input that reads as text until you go near it — the same trick the Live
+   strip's number box plays, and for the same reason: a row of boxed inputs
+   reads as a form to fill in, while these are mostly there to be recognised. */
+.mj-md-co {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 0.1rem 0.3rem;
+	border: 1px solid transparent;
+	border-radius: var(--bs-border-radius-sm);
+	background: transparent;
+	color: var(--bs-body-color);
+	font-family: var(--bs-font-monospace);
+	font-size: 0.8125rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.mj-md-co:hover,
+.mj-md-co:focus {
+	border-color: var(--bs-border-color);
+	outline: 0;
+}
+
+.mj-md-co::placeholder {
+	color: var(--bs-tertiary-color);
+}
+
+.mj-md-pct,
+.mj-md-bad {
+	flex: 0 0 auto;
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-md-bad {
+	color: var(--bs-warning);
+}
+
+.mj-md-del {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.375rem;
+	height: 1.375rem;
 	padding: 0;
-	margin: 0;
+	border: 0;
+	border-radius: 4px;
+	background: none;
+	color: var(--bs-tertiary-color);
+	font-size: 1rem;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.mj-md-del:hover {
+	background: rgba(var(--bs-body-color-rgb), 0.08);
+	color: var(--bs-body-color);
+}
+
+.mj-md-empty {
+	margin-top: 0;
+}
+
+.mj-md-foot {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	margin-top: 0.85rem;
+}
+
+/* Said in the head's note slot when detection is off, and under the list when
+   the regions cannot be placed — both are the page telling you that what is on
+   screen is not the whole story. */
+.mj-md-warn {
+	color: var(--bs-warning);
 }
 
 /* Save and Apply live here together, and the bar is only in the document while
