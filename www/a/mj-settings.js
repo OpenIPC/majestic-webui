@@ -1768,6 +1768,14 @@
 		const list = () => inputs().map(i => i.value.trim());
 
 		// ── the layers ────────────────────────────────────────────────────
+		//
+		// Order matters and is the whole of the hit-testing rule: the catcher is
+		// BENEATH the regions, so a press on empty picture draws a new one and a
+		// press on a region edits that region. Nothing has to ask "did I hit
+		// something" — the DOM already answered.
+		const catcher = el('div', 'mj-md-catch');
+		preview.overlay.appendChild(catcher);
+
 		const layer = el('div', 'mj-md-layer');
 		preview.overlay.appendChild(layer);
 
@@ -1783,9 +1791,6 @@
 		// else it could mean, which is exactly the drawable state. Requiring the
 		// button first was a control standing in front of a gesture that had
 		// nothing to compete with.
-		const catcher = el('div', 'mj-md-catch');
-		preview.overlay.appendChild(catcher);
-
 		// The rubber band, mirroring the Live View page's #mj-marquee exactly:
 		// ONE element, hidden between drags, whose 9999px shadow spread dims
 		// everything outside the rectangle rather than four elements fenced
@@ -1802,6 +1807,30 @@
 		preview.barInsert(btn);
 
 		let armed = false;
+		// Which region is selected, by index, or -1. A drawn region is worth
+		// nothing if it cannot be adjusted afterwards, and the only thing that
+		// can carry handles and a delete button is the one you have picked.
+		let sel = -1;
+		// The gesture in flight: drawing a new region, moving one, or resizing
+		// one by an edge. All three are a pointer down, some movement and a
+		// release, so they share the machinery and differ only in what they do
+		// with the delta.
+		let gesture = null;
+		// Per-row handles from the last paint(), so a move can write the numbers
+		// into the row as they change rather than after the fact.
+		let rowRefs = [];
+
+		// The eight grips, as [name, x-anchor, y-anchor] where the anchors say
+		// which edges that grip moves. Corners move two, edges move one.
+		const GRIPS = [
+			['nw', 'x', 'y'], ['n', '', 'y'], ['ne', 'r', 'y'],
+			['w', 'x', ''], ['e', 'r', ''],
+			['sw', 'x', 'b'], ['s', '', 'b'], ['se', 'r', 'b'],
+		];
+		// Never smaller than this in the stream's own pixels. A region that has
+		// been dragged to nothing is not a region, and it would be invisible on
+		// the picture and so impossible to grab back.
+		const MIN_PX = 16;
 
 		// ── painting ──────────────────────────────────────────────────────
 		//
@@ -1823,7 +1852,7 @@
 			list().forEach((raw, i) => {
 				const r = parse(raw);
 				if (!r) return;
-				const box = el('div', 'mj-md-rgn');
+				const box = el('div', 'mj-md-rgn' + (i === sel ? ' mj-md-sel' : ''));
 				box.dataset.i = String(i);
 				box.style.left = (p.x + r.x / b.w * p.w) + 'px';
 				box.style.top = (p.y + r.y / b.h * p.h) + 'px';
@@ -1832,6 +1861,23 @@
 				const n = el('span', 'mj-md-rgn-n');
 				n.textContent = String(i + 1);
 				box.appendChild(n);
+				// Grips and the delete button only on the selected one. Eight
+				// grips on every region at once is a picture of controls rather
+				// than a picture of what the camera is watching.
+				if (i === sel) {
+					GRIPS.forEach(([name]) => {
+						const g = el('span', 'mj-md-h mj-md-h-' + name);
+						g.dataset.grip = name;
+						box.appendChild(g);
+					});
+					const x = el('button', 'mj-md-x');
+					x.type = 'button';
+					x.dataset.del = String(i);
+					x.innerHTML = '&times;';
+					x.title = 'Remove region ' + (i + 1);
+					x.setAttribute('aria-label', 'Remove region ' + (i + 1));
+					box.appendChild(x);
+				}
 				layer.appendChild(box);
 			});
 		}
@@ -1844,6 +1890,9 @@
 			// Counts what is actually a region: a row you have just opened to
 			// type into is not one yet, and saying "1 region" over an empty box
 			// would be the page agreeing with something nobody has said.
+			// A selection that outlived its row would put handles on somebody
+			// else's rectangle: deleting region 2 of 3 renumbers the third.
+			if (sel >= rows.length) sel = -1;
 			const n = rows.filter(Boolean).length;
 			if (noteEl) {
 				noteEl.textContent = n
@@ -1855,6 +1904,9 @@
 			// it, never a second copy kept in step by hand: the hidden field is
 			// the only model, and every edit below goes back through it.
 			view.innerHTML = '';
+			// The old rows are about to be detached; anything still holding one
+			// would be writing a dragged coordinate into a node nobody can see.
+			rowRefs = [];
 			if (!rows.length) {
 				const empty = el('p', 'mj-live-hint mj-md-empty');
 				// Says the gesture, because the gesture is the only thing there
@@ -1943,6 +1995,15 @@
 				};
 				row.addEventListener('mouseenter', () => lit(true));
 				row.addEventListener('mouseleave', () => lit(false));
+				// The pairing goes both ways: picking a row picks its rectangle,
+				// so the handles appear on the one you are reading the numbers
+				// of. Not from the coordinate box — clicking into that is how
+				// you edit the text, and it must not also move the picture.
+				row.addEventListener('click', (ev) => {
+					if (ev.target.closest('input, button')) return;
+					select(i);
+				});
+				rowRefs[i] = { co: co, says: says };
 			});
 
 			// A rectangle needs two things to be placed: the size of the frame on
@@ -2015,7 +2076,7 @@
 		// somebody who came looking for a control, not a gate.
 		function setArmed(on) {
 			armed = !!on;
-			drawing = null;
+			gesture = null;
 			band.hidden = true;
 			btn.classList.toggle('mj-hud-on', armed);
 			btn.setAttribute('aria-pressed', armed ? 'true' : 'false');
@@ -2027,101 +2088,240 @@
 		// it — and taken off again in the teardown below, or Escape keeps being
 		// swallowed from another section entirely.
 		const onKey = (e) => {
-			if (e.key === 'Escape' && armed) { e.preventDefault(); setArmed(false); }
+			// Never while somebody is typing. Backspace in a coordinate box is
+			// how you correct a number, and taking the region away instead would
+			// be the worst possible reading of it.
+			const t = e.target;
+			const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+				t.isContentEditable);
+			if (e.key === 'Escape') {
+				// Everything transient, in one press. Ordering these — selection
+				// first, then the tool — meant a lit button survived an Escape
+				// that had a selection to clear, so the key looked like it had
+				// done nothing. There is no reading of Escape under which some
+				// of the temporary state should stay.
+				if (sel < 0 && !armed) return;
+				e.preventDefault();
+				select(-1);
+				setArmed(false);
+				return;
+			}
+			if ((e.key === 'Delete' || e.key === 'Backspace') && sel >= 0 && !typing) {
+				e.preventDefault();
+				const i = sel;
+				sel = -1;
+				ctl._drop(i);
+			}
 		};
 		document.addEventListener('keydown', onKey);
 
-		// ── drawing ───────────────────────────────────────────────────────
+		// ── drawing, and editing what was drawn ───────────────────────────
 		//
-		// The Live View page's zoom-to-area, doing a different thing with the
-		// same gesture: press the tool, drag a rectangle, done. Everything below
-		// is that control's shape (preview-zoom.js), and the parts that look
-		// like detail are the parts that make it cost one drag instead of three
-		// decisions.
-		let drawing = null;
+		// Three gestures over one machine, because they are the same gesture with
+		// different arithmetic: press, move, release. Which one you get is decided
+		// by what was under the pointer, which is why the catcher sits beneath the
+		// regions — empty picture draws, a region moves, a grip resizes.
+		//
+		// Drawing is the Live View page's zoom-to-area (preview-zoom.js) and the
+		// parts that look like detail are the parts that make it cost one drag.
 
-		// Both ends held inside the PICTURE, so the band shows exactly what will
-		// be stored — and a drag that never leaves the letterbox collapses to
-		// nothing, which the minimum size below then throws away. Clamping only
-		// at the end, as this did first, draws a rectangle over the black and
-		// then stores a smaller one: the band was a promise the result broke.
+		const at = (e) => {
+			const r = preview.overlay.getBoundingClientRect();
+			return { x: e.clientX - r.left, y: e.clientY - r.top };
+		};
+
+		// Stage pixels to the stream's own, and back. Everything below works in
+		// STREAM pixels once the gesture starts, so a region cannot drift by a
+		// rounding step per pointermove the way it would if each move re-read the
+		// rectangle it had just written.
+		const toStream = (dx, dy, p, b) => ({
+			dx: dx / p.w * b.w,
+			dy: dy / p.h * b.h,
+		});
+
+		// Both ends held inside the PICTURE, so the band shows exactly what will be
+		// stored — and a drag that never leaves the letterbox collapses to nothing,
+		// which the minimum size then throws away. Clamping only at the end, as
+		// this did first, draws a rectangle over the black and stores a smaller
+		// one: the band was a promise the result broke.
 		function bandRect(e) {
-			// Null mid-drag is reachable: a channel change or a dead chain
-			// forgets the frame while a pointer is down. Throwing here would
-			// take the pointermove or pointerup handler with it — capture never
-			// released, `drawing` never cleared, the tool never disarmed — so
-			// the gesture is abandoned rather than completed.
+			// Null mid-drag is reachable: a channel change or a dead chain forgets
+			// the frame while a pointer is down. Throwing here would take the
+			// handler with it — capture never released, the gesture never ended.
 			const p = pic();
-			if (!p) return null;
-			const r = catcher.getBoundingClientRect();
+			if (!p || !gesture) return null;
 			const cx = (v) => Math.min(Math.max(v, p.x), p.x + p.w);
 			const cy = (v) => Math.min(Math.max(v, p.y), p.y + p.h);
-			const x = cx(e.clientX - r.left), y = cy(e.clientY - r.top);
-			const x0 = cx(drawing.x), y0 = cy(drawing.y);
+			const n = at(e);
+			const x = cx(n.x), y = cy(n.y);
+			const x0 = cx(gesture.from.x), y0 = cy(gesture.from.y);
 			return {
 				x: Math.min(x0, x), y: Math.min(y0, y),
 				w: Math.abs(x - x0), h: Math.abs(y - y0),
 			};
 		}
 
-		catcher.addEventListener('pointerdown', (e) => {
-			// No `armed` test: the picture is drawable in its own right. What
-			// still stops a drag is having nowhere to put the result — no frame
-			// size, or no base to write the coordinates in — which is the same
-			// thing that disables the button.
-			// A rectangle belongs to the pointer that began it: a second finger
-			// arriving mid-drag is not a new origin.
-			if (e.button || drawing || !pic() || !base()) return;
-			const r = catcher.getBoundingClientRect();
-			drawing = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
-			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
+		// Write a region back, live. The row's own box shows the numbers changing
+		// under the drag, because those numbers ARE the thing being edited and
+		// watching them move is how you land on a round one.
+		function put(i, r, b) {
+			const v = Math.round(r.x) + 'x' + Math.round(r.y) + 'x' +
+				Math.round(r.w) + 'x' + Math.round(r.h);
+			const src = inputs()[i];
+			if (src) src.value = v;
+			const ref = rowRefs[i];
+			if (ref) { ref.co.value = v; ref.says(parse(v)); }
+			return v;
+		}
+
+		function select(i) {
+			if (sel === i) return;
+			sel = i;
+			paintBoxes();
+		}
+
+		// What the press landed on decides the gesture.
+		function begin(e, surface) {
+			if (e.button || gesture) return;
+			const p = pic(), b = base();
+			if (!p || !b) return;
+
+			const delBtn = e.target.closest && e.target.closest('.mj-md-x');
+			if (delBtn) return;                       // handled on click, not here
+			const grip = e.target.closest && e.target.closest('.mj-md-h');
+			const boxEl = e.target.closest && e.target.closest('.mj-md-rgn');
+
+			if (grip && boxEl) {
+				const i = +boxEl.dataset.i;
+				gesture = { kind: 'resize', id: e.pointerId, i: i, grip: grip.dataset.grip,
+					from: at(e), orig: parse(list()[i]), moved: false };
+			} else if (boxEl) {
+				const i = +boxEl.dataset.i;
+				select(i);
+				gesture = { kind: 'move', id: e.pointerId, i: i,
+					from: at(e), orig: parse(list()[i]), moved: false };
+			} else {
+				// Empty picture. A press here is also how you put a selection down,
+				// which is what makes the grips and the delete button transient.
+				select(-1);
+				gesture = { kind: 'new', id: e.pointerId, from: at(e), moved: false };
+			}
+			if (!gesture.orig && gesture.kind !== 'new') { gesture = null; return; }
+			try { surface.setPointerCapture(e.pointerId); } catch (err) {}
 			e.preventDefault();
-		});
+		}
 
-		catcher.addEventListener('pointermove', (e) => {
-			if (!drawing || e.pointerId !== drawing.id) return;
-			const b = bandRect(e);
-			if (!b) { band.hidden = true; return; }
-			band.hidden = false;
-			band.style.left = b.x + 'px';
-			band.style.top = b.y + 'px';
-			band.style.width = b.w + 'px';
-			band.style.height = b.h + 'px';
-		});
+		function move(e) {
+			if (!gesture || e.pointerId !== gesture.id) return;
+			const p = pic(), b = base();
+			if (!p || !b) { band.hidden = true; return; }
+			gesture.moved = true;
 
-		// `commit` is false for pointercancel: the browser took the gesture away
-		// — a system edge swipe, a rotation, another element capturing the
-		// pointer — and an interrupted gesture is not a completed one.
-		function finishDraw(e, commit) {
-			if (!drawing || e.pointerId !== drawing.id) return;
-			const r = commit ? bandRect(e) : null;   // null if the picture went
-			try { catcher.releasePointerCapture(e.pointerId); } catch (err) {}
-			drawing = null;
+			if (gesture.kind === 'new') {
+				const r = bandRect(e);
+				if (!r) { band.hidden = true; return; }
+				band.hidden = false;
+				band.style.left = r.x + 'px';
+				band.style.top = r.y + 'px';
+				band.style.width = r.w + 'px';
+				band.style.height = r.h + 'px';
+				return;
+			}
+
+			const n = at(e);
+			const d = toStream(n.x - gesture.from.x, n.y - gesture.from.y, p, b);
+			const o = gesture.orig;
+
+			if (gesture.kind === 'move') {
+				// Clamped as a whole rather than per edge: a region dragged at the
+				// frame edge should stop, not squash.
+				const x = Math.min(Math.max(o.x + d.dx, 0), b.w - o.w);
+				const y = Math.min(Math.max(o.y + d.dy, 0), b.h - o.h);
+				put(gesture.i, { x: x, y: y, w: o.w, h: o.h }, b);
+			} else {
+				let x = o.x, y = o.y, w = o.w, h = o.h;
+				const g = gesture.grip;
+				if (g.indexOf('w') >= 0) {
+					const nx = Math.min(Math.max(o.x + d.dx, 0), o.x + o.w - MIN_PX);
+					w = o.x + o.w - nx; x = nx;
+				}
+				if (g.indexOf('e') >= 0) {
+					w = Math.min(Math.max(o.w + d.dx, MIN_PX), b.w - o.x);
+				}
+				if (g.indexOf('n') >= 0) {
+					const ny = Math.min(Math.max(o.y + d.dy, 0), o.y + o.h - MIN_PX);
+					h = o.y + o.h - ny; y = ny;
+				}
+				if (g.indexOf('s') >= 0) {
+					h = Math.min(Math.max(o.h + d.dy, MIN_PX), b.h - o.y);
+				}
+				put(gesture.i, { x: x, y: y, w: w, h: h }, b);
+			}
+			paintBoxes();
+		}
+
+		// `commit` is false for pointercancel: the browser took the gesture away —
+		// a system edge swipe, a rotation, another element capturing the pointer —
+		// and an interrupted gesture is not a completed one.
+		function finish(e, commit, surface) {
+			if (!gesture || e.pointerId !== gesture.id) return;
+			const g = gesture;
+			const r = (commit && g.kind === 'new') ? bandRect(e) : null;
+			try { surface.releasePointerCapture(e.pointerId); } catch (err) {}
+			gesture = null;
 			band.hidden = true;
 
-			const p = pic(), b = base();
-			if (r && p && b) {
-				// A rectangle has to be deliberate. Per AXIS, and a share of the
-				// stage with an absolute floor, so it means the same thing on a
-				// 2560px monitor and a 390px phone.
-				const minW = Math.max(16, preview.stage.clientWidth * 0.02);
-				const minH = Math.max(16, preview.stage.clientHeight * 0.02);
-				if (r.w >= minW && r.h >= minH) {
-					const px = (v, o, sz, n) => Math.round((v - o) / sz * n);
-					const X = px(r.x, p.x, p.w, b.w), Y = px(r.y, p.y, p.h, b.h);
-					const W = px(r.x + r.w, p.x, p.w, b.w) - X;
-					const H = px(r.y + r.h, p.y, p.h, b.h) - Y;
-					if (W > 0 && H > 0) ctl._add(X + 'x' + Y + 'x' + W + 'x' + H);
+			if (g.kind === 'new') {
+				const p = pic(), b = base();
+				if (r && p && b) {
+					// A rectangle has to be deliberate. Per AXIS, and a share of the
+					// stage with an absolute floor, so it means the same thing on a
+					// 2560px monitor and a 390px phone.
+					const minW = Math.max(16, preview.stage.clientWidth * 0.02);
+					const minH = Math.max(16, preview.stage.clientHeight * 0.02);
+					if (r.w >= minW && r.h >= minH) {
+						const px = (v, o, sz, n) => Math.round((v - o) / sz * n);
+						const X = px(r.x, p.x, p.w, b.w), Y = px(r.y, p.y, p.h, b.h);
+						const W = px(r.x + r.w, p.x, p.w, b.w) - X;
+						const H = px(r.y + r.h, p.y, p.h, b.h) - Y;
+						if (W > 0 && H > 0) {
+							ctl._add(X + 'x' + Y + 'x' + W + 'x' + H);
+							// Selected on arrival: the thing you just made is the thing
+							// you are most likely to want to nudge.
+							select(list().length - 1);
+						}
+					}
 				}
+				// One drag, then the button's light goes out — the whole of what
+				// makes it cost one press.
+				if (armed) setArmed(false);
+				return;
 			}
-			// One drag, then it disarms itself — the whole of what makes this
-			// cost one press. It is also the reason there is no banner and no
-			// Done: there is no mode left to be in, so there is nothing to
-			// announce and nothing to leave.
-			setArmed(false);
+
+			// A move or resize that actually moved is an edit to save; one that did
+			// not was a click, and a click is how you select.
+			if (g.moved) { updateDirty(); paint(); }
 		}
-		catcher.addEventListener('pointerup', (e) => finishDraw(e, true));
-		catcher.addEventListener('pointercancel', (e) => finishDraw(e, false));
+
+		[catcher, layer].forEach((surface) => {
+			surface.addEventListener('pointerdown', (e) => begin(e, surface));
+			surface.addEventListener('pointermove', move);
+			surface.addEventListener('pointerup', (e) => finish(e, true, surface));
+			surface.addEventListener('pointercancel', (e) => finish(e, false, surface));
+		});
+
+		// Delete, from the picture. The × on the selected region, and the key that
+		// every other canvas in the world binds — guarded on the focus being
+		// somewhere that is not a text box, or backspacing a coordinate would
+		// delete the region you were correcting.
+		layer.addEventListener('click', (e) => {
+			const x = e.target.closest && e.target.closest('.mj-md-x');
+			if (!x) return;
+			e.preventDefault();
+			sel = -1;
+			ctl._drop(+x.dataset.del);
+		});
+
 
 		// The stage resizes with the window, the rail and the docked bar, none
 		// of which is a window resize — so watch the stage itself, as the Live
