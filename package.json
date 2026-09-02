@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build:dist": "sh tools/build-dist.sh",
-    "test": "node tests/talkback.test.js && node tests/transport.test.js && node tests/staging.test.js && node tests/auto-source.test.js && node tests/mp4index.test.js && node tests/timeline.test.js && node tests/reset-watch.test.js && node tests/luma.test.js && node tests/metrics-parse.test.js && node tests/preview-stats.test.js && node tests/video-check.test.js && node tests/ircut-check.test.js && node tests/ircut-scan.test.js && node tests/setup-page.test.js"
+    "test": "node tests/talkback.test.js && node tests/transport.test.js && node tests/staging.test.js && node tests/auto-source.test.js && node tests/mp4index.test.js && node tests/timeline.test.js && node tests/reset-watch.test.js && node tests/luma.test.js && node tests/metrics-parse.test.js && node tests/preview-socket.test.js && node tests/preview-stats.test.js && node tests/video-check.test.js && node tests/ircut-check.test.js && node tests/ircut-scan.test.js && node tests/setup-page.test.js"
   },
   "devDependencies": {
     "clean-css-cli": "5.6.3",
