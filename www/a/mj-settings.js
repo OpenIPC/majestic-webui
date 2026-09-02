@@ -2697,12 +2697,10 @@
 		const catcher = el('div', 'mj-osd-catch');
 		preview.overlay.appendChild(catcher);
 
-		function base() {
-			const cfg = parseWH(getDotted(state.config, 'video0.size'));
-			if (cfg) return cfg;
-			const f = preview.frame();
-			return (f && preview.stream() === 0) ? { w: f.w, h: f.h } : null;
-		}
+		// No base() here, unlike the region editor. A share of the frame is
+		// resolved by whichever channel is drawing it, so placing the overlay
+		// needs nothing but the picture on screen — which also means it works on
+		// a camera with no main resolution set, where the mask tool cannot.
 		function pic() {
 			const f = preview.frame();
 			const w = stage.clientWidth, h = stage.clientHeight;
@@ -2772,7 +2770,7 @@
 		}
 
 		// Where the overlay is now, from the fields the camera is reading.
-		function current(p, b) {
+		function current(p) {
 			const a = held.anchor.getValue();
 			const sides = anchorSides(a);
 			const w = ghost.offsetWidth || 120, h = ghost.offsetHeight || 20;
@@ -2787,20 +2785,25 @@
 					y: p.y + map(held.posY && held.posY.getValue(), p.h, h),
 				};
 			}
-			const off = (fld, span) => {
-				const v = parseFloat(fld ? fld.getValue() : '0') || 0;
-				return v / (b ? (span === p.w ? b.w : b.h) : 1) * span;
-			};
-			const ox = off(held.offsetX, p.w), oy = off(held.offsetY, p.h);
+			// The span an offset is measured against is the frame being SHOWN,
+			// which is the picture on screen — not video0. That is the same
+			// reading majestic takes per channel, which is why a share travels
+			// between them and a pixel count does not.
+			const f = preview.frame();
+			const emPx = em(p);
+			const ox = offsetFrac(held.offsetX && held.offsetX.getValue(),
+				f ? f.w : 0, emPx * (f ? f.w / p.w : 1)) * p.w;
+			const oy = offsetFrac(held.offsetY && held.offsetY.getValue(),
+				f ? f.h : 0, emPx * (f ? f.h / p.h : 1)) * p.h;
 			const ax = sides.x < 0 ? ox : sides.x > 0 ? p.w - w - ox : (p.w - w) / 2;
 			const ay = sides.y < 0 ? oy : sides.y > 0 ? p.h - h - oy : (p.h - h) / 2;
 			return { x: p.x + ax, y: p.y + ay };
 		}
 
 		function paint() {
-			const p = pic(), b = base();
+			const p = pic();
 			layer.hidden = !active || !p;
-			catcher.hidden = !active || !p || !b;
+			catcher.hidden = !active || !p;
 			if (!p) return;
 			ghost.style.fontSize = em(p).toFixed(1) + 'px';
 			ghost.textContent = shown();
@@ -2815,8 +2818,35 @@
 			}
 		}
 
+		// Offsets are written as a PERCENTAGE, and that is the whole of the
+		// Main/Sub fix. majestic resolves a bare offset as pixels against the
+		// channel it is drawing — so "200" is a tenth of the way across a 1920
+		// frame and well over a quarter across a 704 one, and the overlay landed
+		// somewhere different on each stream from the same setting. `%` is
+		// resolved as a share of that channel's own span (offset_px:
+		// `v * span / 100`), and the font is derived from the stream width too,
+		// so the text lands in the same visual place on every output.
+		//
+		// One decimal: enough that a 1920-wide frame can be addressed to the
+		// pixel, few enough that a drag does not write a different number every
+		// time the pointer jitters.
+		const pct = (v) => Math.round(v * 1000) / 10;
+
+		// Read an offset back, whatever unit it was written in — a config
+		// written before this, or by hand, is still pixels or em.
+		function offsetFrac(spec, span, emPx) {
+			const t = String(spec == null ? '' : spec).trim();
+			const v = parseFloat(t);
+			if (!isFinite(v)) return 0;
+			if (/%\s*$/.test(t)) return v / 100;
+			if (/em\s*$/i.test(t)) return span ? (v * emPx) / span : 0;
+			// bare, or "px": pixels of the channel being drawn. The picture on
+			// screen is one of those channels, so its own frame is the span.
+			return span ? v / span : 0;
+		}
+
 		const SNAP = 12;
-		function place(px, py, p, b) {
+		function place(px, py, p) {
 			const w = ghost.offsetWidth, h = ghost.offsetHeight;
 			const lo = { x: p.x, y: p.y };
 			const mid = { x: p.x + (p.w - w) / 2, y: p.y + (p.h - h) / 2 };
@@ -2829,12 +2859,12 @@
 			if (sx === null) {
 				sx = (px + w / 2) < (p.x + p.w / 2) ? -1 : 1;
 				ox = sx < 0 ? (px - p.x) : (p.x + p.w - (px + w));
-				ox = Math.round(Math.max(0, ox) / p.w * b.w);
+				ox = pct(Math.max(0, ox) / p.w);
 			}
 			if (sy === null) {
 				sy = (py + h / 2) < (p.y + p.h / 2) ? -1 : 1;
 				oy = sy < 0 ? (py - p.y) : (p.y + p.h - (py + h));
-				oy = Math.round(Math.max(0, oy) / p.h * b.h);
+				oy = pct(Math.max(0, oy) / p.h);
 			}
 			// A centred axis ignores its offset — majestic's place_anchored
 			// centres it outright — so writing one would be a number the camera
@@ -2846,18 +2876,19 @@
 
 		function preview_(r, p) {
 			const w = ghost.offsetWidth, h = ghost.offsetHeight;
-			const gx = r.sx < 0 ? p.x + r.ox / (base().w) * p.w
-				: r.sx > 0 ? p.x + p.w - w - r.ox / (base().w) * p.w
+			const fx = r.ox / 100, fy = r.oy / 100;
+			const gx = r.sx < 0 ? p.x + fx * p.w
+				: r.sx > 0 ? p.x + p.w - w - fx * p.w
 				: p.x + (p.w - w) / 2;
-			const gy = r.sy < 0 ? p.y + r.oy / (base().h) * p.h
-				: r.sy > 0 ? p.y + p.h - h - r.oy / (base().h) * p.h
+			const gy = r.sy < 0 ? p.y + fy * p.h
+				: r.sy > 0 ? p.y + p.h - h - fy * p.h
 				: p.y + (p.h - h) / 2;
 			ghost.style.left = gx + 'px';
 			ghost.style.top = gy + 'px';
 			read.style.left = gx + 'px';
 			read.style.top = Math.max(0, gy - 24) + 'px';
 			read.innerHTML = '<b>' + esc(SAY_SIDE[r.sx + ',' + r.sy]) + '</b>' +
-				(r.ox || r.oy ? '<span>' + r.ox + ' · ' + r.oy + '</span>' : '');
+				(r.ox || r.oy ? '<span>' + r.ox + '% · ' + r.oy + '%</span>' : '');
 			guides.classList.toggle('mj-osd-sx', r.sx === -1 || r.sx === 1 || r.sx === 0);
 			guides.querySelectorAll('.mj-osd-g').forEach(g => g.classList.remove('mj-osd-lit'));
 			const gx_ = r.sx === -1 ? '.gx-l' : r.sx === 0 ? '.gx-c' : '.gx-r';
@@ -2873,25 +2904,25 @@
 
 		catcher.addEventListener('pointerdown', (e) => {
 			if (e.button || drag || !active) return;
-			const p = pic(), b = base();
-			if (!p || !b) return;
+			const p = pic();
+			if (!p) return;
 			ghost.hidden = false;
 			read.hidden = false;
 			guides.classList.add('mj-osd-on');
-			const cur = current(p, b);
+			const cur = current(p);
 			const n = at(e);
 			drag = { id: e.pointerId, dx: n.x - cur.x, dy: n.y - cur.y };
 			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
-			preview_(place(cur.x, cur.y, p, b), p);
+			preview_(place(cur.x, cur.y, p), p);
 			e.preventDefault();
 		});
 
 		catcher.addEventListener('pointermove', (e) => {
 			if (!drag || e.pointerId !== drag.id) return;
-			const p = pic(), b = base();
-			if (!p || !b) return;
+			const p = pic();
+			if (!p) return;
 			const n = at(e);
-			const r = place(n.x - drag.dx, n.y - drag.dy, p, b);
+			const r = place(n.x - drag.dx, n.y - drag.dy, p);
 			preview_(r, p);
 			// The camera follows the pointer. postLive serialises and swallows
 			// its own failures, so a move that cannot land does not wedge the
@@ -2899,34 +2930,40 @@
 			const name = anchorName(r.sx, r.sy);
 			if (name !== drag.lastName || r.ox !== drag.lastOx || r.oy !== drag.lastOy) {
 				drag.lastName = name; drag.lastOx = r.ox; drag.lastOy = r.oy;
-				postLive(osdLiveQuery(name, r.ox, r.oy));
+				postLive(osdLiveQuery(name, r.ox + '%', r.oy + '%'));
 			}
 		});
 
 		function done(e, commit) {
 			if (!drag || e.pointerId !== drag.id) return;
-			const p = pic(), b = base();
+			const p = pic();
 			try { catcher.releasePointerCapture(e.pointerId); } catch (err) {}
 			const n = commit ? at(e) : null;
+			// Where you GRABBED it, kept across the line that clears the drag.
+			// Every pointermove placed the overlay at the pointer minus this,
+			// and committing the raw pointer instead moved the text by the grab
+			// offset at the instant you let go — so it landed somewhere the drag
+			// had never shown, and the readout and the camera disagreed.
+			const dx = drag.dx, dy = drag.dy;
 			drag = null;
 			guides.classList.remove('mj-osd-on');
-			if (!n || !p || !b) { paint(); return; }
+			if (!n || !p) { paint(); return; }
 
-			const r = place(n.x, n.y, p, b);
+			const r = place(n.x - dx, n.y - dy, p);
 			const name = anchorName(r.sx, r.sy);
 			// Staged, not saved. The camera is already showing it — that
 			// happened on the way here, one push per move — so all that is left
 			// is for the form to agree, and for Save to mean what it means
 			// everywhere else on the page.
 			if (held.anchor) held.anchor.setValue(name);
-			if (held.offsetX) held.offsetX.setValue(String(r.ox));
-			if (held.offsetY) held.offsetY.setValue(String(r.oy));
+			if (held.offsetX) held.offsetX.setValue(r.ox + '%');
+			if (held.offsetY) held.offsetY.setValue(r.oy + '%');
 			runVisibility();
 			updateDirty();
 			// One last push at the resting place: the drag may have ended
 			// between debounces, and the pointer's last position is the one that
 			// counts.
-			postLive(osdLiveQuery(name, r.ox, r.oy));
+			postLive(osdLiveQuery(name, r.ox + '%', r.oy + '%'));
 			paint();
 		}
 		catcher.addEventListener('pointerup', (e) => done(e, true));
