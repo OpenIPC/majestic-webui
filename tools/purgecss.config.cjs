@@ -19,6 +19,24 @@ module.exports = {
 		'www/**/*.html',
 		'www/a/*.js',
 	],
+	// The three pages majestic serves before there is a session carry their own
+	// CSS and never load this file — they cannot, since /a/* answers 401 without
+	// one (tests/setup-page.test.js pins that self-containment). So scanning
+	// them can never keep a rule they need; it can only invent candidates they
+	// do not. Their inline stylesheets write `border-top` and `text-wrap` as
+	// PROPERTY names, the default extractor tokenises those into class
+	// candidates, and the matching Bootstrap utilities came back into the
+	// shipped file for nobody to use.
+	//
+	// skippedContentGlobs rather than a `!` entry in content: purgecss hands
+	// content straight to its file reader without negation handling, so the
+	// exclamation-mark form silently changes nothing — which looks exactly like
+	// it worked.
+	skippedContentGlobs: [
+		'www/setup.html',
+		'www/login.html',
+		'www/cameras.html',
+	],
 	// Bootstrap leans on CSS custom properties, keyframes and @font-face — never strip these.
 	variables: false,
 	keyframes: false,
