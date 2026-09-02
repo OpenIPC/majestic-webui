@@ -978,8 +978,8 @@ mark {
 }
 
 /* Segmented control (stream picker). Radio inputs kept — they are the right
-   semantics and attachLivePreview() drives .checked/.disabled — but taken out
-   of the flow rather than hidden, so they stay focusable. */
+   semantics and mj-preview.js drives .checked/.disabled — but taken out of the
+   flow rather than hidden, so they stay focusable. */
 .mj-seg {
 	display: flex;
 	/* the control is as wide as its options — as a block child of .mj-ctl-in it
@@ -1053,11 +1053,21 @@ mark {
    the panel changes. It decomposes as the stage's own top offset (the rail and
    form columns start at 134px now that the title band is gone, plus the section
    head) + 12px + the 76px strip + 16px, and the fractional rem keeps that
-   arithmetic legible rather than rounded into a lie. */
-.mj-live-stage {
+   arithmetic legible rather than rounded into a lie.
+
+   The reserve is a variable rather than the constant it was, because the stage
+   is a component now (mj-preview.js) and 17.6rem is a fact about ONE of its
+   consumers — it decomposes as the Live leaf's own chrome plus the Live leaf's
+   knob strip. A section that embeds the picture for some other reason has a
+   different deck under it, or none, and would inherit the wrong answer
+   silently: the picture merely comes out too small, which reads as a design
+   rather than as a bug. Overriding one property is also what makes the docked
+   variant below a single line instead of a second copy of this arithmetic. */
+.mj-pv-stage {
+	--mj-pv-reserve: 17.6rem;
 	position: relative;
-	width: min(100%, max(28rem, calc((100vh - 17.6rem) * 1.77778)));
-	width: min(100%, max(28rem, calc((100dvh - 17.6rem) * 1.77778)));
+	width: min(100%, max(28rem, calc((100vh - var(--mj-pv-reserve)) * 1.77778)));
+	width: min(100%, max(28rem, calc((100dvh - var(--mj-pv-reserve)) * 1.77778)));
 	margin-inline: auto;
 	aspect-ratio: 16 / 9;
 	background: #0d0f14;
@@ -1074,14 +1084,39 @@ mark {
    stabilising rather than oscillating: docking narrows the stage, which can
    only make the bar fit less well, so it stays docked; dockRuntime carries the
    hysteresis that stops the boundary flip-flopping. */
-.mj-live-stage.mj-live-docked {
-	width: min(100%, max(28rem, calc((100vh - 21rem) * 1.77778)));
-	width: min(100%, max(28rem, calc((100dvh - 21rem) * 1.77778)));
+.mj-pv-stage.mj-live-docked {
+	--mj-pv-reserve: 21rem;
+}
+
+/* A picture that is not the hero of its section: it fills the box it was put in
+   — a card body, a column — and takes its height from its aspect ratio like any
+   other block. The height-driven sizing above is for a stage that OWNS the
+   window, which is the Live leaf's arrangement and nobody else's. */
+.mj-pv-stage.mj-pv-inline {
+	width: 100%;
+}
+
+/* Over the picture, under the bar: where a consumer draws on the frame —
+   regions, masks, a crop rectangle. Empty and pointer-transparent, so a stage
+   nobody draws on behaves exactly as it did before this layer existed; a
+   consumer that wants the pointer takes it back on its own children.
+
+   "Under the bar" has to be said in numbers, and every layer in the stage now
+   says so. A positive z-index paints above a z-index:auto sibling whatever the
+   DOM order, so an overlay at 2 with the bar left on auto put a consumer's
+   regions over the channel picker and the icons — and, the moment that consumer
+   took the pointer back on its children, over the controls as inputs too. The
+   media are auto, so the overlay only has to clear them. */
+.mj-pv-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
 }
 
 /* object-fit: contain, so a 4:3 or square-cropped sensor is letterboxed in a
    box that never moves instead of being squeezed into 16:9. */
-.mj-live-video {
+.mj-pv-media {
 	position: absolute;
 	inset: 0;
 	width: 100%;
@@ -1095,7 +1130,7 @@ mark {
    of the account — centred on the empty picture rather than tucked under it,
    because the empty picture is the thing being explained. Its own rule rather
    than Bootstrap's .alert: the backdrop is the black stage, not the page. */
-.mj-live-alert {
+.mj-pv-alert {
 	position: absolute;
 	inset: auto 1.25rem;
 	top: 50%;
@@ -1125,9 +1160,13 @@ mark {
    (#239) — and a bar that grows upwards over the picture defeats the point of
    making the picture bigger. One row, and what does not fit moves off the
    picture rather than on top of more of it. */
-.mj-live-bar {
+.mj-pv-bar {
 	position: absolute;
 	inset: auto 0.75rem 0.75rem;
+	/* Above the overlay (1) and the failure sentence (3): the controls are the
+	   last thing that may be covered, since covering them is indistinguishable
+	   from removing them. See the note on .mj-pv-overlay. */
+	z-index: 4;
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
@@ -1140,11 +1179,11 @@ mark {
    the bar's, which is only the truth while the children are their natural
    size. The sentence is the exception — it has an ellipsis and a title, so it
    is allowed to give way. */
-.mj-live-bar > * {
+.mj-pv-bar > * {
 	flex: 0 0 auto;
 }
 
-.mj-live-bar > .mj-hud-chip {
+.mj-pv-bar > .mj-hud-chip {
 	flex: 0 1 auto;
 }
 
@@ -1272,7 +1311,7 @@ mark {
    bar, so it is the one that gives way rather than pushing the controls out of
    reach; the title carries the rest, and below md it is off the picture
    altogether (mj-settings.js:dockRuntime). */
-.mj-live-bar .mj-hud-chip {
+.mj-pv-bar .mj-hud-chip {
 	min-width: 0;
 	overflow: hidden;
 	white-space: nowrap;
@@ -1957,11 +1996,11 @@ mark {
    snapshot and fullscreen buttons have always made, and the reason the button
    grew a title attribute. */
 @media (max-width: 767.98px) {
-	.mj-live-bar .mj-hud-btn span {
+	.mj-pv-bar .mj-hud-btn span {
 		display: none;
 	}
 
-	.mj-live-bar .mj-hud-btn {
+	.mj-pv-bar .mj-hud-btn {
 		padding-inline: 0.85rem;
 	}
 }
@@ -2023,7 +2062,7 @@ mark {
    These rules only ever apply to preview.cgi -- p/common.cgi's preview() is
    the only thing that emits .mj-stage, and preview.cgi is its only caller.
    mj-settings.cgi's Live section builds its own stage client-side out of
-   .mj-live-video, which is why none of this reaches it. */
+   .mj-pv-media, which is why none of this reaches it. */
 .mj-stage {
 	position: relative;
 	background: #000;
