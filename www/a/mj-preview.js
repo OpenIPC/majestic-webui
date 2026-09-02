@@ -487,6 +487,14 @@ window.MajesticPreview = (function () {
 			// frame. Callers that align something to the picture need it,
 			// because `object-fit: contain` letterboxes anything that is not
 			// the stage's own aspect ratio.
+			//
+			// And they must take it from HERE rather than off media(): on the
+			// software rung the element is a <canvas>, which is 300x150 from
+			// the moment it exists and stays that way for a beat after the
+			// player has marked it painted — measured on an hi3516av300 serving
+			// H.265, where the first sample after the switch read a canvas of
+			// 300x150 while this already said 3840x2160. An overlay laid out
+			// from the element in that window is laid out from a default.
 			frame: function () { return frame; },
 
 			stream: function () { return stream; },
