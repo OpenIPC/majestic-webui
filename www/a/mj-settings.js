@@ -133,6 +133,8 @@
 		// a save whose changes need a pipeline reload leaves this set until the
 		// reload actually runs, so Apply survives switching sections
 		applyPending: false,
+		flashPending: false,
+		flashTimer: null,
 		toolbarMsg: '',
 	};
 
@@ -3705,8 +3707,9 @@
 		if (!bar) return;
 		const n = state.dirtyN || 0;
 		const apply = !!state.applyPending;
-		bar.classList.toggle('d-flex', !!(n || apply));
-		bar.classList.toggle('d-none', !(n || apply));
+		const show = !!(n || apply || state.flashPending);
+		bar.classList.toggle('d-flex', show);
+		bar.classList.toggle('d-none', !show);
 
 		const lbl = document.getElementById('mj-dirty-count');
 		if (lbl && !state.toolbarMsg) {
@@ -3719,7 +3722,7 @@
 				? (n + ' change' + (n === 1 ? '' : 's') + ' pending.' +
 					(apply ? ' A pipeline reload is still due.' : ''))
 				: (apply
-					? 'Saved. Resolution, codec and frame-rate changes take effect after a pipeline reload (the video streams will blink briefly).'
+					? 'Saved. This change needs a pipeline reload before it takes effect (the video streams will blink briefly).'
 					: '');
 		}
 		const save = document.getElementById('mj-save');
@@ -3741,6 +3744,66 @@
 		if (!text) { renderToolbar(); return; }
 		lbl.className = 'me-auto small ' + (cls || 'text-danger');
 		lbl.textContent = text;
+	}
+
+	// What a change costs, as the camera itself declares it.
+	//
+	// `x-reload` is the daemon's own classification — "live", "service:<name>",
+	// "channel:<n>", "pipeline" — and it is the answer to a question this page
+	// used to guess at. The guess was binary: x-live, or else assume the whole
+	// pipeline has to come down. That was true when the only classified keys
+	// WERE the live image knobs, and it has been wrong since the daemon learned
+	// the middle classes: a camera that restarts its overlay in place, encoders
+	// untouched, was being reported to the operator as a pipeline reload with
+	// blinking streams, and then offered a button that reloads nothing.
+	//
+	// x-live is the fallback, not the rule, because an older majestic publishes
+	// it and no x-reload at all. There it still means live, and everything else
+	// still means pipeline — which is exactly today's behaviour on those builds.
+	// A key with neither is pipeline for the same reason the daemon says so: an
+	// undeclared key costs the most until somebody proves otherwise.
+	function reloadClass(f) {
+		const sc = (f && f.schema) || {};
+		if (typeof sc['x-reload'] === 'string' && sc['x-reload']) return sc['x-reload'];
+		return sc['x-live'] ? 'live' : 'pipeline';
+	}
+
+	// Only a pipeline rebuild is something the operator still has to ask for.
+	// The live setters run during the save, and so do the service restarts and
+	// the per-channel rebuilds — all three are carried by the same
+	// POST /api/v1/config round trip, which is why none of them leaves anything
+	// pending afterwards.
+	function needsPipelineReload(fields) {
+		return fields.some(f => reloadClass(f) === 'pipeline');
+	}
+
+	// Whether the save moved anything the streams did not notice, so the page
+	// can say what happened instead of going quiet. Deliberately not a count and
+	// deliberately not a key name: what the operator wants to know is whether
+	// the picture was interrupted.
+	function appliedInPlace(fields) {
+		return fields.some(f => {
+			const c = reloadClass(f);
+			return c.indexOf('service:') === 0 || c.indexOf('channel:') === 0;
+		});
+	}
+
+	// Say it, then get out of the way. With nothing pending the bar hides
+	// itself, so a success message needs to hold it open for a moment — long
+	// enough to read, short enough not to become furniture. Re-entrant: a second
+	// save inside the window replaces the message and restarts the clock rather
+	// than being cut short by the first one's timer.
+	function flashToolbar(text) {
+		if (state.flashTimer) clearTimeout(state.flashTimer);
+		state.flashPending = true;
+		setToolbarMsg(text, 'text-secondary');
+		const bar = document.getElementById('mj-toolbar');
+		if (bar) { bar.classList.add('d-flex'); bar.classList.remove('d-none'); }
+		state.flashTimer = setTimeout(() => {
+			state.flashTimer = null;
+			state.flashPending = false;
+			setToolbarMsg('');
+		}, 4000);
 	}
 
 	async function onSubmit(ev) {
@@ -3814,12 +3877,15 @@
 				showError('Saved, but these could not be disconnected: ' +
 					kept.join('; ') + '. The camera is still configured to ' +
 					'drive them; its firmware may be too old to clear a setting.');
-			// Image knobs (x-live) apply instantly; everything structural
-			// (resolution, codec, fps, ...) only takes effect after majestic
-			// reloads its pipeline. Offer that as an explicit step, in the same
-			// bar the Save was just pressed in.
-			if (dirty.some(f => !(f.schema && f.schema['x-live'])))
+			// Ask the camera what this cost rather than assuming the worst.
+			// Only a pipeline-class change is still owed a reload; a service
+			// restart or a channel rebuild already happened inside the save,
+			// with the rest of the pipeline left running.
+			if (needsPipelineReload(dirty))
 				state.applyPending = true;
+			else if (appliedInPlace(dirty))
+				flashToolbar(
+					'Saved and applied. The video streams were not interrupted.');
 		} catch (e) {
 			showError('Save failed: ' + e.message);
 		} finally {
