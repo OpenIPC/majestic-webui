@@ -111,6 +111,12 @@ function load(cfg) {
 				return bits[0] === 'undecodable' &&
 					!!(w && w.available && w.handles && w.handles(bits[1]));
 			},
+			softwareRungForCodec: (d, codec) => {
+				const bits = String(d || '').split(' ');
+				const w = win.MajesticWasm;
+				return (bits[0] === 'unreachable' || bits[0] === 'mse-error') &&
+					!!(w && w.available && w.handles && w.handles(codec));
+			},
 			chosenStream: () => (cfg.picked === undefined ? null : cfg.picked),
 			chooseStream(where, n) { env.stored = n; },
 		},

@@ -34,6 +34,10 @@
 	let jpegOn = false;
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
+		// Read before the fallback is re-decided below: the codec is what says
+		// whether a socket that gave up is worth handing to the software rung,
+		// and that decision has to be made with the real answer.
+		cfgCodec = [mjGet(cfg, 'video0.codec') || '', mjGet(cfg, 'video1.codec') || ''];
 		// The first attach does not wait for this fetch past CONFIG_WAIT_MS,
 		// and a player can refuse before it even starts — MSE reports 'no-mse'
 		// from inside attach(). Until this line runs, jpegOn is false because
@@ -41,7 +45,19 @@
 		// decided on it would offer "Enable JPEG" for a camera that has JPEG
 		// enabled and would leave the picture it could have shown unshown.
 		// Re-decided here against the real answer; harmless when it agrees.
-		if (fellBack) showFallback(fellBack);
+		//
+		// And if that fallback was a socket giving up ('unreachable') on what
+		// the config now says is a software-decodable channel, the rescue in
+		// nextRung could not have fired — cfgCodec was empty when the failure
+		// arrived. Take it now rather than only re-rendering the MJPEG picture,
+		// or a camera whose config lands slowly (the same flaky link that
+		// caused the giving-up) would never reach the decoder (#288).
+		if (fellBack && MajesticTransport.softwareRungForCodec(
+			fellBack, cfgCodec[stream ? 1 : 0])) {
+			retryFromFallback('wasm');
+		} else if (fellBack) {
+			showFallback(fellBack);
+		}
 		const subOk = mjGet(cfg, 'video1.enabled') === true;
 		subAvailable = subOk;
 		if (subOk) $('#mj-sub').hidden = false;
@@ -78,6 +94,7 @@
 		// The configured frame rates, which are what the chip shows on MSE —
 		// that player measures nothing.
 		cfgFps = [+mjGet(cfg, 'video0.fps') || 0, +mjGet(cfg, 'video1.fps') || 0];
+		// (cfgCodec is read earlier, before the fallback is re-decided.)
 		// The configured bitrates, which are what the adaptation toast names
 		// as the rate the encoder returns to when nothing is holding it down.
 		cfgKbps = [+mjGet(cfg, 'video0.bitrate') || 0, +mjGet(cfg, 'video1.bitrate') || 0];
@@ -349,6 +366,10 @@
 	// reported about its own picture.
 	let chipMedia = null, chipFps = 0;
 	let cfgFps = [0, 0];
+	// Filled from the config when it lands; '' until then, which the codec
+	// helper treats as "not software-decodable", so nothing new happens before
+	// the config is known.
+	let cfgCodec = ['', ''];
 	// The camera's own statement of which channel this WebRTC session serves,
 	// from the `served` signalling reply — or null on an older majestic, over
 	// MSE, and between sessions, in which case the size inference below stands
@@ -866,6 +887,17 @@
 		}
 		if (kind === 'webrtc') { attachPlayer('mse'); return; }
 		if (kind === 'mse' && MajesticTransport.softwareRungFor(detail)) {
+			attachPlayer('wasm');
+			return;
+		}
+		// MSE gave up without a codec verdict — the socket would not stay open
+		// ('unreachable'), so the browser never saw what the stream is. If the
+		// config says this channel is a codec the software decoder handles, let
+		// its worker try its own socket before falling to MJPEG; on a flaky or
+		// remote link that has kept the software decoder working moments before,
+		// dropping to MJPEG here strands the viewer on the worst option (#288).
+		if (kind === 'mse' &&
+			MajesticTransport.softwareRungForCodec(detail, cfgCodec[stream ? 1 : 0])) {
 			attachPlayer('wasm');
 			return;
 		}
