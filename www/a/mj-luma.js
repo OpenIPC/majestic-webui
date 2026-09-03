@@ -107,6 +107,10 @@
 		// them. A tick that finds one already running simply skips, which for a
 		// histogram sampled several times a second costs nothing.
 		let busy = false;
+		// Set once if a browser exposes createImageBitmap but refuses this
+		// canvas source, so the loop stops asking it every tick and stays on the
+		// synchronous path — see the catch below.
+		let bitmapBroken = false;
 
 		// Draw the (already thumbnail-sized) source into the sampling canvas and
 		// turn it into a histogram. `source` is either a bitmap the browser has
@@ -164,14 +168,35 @@
 				// snapshots the source at call time, exactly as drawImage would,
 				// so it captures the same frame from a preserveDrawingBuffer:false
 				// context rather than a blank one.
-				if (v.tagName === 'CANVAS' && typeof createImageBitmap === 'function') {
+				if (v.tagName === 'CANVAS' && typeof createImageBitmap === 'function' &&
+					!bitmapBroken) {
 					busy = true;
 					createImageBitmap(v, {
 						resizeWidth: SW, resizeHeight: SH, resizeQuality: 'low',
 					}).then(function (bmp) {
-						if (!stopped) sampleFrom(bmp);
+						// Publish only if this is still the picture on screen. A
+						// channel or transport switch can land between the snapshot
+						// and here — the software player even swaps its canvas node
+						// — and a histogram of the frame that WAS is a wrong answer
+						// dressed as the current one, worse than one tick's gap. `v`
+						// is the superseded node after such a switch, so the
+						// identity check against the live element catches it.
+						if (!stopped && opts.video() === v && v.__mjPainted === true) {
+							sampleFrom(bmp);
+						}
 						bmp.close();
-					}).catch(function () {}).then(function () { busy = false; });
+						busy = false;
+					}).catch(function () {
+						// The browser has createImageBitmap but will not take this
+						// source. Stop asking it and fall back to the synchronous
+						// readback rather than leave the histogram blank for ever —
+						// the stall is the lesser fault, and only where it is forced.
+						bitmapBroken = true;
+						busy = false;
+						if (!stopped && opts.video() === v && v.__mjPainted === true) {
+							sampleFrom(v);
+						}
+					});
 				} else {
 					sampleFrom(v);
 				}
