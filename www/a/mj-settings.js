@@ -1365,6 +1365,9 @@
 			// player has marked it painted, so a histogram measures UNKNOWN
 			// rather than black while the picture is merely starting.
 			video: () => preview.media(),
+			// So an off-thread readback that began on the channel just left is
+			// dropped rather than published as the current one — see mj-luma.js.
+			token: () => preview.generation(),
 			onData: (r) => {
 				pathEl.setAttribute('d', r.path);
 				// One per cent is the threshold worth a warning: below it you

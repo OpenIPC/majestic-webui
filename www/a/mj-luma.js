@@ -18,8 +18,9 @@
 	// that the shape is readable in a 23rem panel.
 	const BINS = 64;
 	// The sample is a thumbnail, not the frame. A luma distribution is a
-	// statistic — 160x90 is 14,400 pixels, which is plenty for one, and small
-	// enough that the draw plus the readback stay far away from a frame budget.
+	// statistic — 160x90 is 14,400 pixels, which is plenty for one. The
+	// getImageData off this small target is cheap; what is NOT cheap is the
+	// draw that fills it from a large software-decoded canvas — see tick().
 	const SW = 160, SH = 90;
 
 	// Rec.709, because that is what an H.264 HD stream is: using the 601
@@ -100,6 +101,35 @@
 		const ctx = canvas.getContext('2d', { willReadFrequently: true });
 		let timer = null;
 		let stopped = false;
+		// One readback in flight at a time. The canvas path below is async, so
+		// without this a slow readback would pile the next tick's on top of it
+		// — the exact stall this guard exists to bound turned into a queue of
+		// them. A tick that finds one already running simply skips, which for a
+		// histogram sampled several times a second costs nothing.
+		let busy = false;
+		// Set once if a browser exposes createImageBitmap but refuses this
+		// canvas source, so the loop stops asking it every tick and stays on the
+		// synchronous path — see the catch below.
+		let bitmapBroken = false;
+
+		// Draw the (already thumbnail-sized) source into the sampling canvas and
+		// turn it into a histogram. `source` is either a bitmap the browser has
+		// already scaled to SWxSH off-thread, or a <video> the browser scales
+		// down for free as it draws — both leave getImageData reading 14,400
+		// pixels and nothing larger.
+		function sampleFrom(source) {
+			try {
+				ctx.drawImage(source, 0, 0, SW, SH);
+				const d = ctx.getImageData(0, 0, SW, SH).data;
+				const r = histogram(d, SW, SH);
+				r.path = path(r.bins);
+				opts.onData(r);
+			} catch (e) {
+				// A frame that cannot be drawn (mid-teardown, or a tainted
+				// canvas on some future cross-origin source) is not worth
+				// killing the loop over; the next tick may well work.
+			}
+		}
 
 		function tick() {
 			if (stopped) return;
@@ -123,17 +153,58 @@
 			const drawable = v && (v.tagName === 'CANVAS'
 				? v.__mjPainted === true
 				: (v.readyState >= 2 && v.videoWidth > 0));
-			if (!document.hidden && drawable) {
-				try {
-					ctx.drawImage(v, 0, 0, SW, SH);
-					const d = ctx.getImageData(0, 0, SW, SH).data;
-					const r = histogram(d, SW, SH);
-					r.path = path(r.bins);
-					opts.onData(r);
-				} catch (e) {
-					// A frame that cannot be drawn (mid-teardown, or a tainted
-					// canvas on some future cross-origin source) is not worth
-					// killing the loop over; the next tick may well work.
+			if (!document.hidden && drawable && !busy) {
+				// A <video> is cheap to sample: the browser scales it down as it
+				// draws, so the synchronous path stays well inside a frame.
+				//
+				// A software-decode CANVAS is not. drawImage() from a full-res
+				// WebGL surface forces a GPU->CPU readback of the WHOLE frame
+				// before the downscale, and on a weak client decoding a 2592x1520
+				// stream that measured ~570ms — four times a second, jamming the
+				// main thread and every transport switch riding on it (#288).
+				// createImageBitmap does the readback AND the downscale off the
+				// main thread and hands back a bitmap already sized SWxSH, so the
+				// draw above reads back nothing larger than the thumbnail. It
+				// snapshots the source at call time, exactly as drawImage would,
+				// so it captures the same frame from a preserveDrawingBuffer:false
+				// context rather than a blank one.
+				if (v.tagName === 'CANVAS' && typeof createImageBitmap === 'function' &&
+					!bitmapBroken) {
+					busy = true;
+					// Capture what identifies the picture NOW, to compare after
+					// the async readback: the element, and a source token the
+					// caller may supply. The token exists because element
+					// identity is not enough — a same-codec channel switch
+					// reopens on the SAME canvas node, so the node stays live
+					// while the pixels under it change (see opts.token).
+					const tok = opts.token ? opts.token() : null;
+					const fresh = function () {
+						return !stopped && opts.video() === v &&
+							v.__mjPainted === true &&
+							(!opts.token || opts.token() === tok);
+					};
+					createImageBitmap(v, {
+						resizeWidth: SW, resizeHeight: SH, resizeQuality: 'low',
+					}).then(function (bmp) {
+						// Publish only if this is still the picture on screen. A
+						// channel or transport switch can land between the snapshot
+						// and here, and a histogram of the frame that WAS is a
+						// wrong answer dressed as the current one, worse than one
+						// tick's gap.
+						if (fresh()) sampleFrom(bmp);
+						bmp.close();
+						busy = false;
+					}).catch(function () {
+						// The browser has createImageBitmap but will not take this
+						// source. Stop asking it and fall back to the synchronous
+						// readback rather than leave the histogram blank for ever —
+						// the stall is the lesser fault, and only where it is forced.
+						bitmapBroken = true;
+						busy = false;
+						if (fresh()) sampleFrom(v);
+					});
+				} else {
+					sampleFrom(v);
 				}
 			}
 			timer = setTimeout(tick, 1000 / (opts.hz || 4));

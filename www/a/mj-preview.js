@@ -185,6 +185,15 @@ window.MajesticPreview = (function () {
 		// in a browser that refused an H.265 main.
 		let exhausted = false;
 		let frame = null;
+		// Bumped whenever the picture stops being what it was — a channel
+		// change, a dropped chain. An async consumer (the luma sampler reads a
+		// frame off the canvas off-thread) captures it before it starts and
+		// checks it before it publishes, so a readback that began on the stream
+		// just left cannot land as the current one. Element identity is not
+		// enough on its own: a same-codec channel switch reopens the socket on
+		// the SAME canvas node, so the node the sampler holds is still the live
+		// one while the pixels under it have moved.
+		let generation = 0;
 
 		// What the most recent attachment has reported about its picture, and
 		// which attachment that was. It is held rather than published because a
@@ -212,6 +221,9 @@ window.MajesticPreview = (function () {
 		// frame of a session, so it is a state they must handle anyway.
 		function forgetFrame() {
 			pending = null;
+			// Before the early return: a channel change with no frame yet still
+			// invalidates whatever an async consumer captured a moment ago.
+			generation++;
 			if (!frame) return;
 			frame = null;
 			if (opts.onFrame) opts.onFrame(null);
@@ -591,6 +603,12 @@ window.MajesticPreview = (function () {
 			// 300x150 while this already said 3840x2160. An overlay laid out
 			// from the element in that window is laid out from a default.
 			frame: function () { return frame; },
+
+			// A counter that changes when the picture's source does. An async
+			// consumer captures it before an off-thread readback and rechecks
+			// it after, to drop a result that no longer describes what is on
+			// screen — see the note where it is declared.
+			generation: function () { return generation; },
 
 			// The config has moved — re-read what it decides. Only the channel
 			// picker, because it is the only thing here settled once at mount:
