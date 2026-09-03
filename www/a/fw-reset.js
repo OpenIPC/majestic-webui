@@ -63,6 +63,9 @@
 	let lastData = 0;
 	let quietTimer = null;
 	const QUIET_MS = 15000;
+	// When this page — and so the reset it starts on load — began, for
+	// rebootedAlready() to measure the camera's uptime against.
+	const startedAt = performance.now();
 
 	function status(cls, msg) {
 		const s = $('#fw-reset-status');
@@ -143,6 +146,61 @@
 			.catch(() => { clearTimeout(to); return false; });
 	}
 
+	// Positive evidence that the camera restarted, instead of inferring it from a
+	// gap in our own polling.
+	//
+	// The down-then-up watch below cannot see a reboot it was not awake for, and
+	// on this page it is routinely not awake for it. When the reboot line never
+	// leaves the socket buffer the quiet timer is the only trigger left, and that
+	// opens the watch fifteen seconds after the last byte — while the camera's
+	// whole absence is about as long. Measured on an hi3516ev300: gone at 8s,
+	// serving again at 23s, and the first ping landed at 19s and was answered 500
+	// by a majestic that had just started. That counts as up, correctly — but
+	// nothing here could then tell "it has not gone yet" from "it went and came
+	// back between two polls", so downSeen never flipped and the page sat on
+	// "waiting for it to come back" for another three minutes about a camera that
+	// was already back (issue #154). Which way a run falls is decided by a few
+	// seconds of boot time: the same reset handed back in 25s on one run and 207s
+	// on the next.
+	//
+	// So ask the camera rather than watching for a gap. Uptime is read from
+	// majestic's /metrics (node_time − node_boot), which matters more here than
+	// anywhere else it is used: the reset erases the overlay and the session with
+	// it, and /metrics is served without auth, so it still answers the one page
+	// whose credentials it has just destroyed. Extracted with a line match, not
+	// the full parser — this runs against a camera in an unknown state and must
+	// stay dumb.
+	//
+	// Returns false, never throws. On a majestic too old to export node_*, or one
+	// holding an unclaimed camera behind a 401, it is simply unavailable and the
+	// watch below still applies exactly as it did before.
+	async function rebootedAlready() {
+		const ctl = new AbortController();
+		const to = setTimeout(() => ctl.abort(), 2500);
+		try {
+			// No ?_= cache-buster here: majestic's /metrics routes query params into
+			// its value filter and answers 200 with an EMPTY body for an unknown
+			// key, so the buster would blind this check. cache:'no-store' alone
+			// keeps the read fresh.
+			const r = await rawFetch('/metrics', { cache: 'no-store', signal: ctl.signal });
+			if (!r.ok) return false;
+			const txt = await r.text();
+			const num = name => {
+				const m = txt.match(new RegExp('^' + name + ' ([0-9.]+)$', 'm'));
+				return m ? Number(m[1]) : NaN;
+			};
+			const upFor = num('node_time_seconds') - num('node_boot_time_seconds');
+			if (!isFinite(upFor)) return false;
+			// 5s of slack so a camera that booted moments before this page opened is
+			// not mistaken for one that rebooted just now.
+			return upFor < (performance.now() - startedAt) / 1000 - 5;
+		} catch (err) {
+			return false;
+		} finally {
+			clearTimeout(to);
+		}
+	}
+
 	function goBack() {
 		status('success', 'The camera is back. Taking you to it…');
 		// A navigation, so majestic answers it with the login page rather than a
@@ -185,10 +243,22 @@
 			const up = await ping();
 			if (!downSeen) {
 				if (!up) { downSeen = true; tries = 0; }
-				// Still answering well past the point it said it was rebooting. Either
-				// it came back while we were between polls or it never dropped a
-				// connection we noticed; either way it is serving now, so stop
-				// watching and go.
+				// It is answering, which is either "has not rebooted yet" or "went and
+				// came back while we were not looking" — and this watch opens late
+				// enough that the second is the ordinary case, not the corner one. Ask
+				// it directly rather than waiting out DOWN_TRIES.
+				//
+				// Every tick, where the upgrade page asks every fourth: that watch can
+				// open minutes before the reboot, with the camera flashing and to be
+				// disturbed as little as possible, while this one opens past the erase.
+				// And a /metrics read is one request majestic answers out of its own
+				// memory, not the heartbeat's dozen forks and loopback round trip that
+				// stopHeartbeat() exists to stop.
+				else if (await rebootedAlready()) { goBack(); return; }
+				// Still answering well past the point it said it was rebooting, and it
+				// will not say when it booted either. Either it came back while we were
+				// between polls or it never dropped a connection we noticed; either way
+				// it is serving now, so stop watching and go.
 				else if (++tries > DOWN_TRIES) { goBack(); return; }
 			} else if (up) {
 				goBack();

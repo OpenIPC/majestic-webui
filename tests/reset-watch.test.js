@@ -66,7 +66,7 @@ function makeClock() {
 function makeEnv(o) {
 	o = o || {};
 	const clock = makeClock();
-	const env = { clock, notes: [], status: { className: '', textContent: '' }, replaced: null, pings: 0 };
+	const env = { clock, notes: [], status: { className: '', textContent: '' }, replaced: null, pings: 0, metricsReads: 0 };
 
 	// The run.cgi stream: chunks the test pushes, then a read that never settles
 	// unless the test says otherwise.
@@ -99,6 +99,22 @@ function makeEnv(o) {
 		rawFetch: (url) => {
 			if (String(url).indexOf('run.cgi') !== -1)
 				return Promise.resolve({ ok: !o.notOk, status: o.notOk ? 401 : 200, body: { getReader: () => reader } });
+			// The uptime read, before the ping counter: it is not a ping, and
+			// counting it would shift every downFor: n the cases below are pinned on.
+			// Unavailable unless a case asks for it, so a camera that will not say
+			// when it booted is the default and every pre-existing case still
+			// describes the blind watch.
+			if (String(url).indexOf('/metrics') !== -1) {
+				env.metricsReads++;
+				if (o.uptime === undefined) return Promise.resolve({ ok: false, status: 401 });
+				const boot = 1700000000;
+				return Promise.resolve({
+					ok: true, status: 200,
+					text: () => Promise.resolve(
+						'node_boot_time_seconds ' + boot + '\n' +
+						'node_time_seconds ' + (boot + o.uptime) + '\n'),
+				});
+			}
 			env.pings++;                           // the ping() in pollBack
 			return o.cameraDown && env.pings <= (o.downFor || 0)
 				? Promise.reject(new Error('down'))
@@ -194,6 +210,54 @@ async function handsBackOnceTheCameraReturns() {
 		'replaced=' + env.replaced);
 }
 
+// The reported bug's second half, and the one that survived the first fix: the
+// watch opens fifteen seconds after the last byte, and the camera's whole
+// absence is about as long, so every ping it ever makes finds the camera
+// serving. Measured on an hi3516ev300 — gone at 8s, back at 23s, first ping at
+// 19s answered 500 by a majestic that had just started — the page then waited
+// another three minutes about a camera that was already back.
+async function handsBackWhenTheRebootWasMissedEntirely() {
+	group('a reboot that happened between two polls is still noticed');
+	const env = makeEnv({ uptime: 6 });          // camera answering, six seconds old
+	await env.push(PROTECTED);
+	await env.push(ERASE);
+	await env.clock.advance(21000);              // quiet window, then the first poll
+	check('asked the camera when it booted', env.metricsReads > 0);
+	check('navigated without waiting out the blind fallback',
+		env.replaced === '/cgi-bin/status.cgi', 'replaced=' + env.replaced);
+	// The fallback needs sixty-one of these. Counting them is what separates
+	// "it left" from "it left three minutes late", which is the whole bug.
+	check('on the first poll, not the sixty-first', env.pings <= 2, 'pings=' + env.pings);
+}
+
+// The same question asked of a camera that has NOT rebooted must answer no, or
+// the watch would navigate away from a reset still erasing.
+async function anUptimeOlderThanTheRunProvesNothing() {
+	group('a camera that has been up for a day is not read as freshly rebooted');
+	const env = makeEnv({ uptime: 86400 });
+	await env.push(PROTECTED);
+	await env.push(ERASE);
+	await env.clock.advance(60000);
+	check('asked, and was told', env.metricsReads > 0);
+	check('did not navigate', env.replaced === null, 'replaced=' + env.replaced);
+	check('still watching', watching(env), 'status was ' + JSON.stringify(env.status.textContent));
+}
+
+// A majestic too old to export node_*, or one holding an unclaimed camera behind
+// a 401, says nothing about when it booted. That must degrade to the blind watch
+// this page has always had rather than to a page that never leaves.
+async function noUptimeFallsBackToTheBlindWatch() {
+	group('a camera that will not say when it booted still gets handed back');
+	const env = makeEnv();                       // /metrics answers 401
+	await env.push(PROTECTED);
+	await env.push(ERASE);
+	await env.clock.advance(78000);
+	check('not navigated an inch early', env.replaced === null, 'replaced=' + env.replaced);
+	await env.clock.advance(200000);
+	check('but the fallback still fires', env.replaced === '/cgi-bin/status.cgi',
+		'replaced=' + env.replaced);
+}
+
 // The other way the same stuck page is reached: the stream ends cleanly rather
 // than hanging, which is what a majestic that closes the response as its CGI
 // child dies would produce. How it ended says nothing about the reboot.
@@ -224,6 +288,9 @@ async function cleanEndBeforeFlashReportsIt() {
 
 (async () => {
 	await quietAfterFlashStartsTheWatch();
+	await handsBackWhenTheRebootWasMissedEntirely();
+	await anUptimeOlderThanTheRunProvesNothing();
+	await noUptimeFallsBackToTheBlindWatch();
 	await cleanEndAfterFlashStartsTheWatch();
 	await cleanEndBeforeFlashReportsIt();
 	await rebootMarkerStillWins();
