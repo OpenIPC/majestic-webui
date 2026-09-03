@@ -171,10 +171,31 @@
 	// the full parser — this runs against a camera in an unknown state and must
 	// stay dumb.
 	//
+	// It is safe to read the two as a duration even though they are wall-clock
+	// stamps: majestic derives the boot time from the clock it is answering with,
+	// so a correction moves both and cancels. Measured on an hi3516ev300 by
+	// stepping the camera two hours backwards mid-run — node_time and node_boot
+	// both fell by 7200 and their difference stayed 517s, matching /proc/uptime.
+	// A clock correction therefore cannot fake a reboot here, in either
+	// direction.
+	//
 	// Returns false, never throws. On a majestic too old to export node_*, or one
 	// holding an unclaimed camera behind a 401, it is simply unavailable and the
-	// watch below still applies exactly as it did before.
+	// watch below still applies exactly as it did before — but it must not go on
+	// COSTING anything either. Each call is awaited inside a poll, so a camera
+	// that answers the reachability ping and then leaves this request to time out
+	// would add its 2.5s to every one of the sixty polls the blind fallback is
+	// allowed, stretching a three-and-a-half-minute wait towards eight. Hence the
+	// strikes: three unusable answers in a row and the loop stops asking, so such
+	// a camera costs three requests rather than sixty and the watch below runs at
+	// the pace it was designed for. Three rather than one, because the answer
+	// most worth having comes from a majestic that has been serving for four
+	// seconds, which is exactly when it is entitled to a hiccup — on one measured
+	// run the plain reachability ping was answered 500 by a daemon that had just
+	// started.
+	let uptimeStrikes = 0;
 	async function rebootedAlready() {
+		if (uptimeStrikes >= 3) return false;
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 2500);
 		try {
@@ -183,18 +204,22 @@
 			// key, so the buster would blind this check. cache:'no-store' alone
 			// keeps the read fresh.
 			const r = await rawFetch('/metrics', { cache: 'no-store', signal: ctl.signal });
-			if (!r.ok) return false;
+			if (!r.ok) { uptimeStrikes++; return false; }
 			const txt = await r.text();
 			const num = name => {
 				const m = txt.match(new RegExp('^' + name + ' ([0-9.]+)$', 'm'));
 				return m ? Number(m[1]) : NaN;
 			};
 			const upFor = num('node_time_seconds') - num('node_boot_time_seconds');
-			if (!isFinite(upFor)) return false;
+			if (!isFinite(upFor)) { uptimeStrikes++; return false; }
+			// An answer, whichever way it went: the camera can be asked, so a hiccup
+			// earlier in the run must not still be held against it.
+			uptimeStrikes = 0;
 			// 5s of slack so a camera that booted moments before this page opened is
 			// not mistaken for one that rebooted just now.
 			return upFor < (performance.now() - startedAt) / 1000 - 5;
 		} catch (err) {
+			uptimeStrikes++;
 			return false;
 		} finally {
 			clearTimeout(to);

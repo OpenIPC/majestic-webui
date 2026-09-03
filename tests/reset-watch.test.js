@@ -256,6 +256,12 @@ async function noUptimeFallsBackToTheBlindWatch() {
 	await env.clock.advance(200000);
 	check('but the fallback still fires', env.replaced === '/cgi-bin/status.cgi',
 		'replaced=' + env.replaced);
+	// And it must fire on time. Each ask is awaited inside a poll, so one that
+	// times out on every one of the sixty the fallback is allowed would push a
+	// three-and-a-half-minute wait towards eight — the accelerator making the
+	// degraded case worse than it was before it existed.
+	check('and it stopped asking after three refusals', env.metricsReads <= 3,
+		'metricsReads=' + env.metricsReads);
 }
 
 // The other way the same stuck page is reached: the stream ends cleanly rather
