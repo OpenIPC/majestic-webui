@@ -36,11 +36,15 @@ done) %>
 		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
 		<span class="small">Camera is not responding — retrying&hellip;</span>
 	</div>
-	<div class="st-alert" id="st-alert-exp" hidden>
-		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
-		<span class="small"><b>Exposure at maximum</b> — the scene is darker than the sensor can compensate.<span id="st-alert-exp-lum"></span></span>
-		<a class="small ms-auto" href="mj-settings.cgi?tab=live">Open Live adjustments &rarr;</a>
-	</div>
+	<!-- There is no "Exposure at maximum" banner. isp_exposureismax is a true
+	     reading and a nightly one: auto-exposure runs out of shutter and gain
+	     every night on every camera, so it fired at dusk and stood until dawn,
+	     saying only that it had got dark. It was HiSilicon's alone as well —
+	     Ingenic and SigmaStar publish no such gauge — so it could never have
+	     meant the same thing on two cameras, which is the defect the old
+	     "Encoder stalled" banner had. The reading is kept where it is an
+	     observation rather than an accusation: beside the scene-luminance
+	     chart it is about (#273). -->
 	<!-- The wording is written by status.js from the finding it is reporting:
 	     one banner covers a missing pin, a light monitor with nothing to watch,
 	     thresholds with no hysteresis and a day/night disagreement, and each
@@ -54,7 +58,11 @@ done) %>
 		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
 		<span class="small"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></span>
 		<a class="small ms-auto" href="mj-settings.cgi?tab=nightMode">Open Day / Night &rarr;</a>
-		<button type="button" class="btn btn-link btn-sm small p-0 ms-3" id="st-alert-ircut-no" hidden>No filter here</button>
+		<!-- "Dismiss", not "No filter here": the reporter of #273 read the latter
+		     as something the page was asserting rather than a button, and the
+		     sentence it would have carried belongs in the confirm dialog anyway —
+		     this records a fact on the camera, for every browser, permanently. -->
+		<button type="button" class="btn btn-link btn-sm small p-0 ms-3" id="st-alert-ircut-no" aria-label="Dismiss: this camera has no IR-cut filter" hidden>Dismiss</button>
 	</div>
 	<!-- Nothing to see, and the wording is written by status.js from the finding
 	     (video-check.js), because one banner covers three of them: a camera
@@ -188,6 +196,7 @@ done) %>
 					<span class="st-now" id="st-luma-now"></span>
 				</div>
 				<div class="st-chart" id="ch-luma"></div>
+				<div class="x-small text-secondary" id="st-luma-note"></div>
 			</div>
 			<div class="st-panel st-chartbox">
 				<div class="st-chart-head">

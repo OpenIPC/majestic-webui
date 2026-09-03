@@ -3773,6 +3773,36 @@ dialog.mj-modal::backdrop {
 	margin-top: 0.5rem;
 }
 
+/* The sentence is the part that wraps; the actions after it never do. They
+   are two or three words each and one of them is a link that reads as a
+   label, so "Open Day / Night" broken across two lines looks like a stray
+   fragment of the paragraph rather than the thing to press. The row itself
+   stays one row at every width — wrapping it puts the icon, the sentence and
+   the actions on three lines each of which is mostly empty, because the
+   sentence is a flex item that will not shrink past its longest word. */
+.st-alert > a,
+.st-alert > button {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
+/* Below sm there is no room for a sentence AND two actions on one line: the
+   sentence became a four-word-wide column twenty lines deep beside them
+   (measured at 390px: 672px of banner for one finding). Wrapping gives the
+   sentence the width and puts the actions on a line under it — 224px for the
+   same finding. The flex-basis is what forces the break; without it the
+   sentence still refuses to give the actions a line of their own. */
+@media (max-width: 575.98px) {
+	.st-alert {
+		flex-wrap: wrap;
+	}
+
+	.st-alert > span.small {
+		flex: 1 1 10rem;
+		min-width: 0;
+	}
+}
+
 .st-alert-ico {
 	color: var(--bs-warning);
 	flex: 0 0 auto;
