@@ -1,6 +1,11 @@
 (() => {
 	'use strict';
 
+	// The shared condition evaluator (visibleWhen and x-requires). Read once,
+	// here, so a page served without it degrades the same way everywhere
+	// instead of throwing at the first conditional row.
+	const REQ = (typeof window === 'object' && window.MajesticRequires) || null;
+
 	const bootEl = document.getElementById('mj-settings-boot');
 	if (!bootEl) return;
 
@@ -776,6 +781,9 @@
 		state.initial = {};
 		state.cols = null;
 		state.liveSync = [];
+		// dropped with the fields they paint: a stale closure would keep
+		// writing into a row that is no longer in the document
+		state.reqUpdaters = [];
 
 		// Exactly one section on the page, so it gets the whole width — and its
 		// fields are dealt into the two columns of .mj-cols, rather than run
@@ -3903,12 +3911,38 @@
 	// of a list). An unrecognised operator returns true — a field is shown
 	// rather than stranded invisible when a newer schema uses a condition this
 	// build does not know yet.
+	// One implementation of "does this condition hold", shared with x-requires
+	// and tested in mj-requires.js. A missing module leaves every conditional
+	// row shown and every requirement satisfied, which is the same fail-open
+	// direction the operator itself takes.
 	function visMatches(vw, v) {
-		v = String(v);
-		if ('equals' in vw) return v === String(vw.equals);
-		if ('notEquals' in vw) return v !== String(vw.notEquals);
-		if (Array.isArray(vw.in)) return vw.in.map(String).includes(v);
-		return true;
+		return REQ ? REQ.matches(vw, v) : true;
+	}
+
+	// Is an x-requires condition met? Unlike visibleWhen, whose `field` is a
+	// sibling, this one names an absolute dotted path — what decides a setting's
+	// fate is rarely its neighbour, and the case this exists for
+	// (outgoing.substream needing video1.enabled) spans two tabs. So the
+	// controlling field is usually NOT mounted, and the value comes from the
+	// saved config; a mounted control still wins where the two share a page, so
+	// an unsaved edit is reflected the same way fieldVisible reflects one.
+	//
+	// Shares visMatches, and with it the fail-open rule: an operator this build
+	// does not understand counts as satisfied, so a newer schema can never
+	// strand a warning on screen that nothing on the page can clear.
+	function reqNotice(req) {
+		if (!REQ) return '';
+		return REQ.notice(req, {
+			mounted: (dot) => {
+				const f = (state.fields || []).find(x => x.dot === dot);
+				return f ? f.getValue() : undefined;
+			},
+			saved: (dot) => getDotted(state.config, dot),
+			fallback: (dot) => {
+				const g = sectionFields(dot.split('.')[0]).find(x => x.dot === dot);
+				return g && g.sub ? g.sub.default : undefined;
+			},
+		});
 	}
 
 	function applyVisibility() {
@@ -3947,6 +3981,8 @@
 
 	function runVisibility() {
 		(state.visUpdaters || []).forEach(u => u());
+		// a saved edit can have met or broken a requirement on this page
+		(state.reqUpdaters || []).forEach(u => u());
 		// what is on screen just changed, and the head counts what is on screen
 		paintStock();
 	}
@@ -4494,6 +4530,34 @@
 				if (authored) authored.appendChild(hi(sub.hint));
 				p.appendChild(hint);
 			}
+		}
+
+		// A setting the daemon will quietly substitute for. The substitution is
+		// the right behaviour — publishing the main stream beats publishing
+		// nothing — but it used to be invisible outside the camera's log, and
+		// nobody reads a camera's log. In OpenIPC/majestic#311 the reporter's
+		// camera published 1080p H.265 at four times the bitrate his
+		// configuration asked for, over a link he was already reporting as
+		// troubled; asked to test the setting he toggled it and saw no change,
+		// because with video1 off both positions mean the same thing, and
+		// reported that it made no difference — which reads as the setting not
+		// mattering rather than as it being inert.
+		//
+		// Drawn as a warning under the control rather than by hiding or
+		// disabling it: the setting is a legitimate thing to want, it is
+		// remembered, and it starts working the moment its requirement is met.
+		// Hiding it would only move the surprise.
+		if (!live && sub['x-requires'] && sub['x-requires'].field) {
+			const req = sub['x-requires'];
+			const warn = el('div', 'hint mj-requires');
+			const paint = () => {
+				const msg = reqNotice(req);
+				warn.textContent = msg;
+				warn.hidden = !msg;
+			};
+			paint();
+			p.appendChild(warn);
+			(state.reqUpdaters || []).push(paint);
 		}
 
 		// A field the orientation pad drives instead: still a real field, so
