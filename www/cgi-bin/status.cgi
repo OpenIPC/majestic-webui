@@ -58,11 +58,18 @@ done) %>
 		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
 		<span class="small"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></span>
 		<a class="small ms-auto" href="mj-settings.cgi?tab=nightMode">Open Day / Night &rarr;</a>
-		<!-- "Dismiss", not "No filter here": the reporter of #273 read the latter
-		     as something the page was asserting rather than a button, and the
-		     sentence it would have carried belongs in the confirm dialog anyway —
-		     this records a fact on the camera, for every browser, permanently. -->
-		<button type="button" class="btn btn-link btn-sm small p-0 ms-3" id="st-alert-ircut-no" aria-label="Dismiss: this camera has no IR-cut filter" hidden>Dismiss</button>
+		<!-- A bare ×, and it has been three things. "No filter here" read as
+		     something the page was ASSERTING rather than a button; "Dismiss"
+		     fixed that but put a second link-styled phrase beside "Open Day /
+		     Night", and two of those in a row read as a pair of choices rather
+		     than an action and a way out (#273). The × is the convention every
+		     dismissible notice already uses — including this UI's own modal
+		     headers — so it needs no word to be understood, and it stops
+		     competing with the link for the eye.
+		     The name it loses lives in aria-label and title, and the claim it
+		     never carried is still made in full by the confirm dialog: this
+		     records a fact on the camera, for every browser, permanently. -->
+		<button type="button" class="btn-close" id="st-alert-ircut-no" aria-label="Dismiss: this camera has no IR-cut filter" title="Dismiss: this camera has no IR-cut filter" hidden></button>
 	</div>
 	<!-- Nothing to see, and the wording is written by status.js from the finding
 	     (video-check.js), because one banner covers three of them: a camera

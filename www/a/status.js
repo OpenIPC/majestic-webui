@@ -248,10 +248,11 @@
 		const no = $('#st-alert-ircut-no');
 		if (!no) return;
 		no.addEventListener('click', () => {
-			// The button says only "Dismiss", so the whole claim is made here.
-			// It has to be anyway: this writes a fact to the camera and every
-			// browser that opens the page reads it, which is more than a
-			// word on a button can be asked to carry.
+			// The button is a bare ×, so the whole claim is made here. It had
+			// to be anyway: this writes a fact to the camera and every browser
+			// that opens the page reads it, which is more than any word on a
+			// button could be asked to carry — which is also why losing the
+			// word costs nothing.
 			if (!confirm('Hide this warning for good?\n\nThis records on the ' +
 				'camera that it has no IR-cut filter fitted, so the warning ' +
 				'stays away in every browser that opens this page.\n\nSay yes ' +
