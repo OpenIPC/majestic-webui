@@ -3817,9 +3817,17 @@ dialog.mj-modal::backdrop {
 	}
 }
 
+/* Sized against the close button opposite it, not by eye. A glyph paints a
+   good deal smaller than its em box, so at the inherited 1rem the warning mark
+   was 13x12px of ink while .btn-close paints 16x16 — the severity indicator was
+   the smallest thing in the row and the way out was the biggest, which is
+   exactly backwards. 1.35rem paints 17x16 and the two ends match (#273).
+   line-height is pinned so the taller glyph cannot stretch a one-line banner. */
 .st-alert-ico {
 	color: var(--bs-warning);
 	flex: 0 0 auto;
+	font-size: 1.35rem;
+	line-height: 1;
 }
 
 /* auto-fit, so a tile that never mounts (no temp sensor / no Wi-Fi) closes
