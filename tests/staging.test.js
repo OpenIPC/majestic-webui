@@ -132,6 +132,12 @@ function load(pickedTransport, cfg, cfgDelay, wasmOk) {
 				return bits[0] === 'undecodable' &&
 					!!(w && w.available && w.handles && w.handles(bits[1]));
 			},
+			softwareRungForCodec: (d, codec) => {
+				const bits = String(d || '').split(' ');
+				const w = win.MajesticWasm;
+				return (bits[0] === 'unreachable' || bits[0] === 'mse-error') &&
+					!!(w && w.available && w.handles && w.handles(codec));
+			},
 			chosenStream: () => null, chooseStream() {},
 		},
 	};
@@ -574,16 +580,67 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.el('mj-transport-w').checked === false);
 	}
 
-	group('the rung is not taken for a failure that is not about the codec');
+	group('a non-codec failure on a natively-playable channel goes to MJPEG');
 	{
+		// The channel is H.264, which the browser plays natively, so none of
+		// these — a socket that would not stay open, no MSE, a source-buffer
+		// refusal — is worth handing to the H.265 software decoder.
 		for (const reason of ['unreachable', 'no-mse', 'mse-error']) {
-			const env = load('mse', { 'jpeg.enabled': true }, 0, true);
+			const env = load('mse',
+				{ 'jpeg.enabled': true, 'video0.codec': 'h264' }, 0, true);
 			await tick();
 			env.made[0].say('mjpeg', reason);
-			check('`' + reason + '` goes straight to MJPEG',
+			check('`' + reason + '` on H.264 goes straight to MJPEG',
 				env.made.length === 1 && env.el('live-mjpeg').src === '/mjpeg',
 				'made=' + env.made.length);
 		}
+	}
+
+	// The #288 hardening: MSE could not hold the socket long enough to read a
+	// codec ('unreachable'), but the config says the channel is H.265 — a codec
+	// the software decoder handles — so its own socket is worth a try before
+	// MJPEG, rather than stranding a remote viewer on the worst option.
+	group('an unreachable socket on a configured software codec tries the decoder');
+	{
+		const env = load('mse',
+			{ 'jpeg.enabled': true, 'video0.codec': 'h265' }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'unreachable');
+		check('the software decoder is tried, not MJPEG',
+			env.made.length === 2 && env.made[1] && env.made[1].kind === 'wasm',
+			'made=' + env.made.length + ' kind=' + (env.made[1] && env.made[1].kind));
+		check('and no fallback picture went up', env.el('live-mjpeg').src === '');
+		env.made[1].say('playing');
+		check('when it plays, MSE stays lit as the transport underneath',
+			env.el('mj-transport-m').checked === true);
+	}
+
+	group('a rescue that also fails does not loop back');
+	{
+		const env = load('mse',
+			{ 'jpeg.enabled': true, 'video0.codec': 'h265' }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'unreachable');
+		const wasm = env.made[1];
+		check('the decoder was tried', wasm && wasm.kind === 'wasm');
+		// Its worker could not hold the socket either — same flaky link.
+		wasm.say('mjpeg', 'unreachable');
+		check('it falls to MJPEG rather than round again',
+			env.made.length === 2 && env.el('live-mjpeg').src === '/mjpeg',
+			'made=' + env.made.length);
+	}
+
+	group('the rescue needs the decoder to actually be present');
+	{
+		// Same unreachable H.265 channel, but no software decoder in the page
+		// (an offline camera, the common case) — straight to MJPEG.
+		const env = load('mse',
+			{ 'jpeg.enabled': true, 'video0.codec': 'h265' }, 0, false);
+		await tick();
+		env.made[0].say('mjpeg', 'unreachable');
+		check('with no decoder it goes to MJPEG',
+			env.made.length === 1 && env.el('live-mjpeg').src === '/mjpeg',
+			'made=' + env.made.length);
 	}
 
 	group('the rung is not taken for a codec it cannot decode');

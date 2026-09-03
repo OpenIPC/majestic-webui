@@ -311,6 +311,15 @@ window.MajesticPreview = (function () {
 				swap.start('wasm');
 				return;
 			}
+			// MSE could not hold the socket to read a codec ('unreachable'); if
+			// the config says this channel is one the software decoder handles,
+			// let its worker try before the panel gives up. Same reasoning as
+			// preview-page.js:nextRung (#288).
+			if (kind === 'mse' && window.MajesticTransport.softwareRungForCodec(
+				detail, get(stream ? 'video1.codec' : 'video0.codec'))) {
+				swap.start('wasm');
+				return;
+			}
 			exhausted = true;
 			// A canvas that has stopped being painted keeps its last frame and
 			// nothing hides it, so anything sampling the picture — the Live

@@ -78,6 +78,11 @@
 		// The configured frame rates, which are what the chip shows on MSE —
 		// that player measures nothing.
 		cfgFps = [+mjGet(cfg, 'video0.fps') || 0, +mjGet(cfg, 'video1.fps') || 0];
+		// The configured codec per channel — the only thing that says what a
+		// stream is when the socket never delivered an init to say it. Read by
+		// nextRung to decide whether a socket that gave up ('unreachable') is
+		// still worth handing to the software decoder.
+		cfgCodec = [mjGet(cfg, 'video0.codec') || '', mjGet(cfg, 'video1.codec') || ''];
 		// The configured bitrates, which are what the adaptation toast names
 		// as the rate the encoder returns to when nothing is holding it down.
 		cfgKbps = [+mjGet(cfg, 'video0.bitrate') || 0, +mjGet(cfg, 'video1.bitrate') || 0];
@@ -349,6 +354,10 @@
 	// reported about its own picture.
 	let chipMedia = null, chipFps = 0;
 	let cfgFps = [0, 0];
+	// Filled from the config when it lands; '' until then, which the codec
+	// helper treats as "not software-decodable", so nothing new happens before
+	// the config is known.
+	let cfgCodec = ['', ''];
 	// The camera's own statement of which channel this WebRTC session serves,
 	// from the `served` signalling reply — or null on an older majestic, over
 	// MSE, and between sessions, in which case the size inference below stands
@@ -866,6 +875,17 @@
 		}
 		if (kind === 'webrtc') { attachPlayer('mse'); return; }
 		if (kind === 'mse' && MajesticTransport.softwareRungFor(detail)) {
+			attachPlayer('wasm');
+			return;
+		}
+		// MSE gave up without a codec verdict — the socket would not stay open
+		// ('unreachable'), so the browser never saw what the stream is. If the
+		// config says this channel is a codec the software decoder handles, let
+		// its worker try its own socket before falling to MJPEG; on a flaky or
+		// remote link that has kept the software decoder working moments before,
+		// dropping to MJPEG here strands the viewer on the worst option (#288).
+		if (kind === 'mse' &&
+			MajesticTransport.softwareRungForCodec(detail, cfgCodec[stream ? 1 : 0])) {
 			attachPlayer('wasm');
 			return;
 		}

@@ -141,6 +141,25 @@ window.MajesticTransport = (function () {
 			!!(w && w.available && w.handles && w.handles(bits[1]));
 	}
 
+	// A softer test than the one above, for when MSE never got far enough to
+	// return a codec verdict. `undecodable` carries the codec the browser
+	// refused; `unreachable` and `mse-error` do not — the socket could not be
+	// held open to read the init (six reconnects, a flaky or high-latency link)
+	// or the MediaSource refused a mime it had claimed. Neither means "this
+	// browser cannot decode"; both would otherwise fall straight to MJPEG. So
+	// fall back to what the CONFIG says the channel is encoded as: if the
+	// software decoder handles that codec, its worker holds its own /ws/video
+	// socket with its own reconnect and is worth a try — it may survive where
+	// the MSE player's ladder gave up (measured: a Raspberry Pi over a remote
+	// link, majestic #288). It cannot loop, because the software rung's own
+	// failure reports kind `wasm`, which the caller's walk does not route here.
+	function softwareRungForCodec(detail, codec) {
+		const bits = String(detail || '').split(' ');
+		const w = window.MajesticWasm;
+		return (bits[0] === 'unreachable' || bits[0] === 'mse-error') &&
+			!!(w && w.available && w.handles && w.handles(codec));
+	}
+
 	function impl(kind) {
 		return kind === 'webrtc' ? window.MajesticWebRTC
 			: kind === 'wasm' ? window.MajesticWasm
@@ -267,6 +286,7 @@ window.MajesticTransport = (function () {
 		demote: demote,
 		impl: impl,
 		softwareRungFor: softwareRungFor,
+		softwareRungForCodec: softwareRungForCodec,
 		iceServers: iceServers,
 		chosenStream: chosenStream,
 		chooseStream: chooseStream,

@@ -99,6 +99,34 @@ group('softwareRungFor() gates the software rung');
 		t.softwareRungFor('undecodable h265') === false);
 }
 
+group('softwareRungForCodec() rescues a socket that gave up on a software codec');
+{
+	const t = load(true);
+	const setWasm = (w) => { t.__ctx.window.MajesticWasm = w; };
+	const h265 = { available: true, handles: (c) => /^h265$|^hevc$/i.test(c || '') };
+	setWasm(h265);
+
+	// MSE never read a codec — the socket would not stay open — but the config
+	// says the channel is H.265, which this decoder handles.
+	check('an unreachable H.265 channel is worth handing to the decoder',
+		t.softwareRungForCodec('unreachable', 'h265') === true);
+	check('so is a MediaSource that refused its own mime',
+		t.softwareRungForCodec('mse-error', 'h265') === true);
+	// An H.264 channel plays natively; the software decoder is not for it.
+	check('an unreachable H.264 channel is not',
+		t.softwareRungForCodec('unreachable', 'h264') === false);
+	// `undecodable` is the strict test's job; this softer one must not also
+	// fire on it, or the same failure would take the rung twice.
+	check('an undecodable verdict is not this test’s to answer',
+		t.softwareRungForCodec('undecodable h265', 'h265') === false);
+	check('and neither is a missing codec',
+		t.softwareRungForCodec('unreachable', '') === false);
+
+	setWasm(undefined);
+	check('with no decoder present it is never worth trying',
+		t.softwareRungForCodec('unreachable', 'h265') === false);
+}
+
 group('impl() maps a kind to a player');
 {
 	const t = load(true);
