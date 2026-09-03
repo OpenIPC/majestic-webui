@@ -68,7 +68,8 @@
 	// `lookup` supplies the three, each returning undefined when it cannot
 	// answer. They are passed in rather than reached for because the first is
 	// pure DOM and the other two are page state, and none of that belongs in a
-	// decision that wants testing.
+	// decision that wants testing. `lookup.self` is separate: it answers for
+	// the annotated field itself, which met() consults before anything else.
 	function resolve(dot, lookup) {
 		lookup = lookup || {};
 		const order = ['mounted', 'saved', 'fallback'];
@@ -82,9 +83,28 @@
 
 	// Is the requirement satisfied? A malformed or absent condition counts as
 	// satisfied, on the same fail-open reasoning as matches().
+	//
+	// Two things beyond the condition itself make it satisfied, and both exist
+	// because a warning nobody can act on is worse than none:
+	//
+	//   `when` scopes it to the field's OWN value. Both substream fields
+	//   default to off, so a condition testing only the controlling field would
+	//   announce a substitution on a camera that never asked for one -- on
+	//   every camera, permanently, which is how a warning becomes furniture.
+	//
+	//   An unresolvable controlling field. If no lookup can answer, a warning
+	//   would be a definite claim made from no data, and nothing on the page
+	//   could clear it. Same reasoning as an unknown operator holding.
 	function met(req, lookup) {
 		if (!req || !req.field) return true;
-		return matches(req, resolve(req.field, lookup));
+		lookup = lookup || {};
+		if (req.when !== undefined) {
+			const self = typeof lookup.self === 'function' ? lookup.self() : undefined;
+			if (self === undefined || String(self) !== String(req.when)) return true;
+		}
+		const v = resolve(req.field, lookup);
+		if (v === undefined) return true;
+		return matches(req, v);
 	}
 
 	// What to tell the operator, or '' when there is nothing to say. A

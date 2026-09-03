@@ -19,16 +19,24 @@ const { check, group, done } = require('./assert');
 
 const req = require(path.join(__dirname, '..', 'www', 'a', 'mj-requires.js'));
 
-// The condition majestic emits for outgoing.substream, verbatim: `equals` is
-// the STRING "true", because the camera's schema annotation carries the value
-// as a string.
+// The condition majestic emits for outgoing.substream, verbatim. `when` and
+// `equals` are both the STRING "true", because the camera's schema annotation
+// carries values as strings; the config they are compared against carries
+// booleans.
 const SUBSTREAM = {
+	when: 'true',
 	field: 'video1.enabled',
 	equals: 'true',
-	message: 'The second stream (video1) is disabled, so the main stream is published instead.',
+	message: 'The sub stream is disabled, so the main stream is published instead.',
 };
 
-const saved = (cfg) => ({ saved: (dot) => dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg) });
+// A lookup standing in for a page: `self` is the annotated control's own value
+// (substream), `saved` the config behind the other tabs.
+const page = (self, cfg) => ({
+	self: () => self,
+	saved: (dot) => dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg),
+});
+const saved = (cfg) => page(true, cfg);
 
 group('the operator compares across JSON types, because the schema and the config disagree');
 {
@@ -56,6 +64,32 @@ group('an unknown condition holds, so a newer camera degrades to silence');
 	check('no condition at all holds', req.matches(null, false));
 	check('a requirement with no field is satisfied', req.met({ equals: 'true' }, saved({})));
 	check('a null requirement is satisfied', req.met(null, saved({})));
+
+	// Nothing could answer for the controlling field -- no mounted control, no
+	// saved value, no schema default. Warning would be a definite claim made
+	// from no data, and nothing on the page could clear it.
+	check('an unresolvable controlling field is satisfied',
+		req.met(SUBSTREAM, { self: () => true }));
+	check('and says nothing', req.notice(SUBSTREAM, { self: () => true }) === '');
+}
+
+group('the condition is scoped to the field it annotates');
+{
+	// Both substream fields default to off. Without `when` the form would
+	// announce a substitution on every camera that never asked for one, which
+	// is a warning that is always on -- furniture, not information.
+	const off = { video1: { enabled: false } };
+	check('substream off says nothing', req.notice(SUBSTREAM, page(false, off)) === '');
+	check('substream on says it', req.notice(SUBSTREAM, page(true, off)) === SUBSTREAM.message);
+	// The control's value is a JSON boolean; `when` is the string "true".
+	check('the self value coerces too', !req.met(SUBSTREAM, page(true, off)));
+	check('a missing self lookup is satisfied', req.met(SUBSTREAM, {
+		saved: () => false,
+	}));
+	// A condition with no `when` applies whatever the field holds -- the
+	// annotation is optional and the old meaning has to survive.
+	const always = { field: 'video1.enabled', equals: 'true', message: 'x' };
+	check('no when means always', !req.met(always, page(false, off)));
 }
 
 group('a value is taken from the page first, then the config, then the schema');
@@ -105,6 +139,7 @@ group('the reported case: substream on, video1 off');
 	// showing: the schema default stands in, and it is false, so the warning is
 	// still correct.
 	check('an absent video1 falls back to the schema default', req.notice(SUBSTREAM, {
+		self: () => true,
 		saved: () => undefined,
 		fallback: () => false,
 	}) === SUBSTREAM.message);
@@ -112,6 +147,7 @@ group('the reported case: substream on, video1 off');
 	// Editing video1.enabled on the Video tab and coming back without saving
 	// should clear the warning, the same way visibleWhen rows react.
 	check('an unsaved edit clears it', req.notice(SUBSTREAM, {
+		self: () => true,
 		mounted: () => true,
 		saved: () => false,
 	}) === '');
@@ -122,7 +158,7 @@ group('an unmet requirement with nothing to say stays quiet');
 	// The message is the entire content of the warning -- this module has no
 	// idea what any field means. An empty box under a control is worse than no
 	// box, so a condition without one draws nothing even though it is unmet.
-	const mute = { field: 'video1.enabled', equals: 'true' };
+	const mute = { when: 'true', field: 'video1.enabled', equals: 'true' };
 	const off = saved({ video1: { enabled: false } });
 	check('the requirement is still unmet', !req.met(mute, off));
 	check('but nothing is drawn', req.notice(mute, off) === '');

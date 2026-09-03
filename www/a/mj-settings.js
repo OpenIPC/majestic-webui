@@ -3930,9 +3930,10 @@
 	// Shares visMatches, and with it the fail-open rule: an operator this build
 	// does not understand counts as satisfied, so a newer schema can never
 	// strand a warning on screen that nothing on the page can clear.
-	function reqNotice(req) {
+	function reqNotice(req, getSelf) {
 		if (!REQ) return '';
 		return REQ.notice(req, {
+			self: getSelf,
 			mounted: (dot) => {
 				const f = (state.fields || []).find(x => x.dot === dot);
 				return f ? f.getValue() : undefined;
@@ -3963,6 +3964,17 @@
 			update();
 			controllers.add(ctrl);
 		}
+		// An x-requires condition names an absolute path, so its controlling
+		// field is usually on another tab and the saved config answers for it.
+		// Where it does happen to share the page, an unsaved edit to it has to
+		// repaint the warning, exactly as it moves a visibleWhen row.
+		for (const u of state.reqUpdaters || []) {
+			const ctrl = byDot[u.req.field];
+			if (!ctrl || ctrl.dot === u.dot) continue;
+			ctrl.control.addEventListener('change', u.paint);
+			ctrl.control.addEventListener('input', u.paint);
+		}
+
 		// Flipping a controller changes which rows exist, so anything that counts
 		// rows has to run again — once per controller, and only once every
 		// dependent row has been shown or hidden.
@@ -3982,7 +3994,7 @@
 	function runVisibility() {
 		(state.visUpdaters || []).forEach(u => u());
 		// a saved edit can have met or broken a requirement on this page
-		(state.reqUpdaters || []).forEach(u => u());
+		(state.reqUpdaters || []).forEach(u => u.paint());
 		// what is on screen just changed, and the head counts what is on screen
 		paintStock();
 	}
@@ -4551,13 +4563,20 @@
 			const req = sub['x-requires'];
 			const warn = el('div', 'hint mj-requires');
 			const paint = () => {
-				const msg = reqNotice(req);
+				const msg = reqNotice(req, getValue);
 				warn.textContent = msg;
 				warn.hidden = !msg;
 			};
 			paint();
 			p.appendChild(warn);
-			(state.reqUpdaters || []).push(paint);
+			// Half the condition is this field's own value, so its own edits
+			// have to repaint it. The ordinary input/change path runs
+			// updateDirty() and nothing else, which knows nothing about this.
+			control.addEventListener('input', paint);
+			control.addEventListener('change', paint);
+			// The other half is a field that may or may not be on this page;
+			// applyVisibility() wires the listener where it is.
+			(state.reqUpdaters || []).push({ dot: dot, req: req, paint: paint });
 		}
 
 		// A field the orientation pad drives instead: still a real field, so
