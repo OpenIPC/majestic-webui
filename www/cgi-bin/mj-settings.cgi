@@ -117,6 +117,7 @@ fi
 <script src="/a/ircut-check.js" defer></script>
 <script src="/a/ircut-map.js" defer></script>
 <script src="/a/ircut-scan.js" defer></script>
+<script src="/a/mj-requires.js" defer></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>

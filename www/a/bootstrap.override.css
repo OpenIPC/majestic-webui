@@ -67,6 +67,20 @@
    at the cap, and the hint simply fills them — and still holds a paragraph on
    the extension and firmware pages, where a row runs 822px and an unbounded
    hint would be 99 characters to a line. */
+/* An x-requires warning: the setting is fine, its precondition is not, so the
+   camera is quietly doing something else. Sits where the hint sits and reads
+   like one, but in the warning colour, because it describes what the camera is
+   doing right now rather than what the field means. Not Bootstrap's
+   .text-warning — that utility is tuned for dark backgrounds and washes out on
+   the card. */
+.mj-requires {
+	color: var(--bs-warning-text-emphasis, #664d03);
+	background: var(--bs-warning-bg-subtle, #fff3cd);
+	border-left: 3px solid var(--bs-warning-border-subtle, #ffe69c);
+	padding: 0.3rem 0.5rem;
+	border-radius: 0.25rem;
+}
+
 .hint {
 	/* block because the CGI helpers emit it as a <span> — without this the
 	   max-width below does nothing and the hint runs the card's full width */
