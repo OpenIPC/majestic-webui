@@ -34,6 +34,18 @@
 	// Where a press belongs to the control under it rather than to the picture.
 	const CHROME = '.mj-bar, .mj-ptz, #mj-stats, #mj-toasts';
 
+	// The status chip's footprint, as NOMINALS rather than as its measured
+	// size, and that distinction is the whole of #302. The chip's width is its
+	// text -- "MJPEG" against "H265 3840×2160 · 25 fps · 36% · Sub stream" --
+	// so a gate that decides WHERE the chip is drawn from what the chip
+	// currently SAYS is a widget deciding its own position: the served-channel
+	// label Auto always carries grew the chip by 42%, tripped the gate, and
+	// flung every annotation off the picture and out to the screen's edges
+	// while the picture did not move at all. Measure the picture, not the
+	// caption. 210 x 30 is a chip of about thirty monospace characters at
+	// 0.75rem with its padding and border, which is the ordinary line.
+	const CHIP_W = 210, CHIP_H = 30;
+
 	function read(k) {
 		try { return localStorage.getItem(k); } catch (e) { return null; }
 	}
@@ -96,28 +108,42 @@
 	// small enough to leave a band cannot be panned in the first place, so
 	// panning never moves these.
 	function annotate(sw, sh, picW, picH) {
-		// Measured off the chip itself rather than guessed at, because its
-		// width is its text -- "H265 3840×2160 · 25 fps · 67%" against "MJPEG"
-		// -- and its height is the page's font size.
 		const badge = $('#mj-badge');
-		const cw = (badge && badge.offsetWidth) || 210;
-		const ch = (badge && badge.offsetHeight) || 30;
+		const ch = (badge && badge.offsetHeight) || CHIP_H;
 		// Published for the toast stack, which hangs under the chip: the chip's
 		// height is not a constant -- "MJPEG" against "H265 3840×2160 · 25 fps ·
 		// 36% · Sub stream", which wraps to two lines on a phone -- so a toast
 		// at a fixed offset from the top of the stage is either crowding it or
-		// sitting on it.
+		// sitting on it. MEASURED, because it is describing the chip that is on
+		// screen; the gate below is a different question and takes nominals.
 		if (ch) stage.style.setProperty('--mj-chip-h', ch + 'px');
 		const visW = Math.min(sw, picW), visH = Math.min(sh, picH);
-		// A picture too small to carry the chip without the chip dominating it
-		// hands the chrome back to the stage: a 390 x 219 phone in Fit, where
-		// the chip is nearly half the width and there is 283px of band doing
-		// nothing. It is the picture being too small that moves it -- never the
-		// band merely existing, which is why 1841 x 1381 with 359px of gutter
-		// keeps its chip on the picture.
-		const roomy = visW >= cw * 3 && visH >= ch * 5;
-		const set = (name, px) => stage.style.setProperty(name, (roomy ? Math.max(0, px) : 0) + 'px');
-		set('--mj-pic-top', oy);
+		// A picture too small to carry the chrome without the chrome dominating
+		// it hands the chip back to the stage: the 390 x 219 phone in Fit this
+		// hatch was written for, where the chip is nearly half the picture's
+		// width and there is 283px of band above it doing nothing. It is the
+		// picture being too small that moves it -- never the band merely
+		// existing, which is why 1841 x 1381 with 359px of gutter keeps its
+		// chip on the picture.
+		const cramped = visW < CHIP_W * 3 || visH < CHIP_H * 5;
+		// Handing the chip back is only worth anything if the band above can
+		// actually take it. Where it cannot, the move is a few pixels that
+		// leave the chip on the picture anyway, having cut it loose from the
+		// picture's corner for nothing.
+		const clears = oy >= CHIP_H * 2;
+		const set = (name, px) => stage.style.setProperty(name, Math.max(0, px) + 'px');
+		set('--mj-pic-top', cramped && clears ? 0 : oy);
+		// The horizontal insets are never surrendered, whatever the gate says.
+		// Moving the chip sideways cannot get it off the picture: in every case
+		// cramped enough to ask, the chip is WIDER than the pillar it would
+		// move into, so it covers exactly as much picture as before and now
+		// hangs off into black as well. And in the case the hatch exists for --
+		// a portrait phone, where the picture is as wide as the stage -- these
+		// are zero already, so surrendering them was never what helped. What it
+		// did instead was flip on a word: the gate used to be measured against
+		// the chip's own offsetWidth, so pressing Auto appended " · Sub stream",
+		// the chip grew 42%, and every annotation jumped from the picture's
+		// corner to the screen's with the picture not moving a pixel (#302).
 		set('--mj-pic-left', ox);
 		set('--mj-pic-right', sw - (ox + picW));
 	}
@@ -573,8 +599,13 @@
 		// caller renders as nothing rather than as 0%.
 		scalePct: function () { return frame && placed ? Math.round(scale * 100) : 0; },
 
-		// The chip's own width decides whether the chrome fits on the picture,
-		// so a repaint of the chip can change the answer.
+		// A repaint of the chip, which is the toast stack's problem: the stack
+		// hangs off `--mj-chip-h`, the chip's MEASURED height, and a caption
+		// that wraps to a second line is taller than the one it replaced. It no
+		// longer moves the annotations themselves -- the chip's WIDTH deciding
+		// where the chip is drawn is the whole of #302, and the gate takes
+		// nominals now -- so nothing here should be read as a licence to
+		// reintroduce that.
 		refresh: function () {
 			const sw = stage.clientWidth, sh = stage.clientHeight;
 			if (frame && placed && sw && sh) annotate(sw, sh, frame.w * scale, frame.h * scale);

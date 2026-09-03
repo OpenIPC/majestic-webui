@@ -445,8 +445,9 @@
 			(fps ? ' · ' + Math.round(fps) + ' fps' : '') +
 			(pct ? ' · ' + pct + '%' : '') +
 			servedNote();
-		// Its width is what decides whether the chrome fits on the picture, and
-		// it has just changed.
+		// Its height is what the toast stack hangs off, and a caption that wraps
+		// to a second line has just changed it. Its WIDTH decides nothing about
+		// placement any more (#302).
 		if (window.MajesticZoom) window.MajesticZoom.refresh();
 	}
 
