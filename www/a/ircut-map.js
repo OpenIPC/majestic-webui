@@ -60,8 +60,24 @@
 	// The four things a pad can be. Colours are the dashboard's validated
 	// series set, so a pad and its row in the list always agree.
 	const ROLES = [
-		{ key: 'irCutPin1', label: 'IR-cut filter, closing coil', hint: 'pulls the shutter in for daylight', color: '#4c60d8' },
-		{ key: 'irCutPin2', label: 'IR-cut filter, opening coil', hint: 'lets infrared through at night', color: '#0d9488' },
+		// Which coil is which is majestic's to say, not ours, and it is the
+		// opposite of what reads naturally from the key names. night.c drives
+		// pin1 high for NIGHT and pin2 high for DAY (double_ircut_set(night):
+		// set_gpio(pin1, night); set_gpio(pin2, !night)), and night is the
+		// filter swung OUT of the light path. So pin1 is the opening coil and
+		// pin2 the closing one. Measured on the 85H50AI these were written
+		// against: pad 11 driven high opens, pad 10 closes, and its config is
+		// irCutPin1=11 / irCutPin2=10.
+		//
+		// They were the wrong way round here for a release. Nothing broke,
+		// because the labels only name what the fields already do -- but every
+		// sentence that names a coil inherited the error, and single-pin mode
+		// (pin1 set, pin2 unset) was described as putting the pad on the
+		// closing coil when it is the opening one (#273). ircut-scan.js has
+		// always mapped its measured pads the right way; if these two ever
+		// disagree with `irCutPin2: closeHigh` there, that file is right.
+		{ key: 'irCutPin1', label: 'IR-cut filter, opening coil', hint: 'swings the filter out of the way at night', color: '#4c60d8' },
+		{ key: 'irCutPin2', label: 'IR-cut filter, closing coil', hint: 'pulls the filter back in for daylight', color: '#0d9488' },
 		// Not "Infrared lamp": majestic drives this pad for NIGHT and does not
 		// care what is on the end of it, and plenty of boards carry a white
 		// LED ring instead of an IR one. Naming the pad after one of the two

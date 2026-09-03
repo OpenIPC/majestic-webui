@@ -3800,7 +3800,7 @@
 						'this sweep can find: it works by pulsing pairs, and a ' +
 						'single-pad filter is moved by holding one pad at a level, ' +
 						'which is not safe to do to a pad whose job is unknown. ' +
-						'If yours is wired that way, put the pad on the closing coil ' +
+						'If yours is wired that way, put the pad on the opening coil ' +
 						'yourself and press <b>Test the filter</b>.</div>';
 					return;
 				}
