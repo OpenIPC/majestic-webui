@@ -368,10 +368,21 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   deliberately do **not** read them: they are the player's furniture, and
   furniture that jumps when you change zoom is worse than furniture on a band
   (in Fit it also puts the pad in the gutter, covering nothing). One exception,
-  the chip's alone: a picture too small to carry the chrome without it
-  dominating — measured against the chip's own `offsetWidth`, not a constant —
-  hands the insets back to the stage. A 390 × 219 phone in Fit is that case;
-  1841 × 1381 with 359px of gutter is not, so it keeps its chip on the picture.
+  and it is **`--mj-pic-top` alone**: a picture too small to carry the chrome
+  without it dominating, *and* with a band above deep enough to actually clear
+  the chip, hands that one inset back to the stage. A 390 × 219 phone in Fit is
+  that case; 1841 × 1381 with 359px of gutter is not, so it keeps its chip on
+  the picture. The horizontal pair is **never** surrendered — sideways there is
+  no band deep enough to clear a chip, so the move covers exactly as much
+  picture as before and cuts the chip loose from the corner it describes. Both
+  halves of that rule are #302: the gate used to be measured against the chip's
+  own `offsetWidth`, so pressing **Auto** — which always appends the served
+  channel's name — grew the chip by 42%, tripped the gate, and threw every
+  annotation out to the screen's edges with the picture not moving a pixel. A
+  threshold that decides where a widget is drawn must never be measured against
+  what that widget happens to say, so it takes nominals (`CHIP_W`/`CHIP_H`);
+  `--mj-chip-h`, which describes the chip on screen rather than placing it,
+  stays measured.
 - **The two toasts are a stack, not two fixed offsets.** `#mj-toasts` is a flex
   column hung under the chip at `--mj-chip-h`, the chip's *measured* height,
   because that height is not a constant — "MJPEG" against "H265 3840×2160 · 25

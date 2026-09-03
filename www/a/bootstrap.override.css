@@ -2454,9 +2454,12 @@ mark {
 /* Anchored to the PICTURE, not to the stage. Fill leaves the two the same, so
    this changes nothing in the ordinary case; on a letterboxed view a chip at
    the stage's corner floats in black, describing nothing. preview-zoom.js
-   zeroes the insets again when the picture is too small to carry the chrome
-   without it dominating -- a 390 x 219 phone in Fit -- so a band that exists
-   is not by itself a reason to use it. */
+   zeroes --mj-pic-top again when the picture is too small to carry the chrome
+   without it dominating AND the band above is deep enough to take it -- a
+   390 x 219 phone in Fit -- so a band that exists is not by itself a reason to
+   use it. The horizontal pair is never zeroed: sideways there is no band deep
+   enough to clear a chip, so the move only cuts it loose from what it
+   describes (#302). */
 .mj-chip {
 	position: absolute;
 	top: calc(var(--mj-pic-top, 0px) + 0.5rem);
