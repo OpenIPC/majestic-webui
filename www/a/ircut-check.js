@@ -56,7 +56,7 @@
 		// same question. It used to be EITHER coil, on the reasoning that a
 		// half-configured camera is not an unfitted one — true, but it made the
 		// dismissal impossible to use on exactly the camera that was showing
-		// the banner. With only the opening coil assigned majestic still moves
+		// the banner. With only the closing coil assigned majestic still moves
 		// nothing, so the banner stands and offers Dismiss; pressing it
 		// recorded the claim, and the next load read a coil, called it a
 		// contradiction, and deleted it again. Dismiss, reload, banner (#273).
@@ -110,10 +110,11 @@
 		track = track || {};
 		const out = [];
 		const monitor = on(nm.lightMonitor);
-		// majestic drives the filter from irCutPin1 and returns early when it
-		// is unset, whatever else is configured — so a camera holding only the
-		// opening coil is exactly as unable to move the filter as one holding
-		// nothing, and gets the same finding with a different sentence.
+		// majestic drives the filter from irCutPin1 — the OPENING coil, the
+		// pad it raises for night — and returns early when it is unset,
+		// whatever else is configured. So a camera holding only the closing
+		// coil is exactly as unable to move the filter as one holding nothing,
+		// and gets the same finding with a different sentence.
 		const driveable = has(nm.irCutPin1);
 		// One coil assigned is not half a configuration: majestic switches to
 		// single-pin mode and holds that one pad at a LEVEL — high for night,
@@ -148,11 +149,11 @@
 				id: 'no-pins', level: 'danger',
 				title: 'Majestic cannot move the IR-cut filter',
 				detail: (has(nm.irCutPin2)
-					? 'The opening coil is connected, but the closing coil is ' +
-						'not, and majestic drives the filter from the closing ' +
-						'coil\u2019s pad \u2014 without it nothing moves the ' +
-						'filter and it stays wherever it powered up. Left open ' +
-						'in daylight it makes the whole picture magenta.'
+					? 'The closing coil is connected, but the opening coil is ' +
+						'not, and majestic gives up unless the opening coil has ' +
+						'a pad, whatever the other one holds. So nothing moves ' +
+						'the filter and it stays wherever it powered up. Left ' +
+						'open in daylight it makes the whole picture magenta.'
 					: 'Nothing is connected to the filter, so nothing moves it ' +
 						'and it stays wherever it powered up. Left open in ' +
 						'daylight it makes the whole picture magenta.') +
@@ -191,13 +192,13 @@
 			out.push({
 				id: 'single-coil', level: 'info',
 				title: 'The filter is driven from one pad',
-				detail: 'Only the closing coil is assigned, so majestic holds ' +
-					'that one pad at a level \u2014 one for day, the other for ' +
-					'night \u2014 rather than pulsing a pair of coils. That is ' +
+				detail: 'Only the opening coil is assigned, so majestic holds ' +
+					'that one pad at a level \u2014 high for night, low for ' +
+					'day \u2014 rather than pulsing a pair of coils. That is ' +
 					'right for a board whose filter is switched through a ' +
 					'driver chip rather than driven coil by coil, and "Single ' +
 					'IRcut is inverted" is what swaps which level means night. ' +
-					'If the filter in this camera has two coils, assign the opening ' +
+					'If the filter in this camera has two coils, assign the closing ' +
 					'coil as well: on its own, one coil of a pair is left ' +
 					'carrying current for as long as the camera stays in that ' +
 					'position.',
@@ -211,7 +212,7 @@
 		// that predates one, and even with it a settings page cannot say
 		// whether THIS camera is in the mode. Reported here, where it can, and
 		// it is where the reporter's own question gets its answer: the pad that
-		// drives a single-pad filter goes on the closing coil (#273).
+		// drives a single-pad filter goes on the opening coil (#273).
 		if (on(nm.irCutSingleInvert) && driveable && !single) {
 			out.push({
 				id: 'invert-inert', level: 'info',
@@ -219,7 +220,7 @@
 				detail: 'That switch only applies where one pad drives the ' +
 					'filter, and both coils are assigned, so majestic pulses ' +
 					'the pair and never reads it. To drive the filter from one ' +
-					'pad, leave the opening coil unassigned \u2014 the closing ' +
+					'pad, leave the closing coil unassigned \u2014 the opening ' +
 					'coil is the one majestic drives, and this switch then ' +
 					'chooses which level means night.',
 				fix: 'nightMode',

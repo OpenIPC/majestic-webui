@@ -330,6 +330,39 @@ group('run: it finds the pair, and only the pair');
 		check('one from this boot is not a casualty',
 			scan.casualty({ boot: 2000, scan: { pins: [47, 48], started: 2100 } }) === null);
 		check('no journal, no casualty', scan.casualty({ boot: 2000, scan: {} }) === null);
-		done();
+		return eleventh();
+	}
+
+	// The scan measures which pad opens the filter and which closes it, then
+	// files those two facts into majestic's two config keys. The pin map puts a
+	// NAME on each of those keys. Nothing made the two agree, and for a release
+	// they did not: the map called irCutPin1 the closing coil while the scan
+	// correctly filed the opening pad there, so every sentence naming a coil —
+	// including the one telling someone which coil a single-pad filter goes on —
+	// was inverted (#273).
+	//
+	// It is invisible by construction. A swapped label renders perfectly and
+	// reads plausibly; the only way to know is majestic's own source, where
+	// double_ircut_set(night) raises pin1 for NIGHT, and night is the filter
+	// swung out of the light path. So the check is written here, where the
+	// measurement is, rather than trusted to a reader of either file alone.
+	function eleventh() {
+		group('the measured pad and the name on its field are one fact');
+		const map = require(path.join(__dirname, '..', 'www', 'a', 'ircut-map.js'));
+		const label = {};
+		map.ROLES.forEach((r) => { label[r.key] = r.label; });
+		const c = camera(11, 10);
+		return scan.run(c.io, [[11, 10]], { settleMs: 0 }).then((r) => {
+			const p = r.pins;
+			check('the pad that opens the filter is filed as irCutPin1',
+				p.irCutPin1 === p.opensWhenHigh, JSON.stringify(p));
+			check('and the pad that closes it as irCutPin2',
+				p.irCutPin2 === p.closesWhenHigh, JSON.stringify(p));
+			check('so irCutPin1 is the field the map calls the opening coil',
+				/opening coil/.test(label.irCutPin1 || ''), label.irCutPin1);
+			check('and irCutPin2 the one it calls the closing coil',
+				/closing coil/.test(label.irCutPin2 || ''), label.irCutPin2);
+			done();
+		});
 	}
 }

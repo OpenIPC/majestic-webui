@@ -338,18 +338,25 @@ function runRest() {
 		check('as an observation, not a fault', f && f.level === 'info');
 		check('it names the switch that picks which level is night',
 			f && /Single IRcut is inverted/.test(f.detail));
+		// The pad majestic single-pins is irCutPin1, which is the OPENING coil
+		// — it raises it for night. Both of these read the other way round for
+		// a release, and nothing caught it because the labels are only text
+		// (#273).
+		check('and it is the opening coil that is named as the assigned one',
+			f && /Only the opening coil is assigned/.test(f.detail), f && f.detail);
 		check('and says what it does to a filter that has two coils',
 			f && /carrying current/.test(f.detail));
 		check('both coils assigned says nothing',
 			!ic.diagnose({ irCutPin1: 11, irCutPin2: 10 }, null, null)
 				.some(x => x.id === 'single-coil'));
 
-		// The opening coil on its own drives nothing at all — majestic returns
-		// early without the closing coil's pad — so it is the same fault. But
-		// "nothing is connected to the filter" is a plain untruth on a camera
-		// where something is, and the sentence has to name what is missing.
+		// The closing coil on its own drives nothing at all — majestic returns
+		// early without the opening coil's pad, which is the one it raises for
+		// night — so it is the same fault. But "nothing is connected to the
+		// filter" is a plain untruth on a camera where something is, and the
+		// sentence has to name what is missing.
 		const half = ic.diagnose({ irCutPin2: 10 }, null, null);
-		check('the opening coil alone is still the no-pins fault',
+		check('the closing coil alone is still the no-pins fault',
 			half[0].id === 'no-pins' && half[0].level === 'danger',
 			JSON.stringify(half.map(x => x.id)));
 		check('and not a single-coil observation',
@@ -357,7 +364,7 @@ function runRest() {
 		check('it does not claim nothing is connected',
 			!/Nothing is connected/.test(half[0].detail), half[0].detail);
 		check('it names the coil that is missing instead',
-			/closing coil/.test(half[0].detail), half[0].detail);
+			/opening coil/.test(half[0].detail), half[0].detail);
 	}
 
 	group('wired: only a filter the camera can drive contradicts "there is none"');
@@ -365,12 +372,12 @@ function runRest() {
 		// The dashboard drops the owner's "no filter here" claim the moment
 		// this says yes, so it has to ask the same question the banner does.
 		check('nothing assigned is not wired', ic.wired({}) === false);
-		check('the closing coil alone is', ic.wired({ irCutPin1: 11 }) === true);
+		check('the opening coil alone is', ic.wired({ irCutPin1: 11 }) === true);
 		// It used to be EITHER coil, which made Dismiss unusable on the very
 		// camera that was showing the banner: pressing it recorded the claim,
-		// and the next load read the opening coil, called it a contradiction
+		// and the next load read the closing coil, called it a contradiction
 		// and deleted it again — dismiss, reload, banner (#273).
-		check('the opening coil alone is not, because majestic moves nothing with it',
+		check('the closing coil alone is not, because majestic moves nothing with it',
 			ic.wired({ irCutPin2: 10 }) === false);
 		check('and that is exactly the camera the banner is raised on',
 			ic.diagnose({ irCutPin2: 10 }, null, null)[0].id === 'no-pins');
@@ -386,7 +393,7 @@ function runRest() {
 			!!f, JSON.stringify(both.map(x => x.id)));
 		check('as an observation, not a fault', f && f.level === 'info');
 		check('and it names the coil a single-pad filter goes on',
-			f && /closing coil/.test(f.detail));
+			f && /opening coil/.test(f.detail));
 		check('one coil assigned IS the mode, so nothing is inert',
 			!ic.diagnose({ irCutPin1: 11, irCutSingleInvert: true }, null, null)
 				.some(x => x.id === 'invert-inert'));
