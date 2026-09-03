@@ -190,8 +190,7 @@
 					'right for a board whose filter is switched through a ' +
 					'driver chip rather than driven coil by coil, and "Single ' +
 					'IRcut is inverted" is what swaps which level means night. ' +
-					'If the ' +
-					'filter in this camera has two coils, assign the opening ' +
+					'If the filter in this camera has two coils, assign the opening ' +
 					'coil as well: on its own, one coil of a pair is left ' +
 					'carrying current for as long as the camera stays in that ' +
 					'position.',
