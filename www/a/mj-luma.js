@@ -171,19 +171,27 @@
 				if (v.tagName === 'CANVAS' && typeof createImageBitmap === 'function' &&
 					!bitmapBroken) {
 					busy = true;
+					// Capture what identifies the picture NOW, to compare after
+					// the async readback: the element, and a source token the
+					// caller may supply. The token exists because element
+					// identity is not enough — a same-codec channel switch
+					// reopens on the SAME canvas node, so the node stays live
+					// while the pixels under it change (see opts.token).
+					const tok = opts.token ? opts.token() : null;
+					const fresh = function () {
+						return !stopped && opts.video() === v &&
+							v.__mjPainted === true &&
+							(!opts.token || opts.token() === tok);
+					};
 					createImageBitmap(v, {
 						resizeWidth: SW, resizeHeight: SH, resizeQuality: 'low',
 					}).then(function (bmp) {
 						// Publish only if this is still the picture on screen. A
 						// channel or transport switch can land between the snapshot
-						// and here — the software player even swaps its canvas node
-						// — and a histogram of the frame that WAS is a wrong answer
-						// dressed as the current one, worse than one tick's gap. `v`
-						// is the superseded node after such a switch, so the
-						// identity check against the live element catches it.
-						if (!stopped && opts.video() === v && v.__mjPainted === true) {
-							sampleFrom(bmp);
-						}
+						// and here, and a histogram of the frame that WAS is a
+						// wrong answer dressed as the current one, worse than one
+						// tick's gap.
+						if (fresh()) sampleFrom(bmp);
 						bmp.close();
 						busy = false;
 					}).catch(function () {
@@ -193,9 +201,7 @@
 						// the stall is the lesser fault, and only where it is forced.
 						bitmapBroken = true;
 						busy = false;
-						if (!stopped && opts.video() === v && v.__mjPainted === true) {
-							sampleFrom(v);
-						}
+						if (fresh()) sampleFrom(v);
 					});
 				} else {
 					sampleFrom(v);
