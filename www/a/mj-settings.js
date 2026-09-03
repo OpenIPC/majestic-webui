@@ -3787,7 +3787,21 @@
 						'<div class="alert alert-secondary py-2 px-3 mb-0 small">' +
 						'<b>Nothing moved the picture.</b> Either the filter is on a pair this ' +
 						'scan did not reach, or there is not enough light to see it move. ' +
-						'Try again in daylight, or set the pins by hand.</div>';
+						'Try again in daylight, or set the pins by hand.' +
+						// Named because it is a real class of camera the sweep
+						// cannot reach, rather than a gap in the pad list. A
+						// single-pad filter is moved by HOLDING one pad at a
+						// level, and holding a pad is the thing this scan may
+						// not do: on a two-coil board it would leave a winding
+						// carrying current, which is why every actuation here
+						// is a brief pulse across a pair. So that wiring is
+						// found by hand and confirmed by the test (#273).
+						'<br><br>A filter driven from a single pad is not something ' +
+						'this sweep can find: it works by pulsing pairs, and a ' +
+						'single-pad filter is moved by holding one pad at a level, ' +
+						'which is not safe to do to a pad whose job is unknown. ' +
+						'If yours is wired that way, put the pad on the closing coil ' +
+						'yourself and press <b>Test the filter</b>.</div>';
 					return;
 				}
 				// The pair itself was watched moving the picture, so it is
@@ -4638,6 +4652,10 @@
 			if (d) n++;
 		}
 		state.dirtyN = n;
+		// A new edit outranks the last save's confirmation. renderToolbar leaves
+		// the label alone while a message is set, so leaving the flash up would
+		// print "Saved and applied" beside a Save button that has work to do.
+		if (n && state.flashPending) setToolbarMsg('');
 		renderToolbar();
 		paintStock();
 		// Every edit funnels through here — the map, a save, a per-row reset,
@@ -4686,11 +4704,45 @@
 	// is gone).
 	function setToolbarMsg(text, cls) {
 		state.toolbarMsg = text || '';
+		// Clearing the message also ends a flash. A flash IS a message with a
+		// timer on it, and leaving flashPending set would hold the bar open
+		// around nothing.
+		if (!text) {
+			if (state.flashTimer) clearTimeout(state.flashTimer);
+			state.flashTimer = null;
+			state.flashPending = false;
+		}
 		const lbl = document.getElementById('mj-dirty-count');
 		if (!lbl) return;
 		if (!text) { renderToolbar(); return; }
 		lbl.className = 'me-auto small ' + (cls || 'text-danger');
 		lbl.textContent = text;
+	}
+
+	// How long a save's confirmation stays up. It is the only thing holding the
+	// bar open, so it has to go away on its own.
+	const FLASH_MS = 6000;
+
+	// What a successful save says when it leaves nothing pending. An in-place
+	// change is carried by the save itself — no reload, no blink — so without
+	// this the bar vanishes the instant Save is pressed and the operator is
+	// left to guess whether anything happened. `flashPending` is the third
+	// reason for the bar to exist, beside dirty changes and a due reload, and
+	// renderToolbar already knows it.
+	//
+	// It did not exist. The call site shipped without it, inside onSubmit's
+	// try, so a save that had SUCCEEDED threw a ReferenceError on its way out
+	// and the catch reported "Save failed: Can't find variable: flashToolbar"
+	// over a change the camera had already taken (#273).
+	function flashToolbar(text) {
+		if (state.flashTimer) clearTimeout(state.flashTimer);
+		setToolbarMsg(text, 'text-secondary');
+		state.flashPending = true;
+		renderToolbar();
+		state.flashTimer = setTimeout(() => {
+			state.flashTimer = null;
+			setToolbarMsg('');
+		}, FLASH_MS);
 	}
 
 	// What a change costs, as the camera itself declares it, reduced to the
@@ -4790,6 +4842,15 @@
 		setToolbarMsg('');
 		clearError();
 		liveSaving++;
+		// Whether the camera has already taken the change. Everything after the
+		// POST answers ok is the PAGE catching up — re-reading the config,
+		// re-baselining, dressing the toolbar — and a throw in any of it is not
+		// a save that failed. Reported as one, it tells the operator to redo a
+		// change the camera is already holding, and hides a real page bug
+		// behind a plausible sentence about the camera. That is what happened
+		// when the toolbar's confirmation helper turned out never to have been
+		// defined: the save landed and the page said "Save failed" (#273).
+		let landed = false;
 		try {
 			if (dirty.length) {
 				const res = await apiFetch('/api/v1/config', {
@@ -4804,6 +4865,7 @@
 					return;
 				}
 			}
+			landed = true;
 			// The camera now holds these, so the snapshot the revert is built
 			// from has to say so before anything can read it again. refresh()
 			// sets the same values a moment later from the config itself — but
@@ -4834,7 +4896,11 @@
 				flashToolbar(
 					'Saved and applied. The video streams were not interrupted.');
 		} catch (e) {
-			showError('Save failed: ' + e.message);
+			showError(landed
+				? 'Saved \u2014 the camera has the change \u2014 but the page ' +
+					'could not finish updating: ' + e.message + '. Reload to ' +
+					'see what the camera is holding now.'
+				: 'Save failed: ' + e.message);
 		} finally {
 			liveSaving--;
 			btn.disabled = false;

@@ -69,7 +69,19 @@
 	function pairs(info, opts) {
 		opts = opts || {};
 		const skip = {};
-		(info.assigned || []).forEach((a) => { skip[a.pin] = 1; });
+		// Pads with a job that is not this one. The two IR-cut coils are the
+		// EXCEPTION and stay candidates: they are what this sweep is looking
+		// for, so skipping them made a camera with one coil already assigned
+		// unable to find the pair that includes it — every pair containing that
+		// pad was simply absent from the list, the sweep ran to the end and
+		// reported nothing (#273). The illuminator and the daylight sensor stay
+		// skipped: those are deliberate assignments to a different function,
+		// and driving the lamp mid-sweep would change the very picture the scan
+		// is reading. A pad whose role the camera did not name is skipped as
+		// before — an unnamed job is still a job.
+		(info.assigned || []).forEach((a) => {
+			if (a.role !== 'irCutPin1' && a.role !== 'irCutPin2') skip[a.pin] = 1;
+		});
 		(opts.exclude || []).forEach((p) => { skip[p] = 1; });
 		// A line a kernel DRIVER holds is wired to something deliberate and is
 		// the class of pad that resets a PHY or drops a rail. "sysfs" is only an

@@ -102,6 +102,24 @@ group('pairs: the pad list is the SoC\'s, never a constant');
 	}));
 	check('a driver-held line is in no pair', !h.some((x) => x.indexOf(3) >= 0));
 	check('a sysfs export stays a candidate', h.some((x) => x.indexOf(1) >= 0));
+
+	// The two coils are what this sweep is FOR. Skipping a pad already on one
+	// of them made a camera with one coil assigned unable to find the pair
+	// containing it: every pair that could have been the answer was absent from
+	// the list, the sweep ran to the end, and it reported nothing (#273).
+	const half = scan.pairs(Object.assign({}, B10, {
+		assigned: [{ pin: 11, role: 'irCutPin1' }, { pin: 52, role: 'backlightPin' },
+			{ pin: 66, role: 'lightSensorPin' }],
+	}));
+	check('a pad already on a coil is still a candidate',
+		half.some((x) => x.indexOf(11) >= 0));
+	check('and the pair it belongs to is still tried first',
+		half[0][0] === 11 && half[0][1] === 10, JSON.stringify(half[0]));
+	// Not a blanket un-skip: these two are deliberate assignments to another
+	// function, and driving the lamp mid-sweep would change the very picture
+	// the scan reads its answer off.
+	check('the illuminator is not a candidate', !half.some((x) => x.indexOf(52) >= 0));
+	check('nor is the daylight sensor', !half.some((x) => x.indexOf(66) >= 0));
 }
 
 // ---------------------------------------------------------------------------

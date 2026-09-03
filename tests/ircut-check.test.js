@@ -360,6 +360,41 @@ function runRest() {
 			/closing coil/.test(half[0].detail), half[0].detail);
 	}
 
+	group('wired: only a filter the camera can drive contradicts "there is none"');
+	{
+		// The dashboard drops the owner's "no filter here" claim the moment
+		// this says yes, so it has to ask the same question the banner does.
+		check('nothing assigned is not wired', ic.wired({}) === false);
+		check('the closing coil alone is', ic.wired({ irCutPin1: 11 }) === true);
+		// It used to be EITHER coil, which made Dismiss unusable on the very
+		// camera that was showing the banner: pressing it recorded the claim,
+		// and the next load read the opening coil, called it a contradiction
+		// and deleted it again — dismiss, reload, banner (#273).
+		check('the opening coil alone is not, because majestic moves nothing with it',
+			ic.wired({ irCutPin2: 10 }) === false);
+		check('and that is exactly the camera the banner is raised on',
+			ic.diagnose({ irCutPin2: 10 }, null, null)[0].id === 'no-pins');
+		check('pin 0 is a pin here too', ic.wired({ irCutPin1: 0 }) === true);
+	}
+
+	group('diagnose: a switch that is doing nothing says so');
+	{
+		const both = ic.diagnose(
+			{ irCutPin1: 11, irCutPin2: 10, irCutSingleInvert: true }, null, null);
+		const f = both.filter(x => x.id === 'invert-inert')[0];
+		check('the invert switch is called out when both coils are assigned',
+			!!f, JSON.stringify(both.map(x => x.id)));
+		check('as an observation, not a fault', f && f.level === 'info');
+		check('and it names the coil a single-pad filter goes on',
+			f && /closing coil/.test(f.detail));
+		check('one coil assigned IS the mode, so nothing is inert',
+			!ic.diagnose({ irCutPin1: 11, irCutSingleInvert: true }, null, null)
+				.some(x => x.id === 'invert-inert'));
+		check('and with the switch off there is nothing to say',
+			!ic.diagnose({ irCutPin1: 11, irCutPin2: 10 }, null, null)
+				.some(x => x.id === 'invert-inert'));
+	}
+
 	group('diagnose: the light monitor');
 	{
 		const blind = ic.diagnose({ irCutPin1: 11, lightMonitor: true }, null, null);
