@@ -3746,26 +3746,47 @@
 		lbl.textContent = text;
 	}
 
-	// What a change costs, as the camera itself declares it.
+	// What a change costs, as the camera itself declares it, reduced to the
+	// three answers this page can act on.
 	//
-	// `x-reload` is the daemon's own classification — "live", "service:<name>",
-	// "channel:<n>", "pipeline" — and it is the answer to a question this page
-	// used to guess at. The guess was binary: x-live, or else assume the whole
-	// pipeline has to come down. That was true when the only classified keys
-	// WERE the live image knobs, and it has been wrong since the daemon learned
-	// the middle classes: a camera that restarts its overlay in place, encoders
-	// untouched, was being reported to the operator as a pipeline reload with
-	// blinking streams, and then offered a button that reloads nothing.
+	// `x-reload` is the daemon's own classification, and it is the answer to a
+	// question this page used to guess at. The guess was binary: x-live, or else
+	// assume the whole pipeline has to come down. That was true when the only
+	// classified keys WERE the live image knobs, and it has been wrong since the
+	// daemon learned the middle classes: a camera that restarts its overlay in
+	// place, encoders untouched, was being reported to the operator as a pipeline
+	// reload with blinking streams, and then offered a button that reloads
+	// nothing.
+	//
+	// Matched against the vocabulary rather than passed through, because an
+	// unrecognised string must fall to `pipeline` and not off the end of the
+	// world: a class this page has never heard of is one it cannot claim was
+	// carried, and saying nothing about it would leave the setting unapplied with
+	// no Apply offered — the exact failure this function exists to prevent,
+	// reached from the other side.
+	//
+	//   none, live            nothing left to do; the save carried it
+	//   service:x, channel:n  carried too, in place, streams left running
+	//   service, channel      NAMING NOTHING, which the daemon itself answers
+	//                         with a pipeline rebuild, so this must agree
+	//   pipeline, anything    the operator is still owed a reload
 	//
 	// x-live is the fallback, not the rule, because an older majestic publishes
 	// it and no x-reload at all. There it still means live, and everything else
-	// still means pipeline — which is exactly today's behaviour on those builds.
-	// A key with neither is pipeline for the same reason the daemon says so: an
+	// still means pipeline — exactly today's behaviour on those builds. A key
+	// with neither is pipeline for the same reason the daemon says so: an
 	// undeclared key costs the most until somebody proves otherwise.
-	function reloadClass(f) {
+	function changeCost(f) {
 		const sc = (f && f.schema) || {};
-		if (typeof sc['x-reload'] === 'string' && sc['x-reload']) return sc['x-reload'];
-		return sc['x-live'] ? 'live' : 'pipeline';
+		const spec = sc['x-reload'];
+		if (typeof spec !== 'string' || !spec)
+			return sc['x-live'] ? 'none' : 'pipeline';
+		if (spec === 'none' || spec === 'live') return 'none';
+		// The colon is the whole test: it is what tells a class that names its
+		// subsystem or its channel from one that names neither.
+		if (spec.indexOf('service:') === 0 || spec.indexOf('channel:') === 0)
+			return spec.length > spec.indexOf(':') + 1 ? 'inplace' : 'pipeline';
+		return 'pipeline';
 	}
 
 	// Only a pipeline rebuild is something the operator still has to ask for.
@@ -3774,36 +3795,15 @@
 	// POST /api/v1/config round trip, which is why none of them leaves anything
 	// pending afterwards.
 	function needsPipelineReload(fields) {
-		return fields.some(f => reloadClass(f) === 'pipeline');
+		return fields.some(f => changeCost(f) === 'pipeline');
 	}
 
-	// Whether the save moved anything the streams did not notice, so the page
-	// can say what happened instead of going quiet. Deliberately not a count and
-	// deliberately not a key name: what the operator wants to know is whether
-	// the picture was interrupted.
+	// Whether the save moved anything the streams did not notice, so the page can
+	// say what happened instead of going quiet. Deliberately not a count and
+	// deliberately not a key name: what the operator wants to know is whether the
+	// picture was interrupted.
 	function appliedInPlace(fields) {
-		return fields.some(f => {
-			const c = reloadClass(f);
-			return c.indexOf('service:') === 0 || c.indexOf('channel:') === 0;
-		});
-	}
-
-	// Say it, then get out of the way. With nothing pending the bar hides
-	// itself, so a success message needs to hold it open for a moment — long
-	// enough to read, short enough not to become furniture. Re-entrant: a second
-	// save inside the window replaces the message and restarts the clock rather
-	// than being cut short by the first one's timer.
-	function flashToolbar(text) {
-		if (state.flashTimer) clearTimeout(state.flashTimer);
-		state.flashPending = true;
-		setToolbarMsg(text, 'text-secondary');
-		const bar = document.getElementById('mj-toolbar');
-		if (bar) { bar.classList.add('d-flex'); bar.classList.remove('d-none'); }
-		state.flashTimer = setTimeout(() => {
-			state.flashTimer = null;
-			state.flashPending = false;
-			setToolbarMsg('');
-		}, 4000);
+		return fields.some(f => changeCost(f) === 'inplace');
 	}
 
 	async function onSubmit(ev) {
