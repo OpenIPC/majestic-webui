@@ -187,9 +187,10 @@
 				detail: 'Only the closing coil is assigned, so majestic holds ' +
 					'that one pad at a level \u2014 one for day, the other for ' +
 					'night \u2014 rather than pulsing a pair of coils. That is ' +
-					'how a board is driven whose filter is switched by a single ' +
-					'GPIO through a driver, and "Single IRcut is inverted" is ' +
-					'the switch that swaps which level means night. If the ' +
+					'right for a board whose filter is switched through a ' +
+					'driver chip rather than driven coil by coil, and "Single ' +
+					'IRcut is inverted" is what swaps which level means night. ' +
+					'If the ' +
 					'filter in this camera has two coils, assign the opening ' +
 					'coil as well: on its own, one coil of a pair is left ' +
 					'carrying current for as long as the camera stays in that ' +

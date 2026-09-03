@@ -476,6 +476,19 @@
 		setInterval(tick, 5000);
 	}
 
+	// Absent reads as "not at maximum" rather than as a row of its own: this
+	// gauge is HiSilicon's alone — Ingenic publishes isp_avelum but not this,
+	// SigmaStar neither — and a camera that cannot answer must say nothing
+	// here, not zero.
+	function setLumaNote(v) {
+		const note = $('#st-luma-note');
+		if (!note) return;
+		note.textContent = (v && v.isp_exposureismax > 0)
+			? 'Exposure at maximum — the sensor has no shutter or gain left, ' +
+				'so a darker scene now just reads darker. Normal after dusk.'
+			: '';
+	}
+
 	function onSample(s) {
 		if (!s.ok) {
 			// Tracking consumes EVERY sample, failures included, and is not
@@ -494,6 +507,7 @@
 			// still hold — clear them rather than presenting the last good
 			// sample's warnings as current next to "not responding".
 			if (s.fails >= 2) {
+				setLumaNote(null);
 				renderNoVideo(s);
 				// Not cleared, narrowed: an unset irCutPin1 is still unset
 				// while the camera is unreachable, but a day/night
@@ -574,9 +588,6 @@
 		// and only when the metered luminance is zero with it, which no real
 		// scene produces.)
 		//
-		// It is HiSilicon's gauge alone — Ingenic publishes isp_avelum but not
-		// this, SigmaStar neither — so the row must vanish rather than read
-		// zero on the cameras that cannot answer.
 		if ('isp_avelum' in v) {
 			const p = $('#st-luma-panel');
 			if (p && p.hidden) {
@@ -590,12 +601,14 @@
 			pushChart(chLuma, [v.isp_avelum]);
 			const now = $('#st-luma-now');
 			if (now) now.textContent = v.isp_avelum + ' / 255';
-			const note = $('#st-luma-note');
-			if (note) note.textContent = !('isp_exposureismax' in v) ? ''
-				: v.isp_exposureismax > 0
-					? 'Exposure at maximum — the sensor has no shutter or gain left, so a darker scene now just reads darker. Normal after dusk.'
-					: '';
 		}
+		// Outside the luminance block on purpose. The note is a statement
+		// about right now, so it is rewritten on every sample and cleared with
+		// the other condition readings when the camera stops answering —
+		// otherwise it sits under the chart saying the sensor has no shutter
+		// left beside a banner saying the camera is not responding, which is
+		// the last good sample presented as current.
+		setLumaNote(v);
 
 		if (s.prev && s.dt > 0) {
 			// A negative delta is a counter reset or an interface bounce, not
