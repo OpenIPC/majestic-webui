@@ -62,7 +62,11 @@
 	const ROLES = [
 		{ key: 'irCutPin1', label: 'IR-cut filter, closing coil', hint: 'pulls the shutter in for daylight', color: '#4c60d8' },
 		{ key: 'irCutPin2', label: 'IR-cut filter, opening coil', hint: 'lets infrared through at night', color: '#0d9488' },
-		{ key: 'backlightPin', label: 'Infrared lamp', hint: 'the illuminator ring', color: '#c96a2e' },
+		// Not "Infrared lamp": majestic drives this pad for NIGHT and does not
+		// care what is on the end of it, and plenty of boards carry a white
+		// LED ring instead of an IR one. Naming the pad after one of the two
+		// tells the owner of the other that this row is not theirs (#273).
+		{ key: 'backlightPin', label: 'Night illuminator', hint: 'the LED ring, infrared or white', color: '#c96a2e' },
 		{ key: 'lightSensorPin', label: 'Daylight sensor', hint: 'photocell that says when it is dark', color: '#8a5cd8' },
 	];
 	const byKey = {};

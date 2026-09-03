@@ -323,6 +323,43 @@ function runRest() {
 				.filter(x => x.id === 'no-pins').length === 0);
 	}
 
+	group('diagnose: one coil is a mode, not half a fault');
+	{
+		// majestic drives a single assigned pad as a LEVEL rather than as half
+		// of an H-bridge, so one coil is a working configuration on a board
+		// wired for it — and a coil left carrying current on a board that is
+		// not. Nothing here can tell those two boards apart, which is why this
+		// is stated rather than judged, and why it is `info`: the dashboard
+		// drops that level, and a single-pin board would otherwise wear an
+		// undismissable banner for ever (#273).
+		const one = ic.diagnose({ irCutPin1: 11 }, null, null);
+		const f = one.filter(x => x.id === 'single-coil')[0];
+		check('one assigned coil says so', !!f, JSON.stringify(one.map(x => x.id)));
+		check('as an observation, not a fault', f && f.level === 'info');
+		check('it names the switch that picks which level is night',
+			f && /Single IRcut is inverted/.test(f.detail));
+		check('and says what it does to a filter that has two coils',
+			f && /carrying current/.test(f.detail));
+		check('both coils assigned says nothing',
+			!ic.diagnose({ irCutPin1: 11, irCutPin2: 10 }, null, null)
+				.some(x => x.id === 'single-coil'));
+
+		// The opening coil on its own drives nothing at all — majestic returns
+		// early without the closing coil's pad — so it is the same fault. But
+		// "nothing is connected to the filter" is a plain untruth on a camera
+		// where something is, and the sentence has to name what is missing.
+		const half = ic.diagnose({ irCutPin2: 10 }, null, null);
+		check('the opening coil alone is still the no-pins fault',
+			half[0].id === 'no-pins' && half[0].level === 'danger',
+			JSON.stringify(half.map(x => x.id)));
+		check('and not a single-coil observation',
+			!half.some(x => x.id === 'single-coil'));
+		check('it does not claim nothing is connected',
+			!/Nothing is connected/.test(half[0].detail), half[0].detail);
+		check('it names the coil that is missing instead',
+			/closing coil/.test(half[0].detail), half[0].detail);
+	}
+
 	group('diagnose: the light monitor');
 	{
 		const blind = ic.diagnose({ irCutPin1: 11, lightMonitor: true }, null, null);

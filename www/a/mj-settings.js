@@ -1077,7 +1077,7 @@
 		if (ircut.disabled && lbl('toggle-ircut'))
 			lbl('toggle-ircut').title = 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
-			lbl('toggle-light').title = 'Nothing is connected to the infrared lamp.';
+			lbl('toggle-light').title = 'Nothing is connected to the night illuminator.';
 
 		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
 			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })

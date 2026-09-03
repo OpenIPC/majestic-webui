@@ -103,7 +103,19 @@
 		track = track || {};
 		const out = [];
 		const monitor = on(nm.lightMonitor);
+		// majestic drives the filter from irCutPin1 and returns early when it
+		// is unset, whatever else is configured — so a camera holding only the
+		// opening coil is exactly as unable to move the filter as one holding
+		// nothing, and gets the same finding with a different sentence.
 		const driveable = has(nm.irCutPin1);
+		// One coil assigned is not half a configuration: majestic switches to
+		// single-pin mode and holds that one pad at a LEVEL — high for night,
+		// or low with "Single IRcut is inverted" on — instead of pulsing the
+		// pair. Legitimate on a board whose filter is switched by one GPIO
+		// through a driver, and a slow way to cook a coil on a board that has
+		// two. Nothing here can tell those boards apart, so this is stated
+		// rather than judged (#273).
+		const single = driveable && !has(nm.irCutPin2);
 
 		// The one gate the picture gets, and it is the only portable one there
 		// is. An open filter at NIGHT is correct, so the picture may only speak
@@ -128,9 +140,15 @@
 			out.push({
 				id: 'no-pins', level: 'danger',
 				title: 'Majestic cannot move the IR-cut filter',
-				detail: 'Nothing is connected to the filter, so nothing moves it ' +
-					'and it stays wherever it powered up. Left open in daylight ' +
-					'it makes the whole picture magenta.' +
+				detail: (has(nm.irCutPin2)
+					? 'The opening coil is connected, but the closing coil is ' +
+						'not, and majestic drives the filter from the closing ' +
+						'coil\u2019s pad \u2014 without it nothing moves the ' +
+						'filter and it stays wherever it powered up. Left open ' +
+						'in daylight it makes the whole picture magenta.'
+					: 'Nothing is connected to the filter, so nothing moves it ' +
+						'and it stays wherever it powered up. Left open in ' +
+						'daylight it makes the whole picture magenta.') +
 					// Two independent signals agreeing, so this is the one place
 					// the picture is allowed to sound certain — and it still
 					// only sharpens a finding that stands without it.
@@ -151,6 +169,31 @@
 					'configured, so run the IR-cut test to see whether the filter ' +
 					'actually moves. A scene lit by an IR lamp, or by magenta ' +
 					'light, looks the same from here.',
+				fix: 'nightMode',
+			});
+		}
+
+		// Said on the settings page and nowhere else. It is a true observation
+		// about a working configuration, not a fault, so it must not become a
+		// dashboard banner that a single-pin board can never be rid of — the
+		// same rule that keeps 'manual-only' off the dashboard. It exists
+		// because nothing on the page said what one assigned coil does, and a
+		// reporter reasonably read the silence as the warning having been lost
+		// (#273).
+		if (single) {
+			out.push({
+				id: 'single-coil', level: 'info',
+				title: 'The filter is driven from one pad',
+				detail: 'Only the closing coil is assigned, so majestic holds ' +
+					'that one pad at a level \u2014 one for day, the other for ' +
+					'night \u2014 rather than pulsing a pair of coils. That is ' +
+					'right for a board whose filter is switched through a ' +
+					'driver chip rather than driven coil by coil, and "Single ' +
+					'IRcut is inverted" is what swaps which level means night. ' +
+					'If the filter in this camera has two coils, assign the opening ' +
+					'coil as well: on its own, one coil of a pair is left ' +
+					'carrying current for as long as the camera stays in that ' +
+					'position.',
 				fix: 'nightMode',
 			});
 		}
@@ -410,9 +453,10 @@
 			id: 'stuck-closed', level: 'warning',
 			title: 'The filter did not move — it is stuck closed',
 			detail: 'Both positions gave the same coloured picture. Daylight ' +
-				'will look right and night will be almost black, because the ' +
-				'filter is blocking the infrared lamp. Check which pads the two ' +
-				'coils are connected to.',
+				'will look right and night will be almost black on a camera ' +
+				'lit by infrared, because the filter goes on blocking exactly ' +
+				'the light the illuminator emits; a white-light illuminator is ' +
+				'not affected. Check which pads the two coils are connected to.',
 		};
 		return {
 			id: 'unclear', level: 'info',

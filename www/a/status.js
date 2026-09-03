@@ -51,7 +51,7 @@
 		const el = $(id);
 		if (el) el.hidden = !on;
 		const box = $('#st-alerts');
-		if (box) box.hidden = !['#st-alert-stale', '#st-alert-exp', '#st-alert-novideo',
+		if (box) box.hidden = !['#st-alert-stale', '#st-alert-novideo',
 			'#st-alert-wasnovideo', '#st-alert-ircut']
 			.some(a => { const e = $(a); return e && !e.hidden; });
 	}
@@ -248,10 +248,16 @@
 		const no = $('#st-alert-ircut-no');
 		if (!no) return;
 		no.addEventListener('click', () => {
-			if (!confirm('Hide this warning for good?\n\nSay yes only if this ' +
-				'camera has no IR-cut filter fitted. If it has one and it is ' +
-				'simply not set up yet, the picture will go magenta in ' +
-				'daylight and nothing will tell you why.')) return;
+			// The button says only "Dismiss", so the whole claim is made here.
+			// It has to be anyway: this writes a fact to the camera and every
+			// browser that opens the page reads it, which is more than a
+			// word on a button can be asked to carry.
+			if (!confirm('Hide this warning for good?\n\nThis records on the ' +
+				'camera that it has no IR-cut filter fitted, so the warning ' +
+				'stays away in every browser that opens this page.\n\nSay yes ' +
+				'only if that is true. A camera that has one and is simply not ' +
+				'set up yet will go magenta in daylight with nothing to tell ' +
+				'you why.')) return;
 			no.disabled = true;
 			apiFetch('/cgi-bin/j/ircut.cgi?dismiss=1', { credentials: 'same-origin' })
 				.then(r => r.json())
@@ -470,6 +476,19 @@
 		setInterval(tick, 5000);
 	}
 
+	// Absent reads as "not at maximum" rather than as a row of its own: this
+	// gauge is HiSilicon's alone — Ingenic publishes isp_avelum but not this,
+	// SigmaStar neither — and a camera that cannot answer must say nothing
+	// here, not zero.
+	function setLumaNote(v) {
+		const note = $('#st-luma-note');
+		if (!note) return;
+		note.textContent = (v && v.isp_exposureismax > 0)
+			? 'Exposure at maximum — the sensor has no shutter or gain left, ' +
+				'so a darker scene now just reads darker. Normal after dusk.'
+			: '';
+	}
+
 	function onSample(s) {
 		if (!s.ok) {
 			// Tracking consumes EVERY sample, failures included, and is not
@@ -488,7 +507,7 @@
 			// still hold — clear them rather than presenting the last good
 			// sample's warnings as current next to "not responding".
 			if (s.fails >= 2) {
-				setAlert('#st-alert-exp', false);
+				setLumaNote(null);
 				renderNoVideo(s);
 				// Not cleared, narrowed: an unset irCutPin1 is still unset
 				// while the camera is unreachable, but a day/night
@@ -559,14 +578,16 @@
 
 		if (vidTrack) vidTrackNow = vidTrack.push(s, performance.now() / 1000);
 		renderNoVideo(s);
-		// Kept alongside, and it is not the same statement. This one says the
-		// scene is darker than the sensor can compensate for, which is a true
-		// and ordinary thing at dusk; the banner above only speaks when the
-		// metered luminance is zero as well, which no scene produces.
-		setAlert('#st-alert-exp', v.isp_exposureismax > 0);
-		const lum = $('#st-alert-exp-lum');
-		if (lum) lum.textContent = ('isp_avelum' in v) ? ' Scene luminance ' + v.isp_avelum + ' of 255.' : '';
-
+		// isp_exposureismax used to raise a banner of its own. It says the
+		// scene is darker than the sensor can compensate for, which is true and
+		// ordinary at dusk — so it fired every night and stood until morning,
+		// which is exactly what the reporter of #273 predicted it would do.
+		// It is not withdrawn, it is demoted: beside the luminance it explains
+		// it is an observation, and the banner slot is left for faults. (The
+		// no-video finding above is the one place this gauge still accuses,
+		// and only when the metered luminance is zero with it, which no real
+		// scene produces.)
+		//
 		if ('isp_avelum' in v) {
 			const p = $('#st-luma-panel');
 			if (p && p.hidden) {
@@ -581,6 +602,13 @@
 			const now = $('#st-luma-now');
 			if (now) now.textContent = v.isp_avelum + ' / 255';
 		}
+		// Outside the luminance block on purpose. The note is a statement
+		// about right now, so it is rewritten on every sample and cleared with
+		// the other condition readings when the camera stops answering —
+		// otherwise it sits under the chart saying the sensor has no shutter
+		// left beside a banner saying the camera is not responding, which is
+		// the last good sample presented as current.
+		setLumaNote(v);
 
 		if (s.prev && s.dt > 0) {
 			// A negative delta is a counter reset or an interface bounce, not
