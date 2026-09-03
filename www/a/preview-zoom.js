@@ -599,8 +599,13 @@
 		// caller renders as nothing rather than as 0%.
 		scalePct: function () { return frame && placed ? Math.round(scale * 100) : 0; },
 
-		// The chip's own width decides whether the chrome fits on the picture,
-		// so a repaint of the chip can change the answer.
+		// A repaint of the chip, which is the toast stack's problem: the stack
+		// hangs off `--mj-chip-h`, the chip's MEASURED height, and a caption
+		// that wraps to a second line is taller than the one it replaced. It no
+		// longer moves the annotations themselves -- the chip's WIDTH deciding
+		// where the chip is drawn is the whole of #302, and the gate takes
+		// nominals now -- so nothing here should be read as a licence to
+		// reintroduce that.
 		refresh: function () {
 			const sw = stage.clientWidth, sh = stage.clientHeight;
 			if (frame && placed && sw && sh) annotate(sw, sh, frame.w * scale, frame.h * scale);
