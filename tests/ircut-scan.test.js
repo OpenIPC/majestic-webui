@@ -238,7 +238,25 @@ group('run: it finds the pair, and only the pair');
 					return scan.run(brakeOpen.io, [[11, 10]], { settleMs: 0 }).then((r4) => {
 						check('and a brake-held one found the same way is still brake-held',
 							r4.pins.brakeHeld === true, String(r4.pins.brakeHeld));
-						return eighth();
+						// A pad majestic already holds on a coil is braked and
+						// kept exported rather than floated, so the filter is
+						// never let go of and the classification cannot be made.
+						// null, not false: "it holds its position on its own"
+						// would be a claim about a pad nothing released (#273).
+						const held = camera(11, 10);
+						const heldIo = Object.assign({}, held.io, {
+							release: (a, b) => held.io.release(a, b)
+								.then(() => ({ done: true, floated: false })),
+						});
+						return scan.run(heldIo, [[11, 10]], { settleMs: 0 }).then((r5) => {
+							check('a release that did not float reports no classification',
+								r5.pins.brakeHeld === null, String(r5.pins.brakeHeld));
+							check('and the pair itself is still reported',
+								r5.pins.irCutPin1 === 11 && r5.pins.irCutPin2 === 10);
+							check('and the run still settles',
+								r5.pins.settled === true);
+							return eighth();
+						});
 					});
 				});
 			});

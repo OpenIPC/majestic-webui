@@ -252,16 +252,27 @@
 		return ensureClosed()
 			.then(() => io.look())
 			.then((closed) => io.release(closeHigh, otherPad)
-				.then(() => io.wait(settle))
-				.then(() => io.look())
-				.then((floated) => {
-					// Floating releases the brake. A filter that moves was being
-					// held there and its pads must stay driven; one that does
-					// not is latching and can be let go.
-					out.brakeHeld = classify(closed.gmin, floated.gmin) !== null;
-					// Put it back where daylight wants it either way.
-					return io.drive(closeHigh, otherPad);
-				}))
+				.then((rel) => io.wait(settle)
+					.then(() => io.look())
+					.then((floated) => {
+						// Floating releases the brake. A filter that moves was
+						// being held there and its pads must stay driven; one
+						// that does not is latching and can be let go.
+						//
+						// Unless the release did not float. A pad majestic
+						// already holds on a coil is braked and kept exported
+						// instead — floating it would spring a brake-held
+						// filter open and unexporting it would take away the
+						// path majestic writes through — and the endpoint says
+						// so. That is null, never false: "it holds its position
+						// on its own" is a claim, and it would be made here
+						// from a pad that was never let go of.
+						out.brakeHeld = (rel && rel.floated === false)
+							? null
+							: classify(closed.gmin, floated.gmin) !== null;
+						// Put it back where daylight wants it either way.
+						return io.drive(closeHigh, otherPad);
+					})))
 			.then(() => { out.settled = true; return out; })
 			.catch(() => out);
 	}

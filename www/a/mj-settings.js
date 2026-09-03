@@ -3807,12 +3807,22 @@
 				// The pair itself was watched moving the picture, so it is
 				// reported either way; what may be missing is the classification
 				// and the guarantee that the filter was left closed.
-				const tail = found.settled
-					? (found.brakeHeld
-						? 'It springs open when the pins are released, so they have to stay driven.'
-						: 'It holds its position on its own.')
-					: 'The checks after that did not finish, so the filter may not have ' +
-					'been left closed &mdash; look at the picture before trusting it.';
+				// brakeHeld is three-valued. null is a test that did not run:
+				// one of these pads is already majestic's, so it was braked
+				// rather than let go of, and there is no way to see whether the
+				// filter would have sprung open. Saying "it holds its position
+				// on its own" from that would be a claim made about a pad
+				// nothing released (#273).
+				const tail = !found.settled
+					? 'The checks after that did not finish, so the filter may not have ' +
+						'been left closed &mdash; look at the picture before trusting it.'
+					: found.brakeHeld === null
+						? 'Whether it holds its position on its own was not tested: ' +
+							'majestic is already driving one of these pads, and letting ' +
+							'go of it here would have moved the filter.'
+						: found.brakeHeld
+							? 'It springs open when the pins are released, so they have to stay driven.'
+							: 'It holds its position on its own.';
 				host.innerHTML = '<div class="mj-live-grp-head">' +
 					'<span class="mj-cap">Find the pins</span>' +
 					'<span class="mj-live-rule"></span></div>' +
@@ -4896,10 +4906,17 @@
 				flashToolbar(
 					'Saved and applied. The video streams were not interrupted.');
 		} catch (e) {
+			// Accepted, not verified. The POST answering ok means majestic
+			// took every leaf and saved once — but the page's own confirmation
+			// of what the camera now holds is the step that just threw, and on
+			// an older daemon a cleared pin comes back 202 and is ignored. So
+			// this says what is known and hands the reader the way to find out
+			// the rest, rather than swapping one confident wrong answer for
+			// another.
 			showError(landed
-				? 'Saved \u2014 the camera has the change \u2014 but the page ' +
-					'could not finish updating: ' + e.message + '. Reload to ' +
-					'see what the camera is holding now.'
+				? 'The camera accepted the change, but the page could not ' +
+					'read back what it is holding now: ' + e.message +
+					'. Reload the page before changing anything else.'
 				: 'Save failed: ' + e.message);
 		} finally {
 			liveSaving--;

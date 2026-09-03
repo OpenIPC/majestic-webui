@@ -154,6 +154,24 @@ assigned() {
 	done
 }
 
+# The pads majestic has on the IR-cut coils, out of everything `assigned`
+# reports. They are the one class of assigned pad a scan may drive, because they
+# are what a scan is FOR: refusing them left a camera with one coil already set
+# unable to find the pair containing it, and the sweep reported nothing after
+# trying every pair that could not be the answer (#273).
+#
+# They are also the one class it may not hand back the ordinary way. That export
+# is majestic's, and low is where majestic leaves the pad to hold the filter for
+# daylight — so unexporting one floats a brake-held filter open and leaves
+# majestic writing to a path that is no longer there. mode=float therefore
+# BRAKES a coil pad and keeps it exported, and says so in `floated` rather than
+# letting the caller assume a measurement that did not happen.
+coil_pads() {
+	assigned | while read -r v k; do
+		case "$k" in irCutPin1|irCutPin2) echo "$v" ;; esac
+	done
+}
+
 # ── the journal ─────────────────────────────────────────────────────────────
 # Written BEFORE a pad is driven and synced, because the whole point is to
 # survive the pad that stops the camera answering. On the next boot the WebUI
@@ -204,10 +222,20 @@ if [ -n "$DRIVE" ] && [ -n "$LOWPAD" ]; then
 				deny "pad $pad is held by the kernel driver \\\"$own\\\""
 			fi
 		done
-		for v in $(assigned | cut -d' ' -f1); do
-			[ "$v" = "$pad" ] && deny "pad $pad is already assigned"
+		# The IR-cut coils are exempt (see coil_pads). Everything else the
+		# camera has been told about — the illuminator, the daylight sensor, a
+		# PTZ line — is an answer rather than a candidate and stays refused.
+		for line in $(assigned | sed 's/ /:/'); do
+			pv="${line%%:*}"; role="${line#*:}"
+			case "$role" in irCutPin1|irCutPin2) continue ;; esac
+			if [ "$pv" = "$pad" ]; then deny "pad $pad is already assigned"; fi
 		done
 	done
+	COILS=$(coil_pads)
+	is_coil() {
+		for c in $COILS; do [ "$c" = "$1" ] && return 0; done
+		return 1
+	}
 
 	# One actuation at a time, camera-wide. Two overlapping requests could
 	# energise two windings at once, or the same one twice with no gap — and a
@@ -299,18 +327,31 @@ if [ -n "$DRIVE" ] && [ -n "$LOWPAD" ]; then
 		# successful close, and a filter that opens is brake-held while one that
 		# stays is latching. It also returns a ruled-out pad to the state the
 		# scan found it in.
+		# Unexport what this gives back, and unconditionally — not just what
+		# this request exported. float is a caller SAYING "give these back",
+		# and by the time it arrives the pads are exported from the actuation
+		# that preceded it, a separate request, so they look like somebody
+		# else's; judging by who exported them leaves a sysfs entry behind for
+		# every pair a scan rules out.
+		#
+		# A coil pad is the exception and is neither floated nor unexported.
+		# It is majestic's, and braked is where majestic leaves it: floating it
+		# springs a brake-held filter open, and taking the export away leaves
+		# majestic writing to a path that has gone. FLOATED goes back to the
+		# caller so a classification that did not happen is not read as one
+		# that did.
+		FLOATED=true
 		for pad in "$DRIVE" "$LOWPAD"; do
 			[ -d "/sys/class/gpio/gpio$pad" ] || continue
+			if is_coil "$pad"; then
+				FLOATED=false
+				echo out > "/sys/class/gpio/gpio$pad/direction" 2>/dev/null
+				echo 0 > "/sys/class/gpio/gpio$pad/value" 2>/dev/null
+				continue
+			fi
 			echo in > "/sys/class/gpio/gpio$pad/direction" 2>/dev/null
+			echo "$pad" > /sys/class/gpio/unexport 2>/dev/null
 		done
-		# Unexport unconditionally, not just what this request exported. float
-		# is a caller SAYING "give these back", and by the time it arrives the
-		# pads are exported from the actuation that preceded it — a separate
-		# request, so they look like somebody else's. Judging by who exported
-		# them leaves a sysfs entry behind for every pair a scan rules out.
-		# Nothing assigned can reach here; the guard above refused it.
-		echo "$DRIVE" > /sys/class/gpio/unexport 2>/dev/null
-		echo "$LOWPAD" > /sys/class/gpio/unexport 2>/dev/null
 	else
 		# Everything else leaves the pair BRAKED, and that is not tidiness — on
 		# a brake-held filter the brake is what holds the position the actuation
@@ -329,9 +370,9 @@ if [ -n "$DRIVE" ] && [ -n "$LOWPAD" ]; then
 	# next, and a scan works through pairs without pausing to think.
 	usleep "$COOLDOWN_US" 2>/dev/null || sleep 1
 
-	printf '{"drive":%s,"low":%s,"done":%s,"ms":%s,"mode":"%s"}\n' \
+	printf '{"drive":%s,"low":%s,"done":%s,"ms":%s,"mode":"%s","floated":%s}\n' \
 		"$DRIVE" "$LOWPAD" "$([ "$ok" = 1 ] && echo true || echo false)" "$MS" \
-		"${MODE:-pulse}"
+		"${MODE:-pulse}" "${FLOATED:-false}"
 	exit 0
 fi
 
