@@ -643,6 +643,23 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			'made=' + env.made.length);
 	}
 
+	// The socket can give up before the config fetch lands — the same flaky
+	// link slows both — so the rescue has to be reconsidered when the codec
+	// finally becomes known, not only at the moment of failure.
+	group('a late config that reveals a software codec takes the rescue');
+	{
+		const env = load('mse',
+			{ 'jpeg.enabled': true, 'video0.codec': 'h265' }, 2600, true);
+		await tick();
+		env.made[0].say('mjpeg', 'unreachable');
+		check('with no codec known yet, it falls to the picture',
+			env.made.length === 1, 'made=' + env.made.length);
+		await new Promise((r) => setTimeout(r, 1600));
+		check('once the config reveals H.265, the decoder is tried',
+			env.made.length === 2 && env.made[1] && env.made[1].kind === 'wasm',
+			'made=' + env.made.length + ' kind=' + (env.made[1] && env.made[1].kind));
+	}
+
 	group('the rung is not taken for a codec it cannot decode');
 	{
 		const env = load('mse', { 'jpeg.enabled': true }, 0, true);
