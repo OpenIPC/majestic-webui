@@ -289,6 +289,37 @@ function bufferedEnd(env) {
 	return r.length ? r[r.length - 1][1] : 0;
 }
 
+// Nothing here is allowed to assert on a fixed delay. Every append travels
+// through a deferred updateend and a promise-backed range read, so "wait 200 ms
+// and look" is really "wait for the scheduler to be as quick as it was on the
+// machine this was written on" — which a loaded CI runner is not, and the build
+// that fails then has nothing wrong with it. Wait for the condition instead;
+// the timeout only decides how long a genuine failure takes to report.
+const PATIENCE = 10000;
+async function waitFor(pred, ms) {
+	const end = Date.now() + (ms || PATIENCE);
+	while (Date.now() < end) {
+		if (pred()) return true;
+		await sleep(5);
+	}
+	return false;
+}
+
+// "The pump has gone quiet" is the one thing that cannot be waited FOR, only
+// waited OUT — so wait until it has stopped appending and stayed stopped, and
+// let a slow runner take as long as it needs to get there.
+async function quiesce(env, quietMs) {
+	const quiet = quietMs || 250;
+	const end = Date.now() + PATIENCE;
+	let seen = -1, since = Date.now();
+	while (Date.now() < end) {
+		if (env.appends.length !== seen) { seen = env.appends.length; since = Date.now(); }
+		else if (Date.now() - since >= quiet) return true;
+		await sleep(10);
+	}
+	return false;
+}
+
 // Playback, at the only granularity that matters here: the element reports the
 // playhead through timeupdate roughly four times a second, and it cannot move
 // past what is buffered — a browser that runs out says `waiting` and sits
@@ -296,21 +327,20 @@ function bufferedEnd(env) {
 // end" from "stopped early", which is the whole subject.
 async function playTo(env, sec) {
 	const STEP = 0.25;
+	const ahead = () => env.video.currentTime + STEP <= bufferedEnd(env);
 	while (env.video.currentTime + STEP <= sec) {
-		if (env.video.currentTime + STEP > bufferedEnd(env)) {
+		if (!ahead()) {
+			// Starved. A browser says so and sits there; so does this, for as
+			// long as it takes the pump to reach us. Only a pump that never
+			// does ends the run.
 			env.video.fire('waiting');
-			let waited = 0;
-			while (env.video.currentTime + STEP > bufferedEnd(env) && waited < 300) {
-				await sleep(10); waited += 10;
-			}
-			if (env.video.currentTime + STEP > bufferedEnd(env)) break;   // starved for good
+			if (!await waitFor(ahead)) break;
 			continue;
 		}
 		env.video.currentTime = +(env.video.currentTime + STEP).toFixed(2);
 		env.video.fire('timeupdate');
-		await sleep(1);
+		await sleep(0);
 	}
-	await sleep(80);
 	return env.video.currentTime;
 }
 
@@ -318,21 +348,17 @@ async function playTo(env, sec) {
 	group('the pump keeps going for as long as the clip does');
 	{
 		const env = load();
-		await sleep(250);
 
 		// The page opens the newest clip sixty seconds before its end — that
 		// is freshest(), and it is why this bug is the first thing anybody
 		// meets on the page rather than something they scroll into.
-		check('it opened the clip and buffered around the landing point',
-			env.appends.length > 1 && bufferedEnd(env) > 60,
+		const opened = await waitFor(() => env.appends.length > 1 && bufferedEnd(env) > 60);
+		check('it opened the clip and buffered around the landing point', opened,
 			'appends=' + env.appends.length + ' buffered=' + JSON.stringify(env.ranges.all()));
 
+		check('and then stops, once it is far enough ahead', await quiesce(env),
+			'still appending after ' + PATIENCE + 'ms');
 		const settled = bufferedEnd(env);
-		const appendsBefore = env.appends.length;
-		await sleep(120);
-		check('and then stops, once it is far enough ahead',
-			env.appends.length === appendsBefore && bufferedEnd(env) === settled,
-			'grew to ' + bufferedEnd(env));
 		check('about AHEAD seconds ahead of the playhead, not more',
 			settled - env.video.currentTime < 20,
 			(settled - env.video.currentTime) + 's ahead');
@@ -352,36 +378,42 @@ async function playTo(env, sec) {
 		// not happen before: the whole recording, not the first twelve
 		// seconds of wherever it was opened.
 		const got = await playTo(env, CLIP_SECONDS - 3);
+		// The pump runs ahead of the playhead, so it reaches the end of the
+		// file before playback does. endOfStream is how it says so, and it is
+		// the only end-state worth waiting on: fill() raises it from the top of
+		// a call the previous append's updateend made, so by the time it lands
+		// every fragment in the clip is already in the buffer.
+		const finished = await waitFor(() => env.eos === true);
 		check('it followed playback to the end of the recording',
 			got >= CLIP_SECONDS - 4 && bufferedEnd(env) >= CLIP_SECONDS - 1,
 			'played to ' + got + ', buffered ' + bufferedEnd(env) + ' of ' + CLIP_SECONDS);
 		check('and said so, so the element stops rather than running past it',
-			env.eos === true);
+			finished);
 	}
 
 	group('a buffer that ran dry is picked back up');
 	{
 		const env = load();
-		await sleep(250);
+		await waitFor(() => bufferedEnd(env) > 60);
+		await quiesce(env);
 
 		// Starvation is the case timeupdate cannot report: once the element
 		// has nothing to play, currentTime stops moving and timeupdate stops
 		// with it. `waiting` is the only thing left that fires.
-		const end = bufferedEnd(env);
-		env.video.currentTime = end;
+		env.video.currentTime = bufferedEnd(env);
 		env.ranges.clear();
 		const before = env.appends.length;
 		env.video.fire('waiting');
-		await sleep(150);
 		check('waiting alone restarts it',
-			env.appends.length > before,
+			await waitFor(() => env.appends.length > before),
 			'appends ' + before + ' -> ' + env.appends.length);
 	}
 
 	group('the listeners belong to the player, not to the element');
 	{
 		const env = load();
-		await sleep(250);
+		await waitFor(() => bufferedEnd(env) > 60);
+		await quiesce(env);
 		const v = env.video;
 		// Two timeupdate listeners is the right answer, not one: wire() keeps
 		// one of the page's own on this element to move the playhead along the
@@ -399,8 +431,10 @@ async function playTo(env, sec) {
 		const button = { dataset: { clip: '12-00.mp4' } };
 		button.closest = () => button;
 		for (let i = 0; i < 3; i++) {
+			const reads = env.reads.length;
 			env.$('rec-clips').fire('click', { target: button });
-			await sleep(200);
+			await waitFor(() => env.reads.length > reads);
+			await quiesce(env);
 		}
 		check('and the same after reopening it three times',
 			v.listeners('timeupdate') === timeupdates && v.listeners('waiting') === waits,
