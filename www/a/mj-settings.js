@@ -3787,18 +3787,42 @@
 						'<div class="alert alert-secondary py-2 px-3 mb-0 small">' +
 						'<b>Nothing moved the picture.</b> Either the filter is on a pair this ' +
 						'scan did not reach, or there is not enough light to see it move. ' +
-						'Try again in daylight, or set the pins by hand.</div>';
+						'Try again in daylight, or set the pins by hand.' +
+						// Named because it is a real class of camera the sweep
+						// cannot reach, rather than a gap in the pad list. A
+						// single-pad filter is moved by HOLDING one pad at a
+						// level, and holding a pad is the thing this scan may
+						// not do: on a two-coil board it would leave a winding
+						// carrying current, which is why every actuation here
+						// is a brief pulse across a pair. So that wiring is
+						// found by hand and confirmed by the test (#273).
+						'<br><br>A filter driven from a single pad is not something ' +
+						'this sweep can find: it works by pulsing pairs, and a ' +
+						'single-pad filter is moved by holding one pad at a level, ' +
+						'which is not safe to do to a pad whose job is unknown. ' +
+						'If yours is wired that way, put the pad on the closing coil ' +
+						'yourself and press <b>Test the filter</b>.</div>';
 					return;
 				}
 				// The pair itself was watched moving the picture, so it is
 				// reported either way; what may be missing is the classification
 				// and the guarantee that the filter was left closed.
-				const tail = found.settled
-					? (found.brakeHeld
-						? 'It springs open when the pins are released, so they have to stay driven.'
-						: 'It holds its position on its own.')
-					: 'The checks after that did not finish, so the filter may not have ' +
-					'been left closed &mdash; look at the picture before trusting it.';
+				// brakeHeld is three-valued. null is a test that did not run:
+				// one of these pads is already majestic's, so it was braked
+				// rather than let go of, and there is no way to see whether the
+				// filter would have sprung open. Saying "it holds its position
+				// on its own" from that would be a claim made about a pad
+				// nothing released (#273).
+				const tail = !found.settled
+					? 'The checks after that did not finish, so the filter may not have ' +
+						'been left closed &mdash; look at the picture before trusting it.'
+					: found.brakeHeld === null
+						? 'Whether it holds its position on its own was not tested: ' +
+							'majestic is already driving one of these pads, and letting ' +
+							'go of it here would have moved the filter.'
+						: found.brakeHeld
+							? 'It springs open when the pins are released, so they have to stay driven.'
+							: 'It holds its position on its own.';
 				host.innerHTML = '<div class="mj-live-grp-head">' +
 					'<span class="mj-cap">Find the pins</span>' +
 					'<span class="mj-live-rule"></span></div>' +
@@ -4638,6 +4662,10 @@
 			if (d) n++;
 		}
 		state.dirtyN = n;
+		// A new edit outranks the last save's confirmation. renderToolbar leaves
+		// the label alone while a message is set, so leaving the flash up would
+		// print "Saved and applied" beside a Save button that has work to do.
+		if (n && state.flashPending) setToolbarMsg('');
 		renderToolbar();
 		paintStock();
 		// Every edit funnels through here — the map, a save, a per-row reset,
@@ -4686,11 +4714,45 @@
 	// is gone).
 	function setToolbarMsg(text, cls) {
 		state.toolbarMsg = text || '';
+		// Clearing the message also ends a flash. A flash IS a message with a
+		// timer on it, and leaving flashPending set would hold the bar open
+		// around nothing.
+		if (!text) {
+			if (state.flashTimer) clearTimeout(state.flashTimer);
+			state.flashTimer = null;
+			state.flashPending = false;
+		}
 		const lbl = document.getElementById('mj-dirty-count');
 		if (!lbl) return;
 		if (!text) { renderToolbar(); return; }
 		lbl.className = 'me-auto small ' + (cls || 'text-danger');
 		lbl.textContent = text;
+	}
+
+	// How long a save's confirmation stays up. It is the only thing holding the
+	// bar open, so it has to go away on its own.
+	const FLASH_MS = 6000;
+
+	// What a successful save says when it leaves nothing pending. An in-place
+	// change is carried by the save itself — no reload, no blink — so without
+	// this the bar vanishes the instant Save is pressed and the operator is
+	// left to guess whether anything happened. `flashPending` is the third
+	// reason for the bar to exist, beside dirty changes and a due reload, and
+	// renderToolbar already knows it.
+	//
+	// It did not exist. The call site shipped without it, inside onSubmit's
+	// try, so a save that had SUCCEEDED threw a ReferenceError on its way out
+	// and the catch reported "Save failed: Can't find variable: flashToolbar"
+	// over a change the camera had already taken (#273).
+	function flashToolbar(text) {
+		if (state.flashTimer) clearTimeout(state.flashTimer);
+		setToolbarMsg(text, 'text-secondary');
+		state.flashPending = true;
+		renderToolbar();
+		state.flashTimer = setTimeout(() => {
+			state.flashTimer = null;
+			setToolbarMsg('');
+		}, FLASH_MS);
 	}
 
 	// What a change costs, as the camera itself declares it, reduced to the
@@ -4790,6 +4852,15 @@
 		setToolbarMsg('');
 		clearError();
 		liveSaving++;
+		// Whether the camera has already taken the change. Everything after the
+		// POST answers ok is the PAGE catching up — re-reading the config,
+		// re-baselining, dressing the toolbar — and a throw in any of it is not
+		// a save that failed. Reported as one, it tells the operator to redo a
+		// change the camera is already holding, and hides a real page bug
+		// behind a plausible sentence about the camera. That is what happened
+		// when the toolbar's confirmation helper turned out never to have been
+		// defined: the save landed and the page said "Save failed" (#273).
+		let landed = false;
 		try {
 			if (dirty.length) {
 				const res = await apiFetch('/api/v1/config', {
@@ -4804,6 +4875,7 @@
 					return;
 				}
 			}
+			landed = true;
 			// The camera now holds these, so the snapshot the revert is built
 			// from has to say so before anything can read it again. refresh()
 			// sets the same values a moment later from the config itself — but
@@ -4834,7 +4906,18 @@
 				flashToolbar(
 					'Saved and applied. The video streams were not interrupted.');
 		} catch (e) {
-			showError('Save failed: ' + e.message);
+			// Accepted, not verified. The POST answering ok means majestic
+			// took every leaf and saved once — but the page's own confirmation
+			// of what the camera now holds is the step that just threw, and on
+			// an older daemon a cleared pin comes back 202 and is ignored. So
+			// this says what is known and hands the reader the way to find out
+			// the rest, rather than swapping one confident wrong answer for
+			// another.
+			showError(landed
+				? 'The camera accepted the change, but the page could not ' +
+					'read back what it is holding now: ' + e.message +
+					'. Reload the page before changing anything else.'
+				: 'Save failed: ' + e.message);
 		} finally {
 			liveSaving--;
 			btn.disabled = false;

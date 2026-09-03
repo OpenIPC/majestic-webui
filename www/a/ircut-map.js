@@ -66,7 +66,7 @@
 		// care what is on the end of it, and plenty of boards carry a white
 		// LED ring instead of an IR one. Naming the pad after one of the two
 		// tells the owner of the other that this row is not theirs (#273).
-		{ key: 'backlightPin', label: 'Night illuminator', hint: 'the LED ring, infrared or white', color: '#c96a2e' },
+		{ key: 'backlightPin', label: 'Night illuminator', hint: 'the light, infrared or white', color: '#c96a2e' },
 		{ key: 'lightSensorPin', label: 'Daylight sensor', hint: 'photocell that says when it is dark', color: '#8a5cd8' },
 	];
 	const byKey = {};

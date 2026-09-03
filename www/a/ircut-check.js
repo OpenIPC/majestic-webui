@@ -52,14 +52,21 @@
 	// has to be dropped the moment the answer becomes yes — a claim that the
 	// camera has no filter cannot outlive someone configuring one.
 	function wired(nm) {
-		// EITHER coil. The filter is an H-bridge across two pads and the map
-		// assigns them independently, so a camera with only the opening coil
-		// set is half-configured, not unfitted — and it is exactly the camera
-		// that needs the missing-pin banner rather than a claim that there is
-		// no filter here. diagnose() still decides separately whether the
-		// wiring can actually drive anything.
+		// The same question the missing-pin finding asks, and it has to be the
+		// same question. It used to be EITHER coil, on the reasoning that a
+		// half-configured camera is not an unfitted one — true, but it made the
+		// dismissal impossible to use on exactly the camera that was showing
+		// the banner. With only the opening coil assigned majestic still moves
+		// nothing, so the banner stands and offers Dismiss; pressing it
+		// recorded the claim, and the next load read a coil, called it a
+		// contradiction, and deleted it again. Dismiss, reload, banner (#273).
+		//
+		// A claim is only contradicted by a filter this camera can actually
+		// drive. A pad assigned to a coil that majestic never reaches is not
+		// one, and someone pressing Dismiss under that banner is answering
+		// about the state they are looking at.
 		const n = nm || {};
-		return has(n.irCutPin1) || has(n.irCutPin2);
+		return has(n.irCutPin1);
 	}
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and yaml-cli does not normalise it.
@@ -194,6 +201,27 @@
 					'coil as well: on its own, one coil of a pair is left ' +
 					'carrying current for as long as the camera stays in that ' +
 					'position.',
+				fix: 'nightMode',
+			});
+		}
+
+		// The switch that only means something in the mode above. Someone who
+		// turns it on with both coils assigned has changed nothing and has no
+		// way to find that out — the field carries no description on a majestic
+		// that predates one, and even with it a settings page cannot say
+		// whether THIS camera is in the mode. Reported here, where it can, and
+		// it is where the reporter's own question gets its answer: the pad that
+		// drives a single-pad filter goes on the closing coil (#273).
+		if (on(nm.irCutSingleInvert) && driveable && !single) {
+			out.push({
+				id: 'invert-inert', level: 'info',
+				title: '"Single IRcut is inverted" is doing nothing here',
+				detail: 'That switch only applies where one pad drives the ' +
+					'filter, and both coils are assigned, so majestic pulses ' +
+					'the pair and never reads it. To drive the filter from one ' +
+					'pad, leave the opening coil unassigned \u2014 the closing ' +
+					'coil is the one majestic drives, and this switch then ' +
+					'chooses which level means night.',
 				fix: 'nightMode',
 			});
 		}

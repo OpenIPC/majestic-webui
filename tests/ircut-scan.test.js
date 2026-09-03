@@ -102,6 +102,24 @@ group('pairs: the pad list is the SoC\'s, never a constant');
 	}));
 	check('a driver-held line is in no pair', !h.some((x) => x.indexOf(3) >= 0));
 	check('a sysfs export stays a candidate', h.some((x) => x.indexOf(1) >= 0));
+
+	// The two coils are what this sweep is FOR. Skipping a pad already on one
+	// of them made a camera with one coil assigned unable to find the pair
+	// containing it: every pair that could have been the answer was absent from
+	// the list, the sweep ran to the end, and it reported nothing (#273).
+	const half = scan.pairs(Object.assign({}, B10, {
+		assigned: [{ pin: 11, role: 'irCutPin1' }, { pin: 52, role: 'backlightPin' },
+			{ pin: 66, role: 'lightSensorPin' }],
+	}));
+	check('a pad already on a coil is still a candidate',
+		half.some((x) => x.indexOf(11) >= 0));
+	check('and the pair it belongs to is still tried first',
+		half[0][0] === 11 && half[0][1] === 10, JSON.stringify(half[0]));
+	// Not a blanket un-skip: these two are deliberate assignments to another
+	// function, and driving the lamp mid-sweep would change the very picture
+	// the scan reads its answer off.
+	check('the illuminator is not a candidate', !half.some((x) => x.indexOf(52) >= 0));
+	check('nor is the daylight sensor', !half.some((x) => x.indexOf(66) >= 0));
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +238,25 @@ group('run: it finds the pair, and only the pair');
 					return scan.run(brakeOpen.io, [[11, 10]], { settleMs: 0 }).then((r4) => {
 						check('and a brake-held one found the same way is still brake-held',
 							r4.pins.brakeHeld === true, String(r4.pins.brakeHeld));
-						return eighth();
+						// A pad majestic already holds on a coil is braked and
+						// kept exported rather than floated, so the filter is
+						// never let go of and the classification cannot be made.
+						// null, not false: "it holds its position on its own"
+						// would be a claim about a pad nothing released (#273).
+						const held = camera(11, 10);
+						const heldIo = Object.assign({}, held.io, {
+							release: (a, b) => held.io.release(a, b)
+								.then(() => ({ done: true, floated: false })),
+						});
+						return scan.run(heldIo, [[11, 10]], { settleMs: 0 }).then((r5) => {
+							check('a release that did not float reports no classification',
+								r5.pins.brakeHeld === null, String(r5.pins.brakeHeld));
+							check('and the pair itself is still reported',
+								r5.pins.irCutPin1 === 11 && r5.pins.irCutPin2 === 10);
+							check('and the run still settles',
+								r5.pins.settled === true);
+							return eighth();
+						});
 					});
 				});
 			});
