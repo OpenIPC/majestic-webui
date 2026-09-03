@@ -420,6 +420,25 @@
 			}).catch(function () { busy = false; });
 		}
 
+		// fill() drives itself, through updateend, for exactly as long as it is
+		// appending — and it stops appending the moment the buffer is AHEAD
+		// seconds in front of the playhead. No append, no updateend, nothing to
+		// call it back: from there the pump is finished for the life of the
+		// clip. Playback then eats the buffer it left, starves, and the element
+		// sits on a spinner with the rest of the recording still on the card;
+		// pressing play does nothing, because nothing was ever paused.
+		//
+		// So the element has to drive it too. The buffer only shrinks because
+		// the playhead moved, which is precisely what timeupdate reports, and
+		// `waiting` is the backstop for a buffer that ran dry before timeupdate
+		// got there — once it has, currentTime stops advancing and timeupdate
+		// stops with it. This also picks the pump back up after a range read
+		// that failed, which used to end it just as permanently.
+		//
+		// evict() deliberately stays on the append path. The buffer behind the
+		// playhead only grows when something is appended, and driving it from
+		// here as well would issue a remove() for every quarter-second the
+		// playhead advanced.
 		return {
 			attach: function (url, initInfo, clipSize, mime) {
 				read = IDX.reader(url); size = clipSize;
@@ -436,6 +455,9 @@
 						try { sb.appendBuffer(head); } catch (e) { onFallback(); }
 					});
 				}, { once: true });
+
+				video.addEventListener('timeupdate', fill);
+				video.addEventListener('waiting', fill);
 
 				// A pre-tfdt recording buffers nothing and says almost nothing
 				// about why. What it does NOT do is fail the append: appendBuffer
@@ -470,6 +492,12 @@
 			destroy: function () {
 				dead = true;
 				clearTimeout(watchdog);
+				// The element outlives every player attached to it, and
+				// fill() is this player's own closure, so these come off with
+				// the player that added them rather than accumulating a pair
+				// per clip opened.
+				video.removeEventListener('timeupdate', fill);
+				video.removeEventListener('waiting', fill);
 				try { if (sb && ms && ms.readyState === 'open') ms.removeSourceBuffer(sb); } catch (e) {}
 				try { if (ms && ms.readyState === 'open') ms.endOfStream(); } catch (e) {}
 				if (objUrl) { try { URL.revokeObjectURL(objUrl); } catch (e) {} }
