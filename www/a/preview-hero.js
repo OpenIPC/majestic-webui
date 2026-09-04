@@ -73,6 +73,101 @@
 	const stage = $('#mj-stage'), bar = $('#mj-bar');
 	if (!stage || !bar) return;
 
+	// --- The bar and the PTZ pad share the bottom of the stage, and this is what
+	// keeps them off each other. Both used to be placed against constants — the
+	// pad at 3.25rem, the stats panel's ceiling at 5rem — and a constant is one
+	// row of a bar that WRAPS. Measured at 390px the six groups this camera shows
+	// want 855px against a 366px lane, so the bar is three rows there; the pad
+	// draws over the bar, so it covered two of them (#318).
+	//
+	// Which of the two gives way depends on which dimension has room, and that is
+	// the whole of the rule:
+	//
+	//   * Where the stage is tall enough to stack them, the pad rides ABOVE the
+	//     bar's top row: --mj-bar-h, below. A portrait phone is this case —
+	//     390x785 of stage, 200px of bar, and the pad clears it with 370 to
+	//     spare.
+	//   * Where it is not AND the stage is wider than it is tall, the pad stays
+	//     in its corner and the BAR gives way sideways instead, reserving the
+	//     pad's column (.mj-ptz-beside + --mj-ptz-w). A phone in landscape is
+	//     this case and cannot be the other one: 301px of stage against a 211px
+	//     zoom/focus cluster and a two-row bar do not stack in any arrangement —
+	//     but the stage is 740 wide there, so the same groups take the same two
+	//     rows in the lane that is left.
+	//
+	// Wider-than-tall is what says the second arrangement is affordable, and it
+	// has to be asked: reserving 150px of a 320px stage leaves a lane narrower
+	// than one group, and the bar answers by giving every group a row of its own
+	// — measured at 320x568 with audio, 8 rows and 500px of bar over a 509px
+	// stage. That is worse than the overlap it was trying to avoid, so a portrait
+	// stage too small for either arrangement keeps the stacking and lets the
+	// stylesheet's clamp hold the pad on screen (--mj-ptz-h).
+	//
+	// The question is asked of the bar's NATURAL height, which is why the class
+	// comes off before the measurement rather than being toggled at the end:
+	// reserving the column makes the bar taller, so a second pass that measured
+	// the bar as the first pass left it would find even less room and keep the
+	// answer alive after the stage had grown enough to make it wrong. The
+	// arrangement would then depend on the order a window was resized in rather
+	// than on the size it ended up. Removing and re-adding inside one callback
+	// costs a second layout and paints nothing in between.
+	//
+	// The height published is to the top of the top ROW, not to the top of the
+	// element: the bar's padding-top is the transparent end of its gradient, and
+	// clearing that as well would push the pad a further 2rem up the picture for
+	// nothing.
+	//
+	// Layout is when this runs, never the reveal: the bar fades in and out on
+	// opacity, so its height is the same whether it is on screen or not, and
+	// nothing keyed to it moves while somebody is holding the pad.
+	const ptz = $('#mj-ptz');
+	const GAP = 8;
+	const stripHeight = () =>
+		bar.clientHeight - (parseFloat(getComputedStyle(bar).paddingTop) || 0);
+	const publishStrip = (strip) => {
+		if (strip > 0) stage.style.setProperty('--mj-bar-h', strip.toFixed(2) + 'px');
+	};
+	const layoutChrome = () => {
+		// offsetHeight rather than a class check: a camera with no PTZ at all
+		// mounts nothing into #mj-ptz, and one whose ptz_caps drop the direction
+		// pad mounts a shorter cluster than one that keeps it. With no pad there
+		// is nothing to arrange — the stats panel still wants the strip's height.
+		const padH = ptz ? ptz.offsetHeight : 0;
+		if (!padH) {
+			publishStrip(stripHeight());
+			return;
+		}
+		stage.classList.remove('mj-ptz-beside');
+		const natural = stripHeight();
+		const beside = natural + GAP + padH > stage.clientHeight &&
+			stage.clientWidth > stage.clientHeight;
+		if (beside) stage.classList.add('mj-ptz-beside');
+		publishStrip(beside ? stripHeight() : natural);
+		// Published for the clamp that keeps the pad inside the stage whichever
+		// arrangement is in force: pushed off the top it is not merely awkward,
+		// it is unreachable — there is nothing to scroll.
+		stage.style.setProperty('--mj-ptz-h', padH + 'px');
+		stage.style.setProperty('--mj-ptz-w', ptz.offsetWidth + 'px');
+	};
+	layoutChrome();
+	// The bar and the pad themselves, not the window: the groups the bar holds
+	// are unhidden as the player learns what this camera has — a substream,
+	// audio, a transport to offer — and preview-ptz.js mounts the pad when
+	// j/ptz.cgi answers. Every one of those changes the arithmetic above with
+	// the window standing still.
+	if (typeof ResizeObserver === 'function') {
+		try {
+			const ro = new ResizeObserver(layoutChrome);
+			ro.observe(bar);
+			ro.observe(stage);
+			if (ptz) ro.observe(ptz);
+		} catch (e) {
+			window.addEventListener('resize', layoutChrome);
+		}
+	} else {
+		window.addEventListener('resize', layoutChrome);
+	}
+
 	// --- Bar visibility. CSS shows the bar on :hover (mouse) and
 	// :focus-within (keyboard); this handles the rest: mouse movement keeps it
 	// up briefly even when :hover is unreliable (e.g. straight after
