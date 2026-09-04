@@ -182,7 +182,12 @@ Pragma: no-cache
     a banner that can never be one line, and these are on every page at once. %>
 
 <% if [ -z "$network_gateway" ]; then %>
-<% notice warn '<b>No internet connection</b> &mdash; the camera has no default gateway, so it cannot reach the time server or send notifications.' '<a href="network.cgi">Network settings &rarr;</a>' %>
+<%# What is known here is the absence of a default route, and that is what the
+    sentence says. Naming the time server was a consequence nobody measured:
+    an NTP server on the camera's own subnet is reachable with no gateway at
+    all, and a static-network camera pointed at one would have been told every
+    page that its clock was broken when it was not. %>
+<% notice warn '<b>No default gateway</b> &mdash; nothing outside the local network is reachable from this camera.' '<a href="network.cgi">Network settings &rarr;</a>' %>
 <% fi %>
 
 <%# The address the firmware falls back to when the camera's own was not put
