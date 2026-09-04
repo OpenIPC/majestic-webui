@@ -19,12 +19,12 @@
 window.MajesticWasm = (function () {
 	'use strict';
 
-	// Where the decoder comes from. Same rule as xterm.js in tool-console.cgi
+	// Where the decoder comes from. Same rule as xterm.js in console.cgi
 	// and CodeMirror in files.js: too big to sit in a camera's flash, so it is
 	// fetched, version-pinned, with an error path — and a camera with no route
 	// to it simply does not get this rung. The chain carries on to MJPEG and
 	// says why, which is what it was taught to do in #279.
-	// Version-pinned, like @xterm/xterm@5.5.0 in tool-console.cgi and
+	// Version-pinned, like @xterm/xterm@5.5.0 in console.cgi and
 	// codemirror@5.65.16 in files.js. jsDelivr serves the tag straight from the
 	// repository, so there is no npm step between a release and this URL — and
 	// it serves the .wasm as application/wasm, which the camera cannot: its

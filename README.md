@@ -6,9 +6,18 @@ WebUI
 WebUI is a web interface for [OpenIPC Firmware][2],
 and is available on port 80 of your camera.
 
-Web interface uses system credentials for access. Default username is _root_,
-and password is _12345_. You will be asked to change the password at the first login.
-Please note that this will also affect your login via ssh!
+Web interface uses system credentials for access, with _root_ as the username.
+
+A camera fresh from the factory has **no root password at all**, and until one
+is set it is *unclaimed*: it streams nothing, answers RTSP and ONVIF with 401,
+and serves only the page that claims it. Point a browser at the camera and it
+takes you there — set a password, accept the Majestic licence, and you land in
+the WebUI signed in. `ssh root@<camera>` claims it just as well, and whichever
+door you use the other one sees it immediately. Note that this is the camera's
+system password: it is your ssh login too.
+
+Older cameras shipped with _12345_ instead. On those the WebUI sends you
+straight to its Access page until you change it.
 
 Signing in through the web form issues a session cookie; that cookie is what
 lets the live preview, log viewer and firmware-update progress work in every

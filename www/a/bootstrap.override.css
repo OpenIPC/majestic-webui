@@ -267,7 +267,7 @@ body > main > .container > h2 {
 }
 
 /* The settings page prints its own title, at the top of the rail rather than in
-   a band above both columns — see the note in mj-settings.cgi. Smaller than the
+   a band above both columns — see the note in camera.cgi. Smaller than the
    page heading it replaces because it now shares a 261px column with the tree
    it names, and because at 32px it was the loudest thing on a page whose
    subject is a list of settings. */
@@ -297,7 +297,7 @@ body > main > .container > h2 {
    window size. Stop the picture at 976 and the whole panel is on one screen for
    the first time: 8px to spare at 1080p, 368px at 1440p. Below 1375px, where
    96vw already wins, nothing about this changes. */
-#page-mj-settings > main > .container {
+#page-camera > main > .container {
 	max-width: min(96vw, 1320px);
 }
 
@@ -307,7 +307,7 @@ body > main > .container > h2 {
    against the 966px a col-md-3 would leave. Below md the two stack and the
    percentages never applied anyway, hence the same breakpoint Bootstrap uses. */
 @media (min-width: 768px) {
-	#page-mj-settings .row > .col-md-3 {
+	#page-camera .row > .col-md-3 {
 		width: 20rem;
 	}
 
@@ -316,7 +316,7 @@ body > main > .container > h2 {
 	   width and wraps under the rail instead — which is exactly what happened
 	   at 1024, where the knob strip's four cells want more than the 663px left
 	   over. */
-	#page-mj-settings #mj-settings-form-col {
+	#page-camera #mj-settings-form-col {
 		flex: 1 1 0;
 		width: auto;
 		max-width: none;
@@ -519,7 +519,7 @@ pre#output[data-cmd] {
 	color: rgba(170, 170, 170, 0.8);
 }
 
-/* live log console (info-logs.cgi) */
+/* live log console (logs.cgi) */
 #log {
 	height: 70vh;
 	overflow-y: auto;
@@ -885,32 +885,6 @@ mark {
 	.mj-cols > .mj-col {
 		flex: 0 1 auto;
 		width: 100%;
-	}
-}
-
-/* section cards pack as a masonry so unequal heights don't leave chessboard
-   gaps (cards flow top-to-bottom, then into the next column) */
-.mj-cards {
-	column-count: 2;
-	column-gap: 1.5rem;
-}
-
-/* separate the masonry from whatever sits above it (the live-preview / live-
-   adjust row on the Image tab, or the page heading on plain tabs) so the first
-   card doesn't butt up against it. :not(:empty) avoids a phantom gap on the
-   motion/lone tabs where the masonry container is created but unused. */
-.mj-cards:not(:empty) {
-	margin-top: 1.5rem;
-}
-
-.mj-cards > .card {
-	break-inside: avoid;
-	margin-bottom: 1.5rem;
-}
-
-@media (max-width: 991.98px) {
-	.mj-cards {
-		column-count: 1;
 	}
 }
 
@@ -1465,11 +1439,6 @@ mark {
 
 .mj-live-grp + .mj-live-grp {
 	margin-top: 1.25rem;
-}
-
-.mj-live-foot {
-	display: flex;
-	margin-top: 0.75rem;
 }
 
 .mj-live-linkbtn {
@@ -2325,9 +2294,9 @@ mark {
    preview-zoom.js sizes the picture inside it. Same window, same camera: 2560
    x 1920 at 1:1.
 
-   These rules only ever apply to preview.cgi -- p/common.cgi's preview() is
-   the only thing that emits .mj-stage, and preview.cgi is its only caller.
-   mj-settings.cgi's Live section builds its own stage client-side out of
+   These rules only ever apply to live.cgi -- p/common.cgi's preview() is
+   the only thing that emits .mj-stage, and live.cgi is its only caller.
+   camera.cgi's Live section builds its own stage client-side out of
    .mj-pv-media, which is why none of this reaches it. */
 .mj-stage {
 	position: relative;
@@ -2356,7 +2325,7 @@ mark {
    min-height: 0 on every flex item in the chain is the load-bearing half: a
    flex item's default min-height is auto, so without it the stage refuses to
    shrink below its content and the page scrolls after all. */
-#page-preview {
+#page-live {
 	height: 100vh;
 	height: 100dvh;
 	display: flex;
@@ -2364,11 +2333,11 @@ mark {
 	overflow: hidden;
 }
 
-#page-preview > .navbar {
+#page-live > .navbar {
 	flex: none;
 }
 
-#page-preview > main.mj-fullbleed {
+#page-live > main.mj-fullbleed {
 	flex: 1 1 auto;
 	min-height: 0;
 	display: flex;
@@ -2384,13 +2353,13 @@ mark {
    tall on its own. (`:empty` would not have done it anyway — the whitespace
    between the haserl conditionals is a text node, and `:empty` counts those.) */
 
-#page-preview .mj-player {
+#page-live .mj-player {
 	flex: 1 1 auto;
 	min-height: 0;
 	display: flex;
 }
 
-#page-preview .mj-stage {
+#page-live .mj-stage {
 	flex: 1 1 auto;
 	min-width: 0;
 	min-height: 12rem;
@@ -3137,9 +3106,7 @@ mark {
 }
 
 .mj-ptz-btn:active,
-.mj-ptz-fnbtn:active,
-.mj-ptz-btn.mj-held,
-.mj-ptz-fnbtn.mj-held {
+.mj-ptz-fnbtn:active {
 	background: rgba(255, 255, 255, 0.22);
 	color: #fff;
 }
@@ -3364,7 +3331,7 @@ mark {
 	outline: none;
 }
 
-/* ── recordings browser (tool-recordings.cgi) ──────────────────────────────
+/* ── recordings browser (recordings.cgi) ──────────────────────────────
    Everything here is theme-driven through Bootstrap's own custom properties,
    because the timeline has to stay legible on both grounds: the coverage bar
    is the accent, and the playhead and selection are drawn in the body colour,
@@ -3751,7 +3718,7 @@ dialog.mj-modal::backdrop {
 	background: rgba(0, 0, 0, 0.5);
 }
 
-/* ── Dashboard (status.cgi) ─────────────────────────────────────────────────
+/* ── Dashboard (dashboard.cgi) ─────────────────────────────────────────────────
    The merged "Signal Wall + Live" layout. Everything is theme-driven through
    Bootstrap custom properties plus the --st-* series colors above; classes
    are custom (.st-*) rather than Bootstrap utilities so the PurgeCSS subset
@@ -3759,7 +3726,7 @@ dialog.mj-modal::backdrop {
 
 /* The topbar's SoC temperature duplicates the Temperature tile on this one
    page; content a page already carries is not repeated in the strip. */
-#page-status #soc-temp {
+#page-dashboard #soc-temp {
 	display: none;
 }
 

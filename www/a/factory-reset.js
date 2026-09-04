@@ -1,8 +1,8 @@
 // Factory reset: stream `sysupgrade -n --web` through j/run.cgi into the pane on
-// fw-reset.cgi, then wait for the camera to come back and hand the user over to
+// factory-reset.cgi, then wait for the camera to come back and hand the user over to
 // it. Vanilla JS; `$` and `termWriter` come from main.js.
 //
-// Not the /ws/upgrade socket fw-update.js uses: that endpoint exists to drive a
+// Not the /ws/upgrade socket update.js uses: that endpoint exists to drive a
 // firmware flash, and a reset writes no image. run.cgi is the plain streaming
 // pipe this page has always used. What changed is what happens around it.
 //
@@ -10,7 +10,7 @@
 // hold. It read the stream a line at a time and appended each one, which is
 // fine for `Stopping crond: OK` and useless for a meter that redraws itself
 // with a bare \r — hence the terminal writer. And when the stream ended it
-// navigated straight to fw-restart.cgi, on the assumption that sysupgrade had
+// navigated straight to restart.cgi, on the assumption that sysupgrade had
 // been told -x and had left the rebooting to us. It hasn't for a while:
 // rootfs_data is the upper layer of the overlay the running root is assembled
 // from, so erasing it takes the live filesystem with it and sysupgrade reboots
@@ -26,7 +26,7 @@
 	const term = termWriter(out);
 	const dec = new TextDecoder('utf-8');
 
-	// Same two markers fw-update.js reads, for the same reasons. "Protected:
+	// Same two markers update.js reads, for the same reasons. "Protected:
 	// flashing continues" is sysupgrade's point of no return, printed just before
 	// the erase; "Unconditional reboot" is it announcing the reboot it is about
 	// to take. die() prints "<reason> Aborting." — before the RAM pivot that
@@ -58,7 +58,7 @@
 	// the read that follows neither resolves nor rejects. Reported on a
 	// gk7205v300 whose transcript stopped on the last erase line: overlay wiped,
 	// camera rebooted, page left sitting on "do not navigate away" for good
-	// (issue #154). fw-update.js has had this timer since #120; the reset page was
+	// (issue #154). update.js has had this timer since #120; the reset page was
 	// written with the other two triggers and not this one.
 	let lastData = 0;
 	let quietTimer = null;
@@ -233,7 +233,7 @@
 		// in-RAM sessions and the erase took the stay-signed-in key with it.
 		// replace(), not href: this document is finished, and leaving it in
 		// history hands Back a page that looks alive and is not.
-		setTimeout(() => location.replace('/cgi-bin/status.cgi'), 1500);
+		setTimeout(() => location.replace('/cgi-bin/dashboard.cgi'), 1500);
 	}
 
 	// Whichever of the two triggers gets here first wins: sysupgrade announced the

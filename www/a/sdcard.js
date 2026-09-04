@@ -178,7 +178,7 @@
 					: '<div class="x-small text-success mb-3">✓ Recording to this card</div>')
 				: (d.mounted && d.health !== 'readonly'
 					? '<button class="btn btn-sm btn-primary mb-3" id="sd-use">Use this card for recording</button>' : ''))
-			+ '<div><a class="small" href="mj-settings.cgi?tab=records">Recording settings →</a></div>'
+			+ '<div><a class="small" href="camera.cgi?tab=records">Recording settings →</a></div>'
 			+ '</div></div></div></div>';
 	}
 
@@ -194,7 +194,7 @@
 		SD.addEventListener('click', e => {
 			const b = e.target.closest('[data-act]'); if (!b) return;
 			const act = b.dataset.act;
-			if (act === 'browse') { location = 'tool-files.cgi?cd=' + encodeURIComponent(state.mountpoint); return; }
+			if (act === 'browse') { location = 'files.cgi?cd=' + encodeURIComponent(state.mountpoint); return; }
 			if (act === 'format') { openFormat(); return; }
 			if (act === 'fsck' && !confirm('Unmount and check the filesystem?')) return;
 			busy(b); op({ op: act }).then(after);

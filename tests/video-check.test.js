@@ -139,7 +139,7 @@ group('what it does say');
 	const stall = vc.diagnose(BOTH_ON, sample({ venc_empty_frames_run: 40 }),
 		hold(st, sample({ venc_empty_frames_run: 40 }), 2), null);
 	check('a stalled encoder is a finding', !!stall && stall.code === 'stall');
-	check('and it offers a restart', !!stall && /fw-restart/.test(stall.act.href));
+	check('and it offers a restart', !!stall && /restart\.cgi/.test(stall.act.href));
 	// The banner this replaced carried .confirm + data-confirm, which main.js
 	// wires at load — and the anchor it lands on now is written at runtime, so
 	// that wiring would never see it. The prompt travels with the action
@@ -163,9 +163,9 @@ group('what it does say');
 	// so the finding also points at the one artefact worth screenshotting for
 	// whoever sold it to them.
 	check('and a hardware fault offers the logs',
-		!!blind && !!blind.help && /info-logs/.test(blind.help.href));
+		!!blind && !!blind.help && /logs\.cgi/.test(blind.help.href));
 	check('the stalled encoder offers them too',
-		!!stall && !!stall.help && /info-logs/.test(stall.help.href));
+		!!stall && !!stall.help && /logs\.cgi/.test(stall.help.href));
 
 	// Both signals agreeing gets its own sentence, because it is a stronger
 	// claim than either alone.

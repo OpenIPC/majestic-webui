@@ -5,7 +5,7 @@
 // drive the DOM lives here, where the page is guaranteed to be real.
 // `$`, `apiFetch`, `mjConfig` and `mjGet` are globals from main.js.
 (function () {
-	// Two of these are shared with mj-settings.cgi's Live adjustments stage,
+	// Two of these are shared with camera.cgi's Live adjustments stage,
 	// which builds its chrome client-side and so has no elements at load time.
 	// They are published before the early return below for exactly that reason.
 	// What is NOT shared is the bar's auto-hide: on that panel the bar carries

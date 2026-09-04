@@ -262,7 +262,7 @@
 	}
 
 	// Read the version the camera is running NOW. Re-fetches this page instead of
-	// adding an endpoint — fw-update.cgi already renders it, and the value has to
+	// adding an endpoint — update.cgi already renders it, and the value has to
 	// come from the rebooted camera rather than from this stale document.
 	// Returns an object:
 	//   { needsAuth: true }  — reachable but the session is gone (the reboot
@@ -275,7 +275,7 @@
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 5000);
 		try {
-			const r = await rawFetch('fw-update.cgi?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
+			const r = await rawFetch('update.cgi?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
 			// Reachable, but our session no longer authenticates: the reboot cleared
 			// it and a form login left no Basic to fall back on. That is itself proof
 			// the camera came back — report it so the caller sends us to sign in,
@@ -313,7 +313,7 @@
 			if (res.needsAuth) {
 				status('warning', 'Camera is back — please sign in again to continue.');
 				setTimeout(() => location.href =
-					'/login.html?next=' + encodeURIComponent('/cgi-bin/status.cgi'), 1500);
+					'/login.html?next=' + encodeURIComponent('/cgi-bin/dashboard.cgi'), 1500);
 				return;
 			}
 			now = res.version;
@@ -326,7 +326,7 @@
 				// first and read as a refusal to somebody who had just asked for an
 				// upgrade (issue #120).
 				status('success', 'Already up to date — running ' + now + '.');
-				setTimeout(() => location.href = 'status.cgi', 1500);
+				setTimeout(() => location.href = 'dashboard.cgi', 1500);
 				return;
 			}
 			status('danger', 'The camera rebooted but is still running ' + now +
@@ -335,7 +335,7 @@
 			return;
 		}
 		status('success', now ? 'Updated — now running ' + now + '.' : 'Camera is back online.');
-		setTimeout(() => location.href = 'status.cgi', 1500);
+		setTimeout(() => location.href = 'dashboard.cgi', 1500);
 	}
 
 	// Positive evidence that the camera restarted, instead of inferring it from a

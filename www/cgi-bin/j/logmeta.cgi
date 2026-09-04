@@ -7,7 +7,7 @@
 # is device-local with no year and no zone, and this offset is the missing half.
 #
 # Deliberately not `date +%z` and not /etc/TZ: /etc/init.d/rcS exports TZ once at
-# boot, so syslogd keeps whatever zone was current then, and info-logs.cgi
+# boot, so syslogd keeps whatever zone was current then, and logs.cgi
 # restarts it with the CGI's inherited environment rather than the file. Only the
 # daemon's own /proc entry is right in every state, including after a timezone
 # change but before the reboot that makes it stick.

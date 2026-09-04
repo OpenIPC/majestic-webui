@@ -2,118 +2,6 @@
 <%
 IFS_ORIG=$IFS
 
-# tag "text" "classes" "extras"
-div() {
-	tag "div" "$1" "$2" "$3"
-}
-
-# tag "tag" "text" "css" "extras"
-tag() {
-	local t="$1"
-	local n="$2"
-	local c="$3"
-	[ -n "$c" ] && c=" class=\"${c}\""
-	local x="$4"
-	[ -n "$x" ] && x=" ${x}"
-	echo "<${t}${c}${x}>${n}</${t}>"
-}
-
-# A "tag" "classes" "extras"
-A() {
-	local c="$2"
-	[ -n "$c" ] && c=" class=\"${c}\""
-	local x="$3"
-	[ -n "$x" ] && x=" ${x}"
-	echo "<${1}${c}${x}>"
-}
-
-Z() {
-	echo "</${1}>"
-}
-
-d() {
-	echo "$1" >&2
-}
-
-e() {
-	echo -e -n "$1"
-}
-
-h1() {
-	tag "h1" "$1" "$2" "$3"
-}
-
-h2() {
-	tag "h2" "$1" "$2" "$3"
-}
-
-h3() {
-	tag "h3" "$1" "$2" "$3"
-}
-
-h4() {
-	tag "h4" "$1" "$2" "$3"
-}
-
-h5() {
-	tag "h5" "$1" "$2" "$3"
-}
-
-h6() {
-	tag "h6" "$1" "$2" "$3"
-}
-
-label() {
-	tag "label" "$1" "$2" "$3"
-}
-
-li() {
-	tag "li" "$1" "$2" "$3"
-}
-
-p() {
-	tag "p" "$1" "$2" "$3"
-}
-
-span() {
-	tag "span" "$1" "$2" "$3"
-}
-
-div_() {
-	A "div" "$1" "$2"
-}
-
-_div() {
-	Z "div"
-}
-
-row_() {
-	echo "<div class\"row ${1}\" ${2}>"
-}
-
-_row() {
-	echo "</div>"
-}
-
-row() {
-	row_ "$2"
-	echo "$1"
-	_row
-}
-
-span_() {
-	A "span" "$1" "$2"
-}
-
-_span() {
-	Z "span"
-}
-
-# alert "text" "type" "extras"
-alert() {
-	echo "<div class=\"alert alert-${2}\" ${3}>${1}</div>"
-}
-
 # card_head "title" "note"
 #
 # The heading of a card, in the vocabulary the settings deck uses: micro-caps
@@ -201,7 +89,7 @@ uses_default_password() {
 }
 
 check_password() {
-	local p="/cgi-bin/fw-interface.cgi"
+	local p="/cgi-bin/access.cgi"
 	[ -z "$SCRIPT_NAME" ] || [ "$SCRIPT_NAME" = "${p}" ] && return
 	if uses_default_password; then
 		redirect_to "${p}" "danger" "You must set your own secure password!"
@@ -221,23 +109,6 @@ field_hidden() {
 	echo "<input type=\"hidden\" name=\"${n}\" id=\"${n}\" value=\"${v}\" class=\"form-hidden\">"
 }
 
-# field_integer "name" "label" "value" "min" "max" "hint"
-field_integer() {
-	local n="$1"
-	local l="$2"
-	local v="$3"
-	local x="$4"
-	local y="$5"
-	local h="$6"
-	echo "<p class=\"number mj-row\">" \
-		"<label class=\"form-label\" for=\"${n}\">${l}</label>" \
-		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">"
-	echo "<input type=\"number\" id=\"${n}\" name=\"${n}\" class=\"form-control text-end\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step=\"1\">" \
-		"</span></span>"
-	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
-	echo "</p>"
-}
-
 # field_password "name" "label" "hint"
 field_password() {
 	local n="$1"
@@ -251,24 +122,6 @@ field_password() {
 		"<label class=\"input-group-text\">" \
 		"<input type=\"checkbox\" class=\"form-check-input me-1\" data-for=\"${n}\"> show" \
 		"</label></span></span></span>"
-	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
-	echo "</p>"
-}
-
-# field_range "name" "label" "value" "min" "max" "hint"
-field_range() {
-	local n="$1"
-	local l="$2"
-	local v="$3"
-	local x="$4"
-	local y="$5"
-	local h="$6"
-	echo "<p class=\"range mj-row\" id=\"${n}_wrap\">" \
-		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
-		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\"><span class=\"input-group\">"
-	echo "<input type=\"hidden\" id=\"${n}\" name=\"${n}\" value=\"${v}\">"
-	echo "<input type=\"range\" class=\"form-control form-range\" id=\"${n}-range\" value=\"${v}\" min=\"${x}\" max=\"${y}\" step=\"1\">"
-	echo "<span class=\"input-group-text show-value\" id=\"${n}-show\">${v}</span></span></span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
 }
@@ -294,7 +147,7 @@ attr_escape() {
 # Not `pre` or `ex`: both wrap what they are given in a block element -- a <pre>,
 # and a <div> carrying a visible "# command" heading -- which is no use for a
 # value sitting inside a <dt> or mid-sentence. Escaping the endpoint addresses
-# with either would have put a <pre> inside every <dt> on mj-endpoints.cgi and
+# with either would have put a <pre> inside every <dt> on stream-urls.cgi and
 # taken the click-to-copy wiring with it.
 #
 # Not `attr_escape` either. That one deliberately puts numeric character
@@ -454,22 +307,6 @@ majestic_reload() {
 	return 0
 }
 
-# Best-effort clock fix for HTTPS (issue #44): a fresh flash boots with the
-# stale build timestamp until ntpd converges, so HTTPS to GitHub fails
-# ("certificate not yet valid"). Try a quick blocking NTP sync; if that is
-# unreachable, set the clock from a plain-HTTP Date header (no TLS needed).
-synctime() {
-	timeout 8 ntpd -n -q -N >/dev/null 2>&1 && return 0
-	local h d e
-	for h in http://github.com http://deb.debian.org; do
-		d=$(curl -m5 -sI "$h" | sed -n 's/^[Dd]ate: //p' | head -1 | tr -d '\r')
-		[ -z "$d" ] && continue
-		e=$(date -D "%a, %d %b %Y %T GMT" -d "$d" +%s 2>/dev/null)
-		[ -n "$e" ] && date -s @"$e" >/dev/null 2>&1 && return 0
-	done
-	return 1
-}
-
 log_create() {
 	echo "${1}:${2}" > "$log_file"
 }
@@ -498,33 +335,34 @@ set_error_flag() {
 	error=1
 }
 
+# The browser tab. It carries the bar menu the page sits under, so a window
+# of camera tabs reads "System - Network - OpenIPC" rather than four tabs all
+# called Network; a top-level page has no menu and gets no prefix. The `title`
+# secondary that used to sit here is gone -- nothing in the tree ever set it.
 html_title() {
-	[ -n "$page_title" ] && echo -n "$page_title"
-	[ -n "$title" ] && echo -n ": $title"
-	echo -n " - OpenIPC"
+	local m=$(page_menu "$pagename")
+	[ -n "$m" ] && printf '%s - ' "$m"
+	printf '%s - OpenIPC' "$page_title"
 }
 
 include() {
 	[ -f "$1" ] && . "$1"
 }
 
-# label "name" "classes" "extras" "units"
-label() {
-	local c="form-label"
-	[ -n "$2" ] && c="${c} ${2}"
-	local l="$(t_label "$1")"
-	[ -z "$l" ] && l="$1" && c="${c} bg-warning"
+# pre "text" "classes" "extras"
+#
+# The <pre> twin of ex, for a text blob the camera produced rather than a
+# command to run. It has no caller today, but it is half of the escaping API
+# tools/lint-templates.sh names when it catches request data rendered raw
+# through an echoing template tag, so removing it would leave that message
+# pointing at nothing. (Spelling that tag out here would open a second
+# template block inside this one -- haserl scans the raw file for it.)
+pre() {
+	local c="$2"
+	[ -n "$c" ] && c=" class=\"${c}\""
 	local x="$3"
 	[ -n "$x" ] && x=" ${x}"
-	local u="$4"
-	[ -n "$u" ] && l="${l}, <span class=\"units text-secondary x-small\">$u</span>"
-	echo "<label for=\"${1}\" class=\"${c}\"${x}>${l}</label>"
-}
-
-# pre "text" "classes" "extras"
-pre() {
-	# replace <, >, &, ", and ' with HTML entities
-	tag "pre" "$(echo -e "$1" | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g")" "$2" "$3"
+	echo "<pre${c}${x}>$(esc "$(echo -e "$1")")</pre>"
 }
 
 preview() {
@@ -579,7 +417,7 @@ preview() {
 		     moment the fallback works. -->
 		<p id="mj-note" class="alert alert-warning mj-stage-alert" style="display:none">
 			<span id="mj-note-why">Your browser can't play the live video stream.</span>
-			<a href="mj-settings.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
+			<a href="camera.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
 		</p>
 		<!-- The other half of "there is nothing to see", and the one #mj-note
 		     cannot reach: a camera on the wrong sensor driver PLAYS, so the
@@ -592,11 +430,11 @@ preview() {
 		     is what the page says when that hand-off has been spent. -->
 		<p id="mj-blind" class="alert alert-warning mj-stage-alert" style="display:none">
 			<span id="mj-blind-why"></span>
-			<a id="mj-blind-act" href="mj-settings.cgi?tab=isp"></a>
+			<a id="mj-blind-act" href="camera.cgi?tab=isp"></a>
 			<!-- Hidden until a finding says it applies: a hardware fault is the
 			     one an owner cannot fix from a settings page, and the log is
 			     what they can screenshot for whoever sold them the camera. -->
-			<a id="mj-blind-help" href="info-logs.cgi" hidden></a>
+			<a id="mj-blind-help" href="logs.cgi" hidden></a>
 		</p>
 		<!-- The status chip. Same id as the badge it replaces, so every state
 		     write (connecting… / no signal / MJPEG / reconnecting…) keeps
@@ -654,7 +492,7 @@ preview() {
 		     one element instead of four, clipped by the stage. -->
 		<div id="mj-marquee" class="mj-marquee" hidden></div>
 		<!-- PTZ mount. Empty and hidden on every camera; p/motor.cgi (included
-		     by preview.cgi only when the hardware exists) emits the pad after
+		     by live.cgi only when the hardware exists) emits the pad after
 		     the player and preview-ptz.js relocates it in here. -->
 		<div id="mj-ptz" class="mj-ptz" hidden></div>
 		<!-- The control bar. Hidden until pointed at, focused into, or tapped
@@ -716,7 +554,7 @@ preview() {
 			     over a live picture that also steers a camera. -->
 			<span class="mj-hud mj-tog-wrap" id="mj-area-ctl" hidden>
 				<input type="checkbox" class="mj-tog-in" id="mj-area" autocomplete="off">
-				<label class="mj-tog" for="mj-area" id="mj-area-lbl"
+				<label class="mj-tog" for="mj-area"
 					title="Draw a rectangle on the picture to enlarge that part of it. Where nothing is hidden — Fit, mostly — you can just drag; this is for when the picture is already zoomed in and a drag would move it instead. Esc cancels; Fit or Fill comes back out.">
 					<span class="mj-led"></span>
 					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -833,6 +671,43 @@ redirect_back() {
 }
 
 # redirect_to "url" "flash class" "flash text"
+# moved_to <the page it moved to>
+#
+# The whole body of a compatibility alias -- one of the tombstone .cgi files
+# still carrying a pre-rename name, each of which is four lines and a call to
+# this. They all say REMOVE AFTER 2027-06 and can go together.
+#
+# They are not merely politeness to old bookmarks. sbin/updatewebui prunes the
+# overlay copy of a name this release no longer ships, and pruning UNCOVERS the
+# firmware's own older copy underneath -- so on a camera whose image predates
+# the rename, /cgi-bin/fw-settings.cgi would answer 200 with the page exactly
+# as it was, its links and its behaviour and its old bugs included. A file here
+# shadows that; deleting these files does not restore a 404, it restores the
+# stale page.
+#
+# 307 rather than 301, and rather than 302. Not 301 because a 301 a browser has
+# cached outlives the file that sent it, and these are meant to be deleted. Not
+# 302 because 302 does not carry the method: a POST to an old page URL becomes
+# a bodyless GET at the new one, and every page here mutates only on POST -- so
+# the form would appear to submit and do nothing. 307 is 302's method-preserving
+# twin, equally uncached, and it re-issues the POST with its body at the new
+# address, which also leaves the right URL in the bar and the right id on
+# <body>. (The two machine endpoints cannot use any redirect: a curl without -L
+# follows none of them. They exec instead.)
+#
+# The query string rides along either way: a stale link is usually a deep one,
+# and camera.cgi?tab=nightMode is the shape of every settings bookmark there is.
+moved_to() {
+	local q=
+	[ -n "$QUERY_STRING" ] && q="?$QUERY_STRING"
+	echo "HTTP/1.1 307 Temporary Redirect"
+	echo "Content-type: text/html; charset=UTF-8"
+	echo "Cache-Control: no-store"
+	echo "Location: /cgi-bin/${1}${q}"
+	echo
+	exit 0
+}
+
 redirect_to() {
 	[ -n "$3" ] && log_create "$2" "$3"
 	echo "HTTP/1.1 303 See Other"
@@ -842,21 +717,6 @@ redirect_to() {
 	echo "Location: $1"
 	echo
 	exit 0
-}
-
-report_command() {
-	echo "<h4># ${1}</h4>"
-	echo "<pre class=\"small\">${2}</pre>"
-}
-
-report_error() {
-	echo "<h4 class=\"text-danger\">Oops. Something happened.</h4>"
-	alert "$1" "danger"
-}
-
-# report_log "text" "extras"
-report_log() {
-	pre "$1" "small" "$2"
 }
 
 # The bar answers three questions -- which camera am I on, what hardware is
@@ -882,10 +742,6 @@ generate_signature() {
 signature() {
 	[ ! -f "$signature_file" ] && generate_signature
 	cat $signature_file
-}
-
-t_label() {
-	eval "echo \$tL_${1}"
 }
 
 t_value() {

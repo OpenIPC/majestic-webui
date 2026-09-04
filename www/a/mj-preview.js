@@ -1,6 +1,6 @@
 // The camera picture, as a thing a settings section can embed.
 //
-// mj-settings.cgi shows one section at a time, and more than one of them wants
+// camera.cgi shows one section at a time, and more than one of them wants
 // to look at the camera while you change it: the Live adjustments leaf does
 // today, and the regions a Visual editor draws, the crop a resolution field
 // implies and the masks a privacy section places are all judgements nobody can

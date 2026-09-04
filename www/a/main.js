@@ -27,9 +27,9 @@ function sleep(ms) {
 // somewhere to come back to.
 //
 // Deliberately NOT a patch over window.fetch. The pages that deliberately
-// outlive their own session must not be redirected out from under: fw-update.js
+// outlive their own session must not be redirected out from under: update.js
 // expects a 401 while the camera reboots mid-upgrade and handles it itself, with
-// wording that depends on knowing an upgrade was in flight, and fw-reset.js
+// wording that depends on knowing an upgrade was in flight, and factory-reset.js
 // streams the factory reset that destroys the session in the first place. A
 // blanket redirect would race both and throw the transcript away. Anything that
 // wants this behaviour opts in.
@@ -94,10 +94,10 @@ function mjGet(cfg, dot) {
 }
 
 // Camera wall clock. /etc/timezone is a display label, not an IANA name --
-// fw-time.js writes it de-underscored ("America/New York"), which
+// time.js writes it de-underscored ("America/New York"), which
 // Intl.DateTimeFormat rejects with a RangeError. So the camera's zone is applied
 // as the numeric offset pulse.cgi reports, and the result is formatted as if it
-// were UTC. Loaded on every page (p/header.cgi), so fw-time.js reuses both.
+// were UTC. Loaded on every page (p/header.cgi), so time.js reuses both.
 // null, not 0, when the offset is missing or malformed: callers that can hold
 // off (logs.js keeps lines raw until it knows the zone) must be able to tell
 // "unknown" from a genuine +0000, or a camera on +0300 would silently render
@@ -168,8 +168,8 @@ function setProgressBar(id, value, name) {
 // touched again, and only the line still being drawn is rewritten. The console
 // page has an actual terminal (xterm.js) and needs none of this.
 //
-// Shared by the two pages that stream sysupgrade — fw-update.js over /ws/upgrade
-// and fw-reset.js over j/run.cgi. They render the identical output, so the
+// Shared by the two pages that stream sysupgrade — update.js over /ws/upgrade
+// and factory-reset.js over j/run.cgi. They render the identical output, so the
 // lesson above only wants learning once.
 function termWriter(el) {
 	// \u001b/\u009b escaped rather than written as the literal ESC and CSI bytes
@@ -586,10 +586,10 @@ function heartbeat() {
 // Mark the nav entry for the page being viewed. The server emits none: the
 // nav is one static block shared by every page, and the hrefs already in the
 // DOM are the only list of pages there is. Scoped to #navbarNav so the brand
-// logo (also status.cgi) is not marked. A page inside a dropdown lights its
+// logo (also dashboard.cgi) is not marked. A page inside a dropdown lights its
 // parent toggle too, or the collapsed menu gives no hint of where you are.
 document.addEventListener('DOMContentLoaded', () => {
-	const page = location.pathname.split('/').pop() || 'status.cgi';
+	const page = location.pathname.split('/').pop() || 'dashboard.cgi';
 	$$('#navbarNav a[href]').forEach(a => {
 		const href = a.getAttribute('href');
 		if (href === '#' || href.includes('://')) return; // toggles, Sign out, openipc.cloud
@@ -720,7 +720,7 @@ function initAll() {
 	// Both used to be read server-side out of /api/v1/config.json with
 	// jsonfilter, which cost the camera a shell-out to a JSON parser -- and the
 	// firmware a 63KB libubox -- to do what JSON.parse does here for nothing.
-	// Guarded on the spans so only mj-endpoints.cgi pays for the config fetch;
+	// Guarded on the spans so only stream-urls.cgi pays for the config fetch;
 	// mjConfig() caches, so a page that already asked does not ask twice.
 	//
 	// Majestic only range-checks rtsp.port on the write path, so a hand-edited

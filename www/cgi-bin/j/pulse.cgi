@@ -11,15 +11,15 @@ overlay_used=$(df | grep /overlay | xargs | cut -d' ' -f5)
 
 # Epoch and UTC offset in one date(1), split with parameter expansion. The
 # offset and the label are for the pages that must speak the camera's wall
-# clock because the filesystem does: fw-time.cgi, the File Manager (mtimes)
+# clock because the filesystem does: time.cgi, the File Manager (mtimes)
 # and Recordings (clips are named by the camera's strftime). /etc/timezone is
-# a display label only — fw-time.js writes it de-underscored, e.g. "America/New
+# a display label only — time.js writes it de-underscored, e.g. "America/New
 # York", which Intl.DateTimeFormat rejects — so the numeric offset is what
 # actually renders a wall clock.
 now=$(date '+%s %z')
 
 # /etc/timezone is device-written text landing inside a JSON string: escape
-# the two JSON-active characters the way mj-settings.cgi does, and drop
+# the two JSON-active characters the way camera.cgi does, and drop
 # control characters — an embedded newline would end the response early.
 tz=$(tr -d '[:cntrl:]' < /etc/timezone 2>/dev/null | sed 's/\\/\\\\/g; s/"/\\"/g')
 

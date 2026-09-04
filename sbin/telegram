@@ -75,7 +75,7 @@ fi
 
 # The response body still goes to stdout for anyone running this by hand or out
 # of cron. What is new is the exit status: this used to `exit 0` unconditionally,
-# so a rejected send reported success and ext-telegram.cgi's ?send=image webhook
+# so a rejected send reported success and telegram.cgi's ?send=image webhook
 # had to dig `ok` out of the JSON body with jsonfilter to find out otherwise.
 # Telegram answers a rejected send with 4xx, so the HTTP code alone settles it
 # and the camera no longer needs a JSON parser on flash for this.

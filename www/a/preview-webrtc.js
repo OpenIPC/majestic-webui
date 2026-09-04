@@ -194,7 +194,6 @@ window.MajesticWebRTC = (function () {
 					if (r.type === 'inbound-rtp' && r.kind === 'audio') {
 						s.audioKbps = rate(r.bytesReceived || 0, rateAudioBytes);
 						rateAudioBytes = r.bytesReceived || 0;
-						s.audioPackets = r.packetsReceived || 0;
 					} else if (r.type === 'outbound-rtp' && r.kind === 'audio') {
 						// This browser's microphone, as the browser counts it.
 						// The camera's audio-in counter is the other half: one
