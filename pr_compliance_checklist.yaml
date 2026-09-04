@@ -1,0 +1,130 @@
+# Hard gates for majestic-webui pull requests.
+#
+# These are binary pass/fail checks, deliberately narrow and objective.
+#
+# The first two exist because this repository is PUBLIC and the firmware's source
+# repository is not. They are the only gates here whose violation cannot be undone
+# after merge: a commit message on a public branch cannot be rewritten, and editing a
+# merged pull request's description leaves the original visible in its edit history.
+# They apply to the diff AND to the pull request's own title and description.
+#
+# Schema: https://docs.qodo.ai/v1/features/custom-compliance
+
+pr_compliances:
+  - title: "No references into a sibling repository's private source"
+    compliance_label: true
+    objective: >
+      This repository is public; the firmware daemon it talks to is developed in a
+      private one. A path, symbol or tracker number from that repository is a pointer
+      the reader cannot follow, attached to internals they were not meant to have. It
+      also dates badly: the file moves, the symbol is renamed, and the sentence that
+      cited it can no longer be checked by anyone at all.
+    success_criteria: >
+      Claims about what the camera does are stated as behaviour observable from
+      outside it — what an endpoint returned, what landed in majestic.yaml, what the
+      stream or the log did — or they cite a public surface: /api/v1/* endpoints,
+      config keys, schema annotations, metric names, or an issue in the public
+      OpenIPC/majestic tracker. Where a source file has to be gestured at, it is named
+      by what it is ("its own web server", "the camera's overlay formatter").
+    failure_criteria: >
+      The diff, the title or the description adds any of: a path inside another
+      repository's tree (src/..., include/..., a bare foo.c or foo.h that is not a
+      file in THIS repository); the name or URL of a private repository (widgetii/...);
+      a link or #number reference into a private tracker — including one written as
+      "OpenIPC/majestic#N" for an N that does not exist in that public tracker; a
+      C-style identifier attributed to the firmware rather than to this tree
+      (snake_case with a call suffix, an ALL_CAPS macro or enum constant, a struct or
+      type name) where the sentence around it says the camera or the daemon is what
+      contains it; or a quoted excerpt of its source. This criterion deliberately
+      gives no examples: an example here would be the disclosure it prohibits.
+
+  - title: "No lab environment details"
+    compliance_label: true
+    objective: >
+      The cameras used for verification are private infrastructure. Publishing how to
+      reach one, or what one printed, exposes an address and a credential to everyone
+      who reads a public repository, forever.
+    success_criteria: >
+      Verification is described by hardware class and configuration — "measured on an
+      hi3516ev300 + imx335, main stream 1280x720" — which is what makes a result
+      reproducible. Any address a reader needs is a placeholder or an RFC 5737 example.
+    failure_criteria: >
+      The diff, the title or the description adds a lab camera's hostname or domain
+      (*.dlab.*, *.torturelabs.com), a private IP literal, a credential or default
+      password, an SSH alias or config stanza for one, a private build's branch name
+      or commit id, or pasted console/log output or screenshots captured from a lab
+      device.
+
+  - title: "An absent reading is not a zero, and a failed fetch is not a fact"
+    compliance_label: true
+    objective: >
+      This UI's recurring bug class is a confident sentence with nothing behind it. A
+      camera whose build omits a metric is not a camera reporting zero, and a fetch
+      that failed has not told us anything — coercing either into a value produces a
+      warning, a verdict or a chart that states the opposite of the truth, with no
+      error anywhere to contradict it.
+    success_criteria: >
+      A metric, config key, schema annotation or endpoint that may be absent is
+      distinguished from a present one at the point it is read, and the consumer gates
+      on whether it is known. Absence degrades to silence or to a stated limitation.
+    failure_criteria: >
+      The diff coerces a possibly-absent reading with `| 0`, `|| 0`, `Number(x) || 0`
+      or `parseInt(x) || 0`; substitutes `{}` or `[]` for a failed fetch and then reads
+      it as data; or renders a verdict, warning or percentage from a value that may
+      never have arrived.
+
+  - title: "Shell output is escaped before it is rendered"
+    compliance_label: true
+    objective: >
+      Everything a CGI echoes may carry a device name, a filename or a POST field, and
+      the page is served to an authenticated administrator's browser.
+    success_criteria: >
+      Anything derived from POST_/GET_ variables, from the filesystem, or from a
+      command's output goes through the escaper that suits where it lands, all of them
+      in www/cgi-bin/p/common.cgi: `ex` for a command and its output as a block, `pre`
+      for a block of text, `esc` for text inside existing markup, `attr_escape` for a
+      quoted attribute value. `ex` and `pre` emit block markup of their own, so they
+      are not substitutes for the inline two.
+    failure_criteria: >
+      The diff adds `<%= $POST_... %>`, `<%= $GET_... %>`, or any other interpolation of
+      command, device or filesystem output into HTML without one of those four
+      helpers around it.
+
+  - title: "Busybox-compatible shell only"
+    compliance_label: true
+    objective: >
+      The camera ships busybox ash and busybox sed/awk/grep. A bash-ism or a GNU-only
+      flag fails on the device and nowhere else, so CI and the author's machine both
+      say it is fine.
+    success_criteria: >
+      Added shell stays within POSIX plus what busybox provides, and any tool flag used
+      exists in busybox's applet.
+    failure_criteria: >
+      The diff adds bash arrays, `[[ ]]`, `local -n`, `${var^^}`, process substitution,
+      `sed -i` with a backup suffix, `grep -P`, `awk --posix`, or `flock -w` (busybox
+      has only `-n`).
+
+  - title: "No new front-end dependency, bundler or CDN asset"
+    compliance_label: true
+    objective: >
+      There is no build step and the camera serves every byte off its own flash, which
+      on the smallest boards is the difference between fitting and not.
+    success_criteria: >
+      New front-end code is vanilla JS in www/a/, loaded with a plain <script> tag, and
+      any asset it needs is committed to this tree.
+    failure_criteria: >
+      The diff adds a runtime npm dependency, a bundler or transpiler step, a framework,
+      or a <script>/<link>/@import/fetch pointing at a third-party host.
+
+  - title: "A new page is registered, not named twice"
+    compliance_label: true
+    objective: >
+      A page's name is written once, in www/cgi-bin/p/pages.cgi. Written twice it
+      drifts, which is how the nav bar and nine page titles came to disagree.
+    success_criteria: >
+      A new or renamed page CGI has a row in p/pages.cgi, its nav entry renders through
+      `page_label`, and its stylesheet selector (#page-<basename>) moves with it.
+    failure_criteria: >
+      The diff adds a page CGI with no p/pages.cgi row, sets `page_title=` for a name
+      the registry could have supplied, or renames a page file without moving the
+      matching `#page-<basename>` rule in www/a/bootstrap.override.css.
