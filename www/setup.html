@@ -426,6 +426,30 @@
 			var eula = document.getElementById('eula');
 			var eulalang = document.getElementById('eulalang');
 			var docEl = document.getElementById('doc');
+			// WHICH box scrolls the agreement is a question of width: below
+			// 40rem the pane is released and the document IS the page. Every
+			// piece of this file that reasons about reading position has to ask
+			// that first — atEnd() to know what to measure, rewindDoc() to know
+			// what to rewind — so it is asked in one place, and declared up here
+			// beside the element rather than down with the gate, because
+			// renderDoc() sits above the gate and needs it too.
+			var SLACK = 24; // fractional layout and zoom never land exactly
+			function paneScrolls() {
+				return docEl.scrollHeight - docEl.clientHeight > SLACK;
+			}
+			// A replacement document has been read by nobody, so put the reader
+			// back at its first line. Setting docEl.scrollTop alone does that
+			// only while the pane is the scroller; where it is not, the PAGE
+			// holds the scroll and is still sitting at the end of the text that
+			// was just replaced — and the gate, measuring the new document's
+			// bottom edge against a viewport already at it, calls it read.
+			function rewindDoc() {
+				docEl.scrollTop = 0;
+				if (paneScrolls()) return;
+				var y = window.pageYOffset || document.documentElement.scrollTop || 0;
+				var top = docEl.getBoundingClientRect().top + y;
+				if (y > top) window.scrollTo(0, top);
+			}
 			var langSel = document.getElementById('lang');
 			var sshbox = document.getElementById('sshbox');
 			var sshkey = document.getElementById('sshkey');
@@ -664,7 +688,7 @@
 						docEl.appendChild(p);
 					}
 				}
-				docEl.scrollTop = 0;
+				rewindDoc();
 			}
 
 			// Nothing in this file ever sets eula.checked, and nothing may:
@@ -698,22 +722,19 @@
 			   the shorter ones outright. So "no overflow" is its own answer:
 			   already read. */
 			function atEnd() {
-				var slack = 24; // fractional layout and zoom never land exactly
-				// WHICH box scrolls the agreement is a question of width. Below
-				// 40rem the pane is released and the document is the page, so
-				// the pane no longer overflows -- and "does not overflow" is
-				// answered "already read" below. Asked of a released pane that
-				// opens the gate at load, before a word has moved, which is the
-				// one thing this page may not do. So ask the box that is
-				// actually scrolling.
-				if (docEl.scrollHeight - docEl.clientHeight > slack) {
-					return docEl.scrollTop + docEl.clientHeight >= docEl.scrollHeight - slack;
+				// "Does not overflow" used to be answered "already read" here,
+				// which is right for a pane that is the scroller and wrong for
+				// a released one -- released, it never overflows, so that answer
+				// would open the gate at load on every phone, before a word had
+				// moved. Ask the box that is actually scrolling instead.
+				if (paneScrolls()) {
+					return docEl.scrollTop + docEl.clientHeight >= docEl.scrollHeight - SLACK;
 				}
 				var view = window.innerHeight || document.documentElement.clientHeight;
 				var box = docEl.getBoundingClientRect();
 				// Genuinely short document: no end to scroll to, already read.
-				if (box.height <= view - slack) return true;
-				return box.bottom <= view + slack;
+				if (box.height <= view - SLACK) return true;
+				return box.bottom <= view + SLACK;
 			}
 
 			// Sticky once satisfied: scrolling back up to re-read a clause must
