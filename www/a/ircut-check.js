@@ -229,20 +229,55 @@
 			});
 		}
 
-		// A monitor with nothing to watch is worse than no monitor: it owns the
-		// three runtime switches (wireRuntime hides them while it is on) and
-		// then never decides anything, so day/night is frozen AND unreachable.
+		// With nothing wired and nothing calibrated, what happens next depends
+		// on the daemon. A current one takes the automatic exposure-based mode
+		// — an observation, not a fault — and says so in night_mode_source
+		// (carried here as sample.src, null when the gauge is absent). One
+		// whose SoC reports no exposure state retires the monitor and says
+		// source 0. An older daemon says nothing and is genuinely blind: it
+		// owns the three runtime switches (wireRuntime hides them while the
+		// monitor is on) and then never decides anything, so day/night is
+		// frozen AND unreachable.
 		const senses = has(nm.lightSensorPin) ||
 			(has(nm.minThreshold) && has(nm.maxThreshold));
 		if (monitor && !senses) {
-			out.push({
-				id: 'monitor-blind', level: 'warning',
-				title: 'The light monitor has nothing to watch',
-				detail: 'The light monitor is on, but nothing tells it how dark ' +
-					'it is: no daylight sensor is connected, and no day or night ' +
-					'threshold is set.',
-				fix: 'nightMode',
-			});
+			const src = sample && sample.src != null ? sample.src : null;
+			if (src === 4) {
+				out.push({
+					id: 'auto-active', level: 'info',
+					title: 'Automatic day/night is watching the exposure',
+					detail: 'No sensor is wired and no thresholds are set, so ' +
+						'the camera decides from its own exposure state: night ' +
+						'when the sensor runs out of shutter and gain, day when ' +
+						'the gain settles back down. Nothing needs calibrating; ' +
+						'the thresholds and delays below tune it if the defaults ' +
+						'switch too early or too late.',
+					fix: 'nightMode',
+				});
+			} else if (src === 0) {
+				out.push({
+					id: 'auto-retired', level: 'warning',
+					title: 'This camera cannot watch the light by itself',
+					detail: 'The light monitor is on, but this SoC reports no ' +
+						'exposure state to decide from, so automatic day/night ' +
+						'stood down. Wire a daylight sensor to a GPIO pad and ' +
+						'assign it on the map for the monitor to have something ' +
+						'to watch.',
+					fix: 'nightMode',
+				});
+			} else {
+				out.push({
+					id: 'monitor-blind', level: 'warning',
+					title: 'The light monitor has nothing to watch',
+					detail: 'The light monitor is on, but nothing tells it how ' +
+						'dark it is: no daylight sensor is connected, and no day ' +
+						'or night threshold is set. Current firmware decides ' +
+						'from the sensor’s own exposure in this situation — ' +
+						'this camera has not reported that mode, so a firmware ' +
+						'update would give it automatic day/night.',
+					fix: 'nightMode',
+				});
+			}
 		}
 
 		// Thresholds are compared against isp_again, so min must sit BELOW max
@@ -296,9 +331,14 @@
 					id: 'hunting', level: 'warning',
 					title: 'The camera keeps switching between day and night',
 					detail: track.flips + ' switches in the last ' +
-						(HUNT_WINDOW_S / 60) + ' minutes. Widen the gap between the ' +
-						'day and night thresholds so dusk cannot sit on the ' +
-						'boundary.',
+						(HUNT_WINDOW_S / 60) + ' minutes. ' +
+						(sample && sample.src === 4
+							? 'Automatic mode slows itself down after each flip, ' +
+								'but a flashing light aimed at the camera can still ' +
+								'drive it; raising "Seconds of brightness before ' +
+								'day" stretches the cycle further.'
+							: 'Widen the gap between the day and night thresholds ' +
+								'so dusk cannot sit on the boundary.'),
 					fix: 'nightMode',
 				});
 			}
@@ -591,8 +631,89 @@
 			}));
 	}
 
+	// What the light-monitor panel should show for the current sample: the
+	// value to chart, the threshold bands to shade behind it, and the one
+	// sentence that says what the monitor is doing right now. Pure — the
+	// gauges arrive in `v` (the heartbeat's metric map) and the config in
+	// `nm` — so the countdown arithmetic and the band construction are
+	// testable without a camera at dusk.
+	//
+	// null when there is nothing to chart: monitor off, a GPIO/ADC source
+	// (nothing continuous to draw), an old daemon, or a retired monitor.
+	function monitorView(nm, v) {
+		nm = nm || {};
+		if (!on(nm.lightMonitor) || !v) return null;
+		const src = ('night_mode_source' in v) ? v.night_mode_source : null;
+
+		if (src === 4) {
+			const dayG = pin(nm.autoDayGain) !== null ? pin(nm.autoDayGain) : 2;
+			const nightG = pin(nm.autoNightGain);
+			const bands = [{
+				from: 0, to: dayG,
+				color: 'rgba(47,182,115,.10)', label: 'day',
+			}];
+			if (nightG !== null) {
+				// The top edge is clamped to the plot, so "everything above
+				// the user's night threshold" needs no real ceiling.
+				bands.push({
+					from: nightG, to: 1e9,
+					color: 'rgba(255,193,7,.10)', label: 'night',
+				});
+			}
+			const gm = v.night_auto_gain_milli;
+			const pend = v.night_auto_pending;
+			const left = Math.max(0,
+				(v.night_auto_dwell_seconds | 0) -
+				(v.night_auto_streak_seconds | 0));
+			const line = pend === 1
+				? 'Dark enough for night — switching in ' + left + ' s if it stays.'
+				: pend === 2
+					? 'Bright enough for day — switching in ' + left + ' s if it stays.'
+					: (v.night_enabled ? 'Night. ' : 'Day. ') +
+						'Watching the sensor gain' +
+						(nightG === null
+							? '; night comes when the exposure runs out.'
+							: '.');
+			return {
+				mode: 'auto',
+				value: gm != null && gm >= 0 ? gm / 1000 : null,
+				bands: bands, line: line,
+				unit: 'x',
+			};
+		}
+
+		if (src === 2 || src === 3 ||
+			(src === null && has(nm.minThreshold) && has(nm.maxThreshold))) {
+			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
+			const bands = [];
+			if (lo !== null) {
+				bands.push({
+					from: 0, to: lo,
+					color: 'rgba(47,182,115,.10)', label: 'day',
+				});
+			}
+			if (hi !== null) {
+				bands.push({
+					from: hi, to: 1e9,
+					color: 'rgba(255,193,7,.10)', label: 'night',
+				});
+			}
+			return {
+				mode: 'thresholds',
+				value: ('isp_again' in v) ? v.isp_again : null,
+				bands: bands,
+				line: (v.night_enabled ? 'Night. ' : 'Day. ') +
+					'Comparing raw sensor gain against the thresholds ' +
+					'(vendor-specific units).',
+				unit: '',
+			};
+		}
+
+		return null;
+	}
+
 	const api = {
-		diagnose: diagnose, tracker: tracker,
+		diagnose: diagnose, tracker: tracker, monitorView: monitorView,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
 		verdict: verdict, probe: probe, snapshot: snapshot, wired: wired,

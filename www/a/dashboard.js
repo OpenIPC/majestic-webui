@@ -571,11 +571,16 @@
 
 		const dn = $('#st-daynight');
 		// A gauge this majestic does not publish reads as "not reported", never
-		// as day with the filter closed.
+		// as day with the filter closed. The source word says who decided —
+		// absent on daemons that predate night_mode_source, and unsaid for 0
+		// (manual is the absence of a decider, not a decider).
+		const srcWord = ['', ' · sensor pin', ' · thresholds', ' · ADC',
+			' · auto'][v.night_mode_source] || '';
 		if (dn) dn.textContent = s.night == null ? 'Day / night not reported'
 			: (s.night ? '🌙 Night' : '☀️ Day') +
 				' · IR-cut ' + (s.ircut == null ? '?' : (s.ircut ? 'on' : 'off')) +
-				' · lamp ' + (s.light == null ? '?' : (s.light ? 'on' : 'off'));
+				' · lamp ' + (s.light == null ? '?' : (s.light ? 'on' : 'off')) +
+				srcWord;
 		renderIrcut(s);
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means
 		// the encoder has stopped producing frames while all else looks alive.

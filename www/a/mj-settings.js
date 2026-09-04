@@ -3296,10 +3296,54 @@
 		if (!IRCUT || typeof mjMetricsSubscribe !== 'function') return;
 		mjMetricsSubscribe((s) => {
 			if (!s.ok) return;
-			ircutSample = { night: s.night, ircut: s.ircut, light: s.light };
+			const v = (s.m && s.m.v) || {};
+			ircutSample = {
+				night: s.night, ircut: s.ircut, light: s.light,
+				// Which door the daemon says is being watched — diagnose()
+				// tells an automatic monitor from a blind one by it, and null
+				// (gauge absent) keeps the older-firmware reading.
+				src: ('night_mode_source' in v) ? v.night_mode_source : null,
+			};
 			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
 			paintFindings();
+			paintMonitor(s);
 		});
+	}
+
+	// The light monitor's live view: one sentence about what it is doing and a
+	// chart of the value it is watching, with the switching bands shaded. What
+	// to show is decided in ircut-check.js (monitorView, tested); this only
+	// mounts it. The chart is remade when the mode or the bands change — a
+	// superseded instance holds a detached host and renders as a no-op.
+	let monChart = null;
+	let monKey = '';
+	function paintMonitor(s) {
+		const box = document.getElementById('mj-ircut-mon');
+		if (!box) return;
+		const MC = window.MjCharts;
+		const view = IRCUT.monitorView(nightCfg(), (s.m && s.m.v) || null);
+		if (!view || !MC) {
+			box.hidden = true;
+			return;
+		}
+		box.hidden = false;
+		const line = document.getElementById('mj-ircut-mon-line');
+		if (line) line.textContent = view.line;
+		const host = document.getElementById('mj-ircut-mon-chart');
+		if (!host) return;
+		const key = view.mode + '|' + JSON.stringify(view.bands);
+		if (!monChart || monChart.host !== host || monKey !== key) {
+			host.innerHTML = '';
+			monChart = MC.makeChart(host, {
+				h: 110, lo: 0, hi: null, colors: ['#4c60d8'],
+				bands: view.bands,
+				fmt: view.mode === 'auto'
+					? (x) => (x >= 10 ? String(Math.round(x)) : x.toFixed(1)) + 'x'
+					: undefined,
+			});
+			monKey = key;
+		}
+		if (view.value != null) MC.pushChart(monChart, [view.value]);
 	}
 
 	function nightCfg() { return (state.config && state.config.nightMode) || {}; }
@@ -3555,7 +3599,13 @@
 			'<div class="small text-secondary mt-2" id="mj-ircut-why" hidden></div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-status"></div>' +
 			'<div id="mj-ircut-result" class="small" hidden></div>' +
-			'</div></div>';
+			'</div></div>' +
+			'<div id="mj-ircut-mon" hidden>' +
+			'<div class="mj-live-grp-head mt-3"><span class="mj-cap">Light monitor</span>' +
+			'<span class="mj-live-rule"></span></div>' +
+			'<div class="small text-secondary mb-1" id="mj-ircut-mon-line"></div>' +
+			'<div id="mj-ircut-mon-chart"></div>' +
+			'</div>';
 
 		// Wired once, gated every time.
 		const btn = box.querySelector('#mj-ircut-run');

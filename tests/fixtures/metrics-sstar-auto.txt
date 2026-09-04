@@ -1,0 +1,353 @@
+# HELP node_uname_info Labeled system information as provided by the uname system call.
+# TYPE node_uname_info gauge
+node_uname_info{domainname="(null)",machine="armv7l",nodename="camera",release="4.9.84",sysname="Linux",version="#2 SMP PREEMPT Sun Aug 30 17:37:29 UTC 2026"} 1
+# HELP node_boot_time_seconds Node boot time, in unixtime.
+# TYPE node_boot_time_seconds gauge
+node_boot_time_seconds 1788306128
+# HELP node_context_switches_total Total number of context switches.
+# TYPE node_context_switches_total counter
+node_context_switches_total 251768399
+# HELP node_cpu_seconds_total Seconds the cpus spent in each mode.
+# TYPE node_cpu_seconds_total counter
+node_cpu_seconds_total{cpu="0",mode="user"} 6787.32
+node_cpu_seconds_total{cpu="0",mode="nice"} 0
+node_cpu_seconds_total{cpu="0",mode="system"} 23004.9
+node_cpu_seconds_total{cpu="0",mode="idle"} 123439
+node_cpu_seconds_total{cpu="0",mode="iowait"} 0
+node_cpu_seconds_total{cpu="0",mode="irq"} 0
+node_cpu_seconds_total{cpu="0",mode="softirq"} 56.58
+node_cpu_seconds_total{cpu="0",mode="steal"} 0
+node_cpu_seconds_total{cpu="0",mode="guest"} 0
+node_cpu_seconds_total{cpu="0",mode="guest_nice"} 0
+# HELP node_intr_total 
+# TYPE node_intr_total counter
+node_intr_total 104406515
+# HELP node_forks_total 
+# TYPE node_forks_total counter
+node_forks_total 43585
+# HELP node_procs_running_total 
+# TYPE node_procs_running_total gauge
+node_procs_running_total 2
+# HELP node_procs_blocked_total 
+# TYPE node_procs_blocked_total gauge
+node_procs_blocked_total 0
+# HELP node_filefd_allocated File descriptor statistics: allocated.
+# TYPE node_filefd_allocated gauge
+node_filefd_allocated 128
+# HELP node_filefd_maximum File descriptor statistics: maximum.
+# TYPE node_filefd_maximum gauge
+node_filefd_maximum 9039
+# HELP node_load1 1m load average.
+# TYPE node_load1 gauge
+node_load1 13.68
+# HELP node_load5 1m load average.
+# TYPE node_load5 gauge
+node_load5 14.19
+# HELP node_load15 15m load average.
+# TYPE node_load15 gauge
+node_load15 14.32
+# TYPE node_memory_MemTotal_bytes gauge
+node_memory_MemTotal_bytes 94994432
+# TYPE node_memory_MemFree_bytes gauge
+node_memory_MemFree_bytes 37785600
+# TYPE node_memory_MemAvailable_bytes gauge
+node_memory_MemAvailable_bytes 58494976
+# TYPE node_memory_Buffers_bytes gauge
+node_memory_Buffers_bytes 5029888
+# TYPE node_memory_Cached_bytes gauge
+node_memory_Cached_bytes 34222080
+# TYPE node_memory_SwapCached_bytes gauge
+node_memory_SwapCached_bytes 0
+# TYPE node_memory_Active_bytes gauge
+node_memory_Active_bytes 30900224
+# TYPE node_memory_Inactive_bytes gauge
+node_memory_Inactive_bytes 11317248
+# TYPE node_memory_Active_anon_bytes gauge
+node_memory_Active_anon_bytes 14917632
+# TYPE node_memory_Inactive_anon_bytes gauge
+node_memory_Inactive_anon_bytes 4235264
+# TYPE node_memory_Active_file_bytes gauge
+node_memory_Active_file_bytes 15982592
+# TYPE node_memory_Inactive_file_bytes gauge
+node_memory_Inactive_file_bytes 7081984
+# TYPE node_memory_Unevictable_bytes gauge
+node_memory_Unevictable_bytes 0
+# TYPE node_memory_Mlocked_bytes gauge
+node_memory_Mlocked_bytes 0
+# TYPE node_memory_SwapTotal_bytes gauge
+node_memory_SwapTotal_bytes 0
+# TYPE node_memory_SwapFree_bytes gauge
+node_memory_SwapFree_bytes 0
+# TYPE node_memory_Dirty_bytes gauge
+node_memory_Dirty_bytes 0
+# TYPE node_memory_Writeback_bytes gauge
+node_memory_Writeback_bytes 0
+# TYPE node_memory_AnonPages_bytes gauge
+node_memory_AnonPages_bytes 2961408
+# TYPE node_memory_Mapped_bytes gauge
+node_memory_Mapped_bytes 4632576
+# TYPE node_memory_Shmem_bytes gauge
+node_memory_Shmem_bytes 16187392
+# TYPE node_memory_Slab_bytes gauge
+node_memory_Slab_bytes 7286784
+# TYPE node_memory_SReclaimable_bytes gauge
+node_memory_SReclaimable_bytes 2060288
+# TYPE node_memory_SUnreclaim_bytes gauge
+node_memory_SUnreclaim_bytes 5226496
+# TYPE node_memory_KernelStack_bytes gauge
+node_memory_KernelStack_bytes 696320
+# TYPE node_memory_PageTables_bytes gauge
+node_memory_PageTables_bytes 270336
+# TYPE node_memory_NFS_Unstable_bytes gauge
+node_memory_NFS_Unstable_bytes 0
+# TYPE node_memory_Bounce_bytes gauge
+node_memory_Bounce_bytes 0
+# TYPE node_memory_WritebackTmp_bytes gauge
+node_memory_WritebackTmp_bytes 0
+# TYPE node_memory_CommitLimit_bytes gauge
+node_memory_CommitLimit_bytes 47497216
+# TYPE node_memory_Committed_AS_bytes gauge
+node_memory_Committed_AS_bytes 82448384
+# TYPE node_memory_VmallocTotal_bytes gauge
+node_memory_VmallocTotal_bytes 796917760
+# TYPE node_memory_VmallocUsed_bytes gauge
+node_memory_VmallocUsed_bytes 0
+# TYPE node_memory_VmallocChunk_bytes gauge
+node_memory_VmallocChunk_bytes 0
+# TYPE node_memory_CmaTotal_bytes gauge
+node_memory_CmaTotal_bytes 2097152
+# TYPE node_memory_CmaFree_bytes gauge
+node_memory_CmaFree_bytes 1716224
+# TYPE node_network_receive_bytes_total counter
+node_network_receive_bytes_total{device="eth0"} 144589602
+# TYPE node_network_receive_packets_total counter
+node_network_receive_packets_total{device="eth0"} 498425
+# TYPE node_network_receive_errs_total counter
+node_network_receive_errs_total{device="eth0"} 0
+# TYPE node_network_receive_drop_total counter
+node_network_receive_drop_total{device="eth0"} 129
+# TYPE node_network_receive_fifo_total counter
+node_network_receive_fifo_total{device="eth0"} 0
+# TYPE node_network_receive_frame_total counter
+node_network_receive_frame_total{device="eth0"} 0
+# TYPE node_network_receive_compressed_total counter
+node_network_receive_compressed_total{device="eth0"} 0
+# TYPE node_network_receive_multicast_total counter
+node_network_receive_multicast_total{device="eth0"} 45129
+# TYPE node_network_transmit_bytes_total counter
+node_network_transmit_bytes_total{device="eth0"} 278833977
+# TYPE node_network_transmit_packets_total counter
+node_network_transmit_packets_total{device="eth0"} 335058
+# TYPE node_network_transmit_errs_total counter
+node_network_transmit_errs_total{device="eth0"} 0
+# TYPE node_network_transmit_drop_total counter
+node_network_transmit_drop_total{device="eth0"} 0
+# TYPE node_network_transmit_fifo_total counter
+node_network_transmit_fifo_total{device="eth0"} 0
+# TYPE node_network_transmit_colls_total counter
+node_network_transmit_colls_total{device="eth0"} 0
+# TYPE node_network_transmit_carrier_total counter
+node_network_transmit_carrier_total{device="eth0"} 0
+# TYPE node_network_transmit_compressed_total counter
+node_network_transmit_compressed_total{device="eth0"} 0
+node_network_receive_bytes_total{device="tunnel"} 264795
+node_network_receive_packets_total{device="tunnel"} 1341
+node_network_receive_errs_total{device="tunnel"} 0
+node_network_receive_drop_total{device="tunnel"} 726
+node_network_receive_fifo_total{device="tunnel"} 0
+node_network_receive_frame_total{device="tunnel"} 0
+node_network_receive_compressed_total{device="tunnel"} 0
+node_network_receive_multicast_total{device="tunnel"} 0
+node_network_transmit_bytes_total{device="tunnel"} 5236
+node_network_transmit_packets_total{device="tunnel"} 21
+node_network_transmit_errs_total{device="tunnel"} 0
+node_network_transmit_drop_total{device="tunnel"} 0
+node_network_transmit_fifo_total{device="tunnel"} 0
+node_network_transmit_colls_total{device="tunnel"} 0
+node_network_transmit_carrier_total{device="tunnel"} 0
+node_network_transmit_compressed_total{device="tunnel"} 0
+# HELP node_time_seconds Current time.
+# TYPE node_time_seconds gauge
+node_time_seconds 1788475710
+# HELP task_seconds Seconds tasks spent in each mode.
+# TYPE task_seconds counter
+task_seconds{name="majestic.new",tid="2262",mode="user"} 0.29
+task_seconds{name="majestic.new",tid="2262",mode="system"} 0.3
+task_seconds{name="majestic.new",tid="2263",mode="user"} 0
+task_seconds{name="majestic.new",tid="2263",mode="system"} 0
+task_seconds{name="thread-pool-0",tid="2264",mode="user"} 0
+task_seconds{name="thread-pool-0",tid="2264",mode="system"} 0
+task_seconds{name="thread-pool-1",tid="2265",mode="user"} 0
+task_seconds{name="thread-pool-1",tid="2265",mode="system"} 0
+task_seconds{name="3A_Proc",tid="2282",mode="user"} 0.29
+task_seconds{name="3A_Proc",tid="2282",mode="system"} 0.62
+task_seconds{name="majestic.new",tid="2291",mode="user"} 0
+task_seconds{name="majestic.new",tid="2291",mode="system"} 0.28
+# HELP app_boot_time_seconds App boot time, in unixtime.
+# TYPE app_boot_time_seconds gauge
+app_boot_time_seconds 1788475698
+# HELP malloc_mp4_alloc_bytes Number of bytes allocated for MP4 buffer.
+# TYPE malloc_mp4_alloc_bytes gauge
+malloc_mp4_alloc_bytes 0
+# HELP malloc_hls_alloc_bytes Number of bytes the HLS segment ring is holding.
+# TYPE malloc_hls_alloc_bytes gauge
+malloc_hls_alloc_bytes 0
+# HELP jpeg_requests_total Number of JPEG requests made by clients.
+# TYPE jpeg_requests_total counter
+jpeg_requests_total 0
+# HELP jpeg_responses_total Number of JPEG correnponding responses.
+# TYPE jpeg_responses_total counter
+jpeg_responses_total 0
+# HELP http_requests_total Number of requests made to HTTP server.
+# TYPE http_requests_total counter
+http_requests_total 1
+# HELP venc0_rcvd_bytes Number of bytes received from first venc channel
+# TYPE venc0_rcvd_bytes counter
+venc0_rcvd_bytes 3337478
+# HELP venc1_rcvd_bytes Number of bytes received from second venc channel
+# TYPE venc1_rcvd_bytes counter
+venc1_rcvd_bytes 1088458
+# HELP pipeline_rebuilds_total Number of full SDK teardown and rebuild cycles since boot
+# TYPE pipeline_rebuilds_total counter
+pipeline_rebuilds_total 0
+# HELP config_live_applies_total Number of live-apply helper runs that carried a change without a rebuild
+# TYPE config_live_applies_total counter
+config_live_applies_total 0
+# HELP config_service_restarts_total Number of single subsystems restarted without a pipeline rebuild
+# TYPE config_service_restarts_total counter
+config_service_restarts_total 0
+# HELP config_channel_rebuilds_total Number of single encoder channels recreated without a pipeline rebuild
+# TYPE config_channel_rebuilds_total counter
+config_channel_rebuilds_total 0
+# HELP venc_empty_frames Number of venc wakeups that carried no frame
+# TYPE venc_empty_frames counter
+venc_empty_frames 0
+# HELP venc_empty_frames_run Consecutive empty venc wakeups on the worst channel right now
+# TYPE venc_empty_frames_run gauge
+venc_empty_frames_run 0
+# HELP node_hwmon_temp_celsius Chipset temperature
+# TYPE node_hwmon_temp_celsius gauge
+node_hwmon_temp_celsius 65
+# HELP isp_again Analog Gain
+# TYPE isp_again gauge
+isp_again 2077
+# HELP isp_dgain Digital Gain
+# TYPE isp_dgain gauge
+isp_dgain 1024
+# HELP isp_exposure Exposure
+# TYPE isp_exposure gauge
+isp_exposure 33
+# HELP isp_fps Sensor fps
+# TYPE isp_fps gauge
+isp_fps 29
+# HELP isp_avelum Average luminance
+# TYPE isp_avelum gauge
+isp_avelum 37
+# HELP isp_exptime Sensor exposure time
+# TYPE isp_exptime gauge
+isp_exptime 33330
+# HELP isp_exposureismax Exposure reached maximum
+# TYPE isp_exposureismax gauge
+isp_exposureismax 0
+# HELP night_enabled Is night mode enabled
+# TYPE night_enabled gauge
+night_enabled 0
+# HELP ircut_enabled Is ircut mode enabled
+# TYPE ircut_enabled gauge
+ircut_enabled 0
+# HELP light_enabled Is light mode enabled
+# TYPE light_enabled gauge
+light_enabled 0
+# HELP night_mode_source What controls day/night: 0 manual, 1 GPIO sensor, 2 gain thresholds, 3 ADC, 4 automatic
+# TYPE night_mode_source gauge
+night_mode_source 4
+# HELP night_auto_gain_milli Sensor gain as thousandths of 1x, as the automatic day/night monitor sees it
+# TYPE night_auto_gain_milli gauge
+night_auto_gain_milli 2028
+# HELP night_auto_pending 0 stable, 1 counting toward night, 2 counting toward day
+# TYPE night_auto_pending gauge
+night_auto_pending 0
+# HELP night_auto_streak_seconds Seconds the pending condition has held
+# TYPE night_auto_streak_seconds gauge
+night_auto_streak_seconds 0
+# HELP night_auto_dwell_seconds Seconds the pending condition must hold to switch
+# TYPE night_auto_dwell_seconds gauge
+night_auto_dwell_seconds 15
+# HELP md_rects_recv_total Number of rectangles returned by HW MD algorithm.
+# TYPE md_rects_recv_total counter
+md_rects_recv_total 0
+# HELP md_rects_acc_total Number of rectangles fit into ROI.
+# TYPE md_rects_acc_total counter
+md_rects_acc_total 0
+# HELP hls_clients_total Number of connected clients by HLS protocol.
+# TYPE hls_clients_total gauge
+hls_clients_total 0
+# HELP rtsp_clients_total Number of connected RTSP clients.
+# TYPE rtsp_clients_total gauge
+rtsp_clients_total 0
+# HELP rtsp_tx_bytes RTP bytes sent to RTSP clients.
+# TYPE rtsp_tx_bytes counter
+rtsp_tx_bytes 0
+# HELP ws_video_clients_total Number of connected /ws/video (MSE) clients.
+# TYPE ws_video_clients_total gauge
+ws_video_clients_total 0
+# HELP webrtc_sessions_total Number of live WebRTC sessions.
+# TYPE webrtc_sessions_total gauge
+webrtc_sessions_total 0
+# HELP webrtc_tx_bytes SRTP bytes sent to WebRTC peers.
+# TYPE webrtc_tx_bytes counter
+webrtc_tx_bytes 0
+# HELP outgoing_streams_total Live outgoing push streams (RTMP + RTP).
+# TYPE outgoing_streams_total gauge
+outgoing_streams_total 0
+# HELP outgoing_tx_bytes Bytes pushed to outgoing RTMP/RTP destinations.
+# TYPE outgoing_tx_bytes counter
+outgoing_tx_bytes 0
+# HELP records_fragments_dropped_total Number of finished fragments discarded because storage fell behind
+# TYPE records_fragments_dropped_total counter
+records_fragments_dropped_total 0
+# HELP records_dropped_ticks_total Presentation time lost to dropped fragments, in media timescale units
+# TYPE records_dropped_ticks_total counter
+records_dropped_ticks_total 0
+# HELP records_fragments_skipped_total Number of fragments skipped waiting for a keyframe to open a clip on
+# TYPE records_fragments_skipped_total counter
+records_fragments_skipped_total 0
+# HELP records_queue_fragments Fragments waiting to be written to storage
+# TYPE records_queue_fragments gauge
+records_queue_fragments 0
+# HELP records_queue_bytes Bytes waiting to be written to storage
+# TYPE records_queue_bytes gauge
+records_queue_bytes 0
+# HELP records_storage_used_percent Percentage of the recording volume in use, or -1 if not measured yet
+# TYPE records_storage_used_percent gauge
+records_storage_used_percent -1
+# HELP records_cleanup_unlinks_total Number of recordings deleted to keep storage under records.maxUsage
+# TYPE records_cleanup_unlinks_total counter
+records_cleanup_unlinks_total 0
+# HELP records_state Recorder verdict on storage: 0 ok, 1 degraded, 2 failed, 3 offline
+# TYPE records_state gauge
+records_state 0
+# HELP records_bytes_written_total Number of bytes the recorder has written to storage
+# TYPE records_bytes_written_total counter
+records_bytes_written_total 0
+# HELP records_fragments_written_total Number of MP4 fragments the recorder has written
+# TYPE records_fragments_written_total counter
+records_fragments_written_total 0
+# HELP records_write_errors_total Number of writes to storage that failed outright
+# TYPE records_write_errors_total counter
+records_write_errors_total 0
+# HELP records_short_writes_total Number of writes to storage that completed in more than one call
+# TYPE records_short_writes_total counter
+records_short_writes_total 0
+# HELP records_sync_errors_total Number of failed fsync calls on a recording
+# TYPE records_sync_errors_total counter
+records_sync_errors_total 0
+# HELP records_fsync_us_last Duration of the last fsync of a recording
+# TYPE records_fsync_us_last gauge
+records_fsync_us_last 0
+# HELP records_fsync_us_max Longest fsync of a recording since startup
+# TYPE records_fsync_us_max gauge
+records_fsync_us_max 0
+# HELP records_reopens_total Number of times the recorder recovered a card it had given up on
+# TYPE records_reopens_total counter
+records_reopens_total 0
