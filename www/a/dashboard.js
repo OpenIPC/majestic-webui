@@ -576,10 +576,15 @@
 		// (manual is the absence of a decider, not a decider).
 		const srcWord = ['', ' · sensor pin', ' · thresholds', ' · ADC',
 			' · auto'][v.night_mode_source] || '';
+		// A dimmable lamp reports its duty; only then is a percentage said.
+		// A switched lamp keeps on/off, and an absent gauge stays unknown.
+		const duty = v.night_light_duty;
+		const lampWord = typeof duty === 'number' && duty >= 0 ? duty + '%'
+			: s.light == null ? '?' : (s.light ? 'on' : 'off');
 		if (dn) dn.textContent = s.night == null ? 'Day / night not reported'
 			: (s.night ? '🌙 Night' : '☀️ Day') +
 				' · IR-cut ' + (s.ircut == null ? '?' : (s.ircut ? 'on' : 'off')) +
-				' · lamp ' + (s.light == null ? '?' : (s.light ? 'on' : 'off')) +
+				' · lamp ' + lampWord +
 				srcWord;
 		renderIrcut(s);
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means

@@ -651,6 +651,13 @@
 			? 'Night. '
 			: v.night_enabled === 0 || v.night_enabled === false ? 'Day. ' : '';
 
+		// Only a camera with a dimmable lamp publishes a duty; a switched
+		// lamp gets no invented percentage, and 0 on a dimmer is a real
+		// reading (the lamp parked dark), not an absence.
+		const duty = v.night_light_duty;
+		const lampNote = typeof duty === 'number' && duty >= 0
+			? ' Lamp at ' + duty + '%.' : '';
+
 		if (src === 4) {
 			const dayG = pin(nm.autoDayGain) !== null ? pin(nm.autoDayGain) : 2;
 			const nightG = pin(nm.autoNightGain);
@@ -688,7 +695,7 @@
 			return {
 				mode: 'auto',
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
-				bands: bands, line: line,
+				bands: bands, line: line + lampNote,
 				unit: 'x',
 			};
 		}
@@ -718,7 +725,7 @@
 				bands: bands,
 				line: modeWord +
 					'Comparing raw sensor gain against the thresholds ' +
-					'(vendor-specific units).',
+					'(vendor-specific units).' + lampNote,
 				unit: '',
 			};
 		}

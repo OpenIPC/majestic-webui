@@ -494,6 +494,24 @@ function runRest() {
 		check('an absent night_enabled is not called Day',
 			!/^Day/.test(noNight.line) && !/^Night/.test(noNight.line),
 			noNight.line);
+		// A dimmable lamp speaks its duty; a switched one is never given a
+		// percentage, and a parked dimmer (0) is a reading, not an absence.
+		const dimmer = ic.monitorView(nmAuto, Object.assign({}, vAuto,
+			{ night_light_duty: 45 }));
+		check('a dimmable lamp reports its duty in the sentence',
+			/Lamp at 45%\.$/.test(dimmer.line), dimmer.line);
+		const parked = ic.monitorView(nmAuto, Object.assign({}, vAuto,
+			{ night_light_duty: 0 }));
+		check('a parked dimmer still says 0%',
+			/Lamp at 0%\.$/.test(parked.line), parked.line);
+		check('a switched lamp gets no invented percentage',
+			!/Lamp at/.test(ic.monitorView(nmAuto, vAuto).line));
+		const thrLamp = ic.monitorView(
+			{ lightMonitor: true, minThreshold: 1500, maxThreshold: 4000 },
+			{ night_mode_source: 2, night_enabled: 1, isp_again: 6000,
+				night_light_duty: 80 });
+		check('threshold mode carries the lamp note too',
+			/Lamp at 80%\.$/.test(thrLamp.line), thrLamp.line);
 	}
 
 	group('diagnose: thresholds need a band, not a point');
