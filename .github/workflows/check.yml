@@ -2,7 +2,8 @@ name: check
 
 # Gate pull requests on the same minification the release build runs: terser over
 # every hand-written .js followed by `node --check` on the result, plus clean-css
-# over the CSS.
+# over the CSS — then the test suite, the haserl template lint and the purged
+# bootstrap subset.
 #
 # dist.yml only fires on push to master, so before this nothing ran on a PR at
 # all — a syntax error or a construct terser choked on reached master unnoticed
@@ -34,6 +35,12 @@ jobs:
           node-version: '20'
       - run: npm ci
       - run: npm run build:dist
+      # The suite in tests/ ran nowhere: check.yml gated the minification and
+      # dist.yml the release, and `npm test` was left to whoever remembered it
+      # locally. It is plain node with no dependencies, so it costs one step —
+      # and the checks it holds are the ones whose subject fails silently, which
+      # is exactly the kind a human reviewer will not catch either.
+      - run: npm test
 
   templates:
     runs-on: ubuntu-latest

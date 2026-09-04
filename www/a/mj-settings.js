@@ -4524,6 +4524,45 @@
 			return null;
 		}
 
+		// The field's two value accessors, declared as soon as the widget exists
+		// and before anything below can want one. They used to sit at the bottom,
+		// beside the return that hands them out, and the x-requires warning above
+		// paints itself on mount: it reached `getValue` before the declaration had
+		// run and threw a ReferenceError out of renderField, which took the rest of
+		// the section with it — every field after the annotated one, and the save
+		// bar with them, on the first camera whose schema carried the annotation.
+		// Anything built below here may read the field's value; nothing above may.
+		//
+		// It cannot move further up than this: `_get`/`_set` are read once, here,
+		// rather than called through, so the widget branch that assigns them has to
+		// have run already.
+		//
+		// Array fields canonicalise to a comma-joined string so dirty-tracking
+		// (a plain !== against state.initial) keeps working; onSubmit splits it
+		// back into a list before POSTing.
+		const getValue = control._get
+			? control._get
+			: type === 'boolean'
+			? () => control.checked ? 'true' : 'false'
+			: type === 'array'
+			? () => control._rows().join(', ')
+			: () => String(control.value);
+
+		const setValue = control._set ? control._set : (v) => {
+			if (type === 'boolean') {
+				control.checked = toBool(v);
+			} else if (type === 'array') {
+				control.querySelectorAll('.mj-array-row').forEach(r => r.remove());
+				const arr = Array.isArray(v) ? v : (v ? String(v).split(/\s*,\s*/) : []);
+				arr.forEach(x => { if (x) control._addRow(x); });
+				if (control._sync) control._sync();
+			} else {
+				control.value = v !== undefined && v !== null ? String(v) : '';
+				const show = p.querySelector('.show-value');
+				if (show) show.textContent = control.value;
+			}
+		};
+
 		// live knobs share one "Reset all" in the panel header — no per-knob reset
 		if (!live) {
 			const reset = document.createElement('button');
@@ -4624,32 +4663,6 @@
 			control.addEventListener('input', pushLive);
 			control.addEventListener('change', pushLive);
 		}
-
-		// array fields canonicalise to a comma-joined string so dirty-tracking
-		// (a plain !== against state.initial) keeps working; onSubmit splits it
-		// back into a list before POSTing.
-		const getValue = control._get
-			? control._get
-			: type === 'boolean'
-			? () => control.checked ? 'true' : 'false'
-			: type === 'array'
-			? () => control._rows().join(', ')
-			: () => String(control.value);
-
-		const setValue = control._set ? control._set : (v) => {
-			if (type === 'boolean') {
-				control.checked = toBool(v);
-			} else if (type === 'array') {
-				control.querySelectorAll('.mj-array-row').forEach(r => r.remove());
-				const arr = Array.isArray(v) ? v : (v ? String(v).split(/\s*,\s*/) : []);
-				arr.forEach(x => { if (x) control._addRow(x); });
-				if (control._sync) control._sync();
-			} else {
-				control.value = v !== undefined && v !== null ? String(v) : '';
-				const show = p.querySelector('.show-value');
-				if (show) show.textContent = control.value;
-			}
-		};
 
 		return { dot, key, schema: sub, type, control, p, getValue, setValue };
 	}

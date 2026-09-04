@@ -164,4 +164,47 @@ group('an unmet requirement with nothing to say stays quiet');
 	check('but nothing is drawn', req.notice(mute, off) === '');
 }
 
+// The evaluator being right is only half of it: the warning has to reach the
+// page. It did not, on the very first camera whose schema carried the
+// annotation, and the way it failed is why this check is here rather than a
+// note in a review.
+//
+// renderField() declared the field's value accessors last, beside the return
+// that hands them out, while the x-requires block above painted the warning on
+// mount and read `getValue` to do it. A `const` reached before its declaration
+// is a ReferenceError, not an undefined, so the throw left renderField, took
+// every field after the annotated one with it and the save bar with them: the
+// Outgoing tab rendered three of its seven rows and could no longer be saved.
+//
+// Only a camera running a majestic that emits `x-requires` can show that, so
+// nothing here or in a browser on this machine would have caught it. What can
+// be checked from the source alone is the invariant the fix rests on -- the
+// accessors are declared before anything that reads them -- and that is what
+// this asserts. Property reads (`mainF.getValue()`, another field's object)
+// are not the local binding and are excluded.
+group('renderField declares its value accessors before anything reads them');
+{
+	const fs = require('fs');
+	const src = fs.readFileSync(
+		path.join(__dirname, '..', 'www', 'a', 'mj-settings.js'), 'utf8');
+
+	const start = src.indexOf('function renderField(');
+	const decl = src.indexOf('const getValue = control._get', start);
+	check('renderField is where it was', start !== -1);
+	check('and still declares getValue from control._get', decl !== -1);
+
+	// Whole-line comments only: this slice is full of string literals, and a
+	// general comment stripper would have to parse the file to stay out of
+	// them. The prose above the declaration says `getValue` on purpose.
+	const above = src.slice(start, decl)
+		.split('\n')
+		.filter(l => !l.trimStart().startsWith('//'))
+		.join('\n');
+
+	for (const name of ['getValue', 'setValue']) {
+		const used = new RegExp('(?<![.\\w$])' + name + '\\b').test(above);
+		check('nothing above it reads ' + name, !used);
+	}
+}
+
 done();
