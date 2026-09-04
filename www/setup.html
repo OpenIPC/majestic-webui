@@ -234,6 +234,59 @@
 		/* No document to show means no step to count to: the flow collapses to
 		   the claim screen it was before the agreement landed. */
 		.js.noeula #step1, .js.noeula .steps, .js.noeula #back { display: none; }
+
+		/* ---- Phones. -------------------------------------------------------
+		   Everything above is written for a card on a desk. On a phone the
+		   card IS the screen, and the one thing that has to change is who
+		   scrolls: a 24rem pane inside a page that does not scroll shows 6.5%
+		   of the agreement at a time, 33 characters to the line. So below this
+		   width the pane stops being a scroller and the document becomes the
+		   page — the browser's own scrollbar reads the whole thing, at the
+		   full width of the screen, and the accept control sits after the
+		   text where reaching it IS reaching the end. */
+		@media (max-width: 40rem) {
+			body { display: block; min-height: 100vh; min-height: 100dvh; }
+			.card {
+				max-width: none; width: auto; margin: 0;
+				min-height: 100vh; min-height: 100dvh;
+				border: 0; border-radius: 0;
+				padding: 1.15rem 1rem calc(1.25rem + env(safe-area-inset-bottom, 0px));
+			}
+			.card.wide { max-width: none; }
+
+			/* The pane's frame belonged to the box that scrolled. */
+			#pane { margin: 0; background: none; border: 0; border-radius: 0; }
+			#doc { max-height: none; overflow: visible; padding: 1rem 0 .25rem; }
+			#fade { display: none; }
+			/* The measure is the screen now, so prose can breathe. */
+			#doc p, #doc h1 { text-wrap: pretty; }
+
+			/* Two step names at opposite edges of a 358px card collide. The
+			   one you are on is the one worth naming. */
+			.spacer, .stepname:not(.on) { display: none; }
+			.steps { margin: 1.1rem 0 .9rem; }
+
+			/* 44px floor, on every one of the three things a thumb lands on. */
+			#lang { padding: .75rem .65rem; font-size: .875rem; }
+			.check { padding: .6rem 0; margin-bottom: .5rem; align-items: center; }
+			.check input { width: 1.375rem; height: 1.375rem; margin: 0; }
+			button { padding: .8rem .75rem; font-size: 1.0625rem; }
+			button.link { padding: .7rem; }
+			input[type=password], input[type=text] { padding: .7rem .75rem; font-size: 1rem; }
+
+			/* The accept block is the end of the document, so it is set off
+			   from it rather than floating under a box that ended. */
+			#step1 > .check { border-top: 1px solid #2c313d; padding-top: 1.1rem; margin-top: 1.25rem; }
+		}
+
+		/* Landscape phones: wide enough to miss the rule above, far too short
+		   for a 24rem pane inside a viewport that is 390px tall. */
+		@media (max-height: 34rem) and (max-width: 60rem) {
+			body { display: block; }
+			.card { margin: 1rem auto; }
+			#doc { max-height: none; overflow: visible; }
+			#fade { display: none; }
+		}
 	</style>
 </head>
 <body>
@@ -646,8 +699,21 @@
 			   already read. */
 			function atEnd() {
 				var slack = 24; // fractional layout and zoom never land exactly
-				if (docEl.scrollHeight - docEl.clientHeight <= slack) return true;
-				return docEl.scrollTop + docEl.clientHeight >= docEl.scrollHeight - slack;
+				// WHICH box scrolls the agreement is a question of width. Below
+				// 40rem the pane is released and the document is the page, so
+				// the pane no longer overflows -- and "does not overflow" is
+				// answered "already read" below. Asked of a released pane that
+				// opens the gate at load, before a word has moved, which is the
+				// one thing this page may not do. So ask the box that is
+				// actually scrolling.
+				if (docEl.scrollHeight - docEl.clientHeight > slack) {
+					return docEl.scrollTop + docEl.clientHeight >= docEl.scrollHeight - slack;
+				}
+				var view = window.innerHeight || document.documentElement.clientHeight;
+				var box = docEl.getBoundingClientRect();
+				// Genuinely short document: no end to scroll to, already read.
+				if (box.height <= view - slack) return true;
+				return box.bottom <= view + slack;
 			}
 
 			// Sticky once satisfied: scrolling back up to re-read a clause must
@@ -675,6 +741,8 @@
 				document.getElementById('fade').style.opacity = readToEnd ? '0' : '1';
 			}
 			docEl.addEventListener('scroll', syncAccept);
+			// ...and the page, which is the scroller on a phone.
+			window.addEventListener('scroll', syncAccept, { passive: true });
 			// A resize can turn an overflowing document into one that fits, and
 			// the answer above would otherwise be stale.
 			window.addEventListener('resize', syncAccept);

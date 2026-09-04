@@ -90,8 +90,25 @@ group('the reading gate holds both controls, not just the box');
 	check('Continue also refuses when the text is unread',
 		/if\s*\(!gateOff\s*&&\s*!readToEnd\)\s*return;/.test(page));
 	check('a document too short to scroll counts as read',
-		/scrollHeight\s*-\s*\w+\.clientHeight\s*<=\s*\w+\)?\s*\)?\s*return true/.test(page),
+		/\w+\.height\s*<=\s*\w+\s*-\s*\w+\)\s*return true/.test(page),
 		'without this a short agreement makes the form permanently unsubmittable');
+
+	// Below 40rem the pane is released and the document becomes the page, so
+	// the pane NEVER overflows. "Does not overflow" therefore stops meaning
+	// "shorter than its box" and starts being true on every phone, at load —
+	// and the answer above is "already read". Measured with the media query in
+	// and this untouched: the checkbox came up enabled and the must-read line
+	// hidden before a word had moved, i.e. the stylesheet quietly repealing the
+	// gate. It is the exact shape of failure this file exists for: the page
+	// looks right while it happens, and seeing it needs an unclaimed camera,
+	// a phone, and an agreement nobody read.
+	check('a released pane is not mistaken for a document that fits',
+		/scrollHeight\s*-\s*\w+\.clientHeight\s*>\s*\w+\)\s*\{/.test(page)
+		&& /getBoundingClientRect\(\)/.test(page),
+		'the overflow test must SELECT the scroller, not answer the question');
+	check('the page scroll drives the gate too, since on a phone it is the scroller',
+		/window\.addEventListener\('scroll',\s*syncAccept/.test(page),
+		'without it the gate never re-asks while the document is being read');
 	check('a language switch clears it — the new text is unread',
 		/readToEnd\s*=\s*false;/.test(page));
 	check('and the gate is dropped where there is no pane to scroll',
