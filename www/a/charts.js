@@ -197,6 +197,16 @@ window.MjCharts = (function () {
 	}
 	function renderAll() { charts.forEach(renderChart); }
 
+	// Forget a chart that is being replaced. The dashboard's charts live as
+	// long as the page and never need this; a settings panel that is unmounted
+	// and remade on every visit does, or the registry accumulates detached
+	// hosts and their sample history for the life of the tab.
+	function dropChart(ch) {
+		if (!ch) return;
+		const i = charts.indexOf(ch);
+		if (i >= 0) charts.splice(i, 1);
+	}
+
 	// One debounced resize listener for every chart on the page, whichever
 	// script created it.
 	let rt = null;
@@ -207,7 +217,7 @@ window.MjCharts = (function () {
 
 	return {
 		makeSpark: makeSpark, pushSpark: pushSpark,
-		makeChart: makeChart, pushChart: pushChart,
+		makeChart: makeChart, pushChart: pushChart, dropChart: dropChart,
 		renderChart: renderChart, renderAll: renderAll,
 		fmtNum: fmtNum, niceCeil: niceCeil,
 	};

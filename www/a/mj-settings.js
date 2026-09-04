@@ -3313,8 +3313,8 @@
 	// The light monitor's live view: one sentence about what it is doing and a
 	// chart of the value it is watching, with the switching bands shaded. What
 	// to show is decided in ircut-check.js (monitorView, tested); this only
-	// mounts it. The chart is remade when the mode or the bands change — a
-	// superseded instance holds a detached host and renders as a no-op.
+	// mounts it. The chart is remade when the mode or the bands change, and
+	// the superseded instance is dropped from the registry.
 	let monChart = null;
 	let monKey = '';
 	function paintMonitor(s) {
@@ -3333,6 +3333,10 @@
 		if (!host) return;
 		const key = view.mode + '|' + JSON.stringify(view.bands);
 		if (!monChart || monChart.host !== host || monKey !== key) {
+			// The superseded instance is unregistered, not merely abandoned:
+			// every remount of this section makes a new host, and the chart
+			// registry would otherwise keep each one for the life of the tab.
+			MC.dropChart(monChart);
 			host.innerHTML = '';
 			monChart = MC.makeChart(host, {
 				h: 110, lo: 0, hi: null, colors: ['#4c60d8'],

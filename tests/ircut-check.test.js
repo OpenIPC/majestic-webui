@@ -476,8 +476,24 @@ function runRest() {
 		check('a GPIO source has nothing continuous to chart',
 			ic.monitorView({ lightMonitor: true, lightSensorPin: 66 },
 				{ night_mode_source: 1 }) === null);
+		check('an ADC source has nothing continuous to chart either',
+			ic.monitorView({ lightMonitor: true, minThreshold: 100, maxThreshold: 400 },
+				{ night_mode_source: 3, isp_again: 200 }) === null);
 		check('monitor off charts nothing',
 			ic.monitorView({}, vAuto) === null);
+		// Missing gauges stay unknown: no countdown made of coerced zeros,
+		// and no "Day" invented for a camera that never said.
+		const noTimers = ic.monitorView(nmAuto, {
+			night_mode_source: 4, night_enabled: 1,
+			night_auto_gain_milli: 8000, night_auto_pending: 2,
+		});
+		check('a countdown with no gauges behind it is not spoken',
+			!/switching in \d+ s/.test(noTimers.line), noTimers.line);
+		const noNight = ic.monitorView(nmAuto,
+			{ night_mode_source: 4, night_auto_gain_milli: 2000 });
+		check('an absent night_enabled is not called Day',
+			!/^Day/.test(noNight.line) && !/^Night/.test(noNight.line),
+			noNight.line);
 	}
 
 	group('diagnose: thresholds need a band, not a point');

@@ -645,6 +645,12 @@
 		if (!on(nm.lightMonitor) || !v) return null;
 		const src = ('night_mode_source' in v) ? v.night_mode_source : null;
 
+		// An absent night_enabled is a camera whose state is unknown, and an
+		// unknown is not a day — the sentence then simply skips the word.
+		const modeWord = v.night_enabled === 1 || v.night_enabled === true
+			? 'Night. '
+			: v.night_enabled === 0 || v.night_enabled === false ? 'Day. ' : '';
+
 		if (src === 4) {
 			const dayG = pin(nm.autoDayGain) !== null ? pin(nm.autoDayGain) : 2;
 			const nightG = pin(nm.autoNightGain);
@@ -662,15 +668,20 @@
 			}
 			const gm = v.night_auto_gain_milli;
 			const pend = v.night_auto_pending;
-			const left = Math.max(0,
-				(v.night_auto_dwell_seconds | 0) -
-				(v.night_auto_streak_seconds | 0));
+			// A countdown is arithmetic on two gauges; with either missing
+			// there is no number to count from, and "switching in 0 s" would
+			// be a confident sentence made of nothing.
+			const dwell = v.night_auto_dwell_seconds;
+			const streak = v.night_auto_streak_seconds;
+			const left = typeof dwell === 'number' && typeof streak === 'number'
+				? Math.max(0, dwell - streak) : null;
+			const inLeft = left === null ? '.' :
+				' — switching in ' + left + ' s if it stays.';
 			const line = pend === 1
-				? 'Dark enough for night — switching in ' + left + ' s if it stays.'
+				? 'Dark enough for night' + inLeft
 				: pend === 2
-					? 'Bright enough for day — switching in ' + left + ' s if it stays.'
-					: (v.night_enabled ? 'Night. ' : 'Day. ') +
-						'Watching the sensor gain' +
+					? 'Bright enough for day' + inLeft
+					: modeWord + 'Watching the sensor gain' +
 						(nightG === null
 							? '; night comes when the exposure runs out.'
 							: '.');
@@ -682,7 +693,10 @@
 			};
 		}
 
-		if (src === 2 || src === 3 ||
+		// Source 3 (ADC) is deliberately not here: its reading never appears
+		// on /metrics, so there is nothing continuous to chart and isp_again
+		// would be a different quantity wearing the monitor's clothes.
+		if (src === 2 ||
 			(src === null && has(nm.minThreshold) && has(nm.maxThreshold))) {
 			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
 			const bands = [];
@@ -702,7 +716,7 @@
 				mode: 'thresholds',
 				value: ('isp_again' in v) ? v.isp_again : null,
 				bands: bands,
-				line: (v.night_enabled ? 'Night. ' : 'Day. ') +
+				line: modeWord +
 					'Comparing raw sensor gain against the thresholds ' +
 					'(vendor-specific units).',
 				unit: '',
