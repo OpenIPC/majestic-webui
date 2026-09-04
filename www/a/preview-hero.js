@@ -103,9 +103,14 @@
 	// stage too small for either arrangement keeps the stacking and lets the
 	// stylesheet's clamp hold the pad on screen (--mj-ptz-h).
 	//
-	// The flip only ever runs one way on its own: reserving the column can make
-	// the bar taller, which leaves the pad less room, which is the same answer
-	// again. So there is no width at which the two settings chase each other.
+	// The question is asked of the bar's NATURAL height, which is why the class
+	// comes off before the measurement rather than being toggled at the end:
+	// reserving the column makes the bar taller, so a second pass that measured
+	// the bar as the first pass left it would find even less room and keep the
+	// answer alive after the stage had grown enough to make it wrong. The
+	// arrangement would then depend on the order a window was resized in rather
+	// than on the size it ended up. Removing and re-adding inside one callback
+	// costs a second layout and paints nothing in between.
 	//
 	// The height published is to the top of the top ROW, not to the top of the
 	// element: the bar's padding-top is the transparent end of its gradient, and
@@ -117,23 +122,32 @@
 	// nothing keyed to it moves while somebody is holding the pad.
 	const ptz = $('#mj-ptz');
 	const GAP = 8;
-	const layoutChrome = () => {
-		const padTop = parseFloat(getComputedStyle(bar).paddingTop) || 0;
-		const strip = bar.clientHeight - padTop;
+	const stripHeight = () =>
+		bar.clientHeight - (parseFloat(getComputedStyle(bar).paddingTop) || 0);
+	const publishStrip = (strip) => {
 		if (strip > 0) stage.style.setProperty('--mj-bar-h', strip.toFixed(2) + 'px');
+	};
+	const layoutChrome = () => {
 		// offsetHeight rather than a class check: a camera with no PTZ at all
 		// mounts nothing into #mj-ptz, and one whose ptz_caps drop the direction
-		// pad mounts a shorter cluster than one that keeps it.
+		// pad mounts a shorter cluster than one that keeps it. With no pad there
+		// is nothing to arrange — the stats panel still wants the strip's height.
 		const padH = ptz ? ptz.offsetHeight : 0;
-		if (!padH) return;
-		const sw = stage.clientWidth, sh = stage.clientHeight;
+		if (!padH) {
+			publishStrip(stripHeight());
+			return;
+		}
+		stage.classList.remove('mj-ptz-beside');
+		const natural = stripHeight();
+		const beside = natural + GAP + padH > stage.clientHeight &&
+			stage.clientWidth > stage.clientHeight;
+		if (beside) stage.classList.add('mj-ptz-beside');
+		publishStrip(beside ? stripHeight() : natural);
 		// Published for the clamp that keeps the pad inside the stage whichever
 		// arrangement is in force: pushed off the top it is not merely awkward,
 		// it is unreachable — there is nothing to scroll.
 		stage.style.setProperty('--mj-ptz-h', padH + 'px');
 		stage.style.setProperty('--mj-ptz-w', ptz.offsetWidth + 'px');
-		const stacks = strip + GAP + padH <= sh;
-		stage.classList.toggle('mj-ptz-beside', !stacks && sw > sh);
 	};
 	layoutChrome();
 	// The bar and the pad themselves, not the window: the groups the bar holds

@@ -2475,8 +2475,11 @@ mark {
 	   short viewport the numbers yield, not the picture. The strip is as tall as
 	   the bar actually is (--mj-bar-h, preview-hero.js) — the 5rem this used to
 	   be is one row of it, and the panel ran under the other rows wherever the
-	   bar wrapped. */
-	max-height: calc(100% - var(--mj-bar-h, 4.5rem) - 0.5rem);
+	   bar wrapped. --mj-pic-top is in here for the same reason it is in the top
+	   above: the height available is measured from where the panel STARTS, and a
+	   letterboxed picture starts it that far down, so leaving it out let a full
+	   panel reach into the bar by exactly the depth of the band. */
+	max-height: calc(100% - var(--mj-pic-top, 0px) - var(--mj-bar-h, 4.5rem) - 1rem);
 	overflow: auto;
 	background: rgba(13, 15, 20, 0.72);
 	border: 1px solid rgba(255, 255, 255, 0.09);
