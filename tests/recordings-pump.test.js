@@ -237,6 +237,13 @@ function load() {
 		if (url.indexOf('/cgi-bin/j/sdcard.cgi') === 0) {
 			return json({ health: 'ok', total: 1e10, free: 5e9, used: 5e9, recBytes: 1e9 });
 		}
+		// The page asks majestic for its own verdict on the card as well as
+		// the kernel's. Stubbed rather than left to fall through, so that this
+		// test fails on an UNEXPECTED request rather than on the one it knows
+		// about — recordings-health.test.js is where the answer is exercised.
+		if (url.indexOf('/metrics/records') === 0) {
+			return Promise.resolve({ ok: true, text: () => Promise.resolve('records_state 0\n') });
+		}
 		if (url.indexOf('/cgi-bin/j/recordings.cgi?days=1') === 0) {
 			return json({ prefix: '/rec', days: [{ name: '2026-09-03', clips: 1, mtime: 0 }] });
 		}
@@ -267,6 +274,7 @@ function load() {
 		location: { search: '', pathname: '/cgi-bin/recordings.cgi' },
 		apiFetch: apiFetch,
 		mjGet: (cfg, dot) => dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg),
+		parseMetrics: (t) => ({ v: { records_state: 0 } }),
 		parseTzOffsetMs: () => 0,
 		ianaZone: () => null,
 		console: console, JSON: JSON, Promise: Promise, Date: Date, Math: Math,

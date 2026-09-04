@@ -51,12 +51,16 @@
 				</div>
 				<div class="rec-band" id="rec-band"></div>
 
-				<!-- Reserved, and deliberately empty. Majestic's motion detection is
-				     hardware-assisted but is never written to the card, so there is no
-				     event data to draw here yet. -->
+				<!-- Still reserved, and still deliberately empty, but for a narrower
+				     reason than before. Recording on motion (records.mode) writes one
+				     clip per event, so in that mode the band above IS the event record
+				     and drawing it twice would say nothing new. What no camera writes
+				     is where the movement was WITHIN a clip, which is the only thing
+				     this lane could add — so it stays empty until something records
+				     that. The caption below is set from the mode by recordings.js. -->
 				<div class="rec-motion"></div>
 				<div class="rec-ticks" id="rec-ticks"></div>
-				<div class="x-small text-secondary mt-1">Motion — lights up once the camera records detection events</div>
+				<div class="x-small text-secondary mt-1" id="rec-motion-note">Motion — lights up once the camera records detection events</div>
 
 				<div id="rec-export" class="d-none"></div>
 

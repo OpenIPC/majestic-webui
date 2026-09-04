@@ -133,12 +133,19 @@ window.MajesticMp4Index = (function () {
 	// a fixed offset. Verified rather than assumed: a file that puts something
 	// else first reports null and the caller falls back to the exact walk.
 	//
-	// CAVEAT, and it is the reason locate() is only ever an approximation:
-	// majestic's sequence_number is monotonic but NOT strictly increasing — a
-	// walk over a real clip saw 0, 1, 2, 2, 3, 4 at consecutive moofs, where
-	// ISO 14496-12 wants strictly increasing. Binary search tolerates a plateau
-	// (it only needs monotonicity), but the value cannot be trusted as an exact
-	// fragment ordinal, so exact times come from the walk instead.
+	// CAVEAT, and it is the reason locate() is only ever an approximation on
+	// older recordings: majestic used to put its own running counter here,
+	// shared across files and reset whenever the pipeline was rebuilt, so a
+	// walk over a real clip saw 0, 1, 2, 2, 3, 4 at consecutive moofs where
+	// ISO 14496-12 wants strictly increasing — and a resumed clip restarted it
+	// at zero halfway through.
+	//
+	// Current majestic restates it per file, so on a clip written by one it IS
+	// the fragment's ordinal. Nothing here relies on that, because the cards
+	// this page browses are full of clips written by the versions that did
+	// not, and there is no way to tell which is which from the value itself.
+	// Binary search only needs monotonicity, which held either way; exact
+	// times still come from the walk.
 	function moofSeq(u8, at) {
 		if (at + 24 > u8.length) return null;
 		if (fourcc(u8, at + 4) !== 'moof') return null;
@@ -215,6 +222,32 @@ window.MajesticMp4Index = (function () {
 		return total;
 	}
 
+	// Whether this fragment's first sample is one a decoder can start at.
+	//
+	// trun's first_sample_flags (flag 0x004) carries it, and bit 0x10000 of
+	// that word is sample_is_non_sync_sample. majestic only started writing
+	// the real value once fragments stopped being whole GOPs; before that it
+	// hardcoded "sync" because every fragment began at an IDR by construction.
+	//
+	// Absent flags therefore mean sync, and that is not a guess — a recording
+	// whose trun carries no first_sample_flags was written when the property
+	// held. Saying "unknown" instead would make every clip on an older card
+	// unseekable except at its very start.
+	function fragOpensOnSync(u8, moofAt, moofEnd) {
+		const traf = findBox(u8, moofAt + 8, moofEnd, 'traf');
+		if (!traf) return true;
+		const trun = findBox(u8, traf[0] + 8, traf[1], 'trun');
+		if (!trun) return true;
+
+		const tf = be32(u8, trun[0] + 8) & 0xffffff;
+		if (!(tf & 0x004)) return true;
+
+		let p = trun[0] + 16;
+		if (tf & 0x001) p += 4;         // data_offset
+		if (p + 4 > trun[1]) return true;
+		return (be32(u8, p) & 0x10000) === 0;
+	}
+
 	// One step of the chain. `u8` must start exactly at a moof and hold enough
 	// of it to reach the following mdat's size field.
 	function parseFragment(u8) {
@@ -234,6 +267,7 @@ window.MajesticMp4Index = (function () {
 			seq: moofSeq(u8, 0),
 			decodeTicks: fragDecodeTicks(u8, 0, Math.min(moofSize, u8.length)),
 			durTicks: fragDurationTicks(u8, 0, Math.min(moofSize, u8.length)),
+			sync: fragOpensOnSync(u8, 0, Math.min(moofSize, u8.length)),
 		};
 	}
 
@@ -305,6 +339,7 @@ window.MajesticMp4Index = (function () {
 				t: ticks / ts,
 				dur: (f.durTicks || 0) / ts,
 				seq: f.seq,
+				sync: f.sync !== false,
 			});
 			ticks += f.durTicks || 0;
 			off += f.total;
@@ -546,6 +581,12 @@ window.MajesticMp4Index = (function () {
 
 		let i = 0;
 		while (i < f.length - 1 && f[i].t + f[i].dur <= a) i++;
+		// Back to something that opens on a keyframe. An export is a file
+		// somebody will open in a player that has seen nothing before it, so
+		// the first fragment has to be one it can start decoding at — the same
+		// rule as a seek, for the same reason, and here it costs at most one
+		// GOP of extra footage at the front.
+		while (i > 0 && !f[i].sync) i--;
 		let j = i;
 		while (j < f.length - 1 && f[j].t + f[j].dur < b) j++;
 
@@ -561,16 +602,37 @@ window.MajesticMp4Index = (function () {
 		};
 	}
 
-	// The fragment covering `sec`, for a seek once the index exists.
-	function fragmentAt(index, sec) {
+	// The index of the fragment a decoder may START at for `sec`: the one
+	// covering it, or the nearest one before it that opens on a keyframe.
+	//
+	// A fragment is self-contained only if its first sample is one. Handing a
+	// SourceBuffer a fragment that opens mid-GOP feeds it frames whose
+	// references were never appended, and what comes out is a green or smeared
+	// picture rather than an error — so a seek that landed on one looked like
+	// a decode bug rather than a seek bug.
+	//
+	// This could not be asked before: every fragment claimed to be a sync
+	// sample, because the writer hardcoded it. Falling back to fragment 0 is
+	// the honest answer when nothing earlier opens cleanly — the start of the
+	// clip is the only place such a file can be started at all.
+	function playableIndexAt(index, sec) {
 		const f = index.fragments;
-		if (!f || !f.length) return null;
+		if (!f || !f.length) return -1;
 		let lo = 0, hi = f.length - 1;
 		while (lo < hi) {
 			const mid = (lo + hi + 1) >> 1;
 			if (f[mid].t <= sec) lo = mid; else hi = mid - 1;
 		}
-		return f[lo];
+		let i = lo;
+		while (i > 0 && !f[i].sync) i--;
+		return i;
+	}
+
+	// The fragment covering `sec`, for a seek once the index exists — snapped
+	// back to one that can actually be decoded from.
+	function fragmentAt(index, sec) {
+		const i = playableIndexAt(index, sec);
+		return i < 0 ? null : index.fragments[i];
 	}
 
 	// ---- transport -------------------------------------------------------
