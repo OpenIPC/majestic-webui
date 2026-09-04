@@ -3913,6 +3913,18 @@ dialog.mj-modal::backdrop {
 
 .st-dot-c1 { background: var(--st-c1); }
 .st-dot-c2 { background: var(--st-c2); }
+.st-dot-c3 { background: var(--st-c3); }
+.st-dot-c4 { background: var(--st-c4); }
+.st-dot-mute { background: var(--bs-secondary-color); }
+
+/* The Memory tile prints how much history its trace holds, and that line must
+   not wrap: the KPI tiles are grid items that stretch to the tallest, so one
+   tile gaining a second line lifts all of them. */
+.st-tile .st-sub {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
 
 .st-chart svg {
 	display: block;
