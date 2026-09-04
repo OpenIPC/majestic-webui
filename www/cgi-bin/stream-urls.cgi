@@ -23,7 +23,7 @@
 			<dt class="cp2cb">rtsp://<span class="ep-addr"><% esc "$network_address" %></span><span class="ep-rtsp"></span>/stream=2</dt>
 			<dd>RTSP JPEG stream.</dd>
 			<dt class="cp2cb"><span class="ep-ws">ws</span>://<span class="ep-host"><% esc "$network_address" %></span>/ws/video?stream=0</dt>
-			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by Preview). Append <code>&amp;audio=opus,mp4a.40.2</code> to mux in an audio track for the codecs your player accepts.</dd>
+			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by the Live page). Append <code>&amp;audio=opus,mp4a.40.2</code> to mux in an audio track for the codecs your player accepts.</dd>
 			<dt class="cp2cb"><span class="ep-ws">ws</span>://<span class="ep-host"><% esc "$network_address" %></span>/ws/video?stream=1</dt>
 			<dd>Low-latency H.264/H.265 sub stream (fMP4/MSE).</dd>
 			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><% esc "$network_address" %></span>/mjpeg</dt>

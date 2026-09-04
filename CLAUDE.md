@@ -16,7 +16,7 @@ Authentication is HTTP Basic against `/etc/shadow` (user `root`); `common.cgi:ch
 
 **Unclaimed cameras (first boot).** Current firmware ships with root's hash field in `/etc/shadow` *empty* rather than with a password committed to a public repository. Majestic reads that state on every request — `device_unclaimed()` in `crypto.c`, "is `is_shadow_auth("root","")` `AUTH_EMPTYPWD`" — and while it holds the camera **streams nothing**: RTSP answers 401, ONVIF is unauthorized, and every HTTP path but the claim flow gets 401. Setting root's password claims the camera and everything works as before; nothing else records the state, so whichever door sets the password, the other sees it immediately.
 
-- `www/setup.html` — the second **self-contained** page in this repo, for a harder version of login.html's reason: an unclaimed camera serves nothing else at all, no `/a/*` and no CGI. It `POST`s `password`/`confirm` to majestic's `/setup`, which validates, pipes `root:<pw>` to `chpasswd`, checks the password back with `is_shadow_auth` (an exit status is not proof the hash landed), and mints a session so the browser arrives at `dashboard.cgi` signed in.
+- `www/setup.html` — the second **self-contained** page in this repo, for a harder version of login.html's reason: an unclaimed camera serves nothing else at all, no `/a/*` and no CGI. It `POST`s `password`/`confirm` to majestic's `/setup`, which validates, pipes `root:<pw>` to `chpasswd`, checks the password back with `is_shadow_auth` (an exit status is not proof the hash landed), and mints a session so the browser arrives at `live.cgi` signed in.
 - Majestic serves it **only while unclaimed** and 404s it afterwards; `POST /setup` 403s on the same test. An unauthenticated page that sets the root password must not outlive the state that justifies it. Unclaimed, `/`, `/login.html` and every browser navigation redirect here instead of to `/login.html?next=…`.
 - The **other door is SSH**, gated firmware-side by `openipc-claim` as root's login shell (not `/etc/profile`, which `ssh cam 'cmd'` and `scp` never read). It refuses non-interactive sessions, runs `passwd`, then restores `/bin/sh` and steps aside. It is self-disabling, so a camera claimed through the browser repairs `/etc/passwd` on its next login.
 - `system.unsafe` still overrides everything, unclaimed included — that, not a blank password, is how a deliberately-open camera is configured.
@@ -26,7 +26,7 @@ This inverts what an empty root password used to mean: RTSP and ONVIF waved ever
 
 **Session cookies (browser auth).** Majestic (the daemon serving port 80) also mints a `session` cookie so that browser flows Basic composes badly with — most visibly **WebSocket handshakes in Safari**, which never carry a Basic credential — keep working. The pieces:
 
-- `www/login.html` — a **self-contained** login page (inline CSS/JS; it can't pull `/a/*` because those need auth). It `POST`s `username`/`password` to majestic's `/login`, which validates against `/etc/shadow` and returns `Set-Cookie: session=…; HttpOnly; SameSite=Strict`. On success it redirects to the sanitised `?next=` path (default `dashboard.cgi`).
+- `www/login.html` — a **self-contained** login page (inline CSS/JS; it can't pull `/a/*` because those need auth). It `POST`s `username`/`password` to majestic's `/login`, which validates against `/etc/shadow` and returns `Set-Cookie: session=…; HttpOnly; SameSite=Strict`. On success it redirects to the sanitised `?next=` path, defaulting to `live.cgi` — the picture, like `/` does. Majestic's own fallback, for the no-script form POST, is `/cgi-bin/status.cgi`, which is why that tombstone is the one that has to outlive the others.
 - Majestic redirects an **unauthenticated browser navigation** (a `GET` that `Accept`s `text/html` and isn't a WS handshake) to `/login.html?next=…` instead of answering `401 WWW-Authenticate: Basic`, so the native Basic dialog never pops. `curl`/CLI/XHR/WebSocket requests still get the `401`+Basic challenge, so scripted access is unchanged. It also auto-mints the cookie on any successful **root** Basic auth, so a client that still sends Basic transparently gets a session too.
 - The cookie rides every later request (same-origin `fetch` with `credentials: 'same-origin'`, and — the whole point — the three WebSocket handshakes `/ws/{upgrade,video,logs}`).
 - **Sign out** — a nav item in `p/header.cgi` (`#nav-logout`), wired in `main.js` to `POST /logout` (invalidates the server session) then navigate to `/login.html`.
@@ -62,13 +62,25 @@ Every page CGI follows the same skeleton:
 ```
 #!/usr/bin/haserl
 <%in p/common.cgi %>           # helpers + sysinfo + auth gate
-<% page_title="..."; ...POST handling... %>
+<% ...POST handling... %>
 <%in p/header.cgi %>           # <html>, nav, signature bar, flash messages
 ...page body using field_* / ex / button_submit helpers...
 <%in p/footer.cgi %>
 ```
 
 POST handlers in the same file write config, then `redirect_back`/`redirect_to` (303) with a flash message stored in `/tmp/webui/logfile.txt` and rendered by `log_read` on the next page load.
+
+**A page does not name itself.** `p/pages.cgi` is the one place a page's name is written: `page_label <pagename>` gives the word the nav bar prints, the page's own `<h2>` and the browser title, and `page_menu <pagename>` gives the bar menu the page sits under, which only the title uses (`System - Network - OpenIPC`, so a window of camera tabs is readable). `p/header.cgi` includes it, renders every nav entry through it, and defaults `page_title` from it — in header rather than in common, because the page's own block runs between the two includes and a page must still be able to set a name this file cannot know.
+
+This exists because the name used to be written twice, once as nav markup and once as `page_title=`, and nine of them drifted apart across a month of renames: the bar said Live, Network, Config file, Ntfy while the pages called themselves Live View, Network Settings, Configuration File, Ntfy Notifications. Two `tools/lint-templates.sh` checks keep it honest — a nav entry with no row, or a page with neither a row nor its own `page_title`, fails the build, as does any `.cgi` path anywhere in `www/` that names a file which does not exist. That last one is what makes a rename reviewable, and it reads comments too.
+
+A `case` rather than a table of variables, because page names contain hyphens and those are not legal in a shell variable name; `printf` rather than `echo`, or the trailing newline lands inside the anchor text.
+
+**Page files are named after their menu word** — `dashboard.cgi`, `live.cgi`, `camera.cgi`, `backup.cgi`, `network.cgi`, `logs.cgi`. The `fw-`/`mj-`/`tool-`/`info-`/`ext-` prefixes encoded which subsystem owned a page, which is the distinction the nav bar deliberately stopped making. The old names survive as **tombstones**: twenty-six four-line files that `moved_to` the new one, all marked `REMOVE AFTER 2027-06`. They are not only politeness to bookmarks — `sbin/updatewebui` prunes the overlay copy of a name a release no longer ships, and pruning *uncovers the firmware's own older copy underneath*, so without a file here an old URL answers 200 with the page as it was rather than 404ing. Two of them (`ext-telegram.cgi`, `ext-backuper.cgi`) `exec` instead of redirecting, because those URLs are published for machines to call and a `curl` without `-L` takes a 302 as the answer.
+
+`status.cgi`'s tombstone is the one that has to outlive the rest: majestic writes `Location: /cgi-bin/status.cgi` in three places in `src/websrv/httpd.c`.
+
+**One thing has no error to give you.** `p/common.cgi` derives `pagename` from `SCRIPT_NAME`, `p/header.cgi` emits `<body id="page-$pagename">`, and `bootstrap.override.css` keys layout off that id — `#page-live` is the whole full-bleed Live layout, `#page-camera` the two-column settings rail. Rename a page without moving its selector and nothing anywhere reports it; the page just comes out wrong.
 
 ### Common helpers — `www/cgi-bin/p/common.cgi`
 
@@ -587,7 +599,7 @@ In practice the split is much smaller than it looks. **Every** page — `wfb.cgi
 
 The FPV-specific code is exactly two files:
 
-- `p/fpv_common.cgi` — its own `yaml_get_value`/`yaml_set_value`/`yaml_get_nested` helpers, included by `wfb.cgi` only.
+- `p/fpv_common.cgi` — its own `yaml_get_value`/`yaml_set_value` helpers, included by `wfb.cgi` only. It used to be four times this size; the form handler and three renderers under it had no call site and were removed. It never had a `yaml_get_nested`, which this file claimed for a while and `wfb.cgi` called from a function nothing reached.
 - `wfb.cgi` — WFB-NG wireless settings, with legacy `wfb.conf` ↔ YAML compatibility.
 
 `wfb.cgi` is not linked from any navigation; it is reachable only by URL. The only link to it ever written lived in `p/header_fpv.cgi`, which no page ever included — that file and `j/locale_fpv.cgi` (a variant tab-label set nothing ever read) were removed rather than left to imply a code path that never existed. Git history has them if the FPV nav is ever built for real.
@@ -597,7 +609,7 @@ The FPV-specific code is exactly two files:
 Each extension is a CGI for the form + a sbin script invoked by cron or webhook:
 
 - `telegram.cgi` ↔ `sbin/telegram` (image push on motion / on interval).
-- `ntfy.cgi` ↔ `sbin/ntfy` (ntfy.sh notifications, reuses `/etc/webui/proxy.conf`).
+- `ntfy.cgi` ↔ `bin/ntfy.sh` (ntfy.sh notifications, reuses `/etc/webui/proxy.conf`).
 - `openwall.cgi` ↔ `sbin/openwall`.
 - `wireguard.cgi`, `vtun.cgi`, `proxy.cgi`, `backup-create.cgi` — VPN / SOCKS5 / config backup.
 
@@ -610,7 +622,9 @@ Each extension's CGI typically: defines a `params` list, loops `POST_<name>` int
 - **Always escape shell output before rendering.** Use `ex` or `pre` from `common.cgi`. Never `<%= $userInput %>` for anything that came from `POST_`/`GET_`/the filesystem.
 - **Don't write `/etc/majestic.yaml` directly.** Go through `yaml-cli -g/-s/-d` so Majestic sees a valid file.
 - **State that affects the signature bar / banners requires `update_caminfo`** so the cached `/tmp/webui/sysinfo.txt` is regenerated.
+- **A new page needs a row in `p/pages.cgi` and nothing else.** Name the file after the word the menu will use, add the row, add the nav entry rendering `<% page_label <name> %>`, and — if it sits in a dropdown — a `page_menu` arm. Do not write `page_title=` in the page; the lint accepts it, but only for a name the registry cannot know.
+- **A page's filename is a stylesheet selector.** `#page-<basename>` is how `bootstrap.override.css` reaches a specific page, via `<body id="page-$pagename">`. Renaming a file without moving the selector fails silently — there is no error, the layout simply stops applying.
 - **Never name a config key in text a person reads.** Use the name the page itself puts on screen. A key is a second vocabulary, readable only by someone who already knows the answer, and it is being used to explain a problem to someone who does not. The same rule killed the kernel's `bank_pin` GPIO spelling in favour of the plain integers `majestic.yaml` stores.
 - **An absent reading is not a zero, and a failed fetch is not a fact.** `| 0` on a metric that may not exist, or a `{}` from a fetch that failed, both turn "we do not know" into a confident wrong answer that then drives a warning. Distinguish them at the source and let the consumer gate on *known*.
 - **Don't move work between branches by copying files.** `git checkout <branch> -- <file>` is not a merge: it replaces the file wholesale, so anything on the target branch and not on the source is discarded silently and shows up in the diff as a plausible-looking revert nobody reads as one. It reverted a landed fix here once. Cherry-pick or rebase; if a file must be copied, read the **deletions** in `git diff origin/master...HEAD -- <file>`, not just the additions.
-- **`structure.md` drifts.** It still references e.g. `ext-tunnel.cgi`; the actual files are `vtun.cgi` and `wireguard.cgi`, and `p/fpv_common.cgi` isn't listed. Treat the directory tree as authoritative, not `structure.md`.
+- **There is no file tree in the docs, on purpose.** `structure.md` used to hold one and was deleted: it named four files that had been gone for months and omitted about sixty that existed, in a repo whose own guidance already said not to trust it. The directory tree is the tree.
