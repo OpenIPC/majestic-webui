@@ -1072,14 +1072,28 @@
 			return;
 		}
 
-		ircut.disabled = !active(getDotted(state.config, 'nightMode.irCutPin1'));
-		light.disabled = !active(getDotted(state.config, 'nightMode.backlightPin'));
-		// A control that cannot work should say which pin is missing rather than
-		// just refusing to move.
+		// Parked (nightMode.*Enabled: false) outranks wired: the daemon
+		// refuses the toggle, so a live-looking switch would move and snap
+		// back. Explicit === false — an absent key on an older daemon means
+		// the switch does not exist there, not that it is off.
+		const ircutParked =
+			getDotted(state.config, 'nightMode.irCutEnabled') === false;
+		const lightParked =
+			getDotted(state.config, 'nightMode.backlightEnabled') === false;
+		ircut.disabled = ircutParked ||
+			!active(getDotted(state.config, 'nightMode.irCutPin1'));
+		light.disabled = lightParked ||
+			!active(getDotted(state.config, 'nightMode.backlightPin'));
+		// A control that cannot work should say which pin is missing — or that
+		// the actuator is deliberately parked — rather than just refusing.
 		if (ircut.disabled && lbl('toggle-ircut'))
-			lbl('toggle-ircut').title = 'Nothing is connected to the IR-cut filter.';
+			lbl('toggle-ircut').title = ircutParked
+				? 'The IR-cut filter is switched off in Day / Night settings; its wiring is kept.'
+				: 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
-			lbl('toggle-light').title = 'Nothing is connected to the night illuminator.';
+			lbl('toggle-light').title = lightParked
+				? 'The lamp is switched off in Day / Night settings; its wiring is kept.'
+				: 'Nothing is connected to the night illuminator.';
 
 		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
 			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
@@ -3359,6 +3373,12 @@
 		const nm = nightCfg();
 		if (!isNumish(nm.irCutPin1))
 			return 'Nothing is connected to the filter yet, so there is nothing to test.';
+		// Parked outranks wired: the daemon refuses to move a parked filter,
+		// so the test's toggle would silently do nothing and every verdict
+		// would read "stuck" on a filter that is fine.
+		if (nm.irCutEnabled === false)
+			return 'The filter is switched off (its wiring is kept). Turn "Drive the ' +
+				'IR-cut filter" on to test it.';
 		if (!toBool(getDotted(state.config, 'jpeg.enabled')))
 			return 'The test reads a still picture, and this camera has JPEG snapshots turned off.';
 		// The monitor re-drives the filter on its own schedule, and a snapshot

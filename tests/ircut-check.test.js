@@ -514,6 +514,38 @@ function runRest() {
 			/Lamp at 80%\.$/.test(thrLamp.line), thrLamp.line);
 	}
 
+	group('diagnose: parked actuators are decisions, not defects');
+	{
+		const wired = { irCutPin1: 11, irCutPin2: 10 };
+		const parked = Object.assign({ irCutEnabled: false }, wired);
+		const f = ic.diagnose(parked, { night: 1, ircut: 0, light: 0 },
+			{ conflictS: 999, flips: 0 });
+		check('a parked filter is an observation',
+			f.some(x => x.id === 'ircut-parked' && x.level === 'info'));
+		check('a parked filter is never "cannot move"',
+			!f.some(x => x.id === 'no-pins'));
+		check('a parked filter cannot be convicted of a conflict',
+			!f.some(x => x.id === 'conflict'));
+		check('an open-looking picture does not accuse a parked filter',
+			!ic.diagnose(parked, { night: 0, ircut: 0, light: 0 }, {},
+				{ look: 'open', streak: 9 })
+				.some(x => x.id === 'picture-open'));
+		check('an absent key on an older daemon is not "parked"',
+			!ic.diagnose(wired, null, null)
+				.some(x => x.id === 'ircut-parked'));
+		check('a parked lamp with wiring says so',
+			ic.diagnose({ backlightEnabled: false, backlightPin: 52 },
+				null, null)
+				.some(x => x.id === 'light-parked' && x.level === 'info'));
+		check('a parked lamp on a PWM channel says so too',
+			ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 1 },
+				null, null)
+				.some(x => x.id === 'light-parked'));
+		check('a lamp with no wiring at all stays silent',
+			!ic.diagnose({ backlightEnabled: false }, null, null)
+				.some(x => x.id === 'light-parked'));
+	}
+
 	group('diagnose: thresholds need a band, not a point');
 	{
 		const bad = (lo, hi) => ic.diagnose(
