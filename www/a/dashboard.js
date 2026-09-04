@@ -24,6 +24,7 @@
 	const css = getComputedStyle(document.documentElement);
 	const C1 = (css.getPropertyValue('--st-c1') || '#4c60d8').trim();
 	const C2 = (css.getPropertyValue('--st-c2') || '#0d9488').trim();
+	const C3 = (css.getPropertyValue('--st-c3') || '#c96a2e').trim();
 	const C4 = (css.getPropertyValue('--st-c4') || '#8a5cd8').trim();
 	const GRID = (css.getPropertyValue('--st-grid') || '#e9ebf2').trim();
 
@@ -549,6 +550,7 @@
 			$('#st-ram').textContent = s.memPct.toFixed(0);
 			pushSpark(sparks.ram, s.memPct);
 			$('#st-ram-mb').textContent = (((s.memTotal - s.memAvail) / 1048576) | 0) + ' / ' + ((s.memTotal / 1048576) | 0) + ' MB';
+			renderMemory(v, s);
 		}
 		if (s.temp != null) {
 			const el = $('#st-temp');
@@ -765,6 +767,125 @@
 		});
 	}
 
+	// ── memory: the one reading here whose subject is a trend ───────────────
+	// The tile answers "how full is it". Nothing answered "is it filling, and
+	// with what" -- the reporter of majestic#311 watched memory climb 50% to
+	// 80% in five minutes against a horizontal line. Measured on a lab camera
+	// with this file's own code, that climb drew 3.5px of travel in the tile's
+	// 26px sparkline: a two-minute window, of which 23 of the 36 points had
+	// already scrolled off, on a scale where the survivors were 13% of the box.
+	//
+	// Auto-scaling the tile is not the fix, and the same camera says why: left
+	// alone it drifts 0.06 points in three minutes, and fitted to the box that
+	// is a full-height seismograph -- idle would look worse than dying. A fixed
+	// scale is the right way to draw a LEVEL. What was missing was an
+	// instrument for the TREND, so the tile keeps its scale, both it and the
+	// panel below widen to an hour, and the panel carries the split.
+	const MEM_EVERY = 5;   // push every 5th poll: 10s apart, 360 points an hour
+	const MEM_WIN = 3600;
+	// The window GROWS to the smallest rung that still holds everything this
+	// page has collected, up to the hour. An hour-wide plot is 98% empty for
+	// its first hour, and a reader who opens the Dashboard to ask about memory
+	// should not be shown a blank box with the answer squeezed against the
+	// right edge. It stays honest only because the caption is derived from the
+	// window rather than written beside it -- the axis says -2 min, then
+	// -10 min, then -1 h, and each of those is true when it is printed.
+	const MEM_RUNGS = [120, 300, 600, 1800, MEM_WIN];
+	let memTick = 0, chMem = null, memSeen = false, memT0 = 0;
+
+	// Three disjoint slices of what the kernel reports, named for what they
+	// mean rather than for what /proc/meminfo calls them. Anonymous pages are
+	// what programs hold; unreclaimable slab and its neighbours are the
+	// kernel's own, which is where a driver's buffers show on a camera
+	// transmitting continuously; Shmem is the RAM filesystem. tmpfs pages are
+	// page cache rather than anonymous, so nothing here is counted twice.
+	//
+	// An absent key is not a zero. A slice this camera cannot report comes back
+	// null, which charts.js draws as a hole and the legend drops, instead of a
+	// floor that would read as "nothing here" (issue #322).
+	function memSlices(v) {
+		const has = k => ('node_memory_' + k + '_bytes') in v;
+		const g = k => v['node_memory_' + k + '_bytes'];
+		return [
+			has('AnonPages') ? g('AnonPages') : null,
+			has('SUnreclaim')
+				? g('SUnreclaim') + (has('KernelStack') ? g('KernelStack') : 0) +
+					(has('PageTables') ? g('PageTables') : 0)
+				: null,
+			has('Shmem') ? g('Shmem') : null,
+		];
+	}
+
+	const MEM_NAMES = ['Programs', 'Kernel', 'RAM disk'];
+
+	// How much time the trace actually holds, which is only the full window
+	// once the page has been open that long. Saying "the last hour" over four
+	// minutes of samples would be the same kind of untruth this panel exists
+	// to stop telling.
+	function spanWords(sec) {
+		if (sec < 90) return Math.round(sec) + ' s';
+		const m = Math.round(sec / 60);
+		if (m < 60) return m + ' min';
+		const h = (m / 60) | 0, r = m % 60;
+		return h + ' h' + (r ? ' ' + r + ' min' : '');
+	}
+
+	function renderMemory(v, s) {
+		const slices = memSlices(v);
+		if (!memSeen) {
+			// Every panel here mounts per what the camera turns out to report.
+			if (slices.every(x => x == null)) return;
+			memSeen = true;
+			const p = $('#st-mem-row');
+			if (p) p.hidden = false;
+			['#st-mem-lg-prog', '#st-mem-lg-krn', '#st-mem-lg-disk'].forEach((id, i) => {
+				const e = $(id);
+				if (e && slices[i] == null) e.hidden = true;
+			});
+			memT0 = performance.now() / 1000;
+			chMem = makeChart('#ch-mem', {
+				h: 110, lo: 0, hi: null, win: MEM_RUNGS[0],
+				// What counts as a hole follows how often this pushes: three
+				// missed pushes, not the 8s a 2s-paced chart would want.
+				gap: MEM_EVERY * 2 * 3,
+				colors: [C1, C3, C2],
+			});
+		}
+		if (memTick++ % MEM_EVERY === 0) {
+			if (chMem) {
+				const open = performance.now() / 1000 - memT0;
+				for (let i = 0; i < MEM_RUNGS.length; i++)
+					if (MEM_RUNGS[i] >= open || i === MEM_RUNGS.length - 1) {
+						chMem.cfg.win = MEM_RUNGS[i];
+						break;
+					}
+			}
+			pushChart(chMem, slices.map(x => x == null ? null : x / 1048576));
+		}
+
+		const note = $('#st-mem-note');
+		if (!note) return;
+		let txt = 'Holding ' + ((s.memTotal - s.memAvail) / 1048576 | 0) + ' of ' +
+			(s.memTotal / 1048576 | 0) + ' MB.';
+		const pts = chMem ? chMem.pts : [];
+		if (pts.length >= 2) {
+			const a = pts[0], b = pts[pts.length - 1], parts = [];
+			for (let i = 0; i < MEM_NAMES.length; i++) {
+				if (a.v[i] == null || b.v[i] == null) continue;
+				// A tenth of a megabyte is the resolution here, so a change
+				// too small to print gets no sign: "Kernel 0.0" rather than
+				// "Kernel \u22120.0", which claims a direction it cannot see.
+				const d = b.v[i] - a.v[i], mag = Math.abs(d).toFixed(1);
+				parts.push(MEM_NAMES[i] + ' ' +
+					(mag === '0.0' ? '' : d < 0 ? '\u2212' : '+') + mag);
+			}
+			if (parts.length)
+				txt += ' Over the last ' + spanWords(b.t - a.t) + ': ' +
+					parts.join(', ') + ' MB.';
+		}
+		note.textContent = txt;
+	}
+
 	function humanKB(kb) {
 		return kb >= 1024 ? (kb / 1024).toFixed(kb >= 10240 ? 0 : 1) + ' MB' : (kb | 0) + ' KB';
 	}
@@ -803,7 +924,9 @@
 	function init() {
 		renderOverlay();
 		sparks.cpu = makeSpark('#spark-cpu', C1, 0, 100);
-		sparks.ram = makeSpark('#spark-ram', C1, 0, 100);
+		// An hour at the panel's resolution, so the tile's trace and the chart
+		// under it are two readings of the same span rather than of two.
+		sparks.ram = makeSpark('#spark-ram', C1, 0, 100, MEM_WIN / (MEM_EVERY * 2), MEM_EVERY);
 		sparks.temp = makeSpark('#spark-temp', C1, null, null);
 		sparks.enc = makeSpark('#spark-enc', C1, 0, null);
 		chEnc = makeChart('#ch-enc', { h: 150, lo: 0, hi: null, colors: [C1] });

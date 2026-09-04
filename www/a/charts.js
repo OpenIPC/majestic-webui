@@ -12,7 +12,15 @@ window.MjCharts = (function () {
 	// the host width via a fixed viewBox + preserveAspectRatio=none; the
 	// 1.5px stroke stays crisp through vector-effect. `cap` is how many
 	// samples to keep (default 60 — 2 min at the dashboard's 2s poll).
-	function makeSpark(id, color, lo, hi, cap) {
+	//
+	// `every` widens the window without lengthening the path: a new slot opens
+	// every `every` pushes and the newest slot is overwritten in between, so
+	// the trace covers `cap * every` polls while still holding only `cap`
+	// points. Default 1 is a slot per push — every sparkline that does not ask
+	// draws exactly what it drew before. Overwriting keeps the last value of
+	// each slot rather than its peak, which suits a level that moves smoothly
+	// (memory) and would hide a spike in one that does not.
+	function makeSpark(id, color, lo, hi, cap, every) {
 		const el = typeof id === 'string' ? $(id) : id;
 		if (!el) return null;
 		const svg = document.createElementNS(SVG_NS, 'svg');
@@ -30,12 +38,13 @@ window.MjCharts = (function () {
 		svg.appendChild(line);
 		el.textContent = '';
 		el.appendChild(svg);
-		return { fill: fill, line: line, lo: lo, hi: hi, cap: cap || 60, ys: [] };
+		return { fill: fill, line: line, lo: lo, hi: hi, cap: cap || 60, every: every || 1, n: 0, ys: [] };
 	}
 	function pushSpark(s, y) {
 		if (!s) return;
 		const ys = s.ys;
-		ys.push(y);
+		if (s.n++ % s.every === 0) ys.push(y);
+		else ys[ys.length - 1] = y;
 		if (ys.length > s.cap) ys.shift();
 		const n = ys.length, W = 100, H = 38;
 		let lo = s.lo != null ? s.lo : Math.min.apply(null, ys);
@@ -67,16 +76,23 @@ window.MjCharts = (function () {
 	}
 
 	// cfg: { h, lo, hi (null = auto), ref {v,label}|null, bands [{from,to,
-	// color,label}], colors [..], fmt, grid, refColor } — series count =
-	// colors.length; `grid` is the hairline color, `refColor` the reference
-	// line's (defaults keep the dashboard's look).
+	// color,label}], colors [..], fmt, grid, refColor, win, gap } — series
+	// count = colors.length; `grid` is the hairline color, `refColor` the
+	// reference line's (defaults keep the dashboard's look).
 	//
 	// Samples are timestamped and x is elapsed time, not sample index: a
 	// failed or slow poll leaves a real hole, so the line breaks across an
 	// outage instead of bridging it, and nothing older than the labelled
 	// window is drawn as if it were recent.
-	const CHART_WINDOW = 120; // seconds of history on screen ("-2 min")
-	const CHART_GAP = 8;      // a hole longer than this breaks the line
+	//
+	// `win` and `gap` are per-chart because not every subject is a subject of
+	// "right now": bitrate and signal are, memory is a trend over hours. They
+	// were module constants, which is why the memory question had no
+	// instrument to be asked with (issue #322). What a hole IS depends on how
+	// often the caller pushes, so a chart that widens its window widens its
+	// gap with it.
+	const CHART_WINDOW = 120; // default seconds of history on screen
+	const CHART_GAP = 8;      // default: a hole longer than this breaks the line
 	// The plot's vertical furniture, hoisted out of renderChart so that the
 	// height a chart is GOING to draw at can be known before it has any samples
 	// to draw. Everything horizontal stays in there: it depends on the host's
@@ -106,14 +122,25 @@ window.MjCharts = (function () {
 		if (!ch) return;
 		const t = performance.now() / 1000;
 		ch.pts.push({ t: t, v: vals });
-		while (ch.pts.length && ch.pts[0].t < t - CHART_WINDOW) ch.pts.shift();
+		const win = ch.cfg.win || CHART_WINDOW;
+		while (ch.pts.length && ch.pts[0].t < t - win) ch.pts.shift();
 		renderChart(ch);
+	}
+
+	// The window's own label. It was the literal string "-2 min" sitting 115
+	// lines below the constant that decided the window, so changing one left
+	// the other quietly saying something untrue.
+	function spanLabel(sec) {
+		if (sec % 3600 === 0) return '-' + (sec / 3600) + ' h';
+		if (sec % 60 === 0) return '-' + (sec / 60) + ' min';
+		return '-' + sec + ' s';
 	}
 	function renderChart(ch) {
 		if (!ch) return;
 		const W = ch.host.clientWidth;
 		if (!W) return;
 		const cfg = ch.cfg;
+		const win = cfg.win || CHART_WINDOW, gap = cfg.gap || CHART_GAP;
 		const padL = 30, padR = 6, padT = PAD_T, H = cfg.h, XB = X_BAND;
 		const plotW = W - padL - padR;
 		const lo = cfg.lo;
@@ -133,7 +160,7 @@ window.MjCharts = (function () {
 		// "now" is the render moment, not the newest sample: during an outage
 		// the trace ages leftward instead of sitting pinned at the label.
 		const tNow = performance.now() / 1000;
-		const X = t => padL + plotW * (1 - (tNow - t) / CHART_WINDOW);
+		const X = t => padL + plotW * (1 - (tNow - t) / win);
 		let s = '';
 		// threshold bands (Wi-Fi grades, luminance floor) sit under everything
 		(cfg.bands || []).forEach(b => {
@@ -170,8 +197,8 @@ window.MjCharts = (function () {
 			};
 			for (let i = 0; i < n; i++) {
 				const v = pts[i].v[si];
-				if (i && pts[i].t - pts[i - 1].t > CHART_GAP) close();
-				if (v == null || tNow - pts[i].t > CHART_WINDOW) { close(); continue; }
+				if (i && pts[i].t - pts[i - 1].t > gap) close();
+				if (v == null || tNow - pts[i].t > win) { close(); continue; }
 				const x = X(pts[i].t).toFixed(1), y = Y(v).toFixed(1);
 				if (!seg) {
 					line += 'M' + x + ' ' + y;
@@ -190,7 +217,7 @@ window.MjCharts = (function () {
 			s += '<path d="' + line + '" fill="none" stroke="' + cfg.colors[si] +
 				'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
 		}
-		s += '<text x="' + padL + '" y="' + (padT + H + XB - 2) + '">-2 min</text>';
+		s += '<text x="' + padL + '" y="' + (padT + H + XB - 2) + '">' + spanLabel(win) + '</text>';
 		s += '<text x="' + (padL + plotW) + '" y="' + (padT + H + XB - 2) + '" text-anchor="end">now</text>';
 		ch.host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + (padT + H + XB) +
 			'" width="' + W + '" height="' + (padT + H + XB) + '">' + s + '</svg>';

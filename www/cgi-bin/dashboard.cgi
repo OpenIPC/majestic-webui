@@ -195,6 +195,27 @@ done) %>
 			</div>
 		</div>
 
+		<%# The tile above says how full memory is; this says whether it is
+		    filling, and with what. An hour wide, because a leak is not a fact
+		    about this minute -- see issue #322. Hidden until the camera turns
+		    out to report the parts, and hidden on the ROW rather than on the
+		    panel: this is the only row with a single occupant, and a row whose
+		    one child is hidden is still a flex box paying its parent's gap. %>
+		<div class="st-chart-row" id="st-mem-row" hidden>
+			<div class="st-panel st-chartbox" id="st-mem-panel">
+				<div class="st-chart-head">
+					<span class="mj-cap">Memory &mdash; what is holding it</span>
+					<span class="x-small text-secondary st-legend">
+						<span id="st-mem-lg-prog"><i class="st-dot st-dot-c1"></i>Programs</span>
+						<span id="st-mem-lg-krn"><i class="st-dot st-dot-c3"></i>Kernel</span>
+						<span id="st-mem-lg-disk"><i class="st-dot st-dot-c2"></i>RAM disk</span>
+					</span>
+				</div>
+				<div class="st-chart" id="ch-mem"></div>
+				<div class="x-small text-secondary" id="st-mem-note"></div>
+			</div>
+		</div>
+
 		<div class="st-chart-row">
 			<div class="st-panel st-chartbox" id="st-luma-panel" hidden>
 				<div class="st-chart-head">

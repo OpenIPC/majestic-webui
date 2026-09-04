@@ -3913,6 +3913,7 @@ dialog.mj-modal::backdrop {
 
 .st-dot-c1 { background: var(--st-c1); }
 .st-dot-c2 { background: var(--st-c2); }
+.st-dot-c3 { background: var(--st-c3); }
 
 .st-chart svg {
 	display: block;
