@@ -89,7 +89,12 @@ function makeEl(id) {
 function load(cardHealth, metrics, mode) {
 	const els = {};
 	const $ = (id) => (els[id] = els[id] || makeEl(id));
-	const env = { $: $, asked: [] };
+	// The card poll is a 30-second setInterval. Captured rather than waited on,
+	// so a test can say "and now another poll happens" without the suite taking
+	// half a minute per case — and so the poll's own early-return, which is
+	// what decides whether a changed verdict ever reaches the screen, is
+	// exercised at all.
+	const env = { $: $, asked: [], polls: [] };
 
 	const video = $('rec-video');
 	video.buffered = { length: 0, start() { return 0; }, end() { return 0; } };
@@ -110,11 +115,13 @@ function load(cardHealth, metrics, mode) {
 			});
 		}
 		if (url.indexOf('/metrics/records') === 0) {
-			// A camera running an older majestic has no such endpoint. 404 and
-			// a refused connection have to look the same to the page.
+			// A camera running an older majestic answers 404 — a known
+			// absence. A refused connection is an unknown, and the page has to
+			// tell those two apart.
 			if (metrics === null) return Promise.resolve({ ok: false, status: 404 });
 			if (metrics === 'refused') return Promise.reject(new Error('refused'));
-			return Promise.resolve({ ok: true, text: () => Promise.resolve(metrics) });
+			const body = typeof metrics === 'function' ? metrics() : metrics;
+			return Promise.resolve({ ok: true, text: () => Promise.resolve(body) });
 		}
 		if (url.indexOf('/api/v1/config.json') === 0) {
 			return json({ records: { enabled: true, path: '/rec/%F', split: 2,
@@ -159,7 +166,8 @@ function load(cardHealth, metrics, mode) {
 		Uint8Array: Uint8Array, encodeURIComponent: encodeURIComponent,
 		decodeURIComponent: decodeURIComponent, String: String, Number: Number,
 		Array: Array, Object: Object, Error: Error, RegExp: RegExp,
-		setTimeout, clearTimeout, setInterval, clearInterval,
+		setTimeout, clearTimeout, clearInterval,
+		setInterval: (fn) => { env.polls.push(fn); return 0; },
 	};
 	ctx.window.document = ctx.document;
 	vm.createContext(ctx);
@@ -202,11 +210,16 @@ async function waitFor(pred, ms) {
 
 function banner(env) { return env.$('rec-health').innerHTML || ''; }
 
-const metricsWith = (state, dropped) =>
+// `lostSec` is footage dropped, in seconds. majestic reports it as
+// records_dropped_ticks_total, in the media timescale — microseconds — beside
+// a COUNT of fragments that is not the same thing, because records.fragmentMs
+// is configurable.
+const metricsWith = (state, lostSec) =>
 	'# HELP records_state Recorder verdict\n' +
 	'# TYPE records_state gauge\n' +
 	'records_state ' + state + '\n' +
-	'records_fragments_dropped_total ' + (dropped || 0) + '\n' +
+	'records_fragments_dropped_total ' + Math.round(lostSec || 0) + '\n' +
+	'records_dropped_ticks_total ' + Math.round((lostSec || 0) * 1e6) + '\n' +
 	'records_fragments_written_total 4200\n';
 
 async function main() {
@@ -237,15 +250,34 @@ async function main() {
 	}
 
 	{
-		// State 0 and losing footage: nothing is wrong with the filesystem and
-		// nothing is wrong with the writes — the card simply cannot take the
-		// bitrate. The page would otherwise be green.
+		// The counter runs from boot. A card that dropped a second last Tuesday
+		// and has been perfect since must not hold the banner red for ever —
+		// "footage is being lost" is a claim about now.
 		const env = load('ok', metricsWith(0, 37));
+		await waitFor(() => env.polls.length > 0);
+		await new Promise((r) => setTimeout(r, 50));
+		check('drops that happened before this page opened are history, not news',
+			banner(env) === '', JSON.stringify(banner(env)).slice(0, 160));
+	}
+
+	{
+		// State 0 and losing footage NOW: nothing is wrong with the filesystem
+		// and nothing is wrong with the writes — the card simply cannot take
+		// the bitrate. The page would otherwise be green.
+		let lost = 37;
+		const env = load('ok', () => metricsWith(0, lost));
+		await waitFor(() => env.polls.length > 0);
+		await new Promise((r) => setTimeout(r, 50));
+		check('nothing said while the counter is standing still', banner(env) === '');
+
+		lost = 39.5;                       // two and a half more seconds gone
+		env.polls[0]();
 		const ok = await waitFor(() => banner(env).indexOf('cannot keep up') >= 0);
-		check('a card that cannot keep up is not a healthy card', ok,
-			JSON.stringify(banner(env)).slice(0, 160));
-		check('and it says how much has been lost',
-			banner(env).indexOf('37') >= 0, JSON.stringify(banner(env)).slice(0, 160));
+		check('but a card losing footage while you watch is not a healthy card',
+			ok, JSON.stringify(banner(env)).slice(0, 200));
+		check('and what it reports is the footage lost since, not since boot',
+			banner(env).indexOf('37') < 0 && banner(env).indexOf('39') < 0,
+			JSON.stringify(banner(env)).slice(0, 200));
 	}
 
 	group('a majestic too old to ask is not a majestic in trouble');
@@ -256,6 +288,25 @@ async function main() {
 		await new Promise((r) => setTimeout(r, 50));
 		check('nothing is claimed when /metrics/records ' + how,
 			banner(env) === '', JSON.stringify(banner(env)).slice(0, 120));
+	}
+
+	// But the two are not the same, and the badge is where the difference
+	// shows: a camera that answered and has no such endpoint is as known as it
+	// can be, and gets the green it got before these metrics existed. A camera
+	// that could not be asked is not known, and green is a claim.
+	{
+		const env = load('ok', null);
+		await waitFor(() => env.$('rec-daynav').innerHTML.indexOf('badge') >= 0);
+		check('an older majestic still gets its Recording badge',
+			env.$('rec-daynav').innerHTML.indexOf('text-bg-success') >= 0,
+			env.$('rec-daynav').innerHTML.slice(0, 200));
+	}
+	{
+		const env = load('ok', 'refused');
+		await waitFor(() => env.$('rec-daynav').innerHTML.indexOf('badge') >= 0);
+		check('a camera that could not be asked does not',
+			env.$('rec-daynav').innerHTML.indexOf('text-bg-success') < 0,
+			env.$('rec-daynav').innerHTML.slice(0, 200));
 	}
 
 	group('a gap means different things in the two recording modes');

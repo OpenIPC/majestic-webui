@@ -27,7 +27,7 @@
 
 	const state = {
 		cfg: {}, prefix: '', split: 1200, enabled: false, card: null,
-		recorder: null, onMotion: false,
+		recorder: null, onMotion: false, droppedAt: null,
 		offsetMs: 0, offsetKnown: false, zone: null, nowSec: null, today: '',
 		tzSamples: [], tzDiffers: false, tzOn: false,
 		days: [], dayName: '', day: { clips: [], unplaced: [] },
@@ -656,23 +656,47 @@
 	// throw away. The SD-card endpoint cannot see any of that, because none of
 	// it is visible from the filesystem.
 	//
-	// Absent is not bad. A camera running an older majestic serves no
-	// /metrics/records at all, and a page that painted that red would be
-	// telling every one of them something false.
+	// Three answers, not two, and the difference decides what the badge may
+	// say. A camera whose majestic ANSWERED and has no such endpoint is a
+	// camera that cannot report this — a known absence, and the page must go on
+	// saying what it said before that endpoint existed. A request that FAILED
+	// is an unknown, and an unknown may not be turned into a fact.
+	//
+	//   { v: … }        a reading
+	//   { absent: true } answered, and does not have it
+	//   null             not asked yet, or the ask failed
 	function loadRecorder() {
 		return apiFetch('/metrics/records', { credentials: 'same-origin' })
-			.then(function (r) { return r.ok ? r.text() : null; })
+			.then(function (r) {
+				if (r.status === 404) { state.recorder = { absent: true }; return null; }
+				return r.ok ? r.text() : Promise.reject(new Error('status ' + r.status));
+			})
 			.then(function (t) {
-				state.recorder = t ? parseMetrics(t).v : null;
+				if (t === null) return;
+				const v = parseMetrics(t).v;
+				// An answer this release cannot read is not a reading.
+				state.recorder = typeof v.records_state === 'number'
+					? { v: v } : null;
+				// Where the drop counter stood when this page opened, so what
+				// it reports is footage lost while somebody was watching
+				// rather than everything since the camera booted.
+				if (state.droppedAt === null &&
+					typeof v.records_dropped_ticks_total === 'number')
+					state.droppedAt = v.records_dropped_ticks_total;
 			})
 			.catch(function () { state.recorder = null; });
 	}
 
-	// The recorder's own verdict, or null when it has not got one to give.
+	// The recorder's own verdict, or null when there is not one to have.
 	function recorderState() {
-		const v = state.recorder;
-		if (!v || typeof v.records_state !== 'number') return null;
-		return v.records_state;
+		const r = state.recorder;
+		return r && r.v ? r.v.records_state : null;
+	}
+
+	// Whether the camera answered at all. An older majestic saying "no such
+	// endpoint" is not the same as a camera that could not be reached.
+	function recorderKnown() {
+		return !!state.recorder;
 	}
 
 	// Positive claims need positive evidence. A card is only known writable
@@ -689,6 +713,11 @@
 	// to be asked.
 	function cardWritable() {
 		if (!state.card || state.card.health !== 'ok') return false;
+		// A camera that answered and has no recorder metrics is as known as it
+		// can be, and green is what this page said about it before there were
+		// any. A camera that could not be asked is not known, and green is a
+		// claim — the same rule the card itself is held to, two lines up.
+		if (!recorderKnown()) return false;
 		const rs = recorderState();
 		return rs === null || rs === 0;
 	}
@@ -731,7 +760,8 @@
 	// anything. This is the half the SD-card page cannot see: every state below
 	// reads as a healthy filesystem with free space on it.
 	function recorderTrouble() {
-		const v = state.recorder;
+		const r = state.recorder;
+		const v = r && r.v;
 		const rs = recorderState();
 		if (rs === null) return '';
 
@@ -754,14 +784,33 @@
 		// neither the bitrate nor its own garbage collection. Nothing about
 		// the filesystem is wrong, which is exactly why this needs saying —
 		// the page would otherwise be green.
-		if (v && v.records_fragments_dropped_total > 0) {
+		//
+		// Measured against the first reading this page took, not against zero.
+		// The counter runs from boot, so a card that dropped a second last
+		// Tuesday and has been perfect since would otherwise hold the banner
+		// red for ever — and "footage is being lost" is a claim about now.
+		const lost = droppedSeconds();
+		if (lost > 0) {
 			return '<strong>The SD card cannot keep up — footage is being lost.</strong> ' +
-				esc(String(v.records_fragments_dropped_total)) +
-				' second' + (v.records_fragments_dropped_total === 1 ? '' : 's') +
-				' of video have been dropped because the card could not take them ' +
-				'in time. A faster card, or a lower bitrate, is the fix.';
+				esc(TL.duration(lost)) + ' of video has been dropped while this ' +
+				'page has been open, because the card could not take it in time. ' +
+				'A faster card, or a lower bitrate, is the fix.';
 		}
 		return '';
+	}
+
+	// Seconds of footage dropped since this page loaded.
+	//
+	// From records_dropped_ticks_total, which is presentation time in the
+	// media timescale — microseconds for every track majestic writes. The
+	// fragment COUNT beside it is not seconds: records.fragmentMs is
+	// configurable, so counting fragments and calling them seconds is right
+	// only at the default.
+	function droppedSeconds() {
+		const v = state.recorder && state.recorder.v;
+		if (!v || typeof v.records_dropped_ticks_total !== 'number') return 0;
+		if (state.droppedAt === null) return 0;
+		return Math.max(0, (v.records_dropped_ticks_total - state.droppedAt) / 1e6);
 	}
 
 	// Kernel complaints about the card, when the endpoint found any. Never
@@ -854,7 +903,11 @@
 		setInterval(function () {
 			if (document.hidden) return;
 			const before = state.card ? state.card.health : null;
-			const recBefore = recorderState();
+			// The rendered verdict itself, not the inputs to it. Comparing
+			// records_state alone missed a card that started dropping footage
+			// while the recorder stayed in state 0 — the banner is driven by
+			// cardTrouble(), so cardTrouble() is what has to be watched.
+			const msgBefore = cardTrouble();
 			Promise.all([loadCard(false), loadRecorder()]).then(function () {
 				const after = state.card ? state.card.health : null;
 				renderStorage();
@@ -865,7 +918,7 @@
 				// that has just given up on a card the filesystem still calls
 				// healthy is exactly the case this poll exists to catch, and
 				// keying off the card alone would have missed it.
-				if (after === before && recorderState() === recBefore) return;
+				if (after === before && cardTrouble() === msgBefore) return;
 				renderHealth();
 				renderDayNav();
 				renderClips();

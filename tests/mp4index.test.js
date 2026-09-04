@@ -287,7 +287,7 @@ group('buildIndex — the exact walk');
 		check('and does not claim to be complete', idx.complete === false);
 
 		return runLocate();
-	}).then(runExport).then(runSync).then(runCheap).then(() => done());
+	}).then(runExport).then(runSync).then(runSyncCheap).then(runCheap).then(() => done());
 }
 
 // ---- the approximate seek ----------------------------------------------
@@ -437,6 +437,24 @@ function runSync() {
 			check('a clip with no keyframe anywhere falls back to its start',
 				M.fragmentAt(nidx, 3.5) === nidx.fragments[0]);
 
+			// An export from a span that itself begins mid-GOP has nothing
+			// behind it to snap back to. Losing up to a GOP off the FRONT of
+			// the selection beats handing somebody a file that opens black.
+			const mixed = [];
+			for (let i = 0; i < 8; i++)
+				mixed.push({ seq: i, durations: new Array(20).fill(50000),
+					payload: 40000, sync: i >= 3 });
+			const mbuf = clip(1000000, mixed);
+			const minit = M.parseInit(u8of(mbuf));
+			return M.buildIndex(readerFor(mbuf), mbuf.length, minit).then(midx => {
+				const r = M.exportRanges(midx, 0, 6);
+				check('with no keyframe behind it, an export starts at the first one ahead',
+					r.body.start === midx.fragments[3].off,
+					r.body.start + ' vs ' + midx.fragments[3].off);
+				check('and says so, rather than claiming footage it did not include',
+					r.from === 3, 'got ' + r.from);
+			});
+
 			// A recording written before first_sample_flags was emitted at all
 			// must not become unseekable: it has no such field, and every
 			// fragment in it began at an IDR by construction.
@@ -455,6 +473,70 @@ function runSync() {
 			});
 		});
 	});
+}
+
+// The paths production actually takes. buildIndex() is not one of them — a
+// full walk of a 20-minute clip is ~1100 range requests — so a snap that only
+// works on a full index is a snap that never runs: positionAt() calls
+// locate() and hands seekTo() the offset it gets back, and saveSelection()
+// calls locate() then spanFrom() from that same offset. Both had to learn it.
+function runSyncCheap() {
+	group('the cheap paths land somewhere a decoder can start, too');
+
+	const specs = [];
+	for (let i = 0; i < 12; i++) {
+		specs.push({
+			seq: i,
+			durations: new Array(20).fill(50000),
+			payload: 40000,
+			sync: i % 4 === 0,
+		});
+	}
+	const buf = clip(1000000, specs);
+	const init = M.parseInit(u8of(buf));
+
+	return M.locate(readerFor(buf), buf.length, init, 6.5, 1).then(hit => {
+		check('locate snaps back to the keyframe fragment',
+			hit.off === offsetOfFragment(buf, init, 4),
+			hit.off + ' vs ' + offsetOfFragment(buf, init, 4));
+		check('and says it managed to', hit.atSync === true);
+		check('reporting the time it will really start at', hit.approxSec === 4,
+			'got ' + hit.approxSec);
+
+		// spanFrom is what the export walks, so it has to carry the flag or
+		// exportRanges cannot act on it.
+		return M.spanFrom(readerFor(buf), buf.length, init, hit.off, 4);
+	}).then(span => {
+		check('spanFrom carries which fragments open on a keyframe',
+			span.fragments.every(f => typeof f.sync === 'boolean'));
+		check('and the span it hands back starts on one', span.fragments[0].sync === true);
+	}).then(() => {
+		// Nothing to snap to: locate says so rather than pretending.
+		const none = [];
+		for (let i = 0; i < 6; i++)
+			none.push({ seq: i, durations: new Array(20).fill(50000),
+				payload: 40000, sync: false });
+		const nbuf = clip(1000000, none);
+		const ninit = M.parseInit(u8of(nbuf));
+		return M.locate(readerFor(nbuf), nbuf.length, ninit, 3.5, 1).then(hit => {
+			check('a clip with no keyframe in reach reports that it could not snap',
+				hit.atSync === false);
+			check('and still lands at or before the moment asked for',
+				hit.approxSec <= 3.5, 'got ' + hit.approxSec);
+		});
+	});
+}
+
+// Byte offset of the nth fragment, worked out the same way the fixture built
+// it — so the assertions above compare against the file, not against the
+// parser being tested.
+function offsetOfFragment(buf, init, n) {
+	let off = init.firstMoof;
+	for (let i = 0; i < n; i++) {
+		const moofSize = buf.readUInt32BE(off);
+		off += moofSize + buf.readUInt32BE(off + moofSize);
+	}
+	return off;
 }
 
 // ---- the cheap paths ----------------------------------------------------

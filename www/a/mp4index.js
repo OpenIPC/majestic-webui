@@ -373,7 +373,7 @@ window.MajesticMp4Index = (function () {
 		const ts = init.timescale || 1;
 		const target = Math.max(0, targetSec);
 
-		let lo = init.firstMoof, hi = size, best = null;
+		let lo = init.firstMoof, hi = size, best = null, bestSync = null;
 
 		// What a probe found: its byte offset and the time it starts at.
 		// Exact from tfdt; on a pre-tfdt recording, estimated from the write
@@ -430,9 +430,14 @@ window.MajesticMp4Index = (function () {
 				while (at >= 0 && at + 16 <= buf.length) {
 					const t = timeAt(buf, at);
 					if (t === null || t.sec > target) break;
-					best = { off: start + at, sec: t.sec, exact: t.exact };
+					const here = { off: start + at, sec: t.sec, exact: t.exact };
+					best = here;
 					const f = parseFragment(buf.subarray(at));
 					if (!f || f.short || !f.total) break;
+					// The last fragment at or before the target that a decoder
+					// can actually be started at. Free: this walk is already
+					// parsing every fragment in the window.
+					if (f.sync !== false) bestSync = here;
 					at += f.total;
 				}
 				return settle();
@@ -443,8 +448,26 @@ window.MajesticMp4Index = (function () {
 			// Land at or before the moment asked for, never after it: starting
 			// late reads as the seek having been ignored, where starting a
 			// fragment early is just a moment of lead-in.
-			if (!best) return { off: init.firstMoof, approxSec: 0, exact: false };
-			return { off: best.off, approxSec: best.sec, exact: best.exact };
+			//
+			// And prefer a fragment that opens on a keyframe, because that is
+			// where a decoder can be STARTED. Handing MSE a fragment that opens
+			// mid-GOP feeds it frames whose references were never appended, and
+			// the picture stays blank until the next keyframe rather than
+			// erroring — a seek that looked like a decode bug.
+			//
+			// `atSync` says whether one was found. It cannot always be: the
+			// refine window is a fraction of a second of video and a camera
+			// with gopSize 30 puts a keyframe every thirty of them, so on those
+			// this reports false and the caller gets what it used to get. The
+			// answer there is not a wider read on every scrub — it is a shorter
+			// GOP, which is what the export path's forward snap makes up for.
+			const pick = bestSync || best;
+			if (!pick)
+				return { off: init.firstMoof, approxSec: 0, exact: false, atSync: true };
+			return {
+				off: pick.off, approxSec: pick.sec, exact: pick.exact,
+				atSync: bestSync !== null,
+			};
 		}
 
 		return Promise.resolve().then(loop);
@@ -546,7 +569,8 @@ window.MajesticMp4Index = (function () {
 		}
 		function advance(f) {
 			if (!f || f.short || !f.total || off + f.total > size) return finish();
-			frags.push({ off: off, len: f.total, t: ticks / ts, dur: (f.durTicks || 0) / ts, seq: f.seq });
+			frags.push({ off: off, len: f.total, t: ticks / ts,
+				dur: (f.durTicks || 0) / ts, seq: f.seq, sync: f.sync !== false });
 			ticks += f.durTicks || 0;
 			off += f.total;
 			if (onProgress) onProgress(ticks / ts, want);
@@ -581,12 +605,25 @@ window.MajesticMp4Index = (function () {
 
 		let i = 0;
 		while (i < f.length - 1 && f[i].t + f[i].dur <= a) i++;
-		// Back to something that opens on a keyframe. An export is a file
-		// somebody will open in a player that has seen nothing before it, so
-		// the first fragment has to be one it can start decoding at — the same
-		// rule as a seek, for the same reason, and here it costs at most one
-		// GOP of extra footage at the front.
+
+		// An export is a file somebody opens in a player that has seen nothing
+		// before it, so its first fragment has to be one a decoder can be
+		// started at. Otherwise the saved clip opens black — not with an error,
+		// which is what makes it worth going out of the way for.
+		//
+		// Back first, because that keeps everything asked for and costs at most
+		// one GOP of lead-in. Forward only if there is nothing behind: that
+		// happens when the span itself begins mid-GOP, which is what
+		// spanFrom() hands back when locate() could not find a keyframe within
+		// its window. Losing up to a GOP off the FRONT of a selection is worse
+		// than lead-in and better than a file that will not open.
+		const from = i;
 		while (i > 0 && !f[i].sync) i--;
+		if (!f[i].sync) {
+			i = from;
+			while (i < f.length - 1 && !f[i].sync) i++;
+			if (!f[i].sync) i = from;   // no keyframe anywhere: nothing to do
+		}
 		let j = i;
 		while (j < f.length - 1 && f[j].t + f[j].dur < b) j++;
 
