@@ -781,7 +781,11 @@
 	// scale is the right way to draw a LEVEL. What was missing was an
 	// instrument for the TREND, so the tile keeps its scale, both it and the
 	// panel below widen to an hour, and the panel carries the split.
-	const MEM_EVERY = 5;   // push every 5th poll: 10s apart, 360 points an hour
+	// One slot clock for both the tile's trace and the panel below it, in
+	// SECONDS rather than in polls: the heartbeat arms its next tick 2s after
+	// the last one settled and skips a failed poll entirely, so counting polls
+	// would have the two drawing different spans while claiming one.
+	const MEM_SLOT = 10;   // seconds per point: 360 points an hour
 	const MEM_WIN = 3600;
 	// The window GROWS to the smallest rung that still holds everything this
 	// page has collected, up to the hour. An hour-wide plot is 98% empty for
@@ -794,7 +798,7 @@
 	// that trebles leaves the reader looking at the same crowded-into-the-
 	// corner picture this panel exists to stop drawing.
 	const MEM_RUNGS = [120, 300, 600, 1200, 2400, MEM_WIN];
-	let memTick = 0, chMem = null, memSeen = false, memT0 = 0;
+	let memSlot = -1, chMem = null, memSeen = false, memT0 = 0;
 
 	// Three disjoint slices of what the kernel reports, named for what they
 	// mean rather than for what /proc/meminfo calls them. Anonymous pages are
@@ -849,14 +853,16 @@
 			chMem = makeChart('#ch-mem', {
 				h: 110, lo: 0, hi: null, win: MEM_RUNGS[0],
 				// What counts as a hole follows how often this pushes: three
-				// missed pushes, not the 8s a 2s-paced chart would want.
-				gap: MEM_EVERY * 2 * 3,
+				// missed slots, not the 8s a 2s-paced chart would want.
+				gap: MEM_SLOT * 3,
 				colors: [C1, C3, C2],
 			});
 		}
-		if (memTick++ % MEM_EVERY === 0) {
+		const now = performance.now() / 1000, k = Math.floor(now / MEM_SLOT);
+		if (k !== memSlot) {
+			memSlot = k;
 			if (chMem) {
-				const open = performance.now() / 1000 - memT0;
+				const open = now - memT0;
 				for (let i = 0; i < MEM_RUNGS.length; i++)
 					if (MEM_RUNGS[i] >= open || i === MEM_RUNGS.length - 1) {
 						chMem.cfg.win = MEM_RUNGS[i];
@@ -927,9 +933,9 @@
 	function init() {
 		renderOverlay();
 		sparks.cpu = makeSpark('#spark-cpu', C1, 0, 100);
-		// An hour at the panel's resolution, so the tile's trace and the chart
-		// under it are two readings of the same span rather than of two.
-		sparks.ram = makeSpark('#spark-ram', C1, 0, 100, MEM_WIN / (MEM_EVERY * 2), MEM_EVERY);
+		// An hour on the panel's own slot clock, so the tile's trace and the
+		// chart under it really are two readings of the same span.
+		sparks.ram = makeSpark('#spark-ram', C1, 0, 100, MEM_WIN / MEM_SLOT, MEM_SLOT);
 		sparks.temp = makeSpark('#spark-temp', C1, null, null);
 		sparks.enc = makeSpark('#spark-enc', C1, 0, null);
 		chEnc = makeChart('#ch-enc', { h: 150, lo: 0, hi: null, colors: [C1] });

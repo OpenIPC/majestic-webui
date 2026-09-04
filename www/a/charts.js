@@ -13,14 +13,20 @@ window.MjCharts = (function () {
 	// 1.5px stroke stays crisp through vector-effect. `cap` is how many
 	// samples to keep (default 60 — 2 min at the dashboard's 2s poll).
 	//
-	// `every` widens the window without lengthening the path: a new slot opens
-	// every `every` pushes and the newest slot is overwritten in between, so
-	// the trace covers `cap * every` polls while still holding only `cap`
-	// points. Default 1 is a slot per push — every sparkline that does not ask
-	// draws exactly what it drew before. Overwriting keeps the last value of
-	// each slot rather than its peak, which suits a level that moves smoothly
-	// (memory) and would hide a spike in one that does not.
-	function makeSpark(id, color, lo, hi, cap, every) {
+	// `slot` widens the span without lengthening the path: one point covers
+	// `slot` SECONDS, opened when the clock crosses a boundary and overwritten
+	// by every push in between, so the trace holds `cap * slot` seconds and
+	// points older than that are dropped by age. It is deliberately a
+	// duration and not a count of pushes — the caller's pushes are not a
+	// clock, since the dashboard's poll arms its next tick 2s after the last
+	// one SETTLED and pushes nothing at all for a poll that failed. A count
+	// would quietly stretch the window past what it claims, and a sparkline
+	// has no axis to admit that with; holding the span is the only way one can
+	// be honest about it. Omitted is a point per push, capped by count, which
+	// is what every sparkline that does not ask still gets. Overwriting keeps
+	// the last value of each slot rather than its peak, which suits a level
+	// that moves smoothly (memory) and would hide a spike in one that does not.
+	function makeSpark(id, color, lo, hi, cap, slot) {
 		const el = typeof id === 'string' ? $(id) : id;
 		if (!el) return null;
 		const svg = document.createElementNS(SVG_NS, 'svg');
@@ -38,14 +44,26 @@ window.MjCharts = (function () {
 		svg.appendChild(line);
 		el.textContent = '';
 		el.appendChild(svg);
-		return { fill: fill, line: line, lo: lo, hi: hi, cap: cap || 60, every: every || 1, n: 0, ys: [] };
+		return { fill: fill, line: line, lo: lo, hi: hi, cap: cap || 60, slot: slot || 0, ks: [], ys: [] };
 	}
 	function pushSpark(s, y) {
 		if (!s) return;
-		const ys = s.ys;
-		if (s.n++ % s.every === 0) ys.push(y);
-		else ys[ys.length - 1] = y;
-		if (ys.length > s.cap) ys.shift();
+		const ys = s.ys, ks = s.ks;
+		if (!s.slot) {
+			ys.push(y);
+			if (ys.length > s.cap) ys.shift();
+		} else {
+			// Absolute slot index off the clock, so a boundary is a boundary
+			// however the polls happen to land and nothing drifts by a poll
+			// interval per point.
+			const k = Math.floor(performance.now() / 1000 / s.slot);
+			if (ks.length && ks[ks.length - 1] === k) ys[ys.length - 1] = y;
+			else { ys.push(y); ks.push(k); }
+			// Evicting by AGE rather than by count is the half that survives an
+			// outage: points from before a gap in polling are genuinely old,
+			// and this trace is drawn by index and cannot show that they are.
+			while (ks.length && k - ks[0] >= s.cap) { ks.shift(); ys.shift(); }
+		}
 		const n = ys.length, W = 100, H = 38;
 		let lo = s.lo != null ? s.lo : Math.min.apply(null, ys);
 		let hi = s.hi != null ? s.hi : Math.max.apply(null, ys);

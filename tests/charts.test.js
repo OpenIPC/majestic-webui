@@ -12,10 +12,12 @@
 // What must hold, in one sentence each: a fixed scale draws a LEVEL, so idle
 // drift stays flat and only the window decides whether a real climb is visible;
 // an auto scale draws a SHAPE, so idle drift fills the box and the two cameras
-// become indistinguishable; `every` widens a sparkline's span without
-// lengthening its path, and leaves a caller that does not ask for it drawing
-// exactly what it drew before; and the axis caption is derived from the window
-// rather than written beside it, so the two cannot drift apart.
+// become indistinguishable; `slot` widens a sparkline's span without
+// lengthening its path and measures that span in SECONDS, so neither a slow
+// poll nor a failed one can stretch it past what it claims, while a caller that
+// does not ask draws exactly what it drew before; and the axis caption is
+// derived from the window rather than written beside it, so the two cannot
+// drift apart.
 'use strict';
 
 const fs = require('fs');
@@ -57,6 +59,16 @@ function series(name) {
 		.map(Number);
 }
 
+// Feed a series at the dashboard's 2s poll, moving the clock as the browser
+// would — the slotted sparkline reads it, so a test that froze time would
+// deal every sample into one slot.
+function feed(MC, clock, sparks, vals, step) {
+	vals.forEach(v => {
+		clock.t += step == null ? 2 : step;
+		sparks.forEach(sp => MC.pushSpark(sp, v));
+	});
+}
+
 // How far the drawn trace travels vertically, read back out of the path the
 // sparkline emitted — the same thing an eye judges "is it going up" by.
 function travel(sp) {
@@ -81,10 +93,10 @@ const IDLE = series('mem-idle.txt');     // three minutes of a camera at rest
 
 group('a fixed scale draws a level, and only the window decides what of a trend survives');
 {
-	const { MC } = boot();
+	const { MC, clock } = boot();
 
 	const shipped = MC.makeSpark(makeHost(), '#000', 0, 100);          // cap 60
-	CLIMB.forEach(v => MC.pushSpark(shipped, v));
+	feed(MC, clock, [shipped], CLIMB);
 	const shippedPx = px(travel(shipped));
 
 	check('the two-minute window shows only the tail of the climb',
@@ -96,30 +108,38 @@ group('a fixed scale draws a level, and only the window decides what of a trend 
 		shippedPx < 5, shippedPx.toFixed(1) + 'px');
 
 	const idle = MC.makeSpark(makeHost(), '#000', 0, 100);
-	IDLE.forEach(v => MC.pushSpark(idle, v));
+	feed(MC, clock, [idle], IDLE);
 	check('a camera at rest draws flat on the same scale, as it should',
 		px(travel(idle)) < 0.5, px(travel(idle)).toFixed(2) + 'px');
-
+}
+{
 	// The window is the fix, not the scale. Same scale, an hour of room.
-	const hour = MC.makeSpark(makeHost(), '#000', 0, 100, 360, 5);
-	CLIMB.forEach(v => MC.pushSpark(hour, v));
+	const { MC, clock } = boot();
+	const hour = MC.makeSpark(makeHost(), '#000', 0, 100, 360, 10);
+	feed(MC, clock, [hour], CLIMB);
 	const hourPx = px(travel(hour));
 	check('holding the whole climb on that same fixed scale more than doubles the travel',
-		hourPx > shippedPx * 2, shippedPx.toFixed(1) + 'px -> ' + hourPx.toFixed(1) + 'px');
-
-	const idleHour = MC.makeSpark(makeHost(), '#000', 0, 100, 360, 5);
-	IDLE.forEach(v => MC.pushSpark(idleHour, v));
-	check('and the camera at rest is still flat, so the widening invents nothing',
+		hourPx > 7, hourPx.toFixed(1) + 'px against the shipped 3.5px');
+	check('and it spans the whole climb, newest value live at the end',
+		hour.ys[hour.ys.length - 1] === CLIMB[CLIMB.length - 1] &&
+		hour.ys[0] < 47, hour.ys[0].toFixed(1) + '% .. ' + hour.ys[hour.ys.length - 1].toFixed(1) + '%');
+}
+{
+	const { MC, clock } = boot();
+	const idleHour = MC.makeSpark(makeHost(), '#000', 0, 100, 360, 10);
+	feed(MC, clock, [idleHour], IDLE);
+	check('the camera at rest is still flat, so the widening invents nothing',
 		px(travel(idleHour)) < 0.5, px(travel(idleHour)).toFixed(2) + 'px');
 }
 
 group('an auto scale draws a shape, which is why it cannot be the fix here');
 {
-	const { MC } = boot();
-	const idle = MC.makeSpark(makeHost(), '#000', null, null, 360, 5);
-	IDLE.forEach(v => MC.pushSpark(idle, v));
-	const climb = MC.makeSpark(makeHost(), '#000', null, null, 360, 5);
-	CLIMB.forEach(v => MC.pushSpark(climb, v));
+	const { MC, clock } = boot();
+	const idle = MC.makeSpark(makeHost(), '#000', null, null, 360, 10);
+	feed(MC, clock, [idle], IDLE);
+	const b2 = boot();
+	const climb = b2.MC.makeSpark(makeHost(), '#000', null, null, 360, 10);
+	feed(b2.MC, b2.clock, [climb], CLIMB);
 
 	check('0.07 points of idle drift fills the whole box',
 		px(travel(idle)) > TILE_PX - 0.01, px(travel(idle)).toFixed(1) + 'px');
@@ -128,44 +148,73 @@ group('an auto scale draws a shape, which is why it cannot be the fix here');
 		travel(idle).toFixed(1) + ' vs ' + travel(climb).toFixed(1));
 }
 
-// ── `every`: a wider span, not a longer path ────────────────────────────────
+// ── `slot`: a wider span, not a longer path — and measured in seconds ───────
 
-group('every widens the span without lengthening the path');
+group('slot widens the span without lengthening the path');
 {
-	const { MC } = boot();
+	const { MC, clock } = boot();
+	const dense = MC.makeSpark(makeHost(), '#000', 0, 100, 360);
+	const slotted = MC.makeSpark(makeHost(), '#000', 0, 100, 360, 10);
 
-	const dense = MC.makeSpark(makeHost(), '#000', 0, 100, 360, 1);
-	const slotted = MC.makeSpark(makeHost(), '#000', 0, 100, 360, 5);
-	CLIMB.forEach(v => { MC.pushSpark(dense, v); MC.pushSpark(slotted, v); });
+	check('a sparkline with nothing pushed draws nothing',
+		points(slotted) === 0);
 
-	check('one slot per five pushes holds a fifth of the points',
-		slotted.ys.length === Math.ceil(CLIMB.length / 5),
-		slotted.ys.length + ' of ' + dense.ys.length);
-	// Each slot ends holding the last sample that fell in it — a slot is
-	// overwritten, not averaged — so the trace is the series read at a fifth
-	// of the rate rather than a smoothing of it.
-	check('while still spanning the whole series, one sample in five',
-		slotted.ys.every((y, i) =>
-			y === CLIMB[Math.min(5 * i + 4, CLIMB.length - 1)]),
-		slotted.ys[0] + ' .. ' + slotted.ys[slotted.ys.length - 1]);
-	check('the newest slot is live from the first push, not blank until the next one opens',
-		points(MC.makeSpark(makeHost(), '#000', 0, 100, 360, 5)) === 0 &&
+	feed(MC, clock, [dense, slotted], CLIMB);
+
+	// 160 samples 2s apart is 320s, which is 33 ten-second slots.
+	check('a ten-second slot over 320s of polling holds 33 points, not 160',
+		slotted.ys.length === 33 && dense.ys.length === 160,
+		slotted.ys.length + ' against ' + dense.ys.length);
+	// A slot is overwritten, not averaged, so the trace is the series read at
+	// a lower rate rather than a smoothing of it — and the newest point tracks
+	// every push, so the tile is live between slot boundaries.
+	check('the newest point is live between boundaries rather than blank until the next one',
 		slotted.ys[slotted.ys.length - 1] === CLIMB[CLIMB.length - 1]);
 
 	// The default has to be invisible: every other sparkline in the WebUI
-	// passes no `every` and must keep drawing exactly what it drew.
-	const a = MC.makeSpark(makeHost(), '#000', 0, 100);
-	const b = MC.makeSpark(makeHost(), '#000', 0, 100, 60, 1);
-	CLIMB.forEach(v => { MC.pushSpark(a, v); MC.pushSpark(b, v); });
-	check('omitting it is a slot per push, unchanged',
+	// passes no slot and must keep drawing exactly what it drew.
+	const c = boot();
+	const a = c.MC.makeSpark(makeHost(), '#000', 0, 100);
+	const b = c.MC.makeSpark(makeHost(), '#000', 0, 100, 60);
+	feed(c.MC, c.clock, [a, b], CLIMB);
+	check('omitting it is a point per push, capped by count, unchanged',
 		a.line.attrs.d === b.line.attrs.d && a.ys.length === 60);
+}
+
+// The bug this replaced: slots counted PUSHES, so a window of "an hour" was
+// really 1800 successful polls. The dashboard's heartbeat arms its next tick 2s
+// after the last one settled and pushes nothing at all for a poll that failed,
+// so the trace quietly held more than the hour it claimed — on a widget with no
+// axis to admit it with.
+group('and it is seconds, so a stalled poll cannot stretch the span past its claim');
+{
+	const { MC, clock } = boot();
+	const sp = MC.makeSpark(makeHost(), '#000', 0, 100, 6, 10);   // 60 seconds
+
+	feed(MC, clock, [sp], new Array(40).fill(50));                // 80s of polling
+	check('a full trace holds its cap and no more',
+		sp.ys.length === 6, sp.ys.length + ' points');
+	check('spanning no more than cap x slot seconds',
+		(sp.ks[sp.ks.length - 1] - sp.ks[0]) < 6,
+		(sp.ks[sp.ks.length - 1] - sp.ks[0]) * 10 + 's');
+
+	clock.t += 600;                                               // ten dead minutes
+	MC.pushSpark(sp, 90);
+	check('ten minutes of failed polls leave nothing behind from before them',
+		sp.ys.length === 1 && sp.ys[0] === 90,
+		sp.ys.length + ' points, newest ' + sp.ys[sp.ys.length - 1]);
+
+	feed(MC, clock, [sp], new Array(15).fill(70));                // 30s more
+	check('and the trace refills from the resumed polling alone',
+		sp.ys.length === 4 && (sp.ks[sp.ks.length - 1] - sp.ks[0]) < 6,
+		sp.ys.length + ' points');
 }
 
 // ── the window and its caption ──────────────────────────────────────────────
 
 group('the axis caption is derived from the window, not written beside it');
 {
-	const { MC, clock } = boot();
+	const { MC } = boot();
 	const cap = (win) => {
 		const h = makeHost(400);
 		const ch = MC.makeChart(h, win == null
@@ -177,9 +226,10 @@ group('the axis caption is derived from the window, not written beside it');
 	};
 	check('the default still says -2 min, as it always did', cap(null) === '-2 min');
 	check('an hour says -1 h', cap(3600) === '-1 h');
-	check('ten minutes says -10 min', cap(600) === '-10 min');
+	check('the memory panel\'s ladder reads in whole minutes',
+		cap(300) === '-5 min' && cap(600) === '-10 min' &&
+		cap(1200) === '-20 min' && cap(2400) === '-40 min');
 	check('and a window under a minute says seconds', cap(45) === '-45 s');
-	void clock;
 }
 
 group('window and gap are per chart, because not every subject is a subject of now');
