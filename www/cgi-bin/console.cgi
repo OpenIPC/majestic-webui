@@ -106,13 +106,23 @@
 		const form = $('#console-form'), input = $('#command'), out = $('#console-output');
 		const dec = new TextDecoder();
 
-		// run.cgi wraps the output in its own <b>prompt</b> lines. The stream
-		// is never handed to innerHTML — each complete line becomes a text
-		// node, or a <strong> when it is one of those prompt lines — so shell
-		// output cannot smuggle markup into the page.
+		// run.cgi marks its own prompt lines with ANSI bold — SGR 1, then SGR 0
+		// at the end of the line — and sends everything else through untouched.
+		// It used to wrap them in <b></b>, which asked every consumer to treat a
+		// stream of raw command output as markup; this page was the only one that
+		// did, and the factory-reset page printed the tags (issue #154).
+		//
+		// The stream is still never handed to innerHTML: each complete line
+		// becomes a text node, or a <strong> when it is one of those prompt
+		// lines, so shell output cannot smuggle markup into the page.
+		//
+		// \u001b escaped rather than written as the literal ESC byte, as
+		// main.js does: an invisible control character in a source file survives
+		// only as long as nothing greps, copies or re-encodes the line.
+		const bold = /^\u001b\[1m(.*)\u001b\[0m\r?$/;
 		let buf = '';
 		function addLine(ln) {
-			const m = ln.match(/^<b>(.*)<\/b>\r?$/);
+			const m = ln.match(bold);
 			if (m) {
 				const b = document.createElement('strong');
 				b.textContent = m[1] + '\n';
