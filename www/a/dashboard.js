@@ -870,6 +870,11 @@
 	}
 
 	const MEM_NAMES = ['Video buffers', 'Programs', 'Kernel', 'RAM disk', 'Other'];
+	// How far above both ends of the window a peak has to stand before the note
+	// names it. A megabyte, because the deltas print to a tenth and a swing
+	// smaller than this is the ordinary breathing of a running camera rather
+	// than something that happened.
+	const MEM_PEAK = 1;
 	const MEM_LEGEND = ['#st-mem-lg-vid', '#st-mem-lg-prog', '#st-mem-lg-krn',
 		'#st-mem-lg-disk', '#st-mem-lg-other'];
 	const memHas = [false, false, false, false, false];
@@ -884,6 +889,44 @@
 		if (m < 60) return m + ' min';
 		const h = (m / 60) | 0, r = m % 60;
 		return h + ' h' + (r ? ' ' + r + ' min' : '');
+	}
+
+	// The sentence under the chart, built from the points the chart is holding.
+	// Pure and separate because it is the half of this panel that people quote
+	// and screenshot, and it is the half that got the reporter's own leak
+	// wrong -- so it is worth being able to test without a DOM.
+	function memSentence(pts, held, total) {
+		let txt = 'Holding ' + (held / 1048576 | 0) + ' of ' +
+			(total / 1048576 | 0) + ' MB.';
+		if (pts.length < 2) return txt;
+		const a = pts[0], b = pts[pts.length - 1], parts = [], rose = [];
+		for (let i = 0; i < MEM_NAMES.length; i++) {
+			if (a.v[i] == null || b.v[i] == null) continue;
+			// A tenth of a megabyte is the resolution here, so a change too
+			// small to print gets no sign: "Kernel 0.0" rather than
+			// "Kernel \u22120.0", which claims a direction it cannot see.
+			const d = b.v[i] - a.v[i], mag = Math.abs(d).toFixed(1);
+			parts.push(MEM_NAMES[i] + ' ' +
+				(mag === '0.0' ? '' : d < 0 ? '\u2212' : '+') + mag);
+			// The two ends of the window are not the story when something grew
+			// and was then given back. The reporter of #322 ran this on their
+			// own camera and it drew Other climbing 10 to 24.5 MB and falling
+			// back as the stream stopped, under a sentence reading "Other
+			// -0.1 MB". Saying nothing happened while something did is the
+			// exact fault this panel exists to stop committing, so a peak that
+			// clears both ends by a margin worth printing is named outright.
+			let top = -Infinity;
+			for (let j = 0; j < pts.length; j++)
+				if (pts[j].v[i] != null && pts[j].v[i] > top) top = pts[j].v[i];
+			if (top - Math.max(a.v[i], b.v[i]) >= MEM_PEAK)
+				rose.push(MEM_NAMES[i] + ' rose to ' + top.toFixed(1) +
+					' MB and came back');
+		}
+		if (parts.length)
+			txt += ' Over the last ' + spanWords(b.t - a.t) + ': ' +
+				parts.join(', ') + ' MB.';
+		if (rose.length) txt += ' ' + rose.join('. ') + '.';
+		return txt;
 	}
 
 	function renderMemory(v, s) {
@@ -904,13 +947,22 @@
 				colors: [C4, C1, C3, C2, MUTE],
 			});
 		}
-		// Which slices have a key is re-asked every sample, not settled on the
-		// first: one that starts reporting later would otherwise draw a line
-		// the legend does not name (#320, a gauge that arrives late still gets
-		// its row). It is one-way, because the chart keeps what a slice has
-		// already drawn and a key that named it must not go with the gap.
+		// Which slices are worth drawing is re-asked every sample, not settled
+		// on the first: one that starts reporting later would otherwise draw a
+		// line the legend does not name (#320, a gauge that arrives late still
+		// gets its row). It is one-way, because the chart keeps what a slice
+		// has already drawn and a key that named it must not go with the gap.
+		//
+		// The bar is a slice that has ever been NON-ZERO, not one that has
+		// ever been reported. A kernel built with contiguous-pool support but
+		// no pool to speak of answers the question with a zero rather than by
+		// staying silent, and on the reporter's gk7205v210 that put a
+		// permanently flat line along the axis and took a legend slot for
+		// something the camera does not have (#322). A slice held back this
+		// way is pushed as null rather than as zero, or the chart would draw
+		// the line anyway with nothing naming it.
 		MEM_LEGEND.forEach((id, i) => {
-			if (slices[i] != null) memHas[i] = true;
+			if (slices[i]) memHas[i] = true;
 			const e = $(id);
 			if (e) e.hidden = !memHas[i];
 		});
@@ -926,7 +978,8 @@
 						break;
 					}
 			}
-			pushChart(chMem, slices.map(x => x == null ? null : x / 1048576));
+			pushChart(chMem, slices.map((x, i) =>
+				x == null || !memHas[i] ? null : x / 1048576));
 		}
 
 		// This tile alone is an hour wide, and says so. Four identical
@@ -939,26 +992,8 @@
 			: '';
 
 		const note = $('#st-mem-note');
-		if (!note) return;
-		let txt = 'Holding ' + (held / 1048576 | 0) + ' of ' +
-			(s.memTotal / 1048576 | 0) + ' MB.';
-		const pts = chMem ? chMem.pts : [];
-		if (pts.length >= 2) {
-			const a = pts[0], b = pts[pts.length - 1], parts = [];
-			for (let i = 0; i < MEM_NAMES.length; i++) {
-				if (a.v[i] == null || b.v[i] == null) continue;
-				// A tenth of a megabyte is the resolution here, so a change
-				// too small to print gets no sign: "Kernel 0.0" rather than
-				// "Kernel \u22120.0", which claims a direction it cannot see.
-				const d = b.v[i] - a.v[i], mag = Math.abs(d).toFixed(1);
-				parts.push(MEM_NAMES[i] + ' ' +
-					(mag === '0.0' ? '' : d < 0 ? '\u2212' : '+') + mag);
-			}
-			if (parts.length)
-				txt += ' Over the last ' + spanWords(b.t - a.t) + ': ' +
-					parts.join(', ') + ' MB.';
-		}
-		note.textContent = txt;
+		if (note) note.textContent =
+			memSentence(chMem ? chMem.pts : [], held, s.memTotal);
 	}
 
 	function humanKB(kb) {

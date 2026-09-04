@@ -10,8 +10,9 @@
 //
 // What must hold: the named slices plus the remainder reconcile with
 // MemTotal − MemAvailable exactly; the largest pool on each SoC is named where
-// the camera reports it; and a key the camera does not report yields null
-// rather than a zero that would read as "nothing here".
+// the camera reports it; a key the camera does not report yields null rather
+// than a zero that would read as "nothing here"; and the sentence under the
+// chart never says nothing happened over a window in which something did.
 'use strict';
 
 const fs = require('fs');
@@ -39,6 +40,23 @@ const MAIN = fs.readFileSync(
 const pm = MAIN.match(/\nfunction parseMetrics\(text\) \{[\s\S]*?\n\}\n/);
 const parseMetrics = vm.runInNewContext(
 	'(function(){' + pm[0] + 'return parseMetrics})()', { Object: Object, isNaN: isNaN });
+
+// The sentence under the chart, lifted the same way. It carries MEM_NAMES,
+// MEM_PEAK and spanWords with it.
+const lift = (re, extra) => {
+	const hit = SRC.match(re);
+	if (!hit) {
+		console.log('  FAIL could not find ' + re + ' in www/a/dashboard.js');
+		process.exit(1);
+	}
+	return hit[0];
+};
+const memSentence = vm.runInNewContext('(function(){' +
+	lift(/\n\tconst MEM_NAMES = \[[^\]]*\];/) +
+	lift(/\n\tconst MEM_PEAK = \d+;/) +
+	lift(/\n\tfunction spanWords\(sec\) \{[\s\S]*?\n\t\}\n/) +
+	lift(/\n\tfunction memSentence\(pts, held, total\) \{[\s\S]*?\n\t\}\n/) +
+	'return memSentence})()', { Math: Math });
 
 const MB = 1048576;
 const NAMES = ['Video buffers', 'Programs', 'Kernel', 'RAM disk', 'Other'];
@@ -120,6 +138,49 @@ group('the pool is netted against what already names those bytes');
 	check('so the slices grow by exactly what the camera actually took',
 		Math.round((after.reduce((a, x) => a + x, 0) -
 			before.reduce((a, x) => a + x, 0)) / MB) === 15);
+}
+
+// The reporter of #322 ran the merged panel on their own gk7205v210 and it
+// drew Other climbing 10 -> 24.5 MB through four minutes of streaming and
+// falling back as the stream stopped — under a sentence reading "Other -0.1
+// MB". The chart showed the event; the sentence, which is the half people
+// quote, denied it.
+group('the sentence cannot say nothing happened over a window in which something did');
+{
+	// Five slices; index 4 is Other. Values in MB, times in seconds.
+	const at = (t, other) => ({ t: t, v: [0, 1.5, 4, 0.1, other] });
+	const climb = [at(0, 10), at(60, 15), at(120, 20), at(180, 24.5), at(240, 10.1)];
+	const said = memSentence(climb, 17 * MB, 34 * MB);
+
+	check('the net change is still reported, unrounded away',
+		said.indexOf('Other +0.1') >= 0, said);
+	check('and the peak both ends hide is named outright',
+		said.indexOf('Other rose to 24.5 MB and came back') >= 0, said);
+	check('the window it covers is stated, not assumed',
+		said.indexOf('Over the last 4 min') >= 0, said);
+	check('and what is held leads, as before',
+		said.indexOf('Holding 17 of 34 MB.') === 0, said);
+
+	// A trace that only ever went up has no excursion to name — the delta
+	// already says everything, and a second clause repeating it would be noise.
+	const rising = [at(0, 10), at(120, 17), at(240, 24.5)];
+	check('a monotonic climb gets no peak clause, since the delta already says it',
+		memSentence(rising, 17 * MB, 34 * MB).indexOf('rose to') < 0);
+
+	// Ordinary breathing must not trip it, or the clause appears forever and
+	// stops meaning anything.
+	const wobble = [at(0, 10), at(120, 10.6), at(240, 10)];
+	check('a sub-megabyte wobble is breathing, not an event',
+		memSentence(wobble, 17 * MB, 34 * MB).indexOf('rose to') < 0);
+
+	// A slice the camera never reported takes no part in the sentence.
+	const half = [{ t: 0, v: [null, 1.5, 4, 0.1, 10] },
+		{ t: 240, v: [null, 1.5, 4, 0.1, 24.5] }];
+	check('a slice reported as nothing is not named at all',
+		memSentence(half, 17 * MB, 34 * MB).indexOf('Video buffers') < 0);
+
+	check('and one sample is a level, with no change to claim',
+		memSentence([at(0, 10)], 17 * MB, 34 * MB) === 'Holding 17 of 34 MB.');
 }
 
 group('an absent key is a hole, not a floor');
