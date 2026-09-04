@@ -61,7 +61,7 @@ fi
 	# have meant regenerating it.
 	%>
 	<div class="col-12 col-md-3">
-		<div class="sticky-md-top" id="mj-settings-side">
+		<div class="sticky-md-top">
 			<h2 class="mj-rail-title"><%= $page_title %></h2>
 			<%
 			# Hidden until mj-settings.js unhides it: with no JS the box would be

@@ -39,7 +39,7 @@
 				    upgrade actually applied (issue #120). %>
 				<dt>Installed</dt><dd id="fw-installed"><% esc "${fw_version}-${fw_variant}" %></dd>
 				<dt>Latest on GitHub</dt>
-				<dd><span id="firmware-master-ver"><% if [ -n "$fw_date" ]; then %><% esc "$fw_date" %><% else %><span class="text-secondary">— no access to GitHub —</span><% fi %></span></dd>
+				<dd><span><% if [ -n "$fw_date" ]; then %><% esc "$fw_date" %><% else %><span class="text-secondary">— no access to GitHub —</span><% fi %></span></dd>
 				<dt>SoC</dt><dd><% esc "$soc" %> <span class="text-secondary">(<% esc "$soc_family" %>)</span></dd>
 				<dt>Flash</dt><dd><% esc "$flash_type" %></dd>
 			</dl>

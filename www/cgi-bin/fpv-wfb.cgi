@@ -12,46 +12,12 @@ debug_log() {
     :
 }
 
-# Function to determine if a channel is in the 2.4GHz range
-is_24ghz_channel() {
-    local channel="$1"
-    # Channels 1-14 are in the 2.4GHz range
-    if [ "$channel" -ge 1 ] && [ "$channel" -le 14 ]; then
-        return 0  # True
-    else
-        return 1  # False
-    fi
-}
-
-# Function to get the correct TX power based on channel frequency
-get_tx_power_for_channel() {
-    local channel="$1"
-    
-    # For YAML, always use the txpower field
-    yaml_get_nested "$WFB_YAML" "wireless" "txpower"
-    
-}
-
-# Function to set the correct TX power based on channel frequency
-set_tx_power_for_channel() {
-    local channel="$1"
-    local power_value="$2"
-    
-    debug_log "Setting TX power: channel=$channel, power_value=$power_value"
-    
-    # For YAML, always use the txpower field
-    yaml_set_value "$WFB_YAML" "wireless" "txpower" "$power_value"
-    debug_log "Updated wireless.txpower: $power_value"
-
-}
-
 # Function to update all WFB values - handles both YAML and legacy formats
 update_wfbinfo() {
     # Initialize variables with default values
     wfb_txpower="1"
     wfb_channel="161"
     wfb_width="20"
-    wfb_frequency=""
     wfb_mcs_index="1"
     wfb_tun_index="1"
     wfb_fec_k="8"
@@ -71,7 +37,6 @@ update_wfbinfo() {
     yaml_txpower=$(yaml_get_value "$WFB_YAML" "wireless" "txpower")
     yaml_channel=$(yaml_get_value "$WFB_YAML" "wireless" "channel")
     yaml_width=$(yaml_get_value "$WFB_YAML" "wireless" "width")
-    yaml_frequency=$(yaml_get_value "$WFB_YAML" "wireless" "frequency")
     
     # Get Broadcast Values
     yaml_mcs_index=$(yaml_get_value "$WFB_YAML" "broadcast" "mcs_index")
@@ -91,7 +56,6 @@ update_wfbinfo() {
     [ -n "$yaml_txpower" ] && wfb_txpower="$yaml_txpower"
     [ -n "$yaml_channel" ] && wfb_channel="$yaml_channel"
     [ -n "$yaml_width" ] && wfb_width="$yaml_width"
-    [ -n "$yaml_frequency" ] && wfb_frequency="$yaml_frequency"
     [ -n "$yaml_mcs_index" ] && wfb_mcs_index="$yaml_mcs_index"
     [ -n "$yaml_tun_index" ] && wfb_tun_index="$yaml_tun_index"
     [ -n "$yaml_fec_k" ] && wfb_fec_k="$yaml_fec_k"
@@ -105,7 +69,7 @@ update_wfbinfo() {
 
     
     # Export for use in haserl
-    export wfb_txpower wfb_channel wfb_width wfb_frequency
+    export wfb_txpower wfb_channel wfb_width
     export wfb_mcs_index wfb_tun_index wfb_fec_k wfb_fec_n wfb_stbc wfb_ldpc wfb_link_id
     export wfb_router wfb_serial wfb_osd_fps
     
@@ -115,17 +79,6 @@ update_wfbinfo() {
     export wfb_telemetry="Telemetry"
 }
 
-# Map numeric router value to string for UI display
-map_router_value() {
-    local numeric_value="$1"
-    case "$numeric_value" in
-        0) echo "mavfwd" ;;
-        1) echo "mavrouter" ;;
-        2) echo "msposd" ;;
-        3) echo "ground" ;;
-        *) echo "$numeric_value" ;; # Return as-is if not a recognized code
-    esac
-}
 
 
 # Define available wireless channels
@@ -293,11 +246,6 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                 debug_log "Updated wireless.channel: $POST_channel"
             fi
             
-            if [ -n "$POST_frequency" ]; then
-                yaml_set_value "$WFB_YAML" "wireless" "frequency" "$POST_frequency"
-                debug_log "Updated wireless.frequency: $POST_frequency"
-            fi
-            
             if [ -n "$POST_width" ]; then
                 yaml_set_value "$WFB_YAML" "wireless" "width" "$POST_width"
                 debug_log "Updated wireless.width: $POST_width"
@@ -347,9 +295,12 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
                 debug_log "Updated telemetry.router: $POST_router"
             fi
             
-            if [ -n "$POST_serial" ]; then
-                yaml_set_value "$WFB_YAML" "telemetry" "serial" "$POST_serial"
-                debug_log "Updated telemetry.serial: $POST_serial"
+            # The control is name="serial_port" (below); this read POST_serial,
+            # which haserl therefore never set, so choosing a serial port
+            # silently did nothing. The stored key stays telemetry.serial.
+            if [ -n "$POST_serial_port" ]; then
+                yaml_set_value "$WFB_YAML" "telemetry" "serial" "$POST_serial_port"
+                debug_log "Updated telemetry.serial: $POST_serial_port"
             fi
             if [ -n "$POST_osd_fps" ]; then
                 yaml_set_value "$WFB_YAML" "telemetry" "osd_fps" "$POST_osd_fps"
@@ -392,7 +343,6 @@ update_wfbinfo
         <div class="card h-100"><div class="card-body">
             <form action="<%= $SCRIPT_NAME %>" method="post">
                 <% field_hidden "action" "update" %>
-                <% field_hidden "current_tab" "$label" %>
 
                 <%  if [ "$label" = "wireless" ]; then %>
                     <% card_head "Wireless" %>

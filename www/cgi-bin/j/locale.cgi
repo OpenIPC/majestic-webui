@@ -19,4 +19,3 @@ mj_usbcam=USB camera
 mj_watchdog=Watchdog
 mj_sip=SIP
 mj_cloud=Cloud (WebRTC)
-# mj_youtube=Youtube

@@ -2454,8 +2454,6 @@
 	//
 	// Two things can be placed on one picture, so the bar carries a Text/Masks
 	// switch rather than letting a drag guess which was meant.
-	const OSD_DOT = (k) => 'osd.' + k;
-
 	// Only what the camera can actually print. An unrecognised code does not
 	// error and does not print — majestic's specifier switch falls through to
 	// `return 0`, which SILENTLY TRUNCATES the rest of the line, so a person who

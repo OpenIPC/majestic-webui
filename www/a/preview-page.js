@@ -611,7 +611,9 @@
 	let userPickedStream = false;
 	let audioConfigured = false;
 
-	// Which attachment is the live one. Two things need it, and neither is
+	// KNOWN GAP, not a guarded case. There is no generation stamp on an
+	// attachment, so a callback from a player that has been superseded is
+	// interpreted as if the current one had sent it. Two ways in, neither
 	// hypothetical:
 	//
 	// A player can report 'fallback' from inside attach() — MajesticWebRTC does
@@ -625,10 +627,10 @@
 	// from can still call onState and, seeing a `usingWebRTC` that has since
 	// flipped, hide a video that is playing perfectly well.
 	//
-	// So the generation is stamped at attach and captured by that attachment's
-	// handlers: a callback from a superseded player is dropped rather than
-	// interpreted as if the current one had sent it.
-	let attachSeq = 0;
+	// A `let attachSeq = 0` sat here under a comment written as though the
+	// guard existed; it was never incremented and never read. The variable is
+	// gone rather than the note, because the hazards are real — but nothing
+	// here should be read as covering them.
 
 	// Whether to offer the audio control at all: the camera has to have audio
 	// configured and this transport has to be able to carry it. MSE can only

@@ -888,32 +888,6 @@ mark {
 	}
 }
 
-/* section cards pack as a masonry so unequal heights don't leave chessboard
-   gaps (cards flow top-to-bottom, then into the next column) */
-.mj-cards {
-	column-count: 2;
-	column-gap: 1.5rem;
-}
-
-/* separate the masonry from whatever sits above it (the live-preview / live-
-   adjust row on the Image tab, or the page heading on plain tabs) so the first
-   card doesn't butt up against it. :not(:empty) avoids a phantom gap on the
-   motion/lone tabs where the masonry container is created but unused. */
-.mj-cards:not(:empty) {
-	margin-top: 1.5rem;
-}
-
-.mj-cards > .card {
-	break-inside: avoid;
-	margin-bottom: 1.5rem;
-}
-
-@media (max-width: 991.98px) {
-	.mj-cards {
-		column-count: 1;
-	}
-}
-
 /* The 2.5rem `.form-range` above is sized for the settings form, where a slider
    is a row of its own. On the live player the volume slider shares a
    `.btn-group` with the mute button, and a 40px-tall item stretched the group:
@@ -1465,11 +1439,6 @@ mark {
 
 .mj-live-grp + .mj-live-grp {
 	margin-top: 1.25rem;
-}
-
-.mj-live-foot {
-	display: flex;
-	margin-top: 0.75rem;
 }
 
 .mj-live-linkbtn {
@@ -3137,9 +3106,7 @@ mark {
 }
 
 .mj-ptz-btn:active,
-.mj-ptz-fnbtn:active,
-.mj-ptz-btn.mj-held,
-.mj-ptz-fnbtn.mj-held {
+.mj-ptz-fnbtn:active {
 	background: rgba(255, 255, 255, 0.22);
 	color: #fff;
 }
