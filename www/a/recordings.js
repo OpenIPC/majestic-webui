@@ -839,9 +839,11 @@
 		if (!el) return;
 		const msg = cardTrouble();
 		if (!msg) { el.className = 'd-none'; el.innerHTML = ''; return; }
-		el.className = 'alert alert-danger';
-		el.innerHTML = msg + cardKernelLines() +
-			'<div class="mt-2"><a class="btn btn-sm btn-danger" href="sdcard.cgi">Open the SD card page</a></div>';
+		el.className = '';
+		el.innerHTML = mjNotice('danger', msg, {
+			body: cardKernelLines(),
+			acts: '<a class="btn btn-sm btn-danger" href="sdcard.cgi">Open the SD card page</a>',
+		});
 	}
 
 	// Same numbers and the same bar as the SD card page, because it is the same

@@ -3286,6 +3286,149 @@ mark {
 	box-shadow: var(--bs-box-shadow);
 }
 
+/* ── notices ─────────────────────────────────────────────────────────────
+   One notice for the whole UI, and this is the Dashboard's own .st-alert:
+   the right shape with the wrong scope. It was declared inside the Dashboard
+   block below and named for that page, so nothing else in the tree could
+   reach it without renaming or copying it — and so nothing did. Every other
+   page went on emitting Bootstrap's filled .alert, which is what it emitted
+   before the refresh started: an h3 at 28px here, a bare paragraph there, a
+   form, a button, seven saturated blocks stacked above a page otherwise made
+   entirely of cards.
+
+   The box is unchanged from .st-alert — card surface, a severity rule, the
+   radius the cards use, a 0.875rem sentence, the action on the right, a close
+   where dismissing means something. Three things are new.
+
+   1. align-items is flex-start rather than center, so a sentence that wraps
+      keeps its mark against its first line, and a body row can exist at all.
+   2. Severity is a class and it drives the rule and the mark together.
+      .st-alert-ico hard-coded `color: var(--bs-warning)` with no severity in
+      the selector, so the Dashboard's informational notice wore the warning
+      colour — and on the light theme that amber measures 1.63:1 against the
+      white card, which is not a weak mark but an absent one.
+   3. The actions are a group rather than loose siblings, which is what makes
+      the phone break happen every time instead of sometimes. Flexbox has no
+      break-before, so with flat children whether the row wraps depends on how
+      long the sentence happens to be: .st-alert's 10rem basis is a MINIMUM,
+      so a short sentence beside a wide button still fitted on one line and
+      was squeezed to four words a line rather than breaking. One child with a
+      100% basis below sm cannot do anything but take its own line.
+
+   Nothing here is a colour anybody picked. The mark is Bootstrap's own
+   <sev>-text-emphasis, which is that hue made legible on a card in that
+   theme, and the rule is 60% of the same colour. Measured against both cards,
+   all eight combinations land between 3.0:1 and 5.2:1 — a floor a single
+   alpha on the BASE hues cannot reach, because those are four wildly
+   different luminances: #ffc107 on the white card tops out at 1.46:1 even at
+   75%, and #dc3545 on the dark card at 2.55:1. So severity is carried by the
+   hue and by the mark, not by which rule happens to be darkest.
+
+   The rgba() rules are the pre-2023 fallback, and they are what .st-alert
+   ships today. They are behind @supports rather than declared under the
+   color-mix: a color-mix that a browser cannot parse but that carries a
+   var() is invalid at computed-value time, which unsets the property instead
+   of falling back to the declaration above it. */
+.mj-notice {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+	margin-bottom: 0.5rem;
+	padding: 0.6rem 1rem;
+	background: var(--bs-card-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: var(--bs-box-shadow-sm);
+}
+
+/* Sized against the close button opposite it, not by eye. A glyph paints a
+   good deal smaller than its em box, so at the inherited 1rem the warning mark
+   was 13x12px of ink while .btn-close paints 16x16 — the severity indicator
+   was the smallest thing in the row and the way out was the biggest, which is
+   exactly backwards (#273). An SVG paints the box it is given, so this is
+   18x18 and stays 18x18; the nudge is optical alignment against a 21px first
+   line. */
+.mj-notice-ico {
+	flex: 0 0 auto;
+	width: 18px;
+	height: 18px;
+	margin-top: 0.1rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-notice-txt {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: 0.875rem;
+	line-height: 1.5;
+}
+
+/* What the sentence cannot carry: a paragraph, kernel lines, a control. Rare
+   on purpose — a notice with something inside it can never be one line, and
+   the header banners are on every page at once. */
+.mj-notice-body {
+	margin-top: 0.7rem;
+}
+
+/* The sentence is the part that wraps; the actions after it never do. They are
+   two or three words each and one of them is a link that reads as a label, so
+   "Open Day / Night" broken across two lines looks like a stray fragment of
+   the paragraph rather than the thing to press. The row itself stays one row
+   at every width above sm — wrapping it puts the mark, the sentence and the
+   actions on three lines each of which is mostly empty, because the sentence
+   is a flex item that will not shrink past its longest word. */
+.mj-notice-acts {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 0.875rem;
+	margin-left: auto;
+	white-space: nowrap;
+	font-size: 0.875rem;
+}
+
+.mj-notice > .btn-close {
+	flex: 0 0 auto;
+	margin-top: 0.15rem;
+}
+
+.mj-notice-danger { border-color: rgba(var(--bs-danger-rgb), 0.45); }
+.mj-notice-warn { border-color: rgba(var(--bs-warning-rgb), 0.45); }
+.mj-notice-info { border-color: rgba(var(--bs-info-rgb), 0.45); }
+.mj-notice-ok { border-color: rgba(var(--bs-success-rgb), 0.45); }
+
+@supports (border-color: color-mix(in srgb, red 60%, transparent)) {
+	.mj-notice-danger { border-color: color-mix(in srgb, var(--bs-danger-text-emphasis) 60%, transparent); }
+	.mj-notice-warn { border-color: color-mix(in srgb, var(--bs-warning-text-emphasis) 60%, transparent); }
+	.mj-notice-info { border-color: color-mix(in srgb, var(--bs-info-text-emphasis) 60%, transparent); }
+	.mj-notice-ok { border-color: color-mix(in srgb, var(--bs-success-text-emphasis) 60%, transparent); }
+}
+
+.mj-notice-danger > .mj-notice-ico { color: var(--bs-danger-text-emphasis); }
+.mj-notice-warn > .mj-notice-ico { color: var(--bs-warning-text-emphasis); }
+.mj-notice-info > .mj-notice-ico { color: var(--bs-info-text-emphasis); }
+.mj-notice-ok > .mj-notice-ico { color: var(--bs-success-text-emphasis); }
+
+/* Below sm there is no room for a sentence AND its actions on one line: the
+   sentence became a four-word-wide column twenty lines deep beside them
+   (measured at 390px: 672px of banner for one finding). Wrapping gives the
+   sentence the width and puts the actions on a line under it — 224px for the
+   same finding. */
+@media (max-width: 575.98px) {
+	.mj-notice {
+		flex-wrap: wrap;
+	}
+
+	.mj-notice-txt {
+		flex: 1 1 0;
+	}
+
+	.mj-notice-acts {
+		flex: 1 1 100%;
+		justify-content: flex-end;
+	}
+}
+
 .btn {
 	transition: background-color var(--mj-ease), border-color var(--mj-ease),
 		box-shadow var(--mj-ease), filter var(--mj-ease);
@@ -3762,65 +3905,6 @@ dialog.mj-modal::backdrop {
 	border-radius: var(--bs-border-radius-lg);
 	box-shadow: var(--bs-box-shadow-sm);
 	padding: 0.85rem 1rem;
-}
-
-/* Alerts render only while active; amber border says "warning" without a
-   filled banner shouting over the page. */
-.st-alert {
-	display: flex;
-	align-items: center;
-	gap: 0.75rem;
-	padding: 0.6rem 1rem;
-	background: var(--bs-card-bg);
-	border: 1px solid rgba(var(--bs-warning-rgb), 0.45);
-	border-radius: var(--bs-border-radius-lg);
-}
-
-.st-alert + .st-alert {
-	margin-top: 0.5rem;
-}
-
-/* The sentence is the part that wraps; the actions after it never do. They
-   are two or three words each and one of them is a link that reads as a
-   label, so "Open Day / Night" broken across two lines looks like a stray
-   fragment of the paragraph rather than the thing to press. The row itself
-   stays one row at every width — wrapping it puts the icon, the sentence and
-   the actions on three lines each of which is mostly empty, because the
-   sentence is a flex item that will not shrink past its longest word. */
-.st-alert > a,
-.st-alert > button {
-	flex: 0 0 auto;
-	white-space: nowrap;
-}
-
-/* Below sm there is no room for a sentence AND two actions on one line: the
-   sentence became a four-word-wide column twenty lines deep beside them
-   (measured at 390px: 672px of banner for one finding). Wrapping gives the
-   sentence the width and puts the actions on a line under it — 224px for the
-   same finding. The flex-basis is what forces the break; without it the
-   sentence still refuses to give the actions a line of their own. */
-@media (max-width: 575.98px) {
-	.st-alert {
-		flex-wrap: wrap;
-	}
-
-	.st-alert > span.small {
-		flex: 1 1 10rem;
-		min-width: 0;
-	}
-}
-
-/* Sized against the close button opposite it, not by eye. A glyph paints a
-   good deal smaller than its em box, so at the inherited 1rem the warning mark
-   was 13x12px of ink while .btn-close paints 16x16 — the severity indicator was
-   the smallest thing in the row and the way out was the biggest, which is
-   exactly backwards. 1.35rem paints 17x16 and the two ends match (#273).
-   line-height is pinned so the taller glyph cannot stretch a one-line banner. */
-.st-alert-ico {
-	color: var(--bs-warning);
-	flex: 0 0 auto;
-	font-size: 1.35rem;
-	line-height: 1;
 }
 
 /* auto-fit, so a tile that never mounts (no temp sensor / no Wi-Fi) closes

@@ -171,33 +171,38 @@ Pragma: no-cache
 			</div>
 <% fi %>
 
+<%# The banners the camera raises, all four in the one shape the rest of the UI
+    uses -- p/common.cgi's `notice`, over .mj-notice. They were Bootstrap's
+    filled .alert until the notice component was lifted out of the Dashboard,
+    each with whatever markup its author reached for: an h3 at 28px on one, a
+    bare paragraph on two, a form on the fourth.
+
+    Each says what is wrong and then what it costs, and points at the page that
+    fixes it. None of them carries the fix itself: a control inside a banner is
+    a banner that can never be one line, and these are on every page at once. %>
+
 <% if [ -z "$network_gateway" ]; then %>
-<div class="alert alert-warning">
-	<p class="mb-0">Internet connection not available, please <a href="network.cgi">check your network settings</a>.</p>
-</div>
+<% notice warn '<b>No internet connection</b> &mdash; the camera has no default gateway, so it cannot reach the time server or send notifications.' '<a href="network.cgi">Network settings &rarr;</a>' %>
 <% fi %>
 
+<%# The address the firmware falls back to when the camera's own was not put
+    back after flashing. The fix is network.cgi's own "Change MAC address"
+    card, which has been there all along -- the banner used to carry a second
+    copy of that form, on every page, until somebody used one of them. %>
 <% if [ "$network_macaddr" = "00:00:23:34:45:66" ] && [ -f /etc/shadow- ] && [ -n $(grep root /etc/shadow- | cut -d: -f2) ]; then %>
-<div class="alert alert-danger">
-	<%in p/address.cgi %>
-</div>
+<% notice danger "<b>This camera's MAC address is a placeholder</b> &mdash; <code>00:00:23:34:45:66</code> is what the firmware falls back to when the camera's own address was not put back after flashing, and two cameras carrying it on one network will collide." '<a href="network.cgi#mac">Set the MAC address &rarr;</a>' %>
 <% fi %>
 
 <% if [ ! -e $(get_config) ]; then %>
-<div class="alert alert-danger">
-	<p class="mb-0">Camera configuration not found, please <a href="config.cgi">check the configuration file</a>.</p>
-</div>
+<% notice danger '<b>No camera configuration found</b> &mdash; there is no settings file for the camera to read.' '<a href="config.cgi">Configuration file &rarr;</a>' %>
 <% fi %>
 
+<%# Warning rather than danger: it reports something you asked for and have not
+    finished, not something broken. The button keeps btn-danger because main.js
+    hangs the confirmation prompt off that class -- restyling it would quietly
+    drop the "restart now?" question. %>
 <% if [ -e /tmp/system-reboot ]; then %>
-<div class="alert alert-danger">
-	<h3>Warning.</h3>
-	<p>System settings have been updated, restart to apply pending changes.</p>
-	<span class="d-flex gap-3">
-		<a class="btn btn-danger" href="restart.cgi"
-			data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>
-	</span>
-</div>
+<% notice warn '<b>Settings are waiting for a restart</b> &mdash; video and recording stop for about half a minute while the camera comes back.' '<a class="btn btn-danger btn-sm" href="restart.cgi" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>' %>
 <% fi %>
 
 <% if [ -z "$hide_title" ]; then %><h2><%= $page_title %></h2><% fi %>

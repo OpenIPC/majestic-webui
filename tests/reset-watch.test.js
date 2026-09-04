@@ -63,10 +63,25 @@ function makeClock() {
 	};
 }
 
+// The status banner is a .mj-notice: factory-reset.js writes the drawn mark and
+// a .mj-notice-txt child into it and puts the message in that child. The stub
+// follows it there rather than being widened into a DOM, so every assertion
+// below goes on reading one .textContent -- which is the right reading, since
+// that child's text IS what the banner says.
+function makeStatusEl() {
+	const txt = { textContent: '' };
+	return {
+		className: '', innerHTML: '',
+		querySelector: (sel) => (sel === '.mj-notice-txt' ? txt : null),
+		get textContent() { return txt.textContent; },
+		set textContent(v) { txt.textContent = v; },
+	};
+}
+
 function makeEnv(o) {
 	o = o || {};
 	const clock = makeClock();
-	const env = { clock, notes: [], status: { className: '', textContent: '' }, replaced: null, pings: 0, metricsReads: 0 };
+	const env = { clock, notes: [], status: makeStatusEl(), replaced: null, pings: 0, metricsReads: 0 };
 
 	// The run.cgi stream: chunks the test pushes, then a read that never settles
 	// unless the test says otherwise.
@@ -91,6 +106,10 @@ function makeEnv(o) {
 
 	const ctx = {
 		$: (sel) => (sel === '#output' ? out : sel === '#fw-reset-status' ? env.status : null),
+		// A stub, deliberately: this file asserts on what the banner SAYS, and
+		// nothing here reads the mark. recordings-health.test.js lifts the real
+		// one out of main.js, which is where a change to it would be caught.
+		mjNoticeIcon: () => '<svg class="mj-notice-ico"></svg>',
 		termWriter: () => ({
 			write: (t) => t,                       // returns the raw chunk, as the real one does
 			commit: () => {},

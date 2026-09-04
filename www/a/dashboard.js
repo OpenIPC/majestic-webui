@@ -49,6 +49,24 @@
 	}
 
 	// ── alerts ──────────────────────────────────────────────────────────────
+	// The finding's own level, which this page used to throw away. .st-alert
+	// painted one amber rule and one amber mark whatever the finding said, so
+	// a danger finding and an informational one were the same banner — and the
+	// mark's colour was hard-coded in the stylesheet, with no severity in the
+	// selector, so it could not have been otherwise.
+	//
+	// The class is assigned rather than toggled: these banners carry no other
+	// class, and a repaint that added one per finding would accumulate them.
+	const SEV = { danger: 'danger', warning: 'warn', ok: 'ok', info: 'info' };
+	function setSeverity(id, level) {
+		const el = $(id);
+		if (!el) return;
+		const sev = SEV[level] || 'info';
+		el.className = 'mj-notice mj-notice-' + sev;
+		const ico = el.querySelector('.mj-notice-ico');
+		if (ico && typeof mjNoticeIcon === 'function') ico.outerHTML = mjNoticeIcon(sev);
+	}
+
 	function setAlert(id, on) {
 		const el = $(id);
 		if (el) el.hidden = !on;
@@ -94,6 +112,7 @@
 		const f = VC.diagnose(cfgNow, s, vidTrackNow, null);
 		if (f) {
 			cameFromLive = false;
+			setSeverity('#st-alert-novideo', f.level);
 			const t = $('#st-alert-novideo-t'), d = $('#st-alert-novideo-d');
 			const a = $('#st-alert-novideo-a');
 			if (t) t.textContent = f.title;
@@ -238,6 +257,7 @@
 		if (canDismiss && noFilter) f = null;
 
 		if (f) {
+			setSeverity('#st-alert-ircut', f.level);
 			$('#st-alert-ircut-t').textContent = f.title;
 			$('#st-alert-ircut-d').textContent = f.detail;
 		}

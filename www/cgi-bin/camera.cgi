@@ -44,10 +44,11 @@ fi
 
 <% if [ -z "$(pidof majestic majestic.new)" ]; then %>
 
-<div class="alert alert-danger">
-	<h4>Majestic is not running.</h4>
-	<p>Go to https://wiki.openipc.org for more information.</p>
-</div>
+<%# The wiki's front page used to stand here as "more information", printed as
+    plain text rather than a link, about a daemon that has stopped. The log is
+    where majestic says why it died -- and it is what an owner can screenshot
+    for whoever sold them the camera -- and a restart is the thing to try. %>
+<% notice danger '<b>Majestic is not running</b> &mdash; the daemon that streams the video and answers for every setting on this page is stopped, so there is nothing here to configure.' '<a href="logs.cgi">Open the log &rarr;</a><a class="btn btn-danger btn-sm" href="restart.cgi" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. The camera is unreachable for about half a minute while it comes back.">Restart camera</a>' %>
 
 <% else %>
 

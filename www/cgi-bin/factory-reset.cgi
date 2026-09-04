@@ -42,7 +42,10 @@
 %>
 
 <%in p/header.cgi %>
-<div id="fw-reset-status" class="alert alert-warning">Do not close, refresh, or navigate away from this page until the process finishes. The camera will reboot automatically.</div>
+<div id="fw-reset-status" class="mj-notice mj-notice-warn" role="alert">
+	<% notice_icon warn %>
+	<div class="mj-notice-txt">Do not close, refresh, or navigate away from this page until the process finishes. The camera will reboot automatically.</div>
+</div>
 <div class="card"><div class="card-body">
 	<% card_head "Progress" %>
 	<pre id="output" class="mb-0" data-cmd="<%= $c %>"></pre>

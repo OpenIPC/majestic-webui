@@ -775,7 +775,7 @@
 		}
 
 		const err = document.createElement('div');
-		err.className = 'mj-error alert alert-danger d-none';
+		err.className = 'mj-error mj-notice mj-notice-danger d-none';
 		err.role = 'alert';
 		form.appendChild(err);
 
@@ -5249,10 +5249,15 @@
 			esc(text) + '</option>';
 	}
 
+	// The mark has to be rebuilt each time, since the message is written as
+	// text into the notice and would otherwise take the drawn mark with it.
+	// textContent for the message itself: it is majestic's own response body,
+	// which on a rejected leaf is whatever the daemon chose to say.
 	function showError(msg) {
 		const e = document.querySelector('#mj-settings-form .mj-error');
 		if (!e) return;
-		e.textContent = msg;
+		e.innerHTML = mjNoticeIcon('danger') + '<div class="mj-notice-txt"></div>';
+		e.querySelector('.mj-notice-txt').textContent = msg;
 		e.classList.remove('d-none');
 	}
 
@@ -5265,8 +5270,11 @@
 
 	function showFatal(container, msg) {
 		const a = document.createElement('div');
-		a.className = 'alert alert-danger';
-		a.textContent = msg;
+		a.className = 'mj-notice mj-notice-danger';
+		a.setAttribute('role', 'alert');
+		a.innerHTML = mjNoticeIcon('danger') + '<div class="mj-notice-txt"></div>';
+		// textContent: msg carries an HTTP status the camera handed back.
+		a.querySelector('.mj-notice-txt').textContent = msg;
 		container.appendChild(a);
 	}
 })();

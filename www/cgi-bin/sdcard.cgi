@@ -8,7 +8,7 @@
 <dialog class="mj-modal" id="sd-format">
 	<div class="modal-header"><h5 class="modal-title text-danger">Format SD card</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
 	<div class="modal-body">
-		<div class="alert alert-danger mb-3"><strong>This erases everything on the card.</strong> Make a backup first.</div>
+		<% notice danger '<b>This erases everything on the card.</b> Make a backup first.' %>
 		<label class="form-label" for="sd-format-fs">Filesystem</label>
 		<select id="sd-format-fs" class="form-select mb-3"></select>
 		<pre id="sd-format-log" class="small d-none mb-0" style="max-height:30vh;overflow:auto"></pre>

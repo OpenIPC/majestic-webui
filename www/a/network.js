@@ -33,6 +33,33 @@
 			}).catch(() => { btn.disabled = false; st.textContent = 'scan failed'; });
 	}
 
+	// A locally-administered unicast address: bit 1 of the first octet set,
+	// bit 0 clear. It used to live in the placeholder-MAC banner's own include,
+	// alongside a second copy of this card's form; the banner links here now and
+	// carries no control of its own, so the include went with it.
+	function generateMac(ev) {
+		ev.preventDefault();
+		const el = $('#mac_address');
+		if (!el) return;
+		// defaultValue is what the page loaded with, so this asks only when
+		// there is something typed to lose. The old guard compared against the
+		// empty string, which was right in a banner whose field started empty
+		// and would have refused every time on this card, where the field is
+		// pre-filled with the address the camera is using.
+		if (el.value !== '' && el.value !== el.defaultValue &&
+			!confirm('Replace the address you have typed with a random one?')) return;
+		let mac = '';
+		for (let i = 1; i <= 6; i++) {
+			let b = (Math.random() * 255) >>> 0;
+			if (i === 1) { b = b | 2; b = b & ~1; }
+			mac += b.toString(16).toUpperCase().padStart(2, '0') + (i < 6 ? ':' : '');
+		}
+		el.value = mac;
+	}
+
+	const genMac = $('#generate-mac-address');
+	if (genMac) genMac.addEventListener('click', generateMac);
+
 	if (iface) iface.addEventListener('change', toggleInterface);
 	if (dhcp) dhcp.addEventListener('change', toggleStatic);
 	const scanBtn = $('#wifi-scan');
