@@ -14,6 +14,7 @@
 // its config and schema actually carry, which is the whole point.
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { check, group, done } = require('./assert');
 
@@ -162,6 +163,64 @@ group('an unmet requirement with nothing to say stays quiet');
 	const off = saved({ video1: { enabled: false } });
 	check('the requirement is still unmet', !req.met(mute, off));
 	check('but nothing is drawn', req.notice(mute, off) === '');
+}
+
+// The evaluator being right is only half of it: the warning has to reach the
+// page. It did not, on the very first camera whose schema carried the
+// annotation, and the way it failed is why this check is here rather than a
+// note in a review.
+//
+// renderField() declared the field's value accessors by CAPTURING the widget's
+// optional hatches -- `const getValue = control._get ? control._get : ...` --
+// which meant they could not be declared until the branch that assigns those
+// hatches had run, so they sat at the bottom of the function. The x-requires
+// block well above them paints its warning on mount and reads `getValue` to do
+// it. A `const` reached before its declaration is a ReferenceError, not an
+// undefined, so the throw left renderField, took every field after the
+// annotated one with it and the save bar with them: the Outgoing tab rendered
+// three of its seven rows and could no longer be saved.
+//
+// The fix is the reading, not the position. Accessors that reach `control._get`
+// / `._set` on every call can be declared before the widget exists, and there
+// is then no line in that function above which a field's value may not be read
+// -- so a new widget branch or annotation block cannot reintroduce this by
+// being written in the wrong place. That is the property worth guarding, and
+// the capture form is the one shape that takes it away.
+//
+// Only a camera running a majestic that emits `x-requires` shows the crash
+// itself, so this reads the source instead. It fails loudly when it cannot
+// find what it is describing, rather than passing against an empty haystack.
+group('renderField reads the widget hatches on call, not at declaration');
+{
+	const src = fs.readFileSync(
+		path.join(__dirname, '..', 'www', 'a', 'mj-settings.js'), 'utf8');
+	const start = src.indexOf('function renderField(');
+	check('renderField is where it was', start !== -1);
+
+	if (start === -1) {
+		// Slicing from -1 would hand the checks below an empty string and they
+		// would all report ok. A guard that cannot find its subject says so once
+		// and stops, instead of reporting four passes it never made.
+		check('SKIPPED: cannot locate renderField', false);
+	} else {
+		const body = src.slice(start);
+		for (const [name, hatch] of [['getValue', '_get'], ['setValue', '_set']]) {
+			// The capture form is the bug: `const getValue = control._get ? ...`
+			// pins the declaration below the widget dispatch.
+			const captured = new RegExp(
+				'const\\s+' + name + '\\s*=\\s*control\\.' + hatch + '\\b').test(body);
+			check(name + ' does not capture control.' + hatch, !captured);
+			// And the hatch has to actually be reached, inside the accessor's
+			// own body, or it has stopped honouring the widgets that supply
+			// one. Scoped to the declaration because the resolution picker
+			// calls `control._get()` too, and a whole-function search would
+			// pass on that alone.
+			const at = body.indexOf('const ' + name);
+			const decl = at === -1 ? '' : body.slice(at, at + 600);
+			const called = new RegExp('control\\.' + hatch + '\\s*\\(').test(decl);
+			check(name + ' calls control.' + hatch + ' instead', called);
+		}
+	}
 }
 
 done();
