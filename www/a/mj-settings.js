@@ -1707,7 +1707,7 @@
 			if (!strip.querySelector('.mj-live-row')) strip.remove();
 		}
 
-		if (roiField && preview) {
+		if (roiField && preview && window.MajesticRegion) {
 			repaint = mountRegions(preview, roiField, regionBody, regionNote).repaint;
 			// The field's own reset, MOVED into the group head rather than made
 			// again — the same relocation dockRuntime does with the runtime
@@ -1723,12 +1723,15 @@
 			const gh = colRegions.querySelector('.mj-live-grp-head');
 			if (rst && gh) gh.appendChild(rst);
 		} else if (roiField) {
-			// No picture to draw on: say why once, rather than leaving the
-			// coordinate boxes to be explained by nothing.
+			// Nothing to draw on, or nothing to judge the drawing with: say
+			// which, rather than leaving the coordinate boxes to be explained by
+			// nothing — or explained by the wrong half, which is what naming the
+			// preview would do on a camera whose preview came up fine.
 			roiField.p.hidden = false;
 			const p = el('p', 'mj-live-hint');
-			p.textContent = 'The preview could not be loaded, so regions can only be ' +
-				'given as coordinates here.';
+			p.textContent = (preview ? 'The region editor could not be loaded'
+				: 'The preview could not be loaded') +
+				', so regions can only be given as coordinates here.';
 			regionBody.appendChild(p);
 		}
 
@@ -1780,6 +1783,19 @@
 			base: words.base ||
 				'Regions are stored in the main stream’s pixels, and this camera has ' +
 				'no main resolution set. Switch the picture to Main to draw them.',
+			// The singular noun the row verdicts build their sentences from,
+			// and the two things a rectangle the camera cannot use is failing
+			// to do. Kept as words rather than as a boolean, because "watches"
+			// and "hides" are not the same promise and the whole reason these
+			// two callers share a control is that only the sentences differ.
+			thing: words.thing || 'region',
+			deadSome: words.deadSome ||
+				'A region with no area, or one outside the picture, is saved but never watched.',
+			deadAll: words.deadAll ||
+				'None of these regions watches anything, so nothing will be detected: ' +
+				'detection is limited to the regions listed and does not fall back to ' +
+				'the whole picture.',
+			space: words.space || 'Coordinates are main-stream pixels',
 		};
 		// Ungated callers are always live; a gated one starts off and is turned
 		// on by the caller's own mode control.
@@ -1818,11 +1834,15 @@
 			return { x: (w - f.w * s) / 2, y: (h - f.h * s) / 2, w: f.w * s, h: f.h * s };
 		}
 
-		const parse = (s) => {
-			const p = String(s).split('x').map(Number);
-			return p.length === 4 && p.every(n => isFinite(n))
-				? { x: p[0], y: p[1], w: p[2], h: p[3] } : null;
-		};
+		// The geometry verdicts live in mj-region.js, away from the DOM, because
+		// every branch of them renders a confident-looking chip and only a
+		// camera at a particular resolution reaches most of them. What is left
+		// here is where the answers are put on screen.
+		const RGN = window.MajesticRegion;
+		const parse = RGN.parse;
+		// The verdict's class in the module's own vocabulary, dressed here:
+		// the module has no idea what this page's stylesheet calls things.
+		const CLS = { bad: 'mj-md-bad', ok: 'mj-md-pct' };
 		// The underlying inputs, empties INCLUDED — _rows() drops those, and an
 		// empty row is exactly the one somebody is about to type coordinates
 		// into. Read from the DOM rather than kept alongside it: the field's
@@ -1830,6 +1850,11 @@
 		const inputs = () => Array.prototype.slice.call(
 			ctl.querySelectorAll('.mj-array-row input'));
 		const list = () => inputs().map(i => i.value.trim());
+
+		// Declared below list() rather than beside the other geometry helpers:
+		// it reads one, and a const read from above its own declaration is the
+		// temporal dead zone this file has already been bitten by once.
+		const tally = () => RGN.tally(list(), base(), W.thing);
 
 		// ── the layers ────────────────────────────────────────────────────
 		//
@@ -1906,8 +1931,41 @@
 		const view = el('div', 'mj-md-list');
 		const warn = el('p', 'mj-live-hint mj-md-warn');
 		warn.hidden = true;
+		// What an unusable rectangle costs, under the list rather than in the
+		// row: the row says WHICH one, this says what happens because of it,
+		// and the sentence changes when every one of them is unusable — that is
+		// the case the reporter of #330 was in, and it is the only one where a
+		// mistyped region turns the whole feature off.
+		const dead = el('p', 'mj-live-hint mj-md-warn');
+		dead.hidden = true;
+		// The coordinate space, stated once. The editor knew it all along and
+		// never said it, so the numbers in these boxes were the only ones on
+		// the page with no scale printed anywhere near them.
+		const space = el('p', 'mj-live-hint mj-md-space');
+		space.hidden = true;
 		listBox.appendChild(view);
 		listBox.appendChild(warn);
+		listBox.appendChild(dead);
+		listBox.appendChild(space);
+
+		// The head's count and the two lines under the list. Called from paint()
+		// and from every keystroke in a coordinate box: the count used to be
+		// written only by the full paint, so it lagged one row behind the list
+		// beside it — three rows on screen under a head that said "2 regions".
+		function paintTally() {
+			const t = tally(), b = base();
+			if (noteEl) {
+				noteEl.textContent = !t.n ? 'none'
+					: (t.n === 1 ? W.one : t.n + W.many) +
+						(t.bad ? ' · ' + t.bad + ' unusable' : '');
+				noteEl.classList.toggle('mj-md-warn', t.bad > 0);
+			}
+			dead.textContent = !t.bad ? ''
+				: (t.bad === t.n ? W.deadAll : W.deadSome);
+			dead.hidden = !t.bad;
+			space.textContent = b ? W.space + ' — ' + b.w + ' × ' + b.h + '.' : '';
+			space.hidden = !b || !t.n;
+		}
 
 		// The rectangles alone. Split out because typing in a coordinate box has
 		// to move its rectangle without rebuilding the box being typed into.
@@ -1953,16 +2011,10 @@
 			paintBoxes();
 			const rows = list();
 
-			// Counts what is actually a region: a row you have just opened to
-			// type into is not one yet, and saying "1 region" over an empty box
-			// would be the page agreeing with something nobody has said.
 			// A selection that outlived its row would put handles on somebody
 			// else's rectangle: deleting region 2 of 3 renumbers the third.
 			if (sel >= rows.length) sel = -1;
-			const n = rows.filter(Boolean).length;
-			if (noteEl) {
-				noteEl.textContent = n ? (n === 1 ? W.one : n + W.many) : 'none';
-			}
+			paintTally();
 
 			// The list beside the picture is a VIEW of the field, rebuilt from
 			// it, never a second copy kept in step by hand: the hidden field is
@@ -2006,8 +2058,12 @@
 					// value still read "not XxYxWxH" and a resized one still
 					// showed the share of the frame it used to have. Both are
 					// the row saying something about text that is no longer in
-					// it.
+					// it. The head's count and the lines under the list are
+					// derived from the same verdicts, so they move with the
+					// keystroke too — everything except the list itself, which
+					// is what holds the caret.
 					says(parse(co.value));
+					paintTally();
 					paintBoxes();
 				});
 				const del = el('button', 'mj-md-del');
@@ -2025,23 +2081,15 @@
 				// silently missing rectangle — so it is said here, beside the
 				// box you would fix it in. Built once and rewritten in place,
 				// because it has to keep up with typing.
-				const verdict = el('span', 'mj-md-pct');
-				verdict.title = 'share of the frame';
-				row.appendChild(verdict);
+				const vd = el('span', 'mj-md-pct');
+				vd.title = 'share of the frame';
+				row.appendChild(vd);
 				const says = (rr) => {
-					if (!rr) {
-						verdict.className = 'mj-md-bad';
-						verdict.textContent = 'not XxYxWxH';
-						verdict.removeAttribute('title');
-					} else if (b) {
-						verdict.className = 'mj-md-pct';
-						verdict.textContent =
-							Math.round(rr.w * rr.h / (b.w * b.h) * 100) + '%';
-						verdict.title = 'share of the frame';
-					} else {
-						verdict.className = 'mj-md-pct';
-						verdict.textContent = '';
-					}
+					const v = RGN.verdict(rr, b, W.thing);
+					vd.className = CLS[v.cls];
+					vd.textContent = v.text;
+					if (v.title) vd.title = v.title;
+					else vd.removeAttribute('title');
 				};
 				says(r);
 				row.appendChild(del);
@@ -2575,12 +2623,18 @@
 			held[k] = field;
 		}
 
+		// One question, asked once: hiding the raw coordinate rows is only
+		// right where something is going to draw them instead. Asked twice —
+		// once for the row and once for the mount — a missing geometry module
+		// would hide the field and then mount nothing over it, which is the one
+		// outcome the hidden-field pattern exists to rule out.
+		const canRegion = !!preview && !!window.MajesticRegion;
 		const maskSchema = fields.find(f => f.key === 'privacyMasks');
 		let maskField = null;
 		if (maskSchema) {
 			maskField = renderField(maskBody, maskSchema.dot, 'privacyMasks',
 				maskSchema.sub, getDotted(state.config, maskSchema.dot),
-				preview ? { hidden: true } : undefined);
+				canRegion ? { hidden: true } : undefined);
 			if (maskField) {
 				state.fields.push(maskField);
 				state.initial[maskSchema.dot] = maskField.getValue();
@@ -2600,7 +2654,7 @@
 		}
 
 		let masks = null;
-		if (maskField && preview) {
+		if (maskField && canRegion) {
 			masks = mountRegions(preview, maskField, maskBody, maskNote, {
 				gated: true,
 				one: '1 mask', many: ' masks',
@@ -2610,6 +2664,15 @@
 				clearAsk: 'Remove every mask? Everything they cover becomes visible again.',
 				base: 'Masks are stored in the main stream’s pixels, and this camera ' +
 					'has no main resolution set. Switch the picture to Main to draw them.',
+				thing: 'mask',
+				deadSome: 'A mask with no area, or one outside the picture, is saved ' +
+					'but hides nothing.',
+				// No "and so the whole picture is hidden" counterpart: an
+				// unusable mask hides nothing, and every unusable mask still
+				// hides nothing. The all-unusable case is only worth its own
+				// sentence where it inverts the feature, which is the motion
+				// list's case and not this one.
+				deadAll: 'None of these masks hides anything.',
 			});
 			// The masks the camera has already applied are painted into the
 			// stream as solid blocks. The outlines here are for grabbing them;

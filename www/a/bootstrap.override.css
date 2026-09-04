@@ -2260,6 +2260,15 @@ mark {
 	color: var(--bs-warning);
 }
 
+/* The coordinate space the boxes above are written in. Tertiary and last,
+   because it is a fact you look up once and then stop reading — unlike the
+   warning above it, which is about what the camera is failing to do. */
+.mj-md-space {
+	margin-top: 0.5rem;
+	color: var(--bs-tertiary-color);
+	font-variant-numeric: tabular-nums;
+}
+
 /* Save and Apply live here together, and the bar is only in the document while
    one of them has something to do. It is the form's last child, so appearing
    and disappearing costs nothing above it — measured: the section card's top

@@ -122,6 +122,7 @@ fi
 %>
 <script src="/a/charts.js" defer></script>
 <script src="/a/mj-requires.js" defer></script>
+<script src="/a/mj-region.js" defer></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>
