@@ -232,6 +232,29 @@ group('the axis caption is derived from the window, not written beside it');
 	check('and a window under a minute says seconds', cap(45) === '-45 s');
 }
 
+group('hide withholds a line, not a value');
+{
+	const { MC, clock } = boot();
+	const host = makeHost(400);
+	const ch = MC.makeChart(host, { h: 40, lo: 0, hi: 10, colors: ['#a1', '#b2'] });
+	for (let i = 0; i < 5; i++) { clock.t = i * 10; MC.pushChart(ch, [3, 7]); }
+	check('both series draw while nothing is hidden',
+		host.innerHTML.indexOf('#a1') >= 0 && host.innerHTML.indexOf('#b2') >= 0);
+
+	ch.cfg.hide = [true, false];
+	MC.renderChart(ch);
+	check('a hidden series stops being drawn',
+		host.innerHTML.indexOf('#a1') < 0 && host.innerHTML.indexOf('#b2') >= 0);
+	check('while its samples are still there to be read back',
+		ch.pts.length === 5 && ch.pts.every(p => p.v[0] === 3),
+		ch.pts.length + ' points');
+
+	ch.cfg.hide = [false, false];
+	MC.renderChart(ch);
+	check('and unhiding draws the history it kept, not just what came after',
+		host.innerHTML.indexOf('#a1') >= 0);
+}
+
 group('window and gap are per chart, because not every subject is a subject of now');
 {
 	const { MC, clock } = boot();

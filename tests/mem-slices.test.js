@@ -183,6 +183,44 @@ group('the sentence cannot say nothing happened over a window in which something
 		memSentence([at(0, 10)], 17 * MB, 34 * MB) === 'Holding 17 of 34 MB.');
 }
 
+// A slice is withheld from the DRAWING while it has never been anything, and
+// for a while that was done by pushing null — which also told everything
+// reading the points back that the value was unknown. A pool that sat at zero,
+// rose and fell then lost its whole story to the one null the window opened
+// on, for as long as that null took to age out.
+group('withholding a line from the chart does not withhold the value from the sentence');
+{
+	// index 0 is the pool: nothing, then 8 MB, then given back.
+	const pool = (v) => ({ t: 0, v: v });
+	const came = [
+		{ t: 0, v: [0, 1.5, 4, 0.1, 5] },
+		{ t: 120, v: [8, 1.5, 4, 0.1, 5] },
+		{ t: 240, v: [0, 1.5, 4, 0.1, 5] },
+	];
+	const said = memSentence(came, 17 * MB, 34 * MB);
+	check('a pool that came and went inside the window is named',
+		said.indexOf('Video buffers rose to 8.0 MB and came back') >= 0, said);
+
+	// A slice the camera genuinely did not report at one end must not be
+	// silenced at the other: its own first and last reading are the endpoints.
+	const gap = [
+		{ t: 0, v: [null, 1.5, 4, 0.1, 5] },
+		{ t: 120, v: [8, 1.5, 4, 0.1, 5] },
+		{ t: 240, v: [0, 1.5, 4, 0.1, 5] },
+	];
+	check('and a real gap at one end still leaves the slice its own endpoints',
+		memSentence(gap, 17 * MB, 34 * MB).indexOf('Video buffers \u22128.0') >= 0,
+		memSentence(gap, 17 * MB, 34 * MB));
+
+	// The reporter's board: a kernel that answers with a zero rather than by
+	// staying silent must not spend a clause saying nothing.
+	const empty = [{ t: 0, v: [0, 1.5, 4, 0.1, 10] }, { t: 240, v: [0, 1.5, 4, 0.1, 24.5] }];
+	check('a pool reported as zero the whole way is not named at all',
+		memSentence(empty, 17 * MB, 34 * MB).indexOf('Video buffers') < 0,
+		memSentence(empty, 17 * MB, 34 * MB));
+	void pool;
+}
+
 group('an absent key is a hole, not a floor');
 {
 	const held = 100 * MB;

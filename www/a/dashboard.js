@@ -901,11 +901,26 @@
 		if (pts.length < 2) return txt;
 		const a = pts[0], b = pts[pts.length - 1], parts = [], rose = [];
 		for (let i = 0; i < MEM_NAMES.length; i++) {
-			if (a.v[i] == null || b.v[i] == null) continue;
+			// Each slice's OWN first and last, not the window's: a slice the
+			// camera did not report at one end must not silence it at the
+			// other, which is how a pool that appeared mid-window used to lose
+			// its whole story to a single null.
+			let first = null, last = null, top = -Infinity, any = false;
+			for (let j = 0; j < pts.length; j++) {
+				const x = pts[j].v[i];
+				if (x == null) continue;
+				if (first === null) first = x;
+				last = x;
+				if (x > top) top = x;
+				if (x) any = true;
+			}
+			// Never reported, or reported as nothing the whole way: naming it
+			// costs a clause and says nothing about this camera.
+			if (first === null || !any) continue;
 			// A tenth of a megabyte is the resolution here, so a change too
 			// small to print gets no sign: "Kernel 0.0" rather than
 			// "Kernel \u22120.0", which claims a direction it cannot see.
-			const d = b.v[i] - a.v[i], mag = Math.abs(d).toFixed(1);
+			const d = last - first, mag = Math.abs(d).toFixed(1);
 			parts.push(MEM_NAMES[i] + ' ' +
 				(mag === '0.0' ? '' : d < 0 ? '\u2212' : '+') + mag);
 			// The two ends of the window are not the story when something grew
@@ -915,10 +930,7 @@
 			// -0.1 MB". Saying nothing happened while something did is the
 			// exact fault this panel exists to stop committing, so a peak that
 			// clears both ends by a margin worth printing is named outright.
-			let top = -Infinity;
-			for (let j = 0; j < pts.length; j++)
-				if (pts[j].v[i] != null && pts[j].v[i] > top) top = pts[j].v[i];
-			if (top - Math.max(a.v[i], b.v[i]) >= MEM_PEAK)
+			if (top - Math.max(first, last) >= MEM_PEAK)
 				rose.push(MEM_NAMES[i] + ' rose to ' + top.toFixed(1) +
 					' MB and came back');
 		}
@@ -958,14 +970,18 @@
 		// no pool to speak of answers the question with a zero rather than by
 		// staying silent, and on the reporter's gk7205v210 that put a
 		// permanently flat line along the axis and took a legend slot for
-		// something the camera does not have (#322). A slice held back this
-		// way is pushed as null rather than as zero, or the chart would draw
-		// the line anyway with nothing naming it.
+		// something the camera does not have (#322). What is withheld is the
+		// LINE and the legend entry, through the chart's own `hide` — never
+		// the value, which goes in as measured. Pushing null to hide it also
+		// says the value was unknown, and a pool that sat at zero and then
+		// rose and fell then went unreported because the window still opened
+		// on one of those nulls.
 		MEM_LEGEND.forEach((id, i) => {
 			if (slices[i]) memHas[i] = true;
 			const e = $(id);
 			if (e) e.hidden = !memHas[i];
 		});
+		if (chMem) chMem.cfg.hide = memHas.map(h => !h);
 
 		const now = performance.now() / 1000, k = Math.floor(now / MEM_SLOT);
 		if (k !== memSlot) {
@@ -978,8 +994,7 @@
 						break;
 					}
 			}
-			pushChart(chMem, slices.map((x, i) =>
-				x == null || !memHas[i] ? null : x / 1048576));
+			pushChart(chMem, slices.map(x => x == null ? null : x / 1048576));
 		}
 
 		// This tile alone is an hour wide, and says so. Four identical
