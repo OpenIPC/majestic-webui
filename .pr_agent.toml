@@ -1,0 +1,70 @@
+# Qodo code-review configuration.
+#
+# Review standards live in a companion file at the repo root:
+#   pr_compliance_checklist.yaml - binary hard gates
+#
+# Reference: https://docs.qodo.ai/install-and-configure/configuration-overview/configuration-file
+
+[github_app]
+pr_commands = [
+    "/agentic_describe",
+    "/agentic_review",
+]
+
+[review_agent]
+comments_location_policy = "both"
+
+# 1 = all severities inline, 2 = high+medium, 3 = high only.
+# 2 keeps disclosure and silent-failure findings inline without burying the diff
+# in nits.
+inline_comments_severity_threshold = 2
+
+issues_user_guidelines = """
+This is the WebUI for OpenIPC cameras: haserl CGI plus vanilla JS, served by the
+camera's own httpd. There is no build step and nothing the browser loads comes from a
+package manager. It runs on cameras with 32-128 MB of RAM against a firmware daemon
+whose behaviour varies by SoC vendor and build age.
+
+**This repository is PUBLIC. The firmware's source repository is NOT.** Treat any
+reference from this tree into that one as a finding in its own right - see the
+disclosure gate in pr_compliance_checklist.yaml, which is the highest-priority check
+here and the only one that cannot be fixed after merge.
+
+Prioritise, in order:
+
+1. Disclosure. Paths, symbol names, code excerpts or tracker references belonging to a
+   sibling repository that is not public, and any detail identifying the lab
+   environment. This is permanent once merged: a commit message on a public branch
+   cannot be rewritten and a PR body edit leaves its history visible.
+
+2. Claims the page makes that the camera has not been asked. This UI's recurring bug
+   class is a confident sentence with nothing behind it - a metric absent from an older
+   build coerced with `| 0` into a reading, a `{}` from a failed fetch used as data, a
+   verdict rendered from a decision table whose branches all look plausible. An absent
+   reading is not a zero and a failed fetch is not a fact; the consumer must be able to
+   tell "we do not know" from a value.
+
+3. Compatibility with older firmware. Features are gated on schema annotations,
+   metrics and endpoints the camera may not have. A missing one must degrade to
+   silence or to a stated limitation, never to a wrong statement and never to a
+   control that promises something the camera will ignore.
+
+4. Shell safety in the CGI: anything derived from POST_/GET_ or from the filesystem
+   must go through the `ex`/`pre` escapers in p/common.cgi, and the code must stay
+   inside busybox ash - no bash-isms, no GNU-only sed/awk flags.
+
+5. Front-end weight and dependencies. No frameworks, no bundlers, no npm runtime
+   dependencies, no CDN assets: the camera serves every byte off its own flash.
+
+Do not report: the absence of unit tests for DOM or CGI wiring, which the suite
+deliberately does not cover; jQuery-era style preferences; or the use of `<%in %>`
+haserl includes, which is this project's normal idiom.
+"""
+
+compliance_user_guidelines = """
+Apply pr_compliance_checklist.yaml literally, to the lines the diff adds or changes AND
+to the pull request's own title and description - the disclosure gate is about what
+becomes public, and a PR description is as public as the code.
+
+Do not raise a finding for pre-existing code that the diff merely moves or reindents.
+"""
