@@ -31,10 +31,12 @@ pr_compliances:
       repository's tree (src/..., include/..., a bare foo.c or foo.h that is not a
       file in THIS repository); the name or URL of a private repository (widgetii/...);
       a link or #number reference into a private tracker — including one written as
-      "OpenIPC/majestic#N" for an N that does not exist in that public tracker; an
-      internal C symbol or macro from the firmware (config_set_universal,
-      sdk_reload(), place_anchored, CFG_RELOAD_*, and the like); or a quoted excerpt
-      of its source.
+      "OpenIPC/majestic#N" for an N that does not exist in that public tracker; a
+      C-style identifier attributed to the firmware rather than to this tree
+      (snake_case with a call suffix, an ALL_CAPS macro or enum constant, a struct or
+      type name) where the sentence around it says the camera or the daemon is what
+      contains it; or a quoted excerpt of its source. This criterion deliberately
+      gives no examples: an example here would be the disclosure it prohibits.
 
   - title: "No lab environment details"
     compliance_label: true
@@ -78,11 +80,15 @@ pr_compliances:
       the page is served to an authenticated administrator's browser.
     success_criteria: >
       Anything derived from POST_/GET_ variables, from the filesystem, or from a
-      command's output is rendered through the `ex` or `pre` helpers in
-      www/cgi-bin/p/common.cgi.
+      command's output goes through the escaper that suits where it lands, all of them
+      in www/cgi-bin/p/common.cgi: `ex` for a command and its output as a block, `pre`
+      for a block of text, `esc` for text inside existing markup, `attr_escape` for a
+      quoted attribute value. `ex` and `pre` emit block markup of their own, so they
+      are not substitutes for the inline two.
     failure_criteria: >
-      The diff adds `<%= $POST_... %>`, `<%= $GET_... %>`, or an unescaped interpolation
-      of command or filesystem output into HTML.
+      The diff adds `<%= $POST_... %>`, `<%= $GET_... %>`, or any other interpolation of
+      command, device or filesystem output into HTML without one of those four
+      helpers around it.
 
   - title: "Busybox-compatible shell only"
     compliance_label: true

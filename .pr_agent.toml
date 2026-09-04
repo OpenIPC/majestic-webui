@@ -50,8 +50,10 @@ Prioritise, in order:
    control that promises something the camera will ignore.
 
 4. Shell safety in the CGI: anything derived from POST_/GET_ or from the filesystem
-   must go through the `ex`/`pre` escapers in p/common.cgi, and the code must stay
-   inside busybox ash - no bash-isms, no GNU-only sed/awk flags.
+   must go through the escaper in p/common.cgi that suits where it lands - `ex` for a
+   command and its output, `pre` for a block of text, `esc` for text inside existing
+   markup, `attr_escape` for a quoted attribute value. The code must also stay inside
+   busybox ash - no bash-isms, no GNU-only sed/awk flags.
 
 5. Front-end weight and dependencies. No frameworks, no bundlers, no npm runtime
    dependencies, no CDN assets: the camera serves every byte off its own flash.
