@@ -685,14 +685,22 @@ redirect_back() {
 # shadows that; deleting these files does not restore a 404, it restores the
 # stale page.
 #
-# 302 rather than 301, because a 301 a browser has cached outlives the file
-# that sent it and these are meant to be deleted. The query string rides along:
-# a stale link is usually a deep one, and camera.cgi?tab=nightMode is the shape
-# of every settings bookmark there is.
+# 307 rather than 301, and rather than 302. Not 301 because a 301 a browser has
+# cached outlives the file that sent it, and these are meant to be deleted. Not
+# 302 because 302 does not carry the method: a POST to an old page URL becomes
+# a bodyless GET at the new one, and every page here mutates only on POST -- so
+# the form would appear to submit and do nothing. 307 is 302's method-preserving
+# twin, equally uncached, and it re-issues the POST with its body at the new
+# address, which also leaves the right URL in the bar and the right id on
+# <body>. (The two machine endpoints cannot use any redirect: a curl without -L
+# follows none of them. They exec instead.)
+#
+# The query string rides along either way: a stale link is usually a deep one,
+# and camera.cgi?tab=nightMode is the shape of every settings bookmark there is.
 moved_to() {
 	local q=
 	[ -n "$QUERY_STRING" ] && q="?$QUERY_STRING"
-	echo "HTTP/1.1 302 Found"
+	echo "HTTP/1.1 307 Temporary Redirect"
 	echo "Content-type: text/html; charset=UTF-8"
 	echo "Cache-Control: no-store"
 	echo "Location: /cgi-bin/${1}${q}"
