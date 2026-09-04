@@ -67,10 +67,20 @@
 	// rebootedAlready() to measure the camera's uptime against.
 	const startedAt = performance.now();
 
+	// The banner is .mj-notice now, so its severity is a class and its mark is
+	// drawn — which means the mark has to be put back after each rewrite, since
+	// this used to replace the whole element's text. Bootstrap's severity words
+	// are what every call site here passes and they are worth keeping: they are
+	// the same vocabulary log_create and redirect_back use.
+	const SEV = { success: 'ok', warning: 'warn', danger: 'danger', info: 'info' };
 	function status(cls, msg) {
 		const s = $('#fw-reset-status');
-		s.className = 'alert alert-' + cls;
-		s.textContent = msg;
+		const sev = SEV[cls] || 'info';
+		s.className = 'mj-notice mj-notice-' + sev;
+		s.innerHTML = mjNoticeIcon(sev) + '<div class="mj-notice-txt"></div>';
+		// textContent rather than the innerHTML above: every message here is a
+		// plain sentence, and one of them quotes the camera back at you.
+		s.querySelector('.mj-notice-txt').textContent = msg;
 	}
 
 	// Every tick forks a dozen processes and makes a loopback request into the

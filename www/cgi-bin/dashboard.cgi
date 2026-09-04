@@ -31,9 +31,9 @@ done) %>
      in the same slot header.cgi uses for its own banners, and render nothing
      while the camera is healthy — space is only spent on signal. -->
 <div id="st-alerts" class="mt-3" hidden aria-live="polite">
-	<div class="st-alert" id="st-alert-stale" hidden>
-		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
-		<span class="small">Camera is not responding — retrying&hellip;</span>
+	<div class="mj-notice mj-notice-warn" id="st-alert-stale" hidden>
+		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
+		<div class="mj-notice-txt">Camera is not responding — retrying&hellip;</div>
 	</div>
 	<!-- There is no "Exposure at maximum" banner. isp_exposureismax is a true
 	     reading and a nightly one: auto-exposure runs out of shutter and gain
@@ -47,16 +47,20 @@ done) %>
 	<!-- The wording is written by dashboard.js from the finding it is reporting:
 	     one banner covers a missing pin, a light monitor with nothing to watch,
 	     thresholds with no hysteresis and a day/night disagreement, and each
-	     needs its own sentence. -->
+	     needs its own sentence. So does each one's SEVERITY, which this page
+	     used to throw away: .st-alert painted one amber rule and one amber
+	     glyph whatever the finding said, so a danger and an informational
+	     finding were the same banner. The class written here is only the state
+	     it starts hidden in; setSeverity() sets the real one. -->
 	<!-- "No filter here" is offered only for the missing-pin finding, and
 	     dashboard.js unhides it: nothing the camera can measure separates a
 	     filter nobody wired from a camera that has none, so the owner is the
 	     only one who can say. Every other finding is about a filter that is
 	     configured, and none of them can be waved away. -->
-	<div class="st-alert" id="st-alert-ircut" hidden>
-		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
-		<span class="small"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></span>
-		<a class="small ms-auto" href="camera.cgi?tab=nightMode">Open Day / Night &rarr;</a>
+	<div class="mj-notice mj-notice-warn" id="st-alert-ircut" hidden>
+		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
+		<div class="mj-notice-txt"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></div>
+		<span class="mj-notice-acts"><a href="camera.cgi?tab=nightMode">Open Day / Night &rarr;</a></span>
 		<!-- A bare ×, and it has been three things. "No filter here" read as
 		     something the page was ASSERTING rather than a button; "Dismiss"
 		     fixed that but put a second link-styled phrase beside "Open Day /
@@ -77,21 +81,21 @@ done) %>
 	     could only ever fire on SigmaStar, and that said nothing about the
 	     fault a newly flashed camera actually has — the wrong sensor driver,
 	     which streams perfectly and streams black. -->
-	<div class="st-alert" id="st-alert-novideo" hidden>
-		<span class="st-alert-ico" aria-hidden="true">&#9888;</span>
-		<span class="small"><b id="st-alert-novideo-t"></b> &mdash; <span id="st-alert-novideo-d"></span></span>
-		<a class="small ms-auto" id="st-alert-novideo-a" href="camera.cgi?tab=isp"></a>
+	<div class="mj-notice mj-notice-warn" id="st-alert-novideo" hidden>
+		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
+		<div class="mj-notice-txt"><b id="st-alert-novideo-t"></b> &mdash; <span id="st-alert-novideo-d"></span></div>
+		<span class="mj-notice-acts"><a id="st-alert-novideo-a" href="camera.cgi?tab=isp"></a>
 		<!-- Only on a hardware finding. What this page can say is worked out
 		     from two gauges; the log is where majestic says what happened when
 		     it brought the sensor up, and it is what an owner can screenshot
 		     for whoever sold them the camera. -->
-		<a class="small ms-3" id="st-alert-novideo-h" href="logs.cgi" hidden></a>
+		<a id="st-alert-novideo-h" href="logs.cgi" hidden></a></span>
 	</div>
 	<!-- Why you are here, when the Live page sent you and the fault has since
 	     cleared. Being moved to another page for no visible reason is worse
 	     than the fault it was moving you away from. -->
-	<div class="st-alert" id="st-alert-wasnovideo" hidden>
-		<span class="st-alert-ico" aria-hidden="true">&#8505;</span>
+	<div class="mj-notice mj-notice-info" id="st-alert-wasnovideo" hidden>
+		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.7"/><path d="M12 11.2v5.2"/><path d="M12 7.7h.01"/></svg>
 		<!-- Two states, because this page needs its own ten seconds to reach a
 		     verdict and during them it knows nothing. Saying "it looks fine
 		     now" on arrival would be a reassurance issued before anything had
@@ -99,8 +103,8 @@ done) %>
 		     be contradicted by the banner above a few seconds later. So the
 		     sentence starts as the bare fact of the hand-off and only earns its
 		     second half (status.js) once the check has run and found nothing. -->
-		<span class="small">Live video was not available a moment ago, so you were brought here.<span id="st-alert-wasnovideo-ok"></span></span>
-		<a class="small ms-auto" href="live.cgi">Open Live &rarr;</a>
+		<div class="mj-notice-txt">Live video was not available a moment ago, so you were brought here.<span id="st-alert-wasnovideo-ok"></span></div>
+		<span class="mj-notice-acts"><a href="live.cgi">Open Live &rarr;</a></span>
 	</div>
 </div>
 

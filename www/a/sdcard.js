@@ -35,7 +35,7 @@
 			.then(r => r.ok ? r.json() : {}).catch(() => ({}))
 			.then(c => { cfg = c; const rp = recPrefix(); return api(rp ? 'rec=' + encodeURIComponent(rp) : ''); })
 			.then(d => { state = d; render(); })
-			.catch(() => { SD.innerHTML = '<div class="alert alert-danger">Failed to read SD-card status.</div>'; });
+			.catch(() => { SD.innerHTML = mjNotice('danger', 'Failed to read SD-card status.'); });
 	}
 
 	// `ok` is spelled out rather than left as the default: render() calls this
@@ -104,8 +104,13 @@
 			return '';
 		}
 		const fix = remedy(d);
-		return '<div class="alert alert-danger"><strong>' + title + '</strong> ' + body + fix.text +
-			kernelLines(d) + '<div class="mt-2">' + fix.btn + '</div></div>';
+		// The verdict is the sentence; what to do about it, the kernel's
+		// corroboration and the button go in the notice's body row. This is the
+		// one call site in the tree that needs that row -- everything else the
+		// component carries is one line and an action.
+		return mjNotice('danger', '<strong>' + title + '</strong> ' + body, {
+			body: fix.text + kernelLines(d) + '<div class="mt-2">' + fix.btn + '</div>',
+		});
 	}
 
 	function storageBar(d) {
@@ -133,7 +138,7 @@
 		const d = state;
 		const head = '<div class="d-flex align-items-center gap-3 mb-4"><h2 class="text-primary m-0">SD Card</h2>' + badge(d || {}) + '</div>';
 		if (!d || !d.present) {
-			SD.innerHTML = head + '<div class="alert alert-secondary">No SD card detected. Insert a card and reload.</div>';
+			SD.innerHTML = head + mjNotice('info', 'No SD card detected. Insert a card and reload.');
 			return;
 		}
 		const rp = recPrefix(), recEnabled = mjGet(cfg, 'records.enabled') === true;

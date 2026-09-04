@@ -311,6 +311,37 @@ log_create() {
 	echo "${1}:${2}" > "$log_file"
 }
 
+# The one banner shape the whole UI uses: .mj-notice in bootstrap.override.css,
+# which is the Dashboard's old .st-alert lifted out of the Dashboard. Severity
+# is danger | warn | info | ok and drives the rule and the mark together.
+#
+#   notice <severity> <sentence html> [actions html] [dismiss]
+#
+# The sentence is HTML because every caller leads with a <b> and most carry a
+# link in the tail; run anything device-derived through `ex` before passing it.
+# The marks are drawn rather than typed, and are the same five paths main.js
+# emits for the pages that build a notice in the browser -- a severity mark
+# that differs between two pages is worse than no mark at all.
+notice_icon() {
+	local d
+	case "$1" in
+		danger) d='<circle cx="12" cy="12" r="8.7"/><path d="M12 7.6v5"/><path d="M12 16.3h.01"/>' ;;
+		warn) d='<path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/>' ;;
+		ok) d='<circle cx="12" cy="12" r="8.7"/><path d="m8.3 12.3 2.6 2.6 4.9-5.3"/>' ;;
+		*) d='<circle cx="12" cy="12" r="8.7"/><path d="M12 11.2v5.2"/><path d="M12 7.7h.01"/>' ;;
+	esac
+	printf '<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">%s</svg>' "$d"
+}
+
+notice() {
+	printf '<div class="mj-notice mj-notice-%s" role="alert">' "$1"
+	notice_icon "$1"
+	printf '<div class="mj-notice-txt">%s</div>' "$2"
+	[ -n "$3" ] && printf '<span class="mj-notice-acts">%s</span>' "$3"
+	[ -n "$4" ] && printf '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>'
+	printf '</div>\n'
+}
+
 log_read() {
 	[ ! -f "$log_file" ] && return
 	[ -z "$(cat $log_file)" ] && return
@@ -320,11 +351,18 @@ log_read() {
 	OIFS="$IFS"
 	IFS=$'\n'
 	for l in $(cat "$log_file"); do
-		c="$(echo $l | cut -d':' -f1)"
+		# The stored word is Bootstrap's severity name, because that is what
+		# every caller of log_create / redirect_back / set_error_flag writes and
+		# they are spread across two dozen files and both sbin trees. Mapping it
+		# here is one `case`; renaming it at the call sites is a flag day.
+		case "$(echo $l | cut -d':' -f1)" in
+			success) c=ok ;;
+			warning) c=warn ;;
+			danger) c=danger ;;
+			*) c=info ;;
+		esac
 		m="$(echo $l | cut -d':' -f2-)"
-		echo "<div class=\"alert alert-${c} alert-dismissible fade show\" role=\"alert\">${m}" \
-			"<button type=\"button\" class=\"btn btn-close\" data-bs-dismiss=\"alert\" aria-label=\"Close\"></button>" \
-			"</div>"
+		notice "$c" "$m" "" 1
 	done
 	IFS=$OIFS
 	rm -f "$log_file"

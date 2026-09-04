@@ -158,6 +158,11 @@ function load(cardHealth, metrics, mode) {
 		apiFetch: apiFetch,
 		// The one main.js global this page now leans on for the recorder.
 		parseMetrics: parseMetrics,
+		// The real notice builder, for the same reason parseMetrics is the real
+		// parser: the card banner IS its output, so a stub here would be this
+		// file quietly asserting against markup the page does not emit.
+		mjNotice: (...a) => mainGlobal('mjNotice')(...a),
+		mjNoticeIcon: (...a) => mainGlobal('mjNoticeIcon')(...a),
 		mjGet: (cfg, dot) => dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg),
 		parseTzOffsetMs: () => 0,
 		ianaZone: () => null,
@@ -180,21 +185,31 @@ function load(cardHealth, metrics, mode) {
 // The real parser, lifted out of main.js the same way metrics-parse.test.js
 // reaches it — so a change to the format is caught there rather than being
 // re-implemented differently here.
+// main.js compiled once, so the functions this file borrows are the ones the
+// browser runs rather than a second implementation that can drift from them.
+let mainCtx = null;
+function mainGlobal(name) {
+	if (!mainCtx) {
+		const src = fs.readFileSync(A('main.js'), 'utf8');
+		mainCtx = {
+			console: console, JSON: JSON, Object: Object, isNaN: isNaN,
+			document: { addEventListener() {}, getElementById: () => null,
+				querySelector: () => null, querySelectorAll: () => [] },
+			window: { addEventListener() {} },
+			setTimeout, clearTimeout, setInterval, clearInterval,
+			fetch: () => Promise.reject(new Error('no network')),
+			location: { pathname: '/', search: '' },
+			navigator: {}, localStorage: { getItem: () => null, setItem() {} },
+		};
+		vm.createContext(mainCtx);
+		vm.runInContext(src +
+			'\n;this.__lift = { parseMetrics, mjNotice, mjNoticeIcon };', mainCtx);
+	}
+	return mainCtx.__lift[name];
+}
+
 function parseMetrics(text) {
-	const src = fs.readFileSync(A('main.js'), 'utf8');
-	const ctx = {
-		console: console, JSON: JSON, Object: Object, isNaN: isNaN,
-		document: { addEventListener() {}, getElementById: () => null,
-			querySelector: () => null, querySelectorAll: () => [] },
-		window: { addEventListener() {} },
-		setTimeout, clearTimeout, setInterval, clearInterval,
-		fetch: () => Promise.reject(new Error('no network')),
-		location: { pathname: '/', search: '' },
-		navigator: {}, localStorage: { getItem: () => null, setItem() {} },
-	};
-	vm.createContext(ctx);
-	vm.runInContext(src + '\n;this.__parseMetrics = parseMetrics;', ctx);
-	parseMetrics = ctx.__parseMetrics;    // compile once, then use the real one
+	parseMetrics = mainGlobal('parseMetrics');    // then use the real one
 	return parseMetrics(text);
 }
 

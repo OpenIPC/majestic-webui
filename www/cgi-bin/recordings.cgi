@@ -10,7 +10,7 @@
 <div id="rec-note" class="d-none"></div>
 
 <noscript>
-	<div class="alert alert-warning">This page reads the archive off the card in the browser, so it needs JavaScript.</div>
+	<% notice warn 'This page reads the archive off the card in the browser, so it needs JavaScript.' %>
 </noscript>
 
 <!-- Hidden until recordings.js knows there is an archive to show. Almost all of

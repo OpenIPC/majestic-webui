@@ -604,6 +604,44 @@ document.addEventListener('DOMContentLoaded', () => {
 	});
 });
 
+// ── notices ────────────────────────────────────────────────────────────
+// The marks the .mj-notice component wears, and a builder for the pages that
+// assemble a notice in the browser rather than in haserl. They live here
+// rather than in each consumer because there are four of those and a severity
+// mark that differs between two pages is worse than no mark at all;
+// p/common.cgi's `notice` helper emits the same five paths from the shell.
+//
+// Drawn rather than typed. The glyphs these replace (&#9888;, &#8505;) paint
+// whatever size and weight the font decided, which is how the Dashboard ended
+// up with a 13x12px severity mark beside a 16x16px close button.
+const MJ_NOTICE_ICONS = {
+	danger: '<circle cx="12" cy="12" r="8.7"/><path d="M12 7.6v5"/><path d="M12 16.3h.01"/>',
+	warn: '<path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/>',
+	info: '<circle cx="12" cy="12" r="8.7"/><path d="M12 11.2v5.2"/><path d="M12 7.7h.01"/>',
+	ok: '<circle cx="12" cy="12" r="8.7"/><path d="m8.3 12.3 2.6 2.6 4.9-5.3"/>',
+};
+
+function mjNoticeIcon(sev) {
+	return '<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+		'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+		(MJ_NOTICE_ICONS[sev] || MJ_NOTICE_ICONS.info) + '</svg>';
+}
+
+// mjNotice('danger', '<b>Title</b> \u2014 sentence.', {acts: '<a \u2026>Fix it \u2192</a>'})
+// returns the notice's outer HTML as a string, because every caller here is
+// building innerHTML for a container it owns.
+function mjNotice(sev, html, opts) {
+	const o = opts || {};
+	return '<div class="mj-notice mj-notice-' + sev + '"' +
+		(o.id ? ' id="' + o.id + '"' : '') + ' role="alert">' +
+		mjNoticeIcon(sev) +
+		'<div class="mj-notice-txt">' + html +
+		(o.body ? '<div class="mj-notice-body">' + o.body + '</div>' : '') + '</div>' +
+		(o.acts ? '<span class="mj-notice-acts">' + o.acts + '</span>' : '') +
+		(o.dismiss ? '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>' : '') +
+		'</div>';
+}
+
 // Navbar toggler (the only collapse) and dismissable pieces. The slide
 // animation is gone with the bundle; the toggle is instant.
 document.addEventListener('click', e => {
@@ -620,7 +658,10 @@ document.addEventListener('click', e => {
 	const d = e.target.closest('[data-bs-dismiss]');
 	if (d) {
 		const what = d.getAttribute('data-bs-dismiss');
-		if (what === 'alert') { const a = d.closest('.alert'); if (a) a.remove(); }
+		// .mj-notice as well as .alert: the notice component replaced the filled
+		// block on every page banner, and a dismiss that closes only .alert is
+		// an inert x on all of them.
+		if (what === 'alert') { const a = d.closest('.alert, .mj-notice'); if (a) a.remove(); }
 		else if (what === 'modal') { const dlg = d.closest('dialog'); if (dlg) dlg.close(); }
 	}
 });

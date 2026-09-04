@@ -138,12 +138,18 @@ fi
 	<summary>Advanced</summary>
 	<div class="row g-4 mt-1">
 		<div class="col-12 col-lg-6">
-			<div class="card"><div class="card-body">
+			<%# id="mac": the placeholder-MAC banner in p/header.cgi links here, so
+			    this is the anchor it lands on. It also carries the generator the
+			    banner used to hold -- that helper was only ever reachable from a
+			    banner most cameras never raise, on the page nobody looking for
+			    the MAC address would find it on. %>
+			<div class="card" id="mac"><div class="card-body">
 				<% card_head "Change MAC address" %>
-				<p class="small text-secondary">Override the Ethernet MAC address. <span class="text-danger">Requires a reboot.</span></p>
+				<p class="small text-secondary">Override the Ethernet MAC address. <span class="text-danger">Requires a reboot.</span> The camera will most likely come back on a different IP address, because the DHCP server hands out leases by MAC.</p>
 				<form action="<%= $SCRIPT_NAME %>" method="post">
 					<% field_hidden "action" "changemac" %>
 					<% field_string "mac_address" "MAC address" "$network_macaddr" %>
+					<p class="small mb-3"><a href="#" id="generate-mac-address">Generate a valid random one</a></p>
 					<% button_submit "Update MAC" "danger" %>
 				</form>
 
