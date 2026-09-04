@@ -3968,8 +3968,14 @@
 				return f ? f.getValue() : undefined;
 			},
 			saved: (dot) => getDotted(state.config, dot),
+			// withLive, or a live-classified controlling field has no default to
+			// find: sectionFields skips x-live keys unless asked for them, since
+			// the Live adjustments leaf lifts those out of their own sections.
+			// The lift is about where a control is DRAWN; this is asking the
+			// schema what the key defaults to, and an unresolvable controlling
+			// field makes met() fail open and the warning never draw at all.
 			fallback: (dot) => {
-				const g = sectionFields(dot.split('.')[0]).find(x => x.dot === dot);
+				const g = sectionFields(dot.split('.')[0], true).find(x => x.dot === dot);
 				return g && g.sub ? g.sub.default : undefined;
 			},
 		});
@@ -4181,6 +4187,54 @@
 				dot === 'video0.size' || dot === 'video1.size' || dot === 'jpeg.size');
 
 		let p, control;
+
+		// The field's two value accessors. They are declared here, above the widget
+		// dispatch that builds `control`, and they reach `control._get`/`._set` on
+		// every call rather than capturing whichever function is there when this
+		// line runs. Both halves are the fix, and the second is what makes the first
+		// safe.
+		//
+		// Capturing is how this crashed. The accessors used to sit at the bottom of
+		// the function, beside the return that hands them out, which meant they
+		// could not be declared until the branch assigning the hatches had run --
+		// and the x-requires block well above them paints its warning on mount,
+		// reading `getValue` to ask what the field is set to. A `const` reached
+		// before its declaration is a ReferenceError, not an undefined, so the paint
+		// threw, the throw left renderField, and it took every field after the
+		// annotated one with it -- and the save bar, which is built after the fields
+		// are. On the first camera whose schema carried the annotation the Outgoing
+		// tab rendered three of its seven rows and could not be saved.
+		//
+		// Reading the hatches late is what retires the hazard rather than ruling it
+		// out of bounds: there is no longer a line in this function above which the
+		// field's value may not be read, so a new widget branch or annotation block
+		// cannot reintroduce it by being written in the wrong place.
+		//
+		// Array fields canonicalise to a comma-joined string so dirty-tracking (a
+		// plain !== against state.initial) keeps working; onSubmit splits it back
+		// into a list before POSTing.
+		const getValue = () => {
+			if (control._get) return control._get();
+			if (type === 'boolean') return control.checked ? 'true' : 'false';
+			if (type === 'array') return control._rows().join(', ');
+			return String(control.value);
+		};
+
+		const setValue = (v) => {
+			if (control._set) return control._set(v);
+			if (type === 'boolean') {
+				control.checked = toBool(v);
+			} else if (type === 'array') {
+				control.querySelectorAll('.mj-array-row').forEach(r => r.remove());
+				const arr = Array.isArray(v) ? v : (v ? String(v).split(/\s*,\s*/) : []);
+				arr.forEach(x => { if (x) control._addRow(x); });
+				if (control._sync) control._sync();
+			} else {
+				control.value = v !== undefined && v !== null ? String(v) : '';
+				const show = p.querySelector('.show-value');
+				if (show) show.textContent = control.value;
+			}
+		};
 
 		if (live && type === 'integer' && isNum(sub.maximum)) {
 			// The detent slider. Its fill runs from the schema's own default to
@@ -4524,45 +4578,6 @@
 			return null;
 		}
 
-		// The field's two value accessors, declared as soon as the widget exists
-		// and before anything below can want one. They used to sit at the bottom,
-		// beside the return that hands them out, and the x-requires warning above
-		// paints itself on mount: it reached `getValue` before the declaration had
-		// run and threw a ReferenceError out of renderField, which took the rest of
-		// the section with it — every field after the annotated one, and the save
-		// bar with them, on the first camera whose schema carried the annotation.
-		// Anything built below here may read the field's value; nothing above may.
-		//
-		// It cannot move further up than this: `_get`/`_set` are read once, here,
-		// rather than called through, so the widget branch that assigns them has to
-		// have run already.
-		//
-		// Array fields canonicalise to a comma-joined string so dirty-tracking
-		// (a plain !== against state.initial) keeps working; onSubmit splits it
-		// back into a list before POSTing.
-		const getValue = control._get
-			? control._get
-			: type === 'boolean'
-			? () => control.checked ? 'true' : 'false'
-			: type === 'array'
-			? () => control._rows().join(', ')
-			: () => String(control.value);
-
-		const setValue = control._set ? control._set : (v) => {
-			if (type === 'boolean') {
-				control.checked = toBool(v);
-			} else if (type === 'array') {
-				control.querySelectorAll('.mj-array-row').forEach(r => r.remove());
-				const arr = Array.isArray(v) ? v : (v ? String(v).split(/\s*,\s*/) : []);
-				arr.forEach(x => { if (x) control._addRow(x); });
-				if (control._sync) control._sync();
-			} else {
-				control.value = v !== undefined && v !== null ? String(v) : '';
-				const show = p.querySelector('.show-value');
-				if (show) show.textContent = control.value;
-			}
-		};
-
 		// live knobs share one "Reset all" in the panel header — no per-knob reset
 		if (!live) {
 			const reset = document.createElement('button');
@@ -4640,8 +4655,18 @@
 			// Half the condition is this field's own value, so its own edits
 			// have to repaint it. The ordinary input/change path runs
 			// updateDirty() and nothing else, which knows nothing about this.
-			control.addEventListener('input', paint);
-			control.addEventListener('change', paint);
+			//
+			// Listened for on the ROW, not on `control`: both events bubble, and
+			// a field's value does not always come from the one element this
+			// variable points at. The resolution picker keeps its custom text box
+			// as a SIBLING of the select — which is why the dirty tracker has to
+			// bind that box separately — and an array field's value lives in rows
+			// added and removed under it. Bound to the control alone the warning
+			// would paint once at mount and then go stale under exactly the edit
+			// that clears or triggers it, which is the same silence this whole
+			// block exists to break.
+			p.addEventListener('input', paint);
+			p.addEventListener('change', paint);
 			// The other half is a field that may or may not be on this page;
 			// applyVisibility() wires the listener where it is.
 			(state.reqUpdaters || []).push({ dot: dot, req: req, paint: paint });

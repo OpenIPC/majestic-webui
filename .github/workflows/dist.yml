@@ -3,7 +3,8 @@ name: dist
 # Build the minified distribution and publish it as a rolling release asset that the
 # firmware buildroot package fetches. The source in git stays unminified; only this
 # artifact is minified, so the firmware build needs no JS/CSS toolchain and stays
-# hermetic. Runs on every push to master so nightly firmware always gets the latest UI.
+# hermetic. Runs on every push to master so nightly firmware always gets the latest UI —
+# behind the test suite, since this is the path the shipped artifact actually takes.
 
 on:
   push:
@@ -25,6 +26,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      # Before the build, not after: this workflow publishes to every nightly
+      # firmware, and a PR's own green checks do not cover the commit that
+      # actually lands — master moves under a branch, and a direct push has no
+      # PR at all. The suite is the same dependency-free node the `test` job in
+      # check.yml runs; here it stands between a bad merge and the rolling
+      # release rather than between a contributor and a review.
+      - run: npm test
       - run: npm ci
       - run: npm run build:dist
       - name: Publish rolling dist release
