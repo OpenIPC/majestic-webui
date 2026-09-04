@@ -131,13 +131,15 @@
 		//
 		// There is no brightness gate, because there is no brightness to read.
 		// isp_again would be the obvious one and it is not comparable across
-		// vendors — the same "no gain at all" reads 1024 on HiSilicon, 126 on
-		// Ingenic and 20855 on SigmaStar, and SigmaStar reports no isp_avelum
-		// to fall back on. Nor can the frame supply it: auto-exposure drives
-		// average luminance toward its target whatever the light, so a
-		// correctly exposed midnight frame and a correctly exposed noon frame
-		// have the same mean by construction. Hence the wording of the finding
-		// below names what it cannot rule out instead of pretending to.
+		// vendors — the units differ (Q10 on HiSilicon and SigmaStar, log2×32
+		// on Ingenic) and so do the sensor-specific ceilings, so no one
+		// threshold means anything. isp_avelum is published everywhere now and
+		// does not help either, for the same reason the frame cannot supply
+		// it: auto-exposure drives metered luminance toward its target
+		// whatever the light, so a correctly exposed midnight frame and a
+		// correctly exposed noon frame have the same mean by construction.
+		// Hence the wording of the finding below names what it cannot rule
+		// out instead of pretending to.
 		// The day gate needs a camera that SAID it is day. Coercing an absent
 		// gauge to 0 would let the picture warn about an open filter on a
 		// camera that never reported day or night at all.
