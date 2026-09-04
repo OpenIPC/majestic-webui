@@ -279,7 +279,7 @@ get_config() {
 # Make Majestic re-read its configuration file (issue #308).
 #
 # Majestic parses the file once and then holds the whole configuration in
-# memory, and config_save() writes that whole tree back. So a file replaced
+# memory, and a save writes that whole tree back. So a file replaced
 # underneath it is not merely invisible - the settings page keeps serving the
 # values Majestic still holds - it is temporary: the next save from anywhere,
 # a field on the settings page or an ONVIF client, puts the old values back on

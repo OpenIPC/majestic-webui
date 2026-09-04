@@ -2848,8 +2848,8 @@
 		// channel it is drawing — so "200" is a tenth of the way across a 1920
 		// frame and well over a quarter across a 704 one, and the overlay landed
 		// somewhere different on each stream from the same setting. `%` is
-		// resolved as a share of that channel's own span (offset_px:
-		// `v * span / 100`), and the font is derived from the stream width too,
+		// resolved as a share of that channel's own span (`value * span / 100`),
+		// and the font is derived from the stream width too,
 		// so the text lands in the same visual place on every output.
 		//
 		// One decimal: enough that a 1920-wide frame can be addressed to the
@@ -2891,9 +2891,9 @@
 				oy = sy < 0 ? (py - p.y) : (p.y + p.h - (py + h));
 				oy = pct(Math.max(0, oy) / p.h);
 			}
-			// A centred axis ignores its offset — majestic's place_anchored
-			// centres it outright — so writing one would be a number the camera
-			// never reads and the form would show it as set.
+			// A centred axis ignores its offset — the camera's anchored
+			// placement centres it outright — so writing one would be a number
+			// the camera never reads and the form would show it as set.
 			if (sx === 0) ox = 0;
 			if (sy === 0) oy = 0;
 			return { sx: sx, sy: sy, ox: ox, oy: oy };
