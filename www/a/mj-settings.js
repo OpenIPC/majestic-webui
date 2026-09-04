@@ -2678,8 +2678,8 @@
 		'&offsetY=' + encodeURIComponent(oy);
 
 	// The nine named anchors, as majestic orders them. -1 is the near edge (left
-	// or top), 0 centred, 1 the far edge — the same two tables src/osd/text.c
-	// indexes, so a name picked here means the same thing there.
+	// or top), 0 centred, 1 the far edge — the same two tables the camera's own
+	// overlay placement indexes, so a name picked here means the same thing there.
 	const OSD_ANCHORS = [
 		['top-left', -1, -1], ['top', 0, -1], ['top-right', 1, -1],
 		['left', -1, 0], ['center', 0, 0], ['right', 1, 0],
