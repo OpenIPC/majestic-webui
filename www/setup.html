@@ -66,8 +66,11 @@
 		/* A flex item's default is to shrink, and everything else in the card
 		   is chrome with a height of its own — a logo, a step rail, a
 		   checkbox, a button. Without this a squeezed card squashes all of
-		   them a little instead of the one thing that can spare it. */
-		.card > * { flex: none; }
+		   them a little instead of the one thing that can spare it. The one
+		   that must still give is named rather than left to outrank this:
+		   `#step1` does outrank it, but the same pair one level down does
+		   not, and the two want reading the same way. */
+		.card > :not(#step1) { flex: none; }
 
 		.head { display: flex; align-items: flex-start; gap: 1rem; }
 		.brand { display: flex; flex-direction: column; gap: .45rem; flex-grow: 1; min-width: 0; }
@@ -180,7 +183,16 @@
 		   item go below the height of its own content at all. The agreement is
 		   the last of the three, so it is the one that ends up giving. */
 		#step1 { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
-		#step1 > * { flex: none; }
+		/* :not(#pane), not *. `#step1 > *` and `#pane` carry the SAME
+		   specificity — one id each, the universal selector counting for
+		   nothing — so with `*` the winner is whichever is written last, and
+		   the pane's own `flex: 0 1 auto` only holds because it sits below.
+		   Move these two blocks past each other in a tidy-up and the ceiling
+		   stops shrinking anything: the card is capped, nothing inside it
+		   gives, and step 1 overflows the bottom of a page that no longer
+		   scrolls — a worse version of the bug this fixes, arriving silently.
+		   Excluding the pane by name makes the order stop mattering. */
+		#step1 > :not(#pane) { flex: none; }
 
 		/* The reading pane. The ragged column the old page showed was
 		   white-space: pre-wrap honouring the document's own 78-column
