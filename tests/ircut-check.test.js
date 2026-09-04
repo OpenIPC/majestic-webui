@@ -494,6 +494,60 @@ function runRest() {
 		check('an absent night_enabled is not called Day',
 			!/^Day/.test(noNight.line) && !/^Night/.test(noNight.line),
 			noNight.line);
+		// A dimmable lamp speaks its duty; a switched one is never given a
+		// percentage, and a parked dimmer (0) is a reading, not an absence.
+		const dimmer = ic.monitorView(nmAuto, Object.assign({}, vAuto,
+			{ night_light_duty: 45 }));
+		check('a dimmable lamp reports its duty in the sentence',
+			/Lamp at 45%\.$/.test(dimmer.line), dimmer.line);
+		const parked = ic.monitorView(nmAuto, Object.assign({}, vAuto,
+			{ night_light_duty: 0 }));
+		check('a parked dimmer still says 0%',
+			/Lamp at 0%\.$/.test(parked.line), parked.line);
+		check('a switched lamp gets no invented percentage',
+			!/Lamp at/.test(ic.monitorView(nmAuto, vAuto).line));
+		const thrLamp = ic.monitorView(
+			{ lightMonitor: true, minThreshold: 1500, maxThreshold: 4000 },
+			{ night_mode_source: 2, night_enabled: 1, isp_again: 6000,
+				night_light_duty: 80 });
+		check('threshold mode carries the lamp note too',
+			/Lamp at 80%\.$/.test(thrLamp.line), thrLamp.line);
+	}
+
+	group('diagnose: parked actuators are decisions, not defects');
+	{
+		const wired = { irCutPin1: 11, irCutPin2: 10 };
+		const parked = Object.assign({ irCutEnabled: false }, wired);
+		const f = ic.diagnose(parked, { night: 1, ircut: 0, light: 0 },
+			{ conflictS: 999, flips: 0 });
+		check('a parked filter is an observation',
+			f.some(x => x.id === 'ircut-parked' && x.level === 'info'));
+		check('a parked filter is never "cannot move"',
+			!f.some(x => x.id === 'no-pins'));
+		check('a parked filter cannot be convicted of a conflict',
+			!f.some(x => x.id === 'conflict'));
+		check('an open-looking picture does not accuse a parked filter',
+			!ic.diagnose(parked, { night: 0, ircut: 0, light: 0 }, {},
+				{ look: 'open', streak: 9 })
+				.some(x => x.id === 'picture-open'));
+		check('an absent key on an older daemon is not "parked"',
+			!ic.diagnose(wired, null, null)
+				.some(x => x.id === 'ircut-parked'));
+		check('a parked lamp with wiring says so',
+			ic.diagnose({ backlightEnabled: false, backlightPin: 52 },
+				null, null)
+				.some(x => x.id === 'light-parked' && x.level === 'info'));
+		check('a parked lamp on a PWM channel says so too',
+			ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 'pwm1' },
+				null, null)
+				.some(x => x.id === 'light-parked'));
+		check('a lamp with no wiring at all stays silent',
+			!ic.diagnose({ backlightEnabled: false }, null, null)
+				.some(x => x.id === 'light-parked'));
+		check('channel "none" is not wiring',
+			!ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 'none' },
+				null, null)
+				.some(x => x.id === 'light-parked'));
 	}
 
 	group('diagnose: thresholds need a band, not a point');

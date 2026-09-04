@@ -146,7 +146,26 @@
 		const pictureOpen = !!(pic && pic.look === 'open' && pic.streak >= PIC_STREAK &&
 			sample && sample.night === 0);
 
-		if (!driveable) {
+		// Parked (#219): the operator switched the filter off while keeping
+		// its wiring. That is a decision, not a defect — every accusation
+		// about a filter that does not move stands down, and one observation
+		// says what is going on and where the switch is. Explicit === false:
+		// an older daemon has no such key, and absent must not read as off.
+		const ircutParked = nm.irCutEnabled === false;
+		if (ircutParked) {
+			if (driveable) {
+				out.push({
+					id: 'ircut-parked', level: 'info',
+					title: 'The IR-cut filter is switched off',
+					detail: 'Its pins stay configured, but nothing moves the ' +
+						'filter until "Drive the IR-cut filter" is turned back ' +
+						'on. Wherever it sits now is where it stays — open in ' +
+						'daylight reads magenta, and that is the switch, not ' +
+						'the wiring.',
+					fix: 'nightMode',
+				});
+			}
+		} else if (!driveable) {
 			out.push({
 				id: 'no-pins', level: 'danger',
 				title: 'Majestic cannot move the IR-cut filter',
@@ -296,6 +315,20 @@
 			});
 		}
 
+		// The lamp's own park switch, same shape as the filter's: wiring
+		// kept, nothing driven, said once as an observation.
+		if (nm.backlightEnabled === false &&
+			(has(nm.backlightPin) || (nm.backlightPwmChannel &&
+				nm.backlightPwmChannel !== 'none'))) {
+			out.push({
+				id: 'light-parked', level: 'info',
+				title: 'The camera light is switched off',
+				detail: 'Its wiring stays configured, but night mode leaves ' +
+					'it dark until "Drive the camera light" is turned back on.',
+				fix: 'nightMode',
+			});
+		}
+
 		if (driveable && !monitor) {
 			out.push({
 				id: 'manual-only', level: 'info',
@@ -312,7 +345,9 @@
 		// driving. With it off, every switch on the Live tab is manual and a
 		// deliberate disagreement — filter open in daylight to check an IR
 		// lamp, say — is exactly what someone might be doing right now.
-		if (monitor && driveable && known(sample)) {
+		// A parked filter cannot follow the monitor, so the disagreement the
+		// conflict finding convicts on is the expected state, not a fault.
+		if (monitor && driveable && !ircutParked && known(sample)) {
 			if (!agrees(sample) && track.conflictS >= CONFLICT_S) {
 				out.push({
 					id: 'conflict', level: 'danger',
@@ -651,6 +686,13 @@
 			? 'Night. '
 			: v.night_enabled === 0 || v.night_enabled === false ? 'Day. ' : '';
 
+		// Only a camera with a dimmable lamp publishes a duty; a switched
+		// lamp gets no invented percentage, and 0 on a dimmer is a real
+		// reading (the lamp parked dark), not an absence.
+		const duty = v.night_light_duty;
+		const lampNote = typeof duty === 'number' && duty >= 0
+			? ' Lamp at ' + duty + '%.' : '';
+
 		if (src === 4) {
 			const dayG = pin(nm.autoDayGain) !== null ? pin(nm.autoDayGain) : 2;
 			const nightG = pin(nm.autoNightGain);
@@ -688,7 +730,7 @@
 			return {
 				mode: 'auto',
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
-				bands: bands, line: line,
+				bands: bands, line: line + lampNote,
 				unit: 'x',
 			};
 		}
@@ -718,7 +760,7 @@
 				bands: bands,
 				line: modeWord +
 					'Comparing raw sensor gain against the thresholds ' +
-					'(vendor-specific units).',
+					'(vendor-specific units).' + lampNote,
 				unit: '',
 			};
 		}
