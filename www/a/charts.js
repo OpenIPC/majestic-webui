@@ -94,9 +94,16 @@ window.MjCharts = (function () {
 	}
 
 	// cfg: { h, lo, hi (null = auto), ref {v,label}|null, bands [{from,to,
-	// color,label}], colors [..], fmt, grid, refColor, win, gap } — series
-	// count = colors.length; `grid` is the hairline color, `refColor` the
-	// reference line's (defaults keep the dashboard's look).
+	// color,label}], colors [..], fmt, grid, refColor, win, gap, hide [..] } —
+	// series count = colors.length; `grid` is the hairline color, `refColor`
+	// the reference line's (defaults keep the dashboard's look).
+	//
+	// `hide` withholds a series from the DRAWING without withholding it from
+	// the data, which are two different questions and were briefly answered by
+	// one: pushing null to hide a line also told everything reading the points
+	// back that the value was unknown, and a memory slice that sat at zero and
+	// then rose and fell went unreported because the window still opened on one
+	// of those nulls. Push the truth; hide it here.
 	//
 	// Samples are timestamped and x is elapsed time, not sample index: a
 	// failed or slow poll leaves a real hole, so the line breaks across an
@@ -204,6 +211,7 @@ window.MjCharts = (function () {
 		}
 		const yBase = (padT + H).toFixed(1);
 		for (let si = 0; si < cfg.colors.length; si++) {
+			if (cfg.hide && cfg.hide[si]) continue;
 			// line and area are built per contiguous run: a null value or a
 			// gap longer than CHART_GAP closes the run, so neither the stroke
 			// nor the fill spans an outage.
