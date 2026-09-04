@@ -96,7 +96,7 @@
 	// reach and the only thing that can answer for a date that is not today —
 	// the camera ships a POSIX TZ string ("EST5EDT,M3.2.0,M11.1.0") that nothing
 	// in a browser will evaluate, and pulse.cgi's %z is one number for now.
-	// A bare object, not {}: the key is /etc/timezone, which fw-time.cgi writes
+	// A bare object, not {}: the key is /etc/timezone, which time.cgi writes
 	// from a POST, and on a plain object `'constructor' in cache` is true. That
 	// hands back Object as though it were a cached formatter, which ianaZone
 	// then accepts and zoneOffsetMs calls formatToParts on.
@@ -124,7 +124,7 @@
 		return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - ms;
 	}
 
-	// /etc/timezone as a name the browser's database will accept. fw-time.cgi
+	// /etc/timezone as a name the browser's database will accept. time.cgi
 	// writes it de-underscored out of the bundled table ("America/New York"),
 	// which Intl rejects; no zone name contains a space, so putting them back is
 	// exact. Without it the camera side falls back to pulse.cgi's single number,
@@ -543,7 +543,7 @@
 				setStatus('');
 				note('<strong>' + family + ' — this browser cannot decode it.</strong> ' +
 					'Save the clip and play it in VLC, or record the main stream as H.264. ' +
-					'<a href="mj-settings.cgi?tab=video0">Stream settings</a>', 'warning');
+					'<a href="camera.cgi?tab=video0">Stream settings</a>', 'warning');
 				return;
 			}
 			note('');
@@ -691,7 +691,7 @@
 		if (!msg) { el.className = 'd-none'; el.innerHTML = ''; return; }
 		el.className = 'alert alert-danger';
 		el.innerHTML = msg + cardKernelLines() +
-			'<div class="mt-2"><a class="btn btn-sm btn-danger" href="tool-sdcard.cgi">Open the SD card page</a></div>';
+			'<div class="mt-2"><a class="btn btn-sm btn-danger" href="sdcard.cgi">Open the SD card page</a></div>';
 	}
 
 	// Same numbers and the same bar as the SD card page, because it is the same
@@ -1312,7 +1312,7 @@
 		$id('rec-main').hidden = true;
 		note(msg + (cta || ''), kind || 'secondary');
 	}
-	// The page arrives hidden (see tool-recordings.cgi) and is shown once it has
+	// The page arrives hidden (see recordings.cgi) and is shown once it has
 	// something in it, so the ribbon and the clip list appear filled rather than
 	// blank and then filled.
 	function reveal() {
@@ -1563,8 +1563,8 @@
 			'reports no fault. Either the camera cannot write there, or it is running ' +
 			'a firmware that only starts recording when it starts — old enough that ' +
 			'switching records on does not take effect until it is restarted.',
-			' <a href="tool-sdcard.cgi">Check the SD card</a> or ' +
-			'<a href="fw-restart.cgi">restart the camera</a>.',
+			' <a href="sdcard.cgi">Check the SD card</a> or ' +
+			'<a href="restart.cgi">restart the camera</a>.',
 			'warning');
 	}
 
@@ -1577,7 +1577,7 @@
 		return Promise.all([loadConfig(), loadPulse()]).then(function () {
 			if (!state.prefix) {
 				return empty('<strong>Recording is not configured.</strong> No recording path is set, so there is nothing to browse. ',
-					'<a href="tool-sdcard.cgi">Set up the SD card</a>.');
+					'<a href="sdcard.cgi">Set up the SD card</a>.');
 			}
 			return Promise.all([loadDays(), loadCard()]).then(function () {
 				if (!state.days.length) {
@@ -1599,7 +1599,7 @@
 						(state.enabled
 							? '<strong>Nothing recorded yet.</strong> Recording is on, but no clips have been written to <code>' + esc(state.prefix) + '</code> yet.'
 							: '<strong>Recording is off.</strong> The camera is not writing to the card, so there is nothing to browse.'),
-						' <a href="tool-sdcard.cgi">SD card</a>' + (bad ? cardKernelLines() : '') +
+						' <a href="sdcard.cgi">SD card</a>' + (bad ? cardKernelLines() : '') +
 						(fix ? fixButton(fix) : '') + (canStart ? enableSwitch() : ''),
 						bad ? 'danger' : 'secondary');
 					if (fix) wireFix(fix);
@@ -1640,7 +1640,7 @@
 	function boot() {
 		return start().catch(function (e) {
 			empty('<strong>The recordings page could not start.</strong> Reload the page, or ',
-				'<a href="tool-sdcard.cgi">check the SD card</a>.', 'danger');
+				'<a href="sdcard.cgi">check the SD card</a>.', 'danger');
 			if (window.console && console.error) console.error(e);
 		});
 	}

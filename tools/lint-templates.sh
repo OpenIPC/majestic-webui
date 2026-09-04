@@ -36,7 +36,7 @@ SEEN=$(mktemp) || exit 1
 trap 'rm -f "$FAILS" "$SEEN"' EXIT
 
 # --- 1. syntax --------------------------------------------------------------
-# Shell constructs legally span <% %> blocks here: status.cgi opens `if ...;
+# Shell constructs legally span <% %> blocks here: dashboard.cgi opens `if ...;
 # then` in one block and closes it with `<% fi %>` after several lines of HTML.
 # So the blocks cannot be checked in isolation — anything that lints them
 # independently sees an unterminated `if` in every one. Let haserl do the
@@ -112,7 +112,7 @@ esac
 # error in either misconfigures or bricks the camera it runs on.
 #
 # Selection is by shebang. That is why j/locale.cgi does not carry one: it is a
-# data file parsed with sed (mj-settings.cgi), never sourced or executed, and
+# data file parsed with sed (camera.cgi), never sourced or executed, and
 # `mj_cloud=Cloud (WebRTC)` is not valid shell. Quoting that value would not
 # help — the sed captures \(.*\) straight into JSON, so the quotes would end up
 # inside the label.
@@ -143,7 +143,7 @@ done
 # camera -- the page loads, it is just called `mj-endpoints`.
 #
 # Only the bar's own entries are held to this. header.cgi also links pages from
-# its banners (fw-restart.cgi from the pending-changes warning), and those carry
+# its banners (restart.cgi from the pending-changes warning), and those carry
 # a sentence rather than a name, so they need no row.
 for href in $(grep -E 'class="(nav-link|dropdown-item)"' www/cgi-bin/p/header.cgi |
 		grep -oE 'href="[a-z0-9-]+\.cgi"' | sed 's/href="//; s/\.cgi"//' | sort -u); do
@@ -174,7 +174,11 @@ cgi_names=$(find www/cgi-bin -name '*.cgi' | sed 's|^www/cgi-bin/||' | sort -u)
 find www -name '*.cgi' -o -name '*.js' -o -name '*.html' | sort | while IFS= read -r f; do
 	grep -oE '[A-Za-z0-9_][A-Za-z0-9_./-]*\.cgi' "$f" | sort -u |
 		while IFS= read -r t; do
-			# Absolute and cgi-bin-relative spellings name the same file.
+			# Every spelling of the same directory: the URL path, the
+			# cgi-bin-relative one majestic gives a CGI as its cwd, and
+			# the absolute install path an exec needs.
+			t=${t#/var/www/cgi-bin/}
+			t=${t#var/www/cgi-bin/}
 			t=${t#/cgi-bin/}
 			t=${t#cgi-bin/}
 			[ -e "www/cgi-bin/$t" ] && continue

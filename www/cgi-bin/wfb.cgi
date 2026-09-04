@@ -332,7 +332,7 @@ update_wfbinfo
         fi
         c="class=\"nav-link\""
         [ "$label" = "$key" ] && c="class=\"nav-link active\" aria-current=\"true\""
-        echo "<li class=\"nav-item\"><a ${c} href=\"fpv-wfb.cgi?tab=${key}\">${locale}</a></li>"
+        echo "<li class=\"nav-item\"><a ${c} href=\"wfb.cgi?tab=${key}\">${locale}</a></li>"
     done
     %>
 </ul>
@@ -409,7 +409,7 @@ update_wfbinfo
             </form>
             <hr class="my-3">
             <p class="small text-secondary mb-2">Reboot to apply new WFB settings.</p>
-            <a class="btn btn-sm btn-outline-secondary confirm" href="fw-restart.cgi">Restart camera</a>
+            <a class="btn btn-sm btn-outline-secondary confirm" href="restart.cgi">Restart camera</a>
         </div></div>
     </div>
 
@@ -421,5 +421,5 @@ update_wfbinfo
     </div>
 </div>
 
-<script src="/a/fpv-wfb.js"></script>
+<script src="/a/wfb.js"></script>
 <%in p/footer.cgi %>

@@ -264,7 +264,7 @@ function load() {
 		},
 		MediaSource: MediaSourceStub,
 		URL: { createObjectURL: () => 'blob:stub', revokeObjectURL() {} },
-		location: { search: '', pathname: '/cgi-bin/tool-recordings.cgi' },
+		location: { search: '', pathname: '/cgi-bin/recordings.cgi' },
 		apiFetch: apiFetch,
 		mjGet: (cfg, dot) => dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg),
 		parseTzOffsetMs: () => 0,

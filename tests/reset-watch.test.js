@@ -1,4 +1,4 @@
-// fw-reset.js's reboot watch, driven against stubs.
+// factory-reset.js's reboot watch, driven against stubs.
 //
 // One question, three ways in: does the page ever stop waiting? The factory
 // reset erases the overlay and reboots, and the page has to notice and hand the
@@ -21,7 +21,7 @@ const path = require('path');
 const vm = require('vm');
 const { check, group, done } = require('./assert');
 
-const SRC = path.join(__dirname, '..', 'www', 'a', 'fw-reset.js');
+const SRC = path.join(__dirname, '..', 'www', 'a', 'factory-reset.js');
 
 // The code under test is a chain of awaits behind a stubbed fetch, so an event
 // only reaches its effect after several microtask turns. Real setImmediate,
@@ -206,7 +206,7 @@ async function handsBackOnceTheCameraReturns() {
 	await env.push(PROTECTED);
 	await env.push('\nUnconditional reboot\n');
 	await env.clock.advance(20000);
-	check('navigated to the status page', env.replaced === '/cgi-bin/status.cgi',
+	check('navigated to the status page', env.replaced === '/cgi-bin/dashboard.cgi',
 		'replaced=' + env.replaced);
 }
 
@@ -224,7 +224,7 @@ async function handsBackWhenTheRebootWasMissedEntirely() {
 	await env.clock.advance(21000);              // quiet window, then the first poll
 	check('asked the camera when it booted', env.metricsReads > 0);
 	check('navigated without waiting out the blind fallback',
-		env.replaced === '/cgi-bin/status.cgi', 'replaced=' + env.replaced);
+		env.replaced === '/cgi-bin/dashboard.cgi', 'replaced=' + env.replaced);
 	// The fallback needs sixty-one of these. Counting them is what separates
 	// "it left" from "it left three minutes late", which is the whole bug.
 	check('on the first poll, not the sixty-first', env.pings <= 2, 'pings=' + env.pings);
@@ -254,7 +254,7 @@ async function noUptimeFallsBackToTheBlindWatch() {
 	await env.clock.advance(78000);
 	check('not navigated an inch early', env.replaced === null, 'replaced=' + env.replaced);
 	await env.clock.advance(200000);
-	check('but the fallback still fires', env.replaced === '/cgi-bin/status.cgi',
+	check('but the fallback still fires', env.replaced === '/cgi-bin/dashboard.cgi',
 		'replaced=' + env.replaced);
 	// And it must fire on time. Each ask is awaited inside a poll, so one that
 	// times out on every one of the sixty the fallback is allowed would push a

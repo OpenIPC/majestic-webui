@@ -1,4 +1,4 @@
-// The PTZ pads, on the video. Loaded only via p/motor.cgi, which preview.cgi
+// The PTZ pads, on the video. Loaded only via p/motor.cgi, which live.cgi
 // includes only when the camera has motors. `$` and `apiFetch` are globals
 // from main.js.
 //

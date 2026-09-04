@@ -921,7 +921,7 @@
 				if (!ev.persisted) return;
 				fetch('/setup.html', { method: 'HEAD', credentials: 'same-origin' })
 					.then(function (r) {
-						if (!r.ok) location.replace('/cgi-bin/preview.cgi');
+						if (!r.ok) location.replace('/cgi-bin/live.cgi');
 					})
 					.catch(function () { /* camera unreachable: leave the form */ });
 			});
@@ -995,9 +995,9 @@
 							// the reason. replace(), not href: this page no longer
 							// exists on the camera, and leaving it in history
 							// means Back lands on a 404.
-							location.replace('/cgi-bin/preview.cgi');
+							location.replace('/cgi-bin/live.cgi');
 						}).catch(function () {
-							location.replace('/cgi-bin/preview.cgi');
+							location.replace('/cgi-bin/live.cgi');
 						});
 					}
 					// The endpoint answers in plain text and says something useful

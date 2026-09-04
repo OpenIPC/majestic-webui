@@ -138,7 +138,7 @@
 		// replace(), not assign(): this page would decide the same thing again
 		// on the way back, and leaving it in history as an entry that
 		// re-triggers is the trap the one-shot above exists to close.
-		location.replace('status.cgi?novideo=' + encodeURIComponent(f.code));
+		location.replace('dashboard.cgi?novideo=' + encodeURIComponent(f.code));
 	}
 
 	if (typeof mjMetricsSubscribe === 'function') {

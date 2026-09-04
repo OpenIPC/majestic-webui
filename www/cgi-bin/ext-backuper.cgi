@@ -1,30 +1,12 @@
-#!/usr/bin/haserl
-<%in p/common.cgi %>
-<%
-config_file=/etc/webui/backup.conf
-
-backup_create() { # backup_create
-	backup_file_name="${network_address}_${fw_version}-${fw_variant}_"`date +%Y-%m-%d_%H-%M-%S`".tgz"
-	# http_header_tgz filename
-	echo "Content-type: application/tar+gzip"
-	echo "Content-Transfer-Encoding: binary"
-	echo "Cache-Control: no-store"
-	echo "Pragma: no-cache"
-	echo "Content-Disposition: attachment; filename=$backup_file_name"
-	echo
-
-	files_to_backup=`grep "^#/" $config_file | tr '#' ' ' | tr '\r\n' ' '`
-	tar c -f - $files_to_backup | gzip
-	exit 0
-}
-
-# create backup
-if [ "$GET_backup" = "create" ]; then
-	backup_create
-	exit 0
-fi
-
-# This endpoint only serves the backup download; send any other request back to
-# the page that owns the backuper configuration.
-redirect_to "fw-settings.cgi"
-%>
+#!/bin/sh
+# Tombstone for the pre-rename name. REMOVE AFTER 2027-06; see moved_to in
+# p/common.cgi for why these exist at all.
+#
+# backup.cgi publishes a wget line ending
+# .../cgi-bin/ext-backuper.cgi?backup=create for remote backups, and people
+# have it in scripts.
+#
+# exec rather than a redirect, because this URL is called by machines: a curl
+# without -L takes the 302 as the answer and never sends anything. exec keeps
+# the method, the body and the query string, so the caller cannot tell.
+exec /var/www/cgi-bin/backup-create.cgi

@@ -16,7 +16,7 @@
 # desktop that opens the page is asking the same question about the same
 # camera, and they should not each have to be told.
 #
-# Its own file, not a key in webui.conf: fw-interface.cgi writes the theme
+# Its own file, not a key in webui.conf: access.cgi writes the theme
 # there with `>`, so anything else in it is destroyed the next time somebody
 # picks a colour scheme.
 CONF="/etc/webui/ircut.conf"

@@ -22,39 +22,39 @@
 page_label() {
 	case "$1" in
 	# Viewing
-	status)           printf '%s' "Dashboard" ;;
-	preview)          printf '%s' "Live" ;;
-	tool-recordings)  printf '%s' "Recordings" ;;
+	dashboard)      printf '%s' "Dashboard" ;;
+	live)           printf '%s' "Live" ;;
+	recordings)     printf '%s' "Recordings" ;;
 	# Camera
-	mj-settings)      printf '%s' "Settings" ;;
-	mj-endpoints)     printf '%s' "Stream URLs" ;;
-	mj-configuration) printf '%s' "Config file" ;;
+	camera)         printf '%s' "Settings" ;;
+	stream-urls)    printf '%s' "Stream URLs" ;;
+	config)         printf '%s' "Config file" ;;
 	# System
-	fw-network)       printf '%s' "Network" ;;
-	fw-time)          printf '%s' "Time" ;;
-	fw-interface)     printf '%s' "Access" ;;
-	fw-update)        printf '%s' "Update" ;;
-	fw-settings)      printf '%s' "Backup &amp; Restore" ;;
-	info-logs)        printf '%s' "Logs" ;;
-	tool-console)     printf '%s' "Console" ;;
-	tool-files)       printf '%s' "File Manager" ;;
-	tool-sdcard)      printf '%s' "SD Card" ;;
+	network)        printf '%s' "Network" ;;
+	time)           printf '%s' "Time" ;;
+	access)         printf '%s' "Access" ;;
+	update)         printf '%s' "Update" ;;
+	backup)         printf '%s' "Backup &amp; Restore" ;;
+	logs)           printf '%s' "Logs" ;;
+	console)        printf '%s' "Console" ;;
+	files)          printf '%s' "File Manager" ;;
+	sdcard)         printf '%s' "SD Card" ;;
 	# Services
-	ext-openwall)     printf '%s' "OpenWall" ;;
-	ext-telegram)     printf '%s' "Telegram" ;;
-	ext-ntfy)         printf '%s' "Ntfy" ;;
-	ext-vtun)         printf '%s' "VTun" ;;
-	ext-wireguard)    printf '%s' "WireGuard" ;;
-	ext-proxy)        printf '%s' "Proxy" ;;
+	openwall)       printf '%s' "OpenWall" ;;
+	telegram)       printf '%s' "Telegram" ;;
+	ntfy)           printf '%s' "Ntfy" ;;
+	vtun)           printf '%s' "VTun" ;;
+	wireguard)      printf '%s' "WireGuard" ;;
+	proxy)          printf '%s' "Proxy" ;;
 	# Reached from a page rather than from the bar
-	fw-editor)        printf '%s' "Text Editor" ;;
-	fw-reset)         printf '%s' "Factory reset" ;;
+	editor)         printf '%s' "Text Editor" ;;
+	factory-reset)  printf '%s' "Factory reset" ;;
 	# FPV builds only; not in any nav, reachable by URL
-	fpv-wfb)          printf '%s' "WFB Settings" ;;
+	wfb)            printf '%s' "WFB Settings" ;;
 	# A page with no row prints its own filename. That is visibly wrong on
 	# screen rather than a blank heading, and the lint rule is what stops one
 	# reaching a camera in the first place.
-	*)                printf '%s' "$1" ;;
+	*)              printf '%s' "$1" ;;
 	esac
 }
 
@@ -66,11 +66,11 @@ page_label() {
 # and does not need repeating.
 page_menu() {
 	case "$1" in
-	mj-settings|mj-endpoints|mj-configuration)
+	camera|stream-urls|config)
 		printf '%s' "Camera" ;;
-	fw-network|fw-time|fw-interface|fw-update|fw-settings|info-logs|tool-console|tool-files|tool-sdcard)
+	network|time|access|update|backup|logs|console|files|sdcard)
 		printf '%s' "System" ;;
-	ext-openwall|ext-telegram|ext-ntfy|ext-vtun|ext-wireguard|ext-proxy)
+	openwall|telegram|ntfy|vtun|wireguard|proxy)
 		printf '%s' "Services" ;;
 	esac
 }

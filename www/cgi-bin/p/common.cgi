@@ -89,7 +89,7 @@ uses_default_password() {
 }
 
 check_password() {
-	local p="/cgi-bin/fw-interface.cgi"
+	local p="/cgi-bin/access.cgi"
 	[ -z "$SCRIPT_NAME" ] || [ "$SCRIPT_NAME" = "${p}" ] && return
 	if uses_default_password; then
 		redirect_to "${p}" "danger" "You must set your own secure password!"
@@ -147,7 +147,7 @@ attr_escape() {
 # Not `pre` or `ex`: both wrap what they are given in a block element -- a <pre>,
 # and a <div> carrying a visible "# command" heading -- which is no use for a
 # value sitting inside a <dt> or mid-sentence. Escaping the endpoint addresses
-# with either would have put a <pre> inside every <dt> on mj-endpoints.cgi and
+# with either would have put a <pre> inside every <dt> on stream-urls.cgi and
 # taken the click-to-copy wiring with it.
 #
 # Not `attr_escape` either. That one deliberately puts numeric character
@@ -417,7 +417,7 @@ preview() {
 		     moment the fallback works. -->
 		<p id="mj-note" class="alert alert-warning mj-stage-alert" style="display:none">
 			<span id="mj-note-why">Your browser can't play the live video stream.</span>
-			<a href="mj-settings.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
+			<a href="camera.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
 		</p>
 		<!-- The other half of "there is nothing to see", and the one #mj-note
 		     cannot reach: a camera on the wrong sensor driver PLAYS, so the
@@ -430,11 +430,11 @@ preview() {
 		     is what the page says when that hand-off has been spent. -->
 		<p id="mj-blind" class="alert alert-warning mj-stage-alert" style="display:none">
 			<span id="mj-blind-why"></span>
-			<a id="mj-blind-act" href="mj-settings.cgi?tab=isp"></a>
+			<a id="mj-blind-act" href="camera.cgi?tab=isp"></a>
 			<!-- Hidden until a finding says it applies: a hardware fault is the
 			     one an owner cannot fix from a settings page, and the log is
 			     what they can screenshot for whoever sold them the camera. -->
-			<a id="mj-blind-help" href="info-logs.cgi" hidden></a>
+			<a id="mj-blind-help" href="logs.cgi" hidden></a>
 		</p>
 		<!-- The status chip. Same id as the badge it replaces, so every state
 		     write (connecting… / no signal / MJPEG / reconnecting…) keeps
@@ -492,7 +492,7 @@ preview() {
 		     one element instead of four, clipped by the stage. -->
 		<div id="mj-marquee" class="mj-marquee" hidden></div>
 		<!-- PTZ mount. Empty and hidden on every camera; p/motor.cgi (included
-		     by preview.cgi only when the hardware exists) emits the pad after
+		     by live.cgi only when the hardware exists) emits the pad after
 		     the player and preview-ptz.js relocates it in here. -->
 		<div id="mj-ptz" class="mj-ptz" hidden></div>
 		<!-- The control bar. Hidden until pointed at, focused into, or tapped
@@ -671,6 +671,35 @@ redirect_back() {
 }
 
 # redirect_to "url" "flash class" "flash text"
+# moved_to <the page it moved to>
+#
+# The whole body of a compatibility alias -- one of the tombstone .cgi files
+# still carrying a pre-rename name, each of which is four lines and a call to
+# this. They all say REMOVE AFTER 2027-06 and can go together.
+#
+# They are not merely politeness to old bookmarks. sbin/updatewebui prunes the
+# overlay copy of a name this release no longer ships, and pruning UNCOVERS the
+# firmware's own older copy underneath -- so on a camera whose image predates
+# the rename, /cgi-bin/fw-settings.cgi would answer 200 with the page exactly
+# as it was, its links and its behaviour and its old bugs included. A file here
+# shadows that; deleting these files does not restore a 404, it restores the
+# stale page.
+#
+# 302 rather than 301, because a 301 a browser has cached outlives the file
+# that sent it and these are meant to be deleted. The query string rides along:
+# a stale link is usually a deep one, and camera.cgi?tab=nightMode is the shape
+# of every settings bookmark there is.
+moved_to() {
+	local q=
+	[ -n "$QUERY_STRING" ] && q="?$QUERY_STRING"
+	echo "HTTP/1.1 302 Found"
+	echo "Content-type: text/html; charset=UTF-8"
+	echo "Cache-Control: no-store"
+	echo "Location: /cgi-bin/${1}${q}"
+	echo
+	exit 0
+}
+
 redirect_to() {
 	[ -n "$3" ] && log_create "$2" "$3"
 	echo "HTTP/1.1 303 See Other"

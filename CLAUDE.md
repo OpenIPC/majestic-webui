@@ -12,11 +12,11 @@ Every file in `tests/` earns its place the same way — the subject fails **sile
 
 `tests/assert.js` ends the process on an unhandled rejection or uncaught exception, and honours a non-zero failure count even if a chain simply stops. Before that, a rejected promise in an async test logged its `FAIL` through `check()` and then let node exit 0, because `done()` — the only thing that reads the count — was never reached: the suite reported a pass while a test had thrown.
 
-Authentication is HTTP Basic against `/etc/shadow` (user `root`); `common.cgi:check_password` forces a redirect to `fw-interface.cgi` while the legacy factory password `12345` is still in force.
+Authentication is HTTP Basic against `/etc/shadow` (user `root`); `common.cgi:check_password` forces a redirect to `access.cgi` while the legacy factory password `12345` is still in force.
 
 **Unclaimed cameras (first boot).** Current firmware ships with root's hash field in `/etc/shadow` *empty* rather than with a password committed to a public repository. Majestic reads that state on every request — `device_unclaimed()` in `crypto.c`, "is `is_shadow_auth("root","")` `AUTH_EMPTYPWD`" — and while it holds the camera **streams nothing**: RTSP answers 401, ONVIF is unauthorized, and every HTTP path but the claim flow gets 401. Setting root's password claims the camera and everything works as before; nothing else records the state, so whichever door sets the password, the other sees it immediately.
 
-- `www/setup.html` — the second **self-contained** page in this repo, for a harder version of login.html's reason: an unclaimed camera serves nothing else at all, no `/a/*` and no CGI. It `POST`s `password`/`confirm` to majestic's `/setup`, which validates, pipes `root:<pw>` to `chpasswd`, checks the password back with `is_shadow_auth` (an exit status is not proof the hash landed), and mints a session so the browser arrives at `status.cgi` signed in.
+- `www/setup.html` — the second **self-contained** page in this repo, for a harder version of login.html's reason: an unclaimed camera serves nothing else at all, no `/a/*` and no CGI. It `POST`s `password`/`confirm` to majestic's `/setup`, which validates, pipes `root:<pw>` to `chpasswd`, checks the password back with `is_shadow_auth` (an exit status is not proof the hash landed), and mints a session so the browser arrives at `dashboard.cgi` signed in.
 - Majestic serves it **only while unclaimed** and 404s it afterwards; `POST /setup` 403s on the same test. An unauthenticated page that sets the root password must not outlive the state that justifies it. Unclaimed, `/`, `/login.html` and every browser navigation redirect here instead of to `/login.html?next=…`.
 - The **other door is SSH**, gated firmware-side by `openipc-claim` as root's login shell (not `/etc/profile`, which `ssh cam 'cmd'` and `scp` never read). It refuses non-interactive sessions, runs `passwd`, then restores `/bin/sh` and steps aside. It is self-disabling, so a camera claimed through the browser repairs `/etc/passwd` on its next login.
 - `system.unsafe` still overrides everything, unclaimed included — that, not a blank password, is how a deliberately-open camera is configured.
@@ -26,7 +26,7 @@ This inverts what an empty root password used to mean: RTSP and ONVIF waved ever
 
 **Session cookies (browser auth).** Majestic (the daemon serving port 80) also mints a `session` cookie so that browser flows Basic composes badly with — most visibly **WebSocket handshakes in Safari**, which never carry a Basic credential — keep working. The pieces:
 
-- `www/login.html` — a **self-contained** login page (inline CSS/JS; it can't pull `/a/*` because those need auth). It `POST`s `username`/`password` to majestic's `/login`, which validates against `/etc/shadow` and returns `Set-Cookie: session=…; HttpOnly; SameSite=Strict`. On success it redirects to the sanitised `?next=` path (default `status.cgi`).
+- `www/login.html` — a **self-contained** login page (inline CSS/JS; it can't pull `/a/*` because those need auth). It `POST`s `username`/`password` to majestic's `/login`, which validates against `/etc/shadow` and returns `Set-Cookie: session=…; HttpOnly; SameSite=Strict`. On success it redirects to the sanitised `?next=` path (default `dashboard.cgi`).
 - Majestic redirects an **unauthenticated browser navigation** (a `GET` that `Accept`s `text/html` and isn't a WS handshake) to `/login.html?next=…` instead of answering `401 WWW-Authenticate: Basic`, so the native Basic dialog never pops. `curl`/CLI/XHR/WebSocket requests still get the `401`+Basic challenge, so scripted access is unchanged. It also auto-mints the cookie on any successful **root** Basic auth, so a client that still sends Basic transparently gets a session too.
 - The cookie rides every later request (same-origin `fetch` with `credentials: 'same-origin'`, and — the whole point — the three WebSocket handshakes `/ws/{upgrade,video,logs}`).
 - **Sign out** — a nav item in `p/header.cgi` (`#nav-logout`), wired in `main.js` to `POST /logout` (invalidates the server session) then navigate to `/login.html`.
@@ -49,7 +49,7 @@ This is a majestic-side feature; the WebUI just provides the login page and the 
 
     **The installer hands the run over to a newer one (v6).** This script installs itself along with the rest of the tree, so the copy that runs an install is always the one the *previous* install left behind — a fix to the installer lands on the camera but does not act on it until the run after the one that fetched it. So after the download is fetched, verified and unpacked, and before anything on the camera is touched, `hand_over` compares the tree's `sbin/updatewebui` `scr_version` against its own and `exec`s the downloaded one when it is higher, passing it the zip it already has (staged in `/tmp`, handed over by `UPDATEWEBUI_HANDOVER`, which is also the one-hop guard and what the new script's `cleanup` removes). Only ever **forwards**: an older tree is installed perfectly well by a newer installer, whereas handing the camera to an older one would run the very bugs the newer exists to have fixed. `--no-self-update` pins the running copy; `--restore` never does this, since it downloads nothing. A side effect worth knowing: after a handover the running script lives in `/tmp`, so `/usr/sbin/updatewebui` is not held open and installing over it no longer leaves a stale merged view.
 
-    A manifest at `/etc/webui/updatewebui.manifest` records what was installed, which is what lets the next run tell a local edit apart from a file the release simply changed. Local edits are replaced, not merged, but they are archived to `/etc/webui/updatewebui-local-<stamp>.tar.gz` first (`--no-backup` opts out) — and **only** where this run actually overwrites or removes them, since a file nothing touches cannot be lost with it. The manifest answers a different question (is this still what an install put here) and a path can fail it while already holding exactly what the release ships, which is what anything deployed onto the camera by hand between two installs looks like; archiving those was how `/etc/webui` filled up with archives of a tree that never changed. Beware `grep -f` with an **empty** pattern file when filtering these lists: busybox reads it as *match everything*, GNU as match nothing. On a run with **no** manifest — every camera's first, since the firmware now ships this script — the overlay itself is the record: the rootfs is read-only, so any local edit necessarily lives in the upper layer, and an upper copy whose content differs from what the install leaves behind is archived before it is touched. The installer also mirrors the firmware's **variant** file set (`BUILD_OPTION` in `/etc/os-release`, kept in step with the fixup lists in buildroot's `majestic-webui.mk`): a standard build gets no `fpv-wfb.cgi`/`p/fpv_common.cgi`, an FPV build no `telegram`/`openwall`, and a stale overlay copy of a skipped `/var/www` file is pruned rather than reinstalled.
+    A manifest at `/etc/webui/updatewebui.manifest` records what was installed, which is what lets the next run tell a local edit apart from a file the release simply changed. Local edits are replaced, not merged, but they are archived to `/etc/webui/updatewebui-local-<stamp>.tar.gz` first (`--no-backup` opts out) — and **only** where this run actually overwrites or removes them, since a file nothing touches cannot be lost with it. The manifest answers a different question (is this still what an install put here) and a path can fail it while already holding exactly what the release ships, which is what anything deployed onto the camera by hand between two installs looks like; archiving those was how `/etc/webui` filled up with archives of a tree that never changed. Beware `grep -f` with an **empty** pattern file when filtering these lists: busybox reads it as *match everything*, GNU as match nothing. On a run with **no** manifest — every camera's first, since the firmware now ships this script — the overlay itself is the record: the rootfs is read-only, so any local edit necessarily lives in the upper layer, and an upper copy whose content differs from what the install leaves behind is archived before it is touched. The installer also mirrors the firmware's **variant** file set (`BUILD_OPTION` in `/etc/os-release`, kept in step with the fixup lists in buildroot's `majestic-webui.mk`): a standard build gets no `wfb.cgi`/`p/fpv_common.cgi`, an FPV build no `telegram`/`openwall`, and a stale overlay copy of a skipped `/var/www` file is pruned rather than reinstalled.
 - Edits to a running camera can also be made directly under `/var/www/cgi-bin/` and `/usr/sbin/`.
 - There is no local way to run the UI off-camera — every script assumes camera-side binaries (`majestic`, `yaml-cli`, `ipcinfo`, `fw_printenv`, `haserl`, `chpasswd`, `sysupgrade`).
 
@@ -99,18 +99,18 @@ Majestic is the camera daemon and exposes a local HTTP API. Read it, don't reimp
 - `localhost/api/v1/config.json` — current config as JSON.
 - `localhost/api/v1/config.schema.json` — schema used by `mj-settings.js` (in the browser) to generate the entire settings form dynamically (looping over `properties` and dispatching on `type`).
 - `localhost/metrics/...` — Prometheus-style counters and gauges.
-- `localhost/image.jpg`, `localhost/image.heif`, `localhost/mjpeg`, `localhost/night/{on,off,toggle,ircut,light}` — used by `preview.cgi` and the notification sbin scripts.
+- `localhost/image.jpg`, `localhost/image.heif`, `localhost/mjpeg`, `localhost/night/{on,off,toggle,ircut,light}` — used by `live.cgi` and the notification sbin scripts.
 - `POST /api/v1/config` (≤1 MiB JSON body) — batch write. Server walks every leaf via `config_set_universal`, then runs `sdk_reload()` + `config_save()` exactly once. Aborts on first rejected leaf and returns its HTTP code; *no* persistence partial-credit. Used by the Save button in `mj-settings.js`.
     - **A `null` leaf REMOVES its key** rather than writing a value, which is the only way to put an optional setting back the way it was found. Nothing else can say it: `""` reaches `config_set_universal` and an integer field stores **0**, and 0 is a real GPIO — the wiki lists it as `RESET` on several XiongMai boards — so "not connected" used to configure the camera to drive pad 0 *and* silence every missing-key diagnostic, because the key was technically set. Null leaves are collected during the walk and applied only once every leaf is accepted, so a batch that fails deletes nothing. Older majestic answers 202 and ignores them, which is why the caller must re-read the config rather than trust the 202 (see `stillSet` in `mj-settings.js`).
 - `GET /api/v1/set?<dotted>=<v>` — single-key variant of the above. Same reload + save. Used externally (CLI/webhooks); not currently called by the WebUI but kept compatible.
 - `GET /api/v1/reset?key=A[&key=B]` — multi-reset. Returns each key to its **unconfigured** state, which has two spellings and the schema picks: a key with a declared `config_default_*` is restored to it; a key without one is removed outright. Those are the same state — a defaulted key is re-seeded on every load and can never be genuinely absent, so removing it would read as the sentinel now and as the default after the next restart. Single reload + save; 404 now means the key does not exist at all, not merely that it has no default. Used by per-field reset buttons in `mj-settings.js`.
-- `killall -1 majestic` — SIGHUP triggers Majestic's `sdk_reload()`. The WebUI doesn't expose this any more because every `/api/v1/{set,config,reset}` already does the same `sdk_reload()` automatically. For hardware re-init that a soft reload can't cover (e.g. codec switch on `video0`), reach for the device-level `fw-restart.cgi`.
+- `killall -1 majestic` — SIGHUP triggers Majestic's `sdk_reload()`. The WebUI doesn't expose this any more because every `/api/v1/{set,config,reset}` already does the same `sdk_reload()` automatically. For hardware re-init that a soft reload can't cover (e.g. codec switch on `video0`), reach for the device-level `restart.cgi`.
 
-#### `mj-settings.cgi` + `a/mj-settings.js` in detail
+#### `camera.cgi` + `a/mj-settings.js` in detail
 
-The settings page is split: `www/cgi-bin/mj-settings.cgi` renders the page chrome server-side (auth gate, nav, tab strip, signature bar) and emits a tiny bootstrap JSON block; `www/a/mj-settings.js` does everything else in the browser. The legacy haserl POST handler (`printenv | grep POST__` + per-key `yaml-cli -g/-s/-d`) is gone — saving goes through majestic's new write-back API.
+The settings page is split: `www/cgi-bin/camera.cgi` renders the page chrome server-side (auth gate, nav, tab strip, signature bar) and emits a tiny bootstrap JSON block; `www/a/mj-settings.js` does everything else in the browser. The legacy haserl POST handler (`printenv | grep POST__` + per-key `yaml-cli -g/-s/-d`) is gone — saving goes through majestic's new write-back API.
 
-**Server side — `mj-settings.cgi`.**
+**Server side — `camera.cgi`.**
 
 1. Pick the section: `label="$GET_tab"`. `?tab=` names a **section** (`isp`, `video0`, the synthetic `live`), not a category. Left empty the client lands on the first leaf of the first group; a stale `?tab=<group>` bookmark still resolves to that group's first section.
 2. Scrape `j/locale.cgi` with `sed` into the `labels` map the boot blob carries, so the client can title each section. Note `j/locale.cgi` is parsed, *not* sourced: it is a plain `key=value` data file with no shebang, and sourcing it would fail anyway because values like `mj_cloud=Cloud (WebRTC)` are not valid shell.
@@ -165,7 +165,7 @@ One IIFE, vanilla JS, no dependencies beyond `fetch` and the boot JSON tag.
 
     **A cleared pin is sent as `null`, in the same batch as everything else.** The nightMode pin fields are the one place an empty control means *remove this key* rather than *store an empty string*, so `onSubmit` maps them to `null` and everything else posts its value. This replaced a `j/gpio.cgi?unset=` endpoint that edited the YAML with `yaml-cli -d` behind majestic's back and then waited out a deferred `SIGHUP` — two halves of one save that could disagree, and a second write path to keep in step with the first. Because an older majestic accepts `null` and ignores it, `stillSet()` re-reads the refreshed config and names any coil that is *still* configured: a save that silently failed to disconnect one would state the exact opposite of what the feature exists to guarantee. It names the roles the way the map does — never the config key.
 
-There is no separate "Restart Majestic" affordance: every `/api/v1/{config,set,reset}` round-trip already calls `sdk_reload()` server-side, so Save *is* the reload. Settings that need true hardware re-init still want the device-level `fw-restart.cgi`.
+There is no separate "Restart Majestic" affordance: every `/api/v1/{config,set,reset}` round-trip already calls `sdk_reload()` server-side, so Save *is* the reload. Settings that need true hardware re-init still want the device-level `restart.cgi`.
 
 Why this design holds together:
 
@@ -243,7 +243,7 @@ The journal is the one write whose failure **stops** the actuation — it is wha
 - Pure JS, no framework. `$`/`$$` are `querySelector` wrappers. Don't introduce jQuery or any bundler — the README is explicit about keeping this small.
 - Bootstrap 5 **CSS only** (`bootstrap.min.css`, purged, plus `bootstrap.override.css`). The JS bundle is gone: `main.js` carries the four behaviours the UI used from it — a `bootstrap.Modal`-compatible shim over native `<dialog>` (dispatching `hidden.bs.modal`), delegated dropdowns (`data-bs-popper="static"` turns on Bootstrap's own Popper-less placement CSS), the navbar toggler, and `data-bs-dismiss` for alerts/modals. Modal markup is `<dialog class="mj-modal">` with Bootstrap's `.modal-header/-body/-footer` inside; the `--bs-modal-*` tokens those rules read are declared on `dialog.mj-modal` in the override.
 - `main.js:initAll` runs on `load`: wires `.btn-danger`/`.btn-warning`/`.confirm` to `confirm()`, links `input[type=range]` to a sibling `…-show` and hidden input, makes external links open in a new tab, and starts the heartbeat.
-- `main.js:runCmd(msg)` streams `/cgi-bin/j/run.cgi` line-by-line via `fetch`/`ReadableStream` and appends to a `pre#output` element whose `data-cmd` carries the base64-encoded command; used by `fw-reset.cgi` (overlay erase).
+- `main.js:runCmd(msg)` streams `/cgi-bin/j/run.cgi` line-by-line via `fetch`/`ReadableStream` and appends to a `pre#output` element whose `data-cmd` carries the base64-encoded command; used by `factory-reset.cgi` (overlay erase).
 - **The heartbeat publishes `null`, not `0`, for a gauge majestic does not emit** (`night`/`ircut`/`light`). A camera whose build omits them is not a camera reporting day with the filter closed, and everything reasoning about day/night has to be able to tell those apart — coercing with `| 0` let the picture heuristic below open its day gate on a camera that never reported day or night at all.
 - **The IR-cut machinery is three modules and a ladder of evidence**, because a misconfigured filter is invisible everywhere else: the camera streams, records, answers ONVIF and reports healthy counters while sending a magenta picture, and the commonest fault is not a wrong value but a *missing* one — with no `nightMode.irCutPin1` majestic never drives the filter at all.
     - **`ircut-check.js`** is the verdict module and the only one with opinions. `diagnose()` reads config plus the metrics the heartbeat already polls (free, passive, and it catches the missing pin outright). `stats()` computes the two colour statistics that recognise an open filter: `gmin`, the fraction of usable pixels where green is the **minimum** channel, and the brightness-normalised magenta excess at its **25th percentile**. Measured on a paired capture of one scene, filter open vs closed: gmin 1.000 against 0.03–0.07, mex p25 +0.40 against −0.11. `irLook()` needs **both** — a `colorToGray` night frame is R=G=B and satisfies gmin in every pixel; its magenta excess of 0 is what stops it. The percentile rather than the mean is what makes it a statement about the whole frame: a magenta *object* has to fill nine tenths of the picture before the pair fires, and a warm cast never does at any strength, because sunset is R>G>B monotone and green is never the valley in a monotone ramp.
@@ -253,7 +253,7 @@ The journal is the one write whose failure **stops** the actuation — it is wha
     - **`ircut-map.js`** draws the pads. It replaces four number fields that asked a freshly converted camera's owner for wiring facts nothing on the page could help them find. Pads carry **plain running integers**, the same `11` that goes into `nightMode.irCutPin1` and the same `11` the wiki's GPIO table lists; the kernel's `bank_pin` spelling appears nowhere, because a second numbering nobody can map onto the one they must type is worse than the harder one alone. It is a pad array and not a package outline for the same reason the count is not assumed — an outline would re-pitch per SoC, and on a BGA its pin numbers would be a fiction. `set()` fires `onChange` (a programmatic set is still an edit — the scan fills those in on somebody's behalf) except with `{quiet: true}`, which `refresh()` uses to re-sync after a save without pushing straight back into the fields it just settled.
     - **`ircut-scan.js`** finds the wiring by driving it, in tiers: pairs the wiki has seen, then neighbours within one bank, then any two pads in a bank, then across banks only when asked — 281 candidates on a 10-bank SoC where exhaustive is 3160. **Pairs, not pads**, for the reason `gpio.cgi` explains. Hits are judged on the **change**, not on `irLook`'s absolute bar: measured at dusk, the real pad moved gmin 0.05 → 0.88, enormous and still under 0.90, so a scan asking the absolute question would miss its own hit. Both orderings of a pair are tried before it is dismissed, since only the one opposite to the filter's current position changes anything. The filter **type** falls out of one extra trial — float the pads after a successful close, and one that springs open is brake-held while one that stays is latching — and that classification must compare against the picture *after* closing, not the frame the hit produced: when the hit was the opening direction that frame is the open picture, and comparing against it marks a latching filter brake-held.
     - The scan **proposes**; the test **adjudicates**. `irCutPin1`/`irCutPin2` are mapped from "which pad closes it when driven high", verified on one board — a board that disagrees is caught by the filter test, which already knows how to say "wired backwards" and name the fix. Nothing is written to majestic behind anyone's back: the proposal is staged into the hidden fields and the ordinary save bar appears.
-- `timezone.js` holds the `TZ` array used by `fw-time.cgi` for the city → `TZ` string mapping.
+- `timezone.js` holds the `TZ` array used by `time.cgi` for the city → `TZ` string mapping.
 - **The live player is two implementations behind one façade.** `preview.js`
   (`MajesticVideo`, MSE over `/ws/video`) and `preview-webrtc.js`
   (`MajesticWebRTC`, WebRTC over `/ws/webrtc`) return the same object —
@@ -290,20 +290,20 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   In Auto the radios and message stay untouched — nothing was betrayed and the
   chip is the disclosure. On an older majestic no `served` ever arrives and the
   frame-size inference below stands, radios unmoved — today's behaviour.
-  `mj-settings.cgi` does **not** share the `preview()` markup — its live tab is
+  `camera.cgi` does **not** share the `preview()` markup — its live tab is
   built client-side by `renderLive()` in `mj-settings.js` (`.mj-live-video`
   elements), though it loads all four preview player scripts. `preview()`
-  (in `p/common.cgi`) has exactly one caller: `preview.cgi`.
+  (in `p/common.cgi`) has exactly one caller: `live.cgi`.
 - **The Live page is settings-free by design.** It is the page every user of
   the future multi-user system gets, read-only, so nothing on it changes the
   camera: no night/IR/light toggles (those live in mj-settings' Live section,
   `wireNightToggles` in `mj-settings.js`), no custom control panels. The one
   exception is the PTZ pad — steering, not configuration — kept on the video
   until the multi-user split decides who may steer. Every setting belongs
-  under `mj-settings.cgi` only.
-- **The Live page is the picture, and nothing else.** `preview.cgi` sets
+  under `camera.cgi` only.
+- **The Live page is the picture, and nothing else.** `live.cgi` sets
   `full_bleed=1`, which asks `p/header.cgi` and `p/footer.cgi` for a page with
-  no container, no card, no status strip and no footer: `body#page-preview` is
+  no container, no card, no status strip and no footer: `body#page-live` is
   a `100dvh` flex column of navbar → banners → stage, so the stage takes
   whatever is left and the page never scrolls. It is the only page that asks.
   The strip went because all four of its readings — the two usage bars, the
@@ -451,7 +451,7 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   IS the finding), and the `#mj-ns-vs` line remembers each transport's last
   headline across switches so either view can quote the other — the A/B a
   screenshot carries. `lastSeen` survives `reset()` on purpose —
-  sparkline/axis-chart primitives extracted from `status.js`, now shared:
+  sparkline/axis-chart primitives extracted from `dashboard.js`, now shared:
   colors are per-instance arguments and the debounced resize redraw lives in
   charts.js, so load `/a/charts.js` before any consumer —
   under the chip (`preview-adapt.js` — event-driven off the camera's `enc=`
@@ -554,7 +554,7 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   browser's clock. A single offset for the whole day is wrong on the two days a
   year either zone changes and states an hour that never existed. The camera's
   offset comes from `/etc/timezone` via `Intl` — `ianaZone()` puts back the
-  underscores `fw-time.cgi` strips — so it is right for the date being browsed,
+  underscores `time.cgi` strips — so it is right for the date being browsed,
   not just today; `pulse.cgi`'s `%z` is the fallback when the name is not one
   the browser knows, and is right except across a change in the camera's own
   zone. **`state.offsetMs` defaulting to 0 is not a camera that reported UTC**:
@@ -583,23 +583,23 @@ The journal is the one write whose failure **stops** the actuation — it is wha
 
 The repo serves two flavours of firmware selected by `$fw_variant` (read from `/etc/os-release:BUILD_OPTION`):
 
-In practice the split is much smaller than it looks. **Every** page — `fpv-wfb.cgi` included — uses `p/header.cgi`, `p/common.cgi` and `j/locale.cgi`. `$fw_variant` only drives cosmetics (a `<body>` class and the brand label).
+In practice the split is much smaller than it looks. **Every** page — `wfb.cgi` included — uses `p/header.cgi`, `p/common.cgi` and `j/locale.cgi`. `$fw_variant` only drives cosmetics (a `<body>` class and the brand label).
 
 The FPV-specific code is exactly two files:
 
-- `p/fpv_common.cgi` — its own `yaml_get_value`/`yaml_set_value`/`yaml_get_nested` helpers, included by `fpv-wfb.cgi` only.
-- `fpv-wfb.cgi` — WFB-NG wireless settings, with legacy `wfb.conf` ↔ YAML compatibility.
+- `p/fpv_common.cgi` — its own `yaml_get_value`/`yaml_set_value`/`yaml_get_nested` helpers, included by `wfb.cgi` only.
+- `wfb.cgi` — WFB-NG wireless settings, with legacy `wfb.conf` ↔ YAML compatibility.
 
-`fpv-wfb.cgi` is not linked from any navigation; it is reachable only by URL. The only link to it ever written lived in `p/header_fpv.cgi`, which no page ever included — that file and `j/locale_fpv.cgi` (a variant tab-label set nothing ever read) were removed rather than left to imply a code path that never existed. Git history has them if the FPV nav is ever built for real.
+`wfb.cgi` is not linked from any navigation; it is reachable only by URL. The only link to it ever written lived in `p/header_fpv.cgi`, which no page ever included — that file and `j/locale_fpv.cgi` (a variant tab-label set nothing ever read) were removed rather than left to imply a code path that never existed. Git history has them if the FPV nav is ever built for real.
 
 ### Extensions (`ext-*.cgi` + `sbin/*`)
 
 Each extension is a CGI for the form + a sbin script invoked by cron or webhook:
 
-- `ext-telegram.cgi` ↔ `sbin/telegram` (image push on motion / on interval).
-- `ext-ntfy.cgi` ↔ `sbin/ntfy` (ntfy.sh notifications, reuses `/etc/webui/proxy.conf`).
-- `ext-openwall.cgi` ↔ `sbin/openwall`.
-- `ext-wireguard.cgi`, `ext-vtun.cgi`, `ext-proxy.cgi`, `ext-backuper.cgi` — VPN / SOCKS5 / config backup.
+- `telegram.cgi` ↔ `sbin/telegram` (image push on motion / on interval).
+- `ntfy.cgi` ↔ `sbin/ntfy` (ntfy.sh notifications, reuses `/etc/webui/proxy.conf`).
+- `openwall.cgi` ↔ `sbin/openwall`.
+- `wireguard.cgi`, `vtun.cgi`, `proxy.cgi`, `backup-create.cgi` — VPN / SOCKS5 / config backup.
 
 Each extension's CGI typically: defines a `params` list, loops `POST_<name>` into shell vars, validates, rewrites its single `/etc/webui/<name>.conf`, and `sed -i /<name>/d /etc/crontabs/root` before re-adding the cron line if scheduling is on. Webhooks like `?send=image` short-circuit before `header.cgi` and emit their own `Content-type`.
 
@@ -613,4 +613,4 @@ Each extension's CGI typically: defines a `params` list, loops `POST_<name>` int
 - **Never name a config key in text a person reads.** Use the name the page itself puts on screen. A key is a second vocabulary, readable only by someone who already knows the answer, and it is being used to explain a problem to someone who does not. The same rule killed the kernel's `bank_pin` GPIO spelling in favour of the plain integers `majestic.yaml` stores.
 - **An absent reading is not a zero, and a failed fetch is not a fact.** `| 0` on a metric that may not exist, or a `{}` from a fetch that failed, both turn "we do not know" into a confident wrong answer that then drives a warning. Distinguish them at the source and let the consumer gate on *known*.
 - **Don't move work between branches by copying files.** `git checkout <branch> -- <file>` is not a merge: it replaces the file wholesale, so anything on the target branch and not on the source is discarded silently and shows up in the diff as a plausible-looking revert nobody reads as one. It reverted a landed fix here once. Cherry-pick or rebase; if a file must be copied, read the **deletions** in `git diff origin/master...HEAD -- <file>`, not just the additions.
-- **`structure.md` drifts.** It still references e.g. `ext-tunnel.cgi`; the actual files are `ext-vtun.cgi` and `ext-wireguard.cgi`, and `p/fpv_common.cgi` isn't listed. Treat the directory tree as authoritative, not `structure.md`.
+- **`structure.md` drifts.** It still references e.g. `ext-tunnel.cgi`; the actual files are `vtun.cgi` and `wireguard.cgi`, and `p/fpv_common.cgi` isn't listed. Treat the directory tree as authoritative, not `structure.md`.

@@ -126,7 +126,7 @@
 	// happened when it brought the sensor up, and it is the one thing an owner
 	// can screenshot and hand to whoever sold them the camera. Named once so
 	// the findings that carry it cannot drift apart.
-	const HELP = { href: 'info-logs.cgi', label: 'View logs' };
+	const HELP = { href: 'logs.cgi', label: 'View logs' };
 
 	// What the camera cannot show, and why.
 	//
@@ -160,7 +160,7 @@
 				title: 'No video channel is turned on',
 				detail: 'Neither the main nor the sub stream is enabled, so the ' +
 					'camera is not encoding a picture for anything to show.',
-				act: { href: 'mj-settings.cgi?tab=video0', label: 'Open Video settings' },
+				act: { href: 'camera.cgi?tab=video0', label: 'Open Video settings' },
 			};
 		}
 
@@ -182,7 +182,7 @@
 				// restarted the camera on one click. Whoever renders a finding
 				// is responsible for asking; both consumers do.
 				act: {
-					href: 'fw-restart.cgi', label: 'Restart camera',
+					href: 'restart.cgi', label: 'Restart camera',
 					confirm: 'Restart the camera now?\n\nSettings are kept. ' +
 						'Video and recording stop for about half a minute ' +
 						'while it comes back.',
@@ -238,7 +238,7 @@
 			conclusive: ispSays === true && ispHeld && s.night === 0,
 			title: 'The camera is not seeing anything',
 			detail: detail,
-			act: { href: 'mj-settings.cgi?tab=isp', label: 'Open Image settings' },
+			act: { href: 'camera.cgi?tab=isp', label: 'Open Image settings' },
 			help: HELP,
 		};
 	}

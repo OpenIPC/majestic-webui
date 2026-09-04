@@ -1,4 +1,4 @@
-// Live log viewer for info-logs.cgi.
+// Live log viewer for logs.cgi.
 // Streams majestic's /ws/logs WebSocket (a single `logread -f` over which klogd
 // has already merged kernel + application logs) and renders it with a source
 // selector, free-text filter, pause, clear and download. Vanilla JS, no deps.

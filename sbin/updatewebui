@@ -19,7 +19,7 @@
 # WebUI exactly as it was.
 
 scr_name=updatewebui
-scr_version=6
+scr_version=7
 
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
@@ -294,8 +294,19 @@ build_plan() {
 				# build strips the FPV pages, an FPV build strips the
 				# notifier helpers. A skipped path never enters keep, so
 				# a stale overlay copy of it is pruned below.
+				#
+				# fpv-wfb.cgi is the pre-rename name of wfb.cgi. Both
+				# are listed so this script installs an older tree and
+				# a newer one correctly -- which it must, since --url
+				# and --branch will both hand it either. scr_version
+				# went to 7 for this: the copy that runs an install is
+				# the one the PREVIOUS install left, so without the
+				# bump the run that delivers the new name is handled by
+				# a script that has never heard of it, and wfb.cgi
+				# lands on a standard build. Measured, not reasoned:
+				# that is what happened on the lite lab camera.
 				case $sub/$rel in
-				www/cgi-bin/fpv-wfb.cgi | www/cgi-bin/p/fpv_common.cgi)
+				www/cgi-bin/wfb.cgi | www/cgi-bin/fpv-wfb.cgi | www/cgi-bin/p/fpv_common.cgi)
 					if [ "$variant" != fpv ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue

@@ -2,12 +2,12 @@
 <%
 # fpv_common.cgi
 #
-# The YAML helpers fpv-wfb.cgi is written against, and its only includer.
+# The YAML helpers wfb.cgi is written against, and its only includer.
 #
 # It used to carry a second, larger half: a form handler and three renderers
 # (process_form, display_settings, display_presets, display_system_actions)
 # with the preset machinery and the per-setting description table under them.
-# None of it had a call site, in this file or in fpv-wfb.cgi, and three things
+# None of it had a call site, in this file or in wfb.cgi, and three things
 # said it had never had one -- process_form read ${FORM_action}, which haserl
 # does not export; the markup emitted config-table/danger-zone/preset-container,
 # classes that appear in no stylesheet in the tree; and the preset code called

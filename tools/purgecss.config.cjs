@@ -42,7 +42,7 @@ module.exports = {
 	keyframes: false,
 	fontFace: false,
 	safelist: {
-		// `'alert alert-' + result` (fw-reset.js / fw-update.js) — never appears as a literal token.
+		// `'alert alert-' + result` (fw-reset.js / update.js) — never appears as a literal token.
 		standard: [
 			'alert-success', 'alert-danger', 'alert-warning', 'alert-info',
 			'alert-primary', 'alert-secondary', 'alert-light', 'alert-dark',

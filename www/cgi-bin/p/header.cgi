@@ -42,7 +42,7 @@ Pragma: no-cache
 <body id="page-<% attr_escape "$pagename" %>" class="<% attr_escape "$fw_variant" %>">
 	<nav class="navbar navbar-expand-lg bg-body-tertiary">
 		<div class="container">
-			<a class="navbar-brand" href="status.cgi"><img alt="Image: OpenIPC logo" height="32" src="/a/logo.svg"><span class="x-small ms-1"><% esc "$fw_variant" %></span></a>
+			<a class="navbar-brand" href="dashboard.cgi"><img alt="Image: OpenIPC logo" height="32" src="/a/logo.svg"><span class="x-small ms-1"><% esc "$fw_variant" %></span></a>
 			<button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
 				<span class="navbar-toggler-icon"></span>
 			</button>
@@ -54,40 +54,40 @@ Pragma: no-cache
 					     optional services on top. "Majestic" the daemon is not a
 					     word here on purpose: newcomers asked what it meant, and
 					     the answer was "the settings menu". -->
-					<li class="nav-item"><a class="nav-link" href="status.cgi"><% page_label status %></a></li>
-					<li class="nav-item"><a class="nav-link" href="preview.cgi"><% page_label preview %></a></li>
+					<li class="nav-item"><a class="nav-link" href="dashboard.cgi"><% page_label dashboard %></a></li>
+					<li class="nav-item"><a class="nav-link" href="live.cgi"><% page_label live %></a></li>
 					<!-- Top level rather than under a menu: browsing an archive is
 					     a viewing job like Live, and the File Manager route it
 					     replaces was the thing nobody found. Same card guard as
 					     the SD Card entry below — a camera with no card cannot
 					     record, so the page would only ever show its empty state. -->
 					<% if [ -e /dev/mmcblk0 ]; then %>
-						<li class="nav-item"><a class="nav-link" href="tool-recordings.cgi"><% page_label tool-recordings %></a></li>
+						<li class="nav-item"><a class="nav-link" href="recordings.cgi"><% page_label recordings %></a></li>
 					<% fi %>
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownCamera" role="button">Camera</a>
 						<ul aria-labelledby="dropdownCamera" class="dropdown-menu">
-							<li><a class="dropdown-item" href="mj-settings.cgi"><% page_label mj-settings %></a></li>
-							<li><a class="dropdown-item" href="mj-endpoints.cgi"><% page_label mj-endpoints %></a></li>
-							<li><a class="dropdown-item" href="mj-configuration.cgi"><% page_label mj-configuration %></a></li>
+							<li><a class="dropdown-item" href="camera.cgi"><% page_label camera %></a></li>
+							<li><a class="dropdown-item" href="stream-urls.cgi"><% page_label stream-urls %></a></li>
+							<li><a class="dropdown-item" href="config.cgi"><% page_label config %></a></li>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownSystem" role="button">System</a>
 						<ul aria-labelledby="dropdownSystem" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Setup</h6></li>
-							<li><a class="dropdown-item" href="fw-network.cgi"><% page_label fw-network %></a></li>
-							<li><a class="dropdown-item" href="fw-time.cgi"><% page_label fw-time %></a></li>
-							<li><a class="dropdown-item" href="fw-interface.cgi"><% page_label fw-interface %></a></li>
+							<li><a class="dropdown-item" href="network.cgi"><% page_label network %></a></li>
+							<li><a class="dropdown-item" href="time.cgi"><% page_label time %></a></li>
+							<li><a class="dropdown-item" href="access.cgi"><% page_label access %></a></li>
 							<li><h6 class="dropdown-header">Maintenance</h6></li>
-							<li><a class="dropdown-item" href="fw-update.cgi"><% page_label fw-update %></a></li>
-							<li><a class="dropdown-item" href="fw-settings.cgi"><% page_label fw-settings %></a></li>
+							<li><a class="dropdown-item" href="update.cgi"><% page_label update %></a></li>
+							<li><a class="dropdown-item" href="backup.cgi"><% page_label backup %></a></li>
 							<li><h6 class="dropdown-header">Diagnostics</h6></li>
-							<li><a class="dropdown-item" href="info-logs.cgi"><% page_label info-logs %></a></li>
-							<li><a class="dropdown-item" href="tool-console.cgi"><% page_label tool-console %></a></li>
-							<li><a class="dropdown-item" href="tool-files.cgi"><% page_label tool-files %></a></li>
+							<li><a class="dropdown-item" href="logs.cgi"><% page_label logs %></a></li>
+							<li><a class="dropdown-item" href="console.cgi"><% page_label console %></a></li>
+							<li><a class="dropdown-item" href="files.cgi"><% page_label files %></a></li>
 							<% if [ -e /dev/mmcblk0 ]; then %>
-								<li><a class="dropdown-item" href="tool-sdcard.cgi"><% page_label tool-sdcard %></a></li>
+								<li><a class="dropdown-item" href="sdcard.cgi"><% page_label sdcard %></a></li>
 							<% fi %>
 						</ul>
 					</li>
@@ -95,14 +95,14 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownServices" role="button">Services</a>
 						<ul aria-labelledby="dropdownServices" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Notifications</h6></li>
-							<li><a class="dropdown-item" href="ext-openwall.cgi"><% page_label ext-openwall %></a></li>
-							<li><a class="dropdown-item" href="ext-telegram.cgi"><% page_label ext-telegram %></a></li>
-							<li><a class="dropdown-item" href="ext-ntfy.cgi"><% page_label ext-ntfy %></a></li>
+							<li><a class="dropdown-item" href="openwall.cgi"><% page_label openwall %></a></li>
+							<li><a class="dropdown-item" href="telegram.cgi"><% page_label telegram %></a></li>
+							<li><a class="dropdown-item" href="ntfy.cgi"><% page_label ntfy %></a></li>
 							<li><h6 class="dropdown-header">Networking</h6></li>
 							<li><a class="dropdown-item" href="https://openipc.cloud">P2P network</a></li>
-							<li><a class="dropdown-item" href="ext-vtun.cgi"><% page_label ext-vtun %></a></li>
-							<li><a class="dropdown-item" href="ext-wireguard.cgi"><% page_label ext-wireguard %></a></li>
-							<li><a class="dropdown-item" href="ext-proxy.cgi"><% page_label ext-proxy %></a></li>
+							<li><a class="dropdown-item" href="vtun.cgi"><% page_label vtun %></a></li>
+							<li><a class="dropdown-item" href="wireguard.cgi"><% page_label wireguard %></a></li>
+							<li><a class="dropdown-item" href="proxy.cgi"><% page_label proxy %></a></li>
 						</ul>
 					</li>
 					<!-- Other OpenIPC cameras on this link. Hidden until
@@ -135,7 +135,7 @@ Pragma: no-cache
 	</nav>
 
 <% if [ -n "$full_bleed" ]; then %>
-	<!-- A page that IS its content (preview.cgi, and so far only it). <main> is
+	<!-- A page that IS its content (live.cgi, and so far only it). <main> is
 	     a flex column: this container holds whatever banners the camera has to
 	     raise and collapses to nothing when it has none, and the page body
 	     below it takes the rest of the window. Every reading the status strip
@@ -173,7 +173,7 @@ Pragma: no-cache
 
 <% if [ -z "$network_gateway" ]; then %>
 <div class="alert alert-warning">
-	<p class="mb-0">Internet connection not available, please <a href="fw-network.cgi">check your network settings</a>.</p>
+	<p class="mb-0">Internet connection not available, please <a href="network.cgi">check your network settings</a>.</p>
 </div>
 <% fi %>
 
@@ -185,7 +185,7 @@ Pragma: no-cache
 
 <% if [ ! -e $(get_config) ]; then %>
 <div class="alert alert-danger">
-	<p class="mb-0">Camera configuration not found, please <a href="mj-configuration.cgi">check the configuration file</a>.</p>
+	<p class="mb-0">Camera configuration not found, please <a href="config.cgi">check the configuration file</a>.</p>
 </div>
 <% fi %>
 
@@ -194,7 +194,7 @@ Pragma: no-cache
 	<h3>Warning.</h3>
 	<p>System settings have been updated, restart to apply pending changes.</p>
 	<span class="d-flex gap-3">
-		<a class="btn btn-danger" href="fw-restart.cgi"
+		<a class="btn btn-danger" href="restart.cgi"
 			data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>
 	</span>
 </div>

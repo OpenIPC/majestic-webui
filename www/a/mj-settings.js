@@ -385,7 +385,7 @@
 			for (const s of g.sections) {
 				const item = el('li', 'nav-item');
 				const a = el('a', 'nav-link');
-				a.href = 'mj-settings.cgi?tab=' + encodeURIComponent(s.id);
+				a.href = 'camera.cgi?tab=' + encodeURIComponent(s.id);
 				a.appendChild(hi(s.label));
 				if (s.n) {
 					const n = el('span', 'mj-tree-n');
@@ -765,7 +765,7 @@
 
 		setActiveNav(sec);
 		if (push) {
-			history.pushState({ tab: sec }, '', 'mj-settings.cgi?tab=' + encodeURIComponent(sec));
+			history.pushState({ tab: sec }, '', 'camera.cgi?tab=' + encodeURIComponent(sec));
 		}
 
 		form.innerHTML = '';
@@ -920,7 +920,7 @@
 			// it off the picture entirely, where it has a line to itself.
 			'<span class="mj-hud-chip mj-glass" id="mj-lightmon" hidden' +
 			' title="Light monitor is driving night, IR-cut and the lamp">' +
-			'<a href="mj-settings.cgi?tab=nightMode">Light monitor is driving night, IR&#8209;cut and the lamp</a>' +
+			'<a href="camera.cgi?tab=nightMode">Light monitor is driving night, IR&#8209;cut and the lamp</a>' +
 			'</span>';
 	}
 
@@ -1254,7 +1254,7 @@
 			hint.innerHTML = 'Quarter turns (' +
 				turns.map(v => esc(String(v)) + '&#176;').join(', ') +
 				') resize the stream, so they are saved and applied with a reload: ' +
-				'<a href="mj-settings.cgi?tab=' + esc(sec) + '">' + esc(label(sec)) + '</a>.';
+				'<a href="camera.cgi?tab=' + esc(sec) + '">' + esc(label(sec)) + '</a>.';
 			container.appendChild(hint);
 		}
 	}
