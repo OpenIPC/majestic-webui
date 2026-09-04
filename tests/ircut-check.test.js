@@ -538,11 +538,15 @@ function runRest() {
 				null, null)
 				.some(x => x.id === 'light-parked' && x.level === 'info'));
 		check('a parked lamp on a PWM channel says so too',
-			ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 1 },
+			ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 'pwm1' },
 				null, null)
 				.some(x => x.id === 'light-parked'));
 		check('a lamp with no wiring at all stays silent',
 			!ic.diagnose({ backlightEnabled: false }, null, null)
+				.some(x => x.id === 'light-parked'));
+		check('channel "none" is not wiring',
+			!ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 'none' },
+				null, null)
 				.some(x => x.id === 'light-parked'));
 	}
 

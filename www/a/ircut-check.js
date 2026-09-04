@@ -318,7 +318,8 @@
 		// The lamp's own park switch, same shape as the filter's: wiring
 		// kept, nothing driven, said once as an observation.
 		if (nm.backlightEnabled === false &&
-			(has(nm.backlightPin) || has(nm.backlightPwmChannel))) {
+			(has(nm.backlightPin) || (nm.backlightPwmChannel &&
+				nm.backlightPwmChannel !== 'none'))) {
 			out.push({
 				id: 'light-parked', level: 'info',
 				title: 'The camera light is switched off',
