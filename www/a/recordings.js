@@ -27,6 +27,7 @@
 
 	const state = {
 		cfg: {}, prefix: '', split: 1200, enabled: false, card: null,
+		recorder: null, onMotion: false, droppedAt: null,
 		offsetMs: 0, offsetKnown: false, zone: null, nowSec: null, today: '',
 		tzSamples: [], tzDiffers: false, tzOn: false,
 		days: [], dayName: '', day: { clips: [], unplaced: [] },
@@ -270,6 +271,13 @@
 			.then(function (c) {
 				state.cfg = c;
 				state.enabled = mjGet(c, 'records.enabled') === true;
+				// Which changes what a GAP between clips means, and that is
+				// the one thing this page exists to get right. Recording
+				// continuously, a gap is footage that should be there and is
+				// not. Recording on motion, a gap is the camera working
+				// exactly as asked — and labelling it "not recording" sends
+				// somebody to look for a fault they do not have.
+				state.onMotion = mjGet(c, 'records.mode') === 'motion';
 				state.prefix = (mjGet(c, 'records.path') || '').split('%')[0].replace(/\/+$/, '');
 				const sp = +mjGet(c, 'records.split');
 				state.split = sp > 0 ? sp * 60 : 1200;
@@ -639,12 +647,80 @@
 			.catch(function () { state.card = null; });
 	}
 
+	// What the recorder itself makes of the card, which is a different question
+	// from what the filesystem does.
+	//
+	// A card can be mounted read-write, have room on it, and still be taking
+	// nothing: majestic reports its own verdict in records_state — 0 ok,
+	// 1 degraded, 2 failed, 3 offline — and counts the fragments it had to
+	// throw away. The SD-card endpoint cannot see any of that, because none of
+	// it is visible from the filesystem.
+	//
+	// Three answers, not two, and the difference decides what the badge may
+	// say. A camera whose majestic ANSWERED and has no such endpoint is a
+	// camera that cannot report this — a known absence, and the page must go on
+	// saying what it said before that endpoint existed. A request that FAILED
+	// is an unknown, and an unknown may not be turned into a fact.
+	//
+	//   { v: … }        a reading
+	//   { absent: true } answered, and does not have it
+	//   null             not asked yet, or the ask failed
+	function loadRecorder() {
+		return apiFetch('/metrics/records', { credentials: 'same-origin' })
+			.then(function (r) {
+				if (r.status === 404) { state.recorder = { absent: true }; return null; }
+				return r.ok ? r.text() : Promise.reject(new Error('status ' + r.status));
+			})
+			.then(function (t) {
+				if (t === null) return;
+				const v = parseMetrics(t).v;
+				// An answer this release cannot read is not a reading.
+				state.recorder = typeof v.records_state === 'number'
+					? { v: v } : null;
+				// Where the drop counter stood when this page opened, so what
+				// it reports is footage lost while somebody was watching
+				// rather than everything since the camera booted.
+				if (state.droppedAt === null &&
+					typeof v.records_dropped_ticks_total === 'number')
+					state.droppedAt = v.records_dropped_ticks_total;
+			})
+			.catch(function () { state.recorder = null; });
+	}
+
+	// The recorder's own verdict, or null when there is not one to have.
+	function recorderState() {
+		const r = state.recorder;
+		return r && r.v ? r.v.records_state : null;
+	}
+
+	// Whether the camera answered at all. An older majestic saying "no such
+	// endpoint" is not the same as a camera that could not be reached.
+	function recorderKnown() {
+		return !!state.recorder;
+	}
+
 	// Positive claims need positive evidence. A card is only known writable
 	// when the endpoint said so; a request that failed, or an answer this
 	// release does not understand, is an unknown card, and an unknown card
 	// must not be painted green — that false reassurance is the whole bug
 	// this page is here to stop telling.
-	function cardWritable() { return !!state.card && state.card.health === 'ok'; }
+	//
+	// And the filesystem agreeing is no longer enough. A card mounted
+	// read-write with room on it can still be recording nothing — the writes
+	// failing, or the card too slow to keep up — and every one of those states
+	// reads as `health: ok` here, because none of them is visible from the
+	// filesystem. So the recorder has to agree as well, when it is new enough
+	// to be asked.
+	function cardWritable() {
+		if (!state.card || state.card.health !== 'ok') return false;
+		// A camera that answered and has no recorder metrics is as known as it
+		// can be, and green is what this page said about it before there were
+		// any. A camera that could not be asked is not known, and green is a
+		// claim — the same rule the card itself is held to, two lines up.
+		if (!recorderKnown()) return false;
+		const rs = recorderState();
+		return rs === null || rs === 0;
+	}
 
 	// Why there is no new footage, said on the page people actually arrive at.
 	// Returns '' while the card is fine — including while it is merely full,
@@ -652,6 +728,12 @@
 	// records.maxUsage and carries on.
 	function cardTrouble() {
 		const d = state.card;
+		// Asked first, because it is the more specific answer: a card that has
+		// gone read-only under the recorder shows up in BOTH, and "majestic
+		// cannot write to the card" is what somebody looking at an empty
+		// archive needs to read.
+		const rec = recorderTrouble();
+		if (rec) return rec;
 		if (!d) return '';
 		switch (d.health) {
 		case 'readonly':
@@ -674,6 +756,63 @@
 		}
 	}
 
+	// What majestic says about its own recording, when it is new enough to say
+	// anything. This is the half the SD-card page cannot see: every state below
+	// reads as a healthy filesystem with free space on it.
+	function recorderTrouble() {
+		const r = state.recorder;
+		const v = r && r.v;
+		const rs = recorderState();
+		if (rs === null) return '';
+
+		switch (rs) {
+		case 3:
+			return '<strong>The camera cannot open the SD card — nothing is being recorded.</strong> ' +
+				'It has stopped trying and will look again every half minute, so recording resumes ' +
+				'on its own if the card comes back.';
+		case 2:
+			return '<strong>Writes to the SD card are failing — nothing is being recorded.</strong> ' +
+				'The camera gave up on the clip it was writing after repeated errors.';
+		case 1:
+			return '<strong>Writes to the SD card are failing intermittently.</strong> ' +
+				'Recording is continuing for now, but footage is being lost.';
+		default:
+			break;
+		}
+
+		// State 0 and still losing footage: the card is keeping up with
+		// neither the bitrate nor its own garbage collection. Nothing about
+		// the filesystem is wrong, which is exactly why this needs saying —
+		// the page would otherwise be green.
+		//
+		// Measured against the first reading this page took, not against zero.
+		// The counter runs from boot, so a card that dropped a second last
+		// Tuesday and has been perfect since would otherwise hold the banner
+		// red for ever — and "footage is being lost" is a claim about now.
+		const lost = droppedSeconds();
+		if (lost > 0) {
+			return '<strong>The SD card cannot keep up — footage is being lost.</strong> ' +
+				esc(TL.duration(lost)) + ' of video has been dropped while this ' +
+				'page has been open, because the card could not take it in time. ' +
+				'A faster card, or a lower bitrate, is the fix.';
+		}
+		return '';
+	}
+
+	// Seconds of footage dropped since this page loaded.
+	//
+	// From records_dropped_ticks_total, which is presentation time in the
+	// media timescale — microseconds for every track majestic writes. The
+	// fragment COUNT beside it is not seconds: records.fragmentMs is
+	// configurable, so counting fragments and calling them seconds is right
+	// only at the default.
+	function droppedSeconds() {
+		const v = state.recorder && state.recorder.v;
+		if (!v || typeof v.records_dropped_ticks_total !== 'number') return 0;
+		if (state.droppedAt === null) return 0;
+		return Math.max(0, (v.records_dropped_ticks_total - state.droppedAt) / 1e6);
+	}
+
 	// Kernel complaints about the card, when the endpoint found any. Never
 	// rendered as reassurance: the ring buffer is small, so an error that
 	// stopped recording this morning has usually scrolled out of it by now.
@@ -682,6 +821,17 @@
 		if (!d || !d.fsErrors || !d.fsErrors.length) return '';
 		return '<div class="mt-2"><div class="x-small text-secondary mb-1">Recent kernel messages about this card:</div>' +
 			'<pre class="x-small mb-0" style="white-space:pre-wrap">' + esc(d.fsErrors.join('\n')) + '</pre></div>';
+	}
+
+	// The reserved motion lane's caption. Empty in both modes — no camera
+	// records where the movement was inside a clip — but the reason differs,
+	// and so does what the band above already tells you.
+	function renderMotionNote() {
+		const el = $id('rec-motion-note');
+		if (!el) return;
+		el.textContent = state.onMotion
+			? 'Motion — each clip above is one event, with the seconds before it'
+			: 'Motion — lights up once the camera records detection events';
 	}
 
 	function renderHealth() {
@@ -753,13 +903,22 @@
 		setInterval(function () {
 			if (document.hidden) return;
 			const before = state.card ? state.card.health : null;
-			loadCard(false).then(function () {
+			// The rendered verdict itself, not the inputs to it. Comparing
+			// records_state alone missed a card that started dropping footage
+			// while the recorder stayed in state 0 — the banner is driven by
+			// cardTrouble(), so cardTrouble() is what has to be watched.
+			const msgBefore = cardTrouble();
+			Promise.all([loadCard(false), loadRecorder()]).then(function () {
 				const after = state.card ? state.card.health : null;
 				renderStorage();
-				// Everything else only moves when the verdict itself moves —
-				// no reason to rebuild the day picker and the clip list every
-				// thirty seconds for numbers that did not change.
-				if (after === before) return;
+				// Everything else only moves when a verdict moves — no reason
+				// to rebuild the day picker and the clip list every thirty
+				// seconds for numbers that did not change. Both verdicts, now
+				// that either can turn the banner red on its own: a recorder
+				// that has just given up on a card the filesystem still calls
+				// healthy is exactly the case this poll exists to catch, and
+				// keying off the card alone would have missed it.
+				if (after === before && cardTrouble() === msgBefore) return;
 				renderHealth();
 				renderDayNav();
 				renderClips();
@@ -978,7 +1137,8 @@
 		list.slice().reverse().forEach(function (c, i, arr) {
 			const prev = arr[i + 1];
 			if (prev && c.start - prev.end > TL.JOIN_TOLERANCE) {
-				h += '<div class="rec-gap"><span>not recording · ' +
+				h += '<div class="rec-gap"><span>' +
+					(state.onMotion ? 'no motion · ' : 'not recording · ') +
 					hhmm(prev.end) + ' – ' + hhmm(c.start) + '</span></div>';
 			}
 			const on = state.clip && state.clip.name === c.name;
@@ -1400,7 +1560,7 @@
 	// Resolves to '' when recording is really on, and to a reason when it is
 	// not; a write that was refused must never be reported as one that landed.
 	function useCardForRecording() {
-		return loadCard().then(function () {
+		return Promise.all([loadCard(), loadRecorder()]).then(function () {
 			const d = state.card;
 			if (!d || !d.mounted || !d.mountpoint)
 				return 'The card was prepared, but the camera did not report where it ' +
@@ -1579,7 +1739,7 @@
 				return empty('<strong>Recording is not configured.</strong> No recording path is set, so there is nothing to browse. ',
 					'<a href="sdcard.cgi">Set up the SD card</a>.');
 			}
-			return Promise.all([loadDays(), loadCard()]).then(function () {
+			return Promise.all([loadDays(), loadCard(), loadRecorder()]).then(function () {
 				if (!state.days.length) {
 					// The card gets the first word: "nothing recorded yet" is a
 					// guess, and a read-only or unreadable card is the answer.
@@ -1617,6 +1777,7 @@
 					renderDayNav();
 					renderClips();
 					renderHealth();
+					renderMotionNote();
 					renderStorage();
 					centreView(freshest());
 					goTo(freshest());     // opens the clip, so the page is not a black box

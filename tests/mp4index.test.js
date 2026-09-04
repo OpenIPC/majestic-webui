@@ -69,13 +69,34 @@ function ftyp() {
 
 // trun with flags 0x000305: data-offset + first-sample-flags + per-sample
 // duration + per-sample size. This is what majestic emits.
-function trun(durations) {
+//
+// first_sample_flags is 0x02000000 for a fragment opening on a keyframe and
+// 0x01010000 for one that does not — bit 0x10000 being
+// sample_is_non_sync_sample. majestic hardcoded the first of those until
+// fragments stopped being whole GOPs, which is why a recording carrying no
+// first_sample_flags at all has to be read as sync.
+const FSF_SYNC = 0x02000000;
+const FSF_DELTA = 0x01010000;
+
+function trun(durations, sync) {
 	const per = Buffer.alloc(durations.length * 8);
 	durations.forEach((d, i) => {
 		per.writeUInt32BE(d >>> 0, i * 8);
 		per.writeUInt32BE(1000, i * 8 + 4);   // sample size, unused here
 	});
-	return box('trun', Buffer.concat([u32(0x000305, durations.length, 0, 0x02000000), per]));
+	const fsf = sync === false ? FSF_DELTA : FSF_SYNC;
+	return box('trun', Buffer.concat([u32(0x000305, durations.length, 0, fsf), per]));
+}
+
+// The shape written before first_sample_flags existed: flag 0x004 clear, so
+// there is no such field in the box at all.
+function trunNoFlags(durations) {
+	const per = Buffer.alloc(durations.length * 8);
+	durations.forEach((d, i) => {
+		per.writeUInt32BE(d >>> 0, i * 8);
+		per.writeUInt32BE(1000, i * 8 + 4);
+	});
+	return box('trun', Buffer.concat([u32(0x000301, durations.length, 0), per]));
 }
 function tfhdPlain() { return box('tfhd', u32(0x020030, 1)); }
 function tfhdDefaultDuration(d) {
@@ -115,8 +136,8 @@ function clip(timescale, specs, withTfdt) {
 	specs.forEach(s => {
 		const tf = s.defaultDur ? tfhdDefaultDuration(s.defaultDur) : tfhdPlain();
 		const tr = s.defaultDur
-			? box('trun', u32(0x000005, s.count, 0, 0x02000000))   // no per-sample durations
-			: trun(s.durations);
+			? box('trun', u32(0x000005, s.count, 0, FSF_SYNC))   // no per-sample durations
+			: (s.noFlags ? trunNoFlags(s.durations) : trun(s.durations, s.sync));
 		parts.push(moof(s.seq, tf, tr, withTfdt === false ? null : ticks));
 		parts.push(mdat(s.payload, s.fill));
 		ticks += s.defaultDur
@@ -266,7 +287,7 @@ group('buildIndex — the exact walk');
 		check('and does not claim to be complete', idx.complete === false);
 
 		return runLocate();
-	}).then(runExport).then(runCheap).then(() => done());
+	}).then(runExport).then(runSync).then(runSyncCheap).then(runCheap).then(() => done());
 }
 
 // ---- the approximate seek ----------------------------------------------
@@ -351,6 +372,171 @@ function runExport() {
 		check('fragmentAt clamps below zero to the first fragment',
 			M.fragmentAt(idx, -10).t === 0);
 	});
+}
+
+// ---- where a decoder may be started -------------------------------------
+
+// Until majestic bounded a fragment by time and bytes, every fragment began at
+// an IDR and the writer said so with a hardcoded first_sample_flags. Now a
+// fragment can open mid-GOP, and one that does is not a place a decoder can be
+// started: it holds frames whose references were never appended, so a
+// SourceBuffer given one produces a green or smeared picture rather than an
+// error. A seek that landed there looked like a decode bug.
+function runSync() {
+	group('seeks and exports start where a decoder can actually start');
+
+	// Keyframes every four fragments, which is what gopSize 4 x fragmentMs
+	// 1000 looks like from here.
+	const specs = [];
+	for (let i = 0; i < 12; i++) {
+		specs.push({
+			seq: i,
+			durations: new Array(20).fill(50000),
+			payload: 40000,
+			sync: i % 4 === 0,
+		});
+	}
+	const buf = clip(1000000, specs);
+	const init = M.parseInit(u8of(buf));
+
+	return M.buildIndex(readerFor(buf), buf.length, init).then(idx => {
+		const flags = idx.fragments.map(f => f.sync);
+		check('the index records which fragments open on a keyframe',
+			JSON.stringify(flags) ===
+				JSON.stringify([true, false, false, false, true, false, false,
+					false, true, false, false, false]),
+			JSON.stringify(flags));
+
+		check('a seek onto a mid-GOP fragment snaps back to the keyframe one',
+			M.fragmentAt(idx, 6.5).t === 4, 'got ' + M.fragmentAt(idx, 6.5).t);
+		check('a seek that already lands on one does not move',
+			M.fragmentAt(idx, 8.2).t === 8, 'got ' + M.fragmentAt(idx, 8.2).t);
+		check('and the fragment handed back is one a decoder can start at',
+			M.fragmentAt(idx, 6.5).sync === true);
+
+		// An export is a file someone opens in a player that has seen nothing
+		// before it, so the same rule applies and costs at most one GOP at the
+		// front.
+		const r = M.exportRanges(idx, 6, 9);
+		check('an export starts at a fragment a player can open',
+			r.body.start === idx.fragments[4].off,
+			r.body.start + ' vs ' + idx.fragments[4].off);
+		check('and says so in the times it reports', r.from === 4, 'got ' + r.from);
+		check('the end is unchanged — only the opening has to be decodable',
+			r.to === 9, 'got ' + r.to);
+
+		// Nothing to snap back TO is still an answer: the start of the clip is
+		// the only place such a file can be started at all.
+		const none = [];
+		for (let i = 0; i < 5; i++)
+			none.push({ seq: i, durations: new Array(20).fill(50000),
+				payload: 40000, sync: false });
+		const nbuf = clip(1000000, none);
+		const ninit = M.parseInit(u8of(nbuf));
+		return M.buildIndex(readerFor(nbuf), nbuf.length, ninit).then(nidx => {
+			check('a clip with no keyframe anywhere falls back to its start',
+				M.fragmentAt(nidx, 3.5) === nidx.fragments[0]);
+
+			// An export from a span that itself begins mid-GOP has nothing
+			// behind it to snap back to. Losing up to a GOP off the FRONT of
+			// the selection beats handing somebody a file that opens black.
+			const mixed = [];
+			for (let i = 0; i < 8; i++)
+				mixed.push({ seq: i, durations: new Array(20).fill(50000),
+					payload: 40000, sync: i >= 3 });
+			const mbuf = clip(1000000, mixed);
+			const minit = M.parseInit(u8of(mbuf));
+			return M.buildIndex(readerFor(mbuf), mbuf.length, minit).then(midx => {
+				const r = M.exportRanges(midx, 0, 6);
+				check('with no keyframe behind it, an export starts at the first one ahead',
+					r.body.start === midx.fragments[3].off,
+					r.body.start + ' vs ' + midx.fragments[3].off);
+				check('and says so, rather than claiming footage it did not include',
+					r.from === 3, 'got ' + r.from);
+			});
+
+			// A recording written before first_sample_flags was emitted at all
+			// must not become unseekable: it has no such field, and every
+			// fragment in it began at an IDR by construction.
+			const old = [];
+			for (let i = 0; i < 6; i++)
+				old.push({ seq: i, durations: new Array(20).fill(50000),
+					payload: 40000, noFlags: true });
+			const obuf = clip(1000000, old);
+			const oinit = M.parseInit(u8of(obuf));
+			return M.buildIndex(readerFor(obuf), obuf.length, oinit).then(oidx => {
+				check('an older recording carrying no flags reads as all-sync',
+					oidx.fragments.every(f => f.sync === true));
+				check('so a seek into it still lands where it is aimed',
+					M.fragmentAt(oidx, 4.5).t === 4,
+					'got ' + M.fragmentAt(oidx, 4.5).t);
+			});
+		});
+	});
+}
+
+// The paths production actually takes. buildIndex() is not one of them — a
+// full walk of a 20-minute clip is ~1100 range requests — so a snap that only
+// works on a full index is a snap that never runs: positionAt() calls
+// locate() and hands seekTo() the offset it gets back, and saveSelection()
+// calls locate() then spanFrom() from that same offset. Both had to learn it.
+function runSyncCheap() {
+	group('the cheap paths land somewhere a decoder can start, too');
+
+	const specs = [];
+	for (let i = 0; i < 12; i++) {
+		specs.push({
+			seq: i,
+			durations: new Array(20).fill(50000),
+			payload: 40000,
+			sync: i % 4 === 0,
+		});
+	}
+	const buf = clip(1000000, specs);
+	const init = M.parseInit(u8of(buf));
+
+	return M.locate(readerFor(buf), buf.length, init, 6.5, 1).then(hit => {
+		check('locate snaps back to the keyframe fragment',
+			hit.off === offsetOfFragment(buf, init, 4),
+			hit.off + ' vs ' + offsetOfFragment(buf, init, 4));
+		check('and says it managed to', hit.atSync === true);
+		check('reporting the time it will really start at', hit.approxSec === 4,
+			'got ' + hit.approxSec);
+
+		// spanFrom is what the export walks, so it has to carry the flag or
+		// exportRanges cannot act on it.
+		return M.spanFrom(readerFor(buf), buf.length, init, hit.off, 4);
+	}).then(span => {
+		check('spanFrom carries which fragments open on a keyframe',
+			span.fragments.every(f => typeof f.sync === 'boolean'));
+		check('and the span it hands back starts on one', span.fragments[0].sync === true);
+	}).then(() => {
+		// Nothing to snap to: locate says so rather than pretending.
+		const none = [];
+		for (let i = 0; i < 6; i++)
+			none.push({ seq: i, durations: new Array(20).fill(50000),
+				payload: 40000, sync: false });
+		const nbuf = clip(1000000, none);
+		const ninit = M.parseInit(u8of(nbuf));
+		return M.locate(readerFor(nbuf), nbuf.length, ninit, 3.5, 1).then(hit => {
+			check('a clip with no keyframe in reach reports that it could not snap',
+				hit.atSync === false);
+			check('and still lands at or before the moment asked for',
+				hit.approxSec <= 3.5, 'got ' + hit.approxSec);
+		});
+	});
+}
+
+// Byte offset of the nth fragment, worked out the same way the fixture built
+// it — so the assertions above compare against the file, not against the
+// parser being tested.
+function offsetOfFragment(buf, init, n) {
+	let off = init.firstMoof;
+	for (let i = 0; i < n; i++) {
+		const moofSize = buf.readUInt32BE(off);
+		off += moofSize + buf.readUInt32BE(off + moofSize);
+	}
+	return off;
 }
 
 // ---- the cheap paths ----------------------------------------------------
