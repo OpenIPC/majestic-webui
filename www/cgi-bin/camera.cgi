@@ -116,6 +116,11 @@ fi
 <script src="/a/ircut-check.js" defer></script>
 <script src="/a/ircut-map.js" defer></script>
 <script src="/a/ircut-scan.js" defer></script>
+<%
+# The Day/Night section's light-monitor chart shares the dashboard's chart
+# primitives rather than growing its own.
+%>
+<script src="/a/charts.js" defer></script>
 <script src="/a/mj-requires.js" defer></script>
 <script src="/a/mj-settings.js" defer></script>
 

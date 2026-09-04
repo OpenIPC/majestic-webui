@@ -74,6 +74,24 @@ check('sstar: sensor fps and encoder stall gauges', 'isp_fps' in sstar.v && 'ven
 check('absent stays absent — no zero-filling across vendors',
 	!('isp_fps' in hisi.v) && !('isp_exptime' in sstar.v) && !('node_hwmon_temp_celsius' in ingenic.v), '');
 
+group('a current daemon in automatic day/night mode');
+// metrics-sstar-auto.txt is a real dump from the same SSC30KQ running a
+// daemon with the automatic light monitor active — the cross-vendor isp set
+// plus the night_auto_* gauges the Day/Night panel charts.
+{
+	const auto = parse(fixture('sstar-auto'));
+	check('portable isp set present',
+		'isp_avelum' in auto.v && 'isp_exptime' in auto.v &&
+		'isp_exposureismax' in auto.v, '');
+	check('mode source names the automatic monitor',
+		auto.v.night_mode_source === 4, 'got ' + auto.v.night_mode_source);
+	check('auto gauges parse as numbers',
+		auto.v.night_auto_gain_milli > 0 &&
+		'night_auto_pending' in auto.v &&
+		'night_auto_streak_seconds' in auto.v &&
+		auto.v.night_auto_dwell_seconds > 0, '');
+}
+
 group('MemAvailable: pre-3.14 fallback and clamp');
 // The T31 runs 3.10 — no MemAvailable line. The parser must rebuild the
 // kernel's own estimate from the parts, exactly as pulse.cgi's awk used to.

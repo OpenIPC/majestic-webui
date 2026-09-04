@@ -420,6 +420,80 @@ function runRest() {
 		check('pins wired but no monitor is only an observation',
 			ic.diagnose({ irCutPin1: 11 }, null, null)
 				.some(x => x.id === 'manual-only' && x.level === 'info'));
+		// The daemon says who decides via night_mode_source (sample.src).
+		// Source 4 turns "blind" into the automatic-mode observation; source
+		// 0 means the SoC could not answer and the monitor stood down; no
+		// source at all keeps the old warning for older firmware.
+		const auto = ic.diagnose({ irCutPin1: 11, lightMonitor: true },
+			{ night: 0, ircut: 0, light: 0, src: 4 }, null);
+		check('an automatic monitor is an observation, not a fault',
+			auto.some(x => x.id === 'auto-active' && x.level === 'info') &&
+			!auto.some(x => x.id === 'monitor-blind'));
+		check('a monitor the SoC could not feed is flagged as retired',
+			ic.diagnose({ irCutPin1: 11, lightMonitor: true },
+				{ night: 0, ircut: 0, light: 0, src: 0 }, null)
+				.some(x => x.id === 'auto-retired' && x.level === 'warning'));
+		check('no source gauge keeps the older-firmware warning',
+			ic.diagnose({ irCutPin1: 11, lightMonitor: true },
+				{ night: 0, ircut: 0, light: 0, src: null }, null)
+				.some(x => x.id === 'monitor-blind'));
+	}
+
+	group('monitorView: what the panel charts');
+	{
+		const nmAuto = { lightMonitor: true, autoDayGain: 2 };
+		const vAuto = {
+			night_mode_source: 4, night_enabled: 0,
+			night_auto_gain_milli: 2567, night_auto_pending: 0,
+			night_auto_streak_seconds: 0, night_auto_dwell_seconds: 15,
+		};
+		const auto = ic.monitorView(nmAuto, vAuto);
+		check('auto mode charts gain in multiples',
+			auto && auto.mode === 'auto' && auto.value === 2.567,
+			auto && JSON.stringify(auto.value));
+		check('the day band runs to autoDayGain',
+			auto.bands[0].from === 0 && auto.bands[0].to === 2);
+		check('no night band without an explicit autoNightGain',
+			auto.bands.length === 1);
+		check('an explicit autoNightGain shades a night band',
+			ic.monitorView({ lightMonitor: true, autoNightGain: 16 }, vAuto)
+				.bands.some(b => b.from === 16));
+		const counting = ic.monitorView(nmAuto, Object.assign({}, vAuto, {
+			night_auto_pending: 2, night_auto_streak_seconds: 20,
+			night_auto_dwell_seconds: 60,
+		}));
+		check('a pending switch counts down',
+			/switching in 40 s/.test(counting.line), counting.line);
+
+		const nmThr = { lightMonitor: true, minThreshold: 1500, maxThreshold: 4000 };
+		const thr = ic.monitorView(nmThr,
+			{ night_mode_source: 2, night_enabled: 1, isp_again: 6000 });
+		check('threshold mode charts raw isp_again with both bands',
+			thr && thr.mode === 'thresholds' && thr.value === 6000 &&
+			thr.bands.length === 2);
+		check('an old daemon with thresholds still gets the chart',
+			ic.monitorView(nmThr, { isp_again: 2000 }).mode === 'thresholds');
+		check('a GPIO source has nothing continuous to chart',
+			ic.monitorView({ lightMonitor: true, lightSensorPin: 66 },
+				{ night_mode_source: 1 }) === null);
+		check('an ADC source has nothing continuous to chart either',
+			ic.monitorView({ lightMonitor: true, minThreshold: 100, maxThreshold: 400 },
+				{ night_mode_source: 3, isp_again: 200 }) === null);
+		check('monitor off charts nothing',
+			ic.monitorView({}, vAuto) === null);
+		// Missing gauges stay unknown: no countdown made of coerced zeros,
+		// and no "Day" invented for a camera that never said.
+		const noTimers = ic.monitorView(nmAuto, {
+			night_mode_source: 4, night_enabled: 1,
+			night_auto_gain_milli: 8000, night_auto_pending: 2,
+		});
+		check('a countdown with no gauges behind it is not spoken',
+			!/switching in \d+ s/.test(noTimers.line), noTimers.line);
+		const noNight = ic.monitorView(nmAuto,
+			{ night_mode_source: 4, night_auto_gain_milli: 2000 });
+		check('an absent night_enabled is not called Day',
+			!/^Day/.test(noNight.line) && !/^Night/.test(noNight.line),
+			noNight.line);
 	}
 
 	group('diagnose: thresholds need a band, not a point');
