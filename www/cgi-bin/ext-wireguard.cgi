@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="WireGuard"
 env_set=$(fw_printenv | grep -c ^wg_)
 
 if [ "$REQUEST_METHOD" = "POST" ]; then

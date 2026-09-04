@@ -2,7 +2,6 @@
 <%in p/common.cgi %>
 
 <%
-page_title="Camera Settings"
 # The page title is rendered by this page rather than by header.cgi, at the top
 # of the rail instead of in a full-width band above both columns. The band cost
 # 94px of every window — a 2rem margin, a 32px heading and the row's gutter —

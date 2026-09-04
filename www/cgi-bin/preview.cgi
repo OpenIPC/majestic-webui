@@ -11,7 +11,7 @@
 # which is where somebody goes to read them; here they were a band of small
 # text between the menu and the picture. Only this page asks for it: the same
 # argument applies to the other twenty, but that is a different change.
-page_title="Live View"; hide_title=1; full_bleed=1
+hide_title=1; full_bleed=1
 %>
 <%in p/header.cgi %>
 <!-- No page heading: the nav underlines "Live", and a heading here would be a

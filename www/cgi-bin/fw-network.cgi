@@ -2,7 +2,6 @@
 <%in p/common.cgi %>
 
 <%
-page_title="Network Settings"
 params="address dhcp gateway hostname nameserver netmask interface wlan_ssid wlan_password"
 
 network_list="$(ls /sys/class/net | grep -e eth0 -e wlan0)"

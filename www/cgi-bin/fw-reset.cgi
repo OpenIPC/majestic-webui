@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-	page_title="Erasing Overlay"
 	# --web is not optional here, despite there being no WebSocket in sight.
 	#
 	# free_resources() opens with `killall -q -3 majestic` unless web_update is

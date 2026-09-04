@@ -1,6 +1,5 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="SD Card" %>
 <% hide_title=1 %>
 <%in p/header.cgi %>
 

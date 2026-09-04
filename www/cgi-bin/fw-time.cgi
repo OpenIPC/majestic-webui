@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="Time Settings"
 tz_data=$(cat /etc/TZ)
 tz_name=$(cat /etc/timezone)
 

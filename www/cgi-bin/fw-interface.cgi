@@ -1,7 +1,6 @@
 #!/usr/bin/haserl --upload-limit=100 --upload-dir=/tmp
 <%in p/common.cgi %>
 <%
-page_title="Access Settings"
 config_file="/etc/webui/webui.conf"
 
 if [ "$REQUEST_METHOD" = "POST" ]; then

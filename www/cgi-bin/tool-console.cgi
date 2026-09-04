@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="Console"
 %>
 
 <%in p/header.cgi %>

@@ -3,7 +3,6 @@
 <%in p/fpv_common.cgi %>
 <%
 # Set page title and determine active tab
-page_title="WFB Settings"
 label="$GET_tab"
 [ -z "$label" ] && label="wireless"
 

@@ -1,5 +1,13 @@
 #!/usr/bin/haserl
-Content-type: text/html; charset=UTF-8
+<%in p/pages.cgi %>
+<%
+# The page's name, from the one place it is written. This runs here rather
+# than in p/common.cgi because a page's own block sits between the two
+# includes -- so a page that needs a name this file cannot know (one built
+# from a filename, say) can still set page_title itself and be left alone.
+# Nothing does today; the lint rule accepts either.
+[ -z "$page_title" ] && page_title=$(page_label "$pagename")
+%>Content-type: text/html; charset=UTF-8
 Cache-Control: no-store
 Pragma: no-cache
 
@@ -46,40 +54,40 @@ Pragma: no-cache
 					     optional services on top. "Majestic" the daemon is not a
 					     word here on purpose: newcomers asked what it meant, and
 					     the answer was "the settings menu". -->
-					<li class="nav-item"><a class="nav-link" href="status.cgi">Dashboard</a></li>
-					<li class="nav-item"><a class="nav-link" href="preview.cgi">Live</a></li>
+					<li class="nav-item"><a class="nav-link" href="status.cgi"><% page_label status %></a></li>
+					<li class="nav-item"><a class="nav-link" href="preview.cgi"><% page_label preview %></a></li>
 					<!-- Top level rather than under a menu: browsing an archive is
 					     a viewing job like Live, and the File Manager route it
 					     replaces was the thing nobody found. Same card guard as
 					     the SD Card entry below — a camera with no card cannot
 					     record, so the page would only ever show its empty state. -->
 					<% if [ -e /dev/mmcblk0 ]; then %>
-						<li class="nav-item"><a class="nav-link" href="tool-recordings.cgi">Recordings</a></li>
+						<li class="nav-item"><a class="nav-link" href="tool-recordings.cgi"><% page_label tool-recordings %></a></li>
 					<% fi %>
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownCamera" role="button">Camera</a>
 						<ul aria-labelledby="dropdownCamera" class="dropdown-menu">
-							<li><a class="dropdown-item" href="mj-settings.cgi">Settings</a></li>
-							<li><a class="dropdown-item" href="mj-endpoints.cgi">Stream URLs</a></li>
-							<li><a class="dropdown-item" href="mj-configuration.cgi">Config file</a></li>
+							<li><a class="dropdown-item" href="mj-settings.cgi"><% page_label mj-settings %></a></li>
+							<li><a class="dropdown-item" href="mj-endpoints.cgi"><% page_label mj-endpoints %></a></li>
+							<li><a class="dropdown-item" href="mj-configuration.cgi"><% page_label mj-configuration %></a></li>
 						</ul>
 					</li>
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownSystem" role="button">System</a>
 						<ul aria-labelledby="dropdownSystem" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Setup</h6></li>
-							<li><a class="dropdown-item" href="fw-network.cgi">Network</a></li>
-							<li><a class="dropdown-item" href="fw-time.cgi">Time</a></li>
-							<li><a class="dropdown-item" href="fw-interface.cgi">Access</a></li>
+							<li><a class="dropdown-item" href="fw-network.cgi"><% page_label fw-network %></a></li>
+							<li><a class="dropdown-item" href="fw-time.cgi"><% page_label fw-time %></a></li>
+							<li><a class="dropdown-item" href="fw-interface.cgi"><% page_label fw-interface %></a></li>
 							<li><h6 class="dropdown-header">Maintenance</h6></li>
-							<li><a class="dropdown-item" href="fw-update.cgi">Update</a></li>
-							<li><a class="dropdown-item" href="fw-settings.cgi">Backup &amp; Restore</a></li>
+							<li><a class="dropdown-item" href="fw-update.cgi"><% page_label fw-update %></a></li>
+							<li><a class="dropdown-item" href="fw-settings.cgi"><% page_label fw-settings %></a></li>
 							<li><h6 class="dropdown-header">Diagnostics</h6></li>
-							<li><a class="dropdown-item" href="info-logs.cgi">Logs</a></li>
-							<li><a class="dropdown-item" href="tool-console.cgi">Console</a></li>
-							<li><a class="dropdown-item" href="tool-files.cgi">File Manager</a></li>
+							<li><a class="dropdown-item" href="info-logs.cgi"><% page_label info-logs %></a></li>
+							<li><a class="dropdown-item" href="tool-console.cgi"><% page_label tool-console %></a></li>
+							<li><a class="dropdown-item" href="tool-files.cgi"><% page_label tool-files %></a></li>
 							<% if [ -e /dev/mmcblk0 ]; then %>
-								<li><a class="dropdown-item" href="tool-sdcard.cgi">SD Card</a></li>
+								<li><a class="dropdown-item" href="tool-sdcard.cgi"><% page_label tool-sdcard %></a></li>
 							<% fi %>
 						</ul>
 					</li>
@@ -87,14 +95,14 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownServices" role="button">Services</a>
 						<ul aria-labelledby="dropdownServices" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Notifications</h6></li>
-							<li><a class="dropdown-item" href="ext-openwall.cgi">OpenWall</a></li>
-							<li><a class="dropdown-item" href="ext-telegram.cgi">Telegram</a></li>
-							<li><a class="dropdown-item" href="ext-ntfy.cgi">Ntfy</a></li>
+							<li><a class="dropdown-item" href="ext-openwall.cgi"><% page_label ext-openwall %></a></li>
+							<li><a class="dropdown-item" href="ext-telegram.cgi"><% page_label ext-telegram %></a></li>
+							<li><a class="dropdown-item" href="ext-ntfy.cgi"><% page_label ext-ntfy %></a></li>
 							<li><h6 class="dropdown-header">Networking</h6></li>
 							<li><a class="dropdown-item" href="https://openipc.cloud">P2P network</a></li>
-							<li><a class="dropdown-item" href="ext-vtun.cgi">VTun</a></li>
-							<li><a class="dropdown-item" href="ext-wireguard.cgi">WireGuard</a></li>
-							<li><a class="dropdown-item" href="ext-proxy.cgi">Proxy</a></li>
+							<li><a class="dropdown-item" href="ext-vtun.cgi"><% page_label ext-vtun %></a></li>
+							<li><a class="dropdown-item" href="ext-wireguard.cgi"><% page_label ext-wireguard %></a></li>
+							<li><a class="dropdown-item" href="ext-proxy.cgi"><% page_label ext-proxy %></a></li>
 						</ul>
 					</li>
 					<!-- Other OpenIPC cameras on this link. Hidden until

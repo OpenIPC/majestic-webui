@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="Proxy"
 config_file=/etc/webui/proxy.conf
 params="host port username password"
 

@@ -1,6 +1,5 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="Backup &amp; Restore" %>
 <%in p/header.cgi %>
 <% config_file=/etc/webui/backup.conf
 

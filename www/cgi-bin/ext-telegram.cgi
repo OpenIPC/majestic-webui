@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="Telegram"
 config_file=/etc/webui/telegram.conf
 params="enabled token channel thread_id interval caption crontab document heif proxy"
 

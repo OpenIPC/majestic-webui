@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="Logs"
 syslog_defaults=/etc/default/syslogd
 
 if [ "$REQUEST_METHOD" = "POST" ]; then

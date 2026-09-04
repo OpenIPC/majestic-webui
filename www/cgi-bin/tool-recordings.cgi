@@ -1,6 +1,5 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="Recordings" %>
 <%in p/header.cgi %>
 
 <!-- Two banners, and they are not interchangeable. #rec-health is about the

@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-	page_title="Firmware Update"
 
 	# Latest build available for THIS board, via sysupgrade — the same updater the
 	# Install button drives over /ws/upgrade. It reads OpenIPC's manifest.flat

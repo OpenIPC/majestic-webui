@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="OpenWall"
 config_file=/etc/webui/openwall.conf
 params="enabled crontab caption interval heif proxy"
 

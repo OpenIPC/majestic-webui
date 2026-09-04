@@ -1,6 +1,5 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="File Manager" %>
 <%in p/header.cgi %>
 
 <div id="fm">

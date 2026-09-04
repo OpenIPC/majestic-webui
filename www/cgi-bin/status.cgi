@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 
-<% page_title="Dashboard" %>
 <% hide_signature=1 %>
 <% hide_title=1 %>
 <%in p/header.cgi %>

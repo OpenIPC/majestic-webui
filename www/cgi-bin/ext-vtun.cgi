@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="VTun"
 conf_file=/tmp/vtund.conf
 env_host=$(fw_printenv -n vtun)
 

@@ -335,10 +335,14 @@ set_error_flag() {
 	error=1
 }
 
+# The browser tab. It carries the bar menu the page sits under, so a window
+# of camera tabs reads "System - Network - OpenIPC" rather than four tabs all
+# called Network; a top-level page has no menu and gets no prefix. The `title`
+# secondary that used to sit here is gone -- nothing in the tree ever set it.
 html_title() {
-	[ -n "$page_title" ] && echo -n "$page_title"
-	[ -n "$title" ] && echo -n ": $title"
-	echo -n " - OpenIPC"
+	local m=$(page_menu "$pagename")
+	[ -n "$m" ] && printf '%s - ' "$m"
+	printf '%s - OpenIPC' "$page_title"
 }
 
 include() {

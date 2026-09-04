@@ -1,7 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 <%
-page_title="Ntfy Notifications"
 config_file=/etc/webui/ntfy.conf
 # The list of parameters that we will save
 params="enabled server topic user pass caption heif priority"

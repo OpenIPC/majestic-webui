@@ -116,7 +116,11 @@ esac
 # `mj_cloud=Cloud (WebRTC)` is not valid shell. Quoting that value would not
 # help — the sed captures \(.*\) straight into JSON, so the quotes would end up
 # inside the label.
-find www sbin -type f 2>/dev/null | sort | while IFS= read -r s; do
+#
+# bin/ is in the sweep because sbin/updatewebui's PAYLOAD installs it to
+# /usr/bin -- btzoom, btzoom-xm and ntfy.sh are shipped scripts like any other,
+# and were the only ones nothing checked.
+find www sbin bin -type f 2>/dev/null | sort | while IFS= read -r s; do
 	if ! first_line "$s"; then
 		printf '%s: cannot read\n' "$s" >> "$FAILS"
 		continue
@@ -129,6 +133,58 @@ find www sbin -type f 2>/dev/null | sort | while IFS= read -r s; do
 	if ! err=$(sh -n "$s" 2>&1); then
 		printf '%s: %s\n' "$s" "$err" >> "$FAILS"
 	fi
+done
+
+# --- 4. page names --------------------------------------------------------
+# p/pages.cgi is the one place a page's name is written, and this is what keeps
+# it that way in both directions: a nav entry pointing at a page with no row
+# would render its own filename as its label, and a page with neither a row nor
+# its own page_title= would title itself the same way. Both are silent on a
+# camera -- the page loads, it is just called `mj-endpoints`.
+#
+# Only the bar's own entries are held to this. header.cgi also links pages from
+# its banners (fw-restart.cgi from the pending-changes warning), and those carry
+# a sentence rather than a name, so they need no row.
+for href in $(grep -E 'class="(nav-link|dropdown-item)"' www/cgi-bin/p/header.cgi |
+		grep -oE 'href="[a-z0-9-]+\.cgi"' | sed 's/href="//; s/\.cgi"//' | sort -u); do
+	grep -qE "^[[:space:]]+($href|[a-z0-9|-]*\|$href)\)" www/cgi-bin/p/pages.cgi ||
+		printf 'p/pages.cgi: no page_label row for %s.cgi, which the nav bar links\n' "$href" >> "$FAILS"
+done
+
+for f in $(find www/cgi-bin -maxdepth 1 -name '*.cgi' | sort); do
+	grep -q 'p/header.cgi' "$f" || continue
+	n=$(basename "$f" .cgi)
+	grep -qE "^[[:space:]]+($n|[a-z0-9|-]*\|$n)\)" www/cgi-bin/p/pages.cgi && continue
+	grep -q 'page_title=' "$f" && continue
+	printf '%s: no page_label row and no page_title of its own\n' "$f" >> "$FAILS"
+done
+
+# --- 5. links that go nowhere ---------------------------------------------
+# Every page path this tree writes -- href, location, fetch -- has to name a
+# file that exists. Renaming a page and missing one reference is not a runtime
+# error anywhere: the link simply 404s when somebody clicks it, which is a
+# thing nobody does on the page they were not testing. This is the check that
+# makes a rename reviewable.
+#
+# Comments name pages too, and prose about a file deleted years ago is exactly
+# the drift this repo keeps accumulating, so they are checked the same way.
+# Bare basenames count: `header.cgi` in a sentence means p/header.cgi, so a
+# name is accepted if any file under www/cgi-bin carries it.
+cgi_names=$(find www/cgi-bin -name '*.cgi' | sed 's|^www/cgi-bin/||' | sort -u)
+find www -name '*.cgi' -o -name '*.js' -o -name '*.html' | sort | while IFS= read -r f; do
+	grep -oE '[A-Za-z0-9_][A-Za-z0-9_./-]*\.cgi' "$f" | sort -u |
+		while IFS= read -r t; do
+			# Absolute and cgi-bin-relative spellings name the same file.
+			t=${t#/cgi-bin/}
+			t=${t#cgi-bin/}
+			[ -e "www/cgi-bin/$t" ] && continue
+			# A bare basename resolves against any directory below it.
+			case $t in
+			*/*) ;;
+			*) printf '%s\n' "$cgi_names" | grep -q "/$t$" && continue ;;
+			esac
+			printf '%s: names %s, which does not exist\n' "$f" "$t" >> "$FAILS"
+		done
 done
 
 ntpl=$(grep -c '^t$' "$SEEN")

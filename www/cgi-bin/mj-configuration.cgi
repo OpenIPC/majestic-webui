@@ -1,6 +1,5 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="Configuration File" %>
 <%in p/header.cgi %>
 
 <div class="row g-4">

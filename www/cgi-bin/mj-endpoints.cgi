@@ -1,6 +1,5 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
-<% page_title="Stream URLs" %>
 
 <%in p/header.cgi %>
 
