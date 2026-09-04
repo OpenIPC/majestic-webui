@@ -27,6 +27,7 @@
 	const C3 = (css.getPropertyValue('--st-c3') || '#c96a2e').trim();
 	const C4 = (css.getPropertyValue('--st-c4') || '#8a5cd8').trim();
 	const GRID = (css.getPropertyValue('--st-grid') || '#e9ebf2').trim();
+	const MUTE = (css.getPropertyValue('--bs-secondary-color') || '#7a7a8c').trim();
 
 	function humanRate(bps) {
 		const b = bps * 8;
@@ -781,10 +782,11 @@
 	// scale is the right way to draw a LEVEL. What was missing was an
 	// instrument for the TREND, so the tile keeps its scale, both it and the
 	// panel below widen to an hour, and the panel carries the split.
-	// One slot clock for both the tile's trace and the panel below it, in
-	// SECONDS rather than in polls: the heartbeat arms its next tick 2s after
-	// the last one settled and skips a failed poll entirely, so counting polls
-	// would have the two drawing different spans while claiming one.
+	//
+	// One slot clock serves both, in SECONDS rather than in polls: the
+	// heartbeat arms its next tick 2s after the last one settled and skips a
+	// failed poll entirely, so counting polls would have the two drawing
+	// different spans while claiming one.
 	const MEM_SLOT = 10;   // seconds per point: 360 points an hour
 	const MEM_WIN = 3600;
 	// The window GROWS to the smallest rung that still holds everything this
@@ -792,38 +794,75 @@
 	// its first hour, and a reader who opens the Dashboard to ask about memory
 	// should not be shown a blank box with the answer squeezed against the
 	// right edge. It stays honest only because the caption is derived from the
-	// window rather than written beside it -- the axis says -2 min, then
-	// -10 min, then -1 h, and each of those is true when it is printed.
-	// Roughly doubling, so the plot is never less than about half full: a rung
-	// that trebles leaves the reader looking at the same crowded-into-the-
-	// corner picture this panel exists to stop drawing.
+	// window rather than written beside it -- the axis reads -2 min, -5 min,
+	// -10 min, -20 min, -40 min, -1 h in turn, and each of those is true when
+	// it is printed. The steps are 2.5x then 2x, so the plot never drops below
+	// about 40% full when one is taken; a ladder that trebled would put the
+	// reader back in front of the crowded-into-the-corner picture this panel
+	// exists to stop drawing.
 	const MEM_RUNGS = [120, 300, 600, 1200, 2400, MEM_WIN];
 	let memSlot = -1, chMem = null, memSeen = false, memT0 = 0;
 
-	// Three disjoint slices of what the kernel reports, named for what they
-	// mean rather than for what /proc/meminfo calls them. Anonymous pages are
-	// what programs hold; unreclaimable slab and its neighbours are the
-	// kernel's own, which is where a driver's buffers show on a camera
-	// transmitting continuously; Shmem is the RAM filesystem. tmpfs pages are
-	// page cache rather than anonymous, so nothing here is counted twice.
+	// Slices of what the kernel reports, named for what they mean rather than
+	// for what /proc/meminfo calls them. The contiguous pool is where the
+	// vendor SDK keeps the video buffers, and on a HiSilicon camera it is by
+	// far the largest thing held -- 47 of the 57 MB on this repo's own
+	// hi3516ev300 fixture. Anonymous pages are what programs hold;
+	// unreclaimable slab and its neighbours are the kernel's own, which is
+	// where a driver's buffers show on a camera transmitting continuously;
+	// Shmem is the RAM filesystem.
+	//
+	// The last slice is the REMAINDER, and it is what makes the picture add
+	// up. Without it the named parts came to a tenth of the total the note
+	// states right underneath them, so a camera leaking video buffers -- the
+	// majestic#311 case, on the SoC family it was reported from -- would climb
+	// to 90% with every line in this panel flat. A reader told the camera is
+	// full and shown nothing that grew is worse served than one shown no panel
+	// at all. Naming what cannot be attributed is the honest way to keep the
+	// parts reconciled with the whole.
+	//
+	// The pool is the DERIVED slice, not a read one, and that is the whole of
+	// why: pages the CMA allocator has not claimed are movable, so the RAM
+	// filesystem is served out of the same region. Measured on a lab camera,
+	// writing 15.5 MB into tmpfs raised the pool's used figure by exactly the
+	// same 15.5 MB, and reporting the raw difference claimed 31 MB of growth
+	// for 15.5 MB of it -- inventing a video-buffer leak that had not
+	// happened, which is a worse failure than the one this panel was written
+	// to fix. So the pool is what remains of it once the things that CAN live
+	// there and are already named have been taken out. It floors at zero,
+	// which under-claims on a camera whose programs outweigh a small pool, and
+	// under-claiming is the safe direction: the remainder catches what is left
+	// either way.
 	//
 	// An absent key is not a zero. A slice this camera cannot report comes back
 	// null, which charts.js draws as a hole and the legend drops, instead of a
 	// floor that would read as "nothing here" (issue #322).
-	function memSlices(v) {
+	function memSlices(v, held) {
 		const has = k => ('node_memory_' + k + '_bytes') in v;
 		const g = k => v['node_memory_' + k + '_bytes'];
-		return [
-			has('AnonPages') ? g('AnonPages') : null,
+		const prog = has('AnonPages') ? g('AnonPages') : null;
+		const disk = has('Shmem') ? g('Shmem') : null;
+		// Slab is unmovable and never lives in the pool, so it is not netted
+		// off; anonymous pages and the RAM filesystem are movable and can be.
+		const pool = has('CmaTotal') && has('CmaFree')
+			? Math.max(0, g('CmaTotal') - g('CmaFree') - (prog || 0) - (disk || 0))
+			: null;
+		const named = [
+			pool, prog,
 			has('SUnreclaim')
 				? g('SUnreclaim') + (has('KernelStack') ? g('KernelStack') : 0) +
 					(has('PageTables') ? g('PageTables') : 0)
 				: null,
-			has('Shmem') ? g('Shmem') : null,
+			disk,
 		];
+		const sum = named.reduce((a, x) => a + (x || 0), 0);
+		return named.concat([held != null ? Math.max(0, held - sum) : null]);
 	}
 
-	const MEM_NAMES = ['Programs', 'Kernel', 'RAM disk'];
+	const MEM_NAMES = ['Video buffers', 'Programs', 'Kernel', 'RAM disk', 'Other'];
+	const MEM_LEGEND = ['#st-mem-lg-vid', '#st-mem-lg-prog', '#st-mem-lg-krn',
+		'#st-mem-lg-disk', '#st-mem-lg-other'];
+	const memHas = [false, false, false, false, false];
 
 	// How much time the trace actually holds, which is only the full window
 	// once the page has been open that long. Saying "the last hour" over four
@@ -838,26 +877,34 @@
 	}
 
 	function renderMemory(v, s) {
-		const slices = memSlices(v);
+		const held = s.memTotal - s.memAvail;
+		const slices = memSlices(v, held);
 		if (!memSeen) {
 			// Every panel here mounts per what the camera turns out to report.
 			if (slices.every(x => x == null)) return;
 			memSeen = true;
 			const p = $('#st-mem-row');
 			if (p) p.hidden = false;
-			['#st-mem-lg-prog', '#st-mem-lg-krn', '#st-mem-lg-disk'].forEach((id, i) => {
-				const e = $(id);
-				if (e && slices[i] == null) e.hidden = true;
-			});
 			memT0 = performance.now() / 1000;
 			chMem = makeChart('#ch-mem', {
 				h: 110, lo: 0, hi: null, win: MEM_RUNGS[0],
 				// What counts as a hole follows how often this pushes: three
 				// missed slots, not the 8s a 2s-paced chart would want.
 				gap: MEM_SLOT * 3,
-				colors: [C1, C3, C2],
+				colors: [C4, C1, C3, C2, MUTE],
 			});
 		}
+		// Which slices have a key is re-asked every sample, not settled on the
+		// first: one that starts reporting later would otherwise draw a line
+		// the legend does not name (#320, a gauge that arrives late still gets
+		// its row). It is one-way, because the chart keeps what a slice has
+		// already drawn and a key that named it must not go with the gap.
+		MEM_LEGEND.forEach((id, i) => {
+			if (slices[i] != null) memHas[i] = true;
+			const e = $(id);
+			if (e) e.hidden = !memHas[i];
+		});
+
 		const now = performance.now() / 1000, k = Math.floor(now / MEM_SLOT);
 		if (k !== memSlot) {
 			memSlot = k;
@@ -872,9 +919,18 @@
 			pushChart(chMem, slices.map(x => x == null ? null : x / 1048576));
 		}
 
+		// This tile alone is an hour wide, and says so. Four identical
+		// unlabelled boxes in a row otherwise read as one time base, and the
+		// span is stated as what the trace HOLDS rather than as the hour it is
+		// heading for -- the same rule the panel's own caption follows.
+		const rs = $('#st-ram-span'), ks = sparks.ram && sparks.ram.ks;
+		if (rs) rs.textContent = ks && ks.length > 1
+			? ' \u00b7 last ' + spanWords((ks[ks.length - 1] - ks[0]) * MEM_SLOT)
+			: '';
+
 		const note = $('#st-mem-note');
 		if (!note) return;
-		let txt = 'Holding ' + ((s.memTotal - s.memAvail) / 1048576 | 0) + ' of ' +
+		let txt = 'Holding ' + (held / 1048576 | 0) + ' of ' +
 			(s.memTotal / 1048576 | 0) + ' MB.';
 		const pts = chMem ? chMem.pts : [];
 		if (pts.length >= 2) {

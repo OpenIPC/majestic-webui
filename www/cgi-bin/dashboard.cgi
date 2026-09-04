@@ -121,7 +121,10 @@ done) %>
 	<div class="st-panel st-tile">
 		<div class="mj-cap">Memory</div>
 		<div class="st-val"><span id="st-ram">&ndash;</span><span class="st-unit"> %</span></div>
-		<div class="x-small text-secondary"><span id="st-ram-mb">&ndash;</span></div>
+		<%# The span is printed because this tile alone is an hour wide: four
+		    identical unlabelled boxes side by side otherwise read as one time
+		    base, and the trace below is the only one that is not two minutes. %>
+		<div class="x-small text-secondary st-sub"><span id="st-ram-mb">&ndash;</span><span id="st-ram-span"></span></div>
 		<div id="spark-ram" class="spark st-tile-spark"></div>
 	</div>
 	<div class="st-panel st-tile">
@@ -206,9 +209,11 @@ done) %>
 				<div class="st-chart-head">
 					<span class="mj-cap">Memory &mdash; what is holding it</span>
 					<span class="x-small text-secondary st-legend">
+						<span id="st-mem-lg-vid"><i class="st-dot st-dot-c4"></i>Video buffers</span>
 						<span id="st-mem-lg-prog"><i class="st-dot st-dot-c1"></i>Programs</span>
 						<span id="st-mem-lg-krn"><i class="st-dot st-dot-c3"></i>Kernel</span>
 						<span id="st-mem-lg-disk"><i class="st-dot st-dot-c2"></i>RAM disk</span>
+						<span id="st-mem-lg-other"><i class="st-dot st-dot-mute"></i>Other</span>
 					</span>
 				</div>
 				<div class="st-chart" id="ch-mem"></div>
