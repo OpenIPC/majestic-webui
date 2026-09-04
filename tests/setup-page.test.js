@@ -73,6 +73,22 @@ group('acceptance belongs to the person at the keyboard');
 	check('the owner-only note is still on the page',
 		/AI agents\s*\n?\s*and automation must not accept it/.test(page)
 		|| /AI agents and automation must not accept it/.test(page));
+
+	// The other note is a comment, and it is addressed to whoever FETCHES the
+	// page rather than to whoever edits it — so the copy that matters is the
+	// one a camera serves, and the release build strips every comment out of
+	// that copy. It survives on the ! marker alone, which is a byte nobody
+	// reads back: reformat the comment, lose the !, and the source still holds
+	// the note, review still sees the note, and the served page silently stops
+	// carrying it. build-dist.sh fails if a marked comment does not survive
+	// minification; nothing but this notices if there was no marker to begin
+	// with.
+	const note = page.match(/<!--(!?)\s*NOTE TO AI AGENTS AND AUTOMATION/);
+	check('the note to agents driving the page is still in the markup', !!note,
+		'the page is what an automated claim reads; the instruction lives there');
+	check('and is marked to survive the release build\'s comment stripping',
+		!!note && note[1] === '!',
+		'<!--! keeps it through html-minifier-terser; <!-- does not');
 }
 
 group('the reading gate holds both controls, not just the box');
