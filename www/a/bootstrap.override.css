@@ -2472,8 +2472,11 @@ mark {
 	z-index: 5;
 	width: min(92%, 21rem);
 	/* Leave the bar's strip free below, and scroll rather than grow: on a
-	   short viewport the numbers yield, not the picture. */
-	max-height: calc(100% - 5rem);
+	   short viewport the numbers yield, not the picture. The strip is as tall as
+	   the bar actually is (--mj-bar-h, preview-hero.js) — the 5rem this used to
+	   be is one row of it, and the panel ran under the other rows wherever the
+	   bar wrapped. */
+	max-height: calc(100% - var(--mj-bar-h, 4.5rem) - 0.5rem);
 	overflow: auto;
 	background: rgba(13, 15, 20, 0.72);
 	border: 1px solid rgba(255, 255, 255, 0.09);
@@ -2947,49 +2950,22 @@ mark {
 }
 
 /* On a phone the control groups do not fit one bar row — measured at 390px the
-   stage is 330 wide and the groups want ~413 — and letting them wrap stacks the
-   bar two or three rows deep over a stage that is only 186px tall. One row,
-   scrolled sideways. (After the base .mj-bar rule — same specificity, so order
-   is what makes it win.) */
+   six groups this camera shows want 855px against a 366px lane — so the bar
+   wraps onto as many rows as it needs, which is what it already does at every
+   other width.
+
+   It was one row scrolled sideways until #318, and that was right for the page
+   this used to be: the Live stage was a card 330×186, and three rows of bar
+   would have been most of the picture. #289 made the page the picture, and the
+   same phone's stage is 390×785 — where three rows are 200px, a quarter of it,
+   and only while the bar is up, since a tap is what reveals it. What the scroll
+   cost is measured on the same phone: 489px of the bar's 879 were off-screen,
+   more than half of it, behind a sideways gesture over a picture where every
+   other drag pans or draws. (After the base .mj-bar rule — same specificity,
+   so order is what makes it win.) */
 @media (max-width: 767.98px) {
 	.mj-bar {
-		flex-wrap: nowrap;
-		/* Back to the start edge: a centred flex row that overflows puts its
-		   first group off the left of the scrollport, where no scroll gesture
-		   reaches it. */
-		justify-content: flex-start;
-		overflow-x: auto;
 		padding-top: 1.25rem;
-		/* A default scrollbar draws a bright strip the width of the picture.
-		   Kept rather than hidden — with a group cut off at the right edge it
-		   is the second half of the affordance — but drawn as the glass would
-		   draw it. */
-		scrollbar-width: thin;
-		scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
-	}
-
-	.mj-bar::-webkit-scrollbar {
-		height: 3px;
-	}
-
-	.mj-bar::-webkit-scrollbar-track {
-		background: transparent;
-	}
-
-	.mj-bar::-webkit-scrollbar-thumb {
-		border-radius: 2px;
-		background: rgba(255, 255, 255, 0.25);
-	}
-
-	/* Fullscreen is what a phone actually needs from this bar — it is how a
-	   330px stage becomes a usable one — so the icon group is pinned to the
-	   right edge of the scrollport instead of being the thing that falls off
-	   it. What gets cut mid-group is then a stateful control that is already
-	   visible, and a group cut in half is the only scroll affordance a bar
-	   this size can carry. */
-	.mj-ico-wrap {
-		position: sticky;
-		right: 0;
 	}
 
 	/* Thumb-sized while still on the picture. The bar stays overlaid here
@@ -3012,11 +2988,33 @@ mark {
 /* PTZ pad, above the bar's strip so a hold cannot land on a bar control. The
    buttons are real buttons this time — focusable, labelled, and big enough
    that a thumb finds them on the first try. touch-action:none or a
-   press-and-hold scrolls the page instead of panning the camera. */
+   press-and-hold scrolls the page instead of panning the camera.
+
+   --mj-bar-h is where the bar's top row of controls is (preview-hero.js
+   measures it), because the strip the pad has to clear is not one row high on
+   every camera and at every width: the bar wraps, and how many rows it takes
+   depends on the window, on which groups this camera has, and on whether the
+   transport picker is there at all. The 3.25rem it used to be was one row's
+   worth, so a bar that wrapped — a phone, or any window under about 900px —
+   put its upper rows underneath the pad, which draws over them. The fallback
+   is that same 3.25rem, so a page whose chrome script did not load lands
+   exactly where it used to.
+
+   Measured on layout, not on reveal: the bar fades (opacity), so its height is
+   the same whether it is on screen or not, and the pad never moves under a
+   thumb that is holding it.
+
+   The min() is the floor of the whole arrangement: a pad pushed off the top of
+   the stage is not awkward, it is gone — there is no page to scroll to reach
+   it — so where the strip and the pad cannot both fit, the pad stops at the
+   top and takes the overlap. --mj-ptz-h is 0 until the script has measured the
+   pad, which leaves the first term to win, exactly as it did before there was
+   a second one. */
 .mj-ptz {
 	position: absolute;
 	right: 0.5rem;
-	bottom: 3.25rem;
+	bottom: max(0.5rem, min(calc(var(--mj-bar-h, 3.25rem) + 0.5rem),
+		calc(100% - var(--mj-ptz-h, 0px) - 0.5rem)));
 	/* Above the bar: the bar is later in the DOM and its (transparent)
 	   gradient padding reaches up over the pad's lower row — at equal
 	   z-index it swallows the pointerdown that starts a hold. */
@@ -3026,6 +3024,22 @@ mark {
 	flex-direction: column;
 	align-items: flex-end;
 	gap: 6px;
+}
+
+/* The other half of that arrangement, for a stage too short to stack the two —
+   a phone in landscape, where 301px of picture has to hold a 211px zoom/focus
+   cluster and a two-row bar. The pad goes back to its corner and the bar keeps
+   out of its column instead, which is affordable there for the same reason the
+   stacking is not: the stage is 740 wide, so the groups take the same two rows
+   in the lane that is left. preview-hero.js decides which case this is and
+   measures the column; the fallback width is only used if that measurement has
+   not happened, which is also the only state in which the class is never set. */
+.mj-stage.mj-ptz-beside .mj-ptz {
+	bottom: 0.5rem;
+}
+
+.mj-stage.mj-ptz-beside .mj-bar {
+	padding-right: calc(var(--mj-ptz-w, 9rem) + 1rem);
 }
 
 /* Both pads are one glass panel with the buttons inside it, rather than a
