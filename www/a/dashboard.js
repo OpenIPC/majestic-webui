@@ -790,7 +790,10 @@
 	// right edge. It stays honest only because the caption is derived from the
 	// window rather than written beside it -- the axis says -2 min, then
 	// -10 min, then -1 h, and each of those is true when it is printed.
-	const MEM_RUNGS = [120, 300, 600, 1800, MEM_WIN];
+	// Roughly doubling, so the plot is never less than about half full: a rung
+	// that trebles leaves the reader looking at the same crowded-into-the-
+	// corner picture this panel exists to stop drawing.
+	const MEM_RUNGS = [120, 300, 600, 1200, 2400, MEM_WIN];
 	let memTick = 0, chMem = null, memSeen = false, memT0 = 0;
 
 	// Three disjoint slices of what the kernel reports, named for what they
