@@ -90,8 +90,43 @@ group('the reading gate holds both controls, not just the box');
 	check('Continue also refuses when the text is unread',
 		/if\s*\(!gateOff\s*&&\s*!readToEnd\)\s*return;/.test(page));
 	check('a document too short to scroll counts as read',
-		/scrollHeight\s*-\s*\w+\.clientHeight\s*<=\s*\w+\)?\s*\)?\s*return true/.test(page),
+		/\w+\.height\s*<=\s*\w+\s*-\s*\w+\)\s*return true/.test(page),
 		'without this a short agreement makes the form permanently unsubmittable');
+
+	// Below 40rem the pane is released and the document becomes the page, so
+	// the pane NEVER overflows. "Does not overflow" therefore stops meaning
+	// "shorter than its box" and starts being true on every phone, at load —
+	// and the answer above is "already read". Measured with the media query in
+	// and this untouched: the checkbox came up enabled and the must-read line
+	// hidden before a word had moved, i.e. the stylesheet quietly repealing the
+	// gate. It is the exact shape of failure this file exists for: the page
+	// looks right while it happens, and seeing it needs an unclaimed camera,
+	// a phone, and an agreement nobody read.
+	check('a released pane is not mistaken for a document that fits',
+		/function paneScrolls\(\)/.test(page)
+		&& /scrollHeight\s*-\s*\w+\.clientHeight\s*>\s*\w+/.test(page)
+		&& /getBoundingClientRect\(\)/.test(page),
+		'the overflow test must SELECT the scroller, not answer the question');
+	check('the page scroll drives the gate too, since on a phone it is the scroller',
+		/window\.addEventListener\('scroll',\s*syncAccept/.test(page),
+		'without it the gate never re-asks while the document is being read');
+
+	// The other half of the same mistake, and the one that survived the first
+	// pass: renderDoc() rewound docEl.scrollTop, which moves nothing once the
+	// pane is released. Measured on a phone — read the English text to its end,
+	// switch to Chinese, and the page stays where it was while a shorter
+	// document is dropped under it, so the gate re-opens on a text nobody has
+	// seen. The page's own comment already said this must not happen ("carrying
+	// the last one's scroll over would enable acceptance of a text still at its
+	// first line"); only the mechanism enforcing it had stopped reaching.
+	check('a language switch rewinds whichever box is scrolling',
+		/function rewindDoc\(\)/.test(page)
+		&& /rewindDoc\(\);/.test(page)
+		&& /window\.scrollTo\(0,\s*top\)/.test(page),
+		'docEl.scrollTop alone leaves the PAGE at the replaced text\'s end');
+	check('and both the gate and the rewind ask that one question',
+		(page.match(/paneScrolls\(\)/g) || []).length >= 3,
+		'declared once and consulted by atEnd() and rewindDoc(), or they drift');
 	check('a language switch clears it — the new text is unread',
 		/readToEnd\s*=\s*false;/.test(page));
 	check('and the gate is dropped where there is no pane to scroll',
