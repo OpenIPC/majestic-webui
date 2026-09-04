@@ -269,10 +269,11 @@
 	}
 
 	// The ISP panel shows what this SoC's ISP actually reports and nothing
-	// else — the isp_* set is vendor-shaped (only again/dgain are universal)
-	// and values are raw SDK units, deliberately not converted. Scene
-	// luminance is charted separately (it feeds the exposure warning), so it
-	// is not in the row set.
+	// else — the isp_* set is vendor-shaped (again/dgain/exptime/avelum and
+	// exposureismax are on every current daemon, the rest is per-vendor) and
+	// values are raw SDK units, deliberately not converted. Scene luminance
+	// is charted separately (it feeds the exposure warning), so it is not in
+	// the row set.
 	const ISP_ROWS = [
 		['isp_exptime', 'Exposure time'],
 		['isp_exposure', 'Exposure'],
@@ -477,10 +478,11 @@
 		setInterval(tick, 5000);
 	}
 
-	// Absent reads as "not at maximum" rather than as a row of its own: this
-	// gauge is HiSilicon's alone — Ingenic publishes isp_avelum but not this,
-	// SigmaStar neither — and a camera that cannot answer must say nothing
-	// here, not zero.
+	// Absent reads as "not at maximum" rather than as a row of its own: every
+	// current daemon publishes this gauge — HiSilicon reads it from the SDK,
+	// Ingenic and SigmaStar derive it from their AE's own limits — but an
+	// older daemon or an Ingenic T40 does not, and a camera that cannot
+	// answer must say nothing here, not zero.
 	function setLumaNote(v) {
 		const note = $('#st-luma-note');
 		if (!note) return;
@@ -527,7 +529,17 @@
 		setAlert('#st-alert-stale', false);
 		const v = s.m.v;
 		lastV = v;
-		if (!ispEls) buildImaging(v);
+		// Rebuilt, not only built once: the first heartbeat can beat the ISP
+		// up — majestic answers /metrics before the vendor SDK does, and a
+		// SigmaStar daemon whose CUS3A call fails emits no isp_* at all — and
+		// the panel then said "This SoC reports no ISP metrics" until the page
+		// was reloaded. A row set is for the gauges that exist; a gauge
+		// arriving late is the same fact arriving later. Sparkline history
+		// restarts on rebuild, which is the price of not freezing the panel to
+		// whatever the first sample happened to carry.
+		if (!ispEls || ISP_ROWS.some(r => (r[0] in v) && !(r[0] in ispEls)) ||
+			(mdEnabled && 'md_rects_recv_total' in v && !motionEl))
+			buildImaging(v);
 
 		if (s.cpu != null) {
 			$('#st-cpu').textContent = s.cpu.toFixed(0);

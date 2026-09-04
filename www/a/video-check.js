@@ -21,12 +21,15 @@
 //   /image.jpg       392 KB               62 KB, solid black
 //
 // Only two of those are tested. isp_again moved further than anything else and
-// is deliberately not in the predicate: the scale is vendor-specific -- the
-// same idle state reads 1024 on HiSilicon, 126 on Ingenic and 20855 on
-// SigmaStar -- so there is no portable way to ask whether a gain is at its
-// ceiling, and a threshold picked from one board would fire on another camera
-// doing nothing wrong. It is recorded here because it is what the fault looked
-// like, not because anything reads it.
+// is deliberately not in the predicate: the scale is vendor-specific (Q10 on
+// HiSilicon and SigmaStar, log2×32 on Ingenic) and the ceiling is
+// sensor-specific -- an Ingenic camera reads 126 at its own maximum where a
+// HiSilicon board reads tens of thousands -- so a browser-side threshold
+// picked from one board would fire on another camera doing nothing wrong. The
+// portable form of "is the gain at its ceiling" is isp_exposureismax, which
+// each daemon answers against its own AE limits, and which IS in the
+// predicate. The raw number is recorded here because it is what the fault
+// looked like, not because anything reads it.
 //
 // Two independent signals, and they answer different halves. The camera's own
 // gauges say it is holding the shutter open as long as it can and still
@@ -72,8 +75,9 @@
 
 	// The camera's own opinion: exposure at its ceiling and the metered scene
 	// luminance at zero. true / false / null, and null is load-bearing --
-	// isp_avelum is not published by every vendor (SigmaStar reports none), so
-	// a camera that cannot answer must not be read as answering no.
+	// current daemons publish both gauges on HiSilicon, Ingenic and SigmaStar
+	// alike, but an older daemon or an Ingenic T40 does not, and a camera
+	// that cannot answer must not be read as answering no.
 	function ispBlind(v) {
 		if (!v || !('isp_avelum' in v) || !('isp_exposureismax' in v)) return null;
 		return v.isp_avelum === 0 && v.isp_exposureismax > 0;
@@ -211,11 +215,12 @@
 		// Only what the predicate actually tested. The measured signature had
 		// gain pinned at maximum too (32381 against a healthy 1024), and the
 		// first draft of these sentences said so -- but ispBlind() never looks
-		// at isp_again, and it cannot: the gain scale is vendor-specific, the
-		// same idle state reads 1024 on HiSilicon, 126 on Ingenic and 20855 on
-		// SigmaStar, and there is no portable "is this its ceiling" test. A
-		// sentence that states an observation the code did not make is the
-		// same failure as a finding reached from a test that could not look.
+		// at isp_again, and it cannot: the gain scale and ceiling are
+		// vendor- and sensor-specific, so no browser-side "is this its
+		// ceiling" threshold is portable; that question lives daemon-side in
+		// isp_exposureismax, which the predicate does read. A sentence that
+		// states an observation the code did not make is the same failure as
+		// a finding reached from a test that could not look.
 		const both = ispSays === true && ispHeld && picHeld;
 		const detail = both
 			? 'The picture is completely black, and the sensor is at its ' +
