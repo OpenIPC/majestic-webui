@@ -90,7 +90,7 @@
 	// Everything published after the running build. The camera's own revision
 	// is the boundary: a commit above it is in the next build it takes,
 	// whichever night that one happened to publish.
-	function delta(feed, rev) {
+	function delta(feed, rev, buildDate) {
 		const totals = { feature: 0, fix: 0, security: 0, other: 0 };
 		const vendors = new Set();
 		let builds = 0, found = false;
@@ -111,10 +111,29 @@
 				if (note && typeof note.vendor === 'string') vendors.add(note.vendor);
 			}
 		}
-		// Not in the ledger: either newer than the feed (nothing to say) or
-		// older than it reaches (we would be guessing). Say nothing either way.
-		if (!found) return null;
-		return { builds, totals, vendors };
+		if (found) return { builds, totals, vendors, atLeast: false };
+
+		// Not in the ledger, which is two very different situations.
+		//
+		// A build NEWER than the feed -- a development build, or a nightly the
+		// feed has not caught up with -- has nothing to be told.
+		//
+		// A build OLDER than the ledger reaches is the common case and the one
+		// that matters: the ledger starts somewhere, and every camera flashed
+		// before that point falls off the end of it. Saying nothing to those
+		// would leave the banner permanently silent for exactly the owners
+		// furthest behind, which is the opposite of the point.
+		//
+		// The build date separates the two. Only when it is strictly older than
+		// the oldest entry has the camera provably been passed by, and even then
+		// the totals are a floor rather than a count, so the sentence says "at
+		// least". Same-day is not evidence either way, and stays silent.
+		const eldest = feed.builds[feed.builds.length - 1];
+		if (buildDate && eldest && typeof eldest.date === 'string' &&
+			buildDate < eldest.date) {
+			return { builds, totals, vendors, atLeast: true };
+		}
+		return null;
 	}
 
 	function sentence(d, mine, stale) {
@@ -124,13 +143,14 @@
 		if (t.fix) parts.push(plural(t.fix, 'fix', 'fixes'));
 		if (t.security) parts.push(plural(t.security, 'security fix', 'security fixes'));
 
-		let head = '<b>Your camera software is ' +
+		let head = '<b>Your camera software is ' + (d.atLeast ? 'at least ' : '') +
 			plural(d.builds, 'build', 'builds') + ' behind</b>';
 		if (!parts.length) {
 			return head + ' &mdash; updating brings it in line with the current release.';
 		}
 
-		let s = head + ' &mdash; since your build: ' +
+		let s = head + (d.atLeast ? ' &mdash; in the changes we can see: '
+			: ' &mdash; since your build: ') +
 			parts.slice(0, -1).join(', ') +
 			(parts.length > 1 ? ' and ' : '') + parts[parts.length - 1];
 		if (mine) {
@@ -149,7 +169,7 @@
 	}
 
 	function render(slot, feed, build) {
-		const d = delta(feed, build.rev);
+		const d = delta(feed, build.rev, build.date);
 		if (!d || d.builds === 0) return;
 
 		const age = daysSince(build.date);
