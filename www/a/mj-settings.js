@@ -3787,12 +3787,34 @@
 		return r ? r.label : '';
 	}
 
+	// What this field is called on screen. A Day / Night pin has a role on the
+	// map — "IR-cut filter, closing coil" — which is what every sentence in
+	// that panel calls it; anything else is named by the caption printed above
+	// its own control, derived exactly as renderField derives it. Never the
+	// dotted key: a name readable only by someone who already knows the answer
+	// is not a name.
+	function fieldName(f) {
+		const key = f.dot.slice(f.dot.lastIndexOf('.') + 1);
+		const role = f.dot.indexOf('nightMode.') === 0 ? roleName(key) : '';
+		return role || (f.schema && f.schema.title) || titleCase(key);
+	}
+
+	// Which of the fields this save asked the camera to REMOVE are still
+	// configured afterwards. Asked of the refreshed config, so it is the
+	// camera answering and not the form: an older majestic accepts a null,
+	// answers 202 and ignores it, and nothing else on the page would ever say
+	// that a clear did not take.
+	//
+	// It used to look only under nightMode and only at pins, which was right
+	// while pins were the only thing that could be cleared. Once any numeric
+	// field with no default could be, that shape quietly stopped covering the
+	// cases it was written for — a threshold or a speaker pad whose removal
+	// was ignored would have been reported as a clean save, which is the exact
+	// opposite of what this exists to guarantee.
 	function stillSet(cleared) {
 		return (cleared || [])
-			.map((f) => f.dot.slice('nightMode.'.length))
-			.filter((k) => isNumish(getDotted(state.config, 'nightMode.' + k)))
-			.map(roleName)
-			.filter(Boolean);
+			.filter((f) => isNumish(getDotted(state.config, f.dot)))
+			.map(fieldName);
 	}
 
 	// The filter test's verdict names a wiring and a fix for it ("swap the two
@@ -5285,9 +5307,9 @@
 				// Joined with semicolons, because the role names have commas in
 				// them: "IR-cut filter, closing coil, IR-cut filter, opening
 				// coil" reads as four things and names none of them.
-				showError('Saved, but these could not be disconnected: ' +
-					kept.join('; ') + '. The camera is still configured to ' +
-					'drive them; its firmware may be too old to clear a setting.');
+				showError('Saved, but these could not be cleared: ' +
+					kept.join('; ') + '. The camera is still configured with ' +
+					'them; its firmware may be too old to clear a setting.');
 			// Ask the camera what this cost rather than assuming the worst.
 			// Only a pipeline-class change is still owed a reload; a service
 			// restart or a channel rebuild already happened inside the save,
