@@ -91,6 +91,20 @@ const css = fs.readFileSync(A('bootstrap.override.css'), 'utf8');
 SEVS.forEach((s) => check('.mj-notice-' + s + ' is styled',
 	css.includes('.mj-notice-' + s + ' '), s));
 
+// What puts the actions in a column down a stack of banners (#347): the close
+// button is out of the flow, and every notice pays for its corner whether or
+// not it has one. As a flex item it shifted the actions left by its own width
+// on exactly the notices that could be dismissed, which is two right edges in
+// one column. A string check rather than a rendered one, because this suite is
+// plain node with no browser — but losing either half is silent.
+check('every notice reserves the close button its corner',
+	/--mj-notice-close:/.test(css) &&
+	/padding:[^;]*var\(--mj-notice-close\)/.test(css),
+	'the right inset no longer reserves the close slot');
+check('and the close button is out of the flow to sit in it',
+	/\.mj-notice > \.btn-close \{[^}]*position: absolute/.test(css),
+	'a close button back in the flow pushes the actions left again');
+
 const full = mjNotice('warn', 'sentence', {
 	body: 'body', acts: '<a href="#">Go</a>', dismiss: true,
 });
