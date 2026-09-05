@@ -282,6 +282,51 @@ const VER = (rev, date) => 'Lite HiSilicon (hi3516ev300), HEAD+' + rev + ', ' + 
 		(await run(withNotes([{ cat: 'fix', vendor: null, text: { evil: 1 } }])))
 			.html.indexOf('mj-whatsnew') === -1);
 
+	group('a note belongs to the cameras it was written for');
+
+	const mixed = (vendor) => run({
+		version: VER(MINE, iso(30)), vendor: vendor,
+		feed: feedOf([
+			{ sha: 'aaaaaaaaa', date: iso(1),
+			  counts: { feature: 0, fix: 3, security: 0, other: 0 }, notes: [
+				{ cat: 'fix', vendor: null, text: 'Everyone gets this one.' },
+				{ cat: 'fix', vendor: 'hisilicon', text: 'A HiSilicon-only repair.' },
+				{ cat: 'fix', vendor: 'sigmastar', text: 'A SigmaStar-only repair.' },
+			] },
+			entry(MINE, {}),
+		]),
+	});
+
+	let m = await mixed('hisilicon');
+	check('a camera sees the global note and its own vendor\'s',
+		m && /Everyone gets this one/.test(m.html) && /HiSilicon-only repair/.test(m.html),
+		m && m.body);
+	check('and never another vendor\'s',
+		m && !/SigmaStar-only repair/.test(m.html), m && m.body);
+
+	m = await mixed('sigmastar');
+	check('the same feed shows the other vendor theirs instead',
+		m && /SigmaStar-only repair/.test(m.html) && !/HiSilicon-only repair/.test(m.html),
+		m && m.body);
+
+	m = await mixed('novatek');
+	check('a vendor with nothing of its own still sees the global note',
+		m && /Everyone gets this one/.test(m.html) &&
+		     !/HiSilicon-only/.test(m.html) && !/SigmaStar-only/.test(m.html), m && m.body);
+
+	m = await run({
+		version: VER(MINE, iso(30)), vendor: 'novatek',
+		feed: feedOf([
+			{ sha: 'aaaaaaaaa', date: iso(1),
+			  counts: { feature: 0, fix: 2, security: 0, other: 0 }, notes: [
+				{ cat: 'fix', vendor: 'hisilicon', text: 'Not for this camera.' },
+			] },
+			entry(MINE, {}),
+		]),
+	});
+	check('nothing applicable means no expander at all, counts unchanged',
+		m && !/mj-whatsnew/.test(m.html) && /2 fixes/.test(m.html), m && m.html);
+
 	group('nothing to install means nothing to say');
 
 	// majestic-webui#348: the notice said a camera was behind while the Firmware

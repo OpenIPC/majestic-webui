@@ -136,7 +136,11 @@
 				// escaped where it is written, like every other string the feed
 				// supplies.
 				if (typeof note.text === 'string' && note.text) {
-					said.push({ cat: note.cat, text: note.text });
+					// The vendor comes too. It is this note's SCOPE, which is
+					// already how the sentence above uses it, and a list that
+					// drops it offers one vendor's fix to every other vendor's
+					// camera.
+					said.push({ cat: note.cat, vendor: note.vendor, text: note.text });
 				}
 			}
 		}
@@ -217,10 +221,17 @@
 	const CAT_RANK = { security: 0, feature: 1, fix: 2 };
 	const MAX_SHOWN = 8;
 
-	function whatsNew(said) {
+	function whatsNew(said, mine) {
 		if (!said || !said.length) return '';
+		// A note carrying a vendor applies to that vendor's cameras and no
+		// others; one carrying none applies everywhere. Listing another
+		// vendor's work here would promise this owner something their camera
+		// will never do — the same mistake the sentence above already avoids by
+		// only claiming "cameras like this one" on a match.
+		const applies = said.filter(n => !n.vendor || n.vendor === mine);
+		if (!applies.length) return '';
 		const rank = (c) => (c in CAT_RANK) ? CAT_RANK[c] : 3;
-		const sorted = said.slice().sort((a, b) => rank(a.cat) - rank(b.cat));
+		const sorted = applies.slice().sort((a, b) => rank(a.cat) - rank(b.cat));
 		const items = sorted.slice(0, MAX_SHOWN).map(n =>
 			'<li>' + (n.cat === 'security' ? '<b>Security</b> &mdash; ' : '') +
 			esc(n.text) + '</li>').join('');
@@ -249,7 +260,7 @@
 		if (seen === feed.cursor) return;
 
 		slot.innerHTML = mjNotice(severity, sentence(d, matched, stale), {
-			body: whatsNew(d.said),
+			body: whatsNew(d.said, mine),
 			acts: '<a class="btn btn-sm btn-primary" href="update.cgi">Firmware update</a>',
 			dismiss: true,
 		});
