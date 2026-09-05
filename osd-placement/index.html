@@ -17,6 +17,10 @@ li { border: 1px solid #2c313d; border-radius: 12px; padding: 16px 18px; margin-
 li h2 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
 li p { margin: 0; font-size: 14px; color: rgba(230,232,238,.7); }
 li p + p { margin-top: 8px; }
+li ul { margin-top: 10px; }
+li li { border: 0; padding: 0 0 0 16px; margin: 0 0 5px; position: relative;
+  font-size: 14px; color: rgba(230,232,238,.7); }
+li li::before { content: "·"; position: absolute; left: 4px; }
 </style>
 </head>
 <body>
@@ -28,15 +32,20 @@ li p + p { margin-top: 8px; }
     the source. Each round of feedback gets its own version so they stay comparable.</p>
   <ul>
     <li>
-      <h2><a href="v1/">v1 — the proposal</a></h2>
-      <p>Anchor, both offsets and the proportional mode are controls again, and the drag writes
-        into them rather than instead of them. The unit is yours: switch % to px and the number
-        changes while the overlay stays put. Arrow keys nudge one step, shift for ten.</p>
-      <p>They live in a panel that opens on the picture when you click an overlay, so nothing you
-        need is below the fold on a laptop. Four more boards carry the reasoning: why the
-        snapshot and fullscreen buttons moved off the video, what the same design does on a
-        phone, and two directions for the round after this one — several overlays at once, and
-        logos.</p>
+      <h2><a href="v2/">v2 — rebuilt from the first round of feedback</a></h2>
+      <p>Everything raised on v1, applied:</p>
+      <ul>
+        <li><strong>Proportional is the default</strong>, not anchored.</li>
+        <li><strong>A drag no longer changes the anchor</strong> — it moves within the one you picked, and only the pad changes it. The magnet that remains pulls an offset to zero.</li>
+        <li><strong>Font stroke weight</strong> is back; it should never have gone.</li>
+        <li><strong>The panel is draggable</strong> by its header, anywhere in the working area — it is no longer trapped inside the picture.</li>
+        <li><strong>Privacy masks are items too</strong>, in the same list and selected the same way. That hole was mine, not reported.</li>
+        <li>Several logos, no artificial size cap, and the region and memory cost shown beside the item row.</li>
+      </ul>
+    </li>
+    <li>
+      <h2><a href="v1/">v1 — the first proposal</a></h2>
+      <p>What the feedback above was given on. Kept so the two stay comparable.</p>
     </li>
   </ul>
 </main>
