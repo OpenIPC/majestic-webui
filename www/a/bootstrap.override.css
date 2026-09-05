@@ -3398,9 +3398,9 @@ mark {
    backwards (#273). An SVG paints the box it is given, so this is a stated size
    and stays it.
 
-   28px rather than the 18px that first fixed #273, at the reporter's ask
-   (#347). It is the one thing in the row that says what KIND of notice this is
-   before a word is read, and 18px left it the quietest mark on a card. 28 is
+   28px rather than the 18px that first fixed #273 (#347). It is the one thing
+   in the row that says what KIND of notice this is before a word is read, and
+   18px left it the quietest mark on a card. 28 is
    the largest that changes nothing else: a one-line notice is 31px of content
    tall, set by the button beside it, so the mark grows into room that was
    already there — at 36px every banner in the page gets taller to carry it.
@@ -3470,10 +3470,11 @@ mark {
 	display: flex;
 	align-items: center;
 	/* Centred against the whole notice, which on one or two lines is what the
-	   eye expects of a control beside a sentence (#347). The BOX stays
-	   flex-start, so the severity mark keeps its place against the first line
-	   whatever the sentence does — they are different items and only one of
-	   them is annotating the first word. */
+	   eye expects of a control beside a sentence (#347). Per item rather than
+	   on the box, because the sentence must not be centred with it: the text
+	   column is the thing that grows, and centring it would leave a short
+	   notice's body row floating away from the sentence it belongs under. The
+	   mark opposite is centred by its own rule for the same reason. */
 	align-self: center;
 	gap: 0.5rem;
 	margin-left: auto;
@@ -3565,8 +3566,8 @@ mark {
 	   sentence; here the actions have taken a row of their own below it, so the
 	   middle of the box is a third of the way down the text — the x landed over
 	   the sentence it was meant to sit clear of, and a centred mark would point
-	   at the middle of a paragraph instead of at its first line. The reporter of
-	   #347 asked for the centring on desktop only for exactly this reason. */
+	   at the middle of a paragraph instead of at its first line. Which is why
+	   the centring is a desktop rule and not a rule (#347). */
 	.mj-notice > .btn-close {
 		top: calc(0.6rem + 0.15rem);
 		transform: none;

@@ -107,9 +107,10 @@ check('and the close button is out of the flow to sit in it',
 
 // The mark, the actions and the close are one cluster: whatever alignment a
 // notice's shape calls for, all three take it. The mark was left behind exactly
-// once — it stayed on the first line when the other two were centred, and the
-// reporter of #347 is who noticed, not us. So it is centred by default and both
-// exceptions that put the others back on the first line have to name it too.
+// once, staying on the first line when the other two were centred (#347), and
+// nothing said so — a mark hanging above the controls it belongs with renders
+// perfectly. So it is centred by default and both exceptions that put the
+// others back on the first line have to name it too.
 check('the mark is centred with the controls opposite it',
 	/\.mj-notice-ico\s*\{[^}]*align-self:\s*center/.test(css),
 	'the mark hangs at the top while the actions and the close are centred');
@@ -316,9 +317,8 @@ groups.forEach((g) => {
 				? where + '\n    acts on the camera without the class that asks first'
 				: where + '\n    navigation wearing the class main.js hangs confirm() off');
 
-		// An arrow said what the button shape already says. Dropped at the
-		// reporter's request, and pinned so it cannot creep back one banner at
-		// a time.
+		// An arrow said what the button shape already says, so it went (#347).
+		// Pinned so it cannot creep back one banner at a time.
 		check('"' + text + '" carries no arrow', !/(&rarr;|→)$/.test(text), where);
 	}
 });
