@@ -295,14 +295,37 @@ window.MajesticMp4Crypt = (function () {
 	}
 
 	// Is there a protection box anywhere under here? Used only where the track
-	// walk came back empty, and deliberately a scan rather than a parse: the
-	// question is whether these bytes contain any of the boxes protection is
-	// signalled with, and a box tree this build could not walk is exactly the
-	// case where a parse cannot answer.
-	function protectionSomewhere(u8, from, to) {
-		for (let at = from; at + 8 <= to; at++) {
-			const t = fourcc(u8, at);
-			if (t === 'sinf' || t === 'encv' || t === 'enca' || t === 'tenc') return true;
+	// walk came back empty — a header shaped in a way this build has not seen.
+	//
+	// A structural walk, not a search for the four letters. `sinf`, `encv`,
+	// `enca` and `tenc` are ordinary byte sequences and appear inside codec
+	// configuration and metadata payloads by chance; a scan that matched one
+	// there would refuse a perfectly clear recording as an unopenable sealed
+	// one, which is a worse failure than the one this function exists to
+	// prevent. So it descends the containers it knows, reads box types at box
+	// boundaries only, and never looks inside a box it does not understand.
+	//
+	// A tree it cannot walk answers false, which is the same answer as before
+	// this existed: nothing here found protection. That is a statement about
+	// what was looked at, and the caller's sentence says as much.
+	const PROTECTION_PARENTS = {
+		moov: 8, trak: 8, mdia: 8, minf: 8, stbl: 8, stsd: 16, sinf: 8, schi: 8,
+	};
+
+	function protectionSomewhere(u8, from, to, depth) {
+		if ((depth || 0) > 8) return false;           // a tree this deep is not one of ours
+		let at = from;
+		while (at + 8 <= to) {
+			const size = be32(u8, at);
+			if (size < 8 || at + size > to) return false;
+			const type = fourcc(u8, at + 4);
+			if (type === 'sinf' || type === 'encv' || type === 'enca' || type === 'tenc')
+				return true;
+			const skip = PROTECTION_PARENTS[type];
+			if (skip !== undefined && at + skip <= at + size &&
+				protectionSomewhere(u8, at + skip, at + size, (depth || 0) + 1))
+				return true;
+			at += size;
 		}
 		return false;
 	}

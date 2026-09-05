@@ -452,7 +452,7 @@
 						// so once.
 						busy = false;
 						dead = true;
-						onBadFragment(e, at);
+						onBadFragment(e, at, 'fragment');
 						return;
 					}
 					cursor = at + f.total;
@@ -500,7 +500,7 @@
 							out = through('init', head);
 						} catch (e) {
 							dead = true;
-							onBadFragment(e, 0);
+							onBadFragment(e, 0, 'init');
 							return;
 						}
 						try { sb.appendBuffer(out); } catch (e) { onFallback(); }
@@ -528,7 +528,7 @@
 					// buffers nothing has a reason, and the reason is worth
 					// more than another attempt.
 					if (!has) {
-						if (xform) onBadFragment(new Error('nothing buffered'), 0);
+						if (xform) onBadFragment(new Error('nothing buffered'), 0, 'nothing');
 						else onFallback();
 					}
 				}, 5000);
@@ -633,7 +633,7 @@
 		if ('MediaSource' in window && MediaSource.isTypeSupported(mime)) {
 			player = mkPlayer(video,
 				function () { plainFallback(clip, url); },
-				function (err) { badFragment(clip, url, err); });
+				function (err, at, phase) { badFragment(clip, url, err, phase); });
 			player.attach(url, init, clip.size, mime, xform);
 		} else if (xform) {
 			// No MediaSource and a sealed clip: the element cannot be handed
@@ -654,14 +654,26 @@
 	// which fragment and what was wrong with it. Playback of what is already
 	// buffered continues: the frames on screen decoded correctly, and taking
 	// them away proves nothing.
-	function badFragment(clip, url, err) {
+	// Three failures reach here and they are not the same sentence. A header
+	// that could not be prepared and a SourceBuffer that never took anything
+	// have decoded no frames at all, so telling somebody that everything up to
+	// that point played correctly is a claim about a picture nobody saw.
+	function badFragment(clip, url, err, phase) {
 		if (state.clip !== clip) return;
 		setStatus('');
+		const save = ' <a href="' + esc(url) + '" download>Save the clip as recorded</a>.';
+		if (phase === 'init')
+			return note('<strong>This recording’s header could not be prepared.</strong> ' +
+				esc((err && err.message) || 'the header could not be rewritten') +
+				'. Nothing was played.' + save, 'danger');
+		if (phase === 'nothing')
+			return note('<strong>Nothing in this recording could be decoded.</strong> ' +
+				'The header was accepted and no frame arrived, so either the key is not the one ' +
+				'it was sealed with or the file is damaged from the start.' + save, 'danger');
 		note('<strong>This recording stops being readable ' +
 			(err && err.at ? 'at byte ' + err.at : 'partway through') + '.</strong> ' +
 			esc((err && err.message) || 'a fragment could not be decrypted') +
-			'. Everything before that point played correctly. ' +
-			'<a href="' + esc(url) + '" download>Save the clip as recorded</a>.', 'danger');
+			'. What played before that point decoded correctly.' + save, 'danger');
 	}
 
 	// ---- opening a clip --------------------------------------------------
@@ -849,7 +861,7 @@
 		// and shows a black frame — and on some builds asks for a decryption
 		// module nobody here can answer. The reason this clip buffered nothing
 		// is worth more than another attempt at playing it.
-		if (state.xform) { badFragment(clip, url, new Error('nothing could be buffered')); return; }
+		if (state.xform) { badFragment(clip, url, new Error('nothing could be buffered'), 'nothing'); return; }
 		player.destroy();
 		player = null;
 		const video = $id('rec-video');
@@ -1768,6 +1780,7 @@
 		let at = init.firstMoof;
 		let n = 0;
 		let unknown = false;
+		let damaged = false;
 		if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
 
 		read(0, init.headerLength - 1).then(function (head) {
@@ -1778,8 +1791,15 @@
 			if (state.clip !== clip) return;
 			note(verdict, verdict.indexOf('does not match') >= 0 ? 'danger'
 				: verdict.indexOf('cannot be checked') >= 0 ? 'warning' : 'success');
-		}).catch(function () {
+		}).catch(function (e) {
 			if (btn) { btn.disabled = false; btn.textContent = 'Check integrity'; }
+			if (state.clip !== clip) return;
+			// A read that failed, a card that went away mid-walk. Silence here
+			// reads as "checked, and fine" — the one thing that must never be
+			// inferred from a check that did not finish.
+			note('<strong>This recording could not be checked.</strong> ' +
+				esc((e && e.message) || 'the card stopped answering') +
+				'. Nothing is known about the rest of it either way.', 'warning');
 		});
 
 		function step() {
@@ -1787,8 +1807,15 @@
 			if (at + 16 > clip.size) return Promise.resolve(done());
 			return read(at, Math.min(at + 1024 * 1024, clip.size) - 1).then(function (buf) {
 				const f = IDX.parseFragment(buf);
-				if (!f || f.short || !f.total || at + f.total > clip.size)
-					return done();          // the tail of a clip still being written
+				// Two different tails, and only one of them is a camera doing
+				// its job. A fragment whose header is on the card and whose
+				// payload is not — a short read, or one that runs past the end
+				// — is a recording still being written. A run of bytes that is
+				// not a fragment at all is a file that stops making sense, and
+				// calling that "still recording" tells somebody their damaged
+				// clip is fine.
+				if (!f) { damaged = true; return done(); }
+				if (f.short || !f.total || at + f.total > clip.size) return done();
 				const whole = f.total <= buf.length
 					? Promise.resolve(buf.subarray(0, f.total))
 					: read(at, at + f.total - 1);
@@ -1816,7 +1843,12 @@
 			// that intact is the one verdict this button must never give by
 			// accident.
 			const whole = at === clip.size;
-			return 'Intact through ' + n + ' fragment' + (n === 1 ? '' : 's') +
+			const held = 'Intact through ' + n + ' fragment' + (n === 1 ? '' : 's');
+			if (damaged)
+				return held + ', and then the file stops making sense at byte ' + at +
+					'. Every record up to there covers the one before it; what follows is not a ' +
+					'fragment this page can read, so the rest cannot be checked.';
+			return held +
 				(whole ? '. Every fragment matches its own record, and each record covers the one before it.'
 					: ', and the rest has not been written yet — this clip is still recording.');
 		}

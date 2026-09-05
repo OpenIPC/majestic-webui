@@ -581,6 +581,11 @@ window.MajesticRecKeys.ui = (function () {
 	function loadPem(text) {
 		const pass = window.prompt('Choose a passphrase for this browser’s copy of the key');
 		if (pass === null) return;
+		// The same guard generation has. A key stored under no passphrase is
+		// readable by anyone who reaches this browser profile, and an imported
+		// key is exactly as worth protecting as a generated one.
+		if (!pass) return say('A key kept without a passphrase is a key anyone using this ' +
+			'computer can read. Choose one.', 'warning');
 		let got;
 		try {
 			got = K.importPem(text, pass);
@@ -598,7 +603,25 @@ window.MajesticRecKeys.ui = (function () {
 	// the daemon ignores and calling it done is the failure this avoids.
 	function promptPublish() {
 		if (!record) return;
-		const pem = C.pemWrap('PUBLIC KEY', record.spki);
+		// The public half is derived from the unlocked private key, never read
+		// out of the stored record. The record's authentication tag covers the
+		// wrapped key and the parameters needed to unwrap it — not the public
+		// metadata beside them — so a record edited in place could pair a
+		// genuine private key with somebody else's public one, and the camera
+		// would seal every future recording to a key this operator does not
+		// hold. Deriving it means publishing proves possession, which is the
+		// property that matters here.
+		const key = K.heldKey();
+		if (!key) {
+			say('Unlock the key first: what gets sent to the camera is derived from the ' +
+				'key itself, not from what this browser has written down beside it.', 'warning');
+			return;
+		}
+		const meta = K.metaFor(key);
+		if (meta.fingerprint !== record.fingerprint)
+			say('The stored fingerprint did not match the key it sits beside; the key’s own ' +
+				'is what was sent, and the record has been corrected.', 'warning');
+		const pem = C.publicKeyPem(key);
 		say('Saving the public key to the camera…');
 		apiFetch('/upload', {
 			method: 'POST',
