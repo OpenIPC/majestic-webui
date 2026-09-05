@@ -64,7 +64,9 @@ or "(PR #N)" tag points a reader at something they cannot open, and stops meanin
 anything at all once the branch is deleted. Report one the diff adds - the sentence is
 usually sound and only its citation is wrong, so the fix is to drop the tag - and never
 ask for one yourself. A citation is an issue reporting an observed fault; a pull request
-number is not.
+number is not. The rule does not apply to the files that state it - this guidance, the
+compliance checklist and the convention in CLAUDE.md - which have to name the forms they
+prohibit in order to be checkable.
 
 Do not report: the absence of unit tests for DOM or CGI wiring, which the suite
 deliberately does not cover; jQuery-era style preferences; or the use of `<%in %>`

@@ -162,3 +162,8 @@ pr_compliances:
       requested", "addressed in review", "per the review comment". A trailing
       "(Qodo #N)" or "(PR #N)" tag on an otherwise sound sentence fails this on its
       own: the sentence stays, the tag goes.
+
+      Scope: the three files that STATE this rule — this checklist, .pr_agent.toml and
+      the convention in CLAUDE.md — are exempt, because naming the prohibited forms is
+      what makes the rule checkable at all. Nothing else in the tree has any reason to
+      name a review tool.
