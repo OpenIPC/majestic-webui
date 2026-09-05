@@ -16,7 +16,7 @@ ul { list-style: none; padding: 0; margin: 0; }
 li { border: 1px solid #2c313d; border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; }
 li h2 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
 li p { margin: 0; font-size: 14px; color: rgba(230,232,238,.7); }
-li p + p { margin-top: 8px; }
+li p + p, li p + ul { margin-top: 8px; }
 li ul { margin-top: 10px; }
 li li { border: 0; padding: 0 0 0 16px; margin: 0 0 5px; position: relative;
   font-size: 14px; color: rgba(230,232,238,.7); }
@@ -32,20 +32,27 @@ li li::before { content: "·"; position: absolute; left: 4px; }
     the source. Each round of feedback gets its own version so they stay comparable.</p>
   <ul>
     <li>
-      <h2><a href="v2/">v2 — rebuilt from the first round of feedback</a></h2>
-      <p>Everything raised on v1, applied:</p>
+      <h2><a href="v3/">v3 — the current proposal</a></h2>
+      <p>Second round of feedback applied:</p>
       <ul>
-        <li><strong>Proportional is the default</strong>, not anchored.</li>
-        <li><strong>A drag no longer changes the anchor</strong> — it moves within the one you picked, and only the pad changes it. The magnet that remains pulls an offset to zero.</li>
-        <li><strong>Font stroke weight</strong> is back; it should never have gone.</li>
-        <li><strong>The panel is draggable</strong> by its header, anywhere in the working area — it is no longer trapped inside the picture.</li>
-        <li><strong>Privacy masks are items too</strong>, in the same list and selected the same way. That hole was mine, not reported.</li>
-        <li>Several logos, no artificial size cap, and the region and memory cost shown beside the item row.</li>
+        <li><strong>The panel drags over the settings rail too</strong>, not just the working column — that rail is dead space while you are placing an overlay.</li>
+        <li><strong>Nothing carries a stored name.</strong> A text overlay is the line it prints, a logo is its file, a mask is its number. No “New …”, no “… copy”, nothing to type and nothing to keep unique — which is the concept that was the argument against a layers rail in the first place.</li>
+      </ul>
+    </li>
+    <li>
+      <h2><a href="v2/">v2 — the first round of feedback</a></h2>
+      <ul>
+        <li>Proportional is the default, not anchored.</li>
+        <li>A drag no longer changes the anchor — only the pad does. The magnet that remains pulls an offset to zero.</li>
+        <li>Font stroke weight restored.</li>
+        <li>The panel became draggable.</li>
+        <li>Privacy masks became items in the same list.</li>
+        <li>Several logos, no artificial size cap, region and memory cost shown.</li>
       </ul>
     </li>
     <li>
       <h2><a href="v1/">v1 — the first proposal</a></h2>
-      <p>What the feedback above was given on. Kept so the two stay comparable.</p>
+      <p>Where it started. Kept so the rounds stay comparable.</p>
     </li>
   </ul>
 </main>

@@ -1,0 +1,1485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OSD overlay editor — v3, for issue #340</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=PT+Mono&display=swap">
+<style>
+    body { margin: 0; }
+    * { box-sizing: border-box; }
+    a { color: #8a9fd0; text-decoration: none; }
+    a:hover { color: #5c70e8; }
+    .cap { color: #878a94; font-size: 11px; font-weight: 600; letter-spacing: 0.07em;
+           text-transform: uppercase; margin: 0; }
+    .rule { flex: 1 1 auto; height: 1px; background: #2c313d; }
+    .note { color: #878a94; font-size: 11px; }
+    .sub { font-size: 11px; line-height: 1.45; color: #878a94; margin: 0; }
+    .mono { font-family: 'PT Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    .box { background: #1c1f27; border: 1px solid #2c313d; border-radius: 12px;
+           box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+    .hud { display: flex; align-items: center; gap: 2px; padding: 3px;
+           background: rgba(13, 15, 20, 0.72); border: 1px solid rgba(255, 255, 255, 0.09);
+           border-radius: 8px; backdrop-filter: blur(10px); }
+    .pseg { display: flex; width: fit-content; gap: 2px; padding: 2px; background: #232734;
+            border: 1px solid #2c313d; border-radius: 8px; }
+    .pseg button { appearance: none; border: 0; margin: 0; padding: 6px 12px; border-radius: 6px;
+                   background: none; color: #b6b9c2; font: inherit; font-size: 12px;
+                   font-weight: 500; white-space: nowrap; cursor: pointer; }
+    .pseg button.on { background: #5c70e8; color: #fff; }
+    .pad { display: grid; grid-template-columns: repeat(3, 30px); grid-template-rows: repeat(3, 30px);
+           gap: 3px; padding: 3px; background: #232734; border: 1px solid #2c313d; border-radius: 8px; }
+    .pad button, .pad span { appearance: none; margin: 0; padding: 0; border: 0; border-radius: 5px;
+                             cursor: pointer; background: none; display: flex; }
+    .pad button:hover { background: rgba(230, 232, 238, 0.07); }
+    .pad button.on, .pad span.on { background: #5c70e8; }
+    .pad i { display: block; border-radius: 1px; background: #6a7182; }
+    .pad button.on i, .pad span.on i { background: #fff; }
+    .num { width: 74px; height: 32px; padding: 5px 9px; background: #14161c; color: #e6e8ee;
+           border: 1px solid #2c313d; border-radius: 8px; font: inherit; font-size: 13px;
+           font-family: 'PT Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+    .num:focus { outline: 0; border-color: #5c70e8; box-shadow: 0 0 0 3px rgba(92, 112, 232, 0.4); }
+    .num:disabled { color: #5b606c; background: #191c23; }
+    .unit { height: 32px; padding: 5px 6px; background: #14161c; color: #e6e8ee;
+            border: 1px solid #2c313d; border-radius: 8px; font: inherit; font-size: 12px; }
+    .unit:disabled { color: #5b606c; background: #191c23; }
+    .sw { flex: 0 0 auto; width: 30px; height: 15px; border-radius: 15px; position: relative;
+          background: rgba(230, 232, 238, 0.22); }
+    .sw.on { background: #5c70e8; }
+    .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px;
+                 border-radius: 50%; background: #fff; }
+    .sw.on::after { left: 17px; }
+    .chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px;
+            border: 1px solid #2c313d; border-radius: 7px; background: #232734;
+            font-size: 12px; color: #e6e8ee; cursor: pointer; }
+    .chip.on { border-color: #5c70e8; box-shadow: 0 0 0 1px rgba(92,112,232,0.35); }
+    .chip-k { font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+              text-transform: uppercase; color: #8a9fd0; }
+    .chip-v { font-family: 'PT Mono', ui-monospace, monospace; color: #b6b9c2; font-size: 11px; }
+    .btn { appearance: none; border: 1px solid #2c313d; padding: 6px 11px; border-radius: 8px;
+           background: #232734; color: #e6e8ee; font: inherit; font-size: 12px; font-weight: 500;
+           cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .btn:hover { border-color: #5c70e8; color: #fff; }
+    .btn.pri { background: #5c70e8; border-color: #5c70e8; color: #fff; }
+    .hudico { display: inline-flex; align-items: center; justify-content: center;
+              width: 30px; height: 30px; border-radius: 6px; color: #d8dbe4; }
+
+html { background: #14161c; }
+body { background: #14161c; color: #e6e8ee; padding: 40px 24px 64px;
+  font-family: 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.55; }
+header { max-width: 780px; margin: 0 auto 26px; }
+h1 { font-size: 26px; font-weight: 600; margin: 0 0 6px; }
+p.lede { margin: 0 0 22px; color: rgba(230,232,238,.65); font-size: 15px; }
+p.lede a { color: rgb(122,140,245); }
+.seg { display: flex; flex-wrap: wrap; width: fit-content; gap: 2px; padding: 3px;
+  background: #232734; border: 1px solid #2c313d; border-radius: 9px; }
+.seg button { appearance: none; border: 0; margin: 0; padding: 7px 14px; border-radius: 6px;
+  background: none; color: #b6b9c2; font: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer; }
+.seg button.on { background: #5c70e8; color: #fff; }
+#note { max-width: 780px; margin: 16px auto 22px; color: rgba(230,232,238,.6);
+  font-size: 13.5px; min-height: 40px; }
+/* The boards are fixed-width designs. Rather than reflow them — which would be
+   a different design — the stage scales the whole thing down to whatever width
+   the window has, the way a print proof is viewed. */
+.stage { display: flex; justify-content: center; }
+.scaler { transform-origin: top center; }
+.board { border: 1px solid #2c313d; border-radius: 14px; overflow: hidden;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.35); }
+footer { max-width: 780px; margin: 40px auto 0; color: rgba(230,232,238,.45);
+  font-size: 12.5px; }
+footer a { color: rgb(122,140,245); }
+
+#board-editor .item { position: absolute; cursor: move; border: 1.5px solid transparent;
+            border-radius: 3px; touch-action: none; }
+#board-editor .item:hover { border-color: rgba(255,255,255,0.45); }
+#board-editor .item.sel { border-color: #5c70e8; box-shadow: 0 0 0 1px rgba(92,112,232,0.5); }
+#board-editor .item.off { opacity: 0.28; }
+#board-editor .mask { position: absolute; background: #05070b; border: 1.5px solid transparent;
+            touch-action: none; cursor: move; }
+#board-editor .mask:hover { border-color: rgba(255,255,255,0.45); }
+#board-editor .mask.sel { border-color: #e0a458; box-shadow: 0 0 0 1px rgba(224,164,88,0.5); }
+#board-editor .mask.off { opacity: 0.28; }
+#board-editor .grip { position: absolute; right: -5px; bottom: -5px; width: 10px; height: 10px;
+            border-radius: 2px; background: #e0a458; cursor: nwse-resize; }
+#board-editor .itag { position: absolute; left: -1.5px; top: -19px; padding: 1px 6px; border-radius: 4px;
+            background: #5c70e8; color: #fff; font-size: 10px; font-weight: 600;
+            letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+#board-editor .itag.amber { background: #e0a458; color: #191c23; }
+#board-editor .pop { position: absolute; z-index: 8; width: 322px; padding: 0 14px 14px;
+           background: rgba(13,15,20,0.9); border: 1px solid rgba(255,255,255,0.12);
+           border-radius: 12px; backdrop-filter: blur(14px);
+           box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+#board-editor .pop-head { display: flex; align-items: center; gap: 9px; padding: 12px 0 11px;
+                cursor: grab; touch-action: none; user-select: none; }
+#board-editor .pop-head:active { cursor: grabbing; }
+#board-editor .pop .cap { color: #9aa0ad; }
+#board-editor .ptab { display: flex; gap: 2px; padding: 2px; margin: 0 0 11px;
+            background: rgba(255,255,255,0.07); border-radius: 8px; }
+#board-editor .ptab button { flex: 1 1 0; appearance: none; border: 0; padding: 5px 8px; border-radius: 6px;
+                   background: none; color: #b6b9c2; font: inherit; font-size: 11px;
+                   font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+                   cursor: pointer; }
+#board-editor .ptab button.on { background: rgba(255,255,255,0.14); color: #fff; }
+#board-editor .pop .num, #board-editor .pop .unit { background: rgba(0,0,0,0.35); border-color: rgba(255,255,255,0.14);
+                            color: #fff; }
+#board-editor .pop .pad { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
+#board-editor .pop .chip { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.14); color: #fff; }
+#board-editor .pop .btn { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.14); color: #fff; }
+#board-editor .pop .sub { color: #9aa0ad; }
+#board-editor .prow { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+#board-editor .plab { flex: 0 0 74px; color: #9aa0ad; font-size: 11px; font-weight: 600;
+            letter-spacing: 0.06em; text-transform: uppercase; }
+#board-editor .px { appearance: none; border: 0; background: none; color: #9aa0ad; cursor: pointer;
+          width: 22px; height: 22px; border-radius: 5px; display: inline-flex;
+          align-items: center; justify-content: center; margin-left: auto; }
+#board-editor .px:hover { background: rgba(255,255,255,0.12); color: #fff; }
+#board-editor .warn { margin-top: 10px; padding: 8px 10px; border-radius: 7px;
+            background: rgba(224,164,88,0.12); border-left: 3px solid #e0a458;
+            color: #e6cba6; font-size: 11px; line-height: 1.5; }
+
+#board-chrome .shot { position: relative; width: 380px; height: 214px; background: #0d0f14;
+            border: 1px solid #2c313d; border-radius: 10px; overflow: hidden; }
+#board-chrome .shot .scene { position: absolute; inset: 0;
+                   background: radial-gradient(120% 90% at 50% 8%, #2b3242 0%, #191d27 55%, #0f1219 100%); }
+#board-chrome .shot .pole { position: absolute; left: 200px; top: 36px; width: 66px; height: 118px;
+                  border-radius: 2px 2px 0 0; background: linear-gradient(180deg, #39424f 0%, #232a36 100%); opacity: 0.8; }
+#board-chrome .burn { position: absolute; padding: 2px 5px; border-radius: 2px; background: rgba(0,0,0,0.28);
+            color: #fff; font-size: 9px; white-space: nowrap; }
+#board-chrome .bad { position: absolute; border: 1.5px solid #e0574f; border-radius: 5px;
+           box-shadow: 0 0 0 3px rgba(224,87,79,0.18); }
+#board-chrome .zone { position: absolute; border: 1px dashed rgba(92,112,232,0.55); border-radius: 4px;
+            background: rgba(92,112,232,0.08); }
+#board-items .opt { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+#board-items .opt h4 { margin: 0 0 3px; font-size: 15px; font-weight: 600; }
+#board-items .mini { position: relative; background: #0d0f14; border: 1px solid #2c313d;
+            border-radius: 9px; overflow: hidden; }
+#board-items .mini .scene { position: absolute; inset: 0;
+                   background: radial-gradient(120% 90% at 50% 8%, #2b3242 0%, #191d27 55%, #0f1219 100%); }
+#board-items .ov { position: absolute; padding: 2px 5px; border-radius: 2px; background: rgba(0,0,0,0.3);
+          color: #fff; font-size: 8px; white-space: nowrap; }
+#board-items .lay { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 6px;
+           font-size: 11px; color: #b6b9c2; }
+#board-items .lay.on { background: #232734; color: #e6e8ee; }
+#board-items .pro { color: #7fd2a8; }
+#board-items .con { color: #e0a458; }
+#board-items .fact { display: flex; gap: 12px; padding: 12px 14px; border-radius: 9px;
+            background: #232734; border: 1px solid #2c313d; }
+#board-logos .swatch { width: 21px; height: 21px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.14); }
+#board-logos .drop { display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 9px; padding: 24px; border: 1.5px dashed #2c313d; border-radius: 10px;
+            color: #8a9fd0; text-align: center; }
+#board-logos .pro { color: #7fd2a8; }
+#board-logos .con { color: #e0a458; }
+#board-logos .step { display: flex; gap: 12px; align-items: flex-start; }
+#board-logos .stepn { flex: 0 0 22px; height: 22px; border-radius: 50%; background: #232734;
+             border: 1px solid #2c313d; color: #8a9fd0; font-size: 11px; font-weight: 600;
+             display: flex; align-items: center; justify-content: center; }
+#board-phone .pad { grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(3, 40px); }
+#board-phone .num { width: 78px; height: 40px; font-size: 14px; }
+#board-phone .unit { height: 40px; }
+#board-phone .ptab { display: flex; gap: 2px; padding: 2px; background: #232734; border: 1px solid #2c313d;
+            border-radius: 8px; }
+#board-phone .ptab span { flex: 1 1 0; text-align: center; padding: 9px 8px; border-radius: 6px;
+                 color: #b6b9c2; font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+                 text-transform: uppercase; }
+#board-phone .ptab span.on { background: #5c70e8; color: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Overlay editor — v3</h1>
+  <p class="lede">Drawn for
+    <a href="https://github.com/OpenIPC/majestic-webui/issues/340">OpenIPC/majestic-webui#340</a>,
+    which asked for the anchor and offset controls back after the visual editor replaced them.
+    The first board is that proposal and it is interactive — everything on it responds. The rest
+    are the reasoning behind it, and two directions for the round after this one. Nothing here
+    talks to a camera; the picture is a drawing.</p>
+  <div class="seg" id="tabs"><button type="button" data-b="editor" class="on">Editor</button><button type="button" data-b="chrome">The picture</button><button type="button" data-b="items">Several overlays</button><button type="button" data-b="logos">Logos</button><button type="button" data-b="phone">Phone</button></div>
+</header>
+<div id="note"></div>
+<div class="stage"><div class="scaler" id="scaler">
+<section class="board" id="board-editor">
+<div data-root style="width: 1440px; height: 900px; overflow: hidden; background: #14161c; color: #e6e8ee; font-family: 'Montserrat', system-ui, sans-serif;">
+
+  <div style="display: flex; align-items: center; gap: 26px; height: 60px; padding: 0 60px; background: #1c1f27; border-bottom: 1px solid #2c313d;">
+    <div style="display: flex; align-items: center; gap: 9px;">
+      <div style="width: 22px; height: 22px; border-radius: 50%; border: 2px solid #e6e8ee; display: flex; align-items: center; justify-content: center;">
+        <div style="width: 7px; height: 7px; border-radius: 50%; background: #e6e8ee;"></div>
+      </div>
+      <span style="font-size: 16px; font-weight: 700;">OpenIPC</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 20px; font-size: 13px; color: #b6b9c2;">
+      <span>Dashboard</span><span>Live</span><span>Recordings</span>
+      <span style="color: #e6e8ee; border-bottom: 2px solid #5c70e8; padding-bottom: 2px;">Camera</span>
+      <span>System</span>
+    </div>
+    <span style="margin-left: auto; font-size: 13px; color: #b6b9c2;">Sign out</span>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 14px; height: 40px; padding: 0 60px; font-size: 11px; color: #878a94; border-bottom: 1px solid #2c313d;">
+    <div style="width: 90px; height: 4px; border-radius: 2px; background: #2c313d; overflow: hidden;">
+      <div style="width: 22%; height: 100%; background: #0da893;"></div>
+    </div>
+    <span>hi3516ev200-sc2315e, 2.6.09.01-lite</span>
+    <span style="margin-left: auto;">6:08:12 PM</span>
+  </div>
+
+  <div style="display: flex; gap: 24px; padding: 20px 60px 0;">
+
+    <div style="flex: 0 0 306px;">
+      <h2 style="margin: 0 0 10px; color: #5c70e8; font-size: 18px; font-weight: 500;">Camera Settings</h2>
+      <div style="height: 32px; border: 1px solid #2c313d; border-radius: 6px; background: #1c1f27; display: flex; align-items: center; padding: 0 11px; color: #878a94; font-size: 12px;">Search settings…</div>
+      <div style="display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; margin-top: 10px;">
+        <div class="cap" style="padding: 9px 11px 3px;">Image</div>
+        <div style="padding: 6px 11px; color: #b6b9c2;">Live adjustments</div>
+        <div style="padding: 6px 11px; color: #b6b9c2;">ISP / Exposure</div>
+        <div style="padding: 6px 11px; color: #b6b9c2;">Day / Night</div>
+        <div class="cap" style="padding: 12px 11px 3px;">Video &amp; Audio</div>
+        <div style="padding: 6px 11px; color: #b6b9c2;">Main stream</div>
+        <div style="padding: 6px 11px; color: #b6b9c2;">Sub stream</div>
+        <div style="padding: 6px 11px; border-radius: 6px; background: #5c70e8; color: #fff; font-weight: 500;">Overlay</div>
+        <div class="cap" style="padding: 12px 11px 3px;">Events</div>
+        <div style="padding: 6px 11px; color: #b6b9c2;">Motion detection</div>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 auto; min-width: 0;">
+
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 9px;">
+        <h3 class="cap">Overlay</h3>
+        <span class="rule"></span>
+        <span class="note"><span id="ed-headnote"></span></span>
+      </div>
+
+      <!-- The panel lives out here rather than inside the picture, so it can be
+           dragged anywhere in the working area — over the bar, over the item
+           row — instead of being trapped by the picture's own clip. -->
+      <div data-wrap
+           style="position: relative;">
+
+        <div data-pic tabindex="0"
+             style="position: relative; width: 880px; height: 495px; background: #0d0f14; border: 1px solid #2c313d; border-radius: 12px; overflow: hidden; touch-action: none; user-select: none; outline: none;">
+
+          <div style="position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 8%, #2b3242 0%, #191d27 55%, #0f1219 100%);"></div>
+          <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 160px; background: linear-gradient(180deg, rgba(20,24,32,0) 0%, rgba(28,33,44,0.72) 60%, rgba(33,39,52,0.88) 100%);"></div>
+          <div style="position: absolute; left: 462px; top: 84px; width: 155px; height: 272px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #39424f 0%, #232a36 100%); opacity: 0.8;"></div>
+
+          <div id="ed-masks"></div>
+
+          <div id="ed-layer"></div>
+        </div>
+
+        <div class="box" style="display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 7px 10px;">
+          <span class="pseg"><button type="button" class="on">Main</button><button type="button">Sub</button></span>
+          <span class="note mono">H264 1920&#215;1080 &#183; 25 fps</span>
+          <span style="margin-left: auto; display: flex; gap: 4px;">
+            <span class="hudico" title="Snapshot">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 6.6h3.2l1.5-2.1h5.4l1.5 2.1h3.2v9H2.6z" stroke-linejoin="round"></path><circle cx="10" cy="10.6" r="3.1"></circle></svg>
+            </span>
+            <span class="hudico" title="Fullscreen">
+              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path></svg>
+            </span>
+          </span>
+        </div>
+
+        <div class="box" style="display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 12px;">
+          <span class="cap" style="flex: 0 0 auto;">Items</span>
+          <span id="ed-chips"></span>
+          <button type="button" class="btn" style="border-style: dashed; background: transparent; color: #8a9fd0;" data-act="addtext">+ Text</button>
+          <button type="button" class="btn" style="border-style: dashed; background: transparent; color: #8a9fd0;" data-act="addlogo">+ Logo</button>
+          <button type="button" class="btn" style="border-style: dashed; background: transparent; color: #8a9fd0;" data-act="addmask">+ Mask</button>
+          <span class="sub" style="margin-left: auto; text-align: right; max-width: 260px;"><span id="ed-cost"></span></span>
+        </div>
+
+        <!-- ── the inspector ──────────────────────────────────────────── -->
+        <div id="ed-pop"></div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 18px; margin-top: 10px; padding: 0 2px;">
+        <span style="display: flex; align-items: center; gap: 9px;">
+          <span class="sw on"></span><span style="font-size: 12.5px;">Overlays on</span>
+        </span>
+        <span class="rule"></span>
+        <button type="button" class="btn pri" style="padding: 8px 20px; font-size: 13px;">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="board" id="board-chrome" hidden>
+<div style="width: 880px; min-height: 700px; padding: 32px; background: #14161c; color: #e6e8ee; font-family: 'Montserrat', system-ui, sans-serif;">
+
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
+    <h3 class="cap">The picture belongs to the overlay</h3><span class="rule"></span>
+  </div>
+  <p class="sub" style="max-width: 700px; margin-bottom: 20px; font-size: 12.5px;">
+    An overlay can be in any of nine places, so the player's own furniture may be in none of them.
+    That is the whole rule, and it is not a preference — the bar is pinned to the bottom edge at
+    <span class="mono">inset: auto 0.75rem 0.75rem</span>, which is exactly where the commonest
+    overlay of all goes. The two collide on a stock camera, and this is shipped behaviour rather
+    than a fault in the mockup.
+  </p>
+
+  <div style="display: flex; gap: 24px; margin-bottom: 26px;">
+    <div>
+      <p class="cap" style="margin-bottom: 9px; color: #e0574f;">Now</p>
+      <div class="shot">
+        <span class="scene"></span><span class="pole"></span>
+        <span class="burn" style="right: 10px; bottom: 12px;">02.09.2026 18:08:12</span>
+        <span style="position: absolute; left: 9px; right: 9px; bottom: 9px; display: flex; align-items: center; gap: 5px;">
+          <span class="hud" style="padding: 2px;">
+            <span style="padding: 3px 8px; border-radius: 5px; background: rgba(255,255,255,0.12); color: #fff; font-size: 8px; font-weight: 600; letter-spacing: 0.06em;">MAIN</span>
+            <span style="padding: 3px 8px; color: #b6b9c2; font-size: 8px; font-weight: 600; letter-spacing: 0.06em;">SUB</span>
+          </span>
+          <span style="margin-left: auto; display: flex; gap: 4px;">
+            <span class="hud" style="width: 22px; height: 22px; justify-content: center; padding: 0;">
+              <svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="#d8dbe4" stroke-width="1.5" aria-hidden="true"><path d="M2.6 6.6h3.2l1.5-2.1h5.4l1.5 2.1h3.2v9H2.6z" stroke-linejoin="round"></path><circle cx="10" cy="10.6" r="3.1"></circle></svg>
+            </span>
+            <span class="hud" style="width: 22px; height: 22px; justify-content: center; padding: 0;">
+              <svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="#d8dbe4" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path></svg>
+            </span>
+          </span>
+        </span>
+        <span class="bad" style="right: 6px; bottom: 5px; width: 120px; height: 34px;"></span>
+      </div>
+      <p class="sub" style="margin-top: 10px; max-width: 380px; line-height: 1.6;">
+        The timestamp and the snapshot and fullscreen buttons are drawn on top of each other. The
+        overlay is the camera's own burned-in pixels, so it wins — and the two controls a person
+        reaches for most on this page are the ones underneath it.
+      </p>
+    </div>
+
+    <div>
+      <p class="cap" style="margin-bottom: 9px; color: #7fd2a8;">Proposed</p>
+      <div class="shot">
+        <span class="scene"></span><span class="pole"></span>
+        <span class="burn" style="right: 10px; bottom: 10px;">02.09.2026 18:08:12</span>
+        <span class="burn" style="left: 10px; top: 10px;">FRONT GATE</span>
+      </div>
+      <div class="box" style="width: 380px; display: flex; align-items: center; gap: 7px; margin-top: 7px; padding: 6px 8px;">
+        <span class="pseg" style="padding: 1px;"><button type="button" class="on" style="padding: 4px 9px; font-size: 10px;">Main</button><button type="button" style="padding: 4px 9px; font-size: 10px;">Sub</button></span>
+        <span class="note mono" style="font-size: 9px;">H264 1920×1080 · 25 fps</span>
+        <span style="margin-left: auto; display: flex; gap: 3px;">
+          <span class="hudico" style="width: 24px; height: 24px;">
+            <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 6.6h3.2l1.5-2.1h5.4l1.5 2.1h3.2v9H2.6z" stroke-linejoin="round"></path><circle cx="10" cy="10.6" r="3.1"></circle></svg>
+          </span>
+          <span class="hudico" style="width: 24px; height: 24px;">
+            <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path></svg>
+          </span>
+        </span>
+      </div>
+      <p class="sub" style="margin-top: 10px; max-width: 380px; line-height: 1.6;">
+        The bar docks to a row beneath, where it costs 46px of page and nothing of picture. The
+        page already knows how to do this — <span class="mono">dockRuntime</span> moves the
+        night-mode controls off the picture on a short window for the same reason.
+      </p>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px;">
+    <span class="cap">What is allowed on the picture, and what is not</span><span class="rule"></span>
+  </div>
+
+  <div style="display: flex; gap: 22px;">
+    <div style="flex: 0 0 380px;">
+      <div class="shot" style="height: 214px;">
+        <span class="scene"></span>
+        <span class="zone" style="left: 6px; top: 6px; width: 118px; height: 64px;"></span>
+        <span class="zone" style="left: 131px; top: 6px; width: 118px; height: 64px;"></span>
+        <span class="zone" style="right: 6px; top: 6px; width: 118px; height: 64px;"></span>
+        <span class="zone" style="left: 6px; top: 75px; width: 118px; height: 64px;"></span>
+        <span class="zone" style="left: 131px; top: 75px; width: 118px; height: 64px;"></span>
+        <span class="zone" style="right: 6px; top: 75px; width: 118px; height: 64px;"></span>
+        <span class="zone" style="left: 6px; bottom: 6px; width: 118px; height: 64px;"></span>
+        <span class="zone" style="left: 131px; bottom: 6px; width: 118px; height: 64px;"></span>
+        <span class="zone" style="right: 6px; bottom: 6px; width: 118px; height: 64px;"></span>
+      </div>
+      <p class="sub" style="margin-top: 10px; line-height: 1.6;">
+        Nine anchors, nine places an overlay can be. There is no corner left over to put a
+        control in.
+      </p>
+    </div>
+
+    <div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 13px;">
+      <div>
+        <p style="margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: #7fd2a8;">Stays on the picture</p>
+        <p class="sub" style="line-height: 1.65;">
+          The overlay items themselves, their selection outline, and the inspector editing one —
+          because that is what you came to look at, and because the inspector opens on the far
+          side from whatever it is editing rather than at a fixed corner.
+        </p>
+      </div>
+      <div>
+        <p style="margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: #e0574f;">Moves below it</p>
+        <p class="sub" style="line-height: 1.65;">
+          Stream picker, codec chip, snapshot, fullscreen, and the placement readout the earlier
+          round put in the top-left corner — which was the same mistake in a different corner,
+          since a top-left overlay is the second most common one there is.
+        </p>
+      </div>
+      <div>
+        <p style="margin: 0 0 4px; font-size: 12.5px; font-weight: 600;">And on the Live page?</p>
+        <p class="sub" style="line-height: 1.65;">
+          Unchanged. There the stage <em>is</em> the window and there is no page underneath to dock
+          onto, so the bar stays overlaid and auto-hides. This rule is the Overlay leaf's, where
+          the picture sits in a card with room beneath it — the two pages differ because their
+          layouts genuinely do.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="board" id="board-items" hidden>
+<div style="width: 1420px; min-height: 780px; padding: 32px; background: #14161c; color: #e6e8ee; font-family: 'Montserrat', system-ui, sans-serif;">
+
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
+    <h3 class="cap">Brainstorm — several overlays at once</h3><span class="rule"></span>
+  </div>
+  <p class="sub" style="max-width: 900px; margin-bottom: 20px; font-size: 12.5px;">
+    Today there is one overlay string and the page can assume it. With several, three questions
+    appear that did not exist before: how you reach an item that is not the one you last touched,
+    what happens when two of them overlap, and what it costs the camera. The three arrangements
+    below answer the first differently; the panel at the bottom is the same for all of them,
+    because it is a fact about the hardware rather than a choice.
+  </p>
+
+  <div style="display: flex; gap: 22px;">
+
+    <!-- ── A ─────────────────────────────────────────────────────────── -->
+    <div class="opt">
+      <h4>A · A row of chips under the picture <span style="margin-left: 6px; padding: 3px 8px; border-radius: 6px; background: #5c70e8; color: #fff; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 2px;">Chosen</span></h4>
+      <p class="sub" style="margin-bottom: 12px;">What the main artboard draws.</p>
+      <div class="mini" style="height: 176px;">
+        <span class="scene"></span>
+        <span class="ov" style="left: 8px; top: 8px;">FRONT GATE</span>
+        <span class="ov" style="right: 8px; bottom: 8px; outline: 1.5px solid #5c70e8;">02.09.2026 18:08:12</span>
+        <span style="position: absolute; right: 9px; top: 7px; width: 17px; height: 17px; border-radius: 50%; border: 2px solid #fff;"></span>
+      </div>
+      <div class="box" style="display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 8px 9px;">
+        <span class="chip on"><span class="chip-k">Text</span><span class="chip-v">02.09.2026…</span></span>
+        <span class="chip"><span class="chip-k">Text</span><span class="chip-v">FRONT GATE</span></span>
+        <span class="chip"><span class="chip-k">Logo</span></span>
+        <span class="btn" style="border-style: dashed; background: transparent; color: #8a9fd0;">+</span>
+      </div>
+      <p class="sub pro" style="margin-top: 12px; line-height: 1.6;">
+        One row, no width taken from the picture — which on a 900px laptop is the only
+        dimension actually in short supply. Reads as what it is: three or four things,
+        not a document outline.
+      </p>
+      <p class="sub con" style="margin-top: 8px; line-height: 1.6;">
+        Nowhere to express z-order, and it wraps to a second row somewhere around six
+        items. Hiding an item leaves a chip that looks the same as the rest unless it
+        earns its own dimmed state.
+      </p>
+    </div>
+
+    <!-- ── B ─────────────────────────────────────────────────────────── -->
+    <div class="opt">
+      <h4>B · A layers rail beside the picture</h4>
+      <p class="sub" style="margin-bottom: 12px;">The drawing-tool answer.</p>
+      <div style="display: flex; gap: 8px;">
+        <div class="mini" style="flex: 1 1 auto; height: 176px;">
+          <span class="scene"></span>
+          <span class="ov" style="left: 8px; top: 8px;">FRONT GATE</span>
+          <span class="ov" style="right: 8px; bottom: 8px; outline: 1.5px solid #5c70e8;">02.09.2026 18:08:12</span>
+          <span style="position: absolute; right: 9px; top: 7px; width: 17px; height: 17px; border-radius: 50%; border: 2px solid #fff;"></span>
+        </div>
+        <div class="box" style="flex: 0 0 132px; padding: 7px;">
+          <div class="lay on">
+            <svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"></path><circle cx="10" cy="10" r="2.2"></circle></svg>
+            Timestamp
+          </div>
+          <div class="lay">
+            <svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"></path><circle cx="10" cy="10" r="2.2"></circle></svg>
+            Camera name
+          </div>
+          <div class="lay">
+            <svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"></path><circle cx="10" cy="10" r="2.2"></circle></svg>
+            Logo
+          </div>
+          <div class="lay" style="color: #8a9fd0; border: 1px dashed #2c313d; margin-top: 5px; justify-content: center;">+ Add</div>
+        </div>
+      </div>
+      <p class="sub pro" style="margin-top: 12px; line-height: 1.6;">
+        Scales past six, gives every item a permanent name rather than a truncation of
+        its own text, and is the only one of the three with somewhere to put drag-to-reorder —
+        which is what settles two overlays that touch.
+      </p>
+      <p class="sub con" style="margin-top: 8px; line-height: 1.6;">
+        Costs ~140px of picture width. On the laptop the picture is already the thing
+        being squeezed, and a rail that is empty on the common case — one timestamp —
+        is furniture charged to everybody.
+      </p>
+    </div>
+
+    <!-- ── C ─────────────────────────────────────────────────────────── -->
+    <div class="opt">
+      <h4>C · The picture, and nothing else</h4>
+      <p class="sub" style="margin-bottom: 12px;">No list at all.</p>
+      <div class="mini" style="height: 176px;">
+        <span class="scene"></span>
+        <span class="ov" style="left: 8px; top: 8px;">FRONT GATE</span>
+        <span class="ov" style="right: 8px; bottom: 8px; outline: 1.5px solid #5c70e8;">02.09.2026 18:08:12</span>
+        <span style="position: absolute; right: 9px; top: 7px; width: 17px; height: 17px; border-radius: 50%; border: 2px solid #fff;"></span>
+        <span style="position: absolute; left: 50%; bottom: 9px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 7px; background: rgba(13,15,20,0.72); border: 1px solid rgba(255,255,255,0.12); color: #fff; font-size: 10px; font-weight: 600;">+ Add overlay</span>
+      </div>
+      <div style="height: 41px; margin-top: 8px; display: flex; align-items: center;">
+        <p class="sub" style="font-style: italic;">— nothing under the picture —</p>
+      </div>
+      <p class="sub pro" style="margin-top: 12px; line-height: 1.6;">
+        The largest picture of the three, and every item is discovered where it actually
+        is. Nothing to keep in step with the picture, because there is no second
+        representation to disagree with it.
+      </p>
+      <p class="sub con" style="margin-top: 8px; line-height: 1.6;">
+        An item switched off, or one dragged off the edge by a resolution change, becomes
+        unreachable — there is no list to find it in. That is a trap rather than a
+        tradeoff, and it would need an answer before this could ship.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── the fact that is not a choice ─────────────────────────────────── -->
+  <div style="display: flex; align-items: center; gap: 12px; margin: 26px 0 12px;">
+    <span class="cap">The same in all three — what an overlay costs</span><span class="rule"></span>
+  </div>
+
+  <div style="display: flex; gap: 16px;">
+    <div class="fact" style="flex: 1 1 0;">
+      <span style="flex: 0 0 auto; color: #5c70e8;">
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="2"></rect><path d="M7 3v14M13 3v14M3 7h14M3 13h14" opacity="0.5"></path></svg>
+      </span>
+      <div>
+        <p style="margin: 0 0 4px; font-size: 12.5px; font-weight: 600;">A region per item, per stream size</p>
+        <p class="sub" style="line-height: 1.6;">
+          The overlay is hardware: one region is created per <em>distinct frame width</em>, not per
+          encoder, because the glyph size is derived from the width. So three items on a camera
+          encoding two sizes is six regions — and a snapshot that inherits the main stream's size
+          costs nothing extra.
+        </p>
+      </div>
+    </div>
+    <div class="fact" style="flex: 1 1 0;">
+      <span style="flex: 0 0 auto; color: #5c70e8;">
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M10 3.5v7"></path><circle cx="10" cy="14.5" r="0.9" fill="currentColor" stroke="none"></circle><path d="M10 2.2 1.8 16.4h16.4z" stroke-linejoin="round"></path></svg>
+      </span>
+      <div>
+        <p style="margin: 0 0 4px; font-size: 12.5px; font-weight: 600;">Running out is silent today</p>
+        <p class="sub" style="line-height: 1.6;">
+          A region the hardware refuses is not a clipped overlay — it is <em>no overlay at all</em>,
+          with a line in the log and nothing on screen. Whatever arrangement wins has to show the
+          count before the save, not explain it afterwards.
+        </p>
+      </div>
+    </div>
+    <div class="fact" style="flex: 1 1 0;">
+      <span style="flex: 0 0 auto; color: #5c70e8;">
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.5" y="5" width="11" height="8" rx="1.4"></rect><rect x="6.5" y="8" width="11" height="8" rx="1.4"></rect></svg>
+      </span>
+      <div>
+        <p style="margin: 0 0 4px; font-size: 12.5px; font-weight: 600;">Two overlays that touch</p>
+        <p class="sub" style="line-height: 1.6;">
+          Regions are drawn in handle order, so overlap has an answer whether or not the page
+          offers one. Worth deciding now: either the list order <em>is</em> the draw order and can be
+          dragged (B), or the page refuses to let two items overlap and says so.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="box" style="margin-top: 20px; padding: 16px 18px; border-color: #5c70e8; max-width: 1100px;">
+    <p class="cap" style="margin-bottom: 8px; color: #8a9fd0;">Decided — A</p>
+    <p class="sub" style="line-height: 1.65;">
+      Picked by the reporter of #340, on a better argument than the one I had offered: <strong
+      style="color: #e6e8ee;">B forces a new concept — a name for every overlay</strong> — where A
+      can label a chip with the overlay's own text. He also noted that C's objection (an open panel
+      covering the picture, so an overlay underneath cannot be reached) mostly dissolves once the
+      panel can be dragged out of the way, which it now can. C still loses on the harder version of
+      that trap: an overlay switched <em>off</em>, or pushed off the edge by a change of resolution,
+      has no chip and no rail to be found in.
+    </p>
+    <p class="sub" style="line-height: 1.65; margin-top: 10px;">
+      Still open, and still the one that changes the data model rather than the layout: what two
+      overlapping overlays do. Regions are drawn in handle order whether or not the page has an
+      opinion, so the answer exists already — it is only a question of whether it is the one anybody
+      would choose.
+    </p>
+  </div>
+</div>
+</section>
+
+<section class="board" id="board-logos" hidden>
+<div style="width: 1180px; min-height: 900px; padding: 32px; background: #14161c; color: #e6e8ee; font-family: 'Montserrat', system-ui, sans-serif;">
+
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
+    <h3 class="cap">Brainstorm — a logo on the picture</h3><span class="rule"></span>
+  </div>
+  <p class="sub" style="max-width: 780px; margin-bottom: 22px; font-size: 12.5px;">
+    Half of this already exists: the Rockchip path draws a baked-in OpenIPC mark as an overlay
+    region — a 200 × 200 bitmap at four bits per pixel against a sixteen-entry palette,
+    bilinearly rescaled for each stream. So the camera-side question is not <em>can it</em>, it is
+    <em>whose bitmap</em>. That makes the interesting design work browser-side, and it is all one
+    problem: a logo is not a picture the camera can show, it is a picture the camera has to be
+    told how to approximate.
+  </p>
+
+  <!-- ── what the camera actually draws ─────────────────────────────────── -->
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+    <span class="cap">1 · What the camera actually draws, and why the preview has to say so</span>
+    <span class="rule"></span>
+  </div>
+
+  <div style="display: flex; gap: 18px; margin-bottom: 26px;">
+    <div class="box" style="flex: 1 1 0; padding: 18px 20px;">
+      <p class="cap" style="margin-bottom: 12px;">Your file</p>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="width: 92px; height: 92px; border-radius: 8px; background: linear-gradient(135deg, #3a4358 0%, #1d2230 100%); display: flex; align-items: center; justify-content: center;">
+          <svg viewBox="0 0 48 48" width="62" height="62" aria-hidden="true">
+            <defs><radialGradient id="g1" cx="35%" cy="30%"><stop offset="0%" stop-color="#fff"></stop><stop offset="100%" stop-color="#9fb0e8"></stop></radialGradient></defs>
+            <circle cx="24" cy="24" r="20" fill="none" stroke="url(#g1)" stroke-width="3.4" opacity="0.95"></circle>
+            <circle cx="24" cy="24" r="7.5" fill="url(#g1)"></circle>
+          </svg>
+        </div>
+        <div>
+          <p class="mono" style="margin: 0 0 5px; font-size: 12px;">mark.png</p>
+          <p class="sub" style="line-height: 1.6;">512 × 512 · 8-bit RGBA<br>soft gradient · anti-aliased edge<br>drop shadow</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex: 0 0 34px; display: flex; align-items: center; justify-content: center; color: #5c70e8;">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"></path></svg>
+    </div>
+
+    <div class="box" style="flex: 1 1 0; padding: 18px 20px; border-color: #5c70e8;">
+      <p class="cap" style="margin-bottom: 12px; color: #8a9fd0;">What the camera will burn in</p>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="width: 92px; height: 92px; border-radius: 8px; background: linear-gradient(135deg, #3a4358 0%, #1d2230 100%); display: flex; align-items: center; justify-content: center;">
+          <svg viewBox="0 0 48 48" width="62" height="62" shape-rendering="crispEdges" aria-hidden="true">
+            <circle cx="24" cy="24" r="20" fill="none" stroke="#ffffff" stroke-width="4"></circle>
+            <circle cx="24" cy="24" r="7.5" fill="#ffffff"></circle>
+          </svg>
+        </div>
+        <div>
+          <p class="mono" style="margin: 0 0 5px; font-size: 12px;">200 × 200 · 4bpp</p>
+          <p class="sub" style="line-height: 1.6;">16 colours, quantised<br>hard edge — no shadow<br>rescaled per stream</p>
+        </div>
+      </div>
+      <div style="display: flex; gap: 5px; margin-top: 14px;">
+        <span class="swatch" style="background: #ffffff;"></span>
+        <span class="swatch" style="background: #f3f4f8;"></span>
+        <span class="swatch" style="background: #c9cfe4;"></span>
+        <span class="swatch" style="background: #9fb0e8;"></span>
+        <span class="swatch" style="background: #6f7fbe;"></span>
+        <span class="swatch" style="background: #3d4666;"></span>
+        <span class="swatch" style="background: rgba(255,255,255,0.06); border-style: dashed;"></span>
+        <span class="sub" style="align-self: center; margin-left: 6px;">6 of 16 used</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="box" style="display: flex; gap: 14px; padding: 14px 16px; margin-bottom: 28px; border-color: #4a3a22; background: #241f16;">
+    <span style="flex: 0 0 auto; color: #e0a458;">
+      <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M10 3.5v7"></path><circle cx="10" cy="14.5" r="0.9" fill="currentColor" stroke="none"></circle><path d="M10 2.2 1.8 16.4h16.4z" stroke-linejoin="round"></path></svg>
+    </span>
+    <div>
+      <p style="margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: #e6e8ee;">On first-generation HiSilicon the edge is one bit</p>
+      <p class="sub" style="line-height: 1.6; max-width: 900px;">
+        Those parts draw into ARGB1555 — a pixel is either fully there or fully gone. Every later
+        generation gets ARGB4444, which spends its coverage on sixteen levels of transparency and
+        can hold a soft edge. So the same PNG is a clean logo on one camera and a ragged stencil on
+        another, and the only honest thing the page can do is render <em>that camera's</em> approximation
+        beside the file. Nothing about this is fixable in the browser; it is fixable only by saying it.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── how it gets there ──────────────────────────────────────────────── -->
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+    <span class="cap">2 · How it gets onto the camera — three routes</span><span class="rule"></span>
+  </div>
+
+  <div style="display: flex; gap: 18px; margin-bottom: 26px;">
+    <div class="box" style="flex: 1 1 0; padding: 18px 20px;">
+      <p style="margin: 0 0 4px; font-size: 14px; font-weight: 600;">A · Drop a file in the browser</p>
+      <p class="sub" style="margin-bottom: 14px;">The browser quantises; the camera stores a bitmap.</p>
+      <div class="drop">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 16V4M7.5 8.5 12 4l4.5 4.5"></path><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"></path></svg>
+        <span style="font-size: 12px;">Drop a PNG or SVG</span>
+      </div>
+      <p class="sub pro" style="margin-top: 13px; line-height: 1.6;">
+        The only route where the person never touches a filesystem, and the browser is the one
+        place that can show the approximation before it is committed. An SVG also rasterises to
+        whatever the stream needs rather than once.
+      </p>
+      <p class="sub con" style="margin-top: 8px; line-height: 1.6;">
+        Needs an upload endpoint and somewhere on a flash-constrained camera to keep the result.
+        Quantising in the browser means the algorithm lives in two places if the camera ever
+        needs to do it too.
+      </p>
+    </div>
+
+    <div class="box" style="flex: 1 1 0; padding: 18px 20px;">
+      <p style="margin: 0 0 4px; font-size: 14px; font-weight: 600;">B · Pick what is already on the camera</p>
+      <p class="sub" style="margin-bottom: 14px;">A directory, listed — the trick <span class="mono">isp.sensorConfig</span> already uses.</p>
+      <div style="display: flex; flex-direction: column; gap: 5px;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; background: #232734; border: 1px solid #5c70e8;">
+          <span style="width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
+            <svg viewBox="0 0 48 48" width="17" height="17" aria-hidden="true"><circle cx="24" cy="24" r="20" fill="none" stroke="#fff" stroke-width="4"></circle><circle cx="24" cy="24" r="7.5" fill="#fff"></circle></svg>
+          </span>
+          <span class="mono" style="font-size: 11px;">/etc/logo/openipc.bin</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; background: #232734;">
+          <span style="width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
+            <span style="width: 14px; height: 14px; border-radius: 3px; background: #4a5163;"></span>
+          </span>
+          <span class="mono" style="font-size: 11px; color: #b6b9c2;">/etc/logo/site-a.bin</span>
+        </div>
+      </div>
+      <p class="sub pro" style="margin-top: 13px; line-height: 1.6;">
+        No upload path, no new storage question, and a fleet gets its mark from the firmware
+        image where it belongs — one build, every camera, nothing to set per device.
+      </p>
+      <p class="sub con" style="margin-top: 8px; line-height: 1.6;">
+        Useless to the person with one camera and a PNG, which is most of the people asking.
+        Getting a file there at all means SSH.
+      </p>
+    </div>
+
+    <div class="box" style="flex: 1 1 0; padding: 18px 20px; border-color: #5c70e8;">
+      <p style="margin: 0 0 4px; font-size: 14px; font-weight: 600;">C · Both, and B is the fallback
+        <span style="margin-left: 6px; padding: 3px 8px; border-radius: 6px; background: #5c70e8; color: #fff; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 2px;">Chosen</span></p>
+      <p class="sub" style="margin-bottom: 14px;">Drop a file if you have one; pick from the camera if you do not.</p>
+      <div class="drop" style="padding: 14px;">
+        <span style="font-size: 12px;">Drop a PNG or SVG</span>
+      </div>
+      <p class="sub" style="text-align: center; margin: 9px 0;">or</p>
+      <div style="display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; background: #232734;">
+        <span class="mono" style="font-size: 11px; color: #b6b9c2;">Choose from the camera…</span>
+      </div>
+      <p class="sub pro" style="margin-top: 13px; line-height: 1.6;">
+        The upload is the feature; the picker is what keeps working on a camera whose flash is
+        full, and what a provisioning script targets. They share everything downstream of
+        “here is a bitmap”.
+      </p>
+      <p class="sub con" style="margin-top: 8px; line-height: 1.6;">
+        Two affordances for one job, which is one more than the common case needs.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── the answers ────────────────────────────────────────────────── -->
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px;">
+    <span class="cap">3 · Answered</span><span class="rule"></span>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px; max-width: 1060px;">
+    <div class="step">
+      <span class="stepn">1</span>
+      <p class="sub" style="line-height: 1.65;">
+        <strong style="color: #e6e8ee;">The browser quantises.</strong> Decided, and it is the
+        answer that keeps this page honest: the camera stores a finished bitmap, so the panel is
+        showing the actual pixels rather than predicting them. Everywhere else on this page the
+        picture is the camera's own output and nothing imitates it — a browser <em>guessing</em> at
+        the camera's quantiser would have been the first exception, and now there is none.
+      </p>
+    </div>
+    <div class="step">
+      <span class="stepn">2</span>
+      <p class="sub" style="line-height: 1.65;">
+        <strong style="color: #e6e8ee;">Several logos, not one.</strong> A logo is a region exactly
+        as a text overlay is, so nothing in the camera distinguishes them and there was never a
+        reason for the page to. They share the overlay budget — handles 10 to 109, a hundred of
+        them — and the item row counts logos and texts together because the hardware does.
+      </p>
+    </div>
+    <div class="step">
+      <span class="stepn">3</span>
+      <p class="sub" style="line-height: 1.65;">
+        <strong style="color: #e6e8ee;">No artificial size cap — but there is a real one, and a
+        real cost.</strong> 200 × 200 was never a limit; it is just how big the built-in mark
+        happens to be. The genuine ceiling is <strong style="color: #e6e8ee;">the stream</strong>:
+        a region wider than the picture is refused by the hardware, and a refused region is
+        <em>no overlay at all</em> rather than a clipped one. Below that, size is a memory
+        question rather than a permission one — a region is two bytes a pixel, so a full-frame
+        1080p decoration is about 4.1 MB, once per distinct stream size. Measured on the lab
+        hi3516ev200 there are 13 MB of media memory spare in total, so one such frame is a third
+        of what is left and two would not fit.
+      </p>
+    </div>
+    <div class="step">
+      <span class="stepn">·</span>
+      <p class="sub" style="line-height: 1.65;">
+        So the page does not forbid a large bitmap. It shows what the choice costs, next to the
+        region count, and lets the person spend it — the same move the item row already makes.
+        The only hard stop is the one the hardware itself enforces, and it is worth stopping at
+        because the failure on the other side of it is silent.
+      </p>
+    </div>
+  </div>
+
+</div>
+</section>
+
+<section class="board" id="board-phone" hidden>
+<div style="width: 390px; height: 844px; overflow: hidden; position: relative; background: #14161c; color: #e6e8ee; font-family: 'Montserrat', system-ui, sans-serif;">
+
+  <div style="display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 16px; background: #1c1f27; border-bottom: 1px solid #2c313d;">
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <i style="display: block; width: 18px; height: 2px; background: #b6b9c2;"></i>
+      <i style="display: block; width: 18px; height: 2px; background: #b6b9c2;"></i>
+      <i style="display: block; width: 18px; height: 2px; background: #b6b9c2;"></i>
+    </div>
+    <span style="font-size: 15px; font-weight: 600;">OpenIPC</span>
+    <span style="margin-left: auto; font-size: 12px; color: #878a94;">Overlay</span>
+  </div>
+
+  <div style="padding: 14px 16px 0;">
+    <!-- the picture, corners clear -->
+    <div style="position: relative; width: 358px; height: 202px; background: #0d0f14; border: 1px solid #2c313d; border-radius: 12px; overflow: hidden;">
+      <div style="position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 8%, #2b3242 0%, #191d27 55%, #0f1219 100%);"></div>
+      <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 68px; background: linear-gradient(180deg, rgba(20,24,32,0) 0%, rgba(33,39,52,0.88) 100%);"></div>
+      <div style="position: absolute; left: 188px; top: 34px; width: 63px; height: 111px; border-radius: 3px 3px 0 0; background: linear-gradient(180deg, #39424f 0%, #232a36 100%); opacity: 0.8;"></div>
+      <span class="mono" style="position: absolute; left: 8px; top: 8px; padding: 2px 5px; background: rgba(0,0,0,0.28); color: #fff; font-size: 9px; white-space: nowrap;">FRONT GATE</span>
+      <span style="position: absolute; right: 9px; top: 7px; width: 17px; height: 17px; border-radius: 50%; border: 2px solid #fff;"></span>
+      <!-- the selected item, with a 44px grab area around a 9px string -->
+      <span class="mono" style="position: absolute; right: 7px; bottom: 6px; padding: 4px 6px; background: rgba(0,0,0,0.28); color: #fff; font-size: 9px; white-space: nowrap; border: 1.5px solid #5c70e8; border-radius: 3px; box-shadow: 0 0 0 1px rgba(92,112,232,0.5);">02.09.2026 18:08:12</span>
+      <span style="position: absolute; right: 6px; bottom: 24px; padding: 1px 5px; border-radius: 4px; background: #5c70e8; color: #fff; font-size: 8px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;">Timestamp</span>
+    </div>
+
+    <!-- docked bar, same rule as the desktop -->
+    <div class="box" style="display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 8px;">
+      <span class="pseg" style="padding: 1px;"><button type="button" class="on" style="padding: 5px 10px; font-size: 11px;">Main</button><button type="button" style="padding: 5px 10px; font-size: 11px;">Sub</button></span>
+      <span style="margin-left: auto; display: flex; gap: 3px;">
+        <span class="hudico" style="width: 28px; height: 28px;">
+          <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.6 6.6h3.2l1.5-2.1h5.4l1.5 2.1h3.2v9H2.6z" stroke-linejoin="round"></path><circle cx="10" cy="10.6" r="3.1"></circle></svg>
+        </span>
+        <span class="hudico" style="width: 28px; height: 28px;">
+          <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path></svg>
+        </span>
+      </span>
+    </div>
+
+    <div class="box" style="display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 8px 9px;">
+      <span class="chip on"><span class="chip-k">Text</span><span class="chip-v">02.09.2026…</span></span>
+      <span class="chip"><span class="chip-k">Text</span><span class="chip-v">FRONT GATE</span></span>
+      <span class="chip"><span class="chip-k">Logo</span></span>
+    </div>
+  </div>
+
+  <!-- ── the inspector is a SHEET here, not a popover ───────────────────
+       A 322px panel over a 358px picture is not an inspector, it is a
+       replacement for the picture. So below md the same content rises from the
+       bottom edge, the picture stays visible above it, and the sheet can be
+       pulled down to check the result without dismissing the selection. -->
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px 20px; background: #1c1f27; border-top: 1px solid #2c313d; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 28px rgba(0,0,0,0.35);">
+    <span style="display: block; width: 38px; height: 4px; margin: 0 auto 12px; border-radius: 2px; background: #3a4152;"></span>
+
+    <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 10px;">
+      <span class="cap">Timestamp</span>
+      <span class="sub" style="margin-left: auto;">Bottom right · 2% · 3%</span>
+    </div>
+
+    <div class="ptab"><span>Text</span><span>Look</span><span class="on">Place</span></div>
+
+    <div style="display: flex; gap: 16px; margin-top: 14px;">
+      <div>
+        <p class="cap" style="margin-bottom: 7px;">Anchor</p>
+        <div class="pad">
+          <span><i style="width: 12px; height: 4px; margin: 6px auto auto 6px;"></i></span>
+          <span><i style="width: 18px; height: 4px; margin: 6px auto auto;"></i></span>
+          <span><i style="width: 12px; height: 4px; margin: 6px 6px auto auto;"></i></span>
+          <span><i style="width: 4px; height: 18px; margin: auto auto auto 6px;"></i></span>
+          <span><i style="width: 18px; height: 18px; margin: auto;"></i></span>
+          <span><i style="width: 4px; height: 18px; margin: auto 6px auto auto;"></i></span>
+          <span><i style="width: 12px; height: 4px; margin: auto auto 6px 6px;"></i></span>
+          <span><i style="width: 18px; height: 4px; margin: auto auto 6px;"></i></span>
+          <span class="on"><i style="width: 12px; height: 4px; margin: auto 6px 6px auto;"></i></span>
+        </div>
+      </div>
+      <div style="flex: 1 1 auto; min-width: 0;">
+        <p class="cap" style="margin-bottom: 7px;">Offset</p>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <span class="sub" style="width: 10px;">X</span>
+          <span class="num" style="display: flex; align-items: center;">2</span>
+          <span class="unit" style="display: flex; align-items: center; gap: 4px;">%
+            <svg viewBox="0 0 20 20" width="10" height="10" fill="none" stroke="#878a94" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 8.5l4 4 4-4"></path></svg>
+          </span>
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center; margin-top: 7px;">
+          <span class="sub" style="width: 10px;">Y</span>
+          <span class="num" style="display: flex; align-items: center;">3</span>
+          <span class="unit" style="display: flex; align-items: center; color: #878a94;">%</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="sub" style="margin-top: 12px;">From the right and bottom edges. Drag it on the picture, or type here.</p>
+
+    <div style="display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #2c313d;">
+      <span class="sw on"></span><span class="sub">Shown</span>
+      <span class="btn pri" style="margin-left: auto; padding: 9px 20px; font-size: 13px;">Save</span>
+    </div>
+  </div>
+</div>
+</section>
+</div></div>
+<footer>
+  <p>Mockups only — no camera images. Comments belong on
+    <a href="https://github.com/OpenIPC/majestic-webui/issues/340">the issue</a>.</p>
+</footer>
+
+<script>
+(function () {
+  var NOTES = {"editor":"v3. New this round: the panel can be dragged over the settings rail as well, and nothing carries a stored name any more — a text is its own line, a logo is its file, a mask is its number. Carried from v2: proportional by default, a drag that keeps its anchor, stroke weight, and masks as items.","chrome":"Why the player’s buttons moved off the video: an overlay can be in any of nine places, so the controls may be in none of them.","items":"The round after #340. You picked A — the reasoning is recorded at the foot of the board.","logos":"Also the round after. Your three answers are recorded at the foot, including what the real size ceiling turns out to be.","phone":"The same design at 390px, where the panel becomes a sheet rather than a popover."};
+  var tabs = document.getElementById('tabs');
+  var note = document.getElementById('note');
+  var scaler = document.getElementById('scaler');
+
+  function show(id) {
+    Array.prototype.forEach.call(document.querySelectorAll('.board'), function (b) {
+      b.hidden = b.id !== 'board-' + id;
+    });
+    Array.prototype.forEach.call(tabs.children, function (b) {
+      b.className = b.dataset.b === id ? 'on' : '';
+    });
+    note.textContent = NOTES[id] || '';
+    fit();
+  }
+
+  // The visible board decides the scale, and the scaled height has to be given
+  // back to the page — a transform does not change layout, so without this the
+  // footer sits under a shrunk board with a screenful of gap above it.
+  function fit() {
+    var b = document.querySelector('.board:not([hidden])');
+    if (!b) return;
+    scaler.style.transform = 'none';
+    scaler.style.height = '';
+    var w = b.offsetWidth, h = b.offsetHeight;
+    var room = document.documentElement.clientWidth - 48;
+    var s = Math.min(1, room / w);
+    scaler.style.transform = s < 1 ? 'scale(' + s + ')' : 'none';
+    scaler.style.height = (h * s) + 'px';
+  }
+
+  tabs.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-b]');
+    if (!b) return;
+    show(b.dataset.b);
+    // A board somebody can link to. Worth it here because the answer to "did
+    // you see the occlusion one?" should be a URL, not a set of directions.
+    if (history.replaceState) history.replaceState(null, '', '#' + b.dataset.b);
+    else location.hash = b.dataset.b;
+  });
+  window.addEventListener('hashchange', function () {
+    var id = location.hash.replace('#', '');
+    if (document.getElementById('board-' + id)) show(id);
+  });
+  window.addEventListener('resize', fit);
+
+  // ── the interactive board ────────────────────────────────────────────
+  // The same design as the canvas artboard, written plainly because this page
+  // carries no template runtime. State in, markup out, delegated events back.
+  var edPW = 878, edPH = 493, edFW = 1920, edFH = 1080, edEM = 20, edSNAP = 12;
+  var edFONTS = [
+    { file: 'UbuntuMono-Regular.ttf', name: 'Ubuntu Mono', css: "'PT Mono', monospace", w: 400 },
+    { file: 'DejaVuSans-Bold.ttf', name: 'DejaVu Sans Bold', css: "'Montserrat', sans-serif", w: 700 },
+    { file: 'Inconsolata-SemiBold.ttf', name: 'Inconsolata SemiBold', css: "'PT Mono', monospace", w: 600 }
+  ];
+  var edNAMES = {
+    '-1,-1': 'Top left', '0,-1': 'Top', '1,-1': 'Top right',
+    '-1,0': 'Left', '0,0': 'Centre', '1,0': 'Right',
+    '-1,1': 'Bottom left', '0,1': 'Bottom', '1,1': 'Bottom right'
+  };
+  var ed = {
+    sel: 't1', tab: 'place', drag: null, pop: null,
+    items: [
+      { id: 't1', kind: 'text', shows: '02.09.2026 18:08:12',
+        mode: 'proportional', px: -14, py: -14, font: 'UbuntuMono-Regular.ttf',
+        sx: 1, sy: 1, ox: 2, oy: 3, u: '%', size: 1, weight: 'normal',
+        outline: true, plate: 25, on: true,
+        pieces: [{ k: 'Date', v: '02.09.2026' }, { k: 'Gap', v: 'one space' }, { k: 'Time', v: '18:08:12' }] },
+      { id: 't2', kind: 'text', shows: 'FRONT GATE',
+        mode: 'anchored', px: 14, py: 14, font: 'DejaVuSans-Bold.ttf',
+        sx: -1, sy: -1, ox: 2, oy: 4, u: '%', size: 1.2, weight: 'normal',
+        outline: true, plate: 0, on: true, pieces: [{ k: 'Text', v: 'FRONT GATE' }] },
+      { id: 'l1', kind: 'logo', shows: '', file: 'openipc-mark.png',
+        mode: 'anchored', px: -14, py: 14, font: '',
+        sx: 1, sy: -1, ox: 3, oy: 4, u: '%', size: 1, weight: 'normal',
+        outline: false, plate: 0, on: true, pieces: [] },
+      { id: 'k1', kind: 'mask', on: true, mx: 700, my: 640, mw: 420, mh: 300 }
+    ]
+  };
+
+  var edBoard = document.getElementById('board-editor');
+  var edPic = edBoard.querySelector('[data-pic]');
+  var edWrap = edBoard.querySelector('[data-wrap]');
+  var edRoot = edBoard.querySelector('[data-root]');
+  var edEsc = function (t) {
+    return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  };
+  var edCur = function () {
+    for (var i = 0; i < ed.items.length; i++) if (ed.items[i].id === ed.sel) return ed.items[i];
+    return null;
+  };
+  var edPatch = function (id, f) {
+    ed.items = ed.items.map(function (i) {
+      if (i.id !== id) return i;
+      var o = {}, k;
+      for (k in i) o[k] = i[k];
+      for (k in f) o[k] = f[k];
+      return o;
+    });
+    edRender();
+  };
+  // Derived, never stored — a text is its line, a logo is its file, a mask is
+  // its place in the list. Nothing to type and nothing to keep unique.
+  var edLabel = function (it) {
+    if (it.kind === 'mask') {
+      return 'Mask ' + (ed.items.filter(function (i) { return i.kind === 'mask'; }).indexOf(it) + 1);
+    }
+    if (it.kind === 'logo') return it.file || 'No image yet';
+    var t = String(it.shows || '').trim();
+    if (!t) return 'Empty text';
+    return t.length > 22 ? t.slice(0, 21) + '…' : t;
+  };
+  var edFace = function (f) {
+    for (var i = 0; i < edFONTS.length; i++) if (edFONTS[i].file === f) return edFONTS[i];
+    return edFONTS[0];
+  };
+  var edToFrac = function (v, unit, span) {
+    var n = parseFloat(v);
+    if (!isFinite(n)) return 0;
+    if (unit === '%') return n / 100;
+    if (unit === 'em') return (n * edEM) / span;
+    return n / span;
+  };
+  var edFromFrac = function (f, unit, span) {
+    if (unit === '%') return Math.round(f * 1000) / 10;
+    if (unit === 'em') return Math.round((f * span / edEM) * 10) / 10;
+    return Math.round(f * span);
+  };
+  var edOverlays = function () {
+    return ed.items.filter(function (i) { return i.kind !== 'mask'; });
+  };
+  var edMasks = function () {
+    return ed.items.filter(function (i) { return i.kind === 'mask'; });
+  };
+
+  function edItemHTML(it) {
+    var prop = it.mode === 'proportional';
+    var tx = (16 - Math.min(Math.max(+it.px || 0, -16), 16)) / 32;
+    var ty = (16 - Math.min(Math.max(+it.py || 0, -16), 16)) / 32;
+    var fx = (edToFrac(it.ox, it.u, edFW) * 100) + '%';
+    var fy = (edToFrac(it.oy, it.u, edFH) * 100) + '%';
+    var face = edFace(it.font);
+    var fw = it.weight === 'thin' ? Math.max(300, face.w - 300) : face.w;
+    var inner = it.kind === 'text'
+      ? '<span style="display: block; padding: 4px 8px; background: ' +
+        (it.plate ? 'rgba(0,0,0,' + (it.plate / 100).toFixed(2) + ')' : 'transparent') +
+        '; color: #fff; font-family: ' + face.css + '; font-weight: ' + fw +
+        '; font-size: ' + (14 * it.size).toFixed(1) + 'px; letter-spacing: 0.02em; text-shadow: ' +
+        (it.outline ? '0 0 3px rgba(0,0,0,0.9)' : 'none') +
+        '; white-space: nowrap;">' + edEsc(it.shows) + '</span>'
+      : '<span style="display: block; padding: 3px;"><svg viewBox="0 0 48 48" width="' +
+        Math.round(34 * it.size) + '" height="' + Math.round(34 * it.size) +
+        '" aria-hidden="true"><circle cx="24" cy="24" r="21" fill="none" stroke="#ffffff" ' +
+        'stroke-width="4"></circle><circle cx="24" cy="24" r="8" fill="#ffffff"></circle></svg></span>';
+    return '<div class="item' + (it.id === ed.sel ? ' sel' : '') + (it.on ? '' : ' off') +
+      '" data-item="' + it.id + '" style="left: ' +
+      (prop ? (tx * 100) + '%' : it.sx < 0 ? fx : it.sx === 0 ? '50%' : 'auto') + '; right: ' +
+      (prop ? 'auto' : it.sx > 0 ? fx : 'auto') + '; top: ' +
+      (prop ? (ty * 100) + '%' : it.sy < 0 ? fy : it.sy === 0 ? '50%' : 'auto') + '; bottom: ' +
+      (prop ? 'auto' : it.sy > 0 ? fy : 'auto') + '; transform: ' +
+      (prop ? 'translate(' + (-tx * 100).toFixed(2) + '%,' + (-ty * 100).toFixed(2) + '%)'
+        : (it.sx === 0 || it.sy === 0)
+          ? 'translate(' + (it.sx === 0 ? '-50%' : '0') + ',' + (it.sy === 0 ? '-50%' : '0') + ')'
+          : 'none') + ';">' +
+      (it.id === ed.sel && it.kind !== 'text'
+        ? '<span class="itag">' + edEsc(edLabel(it)) + '</span>' : '') +
+      inner + '</div>';
+  }
+
+  function edMaskHTML(m) {
+    return '<div class="mask' + (m.id === ed.sel ? ' sel' : '') + (m.on ? '' : ' off') +
+      '" data-item="' + m.id + '" style="left: ' + (m.mx / edFW * 100) + '%; top: ' +
+      (m.my / edFH * 100) + '%; width: ' + (m.mw / edFW * 100) + '%; height: ' +
+      (m.mh / edFH * 100) + '%;">' +
+      (m.id === ed.sel
+        ? '<span class="itag amber">' + edEsc(edLabel(m)) + '</span>' +
+          '<span class="grip" data-grip="' + m.id + '"></span>'
+        : '') + '</div>';
+  }
+
+  function edPadHTML(sel) {
+    var out = '';
+    for (var iy = -1; iy <= 1; iy++) {
+      for (var ix = -1; ix <= 1; ix++) {
+        var w = ix === 0 ? 14 : (iy === 0 ? 4 : 9), h = iy === 0 ? 14 : 4;
+        var m = (iy < 0 ? '4px' : 'auto') + ' ' + (ix > 0 ? '4px' : 'auto') + ' ' +
+                (iy > 0 ? '4px' : 'auto') + ' ' + (ix < 0 ? '4px' : 'auto');
+        out += '<button type="button"' + ((ix === sel.sx && iy === sel.sy) ? ' class="on"' : '') +
+          ' data-act="anchor" data-x="' + ix + '" data-y="' + iy + '" title="' +
+          edNAMES[ix + ',' + iy] + '" aria-label="' + edNAMES[ix + ',' + iy] + '">' +
+          '<i style="width: ' + w + 'px; height: ' + h + 'px; margin: ' + m + ';"></i></button>';
+      }
+    }
+    return out;
+  }
+
+  function edPopPos(sel) {
+    if (ed.pop) return 'left: ' + ed.pop.x + 'px; top: ' + ed.pop.y + 'px;';
+    var quad = function (it) {
+      return it.kind === 'mask'
+        ? [it.mx + it.mw / 2 < edFW / 2 ? -1 : 1, it.my + it.mh / 2 < edFH / 2 ? -1 : 1]
+        : it.mode === 'proportional' ? [it.px > 0 ? -1 : 1, it.py > 0 ? -1 : 1] : [it.sx, it.sy];
+    };
+    var sq = quad(sel);
+    // Vertically centred on the side the selected item is not on: overlays sit
+    // at corners and edges, so the middle third of one side clears both of that
+    // side's corners. Below the picture would clear everything but pushes the
+    // panel under the fold, which is what this layout exists to avoid.
+    return 'left: ' + (sq[0] > 0 ? '16px' : (edPW - 322 - 16) + 'px') +
+      '; top: calc(50% - 150px);';
+  }
+
+  function edPopHTML() {
+    var sel = edCur();
+    if (!sel) return '';
+    var isMask = sel.kind === 'mask', isText = sel.kind === 'text';
+    var prop = sel.mode === 'proportional';
+    var h = '<div class="pop" style="' + edPopPos(sel) + '">' +
+      '<div class="pop-head" data-act="popgrab">' +
+      '<svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="#6a7182" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 6h.01M7 10h.01M7 14h.01M13 6h.01M13 10h.01M13 14h.01"></path></svg>' +
+      '<span class="cap">' + edEsc(edLabel(sel)) + '</span>' +
+      '<button type="button" class="px" data-act="close" aria-label="Close">' +
+      '<svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"></path></svg></button></div>';
+
+    if (isMask) {
+      var box = function (lab, v, act) {
+        return '<span style="display: flex; flex-direction: column; gap: 5px;">' +
+          '<span class="plab" style="flex: none;">' + lab + '</span>' +
+          '<input class="num" style="width: 68px;" type="number" step="8" value="' + v +
+          '" data-act="' + act + '"></span>';
+      };
+      h += '<div style="display: flex; gap: 8px;">' + box('X', sel.mx, 'mx') + box('Y', sel.my, 'my') +
+        box('Width', sel.mw, 'mw') + box('Height', sel.mh, 'mh') + '</div>' +
+        '<p class="sub" style="margin-top: 9px;">Pixels of the main stream, which is what the camera stores. Drag the block, or the corner to resize.</p>' +
+        '<p class="warn">A mask is drawn into the video itself. It is in the recording and in every other viewer’s picture &#8212; not just in this preview.</p>';
+    } else {
+      h += '<div class="ptab">' +
+        '<button type="button" data-act="tab" data-t="text"' + (ed.tab === 'text' ? ' class="on"' : '') + '>' +
+        (isText ? 'Text' : 'Image') + '</button>' +
+        '<button type="button" data-act="tab" data-t="look"' + (ed.tab === 'look' ? ' class="on"' : '') + '>Look</button>' +
+        '<button type="button" data-act="tab" data-t="place"' + (ed.tab === 'place' ? ' class="on"' : '') + '>Place</button></div>';
+
+      if (ed.tab === 'text' && isText) {
+        h += '<div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 9px; border: 1px dashed rgba(255,255,255,0.16); border-radius: 8px;">';
+        sel.pieces.forEach(function (p) {
+          h += '<span class="chip"><span class="chip-k">' + edEsc(p.k) + '</span><span class="chip-v">' + edEsc(p.v) + '</span></span>';
+        });
+        h += '<span class="chip" style="border-style: dashed; background: transparent; color: #8a9fd0;">+ Add</span></div>' +
+          '<p class="sub" style="margin-top: 9px;">The camera prints this. An unknown %code truncates the rest of the line silently, so the pieces only offer codes it knows.</p>';
+      } else if (ed.tab === 'text') {
+        h += '<div style="display: flex; align-items: center; gap: 12px; padding: 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;">' +
+          '<span style="display: flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 6px; background: rgba(255,255,255,0.07);">' +
+          '<svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><circle cx="24" cy="24" r="21" fill="none" stroke="#fff" stroke-width="4"></circle><circle cx="24" cy="24" r="8" fill="#fff"></circle></svg></span>' +
+          '<div style="min-width: 0;"><p class="mono" style="margin: 0; font-size: 12px; color: #fff;">openipc-mark.png</p>' +
+          '<p class="sub" style="margin-top: 3px;">PNG &#183; quantised to 16 colours &#183; may be any size up to the stream</p></div>' +
+          '<button type="button" class="btn" style="margin-left: auto;">Replace</button></div>' +
+          '<p class="sub" style="margin-top: 9px;">Quantised in the browser, so what is drawn here is what the camera stores &#8212; 16 colours, and a one-bit edge on first-generation HiSilicon.</p>';
+      } else if (ed.tab === 'look') {
+        h += '<div class="prow" style="margin-top: 0;"><span class="plab">' + (isText ? 'Size' : 'Scale') + '</span>' +
+          '<input class="num" type="number" step="0.1" value="' + sel.size + '" data-act="size">' +
+          '<span class="sub">&#215;</span></div>';
+        if (isText) {
+          h += '<div class="prow"><span class="plab">Font</span><select class="unit" style="flex: 1 1 auto; min-width: 0;" data-act="font">';
+          edFONTS.forEach(function (f) {
+            h += '<option value="' + f.file + '"' + (f.file === sel.font ? ' selected' : '') + '>' + edEsc(f.name) + '</option>';
+          });
+          h += '</select></div>' +
+            '<div class="prow"><span class="plab">Stroke</span>' +
+            '<span class="pseg" style="background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.12);">' +
+            '<button type="button" data-act="weight" data-w="normal"' + (sel.weight !== 'thin' ? ' class="on"' : '') + '>Normal</button>' +
+            '<button type="button" data-act="weight" data-w="thin"' + (sel.weight === 'thin' ? ' class="on"' : '') + '>Thin</button></span></div>' +
+            '<div class="prow"><span class="plab">Outline</span><span class="sw' + (sel.outline ? ' on' : '') +
+            '" data-act="outline" style="cursor: pointer;"></span><span class="sub">' + (sel.outline ? 'On' : 'Off') + '</span></div>' +
+            '<div class="prow"><span class="plab">Plate</span>' +
+            '<input class="num" type="number" step="5" value="' + sel.plate + '" data-act="plate">' +
+            '<span class="sub">% opaque</span></div>';
+        }
+        h += '<p class="sub" style="margin-top: 11px;">' + (isText
+          ? 'Thin takes a fraction of a pixel off the stroke, which only first-generation parts cannot spend &#8212; there a glyph pixel is on or off.'
+          : 'Scaled from the source bitmap for each stream, so a logo does not shrink on the substream.') + '</p>';
+      } else {
+        h += '<div class="ptab" style="margin: 0 0 11px;">' +
+          '<button type="button" data-act="mode" data-m="proportional"' + (prop ? ' class="on"' : '') + '>Proportional</button>' +
+          '<button type="button" data-act="mode" data-m="anchored"' + (prop ? '' : ' class="on"') + '>Anchored</button></div>';
+        if (prop) {
+          h += '<div style="display: flex; gap: 5px; align-items: center;">' +
+            '<span class="plab" style="flex: 0 0 62px;">Position X</span>' +
+            '<input class="num" style="width: 62px;" type="number" min="-16" max="16" step="1" value="' + sel.px + '" data-act="px">' +
+            '<span class="sub">16 = left</span></div>' +
+            '<div style="display: flex; gap: 5px; align-items: center; margin-top: 6px;">' +
+            '<span class="plab" style="flex: 0 0 62px;">Position Y</span>' +
+            '<input class="num" style="width: 62px;" type="number" min="-16" max="16" step="1" value="' + sel.py + '" data-act="py">' +
+            '<span class="sub">16 = top</span></div>';
+        } else {
+          h += '<div style="display: flex; gap: 14px;"><div>' +
+            '<p class="cap" style="margin-bottom: 6px;">Anchor</p><div class="pad">' + edPadHTML(sel) + '</div></div>' +
+            '<div style="flex: 1 1 auto; min-width: 0;"><p class="cap" style="margin-bottom: 6px;">Offset</p>' +
+            '<div style="display: flex; gap: 5px; align-items: center;"><span class="sub" style="width: 10px;">X</span>' +
+            '<input class="num" style="width: 62px;" type="number" step="' + (sel.u === 'px' ? 1 : 0.1) +
+            '" value="' + sel.ox + '"' + (sel.sx === 0 ? ' disabled' : '') + ' data-act="ox">' +
+            '<select class="unit" data-act="unit">' +
+            ['%', 'px', 'em'].map(function (u) {
+              return '<option value="' + u + '"' + (u === sel.u ? ' selected' : '') + '>' + u + '</option>';
+            }).join('') + '</select></div>' +
+            '<div style="display: flex; gap: 5px; align-items: center; margin-top: 6px;"><span class="sub" style="width: 10px;">Y</span>' +
+            '<input class="num" style="width: 62px;" type="number" step="' + (sel.u === 'px' ? 1 : 0.1) +
+            '" value="' + sel.oy + '"' + (sel.sy === 0 ? ' disabled' : '') + ' data-act="oy">' +
+            '<span class="unit" style="display: inline-flex; align-items: center; color: #9aa0ad;">' + sel.u + '</span></div>' +
+            '</div></div>';
+        }
+        h += '<p class="sub" style="margin-top: 11px;">' + (prop
+          ? 'Proportional &#183; X ' + sel.px + ' &#183; Y ' + sel.py +
+            '. The camera’s default and what every existing config uses. A drag writes these.'
+          : edNAMES[sel.sx + ',' + sel.sy] + ' &#183; ' + (sel.sx === 0 ? 'centred' : sel.ox + sel.u) +
+            ' &#183; ' + (sel.sy === 0 ? 'centred' : sel.oy + sel.u) +
+            '. A drag moves it within this anchor &#8212; only the pad changes the anchor.') + '</p>';
+      }
+    }
+
+    h += '<div style="display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,0.1);">' +
+      '<span class="sw' + (sel.on ? ' on' : '') + '" data-act="on" style="cursor: pointer;"></span>' +
+      '<span class="sub">' + (sel.on ? 'Shown' : 'Hidden') + '</span>' +
+      '<button type="button" class="btn" style="margin-left: auto;" data-act="dup">Duplicate</button>' +
+      '<button type="button" class="btn" data-act="del">Remove</button></div></div>';
+    return h;
+  }
+
+  function edRender() {
+    var ov = edOverlays(), mk = edMasks();
+    edBoard.querySelector('#ed-layer').innerHTML = ov.map(edItemHTML).join('');
+    edBoard.querySelector('#ed-masks').innerHTML = mk.map(edMaskHTML).join('');
+    edBoard.querySelector('#ed-pop').innerHTML = edPopHTML();
+    edBoard.querySelector('#ed-headnote').textContent =
+      ov.length + ' overlays · ' + mk.length + ' mask' + (mk.length === 1 ? '' : 's');
+    edBoard.querySelector('#ed-chips').innerHTML = ed.items.map(function (it) {
+      return '<span class="chip' + (it.id === ed.sel ? ' on' : '') + '" data-act="chip" data-id="' + it.id + '">' +
+        '<span class="chip-k">' + (it.kind === 'text' ? 'Text' : it.kind === 'logo' ? 'Logo' : 'Mask') + '</span>' +
+        '<span class="chip-v">' + edEsc(it.kind === 'mask'
+          ? edLabel(it).replace('Mask ', '') : edLabel(it)) + '</span></span>';
+    }).join('');
+    edBoard.querySelector('#ed-cost').textContent =
+      ov.length + ' × 2 sizes = ' + (ov.length * 2) + ' of 100 overlay regions · ' +
+      mk.length + ' of 18 mask regions · ~' + (ov.length * 2 * 0.14).toFixed(1) + ' MB';
+  }
+
+  // ── dragging ─────────────────────────────────────────────────────────
+  edWrap.addEventListener('pointerdown', function (e) {
+    if (e.button) return;
+    var head = e.target.closest('.pop-head');
+    if (head) {
+      var pr = edWrap.getBoundingClientRect(), nr = head.parentNode.getBoundingClientRect();
+      ed.drag = { kind: 'pop', dx: e.clientX - nr.left, dy: e.clientY - nr.top };
+      try { edWrap.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+      return;
+    }
+    if (e.target.closest('.pop')) return;
+    var grip = e.target.closest('[data-grip]');
+    var node = e.target.closest('[data-item]');
+    if (!node) {
+      if (e.target.closest('[data-pic]')) { ed.sel = null; edRender(); }
+      return;
+    }
+    var nr2 = node.getBoundingClientRect();
+    ed.sel = node.dataset.item;
+    ed.drag = { kind: grip ? 'resize' : 'move', id: node.dataset.item,
+      dx: e.clientX - nr2.left, dy: e.clientY - nr2.top,
+      w: nr2.width, h: nr2.height, x0: e.clientX, y0: e.clientY };
+    try { edWrap.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+    try { edPic.focus(); } catch (err) {}
+    edRender();
+  });
+
+  edWrap.addEventListener('pointermove', function (e) {
+    var d = ed.drag;
+    if (!d) return;
+    if (d.kind === 'pop') {
+      // Bounded by the page, not by the column — the settings rail is dead
+      // space while you are placing an overlay, so it is the obvious
+      // somewhere-else to put the panel.
+      var wr = edWrap.getBoundingClientRect();
+      var rr = edRoot.getBoundingClientRect();
+      var cl = function (v, lo, hi) { return Math.max(lo, Math.min(hi, v)); };
+      ed.pop = {
+        x: cl(e.clientX - wr.left - d.dx, rr.left - wr.left + 8, rr.right - wr.left - 322 - 8),
+        y: cl(e.clientY - wr.top - d.dy, rr.top - wr.top + 8, rr.bottom - wr.top - 60 - 8)
+      };
+      edRender();
+      return;
+    }
+    var pr = edPic.getBoundingClientRect();
+    if (d.kind === 'resize') {
+      edPatch(d.id, {
+        mw: Math.max(16, Math.round(((e.clientX - d.x0) + d.w) * edFW / edPW)),
+        mh: Math.max(16, Math.round(((e.clientY - d.y0) + d.h) * edFH / edPH))
+      });
+      return;
+    }
+    edPlace(d, e.clientX - pr.left - 1 - d.dx, e.clientY - pr.top - 1 - d.dy);
+  });
+  edWrap.addEventListener('pointerup', function () { ed.drag = null; });
+  edWrap.addEventListener('pointercancel', function () { ed.drag = null; });
+
+  // A DRAG NEVER CHANGES THE ANCHOR. The snap that remains pulls an offset to
+  // zero, which is the same magnet without the silent reclassification.
+  function edPlace(d, x, y) {
+    var it = null, i;
+    for (i = 0; i < ed.items.length; i++) if (ed.items[i].id === d.id) it = ed.items[i];
+    if (!it) return;
+    var W = edPW, H = edPH, w = d.w, h = d.h;
+    if (it.kind === 'mask') {
+      edPatch(d.id, { mx: Math.max(0, Math.round(x * edFW / W)),
+        my: Math.max(0, Math.round(y * edFH / H)) });
+      return;
+    }
+    if (it.mode === 'proportional') {
+      var inv = function (v, span, size) {
+        var t = Math.max(0, span - size) ? v / (span - size) : 0;
+        return Math.round(Math.min(Math.max(16 - t * 32, -16), 16));
+      };
+      edPatch(d.id, { px: inv(x, W, w), py: inv(y, H, h) });
+      return;
+    }
+    var near = function (v) { return Math.abs(v) <= edSNAP ? 0 : v; };
+    var f = {};
+    if (it.sx !== 0) f.ox = edFromFrac(near(Math.max(0, it.sx < 0 ? x : W - (x + w))) / W, it.u, edFW);
+    if (it.sy !== 0) f.oy = edFromFrac(near(Math.max(0, it.sy < 0 ? y : H - (y + h))) / H, it.u, edFH);
+    edPatch(d.id, f);
+  }
+
+  edPic.addEventListener('keydown', function (e) {
+    var k = e.key;
+    if (k !== 'ArrowLeft' && k !== 'ArrowRight' && k !== 'ArrowUp' && k !== 'ArrowDown') return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var it = edCur();
+    if (!it) return;
+    e.preventDefault();
+    var big = e.shiftKey ? 10 : 1;
+    if (it.kind === 'mask') {
+      var s = big * 8;
+      if (k === 'ArrowLeft') edPatch(it.id, { mx: Math.max(0, it.mx - s) });
+      if (k === 'ArrowRight') edPatch(it.id, { mx: it.mx + s });
+      if (k === 'ArrowUp') edPatch(it.id, { my: Math.max(0, it.my - s) });
+      if (k === 'ArrowDown') edPatch(it.id, { my: it.my + s });
+      return;
+    }
+    var cl = function (v) { return Math.min(Math.max(v, -16), 16); };
+    if (it.mode === 'proportional') {
+      if (k === 'ArrowLeft') edPatch(it.id, { px: cl(it.px + big) });
+      if (k === 'ArrowRight') edPatch(it.id, { px: cl(it.px - big) });
+      if (k === 'ArrowUp') edPatch(it.id, { py: cl(it.py + big) });
+      if (k === 'ArrowDown') edPatch(it.id, { py: cl(it.py - big) });
+      return;
+    }
+    var dd = (it.u === 'px' ? 1 : 0.1) * big;
+    var r = function (n) { return Math.round(n * 10) / 10; };
+    if (it.sx !== 0 && (k === 'ArrowLeft' || k === 'ArrowRight')) {
+      edPatch(it.id, { ox: Math.max(0, r(+it.ox + ((k === 'ArrowRight') === (it.sx < 0) ? 1 : -1) * dd)) });
+    }
+    if (it.sy !== 0 && (k === 'ArrowUp' || k === 'ArrowDown')) {
+      edPatch(it.id, { oy: Math.max(0, r(+it.oy + ((k === 'ArrowDown') === (it.sy < 0) ? 1 : -1) * dd)) });
+    }
+  });
+
+  // ── clicks and edits ─────────────────────────────────────────────────
+  var edMk = function (id) {
+    return { id: id, kind: 'text', shows: 'NEW TEXT',
+      mode: 'proportional', px: 0, py: -14, font: 'UbuntuMono-Regular.ttf',
+      sx: 0, sy: 1, ox: 0, oy: 6, u: '%', size: 1, weight: 'normal',
+      outline: true, plate: 25, on: true, pieces: [{ k: 'Text', v: 'NEW TEXT' }] };
+  };
+
+  edBoard.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-act]');
+    if (!t) return;
+    var a = t.dataset.act, sel = edCur(), n, c, k;
+    if (a === 'chip') { ed.sel = t.dataset.id; edRender(); return; }
+    if (a === 'addtext') { n = edMk('n' + ed.items.length); ed.items = ed.items.concat([n]); ed.sel = n.id; ed.tab = 'text'; edRender(); return; }
+    if (a === 'addlogo') {
+      n = edMk('g' + ed.items.length); n.kind = 'logo'; n.shows = ''; n.file = ''; n.pieces = [];
+      ed.items = ed.items.concat([n]); ed.sel = n.id; ed.tab = 'text'; edRender(); return;
+    }
+    if (a === 'addmask') {
+      n = { id: 'k' + ed.items.length, kind: 'mask', on: true,
+        mx: 700, my: 380, mw: 400, mh: 260 };
+      ed.items = ed.items.concat([n]); ed.sel = n.id; edRender(); return;
+    }
+    if (!sel) return;
+    if (a === 'close') { ed.sel = null; edRender(); }
+    else if (a === 'tab') { ed.tab = t.dataset.t; edRender(); }
+    else if (a === 'mode') { edPatch(sel.id, { mode: t.dataset.m }); }
+    else if (a === 'weight') { edPatch(sel.id, { weight: t.dataset.w }); }
+    else if (a === 'anchor') {
+      var ix = +t.dataset.x, iy = +t.dataset.y;
+      edPatch(sel.id, { sx: ix, sy: iy, ox: ix === 0 ? 0 : sel.ox, oy: iy === 0 ? 0 : sel.oy });
+    }
+    else if (a === 'outline') { edPatch(sel.id, { outline: !sel.outline }); }
+    else if (a === 'on') { edPatch(sel.id, { on: !sel.on }); }
+    else if (a === 'dup') {
+      c = {}; for (k in sel) c[k] = sel[k];
+      c.id = sel.id + '-c' + ed.items.length;
+      if (c.kind === 'mask') { c.mx = sel.mx + 48; c.my = sel.my + 48; }
+      else { c.mode = 'proportional'; c.px = 0; c.py = 0; }
+      ed.items = ed.items.concat([c]); ed.sel = c.id; edRender();
+    }
+    else if (a === 'del') {
+      ed.items = ed.items.filter(function (i) { return i.id !== sel.id; });
+      ed.sel = null; edRender();
+    }
+  });
+
+  edBoard.addEventListener('change', function (e) {
+    var t = e.target.closest('[data-act]');
+    if (!t) return;
+    var sel = edCur();
+    if (!sel) return;
+    var a = t.dataset.act, v = t.value;
+    var i = function (lo) { return Math.max(lo, parseInt(v, 10) || lo); };
+    if (a === 'size') edPatch(sel.id, { size: Math.max(0.3, parseFloat(v) || 1) });
+    else if (a === 'font') edPatch(sel.id, { font: v });
+    else if (a === 'plate') edPatch(sel.id, { plate: Math.min(100, Math.max(0, parseInt(v, 10) || 0)) });
+    else if (a === 'ox') edPatch(sel.id, { ox: v });
+    else if (a === 'oy') edPatch(sel.id, { oy: v });
+    else if (a === 'px') edPatch(sel.id, { px: Math.min(Math.max(parseInt(v, 10) || 0, -16), 16) });
+    else if (a === 'py') edPatch(sel.id, { py: Math.min(Math.max(parseInt(v, 10) || 0, -16), 16) });
+    else if (a === 'mx') edPatch(sel.id, { mx: i(0) });
+    else if (a === 'my') edPatch(sel.id, { my: i(0) });
+    else if (a === 'mw') edPatch(sel.id, { mw: i(16) });
+    else if (a === 'mh') edPatch(sel.id, { mh: i(16) });
+    else if (a === 'unit') {
+      edPatch(sel.id, { u: v,
+        ox: edFromFrac(edToFrac(sel.ox, sel.u, edFW), v, edFW),
+        oy: edFromFrac(edToFrac(sel.oy, sel.u, edFH), v, edFH) });
+    }
+  });
+
+  edRender();
+
+  var first = location.hash.replace('#', '');
+  show(document.getElementById('board-' + first) ? first : 'editor');
+})();
+</script>
+</body>
+</html>
