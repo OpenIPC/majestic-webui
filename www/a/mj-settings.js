@@ -3388,6 +3388,7 @@
 					? v.night_auto_dwell_seconds : null,
 			};
 			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
+			paintNightInert(ircutSample.src);
 			paintFindings();
 			paintMonitor(s);
 		});
@@ -3656,6 +3657,67 @@
 
 	function pinField(key) {
 		return state.fields.filter((f) => f.dot === 'nightMode.' + key)[0];
+	}
+
+	// Day / Night has THREE mechanisms that decide the same thing, and the
+	// camera picks between them by what is filled in: a daylight sensor pin
+	// wins, then the pair of legacy raw thresholds, and only with neither of
+	// those does the calibration-free automatic mode run. Every control for
+	// all three sits on the page at once, all of them enabled, and nothing
+	// said which set was live — so the reporter of #325 filled in a night gain
+	// multiple and both automatic delays, watched the camera go on using a
+	// threshold pair set earlier, and reported the countdown as broken. Four
+	// controls were doing nothing and the page was silent about it.
+	//
+	// Which one is live is not inferred from the config here: the camera
+	// publishes the answer and its answer is the one that matters. Fields of a
+	// mechanism that is not deciding get the same note an x-requires field
+	// gets, for the same reason, and deliberately NOT by hiding or disabling
+	// them — the value is real, it is what is causing the surprise, and it has
+	// to stay findable and clearable. Hiding it would only move the surprise.
+	const NIGHT_MECH = {
+		'nightMode.minThreshold': 'thresholds',
+		'nightMode.maxThreshold': 'thresholds',
+		'nightMode.autoNightGain': 'auto',
+		'nightMode.autoDayGain': 'auto',
+		'nightMode.autoNightDelay': 'auto',
+		'nightMode.autoDayDelay': 'auto',
+	};
+	// night_mode_source, as the endpoint documents it: 0 manual, 1 GPIO
+	// sensor, 2 gain thresholds, 3 ADC, 4 automatic. 0 is nothing deciding,
+	// which is not a verdict about any of these, so it marks nothing.
+	const MECH_OF_SRC = { 1: 'sensor', 2: 'thresholds', 3: 'adc', 4: 'auto' };
+	// One line each. The finding at the top of the section carries the
+	// explanation and the way out; repeating a paragraph under every ignored
+	// control is the wall of text the reporter of #325 objected to in the same
+	// breath, and four copies of it say nothing the first did not.
+	const MECH_NAMED = {
+		sensor: 'the daylight sensor is deciding.',
+		adc: 'the sensor pad voltage is deciding.',
+		thresholds: 'the day and night thresholds are deciding.',
+		auto: 'automatic mode is deciding.',
+	};
+	function paintNightInert(src) {
+		const decides = MECH_OF_SRC[src];
+		state.fields.forEach((f) => {
+			const mech = NIGHT_MECH[f.dot];
+			if (!mech || !f.p) return;
+			let note = f.p.querySelector('.mj-night-inert');
+			// An empty control misleads nobody; only a filled-in one that is
+			// being ignored needs saying.
+			const v = f.getValue();
+			const set = decides && mech !== decides &&
+				String(v === undefined || v === null ? '' : v) !== '';
+			if (!set) {
+				if (note) note.remove();
+				return;
+			}
+			if (!note) {
+				note = el('div', 'hint mj-requires mj-night-inert');
+				f.p.appendChild(note);
+			}
+			note.textContent = 'Not in use — ' + MECH_NAMED[decides];
+		});
 	}
 
 	// The map reports; this writes what it reports into the real fields, so the

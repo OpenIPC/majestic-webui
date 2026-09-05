@@ -318,6 +318,42 @@
 			}
 		}
 
+		// Three mechanisms decide the same thing and the camera picks one; the
+		// controls for all three are on the page together. Saying which set is
+		// live matters only when another set is FILLED IN — that is the state
+		// in which somebody has told the camera something it is ignoring, and
+		// the reporter of #325 was in it: a night gain multiple and both
+		// automatic delays set, while a legacy threshold pair kept the wheel.
+		//
+		// Read off the camera's own source gauge rather than re-deriving the
+		// precedence from config, so a build that orders them differently is
+		// described correctly instead of confidently.
+		if (monitor && sample && (sample.src === 1 || sample.src === 2 ||
+			sample.src === 3)) {
+			const autoSet = ['autoNightGain', 'autoNightDelay', 'autoDayDelay']
+				.some((k) => has(nm[k]));
+			const thrSet = has(nm.minThreshold) && has(nm.maxThreshold);
+			const byPin = sample.src !== 2;
+			if (autoSet || (byPin && thrSet)) {
+				out.push({
+					id: 'mech-shadowed', level: 'warning',
+					title: 'Some of these settings are not being used',
+					detail: (byPin
+						? 'A daylight sensor is wired, and it decides before ' +
+							'anything else here does. '
+						: 'The day and night thresholds are both set, so the ' +
+							'camera compares raw sensor gain against those. ') +
+						'Everything below belonging to the other ways of ' +
+						'deciding is filled in but ignored — including the ' +
+						'automatic gain multiples and the delays beside them, ' +
+						'which is why no countdown appears. Each one says so ' +
+						'under itself; clearing the settings that are winning ' +
+						'hands day/night back to automatic mode.',
+					fix: 'nightMode',
+				});
+			}
+		}
+
 		// Thresholds are compared against isp_again, so min must sit BELOW max
 		// to leave a band the camera can idle in. Equal is not "no hysteresis
 		// but workable" — it is the same gain deciding both directions.

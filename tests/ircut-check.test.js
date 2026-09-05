@@ -698,6 +698,35 @@ function runRest() {
 			ic.projector(6).age(1) === null);
 	}
 
+	group('diagnose: a mechanism that is filled in but not deciding');
+	{
+		// Three mechanisms decide the same thing, the camera picks one, and
+		// every control is on the page together. The reporter of #325 filled
+		// in a night gain multiple and both automatic delays while a legacy
+		// threshold pair kept the wheel, and nothing said so — four live-
+		// looking controls doing nothing, and no countdown, because the
+		// mechanism that has no countdown was the one running. Reachable only
+		// with a camera configured both ways at once.
+		const both = { lightMonitor: true, irCutPin1: 11,
+			minThreshold: 2000, maxThreshold: 14000,
+			autoNightGain: 33, autoNightDelay: 15, autoDayDelay: 60 };
+		const said = (nm, src) => ic.diagnose(nm, { night: 0, ircut: 0, src: src },
+			{ flips: 0, conflictS: 0 }).filter(x => x.id === 'mech-shadowed')[0];
+		check('thresholds winning over a filled-in automatic set is named',
+			/compares raw sensor gain/.test(said(both, 2).detail), '');
+		check('and it says why the countdown is missing',
+			/no countdown appears/.test(said(both, 2).detail));
+		check('a wired sensor winning over both is named as the sensor',
+			/daylight sensor is wired/.test(said(both, 1).detail));
+		// Nothing filled in, nothing being ignored, nothing to say.
+		check('automatic mode deciding says nothing',
+			!said(both, 4));
+		check('and neither does a camera with only the winning set filled in',
+			!said({ lightMonitor: true, minThreshold: 2000, maxThreshold: 14000 }, 2));
+		// A camera that has not reported a source is not accused of anything.
+		check('an unknown source says nothing either', !said(both, null));
+	}
+
 	group('diagnose: hunting, and the ordering of what it all reports');
 	{
 		const cfg = { irCutPin1: 11, lightSensorPin: 66, lightMonitor: true };
