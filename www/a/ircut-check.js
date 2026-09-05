@@ -330,25 +330,44 @@
 		// described correctly instead of confidently.
 		if (monitor && sample && (sample.src === 1 || sample.src === 2 ||
 			sample.src === 3)) {
-			const autoSet = ['autoNightGain', 'autoNightDelay', 'autoDayDelay']
-				.some((k) => has(nm[k]));
-			const thrSet = has(nm.minThreshold) && has(nm.maxThreshold);
 			const byPin = sample.src !== 2;
-			if (autoSet || (byPin && thrSet)) {
+			// What is named has to be what is actually there. The first cut of
+			// this said "the automatic gain multiples and the delays beside
+			// them" whatever was set, on a path that could fire with no
+			// automatic value at all — swapping silence for a confident wrong
+			// account of somebody's configuration, which is the fault this
+			// finding exists to end rather than to join.
+			const AUTO_KEYS = ['autoNightGain', 'autoDayGain',
+				'autoNightDelay', 'autoDayDelay'];
+			const autoSet = AUTO_KEYS.some((k) => has(nm[k]));
+			const thrShadowed = byPin &&
+				has(nm.minThreshold) && has(nm.maxThreshold);
+			const shadowed = [];
+			if (autoSet) shadowed.push('the automatic gain multiples and delays');
+			if (thrShadowed) shadowed.push('the day and night thresholds');
+			// Severity follows intent, not presence. The day gain multiple and
+			// both automatic delays ship with defaults and are seeded on every
+			// camera, so finding them set says nothing about what anyone meant;
+			// a night gain multiple, or a threshold pair, is somebody having
+			// typed something. The row notes mark every ignored control either
+			// way — this only decides how loudly the section says it.
+			const deliberate = has(nm.autoNightGain) || thrShadowed;
+			if (shadowed.length) {
 				out.push({
-					id: 'mech-shadowed', level: 'warning',
+					id: 'mech-shadowed',
+					level: deliberate ? 'warning' : 'info',
 					title: 'Some of these settings are not being used',
 					detail: (byPin
 						? 'A daylight sensor is wired, and it decides before ' +
 							'anything else here does. '
 						: 'The day and night thresholds are both set, so the ' +
 							'camera compares raw sensor gain against those. ') +
-						'Everything below belonging to the other ways of ' +
-						'deciding is filled in but ignored — including the ' +
-						'automatic gain multiples and the delays beside them, ' +
-						'which is why no countdown appears. Each one says so ' +
-						'under itself; clearing the settings that are winning ' +
-						'hands day/night back to automatic mode.',
+						'That leaves ' + shadowed.join(' and ') + ' below set ' +
+						'but ignored' +
+						(autoSet ? ', which is why no countdown appears' : '') +
+						'. Each one says so under itself; clearing the ' +
+						'settings that are winning hands day/night back to ' +
+						'automatic mode.',
 					fix: 'nightMode',
 				});
 			}
