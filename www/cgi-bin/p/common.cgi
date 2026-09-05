@@ -326,9 +326,8 @@ log_create() {
 # EVERY action is a button, and the colour says what pressing it costs (#347).
 # A notice is read the way a system dialog is -- a sentence, a way out in the
 # corner, and the thing to press -- so the thing to press is shaped like one.
-# The reporter of #347 put it plainly after seeing the alternative: a bare link
-# among banners of buttons is the odd one out, and an arrow after it says only
-# what the underline already said.
+# A bare link among banners of buttons is the odd one out, and an arrow after it
+# says only what the underline already said (#347).
 #
 #   btn-primary    go to the page that fixes this
 #   btn-secondary  a second, diagnostic destination beside a primary
@@ -856,10 +855,9 @@ update_caminfo() {
 	# different wire), or "motor" (a motor profile in ptz_profile or the
 	# legacy ptz value). An explicit method is trusted but still needs its
 	# binary — a pad whose every press fails is worse than no pad. Unset
-	# means no PTZ, exactly like "none": the reporter of #227 ruled that a
-	# camera without ptz_control shows no pad, so the old auto-detection
-	# from gpio_motors/ptz alone is gone and a field camera configured that
-	# way must set ptz_control once.
+	# means no PTZ, exactly like "none" (#227): a camera without ptz_control
+	# shows no pad, so the old auto-detection from gpio_motors/ptz alone is
+	# gone and a field camera configured that way must set ptz_control once.
 	# The backend decides which pad p/motor.cgi draws — gpio and motor are
 	# stepped eight-way pan/tilt, the Pelco variants are four directions in
 	# timed pulses plus zoom and focus.

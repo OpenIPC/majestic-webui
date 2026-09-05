@@ -3391,18 +3391,31 @@ mark {
 	box-shadow: var(--bs-box-shadow-sm);
 }
 
-/* Sized against the close button opposite it, not by eye. A glyph paints a
-   good deal smaller than its em box, so at the inherited 1rem the warning mark
-   was 13x12px of ink while .btn-close paints 16x16 — the severity indicator
-   was the smallest thing in the row and the way out was the biggest, which is
-   exactly backwards (#273). An SVG paints the box it is given, so this is
-   18x18 and stays 18x18; the nudge is optical alignment against a 21px first
-   line. */
+/* Sized against the close button opposite it, not by eye. A glyph paints a good
+   deal smaller than its em box, so at the inherited 1rem the warning mark was
+   13x12px of ink while .btn-close paints 16x16 — the severity indicator was the
+   smallest thing in the row and the way out was the biggest, which is exactly
+   backwards (#273). An SVG paints the box it is given, so this is a stated size
+   and stays it.
+
+   28px rather than the 18px that first fixed #273 (#347). It is the one thing
+   in the row that says what KIND of notice this is before a word is read, and
+   18px left it the quietest mark on a card. 28 is
+   the largest that changes nothing else: a one-line notice is 31px of content
+   tall, set by the button beside it, so the mark grows into room that was
+   already there — at 36px every banner in the page gets taller to carry it.
+   The stroke is 1.8 of a 24 viewBox and so thickens with the box, which is why
+   this reads as a bolder mark and not just a bigger one.
+
+   Centred, like the two controls opposite it, so all three things that are not
+   the sentence sit on one line through the notice. It was aligned to the first
+   line when everything else was, and stayed there when the actions and the
+   close were centred, which left it the only thing still hanging at the top. */
 .mj-notice-ico {
 	flex: 0 0 auto;
-	width: 18px;
-	height: 18px;
-	margin-top: 0.1rem;
+	width: 28px;
+	height: 28px;
+	align-self: center;
 	color: var(--bs-secondary-color);
 }
 
@@ -3457,10 +3470,11 @@ mark {
 	display: flex;
 	align-items: center;
 	/* Centred against the whole notice, which on one or two lines is what the
-	   eye expects of a control beside a sentence (#347). The BOX stays
-	   flex-start, so the severity mark keeps its place against the first line
-	   whatever the sentence does — they are different items and only one of
-	   them is annotating the first word. */
+	   eye expects of a control beside a sentence (#347). Per item rather than
+	   on the box, because the sentence must not be centred with it: the text
+	   column is the thing that grows, and centring it would leave a short
+	   notice's body row floating away from the sentence it belongs under. The
+	   mark opposite is centred by its own rule for the same reason. */
 	align-self: center;
 	gap: 0.5rem;
 	margin-left: auto;
@@ -3493,8 +3507,17 @@ mark {
    whether the list is open or shut, which is the point. A browser without
    :has() centres them, which is the request as asked and no worse than any
    other notice gets. */
-.mj-notice:has(.mj-notice-body) > .mj-notice-acts {
+.mj-notice:has(.mj-notice-body) > .mj-notice-acts,
+.mj-notice:has(.mj-notice-body) > .mj-notice-ico {
 	align-self: flex-start;
+}
+
+/* The mark is taller than the line it is marking — 28px against 21px — so
+   top-aligning it drops its middle 3.5px below the middle of the first line.
+   Pulling it back up is what makes it read as pointing at that line rather
+   than as sitting slightly low; there is 9.6px of padding above it to spend. */
+.mj-notice:has(.mj-notice-body) > .mj-notice-ico {
+	margin-top: -0.2rem;
 }
 
 .mj-notice:has(.mj-notice-body) > .btn-close {
@@ -3538,14 +3561,21 @@ mark {
 		justify-content: flex-end;
 	}
 
-	/* Back to the corner. Centring the x against the notice is right while it
-	   stands beside the button on one row; here the actions have taken a row of
-	   their own below the sentence, so the middle of the box is a third of the
-	   way down the text — the x landed over the sentence it was meant to sit
-	   clear of. */
+	/* Back to the corner, and the mark back to the first line with it. Centring
+	   either against the notice is right while they stand on one row with the
+	   sentence; here the actions have taken a row of their own below it, so the
+	   middle of the box is a third of the way down the text — the x landed over
+	   the sentence it was meant to sit clear of, and a centred mark would point
+	   at the middle of a paragraph instead of at its first line. Which is why
+	   the centring is a desktop rule and not a rule (#347). */
 	.mj-notice > .btn-close {
 		top: calc(0.6rem + 0.15rem);
 		transform: none;
+	}
+
+	.mj-notice-ico {
+		align-self: flex-start;
+		margin-top: -0.2rem;
 	}
 }
 
