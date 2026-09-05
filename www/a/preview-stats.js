@@ -108,7 +108,7 @@ window.MajesticStats = (function () {
 				'<div class="mj-ns-row"><span>camera sending</span><b id="mj-ns-send">–</b></div>' +
 				'<div class="mj-ns-row"><span>you receive</span><b id="mj-ns-recv">–</b></div>' +
 			'</div>' +
-			'<div class="mj-ns-chart" id="mj-ns-bw"></div>' +
+			'<div class="mj-chart mj-ns-chart" id="mj-ns-bw"></div>' +
 			'<div class="mj-ns-legend">' +
 				'<span>' + seg(C1) + 'received</span>' +
 				'<span id="mj-ns-leg-est">' + seg(C2) + 'link estimate</span></div>' +

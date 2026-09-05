@@ -286,4 +286,45 @@ group('window and gap are per chart, because not every subject is a subject of n
 		(narrow.innerHTML.match(/M/g) || []).length > 4);
 }
 
+// This is the same failure the file opens with, reached from the other side.
+// The groups above are here because a scale can flatten a trend into three
+// pixels while drawing a perfectly confident line; a scale that fits the data
+// and ignores the bands does it to the DISTANCE instead — the one quantity a
+// banded chart exists to show — and is just as quiet about it. Nothing renders
+// an error, the trace is smooth, the box is tinted, and the picture answers a
+// question nobody asked. The layout defects this shipped alongside (a clipped
+// axis number, two band names on one pixel) are not here: those are visible in
+// one page load, which is the line this suite holds.
+group('a band is what the value is compared against, so the scale has to fit it');
+{
+	const { MC, clock } = boot();
+	// The Day / Night monitor's real shape, measured on an hi3516ev300: gain
+	// idling near 1024 while the day and night thresholds sit at 150000 and
+	// 160000. Scaled from the data alone the plot topped out at 2000, both
+	// bands clamped flat against the top edge, and the chart drew a level line
+	// in a uniformly tinted box — while the camera was in fact nowhere near
+	// switching, and would have looked identical if it had been one step away
+	// (#325).
+	const bands = [
+		{ from: 0, to: 150000, color: 'rgba(47,182,115,.10)', label: 'day' },
+		{ from: 160000, to: null, color: 'rgba(255,193,7,.10)', label: 'night' },
+	];
+	const host = makeHost(400);
+	const ch = MC.makeChart(host, { h: 110, lo: 0, hi: null, colors: ['#000'], bands: bands });
+	for (let i = 0; i < 3; i++) { clock.t = i * 2; MC.pushChart(ch, [1024]); }
+	const ticks = (host.innerHTML.match(/text-anchor="end">([\d.]+)</g) || [])
+		.map(t => parseFloat(t.replace(/[^\d.]/g, '')));
+	check('the top of the plot clears the night threshold',
+		Math.max.apply(null, ticks) >= 160000,
+		'top tick ' + Math.max.apply(null, ticks));
+
+	// An open end is not a number. Spelt 1e9 as a stand-in for "and above" it
+	// is indistinguishable from a real edge, so the rule above would fit it
+	// and put the data, the day band and everything else in the bottom
+	// millionth of the box — the same flat, plausible, useless line by another
+	// route.
+	check('and an open band end is not fitted into it',
+		Math.max.apply(null, ticks) < 1e6, 'top tick ' + Math.max.apply(null, ticks));
+}
+
 done();

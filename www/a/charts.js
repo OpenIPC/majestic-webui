@@ -124,6 +124,7 @@ window.MjCharts = (function () {
 	// measured width, which is not knowable this early.
 	const PAD_T = 5;  // headroom above the top gridline
 	const X_BAND = 14; // the "-2 min / now" strip below the plot
+	const LBL_H = 12;  // a band shorter than this has no room for its own label
 	function chartHeight(cfg) { return PAD_T + cfg.h + X_BAND; }
 	function makeChart(sel, cfg) {
 		const host = typeof sel === 'string' ? $(sel) : sel;
@@ -166,18 +167,54 @@ window.MjCharts = (function () {
 		if (!W) return;
 		const cfg = ch.cfg;
 		const win = cfg.win || CHART_WINDOW, gap = cfg.gap || CHART_GAP;
-		const padL = 30, padR = 6, padT = PAD_T, H = cfg.h, XB = X_BAND;
-		const plotW = W - padL - padR;
+		const padR = 6, padT = PAD_T, H = cfg.h, XB = X_BAND;
 		const lo = cfg.lo;
 		let hi = cfg.hi;
 		const pts = ch.pts, n = pts.length;
+		// A band is a range with an OPEN end where `from`/`to` is null — "and
+		// everything above", which is what a night threshold means. That is
+		// spelt null rather than some large number so the auto scale below can
+		// tell a real edge from a stand-in for infinity.
+		const bands = cfg.bands || [];
 		if (hi == null) {
 			let max = 0;
 			pts.forEach(p => p.v.forEach(v => { if (v != null && v > max) max = v; }));
-			hi = niceCeil(Math.max(max * 1.15, 1));
+			// The bands are what the value is being COMPARED against, so a
+			// scale that fits only the data can leave every threshold off the
+			// top: the plot then draws a flat line in a uniformly tinted box
+			// and cannot answer the one question it is on the page for — how
+			// far is this from switching. Day/night on a HiSilicon camera is
+			// exactly that shape, gain idling near 1024 against thresholds in
+			// the 150000s.
+			//
+			// The 15% headroom is for the DATA, which has to have somewhere to
+			// go: a trace pinned to the top edge cannot show that it rose. A
+			// band edge is a fixed number and needs none, and giving it some
+			// pushes the plot a whole nice-number step further out — a day
+			// band ending at 2 asked for a ceiling of 5 and then filled only
+			// the bottom two fifths of its own chart.
+			let top = max * 1.15;
+			bands.forEach(b => {
+				[b.from, b.to].forEach(e => {
+					if (e != null && isFinite(e) && e > top) top = e;
+				});
+			});
+			hi = niceCeil(Math.max(top, 1));
 		}
 		const fmt = cfg.fmt || fmtNum;
 		const grid = cfg.grid || '#e9ebf2';
+		// The gutter is sized to the numbers about to go in it. It was a flat
+		// 30px, which is about four monospace characters — fine for a
+		// percentage or a signal level, and not for the day/night thresholds,
+		// where "150000" lost its first two digits off the left edge of the
+		// plot and read as "0000" (#325). There is no text measurement to be
+		// had from an SVG built as a string, so this is the advance width of
+		// the monospace faces the stylesheets set (~0.6em at 10px) with the
+		// same 5px breathing room the labels always had on each side.
+		const ticks = [lo, (lo + hi) / 2, hi].map(fmt);
+		const wide = ticks.reduce((m, t) => Math.max(m, String(t).length), 0);
+		const padL = Math.min(Math.max(30, Math.ceil(wide * 6.1) + 6), W * 0.4);
+		const plotW = W - padL - padR;
 		const Y = v => {
 			let y = padT + (1 - (v - lo) / (hi - lo)) * H;
 			return y < padT ? padT : y > padT + H ? padT + H : y;
@@ -187,20 +224,30 @@ window.MjCharts = (function () {
 		const tNow = performance.now() / 1000;
 		const X = t => padL + plotW * (1 - (tNow - t) / win);
 		let s = '';
-		// threshold bands (Wi-Fi grades, luminance floor) sit under everything
-		(cfg.bands || []).forEach(b => {
-			const y1 = Y(b.to), y2 = Y(b.from);
+		// threshold bands (Wi-Fi grades, luminance floor, day/night) sit under
+		// everything. An open end reaches the edge of the plot.
+		bands.forEach(b => {
+			const y1 = b.to == null ? padT : Y(b.to);
+			const y2 = b.from == null ? padT + H : Y(b.from);
 			s += '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + plotW +
 				'" height="' + (y2 - y1).toFixed(1) + '" fill="' + b.color + '"/>';
-			if (b.label) s += '<text x="' + (padL + plotW - 4) + '" y="' + (y1 + 10).toFixed(1) +
-				'" text-anchor="end" opacity="0.8">' + b.label + '</text>';
+			// A band squeezed off the plot keeps no room for its own name, and
+			// the name does not shrink with it: two bands clamped to the same
+			// edge printed both words on the same pixel, which is how "day" and
+			// "night" came out as one unreadable smudge. Bands do not overlap,
+			// so once each drawn band is at least a label tall their labels are
+			// necessarily that far apart too — the one guard covers both.
+			if (b.label && y2 - y1 >= LBL_H) {
+				s += '<text x="' + (padL + plotW - 4) + '" y="' + (y1 + 10).toFixed(1) +
+					'" text-anchor="end" opacity="0.8">' + b.label + '</text>';
+			}
 		});
 		// hairline grid at lo / mid / hi, labels on the left
-		[lo, (lo + hi) / 2, hi].forEach(t => {
+		[lo, (lo + hi) / 2, hi].forEach((t, i) => {
 			const y = Y(t);
 			s += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (padL + plotW) +
 				'" y2="' + y.toFixed(1) + '" stroke="' + grid + '" stroke-width="1"/>';
-			s += '<text x="' + (padL - 5) + '" y="' + (y + 3.5).toFixed(1) + '" text-anchor="end">' + fmt(t) + '</text>';
+			s += '<text x="' + (padL - 5) + '" y="' + (y + 3.5).toFixed(1) + '" text-anchor="end">' + ticks[i] + '</text>';
 		});
 		if (cfg.ref && cfg.ref.v > lo && cfg.ref.v < hi) {
 			const y = Y(cfg.ref.v);

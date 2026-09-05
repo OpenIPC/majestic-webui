@@ -919,8 +919,8 @@
 			// with the title carrying the rest, and below md dockRuntime moves
 			// it off the picture entirely, where it has a line to itself.
 			'<span class="mj-hud-chip mj-glass" id="mj-lightmon" hidden' +
-			' title="Light monitor is driving night, IR-cut and the lamp">' +
-			'<a href="camera.cgi?tab=nightMode">Light monitor is driving night, IR&#8209;cut and the lamp</a>' +
+			' title="Automatic day/night is driving night, IR-cut and the lamp">' +
+			'<a href="camera.cgi?tab=nightMode">Automatic day/night is driving night, IR&#8209;cut and the lamp</a>' +
 			'</span>';
 	}
 
@@ -3387,19 +3387,38 @@
 		});
 	}
 
-	// The light monitor's live view: one sentence about what it is doing and a
-	// chart of the value it is watching, with the switching bands shaded. What
-	// to show is decided in ircut-check.js (monitorView, tested); this only
-	// mounts it. The chart is remade when the mode or the bands change, and
-	// the superseded instance is dropped from the registry.
+	// Automatic day/night's live view: one sentence about what the camera is
+	// doing and, where there is something continuous to watch, a chart of the
+	// value with the switching bands shaded. What to show is decided in
+	// ircut-check.js (monitorView, tested); this only mounts it. The chart is
+	// remade when the mode or the bands change, and the superseded instance is
+	// dropped from the registry.
+	//
+	// The block is hidden only while the camera has not answered at all. Every
+	// other state — the switch off, a wired photocell, a monitor that stood
+	// down — gets the sentence without the chart, because a section that
+	// appears only in the configuration it is describing cannot be found from
+	// any of the others (#325).
 	let monChart = null;
 	let monKey = '';
+	function dropMonChart(MC, host) {
+		if (MC) MC.dropChart(monChart);
+		monChart = null;
+		monKey = '';
+		if (host) {
+			host.innerHTML = '';
+			// makeChart reserved this before it had a sample to draw; left
+			// behind it is 129px of empty card under a one-line sentence.
+			host.style.minHeight = '';
+			host.hidden = true;
+		}
+	}
 	function paintMonitor(s) {
 		const box = document.getElementById('mj-ircut-mon');
 		if (!box) return;
 		const MC = window.MjCharts;
 		const view = IRCUT.monitorView(nightCfg(), (s.m && s.m.v) || null);
-		if (!view || !MC) {
+		if (!view) {
 			box.hidden = true;
 			return;
 		}
@@ -3408,6 +3427,11 @@
 		if (line) line.textContent = view.line;
 		const host = document.getElementById('mj-ircut-mon-chart');
 		if (!host) return;
+		if (!view.chart || !MC) {
+			dropMonChart(MC, host);
+			return;
+		}
+		host.hidden = false;
 		const key = view.mode + '|' + JSON.stringify(view.bands);
 		if (!monChart || monChart.host !== host || monKey !== key) {
 			// The superseded instance is unregistered, not merely abandoned:
@@ -3415,8 +3439,16 @@
 			// registry would otherwise keep each one for the life of the tab.
 			MC.dropChart(monChart);
 			host.innerHTML = '';
+			// The dashboard's ink, read the way the dashboard reads it. A
+			// hardcoded series colour is the light theme's, and a hairline
+			// left at the module default is the light theme's too — both were
+			// drawn as-is on this card's dark surface.
+			const css = getComputedStyle(document.documentElement);
+			const tok = (n, d) => (css.getPropertyValue(n) || d).trim();
 			monChart = MC.makeChart(host, {
-				h: 110, lo: 0, hi: null, colors: ['#4c60d8'],
+				h: 110, lo: 0, hi: null,
+				colors: [tok('--st-c1', '#4c60d8')],
+				grid: tok('--st-grid', '#e9ebf2'),
 				bands: view.bands,
 				fmt: view.mode === 'auto'
 					? (x) => (x >= 10 ? String(Math.round(x)) : x.toFixed(1)) + 'x'
@@ -3449,7 +3481,7 @@
 		// moved" — convicting a correctly wired camera. Refusing to run beats
 		// running and possibly lying.
 		if (toBool(nm.lightMonitor))
-			return 'The light monitor would drive the filter back mid-test. Turn it off, ' +
+			return 'Automatic day/night would drive the filter back mid-test. Turn it off, ' +
 				'run the test, then turn it back on.';
 		return null;
 	}
@@ -3688,10 +3720,10 @@
 			'<div id="mj-ircut-result" class="small" hidden></div>' +
 			'</div></div>' +
 			'<div id="mj-ircut-mon" hidden>' +
-			'<div class="mj-live-grp-head mt-3"><span class="mj-cap">Light monitor</span>' +
+			'<div class="mj-live-grp-head mt-3"><span class="mj-cap">Automatic day/night</span>' +
 			'<span class="mj-live-rule"></span></div>' +
 			'<div class="small text-secondary mb-1" id="mj-ircut-mon-line"></div>' +
-			'<div id="mj-ircut-mon-chart"></div>' +
+			'<div class="mj-chart" id="mj-ircut-mon-chart" hidden></div>' +
 			'</div>';
 
 		// Wired once, gated every time.
