@@ -5078,7 +5078,7 @@
 			// nothing pending: leave the hidden bar empty rather than parked on a
 			// stale message
 			lbl.textContent = n
-				? (n + ' change' + (n === 1 ? '' : 's') + ' pending.' +
+				? (n + ' change' + (n === 1 ? '' : 's') + ' pending. ' + pendingCost() +
 					(apply ? ' A pipeline reload is still due.' : ''))
 				: (apply
 					? 'Saved. This change needs a pipeline reload before it takes effect (the video streams will blink briefly).'
@@ -5091,6 +5091,23 @@
 		// three-state model does not have. Save first; Apply comes back after.
 		const applyBtn = document.getElementById('mj-apply-btn');
 		if (applyBtn) applyBtn.classList.toggle('d-none', !(apply && n === 0));
+	}
+
+	// What Save will cost, said before it is pressed. The page used to say it
+	// only afterwards — "the video streams will blink briefly" once the save had
+	// gone through — and the reporter of #316, once the Quarter turn row said
+	// "on Save", asked for every setting that restarts the streams to say so.
+	// On a HiSilicon build that is most of them: 156 of 202 keys carry no
+	// cheaper class, so a mark on each row would be a mark on nearly every row
+	// and would say nothing. The bar is the one place every page shares, and it
+	// already knows the answer for the set that is actually pending from the
+	// daemon's own classification (changeCost), so that is where it is said.
+	function pendingCost() {
+		const dirty = state.fields.filter(f => f.getValue() !== state.initial[f.dot]);
+		if (!dirty.length) return '';
+		return needsPipelineReload(dirty)
+			? 'Save restarts the video streams.'
+			: 'Save keeps the streams running.';
 	}
 
 	// A message that outranks the computed status until it is cleared (the
