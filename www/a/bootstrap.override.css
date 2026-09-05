@@ -2613,12 +2613,12 @@ mark {
 .mj-ns-chart {
 	margin-top: 0.45rem;
 }
-.mj-ns-chart svg {
-	display: block;
-	width: 100%;
-}
-.mj-ns-chart text {
-	font-family: var(--bs-font-monospace);
+/* Structure comes from .mj-chart; only the ink differs, because this panel's
+   black glass is the same in both themes and must not read the page's.
+   Both classes are named so this outranks the shared rule outright: equal
+   specificity would leave the winner to source order, and .mj-chart is
+   declared further down this file. */
+.mj-chart.mj-ns-chart text {
 	font-size: 9px;
 	fill: rgba(255, 255, 255, 0.5);
 }
@@ -4036,12 +4036,22 @@ dialog.mj-modal::backdrop {
 	text-overflow: ellipsis;
 }
 
-.st-chart svg {
+/* Every MjCharts axis chart's host. The primitives were lifted out of the
+   dashboard into charts.js so that other pages could draw with the same
+   pencil, but their stylesheet stayed behind under the dashboard's own
+   `.st-` prefix — so the third caller, the Day / Night light monitor, drew
+   its axis in the page's 16px body font and its default BLACK fill: numbers
+   too wide for the 25px gutter charts.js reserves ("2000" arriving as ")00"),
+   band names printed on top of each other, all of it near-invisible on a dark
+   card (#325). A chart styled only where it was born is a chart that silently
+   comes out wrong everywhere else, so the rules are named after the thing
+   rather than the page and every host carries this class. */
+.mj-chart svg {
 	display: block;
 	width: 100%;
 }
 
-.st-chart text {
+.mj-chart text {
 	font-family: var(--bs-font-monospace);
 	font-size: 10px;
 	fill: var(--bs-tertiary-color);
@@ -4415,6 +4425,14 @@ dialog.mj-modal::backdrop {
 	display: flex;
 	gap: 0.5rem;
 	margin-top: 0.75rem;
+}
+
+/* Automatic day/night's readout closes the panel, and its last row is the
+   chart's own "-2 min / now" strip — which runs to the block's bottom edge,
+   so without this the first field caption below sits directly under it and
+   reads as another axis label. */
+#mj-ircut-mon {
+	margin-bottom: 1rem;
 }
 
 .mj-ircut-scan {

@@ -177,7 +177,7 @@ done) %>
 					<span class="mj-cap">Encoder output &mdash; main stream</span>
 					<span class="st-now" id="st-enc-now"></span>
 				</div>
-				<div class="st-chart" id="ch-enc"></div>
+				<div class="mj-chart" id="ch-enc"></div>
 			</div>
 		</div>
 
@@ -190,14 +190,14 @@ done) %>
 						<span><i class="st-dot st-dot-c2"></i>down</span>
 					</span>
 				</div>
-				<div class="st-chart" id="ch-net"></div>
+				<div class="mj-chart" id="ch-net"></div>
 			</div>
 			<div class="st-panel st-chartbox" id="st-wifi-panel" hidden>
 				<div class="st-chart-head">
 					<span class="mj-cap">Wi-Fi signal</span>
 					<span class="st-now" id="st-rssi-now"></span>
 				</div>
-				<div class="st-chart" id="ch-rssi"></div>
+				<div class="mj-chart" id="ch-rssi"></div>
 				<div class="x-small text-secondary" id="st-wifi-sub"></div>
 			</div>
 		</div>
@@ -220,7 +220,7 @@ done) %>
 						<span id="st-mem-lg-other"><i class="st-dot st-dot-mute"></i>Other</span>
 					</span>
 				</div>
-				<div class="st-chart" id="ch-mem"></div>
+				<div class="mj-chart" id="ch-mem"></div>
 				<div class="x-small text-secondary" id="st-mem-note"></div>
 			</div>
 		</div>
@@ -231,7 +231,7 @@ done) %>
 					<span class="mj-cap">Scene luminance</span>
 					<span class="st-now" id="st-luma-now"></span>
 				</div>
-				<div class="st-chart" id="ch-luma"></div>
+				<div class="mj-chart" id="ch-luma"></div>
 				<div class="x-small text-secondary" id="st-luma-note"></div>
 			</div>
 			<div class="st-panel st-chartbox">

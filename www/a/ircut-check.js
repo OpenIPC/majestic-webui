@@ -277,23 +277,22 @@
 				out.push({
 					id: 'auto-retired', level: 'warning',
 					title: 'This camera cannot watch the light by itself',
-					detail: 'The light monitor is on, but this SoC reports no ' +
-						'exposure state to decide from, so automatic day/night ' +
-						'stood down. Wire a daylight sensor to a GPIO pad and ' +
-						'assign it on the map for the monitor to have something ' +
-						'to watch.',
+					detail: 'Automatic day/night is on, but this SoC reports ' +
+						'no exposure state to decide from, so it has stood ' +
+						'down. Wire a daylight sensor to a GPIO pad and assign ' +
+						'it on the map for it to have something to watch.',
 					fix: 'nightMode',
 				});
 			} else {
 				out.push({
 					id: 'monitor-blind', level: 'warning',
-					title: 'The light monitor has nothing to watch',
-					detail: 'The light monitor is on, but nothing tells it how ' +
+					title: 'Automatic day/night has nothing to watch',
+					detail: 'Automatic day/night is on, but nothing tells it how ' +
 						'dark it is: no daylight sensor is connected, and no day ' +
 						'or night threshold is set. Current firmware decides ' +
 						'from the sensor’s own exposure in this situation — ' +
 						'this camera has not reported that mode, so a firmware ' +
-						'update would give it automatic day/night.',
+						'update would give it that.',
 					fix: 'nightMode',
 				});
 			}
@@ -333,7 +332,7 @@
 			out.push({
 				id: 'manual-only', level: 'info',
 				title: 'Day/night switching is manual',
-				detail: 'The filter is wired but the light monitor is off, so ' +
+				detail: 'The filter is wired but Automatic day/night is off, so ' +
 					'nothing moves it at dusk. That is a valid setup for a ' +
 					'camera driven over the API; it is a fault if you expected ' +
 					'the camera to switch itself.',
@@ -352,7 +351,7 @@
 				out.push({
 					id: 'conflict', level: 'danger',
 					title: 'Night mode and the IR-cut filter disagree',
-					detail: 'The light monitor says it is ' +
+					detail: 'Automatic day/night says it is ' +
 						(sample.night ? 'night' : 'day') + ', but the filter has ' +
 						'been in the ' + (sample.ircut ? 'night (open)' : 'day (closed)') +
 						' position for ' + Math.round(track.conflictS) + 's. The ' +
@@ -673,11 +672,22 @@
 	// `nm` — so the countdown arithmetic and the band construction are
 	// testable without a camera at dusk.
 	//
-	// null when there is nothing to chart: monitor off, a GPIO/ADC source
-	// (nothing continuous to draw), an old daemon, or a retired monitor.
+	// `chart` says whether there is a continuous value to plot. It is false
+	// for every state that has nothing to draw — the switch off, a wired
+	// daylight sensor (light or dark and nothing in between), an ADC pad whose
+	// reading is never published, a monitor that stood down, an older daemon
+	// that says nothing about what it watches. Those used to return null,
+	// which took the whole block off the page, so the panel existed only in
+	// the two configurations that draw a graph. The reporter of #325 searched
+	// a camera in none of them for a section naming the very switch they were
+	// being asked to turn on, found it in two hints, and concluded the feature
+	// had not shipped for their SoC. A sentence is not a graph, but it is an
+	// answer, and it is beside the switch.
+	//
+	// null now means only that the camera has not answered yet.
 	function monitorView(nm, v) {
 		nm = nm || {};
-		if (!on(nm.lightMonitor) || !v) return null;
+		if (!v) return null;
 		const src = ('night_mode_source' in v) ? v.night_mode_source : null;
 
 		// An absent night_enabled is a camera whose state is unknown, and an
@@ -693,6 +703,22 @@
 		const lampNote = typeof duty === 'number' && duty >= 0
 			? ' Lamp at ' + duty + '%.' : '';
 
+		// A state with no plot: one sentence, no bands, no value.
+		const say = (mode, line) => ({
+			mode: mode, chart: false, value: null, bands: [],
+			line: line, unit: '',
+		});
+
+		// The name is the one the switch itself wears on this page. Everything
+		// here used to call it "the light monitor", which is what majestic's
+		// own hints call it and what nothing on screen is labelled — so the
+		// page explained a control using a word the page never printed.
+		if (!on(nm.lightMonitor)) {
+			return say('off', 'Off — nothing switches this camera between day ' +
+				'and night on its own. Turn on Automatic day/night below and ' +
+				'this panel says what it is watching.');
+		}
+
 		if (src === 4) {
 			const dayG = pin(nm.autoDayGain) !== null ? pin(nm.autoDayGain) : 2;
 			const nightG = pin(nm.autoNightGain);
@@ -701,10 +727,12 @@
 				color: 'rgba(47,182,115,.10)', label: 'day',
 			}];
 			if (nightG !== null) {
-				// The top edge is clamped to the plot, so "everything above
-				// the user's night threshold" needs no real ceiling.
+				// Open at the top: "everything above the night threshold"
+				// has no ceiling, and saying so with null rather than a large
+				// number is what keeps the chart's auto scale from trying to
+				// fit one on the plot.
 				bands.push({
-					from: nightG, to: 1e9,
+					from: nightG, to: null,
 					color: 'rgba(255,193,7,.10)', label: 'night',
 				});
 			}
@@ -728,7 +756,7 @@
 							? '; night comes when the exposure runs out.'
 							: '.');
 			return {
-				mode: 'auto',
+				mode: 'auto', chart: true,
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
 				bands: bands, line: line + lampNote,
 				unit: 'x',
@@ -737,7 +765,8 @@
 
 		// Source 3 (ADC) is deliberately not here: its reading never appears
 		// on /metrics, so there is nothing continuous to chart and isp_again
-		// would be a different quantity wearing the monitor's clothes.
+		// would be a different quantity wearing the monitor's clothes. It gets
+		// a sentence of its own below instead.
 		if (src === 2 ||
 			(src === null && has(nm.minThreshold) && has(nm.maxThreshold))) {
 			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
@@ -750,12 +779,12 @@
 			}
 			if (hi !== null) {
 				bands.push({
-					from: hi, to: 1e9,
+					from: hi, to: null,
 					color: 'rgba(255,193,7,.10)', label: 'night',
 				});
 			}
 			return {
-				mode: 'thresholds',
+				mode: 'thresholds', chart: true,
 				value: ('isp_again' in v) ? v.isp_again : null,
 				bands: bands,
 				line: modeWord +
@@ -765,7 +794,28 @@
 			};
 		}
 
-		return null;
+		// A wired photocell is the one door with no reading behind it: the pad
+		// is high or low and nothing in between, so the honest answer is which
+		// way it is pointing and why there is no line under it.
+		if (src === 1 || (src === null && has(nm.lightSensorPin))) {
+			return say('sensor', modeWord + 'The daylight sensor decides. It ' +
+				'reports light or dark and nothing in between, so there is no ' +
+				'reading to plot here.' + lampNote);
+		}
+		if (src === 3) {
+			return say('adc', modeWord + 'A voltage on the daylight sensor pad ' +
+				'decides. The camera does not publish that voltage, so there ' +
+				'is nothing to plot here.' + lampNote);
+		}
+		// The monitor is on and the daemon says nothing is driving it. The
+		// finding above names the two ways out; this only says the state.
+		if (src === 0) {
+			return say('idle', modeWord + 'Nothing is deciding: this camera ' +
+				'reports no exposure to watch, and no daylight sensor or ' +
+				'threshold is set.' + lampNote);
+		}
+		return say('unknown', modeWord + 'This firmware does not report what ' +
+			'the monitor is watching.' + lampNote);
 	}
 
 	const api = {

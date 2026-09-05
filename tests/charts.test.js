@@ -286,4 +286,70 @@ group('window and gap are per chart, because not every subject is a subject of n
 		(narrow.innerHTML.match(/M/g) || []).length > 4);
 }
 
+group('a band is what the value is compared against, so the scale has to fit it');
+{
+	const { MC, clock } = boot();
+	// The Day / Night light monitor's shape, measured on an hi3516ev300: gain
+	// idling near 1024 while the day and night thresholds sit at 150000 and
+	// 160000. Scaled from the data alone the plot topped out at 2000, both
+	// bands clamped to the top edge, and the chart drew a flat line in a
+	// uniformly tinted box — no answer at all to "how far is this from
+	// switching" (#325).
+	const bands = [
+		{ from: 0, to: 150000, color: 'rgba(47,182,115,.10)', label: 'day' },
+		{ from: 160000, to: null, color: 'rgba(255,193,7,.10)', label: 'night' },
+	];
+	const host = makeHost(400);
+	const ch = MC.makeChart(host, { h: 110, lo: 0, hi: null, colors: ['#000'], bands: bands });
+	for (let i = 0; i < 3; i++) { clock.t = i * 2; MC.pushChart(ch, [1024]); }
+	const ticks = (host.innerHTML.match(/text-anchor="end">([\d.]+)</g) || [])
+		.map(t => parseFloat(t.replace(/[^\d.]/g, '')));
+	check('the top of the plot clears the night threshold',
+		Math.max.apply(null, ticks) >= 160000,
+		'top tick ' + Math.max.apply(null, ticks));
+
+	// Both band labels used to be drawn at y1 + 10 whatever the band's drawn
+	// height, so two bands clamped to the same edge printed "day" and "night"
+	// on the same pixel — one unreadable smudge in the corner.
+	const labelY = w => {
+		const m = host.innerHTML.match(new RegExp('y="([\\d.]+)"[^>]*>' + w + '<'));
+		return m ? parseFloat(m[1]) : null;
+	};
+	check('and both band names are on the plot, a line apart',
+		labelY('day') != null && labelY('night') != null &&
+		Math.abs(labelY('day') - labelY('night')) >= 12,
+		'day at ' + labelY('day') + ', night at ' + labelY('night'));
+
+	// An open end is not a number: 1e9 as a stand-in for "and above" would be
+	// folded into the scale above and push the whole plot off the top.
+	check('an open band end is not fitted into the scale',
+		Math.max.apply(null, ticks) < 1e6, 'top tick ' + Math.max.apply(null, ticks));
+
+	// The gutter has to hold the numbers it is about to print. At a flat 30px
+	// — four monospace characters — a six-digit threshold lost its first two
+	// digits off the left edge and read as "0000".
+	const gutter = html => {
+		const m = html.match(/text-anchor="end">[\d.]+<\/text>/) &&
+			html.match(/<text x="([\d.]+)" y="[\d.]+" text-anchor="end">[\d.]+</);
+		return m ? parseFloat(m[1]) : null;
+	};
+	check('the gutter widens for a six-digit axis',
+		gutter(host.innerHTML) >= 6 * 6, 'label right edge at ' + gutter(host.innerHTML));
+	const small = makeHost(400);
+	const ch3 = MC.makeChart(small, { h: 110, lo: 0, hi: 100, colors: ['#000'] });
+	MC.pushChart(ch3, [50]);
+	check('and a short one still gets the gutter it always had',
+		gutter(small.innerHTML) === 25, 'label right edge at ' + gutter(small.innerHTML));
+
+	// A band with no room for its own name does not print it anywhere.
+	const tight = makeHost(400);
+	const ch2 = MC.makeChart(tight, {
+		h: 110, lo: 0, hi: 100, colors: ['#000'],
+		bands: [{ from: 99, to: 100, color: '#fff', label: 'sliver' }],
+	});
+	MC.pushChart(ch2, [50]);
+	check('a band squeezed thinner than its label draws no label',
+		tight.innerHTML.indexOf('sliver') < 0);
+}
+
 done();

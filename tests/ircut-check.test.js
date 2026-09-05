@@ -473,14 +473,47 @@ function runRest() {
 			thr.bands.length === 2);
 		check('an old daemon with thresholds still gets the chart',
 			ic.monitorView(nmThr, { isp_again: 2000 }).mode === 'thresholds');
+		// The band that means "and everything above" is open-ended, and says so
+		// with null rather than a stand-in ceiling: the chart's auto scale
+		// makes room for a finite edge, so a made-up one would push the whole
+		// plot off the top.
+		check('the night band is open at the top',
+			thr.bands[1].from === 4000 && thr.bands[1].to === null);
+		check('so is the automatic mode\'s',
+			ic.monitorView({ lightMonitor: true, autoNightGain: 16 }, vAuto)
+				.bands.find(b => b.from === 16).to === null);
+
+		// Every state answers. A view with nothing continuous behind it says
+		// so with chart:false instead of vanishing — the block is the only
+		// place on the page that names the switch, so a camera in any of these
+		// states used to have no section to find (#325).
+		const gpio = ic.monitorView({ lightMonitor: true, lightSensorPin: 66 },
+			{ night_mode_source: 1, night_enabled: 0 });
 		check('a GPIO source has nothing continuous to chart',
-			ic.monitorView({ lightMonitor: true, lightSensorPin: 66 },
-				{ night_mode_source: 1 }) === null);
+			gpio.chart === false && gpio.value === null && !gpio.bands.length);
+		check('and says which way the sensor is pointing',
+			/^Day\. The daylight sensor decides/.test(gpio.line), gpio.line);
+		const adc = ic.monitorView(
+			{ lightMonitor: true, minThreshold: 100, maxThreshold: 400 },
+			{ night_mode_source: 3, isp_again: 200 });
 		check('an ADC source has nothing continuous to chart either',
-			ic.monitorView({ lightMonitor: true, minThreshold: 100, maxThreshold: 400 },
-				{ night_mode_source: 3, isp_again: 200 }) === null);
-		check('monitor off charts nothing',
-			ic.monitorView({}, vAuto) === null);
+			adc.chart === false && adc.mode === 'adc', adc.line);
+		const off = ic.monitorView({}, vAuto);
+		check('monitor off charts nothing', off.chart === false);
+		check('and points at the switch by the name the page prints on it',
+			/Turn on Automatic day\/night below/.test(off.line), off.line);
+		const retired = ic.monitorView({ lightMonitor: true },
+			{ night_mode_source: 0, night_enabled: 0 });
+		check('a monitor that stood down still has a sentence',
+			retired.chart === false && /Nothing is deciding/.test(retired.line),
+			retired.line);
+		check('and an older daemon that names no source has one too',
+			ic.monitorView({ lightMonitor: true }, { night_enabled: 0 })
+				.mode === 'unknown');
+		check('only a camera that has not answered hides the block',
+			ic.monitorView({ lightMonitor: true }, null) === null);
+		check('a charted view says so',
+			auto.chart === true && thr.chart === true);
 		// Missing gauges stay unknown: no countdown made of coerced zeros,
 		// and no "Day" invented for a camera that never said.
 		const noTimers = ic.monitorView(nmAuto, {
