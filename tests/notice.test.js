@@ -142,4 +142,165 @@ check('data-bs-dismiss reaches .mj-notice as well as .alert',
 	/closest\('\.alert, \.mj-notice'\)/.test(dismiss),
 	'a dismiss that only knows .alert is an inert x on every notice');
 
+
+group('one vocabulary for the actions, wherever they are written');
+
+// A notice points at the page that fixes what it reports, so its action is a
+// plain link ending in an arrow. A filled .btn is for the press that acts on
+// the camera where it stands — today exactly one href, restart.cgi, which
+// reboots on GET.
+//
+// The rule is worth a test rather than a paragraph because it is written in
+// four places at once: two haserl banners, three blocks of Dashboard markup
+// and two browser-built notices. It had already drifted — the firmware-behind
+// banner and the recordings banner both drew navigation as a filled button, so
+// the Dashboard offered "go to a page" in two shapes at the same time (#347) —
+// and nothing anywhere would have said so. Every way this breaks is a banner
+// that still renders, still links to the right place, and still looks like it
+// came from a different program than the banner above it.
+const ACTS_ON_GET = new Set(['restart.cgi']);
+
+// Every action in the tree, named. Named rather than counted, because the
+// failure this scan exists to catch is an action written in a spelling
+// actionGroups() cannot read: it then escapes every check below and the run
+// looks exactly like a passing one. A floor — "at least eight" — is green in
+// precisely that case, so it protects nothing. Against this list an action
+// that stops being recognised is a line that went missing.
+//
+// The cost is that adding a notice action edits this list, and that is the
+// point: it is the review the vocabulary did not have.
+const EXPECTED = [
+	'a/recordings.js sdcard.cgi "Open the SD card page &rarr;"',
+	'a/update-check.js update.cgi "Firmware update &rarr;"',
+	'cgi-bin/camera.cgi logs.cgi "Open the log &rarr;"',
+	'cgi-bin/camera.cgi restart.cgi "Restart camera"',
+	'cgi-bin/dashboard.cgi camera.cgi "Open Day / Night &rarr;"',
+	// The two on the no-video banner are empty here and filled by dashboard.js.
+	'cgi-bin/dashboard.cgi camera.cgi ""',
+	'cgi-bin/dashboard.cgi logs.cgi ""',
+	'cgi-bin/dashboard.cgi live.cgi "Open Live &rarr;"',
+	'cgi-bin/p/header.cgi config.cgi "Configuration file &rarr;"',
+	'cgi-bin/p/header.cgi network.cgi "Network settings &rarr;"',
+	'cgi-bin/p/header.cgi network.cgi "Set the MAC address &rarr;"',
+	'cgi-bin/p/header.cgi restart.cgi "Restart camera"',
+];
+
+// The shell words of a `<% notice ... %>` call, quoted the way sh reads them.
+// The sentences carry apostrophes and the actions carry double-quoted
+// attributes, so both quote styles are in use and splitting on whitespace is
+// not enough.
+function shellWords(line) {
+	const out = [];
+	let cur = '', q = null, started = false;
+	for (const ch of line) {
+		if (q) {
+			if (ch === q) q = null;
+			else cur += ch;
+			continue;
+		}
+		if (ch === "'" || ch === '"') { q = ch; started = true; continue; }
+		if (/\s/.test(ch)) {
+			if (started || cur) out.push(cur);
+			cur = ''; started = false;
+			continue;
+		}
+		cur += ch;
+	}
+	if (started || cur) out.push(cur);
+	return out;
+}
+
+// common.cgi's notice() and main.js's mjNotice() BUILD the action span, so the
+// hit inside each of them is the component itself rather than somewhere an
+// action was written. Matched by the exact placeholder each one interpolates,
+// so a real group can never be mistaken for one of these.
+const EMITTERS = ['%s', "' + o.acts + '"];
+
+// Every action group in the tree, in the three shapes one gets written in.
+function actionGroups(file, src) {
+	const out = [];
+	const add = (html) => { if (html && html.trim()) out.push({ file, html }); };
+	let m;
+
+	const haserl = /<%\s*notice\s+([\s\S]*?)%>/g;
+	while ((m = haserl.exec(src))) add(shellWords(m[1])[2]);
+
+	const markup = /<span class="mj-notice-acts">([\s\S]*?)<\/span>/g;
+	while ((m = markup.exec(src))) {
+		if (EMITTERS.indexOf(m[1]) < 0) add(m[1]);
+	}
+
+	// Written as `acts: '<a …>'`. Anything else is not skipped quietly: a call
+	// site this cannot read is a call site the rule stops covering.
+	const key = /\bacts:\s*/g;
+	while ((m = key.exec(src))) {
+		// Not the one in main.js's own usage note: a comment emits nothing, and
+		// it spells its arrow as an escape, which is not what a page renders.
+		const bol = src.lastIndexOf('\n', m.index) + 1;
+		if (/^\s*(\/\/|\*)/.test(src.slice(bol, m.index))) continue;
+		const lit = /^'((?:[^'\\]|\\.)*)'/.exec(src.slice(m.index + m[0].length));
+		check('the acts: in ' + file + ' is a literal this test can read',
+			!!lit, src.slice(m.index, m.index + 80));
+		if (lit) add(lit[1]);
+	}
+	return out;
+}
+
+function walk(dir) {
+	const out = [];
+	for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+		const f = path.join(dir, e.name);
+		if (e.isDirectory()) out.push(...walk(f));
+		else if (/\.(cgi|js)$/.test(e.name)) out.push(f);
+	}
+	return out;
+}
+
+const WWW = path.join(__dirname, '..', 'www');
+const groups = walk(WWW).flatMap((f) =>
+	actionGroups(path.relative(WWW, f), fs.readFileSync(f, 'utf8')));
+
+const found = [];
+groups.forEach((g) => {
+	const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/g;
+	let a;
+	while ((a = re.exec(g.html))) {
+		const attrs = a[1], text = a[2].trim();
+		const cls = (/\bclass="([^"]*)"/.exec(attrs) || ['', ''])[1];
+		const href = (/\bhref="([^"]*)"/.exec(attrs) || ['', ''])[1];
+		const page = href.split(/[?#]/)[0].replace(/^.*\//, '');
+		const isBtn = /(^|\s)btn(\s|$)/.test(cls);
+		const where = g.file + ': ' + a[0];
+		found.push(g.file + ' ' + page + ' "' + text + '"');
+
+		check(page + ' in ' + g.file + ' is drawn as what pressing it does',
+			isBtn === ACTS_ON_GET.has(page),
+			isBtn ? where + '\n    a .btn that only navigates'
+				: where + '\n    an action that acts on GET, drawn as a link');
+
+		// The two on the Dashboard's no-video banner are empty here and filled
+		// by dashboard.js, so their arrow is checked where it is written.
+		if (text) {
+			check('"' + text + '" ends the way its shape says it should',
+				/(&rarr;|→)$/.test(text) === !isBtn, where);
+		}
+	}
+});
+
+const missing = EXPECTED.filter((e) => found.indexOf(e) < 0);
+const extra = found.filter((f) => EXPECTED.indexOf(f) < 0);
+check('every notice action the tree holds is one the scan can read',
+	missing.length === 0,
+	'no longer found, so no longer checked:\n    ' + missing.join('\n    '));
+check('and the scan reads nothing this list has not been told about',
+	extra.length === 0,
+	'add it to EXPECTED once its shape is right:\n    ' + extra.join('\n    '));
+
+// dashboard.js writes two of those labels at runtime, and has to add the same
+// arrow the static ones are typed with.
+const dash = fs.readFileSync(A('dashboard.js'), 'utf8');
+check('the runtime-filled actions carry the arrow too',
+	(dash.match(/\.label \+ ' →'/g) || []).length === 2,
+	'dashboard.js fills #st-alert-novideo-a and -h');
+
 done();
