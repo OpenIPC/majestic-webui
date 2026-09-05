@@ -1264,6 +1264,12 @@ mark {
 	user-select: none;
 }
 
+/* Hold to compare at stock: nothing to compare, and the title says so */
+.mj-hud-btn:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
 .mj-hud-btn:hover {
 	color: #fff;
 }
@@ -1854,6 +1860,11 @@ mark {
 
 .mj-geo:hover {
 	border-color: var(--bs-tertiary-color);
+}
+
+/* the pad and the quarter turns are two rows of one group */
+.mj-geo-row + .mj-geo-row {
+	margin-top: 0.375rem;
 }
 
 .mj-geo svg {
