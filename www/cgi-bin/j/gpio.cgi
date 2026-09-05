@@ -147,6 +147,17 @@ assigned() {
 		v=$(yaml-cli -g ".nightMode.$k" 2>/dev/null)
 		echo "$v" | grep -qE '^[0-9]+$' && echo "$v $k"
 	done
+	# Pads majestic has been given elsewhere in its own config. Day / Night is
+	# not the only section that assigns one, and a pad the speaker or the
+	# doorbell button is on is neither free to hand an IR-cut coil nor
+	# something a sweep may drive — the scan raises a pad against another and
+	# brakes both, which on a speaker enable or a button line is not a
+	# measurement anybody asked for. They were invisible here, so the map drew
+	# them as free and the sweep treated them as candidates.
+	for kv in "audio.speakerPin speaker" "sip.buttonPin button"; do
+		v=$(yaml-cli -g ".${kv%% *}" 2>/dev/null)
+		echo "$v" | grep -qE '^[0-9]+$' && echo "$v ${kv##* }"
+	done
 	for e in ptz_gpio gpio_motors; do
 		for v in $(fw_printenv -n "$e" 2>/dev/null | tr ',' ' '); do
 			echo "$v" | grep -qE '^[0-9]+$' && echo "$v ptz"
@@ -228,7 +239,19 @@ if [ -n "$DRIVE" ] && [ -n "$LOWPAD" ]; then
 		for line in $(assigned | sed 's/ /:/'); do
 			pv="${line%%:*}"; role="${line#*:}"
 			case "$role" in irCutPin1|irCutPin2) continue ;; esac
-			if [ "$pv" = "$pad" ]; then deny "pad $pad is already assigned"; fi
+			# Named, not just refused. "already assigned" leaves the reader to
+			# go and find out what to, which on a page whose whole subject is
+			# which pad does what is the one thing not to make them do — and
+			# the names are the ones on screen, never the config keys.
+			case "$role" in
+				backlightPin)   what='the night illuminator' ;;
+				lightSensorPin) what='the daylight sensor' ;;
+				ptz)            what='the PTZ driver' ;;
+				speaker)        what='the speaker' ;;
+				button)         what='the doorbell button' ;;
+				*)              what='something else' ;;
+			esac
+			if [ "$pv" = "$pad" ]; then deny "pad $pad is already used by $what"; fi
 		done
 	done
 	COILS=$(coil_pads)
