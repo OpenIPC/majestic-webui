@@ -127,7 +127,8 @@
 		config: null,
 		fields: [],
 		initial: {},
-		fieldCache: {},
+		// the mj-tree.js instance for state.schema, built on first use
+		tree: null,
 		// the mounted section's .mj-cols box, or null on the live/ROI leaves
 		cols: null,
 		// the mj-preview.js handle for whatever section is showing a picture,
@@ -194,59 +195,36 @@
 			(key ? key.charAt(0).toUpperCase() + key.slice(1) : key);
 	}
 
-	// Tabs are the schema's x-groups manifest (Image/Video/Events/...), each
-	// merging several config sections. Only sections present in the live schema
-	// (and groups with >=1 such section) are shown — unsupported features hide.
-	function groups() {
-		const xg = (state.schema && state.schema['x-groups']) || [];
-		const props = (state.schema && state.schema.properties) || {};
-		const out = [];
-		for (const g of xg) {
-			const secs = (g.sections || []).filter(s => props[s] && props[s].properties);
-			if (secs.length) out.push({ id: g.id, label: g.label, sections: secs });
+	// The tree — which leaf every schema key is drawn on — is mj-tree.js's:
+	// groups, the lifted set, absorption, what each leaf draws. Built once per
+	// schema and asked through the wrappers below, so the rest of this file
+	// reads as it did. It is a module because its failures are silent (a key
+	// placed nowhere is a row that is simply not there) and only a module can be
+	// asked by a test; tests/tree.test.js asks it where every key landed. Read
+	// once, here, like REQ — but there is no page without it, so load() says so
+	// rather than throwing at the first lookup.
+	const TREE = (typeof window === 'object' && window.MajesticTree) || null;
+	function treeOf() {
+		if (!state.tree || state.tree.schema !== state.schema) {
+			state.tree = TREE.build(state.schema, {
+				exclude: EXCLUDE, liveOrder: LIVE_ORDER, liveId: LIVE_ID, liveLabel,
+			});
+			state.tree.schema = state.schema;
 		}
-		return out;
+		return state.tree;
 	}
-
-	// Every leaf a section can render, flattened from the schema once and cached:
-	// {key, dot, title, hint} for each field renderProps would draw, so the search
-	// can match on the same words the page shows. Nested objects recurse and
-	// x-live knobs are lifted out, exactly as renderProps does.
-	// `withLive` keeps the x-live fields in. They are normally left out because
-	// the Live adjustments leaf lifts them out of their sections and renders
-	// them beside the picture — but that leaf only lifts from the group that
-	// owns it, so a section elsewhere whose keys became live has to render its
-	// own. The Overlay leaf is that case: the camera classes its placement keys
-	// live (it can move the region without a rebuild), and without this they
-	// would be lifted nowhere and simply disappear from the settings page.
-	function sectionFields(section, withLive) {
-		const ck = withLive ? section + '\u0000live' : section;
-		if (state.fieldCache[ck]) return state.fieldCache[ck];
-		const out = [];
-		const walk = (basePath, props) => {
-			for (const key of Object.keys(props)) {
-				const dot = basePath + '.' + key;
-				if (EXCLUDE.has(dot)) continue;
-				const sub = props[key];
-				if (!sub) continue;
-				if (sub['x-live'] && !withLive) continue;
-				if (sub.type === 'object' && sub.properties) {
-					walk(dot, sub.properties);
-					continue;
-				}
-				if (!RENDERABLE.has(sub.type)) continue;
-				out.push({ key, dot, sub, title: sub.title || sub.description || key, hint: sub.hint || '' });
-			}
-		};
-		const props = ((state.schema.properties || {})[section] || {}).properties;
-		if (props) walk(section, props);
-		state.fieldCache[ck] = out;
-		return out;
+	function groups() { return treeOf().groups(); }
+	function sectionFields(section, withLifted) { return treeOf().sectionFields(section, withLifted); }
+	function groupLiveFields(g) { return treeOf().groupLiveFields(g); }
+	function liveFields() { return treeOf().liveFields(); }
+	function lifted() { return treeOf().lifted(); }
+	function absorbed(sec) { return treeOf().absorbed(sec); }
+	function absorbedSections() { return treeOf().absorbedSections(); }
+	function leafFields(id) { return treeOf().leafFields(id); }
+	function groupHasLive(g) {
+		const o = treeOf().owner();
+		return !!(o && g && o.id === g.id);
 	}
-
-	// The types renderField actually draws — number/object fall through its
-	// dispatch and return null, so they must not make a section look non-empty.
-	const RENDERABLE = new Set(['boolean', 'integer', 'string', 'array']);
 
 	// A field hidden by visibleWhen is not on the page, so a search must not
 	// count it. Same rule the rendered page applies (visMatches) — and against
@@ -270,15 +248,12 @@
 		return visMatches(vw, v);
 	}
 
-	// The navigable leaves of one group, in the order the tree lists them.
+	// The navigable leaves of one group, in the order the rail lists them: the
+	// Live leaf first where the group owns it, then every section with
+	// something left to draw — a section the Live leaf absorbed has none.
 	function groupSections(g) {
-		const out = [];
-		if (groupHasLive(g)) out.push({ id: LIVE_ID, label: 'Live adjustments' });
-		for (const s of g.sections) {
-			if (!leafFields(s).length) continue;   // e.g. a section that is all x-live
-			out.push({ id: s, label: label(s) });
-		}
-		return out;
+		return treeOf().leafIds(g).map(id =>
+			({ id, label: id === LIVE_ID ? 'Live adjustments' : label(id) }));
 	}
 
 	function tree() {
@@ -304,6 +279,9 @@
 			// Motion detection's picture. A bookmark to it is not a dead link:
 			// it names a thing that still exists, on the page that now holds it.
 			if (tab === ROI_ID) tab = 'motionDetect';
+			// Nor is a bookmark to a section the Live leaf absorbed: an image
+			// bookmark lands where the image settings are.
+			if (absorbed(tab)) tab = LIVE_ID;
 			if (leaves().includes(tab)) return tab;
 			const g = t.find(x => x.id === tab);
 			if (g) return g.sections[0].id;
@@ -330,16 +308,6 @@
 			if (secs.length) out.push({ ...x, sections: secs });
 		}
 		return out;
-	}
-
-	// What a given leaf actually renders. The Live leaf has no schema section of
-	// its own; every other leaf renders its whole section, motionDetect.roi
-	// included — the regions are drawn on that section's own picture now, so
-	// searching for "region" has one place to land instead of two.
-	function leafFields(secId) {
-		if (secId === LIVE_ID) return liveFields().map(f =>
-			({ sub: f.sub, dot: f.dot, title: liveLabel(f.key, f.sub), hint: f.sub.hint || '' }));
-		return sectionFields(secId, secId === 'osd');
 	}
 
 	function matchCount(secId, q) {
@@ -548,41 +516,6 @@
 		});
 	}
 
-	// A group has a live preview when any of its fields are x-live (the
-	// HiSilicon image CSC knobs) — so the user can see the effect while dragging.
-	function groupHasLive(group) {
-		if (!group) return false;
-		// only the first such group owns the leaf: the tree keys on section id
-		// and two "Live adjustments" entries would collide
-		const owner = groups().find(g => groupLiveFields(g).length);
-		return !!owner && owner.id === group.id;
-	}
-
-	function groupLiveFields(group) {
-		const props = (state.schema && state.schema.properties) || {};
-		const out = [];
-		if (!group) return out;
-		for (const section of group.sections) {
-			const sp = (props[section] || {}).properties || {};
-			for (const key of Object.keys(sp)) {
-				if (!sp[key] || !sp[key]['x-live']) continue;
-				if (EXCLUDE.has(section + '.' + key)) continue;
-				out.push({ section, key, sub: sp[key], dot: section + '.' + key });
-			}
-		}
-		out.sort((a, b) => {
-			const ia = LIVE_ORDER.indexOf(a.key), ib = LIVE_ORDER.indexOf(b.key);
-			return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
-		});
-		return out;
-	}
-
-	// the x-live knobs of whichever group owns the Live adjustments leaf
-	function liveFields() {
-		const owner = groups().find(g => groupLiveFields(g).length);
-		return owner ? groupLiveFields(owner) : [];
-	}
-
 	function liveLabel(key, sub) {
 		const meta = LIVE_META[key];
 		return meta ? meta.label : (sub.title || sub.description || key);
@@ -644,7 +577,9 @@
 		return f.type === 'boolean' ? (toBool(v) ? 1 : 0) : v;
 	}
 
-	const isLive = (f) => !!(f.schema && f.schema['x-live']);
+	// Wired live, as renderField decided it — not merely flagged live by the
+	// schema. The stream bitrate on Main stream is flagged and is not wired.
+	const isLive = (f) => !!f.pushes;
 
 	// A save that is on the wire owns the live values. It has handed the camera
 	// the dragged ones on purpose, and state.initial does not catch up until the
@@ -704,15 +639,15 @@
 		return () => window.removeEventListener('pagehide', onHide);
 	}
 
-	// The query string /api/v1/image takes, over ALL x-live fields — sending
-	// them together is what lets the backend apply combined settings (mirror
-	// and flip need each other). `valueOf` picks what each field contributes,
-	// so hold-to-compare can post the defaults through the same builder rather
-	// than growing a second copy of it.
+	// The query string /api/v1/image takes, over ALL the wired-live fields —
+	// sending them together is what lets the backend apply combined settings
+	// (mirror and flip need each other). `valueOf` picks what each field
+	// contributes, so hold-to-compare can post the defaults through the same
+	// builder rather than growing a second copy of it.
 	function liveQuery(valueOf) {
 		const parts = [];
 		for (const f of state.fields) {
-			if (!f.schema || !f.schema['x-live']) continue;
+			if (!isLive(f)) continue;
 			parts.push(encodeURIComponent(f.dot.split('.').pop()) + '=' +
 				encodeURIComponent(valueOf(f)));
 		}
@@ -746,6 +681,10 @@
 		const form = document.getElementById('mj-settings-form');
 		if (!form) return;
 		stopLivePreview();
+		if (!TREE) {
+			showFatal(form, 'The settings page cannot build its navigation: /a/mj-tree.js did not load.');
+			return;
+		}
 
 		// schema/config must be loaded before we can resolve groups.
 		try {
@@ -1197,15 +1136,25 @@
 		f.control.dispatchEvent(new Event('input', { bubbles: true }));
 	}
 
-	// Every x-live knob back to its schema default — staged, exactly like the
+	// The strip's knobs back to their schema defaults — staged, exactly like the
 	// per-row ↺ and for the same reason. This used to call /api/v1/reset, which
 	// wrote the camera the moment it was pressed while the sliders beside it
 	// did not: on a panel whose whole claim is that nothing is written until
 	// Save, it was the one control that broke the rule. The rest of the page
 	// keeps the server-side reset, where every row behaves that way.
+	//
+	// The four tone knobs only — the ones the Scene presets name, which is the
+	// vocabulary the strip and the button share. The button's title says four;
+	// mirror and flip are wired live too, and resetting them from here turned
+	// the picture over on a press that promised to touch brightness — and would
+	// now leave the quarter turn beside them where it was, half an orientation
+	// reset. Orientation is a mounting decision, not a tone, and stays put; so
+	// does any integer a future schema lifts beside these, until a preset
+	// learns it.
+	const TONE_KEYS = new Set(Object.keys(LIVE_PRESETS[0].v));
 	function resetLiveAll() {
 		for (const f of state.fields) {
-			if (!f.schema || !f.schema['x-live']) continue;
+			if (!isLive(f) || !TONE_KEYS.has(f.key)) continue;
 			if (f.schema.default === undefined) continue;
 			setLive(f, f.schema.default);
 		}
@@ -1250,27 +1199,74 @@
 		// pad has to be told to re-read after a save or a reset.
 		state.liveSync.push(sync);
 		sync();
+	}
 
-		// The pad is only half of orientation, and without saying so it looks
-		// like all of it. Quarter turns are `rotate`, whose enum is deliberately
-		// ["0","90","270"] — 180 is absent because mirror+flip already give you
-		// that, at sensor level and for free. 90 and 270 are the ones this pad
-		// cannot reach: they are a VPSS operation that swaps the stream's width
-		// and height, so they are not x-live, do not belong on a panel whose
-		// controls all apply live, and stay on their own leaf. Point at it
-		// rather than move it here.
-		const sec = mirrorField.dot.slice(0, mirrorField.dot.lastIndexOf('.'));
-		const rotSchema = (((state.schema.properties || {})[sec] || {}).properties || {}).rotate;
-		const turns = rotSchema && Array.isArray(rotSchema.enum)
-			? rotSchema.enum.filter(v => String(v) !== '0') : [];
-		if (turns.length && !EXCLUDE.has(sec + '.rotate')) {
-			const hint = el('p', 'mj-live-hint');
-			hint.innerHTML = 'Quarter turns (' +
-				turns.map(v => esc(String(v)) + '&#176;').join(', ') +
-				') resize the stream, so they are saved and applied with a reload: ' +
-				'<a href="camera.cgi?tab=' + esc(sec) + '">' + esc(label(sec)) + '</a>.';
-			container.appendChild(hint);
-		}
+	// The other half of orientation. Quarter turns are `rotate`, whose enum is
+	// deliberately ["0","90","270"] — 180 is absent because mirror+flip already
+	// give you that, at sensor level and for free. 90 and 270 are what the pad
+	// above cannot reach: a VPSS operation that swaps the stream's width and
+	// height, so it is a pipeline rebuild rather than a live knob. That
+	// difference in cost used to decide where the control was drawn — the pad
+	// here, the select on a page of its own, each with a hint pointing at the
+	// other — and the reporter of #316 found the split illogical, which it was:
+	// which way up the camera is mounted is one decision, and the picture it is
+	// judged against is this one. So the field mounts here, hidden, pin-map
+	// style: Save, dirty tracking, the reset arrow and refresh() work on it
+	// unchanged, the buttons only stage a value, and what a press cannot show
+	// on the picture the group says in words.
+	function renderTurns(col, sec) {
+		const dot = sec + '.rotate';
+		if (EXCLUDE.has(dot)) return null;
+		const sub = (((state.schema.properties || {})[sec] || {}).properties || {}).rotate;
+		if (!sub || sub.type !== 'string' || !Array.isArray(sub.enum)) return null;
+		// Whole degrees only: the enum is ["0","90","270"] today, and a value the
+		// glyph could not turn by would be a button that draws nothing.
+		const turns = sub.enum.map(String).filter(v => /^\d+$/.test(v));
+		if (!turns.some(v => v !== '0')) return null;
+
+		const body = liveGroup(col, 'Quarter turn', 'on Save');
+		const field = renderField(body, dot, 'rotate', sub, getDotted(state.config, dot), { hidden: true });
+		if (!field) return null;
+		state.fields.push(field);
+		state.initial[dot] = field.getValue();
+
+		// The same frame and glyph as the pad, turned as a whole: a quarter turn
+		// stands the frame on end, which is the thing about it the hint has to
+		// say — the stream comes back portrait.
+		const row = el('div', 'mj-geo-row');
+		const btns = turns.map(v => {
+			const deg = Number(v);
+			const b = el('button', 'mj-geo');
+			b.type = 'button';
+			b.innerHTML =
+				'<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
+				'<g transform="rotate(' + deg + ' 10 10)">' +
+				'<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>' +
+				'<path d="M7.6 6.8h5.2M7.6 10h3.7M7.6 6.8v6.4" stroke-linecap="round" stroke-width="1.7"></path>' +
+				'</g></svg><span>' + (deg ? deg + '&#176;' : 'None') + '</span>';
+			b.addEventListener('click', () => setLive(field, v));
+			row.appendChild(b);
+			return b;
+		});
+		body.appendChild(row);
+
+		const sync = () => {
+			const cur = String(field.getValue());
+			turns.forEach((v, i) => {
+				btns[i].classList.toggle('mj-geo-on', v === cur);
+				btns[i].setAttribute('aria-pressed', v === cur ? 'true' : 'false');
+			});
+		};
+		field.control.addEventListener('input', sync);
+		field.control.addEventListener('change', sync);
+		state.liveSync.push(sync);
+		sync();
+
+		const hint = el('p', 'mj-live-hint');
+		hint.textContent = 'A quarter turn resizes the stream, so the picture cannot ' +
+			'preview it: it takes effect on Save, with the reload Save asks for.';
+		body.appendChild(hint);
+		return field;
 	}
 
 	// Scene presets. Which one is "on" is DERIVED by comparing the current tone
@@ -1580,7 +1576,10 @@
 		if (useGeo) {
 			const mf = state.fields.find(f => f.dot === mirror.dot);
 			const ff = state.fields.find(f => f.dot === flip.dot);
-			if (mf && ff) renderGeometry(liveGroup(colGeo, 'Orientation', ''), mf, ff);
+			if (mf && ff) {
+				renderGeometry(liveGroup(colGeo, 'Orientation', ''), mf, ff);
+				renderTurns(colGeo, mirror.section);
+			}
 		}
 
 		// Every group above is conditional — on the schema, and on which player
@@ -1603,6 +1602,34 @@
 		[colScene, colLuma].forEach(c => { if (!c.childElementCount) c.remove(); });
 		if (!deck.childElementCount) deck.remove();
 		if (hasTone && !strip.querySelector('.mj-live-row')) strip.remove();
+
+		// The leftovers of a section this leaf absorbed — on this build, the
+		// image section's Automatic tuning — as the ordinary rows they would
+		// have been on a page of their own, in a card under the deck. Generic on
+		// purpose: the rows come from the schema, so a key the section grows
+		// tomorrow lands here rather than on a page that no longer exists. What
+		// the deck already claimed (the quarter turns) is skipped by dot.
+		const claimed = new Set(state.fields.map(f => f.dot));
+		for (const sec of absorbedSections()) {
+			if (!sectionFields(sec).some(f => !claimed.has(f.dot))) continue;
+			const card = el('div', 'card mj-live-rest');
+			const body = el('div', 'card-body');
+			const head = el('div', 'mj-live-head');
+			const h = el('h3', 'mj-cap');
+			h.textContent = label(sec);
+			head.appendChild(h);
+			head.appendChild(el('span', 'mj-live-rule'));
+			body.appendChild(head);
+			const cols = el('div', 'mj-cols');
+			cols.appendChild(el('div', 'mj-col'));
+			cols.appendChild(el('div', 'mj-col'));
+			state.cols = cols;
+			body.appendChild(cols);
+			card.appendChild(body);
+			form.appendChild(card);
+			renderProps(cols.firstElementChild, sec,
+				((state.schema.properties || {})[sec] || {}).properties || {}, claimed);
+		}
 	}
 
 	// ── The Motion detection leaf ─────────────────────────────────────────
@@ -3332,11 +3359,16 @@
 
 	const isGroup = (sub) => !!(sub && sub.type === 'object' && sub.properties);
 
-	// A section whose knobs were lifted onto the Live leaf looks half-empty and
-	// says nothing about why: image is two rows because six of its eight are
-	// x-live and render where the picture is. Only claims what is actually on
-	// that leaf — liveFields() is the same list renderLive() mounts, so a build
-	// whose live knobs live in another group gets no note rather than a wrong one.
+	// A section the Live leaf lifted a MINORITY of keeps its page, and says at
+	// the top of it where the lifted part went. No section majestic ships today
+	// is in that state — image, the one section with live knobs, is absorbed
+	// whole (absorbed()) — so this is for the build that classes one exposure
+	// control live. Only claims what is actually on the leaf: liveFields() is
+	// the same list renderLive() mounts.
+	//
+	// Destination first. Led by the list of names, the note read as a
+	// description of the page it was on — and a description naming six settings
+	// the page did not have (#316).
 	function liftedNote(sec) {
 		const mine = liveFields().filter(f => f.section === sec);
 		if (!mine.length) return null;
@@ -3345,9 +3377,8 @@
 			? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1]
 			: names[0];
 		const p = el('p', 'mj-lifted');
-		p.innerHTML = esc(list.charAt(0).toUpperCase() + list.slice(1)) +
-			' apply as you drag them, so they are on ' +
-			'<a href="?tab=' + LIVE_ID + '">Live adjustments</a> with the picture.';
+		p.innerHTML = 'On <a href="?tab=' + LIVE_ID + '">Live adjustments</a>, with the ' +
+			'picture: ' + esc(list) + '. They apply as you drag them.';
 		return p;
 	}
 
@@ -4165,7 +4196,9 @@
 		note.classList.toggle('mj-off-stock', off > 0);
 	}
 
-	function renderProps(container, basePath, props) {
+	// `skip` is a set of dots a caller has already mounted elsewhere on the same
+	// leaf, so the ordinary rows do not draw them a second time.
+	function renderProps(container, basePath, props, skip) {
 		// Scalars first, object subtrees after. An object renders as a labelled
 		// group and everything below its heading reads as part of it, so a scalar
 		// sibling that happens to come later in the schema is captured by it:
@@ -4177,7 +4210,8 @@
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
 			const sub = props[key];
-			if (sub && sub['x-live']) continue;   // live knobs render on their own leaf
+			if (lifted().has(dot)) continue;      // mounted on the Live leaf, beside the picture
+			if (skip && skip.has(dot)) continue;
 			if (isGroup(sub)) {
 				// The Live deck's group head, verbatim: micro-caps name and a
 				// hairline to the column edge, rather than a 20px grey <h5> that
@@ -4334,9 +4368,10 @@
 		const items = Array.from(a.children).concat(Array.from(b.children));
 		if (!items.length) return;
 
-		// A handful of rows does not want two columns. image is two rows once its
-		// six x-live knobs are on the Live leaf, and dealt in half that is one row
-		// beside one row across 966px of card. Under the cut they stay in one
+		// A handful of rows does not want two columns. Two rows dealt in half are
+		// one row beside one row across 966px of card — image was that section
+		// while its six live knobs sat on the Live leaf and the rest did not, and
+		// a two-row section will exist again. Under the cut they stay in one
 		// column at a readable measure and the second column is not drawn at all,
 		// divider included.
 		// Rows only: a group heading is not a setting, and counting it would spend
@@ -4964,15 +4999,23 @@
 		control.addEventListener('input', updateDirty);
 		control.addEventListener('change', updateDirty);
 
-		// Live-tunable fields (schema "x-live", e.g. HiSilicon image knobs):
-		// apply to the SDK on change via POST /api/v1/image — instant, no
-		// save/reinit. The value still persists only on the page's Save.
-		if (sub && sub['x-live']) {
+		// A live knob applies to the SDK as it moves, via POST /api/v1/image —
+		// instant, no save, no reinit; the value still persists only on Save.
+		// Two conditions, and the second is the one that matters: the schema's
+		// x-live says the daemon CAN take the key live, and the leaf says this
+		// page WIRES it — the knobs lifted beside the picture, and the Overlay
+		// leaf's own keys, which are the two sets the endpoint takes. A
+		// live-classed key drawn on an ordinary section — the bitrate, on Main
+		// stream — is applied by Save without a rebuild, which is a different
+		// promise: pushing it here would send the endpoint a name it ignores and
+		// then "revert" it to the same value on the way out of the page.
+		const pushes = !!(sub && sub['x-live'] && (lifted().has(dot) || state.sec === 'osd'));
+		if (pushes) {
 			control.addEventListener('input', pushLive);
 			control.addEventListener('change', pushLive);
 		}
 
-		return { dot, key, schema: sub, type, control, p, getValue, setValue };
+		return { dot, key, schema: sub, type, control, p, getValue, setValue, pushes };
 	}
 
 	function updateDirty() {

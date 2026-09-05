@@ -573,9 +573,9 @@ pre#output[data-cmd] {
 	color: var(--bs-secondary-color);
 }
 
-/* Why a section is half empty, said once at the top of it rather than left for
-   the reader to wonder about: image is two rows because six of its eight knobs
-   are x-live and render on the Live leaf with the picture. */
+/* Where the lifted part of a section went, said once at the top of what is
+   left of it. Reachable only on a build that classes a minority of some
+   section live — image, six of eight, is absorbed onto the Live leaf whole. */
 .mj-lifted {
 	max-width: 46rem;
 	margin: 0.9rem 0 0;
@@ -1370,6 +1370,13 @@ mark {
 
 .mj-live-hint a:hover {
 	color: var(--bs-primary);
+}
+
+/* The leftovers of a section the Live leaf absorbed — Automatic tuning, on a
+   HiSilicon build — as the ordinary card they would have had to themselves,
+   under the deck. */
+.mj-live-rest {
+	margin-top: 1rem;
 }
 
 /* The deck: one card split by a rule, so tone and orientation read as one
