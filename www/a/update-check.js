@@ -37,6 +37,22 @@
 		}[c]));
 	}
 
+	// A date is a date, or it is not evidence.
+	//
+	// Both inputs here are untrusted in different ways. The feed arrives over
+	// the network, and parseBuild lifts any YYYY-MM-DD-shaped run of digits out
+	// of a version string without checking it names a real day. Comparing either
+	// as a raw string would rank "z" after every real date and "0000-00-00"
+	// before them, turning nonsense into a confident "at least N builds behind".
+	function isDate(s) {
+		if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+		const t = Date.parse(s + 'T00:00:00Z');
+		if (isNaN(t)) return false;
+		// Round-trip, because Date.parse rolls 2026-02-31 forward into March
+		// rather than rejecting it.
+		return new Date(t).toISOString().slice(0, 10) === s;
+	}
+
 	function plural(n, one, many) {
 		return n + ' ' + (n === 1 ? one : many);
 	}
@@ -50,11 +66,13 @@
 		const rev = /[+ ]([0-9a-f]{7,40})\b/.exec(version);
 		const date = /(\d{4}-\d{2}-\d{2})/.exec(version);
 		if (!rev) return null;
-		return { rev: rev[1], date: date ? date[1] : null };
+		// A date that is not a real day is no date at all: nothing downstream
+		// should have to ask twice.
+		return { rev: rev[1], date: (date && isDate(date[1])) ? date[1] : null };
 	}
 
 	function daysSince(iso) {
-		if (!iso) return null;
+		if (!isDate(iso)) return null;
 		const then = Date.parse(iso + 'T00:00:00Z');
 		if (isNaN(then)) return null;
 		return Math.floor((Date.now() - then) / 86400000);
@@ -129,7 +147,7 @@
 		// the totals are a floor rather than a count, so the sentence says "at
 		// least". Same-day is not evidence either way, and stays silent.
 		const eldest = feed.builds[feed.builds.length - 1];
-		if (buildDate && eldest && typeof eldest.date === 'string' &&
+		if (isDate(buildDate) && eldest && isDate(eldest.date) &&
 			buildDate < eldest.date) {
 			return { builds, totals, vendors, atLeast: true };
 		}

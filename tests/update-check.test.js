@@ -210,6 +210,38 @@ const VER = (rev, date) => 'Lite HiSilicon (hi3516ev300), HEAD+' + rev + ', ' + 
 			feed: feedOf([entry('aaaaaaaaa', { fix: 9 })]),
 		})) === null);
 
+	group('a date that is not a date is not evidence');
+
+	// The pre-ledger path decides "older" by comparing two dates, and a raw
+	// string comparison ranks "z" after every real date. Both sides are
+	// untrusted: the feed comes over the network, and the camera's date is
+	// lifted out of a version string by shape alone.
+	const badFeedDates = ['z', '2026-13-45', '2026-02-31', '', '20260905', 'yesterday'];
+	for (const bad of badFeedDates) {
+		check('a ledger dated ' + JSON.stringify(bad) + ' proves nothing',
+			(await run({
+				version: VER('deadbeef1', iso(400)),
+				feed: feedOf([{ sha: 'aaaaaaaaa', date: bad,
+					counts: { feature: 1, fix: 2, security: 1, other: 0 }, notes: [] }]),
+			})) === null);
+	}
+	check('a ledger date of the wrong type proves nothing',
+		(await run({
+			version: VER('deadbeef1', iso(400)),
+			feed: feedOf([{ sha: 'aaaaaaaaa', date: 20260905,
+				counts: { feature: 1, fix: 2, security: 1, other: 0 }, notes: [] }]),
+		})) === null);
+	check('a camera date of 0000-00-00 is not an ancient camera',
+		(await run({
+			version: 'Lite HiSilicon (hi3516ev300), HEAD+deadbeef1, 0000-00-00 07:14',
+			feed: feedOf([entry('aaaaaaaaa', { fix: 3 })]),
+		})) === null);
+	check('and a real pair still works',
+		(await run({
+			version: VER('deadbeef1', iso(400)),
+			feed: feedOf([entry('aaaaaaaaa', { fix: 3 })]),
+		})) !== null);
+
 	group('a feed it cannot trust is not a feed');
 
 	// An absent reading is not a zero, and these arrive over the network and end
