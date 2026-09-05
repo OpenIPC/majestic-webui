@@ -16,6 +16,9 @@
 	'use strict';
 
 	const FEED = 'https://openipc.s3-eu-west-1.amazonaws.com/majestic-changes.json';
+	// Whether an image this board can actually install exists. Same-origin, and
+	// the same question the Firmware page asks, through the same updater.
+	const FW_LATEST = '/cgi-bin/j/fw-latest.cgi';
 	const SLOT = 'update-notice';
 	const SEEN = 'mj-update-seen';
 	// A build nobody has updated in half a year is a liability by itself, so it
@@ -223,10 +226,24 @@
 		// A camera with no route out must not hold the page open waiting.
 		const ctl = ('AbortController' in window) ? new AbortController() : null;
 		const timer = setTimeout(() => ctl && ctl.abort(), TIMEOUT_MS);
-
-		fetch(FEED, { signal: ctl ? ctl.signal : undefined, cache: 'no-cache' })
+		const signal = ctl ? ctl.signal : undefined;
+		const grab = (url) => fetch(url, { signal: signal, cache: 'no-cache' })
 			.then(r => r.ok ? r.json() : Promise.reject(r.status))
-			.then(feed => render(slot, feed, build))
+			.catch(() => null);
+
+		// Both questions, because either one alone misleads. The feed says what
+		// changed in the camera's software; the endpoint says whether an image
+		// carrying it exists for this board. Telling an owner they are behind
+		// while the Firmware page offers them nothing to install is the
+		// contradiction this pair exists to make impossible.
+		Promise.all([grab(FEED), grab(FW_LATEST)])
+			.then(([feed, fw]) => {
+				// `newer` is true, false, or null for "cannot tell". Only true
+				// is permission to speak: an unreachable updater is not evidence
+				// that an update exists.
+				if (!feed || !fw || fw.newer !== true) return;
+				render(slot, feed, build);
+			})
 			.catch(() => { /* offline, blocked, or malformed: say nothing */ })
 			.then(() => clearTimeout(timer));
 	});
