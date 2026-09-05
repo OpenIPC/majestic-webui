@@ -767,8 +767,15 @@
 		// on /metrics, so there is nothing continuous to chart and isp_again
 		// would be a different quantity wearing the monitor's clothes. It gets
 		// a sentence of its own below instead.
+		//
+		// The `src === null` half is the older daemon that publishes no
+		// source, and there the precedence has to be reproduced rather than
+		// guessed at: a daylight sensor pin decides BEFORE the thresholds do,
+		// so a camera holding both is charting a gauge that is not driving it.
+		// Hence the pin test here as well as in its own branch below.
 		if (src === 2 ||
-			(src === null && has(nm.minThreshold) && has(nm.maxThreshold))) {
+			(src === null && !has(nm.lightSensorPin) &&
+				has(nm.minThreshold) && has(nm.maxThreshold))) {
 			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
 			const bands = [];
 			if (lo !== null) {

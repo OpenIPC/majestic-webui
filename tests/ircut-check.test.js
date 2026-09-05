@@ -473,6 +473,16 @@ function runRest() {
 			thr.bands.length === 2);
 		check('an old daemon with thresholds still gets the chart',
 			ic.monitorView(nmThr, { isp_again: 2000 }).mode === 'thresholds');
+		// An older daemon publishes no source, so this file has to reproduce
+		// the precedence rather than read it: a daylight sensor pin decides
+		// before the thresholds do. Charting the gain there would draw a
+		// confident line under a gauge that is not driving anything, on a
+		// firmware/wiring pair nothing here can go and look at.
+		check('and a sensor pin outranks them on that daemon, as on the camera',
+			ic.monitorView(
+				{ lightMonitor: true, lightSensorPin: 66,
+					minThreshold: 1500, maxThreshold: 4000 },
+				{ isp_again: 2000, night_enabled: 0 }).mode === 'sensor');
 		// The band that means "and everything above" is open-ended, and says so
 		// with null rather than a stand-in ceiling: the chart's auto scale
 		// makes room for a finite edge, so a made-up one would push the whole
