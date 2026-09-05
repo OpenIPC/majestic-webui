@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OSD overlay editor — proposal versions</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap">
+<style>
+body { margin: 0; background: #14161c; color: #e6e8ee; padding: 48px 24px;
+  font-family: 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; line-height: 1.55; }
+main { max-width: 680px; margin: 0 auto; }
+h1 { font-size: 26px; font-weight: 600; margin: 0 0 6px; }
+p.sub { margin: 0 0 32px; color: rgba(230,232,238,.6); font-size: 15px; }
+a { color: rgb(122,140,245); }
+ul { list-style: none; padding: 0; margin: 0; }
+li { border: 1px solid #2c313d; border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; }
+li h2 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+li p { margin: 0; font-size: 14px; color: rgba(230,232,238,.7); }
+li p + p { margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Overlay — anchor and offset, back in the visual editor</h1>
+  <p class="sub">Interactive mockups for
+    <a href="https://github.com/OpenIPC/majestic-webui/issues/340">OpenIPC/majestic-webui#340</a>.
+    Nothing here is built yet — the point is to agree the shape before any of it reaches
+    the source. Each round of feedback gets its own version so they stay comparable.</p>
+  <ul>
+    <li>
+      <h2><a href="v1/">v1 — the proposal</a></h2>
+      <p>Anchor, both offsets and the proportional mode are controls again, and the drag writes
+        into them rather than instead of them. The unit is yours: switch % to px and the number
+        changes while the overlay stays put. Arrow keys nudge one step, shift for ten.</p>
+      <p>They live in a panel that opens on the picture when you click an overlay, so nothing you
+        need is below the fold on a laptop. Four more boards carry the reasoning: why the
+        snapshot and fullscreen buttons moved off the video, what the same design does on a
+        phone, and two directions for the round after this one — several overlays at once, and
+        logos.</p>
+    </li>
+  </ul>
+</main>
+</body>
+</html>
