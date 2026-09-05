@@ -47,20 +47,31 @@ json_hdr() { printf 'HTTP/1.1 200 OK\nContent-Type: application/json\nCache-Cont
 installed=$(sed -n 's/^GITHUB_VERSION="\?\([^",]*\).*/\1/p' /etc/os-release 2>/dev/null \
             | sed -n 's/.*+\([0-9a-f]\{7,\}\).*/\1/p' | head -1)
 
-fresh=0
+# A half-written cache is not an answer. The file is replaced by rename below,
+# so a reader should never see one — but a crash mid-write, or a cache left by
+# an older build that wrote in place, would otherwise sit here being counted as
+# fresh for hours while serving JSON the browser cannot parse. Cheap to check,
+# and the check is what stops a bad file outliving the request that made it.
+cached=""
 if [ -f "$CACHE" ]; then
+    cached=$(cat "$CACHE" 2>/dev/null)
+    case "$cached" in
+        '{'*'}') ;;
+        *) cached="" ;;
+    esac
+fi
+
+if [ -n "$cached" ]; then
     age=$(( $(date +%s) - $(date -r "$CACHE" +%s 2>/dev/null || echo 0) ))
-    case "$(cat "$CACHE" 2>/dev/null)" in
+    case "$cached" in
         *'"newer":true'*) ttl=$TTL_YES ;;
         *) ttl=$TTL_NO ;;
     esac
-    [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ] && fresh=1
-fi
-
-if [ "$fresh" = "1" ]; then
-    json_hdr
-    cat "$CACHE"
-    exit 0
+    if [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ]; then
+        json_hdr
+        printf '%s' "$cached"
+        exit 0
+    fi
 fi
 
 # Same predicate as the Firmware page, deliberately down to the numbers: a
@@ -98,8 +109,21 @@ body=$(printf '{"installed":"%s","latest":"%s","latestSha":"%s","newer":%s}' \
         "$installed" "$latest" "$latest_sha" "$newer")
 
 # Only a real answer is worth caching; an unknown should be retried, not
-# remembered for six hours.
-[ "$newer" != "null" ] && printf '%s' "$body" > "$CACHE" 2>/dev/null
+# remembered.
+#
+# Written to a private name and renamed into place, because the notice is on
+# every page and these requests overlap: `> "$CACHE"` truncates the file first
+# and fills it after, so a reader arriving between the two gets an empty or
+# partial body, and the mtime the truncation just set makes it look fresh.
+# rename is atomic, so a reader sees either the old answer or the new one.
+if [ "$newer" != "null" ]; then
+    tmp="$CACHE.$$"
+    if printf '%s' "$body" > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$CACHE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    else
+        rm -f "$tmp" 2>/dev/null
+    fi
+fi
 
 json_hdr
 printf '%s' "$body"
