@@ -3348,11 +3348,23 @@ mark {
    var() is invalid at computed-value time, which unsets the property instead
    of falling back to the declaration above it. */
 .mj-notice {
+	--mj-notice-close: 1.5rem;
+	position: relative;
 	display: flex;
 	align-items: flex-start;
 	gap: 0.75rem;
 	margin-bottom: 0.5rem;
-	padding: 0.6rem 1rem;
+	/* The right inset ALWAYS holds the close button's slot, whether or not this
+	   notice has one (#347). As a flex item the x pushed the actions left by its
+	   own width plus the gap, so a stack of banners had its buttons at two
+	   different x positions depending on which of them could be dismissed —
+	   invisible while these were text links and impossible to miss once they
+	   were buttons. Reserving the corner on every notice is what puts them in a
+	   column. The width is .btn-close's own box, 1em of glyph in 0.25em of
+	   padding either side; getting it wrong costs a few pixels of inset rather
+	   than a broken row, which is why this is a plain reservation and not a
+	   :has() rule measuring the button that happens to be there. */
+	padding: 0.6rem calc(1rem + 0.75rem + var(--mj-notice-close)) 0.6rem 1rem;
 	background: var(--bs-card-bg);
 	border: 1px solid var(--bs-border-color);
 	border-radius: var(--bs-border-radius-lg);
@@ -3424,15 +3436,50 @@ mark {
 	flex: 0 0 auto;
 	display: flex;
 	align-items: center;
+	/* Centred against the whole notice, which on one or two lines is what the
+	   eye expects of a control beside a sentence (#347). The BOX stays
+	   flex-start, so the severity mark keeps its place against the first line
+	   whatever the sentence does — they are different items and only one of
+	   them is annotating the first word. */
+	align-self: center;
 	gap: 0.5rem;
 	margin-left: auto;
 	white-space: nowrap;
 	font-size: 0.875rem;
 }
 
+/* Out of the flow and into the slot the padding reserved for it. Centred with
+   the actions rather than pinned to the first line, because the two of them are
+   one cluster and a x sitting a line above the button it stands beside reads as
+   a misalignment rather than as a corner control — on the one-line notices that
+   is most of them, they are the same thing anyway. */
 .mj-notice > .btn-close {
-	flex: 0 0 auto;
-	margin-top: 0.15rem;
+	position: absolute;
+	top: 50%;
+	right: 1rem;
+	transform: translateY(-50%);
+	margin: 0;
+}
+
+/* Both right-hand controls go back to the first line where the notice has a
+   body row under its sentence, because a body row is content that can GROW and
+   the action answers the headline rather than the block. Three notices carry
+   one: the firmware-behind banner, whose body is a "What's new" list that the
+   reader opens; the recordings page's card-trouble banner, which carries the
+   kernel's own messages; and the SD-card page's, which puts its repair button
+   down there rather than in this row. Measured on the first of those with its
+   list open, centring puts the button 63px down, level with the bullets and
+   clear of the sentence it belongs to; against the first line it stays at 26px
+   whether the list is open or shut, which is the point. A browser without
+   :has() centres them, which is the request as asked and no worse than any
+   other notice gets. */
+.mj-notice:has(.mj-notice-body) > .mj-notice-acts {
+	align-self: flex-start;
+}
+
+.mj-notice:has(.mj-notice-body) > .btn-close {
+	top: calc(0.6rem + 0.15rem);
+	transform: none;
 }
 
 .mj-notice-danger { border-color: rgba(var(--bs-danger-rgb), 0.45); }
@@ -3469,6 +3516,16 @@ mark {
 	.mj-notice-acts {
 		flex: 1 1 100%;
 		justify-content: flex-end;
+	}
+
+	/* Back to the corner. Centring the x against the notice is right while it
+	   stands beside the button on one row; here the actions have taken a row of
+	   their own below the sentence, so the middle of the box is a third of the
+	   way down the text — the x landed over the sentence it was meant to sit
+	   clear of. */
+	.mj-notice > .btn-close {
+		top: calc(0.6rem + 0.15rem);
+		transform: none;
 	}
 }
 
