@@ -464,6 +464,36 @@ function runRest() {
 		}));
 		check('a pending switch counts down',
 			/switching in 40 s/.test(counting.line), counting.line);
+		// The camera's streak gauge advances on the camera's schedule, the page
+		// polls on another, and the two beat against each other — so the same
+		// sample is read forward by a local clock between polls. It is the
+		// camera's number carried forward, never a number of the page's own:
+		// every poll resyncs, and neither end of it may run away.
+		const aged = (age) => ic.monitorView(nmAuto, Object.assign({}, vAuto, {
+			night_auto_pending: 2, night_auto_streak_seconds: 20,
+			night_auto_dwell_seconds: 60,
+		}), age);
+		check('and falls a second at a time between polls',
+			/switching in 37 s/.test(aged(3).line), aged(3).line);
+		// Rounded rather than floored: a retell landing just short of a whole
+		// second must still advance, or it reprints the number it just
+		// printed and the countdown stutters instead of counting.
+		check('a retell just short of a second still advances it',
+			/switching in 39 s/.test(aged(0.9).line), aged(0.9).line);
+		check('a sample stamped in the future does not make it climb',
+			/switching in 40 s/.test(aged(-5).line), aged(-5).line);
+		check('and a switch the camera is late making does not go negative',
+			/switching in 0 s/.test(aged(900).line), aged(900).line);
+		// A streak gauge that has gone negative — a stepped clock under a
+		// "seconds held" counter — subtracts into a wait LONGER than the one
+		// configured, which is how a 60 s setting was shown as 250 s. The
+		// countdown cannot outlast its own dwell.
+		const stepped = ic.monitorView(nmAuto, Object.assign({}, vAuto, {
+			night_auto_pending: 2, night_auto_streak_seconds: -190,
+			night_auto_dwell_seconds: 60,
+		}), 0);
+		check('a stepped clock cannot stretch the wait past the dwell',
+			/switching in 60 s/.test(stepped.line), stepped.line);
 
 		const nmThr = { lightMonitor: true, minThreshold: 1500, maxThreshold: 4000 };
 		const thr = ic.monitorView(nmThr,
@@ -643,6 +673,32 @@ function runRest() {
 		check('two switches in the window is not',
 			!ic.diagnose(cfg, { night: 0, ircut: 0 }, { flips: 2, conflictS: 0 })
 				.some(x => x.id === 'hunting'));
+
+		// The finding used to state that automatic mode backs off after each
+		// flip. Nothing had measured that, and the daemon publishes the very
+		// number that would show it — so the sentence is now read off the
+		// gauge. It appears only when the camera is genuinely waiting longer
+		// than it was asked to, and stays silent otherwise, which is the whole
+		// difference between a reading and a claim. Testable only here: it
+		// takes a camera hunting at dusk, which is not a thing that can be
+		// arranged on demand.
+		const auto = { lightMonitor: true, irCutPin1: 11,
+			autoNightDelay: 15, autoDayDelay: 60 };
+		const hunt = (s) => ic.diagnose(auto, s, { flips: 3, conflictS: 0 })
+			.filter(x => x.id === 'hunting')[0].detail;
+		check('a stretched wait is reported as the camera\'s own number',
+			/stretched its wait to 240 s, up from the 60 s/.test(
+				hunt({ night: 1, ircut: 1, src: 4, dwell: 240 })),
+			hunt({ night: 1, ircut: 1, src: 4, dwell: 240 }));
+		check('a dwell equal to what was asked claims no backoff',
+			!/stretched/.test(hunt({ night: 1, ircut: 1, src: 4, dwell: 60 })),
+			hunt({ night: 1, ircut: 1, src: 4, dwell: 60 }));
+		check('and the direction decides which delay it is compared against',
+			!/stretched/.test(hunt({ night: 0, ircut: 0, src: 4, dwell: 15 })) &&
+			/up from the 15 s/.test(hunt({ night: 0, ircut: 0, src: 4, dwell: 40 })),
+			hunt({ night: 0, ircut: 0, src: 4, dwell: 40 }));
+		check('a camera that publishes no dwell gauge is not spoken for',
+			!/stretched/.test(hunt({ night: 1, ircut: 1, src: 4, dwell: null })));
 		const many = ic.diagnose(
 			{ lightMonitor: true, minThreshold: 9, maxThreshold: 9 },
 			{ night: 0, ircut: 1 }, { flips: 9, conflictS: 600 });

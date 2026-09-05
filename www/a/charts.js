@@ -124,7 +124,7 @@ window.MjCharts = (function () {
 	// measured width, which is not knowable this early.
 	const PAD_T = 5;  // headroom above the top gridline
 	const X_BAND = 14; // the "-2 min / now" strip below the plot
-	const LBL_H = 12;  // a band shorter than this has no room for its own label
+	const LBL_H = 12;  // one line of band-label text: the spacing labels keep
 	function chartHeight(cfg) { return PAD_T + cfg.h + X_BAND; }
 	function makeChart(sel, cfg) {
 		const host = typeof sel === 'string' ? $(sel) : sel;
@@ -226,19 +226,38 @@ window.MjCharts = (function () {
 		let s = '';
 		// threshold bands (Wi-Fi grades, luminance floor, day/night) sit under
 		// everything. An open end reaches the edge of the plot.
+		//
+		// Every band that is drawn keeps its name, and the name is PLACED
+		// rather than dropped. Suppressing the label of a band too thin to
+		// hold one looked like the tidy answer to two names landing on the
+		// same pixel, and it was worse than the overlap: on the Day / Night
+		// chart the day band shrinks as the scale grows, so covering the lens
+		// made the only marker on the plot disappear — the reader loses the
+		// legend exactly when the picture starts moving (#325). So a band
+		// narrower than a line of text gets its name centred ON it instead,
+		// and a name that would land on one already taken is nudged clear.
+		const taken = [];
+		const place = (y1, y2) => {
+			const tall = y2 - y1;
+			let y = tall >= LBL_H ? y1 + 10 : y1 + tall / 2 + 3.5;
+			const top = padT + 8, bot = padT + H - 1;
+			const clash = (t) => taken.some(u => Math.abs(u - t) < LBL_H);
+			// Down first — a band's name belongs at its top edge, so the one
+			// that moves is the later, lower band. Up only if down runs out
+			// of plot.
+			while (clash(y) && y + LBL_H <= bot) y += LBL_H;
+			while (clash(y) && y - LBL_H >= top) y -= LBL_H;
+			y = y > bot ? bot : y < top ? top : y;
+			taken.push(y);
+			return y;
+		};
 		bands.forEach(b => {
 			const y1 = b.to == null ? padT : Y(b.to);
 			const y2 = b.from == null ? padT + H : Y(b.from);
 			s += '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + plotW +
 				'" height="' + (y2 - y1).toFixed(1) + '" fill="' + b.color + '"/>';
-			// A band squeezed off the plot keeps no room for its own name, and
-			// the name does not shrink with it: two bands clamped to the same
-			// edge printed both words on the same pixel, which is how "day" and
-			// "night" came out as one unreadable smudge. Bands do not overlap,
-			// so once each drawn band is at least a label tall their labels are
-			// necessarily that far apart too — the one guard covers both.
-			if (b.label && y2 - y1 >= LBL_H) {
-				s += '<text x="' + (padL + plotW - 4) + '" y="' + (y1 + 10).toFixed(1) +
+			if (b.label) {
+				s += '<text x="' + (padL + plotW - 4) + '" y="' + place(y1, y2).toFixed(1) +
 					'" text-anchor="end" opacity="0.8">' + b.label + '</text>';
 			}
 		});

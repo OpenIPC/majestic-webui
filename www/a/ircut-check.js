@@ -99,6 +99,26 @@
 	// view, cannot raise a banner on its own.
 	const PIC_STREAK = 4;
 
+	// What the camera says it is waiting, when that is longer than what was
+	// asked for — and nothing at all when it is not.
+	//
+	// This replaced a sentence stating flatly that automatic mode "slows itself
+	// down after each flip". Nothing here had ever measured that: across every
+	// transition observed on an hi3516ev300 the dwell gauge read back exactly
+	// the configured delay and never more. It may well be true on some build,
+	// and that is the point — the daemon publishes the wait it is applying, so
+	// a page that can READ the number has no business asserting the mechanism
+	// behind it. If a backoff exists, this prints it; if it does not, this says
+	// nothing and the advice below still stands.
+	function stretched(nm, sample) {
+		if (!sample || typeof sample.dwell !== 'number' || sample.dwell < 0) return '';
+		// Whichever way it is about to go decides which delay was asked for.
+		const asked = sample.night ? pin(nm.autoDayDelay) : pin(nm.autoNightDelay);
+		if (asked === null || sample.dwell <= asked) return '';
+		return 'The camera has already stretched its wait to ' + sample.dwell +
+			' s, up from the ' + asked + ' s set below. ';
+	}
+
 	// Findings, worst first. `fix` names the section to send someone to; the
 	// consumer decides whether that becomes a link or a tab switch.
 	//
@@ -367,10 +387,12 @@
 					detail: track.flips + ' switches in the last ' +
 						(HUNT_WINDOW_S / 60) + ' minutes. ' +
 						(sample && sample.src === 4
-							? 'Automatic mode slows itself down after each flip, ' +
-								'but a flashing light aimed at the camera can still ' +
-								'drive it; raising "Seconds of brightness before ' +
-								'day" stretches the cycle further.'
+							? stretched(nm, sample) +
+								'Something in view is moving the light on and off — ' +
+								'a security lamp, headlights, a sign. Raising ' +
+								'"Seconds of brightness before day" and "Seconds ' +
+								'of darkness before night" makes the camera sit ' +
+								'each one out.'
 							: 'Widen the gap between the day and night thresholds ' +
 								'so dusk cannot sit on the boundary.'),
 					fix: 'nightMode',
@@ -685,7 +707,15 @@
 	// answer, and it is beside the switch.
 	//
 	// null now means only that the camera has not answered yet.
-	function monitorView(nm, v) {
+	//
+	// `ageS` is how long ago `v` was sampled. The camera advances its streak
+	// counter on its own schedule — a second here, five seconds on the board
+	// the reporter of #325 was watching — and the page polls on a third, so a
+	// countdown printed straight from the two gauges lurches by whatever the
+	// two cadences happen to beat out. Ageing the streak locally makes it fall
+	// a second at a time and resync on every sample: the number is still the
+	// camera's, read forward by a clock rather than invented.
+	function monitorView(nm, v, ageS) {
 		nm = nm || {};
 		if (!v) return null;
 		const src = ('night_mode_source' in v) ? v.night_mode_source : null;
@@ -742,9 +772,29 @@
 			// there is no number to count from, and "switching in 0 s" would
 			// be a confident sentence made of nothing.
 			const dwell = v.night_auto_dwell_seconds;
-			const streak = v.night_auto_streak_seconds;
-			const left = typeof dwell === 'number' && typeof streak === 'number'
-				? Math.max(0, dwell - streak) : null;
+			const held = v.night_auto_streak_seconds;
+			// Only ever forward, and never past the end: a sample that is
+			// somehow stamped in the future must not make the countdown climb,
+			// and a monitor whose switch is late must not print a negative.
+			// Rounded, not floored. A retell landing 0.9 s after its sample
+			// floors to nothing and reprints the number it just printed, so
+			// the countdown stutters — 13, 13, 11, 11 — which is the jerk it
+			// was meant to remove wearing a smaller amplitude.
+			const streak = typeof held === 'number'
+				? held + (typeof ageS === 'number' && ageS > 0 ? Math.round(ageS) : 0)
+				: null;
+			// Bounded by the dwell at the top as well as by zero at the
+			// bottom. The countdown is arithmetic on two gauges, and a streak
+			// that comes back NEGATIVE — which is what a monotonic-looking
+			// "seconds held" turns into the moment the camera's clock is
+			// stepped by an NTP correction — makes the subtraction produce a
+			// wait LONGER than the one the operator configured. The reporter
+			// of #325 was shown 250 s against a 60 s setting. Nothing can be
+			// held for less than no time, and nothing can be waited for longer
+			// than the dwell, so neither end of that is a reading worth
+			// repeating.
+			const left = typeof dwell === 'number' && streak !== null
+				? Math.max(0, Math.min(dwell, dwell - streak)) : null;
 			const inLeft = left === null ? '.' :
 				' — switching in ' + left + ' s if it stays.';
 			const line = pend === 1

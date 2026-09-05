@@ -3380,6 +3380,12 @@
 				// tells an automatic monitor from a blind one by it, and null
 				// (gauge absent) keeps the older-firmware reading.
 				src: ('night_mode_source' in v) ? v.night_mode_source : null,
+				// The wait the camera says it is currently applying. The
+				// hunting finding used to ASSERT that automatic mode backs off
+				// after a flip; this is the gauge that would show it, so the
+				// finding reads it instead of claiming it.
+				dwell: ('night_auto_dwell_seconds' in v)
+					? v.night_auto_dwell_seconds : null,
 			};
 			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
 			paintFindings();
@@ -3413,11 +3419,35 @@
 			host.hidden = true;
 		}
 	}
+	// The last metric sample and when it arrived, so the sentence can be
+	// re-read a second at a time between polls. The camera advances its streak
+	// counter on its own schedule and the heartbeat polls on another, so a
+	// countdown printed only on arrival lurches by whatever the two cadences
+	// beat out — five seconds at a time, unevenly, on the board in #325.
+	let monSample = null;
+	let monAt = 0;
+	let monTick = null;
+	function retellMonitor() {
+		const line = document.getElementById('mj-ircut-mon-line');
+		if (!line || !monSample) {
+			// The section is gone; so is the reason to keep a timer for it.
+			clearInterval(monTick);
+			monTick = null;
+			return;
+		}
+		const view = IRCUT.monitorView(nightCfg(), monSample,
+			(performance.now() - monAt) / 1000);
+		// The sentence only. Re-dealing the chart every second would push a
+		// duplicate sample into it and re-render the whole plot for nothing.
+		if (view) line.textContent = view.line;
+	}
 	function paintMonitor(s) {
 		const box = document.getElementById('mj-ircut-mon');
 		if (!box) return;
 		const MC = window.MjCharts;
-		const view = IRCUT.monitorView(nightCfg(), (s.m && s.m.v) || null);
+		monSample = (s.m && s.m.v) || null;
+		monAt = performance.now();
+		const view = IRCUT.monitorView(nightCfg(), monSample, 0);
 		if (!view) {
 			box.hidden = true;
 			return;
@@ -3425,6 +3455,12 @@
 		box.hidden = false;
 		const line = document.getElementById('mj-ircut-mon-line');
 		if (line) line.textContent = view.line;
+		// Re-anchored on every sample rather than left free-running, so the
+		// retell falls BETWEEN two polls instead of wherever it happened to
+		// start. Free-running against a 2 s heartbeat it landed a fraction of
+		// a second after each sample and said the same number twice.
+		clearInterval(monTick);
+		monTick = setInterval(retellMonitor, 1000);
 		const host = document.getElementById('mj-ircut-mon-chart');
 		if (!host) return;
 		if (!view.chart || !MC) {
