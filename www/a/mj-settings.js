@@ -4899,6 +4899,31 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
+		} else if (type === 'string' && (sub['x-secret'] || sub.writeOnly)) {
+			// A secret the camera has asked not to be shown. It is not hidden
+			// from anyone who can read this page — the value came down the same
+			// authenticated request as everything else — so this is about
+			// shoulders and screen shares, not about secrecy from the browser.
+			// The markup is the shape p/common.cgi's field_password emits, but
+			// the reveal toggle in main.js is wired once at page load and this
+			// form is built long after — so the handler is attached here, to
+			// the field that was just made, rather than relying on a scan that
+			// has already run.
+			p = el('p', 'string password mj-row');
+			const v = eff !== undefined && eff !== null ? String(eff) : '';
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+				'<div class="input-group">' +
+				'<input type="password" id="' + id + '" class="form-control" value="' + esc(v) +
+				'" autocomplete="off" spellcheck="false">' +
+				'<div class="input-group-text"><input class="form-check-input mt-0" type="checkbox"' +
+				' data-for="' + id + '" aria-label="Show"></div>' +
+				'</div>';
+			control = p.querySelector('input[type=password]');
+			const eye = p.querySelector('input[type=checkbox]');
+			if (eye) eye.addEventListener('change', () => {
+				control.type = eye.checked ? 'text' : 'password';
+			});
 		} else if (type === 'string') {
 			p = el('p', 'string mj-row');
 			const v = eff !== undefined && eff !== null ? String(eff) : '';

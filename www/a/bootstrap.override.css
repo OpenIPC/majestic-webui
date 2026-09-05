@@ -3569,6 +3569,38 @@ mark {
 	object-fit: contain;
 }
 
+/* The lock covers the picture rather than replacing it: the element keeps its
+   place in the layout, so unlocking a clip does not make the page jump. */
+.rec-lock {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.82);
+	color: var(--bs-body-color);
+	padding: 1rem;
+}
+
+.rec-stage.rec-locked .rec-video { visibility: hidden; }
+
+.rec-lock-box {
+	max-width: 30rem;
+	text-align: center;
+	color: #fff;
+}
+
+.rec-lock-icon {
+	font-size: 1.75rem;
+	line-height: 1;
+	margin-bottom: 0.5rem;
+}
+
+.rec-lock-in {
+	max-width: 22rem;
+	margin: 0 auto;
+}
+
 .rec-lbl {
 	display: block;
 	font-size: 0.6875rem;

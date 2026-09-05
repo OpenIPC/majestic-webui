@@ -26,13 +26,19 @@
 		<div class="col-12 col-lg-8">
 			<div class="card"><div class="card-body">
 
+				<!-- The lock sits inside the stage, in place of the picture, and
+				     not in #rec-note above: the note is wiped by the next seek and
+				     by the card poll, and a question about a passphrase has to
+				     outlive both. -->
 				<div class="rec-stage">
 					<video id="rec-video" class="rec-video" controls playsinline preload="metadata"></video>
+					<div id="rec-lock" class="rec-lock" hidden></div>
 				</div>
 
 				<div class="d-flex flex-wrap align-items-center gap-2 mt-2">
 					<span class="small text-secondary" id="rec-status"></span>
-					<button class="btn btn-sm btn-outline-secondary ms-auto" id="rec-dl" type="button">Save whole clip</button>
+					<button class="btn btn-sm btn-outline-secondary ms-auto" id="rec-verify" type="button" hidden>Check integrity</button>
+					<button class="btn btn-sm btn-outline-secondary" id="rec-dl" type="button">Save whole clip</button>
 				</div>
 
 				<div class="rec-lbl mt-3">Whole day</div>
@@ -77,6 +83,22 @@
 		</div>
 	</div>
 
+	<!-- Collapsed by default: most cameras record in the clear and this is a
+	     card about keys they do not have. The recordings page opens it the
+	     first time a clip turns out to be sealed. -->
+	<div class="card mt-4" id="rec-keys"><div class="card-body">
+		<div class="d-flex flex-wrap align-items-center gap-2">
+			<% card_head "Encryption keys" "for recordings this camera sealed" %>
+			<span class="ms-auto" id="rec-keys-chip"></span>
+			<button class="btn btn-sm btn-outline-secondary" type="button"
+				data-bs-toggle="collapse" data-bs-target="#rec-keys-wrap">Show</button>
+		</div>
+		<div class="collapse" id="rec-keys-wrap">
+			<div class="mt-3" id="rec-keys-body"></div>
+			<div class="d-none" id="rec-keys-say"></div>
+		</div>
+	</div></div>
+
 	<div class="card mt-4" id="rec-storage-card" hidden><div class="card-body">
 		<div id="rec-storage"></div>
 	</div></div>
@@ -85,6 +107,9 @@
 
 <script src="/a/timeline.js"></script>
 <script src="/a/mp4index.js"></script>
+<script src="/a/mjcrypto.js"></script>
+<script src="/a/mp4crypt.js"></script>
+<script src="/a/reckeys.js"></script>
 <script src="/a/recordings.js" defer></script>
 
 <%in p/footer.cgi %>

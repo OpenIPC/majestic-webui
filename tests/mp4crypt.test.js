@@ -434,6 +434,27 @@ group('reading the header');
 	check('and so is something that is not an MP4 at all',
 		notMp4.ok === false && !!notMp4.reason);
 
+	// A moov whose tracks this walk cannot take apart — a header shaped in a
+	// way this build has not seen — is a different case again. The bytes are
+	// here, so the question can be asked directly rather than assumed either
+	// way: no protection box anywhere inside them is a finding, and refusing
+	// such a clip would refuse a recording that plays today.
+	const bare = Buffer.concat([
+		box('ftyp', Buffer.alloc(16)),
+		box('moov', box('trak', box('mdia', box('mdhd', Buffer.alloc(24))))),
+	]);
+	const b = CRYPT.inspect(u8(bare), bare.length);
+	check('a header this walk cannot take a track out of, holding no protection at all, is clear',
+		b.ok === true && b.encrypted === false && b.reason === null);
+
+	const bareSealed = Buffer.concat([
+		box('ftyp', Buffer.alloc(16)),
+		box('moov', box('trak', box('mdia', box('minf', sinf('avc1', KID, {}))))),
+	]);
+	const bs = CRYPT.inspect(u8(bareSealed), bareSealed.length);
+	check('and the same header with protection in it is encrypted and unopenable, not clear',
+		bs.ok === true && bs.encrypted === true && /does not know/.test(bs.reason || ''));
+
 	// Signalled as protected and then declared not to be. It plays as it is,
 	// and demanding a passphrase for it would refuse a working clip.
 	const off = CRYPT.inspect(u8(initSegment({ isProtected: 0 })));

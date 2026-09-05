@@ -265,8 +265,25 @@ window.MajesticMp4Crypt = (function () {
 		// actually protected, which decides whether a key is needed at all — a
 		// track can be wrapped and declare itself unprotected, and demanding a
 		// passphrase for that would refuse a clip that plays.
-		if (!Object.keys(tracks).length)
-			return unreadable('the clip header carries no tracks this page can read');
+		// A moov this walk could not take a track out of. That is not the same
+		// as a header nobody saw: the bytes are here, so the question can be
+		// asked directly — is there a protection box anywhere inside them? If
+		// there is not, the clip is in the clear as a FINDING rather than an
+		// assumption, and refusing it would refuse a recording that plays
+		// today. If there is, this build cannot say how, and says that.
+		if (!Object.keys(tracks).length) {
+			const guard = protectionSomewhere(u8, moov[0] + 8, moov[1]);
+			if (guard)
+				return {
+					ok: true, encrypted: true, wrapped: true, tracks: {},
+					keyBox: keyBox(u8.subarray(0, end)),
+					reason: 'this recording is protected in a way this page does not know',
+				};
+			return {
+				ok: true, encrypted: false, wrapped: false,
+				tracks: {}, keyBox: null, reason: null,
+			};
+		}
 		return {
 			ok: true,
 			encrypted: encrypted,
@@ -275,6 +292,19 @@ window.MajesticMp4Crypt = (function () {
 			keyBox: wrapped ? keyBox(u8.subarray(0, end)) : null,
 			reason: reason,
 		};
+	}
+
+	// Is there a protection box anywhere under here? Used only where the track
+	// walk came back empty, and deliberately a scan rather than a parse: the
+	// question is whether these bytes contain any of the boxes protection is
+	// signalled with, and a box tree this build could not walk is exactly the
+	// case where a parse cannot answer.
+	function protectionSomewhere(u8, from, to) {
+		for (let at = from; at + 8 <= to; at++) {
+			const t = fourcc(u8, at);
+			if (t === 'sinf' || t === 'encv' || t === 'enca' || t === 'tenc') return true;
+		}
+		return false;
 	}
 
 	// `ok` false is a third answer beside clear and encrypted, and callers have
