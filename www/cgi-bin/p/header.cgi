@@ -37,6 +37,7 @@ Pragma: no-cache
 	     against the same markup and CSS. -->
 	<script src="/a/main.js"></script>
 	<script src="/a/cameras-switch.js" defer></script>
+	<script src="/a/update-check.js" defer></script>
 </head>
 
 <body id="page-<% attr_escape "$pagename" %>" class="<% attr_escape "$fw_variant" %>">
@@ -206,6 +207,18 @@ Pragma: no-cache
     finished, not something broken. The button keeps btn-danger because main.js
     hangs the confirmation prompt off that class -- restyling it would quietly
     drop the "restart now?" question. %>
+<%# Filled by /a/update-check.js once it has the feed. Server-rendered banners
+    above are things the camera knows on its own; this one needs the public
+    release-notes feed, which the reader's browser fetches -- the camera itself
+    never reaches the internet for it. Empty, and staying empty, is the correct
+    result on a camera with no route out. %>
+<%# Data attributes rather than a <script> block: attr_escape is the escaping
+    this file already trusts everywhere else, and nothing the camera reports
+    can close the tag it sits in. %>
+<div id="update-notice"
+     data-mj-version="<% attr_escape "$mj_version" %>"
+     data-soc-vendor="<% attr_escape "$soc_vendor" %>"></div>
+
 <% if [ -e /tmp/system-reboot ]; then %>
 <% notice warn '<b>Settings are waiting for a restart</b> &mdash; video and recording stop for about half a minute while the camera comes back.' '<a class="btn btn-danger btn-sm" href="restart.cgi" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>' %>
 <% fi %>
