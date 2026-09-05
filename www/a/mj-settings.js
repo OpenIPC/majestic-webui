@@ -74,14 +74,39 @@
 		{ id: 'lowlight', label: 'Low light', v: { luminance: 60, contrast: 42, saturation: 38, hue: 50 } },
 	];
 
+	// One glyph language for the whole Orientation group: a frame, and arrows
+	// for what happens to it. The letter F that used to stand in the frame is an
+	// image editor's convention, and beside a rotated copy of itself on the
+	// quarter-turn row it read as two odd characters rather than as two
+	// operations (#316). A dashed axis with arrowheads is a reflection, an arc
+	// with an arrowhead is a turn, and a frame stood on end is what a quarter
+	// turn does to the stream.
+	const GEO_FRAME = '<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>';
+	const GEO_FRAME_TALL = '<rect x="3.5" y="1.5" width="13" height="17" rx="1.8" opacity="0.4"></rect>';
+	const geoSvg = (inner) =>
+		'<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" ' +
+		'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+		inner + '</svg>';
+	// Arcs are drawn on a circle of radius 4 about the frame's centre; the
+	// arrowhead sits at the arc's end, pointing the way the picture turns.
+	const GEO_TURN = {
+		90:  '<path d="M10 6A4 4 0 0 1 14 10"></path><path d="M12.7 8.2L14 10l1.3-1.8"></path>',
+		270: '<path d="M10 6A4 4 0 0 0 6 10"></path><path d="M4.7 8.2L6 10l1.3-1.8"></path>',
+		180: '<path d="M6.54 8A4 4 0 1 1 6.54 12"></path><path d="M8.5 12.9L6.54 12l-.19 2.2"></path>',
+	};
+
 	// The orientation pad's four states. mirror/flip stay two independent
 	// booleans in the config — this is only how a camera presents them, and how
 	// every camera UI worth copying does.
 	const GEO_STATES = [
-		{ label: 'Normal', mirror: false, flip: false, tf: '' },
-		{ label: 'Mirror', mirror: true,  flip: false, tf: 'translate(20,0) scale(-1,1)' },
-		{ label: 'Flip',   mirror: false, flip: true,  tf: 'translate(0,20) scale(1,-1)' },
-		{ label: '180°',   mirror: true,  flip: true,  tf: 'translate(20,20) scale(-1,-1)' },
+		{ label: 'Normal', mirror: false, flip: false, icon: GEO_FRAME },
+		{ label: 'Mirror', mirror: true,  flip: false, icon: GEO_FRAME +
+			'<path d="M10 5.5v9" stroke-dasharray="1.6 1.4"></path>' +
+			'<path d="M4.8 7.4L8 10l-3.2 2.6zM15.2 7.4L12 10l3.2 2.6z" fill="currentColor" stroke="none"></path>' },
+		{ label: 'Flip',   mirror: false, flip: true,  icon: GEO_FRAME +
+			'<path d="M5.5 10h9" stroke-dasharray="1.6 1.4"></path>' +
+			'<path d="M7.4 5.2L10 8.4l2.6-3.2zM7.4 14.8L10 11.6l2.6 3.2z" fill="currentColor" stroke="none"></path>' },
+		{ label: '180°',   mirror: true,  flip: true,  icon: GEO_FRAME + GEO_TURN[180] },
 	];
 
 	// Curated resolution presets (the de-facto set the firmware assumes), used
@@ -1078,7 +1103,7 @@
 		if (!btn) return;
 		let held = false;
 		const down = (e) => {
-			if (held) return;
+			if (held || btn.disabled) return;
 			held = true;
 			btn.classList.add('mj-hud-on');
 			// A queued push would land 120 ms later and undo the comparison.
@@ -1175,11 +1200,7 @@
 		const btns = GEO_STATES.map(g => {
 			const b = el('button', 'mj-geo');
 			b.type = 'button';
-			b.innerHTML =
-				'<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
-				'<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>' +
-				'<g transform="' + g.tf + '"><path d="M7.6 6.8h5.2M7.6 10h3.7M7.6 6.8v6.4" stroke-linecap="round" stroke-width="1.7"></path></g>' +
-				'</svg><span>' + esc(g.label) + '</span>';
+			b.innerHTML = geoSvg(g.icon) + '<span>' + esc(g.label) + '</span>';
 			b.addEventListener('click', () => {
 				setLive(mirrorField, g.mirror);
 				setLive(flipField, g.flip);
@@ -1218,11 +1239,11 @@
 	// which way up the camera is mounted is one decision, and the picture it is
 	// judged against is this one. So the field mounts here, hidden, pin-map
 	// style: Save, dirty tracking, the reset arrow and refresh() work on it
-	// unchanged, and the buttons only stage a value. The group's note says "on
-	// Save" and nothing more: the save bar that appears on the press says the
-	// rest, and a sentence under the row about why the picture does not move
-	// would be a second explanation of the same fact.
-	function renderTurns(col, sec) {
+	// unchanged, and the buttons only stage a value. It is the second row of
+	// the Orientation group rather than a group of its own, and carries no
+	// note: the save bar that appears on the press says what the press costs,
+	// and a heading or a sentence here would say the same thing again.
+	function renderTurns(body, sec) {
 		const dot = sec + '.rotate';
 		if (EXCLUDE.has(dot)) return null;
 		const sub = (((state.schema.properties || {})[sec] || {}).properties || {}).rotate;
@@ -1232,26 +1253,21 @@
 		const turns = sub.enum.map(String).filter(v => /^\d+$/.test(v));
 		if (!turns.some(v => v !== '0')) return null;
 
-		const body = liveGroup(col, 'Quarter turn', 'on Save');
 		const field = renderField(body, dot, 'rotate', sub, getDotted(state.config, dot), { hidden: true });
 		if (!field) return null;
 		state.fields.push(field);
 		state.initial[dot] = field.getValue();
 
-		// The same frame and glyph as the pad, turned as a whole: a quarter turn
-		// stands the frame on end, which is the thing about it the hint has to
-		// say — the stream comes back portrait.
+		// The frame stood on end, with an arc for the way it turns: a quarter
+		// turn is the one thing here that changes the stream's shape, and the
+		// glyph says so. 0° is the frame as it is, like Normal above it.
 		const row = el('div', 'mj-geo-row');
 		const btns = turns.map(v => {
 			const deg = Number(v);
 			const b = el('button', 'mj-geo');
 			b.type = 'button';
-			b.innerHTML =
-				'<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
-				'<g transform="rotate(' + deg + ' 10 10)">' +
-				'<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>' +
-				'<path d="M7.6 6.8h5.2M7.6 10h3.7M7.6 6.8v6.4" stroke-linecap="round" stroke-width="1.7"></path>' +
-				'</g></svg><span>' + (deg ? deg + '&#176;' : 'None') + '</span>';
+			const icon = deg ? GEO_FRAME_TALL + (GEO_TURN[deg] || '') : GEO_FRAME;
+			b.innerHTML = geoSvg(icon) + '<span>' + deg + '&#176;</span>';
 			b.addEventListener('click', () => setLive(field, v));
 			row.appendChild(b);
 			return b;
@@ -1441,6 +1457,7 @@
 		// picture to judge them by: missing scripts should cost the preview,
 		// not the controls. It used to be an inline check of the same three
 		// globals, which mount() now makes on the caller's behalf.
+		let cmpBtn = null;
 		const preview = window.MajesticPreview &&
 			window.MajesticPreview.mount(form, {
 				// A getter, not state.config itself: a save re-fetches the
@@ -1471,10 +1488,9 @@
 			// make.
 			const cmp = el('button', 'mj-hud-btn mj-glass mj-live-compare');
 			cmp.type = 'button';
-			cmp.title = 'Hold to compare';
-			cmp.setAttribute('aria-label', 'Hold to compare');
 			cmp.innerHTML = ICON.compare + '<span>Hold to compare</span>';
 			preview.barInsert(cmp);
+			cmpBtn = cmp;
 
 			// Before dockRuntime, which MOVES these same nodes rather than
 			// making a second set of them: both of these capture the nodes they
@@ -1546,6 +1562,31 @@
 			state.initial[f.dot] = field.getValue();
 		}
 
+		// Hold to compare shows the picture at stock while it is held. At stock
+		// there is nothing to compare, and a press that changes nothing read as
+		// a button that does nothing (#316) — so it is disabled there, and its
+		// title says what it compares against either way. Re-asked on every
+		// edit and after a refresh, the same way the pad re-reads its fields.
+		if (cmpBtn) {
+			const syncCompare = () => {
+				const off = state.fields.some(f => isLive(f) && f.schema &&
+					f.schema.default !== undefined &&
+					String(liveValue(f)) !== String(liveDefault(f)));
+				cmpBtn.disabled = !off;
+				cmpBtn.title = off
+					? 'Hold to see the picture at stock; release to come back'
+					: 'Nothing to compare: every knob is at stock';
+				cmpBtn.setAttribute('aria-label', cmpBtn.title);
+			};
+			for (const f of state.fields) {
+				if (!isLive(f)) continue;
+				f.control.addEventListener('input', syncCompare);
+				f.control.addEventListener('change', syncCompare);
+			}
+			state.liveSync.push(syncCompare);
+			syncCompare();
+		}
+
 		// Last cell of the strip rather than a footer under it: a footer would
 		// be another line between the picture and the row below, and this is a
 		// control that belongs to the four beside it.
@@ -1580,8 +1621,9 @@
 			const mf = state.fields.find(f => f.dot === mirror.dot);
 			const ff = state.fields.find(f => f.dot === flip.dot);
 			if (mf && ff) {
-				renderGeometry(liveGroup(colGeo, 'Orientation', ''), mf, ff);
-				renderTurns(colGeo, mirror.section);
+				const geo = liveGroup(colGeo, 'Orientation', '');
+				renderGeometry(geo, mf, ff);
+				renderTurns(geo, mirror.section);
 			}
 		}
 
