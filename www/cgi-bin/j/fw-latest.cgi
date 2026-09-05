@@ -25,8 +25,22 @@
 # a stale one is refreshed by whichever request notices first.
 
 CACHE=/tmp/fw-latest.json
-TTL=21600   # six hours: images appear daily at most, and a stale answer only
-            # ever delays the notice, never invents one.
+
+# The two answers are not equally safe to remember, so they are not cached for
+# the same length of time.
+#
+# "no image" is cheap to hold: the worst a stale one does is delay the notice,
+# and it is the common answer — most days there is nothing new, so this is what
+# keeps the query off the page.
+#
+# "there is an image" is the dangerous one. Held for hours it can outlive the
+# thing it describes: connectivity drops, or the build is withdrawn, and the
+# notice keeps insisting while the Firmware page — which asks live, every time —
+# offers nothing. That is the contradiction this endpoint exists to prevent,
+# arriving by a different road. So a yes is re-checked often, and the extra
+# queries only happen while an update is genuinely waiting to be installed.
+TTL_NO=21600    # six hours
+TTL_YES=900     # fifteen minutes
 
 json_hdr() { printf 'HTTP/1.1 200 OK\nContent-Type: application/json\nCache-Control: no-store\n\n'; }
 
@@ -36,7 +50,11 @@ installed=$(sed -n 's/^GITHUB_VERSION="\?\([^",]*\).*/\1/p' /etc/os-release 2>/d
 fresh=0
 if [ -f "$CACHE" ]; then
     age=$(( $(date +%s) - $(date -r "$CACHE" +%s 2>/dev/null || echo 0) ))
-    [ "$age" -ge 0 ] && [ "$age" -lt "$TTL" ] && fresh=1
+    case "$(cat "$CACHE" 2>/dev/null)" in
+        *'"newer":true'*) ttl=$TTL_YES ;;
+        *) ttl=$TTL_NO ;;
+    esac
+    [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ] && fresh=1
 fi
 
 if [ "$fresh" = "1" ]; then
@@ -45,12 +63,23 @@ if [ "$fresh" = "1" ]; then
     exit 0
 fi
 
-# Same call, same scrape as the Firmware page: one source of truth for "what
-# could this board install". `timeout` bounds it so a dead network cannot hang
-# the request.
+# Same predicate as the Firmware page, deliberately down to the numbers: a
+# default route must exist, and `sysupgrade` gets the same fifteen seconds. A
+# longer timeout here, or asking without a route, would let this endpoint answer
+# where the page gives up — and two surfaces that disagree is the whole fault
+# this is fixing.
+#
+# The page reads $network_gateway from the shared shell prelude, which is a
+# haserl template this cannot include, so the one line that computes it is
+# repeated here verbatim rather than reimplemented — `ip route`, not
+# /proc/net/route, because a hand-rolled parse of that file is how this check
+# was wrong the first time: `grep -E` does not read \t as a tab, so it saw no
+# default route on a camera that plainly had one and switched the notice off
+# everywhere.
 latest=""
-if command -v sysupgrade >/dev/null 2>&1; then
-    latest=$(timeout 20 sysupgrade --list-builds 2>/dev/null \
+if [ -n "$(ip route 2>/dev/null | awk '/default/ {print $3}')" ] &&
+   command -v sysupgrade >/dev/null 2>&1; then
+    latest=$(timeout 15 sysupgrade --list-builds 2>/dev/null \
              | grep -Eo '[A-Za-z0-9._]+-[0-9]{8}-[0-9a-f]+' | head -1)
 fi
 
