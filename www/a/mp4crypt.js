@@ -552,12 +552,24 @@ window.MajesticMp4Crypt = (function () {
 	}
 
 	// A copy of `bytes` — one moof and its mdat — with every protected sample
-	// decrypted. `tracks` is what inspect() returned.
+	// decrypted, and with the boxes that described the protection removed.
 	//
 	// The keystream runs continuously across one sample's protected runs, so a
 	// sample's runs are decrypted as one stream and never restarted per run: a
 	// per-run counter still decodes the first NAL of a frame, which means a
 	// picture appears and only the detail is wrong.
+	//
+	// WHY THE AUXILIARY BOXES GO. `senc`, `saiz` and `saio` describe how the
+	// samples were protected, and they were left in place at first on the
+	// reasoning that a track whose sample entry is no longer protected has no
+	// use for them. A browser disagrees: Chromium's parser reads them, finds
+	// them on a track with no protection scheme, and refuses the whole
+	// fragment — appendBuffer raises an error event and nothing plays, while
+	// ffmpeg reads the same bytes without complaint. So they are removed, and
+	// removing them means moving the payload: `trun.data_offset` counts from
+	// the start of the moof, so it shrinks with the moof, and the traf and
+	// moof sizes shrink with what came out of them. Three numbers, and being
+	// wrong about any of them puts the decoder four bytes into a picture.
 	function decryptFragment(bytes, material, tracks) {
 		const src = C.bytes(bytes);
 		if (src.length < 16) throw fail('short-fragment');
@@ -579,6 +591,75 @@ window.MajesticMp4Crypt = (function () {
 				decryptTraf(src, out, at, at + size, moofSize, mdatSize, key, tracks);
 			at += size;
 		}
+		return stripAux(out, moofSize, mdatSize);
+	}
+
+	// The boxes that said how the samples were protected, taken out of a
+	// fragment whose samples no longer are.
+	const AUX = { senc: 1, saiz: 1, saio: 1 };
+
+	function stripAux(frag, moofSize, mdatSize) {
+		// How much comes out, per traf and in total, before anything moves.
+		let removed = 0;
+		const trafs = [];
+		let at = 8;
+		while (at + 8 <= moofSize) {
+			const size = be32(frag, at);
+			if (size < 8 || at + size > moofSize) return frag;   // already refused above
+			if (fourcc(frag, at + 4) === 'traf') {
+				let drop = 0;
+				let k = at + 8;
+				while (k + 8 <= at + size) {
+					const ksize = be32(frag, k);
+					if (ksize < 8 || k + ksize > at + size) return frag;
+					if (AUX[fourcc(frag, k + 4)]) drop += ksize;
+					k += ksize;
+				}
+				trafs.push({ at: at, size: size, drop: drop });
+				removed += drop;
+			}
+			at += size;
+		}
+		if (!removed) return frag;
+
+		const out = new Uint8Array(frag.length - removed);
+		let w = 0;
+		// moof header, then each box, with trafs rebuilt as they are copied.
+		out.set(frag.subarray(0, 8), w); w += 8;
+		at = 8;
+		while (at + 8 <= moofSize) {
+			const size = be32(frag, at);
+			const type = fourcc(frag, at + 4);
+			const traf = trafs.find(function (t) { return t.at === at; });
+			if (type !== 'traf' || !traf || !traf.drop) {
+				out.set(frag.subarray(at, at + size), w);
+				w += size;
+				at += size;
+				continue;
+			}
+			const trafStart = w;
+			out.set(frag.subarray(at, at + 8), w); w += 8;
+			let k = at + 8;
+			while (k + 8 <= at + size) {
+				const ksize = be32(frag, k);
+				const ktype = fourcc(frag, k + 4);
+				if (AUX[ktype]) { k += ksize; continue; }
+				const kAt = w;
+				out.set(frag.subarray(k, k + ksize), w);
+				w += ksize;
+				// The payload starts `removed` bytes earlier than it did, and
+				// this offset counts from the front of the moof.
+				if (ktype === 'trun') {
+					const flags = be32(out, kAt + 8) & 0xffffff;
+					if (flags & 0x000001) put32(out, kAt + 16, (be32(out, kAt + 16) - removed) >>> 0);
+				}
+				k += ksize;
+			}
+			put32(out, trafStart, w - trafStart);
+			at += size;
+		}
+		put32(out, 0, w);                                   // the moof's own size
+		out.set(frag.subarray(moofSize, moofSize + mdatSize), w);
 		return out;
 	}
 
