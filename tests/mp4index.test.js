@@ -579,7 +579,41 @@ function runCheap() {
 		check('and it really is wrong, because the write counter drifts',
 			h.seconds !== n, 'got ' + h.seconds + ' — suspiciously exact');
 		return null;
-	}).then(runLiveTail).then(runLocateExact).then(runBigFragments).then(runSpan);
+	}).then(runLiveTail).then(runFatMoof).then(runLocateExact).then(runBigFragments).then(runSpan);
+}
+
+// A moof wider than one STEP read.
+//
+// An encrypted recording carries per-sample initialisation vectors and an
+// integrity tag inside the moof, which puts a two-track fragment header past
+// the kilobyte the walk reads by default. parseFragment says so — it returns
+// {short: n} rather than guessing — and every caller widens on that except,
+// until this test, durationHint, which returned null instead. Nothing errors:
+// the clip list keeps the estimate it started with, the timeline states a
+// length that was never measured, and the correction that stops the playhead
+// running off the end of a clip never runs. It looks like a page working.
+function runFatMoof() {
+	group('durationHint on a fragment header wider than one read');
+
+	// 220 samples in the trun is ~1.8 KB of moof, about what a two-track
+	// encrypted fragment comes to.
+	const specs = [];
+	for (let i = 0; i < 4; i++)
+		specs.push({ seq: i, durations: new Array(220).fill(4545), payload: 40000 });
+	const buf = clip(1000000, specs);
+	const init = M.parseInit(u8of(buf));
+
+	const log = [];
+	return M.durationHint(readerFor(buf, log), buf.length, init).then(h => {
+		check('the moof really is wider than the default read',
+			M.parseFragment(u8of(buf.subarray(init.firstMoof, init.firstMoof + M.STEP))).short > M.STEP);
+		check('and the duration comes back measured, not null',
+			h !== null && Math.abs(h.seconds - 4 * 0.99990) < 0.01,
+			'got ' + (h && h.seconds));
+		check('and it says so, rather than hedging', h && h.approximate === false);
+		check('at the cost of one extra read, not a walk', log.length <= 3,
+			log.length + ' reads');
+	});
 }
 
 // A clip still being recorded ends with a fragment whose moof is on the card

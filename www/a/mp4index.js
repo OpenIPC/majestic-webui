@@ -49,7 +49,11 @@ window.MajesticMp4Index = (function () {
 	// asks for 256 bytes or 256 KiB, so the only thing to optimise is the
 	// number of requests — one per fragment, never two. parseFragment() reports
 	// a short read rather than guessing, so being wrong here is slow, not
-	// incorrect.
+	// incorrect — provided every caller honours it, which is what durationHint
+	// did not do until an encrypted clip turned up. An encrypted moof carries a
+	// senc, a saiz and a saio per track plus an integrity tag, which puts a
+	// two-track fragment header near 2 KiB: over this, and only the callers
+	// that widen still work.
 	const STEP = 1024;
 	// A probe window only answers if a moof falls inside it, so it has to be
 	// wider than a fragment — and a fragment is not a fixed size. 730 KB was the
@@ -492,8 +496,7 @@ window.MajesticMp4Index = (function () {
 	// every fragment is as long as the first. Flagged `approximate` so a caller
 	// can say so rather than present a guess as a measurement.
 	function durationHint(read, size, init) {
-		return read(init.firstMoof, init.firstMoof + STEP - 1).then(function (head) {
-			const first = parseFragment(head);
+		return firstFragment().then(function (first) {
 			if (!first || first.short || !first.durTicks || !init.timescale) return null;
 			const per = first.durTicks / init.timescale;
 			// The first fragment is the best available guess at how wide the
@@ -534,6 +537,11 @@ window.MajesticMp4Index = (function () {
 				return { seconds: (seq + 1) * per, perFragment: per, approximate: true };
 			});
 
+			// The first fragment, widening once if STEP did not cover its moof.
+			// Giving up instead is silent in a way that is hard to catch later:
+			// the caller keeps the clip list's estimate, the timeline shows a
+			// length that is merely plausible, and the playhead correction that
+			// depends on a real duration never runs.
 			function tail(win) {
 				const from = Math.max(init.firstMoof, size - win);
 				return read(from, size - 1).then(function (buf) {
@@ -543,6 +551,16 @@ window.MajesticMp4Index = (function () {
 				});
 			}
 		}).catch(function () { return null; });
+
+		function firstFragment() {
+			return read(init.firstMoof, init.firstMoof + STEP - 1).then(function (head) {
+				const f = parseFragment(head);
+				if (!f || !f.short) return f;
+				const w = Math.min(f.short, size - init.firstMoof);
+				return read(init.firstMoof, init.firstMoof + w - 1)
+					.then(function (b2) { return parseFragment(b2); });
+			});
+		}
 	}
 
 	// Walk forward from a known fragment boundary until `seconds` of media has
@@ -702,6 +720,7 @@ window.MajesticMp4Index = (function () {
 		moofSeq: moofSeq,
 		findMoof: findMoof,
 		findBox: findBox,
+		descend: descend,
 		buildIndex: buildIndex,
 		durationHint: durationHint,
 		spanFrom: spanFrom,
