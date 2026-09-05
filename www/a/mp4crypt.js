@@ -599,39 +599,43 @@ window.MajesticMp4Crypt = (function () {
 	const AUX = { senc: 1, saiz: 1, saio: 1 };
 
 	function stripAux(frag, moofSize, mdatSize) {
-		// How much comes out, per traf and in total, before anything moves.
+		// How much comes out, before anything moves. A malformed child here is
+		// a refusal and not a reason to hand back what arrived: the samples
+		// have already been decrypted by this point, so returning the original
+		// buffer would produce exactly the thing this function exists to
+		// prevent — decrypted samples still wearing their protection boxes,
+		// which is the state a browser refuses without saying why.
 		let removed = 0;
-		const trafs = [];
 		let at = 8;
 		while (at + 8 <= moofSize) {
 			const size = be32(frag, at);
-			if (size < 8 || at + size > moofSize) return frag;   // already refused above
+			if (size < 8 || at + size > moofSize) throw fail('bad-moof');
 			if (fourcc(frag, at + 4) === 'traf') {
-				let drop = 0;
 				let k = at + 8;
 				while (k + 8 <= at + size) {
 					const ksize = be32(frag, k);
-					if (ksize < 8 || k + ksize > at + size) return frag;
-					if (AUX[fourcc(frag, k + 4)]) drop += ksize;
+					if (ksize < 8 || k + ksize > at + size) throw fail('bad-traf');
+					if (AUX[fourcc(frag, k + 4)]) removed += ksize;
 					k += ksize;
 				}
-				trafs.push({ at: at, size: size, drop: drop });
-				removed += drop;
 			}
 			at += size;
 		}
 		if (!removed) return frag;
 
+		// EVERY traf is rewritten, not only the ones that lost something. The
+		// mdat is shared: it moves earlier by the total removed from the whole
+		// moof, so a clear track sitting beside a protected one — which this
+		// module explicitly allows — would keep an offset pointing past its own
+		// samples and decode somebody else's bytes as pictures.
 		const out = new Uint8Array(frag.length - removed);
 		let w = 0;
-		// moof header, then each box, with trafs rebuilt as they are copied.
 		out.set(frag.subarray(0, 8), w); w += 8;
 		at = 8;
 		while (at + 8 <= moofSize) {
 			const size = be32(frag, at);
 			const type = fourcc(frag, at + 4);
-			const traf = trafs.find(function (t) { return t.at === at; });
-			if (type !== 'traf' || !traf || !traf.drop) {
+			if (type !== 'traf') {
 				out.set(frag.subarray(at, at + size), w);
 				w += size;
 				at += size;

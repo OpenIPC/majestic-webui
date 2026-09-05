@@ -598,6 +598,79 @@ group('decrypting a fragment');
 		hex(f.plainBytes.subarray(f.payloadAt)));
 })();
 
+// A protected track and a clear one in the same fragment. They share the mdat,
+// so anything removed from either traf moves BOTH tracks' samples — and a
+// clear traf loses nothing, which is exactly why its offset is the one that
+// gets forgotten. Its samples then read from wherever the protected track's
+// used to start, and decode as pictures made of somebody else's bytes.
+(function clearTrackBeside() {
+	const p = CRYPT.inspect(u8(init), init.length);
+	const tracks = { 1: p.tracks[1], 9: { id: 9, kind: 'avc1', format: 'avc1', protected: false } };
+
+	const video = [{ plain: videoSample([300, 60], 0x20).bytes, subs: videoSample([300, 60], 0x20).subs, iv: ivFor(1) }];
+	const clear = Buffer.alloc(200, 0x33);
+
+	function build(protBase, clearBase) {
+		return box('moof',
+			box('mfhd', u32(0, 7)),
+			traf(1, [{ bytes: video[0].plain, subs: video[0].subs, iv: video[0].iv }], true, protBase),
+			// A traf with no senc at all: the track is not protected.
+			box('traf', box('tfhd', u32(0x020030, 9, clear.length, 0)),
+				box('trun', u32(0x000201, 1, clearBase), u32(clear.length))));
+	}
+	const probe = build(0, 0);
+	const payloadAt = probe.length + 8;
+	const moof = build(payloadAt, payloadAt + video[0].plain.length);
+	const enc = encryptSample(video[0].plain, video[0].subs, video[0].iv);
+	const frag = Buffer.concat([moof, box('mdat', Buffer.concat([enc, clear]))]);
+
+	const got = Buffer.from(CRYPT.decryptFragment(u8(frag), MATERIAL, tracks));
+	const moofLen = got.readUInt32BE(0);
+	const shrank = moof.length - moofLen;
+	check('the fragment shrank when the protected track lost its boxes', shrank > 0);
+
+	// Both offsets, read back out of the rebuilt trafs.
+	const offsets = [];
+	let at = 8;
+	while (at + 8 <= moofLen) {
+		const size = got.readUInt32BE(at);
+		if (got.toString('ascii', at + 4, at + 8) === 'traf') {
+			const t = got.indexOf(Buffer.from('trun', 'ascii'), at);
+			offsets.push(got.readUInt32BE(t + 12));
+		}
+		at += size;
+	}
+	check('both tracks moved by exactly what came out of the fragment',
+		offsets.length === 2 &&
+		offsets[0] === payloadAt - shrank &&
+		offsets[1] === payloadAt + video[0].plain.length - shrank,
+		offsets.join(',') + ' vs ' + (payloadAt - shrank) + ',' +
+		(payloadAt + video[0].plain.length - shrank));
+
+	check('the protected track decrypted where it now says it is',
+		hex(got.subarray(offsets[0], offsets[0] + video[0].plain.length)) === hex(video[0].plain));
+	check('and the clear track is still its own bytes, untouched',
+		hex(got.subarray(offsets[1], offsets[1] + clear.length)) === hex(clear));
+})();
+
+// Decryption happens before the boxes come out, so a moof this cannot rebuild
+// has already had its samples decrypted. Handing that back — decrypted samples
+// still wearing their protection boxes — is the exact state a browser refuses
+// without saying why, so it is refused here instead.
+(function malformedAfterDecrypt() {
+	const p = CRYPT.inspect(u8(init), init.length);
+	const whole = fragment();
+	const bent = Buffer.from(whole.bytes);
+	// A child box after the ones decryption needs, with a length that runs
+	// past its parent.
+	const saioAt = bent.indexOf(Buffer.from('saio', 'ascii'));
+	bent.writeUInt32BE(0x0fffffff, saioAt - 4);
+	let code = null;
+	try { CRYPT.decryptFragment(u8(bent), MATERIAL, p.tracks); } catch (e) { code = e.code; }
+	check('a moof that cannot be rebuilt is refused, not handed back half-done',
+		code === 'bad-traf' || code === 'bad-moof', 'got ' + code);
+})();
+
 // The size of every container in a fragment, checked independently.
 function walkFragmentSizes(b, bad) {
 	const moofLen = b.readUInt32BE(0);
