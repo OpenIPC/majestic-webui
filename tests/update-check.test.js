@@ -158,9 +158,9 @@ const VER = (rev, date) => 'Lite HiSilicon (hi3516ev300), HEAD+' + rev + ', ' + 
 			version: VER(MINE, iso(1)),
 			feed: feedOf([entry(MINE, { fix: 3 })]),
 		})) === null);
-	check('a revision the ledger has never heard of: no guess',
+	check('a revision the ledger has never heard of, same age as it: no guess',
 		(await run({
-			version: VER('deadbeef1', iso(30)),
+			version: VER('deadbeef1', iso(1)),
 			feed: feedOf([entry('aaaaaaaaa', { fix: 9 }), entry('bbbbbbbbb', {})]),
 		})) === null);
 	check('a build newer than the feed: no banner',
@@ -175,6 +175,72 @@ const VER = (rev, date) => 'Lite HiSilicon (hi3516ev300), HEAD+' + rev + ', ' + 
 		})) === null);
 	check('an empty feed: no banner',
 		(await run({ version: VER(MINE, iso(30)), feed: feedOf([]) })) === null);
+
+	group('a build older than the ledger reaches');
+
+	// The ledger starts somewhere, and every camera flashed before that point
+	// falls off the end of it. Those owners are the furthest behind and the ones
+	// the banner most needs to reach, so "not in the ledger" must not mean
+	// "silent" when the build date proves the camera has been passed by.
+	let older = await run({
+		version: VER('deadbeef1', iso(400)),
+		feed: feedOf([
+			entry('aaaaaaaaa', { feature: 2, fix: 5, security: 1 }),
+			entry('bbbbbbbbb', { fix: 3 }),
+		]),
+	});
+	check('a build predating the whole ledger still gets a banner',
+		older !== null, 'silent for exactly the owners furthest behind');
+	check('and the tally is stated as a floor, not a count',
+		older && /at least 2 builds behind/.test(older.html), older && older.html);
+	check('and the wording does not claim to start from their build',
+		older && !/since your build/.test(older.html) && /changes we can see/.test(older.html),
+		older && older.html);
+	check('a security fix below the horizon still escalates',
+		older && older.sev === 'warn', older && older.sev);
+
+	check('a build NEWER than the feed is still silent',
+		(await run({
+			version: VER('99999999b', iso(0)),
+			feed: feedOf([entry('aaaaaaaaa', { fix: 9 }, [])]),
+		})) === null);
+	check('no build date means no claim about being older',
+		(await run({
+			version: 'Lite HiSilicon (hi3516ev300), HEAD+deadbeef1',
+			feed: feedOf([entry('aaaaaaaaa', { fix: 9 })]),
+		})) === null);
+
+	group('a date that is not a date is not evidence');
+
+	// The pre-ledger path decides "older" by comparing two dates, and a raw
+	// string comparison ranks "z" after every real date. Both sides are
+	// untrusted: the feed comes over the network, and the camera's date is
+	// lifted out of a version string by shape alone.
+	const badFeedDates = ['z', '2026-13-45', '2026-02-31', '', '20260905', 'yesterday'];
+	for (const bad of badFeedDates) {
+		check('a ledger dated ' + JSON.stringify(bad) + ' proves nothing',
+			(await run({
+				version: VER('deadbeef1', iso(400)),
+				feed: feedOf([{ sha: 'aaaaaaaaa', date: bad,
+					counts: { feature: 1, fix: 2, security: 1, other: 0 }, notes: [] }]),
+			})) === null);
+	}
+	check('a ledger date of the wrong type proves nothing',
+		(await run({
+			version: VER('deadbeef1', iso(400)),
+			feed: feedOf([{ sha: 'aaaaaaaaa', date: 20260905,
+				counts: { feature: 1, fix: 2, security: 1, other: 0 }, notes: [] }]),
+		})) === null);
+	check('a camera date of 0000-00-00 is not an ancient camera',
+		(await run({
+			version: 'Lite HiSilicon (hi3516ev300), HEAD+deadbeef1, 0000-00-00 07:14',
+			feed: feedOf([entry('aaaaaaaaa', { fix: 3 })]),
+		})) === null);
+	check('and a real pair still works',
+		(await run({
+			version: VER('deadbeef1', iso(400)),
+			feed: feedOf([entry('aaaaaaaaa', { fix: 3 })]),
+		})) !== null);
 
 	group('a feed it cannot trust is not a feed');
 

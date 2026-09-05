@@ -37,6 +37,22 @@
 		}[c]));
 	}
 
+	// A date is a date, or it is not evidence.
+	//
+	// Both inputs here are untrusted in different ways. The feed arrives over
+	// the network, and parseBuild lifts any YYYY-MM-DD-shaped run of digits out
+	// of a version string without checking it names a real day. Comparing either
+	// as a raw string would rank "z" after every real date and "0000-00-00"
+	// before them, turning nonsense into a confident "at least N builds behind".
+	function isDate(s) {
+		if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+		const t = Date.parse(s + 'T00:00:00Z');
+		if (isNaN(t)) return false;
+		// Round-trip, because Date.parse rolls 2026-02-31 forward into March
+		// rather than rejecting it.
+		return new Date(t).toISOString().slice(0, 10) === s;
+	}
+
 	function plural(n, one, many) {
 		return n + ' ' + (n === 1 ? one : many);
 	}
@@ -50,11 +66,13 @@
 		const rev = /[+ ]([0-9a-f]{7,40})\b/.exec(version);
 		const date = /(\d{4}-\d{2}-\d{2})/.exec(version);
 		if (!rev) return null;
-		return { rev: rev[1], date: date ? date[1] : null };
+		// A date that is not a real day is no date at all: nothing downstream
+		// should have to ask twice.
+		return { rev: rev[1], date: (date && isDate(date[1])) ? date[1] : null };
 	}
 
 	function daysSince(iso) {
-		if (!iso) return null;
+		if (!isDate(iso)) return null;
 		const then = Date.parse(iso + 'T00:00:00Z');
 		if (isNaN(then)) return null;
 		return Math.floor((Date.now() - then) / 86400000);
@@ -90,7 +108,7 @@
 	// Everything published after the running build. The camera's own revision
 	// is the boundary: a commit above it is in the next build it takes,
 	// whichever night that one happened to publish.
-	function delta(feed, rev) {
+	function delta(feed, rev, buildDate) {
 		const totals = { feature: 0, fix: 0, security: 0, other: 0 };
 		const vendors = new Set();
 		let builds = 0, found = false;
@@ -111,10 +129,29 @@
 				if (note && typeof note.vendor === 'string') vendors.add(note.vendor);
 			}
 		}
-		// Not in the ledger: either newer than the feed (nothing to say) or
-		// older than it reaches (we would be guessing). Say nothing either way.
-		if (!found) return null;
-		return { builds, totals, vendors };
+		if (found) return { builds, totals, vendors, atLeast: false };
+
+		// Not in the ledger, which is two very different situations.
+		//
+		// A build NEWER than the feed -- a development build, or a nightly the
+		// feed has not caught up with -- has nothing to be told.
+		//
+		// A build OLDER than the ledger reaches is the common case and the one
+		// that matters: the ledger starts somewhere, and every camera flashed
+		// before that point falls off the end of it. Saying nothing to those
+		// would leave the banner permanently silent for exactly the owners
+		// furthest behind, which is the opposite of the point.
+		//
+		// The build date separates the two. Only when it is strictly older than
+		// the oldest entry has the camera provably been passed by, and even then
+		// the totals are a floor rather than a count, so the sentence says "at
+		// least". Same-day is not evidence either way, and stays silent.
+		const eldest = feed.builds[feed.builds.length - 1];
+		if (isDate(buildDate) && eldest && isDate(eldest.date) &&
+			buildDate < eldest.date) {
+			return { builds, totals, vendors, atLeast: true };
+		}
+		return null;
 	}
 
 	function sentence(d, mine, stale) {
@@ -124,13 +161,14 @@
 		if (t.fix) parts.push(plural(t.fix, 'fix', 'fixes'));
 		if (t.security) parts.push(plural(t.security, 'security fix', 'security fixes'));
 
-		let head = '<b>Your camera software is ' +
+		let head = '<b>Your camera software is ' + (d.atLeast ? 'at least ' : '') +
 			plural(d.builds, 'build', 'builds') + ' behind</b>';
 		if (!parts.length) {
 			return head + ' &mdash; updating brings it in line with the current release.';
 		}
 
-		let s = head + ' &mdash; since your build: ' +
+		let s = head + (d.atLeast ? ' &mdash; in the changes we can see: '
+			: ' &mdash; since your build: ') +
 			parts.slice(0, -1).join(', ') +
 			(parts.length > 1 ? ' and ' : '') + parts[parts.length - 1];
 		if (mine) {
@@ -149,7 +187,7 @@
 	}
 
 	function render(slot, feed, build) {
-		const d = delta(feed, build.rev);
+		const d = delta(feed, build.rev, build.date);
 		if (!d || d.builds === 0) return;
 
 		const age = daysSince(build.date);
