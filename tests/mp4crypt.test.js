@@ -547,29 +547,155 @@ group('decrypting a fragment');
 (function roundTrip() {
 	const p = CRYPT.inspect(u8(init), init.length);
 	const f = fragment();
-	const got = CRYPT.decryptFragment(u8(f.bytes), MATERIAL, p.tracks);
-	check('a fragment decrypts to exactly what was recorded',
-		hex(got) === hex(f.plainBytes));
+	const got = Buffer.from(CRYPT.decryptFragment(u8(f.bytes), MATERIAL, p.tracks));
 
-	// The trap. A multi-NAL sample's protected runs are one keystream; the
-	// clear five bytes between them do not advance it, and the runs are not
-	// multiples of the block size. Decrypting each run from its own counter
-	// gets the first one right — a picture, with the rest of the frame wrong.
-	const first = f.video ? 0 : 0;
-	check('including every NAL of a multi-NAL frame, not just the first',
-		hex(Buffer.from(got).subarray(f.payloadAt, f.payloadAt + 600)) ===
+	// The output is not the input with its samples swapped: the boxes that
+	// described the protection come out with it, because a browser reads them,
+	// finds them on a track that is no longer protected, and refuses the whole
+	// fragment. So the payload moves, and three numbers move with it.
+	check('the boxes describing the protection are gone',
+		got.indexOf(Buffer.from('senc', 'ascii')) < 0 &&
+		got.indexOf(Buffer.from('saiz', 'ascii')) < 0 &&
+		got.indexOf(Buffer.from('saio', 'ascii')) < 0);
+	check('and the integrity tag is not — it describes the recording, not the protection',
+		got.indexOf(INTEGRITY_UUID) > 0);
+
+	const moofLen = got.readUInt32BE(0);
+	check('the moof says how long it now is',
+		got.toString('ascii', 4, 8) === 'moof' && moofLen < f.moofLen);
+	check('and the mdat behind it is untouched in length',
+		got.toString('ascii', moofLen + 4, moofLen + 8) === 'mdat' &&
+		got.readUInt32BE(moofLen) === f.bytes.readUInt32BE(f.moofLen));
+
+	// Every container's size still equals what it holds, walked by a checker
+	// that shares no code with the rewriter.
+	const bad = [];
+	walkFragmentSizes(got, bad);
+	check('every box in the rebuilt moof is as long as its contents', bad.length === 0, bad.join(', '));
+
+	// The one that decides whether a picture decodes: the payload starts
+	// exactly where the trun says it does, and holds what was recorded.
+	const trunAt = got.indexOf(Buffer.from('trun', 'ascii'));
+	const dataOffset = got.readUInt32BE(trunAt + 12);
+	check('the sample offset moved with the moof, exactly',
+		dataOffset === f.payloadAt - (f.moofLen - moofLen),
+		'data_offset ' + dataOffset + ', moof shrank by ' + (f.moofLen - moofLen));
+	check('and the bytes at that offset are what the camera recorded',
+		hex(got.subarray(dataOffset, dataOffset + 600)) ===
 		hex(f.plainBytes.subarray(f.payloadAt, f.payloadAt + 600)));
 
 	// Audio has no subsample list: the whole sample is protected. Applying the
 	// video rule to it would corrupt every audio sample and produce noise at
 	// full volume rather than silence.
-	const audioAt = f.bytes.length - 320;
-	check('and the audio samples, which are protected whole',
-		hex(Buffer.from(got).subarray(audioAt)) === hex(f.plainBytes.subarray(audioAt)));
+	const tail = 320;
+	check('including the audio samples, which are protected whole',
+		hex(got.subarray(got.length - tail)) === hex(f.plainBytes.subarray(f.plainBytes.length - tail)));
 
-	check('twice over is the original again — CTR is its own inverse',
-		hex(CRYPT.decryptFragment(got, MATERIAL, p.tracks)) === hex(f.bytes));
+	// And the whole payload, not just its ends.
+	const payloadLen = f.plainBytes.length - f.payloadAt;
+	check('and every byte of the payload in between',
+		hex(got.subarray(dataOffset, dataOffset + payloadLen)) ===
+		hex(f.plainBytes.subarray(f.payloadAt)));
 })();
+
+// A protected track and a clear one in the same fragment. They share the mdat,
+// so anything removed from either traf moves BOTH tracks' samples — and a
+// clear traf loses nothing, which is exactly why its offset is the one that
+// gets forgotten. Its samples then read from wherever the protected track's
+// used to start, and decode as pictures made of somebody else's bytes.
+(function clearTrackBeside() {
+	const p = CRYPT.inspect(u8(init), init.length);
+	const tracks = { 1: p.tracks[1], 9: { id: 9, kind: 'avc1', format: 'avc1', protected: false } };
+
+	const video = [{ plain: videoSample([300, 60], 0x20).bytes, subs: videoSample([300, 60], 0x20).subs, iv: ivFor(1) }];
+	const clear = Buffer.alloc(200, 0x33);
+
+	function build(protBase, clearBase) {
+		return box('moof',
+			box('mfhd', u32(0, 7)),
+			traf(1, [{ bytes: video[0].plain, subs: video[0].subs, iv: video[0].iv }], true, protBase),
+			// A traf with no senc at all: the track is not protected.
+			box('traf', box('tfhd', u32(0x020030, 9, clear.length, 0)),
+				box('trun', u32(0x000201, 1, clearBase), u32(clear.length))));
+	}
+	const probe = build(0, 0);
+	const payloadAt = probe.length + 8;
+	const moof = build(payloadAt, payloadAt + video[0].plain.length);
+	const enc = encryptSample(video[0].plain, video[0].subs, video[0].iv);
+	const frag = Buffer.concat([moof, box('mdat', Buffer.concat([enc, clear]))]);
+
+	const got = Buffer.from(CRYPT.decryptFragment(u8(frag), MATERIAL, tracks));
+	const moofLen = got.readUInt32BE(0);
+	const shrank = moof.length - moofLen;
+	check('the fragment shrank when the protected track lost its boxes', shrank > 0);
+
+	// Both offsets, read back out of the rebuilt trafs.
+	const offsets = [];
+	let at = 8;
+	while (at + 8 <= moofLen) {
+		const size = got.readUInt32BE(at);
+		if (got.toString('ascii', at + 4, at + 8) === 'traf') {
+			const t = got.indexOf(Buffer.from('trun', 'ascii'), at);
+			offsets.push(got.readUInt32BE(t + 12));
+		}
+		at += size;
+	}
+	check('both tracks moved by exactly what came out of the fragment',
+		offsets.length === 2 &&
+		offsets[0] === payloadAt - shrank &&
+		offsets[1] === payloadAt + video[0].plain.length - shrank,
+		offsets.join(',') + ' vs ' + (payloadAt - shrank) + ',' +
+		(payloadAt + video[0].plain.length - shrank));
+
+	check('the protected track decrypted where it now says it is',
+		hex(got.subarray(offsets[0], offsets[0] + video[0].plain.length)) === hex(video[0].plain));
+	check('and the clear track is still its own bytes, untouched',
+		hex(got.subarray(offsets[1], offsets[1] + clear.length)) === hex(clear));
+})();
+
+// Decryption happens before the boxes come out, so a moof this cannot rebuild
+// has already had its samples decrypted. Handing that back — decrypted samples
+// still wearing their protection boxes — is the exact state a browser refuses
+// without saying why, so it is refused here instead.
+(function malformedAfterDecrypt() {
+	const p = CRYPT.inspect(u8(init), init.length);
+	const whole = fragment();
+	const bent = Buffer.from(whole.bytes);
+	// A child box after the ones decryption needs, with a length that runs
+	// past its parent.
+	const saioAt = bent.indexOf(Buffer.from('saio', 'ascii'));
+	bent.writeUInt32BE(0x0fffffff, saioAt - 4);
+	let code = null;
+	try { CRYPT.decryptFragment(u8(bent), MATERIAL, p.tracks); } catch (e) { code = e.code; }
+	check('a moof that cannot be rebuilt is refused, not handed back half-done',
+		code === 'bad-traf' || code === 'bad-moof', 'got ' + code);
+})();
+
+// The size of every container in a fragment, checked independently.
+function walkFragmentSizes(b, bad) {
+	const moofLen = b.readUInt32BE(0);
+	let sum = 8;
+	let at = 8;
+	while (at + 8 <= moofLen) {
+		const size = b.readUInt32BE(at);
+		const type = b.toString('ascii', at + 4, at + 8);
+		if (size < 8 || at + size > moofLen) { bad.push(type + ' size ' + size); return; }
+		if (type === 'traf') {
+			let inner = 8;
+			let k = at + 8;
+			while (k + 8 <= at + size) {
+				const ks = b.readUInt32BE(k);
+				if (ks < 8) { bad.push('traf child size ' + ks); return; }
+				inner += ks;
+				k += ks;
+			}
+			if (inner !== size) bad.push('traf says ' + size + ', holds ' + inner);
+		}
+		sum += size;
+		at += size;
+	}
+	if (sum !== moofLen) bad.push('moof says ' + moofLen + ', holds ' + sum);
+}
 
 (function refusals() {
 	const p = CRYPT.inspect(u8(init), init.length);
