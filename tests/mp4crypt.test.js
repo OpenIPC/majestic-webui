@@ -416,8 +416,23 @@ group('reading the header');
 		p.tracks[1].ivSize === 8 && p.tracks[1].protected === true);
 	check('and nothing it could not understand', p.reason === null);
 
+	check('and says it could read the header at all', p.ok === true);
+
 	const plain = CRYPT.inspect(u8(initSegment({ encrypted: false })));
-	check('a clip in the clear needs no key', plain.encrypted === false && plain.reason === null);
+	check('a clip in the clear needs no key',
+		plain.ok === true && plain.encrypted === false && plain.reason === null);
+
+	// A header that could not be read is a third answer. Reported as "not
+	// encrypted" — which is what an absent moov used to produce — the page
+	// goes on to hand whatever it has to a decoder, on the strength of never
+	// having looked. The short read is the ordinary way to get here: the page
+	// takes a window off the front of the clip, and a header can be wider.
+	const short = CRYPT.inspect(u8(init.subarray(0, 40)));
+	check('a header too short to hold a moov is unreadable, not unencrypted',
+		short.ok === false && short.encrypted === false && /could not be read/.test(short.reason));
+	const notMp4 = CRYPT.inspect(new Uint8Array(64));
+	check('and so is something that is not an MP4 at all',
+		notMp4.ok === false && !!notMp4.reason);
 
 	// Signalled as protected and then declared not to be. It plays as it is,
 	// and demanding a passphrase for it would refuse a working clip.
@@ -543,6 +558,31 @@ group('decrypting a fragment');
 	refuses('a payload shorter than the samples it claims is refused',
 		b => { b.writeUInt32BE(0x7fffffff, b.indexOf(Buffer.from('trun', 'ascii')) + 20); },
 		'subsample-overrun');
+
+	// A box that stops early does not throw when it is read: past the end of a
+	// Uint8Array every byte is undefined, and every bitwise operation turns
+	// that into zero. So a sample table that lists a thousand samples and
+	// carries ten reads as nine hundred and ninety samples of no length —
+	// the walk completes, the fragment comes back, and nothing in it was
+	// decrypted. That is the shape this refuses.
+	(function truncatedTables() {
+		const whole = fragment();
+		const trunAt = whole.bytes.indexOf(Buffer.from('trun', 'ascii'));
+		const bent = Buffer.from(whole.bytes);
+		bent.writeUInt32BE(400, trunAt + 8);          // says 400 samples; carries two
+		let code = null;
+		try { CRYPT.decryptFragment(u8(bent), MATERIAL, p.tracks); } catch (e) { code = e.code; }
+		check('a sample table that runs past its own box is refused', code === 'bad-trun',
+			'got ' + code);
+
+		const cut = Buffer.from(whole.bytes);
+		const tfhdAt = cut.indexOf(Buffer.from('tfhd', 'ascii'));
+		cut.writeUInt32BE(0x020031, tfhdAt + 4);      // claims a field it does not carry
+		let code2 = null;
+		try { CRYPT.decryptFragment(u8(cut), MATERIAL, p.tracks); } catch (e) { code2 = e.code; }
+		check('and so is a header claiming a field it does not carry', code2 === 'bad-tfhd',
+			'got ' + code2);
+	})();
 
 	let truncated = null;
 	try {

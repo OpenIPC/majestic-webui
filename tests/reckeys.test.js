@@ -101,6 +101,42 @@ group('wrapping the key this browser holds');
 		K.unwrap(Object.assign({}, rec, { v: 99 }), UNLOCK) === null);
 })();
 
+(function hostileRecord() {
+	const der = C.pemBody(PEM).bytes;
+	const rec = K.wrap(der, UNLOCK, K.metaFor(C.parsePrivateKeyPem(PEM)), 'pkcs8');
+
+	// The record states its own unlock cost, so the record decides how long
+	// this page stops responding. Browser storage is not a trusted input —
+	// another tab, an extension, a profile carried between machines — and
+	// stretching a passphrase two billion times cannot be interrupted once it
+	// has started. The shape is therefore checked before any work happens,
+	// and the check has to be cheap: the assertion below is that it returns
+	// rather than that it returns quickly, but a regression here is a browser
+	// that never comes back.
+	const t0 = Date.now();
+	const absurd = K.unwrap(Object.assign({}, rec, { iterations: 2e9 }), UNLOCK);
+	check('an unlock cost no one would choose is refused without doing it',
+		absurd === null && Date.now() - t0 < 500);
+
+	[['a fractional cost', { iterations: 1.5 }],
+	 ['an infinite one', { iterations: Infinity }],
+	 ['a cost that is not a number', { iterations: '200000' }],
+	 ['a salt of the wrong size', { salt: new Uint8Array(4) }],
+	 ['a salt that is not bytes', { salt: 'aaaa' }],
+	 ['a tag of the wrong size', { mac: new Uint8Array(8) }],
+	 ['no ciphertext at all', { ct: new Uint8Array(0) }],
+	].forEach(function (b) {
+		check(b[0] + ' is refused', K.unwrap(Object.assign({}, rec, b[1]), UNLOCK) === null);
+	});
+
+	// The bound is a maximum and not the figure this build writes: a key
+	// wrapped by a later version under a costlier setting still has to open.
+	const dearer = K.wrap(der, UNLOCK, K.metaFor(C.parsePrivateKeyPem(PEM)), 'pkcs8');
+	dearer.iterations = K.MAX_WRAP_ITERATIONS;
+	check('but a cost higher than today\'s, and still sane, is accepted as a shape',
+		K.usable(dearer) === true);
+})();
+
 group('taking a key an operator brings');
 
 (function imported() {

@@ -231,7 +231,12 @@ window.MajesticMp4Crypt = (function () {
 		const u8 = C.bytes(head);
 		const end = Math.min(headerLength || u8.length, u8.length);
 		const moov = IDX.findBox(u8, 0, end, 'moov');
-		if (!moov) return { encrypted: false, tracks: {}, keyBox: null, reason: null };
+		// No moov is not "this clip is in the clear" — it is "this is not a
+		// header I could read", which happens with a short read, a file that
+		// is not an MP4, and a clip whose header is bigger than the window the
+		// caller took. Answering `encrypted: false` there hands protected
+		// bytes to a decoder on the strength of never having looked.
+		if (!moov) return unreadable('the clip header could not be read');
 
 		const tracks = {};
 		let encrypted = false;
@@ -260,12 +265,25 @@ window.MajesticMp4Crypt = (function () {
 		// actually protected, which decides whether a key is needed at all — a
 		// track can be wrapped and declare itself unprotected, and demanding a
 		// passphrase for that would refuse a clip that plays.
+		if (!Object.keys(tracks).length)
+			return unreadable('the clip header carries no tracks this page can read');
 		return {
+			ok: true,
 			encrypted: encrypted,
 			wrapped: wrapped,
 			tracks: tracks,
 			keyBox: wrapped ? keyBox(u8.subarray(0, end)) : null,
 			reason: reason,
+		};
+	}
+
+	// `ok` false is a third answer beside clear and encrypted, and callers have
+	// to treat it as its own: not a reason to play, not a reason to ask for a
+	// passphrase, a reason to say the header could not be read.
+	function unreadable(reason) {
+		return {
+			ok: false, encrypted: false, wrapped: false,
+			tracks: {}, keyBox: null, reason: reason,
 		};
 	}
 
@@ -524,22 +542,31 @@ window.MajesticMp4Crypt = (function () {
 		if (!senc) throw fail('no-senc');
 
 		// tfhd's optional fields, in the order the box defines them.
+		// Reading past the end of a Uint8Array yields undefined, and every
+		// bitwise operation turns that into zero — so a box that stops early
+		// does not throw here, it quietly describes samples of no length and
+		// a fragment comes back looking decrypted with nothing decrypted in
+		// it. Each field is therefore checked against its box's end before it
+		// is read, and a box that cannot hold what its flags promise is a
+		// refusal like any other.
 		let p = tfhd[0] + 16;
 		let baseDataOffset = null;
-		if (tfhdFlags & 0x000001) { baseDataOffset = readU64(src, p); p += 8; }
+		if (tfhdFlags & 0x000001) { need(p + 8, tfhd[1], 'bad-tfhd'); baseDataOffset = readU64(src, p); p += 8; }
 		if (tfhdFlags & 0x000002) p += 4;            // sample description index
 		if (tfhdFlags & 0x000008) p += 4;            // default sample duration
 		let defaultSize = 0;
-		if (tfhdFlags & 0x000010) { defaultSize = be32(src, p); p += 4; }
+		if (tfhdFlags & 0x000010) { need(p + 4, tfhd[1], 'bad-tfhd'); defaultSize = be32(src, p); p += 4; }
 		if (tfhdFlags & 0x000020) p += 4;            // default sample flags
+		need(p, tfhd[1], 'bad-tfhd');
 
 		const trunFlags = be32(src, trun[0] + 8) & 0xffffff;
 		const sampleCount = be32(src, trun[0] + 12);
 		if (sampleCount > MAX_SAMPLES) throw fail('too-many-samples');
 		let q = trun[0] + 16;
 		let dataOffset = 0;
-		if (trunFlags & 0x000001) { dataOffset = be32(src, q) | 0; q += 4; }
+		if (trunFlags & 0x000001) { need(q + 4, trun[1], 'bad-trun'); dataOffset = be32(src, q) | 0; q += 4; }
 		if (trunFlags & 0x000004) q += 4;            // first sample flags
+		need(q, trun[1], 'bad-trun');
 
 		// Where this track's samples begin. Each traf carries its own offset,
 		// so a two-track fragment must not assume the front of the payload —
@@ -557,6 +584,10 @@ window.MajesticMp4Crypt = (function () {
 		const stride = ((trunFlags & 0x000100) ? 4 : 0) + ((trunFlags & 0x000200) ? 4 : 0) +
 			((trunFlags & 0x000400) ? 4 : 0) + ((trunFlags & 0x000800) ? 4 : 0);
 		const sizeAt = q + ((trunFlags & 0x000100) ? 4 : 0);
+		// The whole sample table, not just its first row: a trun that lists a
+		// thousand samples and holds ten is the case that reads as zeroes.
+		need(q + sampleCount * stride, trun[1], 'bad-trun',
+			'the fragment lists ' + sampleCount + ' samples and does not carry them');
 
 		// senc: version+flags, then a count, then one record per sample.
 		const sencFlags = be32(src, senc[0] + 8) & 0xffffff;
@@ -608,6 +639,10 @@ window.MajesticMp4Crypt = (function () {
 			cursor += size;
 		}
 		if (cursor > moofSize + mdatSize) throw fail('short-mdat');
+	}
+
+	function need(at, end, code, detail) {
+		if (at > end) throw fail(code, detail);
 	}
 
 	function readU64(b, i) {

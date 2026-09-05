@@ -47,7 +47,14 @@ window.MajesticRecKeys = (function () {
 	function idb() {
 		return new Promise(function (resolve) {
 			let settled = false;
-			const finish = function (v) { if (!settled) { settled = true; resolve(v); } };
+			let timer = null;
+			const finish = function (v) {
+				if (settled) return false;
+				settled = true;
+				if (timer !== null) clearTimeout(timer);
+				resolve(v);
+				return true;
+			};
 			let req;
 			try {
 				if (typeof indexedDB === 'undefined') return finish(null);
@@ -55,11 +62,17 @@ window.MajesticRecKeys = (function () {
 			} catch (e) {
 				return finish(null);
 			}
-			setTimeout(function () { finish(null); }, OPEN_TIMEOUT_MS);
+			timer = setTimeout(function () { finish(null); }, OPEN_TIMEOUT_MS);
 			req.onupgradeneeded = function () {
 				try { req.result.createObjectStore(STORE); } catch (e) { /* already there */ }
 			};
-			req.onsuccess = function () { finish(req.result); };
+			req.onsuccess = function () {
+				// An open that arrives after the wait gave up still holds a
+				// connection, and a connection nobody closes blocks the next
+				// version change for the life of the tab — so a late answer is
+				// closed rather than dropped on the floor.
+				if (!finish(req.result)) req.result.close();
+			};
 			req.onerror = function () { finish(null); };
 			req.onblocked = function () { finish(null); };
 		});
@@ -126,10 +139,31 @@ window.MajesticRecKeys = (function () {
 		return rec;
 	}
 
+	// The record says how much work its own unlock costs, which means the
+	// record decides how long this page freezes. Browser storage is not a
+	// trusted input — another tab, an extension, a profile carried between
+	// machines, a record from a build that stored something else — and
+	// stretching a passphrase two billion times cannot be interrupted once it
+	// starts, so the shape is checked before any of it runs. The bound is a
+	// maximum rather than the current figure: a key wrapped under a later,
+	// costlier setting must still open here.
+	const MAX_WRAP_ITERATIONS = 4000000;
+
+	function usable(rec) {
+		if (!rec || rec.v !== RECORD_VERSION) return false;
+		if (typeof rec.iterations !== 'number' || !isFinite(rec.iterations) ||
+			rec.iterations < 1 || rec.iterations > MAX_WRAP_ITERATIONS ||
+			Math.floor(rec.iterations) !== rec.iterations) return false;
+		const bytes = function (x, n) {
+			return x instanceof Uint8Array && (n === undefined ? x.length > 0 : x.length === n);
+		};
+		return bytes(rec.salt, 16) && bytes(rec.iv, 16) && bytes(rec.mac, 32) && bytes(rec.ct);
+	}
+
 	// null for a wrong passphrase — an answer, not a failure. Anything else is
 	// a record this build cannot read, which is a different sentence.
 	function unwrap(rec, passphrase) {
-		if (!rec || rec.v !== RECORD_VERSION) return null;
+		if (!usable(rec)) return null;
 		const k = derive(passphrase, rec.salt, rec.iterations);
 		if (!C.ctEqual(macOver(k.mac, rec, rec.ct), rec.mac)) return null;
 		return C.aes128CtrXor(k.enc, rec.iv, rec.ct);
@@ -226,6 +260,8 @@ window.MajesticRecKeys = (function () {
 		WRAP_ITERATIONS: WRAP_ITERATIONS,
 		wrap: wrap,
 		unwrap: unwrap,
+		usable: usable,
+		MAX_WRAP_ITERATIONS: MAX_WRAP_ITERATIONS,
 		keyFromDer: keyFromDer,
 		metaFor: metaFor,
 		importPem: importPem,
