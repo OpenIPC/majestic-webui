@@ -671,6 +671,30 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			'made=' + env.made.length);
 	}
 
+	// A retry scheduled from a superseded session must not fire a software
+	// player over a newer one the viewer just chose (#288).
+	group('a pending software retry does not override a transport change');
+	{
+		const env = load('mse',
+			{ 'jpeg.enabled': true, 'video0.codec': 'h265' }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'unreachable');   // -> wasm made[1]
+		env.made[1].say('playing');
+		env.made[1].say('mjpeg', 'unreachable');  // schedules a wasm retry
+		const before = env.made.length;
+		// The viewer picks WebRTC while that retry is pending.
+		pickWebRTC(env);
+		const afterPick = env.made[env.made.length - 1];
+		check('the transport choice attached its own player',
+			afterPick && afterPick.kind === 'webrtc', afterPick && afterPick.kind);
+		// Long enough that the stale retry timer would have fired.
+		await new Promise((r) => setTimeout(r, 1400));
+		check('the stale retry did not start another software player',
+			env.made.length === before + 1 &&
+			env.made[env.made.length - 1].kind === 'webrtc',
+			'made=' + env.made.length + ' last=' + env.made[env.made.length - 1].kind);
+	}
+
 	group('the rescue needs the decoder to actually be present');
 	{
 		// Same unreachable H.265 channel, but no software decoder in the page
