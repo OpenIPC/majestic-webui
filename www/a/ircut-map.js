@@ -113,9 +113,20 @@
 		// OpenIPC is majestic's, and majestic never releases a pad when its
 		// nightMode key is deleted; treating that as ownership would lock a
 		// camera out of the pad a rescan needs most.
+		//
+		// The roles here are the ones majestic and U-Boot assign OUTSIDE this
+		// section. The four Day / Night roles are excluded because they are
+		// drawn as roles, in their own colours; these have no row of their own
+		// on this page, so without a word here their pads would read as free
+		// to anyone picking one.
+		const FOREIGN = {
+			ptz: 'used by the PTZ driver',
+			speaker: 'used by the speaker',
+			button: 'used by the doorbell button',
+		};
 		const owned = {};
 		(info.assigned || []).forEach((a) => {
-			if (a.role === 'ptz') owned[a.pin] = 'used by the PTZ driver';
+			if (FOREIGN[a.role]) owned[a.pin] = FOREIGN[a.role];
 		});
 		(info.held || []).forEach((h) => {
 			if (h.owner && h.owner !== 'sysfs') owned[h.pin] = 'held by ' + h.owner;
