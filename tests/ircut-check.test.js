@@ -698,6 +698,68 @@ function runRest() {
 			ic.projector(6).age(1) === null);
 	}
 
+	group('diagnose: a mechanism that is filled in but not deciding');
+	{
+		// Three mechanisms decide the same thing, the camera picks one, and
+		// every control is on the page together. The reporter of #325 filled
+		// in a night gain multiple and both automatic delays while a legacy
+		// threshold pair kept the wheel, and nothing said so — four live-
+		// looking controls doing nothing, and no countdown, because the
+		// mechanism that has no countdown was the one running. Reachable only
+		// with a camera configured both ways at once.
+		const both = { lightMonitor: true, irCutPin1: 11,
+			minThreshold: 2000, maxThreshold: 14000,
+			autoNightGain: 33, autoNightDelay: 15, autoDayDelay: 60 };
+		const said = (nm, src) => ic.diagnose(nm, { night: 0, ircut: 0, src: src },
+			{ flips: 0, conflictS: 0 }).filter(x => x.id === 'mech-shadowed')[0];
+		check('thresholds winning over a filled-in automatic set is named',
+			/compares raw sensor gain/.test(said(both, 2).detail), '');
+		check('and it says why the countdown is missing',
+			/no countdown appears/.test(said(both, 2).detail));
+		check('a wired sensor winning over both is named as the sensor',
+			/daylight sensor is wired/.test(said(both, 1).detail));
+		// Nothing filled in, nothing being ignored, nothing to say.
+		check('automatic mode deciding says nothing',
+			!said(both, 4));
+		// A camera that has not reported a source is not accused of anything.
+		check('an unknown source says nothing either', !said(both, null));
+
+		// What it NAMES has to be what is there. The first cut named the
+		// automatic multiples and delays whatever was set, on a path that
+		// could fire with no automatic value at all — silence traded for a
+		// confident wrong account of somebody's configuration.
+		const thrOnly = { lightMonitor: true, minThreshold: 2000,
+			maxThreshold: 14000 };
+		check('a shadowed threshold pair is named without inventing the rest',
+			/the day and night thresholds below set but ignored/
+				.test(said(thrOnly, 1).detail.replace(/\s+/g, ' ')) &&
+			!/gain multiples/.test(said(thrOnly, 1).detail),
+			said(thrOnly, 1).detail);
+		check('and the countdown clause is only spoken about automatic mode',
+			!/no countdown/.test(said(thrOnly, 1).detail));
+		check('both shadowed sets are named together',
+			/gain multiples and delays and the day and night thresholds/
+				.test(said(both, 1).detail.replace(/\s+/g, ' ')),
+			said(both, 1).detail);
+		// The day gain multiple and both delays ship with defaults and are
+		// seeded on every camera, so their presence is not evidence anyone
+		// asked for automatic mode — that is the difference between saying it
+		// and shouting it.
+		const seeded = { lightMonitor: true, minThreshold: 2000,
+			maxThreshold: 14000, autoDayGain: 2, autoNightDelay: 15,
+			autoDayDelay: 60 };
+		check('defaults alone are stated, not warned about',
+			said(seeded, 2).level === 'info', said(seeded, 2).level);
+		check('a night gain multiple somebody typed is a warning',
+			said(both, 2).level === 'warning');
+		// The day gain multiple is an automatic control too; leaving it out of
+		// the set meant a camera holding only that one got a row note and no
+		// section explanation at all.
+		check('the day gain multiple counts as an automatic setting',
+			!!said({ lightMonitor: true, minThreshold: 1, maxThreshold: 2,
+				autoDayGain: 2 }, 2));
+	}
+
 	group('diagnose: hunting, and the ordering of what it all reports');
 	{
 		const cfg = { irCutPin1: 11, lightSensorPin: 66, lightMonitor: true };
