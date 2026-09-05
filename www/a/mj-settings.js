@@ -1211,9 +1211,13 @@
 	// page pointing at the other (#316). Which way up the camera is mounted is
 	// one decision, and this is the picture it is judged against; the save bar
 	// that appears on a press says what the press costs, so the group carries
-	// no note. A build without a quarter turn has four pictures, in one row.
-	function renderOrientation(body, mirrorField, flipField, turnField) {
-		const cells = ORIENT.filter(o => turnField || o.a % 180 === 0);
+	// no note. Only the pictures this camera can reach are offered: a build
+	// without a quarter turn has four, in one row, and one whose enum lists a
+	// single turn has six — a cell for a turn the enum lacks would write a
+	// value the hidden select cannot hold, and stage an empty one for Save.
+	function renderOrientation(body, mirrorField, flipField, turn) {
+		const turnField = turn ? turn.field : null;
+		const cells = ORIENT.filter(o => o.a % 180 === 0 || (turn && turn.has.has(String(o.a))));
 		const rows = [el('div', 'mj-geo-row'), el('div', 'mj-geo-row')];
 		const btns = cells.map((o, i) => {
 			const b = el('button', 'mj-geo' + (o.home ? ' mj-geo-home' : ''));
@@ -1256,9 +1260,10 @@
 	}
 
 	// The quarter turn's field, mounted hidden under the pad — pin-map style —
-	// where the schema has one. Its enum is deliberately ["0","90","270"]: 180
-	// is absent because mirror+flip already give it, at sensor level and for
-	// free, which is exactly how configFor() writes it.
+	// where the schema has one, handed back with the set of turns its enum
+	// actually lists so the pad offers no other. The enum is deliberately
+	// ["0","90","270"]: 180 is absent because mirror+flip already give it, at
+	// sensor level and for free, which is exactly how configFor() writes it.
 	function mountTurnField(body, sec) {
 		const dot = sec + '.rotate';
 		if (EXCLUDE.has(dot)) return null;
@@ -1272,7 +1277,7 @@
 		if (!field) return null;
 		state.fields.push(field);
 		state.initial[dot] = field.getValue();
-		return field;
+		return { field, has: new Set(turns) };
 	}
 
 	// Scene presets. Which one is "on" is DERIVED by comparing the current tone
