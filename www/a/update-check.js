@@ -114,6 +114,7 @@
 	function delta(feed, rev, buildDate) {
 		const totals = { feature: 0, fix: 0, security: 0, other: 0 };
 		const vendors = new Set();
+		const said = [];
 		let builds = 0, found = false;
 
 		for (const entry of feed.builds || []) {
@@ -129,10 +130,21 @@
 			builds++;
 			for (const k of CATEGORIES) totals[k] += c[k];
 			for (const note of entry.notes || []) {
-				if (note && typeof note.vendor === 'string') vendors.add(note.vendor);
+				if (!note) continue;
+				if (typeof note.vendor === 'string') vendors.add(note.vendor);
+				// Remote text, bound for innerHTML. Kept as data here and
+				// escaped where it is written, like every other string the feed
+				// supplies.
+				if (typeof note.text === 'string' && note.text) {
+					// The vendor comes too. It is this note's SCOPE, which is
+					// already how the sentence above uses it, and a list that
+					// drops it offers one vendor's fix to every other vendor's
+					// camera.
+					said.push({ cat: note.cat, vendor: note.vendor, text: note.text });
+				}
 			}
 		}
-		if (found) return { builds, totals, vendors, atLeast: false };
+		if (found) return { builds, totals, vendors, said, atLeast: false };
 
 		// Not in the ledger, which is two very different situations.
 		//
@@ -152,7 +164,7 @@
 		const eldest = feed.builds[feed.builds.length - 1];
 		if (isDate(buildDate) && eldest && isDate(eldest.date) &&
 			buildDate < eldest.date) {
-			return { builds, totals, vendors, atLeast: true };
+			return { builds, totals, vendors, said, atLeast: true };
 		}
 		return null;
 	}
@@ -189,6 +201,48 @@
 		return s;
 	}
 
+	// The counts are the headline because they are what makes the banner
+	// scannable, but they are also the least useful thing in it: "11 fixes" does
+	// not tell an owner whether any of them is theirs. The sentences do, and
+	// until now they were fetched and thrown away.
+	//
+	// Collapsed by default. This sits on every page, and a banner that pushes
+	// the page down to list a fortnight of changes is one people learn to close
+	// rather than read.
+	//
+	// SECURITY FIRST, then features, then fixes: it is the ordering an owner
+	// deciding whether to update now rather than at the weekend actually needs.
+	//
+	// The list is deliberately allowed to be shorter than the counts imply. A
+	// change whose sentence was withheld is still counted and simply not
+	// described, and nothing here draws attention to the gap — saying "some
+	// changes are not described" invites exactly the question the withholding
+	// existed to avoid.
+	const CAT_RANK = { security: 0, feature: 1, fix: 2 };
+	const MAX_SHOWN = 8;
+
+	function whatsNew(said, mine) {
+		if (!said || !said.length) return '';
+		// A note carrying a vendor applies to that vendor's cameras and no
+		// others; one carrying none applies everywhere. Listing another
+		// vendor's work here would promise this owner something their camera
+		// will never do — the same mistake the sentence above already avoids by
+		// only claiming "cameras like this one" on a match.
+		const applies = said.filter(n => !n.vendor || n.vendor === mine);
+		if (!applies.length) return '';
+		const rank = (c) => (c in CAT_RANK) ? CAT_RANK[c] : 3;
+		const sorted = applies.slice().sort((a, b) => rank(a.cat) - rank(b.cat));
+		const items = sorted.slice(0, MAX_SHOWN).map(n =>
+			'<li>' + (n.cat === 'security' ? '<b>Security</b> &mdash; ' : '') +
+			esc(n.text) + '</li>').join('');
+		const rest = sorted.length - MAX_SHOWN;
+		const more = rest > 0
+			? '<p class="small text-secondary mb-0">and ' + rest + ' more</p>'
+			: '';
+		return '<details class="mj-whatsnew"><summary>What\u2019s new</summary>' +
+			'<ul class="small mb-1">' + items + '</ul>' + more + '</details>';
+	}
+
 	function render(slot, feed, build) {
 		const d = delta(feed, build.rev, build.date);
 		if (!d || d.builds === 0) return;
@@ -206,6 +260,7 @@
 		if (seen === feed.cursor) return;
 
 		slot.innerHTML = mjNotice(severity, sentence(d, matched, stale), {
+			body: whatsNew(d.said, mine),
 			acts: '<a class="btn btn-sm btn-primary" href="update.cgi">Firmware update</a>',
 			dismiss: true,
 		});
