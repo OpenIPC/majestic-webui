@@ -118,7 +118,7 @@
 			if (t) t.textContent = f.title;
 			if (d) d.textContent = f.detail;
 			if (a) {
-				a.textContent = f.act.label + ' →';
+				a.textContent = f.act.label;
 				a.href = f.act.href;
 				// Assigned, not added: this anchor is rewritten on every
 				// finding and addEventListener would stack a prompt per
@@ -132,7 +132,7 @@
 			const h = $('#st-alert-novideo-h');
 			if (h) {
 				h.hidden = !f.help;
-				if (f.help) { h.textContent = f.help.label + ' →'; h.href = f.help.href; }
+				if (f.help) { h.textContent = f.help.label; h.href = f.help.href; }
 			}
 		}
 		setAlert('#st-alert-novideo', !!f);

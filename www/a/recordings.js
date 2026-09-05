@@ -840,12 +840,13 @@
 		const msg = cardTrouble();
 		if (!msg) { el.className = 'd-none'; el.innerHTML = ''; return; }
 		el.className = '';
-		// A link, not a button: it goes to a page (#347). It wore btn-danger,
-		// which also put it one initAll() timing accident away from asking
-		// "Are you sure?" before letting anyone read the card's own page.
+		// btn-primary rather than the btn-danger it used to wear: this goes to
+		// a page, and btn-danger is the class main.js hangs a confirm() off, so
+		// it was one initAll() timing accident away from asking "Are you sure?"
+		// before letting anyone read the card's own page.
 		el.innerHTML = mjNotice('danger', msg, {
 			body: cardKernelLines(),
-			acts: '<a href="sdcard.cgi">Open the SD card page &rarr;</a>',
+			acts: '<a class="btn btn-sm btn-primary" href="sdcard.cgi">Open the SD card page</a>',
 		});
 	}
 

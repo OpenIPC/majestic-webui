@@ -188,7 +188,7 @@ Pragma: no-cache
     an NTP server on the camera's own subnet is reachable with no gateway at
     all, and a static-network camera pointed at one would have been told every
     page that its clock was broken when it was not. %>
-<% notice warn '<b>No default gateway</b> &mdash; nothing outside the local network is reachable from this camera.' '<a href="network.cgi">Network settings &rarr;</a>' %>
+<% notice warn '<b>No default gateway</b> &mdash; nothing outside the local network is reachable from this camera.' '<a class="btn btn-sm btn-primary" href="network.cgi">Network settings</a>' %>
 <% fi %>
 
 <%# The address the firmware falls back to when the camera's own was not put
@@ -196,11 +196,11 @@ Pragma: no-cache
     card, which has been there all along -- the banner used to carry a second
     copy of that form, on every page, until somebody used one of them. %>
 <% if [ "$network_macaddr" = "00:00:23:34:45:66" ] && [ -f /etc/shadow- ] && [ -n $(grep root /etc/shadow- | cut -d: -f2) ]; then %>
-<% notice danger "<b>This camera's MAC address is a placeholder</b> &mdash; <code>00:00:23:34:45:66</code> is what the firmware falls back to when the camera's own address was not put back after flashing, and two cameras carrying it on one network will collide." '<a href="network.cgi#mac">Set the MAC address &rarr;</a>' %>
+<% notice danger "<b>This camera's MAC address is a placeholder</b> &mdash; <code>00:00:23:34:45:66</code> is what the firmware falls back to when the camera's own address was not put back after flashing, and two cameras carrying it on one network will collide." '<a class="btn btn-sm btn-primary" href="network.cgi#mac">Set the MAC address</a>' %>
 <% fi %>
 
 <% if [ ! -e $(get_config) ]; then %>
-<% notice danger '<b>No camera configuration found</b> &mdash; there is no settings file for the camera to read.' '<a href="config.cgi">Configuration file &rarr;</a>' %>
+<% notice danger '<b>No camera configuration found</b> &mdash; there is no settings file for the camera to read.' '<a class="btn btn-sm btn-primary" href="config.cgi">Configuration file</a>' %>
 <% fi %>
 
 <%# Warning rather than danger: it reports something you asked for and have not
@@ -220,7 +220,7 @@ Pragma: no-cache
      data-soc-vendor="<% attr_escape "$soc_vendor" %>"></div>
 
 <% if [ -e /tmp/system-reboot ]; then %>
-<% notice warn '<b>Settings are waiting for a restart</b> &mdash; video and recording stop for about half a minute while the camera comes back.' '<a class="btn btn-danger btn-sm" href="restart.cgi" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>' %>
+<% notice warn '<b>Settings are waiting for a restart</b> &mdash; video and recording stop for about half a minute while the camera comes back.' '<a class="btn btn-sm btn-danger" href="restart.cgi" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>' %>
 <% fi %>
 
 <% if [ -z "$hide_title" ]; then %><h2><%= $page_title %></h2><% fi %>

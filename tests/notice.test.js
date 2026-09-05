@@ -145,20 +145,26 @@ check('data-bs-dismiss reaches .mj-notice as well as .alert',
 
 group('one vocabulary for the actions, wherever they are written');
 
-// A notice points at the page that fixes what it reports, so its action is a
-// plain link ending in an arrow. A filled .btn is for the press that acts on
-// the camera where it stands — today exactly one href, restart.cgi, which
-// reboots on GET.
+// A notice is read the way a system dialog is, so the thing to press is shaped
+// like one: every action is a button, and the colour says what pressing costs.
+// btn-primary goes to the page that fixes the finding, btn-secondary is a
+// second diagnostic destination beside it, and btn-danger is the press that
+// acts on the camera rather than going anywhere — today one href, restart.cgi,
+// which reboots on GET.
+//
+// btn-danger is the load-bearing one. main.js hangs its confirm() off
+// .btn-danger and .btn-warning, so wearing that class is a promise that
+// pressing does something worth asking about; the recordings banner wore it
+// over a plain navigation and came within one initAll() timing accident of
+// asking "Are you sure?" before letting somebody read a page.
 //
 // The rule is worth a test rather than a paragraph because it is written in
-// four places at once: two haserl banners, three blocks of Dashboard markup
-// and two browser-built notices. It had already drifted — the firmware-behind
-// banner and the recordings banner both drew navigation as a filled button, so
-// the Dashboard offered "go to a page" in two shapes at the same time (#347) —
-// and nothing anywhere would have said so. Every way this breaks is a banner
-// that still renders, still links to the right place, and still looks like it
-// came from a different program than the banner above it.
-const ACTS_ON_GET = new Set(['restart.cgi']);
+// three languages at once — a haserl argument, hand-written .mj-notice-acts
+// markup, and an `acts:` literal in JS — and nothing compared them, so it
+// drifted: two banners on one Dashboard offered the same thing in two shapes
+// (#347). Every way this breaks renders perfectly. Right link, right
+// destination, wrong shape.
+const ACTS_ON_CAMERA = new Set(['restart.cgi']);
 
 // Every action in the tree, named. Named rather than counted, because the
 // failure this scan exists to catch is an action written in a spelling
@@ -170,18 +176,18 @@ const ACTS_ON_GET = new Set(['restart.cgi']);
 // The cost is that adding a notice action edits this list, and that is the
 // point: it is the review the vocabulary did not have.
 const EXPECTED = [
-	'a/recordings.js sdcard.cgi "Open the SD card page &rarr;"',
-	'a/update-check.js update.cgi "Firmware update &rarr;"',
-	'cgi-bin/camera.cgi logs.cgi "Open the log &rarr;"',
+	'a/recordings.js sdcard.cgi "Open the SD card page"',
+	'a/update-check.js update.cgi "Firmware update"',
+	'cgi-bin/camera.cgi logs.cgi "Open the log"',
 	'cgi-bin/camera.cgi restart.cgi "Restart camera"',
-	'cgi-bin/dashboard.cgi camera.cgi "Open Day / Night &rarr;"',
+	'cgi-bin/dashboard.cgi camera.cgi "Open Day / Night"',
 	// The two on the no-video banner are empty here and filled by dashboard.js.
 	'cgi-bin/dashboard.cgi camera.cgi ""',
 	'cgi-bin/dashboard.cgi logs.cgi ""',
-	'cgi-bin/dashboard.cgi live.cgi "Open Live &rarr;"',
-	'cgi-bin/p/header.cgi config.cgi "Configuration file &rarr;"',
-	'cgi-bin/p/header.cgi network.cgi "Network settings &rarr;"',
-	'cgi-bin/p/header.cgi network.cgi "Set the MAC address &rarr;"',
+	'cgi-bin/dashboard.cgi live.cgi "Open Live"',
+	'cgi-bin/p/header.cgi config.cgi "Configuration file"',
+	'cgi-bin/p/header.cgi network.cgi "Network settings"',
+	'cgi-bin/p/header.cgi network.cgi "Set the MAC address"',
 	'cgi-bin/p/header.cgi restart.cgi "Restart camera"',
 ];
 
@@ -234,10 +240,11 @@ function actionGroups(file, src) {
 	// site this cannot read is a call site the rule stops covering.
 	const key = /\bacts:\s*/g;
 	while ((m = key.exec(src))) {
-		// Not the one in main.js's own usage note: a comment emits nothing, and
-		// it spells its arrow as an escape, which is not what a page renders.
+		// Not the ones in the two emitters' own usage notes: a comment emits
+		// nothing. Three prefixes because the files scanned are written in two
+		// languages -- // and * for JS, # for the haserl shell.
 		const bol = src.lastIndexOf('\n', m.index) + 1;
-		if (/^\s*(\/\/|\*)/.test(src.slice(bol, m.index))) continue;
+		if (/^\s*(\/\/|\*|#)/.test(src.slice(bol, m.index))) continue;
 		const lit = /^'((?:[^'\\]|\\.)*)'/.exec(src.slice(m.index + m[0].length));
 		check('the acts: in ' + file + ' is a literal this test can read',
 			!!lit, src.slice(m.index, m.index + 80));
@@ -266,24 +273,27 @@ groups.forEach((g) => {
 	let a;
 	while ((a = re.exec(g.html))) {
 		const attrs = a[1], text = a[2].trim();
-		const cls = (/\bclass="([^"]*)"/.exec(attrs) || ['', ''])[1];
+		const cls = (/\bclass="([^"]*)"/.exec(attrs) || ['', ''])[1].split(/\s+/);
 		const href = (/\bhref="([^"]*)"/.exec(attrs) || ['', ''])[1];
 		const page = href.split(/[?#]/)[0].replace(/^.*\//, '');
-		const isBtn = /(^|\s)btn(\s|$)/.test(cls);
 		const where = g.file + ': ' + a[0];
+		const has = (c) => cls.indexOf(c) >= 0;
 		found.push(g.file + ' ' + page + ' "' + text + '"');
 
-		check(page + ' in ' + g.file + ' is drawn as what pressing it does',
-			isBtn === ACTS_ON_GET.has(page),
-			isBtn ? where + '\n    a .btn that only navigates'
-				: where + '\n    an action that acts on GET, drawn as a link');
+		check(page + ' in ' + g.file + ' is a button', has('btn'),
+			where + '\n    a bare link among banners of buttons');
 
-		// The two on the Dashboard's no-video banner are empty here and filled
-		// by dashboard.js, so their arrow is checked where it is written.
-		if (text) {
-			check('"' + text + '" ends the way its shape says it should',
-				/(&rarr;|→)$/.test(text) === !isBtn, where);
-		}
+		// The confirm() class, spent only where pressing really does something.
+		check(page + ' in ' + g.file + ' asks before it acts, or does not claim to',
+			(has('btn-danger') || has('btn-warning')) === ACTS_ON_CAMERA.has(page),
+			ACTS_ON_CAMERA.has(page)
+				? where + '\n    acts on the camera without the class that asks first'
+				: where + '\n    navigation wearing the class main.js hangs confirm() off');
+
+		// An arrow said what the button shape already says. Dropped at the
+		// reporter's request, and pinned so it cannot creep back one banner at
+		// a time.
+		check('"' + text + '" carries no arrow', !/(&rarr;|→)$/.test(text), where);
 	}
 });
 
@@ -296,11 +306,11 @@ check('and the scan reads nothing this list has not been told about',
 	extra.length === 0,
 	'add it to EXPECTED once its shape is right:\n    ' + extra.join('\n    '));
 
-// dashboard.js writes two of those labels at runtime, and has to add the same
-// arrow the static ones are typed with.
+// dashboard.js writes two of those labels at runtime, into anchors the markup
+// has already given the right classes. It must not append an arrow to either.
 const dash = fs.readFileSync(A('dashboard.js'), 'utf8');
-check('the runtime-filled actions carry the arrow too',
-	(dash.match(/\.label \+ ' →'/g) || []).length === 2,
+check('the runtime-filled labels carry no arrow either',
+	!/\.label \+ ' →'/.test(dash),
 	'dashboard.js fills #st-alert-novideo-a and -h');
 
 done();
