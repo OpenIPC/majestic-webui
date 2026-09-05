@@ -3425,18 +3425,22 @@
 	// countdown printed only on arrival lurches by whatever the two cadences
 	// beat out — five seconds at a time, unevenly, on the board in #325.
 	let monSample = null;
-	let monAt = 0;
 	let monTick = null;
+	// When to project and by how much is decided in ircut-check.js, where it is
+	// tested against a fake clock; this only turns the handle.
+	const monClock = IRCUT.projector ? IRCUT.projector() : null;
 	function retellMonitor() {
 		const line = document.getElementById('mj-ircut-mon-line');
-		if (!line || !monSample) {
-			// The section is gone; so is the reason to keep a timer for it.
+		const age = monClock && monClock.age(performance.now() / 1000);
+		if (!line || !monSample || age == null) {
+			// The section is gone, or the camera has stopped answering and
+			// there is nothing honest left to count. Freeze on the last thing
+			// it actually said.
 			clearInterval(monTick);
 			monTick = null;
 			return;
 		}
-		const view = IRCUT.monitorView(nightCfg(), monSample,
-			(performance.now() - monAt) / 1000);
+		const view = IRCUT.monitorView(nightCfg(), monSample, age);
 		// The sentence only. Re-dealing the chart every second would push a
 		// duplicate sample into it and re-render the whole plot for nothing.
 		if (view) line.textContent = view.line;
@@ -3446,8 +3450,9 @@
 		if (!box) return;
 		const MC = window.MjCharts;
 		monSample = (s.m && s.m.v) || null;
-		monAt = performance.now();
-		const view = IRCUT.monitorView(nightCfg(), monSample, 0);
+		const age = monClock
+			? monClock.push(monSample, performance.now() / 1000) : 0;
+		const view = IRCUT.monitorView(nightCfg(), monSample, age);
 		if (!view) {
 			box.hidden = true;
 			return;
@@ -3468,7 +3473,7 @@
 			return;
 		}
 		host.hidden = false;
-		const key = view.mode + '|' + JSON.stringify(view.bands);
+		const key = view.mode + '|' + JSON.stringify(view.marks);
 		if (!monChart || monChart.host !== host || monKey !== key) {
 			// The superseded instance is unregistered, not merely abandoned:
 			// every remount of this section makes a new host, and the chart
@@ -3485,7 +3490,7 @@
 				h: 110, lo: 0, hi: null,
 				colors: [tok('--st-c1', '#4c60d8')],
 				grid: tok('--st-grid', '#e9ebf2'),
-				bands: view.bands,
+				marks: view.marks,
 				fmt: view.mode === 'auto'
 					? (x) => (x >= 10 ? String(Math.round(x)) : x.toFixed(1)) + 'x'
 					: undefined,

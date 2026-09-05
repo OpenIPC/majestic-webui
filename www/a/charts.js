@@ -176,6 +176,14 @@ window.MjCharts = (function () {
 		// spelt null rather than some large number so the auto scale below can
 		// tell a real edge from a stand-in for infinity.
 		const bands = cfg.bands || [];
+		// A THRESHOLD is a level, not a region — so it is drawn as a rule at
+		// its own value with its name beside it, and it keeps that size at
+		// every scale. Shading the region instead ties the marker's size to
+		// the scale, which is how the Day / Night chart's only marker came to
+		// shrink away as the gain rose (#325): the reporter asked for the line,
+		// and the line is right. Bands stay for the dashboard, where a band
+		// really is a region — the Wi-Fi grades are ranges, not edges.
+		const marks = cfg.marks || [];
 		if (hi == null) {
 			let max = 0;
 			pts.forEach(p => p.v.forEach(v => { if (v != null && v > max) max = v; }));
@@ -198,6 +206,9 @@ window.MjCharts = (function () {
 				[b.from, b.to].forEach(e => {
 					if (e != null && isFinite(e) && e > top) top = e;
 				});
+			});
+			marks.forEach(m => {
+				if (m.v != null && isFinite(m.v) && m.v > top) top = m.v;
 			});
 			hi = niceCeil(Math.max(top, 1));
 		}
@@ -237,20 +248,22 @@ window.MjCharts = (function () {
 		// narrower than a line of text gets its name centred ON it instead,
 		// and a name that would land on one already taken is nudged clear.
 		const taken = [];
-		const place = (y1, y2) => {
-			const tall = y2 - y1;
-			let y = tall >= LBL_H ? y1 + 10 : y1 + tall / 2 + 3.5;
+		// Keeps names off each other and inside the plot. Down first, because
+		// a name belongs at the top of what it names, so the one that gives
+		// way is the lower of the pair; up only when down runs out of plot.
+		const place = (y) => {
 			const top = padT + 8, bot = padT + H - 1;
 			const clash = (t) => taken.some(u => Math.abs(u - t) < LBL_H);
-			// Down first — a band's name belongs at its top edge, so the one
-			// that moves is the later, lower band. Up only if down runs out
-			// of plot.
 			while (clash(y) && y + LBL_H <= bot) y += LBL_H;
 			while (clash(y) && y - LBL_H >= top) y -= LBL_H;
 			y = y > bot ? bot : y < top ? top : y;
 			taken.push(y);
 			return y;
 		};
+		// A band's name sits inside it, or centred on it when it is thinner
+		// than a line of text.
+		const placeBand = (y1, y2) =>
+			place(y2 - y1 >= LBL_H ? y1 + 10 : y1 + (y2 - y1) / 2 + 3.5);
 		bands.forEach(b => {
 			const y1 = b.to == null ? padT : Y(b.to);
 			const y2 = b.from == null ? padT + H : Y(b.from);
@@ -267,6 +280,21 @@ window.MjCharts = (function () {
 			s += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (padL + plotW) +
 				'" y2="' + y.toFixed(1) + '" stroke="' + grid + '" stroke-width="1"/>';
 			s += '<text x="' + (padL - 5) + '" y="' + (y + 3.5).toFixed(1) + '" text-anchor="end">' + ticks[i] + '</text>';
+		});
+		marks.forEach(m => {
+			if (m.v == null || !isFinite(m.v) || m.v < lo || m.v > hi) return;
+			const y = Y(m.v);
+			s += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' +
+				(padL + plotW) + '" y2="' + y.toFixed(1) + '" stroke="' +
+				(m.color || grid) + '" stroke-width="1" stroke-dasharray="3 3"/>';
+			if (m.label) {
+				// Above the rule where there is room for it, below where the
+				// rule is at the very top of the plot.
+				const above = y - 4 >= padT + 8;
+				s += '<text x="' + (padL + plotW - 4) + '" y="' +
+					place(above ? y - 4 : y + 10).toFixed(1) +
+					'" text-anchor="end" opacity="0.9">' + m.label + '</text>';
+			}
 		});
 		if (cfg.ref && cfg.ref.v > lo && cfg.ref.v < hi) {
 			const y = Y(cfg.ref.v);

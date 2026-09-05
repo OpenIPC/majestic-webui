@@ -706,6 +706,46 @@
 	// had not shipped for their SoC. A sentence is not a graph, but it is an
 	// answer, and it is beside the switch.
 	//
+	// The local clock behind the countdown, kept here rather than in the page
+	// so that it can be driven by a fake one. Two moments, and conflating them
+	// is what makes this subtle:
+	//
+	//   `seen`   the last time the camera ANSWERED. Past `staleS` of silence
+	//            the projection stops: a failed poll leaves the last sample
+	//            standing, and ageing that one walks the countdown to zero and
+	//            announces a switch on behalf of a camera that has gone away.
+	//   `anchor` the last time its answer CHANGED. The streak gauge is coarse
+	//            — a second on one board, five on another — and the heartbeat
+	//            polls every two, so most polls during a pending switch repeat
+	//            the previous value. Re-anchoring on those throws away the
+	//            second just counted and puts the number back UP: 50, 49, 50,
+	//            49. The anchor therefore moves only on a reading that differs,
+	//            which covers forward progress and a restarted streak alike.
+	function projector(staleS) {
+		const limit = typeof staleS === 'number' ? staleS : 6;
+		let last = null, anchor = 0, seen = 0;
+		const differs = (a, b) =>
+			a.night_auto_streak_seconds !== b.night_auto_streak_seconds ||
+			a.night_auto_pending !== b.night_auto_pending ||
+			a.night_auto_dwell_seconds !== b.night_auto_dwell_seconds;
+		return {
+			// A successful poll. Returns the age to read this sample forward by.
+			push: function (v, nowS) {
+				if (!v) { last = null; return 0; }
+				if (!last || differs(last, v)) anchor = nowS;
+				last = v;
+				seen = nowS;
+				return nowS - anchor;
+			},
+			// A tick between polls; null when there is nothing honest left to
+			// project from.
+			age: function (nowS) {
+				if (!last || nowS - seen > limit) return null;
+				return nowS - anchor;
+			},
+		};
+	}
+
 	// null now means only that the camera has not answered yet.
 	//
 	// `ageS` is how long ago `v` was sampled. The camera advances its streak
@@ -735,7 +775,7 @@
 
 		// A state with no plot: one sentence, no bands, no value.
 		const say = (mode, line) => ({
-			mode: mode, chart: false, value: null, bands: [],
+			mode: mode, chart: false, value: null, marks: [],
 			line: line, unit: '',
 		});
 
@@ -752,19 +792,15 @@
 		if (src === 4) {
 			const dayG = pin(nm.autoDayGain) !== null ? pin(nm.autoDayGain) : 2;
 			const nightG = pin(nm.autoNightGain);
-			const bands = [{
-				from: 0, to: dayG,
-				color: 'rgba(47,182,115,.10)', label: 'day',
-			}];
+			// Each threshold is a rule at its own level rather than a shaded
+			// region: the level is the whole fact, and a region's size follows
+			// the scale, which is what made the day marker shrink to nothing
+			// as the gain rose. Only a threshold that EXISTS gets a line — an
+			// automatic camera with no night gain set has no night level to
+			// draw, and the sentence says so instead.
+			const marks = [{ v: dayG, color: '#2fb673', label: 'day' }];
 			if (nightG !== null) {
-				// Open at the top: "everything above the night threshold"
-				// has no ceiling, and saying so with null rather than a large
-				// number is what keeps the chart's auto scale from trying to
-				// fit one on the plot.
-				bands.push({
-					from: nightG, to: null,
-					color: 'rgba(255,193,7,.10)', label: 'night',
-				});
+				marks.push({ v: nightG, color: '#e0a020', label: 'night' });
 			}
 			const gm = v.night_auto_gain_milli;
 			const pend = v.night_auto_pending;
@@ -808,7 +844,7 @@
 			return {
 				mode: 'auto', chart: true,
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
-				bands: bands, line: line + lampNote,
+				marks: marks, line: line + lampNote,
 				unit: 'x',
 			};
 		}
@@ -827,23 +863,13 @@
 			(src === null && !has(nm.lightSensorPin) &&
 				has(nm.minThreshold) && has(nm.maxThreshold))) {
 			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
-			const bands = [];
-			if (lo !== null) {
-				bands.push({
-					from: 0, to: lo,
-					color: 'rgba(47,182,115,.10)', label: 'day',
-				});
-			}
-			if (hi !== null) {
-				bands.push({
-					from: hi, to: null,
-					color: 'rgba(255,193,7,.10)', label: 'night',
-				});
-			}
+			const marks = [];
+			if (lo !== null) marks.push({ v: lo, color: '#2fb673', label: 'day' });
+			if (hi !== null) marks.push({ v: hi, color: '#e0a020', label: 'night' });
 			return {
 				mode: 'thresholds', chart: true,
 				value: ('isp_again' in v) ? v.isp_again : null,
-				bands: bands,
+				marks: marks,
 				line: modeWord +
 					'Comparing raw sensor gain against the thresholds ' +
 					'(vendor-specific units).' + lampNote,
@@ -877,6 +903,7 @@
 
 	const api = {
 		diagnose: diagnose, tracker: tracker, monitorView: monitorView,
+		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
 		verdict: verdict, probe: probe, snapshot: snapshot, wired: wired,
