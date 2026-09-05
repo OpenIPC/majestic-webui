@@ -5105,8 +5105,11 @@
 	function pendingCost() {
 		const dirty = state.fields.filter(f => f.getValue() !== state.initial[f.dot]);
 		if (!dirty.length) return '';
+		// Save itself never restarts anything: a pipeline-class change is saved
+		// and then owed a reload, which is what Apply does and what the streams
+		// notice. The sentence says so in that order.
 		return needsPipelineReload(dirty)
-			? 'Save restarts the video streams.'
+			? 'After Save, a reload restarts the video streams.'
 			: 'Save keeps the streams running.';
 	}
 
