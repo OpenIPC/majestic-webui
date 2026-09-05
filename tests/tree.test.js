@@ -13,8 +13,9 @@
 // It also cannot be reproduced on demand: it needs a camera whose daemon has
 // just learnt to flag a key the page never expected, which is the one thing a
 // fixture can hold still. tests/fixtures/schema-hisi.json is the schema a
-// HiSilicon camera emitted with that bitrate flag in it; the other shapes
-// below are edits of it, each one a schema majestic could plausibly emit next.
+// HiSilicon camera emitted with that bitrate flag in it (one hint reworded so
+// the fixture names no build option); the other shapes below are edits of it,
+// each one a schema majestic could plausibly emit next.
 'use strict';
 
 const fs = require('fs');

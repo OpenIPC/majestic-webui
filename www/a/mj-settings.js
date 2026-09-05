@@ -1143,14 +1143,18 @@
 	// Save, it was the one control that broke the rule. The rest of the page
 	// keeps the server-side reset, where every row behaves that way.
 	//
-	// Integers only. The button sits in the tone strip and its title says four;
+	// The four tone knobs only — the ones the Scene presets name, which is the
+	// vocabulary the strip and the button share. The button's title says four;
 	// mirror and flip are wired live too, and resetting them from here turned
 	// the picture over on a press that promised to touch brightness — and would
 	// now leave the quarter turn beside them where it was, half an orientation
-	// reset. Orientation is a mounting decision, not a tone, and stays put.
+	// reset. Orientation is a mounting decision, not a tone, and stays put; so
+	// does any integer a future schema lifts beside these, until a preset
+	// learns it.
+	const TONE_KEYS = new Set(Object.keys(LIVE_PRESETS[0].v));
 	function resetLiveAll() {
 		for (const f of state.fields) {
-			if (!isLive(f) || f.type !== 'integer') continue;
+			if (!isLive(f) || !TONE_KEYS.has(f.key)) continue;
 			if (f.schema.default === undefined) continue;
 			setLive(f, f.schema.default);
 		}

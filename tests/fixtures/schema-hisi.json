@@ -1456,7 +1456,7 @@
           "type": "boolean",
           "title": "Record both cameras (cam0 + cam1)",
           "default": false,
-          "hint": "Requires an ENABLE_DUALCAM build. When true, records cam0 (stream0) and cam1 (stream3) simultaneously into two separate MP4 files."
+          "hint": "Requires a firmware built with dual-camera recording. When true, records cam0 (stream0) and cam1 (stream3) simultaneously into two separate MP4 files."
         }
       }
     },
