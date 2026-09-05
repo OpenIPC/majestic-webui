@@ -1212,8 +1212,10 @@
 	// which way up the camera is mounted is one decision, and the picture it is
 	// judged against is this one. So the field mounts here, hidden, pin-map
 	// style: Save, dirty tracking, the reset arrow and refresh() work on it
-	// unchanged, the buttons only stage a value, and what a press cannot show
-	// on the picture the group says in words.
+	// unchanged, and the buttons only stage a value. The group's note says "on
+	// Save" and nothing more: the save bar that appears on the press says the
+	// rest, and a sentence under the row about why the picture does not move
+	// would be a second explanation of the same fact.
 	function renderTurns(col, sec) {
 		const dot = sec + '.rotate';
 		if (EXCLUDE.has(dot)) return null;
@@ -1262,10 +1264,6 @@
 		state.liveSync.push(sync);
 		sync();
 
-		const hint = el('p', 'mj-live-hint');
-		hint.textContent = 'A quarter turn resizes the stream, so the picture cannot ' +
-			'preview it: it takes effect on Save, with the reload Save asks for.';
-		body.appendChild(hint);
 		return field;
 	}
 
