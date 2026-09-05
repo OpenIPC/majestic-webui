@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day / Night settings — proposal versions</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap">
+<style>
+body { margin: 0; background: #14161c; color: #e6e8ee; padding: 48px 24px;
+  font-family: 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; line-height: 1.55; }
+main { max-width: 680px; margin: 0 auto; }
+h1 { font-size: 26px; font-weight: 600; margin: 0 0 6px; }
+p.sub { margin: 0 0 32px; color: rgba(230,232,238,.6); font-size: 15px; }
+a { color: rgb(122,140,245); }
+ul { list-style: none; padding: 0; margin: 0; }
+li { border: 1px solid #2c313d; border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; }
+li h2 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+li p { margin: 0; font-size: 14px; color: rgba(230,232,238,.7); }
+li p + p { margin-top: 8px; }
+li ul { margin-top: 10px; }
+li li { border: 0; padding: 0 0 0 16px; margin: 0 0 5px; position: relative;
+  font-size: 14px; color: rgba(230,232,238,.7); }
+li li::before { content: "·"; position: absolute; left: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Day / Night — a page with 18 controls on it</h1>
+  <p class="sub">Mockups for
+    <a href="https://github.com/OpenIPC/majestic-webui/issues/325">OpenIPC/majestic-webui#325</a>.
+    Nothing here is built yet — the point is to agree the shape before any of it reaches
+    the source. Each round of feedback gets its own version so they stay comparable.</p>
+  <ul>
+    <li>
+      <h2><a href="v1/">v1 — the section with almost nothing on it</a></h2>
+      <p>The reporter of #325 asked for two things: fewer words, and only the settings that
+        are actually in use. Following that to its end takes most of the page away.</p>
+      <ul>
+        <li><strong>Three controls on the page</strong> instead of eighteen, plus the switch and its readout.</li>
+        <li><strong>Three folds</strong> — tuning, camera light, older ways of switching — each stating its own condition rather than repeating a warning under every field.</li>
+        <li><strong>The pin map is untouched.</strong> It is the part of this page that works.</li>
+        <li><strong>A raw threshold appears only on a camera that already has one</strong>, shown with what it means on that sensor, and with a button out.</li>
+        <li><strong>English and Russian, side by side</strong> — the section is fully localised so the Russian-speaking community can review the wording, not just the layout.</li>
+      </ul>
+    </li>
+  </ul>
+</main>
+</body>
+</html>
