@@ -61,8 +61,14 @@
 	// says so, because a preset presented as an answer is worse than no preset:
 	// every install has its own light. Tone only; a preset must never quietly
 	// change which way up the picture is.
+	//
+	// No Neutral. It was the four schema defaults under another name, and the
+	// strip's Stock control already puts those back — two buttons for one
+	// effect, side by side (#355). The status line under the chips still says
+	// "Stock" when every knob is at its default, judged against the schema
+	// rather than against a row of 50s, so the state has a name without a
+	// second button to reach it.
 	const LIVE_PRESETS = [
-		{ id: 'neutral',  label: 'Neutral',   v: { luminance: 50, contrast: 50, saturation: 50, hue: 50 } },
 		{ id: 'indoor',   label: 'Indoor',    v: { luminance: 52, contrast: 46, saturation: 52, hue: 50 } },
 		{ id: 'outdoor',  label: 'Outdoor',   v: { luminance: 46, contrast: 58, saturation: 54, hue: 50 } },
 		{ id: 'lowlight', label: 'Low light', v: { luminance: 60, contrast: 42, saturation: 38, hue: 50 } },
@@ -1308,17 +1314,16 @@
 				b.classList.toggle('mj-scene-chip-on', on);
 				b.setAttribute('aria-pressed', on ? 'true' : 'false');
 			});
-			// "Stock" and "Neutral" are the same four numbers, but they are not
-			// the same statement: one says the camera is untouched, the other
-			// that a preset was chosen. The first is what somebody inheriting
-			// this camera needs to hear.
+			// "Stock" is what somebody inheriting this camera needs to hear, and
+			// it outranks a preset match: a preset that happens to equal the
+			// defaults is still the untouched camera.
 			const off = tone.filter(f => f.schema.default !== undefined &&
 				Number(f.getValue()) !== Number(f.schema.default)).length;
 			let head, tail;
 			// "Stock" is a claim about the SCHEMA's defaults, so it is answered
-			// by comparing against them — not by matching the Neutral row of a
-			// table that hard-codes 50. On a build whose defaults are not 50,
-			// matching Neutral and being at the factory setting are different
+			// by comparing against them — never by matching a row of a table
+			// that hard-codes numbers. On a build whose defaults are not 50,
+			// matching a preset and being at the factory setting are different
 			// facts, and saying the second when only the first is true is the
 			// one lie this line must never tell.
 			if (!off) {
