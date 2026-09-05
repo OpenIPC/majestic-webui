@@ -4212,10 +4212,18 @@
 		// Where it does happen to share the page, an unsaved edit to it has to
 		// repaint the warning, exactly as it moves a visibleWhen row.
 		for (const u of state.reqUpdaters || []) {
-			const ctrl = byDot[u.req.field];
-			if (!ctrl || ctrl.dot === u.dot) continue;
-			ctrl.control.addEventListener('change', u.paint);
-			ctrl.control.addEventListener('input', u.paint);
+			// Every field the condition consults, since `any` names more than
+			// one. Missing the second of them would leave the warning correct
+			// on mount and stale under exactly the edit that clears it.
+			const fields = Array.isArray(u.req.any)
+				? u.req.any.map(a => a && a.field).filter(Boolean)
+				: [u.req.field];
+			for (const dot of fields) {
+				const ctrl = byDot[dot];
+				if (!ctrl || ctrl.dot === u.dot) continue;
+				ctrl.control.addEventListener('change', u.paint);
+				ctrl.control.addEventListener('input', u.paint);
+			}
 		}
 
 		// Flipping a controller changes which rows exist, so anything that counts
@@ -4850,7 +4858,12 @@
 		// disabling it: the setting is a legitimate thing to want, it is
 		// remembered, and it starts working the moment its requirement is met.
 		// Hiding it would only move the surprise.
-		if (!live && sub['x-requires'] && sub['x-requires'].field) {
+		// `.field` or `.any`: a requirement carries one controlling field, or a
+		// list of alternatives for a rule that only bites when two settings
+		// coincide. Both shapes are decided by mj-requires.js; this only has to
+		// recognise that there is a requirement to paint.
+		if (!live && sub['x-requires']
+			&& (sub['x-requires'].field || Array.isArray(sub['x-requires'].any))) {
 			const req = sub['x-requires'];
 			const warn = el('div', 'hint mj-requires');
 			const paint = () => {
