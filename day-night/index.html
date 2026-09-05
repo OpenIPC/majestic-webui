@@ -32,6 +32,17 @@ li li::before { content: "·"; position: absolute; left: 4px; }
     the source. Each round of feedback gets its own version so they stay comparable.</p>
   <ul>
     <li>
+      <h2><a href="v5/">v5 — the switch actually swaps now</a></h2>
+      <p>v4 claimed to swap and did not: the fields were marked hidden but still rendered,
+        because an author <code>display:grid</code> rule silently beats the browser's own
+        <code>[hidden]</code>. Verified this time by what the page renders, on the deployed
+        page, rather than by reading back the attribute that had just been set.</p>
+      <ul>
+        <li><strong>Off</strong>: 14 rows, the automatic settings. <strong>On</strong>: 13 rows, the legacy ones. Neither set appears in the other.</li>
+        <li><strong>The Legacy switch moved</strong> out of the section heading and into the group as an ordinary labelled row, like every other control.</li>
+      </ul>
+    </li>
+    <li>
       <h2><a href="v4/">v4 — Legacy swaps the set, it does not add one</a></h2>
       <p>In v3 the switch revealed the old settings while leaving the new ones on screen. It now
         shows one set or the other, which is also what the camera does — it decides by one
