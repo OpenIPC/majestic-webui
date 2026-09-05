@@ -136,3 +136,34 @@ pr_compliances:
       The diff adds a page CGI with no p/pages.cgi row, sets `page_title=` for a name
       the registry could have supplied, or renames a page file without moving the
       matching `#page-<basename>` rule in www/a/bootstrap.override.css.
+
+  - title: "A comment cites the fault, never the review that produced the code"
+    compliance_label: true
+    objective: >
+      Git already holds every fact about how a change came to be: the branch, the
+      review, the bot or agent that asked for what. A comment that repeats it is not
+      explaining the code to the next reader — it is answering a reviewer, permanently,
+      in a file where the conversation it answers cannot be read. It is also the
+      fastest-decaying line in the tree: a review thread is unreachable from a
+      checkout, a review tool's finding numbers are not stable, and a pull request
+      number says nothing to anyone once the branch is merged and deleted.
+    success_criteria: >
+      A comment says what the code does and why it has to be that way, in terms a
+      reader with only the checkout in front of them can check. Where a citation earns
+      its place it names an ISSUE reporting an observed fault — this tree's tracker
+      (`(#273)`) or the public OpenIPC/majestic one — which stays readable and says
+      something the code cannot say about itself.
+    failure_criteria: >
+      The diff adds a comment, or documentation prose in this tree, that names a code
+      review tool, bot or AI agent (Qodo, Copilot, Claude, Cursor, "the review agent",
+      "the reviewer"); cites a review finding, suggestion or thread; cites the number
+      of the pull request the diff is itself part of, or any pull request number in
+      place of the issue; or is addressed to a reviewer rather than to a reader — "as
+      requested", "addressed in review", "per the review comment". A trailing
+      "(Qodo #N)" or "(PR #N)" tag on an otherwise sound sentence fails this on its
+      own: the sentence stays, the tag goes.
+
+      Scope: the three files that STATE this rule — this checklist, .pr_agent.toml and
+      the convention in CLAUDE.md — are exempt, because naming the prohibited forms is
+      what makes the rule checkable at all. Nothing else in the tree has any reason to
+      name a review tool.

@@ -981,8 +981,8 @@
 		}
 		// Which slices are worth drawing is re-asked every sample, not settled
 		// on the first: one that starts reporting later would otherwise draw a
-		// line the legend does not name (#320, a gauge that arrives late still
-		// gets its row). It is one-way, because the chart keeps what a slice
+		// line the legend does not name — a gauge that arrives late still gets
+		// its row. It is one-way, because the chart keeps what a slice
 		// has already drawn and a key that named it must not go with the gap.
 		//
 		// The bar is a slice that has ever been NON-ZERO, not one that has

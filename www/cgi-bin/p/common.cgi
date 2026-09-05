@@ -276,7 +276,7 @@ get_config() {
 	echo ${1}/etc/majestic.yaml
 }
 
-# Make Majestic re-read its configuration file (issue #308).
+# Make Majestic re-read its configuration file.
 #
 # Majestic parses the file once and then holds the whole configuration in
 # memory, and a save writes that whole tree back. So a file replaced

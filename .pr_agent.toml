@@ -58,6 +58,16 @@ Prioritise, in order:
 5. Front-end weight and dependencies. No frameworks, no bundlers, no npm runtime
    dependencies, no CDN assets: the camera serves every byte off its own flash.
 
+Comments in this tree explain the code, not the review that produced it. Git holds the
+branch, the review and who asked for what; a checkout holds none of it, so a "(Qodo #N)"
+or "(PR #N)" tag points a reader at something they cannot open, and stops meaning
+anything at all once the branch is deleted. Report one the diff adds - the sentence is
+usually sound and only its citation is wrong, so the fix is to drop the tag - and never
+ask for one yourself. A citation is an issue reporting an observed fault; a pull request
+number is not. The rule does not apply to the files that state it - this guidance, the
+compliance checklist and the convention in CLAUDE.md - which have to name the forms they
+prohibit in order to be checkable.
+
 Do not report: the absence of unit tests for DOM or CGI wiring, which the suite
 deliberately does not cover; jQuery-era style preferences; or the use of `<%in %>`
 haserl includes, which is this project's normal idiom.

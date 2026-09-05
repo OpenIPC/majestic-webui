@@ -166,7 +166,7 @@
 		const pictureOpen = !!(pic && pic.look === 'open' && pic.streak >= PIC_STREAK &&
 			sample && sample.night === 0);
 
-		// Parked (#219): the operator switched the filter off while keeping
+		// Parked: the operator switched the filter off while keeping
 		// its wiring. That is a decision, not a defect — every accusation
 		// about a filter that does not move stands down, and one observation
 		// says what is going on and where the switch is. Explicit === false:
