@@ -64,7 +64,14 @@ function run(opts) {
 			getItem() { if (opts.storageThrows) throw new Error('denied'); return stored; },
 			setItem(k, v) { if (opts.storageThrows) throw new Error('denied'); stored = v; },
 		},
-		mjNotice(sev, html) { painted = { sev, html }; return '<div>' + html + '</div>'; },
+		// Mirrors what main.js composes, so a test can see the body and the
+		// actions and not just the sentence.
+		mjNotice(sev, html, opts) {
+			const o = opts || {};
+			const full = html + (o.body || '') + (o.acts || '');
+			painted = { sev, html: full, sentence: html, body: o.body || '' };
+			return '<div>' + full + '</div>';
+		},
 		// Two endpoints now: the public feed, and the camera's own answer about
 		// whether an image it can install exists. Tests that do not care about
 		// the second get "yes, there is one", so they keep testing the first.
@@ -219,6 +226,61 @@ const VER = (rev, date) => 'Lite HiSilicon (hi3516ev300), HEAD+' + rev + ', ' + 
 			version: 'Lite HiSilicon (hi3516ev300), HEAD+deadbeef1',
 			feed: feedOf([entry('aaaaaaaaa', { fix: 9 })]),
 		})) === null);
+
+	group('the sentences, which were fetched and thrown away');
+
+	const withNotes = (notes) => ({
+		version: VER(MINE, iso(30)),
+		feed: feedOf([
+			{ sha: 'aaaaaaaaa', date: iso(1),
+			  counts: { feature: 1, fix: 2, security: 1, other: 5 }, notes: notes },
+			entry(MINE, {}),
+		]),
+	});
+
+	let n = await run(withNotes([
+		{ cat: 'fix', vendor: null, text: 'Recording no longer stops on its own.' },
+		{ cat: 'security', vendor: null, text: 'Who may call the camera is now checked.' },
+		{ cat: 'feature', vendor: null, text: 'Streaming can come from both channels.' },
+	]));
+	check('the changelog is rendered, not discarded',
+		n && /What\u2019s new/.test(n.html) && /Recording no longer stops/.test(n.html),
+		n && n.html);
+	check('security is listed first and marked',
+		n && n.html.indexOf('Who may call') < n.html.indexOf('Streaming can come') &&
+		     /<b>Security<\/b>/.test(n.html), n && n.html);
+	check('and it is collapsed, not shouting',
+		n && /<details class="mj-whatsnew"><summary>/.test(n.html) && !/<details open/.test(n.html),
+		n && n.html);
+	check('the counts stay the headline',
+		n && /1 new feature, 2 fixes and 1 security fix/.test(n.html), n && n.html);
+
+	// The disclosure gate withholds sentences it will not publish, so the list
+	// is routinely shorter than the counts. Nothing should draw attention to it.
+	n = await run(withNotes([{ cat: 'fix', vendor: null, text: 'One described change.' }]));
+	check('a list shorter than the counts says nothing about the gap',
+		n && !/not described|withheld|some changes/i.test(n.html), n && n.html);
+
+	n = await run(withNotes([]));
+	check('no sentences at all means no expander, just the counts',
+		n && !/mj-whatsnew/.test(n.html) && /2 fixes/.test(n.html), n && n.html);
+
+	const many = [];
+	for (let i = 0; i < 12; i++) many.push({ cat: 'fix', vendor: null, text: 'Fix number ' + i + '.' });
+	n = await run(withNotes(many));
+	check('a long list is capped and says how many are left',
+		n && /and 4 more/.test(n.html) && !/Fix number 8\./.test(n.html), n && n.html);
+
+	// These sentences are model-written and published with nobody reading them,
+	// so they get the same treatment as any other remote string.
+	n = await run(withNotes([
+		{ cat: 'fix', vendor: null, text: '<img src=x onerror=alert(1)> & "quoted"' },
+	]));
+	check('a sentence carrying markup is escaped, not executed',
+		n && n.html.indexOf('<img src=x') === -1 && /&lt;img/.test(n.html), n && n.html);
+	check('a non-string sentence is ignored rather than printed',
+		(await run(withNotes([{ cat: 'fix', vendor: null, text: { evil: 1 } }])))
+			.html.indexOf('mj-whatsnew') === -1);
 
 	group('nothing to install means nothing to say');
 

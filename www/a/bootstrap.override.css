@@ -3377,6 +3377,26 @@ mark {
 	margin-top: 0.7rem;
 }
 
+/* The changelog inside a notice. A <details> rather than a button and a class,
+   because the browser already knows how to open and close one and remembers
+   nothing between page loads — which is what we want: this reopens closed on
+   every page, so it never becomes a thing to scroll past.
+   The marker is the summary's own, left alone; restyling it is how disclosure
+   widgets stop looking clickable. */
+.mj-whatsnew > summary {
+	cursor: pointer;
+	font-weight: 500;
+}
+
+.mj-whatsnew > ul {
+	margin-top: 0.45rem;
+	padding-left: 1.1rem;
+}
+
+.mj-whatsnew > ul > li + li {
+	margin-top: 0.25rem;
+}
+
 /* The sentence is the part that wraps; the actions after it never do. They are
    two or three words each and they are buttons, so "Open Day / Night" broken
    across two lines is a button with a ragged label rather than the thing to
