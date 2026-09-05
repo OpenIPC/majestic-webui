@@ -1,0 +1,1717 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "type": "object",
+  "properties": {
+    "system": {
+      "type": "object",
+      "properties": {
+        "webPort": {
+          "minimum": 1,
+          "maximum": 65535,
+          "type": "integer",
+          "title": "Port for HTTP access",
+          "default": 80
+        },
+        "httpsPort": {
+          "minimum": 1,
+          "maximum": 65535,
+          "type": "integer",
+          "title": "Port for HTTPS access",
+          "default": 443
+        },
+        "httpsCertificate": {
+          "type": "string",
+          "title": "Path to public SSL certificate"
+        },
+        "httpsCertificateKey": {
+          "type": "string",
+          "title": "Path to private SSL key"
+        },
+        "logLevel": {
+          "enum": [
+            "verbose",
+            "debug",
+            "info"
+          ],
+          "type": "string",
+          "title": "Severity of logging",
+          "default": "debug"
+        },
+        "unsafe": {
+          "type": "boolean",
+          "title": "Disable authentication",
+          "default": false,
+          "hint": "Turns off HTTP authentication for every endpoint — anyone who can reach the camera can view and control it. Use only on a trusted network or for local debugging."
+        },
+        "buffer": {
+          "type": "integer",
+          "title": "Maximum buffer size",
+          "default": 1024,
+          "hint": "Per-client send-buffer cap in KiB (RTSP, HTTP, WebSocket, NETIP). Default 1024 = 1 MiB."
+        },
+        "plugins": {
+          "type": "boolean",
+          "title": "Enable plugin support",
+          "default": false
+        },
+        "staticDir": {
+          "type": "string",
+          "title": "Directory served over HTTP",
+          "default": "/var/www"
+        },
+        "telemetry": {
+          "type": "boolean",
+          "title": "Enable anonymous telemetry",
+          "default": true
+        }
+      }
+    },
+    "isp": {
+      "type": "object",
+      "properties": {
+        "antiFlicker": {
+          "enum": [
+            "disabled",
+            "50",
+            "60"
+          ],
+          "type": "string",
+          "title": "Anti-flicker",
+          "default": "disabled",
+          "hint": "Match your mains frequency (50/60 Hz) to remove the rolling banding seen under artificial light."
+        },
+        "drc": {
+          "type": "integer",
+          "title": "Dynamic range compression"
+        },
+        "sensorConfig": {
+          "type": "string",
+          "title": "Sensor configuration file, by path or by sensor name"
+        },
+        "iqProfile": {
+          "type": "string",
+          "title": "Set image quality profile"
+        },
+        "slowShutter": {
+          "enum": [
+            "disabled",
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string",
+          "title": "Slow shutter mode",
+          "default": "medium"
+        },
+        "rawMode": {
+          "enum": [
+            "none",
+            "slow",
+            "fast"
+          ],
+          "type": "string",
+          "title": "Mode for capturing RAW images",
+          "default": "slow"
+        },
+        "dis": {
+          "type": "boolean",
+          "title": "Digital image stabilization",
+          "default": false
+        },
+        "memMode": {
+          "enum": [
+            "normal",
+            "reduction"
+          ],
+          "type": "string",
+          "title": "Reduce memory usage",
+          "default": "reduction"
+        },
+        "lowDelay": {
+          "type": "boolean",
+          "title": "Reduce sensor-to-network delay",
+          "default": false
+        },
+        "yuvCompression": {
+          "enum": [
+            "auto",
+            "none",
+            "seg"
+          ],
+          "type": "string",
+          "title": "VPSS frame buffer compression",
+          "default": "auto",
+          "hint": "seg saves about a third of the main frame buffer; ignored when rotate, mirror or privacy masks are set"
+        },
+        "iris": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "enum": [
+                "none",
+                "DC",
+                "P"
+              ],
+              "type": "string",
+              "title": "Iris type",
+              "default": "none"
+            },
+            "manual": {
+              "type": "boolean",
+              "title": "Manual iris hold mode",
+              "default": false,
+              "visibleWhen": {
+                "field": "type",
+                "equals": "DC"
+              }
+            },
+            "holdValue": {
+              "minimum": 0,
+              "maximum": 1000,
+              "type": "integer",
+              "title": "DC-iris manual PWM hold value (per-mille)",
+              "default": 610,
+              "visibleWhen": {
+                "field": "type",
+                "equals": "DC"
+              }
+            },
+            "kp": {
+              "minimum": 0,
+              "maximum": 100000,
+              "type": "integer",
+              "title": "DC-iris PID proportional gain",
+              "default": 7000,
+              "visibleWhen": {
+                "field": "type",
+                "equals": "DC"
+              }
+            },
+            "ki": {
+              "minimum": 0,
+              "maximum": 1000,
+              "type": "integer",
+              "title": "DC-iris PID integral gain",
+              "default": 100,
+              "visibleWhen": {
+                "field": "type",
+                "equals": "DC"
+              }
+            },
+            "kd": {
+              "minimum": 0,
+              "maximum": 100000,
+              "type": "integer",
+              "title": "DC-iris PID derivative gain",
+              "default": 3000,
+              "visibleWhen": {
+                "field": "type",
+                "equals": "DC"
+              }
+            },
+            "minPwmDuty": {
+              "minimum": 0,
+              "maximum": 1000,
+              "type": "integer",
+              "title": "DC-iris minimum PWM duty (per-mille)",
+              "default": 250,
+              "visibleWhen": {
+                "field": "type",
+                "equals": "DC"
+              }
+            },
+            "maxPwmDuty": {
+              "minimum": 0,
+              "maximum": 1000,
+              "type": "integer",
+              "title": "DC-iris maximum PWM duty (per-mille)",
+              "default": 950,
+              "visibleWhen": {
+                "field": "type",
+                "equals": "DC"
+              }
+            },
+            "openPwmDuty": {
+              "minimum": 0,
+              "maximum": 1000,
+              "type": "integer",
+              "title": "DC-iris open PWM duty (per-mille)",
+              "default": 800,
+              "visibleWhen": {
+                "field": "type",
+                "equals": "DC"
+              }
+            }
+          }
+        },
+        "autofocus": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "title": "Contrast autofocus",
+              "default": false
+            },
+            "actuator": {
+              "type": "string",
+              "title": "Focus motor protocol",
+              "default": "pelco-xm",
+              "enum": [
+                "pelco-xm",
+                "pelco-d"
+              ],
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": "true"
+              }
+            },
+            "port": {
+              "type": "string",
+              "title": "Focus motor serial port",
+              "default": "/dev/ttyAMA0",
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": "true"
+              }
+            },
+            "speed": {
+              "minimum": 1200,
+              "maximum": 115200,
+              "type": "integer",
+              "title": "Focus motor port baud rate",
+              "default": 115200,
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": "true"
+              }
+            }
+          }
+        },
+        "blkCnt": {
+          "type": "integer",
+          "title": "Memory blocks for hardware encoder",
+          "default": 4
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "mirror": {
+          "type": "boolean",
+          "title": "Flip image horizontally",
+          "default": false,
+          "x-reload": "live",
+          "x-live": true
+        },
+        "flip": {
+          "type": "boolean",
+          "title": "Flip image vertically",
+          "default": false,
+          "x-reload": "live",
+          "x-live": true
+        },
+        "contrast": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Image contrast",
+          "default": 50,
+          "x-reload": "live",
+          "x-live": true
+        },
+        "hue": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Image hue",
+          "default": 50,
+          "x-reload": "live",
+          "x-live": true
+        },
+        "saturation": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Image saturation",
+          "default": 50,
+          "x-reload": "live",
+          "x-live": true
+        },
+        "luminance": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Image luminance",
+          "default": 50,
+          "x-reload": "live",
+          "x-live": true
+        },
+        "rotate": {
+          "enum": [
+            "0",
+            "90",
+            "270"
+          ],
+          "type": "string",
+          "title": "Rotate clockwise",
+          "default": "0"
+        },
+        "tuning": {
+          "type": "boolean",
+          "title": "Automatic tuning",
+          "default": false
+        }
+      }
+    },
+    "video0": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable"
+        },
+        "codec": {
+          "enum": [
+            "h264",
+            "h265"
+          ],
+          "type": "string",
+          "title": "Codec",
+          "default": "h264"
+        },
+        "size": {
+          "type": "string",
+          "title": "Resolution",
+          "default": "1920x1080",
+          "x-resolution": true,
+          "x-native": "1920x1080",
+          "x-min": "114x114",
+          "x-max": "1920x1080"
+        },
+        "fps": {
+          "minimum": 1,
+          "maximum": 120,
+          "type": "integer",
+          "title": "Frame rate",
+          "default": 0,
+          "x-reload": "channel:0"
+        },
+        "bitrate": {
+          "type": "integer",
+          "title": "Bitrate",
+          "default": 4096,
+          "hint": "Target bitrate in kbit/s (e.g. 4096 = 4 Mbit/s).",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "adjustBitrate": {
+          "type": "boolean",
+          "title": "Adjust bitrate for WebRTC viewers",
+          "default": false,
+          "hint": "Lets a WebRTC viewer, such as the Live page, lower this channel's bitrate when its connection cannot handle the configured rate and raise it back afterwards — never above the rate you set. If the same stream is used by multiple clients, including non-WebRTC clients, they all share the resulting bitrate."
+        },
+        "osd": {
+          "type": "boolean",
+          "title": "OSD",
+          "default": true,
+          "x-reload": "service:osd"
+        },
+        "rcMode": {
+          "enum": [
+            "cbr",
+            "vbr",
+            "avbr"
+          ],
+          "type": "string",
+          "title": "Bitrate control mode",
+          "default": "avbr"
+        },
+        "profile": {
+          "enum": [
+            "base",
+            "main",
+            "high"
+          ],
+          "type": "string",
+          "title": "Profile",
+          "default": "main",
+          "visibleWhen": {
+            "field": "codec",
+            "equals": "h264"
+          }
+        },
+        "gopSize": {
+          "type": "string",
+          "title": "Keyframe interval (s)",
+          "hint": "Seconds between keyframes (I-frames): 1.0 = one per second, 2.0 = every two seconds. Larger lowers bitrate but slows seeking and error recovery.",
+          "x-reload": "channel:0"
+        },
+        "crop": {
+          "type": "array",
+          "title": "Crop to size",
+          "default": [],
+          "hint": "Crop to one region written as XxYxWxH (top-left offset, then size). Empty = full frame."
+        },
+        "gopMode": {
+          "enum": [
+            "normal",
+            "dual",
+            "smart"
+          ],
+          "type": "string",
+          "title": "Group of pictures mode",
+          "default": "normal"
+        },
+        "svct": {
+          "enum": [
+            "off",
+            "2x",
+            "4x"
+          ],
+          "type": "string",
+          "title": "Temporal scalability layers (off, 2x, 4x)",
+          "default": "off"
+        },
+        "refEnhance": {
+          "minimum": 0,
+          "maximum": 3,
+          "type": "integer",
+          "title": "Reference enhancement layers",
+          "hint": "Raw VENC reference structure. 0 with reference prediction off makes every P frame reference the keyframe, so one lost frame costs only itself — pair it with a short keyframe interval. Needs a decoder and link that expect it; overridden by temporal scalability layers."
+        },
+        "refPred": {
+          "type": "boolean",
+          "title": "Reference prediction between base frames"
+        },
+        "sliceUnits": {
+          "minimum": 0,
+          "maximum": 32,
+          "type": "integer",
+          "title": "Slice size in rows",
+          "default": 0,
+          "hint": "Macroblock rows (H.264) / LCU rows (H.265) per slice. 0 = disabled. Overridden by sliceBytes when that is set."
+        },
+        "sliceBytes": {
+          "minimum": 0,
+          "maximum": 2000,
+          "type": "integer",
+          "title": "Target bytes per NAL slice",
+          "default": 0,
+          "hint": "Splits each frame into roughly N-byte NAL slices for lower latency and loss tolerance. 0 = disabled (one slice per frame). Takes precedence over sliceUnits."
+        },
+        "minQp": {
+          "default": 28
+        },
+        "maxQp": {
+          "default": 42
+        },
+        "minIp": {
+          "default": 1
+        },
+        "maxIp": {
+          "default": 2
+        }
+      }
+    },
+    "video1": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable"
+        },
+        "codec": {
+          "enum": [
+            "h264",
+            "h265"
+          ],
+          "type": "string",
+          "title": "Codec",
+          "default": "h264"
+        },
+        "size": {
+          "type": "string",
+          "title": "Resolution",
+          "default": "1280x720",
+          "x-resolution": true,
+          "x-min": "114x114",
+          "x-max": "1920x1080"
+        },
+        "fps": {
+          "minimum": 1,
+          "maximum": 120,
+          "type": "integer",
+          "title": "Frame rate",
+          "default": 0
+        },
+        "bitrate": {
+          "type": "integer",
+          "title": "Bitrate",
+          "default": 1024,
+          "hint": "Target bitrate in kbit/s (e.g. 4096 = 4 Mbit/s).",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "adjustBitrate": {
+          "type": "boolean",
+          "title": "Adjust bitrate for WebRTC viewers",
+          "default": true,
+          "hint": "Lets a WebRTC viewer, such as the Live page, lower this channel's bitrate when its connection cannot handle the configured rate and raise it back afterwards — never above the rate you set. If the same stream is used by multiple clients, including non-WebRTC clients, they all share the resulting bitrate."
+        },
+        "osd": {
+          "type": "boolean",
+          "title": "OSD",
+          "default": true,
+          "x-reload": "service:osd"
+        },
+        "rcMode": {
+          "enum": [
+            "cbr",
+            "vbr",
+            "avbr"
+          ],
+          "type": "string",
+          "title": "Bitrate control mode",
+          "default": "vbr"
+        },
+        "profile": {
+          "enum": [
+            "base",
+            "main",
+            "high"
+          ],
+          "type": "string",
+          "title": "Profile",
+          "default": "main",
+          "visibleWhen": {
+            "field": "codec",
+            "equals": "h264"
+          }
+        },
+        "gopSize": {
+          "type": "string",
+          "title": "Keyframe interval (s)",
+          "hint": "Seconds between keyframes (I-frames): 1.0 = one per second, 2.0 = every two seconds. Larger lowers bitrate but slows seeking and error recovery."
+        },
+        "crop": {
+          "type": "array",
+          "title": "Crop to size",
+          "default": [],
+          "hint": "Crop to one region written as XxYxWxH (top-left offset, then size). Empty = full frame."
+        }
+      }
+    },
+    "usbcam": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable a USB (UVC) webcam",
+          "default": false
+        },
+        "device": {
+          "type": "string",
+          "title": "USB camera device node",
+          "default": "/dev/video0",
+          "visibleWhen": {
+            "field": "enabled",
+            "equals": "true"
+          }
+        },
+        "codec": {
+          "enum": [
+            "auto",
+            "h264",
+            "mjpeg",
+            "transcode"
+          ],
+          "type": "string",
+          "title": "USB camera codec",
+          "default": "auto",
+          "visibleWhen": {
+            "field": "enabled",
+            "equals": "true"
+          }
+        },
+        "cameraId": {
+          "type": "integer",
+          "title": "Camera index (>=1; 0 is the sensor)",
+          "default": 1,
+          "visibleWhen": {
+            "field": "enabled",
+            "equals": "true"
+          }
+        },
+        "size": {
+          "type": "string",
+          "title": "USB camera resolution",
+          "default": "1280x720",
+          "visibleWhen": {
+            "field": "enabled",
+            "equals": "true"
+          },
+          "x-resolution": true
+        },
+        "fps": {
+          "minimum": 1,
+          "maximum": 120,
+          "type": "integer",
+          "title": "Frame rate",
+          "default": 30,
+          "visibleWhen": {
+            "field": "enabled",
+            "equals": "true"
+          }
+        },
+        "bitrate": {
+          "type": "integer",
+          "title": "USB camera bitrate",
+          "visibleWhen": {
+            "field": "enabled",
+            "equals": "true"
+          }
+        },
+        "sliceUnits": {
+          "minimum": 0,
+          "maximum": 32,
+          "type": "integer",
+          "title": "H.264 slice units",
+          "default": 0,
+          "visibleWhen": {
+            "field": "enabled",
+            "equals": "true"
+          }
+        },
+        "gopSize": {
+          "type": "string",
+          "title": "Keyframe interval (s)",
+          "default": "1.0",
+          "visibleWhen": {
+            "field": "enabled",
+            "equals": "true"
+          }
+        },
+        "transcode": {
+          "type": "object",
+          "properties": {
+            "codec": {
+              "enum": [
+                "h264",
+                "h265"
+              ],
+              "type": "string",
+              "title": "Transcode output codec",
+              "default": "h264"
+            }
+          }
+        }
+      }
+    },
+    "jpeg": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable MJPEG",
+          "default": true,
+          "hint": "Serves JPEG at all: the /mjpeg stream, still snapshots on /image.jpg, and the RTSP JPEG track. Off frees a frame — the largest single saving on a small board — but ONVIF snapshots and the web preview stop working with it."
+        },
+        "size": {
+          "type": "string",
+          "title": "Resolution",
+          "hint": "Applies to the MJPEG stream and to still snapshots alike.",
+          "x-resolution": true,
+          "x-max": "1920x1080"
+        },
+        "qfactor": {
+          "minimum": 1,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Quality level",
+          "default": 50,
+          "hint": "Applies to the MJPEG stream and to still snapshots alike. Higher is better quality and a bigger frame."
+        },
+        "fps": {
+          "minimum": 1,
+          "maximum": 20,
+          "type": "integer",
+          "title": "Frames per second",
+          "default": 5,
+          "hint": "MJPEG stream only; a snapshot is taken on request."
+        },
+        "osd": {
+          "type": "boolean",
+          "title": "Enable OSD",
+          "default": true,
+          "x-reload": "service:osd"
+        },
+        "rtsp": {
+          "type": "boolean",
+          "title": "Enable over RTSP",
+          "default": false
+        },
+        "tuned": {
+          "type": "string",
+          "title": "Largest snapshot with parameters",
+          "default": "",
+          "hint": "Caps snapshots that ask for their own size, crop or quality (/image.jpg?width=640&height=360). Those encode on a second channel whose frame buffers are reserved when the pipeline starts, so the largest one has to be declared here as WxH — a bigger request is refused rather than served from the video pool. Empty switches the feature off and gives the memory back. A plain /image.jpg is unaffected; it uses Resolution above."
+        }
+      }
+    },
+    "osd": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": false,
+          "x-reload": "service:osd"
+        },
+        "template": {
+          "type": "string",
+          "title": "Template",
+          "default": "%d.%m.%Y %H:%M:%S",
+          "hint": "strftime date/time format, e.g. %d.%m.%Y %H:%M:%S. Extras: %f milliseconds, %@ lens zoom magnification (e.g. x3.2).",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "font": {
+          "type": "string",
+          "title": "Font file",
+          "default": "/usr/share/fonts/truetype/UbuntuMono-Regular.ttf",
+          "x-reload": "service:osd"
+        },
+        "size": {
+          "type": "string",
+          "title": "Font size",
+          "default": "1.0",
+          "hint": "Font scale factor; 1.0 is the default size.",
+          "x-reload": "service:osd"
+        },
+        "weight": {
+          "enum": [
+            "normal",
+            "thin"
+          ],
+          "type": "string",
+          "title": "Font stroke weight",
+          "default": "normal",
+          "hint": "Stroke weight: normal, or thin for a lighter face.",
+          "x-reload": "service:osd"
+        },
+        "outline": {
+          "type": "boolean",
+          "title": "Font outline",
+          "default": true,
+          "hint": "Draw a dark halo around each glyph so the text stays readable over bright or busy scenes.",
+          "x-reload": "service:osd"
+        },
+        "anchor": {
+          "enum": [
+            "proportional",
+            "top-left",
+            "top",
+            "top-right",
+            "left",
+            "center",
+            "right",
+            "bottom-left",
+            "bottom",
+            "bottom-right"
+          ],
+          "type": "string",
+          "title": "Position anchor",
+          "default": "proportional",
+          "hint": "Select the point from which the OSD position is measured. When set to proportional, the legacy proportional positioning is used.",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "offsetX": {
+          "type": "string",
+          "title": "Horizontal offset",
+          "default": "0",
+          "visibleWhen": {
+            "field": "anchor",
+            "in": [
+              "top-left",
+              "top-right",
+              "left",
+              "right",
+              "bottom-left",
+              "bottom-right"
+            ]
+          },
+          "hint": "Distance from the edge or offset to the right of the center. A bare number is in pixels; 2% is a share of the frame; 1.5em is a multiple of the text size.",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "offsetY": {
+          "type": "string",
+          "title": "Vertical offset",
+          "default": "0",
+          "visibleWhen": {
+            "field": "anchor",
+            "in": [
+              "top-left",
+              "top",
+              "top-right",
+              "bottom-left",
+              "bottom",
+              "bottom-right"
+            ]
+          },
+          "hint": "Distance from the edge or offset down from the center. A bare number is in pixels; 2% is a share of the frame; 1.5em is a multiple of the text size.",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "posX": {
+          "type": "integer",
+          "title": "Horizontal position",
+          "default": 16,
+          "visibleWhen": {
+            "field": "anchor",
+            "equals": "proportional"
+          },
+          "hint": "From -16 at the right edge to 16 at the left.",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "posY": {
+          "type": "integer",
+          "title": "Vertical position",
+          "default": 16,
+          "visibleWhen": {
+            "field": "anchor",
+            "equals": "proportional"
+          },
+          "hint": "From -16 at the bottom to 16 at the top.",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "bgAlpha": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Plate opacity",
+          "default": 25,
+          "hint": "Opacity of the black plate behind the text, in percent. 0 = none, the text sits straight on the video; 100 = solid bar.",
+          "x-reload": "live",
+          "x-live": true
+        },
+        "privacyMasks": {
+          "type": "array",
+          "title": "Privacy masks",
+          "default": [],
+          "x-reload": "live",
+          "x-live": true
+        }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable microphone",
+          "default": false
+        },
+        "volume": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Microphone volume (0 mutes the input)",
+          "default": 50
+        },
+        "srate": {
+          "enum": [
+            "8000",
+            "16000",
+            "32000",
+            "48000"
+          ],
+          "type": "string",
+          "title": "Sampling rate",
+          "default": "8000"
+        },
+        "codec": {
+          "enum": [
+            "opus",
+            "aac",
+            "pcm",
+            "alaw",
+            "ulaw"
+          ],
+          "type": "string",
+          "title": "Codec for RTSP and MP4 encoding",
+          "default": "opus"
+        },
+        "outputEnabled": {
+          "type": "boolean",
+          "title": "Enable speaker",
+          "default": false
+        },
+        "outputVolume": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Speaker volume",
+          "default": 50
+        },
+        "speakerPin": {
+          "type": "integer",
+          "title": "GPIO pin to control speaker"
+        },
+        "speakerPinInvert": {
+          "type": "boolean",
+          "title": "Speaker control is inverted",
+          "default": false
+        },
+        "jitterBufferMs": {
+          "minimum": 0,
+          "maximum": 500,
+          "type": "integer",
+          "title": "Inbound de-jitter buffer (ms)",
+          "default": 0,
+          "hint": "G.711 talkback only. 0 = passthrough (LAN-only). Typical: 60 over Wi-Fi, 100–120 over 4G/LTE."
+        },
+        "dual": {
+          "type": "boolean",
+          "title": "Dual microphone",
+          "default": false
+        }
+      }
+    },
+    "rtsp": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": true
+        },
+        "port": {
+          "minimum": 1,
+          "maximum": 65535,
+          "type": "integer",
+          "title": "Port",
+          "default": 554
+        },
+        "backchannel": {
+          "type": "boolean",
+          "title": "Enable back-channel",
+          "default": false,
+          "hint": "Two-way audio (talkback) per ONVIF Profile T."
+        },
+        "audioCodec": {
+          "enum": [
+            "opus",
+            "aac",
+            "pcm",
+            "alaw",
+            "ulaw"
+          ],
+          "type": "string",
+          "title": "Audio codec for RTSP & ONVIF",
+          "default": "",
+          "hint": "Auto follows the main audio.codec. Per-connection override via the RTSP query string ?audio=alaw|ulaw|pcm|aac|opus|mp3."
+        }
+      }
+    },
+    "webrtc": {
+      "type": "object",
+      "properties": {
+        "iceServers": {
+          "type": "string",
+          "title": "STUN/TURN server URLs, comma- or whitespace-separated; 'none' disables them and serves the local network only",
+          "default": "stun:stun.cloudflare.com:3478"
+        },
+        "turnUsername": {
+          "type": "string",
+          "title": "TURN username, if iceServers names a relay"
+        },
+        "turnCredential": {
+          "type": "string",
+          "title": "TURN password, if iceServers names a relay"
+        }
+      }
+    },
+    "sip": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": false,
+          "hint": "Outbound SIP calls (user-agent client) — e.g. a doorbell that dials an intercom or softphone."
+        },
+        "server": {
+          "type": "string",
+          "title": "Registrar / proxy host",
+          "default": ""
+        },
+        "port": {
+          "minimum": 1,
+          "maximum": 65535,
+          "type": "integer",
+          "title": "Remote UDP port",
+          "default": 5060
+        },
+        "username": {
+          "type": "string",
+          "title": "Auth username",
+          "default": ""
+        },
+        "password": {
+          "type": "string",
+          "title": "Auth password",
+          "default": ""
+        },
+        "localUri": {
+          "type": "string",
+          "title": "Local address-of-record",
+          "default": "",
+          "hint": "This camera's SIP identity, e.g. sip:camera@pbx.local."
+        },
+        "callTarget": {
+          "type": "string",
+          "title": "Call target",
+          "default": "",
+          "hint": "SIP URI dialled on a button press, e.g. sip:1001@pbx.local. Several may be given, separated by commas, and are rung per sip.ringMode."
+        },
+        "localIp": {
+          "type": "string",
+          "title": "Local IP address",
+          "default": "",
+          "hint": "Written into the Via/Contact headers; must be an address the peer can route back to."
+        },
+        "localPort": {
+          "minimum": 1,
+          "maximum": 65535,
+          "type": "integer",
+          "title": "Local signalling UDP port",
+          "default": 5060
+        },
+        "doRegister": {
+          "type": "boolean",
+          "title": "REGISTER",
+          "default": true
+        },
+        "registerExpires": {
+          "minimum": 60,
+          "maximum": 86400,
+          "type": "integer",
+          "title": "REGISTER expiry (s)",
+          "default": 3600,
+          "hint": "Registration lifetime in seconds; the client refreshes at expires − 60."
+        },
+        "buttonPin": {
+          "type": "integer",
+          "title": "GPIO pin wired to the doorbell button"
+        },
+        "buttonActiveLow": {
+          "type": "boolean",
+          "title": "Button is active-low",
+          "default": true,
+          "hint": "For pull-up + normally-open wiring: a press pulls the GPIO low."
+        },
+        "rtpPortHint": {
+          "minimum": 1024,
+          "maximum": 65535,
+          "type": "integer",
+          "title": "Start of the local RTP port scan",
+          "default": 5004
+        },
+        "ringMode": {
+          "enum": [
+            "sequential",
+            "parallel"
+          ],
+          "type": "string",
+          "title": "Ring mode for several targets",
+          "default": "sequential",
+          "hint": "With several call targets: sequential rings them one at a time for sip.ringSeconds each; parallel rings them all at once and keeps whoever answers first. Ignored for a single target."
+        },
+        "ringSeconds": {
+          "minimum": 1,
+          "maximum": 300,
+          "type": "integer",
+          "title": "Seconds to ring each target",
+          "default": 10,
+          "hint": "How long one target rings before the call moves on (sequential), or how long the whole fork rings before it is retried (parallel)."
+        },
+        "ringCycles": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Times to run through the target list",
+          "default": 3,
+          "hint": "How many times to run through the target list before giving up. 0 rings until someone answers or the call is cancelled."
+        }
+      }
+    },
+    "nightMode": {
+      "type": "object",
+      "properties": {
+        "colorToGray": {
+          "type": "boolean",
+          "title": "Colorless night mode",
+          "default": true
+        },
+        "irCutEnabled": {
+          "type": "boolean",
+          "title": "Drive the IR-cut filter",
+          "default": true,
+          "x-reload": "service:night",
+          "hint": "Off parks the filter: the pins stay configured but nothing moves it, so running without the filter for a while does not mean clearing pin numbers and hunting for them later."
+        },
+        "backlightEnabled": {
+          "type": "boolean",
+          "title": "Drive the camera light",
+          "default": true,
+          "x-reload": "service:night",
+          "hint": "Off parks the lamp: its pin (or PWM channel) stays configured but night mode leaves it dark. The wiring is kept for when it is wanted again."
+        },
+        "irCutPin1": {
+          "type": "integer",
+          "title": "GPIO pin1 for IRcut",
+          "x-reload": "service:night"
+        },
+        "irCutSingleInvert": {
+          "type": "boolean",
+          "title": "Single IRcut is inverted",
+          "default": false,
+          "x-reload": "service:night",
+          "hint": "Only applies when a single pin drives the IR-cut filter: the first pin (the opening coil) set and the second (the closing coil) left unset. That pin is then held high for night and low for day; turn this on for a board wired the other way round. It does nothing when both pins are set, and nothing at all when only the second is — without the first, the filter is not driven."
+        },
+        "irCutPin2": {
+          "type": "integer",
+          "title": "GPIO pin2 for IRcut",
+          "x-reload": "service:night"
+        },
+        "backlightPin": {
+          "type": "integer",
+          "title": "GPIO pin for camera light",
+          "x-reload": "service:night"
+        },
+        "overrideDrc": {
+          "type": "integer",
+          "title": "DRC value in night mode",
+          "hint": "Dynamic-range-compression strength applied while in night mode (overrides isp.drc). Higher lifts shadows more."
+        },
+        "lightMonitor": {
+          "type": "boolean",
+          "title": "Automatic day/night",
+          "default": false,
+          "x-reload": "service:night",
+          "hint": "Switch day/night without anyone watching. With a light sensor pin set, that pin decides; with both legacy thresholds set, the raw isp_again gauge decides; with neither, the camera decides from its own exposure state — no wiring and no calibration needed."
+        },
+        "lightSensorPin": {
+          "type": "integer",
+          "title": "GPIO pin for light sensor",
+          "x-reload": "service:night"
+        },
+        "lightSensorInvert": {
+          "type": "boolean",
+          "title": "Light sensor is inverted",
+          "default": false,
+          "x-reload": "service:night"
+        },
+        "monitorDelay": {
+          "minimum": 0,
+          "maximum": 60,
+          "type": "integer",
+          "title": "Delay before switching day/night mode",
+          "default": 0,
+          "x-reload": "service:night",
+          "hint": "Seconds between light checks before flipping day/night (software light monitor)."
+        },
+        "minThreshold": {
+          "type": "integer",
+          "title": "Minimum sensor threshold for day",
+          "x-reload": "service:night",
+          "hint": "Legacy raw-unit mode: compared against the sensor's analog gain (the isp_again metric, vendor-specific units). In night mode, switches back to day when gain drops below this. Leave both thresholds empty to use the calibration-free automatic mode instead. Keep below maxThreshold for hysteresis."
+        },
+        "maxThreshold": {
+          "type": "integer",
+          "title": "Maximum sensor threshold for night",
+          "x-reload": "service:night",
+          "hint": "Legacy raw-unit mode: compared against the sensor's analog gain (the isp_again metric, vendor-specific units). In day mode, switches to night when gain rises above this (a darker scene needs more gain). Keep above minThreshold for hysteresis."
+        },
+        "autoNightGain": {
+          "minimum": 1,
+          "maximum": 64,
+          "type": "integer",
+          "title": "Gain multiple that means night",
+          "x-reload": "service:night",
+          "hint": "Automatic mode only. Go to night when sensor gain rises to this multiple of 1x — the same idea as the community backlight scripts, but in units that mean the same on every camera. Leave empty for the default trigger: the exposure running out of shutter and gain, which needs no number at all."
+        },
+        "autoDayGain": {
+          "minimum": 1,
+          "maximum": 16,
+          "type": "integer",
+          "title": "Gain multiple that means day again",
+          "default": 2,
+          "x-reload": "service:night",
+          "hint": "Automatic mode only. Return to day when sensor gain stays at or below this multiple of 1x. The default 2 needs no tuning: daylight parks gain near 1x even with the IR lamp on, while a night scene under the lamp needs far more. Raise it only if the camera returns to day too late in the morning."
+        },
+        "autoNightDelay": {
+          "minimum": 5,
+          "maximum": 600,
+          "type": "integer",
+          "title": "Seconds of darkness before night",
+          "default": 15,
+          "x-reload": "service:night",
+          "hint": "Automatic mode only: seconds the scene must stay too dark before switching to night. Long enough to sit out a passing cloud or a blocked lens; dusk lasts far longer."
+        },
+        "autoDayDelay": {
+          "minimum": 5,
+          "maximum": 600,
+          "type": "integer",
+          "title": "Seconds of brightness before day",
+          "default": 60,
+          "x-reload": "service:night",
+          "hint": "Automatic mode only: seconds the scene must stay bright before switching back to day, so headlights and porch lights at night do not flip the camera. Dawn easily outlasts it."
+        },
+        "backlightPwmChannel": {
+          "enum": [
+            "none",
+            "pwm1",
+            "pwm3"
+          ],
+          "type": "string",
+          "title": "PWM channel for a dimmable lamp",
+          "default": "none",
+          "hint": "A lamp on a PWM pad instead of a plain GPIO: pick the channel and the backlight pin is ignored — brightness then follows the ambient light at night, between the minimum and maximum duty below. \"none\" keeps a switched (on/off) lamp on the backlight pin.",
+          "x-reload": "service:night"
+        },
+        "backlightPwmFreq": {
+          "minimum": 50,
+          "maximum": 20000,
+          "type": "integer",
+          "title": "PWM frequency (Hz)",
+          "default": 400,
+          "x-reload": "service:night"
+        },
+        "backlightPwmMin": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Minimum lamp duty at night (%)",
+          "default": 10,
+          "hint": "The dimmest the lamp is allowed to go while night mode holds it on. LEDs have an ignition threshold; below it the lamp flickers or dies rather than dims.",
+          "x-reload": "service:night"
+        },
+        "backlightPwmMax": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Maximum lamp duty (%)",
+          "default": 100,
+          "x-reload": "service:night"
+        }
+      }
+    },
+    "motionDetect": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": false
+        },
+        "visualize": {
+          "type": "boolean",
+          "title": "Visualize",
+          "default": false,
+          "hint": "Draws motion rectangles onto the stream; requires OSD to be enabled."
+        },
+        "debug": {
+          "type": "boolean",
+          "title": "Enable debugging",
+          "default": false
+        },
+        "roi": {
+          "type": "array",
+          "title": "Region of interest",
+          "default": [],
+          "hint": "Limit detection to one or more XxYxWxH regions. Empty = whole frame."
+        },
+        "sensitivity": {
+          "minimum": 0,
+          "maximum": 8,
+          "type": "integer",
+          "title": "Sensitivity",
+          "default": 3,
+          "hint": "0-8, higher = more sensitive"
+        }
+      }
+    },
+    "records": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": false
+        },
+        "path": {
+          "type": "string",
+          "title": "Path",
+          "default": "/mnt/mmcblk0p1/%F",
+          "hint": "strftime path; %F expands to YYYY-MM-DD, so /mnt/mmcblk0p1/%F writes a folder per day."
+        },
+        "filename": {
+          "type": "string",
+          "title": "Filename",
+          "default": "%H-%M",
+          "hint": "strftime filename; %H-%M writes two digit hour and minute."
+        },
+        "split": {
+          "type": "integer",
+          "title": "File limit in minutes",
+          "default": 20
+        },
+        "maxUsage": {
+          "type": "integer",
+          "title": "Limit of available space usage",
+          "default": 95,
+          "hint": "Percent of the storage volume; recording rotates/stops once usage exceeds this."
+        },
+        "purgeSeconds": {
+          "type": "integer",
+          "title": "Free space check, in seconds",
+          "default": 60,
+          "hint": "How often free space is checked and the oldest recordings deleted. This used to follow the file split, so a camera writing 20-minute clips looked at its card three times an hour (majestic#245)."
+        },
+        "syncSeconds": {
+          "type": "integer",
+          "title": "Flush to storage, in seconds",
+          "default": 30,
+          "hint": "How often the clip being written is committed to the card, which bounds how much of it a power cut can cost. 0 disables the periodic flush; the card is still committed when a clip is closed."
+        },
+        "fragmentMs": {
+          "type": "integer",
+          "title": "Fragment length, in milliseconds",
+          "default": 1000,
+          "hint": "How much video one MP4 fragment holds. A fragment is also the unit the recorder buffers and drops, so this bounds both."
+        },
+        "fragmentBytes": {
+          "type": "integer",
+          "title": "Fragment size limit in bytes, 0 to derive from the bitrate",
+          "default": 0,
+          "hint": "Hard size limit for one fragment. 0 derives it from the stream bitrate. A fragment used to be a whole GOP, so gopSize x bitrate decided how much RAM the recorder needed and nothing bounded it."
+        },
+        "mode": {
+          "type": "string",
+          "title": "When to record",
+          "default": "continuous",
+          "enum": [
+            "continuous",
+            "motion"
+          ],
+          "hint": "continuous records without stopping and splits on the clock; motion opens a clip when the detector fires and closes it once movement has stopped. motion needs motionDetect enabled to see anything."
+        },
+        "preRollSec": {
+          "type": "integer",
+          "title": "Seconds kept before a motion event",
+          "default": 5,
+          "hint": "How much of the run-up to a motion event is kept. The camera holds this much finished video in RAM at all times in motion mode, so it is clamped to what the board can spare and the clamp is logged."
+        },
+        "postRollSec": {
+          "type": "integer",
+          "title": "Seconds kept after motion stops",
+          "default": 10,
+          "hint": "How long recording continues after movement stops. The detector itself debounces for two seconds before it calls motion over."
+        },
+        "minClipSec": {
+          "type": "integer",
+          "title": "Shortest motion clip, in seconds",
+          "default": 3,
+          "hint": "Shortest a motion clip may be, so a single frame of movement does not leave a one-second file. Only bites when postRollSec is small."
+        },
+        "substream": {
+          "type": "boolean",
+          "title": "Record substream",
+          "default": false,
+          "x-requires": {
+            "when": "true",
+            "field": "video1.enabled",
+            "equals": "true",
+            "message": "The sub stream is disabled, so the main stream is recorded instead."
+          }
+        },
+        "audioCodec": {
+          "enum": [
+            "",
+            "aac",
+            "opus"
+          ],
+          "type": "string",
+          "title": "Audio codec for MP4 records",
+          "default": "",
+          "hint": "Also used for HLS (it shares the MP4 muxer). Auto follows the main audio.codec."
+        },
+        "dualcam": {
+          "type": "boolean",
+          "title": "Record both cameras (cam0 + cam1)",
+          "default": false,
+          "hint": "Requires an ENABLE_DUALCAM build. When true, records cam0 (stream0) and cam1 (stream3) simultaneously into two separate MP4 files."
+        }
+      }
+    },
+    "outgoing": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": false
+        },
+        "server": {
+          "type": "string",
+          "title": "Address"
+        },
+        "naluSize": {
+          "type": "integer",
+          "title": "RTP packet size",
+          "default": 1200,
+          "hint": "Maximum RTP payload in bytes when fragmenting NAL units / JPEG. ~1400 suits the public-Internet MTU; up to ~4000 on WFB/Realtek links."
+        },
+        "substream": {
+          "type": "boolean",
+          "title": "RTMP substream",
+          "default": false,
+          "x-requires": {
+            "when": "true",
+            "field": "video1.enabled",
+            "equals": "true",
+            "message": "The sub stream is disabled, so the main stream is published instead."
+          }
+        },
+        "audioSource": {
+          "enum": [
+            "auto",
+            "mic",
+            "silence",
+            "file",
+            "none"
+          ],
+          "type": "string",
+          "title": "Audio",
+          "default": "auto",
+          "hint": "auto uses the microphone when there is one, and silence for destinations that insist on an audio track."
+        },
+        "audioFile": {
+          "type": "string",
+          "title": "AAC file to loop",
+          "visibleWhen": {
+            "field": "audioSource",
+            "equals": "file"
+          },
+          "hint": "ADTS-framed, e.g. ffmpeg -i music.mp3 -c:a aac -f adts loop.aac. Held in RAM, so keep it under a megabyte."
+        },
+        "audioCodec": {
+          "enum": [
+            "",
+            "aac",
+            "pcm",
+            "alaw",
+            "ulaw"
+          ],
+          "type": "string",
+          "title": "Audio codec",
+          "default": "",
+          "hint": "Only what FLV can frame is offered. Auto follows the main audio.codec, substituting AAC when that codec has no FLV mapping."
+        }
+      }
+    },
+    "watchdog": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": true
+        },
+        "timeout": {
+          "type": "integer",
+          "title": "Timeout",
+          "default": 300,
+          "hint": "Seconds without a healthy frame before the watchdog restarts majestic."
+        }
+      }
+    },
+    "hls": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": false
+        },
+        "segments": {
+          "type": "integer",
+          "title": "Segments kept for clients to fetch",
+          "default": 4,
+          "hint": "How many finished segments are held for clients to fetch. More tolerates a slower client, at a copy of each in RAM; clamped to 8. Only one was ever kept before, so the playlist advertised a single segment and anything else 404'd. Takes effect on reload."
+        }
+      }
+    },
+    "mdns": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Answer mDNS queries for openipc.local",
+          "default": true
+        }
+      }
+    },
+    "onvif": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": true
+        },
+        "username": {
+          "type": "string",
+          "title": "Username",
+          "default": "root",
+          "hint": "Matched against the cleartext password below when set; otherwise falls back to the /etc/shadow lookup."
+        },
+        "password": {
+          "type": "string",
+          "title": "Cleartext password",
+          "default": "",
+          "hint": "Opt-in, default empty. When set, unlocks WSSE PasswordDigest and HTTP Digest auth so legacy clients (ODM v2.2.x) and digest-only ones (tinyCam Monitor) work. Stored as cleartext in this config file — only enable if you accept that."
+        }
+      }
+    },
+    "ipeye": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": false
+        }
+      }
+    },
+    "netip": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable",
+          "default": false
+        },
+        "user": {
+          "type": "string",
+          "title": "Username"
+        },
+        "password": {
+          "type": "string",
+          "title": "Hash of password",
+          "hint": "Checked verbatim against the credential NETIP/Sofia clients send."
+        },
+        "port": {
+          "type": "integer",
+          "title": "Port"
+        },
+        "snapshots": {
+          "type": "boolean",
+          "title": "Snapshots",
+          "default": false
+        },
+        "ignoreSetTime": {
+          "type": "boolean",
+          "title": "Ignore set time",
+          "default": false
+        }
+      }
+    },
+    "cloud": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable cloud support",
+          "default": false,
+          "hint": "Connects to the WebRTC cloud signalling service for remote viewing without port-forwarding."
+        },
+        "host": {
+          "type": "string",
+          "title": "Cloud signalling host",
+          "default": "",
+          "hint": "Signalling service to dial out to. Change it only to point a camera at a different deployment."
+        },
+        "port": {
+          "type": "integer",
+          "title": "Cloud signalling port",
+          "default": 8443
+        }
+      }
+    }
+  },
+  "x-groups": [
+    {
+      "id": "image",
+      "label": "Image",
+      "sections": [
+        "image",
+        "isp",
+        "nightMode"
+      ]
+    },
+    {
+      "id": "video",
+      "label": "Video & Audio",
+      "sections": [
+        "video0",
+        "video1",
+        "audio",
+        "jpeg",
+        "osd"
+      ]
+    },
+    {
+      "id": "events",
+      "label": "Events",
+      "sections": [
+        "motionDetect"
+      ]
+    },
+    {
+      "id": "records",
+      "label": "Recording",
+      "sections": [
+        "records"
+      ]
+    },
+    {
+      "id": "network",
+      "label": "Network & Integrations",
+      "sections": [
+        "rtsp",
+        "onvif",
+        "hls",
+        "outgoing",
+        "netip",
+        "ipeye",
+        "sip",
+        "cloud"
+      ]
+    },
+    {
+      "id": "system",
+      "label": "System",
+      "sections": [
+        "system",
+        "watchdog"
+      ]
+    }
+  ]
+}
