@@ -60,6 +60,33 @@
 		return Math.floor((Date.now() - then) / 86400000);
 	}
 
+	const CATEGORIES = ['feature', 'fix', 'security', 'other'];
+
+	// A count is a count, or the entry is not usable.
+	//
+	// Two reasons, and the weaker one is the interesting one. An absent reading
+	// is not a zero: an entry missing its `fix` count would otherwise render a
+	// confident total that silently understates what the owner would gain, and
+	// could drop the severity from warn to info by losing a security count.
+	//
+	// The stronger reason is that this arrives over the network and ends up in
+	// innerHTML. Anything that is not a plain non-negative integer -- a string
+	// carrying markup, most obviously -- must never reach the sentence builder,
+	// and rejecting it here is what guarantees that, rather than escaping it
+	// correctly at every point it is interpolated later.
+	function counts(entry) {
+		if (!entry || typeof entry.counts !== 'object' || entry.counts === null) return null;
+		const out = {};
+		for (const k of CATEGORIES) {
+			const v = entry.counts[k];
+			if (typeof v !== 'number' || !isFinite(v) || v < 0 || Math.floor(v) !== v) {
+				return null;
+			}
+			out[k] = v;
+		}
+		return out;
+	}
+
 	// Everything published after the running build. The camera's own revision
 	// is the boundary: a commit above it is in the next build it takes,
 	// whichever night that one happened to publish.
@@ -69,12 +96,19 @@
 		let builds = 0, found = false;
 
 		for (const entry of feed.builds || []) {
-			if (entry.sha && rev.indexOf(entry.sha) === 0) { found = true; break; }
-			if (entry.sha && entry.sha.indexOf(rev) === 0) { found = true; break; }
+			if (typeof entry.sha !== 'string' || !entry.sha) return null;
+			if (rev.indexOf(entry.sha) === 0 || entry.sha.indexOf(rev) === 0) {
+				found = true;
+				break;
+			}
+			const c = counts(entry);
+			// One malformed entry above the running build makes the whole tally
+			// a guess. Say nothing rather than a number that is wrong.
+			if (!c) return null;
 			builds++;
-			for (const k in totals) totals[k] += (entry.counts && entry.counts[k]) || 0;
+			for (const k of CATEGORIES) totals[k] += c[k];
 			for (const note of entry.notes || []) {
-				if (note.vendor) vendors.add(note.vendor);
+				if (note && typeof note.vendor === 'string') vendors.add(note.vendor);
 			}
 		}
 		// Not in the ledger: either newer than the feed (nothing to say) or
@@ -105,7 +139,11 @@
 		}
 		s += '.';
 		if (stale) {
-			s += ' This camera has not been updated in over six months.';
+			// What is known is the date the running software was BUILT, which
+			// is not when the camera was flashed: a camera set up yesterday
+			// from an old image would be told it had been neglected for half a
+			// year. Say only the part the build date supports.
+			s += ' The software on this camera is over six months old.';
 		}
 		return s;
 	}

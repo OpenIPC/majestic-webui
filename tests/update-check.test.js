@@ -25,7 +25,7 @@ const DAY = 86400000;
 const iso = (daysAgo) =>
 	new Date(Date.now() - daysAgo * DAY).toISOString().slice(0, 10);
 
-// A feed newest-first, the way scripts/release-notes.py writes it.
+// A feed, newest build first, in the shape the published one is served in.
 function feedOf(entries, cursor) {
 	return {
 		as_of: iso(0), cursor: cursor || (entries[0] && entries[0].sha) || null,
@@ -123,8 +123,9 @@ const VER = (rev, date) => 'Lite HiSilicon (hi3516ev300), HEAD+' + rev + ', ' + 
 	});
 	check('a build older than six months escalates on its own',
 		got && got.sev === 'warn', got && got.sev);
-	check('and says so', got && /not been updated in over six months/.test(got.html),
-		got && got.html);
+	check('and says so in terms the build date actually supports',
+		got && /software on this camera is over six months old/.test(got.html)
+		   && !/not been updated/.test(got.html), got && got.html);
 
 	got = await run({
 		version: VER(MINE, iso(30)), vendor: 'sigmastar',
@@ -174,6 +175,35 @@ const VER = (rev, date) => 'Lite HiSilicon (hi3516ev300), HEAD+' + rev + ', ' + 
 		})) === null);
 	check('an empty feed: no banner',
 		(await run({ version: VER(MINE, iso(30)), feed: feedOf([]) })) === null);
+
+	group('a feed it cannot trust is not a feed');
+
+	// An absent reading is not a zero, and these arrive over the network and end
+	// up in innerHTML. Both reasons point the same way: reject, do not coerce.
+	const badCounts = [
+		['a missing category', { feature: 1, fix: 2, security: 0 }],
+		['a string count', { feature: '1', fix: 2, security: 0, other: 0 }],
+		['a negative count', { feature: -1, fix: 2, security: 0, other: 0 }],
+		['a fractional count', { feature: 1.5, fix: 2, security: 0, other: 0 }],
+		['NaN', { feature: NaN, fix: 2, security: 0, other: 0 }],
+		['markup smuggled as a count', { feature: '<img src=x onerror=alert(1)>', fix: 2, security: 0, other: 0 }],
+		['no counts object at all', undefined],
+	];
+	for (const [what, c] of badCounts) {
+		const e = { sha: 'aaaaaaaaa', date: iso(1), notes: [] };
+		if (c !== undefined) e.counts = c;
+		check('rejects ' + what + ' and renders nothing',
+			(await run({ version: VER(MINE, iso(30)), feed: feedOf([e, entry(MINE, {})]) })) === null);
+	}
+	check('a security count lost to a malformed sibling never downgrades severity',
+		(await run({
+			version: VER(MINE, iso(30)),
+			feed: feedOf([
+				entry('aaaaaaaaa', { fix: 1, security: 1 }),
+				{ sha: 'bbbbbbbbb', date: iso(2), counts: { feature: 0, fix: 1 }, notes: [] },
+				entry(MINE, {}),
+			]),
+		})) === null);
 
 	group('dismissal is "not now", not "never"');
 

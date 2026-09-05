@@ -111,10 +111,18 @@ pr_compliances:
       on the smallest boards is the difference between fitting and not.
     success_criteria: >
       New front-end code is vanilla JS in www/a/, loaded with a plain <script> tag, and
-      any asset it needs is committed to this tree.
+      any asset it needs is committed to this tree. A page may additionally read
+      OPTIONAL DATA over fetch from a first-party OpenIPC endpoint — data the page is
+      about, not a resource it is built from — provided it renders completely when that
+      fetch fails, is blocked, or returns nonsense, and provided the data is treated as
+      untrusted input rather than markup.
     failure_criteria: >
       The diff adds a runtime npm dependency, a bundler or transpiler step, a framework,
-      or a <script>/<link>/@import/fetch pointing at a third-party host.
+      or a <script>/<link>/@import pointing at a third-party host; or a fetch of anything
+      the page needs in order to render — a script, a style, a font, an image, a
+      template. A data fetch that is not first-party, or whose failure leaves the page
+      incomplete, broken or visibly waiting, fails this too: an offline camera must look
+      normal, not degraded.
 
   - title: "A new page is registered, not named twice"
     compliance_label: true
