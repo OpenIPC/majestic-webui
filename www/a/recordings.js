@@ -39,7 +39,10 @@
 		// What the open clip's header said about protection, and what the page
 		// managed to do about it: `xform` is the pair of transforms the player
 		// and the exporter run bytes through, absent on a clip in the clear.
-		prot: null, xform: null,
+		// The open clip's keys, and they are per clip: carried into the next
+		// one they would verify it against the wrong key and report tampering
+		// — an accusation about somebody's footage, made by a bug.
+		prot: null, xform: null, material: null,
 	};
 
 
@@ -671,7 +674,9 @@
 		state.hint = null;
 		state.prot = null;
 		state.xform = null;
+		state.material = null;
 		lock('');
+		sealedControls();
 		const url = fileUrl(clipPath(clip.name));
 
 		if (player) { player.destroy(); player = null; }
@@ -775,8 +780,11 @@
 				if (!material) return;                 // the lock panel explains
 				const xform = mkTransform(prot, material, init.headerLength);
 				state.xform = xform;
+				state.material = material;
 				setStatus('');
 				lock('');
+				sealedControls();
+				renderClips();
 				startPlaying(clip, url, init, mime, xform, atSec);
 			});
 
@@ -1372,6 +1380,24 @@
 		$id('rec-sel-save').addEventListener('click', saveSelection);
 	}
 
+	// What the camera is doing to recordings right now, from the configuration
+	// the page already has. Deliberately not a per-clip answer: knowing whether
+	// a given file is sealed means reading its header, and a day of clips is a
+	// range request each — on a page whose whole index strategy is built around
+	// the cost of a request being the request. So this says what is true of new
+	// recordings and does not pretend to describe old ones, which is exactly
+	// what the configuration knows.
+	function sealedHint() {
+		const mode = mjGet(state.cfg, 'records.encryption');
+		if (!mode || mode === 'none') return '';
+		const what = mode === 'passphrase' ? 'with a passphrase'
+			: mode === 'chip' ? 'to this camera’s hardware'
+			: mode === 'pubkey' ? 'to a key this camera cannot open'
+			: 'in a way this page does not know';
+		return '<div class="x-small text-secondary mb-2">New recordings are sealed ' + what +
+			'. Older clips are however they were written at the time.</div>';
+	}
+
 	function renderClips() {
 		const el = $id('rec-clips');
 		if (!el) return;
@@ -1380,7 +1406,7 @@
 			el.innerHTML = '<div class="text-secondary small">No clips in this day.</div>';
 			return;
 		}
-		let h = '';
+		let h = sealedHint();
 		// timeline.js calls the newest clip "recording" when it ends about now,
 		// which is a statement about the clock and cannot know the card stopped
 		// accepting writes. On a card that cannot be written the last clip is
@@ -1395,10 +1421,14 @@
 					hhmm(prev.end) + ' – ' + hhmm(c.start) + '</span></div>';
 			}
 			const on = state.clip && state.clip.name === c.name;
+			// A lock on the row of the clip that is open, because that is the
+			// one whose header has actually been read. Putting one on every row
+			// would be a guess dressed as a fact.
+			const sealed = on && state.prot && state.prot.encrypted ? ' 🔒' : '';
 			h += '<button type="button" class="rec-clip' + (on ? ' active' : '') + '" data-clip="' + esc(c.name) + '">' +
 				'<span class="rec-poster"' + (c.recording && writable ? ' data-live="1"' : '') + '>' +
 				'<span class="rec-poster-t">' + hhmm(c.start) + '</span></span>' +
-				'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + hhmm(c.start) + '</span>' +
+				'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + hhmm(c.start) + sealed + '</span>' +
 				'<span class="x-small text-secondary">' +
 				(c.recording && writable ? 'recording'
 					: (c.estimated ? '≈ ' : '') + TL.duration(c.dur)) +
@@ -1780,8 +1810,12 @@
 					'Recordings written by older firmware are like this.';
 			// A clip still being written ends mid-fragment. That is the camera
 			// doing its job, and saying "the chain ends early" about it would
-			// accuse a working camera of something.
-			const whole = at + 16 > clip.size;
+			// accuse a working camera of something. But "complete" has to mean
+			// the walk finished ON the last byte: a file cut a few bytes into
+			// its next fragment leaves a tail too short to parse, and calling
+			// that intact is the one verdict this button must never give by
+			// accident.
+			const whole = at === clip.size;
 			return 'Intact through ' + n + ' fragment' + (n === 1 ? '' : 's') +
 				(whole ? '. Every fragment matches its own record, and each record covers the one before it.'
 					: ', and the rest has not been written yet — this clip is still recording.');

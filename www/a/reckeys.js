@@ -549,13 +549,32 @@ window.MajesticRecKeys.ui = (function () {
 		say('Making a key…');
 		K.generate(pass).then(function (made) {
 			download('owner-' + made.meta.fingerprint.slice(0, 8) + '.pem', made.privatePem);
-			return K.save(made.record).then(refresh).then(function () {
-				say('Made, and the private half has downloaded. <strong>That file is the only other ' +
-					'copy</strong> — this browser’s is a convenience and goes when its storage does. ' +
-					'Now save the public key to the camera so it starts sealing recordings to it.', 'success');
-			});
+			return keep(made.record, made.key, made.meta,
+				'Made, and the private half has downloaded. <strong>That file is the only other ' +
+				'copy</strong> — this browser’s is a convenience and goes when its storage does. ' +
+				'Now save the public key to the camera so it starts sealing recordings to it.');
 		}).catch(function (e) {
 			say(esc(e.message || 'the key could not be made'), 'danger');
+		});
+	}
+
+	// Storing can simply not happen — a private window, blocked site data, a
+	// transaction that failed — and K.save() answers null when it did not. A
+	// page that says "saved" anyway sends somebody away believing they have a
+	// key here; the truthful answer is that it works for this visit and the
+	// PEM is the only copy that outlives it. Either way the key is held in
+	// memory, so the visit is usable rather than merely reported on.
+	function keep(rec, key, meta, kept) {
+		return K.save(rec).then(function (ok) {
+			K.holdKey(key, meta);
+			record = rec;
+			return refresh().then(function () {
+				say(storable === false || ok === null
+					? 'Loaded, and usable until this page is closed — this browser will not keep it ' +
+						'between visits, so the PEM file is the only copy. Private windows and blocked ' +
+						'site data both do this.'
+					: kept, storable === false || ok === null ? 'warning' : 'success');
+			});
 		});
 	}
 
@@ -568,9 +587,8 @@ window.MajesticRecKeys.ui = (function () {
 		} catch (e) {
 			return say(esc(e.message || 'that file is not a private key'), 'danger');
 		}
-		K.save(got.record).then(refresh).then(function () {
-			say('Loaded the key ending ' + esc(fp(got.meta.fingerprint.slice(-4))) + '.', 'success');
-		});
+		keep(got.record, got.key, got.meta,
+			'Loaded the key ending ' + esc(fp(got.meta.fingerprint.slice(-4))) + '.');
 	}
 
 	// Publishing is two writes and the second is not guessed at: the file goes
@@ -589,10 +607,21 @@ window.MajesticRecKeys.ui = (function () {
 		}).then(function (r) {
 			if (!r.ok) throw new Error('the camera answered ' + r.status);
 			return apiFetch('/api/v1/config.schema.json').then(function (s) {
-				return s.ok ? s.json() : null;
+				// A schema that did not arrive is not a schema without the
+				// setting in it. The two are reported apart below, because one
+				// is a fact about this firmware and the other is a fact about
+				// one HTTP request.
+				if (!s.ok) return { failed: s.status };
+				return s.json().then(function (j) { return { schema: j }; },
+					function () { return { failed: 'unreadable' }; });
 			});
-		}).then(function (schema) {
-			if (!settingExists(schema))
+		}).then(function (got) {
+			if (got.failed)
+				return say('The public key is on the camera at <code>' + esc(PUBLIC_PATH) + '</code>, ' +
+					'but its settings could not be read just now (' + esc(got.failed) + '), so nothing ' +
+					'else was changed. Point the recording settings at that file, or try again.',
+					'warning');
+			if (!settingExists(got.schema))
 				return say('The public key is on the camera at <code>' + esc(PUBLIC_PATH) + '</code>. ' +
 					'This firmware does not offer a setting to point at it, so nothing else was ' +
 					'changed — a newer build will.', 'warning');
@@ -613,15 +642,17 @@ window.MajesticRecKeys.ui = (function () {
 	function settingExists(schema) {
 		try {
 			const p = PUBLIC_KEY_SETTING.split('.');
-			let at = schema.properties;
+			let at = schema && schema.properties;
 			for (let i = 0; i < p.length; i++) {
 				if (!at || !at[p[i]]) return false;
 				at = i === p.length - 1 ? at[p[i]] : at[p[i]].properties;
 			}
 			return true;
 		} catch (e) {
-			// A schema that could not be read is not a schema that says no.
-			// Nothing is written on the strength of a failed fetch.
+			// A schema shaped in a way this walk did not expect. Reported the
+			// same as one without the setting, which is the safe half of the
+			// distinction: nothing is written. The other half — a schema that
+			// never arrived — is decided before this is called.
 			return false;
 		}
 	}
