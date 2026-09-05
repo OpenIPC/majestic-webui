@@ -3380,6 +3380,12 @@
 				// tells an automatic monitor from a blind one by it, and null
 				// (gauge absent) keeps the older-firmware reading.
 				src: ('night_mode_source' in v) ? v.night_mode_source : null,
+				// The wait the camera says it is currently applying. The
+				// hunting finding used to ASSERT that automatic mode backs off
+				// after a flip; this is the gauge that would show it, so the
+				// finding reads it instead of claiming it.
+				dwell: ('night_auto_dwell_seconds' in v)
+					? v.night_auto_dwell_seconds : null,
 			};
 			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
 			paintFindings();
@@ -3413,11 +3419,40 @@
 			host.hidden = true;
 		}
 	}
+	// The last metric sample and when it arrived, so the sentence can be
+	// re-read a second at a time between polls. The camera advances its streak
+	// counter on its own schedule and the heartbeat polls on another, so a
+	// countdown printed only on arrival lurches by whatever the two cadences
+	// beat out — five seconds at a time, unevenly, on the board in #325.
+	let monSample = null;
+	let monTick = null;
+	// When to project and by how much is decided in ircut-check.js, where it is
+	// tested against a fake clock; this only turns the handle.
+	const monClock = IRCUT.projector ? IRCUT.projector() : null;
+	function retellMonitor() {
+		const line = document.getElementById('mj-ircut-mon-line');
+		const age = monClock && monClock.age(performance.now() / 1000);
+		if (!line || !monSample || age == null) {
+			// The section is gone, or the camera has stopped answering and
+			// there is nothing honest left to count. Freeze on the last thing
+			// it actually said.
+			clearInterval(monTick);
+			monTick = null;
+			return;
+		}
+		const view = IRCUT.monitorView(nightCfg(), monSample, age);
+		// The sentence only. Re-dealing the chart every second would push a
+		// duplicate sample into it and re-render the whole plot for nothing.
+		if (view) line.textContent = view.line;
+	}
 	function paintMonitor(s) {
 		const box = document.getElementById('mj-ircut-mon');
 		if (!box) return;
 		const MC = window.MjCharts;
-		const view = IRCUT.monitorView(nightCfg(), (s.m && s.m.v) || null);
+		monSample = (s.m && s.m.v) || null;
+		const age = monClock
+			? monClock.push(monSample, performance.now() / 1000) : 0;
+		const view = IRCUT.monitorView(nightCfg(), monSample, age);
 		if (!view) {
 			box.hidden = true;
 			return;
@@ -3425,6 +3460,12 @@
 		box.hidden = false;
 		const line = document.getElementById('mj-ircut-mon-line');
 		if (line) line.textContent = view.line;
+		// Re-anchored on every sample rather than left free-running, so the
+		// retell falls BETWEEN two polls instead of wherever it happened to
+		// start. Free-running against a 2 s heartbeat it landed a fraction of
+		// a second after each sample and said the same number twice.
+		clearInterval(monTick);
+		monTick = setInterval(retellMonitor, 1000);
 		const host = document.getElementById('mj-ircut-mon-chart');
 		if (!host) return;
 		if (!view.chart || !MC) {
@@ -3432,7 +3473,7 @@
 			return;
 		}
 		host.hidden = false;
-		const key = view.mode + '|' + JSON.stringify(view.bands);
+		const key = view.mode + '|' + JSON.stringify(view.marks);
 		if (!monChart || monChart.host !== host || monKey !== key) {
 			// The superseded instance is unregistered, not merely abandoned:
 			// every remount of this section makes a new host, and the chart
@@ -3449,7 +3490,7 @@
 				h: 110, lo: 0, hi: null,
 				colors: [tok('--st-c1', '#4c60d8')],
 				grid: tok('--st-grid', '#e9ebf2'),
-				bands: view.bands,
+				marks: view.marks,
 				fmt: view.mode === 'auto'
 					? (x) => (x >= 10 ? String(Math.round(x)) : x.toFixed(1)) + 'x'
 					: undefined,

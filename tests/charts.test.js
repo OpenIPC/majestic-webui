@@ -305,12 +305,12 @@ group('a band is what the value is compared against, so the scale has to fit it'
 	// in a uniformly tinted box — while the camera was in fact nowhere near
 	// switching, and would have looked identical if it had been one step away
 	// (#325).
-	const bands = [
-		{ from: 0, to: 150000, color: 'rgba(47,182,115,.10)', label: 'day' },
-		{ from: 160000, to: null, color: 'rgba(255,193,7,.10)', label: 'night' },
+	const marks = [
+		{ v: 150000, color: '#2fb673', label: 'day' },
+		{ v: 160000, color: '#e0a020', label: 'night' },
 	];
 	const host = makeHost(400);
-	const ch = MC.makeChart(host, { h: 110, lo: 0, hi: null, colors: ['#000'], bands: bands });
+	const ch = MC.makeChart(host, { h: 110, lo: 0, hi: null, colors: ['#000'], marks: marks });
 	for (let i = 0; i < 3; i++) { clock.t = i * 2; MC.pushChart(ch, [1024]); }
 	const ticks = (host.innerHTML.match(/text-anchor="end">([\d.]+)</g) || [])
 		.map(t => parseFloat(t.replace(/[^\d.]/g, '')));
@@ -318,13 +318,20 @@ group('a band is what the value is compared against, so the scale has to fit it'
 		Math.max.apply(null, ticks) >= 160000,
 		'top tick ' + Math.max.apply(null, ticks));
 
-	// An open end is not a number. Spelt 1e9 as a stand-in for "and above" it
-	// is indistinguishable from a real edge, so the rule above would fit it
-	// and put the data, the day band and everything else in the bottom
+	// A band's open end is not a number either. Spelt 1e9 as a stand-in for
+	// "and above" it is indistinguishable from a real edge, so the rule above
+	// would fit it and put the data and everything else in the bottom
 	// millionth of the box — the same flat, plausible, useless line by another
 	// route.
-	check('and an open band end is not fitted into it',
-		Math.max.apply(null, ticks) < 1e6, 'top tick ' + Math.max.apply(null, ticks));
+	const open = makeHost(400);
+	const ch2 = MC.makeChart(open, { h: 110, lo: 0, hi: null, colors: ['#000'],
+		bands: [{ from: 160000, to: null, color: '#fff', label: 'night' }] });
+	clock.t += 2; MC.pushChart(ch2, [1024]);
+	const t2 = (open.innerHTML.match(/text-anchor="end">([\d.]+)</g) || [])
+		.map(x => parseFloat(x.replace(/[^\d.]/g, '')));
+	check('and an open band end is not fitted into the scale',
+		Math.max.apply(null, t2) >= 160000 && Math.max.apply(null, t2) < 1e6,
+		'top tick ' + Math.max.apply(null, t2));
 }
 
 done();

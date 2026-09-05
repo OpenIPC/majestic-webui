@@ -451,26 +451,60 @@ function runRest() {
 		check('auto mode charts gain in multiples',
 			auto && auto.mode === 'auto' && auto.value === 2.567,
 			auto && JSON.stringify(auto.value));
-		check('the day band runs to autoDayGain',
-			auto.bands[0].from === 0 && auto.bands[0].to === 2);
-		check('no night band without an explicit autoNightGain',
-			auto.bands.length === 1);
-		check('an explicit autoNightGain shades a night band',
+		// A threshold is a LEVEL, so it is a rule at its own value rather than
+		// a shaded region whose size follows the scale — which is what made
+		// the only marker on the plot shrink away as the gain rose (#325).
+		check('the day threshold is a rule at autoDayGain',
+			auto.marks.length === 1 && auto.marks[0].v === 2 &&
+			auto.marks[0].label === 'day');
+		check('no night rule without an explicit autoNightGain',
+			!auto.marks.some(m => m.label === 'night'));
+		check('an explicit autoNightGain draws one',
 			ic.monitorView({ lightMonitor: true, autoNightGain: 16 }, vAuto)
-				.bands.some(b => b.from === 16));
+				.marks.some(m => m.v === 16 && m.label === 'night'));
 		const counting = ic.monitorView(nmAuto, Object.assign({}, vAuto, {
 			night_auto_pending: 2, night_auto_streak_seconds: 20,
 			night_auto_dwell_seconds: 60,
 		}));
 		check('a pending switch counts down',
 			/switching in 40 s/.test(counting.line), counting.line);
+		// The camera's streak gauge advances on the camera's schedule, the page
+		// polls on another, and the two beat against each other — so the same
+		// sample is read forward by a local clock between polls. It is the
+		// camera's number carried forward, never a number of the page's own:
+		// every poll resyncs, and neither end of it may run away.
+		const aged = (age) => ic.monitorView(nmAuto, Object.assign({}, vAuto, {
+			night_auto_pending: 2, night_auto_streak_seconds: 20,
+			night_auto_dwell_seconds: 60,
+		}), age);
+		check('and falls a second at a time between polls',
+			/switching in 37 s/.test(aged(3).line), aged(3).line);
+		// Rounded rather than floored: a retell landing just short of a whole
+		// second must still advance, or it reprints the number it just
+		// printed and the countdown stutters instead of counting.
+		check('a retell just short of a second still advances it',
+			/switching in 39 s/.test(aged(0.9).line), aged(0.9).line);
+		check('a sample stamped in the future does not make it climb',
+			/switching in 40 s/.test(aged(-5).line), aged(-5).line);
+		check('and a switch the camera is late making does not go negative',
+			/switching in 0 s/.test(aged(900).line), aged(900).line);
+		// A streak gauge that has gone negative — a stepped clock under a
+		// "seconds held" counter — subtracts into a wait LONGER than the one
+		// configured, which is how a 60 s setting was shown as 250 s. The
+		// countdown cannot outlast its own dwell.
+		const stepped = ic.monitorView(nmAuto, Object.assign({}, vAuto, {
+			night_auto_pending: 2, night_auto_streak_seconds: -190,
+			night_auto_dwell_seconds: 60,
+		}), 0);
+		check('a stepped clock cannot stretch the wait past the dwell',
+			/switching in 60 s/.test(stepped.line), stepped.line);
 
 		const nmThr = { lightMonitor: true, minThreshold: 1500, maxThreshold: 4000 };
 		const thr = ic.monitorView(nmThr,
 			{ night_mode_source: 2, night_enabled: 1, isp_again: 6000 });
-		check('threshold mode charts raw isp_again with both bands',
+		check('threshold mode charts raw isp_again with both rules',
 			thr && thr.mode === 'thresholds' && thr.value === 6000 &&
-			thr.bands.length === 2);
+			thr.marks.length === 2);
 		check('an old daemon with thresholds still gets the chart',
 			ic.monitorView(nmThr, { isp_again: 2000 }).mode === 'thresholds');
 		// An older daemon publishes no source, so this file has to reproduce
@@ -483,15 +517,10 @@ function runRest() {
 				{ lightMonitor: true, lightSensorPin: 66,
 					minThreshold: 1500, maxThreshold: 4000 },
 				{ isp_again: 2000, night_enabled: 0 }).mode === 'sensor');
-		// The band that means "and everything above" is open-ended, and says so
-		// with null rather than a stand-in ceiling: the chart's auto scale
-		// makes room for a finite edge, so a made-up one would push the whole
-		// plot off the top.
-		check('the night band is open at the top',
-			thr.bands[1].from === 4000 && thr.bands[1].to === null);
-		check('so is the automatic mode\'s',
-			ic.monitorView({ lightMonitor: true, autoNightGain: 16 }, vAuto)
-				.bands.find(b => b.from === 16).to === null);
+		check('the night rule sits at maxThreshold',
+			thr.marks[1].v === 4000 && thr.marks[1].label === 'night');
+		check('and the day rule at minThreshold',
+			thr.marks[0].v === 1500 && thr.marks[0].label === 'day');
 
 		// Every state answers. A view with nothing continuous behind it says
 		// so with chart:false instead of vanishing — the block is the only
@@ -500,7 +529,7 @@ function runRest() {
 		const gpio = ic.monitorView({ lightMonitor: true, lightSensorPin: 66 },
 			{ night_mode_source: 1, night_enabled: 0 });
 		check('a GPIO source has nothing continuous to chart',
-			gpio.chart === false && gpio.value === null && !gpio.bands.length);
+			gpio.chart === false && gpio.value === null && !gpio.marks.length);
 		check('and says which way the sensor is pointing',
 			/^Day\. The daylight sensor decides/.test(gpio.line), gpio.line);
 		const adc = ic.monitorView(
@@ -634,6 +663,41 @@ function runRest() {
 				.some(x => x.id === 'conflict'));
 	}
 
+	group('projector: the local clock the countdown is read forward by');
+	{
+		// A pending switch, sampled by a heartbeat that polls faster than the
+		// camera's own gauge ticks. Both bugs below produce a fluent, moving
+		// sentence — one that counts the wrong way, one that counts for a
+		// camera that has stopped answering — and neither raises anything.
+		const at = (streak) => ({
+			night_auto_pending: 2, night_auto_dwell_seconds: 60,
+			night_auto_streak_seconds: streak,
+		});
+		const p = ic.projector(6);
+		check('a first sample is read as it stands', p.push(at(10), 100) === 0);
+		check('and a tick between polls ages it', p.age(101) === 1);
+		// The camera repeating itself is not the countdown standing still and
+		// is certainly not it going backwards: re-anchoring on a repeat threw
+		// away the second just counted and put the number back up.
+		check('a poll repeating the same reading keeps the projection',
+			p.push(at(10), 102) === 2, String(p.push(at(10), 102)));
+		check('and the camera moving on re-anchors to what it says',
+			p.push(at(15), 105) === 0);
+		// A streak that restarts is a change like any other; only an identical
+		// reading means "no news".
+		check('a restarted streak re-anchors too', p.push(at(0), 106) === 0);
+
+		// Past the stale window there is nothing honest left to count from.
+		const q = ic.projector(6);
+		q.push(at(10), 200);
+		check('a sample inside the window is still projected', q.age(205) === 5);
+		check('and one past it is not projected at all', q.age(207) === null);
+		check('a successful poll starts the window again',
+			q.push(at(10), 208) === 8 && q.age(209) !== null);
+		check('nothing is projected before the camera has answered',
+			ic.projector(6).age(1) === null);
+	}
+
 	group('diagnose: hunting, and the ordering of what it all reports');
 	{
 		const cfg = { irCutPin1: 11, lightSensorPin: 66, lightMonitor: true };
@@ -643,6 +707,32 @@ function runRest() {
 		check('two switches in the window is not',
 			!ic.diagnose(cfg, { night: 0, ircut: 0 }, { flips: 2, conflictS: 0 })
 				.some(x => x.id === 'hunting'));
+
+		// The finding used to state that automatic mode backs off after each
+		// flip. Nothing had measured that, and the daemon publishes the very
+		// number that would show it — so the sentence is now read off the
+		// gauge. It appears only when the camera is genuinely waiting longer
+		// than it was asked to, and stays silent otherwise, which is the whole
+		// difference between a reading and a claim. Testable only here: it
+		// takes a camera hunting at dusk, which is not a thing that can be
+		// arranged on demand.
+		const auto = { lightMonitor: true, irCutPin1: 11,
+			autoNightDelay: 15, autoDayDelay: 60 };
+		const hunt = (s) => ic.diagnose(auto, s, { flips: 3, conflictS: 0 })
+			.filter(x => x.id === 'hunting')[0].detail;
+		check('a stretched wait is reported as the camera\'s own number',
+			/stretched its wait to 240 s, up from the 60 s/.test(
+				hunt({ night: 1, ircut: 1, src: 4, dwell: 240 })),
+			hunt({ night: 1, ircut: 1, src: 4, dwell: 240 }));
+		check('a dwell equal to what was asked claims no backoff',
+			!/stretched/.test(hunt({ night: 1, ircut: 1, src: 4, dwell: 60 })),
+			hunt({ night: 1, ircut: 1, src: 4, dwell: 60 }));
+		check('and the direction decides which delay it is compared against',
+			!/stretched/.test(hunt({ night: 0, ircut: 0, src: 4, dwell: 15 })) &&
+			/up from the 15 s/.test(hunt({ night: 0, ircut: 0, src: 4, dwell: 40 })),
+			hunt({ night: 0, ircut: 0, src: 4, dwell: 40 }));
+		check('a camera that publishes no dwell gauge is not spoken for',
+			!/stretched/.test(hunt({ night: 1, ircut: 1, src: 4, dwell: null })));
 		const many = ic.diagnose(
 			{ lightMonitor: true, minThreshold: 9, maxThreshold: 9 },
 			{ night: 0, ircut: 1 }, { flips: 9, conflictS: 600 });

@@ -124,7 +124,7 @@ window.MjCharts = (function () {
 	// measured width, which is not knowable this early.
 	const PAD_T = 5;  // headroom above the top gridline
 	const X_BAND = 14; // the "-2 min / now" strip below the plot
-	const LBL_H = 12;  // a band shorter than this has no room for its own label
+	const LBL_H = 12;  // one line of band-label text: the spacing labels keep
 	function chartHeight(cfg) { return PAD_T + cfg.h + X_BAND; }
 	function makeChart(sel, cfg) {
 		const host = typeof sel === 'string' ? $(sel) : sel;
@@ -176,6 +176,14 @@ window.MjCharts = (function () {
 		// spelt null rather than some large number so the auto scale below can
 		// tell a real edge from a stand-in for infinity.
 		const bands = cfg.bands || [];
+		// A THRESHOLD is a level, not a region — so it is drawn as a rule at
+		// its own value with its name beside it, and it keeps that size at
+		// every scale. Shading the region instead ties the marker's size to
+		// the scale, which is how the Day / Night chart's only marker came to
+		// shrink away as the gain rose (#325): the reporter asked for the line,
+		// and the line is right. Bands stay for the dashboard, where a band
+		// really is a region — the Wi-Fi grades are ranges, not edges.
+		const marks = cfg.marks || [];
 		if (hi == null) {
 			let max = 0;
 			pts.forEach(p => p.v.forEach(v => { if (v != null && v > max) max = v; }));
@@ -198,6 +206,9 @@ window.MjCharts = (function () {
 				[b.from, b.to].forEach(e => {
 					if (e != null && isFinite(e) && e > top) top = e;
 				});
+			});
+			marks.forEach(m => {
+				if (m.v != null && isFinite(m.v) && m.v > top) top = m.v;
 			});
 			hi = niceCeil(Math.max(top, 1));
 		}
@@ -226,19 +237,40 @@ window.MjCharts = (function () {
 		let s = '';
 		// threshold bands (Wi-Fi grades, luminance floor, day/night) sit under
 		// everything. An open end reaches the edge of the plot.
+		//
+		// Every band that is drawn keeps its name, and the name is PLACED
+		// rather than dropped. Suppressing the label of a band too thin to
+		// hold one looked like the tidy answer to two names landing on the
+		// same pixel, and it was worse than the overlap: on the Day / Night
+		// chart the day band shrinks as the scale grows, so covering the lens
+		// made the only marker on the plot disappear — the reader loses the
+		// legend exactly when the picture starts moving (#325). So a band
+		// narrower than a line of text gets its name centred ON it instead,
+		// and a name that would land on one already taken is nudged clear.
+		const taken = [];
+		// Keeps names off each other and inside the plot. Down first, because
+		// a name belongs at the top of what it names, so the one that gives
+		// way is the lower of the pair; up only when down runs out of plot.
+		const place = (y) => {
+			const top = padT + 8, bot = padT + H - 1;
+			const clash = (t) => taken.some(u => Math.abs(u - t) < LBL_H);
+			while (clash(y) && y + LBL_H <= bot) y += LBL_H;
+			while (clash(y) && y - LBL_H >= top) y -= LBL_H;
+			y = y > bot ? bot : y < top ? top : y;
+			taken.push(y);
+			return y;
+		};
+		// A band's name sits inside it, or centred on it when it is thinner
+		// than a line of text.
+		const placeBand = (y1, y2) =>
+			place(y2 - y1 >= LBL_H ? y1 + 10 : y1 + (y2 - y1) / 2 + 3.5);
 		bands.forEach(b => {
 			const y1 = b.to == null ? padT : Y(b.to);
 			const y2 = b.from == null ? padT + H : Y(b.from);
 			s += '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + plotW +
 				'" height="' + (y2 - y1).toFixed(1) + '" fill="' + b.color + '"/>';
-			// A band squeezed off the plot keeps no room for its own name, and
-			// the name does not shrink with it: two bands clamped to the same
-			// edge printed both words on the same pixel, which is how "day" and
-			// "night" came out as one unreadable smudge. Bands do not overlap,
-			// so once each drawn band is at least a label tall their labels are
-			// necessarily that far apart too — the one guard covers both.
-			if (b.label && y2 - y1 >= LBL_H) {
-				s += '<text x="' + (padL + plotW - 4) + '" y="' + (y1 + 10).toFixed(1) +
+			if (b.label) {
+				s += '<text x="' + (padL + plotW - 4) + '" y="' + place(y1, y2).toFixed(1) +
 					'" text-anchor="end" opacity="0.8">' + b.label + '</text>';
 			}
 		});
@@ -248,6 +280,21 @@ window.MjCharts = (function () {
 			s += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (padL + plotW) +
 				'" y2="' + y.toFixed(1) + '" stroke="' + grid + '" stroke-width="1"/>';
 			s += '<text x="' + (padL - 5) + '" y="' + (y + 3.5).toFixed(1) + '" text-anchor="end">' + ticks[i] + '</text>';
+		});
+		marks.forEach(m => {
+			if (m.v == null || !isFinite(m.v) || m.v < lo || m.v > hi) return;
+			const y = Y(m.v);
+			s += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' +
+				(padL + plotW) + '" y2="' + y.toFixed(1) + '" stroke="' +
+				(m.color || grid) + '" stroke-width="1" stroke-dasharray="3 3"/>';
+			if (m.label) {
+				// Above the rule where there is room for it, below where the
+				// rule is at the very top of the plot.
+				const above = y - 4 >= padT + 8;
+				s += '<text x="' + (padL + plotW - 4) + '" y="' +
+					place(above ? y - 4 : y + 10).toFixed(1) +
+					'" text-anchor="end" opacity="0.9">' + m.label + '</text>';
+			}
 		});
 		if (cfg.ref && cfg.ref.v > lo && cfg.ref.v < hi) {
 			const y = Y(cfg.ref.v);

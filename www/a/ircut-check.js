@@ -99,6 +99,26 @@
 	// view, cannot raise a banner on its own.
 	const PIC_STREAK = 4;
 
+	// What the camera says it is waiting, when that is longer than what was
+	// asked for — and nothing at all when it is not.
+	//
+	// This replaced a sentence stating flatly that automatic mode "slows itself
+	// down after each flip". Nothing here had ever measured that: across every
+	// transition observed on an hi3516ev300 the dwell gauge read back exactly
+	// the configured delay and never more. It may well be true on some build,
+	// and that is the point — the daemon publishes the wait it is applying, so
+	// a page that can READ the number has no business asserting the mechanism
+	// behind it. If a backoff exists, this prints it; if it does not, this says
+	// nothing and the advice below still stands.
+	function stretched(nm, sample) {
+		if (!sample || typeof sample.dwell !== 'number' || sample.dwell < 0) return '';
+		// Whichever way it is about to go decides which delay was asked for.
+		const asked = sample.night ? pin(nm.autoDayDelay) : pin(nm.autoNightDelay);
+		if (asked === null || sample.dwell <= asked) return '';
+		return 'The camera has already stretched its wait to ' + sample.dwell +
+			' s, up from the ' + asked + ' s set below. ';
+	}
+
 	// Findings, worst first. `fix` names the section to send someone to; the
 	// consumer decides whether that becomes a link or a tab switch.
 	//
@@ -367,10 +387,12 @@
 					detail: track.flips + ' switches in the last ' +
 						(HUNT_WINDOW_S / 60) + ' minutes. ' +
 						(sample && sample.src === 4
-							? 'Automatic mode slows itself down after each flip, ' +
-								'but a flashing light aimed at the camera can still ' +
-								'drive it; raising "Seconds of brightness before ' +
-								'day" stretches the cycle further.'
+							? stretched(nm, sample) +
+								'Something in view is moving the light on and off — ' +
+								'a security lamp, headlights, a sign. Raising ' +
+								'"Seconds of brightness before day" and "Seconds ' +
+								'of darkness before night" makes the camera sit ' +
+								'each one out.'
 							: 'Widen the gap between the day and night thresholds ' +
 								'so dusk cannot sit on the boundary.'),
 					fix: 'nightMode',
@@ -684,8 +706,56 @@
 	// had not shipped for their SoC. A sentence is not a graph, but it is an
 	// answer, and it is beside the switch.
 	//
+	// The local clock behind the countdown, kept here rather than in the page
+	// so that it can be driven by a fake one. Two moments, and conflating them
+	// is what makes this subtle:
+	//
+	//   `seen`   the last time the camera ANSWERED. Past `staleS` of silence
+	//            the projection stops: a failed poll leaves the last sample
+	//            standing, and ageing that one walks the countdown to zero and
+	//            announces a switch on behalf of a camera that has gone away.
+	//   `anchor` the last time its answer CHANGED. The streak gauge is coarse
+	//            — a second on one board, five on another — and the heartbeat
+	//            polls every two, so most polls during a pending switch repeat
+	//            the previous value. Re-anchoring on those throws away the
+	//            second just counted and puts the number back UP: 50, 49, 50,
+	//            49. The anchor therefore moves only on a reading that differs,
+	//            which covers forward progress and a restarted streak alike.
+	function projector(staleS) {
+		const limit = typeof staleS === 'number' ? staleS : 6;
+		let last = null, anchor = 0, seen = 0;
+		const differs = (a, b) =>
+			a.night_auto_streak_seconds !== b.night_auto_streak_seconds ||
+			a.night_auto_pending !== b.night_auto_pending ||
+			a.night_auto_dwell_seconds !== b.night_auto_dwell_seconds;
+		return {
+			// A successful poll. Returns the age to read this sample forward by.
+			push: function (v, nowS) {
+				if (!v) { last = null; return 0; }
+				if (!last || differs(last, v)) anchor = nowS;
+				last = v;
+				seen = nowS;
+				return nowS - anchor;
+			},
+			// A tick between polls; null when there is nothing honest left to
+			// project from.
+			age: function (nowS) {
+				if (!last || nowS - seen > limit) return null;
+				return nowS - anchor;
+			},
+		};
+	}
+
 	// null now means only that the camera has not answered yet.
-	function monitorView(nm, v) {
+	//
+	// `ageS` is how long ago `v` was sampled. The camera advances its streak
+	// counter on its own schedule — a second here, five seconds on the board
+	// the reporter of #325 was watching — and the page polls on a third, so a
+	// countdown printed straight from the two gauges lurches by whatever the
+	// two cadences happen to beat out. Ageing the streak locally makes it fall
+	// a second at a time and resync on every sample: the number is still the
+	// camera's, read forward by a clock rather than invented.
+	function monitorView(nm, v, ageS) {
 		nm = nm || {};
 		if (!v) return null;
 		const src = ('night_mode_source' in v) ? v.night_mode_source : null;
@@ -705,7 +775,7 @@
 
 		// A state with no plot: one sentence, no bands, no value.
 		const say = (mode, line) => ({
-			mode: mode, chart: false, value: null, bands: [],
+			mode: mode, chart: false, value: null, marks: [],
 			line: line, unit: '',
 		});
 
@@ -722,19 +792,15 @@
 		if (src === 4) {
 			const dayG = pin(nm.autoDayGain) !== null ? pin(nm.autoDayGain) : 2;
 			const nightG = pin(nm.autoNightGain);
-			const bands = [{
-				from: 0, to: dayG,
-				color: 'rgba(47,182,115,.10)', label: 'day',
-			}];
+			// Each threshold is a rule at its own level rather than a shaded
+			// region: the level is the whole fact, and a region's size follows
+			// the scale, which is what made the day marker shrink to nothing
+			// as the gain rose. Only a threshold that EXISTS gets a line — an
+			// automatic camera with no night gain set has no night level to
+			// draw, and the sentence says so instead.
+			const marks = [{ v: dayG, color: '#2fb673', label: 'day' }];
 			if (nightG !== null) {
-				// Open at the top: "everything above the night threshold"
-				// has no ceiling, and saying so with null rather than a large
-				// number is what keeps the chart's auto scale from trying to
-				// fit one on the plot.
-				bands.push({
-					from: nightG, to: null,
-					color: 'rgba(255,193,7,.10)', label: 'night',
-				});
+				marks.push({ v: nightG, color: '#e0a020', label: 'night' });
 			}
 			const gm = v.night_auto_gain_milli;
 			const pend = v.night_auto_pending;
@@ -742,9 +808,29 @@
 			// there is no number to count from, and "switching in 0 s" would
 			// be a confident sentence made of nothing.
 			const dwell = v.night_auto_dwell_seconds;
-			const streak = v.night_auto_streak_seconds;
-			const left = typeof dwell === 'number' && typeof streak === 'number'
-				? Math.max(0, dwell - streak) : null;
+			const held = v.night_auto_streak_seconds;
+			// Only ever forward, and never past the end: a sample that is
+			// somehow stamped in the future must not make the countdown climb,
+			// and a monitor whose switch is late must not print a negative.
+			// Rounded, not floored. A retell landing 0.9 s after its sample
+			// floors to nothing and reprints the number it just printed, so
+			// the countdown stutters — 13, 13, 11, 11 — which is the jerk it
+			// was meant to remove wearing a smaller amplitude.
+			const streak = typeof held === 'number'
+				? held + (typeof ageS === 'number' && ageS > 0 ? Math.round(ageS) : 0)
+				: null;
+			// Bounded by the dwell at the top as well as by zero at the
+			// bottom. The countdown is arithmetic on two gauges, and a streak
+			// that comes back NEGATIVE — which is what a monotonic-looking
+			// "seconds held" turns into the moment the camera's clock is
+			// stepped by an NTP correction — makes the subtraction produce a
+			// wait LONGER than the one the operator configured. The reporter
+			// of #325 was shown 250 s against a 60 s setting. Nothing can be
+			// held for less than no time, and nothing can be waited for longer
+			// than the dwell, so neither end of that is a reading worth
+			// repeating.
+			const left = typeof dwell === 'number' && streak !== null
+				? Math.max(0, Math.min(dwell, dwell - streak)) : null;
 			const inLeft = left === null ? '.' :
 				' — switching in ' + left + ' s if it stays.';
 			const line = pend === 1
@@ -758,7 +844,7 @@
 			return {
 				mode: 'auto', chart: true,
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
-				bands: bands, line: line + lampNote,
+				marks: marks, line: line + lampNote,
 				unit: 'x',
 			};
 		}
@@ -777,23 +863,13 @@
 			(src === null && !has(nm.lightSensorPin) &&
 				has(nm.minThreshold) && has(nm.maxThreshold))) {
 			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
-			const bands = [];
-			if (lo !== null) {
-				bands.push({
-					from: 0, to: lo,
-					color: 'rgba(47,182,115,.10)', label: 'day',
-				});
-			}
-			if (hi !== null) {
-				bands.push({
-					from: hi, to: null,
-					color: 'rgba(255,193,7,.10)', label: 'night',
-				});
-			}
+			const marks = [];
+			if (lo !== null) marks.push({ v: lo, color: '#2fb673', label: 'day' });
+			if (hi !== null) marks.push({ v: hi, color: '#e0a020', label: 'night' });
 			return {
 				mode: 'thresholds', chart: true,
 				value: ('isp_again' in v) ? v.isp_again : null,
-				bands: bands,
+				marks: marks,
 				line: modeWord +
 					'Comparing raw sensor gain against the thresholds ' +
 					'(vendor-specific units).' + lampNote,
@@ -827,6 +903,7 @@
 
 	const api = {
 		diagnose: diagnose, tracker: tracker, monitorView: monitorView,
+		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
 		verdict: verdict, probe: probe, snapshot: snapshot, wired: wired,
