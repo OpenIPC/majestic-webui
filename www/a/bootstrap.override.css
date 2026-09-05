@@ -3462,11 +3462,17 @@ mark {
 }
 
 /* Both right-hand controls go back to the first line where the notice has a
-   body row under its sentence. There the text column can be a paragraph, three
-   lines of dmesg and a control of its own, and the middle of that is nowhere:
-   the action belongs against the headline it answers. Only the SD-card health
-   banner is built this way. A browser without :has() centres them, which is the
-   request as asked and no worse than any other notice gets. */
+   body row under its sentence, because a body row is content that can GROW and
+   the action answers the headline rather than the block. Three notices carry
+   one: the firmware-behind banner, whose body is a "What's new" list that the
+   reader opens; the recordings page's card-trouble banner, which carries the
+   kernel's own messages; and the SD-card page's, which puts its repair button
+   down there rather than in this row. Measured on the first of those with its
+   list open, centring puts the button 63px down, level with the bullets and
+   clear of the sentence it belongs to; against the first line it stays at 26px
+   whether the list is open or shut, which is the point. A browser without
+   :has() centres them, which is the request as asked and no worse than any
+   other notice gets. */
 .mj-notice:has(.mj-notice-body) > .mj-notice-acts {
 	align-self: flex-start;
 }
