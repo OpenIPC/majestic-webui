@@ -189,6 +189,25 @@ group('aes-128-ctr');
 		hex(two.subarray(16)) === hex(second));
 })();
 
+(function longStream() {
+	// A single block vector exercises one path through the tables and can pass
+	// with an S-box entry wrong: most blocks never touch a given byte, and one
+	// that touches a wrong entry only in the last round comes out with a
+	// single byte wrong — inside a frame, that is a smear on one macroblock.
+	// So a long stream is compared against an implementation with no shared
+	// ancestry with this one. It is the same argument as the RSA fixture,
+	// and it is what caught exactly that bug.
+	const key = fromHex('603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4');
+	const k128 = key.subarray(0, 16);
+	const iv = fromHex('f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+	const zeros = new Uint8Array(4096);
+	const mine = hex(C.aes128CtrXor(k128, iv, zeros));
+	const theirs = require('crypto')
+		.createCipheriv('aes-128-ctr', Buffer.from(k128), Buffer.from(iv))
+		.update(Buffer.from(zeros)).toString('hex');
+	check('4 KiB of keystream matches an independent implementation', mine === theirs);
+})();
+
 (function streaming() {
 	// One sample's protected runs are handed over one after another and must
 	// come out as one keystream. A run is a NAL minus a five-byte clear

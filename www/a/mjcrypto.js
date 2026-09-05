@@ -292,7 +292,16 @@ window.MajesticCrypto = (function () {
 		}
 		SBOX[0] = 0x63;
 		for (let i = 0; i < 255; i++) {
-			const inv = p[255 - l[p[i]]];
+			// The inverse of g^i is g^(255-i), and the exponents run mod 255 —
+			// so i = 0 asks for g^255, which is g^0. Reading p[255] instead
+			// finds the one slot this table never fills, and the S-box entry
+			// for 0x01 comes out as the entry for 0x00. One byte wrong in one
+			// table: most blocks are unaffected, a block that touches it in
+			// the last round has a single byte wrong, and one that touches it
+			// earlier is wrong throughout. A single-block vector can pass
+			// through all of that untouched, which is why there is a long
+			// stream in the tests as well.
+			const inv = p[(255 - l[p[i]]) % 255];
 			let s = inv ^ 0x63;
 			for (let j = 1; j < 5; j++) s ^= ((inv << j) | (inv >>> (8 - j))) & 255;
 			SBOX[p[i]] = s & 255;
