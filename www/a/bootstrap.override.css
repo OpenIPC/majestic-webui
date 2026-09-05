@@ -3378,17 +3378,22 @@ mark {
 }
 
 /* The sentence is the part that wraps; the actions after it never do. They are
-   two or three words each and one of them is a link that reads as a label, so
-   "Open Day / Night" broken across two lines looks like a stray fragment of
-   the paragraph rather than the thing to press. The row itself stays one row
-   at every width above sm — wrapping it puts the mark, the sentence and the
-   actions on three lines each of which is mostly empty, because the sentence
-   is a flex item that will not shrink past its longest word. */
+   two or three words each and they are buttons, so "Open Day / Night" broken
+   across two lines is a button with a ragged label rather than the thing to
+   press. The row itself stays one row at every width above sm — wrapping it
+   puts the mark, the sentence and the actions on three lines each of which is
+   mostly empty, because the sentence is a flex item that will not shrink past
+   its longest word.
+
+   The gap is 0.5rem rather than the 0.875rem it was while these were bare
+   links. Text needs the air to read as two separate labels; two buttons carry
+   their own edges, and at 14px apart they read as two unrelated controls that
+   happen to be near each other rather than as the pair of choices they are. */
 .mj-notice-acts {
 	flex: 0 0 auto;
 	display: flex;
 	align-items: center;
-	gap: 0.875rem;
+	gap: 0.5rem;
 	margin-left: auto;
 	white-space: nowrap;
 	font-size: 0.875rem;

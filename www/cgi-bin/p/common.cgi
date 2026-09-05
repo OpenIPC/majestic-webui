@@ -323,22 +323,35 @@ log_create() {
 # emits for the pages that build a notice in the browser -- a severity mark
 # that differs between two pages is worse than no mark at all.
 #
-# The actions have one vocabulary, and it is about what pressing them DOES
-# rather than about how important the notice is (#347). A notice says what is
-# wrong and points at the page that fixes it, so its ordinary action is a plain
-# link ending in an arrow -- "Open Day / Night ->" -- and it is a link for the
-# same reason the sentence is a sentence: nothing has happened yet. A filled
-# .btn is reserved for the rare action that happens where it stands, and today
-# that is exactly one href, restart.cgi, which reboots the camera on GET. Both
-# spellings sit side by side in camera.cgi's stopped-daemon banner, which is
-# what the pair is for: one goes to the log, the other restarts the camera.
+# EVERY action is a button, and the colour says what pressing it costs (#347).
+# A notice is read the way a system dialog is -- a sentence, a way out in the
+# corner, and the thing to press -- so the thing to press is shaped like one.
+# The reporter of #347 put it plainly after seeing the alternative: a bare link
+# among banners of buttons is the odd one out, and an arrow after it says only
+# what the underline already said.
 #
-# It went wrong the way one vocabulary with two writers always does. The
-# firmware-behind banner drew "Firmware update ->" as a filled btn-primary and
-# the recordings banner drew "Open the SD card page" as a btn-danger, both of
-# them navigation, so the Dashboard showed two notices making the same offer in
-# two different shapes. tests/notice.test.js walks every action group in the
-# tree and holds the rule.
+#   btn-primary    go to the page that fixes this
+#   btn-secondary  a second, diagnostic destination beside a primary
+#   btn-danger     acts on the camera when pressed, not a destination
+#
+# btn-secondary rather than btn-outline-secondary, which is the more obvious
+# reading of "the quieter one", because the outline's label is the SAME grey
+# as its border: measured on this card it is 3.51:1 on the dark theme, where
+# the filled one puts white on that grey and reaches 4.69:1 in both themes. A
+# filled grey is quieter than a filled blue or red anyway -- it is the least
+# saturated thing in the row -- so nothing is lost by taking the legible one.
+#
+# The last one is not decoration. main.js hangs its confirm() off .btn-danger
+# and .btn-warning, so that class is a promise that pressing does something
+# worth asking about; today exactly one href earns it, restart.cgi, which
+# reboots the camera on GET. Putting it on a link that merely navigates is how
+# the recordings banner came within one initAll() timing accident of asking
+# "Are you sure?" before letting somebody read a page.
+#
+# The vocabulary drifted once already, because it is written in three languages
+# -- this argument, hand-written .mj-notice-acts markup, and an `acts:` literal
+# in JS -- and nothing compared them. tests/notice.test.js now does, over every
+# action in the tree, by name.
 notice_icon() {
 	local d
 	case "$1" in

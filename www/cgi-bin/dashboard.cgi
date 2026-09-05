@@ -60,7 +60,7 @@ done) %>
 	<div class="mj-notice mj-notice-warn" id="st-alert-ircut" hidden>
 		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
 		<div class="mj-notice-txt"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></div>
-		<span class="mj-notice-acts"><a href="camera.cgi?tab=nightMode">Open Day / Night &rarr;</a></span>
+		<span class="mj-notice-acts"><a class="btn btn-sm btn-primary" href="camera.cgi?tab=nightMode">Open Day / Night</a></span>
 		<!-- A bare ×, and it has been three things. "No filter here" read as
 		     something the page was ASSERTING rather than a button; "Dismiss"
 		     fixed that but put a second link-styled phrase beside "Open Day /
@@ -84,12 +84,12 @@ done) %>
 	<div class="mj-notice mj-notice-warn" id="st-alert-novideo" hidden>
 		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
 		<div class="mj-notice-txt"><b id="st-alert-novideo-t"></b> &mdash; <span id="st-alert-novideo-d"></span></div>
-		<span class="mj-notice-acts"><a id="st-alert-novideo-a" href="camera.cgi?tab=isp"></a>
+		<span class="mj-notice-acts"><a class="btn btn-sm btn-primary" id="st-alert-novideo-a" href="camera.cgi?tab=isp"></a>
 		<!-- Only on a hardware finding. What this page can say is worked out
 		     from two gauges; the log is where majestic says what happened when
 		     it brought the sensor up, and it is what an owner can screenshot
 		     for whoever sold them the camera. -->
-		<a id="st-alert-novideo-h" href="logs.cgi" hidden></a></span>
+		<a class="btn btn-sm btn-secondary" id="st-alert-novideo-h" href="logs.cgi" hidden></a></span>
 	</div>
 	<!-- Why you are here, when the Live page sent you and the fault has since
 	     cleared. Being moved to another page for no visible reason is worse
@@ -104,7 +104,7 @@ done) %>
 		     sentence starts as the bare fact of the hand-off and only earns its
 		     second half (status.js) once the check has run and found nothing. -->
 		<div class="mj-notice-txt">Live video was not available a moment ago, so you were brought here.<span id="st-alert-wasnovideo-ok"></span></div>
-		<span class="mj-notice-acts"><a href="live.cgi">Open Live &rarr;</a></span>
+		<span class="mj-notice-acts"><a class="btn btn-sm btn-primary" href="live.cgi">Open Live</a></span>
 	</div>
 </div>
 
