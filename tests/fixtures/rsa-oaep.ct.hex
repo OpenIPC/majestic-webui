@@ -1,0 +1,7 @@
+# RSA-OAEP(SHA-256, MGF1-SHA-256) of the 48 bytes in plain.txt, made once with openssl.
+# openssl pkeyutl -encrypt -pubin -inkey rsa-oaep.pub.pem -in plain.txt -out - \
+#   -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256
+965c992011f2ad665139cc6bb82943412a65d06e7f44157c98668af1c2632fc31afeebd34b7a02d5436afd73373dd287c5c01147ea2bbf1920740841f5de6978
+762a58c2af5b0ffaf8816acbd474ff1e16416f94c7f6d881e214edbe90d5985a1686ba71b2017177a92557c2bbb2921893704db05fb53a0fa86ad2922a3a8eaf
+473372968c09231f487a5a442e20e49c591773726aa9431ff38378ce6e20182732761cc770f4c08d760e5f69745302f8d9e424c3821c1aa3af086c5b1c42ef94
+95978b2bb99bc5b692e85352ea5530d064c04df66efd0e6af1446a8cc1b79be3f343f1d121f026658e6ae49e20e294b563afd58396fec5de9c25066c95afff3f
