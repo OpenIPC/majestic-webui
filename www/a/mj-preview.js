@@ -184,6 +184,15 @@ window.MajesticPreview = (function () {
 		// channel is still a request worth honouring — an H.264 substream plays
 		// in a browser that refused an H.265 main.
 		let exhausted = false;
+		// A page-level reconnect ladder for the software rung, matching
+		// preview-page.js and backing the worker's own (hevc-wasm@v0.1.1): a
+		// pinned worker older than that gives up on the first dropped socket,
+		// and this panel — which has no MJPEG fallback — then shows its "could
+		// not be played" alert for good, the #288 dead-end on the settings page.
+		// Retry the rung a few times before the alert; reset by a promotion.
+		const WASM_MAX_RETRIES = 5;
+		const WASM_RETRY_MS = 1000;
+		let wasmRetries = 0;
 		let frame = null;
 		// Bumped whenever the picture stops being what it was — a channel
 		// change, a dropped chain. An async consumer (the luma sampler reads a
@@ -249,6 +258,12 @@ window.MajesticPreview = (function () {
 			const p = pending;
 			pending = null;
 			if (!p.w || !p.h) return;
+			// A real decoded frame is on screen, so the software rung recovered:
+			// reset its page-level reconnect ladder here rather than in
+			// onPromoted, which also fires for an unproven promotion still
+			// connecting — resetting there would let the #288 backstop retry
+			// without bound instead of a bounded few times.
+			wasmRetries = 0;
 			const same = frame && frame.w === p.w && frame.h === p.h &&
 				frame.codec === p.codec;
 			frame = { w: p.w, h: p.h, codec: p.codec };
@@ -318,6 +333,18 @@ window.MajesticPreview = (function () {
 			if (kind === 'mse' && window.MajesticTransport.softwareRungForCodec(
 				detail, get(stream ? 'video1.codec' : 'video0.codec'))) {
 				swap.start('wasm');
+				return;
+			}
+			// The software rung dropped its socket. Retry it a bounded few times
+			// before the alert, so a transient blip does not end a working H.265
+			// preview here (#288). Reset by a promotion (onPromoted); only a
+			// socket drop reports 'unreachable', so this cannot loop.
+			if (kind === 'wasm' && String(detail || '').split(' ')[0] === 'unreachable' &&
+				wasmRetries < WASM_MAX_RETRIES) {
+				wasmRetries++;
+				setTimeout(function () {
+					if (!exhausted) swap.start('wasm');
+				}, WASM_RETRY_MS * wasmRetries);
 				return;
 			}
 			exhausted = true;

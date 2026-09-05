@@ -120,6 +120,19 @@
 	// They part company for the length of that retry, and that gap is the
 	// point: the picture stays until the replacement has one of its own.
 	let holdingFallback = null;
+	// A page-level reconnect ladder for the software-decode rung, and a belt to
+	// the worker's own braces (hevc-wasm@v0.1.1). A pinned worker older than
+	// that gives up on the FIRST dropped socket, and the chain reads that one
+	// `unreachable` as "software decode is done" and falls to MJPEG with no way
+	// back — the #288 dead-end, where a transient blip stranded a working H.265
+	// preview until the tab was reloaded. So a wasm socket drop is retried here
+	// a few times before MJPEG, reset by a picture reaching the stage
+	// (showVideo). It cannot loop: only a socket drop reports `unreachable`; a
+	// codec the decoder cannot take reports `codec-changed`, and a missing
+	// decoder `decoder-unavailable`, both of which terminate the chain instead.
+	const WASM_MAX_RETRIES = 5;
+	const WASM_RETRY_MS = 1000;
+	let wasmRetries = 0;
 	function showVideo() {
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = '#000'; }
@@ -903,6 +916,24 @@
 			attachPlayer('wasm');
 			return;
 		}
+		// The software rung itself dropped its socket. A current worker has
+		// already retried six times before saying so; an older pinned one gave
+		// up on the first drop. Either way, retry the rung a bounded few times
+		// before MJPEG rather than ending a working H.265 preview on one blip
+		// (#288). Reset by a picture (showVideo); terminates on anything but a
+		// socket drop, so it cannot loop.
+		if (kind === 'wasm' && String(detail || '').split(' ')[0] === 'unreachable' &&
+			wasmRetries < WASM_MAX_RETRIES) {
+			wasmRetries++;
+			// The caller has already retired the live player (or it was a failed
+			// trial), so its last frame stays on the stage through the wait
+			// rather than blanking it — the same picture-holding rule as a
+			// transport switch.
+			setTimeout(function () {
+				if (fellBack === null) attachPlayer('wasm');
+			}, WASM_RETRY_MS * wasmRetries);
+			return;
+		}
 		showFallback(detail);
 	}
 
@@ -921,6 +952,12 @@
 	// `inset: 0` and letterbox, which is Fit.
 	function applyMedia(m) {
 		chipMedia = m;
+		// A real decoded frame reached the stage, so the software rung is
+		// genuinely playing again: reset its page-level reconnect ladder. This
+		// is the "recovered" signal, not showVideo() — that also runs for an
+		// unproven promotion still connecting, and resetting there would let the
+		// #288 backstop retry for ever instead of a bounded few times.
+		wasmRetries = 0;
 		if (window.MajesticZoom) window.MajesticZoom.setFrame(m.w, m.h);
 		setChip();
 	}

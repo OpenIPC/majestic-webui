@@ -34,7 +34,7 @@ window.MajesticWasm = (function () {
 	// MJ_WASM_BASE overrides it, for a development build or an operator who
 	// would rather host it themselves.
 	const BASE = (window.MJ_WASM_BASE ||
-		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.1.0/dist/');
+		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.1.1/dist/');
 	const LOAD_TIMEOUT_MS = 8000;
 
 	// A Worker cannot be constructed from a cross-origin URL, so the worker
