@@ -65,7 +65,17 @@ function run(opts) {
 			setItem(k, v) { if (opts.storageThrows) throw new Error('denied'); stored = v; },
 		},
 		mjNotice(sev, html) { painted = { sev, html }; return '<div>' + html + '</div>'; },
-		fetch() {
+		// Two endpoints now: the public feed, and the camera's own answer about
+		// whether an image it can install exists. Tests that do not care about
+		// the second get "yes, there is one", so they keep testing the first.
+		fetch(url) {
+			const isFw = String(url).indexOf('fw-latest') !== -1;
+			if (isFw) {
+				if (opts.fwFails) return Promise.reject(new Error('no updater'));
+				const fw = ('fw' in opts) ? opts.fw : { newer: true };
+				if (fw === null) return Promise.resolve({ ok: false, status: 500 });
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(fw) });
+			}
 			if (opts.netFails) return Promise.reject(new Error('offline'));
 			if (opts.httpStatus) return Promise.resolve({ ok: false, status: opts.httpStatus });
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(opts.feed) });
@@ -209,6 +219,31 @@ const VER = (rev, date) => 'Lite HiSilicon (hi3516ev300), HEAD+' + rev + ', ' + 
 			version: 'Lite HiSilicon (hi3516ev300), HEAD+deadbeef1',
 			feed: feedOf([entry('aaaaaaaaa', { fix: 9 })]),
 		})) === null);
+
+	group('nothing to install means nothing to say');
+
+	// majestic-webui#348: the notice said a camera was behind while the Firmware
+	// page correctly offered nothing to install. The software and the image it
+	// ships in do not become available at the same moment, so the notice has to
+	// wait for the image.
+	const behind = {
+		version: VER(MINE, iso(30)),
+		feed: feedOf([entry('aaaaaaaaa', { feature: 2, fix: 6, security: 1 }), entry(MINE, {})]),
+	};
+	check('with an installable image, it speaks',
+		(await run(Object.assign({}, behind, { fw: { newer: true } }))) !== null);
+	check('with no newer image, it stays silent even with a security fix',
+		(await run(Object.assign({}, behind, { fw: { newer: false } }))) === null);
+	check('"cannot tell" is not permission to speak',
+		(await run(Object.assign({}, behind, { fw: { newer: null } }))) === null);
+	check('a missing `newer` field is not permission either',
+		(await run(Object.assign({}, behind, { fw: {} }))) === null);
+	check('an updater that cannot be reached is not evidence of an update',
+		(await run(Object.assign({}, behind, { fwFails: true }))) === null);
+	check('nor is an endpoint that errors',
+		(await run(Object.assign({}, behind, { fw: null }))) === null);
+	check('and the string "true" is not the boolean',
+		(await run(Object.assign({}, behind, { fw: { newer: 'true' } }))) === null);
 
 	group('a date that is not a date is not evidence');
 
