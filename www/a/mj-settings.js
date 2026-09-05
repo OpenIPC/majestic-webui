@@ -1213,10 +1213,9 @@
 	// judged against is this one. So the field mounts here, hidden, pin-map
 	// style: Save, dirty tracking, the reset arrow and refresh() work on it
 	// unchanged, and the buttons only stage a value. The group's note says "on
-	// Save" and nothing more: a sentence under it explaining why the picture
-	// does not move was the first thing the reporter of #316 asked to lose once
-	// the control was where it belonged, and the save bar that appears on the
-	// press already says the rest.
+	// Save" and nothing more: the save bar that appears on the press says the
+	// rest, and a sentence under the row about why the picture does not move
+	// would be a second explanation of the same fact.
 	function renderTurns(col, sec) {
 		const dot = sec + '.rotate';
 		if (EXCLUDE.has(dot)) return null;
