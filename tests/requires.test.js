@@ -237,6 +237,14 @@ group('renderField reads the widget hatches on call, not at declaration');
 // warning about a configuration the camera deliberately allows, which nothing
 // on the page can clear. So the condition arrives as alternatives, satisfied
 // by either way out of the rule.
+// It fails the same silent way the single-field shape does, which is why these
+// belong beside those rather than in a suite of their own: get `any` wrong in
+// one direction and no warning draws on the camera that needs one; get it wrong
+// in the other and a warning sits on a valid camera with nothing on the page
+// able to clear it. Neither states an error anywhere. And neither can be
+// produced to order — seeing the real thing needs a camera recording on motion
+// with HLS switched on, and then the same camera with recording off to prove
+// the warning goes away again.
 group('a requirement satisfied by any one of several alternatives');
 {
 	// Exactly what majestic emits, including the absent top-level `field`.
