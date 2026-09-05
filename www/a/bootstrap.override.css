@@ -1862,7 +1862,7 @@ mark {
 	border-color: var(--bs-tertiary-color);
 }
 
-/* the pad and the quarter turns are two rows of one group */
+/* the eight pictures are two rows of one group */
 .mj-geo-row + .mj-geo-row {
 	margin-top: 0.375rem;
 }
@@ -1873,8 +1873,28 @@ mark {
 }
 
 .mj-geo span {
+	display: block;
+	min-height: 2.3em;
 	font-size: 0.625rem;
+	line-height: 1.15;
 	letter-spacing: 0.02em;
+}
+
+/* The untouched orientation wears a mark, so it can be found among eight
+   pictures that all look plausible. */
+.mj-geo {
+	position: relative;
+}
+
+.mj-geo-home::after {
+	content: '';
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--bs-primary);
 }
 
 .mj-geo-on {
