@@ -105,6 +105,18 @@ check('and the close button is out of the flow to sit in it',
 	/\.mj-notice > \.btn-close \{[^}]*position: absolute/.test(css),
 	'a close button back in the flow pushes the actions left again');
 
+// The mark, the actions and the close are one cluster: whatever alignment a
+// notice's shape calls for, all three take it. The mark was left behind exactly
+// once — it stayed on the first line when the other two were centred, and the
+// reporter of #347 is who noticed, not us. So it is centred by default and both
+// exceptions that put the others back on the first line have to name it too.
+check('the mark is centred with the controls opposite it',
+	/\.mj-notice-ico\s*\{[^}]*align-self:\s*center/.test(css),
+	'the mark hangs at the top while the actions and the close are centred');
+check('and follows them back to the first line in both exceptions',
+	(css.match(/\.mj-notice-ico\s*\{[^}]*align-self:\s*flex-start/g) || []).length === 2,
+	'a body row and a narrow screen each move all three, or none of them');
+
 const full = mjNotice('warn', 'sentence', {
 	body: 'body', acts: '<a href="#">Go</a>', dismiss: true,
 });
