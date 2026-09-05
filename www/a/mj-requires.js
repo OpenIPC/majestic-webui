@@ -96,12 +96,36 @@
 	//   would be a definite claim made from no data, and nothing on the page
 	//   could clear it. Same reasoning as an unknown operator holding.
 	function met(req, lookup) {
-		if (!req || !req.field) return true;
+		if (!req || (!req.field && !Array.isArray(req.any))) return true;
 		lookup = lookup || {};
 		if (req.when !== undefined) {
 			const self = typeof lookup.self === 'function' ? lookup.self() : undefined;
 			if (self === undefined || String(self) !== String(req.when)) return true;
 		}
+
+		// A list of alternatives, satisfied when any one of them holds.
+		//
+		// Some rules only bite when two settings coincide, and one equality
+		// then says something broader than the camera enforces. Live HLS is
+		// the case this was added for: motion recording defeats it only when
+		// there IS a recorder running, so `records.mode` alone would grey the
+		// switch out on a camera with recording off and tell its owner to
+		// change a setting that is already inert.
+		//
+		// Same fail-open rule as everything else here, applied per
+		// alternative: one whose field cannot be resolved satisfies the
+		// requirement outright, because a warning drawn from no data is one
+		// nothing on the page can clear.
+		if (Array.isArray(req.any)) {
+			if (!req.any.length) return true;
+			return req.any.some(function (alt) {
+				if (!alt || !alt.field) return true;
+				const av = resolve(alt.field, lookup);
+				if (av === undefined) return true;
+				return matches(alt, av);
+			});
+		}
+
 		const v = resolve(req.field, lookup);
 		if (v === undefined) return true;
 		return matches(req, v);

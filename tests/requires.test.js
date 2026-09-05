@@ -223,4 +223,76 @@ group('renderField reads the widget hatches on call, not at declaration');
 	}
 }
 
+// A rule that only bites when two settings coincide.
+//
+// majestic refuses live HLS on a camera whose recorder is in motion mode,
+// because nothing is written between detections and the playlist has no new
+// bytes to describe. It does NOT refuse it when the recorder is switched off:
+// records.mode then describes nothing that is happening, and HLS serves out of
+// memory exactly as it does on a camera with no card.
+//
+// One controlling field cannot say that. Written as "HLS requires
+// records.mode continuous" the form would grey the switch out on a camera with
+// recording off and tell its owner to change a setting that is inert — a
+// warning about a configuration the camera deliberately allows, which nothing
+// on the page can clear. So the condition arrives as alternatives, satisfied
+// by either way out of the rule.
+// It fails the same silent way the single-field shape does, which is why these
+// belong beside those rather than in a suite of their own: get `any` wrong in
+// one direction and no warning draws on the camera that needs one; get it wrong
+// in the other and a warning sits on a valid camera with nothing on the page
+// able to clear it. Neither states an error anywhere. And neither can be
+// produced to order — seeing the real thing needs a camera recording on motion
+// with HLS switched on, and then the same camera with recording off to prove
+// the warning goes away again.
+group('a requirement satisfied by any one of several alternatives');
+{
+	// Exactly what majestic emits, including the absent top-level `field`.
+	const HLS = {
+		when: 'true',
+		any: [
+			{ field: 'records.enabled', equals: 'false' },
+			{ field: 'records.mode', notEquals: 'motion' },
+		],
+		message: 'Motion recording writes nothing between detections.',
+	};
+
+	const lookup = (hls, enabled, mode) => ({
+		self: () => hls,
+		saved: (dot) => dot === 'records.enabled' ? enabled
+			: dot === 'records.mode' ? mode : undefined,
+	});
+
+	check('recording on and in motion mode is the one combination refused',
+		req.met(HLS, lookup(true, true, 'motion')) === false);
+	check('and it is the only one that says anything',
+		req.notice(HLS, lookup(true, true, 'motion')) === HLS.message);
+
+	check('recording off leaves the mode inert, so HLS is fine',
+		req.met(HLS, lookup(true, false, 'motion')) === true);
+	check('continuous recording is fine',
+		req.met(HLS, lookup(true, true, 'continuous')) === true);
+	check('and so is recording off in continuous mode',
+		req.met(HLS, lookup(true, false, 'continuous')) === true);
+
+	// `when` still scopes it to this field's own value: a camera with HLS off
+	// must not be told anything about it.
+	check('nothing is said about a switch that is off',
+		req.met(HLS, lookup(false, true, 'motion')) === true);
+
+	// Same fail-open rule as a single condition, applied per alternative: an
+	// alternative whose field nothing can answer for satisfies the whole
+	// requirement, because a warning drawn from no data cannot be cleared.
+	check('an unresolvable alternative satisfies it',
+		req.met(HLS, { self: () => true, saved: (dot) =>
+			dot === 'records.mode' ? 'motion' : undefined }) === true);
+
+	// A malformed or empty list is satisfied rather than stuck on screen.
+	check('an empty list of alternatives is satisfied',
+		req.met({ when: 'true', any: [] }, { self: () => true }) === true);
+	check('a requirement with neither field nor any is satisfied',
+		req.met({ when: 'true', message: 'x' }, { self: () => true }) === true);
+}
+
+
 done();
