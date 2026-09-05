@@ -32,6 +32,19 @@ li li::before { content: "·"; position: absolute; left: 4px; }
     the source. Each round of feedback gets its own version so they stay comparable.</p>
   <ul>
     <li>
+      <h2><a href="v2/">v2 — polarity belongs to the wiring</a></h2>
+      <p>Both “inverted” settings were bucketed with the older switching mechanisms. That was a
+        category error: an invert is not a way of deciding day from night, it is a fact about how
+        the board is wired — and the pin map already owns wiring.</p>
+      <ul>
+        <li><strong>Each assigned role carries a chip</strong> saying what its pad does in the active state — <code>lamp&nbsp;on&nbsp;=&nbsp;HIGH</code>, <code>dark&nbsp;=&nbsp;HIGH</code>, <code>night&nbsp;=&nbsp;HIGH</code>. Clicking flips it.</li>
+        <li><strong>The word “inverted” leaves the page</strong>, and with it 375 characters of hint explaining when the setting applies.</li>
+        <li><strong>The single-coil rule becomes visible</strong>: the IR-cut chip exists only while one coil drives the filter, which is the daemon's own rule rather than a paragraph about it.</li>
+        <li><strong>The camera light gets one too</strong> — proposed, because it is the only pad majestic drives with no polarity setting today.</li>
+        <li><strong>The lamp's pad is reachable from its own fold</strong>, which previously said “no lamp wired” and offered no way to wire it.</li>
+      </ul>
+    </li>
+    <li>
       <h2><a href="v1/">v1 — the section with almost nothing on it</a></h2>
       <p>The reporter of #325 asked for two things: fewer words, and only the settings that
         are actually in use. Following that to its end takes most of the page away.</p>
