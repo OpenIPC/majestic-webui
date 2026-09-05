@@ -202,8 +202,13 @@
 		try { seen = localStorage.getItem(SEEN); } catch (e) { /* private mode */ }
 		if (seen === feed.cursor) return;
 
+		// A plain link, like every other notice that points at a page. This
+		// was a filled btn-primary, which put two notices side by side on the
+		// Dashboard making the same offer -- go to a page -- in two different
+		// shapes (#347). A .btn in a notice means the press acts on the camera
+		// then and there; this one navigates.
 		slot.innerHTML = mjNotice(severity, sentence(d, matched, stale), {
-			acts: '<a class="btn btn-primary btn-sm" href="update.cgi">Firmware update &rarr;</a>',
+			acts: '<a href="update.cgi">Firmware update &rarr;</a>',
 			dismiss: true,
 		});
 		slot.addEventListener('click', e => {

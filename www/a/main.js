@@ -627,9 +627,15 @@ function mjNoticeIcon(sev) {
 		(MJ_NOTICE_ICONS[sev] || MJ_NOTICE_ICONS.info) + '</svg>';
 }
 
-// mjNotice('danger', '<b>Title</b> \u2014 sentence.', {acts: '<a \u2026>Fix it \u2192</a>'})
+// mjNotice('danger', '<b>Title</b> \u2014 sentence.', {acts: '<a href="network.cgi">Fix it \u2192</a>'})
 // returns the notice's outer HTML as a string, because every caller here is
 // building innerHTML for a container it owns.
+//
+// The action is a plain link ending in an arrow, because a notice points at the
+// page that fixes what it reports rather than carrying the fix. A filled .btn
+// is only for a press that acts on the camera where it stands. p/common.cgi's
+// `notice` states the rule in full and tests/notice.test.js holds it across
+// every call site in the tree.
 function mjNotice(sev, html, opts) {
 	const o = opts || {};
 	return '<div class="mj-notice mj-notice-' + sev + '"' +

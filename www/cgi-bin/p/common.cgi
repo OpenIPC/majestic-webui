@@ -322,6 +322,23 @@ log_create() {
 # The marks are drawn rather than typed, and are the same five paths main.js
 # emits for the pages that build a notice in the browser -- a severity mark
 # that differs between two pages is worse than no mark at all.
+#
+# The actions have one vocabulary, and it is about what pressing them DOES
+# rather than about how important the notice is (#347). A notice says what is
+# wrong and points at the page that fixes it, so its ordinary action is a plain
+# link ending in an arrow -- "Open Day / Night ->" -- and it is a link for the
+# same reason the sentence is a sentence: nothing has happened yet. A filled
+# .btn is reserved for the rare action that happens where it stands, and today
+# that is exactly one href, restart.cgi, which reboots the camera on GET. Both
+# spellings sit side by side in camera.cgi's stopped-daemon banner, which is
+# what the pair is for: one goes to the log, the other restarts the camera.
+#
+# It went wrong the way one vocabulary with two writers always does. The
+# firmware-behind banner drew "Firmware update ->" as a filled btn-primary and
+# the recordings banner drew "Open the SD card page" as a btn-danger, both of
+# them navigation, so the Dashboard showed two notices making the same offer in
+# two different shapes. tests/notice.test.js walks every action group in the
+# tree and holds the rule.
 notice_icon() {
 	local d
 	case "$1" in

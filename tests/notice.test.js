@@ -142,4 +142,128 @@ check('data-bs-dismiss reaches .mj-notice as well as .alert',
 	/closest\('\.alert, \.mj-notice'\)/.test(dismiss),
 	'a dismiss that only knows .alert is an inert x on every notice');
 
+group('one vocabulary for the actions, wherever they are written');
+
+// A notice points at the page that fixes what it reports, so its action is a
+// plain link ending in an arrow. A filled .btn is for the press that acts on
+// the camera where it stands — today exactly one href, restart.cgi, which
+// reboots on GET.
+//
+// The rule is worth a test rather than a paragraph because it is written in
+// four places at once: two haserl banners, three blocks of Dashboard markup
+// and two browser-built notices. It had already drifted — the firmware-behind
+// banner and the recordings banner both drew navigation as a filled button, so
+// the Dashboard offered "go to a page" in two shapes at the same time (#347) —
+// and nothing anywhere would have said so. Every way this breaks is a banner
+// that still renders, still links to the right place, and still looks like it
+// came from a different program than the banner above it.
+const ACTS_ON_GET = new Set(['restart.cgi']);
+
+// The shell words of a `<% notice ... %>` call, quoted the way sh reads them.
+// The sentences carry apostrophes and the actions carry double-quoted
+// attributes, so both quote styles are in use and splitting on whitespace is
+// not enough.
+function shellWords(line) {
+	const out = [];
+	let cur = '', q = null, started = false;
+	for (const ch of line) {
+		if (q) {
+			if (ch === q) q = null;
+			else cur += ch;
+			continue;
+		}
+		if (ch === "'" || ch === '"') { q = ch; started = true; continue; }
+		if (/\s/.test(ch)) {
+			if (started || cur) out.push(cur);
+			cur = ''; started = false;
+			continue;
+		}
+		cur += ch;
+	}
+	if (started || cur) out.push(cur);
+	return out;
+}
+
+// Every action group in the tree, in the three shapes one gets written in.
+function actionGroups(file, src) {
+	const out = [];
+	const add = (html) => { if (html && html.trim()) out.push({ file, html }); };
+	let m;
+
+	const haserl = /<%\s*notice\s+([\s\S]*?)%>/g;
+	while ((m = haserl.exec(src))) add(shellWords(m[1])[2]);
+
+	const markup = /<span class="mj-notice-acts">([\s\S]*?)<\/span>/g;
+	while ((m = markup.exec(src))) add(m[1]);
+
+	// Written as `acts: '<a …>'`. Anything else is not skipped quietly: a call
+	// site this cannot read is a call site the rule stops covering.
+	const key = /\bacts:\s*/g;
+	while ((m = key.exec(src))) {
+		// Not the one in main.js's own usage note: a comment emits nothing, and
+		// it spells its arrow as an escape, which is not what a page renders.
+		const bol = src.lastIndexOf('\n', m.index) + 1;
+		if (/^\s*(\/\/|\*)/.test(src.slice(bol, m.index))) continue;
+		const lit = /^'((?:[^'\\]|\\.)*)'/.exec(src.slice(m.index + m[0].length));
+		check('the acts: in ' + file + ' is a literal this test can read',
+			!!lit, src.slice(m.index, m.index + 80));
+		if (lit) add(lit[1]);
+	}
+	return out;
+}
+
+function walk(dir) {
+	const out = [];
+	for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+		const f = path.join(dir, e.name);
+		if (e.isDirectory()) out.push(...walk(f));
+		else if (/\.(cgi|js)$/.test(e.name)) out.push(f);
+	}
+	return out;
+}
+
+const WWW = path.join(__dirname, '..', 'www');
+const groups = walk(WWW).flatMap((f) =>
+	actionGroups(path.relative(WWW, f), fs.readFileSync(f, 'utf8')));
+
+// A scanner that matched nothing would pass every check under it.
+check('the scan found the notices that actually carry actions',
+	groups.length >= 8, 'found ' + groups.length);
+
+let anchors = 0;
+groups.forEach((g) => {
+	const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/g;
+	let a;
+	while ((a = re.exec(g.html))) {
+		anchors++;
+		const attrs = a[1], text = a[2].trim();
+		const cls = (/\bclass="([^"]*)"/.exec(attrs) || ['', ''])[1];
+		const href = (/\bhref="([^"]*)"/.exec(attrs) || ['', ''])[1];
+		const page = href.split(/[?#]/)[0].replace(/^.*\//, '');
+		const isBtn = /(^|\s)btn(\s|$)/.test(cls);
+		const where = g.file + ': ' + a[0];
+
+		check(page + ' in ' + g.file + ' is drawn as what pressing it does',
+			isBtn === ACTS_ON_GET.has(page),
+			isBtn ? where + '\n    a .btn that only navigates'
+				: where + '\n    an action that acts on GET, drawn as a link');
+
+		// The two on the Dashboard's no-video banner are empty here and filled
+		// by dashboard.js, so their arrow is checked where it is written.
+		if (text) {
+			check('"' + text + '" ends the way its shape says it should',
+				/(&rarr;|→)$/.test(text) === !isBtn, where);
+		}
+	}
+});
+check('every action group in the tree holds at least one link', anchors >= 8,
+	'found ' + anchors);
+
+// dashboard.js writes two of those labels at runtime, and has to add the same
+// arrow the static ones are typed with.
+const dash = fs.readFileSync(A('dashboard.js'), 'utf8');
+check('the runtime-filled actions carry the arrow too',
+	(dash.match(/\.label \+ ' →'/g) || []).length === 2,
+	'dashboard.js fills #st-alert-novideo-a and -h');
+
 done();
