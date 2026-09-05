@@ -142,6 +142,7 @@ check('data-bs-dismiss reaches .mj-notice as well as .alert',
 	/closest\('\.alert, \.mj-notice'\)/.test(dismiss),
 	'a dismiss that only knows .alert is an inert x on every notice');
 
+
 group('one vocabulary for the actions, wherever they are written');
 
 // A notice points at the page that fixes what it reports, so its action is a
@@ -158,6 +159,31 @@ group('one vocabulary for the actions, wherever they are written');
 // that still renders, still links to the right place, and still looks like it
 // came from a different program than the banner above it.
 const ACTS_ON_GET = new Set(['restart.cgi']);
+
+// Every action in the tree, named. Named rather than counted, because the
+// failure this scan exists to catch is an action written in a spelling
+// actionGroups() cannot read: it then escapes every check below and the run
+// looks exactly like a passing one. A floor — "at least eight" — is green in
+// precisely that case, so it protects nothing. Against this list an action
+// that stops being recognised is a line that went missing.
+//
+// The cost is that adding a notice action edits this list, and that is the
+// point: it is the review the vocabulary did not have.
+const EXPECTED = [
+	'a/recordings.js sdcard.cgi "Open the SD card page &rarr;"',
+	'a/update-check.js update.cgi "Firmware update &rarr;"',
+	'cgi-bin/camera.cgi logs.cgi "Open the log &rarr;"',
+	'cgi-bin/camera.cgi restart.cgi "Restart camera"',
+	'cgi-bin/dashboard.cgi camera.cgi "Open Day / Night &rarr;"',
+	// The two on the no-video banner are empty here and filled by dashboard.js.
+	'cgi-bin/dashboard.cgi camera.cgi ""',
+	'cgi-bin/dashboard.cgi logs.cgi ""',
+	'cgi-bin/dashboard.cgi live.cgi "Open Live &rarr;"',
+	'cgi-bin/p/header.cgi config.cgi "Configuration file &rarr;"',
+	'cgi-bin/p/header.cgi network.cgi "Network settings &rarr;"',
+	'cgi-bin/p/header.cgi network.cgi "Set the MAC address &rarr;"',
+	'cgi-bin/p/header.cgi restart.cgi "Restart camera"',
+];
 
 // The shell words of a `<% notice ... %>` call, quoted the way sh reads them.
 // The sentences carry apostrophes and the actions carry double-quoted
@@ -184,6 +210,12 @@ function shellWords(line) {
 	return out;
 }
 
+// common.cgi's notice() and main.js's mjNotice() BUILD the action span, so the
+// hit inside each of them is the component itself rather than somewhere an
+// action was written. Matched by the exact placeholder each one interpolates,
+// so a real group can never be mistaken for one of these.
+const EMITTERS = ['%s', "' + o.acts + '"];
+
 // Every action group in the tree, in the three shapes one gets written in.
 function actionGroups(file, src) {
 	const out = [];
@@ -194,7 +226,9 @@ function actionGroups(file, src) {
 	while ((m = haserl.exec(src))) add(shellWords(m[1])[2]);
 
 	const markup = /<span class="mj-notice-acts">([\s\S]*?)<\/span>/g;
-	while ((m = markup.exec(src))) add(m[1]);
+	while ((m = markup.exec(src))) {
+		if (EMITTERS.indexOf(m[1]) < 0) add(m[1]);
+	}
 
 	// Written as `acts: '<a …>'`. Anything else is not skipped quietly: a call
 	// site this cannot read is a call site the rule stops covering.
@@ -226,22 +260,18 @@ const WWW = path.join(__dirname, '..', 'www');
 const groups = walk(WWW).flatMap((f) =>
 	actionGroups(path.relative(WWW, f), fs.readFileSync(f, 'utf8')));
 
-// A scanner that matched nothing would pass every check under it.
-check('the scan found the notices that actually carry actions',
-	groups.length >= 8, 'found ' + groups.length);
-
-let anchors = 0;
+const found = [];
 groups.forEach((g) => {
 	const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/g;
 	let a;
 	while ((a = re.exec(g.html))) {
-		anchors++;
 		const attrs = a[1], text = a[2].trim();
 		const cls = (/\bclass="([^"]*)"/.exec(attrs) || ['', ''])[1];
 		const href = (/\bhref="([^"]*)"/.exec(attrs) || ['', ''])[1];
 		const page = href.split(/[?#]/)[0].replace(/^.*\//, '');
 		const isBtn = /(^|\s)btn(\s|$)/.test(cls);
 		const where = g.file + ': ' + a[0];
+		found.push(g.file + ' ' + page + ' "' + text + '"');
 
 		check(page + ' in ' + g.file + ' is drawn as what pressing it does',
 			isBtn === ACTS_ON_GET.has(page),
@@ -256,8 +286,15 @@ groups.forEach((g) => {
 		}
 	}
 });
-check('every action group in the tree holds at least one link', anchors >= 8,
-	'found ' + anchors);
+
+const missing = EXPECTED.filter((e) => found.indexOf(e) < 0);
+const extra = found.filter((f) => EXPECTED.indexOf(f) < 0);
+check('every notice action the tree holds is one the scan can read',
+	missing.length === 0,
+	'no longer found, so no longer checked:\n    ' + missing.join('\n    '));
+check('and the scan reads nothing this list has not been told about',
+	extra.length === 0,
+	'add it to EXPECTED once its shape is right:\n    ' + extra.join('\n    '));
 
 // dashboard.js writes two of those labels at runtime, and has to add the same
 // arrow the static ones are typed with.
