@@ -19,6 +19,8 @@
 
 	const IDX = window.MajesticMp4Index;
 	const TL = window.MajesticTimeline;
+	const CRYPT = window.MajesticMp4Crypt;
+	const KEYS = window.MajesticRecKeys;
 	const DAY = TL.DAY;
 
 	// How much of the day the detail band shows, and the steps the zoom takes.
@@ -34,6 +36,13 @@
 		view: { from: 0, to: 3600, width: 3600 },
 		playhead: 0, sel: null,
 		clip: null, mime: null, init: null, hint: null,
+		// What the open clip's header said about protection, and what the page
+		// managed to do about it: `xform` is the pair of transforms the player
+		// and the exporter run bytes through, absent on a clip in the clear.
+		// The open clip's keys, and they are per clip: carried into the next
+		// one they would verify it against the wrong key and report tampering
+		// — an accusation about somebody's footage, made by a bug.
+		prot: null, xform: null, material: null,
 	};
 
 
@@ -350,7 +359,7 @@
 	// fills and recycles in days; a few years is generous), delete plainFallback
 	// and the watchdog below with it, and let a clip that will not append fail
 	// honestly.
-	function mkPlayer(video, onFallback) {
+	function mkPlayer(video, onFallback, onBadFragment) {
 		let ms = null, sb = null, objUrl = null;
 		let read = null, size = 0, headerLen = 0;
 		let cursor = 0, dead = false, busy = false, reset = false;
@@ -387,6 +396,16 @@
 			} catch (e) { /* nothing to drop */ }
 		}
 
+		// Applied to the init segment and to every fragment before either
+		// reaches the SourceBuffer. Absent on a clip in the clear, where this
+		// is the identity and the pump below is what it always was.
+		let xform = null;
+
+		function through(what, bytes) {
+			if (!xform || !xform[what]) return bytes;
+			return xform[what](bytes);
+		}
+
 		function fill() {
 			if (dead || !sb || sb.updating || busy) return;
 			if (reset) {
@@ -421,8 +440,23 @@
 					: read(at, at + f.total - 1);
 				return whole.then(function (bytes) {
 					if (dead || !sb) { busy = false; return; }
+					let out;
+					try {
+						out = through('fragment', bytes);
+					} catch (e) {
+						// A fragment that cannot be decrypted is not a read to
+						// retry: the same bytes will fail the same way, and
+						// timeupdate would drive this straight back here for
+						// the life of the clip — a spinner, a stream of range
+						// requests, and nothing in the console. Stop, and say
+						// so once.
+						busy = false;
+						dead = true;
+						onBadFragment(e, at, 'fragment');
+						return;
+					}
 					cursor = at + f.total;
-					try { sb.appendBuffer(bytes); } catch (e) { evict(); }
+					try { sb.appendBuffer(out); } catch (e) { evict(); }
 					busy = false;
 				});
 			}).catch(function () { busy = false; });
@@ -448,8 +482,9 @@
 		// here as well would issue a remove() for every quarter-second the
 		// playhead advanced.
 		return {
-			attach: function (url, initInfo, clipSize, mime) {
+			attach: function (url, initInfo, clipSize, mime, transforms) {
 				read = IDX.reader(url); size = clipSize;
+				xform = transforms || null;
 				headerLen = initInfo.headerLength; cursor = initInfo.firstMoof;
 				dead = false; busy = false; reset = false; want = null;
 				ms = new MediaSource();
@@ -460,7 +495,15 @@
 					sb.addEventListener('updateend', function () { evict(); fill(); });
 					read(0, headerLen - 1).then(function (head) {
 						if (dead || !sb) return;
-						try { sb.appendBuffer(head); } catch (e) { onFallback(); }
+						let out;
+						try {
+							out = through('init', head);
+						} catch (e) {
+							dead = true;
+							onBadFragment(e, 0, 'init');
+							return;
+						}
+						try { sb.appendBuffer(out); } catch (e) { onFallback(); }
 					});
 				}, { once: true });
 
@@ -477,7 +520,17 @@
 					if (dead) return;
 					let has = 0;
 					try { has = sb ? sb.buffered.length : 0; } catch (e) {}
-					if (!has) onFallback();
+					// The fallback hands the file to a bare element, which is
+					// the right answer for a recording written before tfdt and
+					// the wrong one for a sealed clip: the element gets bytes
+					// no decoder can read, and shows a black frame instead of
+					// the sentence explaining why. An encrypted clip that
+					// buffers nothing has a reason, and the reason is worth
+					// more than another attempt.
+					if (!has) {
+						if (xform) onBadFragment(new Error('nothing buffered'), 0, 'nothing');
+						else onFallback();
+					}
 				}, 5000);
 			},
 			// Whether the SourceBuffer ever accepted anything. The difference
@@ -518,6 +571,111 @@
 		};
 	}
 
+	// ---- sealed clips ----------------------------------------------------
+
+	// The lock panel: shown in the stage in place of a picture, because the
+	// transient note above the player is wiped by the next seek or card poll
+	// and a request for a passphrase has to survive both.
+	function lock(html) {
+		const el = $id('rec-lock');
+		if (!el) return;
+		el.innerHTML = html || '';
+		el.hidden = !html;
+		const stage = el.parentNode;
+		if (stage && stage.classList) stage.classList.toggle('rec-locked', !!html);
+	}
+
+	// One camera writes one key across a day, so the first clip's prompt
+	// covers every clip and seek after it. `done` is called with the clip's 48
+	// bytes, or with null when nothing on this device can open it — and null
+	// is an answer, not a failure: the lock panel has already said which.
+	function needKeys(clip, prot, done) {
+		if (!prot.keyBox) {
+			lock(lockNote('This recording is sealed and carries no key box, ' +
+				'so nothing can open it.', clip));
+			return done(null);
+		}
+		KEYS.needFor(prot.keyBox, {
+			clip: clip,
+			show: lock,
+			download: fileUrl(clipPath(clip.name)),
+			name: clip.name,
+		}).then(function (material) {
+			done(material || null);
+		});
+	}
+
+	function lockNote(sentence, clip) {
+		return '<div class="rec-lock-box"><div class="rec-lock-icon">🔒</div>' +
+			'<p>' + esc(sentence) + '</p>' +
+			'<a class="btn btn-sm btn-outline-secondary" download href="' +
+			esc(fileUrl(clipPath(clip.name))) + '">Save the clip as recorded</a></div>';
+	}
+
+	// What the player and the exporter run bytes through. The init segment is
+	// rewritten once and kept, since every fragment append reuses it.
+	function mkTransform(prot, material, headerLength) {
+		let clearHead = null;
+		return {
+			init: function (bytes) {
+				if (!clearHead) clearHead = CRYPT.clearInit(bytes, headerLength || bytes.length);
+				if (!clearHead) throw new Error('the header could not be prepared');
+				return clearHead;
+			},
+			fragment: function (bytes) {
+				return CRYPT.decryptFragment(bytes, material, prot.tracks);
+			},
+		};
+	}
+
+	function startPlaying(clip, url, init, mime, xform, atSec) {
+		const video = $id('rec-video');
+		if ('MediaSource' in window && MediaSource.isTypeSupported(mime)) {
+			player = mkPlayer(video,
+				function () { plainFallback(clip, url); },
+				function (err, at, phase) { badFragment(clip, url, err, phase); });
+			player.attach(url, init, clip.size, mime, xform);
+		} else if (xform) {
+			// No MediaSource and a sealed clip: the element cannot be handed
+			// the file, because the file is not playable media. Say so rather
+			// than showing a black frame.
+			note('<strong>This browser cannot play a sealed recording.</strong> ' +
+				'It has no Media Source support, so the clip cannot be decrypted as it plays. ' +
+				'Use Save decrypted, or open the page in another browser.', 'warning');
+		} else {
+			video.src = url;
+		}
+		positionAt(atSec || 0);
+		video.play().catch(function () { /* autoplay policy; controls remain */ });
+	}
+
+	// A fragment that would not decrypt. Not a read to retry — the same bytes
+	// fail the same way — so the player has already stopped, and this says
+	// which fragment and what was wrong with it. Playback of what is already
+	// buffered continues: the frames on screen decoded correctly, and taking
+	// them away proves nothing.
+	// Three failures reach here and they are not the same sentence. A header
+	// that could not be prepared and a SourceBuffer that never took anything
+	// have decoded no frames at all, so telling somebody that everything up to
+	// that point played correctly is a claim about a picture nobody saw.
+	function badFragment(clip, url, err, phase) {
+		if (state.clip !== clip) return;
+		setStatus('');
+		const save = ' <a href="' + esc(url) + '" download>Save the clip as recorded</a>.';
+		if (phase === 'init')
+			return note('<strong>This recording’s header could not be prepared.</strong> ' +
+				esc((err && err.message) || 'the header could not be rewritten') +
+				'. Nothing was played.' + save, 'danger');
+		if (phase === 'nothing')
+			return note('<strong>Nothing in this recording could be decoded.</strong> ' +
+				'The header was accepted and no frame arrived, so either the key is not the one ' +
+				'it was sealed with or the file is damaged from the start.' + save, 'danger');
+		note('<strong>This recording stops being readable ' +
+			(err && err.at ? 'at byte ' + err.at : 'partway through') + '.</strong> ' +
+			esc((err && err.message) || 'a fragment could not be decrypted') +
+			'. What played before that point decoded correctly.' + save, 'danger');
+	}
+
 	// ---- opening a clip --------------------------------------------------
 
 	function openClip(clip, atSec) {
@@ -526,6 +684,11 @@
 		state.clip = clip;
 		state.init = null;
 		state.hint = null;
+		state.prot = null;
+		state.xform = null;
+		state.material = null;
+		lock('');
+		sealedControls();
 		const url = fileUrl(clipPath(clip.name));
 
 		if (player) { player.destroy(); player = null; }
@@ -533,14 +696,56 @@
 
 		const read = IDX.reader(url);
 		// 64 KiB is generous for ftyp + moov, so the codec probe and the init
-		// parse share one request.
+		// parse share one request. A sealed clip's header is larger — a
+		// protection scheme per track and the key box — but not by anything
+		// approaching this, and a header that does not fit says so below
+		// rather than being read as a file that is not an MP4.
 		read(0, 65535).then(function (head) {
 			if (state.clip !== clip) return;          // switched away mid-flight
 			const init = IDX.parseInit(head);
 			if (!init) throw new Error('not a fragmented MP4');
 			state.init = init;
 
-			const codec = codecFromHeader(head);
+			// What the header says about protection, before any key is asked
+			// for: the real codec, whether the samples are sealed, and whether
+			// this page understands how. All of it is in the clear, so a clip
+			// nothing here can open is still described accurately rather than
+			// refused as an unplayable codec.
+			const prot = CRYPT.inspect(head, init.headerLength);
+			state.prot = prot;
+			if (!prot.ok) {
+				setStatus('');
+				note('Could not read the header of <code>' + esc(clip.name) + '</code> — ' +
+					esc(prot.reason) + '. <a href="' + esc(url) + '" download>Save the clip</a> ' +
+					'and open it in a player that can.', 'danger');
+				return;
+			}
+			if (prot.reason) {
+				setStatus('');
+				note('<strong>' + esc(clip.name) + ' cannot be opened here.</strong> ' +
+					esc(prot.reason) + '. <a href="' + esc(url) + '" download>Save the clip</a>.',
+					'warning');
+				return;
+			}
+
+			// The rewritten header, which is what a decoder is given. Done
+			// before the key, because it needs none: the codec and its
+			// configuration sit in the clear beside the protection boxes. So a
+			// clip this browser cannot decode can still be offered as a file
+			// that plays elsewhere, even when nothing here can open it.
+			let clearHead = head;
+			if (prot.wrapped) {
+				const rebuilt = CRYPT.clearInit(head, init.headerLength);
+				if (!rebuilt) {
+					setStatus('');
+					note('<strong>' + esc(clip.name) + ' has a header this page cannot prepare.</strong> ' +
+						'<a href="' + esc(url) + '" download>Save the clip</a> and open it in VLC.', 'warning');
+					return;
+				}
+				clearHead = rebuilt;
+			}
+
+			const codec = codecFromHeader(clearHead);
 			const mime = 'video/mp4; codecs="' + (codec || 'avc1.42E01E') + '"';
 
 			// An unplayable codec does not raise `error` on a <video>: H.265
@@ -549,23 +754,51 @@
 			if (codec && !video.canPlayType(mime)) {
 				const family = /^(hvc1|hev1)/.test(codec) ? 'H.265 (HEVC)' : codec.split('.')[0];
 				setStatus('');
+				// "Save it and play it in VLC" is sound advice about a clip in
+				// the clear and false about a sealed one — the file that lands
+				// on disk opens in nothing. Where the page can decrypt, it
+				// offers the copy that does play.
 				note('<strong>' + family + ' — this browser cannot decode it.</strong> ' +
-					'Save the clip and play it in VLC, or record the main stream as H.264. ' +
+					(prot.encrypted
+						? 'The saved file is encrypted, so unlock it below and use Save decrypted. '
+						: 'Save the clip and play it in VLC, or record the main stream as H.264. ') +
 					'<a href="camera.cgi?tab=video0">Stream settings</a>', 'warning');
+				if (prot.encrypted) {
+					needKeys(clip, prot, function (material) {
+						if (state.clip !== clip || !material) return;
+						state.xform = mkTransform(prot, material, init.headerLength);
+						state.material = material;
+						lock('');
+						renderSelection();
+						sealedControls();
+					});
+				}
 				return;
 			}
 			note('');
 			state.mime = mime;
 			setStatus('');
 
-			if ('MediaSource' in window && MediaSource.isTypeSupported(mime)) {
-				player = mkPlayer(video, function () { plainFallback(clip, url); });
-				player.attach(url, init, clip.size, mime);
-			} else {
-				video.src = url;
+			if (!prot.encrypted) {
+				startPlaying(clip, url, init, mime, null, atSec);
+				return;
 			}
-			positionAt(atSec || 0);
-			video.play().catch(function () { /* autoplay policy; controls remain */ });
+
+			// Sealed: everything above happens whether or not a key turns up,
+			// and only this part waits for one.
+			setStatus('Locked — waiting for a key…');
+			needKeys(clip, prot, function (material) {
+				if (state.clip !== clip) return;
+				if (!material) return;                 // the lock panel explains
+				const xform = mkTransform(prot, material, init.headerLength);
+				state.xform = xform;
+				state.material = material;
+				setStatus('');
+				lock('');
+				sealedControls();
+				renderClips();
+				startPlaying(clip, url, init, mime, xform, atSec);
+			});
 
 			// Two reads to turn the clip list's estimate into a real length.
 			hintDuration(url, clip, init);
@@ -601,6 +834,22 @@
 			}).catch(function () { /* stay where we are */ });
 	}
 
+	// The body of an export is a run of whole fragments, and the span already
+	// knows where each one starts — so they are cut at those boundaries and
+	// decrypted one at a time rather than the whole buffer being handed to a
+	// parser again.
+	function decryptParts(parts, span, ranges) {
+		const head = state.xform.init(new Uint8Array(parts[0]));
+		const body = new Uint8Array(parts[1]);
+		const out = [head];
+		span.fragments.forEach(function (f) {
+			const at = f.off - ranges.body.start;
+			if (at < 0 || at + f.len > body.length) return;
+			out.push(state.xform.fragment(body.subarray(at, at + f.len)));
+		});
+		return out;
+	}
+
 	// DEPRECATED, REMOVE AFTER 2029-01 — see the note above mkPlayer.
 	//
 	// A recording with no tfdt cannot go through a SourceBuffer at all. Hand it
@@ -608,6 +857,11 @@
 	// just has to find its own way to a seek.
 	function plainFallback(clip, url) {
 		if (!player || state.clip !== clip) return;
+		// A bare element handed a sealed file gets bytes no decoder can read
+		// and shows a black frame — and on some builds asks for a decryption
+		// module nobody here can answer. The reason this clip buffered nothing
+		// is worth more than another attempt at playing it.
+		if (state.xform) { badFragment(clip, url, new Error('nothing could be buffered'), 'nothing'); return; }
 		player.destroy();
 		player = null;
 		const video = $id('rec-video');
@@ -967,6 +1221,19 @@
 		});
 	}
 
+	// The two save buttons mean different things on a sealed clip, and saying
+	// so on the button is the only place it will be read. "As recorded" keeps
+	// the encryption and the integrity record and needs a key to open later;
+	// the selection export writes a file that plays anywhere and can no longer
+	// be checked against its own tags.
+	function sealedControls() {
+		const dl = $id('rec-dl');
+		if (dl) dl.textContent = state.prot && state.prot.encrypted
+			? 'Save whole clip (as recorded)' : 'Save whole clip';
+		const check = $id('rec-verify');
+		if (check) check.hidden = !(state.prot && state.prot.encrypted && state.xform);
+	}
+
 	function setStatus(t) {
 		const s = $id('rec-status');
 		if (s) s.textContent = t || '';
@@ -1125,6 +1392,24 @@
 		$id('rec-sel-save').addEventListener('click', saveSelection);
 	}
 
+	// What the camera is doing to recordings right now, from the configuration
+	// the page already has. Deliberately not a per-clip answer: knowing whether
+	// a given file is sealed means reading its header, and a day of clips is a
+	// range request each — on a page whose whole index strategy is built around
+	// the cost of a request being the request. So this says what is true of new
+	// recordings and does not pretend to describe old ones, which is exactly
+	// what the configuration knows.
+	function sealedHint() {
+		const mode = mjGet(state.cfg, 'records.encryption');
+		if (!mode || mode === 'none') return '';
+		const what = mode === 'passphrase' ? 'with a passphrase'
+			: mode === 'chip' ? 'to this camera’s hardware'
+			: mode === 'pubkey' ? 'to a key this camera cannot open'
+			: 'in a way this page does not know';
+		return '<div class="x-small text-secondary mb-2">New recordings are sealed ' + what +
+			'. Older clips are however they were written at the time.</div>';
+	}
+
 	function renderClips() {
 		const el = $id('rec-clips');
 		if (!el) return;
@@ -1133,7 +1418,7 @@
 			el.innerHTML = '<div class="text-secondary small">No clips in this day.</div>';
 			return;
 		}
-		let h = '';
+		let h = sealedHint();
 		// timeline.js calls the newest clip "recording" when it ends about now,
 		// which is a statement about the clock and cannot know the card stopped
 		// accepting writes. On a card that cannot be written the last clip is
@@ -1148,10 +1433,14 @@
 					hhmm(prev.end) + ' – ' + hhmm(c.start) + '</span></div>';
 			}
 			const on = state.clip && state.clip.name === c.name;
+			// A lock on the row of the clip that is open, because that is the
+			// one whose header has actually been read. Putting one on every row
+			// would be a guess dressed as a fact.
+			const sealed = on && state.prot && state.prot.encrypted ? ' 🔒' : '';
 			h += '<button type="button" class="rec-clip' + (on ? ' active' : '') + '" data-clip="' + esc(c.name) + '">' +
 				'<span class="rec-poster"' + (c.recording && writable ? ' data-live="1"' : '') + '>' +
 				'<span class="rec-poster-t">' + hhmm(c.start) + '</span></span>' +
-				'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + hhmm(c.start) + '</span>' +
+				'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + hhmm(c.start) + sealed + '</span>' +
 				'<span class="x-small text-secondary">' +
 				(c.recording && writable ? 'recording'
 					: (c.estimated ? '≈ ' : '') + TL.duration(c.dur)) +
@@ -1302,6 +1591,11 @@
 				read(r.body.start, r.body.end - 1),
 			]).then(function (parts) { return { parts: parts, span: span, r: r }; });
 		}).then(function (o) {
+			// A sealed selection is saved decrypted, because the point of
+			// saving a cut is that it plays somewhere. The same transforms the
+			// player uses run over the two parts: the header once, then each
+			// fragment at the boundaries the span already recorded.
+			if (state.xform) o.parts = decryptParts(o.parts, o.span, o.r);
 			const blob = new Blob(o.parts, { type: 'video/mp4' });
 			const a = document.createElement('a');
 			a.href = URL.createObjectURL(blob);
@@ -1444,6 +1738,12 @@
 			// trouble. If data HAS buffered, the error is something else and
 			// throwing away a working player would only make it worse.
 			if (player && !player.hasData()) { plainFallback(state.clip, url); return; }
+			if (state.xform) {
+				note('Playback stopped on <code>' + esc(state.clip.name) + '</code>. ' +
+					'What played was decrypted correctly; the rest could not be. ' +
+					'<a href="' + esc(url) + '" download>Save the clip as recorded</a>.', 'danger');
+				return;
+			}
 			note('Playback stopped on <code>' + esc(state.clip.name) + '</code>. ' +
 				'<a href="' + esc(url) + '" download>Save the clip</a> instead.', 'danger');
 		});
@@ -1456,6 +1756,108 @@
 			a.download = state.clip.name;
 			document.body.appendChild(a); a.click(); a.remove();
 		});
+
+		// A whole clip is handed over as it is on the card — streamed by the
+		// browser, never assembled in this tab, which is what makes it safe
+		// for a recording of any length. On a sealed clip that means the file
+		// needs a key to open later, and the button says so rather than
+		// leaving somebody to find out.
+		const check = $id('rec-verify');
+		if (check) check.addEventListener('click', function () { verifyOpenClip(); });
+	}
+
+	// Walking the integrity chain. Forward from the start of the clip, because
+	// each fragment's tag covers the one before it — which is also why this is
+	// a deliberate action rather than something the player does as it seeks: a
+	// chain restarted in the middle proves nothing about what came before, and
+	// a page that implied otherwise would be worse than one that said nothing.
+	function verifyOpenClip() {
+		const clip = state.clip, init = state.init;
+		if (!clip || !init || !state.xform || !state.material) return;
+		const btn = $id('rec-verify');
+		const read = IDX.reader(fileUrl(clipPath(clip.name)));
+		const chain = CRYPT.chain(state.material);
+		let at = init.firstMoof;
+		let n = 0;
+		let unknown = false;
+		let damaged = false;
+		if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+
+		read(0, init.headerLength - 1).then(function (head) {
+			chain.genesis(head);
+			return step();
+		}).then(function (verdict) {
+			if (btn) { btn.disabled = false; btn.textContent = 'Check integrity'; }
+			if (state.clip !== clip) return;
+			note(verdict, verdict.indexOf('does not match') >= 0 ? 'danger'
+				: verdict.indexOf('cannot be checked') >= 0 ? 'warning' : 'success');
+		}).catch(function (e) {
+			if (btn) { btn.disabled = false; btn.textContent = 'Check integrity'; }
+			if (state.clip !== clip) return;
+			// A read that failed, a card that went away mid-walk. Silence here
+			// reads as "checked, and fine" — the one thing that must never be
+			// inferred from a check that did not finish.
+			note('<strong>This recording could not be checked.</strong> ' +
+				esc((e && e.message) || 'the card stopped answering') +
+				'. Nothing is known about the rest of it either way.', 'warning');
+		});
+
+		function step() {
+			if (state.clip !== clip) return Promise.resolve('');
+			if (at + 16 > clip.size) return Promise.resolve(done());
+			return read(at, Math.min(at + 1024 * 1024, clip.size) - 1).then(function (buf) {
+				const f = IDX.parseFragment(buf);
+				// Two different tails, and only one of them is a camera doing
+				// its job. A fragment whose header is on the card and whose
+				// payload is not — a short read, or one that runs past the end
+				// — is a recording still being written. A run of bytes that is
+				// not a fragment at all is a file that stops making sense, and
+				// calling that "still recording" tells somebody their damaged
+				// clip is fine.
+				if (!f) { damaged = true; return done(); }
+				if (f.short || !f.total || at + f.total > clip.size) return done();
+				const whole = f.total <= buf.length
+					? Promise.resolve(buf.subarray(0, f.total))
+					: read(at, at + f.total - 1);
+				return whole.then(function (bytes) {
+					const r = chain.step(bytes);
+					if (r.unknown) { unknown = true; return done(); }
+					if (!r.ok) return broken(n + 1, at);
+					n++;
+					at += f.total;
+					if (btn) btn.textContent = 'Checking… ' + n;
+					return step();
+				});
+			});
+		}
+
+		function done() {
+			if (unknown)
+				return 'This recording carries no integrity record, so it cannot be checked. ' +
+					'Recordings written by older firmware are like this.';
+			// A clip still being written ends mid-fragment. That is the camera
+			// doing its job, and saying "the chain ends early" about it would
+			// accuse a working camera of something. But "complete" has to mean
+			// the walk finished ON the last byte: a file cut a few bytes into
+			// its next fragment leaves a tail too short to parse, and calling
+			// that intact is the one verdict this button must never give by
+			// accident.
+			const whole = at === clip.size;
+			const held = 'Intact through ' + n + ' fragment' + (n === 1 ? '' : 's');
+			if (damaged)
+				return held + ', and then the file stops making sense at byte ' + at +
+					'. Every record up to there covers the one before it; what follows is not a ' +
+					'fragment this page can read, so the rest cannot be checked.';
+			return held +
+				(whole ? '. Every fragment matches its own record, and each record covers the one before it.'
+					: ', and the rest has not been written yet — this clip is still recording.');
+		}
+
+		function broken(index, off) {
+			return 'This recording <strong>does not match its own integrity record</strong> from ' +
+				'fragment ' + index + ' (byte ' + off + '). Everything before that point matches. ' +
+				'The file has been cut, edited, or damaged since the camera wrote it.';
+		}
 	}
 
 	function goDay(name) {
@@ -1740,6 +2142,10 @@
 	let wired = false;
 
 	function start() {
+		// The panel reads its own storage and paints itself; it does not wait
+		// for the card, and a camera with no recordings still has a key to
+		// manage.
+		if (KEYS && KEYS.ui) KEYS.ui.mount();
 		return Promise.all([loadConfig(), loadPulse()]).then(function () {
 			if (!state.prefix) {
 				return empty('<strong>Recording is not configured.</strong> No recording path is set, so there is nothing to browse. ',

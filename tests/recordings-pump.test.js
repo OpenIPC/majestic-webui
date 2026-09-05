@@ -155,7 +155,7 @@ function makeEl(id) {
 const CLIP_SECONDS = 120;
 const CLIP = clip(CLIP_SECONDS);
 
-function load() {
+function load(opts) {
 	const env = { appends: [], ranges: makeRanges(), reads: [], eos: false };
 	const els = {};
 	const $ = (id) => (els[id] = els[id] || makeEl(id));
@@ -188,7 +188,7 @@ function load() {
 					fire(ev) { (sb.handlers[ev] || []).slice().forEach((f) => f()); },
 					appendBuffer(bytes) {
 						const at = appendedAt(bytes);
-						env.appends.push({ at: at, bytes: bytes.length });
+						env.appends.push({ at: at, bytes: bytes.length, tag: bytes[0] });
 						if (at !== null) env.ranges.add(at, at + FRAG_SECONDS);
 						sb.updating = true;
 						// updateend lands on a later task, as it does in a
@@ -286,10 +286,53 @@ function load() {
 	};
 	ctx.window.document = ctx.document;
 	vm.createContext(ctx);
-	for (const f of ['timeline.js', 'mp4index.js', 'recordings.js']) {
+	// The page loads these in this order, and so does the browser: recordings.js
+	// takes the crypto modules at module scope, the way it takes the index.
+	for (const f of ['timeline.js', 'mp4index.js', 'mjcrypto.js', 'mp4crypt.js',
+		'reckeys.js']) {
 		vm.runInContext(fs.readFileSync(A(f), 'utf8'), ctx);
 	}
+	// A clip the page will treat as sealed, without building an encrypted one.
+	// What is under test here is the WIRING — that the transforms reach both
+	// append sites — and the format modules have their own suite for whether
+	// the bytes come out right. Stubbing at this seam is what lets this file
+	// keep using the fixture every other test in it uses.
+	if (opts && opts.sealed) {
+		env.transformed = { init: 0, fragment: 0 };
+		ctx.window.MajesticMp4Crypt = {
+			inspect: () => ({
+				ok: true, encrypted: true, wrapped: true,
+				tracks: { 1: { id: 1, protected: true, ivSize: 8, format: 'avc1' } },
+				keyBox: { kidHex: 'kid', modes: ['passphrase'], slots: [], pubkeyFp: null },
+				reason: null,
+			}),
+			// Marks what it touched, so an append that skipped a transform is
+			// visible rather than merely wrong-looking.
+			clearInit: (bytes) => { env.transformed.init++; return mark(bytes, 0xc1); },
+			decryptFragment: (bytes) => { env.transformed.fragment++; return mark(bytes, 0xd2); },
+			chipOnly: () => false,
+			openWithPassphrase: () => ({ material: new Uint8Array(48) }),
+			openWithPrivateKey: () => ({ reason: 'no' }),
+			chain: () => ({ genesis: () => {}, step: () => ({ ok: true }) }),
+		};
+		ctx.window.MajesticRecKeys = {
+			ui: { mount() {}, refresh: () => Promise.resolve(null), state: () => 'none' },
+			needFor: () => Promise.resolve(new Uint8Array(48)),
+			known: () => null, remember() {}, forgetAll() {},
+			heldKey: () => null, heldMeta: () => null,
+		};
+	}
+	vm.runInContext(fs.readFileSync(A('recordings.js'), 'utf8'), ctx);
 	return env;
+}
+
+// A copy with its first byte stamped, so a test can see which transform a
+// buffer went through — or that it went through none.
+function mark(bytes, tag) {
+	const out = new Uint8Array(bytes.length ? bytes : 1);
+	out.set(bytes);
+	out[0] = tag;
+	return out;
 }
 
 function bufferedEnd(env) {
@@ -450,6 +493,33 @@ async function playTo(env, sec) {
 		check('reopening really did run the open path again',
 			env.appends.length > 0 && env.reads.length > 4,
 			'reads=' + env.reads.length);
+	}
+
+	// ---- a sealed clip reaches the decoder decrypted ---------------------
+	//
+	// The wiring, and it is the kind that fails silently in both directions. A
+	// transform applied to the fragments but not the init segment gives a
+	// SourceBuffer an initialisation segment whose sample entries name a codec
+	// no decoder implements; one applied to the init but not the fragments
+	// gives it ciphertext. Neither raises anything. Both are a black frame and
+	// a page that looks like it is still loading.
+	{
+		group('a sealed clip is decrypted on its way to the decoder');
+		const env = load({ sealed: true });
+		await waitFor(() => env.appends.length > 2);
+		await quiesce(env);
+
+		check('the init segment went through the header rewrite',
+			env.transformed.init >= 1, 'init transforms: ' + env.transformed.init);
+		check('and every fragment through the decrypter',
+			env.transformed.fragment >= 2, 'fragment transforms: ' + env.transformed.fragment);
+
+		const stamps = env.appends.map((a) => a.tag);
+		check('every buffer the SourceBuffer was given carries a transform\'s mark',
+			stamps.length > 2 && stamps.every((t) => t === 0xc1 || t === 0xd2),
+			stamps.join(','));
+		check('the first of them is the rewritten header, not a fragment',
+			stamps[0] === 0xc1, 'first append tag ' + stamps[0]);
 	}
 
 	done();

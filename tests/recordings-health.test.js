@@ -176,7 +176,10 @@ function load(cardHealth, metrics, mode) {
 	};
 	ctx.window.document = ctx.document;
 	vm.createContext(ctx);
-	for (const f of ['timeline.js', 'mp4index.js', 'recordings.js']) {
+	// The page loads these in this order, and so does the browser: recordings.js
+	// takes the crypto modules at module scope, the way it takes the index.
+	for (const f of ['timeline.js', 'mp4index.js', 'mjcrypto.js', 'mp4crypt.js',
+		'reckeys.js', 'recordings.js']) {
 		vm.runInContext(fs.readFileSync(A(f), 'utf8'), ctx);
 	}
 	return env;

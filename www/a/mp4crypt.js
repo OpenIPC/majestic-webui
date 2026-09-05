@@ -265,8 +265,25 @@ window.MajesticMp4Crypt = (function () {
 		// actually protected, which decides whether a key is needed at all — a
 		// track can be wrapped and declare itself unprotected, and demanding a
 		// passphrase for that would refuse a clip that plays.
-		if (!Object.keys(tracks).length)
-			return unreadable('the clip header carries no tracks this page can read');
+		// A moov this walk could not take a track out of. That is not the same
+		// as a header nobody saw: the bytes are here, so the question can be
+		// asked directly — is there a protection box anywhere inside them? If
+		// there is not, the clip is in the clear as a FINDING rather than an
+		// assumption, and refusing it would refuse a recording that plays
+		// today. If there is, this build cannot say how, and says that.
+		if (!Object.keys(tracks).length) {
+			const guard = protectionSomewhere(u8, moov[0] + 8, moov[1]);
+			if (guard)
+				return {
+					ok: true, encrypted: true, wrapped: true, tracks: {},
+					keyBox: keyBox(u8.subarray(0, end)),
+					reason: 'this recording is protected in a way this page does not know',
+				};
+			return {
+				ok: true, encrypted: false, wrapped: false,
+				tracks: {}, keyBox: null, reason: null,
+			};
+		}
 		return {
 			ok: true,
 			encrypted: encrypted,
@@ -275,6 +292,42 @@ window.MajesticMp4Crypt = (function () {
 			keyBox: wrapped ? keyBox(u8.subarray(0, end)) : null,
 			reason: reason,
 		};
+	}
+
+	// Is there a protection box anywhere under here? Used only where the track
+	// walk came back empty — a header shaped in a way this build has not seen.
+	//
+	// A structural walk, not a search for the four letters. `sinf`, `encv`,
+	// `enca` and `tenc` are ordinary byte sequences and appear inside codec
+	// configuration and metadata payloads by chance; a scan that matched one
+	// there would refuse a perfectly clear recording as an unopenable sealed
+	// one, which is a worse failure than the one this function exists to
+	// prevent. So it descends the containers it knows, reads box types at box
+	// boundaries only, and never looks inside a box it does not understand.
+	//
+	// A tree it cannot walk answers false, which is the same answer as before
+	// this existed: nothing here found protection. That is a statement about
+	// what was looked at, and the caller's sentence says as much.
+	const PROTECTION_PARENTS = {
+		moov: 8, trak: 8, mdia: 8, minf: 8, stbl: 8, stsd: 16, sinf: 8, schi: 8,
+	};
+
+	function protectionSomewhere(u8, from, to, depth) {
+		if ((depth || 0) > 8) return false;           // a tree this deep is not one of ours
+		let at = from;
+		while (at + 8 <= to) {
+			const size = be32(u8, at);
+			if (size < 8 || at + size > to) return false;
+			const type = fourcc(u8, at + 4);
+			if (type === 'sinf' || type === 'encv' || type === 'enca' || type === 'tenc')
+				return true;
+			const skip = PROTECTION_PARENTS[type];
+			if (skip !== undefined && at + skip <= at + size &&
+				protectionSomewhere(u8, at + skip, at + size, (depth || 0) + 1))
+				return true;
+			at += size;
+		}
+		return false;
 	}
 
 	// `ok` false is a third answer beside clear and encrypted, and callers have
