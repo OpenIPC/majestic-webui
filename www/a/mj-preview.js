@@ -184,6 +184,28 @@ window.MajesticPreview = (function () {
 		// channel is still a request worth honouring — an H.264 substream plays
 		// in a browser that refused an H.265 main.
 		let exhausted = false;
+		// A page-level reconnect ladder for the software rung, matching
+		// preview-page.js and backing the worker's own (hevc-wasm@v0.1.1): a
+		// pinned worker older than that gives up on the first dropped socket,
+		// and this panel — which has no MJPEG fallback — then shows its "could
+		// not be played" alert for good, the #288 dead-end on the settings page.
+		// Retry the rung a few times before the alert; reset by a promotion.
+		const WASM_MAX_RETRIES = 5;
+		const WASM_RETRY_MS = 1000;
+		let wasmRetries = 0;
+		// A pending retry, a "played long enough to count as recovered" timer,
+		// and the generation they belong to. A channel change bumps the
+		// generation so a superseded retry cannot start a wasm player over the
+		// newer session, and `destroyed` stops a retry firing after the panel
+		// closes and leaking a worker/socket.
+		let wasmRetryTimer = null;
+		let wasmHealthyTimer = null;
+		let wasmGen = 0;
+		let destroyed = false;
+		function cancelWasmTimers() {
+			if (wasmRetryTimer) { clearTimeout(wasmRetryTimer); wasmRetryTimer = null; }
+			if (wasmHealthyTimer) { clearTimeout(wasmHealthyTimer); wasmHealthyTimer = null; }
+		}
 		let frame = null;
 		// Bumped whenever the picture stops being what it was — a channel
 		// change, a dropped chain. An async consumer (the luma sampler reads a
@@ -320,6 +342,24 @@ window.MajesticPreview = (function () {
 				swap.start('wasm');
 				return;
 			}
+			// The software rung dropped its socket. Retry it a bounded few times
+			// before the alert, so a transient blip does not end a working H.265
+			// preview here (#288). Reset by a promotion (onPromoted); only a
+			// socket drop reports 'unreachable', so this cannot loop.
+			if (kind === 'wasm' && String(detail || '').split(' ')[0] === 'unreachable' &&
+				wasmRetries < WASM_MAX_RETRIES) {
+				wasmRetries++;
+				cancelWasmTimers();
+				const g = wasmGen;
+				wasmRetryTimer = setTimeout(function () {
+					wasmRetryTimer = null;
+					// Not after teardown (would leak a worker), not for a stale
+					// generation (a channel change superseded it), not once the
+					// chain has already given up.
+					if (!destroyed && !exhausted && wasmGen === g) swap.start('wasm');
+				}, WASM_RETRY_MS * wasmRetries);
+				return;
+			}
 			exhausted = true;
 			// A canvas that has stopped being painted keeps its last frame and
 			// nothing hides it, so anything sampling the picture — the Live
@@ -420,7 +460,24 @@ window.MajesticPreview = (function () {
 				// only place a FIRST attach can say so — it was promoted before
 				// it had anything, so its picture arrives here rather than as a
 				// second promotion.
-				if (st === 'playing') announcePlaying(kind);
+				if (st === 'playing') {
+					announcePlaying(kind);
+					// A software session that keeps playing for a moment (not just
+					// one decoded frame) is a genuine recovery, so the retry
+					// budget resets and the next drop gets a fresh ladder. A
+					// decoder that plays a frame and immediately drops never arms
+					// this, so it still exhausts to the alert. No
+					// per-frame stats reach this panel, hence the short timer.
+					if (kind === 'wasm') {
+						if (wasmHealthyTimer) clearTimeout(wasmHealthyTimer);
+						const hg = wasmGen;
+						wasmHealthyTimer = setTimeout(function () {
+							wasmHealthyTimer = null;
+							if (!destroyed && wasmGen === hg && swap.playing() === 'wasm')
+								wasmRetries = 0;
+						}, 1500);
+					}
+				}
 				if (kind !== 'webrtc') {
 					// MSE is the last thing to try, so its giving up ends the
 					// chain — and it says so on the live player's own channel
@@ -537,6 +594,10 @@ window.MajesticPreview = (function () {
 		// ── The handle ───────────────────────────────────────────────────────
 
 		function goToStream(n) {
+			// A channel change supersedes any pending software-rung retry or
+			// recovery timer: they belonged to the channel being left.
+			wasmGen++;
+			cancelWasmTimers();
 			// Only when it actually moves. The channels are different pictures —
 			// different size, often a different codec — so what was true of the
 			// old one is not a description of the new one, it is a wrong
@@ -653,6 +714,10 @@ window.MajesticPreview = (function () {
 			setStream: goToStream,
 
 			destroy: function () {
+				// A pending software-rung retry must not fire after teardown and
+				// recreate a worker/socket against the detached stage.
+				destroyed = true;
+				cancelWasmTimers();
 				// Through the swap, which closes the trial as well as the player
 				// on screen. Destroying only the live player would leave a
 				// transport still being judged behind on every teardown — a live

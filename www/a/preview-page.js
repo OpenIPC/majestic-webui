@@ -120,6 +120,33 @@
 	// They part company for the length of that retry, and that gap is the
 	// point: the picture stays until the replacement has one of its own.
 	let holdingFallback = null;
+	// A page-level reconnect ladder for the software-decode rung, and a belt to
+	// the worker's own braces (hevc-wasm@v0.1.1). A pinned worker older than
+	// that gives up on the FIRST dropped socket, and the chain reads that one
+	// `unreachable` as "software decode is done" and falls to MJPEG with no way
+	// back — the #288 dead-end, where a transient blip stranded a working H.265
+	// preview until the tab was reloaded. So a wasm socket drop is retried here
+	// a few times before MJPEG, reset by a picture reaching the stage
+	// (showVideo). It cannot loop: only a socket drop reports `unreachable`; a
+	// codec the decoder cannot take reports `codec-changed`, and a missing
+	// decoder `decoder-unavailable`, both of which terminate the chain instead.
+	const WASM_MAX_RETRIES = 5;
+	const WASM_RETRY_MS = 1000;
+	// Frames a software session must decode before it counts as recovered and
+	// the retry budget resets — proof of sustained play, not the mere codec
+	// announcement (~1s at 8fps).
+	const WASM_HEALTHY_FRAMES = 8;
+	let wasmRetries = 0;
+	// A pending page-level retry and the generation it belongs to. Any fresh
+	// attach, channel change or transport change bumps the generation, so a
+	// retry scheduled by a superseded session cannot fire attachPlayer('wasm')
+	// over the newer player and override the viewer's choice. The timer is held
+	// so it can be cancelled outright.
+	let wasmRetryTimer = null;
+	let wasmGen = 0;
+	function cancelWasmRetry() {
+		if (wasmRetryTimer) { clearTimeout(wasmRetryTimer); wasmRetryTimer = null; }
+	}
 	function showVideo() {
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = '#000'; }
@@ -859,6 +886,11 @@
 		: MajesticVideo;
 
 	function attachPlayer(kind) {
+		// Any fresh attach supersedes a pending software-rung retry: it belongs
+		// to a session that is being replaced, and firing it now would stage a
+		// wasm player over the new one.
+		wasmGen++;
+		cancelWasmRetry();
 		swap.start(kind === true ? 'webrtc' : kind === false ? 'mse' : kind);
 	}
 
@@ -901,6 +933,28 @@
 		if (kind === 'mse' &&
 			MajesticTransport.softwareRungForCodec(detail, cfgCodec[stream ? 1 : 0])) {
 			attachPlayer('wasm');
+			return;
+		}
+		// The software rung itself dropped its socket. A current worker has
+		// already retried six times before saying so; an older pinned one gave
+		// up on the first drop. Either way, retry the rung a bounded few times
+		// before MJPEG rather than ending a working H.265 preview on one blip
+		// (#288). Reset by a picture (showVideo); terminates on anything but a
+		// socket drop, so it cannot loop.
+		if (kind === 'wasm' && String(detail || '').split(' ')[0] === 'unreachable' &&
+			wasmRetries < WASM_MAX_RETRIES) {
+			wasmRetries++;
+			// The caller has already retired the live player (or it was a failed
+			// trial), so its last frame stays on the stage through the wait
+			// rather than blanking it — the same picture-holding rule as a
+			// transport switch. Guarded by the generation captured now: a channel
+			// or transport change in the meantime bumps it and this does nothing.
+			cancelWasmRetry();
+			const retryGen = wasmGen;
+			wasmRetryTimer = setTimeout(function () {
+				wasmRetryTimer = null;
+				if (wasmGen === retryGen && fellBack === null) attachPlayer('wasm');
+			}, WASM_RETRY_MS * wasmRetries);
 			return;
 		}
 		showFallback(detail);
@@ -1028,7 +1082,15 @@
 			},
 			onStats: (s) => {
 				if (!isLive()) return;
-				if (s.transport === 'wasm') softwareNote(s);
+				if (s.transport === 'wasm') {
+					softwareNote(s);
+					// Sustained software playback resets the retry budget so the
+					// NEXT drop gets a fresh ladder — gated on frames actually
+					// decoded, not the codec announcement, so a decoder that
+					// announces its codec and immediately drops still exhausts to
+					// MJPEG rather than resetting on every attempt.
+					if ((s.framesDecoded | 0) >= WASM_HEALTHY_FRAMES) wasmRetries = 0;
+				}
 				// The chip rides every tick, not just when the panel is open —
 				// this is where its fps comes from, and a fresh write also
 				// heals it after a transient "reconnecting…" state. The panel
@@ -1283,6 +1345,10 @@
 	// it would be promoted onto the channel the viewer had already left — and
 	// the adaptation toast's baseline, which belongs to the channel being left.
 	function goToStream(n) {
+		// The viewer changed channel: a software-rung retry pending from the
+		// channel being left must not fire onto the new one.
+		wasmGen++;
+		cancelWasmRetry();
 		stream = n;
 		// The two channels are two encoders; the baseline and any toast on
 		// screen describe the one being left.

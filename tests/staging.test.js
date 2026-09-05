@@ -615,7 +615,12 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.el('mj-transport-m').checked === true);
 	}
 
-	group('a rescue that also fails does not loop back');
+	// #288: the software rung has a reconnect ladder of its own now — a dropped
+	// socket is retried, not read as "software decode is done" and dropped to
+	// MJPEG. A working player was the whole point of the rung; one blip must not
+	// end it. (The worker retries internally too, hevc-wasm@v0.1.1; this page
+	// ladder backs an older pinned worker that gives up on the first drop.)
+	group('a software socket drop retries the rung before MJPEG');
 	{
 		const env = load('mse',
 			{ 'jpeg.enabled': true, 'video0.codec': 'h265' }, 0, true);
@@ -623,11 +628,71 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		env.made[0].say('mjpeg', 'unreachable');
 		const wasm = env.made[1];
 		check('the decoder was tried', wasm && wasm.kind === 'wasm');
-		// Its worker could not hold the socket either — same flaky link.
+		wasm.say('playing');           // it was working
+		// Its socket drops mid-session. The old behaviour fell straight to MJPEG.
 		wasm.say('mjpeg', 'unreachable');
-		check('it falls to MJPEG rather than round again',
-			env.made.length === 2 && env.el('live-mjpeg').src === '/mjpeg',
+		check('no MJPEG yet — the drop is being retried',
+			env.el('live-mjpeg').src === '', env.el('live-mjpeg').src);
+		await new Promise((r) => setTimeout(r, 1200));
+		check('a fresh software player was made for the retry',
+			env.made.length === 3 && env.made[2].kind === 'wasm',
 			'made=' + env.made.length);
+		// The retry catches: a picture is back, and the ladder resets so the
+		// next drop gets the full budget again.
+		env.made[2].say('playing');
+		check('the recovered picture is on the stage, not MJPEG',
+			env.el('live-mjpeg').src === '');
+	}
+
+	group('a software rung that keeps dropping falls to MJPEG, bounded');
+	{
+		const env = load('mse',
+			{ 'jpeg.enabled': true, 'video0.codec': 'h265' }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'unreachable');   // -> wasm made[1]
+		// Every retry also drops, before ever showing a picture. The ladder is
+		// five deep (1s..5s) — long enough to outlast a daemon restart — so drive
+		// that many drops and let each timer fire, then one more to spend it.
+		let made = 2;
+		for (let i = 1; i <= 5; i++) {
+			env.made[env.made.length - 1].say('mjpeg', 'unreachable');
+			await new Promise((r) => setTimeout(r, 1000 * i + 200));
+			check('retry ' + i + ' made a fresh software player',
+				env.made.length === made + 1 && env.made[made].kind === 'wasm',
+				'made=' + env.made.length);
+			made = env.made.length;
+		}
+		// The fourth drop is past the budget: now it gives up to MJPEG rather
+		// than retry for ever.
+		env.made[env.made.length - 1].say('mjpeg', 'unreachable');
+		check('the ladder is spent, so MJPEG takes the stage',
+			env.el('live-mjpeg').src === '/mjpeg', env.el('live-mjpeg').src);
+		check('and it stopped making players', env.made.length === made,
+			'made=' + env.made.length);
+	}
+
+	// A retry scheduled from a superseded session must not fire a software
+	// player over a newer one the viewer just chose (#288).
+	group('a pending software retry does not override a transport change');
+	{
+		const env = load('mse',
+			{ 'jpeg.enabled': true, 'video0.codec': 'h265' }, 0, true);
+		await tick();
+		env.made[0].say('mjpeg', 'unreachable');   // -> wasm made[1]
+		env.made[1].say('playing');
+		env.made[1].say('mjpeg', 'unreachable');  // schedules a wasm retry
+		const before = env.made.length;
+		// The viewer picks WebRTC while that retry is pending.
+		pickWebRTC(env);
+		const afterPick = env.made[env.made.length - 1];
+		check('the transport choice attached its own player',
+			afterPick && afterPick.kind === 'webrtc', afterPick && afterPick.kind);
+		// Long enough that the stale retry timer would have fired.
+		await new Promise((r) => setTimeout(r, 1400));
+		check('the stale retry did not start another software player',
+			env.made.length === before + 1 &&
+			env.made[env.made.length - 1].kind === 'webrtc',
+			'made=' + env.made.length + ' last=' + env.made[env.made.length - 1].kind);
 	}
 
 	group('the rescue needs the decoder to actually be present');
