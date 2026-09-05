@@ -5179,14 +5179,42 @@
 		return fields.some(f => changeCost(f) === 'inplace');
 	}
 
+	// Does emptying this control mean "remove this key"?
+	//
+	// A NUMBER field has no way to say "empty" other than by being empty: an
+	// empty string reaches the config walker and an integer key stores ZERO,
+	// which is a real value and a different statement. The reporter of #325
+	// found that the hard way — told by this very page to clear the day and
+	// night thresholds to hand day/night back to automatic mode, they cleared
+	// both, and the save wrote 0 and 0. Measured on an hi3516ev300: the
+	// camera goes on reporting the threshold mechanism, so the advice could
+	// not be followed at all. Sent as null instead, both keys are removed and
+	// the camera returns to automatic on the same save.
+	//
+	// Only where the schema declares no `default`. A key with one has a
+	// defined unconfigured state that is not absence — it is re-seeded on
+	// every load — so removing it would read as absent now and as the default
+	// after the next restart, which is what the reset control is for.
+	//
+	// Strings are deliberately left alone: an empty string is a value someone
+	// can mean, and an overlay line cleared to nothing is not the same request
+	// as an overlay key that does not exist.
+	function clearsToNull(f) {
+		if (String(f.getValue()) !== '') return false;
+		if (PIN_DOTS[f.dot]) return true;
+		const sch = f.schema || {};
+		if (sch.type !== 'integer' && sch.type !== 'number') return false;
+		return sch.default === undefined || sch.default === null;
+	}
+
 	async function onSubmit(ev) {
 		ev.preventDefault();
 		const all = state.fields.filter(f => f.getValue() !== state.initial[f.dot]);
-		// A cleared pin rides the same batch as everything else, as a null —
+		// A cleared field rides the same batch as everything else, as a null —
 		// which majestic removes rather than stores. Withholding it and tidying
 		// up afterwards was the older shape, and it left the two halves of one
 		// save able to disagree.
-		const cleared = all.filter(f => PIN_DOTS[f.dot] && String(f.getValue()) === '');
+		const cleared = all.filter(clearsToNull);
 		const dirty = all;
 		if (!all.length) return;
 
@@ -5203,8 +5231,8 @@
 			// list of strings, not a comma-joined scalar.
 			if (f.schema && f.schema.type === 'array')
 				val = String(val).split(',').map(s => s.trim()).filter(s => s.length);
-			// null is "remove this key". Only a cleared pin means it — an empty
-			// string field is an empty string, which is a value someone chose.
+			// null is "remove this key" — see clearsToNull for which emptied
+			// controls mean it and which mean an empty string someone chose.
 			else if (cleared.indexOf(f) >= 0)
 				val = null;
 			setDotted(body, f.dot, val);
