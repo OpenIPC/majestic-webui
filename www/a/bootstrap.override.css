@@ -5481,3 +5481,21 @@ dialog.mj-modal::backdrop {
 	margin: 0;
 	padding: 0;
 }
+
+/* What the picture costs the camera, at the far end of the item row. Small and
+   quiet: it is a thing to glance at before adding the overlay that would be
+   refused, not a reading anybody is here for. */
+.mj-osd-cost {
+	flex: 0 0 auto;
+	margin-left: auto;
+	color: var(--bs-secondary-color);
+	font-size: 0.78rem;
+	text-align: right;
+	white-space: nowrap;
+}
+
+/* Near the ceiling. Not an error — nothing has failed yet, and the next thing
+   added is the one that would. */
+.mj-osd-cost-low {
+	color: var(--bs-warning-text-emphasis, #ffc107);
+}

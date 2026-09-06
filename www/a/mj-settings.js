@@ -3297,7 +3297,75 @@
 			row.appendChild(cap);
 			const chips = el('span', 'mj-osd-chips');
 			row.appendChild(chips);
+
+			// WHAT IT COSTS, beside what there is. A region refused for want of
+			// a handle is not a clipped overlay: it is no overlay at all,
+			// drawn nowhere, with the stream carrying on as though nothing had
+			// been asked for. Nothing else on this page can report that, so
+			// the way to keep somebody out of it is to show what is left
+			// before they spend it.
+			//
+			// TWO BUDGETS AND NOT A TOTAL. Masks and overlays come out of
+			// different ranges of the camera's handle map, so a mask can never
+			// take an overlay's slot; one number would be wrong in both
+			// directions. The camera reports both, and a build that has not
+			// written its region map down reports zero — shown as a count with
+			// no ceiling, which is what not knowing looks like.
+			//
+			// The memory is the same arithmetic the camera does: the real
+			// rectangles, two bytes a pixel, two buffers a region. It is here
+			// because a full-frame logo is megabytes and nothing forbids one —
+			// the page shows the price and lets the person decide.
+			const cost = el('span', 'mj-osd-cost');
+			row.appendChild(cost);
 			row.appendChild(onBar);
+
+			function drawCost() {
+				const b = camRects.budget;
+				const nMask = masks ? masks.count() : 0;
+				// COUNTED FROM WHAT IS ON THE PAGE, not from what the camera
+				// has drawn so far. An overlay added here does not exist on
+				// the camera until Save, and a count that only moved afterwards
+				// would tell somebody they had run out one press too late —
+				// which is the press this line exists to stop.
+				//
+				// One region per overlay per distinct frame size, which is the
+				// camera's own rule: the glyphs are sized from the width, so
+				// two outputs of the same size share a region and a snapshot
+				// inheriting the main stream's costs nothing extra. The number
+				// of sizes is the camera's to say and is read from its report.
+				const items = listed().length + (markShown() ? 1 : 0);
+				const regions = items * (camRects.widths || 1);
+				const bits = [];
+				bits.push(b && b.overlays
+					? regions + ' of ' + b.overlays + ' regions'
+					: regions + (regions === 1 ? ' region' : ' regions'));
+				if (masks) {
+					bits.push(b && b.masks
+						? nMask + ' of ' + b.masks + ' masks'
+						: nMask + (nMask === 1 ? ' mask' : ' masks'));
+				}
+				if (camRects.bytes) {
+					const mb = camRects.bytes / 1048576;
+					bits.push('~' + (mb >= 1 ? mb.toFixed(1) + ' MB'
+						: Math.round(camRects.bytes / 1024) + ' KB'));
+				}
+				cost.textContent = bits.join(' · ');
+				// Only where the camera said what the ceiling is; a count with
+				// no ceiling has nothing to be near the end of.
+				const tight = !!(b && b.overlays && regions >= b.overlays - 2) ||
+					!!(b && b.masks && nMask >= b.masks - 1);
+				cost.classList.toggle('mj-osd-cost-low', tight);
+				cost.title = tight
+					? 'Close to this camera\u2019s limit. A region it cannot ' +
+					  'create is an overlay that is not drawn at all.'
+					: 'One region per item per distinct stream size. Overlay ' +
+					  'regions and privacy masks come out of different ranges, ' +
+					  'so a mask never costs an overlay its slot. The size is ' +
+					  'what the camera is drawing now, in its video memory.';
+			}
+			camRects.onCost = drawCost;
+			state.liveCleanup.push(() => { camRects.onCost = null; });
 			(barRow || preview.stage).insertAdjacentElement('afterend', row);
 
 			const listed = () => OVERLAYS.filter(listedOverlay);
@@ -3475,6 +3543,7 @@
 			}
 
 			function draw() {
+				drawCost();
 				chips.textContent = '';
 				for (const n of listed()) {
 					const on = sel.t === 'text' && sel.i === n;
@@ -4027,7 +4096,8 @@
 	// and this asks for it. A build without the endpoint 404s once and is never
 	// asked again; the estimate is still there behind it, which is what every
 	// build before this had.
-	const camRects = { by: {}, ok: true, mark: null, onMark: null };
+	const camRects = { by: {}, ok: true, mark: null, onMark: null,
+		budget: null, widths: 0, bytes: 0, onCost: null };
 
 	// Logo files whose overlay has been cleared but not yet saved.
 	//
@@ -4078,10 +4148,48 @@
 						fw: f[0], fh: f[1], x: r[0], y: r[1], w: r[2], h: r[3],
 					});
 				}
+				// WHAT THE PICTURE COSTS, counted rather than estimated.
+				//
+				// The camera reports one rectangle per ATTACHMENT, and two
+				// outputs of the same size share one region — the glyphs are
+				// sized from the width, so a snapshot inheriting the main
+				// stream's size costs nothing extra. Distinct (overlay, frame)
+				// pairs is therefore the region count, and the rectangles are
+				// the real ones rather than a guess at what the font will
+				// measure. Two bytes a pixel, and the hardware keeps two
+				// buffers per region so it can draw one while the other is
+				// shown.
+				const seen = {};
+				let bytes = 0;
+				for (const o of (j.overlays || [])) {
+					const f = o.frame || [], r = o.rect || [];
+					if (f.length < 2 || r.length < 4) continue;
+					const key = o.overlay + '@' + f[0] + 'x' + f[1];
+					if (seen[key]) continue;
+					seen[key] = true;
+					bytes += r[2] * r[3] * 2 * 2;
+				}
+				const wasCost = camRects.widths + '/' + camRects.bytes;
+				// How many DISTINCT frame sizes this camera draws on, which is
+				// what each overlay costs in regions. Counted from the report
+				// rather than from the config: two outputs of the same size
+				// share a region, and only the camera knows which sizes it
+				// ended up with.
+				const sizes = {};
+				for (const o of (j.overlays || [])) {
+					const f = o.frame || [];
+					if (f.length >= 2) sizes[f[0] + 'x' + f[1]] = true;
+				}
+				camRects.widths = Object.keys(sizes).length;
+				camRects.bytes = bytes;
+				camRects.budget = j.budget || null;
+
 				const was = camRects.mark;
 				camRects.by = by;
 				camRects.mark = mark;
 				if (was !== mark && camRects.onMark) camRects.onMark();
+				if (wasCost !== camRects.widths + '/' + camRects.bytes &&
+					camRects.onCost) camRects.onCost();
 			})
 			.catch(() => {});
 	}
