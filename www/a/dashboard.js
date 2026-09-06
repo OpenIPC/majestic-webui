@@ -175,21 +175,23 @@
 		paintIrcut();
 	}).catch(() => {});
 
-	// "This camera has no IR-cut filter", as recorded on the camera itself.
-	// Nothing measurable separates a filter nobody wired from a camera that
-	// has none, so the owner says which — once, for every browser that opens
-	// the page, which is why it is not localStorage.
+	// There was a dismissal here — a × that recorded "this camera has no IR-cut
+	// filter" in /etc/webui/ircut.conf through a CGI of its own, so the banner
+	// would stop asking an owner to wire a filter they do not have.
 	//
-	// Starts false: a fetch that did not happen must not silence a fault. The
-	// cost of getting that wrong in this direction is a banner someone
-	// dismisses again; the other way it is a magenta picture nobody is told
-	// about.
-	let noFilter = false;
-	let noFilterCleared = false;
-	apiFetch('/cgi-bin/j/ircut.cgi', { credentials: 'same-origin' })
-		.then(r => r.json())
-		.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
-		.catch(() => {});
+	// It was a second way to say something majestic already stores. "Drive the
+	// IR-cut filter" off IS that statement: the daemon holds it, Day / Night
+	// shows it, a config backup carries it, every browser reads the same value,
+	// and diagnose() has always fallen silent on a camera with it off and no
+	// pads — the finding below is in the `else` of that switch. So the × said
+	// the same thing in a place nothing else could see, and everything that
+	// went wrong with it followed from the duplication: a private claim has to
+	// be invalidated when the wiring contradicts it, that invalidation ran here
+	// on a page where nobody wires anything, and it therefore never ran at the
+	// moment that mattered (#367).
+	//
+	// One statement, in the camera's own configuration. Nothing to keep in
+	// step, and nothing left that can go stale.
 
 	// What the snapshot tile's frame looks like. Kept as the last observation
 	// plus its run length, so the banner is driven by the picture the page is
@@ -228,66 +230,15 @@
 		// is down is never. Every other caller already refused to paint here;
 		// this refuses centrally so a new one cannot forget.
 		if (!IC || !nmCfg) return;
-		let f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
+		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
 			.filter(x => x.level !== 'info')[0];
-
-		// Configuring a pin contradicts "there is no filter here", so the claim
-		// is dropped the moment one appears. That is what keeps a dismissal
-		// from outliving its own premise: someone who says no filter, then
-		// wires one, then has it fail, is told — the promise the dismissal
-		// made was to silence "you have not set this up", not "the one you set
-		// up has stopped working".
-		if (noFilter && !noFilterCleared && IC.wired && IC.wired(nmCfg)) {
-			// Once per load, and the answer comes from the file rather than from
-			// having asked: a delete the flash refused would otherwise leave the
-			// page believing the claim was dropped while it survives on the
-			// camera, ready to suppress the banner after the pin is taken away
-			// again. Retried on the next load, which is when it can differ.
-			noFilterCleared = true;
-			apiFetch('/cgi-bin/j/ircut.cgi?clear=1', { credentials: 'same-origin' })
-				.then(r => r.json())
-				.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
-				.catch(() => {});
-		}
-
-		// Only the missing-pin finding can be waved away. Every other one is
-		// about a filter that IS configured, and a camera whose filter is
-		// wired backwards is not a camera without one.
-		const canDismiss = !!f && f.id === 'no-pins';
-		if (canDismiss && noFilter) f = null;
 
 		if (f) {
 			setSeverity('#st-alert-ircut', f.level);
 			$('#st-alert-ircut-t').textContent = f.title;
 			$('#st-alert-ircut-d').textContent = f.detail;
 		}
-		const no = $('#st-alert-ircut-no');
-		if (no) no.hidden = !(f && canDismiss);
 		setAlert('#st-alert-ircut', !!f);
-	}
-
-	function wireIrcutDismiss() {
-		const no = $('#st-alert-ircut-no');
-		if (!no) return;
-		no.addEventListener('click', () => {
-			// The button is a bare ×, so the whole claim is made here. It had
-			// to be anyway: this writes a fact to the camera and every browser
-			// that opens the page reads it, which is more than any word on a
-			// button could be asked to carry — which is also why losing the
-			// word costs nothing.
-			if (!confirm('Hide this warning for good?\n\nThis records on the ' +
-				'camera that it has no IR-cut filter fitted, so the warning ' +
-				'stays away in every browser that opens this page.\n\nSay yes ' +
-				'only if that is true. A camera that has one and is simply not ' +
-				'set up yet will go magenta in daylight with nothing to tell ' +
-				'you why.')) return;
-			no.disabled = true;
-			apiFetch('/cgi-bin/j/ircut.cgi?dismiss=1', { credentials: 'same-origin' })
-				.then(r => r.json())
-				.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
-				.catch(() => {})
-				.then(() => { no.disabled = false; });
-		});
 	}
 
 	// The ISP panel shows what this SoC's ISP actually reports and nothing
@@ -1080,7 +1031,6 @@
 		// main.js is loaded without defer, so the registry exists; the poll is
 		// started by initAll on window load.
 		mjMetricsSubscribe(onSample);
-		wireIrcutDismiss();
 		// Resize redraws are charts.js's job — one debounced listener for
 		// every chart on the page.
 	}

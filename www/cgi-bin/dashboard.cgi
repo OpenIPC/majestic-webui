@@ -52,27 +52,19 @@ done) %>
 	     glyph whatever the finding said, so a danger and an informational
 	     finding were the same banner. The class written here is only the state
 	     it starts hidden in; setSeverity() sets the real one. -->
-	<!-- "No filter here" is offered only for the missing-pin finding, and
-	     dashboard.js unhides it: nothing the camera can measure separates a
-	     filter nobody wired from a camera that has none, so the owner is the
-	     only one who can say. Every other finding is about a filter that is
-	     configured, and none of them can be waved away. -->
+	<!-- No dismissal here, and that is deliberate. This banner used to carry a
+	     × recording "the camera has no IR-cut filter" in a file of its own,
+	     because nothing measurable separates a filter nobody wired from one
+	     that was never fitted. But majestic already stores that statement:
+	     "Drive the IR-cut filter" off is it, and with it off and no pads
+	     assigned there is no finding to show in the first place. So the way to
+	     silence this is on the page the button already opens, in the camera's
+	     own configuration, where a backup carries it and the daemon agrees with
+	     it (#367). -->
 	<div class="mj-notice mj-notice-warn" id="st-alert-ircut" hidden>
 		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
 		<div class="mj-notice-txt"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></div>
 		<span class="mj-notice-acts"><a class="btn btn-sm btn-primary" href="camera.cgi?tab=nightMode">Open Day / Night</a></span>
-		<!-- A bare ×, and it has been three things. "No filter here" read as
-		     something the page was ASSERTING rather than a button; "Dismiss"
-		     fixed that but put a second link-styled phrase beside "Open Day /
-		     Night", and two of those in a row read as a pair of choices rather
-		     than an action and a way out (#273). The × is the convention every
-		     dismissible notice already uses — including this UI's own modal
-		     headers — so it needs no word to be understood, and it stops
-		     competing with the link for the eye.
-		     The name it loses lives in aria-label and title, and the claim it
-		     never carried is still made in full by the confirm dialog: this
-		     records a fact on the camera, for every browser, permanently. -->
-		<button type="button" class="btn-close" id="st-alert-ircut-no" aria-label="Dismiss: this camera has no IR-cut filter" title="Dismiss: this camera has no IR-cut filter" hidden></button>
 	</div>
 	<!-- Nothing to see, and the wording is written by dashboard.js from the finding
 	     (video-check.js), because one banner covers three of them: a camera

@@ -47,27 +47,6 @@
 	}
 	const has = (v) => pin(v) !== null;
 
-	// Is anything wired to the filter at all? The same question the missing-pin
-	// finding asks, exported because the dashboard's "no filter here" dismissal
-	// has to be dropped the moment the answer becomes yes — a claim that the
-	// camera has no filter cannot outlive someone configuring one.
-	function wired(nm) {
-		// The same question the missing-pin finding asks, and it has to be the
-		// same question. It used to be EITHER coil, on the reasoning that a
-		// half-configured camera is not an unfitted one — true, but it made the
-		// dismissal impossible to use on exactly the camera that was showing
-		// the banner. With only the closing coil assigned majestic still moves
-		// nothing, so the banner stands and offers Dismiss; pressing it
-		// recorded the claim, and the next load read a coil, called it a
-		// contradiction, and deleted it again. Dismiss, reload, banner (#273).
-		//
-		// A claim is only contradicted by a filter this camera can actually
-		// drive. A pad assigned to a coil that majestic never reaches is not
-		// one, and someone pressing Dismiss under that banner is answering
-		// about the state they are looking at.
-		const n = nm || {};
-		return has(n.irCutPin1);
-	}
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and nothing on the way in retypes it.
 	const on = (v) => v === true || v === 'true' || v === 1 || v === '1';
@@ -202,7 +181,33 @@
 					// the picture is allowed to sound certain — and it still
 					// only sharpens a finding that stands without it.
 					(pictureOpen ? ' The picture agrees: the last few frames have ' +
-						'exactly that cast, so the filter is open right now.' : ''),
+						'exactly that cast, so the filter is open right now.' : '') +
+					// The way out, for the owner this finding does not apply to.
+					// A camera with no filter fitted is not faulty, and nothing
+					// measurable tells it apart from one nobody has wired — so
+					// the answer is a setting rather than a guess, and it is the
+					// setting that makes this finding stop (the branch above).
+					// It used to be a × on the Dashboard writing a private file,
+					// which said the same thing where only that banner could
+					// read it (#367).
+					//
+					// Only where the camera HAS that switch. It is recent, and
+					// the settings page is drawn from the daemon's own schema,
+					// so on a build without it there is no such control to go
+					// and find — naming one would be this page inventing an
+					// answer. An absent key is a reliable signal here and a
+					// default is not mistaken for one: /api/v1/config.json
+					// reports the effective configuration, so a key sitting at
+					// its default is still present in it, and only a daemon
+					// that has never heard of it leaves it out.
+					(nm.irCutEnabled === undefined
+						? ' If this camera has no IR-cut filter fitted, there ' +
+							'is nothing here to say so with: the switch that ' +
+							'settles it, "Drive the IR-cut filter", arrives ' +
+							'with a newer firmware than this one.'
+						: ' If this camera has no IR-cut filter fitted, turn ' +
+							'off "Drive the IR-cut filter" and nothing here ' +
+							'will ask again.'),
 				fix: 'nightMode',
 			});
 		} else if (pictureOpen) {
@@ -961,7 +966,7 @@
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
-		verdict: verdict, probe: probe, snapshot: snapshot, wired: wired,
+		verdict: verdict, probe: probe, snapshot: snapshot,
 		HUNT_WINDOW_S: HUNT_WINDOW_S, HUNT_FLIPS: HUNT_FLIPS,
 		CONFLICT_S: CONFLICT_S, PIC_STREAK: PIC_STREAK,
 	};
