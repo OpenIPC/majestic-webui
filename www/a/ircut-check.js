@@ -286,7 +286,39 @@
 			(has(nm.minThreshold) && has(nm.maxThreshold));
 		if (monitor && !senses) {
 			const src = sample && sample.src != null ? sample.src : null;
-			if (src === 4) {
+			// Exactly one threshold filled in is a configuration half-finished,
+			// and the camera answers it by installing NO light monitor at all —
+			// deliberately, rather than falling through to automatic mode and
+			// starting to switch a camera whose owner was in the middle of
+			// setting something else up. It then reports source 0, which is the
+			// same number a camera whose SoC has no exposure to offer reports,
+			// and that collision is the bug this branch used to have: it read
+			// the 0, blamed the SoC, and told the owner to go and wire a
+			// daylight sensor — the opposite of what they needed, on a camera
+			// whose exposure gauges were working perfectly (#370).
+			//
+			// So this is settled from the configuration, which says which of
+			// the two it is, before the gauge is consulted at all.
+			if (has(nm.minThreshold) !== has(nm.maxThreshold)) {
+				out.push({
+					id: 'threshold-half', level: 'warning',
+					title: 'Day/night is set up half-way',
+					detail: 'Only one of the two sensor thresholds is filled ' +
+						'in, and the camera wants both or neither: with one it ' +
+						'sets up no light monitor at all, so nothing switches ' +
+						'day or night however dark it gets. Fill in ' +
+						(has(nm.maxThreshold)
+							? '"Minimum sensor threshold for day"'
+							: '"Maximum sensor threshold for night"') +
+						' as well to decide by gain, or clear ' +
+						(has(nm.maxThreshold)
+							? '"Maximum sensor threshold for night"'
+							: '"Minimum sensor threshold for day"') +
+						' to hand day/night to automatic mode, which needs no ' +
+						'numbers at all.',
+					fix: 'nightMode',
+				});
+			} else if (src === 4) {
 				out.push({
 					id: 'auto-active', level: 'info',
 					title: 'Automatic day/night is watching the exposure',
@@ -951,11 +983,21 @@
 				'is nothing to plot here.' + lampNote);
 		}
 		// The monitor is on and the daemon says nothing is driving it. The
-		// finding above names the two ways out; this only says the state.
+		// finding above names the way out; this only says the state — and it
+		// has to say the right one, because source 0 has two causes and the
+		// configuration is what tells them apart. A half-set threshold pair
+		// gets no monitor at all, deliberately, and describing that as a
+		// camera with no exposure to watch and no threshold set is wrong twice
+		// over on a camera where one plainly is (#370).
 		if (src === 0) {
-			return say('idle', modeWord + 'Nothing is deciding: this camera ' +
-				'reports no exposure to watch, and no daylight sensor or ' +
-				'threshold is set.' + lampNote);
+			return say('idle', modeWord + (
+				has(nm.minThreshold) !== has(nm.maxThreshold)
+					? 'Nothing is deciding: one of the two sensor thresholds ' +
+						'is filled in and the camera wants both or neither, so ' +
+						'it has set up no light monitor at all.'
+					: 'Nothing is deciding: this camera reports no exposure to ' +
+						'watch, and no daylight sensor or threshold is set.'
+			) + lampNote);
 		}
 		return say('unknown', modeWord + 'This firmware does not report what ' +
 			'the monitor is watching.' + lampNote);

@@ -435,6 +435,68 @@ function runRest() {
 			ic.diagnose({ irCutPin1: 11, lightMonitor: true },
 				{ night: 0, ircut: 0, light: 0, src: null }, null)
 				.some(x => x.id === 'monitor-blind'));
+
+		// One threshold is a half-finished configuration, and the camera
+		// answers it by setting up no monitor at all rather than falling
+		// through to automatic mode. It then reports source 0 — the SAME
+		// number a camera whose SoC has no exposure to offer reports, which
+		// is what made this branch accuse the SoC and tell the owner to go
+		// and wire a daylight sensor, on a camera whose exposure gauges were
+		// working perfectly (#370). Settled from the configuration, which
+		// knows which of the two it is, before the gauge is consulted.
+		const halfHi = ic.diagnose(
+			{ irCutPin1: 11, lightMonitor: true, maxThreshold: 14000 },
+			{ night: 0, ircut: 0, light: 0, src: 0 }, null);
+		check('one threshold alone is called out as half-finished',
+			halfHi.some(x => x.id === 'threshold-half' && x.level === 'warning'));
+		check('...and the SoC is not blamed for it',
+			!halfHi.some(x => x.id === 'auto-retired'));
+		check('...nor is the owner sent to wire a sensor',
+			!/daylight sensor to a GPIO pad/.test(
+				halfHi.filter(x => x.id === 'threshold-half')[0].detail));
+		check('it names the one to fill in and the one to clear',
+			/Fill in "Minimum sensor threshold for day"/.test(
+				halfHi.filter(x => x.id === 'threshold-half')[0].detail) &&
+			/clear "Maximum sensor threshold for night"/.test(
+				halfHi.filter(x => x.id === 'threshold-half')[0].detail));
+		// And the other way round, since either half can be the one that is set.
+		const halfLo = ic.diagnose(
+			{ irCutPin1: 11, lightMonitor: true, minThreshold: 5000 },
+			{ night: 0, ircut: 0, light: 0, src: 0 }, null);
+		check('the mirror case names the mirror controls',
+			/Fill in "Maximum sensor threshold for night"/.test(
+				halfLo.filter(x => x.id === 'threshold-half')[0].detail));
+		// The SoC case is real and must survive: no thresholds at all, and the
+		// camera says nothing is deciding.
+		check('a genuinely blind SoC is still called out as one',
+			ic.diagnose({ irCutPin1: 11, lightMonitor: true },
+				{ night: 0, ircut: 0, light: 0, src: 0 }, null)
+				.some(x => x.id === 'auto-retired'));
+		check('and a half-set pair is not reported where a sensor decides',
+			!ic.diagnose({ irCutPin1: 11, lightMonitor: true,
+				lightSensorPin: 15, maxThreshold: 14000 },
+			{ night: 0, ircut: 0, light: 0, src: 1 }, null)
+				.some(x => x.id === 'threshold-half'));
+	}
+
+	group('monitorView: source 0 has two causes and says which');
+	{
+		// The same collision the finding above disentangles, in the panel's own
+		// sentence. A half-set threshold pair gets no monitor at all, on purpose;
+		// describing it as a camera with no exposure to watch and no threshold
+		// set is wrong twice over on a camera where one plainly is (#370).
+		const half = ic.monitorView({ lightMonitor: true, maxThreshold: 14000 },
+			{ night_mode_source: 0, night_enabled: 0 });
+		check('a half-set pair is named as the reason',
+			/one of the two sensor thresholds is filled in/.test(half.line), half.line);
+		check('...and the camera is not said to be reporting no exposure',
+			!/reports no exposure to watch/.test(half.line), half.line);
+		const none = ic.monitorView({ lightMonitor: true },
+			{ night_mode_source: 0, night_enabled: 0 });
+		check('with neither set the original sentence stands',
+			/reports no exposure to watch/.test(none.line), none.line);
+		check('and both are the idle mode either way',
+			half.mode === 'idle' && none.mode === 'idle');
 	}
 
 	group('monitorView: what the panel charts');
