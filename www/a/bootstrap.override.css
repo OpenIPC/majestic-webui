@@ -1053,9 +1053,24 @@ mark {
    variant below a single line instead of a second copy of this arithmetic. */
 .mj-pv-stage {
 	--mj-pv-reserve: 17.6rem;
+	/* And the save bar, while there is one.
+	 *
+	 * It is sticky at the bottom of the window, so it does not push anything;
+	 * it sits ON whatever the window happens to be showing there. On a leaf
+	 * whose picture is sized from the viewport height that is always the row
+	 * of controls under the picture, and the collision is silent: the control
+	 * is on screen, it is simply not the topmost thing at its own coordinates,
+	 * so pressing it does nothing at all.
+	 *
+	 * Reported as "the remove cross does nothing", and it only ever happened
+	 * once something was unsaved -- which pressing "+ Text" guarantees. It was
+	 * invisible on a tall window and in a DevTools viewport, which is why it
+	 * looked like the inspector's doing. 4.95rem is the bar measured: 63px
+	 * plus its 16px margin. */
+	--mj-pv-toolbar: 0rem;
 	position: relative;
-	width: min(100%, max(28rem, calc((100vh - var(--mj-pv-reserve)) * 1.77778)));
-	width: min(100%, max(28rem, calc((100dvh - var(--mj-pv-reserve)) * 1.77778)));
+	width: min(100%, max(28rem, calc((100vh - var(--mj-pv-reserve) - var(--mj-pv-toolbar)) * 1.77778)));
+	width: min(100%, max(28rem, calc((100dvh - var(--mj-pv-reserve) - var(--mj-pv-toolbar)) * 1.77778)));
 	margin-inline: auto;
 	aspect-ratio: 16 / 9;
 	background: #0d0f14;
@@ -1089,7 +1104,51 @@ mark {
    purpose: it is not what you look at the picture to change. What is, comes to
    the picture. */
 .mj-pv-stage.mj-osd-stage {
-	--mj-pv-reserve: 14.5rem;
+	/* Stage top, the docked bar row under it, and the item list under that.
+	   The item list is the part this had to learn: it is a control row, not
+	   chrome, and at 14.5rem it landed at or below the fold on a laptop —
+	   measured at 1440x681, where the row's own top was 681.25. A control the
+	   window cuts off reads as a control that does not work, which is how it
+	   was reported. */
+	--mj-pv-reserve: 18.5rem;
+}
+
+/* ── the picture and its inspector ───────────────────────────────────────
+   Two columns: the picture and everything that annotates it on the left, the
+   selected item's settings on the right. The panel used to float on the
+   picture, which put the settings beside the thing they change and covered a
+   fifth of the video to do it — on a page that already has a settings column
+   sitting empty to the right of a rail.
+
+   Below lg they stack, which is where the panel already went on a narrow
+   stage: at that width there is no room beside the picture for anything. */
+.mj-osd-work {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+}
+
+.mj-osd-pic {
+	/* min-width: 0 or the stage's own min width would stop the row shrinking
+	   and push the inspector off the card. */
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.mj-osd-side {
+	flex: 0 0 20.5rem;
+	max-width: 20.5rem;
+	position: sticky;
+	top: 0.75rem;
+}
+
+@media (max-width: 991.98px) {
+	.mj-osd-work { display: block; }
+	.mj-osd-side {
+		flex: none;
+		max-width: none;
+		position: static;
+	}
 }
 
 /* The bar, off the picture. Nothing here restyles the bar's own contents —
@@ -1122,69 +1181,36 @@ mark {
    (the overlay layer above it is pointer-transparent by default) and sits
    above the drag catcher, which is what stops a press inside it starting a
    drag underneath. */
+/* Off the picture, so the page's own ground rather than glass — glass is for
+   chrome whose background is the video, and this one's is the card. It is no
+   longer a thing you move or close either: a column has nowhere to be in the
+   way of, which is the whole reason the drag and the close button existed. */
 .mj-osd-panel {
-	position: absolute;
-	left: 0.75rem;
-	top: 0.75rem;
-	z-index: 6;
-	width: 20.5rem;
-	max-width: calc(100% - 1.5rem);
-	max-height: calc(100% - 1.5rem);
 	display: flex;
 	flex-direction: column;
+	max-height: calc(100dvh - 2rem);
+	overflow: auto;
 	padding: 0 0.875rem 0.875rem;
-	background: rgba(13, 15, 20, 0.9);
-	border: 1px solid rgba(255, 255, 255, 0.12);
+	background: var(--bs-card-bg);
+	border: 1px solid var(--bs-border-color);
 	border-radius: var(--bs-border-radius-lg);
-	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-	backdrop-filter: blur(14px);
-	pointer-events: auto;
-	color: #e6e8ee;
+	box-shadow: var(--bs-box-shadow-sm);
+	color: var(--bs-body-color);
 }
 
-/* The whole header is the handle. A panel that can be put somewhere else is
-   the answer to the one thing a panel on a picture cannot avoid — sooner or
-   later it is over the thing you want to see. */
 .mj-osd-panel-head {
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
 	padding: 0.75rem 0 0.7rem;
-	color: #6a7182;
-	cursor: grab;
-	touch-action: none;
-	user-select: none;
 }
 
-.mj-osd-panel-head:active { cursor: grabbing; }
-
 .mj-osd-panel-name {
-	color: #9aa0ad;
+	color: var(--bs-tertiary-color);
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-}
-
-.mj-osd-panel-x {
-	margin-left: auto;
-	flex: 0 0 auto;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 1.375rem;
-	height: 1.375rem;
-	padding: 0;
-	border: 0;
-	border-radius: var(--bs-border-radius-sm);
-	background: none;
-	color: #9aa0ad;
-	cursor: pointer;
-}
-
-.mj-osd-panel-x:hover {
-	background: rgba(255, 255, 255, 0.12);
-	color: #fff;
 }
 
 .mj-osd-tabs {
@@ -1192,7 +1218,7 @@ mark {
 	gap: 2px;
 	padding: 2px;
 	margin-bottom: 0.7rem;
-	background: rgba(255, 255, 255, 0.07);
+	background: var(--bs-tertiary-bg);
 	border-radius: var(--bs-border-radius);
 }
 
@@ -1202,7 +1228,7 @@ mark {
 	border: 0;
 	border-radius: var(--bs-border-radius-sm);
 	background: none;
-	color: #b6b9c2;
+	color: var(--bs-secondary-color);
 	font-size: 0.6875rem;
 	font-weight: 600;
 	letter-spacing: 0.05em;
@@ -1211,7 +1237,7 @@ mark {
 }
 
 .mj-osd-tab-on {
-	background: rgba(255, 255, 255, 0.14);
+	background: var(--bs-primary);
 	color: #fff;
 }
 
@@ -1221,28 +1247,19 @@ mark {
 	scrollbar-width: thin;
 }
 
-/* The rows inside are the page's own, mounted here rather than in a deck, so
-   they need the colours the dark glass asks for and nothing else. */
-.mj-osd-body .form-control,
-.mj-osd-body .form-select {
-	background: rgba(0, 0, 0, 0.35);
-	border-color: rgba(255, 255, 255, 0.14);
-	color: #fff;
-}
-
-.mj-osd-body .mj-row > .form-label { color: #9aa0ad; }
-.mj-osd-body .mj-hint { color: #9aa0ad; }
-.mj-osd-body .mj-reset { color: #9aa0ad; }
-.mj-osd-body .mj-reset:hover:not(:disabled) {
-	background: rgba(255, 255, 255, 0.12);
-	color: #fff;
-}
+/* The rows inside are the page's own, mounted here rather than in a deck, and
+   the panel's ground is now the card — so they need nothing the page does not
+   already give them. Only the labels are quietened, because a column of them
+   beside a picture is a list to scan rather than a form to read. */
+.mj-osd-body .mj-row > .form-label,
+.mj-osd-body .mj-hint,
+.mj-osd-body .mj-reset { color: var(--bs-tertiary-color); }
 
 /* Nine cells that are the nine anchors, in the arrangement they name. It
    replaces reading "bottom-right" off a select and mapping it onto the picture
    yourself — the word is a second vocabulary for a thing you are looking at. */
 .mj-osd-pad-wrap { margin-bottom: 0.85rem; }
-.mj-osd-pad-wrap .mj-cap { margin: 0 0 0.4rem; color: #9aa0ad; }
+.mj-osd-pad-wrap .mj-cap { margin: 0 0 0.4rem; color: var(--bs-tertiary-color); }
 
 .mj-osd-pad {
 	display: grid;
@@ -1251,8 +1268,8 @@ mark {
 	gap: 3px;
 	padding: 3px;
 	width: fit-content;
-	background: rgba(255, 255, 255, 0.06);
-	border: 1px solid rgba(255, 255, 255, 0.12);
+	background: var(--bs-tertiary-bg);
+	border: 1px solid var(--bs-border-color);
 	border-radius: var(--bs-border-radius);
 }
 
@@ -1269,55 +1286,14 @@ mark {
 	cursor: pointer;
 }
 
-.mj-osd-cell:hover { background: rgba(230, 232, 238, 0.09); }
+.mj-osd-cell:hover { background: var(--bs-secondary-bg); }
 .mj-osd-cell-on { background: var(--bs-primary); }
-.mj-osd-cell i { display: block; border-radius: 1px; background: #6a7182; }
+.mj-osd-cell i {
+	display: block;
+	border-radius: 1px;
+	background: var(--bs-secondary-color);
+}
 .mj-osd-cell-on i { background: #fff; }
-
-/* On a narrow picture a 20.5rem panel IS the picture, so it moves off it —
-   the same trade dockRuntime makes for the runtime toggles, and for the same
-   reason. It cannot be done with a media query: the panel lives in the stage's
-   overlay, which is clipped to the stage, so a static position there is still
-   inside it. mountOsdPanel moves the node and sets this class.
-
-   Off the picture the ground is the card, so the glass goes with it. */
-.mj-osd-panel.mj-osd-panel-docked {
-	position: static;
-	width: auto;
-	max-width: none;
-	max-height: none;
-	margin-top: 0.625rem;
-	background: var(--bs-card-bg);
-	border-color: var(--bs-border-color);
-	box-shadow: var(--bs-box-shadow-sm);
-	backdrop-filter: none;
-	color: var(--bs-body-color);
-}
-
-.mj-osd-panel-docked .mj-osd-panel-head { cursor: default; }
-.mj-osd-panel-docked .mj-osd-panel-name { color: var(--bs-tertiary-color); }
-
-.mj-osd-panel-docked .form-control,
-.mj-osd-panel-docked .form-select {
-	background: var(--bs-body-bg);
-	border-color: var(--bs-border-color);
-	color: var(--bs-body-color);
-}
-
-.mj-osd-panel-docked .mj-row > .form-label,
-.mj-osd-panel-docked .mj-hint,
-.mj-osd-panel-docked .mj-reset { color: var(--bs-tertiary-color); }
-
-.mj-osd-panel-docked .mj-osd-tabs { background: var(--bs-tertiary-bg); }
-.mj-osd-panel-docked .mj-osd-tab-on {
-	background: var(--bs-primary);
-	color: #fff;
-}
-
-.mj-osd-panel-docked .mj-osd-pad {
-	background: var(--bs-tertiary-bg);
-	border-color: var(--bs-border-color);
-}
 
 /* ── what is on the picture ──────────────────────────────────────────────
    One chip per thing, and pressing one is the same act as pressing the thing
@@ -2706,6 +2682,13 @@ button.mj-osd-chip,
    one of them has something to do. It is the form's last child, so appearing
    and disappearing costs nothing above it — measured: the section card's top
    is identical with the bar shown and hidden. */
+/* The picture makes room for it: see --mj-pv-toolbar. renderToolbar() sets the
+   class on the form, because the bar is the only thing that knows when it is
+   there and the stage is the only thing that has to care. */
+.mj-has-toolbar .mj-pv-stage {
+	--mj-pv-toolbar: 4.95rem;
+}
+
 .mj-toolbar {
 	position: sticky;
 	bottom: 0;

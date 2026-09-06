@@ -2708,9 +2708,32 @@
 		head.appendChild(note);
 		form.appendChild(head);
 
+		// ── the picture and its inspector, side by side ─────────────────
+		//
+		// The inspector used to float ON the picture. That put the settings
+		// next to the thing they change, which was the point, and it also
+		// covered a fifth of the video on the only screen most people have —
+		// and this page has a whole settings column to the right of a rail,
+		// most of which was empty while the panel sat on the video.
+		//
+		// It also cost more than the pixels it covered: a picture sized from
+		// the viewport height, plus a bar and an item list under it, put the
+		// item list at or below the fold on a laptop. Beside the picture the
+		// column carries the settings, the picture keeps its own width, and
+		// what is under it stays on screen.
+		//
+		// Below lg the row wraps and the inspector goes back under the
+		// picture, which is where it already went on a narrow stage.
+		const work = el('div', 'mj-osd-work');
+		const picCol = el('div', 'mj-osd-pic');
+		const sideCol = el('div', 'mj-osd-side');
+		work.appendChild(picCol);
+		work.appendChild(sideCol);
+		form.appendChild(work);
+
 		let repaint = () => {};
 		const preview = window.MajesticPreview &&
-			window.MajesticPreview.mount(form, {
+			window.MajesticPreview.mount(picCol, {
 				config: () => state.config,
 				where: 'osd',
 				onFrame: () => repaint(),
@@ -2751,6 +2774,7 @@
 		deck.appendChild(colText);
 		deck.appendChild(colLook);
 		form.appendChild(deck);
+		if (!preview) sideCol.remove();
 
 		// ── the inspector ────────────────────────────────────────────────
 		//
@@ -2766,7 +2790,7 @@
 		// when they were columns in a deck — this only says where. That is what
 		// keeps Save, dirty tracking, the per-row reset and the schema's own
 		// visibleWhen rules working without any of them learning a panel exists.
-		const panel = preview ? mountOsdPanel(preview) : null;
+		const panel = preview ? mountOsdPanel(preview, sideCol) : null;
 		const textBody = panel ? panel.tab('text') : liveGroup(colText, 'Text', 'what it says');
 		const lookBody = panel ? panel.tab('look') : liveGroup(colLook, 'Legibility', '');
 		const placeBody = panel ? panel.tab('place') : colText;
@@ -3114,25 +3138,16 @@
 	// saving, dirty tracking, resetting or the schema's visibleWhen rules had to
 	// learn about it. The one thing it adds is the anchor pad, and even that
 	// writes the anchor ROW rather than standing in for it.
-	function mountOsdPanel(preview) {
+	function mountOsdPanel(preview, mount) {
 		const P = window.MajesticPlace;
 		const box = el('div', 'mj-osd-panel');
 		box.innerHTML =
 			'<div class="mj-osd-panel-head">' +
-				'<svg viewBox="0 0 20 20" width="12" height="12" fill="none" ' +
-					'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" ' +
-					'aria-hidden="true"><path d="M7 6h.01M7 10h.01M7 14h.01M13 6h.01' +
-					'M13 10h.01M13 14h.01"></path></svg>' +
 				'<span class="mj-cap mj-osd-panel-name"></span>' +
-				'<button type="button" class="mj-osd-panel-x" aria-label="Close">' +
-					'<svg viewBox="0 0 20 20" width="13" height="13" fill="none" ' +
-					'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" ' +
-					'aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"></path>' +
-					'</svg></button>' +
 			'</div>' +
 			'<div class="mj-osd-tabs" role="tablist"></div>' +
 			'<div class="mj-osd-bodies"></div>';
-		preview.overlay.appendChild(box);
+		mount.appendChild(box);
 
 		const tabs = box.querySelector('.mj-osd-tabs');
 		const bodies = box.querySelector('.mj-osd-bodies');
@@ -3162,80 +3177,6 @@
 		}
 		show(open);
 
-		// Dragged by its header, and bounded by the picture. It cannot be
-		// dropped somewhere it cannot be picked up again.
-		const headEl = box.querySelector('.mj-osd-panel-head');
-		let grab = null;
-		headEl.addEventListener('pointerdown', (e) => {
-			if (e.button) return;
-			const r = box.getBoundingClientRect();
-			grab = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top };
-			try { headEl.setPointerCapture(e.pointerId); } catch (err) {}
-			e.preventDefault();
-			e.stopPropagation();
-		});
-		headEl.addEventListener('pointermove', (e) => {
-			if (!grab || e.pointerId !== grab.id) return;
-			const s = preview.stage.getBoundingClientRect();
-			const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-			box.style.left = clamp(e.clientX - s.left - grab.dx, 8,
-				Math.max(8, s.width - box.offsetWidth - 8)) + 'px';
-			box.style.top = clamp(e.clientY - s.top - grab.dy, 8,
-				Math.max(8, s.height - 48)) + 'px';
-			box.style.right = 'auto';
-			box.style.bottom = 'auto';
-		});
-		const drop = (e) => {
-			if (grab && e.pointerId === grab.id) grab = null;
-		};
-		headEl.addEventListener('pointerup', drop);
-		headEl.addEventListener('pointercancel', drop);
-
-		box.querySelector('.mj-osd-panel-x')
-			.addEventListener('click', () => { box.hidden = true; });
-
-		// On a picture too narrow to hold it, the panel moves off the picture.
-		// Measured rather than assumed, and the node is MOVED rather than
-		// restyled: it lives in the stage's overlay, which is clipped to the
-		// stage, so no amount of CSS puts it underneath from in there. The mount
-		// below the bar is created once and stays empty while the panel is on
-		// the picture.
-		const NARROW = 560;
-		let dockMount = null, docked = null;
-		function dock(on) {
-			if (on === docked) return;
-			docked = on;
-			if (on) {
-				if (!dockMount) {
-					dockMount = el('div', 'mj-osd-panel-mount');
-					const after = preview.stage.nextElementSibling;
-					preview.stage.parentNode.insertBefore(
-						dockMount, after ? after.nextElementSibling : null);
-				}
-				box.style.left = box.style.top = '';
-				box.style.right = box.style.bottom = '';
-				box.classList.add('mj-osd-panel-docked');
-				dockMount.appendChild(box);
-			} else {
-				box.classList.remove('mj-osd-panel-docked');
-				preview.overlay.appendChild(box);
-			}
-		}
-		function measure() { dock(preview.stage.clientWidth < NARROW); }
-		let ro = null;
-		if (window.ResizeObserver) {
-			ro = new ResizeObserver(measure);
-			ro.observe(preview.stage);
-		} else {
-			window.addEventListener('resize', measure);
-		}
-		state.liveCleanup.push(() => {
-			if (ro) ro.disconnect();
-			else window.removeEventListener('resize', measure);
-		});
-		measure();
-		// A press inside must not reach the drag catcher underneath.
-		box.addEventListener('pointerdown', (e) => e.stopPropagation());
 
 		// One slot per overlay inside each tab, all but the selected one hidden.
 		//
@@ -3267,10 +3208,9 @@
 			tab: (id) => made[id].body,
 			slot: slot,
 			showOverlay: showOverlay,
-			reveal: (id) => {
-				box.hidden = false;
-				if (id) show(id);
-			},
+			// It is always there now, so this only chooses which tab of it you
+			// are looking at.
+			reveal: (id) => { if (id) show(id); },
 			// What it is called, derived rather than stored: a text overlay is
 			// the line it prints. Nothing anywhere holds a name for it.
 			name: (text) => {
@@ -5985,6 +5925,11 @@
 		const show = !!(n || apply || state.flashPending);
 		bar.classList.toggle('d-flex', show);
 		bar.classList.toggle('d-none', !show);
+		// A sticky bar does not push anything; it sits on whatever is at the
+		// bottom of the window. On a leaf whose picture is sized from the
+		// viewport height that is the control row under the picture, so the
+		// picture gives the bar its height back while it is there.
+		if (bar.parentNode) bar.parentNode.classList.toggle('mj-has-toolbar', show);
 
 		const lbl = document.getElementById('mj-dirty-count');
 		if (lbl && !state.toolbarMsg) {
