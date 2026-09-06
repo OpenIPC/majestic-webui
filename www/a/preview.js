@@ -44,6 +44,10 @@ window.MajesticVideo = (function () {
 		let ws = null, ms = null, sb = null, objUrl = null;
 		let queue = [], started = false, mime = null;
 		let skipInitBinary = false;
+		// The running stream's dimensions. The fallback mime carries the codec
+		// but not the resolution, so a re-init that changes only width/height
+		// has to be told from a true re-announcement by these.
+		let lastW = 0, lastH = 0;
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let gotSignal = false, signalTimer = null, failCount = 0;
 		// From the caller: this player is also staged as a replacement now, and
@@ -86,6 +90,10 @@ window.MajesticVideo = (function () {
 
 		function teardownMse() {
 			started = false; queue = [];
+			// A redundant init may have armed this for a moov that never arrived
+			// (the socket dropped first). Clear it, or the next connection's real
+			// init segment would be dropped and playback could not start.
+			skipInitBinary = false;
 			try { if (sb && sb.updating) sb.abort(); } catch (e) {}
 			try { if (sb && ms && ms.readyState === 'open') ms.removeSourceBuffer(sb); } catch (e) {}
 			sb = null;
@@ -173,13 +181,25 @@ window.MajesticVideo = (function () {
 			// the redundant init segment (this message and the binary moov that
 			// follows it): the camera's fragment timeline is continuous across the
 			// re-announcement, so the fragments after it keep appending to the
-			// existing buffer. A real reconfigure changes the codec, resolution or
-			// audio track, which changes the mime and takes the rebuild path below.
-			if (started && sb && ms && ms.readyState === 'open' && newMime === mime) {
+			// existing buffer.
+			//
+			// The identity has to include the resolution, not just the mime: the
+			// fallback mime is built from codecString alone, so a channel resized
+			// without a codec change (e.g. 1080p -> 720p at the same H.265 level)
+			// keeps the same mime while genuinely needing a new decoder. Compare
+			// width and height too, or that reconfigure would be swallowed here
+			// and its fragments would reach a buffer set up for the old size. A
+			// real reconfigure -- codec, resolution or audio -- takes the rebuild
+			// path below.
+			if (started && sb && ms && ms.readyState === 'open' &&
+					newMime === mime && (info.width | 0) === lastW &&
+					(info.height | 0) === lastH) {
 				skipInitBinary = true;
 				return;
 			}
 			mime = newMime;
+			lastW = info.width | 0;
+			lastH = info.height | 0;
 			teardownMse();
 			ms = new MediaSource();
 			objUrl = URL.createObjectURL(ms);

@@ -248,5 +248,48 @@ function load() {
 		env.player.destroy();
 	}
 
+	group('a resolution change with the same codec still rebuilds');
+	{
+		// The fallback mime is codecString alone, so a channel resized without a
+		// codec change keeps the same mime. The guard must not read that as a
+		// re-announcement: the new size needs a new decoder.
+		const env = load();
+		const s = env.sockets[0];
+		s.fire('open');
+		s.fire('message', { data: JSON.stringify(
+			{ type: 'init', codec: 'h264', codecString: 'avc1.4d001f', width: 1920, height: 1080 }) });
+		if (env.ms && env.ms.listeners.sourceopen) env.ms.listeners.sourceopen();
+		check('one decoder for the first size', env.msCount === 1, env.msCount + '');
+
+		s.fire('message', { data: JSON.stringify(
+			{ type: 'init', codec: 'h264', codecString: 'avc1.4d001f', width: 1280, height: 720 }) });
+		if (env.ms && env.ms.listeners.sourceopen) env.ms.listeners.sourceopen();
+		check('a resolution change rebuilt the decoder', env.msCount === 2, env.msCount + '');
+		env.player.destroy();
+	}
+
+	group('a disconnect after a redundant init does not strand the reconnect');
+	{
+		// A redundant init arms "drop the next binary" for the moov that follows
+		// it. If the socket drops before that binary arrives, the flag must be
+		// cleared, or the replacement connection's real init segment is dropped
+		// and playback can never start.
+		const env = load();
+		env.play();
+		const s0 = env.sockets[0];
+		// The camera re-announces, but the socket dies before the moov lands.
+		s0.fire('message', { data: JSON.stringify(
+			{ type: 'init', codec: 'h264', codecString: 'avc1.4d001f' }) });
+		s0.fire('close');
+		await sleep(1300); // the reconnect backoff
+		check('a replacement socket opened', env.sockets.length === 2, env.sockets.length + '');
+
+		env.play(); // the replacement's fresh init + sourceopen
+		env.sockets[1].fire('message', { data: { byteLength: 300 } }); // its moov
+		check('the replacement init segment was appended, not dropped',
+			env.sb.appends === 1, env.sb.appends + '');
+		env.player.destroy();
+	}
+
 	done();
 })();
