@@ -2276,6 +2276,7 @@
 			if (!confirm(W.clearAsk)) return;
 			field.setValue('');
 			updateDirty();
+			pushLive();
 		});
 		foot.appendChild(clear);
 		listBox.appendChild(foot);
@@ -2395,7 +2396,21 @@
 			if (src) src.value = v;
 			const ref = rowRefs[i];
 			if (ref) { ref.co.value = v; ref.says(parse(v)); }
+			pushLive();
 			return v;
+		}
+
+		// The camera follows the drag, where the caller wired it to.
+		//
+		// Without this a mask was the one thing on this picture that did not
+		// move until Save, while the text beside it followed the pointer — so
+		// the same gesture on the same picture behaved two different ways. The
+		// daemon classes osd.privacyMasks live and moves the covers with one
+		// call per stream, which is what makes this the same promise the
+		// placement already makes: nothing saved, nothing rebuilt.
+		function pushLive() {
+			if (words.onLive) words.onLive(list().filter(Boolean).join(','));
+			if (onEdit) onEdit();
 		}
 
 		// Removing a region renumbers every one after it, and the selection is an
@@ -2406,7 +2421,10 @@
 			if (sel === i) sel = -1;
 			else if (sel > i) sel -= 1;
 			ctl._drop(i);
+			pushLive();
 		}
+
+		let onEdit = null;
 
 		// Told, not asked. select() already returns early on no change, so a
 		// listener here cannot loop back into it.
@@ -2622,6 +2640,25 @@
 			selectAt: (i) => select(i),
 			onSelect: (fn) => { onSelect = fn; },
 			count: () => list().length,
+			// One region's rectangle, read and written, for a caller that
+			// shows the selected one somewhere else. Through the same inputs
+			// and the same repaint the list's own boxes use, so there is one
+			// source of truth and not a second copy to keep in step.
+			rectAt: (i) => {
+				const v = list()[i];
+				return v === undefined ? '' : v;
+			},
+			setRectAt: (i, v) => {
+				const src = inputs()[i];
+				if (!src) return;
+				src.value = v;
+				src.dispatchEvent(new Event('input', { bubbles: true }));
+				src.dispatchEvent(new Event('change', { bubbles: true }));
+				pushLive();
+			},
+			// What the list is showing, so a caller can repaint its own view of
+			// it when a drag moves the numbers.
+			onEdit: (fn) => { onEdit = fn; },
 		};
 	}
 
@@ -2829,6 +2866,8 @@
 		// showing — the tab strip is the selected overlay's, not everyone's.
 		const kinds = {};
 		let shownKind = 0;
+		// The panel's own box for the selected mask's rectangle.
+		let maskCo = null;
 		for (const n of OVERLAYS) {
 			const list = n === 0 ? fields : extra[String(n)];
 			const held = {};
@@ -2915,6 +2954,10 @@
 		if (maskField && canRegion) {
 			masks = mountRegions(preview, maskField, maskBody, maskNote, {
 				gated: true,
+				// The camera follows a mask drag the way it follows a text one.
+				// Same endpoint, same document shape, same undo: the drop below
+				// puts every staged rectangle back where the config says.
+				onLive: (spec) => postLivePlace({ osd: { privacyMasks: spec } }),
 				one: '1 mask', many: ' masks',
 				draw: 'Draw masks', drawHint: 'Drag a rectangle on the picture',
 				empty: 'No masks. Switch the picture to Masks and drag one over ' +
@@ -3039,8 +3082,21 @@
 				if (sel.t === 'text' && panel) {
 					panel.showOverlay(sel.i);
 					shownKind = sel.i;
+					panel.offer('text', true);
 					panel.offer('look', !kinds[sel.i]);
+					panel.offer('place', true);
 					panel.reveal();
+				} else if (sel.t === 'mask' && panel) {
+					// A mask has a rectangle and nothing else: no content to
+					// write, no font to choose. One tab, and it is the one
+					// about where a thing is.
+					panel.showOverlay('mask');
+					panel.offer('text', false);
+					panel.offer('look', false);
+					panel.offer('place', true);
+					panel.name(sel.i >= 0 ? 'Mask ' + (sel.i + 1) : 'Masks');
+					if (maskCo && sel.i >= 0) maskCo.value = masks.rectAt(sel.i);
+					panel.reveal('place');
 				}
 				draw();
 			}
@@ -3242,6 +3298,49 @@
 			// chips do, so the chip row cannot disagree with what is being
 			// dragged.
 			pickHandler = (n) => pick({ t: 'text', i: n });
+
+			// ── the inspector, for a mask ────────────────────────────────
+			//
+			// A mask is a thing on this picture like the others, and the panel
+			// had nothing to say about one: selecting a Mask chip left the
+			// last text overlay's settings on screen, which is a panel
+			// describing something you are not looking at.
+			//
+			// What a mask HAS is a rectangle and a consequence, so that is what
+			// it shows. The rectangle is the list's own input read and written
+			// through mountRegions rather than copied, so the picture, the row
+			// below and this box are three views of one value and cannot
+			// disagree.
+			if (masks && panel) {
+				const slot = panel.slot('place', 'mask');
+				const box = el('p', 'string mj-row');
+				box.innerHTML =
+					'<label class="form-label" for="mj-md-inspect">' +
+						'Left × Top × Width × Height</label>' +
+					'<input type="text" class="form-control" id="mj-md-inspect" ' +
+						'spellcheck="false" autocomplete="off">';
+				slot.appendChild(box);
+				const co = box.querySelector('input');
+
+				const why = el('p', 'mj-live-hint');
+				why.textContent = 'A mask is drawn into the video itself, so it ' +
+					'is in the recording and in every other viewer’s picture — ' +
+					'not just in this preview.';
+				slot.appendChild(why);
+
+				maskCo = co;
+				co.addEventListener('change', () => {
+					if (sel.t === 'mask' && sel.i >= 0)
+						masks.setRectAt(sel.i, co.value.trim());
+				});
+				// The numbers move under a drag, and this is one of the places
+				// they are shown.
+				masks.onEdit(() => {
+					if (sel.t === 'mask' && sel.i >= 0 &&
+						document.activeElement !== co)
+						co.value = masks.rectAt(sel.i);
+				});
+			}
 
 			pick(sel, false);
 		}
@@ -3482,7 +3581,10 @@
 	function revertOsdPlace() {
 		if (!osdPushed) return;
 		osdPushed = false;
-		postLiveJson({ osd: { anchor: '' } });
+		// The masks go with the placement: an empty list is the same "put back
+		// what is saved" the empty anchor is, and both were staged by the same
+		// page and are abandoned by the same act of leaving it.
+		postLiveJson({ osd: { anchor: '', privacyMasks: '' } });
 	}
 
 	// The same drop, for the path a normal request cannot survive: a reload or
@@ -3493,7 +3595,8 @@
 		osdPushed = false;
 		try {
 			navigator.sendBeacon('/api/v1/live',
-				new Blob([JSON.stringify({ osd: { anchor: '' } })],
+				new Blob([JSON.stringify(
+					{ osd: { anchor: '', privacyMasks: '' } })],
 					{ type: 'application/json' }));
 		} catch (e) { /* the tab is going; there is nothing to report to */ }
 	}
