@@ -2845,7 +2845,25 @@
 		// point is the override that no live page is answering for. The cost of
 		// getting it wrong is one dropped preview in another browser, whose
 		// very next pointermove pushes it again.
-		revertOsdPlace(true);
+		// ONCE PER VISIT, not on every mount of this leaf.
+		//
+		// What this is for is the override no live page is answering for: a
+		// tab that died between staging one and taking it off. That is a
+		// question about the camera when this page arrives, and it has an
+		// answer the first time it is asked. Asking it again every time the
+		// leaf is remounted — a tab switched away from and back, a save, a
+		// search that rebuilds the form — turned a one-off reconciliation
+		// into a repeated one, and every repeat is a chance to drop the
+		// placement somebody else is in the middle of dragging.
+		//
+		// It does not make this safe for two people editing at once; nothing
+		// here can, since the camera holds one override and cannot say whose.
+		// It makes the window one moment per visit instead of one per mount,
+		// and the other editor's next pointermove stages theirs again.
+		if (!state.osdReconciled) {
+			state.osdReconciled = true;
+			revertOsdPlace(true);
+		}
 
 		// Which overlays this camera can draw, and the fields of each.
 		//
@@ -3085,11 +3103,11 @@
 		// once. The item list below words it; the picture needs it too, so that
 		// a press cannot pick up an overlay that is not being drawn.
 		//
-		// A LINE OR A PICTURE, exactly as osd_overlay_active() has it. Teaching
-		// the daemon that a logo makes an overlay exist and not teaching this
-		// left a logo-only overlay drawn on the video and absent from the item
-		// list — so there was no chip to select, and therefore no way to reach
-		// the thing that would change or remove it.
+		// A LINE OR A PICTURE, which is the camera's own rule for whether an
+		// overlay exists at all. Counting only the line left an overlay that
+		// draws just a logo on the video and absent from the item list — so
+		// there was no chip to select, and therefore no way to reach the thing
+		// that would change or remove it.
 		const lineOf = (n) => HELD[n] && HELD[n].template
 			? String(HELD[n].template.getValue() || '') : '';
 		const logoOf = (n) => HELD[n] && HELD[n].image
@@ -3344,11 +3362,22 @@
 				// inheriting the main stream's costs nothing extra. The number
 				// of sizes is the camera's to say and is read from its report.
 				const items = listed().length + (markShown() ? 1 : 0);
-				const regions = items * (camRects.widths || 1);
+				// HOW MANY STREAM SIZES IS THE CAMERA'S TO SAY, and until it
+				// has said, this line says nothing about regions. Standing in
+				// 1 for an unknown count turned a guess into a printed number
+				// — and understated it on every camera with two stream sizes,
+				// which is most of them. That stood before the first reply,
+				// after any hiccup, and for good on a build with no
+				// /api/v1/osd at all.
+				const regions = camRects.widths ? items * camRects.widths : 0;
 				const bits = [];
-				bits.push(b && b.overlays
-					? regions + ' of ' + b.overlays + ' regions'
-					: regions + (regions === 1 ? ' region' : ' regions'));
+				if (regions) {
+					bits.push(b && b.overlays
+						? regions + ' of ' + b.overlays + ' regions'
+						: regions + (regions === 1 ? ' region' : ' regions'));
+				} else {
+					bits.push(items + (items === 1 ? ' item' : ' items'));
+				}
 				if (masks) {
 					bits.push(b && b.masks
 						? nMask + ' of ' + b.masks + ' masks'
@@ -4008,7 +4037,16 @@
 		// The masks go with the placement: an empty list is the same "put back
 		// what is saved" the empty anchor is, and both were staged by the same
 		// page and are abandoned by the same act of leaving it.
-		postLiveJson({ osd: { anchor: '', privacyMasks: '' } });
+		// THROUGH WHICHEVER DOOR THE PUSHES WENT. postLivePlace() falls back
+		// to the query endpoint when the document form answers 404, and this
+		// went on addressing the document form regardless — so on exactly the
+		// cameras that needed the fallback, the undo was sent to an endpoint
+		// that is not there and the overlay stayed where it had been dragged.
+		if (liveDoc) {
+			postLiveJson({ osd: { anchor: '', privacyMasks: '' } });
+			return;
+		}
+		postLive(legacyQuery({ osd: { anchor: '' } }));
 	}
 
 	// The same drop, for the path a normal request cannot survive: a reload or
@@ -4018,6 +4056,12 @@
 		if (!osdPushed || !navigator.sendBeacon) return;
 		osdPushed = false;
 		try {
+			// Same door as the pushes, for the same reason as revertOsdPlace.
+			if (!liveDoc) {
+				navigator.sendBeacon('/api/v1/image?' +
+					legacyQuery({ osd: { anchor: '' } }));
+				return;
+			}
 			navigator.sendBeacon('/api/v1/live',
 				new Blob([JSON.stringify(
 					{ osd: { anchor: '', privacyMasks: '' } })],
@@ -4053,7 +4097,7 @@
 				credentials: 'same-origin',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(doc),
-			}).then((r) => r.ok || r.status === 400, () => false));
+			}).then((r) => r.ok, () => false));
 		return liveJsonWrite;
 	}
 
@@ -4339,12 +4383,14 @@
 		// approximation on purpose and never pretends otherwise.
 		//
 		// It has to be a CLOSE approximation now, which it was not. The
-		// divisor is the camera's own arithmetic: get_font_size() is
-		// frame_w/55 POINTS and init_font() scales points to pixels by 100/72,
-		// so a glyph is frame_w/39.6 pixels — and the picture on screen is
-		// that frame at a different scale, so the ratio holds against the
-		// picture's own width. It was 96, which is 2.4x too small: the
-		// stand-in came out half the size of the text it stands in for.
+		// divisor is measured against what the camera actually draws: the
+		// overlay's text comes out at about a 39.6th of the frame's width,
+		// and the picture on screen is that frame at a different scale, so
+		// the ratio holds against the picture's own width. It was 96, which
+		// is 2.4x too small: the stand-in came out half the size of the text
+		// it stands in for. GET /api/v1/osd reports the real rectangles and
+		// is what the hit-testing uses; this is only the stand-in drawn under
+		// the pointer before the camera has answered.
 		//
 		// That was invisible while the stand-in only appeared under a finger
 		// mid-drag. It stopped being invisible when the same box became what a
@@ -4404,10 +4450,18 @@
 		// is their choice to make and the unit is theirs. For the mark it is
 		// not a choice at all — there is no unit control, its position has to
 		// hold on every output, and a share is the only spelling that does.
-		function unit() {
+		function unit(axis) {
 			if (hooks.unit) return hooks.unit;
 			const x = P.unitOf(held.offsetX && held.offsetX.getValue());
 			const y = P.unitOf(held.offsetY && held.offsetY.getValue());
+			// PER AXIS, because the two fields are two settings. Picking the
+			// first spelling either of them happened to hold and writing both
+			// in it rewrote an axis that had not moved — a vertical offset in
+			// em became a percentage because the horizontal one was, which is
+			// a value the operator chose being replaced by one they did not.
+			// An axis with no spelling of its own borrows the other's, since
+			// there is nothing there to overwrite.
+			if (axis === 'y') return y || x || P.DEFAULT_UNIT;
 			return x || y || P.DEFAULT_UNIT;
 		}
 
@@ -4549,12 +4603,12 @@
 			}
 			const sides = P.sidesOf(a);
 			const sp = spans(p);
-			const u = unit();
+			const ux = unit('x'), uy = unit('y');
 			const f = P.dragWithin(p, b, sides, { x: px, y: py });
 			return {
-				prop: false, sides: sides, anchor: a, u: u,
-				ox: P.fromFrac(f.fx, u, sp.w, sp.emx),
-				oy: P.fromFrac(f.fy, u, sp.h, sp.emy),
+				prop: false, sides: sides, anchor: a, u: ux,
+				ox: P.fromFrac(f.fx, ux, sp.w, sp.emx),
+				oy: P.fromFrac(f.fy, uy, sp.h, sp.emy),
 				fx: f.fx, fy: f.fy,
 			};
 		}
@@ -4759,7 +4813,12 @@
 			}
 			const sides = P.sidesOf(a);
 			const sp = spans(p);
-			const u = unit();
+			/* The axis being nudged, in ITS unit. An arrow moves one axis, so
+			 * writing both in one spelling rewrote the one that had not
+			 * moved. */
+			const horiz = k === 'ArrowLeft' || k === 'ArrowRight';
+			const u = unit(horiz ? 'x' : 'y');
+			const ux = unit('x'), uy = unit('y');
 			const step = (u === 'px' ? 1 : 0.1) * big;
 			const r = (n) => Math.round(n * 10) / 10;
 			const cur = {
@@ -4773,12 +4832,13 @@
 			else
 				oy = Math.max(0, r(oy + P.nudge(sides, 'y',
 					k === 'ArrowDown' ? 1 : -1) * step));
-			const suffix = u === '%' ? '%' : u === 'em' ? 'em' : '';
+			const sfx = (v) => (v === '%' ? '%' : v === 'em' ? 'em' : '');
+			const sx = ox + sfx(ux), sy = oy + sfx(uy);
 			commitTo({
 				prop: false, sides: sides, anchor: a, u: u,
-				ox: ox + suffix, oy: oy + suffix,
-				fx: P.toFrac(ox + suffix, sp.w, sp.emx),
-				fy: P.toFrac(oy + suffix, sp.h, sp.emy),
+				ox: sx, oy: sy,
+				fx: P.toFrac(sx, sp.w, sp.emx),
+				fy: P.toFrac(sy, sp.h, sp.emy),
 			});
 			paint();
 		});
@@ -4997,6 +5057,10 @@
 		function fetchShot() {
 			if (asked) return;
 			asked = true;
+			// Cleared on failure below: a transient network error left this
+			// set for the life of the editor, so every later repaint refused
+			// to look again and the picture stayed on its error message even
+			// once the camera was answering.
 			apiFetch('/api/v1/osd/image?overlay=' + overlay,
 				{ credentials: 'same-origin' })
 				.then((r) => {
@@ -5028,6 +5092,12 @@
 					say(w + '×' + h + ' · on the camera');
 				})
 				.catch(() => {
+					// Asked again next time. This is the difference between a
+					// logo that is not there and one the camera did not answer
+					// for just now, and only the second is worth retrying —
+					// but the flag could not tell them apart and refused both
+					// for the life of the editor.
+					asked = false;
 					// A path that is set and a picture that cannot be had are
 					// not the same as no picture, and the box says which.
 					shot.hidden = true;
@@ -5061,9 +5131,9 @@
 		}
 
 		// The frame the pixels are chosen for, so the camera can keep the same
-		// share of every stream — see the daemon's osd/image.h. The picture on
-		// screen is the frame being shown, which is what the operator sized it
-		// against.
+		// share of every stream: it is sent with the upload as `ref` and the
+		// camera scales the picture by it. The frame on screen is the one the
+		// operator sized it against, so that is what is reported.
 		function refWidth() {
 			const f = preview && preview.frame && preview.frame();
 			return f && f.w ? f.w : 1920;
@@ -5104,10 +5174,16 @@
 					// The camera's number, not this one's: it compresses the
 					// pixels, so what lands in flash is not w*h*4 and saying
 					// that would overstate the cost by a factor of fifty.
+					// Only where the camera said. w*h*4 is what was SENT, and
+					// the comment above says the stored file can be fifty
+					// times smaller — so printing that number as the size on
+					// the camera is not an estimate, it is the wrong figure
+					// with a unit after it. A camera that does not report the
+					// stored size gets a sentence with no size in it.
 					const kb = j.stored
-						? Math.max(1, Math.round(j.stored / 1024))
-						: Math.round(q.w * q.h * 4 / 1024);
-					say(q.w + '×' + q.h + ' · ' + kb + ' KB · ' +
+						? Math.max(1, Math.round(j.stored / 1024)) + ' KB · '
+						: '';
+					say(q.w + '×' + q.h + ' · ' + kb +
 						Math.round(q.w * 100 / ref) +
 						'% of the picture’s width. Press Save to draw it.');
 				})
@@ -5156,11 +5232,14 @@
 			if (onBack) setTimeout(onBack, 0);
 			drawn = false;
 			asked = false;
-			// An empty body removes the file; the field going empty is what
-			// makes the overlay draw its text again.
-			apiFetch('/api/v1/osd/image?overlay=' + overlay,
-				{ method: 'POST', credentials: 'same-origin' })
-				.catch(() => {});
+			// STAGED, like the field beside it. Deleting the file here made
+			// one half of this change permanent the moment it was pressed
+			// while the other half waited for Save — so leaving without
+			// saving, or pressing the row's reset arrow, left a configuration
+			// still naming a picture whose bytes were gone, and nothing could
+			// put them back. logoBin carries the removal to Save, which is
+			// where the rest of this edit lands.
+			logoBin.add(overlay);
 			field.setValue('');
 			field.control.dispatchEvent(new Event('change', { bubbles: true }));
 			shot.hidden = true;

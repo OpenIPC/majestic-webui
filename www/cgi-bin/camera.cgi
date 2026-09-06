@@ -49,11 +49,24 @@ fi
 # shows the face name.
 boot_fonts=""
 if [ -d /usr/share/fonts ]; then
+	# Split on newlines only, and do not glob what comes back. The plain
+	# `for f in $(find ...)` splits on every space and tab and then expands
+	# what it split as a pattern, so a font in a directory with a space in its
+	# name arrived as two fragments and one with a bracket in it arrived as
+	# whatever happened to match — and the picker then stored a path the
+	# camera cannot open. Not a pipe into `while read`: that is a subshell in
+	# POSIX sh and boot_fonts would not survive it.
+	_ifs=$IFS
+	IFS='
+'
+	set -f
 	for f in $(find /usr/share/fonts -type f \
 		\( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) 2>/dev/null); do
-		e=$(echo -n "$f" | mj_json_escape)
+		e=$(printf '%s' "$f" | mj_json_escape)
 		boot_fonts="${boot_fonts}${boot_fonts:+,}\"${e}\""
 	done
+	set +f
+	IFS=$_ifs
 fi
 %>
 
