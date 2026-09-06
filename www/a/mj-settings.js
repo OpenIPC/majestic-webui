@@ -368,8 +368,23 @@
 		return out;
 	}
 
+	// A member of the overlay collection, rather than a field of the camera's
+	// own overlay.
+	//
+	// mj-tree's walk recurses into nested objects, which is what isp.iris wants
+	// and what osd.overlays.<n> emphatically does not: it is an indexed
+	// collection, and walked flat it puts every member's eleven fields on the
+	// Overlay leaf — seventy-seven rows — while renderOsd's byKey, which keys on
+	// the last dotted segment, quietly hands the panel the LAST template it saw
+	// instead of the camera's own. Neither half announces itself: the page still
+	// renders, still saves, and edits the wrong overlay.
+	//
+	// So until the item list can pick one, this leaf draws the first overlay,
+	// which is the flat keys. That is the line W3 changes.
+	function isOverlayMember(dot) { return /^osd\.overlays\./.test(dot); }
+
 	function matchCount(secId, q) {
-		return leafFields(secId).filter(f => fieldVisible(f) &&
+		return leafFields(secId).filter(f => !isOverlayMember(f.dot) && fieldVisible(f) &&
 			((f.title || '').toLowerCase().includes(q) ||
 				(f.hint || '').toLowerCase().includes(q) ||
 				// four of ~170 fields ship no title; renderField falls back to the
@@ -2669,7 +2684,7 @@
 	];
 
 	function renderOsd(form) {
-		const fields = sectionFields('osd', true);
+		const fields = sectionFields('osd', true).filter(f => !isOverlayMember(f.dot));
 		const byKey = {};
 		fields.forEach(f => { byKey[f.key] = f; });
 
