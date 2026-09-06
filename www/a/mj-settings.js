@@ -2860,6 +2860,15 @@
 			}
 		}
 		const held = HELD[0];
+
+		// What an overlay SAYS is also whether it exists — the same rule the
+		// camera applies, read from the control so a line added here counts at
+		// once. The item list below words it; the picture needs it too, so that
+		// a press cannot pick up an overlay that is not being drawn.
+		const lineOf = (n) => HELD[n] && HELD[n].template
+			? String(HELD[n].template.getValue() || '') : '';
+		const listedOverlay = (n) =>
+			!!placers[n] && (n === 0 || lineOf(n).trim() !== '');
 		// The first overlay, until something selects another. Said here rather
 		// than left to the item list, which does not exist on a leaf with no
 		// picture to put items on.
@@ -2917,11 +2926,36 @@
 		// layer and drag catcher when it is not, so the selected overlay is the
 		// only thing a press on the picture can move — which is the whole of
 		// what selection has to mean here.
+		// Which overlay a press on the picture is reaching for.
+		//
+		// Answered by the leaf rather than by any one placer, because it is a
+		// question about all of them: only the selected overlay has a catcher,
+		// so its handler asks here whether the press actually landed on one of
+		// the others. `probe` means "just tell me, do not select anything" —
+		// that is the pointermove asking so the cursor can say what a press
+		// would do.
+		//
+		// The SMALLEST overlay under the press wins an overlap. A short label
+		// sitting inside the span of a long clock is the one being reached
+		// for; the long one can be taken anywhere else along its length.
+		let pickHandler = null;
+		const pickAt = (pt, from, probe) => {
+			let found = null;
+			for (const n of OVERLAYS) {
+				if (n === from || !placers[n]) continue;
+				if (!listedOverlay(n) || !placers[n].hitAt(pt)) continue;
+				if (!found || placers[n].area() < found.area()) found = placers[n];
+			}
+			if (found && !probe && pickHandler) pickHandler(found.overlay);
+			return found;
+		};
+
 		let anyPlacer = false;
 		if (preview) {
 			for (const n of OVERLAYS) {
 				if (!HELD[n].anchor) continue;
-				placers[n] = mountOsdText(preview, HELD[n], note, panel, n);
+				placers[n] = mountOsdText(preview, HELD[n], note, panel, n,
+					{ pickAt: pickAt });
 				placers[n].setActive(false);
 				anyPlacer = true;
 			}
@@ -2957,18 +2991,10 @@
 			row.appendChild(chips);
 			(barRow || preview.stage).insertAdjacentElement('afterend', row);
 
-			// What an overlay SAYS is also whether it exists.
-			//
-			// Same rule the camera applies — majestic draws overlay n above zero
-			// only where it has a template of its own — read from the control
-			// rather than from the config, so a line added here is in the list
-			// before it has been saved. Overlay 0 is always listed: it is the
-			// flat keys, every camera has them, and turning the text off is the
-			// Enable switch rather than the absence of an item.
-			const lineOf = (n) => HELD[n] && HELD[n].template
-				? String(HELD[n].template.getValue() || '') : '';
-			const listed = () =>
-				OVERLAYS.filter(n => placers[n] && (n === 0 || lineOf(n).trim() !== ''));
+			// Overlay 0 is always listed: it is the flat keys, every camera has
+			// them, and turning the text off is the Enable switch rather than
+			// the absence of an item.
+			const listed = () => OVERLAYS.filter(listedOverlay);
 			const spare = () =>
 				OVERLAYS.find(n => n > 0 && placers[n] && lineOf(n).trim() === '');
 
@@ -3115,6 +3141,11 @@
 				HELD[n].template.control.addEventListener('input', draw);
 				HELD[n].template.control.addEventListener('change', draw);
 			}
+
+			// A press on the picture selects through exactly the same door the
+			// chips do, so the chip row cannot disagree with what is being
+			// dragged.
+			pickHandler = (n) => pick({ t: 'text', i: n });
 
 			pick(sel, false);
 		}
@@ -3414,9 +3445,10 @@
 	// reason they are right here rather than free pixels: a named corner
 	// survives a change of resolution, and "16 px from the left" does not mean
 	// the same thing on a 1920 frame as on a 640 one.
-	function mountOsdText(preview, held, headNote, panel, overlay) {
+	function mountOsdText(preview, held, headNote, panel, overlay, hooks) {
 		const P = window.MajesticPlace;
 		overlay = overlay || 0;
+		hooks = hooks || {};
 		const stage = preview.stage;
 		// Where a press landed, so a TAP can be told from a drag: a tap on the
 		// overlay brings its panel back after it has been closed, and a drag
@@ -3436,7 +3468,12 @@
 		['gx-l', 'gx-c', 'gx-r'].forEach(c => guides.appendChild(el('span', 'mj-osd-g mj-osd-v ' + c)));
 		['gy-t', 'gy-c', 'gy-b'].forEach(c => guides.appendChild(el('span', 'mj-osd-g mj-osd-h ' + c)));
 		const ghost = el('div', 'mj-osd-ghost');
-		ghost.hidden = true;
+		// Hidden by VISIBILITY, not by `hidden`, and its layer stays laid out
+		// even when this overlay is not the selected one — because the stand-in
+		// is also how this overlay's size is measured, and a display:none box
+		// measures zero. That is what lets a press on the picture find an
+		// overlay that is not the one currently being dragged.
+		ghost.style.visibility = 'hidden';
 		layer.appendChild(ghost);
 		const read = el('span', 'mj-osd-read');
 		read.hidden = true;
@@ -3597,7 +3634,11 @@
 			sayPlacement();
 			if (panel && active) panel.name(shown());
 			const p = pic();
-			layer.hidden = !active || !p;
+			// The LAYER stays whenever there is a picture: an unselected
+			// overlay still has to be measurable, and everything in it is
+			// invisible and pointer-transparent until a drag starts. Only the
+			// catcher is the selected overlay's alone.
+			layer.hidden = !p;
 			catcher.hidden = !active || !p;
 			if (!p) return;
 			ghost.style.fontSize = em(p).toFixed(1) + 'px';
@@ -3607,10 +3648,42 @@
 			guides.style.width = p.w + 'px';
 			guides.style.height = p.h + 'px';
 			if (!drag) {
-				ghost.hidden = true;
+				// Parked where the overlay actually is, invisibly. Only the
+				// drag used to position it, so at rest every stand-in sat at
+				// the layer's origin — which costs nothing while nobody can
+				// see it, and is wrong the moment the element's own box is
+				// what a press is tested against.
+				const c = current(p);
+				ghost.style.left = c.x + 'px';
+				ghost.style.top = c.y + 'px';
+				ghost.style.visibility = 'hidden';
 				read.hidden = true;
 				guides.classList.remove('mj-osd-on');
 			}
+		}
+
+		// Where this overlay is on screen right now, selected or not. The same
+		// two answers the drag already computes — where the placement puts it,
+		// and how big the stand-in is — asked for a different reason.
+		function rectOn(p) {
+			const b = box();
+			const c = current(p);
+			return { x: c.x, y: c.y, w: b.w, h: b.h };
+		}
+
+		/* How much of the picture this overlay covers, for deciding between two
+		 * that are both under the press. */
+		function areaOn() {
+			const b = box();
+			return b.w * b.h;
+		}
+
+		function hitAt(pt) {
+			const p = pic();
+			if (!p) return false;
+			const r = rectOn(p);
+			return pt.x >= r.x && pt.x <= r.x + r.w &&
+				pt.y >= r.y && pt.y <= r.y + r.h;
 		}
 
 		// A DRAG NEVER CHANGES THE ANCHOR.
@@ -3690,12 +3763,14 @@
 			return { x: e.clientX - r.left, y: e.clientY - r.top };
 		};
 
-		catcher.addEventListener('pointerdown', (e) => {
-			if (e.button || drag || !active) return;
+		// Taking hold of this overlay, wherever the press came from: its own
+		// catcher, or another overlay's catcher handing it over because the
+		// press landed here.
+		function grab(e) {
 			const p = pic();
 			if (!p) return;
 			tapFrom = { x: e.clientX, y: e.clientY };
-			ghost.hidden = false;
+			ghost.style.visibility = '';
 			read.hidden = false;
 			guides.classList.add('mj-osd-on');
 			const cur = current(p);
@@ -3704,7 +3779,40 @@
 			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
 			try { stage.focus(); } catch (err) {}
 			preview_(place(cur.x, cur.y, p), p);
+		}
+
+		catcher.addEventListener('pointerdown', (e) => {
+			if (e.button || drag || !active) return;
+			const p = pic();
+			if (!p) return;
 			e.preventDefault();
+
+			// WHAT THE PRESS LANDED ON DECIDES WHICH OVERLAY MOVES.
+			//
+			// The catcher covers the whole picture, so without this a press
+			// anywhere drags whichever overlay happens to be selected — and
+			// the only way to reach a second one was the chip row under the
+			// picture. Pressing the text you want to move is the obvious
+			// gesture and it did nothing, which reads as only one overlay
+			// being draggable at all.
+			//
+			// The handover is inside one gesture: the overlay under the press
+			// is selected AND picked up, so it moves with the same drag rather
+			// than needing a second one. It is the same rule the region editor
+			// states — a region is a thing you can pick up, and what the press
+			// landed on decides the gesture.
+			const other = hooks.pickAt && hooks.pickAt(at(e), overlay);
+			if (other) { other.grab(e); return; }
+
+			grab(e);
+		});
+
+		// And the pointer says so before the press: over another overlay this
+		// is a thing to pick up, not a picture to drag the selected one across.
+		catcher.addEventListener('pointermove', (e) => {
+			if (drag || !active) return;
+			const other = hooks.pickAt && hooks.pickAt(at(e), overlay, true);
+			catcher.classList.toggle('mj-osd-pickable', !!other);
 		});
 
 		catcher.addEventListener('pointermove', (e) => {
@@ -3827,6 +3935,9 @@
 		return {
 			repaint: paint,
 			overlay: overlay,
+			hitAt: hitAt,
+			area: areaOn,
+			grab: grab,
 			setActive: (on) => { active = !!on; paint(); },
 			// For anything that writes the placement rows directly — the anchor
 			// pad, a typed offset — so the camera follows a click the same way

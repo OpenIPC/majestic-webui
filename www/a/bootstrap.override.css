@@ -5052,6 +5052,13 @@ dialog.mj-modal::backdrop {
 	touch-action: none;
 }
 
+/* Over another overlay the press means "pick that one up", not "drag the
+   selected one from here", and the cursor is where that is disclosed —
+   there is nothing else on the picture to say it. */
+.mj-osd-catch.mj-osd-pickable {
+	cursor: pointer;
+}
+
 .mj-osd-guides {
 	position: absolute;
 	pointer-events: none;
