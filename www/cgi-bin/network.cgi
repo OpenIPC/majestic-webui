@@ -5,12 +5,89 @@
 params="address dhcp gateway hostname nameserver netmask interface wlan_ssid wlan_password"
 
 network_list="$(ls /sys/class/net | grep -e eth0 -e wlan0)"
-network_nameserver="$(cat /etc/resolv.conf | grep nameserver | cut -d' ' -f2)"
-network_netmask="$(ifconfig ${network_interface} | grep Mask | cut -d: -f4)"
-network_dhcp="$(cat /etc/network/interfaces.d/${network_interface} | grep -q dhcp && echo true)"
-
 network_wlan_ssid="$(fw_printenv -n wlanssid)"
 network_wlan_password="$(fw_printenv -n wlanpass)"
+
+# The interface the camera is on: the one carrying the default route, as
+# sysinfo found it. The form edits this one's file and the card reports this
+# one's state. The select can point a save at the other interface, and what
+# that does at boot is the boot script's decision, not this page's -- it
+# brings wlan0 up from its file only when U-Boot names a wireless driver, and
+# eth0 from its file only when it does not -- so nothing here promises when
+# such a save takes effect.
+now_iface="${network_interface:-eth0}"
+
+# Two readings, kept apart, because they are only the same thing between a
+# restart and the next save. sbin/setnetwork writes
+# /etc/network/interfaces.d/<iface> and applies nothing but the hostname; the
+# boot script's ifup is what reads the file, so a saved address exists nowhere
+# but in that file until the camera restarts. The FORM shows the file, since
+# that is what it edits. The CARD shows the kernel, since that is what
+# "current connection" means. The form used to be drawn from the kernel too,
+# so a static address that had just been saved came back as the DHCP lease
+# still in use, and the only place the save was visible was the file dumped
+# under Diagnostics (OpenIPC/majestic#311).
+net_read() {
+	local f="/etc/network/interfaces.d/$1"
+	cfg_mode=$(awk '$1 == "iface" { print $4; exit }' "$f" 2>/dev/null)
+	cfg_address=$(awk '$1 == "address" { print $2; exit }' "$f" 2>/dev/null)
+	cfg_netmask=$(awk '$1 == "netmask" { print $2; exit }' "$f" 2>/dev/null)
+	cfg_gateway=$(awk '$1 == "gateway" { print $2; exit }' "$f" 2>/dev/null)
+	# The resolver is a pre-up line that writes /tmp/resolv.conf. That
+	# spelling is setnetwork's, and this is its only reader.
+	cfg_nameserver=$(awk '$1 == "pre-up" && $2 == "echo" && $3 == "nameserver" { print $4; exit }' "$f" 2>/dev/null)
+
+	local inet=$(ifconfig "$1" 2>/dev/null | sed -n 's/.*inet addr:\([^ ]*\).*Mask:\([^ ]*\).*/\1 \2/p')
+	now_address=${inet% *}
+	now_netmask=${inet#* }
+	now_gateway=$(ip -4 route 2>/dev/null | awk -v i="$1" '
+		$1 == "default" {
+			gw = ""; dev = ""
+			for (n = 2; n <= NF; n++) {
+				if ($n == "via") gw = $(n + 1)
+				if ($n == "dev") dev = $(n + 1)
+			}
+			if (dev == i && gw != "") { print gw; exit }
+		}')
+	now_nameserver=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf 2>/dev/null)
+	# A live udhcpc for the interface is what being on DHCP means; ifup
+	# leaves its pid where ifdown will look for it.
+	local pid=$(cat "/var/run/udhcpc.$1.pid" 2>/dev/null)
+	if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+		now_mode=dhcp
+	else
+		now_mode=static
+	fi
+	# The wireless network in use is the one wpa_supplicant was started
+	# with: the pre-up wrote it from the U-Boot variables of that moment,
+	# and a later save changes the variables and nothing else.
+	now_ssid=$(sed -n 's/^[[:space:]]*ssid="\(.*\)"$/\1/p' /tmp/wpa_supplicant.conf 2>/dev/null | head -n1)
+	now_psk=$(sed -n 's/^[[:space:]]*psk=\([0-9a-f]*\)$/\1/p' /tmp/wpa_supplicant.conf 2>/dev/null | head -n1)
+}
+
+# True while the file says something the kernel is not doing. Judged from the
+# two readings every time rather than flagged at save time, so it clears
+# itself on a restart, on a save that puts things back, and for a file edited
+# by hand -- a flag left in /tmp would say "waiting for a restart" about a
+# change that had since been undone.
+net_pending() {
+	[ -n "$cfg_mode" ] || return 1
+	[ "$cfg_mode" = "$now_mode" ] || return 0
+	if [ "$cfg_mode" = "static" ]; then
+		[ "$cfg_address" = "$now_address" ] || return 0
+		[ "$cfg_netmask" = "$now_netmask" ] || return 0
+		[ "$cfg_gateway" = "$now_gateway" ] || return 0
+		[ "$cfg_nameserver" = "$now_nameserver" ] || return 0
+	fi
+	if [ "$now_iface" = "wlan0" ] && [ -n "$now_ssid" ] && command -v wpa_passphrase >/dev/null; then
+		[ "$network_wlan_ssid" = "$now_ssid" ] || return 0
+		local psk=$(wpa_passphrase "$network_wlan_ssid" "$network_wlan_password" 2>/dev/null | sed -n 's/^[[:space:]]*psk=//p')
+		[ "$psk" = "$now_psk" ] || return 0
+	fi
+	return 1
+}
+
+net_read "$now_iface"
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
@@ -32,7 +109,10 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		reset)
 			rm -f /etc/network/interfaces.d/*
 			cp -f /rom/etc/network/interfaces.d/* /etc/network/interfaces.d
-			redirect_back
+			net_read "$now_iface"
+			msg="Network configuration reset to the firmware's."
+			net_pending && msg="$msg It takes effect when the camera restarts."
+			redirect_back "success" "$msg"
 			;;
 
 		update)
@@ -73,16 +153,50 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				fi
 
 				echo "$command" >> /tmp/webui.log
-				eval "$command" > /dev/null 2>&1
+				# setnetwork refuses on its own checks and says why on stdout;
+				# its status used to be dropped, so a refused save was
+				# reported as a save.
+				if ! out=$(eval "$command" 2>&1); then
+					redirect_back "danger" "Network settings were not saved: $(esc "$out")"
+				fi
 
 				update_caminfo
-				redirect_back "success" "Network settings updated."
+				msg="Network settings saved."
+				if [ "$network_interface" = "$now_iface" ]; then
+					net_read "$now_iface"
+					net_pending && msg="$msg They take effect when the camera restarts."
+				fi
+				redirect_back "success" "$msg"
 			fi
 			;;
 	esac
 fi
+
+# The header reads network_gateway for its no-default-route banner, and that
+# is a statement about the kernel; so the banner it does draw for the pending
+# save is asked for by name, and the form's variables are filled in below it.
+net_pending && restart_pending=1
 %>
 <%in p/header.cgi %>
+
+<%
+# The fields carry the file. On DHCP the static fields are hidden, and what
+# they hold is the starting point for turning the switch off: the lease in
+# use, which is what most people mean to pin.
+network_interface=$now_iface
+network_dhcp=$([ "$cfg_mode" = "dhcp" ] && echo true)
+if [ "$cfg_mode" = "static" ]; then
+	network_address=$cfg_address
+	network_netmask=$cfg_netmask
+	network_gateway=$cfg_gateway
+	network_nameserver=$cfg_nameserver
+else
+	network_address=$now_address
+	network_netmask=$now_netmask
+	network_gateway=$now_gateway
+	network_nameserver=$now_nameserver
+fi
+%>
 
 <div class="row g-4">
 	<div class="col-12 col-lg-7">
@@ -120,14 +234,20 @@ fi
 	<div class="col-12 col-lg-5">
 		<div class="card"><div class="card-body">
 			<% card_head "Current connection" %>
+			<% if net_pending; then %>
+			<p class="small text-secondary">Still the setup from before the save. The saved settings take effect when the camera restarts.</p>
+			<% fi %>
 			<dl class="small list mb-0">
 				<dt>Hostname</dt><dd><% esc "$network_hostname" %></dd>
-				<dt>Interface</dt><dd><% esc "$network_interface" %></dd>
-				<dt>Mode</dt><dd><%= $([ "$network_dhcp" = "true" ] && echo DHCP || echo Static) %></dd>
-				<dt>IP</dt><dd><% esc "$network_address" %></dd>
-				<dt>Netmask</dt><dd><% esc "${network_netmask:-—}" %></dd>
-				<dt>Gateway</dt><dd><% esc "${network_gateway:-—}" %></dd>
-				<dt>DNS</dt><dd><% esc "${network_nameserver:-—}" %></dd>
+				<dt>Interface</dt><dd><% esc "$now_iface" %></dd>
+				<dt>Mode</dt><dd><%= $([ "$now_mode" = "dhcp" ] && echo DHCP || echo Static) %></dd>
+				<% if [ "$now_iface" = "wlan0" ] && [ -n "$now_ssid" ]; then %>
+				<dt>Wi-Fi</dt><dd><% esc "$now_ssid" %></dd>
+				<% fi %>
+				<dt>IP</dt><dd><% esc "${now_address:-—}" %></dd>
+				<dt>Netmask</dt><dd><% esc "${now_netmask:-—}" %></dd>
+				<dt>Gateway</dt><dd><% esc "${now_gateway:-—}" %></dd>
+				<dt>DNS</dt><dd><% esc "${now_nameserver:-—}" %></dd>
 				<dt>MAC</dt><dd class="text-break"><% esc "$network_macaddr" %></dd>
 			</dl>
 		</div></div>

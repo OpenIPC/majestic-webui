@@ -229,7 +229,14 @@ Pragma: no-cache
      data-mj-version="<% attr_escape "$mj_version" %>"
      data-soc-vendor="<% attr_escape "$soc_vendor" %>"></div>
 
-<% if [ -e /tmp/system-reboot ]; then %>
+<%# The flag file is how a page says so from a POST it has already left.
+    restart_pending is how a page that can SEE the pending state on every
+    draw says so without leaving a flag nothing can clear: network.cgi
+    compares the saved interface file with what the kernel is doing, so its
+    banner clears itself on a restart and on a save that puts things back,
+    where a flag would go on saying "waiting for a restart" about a change
+    that had since been undone. %>
+<% if [ -e /tmp/system-reboot ] || [ -n "$restart_pending" ]; then %>
 <% notice warn '<b>Settings are waiting for a restart</b> &mdash; video and recording stop for about half a minute while the camera comes back.' '<a class="btn btn-sm btn-danger" href="restart.cgi" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>' %>
 <% fi %>
 
