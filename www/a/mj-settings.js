@@ -2733,6 +2733,10 @@
 			// click does, so there is one path and one repaint.
 			selected: () => sel,
 			selectAt: (i) => select(i),
+			// The same removal the × on the selected rectangle performs, for a
+			// caller that lists these somewhere else and has to offer it the
+			// same way it offers the others'.
+			removeAt: (i) => removeAt(i),
 			// Answering for this editor when it is not the one in charge: which
 			// region is under a point, and taking hold of it from a press that
 			// landed on somebody else's surface.
@@ -3497,9 +3501,31 @@
 				}
 				const n = masks ? masks.count() : 0;
 				for (let i = 0; i < n; i++) {
-					const c = chip('Mask', String(i + 1),
-						sel.t === 'mask' && sel.i === i);
+					const on = sel.t === 'mask' && sel.i === i;
+					const c = chip('Mask', String(i + 1), on);
 					c.b.addEventListener('click', () => pick({ t: 'mask', i: i }));
+					// The same cross every other item carries. A mask could
+					// only be removed from the picture — the × on its selected
+					// rectangle, or the Delete key — so the row offered the
+					// gesture for text and not for masks, on the same chips,
+					// under the same heading.
+					if (on) {
+						const x = el('button', 'mj-osd-chip-x');
+						x.type = 'button';
+						x.title = 'Remove this mask';
+						x.setAttribute('aria-label', 'Remove this mask');
+						x.textContent = '\u00d7';
+						x.addEventListener('click', () => {
+							masks.removeAt(i);
+							// Still among masks. removeAt() has already moved
+							// its own selection down — removing one renumbers
+							// every mask after it — so the row is told what the
+							// editor decided rather than sent back to the first
+							// text overlay, which is not where you were.
+							pick({ t: 'mask', i: masks.selected() });
+						});
+						c.wrap.appendChild(x);
+					}
 					chips.appendChild(c.wrap);
 				}
 				// AND NO CROSS. Every other chip carries one; this is the item
