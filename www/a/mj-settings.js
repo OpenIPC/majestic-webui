@@ -2950,12 +2950,20 @@
 			return found;
 		};
 
+		// Asked once at mount and then on a slow tick: the rectangles move when
+		// the template changes length, when a save lands, and after a drag —
+		// none of which is fast, and none of which the page can predict without
+		// asking. Stopped with the rest of the leaf.
 		let anyPlacer = false;
 		if (preview) {
+			refreshOsdRects();
+			const rectTimer = setInterval(refreshOsdRects, 2000);
+			state.liveCleanup.push(() => clearInterval(rectTimer));
 			for (const n of OVERLAYS) {
 				if (!HELD[n].anchor) continue;
 				placers[n] = mountOsdText(preview, HELD[n], note, panel, n,
-					{ pickAt: pickAt });
+					{ pickAt: pickAt, camRect: camRectFor,
+					  rectsChanged: () => setTimeout(refreshOsdRects, 400) });
 				placers[n].setActive(false);
 				anyPlacer = true;
 			}
@@ -3445,6 +3453,62 @@
 	// reason they are right here rather than free pixels: a named corner
 	// survives a change of resolution, and "16 px from the left" does not mean
 	// the same thing on a 1920 frame as on a 640 one.
+	// See em() below: majestic's own points-to-pixels arithmetic for the
+	// overlay's glyph size, as a divisor of the frame width.
+	const EM_DIVISOR = 39.6;
+
+	// WHERE THE OVERLAYS ACTUALLY ARE, ASKED OF THE CAMERA.
+	//
+	// The camera is the renderer: it has the font, its metrics and the padding
+	// the region carries. The browser has none of those, so everything it draws
+	// over the picture is an estimate — fine for a dashed stand-in nobody
+	// measures against the real thing, and wrong for a box a press is tested
+	// against. Drawn over a 636px preview the estimate put the clock's box
+	// entirely below the clock, and a short label could not be picked up at all.
+	//
+	// So majestic reports each region's rectangle in its stream's own pixels
+	// and this asks for it. A build without the endpoint 404s once and is never
+	// asked again; the estimate is still there behind it, which is what every
+	// build before this had.
+	const camRects = { by: {}, ok: true };
+
+	function refreshOsdRects() {
+		if (!camRects.ok) return Promise.resolve();
+		return apiFetch('/api/v1/osd', { credentials: 'same-origin' })
+			.then((r) => {
+				// 404 is "this camera cannot say", which is a fact about the
+				// build and will not change under us. Anything else is a
+				// hiccup and worth asking again next tick.
+				if (r.status === 404) { camRects.ok = false; return null; }
+				return r.ok ? r.json() : null;
+			})
+			.then((j) => {
+				if (!j) return;
+				const by = {};
+				for (const o of (j.overlays || [])) {
+					const f = o.frame || [], r = o.rect || [];
+					if (f.length < 2 || r.length < 4) continue;
+					(by[o.overlay] = by[o.overlay] || []).push({
+						fw: f[0], fh: f[1], x: r[0], y: r[1], w: r[2], h: r[3],
+					});
+				}
+				camRects.by = by;
+			})
+			.catch(() => {});
+	}
+
+	// The one for this overlay on the frame being shown. Matched on the frame
+	// rather than on a channel number, because that is what the player knows
+	// and the two streams differ in exactly that.
+	function camRectFor(overlay, frame) {
+		if (!frame || !frame.w) return null;
+		const all = camRects.by[overlay];
+		if (!all) return null;
+		for (const r of all)
+			if (r.fw === frame.w && r.fh === frame.h) return r;
+		return null;
+	}
+
 	function mountOsdText(preview, held, headNote, panel, overlay, hooks) {
 		const P = window.MajesticPlace;
 		overlay = overlay || 0;
@@ -3549,9 +3613,23 @@
 		// Roughly what the camera will draw. Majestic derives the glyph size
 		// from the stream width, so this tracks the same thing; it is an
 		// approximation on purpose and never pretends otherwise.
+		//
+		// It has to be a CLOSE approximation now, which it was not. The
+		// divisor is the camera's own arithmetic: get_font_size() is
+		// frame_w/55 POINTS and init_font() scales points to pixels by 100/72,
+		// so a glyph is frame_w/39.6 pixels — and the picture on screen is
+		// that frame at a different scale, so the ratio holds against the
+		// picture's own width. It was 96, which is 2.4x too small: the
+		// stand-in came out half the size of the text it stands in for.
+		//
+		// That was invisible while the stand-in only appeared under a finger
+		// mid-drag. It stopped being invisible when the same box became what a
+		// press is tested against: drawn over the real overlays, the boxes sat
+		// beside and below them, and FRONT GATE could not be picked up at all
+		// because only the top edge of its box touched its text.
 		function em(p) {
 			const size = parseFloat(held.size ? held.size.getValue() : '1') || 1;
-			return Math.max(8, p.w / 96 * size);
+			return Math.max(6, p.w / EM_DIVISOR * size);
 		}
 
 		// The box the overlay occupies on screen, for the arithmetic below.
@@ -3666,6 +3744,17 @@
 		// two answers the drag already computes — where the placement puts it,
 		// and how big the stand-in is — asked for a different reason.
 		function rectOn(p) {
+			// The camera's own answer where there is one, mapped from the
+			// stream's pixels onto the picture on screen.
+			const f = preview.frame();
+			const cam = hooks.camRect && f ? hooks.camRect(overlay, f) : null;
+			if (cam && f.w) {
+				const k = p.w / f.w;
+				return {
+					x: p.x + cam.x * k, y: p.y + cam.y * k,
+					w: cam.w * k, h: cam.h * k,
+				};
+			}
 			const b = box();
 			const c = current(p);
 			return { x: c.x, y: c.y, w: b.w, h: b.h };
@@ -3682,8 +3771,12 @@
 			const p = pic();
 			if (!p) return false;
 			const r = rectOn(p);
-			return pt.x >= r.x && pt.x <= r.x + r.w &&
-				pt.y >= r.y && pt.y <= r.y + r.h;
+			// A little slack either way. Where the rectangle came from the
+			// camera it is exact and this only forgives the pointer; where it
+			// is still the browser's estimate it forgives the estimate too.
+			const pad = Math.max(4, r.h / 4);
+			return pt.x >= r.x - pad && pt.x <= r.x + r.w + pad &&
+				pt.y >= r.y - pad && pt.y <= r.y + r.h + pad;
 		}
 
 		// A DRAG NEVER CHANGES THE ANCHOR.
@@ -3847,6 +3940,9 @@
 			runVisibility();
 			updateDirty();
 			postLivePlace(docOf(r));
+			// The camera has just moved it, so its rectangle is stale. Asking
+			// now rather than waiting out the tick keeps the next press honest.
+			if (hooks.rectsChanged) hooks.rectsChanged();
 		}
 
 		function done(e, commit) {
