@@ -1352,7 +1352,10 @@ mark {
    chip it sits on and reads as a control that does nothing. */
 .mj-osd-chip {
 	display: inline-flex;
-	align-items: center;
+	/* stretch, not center: the two buttons inside divide the pill's whole
+	   height between them, so there is no band along the top or bottom that
+	   belongs to neither. */
+	align-items: stretch;
 	border: 1px solid var(--bs-border-color);
 	border-radius: 0.4375rem;
 	background: var(--bs-tertiary-bg);
@@ -1371,6 +1374,7 @@ button.mj-osd-chip,
 .mj-osd-chip-b {
 	display: inline-flex;
 	align-items: center;
+	flex: 1 1 auto;
 	gap: 0.4rem;
 	border: 0;
 	border-radius: inherit;
@@ -1409,24 +1413,38 @@ button.mj-osd-chip,
    one — a row of crosses is a picture of controls rather than of what is on the
    screen. A sibling of the label button rather than a child of it; see the
    pill above for why that distinction is load-bearing. */
+/* It fills the right-hand end of the pill: full height, and wide enough to be
+   a real pointer target. The GLYPH is small; what you can press is not.
+
+   It was a 16x16 box with seven dead pixels of pill to the right of it and five
+   above and below, inside a pill 137x30. A press that missed by one landed
+   either on the label — which re-selects a chip that is already selected, and
+   so looks like nothing happened — or on the wrapper, which has no handler at
+   all and really did nothing. Both readings are "the cross is broken", which
+   is how it was reported.
+
+   Measured rather than eyeballed: walk elementFromPoint across the chip and
+   every pixel of it must belong to the label or to the cross, with no band
+   between them that belongs to neither. */
 .mj-osd-chip-x {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 1rem;
-	height: 1rem;
-	margin: 0 0.35rem 0 -0.15rem;
-	padding: 0;
+	align-self: stretch;
+	min-width: 1.5rem;
+	margin: 0;
+	padding: 0 0.4rem;
 	border: 0;
-	border-radius: 0.25rem;
+	border-radius: 0 0.375rem 0.375rem 0;
 	background: transparent;
-	color: var(--bs-tertiary-color);
-	font-size: 0.875rem;
+	color: var(--bs-secondary-color);
+	font-size: 0.9375rem;
 	line-height: 1;
 	cursor: pointer;
 }
 
-.mj-osd-chip-x:hover {
+.mj-osd-chip-x:hover,
+.mj-osd-chip-x:focus-visible {
 	background: rgba(var(--bs-danger-rgb), 0.18);
 	color: var(--bs-danger);
 }
