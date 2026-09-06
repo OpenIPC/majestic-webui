@@ -3024,6 +3024,35 @@ button.mj-osd-chip,
 /* The two overlays that scroll inside themselves — the bar sideways on a
    phone, the stats panel down — take their gestures back from the stage. */
 .mj-bar,
+/* Autofocus status is browser-only stage chrome. */
+.mj-af-overlay {
+	position: absolute;
+	top: calc(var(--mj-pic-top, 0px) + 0.5rem);
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 5;
+	max-width: calc(100% - 1rem);
+	padding: 0.4rem 0.65rem;
+	border-radius: var(--bs-border-radius);
+	background: rgba(13, 15, 20, 0.78);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	color: #e6e8ee;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.75rem;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	pointer-events: none;
+	backdrop-filter: blur(10px);
+}
+
+.mj-af-overlay[data-state="done"] {
+	border-color: rgba(87, 214, 141, 0.55);
+}
+
+.mj-af-overlay[data-state="failed"] {
+	border-color: rgba(255, 171, 64, 0.65);
+}
+
 .mj-stats-overlay {
 	touch-action: auto;
 }
