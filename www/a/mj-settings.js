@@ -19,6 +19,23 @@
 
 	const EXCLUDE = new Set(boot.exclude || []);
 	const SENSORS = boot.sensors || [];
+	const FONTS = boot.fonts || [];
+
+	// The name a font file goes by. The setting stores a path — freetype takes
+	// one — but a path is not what anybody chooses between: on the camera this
+	// was written against there is exactly one face and its row read
+	// "/usr/share/fonts/truetype/UbuntuMono-Regular.ttf", which is thirty
+	// characters of directory in front of the four that vary.
+	function fontName(path) {
+		const base = String(path).split('/').pop();
+		return base.replace(/\.(ttf|otf|ttc)$/i, '') || base;
+	}
+
+	// Whether this key names the file an overlay is drawn with. Both spellings,
+	// because the flat osd.font IS overlay 0's and the rest are nested under it.
+	function isFontPath(dot) {
+		return dot === 'osd.font' || /^osd\.overlays\.\d+\.font$/.test(dot);
+	}
 
 	// Short labels + display order for the x-live image knobs in the Live
 	// adjustments deck (keyed by the field's dot tail).
@@ -5078,6 +5095,7 @@
 		const id = 'mjf-' + dot.replace(/\./g, '-');
 		const hasDefault = Object.prototype.hasOwnProperty.call(sub, 'default');
 		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
+		const isFontFile = isFontPath(dot) && FONTS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
 		// resolution picker for the video/jpeg size fields: a dropdown of named
 		// presets + a "Custom…" escape hatch. Selected by the backend's
@@ -5425,6 +5443,35 @@
 			const opts =
 				(unlisted ? option(cur, true, cur + ' (unsupported)') : '') +
 				enumVals.map(o => option(o, !unlisted && cur === String(o))).join('');
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+				'<select class="form-select" id="' + id + '">' + opts + '</select>';
+			control = p.querySelector('select');
+		} else if (type === 'string' && isFontFile) {
+			// The faces installed on this camera, by name. The value is still the
+			// path — nothing about the setting changes — and the row is a select
+			// rather than a text box because the answer is a file that either
+			// exists or does not, and a mistyped one draws nothing and says so
+			// only in the log.
+			//
+			// The rule is that whatever is configured is always selectable, so
+			// that the row states what is in effect rather than the first face
+			// the scan happened to find — the same reason the enum branch above
+			// carries an unsupported value. Three ways it can be something the
+			// scan did not list. An overlay above the first may leave it empty,
+			// which means the camera's own font. Overlay 0 has nowhere to
+			// inherit from, so empty there is a font that will not load, and
+			// saying "not set" is the only honest way to show it. And either may
+			// name a file that is not there.
+			p = el('p', 'select mj-row mj-wide');
+			const cur = eff === undefined || eff === null ? '' : String(eff);
+			const inherits = dot !== 'osd.font';
+			const missing = cur !== '' && FONTS.indexOf(cur) < 0;
+			const opts =
+				(inherits ? option('', cur === '', 'Camera default')
+					: cur === '' ? option('', true, 'Not set') : '') +
+				(missing ? option(cur, true, fontName(cur) + ' (not installed)') : '') +
+				FONTS.map(f => option(f, cur === f, fontName(f))).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';

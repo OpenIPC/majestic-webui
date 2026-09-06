@@ -38,6 +38,23 @@ if [ -d /etc/sensors ]; then
 		boot_sensors="${boot_sensors}${boot_sensors:+,}\"${e}\""
 	done
 fi
+
+# The fonts the camera can draw the overlay with. One face ships with the
+# firmware; the point of listing rather than hardcoding is the ones an owner
+# adds to their own image, which is the only way there are ever two.
+#
+# By extension and recursively, because freetype takes a path and not a name:
+# nothing requires an added face to sit beside the shipped one, or in a flat
+# directory. Full paths, since that is what the setting stores; the picker
+# shows the face name.
+boot_fonts=""
+if [ -d /usr/share/fonts ]; then
+	for f in $(find /usr/share/fonts -type f \
+		\( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) 2>/dev/null); do
+		e=$(echo -n "$f" | mj_json_escape)
+		boot_fonts="${boot_fonts}${boot_fonts:+,}\"${e}\""
+	done
+fi
 %>
 
 <%in p/header.cgi %>
@@ -77,7 +94,7 @@ fi
 	</div>
 
 	<div class="col-12 col-md-9" id="mj-settings-form-col">
-		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>]}</script>
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>]}</script>
 
 		<%
 		# No page-level heading any more: one section is shown at a time and its
