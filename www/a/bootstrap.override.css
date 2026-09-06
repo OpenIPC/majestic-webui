@@ -1295,17 +1295,25 @@ mark {
 }
 .mj-osd-cell-on i { background: #fff; }
 
-/* Which of the two an overlay is. Lighter than the tab strip above it — it
-   picks between two contents of one tab, not between tabs — but the same
-   vocabulary, because it is the same act. */
-.mj-osd-kind {
-	width: fit-content;
-	margin-bottom: 0.7rem;
+/* The way across to a picture. Quiet, and under the text it would replace:
+   it is a thing you do occasionally, not a mode you sit in, and a second row
+   of segmented buttons under the tab strip read as one. */
+.mj-osd-swap {
+	display: block;
+	width: 100%;
+	margin-top: 0.6rem;
+	padding: 0.35rem 0.6rem;
+	border: 1px dashed var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: transparent;
+	color: var(--bs-secondary-color);
+	font-size: 0.8125rem;
+	cursor: pointer;
 }
 
-.mj-osd-kind .mj-osd-tab {
-	flex: 0 0 auto;
-	padding: 0.22rem 0.7rem;
+.mj-osd-swap:hover {
+	border-color: var(--bs-primary);
+	color: var(--bs-body-color);
 }
 
 /* ── a logo ──────────────────────────────────────────────────────────────

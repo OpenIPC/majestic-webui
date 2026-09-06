@@ -2825,6 +2825,10 @@
 		// reset from ever learning that a selector exists.
 		const placers = {};
 		const HELD = {};
+		// Whether each overlay draws a picture, and which one the panel is
+		// showing — the tab strip is the selected overlay's, not everyone's.
+		const kinds = {};
+		let shownKind = 0;
 		for (const n of OVERLAYS) {
 			const list = n === 0 ? fields : extra[String(n)];
 			const held = {};
@@ -2850,7 +2854,16 @@
 			}
 			if (panel && held.anchor)
 				panel.pad(held, placeBox, () => placers[n]);
-			buildContent(textBox, held, n, preview);
+			buildContent(textBox, held, n, preview, (logo) => {
+				kinds[n] = logo;
+				// Only the one on screen decides the strip.
+				if (panel && shownKind === n) panel.offer('look', !logo);
+				// The panel's own title is derived from what the overlay says,
+				// and the placer is what derives it — but it repaints on a
+				// video frame, so without this the header goes on naming the
+				// text for as long as no frame arrives.
+				if (placers[n]) placers[n].repaint();
+			});
 		}
 		const held = HELD[0];
 
@@ -2875,7 +2888,10 @@
 		// The first overlay, until something selects another. Said here rather
 		// than left to the item list, which does not exist on a leaf with no
 		// picture to put items on.
-		if (panel) panel.showOverlay(0);
+		if (panel) {
+			panel.showOverlay(0);
+			panel.offer('look', !kinds[0]);
+		}
 
 		// One question, asked once: hiding the raw coordinate rows is only
 		// right where something is going to draw them instead. Asked twice —
@@ -3022,6 +3038,8 @@
 				}
 				if (sel.t === 'text' && panel) {
 					panel.showOverlay(sel.i);
+					shownKind = sel.i;
+					panel.offer('look', !kinds[sel.i]);
 					panel.reveal();
 				}
 				draw();
@@ -3259,6 +3277,10 @@
 		}
 
 		function show(id) {
+			// A tab that is not offered cannot be the open one: asking for it
+			// would leave the strip with nothing lit and the panel blank.
+			if (made[id] && made[id].btn.hidden) id = TABS.find(
+				([tid]) => !made[tid].btn.hidden)[0];
 			open = id;
 			for (const [tid] of TABS) {
 				made[tid].btn.classList.toggle('mj-osd-tab-on', tid === id);
@@ -3267,6 +3289,19 @@
 			}
 		}
 		show(open);
+
+		// Which tabs this overlay has.
+		//
+		// A picture has no Look: every control there — the font, its size, its
+		// weight, its outline, the plate behind the text — draws TEXT, and none
+		// of it touches a bitmap the camera blits. Offering them would be three
+		// controls and a switch that do nothing, on the tab most likely to be
+		// opened looking for how to change the picture.
+		function offer(id, on) {
+			if (!made[id]) return;
+			made[id].btn.hidden = !on;
+			if (!on && open === id) show(TABS[0][0]);
+		}
 
 
 		// One slot per overlay inside each tab, all but the selected one hidden.
@@ -3297,6 +3332,7 @@
 		return {
 			el: box,
 			tab: (id) => made[id].body,
+			offer: offer,
 			slot: slot,
 			showOverlay: showOverlay,
 			// It is always there now, so this only chooses which tab of it you
@@ -4137,18 +4173,24 @@
 
 	// WHAT AN OVERLAY SAYS: a line or a picture, and only ever one of them.
 	//
-	// Both controls used to be shown at once, which offered a choice the camera
-	// does not have — it draws the picture wherever there is one and ignores
-	// the template — so an overlay could be given text that would never appear
-	// and nothing said so. A knob that does nothing is worse than a missing
-	// one, because it is indistinguishable from a broken camera.
+	// It is CHOSEN BY DOING, not by a mode switch. The switch that stood here
+	// was a second row of segmented buttons under the tab strip — two rows of
+	// the same control doing two unrelated jobs — and it had a state you could
+	// be in with nothing in it: Picture selected, no picture, an empty panel.
 	//
-	// The switch is a VIEW of the image field, not a second place the answer is
-	// kept: the overlay is a picture exactly when it has one, which is the same
-	// rule the camera, the item list and the stand-in all read. Choosing Text
-	// clears the picture; choosing Picture opens the chooser when there is none
-	// yet. Neither writes anything the ordinary Save would not.
-	function buildContent(box, held, overlay, preview) {
+	// One button instead, on the thing it changes: from text, "Use a picture
+	// instead" opens the chooser, and the overlay only becomes a picture if one
+	// is actually chosen — a cancelled chooser leaves it exactly as it was,
+	// which a mode switch cannot promise. From a picture, "Use text instead"
+	// goes back. The overlay is a picture exactly when it has one, which is the
+	// same rule the daemon, the item list and the stand-in all read; nothing
+	// here is a second place that answer is kept.
+	//
+	// `onKind` tells the caller which of the two this is, because the tab strip
+	// has to drop Look for a picture: every control on it — the font, its size,
+	// its weight, its outline, the plate behind the text — is about drawing
+	// text, and none of it touches a bitmap the camera blits.
+	function buildContent(box, held, overlay, preview, onKind) {
 		if (!held.template && !held.image) return;
 
 		const wrap = el('div', 'mj-osd-content');
@@ -4156,23 +4198,6 @@
 
 		const logoPart = el('div');
 		const textPart = el('div');
-
-		// The switch only where the camera can draw a picture at all: the field
-		// exists exactly where the backend said it does.
-		let kind = null;
-		if (held.image) {
-			kind = el('div', 'mj-osd-tabs mj-osd-kind');
-			kind.setAttribute('role', 'group');
-			kind.setAttribute('aria-label', 'What this overlay draws');
-			for (const [id, word] of [['text', 'Text'], ['logo', 'Picture']]) {
-				const b = el('button', 'mj-osd-tab');
-				b.type = 'button';
-				b.dataset.kind = id;
-				b.textContent = word;
-				kind.appendChild(b);
-			}
-			wrap.appendChild(kind);
-		}
 		wrap.appendChild(logoPart);
 		wrap.appendChild(textPart);
 
@@ -4198,42 +4223,43 @@
 		const isLogo = () =>
 			!!(held.image && String(held.image.getValue() || '').trim());
 
+		// The one control, only where the camera can draw a picture at all.
+		let swap = null;
+		if (held.image) {
+			swap = el('button', 'mj-osd-swap');
+			swap.type = 'button';
+			textPart.appendChild(swap);
+			swap.addEventListener('click', () => {
+				if (!isLogo()) {
+					// Inside the press, which is what lets the chooser open.
+					if (picker) picker.choose();
+					return;
+				}
+				if (picker) picker.remove();
+			});
+			// From a picture, the way back sits with the picture's own
+			// controls rather than under the text that is not being shown.
+			if (picker) picker.onBack(() => {
+				// An overlay that says nothing is not listed, so it would
+				// vanish from under the person who just pressed it.
+				if (held.template &&
+					!String(held.template.getValue() || '').trim()) {
+					held.template.setValue('Text');
+					held.template.control.dispatchEvent(
+						new Event('change', { bubbles: true }));
+					runVisibility();
+					updateDirty();
+				}
+			});
+		}
+
 		function paint() {
 			const logo = isLogo();
 			logoPart.hidden = !logo;
 			textPart.hidden = logo;
-			if (!kind) return;
-			for (const b of kind.children)
-				b.classList.toggle('mj-osd-tab-on',
-					(b.dataset.kind === 'logo') === logo);
+			if (swap) swap.textContent = 'Use a picture instead…';
+			if (onKind) onKind(logo);
 		}
-
-		if (kind) kind.addEventListener('click', (e) => {
-			const b = e.target.closest ? e.target.closest('button') : null;
-			if (!b) return;
-			if (b.dataset.kind === 'logo') {
-				// Nothing to show yet, so ask for one — inside the press, which
-				// is what lets the chooser open at all.
-				if (!isLogo() && picker) picker.choose();
-				else paint();
-				return;
-			}
-			// Back to text. The template is left alone rather than cleared: it
-			// is what the overlay said before the picture and what it says
-			// again now, and throwing it away to change a mode would lose work
-			// nobody asked to lose.
-			if (isLogo() && picker) picker.remove();
-			// An overlay that says nothing is not listed, so it would vanish
-			// from under the person who just pressed Text. Give it something.
-			if (held.template && !String(held.template.getValue() || '').trim()) {
-				held.template.setValue('Text');
-				held.template.control.dispatchEvent(
-					new Event('change', { bubbles: true }));
-				runVisibility();
-				updateDirty();
-			}
-			paint();
-		});
 
 		if (held.image) held.image.control.addEventListener('change', paint);
 		paint();
@@ -4269,9 +4295,14 @@
 			'<div class="mj-logo-acts">' +
 				'<label class="mj-logo-pick">' +
 					'<input type="file" accept="image/*" hidden>' +
-					'<span>Choose a picture…</span>' +
+					'<span class="mj-logo-pick-w">Choose a picture…</span>' +
 				'</label>' +
-				'<button type="button" class="mj-logo-drop" hidden>Remove</button>' +
+				// "Use text instead", not "Remove": what it does is put the
+				// overlay back to drawing its line, and naming the consequence
+				// is the difference between a button you can predict and one
+				// you have to try.
+				'<button type="button" class="mj-logo-drop" hidden>' +
+					'Use text instead</button>' +
 			'</div>';
 
 		const note = wrap.querySelector('.mj-logo-note');
@@ -4279,6 +4310,8 @@
 		const empty = wrap.querySelector('.mj-logo-empty');
 		const input = wrap.querySelector('input[type=file]');
 		const drop = wrap.querySelector('.mj-logo-drop');
+		const pickWord = wrap.querySelector('.mj-logo-pick-w');
+		let onBack = null;
 
 		function say(msg, bad) {
 			note.textContent = msg || '';
@@ -4289,6 +4322,8 @@
 			const has = !!String(field.getValue() || '').trim();
 			empty.hidden = has;
 			drop.hidden = !has;
+			// Choosing when there is nothing, replacing when there is.
+			pickWord.textContent = has ? 'Replace picture…' : 'Choose a picture…';
 			// What happens if this is left empty, said honestly: it depends on
 			// whether the overlay has anything else to say.
 			const t = tplField ? String(tplField.getValue() || '').trim() : '';
@@ -4413,6 +4448,7 @@
 		});
 
 		drop.addEventListener('click', () => {
+			if (onBack) setTimeout(onBack, 0);
 			// An empty body removes the file; the field going empty is what
 			// makes the overlay draw its text again.
 			apiFetch('/api/v1/osd/image?overlay=' + overlay,
@@ -4437,6 +4473,9 @@
 		return {
 			choose: () => input.click(),
 			remove: () => drop.click(),
+			// Run after the picture goes, so the caller can make sure the
+			// overlay still says something.
+			onBack: (fn) => { onBack = fn; },
 		};
 	}
 
