@@ -2213,6 +2213,13 @@
 			// it reads the same over the letterbox.
 			preview.stage.classList.toggle('mj-md-armed', usable);
 			catcher.hidden = !usable;
+			// The rectangles are pointer-events: auto so that what a press lands
+			// on decides the gesture. That has to stop when this editor is not
+			// the one in charge, or a mask keeps swallowing presses meant for
+			// the overlay underneath it — which until now was prevented only by
+			// the ORDER the two were mounted in, an arrangement nothing stated
+			// and anything could have reordered.
+			layer.style.pointerEvents = active ? '' : 'none';
 			// Nothing left to draw on, so the button cannot stay lit: it would
 			// promise a drag that now does nothing.
 			if (!usable && armed) setArmed(false);
@@ -2268,6 +2275,13 @@
 		// it — and taken off again in the teardown below, or Escape keeps being
 		// swallowed from another section entirely.
 		const onKey = (e) => {
+			// Not while another editor owns the picture. This listener is on
+			// `document` and used to fire whenever there was a selection at all,
+			// so with two editors on one picture both claimed Escape and Delete
+			// and the one that answered was whichever mounted last. `active` is
+			// the same flag the drag surface is gated on, so the keyboard now
+			// follows the pointer rather than racing it.
+			if (!active) return;
 			// Never while somebody is typing. Backspace in a coordinate box is
 			// how you correct a number, and taking the region away instead would
 			// be the worst possible reading of it.
@@ -2365,10 +2379,14 @@
 			ctl._drop(i);
 		}
 
+		// Told, not asked. select() already returns early on no change, so a
+		// listener here cannot loop back into it.
+		let onSelect = null;
 		function select(i) {
 			if (sel === i) return;
 			sel = i;
 			paintBoxes();
+			if (onSelect) onSelect(i);
 		}
 
 		// Put back what a gesture had already written. Move and resize edit the
@@ -2567,6 +2585,14 @@
 				if (!active) select(-1);
 				paint();
 			},
+			// The selection, for a caller that lists these things somewhere else
+			// and has to agree with the picture about which one is current.
+			// Reading it is free; writing it goes through the same select() a
+			// click does, so there is one path and one repaint.
+			selected: () => sel,
+			selectAt: (i) => select(i),
+			onSelect: (fn) => { onSelect = fn; },
+			count: () => list().length,
 		};
 	}
 
@@ -2807,31 +2833,84 @@
 			repaint = masks.repaint;
 		}
 
-		// One picture, two things to place. The switch says which a drag is for
-		// rather than letting the drag guess, and it is the only new control the
-		// bar gains.
+		// ── one list of the things on the picture ────────────────────────
+		//
+		// This replaces a Text / Masks switch in the bar, which asked the
+		// question the wrong way round: it made you name a KIND before you
+		// could touch a thing, and it could not tell you what was on the
+		// picture — a mask switched off the screen edge, or three masks where
+		// you thought there was one, looked exactly like none.
+		//
+		// A chip per thing, and pressing one is the same act as pressing the
+		// thing itself: both go through the same selection. Labels are DERIVED
+		// — a text overlay is the line it prints, a mask is its number — so
+		// nothing here needs a name, which is the concept the whole arrangement
+		// was chosen to avoid.
 		if (preview && (placer || masks)) {
-			const seg = el('span', 'mj-hud mj-seg');
-			seg.setAttribute('role', 'group');
-			seg.setAttribute('aria-label', 'What a drag places');
-			const uid = 'mj-osd-mode';
-			seg.innerHTML =
-				'<input type="radio" class="mj-seg-in" name="' + uid + '" id="' + uid + '-t" checked>' +
-				'<label class="mj-seg-lbl" for="' + uid + '-t">Text</label>' +
-				'<input type="radio" class="mj-seg-in" name="' + uid + '" id="' + uid + '-m">' +
-				'<label class="mj-seg-lbl" for="' + uid + '-m">Masks</label>';
-			preview.barInsert(seg);
-			const t = seg.querySelector('#' + uid + '-t');
-			const m = seg.querySelector('#' + uid + '-m');
-			const sync = () => {
-				const textMode = t.checked;
-				if (placer) placer.setActive(textMode);
-				if (masks) masks.setActive(!textMode);
-			};
-			t.addEventListener('click', sync);
-			m.addEventListener('click', sync);
-			sync();
-			if (!placer) { m.checked = true; sync(); }
+			const row = el('div', 'mj-osd-items box');
+			const cap = el('span', 'mj-cap');
+			cap.textContent = 'Items';
+			row.appendChild(cap);
+			const chips = el('span', 'mj-osd-chips');
+			row.appendChild(chips);
+			(barRow || preview.stage).insertAdjacentElement('afterend', row);
+
+			// -1 is the text overlay; 0.. are the masks, by their own index.
+			let cur = placer ? -1 : 0;
+
+			function pick(i, fromPicture) {
+				cur = i;
+				if (placer) placer.setActive(i < 0);
+				if (masks) {
+					masks.setActive(i >= 0);
+					if (i >= 0 && !fromPicture) masks.selectAt(i);
+				}
+				if (i < 0 && panel) panel.reveal();
+				draw();
+			}
+
+			function draw() {
+				chips.textContent = '';
+				if (placer) {
+					const b = el('button', 'mj-osd-chip' +
+						(cur < 0 ? ' mj-osd-chip-on' : ''));
+					b.type = 'button';
+					const t = held.template ? String(held.template.getValue() || '') : '';
+					b.innerHTML = '<span class="mj-osd-chip-k">Text</span>' +
+						'<span class="mj-osd-chip-v"></span>';
+					b.lastChild.textContent =
+						t.length > 20 ? t.slice(0, 19) + '…' : (t || 'Overlay');
+					b.addEventListener('click', () => pick(-1));
+					chips.appendChild(b);
+				}
+				const n = masks ? masks.count() : 0;
+				for (let i = 0; i < n; i++) {
+					const b = el('button', 'mj-osd-chip' +
+						(cur === i ? ' mj-osd-chip-on' : ''));
+					b.type = 'button';
+					b.innerHTML = '<span class="mj-osd-chip-k">Mask</span>' +
+						'<span class="mj-osd-chip-v">' + (i + 1) + '</span>';
+					b.addEventListener('click', () => pick(i));
+					chips.appendChild(b);
+				}
+				if (!n && masks) {
+					const hint = el('span', 'mj-osd-chip-none');
+					hint.textContent = 'no masks';
+					chips.appendChild(hint);
+				}
+			}
+
+			// Picking a mask ON the picture has to move the chip too, or the two
+			// disagree about which one is current and the row becomes a second
+			// opinion rather than a view.
+			if (masks) masks.onSelect((i) => { if (i >= 0) { cur = i; draw(); } });
+			// A mask added or removed changes what the row lists. The array
+			// widget fires change for every edit that reaches the field, which
+			// is every edit: a drawn rectangle goes through the same _add().
+			if (maskField) maskField.control.addEventListener('change', draw);
+			if (held.template) held.template.control.addEventListener('input', draw);
+
+			pick(cur, false);
 		}
 
 		if (!maskField) maskDeck.remove();

@@ -1319,6 +1319,67 @@ mark {
 	border-color: var(--bs-border-color);
 }
 
+/* ── what is on the picture ──────────────────────────────────────────────
+   One chip per thing, and pressing one is the same act as pressing the thing
+   itself. It replaces a Text / Masks switch that asked you to name a KIND
+   before you could touch anything, and that could not say what was there: a
+   mask off the screen edge and no masks at all looked identical. */
+.mj-osd-items {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+	margin-top: 0.625rem;
+	padding: 0.55rem 0.75rem;
+}
+
+.mj-osd-chips {
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+	flex-wrap: wrap;
+	min-width: 0;
+}
+
+.mj-osd-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.3rem 0.55rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: 0.4375rem;
+	background: var(--bs-tertiary-bg);
+	color: var(--bs-body-color);
+	font-size: 0.8125rem;
+	cursor: pointer;
+}
+
+.mj-osd-chip:hover { border-color: var(--bs-primary); }
+
+.mj-osd-chip-on {
+	border-color: var(--bs-primary);
+	box-shadow: 0 0 0 1px rgba(var(--bs-primary-rgb), 0.35);
+}
+
+.mj-osd-chip-k {
+	font-size: 0.625rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--bs-secondary);
+}
+
+.mj-osd-chip-v {
+	font-family: var(--bs-font-monospace);
+	font-size: 0.75rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-osd-chip-none {
+	color: var(--bs-tertiary-color);
+	font-size: 0.8125rem;
+}
+
 /* A picture that is not the hero of its section: it fills the box it was put in
    — a card body, a column — and takes its height from its aspect ratio like any
    other block. The height-driven sizing above is for a stage that OWNS the
