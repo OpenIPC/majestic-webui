@@ -622,9 +622,27 @@ function runRest() {
 		// for: nothing is wired and the owner has not said the filter is absent.
 		check('but with the switch on it is still "cannot move"',
 			ic.diagnose({}, null, null).some(x => x.id === 'no-pins'));
+		const noPins = (nm) =>
+			ic.diagnose(nm, null, null).filter(x => x.id === 'no-pins')[0].detail;
 		check('and that finding names the switch that answers it',
-			/Drive the IR-cut filter/.test(
-				ic.diagnose({}, null, null).filter(x => x.id === 'no-pins')[0].detail));
+			/turn off "Drive the IR-cut filter"/.test(noPins({ irCutEnabled: true })));
+
+		// But only where the camera has it. The switch is recent and the
+		// settings page is drawn from the daemon's own schema, so on a build
+		// without the key there is no such control to go and find — sending
+		// someone to look for one would be the page inventing an answer.
+		// Absence is a reliable signal: config.json reports the EFFECTIVE
+		// configuration, so a key sitting at its default is still in it
+		// (measured on an hi3516ev200 after resetting the key: gone from
+		// majestic.yaml, still present in config.json), and only a daemon that
+		// has never heard of the key leaves it out.
+		check('an older daemon is told the truth instead',
+			/arrives with a newer firmware/.test(noPins({})));
+		check('...and is never sent to a switch it does not have',
+			!/turn off "Drive the IR-cut filter"/.test(noPins({})));
+		check('the fault itself is stated either way',
+			/Nothing is connected to the filter/.test(noPins({})) &&
+			/Nothing is connected to the filter/.test(noPins({ irCutEnabled: true })));
 		check('a parked lamp with wiring says so',
 			ic.diagnose({ backlightEnabled: false, backlightPin: 52 },
 				null, null)
