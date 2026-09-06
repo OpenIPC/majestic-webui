@@ -1380,6 +1380,43 @@ mark {
 	font-size: 0.8125rem;
 }
 
+/* The remove control rides the chip it removes, and only the selected chip has
+   one — a row of crosses is a picture of controls rather than of what is on the
+   screen. A button inside a button is not legal markup, so this is styled as
+   one and the click that reaches it is stopped from reaching the chip. */
+.mj-osd-chip-x {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1rem;
+	height: 1rem;
+	margin: -0.15rem -0.2rem -0.15rem 0.1rem;
+	padding: 0;
+	border: 0;
+	border-radius: 0.25rem;
+	background: transparent;
+	color: var(--bs-tertiary-color);
+	font-size: 0.875rem;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.mj-osd-chip-x:hover {
+	background: rgba(var(--bs-danger-rgb), 0.18);
+	color: var(--bs-danger);
+}
+
+.mj-osd-chip-add {
+	border-style: dashed;
+	background: transparent;
+	color: var(--bs-secondary-color);
+}
+
+/* One slot per overlay inside each of the panel's tabs. Hidden rather than
+   unmounted, because every overlay's controls are live at once: that is what
+   lets two of them be edited and saved together. */
+.mj-osd-slot[hidden] { display: none; }
+
 /* A picture that is not the hero of its section: it fills the box it was put in
    — a card body, a column — and takes its height from its aspect ratio like any
    other block. The height-driven sizing above is for a stage that OWNS the
