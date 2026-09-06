@@ -19,6 +19,23 @@
 
 	const EXCLUDE = new Set(boot.exclude || []);
 	const SENSORS = boot.sensors || [];
+	const FONTS = boot.fonts || [];
+
+	// The name a font file goes by. The setting stores a path — freetype takes
+	// one — but a path is not what anybody chooses between: on the camera this
+	// was written against there is exactly one face and its row read
+	// "/usr/share/fonts/truetype/UbuntuMono-Regular.ttf", which is thirty
+	// characters of directory in front of the four that vary.
+	function fontName(path) {
+		const base = String(path).split('/').pop();
+		return base.replace(/\.(ttf|otf|ttc)$/i, '') || base;
+	}
+
+	// Whether this key names the file an overlay is drawn with. Both spellings,
+	// because the flat osd.font IS overlay 0's and the rest are nested under it.
+	function isFontPath(dot) {
+		return dot === 'osd.font' || /^osd\.overlays\.\d+\.font$/.test(dot);
+	}
 
 	// Short labels + display order for the x-live image knobs in the Live
 	// adjustments deck (keyed by the field's dot tail).
@@ -351,8 +368,30 @@
 		return out;
 	}
 
+	// A member of the overlay collection, rather than a field of the camera's
+	// own overlay.
+	//
+	// mj-tree's walk recurses into nested objects, which is what isp.iris wants
+	// and what osd.overlays.<n> emphatically does not: it is an indexed
+	// collection, and walked flat it puts every member's eleven fields on the
+	// Overlay leaf — seventy-seven rows — while renderOsd's byKey, which keys on
+	// the last dotted segment, quietly hands the panel the LAST template it saw
+	// instead of the camera's own. Neither half announces itself: the page still
+	// renders, still saves, and edits the wrong overlay.
+	//
+	// So until the item list can pick one, this leaf draws the first overlay,
+	// which is the flat keys. That is the line W3 changes.
+	// Both subtrees of osd.* that belong to a THING on the picture rather than
+	// to the section: the operator's overlays, and the vendor mark. Without
+	// the second, the mark's five placement keys render as loose rows beside
+	// overlay 0's own — a second Position anchor, a second Horizontal offset,
+	// with nothing to say which of the two things on the picture they move.
+	function isOverlayMember(dot) {
+		return /^osd\.overlays\./.test(dot) || /^osd\.mark\./.test(dot);
+	}
+
 	function matchCount(secId, q) {
-		return leafFields(secId).filter(f => fieldVisible(f) &&
+		return leafFields(secId).filter(f => !isOverlayMember(f.dot) && fieldVisible(f) &&
 			((f.title || '').toLowerCase().includes(q) ||
 				(f.hint || '').toLowerCase().includes(q) ||
 				// four of ~170 fields ship no title; renderField falls back to the
@@ -567,6 +606,7 @@
 		// subtree, and it used to be the one thing teardown left behind (#259).
 		// Before the fields go, put it back where they say it is.
 		revertLive();
+		revertOsdPlace();
 
 		// Anything this leaf wired outside its own subtree — document-level
 		// listeners for hold-to-compare, timers — is undone here. The subtree
@@ -672,7 +712,9 @@
 			// the tab closed. That one can still be reordered by the server, and
 			// this page has no way to stop it.
 			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
-			if (ev.persisted || !state.fields.length || !liveDrift()) return;
+			if (ev.persisted) return;
+			beaconOsdDrop();
+			if (!state.fields.length || !liveDrift()) return;
 			const q = liveQuery(liveSaved);
 			if (q && navigator.sendBeacon) navigator.sendBeacon('/api/v1/image?' + q);
 		};
@@ -2207,6 +2249,13 @@
 			// it reads the same over the letterbox.
 			preview.stage.classList.toggle('mj-md-armed', usable);
 			catcher.hidden = !usable;
+			// The rectangles are pointer-events: auto so that what a press lands
+			// on decides the gesture. That has to stop when this editor is not
+			// the one in charge, or a mask keeps swallowing presses meant for
+			// the overlay underneath it — which until now was prevented only by
+			// the ORDER the two were mounted in, an arrangement nothing stated
+			// and anything could have reordered.
+			layer.style.pointerEvents = active ? '' : 'none';
 			// Nothing left to draw on, so the button cannot stay lit: it would
 			// promise a drag that now does nothing.
 			if (!usable && armed) setArmed(false);
@@ -2234,6 +2283,7 @@
 			if (!confirm(W.clearAsk)) return;
 			field.setValue('');
 			updateDirty();
+			pushLive();
 		});
 		foot.appendChild(clear);
 		listBox.appendChild(foot);
@@ -2262,6 +2312,13 @@
 		// it — and taken off again in the teardown below, or Escape keeps being
 		// swallowed from another section entirely.
 		const onKey = (e) => {
+			// Not while another editor owns the picture. This listener is on
+			// `document` and used to fire whenever there was a selection at all,
+			// so with two editors on one picture both claimed Escape and Delete
+			// and the one that answered was whichever mounted last. `active` is
+			// the same flag the drag surface is gated on, so the keyboard now
+			// follows the pointer rather than racing it.
+			if (!active) return;
 			// Never while somebody is typing. Backspace in a coordinate box is
 			// how you correct a number, and taking the region away instead would
 			// be the worst possible reading of it.
@@ -2346,7 +2403,21 @@
 			if (src) src.value = v;
 			const ref = rowRefs[i];
 			if (ref) { ref.co.value = v; ref.says(parse(v)); }
+			pushLive();
 			return v;
+		}
+
+		// The camera follows the drag, where the caller wired it to.
+		//
+		// Without this a mask was the one thing on this picture that did not
+		// move until Save, while the text beside it followed the pointer — so
+		// the same gesture on the same picture behaved two different ways. The
+		// daemon classes osd.privacyMasks live and moves the covers with one
+		// call per stream, which is what makes this the same promise the
+		// placement already makes: nothing saved, nothing rebuilt.
+		function pushLive() {
+			if (words.onLive) words.onLive(list().filter(Boolean).join(','));
+			if (onEdit) onEdit();
 		}
 
 		// Removing a region renumbers every one after it, and the selection is an
@@ -2357,12 +2428,19 @@
 			if (sel === i) sel = -1;
 			else if (sel > i) sel -= 1;
 			ctl._drop(i);
+			pushLive();
 		}
 
+		let onEdit = null;
+
+		// Told, not asked. select() already returns early on no change, so a
+		// listener here cannot loop back into it.
+		let onSelect = null;
 		function select(i) {
 			if (sel === i) return;
 			sel = i;
 			paintBoxes();
+			if (onSelect) onSelect(i);
 		}
 
 		// Put back what a gesture had already written. Move and resize edit the
@@ -2380,6 +2458,58 @@
 			paint();
 		}
 
+		// Where a region is on the stage, in the stage's own pixels. The DOM
+		// knows this too, but only while the layer is taking the pointer — and
+		// the whole point of this pair is to answer for an editor that is NOT
+		// the one in charge, whose rectangles are deliberately pointer-
+		// transparent so they cannot swallow presses meant for what is under
+		// them.
+		function boxOf(i) {
+			const p = pic(), b = base();
+			if (!p || !b) return null;
+			const r = parse(list()[i]);
+			if (!r) return null;
+			return {
+				x: p.x + r.x / b.w * p.w, y: p.y + r.y / b.h * p.h,
+				w: r.w / b.w * p.w, h: r.h / b.h * p.h,
+			};
+		}
+
+		// Which region a press is reaching for, asked by whoever owns the
+		// picture at the time. The SMALLEST one under the press wins an
+		// overlap — the same rule the text overlays are picked by, and for the
+		// same reason: a small rectangle inside a large one is the one being
+		// reached for, and the large one can be taken anywhere else along its
+		// span.
+		function hitAt(pt) {
+			let found = null;
+			list().forEach((raw, i) => {
+				const o = boxOf(i);
+				if (!o) return;
+				if (pt.x < o.x || pt.x > o.x + o.w) return;
+				if (pt.y < o.y || pt.y > o.y + o.h) return;
+				const a = o.w * o.h;
+				if (!found || a < found.area) found = { i: i, area: a };
+			});
+			return found;
+		}
+
+		// Taking hold of a region from a press that arrived somewhere else —
+		// another editor's catcher handing the gesture over because the press
+		// landed here. Capture goes on THIS editor's catcher rather than on
+		// whatever the pointer is physically over, or the moves and the release
+		// would be delivered to the surface that has just given the gesture
+		// away and this drag would end where it started.
+		function grabAt(i, e) {
+			const p = pic(), b = base(), o = parse(list()[i]);
+			if (!p || !b || !o || gesture) return;
+			select(i);
+			gesture = { kind: 'move', id: e.pointerId, i: i,
+				from: at(e), orig: o, moved: false };
+			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
+			e.preventDefault();
+		}
+
 		// What the press landed on decides the gesture.
 		function begin(e, surface) {
 			if (e.button || gesture) return;
@@ -2390,6 +2520,33 @@
 			if (delBtn) return;                       // handled on click, not here
 			const grip = e.target.closest && e.target.closest('.mj-md-h');
 			const boxEl = e.target.closest && e.target.closest('.mj-md-rgn');
+
+			// ONE RULE ACROSS BOTH EDITORS: the smallest thing under the press
+			// is the one being reached for.
+			//
+			// The DOM answers for this editor's own rectangles; a text overlay
+			// is not a DOM rectangle at all — the camera draws it and the leaf
+			// hit-tests against the rectangles the camera reports — so the two
+			// answers have to be COMPARED rather than merely stacked. Stacking
+			// is what was wrong before: whichever editor was not in charge had
+			// its layer made pointer-transparent, so a press on a mask dragged
+			// the selected text, and a mask large enough to contain the text
+			// made that text unreachable for as long as the mask was selected.
+			//
+			// A grip is exempt. It is a control rather than a picture, it only
+			// exists on the selected region, and a press on one can only ever
+			// mean resize that region.
+			if (!grip) {
+				const mine = boxEl ? boxOf(+boxEl.dataset.i) : null;
+				const myArea = mine ? mine.w * mine.h : Infinity;
+				const seen = words.pickAt && words.pickAt(at(e), 'mask', true);
+				// Asked twice on purpose: the probe decides, and only the
+				// second call selects, so measuring cannot move the selection.
+				if (seen && seen.area < myArea) {
+					const other = words.pickAt(at(e), 'mask');
+					if (other) { other.grab(e); return; }
+				}
+			}
 
 			if (grip && boxEl) {
 				const i = +boxEl.dataset.i;
@@ -2520,6 +2677,15 @@
 			surface.addEventListener('pointercancel', (e) => finish(e, false, surface));
 		});
 
+		// Over something this editor does not own, the press means "pick that
+		// one up" rather than "start drawing here", and the cursor is the only
+		// place that can be disclosed before the press commits to one of them.
+		catcher.addEventListener('pointermove', (e) => {
+			if (gesture) return;
+			const other = words.pickAt && words.pickAt(at(e), 'mask', true);
+			catcher.classList.toggle('mj-osd-pickable', !!other);
+		});
+
 		// Delete, from the picture. The × on the selected region, and the key that
 		// every other canvas in the world binds — guarded on the focus being
 		// somewhere that is not a text box, or backspacing a coordinate would
@@ -2561,6 +2727,42 @@
 				if (!active) select(-1);
 				paint();
 			},
+			// The selection, for a caller that lists these things somewhere else
+			// and has to agree with the picture about which one is current.
+			// Reading it is free; writing it goes through the same select() a
+			// click does, so there is one path and one repaint.
+			selected: () => sel,
+			selectAt: (i) => select(i),
+			// The same removal the × on the selected rectangle performs, for a
+			// caller that lists these somewhere else and has to offer it the
+			// same way it offers the others'.
+			removeAt: (i) => removeAt(i),
+			// Answering for this editor when it is not the one in charge: which
+			// region is under a point, and taking hold of it from a press that
+			// landed on somebody else's surface.
+			hitAt: hitAt,
+			grabAt: grabAt,
+			onSelect: (fn) => { onSelect = fn; },
+			count: () => list().length,
+			// One region's rectangle, read and written, for a caller that
+			// shows the selected one somewhere else. Through the same inputs
+			// and the same repaint the list's own boxes use, so there is one
+			// source of truth and not a second copy to keep in step.
+			rectAt: (i) => {
+				const v = list()[i];
+				return v === undefined ? '' : v;
+			},
+			setRectAt: (i, v) => {
+				const src = inputs()[i];
+				if (!src) return;
+				src.value = v;
+				src.dispatchEvent(new Event('input', { bubbles: true }));
+				src.dispatchEvent(new Event('change', { bubbles: true }));
+				pushLive();
+			},
+			// What the list is showing, so a caller can repaint its own view of
+			// it when a drag moves the numbers.
+			onEdit: (fn) => { onEdit = fn; },
 		};
 	}
 
@@ -2620,9 +2822,67 @@
 	];
 
 	function renderOsd(form) {
-		const fields = sectionFields('osd', true);
-		const byKey = {};
-		fields.forEach(f => { byKey[f.key] = f; });
+		const all = sectionFields('osd', true);
+		const fields = all.filter(f => !isOverlayMember(f.dot));
+
+		// WHATEVER IS STAGED ON THE CAMERA, THIS PAGE IS ABOUT TO DRAW THE
+		// CONFIG. So the camera is put back to the config first, and the two
+		// agree from the first frame.
+		//
+		// A live push is the camera's, not this tab's: it moves the picture for
+		// every viewer and for the recording, and it stays in force until
+		// somebody takes it off. The page that staged it does that on its way
+		// out — Save, leaving the leaf, closing the tab — but a tab that dies
+		// between those (a crash, a sleep, a pulled cable) sends nothing, and
+		// the override outlives it. What the next person then opens is a
+		// picture that disagrees with every number on the page: the outline
+		// where the config says the mask is, and the camera's grey block
+		// somewhere else. For a privacy mask that is not merely confusing,
+		// because the block left staged can be somewhere that hides LESS than
+		// the saved list does.
+		//
+		// Unconditional, and not guarded by whether THIS page pushed: the whole
+		// point is the override that no live page is answering for. The cost of
+		// getting it wrong is one dropped preview in another browser, whose
+		// very next pointermove pushes it again.
+		// ONCE PER VISIT, not on every mount of this leaf.
+		//
+		// What this is for is the override no live page is answering for: a
+		// tab that died between staging one and taking it off. That is a
+		// question about the camera when this page arrives, and it has an
+		// answer the first time it is asked. Asking it again every time the
+		// leaf is remounted — a tab switched away from and back, a save, a
+		// search that rebuilds the form — turned a one-off reconciliation
+		// into a repeated one, and every repeat is a chance to drop the
+		// placement somebody else is in the middle of dragging.
+		//
+		// It does not make this safe for two people editing at once; nothing
+		// here can, since the camera holds one override and cannot say whose.
+		// It makes the window one moment per visit instead of one per mount,
+		// and the other editor's next pointermove stages theirs again.
+		if (!state.osdReconciled) {
+			state.osdReconciled = true;
+			revertOsdPlace(true);
+		}
+
+		// Which overlays this camera can draw, and the fields of each.
+		//
+		// The flat osd.* keys are overlay 0 — every config in the field has them
+		// there and majestic reads them as the first line — and osd.overlays.<n>
+		// is the rest. How many there are is the CAMERA's answer: it declares an
+		// index only where its region model can address one, so a build that
+		// draws a single overlay describes none of these and the Add button
+		// below never appears. Adding an index the schema does not carry would
+		// be offering a line the camera silently would not draw.
+		const extra = {};
+		const markFields = [];
+		for (const f of all) {
+			const m = /^osd\.overlays\.(\d+)\./.exec(f.dot);
+			if (m) (extra[m[1]] = extra[m[1]] || []).push(f);
+			else if (/^osd\.mark\./.test(f.dot)) markFields.push(f);
+		}
+		const OVERLAYS = [0].concat(
+			Object.keys(extra).map(Number).sort((a, b) => a - b));
 
 		const head = el('div', 'mj-live-head');
 		head.innerHTML = '<h3 class="mj-cap">' + esc(label('osd')) + '</h3>' +
@@ -2631,14 +2891,60 @@
 		head.appendChild(note);
 		form.appendChild(head);
 
+		// ── the picture and its inspector, side by side ─────────────────
+		//
+		// The inspector used to float ON the picture. That put the settings
+		// next to the thing they change, which was the point, and it also
+		// covered a fifth of the video on the only screen most people have —
+		// and this page has a whole settings column to the right of a rail,
+		// most of which was empty while the panel sat on the video.
+		//
+		// It also cost more than the pixels it covered: a picture sized from
+		// the viewport height, plus a bar and an item list under it, put the
+		// item list at or below the fold on a laptop. Beside the picture the
+		// column carries the settings, the picture keeps its own width, and
+		// what is under it stays on screen.
+		//
+		// Below lg the row wraps and the inspector goes back under the
+		// picture, which is where it already went on a narrow stage.
+		const work = el('div', 'mj-osd-work');
+		const picCol = el('div', 'mj-osd-pic');
+		const sideCol = el('div', 'mj-osd-side');
+		work.appendChild(picCol);
+		work.appendChild(sideCol);
+		form.appendChild(work);
+
 		let repaint = () => {};
 		const preview = window.MajesticPreview &&
-			window.MajesticPreview.mount(form, {
+			window.MajesticPreview.mount(picCol, {
 				config: () => state.config,
 				where: 'osd',
 				onFrame: () => repaint(),
 			});
 		state.preview = preview;
+
+		// ── the picture belongs to the overlay ───────────────────────────
+		//
+		// An overlay can be in any of nine places, so the player's own
+		// furniture may be in none of them. The bar is pinned to the bottom
+		// edge of the stage, which is exactly where the commonest overlay of
+		// all goes: on a stock camera the timestamp and the snapshot and
+		// fullscreen buttons are drawn on top of one another, and the overlay
+		// wins because the camera burned it into the stream. Shipped
+		// behaviour, and the reason it survived is that nothing errors — it
+		// just looks untidy and the two controls a person reaches for most on
+		// this page are the ones underneath it.
+		//
+		// Down here the bar costs a row of page and nothing of picture. Moving
+		// the node rather than restyling it in place keeps mj-preview.js the
+		// only thing that builds a bar; this leaf only says where it goes.
+		let barRow = null;
+		if (preview) {
+			preview.stage.classList.add('mj-osd-stage');
+			barRow = el('div', 'mj-osd-bar box');
+			barRow.appendChild(preview.bar);
+			preview.stage.insertAdjacentElement('afterend', barRow);
+		}
 
 		// No knob strip on this leaf. Size would be the one thing worth dragging
 		// while watching, but osd.size is a STRING in the schema ("1.0"), so it
@@ -2651,40 +2957,179 @@
 		deck.appendChild(colText);
 		deck.appendChild(colLook);
 		form.appendChild(deck);
+		if (!preview) sideCol.remove();
 
-		const textBody = liveGroup(colText, 'Text', 'what it says');
-		// Two groups in one column: whether it is shown at all is not a question
-		// about whether you can read it.
-		const onBody = liveGroup(colLook, 'Overlay', '');
-		const lookBody = liveGroup(colLook, 'Legibility', '');
+		// ── the inspector ────────────────────────────────────────────────
+		//
+		// What an overlay says, how it looks and where it goes are the three
+		// questions you ask WHILE looking at it, and on a 1440x900 laptop the
+		// deck that held them is entirely below the fold: the picture is sized
+		// from the viewport height, so the settings start under it. The answer
+		// is not a shorter picture. It is that the settings for the thing you
+		// clicked come to the thing you clicked.
+		//
+		// The tabs are containers and nothing more. Every control below still
+		// mounts through renderField() and buildTemplate() exactly as it did
+		// when they were columns in a deck — this only says where. That is what
+		// keeps Save, dirty tracking, the per-row reset and the schema's own
+		// visibleWhen rules working without any of them learning a panel exists.
+		const panel = preview ? mountOsdPanel(preview, sideCol) : null;
+		const textBody = panel ? panel.tab('text') : liveGroup(colText, 'Text', 'what it says');
+		const lookBody = panel ? panel.tab('look') : liveGroup(colLook, 'Legibility', '');
+		const placeBody = panel ? panel.tab('place') : colText;
+		// Whether anything is shown at all is not a question about the overlay
+		// you are editing — it is a question about the leaf — so it stays on
+		// the page rather than joining the panel.
+		//
+		// ON THE ITEM BAR, not in a card. One switch was taking a deck, a
+		// column, a group heading and a rule across the full width of the page,
+		// which on a laptop pushed it off the bottom of the screen entirely —
+		// a control both enormous and invisible. It is the small switch and the
+		// short word the design puts on the bar, in the inline shape the live
+		// rows already use, and it sits beside the items because whether they
+		// are drawn is the one question about all of them at once.
+		const onBar = el('span', 'mj-osd-enable');
+		onBar.title = 'Draw text and pictures on the video. ' +
+			'Privacy masks are not affected by this.';
+		const onBody = preview ? onBar : liveGroup(colLook, 'Overlay', '');
 
+		// NOT APPENDED HERE. Where the picture can be drawn on, the inspector
+		// says everything about the selected mask — its rectangle, and what a
+		// mask costs — and this said it again, under a heading of its own,
+		// across the full width of the page. It is still the only way to edit
+		// one where there is no picture to draw on, so it goes onto the page
+		// exactly there, and nowhere else.
 		const maskDeck = el('div', 'mj-live-deck');
 		const colMask = el('div', 'mj-live-col');
 		maskDeck.appendChild(colMask);
-		form.appendChild(maskDeck);
 		const maskBody = liveGroup(colMask, 'Privacy masks', 'none');
 		const maskNote = colMask.querySelector('.mj-live-grp-head .mj-live-note');
 
-		// Where each field goes, and which of them this leaf drives instead of
-		// showing. The placement four render hidden — the picture edits them —
-		// on the same pattern the nightMode pin map uses, so Save, dirty
-		// tracking and the per-row reset never learn a drag exists, and a camera
-		// that cannot show a picture gets them back as plain fields.
+		// Where each field goes.
+		//
+		// The placement five are ROWS again, in the Place tab, which is what
+		// #340 asked for: they were rendered hidden and driven only by the drag,
+		// so a position could only be as accurate as the mouse was and could not
+		// be reproduced on the next camera. The anchor keeps a pad above it —
+		// nine cells that are the nine anchors, in the arrangement they name —
+		// but the pad writes the row rather than replacing it, and the schema's
+		// own visibleWhen still decides which offsets are shown for the anchor
+		// in force. Nothing here is hidden from Save or from the reset arrow.
 		const PLACE = { anchor: 1, offsetX: 1, offsetY: 1, posX: 1, posY: 1 };
-		const held = {};
-		for (const f of fields) {
-			const k = f.key;
-			const hidden = !!PLACE[k] && !!preview;
-			const box = k === 'enabled' ? onBody
-				: k === 'template' ? textBody
-				: (PLACE[k] ? textBody : lookBody);
-			if (k === 'privacyMasks') continue;   // mounted below, in its own deck
-			const field = renderField(box, f.dot, k, f.sub,
-				getDotted(state.config, f.dot), hidden ? { hidden: true } : undefined);
-			if (!field) continue;
-			state.fields.push(field);
-			state.initial[f.dot] = field.getValue();
-			held[k] = field;
+
+		// Every overlay's controls, mounted at once, each into its own slot of
+		// the panel's three tabs. All of them exist from the start and only the
+		// selected one is shown, which is what lets two overlays be edited and
+		// saved together — and what keeps Save, dirty tracking and the per-row
+		// reset from ever learning that a selector exists.
+		const placers = {};
+		const HELD = {};
+		// Whether each overlay draws a picture, and which one the panel is
+		// showing — the tab strip is the selected overlay's, not everyone's.
+		const kinds = {};
+		let shownKind = 0;
+		// The panel's own box for the selected mask's rectangle.
+		let maskCo = null;
+		for (const n of OVERLAYS) {
+			const list = n === 0 ? fields : extra[String(n)];
+			const held = {};
+			HELD[n] = held;
+			const textBox = panel ? panel.slot('text', n) : textBody;
+			const lookBox = panel ? panel.slot('look', n) : lookBody;
+			const placeBox = panel ? panel.slot('place', n) : placeBody;
+			for (const f of list) {
+				const k = f.key;
+				if (k === 'privacyMasks') continue;   // its own deck, below
+				// `enabled` is the leaf's switch, not an overlay's, and only
+				// overlay 0 carries one: whether the camera draws any text at
+				// all is a different question from what each line says.
+				const box = k === 'enabled' ? onBody
+					: k === 'template' ? textBox
+					: (PLACE[k] ? placeBox : lookBox);
+				const field = renderField(box, f.dot, k, f.sub,
+					getDotted(state.config, f.dot),
+					// The inline switch-then-word shape, which is what makes it
+					// a bar item rather than a row wanting a column.
+					box === onBar ? { live: true } : undefined);
+				if (!field) continue;
+				state.fields.push(field);
+				state.initial[f.dot] = field.getValue();
+				held[k] = field;
+			}
+			if (panel && held.anchor)
+				panel.pad(held, placeBox, () => placers[n]);
+			buildContent(textBox, held, n, preview, (logo) => {
+				kinds[n] = logo;
+				// Only the one on screen decides the strip.
+				if (panel && shownKind === n) panel.offer('look', !logo);
+				// The panel's own title is derived from what the overlay says,
+				// and the placer is what derives it — but it repaints on a
+				// video frame, so without this the header goes on naming the
+				// text for as long as no frame arrives.
+				if (placers[n]) placers[n].repaint();
+			});
+		}
+		// ── the vendor mark ──────────────────────────────────────────────
+		//
+		// An overlay in every way that matters to this page: it has a place on
+		// the picture, the same five keys describe it, and the same placer
+		// drags it. What it does not have is anything to say or any way to
+		// look — the camera decides both — so it gets the Place tab and
+		// nothing else, and the item row gives it no way to be removed.
+		//
+		// Mounted whenever the schema describes it, and SHOWN only while the
+		// camera reports drawing it. Those are different questions: the keys
+		// exist on every build that has the mark at all, and whether it is on
+		// the video turns on the licence, which this page cannot read.
+		if (panel && markFields.length) {
+			const box = panel.slot('place', MARK);
+			const mheld = {};
+			for (const f of markFields) {
+				const field = renderField(box, f.dot, f.key, f.sub,
+					getDotted(state.config, f.dot));
+				if (!field) continue;
+				state.fields.push(field);
+				state.initial[f.dot] = field.getValue();
+				mheld[f.key] = field;
+			}
+			HELD[MARK] = mheld;
+			if (mheld.anchor) panel.pad(mheld, box, () => placers[MARK]);
+		}
+
+		const held = HELD[0];
+
+		// What an overlay SAYS is also whether it exists — the same rule the
+		// camera applies, read from the control so a line added here counts at
+		// once. The item list below words it; the picture needs it too, so that
+		// a press cannot pick up an overlay that is not being drawn.
+		//
+		// A LINE OR A PICTURE, which is the camera's own rule for whether an
+		// overlay exists at all. Counting only the line left an overlay that
+		// draws just a logo on the video and absent from the item list — so
+		// there was no chip to select, and therefore no way to reach the thing
+		// that would change or remove it.
+		const lineOf = (n) => HELD[n] && HELD[n].template
+			? String(HELD[n].template.getValue() || '') : '';
+		const logoOf = (n) => HELD[n] && HELD[n].image
+			? String(HELD[n].image.getValue() || '') : '';
+		const saysAnything = (n) =>
+			lineOf(n).trim() !== '' || logoOf(n).trim() !== '';
+		// AN ITEM IS SOMETHING ON THE PICTURE, whatever its index.
+		//
+		// Overlay 0 used to be listed whether or not it drew anything, on the
+		// grounds that its keys are the flat osd.* ones and every camera has
+		// them. That is true of the KEYS and not of the picture, and it made
+		// the first line the one item that could not be removed: no cross on
+		// its chip, while every other text had one. The reporter's clock and
+		// their FRONT GATE behaved differently for a reason nothing on screen
+		// could show.
+		const listedOverlay = (n) => !!placers[n] && saysAnything(n);
+		// The first overlay, until something selects another. Said here rather
+		// than left to the item list, which does not exist on a leaf with no
+		// picture to put items on.
+		if (panel) {
+			panel.showOverlay(0);
+			panel.offer('look', !kinds[0]);
 		}
 
 		// One question, asked once: hiding the raw coordinate rows is only
@@ -2705,22 +3150,18 @@
 			}
 		}
 
-		// The chip builder sits above the raw template row and drives it. The
-		// row stays — hidden — so Save and the reset arrow keep working on the
-		// field itself, and a build whose template this cannot parse falls back
-		// to showing it rather than losing it.
-		if (held.template) {
-			// Folded away, not removed: "Edit directly" brings it back, and a
-			// template the chips cannot parse is still editable where it always
-			// was. Save, dirty tracking and the reset arrow never notice.
-			held.template.p.hidden = true;
-			buildTemplate(textBody, held.template);
-		}
-
 		let masks = null;
 		if (maskField && canRegion) {
 			masks = mountRegions(preview, maskField, maskBody, maskNote, {
 				gated: true,
+				// Called through rather than passed, because `pickAt` is
+				// declared below this call and reading it here would be the
+				// temporal dead zone this file has already been bitten by.
+				pickAt: (pt, from, probe) => pickAt(pt, from, probe),
+				// The camera follows a mask drag the way it follows a text one.
+				// Same endpoint, same document shape, same undo: the drop below
+				// puts every staged rectangle back where the config says.
+				onLive: (spec) => postLivePlace({ osd: { privacyMasks: spec } }),
 				one: '1 mask', many: ' masks',
 				draw: 'Draw masks', drawHint: 'Drag a rectangle on the picture',
 				empty: 'No masks. Switch the picture to Masks and drag one over ' +
@@ -2747,42 +3188,791 @@
 			maskBody.appendChild(say);
 		}
 
-		let placer = null;
-		if (preview && held.anchor) {
-			placer = mountOsdText(preview, held, note);
-			repaint = () => { placer.repaint(); if (masks) masks.repaint(); };
+		// One placer per overlay, exactly one of them active. Each hides its own
+		// layer and drag catcher when it is not, so the selected overlay is the
+		// only thing a press on the picture can move — which is the whole of
+		// what selection has to mean here.
+		// Which overlay a press on the picture is reaching for.
+		//
+		// Answered by the leaf rather than by any one placer, because it is a
+		// question about all of them: only the selected overlay has a catcher,
+		// so its handler asks here whether the press actually landed on one of
+		// the others. `probe` means "just tell me, do not select anything" —
+		// that is the pointermove asking so the cursor can say what a press
+		// would do.
+		//
+		// The SMALLEST thing under the press wins an overlap. A short label
+		// sitting inside the span of a long clock is the one being reached
+		// for; the long one can be taken anywhere else along its length. A
+		// mask is measured on the same scale, so a small mask over a long
+		// clock is reachable and the clock is still reachable beside it.
+		//
+		// MASKS ARE IN HERE FOR A REASON THE DOM CANNOT COVER. The regions are
+		// real elements and the text overlays are not — they are drawn by the
+		// camera, and this page hit-tests them against the rectangles the
+		// camera reports. So the two editors cannot arbitrate by stacking
+		// order: whichever is not in charge has its layer made pointer-
+		// transparent, and a press on its rectangles falls through to the
+		// other's full-picture catcher. Pressing a mask dragged the selected
+		// TEXT, and pressing the text while a mask was selected drew a new
+		// mask across it. One arbiter, asked by both catchers, is what makes
+		// the picture a list of things you can pick up rather than two editors
+		// taking turns at the same pixels.
+		// On the picture right now. Not "configured": the mark is drawn when
+		// the camera is unlicensed AND more than one overlay is saying
+		// something, and the first of those is not in the schema — so the only
+		// honest source is the camera reporting that it drew one.
+		function markShown() {
+			return !!placers[MARK] &&
+				camRects.mark !== null && camRects.mark !== undefined;
+		}
+
+		let pickHandler = null;
+		const pickAt = (pt, from, probe) => {
+			let found = null;
+			const offer = (area, sel, grab) => {
+				if (!found || area < found.area) found = { area: area, sel: sel, grab: grab };
+			};
+			for (const n of OVERLAYS) {
+				if (n === from || !placers[n]) continue;
+				if (!listedOverlay(n) || !placers[n].hitAt(pt)) continue;
+				offer(placers[n].area(), { t: 'text', i: n }, (e) => placers[n].grab(e));
+			}
+			if (masks && from !== 'mask') {
+				const m = masks.hitAt(pt);
+				if (m) offer(m.area, { t: 'mask', i: m.i }, (e) => masks.grabAt(m.i, e));
+			}
+			// And the mark, on the same smallest-wins scale as everything
+			// else — only while the camera is actually drawing it, or a press
+			// would pick up a thing that is not on the picture.
+			if (markShown() && from !== MARK && placers[MARK].hitAt(pt)) {
+				offer(placers[MARK].area(), { t: 'mark' },
+					(e) => placers[MARK].grab(e));
+			}
+			if (found && !probe && pickHandler) pickHandler(found.sel);
+			return found;
+		};
+
+		// Asked once at mount and then on a slow tick: the rectangles move when
+		// the template changes length, when a save lands, and after a drag —
+		// none of which is fast, and none of which the page can predict without
+		// asking. Stopped with the rest of the leaf.
+		let anyPlacer = false;
+		if (preview) {
+			refreshOsdRects();
+			const rectTimer = setInterval(refreshOsdRects, 2000);
+			state.liveCleanup.push(() => clearInterval(rectTimer));
+			for (const n of OVERLAYS) {
+				if (!HELD[n].anchor) continue;
+				placers[n] = mountOsdText(preview, HELD[n], note, panel, n,
+					{ pickAt: pickAt, camRect: camRectFor,
+					  rectsChanged: () => setTimeout(refreshOsdRects, 400) });
+				placers[n].setActive(false);
+				anyPlacer = true;
+			}
+			// The same placer, on the same hooks. It hit-tests against the
+			// rectangle the camera reports for the mark exactly as the others
+			// do against theirs, so dragging it is the gesture already written
+			// rather than a second one.
+			if (HELD[MARK] && HELD[MARK].anchor) {
+				placers[MARK] = mountOsdText(preview, HELD[MARK], note, panel,
+					MARK,
+					{ pickAt: pickAt, camRect: camRectFor,
+					  // Always a share — see unit(). The mark must sit in the
+					  // same place on the main stream and the sub, and pixels
+					  // cannot say that.
+					  unit: '%',
+					  rectsChanged: () => setTimeout(refreshOsdRects, 400) });
+				placers[MARK].setActive(false);
+			}
+		}
+		if (anyPlacer) {
+			repaint = () => {
+				for (const k of Object.keys(placers)) placers[k].repaint();
+				if (masks) masks.repaint();
+			};
 		} else if (masks) {
 			repaint = masks.repaint;
 		}
 
-		// One picture, two things to place. The switch says which a drag is for
-		// rather than letting the drag guess, and it is the only new control the
-		// bar gains.
-		if (preview && (placer || masks)) {
-			const seg = el('span', 'mj-hud mj-seg mj-osd-mode');
-			seg.setAttribute('role', 'group');
-			seg.setAttribute('aria-label', 'What a drag places');
-			const uid = 'mj-osd-mode';
-			seg.innerHTML =
-				'<input type="radio" class="mj-seg-in" name="' + uid + '" id="' + uid + '-t" checked>' +
-				'<label class="mj-seg-lbl" for="' + uid + '-t">Text</label>' +
-				'<input type="radio" class="mj-seg-in" name="' + uid + '" id="' + uid + '-m">' +
-				'<label class="mj-seg-lbl" for="' + uid + '-m">Masks</label>';
-			preview.barInsert(seg);
-			const t = seg.querySelector('#' + uid + '-t');
-			const m = seg.querySelector('#' + uid + '-m');
-			const sync = () => {
-				const textMode = t.checked;
-				if (placer) placer.setActive(textMode);
-				if (masks) masks.setActive(!textMode);
+		// ── one list of the things on the picture ────────────────────────
+		//
+		// This replaces a Text / Masks switch in the bar, which asked the
+		// question the wrong way round: it made you name a KIND before you
+		// could touch a thing, and it could not tell you what was on the
+		// picture — a mask switched off the screen edge, or three masks where
+		// you thought there was one, looked exactly like none.
+		//
+		// A chip per thing, and pressing one is the same act as pressing the
+		// thing itself: both go through the same selection. Labels are DERIVED
+		// — a text overlay is the line it prints, a mask is its number — so
+		// nothing here needs a name, which is the concept the whole arrangement
+		// was chosen to avoid.
+		if (preview && (anyPlacer || masks)) {
+			const row = el('div', 'mj-osd-items box');
+			const cap = el('span', 'mj-cap');
+			cap.textContent = 'Items';
+			row.appendChild(cap);
+			const chips = el('span', 'mj-osd-chips');
+			row.appendChild(chips);
+
+			// WHAT IT COSTS, beside what there is. A region refused for want of
+			// a handle is not a clipped overlay: it is no overlay at all,
+			// drawn nowhere, with the stream carrying on as though nothing had
+			// been asked for. Nothing else on this page can report that, so
+			// the way to keep somebody out of it is to show what is left
+			// before they spend it.
+			//
+			// TWO BUDGETS AND NOT A TOTAL. Masks and overlays come out of
+			// different ranges of the camera's handle map, so a mask can never
+			// take an overlay's slot; one number would be wrong in both
+			// directions. The camera reports both, and a build that has not
+			// written its region map down reports zero — shown as a count with
+			// no ceiling, which is what not knowing looks like.
+			//
+			// The memory is the same arithmetic the camera does: the real
+			// rectangles, two bytes a pixel, two buffers a region. It is here
+			// because a full-frame logo is megabytes and nothing forbids one —
+			// the page shows the price and lets the person decide.
+			// ON ITS OWN LINE, under the row rather than in it.
+			//
+			// In the row it was a 242px item that could not shrink and could
+			// not wrap, on a bar that must not wrap — so it came out of the
+			// chips' width. In the leaf's picture column, which is about 640px
+			// once the inspector has its side, that left the chips 218px and
+			// every one of them wrapped onto a line of its own: a 335px bar
+			// for three items, with this line floating in the middle of it.
+			//
+			// Below, it costs one line and takes nothing from anything.
+			const cost = el('div', 'mj-osd-cost');
+			row.appendChild(onBar);
+
+			function drawCost() {
+				const b = camRects.budget;
+				const nMask = masks ? masks.count() : 0;
+				// COUNTED FROM WHAT IS ON THE PAGE, not from what the camera
+				// has drawn so far. An overlay added here does not exist on
+				// the camera until Save, and a count that only moved afterwards
+				// would tell somebody they had run out one press too late —
+				// which is the press this line exists to stop.
+				//
+				// One region per overlay per distinct frame size, which is the
+				// camera's own rule: the glyphs are sized from the width, so
+				// two outputs of the same size share a region and a snapshot
+				// inheriting the main stream's costs nothing extra. The number
+				// of sizes is the camera's to say and is read from its report.
+				const items = listed().length + (markShown() ? 1 : 0);
+				// HOW MANY STREAM SIZES IS THE CAMERA'S TO SAY, and until it
+				// has said, this line says nothing about regions. Standing in
+				// 1 for an unknown count turned a guess into a printed number
+				// — and understated it on every camera with two stream sizes,
+				// which is most of them. That stood before the first reply,
+				// after any hiccup, and for good on a build with no
+				// /api/v1/osd at all.
+				const regions = camRects.widths ? items * camRects.widths : 0;
+				const bits = [];
+				if (regions) {
+					bits.push(b && b.overlays
+						? regions + ' of ' + b.overlays + ' regions'
+						: regions + (regions === 1 ? ' region' : ' regions'));
+				} else {
+					bits.push(items + (items === 1 ? ' item' : ' items'));
+				}
+				if (masks) {
+					bits.push(b && b.masks
+						? nMask + ' of ' + b.masks + ' masks'
+						: nMask + (nMask === 1 ? ' mask' : ' masks'));
+				}
+				if (camRects.bytes) {
+					const mb = camRects.bytes / 1048576;
+					bits.push('~' + (mb >= 1 ? mb.toFixed(1) + ' MB'
+						: Math.round(camRects.bytes / 1024) + ' KB'));
+				}
+				cost.textContent = bits.join(' · ');
+				// Only where the camera said what the ceiling is; a count with
+				// no ceiling has nothing to be near the end of.
+				const tight = !!(b && b.overlays && regions >= b.overlays - 2) ||
+					!!(b && b.masks && nMask >= b.masks - 1);
+				cost.classList.toggle('mj-osd-cost-low', tight);
+				cost.title = tight
+					? 'Close to this camera\u2019s limit. A region it cannot ' +
+					  'create is an overlay that is not drawn at all.'
+					: 'One region per item per distinct stream size. Overlay ' +
+					  'regions and privacy masks come out of different ranges, ' +
+					  'so a mask never costs an overlay its slot. The size is ' +
+					  'what the camera is drawing now, in its video memory.';
+			}
+			camRects.onCost = drawCost;
+			state.liveCleanup.push(() => { camRects.onCost = null; });
+			(barRow || preview.stage).insertAdjacentElement('afterend', row);
+			// After the row is in the document, not before: afterend on a node
+			// with no parent silently does nothing, and the line simply never
+			// appeared.
+			row.insertAdjacentElement('afterend', cost);
+
+			const listed = () => OVERLAYS.filter(listedOverlay);
+			// Index 0 included, or emptying the first line would retire it: it
+			// is the lowest free index and OVERLAYS is sorted, so + Text takes
+			// it back first. An index that can be cleared and never refilled
+			// is a line the camera can draw and the page cannot ask for.
+			const spare = () =>
+				OVERLAYS.find(n => placers[n] && !saysAnything(n));
+
+			// What to select when whatever was selected has gone. Text first,
+			// then a mask, then the mark — and `none` where the picture really
+			// is empty, which is a state this leaf can now reach.
+			function fallbackSel() {
+				const l = listed();
+				if (l.length) return { t: 'text', i: l[0] };
+				if (masks && masks.count()) return { t: 'mask', i: 0 };
+				if (markShown()) return { t: 'mark' };
+				return { t: 'none' };
+			}
+
+			// {t: 'text', i: overlay} or {t: 'mask', i: index} or {t: 'mark'}.
+			let sel = anyPlacer || masks ? fallbackSel() : { t: 'mask', i: 0 };
+
+			function pick(next, fromPicture) {
+				sel = next;
+				for (const k of Object.keys(placers))
+					placers[k].setActive(k === MARK
+						? sel.t === 'mark'
+						: sel.t === 'text' && +k === sel.i);
+				if (masks) {
+					masks.setActive(sel.t === 'mask');
+					if (sel.t === 'mask' && !fromPicture) masks.selectAt(sel.i);
+				}
+				if (sel.t === 'none' && panel) {
+					// The picture is empty. Offering a tab about a thing that
+					// is not there is worse than offering none: every control
+					// in it would edit an overlay nobody can see.
+					panel.offer('text', false);
+					panel.offer('look', false);
+					panel.offer('place', false);
+					panel.name('');
+				} else if (sel.t === 'text' && panel) {
+					panel.showOverlay(sel.i);
+					shownKind = sel.i;
+					panel.offer('text', true);
+					panel.offer('look', !kinds[sel.i]);
+					panel.offer('place', true);
+					panel.reveal();
+				} else if (sel.t === 'mark' && panel) {
+					// A place and nothing else. There is no content to write
+					// and no face to choose — the camera answers both, and a
+					// tab offering either would be a control that does not
+					// work rather than a setting somebody has not found.
+					panel.showOverlay(MARK);
+					panel.offer('text', false);
+					panel.offer('look', false);
+					panel.offer('place', true);
+					panel.name('OpenIPC');
+					panel.reveal('place');
+				} else if (sel.t === 'mask' && panel) {
+					// A mask has a rectangle and nothing else: no content to
+					// write, no font to choose. One tab, and it is the one
+					// about where a thing is.
+					panel.showOverlay('mask');
+					panel.offer('text', false);
+					panel.offer('look', false);
+					panel.offer('place', true);
+					panel.name(sel.i >= 0 ? 'Mask ' + (sel.i + 1) : 'Masks');
+					if (maskCo && sel.i >= 0) maskCo.value = masks.rectAt(sel.i);
+					panel.reveal('place');
+				}
+				draw();
+			}
+
+			// Adding one is writing a template into the lowest index that has
+			// none — which is exactly what makes the camera draw it. Everything
+			// else stays at its declared default, so what a save writes is one
+			// line of config rather than a transcription of overlay 0.
+			function addOverlay() {
+				const n = spare();
+				if (n === undefined) return;
+				const f = HELD[n].template;
+				f.setValue('Text');
+				// buildTemplate rebuilds its chips from the field's own events,
+				// and setValue fires none — so say it moved.
+				f.control.dispatchEvent(new Event('change', { bubbles: true }));
+				runVisibility();
+				updateDirty();
+				pick({ t: 'text', i: n });
+				if (panel) panel.reveal('text');
+			}
+
+			// Adding a LOGO is one act, not "add some text and then replace it
+			// with a picture". It takes the next free index, opens its panel
+			// and opens the file chooser straight away — this runs inside the
+			// press, so the chooser is allowed to open.
+			//
+			// Nothing is written until a picture is actually chosen: an
+			// overlay with neither a line nor a picture says nothing, so it is
+			// not listed, so a cancelled chooser leaves no empty item behind.
+			function addLogo() {
+				const n = spare();
+				if (n === undefined || !HELD[n].image) return;
+				pick({ t: 'text', i: n });
+				if (panel) panel.reveal('text');
+				const slot = panel ? panel.slot('text', n) : null;
+				const input = slot &&
+					slot.querySelector('.mj-logo input[type=file]');
+				if (input) input.click();
+			}
+
+			// And removing one is putting the whole overlay back to its declared
+			// defaults, template included. A member equal to its default is left
+			// out of a save, so the block leaves /etc/majestic.yaml rather than
+			// staying behind as an inert one nobody can see.
+			//
+			// Overlay 0 is not removable: it is the flat keys, which every
+			// config has and no camera can be without.
+			function removeOverlay(n) {
+				// Index 0 is removable like the rest. It cannot cease to
+				// EXIST — its keys are the flat ones and are always there —
+				// but the line it draws can go, which is the only sense in
+				// which any of these is removed: an overlay above zero is
+				// gone precisely when it says nothing.
+				if (n === undefined || !HELD[n]) return;
+				// The file as well as the setting — but on Save, not now: see
+				// logoBin. Clearing the field alone would leave the picture in
+				// the camera's writable overlay, taking flash for an overlay
+				// that no longer refers to it.
+				if (logoOf(n).trim() !== '') logoBin.add(n);
+				for (const k of Object.keys(HELD[n])) {
+					const f = HELD[n][k];
+					// WHAT IT SAYS IS CLEARED, not defaulted. The rest of an
+					// overlay goes back to its default so the index is clean
+					// for whoever takes it next — but a default is the wrong
+					// answer for these two, and on index 0 it is the opposite
+					// of the one asked for: osd.template's default is the
+					// clock, so removing the first line put the clock back.
+					// Above zero the default happens to be empty and the two
+					// rules agreed, which is why nothing showed it.
+					const clears = k === 'template' || k === 'image';
+					const d = !clears && f.schema &&
+						Object.prototype.hasOwnProperty.call(f.schema, 'default')
+						? f.schema.default : '';
+					f.setValue(d === undefined || d === null ? '' : String(d));
+					f.control.dispatchEvent(new Event('change', { bubbles: true }));
+				}
+				runVisibility();
+				updateDirty();
+				pick(fallbackSel());
+			}
+
+			// The pill is a WRAPPER, and the label is a button inside it.
+			//
+			// It was one button with the remove cross nested inside, which is
+			// invalid markup — a button may not contain another — and browsers
+			// do not agree about what a press on the inner one means. Where the
+			// outer button wins the hit test, pressing the cross re-selects the
+			// chip it is on: no error, no change, a control that does nothing.
+			// Two real buttons side by side inside a plain span is the same
+			// picture and has one meaning everywhere.
+			function chip(kind, word, on) {
+				const wrap = el('span',
+					'mj-osd-chip' + (on ? ' mj-osd-chip-on' : ''));
+				const b = el('button', 'mj-osd-chip-b');
+				b.type = 'button';
+				b.innerHTML = '<span class="mj-osd-chip-k"></span>' +
+					'<span class="mj-osd-chip-v"></span>';
+				b.firstChild.textContent = kind;
+				b.lastChild.textContent = word;
+				wrap.appendChild(b);
+
+				return { wrap: wrap, b: b };
+			}
+
+			function draw() {
+				drawCost();
+				chips.textContent = '';
+				for (const n of listed()) {
+					const on = sel.t === 'text' && sel.i === n;
+					// What the CAMERA draws, which is the picture wherever
+					// there is one — a chip showing the template of an overlay
+					// that is drawing a logo names something nobody can see.
+					const logo = logoOf(n).trim() !== '';
+					const t = lineOf(n);
+					const c = logo
+						? chip('Logo', 'Picture', on)
+						: chip('Text',
+							t.length > 20 ? t.slice(0, 19) + '…' : (t || 'Overlay'),
+							on);
+					c.b.addEventListener('click', () => pick({ t: 'text', i: n }));
+					// The remove control rides the chip it removes, and only
+					// while that chip is the selected one: a row of crosses is a
+					// picture of controls rather than of what is on the screen.
+					if (on) {
+						const x = el('button', 'mj-osd-chip-x');
+						x.type = 'button';
+						x.title = 'Remove this overlay';
+						x.setAttribute('aria-label', 'Remove this overlay');
+						x.textContent = '\u00d7';
+						x.addEventListener('click', () => removeOverlay(n));
+						c.wrap.appendChild(x);
+					}
+					chips.appendChild(c.wrap);
+				}
+				const n = masks ? masks.count() : 0;
+				for (let i = 0; i < n; i++) {
+					const on = sel.t === 'mask' && sel.i === i;
+					const c = chip('Mask', String(i + 1), on);
+					c.b.addEventListener('click', () => pick({ t: 'mask', i: i }));
+					// The same cross every other item carries. A mask could
+					// only be removed from the picture — the × on its selected
+					// rectangle, or the Delete key — so the row offered the
+					// gesture for text and not for masks, on the same chips,
+					// under the same heading.
+					if (on) {
+						const x = el('button', 'mj-osd-chip-x');
+						x.type = 'button';
+						x.title = 'Remove this mask';
+						x.setAttribute('aria-label', 'Remove this mask');
+						x.textContent = '\u00d7';
+						x.addEventListener('click', () => {
+							masks.removeAt(i);
+							// Still among masks. removeAt() has already moved
+							// its own selection down — removing one renumbers
+							// every mask after it — so the row is told what the
+							// editor decided rather than sent back to the first
+							// text overlay, which is not where you were.
+							pick({ t: 'mask', i: masks.selected() });
+						});
+						c.wrap.appendChild(x);
+					}
+					chips.appendChild(c.wrap);
+				}
+				// AND NO CROSS. Every other chip carries one; this is the item
+				// that cannot be taken off, and the absence is the whole
+				// statement. A disabled cross would read as a control that is
+				// broken rather than as a thing that is not offered, and a
+				// cross that explained itself in a tooltip would still be a
+				// button somebody presses first and reads second.
+				if (markShown()) {
+					const c = chip('Logo', 'OpenIPC', sel.t === 'mark');
+					c.b.title = 'Drag it anywhere on the picture. ' +
+						'It cannot be removed.';
+					c.b.addEventListener('click', () => pick({ t: 'mark' }));
+					chips.appendChild(c.wrap);
+				}
+				// Offered only while the camera has an index left to draw on.
+				if (spare() !== undefined) {
+					const add = el('button', 'mj-osd-chip mj-osd-chip-add');
+					add.type = 'button';
+					add.textContent = '+ Text';
+					add.title = 'Add another line of text to the picture';
+					add.addEventListener('click', addOverlay);
+					chips.appendChild(add);
+
+					// Only where the camera can draw one: the field exists
+					// exactly where the backend said it does.
+					if (HELD[spare()] && HELD[spare()].image) {
+						const lg = el('button', 'mj-osd-chip mj-osd-chip-add');
+						lg.type = 'button';
+						lg.textContent = '+ Logo';
+						lg.title = 'Put a picture on the video';
+						lg.addEventListener('click', addLogo);
+						chips.appendChild(lg);
+					}
+				}
+
+				// AND A MASK, which had no way in at all.
+				//
+				// Drawing one used to be a press on a Masks switch in the
+				// player bar and then a drag. The switch went when the chips
+				// replaced it, and a chip only exists for a mask that already
+				// exists — so with none there was nothing to press, the mask
+				// layer was never active, and a drag on the picture moved the
+				// selected overlay instead. The deck below still had "Add by
+				// coordinates", which is not the same offer as drawing one.
+				//
+				// It stays lit while the picture is in mask mode with nothing
+				// selected, because that is a state you are IN and the crosshair
+				// alone does not say whose crosshair it is.
+				if (masks) {
+					const mk = el('button', 'mj-osd-chip mj-osd-chip-add' +
+						(sel.t === 'mask' && sel.i < 0 ? ' mj-osd-chip-on' : ''));
+					mk.type = 'button';
+					mk.textContent = n ? '+ Mask' : '+ Mask';
+					mk.title = 'Drag a rectangle on the picture to hide it';
+					mk.addEventListener('click', () => pick({ t: 'mask', i: -1 }));
+					chips.appendChild(mk);
+				}
+			}
+
+			// Picking a mask ON the picture has to move the chip too, or the two
+			// disagree about which one is current and the row becomes a second
+			// opinion rather than a view.
+			if (masks) masks.onSelect((i) => {
+				// A mask drawn on the picture selects itself, which is how the
+				// row learns it exists and how the drawn one gets its handles.
+				if (i >= 0) { sel = { t: 'mask', i: i }; draw(); }
+			});
+			// A mask added or removed changes what the row lists. The array
+			// widget fires change for every edit that reaches the field, which
+			// is every edit: a drawn rectangle goes through the same _add().
+			if (maskField) maskField.control.addEventListener('change', draw);
+			// So does an overlay's own line — it is the chip's label, and above
+			// overlay 0 it is also whether the chip is there at all.
+			for (const n of OVERLAYS) {
+				if (HELD[n].template) {
+					HELD[n].template.control.addEventListener('input', draw);
+					HELD[n].template.control.addEventListener('change', draw);
+				}
+				// A picture chosen or removed changes the chip's kind, and
+				// above overlay 0 it changes whether the chip is there at all.
+				if (HELD[n].image)
+					HELD[n].image.control.addEventListener('change', draw);
+			}
+
+			// A press on the picture selects through exactly the same door the
+			// chips do, so the chip row cannot disagree with what is being
+			// dragged. It carries the whole selector rather than an overlay
+			// number, because a mask is one of the things a press can reach.
+			pickHandler = (sel_) => pick(sel_);
+
+			// ── the inspector, for a mask ────────────────────────────────
+			//
+			// A mask is a thing on this picture like the others, and the panel
+			// had nothing to say about one: selecting a Mask chip left the
+			// last text overlay's settings on screen, which is a panel
+			// describing something you are not looking at.
+			//
+			// What a mask HAS is a rectangle and a consequence, so that is what
+			// it shows. The rectangle is the list's own input read and written
+			// through mountRegions rather than copied, so the picture, the row
+			// below and this box are three views of one value and cannot
+			// disagree.
+			if (masks && panel) {
+				const slot = panel.slot('place', 'mask');
+				const box = el('p', 'string mj-row');
+				box.innerHTML =
+					'<label class="form-label" for="mj-md-inspect">' +
+						'Left × Top × Width × Height</label>' +
+					'<input type="text" class="form-control" id="mj-md-inspect" ' +
+						'spellcheck="false" autocomplete="off">';
+				slot.appendChild(box);
+				const co = box.querySelector('input');
+
+				const why = el('p', 'mj-live-hint');
+				why.textContent = 'A mask is drawn into the video itself, so it ' +
+					'is in the recording and in every other viewer’s picture — ' +
+					'not just in this preview.';
+				slot.appendChild(why);
+
+				maskCo = co;
+				co.addEventListener('change', () => {
+					if (sel.t === 'mask' && sel.i >= 0)
+						masks.setRectAt(sel.i, co.value.trim());
+				});
+				// The numbers move under a drag, and this is one of the places
+				// they are shown.
+				masks.onEdit(() => {
+					if (sel.t === 'mask' && sel.i >= 0 &&
+						document.activeElement !== co)
+						co.value = masks.rectAt(sel.i);
+				});
+			}
+
+			// It comes and goes with what the camera is drawing — a second
+			// overlay brings it a tick later, and removing one takes it away
+			// — so the row is rebuilt when that answer changes rather than
+			// only when something here is clicked.
+			camRects.onMark = () => {
+				if (sel.t === 'mark' && !markShown()) {
+					pick({ t: 'text', i: listed()[0] });
+					return;
+				}
+				draw();
 			};
-			t.addEventListener('click', sync);
-			m.addEventListener('click', sync);
-			sync();
-			if (!placer) { m.checked = true; sync(); }
+			state.liveCleanup.push(() => { camRects.onMark = null; });
+
+			pick(sel, false);
 		}
 
-		if (!maskField) maskDeck.remove();
+		if (maskField && !canRegion) form.appendChild(maskDeck);
+		// The switch that was the deck's last tenant is on the item bar, and
+		// the two columns it was built for are on the picture. What is left is
+		// a border and some padding around nothing, so it goes — but only once
+		// it is actually empty, since a leaf with no picture still renders all
+		// of it here.
+		if (panel) colText.remove();
+		// Rehomed BEFORE the column is judged empty, or a leaf with a picture
+		// but no items to bar would have the column removed out from under the
+		// group this is about to build in it, and the switch would go with it.
+		if (!onBar.parentNode && onBar.childElementCount)
+			liveGroup(colLook, 'Overlay', '').appendChild(onBar);
+		if (!colLook.childElementCount) colLook.remove();
+		else if (panel) colLook.classList.remove('mj-live-col-b');
+		if (!deck.childElementCount) deck.remove();
+	}
+
+	// The panel the overlay's settings live in: a card on the picture, opened
+	// by clicking the overlay and moved by its header.
+	//
+	// It is deliberately thin. It owns a header, three tab buttons and three
+	// empty bodies; every control inside is mounted by the same renderField()
+	// and buildTemplate() calls that filled the deck before, so nothing about
+	// saving, dirty tracking, resetting or the schema's visibleWhen rules had to
+	// learn about it. The one thing it adds is the anchor pad, and even that
+	// writes the anchor ROW rather than standing in for it.
+	function mountOsdPanel(preview, mount) {
+		const P = window.MajesticPlace;
+		const box = el('div', 'mj-osd-panel');
+		box.innerHTML =
+			'<div class="mj-osd-panel-head">' +
+				'<span class="mj-cap mj-osd-panel-name"></span>' +
+			'</div>' +
+			'<div class="mj-osd-tabs" role="tablist"></div>' +
+			'<div class="mj-osd-bodies"></div>';
+		mount.appendChild(box);
+
+		const tabs = box.querySelector('.mj-osd-tabs');
+		const bodies = box.querySelector('.mj-osd-bodies');
+		const made = {};
+		// "Content" rather than "Text": what an overlay says is a line or a
+		// picture, and the tab holds whichever this one is.
+		const TABS = [['text', 'Content'], ['look', 'Look'], ['place', 'Place']];
+		let open = 'place';
+
+		for (const [id, word] of TABS) {
+			const b = el('button', 'mj-osd-tab');
+			b.type = 'button';
+			b.textContent = word;
+			b.setAttribute('role', 'tab');
+			b.addEventListener('click', () => show(id));
+			tabs.appendChild(b);
+			const body = el('div', 'mj-osd-body');
+			bodies.appendChild(body);
+			made[id] = { btn: b, body: body };
+		}
+
+		function show(id) {
+			// A tab that is not offered cannot be the open one: asking for it
+			// would leave the strip with nothing lit and the panel blank.
+			if (made[id] && made[id].btn.hidden) id = TABS.find(
+				([tid]) => !made[tid].btn.hidden)[0];
+			open = id;
+			for (const [tid] of TABS) {
+				made[tid].btn.classList.toggle('mj-osd-tab-on', tid === id);
+				made[tid].btn.setAttribute('aria-selected', tid === id ? 'true' : 'false');
+				made[tid].body.hidden = tid !== id;
+			}
+		}
+		show(open);
+
+		// Which tabs this overlay has.
+		//
+		// A picture has no Look: every control there — the font, its size, its
+		// weight, its outline, the plate behind the text — draws TEXT, and none
+		// of it touches a bitmap the camera blits. Offering them would be three
+		// controls and a switch that do nothing, on the tab most likely to be
+		// opened looking for how to change the picture.
+		function offer(id, on) {
+			if (!made[id]) return;
+			made[id].btn.hidden = !on;
+			if (!on && open === id) show(TABS[0][0]);
+		}
+
+
+		// One slot per overlay inside each tab, all but the selected one hidden.
+		//
+		// Every overlay's controls are mounted at once, which is what keeps
+		// Save, dirty tracking and the per-row reset working across all of them
+		// — two overlays can be edited and saved together, and none of that
+		// machinery learns a selector exists. The alternative, re-rendering the
+		// tab on every selection, would throw away unsaved edits the moment you
+		// looked at another overlay.
+		const slots = {};
+		function slot(id, n) {
+			const k = id + '.' + n;
+			if (!slots[k]) {
+				const d = el('div', 'mj-osd-slot');
+				made[id].body.appendChild(d);
+				slots[k] = d;
+			}
+			return slots[k];
+		}
+		let shownOverlay = null;
+		function showOverlay(n) {
+			shownOverlay = n;
+			for (const k of Object.keys(slots))
+				slots[k].hidden = k.slice(k.indexOf('.') + 1) !== String(n);
+		}
+
+		return {
+			el: box,
+			tab: (id) => made[id].body,
+			offer: offer,
+			slot: slot,
+			showOverlay: showOverlay,
+			// It is always there now, so this only chooses which tab of it you
+			// are looking at.
+			reveal: (id) => { if (id) show(id); },
+			// What it is called, derived rather than stored: a text overlay is
+			// the line it prints. Nothing anywhere holds a name for it.
+			name: (text) => {
+				const t = String(text || '').trim();
+				box.querySelector('.mj-osd-panel-name').textContent =
+					t ? (t.length > 24 ? t.slice(0, 23) + '…' : t) : 'Overlay';
+			},
+			// Nine cells that are the nine anchors, in the arrangement they
+			// name. It writes the anchor row; the row remains the truth.
+			pad: (held, into, pushNow) => {
+				const wrap = el('div', 'mj-osd-pad-wrap');
+				const grid = el('div', 'mj-osd-pad');
+				const cells = [];
+				for (let iy = -1; iy <= 1; iy++) {
+					for (let ix = -1; ix <= 1; ix++) {
+						const b = el('button', 'mj-osd-cell');
+						b.type = 'button';
+						const nm = P.nameOf(ix, iy);
+						b.title = P.sayOf(nm);
+						b.setAttribute('aria-label', P.sayOf(nm));
+						const bar = el('i');
+						bar.style.width = (ix === 0 ? 14 : (iy === 0 ? 4 : 9)) + 'px';
+						bar.style.height = (iy === 0 ? 14 : 4) + 'px';
+						bar.style.margin = (iy < 0 ? '3px' : 'auto') + ' ' +
+							(ix > 0 ? '3px' : 'auto') + ' ' +
+							(iy > 0 ? '3px' : 'auto') + ' ' +
+							(ix < 0 ? '3px' : 'auto');
+						b.appendChild(bar);
+						b.addEventListener('click', () => {
+							held.anchor.setValue(nm);
+							runVisibility();
+							updateDirty();
+							lightPad();
+							// Resolved at press rather than captured: the pads are
+							// built while the fields are, before any placer exists.
+							const push = pushNow && pushNow();
+							if (push) push.pushNow();
+						});
+						grid.appendChild(b);
+						cells.push({ el: b, name: nm });
+					}
+				}
+				function lightPad() {
+					const cur = held.anchor.getValue();
+					const prop = P.isProportional(cur);
+					wrap.classList.toggle('mj-osd-pad-off', prop);
+					for (const c of cells)
+						c.el.classList.toggle('mj-osd-cell-on', !prop && c.name === cur);
+				}
+				// No caption: the anchor's own row sits directly beneath and is
+				// labelled, so a heading here would print the same word twice.
+				// The cells carry aria-labels, which is what a screen reader
+				// needs from a grid of nine unlabelled buttons.
+				grid.setAttribute('role', 'group');
+				grid.setAttribute('aria-label', 'Anchor');
+				wrap.appendChild(grid);
+				const row = into || made.place.body;
+				row.insertBefore(wrap, row.firstChild);
+				lightPad();
+				held.anchor.control.addEventListener('change', lightPad);
+				return { light: lightPad };
+			},
+		};
 	}
 
 	// Placement is a LIVE knob, and that is the whole difference.
@@ -2799,38 +3989,303 @@
 	// nothing rebuilt. The fields stage until Save like everything else on the
 	// page, and abandoning the drag reverts through the same path every other
 	// live knob already uses.
-	const osdLiveQuery = (name, ox, oy) =>
-		'anchor=' + encodeURIComponent(name) +
-		'&offsetX=' + encodeURIComponent(ox) +
-		'&offsetY=' + encodeURIComponent(oy);
+	// The live placement push, as a DOCUMENT rather than a query string.
+	//
+	// majestic takes the same nested shape /api/v1/config takes, addressed by
+	// real dotted paths. The query form it replaces read a key by its LAST
+	// dotted segment, so `osd.overlays.1.anchor` and `osd.overlays.2.anchor`
+	// both arrived as `anchor=` and moved the same overlay — the wire format,
+	// not the feature, was the ceiling on several overlays.
+	//
+	// An older daemon has no /api/v1/live and answers 404. That is remembered
+	// once and the query form is used from then on: it can say everything a
+	// single overlay needs, which is everything those builds have.
+	let liveDoc = true;
+	// Whether a placement override is in force on the camera that the form has
+	// not saved. One flag for every overlay, because one drop clears them all.
+	let osdPushed = false;
+	function postLivePlace(doc) {
+		osdPushed = true;
+		if (liveDoc) {
+			return postLiveJson(doc).then((ok) => {
+				if (ok) return;
+				liveDoc = false;
+				return postLive(legacyQuery(doc));
+			});
+		}
+		return postLive(legacyQuery(doc));
+	}
 
-	// The nine named anchors, as majestic orders them. -1 is the near edge (left
-	// or top), 0 centred, 1 the far edge — the same two tables the camera's own
-	// overlay placement indexes, so a name picked here means the same thing there.
-	const OSD_ANCHORS = [
-		['top-left', -1, -1], ['top', 0, -1], ['top-right', 1, -1],
-		['left', -1, 0], ['center', 0, 0], ['right', 1, 0],
-		['bottom-left', -1, 1], ['bottom', 0, 1], ['bottom-right', 1, 1],
-	];
-	const anchorName = (sx, sy) => {
-		const hit = OSD_ANCHORS.find(a => a[1] === sx && a[2] === sy);
-		return hit ? hit[0] : 'top-left';
-	};
-	const anchorSides = (name) => {
-		const hit = OSD_ANCHORS.find(a => a[0] === name);
-		return hit ? { x: hit[1], y: hit[2] } : null;
-	};
-	const SAY_SIDE = { '-1,-1': 'Top left', '0,-1': 'Top', '1,-1': 'Top right',
-		'-1,0': 'Left', '0,0': 'Centre', '1,0': 'Right',
-		'-1,1': 'Bottom left', '0,1': 'Bottom', '1,1': 'Bottom right' };
+	// The undo those pushes owe.
+	//
+	// A drag moves the camera on the way past — one push per pointermove — and
+	// stages the numbers in the form. Leaving the page without saving therefore
+	// has to put the camera back, or the controls come back at their saved
+	// values while the overlay stays where it was dragged to: the same defect
+	// #259 reported for the tone sliders, which revertLive() covers for
+	// everything that pushes through the query endpoint.
+	//
+	// It cannot cover this one. That path rebuilds a query string from the
+	// live fields, and a query string reads a key by its last dotted segment,
+	// so it can only ever say "overlay 0". An empty anchor in the document
+	// form is majestic's own word for "drop the override and go back to what is
+	// saved", and it drops EVERY overlay in one call — which is exactly the
+	// undo, whichever ones were dragged.
+	function revertOsdPlace(force) {
+		if (!osdPushed && !force) return;
+		osdPushed = false;
+		// The masks go with the placement: an empty list is the same "put back
+		// what is saved" the empty anchor is, and both were staged by the same
+		// page and are abandoned by the same act of leaving it.
+		// THROUGH WHICHEVER DOOR THE PUSHES WENT. postLivePlace() falls back
+		// to the query endpoint when the document form answers 404, and this
+		// went on addressing the document form regardless — so on exactly the
+		// cameras that needed the fallback, the undo was sent to an endpoint
+		// that is not there and the overlay stayed where it had been dragged.
+		if (liveDoc) {
+			postLiveJson({ osd: { anchor: '', privacyMasks: '' } });
+			return;
+		}
+		postLive(legacyQuery({ osd: { anchor: '' } }));
+	}
+
+	// The same drop, for the path a normal request cannot survive: a reload or
+	// a closed tab kills the fetch with the document. Beacons carry a body, so
+	// the document form travels here too.
+	function beaconOsdDrop() {
+		if (!osdPushed || !navigator.sendBeacon) return;
+		osdPushed = false;
+		try {
+			// Same door as the pushes, for the same reason as revertOsdPlace.
+			if (!liveDoc) {
+				navigator.sendBeacon('/api/v1/image?' +
+					legacyQuery({ osd: { anchor: '' } }));
+				return;
+			}
+			navigator.sendBeacon('/api/v1/live',
+				new Blob([JSON.stringify(
+					{ osd: { anchor: '', privacyMasks: '' } })],
+					{ type: 'application/json' }));
+		} catch (e) { /* the tab is going; there is nothing to report to */ }
+	}
+
+	// The same three keys the old endpoint understood, for the fallback. posX
+	// and posY are sent too: an older daemon ignores them, and one new enough
+	// to have learnt the proportional override but not the document form does
+	// not exist.
+	function legacyQuery(doc) {
+		const o = doc.osd || {};
+		// An overlay above the first cannot be addressed in this form at all —
+		// and a build old enough to need it has no such overlay to move. Saying
+		// nothing is right; saying `anchor=` would move overlay 0.
+		if (o.overlays) return '';
+		const bit = (k, v) => v === undefined ? '' :
+			'&' + k + '=' + encodeURIComponent(v);
+		return 'anchor=' + encodeURIComponent(o.anchor === undefined ? '' : o.anchor) +
+			bit('offsetX', o.offsetX) + bit('offsetY', o.offsetY) +
+			bit('posX', o.posX) + bit('posY', o.posY);
+	}
+
+	// Serialised behind the same promise chain every other live push uses, and
+	// swallowing its own failures for the same reason: a move that cannot land
+	// must not wedge the ones after it or interrupt the drag.
+	let liveJsonWrite = Promise.resolve();
+	function postLiveJson(doc) {
+		liveJsonWrite = liveJsonWrite.then(() =>
+			apiFetch('/api/v1/live', {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(doc),
+			}).then((r) => r.ok, () => false));
+		return liveJsonWrite;
+	}
+
+	// The placement the fields currently describe, as the document to send.
+	// Whole every time: majestic installs a whole placement or none, and a
+	// request naming only half of one would leave the camera to guess the rest.
+	function placementDoc(held, overlay) {
+		const P = window.MajesticPlace;
+		const anchor = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+		const keys = { anchor: anchor };
+		if (P.isProportional(anchor)) {
+			if (held.posX) keys.posX = String(held.posX.getValue());
+			if (held.posY) keys.posY = String(held.posY.getValue());
+		} else {
+			if (held.offsetX) keys.offsetX = String(held.offsetX.getValue());
+			if (held.offsetY) keys.offsetY = String(held.offsetY.getValue());
+		}
+		return osdPlaceDoc(overlay || 0, keys);
+	}
+
+	// Where an overlay's keys sit in the document. Overlay 0 IS the flat osd.*
+	// keys — every config in the field has them there and majestic reads them
+	// as the first overlay — so it has one spelling and no nesting.
+	function osdPlaceDoc(overlay, keys) {
+		// The mark is addressed by NAME, not by index. Its slot sits above
+		// every overlay the config describes, and majestic refuses that index
+		// spelled as an overlay precisely so the two cannot become one door.
+		if (overlay === MARK) return { osd: { mark: keys } };
+		return overlay
+			? { osd: { overlays: { [String(overlay)]: keys } } }
+			: { osd: keys };
+	}
 
 	// Placing the overlay by dragging it, with the picture's own edges and
 	// middles as magnets — the sticky guides every layout tool has, and the
 	// reason they are right here rather than free pixels: a named corner
 	// survives a change of resolution, and "16 px from the left" does not mean
 	// the same thing on a 1920 frame as on a 640 one.
-	function mountOsdText(preview, held, headNote) {
+	// See em() below: majestic's own points-to-pixels arithmetic for the
+	// overlay's glyph size, as a divisor of the frame width.
+	const EM_DIVISOR = 39.6;
+
+	// WHERE THE OVERLAYS ACTUALLY ARE, ASKED OF THE CAMERA.
+	//
+	// The camera is the renderer: it has the font, its metrics and the padding
+	// the region carries. The browser has none of those, so everything it draws
+	// over the picture is an estimate — fine for a dashed stand-in nobody
+	// measures against the real thing, and wrong for a box a press is tested
+	// against. Drawn over a 636px preview the estimate put the clock's box
+	// entirely below the clock, and a short label could not be picked up at all.
+	//
+	// So majestic reports each region's rectangle in its stream's own pixels
+	// and this asks for it. A build without the endpoint 404s once and is never
+	// asked again; the estimate is still there behind it, which is what every
+	// build before this had.
+	const camRects = { by: {}, ok: true, mark: null, onMark: null,
+		budget: null, widths: 0, bytes: 0, onCost: null };
+
+	// Logo files whose overlay has been cleared but not yet saved.
+	//
+	// Deleting the file when the cross is pressed would change the camera on
+	// an unsaved edit: the config would still point at it, the load would
+	// fail, and the logo would vanish from the video before anyone pressed
+	// Save — which is the one thing this page does not do. So the removal is
+	// staged like every other edit and the file goes when the save lands.
+	// Choosing a new picture for the same overlay takes it back off the list,
+	// because that upload has already overwritten the file.
+	const logoBin = new Set();
+
+	function flushLogoBin() {
+		for (const n of Array.from(logoBin)) {
+			apiFetch('/api/v1/osd/image?overlay=' + n,
+				{ method: 'POST', credentials: 'same-origin' })
+				.catch(() => {});
+		}
+		logoBin.clear();
+	}
+
+	function refreshOsdRects() {
+		if (!camRects.ok) return Promise.resolve();
+		return apiFetch('/api/v1/osd', { credentials: 'same-origin' })
+			.then((r) => {
+				// 404 is "this camera cannot say", which is a fact about the
+				// build and will not change under us. Anything else is a
+				// hiccup and worth asking again next tick.
+				if (r.status === 404) { camRects.ok = false; return null; }
+				return r.ok ? r.json() : null;
+			})
+			.then((j) => {
+				if (!j) return;
+				const by = {};
+				// WHICH INDEX THE MARK HAS IS THE CAMERA'S TO SAY, and whether
+				// there is one at all is the only way this page can know: it
+				// turns on the licence and on how many overlays are drawing,
+				// and the licence is not in the schema. So the item appears
+				// when the camera reports drawing it and goes when it stops —
+				// which is also what makes it show up by itself a tick after a
+				// second overlay is added.
+				let mark = null;
+				for (const o of (j.overlays || [])) {
+					const f = o.frame || [], r = o.rect || [];
+					if (f.length < 2 || r.length < 4) continue;
+					if (o.mark) mark = o.overlay;
+					(by[o.overlay] = by[o.overlay] || []).push({
+						fw: f[0], fh: f[1], x: r[0], y: r[1], w: r[2], h: r[3],
+					});
+				}
+				// WHAT THE PICTURE COSTS, counted rather than estimated.
+				//
+				// The camera reports one rectangle per ATTACHMENT, and two
+				// outputs of the same size share one region — the glyphs are
+				// sized from the width, so a snapshot inheriting the main
+				// stream's size costs nothing extra. Distinct (overlay, frame)
+				// pairs is therefore the region count, and the rectangles are
+				// the real ones rather than a guess at what the font will
+				// measure. Two bytes a pixel, and the hardware keeps two
+				// buffers per region so it can draw one while the other is
+				// shown.
+				const seen = {};
+				let bytes = 0;
+				for (const o of (j.overlays || [])) {
+					const f = o.frame || [], r = o.rect || [];
+					if (f.length < 2 || r.length < 4) continue;
+					const key = o.overlay + '@' + f[0] + 'x' + f[1];
+					if (seen[key]) continue;
+					seen[key] = true;
+					bytes += r[2] * r[3] * 2 * 2;
+				}
+				const wasCost = camRects.widths + '/' + camRects.bytes;
+				// How many DISTINCT frame sizes this camera draws on, which is
+				// what each overlay costs in regions. Counted from the report
+				// rather than from the config: two outputs of the same size
+				// share a region, and only the camera knows which sizes it
+				// ended up with.
+				const sizes = {};
+				for (const o of (j.overlays || [])) {
+					const f = o.frame || [];
+					if (f.length >= 2) sizes[f[0] + 'x' + f[1]] = true;
+				}
+				camRects.widths = Object.keys(sizes).length;
+				camRects.bytes = bytes;
+				camRects.budget = j.budget || null;
+
+				const was = camRects.mark;
+				camRects.by = by;
+				camRects.mark = mark;
+				if (was !== mark && camRects.onMark) camRects.onMark();
+				if (wasCost !== camRects.widths + '/' + camRects.bytes &&
+					camRects.onCost) camRects.onCost();
+			})
+			.catch(() => {});
+	}
+
+	// The one for this overlay on the frame being shown. Matched on the frame
+	// rather than on a channel number, because that is what the player knows
+	// and the two streams differ in exactly that.
+	// The symbolic name the mark is mounted under, resolved here to whatever
+	// index this camera reports for it. Kept out of the placer so that nothing
+	// which draws an overlay has to know one of them is not the operator's.
+	const MARK = 'mark';
+
+	function camRectFor(overlay, frame) {
+		if (!frame || !frame.w) return null;
+		if (overlay === MARK) {
+			if (camRects.mark === null || camRects.mark === undefined) return null;
+			overlay = camRects.mark;
+		}
+		const all = camRects.by[overlay];
+		if (!all) return null;
+		for (const r of all)
+			if (r.fw === frame.w && r.fh === frame.h) return r;
+		return null;
+	}
+
+	function mountOsdText(preview, held, headNote, panel, overlay, hooks) {
+		const P = window.MajesticPlace;
+		overlay = overlay || 0;
+		hooks = hooks || {};
 		const stage = preview.stage;
+		// Where a press landed, so a TAP can be told from a drag: a tap on the
+		// overlay brings its panel back after it has been closed, and a drag
+		// must not.
+		let tapFrom = null;
+		// Focusable, because the arrow keys are half of what #340 asked for and
+		// a keydown listener on an unfocusable element never fires. Scoped to
+		// this leaf's own stage: mountOsdText is the Overlay leaf's and the
+		// preview handle is per-mount.
+		stage.tabIndex = 0;
 		let active = true, drag = null;
 
 		const layer = el('div', 'mj-osd-layer');
@@ -2839,8 +4294,13 @@
 		layer.appendChild(guides);
 		['gx-l', 'gx-c', 'gx-r'].forEach(c => guides.appendChild(el('span', 'mj-osd-g mj-osd-v ' + c)));
 		['gy-t', 'gy-c', 'gy-b'].forEach(c => guides.appendChild(el('span', 'mj-osd-g mj-osd-h ' + c)));
-		const ghost = el('div', 'mj-osd-ghost mono');
-		ghost.hidden = true;
+		const ghost = el('div', 'mj-osd-ghost');
+		// Hidden by VISIBILITY, not by `hidden`, and its layer stays laid out
+		// even when this overlay is not the selected one — because the stand-in
+		// is also how this overlay's size is measured, and a display:none box
+		// measures zero. That is what lets a press on the picture find an
+		// overlay that is not the one currently being dragged.
+		ghost.style.visibility = 'hidden';
 		layer.appendChild(ghost);
 		const read = el('span', 'mj-osd-read');
 		read.hidden = true;
@@ -2910,51 +4370,155 @@
 			};
 			const out = String(t).replace(/%[-_0]?([a-zA-Z@$%])/g,
 				(m, c) => (map[c] !== undefined ? map[c] : m));
+			// A logo is what the camera draws where there is one, so the
+			// stand-in says so rather than reading out a template that is not
+			// on the video.
+			if (held.image && String(held.image.getValue() || '').trim())
+				return 'Logo';
 			return out || 'Overlay';
 		}
 
 		// Roughly what the camera will draw. Majestic derives the glyph size
 		// from the stream width, so this tracks the same thing; it is an
 		// approximation on purpose and never pretends otherwise.
+		//
+		// It has to be a CLOSE approximation now, which it was not. The
+		// divisor is measured against what the camera actually draws: the
+		// overlay's text comes out at about a 39.6th of the frame's width,
+		// and the picture on screen is that frame at a different scale, so
+		// the ratio holds against the picture's own width. It was 96, which
+		// is 2.4x too small: the stand-in came out half the size of the text
+		// it stands in for. GET /api/v1/osd reports the real rectangles and
+		// is what the hit-testing uses; this is only the stand-in drawn under
+		// the pointer before the camera has answered.
+		//
+		// That was invisible while the stand-in only appeared under a finger
+		// mid-drag. It stopped being invisible when the same box became what a
+		// press is tested against: drawn over the real overlays, the boxes sat
+		// beside and below them, and FRONT GATE could not be picked up at all
+		// because only the top edge of its box touched its text.
 		function em(p) {
 			const size = parseFloat(held.size ? held.size.getValue() : '1') || 1;
-			return Math.max(8, p.w / 96 * size);
+			return Math.max(6, p.w / EM_DIVISOR * size);
+		}
+
+		// The box the overlay occupies on screen, for the arithmetic below.
+		//
+		// The camera's own rectangle wherever it is known, and the stand-in's
+		// measured size otherwise. The drag maths is built on this — where the
+		// overlay is now, where a drop would put it, how far the anchor pulls
+		// it — so an estimate here is an estimate in all of it. It matters most
+		// for a logo, whose stand-in is a word and whose real shape is a
+		// picture of no relation to it.
+		const box = () => {
+			const f = preview.frame();
+			const cam = hooks.camRect && f ? hooks.camRect(overlay, f) : null;
+			const p = cam ? pic() : null;
+			if (cam && p && f.w) {
+				const k = p.w / f.w;
+				return { w: cam.w * k, h: cam.h * k };
+			}
+			return {
+				w: ghost.offsetWidth || 120,
+				h: ghost.offsetHeight || 20,
+			};
+		};
+
+		// The span an offset is measured against is the frame being SHOWN,
+		// which is the picture on screen — not video0. That is the same reading
+		// majestic takes per channel, which is why a share travels between them
+		// and a pixel count does not.
+		function spans(p) {
+			const f = preview.frame();
+			const emPx = em(p);
+			return {
+				w: f ? f.w : 0, h: f ? f.h : 0,
+				emx: emPx * (f && p.w ? f.w / p.w : 1),
+				emy: emPx * (f && p.h ? f.h / p.h : 1),
+			};
+		}
+
+		// Which spelling this camera's offsets are written in. A bare non-zero
+		// really is pixels and stays pixels; a bare zero carries no choice, and
+		// a share is what travels between Main and Sub.
+		//
+		// EXCEPT WHERE THE CALLER FIXES IT, which the vendor mark does. A bare
+		// offset is resolved against the channel being drawn, so pixels chosen
+		// on a 2592-wide main are off the edge of a 1280-wide sub and clamp
+		// into its corner: dragged to the middle of one picture, cowering in
+		// the corner of the other. For an overlay that is the operator's, that
+		// is their choice to make and the unit is theirs. For the mark it is
+		// not a choice at all — there is no unit control, its position has to
+		// hold on every output, and a share is the only spelling that does.
+		function unit(axis) {
+			if (hooks.unit) return hooks.unit;
+			const x = P.unitOf(held.offsetX && held.offsetX.getValue());
+			const y = P.unitOf(held.offsetY && held.offsetY.getValue());
+			// PER AXIS, because the two fields are two settings. Picking the
+			// first spelling either of them happened to hold and writing both
+			// in it rewrote an axis that had not moved — a vertical offset in
+			// em became a percentage because the horizontal one was, which is
+			// a value the operator chose being replaced by one they did not.
+			// An axis with no spelling of its own borrows the other's, since
+			// there is nothing there to overwrite.
+			if (axis === 'y') return y || x || P.DEFAULT_UNIT;
+			return x || y || P.DEFAULT_UNIT;
 		}
 
 		// Where the overlay is now, from the fields the camera is reading.
 		function current(p) {
-			const a = held.anchor.getValue();
-			const sides = anchorSides(a);
-			const w = ghost.offsetWidth || 120, h = ghost.offsetHeight || 20;
-			if (!sides) {
-				// proportional: posX/posY run -16 (far edge) .. 16 (near edge)
-				const map = (v, span, size) => {
-					const t = (16 - Math.min(Math.max(+v || 0, -16), 16)) / 32;
-					return t * Math.max(0, span - size);
-				};
-				return {
-					x: p.x + map(held.posX && held.posX.getValue(), p.w, w),
-					y: p.y + map(held.posY && held.posY.getValue(), p.h, h),
-				};
+			const a = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+			const b = box();
+			if (P.isProportional(a)) {
+				return P.proportionalSpot(
+					p, b,
+					held.posX && held.posX.getValue(),
+					held.posY && held.posY.getValue());
 			}
-			// The span an offset is measured against is the frame being SHOWN,
-			// which is the picture on screen — not video0. That is the same
-			// reading majestic takes per channel, which is why a share travels
-			// between them and a pixel count does not.
-			const f = preview.frame();
-			const emPx = em(p);
-			const ox = offsetFrac(held.offsetX && held.offsetX.getValue(),
-				f ? f.w : 0, emPx * (f ? f.w / p.w : 1)) * p.w;
-			const oy = offsetFrac(held.offsetY && held.offsetY.getValue(),
-				f ? f.h : 0, emPx * (f ? f.h / p.h : 1)) * p.h;
-			const ax = sides.x < 0 ? ox : sides.x > 0 ? p.w - w - ox : (p.w - w) / 2;
-			const ay = sides.y < 0 ? oy : sides.y > 0 ? p.h - h - oy : (p.h - h) / 2;
-			return { x: p.x + ax, y: p.y + ay };
+			const sp = spans(p);
+			const fx = P.toFrac(
+				held.offsetX && held.offsetX.getValue(), sp.w, sp.emx);
+			const fy = P.toFrac(
+				held.offsetY && held.offsetY.getValue(), sp.h, sp.emy);
+			return P.anchoredSpot(p, b, P.sidesOf(a), fx, fy);
+		}
+
+		// What the placement IS, at rest, in the head beside the section name.
+		//
+		// The parameter for this was passed and never read: the readout only
+		// existed while a finger was down, so the one number worth writing on a
+		// sticky note — the thing that reproduces this layout on the next
+		// camera, which is what #340 was asking for — was the one number you
+		// could not see. It says the mode, and in anchored mode the two offsets
+		// in whatever unit they are actually written in.
+		function sayPlacement() {
+			// Only the selected overlay writes it. There is one note beside the
+			// section name and several overlays, so an inactive one repainting
+			// would state a placement for something nobody is editing.
+			if (!headNote || !active) return;
+			const a = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+			if (P.isProportional(a)) {
+				const px = held.posX ? held.posX.getValue() : 0;
+				const py = held.posY ? held.posY.getValue() : 0;
+				headNote.textContent = 'Proportional · ' + px + ' · ' + py;
+				return;
+			}
+			const sides = P.sidesOf(a);
+			const ox = held.offsetX ? held.offsetX.getValue() : '';
+			const oy = held.offsetY ? held.offsetY.getValue() : '';
+			headNote.textContent = P.sayOf(a) +
+				(sides.x ? ' · ' + ox : '') + (sides.y ? ' · ' + oy : '');
 		}
 
 		function paint() {
+			sayPlacement();
+			if (panel && active) panel.name(shown());
 			const p = pic();
-			layer.hidden = !active || !p;
+			// The LAYER stays whenever there is a picture: an unselected
+			// overlay still has to be measurable, and everything in it is
+			// invisible and pointer-transparent until a drag starts. Only the
+			// catcher is the selected overlay's alone.
+			layer.hidden = !p;
 			catcher.hidden = !active || !p;
 			if (!p) return;
 			ghost.style.fontSize = em(p).toFixed(1) + 'px';
@@ -2964,89 +4528,129 @@
 			guides.style.width = p.w + 'px';
 			guides.style.height = p.h + 'px';
 			if (!drag) {
-				ghost.hidden = true;
+				// Parked where the overlay actually is, invisibly. Only the
+				// drag used to position it, so at rest every stand-in sat at
+				// the layer's origin — which costs nothing while nobody can
+				// see it, and is wrong the moment the element's own box is
+				// what a press is tested against.
+				const c = current(p);
+				ghost.style.left = c.x + 'px';
+				ghost.style.top = c.y + 'px';
+				ghost.style.visibility = 'hidden';
 				read.hidden = true;
 				guides.classList.remove('mj-osd-on');
 			}
 		}
 
-		// Offsets are written as a PERCENTAGE, and that is the whole of the
-		// Main/Sub fix. majestic resolves a bare offset as pixels against the
-		// channel it is drawing — so "200" is a tenth of the way across a 1920
-		// frame and well over a quarter across a 704 one, and the overlay landed
-		// somewhere different on each stream from the same setting. `%` is
-		// resolved as a share of that channel's own span (`value * span / 100`),
-		// and the font is derived from the stream width too,
-		// so the text lands in the same visual place on every output.
-		//
-		// One decimal: enough that a 1920-wide frame can be addressed to the
-		// pixel, few enough that a drag does not write a different number every
-		// time the pointer jitters.
-		const pct = (v) => Math.round(v * 1000) / 10;
-
-		// Read an offset back, whatever unit it was written in — a config
-		// written before this, or by hand, is still pixels or em.
-		function offsetFrac(spec, span, emPx) {
-			const t = String(spec == null ? '' : spec).trim();
-			const v = parseFloat(t);
-			if (!isFinite(v)) return 0;
-			if (/%\s*$/.test(t)) return v / 100;
-			if (/em\s*$/i.test(t)) return span ? (v * emPx) / span : 0;
-			// bare, or "px": pixels of the channel being drawn. The picture on
-			// screen is one of those channels, so its own frame is the span.
-			return span ? v / span : 0;
+		// Where this overlay is on screen right now, selected or not. The same
+		// two answers the drag already computes — where the placement puts it,
+		// and how big the stand-in is — asked for a different reason.
+		function rectOn(p) {
+			// The camera's own answer where there is one, mapped from the
+			// stream's pixels onto the picture on screen.
+			const f = preview.frame();
+			const cam = hooks.camRect && f ? hooks.camRect(overlay, f) : null;
+			if (cam && f.w) {
+				const k = p.w / f.w;
+				return {
+					x: p.x + cam.x * k, y: p.y + cam.y * k,
+					w: cam.w * k, h: cam.h * k,
+				};
+			}
+			const b = box();
+			const c = current(p);
+			return { x: c.x, y: c.y, w: b.w, h: b.h };
 		}
 
-		const SNAP = 12;
+		/* How much of the picture this overlay covers, for deciding between two
+		 * that are both under the press. */
+		function areaOn() {
+			const b = box();
+			return b.w * b.h;
+		}
+
+		function hitAt(pt) {
+			const p = pic();
+			if (!p) return false;
+			const r = rectOn(p);
+			// A little slack either way. Where the rectangle came from the
+			// camera it is exact and this only forgives the pointer; where it
+			// is still the browser's estimate it forgives the estimate too.
+			const pad = Math.max(4, r.h / 4);
+			return pt.x >= r.x - pad && pt.x <= r.x + r.w + pad &&
+				pt.y >= r.y - pad && pt.y <= r.y + r.h + pad;
+		}
+
+		// A DRAG NEVER CHANGES THE ANCHOR.
+		//
+		// This reverses what shipped, and it is issue #340's own request.
+		// Snapping to a named corner is what makes a placement survive a change
+		// of resolution — which is why the placer this replaces re-anchored
+		// under the drag — and doing it while somebody's finger is down is
+		// exactly what read as the editor deciding on their behalf. The anchor
+		// is chosen on the pad and nowhere else; the magnet that remains pulls
+		// an offset to ZERO, which is the same help without the silent
+		// reclassification.
+		//
+		// In proportional mode the drag writes posX/posY, so a camera that has
+		// never been placed by hand keeps the coordinate system it came with.
 		function place(px, py, p) {
-			const w = ghost.offsetWidth, h = ghost.offsetHeight;
-			const lo = { x: p.x, y: p.y };
-			const mid = { x: p.x + (p.w - w) / 2, y: p.y + (p.h - h) / 2 };
-			const hi = { x: p.x + p.w - w, y: p.y + p.h - h };
-			const pick = (v, a, c, z) => Math.abs(v - a) <= SNAP ? -1
-				: Math.abs(v - c) <= SNAP ? 0 : Math.abs(v - z) <= SNAP ? 1 : null;
-			let sx = pick(px, lo.x, mid.x, hi.x);
-			let sy = pick(py, lo.y, mid.y, hi.y);
-			let ox = 0, oy = 0;
-			if (sx === null) {
-				sx = (px + w / 2) < (p.x + p.w / 2) ? -1 : 1;
-				ox = sx < 0 ? (px - p.x) : (p.x + p.w - (px + w));
-				ox = pct(Math.max(0, ox) / p.w);
+			const a = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+			const b = box();
+			if (P.isProportional(a)) {
+				const r = P.dragProportional(p, b, { x: px, y: py });
+				return { prop: true, posX: r.posX, posY: r.posY };
 			}
-			if (sy === null) {
-				sy = (py + h / 2) < (p.y + p.h / 2) ? -1 : 1;
-				oy = sy < 0 ? (py - p.y) : (p.y + p.h - (py + h));
-				oy = pct(Math.max(0, oy) / p.h);
-			}
-			// A centred axis ignores its offset — the camera's anchored
-			// placement centres it outright — so writing one would be a number
-			// the camera never reads and the form would show it as set.
-			if (sx === 0) ox = 0;
-			if (sy === 0) oy = 0;
-			return { sx: sx, sy: sy, ox: ox, oy: oy };
+			const sides = P.sidesOf(a);
+			const sp = spans(p);
+			const ux = unit('x'), uy = unit('y');
+			const f = P.dragWithin(p, b, sides, { x: px, y: py });
+			return {
+				prop: false, sides: sides, anchor: a, u: ux,
+				ox: P.fromFrac(f.fx, ux, sp.w, sp.emx),
+				oy: P.fromFrac(f.fy, uy, sp.h, sp.emy),
+				fx: f.fx, fy: f.fy,
+			};
+		}
+
+		// What the drag is about to write, as the document to push.
+		function docOf(r) {
+			if (r.prop)
+				return osdPlaceDoc(overlay, { anchor: P.PROPORTIONAL,
+					posX: String(r.posX), posY: String(r.posY) });
+			const keys = { anchor: r.anchor };
+			if (r.sides.x !== 0) keys.offsetX = r.ox;
+			if (r.sides.y !== 0) keys.offsetY = r.oy;
+			return osdPlaceDoc(overlay, keys);
 		}
 
 		function preview_(r, p) {
-			const w = ghost.offsetWidth, h = ghost.offsetHeight;
-			const fx = r.ox / 100, fy = r.oy / 100;
-			const gx = r.sx < 0 ? p.x + fx * p.w
-				: r.sx > 0 ? p.x + p.w - w - fx * p.w
-				: p.x + (p.w - w) / 2;
-			const gy = r.sy < 0 ? p.y + fy * p.h
-				: r.sy > 0 ? p.y + p.h - h - fy * p.h
-				: p.y + (p.h - h) / 2;
-			ghost.style.left = gx + 'px';
-			ghost.style.top = gy + 'px';
-			read.style.left = gx + 'px';
-			read.style.top = Math.max(0, gy - 24) + 'px';
-			read.innerHTML = '<b>' + esc(SAY_SIDE[r.sx + ',' + r.sy]) + '</b>' +
-				(r.ox || r.oy ? '<span>' + r.ox + '% · ' + r.oy + '%</span>' : '');
-			guides.classList.toggle('mj-osd-sx', r.sx === -1 || r.sx === 1 || r.sx === 0);
-			guides.querySelectorAll('.mj-osd-g').forEach(g => g.classList.remove('mj-osd-lit'));
-			const gx_ = r.sx === -1 ? '.gx-l' : r.sx === 0 ? '.gx-c' : '.gx-r';
-			const gy_ = r.sy === -1 ? '.gy-t' : r.sy === 0 ? '.gy-c' : '.gy-b';
-			if (r.ox === 0) guides.querySelector(gx_).classList.add('mj-osd-lit');
-			if (r.oy === 0) guides.querySelector(gy_).classList.add('mj-osd-lit');
+			const b = box();
+			const g = r.prop
+				? P.proportionalSpot(p, b, r.posX, r.posY)
+				: P.anchoredSpot(p, b, r.sides, r.fx, r.fy);
+			ghost.style.left = g.x + 'px';
+			ghost.style.top = g.y + 'px';
+			read.style.left = g.x + 'px';
+			read.style.top = Math.max(0, g.y - 24) + 'px';
+			read.innerHTML = r.prop
+				? '<b>Proportional</b><span>' + r.posX + ' · ' + r.posY + '</span>'
+				: '<b>' + esc(P.sayOf(r.anchor)) + '</b>' +
+					(r.sides.x || r.sides.y
+						? '<span>' + (r.sides.x ? r.ox : '—') + ' · ' +
+							(r.sides.y ? r.oy : '—') + '</span>'
+						: '');
+			guides.querySelectorAll('.mj-osd-g').forEach(
+				g2 => g2.classList.remove('mj-osd-lit'));
+			if (r.prop) return;
+			// The guide lights where the offset is zero — the magnet's whole
+			// vocabulary now that it no longer moves the anchor.
+			const gx = r.sides.x === -1 ? '.gx-l' : r.sides.x === 0 ? '.gx-c' : '.gx-r';
+			const gy = r.sides.y === -1 ? '.gy-t' : r.sides.y === 0 ? '.gy-c' : '.gy-b';
+			if (r.sides.x !== 0 && r.fx === 0)
+				guides.querySelector(gx).classList.add('mj-osd-lit');
+			if (r.sides.y !== 0 && r.fy === 0)
+				guides.querySelector(gy).classList.add('mj-osd-lit');
 		}
 
 		const at = (e) => {
@@ -3054,19 +4658,74 @@
 			return { x: e.clientX - r.left, y: e.clientY - r.top };
 		};
 
-		catcher.addEventListener('pointerdown', (e) => {
-			if (e.button || drag || !active) return;
+		// Taking hold of this overlay, wherever the press came from: its own
+		// catcher, or another overlay's catcher handing it over because the
+		// press landed here.
+		function grab(e) {
 			const p = pic();
 			if (!p) return;
-			ghost.hidden = false;
+			tapFrom = { x: e.clientX, y: e.clientY };
+			ghost.style.visibility = '';
 			read.hidden = false;
 			guides.classList.add('mj-osd-on');
 			const cur = current(p);
 			const n = at(e);
 			drag = { id: e.pointerId, dx: n.x - cur.x, dy: n.y - cur.y };
 			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
+			try { stage.focus(); } catch (err) {}
 			preview_(place(cur.x, cur.y, p), p);
+		}
+
+		catcher.addEventListener('pointerdown', (e) => {
+			if (e.button || drag || !active) return;
+			const p = pic();
+			if (!p) return;
 			e.preventDefault();
+
+			// WHAT THE PRESS LANDED ON DECIDES WHICH OVERLAY MOVES.
+			//
+			// The catcher covers the whole picture, so without this a press
+			// anywhere drags whichever overlay happens to be selected — and
+			// the only way to reach a second one was the chip row under the
+			// picture. Pressing the text you want to move is the obvious
+			// gesture and it did nothing, which reads as only one overlay
+			// being draggable at all.
+			//
+			// The handover is inside one gesture: the thing under the press is
+			// selected AND picked up, so it moves with the same drag rather
+			// than needing a second one. It is the same rule the region editor
+			// states — a region is a thing you can pick up, and what the press
+			// landed on decides the gesture.
+			//
+			// THIS OVERLAY IS ONE OF THE THINGS UNDER THE PRESS, and has to be
+			// weighed against the rest rather than simply losing to them: a
+			// privacy mask is a rectangle that can cover the whole picture,
+			// and without the comparison it would take every press away from
+			// the very overlay it is drawn behind. Off the overlay there is
+			// nothing of ours to weigh, so anything found wins — which is what
+			// keeps a press on empty picture dragging the selected overlay
+			// when there is nothing else there.
+			const pt = at(e);
+			const mine = hitAt(pt) ? areaOn() : Infinity;
+			// Probed first, committed second: measuring must not move the
+			// selection, so only the second call is allowed to select.
+			const seen = hooks.pickAt && hooks.pickAt(pt, overlay, true);
+			if (seen && seen.area < mine) {
+				const other = hooks.pickAt(pt, overlay);
+				if (other) { other.grab(e); return; }
+			}
+
+			grab(e);
+		});
+
+		// And the pointer says so before the press: over another overlay this
+		// is a thing to pick up, not a picture to drag the selected one across.
+		catcher.addEventListener('pointermove', (e) => {
+			if (drag || !active) return;
+			const pt = at(e);
+			const mine = hitAt(pt) ? areaOn() : Infinity;
+			const seen = hooks.pickAt && hooks.pickAt(pt, overlay, true);
+			catcher.classList.toggle('mj-osd-pickable', !!seen && seen.area < mine);
 		});
 
 		catcher.addEventListener('pointermove', (e) => {
@@ -3076,15 +4735,35 @@
 			const n = at(e);
 			const r = place(n.x - drag.dx, n.y - drag.dy, p);
 			preview_(r, p);
-			// The camera follows the pointer. postLive serialises and swallows
-			// its own failures, so a move that cannot land does not wedge the
-			// ones after it or interrupt the drag.
-			const name = anchorName(r.sx, r.sy);
-			if (name !== drag.lastName || r.ox !== drag.lastOx || r.oy !== drag.lastOy) {
-				drag.lastName = name; drag.lastOx = r.ox; drag.lastOy = r.oy;
-				postLive(osdLiveQuery(name, r.ox + '%', r.oy + '%'));
+			// The camera follows the pointer. postLivePlace serialises and
+			// swallows its own failures, so a move that cannot land does not
+			// wedge the ones after it or interrupt the drag.
+			const key = JSON.stringify(r.prop
+				? [r.posX, r.posY] : [r.anchor, r.ox, r.oy]);
+			if (key !== drag.last) {
+				drag.last = key;
+				postLivePlace(docOf(r));
 			}
 		});
+
+		// Staged, not saved. The camera is already showing it — that happened on
+		// the way here, one push per move — so all that is left is for the form
+		// to agree, and for Save to mean what it means everywhere else.
+		function commitTo(r) {
+			if (r.prop) {
+				if (held.posX) held.posX.setValue(r.posX);
+				if (held.posY) held.posY.setValue(r.posY);
+			} else {
+				if (held.offsetX && r.sides.x !== 0) held.offsetX.setValue(r.ox);
+				if (held.offsetY && r.sides.y !== 0) held.offsetY.setValue(r.oy);
+			}
+			runVisibility();
+			updateDirty();
+			postLivePlace(docOf(r));
+			// The camera has just moved it, so its rectangle is stale. Asking
+			// now rather than waiting out the tick keeps the next press honest.
+			if (hooks.rectsChanged) hooks.rectsChanged();
+		}
 
 		function done(e, commit) {
 			if (!drag || e.pointerId !== drag.id) return;
@@ -3100,24 +4779,70 @@
 			drag = null;
 			guides.classList.remove('mj-osd-on');
 			if (!n || !p) { paint(); return; }
-
-			const r = place(n.x - dx, n.y - dy, p);
-			const name = anchorName(r.sx, r.sy);
-			// Staged, not saved. The camera is already showing it — that
-			// happened on the way here, one push per move — so all that is left
-			// is for the form to agree, and for Save to mean what it means
-			// everywhere else on the page.
-			if (held.anchor) held.anchor.setValue(name);
-			if (held.offsetX) held.offsetX.setValue(r.ox + '%');
-			if (held.offsetY) held.offsetY.setValue(r.oy + '%');
-			runVisibility();
-			updateDirty();
-			// One last push at the resting place: the drag may have ended
-			// between debounces, and the pointer's last position is the one that
-			// counts.
-			postLive(osdLiveQuery(name, r.ox + '%', r.oy + '%'));
+			const moved = tapFrom &&
+				(Math.abs(e.clientX - tapFrom.x) > 4 ||
+				 Math.abs(e.clientY - tapFrom.y) > 4);
+			tapFrom = null;
+			if (!moved) { if (panel) panel.reveal(); paint(); return; }
+			commitTo(place(n.x - dx, n.y - dy, p));
 			paint();
 		}
+
+		// One step, exactly, repeatable — the half a mouse cannot do, and what
+		// "precise" means in the request this came from. Shift for ten.
+		stage.addEventListener('keydown', (e) => {
+			if (!active) return;
+			const k = e.key;
+			if (k !== 'ArrowLeft' && k !== 'ArrowRight' &&
+				k !== 'ArrowUp' && k !== 'ArrowDown') return;
+			if (e.metaKey || e.ctrlKey || e.altKey) return;
+			const p = pic();
+			if (!p) return;
+			e.preventDefault();
+			const big = e.shiftKey ? 10 : 1;
+			const a = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+			const cl = (v) => Math.min(Math.max(v, -P.POS_MAX), P.POS_MAX);
+			if (P.isProportional(a)) {
+				const px = +(held.posX && held.posX.getValue()) || 0;
+				const py = +(held.posY && held.posY.getValue()) || 0;
+				const dx = k === 'ArrowLeft' ? big : k === 'ArrowRight' ? -big : 0;
+				const dy = k === 'ArrowUp' ? big : k === 'ArrowDown' ? -big : 0;
+				commitTo({ prop: true, posX: cl(px + dx), posY: cl(py + dy) });
+				paint();
+				return;
+			}
+			const sides = P.sidesOf(a);
+			const sp = spans(p);
+			/* The axis being nudged, in ITS unit. An arrow moves one axis, so
+			 * writing both in one spelling rewrote the one that had not
+			 * moved. */
+			const horiz = k === 'ArrowLeft' || k === 'ArrowRight';
+			const u = unit(horiz ? 'x' : 'y');
+			const ux = unit('x'), uy = unit('y');
+			const step = (u === 'px' ? 1 : 0.1) * big;
+			const r = (n) => Math.round(n * 10) / 10;
+			const cur = {
+				ox: parseFloat(held.offsetX && held.offsetX.getValue()) || 0,
+				oy: parseFloat(held.offsetY && held.offsetY.getValue()) || 0,
+			};
+			let ox = cur.ox, oy = cur.oy;
+			if (k === 'ArrowLeft' || k === 'ArrowRight')
+				ox = Math.max(0, r(ox + P.nudge(sides, 'x',
+					k === 'ArrowRight' ? 1 : -1) * step));
+			else
+				oy = Math.max(0, r(oy + P.nudge(sides, 'y',
+					k === 'ArrowDown' ? 1 : -1) * step));
+			const sfx = (v) => (v === '%' ? '%' : v === 'em' ? 'em' : '');
+			const sx = ox + sfx(ux), sy = oy + sfx(uy);
+			commitTo({
+				prop: false, sides: sides, anchor: a, u: u,
+				ox: sx, oy: sy,
+				fx: P.toFrac(sx, sp.w, sp.emx),
+				fy: P.toFrac(sy, sp.h, sp.emy),
+			});
+			paint();
+		});
+
 		catcher.addEventListener('pointerup', (e) => done(e, true));
 		catcher.addEventListener('pointercancel', (e) => done(e, false));
 
@@ -3131,7 +4856,412 @@
 		paint();
 		return {
 			repaint: paint,
+			overlay: overlay,
+			hitAt: hitAt,
+			area: areaOn,
+			grab: grab,
 			setActive: (on) => { active = !!on; paint(); },
+			// For anything that writes the placement rows directly — the anchor
+			// pad, a typed offset — so the camera follows a click the same way
+			// it follows a drag.
+			pushNow: () => { postLivePlace(placementDoc(held, overlay)); paint(); },
+		};
+	}
+
+	// WHAT AN OVERLAY SAYS: a line or a picture, and only ever one of them.
+	//
+	// It is CHOSEN BY DOING, not by a mode switch. The switch that stood here
+	// was a second row of segmented buttons under the tab strip — two rows of
+	// the same control doing two unrelated jobs — and it had a state you could
+	// be in with nothing in it: Picture selected, no picture, an empty panel.
+	//
+	// One button instead, on the thing it changes: from text, "Use a picture
+	// instead" opens the chooser, and the overlay only becomes a picture if one
+	// is actually chosen — a cancelled chooser leaves it exactly as it was,
+	// which a mode switch cannot promise. From a picture, "Use text instead"
+	// goes back. The overlay is a picture exactly when it has one, which is the
+	// same rule the daemon, the item list and the stand-in all read; nothing
+	// here is a second place that answer is kept.
+	//
+	// `onKind` tells the caller which of the two this is, because the tab strip
+	// has to drop Look for a picture: every control on it — the font, its size,
+	// its weight, its outline, the plate behind the text — is about drawing
+	// text, and none of it touches a bitmap the camera blits.
+	function buildContent(box, held, overlay, preview, onKind) {
+		if (!held.template && !held.image) return;
+
+		const wrap = el('div', 'mj-osd-content');
+		box.insertBefore(wrap, box.firstChild);
+
+		const logoPart = el('div');
+		const textPart = el('div');
+		wrap.appendChild(logoPart);
+		wrap.appendChild(textPart);
+
+		// The chip builder sits above the raw template row and drives it. The
+		// row stays — hidden — so Save and the reset arrow keep working on the
+		// field itself, and a build whose template this cannot parse falls back
+		// to showing it rather than losing it.
+		if (held.template) {
+			held.template.p.hidden = true;
+			buildTemplate(textPart, held.template);
+		}
+		// The image field is a path like osd.font is, so a firmware can ship a
+		// picture and this is one way of putting one there rather than the only
+		// way. Hidden and driven by the picker, on the pin-map pattern, so Save,
+		// dirty tracking and the per-row reset never learn a picker exists.
+		let picker = null;
+		if (held.image) {
+			held.image.p.hidden = true;
+			picker = buildLogo(logoPart, held.image, held.template, overlay,
+				preview);
+		}
+
+		const isLogo = () =>
+			!!(held.image && String(held.image.getValue() || '').trim());
+
+		// The one control, only where the camera can draw a picture at all.
+		let swap = null;
+		if (held.image) {
+			swap = el('button', 'mj-osd-swap');
+			swap.type = 'button';
+			textPart.appendChild(swap);
+			swap.addEventListener('click', () => {
+				if (!isLogo()) {
+					// Inside the press, which is what lets the chooser open.
+					if (picker) picker.choose();
+					return;
+				}
+				if (picker) picker.remove();
+			});
+			// From a picture, the way back sits with the picture's own
+			// controls rather than under the text that is not being shown.
+			if (picker) picker.onBack(() => {
+				// An overlay that says nothing is not listed, so it would
+				// vanish from under the person who just pressed it.
+				if (held.template &&
+					!String(held.template.getValue() || '').trim()) {
+					held.template.setValue('Text');
+					held.template.control.dispatchEvent(
+						new Event('change', { bubbles: true }));
+					runVisibility();
+					updateDirty();
+				}
+			});
+		}
+
+		function paint() {
+			const logo = isLogo();
+			logoPart.hidden = !logo;
+			textPart.hidden = logo;
+			if (swap) swap.textContent = 'Use a picture instead…';
+			if (onKind) onKind(logo);
+		}
+
+		if (held.image) held.image.control.addEventListener('change', paint);
+		paint();
+	}
+
+	// A LOGO: a picture drawn into the overlay instead of a line.
+	//
+	// The browser decodes and quantises, and sends pixels. There is no image
+	// decoder anywhere in majestic — no libpng, no stb_image — and a logo is
+	// not a reason to put one on the daemon, parsing a hostile file, when the
+	// browser has a decoder already and is the only place the result can be
+	// shown before it is burned into a video.
+	//
+	// So the preview here is not a courtesy. It is the same reduction the
+	// camera's overlay format forces (four bits a channel; one bit of alpha on
+	// HiSilicon gen 1), applied here so that what you approve is what the
+	// camera will draw — rather than a crisp picture in the page and a banded
+	// one on the stream, with nowhere to see the difference until it is
+	// recorded.
+	function buildLogo(container, field, tplField, overlay, preview) {
+		const wrap = el('div', 'mj-logo');
+		container.insertBefore(wrap, container.firstChild);
+
+		wrap.innerHTML =
+			'<div class="mj-logo-head">' +
+				'<span class="mj-cap">Logo</span>' +
+				'<span class="mj-logo-note"></span>' +
+			'</div>' +
+			'<div class="mj-logo-body">' +
+				'<canvas class="mj-logo-shot" hidden></canvas>' +
+				'<p class="mj-logo-empty"></p>' +
+			'</div>' +
+			'<div class="mj-logo-acts">' +
+				'<label class="mj-logo-pick">' +
+					'<input type="file" accept="image/*" hidden>' +
+					'<span class="mj-logo-pick-w">Choose a picture…</span>' +
+				'</label>' +
+				// "Use text instead", not "Remove": what it does is put the
+				// overlay back to drawing its line, and naming the consequence
+				// is the difference between a button you can predict and one
+				// you have to try.
+				'<button type="button" class="mj-logo-drop" hidden>' +
+					'Use text instead</button>' +
+			'</div>';
+
+		const note = wrap.querySelector('.mj-logo-note');
+		const shot = wrap.querySelector('.mj-logo-shot');
+		const empty = wrap.querySelector('.mj-logo-empty');
+		const input = wrap.querySelector('input[type=file]');
+		const drop = wrap.querySelector('.mj-logo-drop');
+		const pickWord = wrap.querySelector('.mj-logo-pick-w');
+		let onBack = null;
+
+		function say(msg, bad) {
+			note.textContent = msg || '';
+			note.classList.toggle('mj-logo-bad', !!bad);
+		}
+
+		// Declared ABOVE the first thing that reads them. paint() only runs
+		// after this point today, but a `let` read before its declaration is a
+		// ReferenceError rather than an undefined, and this file has already
+		// lost a whole section of a form to exactly that.
+		let drawn = false;   // the canvas holds this overlay's picture
+		let asked = false;   // the camera has been asked for it
+
+		function paint() {
+			const has = !!String(field.getValue() || '').trim();
+			drop.hidden = !has;
+			// Choosing when there is nothing, replacing when there is.
+			pickWord.textContent = has ? 'Replace picture…' : 'Choose a picture…';
+			if (!has) {
+				shot.hidden = true;
+				empty.hidden = false;
+				// What happens if this is left empty, said honestly: it depends
+				// on whether the overlay has anything else to say.
+				const t = tplField ? String(tplField.getValue() || '').trim() : '';
+				empty.textContent = t
+					? 'No picture. The overlay draws “' +
+						(t.length > 24 ? t.slice(0, 23) + '…' : t) + '”.'
+					: 'No picture yet.';
+				return;
+			}
+			// There IS one, so show it. Drawn already if it was chosen in this
+			// visit; otherwise fetched, because a reload has had no visit and
+			// an empty frame where a picture should be is the worst of the
+			// three things this box can say.
+			if (drawn) {
+				shot.hidden = false;
+				empty.hidden = true;
+				return;
+			}
+			shot.hidden = true;
+			empty.hidden = false;
+			empty.textContent = 'Loading the picture…';
+			fetchShot();
+		}
+
+		function fetchShot() {
+			if (asked) return;
+			asked = true;
+			// Cleared on failure below: a transient network error left this
+			// set for the life of the editor, so every later repaint refused
+			// to look again and the picture stayed on its error message even
+			// once the camera was answering.
+			apiFetch('/api/v1/osd/image?overlay=' + overlay,
+				{ credentials: 'same-origin' })
+				.then((r) => {
+					if (!r.ok) throw new Error('HTTP ' + r.status);
+					const w = +r.headers.get('X-Osd-Width');
+					const h = +r.headers.get('X-Osd-Height');
+					if (!w || !h) throw new Error('no size');
+					return r.arrayBuffer().then((b) => ({ w: w, h: h, b: b }));
+				})
+				.then(({ w, h, b }) => {
+					const src = new Uint8Array(b);
+					if (src.length < w * h * 4) throw new Error('short');
+					const ctx = shot.getContext('2d');
+					shot.width = w;
+					shot.height = h;
+					const out = ctx.createImageData(w, h);
+					// BGRA on the wire, RGBA in a canvas: the same swap the
+					// upload does, in reverse.
+					for (let i = 0; i < w * h * 4; i += 4) {
+						out.data[i] = src[i + 2];
+						out.data[i + 1] = src[i + 1];
+						out.data[i + 2] = src[i];
+						out.data[i + 3] = src[i + 3];
+					}
+					ctx.putImageData(out, 0, 0);
+					drawn = true;
+					shot.hidden = false;
+					empty.hidden = true;
+					say(w + '×' + h + ' · on the camera');
+				})
+				.catch(() => {
+					// Asked again next time. This is the difference between a
+					// logo that is not there and one the camera did not answer
+					// for just now, and only the second is worth retrying —
+					// but the flag could not tell them apart and refused both
+					// for the life of the editor.
+					asked = false;
+					// A path that is set and a picture that cannot be had are
+					// not the same as no picture, and the box says which.
+					shot.hidden = true;
+					empty.hidden = false;
+					empty.textContent =
+						'A picture is set, but the camera could not hand it ' +
+						'back. It may not be there any more.';
+				});
+		}
+
+		// What the camera's overlay can carry. Four bits a channel is every
+		// current part; gen 1's single alpha bit is not asked about here
+		// because this page cannot know the generation — the camera applies it,
+		// and a soft edge that comes out hard is the one difference between
+		// this preview and the stream.
+		function quantise(img) {
+			const w = img.width, h = img.height;
+			const c = document.createElement('canvas');
+			c.width = w; c.height = h;
+			const ctx = c.getContext('2d');
+			ctx.drawImage(img, 0, 0);
+			const d = ctx.getImageData(0, 0, w, h);
+			const px = d.data;
+			// (v >> 4) * 17 rather than (v >> 4) << 4: it maps the four bits
+			// back over the whole range, so white stays 255 instead of 240 and
+			// the preview does not read as a picture the camera has dimmed.
+			for (let i = 0; i < px.length; i++)
+				px[i] = (px[i] >> 4) * 17;
+			ctx.putImageData(d, 0, 0);
+			return { canvas: c, data: d, w: w, h: h };
+		}
+
+		// The frame the pixels are chosen for, so the camera can keep the same
+		// share of every stream: it is sent with the upload as `ref` and the
+		// camera scales the picture by it. The frame on screen is the one the
+		// operator sized it against, so that is what is reported.
+		function refWidth() {
+			const f = preview && preview.frame && preview.frame();
+			return f && f.w ? f.w : 1920;
+		}
+
+		function upload(q) {
+			const ref = refWidth();
+			say('Sending ' + q.w + '×' + q.h + '…');
+			return apiFetch(
+				'/api/v1/osd/image?overlay=' + overlay + '&w=' + q.w +
+					'&h=' + q.h + '&ref=' + ref,
+				{
+					method: 'POST',
+					credentials: 'same-origin',
+					headers: { 'Content-Type': 'application/octet-stream' },
+					body: q.data.data,
+				})
+				.then((r) => (r.ok ? r.json() : r.text().then((t) => {
+					throw new Error(t || ('HTTP ' + r.status));
+				})))
+				.then((j) => {
+					// This upload has already overwritten the file, so a
+					// removal staged earlier in this visit must not delete it.
+					logoBin.delete(overlay);
+					// What is on the canvas is this picture now, and the
+					// camera's copy is worth asking for again if it is ever
+					// wanted.
+					drawn = true;
+					asked = false;
+					// The camera decides the path; this only records it, and
+					// it is a staged edit like any other until Save.
+					field.setValue(j.path);
+					field.control.dispatchEvent(
+						new Event('change', { bubbles: true }));
+					runVisibility();
+					updateDirty();
+					paint();
+					// The camera's number, not this one's: it compresses the
+					// pixels, so what lands in flash is not w*h*4 and saying
+					// that would overstate the cost by a factor of fifty.
+					// Only where the camera said. w*h*4 is what was SENT, and
+					// the comment above says the stored file can be fifty
+					// times smaller — so printing that number as the size on
+					// the camera is not an estimate, it is the wrong figure
+					// with a unit after it. A camera that does not report the
+					// stored size gets a sentence with no size in it.
+					const kb = j.stored
+						? Math.max(1, Math.round(j.stored / 1024)) + ' KB · '
+						: '';
+					say(q.w + '×' + q.h + ' · ' + kb +
+						Math.round(q.w * 100 / ref) +
+						'% of the picture’s width. Press Save to draw it.');
+				})
+				.catch((e) => say('Could not send it: ' + e.message, true));
+		}
+
+		input.addEventListener('change', () => {
+			const file = input.files && input.files[0];
+			input.value = '';
+			if (!file) return;
+
+			const img = new Image();
+			const url = URL.createObjectURL(file);
+			img.onload = () => {
+				URL.revokeObjectURL(url);
+				// Bounded by what the camera will store, and said before the
+				// upload rather than refused after it: the file lands in the
+				// camera's writable overlay and becomes region memory on every
+				// stream carrying it.
+				if (img.width > 1024 || img.height > 1024) {
+					say('That picture is ' + img.width + '×' + img.height +
+						'. The camera draws up to 1024 each way.', true);
+					return;
+				}
+				if (img.width * img.height * 4 > (1 << 20)) {
+					say('That picture is more than a megabyte of pixels, ' +
+						'which is more than the camera will store.', true);
+					return;
+				}
+				const q = quantise(img);
+				shot.width = q.w;
+				shot.height = q.h;
+				shot.getContext('2d').drawImage(q.canvas, 0, 0);
+				shot.hidden = false;
+				empty.hidden = true;
+				upload(q);
+			};
+			img.onerror = () => {
+				URL.revokeObjectURL(url);
+				say('That file is not a picture this browser can open.', true);
+			};
+			img.src = url;
+		});
+
+		drop.addEventListener('click', () => {
+			if (onBack) setTimeout(onBack, 0);
+			drawn = false;
+			asked = false;
+			// STAGED, like the field beside it. Deleting the file here made
+			// one half of this change permanent the moment it was pressed
+			// while the other half waited for Save — so leaving without
+			// saving, or pressing the row's reset arrow, left a configuration
+			// still naming a picture whose bytes were gone, and nothing could
+			// put them back. logoBin carries the removal to Save, which is
+			// where the rest of this edit lands.
+			logoBin.add(overlay);
+			field.setValue('');
+			field.control.dispatchEvent(new Event('change', { bubbles: true }));
+			shot.hidden = true;
+			runVisibility();
+			updateDirty();
+			paint();
+			const t = tplField ? String(tplField.getValue() || '') : '';
+			say(t ? 'Removed. The overlay draws its text again.'
+				: 'Removed. Give the overlay some text, or it draws nothing.');
+		});
+
+		field.control.addEventListener('change', paint);
+		paint();
+
+		// The two acts the kind switch above needs. `choose` has to be called
+		// inside a press or the chooser will not open.
+		return {
+			choose: () => input.click(),
+			remove: () => drop.click(),
+			// Run after the picture goes, so the caller can make sure the
+			// overlay still says something.
+			onBack: (fn) => { onBack = fn; },
 		};
 	}
 
@@ -3158,7 +5288,7 @@
 		const opts = el('div', 'mj-tpl-opts');
 		opts.hidden = true;
 		wrap.appendChild(opts);
-		const raw = el('div', 'mj-tpl-raw');
+		const raw = el('div');
 		wrap.appendChild(raw);
 
 		let parts = [];
@@ -4586,6 +6716,7 @@
 		const id = 'mjf-' + dot.replace(/\./g, '-');
 		const hasDefault = Object.prototype.hasOwnProperty.call(sub, 'default');
 		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
+		const isFontFile = isFontPath(dot) && FONTS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
 		// resolution picker for the video/jpeg size fields: a dropdown of named
 		// presets + a "Custom…" escape hatch. Selected by the backend's
@@ -4937,6 +7068,35 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
+		} else if (type === 'string' && isFontFile) {
+			// The faces installed on this camera, by name. The value is still the
+			// path — nothing about the setting changes — and the row is a select
+			// rather than a text box because the answer is a file that either
+			// exists or does not, and a mistyped one draws nothing and says so
+			// only in the log.
+			//
+			// The rule is that whatever is configured is always selectable, so
+			// that the row states what is in effect rather than the first face
+			// the scan happened to find — the same reason the enum branch above
+			// carries an unsupported value. Three ways it can be something the
+			// scan did not list. An overlay above the first may leave it empty,
+			// which means the camera's own font. Overlay 0 has nowhere to
+			// inherit from, so empty there is a font that will not load, and
+			// saying "not set" is the only honest way to show it. And either may
+			// name a file that is not there.
+			p = el('p', 'select mj-row mj-wide');
+			const cur = eff === undefined || eff === null ? '' : String(eff);
+			const inherits = dot !== 'osd.font';
+			const missing = cur !== '' && FONTS.indexOf(cur) < 0;
+			const opts =
+				(inherits ? option('', cur === '', 'Camera default')
+					: cur === '' ? option('', true, 'Not set') : '') +
+				(missing ? option(cur, true, fontName(cur) + ' (not installed)') : '') +
+				FONTS.map(f => option(f, cur === f, fontName(f))).join('');
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+				'<select class="form-select" id="' + id + '">' + opts + '</select>';
+			control = p.querySelector('select');
 		} else if (type === 'string' && isSensorPath) {
 			p = el('p', 'select mj-row mj-wide');
 			const opts = option('', !eff) + SENSORS.map(s => option(s, String(eff) === s)).join('');
@@ -5142,13 +7302,20 @@
 		// instant, no save, no reinit; the value still persists only on Save.
 		// Two conditions, and the second is the one that matters: the schema's
 		// x-live says the daemon CAN take the key live, and the leaf says this
-		// page WIRES it — the knobs lifted beside the picture, and the Overlay
-		// leaf's own keys, which are the two sets the endpoint takes. A
-		// live-classed key drawn on an ordinary section — the bitrate, on Main
-		// stream — is applied by Save without a rebuild, which is a different
-		// promise: pushing it here would send the endpoint a name it ignores and
-		// then "revert" it to the same value on the way out of the page.
-		const pushes = !!(sub && sub['x-live'] && (lifted().has(dot) || state.sec === 'osd'));
+		// page WIRES it. A live-classed key drawn on an ordinary section — the
+		// bitrate, on Main stream — is applied by Save without a rebuild, which
+		// is a different promise: pushing it here would send the endpoint a name
+		// it ignores and then "revert" it to the same value on the way out.
+		//
+		// The lifted knobs are that set, and they are now the WHOLE of it. The
+		// Overlay leaf used to be in it too, and cannot be any more: this
+		// endpoint takes a query string and reads each key by its LAST dotted
+		// segment, so osd.overlays.3.anchor arrives as `anchor=` and moves
+		// overlay 0 — a control silently editing a different overlay from the
+		// one it is drawn under. Placement pushes go through postLivePlace and
+		// the document endpoint, which addresses overlays by their real path;
+		// see revertOsdPlace() for the other half, the undo those pushes owe.
+		const pushes = !!(sub && sub['x-live'] && lifted().has(dot));
 		if (pushes) {
 			control.addEventListener('input', pushLive);
 			control.addEventListener('change', pushLive);
@@ -5188,6 +7355,11 @@
 		const show = !!(n || apply || state.flashPending);
 		bar.classList.toggle('d-flex', show);
 		bar.classList.toggle('d-none', !show);
+		// A sticky bar does not push anything; it sits on whatever is at the
+		// bottom of the window. On a leaf whose picture is sized from the
+		// viewport height that is the control row under the picture, so the
+		// picture gives the bar its height back while it is there.
+		if (bar.parentNode) bar.parentNode.classList.toggle('mj-has-toolbar', show);
 
 		const lbl = document.getElementById('mj-dirty-count');
 		if (lbl && !state.toolbarMsg) {
@@ -5434,6 +7606,14 @@
 			// refresh would let a later discard "revert" the camera to values
 			// that are no longer what was saved (#259).
 			sent.forEach((v, f) => { state.initial[f.dot] = v; });
+			// The drag's override has done its job: the config now says what it
+			// was saying, so it can come off. Left installed it would go on
+			// overriding the saved placement for the life of the daemon, and a
+			// later change made anywhere else — the CLI, another browser — would
+			// be written, reported saved, and not appear.
+			revertOsdPlace();
+			// The config no longer names them, so the files can go.
+			flushLogoBin();
 			await refresh();
 			// refresh() has just re-read the config, so this asks the camera
 			// rather than the form. A pin still holding a number here means the

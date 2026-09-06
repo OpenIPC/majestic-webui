@@ -38,6 +38,36 @@ if [ -d /etc/sensors ]; then
 		boot_sensors="${boot_sensors}${boot_sensors:+,}\"${e}\""
 	done
 fi
+
+# The fonts the camera can draw the overlay with. One face ships with the
+# firmware; the point of listing rather than hardcoding is the ones an owner
+# adds to their own image, which is the only way there are ever two.
+#
+# By extension and recursively, because freetype takes a path and not a name:
+# nothing requires an added face to sit beside the shipped one, or in a flat
+# directory. Full paths, since that is what the setting stores; the picker
+# shows the face name.
+boot_fonts=""
+if [ -d /usr/share/fonts ]; then
+	# Split on newlines only, and do not glob what comes back. The plain
+	# `for f in $(find ...)` splits on every space and tab and then expands
+	# what it split as a pattern, so a font in a directory with a space in its
+	# name arrived as two fragments and one with a bracket in it arrived as
+	# whatever happened to match — and the picker then stored a path the
+	# camera cannot open. Not a pipe into `while read`: that is a subshell in
+	# POSIX sh and boot_fonts would not survive it.
+	_ifs=$IFS
+	IFS='
+'
+	set -f
+	for f in $(find /usr/share/fonts -type f \
+		\( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) 2>/dev/null); do
+		e=$(printf '%s' "$f" | mj_json_escape)
+		boot_fonts="${boot_fonts}${boot_fonts:+,}\"${e}\""
+	done
+	set +f
+	IFS=$_ifs
+fi
 %>
 
 <%in p/header.cgi %>
@@ -77,7 +107,7 @@ fi
 	</div>
 
 	<div class="col-12 col-md-9" id="mj-settings-form-col">
-		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>]}</script>
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>]}</script>
 
 		<%
 		# No page-level heading any more: one section is shown at a time and its
@@ -131,6 +161,13 @@ fi
 %>
 <script src="/a/mj-tree.js" defer></script>
 <script src="/a/mj-region.js" defer></script>
+<%
+# Where the overlay sits. Its own file for the same reason the tree is: the
+# arithmetic is the subject of issue #340, it fails silently — an overlay placed
+# wrongly still renders and still looks like an overlay — and tests/place.test.js
+# can only ask it if it is reachable without a picture.
+%>
+<script src="/a/mj-place.js" defer></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>

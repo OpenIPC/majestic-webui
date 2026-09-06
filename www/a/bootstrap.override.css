@@ -1053,9 +1053,24 @@ mark {
    variant below a single line instead of a second copy of this arithmetic. */
 .mj-pv-stage {
 	--mj-pv-reserve: 17.6rem;
+	/* And the save bar, while there is one.
+	 *
+	 * It is sticky at the bottom of the window, so it does not push anything;
+	 * it sits ON whatever the window happens to be showing there. On a leaf
+	 * whose picture is sized from the viewport height that is always the row
+	 * of controls under the picture, and the collision is silent: the control
+	 * is on screen, it is simply not the topmost thing at its own coordinates,
+	 * so pressing it does nothing at all.
+	 *
+	 * Reported as "the remove cross does nothing", and it only ever happened
+	 * once something was unsaved -- which pressing "+ Text" guarantees. It was
+	 * invisible on a tall window and in a DevTools viewport, which is why it
+	 * looked like the inspector's doing. 4.95rem is the bar measured: 63px
+	 * plus its 16px margin. */
+	--mj-pv-toolbar: 0rem;
 	position: relative;
-	width: min(100%, max(28rem, calc((100vh - var(--mj-pv-reserve)) * 1.77778)));
-	width: min(100%, max(28rem, calc((100dvh - var(--mj-pv-reserve)) * 1.77778)));
+	width: min(100%, max(28rem, calc((100vh - var(--mj-pv-reserve) - var(--mj-pv-toolbar)) * 1.77778)));
+	width: min(100%, max(28rem, calc((100dvh - var(--mj-pv-reserve) - var(--mj-pv-toolbar)) * 1.77778)));
 	margin-inline: auto;
 	aspect-ratio: 16 / 9;
 	background: #0d0f14;
@@ -1075,6 +1090,450 @@ mark {
 .mj-pv-stage.mj-live-docked {
 	--mj-pv-reserve: 21rem;
 }
+
+/* ── the Overlay leaf ────────────────────────────────────────────────────
+   Its own reserve, which is what the variable exists for. 17.6rem is the LIVE
+   leaf's arithmetic — stage top, 12px, the 76px knob strip, 16px — and this
+   leaf has no strip: what sits under its picture is one docked bar row. The
+   stylesheet has said since that value was written that another consumer with
+   a different deck under it would inherit the wrong answer silently, the
+   picture merely coming out too small, which reads as a design rather than as
+   a bug. This is that consumer, and this is it saying so.
+
+   The rest of the leaf — text, legibility, masks — is below the fold on
+   purpose: it is not what you look at the picture to change. What is, comes to
+   the picture. */
+.mj-pv-stage.mj-osd-stage {
+	/* Stage top, the docked bar row under it, and the item list under that.
+	   The item list is the part this had to learn: it is a control row, not
+	   chrome, and at 14.5rem it landed at or below the fold on a laptop —
+	   measured at 1440x681, where the row's own top was 681.25. A control the
+	   window cuts off reads as a control that does not work, which is how it
+	   was reported. */
+	--mj-pv-reserve: 18.5rem;
+}
+
+/* ── the picture and its inspector ───────────────────────────────────────
+   Two columns: the picture and everything that annotates it on the left, the
+   selected item's settings on the right. The panel used to float on the
+   picture, which put the settings beside the thing they change and covered a
+   fifth of the video to do it — on a page that already has a settings column
+   sitting empty to the right of a rail.
+
+   Below lg they stack, which is where the panel already went on a narrow
+   stage: at that width there is no room beside the picture for anything. */
+.mj-osd-work {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+}
+
+.mj-osd-pic {
+	/* min-width: 0 or the stage's own min width would stop the row shrinking
+	   and push the inspector off the card. */
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.mj-osd-side {
+	flex: 0 0 20.5rem;
+	max-width: 20.5rem;
+	position: sticky;
+	top: 0.75rem;
+}
+
+@media (max-width: 991.98px) {
+	.mj-osd-work { display: block; }
+	.mj-osd-side {
+		flex: none;
+		max-width: none;
+		position: static;
+	}
+}
+
+/* The bar, off the picture. Nothing here restyles the bar's own contents —
+   mj-preview.js still owns those; this only stops it floating. */
+.mj-osd-bar {
+	margin-top: 0.625rem;
+	padding: 0.4rem 0.625rem;
+}
+
+.mj-osd-bar .mj-pv-bar {
+	position: static;
+	inset: auto;
+	z-index: auto;
+	/* On the picture the bar is black glass because its ground is the video.
+	   On a card the ground is the card, so the groups take the page's own
+	   surface treatment and stop being a dark slab on a light one. */
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.mj-osd-bar .mj-pv-bar::-webkit-scrollbar { display: none; }
+
+/* ── the inspector ───────────────────────────────────────────────────────
+   The overlay's own settings, on the picture, because the deck that held them
+   starts below the fold on a laptop: the stage is sized from the viewport
+   height, so everything under it begins where the screen ends.
+
+   Black glass in both themes, like every other piece of on-picture chrome —
+   its ground is the video, not the page surface. It takes the pointer back
+   (the overlay layer above it is pointer-transparent by default) and sits
+   above the drag catcher, which is what stops a press inside it starting a
+   drag underneath. */
+/* Off the picture, so the page's own ground rather than glass — glass is for
+   chrome whose background is the video, and this one's is the card. It is no
+   longer a thing you move or close either: a column has nowhere to be in the
+   way of, which is the whole reason the drag and the close button existed. */
+.mj-osd-panel {
+	display: flex;
+	flex-direction: column;
+	max-height: calc(100dvh - 2rem);
+	overflow: auto;
+	padding: 0 0.875rem 0.875rem;
+	background: var(--bs-card-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: var(--bs-box-shadow-sm);
+	color: var(--bs-body-color);
+}
+
+.mj-osd-panel-head {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.75rem 0 0.7rem;
+}
+
+.mj-osd-panel-name {
+	color: var(--bs-tertiary-color);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mj-osd-tabs {
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	margin-bottom: 0.7rem;
+	background: var(--bs-tertiary-bg);
+	border-radius: var(--bs-border-radius);
+}
+
+.mj-osd-tab {
+	flex: 1 1 0;
+	padding: 0.3rem 0.5rem;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
+	color: var(--bs-secondary-color);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	cursor: pointer;
+}
+
+.mj-osd-tab-on {
+	background: var(--bs-primary);
+	color: #fff;
+}
+
+.mj-osd-bodies {
+	min-height: 0;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+
+/* The rows inside are the page's own, mounted here rather than in a deck, and
+   the panel's ground is now the card — so they need nothing the page does not
+   already give them. Only the labels are quietened, because a column of them
+   beside a picture is a list to scan rather than a form to read. */
+.mj-osd-body .mj-row > .form-label,
+.mj-osd-body .mj-hint,
+.mj-osd-body .mj-reset { color: var(--bs-tertiary-color); }
+
+/* Nine cells that are the nine anchors, in the arrangement they name. It
+   replaces reading "bottom-right" off a select and mapping it onto the picture
+   yourself — the word is a second vocabulary for a thing you are looking at. */
+.mj-osd-pad-wrap { margin-bottom: 0.85rem; }
+.mj-osd-pad-wrap .mj-cap { margin: 0 0 0.4rem; color: var(--bs-tertiary-color); }
+
+.mj-osd-pad {
+	display: grid;
+	grid-template-columns: repeat(3, 1.875rem);
+	grid-template-rows: repeat(3, 1.875rem);
+	gap: 3px;
+	padding: 3px;
+	width: fit-content;
+	background: var(--bs-tertiary-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+}
+
+/* Proportional has no anchor, so the pad says so rather than showing nine
+   cells none of which is lit. */
+.mj-osd-pad-off .mj-osd-pad { opacity: 0.35; }
+
+.mj-osd-cell {
+	display: flex;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
+	cursor: pointer;
+}
+
+.mj-osd-cell:hover { background: var(--bs-secondary-bg); }
+.mj-osd-cell-on { background: var(--bs-primary); }
+.mj-osd-cell i {
+	display: block;
+	border-radius: 1px;
+	background: var(--bs-secondary-color);
+}
+.mj-osd-cell-on i { background: #fff; }
+
+/* The way across to a picture. Quiet, and under the text it would replace:
+   it is a thing you do occasionally, not a mode you sit in, and a second row
+   of segmented buttons under the tab strip read as one. */
+.mj-osd-swap {
+	display: block;
+	width: 100%;
+	margin-top: 0.6rem;
+	padding: 0.35rem 0.6rem;
+	border: 1px dashed var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: transparent;
+	color: var(--bs-secondary-color);
+	font-size: 0.8125rem;
+	cursor: pointer;
+}
+
+.mj-osd-swap:hover {
+	border-color: var(--bs-primary);
+	color: var(--bs-body-color);
+}
+
+/* ── a logo ──────────────────────────────────────────────────────────────
+   The preview is the reduced picture, not the file: four bits a channel is
+   what the overlay format carries, so what is approved here is what the camera
+   burns in. Checkered ground, because a logo's alpha is most of what makes it
+   a logo and a picture with a soft edge on a flat panel says nothing about
+   what it will look like over video. */
+.mj-logo { margin-bottom: 0.85rem; }
+
+.mj-logo-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	margin-bottom: 0.4rem;
+}
+
+.mj-logo-note {
+	min-width: 0;
+	font-size: 0.75rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-logo-bad { color: var(--bs-danger); }
+
+.mj-logo-body {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 4rem;
+	padding: 0.5rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background-color: var(--bs-tertiary-bg);
+	background-image:
+		linear-gradient(45deg, rgba(128, 128, 128, 0.22) 25%, transparent 25%),
+		linear-gradient(-45deg, rgba(128, 128, 128, 0.22) 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.22) 75%),
+		linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.22) 75%);
+	background-size: 12px 12px;
+	background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+}
+
+.mj-logo-shot {
+	max-width: 100%;
+	max-height: 8rem;
+	image-rendering: pixelated;
+}
+
+.mj-logo-empty {
+	margin: 0;
+	font-size: 0.8125rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-logo-acts {
+	display: flex;
+	gap: 0.4rem;
+	margin-top: 0.4rem;
+}
+
+.mj-logo-pick,
+.mj-logo-drop {
+	padding: 0.3rem 0.6rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-tertiary-bg);
+	color: var(--bs-body-color);
+	font-size: 0.8125rem;
+	cursor: pointer;
+}
+
+.mj-logo-pick:hover,
+.mj-logo-drop:hover { border-color: var(--bs-primary); }
+
+/* ── what is on the picture ──────────────────────────────────────────────
+   One chip per thing, and pressing one is the same act as pressing the thing
+   itself. It replaces a Text / Masks switch that asked you to name a KIND
+   before you could touch anything, and that could not say what was there: a
+   mask off the screen edge and no masks at all looked identical. */
+/* The bar does NOT wrap; the chips inside it do. Wrapping here put the on/off
+   switch on a line of its own the moment the chips filled the width, which is
+   a third row of bar for one control — the very thing moving it here was for.
+   The chips take the slack, so they are what gives when there are many. */
+.mj-osd-items {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: nowrap;
+	margin-top: 0.625rem;
+	padding: 0.55rem 0.75rem;
+}
+
+.mj-osd-chips {
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+	flex-wrap: wrap;
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+/* The pill. It is a plain <span> around two real buttons where it carries a
+   remove control, and a <button> itself where it has nothing beside its label
+   — the Add control. Both spellings wear this class; neither is an element the
+   selector cares about.
+
+   It used to be a button with the remove cross nested inside it, which is
+   invalid markup and, more to the point, does not hit-test the same way in
+   every engine: where the outer button wins, pressing the cross re-selects the
+   chip it sits on and reads as a control that does nothing. */
+.mj-osd-chip {
+	display: inline-flex;
+	/* stretch, not center: the two buttons inside divide the pill's whole
+	   height between them, so there is no band along the top or bottom that
+	   belongs to neither. */
+	align-items: stretch;
+	border: 1px solid var(--bs-border-color);
+	border-radius: 0.4375rem;
+	background: var(--bs-tertiary-bg);
+	color: var(--bs-body-color);
+	font-size: 0.8125rem;
+}
+
+/* The padding is on whatever is actually pressable, so the label's hit area is
+   the whole of the pill it appears to fill. */
+button.mj-osd-chip,
+.mj-osd-chip-b {
+	padding: 0.3rem 0.55rem;
+	cursor: pointer;
+}
+
+.mj-osd-chip-b {
+	display: inline-flex;
+	align-items: center;
+	flex: 1 1 auto;
+	gap: 0.4rem;
+	border: 0;
+	border-radius: inherit;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+}
+
+.mj-osd-chip:hover { border-color: var(--bs-primary); }
+
+.mj-osd-chip-on {
+	border-color: var(--bs-primary);
+	box-shadow: 0 0 0 1px rgba(var(--bs-primary-rgb), 0.35);
+}
+
+.mj-osd-chip-k {
+	font-size: 0.625rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--bs-secondary);
+}
+
+.mj-osd-chip-v {
+	font-family: var(--bs-font-monospace);
+	font-size: 0.75rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-osd-chip-none {
+	color: var(--bs-tertiary-color);
+	font-size: 0.8125rem;
+}
+
+/* The remove control rides the chip it removes, and only the selected chip has
+   one — a row of crosses is a picture of controls rather than of what is on the
+   screen. A sibling of the label button rather than a child of it; see the
+   pill above for why that distinction is load-bearing. */
+/* It fills the right-hand end of the pill: full height, and wide enough to be
+   a real pointer target. The GLYPH is small; what you can press is not.
+
+   It was a 16x16 box with seven dead pixels of pill to the right of it and five
+   above and below, inside a pill 137x30. A press that missed by one landed
+   either on the label — which re-selects a chip that is already selected, and
+   so looks like nothing happened — or on the wrapper, which has no handler at
+   all and really did nothing. Both readings are "the cross is broken", which
+   is how it was reported.
+
+   Measured rather than eyeballed: walk elementFromPoint across the chip and
+   every pixel of it must belong to the label or to the cross, with no band
+   between them that belongs to neither. */
+.mj-osd-chip-x {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	align-self: stretch;
+	min-width: 1.5rem;
+	margin: 0;
+	padding: 0 0.4rem;
+	border: 0;
+	border-radius: 0 0.375rem 0.375rem 0;
+	background: transparent;
+	color: var(--bs-secondary-color);
+	font-size: 0.9375rem;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.mj-osd-chip-x:hover,
+.mj-osd-chip-x:focus-visible {
+	background: rgba(var(--bs-danger-rgb), 0.18);
+	color: var(--bs-danger);
+}
+
+.mj-osd-chip-add {
+	border-style: dashed;
+	background: transparent;
+	color: var(--bs-secondary-color);
+}
+
+/* One slot per overlay inside each of the panel's tabs. Hidden rather than
+   unmounted, because every overlay's controls are live at once: that is what
+   lets two of them be edited and saved together. */
+.mj-osd-slot[hidden] { display: none; }
 
 /* A picture that is not the hero of its section: it fills the box it was put in
    — a card body, a column — and takes its height from its aspect ratio like any
@@ -2322,6 +2781,13 @@ mark {
    one of them has something to do. It is the form's last child, so appearing
    and disappearing costs nothing above it — measured: the section card's top
    is identical with the bar shown and hidden. */
+/* The picture makes room for it: see --mj-pv-toolbar. renderToolbar() sets the
+   class on the form, because the bar is the only thing that knows when it is
+   there and the stage is the only thing that has to care. */
+.mj-has-toolbar .mj-pv-stage {
+	--mj-pv-toolbar: 4.95rem;
+}
+
 .mj-toolbar {
 	position: sticky;
 	bottom: 0;
@@ -4685,6 +5151,13 @@ dialog.mj-modal::backdrop {
 	touch-action: none;
 }
 
+/* Over another overlay the press means "pick that one up", not "drag the
+   selected one from here", and the cursor is where that is disclosed —
+   there is nothing else on the picture to say it. */
+.mj-osd-catch.mj-osd-pickable {
+	cursor: pointer;
+}
+
 .mj-osd-guides {
 	position: absolute;
 	pointer-events: none;
@@ -4983,4 +5456,45 @@ dialog.mj-modal::backdrop {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* The region editor's catcher says the same thing the overlay catcher does:
+   over something this editor does not own, the press picks that up instead of
+   starting a rectangle here. Later than .mj-md-armed's crosshair on purpose —
+   both apply, and this is the more specific statement about the same press. */
+.mj-md-catch.mj-osd-pickable {
+	cursor: pointer;
+}
+
+/* The overlay on/off switch, on the item bar rather than in a card of its own.
+   Pushed to the far end so the items read left to right and the one control
+   that is about all of them sits apart from them. The field inside is a live
+   row — switch then word, inline — so all this has to do is take the margins
+   off a row that was written for a column. */
+.mj-osd-enable {
+	display: flex;
+	align-items: center;
+	margin-left: auto;
+}
+
+.mj-osd-enable .mj-row {
+	margin: 0;
+	padding: 0;
+}
+
+/* What the picture costs the camera, at the far end of the item row. Small and
+   quiet: it is a thing to glance at before adding the overlay that would be
+   refused, not a reading anybody is here for. */
+.mj-osd-cost {
+	margin: 0.3rem 0.15rem 0 0;
+	color: var(--bs-secondary-color);
+	font-size: 0.75rem;
+	line-height: 1.2;
+	text-align: right;
+}
+
+/* Near the ceiling. Not an error — nothing has failed yet, and the next thing
+   added is the one that would. */
+.mj-osd-cost-low {
+	color: var(--bs-warning-text-emphasis, #ffc107);
 }
