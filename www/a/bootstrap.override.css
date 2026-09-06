@@ -1295,6 +1295,79 @@ mark {
 }
 .mj-osd-cell-on i { background: #fff; }
 
+/* ── a logo ──────────────────────────────────────────────────────────────
+   The preview is the reduced picture, not the file: four bits a channel is
+   what the overlay format carries, so what is approved here is what the camera
+   burns in. Checkered ground, because a logo's alpha is most of what makes it
+   a logo and a picture with a soft edge on a flat panel says nothing about
+   what it will look like over video. */
+.mj-logo { margin-bottom: 0.85rem; }
+
+.mj-logo-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	margin-bottom: 0.4rem;
+}
+
+.mj-logo-note {
+	min-width: 0;
+	font-size: 0.75rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-logo-bad { color: var(--bs-danger); }
+
+.mj-logo-body {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 4rem;
+	padding: 0.5rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background-color: var(--bs-tertiary-bg);
+	background-image:
+		linear-gradient(45deg, rgba(128, 128, 128, 0.22) 25%, transparent 25%),
+		linear-gradient(-45deg, rgba(128, 128, 128, 0.22) 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.22) 75%),
+		linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.22) 75%);
+	background-size: 12px 12px;
+	background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+}
+
+.mj-logo-shot {
+	max-width: 100%;
+	max-height: 8rem;
+	image-rendering: pixelated;
+}
+
+.mj-logo-empty {
+	margin: 0;
+	font-size: 0.8125rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-logo-acts {
+	display: flex;
+	gap: 0.4rem;
+	margin-top: 0.4rem;
+}
+
+.mj-logo-pick,
+.mj-logo-drop {
+	padding: 0.3rem 0.6rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-tertiary-bg);
+	color: var(--bs-body-color);
+	font-size: 0.8125rem;
+	cursor: pointer;
+}
+
+.mj-logo-pick:hover,
+.mj-logo-drop:hover { border-color: var(--bs-primary); }
+
 /* ── what is on the picture ──────────────────────────────────────────────
    One chip per thing, and pressing one is the same act as pressing the thing
    itself. It replaces a Text / Masks switch that asked you to name a KIND

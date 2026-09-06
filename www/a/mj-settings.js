@@ -2858,6 +2858,15 @@
 				held.template.p.hidden = true;
 				buildTemplate(textBox, held.template);
 			}
+			// A logo, where the camera can draw one. The field is a path like
+			// osd.font is, so a firmware can ship a picture and this is only
+			// one way of putting one there; it renders hidden and the picker
+			// drives it, on the pin-map pattern, so Save, dirty tracking and
+			// the per-row reset never learn a picker exists.
+			if (held.image) {
+				held.image.p.hidden = true;
+				buildLogo(textBox, held.image, held.template, n, preview);
+			}
 		}
 		const held = HELD[0];
 
@@ -4040,6 +4049,186 @@
 			// it follows a drag.
 			pushNow: () => { postLivePlace(placementDoc(held, overlay)); paint(); },
 		};
+	}
+
+	// A LOGO: a picture drawn into the overlay instead of a line.
+	//
+	// The browser decodes and quantises, and sends pixels. There is no image
+	// decoder anywhere in majestic — no libpng, no stb_image — and a logo is
+	// not a reason to put one on the daemon, parsing a hostile file, when the
+	// browser has a decoder already and is the only place the result can be
+	// shown before it is burned into a video.
+	//
+	// So the preview here is not a courtesy. It is the same reduction the
+	// camera's overlay format forces (four bits a channel; one bit of alpha on
+	// HiSilicon gen 1), applied here so that what you approve is what the
+	// camera will draw — rather than a crisp picture in the page and a banded
+	// one on the stream, with nowhere to see the difference until it is
+	// recorded.
+	function buildLogo(container, field, tplField, overlay, preview) {
+		const wrap = el('div', 'mj-logo');
+		container.insertBefore(wrap, container.firstChild);
+
+		wrap.innerHTML =
+			'<div class="mj-logo-head">' +
+				'<span class="mj-cap">Logo</span>' +
+				'<span class="mj-logo-note"></span>' +
+			'</div>' +
+			'<div class="mj-logo-body">' +
+				'<canvas class="mj-logo-shot" hidden></canvas>' +
+				'<p class="mj-logo-empty">No picture. The overlay draws its ' +
+					'text.</p>' +
+			'</div>' +
+			'<div class="mj-logo-acts">' +
+				'<label class="mj-logo-pick">' +
+					'<input type="file" accept="image/*" hidden>' +
+					'<span>Choose a picture…</span>' +
+				'</label>' +
+				'<button type="button" class="mj-logo-drop" hidden>Remove</button>' +
+			'</div>';
+
+		const note = wrap.querySelector('.mj-logo-note');
+		const shot = wrap.querySelector('.mj-logo-shot');
+		const empty = wrap.querySelector('.mj-logo-empty');
+		const input = wrap.querySelector('input[type=file]');
+		const drop = wrap.querySelector('.mj-logo-drop');
+
+		function say(msg, bad) {
+			note.textContent = msg || '';
+			note.classList.toggle('mj-logo-bad', !!bad);
+		}
+
+		function paint() {
+			const has = !!String(field.getValue() || '').trim();
+			empty.hidden = has;
+			drop.hidden = !has;
+			// The canvas holds the last picture CHOSEN in this visit. A logo
+			// already on the camera is on the picture itself, which is the
+			// honest preview and better than anything drawn here — so nothing
+			// is invented for it.
+			if (!has) shot.hidden = true;
+		}
+
+		// What the camera's overlay can carry. Four bits a channel is every
+		// current part; gen 1's single alpha bit is not asked about here
+		// because this page cannot know the generation — the camera applies it,
+		// and a soft edge that comes out hard is the one difference between
+		// this preview and the stream.
+		function quantise(img) {
+			const w = img.width, h = img.height;
+			const c = document.createElement('canvas');
+			c.width = w; c.height = h;
+			const ctx = c.getContext('2d');
+			ctx.drawImage(img, 0, 0);
+			const d = ctx.getImageData(0, 0, w, h);
+			const px = d.data;
+			// (v >> 4) * 17 rather than (v >> 4) << 4: it maps the four bits
+			// back over the whole range, so white stays 255 instead of 240 and
+			// the preview does not read as a picture the camera has dimmed.
+			for (let i = 0; i < px.length; i++)
+				px[i] = (px[i] >> 4) * 17;
+			ctx.putImageData(d, 0, 0);
+			return { canvas: c, data: d, w: w, h: h };
+		}
+
+		// The frame the pixels are chosen for, so the camera can keep the same
+		// share of every stream — see the daemon's osd/image.h. The picture on
+		// screen is the frame being shown, which is what the operator sized it
+		// against.
+		function refWidth() {
+			const f = preview && preview.frame && preview.frame();
+			return f && f.w ? f.w : 1920;
+		}
+
+		function upload(q) {
+			const ref = refWidth();
+			const bytes = q.w * q.h * 4;
+			say('Sending ' + q.w + '×' + q.h + '…');
+			return apiFetch(
+				'/api/v1/osd/image?overlay=' + overlay + '&w=' + q.w +
+					'&h=' + q.h + '&ref=' + ref,
+				{
+					method: 'POST',
+					credentials: 'same-origin',
+					headers: { 'Content-Type': 'application/octet-stream' },
+					body: q.data.data,
+				})
+				.then((r) => (r.ok ? r.json() : r.text().then((t) => {
+					throw new Error(t || ('HTTP ' + r.status));
+				})))
+				.then((j) => {
+					// The camera decides the path; this only records it, and
+					// it is a staged edit like any other until Save.
+					field.setValue(j.path);
+					field.control.dispatchEvent(
+						new Event('change', { bubbles: true }));
+					runVisibility();
+					updateDirty();
+					paint();
+					say(q.w + '×' + q.h + ' · ' + Math.round(bytes / 1024) +
+						' KB · ' + Math.round(q.w * 100 / ref) +
+						'% of the picture’s width. Press Save to draw it.');
+				})
+				.catch((e) => say('Could not send it: ' + e.message, true));
+		}
+
+		input.addEventListener('change', () => {
+			const file = input.files && input.files[0];
+			input.value = '';
+			if (!file) return;
+
+			const img = new Image();
+			const url = URL.createObjectURL(file);
+			img.onload = () => {
+				URL.revokeObjectURL(url);
+				// Bounded by what the camera will store, and said before the
+				// upload rather than refused after it: the file lands in the
+				// camera's writable overlay and becomes region memory on every
+				// stream carrying it.
+				if (img.width > 1024 || img.height > 1024) {
+					say('That picture is ' + img.width + '×' + img.height +
+						'. The camera draws up to 1024 each way.', true);
+					return;
+				}
+				if (img.width * img.height * 4 > (1 << 20)) {
+					say('That picture is more than a megabyte of pixels, ' +
+						'which is more than the camera will store.', true);
+					return;
+				}
+				const q = quantise(img);
+				shot.width = q.w;
+				shot.height = q.h;
+				shot.getContext('2d').drawImage(q.canvas, 0, 0);
+				shot.hidden = false;
+				empty.hidden = true;
+				upload(q);
+			};
+			img.onerror = () => {
+				URL.revokeObjectURL(url);
+				say('That file is not a picture this browser can open.', true);
+			};
+			img.src = url;
+		});
+
+		drop.addEventListener('click', () => {
+			// An empty body removes the file; the field going empty is what
+			// makes the overlay draw its text again.
+			apiFetch('/api/v1/osd/image?overlay=' + overlay,
+				{ method: 'POST', credentials: 'same-origin' })
+				.catch(() => {});
+			field.setValue('');
+			field.control.dispatchEvent(new Event('change', { bubbles: true }));
+			shot.hidden = true;
+			runVisibility();
+			updateDirty();
+			paint();
+			const t = tplField ? String(tplField.getValue() || '') : '';
+			say(t ? 'Removed. The overlay draws its text again.'
+				: 'Removed. Give the overlay some text, or it draws nothing.');
+		});
+
+		field.control.addEventListener('change', paint);
+		paint();
 	}
 
 	// The overlay's text, as pieces you can pick up.
