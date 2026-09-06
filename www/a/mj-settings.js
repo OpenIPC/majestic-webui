@@ -579,6 +579,12 @@
 		// exactly the kind of listener the comment above is about: it has to
 		// come off when the section goes, not when a replacement happens to
 		// mount, or Escape keeps being intercepted from another tab entirely.
+		// Held only so the anchor pad can push what it just wrote. It lives in
+		// the leaf's own subtree and goes with it, but a stale reference here
+		// would have the next section's pad — if one ever exists — pushing
+		// through a dead one.
+		state.osdPlacer = null;
+
 		if (state.ircutMap && state.ircutMap.destroy) {
 			try { state.ircutMap.destroy(); } catch (e) { /* best-effort */ }
 			state.ircutMap = null;
@@ -2640,6 +2646,29 @@
 			});
 		state.preview = preview;
 
+		// ── the picture belongs to the overlay ───────────────────────────
+		//
+		// An overlay can be in any of nine places, so the player's own
+		// furniture may be in none of them. The bar is pinned to the bottom
+		// edge of the stage, which is exactly where the commonest overlay of
+		// all goes: on a stock camera the timestamp and the snapshot and
+		// fullscreen buttons are drawn on top of one another, and the overlay
+		// wins because the camera burned it into the stream. Shipped
+		// behaviour, and the reason it survived is that nothing errors — it
+		// just looks untidy and the two controls a person reaches for most on
+		// this page are the ones underneath it.
+		//
+		// Down here the bar costs a row of page and nothing of picture. Moving
+		// the node rather than restyling it in place keeps mj-preview.js the
+		// only thing that builds a bar; this leaf only says where it goes.
+		let barRow = null;
+		if (preview) {
+			preview.stage.classList.add('mj-osd-stage');
+			barRow = el('div', 'mj-osd-bar box');
+			barRow.appendChild(preview.bar);
+			preview.stage.insertAdjacentElement('afterend', barRow);
+		}
+
 		// No knob strip on this leaf. Size would be the one thing worth dragging
 		// while watching, but osd.size is a STRING in the schema ("1.0"), so it
 		// renders as a text row and a text row in the strip is a card built for
@@ -2652,11 +2681,28 @@
 		deck.appendChild(colLook);
 		form.appendChild(deck);
 
-		const textBody = liveGroup(colText, 'Text', 'what it says');
-		// Two groups in one column: whether it is shown at all is not a question
-		// about whether you can read it.
+		// ── the inspector ────────────────────────────────────────────────
+		//
+		// What an overlay says, how it looks and where it goes are the three
+		// questions you ask WHILE looking at it, and on a 1440x900 laptop the
+		// deck that held them is entirely below the fold: the picture is sized
+		// from the viewport height, so the settings start under it. The answer
+		// is not a shorter picture. It is that the settings for the thing you
+		// clicked come to the thing you clicked.
+		//
+		// The tabs are containers and nothing more. Every control below still
+		// mounts through renderField() and buildTemplate() exactly as it did
+		// when they were columns in a deck — this only says where. That is what
+		// keeps Save, dirty tracking, the per-row reset and the schema's own
+		// visibleWhen rules working without any of them learning a panel exists.
+		const panel = preview ? mountOsdPanel(preview) : null;
+		const textBody = panel ? panel.tab('text') : liveGroup(colText, 'Text', 'what it says');
+		const lookBody = panel ? panel.tab('look') : liveGroup(colLook, 'Legibility', '');
+		const placeBody = panel ? panel.tab('place') : colText;
+		// Whether it is shown at all is not a question about the overlay you
+		// are editing — it is a question about the leaf — so it stays on the
+		// page rather than joining the panel.
 		const onBody = liveGroup(colLook, 'Overlay', '');
-		const lookBody = liveGroup(colLook, 'Legibility', '');
 
 		const maskDeck = el('div', 'mj-live-deck');
 		const colMask = el('div', 'mj-live-col');
@@ -2665,27 +2711,32 @@
 		const maskBody = liveGroup(colMask, 'Privacy masks', 'none');
 		const maskNote = colMask.querySelector('.mj-live-grp-head .mj-live-note');
 
-		// Where each field goes, and which of them this leaf drives instead of
-		// showing. The placement four render hidden — the picture edits them —
-		// on the same pattern the nightMode pin map uses, so Save, dirty
-		// tracking and the per-row reset never learn a drag exists, and a camera
-		// that cannot show a picture gets them back as plain fields.
+		// Where each field goes.
+		//
+		// The placement five are ROWS again, in the Place tab, which is what
+		// #340 asked for: they were rendered hidden and driven only by the drag,
+		// so a position could only be as accurate as the mouse was and could not
+		// be reproduced on the next camera. The anchor keeps a pad above it —
+		// nine cells that are the nine anchors, in the arrangement they name —
+		// but the pad writes the row rather than replacing it, and the schema's
+		// own visibleWhen still decides which offsets are shown for the anchor
+		// in force. Nothing here is hidden from Save or from the reset arrow.
 		const PLACE = { anchor: 1, offsetX: 1, offsetY: 1, posX: 1, posY: 1 };
 		const held = {};
 		for (const f of fields) {
 			const k = f.key;
-			const hidden = !!PLACE[k] && !!preview;
 			const box = k === 'enabled' ? onBody
 				: k === 'template' ? textBody
-				: (PLACE[k] ? textBody : lookBody);
+				: (PLACE[k] ? placeBody : lookBody);
 			if (k === 'privacyMasks') continue;   // mounted below, in its own deck
 			const field = renderField(box, f.dot, k, f.sub,
-				getDotted(state.config, f.dot), hidden ? { hidden: true } : undefined);
+				getDotted(state.config, f.dot));
 			if (!field) continue;
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
 			held[k] = field;
 		}
+		if (panel && held.anchor) panel.pad(held);
 
 		// One question, asked once: hiding the raw coordinate rows is only
 		// right where something is going to draw them instead. Asked twice —
@@ -2749,7 +2800,8 @@
 
 		let placer = null;
 		if (preview && held.anchor) {
-			placer = mountOsdText(preview, held, note);
+			placer = mountOsdText(preview, held, note, panel);
+			state.osdPlacer = placer;
 			repaint = () => { placer.repaint(); if (masks) masks.repaint(); };
 		} else if (masks) {
 			repaint = masks.repaint;
@@ -2759,7 +2811,7 @@
 		// rather than letting the drag guess, and it is the only new control the
 		// bar gains.
 		if (preview && (placer || masks)) {
-			const seg = el('span', 'mj-hud mj-seg mj-osd-mode');
+			const seg = el('span', 'mj-hud mj-seg');
 			seg.setAttribute('role', 'group');
 			seg.setAttribute('aria-label', 'What a drag places');
 			const uid = 'mj-osd-mode';
@@ -2783,6 +2835,214 @@
 		}
 
 		if (!maskField) maskDeck.remove();
+		// With the panel mounted, the deck holds only the on/off switch — the
+		// two columns it was built for are on the picture now. An empty column
+		// is a border and some padding around nothing.
+		if (panel) {
+			colText.remove();
+			colLook.classList.remove('mj-live-col-b');
+		}
+	}
+
+	// The panel the overlay's settings live in: a card on the picture, opened
+	// by clicking the overlay and moved by its header.
+	//
+	// It is deliberately thin. It owns a header, three tab buttons and three
+	// empty bodies; every control inside is mounted by the same renderField()
+	// and buildTemplate() calls that filled the deck before, so nothing about
+	// saving, dirty tracking, resetting or the schema's visibleWhen rules had to
+	// learn about it. The one thing it adds is the anchor pad, and even that
+	// writes the anchor ROW rather than standing in for it.
+	function mountOsdPanel(preview) {
+		const P = window.MajesticPlace;
+		const box = el('div', 'mj-osd-panel');
+		box.innerHTML =
+			'<div class="mj-osd-panel-head">' +
+				'<svg viewBox="0 0 20 20" width="12" height="12" fill="none" ' +
+					'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" ' +
+					'aria-hidden="true"><path d="M7 6h.01M7 10h.01M7 14h.01M13 6h.01' +
+					'M13 10h.01M13 14h.01"></path></svg>' +
+				'<span class="mj-cap mj-osd-panel-name"></span>' +
+				'<button type="button" class="mj-osd-panel-x" aria-label="Close">' +
+					'<svg viewBox="0 0 20 20" width="13" height="13" fill="none" ' +
+					'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" ' +
+					'aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"></path>' +
+					'</svg></button>' +
+			'</div>' +
+			'<div class="mj-osd-tabs" role="tablist"></div>' +
+			'<div class="mj-osd-bodies"></div>';
+		preview.overlay.appendChild(box);
+
+		const tabs = box.querySelector('.mj-osd-tabs');
+		const bodies = box.querySelector('.mj-osd-bodies');
+		const made = {};
+		const TABS = [['text', 'Text'], ['look', 'Look'], ['place', 'Place']];
+		let open = 'place';
+
+		for (const [id, word] of TABS) {
+			const b = el('button', 'mj-osd-tab');
+			b.type = 'button';
+			b.textContent = word;
+			b.setAttribute('role', 'tab');
+			b.addEventListener('click', () => show(id));
+			tabs.appendChild(b);
+			const body = el('div', 'mj-osd-body');
+			bodies.appendChild(body);
+			made[id] = { btn: b, body: body };
+		}
+
+		function show(id) {
+			open = id;
+			for (const [tid] of TABS) {
+				made[tid].btn.classList.toggle('mj-osd-tab-on', tid === id);
+				made[tid].btn.setAttribute('aria-selected', tid === id ? 'true' : 'false');
+				made[tid].body.hidden = tid !== id;
+			}
+		}
+		show(open);
+
+		// Dragged by its header, and bounded by the picture. It cannot be
+		// dropped somewhere it cannot be picked up again.
+		const headEl = box.querySelector('.mj-osd-panel-head');
+		let grab = null;
+		headEl.addEventListener('pointerdown', (e) => {
+			if (e.button) return;
+			const r = box.getBoundingClientRect();
+			grab = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top };
+			try { headEl.setPointerCapture(e.pointerId); } catch (err) {}
+			e.preventDefault();
+			e.stopPropagation();
+		});
+		headEl.addEventListener('pointermove', (e) => {
+			if (!grab || e.pointerId !== grab.id) return;
+			const s = preview.stage.getBoundingClientRect();
+			const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+			box.style.left = clamp(e.clientX - s.left - grab.dx, 8,
+				Math.max(8, s.width - box.offsetWidth - 8)) + 'px';
+			box.style.top = clamp(e.clientY - s.top - grab.dy, 8,
+				Math.max(8, s.height - 48)) + 'px';
+			box.style.right = 'auto';
+			box.style.bottom = 'auto';
+		});
+		const drop = (e) => {
+			if (grab && e.pointerId === grab.id) grab = null;
+		};
+		headEl.addEventListener('pointerup', drop);
+		headEl.addEventListener('pointercancel', drop);
+
+		box.querySelector('.mj-osd-panel-x')
+			.addEventListener('click', () => { box.hidden = true; });
+
+		// On a picture too narrow to hold it, the panel moves off the picture.
+		// Measured rather than assumed, and the node is MOVED rather than
+		// restyled: it lives in the stage's overlay, which is clipped to the
+		// stage, so no amount of CSS puts it underneath from in there. The mount
+		// below the bar is created once and stays empty while the panel is on
+		// the picture.
+		const NARROW = 560;
+		let dockMount = null, docked = null;
+		function dock(on) {
+			if (on === docked) return;
+			docked = on;
+			if (on) {
+				if (!dockMount) {
+					dockMount = el('div', 'mj-osd-panel-mount');
+					const after = preview.stage.nextElementSibling;
+					preview.stage.parentNode.insertBefore(
+						dockMount, after ? after.nextElementSibling : null);
+				}
+				box.style.left = box.style.top = '';
+				box.style.right = box.style.bottom = '';
+				box.classList.add('mj-osd-panel-docked');
+				dockMount.appendChild(box);
+			} else {
+				box.classList.remove('mj-osd-panel-docked');
+				preview.overlay.appendChild(box);
+			}
+		}
+		function measure() { dock(preview.stage.clientWidth < NARROW); }
+		let ro = null;
+		if (window.ResizeObserver) {
+			ro = new ResizeObserver(measure);
+			ro.observe(preview.stage);
+		} else {
+			window.addEventListener('resize', measure);
+		}
+		state.liveCleanup.push(() => {
+			if (ro) ro.disconnect();
+			else window.removeEventListener('resize', measure);
+		});
+		measure();
+		// A press inside must not reach the drag catcher underneath.
+		box.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+		return {
+			el: box,
+			tab: (id) => made[id].body,
+			reveal: (id) => {
+				box.hidden = false;
+				if (id) show(id);
+			},
+			// What it is called, derived rather than stored: a text overlay is
+			// the line it prints. Nothing anywhere holds a name for it.
+			name: (text) => {
+				const t = String(text || '').trim();
+				box.querySelector('.mj-osd-panel-name').textContent =
+					t ? (t.length > 24 ? t.slice(0, 23) + '…' : t) : 'Overlay';
+			},
+			// Nine cells that are the nine anchors, in the arrangement they
+			// name. It writes the anchor row; the row remains the truth.
+			pad: (held) => {
+				const wrap = el('div', 'mj-osd-pad-wrap');
+				const grid = el('div', 'mj-osd-pad');
+				const cells = [];
+				for (let iy = -1; iy <= 1; iy++) {
+					for (let ix = -1; ix <= 1; ix++) {
+						const b = el('button', 'mj-osd-cell');
+						b.type = 'button';
+						const nm = P.nameOf(ix, iy);
+						b.title = P.sayOf(nm);
+						b.setAttribute('aria-label', P.sayOf(nm));
+						const bar = el('i');
+						bar.style.width = (ix === 0 ? 14 : (iy === 0 ? 4 : 9)) + 'px';
+						bar.style.height = (iy === 0 ? 14 : 4) + 'px';
+						bar.style.margin = (iy < 0 ? '3px' : 'auto') + ' ' +
+							(ix > 0 ? '3px' : 'auto') + ' ' +
+							(iy > 0 ? '3px' : 'auto') + ' ' +
+							(ix < 0 ? '3px' : 'auto');
+						b.appendChild(bar);
+						b.addEventListener('click', () => {
+							held.anchor.setValue(nm);
+							runVisibility();
+							updateDirty();
+							lightPad();
+							if (state.osdPlacer) state.osdPlacer.pushNow();
+						});
+						grid.appendChild(b);
+						cells.push({ el: b, name: nm });
+					}
+				}
+				function lightPad() {
+					const cur = held.anchor.getValue();
+					const prop = P.isProportional(cur);
+					wrap.classList.toggle('mj-osd-pad-off', prop);
+					for (const c of cells)
+						c.el.classList.toggle('mj-osd-cell-on', !prop && c.name === cur);
+				}
+				// No caption: the anchor's own row sits directly beneath and is
+				// labelled, so a heading here would print the same word twice.
+				// The cells carry aria-labels, which is what a screen reader
+				// needs from a grid of nine unlabelled buttons.
+				grid.setAttribute('role', 'group');
+				grid.setAttribute('aria-label', 'Anchor');
+				wrap.appendChild(grid);
+				const row = made.place.body;
+				row.insertBefore(wrap, row.firstChild);
+				lightPad();
+				held.anchor.control.addEventListener('change', lightPad);
+				return { light: lightPad };
+			},
+		};
 	}
 
 	// Placement is a LIVE knob, and that is the whole difference.
@@ -2872,9 +3132,13 @@
 	// reason they are right here rather than free pixels: a named corner
 	// survives a change of resolution, and "16 px from the left" does not mean
 	// the same thing on a 1920 frame as on a 640 one.
-	function mountOsdText(preview, held, headNote) {
+	function mountOsdText(preview, held, headNote, panel) {
 		const P = window.MajesticPlace;
 		const stage = preview.stage;
+		// Where a press landed, so a TAP can be told from a drag: a tap on the
+		// overlay brings its panel back after it has been closed, and a drag
+		// must not.
+		let tapFrom = null;
 		// Focusable, because the arrow keys are half of what #340 asked for and
 		// a keydown listener on an unfocusable element never fires. Scoped to
 		// this leaf's own stage: mountOsdText is the Overlay leaf's and the
@@ -2888,7 +3152,7 @@
 		layer.appendChild(guides);
 		['gx-l', 'gx-c', 'gx-r'].forEach(c => guides.appendChild(el('span', 'mj-osd-g mj-osd-v ' + c)));
 		['gy-t', 'gy-c', 'gy-b'].forEach(c => guides.appendChild(el('span', 'mj-osd-g mj-osd-h ' + c)));
-		const ghost = el('div', 'mj-osd-ghost mono');
+		const ghost = el('div', 'mj-osd-ghost');
 		ghost.hidden = true;
 		layer.appendChild(ghost);
 		const read = el('span', 'mj-osd-read');
@@ -3045,6 +3309,7 @@
 
 		function paint() {
 			sayPlacement();
+			if (panel) panel.name(shown());
 			const p = pic();
 			layer.hidden = !active || !p;
 			catcher.hidden = !active || !p;
@@ -3143,6 +3408,7 @@
 			if (e.button || drag || !active) return;
 			const p = pic();
 			if (!p) return;
+			tapFrom = { x: e.clientX, y: e.clientY };
 			ghost.hidden = false;
 			read.hidden = false;
 			guides.classList.add('mj-osd-on');
@@ -3203,6 +3469,11 @@
 			drag = null;
 			guides.classList.remove('mj-osd-on');
 			if (!n || !p) { paint(); return; }
+			const moved = tapFrom &&
+				(Math.abs(e.clientX - tapFrom.x) > 4 ||
+				 Math.abs(e.clientY - tapFrom.y) > 4);
+			tapFrom = null;
+			if (!moved) { if (panel) panel.reveal(); paint(); return; }
 			commitTo(place(n.x - dx, n.y - dy, p));
 			paint();
 		}
@@ -3270,6 +3541,10 @@
 		return {
 			repaint: paint,
 			setActive: (on) => { active = !!on; paint(); },
+			// For anything that writes the placement rows directly — the anchor
+			// pad, a typed offset — so the camera follows a click the same way
+			// it follows a drag.
+			pushNow: () => { postLivePlace(placementDoc(held)); paint(); },
 		};
 	}
 
@@ -3296,7 +3571,7 @@
 		const opts = el('div', 'mj-tpl-opts');
 		opts.hidden = true;
 		wrap.appendChild(opts);
-		const raw = el('div', 'mj-tpl-raw');
+		const raw = el('div');
 		wrap.appendChild(raw);
 
 		let parts = [];

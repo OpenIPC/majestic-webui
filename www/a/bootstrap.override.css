@@ -1076,6 +1076,249 @@ mark {
 	--mj-pv-reserve: 21rem;
 }
 
+/* ── the Overlay leaf ────────────────────────────────────────────────────
+   Its own reserve, which is what the variable exists for. 17.6rem is the LIVE
+   leaf's arithmetic — stage top, 12px, the 76px knob strip, 16px — and this
+   leaf has no strip: what sits under its picture is one docked bar row. The
+   stylesheet has said since that value was written that another consumer with
+   a different deck under it would inherit the wrong answer silently, the
+   picture merely coming out too small, which reads as a design rather than as
+   a bug. This is that consumer, and this is it saying so.
+
+   The rest of the leaf — text, legibility, masks — is below the fold on
+   purpose: it is not what you look at the picture to change. What is, comes to
+   the picture. */
+.mj-pv-stage.mj-osd-stage {
+	--mj-pv-reserve: 14.5rem;
+}
+
+/* The bar, off the picture. Nothing here restyles the bar's own contents —
+   mj-preview.js still owns those; this only stops it floating. */
+.mj-osd-bar {
+	margin-top: 0.625rem;
+	padding: 0.4rem 0.625rem;
+}
+
+.mj-osd-bar .mj-pv-bar {
+	position: static;
+	inset: auto;
+	z-index: auto;
+	/* On the picture the bar is black glass because its ground is the video.
+	   On a card the ground is the card, so the groups take the page's own
+	   surface treatment and stop being a dark slab on a light one. */
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.mj-osd-bar .mj-pv-bar::-webkit-scrollbar { display: none; }
+
+/* ── the inspector ───────────────────────────────────────────────────────
+   The overlay's own settings, on the picture, because the deck that held them
+   starts below the fold on a laptop: the stage is sized from the viewport
+   height, so everything under it begins where the screen ends.
+
+   Black glass in both themes, like every other piece of on-picture chrome —
+   its ground is the video, not the page surface. It takes the pointer back
+   (the overlay layer above it is pointer-transparent by default) and sits
+   above the drag catcher, which is what stops a press inside it starting a
+   drag underneath. */
+.mj-osd-panel {
+	position: absolute;
+	left: 0.75rem;
+	top: 0.75rem;
+	z-index: 6;
+	width: 20.5rem;
+	max-width: calc(100% - 1.5rem);
+	max-height: calc(100% - 1.5rem);
+	display: flex;
+	flex-direction: column;
+	padding: 0 0.875rem 0.875rem;
+	background: rgba(13, 15, 20, 0.9);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+	backdrop-filter: blur(14px);
+	pointer-events: auto;
+	color: #e6e8ee;
+}
+
+/* The whole header is the handle. A panel that can be put somewhere else is
+   the answer to the one thing a panel on a picture cannot avoid — sooner or
+   later it is over the thing you want to see. */
+.mj-osd-panel-head {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.75rem 0 0.7rem;
+	color: #6a7182;
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+}
+
+.mj-osd-panel-head:active { cursor: grabbing; }
+
+.mj-osd-panel-name {
+	color: #9aa0ad;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mj-osd-panel-x {
+	margin-left: auto;
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.375rem;
+	height: 1.375rem;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
+	color: #9aa0ad;
+	cursor: pointer;
+}
+
+.mj-osd-panel-x:hover {
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+}
+
+.mj-osd-tabs {
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	margin-bottom: 0.7rem;
+	background: rgba(255, 255, 255, 0.07);
+	border-radius: var(--bs-border-radius);
+}
+
+.mj-osd-tab {
+	flex: 1 1 0;
+	padding: 0.3rem 0.5rem;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
+	color: #b6b9c2;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	cursor: pointer;
+}
+
+.mj-osd-tab-on {
+	background: rgba(255, 255, 255, 0.14);
+	color: #fff;
+}
+
+.mj-osd-bodies {
+	min-height: 0;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+
+/* The rows inside are the page's own, mounted here rather than in a deck, so
+   they need the colours the dark glass asks for and nothing else. */
+.mj-osd-body .form-control,
+.mj-osd-body .form-select {
+	background: rgba(0, 0, 0, 0.35);
+	border-color: rgba(255, 255, 255, 0.14);
+	color: #fff;
+}
+
+.mj-osd-body .mj-row > .form-label { color: #9aa0ad; }
+.mj-osd-body .mj-hint { color: #9aa0ad; }
+.mj-osd-body .mj-reset { color: #9aa0ad; }
+.mj-osd-body .mj-reset:hover:not(:disabled) {
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+}
+
+/* Nine cells that are the nine anchors, in the arrangement they name. It
+   replaces reading "bottom-right" off a select and mapping it onto the picture
+   yourself — the word is a second vocabulary for a thing you are looking at. */
+.mj-osd-pad-wrap { margin-bottom: 0.85rem; }
+.mj-osd-pad-wrap .mj-cap { margin: 0 0 0.4rem; color: #9aa0ad; }
+
+.mj-osd-pad {
+	display: grid;
+	grid-template-columns: repeat(3, 1.875rem);
+	grid-template-rows: repeat(3, 1.875rem);
+	gap: 3px;
+	padding: 3px;
+	width: fit-content;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: var(--bs-border-radius);
+}
+
+/* Proportional has no anchor, so the pad says so rather than showing nine
+   cells none of which is lit. */
+.mj-osd-pad-off .mj-osd-pad { opacity: 0.35; }
+
+.mj-osd-cell {
+	display: flex;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: none;
+	cursor: pointer;
+}
+
+.mj-osd-cell:hover { background: rgba(230, 232, 238, 0.09); }
+.mj-osd-cell-on { background: var(--bs-primary); }
+.mj-osd-cell i { display: block; border-radius: 1px; background: #6a7182; }
+.mj-osd-cell-on i { background: #fff; }
+
+/* On a narrow picture a 20.5rem panel IS the picture, so it moves off it —
+   the same trade dockRuntime makes for the runtime toggles, and for the same
+   reason. It cannot be done with a media query: the panel lives in the stage's
+   overlay, which is clipped to the stage, so a static position there is still
+   inside it. mountOsdPanel moves the node and sets this class.
+
+   Off the picture the ground is the card, so the glass goes with it. */
+.mj-osd-panel.mj-osd-panel-docked {
+	position: static;
+	width: auto;
+	max-width: none;
+	max-height: none;
+	margin-top: 0.625rem;
+	background: var(--bs-card-bg);
+	border-color: var(--bs-border-color);
+	box-shadow: var(--bs-box-shadow-sm);
+	backdrop-filter: none;
+	color: var(--bs-body-color);
+}
+
+.mj-osd-panel-docked .mj-osd-panel-head { cursor: default; }
+.mj-osd-panel-docked .mj-osd-panel-name { color: var(--bs-tertiary-color); }
+
+.mj-osd-panel-docked .form-control,
+.mj-osd-panel-docked .form-select {
+	background: var(--bs-body-bg);
+	border-color: var(--bs-border-color);
+	color: var(--bs-body-color);
+}
+
+.mj-osd-panel-docked .mj-row > .form-label,
+.mj-osd-panel-docked .mj-hint,
+.mj-osd-panel-docked .mj-reset { color: var(--bs-tertiary-color); }
+
+.mj-osd-panel-docked .mj-osd-tabs { background: var(--bs-tertiary-bg); }
+.mj-osd-panel-docked .mj-osd-tab-on {
+	background: var(--bs-primary);
+	color: #fff;
+}
+
+.mj-osd-panel-docked .mj-osd-pad {
+	background: var(--bs-tertiary-bg);
+	border-color: var(--bs-border-color);
+}
+
 /* A picture that is not the hero of its section: it fills the box it was put in
    — a card body, a column — and takes its height from its aspect ratio like any
    other block. The height-driven sizing above is for a stage that OWNS the
