@@ -3615,6 +3615,27 @@
 		}
 	}
 
+	// The Dashboard lets an owner record, on the camera, that it has no IR-cut
+	// filter fitted — nothing measurable separates that from one nobody has
+	// wired, so the owner is the only one who can say. Wiring a filter
+	// contradicts it, and j/ircut.cgi drops the claim whenever it is asked
+	// while a pad is assigned. What it cannot see is a pad that came and went
+	// between two questions, and this page is the only place that happens: the
+	// reporter of #367 wired the filter here, saved, took it away, saved again,
+	// and nothing asked the camera in between — so the claim survived the
+	// wiring that contradicted it and the Dashboard went on hiding a warning
+	// about a filter it could no longer move.
+	//
+	// So the save asks, while the pad is still there. Nothing is decided here
+	// and the answer is not read: the rule stays in one place, on the side that
+	// holds the fact, and this only puts the question at the one moment the
+	// answer can change.
+	function recheckNoFilterClaim() {
+		if (!isNumish(nightCfg().irCutPin1)) return;
+		apiFetch('/cgi-bin/j/ircut.cgi', { credentials: 'same-origin' })
+			.catch(() => { /* the Dashboard asks again on its own */ });
+	}
+
 	function paintFindings() {
 		const box = document.getElementById('mj-ircut-findings');
 		if (!box || !IRCUT) return;
@@ -5509,6 +5530,10 @@
 		// which `quiet` just skipped.
 		if (state.ircutRoles) state.ircutRoles();
 		syncTestBtn();
+		// A save or a reset is the one moment a pad can appear, and the only
+		// moment the camera can be shown one that is about to be taken away
+		// again.
+		recheckNoFilterClaim();
 		updateDirty();
 	}
 
