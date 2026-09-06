@@ -165,7 +165,7 @@ if grep -rnE '^[^#]*\b(cat|grep|egrep|fgrep|sed|awk|head|tail|cut|sort|uniq|tr|w
 	echo "  Read with mj_cfg (GET /api/v1/get), write with POST /api/v1/config." >> "$FAILS"
 fi
 
-# --- 4. page names --------------------------------------------------------
+# --- 5. page names --------------------------------------------------------
 # p/pages.cgi is the one place a page's name is written, and this is what keeps
 # it that way in both directions: a nav entry pointing at a page with no row
 # would render its own filename as its label, and a page with neither a row nor
@@ -189,7 +189,7 @@ for f in $(find www/cgi-bin -maxdepth 1 -name '*.cgi' | sort); do
 	printf '%s: no page_label row and no page_title of its own\n' "$f" >> "$FAILS"
 done
 
-# --- 5. links that go nowhere ---------------------------------------------
+# --- 6. links that go nowhere ---------------------------------------------
 # Every page path this tree writes -- href, location, fetch -- has to name a
 # file that exists. Renaming a page and missing one reference is not a runtime
 # error anywhere: the link simply 404s when somebody clicks it, which is a
