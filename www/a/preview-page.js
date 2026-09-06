@@ -74,7 +74,7 @@
 				autoOn = false;
 				autoCtl.checked = false;
 				if (s0) s0.checked = true;
-				stream = 0;
+				stream = wantSubtype = 0;
 			}
 		}
 		// "WxH" per channel. Auto compares areas, so parse once. The same
@@ -403,6 +403,15 @@
 	// streams as 3*camera + subtype.
 	let camera = 0;
 	let sources = [];
+	// The channel the VIEWER asked for, which is not always the one playing.
+	//
+	// `stream` above is what this source can actually honour: a webcam that
+	// publishes only MJPEG forces subtype 2 whatever was picked before it. That
+	// clamp used to be written back into the preference, so coming back to the
+	// on-board camera picked ITS subtype 2 — the 5 fps JPEG channel — and the
+	// sensor played over the MJPEG rung, having been on WebRTC a moment
+	// earlier. A clamp is what one source can do, not a change of mind.
+	let wantSubtype = 0;
 	// The remembered choice, so a camera watched from this browser comes back
 	// to the source it was left on. Per browser rather than on the camera, like
 	// the transport and the channel beside it: it is a viewing preference, and
@@ -588,12 +597,23 @@
 		// bug it guards, a control repainting the chip with the codec of the
 		// stream that failed, is exactly the one #274 photographed.
 		if (!badge || !chipMedia || fellBack || holdingFallback) return;
-		// WebRTC measures its own rate, MSE measures nothing so the configured
-		// rate stands in — and software decode measures, which is the entire
-		// point of that rung. Leaving it on the configured rate would make the
-		// chip claim 25 fps while the client managed 9, in exactly the case
-		// this exists to expose.
-		const fps = liveKind === 'mse' ? cfgFps[stream ? 1 : 0] : chipFps;
+		// WebRTC measures its own rate, and software decode measures, which is
+		// the entire point of that rung. Leaving those on a stated rate would
+		// make the chip claim 25 fps while the client managed 9, in exactly the
+		// case this exists to expose.
+		//
+		// MSE and the MJPEG rung measure nothing, so a stated rate stands in.
+		// It comes from /api/v1/sources where that answer exists, because
+		// cfgFps holds video0/video1 — the ON-BOARD channels — and reading it
+		// for another camera would print the sensor's rate over a webcam's
+		// picture. It is also the only answer for the MJPEG rung at all, which
+		// no config key describes: without it the chip read "MJPEG 640×480" and
+		// simply had no rate on it.
+		const info = curStreamInfo();
+		const stated = (info && info.fps > 0) ? info.fps
+			: (camera === 0 ? cfgFps[stream ? 1 : 0] : 0);
+		const fps = (liveKind === 'mse' || liveKind === 'multipart')
+			? stated : chipFps;
 		// The scale the picture is drawn at, because Fill covers the window by
 		// enlarging a stream smaller than the screen — a 1080p main on a 1440p
 		// monitor is 133%, the substream far more — and a soft picture with no
@@ -1460,6 +1480,10 @@
 	// USB webcam in its usual mode has one MJPEG stream and neither a Main nor
 	// a Sub to have chosen between.
 	function clampToSource(moved) {
+		// Everything upstream of this call CHOSE a channel; this call only
+		// accommodates what the source can serve. Recording the choice here is
+		// what keeps the two apart with one line rather than four.
+		wantSubtype = stream;
 		const S = window.MajesticSources;
 		const src = srcOf(camera);
 		const p = (S && src) ? S.pick(src, stream) : null;
@@ -1634,7 +1658,7 @@
 		// channel being left must not fire onto the new one.
 		wasmGen++;
 		cancelWasmRetry();
-		stream = n;
+		stream = wantSubtype = n;
 		// The two channels are two encoders; the baseline and any toast on
 		// screen describe the one being left.
 		if (window.MajesticAdapt) window.MajesticAdapt.reset();
@@ -1770,7 +1794,8 @@
 		// id the camera refuses.
 		const S = window.MajesticSources;
 		const src = srcOf(camera);
-		const pick = (S && src) ? S.pick(src, stream) : null;
+		// From the preference, not from what the last source was clamped to.
+		const pick = (S && src) ? S.pick(src, wantSubtype) : null;
 		if (pick) stream = pick.subtype;
 		syncStreamControls();
 		reflectSource();
@@ -1886,11 +1911,11 @@
 				autoOn = true;
 				lastAutoAt = 0;
 				const pick = autoPick();
-				if (pick !== null) stream = pick;
+				if (pick !== null) stream = wantSubtype = pick;
 				wantedCh = null;
 			} else {
 				autoOn = false;
-				stream = n;
+				stream = wantSubtype = n;
 				wantedCh = n;
 			}
 			// Straight to the top of the chain when there is a picture to

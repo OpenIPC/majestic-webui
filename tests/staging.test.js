@@ -1098,6 +1098,42 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.el('mj-auto').hidden === true);
 	}
 
+	// A clamp is what one source can do, not a change of mind. The webcam
+	// publishes only MJPEG, so selecting it forces subtype 2 — and writing that
+	// back into the preference meant coming home to the SENSOR's subtype 2, its
+	// 5 fps JPEG channel, on the MJPEG rung. The viewer had been on Main over
+	// WebRTC a moment earlier and got that back instead.
+	group('coming back from a source that forced a channel');
+	{
+		const env = load('webrtc', { 'jpeg.enabled': true, 'video1.enabled': true },
+			0, false, [SENSOR, USB]);
+		env.multipart = true;
+		await tick();
+		const first = env.made[env.made.length - 1];
+		check('the sensor opens on a NAL transport', first.kind === 'webrtc',
+			first.kind);
+
+		const inputs = env.el('mj-source').kids.filter(k => k.tag === 'input');
+		inputs[1].checked = true;
+		inputs[1].fire('change');
+		const onUsb = env.made[env.made.length - 1];
+		check('the webcam opens on the MJPEG rung', onUsb.kind === 'multipart',
+			onUsb.kind);
+		check('on its own stream', onUsb.opts.stream === 5,
+			String(onUsb.opts.stream));
+
+		inputs[0].checked = true;
+		inputs[0].fire('change');
+		const back = env.made[env.made.length - 1];
+		check('coming back does NOT land on the sensor\u2019s JPEG channel',
+			back.opts.stream !== 2, String(back.opts.stream));
+		check('it restores the channel the viewer had chosen',
+			back.opts.stream === first.opts.stream,
+			back.opts.stream + ' vs ' + first.opts.stream);
+		check('and the transport its codec implies, not the floor',
+			back.kind !== 'multipart', back.kind);
+	}
+
 	group('a remembered source comes back');
 	{
 		const env = load('mse', { 'jpeg.enabled': true }, 0, false, [SENSOR, USB]);
