@@ -4789,6 +4789,21 @@
 			control = p.querySelector('input');
 			const show = p.querySelector('.show-value');
 			control.addEventListener('input', () => { show.textContent = control.value; });
+			// A range input cannot be empty: given value="" the browser parks
+			// the thumb at the midpoint and .value reads that number, so an
+			// unset field reported itself as set — the night gain multiple,
+			// unset on every camera by default, read as 33 — and a note that
+			// applies only while the field holds a value drew under a control
+			// nobody had touched. The display beside the thumb is the page's
+			// own record of "nothing chosen": empty until an input or a real
+			// value arrives, so it is what getValue() asks, and a pushed-in
+			// empty value keeps it empty rather than copying the midpoint in.
+			control._get = () => (show.textContent === '' ? '' : String(control.value));
+			control._set = (v) => {
+				const s = v !== undefined && v !== null ? String(v) : '';
+				control.value = s;
+				show.textContent = s === '' ? '' : String(control.value);
+			};
 		} else if (type === 'integer') {
 			p = el('p', 'number mj-row');
 			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
