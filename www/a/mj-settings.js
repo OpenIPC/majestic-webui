@@ -2874,10 +2874,20 @@
 		// camera applies, read from the control so a line added here counts at
 		// once. The item list below words it; the picture needs it too, so that
 		// a press cannot pick up an overlay that is not being drawn.
+		//
+		// A LINE OR A PICTURE, exactly as osd_overlay_active() has it. Teaching
+		// the daemon that a logo makes an overlay exist and not teaching this
+		// left a logo-only overlay drawn on the video and absent from the item
+		// list — so there was no chip to select, and therefore no way to reach
+		// the thing that would change or remove it.
 		const lineOf = (n) => HELD[n] && HELD[n].template
 			? String(HELD[n].template.getValue() || '') : '';
+		const logoOf = (n) => HELD[n] && HELD[n].image
+			? String(HELD[n].image.getValue() || '') : '';
+		const saysAnything = (n) =>
+			lineOf(n).trim() !== '' || logoOf(n).trim() !== '';
 		const listedOverlay = (n) =>
-			!!placers[n] && (n === 0 || lineOf(n).trim() !== '');
+			!!placers[n] && (n === 0 || saysAnything(n));
 		// The first overlay, until something selects another. Said here rather
 		// than left to the item list, which does not exist on a leaf with no
 		// picture to put items on.
@@ -3013,7 +3023,7 @@
 			// the absence of an item.
 			const listed = () => OVERLAYS.filter(listedOverlay);
 			const spare = () =>
-				OVERLAYS.find(n => n > 0 && placers[n] && lineOf(n).trim() === '');
+				OVERLAYS.find(n => n > 0 && placers[n] && !saysAnything(n));
 
 			// {t: 'text', i: overlay} or {t: 'mask', i: index}.
 			let sel = anyPlacer ? { t: 'text', i: listed()[0] } : { t: 'mask', i: 0 };
@@ -3051,6 +3061,25 @@
 				if (panel) panel.reveal('text');
 			}
 
+			// Adding a LOGO is one act, not "add some text and then replace it
+			// with a picture". It takes the next free index, opens its panel
+			// and opens the file chooser straight away — this runs inside the
+			// press, so the chooser is allowed to open.
+			//
+			// Nothing is written until a picture is actually chosen: an
+			// overlay with neither a line nor a picture says nothing, so it is
+			// not listed, so a cancelled chooser leaves no empty item behind.
+			function addLogo() {
+				const n = spare();
+				if (n === undefined || !HELD[n].image) return;
+				pick({ t: 'text', i: n });
+				if (panel) panel.reveal('text');
+				const slot = panel ? panel.slot('text', n) : null;
+				const input = slot &&
+					slot.querySelector('.mj-logo input[type=file]');
+				if (input) input.click();
+			}
+
 			// And removing one is putting the whole overlay back to its declared
 			// defaults, template included. A member equal to its default is left
 			// out of a save, so the block leaves /etc/majestic.yaml rather than
@@ -3060,6 +3089,11 @@
 			// config has and no camera can be without.
 			function removeOverlay(n) {
 				if (!n || !HELD[n]) return;
+				// The file as well as the setting — but on Save, not now: see
+				// logoBin. Clearing the field alone would leave the picture in
+				// the camera's writable overlay, taking flash for an overlay
+				// that no longer refers to it.
+				if (logoOf(n).trim() !== '') logoBin.add(n);
 				for (const k of Object.keys(HELD[n])) {
 					const f = HELD[n][k];
 					const d = f.schema &&
@@ -3099,10 +3133,17 @@
 			function draw() {
 				chips.textContent = '';
 				for (const n of listed()) {
-					const t = lineOf(n);
 					const on = sel.t === 'text' && sel.i === n;
-					const c = chip('Text',
-						t.length > 20 ? t.slice(0, 19) + '…' : (t || 'Overlay'), on);
+					// What the CAMERA draws, which is the picture wherever
+					// there is one — a chip showing the template of an overlay
+					// that is drawing a logo names something nobody can see.
+					const logo = logoOf(n).trim() !== '';
+					const t = lineOf(n);
+					const c = logo
+						? chip('Logo', 'Picture', on)
+						: chip('Text',
+							t.length > 20 ? t.slice(0, 19) + '…' : (t || 'Overlay'),
+							on);
 					c.b.addEventListener('click', () => pick({ t: 'text', i: n }));
 					// The remove control rides the chip it removes, and only
 					// while that chip is the selected one: a row of crosses is a
@@ -3138,6 +3179,17 @@
 					add.title = 'Add another line of text to the picture';
 					add.addEventListener('click', addOverlay);
 					chips.appendChild(add);
+
+					// Only where the camera can draw one: the field exists
+					// exactly where the backend said it does.
+					if (HELD[spare()] && HELD[spare()].image) {
+						const lg = el('button', 'mj-osd-chip mj-osd-chip-add');
+						lg.type = 'button';
+						lg.textContent = '+ Logo';
+						lg.title = 'Put a picture on the video';
+						lg.addEventListener('click', addLogo);
+						chips.appendChild(lg);
+					}
 				}
 			}
 
@@ -3154,9 +3206,14 @@
 			// So does an overlay's own line — it is the chip's label, and above
 			// overlay 0 it is also whether the chip is there at all.
 			for (const n of OVERLAYS) {
-				if (!HELD[n].template) continue;
-				HELD[n].template.control.addEventListener('input', draw);
-				HELD[n].template.control.addEventListener('change', draw);
+				if (HELD[n].template) {
+					HELD[n].template.control.addEventListener('input', draw);
+					HELD[n].template.control.addEventListener('change', draw);
+				}
+				// A picture chosen or removed changes the chip's kind, and
+				// above overlay 0 it changes whether the chip is there at all.
+				if (HELD[n].image)
+					HELD[n].image.control.addEventListener('change', draw);
 			}
 
 			// A press on the picture selects through exactly the same door the
@@ -3481,6 +3538,26 @@
 	// build before this had.
 	const camRects = { by: {}, ok: true };
 
+	// Logo files whose overlay has been cleared but not yet saved.
+	//
+	// Deleting the file when the cross is pressed would change the camera on
+	// an unsaved edit: the config would still point at it, the load would
+	// fail, and the logo would vanish from the video before anyone pressed
+	// Save — which is the one thing this page does not do. So the removal is
+	// staged like every other edit and the file goes when the save lands.
+	// Choosing a new picture for the same overlay takes it back off the list,
+	// because that upload has already overwritten the file.
+	const logoBin = new Set();
+
+	function flushLogoBin() {
+		for (const n of Array.from(logoBin)) {
+			apiFetch('/api/v1/osd/image?overlay=' + n,
+				{ method: 'POST', credentials: 'same-origin' })
+				.catch(() => {});
+		}
+		logoBin.clear();
+	}
+
 	function refreshOsdRects() {
 		if (!camRects.ok) return Promise.resolve();
 		return apiFetch('/api/v1/osd', { credentials: 'same-origin' })
@@ -3616,6 +3693,11 @@
 			};
 			const out = String(t).replace(/%[-_0]?([a-zA-Z@$%])/g,
 				(m, c) => (map[c] !== undefined ? map[c] : m));
+			// A logo is what the camera draws where there is one, so the
+			// stand-in says so rather than reading out a template that is not
+			// on the video.
+			if (held.image && String(held.image.getValue() || '').trim())
+				return 'Logo';
 			return out || 'Overlay';
 		}
 
@@ -3642,10 +3724,26 @@
 		}
 
 		// The box the overlay occupies on screen, for the arithmetic below.
-		const box = () => ({
-			w: ghost.offsetWidth || 120,
-			h: ghost.offsetHeight || 20,
-		});
+		//
+		// The camera's own rectangle wherever it is known, and the stand-in's
+		// measured size otherwise. The drag maths is built on this — where the
+		// overlay is now, where a drop would put it, how far the anchor pulls
+		// it — so an estimate here is an estimate in all of it. It matters most
+		// for a logo, whose stand-in is a word and whose real shape is a
+		// picture of no relation to it.
+		const box = () => {
+			const f = preview.frame();
+			const cam = hooks.camRect && f ? hooks.camRect(overlay, f) : null;
+			const p = cam ? pic() : null;
+			if (cam && p && f.w) {
+				const k = p.w / f.w;
+				return { w: cam.w * k, h: cam.h * k };
+			}
+			return {
+				w: ghost.offsetWidth || 120,
+				h: ghost.offsetHeight || 20,
+			};
+		};
 
 		// The span an offset is measured against is the frame being SHOWN,
 		// which is the picture on screen — not video0. That is the same reading
@@ -4157,6 +4255,9 @@
 					throw new Error(t || ('HTTP ' + r.status));
 				})))
 				.then((j) => {
+					// This upload has already overwritten the file, so a
+					// removal staged earlier in this visit must not delete it.
+					logoBin.delete(overlay);
 					// The camera decides the path; this only records it, and
 					// it is a staged edit like any other until Save.
 					field.setValue(j.path);
@@ -6578,6 +6679,8 @@
 			// later change made anywhere else — the CLI, another browser — would
 			// be written, reported saved, and not appear.
 			revertOsdPlace();
+			// The config no longer names them, so the files can go.
+			flushLogoBin();
 			await refresh();
 			// refresh() has just re-read the config, so this asks the camera
 			// rather than the form. A pin still holding a number here means the
