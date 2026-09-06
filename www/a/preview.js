@@ -43,6 +43,7 @@ window.MajesticVideo = (function () {
 		let stream = opts.stream | 0;
 		let ws = null, ms = null, sb = null, objUrl = null;
 		let queue = [], started = false, mime = null;
+		let skipInitBinary = false;
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let gotSignal = false, signalTimer = null, failCount = 0;
 		// From the caller: this player is also staged as a replacement now, and
@@ -157,12 +158,28 @@ window.MajesticVideo = (function () {
 			// no-opping. No reconnect here — this stream is already what a mute
 			// would have produced.
 			if (wantAudio && !info.audioCodec) { wantAudio = false; video.muted = true; }
-			mime = info.mime || ('video/mp4; codecs="' + info.codecString + '"');
-			if (!mseOk || !MediaSource.isTypeSupported(mime)) {
+			const newMime = info.mime || ('video/mp4; codecs="' + info.codecString + '"');
+			if (!mseOk || !MediaSource.isTypeSupported(newMime)) {
 				onState('mjpeg', 'undecodable ' + info.codec);
 				stop();
 				return;
 			}
+			// A re-sent init identical to the one already playing is a
+			// re-announcement, not a reconfigure. Some encoders emit the parameter
+			// sets on every keyframe, so the camera re-sends the init each time;
+			// rebuilding MediaSource for it resets the decoder and blanks the
+			// picture once per keyframe -- the Safari flash and the jerky H.265 of
+			// OpenIPC/majestic-webui#269 / #335. Keep the running decoder and drop
+			// the redundant init segment (this message and the binary moov that
+			// follows it): the camera's fragment timeline is continuous across the
+			// re-announcement, so the fragments after it keep appending to the
+			// existing buffer. A real reconfigure changes the codec, resolution or
+			// audio track, which changes the mime and takes the rebuild path below.
+			if (started && sb && ms && ms.readyState === 'open' && newMime === mime) {
+				skipInitBinary = true;
+				return;
+			}
+			mime = newMime;
 			teardownMse();
 			ms = new MediaSource();
 			objUrl = URL.createObjectURL(ms);
@@ -190,6 +207,9 @@ window.MajesticVideo = (function () {
 		}
 
 		function onBinary(buf) {
+			// A redundant init (see onInit) is followed by its binary moov; drop
+			// that one segment so it is not re-appended to the running buffer.
+			if (skipInitBinary) { skipInitBinary = false; return; }
 			rxBytes += buf.byteLength || 0;
 			queue.push(new Uint8Array(buf));
 			if (queue.length > MAX_QUEUE) queue.splice(0, queue.length - MAX_QUEUE);

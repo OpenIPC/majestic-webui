@@ -86,14 +86,18 @@ function load() {
 			listeners: {},
 			addEventListener(ev, fn) { ms.listeners[ev] = fn; },
 			addSourceBuffer() {
-				return {
-					updating: false, mode: '', buffered: { length: 0 },
-					addEventListener() {}, appendBuffer() {}, remove() {}, abort() {},
+				const sb = {
+					updating: false, mode: '', buffered: { length: 0 }, appends: 0,
+					addEventListener() {}, appendBuffer() { this.appends++; },
+					remove() {}, abort() {},
 				};
+				env.sb = sb;
+				return sb;
 			},
 			removeSourceBuffer() {}, endOfStream() {},
 		};
 		env.ms = ms;
+		env.msCount = (env.msCount || 0) + 1;
 		return ms;
 	};
 	MediaSourceStub.isTypeSupported = () => true;
@@ -107,6 +111,7 @@ function load() {
 		location: { protocol: 'http:', host: 'camera' },
 		console: console, JSON: JSON, Promise: Promise,
 		setTimeout, clearTimeout, setInterval, clearInterval,
+		Uint8Array,
 	};
 	vm.createContext(ctx);
 	vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
@@ -194,6 +199,53 @@ function load() {
 			env.sockets[0].silent());
 		await sleep(1300);
 		check('nothing reconnected', env.sockets.length === 1, env.sockets.length + '');
+	}
+
+	group('a re-sent init identical to the running one keeps the decoder');
+	{
+		// Some encoders emit the parameter sets on every keyframe, so the
+		// camera re-announces the stream — the same init frame, over and over.
+		// Rebuilding MediaSource for each one resets the decoder and blanks the
+		// picture once per keyframe: the Safari flash and jerky H.265 of
+		// majestic-webui#269 / #335. The running decoder has to be kept, and
+		// the redundant init segment (the binary moov that follows the frame)
+		// dropped rather than re-appended.
+		const env = load();
+		env.play();
+		check('one decoder built to start with', env.msCount === 1, env.msCount + '');
+		const s = env.sockets[0];
+		s.fire('message', { data: { byteLength: 100 } });
+		check('a media fragment is appended', env.sb.appends === 1, env.sb.appends + '');
+
+		// The camera re-announces the same stream.
+		s.fire('message', { data: JSON.stringify(
+			{ type: 'init', codec: 'h264', codecString: 'avc1.4d001f' }) });
+		check('no second decoder was built', env.msCount === 1, env.msCount + '');
+		check('the picture kept the same buffer', env.sb.appends === 1, env.sb.appends + '');
+
+		// The binary moov that follows the redundant frame is dropped, not
+		// appended; the next real fragment resumes.
+		s.fire('message', { data: { byteLength: 200 } });
+		check('the redundant init segment was not appended', env.sb.appends === 1, env.sb.appends + '');
+		s.fire('message', { data: { byteLength: 100 } });
+		check('fragments after it keep flowing', env.sb.appends === 2, env.sb.appends + '');
+		env.player.destroy();
+	}
+
+	group('a real reconfigure still rebuilds the decoder');
+	{
+		// A changed codec, resolution or audio track changes the mime the
+		// decoder is configured from, and that genuinely needs a new
+		// MediaSource — the guard above must not swallow it.
+		const env = load();
+		env.play();
+		check('one decoder to start with', env.msCount === 1, env.msCount + '');
+		const s = env.sockets[0];
+		s.fire('message', { data: JSON.stringify(
+			{ type: 'init', codec: 'h264', codecString: 'avc1.640028' }) });
+		if (env.ms && env.ms.listeners.sourceopen) env.ms.listeners.sourceopen();
+		check('a changed init built a second decoder', env.msCount === 2, env.msCount + '');
+		env.player.destroy();
 	}
 
 	done();
