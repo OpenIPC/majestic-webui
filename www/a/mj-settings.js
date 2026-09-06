@@ -2799,30 +2799,73 @@
 	// nothing rebuilt. The fields stage until Save like everything else on the
 	// page, and abandoning the drag reverts through the same path every other
 	// live knob already uses.
-	const osdLiveQuery = (name, ox, oy) =>
-		'anchor=' + encodeURIComponent(name) +
-		'&offsetX=' + encodeURIComponent(ox) +
-		'&offsetY=' + encodeURIComponent(oy);
+	// The live placement push, as a DOCUMENT rather than a query string.
+	//
+	// majestic takes the same nested shape /api/v1/config takes, addressed by
+	// real dotted paths. The query form it replaces read a key by its LAST
+	// dotted segment, so `osd.overlays.1.anchor` and `osd.overlays.2.anchor`
+	// both arrived as `anchor=` and moved the same overlay — the wire format,
+	// not the feature, was the ceiling on several overlays.
+	//
+	// An older daemon has no /api/v1/live and answers 404. That is remembered
+	// once and the query form is used from then on: it can say everything a
+	// single overlay needs, which is everything those builds have.
+	let liveDoc = true;
+	function postLivePlace(doc) {
+		if (liveDoc) {
+			return postLiveJson(doc).then((ok) => {
+				if (ok) return;
+				liveDoc = false;
+				return postLive(legacyQuery(doc));
+			});
+		}
+		return postLive(legacyQuery(doc));
+	}
 
-	// The nine named anchors, as majestic orders them. -1 is the near edge (left
-	// or top), 0 centred, 1 the far edge — the same two tables the camera's own
-	// overlay placement indexes, so a name picked here means the same thing there.
-	const OSD_ANCHORS = [
-		['top-left', -1, -1], ['top', 0, -1], ['top-right', 1, -1],
-		['left', -1, 0], ['center', 0, 0], ['right', 1, 0],
-		['bottom-left', -1, 1], ['bottom', 0, 1], ['bottom-right', 1, 1],
-	];
-	const anchorName = (sx, sy) => {
-		const hit = OSD_ANCHORS.find(a => a[1] === sx && a[2] === sy);
-		return hit ? hit[0] : 'top-left';
-	};
-	const anchorSides = (name) => {
-		const hit = OSD_ANCHORS.find(a => a[0] === name);
-		return hit ? { x: hit[1], y: hit[2] } : null;
-	};
-	const SAY_SIDE = { '-1,-1': 'Top left', '0,-1': 'Top', '1,-1': 'Top right',
-		'-1,0': 'Left', '0,0': 'Centre', '1,0': 'Right',
-		'-1,1': 'Bottom left', '0,1': 'Bottom', '1,1': 'Bottom right' };
+	// The same three keys the old endpoint understood, for the fallback. posX
+	// and posY are sent too: an older daemon ignores them, and one new enough
+	// to have learnt the proportional override but not the document form does
+	// not exist.
+	function legacyQuery(doc) {
+		const o = doc.osd || {};
+		const bit = (k, v) => v === undefined ? '' :
+			'&' + k + '=' + encodeURIComponent(v);
+		return 'anchor=' + encodeURIComponent(o.anchor === undefined ? '' : o.anchor) +
+			bit('offsetX', o.offsetX) + bit('offsetY', o.offsetY) +
+			bit('posX', o.posX) + bit('posY', o.posY);
+	}
+
+	// Serialised behind the same promise chain every other live push uses, and
+	// swallowing its own failures for the same reason: a move that cannot land
+	// must not wedge the ones after it or interrupt the drag.
+	let liveJsonWrite = Promise.resolve();
+	function postLiveJson(doc) {
+		liveJsonWrite = liveJsonWrite.then(() =>
+			apiFetch('/api/v1/live', {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(doc),
+			}).then((r) => r.ok || r.status === 400, () => false));
+		return liveJsonWrite;
+	}
+
+	// The placement the fields currently describe, as the document to send.
+	// Whole every time: majestic installs a whole placement or none, and a
+	// request naming only half of one would leave the camera to guess the rest.
+	function placementDoc(held) {
+		const P = window.MajesticPlace;
+		const anchor = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+		const osd = { anchor: anchor };
+		if (P.isProportional(anchor)) {
+			if (held.posX) osd.posX = String(held.posX.getValue());
+			if (held.posY) osd.posY = String(held.posY.getValue());
+		} else {
+			if (held.offsetX) osd.offsetX = String(held.offsetX.getValue());
+			if (held.offsetY) osd.offsetY = String(held.offsetY.getValue());
+		}
+		return { osd: osd };
+	}
 
 	// Placing the overlay by dragging it, with the picture's own edges and
 	// middles as magnets — the sticky guides every layout tool has, and the
@@ -2830,7 +2873,13 @@
 	// survives a change of resolution, and "16 px from the left" does not mean
 	// the same thing on a 1920 frame as on a 640 one.
 	function mountOsdText(preview, held, headNote) {
+		const P = window.MajesticPlace;
 		const stage = preview.stage;
+		// Focusable, because the arrow keys are half of what #340 asked for and
+		// a keydown listener on an unfocusable element never fires. Scoped to
+		// this leaf's own stage: mountOsdText is the Overlay leaf's and the
+		// preview handle is per-mount.
+		stage.tabIndex = 0;
 		let active = true, drag = null;
 
 		const layer = el('div', 'mj-osd-layer');
@@ -2921,38 +2970,81 @@
 			return Math.max(8, p.w / 96 * size);
 		}
 
-		// Where the overlay is now, from the fields the camera is reading.
-		function current(p) {
-			const a = held.anchor.getValue();
-			const sides = anchorSides(a);
-			const w = ghost.offsetWidth || 120, h = ghost.offsetHeight || 20;
-			if (!sides) {
-				// proportional: posX/posY run -16 (far edge) .. 16 (near edge)
-				const map = (v, span, size) => {
-					const t = (16 - Math.min(Math.max(+v || 0, -16), 16)) / 32;
-					return t * Math.max(0, span - size);
-				};
-				return {
-					x: p.x + map(held.posX && held.posX.getValue(), p.w, w),
-					y: p.y + map(held.posY && held.posY.getValue(), p.h, h),
-				};
-			}
-			// The span an offset is measured against is the frame being SHOWN,
-			// which is the picture on screen — not video0. That is the same
-			// reading majestic takes per channel, which is why a share travels
-			// between them and a pixel count does not.
+		// The box the overlay occupies on screen, for the arithmetic below.
+		const box = () => ({
+			w: ghost.offsetWidth || 120,
+			h: ghost.offsetHeight || 20,
+		});
+
+		// The span an offset is measured against is the frame being SHOWN,
+		// which is the picture on screen — not video0. That is the same reading
+		// majestic takes per channel, which is why a share travels between them
+		// and a pixel count does not.
+		function spans(p) {
 			const f = preview.frame();
 			const emPx = em(p);
-			const ox = offsetFrac(held.offsetX && held.offsetX.getValue(),
-				f ? f.w : 0, emPx * (f ? f.w / p.w : 1)) * p.w;
-			const oy = offsetFrac(held.offsetY && held.offsetY.getValue(),
-				f ? f.h : 0, emPx * (f ? f.h / p.h : 1)) * p.h;
-			const ax = sides.x < 0 ? ox : sides.x > 0 ? p.w - w - ox : (p.w - w) / 2;
-			const ay = sides.y < 0 ? oy : sides.y > 0 ? p.h - h - oy : (p.h - h) / 2;
-			return { x: p.x + ax, y: p.y + ay };
+			return {
+				w: f ? f.w : 0, h: f ? f.h : 0,
+				emx: emPx * (f && p.w ? f.w / p.w : 1),
+				emy: emPx * (f && p.h ? f.h / p.h : 1),
+			};
+		}
+
+		// Which spelling this camera's offsets are written in. A bare non-zero
+		// really is pixels and stays pixels; a bare zero carries no choice, and
+		// a share is what travels between Main and Sub.
+		function unit() {
+			const s = spans(pic() || { w: 0, h: 0 });
+			const x = P.unitOf(held.offsetX && held.offsetX.getValue());
+			const y = P.unitOf(held.offsetY && held.offsetY.getValue());
+			void s;
+			return x || y || P.DEFAULT_UNIT;
+		}
+
+		// Where the overlay is now, from the fields the camera is reading.
+		function current(p) {
+			const a = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+			const b = box();
+			if (P.isProportional(a)) {
+				return P.proportionalSpot(
+					p, b,
+					held.posX && held.posX.getValue(),
+					held.posY && held.posY.getValue());
+			}
+			const sp = spans(p);
+			const fx = P.toFrac(
+				held.offsetX && held.offsetX.getValue(), sp.w, sp.emx);
+			const fy = P.toFrac(
+				held.offsetY && held.offsetY.getValue(), sp.h, sp.emy);
+			return P.anchoredSpot(p, b, P.sidesOf(a), fx, fy);
+		}
+
+		// What the placement IS, at rest, in the head beside the section name.
+		//
+		// The parameter for this was passed and never read: the readout only
+		// existed while a finger was down, so the one number worth writing on a
+		// sticky note — the thing that reproduces this layout on the next
+		// camera, which is what #340 was asking for — was the one number you
+		// could not see. It says the mode, and in anchored mode the two offsets
+		// in whatever unit they are actually written in.
+		function sayPlacement() {
+			if (!headNote) return;
+			const a = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+			if (P.isProportional(a)) {
+				const px = held.posX ? held.posX.getValue() : 0;
+				const py = held.posY ? held.posY.getValue() : 0;
+				headNote.textContent = 'Proportional · ' + px + ' · ' + py;
+				return;
+			}
+			const sides = P.sidesOf(a);
+			const ox = held.offsetX ? held.offsetX.getValue() : '';
+			const oy = held.offsetY ? held.offsetY.getValue() : '';
+			headNote.textContent = P.sayOf(a) +
+				(sides.x ? ' · ' + ox : '') + (sides.y ? ' · ' + oy : '');
 		}
 
 		function paint() {
+			sayPlacement();
 			const p = pic();
 			layer.hidden = !active || !p;
 			catcher.hidden = !active || !p;
@@ -2970,83 +3062,76 @@
 			}
 		}
 
-		// Offsets are written as a PERCENTAGE, and that is the whole of the
-		// Main/Sub fix. majestic resolves a bare offset as pixels against the
-		// channel it is drawing — so "200" is a tenth of the way across a 1920
-		// frame and well over a quarter across a 704 one, and the overlay landed
-		// somewhere different on each stream from the same setting. `%` is
-		// resolved as a share of that channel's own span (`value * span / 100`),
-		// and the font is derived from the stream width too,
-		// so the text lands in the same visual place on every output.
+		// A DRAG NEVER CHANGES THE ANCHOR.
 		//
-		// One decimal: enough that a 1920-wide frame can be addressed to the
-		// pixel, few enough that a drag does not write a different number every
-		// time the pointer jitters.
-		const pct = (v) => Math.round(v * 1000) / 10;
-
-		// Read an offset back, whatever unit it was written in — a config
-		// written before this, or by hand, is still pixels or em.
-		function offsetFrac(spec, span, emPx) {
-			const t = String(spec == null ? '' : spec).trim();
-			const v = parseFloat(t);
-			if (!isFinite(v)) return 0;
-			if (/%\s*$/.test(t)) return v / 100;
-			if (/em\s*$/i.test(t)) return span ? (v * emPx) / span : 0;
-			// bare, or "px": pixels of the channel being drawn. The picture on
-			// screen is one of those channels, so its own frame is the span.
-			return span ? v / span : 0;
+		// This reverses what shipped, and it is issue #340's own request.
+		// Snapping to a named corner is what makes a placement survive a change
+		// of resolution — which is why the placer this replaces re-anchored
+		// under the drag — and doing it while somebody's finger is down is
+		// exactly what read as the editor deciding on their behalf. The anchor
+		// is chosen on the pad and nowhere else; the magnet that remains pulls
+		// an offset to ZERO, which is the same help without the silent
+		// reclassification.
+		//
+		// In proportional mode the drag writes posX/posY, so a camera that has
+		// never been placed by hand keeps the coordinate system it came with.
+		function place(px, py, p) {
+			const a = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+			const b = box();
+			if (P.isProportional(a)) {
+				const r = P.dragProportional(p, b, { x: px, y: py });
+				return { prop: true, posX: r.posX, posY: r.posY };
+			}
+			const sides = P.sidesOf(a);
+			const sp = spans(p);
+			const u = unit();
+			const f = P.dragWithin(p, b, sides, { x: px, y: py });
+			return {
+				prop: false, sides: sides, anchor: a, u: u,
+				ox: P.fromFrac(f.fx, u, sp.w, sp.emx),
+				oy: P.fromFrac(f.fy, u, sp.h, sp.emy),
+				fx: f.fx, fy: f.fy,
+			};
 		}
 
-		const SNAP = 12;
-		function place(px, py, p) {
-			const w = ghost.offsetWidth, h = ghost.offsetHeight;
-			const lo = { x: p.x, y: p.y };
-			const mid = { x: p.x + (p.w - w) / 2, y: p.y + (p.h - h) / 2 };
-			const hi = { x: p.x + p.w - w, y: p.y + p.h - h };
-			const pick = (v, a, c, z) => Math.abs(v - a) <= SNAP ? -1
-				: Math.abs(v - c) <= SNAP ? 0 : Math.abs(v - z) <= SNAP ? 1 : null;
-			let sx = pick(px, lo.x, mid.x, hi.x);
-			let sy = pick(py, lo.y, mid.y, hi.y);
-			let ox = 0, oy = 0;
-			if (sx === null) {
-				sx = (px + w / 2) < (p.x + p.w / 2) ? -1 : 1;
-				ox = sx < 0 ? (px - p.x) : (p.x + p.w - (px + w));
-				ox = pct(Math.max(0, ox) / p.w);
-			}
-			if (sy === null) {
-				sy = (py + h / 2) < (p.y + p.h / 2) ? -1 : 1;
-				oy = sy < 0 ? (py - p.y) : (p.y + p.h - (py + h));
-				oy = pct(Math.max(0, oy) / p.h);
-			}
-			// A centred axis ignores its offset — the camera's anchored
-			// placement centres it outright — so writing one would be a number
-			// the camera never reads and the form would show it as set.
-			if (sx === 0) ox = 0;
-			if (sy === 0) oy = 0;
-			return { sx: sx, sy: sy, ox: ox, oy: oy };
+		// What the drag is about to write, as the document to push.
+		function docOf(r) {
+			if (r.prop)
+				return { osd: { anchor: P.PROPORTIONAL,
+					posX: String(r.posX), posY: String(r.posY) } };
+			const osd = { anchor: r.anchor };
+			if (r.sides.x !== 0) osd.offsetX = r.ox;
+			if (r.sides.y !== 0) osd.offsetY = r.oy;
+			return { osd: osd };
 		}
 
 		function preview_(r, p) {
-			const w = ghost.offsetWidth, h = ghost.offsetHeight;
-			const fx = r.ox / 100, fy = r.oy / 100;
-			const gx = r.sx < 0 ? p.x + fx * p.w
-				: r.sx > 0 ? p.x + p.w - w - fx * p.w
-				: p.x + (p.w - w) / 2;
-			const gy = r.sy < 0 ? p.y + fy * p.h
-				: r.sy > 0 ? p.y + p.h - h - fy * p.h
-				: p.y + (p.h - h) / 2;
-			ghost.style.left = gx + 'px';
-			ghost.style.top = gy + 'px';
-			read.style.left = gx + 'px';
-			read.style.top = Math.max(0, gy - 24) + 'px';
-			read.innerHTML = '<b>' + esc(SAY_SIDE[r.sx + ',' + r.sy]) + '</b>' +
-				(r.ox || r.oy ? '<span>' + r.ox + '% · ' + r.oy + '%</span>' : '');
-			guides.classList.toggle('mj-osd-sx', r.sx === -1 || r.sx === 1 || r.sx === 0);
-			guides.querySelectorAll('.mj-osd-g').forEach(g => g.classList.remove('mj-osd-lit'));
-			const gx_ = r.sx === -1 ? '.gx-l' : r.sx === 0 ? '.gx-c' : '.gx-r';
-			const gy_ = r.sy === -1 ? '.gy-t' : r.sy === 0 ? '.gy-c' : '.gy-b';
-			if (r.ox === 0) guides.querySelector(gx_).classList.add('mj-osd-lit');
-			if (r.oy === 0) guides.querySelector(gy_).classList.add('mj-osd-lit');
+			const b = box();
+			const g = r.prop
+				? P.proportionalSpot(p, b, r.posX, r.posY)
+				: P.anchoredSpot(p, b, r.sides, r.fx, r.fy);
+			ghost.style.left = g.x + 'px';
+			ghost.style.top = g.y + 'px';
+			read.style.left = g.x + 'px';
+			read.style.top = Math.max(0, g.y - 24) + 'px';
+			read.innerHTML = r.prop
+				? '<b>Proportional</b><span>' + r.posX + ' · ' + r.posY + '</span>'
+				: '<b>' + esc(P.sayOf(r.anchor)) + '</b>' +
+					(r.sides.x || r.sides.y
+						? '<span>' + (r.sides.x ? r.ox : '—') + ' · ' +
+							(r.sides.y ? r.oy : '—') + '</span>'
+						: '');
+			guides.querySelectorAll('.mj-osd-g').forEach(
+				g2 => g2.classList.remove('mj-osd-lit'));
+			if (r.prop) return;
+			// The guide lights where the offset is zero — the magnet's whole
+			// vocabulary now that it no longer moves the anchor.
+			const gx = r.sides.x === -1 ? '.gx-l' : r.sides.x === 0 ? '.gx-c' : '.gx-r';
+			const gy = r.sides.y === -1 ? '.gy-t' : r.sides.y === 0 ? '.gy-c' : '.gy-b';
+			if (r.sides.x !== 0 && r.fx === 0)
+				guides.querySelector(gx).classList.add('mj-osd-lit');
+			if (r.sides.y !== 0 && r.fy === 0)
+				guides.querySelector(gy).classList.add('mj-osd-lit');
 		}
 
 		const at = (e) => {
@@ -3065,6 +3150,7 @@
 			const n = at(e);
 			drag = { id: e.pointerId, dx: n.x - cur.x, dy: n.y - cur.y };
 			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
+			try { stage.focus(); } catch (err) {}
 			preview_(place(cur.x, cur.y, p), p);
 			e.preventDefault();
 		});
@@ -3076,15 +3162,32 @@
 			const n = at(e);
 			const r = place(n.x - drag.dx, n.y - drag.dy, p);
 			preview_(r, p);
-			// The camera follows the pointer. postLive serialises and swallows
-			// its own failures, so a move that cannot land does not wedge the
-			// ones after it or interrupt the drag.
-			const name = anchorName(r.sx, r.sy);
-			if (name !== drag.lastName || r.ox !== drag.lastOx || r.oy !== drag.lastOy) {
-				drag.lastName = name; drag.lastOx = r.ox; drag.lastOy = r.oy;
-				postLive(osdLiveQuery(name, r.ox + '%', r.oy + '%'));
+			// The camera follows the pointer. postLivePlace serialises and
+			// swallows its own failures, so a move that cannot land does not
+			// wedge the ones after it or interrupt the drag.
+			const key = JSON.stringify(r.prop
+				? [r.posX, r.posY] : [r.anchor, r.ox, r.oy]);
+			if (key !== drag.last) {
+				drag.last = key;
+				postLivePlace(docOf(r));
 			}
 		});
+
+		// Staged, not saved. The camera is already showing it — that happened on
+		// the way here, one push per move — so all that is left is for the form
+		// to agree, and for Save to mean what it means everywhere else.
+		function commitTo(r) {
+			if (r.prop) {
+				if (held.posX) held.posX.setValue(r.posX);
+				if (held.posY) held.posY.setValue(r.posY);
+			} else {
+				if (held.offsetX && r.sides.x !== 0) held.offsetX.setValue(r.ox);
+				if (held.offsetY && r.sides.y !== 0) held.offsetY.setValue(r.oy);
+			}
+			runVisibility();
+			updateDirty();
+			postLivePlace(docOf(r));
+		}
 
 		function done(e, commit) {
 			if (!drag || e.pointerId !== drag.id) return;
@@ -3100,24 +3203,59 @@
 			drag = null;
 			guides.classList.remove('mj-osd-on');
 			if (!n || !p) { paint(); return; }
-
-			const r = place(n.x - dx, n.y - dy, p);
-			const name = anchorName(r.sx, r.sy);
-			// Staged, not saved. The camera is already showing it — that
-			// happened on the way here, one push per move — so all that is left
-			// is for the form to agree, and for Save to mean what it means
-			// everywhere else on the page.
-			if (held.anchor) held.anchor.setValue(name);
-			if (held.offsetX) held.offsetX.setValue(r.ox + '%');
-			if (held.offsetY) held.offsetY.setValue(r.oy + '%');
-			runVisibility();
-			updateDirty();
-			// One last push at the resting place: the drag may have ended
-			// between debounces, and the pointer's last position is the one that
-			// counts.
-			postLive(osdLiveQuery(name, r.ox + '%', r.oy + '%'));
+			commitTo(place(n.x - dx, n.y - dy, p));
 			paint();
 		}
+
+		// One step, exactly, repeatable — the half a mouse cannot do, and what
+		// "precise" means in the request this came from. Shift for ten.
+		stage.addEventListener('keydown', (e) => {
+			if (!active) return;
+			const k = e.key;
+			if (k !== 'ArrowLeft' && k !== 'ArrowRight' &&
+				k !== 'ArrowUp' && k !== 'ArrowDown') return;
+			if (e.metaKey || e.ctrlKey || e.altKey) return;
+			const p = pic();
+			if (!p) return;
+			e.preventDefault();
+			const big = e.shiftKey ? 10 : 1;
+			const a = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
+			const cl = (v) => Math.min(Math.max(v, -P.POS_MAX), P.POS_MAX);
+			if (P.isProportional(a)) {
+				const px = +(held.posX && held.posX.getValue()) || 0;
+				const py = +(held.posY && held.posY.getValue()) || 0;
+				const dx = k === 'ArrowLeft' ? big : k === 'ArrowRight' ? -big : 0;
+				const dy = k === 'ArrowUp' ? big : k === 'ArrowDown' ? -big : 0;
+				commitTo({ prop: true, posX: cl(px + dx), posY: cl(py + dy) });
+				paint();
+				return;
+			}
+			const sides = P.sidesOf(a);
+			const sp = spans(p);
+			const u = unit();
+			const step = (u === 'px' ? 1 : 0.1) * big;
+			const r = (n) => Math.round(n * 10) / 10;
+			const cur = {
+				ox: parseFloat(held.offsetX && held.offsetX.getValue()) || 0,
+				oy: parseFloat(held.offsetY && held.offsetY.getValue()) || 0,
+			};
+			let ox = cur.ox, oy = cur.oy;
+			if (k === 'ArrowLeft' || k === 'ArrowRight')
+				ox = Math.max(0, r(ox + P.nudge(sides, 'x',
+					k === 'ArrowRight' ? 1 : -1) * step));
+			else
+				oy = Math.max(0, r(oy + P.nudge(sides, 'y',
+					k === 'ArrowDown' ? 1 : -1) * step));
+			const suffix = u === '%' ? '%' : u === 'em' ? 'em' : '';
+			commitTo({
+				prop: false, sides: sides, anchor: a, u: u,
+				ox: ox + suffix, oy: oy + suffix,
+				fx: P.toFrac(ox + suffix, sp.w, sp.emx),
+				fy: P.toFrac(oy + suffix, sp.h, sp.emy),
+			});
+			paint();
+		});
+
 		catcher.addEventListener('pointerup', (e) => done(e, true));
 		catcher.addEventListener('pointercancel', (e) => done(e, false));
 
