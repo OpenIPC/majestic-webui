@@ -911,6 +911,8 @@ function initAll() {
 			h.textContent = name;
 			dl.appendChild(h);
 
+			// Normalised by S.streams(): the wire spells `subtype` as a name
+			// and the module is what turns it into this index.
 			S.streams(src).forEach(st => {
 				const what = st.subtype === 0 ? 'main' :
 					st.subtype === 1 ? 'sub' : 'JPEG';

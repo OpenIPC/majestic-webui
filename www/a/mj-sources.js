@@ -28,6 +28,33 @@
 	const NAL = { h264: true, h265: true };
 	const MULTIPART = { mjpeg: true, jpeg: true };
 
+	// The wire spells `subtype` as a NAME — "main" / "sub" / "mjpeg" — because
+	// the payload is meant to be read by a person. Everything in here wants the
+	// INDEX, because that is what the stream_id arithmetic is in. The two have
+	// to be mapped in exactly one place or they drift, and they did: this module
+	// compared the name against 0/1/2, matched nothing, and reported a camera
+	// with three healthy streams as having none to watch.
+	//
+	// `id % 3` is the authority rather than the table, because
+	// stream_id = 3*camera + subtype is the protocol's own definition — so it
+	// stays right for a subtype name this UI has never been told about. The
+	// table is only the fallback for a payload that carries no id.
+	const SUBTYPE_INDEX = { main: 0, sub: 1, mjpeg: 2 };
+
+	function subtypeOf(s) {
+		if (!s) return -1;
+		if (typeof s.id === 'number') return s.id % 3;
+		if (typeof s.subtype === 'number') return s.subtype;
+		const n = SUBTYPE_INDEX[s.subtype];
+		return n === undefined ? -1 : n;
+	}
+
+	// A copy carrying the numeric subtype, so nothing downstream has to know
+	// the wire spells it a name. Every stream this module hands out is one.
+	function normalise(s) {
+		return Object.assign({}, s, { subtype: subtypeOf(s) });
+	}
+
 	// A stream worth offering: the machinery behind it is up and the daemon
 	// named a codec for it.
 	//
@@ -57,7 +84,7 @@
 	function streams(source) {
 		const by = {};
 		for (const s of streamsOf(source)) {
-			if (watchable(s)) by[s.subtype] = s;
+			if (watchable(s)) by[subtypeOf(s)] = normalise(s);
 		}
 		return DISPLAY.map(t => by[t]).filter(Boolean);
 	}
@@ -140,7 +167,7 @@
 	// localStorage should not have to do division to know what was remembered.
 	function key(source, stream) {
 		return (source ? source.camera | 0 : 0) + ':' +
-			(stream ? stream.subtype | 0 : 0);
+			(stream ? subtypeOf(stream) : 0);
 	}
 
 	function parse(str) {
@@ -149,7 +176,7 @@
 	}
 
 	const api = {
-		watchable, family, streams, watchableSources, multi,
+		watchable, family, subtypeOf, streams, watchableSources, multi,
 		pick, resolve, label, key, parse,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;

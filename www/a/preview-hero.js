@@ -63,9 +63,16 @@
 				if (typeof mjSources !== 'function' || !window.MajesticSources) {
 					return Promise.resolve(false);
 				}
-				return mjSources().then(list => (list || []).some(src =>
-					src.camera === camera && (src.streams || []).some(
-						st => st.subtype === 2 && st.present)));
+				return mjSources().then(list => {
+					const S = window.MajesticSources;
+					if (!S || !list) return false;
+					// Through the module: it is what maps the wire's subtype
+					// name to the index, and what decides what "watchable"
+					// means. Asking the payload directly is how those two
+					// answers drift apart.
+					const src = list.find(x => x.camera === camera);
+					return !!src && S.streams(src).some(st => st.subtype === 2);
+				});
 			}
 			// The answer is per camera and arrives asynchronously, so a source
 			// switch can have two in flight. Without the recheck the slower one

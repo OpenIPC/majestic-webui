@@ -437,9 +437,13 @@
 	// failed. On the on-board camera that is the jpeg channel; on a USB webcam
 	// in its usual mode it is the only stream there is.
 	function mjpegStreamOf(cam) {
+		const S = window.MajesticSources;
 		const src = srcOf(cam);
-		if (src && Array.isArray(src.streams)) {
-			return src.streams.find(x => x.subtype === 2 && x.present) || null;
+		if (S && src && Array.isArray(src.streams)) {
+			// Through the module, not over the raw payload: the wire spells
+			// `subtype` as a name and only the module maps it to the index this
+			// compares against.
+			return S.streams(src).find(x => x.subtype === 2) || null;
 		}
 		// Nobody has answered yet, or the request failed. For the on-board
 		// camera the configuration still knows, and it is what gated this
@@ -451,6 +455,28 @@
 		}
 		return null;
 	}
+	// Where the chain should START for what is on screen.
+	//
+	// Not always the top. The ladder above the MJPEG rung carries NAL streams,
+	// and a source whose only stream is MJPEG — which is most USB webcams — has
+	// nothing for WebRTC or MSE to negotiate. Starting there anyway asked the
+	// daemon for a stream_id it cannot serve over those transports, and it
+	// answered with a channel of the ON-BOARD camera: the viewer pressed "USB
+	// camera", saw the sensor, and was told "Sub stream isn't available right
+	// now — showing Main stream instead", which is a true sentence about
+	// entirely the wrong question.
+	//
+	// So the transport follows the codec, which is the whole reason
+	// /api/v1/sources reports one.
+	function startingRung() {
+		const S = window.MajesticSources;
+		const info = curStreamInfo();
+		if (info && S && S.family(info) === 'multipart') {
+			return 'multipart';
+		}
+		return wantWebRTC();
+	}
+
 	function curStreamInfo() {
 		const S = window.MajesticSources;
 		const src = srcOf(camera);
@@ -668,6 +694,14 @@
 	// remembered preference must stay the viewer's own — a daemon fallback is
 	// not a choice, and next page load should ask for their channel again.
 	function applyServed(info) {
+		// WebRTC negotiates the on-board channels only — its offer loop is
+		// bounded by the two channels with videoN.bitrate behind them — so a
+		// served reply can only ever be about camera 0. Reaching here while
+		// another source is on screen would move THIS source's radios and print
+		// a mismatch about a channel nobody asked for.
+		if (camera !== 0) {
+			return;
+		}
 		servedCh = (info.channel === 0 || info.channel === 1)
 			? info.channel : null;
 		const mismatch = servedCh !== null && info.requested !== null &&
@@ -1041,7 +1075,7 @@
 		// handle, and if the new one is refused too the reason will name that
 		// codec, which the gate below rejects.
 		if (String(detail || '').split(' ')[0] === 'codec-changed') {
-			attachPlayer(wantWebRTC());
+			attachPlayer(startingRung());
 			return;
 		}
 		if (kind === 'webrtc') { attachPlayer('mse'); return; }
@@ -1497,7 +1531,7 @@
 				syncStreamControls();
 				if (player || swap.trial()) {
 					fellBack = null;
-					attachPlayer(wantWebRTC());
+					attachPlayer(startingRung());
 					return;
 				}
 			}
@@ -1525,7 +1559,7 @@
 	]).then(answers => {
 		if (answers) chooseSub(answers[0]); else attachedBlind = true;
 		syncStreamControls();
-		attachPlayer(wantWebRTC());
+		attachPlayer(startingRung());
 	});
 
 	// If the deadline won, put it right when the answer turns up — but not if
@@ -1628,7 +1662,7 @@
 		// nothing, since one MJPEG stream serves every channel of a camera. So
 		// ask the whole chain again instead.
 		if (liveKind === 'multipart' && fellToMultipart) {
-			attachPlayer(wantWebRTC());
+			attachPlayer(startingRung());
 			return;
 		}
 		// The stream_id, not the subtype: every player is attached with one.
@@ -1718,6 +1752,11 @@
 		cancelWasmRetry();
 		camera = n;
 		writeSource(String(n));
+		// Whatever the chain had to explain about the source being left does
+		// not describe this one. A webcam that publishes only MJPEG is played
+		// on the MJPEG rung by choice, and a viewer who chose it is not owed an
+		// apology for it.
+		fellToMultipart = null;
 		if (window.MajesticAdapt) window.MajesticAdapt.reset();
 		if (window.MajesticStats) window.MajesticStats.reset();
 		wantedCh = null;
@@ -1747,7 +1786,7 @@
 		// <img> where an H.264 one is a <video> — so there is nothing here for
 		// setStream() to do.
 		fellBack = null;
-		attachPlayer(wantWebRTC());
+		attachPlayer(startingRung());
 	}
 
 	// The radios this page created, kept rather than queried back out of the
@@ -1858,7 +1897,7 @@
 			// protect: retryFromFallback() is for the note, and it is guarded
 			// on fellBack so it would do nothing here.
 			if (fellBack) retryFromFallback();
-			else attachPlayer(wantWebRTC());
+			else attachPlayer(startingRung());
 		});
 	});
 

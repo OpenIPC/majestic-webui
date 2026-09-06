@@ -1015,16 +1015,20 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 	// publish a USB webcam as a second camera, both addressed as
 	// stream_id = 3*camera + subtype. The page showed one, because until
 	// /api/v1/sources there was no way for it to learn about the other.
+	// `subtype` as the wire spells it — a name, not an index. Written with
+	// integers, these fixtures agreed with a module that was reading them the
+	// same wrong way, and a camera whose every stream was healthy reported none
+	// to watch.
 	const SENSOR = {
 		camera: 0, kind: 'sensor', streams: [
-			{ id: 0, subtype: 0, codec: 'h264', present: true, configured: true, rtsp: true },
-			{ id: 1, subtype: 1, codec: 'h264', present: true, configured: true, rtsp: true },
-			{ id: 2, subtype: 2, codec: 'mjpeg', present: true, configured: true, rtsp: false },
+			{ id: 0, subtype: 'main', codec: 'h264', present: true, configured: true, rtsp: true },
+			{ id: 1, subtype: 'sub', codec: 'h264', present: true, configured: true, rtsp: true },
+			{ id: 2, subtype: 'mjpeg', codec: 'mjpeg', present: true, configured: true, rtsp: false },
 		],
 	};
 	const USB = {
 		camera: 1, kind: 'external', streams: [
-			{ id: 5, subtype: 2, codec: 'mjpeg', present: true, configured: true, rtsp: false },
+			{ id: 5, subtype: 'mjpeg', codec: 'mjpeg', present: true, configured: true, rtsp: false },
 		],
 	};
 
@@ -1070,6 +1074,12 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		// element — an MJPEG webcam is an <img> where an H.264 one is a <video>.
 		check('a fresh player was attached', env.made.length === made + 1,
 			'made=' + env.made.length);
+		// And on the transport this source's codec implies. Starting at the top
+		// asked the daemon for a stream_id WebRTC cannot serve, and it answered
+		// with a channel of the on-board camera — so pressing "USB camera"
+		// showed the sensor, over a toast about the sub stream.
+		check('on the rung its codec implies, not the top of the ladder',
+			env.made[made].kind === 'multipart', env.made[made].kind);
 		// The webcam publishes only MJPEG, so its stream_id is 3*1 + 2.
 		check('asked for that camera\u2019s stream',
 			env.made[made].opts.stream === 5,
