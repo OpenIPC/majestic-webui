@@ -2451,6 +2451,58 @@
 			paint();
 		}
 
+		// Where a region is on the stage, in the stage's own pixels. The DOM
+		// knows this too, but only while the layer is taking the pointer — and
+		// the whole point of this pair is to answer for an editor that is NOT
+		// the one in charge, whose rectangles are deliberately pointer-
+		// transparent so they cannot swallow presses meant for what is under
+		// them.
+		function boxOf(i) {
+			const p = pic(), b = base();
+			if (!p || !b) return null;
+			const r = parse(list()[i]);
+			if (!r) return null;
+			return {
+				x: p.x + r.x / b.w * p.w, y: p.y + r.y / b.h * p.h,
+				w: r.w / b.w * p.w, h: r.h / b.h * p.h,
+			};
+		}
+
+		// Which region a press is reaching for, asked by whoever owns the
+		// picture at the time. The SMALLEST one under the press wins an
+		// overlap — the same rule the text overlays are picked by, and for the
+		// same reason: a small rectangle inside a large one is the one being
+		// reached for, and the large one can be taken anywhere else along its
+		// span.
+		function hitAt(pt) {
+			let found = null;
+			list().forEach((raw, i) => {
+				const o = boxOf(i);
+				if (!o) return;
+				if (pt.x < o.x || pt.x > o.x + o.w) return;
+				if (pt.y < o.y || pt.y > o.y + o.h) return;
+				const a = o.w * o.h;
+				if (!found || a < found.area) found = { i: i, area: a };
+			});
+			return found;
+		}
+
+		// Taking hold of a region from a press that arrived somewhere else —
+		// another editor's catcher handing the gesture over because the press
+		// landed here. Capture goes on THIS editor's catcher rather than on
+		// whatever the pointer is physically over, or the moves and the release
+		// would be delivered to the surface that has just given the gesture
+		// away and this drag would end where it started.
+		function grabAt(i, e) {
+			const p = pic(), b = base(), o = parse(list()[i]);
+			if (!p || !b || !o || gesture) return;
+			select(i);
+			gesture = { kind: 'move', id: e.pointerId, i: i,
+				from: at(e), orig: o, moved: false };
+			try { catcher.setPointerCapture(e.pointerId); } catch (err) {}
+			e.preventDefault();
+		}
+
 		// What the press landed on decides the gesture.
 		function begin(e, surface) {
 			if (e.button || gesture) return;
@@ -2461,6 +2513,33 @@
 			if (delBtn) return;                       // handled on click, not here
 			const grip = e.target.closest && e.target.closest('.mj-md-h');
 			const boxEl = e.target.closest && e.target.closest('.mj-md-rgn');
+
+			// ONE RULE ACROSS BOTH EDITORS: the smallest thing under the press
+			// is the one being reached for.
+			//
+			// The DOM answers for this editor's own rectangles; a text overlay
+			// is not a DOM rectangle at all — the camera draws it and the leaf
+			// hit-tests against the rectangles the camera reports — so the two
+			// answers have to be COMPARED rather than merely stacked. Stacking
+			// is what was wrong before: whichever editor was not in charge had
+			// its layer made pointer-transparent, so a press on a mask dragged
+			// the selected text, and a mask large enough to contain the text
+			// made that text unreachable for as long as the mask was selected.
+			//
+			// A grip is exempt. It is a control rather than a picture, it only
+			// exists on the selected region, and a press on one can only ever
+			// mean resize that region.
+			if (!grip) {
+				const mine = boxEl ? boxOf(+boxEl.dataset.i) : null;
+				const myArea = mine ? mine.w * mine.h : Infinity;
+				const seen = words.pickAt && words.pickAt(at(e), 'mask', true);
+				// Asked twice on purpose: the probe decides, and only the
+				// second call selects, so measuring cannot move the selection.
+				if (seen && seen.area < myArea) {
+					const other = words.pickAt(at(e), 'mask');
+					if (other) { other.grab(e); return; }
+				}
+			}
 
 			if (grip && boxEl) {
 				const i = +boxEl.dataset.i;
@@ -2591,6 +2670,15 @@
 			surface.addEventListener('pointercancel', (e) => finish(e, false, surface));
 		});
 
+		// Over something this editor does not own, the press means "pick that
+		// one up" rather than "start drawing here", and the cursor is the only
+		// place that can be disclosed before the press commits to one of them.
+		catcher.addEventListener('pointermove', (e) => {
+			if (gesture) return;
+			const other = words.pickAt && words.pickAt(at(e), 'mask', true);
+			catcher.classList.toggle('mj-osd-pickable', !!other);
+		});
+
 		// Delete, from the picture. The × on the selected region, and the key that
 		// every other canvas in the world binds — guarded on the focus being
 		// somewhere that is not a text box, or backspacing a coordinate would
@@ -2638,6 +2726,11 @@
 			// click does, so there is one path and one repaint.
 			selected: () => sel,
 			selectAt: (i) => select(i),
+			// Answering for this editor when it is not the one in charge: which
+			// region is under a point, and taking hold of it from a press that
+			// landed on somebody else's surface.
+			hitAt: hitAt,
+			grabAt: grabAt,
 			onSelect: (fn) => { onSelect = fn; },
 			count: () => list().length,
 			// One region's rectangle, read and written, for a caller that
@@ -2954,6 +3047,10 @@
 		if (maskField && canRegion) {
 			masks = mountRegions(preview, maskField, maskBody, maskNote, {
 				gated: true,
+				// Called through rather than passed, because `pickAt` is
+				// declared below this call and reading it here would be the
+				// temporal dead zone this file has already been bitten by.
+				pickAt: (pt, from, probe) => pickAt(pt, from, probe),
 				// The camera follows a mask drag the way it follows a text one.
 				// Same endpoint, same document shape, same undo: the drop below
 				// puts every staged rectangle back where the config says.
@@ -2997,18 +3094,39 @@
 		// that is the pointermove asking so the cursor can say what a press
 		// would do.
 		//
-		// The SMALLEST overlay under the press wins an overlap. A short label
+		// The SMALLEST thing under the press wins an overlap. A short label
 		// sitting inside the span of a long clock is the one being reached
-		// for; the long one can be taken anywhere else along its length.
+		// for; the long one can be taken anywhere else along its length. A
+		// mask is measured on the same scale, so a small mask over a long
+		// clock is reachable and the clock is still reachable beside it.
+		//
+		// MASKS ARE IN HERE FOR A REASON THE DOM CANNOT COVER. The regions are
+		// real elements and the text overlays are not — they are drawn by the
+		// camera, and this page hit-tests them against the rectangles the
+		// camera reports. So the two editors cannot arbitrate by stacking
+		// order: whichever is not in charge has its layer made pointer-
+		// transparent, and a press on its rectangles falls through to the
+		// other's full-picture catcher. Pressing a mask dragged the selected
+		// TEXT, and pressing the text while a mask was selected drew a new
+		// mask across it. One arbiter, asked by both catchers, is what makes
+		// the picture a list of things you can pick up rather than two editors
+		// taking turns at the same pixels.
 		let pickHandler = null;
 		const pickAt = (pt, from, probe) => {
 			let found = null;
+			const offer = (area, sel, grab) => {
+				if (!found || area < found.area) found = { area: area, sel: sel, grab: grab };
+			};
 			for (const n of OVERLAYS) {
 				if (n === from || !placers[n]) continue;
 				if (!listedOverlay(n) || !placers[n].hitAt(pt)) continue;
-				if (!found || placers[n].area() < found.area()) found = placers[n];
+				offer(placers[n].area(), { t: 'text', i: n }, (e) => placers[n].grab(e));
 			}
-			if (found && !probe && pickHandler) pickHandler(found.overlay);
+			if (masks && from !== 'mask') {
+				const m = masks.hitAt(pt);
+				if (m) offer(m.area, { t: 'mask', i: m.i }, (e) => masks.grabAt(m.i, e));
+			}
+			if (found && !probe && pickHandler) pickHandler(found.sel);
 			return found;
 		};
 
@@ -3296,8 +3414,9 @@
 
 			// A press on the picture selects through exactly the same door the
 			// chips do, so the chip row cannot disagree with what is being
-			// dragged.
-			pickHandler = (n) => pick({ t: 'text', i: n });
+			// dragged. It carries the whole selector rather than an overlay
+			// number, because a mask is one of the things a press can reach.
+			pickHandler = (sel_) => pick(sel_);
 
 			// ── the inspector, for a mask ────────────────────────────────
 			//
@@ -4141,13 +4260,29 @@
 			// gesture and it did nothing, which reads as only one overlay
 			// being draggable at all.
 			//
-			// The handover is inside one gesture: the overlay under the press
-			// is selected AND picked up, so it moves with the same drag rather
+			// The handover is inside one gesture: the thing under the press is
+			// selected AND picked up, so it moves with the same drag rather
 			// than needing a second one. It is the same rule the region editor
 			// states — a region is a thing you can pick up, and what the press
 			// landed on decides the gesture.
-			const other = hooks.pickAt && hooks.pickAt(at(e), overlay);
-			if (other) { other.grab(e); return; }
+			//
+			// THIS OVERLAY IS ONE OF THE THINGS UNDER THE PRESS, and has to be
+			// weighed against the rest rather than simply losing to them: a
+			// privacy mask is a rectangle that can cover the whole picture,
+			// and without the comparison it would take every press away from
+			// the very overlay it is drawn behind. Off the overlay there is
+			// nothing of ours to weigh, so anything found wins — which is what
+			// keeps a press on empty picture dragging the selected overlay
+			// when there is nothing else there.
+			const pt = at(e);
+			const mine = hitAt(pt) ? areaOn() : Infinity;
+			// Probed first, committed second: measuring must not move the
+			// selection, so only the second call is allowed to select.
+			const seen = hooks.pickAt && hooks.pickAt(pt, overlay, true);
+			if (seen && seen.area < mine) {
+				const other = hooks.pickAt(pt, overlay);
+				if (other) { other.grab(e); return; }
+			}
 
 			grab(e);
 		});
@@ -4156,8 +4291,10 @@
 		// is a thing to pick up, not a picture to drag the selected one across.
 		catcher.addEventListener('pointermove', (e) => {
 			if (drag || !active) return;
-			const other = hooks.pickAt && hooks.pickAt(at(e), overlay, true);
-			catcher.classList.toggle('mj-osd-pickable', !!other);
+			const pt = at(e);
+			const mine = hitAt(pt) ? areaOn() : Infinity;
+			const seen = hooks.pickAt && hooks.pickAt(pt, overlay, true);
+			catcher.classList.toggle('mj-osd-pickable', !!seen && seen.area < mine);
 		});
 
 		catcher.addEventListener('pointermove', (e) => {

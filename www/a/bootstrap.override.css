@@ -5452,3 +5452,11 @@ dialog.mj-modal::backdrop {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+
+/* The region editor's catcher says the same thing the overlay catcher does:
+   over something this editor does not own, the press picks that up instead of
+   starting a rectangle here. Later than .mj-md-armed's crosshair on purpose —
+   both apply, and this is the more specific statement about the same press. */
+.mj-md-catch.mj-osd-pickable {
+	cursor: pointer;
+}
