@@ -4318,24 +4318,87 @@
 			note.classList.toggle('mj-logo-bad', !!bad);
 		}
 
+		// Declared ABOVE the first thing that reads them. paint() only runs
+		// after this point today, but a `let` read before its declaration is a
+		// ReferenceError rather than an undefined, and this file has already
+		// lost a whole section of a form to exactly that.
+		let drawn = false;   // the canvas holds this overlay's picture
+		let asked = false;   // the camera has been asked for it
+
 		function paint() {
 			const has = !!String(field.getValue() || '').trim();
-			empty.hidden = has;
 			drop.hidden = !has;
 			// Choosing when there is nothing, replacing when there is.
 			pickWord.textContent = has ? 'Replace picture…' : 'Choose a picture…';
-			// What happens if this is left empty, said honestly: it depends on
-			// whether the overlay has anything else to say.
-			const t = tplField ? String(tplField.getValue() || '').trim() : '';
-			empty.textContent = t
-				? 'No picture. The overlay draws “' +
-					(t.length > 24 ? t.slice(0, 23) + '…' : t) + '”.'
-				: 'No picture yet.';
-			// The canvas holds the last picture CHOSEN in this visit. A logo
-			// already on the camera is on the picture itself, which is the
-			// honest preview and better than anything drawn here — so nothing
-			// is invented for it.
-			if (!has) shot.hidden = true;
+			if (!has) {
+				shot.hidden = true;
+				empty.hidden = false;
+				// What happens if this is left empty, said honestly: it depends
+				// on whether the overlay has anything else to say.
+				const t = tplField ? String(tplField.getValue() || '').trim() : '';
+				empty.textContent = t
+					? 'No picture. The overlay draws “' +
+						(t.length > 24 ? t.slice(0, 23) + '…' : t) + '”.'
+					: 'No picture yet.';
+				return;
+			}
+			// There IS one, so show it. Drawn already if it was chosen in this
+			// visit; otherwise fetched, because a reload has had no visit and
+			// an empty frame where a picture should be is the worst of the
+			// three things this box can say.
+			if (drawn) {
+				shot.hidden = false;
+				empty.hidden = true;
+				return;
+			}
+			shot.hidden = true;
+			empty.hidden = false;
+			empty.textContent = 'Loading the picture…';
+			fetchShot();
+		}
+
+		function fetchShot() {
+			if (asked) return;
+			asked = true;
+			apiFetch('/api/v1/osd/image?overlay=' + overlay,
+				{ credentials: 'same-origin' })
+				.then((r) => {
+					if (!r.ok) throw new Error('HTTP ' + r.status);
+					const w = +r.headers.get('X-Osd-Width');
+					const h = +r.headers.get('X-Osd-Height');
+					if (!w || !h) throw new Error('no size');
+					return r.arrayBuffer().then((b) => ({ w: w, h: h, b: b }));
+				})
+				.then(({ w, h, b }) => {
+					const src = new Uint8Array(b);
+					if (src.length < w * h * 4) throw new Error('short');
+					const ctx = shot.getContext('2d');
+					shot.width = w;
+					shot.height = h;
+					const out = ctx.createImageData(w, h);
+					// BGRA on the wire, RGBA in a canvas: the same swap the
+					// upload does, in reverse.
+					for (let i = 0; i < w * h * 4; i += 4) {
+						out.data[i] = src[i + 2];
+						out.data[i + 1] = src[i + 1];
+						out.data[i + 2] = src[i];
+						out.data[i + 3] = src[i + 3];
+					}
+					ctx.putImageData(out, 0, 0);
+					drawn = true;
+					shot.hidden = false;
+					empty.hidden = true;
+					say(w + '×' + h + ' · on the camera');
+				})
+				.catch(() => {
+					// A path that is set and a picture that cannot be had are
+					// not the same as no picture, and the box says which.
+					shot.hidden = true;
+					empty.hidden = false;
+					empty.textContent =
+						'A picture is set, but the camera could not hand it ' +
+						'back. It may not be there any more.';
+				});
 		}
 
 		// What the camera's overlay can carry. Four bits a channel is every
@@ -4388,6 +4451,11 @@
 					// This upload has already overwritten the file, so a
 					// removal staged earlier in this visit must not delete it.
 					logoBin.delete(overlay);
+					// What is on the canvas is this picture now, and the
+					// camera's copy is worth asking for again if it is ever
+					// wanted.
+					drawn = true;
+					asked = false;
 					// The camera decides the path; this only records it, and
 					// it is a staged edit like any other until Save.
 					field.setValue(j.path);
@@ -4449,6 +4517,8 @@
 
 		drop.addEventListener('click', () => {
 			if (onBack) setTimeout(onBack, 0);
+			drawn = false;
+			asked = false;
 			// An empty body removes the file; the field going empty is what
 			// makes the overlay draw its text again.
 			apiFetch('/api/v1/osd/image?overlay=' + overlay,
