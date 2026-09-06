@@ -36,13 +36,25 @@ json_hdr
 # settings page saves only the keys somebody changed — yielded an empty prefix
 # and was told, in a confident sentence, that it had no recordings directory
 # at all.
-if ! records_path=$(mj_cfg records.path); then
-	# Two different things arrive here: the key is genuinely unset, or the
-	# daemon could not be reached. Neither is "there is nowhere to look", and
-	# saying that would state as fact something nothing has established.
-	printf '{"error":"could not ask the camera where recordings live"}'
-	exit 0
-fi
+records_path=$(mj_cfg records.path)
+case $? in
+	0) ;;
+	1)
+		# Answered, and the key is not set. That is a fact about the camera and
+		# is worth saying plainly -- unlike the case below, where nothing has
+		# been established at all.
+		printf '{"error":"no recording path is configured"}'
+		exit 0
+		;;
+	*)
+		# The daemon could not be asked. Reporting this as "no recordings
+		# directory" would state as fact something nothing has established, and
+		# reporting it as "not configured" would blame the configuration for a
+		# request that never got an answer.
+		printf '{"error":"could not ask the camera where recordings live"}'
+		exit 0
+		;;
+esac
 
 prefix=$(printf '%s' "$records_path" | sed 's/%.*//; s#/*$##')
 if [ -z "$prefix" ] || [ ! -d "$prefix" ]; then

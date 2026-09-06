@@ -92,6 +92,23 @@ has_cap() {
 # reach them raw. (start/day/night exist in btzoom but are lens maintenance,
 # not viewing controls — not reachable from here.) Both Pelco variants take
 # the same nine verbs, which is why one pad serves them both.
+# Is majestic's autofocus engine switched on?
+#
+# Asked separately from the rest of the gate so that "the camera did not
+# answer" cannot arrive at the operator as "Autofocus not available on this
+# camera." -- a confident statement about the hardware, drawn from a request
+# that failed. A camera that cannot be asked keeps the button and lets the
+# attempt report its own failure; only a camera that answered and said no
+# withdraws it.
+af_configured() {
+	_af=$(mj_cfg isp.autofocus.enabled)
+	case $? in
+		0) [ "$_af" = "true" ] ;;
+		1) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
 af_enabled() {
 	# The same three gates the pad's af_support carries: a usable backend
 	# (unset/none ptz_control keeps every PTZ procedure inactive, the #227
@@ -99,7 +116,7 @@ af_enabled() {
 	# the focus axis, and majestic's engine turned on.
 	{ [ "$pelco_ok" = 1 ] || [ "$gpio_ok" = 1 ] || [ "$motor_ok" = 1 ]; } &&
 		has_cap focus &&
-		[ "$(mj_cfg isp.autofocus.enabled)" = "true" ]
+		af_configured
 }
 
 if [ -n "$ACTION" ]; then

@@ -3940,6 +3940,12 @@
 		let info;
 		try {
 			const r = await apiFetch('/api/v1/gpio', { credentials: 'same-origin' });
+			// apiFetch only intercepts 401. Everything else arrives as an
+			// ordinary response, and a firmware without this endpoint answers
+			// with a perfectly parseable JSON error — which, mounted as pad
+			// data, has no banks and draws an empty chip instead of falling
+			// back to the plain number fields.
+			if (!r.ok) throw new Error('HTTP ' + r.status);
 			info = await r.json();
 		} catch (e) {
 			// No pad list, no map. The hidden number fields are still there, so
@@ -4025,6 +4031,7 @@
 			try {
 				const r = await apiFetch('/api/v1/gpio',
 					{ credentials: 'same-origin' });
+				if (!r.ok) throw new Error('HTTP ' + r.status);
 				fresh = await r.json();
 				state.ircutInfo = fresh;
 			} catch (e) {

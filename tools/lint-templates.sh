@@ -152,6 +152,19 @@ if grep -rn 'yaml-cli' www sbin bin 2>/dev/null >> "$FAILS"; then
 	echo "  write it with POST /api/v1/config. The file omits every defaulted key." >> "$FAILS"
 fi
 
+# The tool is only the commonest way to make this mistake; a `grep` at the file
+# makes it just as well, and banning one name would leave the other open. So
+# this catches an ACCESS rather than a mention: a reader or a redirect aimed at
+# the path. Naming the file is still fine -- get_config returns it, backup.cgi
+# lists it, and a dozen comments explain what is in it -- because a name is not
+# a read.
+if grep -rnE '^[^#]*\b(cat|grep|egrep|fgrep|sed|awk|head|tail|cut|sort|uniq|tr|wc|source)\b[^|;]*/etc/majestic\.yaml|^[^#]*[<>]{1,2}[[:space:]]*/etc/majestic\.yaml' \
+		www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ /etc/majestic.yaml is not the configuration: it holds only what" >> "$FAILS"
+	echo "  differs from majestic's defaults, so a defaulted key is not in it." >> "$FAILS"
+	echo "  Read with mj_cfg (GET /api/v1/get), write with POST /api/v1/config." >> "$FAILS"
+fi
+
 # --- 4. page names --------------------------------------------------------
 # p/pages.cgi is the one place a page's name is written, and this is what keeps
 # it that way in both directions: a nav entry pointing at a page with no row
