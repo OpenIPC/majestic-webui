@@ -19,12 +19,27 @@ window.MajesticTimeline = (function () {
 	// records.filename defaults to "%H-%M"; "%H-%M-%S" is the other spelling
 	// people set. Anything else we decline to place rather than guess, because
 	// a clip drawn at the wrong time is worse than a clip listed without one.
+	//
+	// `-cam<N>` before the extension is majestic's suffix for a second camera's
+	// writer (insert_suffix_before_ext, src/file_format/mp4/storage.c). Without
+	// it here every clip a dual-camera board records went into the "clip(s)
+	// whose name has no time" bucket — placed nowhere, drawn on no timeline, and
+	// looking for all the world like a naming fault.
+	const NAME_RE = /^(\d{2})-(\d{2})(?:-(\d{2}))?(?:-cam(\d+))?\./;
+
 	function startOfName(name) {
-		const m = /^(\d{2})-(\d{2})(?:-(\d{2}))?\./.exec(name);
+		const m = NAME_RE.exec(name);
 		if (!m) return null;
 		const h = +m[1], mi = +m[2], s = m[3] ? +m[3] : 0;
 		if (h > 23 || mi > 59 || s > 59) return null;
 		return h * 3600 + mi * 60 + s;
+	}
+
+	// Which camera wrote a clip. 0 for the on-board one, which writes no suffix
+	// at all, so an unsuffixed name is an answer rather than a missing one.
+	function cameraOfName(name) {
+		const m = NAME_RE.exec(name);
+		return (m && m[4]) ? +m[4] : 0;
 	}
 
 	// Place a day's clips on a 0..86400 line.
@@ -41,8 +56,12 @@ window.MajesticTimeline = (function () {
 		const unplaced = [];
 		(clips || []).forEach(function (c) {
 			const start = startOfName(c.name);
-			if (start === null) unplaced.push(Object.assign({}, c, { start: null }));
-			else placed.push(Object.assign({}, c, { start: start }));
+			const cam = cameraOfName(c.name);
+			if (start === null) {
+				unplaced.push(Object.assign({}, c, { start: null, camera: cam }));
+			} else {
+				placed.push(Object.assign({}, c, { start: start, camera: cam }));
+			}
 		});
 		placed.sort(function (a, b) { return a.start - b.start; });
 
@@ -183,6 +202,7 @@ window.MajesticTimeline = (function () {
 		DAY: DAY,
 		JOIN_TOLERANCE: JOIN_TOLERANCE,
 		startOfName: startOfName,
+		cameraOfName: cameraOfName,
 		buildDay: buildDay,
 		applyExactDuration: applyExactDuration,
 		coverage: coverage,

@@ -41,14 +41,45 @@
 		// full sensor resolution, whatever size the player happens to be drawn
 		// at. That endpoint is the JPEG channel, so the button only appears when
 		// that channel is on.
-		wireSnapshot: function (btn) {
+		//
+		// `cameraFn` is the source on screen, for a page that can show more than
+		// one. /image.jpg takes a CAMERA (?channel=), so a snapshot of a USB
+		// webcam is that camera's own frame rather than the on-board sensor's —
+		// which is what the button appears to promise, and what it silently did
+		// not do before there was a way to ask which camera was playing.
+		wireSnapshot: function (btn, cameraFn) {
 			if (!btn) return;
-			mjConfig().then(cfg => {
-				btn.hidden = mjGet(cfg, 'jpeg.enabled') !== true;
-			});
+			const cam = () => (cameraFn ? cameraFn() | 0 : 0);
+			// The on-board JPEG channel answers for camera 0; any other camera
+			// has its own MJPEG stream or none, and /api/v1/sources is what
+			// says which. Asked once — the answer is a property of the hardware,
+			// not of what is on screen — and the button is then shown for a
+			// camera that has one.
+			function offerFor(camera) {
+				if (camera === 0) {
+					return mjConfig().then(
+						cfg => mjGet(cfg, 'jpeg.enabled') === true);
+				}
+				if (typeof mjSources !== 'function' || !window.MajesticSources) {
+					return Promise.resolve(false);
+				}
+				return mjSources().then(list => (list || []).some(src =>
+					src.camera === camera && (src.streams || []).some(
+						st => st.subtype === 2 && st.present)));
+			}
+			function sync() {
+				offerFor(cam()).then(ok => { btn.hidden = !ok; });
+			}
+			sync();
+			// Re-asked when the page changes source, since the answer is per
+			// camera: a webcam that publishes only MJPEG has a snapshot where
+			// the sensor beside it may not, and the other way round.
+			btn.__mjSyncSnapshot = sync;
 			btn.addEventListener('click', () => {
 				btn.disabled = true;
-				apiFetch('/image.jpg', { credentials: 'same-origin', cache: 'no-store' })
+				const q = cam() > 0 ? '?channel=' + cam() : '';
+				apiFetch('/image.jpg' + q,
+					{ credentials: 'same-origin', cache: 'no-store' })
 					.then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
 					.then(b => {
 						const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -223,5 +254,10 @@
 	});
 
 	window.MajesticHero.wireFullscreen(stage, $('#mj-fs'));
-	window.MajesticHero.wireSnapshot($('#mj-snap'));
+	// Which camera the Live page is showing, if it is showing one at all. A
+	// getter rather than a value: the page can change source under this at any
+	// time, and a snapshot of the camera that WAS on screen is the bug this
+	// replaces.
+	window.MajesticHero.wireSnapshot($('#mj-snap'),
+		() => (window.MajesticLiveCamera ? window.MajesticLiveCamera() : 0));
 })();

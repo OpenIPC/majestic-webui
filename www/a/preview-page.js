@@ -422,6 +422,11 @@
 	// accepts, so an off-by-one is a viewer watching the wrong camera.
 	function wireStream() { return 3 * camera + stream; }
 
+	// Published for preview-hero.js's snapshot button, which is wired
+	// independently of this file and has to take its picture from the camera
+	// that is actually on screen. A getter, because that changes.
+	window.MajesticLiveCamera = () => camera;
+
 	// The /api/v1/sources entry for the current source, or null before the
 	// answer arrives. The transport gate reads it: what is worth trying depends
 	// on what this source publishes, not on what the on-board sensor does.
@@ -1697,6 +1702,10 @@
 		syncStreamControls();
 		reflectSource();
 		setChip();
+		// The snapshot button is per camera: a webcam that publishes only MJPEG
+		// has one where the sensor beside it may not, and the other way round.
+		const snap = $('#mj-snap');
+		if (snap && snap.__mjSyncSnapshot) snap.__mjSyncSnapshot();
 
 		// From the top of the chain rather than by retargeting the player on
 		// screen. A different source can be a different codec, a different

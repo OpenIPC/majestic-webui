@@ -35,6 +35,12 @@
 			<dt class="cp2cb"><span class="ep-http">http</span>://<span class="ep-host"><% esc "$network_address" %></span>/mjpeg.html</dt>
 			<dd>MJPEG live-streaming in web browser.</dd>
 		</dl>
+		<!-- Any camera beyond the on-board one, filled by main.js from
+		     /api/v1/sources. Empty here on purpose: which stream ids exist and
+		     which of them RTSP will answer for is something only the camera
+		     knows — a second sensor and a USB webcam publish different sets —
+		     and a grid of URLs that 404 is worse than no grid. -->
+		<div id="ep-sources"></div>
 	</div>
 
 	<div class="col">
@@ -99,5 +105,7 @@
 		</dl>
 	</div>
 </div>
+
+<script src="/a/mj-sources.js"></script>
 
 <%in p/footer.cgi %>
