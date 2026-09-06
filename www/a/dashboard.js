@@ -183,20 +183,13 @@
 	// Starts false: a fetch that did not happen must not silence a fault. The
 	// cost of getting that wrong in this direction is a banner someone
 	// dismisses again; the other way it is a magenta picture nobody is told
-	// about. Which is why the answer being ABSENT and the answer being "no"
-	// are two states here rather than one — the banner used to paint the
-	// moment the config arrived and then withdraw itself when this landed a
-	// frame or two later, so a camera whose owner had said it has no filter
-	// flashed the warning on every single load (#367). Nothing is painted
-	// until the question has been put; a failed fetch counts as put, and
-	// leaves the fault to be reported.
+	// about.
 	let noFilter = false;
-	let noFilterAsked = false;
+	let noFilterCleared = false;
 	apiFetch('/cgi-bin/j/ircut.cgi', { credentials: 'same-origin' })
 		.then(r => r.json())
-		.then(j => { noFilter = !!(j && j.noFilter); })
-		.catch(() => {})
-		.then(() => { noFilterAsked = true; paintIrcut(); });
+		.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
+		.catch(() => {});
 
 	// What the snapshot tile's frame looks like. Kept as the last observation
 	// plus its run length, so the banner is driven by the picture the page is
@@ -234,25 +227,28 @@
 		// stands until something else repaints, which on a camera whose heartbeat
 		// is down is never. Every other caller already refused to paint here;
 		// this refuses centrally so a new one cannot forget.
-		// Nor before the camera has answered whether the claim is on file, which
-		// is the difference between a banner and a flash of one.
-		if (!IC || !nmCfg || !noFilterAsked) return;
+		if (!IC || !nmCfg) return;
 		let f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
 			.filter(x => x.level !== 'info')[0];
 
 		// Configuring a pin contradicts "there is no filter here", so the claim
-		// is dropped the moment one appears — which is what keeps a dismissal
+		// is dropped the moment one appears. That is what keeps a dismissal
 		// from outliving its own premise: someone who says no filter, then
-		// wires one, then has it fail, is told. The promise the dismissal made
-		// was to silence "you have not set this up", not "the one you set up
-		// has stopped working".
-		//
-		// That drop is the camera's job now (j/ircut.cgi), not this page's. It
-		// was this page's for one release, and this page is the one that cannot
-		// wire anything: the filter is wired on Day / Night, and someone who
-		// wires it there and takes it away again never has a dashboard open
-		// while the pad exists — so the only witness never witnessed it and the
-		// claim survived the wiring that contradicted it (#367).
+		// wires one, then has it fail, is told — the promise the dismissal
+		// made was to silence "you have not set this up", not "the one you set
+		// up has stopped working".
+		if (noFilter && !noFilterCleared && IC.wired && IC.wired(nmCfg)) {
+			// Once per load, and the answer comes from the file rather than from
+			// having asked: a delete the flash refused would otherwise leave the
+			// page believing the claim was dropped while it survives on the
+			// camera, ready to suppress the banner after the pin is taken away
+			// again. Retried on the next load, which is when it can differ.
+			noFilterCleared = true;
+			apiFetch('/cgi-bin/j/ircut.cgi?clear=1', { credentials: 'same-origin' })
+				.then(r => r.json())
+				.then(j => { noFilter = !!(j && j.noFilter); paintIrcut(); })
+				.catch(() => {});
+		}
 
 		// Only the missing-pin finding can be waved away. Every other one is
 		// about a filter that IS configured, and a camera whose filter is

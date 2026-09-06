@@ -47,15 +47,27 @@
 	}
 	const has = (v) => pin(v) !== null;
 
-	// There was a wired() here, exported so the dashboard could drop the
-	// owner's "this camera has no IR-cut filter" claim the moment a pad
-	// appeared. The drop is the camera's job now (j/ircut.cgi), because the
-	// dashboard is the one page on which nobody wires anything and so is the
-	// last place to find out (#367). What it asked lives on as `driveable`
-	// below, which is the same line: the opening coil alone, because a camera
-	// with only the closing coil assigned still moves nothing and is still the
-	// camera the banner is raised on (#273).
-
+	// Is anything wired to the filter at all? The same question the missing-pin
+	// finding asks, exported because the dashboard's "no filter here" dismissal
+	// has to be dropped the moment the answer becomes yes — a claim that the
+	// camera has no filter cannot outlive someone configuring one.
+	function wired(nm) {
+		// The same question the missing-pin finding asks, and it has to be the
+		// same question. It used to be EITHER coil, on the reasoning that a
+		// half-configured camera is not an unfitted one — true, but it made the
+		// dismissal impossible to use on exactly the camera that was showing
+		// the banner. With only the closing coil assigned majestic still moves
+		// nothing, so the banner stands and offers Dismiss; pressing it
+		// recorded the claim, and the next load read a coil, called it a
+		// contradiction, and deleted it again. Dismiss, reload, banner (#273).
+		//
+		// A claim is only contradicted by a filter this camera can actually
+		// drive. A pad assigned to a coil that majestic never reaches is not
+		// one, and someone pressing Dismiss under that banner is answering
+		// about the state they are looking at.
+		const n = nm || {};
+		return has(n.irCutPin1);
+	}
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and yaml-cli does not normalise it.
 	const on = (v) => v === true || v === 'true' || v === 1 || v === '1';
@@ -949,7 +961,7 @@
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
-		verdict: verdict, probe: probe, snapshot: snapshot,
+		verdict: verdict, probe: probe, snapshot: snapshot, wired: wired,
 		HUNT_WINDOW_S: HUNT_WINDOW_S, HUNT_FLIPS: HUNT_FLIPS,
 		CONFLICT_S: CONFLICT_S, PIC_STREAK: PIC_STREAK,
 	};

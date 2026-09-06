@@ -367,24 +367,21 @@ function runRest() {
 			/opening coil/.test(half[0].detail), half[0].detail);
 	}
 
-	group('only a filter the camera can drive is a configured one');
+	group('wired: only a filter the camera can drive contradicts "there is none"');
 	{
-		// The opening coil is what majestic returns early without, so a camera
-		// holding only the other one moves nothing and gets the same banner. It
-		// matters beyond the wording: this finding is the one an owner is
-		// allowed to wave away with "there is no filter here", and asking about
-		// EITHER coil made that unusable on the very camera showing the banner
-		// — the claim was recorded and the next load read the closing coil,
-		// called it a contradiction and deleted it again (#273).
-		const raised = (nm) =>
-			ic.diagnose(nm, null, null).some((f) => f.id === 'no-pins');
-		check('nothing assigned raises it', raised({}) === true);
-		check('the opening coil settles it', raised({ irCutPin1: 11 }) === false);
-		check('the closing coil alone does not', raised({ irCutPin2: 10 }) === true);
-		check('pad 0 is a pad here too', raised({ irCutPin1: 0 }) === false);
-		// tests/ircut-claim.test.js holds j/ircut.cgi to this same table, since
-		// the endpoint that drops the owner's claim has to ask what the banner
-		// asks or the two states disagree.
+		// The dashboard drops the owner's "no filter here" claim the moment
+		// this says yes, so it has to ask the same question the banner does.
+		check('nothing assigned is not wired', ic.wired({}) === false);
+		check('the opening coil alone is', ic.wired({ irCutPin1: 11 }) === true);
+		// It used to be EITHER coil, which made Dismiss unusable on the very
+		// camera that was showing the banner: pressing it recorded the claim,
+		// and the next load read the closing coil, called it a contradiction
+		// and deleted it again — dismiss, reload, banner (#273).
+		check('the closing coil alone is not, because majestic moves nothing with it',
+			ic.wired({ irCutPin2: 10 }) === false);
+		check('and that is exactly the camera the banner is raised on',
+			ic.diagnose({ irCutPin2: 10 }, null, null)[0].id === 'no-pins');
+		check('pin 0 is a pin here too', ic.wired({ irCutPin1: 0 }) === true);
 	}
 
 	group('diagnose: a switch that is doing nothing says so');
