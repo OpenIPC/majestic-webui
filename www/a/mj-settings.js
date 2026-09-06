@@ -2814,6 +2814,28 @@
 		const all = sectionFields('osd', true);
 		const fields = all.filter(f => !isOverlayMember(f.dot));
 
+		// WHATEVER IS STAGED ON THE CAMERA, THIS PAGE IS ABOUT TO DRAW THE
+		// CONFIG. So the camera is put back to the config first, and the two
+		// agree from the first frame.
+		//
+		// A live push is the camera's, not this tab's: it moves the picture for
+		// every viewer and for the recording, and it stays in force until
+		// somebody takes it off. The page that staged it does that on its way
+		// out — Save, leaving the leaf, closing the tab — but a tab that dies
+		// between those (a crash, a sleep, a pulled cable) sends nothing, and
+		// the override outlives it. What the next person then opens is a
+		// picture that disagrees with every number on the page: the outline
+		// where the config says the mask is, and the camera's grey block
+		// somewhere else. For a privacy mask that is not merely confusing,
+		// because the block left staged can be somewhere that hides LESS than
+		// the saved list does.
+		//
+		// Unconditional, and not guarded by whether THIS page pushed: the whole
+		// point is the override that no live page is answering for. The cost of
+		// getting it wrong is one dropped preview in another browser, whose
+		// very next pointermove pushes it again.
+		revertOsdPlace(true);
+
 		// Which overlays this camera can draw, and the fields of each.
 		//
 		// The flat osd.* keys are overlay 0 — every config in the field has them
@@ -3697,8 +3719,8 @@
 	// form is majestic's own word for "drop the override and go back to what is
 	// saved", and it drops EVERY overlay in one call — which is exactly the
 	// undo, whichever ones were dragged.
-	function revertOsdPlace() {
-		if (!osdPushed) return;
+	function revertOsdPlace(force) {
+		if (!osdPushed && !force) return;
 		osdPushed = false;
 		// The masks go with the placement: an empty list is the same "put back
 		// what is saved" the empty anchor is, and both were staged by the same
