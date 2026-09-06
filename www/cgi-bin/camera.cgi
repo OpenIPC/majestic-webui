@@ -131,6 +131,13 @@ fi
 %>
 <script src="/a/mj-tree.js" defer></script>
 <script src="/a/mj-region.js" defer></script>
+<%
+# Where the overlay sits. Its own file for the same reason the tree is: the
+# arithmetic is the subject of issue #340, it fails silently — an overlay placed
+# wrongly still renders and still looks like an overlay — and tests/place.test.js
+# can only ask it if it is reachable without a picture.
+%>
+<script src="/a/mj-place.js" defer></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>
