@@ -189,25 +189,11 @@
 					// setting that makes this finding stop (the branch above).
 					// It used to be a × on the Dashboard writing a private file,
 					// which said the same thing where only that banner could
-					// read it (#367).
-					//
-					// Only where the camera HAS that switch. It is recent, and
-					// the settings page is drawn from the daemon's own schema,
-					// so on a build without it there is no such control to go
-					// and find — naming one would be this page inventing an
-					// answer. An absent key is a reliable signal here and a
-					// default is not mistaken for one: /api/v1/config.json
-					// reports the effective configuration, so a key sitting at
-					// its default is still present in it, and only a daemon
-					// that has never heard of it leaves it out.
-					(nm.irCutEnabled === undefined
-						? ' If this camera has no IR-cut filter fitted, there ' +
-							'is nothing here to say so with: the switch that ' +
-							'settles it, "Drive the IR-cut filter", arrives ' +
-							'with a newer firmware than this one.'
-						: ' If this camera has no IR-cut filter fitted, turn ' +
-							'off "Drive the IR-cut filter" and nothing here ' +
-							'will ask again.'),
+					// read it (#367). Said unconditionally: the WebUI and the
+					// daemon ship in one firmware image, so a camera running
+					// this page has the switch this sentence names.
+					' If this camera has no IR-cut filter fitted, turn off ' +
+					'"Drive the IR-cut filter" and nothing here will ask again.',
 				fix: 'nightMode',
 			});
 		} else if (pictureOpen) {
