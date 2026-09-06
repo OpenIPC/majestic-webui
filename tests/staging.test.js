@@ -36,6 +36,13 @@ const IDS = [
 	'toggle-ircut', 'toggle-light', 'toggle-night',
 ];
 
+// Ask the page for a transport directly, bypassing the (now disabled) radio —
+// the point being that the guard holds wherever the request comes from.
+function attachAs(env, kind) {
+	env.el('mj-transport-' + (kind === 'webrtc' ? 'w' : 'm')).checked = true;
+	env.el('mj-transport-' + (kind === 'webrtc' ? 'w' : 'm')).fire('change');
+}
+
 // The user picks WebRTC on the segmented control. The stub elements are not a
 // real radio group, so the sibling is unchecked by hand as a browser would.
 function pickWebRTC(env) {
@@ -1132,6 +1139,54 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			back.opts.stream + ' vs ' + first.opts.stream);
 		check('and the transport its codec implies, not the floor',
 			back.kind !== 'multipart', back.kind);
+	}
+
+	// Reported by a maintainer against the lab camera: with the built-in sensor
+	// WebRTC and MSE work; selecting the webcam un-selects both; pressing MSE
+	// does nothing; pressing WebRTC switches back to the built-in sensor. All
+	// three are the picker not following the source — it named two transports
+	// that cannot carry an MJPEG-only stream, so one was inert and the other
+	// answered with a different CAMERA.
+	group('the transport picker follows the source');
+	{
+		const env = load('webrtc', { 'jpeg.enabled': true, 'video1.enabled': true },
+			0, false, [SENSOR, USB]);
+		env.multipart = true;
+		await tick();
+		check('both transports are offered for the sensor',
+			env.el('mj-transport-w').disabled === false &&
+			env.el('mj-transport-m').disabled === false);
+
+		const inputs = env.el('mj-source').kids.filter(k => k.tag === 'input');
+		inputs[1].checked = true;
+		inputs[1].fire('change');
+
+		// Not merely unlit, which reads as broken. Unavailable, the same answer
+		// the Main/Sub radios give for a source with one stream.
+		check('neither is offered for an MJPEG-only source',
+			env.el('mj-transport-w').disabled === true &&
+			env.el('mj-transport-m').disabled === true);
+		check('and the label says why',
+			/MJPEG only/.test(env.el('mj-transport-lbl').title),
+			env.el('mj-transport-lbl').title);
+
+		// Belt and braces: whatever asks, a NAL transport is not sent at a
+		// source that has no NAL stream. WebRTC would have been answered with
+		// camera 0 — the viewer pressing a TRANSPORT and getting a different
+		// CAMERA is the report.
+		const made = env.made.length;
+		attachAs(env, 'webrtc');
+		check('asking for WebRTC anyway does not leave this source',
+			env.made.length === made + 1 &&
+			env.made[made].kind === 'multipart' &&
+			env.made[made].opts.stream === 5,
+			env.made[made] && (env.made[made].kind + '/' + env.made[made].opts.stream));
+
+		inputs[0].checked = true;
+		inputs[0].fire('change');
+		check('and they come back with a source that has NAL streams',
+			env.el('mj-transport-w').disabled === false &&
+			env.el('mj-transport-m').disabled === false);
 	}
 
 	group('a remembered source comes back');

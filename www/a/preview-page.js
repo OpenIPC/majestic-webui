@@ -361,6 +361,31 @@
 		});
 	}
 
+	// The transport picker names what can carry THIS source's stream, so it has
+	// to follow the source rather than sit there offering two choices that do
+	// not apply. On a webcam publishing only MJPEG both were left merely
+	// unlit — which reads as broken rather than as inapplicable — and pressing
+	// them was worse than nothing: MSE did nothing at all, and WebRTC changed
+	// the camera. Disabled is the same answer the Main/Sub radios already give
+	// for a source with one stream.
+	function syncTransportControls() {
+		const S = window.MajesticSources;
+		const info = curStreamInfo();
+		// Unknown stays enabled: the sources answer is raced against a deadline
+		// and a slow one must not take the picker away from a camera that has
+		// always had it.
+		const nal = !info || !S || S.family(info) === 'nal';
+		if (transportW) transportW.disabled = !nal || !webrtcAvailable;
+		if (transportM) transportM.disabled = !nal;
+		if (transportLbl && !nal) {
+			transportLbl.title = 'This source publishes MJPEG only, which ' +
+				'neither WebRTC nor MSE can carry \u2014 the picture comes over ' +
+				'HTTP instead.';
+		} else if (transportLbl && liveKind !== 'webrtc') {
+			transportLbl.title = TRANSPORT_TITLE;
+		}
+	}
+
 	function reflectTransport(kind) {
 		if (transportW) transportW.checked = kind === 'webrtc';
 		if (transportM) transportM.checked = kind === 'mse';
@@ -1070,7 +1095,24 @@
 		// wasm player over the new one.
 		wasmGen++;
 		cancelWasmRetry();
-		swap.start(kind === true ? 'webrtc' : kind === false ? 'mse' : kind);
+
+		let want = kind === true ? 'webrtc' : kind === false ? 'mse' : kind;
+		// A NAL transport cannot carry a source that publishes MJPEG only, and
+		// asking anyway is not harmless in the way a refused attach usually is.
+		// The daemon declines /ws/video for a JPEG stream — it carries no
+		// access units — so MSE simply did nothing; and WebRTC negotiates the
+		// on-board channels only, so it answered with camera 0 and the viewer
+		// silently got a DIFFERENT CAMERA from the one they were watching.
+		//
+		// Held here as well as on the controls below, because every caller
+		// reaches this and only one of them is a button.
+		const S = window.MajesticSources;
+		const info = curStreamInfo();
+		if (want !== 'multipart' && info && S &&
+			S.family(info) === 'multipart') {
+			want = 'multipart';
+		}
+		swap.start(want);
 	}
 
 	// The chain, as an ordered walk rather than the pair of `kind === 'webrtc'`
@@ -1733,6 +1775,9 @@
 	// radios. A USB webcam in MJPEG mode has one stream and no channel to pick
 	// between, so Main/Sub/Auto go away rather than sit there doing nothing.
 	function syncStreamControls() {
+		// First, and outside the early return below: the transports apply to
+		// whatever is on screen whether or not the source list has landed.
+		syncTransportControls();
 		const S = window.MajesticSources;
 		const src = srcOf(camera);
 		const avail = (S && src) ? S.streams(src) : null;
