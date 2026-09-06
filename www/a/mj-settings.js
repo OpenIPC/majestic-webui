@@ -1054,8 +1054,10 @@
 
 		// Parked (nightMode.*Enabled: false) outranks wired: the daemon
 		// refuses the toggle, so a live-looking switch would move and snap
-		// back. Explicit === false — an absent key on an older daemon means
-		// the switch does not exist there, not that it is off.
+		// back. Explicit === false, because absent is not off: a key the page
+		// was never given is one it knows nothing about, and reading that as
+		// "switched off" would grey out the control on a camera whose filter
+		// is working perfectly.
 		const ircutParked =
 			getDotted(state.config, 'nightMode.irCutEnabled') === false;
 		const lightParked =
