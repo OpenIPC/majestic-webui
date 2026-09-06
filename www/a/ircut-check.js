@@ -69,7 +69,7 @@
 		return has(n.irCutPin1);
 	}
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
-	// leave "true" as a string and yaml-cli does not normalise it.
+	// leave "true" as a string and nothing on the way in retypes it.
 	const on = (v) => v === true || v === 'true' || v === 1 || v === '1';
 
 	// Agreement, and the direction is measured rather than assumed: with the

@@ -2,6 +2,21 @@
 <%
 IFS_ORIG=$IFS
 
+# Reading majestic's configuration.
+#
+# Sourced through the working directory, not through $0. Under haserl $0 is the
+# interpreter -- /bin/sh -- so `dirname $0` is /bin and every page 500s on a
+# file that is not there. The CGI's cwd is the directory of the script being
+# served, which for every page that includes this one is cgi-bin/ -- the same
+# directory haserl resolves this file's own include against. Relative rather
+# than /var/www/... because the document root is majestic's system.staticDir
+# and a camera is free to move it.
+#
+# (Nothing in a comment here may contain a haserl close tag: it is inside the
+# block, so the parser would end the block on it and the page would fail with
+# "Missing" that same tag, several hundred lines later.)
+. ./p/majestic.sh
+
 # card_head "title" "note"
 #
 # The heading of a card, in the vocabulary the settings deck uses: micro-caps
@@ -916,7 +931,15 @@ update_caminfo() {
 	# AF button additionally needs a focus axis to make sense. Cached like
 	# the rest so pages don't shell out per request.
 	af_support=""
-	if [ -n "$ptz_support" ] && [ "$(yaml-cli -g .isp.autofocus.enabled 2>/dev/null)" = "true" ]; then
+	# A camera that could not be asked keeps the button rather than losing it:
+	# withdrawing the control would state, from a failed request, that this
+	# hardware does not have the feature. Only an answer saying it is off
+	# withdraws it.
+	_af=$(mj_cfg isp.autofocus.enabled); _afrc=$?
+	_af_on=""
+	[ "$_afrc" = 0 ] && [ "$_af" = "true" ] && _af_on=1
+	[ "$_afrc" -gt 1 ] && _af_on=1
+	if [ -n "$ptz_support" ] && [ -n "$_af_on" ]; then
 		case " ${ptz_caps:-focus} " in
 			*" focus "*) af_support="1" ;;
 		esac

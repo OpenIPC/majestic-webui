@@ -1,7 +1,7 @@
 #!/bin/sh
 # Recordings browser backend: which days hold footage, and what is in one day.
-# GET ?days=1&prefix=<dir>      -> {"prefix":"…","days":[{name,clips,mtime}]}
-# GET ?day=<name>&prefix=<dir>  -> {"path":"…","clips":[{name,size,mtime}]}
+# GET ?days=1        -> {"prefix":"…","days":[{name,clips,mtime}]}
+# GET ?day=<name>    -> {"path":"…","clips":[{name,size,mtime}]}
 #
 # It never serves media, and must never be made to. The browser fetches a clip
 # straight off its filesystem path, where majestic answers with sendfile and
@@ -9,10 +9,12 @@
 # connection buffer and take the camera's RAM with it. Everything here is
 # metadata only — names, sizes, mtimes.
 #
-# <prefix> comes from the client, which reads records.path out of
-# /api/v1/config.json and splits it at the first strftime %. Same arrangement as
-# j/sdcard.cgi's ?rec=, and for the same reason: no shell here has to parse YAML
-# or JSON to find out where recordings live.
+# This exists because majestic indexes nothing it records: it writes the clips
+# and publishes no listing, no size and no mtime for any of them, so somebody
+# has to walk the directory. That is the whole job — everything else it needs,
+# it asks the daemon for.
+
+. "$(dirname "$0")/../p/majestic.sh"
 
 json_hdr() { printf 'HTTP/1.1 200 OK\nContent-Type: application/json\nCache-Control: no-store\n\n'; }
 
@@ -26,9 +28,35 @@ json_hdr
 # enumerate MP4 names, sizes and mtimes anywhere the web process can read —
 # never mind that the page only ever sent the configured path. A filesystem
 # path arriving from a client is not a permission, so derive it here and ignore
-# what was sent. Same value the page computes for itself: records.path up to the
-# first strftime %.
-prefix=$(yaml-cli -g .records.path 2>/dev/null | sed 's/%.*//; s#/*$##')
+# what was sent: records.path up to the first strftime %.
+#
+# Derived by asking the daemon, which is not the same as reading its file. The
+# file holds only what differs from the built-in defaults, so a camera that
+# never had its recording path written to disk — the ordinary case, since the
+# settings page saves only the keys somebody changed — yielded an empty prefix
+# and was told, in a confident sentence, that it had no recordings directory
+# at all.
+records_path=$(mj_cfg records.path)
+case $? in
+	0) ;;
+	1)
+		# Answered, and the key is not set. That is a fact about the camera and
+		# is worth saying plainly -- unlike the case below, where nothing has
+		# been established at all.
+		printf '{"error":"no recording path is configured"}'
+		exit 0
+		;;
+	*)
+		# The daemon could not be asked. Reporting this as "no recordings
+		# directory" would state as fact something nothing has established, and
+		# reporting it as "not configured" would blame the configuration for a
+		# request that never got an answer.
+		printf '{"error":"could not ask the camera where recordings live"}'
+		exit 0
+		;;
+esac
+
+prefix=$(printf '%s' "$records_path" | sed 's/%.*//; s#/*$##')
 if [ -z "$prefix" ] || [ ! -d "$prefix" ]; then
 	printf '{"error":"no recordings directory"}'
 	exit 0

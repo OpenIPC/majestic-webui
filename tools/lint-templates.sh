@@ -135,7 +135,37 @@ find www sbin bin -type f 2>/dev/null | sort | while IFS= read -r s; do
 	fi
 done
 
-# --- 4. page names --------------------------------------------------------
+# --- 4. the deprecated config reader ---------------------------------------
+# /etc/majestic.yaml holds only what differs from majestic's built-in defaults,
+# so a key sitting at its default is absent from it entirely: parsing the file
+# reads back nothing for a value the camera is plainly running on, and nothing
+# distinguishes that from a value nobody chose. Reads go to /api/v1/get (mj_cfg
+# in p/majestic.sh) and writes to /api/v1/config.
+#
+# A flat string ban is defensible here precisely because the legitimate count is
+# zero: after the change that added this check, the tool appears nowhere in the
+# payload, so any reappearance is a regression rather than a judgement call.
+# Scoped to what ships -- this file and the compliance checklist have to name
+# what they forbid in order to state the rule at all.
+if grep -rn 'yaml-cli' www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ yaml-cli is deprecated: read config with mj_cfg (GET /api/v1/get)," >> "$FAILS"
+	echo "  write it with POST /api/v1/config. The file omits every defaulted key." >> "$FAILS"
+fi
+
+# The tool is only the commonest way to make this mistake; a `grep` at the file
+# makes it just as well, and banning one name would leave the other open. So
+# this catches an ACCESS rather than a mention: a reader or a redirect aimed at
+# the path. Naming the file is still fine -- get_config returns it, backup.cgi
+# lists it, and a dozen comments explain what is in it -- because a name is not
+# a read.
+if grep -rnE '^[^#]*\b(cat|grep|egrep|fgrep|sed|awk|head|tail|cut|sort|uniq|tr|wc|source)\b[^|;]*/etc/majestic\.yaml|^[^#]*[<>]{1,2}[[:space:]]*/etc/majestic\.yaml' \
+		www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ /etc/majestic.yaml is not the configuration: it holds only what" >> "$FAILS"
+	echo "  differs from majestic's defaults, so a defaulted key is not in it." >> "$FAILS"
+	echo "  Read with mj_cfg (GET /api/v1/get), write with POST /api/v1/config." >> "$FAILS"
+fi
+
+# --- 5. page names --------------------------------------------------------
 # p/pages.cgi is the one place a page's name is written, and this is what keeps
 # it that way in both directions: a nav entry pointing at a page with no row
 # would render its own filename as its label, and a page with neither a row nor
@@ -159,7 +189,7 @@ for f in $(find www/cgi-bin -maxdepth 1 -name '*.cgi' | sort); do
 	printf '%s: no page_label row and no page_title of its own\n' "$f" >> "$FAILS"
 done
 
-# --- 5. links that go nowhere ---------------------------------------------
+# --- 6. links that go nowhere ---------------------------------------------
 # Every page path this tree writes -- href, location, fetch -- has to name a
 # file that exists. Renaming a page and missing one reference is not a runtime
 # error anywhere: the link simply 404s when somebody clicks it, which is a

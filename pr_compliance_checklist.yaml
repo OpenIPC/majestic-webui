@@ -55,6 +55,52 @@ pr_compliances:
       or commit id, or pasted console/log output or screenshots captured from a lab
       device.
 
+  - title: "Configuration comes from the daemon, never from its file"
+    compliance_label: true
+    objective: >
+      /etc/majestic.yaml holds only what differs from majestic's built-in
+      defaults, so a key sitting at its default is absent from it entirely.
+      Anything that parses the file to learn a setting reads back nothing for a
+      value the camera is plainly running on, and cannot tell that from a
+      setting nobody ever chose. Measured on one camera with a fully populated
+      file, seven keys already disagreed - a configured privacy mask and two
+      motion regions among them - and the recordings page reported having no
+      recordings directory because of it. The tool that used to do this is
+      deprecated and no longer appears anywhere in the tree.
+    success_criteria: >
+      Configuration values are read from majestic - GET /api/v1/get?key=<dotted>
+      in a shell (via mj_cfg in www/cgi-bin/p/majestic.sh), /api/v1/config.json
+      in the browser (via mjConfig) - and written with POST /api/v1/config. A
+      key that may be unset is distinguished from one set to an empty value:
+      mj_cfg exits non-zero rather than printing nothing.
+    failure_criteria: >
+      The diff adds the string `yaml-cli` anywhere - an invocation, a comment, a
+      log message or a line of documentation - or reads or writes
+      /etc/majestic.yaml directly with cat, grep, sed, awk or a redirect. The
+      files that state this rule are exempt, since they must name what they
+      forbid: this checklist, .pr_agent.toml, and the check in
+      tools/lint-templates.sh.
+
+  - title: "The browser asks majestic directly for anything majestic serves"
+    compliance_label: true
+    objective: >
+      A CGI hop costs a fork of the shell and every subprocess in it, on a
+      camera with 32-128 MB of RAM, to relay bytes the daemon already serves on
+      the same port. Worse, a relay drifts: it re-derives what the daemon knows
+      and can be wrong about it, silently, in a way the daemon never is.
+    success_criteria: >
+      Browser code fetches majestic's own endpoints through apiFetch -
+      /api/v1/*, /metrics, /image.jpg, /night/*. A CGI under www/cgi-bin/j/
+      carries only what the daemon cannot answer: /proc, /sys, U-Boot env, block
+      devices, the filesystem, or a command. j/pulse.cgi is the model - it was
+      cut back to overlay df, /etc/timezone and the camera's own date %z once
+      /metrics was found to carry everything else it used to report.
+    failure_criteria: >
+      The diff adds browser code that fetches a CGI for a majestic config value,
+      a metric, a snapshot or day/night state; or adds a CGI endpoint, or a
+      field on one, whose value comes from majestic's configuration or /metrics
+      rather than from the camera around it.
+
   - title: "An absent reading is not a zero, and a failed fetch is not a fact"
     compliance_label: true
     objective: >

@@ -3806,8 +3806,8 @@
 	// majestic removes the key, in the same round trip that writes the others,
 	// so there is no window in which pad 0 is configured and no second endpoint
 	// to keep in step. It replaced a `j/gpio.cgi?unset=` call that edited the
-	// file with yaml-cli behind majestic's back and then waited out a deferred
-	// SIGHUP.
+	// configuration file directly, behind majestic's back, and then waited out
+	// a deferred SIGHUP.
 	//
 	// A majestic without that fix answers 202 and does nothing, so the check
 	// below is what keeps this honest — the whole point of the feature is that
@@ -3939,7 +3939,13 @@
 		if (!host || !window.MajesticIrcutMap) return;
 		let info;
 		try {
-			const r = await apiFetch('/cgi-bin/j/gpio.cgi', { credentials: 'same-origin' });
+			const r = await apiFetch('/api/v1/gpio', { credentials: 'same-origin' });
+			// apiFetch only intercepts 401. Everything else arrives as an
+			// ordinary response, and a firmware without this endpoint answers
+			// with a perfectly parseable JSON error — which, mounted as pad
+			// data, has no banks and draws an empty chip instead of falling
+			// back to the plain number fields.
+			if (!r.ok) throw new Error('HTTP ' + r.status);
 			info = await r.json();
 		} catch (e) {
 			// No pad list, no map. The hidden number fields are still there, so
@@ -4023,8 +4029,9 @@
 		if (find) find.addEventListener('click', async () => {
 			let fresh = info;
 			try {
-				const r = await apiFetch('/cgi-bin/j/gpio.cgi',
+				const r = await apiFetch('/api/v1/gpio',
 					{ credentials: 'same-origin' });
+				if (!r.ok) throw new Error('HTTP ' + r.status);
 				fresh = await r.json();
 				state.ircutInfo = fresh;
 			} catch (e) {
@@ -4033,6 +4040,22 @@
 			}
 			openScan(box, map, fresh);
 		});
+
+		// A sweep drives pads, and the camera refuses to drive any pair while it
+		// cannot say what the pads already are — no debugfs to name a line's
+		// owner, or no boot loader environment to see the PTZ pads. Offering the
+		// button anyway would spend a press to be told no, once per pad, so the
+		// reason is said here instead. Picking a pin by hand still works: that
+		// writes a number into a field and moves nothing.
+		if (find && (info.ownersUnknown || info.ptzUnknown)) {
+			const cant = [];
+			if (info.ownersUnknown) cant.push('which pads the kernel already holds');
+			if (info.ptzUnknown) cant.push('which pads the PTZ driver is on');
+			find.disabled = true;
+			find.title = 'This camera cannot say ' + cant.join(' or ') +
+				', so nothing may be driven. Set the pins by hand, or check that '
+				+ 'debugfs is mounted and the boot environment is readable.';
+		}
 
 		// A camera that came back from the dead mid-scan says so before anything
 		// else — the pad that did it is named and excluded.
@@ -4121,11 +4144,14 @@
 				// move anything" made the scan keep firing GPIO writes at a dead
 				// camera for another two hundred pairs and then report that
 				// nothing moved. It rejects now, and the sweep stops.
-				drive: (a, b) => apiFetch('/cgi-bin/j/gpio.cgi?pair=' + a + ',' + b,
-					{ credentials: 'same-origin' })
+				// POST, not GET: driving a pad is a mutation, and a GET is what
+				// a browser issues by itself — a prefetch, a restored tab, a
+				// link from anywhere — carrying the session with it.
+				drive: (a, b) => apiFetch('/api/v1/gpio?pair=' + a + ',' + b,
+					{ method: 'POST', credentials: 'same-origin' })
 					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
-				release: (a, b) => apiFetch('/cgi-bin/j/gpio.cgi?park=' + a + ',' + b + '&mode=float',
-					{ credentials: 'same-origin' })
+				release: (a, b) => apiFetch('/api/v1/gpio?park=' + a + ',' + b + '&mode=float',
+					{ method: 'POST', credentials: 'same-origin' })
 					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
 				look: () => IRCUT.snapshot('/image.jpg'),
 				wait: (ms) => new Promise((r) => setTimeout(r, ms)),
