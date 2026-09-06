@@ -8,14 +8,28 @@ network_list="$(ls /sys/class/net | grep -e eth0 -e wlan0)"
 network_wlan_ssid="$(fw_printenv -n wlanssid)"
 network_wlan_password="$(fw_printenv -n wlanpass)"
 
-# The interface the camera is on: the one carrying the default route, as
-# sysinfo found it. The form edits this one's file and the card reports this
-# one's state. The select can point a save at the other interface, and what
-# that does at boot is the boot script's decision, not this page's -- it
-# brings wlan0 up from its file only when U-Boot names a wireless driver, and
-# eth0 from its file only when it does not -- so nothing here promises when
+# The interface the camera is on. The default route names it when there is
+# one and it is one of the two edited here; a route through a tunnel or a
+# modem must not point the form at a file it cannot show. Without one -- a
+# static setup with no gateway, which is what a save on this page can
+# produce -- it is the interface the firmware's boot script brought up from
+# its file, which is also the only file a restart will read: wlan0 when
+# U-Boot names a wireless driver, eth0 when it does not. The form edits this
+# one's file and the card reports this one's state. The select can point a
+# save at the other interface, and what that does at boot is the boot
+# script's decision rather than this page's, so nothing here promises when
 # such a save takes effect.
-now_iface="${network_interface:-eth0}"
+now_iface=""
+for i in $network_list; do
+	[ "$i" = "$network_interface" ] && now_iface=$i
+done
+if [ -z "$now_iface" ]; then
+	if [ -n "$(fw_printenv -n wlandev 2>/dev/null)" ] && echo "$network_list" | grep -qx wlan0; then
+		now_iface=wlan0
+	else
+		now_iface=eth0
+	fi
+fi
 
 # Two readings, kept apart, because they are only the same thing between a
 # restart and the next save. sbin/setnetwork writes
@@ -37,6 +51,9 @@ net_read() {
 	# spelling is setnetwork's, and this is its only reader.
 	cfg_nameserver=$(awk '$1 == "pre-up" && $2 == "echo" && $3 == "nameserver" { print $4; exit }' "$f" 2>/dev/null)
 
+	# Empty here is an absence, not a failed reading: the tools are busybox's
+	# own, and an interface with no address, no route or no resolver is a
+	# fact about it that the file may well disagree with.
 	local inet=$(ifconfig "$1" 2>/dev/null | sed -n 's/.*inet addr:\([^ ]*\).*Mask:\([^ ]*\).*/\1 \2/p')
 	now_address=${inet% *}
 	now_netmask=${inet#* }
@@ -51,12 +68,16 @@ net_read() {
 		}')
 	now_nameserver=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf 2>/dev/null)
 	# A live udhcpc for the interface is what being on DHCP means; ifup
-	# leaves its pid where ifdown will look for it.
+	# leaves its pid where ifdown will look for it. An address with no
+	# udhcpc behind it is static. No address at all is neither, and the card
+	# says so rather than picking one.
 	local pid=$(cat "/var/run/udhcpc.$1.pid" 2>/dev/null)
 	if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
 		now_mode=dhcp
-	else
+	elif [ -n "$now_address" ]; then
 		now_mode=static
+	else
+		now_mode=""
 	fi
 	# The wireless network in use is the one wpa_supplicant was started
 	# with: the pre-up wrote it from the U-Boot variables of that moment,
@@ -107,8 +128,21 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			;;
 
 		reset)
-			rm -f /etc/network/interfaces.d/*
-			cp -f /rom/etc/network/interfaces.d/* /etc/network/interfaces.d
+			# The firmware's set is staged beside the directory and swapped in
+			# only once every copy succeeded, so a copy that fails -- the
+			# overlay full, say -- leaves what was there rather than a camera
+			# with no interface file to boot from. Staged rather than copied
+			# onto the merged path, because a file the overlay has never
+			# copied up is the firmware's own inode showing through, and cp
+			# refuses to copy a file onto itself.
+			d=/etc/network/interfaces.d
+			rm -rf "$d.new"
+			if ! out=$({ mkdir "$d.new" && cp -f "/rom$d"/* "$d.new/"; } 2>&1); then
+				rm -rf "$d.new"
+				redirect_back "danger" "Network configuration was not reset: $(esc "$out")"
+			fi
+			rm -f "$d"/*
+			mv "$d.new"/* "$d/" && rmdir "$d.new"
 			net_read "$now_iface"
 			msg="Network configuration reset to the firmware's."
 			net_pending && msg="$msg It takes effect when the camera restarts."
@@ -182,19 +216,24 @@ net_pending && restart_pending=1
 <%
 # The fields carry the file. On DHCP the static fields are hidden, and what
 # they hold is the starting point for turning the switch off: the lease in
-# use, which is what most people mean to pin.
-network_interface=$now_iface
-network_dhcp=$([ "$cfg_mode" = "dhcp" ] && echo true)
-if [ "$cfg_mode" = "static" ]; then
-	network_address=$cfg_address
-	network_netmask=$cfg_netmask
-	network_gateway=$cfg_gateway
-	network_nameserver=$cfg_nameserver
-else
-	network_address=$now_address
-	network_netmask=$now_netmask
-	network_gateway=$now_gateway
-	network_nameserver=$now_nameserver
+# use, which is what most people mean to pin. A save the checks above
+# refused falls through to here with the posted values still in the
+# variables, and they stay: the page is showing the person their own
+# attempt beside what was wrong with it.
+if [ -z "$error" ]; then
+	network_interface=$now_iface
+	network_dhcp=$([ "$cfg_mode" = "dhcp" ] && echo true)
+	if [ "$cfg_mode" = "static" ]; then
+		network_address=$cfg_address
+		network_netmask=$cfg_netmask
+		network_gateway=$cfg_gateway
+		network_nameserver=$cfg_nameserver
+	else
+		network_address=$now_address
+		network_netmask=$now_netmask
+		network_gateway=$now_gateway
+		network_nameserver=$now_nameserver
+	fi
 fi
 %>
 
@@ -235,12 +274,12 @@ fi
 		<div class="card"><div class="card-body">
 			<% card_head "Current connection" %>
 			<% if net_pending; then %>
-			<p class="small text-secondary">Still the setup from before the save. The saved settings take effect when the camera restarts.</p>
+			<p class="small text-secondary">What the camera is on now. The saved settings take effect when it restarts.</p>
 			<% fi %>
 			<dl class="small list mb-0">
 				<dt>Hostname</dt><dd><% esc "$network_hostname" %></dd>
 				<dt>Interface</dt><dd><% esc "$now_iface" %></dd>
-				<dt>Mode</dt><dd><%= $([ "$now_mode" = "dhcp" ] && echo DHCP || echo Static) %></dd>
+				<dt>Mode</dt><dd><%= $(case "$now_mode" in dhcp) echo DHCP ;; static) echo Static ;; *) echo "—" ;; esac) %></dd>
 				<% if [ "$now_iface" = "wlan0" ] && [ -n "$now_ssid" ]; then %>
 				<dt>Wi-Fi</dt><dd><% esc "$now_ssid" %></dd>
 				<% fi %>
