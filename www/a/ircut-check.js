@@ -48,9 +48,9 @@
 	const has = (v) => pin(v) !== null;
 
 	// Is anything wired to the filter at all? The same question the missing-pin
-	// finding asks, exported because the dashboard's "no filter here" dismissal
-	// has to be dropped the moment the answer becomes yes — a claim that the
-	// camera has no filter cannot outlive someone configuring one.
+	// finding asks, exported because the "no filter here" dismissal has to be
+	// dropped the moment the answer becomes yes — a claim that the camera has
+	// no filter cannot outlive someone configuring one.
 	function wired(nm) {
 		// The same question the missing-pin finding asks, and it has to be the
 		// same question. It used to be EITHER coil, on the reasoning that a
@@ -68,6 +68,68 @@
 		const n = nm || {};
 		return has(n.irCutPin1);
 	}
+
+	// The owner's claim, as the camera holds it, with the one rule that can
+	// take it away already applied. Both pages that care ask THIS rather than
+	// reading the file and deciding for themselves, because a rule spelt out at
+	// two call sites is a rule that will be true at one of them.
+	//
+	// It has to be asked from more than one page, and that is the whole of
+	// #367. The drop used to happen only on the Dashboard, on the first load
+	// that saw a pad — which made the Dashboard the sole witness to a wiring
+	// change, and it is the one page on which nobody wires anything. Wire the
+	// filter on Day / Night, take it away again, and no Dashboard was ever open
+	// while a pad existed: the claim outlived the wiring that contradicted it,
+	// and went on hiding a warning about a filter the camera could no longer
+	// move. Nor can it be recovered afterwards — clearing those fields REMOVES
+	// the keys rather than zeroing them, so the configuration after the round
+	// trip is byte-identical to the configuration before it.
+	//
+	// So Day / Night asks too, after every save, while the pad is still there.
+	//
+	// The claim is a WebUI fact about hardware, kept in /etc/webui — majestic
+	// neither stores it nor has an endpoint for it — which is why this one goes
+	// through a CGI while the wiring it is judged against comes from the
+	// daemon's own config, in the browser, where both callers already have it.
+	function claim(nm, io) {
+		io = io || claimIo();
+		// A read that did not happen has not told us the claim stands, and the
+		// cost of getting that wrong in this direction is a banner someone
+		// dismisses again; the other way it is a magenta picture nobody is told
+		// about.
+		return Promise.resolve().then(io.read).then(
+			(c) => {
+				const stands = !!(c && c.noFilter);
+				if (!stands || !wired(nm)) return stands;
+				// Read the answer back rather than assuming the delete landed:
+				// a flash that refused the removal leaves the claim on the
+				// camera, and this page believing otherwise would be the same
+				// bug one layer up. Retried on the next ask, which is when it
+				// can differ.
+				return Promise.resolve().then(io.clear)
+					.then((c2) => !!(c2 && c2.noFilter), () => stands);
+			},
+			() => false);
+	}
+
+	// Where the claim is kept, and the only three things anyone does with it.
+	// The endpoint is named once, here, rather than at each call site.
+	//
+	// It is a CGI, and it is one of the few things that still should be: the
+	// claim is an owner's word about hardware, stored under /etc/webui, and
+	// majestic neither holds it nor serves it. The wiring it is weighed against
+	// is a different matter and comes from the daemon, in the browser, where
+	// both callers have already fetched it.
+	function claimIo() {
+		const go = (q) => apiFetch('/cgi-bin/j/ircut.cgi' + q,
+			{ credentials: 'same-origin' }).then((r) => r.json());
+		return {
+			read: () => go(''),
+			clear: () => go('?clear=1'),
+			dismiss: () => go('?dismiss=1'),
+		};
+	}
+
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and nothing on the way in retypes it.
 	const on = (v) => v === true || v === 'true' || v === 1 || v === '1';
@@ -961,7 +1023,8 @@
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
-		verdict: verdict, probe: probe, snapshot: snapshot, wired: wired,
+		verdict: verdict, probe: probe, snapshot: snapshot,
+		wired: wired, claim: claim, claimIo: claimIo,
 		HUNT_WINDOW_S: HUNT_WINDOW_S, HUNT_FLIPS: HUNT_FLIPS,
 		CONFLICT_S: CONFLICT_S, PIC_STREAK: PIC_STREAK,
 	};

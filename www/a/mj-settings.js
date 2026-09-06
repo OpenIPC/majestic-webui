@@ -3615,6 +3615,29 @@
 		}
 	}
 
+	// The Dashboard lets an owner record, on the camera, that it has no IR-cut
+	// filter fitted — nothing measurable separates that from one nobody has
+	// wired, so the owner is the only one who can say. Wiring a filter
+	// contradicts it, and IRCUT.claim() drops the claim when it is asked with
+	// a pad assigned.
+	//
+	// It has to be asked HERE, because this is the only page in the UI where a
+	// pad appears at all. The reporter of #367 wired the filter here, saved,
+	// took it away, saved again — and the only code that could have noticed ran
+	// on the Dashboard, which was never open while the pad existed. Nothing
+	// afterwards can recover it either: clearing those fields removes the keys
+	// rather than zeroing them, so the configuration ends byte-identical to how
+	// it started.
+	//
+	// So the save asks, while the pad is still there. Nothing is decided here
+	// and the answer is not read: this only puts the question at the one moment
+	// it can be answered differently.
+	function recheckNoFilterClaim() {
+		if (!IRCUT || !IRCUT.claim) return;
+		IRCUT.claim(nightCfg())
+			.catch(() => { /* the Dashboard asks again on its own */ });
+	}
+
 	function paintFindings() {
 		const box = document.getElementById('mj-ircut-findings');
 		if (!box || !IRCUT) return;
@@ -5535,6 +5558,10 @@
 		// which `quiet` just skipped.
 		if (state.ircutRoles) state.ircutRoles();
 		syncTestBtn();
+		// A save or a reset is the one moment a pad can appear, and the only
+		// moment the camera can be shown one that is about to be taken away
+		// again.
+		recheckNoFilterClaim();
 		updateDirty();
 	}
 

@@ -369,8 +369,8 @@ function runRest() {
 
 	group('wired: only a filter the camera can drive contradicts "there is none"');
 	{
-		// The dashboard drops the owner's "no filter here" claim the moment
-		// this says yes, so it has to ask the same question the banner does.
+		// claim() drops the owner's "no filter here" the moment this says yes,
+		// so it has to ask the same question the banner does.
 		check('nothing assigned is not wired', ic.wired({}) === false);
 		check('the opening coil alone is', ic.wired({ irCutPin1: 11 }) === true);
 		// It used to be EITHER coil, which made Dismiss unusable on the very
@@ -955,5 +955,109 @@ function runRest() {
 				.every(x => x.level !== 'ok'));
 	}
 
-	done();
+	runClaim();
+}
+
+// ---------------------------------------------------------------------------
+// The owner's "this camera has no IR-cut filter", and the one rule that takes
+// it back.
+//
+// Every way this fails is a banner that does NOT appear, which on a page is
+// indistinguishable from a camera that is fine — and reproducing it for real
+// needs an owner who pressed Dismiss, a filter wired after that, and the same
+// filter taken away again (#367). So the sequence is driven here, against a
+// stub of the endpoint, from both of the pages that have to apply the rule.
+function runClaim() {
+	// Stands in for /cgi-bin/j/ircut.cgi: a file that is there or is not, and
+	// a count of what was asked of it.
+	function camera(start) {
+		const st = { noFilter: !!start, reads: 0, clears: 0 };
+		return {
+			io: {
+				read: () => { st.reads++; return Promise.resolve({ noFilter: st.noFilter }); },
+				clear: () => {
+					st.clears++; st.noFilter = false;
+					return Promise.resolve({ noFilter: st.noFilter });
+				},
+			},
+			st: st,
+		};
+	}
+
+	const NONE = {};
+	const WIRED = { irCutPin1: 11 };
+
+	group('claim: a pad wired to the filter takes the claim back');
+	Promise.resolve()
+		.then(() => {
+			const c = camera(true);
+			return ic.claim(NONE, c.io).then((stands) => {
+				check('with nothing wired the claim stands', stands === true);
+				check('and nothing was deleted', c.st.clears === 0);
+			});
+		})
+		.then(() => {
+			const c = camera(true);
+			return ic.claim(WIRED, c.io).then((stands) => {
+				check('a pad contradicts it', stands === false);
+				check('and it is dropped, not merely overruled', c.st.clears === 1);
+				check('so a later ask finds nothing to drop',
+					c.st.noFilter === false);
+			});
+		})
+		.then(() => {
+			// The sequence from the report, in the order it happened: the
+			// wiring is done on Day / Night and undone there, and the Dashboard
+			// is not open for either. Only because the settings page asks in
+			// between does the Dashboard get a truthful answer afterwards.
+			const c = camera(true);
+			return ic.claim(WIRED, c.io)                       // Day / Night saves
+				.then(() => ic.claim(NONE, c.io))              // pad taken away
+				.then((stands) => {
+					check('wire, save, unwire, save: the warning comes back',
+						stands === false);
+				});
+		})
+		.then(() => {
+			// And the same sequence with nobody asking while the pad exists is
+			// the bug itself — kept here so the reason the settings page has to
+			// call this cannot be quietly removed.
+			const c = camera(true);
+			return ic.claim(NONE, c.io).then((stands) => {
+				check('...whereas with no ask in between it would still stand',
+					stands === true);
+			});
+		})
+		.then(() => {
+			const c = camera(false);
+			return ic.claim(WIRED, c.io).then((stands) => {
+				check('a camera with no claim on file needs no delete',
+					stands === false && c.st.clears === 0);
+			});
+		})
+		.then(() => {
+			group('claim: an ask that did not happen is not an answer');
+			// A failed read must not silence the fault: the cost of getting
+			// that wrong is a magenta picture nobody is told about, against a
+			// banner someone dismisses again.
+			const dead = { read: () => Promise.reject(new Error('offline')),
+				clear: () => Promise.reject(new Error('offline')) };
+			return ic.claim(NONE, dead).then((stands) => {
+				check('an unreachable camera does not silence the banner',
+					stands === false);
+			});
+		})
+		.then(() => {
+			// A delete the flash refused leaves the claim where it was, and
+			// saying otherwise would be this bug one layer up.
+			const stubborn = {
+				read: () => Promise.resolve({ noFilter: true }),
+				clear: () => Promise.reject(new Error('read-only')),
+			};
+			return ic.claim(WIRED, stubborn).then((stands) => {
+				check('a delete that failed is not reported as a delete',
+					stands === true);
+			});
+		})
+		.then(done, (e) => { throw e; });
 }
