@@ -381,7 +381,14 @@
 	//
 	// So until the item list can pick one, this leaf draws the first overlay,
 	// which is the flat keys. That is the line W3 changes.
-	function isOverlayMember(dot) { return /^osd\.overlays\./.test(dot); }
+	// Both subtrees of osd.* that belong to a THING on the picture rather than
+	// to the section: the operator's overlays, and the vendor mark. Without
+	// the second, the mark's five placement keys render as loose rows beside
+	// overlay 0's own — a second Position anchor, a second Horizontal offset,
+	// with nothing to say which of the two things on the picture they move.
+	function isOverlayMember(dot) {
+		return /^osd\.overlays\./.test(dot) || /^osd\.mark\./.test(dot);
+	}
 
 	function matchCount(secId, q) {
 		return leafFields(secId).filter(f => !isOverlayMember(f.dot) && fieldVisible(f) &&
@@ -2846,9 +2853,11 @@
 		// below never appears. Adding an index the schema does not carry would
 		// be offering a line the camera silently would not draw.
 		const extra = {};
+		const markFields = [];
 		for (const f of all) {
 			const m = /^osd\.overlays\.(\d+)\./.exec(f.dot);
 			if (m) (extra[m[1]] = extra[m[1]] || []).push(f);
+			else if (/^osd\.mark\./.test(f.dot)) markFields.push(f);
 		}
 		const OVERLAYS = [0].concat(
 			Object.keys(extra).map(Number).sort((a, b) => a - b));
@@ -3038,6 +3047,33 @@
 				if (placers[n]) placers[n].repaint();
 			});
 		}
+		// ── the vendor mark ──────────────────────────────────────────────
+		//
+		// An overlay in every way that matters to this page: it has a place on
+		// the picture, the same five keys describe it, and the same placer
+		// drags it. What it does not have is anything to say or any way to
+		// look — the camera decides both — so it gets the Place tab and
+		// nothing else, and the item row gives it no way to be removed.
+		//
+		// Mounted whenever the schema describes it, and SHOWN only while the
+		// camera reports drawing it. Those are different questions: the keys
+		// exist on every build that has the mark at all, and whether it is on
+		// the video turns on the licence, which this page cannot read.
+		if (panel && markFields.length) {
+			const box = panel.slot('place', MARK);
+			const mheld = {};
+			for (const f of markFields) {
+				const field = renderField(box, f.dot, f.key, f.sub,
+					getDotted(state.config, f.dot));
+				if (!field) continue;
+				state.fields.push(field);
+				state.initial[f.dot] = field.getValue();
+				mheld[f.key] = field;
+			}
+			HELD[MARK] = mheld;
+			if (mheld.anchor) panel.pad(mheld, box, () => placers[MARK]);
+		}
+
 		const held = HELD[0];
 
 		// What an overlay SAYS is also whether it exists — the same rule the
@@ -3152,6 +3188,15 @@
 		// mask across it. One arbiter, asked by both catchers, is what makes
 		// the picture a list of things you can pick up rather than two editors
 		// taking turns at the same pixels.
+		// On the picture right now. Not "configured": the mark is drawn when
+		// the camera is unlicensed AND more than one overlay is saying
+		// something, and the first of those is not in the schema — so the only
+		// honest source is the camera reporting that it drew one.
+		function markShown() {
+			return !!placers[MARK] &&
+				camRects.mark !== null && camRects.mark !== undefined;
+		}
+
 		let pickHandler = null;
 		const pickAt = (pt, from, probe) => {
 			let found = null;
@@ -3166,6 +3211,13 @@
 			if (masks && from !== 'mask') {
 				const m = masks.hitAt(pt);
 				if (m) offer(m.area, { t: 'mask', i: m.i }, (e) => masks.grabAt(m.i, e));
+			}
+			// And the mark, on the same smallest-wins scale as everything
+			// else — only while the camera is actually drawing it, or a press
+			// would pick up a thing that is not on the picture.
+			if (markShown() && from !== MARK && placers[MARK].hitAt(pt)) {
+				offer(placers[MARK].area(), { t: 'mark' },
+					(e) => placers[MARK].grab(e));
 			}
 			if (found && !probe && pickHandler) pickHandler(found.sel);
 			return found;
@@ -3187,6 +3239,17 @@
 					  rectsChanged: () => setTimeout(refreshOsdRects, 400) });
 				placers[n].setActive(false);
 				anyPlacer = true;
+			}
+			// The same placer, on the same hooks. It hit-tests against the
+			// rectangle the camera reports for the mark exactly as the others
+			// do against theirs, so dragging it is the gesture already written
+			// rather than a second one.
+			if (HELD[MARK] && HELD[MARK].anchor) {
+				placers[MARK] = mountOsdText(preview, HELD[MARK], note, panel,
+					MARK,
+					{ pickAt: pickAt, camRect: camRectFor,
+					  rectsChanged: () => setTimeout(refreshOsdRects, 400) });
+				placers[MARK].setActive(false);
 			}
 		}
 		if (anyPlacer) {
@@ -3234,7 +3297,9 @@
 			function pick(next, fromPicture) {
 				sel = next;
 				for (const k of Object.keys(placers))
-					placers[k].setActive(sel.t === 'text' && +k === sel.i);
+					placers[k].setActive(k === MARK
+						? sel.t === 'mark'
+						: sel.t === 'text' && +k === sel.i);
 				if (masks) {
 					masks.setActive(sel.t === 'mask');
 					if (sel.t === 'mask' && !fromPicture) masks.selectAt(sel.i);
@@ -3246,6 +3311,17 @@
 					panel.offer('look', !kinds[sel.i]);
 					panel.offer('place', true);
 					panel.reveal();
+				} else if (sel.t === 'mark' && panel) {
+					// A place and nothing else. There is no content to write
+					// and no face to choose — the camera answers both, and a
+					// tab offering either would be a control that does not
+					// work rather than a setting somebody has not found.
+					panel.showOverlay(MARK);
+					panel.offer('text', false);
+					panel.offer('look', false);
+					panel.offer('place', true);
+					panel.name('OpenIPC');
+					panel.reveal('place');
 				} else if (sel.t === 'mask' && panel) {
 					// A mask has a rectangle and nothing else: no content to
 					// write, no font to choose. One tab, and it is the one
@@ -3384,6 +3460,19 @@
 					c.b.addEventListener('click', () => pick({ t: 'mask', i: i }));
 					chips.appendChild(c.wrap);
 				}
+				// AND NO CROSS. Every other chip carries one; this is the item
+				// that cannot be taken off, and the absence is the whole
+				// statement. A disabled cross would read as a control that is
+				// broken rather than as a thing that is not offered, and a
+				// cross that explained itself in a tooltip would still be a
+				// button somebody presses first and reads second.
+				if (markShown()) {
+					const c = chip('Logo', 'OpenIPC', sel.t === 'mark');
+					c.b.title = 'Drag it anywhere on the picture. ' +
+						'It cannot be removed.';
+					c.b.addEventListener('click', () => pick({ t: 'mark' }));
+					chips.appendChild(c.wrap);
+				}
 				// Offered only while the camera has an index left to draw on.
 				if (spare() !== undefined) {
 					const add = el('button', 'mj-osd-chip mj-osd-chip-add');
@@ -3502,6 +3591,19 @@
 						co.value = masks.rectAt(sel.i);
 				});
 			}
+
+			// It comes and goes with what the camera is drawing — a second
+			// overlay brings it a tick later, and removing one takes it away
+			// — so the row is rebuilt when that answer changes rather than
+			// only when something here is clicked.
+			camRects.onMark = () => {
+				if (sel.t === 'mark' && !markShown()) {
+					pick({ t: 'text', i: listed()[0] });
+					return;
+				}
+				draw();
+			};
+			state.liveCleanup.push(() => { camRects.onMark = null; });
 
 			pick(sel, false);
 		}
@@ -3822,6 +3924,10 @@
 	// keys — every config in the field has them there and majestic reads them
 	// as the first overlay — so it has one spelling and no nesting.
 	function osdPlaceDoc(overlay, keys) {
+		// The mark is addressed by NAME, not by index. Its slot sits above
+		// every overlay the config describes, and majestic refuses that index
+		// spelled as an overlay precisely so the two cannot become one door.
+		if (overlay === MARK) return { osd: { mark: keys } };
 		return overlay
 			? { osd: { overlays: { [String(overlay)]: keys } } }
 			: { osd: keys };
@@ -3849,7 +3955,7 @@
 	// and this asks for it. A build without the endpoint 404s once and is never
 	// asked again; the estimate is still there behind it, which is what every
 	// build before this had.
-	const camRects = { by: {}, ok: true };
+	const camRects = { by: {}, ok: true, mark: null, onMark: null };
 
 	// Logo files whose overlay has been cleared but not yet saved.
 	//
@@ -3884,14 +3990,26 @@
 			.then((j) => {
 				if (!j) return;
 				const by = {};
+				// WHICH INDEX THE MARK HAS IS THE CAMERA'S TO SAY, and whether
+				// there is one at all is the only way this page can know: it
+				// turns on the licence and on how many overlays are drawing,
+				// and the licence is not in the schema. So the item appears
+				// when the camera reports drawing it and goes when it stops —
+				// which is also what makes it show up by itself a tick after a
+				// second overlay is added.
+				let mark = null;
 				for (const o of (j.overlays || [])) {
 					const f = o.frame || [], r = o.rect || [];
 					if (f.length < 2 || r.length < 4) continue;
+					if (o.mark) mark = o.overlay;
 					(by[o.overlay] = by[o.overlay] || []).push({
 						fw: f[0], fh: f[1], x: r[0], y: r[1], w: r[2], h: r[3],
 					});
 				}
+				const was = camRects.mark;
 				camRects.by = by;
+				camRects.mark = mark;
+				if (was !== mark && camRects.onMark) camRects.onMark();
 			})
 			.catch(() => {});
 	}
@@ -3899,8 +4017,17 @@
 	// The one for this overlay on the frame being shown. Matched on the frame
 	// rather than on a channel number, because that is what the player knows
 	// and the two streams differ in exactly that.
+	// The symbolic name the mark is mounted under, resolved here to whatever
+	// index this camera reports for it. Kept out of the placer so that nothing
+	// which draws an overlay has to know one of them is not the operator's.
+	const MARK = 'mark';
+
 	function camRectFor(overlay, frame) {
 		if (!frame || !frame.w) return null;
+		if (overlay === MARK) {
+			if (camRects.mark === null || camRects.mark === undefined) return null;
+			overlay = camRects.mark;
+		}
 		const all = camRects.by[overlay];
 		if (!all) return null;
 		for (const r of all)
