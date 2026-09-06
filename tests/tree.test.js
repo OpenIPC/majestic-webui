@@ -173,4 +173,44 @@ group('a schema with no groups draws nothing and throws nothing');
 	check('a section can still be asked for its fields', t.sectionFields('image').length === 8);
 }
 
+group('a group whose sections this build does not have disappears');
+{
+	// The USB group is the live case for this. majestic emits it on every
+	// camera, but the two sections it names are behind build flags that only a
+	// couple of SoCs set (#176), so most cameras get a group listing sections
+	// their schema does not contain. What they must not get is an empty tab
+	// with nothing behind it — which is the shape a reader of x-groups alone
+	// would produce, and the reason the filter in groups() is not decoration.
+	const s = clone(SCHEMA);
+	// This fixture came off a camera that HAS usbcam, so take it away: what is
+	// being tested is the majority of cameras, which have neither.
+	delete s.properties.usbcam;
+	delete s.properties.uvcgadget;
+	s['x-groups'] = s['x-groups'].concat([
+		{ id: 'usb', label: 'USB', sections: ['usbcam', 'uvcgadget'] },
+	]);
+	const t = build(s);
+	check('the group is not offered at all', t.groups().every(g => g.id !== 'usb'));
+	check('and nothing else moved', t.groups().length === SCHEMA['x-groups'].length);
+	everyKeyOnce('a group with no sections present', t, s);
+
+	// A build with one of the two is not hypothetical either: usbcam and
+	// uvcgadget have separate flags, and a camera that can read a webcam but
+	// not pretend to be one is an ordinary configuration.
+	const one = clone(s);
+	one.properties.usbcam = {
+		type: 'object',
+		properties: {
+			enabled: { type: 'boolean', title: 'Enable' },
+			fps: { type: 'integer', title: 'Frame rate' },
+		},
+	};
+	const t2 = build(one);
+	const usb = t2.groups().find(g => g.id === 'usb');
+	check('the group appears once a section exists', !!usb);
+	check('naming only the section that exists', !!usb && usb.sections.join() === 'usbcam');
+	check('and its keys are drawn', leafOf(t2, 'usbcam.fps').length === 1);
+	everyKeyOnce('a group with one section present', t2, one);
+}
+
 done();

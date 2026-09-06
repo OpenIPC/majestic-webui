@@ -27,6 +27,7 @@ page_label() {
 	recordings)     printf '%s' "Recordings" ;;
 	# Camera
 	camera)         printf '%s' "Settings" ;;
+	usb)            printf '%s' "USB" ;;
 	stream-urls)    printf '%s' "Stream URLs" ;;
 	config)         printf '%s' "Config file" ;;
 	# System
@@ -66,7 +67,7 @@ page_label() {
 # and does not need repeating.
 page_menu() {
 	case "$1" in
-	camera|stream-urls|config)
+	camera|usb|stream-urls|config)
 		printf '%s' "Camera" ;;
 	network|time|access|update|backup|logs|console|files|sdcard)
 		printf '%s' "System" ;;

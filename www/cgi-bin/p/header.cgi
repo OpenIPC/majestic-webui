@@ -69,6 +69,16 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownCamera" role="button">Camera</a>
 						<ul aria-labelledby="dropdownCamera" class="dropdown-menu">
 							<li><a class="dropdown-item" href="camera.cgi"><% page_label camera %></a></li>
+							<!-- Only where the USB port can actually be switched. Same
+							     shape as the SD Card guard: a camera whose port is
+							     soldered to one role has nothing to choose, and the
+							     page would offer a choice that does nothing.
+							     usr/sbin is where firmware installs the tool; usr/bin
+							     is where the gk7205v200 OTG profile used to, and
+							     cameras in the field still have it there. -->
+							<% if [ -x /usr/sbin/usb-mode ] || [ -x /usr/bin/usb-mode ]; then %>
+								<li><a class="dropdown-item" href="usb.cgi"><% page_label usb %></a></li>
+							<% fi %>
 							<li><a class="dropdown-item" href="stream-urls.cgi"><% page_label stream-urls %></a></li>
 							<li><a class="dropdown-item" href="config.cgi"><% page_label config %></a></li>
 						</ul>
