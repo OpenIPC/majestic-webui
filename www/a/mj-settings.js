@@ -3168,11 +3168,6 @@
 					c.b.addEventListener('click', () => pick({ t: 'mask', i: i }));
 					chips.appendChild(c.wrap);
 				}
-				if (!n && masks) {
-					const hint = el('span', 'mj-osd-chip-none');
-					hint.textContent = 'no masks';
-					chips.appendChild(hint);
-				}
 				// Offered only while the camera has an index left to draw on.
 				if (spare() !== undefined) {
 					const add = el('button', 'mj-osd-chip mj-osd-chip-add');
@@ -3193,12 +3188,37 @@
 						chips.appendChild(lg);
 					}
 				}
+
+				// AND A MASK, which had no way in at all.
+				//
+				// Drawing one used to be a press on a Masks switch in the
+				// player bar and then a drag. The switch went when the chips
+				// replaced it, and a chip only exists for a mask that already
+				// exists — so with none there was nothing to press, the mask
+				// layer was never active, and a drag on the picture moved the
+				// selected overlay instead. The deck below still had "Add by
+				// coordinates", which is not the same offer as drawing one.
+				//
+				// It stays lit while the picture is in mask mode with nothing
+				// selected, because that is a state you are IN and the crosshair
+				// alone does not say whose crosshair it is.
+				if (masks) {
+					const mk = el('button', 'mj-osd-chip mj-osd-chip-add' +
+						(sel.t === 'mask' && sel.i < 0 ? ' mj-osd-chip-on' : ''));
+					mk.type = 'button';
+					mk.textContent = n ? '+ Mask' : '+ Mask';
+					mk.title = 'Drag a rectangle on the picture to hide it';
+					mk.addEventListener('click', () => pick({ t: 'mask', i: -1 }));
+					chips.appendChild(mk);
+				}
 			}
 
 			// Picking a mask ON the picture has to move the chip too, or the two
 			// disagree about which one is current and the row becomes a second
 			// opinion rather than a view.
 			if (masks) masks.onSelect((i) => {
+				// A mask drawn on the picture selects itself, which is how the
+				// row learns it exists and how the drawn one gets its handles.
 				if (i >= 0) { sel = { t: 'mask', i: i }; draw(); }
 			});
 			// A mask added or removed changes what the row lists. The array
