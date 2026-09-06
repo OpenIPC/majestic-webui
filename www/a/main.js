@@ -108,8 +108,15 @@ function mjSources() {
 			.then(r => r.ok ? r.json() : Promise.reject(r.status))
 			.then(j => (j && Array.isArray(j.sources)) ? j.sources : [])
 			.catch(() => {
+				// null, not []: those mean different things and a caller has to
+				// be able to tell them apart. [] is the camera saying it has no
+				// sources; null is nobody having answered, and a caller that
+				// read the second as the first would decide a camera had lost
+				// capabilities it still has — no chooser, no snapshot, no
+				// MJPEG rung to fall to — over one failed request on a bad
+				// link. Not cached either, so the next call retries.
 				_mjSources = null;
-				return [];
+				return null;
 			});
 	return _mjSources;
 }
@@ -871,7 +878,8 @@ function initAll() {
 	const epSources = $('#ep-sources');
 	if (epSources && typeof mjSources === 'function') mjSources().then(list => {
 		const S = window.MajesticSources;
-		if (!S) return;
+		// null is "nobody answered", which is not a reason to print anything.
+		if (!S || !list) return;
 		const extra = S.watchableSources(list).filter(src => src.camera > 0);
 		if (!extra.length) return;
 
@@ -887,6 +895,12 @@ function initAll() {
 		};
 		const addr = '<span class="ep-addr"></span><span class="ep-rtsp"></span>';
 		const host = '<span class="ep-host"></span>';
+		// The only values from the camera's answer that reach innerHTML, and
+		// they are coerced to integers first. The daemon writes them as
+		// numbers, but a page that renders whatever a response contains is one
+		// bad answer away from running it — and a stream id is an integer or it
+		// is nothing.
+		const num = (v) => String(v | 0);
 
 		extra.forEach(src => {
 			const l = S.label(src, list);
@@ -904,18 +918,19 @@ function initAll() {
 				// video1.enabled and the JPEG track jpeg.rtsp, and a URL that
 				// 404s is worse than no URL at all.
 				if (st.rtsp) {
-					row('rtsp://' + addr + '/stream=' + st.id,
+					row('rtsp://' + addr + '/stream=' + num(st.id),
 						'RTSP ' + what + ' stream.');
 				}
 				if (S.family(st) === 'nal') {
 					row('<span class="ep-ws"></span>://' + host +
-						'/ws/video?stream=' + st.id,
+						'/ws/video?stream=' + num(st.id),
 						'Low-latency ' + what + ' stream (fMP4/MSE).');
 				} else {
 					row('<span class="ep-http"></span>://' + host +
-						'/mjpeg?channel=' + src.camera, 'MJPEG video stream.');
+						'/mjpeg?channel=' + num(src.camera),
+						'MJPEG video stream.');
 					row('<span class="ep-http"></span>://' + host +
-						'/image.jpg?channel=' + src.camera,
+						'/image.jpg?channel=' + num(src.camera),
 						'Snapshot in JPEG format.');
 				}
 			});

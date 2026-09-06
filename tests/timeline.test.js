@@ -50,11 +50,11 @@ check('an impossible minute is declined too',
 check('a name in some other scheme is declined, not guessed',
 	T.startOfName('recording_004.mp4') === null);
 
-// A second camera's writer inserts `-cam<N>` before the extension
-// (insert_suffix_before_ext, majestic src/file_format/mp4/storage.c). Before
-// this every clip a dual-camera board recorded fell into the "clip(s) whose
-// name has no time" bucket: placed nowhere, drawn on no timeline, and looking
-// like a naming fault rather than a second camera.
+// A second camera's clips are named with `-cam<N>` before the extension, so a
+// card holds `12-04.mp4` and `12-04-cam1.mp4` side by side. Before this every
+// clip a dual-camera board recorded fell into the "clip(s) whose name has no
+// time" bucket: placed nowhere, drawn on no timeline, and looking like a naming
+// fault rather than a second camera.
 check('a second camera\u2019s clip still carries its time',
 	T.startOfName('12-04-cam1.mp4') === 12 * HOUR + 4 * 60,
 	'got ' + T.startOfName('12-04-cam1.mp4'));

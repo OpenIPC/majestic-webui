@@ -330,12 +330,18 @@
 					(name === '.' && state.nowSec !== null);
 				const all = (j && j.clips) || [];
 
-				// Which cameras wrote today. A second camera's writer inserts
-				// `-cam<N>` before the extension (majestic
-				// src/file_format/mp4/storage.c), so one directory holds both
-				// cameras' clips interleaved by minute.
+				// Which cameras wrote today. A second camera's clips are named
+				// with `-cam<N>` before the extension, so one directory holds
+				// both cameras' clips interleaved by minute.
+				// Only from clips that carry a time. cameraOfName() answers 0
+				// for an unsuffixed name AND for a name in some other scheme
+				// entirely, and buildDay() puts the latter in `unplaced` — so a
+				// card holding one stray file beside a second camera's clips
+				// would grow a camera 0 whose ribbon is empty, be shown that
+				// one first, and hide the camera that has the footage.
 				state.cameras = [];
 				all.forEach(function (c) {
+					if (TL.startOfName(c.name) === null) return;
 					const n = TL.cameraOfName(c.name);
 					if (state.cameras.indexOf(n) < 0) state.cameras.push(n);
 				});

@@ -456,9 +456,23 @@ preview() {
 	# Underscores in the key, unlike the settings-tree labels beside them:
 	# these name a source rather than a config section, so they are not in that
 	# namespace and must not collide with a section called `source`.
+	# Escaped, not merely quoted. The value is whatever is in the locale file,
+	# and this lands inside an inline <script>: an unescaped quote or backslash
+	# invalidates the payload (which sourceLabel() then silently answers in
+	# English), and a "</script" in it would end the element and turn the rest
+	# into markup on an authenticated page. Backslash first, then quote, then
+	# every < — none of them can appear in a source name, so dropping them
+	# costs nothing and closes the tag-break.
 	local mj_src_labels
-	mj_src_labels=$(sed -n 's/^mj_\(source_[A-Za-z0-9_]*\)=\(.*\)/"\1":"\2"/p' \
-		j/locale.cgi 2>/dev/null | paste -sd,)
+	mj_src_labels=$(sed -n \
+		's/^mj_\(source_[A-Za-z0-9_]*\)=\(.*\)/\1\t\2/p' \
+		j/locale.cgi 2>/dev/null |
+		while IFS="$(printf '\t')" read -r k v; do
+			v=$(printf '%s' "$v" |
+				sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/[<>]//g' \
+					-e 's/[[:cntrl:]]//g')
+			printf '"%s":"%s"\n' "$k" "$v"
+		done | paste -sd,)
 	cat <<EOF
 <script type="application/json" id="mj-preview-boot">{"labels":{${mj_src_labels}}}</script>
 <div class="mj-player" id="mj-player">

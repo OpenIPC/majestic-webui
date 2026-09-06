@@ -20,10 +20,10 @@ window.MajesticTimeline = (function () {
 	// people set. Anything else we decline to place rather than guess, because
 	// a clip drawn at the wrong time is worse than a clip listed without one.
 	//
-	// `-cam<N>` before the extension is majestic's suffix for a second camera's
-	// writer (insert_suffix_before_ext, src/file_format/mp4/storage.c). Without
-	// it here every clip a dual-camera board records went into the "clip(s)
-	// whose name has no time" bucket — placed nowhere, drawn on no timeline, and
+	// `-cam<N>` before the extension is how a second camera's clips are named,
+	// so a card holds `12-04.mp4` and `12-04-cam1.mp4` side by side. Without it
+	// here every clip a dual-camera board records went into the "clip(s) whose
+	// name has no time" bucket — placed nowhere, drawn on no timeline, and
 	// looking for all the world like a naming fault.
 	const NAME_RE = /^(\d{2})-(\d{2})(?:-(\d{2}))?(?:-cam(\d+))?\./;
 

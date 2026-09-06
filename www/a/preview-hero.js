@@ -67,8 +67,15 @@
 					src.camera === camera && (src.streams || []).some(
 						st => st.subtype === 2 && st.present)));
 			}
+			// The answer is per camera and arrives asynchronously, so a source
+			// switch can have two in flight. Without the recheck the slower one
+			// wins and decides visibility for a camera nobody is watching.
 			function sync() {
-				offerFor(cam()).then(ok => { btn.hidden = !ok; });
+				const asked = cam();
+				offerFor(asked).then(ok => {
+					if (cam() !== asked) return;
+					btn.hidden = !ok;
+				});
 			}
 			sync();
 			// Re-asked when the page changes source, since the answer is per

@@ -35,10 +35,9 @@ window.MajesticMultipart = (function () {
 
 	// Every transport in this UI is attached with a stream_id, so this one is
 	// too — a caller should not have to know which of them speaks a different
-	// language. The camera is derived from it, because /mjpeg takes a CAMERA:
-	// majestic clamps ?channel= to 0..RTSP_VIDEO_STREAMS_MAX/3-1
-	// (src/websrv/httpd.c), there being one MJPEG stream per camera and no
-	// subtype to choose between. Camera 0 is served at the bare path.
+	// language. The camera is derived from it, because /mjpeg takes a CAMERA in
+	// ?channel=: there is one MJPEG stream per camera and no subtype to choose
+	// between. Camera 0 is served at the bare path.
 	function cameraOf(streamId) { return Math.floor((streamId | 0) / 3); }
 
 	// The cache-buster is not about caching. Assigning an identical `src` is a

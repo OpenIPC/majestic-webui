@@ -13,10 +13,10 @@ const { check, group, done } = require('./assert');
 
 const S = require(path.join(__dirname, '..', 'www', 'a', 'mj-sources.js'));
 
-// The shape the daemon emits (src/websrv/httpd.c on_sources_json). `flowing` is
-// absent on an MJPEG stream on purpose — there are no parameter sets to report
-// — and every fixture here keeps that, because treating a missing key as false
-// is exactly the mistake that would hide every USB webcam.
+// The shape /api/v1/sources answers with. `flowing` is absent on an MJPEG
+// stream on purpose — there are no parameter sets to report — and every fixture
+// here keeps that, because treating a missing key as false is exactly the
+// mistake that would hide every USB webcam.
 function stream(subtype, codec, extra) {
 	return Object.assign({
 		id: subtype, subtype: subtype, codec: codec,

@@ -397,11 +397,10 @@
 	// Which SOURCE is on screen, and what the camera said about it.
 	//
 	// `stream` above stays a subtype (0 main, 1 sub), because that is what the
-	// configuration is per: there is no video0-for-camera-1 key, and both
-	// second-camera implementations reuse camera 0's video0/video1/jpeg values
-	// (majestic src/rockchip/sdk.c). What goes on the wire is the two together
-	// — wireStream() below — because majestic addresses streams as
-	// 3*camera + subtype.
+	// configuration is per: there is no video0-for-camera-1 key, and a second
+	// camera reuses camera 0's video0/video1/jpeg values. What goes on the wire
+	// is the two together — wireStream() below — because majestic addresses
+	// streams as 3*camera + subtype.
 	let camera = 0;
 	let sources = [];
 	// The remembered choice, so a camera watched from this browser comes back
@@ -439,9 +438,18 @@
 	// in its usual mode it is the only stream there is.
 	function mjpegStreamOf(cam) {
 		const src = srcOf(cam);
-		return (src && Array.isArray(src.streams))
-			? src.streams.find(x => x.subtype === 2 && x.present) || null
-			: null;
+		if (src && Array.isArray(src.streams)) {
+			return src.streams.find(x => x.subtype === 2 && x.present) || null;
+		}
+		// Nobody has answered yet, or the request failed. For the on-board
+		// camera the configuration still knows, and it is what gated this
+		// before /api/v1/sources existed — so a camera whose sources answer
+		// never lands keeps exactly the fallback it always had rather than
+		// losing it to a question nobody could ask.
+		if (!sourcesKnown && cam === 0 && jpegOn) {
+			return { subtype: 2, codec: 'mjpeg', present: true, rtsp: false };
+		}
+		return null;
 	}
 	function curStreamInfo() {
 		const S = window.MajesticSources;
@@ -1437,9 +1445,18 @@
 	// config already may. It always settles, which is what lets the first attach
 	// wait for it without ever being held hostage by it.
 	const SOURCES_WAIT_MS = 1200;
+	// `sourcesKnown` is the difference between the camera saying it has one
+	// source and nobody having answered. They are not the same, and reading the
+	// second as the first would take the MJPEG rung away from a camera that has
+	// one — the picture this page falls back to — over a single failed request.
+	let sourcesKnown = false;
 	const sourcesFetched =
 		(typeof mjSources === 'function' ? mjSources() : Promise.resolve([]))
-			.then((list) => (sources = Array.isArray(list) ? list : []))
+			.then((list) => {
+				sourcesKnown = Array.isArray(list);
+				sources = sourcesKnown ? list : [];
+				return sources;
+			})
 			.catch(() => (sources = []));
 	const sourcesReady = Promise.race([
 		sourcesFetched,
@@ -1467,6 +1484,23 @@
 		} else {
 			if (r) camera = r.source.camera;
 			reflectSource();
+			// The subtype has to move with it. The answer can arrive after the
+			// first attach — it is raced against a deadline — and the video
+			// sections that chose the channel describe the on-board camera, so
+			// a source that turns out to publish only MJPEG leaves the player
+			// attached to a stream id nothing serves. Restart rather than
+			// retarget: a different subtype can be a different transport family
+			// and a different element.
+			const p = (S && r) ? S.pick(r.source, stream) : null;
+			if (p && p.subtype !== stream) {
+				stream = p.subtype;
+				syncStreamControls();
+				if (player || swap.trial()) {
+					fellBack = null;
+					attachPlayer(wantWebRTC());
+					return;
+				}
+			}
 			syncStreamControls();
 		}
 
