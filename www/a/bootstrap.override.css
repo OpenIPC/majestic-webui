@@ -1264,6 +1264,17 @@ mark {
 	user-select: none;
 }
 
+/* Hold to compare is held, not tapped, and Safari reads a long press on text
+   as a request to select the word under it and offer the Dictionary (#316).
+   The label is a caption, not text to select — the prefixed form is the one
+   Safari honours, and the callout is iOS's version of the same reflex. */
+.mj-live-compare,
+.mj-live-compare span {
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+
 /* Hold to compare at stock: nothing to compare, and the title says so */
 .mj-hud-btn:disabled {
 	opacity: 0.45;
