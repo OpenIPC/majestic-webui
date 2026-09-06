@@ -82,7 +82,11 @@
 	function matches(cond, v) {
 		if (!cond) return true;
 		// Before the stringify below: String(undefined) is 'undefined', a value,
-		// and an absent field would count as set.
+		// and an absent field would count as set. Only `unset: true` is ever
+		// served; `unset: false` is accepted for symmetry, but note that met()
+		// never gets here for a field no lookup could answer for -- that is
+		// the fail-open rule, and it means a rule asking for PRESENCE cannot
+		// tell an absent key from an unanswerable one and stays silent.
 		if ('unset' in cond) return isUnset(v) === Boolean(cond.unset);
 		v = String(v);
 		if ('equals' in cond) return v === String(cond.equals);

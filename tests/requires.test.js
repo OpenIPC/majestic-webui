@@ -296,13 +296,13 @@ group('a requirement satisfied by any one of several alternatives');
 
 group('a precedence: inert while any of several fields is set (majestic#314)');
 {
-	// The shapes majestic emits for the day/night keys, verbatim. No top-level
-	// field, when or message: each condition carries its own, the first unmet
-	// one is shown, and a build that predates `all` reads the whole thing as
-	// satisfied.
-	const PIN_MSG_T = 'Not in use while a daylight sensor pin is set: the pin decides day and night. Clear the pin for the thresholds to take over.';
-	const PIN_MSG_A = 'Not in use while a daylight sensor pin is set: the pin decides day and night. Clear the pin for automatic mode.';
-	const PAIR_MSG = 'Not in use while a sensor threshold is set. Clear both thresholds for automatic mode.';
+	// The shapes the camera serves for the day/night keys at
+	// /api/v1/config.schema.json, as they arrive. No top-level field, when or
+	// message: each condition carries its own, the first unmet one is shown,
+	// and a build that predates `all` reads the whole thing as satisfied.
+	const PIN_MSG_T = 'Not in use while a daylight sensor pin is set: the pin outranks the thresholds. Clear the pin for the thresholds to take over.';
+	const PIN_MSG_A = 'Not in use while a daylight sensor pin is set: the pin outranks automatic mode. Clear the pin for automatic mode.';
+	const PAIR_MSG = 'Not in use while a sensor threshold is set: the thresholds outrank automatic mode. Clear both thresholds for automatic mode.';
 	const THRESHOLD = { whenSet: true, all: [
 		{ field: 'nightMode.lightSensorPin', unset: true, message: PIN_MSG_T },
 	] };
