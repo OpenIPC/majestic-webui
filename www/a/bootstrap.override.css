@@ -1394,11 +1394,15 @@ mark {
    itself. It replaces a Text / Masks switch that asked you to name a KIND
    before you could touch anything, and that could not say what was there: a
    mask off the screen edge and no masks at all looked identical. */
+/* The bar does NOT wrap; the chips inside it do. Wrapping here put the on/off
+   switch on a line of its own the moment the chips filled the width, which is
+   a third row of bar for one control — the very thing moving it here was for.
+   The chips take the slack, so they are what gives when there are many. */
 .mj-osd-items {
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
 	margin-top: 0.625rem;
 	padding: 0.55rem 0.75rem;
 }
@@ -1408,6 +1412,7 @@ mark {
 	align-items: center;
 	gap: 0.375rem;
 	flex-wrap: wrap;
+	flex: 1 1 auto;
 	min-width: 0;
 }
 
@@ -5459,4 +5464,20 @@ dialog.mj-modal::backdrop {
    both apply, and this is the more specific statement about the same press. */
 .mj-md-catch.mj-osd-pickable {
 	cursor: pointer;
+}
+
+/* The overlay on/off switch, on the item bar rather than in a card of its own.
+   Pushed to the far end so the items read left to right and the one control
+   that is about all of them sits apart from them. The field inside is a live
+   row — switch then word, inline — so all this has to do is take the margins
+   off a row that was written for a column. */
+.mj-osd-enable {
+	display: flex;
+	align-items: center;
+	margin-left: auto;
+}
+
+.mj-osd-enable .mj-row {
+	margin: 0;
+	padding: 0;
 }

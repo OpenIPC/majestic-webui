@@ -2946,15 +2946,31 @@
 		const textBody = panel ? panel.tab('text') : liveGroup(colText, 'Text', 'what it says');
 		const lookBody = panel ? panel.tab('look') : liveGroup(colLook, 'Legibility', '');
 		const placeBody = panel ? panel.tab('place') : colText;
-		// Whether it is shown at all is not a question about the overlay you
-		// are editing — it is a question about the leaf — so it stays on the
-		// page rather than joining the panel.
-		const onBody = liveGroup(colLook, 'Overlay', '');
+		// Whether anything is shown at all is not a question about the overlay
+		// you are editing — it is a question about the leaf — so it stays on
+		// the page rather than joining the panel.
+		//
+		// ON THE ITEM BAR, not in a card. One switch was taking a deck, a
+		// column, a group heading and a rule across the full width of the page,
+		// which on a laptop pushed it off the bottom of the screen entirely —
+		// a control both enormous and invisible. It is the small switch and the
+		// short word the design puts on the bar, in the inline shape the live
+		// rows already use, and it sits beside the items because whether they
+		// are drawn is the one question about all of them at once.
+		const onBar = el('span', 'mj-osd-enable');
+		onBar.title = 'Draw text and pictures on the video. ' +
+			'Privacy masks are not affected by this.';
+		const onBody = preview ? onBar : liveGroup(colLook, 'Overlay', '');
 
+		// NOT APPENDED HERE. Where the picture can be drawn on, the inspector
+		// says everything about the selected mask — its rectangle, and what a
+		// mask costs — and this said it again, under a heading of its own,
+		// across the full width of the page. It is still the only way to edit
+		// one where there is no picture to draw on, so it goes onto the page
+		// exactly there, and nowhere else.
 		const maskDeck = el('div', 'mj-live-deck');
 		const colMask = el('div', 'mj-live-col');
 		maskDeck.appendChild(colMask);
-		form.appendChild(maskDeck);
 		const maskBody = liveGroup(colMask, 'Privacy masks', 'none');
 		const maskNote = colMask.querySelector('.mj-live-grp-head .mj-live-note');
 
@@ -3000,7 +3016,10 @@
 					: k === 'template' ? textBox
 					: (PLACE[k] ? placeBox : lookBox);
 				const field = renderField(box, f.dot, k, f.sub,
-					getDotted(state.config, f.dot));
+					getDotted(state.config, f.dot),
+					// The inline switch-then-word shape, which is what makes it
+					// a bar item rather than a row wanting a column.
+					box === onBar ? { live: true } : undefined);
 				if (!field) continue;
 				state.fields.push(field);
 				state.initial[f.dot] = field.getValue();
@@ -3199,6 +3218,7 @@
 			row.appendChild(cap);
 			const chips = el('span', 'mj-osd-chips');
 			row.appendChild(chips);
+			row.appendChild(onBar);
 			(barRow || preview.stage).insertAdjacentElement('afterend', row);
 
 			// Overlay 0 is always listed: it is the flat keys, every camera has
@@ -3486,14 +3506,21 @@
 			pick(sel, false);
 		}
 
-		if (!maskField) maskDeck.remove();
-		// With the panel mounted, the deck holds only the on/off switch — the
-		// two columns it was built for are on the picture now. An empty column
-		// is a border and some padding around nothing.
-		if (panel) {
-			colText.remove();
-			colLook.classList.remove('mj-live-col-b');
-		}
+		if (maskField && !canRegion) form.appendChild(maskDeck);
+		// The switch that was the deck's last tenant is on the item bar, and
+		// the two columns it was built for are on the picture. What is left is
+		// a border and some padding around nothing, so it goes — but only once
+		// it is actually empty, since a leaf with no picture still renders all
+		// of it here.
+		if (panel) colText.remove();
+		// Rehomed BEFORE the column is judged empty, or a leaf with a picture
+		// but no items to bar would have the column removed out from under the
+		// group this is about to build in it, and the switch would go with it.
+		if (!onBar.parentNode && onBar.childElementCount)
+			liveGroup(colLook, 'Overlay', '').appendChild(onBar);
+		if (!colLook.childElementCount) colLook.remove();
+		else if (panel) colLook.classList.remove('mj-live-col-b');
+		if (!deck.childElementCount) deck.remove();
 	}
 
 	// The panel the overlay's settings live in: a card on the picture, opened
