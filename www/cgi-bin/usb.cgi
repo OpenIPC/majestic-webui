@@ -5,15 +5,32 @@
 #
 # Two halves with two different owners, which is why there is no POST handler
 # here. The role belongs to the DWC3 controller and to /etc/usbmode, and goes
-# through j/usb.cgi. Everything majestic knows -- whether the second camera is
-# on, what the PC is offered -- belongs to majestic and goes to its API from
-# a/usb.js. Nothing on this page reads the camera's configuration file.
+# through the JSON endpoint the feature package installs. Everything majestic
+# knows -- whether the second camera is on, what the PC is offered -- belongs to
+# majestic and is read from its API by the page script. Nothing on this page
+# reads the camera's configuration file.
 #
 # The per-role tuning lives in Settings, on the leaf this page links to. Two
 # places to change one thing is worse than one place to find it, so what is
 # here is the choice, and what is there is everything that follows from it.
+#
+# Only this shell is in the web UI. The endpoint and the page script ship with
+# the feature itself (OpenIPC/firmware's usb-dual-role package), because this
+# tree goes out as one tarball to every camera and most of them have no
+# switchable port -- on a board already over its partition, carrying a role
+# switch it can never use is 4 KB that has to come from somewhere. The shell
+# stays because the link checker needs the .cgi a menu entry names to exist
+# here.
 %>
 <%in p/header.cgi %>
+
+<% if [ ! -x /usr/sbin/usb-mode ] && [ ! -x /usr/bin/usb-mode ]; then %>
+
+<%# Reachable only by typing the URL: the menu entry is guarded the same way.
+    Saying so is better than a form whose buttons do nothing. %>
+<% notice info '<b>This camera cannot switch its USB port</b> &mdash; the port is wired for one job and there is nothing here to choose.' %>
+
+<% else %>
 
 <div class="row g-4">
 	<div class="col-12 col-lg-7">
@@ -89,5 +106,7 @@
 </div>
 
 <script src="/a/usb.js" defer></script>
+
+<% fi %>
 
 <%in p/footer.cgi %>
