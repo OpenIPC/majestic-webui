@@ -3260,6 +3260,10 @@
 				placers[MARK] = mountOsdText(preview, HELD[MARK], note, panel,
 					MARK,
 					{ pickAt: pickAt, camRect: camRectFor,
+					  // Always a share — see unit(). The mark must sit in the
+					  // same place on the main stream and the sub, and pixels
+					  // cannot say that.
+					  unit: '%',
 					  rectsChanged: () => setTimeout(refreshOsdRects, 400) });
 				placers[MARK].setActive(false);
 			}
@@ -4270,11 +4274,19 @@
 		// Which spelling this camera's offsets are written in. A bare non-zero
 		// really is pixels and stays pixels; a bare zero carries no choice, and
 		// a share is what travels between Main and Sub.
+		//
+		// EXCEPT WHERE THE CALLER FIXES IT, which the vendor mark does. A bare
+		// offset is resolved against the channel being drawn, so pixels chosen
+		// on a 2592-wide main are off the edge of a 1280-wide sub and clamp
+		// into its corner: dragged to the middle of one picture, cowering in
+		// the corner of the other. For an overlay that is the operator's, that
+		// is their choice to make and the unit is theirs. For the mark it is
+		// not a choice at all — there is no unit control, its position has to
+		// hold on every output, and a share is the only spelling that does.
 		function unit() {
-			const s = spans(pic() || { w: 0, h: 0 });
+			if (hooks.unit) return hooks.unit;
 			const x = P.unitOf(held.offsetX && held.offsetX.getValue());
 			const y = P.unitOf(held.offsetY && held.offsetY.getValue());
-			void s;
 			return x || y || P.DEFAULT_UNIT;
 		}
 
