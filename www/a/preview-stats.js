@@ -727,6 +727,50 @@ window.MajesticStats = (function () {
 		// new session too. (lastSeen stays — the comparison line is the one
 		// thing that is SUPPOSED to outlive a switch.)
 		lastStallAt = 0;
+
+		// And the numbers on screen, not only the state behind them.
+		//
+		// This panel has two halves and they are driven independently: these
+		// fields come from the player through tick(), the rest from the 2 s
+		// /metrics heartbeat. A transport that reports no statistics at all —
+		// the MJPEG rung, which has none to report — never calls tick() again,
+		// so its predecessor's last values sat frozen here BESIDE camera-side
+		// rows that went on updating. A dead measurement presented next to a
+		// live one is worse than no measurement: nothing on the panel said
+		// which half had stopped.
+		//
+		// Clearing on every reset costs a switch between two reporting
+		// transports about one second of dashes before the next tick lands,
+		// which is the honest thing to show while nothing is known.
+		blankTickSide();
+	}
+
+	// The fields tick() owns. Kept beside reset() rather than inside it so the
+	// list is visibly the counterpart of what tick() writes: if a new row is
+	// added there and not here, it is the one that will go stale.
+	function blankTickSide() {
+		if (!els) return;
+		// Text fields are emptied; the three containers are hidden instead.
+		// Emptying those would take their children with them, and nothing
+		// rebuilds els — ensure() returns early once it is built — so the rows
+		// would never come back.
+		[
+			els.grade, els.lat, els.latSub, els.lBuf, els.lCam, els.lDec,
+			els.lNet, els.rCap, els.recv, els.repair, els.rSet, els.send,
+			els.set, els.capEst, els.fp,
+		].forEach(function (el) {
+			if (el) el.textContent = '';
+		});
+		// The latency bar's segments carry no text — they are sized. Their
+		// container is hidden below, so this is belt and braces against it
+		// being shown again before a tick has resized them.
+		[els.segCam, els.segNet, els.segBuf, els.segDec].forEach(function (el) {
+			if (el && el.style) el.style.width = '0%';
+		});
+		[els.bar, els.legend, els.legEst, els.vs].forEach(function (el) {
+			if (el) el.hidden = true;
+		});
+		if (els.grade) els.grade.style.color = '';
 	}
 
 	function setOpen(o) {
