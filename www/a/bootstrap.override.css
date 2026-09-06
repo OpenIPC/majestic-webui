@@ -1341,17 +1341,42 @@ mark {
 	min-width: 0;
 }
 
+/* The pill. It is a plain <span> around two real buttons where it carries a
+   remove control, and a <button> itself where it has nothing beside its label
+   — the Add control. Both spellings wear this class; neither is an element the
+   selector cares about.
+
+   It used to be a button with the remove cross nested inside it, which is
+   invalid markup and, more to the point, does not hit-test the same way in
+   every engine: where the outer button wins, pressing the cross re-selects the
+   chip it sits on and reads as a control that does nothing. */
 .mj-osd-chip {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.4rem;
-	padding: 0.3rem 0.55rem;
 	border: 1px solid var(--bs-border-color);
 	border-radius: 0.4375rem;
 	background: var(--bs-tertiary-bg);
 	color: var(--bs-body-color);
 	font-size: 0.8125rem;
+}
+
+/* The padding is on whatever is actually pressable, so the label's hit area is
+   the whole of the pill it appears to fill. */
+button.mj-osd-chip,
+.mj-osd-chip-b {
+	padding: 0.3rem 0.55rem;
 	cursor: pointer;
+}
+
+.mj-osd-chip-b {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	border: 0;
+	border-radius: inherit;
+	background: transparent;
+	color: inherit;
+	font: inherit;
 }
 
 .mj-osd-chip:hover { border-color: var(--bs-primary); }
@@ -1382,15 +1407,15 @@ mark {
 
 /* The remove control rides the chip it removes, and only the selected chip has
    one — a row of crosses is a picture of controls rather than of what is on the
-   screen. A button inside a button is not legal markup, so this is styled as
-   one and the click that reaches it is stopped from reaching the chip. */
+   screen. A sibling of the label button rather than a child of it; see the
+   pill above for why that distinction is load-bearing. */
 .mj-osd-chip-x {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	width: 1rem;
 	height: 1rem;
-	margin: -0.15rem -0.2rem -0.15rem 0.1rem;
+	margin: 0 0.35rem 0 -0.15rem;
 	padding: 0;
 	border: 0;
 	border-radius: 0.25rem;

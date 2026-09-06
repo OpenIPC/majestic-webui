@@ -3006,14 +3006,27 @@
 				pick({ t: 'text', i: 0 });
 			}
 
+			// The pill is a WRAPPER, and the label is a button inside it.
+			//
+			// It was one button with the remove cross nested inside, which is
+			// invalid markup — a button may not contain another — and browsers
+			// do not agree about what a press on the inner one means. Where the
+			// outer button wins the hit test, pressing the cross re-selects the
+			// chip it is on: no error, no change, a control that does nothing.
+			// Two real buttons side by side inside a plain span is the same
+			// picture and has one meaning everywhere.
 			function chip(kind, word, on) {
-				const b = el('button', 'mj-osd-chip' + (on ? ' mj-osd-chip-on' : ''));
+				const wrap = el('span',
+					'mj-osd-chip' + (on ? ' mj-osd-chip-on' : ''));
+				const b = el('button', 'mj-osd-chip-b');
 				b.type = 'button';
 				b.innerHTML = '<span class="mj-osd-chip-k"></span>' +
 					'<span class="mj-osd-chip-v"></span>';
 				b.firstChild.textContent = kind;
 				b.lastChild.textContent = word;
-				return b;
+				wrap.appendChild(b);
+
+				return { wrap: wrap, b: b };
 			}
 
 			function draw() {
@@ -3021,9 +3034,9 @@
 				for (const n of listed()) {
 					const t = lineOf(n);
 					const on = sel.t === 'text' && sel.i === n;
-					const b = chip('Text',
+					const c = chip('Text',
 						t.length > 20 ? t.slice(0, 19) + '…' : (t || 'Overlay'), on);
-					b.addEventListener('click', () => pick({ t: 'text', i: n }));
+					c.b.addEventListener('click', () => pick({ t: 'text', i: n }));
 					// The remove control rides the chip it removes, and only
 					// while that chip is the selected one: a row of crosses is a
 					// picture of controls rather than of what is on the screen.
@@ -3033,20 +3046,17 @@
 						x.title = 'Remove this overlay';
 						x.setAttribute('aria-label', 'Remove this overlay');
 						x.textContent = '\u00d7';
-						x.addEventListener('click', (e) => {
-							e.stopPropagation();
-							removeOverlay(n);
-						});
-						b.appendChild(x);
+						x.addEventListener('click', () => removeOverlay(n));
+						c.wrap.appendChild(x);
 					}
-					chips.appendChild(b);
+					chips.appendChild(c.wrap);
 				}
 				const n = masks ? masks.count() : 0;
 				for (let i = 0; i < n; i++) {
-					const b = chip('Mask', String(i + 1),
+					const c = chip('Mask', String(i + 1),
 						sel.t === 'mask' && sel.i === i);
-					b.addEventListener('click', () => pick({ t: 'mask', i: i }));
-					chips.appendChild(b);
+					c.b.addEventListener('click', () => pick({ t: 'mask', i: i }));
+					chips.appendChild(c.wrap);
 				}
 				if (!n && masks) {
 					const hint = el('span', 'mj-osd-chip-none');
