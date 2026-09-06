@@ -3092,8 +3092,16 @@
 			? String(HELD[n].image.getValue() || '') : '';
 		const saysAnything = (n) =>
 			lineOf(n).trim() !== '' || logoOf(n).trim() !== '';
-		const listedOverlay = (n) =>
-			!!placers[n] && (n === 0 || saysAnything(n));
+		// AN ITEM IS SOMETHING ON THE PICTURE, whatever its index.
+		//
+		// Overlay 0 used to be listed whether or not it drew anything, on the
+		// grounds that its keys are the flat osd.* ones and every camera has
+		// them. That is true of the KEYS and not of the picture, and it made
+		// the first line the one item that could not be removed: no cross on
+		// its chip, while every other text had one. The reporter's clock and
+		// their FRONT GATE behaved differently for a reason nothing on screen
+		// could show.
+		const listedOverlay = (n) => !!placers[n] && saysAnything(n);
 		// The first overlay, until something selects another. Said here rather
 		// than left to the item list, which does not exist on a leaf with no
 		// picture to put items on.
@@ -3284,15 +3292,27 @@
 			row.appendChild(onBar);
 			(barRow || preview.stage).insertAdjacentElement('afterend', row);
 
-			// Overlay 0 is always listed: it is the flat keys, every camera has
-			// them, and turning the text off is the Enable switch rather than
-			// the absence of an item.
 			const listed = () => OVERLAYS.filter(listedOverlay);
+			// Index 0 included, or emptying the first line would retire it: it
+			// is the lowest free index and OVERLAYS is sorted, so + Text takes
+			// it back first. An index that can be cleared and never refilled
+			// is a line the camera can draw and the page cannot ask for.
 			const spare = () =>
-				OVERLAYS.find(n => n > 0 && placers[n] && !saysAnything(n));
+				OVERLAYS.find(n => placers[n] && !saysAnything(n));
 
-			// {t: 'text', i: overlay} or {t: 'mask', i: index}.
-			let sel = anyPlacer ? { t: 'text', i: listed()[0] } : { t: 'mask', i: 0 };
+			// What to select when whatever was selected has gone. Text first,
+			// then a mask, then the mark — and `none` where the picture really
+			// is empty, which is a state this leaf can now reach.
+			function fallbackSel() {
+				const l = listed();
+				if (l.length) return { t: 'text', i: l[0] };
+				if (masks && masks.count()) return { t: 'mask', i: 0 };
+				if (markShown()) return { t: 'mark' };
+				return { t: 'none' };
+			}
+
+			// {t: 'text', i: overlay} or {t: 'mask', i: index} or {t: 'mark'}.
+			let sel = anyPlacer || masks ? fallbackSel() : { t: 'mask', i: 0 };
 
 			function pick(next, fromPicture) {
 				sel = next;
@@ -3304,7 +3324,15 @@
 					masks.setActive(sel.t === 'mask');
 					if (sel.t === 'mask' && !fromPicture) masks.selectAt(sel.i);
 				}
-				if (sel.t === 'text' && panel) {
+				if (sel.t === 'none' && panel) {
+					// The picture is empty. Offering a tab about a thing that
+					// is not there is worse than offering none: every control
+					// in it would edit an overlay nobody can see.
+					panel.offer('text', false);
+					panel.offer('look', false);
+					panel.offer('place', false);
+					panel.name('');
+				} else if (sel.t === 'text' && panel) {
 					panel.showOverlay(sel.i);
 					shownKind = sel.i;
 					panel.offer('text', true);
@@ -3382,7 +3410,12 @@
 			// Overlay 0 is not removable: it is the flat keys, which every
 			// config has and no camera can be without.
 			function removeOverlay(n) {
-				if (!n || !HELD[n]) return;
+				// Index 0 is removable like the rest. It cannot cease to
+				// EXIST — its keys are the flat ones and are always there —
+				// but the line it draws can go, which is the only sense in
+				// which any of these is removed: an overlay above zero is
+				// gone precisely when it says nothing.
+				if (n === undefined || !HELD[n]) return;
 				// The file as well as the setting — but on Save, not now: see
 				// logoBin. Clearing the field alone would leave the picture in
 				// the camera's writable overlay, taking flash for an overlay
@@ -3390,7 +3423,16 @@
 				if (logoOf(n).trim() !== '') logoBin.add(n);
 				for (const k of Object.keys(HELD[n])) {
 					const f = HELD[n][k];
-					const d = f.schema &&
+					// WHAT IT SAYS IS CLEARED, not defaulted. The rest of an
+					// overlay goes back to its default so the index is clean
+					// for whoever takes it next — but a default is the wrong
+					// answer for these two, and on index 0 it is the opposite
+					// of the one asked for: osd.template's default is the
+					// clock, so removing the first line put the clock back.
+					// Above zero the default happens to be empty and the two
+					// rules agreed, which is why nothing showed it.
+					const clears = k === 'template' || k === 'image';
+					const d = !clears && f.schema &&
 						Object.prototype.hasOwnProperty.call(f.schema, 'default')
 						? f.schema.default : '';
 					f.setValue(d === undefined || d === null ? '' : String(d));
@@ -3398,7 +3440,7 @@
 				}
 				runVisibility();
 				updateDirty();
-				pick({ t: 'text', i: 0 });
+				pick(fallbackSel());
 			}
 
 			// The pill is a WRAPPER, and the label is a button inside it.
@@ -3442,7 +3484,7 @@
 					// The remove control rides the chip it removes, and only
 					// while that chip is the selected one: a row of crosses is a
 					// picture of controls rather than of what is on the screen.
-					if (on && n > 0) {
+					if (on) {
 						const x = el('button', 'mj-osd-chip-x');
 						x.type = 'button';
 						x.title = 'Remove this overlay';
