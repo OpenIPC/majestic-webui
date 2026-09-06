@@ -367,21 +367,19 @@ function runRest() {
 			/opening coil/.test(half[0].detail), half[0].detail);
 	}
 
-	group('wired: only a filter the camera can drive contradicts "there is none"');
+	group('only a filter the camera can drive is a configured one');
 	{
-		// The dashboard drops the owner's "no filter here" claim the moment
-		// this says yes, so it has to ask the same question the banner does.
-		check('nothing assigned is not wired', ic.wired({}) === false);
-		check('the opening coil alone is', ic.wired({ irCutPin1: 11 }) === true);
-		// It used to be EITHER coil, which made Dismiss unusable on the very
-		// camera that was showing the banner: pressing it recorded the claim,
-		// and the next load read the closing coil, called it a contradiction
-		// and deleted it again — dismiss, reload, banner (#273).
-		check('the closing coil alone is not, because majestic moves nothing with it',
-			ic.wired({ irCutPin2: 10 }) === false);
-		check('and that is exactly the camera the banner is raised on',
-			ic.diagnose({ irCutPin2: 10 }, null, null)[0].id === 'no-pins');
-		check('pin 0 is a pin here too', ic.wired({ irCutPin1: 0 }) === true);
+		// The opening coil is what majestic returns early without, so a camera
+		// holding only the other one moves nothing and gets the same banner.
+		// Asking about EITHER coil was wrong and had a visible cost while the
+		// Dashboard still offered a dismissal: it made that button unusable on
+		// the very camera showing the banner (#273).
+		const raised = (nm) =>
+			ic.diagnose(nm, null, null).some((f) => f.id === 'no-pins');
+		check('nothing assigned raises it', raised({}) === true);
+		check('the opening coil settles it', raised({ irCutPin1: 11 }) === false);
+		check('the closing coil alone does not', raised({ irCutPin2: 10 }) === true);
+		check('pad 0 is a pad here too', raised({ irCutPin1: 0 }) === false);
 	}
 
 	group('diagnose: a switch that is doing nothing says so');
@@ -605,6 +603,28 @@ function runRest() {
 		check('an absent key on an older daemon is not "parked"',
 			!ic.diagnose(wired, null, null)
 				.some(x => x.id === 'ircut-parked'));
+
+		// The switch off with NO pads is a camera that has no filter fitted,
+		// and this silence is the only thing that says so. It is load-bearing:
+		// it is what an owner of such a camera does instead of dismissing a
+		// banner, since the Dashboard's × — which recorded the same statement
+		// in a file of its own — is gone with everything that went wrong with
+		// it (#367). Nothing here says it out loud, so nothing but this test
+		// would notice it coming back.
+		const unfitted = { irCutEnabled: false };
+		check('switched off with nothing wired says nothing at all',
+			ic.diagnose(unfitted, { night: 0, ircut: 0, light: 0 },
+				{ conflictS: 999, flips: 0 }).length === 0);
+		check('...not even the picture, which cannot tell either',
+			ic.diagnose(unfitted, { night: 0, ircut: 0, light: 0 }, {},
+				{ look: 'open', streak: 99 }).length === 0);
+		// And the same camera with the switch left ON is the one the banner is
+		// for: nothing is wired and the owner has not said the filter is absent.
+		check('but with the switch on it is still "cannot move"',
+			ic.diagnose({}, null, null).some(x => x.id === 'no-pins'));
+		check('and that finding names the switch that answers it',
+			/Drive the IR-cut filter/.test(
+				ic.diagnose({}, null, null).filter(x => x.id === 'no-pins')[0].detail));
 		check('a parked lamp with wiring says so',
 			ic.diagnose({ backlightEnabled: false, backlightPin: 52 },
 				null, null)
