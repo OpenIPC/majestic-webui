@@ -5486,12 +5486,11 @@ dialog.mj-modal::backdrop {
    quiet: it is a thing to glance at before adding the overlay that would be
    refused, not a reading anybody is here for. */
 .mj-osd-cost {
-	flex: 0 0 auto;
-	margin-left: auto;
+	margin: 0.3rem 0.15rem 0 0;
 	color: var(--bs-secondary-color);
-	font-size: 0.78rem;
+	font-size: 0.75rem;
+	line-height: 1.2;
 	text-align: right;
-	white-space: nowrap;
 }
 
 /* Near the ceiling. Not an error — nothing has failed yet, and the next thing

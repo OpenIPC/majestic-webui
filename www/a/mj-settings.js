@@ -3316,8 +3316,17 @@
 			// rectangles, two bytes a pixel, two buffers a region. It is here
 			// because a full-frame logo is megabytes and nothing forbids one —
 			// the page shows the price and lets the person decide.
-			const cost = el('span', 'mj-osd-cost');
-			row.appendChild(cost);
+			// ON ITS OWN LINE, under the row rather than in it.
+			//
+			// In the row it was a 242px item that could not shrink and could
+			// not wrap, on a bar that must not wrap — so it came out of the
+			// chips' width. In the leaf's picture column, which is about 640px
+			// once the inspector has its side, that left the chips 218px and
+			// every one of them wrapped onto a line of its own: a 335px bar
+			// for three items, with this line floating in the middle of it.
+			//
+			// Below, it costs one line and takes nothing from anything.
+			const cost = el('div', 'mj-osd-cost');
 			row.appendChild(onBar);
 
 			function drawCost() {
@@ -3367,6 +3376,10 @@
 			camRects.onCost = drawCost;
 			state.liveCleanup.push(() => { camRects.onCost = null; });
 			(barRow || preview.stage).insertAdjacentElement('afterend', row);
+			// After the row is in the document, not before: afterend on a node
+			// with no parent silently does nothing, and the line simply never
+			// appeared.
+			row.insertAdjacentElement('afterend', cost);
 
 			const listed = () => OVERLAYS.filter(listedOverlay);
 			// Index 0 included, or emptying the first line would retire it: it
