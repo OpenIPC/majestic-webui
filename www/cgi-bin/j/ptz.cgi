@@ -12,6 +12,8 @@
 # body. act= wins when both are present — a caller that sends both knows the
 # camera better than this script does.
 
+. "$(dirname "$0")/../p/majestic.sh"
+
 echo "HTTP/1.1 200 OK
 Content-type: text/plain; charset=UTF-8
 Cache-Control: no-store
@@ -97,7 +99,7 @@ af_enabled() {
 	# the focus axis, and majestic's engine turned on.
 	{ [ "$pelco_ok" = 1 ] || [ "$gpio_ok" = 1 ] || [ "$motor_ok" = 1 ]; } &&
 		has_cap focus &&
-		[ "$(yaml-cli -g .isp.autofocus.enabled 2>/dev/null)" = "true" ]
+		[ "$(mj_cfg isp.autofocus.enabled)" = "true" ]
 }
 
 if [ -n "$ACTION" ]; then

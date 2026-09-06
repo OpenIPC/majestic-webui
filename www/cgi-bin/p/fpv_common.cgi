@@ -10,10 +10,10 @@
 # None of it had a call site, in this file or in wfb.cgi, and three things
 # said it had never had one -- process_form read ${FORM_action}, which haserl
 # does not export; the markup emitted config-table/danger-zone/preset-container,
-# classes that appear in no stylesheet in the tree; and the preset code called
-# `yaml-cli --get/--set`, a spelling every live call site in the repo spells
-# -g/-s. It was an earlier, pre-Bootstrap generation of the page, kept alive by
-# nothing but the include. Git history has it.
+# classes that appear in no stylesheet in the tree; and the preset code shelled
+# out to a YAML editor with a flag spelling nothing else in the repo used. It
+# was an earlier, pre-Bootstrap generation of the page, kept alive by nothing
+# but the include. Git history has it.
 
 # Debug logging function
 log_debug() {
@@ -77,7 +77,7 @@ yaml_get_value() {
         wifibroadcast cli -g ".$key.$item" 2>/dev/null
     else
         # Fallback to basic implementation for basic YAML using grep/sed
-        log_debug "yaml-cli not available, using fallback method"
+        log_debug "wifibroadcast cli not available, using fallback method"
         grep "^$key:" "$file" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//'
     fi
 }
@@ -96,12 +96,12 @@ yaml_set_value() {
     fi
     
     if has_wifibroadcast_cli; then
-        # Use yaml-cli to set value
+        # Use the wifibroadcast cli to set the value
         log_debug "***** Set YAML value using wifibroadcast: $key = $value"
         wifibroadcast cli -s ".$key.$item" "$value" 2>/dev/null
     else
         # Fallback to basic implementation
-        log_debug "yaml-cli not available, using fallback method"
+        log_debug "wifibroadcast cli not available, using fallback method"
         
         # Check if key exists
         if grep -q "^$key:" "$file" 2>/dev/null; then

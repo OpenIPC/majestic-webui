@@ -131,6 +131,21 @@
 		(info.held || []).forEach((h) => {
 			if (h.owner && h.owner !== 'sysfs') owned[h.pin] = 'held by ' + h.owner;
 		});
+		// The camera saying it could not find out is not the camera saying
+		// nothing is spoken for. Without debugfs it cannot name a line's owner,
+		// and without the boot loader's environment it cannot see the PTZ pads
+		// at all — so an empty list from either source would draw every pad on
+		// the chip as free to pick. The camera refuses to drive a pair in that
+		// state; the map has to stop offering it, and say why rather than
+		// leaving the refusal to arrive as a failure after the press.
+		const blind = [];
+		if (info.ownersUnknown) blind.push('which pads the kernel already holds');
+		if (info.ptzUnknown) blind.push('which pads the PTZ driver is on');
+		// Picking a pad by hand is still allowed — that writes a number into a
+		// field and moves nothing. It is the SWEEP that drives, and the page
+		// disables it separately. What changes here is only the word: a pad
+		// nobody could check is not a pad known to be free.
+		const freeWord = blind.length ? 'not checked — see the note below' : 'free';
 		// Pads the mux has as something else. Absent unless majestic offers it.
 		const notGpio = opts.notGpio || {};
 
@@ -209,7 +224,7 @@
 			head.appendChild(n);
 			const note = el('span');
 			note.textContent = notGpio[pin] ? ('carries ' + notGpio[pin] + ' right now')
-				: (owned[pin] || 'free');
+				: (owned[pin] || freeWord);
 			head.appendChild(note);
 			// Somewhere to press. Clicking the pad again closes it too and
 			// Escape works, but neither is discoverable, and a panel with no

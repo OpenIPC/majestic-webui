@@ -135,6 +135,23 @@ find www sbin bin -type f 2>/dev/null | sort | while IFS= read -r s; do
 	fi
 done
 
+# --- 4. the deprecated config reader ---------------------------------------
+# /etc/majestic.yaml holds only what differs from majestic's built-in defaults,
+# so a key sitting at its default is absent from it entirely: parsing the file
+# reads back nothing for a value the camera is plainly running on, and nothing
+# distinguishes that from a value nobody chose. Reads go to /api/v1/get (mj_cfg
+# in p/majestic.sh) and writes to /api/v1/config.
+#
+# A flat string ban is defensible here precisely because the legitimate count is
+# zero: after the change that added this check, the tool appears nowhere in the
+# payload, so any reappearance is a regression rather than a judgement call.
+# Scoped to what ships -- this file and the compliance checklist have to name
+# what they forbid in order to state the rule at all.
+if grep -rn 'yaml-cli' www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ yaml-cli is deprecated: read config with mj_cfg (GET /api/v1/get)," >> "$FAILS"
+	echo "  write it with POST /api/v1/config. The file omits every defaulted key." >> "$FAILS"
+fi
+
 # --- 4. page names --------------------------------------------------------
 # p/pages.cgi is the one place a page's name is written, and this is what keeps
 # it that way in both directions: a nav entry pointing at a page with no row
