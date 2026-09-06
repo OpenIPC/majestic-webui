@@ -2850,23 +2850,7 @@
 			}
 			if (panel && held.anchor)
 				panel.pad(held, placeBox, () => placers[n]);
-			// The chip builder sits above the raw template row and drives it.
-			// The row stays — hidden — so Save and the reset arrow keep working
-			// on the field itself, and a build whose template this cannot parse
-			// falls back to showing it rather than losing it.
-			if (held.template) {
-				held.template.p.hidden = true;
-				buildTemplate(textBox, held.template);
-			}
-			// A logo, where the camera can draw one. The field is a path like
-			// osd.font is, so a firmware can ship a picture and this is only
-			// one way of putting one there; it renders hidden and the picker
-			// drives it, on the pin-map pattern, so Save, dirty tracking and
-			// the per-row reset never learn a picker exists.
-			if (held.image) {
-				held.image.p.hidden = true;
-				buildLogo(textBox, held.image, held.template, n, preview);
-			}
+			buildContent(textBox, held, n, preview);
 		}
 		const held = HELD[0];
 
@@ -3257,7 +3241,9 @@
 		const tabs = box.querySelector('.mj-osd-tabs');
 		const bodies = box.querySelector('.mj-osd-bodies');
 		const made = {};
-		const TABS = [['text', 'Text'], ['look', 'Look'], ['place', 'Place']];
+		// "Content" rather than "Text": what an overlay says is a line or a
+		// picture, and the tab holds whichever this one is.
+		const TABS = [['text', 'Content'], ['look', 'Look'], ['place', 'Place']];
 		let open = 'place';
 
 		for (const [id, word] of TABS) {
@@ -4149,6 +4135,110 @@
 		};
 	}
 
+	// WHAT AN OVERLAY SAYS: a line or a picture, and only ever one of them.
+	//
+	// Both controls used to be shown at once, which offered a choice the camera
+	// does not have — it draws the picture wherever there is one and ignores
+	// the template — so an overlay could be given text that would never appear
+	// and nothing said so. A knob that does nothing is worse than a missing
+	// one, because it is indistinguishable from a broken camera.
+	//
+	// The switch is a VIEW of the image field, not a second place the answer is
+	// kept: the overlay is a picture exactly when it has one, which is the same
+	// rule the camera, the item list and the stand-in all read. Choosing Text
+	// clears the picture; choosing Picture opens the chooser when there is none
+	// yet. Neither writes anything the ordinary Save would not.
+	function buildContent(box, held, overlay, preview) {
+		if (!held.template && !held.image) return;
+
+		const wrap = el('div', 'mj-osd-content');
+		box.insertBefore(wrap, box.firstChild);
+
+		const logoPart = el('div');
+		const textPart = el('div');
+
+		// The switch only where the camera can draw a picture at all: the field
+		// exists exactly where the backend said it does.
+		let kind = null;
+		if (held.image) {
+			kind = el('div', 'mj-osd-tabs mj-osd-kind');
+			kind.setAttribute('role', 'group');
+			kind.setAttribute('aria-label', 'What this overlay draws');
+			for (const [id, word] of [['text', 'Text'], ['logo', 'Picture']]) {
+				const b = el('button', 'mj-osd-tab');
+				b.type = 'button';
+				b.dataset.kind = id;
+				b.textContent = word;
+				kind.appendChild(b);
+			}
+			wrap.appendChild(kind);
+		}
+		wrap.appendChild(logoPart);
+		wrap.appendChild(textPart);
+
+		// The chip builder sits above the raw template row and drives it. The
+		// row stays — hidden — so Save and the reset arrow keep working on the
+		// field itself, and a build whose template this cannot parse falls back
+		// to showing it rather than losing it.
+		if (held.template) {
+			held.template.p.hidden = true;
+			buildTemplate(textPart, held.template);
+		}
+		// The image field is a path like osd.font is, so a firmware can ship a
+		// picture and this is one way of putting one there rather than the only
+		// way. Hidden and driven by the picker, on the pin-map pattern, so Save,
+		// dirty tracking and the per-row reset never learn a picker exists.
+		let picker = null;
+		if (held.image) {
+			held.image.p.hidden = true;
+			picker = buildLogo(logoPart, held.image, held.template, overlay,
+				preview);
+		}
+
+		const isLogo = () =>
+			!!(held.image && String(held.image.getValue() || '').trim());
+
+		function paint() {
+			const logo = isLogo();
+			logoPart.hidden = !logo;
+			textPart.hidden = logo;
+			if (!kind) return;
+			for (const b of kind.children)
+				b.classList.toggle('mj-osd-tab-on',
+					(b.dataset.kind === 'logo') === logo);
+		}
+
+		if (kind) kind.addEventListener('click', (e) => {
+			const b = e.target.closest ? e.target.closest('button') : null;
+			if (!b) return;
+			if (b.dataset.kind === 'logo') {
+				// Nothing to show yet, so ask for one — inside the press, which
+				// is what lets the chooser open at all.
+				if (!isLogo() && picker) picker.choose();
+				else paint();
+				return;
+			}
+			// Back to text. The template is left alone rather than cleared: it
+			// is what the overlay said before the picture and what it says
+			// again now, and throwing it away to change a mode would lose work
+			// nobody asked to lose.
+			if (isLogo() && picker) picker.remove();
+			// An overlay that says nothing is not listed, so it would vanish
+			// from under the person who just pressed Text. Give it something.
+			if (held.template && !String(held.template.getValue() || '').trim()) {
+				held.template.setValue('Text');
+				held.template.control.dispatchEvent(
+					new Event('change', { bubbles: true }));
+				runVisibility();
+				updateDirty();
+			}
+			paint();
+		});
+
+		if (held.image) held.image.control.addEventListener('change', paint);
+		paint();
+	}
+
 	// A LOGO: a picture drawn into the overlay instead of a line.
 	//
 	// The browser decodes and quantises, and sends pixels. There is no image
@@ -4174,8 +4264,7 @@
 			'</div>' +
 			'<div class="mj-logo-body">' +
 				'<canvas class="mj-logo-shot" hidden></canvas>' +
-				'<p class="mj-logo-empty">No picture. The overlay draws its ' +
-					'text.</p>' +
+				'<p class="mj-logo-empty"></p>' +
 			'</div>' +
 			'<div class="mj-logo-acts">' +
 				'<label class="mj-logo-pick">' +
@@ -4200,6 +4289,13 @@
 			const has = !!String(field.getValue() || '').trim();
 			empty.hidden = has;
 			drop.hidden = !has;
+			// What happens if this is left empty, said honestly: it depends on
+			// whether the overlay has anything else to say.
+			const t = tplField ? String(tplField.getValue() || '').trim() : '';
+			empty.textContent = t
+				? 'No picture. The overlay draws “' +
+					(t.length > 24 ? t.slice(0, 23) + '…' : t) + '”.'
+				: 'No picture yet.';
 			// The canvas holds the last picture CHOSEN in this visit. A logo
 			// already on the camera is on the picture itself, which is the
 			// honest preview and better than anything drawn here — so nothing
@@ -4330,6 +4426,13 @@
 
 		field.control.addEventListener('change', paint);
 		paint();
+
+		// The two acts the kind switch above needs. `choose` has to be called
+		// inside a press or the chooser will not open.
+		return {
+			choose: () => input.click(),
+			remove: () => drop.click(),
+		};
 	}
 
 	// The overlay's text, as pieces you can pick up.

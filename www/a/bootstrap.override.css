@@ -1295,6 +1295,19 @@ mark {
 }
 .mj-osd-cell-on i { background: #fff; }
 
+/* Which of the two an overlay is. Lighter than the tab strip above it — it
+   picks between two contents of one tab, not between tabs — but the same
+   vocabulary, because it is the same act. */
+.mj-osd-kind {
+	width: fit-content;
+	margin-bottom: 0.7rem;
+}
+
+.mj-osd-kind .mj-osd-tab {
+	flex: 0 0 auto;
+	padding: 0.22rem 0.7rem;
+}
+
 /* ── a logo ──────────────────────────────────────────────────────────────
    The preview is the reduced picture, not the file: four bits a channel is
    what the overlay format carries, so what is approved here is what the camera
