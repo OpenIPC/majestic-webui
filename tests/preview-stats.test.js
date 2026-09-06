@@ -196,6 +196,33 @@ g('grade words move on loss and round trip', () => {
 	check('a half-second round trip is poor', env.el('mj-ns-grade').textContent === 'poor');
 });
 
+// The panel has two halves driven independently: these fields come from the
+// player through tick(), the rest from a 2 s /metrics heartbeat of its own. A
+// transport that reports no statistics — the MJPEG rung, which has none —
+// never calls tick() again, so its predecessor's last values sat frozen here
+// BESIDE camera-side rows that went on updating. A dead measurement shown next
+// to a live one is worse than none: nothing said which half had stopped.
+g('reset clears the numbers on screen, not just the state behind them', () => {
+	const env = boot();
+	env.stats.tick({ cam: {}, packetsLost: 0, packetsReceived: 1000, rttMs: 10 });
+	env.tickClock(1000);
+	env.stats.tick({ cam: {}, packetsLost: 0, packetsReceived: 2000, rttMs: 10 });
+	check('a session put numbers on the panel',
+		env.el('mj-ns-grade').textContent !== '',
+		env.el('mj-ns-grade').textContent);
+
+	env.stats.reset();
+	check('the grade is withdrawn', env.el('mj-ns-grade').textContent === '',
+		env.el('mj-ns-grade').textContent);
+	check('and so is the latency read', env.el('mj-ns-lat').textContent === '',
+		env.el('mj-ns-lat').textContent);
+	// Hidden rather than emptied: emptying takes the children with it, and
+	// nothing rebuilds the element map once it is built, so the rows would
+	// never come back.
+	check('the latency bar is hidden, not gutted',
+		env.el('mj-ns-bar').hidden === true);
+});
+
 g('reset forgets the dead session', () => {
 	const env = boot();
 	env.stats.tick({ cam: {}, packetsLost: 0, packetsReceived: 1000, nack: 0 });

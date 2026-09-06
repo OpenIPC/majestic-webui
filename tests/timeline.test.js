@@ -50,6 +50,37 @@ check('an impossible minute is declined too',
 check('a name in some other scheme is declined, not guessed',
 	T.startOfName('recording_004.mp4') === null);
 
+// A second camera's clips are named with `-cam<N>` before the extension, so a
+// card holds `12-04.mp4` and `12-04-cam1.mp4` side by side. Before this every
+// clip a dual-camera board recorded fell into the "clip(s) whose name has no
+// time" bucket: placed nowhere, drawn on no timeline, and looking like a naming
+// fault rather than a second camera.
+check('a second camera\u2019s clip still carries its time',
+	T.startOfName('12-04-cam1.mp4') === 12 * HOUR + 4 * 60,
+	'got ' + T.startOfName('12-04-cam1.mp4'));
+check('with seconds too',
+	T.startOfName('12-04-30-cam1.mp4') === 12 * HOUR + 4 * 60 + 30);
+check('the on-board camera writes no suffix, and that is an answer',
+	T.cameraOfName('12-04.mp4') === 0);
+check('a suffixed clip names its camera',
+	T.cameraOfName('12-04-cam1.mp4') === 1);
+check('and is not confused with a seconds field',
+	T.cameraOfName('12-04-30.mp4') === 0);
+// The suffix is not a licence to accept anything: a name that merely looks
+// similar is still declined rather than placed at a guessed time.
+check('a suffix that is not a camera is still no time',
+	T.startOfName('12-04-camX.mp4') === null);
+
+{
+	const day = T.buildDay(
+		[clip('12-04.mp4'), clip('12-04-cam1.mp4')], { splitSec: SPLIT });
+	check('both cameras\u2019 clips are placed', day.clips.length === 2,
+		day.clips.length + '/' + day.unplaced.length);
+	check('and each says which camera wrote it',
+		day.clips.map(c => c.camera).sort().join(',') === '0,1',
+		day.clips.map(c => c.camera).join(','));
+}
+
 {
 	const day = T.buildDay([clip('12-04.mp4'), clip('weird-name.mp4')], { splitSec: SPLIT });
 	check('an unplaceable clip stays listed but off the ribbon',

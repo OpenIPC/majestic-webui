@@ -31,6 +31,10 @@ function load(withStorage, seed, refuseWrites) {
 		MajesticWebRTC: { name: 'webrtc' },
 		MajesticVideo: { name: 'mse' },
 		MajesticWasm: { name: 'wasm' },
+		MajesticMultipart: { name: 'multipart', available: true },
+		// The real one. multipartRungFor() asks it what a codec implies, and a
+		// stub would let the two disagree about what 'mjpeg' means.
+		MajesticSources: require(path.join(__dirname, '..', 'www', 'a', 'mj-sources.js')),
 	}, console: console };
 	if (withStorage) {
 		ctx.localStorage = {
@@ -133,12 +137,34 @@ group('impl() maps a kind to a player');
 	check('webrtc', t.impl('webrtc').name === 'webrtc', t.impl('webrtc').name);
 	check('mse', t.impl('mse').name === 'mse', t.impl('mse').name);
 	check('wasm', t.impl('wasm').name === 'wasm', t.impl('wasm').name);
+	check('multipart', t.impl('multipart').name === 'multipart',
+		t.impl('multipart').name);
 	// MSE is the floor on purpose: it plays whatever the browser can decode,
 	// so an unrecognised kind lands somewhere that works rather than on
 	// undefined.
 	check('anything else falls to MSE', t.impl('nonsense').name === 'mse',
 		t.impl('nonsense').name);
 	check('and so does nothing at all', t.impl().name === 'mse');
+}
+
+// The gate that decides whether the bottom rung is worth trying, read by both
+// pages' nextRung() walks. It lives here rather than in either page so the two
+// cannot disagree about it — a transport that works on one page and not the
+// other is the failure this file's neighbours were written to prevent.
+group('multipartRungFor() gates the bottom rung');
+{
+	const t = load(true);
+	const s = (codec) => ({ subtype: 2, codec: codec, present: true });
+	check('an MJPEG stream is worth trying', t.multipartRungFor(s('mjpeg')) === true);
+	check('so is the on-board JPEG channel', t.multipartRungFor(s('jpeg')) === true);
+	// The rung serves one thing. Offering it for a stream the camera publishes
+	// as H.264 would put an <img> on a URL that answers with nothing.
+	check('an H.264 stream is not', t.multipartRungFor(s('h264')) === false);
+	check('nor is a codec nothing here knows', t.multipartRungFor(s('av1')) === false);
+	// A caller that has not heard back from /api/v1/sources yet. Offering a
+	// picture the camera may not serve is worse than offering none.
+	check('and neither is not knowing yet', t.multipartRungFor(null) === false);
+	check('or undefined', t.multipartRungFor(undefined) === false);
 }
 const is = (name, got, want) =>
 	check(name, eq(got, want), 'got ' + JSON.stringify(got));

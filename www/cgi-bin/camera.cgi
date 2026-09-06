@@ -94,6 +94,8 @@ fi
 <script src="/a/preview-webrtc.js"></script>
 <script src="/a/preview-swap.js"></script>
 <script src="/a/preview-wasm.js"></script>
+<script src="/a/mj-sources.js"></script>
+<script src="/a/preview-multipart.js"></script>
 <script src="/a/preview-transport.js"></script>
 <%
 # preview-hero.js publishes window.MajesticHero (fullscreen + snapshot) before

@@ -33,6 +33,11 @@
 		offsetMs: 0, offsetKnown: false, zone: null, nowSec: null, today: '',
 		tzSamples: [], tzDiffers: false, tzOn: false,
 		days: [], dayName: '', day: { clips: [], unplaced: [] },
+		// Which cameras wrote clips into the day being shown, and which of
+		// them is on the ribbon. A board with one camera has [0] and never
+		// sees a picker; a second sensor or a USB webcam writes a `-cam<N>`
+		// suffix and gets its own line of footage.
+		cameras: [0], camera: 0,
 		view: { from: 0, to: 3600, width: 3600 },
 		playhead: 0, sel: null,
 		clip: null, mime: null, init: null, hint: null,
@@ -323,7 +328,41 @@
 				if (token !== dayToken) return;
 				const isToday = (name === state.today) ||
 					(name === '.' && state.nowSec !== null);
-				state.day = TL.buildDay((j && j.clips) || [], {
+				const all = (j && j.clips) || [];
+
+				// Which cameras wrote today. A second camera's clips are named
+				// with `-cam<N>` before the extension, so one directory holds
+				// both cameras' clips interleaved by minute.
+				// Only from clips that carry a time. cameraOfName() answers 0
+				// for an unsuffixed name AND for a name in some other scheme
+				// entirely, and buildDay() puts the latter in `unplaced` — so a
+				// card holding one stray file beside a second camera's clips
+				// would grow a camera 0 whose ribbon is empty, be shown that
+				// one first, and hide the camera that has the footage.
+				state.cameras = [];
+				all.forEach(function (c) {
+					if (TL.startOfName(c.name) === null) return;
+					const n = TL.cameraOfName(c.name);
+					if (state.cameras.indexOf(n) < 0) state.cameras.push(n);
+				});
+				state.cameras.sort(function (a, b) { return a - b; });
+				if (state.cameras.indexOf(state.camera) < 0) {
+					state.camera = state.cameras.length ? state.cameras[0] : 0;
+				}
+
+				// Built from ONE camera's clips, not from all of them. The day
+				// model is a line of footage — gaps, joins, durations, "still
+				// recording" — and two cameras' clips share every minute, so a
+				// combined line would report a gap wherever one camera has a
+				// clip and the other does not, and would join two cameras'
+				// clips into a stretch that never existed.
+				const mine = state.cameras.length > 1
+					? all.filter(function (c) {
+						return TL.cameraOfName(c.name) === state.camera;
+					})
+					: all;
+
+				state.day = TL.buildDay(mine, {
 					splitSec: state.split,
 					nowSec: isToday ? state.nowSec : null,
 				});
@@ -1512,6 +1551,19 @@
 			}).join('') + '</select>' +
 			'<button class="btn btn-sm btn-outline-secondary" id="rec-next" type="button"' +
 			(next ? '' : ' disabled') + ' aria-label="Next day">&rsaquo;</button>' +
+			// Only where a second camera actually wrote something today. A
+			// board with one camera never sees this, which is nearly every
+			// board — and a picker of one is a control that answers nothing.
+			(state.cameras.length > 1
+				? '<select class="form-select form-select-sm rec-daypick" id="rec-camsel" ' +
+					'aria-label="Camera">' +
+					state.cameras.map(function (n) {
+						return '<option value="' + n + '"' +
+							(n === state.camera ? ' selected' : '') + '>' +
+							(n === 0 ? 'Camera 1' : 'Camera ' + (n + 1)) +
+							'</option>';
+					}).join('') + '</select>'
+				: '') +
 			'<span class="small text-secondary">' + state.day.clips.length + ' clips · ' + TL.duration(total) + '</span>' +
 			tz +
 			// Four states, not two: the switch being on is a setting, and a card
@@ -1532,6 +1584,11 @@
 		if (prev) $id('rec-prev').addEventListener('click', function () { goDay(prev); });
 		if (next) $id('rec-next').addEventListener('click', function () { goDay(next); });
 		$id('rec-daysel').addEventListener('change', function (e) { goDay(e.target.value); });
+		if ($id('rec-camsel')) {
+			$id('rec-camsel').addEventListener('change', function (e) {
+				goCamera(+e.target.value);
+			});
+		}
 		if (differs) {
 			$id('rec-tz-cam').addEventListener('click', function () { setTz('camera'); });
 			$id('rec-tz-loc').addEventListener('click', function () { setTz('local'); });
@@ -1858,6 +1915,24 @@
 				'fragment ' + index + ' (byte ' + off + '). Everything before that point matches. ' +
 				'The file has been cut, edited, or damaged since the camera wrote it.';
 		}
+	}
+
+	// Switching camera is switching which line of footage the page is showing,
+	// so it is a day reload rather than a filter over what is drawn: the ribbon,
+	// the gaps, the durations and the clip that is open all describe one
+	// camera's recordings, and none of them survives being asked about another.
+	function goCamera(n) {
+		if (n === state.camera) return;
+		state.camera = n;
+		state.clip = null; state.init = null; state.hint = null; state.sel = null;
+		const v = $id('rec-video');
+		if (v) { try { v.removeAttribute('src'); v.load(); } catch (e) {} }
+		loadDay(state.dayName).then(function () {
+			renderDayNav(); renderClips();
+			note('');
+			centreView(freshest());
+			goTo(freshest());
+		});
 	}
 
 	function goDay(name) {

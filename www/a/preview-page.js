@@ -28,8 +28,8 @@
 	// --- Live player (WebRTC or MSE, with MJPEG / no-signal fallback) ---
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;
-	const badge = $('#mj-badge'), img = $('#live-mjpeg'), note = $('#mj-note');
-	const noteWhy = $('#mj-note-why');
+	const badge = $('#mj-badge'), note = $('#mj-note');
+	const noteWhy = $('#mj-note-why'), noteAct = $('#mj-note-act');
 	const servedEl = $('#mj-served'), servedWhy = $('#mj-served-why');
 	let jpegOn = false;
 	mjConfig().then(cfg => {
@@ -74,7 +74,7 @@
 				autoOn = false;
 				autoCtl.checked = false;
 				if (s0) s0.checked = true;
-				stream = 0;
+				stream = wantSubtype = 0;
 			}
 		}
 		// "WxH" per channel. Auto compares areas, so parse once. The same
@@ -120,6 +120,10 @@
 	// They part company for the length of that retry, and that gap is the
 	// point: the picture stays until the replacement has one of its own.
 	let holdingFallback = null;
+	// Why the chain fell to the MJPEG rung, or null when it was chosen rather
+	// than fallen to — a USB webcam that publishes nothing else is not a
+	// failure and has nothing to explain.
+	let fellToMultipart = null;
 	// A page-level reconnect ladder for the software-decode rung, and a belt to
 	// the worker's own braces (hevc-wasm@v0.1.1). A pinned worker older than
 	// that gives up on the FIRST dropped socket, and the chain reads that one
@@ -150,10 +154,15 @@
 	function showVideo() {
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = '#000'; }
-		if (img) { img.style.display = 'none'; img.src = ''; }
 		if (note) note.style.display = 'none';
 		fellBack = null;
 		holdingFallback = null;
+		// Unless the picture on screen IS the fallback. The MJPEG rung is a
+		// player like any other now, so it reports 'playing' and lands here —
+		// and taking the message down would leave a viewer looking at a
+		// substitute picture with nothing anywhere saying why, which is the
+		// half of #274 that was about the explanation rather than the picture.
+		if (liveKind === 'multipart' && fellToMultipart) return;
 		hideStageMsg('fallback');
 	}
 	function showNoSignal() {
@@ -164,7 +173,6 @@
 		if (holdingFallback) return;
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = BARS; }
-		if (img) { img.style.display = 'none'; img.src = ''; }
 		if (note) note.style.display = 'none';
 		fellBack = null;
 		hideStageMsg('fallback');
@@ -230,22 +238,23 @@
 		servedShownKey = '';
 		hideStageMsg();
 		const sentence = fallbackSentence(fellBack);
-		if (jpegOn && img) {
-			img.src = '/mjpeg';
-			img.style.display = '';
-			if (note) note.style.display = 'none';
-			if (badge) badge.textContent = 'MJPEG';
-			holdingFallback = 'mjpeg';
-			showStageMsg('fallback', sentence + ' Showing the MJPEG fallback.');
-		} else {
-			// No fallback to show, so the note carries the explanation and the
-			// remedy together and the toast would only repeat it. Nothing is
-			// playing, so the chip names no format either.
-			if (noteWhy) noteWhy.textContent = sentence;
-			if (note) note.style.display = '';
-			if (badge) badge.textContent = 'unavailable';
-			holdingFallback = 'note';
-		}
+		// This is the end of the chain now, and only the end. The MJPEG picture
+		// used to be written from here — `img.src = '/mjpeg'`, outside the
+		// swap, with its own visibility flag — and that stopped being tenable
+		// when MJPEG became a source rather than a failure: two paths to the
+		// same stream, one of them unable to name a camera. nextRung() reaches
+		// the rung above; arriving here means there was none to reach or it
+		// gave up too, so what is left is the explanation.
+		hideOtherKind(null);
+		if (noteWhy) noteWhy.textContent = sentence;
+		// "Enable JPEG for an MJPEG fallback" is advice, and advice is only
+		// worth giving when it would help. With a JPEG stream already up the
+		// chain has just tried it and failed, and telling someone to switch on
+		// what they have switched on is how a page loses their trust.
+		if (noteAct) noteAct.hidden = !!mjpegStreamOf(camera) || jpegOn;
+		if (note) note.style.display = '';
+		if (badge) badge.textContent = 'unavailable';
+		holdingFallback = 'note';
 		// Neither transport is carrying the picture, so neither is lit. It is
 		// also what makes the retry work: with the group cleared, pressing the
 		// transport that just failed is a real change event again.
@@ -272,10 +281,10 @@
 		if (!fellBack) return;
 		fellBack = null;
 		hideStageMsg();
-		if (badge) {
-			badge.textContent = holdingFallback === 'mjpeg'
-				? 'MJPEG · retrying…' : 'retrying…';
-		}
+		// One thing can be held here now: the note. The MJPEG picture is a rung
+		// of the chain and is held by the swap like any other player, so
+		// arriving here means there was no picture to keep.
+		if (badge) badge.textContent = 'retrying…';
 		attachPlayer(kind === undefined ? wantWebRTC() : kind);
 	}
 
@@ -329,11 +338,52 @@
 	const transportW = $('#mj-transport-w'), transportM = $('#mj-transport-m');
 	const transportGrp = $('#mj-transport-ctl');
 	const transportLbl = $('#mj-transport-lbl');
+	// Three pairs now, so this hides the two the live kind is not using rather
+	// than the one. The swap only ever touches the slot it is playing on, so
+	// without this an idle <video> or a frozen <img> sits visible underneath
+	// whatever took the stage.
+	const PAIRS = {
+		wasm: ['#live-canvas', '#live-canvas-b'],
+		multipart: ['#live-mjpeg', '#live-mjpeg-b'],
+		video: ['#live-video', '#live-video-b'],
+	};
+	function pairFor(kind) {
+		return PAIRS[kind === 'wasm' || kind === 'multipart' ? kind : 'video'];
+	}
 	function hideOtherKind(kind) {
-		(kind === 'wasm'
-			? ['#live-video', '#live-video-b']
-			: ['#live-canvas', '#live-canvas-b']
-		).forEach((sel) => { const e = $(sel); if (e) e.style.display = 'none'; });
+		const mine = pairFor(kind);
+		Object.keys(PAIRS).forEach((k) => {
+			if (PAIRS[k] === mine) return;
+			PAIRS[k].forEach((sel) => {
+				const e = $(sel);
+				if (e) e.style.display = 'none';
+			});
+		});
+	}
+
+	// The transport picker names what can carry THIS source's stream, so it has
+	// to follow the source rather than sit there offering two choices that do
+	// not apply. On a webcam publishing only MJPEG both were left merely
+	// unlit — which reads as broken rather than as inapplicable — and pressing
+	// them was worse than nothing: MSE did nothing at all, and WebRTC changed
+	// the camera. Disabled is the same answer the Main/Sub radios already give
+	// for a source with one stream.
+	function syncTransportControls() {
+		const S = window.MajesticSources;
+		const info = curStreamInfo();
+		// Unknown stays enabled: the sources answer is raced against a deadline
+		// and a slow one must not take the picker away from a camera that has
+		// always had it.
+		const nal = !info || !S || S.family(info) === 'nal';
+		if (transportW) transportW.disabled = !nal || !webrtcAvailable;
+		if (transportM) transportM.disabled = !nal;
+		if (transportLbl && !nal) {
+			transportLbl.title = 'This source publishes MJPEG only, which ' +
+				'neither WebRTC nor MSE can carry \u2014 the picture comes over ' +
+				'HTTP instead.';
+		} else if (transportLbl && liveKind !== 'webrtc') {
+			transportLbl.title = TRANSPORT_TITLE;
+		}
 	}
 
 	function reflectTransport(kind) {
@@ -369,6 +419,103 @@
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
+	// Which SOURCE is on screen, and what the camera said about it.
+	//
+	// `stream` above stays a subtype (0 main, 1 sub), because that is what the
+	// configuration is per: there is no video0-for-camera-1 key, and a second
+	// camera reuses camera 0's video0/video1/jpeg values. What goes on the wire
+	// is the two together — wireStream() below — because majestic addresses
+	// streams as 3*camera + subtype.
+	let camera = 0;
+	let sources = [];
+	// The channel the VIEWER asked for, which is not always the one playing.
+	//
+	// `stream` above is what this source can actually honour: a webcam that
+	// publishes only MJPEG forces subtype 2 whatever was picked before it. That
+	// clamp used to be written back into the preference, so coming back to the
+	// on-board camera picked ITS subtype 2 — the 5 fps JPEG channel — and the
+	// sensor played over the MJPEG rung, having been on WebRTC a moment
+	// earlier. A clamp is what one source can do, not a change of mind.
+	let wantSubtype = 0;
+	// The remembered choice, so a camera watched from this browser comes back
+	// to the source it was left on. Per browser rather than on the camera, like
+	// the transport and the channel beside it: it is a viewing preference, and
+	// the same camera watched from a phone and a desk may want different
+	// answers.
+	const SOURCE_KEY = 'mj-preview-source';
+	function readSource() {
+		try { return localStorage.getItem(SOURCE_KEY); } catch (e) { return null; }
+	}
+	function writeSource(v) {
+		try { localStorage.setItem(SOURCE_KEY, v); } catch (e) {}
+	}
+
+	// The stream_id for what is playing. One place, because getting it wrong is
+	// not visible — the camera answers with SOME picture for every id it
+	// accepts, so an off-by-one is a viewer watching the wrong camera.
+	function wireStream() { return 3 * camera + stream; }
+
+	// Published for preview-hero.js's snapshot button, which is wired
+	// independently of this file and has to take its picture from the camera
+	// that is actually on screen. A getter, because that changes.
+	window.MajesticLiveCamera = () => camera;
+
+	// The /api/v1/sources entry for the current source, or null before the
+	// answer arrives. The transport gate reads it: what is worth trying depends
+	// on what this source publishes, not on what the on-board sensor does.
+	function srcOf(cam) {
+		return sources.find(s => s.camera === (cam | 0)) || null;
+	}
+	// The MJPEG stream this source publishes, which is what the bottom rung can
+	// serve — not the stream currently picked, which is the one that just
+	// failed. On the on-board camera that is the jpeg channel; on a USB webcam
+	// in its usual mode it is the only stream there is.
+	function mjpegStreamOf(cam) {
+		const S = window.MajesticSources;
+		const src = srcOf(cam);
+		if (S && src && Array.isArray(src.streams)) {
+			// Through the module, not over the raw payload: the wire spells
+			// `subtype` as a name and only the module maps it to the index this
+			// compares against.
+			return S.streams(src).find(x => x.subtype === 2) || null;
+		}
+		// Nobody has answered yet, or the request failed. For the on-board
+		// camera the configuration still knows, and it is what gated this
+		// before /api/v1/sources existed — so a camera whose sources answer
+		// never lands keeps exactly the fallback it always had rather than
+		// losing it to a question nobody could ask.
+		if (!sourcesKnown && cam === 0 && jpegOn) {
+			return { subtype: 2, codec: 'mjpeg', present: true, rtsp: false };
+		}
+		return null;
+	}
+	// Where the chain should START for what is on screen.
+	//
+	// Not always the top. The ladder above the MJPEG rung carries NAL streams,
+	// and a source whose only stream is MJPEG — which is most USB webcams — has
+	// nothing for WebRTC or MSE to negotiate. Starting there anyway asked the
+	// daemon for a stream_id it cannot serve over those transports, and it
+	// answered with a channel of the ON-BOARD camera: the viewer pressed "USB
+	// camera", saw the sensor, and was told "Sub stream isn't available right
+	// now — showing Main stream instead", which is a true sentence about
+	// entirely the wrong question.
+	//
+	// So the transport follows the codec, which is the whole reason
+	// /api/v1/sources reports one.
+	function startingRung() {
+		const S = window.MajesticSources;
+		const info = curStreamInfo();
+		if (info && S && S.family(info) === 'multipart') {
+			return 'multipart';
+		}
+		return wantWebRTC();
+	}
+
+	function curStreamInfo() {
+		const S = window.MajesticSources;
+		const src = srcOf(camera);
+		return (S && src) ? S.pick(src, stream) : null;
+	}
 	// The camera's STUN/TURN configuration, filled when the config lands. Read
 	// through a getter at every open(), so an attach that beat the fetch is
 	// corrected by the first reconnect rather than staying host-candidates-only
@@ -475,12 +622,23 @@
 		// bug it guards, a control repainting the chip with the codec of the
 		// stream that failed, is exactly the one #274 photographed.
 		if (!badge || !chipMedia || fellBack || holdingFallback) return;
-		// WebRTC measures its own rate, MSE measures nothing so the configured
-		// rate stands in — and software decode measures, which is the entire
-		// point of that rung. Leaving it on the configured rate would make the
-		// chip claim 25 fps while the client managed 9, in exactly the case
-		// this exists to expose.
-		const fps = liveKind === 'mse' ? cfgFps[stream ? 1 : 0] : chipFps;
+		// WebRTC measures its own rate, and software decode measures, which is
+		// the entire point of that rung. Leaving those on a stated rate would
+		// make the chip claim 25 fps while the client managed 9, in exactly the
+		// case this exists to expose.
+		//
+		// MSE and the MJPEG rung measure nothing, so a stated rate stands in.
+		// It comes from /api/v1/sources where that answer exists, because
+		// cfgFps holds video0/video1 — the ON-BOARD channels — and reading it
+		// for another camera would print the sensor's rate over a webcam's
+		// picture. It is also the only answer for the MJPEG rung at all, which
+		// no config key describes: without it the chip read "MJPEG 640×480" and
+		// simply had no rate on it.
+		const info = curStreamInfo();
+		const stated = (info && info.fps > 0) ? info.fps
+			: (camera === 0 ? cfgFps[stream ? 1 : 0] : 0);
+		const fps = (liveKind === 'mse' || liveKind === 'multipart')
+			? stated : chipFps;
 		// The scale the picture is drawn at, because Fill covers the window by
 		// enlarging a stream smaller than the screen — a 1080p main on a 1440p
 		// monitor is 133%, the substream far more — and a soft picture with no
@@ -581,6 +739,14 @@
 	// remembered preference must stay the viewer's own — a daemon fallback is
 	// not a choice, and next page load should ask for their channel again.
 	function applyServed(info) {
+		// WebRTC negotiates the on-board channels only — its offer loop is
+		// bounded by the two channels with videoN.bitrate behind them — so a
+		// served reply can only ever be about camera 0. Reaching here while
+		// another source is on screen would move THIS source's radios and print
+		// a mismatch about a channel nobody asked for.
+		if (camera !== 0) {
+			return;
+		}
 		servedCh = (info.channel === 0 || info.channel === 1)
 			? info.channel : null;
 		const mismatch = servedCh !== null && info.requested !== null &&
@@ -758,9 +924,14 @@
 		// within a session and every show/hide would write to nothing.
 		// Four elements, two slots. The kind decides which pair, because
 		// software decode paints a canvas and the other two drive a video.
+		// Six elements, two slots. The kind decides which pair: software decode
+		// paints a canvas, the MJPEG rung an <img>, and the other two drive a
+		// video.
 		elements: [
-			(kind) => $(kind === 'wasm' ? '#live-canvas' : '#live-video'),
-			(kind) => $(kind === 'wasm' ? '#live-canvas-b' : '#live-video-b'),
+			(kind) => $(kind === 'wasm' ? '#live-canvas'
+				: kind === 'multipart' ? '#live-mjpeg' : '#live-video'),
+			(kind) => $(kind === 'wasm' ? '#live-canvas-b'
+				: kind === 'multipart' ? '#live-mjpeg-b' : '#live-video-b'),
 		],
 		// audio and volume go in at attach rather than after promotion.
 		// Applying them later means renegotiating a session that has just
@@ -769,7 +940,11 @@
 		// step.
 		open: (kind, el, id, onState) => MajesticVideoImpl(kind).attach(
 			el, Object.assign(
-				{ stream: stream, iceServers: () => ice,
+				// `stream` is the id on the wire (3*camera + subtype); the
+				// MJPEG rung wants the camera instead, because there is one
+				// MJPEG stream per camera and no subtype to choose between.
+				{ stream: wireStream(), camera: camera,
+					iceServers: () => ice,
 					audio: audioOn, volume: vol },
 				handlersFor(id, onState))),
 		onPromoted: (kind, proven) => {
@@ -785,7 +960,12 @@
 			// group dark would collide with the meaning #280 gave it — neither
 			// transport carrying anything — and would make a press of either
 			// radio tear down a working session.
-			reflectTransport(kind === 'wasm' ? 'mse' : kind);
+			// The MJPEG rung is not one of the two the picker names — it is
+			// the floor of the chain, reached rather than chosen — so it lights
+			// neither radio, the way the end of the chain never did. A press of
+			// either is then a real change event and a real retry.
+			reflectTransport(kind === 'wasm' ? 'mse'
+				: kind === 'multipart' ? null : kind);
 			// The idle pair belonging to the OTHER kind is hidden by nobody:
 			// the swap only ever touches the slot it is using, so an empty
 			// <video> sits visible underneath a canvas that is painting over
@@ -798,6 +978,17 @@
 			// own in the way — and showing the empty video element for it
 			// would take away the picture the viewer still has.
 			if (proven || !holdingFallback) showVideo();
+			// A viewer handed the MJPEG picture in place of the one they asked
+			// for is owed the reason: that was half of #274, and a rung
+			// promoted like any other says nothing about what it replaced.
+			// Only when it was FALLEN to — a source that publishes nothing else
+			// is not a failure and has nothing to explain.
+			if (kind === 'multipart' && fellToMultipart) {
+				showStageMsg('fallback', fallbackSentence(fellToMultipart) +
+					' Showing the MJPEG stream.');
+			} else {
+				fellToMultipart = null;
+			}
 		},
 		// A trial was dropped and the screen is untouched. All that changes is
 		// the toggle, which has to come back up carrying the reason.
@@ -817,23 +1008,36 @@
 			// erasing the demotion the WebRTC refusal had recorded a moment
 			// earlier. showFallback() unlights both radios straight after, so
 			// nothing on screen said so; the storage was wrong for good (#269).
-			if (kind !== 'webrtc') {
-				if (swap.playing() === 'webrtc') {
-					reflectTransport('webrtc');
-					rememberTransport('webrtc');
+			if (kind === 'webrtc') {
+				reflectTransport('mse');
+				// The reason first, because it is the news, then the standing
+				// explanation — the tooltip is the only place either lives.
+				if (transportLbl) {
+					transportLbl.title = 'WebRTC: ' + (why || 'unavailable') +
+						'\n\n' + TRANSPORT_TITLE;
 				}
-				return;
+				// 'busy' says the camera is full, which will not be true for
+				// long. Only a real refusal is worth remembering, and even
+				// that expires.
+				if (permanent) rememberDemotion();
+			} else if (swap.playing() === 'webrtc') {
+				reflectTransport('webrtc');
+				rememberTransport('webrtc');
 			}
-			reflectTransport('mse');
-			// The reason first, because it is the news, then the standing
-			// explanation — the tooltip is the only place either of them lives.
-			if (transportLbl) {
-				transportLbl.title =
-					'WebRTC: ' + (why || 'unavailable') + '\n\n' + TRANSPORT_TITLE;
+			// A failed trial normally stops here: the viewer keeps what was on
+			// screen, which is the whole point of staging. The exception is a
+			// picture that is ITSELF the end of the chain — the MJPEG rung,
+			// fallen to rather than chosen. Someone pressing a transport over
+			// that is asking to leave it, so a refusal carries on down the
+			// chain instead of quietly putting them back where they started.
+			//
+			// Before the rung existed this happened by accident: showFallback()
+			// had stopped the swap, so there was no live player and every
+			// failure arrived as onExhausted. Now there is one, and the
+			// intention has to be stated.
+			if (liveKind === 'multipart' && fellToMultipart) {
+				nextRung(kind, why);
 			}
-			// 'busy' says the camera is full, which will not be true for long.
-			// Only a real refusal is worth remembering, and even that expires.
-			if (permanent) rememberDemotion();
 		},
 		// Nothing left on screen worth keeping. Try the other transport — from
 		// WebRTC that means MSE, which plays what this browser's decoder takes
@@ -880,10 +1084,10 @@
 		},
 	});
 
-	const MajesticVideoImpl = (kind) =>
-		kind === 'webrtc' ? MajesticWebRTC
-		: kind === 'wasm' ? window.MajesticWasm
-		: MajesticVideo;
+	// Through the shared lookup rather than a second copy of it: the ladder has
+	// four rungs now, and a page that knew about three would silently fall to
+	// MSE for the fourth.
+	const MajesticVideoImpl = (kind) => MajesticTransport.impl(kind);
 
 	function attachPlayer(kind) {
 		// Any fresh attach supersedes a pending software-rung retry: it belongs
@@ -891,7 +1095,24 @@
 		// wasm player over the new one.
 		wasmGen++;
 		cancelWasmRetry();
-		swap.start(kind === true ? 'webrtc' : kind === false ? 'mse' : kind);
+
+		let want = kind === true ? 'webrtc' : kind === false ? 'mse' : kind;
+		// A NAL transport cannot carry a source that publishes MJPEG only, and
+		// asking anyway is not harmless in the way a refused attach usually is.
+		// The daemon declines /ws/video for a JPEG stream — it carries no
+		// access units — so MSE simply did nothing; and WebRTC negotiates the
+		// on-board channels only, so it answered with camera 0 and the viewer
+		// silently got a DIFFERENT CAMERA from the one they were watching.
+		//
+		// Held here as well as on the controls below, because every caller
+		// reaches this and only one of them is a button.
+		const S = window.MajesticSources;
+		const info = curStreamInfo();
+		if (want !== 'multipart' && info && S &&
+			S.family(info) === 'multipart') {
+			want = 'multipart';
+		}
+		swap.start(want);
 	}
 
 	// The chain, as an ordered walk rather than the pair of `kind === 'webrtc'`
@@ -916,7 +1137,7 @@
 		// handle, and if the new one is refused too the reason will name that
 		// codec, which the gate below rejects.
 		if (String(detail || '').split(' ')[0] === 'codec-changed') {
-			attachPlayer(wantWebRTC());
+			attachPlayer(startingRung());
 			return;
 		}
 		if (kind === 'webrtc') { attachPlayer('mse'); return; }
@@ -955,6 +1176,32 @@
 				wasmRetryTimer = null;
 				if (wasmGen === retryGen && fellBack === null) attachPlayer('wasm');
 			}, WASM_RETRY_MS * wasmRetries);
+			return;
+		}
+		// The bottom rung. Not reached from itself — `multipart` is the end of
+		// the chain — and only when this SOURCE has an MJPEG stream to serve:
+		// offering an <img> a URL the camera answers with nothing would trade a
+		// clear explanation for a broken image icon.
+		if (kind !== 'multipart' && liveKind !== 'multipart' &&
+			MajesticTransport.multipartRungFor(mjpegStreamOf(camera))) {
+			// Why we are here, kept for the promotion. A viewer handed the
+			// MJPEG picture in place of the one they asked for is owed the
+			// reason — that was half of #274 — and a rung that is promoted
+			// like any other says nothing about what it replaced. Cleared on
+			// any other promotion, so it cannot outlive its session.
+			fellToMultipart = detail || 'unknown';
+			attachPlayer('multipart');
+			return;
+		}
+		// The rung is already carrying the picture and the chain has run out
+		// again: a retry the viewer asked for that got no further. Keep what
+		// they have and put the explanation back — taking a picture away in
+		// exchange for a sentence about why there is none is the wrong trade,
+		// and the sentence would be false anyway.
+		if (liveKind === 'multipart' && swap.playing() === 'multipart') {
+			fellToMultipart = detail || fellToMultipart || 'unknown';
+			showStageMsg('fallback', fallbackSentence(fellToMultipart) +
+				' Showing the MJPEG stream.');
 			return;
 		}
 		showFallback(detail);
@@ -1262,19 +1509,123 @@
 		if (want !== 1 || !subAvailable) {
 			stream = 0;
 			if (s0) s0.checked = true;
-			return false;
+			return clampToSource(false);
 		}
 		stream = 1;
 		if (s1) s1.checked = true;
-		return true;
+		return clampToSource(true);
 	}
 
+	// Everything above reads the video0/video1 sections, which describe the
+	// ON-BOARD channels — there is no video0-for-camera-1 key. So whatever they
+	// decide has to be checked against what the source actually publishes: a
+	// USB webcam in its usual mode has one MJPEG stream and neither a Main nor
+	// a Sub to have chosen between.
+	function clampToSource(moved) {
+		// Everything upstream of this call CHOSE a channel; this call only
+		// accommodates what the source can serve. Recording the choice here is
+		// what keeps the two apart with one line rather than four.
+		wantSubtype = stream;
+		const S = window.MajesticSources;
+		const src = srcOf(camera);
+		const p = (S && src) ? S.pick(src, stream) : null;
+		if (p && p.subtype !== stream) {
+			stream = p.subtype;
+			return true;
+		}
+		return moved;
+	}
+
+	// Raced against the first attach below, so a remembered source opens
+	// directly rather than by attaching the on-board camera and replacing it a
+	// moment later. Never rejects: a camera that cannot answer this still has a
+	// picture to show, and it is the one the configuration describes.
+	// Bounded by a deadline of its own, shorter than the config's below, so a
+	// camera that cannot answer this delays the first picture by less than the
+	// config already may. It always settles, which is what lets the first attach
+	// wait for it without ever being held hostage by it.
+	const SOURCES_WAIT_MS = 1200;
+	// `sourcesKnown` is the difference between the camera saying it has one
+	// source and nobody having answered. They are not the same, and reading the
+	// second as the first would take the MJPEG rung away from a camera that has
+	// one — the picture this page falls back to — over a single failed request.
+	let sourcesKnown = false;
+	const sourcesFetched =
+		(typeof mjSources === 'function' ? mjSources() : Promise.resolve([]))
+			.then((list) => {
+				sourcesKnown = Array.isArray(list);
+				sources = sourcesKnown ? list : [];
+				return sources;
+			})
+			.catch(() => (sources = []));
+	const sourcesReady = Promise.race([
+		sourcesFetched,
+		new Promise(done => setTimeout(() => done(null), SOURCES_WAIT_MS)),
+	]);
+
+	// On the fetch itself, not on the deadline-bounded promise above: an answer
+	// that arrives after the deadline still has to build the chooser and still
+	// has to be able to say there is a rung the chain did not know about.
+	sourcesFetched.then(() => {
+		const S = window.MajesticSources;
+		// The remembered source, if it is still there. resolve() falls back to
+		// the first one rather than to nothing: a webcam unplugged since the
+		// choice was made should leave the viewer looking at the on-board
+		// camera, not at an error about a camera that is gone.
+		const want = S ? S.parse(readSource() + ':' + stream) : null;
+		const r = S ? S.resolve(sources, want) : null;
+		buildSourceChooser();
+
+		if (r && r.source.camera !== camera && (player || fellBack)) {
+			// The answer arrived after the chain had already started on the
+			// on-board camera. Switching is a real change, so it goes through
+			// the same path a click does.
+			goToSource(r.source.camera);
+		} else {
+			if (r) camera = r.source.camera;
+			reflectSource();
+			// The subtype has to move with it. The answer can arrive after the
+			// first attach — it is raced against a deadline — and the video
+			// sections that chose the channel describe the on-board camera, so
+			// a source that turns out to publish only MJPEG leaves the player
+			// attached to a stream id nothing serves. Restart rather than
+			// retarget: a different subtype can be a different transport family
+			// and a different element.
+			const p = (S && r) ? S.pick(r.source, stream) : null;
+			if (p && p.subtype !== stream) {
+				stream = p.subtype;
+				syncStreamControls();
+				if (player || swap.trial()) {
+					fellBack = null;
+					attachPlayer(startingRung());
+					return;
+				}
+			}
+			syncStreamControls();
+		}
+
+		// The bottom rung is gated on this list, so until it landed there was
+		// no way to know an MJPEG stream existed to fall to — and a camera
+		// whose answer is slow would otherwise sit on the note with a picture
+		// available.
+		if (fellBack && MajesticTransport.multipartRungFor(
+			mjpegStreamOf(camera))) {
+			retryFromFallback('multipart');
+		}
+	});
+
+	// Both answers, or the deadline. Which SOURCE to open is as much a part of
+	// the first attach as which channel: resolving it afterwards meant
+	// attaching the on-board camera and replacing it a moment later, which is a
+	// visible flicker and a socket the camera opened for nobody. sourcesReady
+	// always settles and settles sooner, so this waits no longer than it did.
 	Promise.race([
-		mjConfig(),
+		Promise.all([mjConfig(), sourcesReady]),
 		new Promise(done => setTimeout(() => done(null), CONFIG_WAIT_MS)),
-	]).then(cfg => {
-		if (cfg) chooseSub(cfg); else attachedBlind = true;
-		attachPlayer(wantWebRTC());
+	]).then(answers => {
+		if (answers) chooseSub(answers[0]); else attachedBlind = true;
+		syncStreamControls();
+		attachPlayer(startingRung());
 	});
 
 	// If the deadline won, put it right when the answer turns up — but not if
@@ -1349,7 +1700,7 @@
 		// channel being left must not fire onto the new one.
 		wasmGen++;
 		cancelWasmRetry();
-		stream = n;
+		stream = wantSubtype = n;
 		// The two channels are two encoders; the baseline and any toast on
 		// screen describe the one being left.
 		if (window.MajesticAdapt) window.MajesticAdapt.reset();
@@ -1370,12 +1721,186 @@
 		// visible and, on the fallback reached through onLive, called
 		// setStream() on a stopped player, reopening its socket.
 		if (fellBack) { retryFromFallback(); return; }
-		if (player) player.setStream(n);
+		// Holding the MJPEG picture because the chain ran out on the channel
+		// being left. The pick is still a request worth honouring — an H.264
+		// substream plays in a browser that refused an H.265 main, which is the
+		// camera in #274 — and setStream() on the rung would correctly do
+		// nothing, since one MJPEG stream serves every channel of a camera. So
+		// ask the whole chain again instead.
+		if (liveKind === 'multipart' && fellToMultipart) {
+			attachPlayer(startingRung());
+			return;
+		}
+		// The stream_id, not the subtype: every player is attached with one.
+		if (player) player.setStream(wireStream());
 		const t = swap.trial();
-		if (t) t.setStream(n);
+		if (t) t.setStream(wireStream());
 		// On MSE the chip's fps is the configured rate, which is per channel.
 		setChip();
 	}
+	// --- the source chooser ---
+	//
+	// Built here rather than sitting in the template because most cameras have
+	// exactly one source: markup for a chooser nobody can use is markup that has
+	// to be hidden correctly for ever, and the last time this page grew a
+	// control that "just stays hidden" it shipped enabled radios for a channel
+	// the camera did not have. The same reasoning cameras-switch.js applies to
+	// the device picker.
+	const sourceBox = $('#mj-source');
+
+	// The camera's own words for its sources, inlined by p/common.cgi from
+	// j/locale.cgi. Read once and tolerantly: a build whose locale file has not
+	// caught up should still get a usable button, and a page that threw here
+	// would take the whole player down over a caption.
+	const srcLabels = (function () {
+		try {
+			const el = $('#mj-preview-boot');
+			return (el && JSON.parse(el.textContent).labels) || {};
+		} catch (e) { return {}; }
+	})();
+
+	const FALLBACK_NAMES = { mj_source_usb: 'USB camera', mj_source_sensor: 'Sensor' };
+
+	function sourceLabel(src) {
+		const S = window.MajesticSources;
+		const l = S.label(src, sources);
+		const name = srcLabels[l.key.replace(/^mj_/, '')] || FALLBACK_NAMES[l.key];
+		// Only where the kind is ambiguous. "Sensor" and "Sensor 2" is what a
+		// second-sensor board needs; numbering a lone USB camera would be
+		// numbering a set of one.
+		return l.ordinal ? name + ' ' + l.ordinal : name;
+	}
+
+	// Which subtypes this source actually publishes, applied to the stream
+	// radios. A USB webcam in MJPEG mode has one stream and no channel to pick
+	// between, so Main/Sub/Auto go away rather than sit there doing nothing.
+	function syncStreamControls() {
+		// First, and outside the early return below: the transports apply to
+		// whatever is on screen whether or not the source list has landed.
+		syncTransportControls();
+		const S = window.MajesticSources;
+		const src = srcOf(camera);
+		const avail = (S && src) ? S.streams(src) : null;
+		// Before the answer arrives, leave the controls as the configuration
+		// set them: the on-board camera is what is playing and its channels are
+		// what the config describes.
+		if (!avail) return;
+
+		const has = (t) => avail.some(x => x.subtype === t);
+		const nal = has(0) || has(1);
+		if (s0) s0.disabled = !has(0);
+		if (s1) s1.disabled = !has(1);
+		const subOk = has(1) && has(0);
+		if ($('#mj-sub')) $('#mj-sub').hidden = !has(1);
+		if (autoLbl) autoLbl.hidden = !subOk;
+		if (autoCtl) autoCtl.disabled = !subOk;
+		// A source with nothing but MJPEG has no channel to choose, and Auto
+		// has nothing to decide. Turn a stale Auto off rather than leave it
+		// running behind a control nobody can see or clear — the same rule the
+		// config path applies when a camera turns out to have one encoder.
+		if (!subOk && (autoOn || (autoCtl && autoCtl.checked))) {
+			autoOn = false;
+			if (autoCtl) autoCtl.checked = false;
+		}
+		if (!nal) {
+			// Nothing to check: every radio in the group is unavailable, and
+			// leaving one lit would name a stream that is not playing.
+			[s0, s1, autoCtl].forEach((el) => { if (el) el.checked = false; });
+		} else {
+			if (s0) s0.checked = stream === 0;
+			if (s1) s1.checked = stream === 1;
+		}
+	}
+
+	function goToSource(n) {
+		if (n === camera) return;
+		// Same hygiene as a channel change, for the same reasons: a pending
+		// software retry belongs to the source being left, and the adaptation
+		// baseline and the served answer both describe it.
+		wasmGen++;
+		cancelWasmRetry();
+		camera = n;
+		writeSource(String(n));
+		// Whatever the chain had to explain about the source being left does
+		// not describe this one. A webcam that publishes only MJPEG is played
+		// on the MJPEG rung by choice, and a viewer who chose it is not owed an
+		// apology for it.
+		fellToMultipart = null;
+		if (window.MajesticAdapt) window.MajesticAdapt.reset();
+		if (window.MajesticStats) window.MajesticStats.reset();
+		wantedCh = null;
+		servedCh = null;
+		servedShownKey = '';
+		hideServedMsg();
+
+		// The subtype has to be one this source has before anything is asked
+		// for: a webcam that publishes only MJPEG cannot serve the sub stream
+		// the viewer was on, and asking for it would open a socket on a stream
+		// id the camera refuses.
+		const S = window.MajesticSources;
+		const src = srcOf(camera);
+		// From the preference, not from what the last source was clamped to.
+		const pick = (S && src) ? S.pick(src, wantSubtype) : null;
+		if (pick) stream = pick.subtype;
+		syncStreamControls();
+		reflectSource();
+		setChip();
+		// The snapshot button is per camera: a webcam that publishes only MJPEG
+		// has one where the sensor beside it may not, and the other way round.
+		const snap = $('#mj-snap');
+		if (snap && snap.__mjSyncSnapshot) snap.__mjSyncSnapshot();
+
+		// From the top of the chain rather than by retargeting the player on
+		// screen. A different source can be a different codec, a different
+		// transport family, even a different element — an MJPEG webcam is an
+		// <img> where an H.264 one is a <video> — so there is nothing here for
+		// setStream() to do.
+		fellBack = null;
+		attachPlayer(startingRung());
+	}
+
+	// The radios this page created, kept rather than queried back out of the
+	// DOM: they are built here and nowhere else, so the list is already known
+	// and asking the document for it again is a way to be wrong about it.
+	let sourceInputs = [];
+
+	function reflectSource() {
+		sourceInputs.forEach((el) => { el.checked = el.__cam === camera; });
+	}
+
+	function buildSourceChooser() {
+		const S = window.MajesticSources;
+		if (!sourceBox || !S) return;
+		sourceBox.textContent = '';
+		sourceInputs = [];
+		const watchable = S.watchableSources(sources);
+		// One source is the overwhelming case, and it gets no picker.
+		if (watchable.length < 2) { sourceBox.hidden = true; return; }
+
+		watchable.forEach((src) => {
+			const id = 'mj-source-' + src.camera;
+			const input = document.createElement('input');
+			input.type = 'radio';
+			input.className = 'mj-seg-in';
+			input.name = 'mj-source-pick';
+			input.id = id;
+			input.autocomplete = 'off';
+			input.__cam = src.camera;
+			input.checked = src.camera === camera;
+			input.addEventListener('change', () => goToSource(src.camera));
+
+			const label = document.createElement('label');
+			label.className = 'mj-seg-lbl';
+			label.htmlFor = id;
+			label.textContent = sourceLabel(src);
+
+			sourceInputs.push(input);
+			sourceBox.appendChild(input);
+			sourceBox.appendChild(label);
+		});
+		sourceBox.hidden = false;
+	}
+
 	if (s0) s0.addEventListener('change', () => { autoOn = false; goToStream(0); });
 	if (s1) s1.addEventListener('change', () => { autoOn = false; goToStream(1); });
 	if (autoCtl) autoCtl.addEventListener('change', () => {
@@ -1419,19 +1944,30 @@
 		if (el) el.addEventListener('click', () => {
 			userPickedStream = true;
 			MajesticTransport.chooseStream('preview', n === 2 ? 'auto' : n);
-			if (!fellBack) return;
+			// Two ways to be at the end of the chain: nothing playing (the
+			// note), or the MJPEG rung playing because the channel the viewer
+			// asked for could not be. Both are a state a channel press is
+			// asking to leave, and until the rung existed only the first one
+			// could happen here.
+			if (!fellBack && !(liveKind === 'multipart' && fellToMultipart)) {
+				return;
+			}
 			if (n === 2) {
 				autoOn = true;
 				lastAutoAt = 0;
 				const pick = autoPick();
-				if (pick !== null) stream = pick;
+				if (pick !== null) stream = wantSubtype = pick;
 				wantedCh = null;
 			} else {
 				autoOn = false;
-				stream = n;
+				stream = wantSubtype = n;
 				wantedCh = n;
 			}
-			retryFromFallback();
+			// Straight to the top of the chain when there is a picture to
+			// protect: retryFromFallback() is for the note, and it is guarded
+			// on fellBack so it would do nothing here.
+			if (fellBack) retryFromFallback();
+			else attachPlayer(startingRung());
 		});
 	});
 

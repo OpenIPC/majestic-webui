@@ -89,6 +89,38 @@ function mjConfig() {
 	return _mjCfg;
 }
 
+
+// What this camera can show, from the daemon rather than from a guess.
+//
+// A camera is not always one camera: majestic can carry a second sensor
+// (Rockchip) or publish a USB webcam as a second camera, both addressed as
+// stream_id = 3*camera + subtype. Nothing here can work that out from the
+// config — usbcam.enabled says a source was asked for, not that it came up, and
+// a second sensor has no key at all — so the daemon is asked.
+//
+// Cached and invalidated exactly like mjConfig(), including the load-bearing
+// `_mjSources = null` in the catch: a transient failure at page load must not
+// cache as "one camera" for the life of the page.
+let _mjSources;
+function mjSources() {
+	if (!_mjSources)
+		_mjSources = apiFetch('/api/v1/sources', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.json() : Promise.reject(r.status))
+			.then(j => (j && Array.isArray(j.sources)) ? j.sources : [])
+			.catch(() => {
+				// null, not []: those mean different things and a caller has to
+				// be able to tell them apart. [] is the camera saying it has no
+				// sources; null is nobody having answered, and a caller that
+				// read the second as the first would decide a camera had lost
+				// capabilities it still has — no chooser, no snapshot, no
+				// MJPEG rung to fall to — over one failed request on a bad
+				// link. Not cached either, so the next call retries.
+				_mjSources = null;
+				return null;
+			});
+	return _mjSources;
+}
+
 function mjGet(cfg, dot) {
 	return dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg);
 }
@@ -758,11 +790,19 @@ function initAll() {
 	// strips the port off HTTP_HOST. Runs before the .cp2cb wiring below so a
 	// copy picks up the rewritten text.
 	const epTls = location.protocol === 'https:';
-	$$('.ep-http').forEach(el => el.textContent = epTls ? 'https' : 'http');
-	$$('.ep-ws').forEach(el => el.textContent = epTls ? 'wss' : 'ws');
-	// host and hostname both keep the brackets an IPv6 literal needs in a URL
-	$$('.ep-host').forEach(el => el.textContent = location.host);      // host[:port]
-	$$('.ep-addr').forEach(el => el.textContent = location.hostname);  // RTSP has its own port
+	// A subtree, so rows added later — the extra sources below — are painted the
+	// same way rather than by a second copy of these five rules.
+	let epRtsp = '';
+	function fillEndpoints(root) {
+		const all = (sel) => Array.prototype.slice.call(root.querySelectorAll(sel));
+		all('.ep-http').forEach(el => el.textContent = epTls ? 'https' : 'http');
+		all('.ep-ws').forEach(el => el.textContent = epTls ? 'wss' : 'ws');
+		// host and hostname both keep the brackets an IPv6 literal needs in a URL
+		all('.ep-host').forEach(el => el.textContent = location.host);      // host[:port]
+		all('.ep-addr').forEach(el => el.textContent = location.hostname);  // RTSP has its own port
+		if (epRtsp) all('.ep-rtsp').forEach(el => el.textContent = epRtsp);
+	}
+	fillEndpoints(document);
 
 	// ...and RTSP's own port is the one value on that page location cannot
 	// supply, along with whether majestic is serving everything unauthenticated.
@@ -782,8 +822,10 @@ function initAll() {
 		// so a stray `true` cannot become port 1) keeps that latitude.
 		const raw = mjGet(cfg, 'rtsp.port');
 		const port = (typeof raw === 'number' || typeof raw === 'string') ? Number(raw) : NaN;
-		if (Number.isInteger(port) && port >= 1 && port <= 65535 && port !== 554)
-			$$('.ep-rtsp').forEach(el => el.textContent = ':' + port);
+		if (Number.isInteger(port) && port >= 1 && port <= 65535 && port !== 554) {
+			epRtsp = ':' + port;
+			$$('.ep-rtsp').forEach(el => el.textContent = epRtsp);
+		}
 
 		// Both notes start hidden, so this reveals exactly one -- and only once the
 		// config is real. mjConfig() turns a failed or non-OK fetch into {}, which
@@ -807,7 +849,8 @@ function initAll() {
 
 	// click-to-copy for .cp2cb snippets (HTTPS uses the clipboard API, plain
 	// http falls back to a hidden textarea + execCommand)
-	$$('.cp2cb').forEach(el => {
+	function wireCopy(root) {
+	Array.prototype.slice.call(root.querySelectorAll('.cp2cb')).forEach(el => {
 		el.title = 'Click to copy';
 		el.addEventListener('click', () => {
 			const text = el.textContent.trim();
@@ -822,6 +865,82 @@ function initAll() {
 				document.body.removeChild(ta);
 			}
 		});
+	});
+	}
+	wireCopy(document);
+
+	// The endpoints of any camera beyond the on-board one. Rendered from
+	// /api/v1/sources rather than written out here: which stream ids exist, and
+	// which of them RTSP will actually answer for, is something only the camera
+	// knows — a second sensor and a USB webcam publish different sets, and the
+	// JPEG track is opt-in (jpeg.rtsp). Guarded on the container so only
+	// stream-urls.cgi pays for the fetch.
+	const epSources = $('#ep-sources');
+	if (epSources && typeof mjSources === 'function') mjSources().then(list => {
+		const S = window.MajesticSources;
+		// null is "nobody answered", which is not a reason to print anything.
+		if (!S || !list) return;
+		const extra = S.watchableSources(list).filter(src => src.camera > 0);
+		if (!extra.length) return;
+
+		const dl = document.createElement('dl');
+		const row = (html, text) => {
+			const dt = document.createElement('dt');
+			dt.className = 'cp2cb';
+			dt.innerHTML = html;
+			const dd = document.createElement('dd');
+			dd.textContent = text;
+			dl.appendChild(dt);
+			dl.appendChild(dd);
+		};
+		const addr = '<span class="ep-addr"></span><span class="ep-rtsp"></span>';
+		const host = '<span class="ep-host"></span>';
+		// The only values from the camera's answer that reach innerHTML, and
+		// they are coerced to integers first. The daemon writes them as
+		// numbers, but a page that renders whatever a response contains is one
+		// bad answer away from running it — and a stream id is an integer or it
+		// is nothing.
+		const num = (v) => String(v | 0);
+
+		extra.forEach(src => {
+			const l = S.label(src, list);
+			const name = (l.key === 'mj_source_usb' ? 'USB camera' : 'Sensor') +
+				(l.ordinal ? ' ' + l.ordinal : '');
+			const h = document.createElement('h6');
+			h.className = 'mt-3';
+			h.textContent = name;
+			dl.appendChild(h);
+
+			// Normalised by S.streams(): the wire spells `subtype` as a name
+			// and the module is what turns it into this index.
+			S.streams(src).forEach(st => {
+				const what = st.subtype === 0 ? 'main' :
+					st.subtype === 1 ? 'sub' : 'JPEG';
+				// Only where the server will answer: the sub track needs
+				// video1.enabled and the JPEG track jpeg.rtsp, and a URL that
+				// 404s is worse than no URL at all.
+				if (st.rtsp) {
+					row('rtsp://' + addr + '/stream=' + num(st.id),
+						'RTSP ' + what + ' stream.');
+				}
+				if (S.family(st) === 'nal') {
+					row('<span class="ep-ws"></span>://' + host +
+						'/ws/video?stream=' + num(st.id),
+						'Low-latency ' + what + ' stream (fMP4/MSE).');
+				} else {
+					row('<span class="ep-http"></span>://' + host +
+						'/mjpeg?channel=' + num(src.camera),
+						'MJPEG video stream.');
+					row('<span class="ep-http"></span>://' + host +
+						'/image.jpg?channel=' + num(src.camera),
+						'Snapshot in JPEG format.');
+				}
+			});
+		});
+
+		epSources.appendChild(dl);
+		fillEndpoints(epSources);
+		wireCopy(epSources);
 	});
 
 	localClock();
