@@ -4336,7 +4336,6 @@
 
 		function upload(q) {
 			const ref = refWidth();
-			const bytes = q.w * q.h * 4;
 			say('Sending ' + q.w + '×' + q.h + '…');
 			return apiFetch(
 				'/api/v1/osd/image?overlay=' + overlay + '&w=' + q.w +
@@ -4362,8 +4361,14 @@
 					runVisibility();
 					updateDirty();
 					paint();
-					say(q.w + '×' + q.h + ' · ' + Math.round(bytes / 1024) +
-						' KB · ' + Math.round(q.w * 100 / ref) +
+					// The camera's number, not this one's: it compresses the
+					// pixels, so what lands in flash is not w*h*4 and saying
+					// that would overstate the cost by a factor of fifty.
+					const kb = j.stored
+						? Math.max(1, Math.round(j.stored / 1024))
+						: Math.round(q.w * q.h * 4 / 1024);
+					say(q.w + '×' + q.h + ' · ' + kb + ' KB · ' +
+						Math.round(q.w * 100 / ref) +
 						'% of the picture’s width. Press Save to draw it.');
 				})
 				.catch((e) => say('Could not send it: ' + e.message, true));
