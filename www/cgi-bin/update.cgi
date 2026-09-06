@@ -4,9 +4,12 @@
 
 	# Latest build available for THIS board, via sysupgrade — the same updater the
 	# Install button drives over /ws/upgrade. It reads OpenIPC's manifest.flat
-	# (firmware or builder repo, chosen by model) with `curl -k`, so unlike the old
-	# verifying HTTPS HEAD it is not defeated by a fresh flash's stale clock
-	# (issue #44/#121: BADCERT_FUTURE made curl fail while sysupgrade updated fine).
+	# (firmware or builder repo, chosen by model), and it answers a fresh flash's
+	# stale clock itself — NTP first, then the HTTP Date header — so unlike the
+	# old verifying HTTPS HEAD it is not defeated by one (issue #44/#121:
+	# BADCERT_FUTURE made curl fail while sysupgrade updated fine). It used to do
+	# that by skipping certificate verification; since sysupgrade 1.0.63 the
+	# fetch is verified and the clock is what gets fixed.
 	# `timeout` bounds it so a dead network cannot hang the page.
 	latest_build() {
 		[ -z "$network_gateway" ] && return
