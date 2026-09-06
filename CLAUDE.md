@@ -99,11 +99,11 @@ This is the most important file to read before editing anything. It defines:
 - `/etc/majestic.yaml` — Majestic config. Written by majestic and nothing else; the WebUI reads `/api/v1/get` and writes `/api/v1/config`, and never opens the file.
 - `/etc/webui/webui.conf` — UI theme.
 - `/etc/webui/{telegram,ntfy,proxy,openwall,vtun,wireguard,backup}.conf` — one per extension, sourced as shell.
-- `/etc/network/interfaces.d/{eth0,wlan0}` — written by `sbin/setnetwork` (not by the CGI directly).
+- `/etc/network/interfaces.d/{eth0,wlan0}` — written by `sbin/setnetwork` (not by the CGI directly), and applied by nothing but the boot script's `ifup`: a saved address exists nowhere else until the camera restarts. So `network.cgi` draws its **form** from the file (what it edits) and its **Current connection** card from the kernel (what is running), and while the two disagree it raises the restart banner by setting `restart_pending` before including the header — judged on every draw, so it clears itself on a restart or on a save that puts things back. Drawing the form from the kernel too, as it used to, showed a static address that had just been saved as still absent, visible only in the file dumped under Diagnostics (OpenIPC/majestic#311).
 - `/etc/crontabs/root` — extensions add/remove their own lines with `sed -i /name/d` then append.
 - `/etc/webui/ircut-scan.json` — the pin scan's journal: the pair about to be driven, written and `sync`ed **before** any register is touched. It is in `/etc` rather than `/tmp` because its whole purpose is to survive the pad that stops the camera answering (see `j/gpio.cgi` below).
 - `/tmp/webui/` — scratch (sysinfo, schema cache, flash log, signature, `ircut-pulse.lock`).
-- `/tmp/system-reboot` — sentinel file; presence triggers the "restart required" banner in `header.cgi`.
+- `/tmp/system-reboot` — sentinel file; presence triggers the "restart required" banner in `header.cgi`. A page that can *see* its pending state on every draw sets `restart_pending` before the include instead, since a flag nothing clears goes on announcing a change that has since been undone.
 - U-Boot env via `fw_printenv -n` / `fw_setenv` for `ethaddr`, `wlanssid`, `wlanpass`, `upgrade`, `sensor`, `soc`, and the PTZ family `ptz_control`/`ptz_gpio`/`ptz_port`/`ptz_speed`/`ptz_profile`/`ptz_caps` (legacy aliases `gpio_motors`, `ptz`).
 
 ### Talking to Majestic
