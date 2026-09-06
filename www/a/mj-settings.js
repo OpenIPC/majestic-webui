@@ -3741,6 +3741,12 @@
 	// gets, for the same reason, and deliberately NOT by hiding or disabling
 	// them — the value is real, it is what is causing the surprise, and it has
 	// to stay findable and clearable. Hiding it would only move the surprise.
+	//
+	// A daemon that declares the precedence itself (OpenIPC/majestic#314) puts
+	// the note on these fields through the ordinary x-requires path, from its
+	// own schema; this table then stands down for them, since two notes under
+	// one control is the clutter #325 objected to. It stays for an older
+	// daemon, whose schema says nothing about it.
 	const NIGHT_MECH = {
 		'nightMode.minThreshold': 'thresholds',
 		'nightMode.maxThreshold': 'thresholds',
@@ -3769,6 +3775,10 @@
 			const mech = NIGHT_MECH[f.dot];
 			if (!mech || !f.p) return;
 			let note = f.p.querySelector('.mj-night-inert');
+			if (f.schema && f.schema['x-requires']) {
+				if (note) note.remove();
+				return;
+			}
 			// An empty control misleads nobody; only a filled-in one that is
 			// being ignored needs saying.
 			const v = f.getValue();
@@ -4391,11 +4401,13 @@
 		// Where it does happen to share the page, an unsaved edit to it has to
 		// repaint the warning, exactly as it moves a visibleWhen row.
 		for (const u of state.reqUpdaters || []) {
-			// Every field the condition consults, since `any` names more than
-			// one. Missing the second of them would leave the warning correct
-			// on mount and stale under exactly the edit that clears it.
-			const fields = Array.isArray(u.req.any)
-				? u.req.any.map(a => a && a.field).filter(Boolean)
+			// Every field the condition consults, since `any` and `all` name
+			// more than one. Missing the second of them would leave the warning
+			// correct on mount and stale under exactly the edit that clears it.
+			const list = Array.isArray(u.req.any) ? u.req.any
+				: Array.isArray(u.req.all) ? u.req.all : null;
+			const fields = list
+				? list.map(a => a && a.field).filter(Boolean)
 				: [u.req.field];
 			for (const dot of fields) {
 				const ctrl = byDot[dot];
@@ -5063,12 +5075,14 @@
 		// disabling it: the setting is a legitimate thing to want, it is
 		// remembered, and it starts working the moment its requirement is met.
 		// Hiding it would only move the surprise.
-		// `.field` or `.any`: a requirement carries one controlling field, or a
-		// list of alternatives for a rule that only bites when two settings
-		// coincide. Both shapes are decided by mj-requires.js; this only has to
-		// recognise that there is a requirement to paint.
+		// `.field`, `.any` or `.all`: a requirement carries one controlling
+		// field, a list of alternatives for a rule that only bites when two
+		// settings coincide, or a list that must all hold for a setting that
+		// several others outrank. Every shape is decided by mj-requires.js;
+		// this only has to recognise that there is a requirement to paint.
 		if (!live && sub['x-requires']
-			&& (sub['x-requires'].field || Array.isArray(sub['x-requires'].any))) {
+			&& (sub['x-requires'].field || Array.isArray(sub['x-requires'].any)
+				|| Array.isArray(sub['x-requires'].all))) {
 			const req = sub['x-requires'];
 			const warn = el('div', 'hint mj-requires');
 			const paint = () => {

@@ -26,6 +26,28 @@
 //                   stream is published instead."
 //     }
 //
+// A second shape carries a precedence rather than a substitution -- the
+// day/night keys, where a sensor pin outranks the raw threshold pair, which
+// outranks the automatic policy, and a camera with thresholds left over from
+// earlier experimentation silently ignored a night gain multiple and both
+// automatic delays (OpenIPC/majestic#314, from #325 here):
+//
+//     "x-requires": {
+//       "whenSet": true,
+//       "all": [
+//         { "field": "nightMode.lightSensorPin", "unset": true,
+//           "message": "Not in use while a daylight sensor pin is set: ..." },
+//         { "field": "nightMode.minThreshold", "unset": true, "message": "..." },
+//         { "field": "nightMode.maxThreshold", "unset": true, "message": "..." }
+//       ]
+//     }
+//
+// Every condition must hold and the first unmet one supplies the message, so
+// the list is in precedence order; `whenSet` scopes the rule to the annotated
+// field holding a value, as `when` scopes a boolean. There is no top-level
+// `field`, so a build that predates `all` reads it as satisfied and says
+// nothing -- the same degradation `any` chose.
+//
 // This module is the decision, kept away from the DOM so it can be tested:
 // getting it wrong is silent in the worst way, because a warning that never
 // draws looks exactly like a camera doing what it was told.
@@ -48,8 +70,20 @@
 	// screen that nothing on the page can clear, nor hide a row it does not
 	// understand how to reveal, so a newer schema degrades to silence rather
 	// than to noise.
+	// Has a field no value? Three spellings of one fact, from three sources: a
+	// key absent from the config resolves to undefined, a leaf the camera has
+	// removed comes back as null, and an emptied number control reads ''. The
+	// number 0 is none of them -- pad 0 is a real GPIO, and #273 was filed from
+	// exactly a clear that had become 0.
+	function isUnset(v) {
+		return v === undefined || v === null || v === '';
+	}
+
 	function matches(cond, v) {
 		if (!cond) return true;
+		// Before the stringify below: String(undefined) is 'undefined', a value,
+		// and an absent field would count as set.
+		if ('unset' in cond) return isUnset(v) === Boolean(cond.unset);
 		v = String(v);
 		if ('equals' in cond) return v === String(cond.equals);
 		if ('notEquals' in cond) return v !== String(cond.notEquals);
@@ -95,12 +129,24 @@
 	//   An unresolvable controlling field. If no lookup can answer, a warning
 	//   would be a definite claim made from no data, and nothing on the page
 	//   could clear it. Same reasoning as an unknown operator holding.
-	function met(req, lookup) {
-		if (!req || (!req.field && !Array.isArray(req.any))) return true;
+	// The condition that fails, or null when the requirement is satisfied.
+	// A condition rather than a boolean because `all` carries a message per
+	// condition, and notice() has to know which one to show.
+	function unmet(req, lookup) {
+		if (!req || (!req.field && !Array.isArray(req.any) && !Array.isArray(req.all))) return null;
 		lookup = lookup || {};
+		const self = () => (typeof lookup.self === 'function' ? lookup.self() : undefined);
 		if (req.when !== undefined) {
-			const self = typeof lookup.self === 'function' ? lookup.self() : undefined;
-			if (self === undefined || String(self) !== String(req.when)) return true;
+			const s = self();
+			if (s === undefined || String(s) !== String(req.when)) return null;
+		}
+		// `whenSet` is `when` for a field with no fixed value: the rule applies
+		// while the annotated field holds one. An empty control that is being
+		// ignored misleads nobody, and a missing self lookup is satisfied for
+		// the same reason `when` treats it so.
+		if (req.whenSet) {
+			const s = self();
+			if (s === undefined || isUnset(s)) return null;
 		}
 
 		// A list of alternatives, satisfied when any one of them holds.
@@ -117,30 +163,56 @@
 		// requirement outright, because a warning drawn from no data is one
 		// nothing on the page can clear.
 		if (Array.isArray(req.any)) {
-			if (!req.any.length) return true;
-			return req.any.some(function (alt) {
+			if (!req.any.length) return null;
+			const ok = req.any.some(function (alt) {
 				if (!alt || !alt.field) return true;
 				const av = resolve(alt.field, lookup);
 				if (av === undefined) return true;
 				return matches(alt, av);
 			});
+			return ok ? null : req;
+		}
+
+		// A list every condition of which must hold: a precedence, where the
+		// annotated setting is outranked by any one of several others. The
+		// first that fails is the answer, so the list's order is the order of
+		// precedence and the note names what actually won. Same fail-open rule
+		// per condition: one whose field nothing can answer for holds.
+		if (Array.isArray(req.all)) {
+			for (const cond of req.all) {
+				if (!cond || !cond.field) continue;
+				const cv = resolve(cond.field, lookup);
+				if (cv === undefined) continue;
+				if (!matches(cond, cv)) return cond;
+			}
+			return null;
 		}
 
 		const v = resolve(req.field, lookup);
-		if (v === undefined) return true;
-		return matches(req, v);
+		if (v === undefined) return null;
+		return matches(req, v) ? null : req;
+	}
+
+	// Is the requirement satisfied? See unmet() for the rules.
+	function met(req, lookup) {
+		return unmet(req, lookup) === null;
 	}
 
 	// What to tell the operator, or '' when there is nothing to say. A
 	// condition that is unmet but carries no message stays silent: an empty
 	// warning box is worse than no warning box, and the message is the whole
-	// content -- this module has no idea what the field means.
+	// content -- this module has no idea what the field means. A condition
+	// inside `all` carries its own; the requirement's is the fallback.
 	function notice(req, lookup) {
-		if (met(req, lookup)) return '';
-		return (req && req.message) || '';
+		const failed = unmet(req, lookup);
+		if (!failed) return '';
+		return failed.message || (req && req.message) || '';
 	}
 
-	const api = { matches: matches, resolve: resolve, met: met, notice: notice };
+	const api = {
+		matches: matches, resolve: resolve, met: met, unmet: unmet,
+		notice: notice, isUnset: isUnset,
+	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticRequires = api;
 })();

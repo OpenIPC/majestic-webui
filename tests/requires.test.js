@@ -294,5 +294,86 @@ group('a requirement satisfied by any one of several alternatives');
 		req.met({ when: 'true', message: 'x' }, { self: () => true }) === true);
 }
 
+group('a precedence: inert while any of several fields is set (majestic#314)');
+{
+	// The shapes majestic emits for the day/night keys, verbatim. No top-level
+	// field, when or message: each condition carries its own, the first unmet
+	// one is shown, and a build that predates `all` reads the whole thing as
+	// satisfied.
+	const PIN_MSG_T = 'Not in use while a daylight sensor pin is set: the pin decides day and night. Clear the pin for the thresholds to take over.';
+	const PIN_MSG_A = 'Not in use while a daylight sensor pin is set: the pin decides day and night. Clear the pin for automatic mode.';
+	const PAIR_MSG = 'Not in use while a sensor threshold is set. Clear both thresholds for automatic mode.';
+	const THRESHOLD = { whenSet: true, all: [
+		{ field: 'nightMode.lightSensorPin', unset: true, message: PIN_MSG_T },
+	] };
+	const AUTO = { whenSet: true, all: [
+		{ field: 'nightMode.lightSensorPin', unset: true, message: PIN_MSG_A },
+		{ field: 'nightMode.minThreshold', unset: true, message: PAIR_MSG },
+		{ field: 'nightMode.maxThreshold', unset: true, message: PAIR_MSG },
+	] };
+	const night = (self, nm) => page(self, { nightMode: nm });
+
+	// "Unset" is a fact about presence, not a value: an absent key, a removed
+	// leaf and an emptied control all say it, and 0 -- pad 0 -- does not.
+	check('unset: an absent key', req.matches({ unset: true }, undefined));
+	check('unset: a removed leaf', req.matches({ unset: true }, null));
+	check('unset: an emptied control', req.matches({ unset: true }, ''));
+	check('unset: pad 0 is a value', !req.matches({ unset: true }, 0));
+	check('unset: so is the text "0"', !req.matches({ unset: true }, '0'));
+	check('unset: so is false', !req.matches({ unset: true }, false));
+	check('unset false asks for a value',
+		req.matches({ unset: false }, 5) && !req.matches({ unset: false }, ''));
+
+	// The table from the issue: which set of controls is live.
+	const pair = { minThreshold: 2000, maxThreshold: 14000 };
+	check('nothing set: automatic mode is live', req.met(AUTO, night(33, { lightMonitor: true })));
+	check('thresholds set: the night gain is not', !req.met(AUTO, night(33, pair)));
+	check('and the note names the pair', req.notice(AUTO, night(33, pair)) === PAIR_MSG);
+	check('one threshold is enough to outrank it',
+		req.notice(AUTO, night(33, { maxThreshold: 14000 })) === PAIR_MSG);
+	check('thresholds with no pin are live', req.met(THRESHOLD, night(2000, pair)));
+	check('a pin outranks the thresholds',
+		req.notice(THRESHOLD, night(2000, { lightSensorPin: 61 })) === PIN_MSG_T);
+	check('and the automatic set',
+		req.notice(AUTO, night(33, { lightSensorPin: 61, minThreshold: 2000 })) === PIN_MSG_A);
+	check('the first unmet condition wins, in list order',
+		req.unmet(AUTO, night(33, { lightSensorPin: 61, minThreshold: 2000 })).field
+			=== 'nightMode.lightSensorPin');
+	check('pad 0 counts as a pin', !req.met(THRESHOLD, night(2000, { lightSensorPin: 0 })));
+
+	// whenSet: an empty control that is being ignored misleads nobody, while
+	// a defaulted one holds a value and is told.
+	check('an empty night gain says nothing', req.met(AUTO, night('', pair)));
+	check('nor an absent one', req.met(AUTO, night(undefined, { minThreshold: 2000 })));
+	check('a defaulted delay is set, and is told',
+		req.notice(AUTO, night(60, { lightSensorPin: 61 })) === PIN_MSG_A);
+
+	// The controlling fields share the page with these, so an unsaved edit
+	// to the pin moves the note before the save, exactly as for visibleWhen.
+	check('a pin emptied on the page lifts the note', req.met(THRESHOLD, {
+		self: () => 2000,
+		mounted: (dot) => (dot === 'nightMode.lightSensorPin' ? '' : undefined),
+		saved: (dot) => (dot === 'nightMode.lightSensorPin' ? 61 : undefined),
+	}));
+	check('a pin typed on the page paints it', !req.met(THRESHOLD, {
+		self: () => 2000,
+		mounted: (dot) => (dot === 'nightMode.lightSensorPin' ? '61' : undefined),
+		saved: () => undefined,
+	}));
+
+	// Fail-open, per condition and for the whole, and the older shapes keep
+	// their meaning.
+	check('an unresolvable field holds', req.met(AUTO, { self: () => 33 }));
+	check('an empty list is satisfied', req.met({ whenSet: true, all: [] }, { self: () => 33 }));
+	check('a missing self lookup is satisfied', req.met(AUTO, { saved: () => 61 }));
+	check('a condition with no message falls back to the requirement\'s',
+		req.notice({ whenSet: true, message: 'fallback', all: [{ field: 'a.b', unset: true }] },
+			{ self: () => 1, saved: () => 1 }) === 'fallback');
+	check('the substream shape is unchanged',
+		req.notice(SUBSTREAM, saved({ video1: { enabled: false }, outgoing: { substream: true } }))
+			=== SUBSTREAM.message);
+	check('an old build\'s reading -- no field, no any -- would be silence',
+		!AUTO.field && !Array.isArray(AUTO.any));
+}
 
 done();
