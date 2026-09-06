@@ -89,6 +89,31 @@ function mjConfig() {
 	return _mjCfg;
 }
 
+
+// What this camera can show, from the daemon rather than from a guess.
+//
+// A camera is not always one camera: majestic can carry a second sensor
+// (Rockchip) or publish a USB webcam as a second camera, both addressed as
+// stream_id = 3*camera + subtype. Nothing here can work that out from the
+// config — usbcam.enabled says a source was asked for, not that it came up, and
+// a second sensor has no key at all — so the daemon is asked.
+//
+// Cached and invalidated exactly like mjConfig(), including the load-bearing
+// `_mjSources = null` in the catch: a transient failure at page load must not
+// cache as "one camera" for the life of the page.
+let _mjSources;
+function mjSources() {
+	if (!_mjSources)
+		_mjSources = apiFetch('/api/v1/sources', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.json() : Promise.reject(r.status))
+			.then(j => (j && Array.isArray(j.sources)) ? j.sources : [])
+			.catch(() => {
+				_mjSources = null;
+				return [];
+			});
+	return _mjSources;
+}
+
 function mjGet(cfg, dot) {
 	return dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg);
 }

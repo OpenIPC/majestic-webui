@@ -160,9 +160,29 @@ window.MajesticTransport = (function () {
 			!!(w && w.available && w.handles && w.handles(codec));
 	}
 
+	// Whether the MJPEG rung is worth trying for what is on screen.
+	//
+	// Two quite different reasons to reach it, and the gate is the same one:
+	// the camera has an MJPEG stream for this source. Either the ladder above
+	// gave up — nothing here can decode what this source encodes — or the
+	// source has never had anything else, which is the usual state of a USB
+	// webcam. `stream` is the entry from /api/v1/sources; a caller with no
+	// answer yet passes nothing and gets false, because offering a picture the
+	// camera may not serve is worse than offering none.
+	//
+	// It lives beside softwareRungFor() rather than in either page for the
+	// reason that one does: two nextRung() walks read it, and a gate that
+	// disagreed between them would be a transport that works on one page.
+	function multipartRungFor(stream) {
+		const s = window.MajesticSources;
+		return !!(stream && s && s.family(stream) === 'multipart' &&
+			window.MajesticMultipart && window.MajesticMultipart.available);
+	}
+
 	function impl(kind) {
 		return kind === 'webrtc' ? window.MajesticWebRTC
 			: kind === 'wasm' ? window.MajesticWasm
+			: kind === 'multipart' ? window.MajesticMultipart
 			: window.MajesticVideo;
 	}
 
@@ -287,6 +307,7 @@ window.MajesticTransport = (function () {
 		impl: impl,
 		softwareRungFor: softwareRungFor,
 		softwareRungForCodec: softwareRungForCodec,
+		multipartRungFor: multipartRungFor,
 		iceServers: iceServers,
 		chosenStream: chosenStream,
 		chooseStream: chooseStream,

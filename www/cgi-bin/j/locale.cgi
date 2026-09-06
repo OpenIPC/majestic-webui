@@ -22,3 +22,5 @@ mj_webrtc=STUN / TURN
 mj_watchdog=Watchdog
 mj_sip=SIP
 mj_cloud=Cloud (WebRTC)
+mj_source_sensor=Sensor
+mj_source_usb=USB camera

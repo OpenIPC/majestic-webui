@@ -448,7 +448,19 @@ pre() {
 }
 
 preview() {
+	# The source names, from the camera's own locale file. The daemon reports a
+	# KIND ('sensor' / 'external') and refuses to name it — it has no business
+	# deciding what language an operator reads — so the naming happens here,
+	# where every other operator-facing string on this camera is translated.
+	#
+	# Underscores in the key, unlike the settings-tree labels beside them:
+	# these name a source rather than a config section, so they are not in that
+	# namespace and must not collide with a section called `source`.
+	local mj_src_labels
+	mj_src_labels=$(sed -n 's/^mj_\(source_[A-Za-z0-9_]*\)=\(.*\)/"\1":"\2"/p' \
+		j/locale.cgi 2>/dev/null | paste -sd,)
 	cat <<EOF
+<script type="application/json" id="mj-preview-boot">{"labels":{${mj_src_labels}}}</script>
 <div class="mj-player" id="mj-player">
 	<!-- The stage: everything lives ON the video, and the stage is the page.
 	     It takes the whole window under the navbar — no container, no card, no
@@ -489,7 +501,16 @@ preview() {
 		     which a camera on plain HTTP is not -- hence a canvas. -->
 		<canvas id="live-canvas" class="mj-stage-media" style="display:none"></canvas>
 		<canvas id="live-canvas-b" class="mj-stage-media" style="display:none"></canvas>
+		<!-- And the MJPEG rung paints here. Two, for the same reason as the
+		     videos and the canvases: it is a transport now rather than the
+		     terminal fallback it used to be, so it is staged and promoted like
+		     any other, and a trial has to prove itself on an idle element.
+		     It stopped being a fallback because a USB webcam publishing MJPEG
+		     is a SOURCE — for most of them the only thing they publish — so
+		     this picture has to be reachable as a first choice, for a camera
+		     other than the on-board one. -->
 		<img id="live-mjpeg" class="mj-stage-media" alt="" style="display:none">
+		<img id="live-mjpeg-b" class="mj-stage-media" alt="" style="display:none">
 		<!-- Shown only when there is no MJPEG fallback to show, so it carries
 		     both halves: why the stream could not be played (preview-page.js
 		     rewrites the span from the player's reason code) and the one thing
@@ -499,7 +520,12 @@ preview() {
 		     moment the fallback works. -->
 		<p id="mj-note" class="alert alert-warning mj-stage-alert" style="display:none">
 			<span id="mj-note-why">Your browser can't play the live video stream.</span>
-			<a href="camera.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
+			<!-- Hidden by preview-page.js when the camera already has a JPEG
+			     stream: the chain reaches it as a transport of its own now, so
+			     if the page is showing this note that stream was tried and
+			     failed, and telling someone to switch on what is already on is
+			     how a page loses their trust. -->
+			<a id="mj-note-act" href="camera.cgi?tab=jpeg">Enable JPEG</a> for an MJPEG fallback.
 		</p>
 		<!-- The other half of "there is nothing to see", and the one #mj-note
 		     cannot reach: a camera on the wrong sensor driver PLAYS, so the
@@ -646,6 +672,16 @@ preview() {
 					<span class="mj-tog-t">Area</span>
 				</label>
 			</span>
+
+			<!-- Which camera. Empty, and built by preview-page.js from
+			     /api/v1/sources, because most cameras have exactly one source
+			     and markup for a chooser nobody can use is markup that has to
+			     be hidden correctly for ever — the same reasoning
+			     cameras-switch.js applies to the device picker. A camera with a
+			     second sensor or a USB webcam grows the buttons; every other
+			     one leaves this empty and it takes no room. -->
+			<span class="mj-hud mj-seg" role="group" aria-label="Source"
+				id="mj-source" hidden></span>
 
 			<span class="mj-hud mj-seg" role="group" aria-label="Stream">
 				<input type="radio" class="mj-seg-in" name="mj-stream" id="mj-stream-0" autocomplete="off" checked>
