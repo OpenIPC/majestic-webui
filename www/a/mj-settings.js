@@ -279,6 +279,7 @@
 	function absorbed(sec) { return treeOf().absorbed(sec); }
 	function absorbedSections() { return treeOf().absorbedSections(); }
 	function leafFields(id) { return treeOf().leafFields(id); }
+	function sectionGroups(sec) { return TREE && TREE.sectionGroups(sec); }
 	function groupHasLive(g) {
 		const o = treeOf().owner();
 		return !!(o && g && o.id === g.id);
@@ -808,6 +809,7 @@
 		// dropped with the fields they paint: a stale closure would keep
 		// writing into a row that is no longer in the document
 		state.reqUpdaters = [];
+		state.legacyBox = null;
 
 		// Exactly one section on the page, so it gets the whole width — and its
 		// fields are dealt into the two columns of .mj-cols, rather than run
@@ -852,6 +854,10 @@
 			// all rows into the first column; layoutCols() deals the tail over
 			// into the second once applyVisibility() has settled what is on screen
 			renderProps(cols.firstElementChild, sec, props);
+			// After the rows exist and before layoutCols deals them, so the
+			// switch is dealt with everything else and the hidden set is
+			// already settled when the cut is chosen.
+			if (sec === 'nightMode') mountLegacy(cols.firstElementChild);
 		}
 
 		// Save and Apply share this bar, and each is present only while its own
@@ -5853,8 +5859,159 @@
 	const PIN_DOTS = {};
 	PIN_KEYS.forEach((k) => { PIN_DOTS['nightMode.' + k] = 1; });
 
+	// The polarity of a pad is a fact about how the board is wired, and the map
+	// is where wiring lives — so these ride the pin-map pattern too: real
+	// fields, rendered hidden, driven by a chip on the role they belong to.
+	// Between them they carried 375 characters of hint explaining WHEN the
+	// setting applies; the chip's presence says it instead (#325).
+	const POLARITY = {
+		irCutPin1: 'irCutSingleInvert',
+		backlightPin: 'backlightInvert',
+		lightSensorPin: 'lightSensorInvert',
+	};
+	// Derived from mj-tree's list rather than restated here, so the invariant
+	// in tests/tree.test.js is checking the set this page actually hides.
+	const MAP_DOTS = {};
+	((TREE && TREE.mapDriven('nightMode')) || []).forEach((k) => {
+		MAP_DOTS['nightMode.' + k] = 1;
+	});
+
 	function pinField(key) {
 		return state.fields.filter((f) => f.dot === 'nightMode.' + key)[0];
+	}
+
+	// A two-state chip over one hidden boolean. It reads the field rather than
+	// keeping a copy, so a save, a refresh or a per-row reset moves it without
+	// anything having to remember to.
+	// The caller resolves the field first and does not build a chip without
+	// one, so this reads it straight: a chip that cannot write is worse than no
+	// chip, because it still states a signal level.
+	function polarityChip(pol, inert) {
+		const f = pinField(pol.invert);
+		const b = el('button', 'mj-pol' + (inert ? ' mj-pol-off' : ''));
+		b.type = 'button';
+		const paint = () => {
+			const on = !toBool(f.getValue());
+			b.textContent = on ? pol.on : pol.off;
+			b.title = inert
+				? 'Not in use while both coils are wired. Press to clear it.'
+				: 'Press to flip: ' + (on ? pol.off : pol.on);
+		};
+		b.addEventListener('click', (e) => {
+			// The row beneath selects the pad; flipping polarity is not that.
+			e.stopPropagation();
+			f.setValue(toBool(f.getValue()) ? 'false' : 'true');
+			paint();
+			updateDirty();
+		});
+		paint();
+		return b;
+	}
+
+	// ── the Legacy switch ───────────────────────────────────────────────────
+	//
+	// Two mechanisms decide day/night and the camera runs exactly one of them:
+	// a pair of raw sensor-gain thresholds, or the calibration-free automatic
+	// mode. Both sets of controls used to sit on the page together, which is the
+	// confusion #325 is about — the reporter filled in three automatic settings
+	// their camera was ignoring, and nothing said so.
+	//
+	// The switch stores nothing of its own. Legacy IS in use when either
+	// threshold holds a value, because that is what the camera decides on; a
+	// flag beside it would be a second copy of a fact the daemon already keeps,
+	// and a second copy needs an invalidation rule (#367).
+	const LEGACY_KEYS = ['minThreshold', 'maxThreshold', 'monitorDelay'];
+	const AUTO_KEYS = ['autoNightGain', 'autoDayGain', 'autoNightDelay', 'autoDayDelay'];
+
+	function legacyOn() {
+		return ['minThreshold', 'maxThreshold']
+			.some((k) => { const f = pinField(k); return f && String(f.getValue()) !== ''; });
+	}
+
+	// Rows are shown and hidden through `style.display`, the channel visibleWhen
+	// uses, not the `hidden` attribute: paintStock skips a display:none row and
+	// does not skip a hidden one, so the "N of M off stock" count stays true.
+	// layoutCols is deliberately NOT re-run — the deal is decided at mount and
+	// on resize, and re-dealing under a toggle used to move the control being
+	// edited across the fold (#189).
+	function showLegacy(on) {
+		AUTO_KEYS.forEach((k) => { const f = pinField(k); if (f) f.p.style.display = on ? 'none' : ''; });
+		LEGACY_KEYS.forEach((k) => { const f = pinField(k); if (f) f.p.style.display = on ? '' : 'none'; });
+		paintStock();
+	}
+
+	// Turning legacy OFF empties BOTH thresholds — never one. A half-pair is
+	// not a lighter version of the same thing: the camera installs no monitor at
+	// all and reports the same source 0 a SoC with no exposure state reports
+	// (#370). Emptying rather than deleting is what makes this an ordinary
+	// staged edit: they are real fields, so clearsToNull sends null in the same
+	// batch, stillSet checks the removal landed, and the save bar appears just
+	// as it would for a typed number.
+	function stageLegacy(on) {
+		if (on) return;
+		['minThreshold', 'maxThreshold'].forEach((k) => {
+			const f = pinField(k);
+			if (f && String(f.getValue()) !== '') f.setValue('');
+		});
+	}
+
+	function mountLegacy(container) {
+		const host = pinField('lightMonitor');
+		if (!host) return;
+		const id = 'mjf-nightMode-legacy';
+		const p = el('p', 'boolean mj-row');
+		// The same shape renderField gives a boolean once its reset wrap has run:
+		// label above, then the switch and its lit word together inside
+		// .mj-ctl > .mj-ctl-in. Built rather than borrowed because this row has
+		// no config key of its own and so no ↺ to sit beside — but it has to
+		// line up with the rows around it, and hand-rolling the inner markup
+		// alone left the word wrapped under the switch.
+		p.innerHTML =
+			'<label for="' + id + '" class="form-label">Legacy settings</label>' +
+			'<span class="mj-ctl"><span class="mj-ctl-in">' +
+			'<span class="form-check form-switch">' +
+			'<input type="checkbox" id="' + id + '" class="form-check-input">' +
+			'</span>' +
+			'<span class="mj-state" aria-hidden="true"></span>' +
+			'</span></span>' +
+			'<div class="hint text-secondary">Off: the camera decides from its own ' +
+			'exposure. On: the older pair of raw sensor-gain thresholds.</div>';
+		const box = p.querySelector('input');
+		const word = p.querySelector('.mj-state');
+		const paint = () => {
+			word.textContent = box.checked ? 'On' : 'Off';
+			word.classList.toggle('mj-state-on', box.checked);
+		};
+		box.addEventListener('change', () => {
+			paint();
+			stageLegacy(box.checked);
+			showLegacy(box.checked);
+			updateDirty();
+		});
+		box.checked = legacyOn();
+		paint();
+		host.p.parentNode.insertBefore(p, host.p.nextSibling);
+		state.legacyBox = box;
+		showLegacy(box.checked);
+	}
+
+	// refresh() re-reads the config and pushes it into every control, so the
+	// switch has to be re-derived from what came back — otherwise a save, or a
+	// per-row reset of a threshold, leaves it stating the opposite of what the
+	// camera now holds.
+	function syncLegacy() {
+		const box = state.legacyBox;
+		if (!box || !document.body.contains(box)) return;
+		// Re-derived, never re-fired: the change handler STAGES a clear, and a
+		// refresh that replayed it would empty two thresholds the operator had
+		// just saved.
+		box.checked = legacyOn();
+		const word = box.closest('.mj-row').querySelector('.mj-state');
+		if (word) {
+			word.textContent = box.checked ? 'On' : 'Off';
+			word.classList.toggle('mj-state-on', box.checked);
+		}
+		showLegacy(box.checked);
 	}
 
 	// Day / Night has THREE mechanisms that decide the same thing, and the
@@ -6095,7 +6252,13 @@
 			host.innerHTML = '<p class="small text-secondary mb-0">' +
 				'Could not read this camera\'s GPIO list, so the pin map is not available. ' +
 				'The pin numbers below can still be set by hand.</p>';
-			PIN_KEYS.forEach((k) => { const f = pinField(k); if (f) f.p.hidden = false; });
+			// Every field the map drives comes back as an ordinary row, the
+			// polarity switches included — otherwise the three inverts would be
+			// unreachable on a camera whose pad list cannot be read.
+			Object.keys(MAP_DOTS).forEach((d) => {
+				const f = state.fields.filter((x) => x.dot === d)[0];
+				if (f) f.p.hidden = false;
+			});
 			layoutCols();
 			return;
 		}
@@ -6138,7 +6301,43 @@
 				h.textContent = r.hint;
 				t.appendChild(h);
 				row.appendChild(t);
+				// The polarity chip: what this pad does in its active state, in
+				// words, with a press to flip it. It replaces a boolean called
+				// "inverted" and the paragraph that had to explain what
+				// inverting meant — you read that the lamp lights on HIGH, see
+				// it lit at noon, and press (#325).
+				//
+				// Only where a pad is actually assigned: polarity is a fact
+				// about a wire, and there is no wire yet. The IR-cut chip is
+				// further limited to single-coil mode, so the control's presence
+				// carries the rule the daemon states in its own hint.
 				const onChip = set && map.has(a[r.key]);
+				// The chip is the only way to reach a polarity switch now, so
+				// it appears wherever one is SET as well as wherever it
+				// applies. Hiding a stored setting is how a camera ends up
+				// holding an invert nobody can find: with both coils wired the
+				// single-pin switch does nothing, diagnose() says so, and that
+				// sentence would otherwise point at a control that is not on
+				// the page at all.
+				const pol = r.polarity;
+				const polF = pol && pinField(pol.invert);
+				const applies = !pol || !pol.single || a.irCutPin2 === undefined;
+				const stored = polF && toBool(polF.getValue());
+				// Deliberately `set` and not `onChip`: a pin this kernel does
+				// not report is still a pin the config names, and its polarity
+				// is still stored. Gating the chip on the pad being drawn left
+				// a yaml carried from another board holding an invert with no
+				// control anywhere on the page to see or clear it — the same
+				// stranding the `stored` arm above exists to prevent, reached
+				// by a different door.
+				//
+				// polF is required because the chip edits that field and
+				// nothing else: without it the press would return silently
+				// while the words went on naming a signal level, which is a
+				// control that lies rather than one that is missing.
+				if (pol && polF && (set || stored) && (applies || stored)) {
+					row.appendChild(polarityChip(pol, !applies));
+				}
 				const pin = el('span', 'mj-ircut-rpin');
 				pin.textContent = set ? String(a[r.key]) : 'not set';
 				row.appendChild(pin);
@@ -6389,6 +6588,14 @@
 	// screen (a visibleWhen-hidden row is not one of the section's N from here)
 	// and over fields the schema records a default for, so the sentence is
 	// provable: a key with no recorded default can never be shown to be either.
+	//
+	// Both hiding channels count, and they have to: a row goes off screen
+	// either by inline display (visibleWhen) or by the hidden attribute (a
+	// field some other control drives — the pin map's pads and their polarity
+	// switches). Reading only the first put three defaulted booleans nobody
+	// can see into the denominator of a sentence that promises to count the
+	// rows on screen, and let a flipped polarity register as a row off stock
+	// that the reader cannot find to reset.
 	// Measured against the default rather than against the last save, so it goes
 	// on saying "off stock" after Save — it is a fact about the camera.
 	function paintStock() {
@@ -6396,7 +6603,7 @@
 		if (!note) return;
 		let shown = 0, known = 0, off = 0;
 		for (const f of state.fields) {
-			if (!f.p || f.p.style.display === 'none') continue;
+			if (!f.p || f.p.style.display === 'none' || f.p.hidden) continue;
 			shown++;
 			if (!f.schema || !Object.prototype.hasOwnProperty.call(f.schema, 'default')) continue;
 			known++;
@@ -6423,14 +6630,60 @@
 
 	// `skip` is a set of dots a caller has already mounted elsewhere on the same
 	// leaf, so the ordinary rows do not draw them a second time.
-	function renderProps(container, basePath, props, skip) {
+	// The group head both an object subtree and a flat section's heading use:
+	// micro-caps name and a hairline to the column edge, rather than a 20px
+	// grey <h5> that outweighed every label under it.
+	function head(container, label) {
+		const h = el('div', 'mj-live-grp-head');
+		const t = el('span', 'mj-cap');
+		t.textContent = label;
+		h.appendChild(t);
+		h.appendChild(el('span', 'mj-live-rule'));
+		container.appendChild(h);
+	}
+
+	// The named keys of `props`, in the order they were named.
+	function pick(props, order) {
+		const out = {};
+		order.forEach((k) => { if (k in props) out[k] = props[k]; });
+		return out;
+	}
+
+	// `flat` renders the given properties with no group walk. It is what the
+	// group walk itself calls, so a section that has headings does not re-enter
+	// them for every group and recurse forever.
+	function renderProps(container, basePath, props, skip, flat) {
 		// Scalars first, object subtrees after. An object renders as a labelled
 		// group and everything below its heading reads as part of it, so a scalar
 		// sibling that happens to come later in the schema is captured by it:
 		// isp.blkCnt — memory blocks for the encoder — read as an iris setting,
 		// which is where nobody would look for it.
 		const keys = Object.keys(props);
-		const ordered = keys.filter(k => !isGroup(props[k])).concat(keys.filter(k => isGroup(props[k])));
+		let ordered = keys.filter(k => !isGroup(props[k])).concat(keys.filter(k => isGroup(props[k])));
+
+		// A flat section can still be grouped. nightMode has no object subtrees,
+		// so every one of its nineteen controls arrived in one undifferentiated
+		// deal; mj-tree.js names the headings and their order, and they are
+		// drawn with the same micro-caps head an object group gets, so a reader
+		// cannot tell the two apart. Anything the map does not name is rendered
+		// after the last heading rather than dropped — a key the daemon adds
+		// tomorrow appears, instead of silently not being there.
+		const secGroups = flat ? null : sectionGroups(basePath);
+		if (secGroups) {
+			const named = new Set();
+			secGroups.forEach(g => g.keys.forEach(k => named.add(k)));
+			for (const g of secGroups) {
+				const mine = g.keys.filter(k => keys.indexOf(k) >= 0);
+				// A heading with nothing under it is furniture; a build without
+				// these keys should not grow an empty rule.
+				if (!mine.some(k => !EXCLUDE.has(basePath + '.' + k) && !MAP_DOTS[basePath + '.' + k])) continue;
+				head(container, g.label);
+				renderProps(container, basePath, pick(props, mine), skip, true);
+			}
+			ordered = ordered.filter(k => !named.has(k));
+			if (!ordered.length) return;
+		}
+
 		for (const key of ordered) {
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
@@ -6438,15 +6691,7 @@
 			if (lifted().has(dot)) continue;      // mounted on the Live leaf, beside the picture
 			if (skip && skip.has(dot)) continue;
 			if (isGroup(sub)) {
-				// The Live deck's group head, verbatim: micro-caps name and a
-				// hairline to the column edge, rather than a 20px grey <h5> that
-				// outweighed every label under it.
-				const h = el('div', 'mj-live-grp-head');
-				const t = el('span', 'mj-cap');
-				t.textContent = sub.title || titleCase(key);
-				h.appendChild(t);
-				h.appendChild(el('span', 'mj-live-rule'));
-				container.appendChild(h);
+				head(container, sub.title || titleCase(key));
 				renderProps(container, dot, sub.properties);
 				continue;
 			}
@@ -6456,7 +6701,7 @@
 			// so dirty tracking, Save and the per-row reset keep working on them
 			// without knowing a map exists.
 			const field = renderField(container, dot, key, sub, eff,
-				PIN_DOTS[dot] ? { hidden: true } : undefined);
+				MAP_DOTS[dot] ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -6645,17 +6890,41 @@
 		// heights come from the rows' own boxes rather than from where the last
 		// deal put them, so a given width always picks the same cut however the
 		// rows are arranged when this runs.
-		let best = Infinity, cut = items.length;
-		for (let i = 1; i <= items.length; i++) {
-			// a group heading belongs to the rows under it, so it must not be
-			// left as the last thing in a column
-			if (i < items.length && items[i - 1].classList.contains('mj-live-grp-head')) continue;
-			const n = seen[i];
-			const left = n ? y[n - 1] + rows[n - 1].h + rows[n - 1].mb : 0;
-			const right = n < rows.length ? rows[n].mt + total - y[n] : 0;
-			const taller = Math.max(left, right);
-			if (taller < best) { best = taller; cut = i; }
-		}
+		// A section with headings is cut BETWEEN groups wherever one will do.
+		// Cutting inside a group strands its tail at the top of the second
+		// column under no heading at all — Day / Night's four switching
+		// settings split that way, and the last of them read as belonging to
+		// whatever heading came next (#325). Balance is worth less than a row
+		// sitting under the words that name it.
+		const heads = items.filter(it => it.offsetHeight &&
+			it.classList.contains('mj-live-grp-head')).length;
+		const onlyHeads = heads > 1;
+
+		const choose = (headsOnly) => {
+			let best = Infinity, at = items.length;
+			for (let i = 1; i <= items.length; i++) {
+				// a group heading belongs to the rows under it, so it must not
+				// be left as the last thing in a column
+				if (i < items.length && items[i - 1].classList.contains('mj-live-grp-head')) continue;
+				// ...and the second column should open with one, not with the
+				// remains of the group the first column was in the middle of.
+				if (headsOnly && i < items.length &&
+					!items[i].classList.contains('mj-live-grp-head')) continue;
+				const n = seen[i];
+				const left = n ? y[n - 1] + rows[n - 1].h + rows[n - 1].mb : 0;
+				const right = n < rows.length ? rows[n].mt + total - y[n] : 0;
+				const taller = Math.max(left, right);
+				if (taller < best) { best = taller; at = i; }
+			}
+			return { best, at };
+		};
+
+		// Falling back rather than insisting: a section whose every group is
+		// enormous would otherwise pile the whole thing into one column, which
+		// is worse than a straddled heading.
+		let pick = onlyHeads ? choose(true) : choose(false);
+		if (onlyHeads && (pick.at === items.length || pick.best > total * 0.75)) pick = choose(false);
+		const cut = pick.at;
 		if (cut === a.children.length) return;   // already dealt this way
 
 		// re-parenting blurs whatever control the user is in, which resizing
@@ -7745,6 +8014,7 @@
 		// The pads are only half of it; the role list is drawn from onChange,
 		// which `quiet` just skipped.
 		if (state.ircutRoles) state.ircutRoles();
+		syncLegacy();
 		syncTestBtn();
 		updateDirty();
 	}

@@ -388,9 +388,8 @@
 						'That leaves ' + shadowed.join(' and ') + ' below set ' +
 						'but ignored' +
 						(autoSet ? ', which is why no countdown appears' : '') +
-						'. Each one says so under itself; clearing the ' +
-						'settings that are winning hands day/night back to ' +
-						'automatic mode.',
+						'. Clearing the settings that are winning hands ' +
+						'day/night back to automatic mode.',
 					fix: 'nightMode',
 				});
 			}

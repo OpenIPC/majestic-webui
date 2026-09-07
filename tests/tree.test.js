@@ -213,4 +213,46 @@ group('a group whose sections this build does not have disappears');
 	everyKeyOnce('a group with one section present', t2, one);
 }
 
+// ── Day / Night's own headings ──────────────────────────────────────────────
+//
+// nightMode is flat in the schema, so the page groups it from a map here. The
+// failure is the same silent one this file opens with, one level down: a key
+// named in no group and drawn by no control is a row that is not there, and a
+// section missing a row looks exactly like a section. Reaching it needs a
+// daemon that has just added a setting — which is the one thing a fixture can
+// hold still.
+group('Day / Night: every setting is in a heading or on the pin map');
+{
+	const NM = SCHEMA.properties.nightMode.properties;
+	const groups = TREE.sectionGroups('nightMode');
+	const onMap = TREE.mapDriven('nightMode');
+
+	check('the section has a group map at all', !!groups && groups.length > 0);
+	check('and every group is named', groups.every(g => g.id && g.label && g.keys.length));
+
+	const placed = groups.reduce((acc, g) => acc.concat(g.keys), []);
+	const dupes = placed.filter((k, i) => placed.indexOf(k) !== i);
+	check('no key is in two headings', !dupes.length, dupes.join(', '));
+	const bothWays = placed.filter(k => onMap.indexOf(k) >= 0);
+	check('and none is both a row and drawn by the map', !bothWays.length, bothWays.join(', '));
+
+	const known = new Set(placed.concat(onMap));
+	const orphans = Object.keys(NM).filter(k => !known.has(k));
+	check('every key in the shipped schema is accounted for', !orphans.length,
+		'unplaced: ' + orphans.join(', '));
+
+	// The reverse is deliberately NOT "the map names only keys that exist". It
+	// has to be able to name one the daemon has not shipped yet — this fixture
+	// predates backlightInvert, which a current camera has — and naming one
+	// costs nothing, because a key that is absent simply is not rendered.
+	//
+	// What would cost something is a HEADING left with nothing under it: a
+	// micro-caps name and a rule across the column, introducing no settings.
+	// That is what to assert, and it holds on any schema.
+	const drawn = (g) => g.keys.filter(k => (k in NM) && onMap.indexOf(k) < 0);
+	const empty = groups.filter(g => !drawn(g).length).map(g => g.id);
+	check('no heading is left with nothing under it', !empty.length,
+		'empty: ' + empty.join(', '));
+}
+
 done();

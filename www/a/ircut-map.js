@@ -76,14 +76,23 @@
 		// closing coil when it is the opening one (#273). ircut-scan.js has
 		// always mapped its measured pads the right way; if these two ever
 		// disagree with `irCutPin2: closeHigh` there, that file is right.
-		{ key: 'irCutPin1', label: 'IR-cut filter, opening coil', hint: 'swings the filter out of the way at night', color: '#4c60d8' },
+		//
+		// `polarity` is what the pad does in its ACTIVE state, in the two words
+		// a chip on the role row shows: pressing it flips the invert the words
+		// name. `single` marks a chip that only exists while ONE coil drives the
+		// filter — with both wired there is nothing to invert, which is the
+		// daemon's own rule and what its hint spends 375 characters explaining.
+		{ key: 'irCutPin1', label: 'IR-cut filter, opening coil', hint: 'swings the filter out of the way at night', color: '#4c60d8',
+			polarity: { invert: 'irCutSingleInvert', on: 'night = HIGH', off: 'night = LOW', single: true } },
 		{ key: 'irCutPin2', label: 'IR-cut filter, closing coil', hint: 'pulls the filter back in for daylight', color: '#0d9488' },
 		// Not "Infrared lamp": majestic drives this pad for NIGHT and does not
 		// care what is on the end of it, and plenty of boards carry a white
 		// LED ring instead of an IR one. Naming the pad after one of the two
 		// tells the owner of the other that this row is not theirs (#273).
-		{ key: 'backlightPin', label: 'Night illuminator', hint: 'the light, infrared or white', color: '#c96a2e' },
-		{ key: 'lightSensorPin', label: 'Daylight sensor', hint: 'photocell that says when it is dark', color: '#8a5cd8' },
+		{ key: 'backlightPin', label: 'Night illuminator', hint: 'the light, infrared or white', color: '#c96a2e',
+			polarity: { invert: 'backlightInvert', on: 'lamp on = HIGH', off: 'lamp on = LOW' } },
+		{ key: 'lightSensorPin', label: 'Daylight sensor', hint: 'photocell that says when it is dark', color: '#8a5cd8',
+			polarity: { invert: 'lightSensorInvert', on: 'dark = HIGH', off: 'dark = LOW' } },
 	];
 	const byKey = {};
 	ROLES.forEach((r) => { byKey[r.key] = r; });

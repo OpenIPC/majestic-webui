@@ -66,6 +66,19 @@ done) %>
 		<div class="mj-notice-txt"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></div>
 		<span class="mj-notice-acts"><a class="btn btn-sm btn-primary" href="camera.cgi?tab=nightMode">Open Day / Night</a></span>
 	</div>
+	<!-- A camera upgraded from a version that only had the raw-gain thresholds
+	     necessarily starts out switching on them, and nothing else would tell
+	     its owner: the settings page says which mechanism is deciding, but only
+	     once you are already on it. Dismissible, because choosing the legacy
+	     mechanism deliberately is a legitimate thing to have done and a notice
+	     with no way out is a nag (#325). The dismiss removes the node, so it
+	     stays gone for the visit without any state being kept for it. -->
+	<div class="mj-notice mj-notice-warn" id="st-alert-legacy" hidden>
+		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
+		<div class="mj-notice-txt"><b>Legacy day/night settings are in use</b> &mdash; this camera switches on the older pair of raw sensor-gain thresholds. Automatic switching reads the sensor's own exposure instead, and needs no numbers and no calibration.</div>
+		<span class="mj-notice-acts"><a class="btn btn-sm btn-primary" href="camera.cgi?tab=nightMode">Open Day / Night</a></span>
+		<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+	</div>
 	<!-- Nothing to see, and the wording is written by dashboard.js from the finding
 	     (video-check.js), because one banner covers three of them: a camera
 	     reading no light at all, an encoder that has stopped, and a camera with

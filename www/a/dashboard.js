@@ -72,7 +72,7 @@
 		if (el) el.hidden = !on;
 		const box = $('#st-alerts');
 		if (box) box.hidden = !['#st-alert-stale', '#st-alert-novideo',
-			'#st-alert-wasnovideo', '#st-alert-ircut']
+			'#st-alert-wasnovideo', '#st-alert-ircut', '#st-alert-legacy']
 			.some(a => { const e = $(a); return e && !e.hidden; });
 	}
 
@@ -550,6 +550,10 @@
 		// (manual is the absence of a decider, not a decider).
 		const srcWord = ['', ' · sensor pin', ' · thresholds', ' · ADC',
 			' · auto'][v.night_mode_source] || '';
+		// 2 is the camera saying it is deciding on the legacy thresholds. Asked
+		// of the gauge rather than of the config, because the gauge is the
+		// camera's own verdict about what it is actually running.
+		setAlert('#st-alert-legacy', v.night_mode_source === 2);
 		// A dimmable lamp reports its duty; only then is a percentage said.
 		// A switched lamp keeps on/off, and an absent gauge stays unknown.
 		const duty = v.night_light_duty;
