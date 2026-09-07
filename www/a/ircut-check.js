@@ -351,9 +351,24 @@
 		// Read off the camera's own source gauge rather than re-deriving the
 		// precedence from config, so a build that orders them differently is
 		// described correctly instead of confidently.
-		if (monitor && sample && (sample.src === 1 || sample.src === 2 ||
-			sample.src === 3)) {
-			const byPin = sample.src !== 2;
+		// Only where a wired daylight sensor is what decides. A threshold pair
+		// (src === 2) used to need saying here because the controls for all
+		// three mechanisms were on the page together with nothing marking
+		// which one was live. The Legacy settings switch is that marking now:
+		// it is on exactly when the camera is deciding on the thresholds, it
+		// says so in words, and the automatic controls it displaces are off
+		// the page rather than sitting there looking live. Repeating it turned
+		// somebody's deliberate choice into a reported fault and advised them
+		// to clear the very settings they had just chosen (#325).
+		//
+		// A sensor pin is the case the switch cannot cover: it outranks BOTH
+		// on-screen sets, and nothing else on the page mentions it. The ADC
+		// pad (src 3) outranks them the same way and is named separately: it
+		// is a different mechanism with no key on this page, so telling its
+		// owner to clear the daylight sensor pin would send them to a control
+		// that is not the one deciding.
+		if (monitor && sample && (sample.src === 1 || sample.src === 3)) {
+			const byAdc = sample.src === 3;
 			// What is named has to be what is actually there. The first cut of
 			// this said "the automatic gain multiples and the delays beside
 			// them" whatever was set, on a path that could fire with no
@@ -363,33 +378,35 @@
 			const AUTO_KEYS = ['autoNightGain', 'autoDayGain',
 				'autoNightDelay', 'autoDayDelay'];
 			const autoSet = AUTO_KEYS.some((k) => has(nm[k]));
-			const thrShadowed = byPin &&
-				has(nm.minThreshold) && has(nm.maxThreshold);
+			const thrSet = has(nm.minThreshold) && has(nm.maxThreshold);
 			const shadowed = [];
 			if (autoSet) shadowed.push('the automatic gain multiples and delays');
-			if (thrShadowed) shadowed.push('the day and night thresholds');
+			if (thrSet) shadowed.push('the day and night thresholds');
 			// Severity follows intent, not presence. The day gain multiple and
 			// both automatic delays ship with defaults and are seeded on every
 			// camera, so finding them set says nothing about what anyone meant;
 			// a night gain multiple, or a threshold pair, is somebody having
 			// typed something. The row notes mark every ignored control either
 			// way — this only decides how loudly the section says it.
-			const deliberate = has(nm.autoNightGain) || thrShadowed;
+			const deliberate = has(nm.autoNightGain) || thrSet;
 			if (shadowed.length) {
 				out.push({
 					id: 'mech-shadowed',
 					level: deliberate ? 'warning' : 'info',
 					title: 'Some of these settings are not being used',
-					detail: (byPin
-						? 'A daylight sensor is wired, and it decides before ' +
-							'anything else here does. '
-						: 'The day and night thresholds are both set, so the ' +
-							'camera compares raw sensor gain against those. ') +
-						'That leaves ' + shadowed.join(' and ') + ' below set ' +
-						'but ignored' +
+					detail: (byAdc
+						? 'This camera is switching on an analog voltage ' +
+							'reading, and it decides before anything else ' +
+							'here does. '
+						: 'A daylight sensor is wired, and it decides ' +
+							'before anything else here does. ') +
+						'That leaves ' + shadowed.join(' and ') +
+						' set but ignored' +
 						(autoSet ? ', which is why no countdown appears' : '') +
-						'. Clearing the settings that are winning hands ' +
-						'day/night back to automatic mode.',
+						'.' + (byAdc
+							? ' The pad it reads is not configured on this page.'
+							: ' Clearing the daylight sensor pin on the wiring ' +
+								'map hands day/night back to the settings here.'),
 					fix: 'nightMode',
 				});
 			}
