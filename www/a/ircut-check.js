@@ -362,8 +362,13 @@
 		// to clear the very settings they had just chosen (#325).
 		//
 		// A sensor pin is the case the switch cannot cover: it outranks BOTH
-		// on-screen sets, and nothing else on the page mentions it.
+		// on-screen sets, and nothing else on the page mentions it. The ADC
+		// pad (src 3) outranks them the same way and is named separately: it
+		// is a different mechanism with no key on this page, so telling its
+		// owner to clear the daylight sensor pin would send them to a control
+		// that is not the one deciding.
 		if (monitor && sample && (sample.src === 1 || sample.src === 3)) {
+			const byAdc = sample.src === 3;
 			// What is named has to be what is actually there. The first cut of
 			// this said "the automatic gain multiples and the delays beside
 			// them" whatever was set, on a path that could fire with no
@@ -389,12 +394,19 @@
 					id: 'mech-shadowed',
 					level: deliberate ? 'warning' : 'info',
 					title: 'Some of these settings are not being used',
-					detail: 'A daylight sensor is wired, and it decides ' +
-						'before anything else here does. That leaves ' +
-						shadowed.join(' and ') + ' set but ignored' +
+					detail: (byAdc
+						? 'This camera is switching on an analog voltage ' +
+							'reading, and it decides before anything else ' +
+							'here does. '
+						: 'A daylight sensor is wired, and it decides ' +
+							'before anything else here does. ') +
+						'That leaves ' + shadowed.join(' and ') +
+						' set but ignored' +
 						(autoSet ? ', which is why no countdown appears' : '') +
-						'. Clearing the daylight sensor pin on the wiring map ' +
-						'hands day/night back to the settings here.',
+						'.' + (byAdc
+							? ' The pad it reads is not configured on this page.'
+							: ' Clearing the daylight sensor pin on the wiring ' +
+								'map hands day/night back to the settings here.'),
 					fix: 'nightMode',
 				});
 			}

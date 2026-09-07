@@ -819,7 +819,18 @@ function runRest() {
 		// Nothing filled in, nothing being ignored, nothing to say.
 		check('automatic mode deciding says nothing',
 			!said(both, 4));
-		check('and the ADC source is still covered', !!said(both, 3));
+		// src 3 is the ADC pad, a different mechanism with no control on this
+		// page. It shared the sensor-pin sentence, which was merely loose
+		// until the advice became concrete — at which point it sent the owner
+		// of an ADC camera to clear a pin that is not what is deciding.
+		check('the ADC source is covered too', !!said(both, 3));
+		check('and named as a voltage reading, not as a wired sensor',
+			/analog voltage reading/.test(said(both, 3).detail) &&
+			!/daylight sensor is wired/.test(said(both, 3).detail),
+			said(both, 3).detail);
+		check('and is not told to clear a pin that is not deciding',
+			!/wiring map/.test(said(both, 3).detail) &&
+			/not configured on this page/.test(said(both, 3).detail));
 		// A camera that has not reported a source is not accused of anything.
 		check('an unknown source says nothing either', !said(both, null));
 
