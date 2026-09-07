@@ -138,15 +138,19 @@
 			if (FOREIGN[a.role]) owned[a.pin] = FOREIGN[a.role];
 			// A DIMMABLE lamp is configured as a PWM channel, and the pad that
 			// channel takes over is the SoC's, named in no field on this page.
-			// So the camera reports a pad here that the role's own assignment
-			// does not have — and that pad is exactly as unpickable as the PTZ
-			// driver's, for the same reason: nothing on this page can move it,
-			// and a coil assigned to it would fight the lamp for the mux.
+			// It is exactly as unpickable as the PTZ driver's pad: nothing here
+			// can move it, and a coil assigned to it would fight the lamp for
+			// the mux.
 			//
-			// Judged against the assignment rather than by role name, because
-			// the same role covers a lamp on a plain pad, where the field IS
-			// the editable truth and the pad must stay pickable.
-			if (a.role === 'backlightPin' && assign.backlightPin !== a.pin) {
+			// Told by the caller, not worked out from the assignment. The first
+			// try owned the pad only where it DIFFERED from backlightPin — an
+			// equality standing in for "the field is authoritative", which it
+			// is not: with a channel selected the camera ignores that field
+			// whatever it holds, so a stale pin that happened to equal the PWM
+			// pad handed the lamp's own pad back to the picker. The lamp being
+			// on a channel is a fact about the configuration, and the page that
+			// reads the configuration is the one that should say so.
+			if (a.role === 'backlightPin' && opts.pwmLamp) {
 				owned[a.pin] = 'used by the night illuminator';
 			}
 		});
