@@ -877,6 +877,23 @@
 				'to call it night (' + v.isp_avelum + ' of 255).';
 	}
 
+	// In night the camera is waiting for the OTHER door, and the gain half of
+	// it is already the plot. The half that is not is the exposure: while it
+	// is still pinned at its ceiling, day cannot come however far the gain
+	// falls — so a lamp that has brought the gain down under the day mark can
+	// sit there looking like a switch that is refusing to happen.
+	//
+	// Spoken only while it is the thing in the way. "The exposure is off its
+	// ceiling" on every tick of every night is noise, and the chart is already
+	// showing what is then actually being waited for.
+	function stillPinned(v) {
+		if (!v || !('isp_exposureismax' in v)) return '';
+		return v.isp_exposureismax > 0
+			? ' The exposure is still at its ceiling, so day waits whatever ' +
+				'the gain does.'
+			: '';
+	}
+
 	function monitorView(nm, v, ageS) {
 		nm = nm || {};
 		if (!v) return null;
@@ -884,9 +901,10 @@
 
 		// An absent night_enabled is a camera whose state is unknown, and an
 		// unknown is not a day — the sentence then simply skips the word.
-		const modeWord = v.night_enabled === 1 || v.night_enabled === true
-			? 'Night. '
-			: v.night_enabled === 0 || v.night_enabled === false ? 'Day. ' : '';
+		const inNight = v.night_enabled === 1 || v.night_enabled === true ? true
+			: v.night_enabled === 0 || v.night_enabled === false ? false : null;
+		const modeWord = inNight === true ? 'Night. '
+			: inNight === false ? 'Day. ' : '';
 
 		// Only a camera with a dimmable lamp publishes a duty; a switched
 		// lamp gets no invented percentage, and 0 on a dimmer is a real
@@ -959,11 +977,23 @@
 				? 'Dark enough for night' + inLeft
 				: pend === 2
 					? 'Bright enough for day' + inLeft
-					: modeWord + 'Watching the sensor gain' +
-						(nightG === null
-							? '; night comes when the exposure runs out.' +
-								runOut(v)
-							: '.');
+					: modeWord + 'Watching the sensor gain' + (
+						nightG !== null ? '.'
+							// Which door is being waited for is decided by
+							// which side the camera is on, and saying the wrong
+							// one is worse than saying less: "Night." followed
+							// by "night comes when the exposure runs out" reads
+							// as a switch that has not happened, on a camera
+							// where it has. Where night_enabled is absent the
+							// direction is unknown, so the sentence stops at
+							// the mechanism and claims neither.
+							: inNight === true
+								? '; day comes when the gain settles back ' +
+									'down.' + stillPinned(v)
+								: inNight === false
+									? '; night comes when the exposure runs ' +
+										'out.' + runOut(v)
+									: '; night comes when the exposure runs out.');
 			return {
 				mode: 'auto', chart: true,
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
