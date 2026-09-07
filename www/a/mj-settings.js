@@ -6395,6 +6395,20 @@
 		// camera still drives could sit under the word "not set".
 		state.ircutRoles = paintRoles;
 
+		// Which pad the camera says the dimmable lamp took over, or undefined.
+		// The enumeration is the only place that number exists: the lamp is
+		// configured as a CHANNEL, and which GPIO a channel occupies is the
+		// processor's business, not the configuration's. Read only where the
+		// field is empty — with a lamp on a plain pad the field is the truth
+		// and this must not second-guess it.
+		function pwmLamp() {
+			const ch = getDotted(state.config, 'nightMode.backlightPwmChannel');
+			if (!ch || ch === 'none') return null;
+			const from = (state.ircutInfo && state.ircutInfo.assigned) || [];
+			const row = from.filter((x) => x.role === 'backlightPin')[0];
+			return { channel: String(ch), pin: row ? row.pin : undefined };
+		}
+
 		function paintRoles() {
 			syncTestBtn();
 			const a = map.get();
@@ -6402,7 +6416,13 @@
 			map.roles.forEach((r) => {
 				const row = el('button', 'mj-ircut-role');
 				row.type = 'button';
-				const set = a[r.key] !== undefined;
+				// A dimmable lamp is connected, and was reported as "not set"
+				// because the field this row draws from holds a pad and the
+				// lamp is on a channel. Nothing was wrong with the camera; the
+				// row was reading the one place the answer could not be.
+				const lamp = r.key === 'backlightPin' && a[r.key] === undefined
+					? pwmLamp() : null;
+				const set = a[r.key] !== undefined || !!lamp;
 				if (!set) row.classList.add('mj-ircut-role-unset');
 				const dot = el('span', 'mj-ircut-rdot');
 				dot.style.background = set ? r.color : '';
@@ -6412,7 +6432,9 @@
 				l.textContent = r.label;
 				t.appendChild(l);
 				const h = el('em');
-				h.textContent = r.hint;
+				h.textContent = lamp
+					? 'dimmable, on ' + lamp.channel
+					: r.hint;
 				t.appendChild(h);
 				row.appendChild(t);
 				// The polarity chip: what this pad does in its active state, in
@@ -6449,13 +6471,27 @@
 				// nothing else: without it the press would return silently
 				// while the words went on naming a signal level, which is a
 				// control that lies rather than one that is missing.
+				// `set` now covers a lamp on a channel, which is what keeps the
+				// active-low chip reachable for one: the invert is applied to
+				// the duty just as it is to a switched pad, so a dimmable lamp
+				// wired the other way round needs the same control.
 				if (pol && polF && (set || stored) && (applies || stored)) {
 					row.appendChild(polarityChip(pol, !applies));
 				}
 				const pin = el('span', 'mj-ircut-rpin');
-				pin.textContent = set ? String(a[r.key]) : 'not set';
+				// The pad, where the camera could say which one the channel
+				// took over; the channel alone otherwise. Never "not set",
+				// which is the one thing that is certainly untrue here.
+				pin.textContent = lamp
+					? (lamp.pin === undefined ? lamp.channel : String(lamp.pin))
+					: (set ? String(a[r.key]) : 'not set');
 				row.appendChild(pin);
-				if (set && !onChip) {
+				// `!lamp`, because a dimmable lamp reaches here with no pad of
+				// its own in the assignment and would otherwise be accused of
+				// naming a pin this processor does not have. Its pad, where the
+				// camera reports one, is the camera's own answer and is drawn
+				// like any other.
+				if (set && !onChip && !lamp) {
 					// Configured, but this kernel reports no such pad — a config
 					// from another SoC, or a hand-edited yaml. Saying so beats a
 					// row that points at a pad which is not drawn.
@@ -6467,6 +6503,12 @@
 				// panel always point at the same thing.
 				row.addEventListener('click', () => {
 					if (onChip) map.select(a[r.key]);
+					// The lamp's pad is not this row's to edit, but it is
+					// worth pointing at: selecting it is how the map says
+					// which pad the channel took.
+					else if (lamp && lamp.pin !== undefined && map.has(lamp.pin)) {
+						map.select(lamp.pin);
+					}
 				});
 				list.appendChild(row);
 			});
