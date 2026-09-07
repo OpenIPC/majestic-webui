@@ -168,6 +168,7 @@ fi
 # can only ask it if it is reachable without a picture.
 %>
 <script src="/a/mj-place.js" defer></script>
+<script src="/a/mj-queue.js" defer></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>
