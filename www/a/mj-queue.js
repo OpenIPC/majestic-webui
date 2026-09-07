@@ -7,14 +7,14 @@
  * land second and leave the camera sitting at stock, precisely the state that
  * control exists to undo.
  *
- * But serialised alone is a QUEUE. Measured from a browser sharing the camera
- * with a video stream, a live write takes about half a second whatever the
- * same request costs from a shell — so a drag of a dozen moves is a dozen
- * requests, and the picture goes on catching up for the better part of ten
- * seconds after the pointer has stopped. What is on the video meanwhile is the
- * overlay, or the privacy mask, at a position nobody asked for and nothing on
- * screen agrees with: OpenIPC/majestic-webui#340 reports it as a mask sitting
- * apart from its own outline.
+ * But serialised alone is a QUEUE. Measured on an hi3516ev300 + imx335, sub
+ * stream 1280x720: a live write from a browser sharing the camera with a video
+ * stream takes about 630 ms, whatever the same request costs from a shell — so
+ * a drag of a dozen moves is a dozen requests, and the picture goes on catching
+ * up for the better part of ten seconds after the pointer has stopped. What is
+ * on the video meanwhile is the overlay, or the privacy mask, at a position
+ * nobody asked for and nothing on screen agrees with: #340 reports it as a mask
+ * sitting apart from its own outline.
  *
  * So a write that arrives while one is in flight REPLACES the one waiting
  * rather than joining the queue — but only where it says the same thing about
