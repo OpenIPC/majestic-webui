@@ -5883,12 +5883,15 @@
 	// A two-state chip over one hidden boolean. It reads the field rather than
 	// keeping a copy, so a save, a refresh or a per-row reset moves it without
 	// anything having to remember to.
+	// The caller resolves the field first and does not build a chip without
+	// one, so this reads it straight: a chip that cannot write is worse than no
+	// chip, because it still states a signal level.
 	function polarityChip(pol, inert) {
 		const f = pinField(pol.invert);
 		const b = el('button', 'mj-pol' + (inert ? ' mj-pol-off' : ''));
 		b.type = 'button';
 		const paint = () => {
-			const on = !f || !toBool(f.getValue());
+			const on = !toBool(f.getValue());
 			b.textContent = on ? pol.on : pol.off;
 			b.title = inert
 				? 'Not in use while both coils are wired. Press to clear it.'
@@ -5897,7 +5900,6 @@
 		b.addEventListener('click', (e) => {
 			// The row beneath selects the pad; flipping polarity is not that.
 			e.stopPropagation();
-			if (!f) return;
 			f.setValue(toBool(f.getValue()) ? 'false' : 'true');
 			paint();
 			updateDirty();
@@ -6321,7 +6323,19 @@
 				const polF = pol && pinField(pol.invert);
 				const applies = !pol || !pol.single || a.irCutPin2 === undefined;
 				const stored = polF && toBool(polF.getValue());
-				if (pol && onChip && (applies || stored)) {
+				// Deliberately `set` and not `onChip`: a pin this kernel does
+				// not report is still a pin the config names, and its polarity
+				// is still stored. Gating the chip on the pad being drawn left
+				// a yaml carried from another board holding an invert with no
+				// control anywhere on the page to see or clear it — the same
+				// stranding the `stored` arm above exists to prevent, reached
+				// by a different door.
+				//
+				// polF is required because the chip edits that field and
+				// nothing else: without it the press would return silently
+				// while the words went on naming a signal level, which is a
+				// control that lies rather than one that is missing.
+				if (pol && polF && (set || stored) && (applies || stored)) {
 					row.appendChild(polarityChip(pol, !applies));
 				}
 				const pin = el('span', 'mj-ircut-rpin');
@@ -6574,6 +6588,14 @@
 	// screen (a visibleWhen-hidden row is not one of the section's N from here)
 	// and over fields the schema records a default for, so the sentence is
 	// provable: a key with no recorded default can never be shown to be either.
+	//
+	// Both hiding channels count, and they have to: a row goes off screen
+	// either by inline display (visibleWhen) or by the hidden attribute (a
+	// field some other control drives — the pin map's pads and their polarity
+	// switches). Reading only the first put three defaulted booleans nobody
+	// can see into the denominator of a sentence that promises to count the
+	// rows on screen, and let a flipped polarity register as a row off stock
+	// that the reader cannot find to reset.
 	// Measured against the default rather than against the last save, so it goes
 	// on saying "off stock" after Save — it is a fact about the camera.
 	function paintStock() {
@@ -6581,7 +6603,7 @@
 		if (!note) return;
 		let shown = 0, known = 0, off = 0;
 		for (const f of state.fields) {
-			if (!f.p || f.p.style.display === 'none') continue;
+			if (!f.p || f.p.style.display === 'none' || f.p.hidden) continue;
 			shown++;
 			if (!f.schema || !Object.prototype.hasOwnProperty.call(f.schema, 'default')) continue;
 			known++;
