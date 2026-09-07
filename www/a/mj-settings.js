@@ -6394,10 +6394,21 @@
 			if (info.ownersUnknown) cant.push('which pads the kernel already holds');
 			if (info.ptzUnknown) cant.push('which pads the PTZ driver is on');
 			find.disabled = true;
+			// What is refused is the SWEEP, and only the sweep: it is the one
+			// thing here that drives pads nobody has vouched for. Testing a
+			// filter the camera already knows about still works, and still
+			// moves it. "Nothing may be driven" said otherwise, and then the
+			// same sentence sent the reader to a control that drives.
+			//
+			// It ends at Save because the pin map only STAGES: the map writes
+			// into the hidden fields, while the test reads the configuration
+			// the camera is running on. Skip the save and the verdict is about
+			// the old wiring — which is the one answer this panel must never
+			// give. The scan's own success path has always said it this way.
 			const why = 'This camera cannot say ' + cant.join(' or ') +
-				', so nothing may be driven. Set the coils by hand on the pin ' +
-				'map — that writes a number into a field and moves nothing, and ' +
-				'Test the filter will check them.';
+				', so the sweep may not drive pads it has not been told about. ' +
+				'Set the coils by hand on the pin map, Save, then Test the ' +
+				'filter checks them.';
 			find.title = why;
 			// The reason goes on the page and not only in the title, for the
 			// reason syncTestBtn() says two controls down: a tooltip is not an
