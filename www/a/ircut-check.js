@@ -849,6 +849,51 @@
 	// two cadences happen to beat out. Ageing the streak locally makes it fall
 	// a second at a time and resync on every sample: the number is still the
 	// camera's, read forward by a clock rather than invented.
+	// The camera holds day until the exposure has genuinely run out AND the
+	// picture is dark with it; below this the veto stands aside. It is the
+	// daemon's number, mirrored here only to word the sentence — nothing is
+	// decided on this side.
+	const LUMA_NIGHT = 128;
+
+	// Whether the two things night waits for are true YET.
+	//
+	// Uncalibrated, the camera does not decide by gain at all: it waits for
+	// the automatic exposure to run out of shutter and gain, and for the
+	// picture to be dark with it. This panel named both and then plotted the
+	// gain, which can answer neither — so a camera sitting in day with its
+	// gain at 22x looked like one ignoring an obvious night, and there was
+	// nothing further on the page to read (#370).
+	//
+	// Silent where the camera does not publish the reading. A missing answer
+	// is not a "no", and "it has not run out" about a camera that never said
+	// would be the confident wrong answer this panel exists to avoid.
+	function runOut(v) {
+		if (!v || !('isp_exposureismax' in v)) return '';
+		if (!(v.isp_exposureismax > 0)) return ' The exposure has not run out yet.';
+		if (!('isp_avelum' in v)) return ' The exposure has run out.';
+		return v.isp_avelum < LUMA_NIGHT
+			? ' The exposure has run out and the picture is dark with it.'
+			: ' The exposure has run out, but the picture is still too bright ' +
+				'to call it night (' + v.isp_avelum + ' of 255).';
+	}
+
+	// In night the camera is waiting for the OTHER door, and the gain half of
+	// it is already the plot. The half that is not is the exposure: while it
+	// is still pinned at its ceiling, day cannot come however far the gain
+	// falls — so a lamp that has brought the gain down under the day mark can
+	// sit there looking like a switch that is refusing to happen.
+	//
+	// Spoken only while it is the thing in the way. "The exposure is off its
+	// ceiling" on every tick of every night is noise, and the chart is already
+	// showing what is then actually being waited for.
+	function stillPinned(v) {
+		if (!v || !('isp_exposureismax' in v)) return '';
+		return v.isp_exposureismax > 0
+			? ' The exposure is still at its ceiling, so day waits whatever ' +
+				'the gain does.'
+			: '';
+	}
+
 	function monitorView(nm, v, ageS) {
 		nm = nm || {};
 		if (!v) return null;
@@ -856,9 +901,10 @@
 
 		// An absent night_enabled is a camera whose state is unknown, and an
 		// unknown is not a day — the sentence then simply skips the word.
-		const modeWord = v.night_enabled === 1 || v.night_enabled === true
-			? 'Night. '
-			: v.night_enabled === 0 || v.night_enabled === false ? 'Day. ' : '';
+		const inNight = v.night_enabled === 1 || v.night_enabled === true ? true
+			: v.night_enabled === 0 || v.night_enabled === false ? false : null;
+		const modeWord = inNight === true ? 'Night. '
+			: inNight === false ? 'Day. ' : '';
 
 		// Only a camera with a dimmable lamp publishes a duty; a switched
 		// lamp gets no invented percentage, and 0 on a dimmer is a real
@@ -931,10 +977,23 @@
 				? 'Dark enough for night' + inLeft
 				: pend === 2
 					? 'Bright enough for day' + inLeft
-					: modeWord + 'Watching the sensor gain' +
-						(nightG === null
-							? '; night comes when the exposure runs out.'
-							: '.');
+					: modeWord + 'Watching the sensor gain' + (
+						nightG !== null ? '.'
+							// Which door is being waited for is decided by
+							// which side the camera is on, and saying the wrong
+							// one is worse than saying less: "Night." followed
+							// by "night comes when the exposure runs out" reads
+							// as a switch that has not happened, on a camera
+							// where it has. Where night_enabled is absent the
+							// direction is unknown, so the sentence stops at
+							// the mechanism and claims neither.
+							: inNight === true
+								? '; day comes when the gain settles back ' +
+									'down.' + stillPinned(v)
+								: inNight === false
+									? '; night comes when the exposure runs ' +
+										'out.' + runOut(v)
+									: '; night comes when the exposure runs out.');
 			return {
 				mode: 'auto', chart: true,
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
