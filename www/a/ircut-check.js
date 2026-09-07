@@ -849,6 +849,34 @@
 	// two cadences happen to beat out. Ageing the streak locally makes it fall
 	// a second at a time and resync on every sample: the number is still the
 	// camera's, read forward by a clock rather than invented.
+	// The camera holds day until the exposure has genuinely run out AND the
+	// picture is dark with it; below this the veto stands aside. It is the
+	// daemon's number, mirrored here only to word the sentence — nothing is
+	// decided on this side.
+	const LUMA_NIGHT = 128;
+
+	// Whether the two things night waits for are true YET.
+	//
+	// Uncalibrated, the camera does not decide by gain at all: it waits for
+	// the automatic exposure to run out of shutter and gain, and for the
+	// picture to be dark with it. This panel named both and then plotted the
+	// gain, which can answer neither — so a camera sitting in day with its
+	// gain at 22x looked like one ignoring an obvious night, and there was
+	// nothing further on the page to read (#370).
+	//
+	// Silent where the camera does not publish the reading. A missing answer
+	// is not a "no", and "it has not run out" about a camera that never said
+	// would be the confident wrong answer this panel exists to avoid.
+	function runOut(v) {
+		if (!v || !('isp_exposureismax' in v)) return '';
+		if (!(v.isp_exposureismax > 0)) return ' The exposure has not run out yet.';
+		if (!('isp_avelum' in v)) return ' The exposure has run out.';
+		return v.isp_avelum < LUMA_NIGHT
+			? ' The exposure has run out and the picture is dark with it.'
+			: ' The exposure has run out, but the picture is still too bright ' +
+				'to call it night (' + v.isp_avelum + ' of 255).';
+	}
+
 	function monitorView(nm, v, ageS) {
 		nm = nm || {};
 		if (!v) return null;
@@ -933,7 +961,8 @@
 					? 'Bright enough for day' + inLeft
 					: modeWord + 'Watching the sensor gain' +
 						(nightG === null
-							? '; night comes when the exposure runs out.'
+							? '; night comes when the exposure runs out.' +
+								runOut(v)
 							: '.');
 			return {
 				mode: 'auto', chart: true,

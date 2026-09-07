@@ -479,6 +479,48 @@ function runRest() {
 				.some(x => x.id === 'threshold-half'));
 	}
 
+	group('monitorView: automatic mode says what night is waiting for');
+	{
+		// Uncalibrated, night is not decided by gain at all — it waits for the
+		// exposure to run out and for the picture to be dark with it. The panel
+		// said so and then plotted the gain, which answers neither, so a camera
+		// sitting in day at 22x gain had nothing further on the page to read
+		// (#370).
+		const auto = (extra) => ic.monitorView({ lightMonitor: true },
+			Object.assign({ night_mode_source: 4, night_enabled: 0,
+				night_auto_gain_milli: 22386, isp_again: 22924 }, extra)).line;
+
+		const waiting = auto({ isp_exposureismax: 0, isp_avelum: 40 });
+		check('not run out yet is said out loud',
+			/exposure has not run out yet/.test(waiting), waiting);
+
+		const dark = auto({ isp_exposureismax: 1, isp_avelum: 40 });
+		check('run out, and dark with it',
+			/run out and the picture is dark with it/.test(dark), dark);
+
+		// The half of the rule nothing on the page could show: the exposure is
+		// finished but the veto still holds day, which is indistinguishable
+		// from "nothing is happening" without saying it.
+		const bright = auto({ isp_exposureismax: 1, isp_avelum: 200 });
+		check('run out but vetoed by a bright picture, with the reading',
+			/still too bright to call it night \(200 of 255\)/.test(bright), bright);
+
+		// A missing reading is not a "no". Saying the exposure has not run out
+		// about a camera that never said would be exactly the confident wrong
+		// answer this panel exists to avoid.
+		const quiet = auto({});
+		check('a camera that does not publish it is not accused either way',
+			!/run out/.test(quiet.replace('runs out', '')), quiet);
+
+		// With an explicit night threshold the gain IS the rule, and the
+		// sentence must not start describing a mechanism that is not running.
+		const byGain = ic.monitorView({ lightMonitor: true, autoNightGain: 8 },
+			{ night_mode_source: 4, night_enabled: 0, night_auto_gain_milli: 3000,
+				isp_exposureismax: 1, isp_avelum: 200 }).line;
+		check('an explicit night gain keeps the old sentence',
+			!/run out/.test(byGain), byGain);
+	}
+
 	group('monitorView: source 0 has two causes and says which');
 	{
 		// The same collision the finding above disentangles, in the panel's own
