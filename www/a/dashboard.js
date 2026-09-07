@@ -67,6 +67,41 @@
 		if (ico && typeof mjNoticeIcon === 'function') ico.outerHTML = mjNoticeIcon(sev);
 	}
 
+	// Dismissing the legacy notice is remembered, and remembered against the
+	// state that raised it. A notice that returns on the next page load is not
+	// dismissible — it is a nag with a button on it, which is what the reporter
+	// of #325 found after closing it. But remembering it forever would silence
+	// a camera that left legacy switching and later came back to it, and coming
+	// back is a new event worth one mention. So the flag is dropped the moment
+	// the camera stops reporting that source, and the witness for that is this
+	// heartbeat, which is reading the gauge every couple of seconds anyway.
+	// (#367 is the rule being followed here: the FACT lives in the daemon's
+	// night_mode_source, and all that is stored on this side is whether this
+	// browser has already been told. A stored claim needs an invalidation rule,
+	// and an invalidation rule needs a witness at the event.)
+	//
+	// localStorage throws outright in some privacy configurations, so both ends
+	// are guarded: an unreadable store means the dismissal is not remembered,
+	// never that the notice is not shown.
+	const LEGACY_DISMISSED = 'mj-dash-legacy-dismissed';
+	function legacyDismissed() {
+		try { return localStorage.getItem(LEGACY_DISMISSED) === '1'; }
+		catch (e) { return false; }
+	}
+	function rememberLegacyDismissed(on) {
+		try {
+			if (on) localStorage.setItem(LEGACY_DISMISSED, '1');
+			else localStorage.removeItem(LEGACY_DISMISSED);
+		} catch (e) { /* not remembered; still gone for this visit */ }
+	}
+	{
+		// main.js's delegated handler removes the node on click; this runs on
+		// the button itself, so it records the choice before that happens.
+		const box = $('#st-alert-legacy');
+		const x = box && box.querySelector('[data-bs-dismiss]');
+		if (x) x.addEventListener('click', () => rememberLegacyDismissed(true));
+	}
+
 	function setAlert(id, on) {
 		const el = $(id);
 		if (el) el.hidden = !on;
@@ -553,7 +588,9 @@
 		// 2 is the camera saying it is deciding on the legacy thresholds. Asked
 		// of the gauge rather than of the config, because the gauge is the
 		// camera's own verdict about what it is actually running.
-		setAlert('#st-alert-legacy', v.night_mode_source === 2);
+		const onLegacy = v.night_mode_source === 2;
+		if (!onLegacy) rememberLegacyDismissed(false);
+		setAlert('#st-alert-legacy', onLegacy && !legacyDismissed());
 		// A dimmable lamp reports its duty; only then is a percentage said.
 		// A switched lamp keeps on/off, and an absent gauge stays unknown.
 		const duty = v.night_light_duty;

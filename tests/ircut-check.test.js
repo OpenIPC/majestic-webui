@@ -785,27 +785,41 @@ function runRest() {
 
 	group('diagnose: a mechanism that is filled in but not deciding');
 	{
-		// Three mechanisms decide the same thing, the camera picks one, and
-		// every control is on the page together. The reporter of #325 filled
-		// in a night gain multiple and both automatic delays while a legacy
-		// threshold pair kept the wheel, and nothing said so — four live-
-		// looking controls doing nothing, and no countdown, because the
-		// mechanism that has no countdown was the one running. Reachable only
-		// with a camera configured both ways at once.
+		// Three mechanisms decide the same thing and the camera picks one. The
+		// reporter of #325 filled in a night gain multiple and both automatic
+		// delays while a legacy threshold pair kept the wheel, and nothing said
+		// so — four live-looking controls doing nothing, and no countdown,
+		// because the mechanism that has no countdown was the one running.
+		//
+		// The page answers half of that itself now. The Legacy settings switch
+		// is on exactly when the camera is deciding on the thresholds, and the
+		// automatic controls are off the page while it is, so there are no
+		// live-looking controls left to explain and this finding stays quiet —
+		// the same reporter, testing the redesign, read it as being told his
+		// deliberate choice was a fault. What the switch cannot cover is a
+		// wired daylight sensor: it outranks BOTH on-screen sets and nothing
+		// else mentions it, so that is the case this finding is now for.
+		// Reachable only with a camera configured two ways at once.
 		const both = { lightMonitor: true, irCutPin1: 11,
 			minThreshold: 2000, maxThreshold: 14000,
 			autoNightGain: 33, autoNightDelay: 15, autoDayDelay: 60 };
 		const said = (nm, src) => ic.diagnose(nm, { night: 0, ircut: 0, src: src },
 			{ flips: 0, conflictS: 0 }).filter(x => x.id === 'mech-shadowed')[0];
-		check('thresholds winning over a filled-in automatic set is named',
-			/compares raw sensor gain/.test(said(both, 2).detail), '');
-		check('and it says why the countdown is missing',
-			/no countdown appears/.test(said(both, 2).detail));
+		check('thresholds winning is left to the Legacy switch, not repeated here',
+			!said(both, 2));
 		check('a wired sensor winning over both is named as the sensor',
 			/daylight sensor is wired/.test(said(both, 1).detail));
+		check('and it says why the countdown is missing',
+			/no countdown appears/.test(said(both, 1).detail));
+		// The rows this names move on and off the page with the Legacy switch,
+		// so it must not claim where they are. "below" outlived the layout it
+		// described.
+		check('it does not say where the ignored controls are',
+			!/below/.test(said(both, 1).detail), said(both, 1).detail);
 		// Nothing filled in, nothing being ignored, nothing to say.
 		check('automatic mode deciding says nothing',
 			!said(both, 4));
+		check('and the ADC source is still covered', !!said(both, 3));
 		// A camera that has not reported a source is not accused of anything.
 		check('an unknown source says nothing either', !said(both, null));
 
@@ -816,7 +830,7 @@ function runRest() {
 		const thrOnly = { lightMonitor: true, minThreshold: 2000,
 			maxThreshold: 14000 };
 		check('a shadowed threshold pair is named without inventing the rest',
-			/the day and night thresholds below set but ignored/
+			/the day and night thresholds set but ignored/
 				.test(said(thrOnly, 1).detail.replace(/\s+/g, ' ')) &&
 			!/gain multiples/.test(said(thrOnly, 1).detail),
 			said(thrOnly, 1).detail);
@@ -834,15 +848,15 @@ function runRest() {
 			maxThreshold: 14000, autoDayGain: 2, autoNightDelay: 15,
 			autoDayDelay: 60 };
 		check('defaults alone are stated, not warned about',
-			said(seeded, 2).level === 'info', said(seeded, 2).level);
+			said(seeded, 1).level === 'info', said(seeded, 1).level);
 		check('a night gain multiple somebody typed is a warning',
-			said(both, 2).level === 'warning');
+			said(both, 1).level === 'warning');
 		// The day gain multiple is an automatic control too; leaving it out of
 		// the set meant a camera holding only that one got a row note and no
 		// section explanation at all.
 		check('the day gain multiple counts as an automatic setting',
 			!!said({ lightMonitor: true, minThreshold: 1, maxThreshold: 2,
-				autoDayGain: 2 }, 2));
+				autoDayGain: 2 }, 1));
 	}
 
 	group('diagnose: hunting, and the ordering of what it all reports');

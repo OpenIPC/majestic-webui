@@ -71,8 +71,10 @@ done) %>
 	     its owner: the settings page says which mechanism is deciding, but only
 	     once you are already on it. Dismissible, because choosing the legacy
 	     mechanism deliberately is a legitimate thing to have done and a notice
-	     with no way out is a nag (#325). The dismiss removes the node, so it
-	     stays gone for the visit without any state being kept for it. -->
+	     with no way out is a nag (#325). The dismiss is remembered per browser
+	     and dropped again when the camera stops reporting that source, so
+	     coming back to legacy switching later still gets one mention; see
+	     dashboard.js. -->
 	<div class="mj-notice mj-notice-warn" id="st-alert-legacy" hidden>
 		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
 		<div class="mj-notice-txt"><b>Legacy day/night settings are in use</b> &mdash; this camera switches on the older pair of raw sensor-gain thresholds. Automatic switching reads the sensor's own exposure instead, and needs no numbers and no calibration.</div>
