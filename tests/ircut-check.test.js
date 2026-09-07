@@ -844,11 +844,17 @@ function runRest() {
 		// seeded on every camera, so their presence is not evidence anyone
 		// asked for automatic mode — that is the difference between saying it
 		// and shouting it.
-		const seeded = { lightMonitor: true, minThreshold: 2000,
-			maxThreshold: 14000, autoDayGain: 2, autoNightDelay: 15,
-			autoDayDelay: 60 };
+		// No threshold pair here, deliberately: a typed pair being overruled is
+		// itself somebody's setting going unused, so including one would make
+		// this warn for a reason that has nothing to do with the seeded
+		// automatic values it is about.
+		const seeded = { lightMonitor: true, lightSensorPin: 66,
+			autoDayGain: 2, autoNightDelay: 15, autoDayDelay: 60 };
 		check('defaults alone are stated, not warned about',
 			said(seeded, 1).level === 'info', said(seeded, 1).level);
+		check('a threshold pair overruled by the sensor is a warning',
+			said({ lightMonitor: true, lightSensorPin: 66, minThreshold: 2000,
+				maxThreshold: 14000 }, 1).level === 'warning');
 		check('a night gain multiple somebody typed is a warning',
 			said(both, 1).level === 'warning');
 		// The day gain multiple is an automatic control too; leaving it out of
