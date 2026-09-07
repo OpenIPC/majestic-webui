@@ -6318,6 +6318,7 @@
 			'<button type="button" class="btn btn-primary btn-sm" id="mj-ircut-find">Find them for me</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
 			'</div>' +
+			'<div class="small text-secondary mt-2" id="mj-ircut-find-why" hidden></div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-why" hidden></div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-status"></div>' +
 			'<div id="mj-ircut-result" class="small" hidden></div>' +
@@ -6506,9 +6507,32 @@
 			if (info.ownersUnknown) cant.push('which pads the kernel already holds');
 			if (info.ptzUnknown) cant.push('which pads the PTZ driver is on');
 			find.disabled = true;
-			find.title = 'This camera cannot say ' + cant.join(' or ') +
-				', so nothing may be driven. Set the pins by hand, or check that '
-				+ 'debugfs is mounted and the boot environment is readable.';
+			// What is refused is the SWEEP, and only the sweep: it is the one
+			// thing here that drives pads nobody has vouched for. Testing a
+			// filter the camera already knows about still works, and still
+			// moves it. "Nothing may be driven" said otherwise, and then the
+			// same sentence sent the reader to a control that drives.
+			//
+			// It ends at Save because the pin map only STAGES: the map writes
+			// into the hidden fields, while the test reads the configuration
+			// the camera is running on. Skip the save and the verdict is about
+			// the old wiring — which is the one answer this panel must never
+			// give. The scan's own success path has always said it this way.
+			const why = 'This camera cannot say ' + cant.join(' or ') +
+				', so the sweep may not drive pads it has not been told about. ' +
+				'Set the coils by hand on the pin map, Save, then Test the ' +
+				'filter checks them.';
+			find.title = why;
+			// The reason goes on the page and not only in the title, for the
+			// reason syncTestBtn() says two controls down: a tooltip is not an
+			// explanation on a touchscreen, where there is no hover at all.
+			// This button was the one place in the panel that broke that rule,
+			// and the greyed-out control it left had to be asked about.
+			const note = box.querySelector('#mj-ircut-find-why');
+			if (note) {
+				note.textContent = why;
+				note.hidden = false;
+			}
 		}
 
 		// A camera that came back from the dead mid-scan says so before anything
