@@ -5958,12 +5958,20 @@
 		if (!host) return;
 		const id = 'mjf-nightMode-legacy';
 		const p = el('p', 'boolean mj-row');
+		// The same shape renderField gives a boolean once its reset wrap has run:
+		// label above, then the switch and its lit word together inside
+		// .mj-ctl > .mj-ctl-in. Built rather than borrowed because this row has
+		// no config key of its own and so no ↺ to sit beside — but it has to
+		// line up with the rows around it, and hand-rolling the inner markup
+		// alone left the word wrapped under the switch.
 		p.innerHTML =
 			'<label for="' + id + '" class="form-label">Legacy settings</label>' +
+			'<span class="mj-ctl"><span class="mj-ctl-in">' +
 			'<span class="form-check form-switch">' +
 			'<input type="checkbox" id="' + id + '" class="form-check-input">' +
 			'</span>' +
 			'<span class="mj-state" aria-hidden="true"></span>' +
+			'</span></span>' +
 			'<div class="hint text-secondary">Off: the camera decides from its own ' +
 			'exposure. On: the older pair of raw sensor-gain thresholds.</div>';
 		const box = p.querySelector('input');
@@ -6860,17 +6868,41 @@
 		// heights come from the rows' own boxes rather than from where the last
 		// deal put them, so a given width always picks the same cut however the
 		// rows are arranged when this runs.
-		let best = Infinity, cut = items.length;
-		for (let i = 1; i <= items.length; i++) {
-			// a group heading belongs to the rows under it, so it must not be
-			// left as the last thing in a column
-			if (i < items.length && items[i - 1].classList.contains('mj-live-grp-head')) continue;
-			const n = seen[i];
-			const left = n ? y[n - 1] + rows[n - 1].h + rows[n - 1].mb : 0;
-			const right = n < rows.length ? rows[n].mt + total - y[n] : 0;
-			const taller = Math.max(left, right);
-			if (taller < best) { best = taller; cut = i; }
-		}
+		// A section with headings is cut BETWEEN groups wherever one will do.
+		// Cutting inside a group strands its tail at the top of the second
+		// column under no heading at all — Day / Night's four switching
+		// settings split that way, and the last of them read as belonging to
+		// whatever heading came next (#325). Balance is worth less than a row
+		// sitting under the words that name it.
+		const heads = items.filter(it => it.offsetHeight &&
+			it.classList.contains('mj-live-grp-head')).length;
+		const onlyHeads = heads > 1;
+
+		const choose = (headsOnly) => {
+			let best = Infinity, at = items.length;
+			for (let i = 1; i <= items.length; i++) {
+				// a group heading belongs to the rows under it, so it must not
+				// be left as the last thing in a column
+				if (i < items.length && items[i - 1].classList.contains('mj-live-grp-head')) continue;
+				// ...and the second column should open with one, not with the
+				// remains of the group the first column was in the middle of.
+				if (headsOnly && i < items.length &&
+					!items[i].classList.contains('mj-live-grp-head')) continue;
+				const n = seen[i];
+				const left = n ? y[n - 1] + rows[n - 1].h + rows[n - 1].mb : 0;
+				const right = n < rows.length ? rows[n].mt + total - y[n] : 0;
+				const taller = Math.max(left, right);
+				if (taller < best) { best = taller; at = i; }
+			}
+			return { best, at };
+		};
+
+		// Falling back rather than insisting: a section whose every group is
+		// enormous would otherwise pile the whole thing into one column, which
+		// is worse than a straddled heading.
+		let pick = onlyHeads ? choose(true) : choose(false);
+		if (onlyHeads && (pick.at === items.length || pick.best > total * 0.75)) pick = choose(false);
+		const cut = pick.at;
 		if (cut === a.children.length) return;   // already dealt this way
 
 		// re-parenting blurs whatever control the user is in, which resizing
