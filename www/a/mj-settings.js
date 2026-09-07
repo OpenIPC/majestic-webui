@@ -707,7 +707,7 @@
 		const onHide = (ev) => {
 			// Same reason as in revertLive: a queued write would be the discarded
 			// edit arriving after the revert. There is no chaining it here — the
-			// beacon leaves outside liveWrite because nothing can be awaited on
+			// beacon leaves outside the live queue because nothing can be awaited on
 			// the way out — so cancelling is the whole of the ordering guarantee,
 			// and it covers everything except a write already on the wire when
 			// the tab closed. That one can still be reordered by the server, and
@@ -738,19 +738,32 @@
 		return parts.join('&');
 	}
 
-	// Serialised, not fire-and-forget. Hold-to-compare issues two of these — the
-	// defaults on press, the live values on release — and independent fetches
-	// have no ordering guarantee, so a short hold could let the defaults land
-	// second and leave the camera sitting at stock: precisely the state this
-	// control exists to undo. Each link swallows its own rejection, because a
-	// write that fails must not wedge every write after it.
-	let liveWrite = Promise.resolve();
+	// Live writes go through mj-queue.js: one in flight, and at most one
+	// waiting behind it per statement. Why that is the policy is written out
+	// there; what matters here is that order holds — hold-to-compare's two
+	// writes must not swap — and that a drag on a slow camera does not leave a
+	// queue of positions still arriving after the pointer has stopped.
+	//
+	// Without the module, the behaviour this page had before it existed:
+	// serialised, so order still holds, and one request per push. Each link
+	// swallows its own rejection either way, because a write that fails must
+	// not wedge every write after it.
+	function queued(sendOne, sig) {
+		const Q = window.MajesticQueue;
+		if (Q) return Q.coalesce(sendOne, Q[sig]);
+		let chain = Promise.resolve();
+		return (payload) => (chain = chain.then(() => sendOne(payload)));
+	}
+
+	let liveQueue = null;
 	function postLive(q) {
-		if (!q) return liveWrite;
-		liveWrite = liveWrite.then(() =>
-			apiFetch('/api/v1/image?' + q, { method: 'POST', credentials: 'same-origin' })
-				.catch(() => {}));
-		return liveWrite;
+		if (!q) return Promise.resolve(true);
+		if (!liveQueue) liveQueue = queued(
+			(s) => apiFetch('/api/v1/image?' + s,
+				{ method: 'POST', credentials: 'same-origin' })
+				.then((r) => r.ok, () => false),
+			'querySig');
+		return liveQueue(q);
 	}
 
 	// Debounced live apply: on any x-live field change, POST the current value
@@ -3501,6 +3514,7 @@
 				// buildTemplate rebuilds its chips from the field's own events,
 				// and setValue fires none — so say it moved.
 				f.control.dispatchEvent(new Event('change', { bubbles: true }));
+				drawWhatWasAdded();
 				runVisibility();
 				updateDirty();
 				pick({ t: 'text', i: n });
@@ -3767,6 +3781,43 @@
 					'not just in this preview.';
 				slot.appendChild(why);
 
+				// Moving a mask is previewed; adding or removing one is not,
+				// and the difference is the camera's rather than this page's.
+				// A move rewrites the rectangle of a region that already
+				// exists, which the daemon does on a running pipeline. A mask
+				// added has no region yet and one removed still has its own,
+				// so the daemon refuses the whole list until a save rebuilds
+				// it — and the video goes on showing the masks it was given
+				// while the outlines here show the ones it has not. Two
+				// rectangles, not agreeing, and nothing saying which is which.
+				const later = el('p', 'mj-live-hint mj-md-warn');
+				slot.appendChild(later);
+				// Read rather than captured: a save refreshes what the camera
+				// is holding, and a line that went on naming the count from
+				// mount would still be there after the save that answered it.
+				function sayLater() {
+					const was = String(state.initial[maskSchema.dot] || '')
+						.match(/\d+x\d+x\d+x\d+/g);
+					const off = masks.count() !== (was ? was.length : 0);
+					later.textContent = off
+						? 'The video still shows the masks it was last given. ' +
+							'Save to add or remove one; moving one is shown as ' +
+							'you drag.'
+						: '';
+					later.hidden = !off;
+				}
+				sayLater();
+				// A save is the answer to this line, and it does not reach the
+				// drag's own callback: it pushes the saved value back into the
+				// field, which repaints the list through _sync. So the line is
+				// asked again there, or it would still be standing after the
+				// save that made it untrue.
+				const synced = maskField.control._sync;
+				maskField.control._sync = () => {
+					if (synced) synced();
+					sayLater();
+				};
+
 				maskCo = co;
 				co.addEventListener('change', () => {
 					if (sel.t === 'mask' && sel.i >= 0)
@@ -3775,6 +3826,7 @@
 				// The numbers move under a drag, and this is one of the places
 				// they are shown.
 				masks.onEdit(() => {
+					sayLater();
 					if (sel.t === 'mask' && sel.i >= 0 &&
 						document.activeElement !== co)
 						co.value = masks.rectAt(sel.i);
@@ -3812,6 +3864,24 @@
 		if (!colLook.childElementCount) colLook.remove();
 		else if (panel) colLook.classList.remove('mj-live-col-b');
 		if (!deck.childElementCount) deck.remove();
+	}
+
+	// Adding something to the picture turns the picture on.
+	//
+	// The switch decides whether ANY overlay is drawn, and it was left wherever
+	// it had been: adding a line to a camera whose overlays were off produced
+	// an item on the bar, a panel full of settings, and nothing on the video —
+	// with nothing saying why, since the switch that explains it is a bar item
+	// away from the press. Asking for a thing to be drawn is the same statement
+	// as asking for drawing, so the act carries both. It is a staged edit like
+	// every other, and the save bar counts it.
+	function drawWhatWasAdded() {
+		const f = state.fields.find((x) => x.dot === 'osd.enabled');
+		if (!f || f.getValue() === 'true') return;
+		f.setValue('true');
+		f.control.dispatchEvent(new Event('change', { bubbles: true }));
+		runVisibility();
+		updateDirty();
 	}
 
 	// The panel the overlay's settings live in: a card on the picture, opened
@@ -3879,6 +3949,14 @@
 			if (!made[id]) return;
 			made[id].btn.hidden = !on;
 			if (!on && open === id) show(TABS[0][0]);
+			// A strip of ONE is not a strip. A mask and the vendor mark have
+			// a place and nothing else, and the lone lit tab above their
+			// numbers read as a button — something to press, which then did
+			// nothing, because it was already the tab you were on. There is
+			// no choice to offer, so nothing is offered: the panel's own
+			// heading already says what is selected.
+			tabs.hidden =
+				TABS.filter(([tid]) => !made[tid].btn.hidden).length < 2;
 		}
 
 
@@ -4012,13 +4090,7 @@
 	let osdPushed = false;
 	function postLivePlace(doc) {
 		osdPushed = true;
-		if (liveDoc) {
-			return postLiveJson(doc).then((ok) => {
-				if (ok) return;
-				liveDoc = false;
-				return postLive(legacyQuery(doc));
-			});
-		}
+		if (liveDoc) return postLiveJson(doc);
 		return postLive(legacyQuery(doc));
 	}
 
@@ -4085,6 +4157,14 @@
 		// and a build old enough to need it has no such overlay to move. Saying
 		// nothing is right; saying `anchor=` would move overlay 0.
 		if (o.overlays) return '';
+		// Nor can it say anything about the masks, and a document that carries
+		// only those has no placement to translate. It used to fall through to
+		// the line below and send a bare `anchor=`, which is majestic's word
+		// for "drop the override" — so a mask drag arriving here cancelled the
+		// live placement of the text beside it, once per pointermove.
+		if (o.anchor === undefined && o.posX === undefined &&
+			o.offsetX === undefined && o.posY === undefined &&
+			o.offsetY === undefined) return '';
 		const bit = (k, v) => v === undefined ? '' :
 			'&' + k + '=' + encodeURIComponent(v);
 		return 'anchor=' + encodeURIComponent(o.anchor === undefined ? '' : o.anchor) +
@@ -4092,19 +4172,47 @@
 			bit('posX', o.posX) + bit('posY', o.posY);
 	}
 
-	// Serialised behind the same promise chain every other live push uses, and
+	// Behind the same one-in-flight queue every other live push uses, and
 	// swallowing its own failures for the same reason: a move that cannot land
 	// must not wedge the ones after it or interrupt the drag.
-	let liveJsonWrite = Promise.resolve();
+	//
+	// It answers with the camera's STATUS rather than with yes or no, because
+	// the one thing that has to be told apart is an endpoint that is not there
+	// from one that refused this request — 0 where there was no answer at all.
+	let liveJsonQueue = null;
 	function postLiveJson(doc) {
-		liveJsonWrite = liveJsonWrite.then(() =>
-			apiFetch('/api/v1/live', {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(doc),
-			}).then((r) => r.ok, () => false));
-		return liveJsonWrite;
+		if (!liveJsonQueue) liveJsonQueue = queued(sendLiveDoc, 'docSig');
+		return liveJsonQueue(doc);
+	}
+
+	// One write, its answer, and the fallback that answer may owe.
+	//
+	// The fallback belongs to the write that was actually SENT rather than to
+	// the caller that asked for one, because the queue coalesces: ten
+	// pointermoves can share one transmitted document and one promise, and a
+	// fallback hung off that promise by each caller would turn a single 404
+	// into a legacy write per move — the first of them carrying a position the
+	// drag had already passed through. Here there is one write, so there is one
+	// fallback, and it carries the document the camera was actually given.
+	//
+	// ONLY a 404 is the door not being there. Anything else is this camera
+	// refusing this request, and a refusal is not a reason to stop using the
+	// endpoint that reported it: a mask added but not yet saved is refused —
+	// there is no region to move until a save creates one — and that one 500
+	// used to demote the page for the rest of the visit, after which every drag
+	// went out as a query the endpoint reads as "drop the override", once per
+	// pointermove.
+	function sendLiveDoc(d) {
+		return apiFetch('/api/v1/live', {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(d),
+		}).then((r) => r.status, () => 0).then((status) => {
+			if (status !== 404) return status;
+			liveDoc = false;
+			return postLive(legacyQuery(d)).then(() => status, () => status);
+		});
 	}
 
 	// The placement the fields currently describe, as the document to send.
@@ -5174,6 +5282,11 @@
 					field.setValue(j.path);
 					field.control.dispatchEvent(
 						new Event('change', { bubbles: true }));
+					// A picture chosen is a picture asked for. This is where
+					// a logo starts being drawn — "+ Logo" writes nothing
+					// until one is picked — so this is where the switch that
+					// draws it follows.
+					drawWhatWasAdded();
 					runVisibility();
 					updateDirty();
 					paint();
