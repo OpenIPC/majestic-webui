@@ -59,6 +59,13 @@
 	// sendOne(payload) -> Promise of whatever the caller wants back. It must
 	// not reject: a write that fails must not wedge every write after it, so
 	// the failure is a value like any other.
+	//
+	// A CALLER CANNOT ASSUME ITS OWN PAYLOAD WAS THE ONE SENT. Ten replaced
+	// pushes share one promise and one transmitted payload, so anything that
+	// has to act on what the camera was actually given — a fallback to another
+	// endpoint, say — belongs inside sendOne, which is handed exactly that.
+	// Hung off the returned promise instead, it would run once per superseded
+	// caller and carry positions the drag had already passed through.
 	function coalesce(sendOne, sigOf) {
 		let flight = null;
 		const queue = [];

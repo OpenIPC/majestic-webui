@@ -4090,22 +4090,7 @@
 	let osdPushed = false;
 	function postLivePlace(doc) {
 		osdPushed = true;
-		if (liveDoc) {
-			return postLiveJson(doc).then((status) => {
-				if (status >= 200 && status < 300) return;
-				// ONLY a 404 is the door not being there. Anything else is
-				// this camera refusing this request, and a refusal is not a
-				// reason to stop using the endpoint that reported it: a mask
-				// added but not yet saved is refused — there is no region to
-				// move until a save creates one — and that one 500 used to
-				// demote the page for the rest of the visit, after which every
-				// drag went out as a query the endpoint reads as "drop the
-				// override", once per pointermove.
-				if (status !== 404) return;
-				liveDoc = false;
-				return postLive(legacyQuery(doc));
-			});
-		}
+		if (liveDoc) return postLiveJson(doc);
 		return postLive(legacyQuery(doc));
 	}
 
@@ -4192,20 +4177,42 @@
 	// must not wedge the ones after it or interrupt the drag.
 	//
 	// It answers with the camera's STATUS rather than with yes or no, because
-	// the one thing the caller has to tell apart is an endpoint that is not
-	// there from one that refused this request — 0 where there was no answer
-	// at all.
+	// the one thing that has to be told apart is an endpoint that is not there
+	// from one that refused this request — 0 where there was no answer at all.
 	let liveJsonQueue = null;
 	function postLiveJson(doc) {
-		if (!liveJsonQueue) liveJsonQueue = queued(
-			(d) => apiFetch('/api/v1/live', {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(d),
-			}).then((r) => r.status, () => 0),
-			'docSig');
+		if (!liveJsonQueue) liveJsonQueue = queued(sendLiveDoc, 'docSig');
 		return liveJsonQueue(doc);
+	}
+
+	// One write, its answer, and the fallback that answer may owe.
+	//
+	// The fallback belongs to the write that was actually SENT rather than to
+	// the caller that asked for one, because the queue coalesces: ten
+	// pointermoves can share one transmitted document and one promise, and a
+	// fallback hung off that promise by each caller would turn a single 404
+	// into a legacy write per move — the first of them carrying a position the
+	// drag had already passed through. Here there is one write, so there is one
+	// fallback, and it carries the document the camera was actually given.
+	//
+	// ONLY a 404 is the door not being there. Anything else is this camera
+	// refusing this request, and a refusal is not a reason to stop using the
+	// endpoint that reported it: a mask added but not yet saved is refused —
+	// there is no region to move until a save creates one — and that one 500
+	// used to demote the page for the rest of the visit, after which every drag
+	// went out as a query the endpoint reads as "drop the override", once per
+	// pointermove.
+	function sendLiveDoc(d) {
+		return apiFetch('/api/v1/live', {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(d),
+		}).then((r) => r.status, () => 0).then((status) => {
+			if (status !== 404) return status;
+			liveDoc = false;
+			return postLive(legacyQuery(d)).then(() => status, () => status);
+		});
 	}
 
 	// The placement the fields currently describe, as the document to send.

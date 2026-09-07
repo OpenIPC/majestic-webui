@@ -174,6 +174,43 @@ check('and a query with another parameter is another statement',
 		check('which is what both of them are told', (await c) === 500);
 	}
 
+	group('what a write owes is owed once, by the write');
+	{
+		// Anything that has to act on what the camera was actually given — the
+		// settings page falls back to an older endpoint on a 404 — belongs
+		// inside the sender, which is handed the transmitted payload. Hung off
+		// the returned promise it would run once per superseded caller and
+		// carry positions the drag had already passed through, which is the
+		// backlog this queue exists to remove.
+		const sent = [];
+		const owed = [];
+		let gate = null;
+		const post = Q.coalesce((payload) => {
+			sent.push(payload);
+			return new Promise((res) => { gate = res; })
+				.then((status) => {
+					if (status === 404) owed.push(payload);
+					return status;
+				});
+		}, Q.docSig);
+
+		const first = post({ osd: { anchor: 'p0' } });
+		await tick();
+		for (let i = 1; i < 6; i++) post({ osd: { anchor: 'p' + i } });
+		await tick();
+		gate(404);
+		await first;
+		await tick();
+		gate(404);
+		await tick();
+		check('six pushes were two writes', sent.length === 2,
+			'sent ' + sent.length);
+		check('and two fallbacks, not six', owed.length === 2,
+			'owed ' + owed.length);
+		check('each carrying what was sent, the last one the last position',
+			owed[1].osd.anchor === 'p5', 'owed ' + owed[1].osd.anchor);
+	}
+
 	group('a failure does not wedge the ones after it');
 	{
 		const r = recorder();
