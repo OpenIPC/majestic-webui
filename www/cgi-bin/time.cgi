@@ -72,7 +72,16 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 					# reports servers the running daemon goes on ignoring until
 					# the next reboot -- and on a camera being repaired from the
 					# whiteout above there is no daemon running to ignore them.
-					[ -x /etc/init.d/S49ntpd ] && /etc/init.d/S49ntpd restart > /dev/null 2>&1
+					#
+					# Reported rather than assumed: an image can ship without
+					# the init script at all (rubyfpv's tweaksys removes it),
+					# and "saved" and "in effect" are not the same claim to
+					# make. The list is on the camera either way, so this is a
+					# warning about when it starts counting, not a failure.
+					if ! { [ -x /etc/init.d/S49ntpd ] && /etc/init.d/S49ntpd restart > /dev/null 2>&1; }; then
+						saved_class="warning"
+						saved_text="Saved. ntpd could not be restarted, so the new servers take effect at the next boot."
+					fi
 				else
 					rm -f /etc/ntp.conf.new
 					saved_class="danger"
@@ -111,11 +120,26 @@ for host in $(ntp_read "$ntp_src"); do
 	eval "server_${i}=\$host"
 	i=$((i + 1))
 done
+
+# Two different situations wear the same missing file, and promising a repair
+# that cannot happen is worse than admitting there is none. Keyed on whether a
+# box actually got filled rather than on $ntp_rom existing, because that is the
+# thing the reader is about to look at: a /rom copy that is present but carries
+# no server line leaves the form just as empty, and Save just as refused.
+ntp_warn=""
+if [ -n "$ntp_missing" ]; then
+	ntp_warn='<b>This camera has no NTP configuration.</b> <code>/etc/ntp.conf</code> is missing, so <code>ntpd</code> exits at every boot and nothing ever corrects the clock &mdash; recordings and log rows carry whatever time the camera drifted to. '
+	if [ -n "$server_0" ]; then
+		ntp_warn="${ntp_warn}The servers below are the firmware defaults, filled in but not in effect; saving the form writes the file back."
+	else
+		ntp_warn="${ntp_warn}This image has no copy to restore from either, so nothing could be filled in below: type a server &mdash; <code>0.pool.ntp.org</code> will do &mdash; and save."
+	fi
+fi
 %>
 
 <%in p/header.cgi %>
 
-<% [ -n "$ntp_missing" ] && notice warn '<b>This camera has no NTP configuration.</b> <code>/etc/ntp.conf</code> is missing, so <code>ntpd</code> exits at every boot and nothing ever corrects the clock &mdash; recordings and log rows carry whatever time the camera drifted to. The servers below are the firmware defaults, filled in but not in effect; saving the form writes the file back.' %>
+<% [ -n "$ntp_warn" ] && notice warn "$ntp_warn" %>
 
 <div class="row g-4">
 	<div class="col-12">
