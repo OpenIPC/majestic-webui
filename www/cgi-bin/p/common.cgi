@@ -473,8 +473,18 @@ preview() {
 					-e 's/[[:cntrl:]]//g')
 			printf '"%s":"%s"\n' "$k" "$v"
 		done | paste -sd,)
-	cat <<EOF
-<script type="application/json" id="mj-preview-boot">{"labels":{${mj_src_labels}}}</script>
+	printf '%s\n' \
+		"<script type=\"application/json\" id=\"mj-preview-boot\">{\"labels\":{${mj_src_labels}}}</script>"
+
+	# Quoted delimiter, and that is the whole reason the boot payload is printed
+	# above rather than interpolated in here. What follows is 300 lines of static
+	# markup with nothing left to substitute, and an unquoted heredoc hands every
+	# byte of it to the shell: the prose in these comments quotes CSS the way the
+	# rest of the tree does, so `inset: 0` became a command substitution and the
+	# shell ran `inset:` with argument 0. Six of them per Live page load, each one
+	# a fork and a "not found" on majestic's stderr (the CGI inherits it), and the
+	# quoted text silently deleted from the comment it was explaining.
+	cat <<'EOF'
 <div class="mj-player" id="mj-player">
 	<!-- The stage: everything lives ON the video, and the stage is the page.
 	     It takes the whole window under the navbar — no container, no card, no
