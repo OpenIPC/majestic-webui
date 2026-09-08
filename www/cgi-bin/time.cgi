@@ -4,6 +4,21 @@
 tz_data=$(cat /etc/TZ)
 tz_name=$(cat /etc/timezone)
 
+# The firmware's own copy of the stock list. The rootfs is a read-only squashfs
+# pivoted to /rom with a jffs2 overlay on top, so this is what /etc/ntp.conf
+# reads through to until something writes over it -- and what is still sitting
+# there, untouched, on a camera where something has deleted it.
+ntp_rom=/rom/etc/ntp.conf
+
+# The hostname of every "server" line, in file order. `awk` on the keyword
+# rather than `sed -n <N>p` by line number: a comment or a blank line at the top
+# shifted every box down one, so the form offered a comment's second word as a
+# hostname and saving the form put it back as one.
+ntp_read() {
+	[ -f "$1" ] || return 0
+	awk '$1 == "server" && $2 != "" { print $2 }' "$1"
+}
+
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
 		update)
@@ -18,24 +33,89 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				touch /tmp/system-reboot
 			fi
 
-			rm -f /etc/ntp.conf
+			# Build the list first, and only then go near the file. What this
+			# replaced removed /etc/ntp.conf up front and appended the boxes to
+			# the live file a line at a time, which failed two ways -- and the
+			# second is not repairable from this page.
+			#
+			# A save with the boxes empty left no file at all. On an overlayfs
+			# root, deleting a file that lives in the lower layer does not free
+			# anything: it writes a WHITEOUT into the overlay, so the firmware's
+			# own /rom/etc/ntp.conf is still there, still perfectly good, and
+			# masked for good -- through reboots, and through sysupgrade, which
+			# does not touch the overlay. busybox ntpd has no built-in peers and
+			# takes them from that file alone, so it exits 1 the moment S49ntpd
+			# starts it and the clock is never disciplined again. Found on a lab
+			# ssc30kq that had drifted 863 minutes with nothing on this page
+			# saying why; the boxes then read back from the file the save had
+			# just destroyed, came up empty, and armed the same trap for the
+			# next save.
+			ntp_new=""
 			for i in $(seq 0 3); do
 				eval ntp="\$POST_server_${i}"
-				[ -n "$ntp" ] && echo "server $ntp iburst" >> /etc/ntp.conf
+				[ -n "$ntp" ] && ntp_new="${ntp_new}server ${ntp} iburst
+"
 			done
+
+			saved_class="success"
+			saved_text="Configuration updated."
+			if [ -n "$ntp_new" ]; then
+				# Written beside the target rather than in /tmp, so `mv` is a
+				# rename instead of the truncate-and-copy it falls back to
+				# across a filesystem: a reader gets the whole old list or the
+				# whole new one, and there is never a moment with no file. The
+				# mode goes on before the rename for the same reason -- the
+				# CGI's umask is 077 and the firmware ships this file 644.
+				if printf '%s' "$ntp_new" > /etc/ntp.conf.new && chmod 644 /etc/ntp.conf.new &&
+					mv /etc/ntp.conf.new /etc/ntp.conf; then
+					# ntpd reads the file once, at start. Without this the page
+					# reports servers the running daemon goes on ignoring until
+					# the next reboot -- and on a camera being repaired from the
+					# whiteout above there is no daemon running to ignore them.
+					[ -x /etc/init.d/S49ntpd ] && /etc/init.d/S49ntpd restart > /dev/null 2>&1
+				else
+					rm -f /etc/ntp.conf.new
+					saved_class="danger"
+					saved_text="Time zone saved, but the NTP server list could not be written."
+				fi
+			else
+				saved_class="warning"
+				saved_text="Time zone saved. The NTP servers were left as they were: ntpd has no peers of its own, so an empty list is not a setting, it is a clock that never syncs again."
+			fi
 			update_caminfo
-			redirect_back "success" "Configuration updated."
+			redirect_back "$saved_class" "$saved_text"
 			;;
 	esac
 fi
 
-for i in $(seq 0 3); do
-	eval server_${i}=$(sed -n $((i + 1))p /etc/ntp.conf | awk '{print $2}')
+# The summary is what is IN EFFECT, so it reads /etc/ntp.conf and nothing else:
+# on a camera with the file deleted it says "—", which is the truth.
+ntp_summary=$(ntp_read /etc/ntp.conf | awk '{ printf "%s%s", sep, $0; sep = ", " }')
+
+# The boxes are what there is to EDIT, so where the file is gone they offer the
+# firmware's own list instead of nothing -- Save is then the way back out of the
+# whiteout, and the banner below is what keeps the two apart on screen.
+ntp_missing=""
+ntp_src=/etc/ntp.conf
+if [ ! -f /etc/ntp.conf ]; then
+	ntp_missing=1
+	[ -f "$ntp_rom" ] && ntp_src="$ntp_rom"
+fi
+
+i=0
+for host in $(ntp_read "$ntp_src"); do
+	[ "$i" -gt 3 ] && break
+	# `\$host`, so eval is handed an assignment rather than the contents of the
+	# file: the line this replaced was `eval server_$i=$(...)`, which gave
+	# whatever was on that line to the shell to parse as a command.
+	eval "server_${i}=\$host"
+	i=$((i + 1))
 done
-ntp_summary=$(echo $server_0 $server_1 $server_2 $server_3 | sed 's/ /, /g')
 %>
 
 <%in p/header.cgi %>
+
+<% [ -n "$ntp_missing" ] && notice warn '<b>This camera has no NTP configuration.</b> <code>/etc/ntp.conf</code> is missing, so <code>ntpd</code> exits at every boot and nothing ever corrects the clock &mdash; recordings and log rows carry whatever time the camera drifted to. The servers below are the firmware defaults, filled in but not in effect; saving the form writes the file back.' %>
 
 <div class="row g-4">
 	<div class="col-12">
