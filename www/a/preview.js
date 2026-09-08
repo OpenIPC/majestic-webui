@@ -1,6 +1,13 @@
 // Low-latency H.264/H.265 MSE player over the majestic /ws/video WebSocket.
 window.MajesticVideo = (function () {
 	const MAX_QUEUE = 240;
+	// Consecutive decode failures on one player before we stop rebuilding it
+	// and fall through the chain. A browser whose decoder cannot take this
+	// stream (a Safari that rejects a conformant HEVC, majestic-webui#335) fails
+	// again on every rebuild, so retrying forever is the ~2s flash; two strikes
+	// is enough to tell a permanent inability from a one-off glitch.
+	const DECODE_MAX = 2;
+	const DECODE_RESET_MS = 30000;
 	const LIVE_EDGE = 1.0;
 
 	// Audio is opt-in per connection: the camera only encodes it while someone
@@ -50,6 +57,9 @@ window.MajesticVideo = (function () {
 		let lastW = 0, lastH = 0;
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let gotSignal = false, signalTimer = null, failCount = 0;
+		// Decode failures (MediaError code 3), and the codec to name when we give
+		// up on the browser's own decoder and ask the page for the next rung.
+		let decodeErrs = 0, lastDecodeAt = 0, lastCodec = '';
 		// From the caller: this player is also staged as a replacement now, and
 		// a session that proved itself must not be reopened just to turn on the
 		// audio the outgoing one already had. See preview-swap.js.
@@ -130,7 +140,28 @@ window.MajesticVideo = (function () {
 		}
 
 		function onVideoError(e) {
-			if (!closed && e.target === video) reconnect();
+			if (closed || e.target !== video) return;
+			// A decode error (MEDIA_ERR_DECODE) that keeps coming back is the
+			// browser telling us its decoder cannot play this stream -- a Safari
+			// that rejects a conformant HEVC (#335). Rebuilding the same decoder
+			// only reproduces it (the ~2s flash), so after DECODE_MAX strikes stop
+			// and hand the page an `undecodable` verdict, the same one onInit gives
+			// for a mime MSE will not take: the chain then tries the software
+			// decoder (which can play what the hardware one refused) or MJPEG.
+			// Strikes far apart in time are a one-off, not an inability, so a gap
+			// longer than DECODE_RESET_MS starts the count over.
+			var code = video.error && video.error.code;
+			if (code === 3) {
+				var now = Date.now();
+				if (now - lastDecodeAt > DECODE_RESET_MS) decodeErrs = 0;
+				lastDecodeAt = now;
+				if (++decodeErrs >= DECODE_MAX) {
+					onState('mjpeg', 'undecodable ' + (lastCodec || 'h265'));
+					stop();
+					return;
+				}
+			}
+			reconnect();
 		}
 		// The element is replaced on every (re)connect, so mute and volume have
 		// to be re-applied — cloneNode does not carry them, and defaulting to
@@ -155,6 +186,7 @@ window.MajesticVideo = (function () {
 		function onInit(info) {
 			markSignal();
 			failCount = 0;
+			lastCodec = info.codec;
 			onCodec(info.codec, info.codecString, info.width, info.height);
 			// Null when we asked for audio and the camera has none to give —
 			// a mic that is off or not producing. Report it either way so the

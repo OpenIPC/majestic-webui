@@ -291,5 +291,49 @@ function load() {
 		env.player.destroy();
 	}
 
+	group('a decoder that cannot take the stream falls through instead of looping');
+	{
+		// Safari can reject a conformant HEVC with MEDIA_ERR_DECODE about a
+		// second in; rebuilding the same MSE decoder reproduces it forever (the
+		// ~2s flash of majestic-webui#335). After two strikes the player must
+		// stop and hand the page an `undecodable` verdict so the chain can try
+		// the software decoder or MJPEG.
+		const env = load();
+		env.play();
+		check('one session to start with', env.sockets.length === 1, env.sockets.length + '');
+
+		// First decode error: still worth one rebuild (it might be a one-off).
+		env.video.error = { code: 3 };
+		env.video.fire('error');
+		await sleep(1300); // the reconnect backoff
+		check('rebuilt once after the first decode error', env.sockets.length === 2, env.sockets.length + '');
+		env.play();
+
+		// Second strike in quick succession: give up on this decoder.
+		env.video.error = { code: 3 };
+		env.video.fire('error');
+		check('fell through with an undecodable verdict',
+			env.states.indexOf('mjpeg undecodable h264') >= 0, env.states.join(','));
+		await sleep(1300);
+		check('and did not open a third session', env.sockets.length === 2, env.sockets.length + '');
+		check('no session is left live', env.live().length === 0, env.live().length + ' live');
+		env.player.destroy();
+	}
+
+	group('a lone decode error is not treated as an inability');
+	{
+		// One decode glitch, then clean playback, must not fall through — the
+		// count only fires on failures close together in time.
+		const env = load();
+		env.play();
+		env.video.error = { code: 3 };
+		env.video.fire('error');
+		await sleep(1300);
+		check('it rebuilt rather than fell through',
+			env.states.indexOf('mjpeg undecodable h264') < 0 && env.sockets.length === 2,
+			env.states.join(',') + ' / ' + env.sockets.length);
+		env.player.destroy();
+	}
+
 	done();
 })();
