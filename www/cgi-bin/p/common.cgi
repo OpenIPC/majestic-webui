@@ -113,7 +113,13 @@ check_password() {
 
 ex() {
 	echo "<div class=\"${2:-ex}\"><h6># ${1}</h6><pre class=\"small\">"
-	eval "$1" | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g"
+	# 2>&1 because this block exists to SHOW what a command said, and what a
+	# failing one says is on stderr. Without it the operator gets an empty box
+	# while the reason goes to a stderr the service sends nowhere -- on a panel
+	# whose whole job is to report. wireguard.cgi's `ip link show wg0` is the
+	# case that shows it: on a camera with no tunnel the command fails, and the
+	# page had nothing to say about why.
+	eval "$1" 2>&1 | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g"
 	echo "</pre></div>"
 }
 
@@ -280,7 +286,23 @@ field_text() {
 field_textedit() {
 	local n="$1"
 	local l="$2"
-	local v=$(cat "$3")
+	# The path need not name a readable regular file, and both halves of that
+	# matter. editor.cgi passes "$editor_file" straight from GET_f: it is empty
+	# until a file is chosen, and it is whatever the query string said
+	# otherwise -- a directory included, which editor.cgi logs as not found
+	# without stopping the render. `cat` on either writes to a stderr the
+	# service sends nowhere, and shows the operator the same empty textarea it
+	# shows for a file that is simply absent. So test for a regular file, not
+	# merely a readable one: -r alone is true of a directory.
+	#
+	# And redirect anyway. The test says what this accepts; the redirect covers
+	# what it cannot predict -- a regular file that passes -r and still fails to
+	# read, /proc/self/mem being the reachable example, since the path is
+	# whatever the query string said. Nothing is hidden by it: the operator's
+	# answer is the empty textarea either way, and editor.cgi writes the banner
+	# that explains why.
+	local v=""
+	[ -f "$3" ] && [ -r "$3" ] && v=$(cat "$3" 2>/dev/null)
 	echo "<p class=\"textarea\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<textarea id=\"${n}\" name=\"${n}\" class=\"form-control\">${v}</textarea>"
