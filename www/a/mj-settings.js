@@ -3043,6 +3043,8 @@
 		// reset from ever learning that a selector exists.
 		const placers = {};
 		const HELD = {};
+		// What each overlay's picker holds of its picture, for the stand-in.
+		const logos = {};
 		// Whether each overlay draws a picture, and which one the panel is
 		// showing — the tab strip is the selected overlay's, not everyone's.
 		const kinds = {};
@@ -3077,7 +3079,7 @@
 			}
 			if (panel && held.anchor)
 				panel.pad(held, placeBox, () => placers[n]);
-			buildContent(textBox, held, n, preview, (logo) => {
+			logos[n] = buildContent(textBox, held, n, preview, (logo) => {
 				kinds[n] = logo;
 				// Only the one on screen decides the strip.
 				if (panel && shownKind === n) panel.offer('look', !logo);
@@ -3085,6 +3087,14 @@
 				// and the placer is what derives it — but it repaints on a
 				// video frame, so without this the header goes on naming the
 				// text for as long as no frame arrives.
+				if (placers[n]) placers[n].repaint();
+			}, () => {
+				// The picture arrived — from the camera, after a reload —
+				// and the stand-in is drawn from it. It is fetched before
+				// the placers exist and lands whenever the camera answers,
+				// which can be after the last repaint; without this the
+				// stand-in stayed the word-sized box until something else
+				// happened to repaint it.
 				if (placers[n]) placers[n].repaint();
 			});
 		}
@@ -3285,10 +3295,23 @@
 				if (!HELD[n].anchor) continue;
 				placers[n] = mountOsdText(preview, HELD[n], note, panel, n,
 					{ pickAt: pickAt, camRect: camRectFor,
-					  rectsChanged: () => setTimeout(refreshOsdRects, 400) });
+					  rectsChanged: () => setTimeout(refreshOsdRects, 400),
+					  // An overlay that says something and is not on the
+					  // camera's list is one the page has to draw itself —
+					  // but only once the camera has answered, since before
+					  // that the list is empty for every overlay.
+					  standIn: () => camRects.known && listedOverlay(n),
+					  logo: () => logos[n] ? logos[n].logo() : null });
 				placers[n].setActive(false);
 				anyPlacer = true;
 			}
+			// The stand-ins are decided by the camera's answer, so a new
+			// answer repaints them: a save that made the camera draw a line
+			// takes the page's copy of it off, a tick later.
+			camRects.onRects = () => {
+				for (const k of Object.keys(placers)) placers[k].repaint();
+			};
+			state.liveCleanup.push(() => { camRects.onRects = null; });
 			// The same placer, on the same hooks. It hit-tests against the
 			// rectangle the camera reports for the mark exactly as the others
 			// do against theirs, so dragging it is the gesture already written
@@ -3719,6 +3742,11 @@
 					mk.addEventListener('click', () => pick({ t: 'mask', i: -1 }));
 					chips.appendChild(mk);
 				}
+				// Whatever changed the row changed what the picture has to
+				// show: a line added is a stand-in to draw, a picture chosen
+				// is a stand-in to resize, and neither reaches the placer
+				// through any event of its own.
+				repaint();
 			}
 
 			// Picking a mask ON the picture has to move the chip too, or the two
@@ -4268,7 +4296,11 @@
 	// asked again; the estimate is still there behind it, which is what every
 	// build before this had.
 	const camRects = { by: {}, ok: true, mark: null, onMark: null,
-		budget: null, widths: 0, bytes: 0, onCost: null };
+		budget: null, widths: 0, bytes: 0, onCost: null,
+		// Whether the camera has answered at all this visit. Before it has,
+		// "no rectangle for this overlay" is not a fact about the overlay,
+		// and nothing below may draw a conclusion from it.
+		known: false, sig: '', onRects: null };
 
 	// Logo files whose overlay has been cleared but not yet saved.
 	//
@@ -4358,6 +4390,15 @@
 				const was = camRects.mark;
 				camRects.by = by;
 				camRects.mark = mark;
+				camRects.known = true;
+				// The stand-ins are drawn from this answer — see undrawn() in
+				// mountOsdText — so a change in it repaints them, and a repeat
+				// of the same answer is not worth a repaint every two seconds.
+				const sig = JSON.stringify(by);
+				if (sig !== camRects.sig) {
+					camRects.sig = sig;
+					if (camRects.onRects) camRects.onRects();
+				}
 				if (was !== mark && camRects.onMark) camRects.onMark();
 				if (wasCost !== camRects.widths + '/' + camRects.bytes &&
 					camRects.onCost) camRects.onCost();
@@ -4527,16 +4568,90 @@
 		const box = () => {
 			const f = preview.frame();
 			const cam = hooks.camRect && f ? hooks.camRect(overlay, f) : null;
-			const p = cam ? pic() : null;
+			const p = pic();
 			if (cam && p && f.w) {
 				const k = p.w / f.w;
 				return { w: cam.w * k, h: cam.h * k };
 			}
+			const lg = logoBox(p);
+			if (lg) return lg;
 			return {
 				w: ghost.offsetWidth || 120,
 				h: ghost.offsetHeight || 20,
 			};
 		};
+
+		// A LOGO'S OWN SIZE ON SCREEN, before the camera has drawn it.
+		//
+		// The stand-in for a picture used to be the word "Logo" in a box the
+		// size of the word — so a 240-pixel-wide picture was placed by
+		// dragging a 50-pixel box, and where its far edge would land was a
+		// guess until Save. The page has the picture: it decoded and
+		// quantised it before sending it, and asks the camera for it back
+		// after a reload. What it also has is the frame width the upload was
+		// sized against, which is the whole of the camera's own scaling rule
+		// — the picture is drawn at w * frame / ref on every stream, so on
+		// the picture on screen it is w * p.w / ref, whichever stream that
+		// is. Once the camera reports the rectangle it actually gave the
+		// region, that answer wins; this is only for the gap before it.
+		function logoBox(p) {
+			const lg = hooks.logo && hooks.logo();
+			if (!lg || !lg.w || !lg.h || !lg.ref || !p || !p.w) return null;
+			const k = p.w / lg.ref;
+			return { w: Math.max(2, lg.w * k), h: Math.max(2, lg.h * k) };
+		}
+
+		// Whether the page has to draw this overlay itself, because the
+		// camera is not: a line or a picture added and not yet saved, or a
+		// leaf whose switch is off. The camera's report is the only honest
+		// source for "not drawn", so nothing is concluded before it has
+		// answered once — and the caller says whether this overlay is one
+		// that ought to be on the picture at all, since an empty index and
+		// the vendor mark both have a placer and neither wants a stand-in.
+		//
+		// Before this the stand-in existed only under a finger: an item
+		// added to the picture was invisible from the moment it was added
+		// until Save, and appeared only while being dragged — so a fresh
+		// logo or line could not be found on the picture to be dragged in
+		// the first place.
+		function undrawn() {
+			if (!hooks.standIn || !hooks.standIn()) return false;
+			const f = preview.frame();
+			return !!f && !(hooks.camRect && hooks.camRect(overlay, f));
+		}
+
+		// What the stand-in is made of: the picture, where this overlay
+		// draws one and the page holds it, and the line otherwise. The same
+		// box the drag arithmetic measures — see box() — so a picture is
+		// dragged by its own edges rather than by the word "Logo".
+		let dressedUrl = '';
+		function dress(p) {
+			ghost.style.fontSize = em(p).toFixed(1) + 'px';
+			const lg = hooks.logo && hooks.logo();
+			const b = lg && lg.url ? logoBox(p) : null;
+			if (b) {
+				ghost.classList.add('mj-osd-ghost-img');
+				ghost.style.width = b.w.toFixed(1) + 'px';
+				ghost.style.height = b.h.toFixed(1) + 'px';
+				// A data URL of the whole picture, set only when it changes:
+				// a style write of a megabyte string per repaint is a
+				// repaint that costs something.
+				if (dressedUrl !== lg.url) {
+					dressedUrl = lg.url;
+					ghost.style.backgroundImage = 'url("' + lg.url + '")';
+				}
+				ghost.textContent = '';
+				return;
+			}
+			if (dressedUrl) {
+				dressedUrl = '';
+				ghost.style.backgroundImage = '';
+			}
+			ghost.classList.remove('mj-osd-ghost-img');
+			ghost.style.width = '';
+			ghost.style.height = '';
+			ghost.textContent = shown();
+		}
 
 		// The span an offset is measured against is the frame being SHOWN,
 		// which is the picture on screen — not video0. That is the same reading
@@ -4635,8 +4750,7 @@
 			layer.hidden = !p;
 			catcher.hidden = !active || !p;
 			if (!p) return;
-			ghost.style.fontSize = em(p).toFixed(1) + 'px';
-			ghost.textContent = shown();
+			dress(p);
 			guides.style.left = p.x + 'px';
 			guides.style.top = p.y + 'px';
 			guides.style.width = p.w + 'px';
@@ -4650,7 +4764,15 @@
 				const c = current(p);
 				ghost.style.left = c.x + 'px';
 				ghost.style.top = c.y + 'px';
-				ghost.style.visibility = 'hidden';
+				// And SHOWN there, when the camera is not drawing this
+				// overlay — dashed, because it is the page's drawing and not
+				// the camera's, and without the readout and the guides,
+				// which belong to a drag. Hidden otherwise: the camera's
+				// rendering is on the video already and a second copy
+				// beside it would be two overlays for one setting.
+				const rest = undrawn();
+				ghost.style.visibility = rest ? '' : 'hidden';
+				ghost.classList.toggle('mj-osd-rest', rest);
 				read.hidden = true;
 				guides.classList.remove('mj-osd-on');
 			}
@@ -5001,7 +5123,7 @@
 	// has to drop Look for a picture: every control on it — the font, its size,
 	// its weight, its outline, the plate behind the text — is about drawing
 	// text, and none of it touches a bitmap the camera blits.
-	function buildContent(box, held, overlay, preview, onKind) {
+	function buildContent(box, held, overlay, preview, onKind, onPicture) {
 		if (!held.template && !held.image) return;
 
 		const wrap = el('div', 'mj-osd-content');
@@ -5029,6 +5151,7 @@
 			held.image.p.hidden = true;
 			picker = buildLogo(logoPart, held.image, held.template, overlay,
 				preview);
+			if (onPicture) picker.onPicture(onPicture);
 		}
 
 		const isLogo = () =>
@@ -5074,6 +5197,11 @@
 
 		if (held.image) held.image.control.addEventListener('change', paint);
 		paint();
+
+		// The picture the overlay draws, as the stand-in needs it: its size,
+		// the frame width it was sized against, and the pixels. Null for a
+		// line, and for a picture the page has not got hold of.
+		return { logo: () => (picker ? picker.logo() : null) };
 	}
 
 	// A LOGO: a picture drawn into the overlay instead of a line.
@@ -5135,6 +5263,27 @@
 		// lost a whole section of a form to exactly that.
 		let drawn = false;   // the canvas holds this overlay's picture
 		let asked = false;   // the camera has been asked for it
+		// The picture as the stand-in on the video needs it: pixel size, the
+		// frame width it is scaled against, and the pixels as a data URL.
+		// Set when the camera has it — after an upload lands, or when it
+		// hands one back — and cleared when the overlay stops drawing it.
+		let pict = null;
+		let onPicture = null;
+		// WHICH PICTURE AN ANSWER IS ABOUT. The fetch, the upload and the
+		// removal are all asynchronous against each other, and a reply
+		// belongs to the picture that was current when it was asked for:
+		// a fetch of the old picture that lands after a replacement was
+		// uploaded used to paint the old pixels over the new ones and size
+		// the stand-in to them, and an upload that landed after the cross
+		// was pressed wrote the path back into a field just cleared. Every
+		// start bumps this, every completion checks it, and a stale answer
+		// is dropped on the floor.
+		let gen = 0;
+
+		function have(p) {
+			pict = p;
+			if (onPicture) onPicture();
+		}
 
 		function paint() {
 			const has = !!String(field.getValue() || '').trim();
@@ -5144,6 +5293,19 @@
 			if (!has) {
 				shot.hidden = true;
 				empty.hidden = false;
+				// The picture is gone, whoever took it: the button below, the
+				// cross on the item row, a per-row reset, a save that put the
+				// field back. Everything the picker holds of it goes with it,
+				// and anything still in flight about it is disowned — a fetch
+				// of it that lands now would otherwise hand the stand-in a
+				// picture the overlay no longer draws, and a line added to
+				// this index next would stand in as that picture.
+				if (pict || drawn || asked) {
+					drawn = false;
+					asked = false;
+					gen++;
+					have(null);
+				}
 				// What happens if this is left empty, said honestly: it depends
 				// on whether the overlay has anything else to say.
 				const t = tplField ? String(tplField.getValue() || '').trim() : '';
@@ -5171,6 +5333,7 @@
 		function fetchShot() {
 			if (asked) return;
 			asked = true;
+			const my = ++gen;
 			// Cleared on failure below: a transient network error left this
 			// set for the life of the editor, so every later repaint refused
 			// to look again and the picture stayed on its error message even
@@ -5182,9 +5345,17 @@
 					const w = +r.headers.get('X-Osd-Width');
 					const h = +r.headers.get('X-Osd-Height');
 					if (!w || !h) throw new Error('no size');
-					return r.arrayBuffer().then((b) => ({ w: w, h: h, b: b }));
+					// The width the picture is scaled against, which the
+					// camera keeps in the file. A file without one is drawn
+					// pixel for pixel, and that is what its own width says.
+					const ref = +r.headers.get('X-Osd-Ref') || w;
+					return r.arrayBuffer().then(
+						(b) => ({ w: w, h: h, b: b, ref: ref }));
 				})
-				.then(({ w, h, b }) => {
+				.then(({ w, h, b, ref }) => {
+					// Not this picture any more: replaced or removed while
+					// the camera was answering.
+					if (my !== gen) return;
 					const src = new Uint8Array(b);
 					if (src.length < w * h * 4) throw new Error('short');
 					const ctx = shot.getContext('2d');
@@ -5201,11 +5372,13 @@
 					}
 					ctx.putImageData(out, 0, 0);
 					drawn = true;
+					have({ w: w, h: h, ref: ref, url: shot.toDataURL() });
 					shot.hidden = false;
 					empty.hidden = true;
 					say(w + '×' + h + ' · on the camera');
 				})
 				.catch(() => {
+					if (my !== gen) return;
 					// Asked again next time. This is the difference between a
 					// logo that is not there and one the camera did not answer
 					// for just now, and only the second is worth retrying —
@@ -5255,6 +5428,7 @@
 
 		function upload(q) {
 			const ref = refWidth();
+			const my = ++gen;
 			say('Sending ' + q.w + '×' + q.h + '…');
 			return apiFetch(
 				'/api/v1/osd/image?overlay=' + overlay + '&w=' + q.w +
@@ -5269,6 +5443,11 @@
 					throw new Error(t || ('HTTP ' + r.status));
 				})))
 				.then((j) => {
+					// Overtaken: another picture was chosen, or this one
+					// removed, before the camera answered. The file on the
+					// camera is whichever request it took last, and that
+					// request's own completion is the one that says so.
+					if (my !== gen) return;
 					// This upload has already overwritten the file, so a
 					// removal staged earlier in this visit must not delete it.
 					logoBin.delete(overlay);
@@ -5277,6 +5456,9 @@
 					// wanted.
 					drawn = true;
 					asked = false;
+					// What the canvas holds is what the camera now has, sized
+					// against the frame this upload named.
+					have({ w: q.w, h: q.h, ref: ref, url: shot.toDataURL() });
 					// The camera decides the path; this only records it, and
 					// it is a staged edit like any other until Save.
 					field.setValue(j.path);
@@ -5306,7 +5488,9 @@
 						Math.round(q.w * 100 / ref) +
 						'% of the picture’s width. Press Save to draw it.');
 				})
-				.catch((e) => say('Could not send it: ' + e.message, true));
+				.catch((e) => {
+					if (my === gen) say('Could not send it: ' + e.message, true);
+				});
 		}
 
 		input.addEventListener('change', () => {
@@ -5349,8 +5533,10 @@
 
 		drop.addEventListener('click', () => {
 			if (onBack) setTimeout(onBack, 0);
-			drawn = false;
-			asked = false;
+			// The rest of what removal means — the canvas, the pixels held
+			// for the stand-in, anything in flight — is done by paint() when
+			// the field goes empty below, because the field can be emptied
+			// from outside this picker too.
 			// STAGED, like the field beside it. Deleting the file here made
 			// one half of this change permanent the moment it was pressed
 			// while the other half waited for Save — so leaving without
@@ -5381,6 +5567,11 @@
 			// Run after the picture goes, so the caller can make sure the
 			// overlay still says something.
 			onBack: (fn) => { onBack = fn; },
+			// The picture itself, for the stand-in on the video, and a word
+			// when it changes hands — the fetch lands whenever the camera
+			// answers, and whoever draws from it has to be told.
+			logo: () => pict,
+			onPicture: (fn) => { onPicture = fn; },
 		};
 	}
 
@@ -7849,7 +8040,9 @@
 		// A sticky bar does not push anything; it sits on whatever is at the
 		// bottom of the window. On a leaf whose picture is sized from the
 		// viewport height that is the control row under the picture, so the
-		// picture gives the bar its height back while it is there.
+		// picture gives the bar its height back while it is there — except
+		// on the Overlay leaf, which keeps that room at all times: see
+		// --mj-pv-toolbar in the stylesheet.
 		if (bar.parentNode) bar.parentNode.classList.toggle('mj-has-toolbar', show);
 
 		const lbl = document.getElementById('mj-dirty-count');
