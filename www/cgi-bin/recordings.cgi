@@ -1,6 +1,22 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
+
+<%
+# The name of this page is already on the nav bar, lit, and in the browser tab.
+# A full-width band under both of them said it a third time and cost about a
+# hundred pixels of every window -- and on this page those pixels are the
+# difference between seeing the day and not: measured on a 1470x866 Mac window,
+# the ribbon and the scrub band sat below the fold and "Whole day" was the last
+# thing on screen. camera.cgi hid the band for the same reason and put its
+# heading in the rail beside the picture (#239); this page has no rail, so the
+# heading stays in the document and stops being drawn. Not deleted: a page with
+# no heading at all is worse for anything reading the document rather than
+# looking at it.
+hide_title=1
+%>
 <%in p/header.cgi %>
+
+<h2 class="mj-sr"><%= $page_title %></h2>
 
 <!-- Two banners, and they are not interchangeable. #rec-health is about the
      card and stays put for as long as the card is in trouble; #rec-note is the
@@ -20,7 +36,7 @@
      someone for a fifth of a second and takes it away again. -->
 <div id="rec-main" hidden>
 
-	<div id="rec-daynav" class="d-flex flex-wrap align-items-center gap-2 mb-3"></div>
+	<div id="rec-daynav" class="d-flex flex-wrap align-items-center gap-2 mb-2"></div>
 
 	<div class="row g-4">
 		<div class="col-12 col-lg-8">
@@ -41,7 +57,7 @@
 					<button class="btn btn-sm btn-outline-secondary" id="rec-dl" type="button">Save whole clip</button>
 				</div>
 
-				<div class="rec-lbl mt-3">Whole day</div>
+				<div class="rec-lbl mt-2">Whole day</div>
 				<div class="rec-strip" id="rec-strip"></div>
 				<!-- The camera's own 24 hours. Relabelled by recordings.js when the
 				     viewer asks to read the day on their clock instead; left exactly
@@ -51,7 +67,7 @@
 					<span>12</span><span>14</span><span>16</span><span>18</span><span>20</span><span>22</span><span>24</span>
 				</div>
 
-				<div class="d-flex justify-content-between align-items-center mt-3">
+				<div class="d-flex justify-content-between align-items-center mt-2">
 					<span class="rec-lbl" id="rec-view-label"></span>
 					<span class="x-small text-secondary">drag to scrub · shift-drag to select · scroll to zoom</span>
 				</div>
