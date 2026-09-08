@@ -40,6 +40,7 @@ hide_title=1; full_bleed=1
 <script src="/a/mj-sources.js"></script>
 <script src="/a/preview-multipart.js"></script>
 <script src="/a/preview-transport.js"></script>
+<script src="/a/preview-chain.js"></script>
 <script src="/a/preview-served.js"></script>
 <script src="/a/charts.js"></script>
 <script src="/a/preview-adapt.js"></script>

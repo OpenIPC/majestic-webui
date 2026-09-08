@@ -127,6 +127,7 @@ fi
 <script src="/a/mj-sources.js"></script>
 <script src="/a/preview-multipart.js"></script>
 <script src="/a/preview-transport.js"></script>
+<script src="/a/preview-chain.js"></script>
 <script src="/a/preview-served.js"></script>
 <%
 # preview-hero.js publishes window.MajesticHero (fullscreen + snapshot) before

@@ -21,16 +21,19 @@
 //
 // WHAT IS NOT HERE, and why. The transport ladder's *rules* — which transport to
 // prefer, what to remember, when a failure is durable — stay in
-// preview-transport.js, and the swap itself stays in preview-swap.js. Both are
-// already shared with the Live View page (preview-page.js), which wants
-// different things from an outcome: it has an MJPEG fallback, a badge, a stats
-// panel and a zoom rule, none of which belong on a settings panel. This is the
-// third consumer of those two modules, not a second copy of them.
+// preview-transport.js; the swap itself stays in preview-swap.js; and the walk
+// down the chain, with the software rung's retry ladder, stays in
+// preview-chain.js. All three are shared with the Live View page
+// (preview-page.js), which wants different things from an OUTCOME: it has an
+// MJPEG fallback, a badge, a stats panel and a zoom rule, none of which belong
+// on a settings panel. This is a consumer of those modules, not a second copy
+// of any of them — the walk was a copy once, and had to be fixed twice (#309,
+// #342) before it was shared (#400).
 //
 // Requires: preview.js, preview-webrtc.js, preview-swap.js, preview-wasm.js,
-// preview-transport.js, and (optionally) preview-served.js for served-channel
-// reflection and preview-hero.js for the two icon buttons. `apiFetch` is a
-// global from main.js.
+// preview-transport.js, preview-chain.js, and (optionally) preview-served.js
+// for served-channel reflection and preview-hero.js for the two icon buttons.
+// `apiFetch` is a global from main.js.
 window.MajesticPreview = (function () {
 	'use strict';
 
@@ -49,14 +52,14 @@ window.MajesticPreview = (function () {
 	let uid = 0;
 
 	// The whole player stack, not just the decoder. The old inline version
-	// checked the same three names before building anything, because a page
+	// checked the same names before building anything, because a page
 	// served without them — an older install, a half-finished deploy — threw
 	// midway and left a stage on screen with nothing behind it and no error
 	// anywhere. A caller that cannot have a picture should find out by asking,
 	// and still be able to render its controls.
 	function available() {
 		return !!(window.MajesticVideo && window.MajesticSwap &&
-			window.MajesticTransport);
+			window.MajesticTransport && window.MajesticChain);
 	}
 
 	function el(tag, cls) {
@@ -196,28 +199,20 @@ window.MajesticPreview = (function () {
 		// channel is still a request worth honouring — an H.264 substream plays
 		// in a browser that refused an H.265 main.
 		let exhausted = false;
-		// A page-level reconnect ladder for the software rung, matching
-		// preview-page.js and backing the worker's own (hevc-wasm@v0.1.1): a
-		// pinned worker older than that gives up on the first dropped socket,
-		// and this panel — which has no MJPEG fallback — then shows its "could
-		// not be played" alert for good, the #288 dead-end on the settings page.
-		// Retry the rung a few times before the alert; reset by a promotion.
-		const WASM_MAX_RETRIES = 5;
-		const WASM_RETRY_MS = 1000;
-		let wasmRetries = 0;
-		// A pending retry, a "played long enough to count as recovered" timer,
-		// and the generation they belong to. A channel change bumps the
-		// generation so a superseded retry cannot start a wasm player over the
-		// newer session, and `destroyed` stops a retry firing after the panel
-		// closes and leaking a worker/socket.
-		let wasmRetryTimer = null;
-		let wasmHealthyTimer = null;
-		let wasmGen = 0;
-		let destroyed = false;
-		function cancelWasmTimers() {
-			if (wasmRetryTimer) { clearTimeout(wasmRetryTimer); wasmRetryTimer = null; }
-			if (wasmHealthyTimer) { clearTimeout(wasmHealthyTimer); wasmHealthyTimer = null; }
-		}
+		// The walk down the chain and the software rung's retry ladder, shared
+		// with the Live View page (preview-chain.js). This stage supplies how to
+		// attach a rung (the swap, directly — there is no MJPEG-only source to
+		// detect here), where a codec change restarts from, which codec the
+		// channel on screen is configured as, and what to do when the walk runs
+		// out: this stage has no rung of its own below the software decoder, so
+		// that is the alert, in `lost` below. `swap` is declared further down;
+		// every callback runs at failure time, never at construction.
+		const chain = window.MajesticChain.make({
+			start: (kind) => swap.start(kind),
+			starting: () => window.MajesticTransport.preferred(),
+			codecFor: () => get(stream ? 'video1.codec' : 'video0.codec'),
+			onExhausted: (kind, detail) => lost(detail),
+		});
 		let frame = null;
 		// Bumped whenever the picture stops being what it was — a channel
 		// change, a dropped chain. An async consumer (the luma sampler reads a
@@ -335,52 +330,12 @@ window.MajesticPreview = (function () {
 		}
 		function hideAlert() { alertEl.hidden = true; }
 
-		// The same walk the Live View page makes, for the same reasons — see
-		// preview-page.js:nextRung. Kept as its own dozen lines rather than
-		// shared, on the standing division above: what a page DOES about an
-		// outcome differs, while the rules about which transport to prefer live
-		// in preview-transport.js.
-		function nextRung(kind, detail) {
-			// A channel change can change the codec, and the failure that put us
-			// on the software rung was about the channel we left. Ask the whole
-			// chain again rather than giving up: an H.264 substream plays
-			// natively, and this stage exists to be looked at.
-			if (String(detail || '').split(' ')[0] === 'codec-changed') {
-				swap.start(window.MajesticTransport.preferred());
-				return;
-			}
-			if (kind === 'webrtc') { swap.start('mse'); return; }
-			if (kind === 'mse' && window.MajesticTransport.softwareRungFor(detail)) {
-				swap.start('wasm');
-				return;
-			}
-			// MSE could not hold the socket to read a codec ('unreachable'); if
-			// the config says this channel is one the software decoder handles,
-			// let its worker try before the panel gives up. Same reasoning as
-			// preview-page.js:nextRung (#288).
-			if (kind === 'mse' && window.MajesticTransport.softwareRungForCodec(
-				detail, get(stream ? 'video1.codec' : 'video0.codec'))) {
-				swap.start('wasm');
-				return;
-			}
-			// The software rung dropped its socket. Retry it a bounded few times
-			// before the alert, so a transient blip does not end a working H.265
-			// preview here (#288). Reset by a promotion (onPromoted); only a
-			// socket drop reports 'unreachable', so this cannot loop.
-			if (kind === 'wasm' && String(detail || '').split(' ')[0] === 'unreachable' &&
-				wasmRetries < WASM_MAX_RETRIES) {
-				wasmRetries++;
-				cancelWasmTimers();
-				const g = wasmGen;
-				wasmRetryTimer = setTimeout(function () {
-					wasmRetryTimer = null;
-					// Not after teardown (would leak a worker), not for a stale
-					// generation (a channel change superseded it), not once the
-					// chain has already given up.
-					if (!destroyed && !exhausted && wasmGen === g) swap.start('wasm');
-				}, WASM_RETRY_MS * wasmRetries);
-				return;
-			}
+		// The walk ran out: preview-chain.js has tried the other transport and
+		// the software rung, with its retries. This stage has no rung of its
+		// own below that and there is not going to be one, so what it owes the
+		// viewer is the reason — an empty black box is indistinguishable from a
+		// camera that is off.
+		function lost(detail) {
 			exhausted = true;
 			// A canvas that has stopped being painted keeps its last frame and
 			// nothing hides it, so anything sampling the picture — the Live
@@ -445,6 +400,14 @@ window.MajesticPreview = (function () {
 						heldReply.hold(attachId, info);
 						flushServed();
 					},
+					// The software rung's own frame count, for the chain's retry
+					// budget: sustained decode on the session ON SCREEN refills it.
+					// Only for that rung — asking the MSE player for stats would
+					// start its own per-second sampling for no consumer, and its
+					// frames say nothing about this ladder.
+					onStats: kind === 'wasm'
+						? (s) => { if (swap.isLive(attachId)) chain.healthy(s); }
+						: undefined,
 					stream: stream,
 					// Opened with the volume it should have rather than given it
 					// afterwards; see preview-swap.js on why applying
@@ -498,30 +461,13 @@ window.MajesticPreview = (function () {
 			// Nothing on screen left to protect. Past MSE this stage has no
 			// preview at all, so what it owes the viewer is the reason — an
 			// empty black box is indistinguishable from a camera that is off.
-			onExhausted: (kind, detail) => { nextRung(kind, detail); },
+			onExhausted: (kind, detail) => { chain.next(kind, detail); },
 			onLive: (st, d, kind) => {
 				// The live player's own report that it is playing. This is the
 				// only place a FIRST attach can say so — it was promoted before
 				// it had anything, so its picture arrives here rather than as a
 				// second promotion.
-				if (st === 'playing') {
-					announcePlaying(kind);
-					// A software session that keeps playing for a moment (not just
-					// one decoded frame) is a genuine recovery, so the retry
-					// budget resets and the next drop gets a fresh ladder. A
-					// decoder that plays a frame and immediately drops never arms
-					// this, so it still exhausts to the alert. No
-					// per-frame stats reach this panel, hence the short timer.
-					if (kind === 'wasm') {
-						if (wasmHealthyTimer) clearTimeout(wasmHealthyTimer);
-						const hg = wasmGen;
-						wasmHealthyTimer = setTimeout(function () {
-							wasmHealthyTimer = null;
-							if (!destroyed && wasmGen === hg && swap.playing() === 'wasm')
-								wasmRetries = 0;
-						}, 1500);
-					}
-				}
+				if (st === 'playing') announcePlaying(kind);
 				if (kind !== 'webrtc') {
 					// MSE is the last thing to try, so its giving up ends the
 					// chain — and it says so on the live player's own channel
@@ -535,7 +481,7 @@ window.MajesticPreview = (function () {
 						// closed itself, and its socket's onclose restarts the
 						// reconnect ladder for a session already given up on.
 						swap.stop();
-						nextRung(kind, d);
+						chain.next(kind, d);
 					}
 					return;
 				}
@@ -701,10 +647,9 @@ window.MajesticPreview = (function () {
 		// ── The handle ───────────────────────────────────────────────────────
 
 		function goToStream(n) {
-			// A channel change supersedes any pending software-rung retry or
-			// recovery timer: they belonged to the channel being left.
-			wasmGen++;
-			cancelWasmTimers();
+			// A channel change supersedes any pending software-rung retry: it
+			// belonged to the channel being left.
+			chain.cancel();
 			// A deliberate pick is a fresh ask: the old served answer and its
 			// message described the channel being left, and n is the channel the
 			// next reply is judged against.
@@ -827,8 +772,7 @@ window.MajesticPreview = (function () {
 			destroy: function () {
 				// A pending software-rung retry must not fire after teardown and
 				// recreate a worker/socket against the detached stage.
-				destroyed = true;
-				cancelWasmTimers();
+				chain.cancel();
 				// Through the swap, which closes the trial as well as the player
 				// on screen. Destroying only the live player would leave a
 				// transport still being judged behind on every teardown — a live

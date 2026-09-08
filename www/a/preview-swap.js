@@ -14,18 +14,18 @@
 // the trial reports that it is playing. A trial that fails is destroyed and the
 // screen never learns it happened.
 //
-// WHY THIS IS SHARED, when the fall-back dance next to it deliberately is not.
-// That dance is a dozen lines and the two pages want different things from it —
-// one has a badge, an MJPEG fallback and a toggle to keep in step, the other a
-// bare video element. This is not that. It is a state machine with invariants
-// that are not obvious and are wrong in quiet ways: two players live at once,
-// an id per attachment because "is this the current generation" cannot describe
-// two current things, and a dead player that must be marked or its last frame
+// WHY THIS IS SHARED. It is a state machine with invariants that are not
+// obvious and are wrong in quiet ways: two players live at once, an id per
+// attachment because "is this the current generation" cannot describe two
+// current things, and a dead player that must be marked or its last frame
 // sits on screen for ever. A second copy would drift, and the drift would look
-// like a picture rather than an error.
+// like a picture rather than an error. The walk that decides what to try next
+// when a player fails is shared too, in preview-chain.js, for the same reason
+// — it was a copy per page once, and was fixed twice (#309, #342).
 //
-// What stays with the caller is every decision: what to try next, what to put
-// on the badge, what a failure means. This owns only the swap.
+// What stays with the caller is what an outcome MEANS on its page: what to put
+// on the badge, what a failure means for its controls, what to show when the
+// chain runs out. This owns only the swap.
 window.MajesticSwap = function (opts) {
 	// opts.elements   [get, get] — two functions, each returning a video
 	//                 element. Functions rather than nodes: the MSE player

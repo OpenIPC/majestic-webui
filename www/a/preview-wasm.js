@@ -3,9 +3,11 @@
 // This is NOT a third transport. It is the same /ws/video bytes the MSE player
 // reads, decoded in WebAssembly instead of by the browser, so the picker keeps
 // naming the transport exactly once and the viewer's remembered preference is
-// untouched by what is a codec problem. The page reaches it as a rung of the
-// fallback chain, on the `undecodable` reason code and only for a codec this
-// decoder handles — see preview-page.js.
+// untouched by what is a codec problem. Both preview pages reach it as a rung
+// of the fallback chain (preview-chain.js), on the `undecodable` reason code
+// — or a socket that dropped before any verdict on a channel configured as
+// H.265 — and only for a codec this decoder handles; the two gates are
+// preview-transport.js's.
 //
 // It returns the same nine-member object every other player returns, so
 // preview-swap.js needs to know nothing about it.
