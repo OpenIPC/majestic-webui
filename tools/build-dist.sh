@@ -33,7 +33,11 @@ find "$PKG/www" -name '*.cgi' -exec chmod 0755 {} +
 # minified file is ever not valid JS.
 find "$PKG/www" -name '*.js' ! -name '*.min.js' | while IFS= read -r f; do
 	# .js suffix on the temp so `node --check` recognises it as a script
-	"$BIN/terser" "$f" --compress --mangle -o "$f.tmp.js"
+	# comments=false, not the CLI default: terser's default is "some", which
+	# keeps /*! and @license banners. No hand-written .js here carries one and
+	# no vendored .min.js exists to need one, so the default only leaves a way
+	# for a comment to reach a camera unnoticed.
+	"$BIN/terser" "$f" --compress --mangle --format comments=false -o "$f.tmp.js"
 	node --check "$f.tmp.js"
 	mv "$f.tmp.js" "$f"
 done
@@ -58,9 +62,7 @@ done
 # measured, the whitespace is another 578 bytes out of 55 KB — 0.6% — for a
 # transform that can take a meaningful space out from between two inline
 # elements. That is not a trade worth making on the pages with no fallback.
-#
-# The .cgi templates are not touched and must not be: they are haserl, and an
-# HTML minifier does not know what <% %> is.
+
 find "$PKG/www" -name '*.html' | while IFS= read -r f; do
 	"$BIN/html-minifier-terser" --remove-comments --minify-js --minify-css \
 		-o "$f.tmp" "$f"
@@ -87,6 +89,27 @@ find "$PKG/www" -name '*.html' | while IFS= read -r f; do
 	[ -s "$f.tmp" ] || { echo "build-dist: $f minified to nothing" >&2; exit 1; }
 	mv "$f.tmp" "$f"
 done
+
+# strip the comments out of the haserl templates.
+#
+# This is the step an HTML minifier could not do -- it does not know what <% %>
+# is, and two thirds of the comment bytes in a .cgi are not HTML comments at
+# all but shell and haserl ones. tools/strip-cgi-comments.js knows all three.
+#
+# It is worth more than the .html pages above: measured over this tree, 83 KB
+# of 297 KB, and on the Live page 17 KB of the 32 KB a browser is sent EVERY
+# time somebody opens it -- uncompressed, because a CGI reply comes back
+# chunked with no Content-Encoding however the request asks for one.
+node tools/strip-cgi-comments.js "$PKG/www"
+
+# ...and refuse to build a payload that still carries any.
+#
+# Last step before the tar on purpose: it checks what is about to ship rather
+# than what the sources say, so it also catches a minifier that stopped
+# removing comments, a step accidentally reordered, and a new asset type nobody
+# ran through either loop. check.yml runs this same script on a pull request,
+# so the gate fires there too.
+node tools/check-no-comments.js "$PKG"
 
 tar czf majestic-webui-dist.tar.gz -C "$OUT" majestic-webui
 echo "built majestic-webui-dist.tar.gz ($(wc -c < majestic-webui-dist.tar.gz) bytes)"
