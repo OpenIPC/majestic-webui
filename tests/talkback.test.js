@@ -90,8 +90,13 @@ function makeEnv(o) {
 		RTCPeerConnection: RTCPeerConnection,
 		isSecureContext: o.secure !== false,
 	};
+	env.docHandlers = {};
+	const document = {
+		addEventListener(t, fn) { (env.docHandlers[t] = env.docHandlers[t] || []).push(fn); },
+		removeEventListener(t, fn) { env.docHandlers[t] = (env.docHandlers[t] || []).filter((f) => f !== fn); },
+	};
 	const ctx = {
-		window: win, navigator: navigator, WebSocket: WebSocket,
+		window: win, navigator: navigator, WebSocket: WebSocket, document: document,
 		RTCPeerConnection: RTCPeerConnection,
 		location: { protocol: 'https:', host: 'cam' },
 		setTimeout, clearTimeout, setInterval, clearInterval, console,
@@ -263,9 +268,36 @@ async function cameraTakesMicButSendsNothing() {
 	p.destroy();
 }
 
+async function playRetriesOnGesture() {
+	group('a muted video refused autoplay retries on the first user gesture (#317)');
+	// Opera for Android refuses autoplay of the muted WebRTC picture on a fresh
+	// load; the picture is ready but paused. The player must retry play() on the
+	// first user gesture rather than leave it paused for ever.
+	const env = makeEnv();
+	let plays = 0, reject = true;
+	const video = {
+		muted: true, volume: 1, srcObject: null,
+		play() { plays++; return reject ? Promise.reject({ name: 'NotAllowedError' }) : Promise.resolve(); },
+	};
+	env.MajesticWebRTC.attach(video, {});
+	await tick();
+	check('a peer connection was made', env.pcs.length >= 1, env.pcs.length + '');
+	// The camera's video track arrives; play() is attempted and refused.
+	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
+	await tick();
+	check('play() was attempted and refused', plays === 1, plays + ' plays');
+	check('a one-shot gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
+		JSON.stringify(Object.keys(env.docHandlers)));
+	// The viewer taps: play() is retried, and this time it is allowed.
+	reject = false;
+	env.docHandlers.pointerdown[0]();
+	check('play() was retried on the gesture', plays === 2, plays + ' plays');
+	check('and the one-shot listener removed itself', (env.docHandlers.pointerdown || []).length === 0);
+}
+
 (async () => {
 	for (const t of [reentrancy, cameraTakesMicButSendsNothing, destroyedDuringPrompt, cameraDeclines,
-		trackEndsOnItsOwn, destroyStopsMic, insecureContext, refused]) {
+		trackEndsOnItsOwn, destroyStopsMic, insecureContext, refused, playRetriesOnGesture]) {
 		await t();
 	}
 	done();

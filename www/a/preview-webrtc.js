@@ -61,6 +61,25 @@ window.MajesticWebRTC = (function () {
 		let stream = opts.stream | 0;
 
 		let pc = null, ws = null, statsTimer = null, signalTimer = null;
+		// Autoplay refused on a fresh document load with no user activation (Opera
+		// for Android, majestic-webui#317): the muted picture is ready but paused,
+		// and play() is never retried, so nothing shows until an in-app navigation
+		// happens to carry an activation. Retry play() on the first user gesture
+		// instead. One-shot, capture phase so a tap the controls also handle still
+		// counts, and guarded for the vm tests, which have no document.
+		let gestureArmed = false;
+		function playOnGesture(v, alive) {
+			if (gestureArmed || typeof document === 'undefined') return;
+			gestureArmed = true;
+			const evs = ['pointerdown', 'touchstart', 'keydown'];
+			const retry = function () {
+				gestureArmed = false;
+				evs.forEach(function (t) { try { document.removeEventListener(t, retry, true); } catch (e) {} });
+				if (alive && !alive()) return;
+				try { const p = v.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+			};
+			evs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
+		}
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let failCount = 0, gotMedia = false;
 		// From the caller, not fixed at false: a player staged as a replacement
@@ -512,7 +531,14 @@ window.MajesticWebRTC = (function () {
 					// aborts the video track's play() with AbortError: treating
 					// that as an autoplay refusal reports "no audio" over a
 					// working Opus stream, which is exactly what it did.
-					if (!current(my) || video.muted) return;
+					if (!current(my)) return;
+					// A muted element has no sound to blame: autoplay was refused on a
+					// fresh load with no user activation (#317). Retry on the first gesture.
+					if (video.muted) {
+						if (err && err.name === 'NotAllowedError')
+							playOnGesture(video, function () { return current(my); });
+						return;
+					}
 					if (!err || err.name !== 'NotAllowedError') return;
 					onAudio(null);
 					// Renegotiate rather than just muting. The audio
