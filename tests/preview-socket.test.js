@@ -320,6 +320,28 @@ function load() {
 		env.player.destroy();
 	}
 
+	group('a stream switch does not inherit the previous stream\'s decode strike');
+	{
+		// One decode error on Main, then the viewer switches to Sub within the
+		// window: a single error on the new stream must not fall through, because
+		// the switch is a fresh decode context.
+		const env = load();
+		env.play();
+		env.video.error = { code: 3 };
+		env.video.fire('error');   // strike 1 on the first stream
+		await sleep(1300);
+		env.player.setStream(1);   // deliberate switch -> resets the count
+		await sleep(400);
+		env.play();
+		env.video.error = { code: 3 };
+		env.video.fire('error');   // strike 1 on the new stream, not 2
+		check('the switched stream was not routed away',
+			env.states.indexOf('mjpeg undecodable h264') < 0, env.states.join(','));
+		await sleep(1300);
+		check('it rebuilt for the new stream instead', env.live().length === 1, env.live().length + ' live');
+		env.player.destroy();
+	}
+
 	group('a lone decode error is not treated as an inability');
 	{
 		// One decode glitch, then clean playback, must not fall through — the

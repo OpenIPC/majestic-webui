@@ -331,6 +331,12 @@ window.MajesticVideo = (function () {
 		function reopen() {
 			backoff = 1000;
 			failCount = 0;
+			// A deliberate switch (Main/Sub, audio) is a fresh decode context:
+			// the new stream must not inherit the old one's decode strikes, or a
+			// single error on it within DECODE_RESET_MS of an earlier one would
+			// route it straight to software/MJPEG (only reconnect(), the error
+			// path, keeps the count).
+			decodeErrs = 0; lastDecodeAt = 0;
 			stop();
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			reconnectTimer = setTimeout(function () { reconnectTimer = null; open(); }, 300);
