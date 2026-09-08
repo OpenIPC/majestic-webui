@@ -16,7 +16,12 @@ case "$QUERY_STRING" in
 		fi
 		;;
 	*)
-		if ntpd -n -q -N; then
+		if [ ! -f /etc/ntp.conf ]; then
+			# busybox ntpd has no built-in peers -- with the file gone it prints
+			# its usage and exits, and "Synchronization failed!" was all the page
+			# ever said about a camera that could not sync and never would.
+			payload='{"result":"danger","message":"No NTP servers are configured: /etc/ntp.conf is missing. Fill the servers in above and save."}'
+		elif ntpd -n -q -N; then
 			payload='{"result":"success","message":"Camera time synchronized with NTP server."}'
 		else
 			payload='{"result":"danger","message":"Synchronization failed!"}'
