@@ -2,9 +2,9 @@
 // preview so a fix lands in one place.
 //
 // WebRTC takes ?stream= as a preference, not an order: the camera can serve the
-// other channel — a codec its negotiation can give this browser, or a daemon
-// fault (majestic#299 arrived as "Main selected, Sub displayed" with nothing
-// admitting it). A new majestic states in the signalling which channel a
+// other channel — a codec its negotiation can give this browser, or a fault
+// that once had Main selected while Sub was on screen with nothing admitting
+// it. A camera whose firmware states in the signalling which channel a
 // session actually serves (#240/#249), and this decides what the picker should
 // then say and do. The DECISION is pure; a small applier holds the state that
 // remembers what has already been said and turns each reply into the caller's
@@ -40,8 +40,16 @@ window.MajesticServed = (function () {
 			return { servedCh: null, wanted: wanted, key: shownKey,
 				adopt: null, message: null, hide: false };
 		}
-		var mismatch = info.requested !== null &&
-			info.channel !== info.requested;
+		// The camera stated the channel but not the request (the signalling
+		// parser maps an omitted `requested` to null): a mismatch cannot be told
+		// and there is no "instead of X" to word, but the picture IS on servedCh,
+		// so the radios follow it — silently. Any standing message and its key
+		// are left as they are.
+		if (info.requested === null) {
+			return { servedCh: servedCh, wanted: wanted, key: shownKey,
+				adopt: servedCh, message: null, hide: false };
+		}
+		var mismatch = info.channel !== info.requested;
 		if (!mismatch) {
 			// A match the viewer never asked for is not good news: a reopen
 			// inside a fallen-back session requests the adopted channel and is
@@ -122,5 +130,37 @@ window.MajesticServed = (function () {
 		};
 	}
 
-	return { decide: decide, make: make };
+	// A holder around an applier, for a caller that stages sessions off-screen.
+	// The settings preview attaches each transport as a hidden trial and promotes
+	// it only once it proves a picture, so a served-channel reply can arrive for a
+	// session that is not the one on screen — and may never be, if the trial
+	// fails. The reply is kept against the attachment id that carried it and
+	// applied only when that id is the one live; a trial that never goes live
+	// never moves the radios. A page that applies replies directly (the Live View
+	// page) does not need this and calls the applier itself.
+	//
+	//   applier   a make() handle (apply/reset/channel).
+	// Returns { hold, flush, reset, held }:
+	//   hold(id, info)  keep this reply against attachment id (replacing any).
+	//   flush(isLive)   if the held reply's id is live now, apply it once and drop
+	//                   it; isLive(id) is the caller's on-screen test.
+	//   reset(n)        drop any held reply and reset the applier to ask n.
+	//   held()          the held { id, info } or null (for tests and assertions).
+	function holder(applier) {
+		var held = null;
+		return {
+			hold: function (id, info) { held = { id: id, info: info }; },
+			flush: function (isLive) {
+				if (held && isLive(held.id)) {
+					var info = held.info;
+					held = null;
+					applier.apply(info);
+				}
+			},
+			reset: function (n) { held = null; applier.reset(n); },
+			held: function () { return held; },
+		};
+	}
+
+	return { decide: decide, make: make, holder: holder };
 })();

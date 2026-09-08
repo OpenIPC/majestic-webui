@@ -246,9 +246,11 @@ window.MajesticPreview = (function () {
 		// A reply that arrived while its session was still a trial: moving the
 		// radios for a session that may yet be thrown away would announce a
 		// switch that never happened, so it is applied only once that session is
-		// the one on screen. The served state itself — which channel, the
-		// viewer's ask, what has been said — lives in the shared applier below.
-		let heldServed = null;
+		// the one on screen. The holding, and the served state it feeds — which
+		// channel, the viewer's ask, what has been said — both live in the shared
+		// module (MajesticServed.holder around make()); this is its handle, set
+		// once the applier exists below, and null on a build without the module.
+		let heldReply = null;
 
 		// Forgetting the frame is news. Everything laid out against the picture —
 		// an overlay's rectangles, a tool that needs to map a drag into it — is
@@ -392,6 +394,13 @@ window.MajesticPreview = (function () {
 			// an overlay laid out over an empty stage.
 			forgetFrame();
 			announced = null;
+			// The alert is the whole account now. A served-channel toast left
+			// over from the WebRTC session that opened the chain would sit on the
+			// empty stage still reading "showing the other channel", when nothing
+			// is on screen to show. resetServed() drops that state and hides the
+			// message; the Live page never needs this because its fallback reuses
+			// the one message slot, but this preview owns a toast of its own.
+			resetServed();
 			showAlert(detail);
 			if (opts.onLost) opts.onLost(detail);
 		}
@@ -432,7 +441,8 @@ window.MajesticPreview = (function () {
 					// screen, for the same reason onCodec's report is: a trial's
 					// reply must not move the radios for a session that may fail.
 					onServed: (info) => {
-						heldServed = { id: attachId, info: info };
+						if (!heldReply) return;
+						heldReply.hold(attachId, info);
 						flushServed();
 					},
 					stream: stream,
@@ -581,23 +591,22 @@ window.MajesticPreview = (function () {
 			show: showServedMsg,
 			hide: hideServedMsg,
 		});
-		// A reply is held against its attachment id until that attachment is the
-		// one on screen; then it is real news. A trial that fails never becomes
-		// live, so its held reply is simply never applied.
+		// The holder wraps the applier with the staging rule: a reply is kept
+		// against its attachment id until that id is the one on screen, then
+		// applied once. A trial that fails never goes live, so its held reply is
+		// never applied. All of that lives in the shared module now, tested there;
+		// these two wrappers only supply this stage's on-screen test (swap.isLive)
+		// and keep the call sites reading as they did.
+		if (served) heldReply = window.MajesticServed.holder(served);
 		function flushServed() {
-			if (served && heldServed && swap.isLive(heldServed.id)) {
-				const info = heldServed.info;
-				heldServed = null;
-				served.apply(info);
-			}
+			if (heldReply) heldReply.flush(function (id) { return swap.isLive(id); });
 		}
 		// A deliberate channel change is a fresh ask; a non-WebRTC transport
 		// serves the exact number it is given, so a prior mismatch is moot. The
 		// held reply is dropped either way. `n` (a channel) becomes the ask the
 		// next reply is judged against.
 		function resetServed(n) {
-			heldServed = null;
-			if (served) served.reset(n);
+			if (heldReply) heldReply.reset(n);
 		}
 		// A click anywhere on the toast dismisses it — a message small enough to
 		// need aim at its × is a message that gets missed.
