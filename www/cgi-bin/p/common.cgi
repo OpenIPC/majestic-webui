@@ -113,7 +113,12 @@ check_password() {
 
 ex() {
 	echo "<div class=\"${2:-ex}\"><h6># ${1}</h6><pre class=\"small\">"
-	eval "$1" | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g"
+	# 2>&1 because this block exists to SHOW what a command said, and what a
+	# failing one says is on stderr. Without it the operator gets an empty box
+	# and the reason goes to majestic's stderr, which under the service goes
+	# nowhere: `ip link show wg0` on a camera with no tunnel printed "can't find
+	# device" there and nothing here, on a panel whose whole job is to report.
+	eval "$1" 2>&1 | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g"
 	echo "</pre></div>"
 }
 
@@ -280,7 +285,12 @@ field_text() {
 field_textedit() {
 	local n="$1"
 	local l="$2"
-	local v=$(cat "$3")
+	# The file need not exist. editor.cgi passes "$editor_file", which is empty
+	# until a file is chosen, so opening the editor from the menu ran `cat ""`
+	# and put "can't open ''" on majestic's stderr on every visit. An unreadable
+	# path is an empty box, which is what the page shows anyway.
+	local v=""
+	[ -r "$3" ] && v=$(cat "$3")
 	echo "<p class=\"textarea\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<textarea id=\"${n}\" name=\"${n}\" class=\"form-control\">${v}</textarea>"

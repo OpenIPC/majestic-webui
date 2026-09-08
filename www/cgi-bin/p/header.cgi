@@ -1,6 +1,26 @@
 #!/usr/bin/haserl
 <%in p/pages.cgi %>
 <%
+# A partial, not a page. majestic execs this file for anyone who asks for
+# /cgi-bin/p/header.cgi, and haserl then runs it with none of p/common.cgi's
+# helpers defined: eleven "not found" lines on majestic's stderr and a fragment
+# with an empty <title>, from a URL nothing links to and nobody can use.
+#
+# Every real page includes common.cgi before this one, so the helpers ARE the
+# test. Inside this block rather than one of its own: what follows the closing
+# tag is the response's own headers, and a block above them would put a newline
+# in front of the status line.
+#
+# An `HTTP/1.1` line sets the code, the way j/fw-latest.cgi does it; a CGI
+# `Status:` header does not -- measured, it arrives as a response header of
+# that name and the reply is a 500. Plain \n for the same reason: a \r survives
+# into the header value.
+command -v esc >/dev/null 2>&1 || {
+	printf 'HTTP/1.1 404 Not Found\nContent-type: text/plain; charset=UTF-8\n\n'
+	printf 'Not a page.\n'
+	exit 0
+}
+
 # The page's name, from the one place it is written. This runs here rather
 # than in p/common.cgi because a page's own block sits between the two
 # includes -- so a page that needs a name this file cannot know (one built
