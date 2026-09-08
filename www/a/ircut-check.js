@@ -259,15 +259,14 @@
 			});
 		}
 
-		// With nothing wired and nothing calibrated, what happens next depends
-		// on the daemon. A current one takes the automatic exposure-based mode
-		// — an observation, not a fault — and says so in night_mode_source
-		// (carried here as sample.src, null when the gauge is absent). One
-		// whose SoC reports no exposure state retires the monitor and says
-		// source 0. An older daemon says nothing and is genuinely blind: it
-		// owns the three runtime switches (wireRuntime hides them while the
-		// monitor is on) and then never decides anything, so day/night is
-		// frozen AND unreachable.
+		// With nothing wired and nothing calibrated, the camera takes the
+		// automatic exposure-based mode — an observation, not a fault — and
+		// says so in night_mode_source, carried here as sample.src. A SoC that
+		// reports no exposure state retires the monitor and says source 0
+		// instead, which is a fault and has something to do about it.
+		//
+		// src is null where no sample has arrived yet, or where the heartbeat
+		// is down: that is not knowing, and nothing below speaks from it.
 		const senses = has(nm.lightSensorPin) ||
 			(has(nm.minThreshold) && has(nm.maxThreshold));
 		if (monitor && !senses) {
@@ -326,19 +325,17 @@
 						'it on the map for it to have something to watch.',
 					fix: 'nightMode',
 				});
-			} else {
-				out.push({
-					id: 'monitor-blind', level: 'warning',
-					title: 'Automatic day/night has nothing to watch',
-					detail: 'Automatic day/night is on, but nothing tells it how ' +
-						'dark it is: no daylight sensor is connected, and no day ' +
-						'or night threshold is set. Current firmware decides ' +
-						'from the sensor’s own exposure in this situation — ' +
-						'this camera has not reported that mode, so a firmware ' +
-						'update would give it that.',
-					fix: 'nightMode',
-				});
 			}
+			// No third arm. The one that stood here answered a src of neither 0
+			// nor 4 by telling the operator their firmware was too old to
+			// decide from the exposure — prose for a state the project does
+			// not have, since the page and the daemon ship in one image and
+			// move together (#377 removed its twin). It was also what an
+			// ABSENT src produced, and src is absent whenever no sample has
+			// arrived: on the Dashboard that is every camera with automatic
+			// mode running, which is how the reporter of #325 got told their
+			// working monitor had nothing to watch. An unrecognised source is
+			// not knowing, and not knowing has no finding.
 		}
 
 		// Three mechanisms decide the same thing and the camera picks one; the
@@ -1019,13 +1016,32 @@
 			const marks = [];
 			if (lo !== null) marks.push({ v: lo, color: '#2fb673', label: 'day' });
 			if (hi !== null) marks.push({ v: hi, color: '#e0a020', label: 'night' });
+			// Why there is no countdown here, said where the countdown would
+			// have been. The two mechanisms look interchangeable on the page —
+			// a pair of numbers and a delay either way — so the reporter of
+			// #325 read the missing countdown as a fault in the legacy half.
+			// It is a difference in what the camera does: a threshold monitor
+			// switches on the first check that lands past a threshold, with no
+			// dwell to serve out, while automatic mode holds a condition for
+			// its two delays before acting. Saying nothing left the operator
+			// to conclude the timer was broken.
+			//
+			// The period is the same "seconds between light checks" both
+			// mechanisms are armed from, and majestic floors an unset or zero
+			// one at 5 s — so the number here is the one the camera is using,
+			// not the one the config happens to hold.
+			const period = pin(nm.monitorDelay);
+			const everyS = period > 0 ? period : 5;
 			return {
 				mode: 'thresholds', chart: true,
 				value: ('isp_again' in v) ? v.isp_again : null,
 				marks: marks,
 				line: modeWord +
 					'Comparing raw sensor gain against the thresholds ' +
-					'(vendor-specific units).' + lampNote,
+					'(vendor-specific units). It switches on the first check ' +
+					'past one — every ' + everyS + ' s — so there is no wait ' +
+					'to count down; the two delays belong to automatic mode.' +
+					lampNote,
 				unit: '',
 			};
 		}
