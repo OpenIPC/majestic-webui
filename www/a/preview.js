@@ -8,6 +8,9 @@ window.MajesticVideo = (function () {
 	// is enough to tell a permanent inability from a one-off glitch.
 	const DECODE_MAX = 2;
 	const DECODE_RESET_MS = 30000;
+	// How far playback may fall behind where it was seen to run before the
+	// player seeks it back to the live edge. A budget for DRIFT, not a
+	// latency: see syncLive() for why the two are not the same thing.
 	const LIVE_EDGE = 1.0;
 
 	// Audio is opt-in per connection: the camera only encodes it while someone
@@ -72,6 +75,12 @@ window.MajesticVideo = (function () {
 		let rxBytes = 0;
 		let stallCount = 0;
 		function onWaiting() { stallCount++; }
+		// The live-edge rule's memory (syncLive): how far behind the newest
+		// appended frame this pipeline runs when it is running, the playhead
+		// at the last look (so that its advance can be told from its being
+		// moved), whether the next advance is the first since a seek, and
+		// whether play() has been refused since the pipeline was built.
+		let lagFloor = 0, lagLearn = true, lastCt = null, playRefused = false;
 
 		const mseOk = ('MediaSource' in window);
 		const NO_SIGNAL_MS = 4000;
@@ -93,13 +102,20 @@ window.MajesticVideo = (function () {
 			try {
 				if (sb && !sb.updating && sb.buffered.length) {
 					const end = sb.buffered.end(sb.buffered.length - 1);
-					if (end > 8) sb.remove(0, end - 4);
+					// Behind the playhead, which sits lagFloor (plus up to a
+					// budget of drift) back from the end: cutting under it would
+					// force the seek that syncLive() exists not to make.
+					const keep = Math.max(4, lagFloor + LIVE_EDGE + 1);
+					if (end > keep + 4) sb.remove(0, end - keep);
 				}
 			} catch (e) {}
 		}
 
 		function teardownMse() {
 			started = false; queue = [];
+			// The lag floor describes the pipeline being torn down; the next
+			// one learns its own.
+			lagFloor = 0; lagLearn = true; lastCt = null; playRefused = false;
 			// A redundant init may have armed this for a moov that never arrived
 			// (the socket dropped first). Clear it, or the next connection's real
 			// init segment would be dropped and playback could not start.
@@ -247,15 +263,85 @@ window.MajesticVideo = (function () {
 			}, { once: true });
 		}
 
+		// Keep playback at the live edge -- by seeking it forward when it has
+		// fallen behind, and ONLY then.
+		//
+		// This used to seek whenever the buffer ran more than LIVE_EDGE ahead
+		// of the playhead, whether or not the playhead was moving. That reads
+		// the gap as latency to be cut, and it is not always that: part of it
+		// is what the browser's decoder needs before it will output anything.
+		// Chrome's hardware H.264 path sizes its reorder window from the SPS,
+		// and when the SPS carries no bitstream_restriction it takes the
+		// level's whole DPB -- 16 frames for a level 5.1 1080p stream, which
+		// is what an Ingenic T31 emits. At the ~9 fps that camera delivers,
+		// 16 frames is 1.7 s: the decoder cannot produce a frame inside the
+		// 1.0 s budget, so every seek flushed it before it had produced one,
+		// the next fragment found the buffer 1.0 s ahead again and seeked
+		// again, and nothing reached the screen except the four frames an IDR
+		// flushes out of the DPB -- once per GOP, every 12.6 s. Measured in
+		// Chrome with VA-API on the lab T31: 12 frames and 46 seeks in 46 s.
+		// WebRTC on the same camera and browser plays from the first second,
+		// because nothing there seeks. The HiSilicon next to it never
+		// showed this because its level 5.0 at 2592x1520 gives a 7-frame
+		// window, 0.35 s at 20 fps, under the budget -- the same rule, one
+		// camera on each side of the cliff.
+		//
+		// So the seek is decided on DRIFT: how much further behind playback
+		// has fallen than this pipeline was seen to run. Three parts.
+		//
+		//  1. Nothing is seeked while nothing is moving. A pipeline that has
+		//     produced no frame since it was built or last seeked is not
+		//     behind, it is starting; a seek now only starts it over. The
+		//     playhead advancing (past where the last look, or the last
+		//     seek, left it) is the one sign that means frames are on screen
+		//     in every browser -- a decoded-frame count can rise for frames a
+		//     seek then discards, so it is not used.
+		//
+		//  2. The lag the pipeline runs at is learned, not assumed. The first
+		//     time the playhead is seen moving -- at the start, and again
+		//     after every seek -- the gap to the buffer's end is what this
+		//     decoder and renderer need: the floor, tightened by any smaller
+		//     gap seen later. A seek is made when the gap exceeds the floor
+		//     by LIVE_EDGE: after a stall, a tab in the background, a link
+		//     that delivered a burst. The T31 above runs 2 s behind under a
+		//     hardware decoder and is never seeked for it, because no seek
+		//     can shorten it: measured, seeking it once at the start cost a
+		//     1.3 s blackout right after the first picture and bought 0.2 s.
+		//
+		//  3. The one start whose lag is not the pipeline's is a start that
+		//     autoplay refused: the buffer fills while play() waits for a
+		//     click, and the seconds it fills with would be learned as if a
+		//     decoder needed them. A refusal is remembered, and the first
+		//     movement after one is judged against a floor of zero -- the
+		//     absolute budget the rule always had -- so it is seeked to the
+		//     edge, and the floor is learned from where playback resumes.
+		//
+		// Two corrections stay unconditional, because they are not about
+		// latency: a playhead under the buffer's start (the buffer was
+		// trimmed under it) or past its end can only be moved.
 		function syncLive() {
 			try {
 				if (!video.buffered.length) return;
 				const start = video.buffered.start(0);
 				const end = video.buffered.end(video.buffered.length - 1);
 				const ct = video.currentTime;
-				if (ct < start || ct > end + 0.25 || end - ct > LIVE_EDGE)
-					video.currentTime = Math.max(start, end - 0.1);
+				if (ct < start || ct > end + 0.25) { seekLive(start, end); return; }
+				const moving = lastCt !== null && ct > lastCt + 0.001;
+				lastCt = ct;
+				if (!moving) return;
+				const lag = end - ct;
+				if (lagLearn) { lagFloor = lag; lagLearn = false; }
+				else if (lag < lagFloor) lagFloor = lag;
+				if (playRefused) { playRefused = false; lagFloor = 0; }
+				if (lag - lagFloor > LIVE_EDGE) seekLive(start, end);
 			} catch (e) {}
+		}
+		function seekLive(start, end) {
+			video.currentTime = Math.max(start, end - 0.1);
+			// Read back rather than assumed: the browser may clamp it, and the
+			// jump itself must not count as the playhead advancing.
+			lastCt = video.currentTime;
+			lagLearn = true;
 		}
 
 		function onBinary(buf) {
@@ -267,7 +353,12 @@ window.MajesticVideo = (function () {
 			if (queue.length > MAX_QUEUE) queue.splice(0, queue.length - MAX_QUEUE);
 			pump();
 			syncLive();
-			if (video.paused) video.play().catch(function () {});
+			// A refusal is remembered for syncLive(): the seconds that pile up
+			// in the buffer while autoplay waits for a click are not what the
+			// pipeline needs, and must not be learned as if they were.
+			if (video.paused) {
+				video.play().catch(function () { playRefused = true; });
+			}
 		}
 
 		function open() {
