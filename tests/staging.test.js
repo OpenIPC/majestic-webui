@@ -152,6 +152,7 @@ function load(pickedTransport, cfg, cfgDelay, wasmOk, srcs, srcDelay, store) {
 			available: () => true,
 			preferred: () => pickedTransport || 'mse',
 			choose(k) { env.chosen = k; }, demote() { env.demoted = true; },
+			durable: (s) => s === 'fallback',
 			impl: (k) => (impls[k] || impls.mse),
 			iceServers: () => [],
 			// The real rule lives in preview-transport.js and is tested there;
@@ -324,6 +325,23 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		env.made[1].say('busy', 'the camera is serving as many viewers as it can');
 		check('the working player is untouched', !env.made[0].destroyed);
 		check('and no demotion was recorded', env.demoted !== true);
+	}
+
+	group('a live WebRTC session that goes busy stages MSE without a demotion');
+	{
+		// The live-player mid-session path, distinct from the trial-drop above:
+		// a live WebRTC player reports 'busy'. It stages MSE like a 'fallback'
+		// does, but 'busy' is transient, so nothing is remembered (#402).
+		const env = load('webrtc');
+		await tick();
+		env.made[0].say('playing');
+		env.made[0].say('busy', 'the camera is serving as many viewers as it can');
+		check('a replacement was staged', env.made.length === 2, env.made.length + '');
+		check('and it is MSE', env.made[1].kind === 'mse', env.made[1].kind);
+		check('but no demotion was recorded', env.demoted !== true);
+		check('the MSE radio is lit meanwhile',
+			env.el('mj-transport-m').checked === true &&
+			env.el('mj-transport-w').checked === false);
 	}
 
 	group('when the live player dies and its replacement fails too');

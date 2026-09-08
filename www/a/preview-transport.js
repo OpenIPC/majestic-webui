@@ -125,6 +125,20 @@ window.MajesticTransport = (function () {
 	// it is reached by the chain, never remembered, never picked. So a caller
 	// asking for 'wasm' has decided already, and an unknown string still lands
 	// on the player that plays anything the browser can decode.
+	// Whether a WebRTC session's ENDING is worth remembering as a demotion.
+	// 'fallback' is the camera or this browser saying it cannot serve WebRTC at
+	// all — a durable fact that still expires, since demote() timestamps it —
+	// while 'busy' says only that the camera is full right now, which it will
+	// not be for long and so is never remembered. One rule, asked wherever a
+	// WebRTC session ends: a dropped trial (a page's onFailed) and a live player
+	// giving up mid-session (its onLive), on both the Live page and the settings
+	// preview, so the two cannot drift (#402). It takes the machine STATE, not
+	// the reason detail — the detail is a human string ('RTCPeerConnection
+	// failed', 'the camera refused the offer'), the state is 'fallback'/'busy'.
+	function durable(state) {
+		return state === 'fallback';
+	}
+
 	// Whether the software-decode rung is worth trying for a given failure.
 	// Here rather than in the walk (preview-chain.js) because it is a RULE,
 	// which is what this module is for: the walk asks whether the attempt is
@@ -306,6 +320,7 @@ window.MajesticTransport = (function () {
 		choose: choose,
 		demote: demote,
 		impl: impl,
+		durable: durable,
 		softwareRungFor: softwareRungFor,
 		softwareRungForCodec: softwareRungForCodec,
 		multipartRungFor: multipartRungFor,

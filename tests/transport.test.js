@@ -271,4 +271,17 @@ check('and the legacy key is kept for the next attempt',
 	stuck.store['mj-preview-stream'] === '0',
 	JSON.stringify(stuck.store));
 
+group('which WebRTC endings are worth remembering as a demotion');
+{
+	const T = load(true);
+	// 'fallback' — the camera or this browser cannot serve WebRTC at all — is
+	// durable; 'busy' — merely full right now — is not. Everything else a
+	// player might report is not a WebRTC demotion either.
+	check("'fallback' is durable", T.durable('fallback') === true);
+	check("'busy' is not", T.durable('busy') === false);
+	check("'mjpeg' is not", T.durable('mjpeg') === false);
+	check('an empty string is not', T.durable('') === false);
+	check('undefined is not', T.durable(undefined) === false);
+}
+
 done();
