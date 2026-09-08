@@ -1603,6 +1603,26 @@ button.mj-osd-chip,
 	line-height: 1.5;
 }
 
+/* The served-channel message: a dismissible toast across the top of the
+   picture, over a stream that IS playing — so it clears the bottom bar and is
+   distinct from the centred no-picture alert (which only shows when there is no
+   picture, so the two never overlap). Its toast body reuses .mj-adapt-toast's
+   glass; this rule only places and centres it. The [hidden] override is
+   required because a display value on the base would beat the hidden
+   attribute's own display:none. */
+.mj-pv-msg {
+	position: absolute;
+	inset: 0.75rem 0.75rem auto;
+	z-index: 3;
+	display: flex;
+	justify-content: center;
+	/* The strip is a container, not a surface: only the toast in it takes a
+	   click, so the gap around it does not swallow a tap meant for the picture. */
+	pointer-events: none;
+}
+.mj-pv-msg[hidden] { display: none; }
+.mj-pv-msg > * { pointer-events: auto; max-width: min(100%, 30rem); cursor: pointer; }
+
 /* On-picture chrome: black glass in both themes, because its background is the
    picture and not the page surface. */
 .mj-glass {
