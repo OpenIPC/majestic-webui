@@ -75,12 +75,15 @@ function stripHtmlComments(text) {
 
 /* Walk one line of shell, carrying the quoting state in and out. Stops at an
  * unquoted `#` in command position, so an apostrophe inside a comment cannot
- * open a quote that swallows the rest of the file. Reports the first heredoc
- * the line opens. */
+ * open a quote that swallows the rest of the file.
+ *
+ * Reports EVERY heredoc the line opens, in the order the shell will consume
+ * their bodies. `cat <<A <<B` is one command with two of them, and a reader
+ * that remembers only the first treats B's body as code. */
 function scanShellLine(line, quote) {
 	let q = quote;
 	let esc = false;
-	let heredoc = null;
+	const heredocs = [];
 	let i = 0;
 	while (i < line.length) {
 		const c = line[i];
@@ -95,21 +98,21 @@ function scanShellLine(line, quote) {
 		if (c === '\\') { esc = true; i++; continue; }
 		if (c === "'" || c === '"') { q = c; i++; continue; }
 		if (c === '#' && (i === 0 || /[ \t;&|(]/.test(line[i - 1]))) break;
-		if (!heredoc && c === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
+		if (c === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
 			const m = /^<<(-?)[ \t]*(?:'([^']*)'|"([^"]*)"|([A-Za-z_][A-Za-z0-9_]*))/
 				.exec(line.slice(i));
 			if (m) {
-				heredoc = {
+				heredocs.push({
 					dash: m[1] === '-',
 					delim: m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4],
-				};
+				});
 				i += m[0].length;
 				continue;
 			}
 		}
 		i++;
 	}
-	return { quote: q, heredoc };
+	return { quote: q, heredocs };
 }
 
 function stripShell(code, where) {
@@ -117,6 +120,10 @@ function stripShell(code, where) {
 	const out = [];
 	let quote = null;
 	let hd = null;
+	/* Bodies queue up in the order the shell reads them: one command line can
+	 * open several, and the second body starts where the first delimiter
+	 * ended. */
+	const pending = [];
 	let body = [];
 	const flushBody = () => {
 		if (body.length) {
@@ -130,7 +137,7 @@ function stripShell(code, where) {
 			if (t === hd.delim) {
 				flushBody();
 				out.push(line);
-				hd = null;
+				hd = pending.length ? pending.shift() : null;
 			} else {
 				body.push(line);
 			}
@@ -140,7 +147,8 @@ function stripShell(code, where) {
 		out.push(line);
 		const r = scanShellLine(line, quote);
 		quote = r.quote;
-		if (r.heredoc) hd = r.heredoc;
+		pending.push(...r.heredocs);
+		if (pending.length) hd = pending.shift();
 	}
 	if (hd) {
 		throw new Error(
@@ -203,8 +211,32 @@ function stripCgi(src, where) {
 function shellLines(src, where) {
 	where = where || '<input>';
 	const out = [];
+
+	/* One walker for both kinds of file. A plain script used to be returned
+	 * line for line, which handed back heredoc BODIES as if they were code --
+	 * sbin/updatewebui's usage text is a heredoc, and a line of it starting
+	 * with a keyword, or holding a brace, is data that would be read as shell.
+	 * The state a code block needs is exactly the state a script needs. */
+	const walk = (code, base) => {
+		let quote = null;
+		let hd = null;
+		const pending = [];
+		code.split('\n').forEach((t, n) => {
+			if (hd) {
+				const d = hd.dash ? t.replace(/^[\t]+/, '') : t;
+				if (d === hd.delim) hd = pending.length ? pending.shift() : null;
+				return;
+			}
+			if (!quote) out.push({ line: base + n, text: t });
+			const r = scanShellLine(t, quote);
+			quote = r.quote;
+			pending.push(...r.heredocs);
+			if (pending.length) hd = pending.shift();
+		});
+	};
+
 	if (src.indexOf('<%') === -1) {
-		src.split('\n').forEach((t, n) => out.push({ line: n + 1, text: t }));
+		walk(src, 1);
 		return out;
 	}
 	let i = 0;
@@ -217,20 +249,7 @@ function shellLines(src, where) {
 		}
 		const kind = src[j + 2];
 		if (kind !== '#' && kind !== '=') {
-			const base = src.slice(0, j + 2).split('\n').length;
-			let quote = null;
-			let hd = null;
-			src.slice(j + 2, k).split('\n').forEach((t, n) => {
-				if (hd) {
-					const s = hd.dash ? t.replace(/^[\t]+/, '') : t;
-					if (s === hd.delim) hd = null;
-					return;
-				}
-				if (!quote) out.push({ line: base + n, text: t });
-				const r = scanShellLine(t, quote);
-				quote = r.quote;
-				if (r.heredoc) hd = r.heredoc;
-			});
+			walk(src.slice(j + 2, k), src.slice(0, j + 2).split('\n').length);
 		}
 		i = k + 2;
 	}

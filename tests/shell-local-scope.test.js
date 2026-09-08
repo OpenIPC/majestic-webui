@@ -78,13 +78,34 @@ function bareTokens(line) {
 		}
 		if (c === '#' && (i === 0 || /[ \t;&|(]/.test(line[i - 1]))) break;
 		if (c === ' ' || c === '\t') { if (cur) { out.push(cur); cur = ''; } continue; }
+		/* Shell punctuation is its own token even with no space around it.
+		 * Splitting on whitespace alone, `f(){` is one word that matches no
+		 * function pattern and hides its brace, and `};` never closes one --
+		 * so a compact function's `local` is rejected and a top-level one
+		 * after `};` sails through. Both are valid shell. */
+		if ('(){};|&'.indexOf(c) !== -1) {
+			if (cur) { out.push(cur); cur = ''; }
+			out.push(c);
+			continue;
+		}
 		cur += c;
 	}
 	if (cur) out.push(cur);
 	return out;
 }
 
-const FN_DEF = /^[A-Za-z_][A-Za-z0-9_]*\(\)$/;
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/* `name ( )` anywhere in the line's tokens -- the definition may be compact
+ * (`f(){`), spaced (`f () {`), or leave its brace for the next line. */
+function opensFunction(toks) {
+	for (let i = 0; i + 2 < toks.length + 1; i++) {
+		if (IDENT.test(toks[i] || '') && toks[i + 1] === '(' && toks[i + 2] === ')') {
+			return true;
+		}
+	}
+	return false;
+}
 
 /* [{ line, text }] of offending lines. */
 function localsOutsideFunctions(src, where) {
@@ -96,7 +117,7 @@ function localsOutsideFunctions(src, where) {
 			findings.push({ line, text: text.trim() });
 		}
 		const toks = bareTokens(text);
-		if (toks.some((t) => FN_DEF.test(t))) pendingFn = true;
+		if (opensFunction(toks)) pendingFn = true;
 		for (const t of toks) {
 			if (t === '{') { stack.push(pendingFn ? 'fn' : 'grp'); pendingFn = false; }
 			else if (t === '}') stack.pop();
@@ -158,6 +179,37 @@ check('and the same with the other trim operators',
 
 check('the word local inside a string',
 	S('<%\nf="a local file"\n%>').length === 0);
+
+// Review findings on #409. None of these three shapes is in the tree today,
+// which is exactly why they are worth pinning: a gate is judged by what it
+// does to code nobody has written yet.
+group('shell punctuation needs no whitespace around it');
+
+check('a compact function opening still opens scope',
+	S('<%\nf(){\nlocal ok\n}\n%>').length === 0);
+
+check('a spaced function opening does too',
+	S('<%\nf () {\nlocal ok\n}\n%>').length === 0);
+
+check('`};` closes a function, so a local after it is caught',
+	S('<%\nf() {\n\tx=1\n};\nlocal bad\n%>').length === 1);
+
+check('a subshell is not a function definition',
+	S('<%\n( cd /tmp )\nlocal bad\n%>').length === 1);
+
+check('a command substitution is not a function definition',
+	S('<%\nx=$(date)\nlocal bad\n%>').length === 1);
+
+group('heredoc bodies are data, in every kind of file');
+
+check('a plain script\'s heredoc body is not code',
+	S('#!/bin/sh\nf() {\n\tcat <<EOF\nlocal conditions apply\n}\nEOF\n\tlocal ok\n}\n').length === 0);
+
+check('two heredocs on one command: the second body is data too',
+	S('<%\nf() {\n\tcat <<A <<B\nlocal in a\nA\nlocal in b\nB\n\tlocal ok\n}\n%>').length === 0);
+
+check('a quoted heredoc body is data as well',
+	S("<%\nf() {\n\tcat <<'EOF'\nlocal thing\nEOF\n\tlocal ok\n}\n%>").length === 0);
 
 group('the shipped tree');
 
