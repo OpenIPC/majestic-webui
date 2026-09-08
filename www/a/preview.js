@@ -1,6 +1,18 @@
 // Low-latency H.264/H.265 MSE player over the majestic /ws/video WebSocket.
 window.MajesticVideo = (function () {
 	const MAX_QUEUE = 240;
+	// Safari wedges its MSE SourceBuffer on high-frequency per-frame appendBuffer
+	// calls for HEVC: /ws/video delivers one fMP4 fragment per frame (~20-30/s),
+	// and appending each on its own froze Safari after a few seconds with NO
+	// decode error — the silent stall DECODE_MAX below never catches, which the
+	// rebuild then surfaces as the ~2s flash of majestic-webui#335. Coalescing a
+	// few fragments into one append keeps its decoder fed. Proven on macOS 15
+	// Safari 26.6.1 in OpenIPC/safari-hevc-qa: per-frame stalls at ~3s, batches of
+	// five play the stream through. Only HEVC is batched — H.264 stays per-frame,
+	// so its low-latency live path is unchanged — and the wait is bounded so a
+	// slow or ending stream still flushes what it has.
+	const APPEND_BATCH = 5;
+	const APPEND_MAX_WAIT = 200;
 	// Consecutive decode failures on one player before we stop rebuilding it
 	// and fall through the chain. A browser whose decoder cannot take this
 	// stream (a Safari that rejects a conformant HEVC, majestic-webui#335) fails
@@ -53,6 +65,9 @@ window.MajesticVideo = (function () {
 		let stream = opts.stream | 0;
 		let ws = null, ms = null, sb = null, objUrl = null;
 		let queue = [], started = false, mime = null;
+		// HEVC append-coalescing state (see APPEND_BATCH above); pumpTimer bounds
+		// the wait for a full batch. hevc is set from the mime on each (re)init.
+		let pumpTimer = null, hevc = false;
 		let skipInitBinary = false;
 		// The running stream's dimensions. The fallback mime carries the codec
 		// but not the resolution, so a re-init that changes only width/height
@@ -95,7 +110,34 @@ window.MajesticVideo = (function () {
 
 		function pump() {
 			if (!sb || sb.updating || !queue.length) return;
-			try { sb.appendBuffer(queue.shift()); }
+			// H.264 keeps its per-frame append. HEVC coalesces: wait briefly for a
+			// full batch (bounded by APPEND_MAX_WAIT so a slow/ending stream still
+			// plays), then append the batch as one buffer.
+			if (hevc && queue.length < APPEND_BATCH) {
+				if (!pumpTimer) pumpTimer = setTimeout(function () {
+					pumpTimer = null; flushAppend();
+				}, APPEND_MAX_WAIT);
+				return;
+			}
+			flushAppend();
+		}
+		function flushAppend() {
+			if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
+			if (!sb || sb.updating || !queue.length) return;
+			const n = hevc ? Math.min(queue.length, APPEND_BATCH) : 1;
+			let buf;
+			if (n === 1) {
+				buf = queue[0];
+			} else {
+				let total = 0, i;
+				for (i = 0; i < n; i++) total += queue[i].byteLength;
+				buf = new Uint8Array(total);
+				for (i = 0, total = 0; i < n; i++) { buf.set(queue[i], total); total += queue[i].byteLength; }
+			}
+			// Consume only on a clean append: appendBuffer throws synchronously
+			// only on quota or a bad SourceBuffer state, and trim() frees the quota
+			// so the next pump retries the same fragments rather than dropping them.
+			try { sb.appendBuffer(buf); queue.splice(0, n); }
 			catch (e) { trim(); }
 		}
 		function trim() {
@@ -113,6 +155,7 @@ window.MajesticVideo = (function () {
 
 		function teardownMse() {
 			started = false; queue = [];
+			if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
 			// The lag floor describes the pipeline being torn down; the next
 			// one learns its own.
 			lagFloor = 0; lagLearn = true; lastCt = null; playRefused = false;
@@ -246,6 +289,7 @@ window.MajesticVideo = (function () {
 				return;
 			}
 			mime = newMime;
+			hevc = /hvc1|hev1/i.test(newMime);
 			lastW = info.width | 0;
 			lastH = info.height | 0;
 			teardownMse();
