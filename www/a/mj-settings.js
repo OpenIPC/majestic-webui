@@ -1834,6 +1834,12 @@
 
 		if (roiField && preview && window.MajesticRegion) {
 			repaint = mountRegions(preview, roiField, regionBody, regionNote).repaint;
+			// Regions are in the main stream's pixels and the picture may be
+			// the sub stream; how one lands on the other is the camera's to
+			// say, and it says so in the same report the Overlay leaf polls.
+			// Asked once here — a crop cannot change under a running
+			// pipeline — and the outlines are redrawn when it answers.
+			refreshOsdRects().then(() => repaint());
 			// The field's own reset, MOVED into the group head rather than made
 			// again — the same relocation dockRuntime does with the runtime
 			// toggles, and for the same reason: one control, with its real
@@ -1941,10 +1947,51 @@
 		// stream there is nothing to scale by and the editor says so instead of
 		// drawing rectangles in the wrong places.
 		function base() {
+			// The camera's own word for the main stream's size, where it has
+			// given one. It is not always video0.size: a crop on the main
+			// stream makes the stream the crop's size, and the rectangles
+			// are written in THAT.
+			const m = camView();
+			if (m) return m.b;
 			const cfg = parseWH(getDotted(state.config, 'video0.size'));
 			if (cfg) return cfg;
 			const f = preview.frame();
 			return (f && preview.stream() === 0) ? { w: f.w, h: f.h } : null;
+		}
+
+		// How a main-stream rectangle lands on the stream being shown, as
+		// the camera draws it. The two are not the same picture when either
+		// stream is cropped: the camera maps through the sensor's frame, and
+		// drawn as a plain ratio of the main stream the outline sat on the
+		// wrong part of the sub stream, beside the camera's block on the
+		// right part (#340). Null until the camera has said, and then the
+		// ratio is right exactly when neither stream is cropped.
+		function camView() {
+			return RGN.view(camRects.group, camRects.views, 0, preview.stream());
+		}
+
+		// EVERY conversion between a rectangle and pixels on screen goes
+		// through here, in both directions, so that the outline, the press
+		// that picks it up, the drag that moves it and the band that draws a
+		// new one cannot disagree about where the picture is. `b` is the
+		// main frame, the space rectangles are written in; `f` the frame the
+		// picture on screen shows; k and o the map between them.
+		function geom() {
+			const p = pic(), b = base();
+			if (!p || !b) return null;
+			const m = camView();
+			const f = m ? m.f : b;
+			const k = m ? m.k : { x: 1, y: 1 };
+			const o = m ? m.o : { x: 0, y: 0 };
+			return {
+				p: p, b: b,
+				sx: (x) => p.x + (k.x * x + o.x) / f.w * p.w,
+				sy: (y) => p.y + (k.y * y + o.y) / f.h * p.h,
+				mx: (s) => ((s - p.x) / p.w * f.w - o.x) / k.x,
+				my: (s) => ((s - p.y) / p.h * f.h - o.y) / k.y,
+				dx: (d) => d / p.w * f.w / k.x,
+				dy: (d) => d / p.h * f.h / k.y,
+			};
 		}
 
 		// Where the picture actually is inside the stage. object-fit: contain
@@ -2095,18 +2142,19 @@
 		// The rectangles alone. Split out because typing in a coordinate box has
 		// to move its rectangle without rebuilding the box being typed into.
 		function paintBoxes() {
-			const p = pic(), b = base();
+			const g = geom();
 			layer.innerHTML = '';
-			if (!p || !b) return;
+			if (!g) return;
 			list().forEach((raw, i) => {
 				const r = parse(raw);
 				if (!r) return;
 				const box = el('div', 'mj-md-rgn' + (i === sel ? ' mj-md-sel' : ''));
 				box.dataset.i = String(i);
-				box.style.left = (p.x + r.x / b.w * p.w) + 'px';
-				box.style.top = (p.y + r.y / b.h * p.h) + 'px';
-				box.style.width = (r.w / b.w * p.w) + 'px';
-				box.style.height = (r.h / b.h * p.h) + 'px';
+				const l = g.sx(r.x), t = g.sy(r.y);
+				box.style.left = l + 'px';
+				box.style.top = t + 'px';
+				box.style.width = (g.sx(r.x + r.w) - l) + 'px';
+				box.style.height = (g.sy(r.y + r.h) - t) + 'px';
 				const n = el('span', 'mj-md-rgn-n');
 				n.textContent = String(i + 1);
 				box.appendChild(n);
@@ -2381,14 +2429,10 @@
 			return { x: e.clientX - r.left, y: e.clientY - r.top };
 		};
 
-		// Stage pixels to the stream's own, and back. Everything below works in
-		// STREAM pixels once the gesture starts, so a region cannot drift by a
-		// rounding step per pointermove the way it would if each move re-read the
-		// rectangle it had just written.
-		const toStream = (dx, dy, p, b) => ({
-			dx: dx / p.w * b.w,
-			dy: dy / p.h * b.h,
-		});
+		// Everything below works in STREAM pixels once the gesture starts, so
+		// a region cannot drift by a rounding step per pointermove the way it
+		// would if each move re-read the rectangle it had just written. The
+		// stage-to-stream step is geom()'s dx/dy.
 
 		// Both ends held inside the PICTURE, so the band shows exactly what will be
 		// stored — and a drag that never leaves the letterbox collapses to nothing,
@@ -2484,13 +2528,14 @@
 		// transparent so they cannot swallow presses meant for what is under
 		// them.
 		function boxOf(i) {
-			const p = pic(), b = base();
-			if (!p || !b) return null;
+			const g = geom();
+			if (!g) return null;
 			const r = parse(list()[i]);
 			if (!r) return null;
+			const l = g.sx(r.x), t = g.sy(r.y);
 			return {
-				x: p.x + r.x / b.w * p.w, y: p.y + r.y / b.h * p.h,
-				w: r.w / b.w * p.w, h: r.h / b.h * p.h,
+				x: l, y: t,
+				w: g.sx(r.x + r.w) - l, h: g.sy(r.y + r.h) - t,
 			};
 		}
 
@@ -2589,8 +2634,9 @@
 
 		function move(e) {
 			if (!gesture || e.pointerId !== gesture.id) return;
-			const p = pic(), b = base();
-			if (!p || !b) { band.hidden = true; return; }
+			const g = geom();
+			if (!g) { band.hidden = true; return; }
+			const b = g.b;
 			gesture.moved = true;
 
 			if (gesture.kind === 'new') {
@@ -2605,7 +2651,7 @@
 			}
 
 			const n = at(e);
-			const d = toStream(n.x - gesture.from.x, n.y - gesture.from.y, p, b);
+			const d = { dx: g.dx(n.x - gesture.from.x), dy: g.dy(n.y - gesture.from.y) };
 			const o = gesture.orig;
 
 			if (gesture.kind === 'move') {
@@ -2658,18 +2704,17 @@
 			band.hidden = true;
 
 			if (g.kind === 'new') {
-				const p = pic(), b = base();
-				if (r && p && b) {
+				const gm = geom();
+				if (r && gm) {
 					// A rectangle has to be deliberate. Per AXIS, and a share of the
 					// stage with an absolute floor, so it means the same thing on a
 					// 2560px monitor and a 390px phone.
 					const minW = Math.max(16, preview.stage.clientWidth * 0.02);
 					const minH = Math.max(16, preview.stage.clientHeight * 0.02);
 					if (r.w >= minW && r.h >= minH) {
-						const px = (v, o, sz, n) => Math.round((v - o) / sz * n);
-						const X = px(r.x, p.x, p.w, b.w), Y = px(r.y, p.y, p.h, b.h);
-						const W = px(r.x + r.w, p.x, p.w, b.w) - X;
-						const H = px(r.y + r.h, p.y, p.h, b.h) - Y;
+						const X = Math.round(gm.mx(r.x)), Y = Math.round(gm.my(r.y));
+						const W = Math.round(gm.mx(r.x + r.w)) - X;
+						const H = Math.round(gm.my(r.y + r.h)) - Y;
 						if (W > 0 && H > 0) {
 							ctl._add(X + 'x' + Y + 'x' + W + 'x' + H);
 							// Selected on arrival: the thing you just made is the thing
@@ -3310,6 +3355,10 @@
 			// takes the page's copy of it off, a tick later.
 			camRects.onRects = () => {
 				for (const k of Object.keys(placers)) placers[k].repaint();
+				// The masks too: their outlines are drawn through the
+				// camera's account of what each stream shows, which arrives
+				// with the same answer.
+				if (masks) masks.repaint();
 			};
 			state.liveCleanup.push(() => { camRects.onRects = null; });
 			// The same placer, on the same hooks. It hit-tests against the
@@ -4300,7 +4349,11 @@
 		// Whether the camera has answered at all this visit. Before it has,
 		// "no rectangle for this overlay" is not a fact about the overlay,
 		// and nothing below may draw a conclusion from it.
-		known: false, sig: '', onRects: null };
+		known: false, sig: '', onRects: null,
+		// What each stream shows of the sensor's frame, and that frame's
+		// size — the route a mask takes from the main stream's pixels to
+		// any other stream's. See MajesticRegion.view().
+		group: null, views: null };
 
 	// Logo files whose overlay has been cleared but not yet saved.
 	//
@@ -4386,6 +4439,8 @@
 				camRects.widths = Object.keys(sizes).length;
 				camRects.bytes = bytes;
 				camRects.budget = j.budget || null;
+				camRects.group = j.group || null;
+				camRects.views = j.streams || null;
 
 				const was = camRects.mark;
 				camRects.by = by;
@@ -4394,7 +4449,7 @@
 				// The stand-ins are drawn from this answer — see undrawn() in
 				// mountOsdText — so a change in it repaints them, and a repeat
 				// of the same answer is not worth a repaint every two seconds.
-				const sig = JSON.stringify(by);
+				const sig = JSON.stringify([by, camRects.group, camRects.views]);
 				if (sig !== camRects.sig) {
 					camRects.sig = sig;
 					if (camRects.onRects) camRects.onRects();
