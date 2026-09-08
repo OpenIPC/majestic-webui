@@ -64,30 +64,57 @@ function loadBanner(opts) {
 	const o = opts || {};
 	const els = {};
 	const el = (id) => (els[id] = els[id] || { id, innerHTML: '', textContent: '', className: '' });
-	const env = { els, el, asked: [], beats: [], timers: 0 };
+	// The Dashboard's storage rows, one per filesystem df matched. Given as
+	// mountpoints so a test can hand over more than one and check that the
+	// verdict lands on the right of them.
+	const rows = (o.rows || []).map(function (mnt) {
+		const badge = { className: 'badge text-bg-secondary flex-shrink-0 mj-sd-badge' };
+		const why = { textContent: '' };
+		return {
+			mnt: mnt, badge: badge, why: why,
+			getAttribute: (k) => (k === 'data-mnt' ? mnt : null),
+			querySelector: (sel) => (sel === '.mj-sd-badge' ? badge
+				: sel === '.mj-sd-why' ? why : null),
+		};
+	});
+	const env = { els, el, rows, asked: [], beats: [], retries: [], polls: [], cfgAsks: 0 };
 
 	const ctx = {
 		console,
 		JSON, Promise, Object, Set, String, Number, Array, Error, RegExp, Math,
-		setInterval: () => { env.timers++; return 0; },
+		// The card poll, captured so a test can make the next one happen.
+		setInterval: (fn) => { env.polls.push(fn); return 0; },
 		clearInterval() {},
-		setTimeout,
+		// The module's own retry is captured rather than waited out; anything
+		// short is the harness settling and runs for real.
+		setTimeout: (fn, ms) => (ms >= 1000 ? (env.retries.push(fn), 0) : setTimeout(fn, ms)),
 		document: {
 			readyState: 'complete',
 			addEventListener() {},
 			getElementById: (id) => (o.missing === id ? null : el(id)),
+			querySelectorAll: (sel) => (sel === '.mj-sd-row' ? rows : []),
 			body: { id: o.page || 'page-live' },
 		},
 	};
 	ctx.window = ctx;
 	ctx.apiFetch = (url) => {
 		env.asked.push(url);
+		if (o.cardFailsAfter !== undefined && env.asked.length > o.cardFailsAfter) {
+			return Promise.reject(new Error('unreachable'));
+		}
 		return Promise.resolve({ json: () => Promise.resolve(o.card || { health: 'ok' }) });
 	};
-	ctx.mjConfig = () => Promise.resolve({ records: {
-		enabled: o.recording !== false,
-		path: (o.path || '/mnt/mmcblk0p1') + '/%F',
-	} });
+	// {} is what mjConfig() resolves when the fetch failed -- deliberately not
+	// cached, so a later call retries. `cfgFails` makes the first N calls do
+	// that, the way a camera under load does.
+	ctx.mjConfig = () => {
+		env.cfgAsks++;
+		if (env.cfgAsks <= (o.cfgFails || 0)) return Promise.resolve({});
+		return Promise.resolve({ records: {
+			enabled: o.recording !== false,
+			path: (o.path || '/mnt/mmcblk0p1') + '/%F',
+		} });
+	};
 	ctx.mjGet = (cfg, dot) => dot.split('.').reduce((a, k) => (a == null ? undefined : a[k]), cfg);
 	// The real builder's shape, in miniature: the action belongs to the notice,
 	// so a stub that dropped it would hide a banner with nowhere to go.
@@ -101,12 +128,117 @@ function loadBanner(opts) {
 	env.beat = (v) => env.beats.forEach((fn) => fn(v === null
 		? { ok: false } : { ok: true, m: { v } }));
 	env.banner = () => el('storage-notice').innerHTML;
+	env.badge = (mnt) => (rows.filter((r) => r.mnt === mnt)[0] || {}).badge;
+	env.poll = () => { env.polls.forEach((fn) => fn()); return settle(); };
 	return env;
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 20));
 
 async function banners() {
+
+	group('the badge is a claim, so it needs evidence for each of its colours');
+
+	const MPT = '/mnt/mmcblk0p1';
+
+	{
+		const env = loadBanner({ rows: [MPT], card: { health: 'ok', mountpoint: MPT } });
+		await settle();
+		check('nothing established yet leaves it neutral',
+			/text-bg-secondary/.test(env.badge(MPT).className), env.badge(MPT).className);
+		env.beat({ records_state: 0 });
+		check('both halves agreeing is what turns it green',
+			/text-bg-success/.test(env.badge(MPT).className), env.badge(MPT).className);
+	}
+
+	{
+		// Footage is being lost. Not danger, and certainly not green.
+		const env = loadBanner({ rows: [MPT], card: { health: 'ok', mountpoint: MPT } });
+		await settle();
+		env.beat({ records_state: 1 });
+		check('a warning is drawn as a warning',
+			/text-bg-warning/.test(env.badge(MPT).className), env.badge(MPT).className);
+	}
+
+	{
+		const env = loadBanner({ rows: [MPT], card: { health: 'readonly', mountpoint: MPT } });
+		await settle();
+		env.beat({ records_state: 0 });
+		check('a dead card is drawn as danger',
+			/text-bg-danger/.test(env.badge(MPT).className), env.badge(MPT).className);
+		check('and the row says why', /read-only/.test(env.rows[0].why.textContent));
+	}
+
+	{
+		// The heartbeat could not be read, so nothing about the recorder is
+		// known and green is a claim nothing supports.
+		const env = loadBanner({ rows: [MPT], card: { health: 'ok', mountpoint: MPT } });
+		await settle();
+		env.beat(null);
+		check('a failed heartbeat is not evidence of health',
+			/text-bg-secondary/.test(env.badge(MPT).className), env.badge(MPT).className);
+	}
+
+	{
+		// One row per filesystem df matched, and this endpoint describes one
+		// device. The verdict must land on that device's row and no other.
+		const env = loadBanner({
+			rows: ['/mnt/usbdrive', MPT],
+			card: { health: 'absent', mountpoint: MPT },
+		});
+		await settle();
+		env.beat({ records_state: 0 });
+		check('a second filesystem is left alone',
+			/text-bg-secondary/.test(env.badge('/mnt/usbdrive').className),
+			env.badge('/mnt/usbdrive').className);
+		check('and the card row is the one marked',
+			/text-bg-danger/.test(env.badge(MPT).className), env.badge(MPT).className);
+	}
+
+	group('a reading that stopped arriving stops being an answer');
+
+	{
+		// The first poll answers, the next one cannot be made. Holding the last
+		// good answer is how a badge stays green through an hour of failures.
+		const env = loadBanner({
+			rows: [MPT], card: { health: 'ok', mountpoint: MPT }, cardFailsAfter: 1,
+		});
+		await settle();
+		env.beat({ records_state: 0 });
+		check('the first answer is used', /text-bg-success/.test(env.badge(MPT).className));
+		await env.poll();
+		check('and a poll that failed takes the claim back, rather than keeping it',
+			/text-bg-secondary/.test(env.badge(MPT).className), env.badge(MPT).className);
+	}
+
+	group('a configuration that could not be read is not recording switched off');
+
+	{
+		// mjConfig() resolves {} on a failed fetch and does not cache it, so a
+		// later call retries -- but nothing retried, and one refused request at
+		// page load turned every storage alert off for the life of the page.
+		const env = loadBanner({
+			cfgFails: 1, rows: [MPT],
+			card: { health: 'absent', mountpoint: MPT },
+		});
+		await settle();
+		check('a failed config asks for nothing yet', env.asked.length === 0);
+		check('but it does arrange to ask again', env.retries.length === 1);
+		env.retries[0]();
+		await settle();
+		env.beat({ records_state: 0 });
+		check('and on the retry the camera is monitored after all',
+			/no SD card/.test(env.banner()), env.banner().slice(0, 90));
+	}
+
+	{
+		// Explicitly off is a fact, and facts are not retried.
+		const env = loadBanner({ recording: false, rows: [MPT] });
+		await settle();
+		check('recording switched off is answered once and left',
+			env.retries.length === 0 && env.asked.length === 0);
+	}
+
 	group('the banner reaches the pages that were saying nothing');
 
 	{
