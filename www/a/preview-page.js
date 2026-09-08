@@ -747,51 +747,44 @@
 		if (camera !== 0) {
 			return;
 		}
-		servedCh = (info.channel === 0 || info.channel === 1)
-			? info.channel : null;
-		const mismatch = servedCh !== null && info.requested !== null &&
-			info.channel !== info.requested;
-		if (!mismatch) {
-			// A match the viewer never asked for is not good news: a reopen
-			// inside a fallen-back session requests the adopted channel and
-			// is answered with it, while the viewer's own ask stands unmet.
-			// Leave the explanation exactly as it is — up if it was up,
-			// dismissed if they dismissed it.
-			if (wantedCh !== null && servedCh !== null &&
-				servedCh !== wantedCh) {
-				setChip();
-				return;
+		// The rule and the say-once state are MajesticServed's — the same code
+		// the settings preview uses (preview-served.js). This page keeps its own
+		// state vars (servedStream() reads servedCh, the resets below clear them)
+		// and its Auto exception, and wires the decision to the radios, the
+		// message and the chip.
+		const d = window.MajesticServed &&
+			window.MajesticServed.decide(info, wantedCh, servedShownKey);
+		if (!d) return;
+		servedCh = d.servedCh;
+		// The betrayed ask is remembered past the adoption, in Auto too; on a
+		// match it is unchanged.
+		wantedCh = d.wanted;
+		if (d.adopt !== null) {
+			// A mismatch. In Auto the radios stay Auto's and no message shows —
+			// no explicit request was betrayed and the chip (which in Auto
+			// always names the channel) is the disclosure, and Auto's own
+			// `stream` is left alone so autoApply()'s want === stream comparison
+			// keeps meaning "nothing to do" rather than oscillating against the
+			// camera's fallback.
+			if (!autoOn) {
+				// The controls tell the truth: the session — player included, it
+				// adopted the channel itself — is on servedCh, so the page and
+				// the radios follow. The viewer's original radio is now genuinely
+				// unchecked, which is what makes re-picking it a real change and a
+				// real renegotiation. The message is said once.
+				servedShownKey = d.key;
+				stream = d.adopt;
+				if (s0) s0.checked = d.adopt === 0;
+				if (s1) s1.checked = d.adopt === 1;
+				if (d.message) showServedMsg(d.message);
 			}
-			// Served as the viewer asked (or nothing was asked): any
-			// standing message describes a mismatch that no longer exists.
+		} else if (d.hide) {
+			// Served as the viewer asked (or nothing was asked): any standing
+			// message describes a mismatch that no longer exists. (A match to the
+			// adopted channel while the ask is unmet leaves it up — d.hide false.)
 			servedShownKey = '';
 			hideServedMsg();
-			setChip();
-			return;
 		}
-		// The betrayed ask, remembered past the adoption below — the daemon
-		// echoes exactly what this page requested.
-		wantedCh = info.requested;
-		if (!autoOn) {
-			// The controls tell the truth: the session — player included, it
-			// adopted the channel itself — is on servedCh, so the page and
-			// the radios follow. The viewer's original radio is now
-			// genuinely unchecked, which is what makes re-picking it a real
-			// change event and a real renegotiation.
-			stream = servedCh;
-			if (s0) s0.checked = servedCh === 0;
-			if (s1) s1.checked = servedCh === 1;
-			const key = info.requested + '>' + info.channel + ':' + info.reason;
-			if (key !== servedShownKey) {
-				servedShownKey = key;
-				showServedMsg(info);
-			}
-		}
-		// In Auto the radios stay Auto's and no message shows: no explicit
-		// request was betrayed, and the chip (which in Auto always names the
-		// channel) is the disclosure. Auto's own `stream` is left alone so
-		// autoApply()'s want === stream comparison keeps meaning "nothing to
-		// do" rather than oscillating against the camera's fallback.
 		setChip();
 	}
 	// Talkback is deliberately NOT carried across a transport switch or a
