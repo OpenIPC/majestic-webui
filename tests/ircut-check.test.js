@@ -658,6 +658,23 @@ function runRest() {
 				{ lightMonitor: true, lightSensorPin: 66,
 					minThreshold: 1500, maxThreshold: 4000 },
 				{ isp_again: 2000, night_enabled: 0 }).mode === 'sensor');
+		// Why there is no countdown, on the one mechanism that has none. It
+		// has to name the interval it is actually checking at, which is the
+		// camera's floor of five where nothing is configured, not the 0 the
+		// config holds (#325).
+		check('the threshold line says there is no countdown',
+			/no countdown/.test(thr.line) && !/switching in/.test(thr.line),
+			thr.line);
+		check('...at the camera\'s floor when nothing is set',
+			/every 5 s/.test(thr.line), thr.line);
+		check('...and at the configured interval when there is one',
+			/every 30 s/.test(ic.monitorView(
+				Object.assign({ monitorDelay: 30 }, nmThr),
+				{ night_mode_source: 2, isp_again: 6000 }).line));
+		check('...and a zero is the floor, not a zero',
+			/every 5 s/.test(ic.monitorView(
+				Object.assign({ monitorDelay: 0 }, nmThr),
+				{ night_mode_source: 2, isp_again: 6000 }).line));
 		check('the night rule sits at maxThreshold',
 			thr.marks[1].v === 4000 && thr.marks[1].label === 'night');
 		check('and the day rule at minThreshold',

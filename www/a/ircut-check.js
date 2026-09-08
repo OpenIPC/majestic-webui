@@ -1017,14 +1017,17 @@
 			if (lo !== null) marks.push({ v: lo, color: '#2fb673', label: 'day' });
 			if (hi !== null) marks.push({ v: hi, color: '#e0a020', label: 'night' });
 			// Why there is no countdown here, said where the countdown would
-			// have been. The two mechanisms look interchangeable on the page —
-			// a pair of numbers and a delay either way — so the reporter of
-			// #325 read the missing countdown as a fault in the legacy half.
-			// It is a difference in what the camera does: a threshold monitor
-			// switches on the first check that lands past a threshold, with no
-			// dwell to serve out, while automatic mode holds a condition for
-			// its two delays before acting. Saying nothing left the operator
-			// to conclude the timer was broken.
+			// have been: a threshold monitor switches on the first check that
+			// lands past a threshold, with no dwell to serve out, while
+			// automatic mode holds a condition for its two delays first. The
+			// reporter of #325 read the missing countdown as a fault in the
+			// legacy half, because saying nothing left nothing else to think.
+			//
+			// Said in one clause rather than three. The first cut of this
+			// closed by naming which mechanism the delays belong to, which was
+			// explaining the page in the page: the Legacy switch is two rows
+			// up and the check interval now says what it is on its own row, so
+			// the sentence can state the behaviour and stop (#325).
 			//
 			// The period is the same "seconds between light checks" both
 			// mechanisms are armed from, and majestic floors an unset or zero
@@ -1037,10 +1040,9 @@
 				value: ('isp_again' in v) ? v.isp_again : null,
 				marks: marks,
 				line: modeWord +
-					'Comparing raw sensor gain against the thresholds ' +
-					'(vendor-specific units). It switches on the first check ' +
-					'past one — every ' + everyS + ' s — so there is no wait ' +
-					'to count down; the two delays belong to automatic mode.' +
+					'Comparing raw sensor gain (vendor units) against the ' +
+					'thresholds. It switches on the first check past one, ' +
+					'every ' + everyS + ' s — so there is no countdown.' +
 					lampNote,
 				unit: '',
 			};
