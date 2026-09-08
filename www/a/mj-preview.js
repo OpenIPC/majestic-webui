@@ -27,8 +27,9 @@
 // (preview-page.js), which wants different things from an OUTCOME: it has an
 // MJPEG fallback, a badge, a stats panel and a zoom rule, none of which belong
 // on a settings panel. This is a consumer of those modules, not a second copy
-// of any of them — the walk was a copy once, and had to be fixed twice (#309,
-// #342) before it was shared (#400).
+// of any of them — the walk was a copy once, and the same fault had to be
+// fixed in each before it was shared (the software-rung reconnect of #288;
+// #400).
 //
 // Requires: preview.js, preview-webrtc.js, preview-swap.js, preview-wasm.js,
 // preview-transport.js, preview-chain.js, and (optionally) preview-served.js

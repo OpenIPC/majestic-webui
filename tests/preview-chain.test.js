@@ -1,8 +1,9 @@
 // preview-chain.js — the fallback walk and the software-rung retry ladder,
 // shared by the Live View page and the settings preview.
 //
-// The walk used to be written twice and was fixed twice (#309, #342), which is
-// why it is one copy now (#400). What this pins is the copy's contract: which
+// The walk used to be written twice and the same fault fixed once in each copy
+// (the software-rung reconnect of #288), which is why it is one copy now
+// (#400). What this pins is the copy's contract: which
 // failure sends the chain where, that a dropped software socket is retried a
 // bounded number of times with a growing wait and never for any other reason,
 // that a fresh start cancels a pending retry without refilling the budget,
@@ -233,7 +234,7 @@ group('a fresh start cancels a pending retry and leaves the budget alone');
 		e.starts.length === 1 && e.starts[0] === 'webrtc', e.starts.join());
 }
 
-group('only sustained software decode refills the budget');
+group('only sustained software decode refills the budget, measured as a delta');
 {
 	const { C, driver } = load();
 	const e = driver();
@@ -241,14 +242,64 @@ group('only sustained software decode refills the budget');
 	e.chain.next('wasm', 'unreachable');
 	e.chain.next('wasm', 'unreachable');
 	check('two retries spent', e.chain.retries() === 2);
-	e.chain.healthy({ transport: 'wasm', framesDecoded: C.HEALTHY_FRAMES - 1 });
-	check('seven frames are not proof', e.chain.retries() === 2);
-	e.chain.healthy({ transport: 'mse', framesDecoded: 100 });
+	// The count is cumulative, so a big first tick only sets the baseline.
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 5000 });
+	check('a first cumulative tick is not proof', e.chain.retries() === 2);
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 5000 + C.HEALTHY_FRAMES - 1 });
+	check('short of eight frames past the baseline is not proof', e.chain.retries() === 2);
+	e.chain.healthy({ transport: 'mse', framesDecoded: 999999 });
 	check('the MSE player decoding is not proof about this rung', e.chain.retries() === 2);
-	e.chain.healthy({ transport: 'wasm', framesDecoded: C.HEALTHY_FRAMES });
-	check('eight software frames are', e.chain.retries() === 0);
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 5000 + C.HEALTHY_FRAMES });
+	check('eight frames past the baseline are', e.chain.retries() === 0);
 	e.chain.healthy(null);
 	check('nothing at all is harmless', e.chain.retries() === 0);
+}
+
+group('cumulative frames carried across a channel change do not refill the budget');
+{
+	// The software worker owns its socket, so an in-place channel switch keeps
+	// decoding and its framesDecoded stays cumulative.
+	// The first stats tick after the switch carries thousands of frames from
+	// the channel just left, and must not read as sustained decode on the new
+	// one — the budget a switch is meant to leave alone.
+	const { C, driver } = load();
+	const e = driver();
+	e.codec = 'h265';
+	e.chain.next('wasm', 'unreachable');
+	e.chain.next('wasm', 'unreachable');
+	check('two retries spent', e.chain.retries() === 2);
+	// It had been decoding for a while: a large cumulative count.
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 5000 });
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 5100 });
+	check('sustained decode on the current channel did refill it',
+		e.chain.retries() === 0);
+	// Spend the budget again, then the viewer switches channel: the page
+	// cancels, and the SAME worker keeps its cumulative count.
+	e.chain.next('wasm', 'unreachable');
+	check('a retry is spent again', e.chain.retries() === 1);
+	e.chain.cancel();                 // the channel switch
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 5103 });
+	check('the tick straight after the switch does not refill', e.chain.retries() === 1);
+	// Only frames actually decoded on the new channel refill it.
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 5103 + C.HEALTHY_FRAMES });
+	check('eight frames on the new channel do', e.chain.retries() === 0);
+}
+
+group('a fresh worker starting from zero is measured from zero, not the old high count');
+{
+	// A retry attaches a new worker whose framesDecoded restarts at 0; the
+	// baseline must drop with it, or the fresh session could never be counted
+	// healthy against a stale high baseline.
+	const { C, driver } = load();
+	const e = driver();
+	e.codec = 'h265';
+	e.chain.next('wasm', 'unreachable');
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 8000 });   // old worker, high
+	e.chain.next('wasm', 'unreachable');                            // retry: new worker
+	check('two retries spent', e.chain.retries() === 2);
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 2 });       // new worker from ~0
+	e.chain.healthy({ transport: 'wasm', framesDecoded: 2 + C.HEALTHY_FRAMES });
+	check('the fresh worker refills once it has decoded enough', e.chain.retries() === 0);
 }
 
 group('a player that fails from inside attach() does not corrupt the walk');

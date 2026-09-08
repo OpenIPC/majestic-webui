@@ -21,7 +21,8 @@
 // sits on screen for ever. A second copy would drift, and the drift would look
 // like a picture rather than an error. The walk that decides what to try next
 // when a player fails is shared too, in preview-chain.js, for the same reason
-// — it was a copy per page once, and was fixed twice (#309, #342).
+// — it was a copy per page once, and the same fault had to be fixed in each
+// before it was shared (the software-rung reconnect of #288; #400).
 //
 // What stays with the caller is what an outcome MEANS on its page: what to put
 // on the badge, what a failure means for its controls, what to show when the

@@ -34,7 +34,7 @@
 // sustained decode — frames actually decoded on a live software session — and
 // never by the mere codec announcement, so a decoder that announces itself and
 // immediately drops still exhausts rather than resetting on every attempt. It
-// is not refilled by a channel or source change either (#342).
+// is not refilled by a channel or source change either (#288).
 //
 // A channel change can change the CODEC, and the failure that put the chain on
 // a rung was about the channel just left. `codec-changed` is therefore not the
@@ -44,10 +44,11 @@
 // for a stream the browser decodes perfectly.
 //
 // Why one copy. Everything above used to be written twice, once per page, and
-// the same fault was then fixed twice — a socket that gave up on a software
-// codec (#309) and the retry ladder itself (#342) each had to be remembered in
-// both files, and a fix applied to one would have been a silent divergence
-// between the Live page and every settings preview (#400). What each page DOES
+// the same faults — a socket that gave up on a software codec, and the retry
+// ladder itself — were then fixed once in each file, where a fix applied to
+// only one would have been a silent divergence between the Live page and every
+// settings preview. The reconnect saga that produced them is #288; the
+// duplication this pays down is #400. What each page DOES
 // about the walk running out — an MJPEG rung and a note on one, an alert
 // sentence on the other — stays with the page, through onExhausted.
 window.MajesticChain = (function () {
@@ -114,12 +115,19 @@ window.MajesticChain = (function () {
 		let retries = 0;
 		let timer = null;
 
+		// The frame count the healthy rule is measured against — see healthy().
+		// Reset whenever the budget is disturbed, which is what a channel or
+		// transport change does through cancel().
+		let baseFrames = null;
 		// Any fresh start supersedes a pending retry: it belonged to a session
 		// that is being replaced, and firing it would stage a software player
-		// over the newer one and override the viewer's choice. The budget is
-		// deliberately left alone — a channel change is not a recovery.
+		// over the newer one and override the viewer's choice. The budget of
+		// retries is deliberately left alone — a channel change is not a
+		// recovery — but the frame baseline starts over, so a switch cannot be
+		// read as sustained decode (below).
 		function cancel() {
 			if (timer) { clearTimeout(timer); timer = null; }
+			baseFrames = null;
 		}
 		function go(token) {
 			cancel();
@@ -151,11 +159,22 @@ window.MajesticChain = (function () {
 		// gated on frames actually decoded, not the codec announcement, and on
 		// the software transport alone: the MSE player decodes frames too, and
 		// its doing so says nothing about the rung this budget belongs to.
+		//
+		// A DELTA, not the raw count. framesDecoded is CUMULATIVE across a
+		// worker's life and survives an in-place channel change — the worker
+		// owns the socket, so setStream keeps counting — so the raw total is
+		// not "frames since this became worth trusting". The first stats tick
+		// after a switch would otherwise carry thousands of pre-switch frames
+		// and refill a budget the switch was meant to leave alone. So measure
+		// from a baseline: cancel() (a switch) starts it over, and a count that
+		// drops is a fresh worker after a retry starting from zero. Then
+		// HEALTHY_FRAMES past the baseline is proof of sustained decode on the
+		// session and channel actually on screen.
 		function healthy(s) {
-			if (s && s.transport === 'wasm' &&
-				(s.framesDecoded | 0) >= HEALTHY_FRAMES) {
-				retries = 0;
-			}
+			if (!s || s.transport !== 'wasm') return;
+			const f = s.framesDecoded | 0;
+			if (baseFrames === null || f < baseFrames) baseFrames = f;
+			if (f - baseFrames >= HEALTHY_FRAMES) retries = 0;
 		}
 
 		return {

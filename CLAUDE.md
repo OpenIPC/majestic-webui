@@ -330,13 +330,14 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   wait and for no other reason — and `make()` is the driver that owns the
   retry timer and the budget, refilled only by frames a live software session
   actually decoded, never by the codec announcement and never by a channel
-  change (#342). Both `preview-page.js` and `mj-preview.js` build one, handing
+  change (#288). Both `preview-page.js` and `mj-preview.js` build one, handing
   it how to attach (the page wraps it with its MJPEG-only-source detection),
   where to restart from, the configured codec, and what to do when the walk
   runs out above the page's own floor: the Live page's `fallThrough` goes on
   to the MJPEG rung and the note, the component's `lost` shows its alert.
-  The walk used to be written in both files and was fixed twice in both
-  (#309, #342); `tests/preview-chain.test.js` pins it with fake timers, and
+  The walk used to be written in both files and the same fault fixed once in
+  each (the software-rung reconnect of #288); `tests/preview-chain.test.js`
+  pins it with fake timers, and
   the page's two harnesses passing unchanged after the extraction is what
   proved the Live page kept its behaviour (#400). Any fresh start cancels a
   pending retry — the page's `attachPlayer`, `goToStream`, `goToSource` and
