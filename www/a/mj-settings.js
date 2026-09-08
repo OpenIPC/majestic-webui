@@ -5690,20 +5690,14 @@
 		if (!IRCUT || typeof mjMetricsSubscribe !== 'function') return;
 		mjMetricsSubscribe((s) => {
 			if (!s.ok) return;
-			const v = (s.m && s.m.v) || {};
-			ircutSample = {
-				night: s.night, ircut: s.ircut, light: s.light,
-				// Which door the daemon says is being watched — diagnose()
-				// tells an automatic monitor from a blind one by it, and null
-				// (gauge absent) keeps the older-firmware reading.
-				src: ('night_mode_source' in v) ? v.night_mode_source : null,
-				// The wait the camera says it is currently applying. The
-				// hunting finding used to ASSERT that automatic mode backs off
-				// after a flip; this is the gauge that would show it, so the
-				// finding reads it instead of claiming it.
-				dwell: ('night_auto_dwell_seconds' in v)
-					? v.night_auto_dwell_seconds : null,
-			};
+			// The heartbeat's own sample, not a second one assembled here.
+			// Which door is being watched (src) and the wait the camera is
+			// currently applying (dwell) used to be read out of the raw metrics
+			// on this page alone, so the Dashboard's copy of the same call had
+			// neither and every finding that turns on them was decided from an
+			// absence (#325). One place builds the sample now, and both pages
+			// ask the same question of the same object.
+			ircutSample = s;
 			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
 			paintNightInert(ircutSample.src);
 			paintFindings();
@@ -6033,7 +6027,13 @@
 	// threshold holds a value, because that is what the camera decides on; a
 	// flag beside it would be a second copy of a fact the daemon already keeps,
 	// and a second copy needs an invalidation rule (#367).
-	const LEGACY_KEYS = ['minThreshold', 'maxThreshold', 'monitorDelay'];
+	//
+	// The thresholds, and only the thresholds. "Seconds between light checks"
+	// is the tick period of ALL three monitors — majestic arms the automatic
+	// one from it too — so hiding it with the switch took automatic mode's only
+	// polling knob off the page, and left the operator reading the legacy
+	// position as the one with a delay in it (#325).
+	const LEGACY_KEYS = ['minThreshold', 'maxThreshold'];
 	const AUTO_KEYS = ['autoNightGain', 'autoDayGain', 'autoNightDelay', 'autoDayDelay'];
 
 	function legacyOn() {
@@ -6099,6 +6099,16 @@
 			paint();
 			stageLegacy(box.checked);
 			showLegacy(box.checked);
+			// setValue() writes a control without firing its events, so the
+			// x-requires notes under the automatic rows — the ones saying a
+			// threshold outranks them — would still be claiming a threshold
+			// that this press has just emptied. They were painted while the
+			// rows were hidden and turned up stale the moment the switch
+			// revealed them (#325). runVisibility() is the repaint every other
+			// programmatic write on this page already pairs with updateDirty();
+			// nothing in nightMode carries a visibleWhen, so it cannot fight
+			// the display writes showLegacy() has just made.
+			runVisibility();
 			updateDirty();
 		});
 		box.checked = legacyOn();
@@ -6205,6 +6215,10 @@
 			const f = pinField(k);
 			if (f) f.setValue(a[k] === undefined ? '' : String(a[k]));
 		});
+		// A daylight sensor pin outranks both switching sets, so assigning or
+		// clearing one on the map decides whether six other rows are inert —
+		// and setValue() fires nothing that would repaint the notes saying so.
+		runVisibility();
 		updateDirty();
 	}
 

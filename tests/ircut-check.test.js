@@ -308,7 +308,7 @@ function runRest() {
 		check('an empty nightMode reports no-pins', f[0].id === 'no-pins', f[0] && f[0].id);
 		check('and reports it as a fault', f[0].level === 'danger');
 		check('with nothing to add about a monitor that is off',
-			f.filter(x => x.id === 'monitor-blind').length === 0);
+			f.filter(x => /^(auto-active|auto-retired)$/.test(x.id)).length === 0);
 	}
 
 	group('diagnose: GPIO 0 is a pin, not an absence');
@@ -402,39 +402,47 @@ function runRest() {
 
 	group('diagnose: the light monitor');
 	{
-		const blind = ic.diagnose({ irCutPin1: 11, lightMonitor: true }, null, null);
-		check('a monitor with no sensor and no thresholds is flagged',
-			blind.some(x => x.id === 'monitor-blind'));
-		check('a monitor with a sensor pin is not',
-			!ic.diagnose({ irCutPin1: 11, lightMonitor: true, lightSensorPin: 66 }, null, null)
-				.some(x => x.id === 'monitor-blind'));
-		check('a monitor with a threshold pair is not',
-			!ic.diagnose({ irCutPin1: 11, lightMonitor: true, minThreshold: 1500, maxThreshold: 4000 },
-				null, null).some(x => x.id === 'monitor-blind'));
-		// A string "true" reaches here from a hand-edited majestic.yaml.
-		check('lightMonitor as a string still counts as on',
-			ic.diagnose({ irCutPin1: 11, lightMonitor: 'true' }, null, null)
-				.some(x => x.id === 'monitor-blind'));
+		// The daemon says who decides via night_mode_source (sample.src).
+		// Source 4 is automatic mode running and is an observation; source 0
+		// is the SoC declining to answer, which is a fault with a way out.
+		// Anything else — including no sample at all — is not knowing, and
+		// carries no finding: the Dashboard passes null while the heartbeat
+		// is down and passed a sample with no src at all until #325, so the
+		// old third arm accused every working automatic camera of having
+		// nothing to watch.
+		check('a monitor nothing has reported on yet says nothing',
+			!ic.diagnose({ irCutPin1: 11, lightMonitor: true }, null, null)
+				.some(x => /^(auto-active|auto-retired)$/.test(x.id)));
+		check('...and no finding claims the firmware is too old for it',
+			!ic.diagnose({ irCutPin1: 11, lightMonitor: true },
+				{ night: 0, ircut: 0, light: 0, src: null }, null)
+				.some(x => /firmware/.test(x.detail || '')));
 		check('pins wired but no monitor is only an observation',
 			ic.diagnose({ irCutPin1: 11 }, null, null)
 				.some(x => x.id === 'manual-only' && x.level === 'info'));
-		// The daemon says who decides via night_mode_source (sample.src).
-		// Source 4 turns "blind" into the automatic-mode observation; source
-		// 0 means the SoC could not answer and the monitor stood down; no
-		// source at all keeps the old warning for older firmware.
 		const auto = ic.diagnose({ irCutPin1: 11, lightMonitor: true },
 			{ night: 0, ircut: 0, light: 0, src: 4 }, null);
 		check('an automatic monitor is an observation, not a fault',
 			auto.some(x => x.id === 'auto-active' && x.level === 'info') &&
-			!auto.some(x => x.id === 'monitor-blind'));
+			!auto.some(x => /^(auto-retired|threshold-half)$/.test(x.id)));
+		// A string "true" reaches here from a hand-edited majestic.yaml.
+		check('lightMonitor as a string still counts as on',
+			ic.diagnose({ irCutPin1: 11, lightMonitor: 'true' },
+				{ night: 0, ircut: 0, light: 0, src: 4 }, null)
+				.some(x => x.id === 'auto-active'));
 		check('a monitor the SoC could not feed is flagged as retired',
 			ic.diagnose({ irCutPin1: 11, lightMonitor: true },
 				{ night: 0, ircut: 0, light: 0, src: 0 }, null)
 				.some(x => x.id === 'auto-retired' && x.level === 'warning'));
-		check('no source gauge keeps the older-firmware warning',
-			ic.diagnose({ irCutPin1: 11, lightMonitor: true },
-				{ night: 0, ircut: 0, light: 0, src: null }, null)
-				.some(x => x.id === 'monitor-blind'));
+		check('a sensor pin is neither of those',
+			!ic.diagnose({ irCutPin1: 11, lightMonitor: true, lightSensorPin: 66 },
+				{ night: 0, ircut: 0, light: 0, src: 1 }, null)
+				.some(x => /^(auto-active|auto-retired)$/.test(x.id)));
+		check('nor is a threshold pair',
+			!ic.diagnose({ irCutPin1: 11, lightMonitor: true,
+				minThreshold: 1500, maxThreshold: 4000 },
+			{ night: 0, ircut: 0, light: 0, src: 2 }, null)
+				.some(x => /^(auto-active|auto-retired)$/.test(x.id)));
 
 		// One threshold is a half-finished configuration, and the camera
 		// answers it by setting up no monitor at all rather than falling

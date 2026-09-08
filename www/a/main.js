@@ -504,6 +504,17 @@ function heartbeat() {
 				night: ('night_enabled' in v) ? (v.night_enabled | 0) : null,
 				ircut: ('ircut_enabled' in v) ? (v.ircut_enabled | 0) : null,
 				light: ('light_enabled' in v) ? (v.light_enabled | 0) : null,
+				// Which door the camera says it is actually watching, and the
+				// wait it is currently applying. Both belong here rather than in
+				// one page's own copy: ircut-check's diagnose() reads them off
+				// the sample it is handed, and the Dashboard handed it one that
+				// carried neither — so every automatic camera answered the
+				// question "which mechanism is deciding?" with silence, and the
+				// finding for a camera with nothing to watch was the one that
+				// drew (#325). Same null-not-zero rule as the three above.
+				src: ('night_mode_source' in v) ? v.night_mode_source : null,
+				dwell: ('night_auto_dwell_seconds' in v)
+					? v.night_auto_dwell_seconds : null,
 				rx: m.rx, tx: m.tx, m,
 				// Consumers do their own counter deltas (net, venc bytes, md rects)
 				// against this snapshot; CPU% is computed here because its state
