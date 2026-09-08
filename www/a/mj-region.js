@@ -113,7 +113,67 @@
 		return { n: n, bad: bad };
 	}
 
-	const api = { parse: parse, clip: clip, verdict: verdict, tally: tally };
+	// HOW A MAIN-STREAM RECTANGLE LANDS ON THE STREAM BEING SHOWN.
+	//
+	// Regions are written in the main stream's pixels and drawn on every
+	// stream, and the two are not the same picture when either is cropped. The
+	// camera maps a rectangle through the sensor's frame -- main pixels back to
+	// group pixels by the main stream's crop, group pixels forward by the shown
+	// stream's -- and that is the only route that lands a mask on the same
+	// scene in both. Drawn as a plain ratio of the main stream, the outline
+	// sat on the wrong part of the sub stream whenever the main stream was
+	// cropped, beside the camera's own block on the right part, and the page
+	// had nothing to correct it by: the crop is in group pixels and the group
+	// frame's size is in no configuration key. So the camera reports both, and
+	// this turns the report into one affine map per axis.
+	//
+	// `group` is [w, h]; `streams` is the camera's list of {stream, frame:
+	// [w, h], view: [x, y, w, h]}; `main` and `shown` are stream indexes.
+	// The answer maps main-stream pixels to shown-stream pixels as
+	// k.x * x + o.x, and carries the main frame (`b`, the space a region is
+	// written in) and the shown frame (`f`, the space the picture on screen
+	// shows). Null where the camera has not said, and the caller falls back
+	// to the ratio -- which is right exactly when neither stream is cropped.
+	// Finite numbers, all of them, or no map at all: an origin that is
+	// missing or a string would come out of the arithmetic below as NaN, and
+	// a NaN reaches every outline, press and drag as a rectangle nowhere.
+	function nums(a, n, positiveFrom) {
+		if (!Array.isArray(a) || a.length < n) return false;
+		for (let i = 0; i < n; i++) {
+			if (typeof a[i] !== 'number' || !isFinite(a[i])) return false;
+			if (i >= positiveFrom && a[i] <= 0) return false;
+		}
+		return true;
+	}
+
+	function view(group, streams, main, shown) {
+		if (!nums(group, 2, 0) || !Array.isArray(streams)) return null;
+		const find = function (idx) {
+			for (let i = 0; i < streams.length; i++) {
+				const s = streams[i];
+				if (s && s.stream === idx && nums(s.frame, 2, 0) &&
+					nums(s.view, 4, 2)) return s;
+			}
+			return null;
+		};
+		const ref = find(main), cur = find(shown);
+		if (!ref || !cur) return null;
+		const rv = ref.view, cv = cur.view;
+		const b = { w: ref.frame[0], h: ref.frame[1] };
+		const f = { w: cur.frame[0], h: cur.frame[1] };
+		// Main pixels to group pixels is rv.w / b.w with an offset of rv.x;
+		// group pixels to shown pixels is f.w / cv.w with an offset of -cv.x.
+		const kx = rv[2] / b.w * f.w / cv[2];
+		const ky = rv[3] / b.h * f.h / cv[3];
+		return {
+			b: b, f: f,
+			k: { x: kx, y: ky },
+			o: { x: (rv[0] - cv[0]) * f.w / cv[2], y: (rv[1] - cv[1]) * f.h / cv[3] },
+		};
+	}
+
+	const api = { parse: parse, clip: clip, verdict: verdict, tally: tally,
+		view: view };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticRegion = api;
 })();
