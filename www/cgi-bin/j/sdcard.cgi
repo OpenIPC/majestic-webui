@@ -179,7 +179,16 @@ mkfs_list() {
 }
 
 get_info() {
-	if [ ! -b "$DEV" ]; then printf '{"present":false,"health":"absent","fsErrors":[],"mkfs":[%s]}' "$(mkfs_list)"; return; fi
+	# The mountpoint is reported even with no card in the slot, because the
+	# question a caller asks next is whether the camera is recording HERE at
+	# all: records.path can point at a USB stick or a network mount, and then
+	# "there is no SD card" is true and irrelevant. This endpoint only ever
+	# describes $DEV, so the answer is the same one the present branch gives.
+	if [ ! -b "$DEV" ]; then
+		printf '{"present":false,"health":"absent","mountpoint":"%s","fsErrors":[],"mkfs":[%s]}' \
+			"$(json_str "/mnt/$(basename "$DEV")p1")" "$(mkfs_list)"
+		return
+	fi
 	t=$(target); base=${t##*/}
 	[ -b "${DEV}p1" ] && partd=true || partd=false
 	size=$(( $(cat "$SYS/size" 2>/dev/null || echo 0) * 512 ))

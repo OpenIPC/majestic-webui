@@ -322,6 +322,9 @@ function load(opts) {
 			heldKey: () => null, heldMeta: () => null,
 		};
 	}
+	// The header loads this before the page's own script, and recordings.js
+	// takes it at module scope.
+	vm.runInContext(fs.readFileSync(A('storage-verdict.js'), 'utf8'), ctx);
 	vm.runInContext(fs.readFileSync(A('recordings.js'), 'utf8'), ctx);
 	return env;
 }

@@ -131,7 +131,13 @@ function load(cardHealth, metrics, mode) {
 			return json({ utc_offset: '+0000', timezone: 'UTC', time_now: 0 });
 		}
 		if (url.indexOf('/cgi-bin/j/sdcard.cgi') === 0) {
-			return json({ health: cardHealth, mountpoint: '/mnt/mmcblk0p1',
+			// The mountpoint agrees with records.path above, as it does on a
+			// camera: the card's own verdict is an answer about recording only
+			// where the recording goes, so a fixture that mounts the card
+			// somewhere the clips are not is a fixture describing a camera
+			// recording to a USB stick — which is exactly the case that must
+			// NOT raise a card banner.
+			return json({ health: cardHealth, mountpoint: '/rec',
 				totalKb: 1e7, usedKb: 5e6, availKb: 5e6, recBytes: 1e9, fsErrors: [] });
 		}
 		if (url.indexOf('/cgi-bin/j/recordings.cgi?days=1') === 0) {
@@ -178,8 +184,10 @@ function load(cardHealth, metrics, mode) {
 	vm.createContext(ctx);
 	// The page loads these in this order, and so does the browser: recordings.js
 	// takes the crypto modules at module scope, the way it takes the index.
-	for (const f of ['timeline.js', 'mp4index.js', 'mjcrypto.js', 'mp4crypt.js',
-		'reckeys.js', 'recordings.js']) {
+	// storage-verdict.js first, as p/header.cgi loads it: recordings.js takes
+	// it at module scope, the way it takes the index and the crypto.
+	for (const f of ['storage-verdict.js', 'timeline.js', 'mp4index.js',
+		'mjcrypto.js', 'mp4crypt.js', 'reckeys.js', 'recordings.js']) {
 		vm.runInContext(fs.readFileSync(A(f), 'utf8'), ctx);
 	}
 	return env;

@@ -285,9 +285,22 @@ done) %>
 			<script type="application/json" id="overlay-data">{"total":<%= ${ov_total:-0} %>,"used":<%= ${ov_used:-0} %>,"avail":<%= ${ov_avail:-0} %>,"cats":[<%= $ov_cats %>]}</script>
 			<% if [ -n "$sd_rows" ]; then %>
 				<% echo "$sd_rows" | while IFS='|' read mnt use pct; do %>
-					<div class="d-flex align-items-center gap-2 x-small">
-						<span class="badge text-bg-success flex-shrink-0">SD</span>
-						<span class="text-secondary"><% esc "$mnt — $use ($pct)" %></span>
+					<%# Neutral, and coloured by /a/storage-check.js once
+					    something has actually established a verdict. These
+					    numbers are df's, and df reports a card that went
+					    read-only at lunchtime with all of the free space it had
+					    then -- so green here would be a claim about health that
+					    nothing has checked. df is not wrong; it is answering a
+					    different question from the one being asked.
+
+					    The mount is on the row rather than an id, because this
+					    loop draws one row per matching filesystem and the health
+					    endpoint describes exactly one device: an id repeated
+					    down the loop would colour the first row whichever one
+					    the verdict was about. %>
+					<div class="d-flex align-items-center gap-2 x-small mj-sd-row" data-mnt="<% attr_escape "$mnt" %>">
+						<span class="badge text-bg-secondary flex-shrink-0 mj-sd-badge">SD</span>
+						<span class="text-secondary"><% esc "$mnt — $use ($pct)" %><span class="mj-sd-why"></span></span>
 					</div>
 				<% done %>
 			<% else %>
