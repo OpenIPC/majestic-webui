@@ -13,7 +13,8 @@ const vm = require('vm');
 const { check, group, done } = require('./assert');
 
 const A = (f) => path.join(__dirname, '..', 'www', 'a', f);
-const SRCS = [A('preview-swap.js'), A('preview-served.js'), A('preview-page.js')];
+const SRCS = [A('preview-swap.js'), A('preview-served.js'), A('preview-chain.js'),
+	A('preview-page.js')];
 
 const IDS = [
 	'live-mjpeg', 'live-mjpeg-b',
@@ -148,8 +149,9 @@ function load(cfg) {
 	vm.createContext(ctx);
 	vm.runInContext(fs.readFileSync(SRCS[0], 'utf8'), ctx);
 	ctx.MajesticSwap = win.MajesticSwap;
-	// preview-served.js (window.MajesticServed) then the page; the page reaches
-	// the module through window, so it needs no hand-over.
+	// preview-served.js and preview-chain.js (window.MajesticServed,
+	// window.MajesticChain) then the page; the page reaches both through
+	// window, so they need no hand-over.
 	for (let i = 1; i < SRCS.length; i++) {
 		vm.runInContext(fs.readFileSync(SRCS[i], 'utf8'), ctx);
 	}

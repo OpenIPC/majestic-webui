@@ -8,16 +8,17 @@
 // merely busy. Divergence there would show up as "the preview behaves
 // differently on the settings page", which is the kind of bug nobody files.
 //
-// What is deliberately NOT here is the attach-and-fall-back dance: what to try
-// next, what to put on the badge, what a failure means. The two pages want
-// different things from it — one has a badge, an MJPEG fallback and a transport
-// toggle to keep in step, the other a bare video element — and a shared version
-// would be an abstraction over two callers with one of them bent to fit.
+// What is deliberately NOT here is what a page DOES about an outcome: what to
+// put on the badge, what a failure means for its controls, what to show when
+// the chain runs out. The two pages want different things there — one has a
+// badge, an MJPEG fallback and a transport toggle to keep in step, the other
+// an alert sentence — and those stay per page.
 //
-// The swap underneath it is shared, in preview-swap.js, and the line between
-// them is worth stating: that is a state machine with invariants that are not
-// obvious, this is a set of rules, and the dance in between is a dozen lines of
-// each page's own judgement.
+// The line between the three shared modules is worth stating: preview-swap.js
+// is a state machine with invariants that are not obvious, preview-chain.js is
+// the walk down the chain (what to try next, and the software rung's retry
+// ladder), and this is the set of rules the walk asks — which transport to
+// prefer, what to remember, whether a failure is worth the next rung.
 window.MajesticTransport = (function () {
 	// What the person chose. Permanent until they choose again.
 	const PICK_KEY = 'mj-transport-pick';
@@ -125,10 +126,9 @@ window.MajesticTransport = (function () {
 	// asking for 'wasm' has decided already, and an unknown string still lands
 	// on the player that plays anything the browser can decode.
 	// Whether the software-decode rung is worth trying for a given failure.
-	// Here rather than in either page because it is a RULE, which is what this
-	// module is for — and because two copies of it would drift: the Live page
-	// and the settings panel differ in what they do about the outcome, not in
-	// what makes the attempt worth a network round trip.
+	// Here rather than in the walk (preview-chain.js) because it is a RULE,
+	// which is what this module is for: the walk asks whether the attempt is
+	// worth a network round trip, and this is the answer.
 	//
 	// `detail` is the player's reason code. Only a codec the browser refused,
 	// and only one this decoder speaks: an unreachable camera is not a decoding
@@ -152,7 +152,7 @@ window.MajesticTransport = (function () {
 	// socket with its own reconnect and is worth a try — it may survive where
 	// the MSE player's ladder gave up (measured: a Raspberry Pi over a remote
 	// link, majestic #288). It cannot loop, because the software rung's own
-	// failure reports kind `wasm`, which the caller's walk does not route here.
+	// failure reports kind `wasm`, which the walk does not route here.
 	function softwareRungForCodec(detail, codec) {
 		const bits = String(detail || '').split(' ');
 		const w = window.MajesticWasm;
@@ -170,9 +170,10 @@ window.MajesticTransport = (function () {
 	// answer yet passes nothing and gets false, because offering a picture the
 	// camera may not serve is worse than offering none.
 	//
-	// It lives beside softwareRungFor() rather than in either page for the
-	// reason that one does: two nextRung() walks read it, and a gate that
-	// disagreed between them would be a transport that works on one page.
+	// It lives beside softwareRungFor() for the reason that one does: it is a
+	// rule, and the Live page's floor (its fallThrough) is what asks it — the
+	// settings preview has no MJPEG rung, which is why the shared walk in
+	// preview-chain.js stops above this and leaves the floor to each page.
 	function multipartRungFor(stream) {
 		const s = window.MajesticSources;
 		return !!(stream && s && s.family(stream) === 'multipart' &&

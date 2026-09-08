@@ -321,6 +321,29 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   built client-side by `renderLive()` in `mj-settings.js` (`.mj-live-video`
   elements), though it loads all four preview player scripts. `preview()`
   (in `p/common.cgi`) has exactly one caller: `live.cgi`.
+- **The walk down the chain is one copy, `preview-chain.js`, and what each
+  page shows about it is not.** `MajesticChain.decide()` is the pure walk —
+  `codec-changed` restarts from wherever the caller starts, WebRTC falls to
+  MSE, MSE falls to the software decoder on a refused codec or on a socket
+  that dropped before any verdict when the config says the channel is H.265
+  (#288), and a dropped software socket is retried five times with a growing
+  wait and for no other reason — and `make()` is the driver that owns the
+  retry timer and the budget, refilled only by frames a live software session
+  actually decoded, never by the codec announcement and never by a channel
+  change (#288). Both `preview-page.js` and `mj-preview.js` build one, handing
+  it how to attach (the page wraps it with its MJPEG-only-source detection),
+  where to restart from, the configured codec, and what to do when the walk
+  runs out above the page's own floor: the Live page's `fallThrough` goes on
+  to the MJPEG rung and the note, the component's `lost` shows its alert.
+  The walk used to be written in both files and the same fault fixed once in
+  each (the software-rung reconnect of #288); `tests/preview-chain.test.js`
+  pins it with fake timers, and
+  the page's two harnesses passing unchanged after the extraction is what
+  proved the Live page kept its behaviour (#400). Any fresh start cancels a
+  pending retry — the page's `attachPlayer`, `goToStream`, `goToSource` and
+  `showFallback` say so, because a stopped swap has nothing for a retry to
+  stage over — and the timer needs no generation guard: a cancelled timer
+  cannot fire.
 - **The MSE player seeks for drift, never for lag (`syncLive` in
   `preview.js`).** It used to seek to the live edge whenever the buffer ran
   more than a second ahead of the playhead, moving or not, and that read a
@@ -515,7 +538,10 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   `tests/auto-source.test.js` and `tests/staging.test.js` execute
   `preview-page.js` in a bare `vm` with a stubbed `$` over an `IDS` list: any
   new element preview-page.js touches must be `$`-guarded and, for coverage,
-  added to both `IDS` lists. Every group in the bar is black glass and, where it
+  added to both `IDS` lists. Their loaders run every file in `SRCS` in order
+  — the swap (handed over as a bare global), then `preview-served.js` and
+  `preview-chain.js` (reached through `window.*`, no hand-over), then the
+  page — so a new module the page needs goes into both lists ahead of it. Every group in the bar is black glass and, where it
   has state, a lit indicator with the word that names it — `Muted`, `Talk`,
   `Stats`, because a lit dot alone does not say what is lit. A **segmented
   picker carries no caption**: its options say what it is (`Main Sub Auto`,

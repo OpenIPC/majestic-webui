@@ -12,12 +12,13 @@
 // the camera match the encoder to the link. MSE is a tick away for the
 // browsers and cameras where negotiation cannot be made to work.
 //
-// The chain is WebRTC -> MSE -> MJPEG -> note, and the middle step is
-// load-bearing rather than tidy. WebRTC negotiates and can therefore fail
-// where MSE cannot: Firefox's WebRTC stack offers only H.264 Baseline whatever
-// its decoder can do, so a camera on `profile: main` has nothing to give it —
-// the same browser plays that stream over MSE without complaint. A player
-// reporting 'fallback' is asking for the other transport, not for MJPEG.
+// The chain is WebRTC -> MSE -> software decode -> MJPEG -> note. The walk
+// down it, and the software rung's retry ladder, are preview-chain.js —
+// shared with the settings preview, which wants a different thing from the
+// chain running out (an alert sentence) and nothing different from the walk.
+// See that file for why the middle steps are load-bearing rather than tidy.
+// What is here is what this page does about each outcome: the MJPEG rung,
+// the note, the badge, the radios.
 //
 // Now that the chain runs by default rather than on request, what it remembers
 // matters more than it did. A refusal is recorded with a timestamp and expires;
@@ -47,8 +48,8 @@
 		// Re-decided here against the real answer; harmless when it agrees.
 		//
 		// And if that fallback was a socket giving up ('unreachable') on what
-		// the config now says is a software-decodable channel, the rescue in
-		// nextRung could not have fired — cfgCodec was empty when the failure
+		// the config now says is a software-decodable channel, the chain's
+		// rescue could not have fired — cfgCodec was empty when the failure
 		// arrived. Take it now rather than only re-rendering the MJPEG picture,
 		// or a camera whose config lands slowly (the same flaky link that
 		// caused the giving-up) would never reach the decoder (#288).
@@ -124,33 +125,22 @@
 	// than fallen to — a USB webcam that publishes nothing else is not a
 	// failure and has nothing to explain.
 	let fellToMultipart = null;
-	// A page-level reconnect ladder for the software-decode rung, and a belt to
-	// the worker's own braces (hevc-wasm@v0.1.1). A pinned worker older than
-	// that gives up on the FIRST dropped socket, and the chain reads that one
-	// `unreachable` as "software decode is done" and falls to MJPEG with no way
-	// back — the #288 dead-end, where a transient blip stranded a working H.265
-	// preview until the tab was reloaded. So a wasm socket drop is retried here
-	// a few times before MJPEG, reset by a picture reaching the stage
-	// (showVideo). It cannot loop: only a socket drop reports `unreachable`; a
-	// codec the decoder cannot take reports `codec-changed`, and a missing
-	// decoder `decoder-unavailable`, both of which terminate the chain instead.
-	const WASM_MAX_RETRIES = 5;
-	const WASM_RETRY_MS = 1000;
-	// Frames a software session must decode before it counts as recovered and
-	// the retry budget resets — proof of sustained play, not the mere codec
-	// announcement (~1s at 8fps).
-	const WASM_HEALTHY_FRAMES = 8;
-	let wasmRetries = 0;
-	// A pending page-level retry and the generation it belongs to. Any fresh
-	// attach, channel change or transport change bumps the generation, so a
-	// retry scheduled by a superseded session cannot fire attachPlayer('wasm')
-	// over the newer player and override the viewer's choice. The timer is held
-	// so it can be cancelled outright.
-	let wasmRetryTimer = null;
-	let wasmGen = 0;
-	function cancelWasmRetry() {
-		if (wasmRetryTimer) { clearTimeout(wasmRetryTimer); wasmRetryTimer = null; }
-	}
+	// The walk down the chain and the software rung's retry ladder, shared with
+	// the settings preview (preview-chain.js). What this page supplies is how
+	// to attach a rung (attachPlayer, with its MJPEG-only-source detection),
+	// where a codec change restarts from, which codec the channel on screen is
+	// configured as, and what to do when the walk runs out above this page's
+	// floor — fallThrough below: the MJPEG rung, then the note.
+	//
+	// Built here, above everything that reaches it, but calling into functions
+	// declared further down: every callback runs at failure time, never at
+	// construction.
+	const chain = window.MajesticChain.make({
+		start: (token) => attachPlayer(token),
+		starting: () => startingRung(),
+		codecFor: () => cfgCodec[stream ? 1 : 0],
+		onExhausted: (kind, detail) => fallThrough(kind, detail),
+	});
 	function showVideo() {
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = '#000'; }
@@ -210,6 +200,11 @@
 		// 'connecting…' seconds after the fallback appeared.
 		swap.stop();
 		player = null;
+		// And any software-rung retry still waiting: a stopped swap has nothing
+		// for it to stage over, and the timer would otherwise fire a software
+		// player at a stage that is showing the note — reachable when the MJPEG
+		// rung dies inside the second a retry above it is waiting out.
+		chain.cancel();
 		// The kind goes with the player. Left standing it names a session that
 		// ended, and every `liveKind === …` test below is then answering about
 		// something that is not on screen.
@@ -242,9 +237,9 @@
 		// used to be written from here — `img.src = '/mjpeg'`, outside the
 		// swap, with its own visibility flag — and that stopped being tenable
 		// when MJPEG became a source rather than a failure: two paths to the
-		// same stream, one of them unable to name a camera. nextRung() reaches
-		// the rung above; arriving here means there was none to reach or it
-		// gave up too, so what is left is the explanation.
+		// same stream, one of them unable to name a camera. fallThrough()
+		// reaches the rung above; arriving here means there was none to reach
+		// or it gave up too, so what is left is the explanation.
 		hideOtherKind(null);
 		if (noteWhy) noteWhy.textContent = sentence;
 		// "Enable JPEG for an MJPEG fallback" is advice, and advice is only
@@ -1029,7 +1024,7 @@
 			// failure arrived as onExhausted. Now there is one, and the
 			// intention has to be stated.
 			if (liveKind === 'multipart' && fellToMultipart) {
-				nextRung(kind, why);
+				chain.next(kind, why);
 			}
 		},
 		// Nothing left on screen worth keeping. Try the other transport — from
@@ -1038,7 +1033,7 @@
 		// set — and MJPEG if that already was the other transport.
 		onExhausted: (kind, detail) => {
 			player = null;
-			nextRung(kind, detail);
+			chain.next(kind, detail);
 		},
 		onLive: (s, d) => {
 			if (s === 'playing') showVideo();
@@ -1048,7 +1043,7 @@
 			// arrives here rather than as a dropped trial — and sending it
 			// directly to showFallback() skipped every rung below the one that
 			// failed.
-			else if (s === 'mjpeg') { swap.retire(); nextRung(liveKind, d); }
+			else if (s === 'mjpeg') { swap.retire(); chain.next(liveKind, d); }
 			else if (s === 'fallback' || s === 'busy') {
 				// The live player gave up mid-session. Staged like any other
 				// switch, so its last frame stays until the replacement has one
@@ -1085,9 +1080,10 @@
 	function attachPlayer(kind) {
 		// Any fresh attach supersedes a pending software-rung retry: it belongs
 		// to a session that is being replaced, and firing it now would stage a
-		// wasm player over the new one.
-		wasmGen++;
-		cancelWasmRetry();
+		// wasm player over the new one. The chain cancels for the attaches it
+		// issues itself; this covers the callers that are not the chain — the
+		// radios, the retry out of the fallback, the late config and sources.
+		chain.cancel();
 
 		let want = kind === true ? 'webrtc' : kind === false ? 'mse' : kind;
 		// A NAL transport cannot carry a source that publishes MJPEG only, and
@@ -1108,69 +1104,12 @@
 		swap.start(want);
 	}
 
-	// The chain, as an ordered walk rather than the pair of `kind === 'webrtc'`
-	// tests it used to be:
-	//
-	//     WebRTC -> MSE -> [software decode] -> MJPEG -> note
-	//
-	// The third rung is not a transport and gets no radio. It is the same
-	// /ws/video bytes the MSE player just failed on, decoded in WebAssembly
-	// instead of by the browser — so the picker goes on naming the transport
-	// exactly once, and a codec problem never touches the viewer's remembered
-	// preference.
-	function nextRung(kind, detail) {
-		// A channel change can change the CODEC, and the failure that put us on
-		// this rung was about the channel we have just left. So this is not the
-		// chain running out — it is a different question, asked again from the
-		// top: an H.264 substream may well play over WebRTC or MSE natively,
-		// and falling to MJPEG here would hand the viewer the worst option
-		// available for a stream the browser can decode perfectly.
-		//
-		// It cannot loop: the rung only stands down for a codec it does not
-		// handle, and if the new one is refused too the reason will name that
-		// codec, which the gate below rejects.
-		if (String(detail || '').split(' ')[0] === 'codec-changed') {
-			attachPlayer(startingRung());
-			return;
-		}
-		if (kind === 'webrtc') { attachPlayer('mse'); return; }
-		if (kind === 'mse' && MajesticTransport.softwareRungFor(detail)) {
-			attachPlayer('wasm');
-			return;
-		}
-		// MSE gave up without a codec verdict — the socket would not stay open
-		// ('unreachable'), so the browser never saw what the stream is. If the
-		// config says this channel is a codec the software decoder handles, let
-		// its worker try its own socket before falling to MJPEG; on a flaky or
-		// remote link that has kept the software decoder working moments before,
-		// dropping to MJPEG here strands the viewer on the worst option (#288).
-		if (kind === 'mse' &&
-			MajesticTransport.softwareRungForCodec(detail, cfgCodec[stream ? 1 : 0])) {
-			attachPlayer('wasm');
-			return;
-		}
-		// The software rung itself dropped its socket. A current worker has
-		// already retried six times before saying so; an older pinned one gave
-		// up on the first drop. Either way, retry the rung a bounded few times
-		// before MJPEG rather than ending a working H.265 preview on one blip
-		// (#288). Reset by a picture (showVideo); terminates on anything but a
-		// socket drop, so it cannot loop.
-		if (kind === 'wasm' && String(detail || '').split(' ')[0] === 'unreachable' &&
-			wasmRetries < WASM_MAX_RETRIES) {
-			wasmRetries++;
-			// The caller has already retired the live player (or it was a failed
-			// trial), so its last frame stays on the stage through the wait
-			// rather than blanking it — the same picture-holding rule as a
-			// transport switch. Guarded by the generation captured now: a channel
-			// or transport change in the meantime bumps it and this does nothing.
-			cancelWasmRetry();
-			const retryGen = wasmGen;
-			wasmRetryTimer = setTimeout(function () {
-				wasmRetryTimer = null;
-				if (wasmGen === retryGen && fellBack === null) attachPlayer('wasm');
-			}, WASM_RETRY_MS * wasmRetries);
-			return;
-		}
+	// The walk ran out above this page's floor. The chain (preview-chain.js)
+	// has already tried the other transport and the software rung with its
+	// retries; what is left is this page's own: the camera's MJPEG channel,
+	// and failing that the note. `kind` is the rung that failed, `detail` its
+	// reason.
+	function fallThrough(kind, detail) {
 		// The bottom rung. Not reached from itself — `multipart` is the end of
 		// the chain — and only when this SOURCE has an MJPEG stream to serve:
 		// offering an <img> a URL the camera answers with nothing would trade a
@@ -1324,12 +1263,10 @@
 				if (!isLive()) return;
 				if (s.transport === 'wasm') {
 					softwareNote(s);
-					// Sustained software playback resets the retry budget so the
-					// NEXT drop gets a fresh ladder — gated on frames actually
-					// decoded, not the codec announcement, so a decoder that
-					// announces its codec and immediately drops still exhausts to
-					// MJPEG rather than resetting on every attempt.
-					if ((s.framesDecoded | 0) >= WASM_HEALTHY_FRAMES) wasmRetries = 0;
+					// Sustained software playback refills the retry budget so the
+					// NEXT drop gets a fresh ladder; the chain judges it on frames
+					// actually decoded, never on the codec announcement.
+					chain.healthy(s);
 				}
 				// The chip rides every tick, not just when the panel is open —
 				// this is where its fps comes from, and a fresh write also
@@ -1691,8 +1628,7 @@
 	function goToStream(n) {
 		// The viewer changed channel: a software-rung retry pending from the
 		// channel being left must not fire onto the new one.
-		wasmGen++;
-		cancelWasmRetry();
+		chain.cancel();
 		stream = wantSubtype = n;
 		// The two channels are two encoders; the baseline and any toast on
 		// screen describe the one being left.
@@ -1810,8 +1746,7 @@
 		// Same hygiene as a channel change, for the same reasons: a pending
 		// software retry belongs to the source being left, and the adaptation
 		// baseline and the served answer both describe it.
-		wasmGen++;
-		cancelWasmRetry();
+		chain.cancel();
 		camera = n;
 		writeSource(String(n));
 		// Whatever the chain had to explain about the source being left does
