@@ -75,6 +75,29 @@ window.MajesticWebRTC = (function () {
 				gestureEvs.forEach(function (t) { try { document.removeEventListener(t, gestureRetry, true); } catch (e) {} });
 			gestureRetry = null;
 		}
+		// Opera for Android RESOLVES play() for a muted MediaStream but does not
+		// actually start playback — the picture is ready and paused, and play()'s
+		// promise never rejects, so a retry armed inside play().catch never arms
+		// (majestic-webui#317). The reporter's A/B test proves this: PR #396
+		// broadened that catch to arm on any muted rejection and behaved exactly
+		// like master, i.e. the catch never ran. So observe the real state
+		// instead: shortly after attaching, if the muted picture is still paused,
+		// arm the gesture-retry regardless of what play()'s promise did. A browser
+		// that actually started (Chrome, measured) is not paused here, so this
+		// never fires for it and cannot regress it.
+		let pausedTimer = null;
+		function disarmPausedTimer() {
+			if (pausedTimer) { clearTimeout(pausedTimer); pausedTimer = null; }
+		}
+		function armPausedRetry(v, alive) {
+			if (typeof document === 'undefined') return;
+			disarmPausedTimer();
+			pausedTimer = setTimeout(function () {
+				pausedTimer = null;
+				if (alive && !alive()) return;
+				if (v.muted && v.paused) playOnGesture(v, alive);
+			}, 800);
+		}
 		function playOnGesture(v, alive) {
 			if (typeof document === 'undefined') return;
 			// Replace any arming left by a previous attempt rather than refuse to
@@ -530,6 +553,11 @@ window.MajesticWebRTC = (function () {
 				if (ev.streams && ev.streams[0]) video.srcObject = ev.streams[0];
 				video.muted = !wantAudio;
 				try { video.volume = volume; } catch (e) {}
+				// The play() promise cannot be trusted to report an autoplay
+				// refusal (Opera resolves it without playing, #317), so watch the
+				// element: if it is a muted picture still paused shortly from now,
+				// arm the gesture-retry. Cheap and self-cancelling once it plays.
+				if (video.muted) armPausedRetry(video, function () { return current(my); });
 				video.play().catch(function (err) {
 					// Only one rejection means the sound is the problem.
 					// NotAllowedError is autoplay policy refusing unmuted
@@ -543,11 +571,16 @@ window.MajesticWebRTC = (function () {
 					// that as an autoplay refusal reports "no audio" over a
 					// working Opus stream, which is exactly what it did.
 					if (!current(my)) return;
-					// A muted element has no sound to blame: autoplay was refused on a
-					// fresh load with no user activation (#317). Retry on the first gesture.
+					// A muted element has no sound to blame: a rejection here is
+					// autoplay refused on a fresh load with no user activation
+					// (#317). Retry on the first gesture whatever the rejection was
+					// named — browsers disagree (NotAllowedError, AbortError, an
+					// unnamed reject) and the only actionable fact is that a muted
+					// picture is paused. No audio track is requested while muted, so
+					// ontrack fires once and this is not the audio-track AbortError
+					// the unmuted branch below guards.
 					if (video.muted) {
-						if (err && err.name === 'NotAllowedError')
-							playOnGesture(video, function () { return current(my); });
+						playOnGesture(video, function () { return current(my); });
 						return;
 					}
 					if (!err || err.name !== 'NotAllowedError') return;
@@ -722,6 +755,7 @@ window.MajesticWebRTC = (function () {
 			// A new attempt begins here; drop any gesture retry bound to the old
 			// one so this attempt can arm its own if it too is refused autoplay.
 			disarmGesture();
+			disarmPausedTimer();
 			// Retire the attempt before dismantling it. Closing a peer
 			// connection rejects whatever it had in flight, and a rejection
 			// that arrives while its own attempt still looks current would be
@@ -815,6 +849,7 @@ window.MajesticWebRTC = (function () {
 			// file guards against.
 			releaseMic();
 			disarmGesture();
+			disarmPausedTimer();
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			stop();
 		}
