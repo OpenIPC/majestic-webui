@@ -188,7 +188,55 @@ function stripCgi(src, where) {
 	}
 }
 
-module.exports = { stripCgi, stripShell, stripHtmlComments };
+/* The lines of a .cgi that are actually shell CODE: inside a code block, not a
+ * heredoc body, not literal markup, and not the continuation of a string that
+ * opened on an earlier line. Returned as { line, text } with 1-based source
+ * line numbers.
+ *
+ * Exported so the lint in tests/ walks the same parser this strips with. The
+ * two ask different questions of a .cgi and must not disagree about which
+ * bytes are shell -- that disagreement is the whole reason a comment full of
+ * CSS was once handed to /bin/sh.
+ *
+ * A file with no code block at all is a plain shell script (sbin/, bin/, the
+ * j/*.cgi endpoints), so every line of it is code. */
+function shellLines(src, where) {
+	where = where || '<input>';
+	const out = [];
+	if (src.indexOf('<%') === -1) {
+		src.split('\n').forEach((t, n) => out.push({ line: n + 1, text: t }));
+		return out;
+	}
+	let i = 0;
+	for (;;) {
+		const j = src.indexOf('<%', i);
+		if (j === -1) return out;
+		const k = src.indexOf('%>', j);
+		if (k === -1) {
+			throw new Error(`${where}: '<%' at offset ${j} is never closed`);
+		}
+		const kind = src[j + 2];
+		if (kind !== '#' && kind !== '=') {
+			const base = src.slice(0, j + 2).split('\n').length;
+			let quote = null;
+			let hd = null;
+			src.slice(j + 2, k).split('\n').forEach((t, n) => {
+				if (hd) {
+					const s = hd.dash ? t.replace(/^[\t]+/, '') : t;
+					if (s === hd.delim) hd = null;
+					return;
+				}
+				if (!quote) out.push({ line: base + n, text: t });
+				const r = scanShellLine(t, quote);
+				quote = r.quote;
+				if (r.heredoc) hd = r.heredoc;
+			});
+		}
+		i = k + 2;
+	}
+}
+
+module.exports = { stripCgi, stripShell, stripHtmlComments, shellLines };
 
 if (require.main === module) {
 	const fs = require('fs');
