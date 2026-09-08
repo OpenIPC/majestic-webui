@@ -136,39 +136,53 @@ printf '{"path":"%s","clips":[' "$(json_str "$dir")"
 # replaces asked: a link to a clip is a clip, and a dangling one fails stat and
 # drops out, as it did before. Size and mtime now describe the clip rather than
 # the link, which is the answer the caller was always after.
+#
+# Every entry is rejected on its own, and nothing guards the batch. A `[ -e ]`
+# on the first glob result would look like the empty-directory check the day
+# list does, and would instead be a way to lose a whole day: this directory is
+# pruned while it is being read, so the first clip going away between the glob
+# and the test is ordinary, and a dangling link that sorts first would do it
+# too -- either one would empty the timeline of a day that is full of footage.
+# An unmatched glob needs no guard either. It stays literal, stat says no such
+# file, and a day with nothing in it comes back as the [] it should be.
 set -- "$dir"/*.mp4
-if [ -e "$1" ]; then
-	printf '%s\0' "$@" |
-	xargs -0 -r stat -L -c '%s|%Y|%F|%n' 2>/dev/null |
-	awk -F'|' '
-		# json_str, moved in here: escape backslash and quote, drop control
-		# characters. Done a character at a time on purpose -- a backslash in
-		# a gsub *replacement* is reinterpreted by gsub, and getting that
-		# wrong is silent, so this never puts one there.
-		function esc(s,   out, i, c) {
-			out = ""
-			for (i = 1; i <= length(s); i++) {
-				c = substr(s, i, 1)
-				if (c == "\\" || c == "\"") out = out "\\" c
-				else if (c !~ /[\001-\037]/) out = out c
-			}
-			return out
+printf '%s\0' "$@" |
+xargs -0 -r stat -L -c '%s|%Y|%F|%n|#' 2>/dev/null |
+awk -F'|' '
+	# json_str, moved in here: escape backslash and quote, drop control
+	# characters. Done a character at a time on purpose -- a backslash in
+	# a gsub *replacement* is reinterpreted by gsub, and getting that
+	# wrong is silent, so this never puts one there.
+	function esc(s,   out, i, c) {
+		out = ""
+		for (i = 1; i <= length(s); i++) {
+			c = substr(s, i, 1)
+			if (c == "\\" || c == "\"") out = out "\\" c
+			else if (c !~ /[\001-\037]/) out = out c
 		}
-		# The name is field 4 onwards, rejoined: a filename may contain the
-		# separator itself. Size, mtime and type go first, where they cannot
-		# be mistaken for part of it.
-		#
-		# ^regular, not "regular file": busybox calls a zero-byte file a
-		# "regular empty file", and the clip being recorded right now is
-		# zero bytes until the muxer first flushes. Matching the exact string
-		# drops the newest clip from the day you are most likely looking at.
-		$3 ~ /^regular/ {
-			name = $4
-			for (i = 5; i <= NF; i++) name = name "|" $i
-			sub(/.*\//, "", name)
-			printf "%s{\"name\":\"%s\",\"size\":%s,\"mtime\":%s}", \
-				(seen++ ? "," : ""), esc(name), $1, $2
-		}
-	'
-fi
+		return out
+	}
+	# The name is the fields between the type and the terminator, rejoined:
+	# a filename may contain the separator itself. Size, mtime and type go
+	# first, where they cannot be mistaken for part of it.
+	#
+	# ^regular, not "regular file": busybox calls a zero-byte file a
+	# "regular empty file", and the clip being recorded right now is
+	# zero bytes until the muxer first flushes. Matching the exact string
+	# drops the newest clip from the day you are most likely looking at.
+	#
+	# The trailing # is what makes a record whole. stat separates records
+	# with a newline, and a filename is allowed to contain one -- which
+	# splits it across two lines, neither of them the truth. The terminator
+	# is printed after the name, so a split record does not carry it and is
+	# dropped here. Squashing the newline out instead, as this used to,
+	# only produced a name no file on the card answers to.
+	$3 ~ /^regular/ && $NF == "#" {
+		name = $4
+		for (i = 5; i <= NF - 1; i++) name = name "|" $i
+		sub(/.*\//, "", name)
+		printf "%s{\"name\":\"%s\",\"size\":%s,\"mtime\":%s}", \
+			(seen++ ? "," : ""), esc(name), $1, $2
+	}
+'
 printf ']}'
