@@ -3088,6 +3088,14 @@
 				// video frame, so without this the header goes on naming the
 				// text for as long as no frame arrives.
 				if (placers[n]) placers[n].repaint();
+			}, () => {
+				// The picture arrived — from the camera, after a reload —
+				// and the stand-in is drawn from it. It is fetched before
+				// the placers exist and lands whenever the camera answers,
+				// which can be after the last repaint; without this the
+				// stand-in stayed the word-sized box until something else
+				// happened to repaint it.
+				if (placers[n]) placers[n].repaint();
 			});
 		}
 		// ── the vendor mark ──────────────────────────────────────────────
@@ -5115,7 +5123,7 @@
 	// has to drop Look for a picture: every control on it — the font, its size,
 	// its weight, its outline, the plate behind the text — is about drawing
 	// text, and none of it touches a bitmap the camera blits.
-	function buildContent(box, held, overlay, preview, onKind) {
+	function buildContent(box, held, overlay, preview, onKind, onPicture) {
 		if (!held.template && !held.image) return;
 
 		const wrap = el('div', 'mj-osd-content');
@@ -5143,6 +5151,7 @@
 			held.image.p.hidden = true;
 			picker = buildLogo(logoPart, held.image, held.template, overlay,
 				preview);
+			if (onPicture) picker.onPicture(onPicture);
 		}
 
 		const isLogo = () =>
@@ -5259,6 +5268,22 @@
 		// Set when the camera has it — after an upload lands, or when it
 		// hands one back — and cleared when the overlay stops drawing it.
 		let pict = null;
+		let onPicture = null;
+		// WHICH PICTURE AN ANSWER IS ABOUT. The fetch, the upload and the
+		// removal are all asynchronous against each other, and a reply
+		// belongs to the picture that was current when it was asked for:
+		// a fetch of the old picture that lands after a replacement was
+		// uploaded used to paint the old pixels over the new ones and size
+		// the stand-in to them, and an upload that landed after the cross
+		// was pressed wrote the path back into a field just cleared. Every
+		// start bumps this, every completion checks it, and a stale answer
+		// is dropped on the floor.
+		let gen = 0;
+
+		function have(p) {
+			pict = p;
+			if (onPicture) onPicture();
+		}
 
 		function paint() {
 			const has = !!String(field.getValue() || '').trim();
@@ -5268,6 +5293,19 @@
 			if (!has) {
 				shot.hidden = true;
 				empty.hidden = false;
+				// The picture is gone, whoever took it: the button below, the
+				// cross on the item row, a per-row reset, a save that put the
+				// field back. Everything the picker holds of it goes with it,
+				// and anything still in flight about it is disowned — a fetch
+				// of it that lands now would otherwise hand the stand-in a
+				// picture the overlay no longer draws, and a line added to
+				// this index next would stand in as that picture.
+				if (pict || drawn || asked) {
+					drawn = false;
+					asked = false;
+					gen++;
+					have(null);
+				}
 				// What happens if this is left empty, said honestly: it depends
 				// on whether the overlay has anything else to say.
 				const t = tplField ? String(tplField.getValue() || '').trim() : '';
@@ -5295,6 +5333,7 @@
 		function fetchShot() {
 			if (asked) return;
 			asked = true;
+			const my = ++gen;
 			// Cleared on failure below: a transient network error left this
 			// set for the life of the editor, so every later repaint refused
 			// to look again and the picture stayed on its error message even
@@ -5314,6 +5353,9 @@
 						(b) => ({ w: w, h: h, b: b, ref: ref }));
 				})
 				.then(({ w, h, b, ref }) => {
+					// Not this picture any more: replaced or removed while
+					// the camera was answering.
+					if (my !== gen) return;
 					const src = new Uint8Array(b);
 					if (src.length < w * h * 4) throw new Error('short');
 					const ctx = shot.getContext('2d');
@@ -5330,12 +5372,13 @@
 					}
 					ctx.putImageData(out, 0, 0);
 					drawn = true;
-					pict = { w: w, h: h, ref: ref, url: shot.toDataURL() };
+					have({ w: w, h: h, ref: ref, url: shot.toDataURL() });
 					shot.hidden = false;
 					empty.hidden = true;
 					say(w + '×' + h + ' · on the camera');
 				})
 				.catch(() => {
+					if (my !== gen) return;
 					// Asked again next time. This is the difference between a
 					// logo that is not there and one the camera did not answer
 					// for just now, and only the second is worth retrying —
@@ -5385,6 +5428,7 @@
 
 		function upload(q) {
 			const ref = refWidth();
+			const my = ++gen;
 			say('Sending ' + q.w + '×' + q.h + '…');
 			return apiFetch(
 				'/api/v1/osd/image?overlay=' + overlay + '&w=' + q.w +
@@ -5399,6 +5443,11 @@
 					throw new Error(t || ('HTTP ' + r.status));
 				})))
 				.then((j) => {
+					// Overtaken: another picture was chosen, or this one
+					// removed, before the camera answered. The file on the
+					// camera is whichever request it took last, and that
+					// request's own completion is the one that says so.
+					if (my !== gen) return;
 					// This upload has already overwritten the file, so a
 					// removal staged earlier in this visit must not delete it.
 					logoBin.delete(overlay);
@@ -5409,7 +5458,7 @@
 					asked = false;
 					// What the canvas holds is what the camera now has, sized
 					// against the frame this upload named.
-					pict = { w: q.w, h: q.h, ref: ref, url: shot.toDataURL() };
+					have({ w: q.w, h: q.h, ref: ref, url: shot.toDataURL() });
 					// The camera decides the path; this only records it, and
 					// it is a staged edit like any other until Save.
 					field.setValue(j.path);
@@ -5439,7 +5488,9 @@
 						Math.round(q.w * 100 / ref) +
 						'% of the picture’s width. Press Save to draw it.');
 				})
-				.catch((e) => say('Could not send it: ' + e.message, true));
+				.catch((e) => {
+					if (my === gen) say('Could not send it: ' + e.message, true);
+				});
 		}
 
 		input.addEventListener('change', () => {
@@ -5482,9 +5533,10 @@
 
 		drop.addEventListener('click', () => {
 			if (onBack) setTimeout(onBack, 0);
-			drawn = false;
-			asked = false;
-			pict = null;
+			// The rest of what removal means — the canvas, the pixels held
+			// for the stand-in, anything in flight — is done by paint() when
+			// the field goes empty below, because the field can be emptied
+			// from outside this picker too.
 			// STAGED, like the field beside it. Deleting the file here made
 			// one half of this change permanent the moment it was pressed
 			// while the other half waited for Save — so leaving without
@@ -5515,8 +5567,11 @@
 			// Run after the picture goes, so the caller can make sure the
 			// overlay still says something.
 			onBack: (fn) => { onBack = fn; },
-			// The picture itself, for the stand-in on the video.
+			// The picture itself, for the stand-in on the video, and a word
+			// when it changes hands — the fetch lands whenever the camera
+			// answers, and whoever draws from it has to be told.
 			logo: () => pict,
+			onPicture: (fn) => { onPicture = fn; },
 		};
 	}
 
