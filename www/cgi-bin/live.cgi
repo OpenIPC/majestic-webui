@@ -28,7 +28,7 @@ hide_title=1; full_bleed=1
      No "Stream URLs" link either: it is a menu item under Camera, and a
      second copy under the picture was the only body text on the page. -->
 
-<% preview %>
+<%in p/player.cgi %>
 <% if [ -n "$ptz_support" ]; then %>
 	<%in p/motor.cgi %>
 <% fi %>
