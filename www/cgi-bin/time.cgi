@@ -45,9 +45,9 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			# masked for good -- through reboots, and through sysupgrade, which
 			# does not touch the overlay. busybox ntpd has no built-in peers and
 			# takes them from that file alone, so it exits 1 the moment S49ntpd
-			# starts it and the clock is never disciplined again. Found on a lab
-			# ssc30kq that had drifted 863 minutes with nothing on this page
-			# saying why; the boxes then read back from the file the save had
+			# starts it and the clock is never disciplined again. Found on an
+			# ssc30kq + imx335 that had drifted 863 minutes with nothing on this
+			# page saying why; the boxes then read back from the file the save had
 			# just destroyed, came up empty, and armed the same trap for the
 			# next save.
 			ntp_new=""
