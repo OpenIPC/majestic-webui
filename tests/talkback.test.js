@@ -288,10 +288,18 @@ async function playRetriesOnGesture() {
 	check('play() was attempted and refused', plays === 1, plays + ' plays');
 	check('a one-shot gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
 		JSON.stringify(Object.keys(env.docHandlers)));
+	// A second attempt (as a reconnect would make) is also refused: it must
+	// re-arm afresh, not be blocked by the first arming nor stack a second
+	// listener.
+	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
+	await tick();
+	check('play() attempted again', plays === 2, plays + ' plays');
+	check('still exactly one retry (re-armed, not stacked or blocked)',
+		(env.docHandlers.pointerdown || []).length === 1);
 	// The viewer taps: play() is retried, and this time it is allowed.
 	reject = false;
 	env.docHandlers.pointerdown[0]();
-	check('play() was retried on the gesture', plays === 2, plays + ' plays');
+	check('play() was retried on the gesture', plays === 3, plays + ' plays');
 	check('and the one-shot listener removed itself', (env.docHandlers.pointerdown || []).length === 0);
 }
 

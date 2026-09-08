@@ -67,18 +67,28 @@ window.MajesticWebRTC = (function () {
 		// happens to carry an activation. Retry play() on the first user gesture
 		// instead. One-shot, capture phase so a tap the controls also handle still
 		// counts, and guarded for the vm tests, which have no document.
-		let gestureArmed = false;
+		let gestureRetry = null;
+		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
+		function disarmGesture() {
+			if (gestureRetry && typeof document !== 'undefined')
+				gestureEvs.forEach(function (t) { try { document.removeEventListener(t, gestureRetry, true); } catch (e) {} });
+			gestureRetry = null;
+		}
 		function playOnGesture(v, alive) {
-			if (gestureArmed || typeof document === 'undefined') return;
-			gestureArmed = true;
-			const evs = ['pointerdown', 'touchstart', 'keydown'];
+			if (typeof document === 'undefined') return;
+			// Replace any arming left by a previous attempt rather than refuse to
+			// arm: a reconnect after arming but before a gesture must be able to
+			// arm its own retry (bound to the CURRENT attempt), or the stale
+			// callback fires, finds its attempt no longer current, and removes
+			// the listeners without ever playing -- leaving the picture paused.
+			disarmGesture();
 			const retry = function () {
-				gestureArmed = false;
-				evs.forEach(function (t) { try { document.removeEventListener(t, retry, true); } catch (e) {} });
+				disarmGesture();
 				if (alive && !alive()) return;
 				try { const p = v.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
 			};
-			evs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
+			gestureRetry = retry;
+			gestureEvs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
 		}
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let failCount = 0, gotMedia = false;
@@ -708,6 +718,9 @@ window.MajesticWebRTC = (function () {
 		}
 
 		function reconnect() {
+			// A new attempt begins here; drop any gesture retry bound to the old
+			// one so this attempt can arm its own if it too is refused autoplay.
+			disarmGesture();
 			// Retire the attempt before dismantling it. Closing a peer
 			// connection rejects whatever it had in flight, and a rejection
 			// that arrives while its own attempt still looks current would be
@@ -800,6 +813,7 @@ window.MajesticWebRTC = (function () {
 			// only control able to stop it is the worst of the failures this
 			// file guards against.
 			releaseMic();
+			disarmGesture();
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			stop();
 		}
