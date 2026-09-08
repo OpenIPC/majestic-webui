@@ -36,12 +36,16 @@ else
 	if [ ! -f "$editor_file" ]; then
 		log_create "danger" "File not found!"
 	elif [ -n "$editor_file" ]; then
-		if [ "b" = "$( (cat -v "$editor_file" | grep -q "\^@") && echo "b" )" ]; then
+		# 2>/dev/null: the path is whatever GET_f said, and a regular file can
+		# pass -f and still fail to read (/proc/self/mem). The probe's answer
+		# is "not a text file" either way, so the read error has nothing to add
+		# except a line on a stderr the service sends nowhere.
+		if [ "b" = "$( (cat -v "$editor_file" 2>/dev/null | grep -q "\^@") && echo "b" )" ]; then
 			log_create "danger" "Not a text file!"
-		elif [ "$(stat -c%s $editor_file)" -gt "102400" ]; then
+		elif [ "$(stat -c%s "$editor_file" 2>/dev/null)" -gt "102400" ]; then
 			log_create "danger" "Uploaded file is too large!"
 		else
-			editor_text="$(cat $editor_file)"
+			editor_text="$(cat "$editor_file" 2>/dev/null)"
 		fi
 	fi
 fi

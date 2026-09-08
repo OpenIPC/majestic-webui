@@ -3,8 +3,9 @@
 <%
 # A partial, not a page. majestic execs this file for anyone who asks for
 # /cgi-bin/p/header.cgi, and haserl then runs it with none of p/common.cgi's
-# helpers defined: eleven "not found" lines on majestic's stderr and a fragment
-# with an empty <title>, from a URL nothing links to and nobody can use.
+# helpers defined -- so the shell fails to find every one it calls, a line each
+# on a stderr the service sends nowhere, and serves a fragment with an empty
+# <title> from a URL nothing links to and nobody can use.
 #
 # Every real page includes common.cgi before this one, so the helpers ARE the
 # test. Inside this block rather than one of its own: what follows the closing

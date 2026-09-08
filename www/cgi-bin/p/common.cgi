@@ -115,9 +115,10 @@ ex() {
 	echo "<div class=\"${2:-ex}\"><h6># ${1}</h6><pre class=\"small\">"
 	# 2>&1 because this block exists to SHOW what a command said, and what a
 	# failing one says is on stderr. Without it the operator gets an empty box
-	# and the reason goes to majestic's stderr, which under the service goes
-	# nowhere: `ip link show wg0` on a camera with no tunnel printed "can't find
-	# device" there and nothing here, on a panel whose whole job is to report.
+	# while the reason goes to a stderr the service sends nowhere -- on a panel
+	# whose whole job is to report. wireguard.cgi's `ip link show wg0` is the
+	# case that shows it: on a camera with no tunnel the command fails, and the
+	# page had nothing to say about why.
 	eval "$1" 2>&1 | sed "s/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g;s/\"/\&quot;/g"
 	echo "</pre></div>"
 }
@@ -285,12 +286,23 @@ field_text() {
 field_textedit() {
 	local n="$1"
 	local l="$2"
-	# The file need not exist. editor.cgi passes "$editor_file", which is empty
-	# until a file is chosen, so opening the editor from the menu ran `cat ""`
-	# and put "can't open ''" on majestic's stderr on every visit. An unreadable
-	# path is an empty box, which is what the page shows anyway.
+	# The path need not name a readable regular file, and both halves of that
+	# matter. editor.cgi passes "$editor_file" straight from GET_f: it is empty
+	# until a file is chosen, and it is whatever the query string said
+	# otherwise -- a directory included, which editor.cgi logs as not found
+	# without stopping the render. `cat` on either writes to a stderr the
+	# service sends nowhere, and shows the operator the same empty textarea it
+	# shows for a file that is simply absent. So test for a regular file, not
+	# merely a readable one: -r alone is true of a directory.
+	#
+	# And redirect anyway. The test says what this accepts; the redirect covers
+	# what it cannot predict -- a regular file that passes -r and still fails to
+	# read, /proc/self/mem being the reachable example, since the path is
+	# whatever the query string said. Nothing is hidden by it: the operator's
+	# answer is the empty textarea either way, and editor.cgi writes the banner
+	# that explains why.
 	local v=""
-	[ -r "$3" ] && v=$(cat "$3")
+	[ -f "$3" ] && [ -r "$3" ] && v=$(cat "$3" 2>/dev/null)
 	echo "<p class=\"textarea\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<textarea id=\"${n}\" name=\"${n}\" class=\"form-control\">${v}</textarea>"
