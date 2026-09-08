@@ -1979,6 +1979,14 @@
 		function geom() {
 			const p = pic(), b = base();
 			if (!p || !b) return null;
+			// NOT BEFORE THE CAMERA HAS ANSWERED. Until it has, whether the
+			// ratio is right is unknown, and an outline drawn by it on a
+			// cropped camera sits on the wrong part of the picture until the
+			// answer arrives and moves it. A camera with no such endpoint at
+			// all is a different state, and one the ratio is the only answer
+			// for; so is one that answered without saying, which is a backend
+			// that draws every stream by the ratio itself.
+			if (camRects.ok && !camRects.known) return null;
 			const m = camView();
 			const f = m ? m.f : b;
 			const k = m ? m.k : { x: 1, y: 1 };
@@ -2306,10 +2314,13 @@
 			const noBase = !!p && !b;
 			warn.textContent = noBase ? W.base : '';
 			warn.hidden = !noBase;
-			const usable = !!p && !noBase && active;
+			// geom() is also null while the camera has not yet said how this
+			// picture maps, which is the same state as no picture: nothing
+			// can be placed on it yet, and the button says so the same way.
+			const usable = !!p && !noBase && active && !!geom();
 			btn.disabled = !usable;
 			btn.title = noBase ? W.base
-				: (!p ? 'Waiting for the picture' : W.drawHint);
+				: (!usable ? 'Waiting for the picture' : W.drawHint);
 			// The crosshair is the disclosure that a bare drag does something,
 			// so it tracks whether a drag CAN do something rather than whether
 			// the button has been pressed. On the stage as well as the media, so
@@ -4350,6 +4361,10 @@
 		// "no rectangle for this overlay" is not a fact about the overlay,
 		// and nothing below may draw a conclusion from it.
 		known: false, sig: '', onRects: null,
+		// Which request is the latest. Polls, the refresh after a drag and a
+		// leaf remount overlap, and an older answer landing last would put
+		// back geometry a newer one had already replaced.
+		seq: 0,
 		// What each stream shows of the sensor's frame, and that frame's
 		// size — the route a mask takes from the main stream's pixels to
 		// any other stream's. See MajesticRegion.view().
@@ -4377,6 +4392,7 @@
 
 	function refreshOsdRects() {
 		if (!camRects.ok) return Promise.resolve();
+		const my = ++camRects.seq;
 		return apiFetch('/api/v1/osd', { credentials: 'same-origin' })
 			.then((r) => {
 				// 404 is "this camera cannot say", which is a fact about the
@@ -4386,6 +4402,9 @@
 				return r.ok ? r.json() : null;
 			})
 			.then((j) => {
+				// Overtaken: a later request has been sent, and its answer is
+				// the one that describes the camera now.
+				if (my !== camRects.seq) return;
 				if (!j) return;
 				const by = {};
 				// WHICH INDEX THE MARK HAS IS THE CAMERA'S TO SAY, and whether

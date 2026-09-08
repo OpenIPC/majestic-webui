@@ -134,15 +134,25 @@
 	// written in) and the shown frame (`f`, the space the picture on screen
 	// shows). Null where the camera has not said, and the caller falls back
 	// to the ratio -- which is right exactly when neither stream is cropped.
+	// Finite numbers, all of them, or no map at all: an origin that is
+	// missing or a string would come out of the arithmetic below as NaN, and
+	// a NaN reaches every outline, press and drag as a rectangle nowhere.
+	function nums(a, n, positiveFrom) {
+		if (!Array.isArray(a) || a.length < n) return false;
+		for (let i = 0; i < n; i++) {
+			if (typeof a[i] !== 'number' || !isFinite(a[i])) return false;
+			if (i >= positiveFrom && a[i] <= 0) return false;
+		}
+		return true;
+	}
+
 	function view(group, streams, main, shown) {
-		if (!group || !streams || group.length < 2 || !group[0] || !group[1])
-			return null;
+		if (!nums(group, 2, 0) || !Array.isArray(streams)) return null;
 		const find = function (idx) {
 			for (let i = 0; i < streams.length; i++) {
 				const s = streams[i];
-				if (s && s.stream === idx && s.frame && s.view &&
-					s.frame[0] > 0 && s.frame[1] > 0 &&
-					s.view[2] > 0 && s.view[3] > 0) return s;
+				if (s && s.stream === idx && nums(s.frame, 2, 0) &&
+					nums(s.view, 4, 2)) return s;
 			}
 			return null;
 		};

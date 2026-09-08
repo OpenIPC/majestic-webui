@@ -10,8 +10,9 @@
 //
 // The numbers are the lab hi3516ev300's: a 2592x1520 sensor frame, the main
 // stream cropped to 1920x1080 at 320,160, the sub stream 704x576 showing the
-// whole frame. The expected values are what the daemon's cover_geometry()
-// computes for the same rectangle, before its two-pixel alignment.
+// whole frame. The expected values are where the camera actually drew the
+// mask, measured in a decoded frame of each stream, before the two-pixel
+// alignment the hardware applies.
 'use strict';
 
 const path = require('path');
@@ -95,6 +96,23 @@ group('what the camera has not said');
 	check('no streams at all is no map', R.view(GROUP, null, 0, 0) === null);
 	check('a view with no area is no map',
 		R.view(GROUP, [{ stream: 0, frame: [2592, 1520], view: [0, 0, 0, 0] }], 0, 0) === null);
+	// A field that is not a number would come out of the arithmetic as NaN,
+	// and a NaN is a rectangle nowhere on every outline, press and drag.
+	check('a view with a missing origin is no map',
+		R.view(GROUP, [{ stream: 0, frame: [2592, 1520], view: [null, 0, 2592, 1520] }], 0, 0) === null);
+	check('a view with a string in it is no map',
+		R.view(GROUP, [{ stream: 0, frame: [2592, 1520], view: ['0', 0, 2592, 1520] }], 0, 0) === null);
+	check('a short view is no map',
+		R.view(GROUP, [{ stream: 0, frame: [2592, 1520], view: [0, 0, 2592] }], 0, 0) === null);
+	check('a frame that is not an array is no map',
+		R.view(GROUP, [{ stream: 0, frame: '2592x1520', view: FULL }], 0, 0) === null);
+	check('a group with an infinity in it is no map',
+		R.view([Infinity, 1520], [{ stream: 0, frame: [2592, 1520], view: FULL }], 0, 0) === null);
+	check('streams that are not a list is no map', R.view(GROUP, {}, 0, 0) === null);
+	// A negative origin is a legitimate answer -- a crop can begin anywhere
+	// -- so only the sizes are required to be positive.
+	check('a view at a negative origin is still a map',
+		R.view(GROUP, [{ stream: 0, frame: [2592, 1520], view: [-2, -2, 2592, 1520] }], 0, 0) !== null);
 }
 
 done();
