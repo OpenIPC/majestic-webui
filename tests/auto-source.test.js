@@ -13,7 +13,7 @@ const vm = require('vm');
 const { check, group, done } = require('./assert');
 
 const A = (f) => path.join(__dirname, '..', 'www', 'a', f);
-const SRCS = [A('preview-swap.js'), A('preview-page.js')];
+const SRCS = [A('preview-swap.js'), A('preview-served.js'), A('preview-page.js')];
 
 const IDS = [
 	'live-mjpeg', 'live-mjpeg-b',
@@ -148,7 +148,11 @@ function load(cfg) {
 	vm.createContext(ctx);
 	vm.runInContext(fs.readFileSync(SRCS[0], 'utf8'), ctx);
 	ctx.MajesticSwap = win.MajesticSwap;
-	vm.runInContext(fs.readFileSync(SRCS[1], 'utf8'), ctx);
+	// preview-served.js (window.MajesticServed) then the page; the page reaches
+	// the module through window, so it needs no hand-over.
+	for (let i = 1; i < SRCS.length; i++) {
+		vm.runInContext(fs.readFileSync(SRCS[i], 'utf8'), ctx);
+	}
 	env.el = (id) => env.els['#' + id];
 	env.win = win;
 	return env;

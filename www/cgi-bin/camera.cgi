@@ -127,6 +127,7 @@ fi
 <script src="/a/mj-sources.js"></script>
 <script src="/a/preview-multipart.js"></script>
 <script src="/a/preview-transport.js"></script>
+<script src="/a/preview-served.js"></script>
 <%
 # preview-hero.js publishes window.MajesticHero (fullscreen + snapshot) before
 # it looks for the Live page's own stage, so this page can share those two
