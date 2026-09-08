@@ -61,6 +61,35 @@ window.MajesticWebRTC = (function () {
 		let stream = opts.stream | 0;
 
 		let pc = null, ws = null, statsTimer = null, signalTimer = null;
+		// Autoplay refused on a fresh document load with no user activation (Opera
+		// for Android, majestic-webui#317): the muted picture is ready but paused,
+		// and play() is never retried, so nothing shows until an in-app navigation
+		// happens to carry an activation. Retry play() on the first user gesture
+		// instead. One-shot, capture phase so a tap the controls also handle still
+		// counts, and guarded for the vm tests, which have no document.
+		let gestureRetry = null;
+		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
+		function disarmGesture() {
+			if (gestureRetry && typeof document !== 'undefined')
+				gestureEvs.forEach(function (t) { try { document.removeEventListener(t, gestureRetry, true); } catch (e) {} });
+			gestureRetry = null;
+		}
+		function playOnGesture(v, alive) {
+			if (typeof document === 'undefined') return;
+			// Replace any arming left by a previous attempt rather than refuse to
+			// arm: a reconnect after arming but before a gesture must be able to
+			// arm its own retry (bound to the CURRENT attempt), or the stale
+			// callback fires, finds its attempt no longer current, and removes
+			// the listeners without ever playing -- leaving the picture paused.
+			disarmGesture();
+			const retry = function () {
+				disarmGesture();
+				if (alive && !alive()) return;
+				try { const p = v.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+			};
+			gestureRetry = retry;
+			gestureEvs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
+		}
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let failCount = 0, gotMedia = false;
 		// From the caller, not fixed at false: a player staged as a replacement
@@ -512,7 +541,14 @@ window.MajesticWebRTC = (function () {
 					// aborts the video track's play() with AbortError: treating
 					// that as an autoplay refusal reports "no audio" over a
 					// working Opus stream, which is exactly what it did.
-					if (!current(my) || video.muted) return;
+					if (!current(my)) return;
+					// A muted element has no sound to blame: autoplay was refused on a
+					// fresh load with no user activation (#317). Retry on the first gesture.
+					if (video.muted) {
+						if (err && err.name === 'NotAllowedError')
+							playOnGesture(video, function () { return current(my); });
+						return;
+					}
 					if (!err || err.name !== 'NotAllowedError') return;
 					onAudio(null);
 					// Renegotiate rather than just muting. The audio
@@ -682,6 +718,9 @@ window.MajesticWebRTC = (function () {
 		}
 
 		function reconnect() {
+			// A new attempt begins here; drop any gesture retry bound to the old
+			// one so this attempt can arm its own if it too is refused autoplay.
+			disarmGesture();
 			// Retire the attempt before dismantling it. Closing a peer
 			// connection rejects whatever it had in flight, and a rejection
 			// that arrives while its own attempt still looks current would be
@@ -774,6 +813,7 @@ window.MajesticWebRTC = (function () {
 			// only control able to stop it is the worst of the failures this
 			// file guards against.
 			releaseMic();
+			disarmGesture();
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			stop();
 		}
