@@ -980,7 +980,7 @@
 		},
 		// A trial was dropped and the screen is untouched. All that changes is
 		// the toggle, which has to come back up carrying the reason.
-		onFailed: (kind, why, permanent) => {
+		onFailed: (kind, why, state) => {
 			// The trial is gone and the live player is whatever it was. The
 			// toggle has to describe that, not the transport that just failed
 			// — including when the failure was MSE and WebRTC is still playing,
@@ -1006,8 +1006,10 @@
 				}
 				// 'busy' says the camera is full, which will not be true for
 				// long. Only a real refusal is worth remembering, and even
-				// that expires.
-				if (permanent) rememberDemotion();
+				// that expires. The rule for which endings are durable lives in
+				// one place now (MajesticTransport.durable), asked here and by
+				// the live-player branch below (#402).
+				if (MajesticTransport.durable(state)) rememberDemotion();
 			} else if (swap.playing() === 'webrtc') {
 				reflectTransport('webrtc');
 				rememberTransport('webrtc');
@@ -1057,9 +1059,15 @@
 						transportLbl.title = 'WebRTC: ' + (d || 'unavailable') +
 							'\n\n' + TRANSPORT_TITLE;
 					}
-					if (s === 'fallback') rememberDemotion();
+					// The same demote rule as the trial-drop path above (#402).
+					if (MajesticTransport.durable(s)) rememberDemotion();
+					// Retire so the frozen frame holds, then down the shared
+					// walk: webrtc -> mse lives in the chain now, not a second
+					// copy here. decide('webrtc', …) is always {start:'mse'}
+					// (only codec-changed diverts, which a webrtc fallback is
+					// not), so this runs the same attachPlayer('mse') as before.
 					swap.retire();
-					attachPlayer('mse');
+					chain.next('webrtc', d);
 				} else {
 					showFallback(d);
 				}

@@ -37,8 +37,12 @@ window.MajesticSwap = function (opts) {
 	// opts.open       (kind, el, id, onState) -> player
 	// opts.onLive     (state, detail, kind) — from the player on screen
 	// opts.onPromoted (kind) — a trial has taken over
-	// opts.onFailed   (kind, detail, permanent) — trial dropped, screen intact
-	// opts.onExhausted(kind, detail, permanent) — trial dropped, nothing left
+	// opts.onFailed   (kind, detail, state) — trial dropped, screen intact;
+	//                 `state` is the player state it dropped on ('fallback' /
+	//                 'busy' / 'mjpeg'), a fact for the caller to judge (is it
+	//                 durable? — preview-transport.js:durable), not a judgment
+	//                 this state machine makes.
+	// opts.onExhausted(kind, detail) — trial dropped, nothing left
 	const els = opts.elements;
 	let live = null;     // { id, p, slot, kind, dead }
 	let staging = null;  // { id, p, slot, kind }
@@ -99,14 +103,14 @@ window.MajesticSwap = function (opts) {
 	// The trial failed. Leave the screen exactly as it was — unless what is on
 	// screen is already dead, in which case there is nothing left to protect
 	// and the caller has to decide where to go instead.
-	function drop(detail, permanent) {
+	function drop(detail, state) {
 		const s = staging;
 		staging = null;
 		kill(s);
-		if (opts.onFailed) opts.onFailed(s.kind, detail, permanent);
+		if (opts.onFailed) opts.onFailed(s.kind, detail, state);
 		if (live && !live.dead) return;
 		if (live) { kill(live); live = null; }
-		if (opts.onExhausted) opts.onExhausted(s.kind, detail, permanent);
+		if (opts.onExhausted) opts.onExhausted(s.kind, detail);
 	}
 
 	// Try `kind`. If something is playing it keeps playing until this works.
@@ -140,7 +144,7 @@ window.MajesticSwap = function (opts) {
 				if (state === 'playing') promote(true);
 				else if (state === 'fallback' || state === 'busy' ||
 					state === 'mjpeg') {
-					drop(detail, state === 'fallback');
+					drop(detail, state);
 				}
 				return;
 			}

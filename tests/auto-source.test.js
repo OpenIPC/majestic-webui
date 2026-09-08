@@ -103,7 +103,7 @@ function load(cfg) {
 		MajesticWebRTC: impls.webrtc,
 		MajesticTransport: {
 			available: () => true, preferred: () => cfg.transport || 'mse',
-			choose() {}, demote() {},
+			choose() {}, demote() {}, durable: (s) => s === 'fallback',
 			impl: (k) => (k === 'webrtc' ? impls.webrtc : impls.mse),
 			iceServers: () => [],
 			// The real rule lives in preview-transport.js and is tested there;

@@ -21,7 +21,8 @@
 //
 // 'busy' is the same instruction with a shorter shelf life — the camera is out
 // of session slots rather than unable to serve this browser — so a caller that
-// remembers 'fallback' should not remember this one.
+// remembers 'fallback' should not remember this one. Which of these two a
+// caller demotes on is one rule now, preview-transport.js:durable() (#402).
 window.MajesticWebRTC = (function () {
 	// How long to wait for media before saying so. Longer than MSE's 4 s: ICE
 	// and DTLS happen first, and on a camera gathering a reflexive address

@@ -178,6 +178,7 @@ function load(cfg) {
 		preferred: () => cfg.preferred || 'mse',
 		choose(k) { env.chosen = k; },
 		demote() { env.demoted = true; },
+		durable: (s) => s === 'fallback',
 		impl: (k) => impls[k] || impls.mse,
 		iceServers: () => [],
 		chosenStream: () => (cfg.chosenStream === undefined ? null : cfg.chosenStream),
@@ -293,6 +294,19 @@ function ui(rec) {
 		env.made[1].say('playing');
 		check('the trial announces once it has a picture',
 			rec.playing.join() === 'webrtc,mse', rec.playing.join());
+	}
+
+	group('a live WebRTC session that goes busy stages MSE but does not demote');
+	{
+		// 'busy' is transient: it stages MSE like 'fallback' but is never
+		// remembered as a demotion (#402, the one rule in transport.durable).
+		const env = load({ preferred: 'webrtc' });
+		env.mount();
+		env.made[0].say('playing');
+		env.made[0].say('busy', 'the camera is serving as many viewers as it can');
+		check('an MSE trial was staged', env.made.length === 2 && env.made[1].kind === 'mse',
+			env.made.map((p) => p.kind).join(','));
+		check('and no demotion was recorded', env.demoted !== true, env.demoted + '');
 	}
 
 	group('MSE giving up shows the alert, and the selected channel retries');

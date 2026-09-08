@@ -454,10 +454,14 @@ window.MajesticPreview = (function () {
 				// a first attach reports the same news once it is true.
 				if (proven) announcePlaying(kind);
 			},
-			onFailed: (kind, why, permanent) => {
+			onFailed: (kind, why, state) => {
 				// 'fallback' is durable and worth remembering; 'busy' says the
-				// camera is full, which it will not be for long.
-				if (kind === 'webrtc' && permanent) window.MajesticTransport.demote();
+				// camera is full, which it will not be for long. The rule lives
+				// in one place now, asked here and by the live-player branch
+				// below (MajesticTransport.durable, #402).
+				if (kind === 'webrtc' && window.MajesticTransport.durable(state)) {
+					window.MajesticTransport.demote();
+				}
 			},
 			// Nothing on screen left to protect. Past MSE this stage has no
 			// preview at all, so what it owes the viewer is the reason — an
@@ -487,11 +491,17 @@ window.MajesticPreview = (function () {
 					return;
 				}
 				if (st === 'fallback' || st === 'busy') {
-					if (st === 'fallback') window.MajesticTransport.demote();
+					// The same demote rule as the trial-drop path above (#402).
+					if (window.MajesticTransport.durable(st)) {
+						window.MajesticTransport.demote();
+					}
 					// Its picture is frozen from here; the replacement is staged
-					// over it rather than blanking the stage.
+					// over it rather than blanking the stage. Down the shared
+					// walk, not a second copy of webrtc -> mse: chain.next runs
+					// swap.start('mse'), since decide('webrtc', …) is always
+					// {start:'mse'}.
 					swap.retire();
-					swap.start('mse');
+					chain.next('webrtc', d);
 				}
 			},
 		});
