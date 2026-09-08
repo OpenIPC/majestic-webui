@@ -1111,6 +1111,19 @@ mark {
 	   window cuts off reads as a control that does not work, which is how it
 	   was reported. */
 	--mj-pv-reserve: 18.5rem;
+	/* And the save bar's room is kept at ALL times here, not only while the
+	   bar is shown. Given back only when the bar appeared -- the moment of
+	   the first edit -- it meant the first thing drawing a mask or dragging
+	   a line did was shrink the picture it was being judged against, by a
+	   tenth on a laptop, and grow it back on Save. Every rectangle drawn
+	   over the picture followed it correctly, and it still read as the mask
+	   and the video coming apart (#340): a picture that moves under the hand
+	   costs trust in everything placed on it. Only this leaf pays for
+	   holding still, because only here is the picture a thing you place
+	   against; the Live adjustments leaf keeps the rule above, since on a
+	   1366x768 laptop a permanent reserve would take a sixth off a picture
+	   #239 fought to make big enough to judge by. */
+	--mj-pv-toolbar: 4.95rem;
 }
 
 /* ── the picture and its inspector ───────────────────────────────────────
@@ -5233,6 +5246,25 @@ dialog.mj-modal::backdrop {
 	white-space: nowrap;
 	pointer-events: none;
 	line-height: 1.25;
+}
+
+/* At rest, standing in for an overlay the camera is not drawing yet -- a line
+   or a picture added and not saved. Quieter than under a drag, since nothing
+   is being placed, but the dashes stay: it is the page's drawing, and it must
+   never read as the camera's. */
+.mj-osd-ghost.mj-osd-rest {
+	opacity: 0.85;
+}
+
+/* The picture itself, at the size the camera will draw it. The box IS the
+   picture's edges, so the border sits on them rather than around a padded
+   word, and the tint shows through wherever the picture is transparent. */
+.mj-osd-ghost.mj-osd-ghost-img {
+	box-sizing: border-box;
+	padding: 0;
+	background-repeat: no-repeat;
+	background-size: 100% 100%;
+	image-rendering: auto;
 }
 
 .mj-osd-read {
