@@ -366,10 +366,12 @@
 					splitSec: state.split,
 					nowSec: isToday ? state.nowSec : null,
 				});
+				resetClipWindow();
 			})
 			.catch(function () {
 				if (token !== dayToken) return;
 				state.day = { clips: [], unplaced: [] };
+				resetClipWindow();
 			});
 	}
 
@@ -1449,53 +1451,179 @@
 			'. Older clips are however they were written at the time.</div>';
 	}
 
+	// ---- the clip list ---------------------------------------------------
+	//
+	// A day is not a folder you page through. records.split is counted in
+	// minutes and 1 is a legal value, so a camera can close a file every
+	// minute and a full day is then 1440 clips. Measured on a lab
+	// hi3516av300 holding 745 of them, this card had no bound and no
+	// scrollbar of its own, so the column came out about 49,000 px tall —
+	// and being the tallest thing in the row it WAS the page's height: the
+	// player was a stamp at the top and the keys and storage cards sat forty
+	// screens below the fold.
+	//
+	// So the list is a window over the day rather than the whole of it. The
+	// card scrolls (bootstrap.override.css bounds it), the window grows when
+	// that scroll reaches the end, and a clip picked anywhere else — off the
+	// ribbon, off the band — moves the window to it rather than leaving
+	// somebody to find the row that is already playing.
+	//
+	// Rows are NOT placed by arithmetic over an assumed row height, which is
+	// the usual way to window a list. A row here is as tall as its two lines
+	// of text come to, a gap marker is a different height again, and both
+	// move with the font and the column width. Guessing that height wrong
+	// shows up as rows clipped mid-word or a scrollbar that lies about how
+	// much is left, and neither announces itself. A contiguous run of real
+	// rows cannot be wrong about its own height.
+	const CLIP_PAGE = 60;             // rows a growth step adds
+	const CLIP_NEAR = 240;            // px from the end that counts as reaching it
+	let clipFrom = 0;                 // first row shown, counting from the newest
+	let clipCount = CLIP_PAGE;        // how many rows are shown
+	let clipAt = '';                  // the clip the list last moved itself to
+
+	// A new day is a new list: the window cannot carry over a position in one
+	// day's clips into another's, and neither can the row it last moved to.
+	function resetClipWindow() {
+		clipFrom = 0;
+		clipCount = CLIP_PAGE;
+		clipAt = '';
+	}
+
+	function clipRow(c, writable, on) {
+		// A lock on the row of the clip that is open, because that is the one
+		// whose header has actually been read. Putting one on every row would
+		// be a guess dressed as a fact.
+		const sealed = on && state.prot && state.prot.encrypted ? ' 🔒' : '';
+		return '<button type="button" class="rec-clip' + (on ? ' active' : '') + '" data-clip="' + esc(c.name) + '">' +
+			'<span class="rec-poster"' + (c.recording && writable ? ' data-live="1"' : '') + '>' +
+			'<span class="rec-poster-t">' + hhmm(c.start) + '</span></span>' +
+			'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + hhmm(c.start) + sealed + '</span>' +
+			'<span class="x-small text-secondary">' +
+			(c.recording && writable ? 'recording'
+				: (c.estimated ? '≈ ' : '') + TL.duration(c.dur)) +
+			' · ' + TL.bytes(c.size) + '</span></span></button>';
+	}
+
+	function gapRow(from, to) {
+		return '<div class="rec-gap"><span>' +
+			(state.onMotion ? 'no motion · ' : 'not recording · ') +
+			hhmm(from) + ' – ' + hhmm(to) + '</span></div>';
+	}
+
+	function moreRow(where, n) {
+		return '<button type="button" class="rec-more" data-clips="' + where + '">' +
+			n + (where === 'newer' ? ' newer' : ' older') +
+			(n === 1 ? ' clip' : ' clips') + ' — show more</button>';
+	}
+
 	function renderClips() {
 		const el = $id('rec-clips');
 		if (!el) return;
 		const list = state.day.clips;
 		if (!list.length) {
 			el.innerHTML = '<div class="text-secondary small">No clips in this day.</div>';
+			clipAt = '';
 			return;
 		}
-		let h = sealedHint();
+		// newest first: that is the one people want
+		const rows = list.slice().reverse();
+		if (clipFrom >= rows.length) clipFrom = 0;
+
+		// Keep the clip that is playing inside the window. Growing the window
+		// down to reach it would render every row in between, which on a day
+		// of one-minute clips is most of the day; it moves instead, and the
+		// count above the first row says what it moved past.
+		let at = -1;
+		for (let i = 0; i < rows.length; i++) {
+			if (state.clip && rows[i].name === state.clip.name) { at = i; break; }
+		}
+		if (at >= 0 && (at < clipFrom || at >= clipFrom + clipCount)) {
+			clipFrom = at;
+			clipCount = CLIP_PAGE;
+		}
+		const to = Math.min(clipFrom + clipCount, rows.length);
+
 		// timeline.js calls the newest clip "recording" when it ends about now,
 		// which is a statement about the clock and cannot know the card stopped
 		// accepting writes. On a card that cannot be written the last clip is
 		// not growing — it is the truncated one the failure interrupted.
 		const writable = cardWritable();
-		// newest first: that is the one people want
-		list.slice().reverse().forEach(function (c, i, arr) {
-			const prev = arr[i + 1];
-			if (prev && c.start - prev.end > TL.JOIN_TOLERANCE) {
-				h += '<div class="rec-gap"><span>' +
-					(state.onMotion ? 'no motion · ' : 'not recording · ') +
-					hhmm(prev.end) + ' – ' + hhmm(c.start) + '</span></div>';
+		let h = sealedHint();
+		if (clipFrom > 0) h += moreRow('newer', clipFrom);
+		for (let i = clipFrom; i < to; i++) {
+			const c = rows[i];
+			h += clipRow(c, writable, !!(state.clip && state.clip.name === c.name));
+			// The hole BELOW this row, which is the one between it and the
+			// older clip drawn under it. It used to be written above the row
+			// instead, where it named the two clips either side of a different
+			// row — a divider a row out of place is not a divider, and on a
+			// day with one hole in it that is the only thing this lane says.
+			// Only between two rows that are both drawn: a marker at the
+			// window's edge would describe a clip that is not there.
+			const older = rows[i + 1];
+			if (i + 1 < to && c.start - older.end > TL.JOIN_TOLERANCE) {
+				h += gapRow(older.end, c.start);
 			}
-			const on = state.clip && state.clip.name === c.name;
-			// A lock on the row of the clip that is open, because that is the
-			// one whose header has actually been read. Putting one on every row
-			// would be a guess dressed as a fact.
-			const sealed = on && state.prot && state.prot.encrypted ? ' 🔒' : '';
-			h += '<button type="button" class="rec-clip' + (on ? ' active' : '') + '" data-clip="' + esc(c.name) + '">' +
-				'<span class="rec-poster"' + (c.recording && writable ? ' data-live="1"' : '') + '>' +
-				'<span class="rec-poster-t">' + hhmm(c.start) + '</span></span>' +
-				'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + hhmm(c.start) + sealed + '</span>' +
-				'<span class="x-small text-secondary">' +
-				(c.recording && writable ? 'recording'
-					: (c.estimated ? '≈ ' : '') + TL.duration(c.dur)) +
-				' · ' + TL.bytes(c.size) + '</span></span></button>';
-		});
-		if (state.day.unplaced.length) {
+		}
+		if (to < rows.length) h += moreRow('older', rows.length - to);
+
+		// Only once the list has reached the end of the day, since that is
+		// where they are: a clip whose name carries no time has no place among
+		// clips that are ordered by theirs.
+		if (to >= rows.length && state.day.unplaced.length) {
 			h += '<div class="rec-gap"><span>' + state.day.unplaced.length +
 				' clip(s) whose name has no time</span></div>';
 			state.day.unplaced.forEach(function (c) {
-				h += '<button type="button" class="rec-clip" data-clip="' + esc(c.name) + '">' +
+				h += '<button type="button" class="rec-clip' +
+					(state.clip && state.clip.name === c.name ? ' active' : '') +
+					'" data-clip="' + esc(c.name) + '">' +
 					'<span class="rec-poster"><span class="rec-poster-t">?</span></span>' +
 					'<span class="rec-clip-m"><span class="font-monospace fw-semibold">' + esc(c.name) + '</span>' +
 					'<span class="x-small text-secondary">' + TL.bytes(c.size) + '</span></span></button>';
 			});
 		}
 		el.innerHTML = h;
+
+		// Move the list only when the clip it is following has changed. This
+		// is redrawn by the card poll and by every duration the index firms
+		// up, and a list that jumped back to the playhead on each of those
+		// would be one nobody can read a day in.
+		const now = state.clip ? state.clip.name : '';
+		if (now && now !== clipAt) revealRow(el, el.querySelector('.rec-clip.active'));
+		clipAt = now;
+	}
+
+	// Scroll the LIST, never the page. scrollIntoView cannot be told to leave
+	// the document alone, and the row it would be asked to reveal sits in a box
+	// that is already on screen — moving the page under the player to reach it
+	// is not what picking a clip asked for.
+	function revealRow(box, row) {
+		if (!row || !row.getBoundingClientRect || !box.getBoundingClientRect) return;
+		const top = box.scrollTop + (row.getBoundingClientRect().top - box.getBoundingClientRect().top);
+		const bottom = top + (row.offsetHeight || 0);
+		if (top < box.scrollTop) box.scrollTop = top;
+		else if (bottom > box.scrollTop + box.clientHeight) box.scrollTop = bottom - box.clientHeight;
+	}
+
+	// Growing downward is the ordinary case and costs nothing: rows are added
+	// under what is already drawn. Growing upward moves everything down by the
+	// height of what was added, so the distance to the BOTTOM is what is held
+	// still — the reader is looking at rows, not at a scroll offset.
+	function growClips(where) {
+		const el = $id('rec-clips');
+		if (!el) return;
+		if (where === 'newer') {
+			const back = Math.min(clipFrom, CLIP_PAGE);
+			if (!back) return;
+			const fromEnd = el.scrollHeight - el.scrollTop;
+			clipFrom -= back;
+			clipCount += back;
+			renderClips();
+			el.scrollTop = el.scrollHeight - fromEnd;
+			return;
+		}
+		clipCount += CLIP_PAGE;
+		renderClips();
 	}
 
 	function renderDayNav() {
@@ -1763,6 +1891,8 @@
 		}, { passive: false });
 
 		$id('rec-clips').addEventListener('click', function (e) {
+			const more = e.target.closest('[data-clips]');
+			if (more) { growClips(more.dataset.clips); return; }
 			const b = e.target.closest('[data-clip]');
 			if (!b) return;
 			const name = b.dataset.clip;
@@ -1775,6 +1905,16 @@
 			}
 			openClip(c, 0);
 			renderClips();
+		});
+
+		// Reaching the end of the list is what asks for more of the day, so
+		// going down a long day is just going on scrolling. The button under
+		// the last row is the same step for a reader who never scrolls this
+		// box — a keyboard, or a wheel aimed at the page rather than the card.
+		$id('rec-clips').addEventListener('scroll', function () {
+			if (clipFrom + clipCount >= state.day.clips.length) return;
+			if (this.scrollTop + this.clientHeight < this.scrollHeight - CLIP_NEAR) return;
+			growClips('older');
 		});
 
 		const v = $id('rec-video');
