@@ -38,6 +38,8 @@ Pragma: no-cache
 	<script src="/a/main.js"></script>
 	<script src="/a/cameras-switch.js" defer></script>
 	<script src="/a/update-check.js" defer></script>
+	<script src="/a/storage-verdict.js" defer></script>
+	<script src="/a/storage-check.js" defer></script>
 </head>
 
 <body id="page-<% attr_escape "$pagename" %>" class="<% attr_escape "$fw_variant" %>">
@@ -228,6 +230,19 @@ Pragma: no-cache
 <div id="update-notice"
      data-mj-version="<% attr_escape "$mj_version" %>"
      data-soc-vendor="<% attr_escape "$soc_vendor" %>"></div>
+
+<%# Filled by /a/storage-check.js while the camera is recording and its card is
+    not taking the footage. Client-side, and on every page, because that is the
+    shape of the fault: a card dies while somebody is looking at a page rather
+    than between two of them, and everything else about the camera goes on
+    looking perfect -- the picture is live, the counters are healthy, and the
+    archive simply stops growing. It used to be said on Recordings and SD card
+    only, so finding out required already suspecting it.
+
+    The wording is the one those pages use, out of /a/storage-verdict.js: two
+    vocabularies for one fault is how a camera comes to describe its card one
+    way in a banner and another way on the page the banner points at. %>
+<div id="storage-notice"></div>
 
 <%# The flag file is how a page says so from a POST it has already left.
     restart_pending is how a page that can SEE the pending state on every

@@ -178,8 +178,10 @@ function load(cardHealth, metrics, mode) {
 	vm.createContext(ctx);
 	// The page loads these in this order, and so does the browser: recordings.js
 	// takes the crypto modules at module scope, the way it takes the index.
-	for (const f of ['timeline.js', 'mp4index.js', 'mjcrypto.js', 'mp4crypt.js',
-		'reckeys.js', 'recordings.js']) {
+	// storage-verdict.js first, as p/header.cgi loads it: recordings.js takes
+	// it at module scope, the way it takes the index and the crypto.
+	for (const f of ['storage-verdict.js', 'timeline.js', 'mp4index.js',
+		'mjcrypto.js', 'mp4crypt.js', 'reckeys.js', 'recordings.js']) {
 		vm.runInContext(fs.readFileSync(A(f), 'utf8'), ctx);
 	}
 	return env;

@@ -21,6 +21,7 @@
 	const TL = window.MajesticTimeline;
 	const CRYPT = window.MajesticMp4Crypt;
 	const KEYS = window.MajesticRecKeys;
+	const SV = window.MajesticStorageVerdict;
 	const DAY = TL.DAY;
 
 	// How much of the day the detail band shows, and the steps the zoom takes.
@@ -982,116 +983,30 @@
 			.catch(function () { state.recorder = null; });
 	}
 
-	// The recorder's own verdict, or null when there is not one to have.
-	function recorderState() {
-		const r = state.recorder;
-		return r && r.v ? r.v.records_state : null;
-	}
 
-	// Whether the camera answered at all. An older majestic saying "no such
-	// endpoint" is not the same as a camera that could not be reached.
-	function recorderKnown() {
-		return !!state.recorder;
-	}
-
-	// Positive claims need positive evidence. A card is only known writable
-	// when the endpoint said so; a request that failed, or an answer this
-	// release does not understand, is an unknown card, and an unknown card
-	// must not be painted green — that false reassurance is the whole bug
-	// this page is here to stop telling.
-	//
-	// And the filesystem agreeing is no longer enough. A card mounted
-	// read-write with room on it can still be recording nothing — the writes
-	// failing, or the card too slow to keep up — and every one of those states
-	// reads as `health: ok` here, because none of them is visible from the
-	// filesystem. So the recorder has to agree as well, when it is new enough
-	// to be asked.
-	function cardWritable() {
-		if (!state.card || state.card.health !== 'ok') return false;
-		// A camera that answered and has no recorder metrics is as known as it
-		// can be, and green is what this page said about it before there were
-		// any. A camera that could not be asked is not known, and green is a
-		// claim — the same rule the card itself is held to, two lines up.
-		if (!recorderKnown()) return false;
-		const rs = recorderState();
-		return rs === null || rs === 0;
-	}
+	// Both of these are storage-verdict.js's, and the reasoning that goes with
+	// them lives there: a card is only known writable when the endpoint said
+	// so, an unknown card must not be painted green, and the filesystem
+	// agreeing is not enough because a card mounted read-write with room on it
+	// can still be recording nothing. Called through rather than copied — the
+	// banner on every other page asks the same two questions, and the answers
+	// have to be the same answers.
+	function cardWritable() { return SV.writable(state.card, state.recorder); }
 
 	// Why there is no new footage, said on the page people actually arrive at.
-	// Returns '' while the card is fine — including while it is merely full,
+	// The sentences are storage-verdict.js's, which is also what the banner on
+	// every other page says; this page takes the long form of them, and the
+	// one thing it can measure that the banner cannot — footage dropped while
+	// somebody has had this page open.
+	//
+	// Returns '' while the card is fine, including while it is merely full,
 	// which is normal operation: majestic deletes the oldest clips at
 	// records.maxUsage and carries on.
 	function cardTrouble() {
-		const d = state.card;
-		// Asked first, because it is the more specific answer: a card that has
-		// gone read-only under the recorder shows up in BOTH, and "majestic
-		// cannot write to the card" is what somebody looking at an empty
-		// archive needs to read.
-		const rec = recorderTrouble();
-		if (rec) return rec;
-		if (!d) return '';
-		switch (d.health) {
-		case 'readonly':
-			return '<strong>The SD card is mounted read-only — nothing is being recorded.</strong> ' +
-				'It reports free space and its older clips still play, but the camera cannot write to it. ' +
-				'The kernel drops a card to read-only as soon as its filesystem stops making sense, ' +
-				'so expect a damaged filesystem rather than a full one.';
-		case 'unreadable':
-			return '<strong>The SD card has no readable filesystem — nothing is being recorded.</strong> ' +
-				'A partition is there but nothing on the camera can read it, so it is either damaged or was never formatted.';
-		case 'unformatted':
-			return '<strong>The SD card is not formatted — nothing is being recorded.</strong>';
-		case 'unmounted':
-			return '<strong>The SD card is not mounted — nothing is being recorded.</strong> ' +
-				'The filesystem is intact; it just is not attached to <code>' + esc(d.mountpoint || '') + '</code>.';
-		case 'absent':
-			return '<strong>There is no SD card in the camera — nothing is being recorded.</strong>';
-		default:
-			return '';
-		}
-	}
-
-	// What majestic says about its own recording, when it is new enough to say
-	// anything. This is the half the SD-card page cannot see: every state below
-	// reads as a healthy filesystem with free space on it.
-	function recorderTrouble() {
-		const r = state.recorder;
-		const v = r && r.v;
-		const rs = recorderState();
-		if (rs === null) return '';
-
-		switch (rs) {
-		case 3:
-			return '<strong>The camera cannot open the SD card — nothing is being recorded.</strong> ' +
-				'It has stopped trying and will look again every half minute, so recording resumes ' +
-				'on its own if the card comes back.';
-		case 2:
-			return '<strong>Writes to the SD card are failing — nothing is being recorded.</strong> ' +
-				'The camera gave up on the clip it was writing after repeated errors.';
-		case 1:
-			return '<strong>Writes to the SD card are failing intermittently.</strong> ' +
-				'Recording is continuing for now, but footage is being lost.';
-		default:
-			break;
-		}
-
-		// State 0 and still losing footage: the card is keeping up with
-		// neither the bitrate nor its own garbage collection. Nothing about
-		// the filesystem is wrong, which is exactly why this needs saying —
-		// the page would otherwise be green.
-		//
-		// Measured against the first reading this page took, not against zero.
-		// The counter runs from boot, so a card that dropped a second last
-		// Tuesday and has been perfect since would otherwise hold the banner
-		// red for ever — and "footage is being lost" is a claim about now.
 		const lost = droppedSeconds();
-		if (lost > 0) {
-			return '<strong>The SD card cannot keep up — footage is being lost.</strong> ' +
-				esc(TL.duration(lost)) + ' of video has been dropped while this ' +
-				'page has been open, because the card could not take it in time. ' +
-				'A faster card, or a lower bitrate, is the fix.';
-		}
-		return '';
+		const v = SV.of(state.card, state.recorder,
+			lost > 0 ? TL.duration(lost) : '');
+		return v ? v.detail : '';
 	}
 
 	// Seconds of footage dropped since this page loaded.

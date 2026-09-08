@@ -285,9 +285,15 @@ done) %>
 			<script type="application/json" id="overlay-data">{"total":<%= ${ov_total:-0} %>,"used":<%= ${ov_used:-0} %>,"avail":<%= ${ov_avail:-0} %>,"cats":[<%= $ov_cats %>]}</script>
 			<% if [ -n "$sd_rows" ]; then %>
 				<% echo "$sd_rows" | while IFS='|' read mnt use pct; do %>
+					<%# Green until /a/storage-check.js says otherwise. These
+					    numbers come from df, which reports a card that went
+					    read-only at lunchtime with all of the free space it had
+					    then -- a healthy-looking row over a card that has
+					    recorded nothing since. df is not wrong; it is answering
+					    a different question from the one being asked here. %>
 					<div class="d-flex align-items-center gap-2 x-small">
-						<span class="badge text-bg-success flex-shrink-0">SD</span>
-						<span class="text-secondary"><% esc "$mnt — $use ($pct)" %></span>
+						<span id="sd-badge" class="badge text-bg-success flex-shrink-0">SD</span>
+						<span class="text-secondary"><% esc "$mnt — $use ($pct)" %><span id="sd-badge-why"></span></span>
 					</div>
 				<% done %>
 			<% else %>

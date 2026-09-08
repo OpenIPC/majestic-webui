@@ -204,6 +204,9 @@ const ACTS_ON_CAMERA = new Set(['restart.cgi']);
 // point: it is the review the vocabulary did not have.
 const EXPECTED = [
 	'a/recordings.js sdcard.cgi "Open the SD card page"',
+	// The same destination and the same words as the line above, because it
+	// is the same verdict said shorter -- both come out of storage-verdict.js.
+	'a/storage-check.js sdcard.cgi "Open the SD card page"',
 	'a/update-check.js update.cgi "Firmware update"',
 	'cgi-bin/camera.cgi logs.cgi "Open the log"',
 	'cgi-bin/camera.cgi restart.cgi "Restart camera"',
