@@ -41,6 +41,11 @@ const V = loadVerdict();
 // A recorder that answered with a reading, one that answered without the
 // endpoint, and one that could not be asked at all.
 const rec = (n) => ({ v: { records_state: n } });
+// The card this endpoint describes, and where the camera is pointed. Every
+// case above the last group records to the card, which is the ordinary
+// configuration; the last group is what happens when it does not.
+const MP = '/mnt/mmcblk0p1';
+const ON = MP;                         // records.path's directory, on the card
 const OLD = { absent: true };          // majestic too old to have the endpoint
 const UNASKED = null;                  // the request failed
 
@@ -79,7 +84,10 @@ function loadBanner(opts) {
 		env.asked.push(url);
 		return Promise.resolve({ json: () => Promise.resolve(o.card || { health: 'ok' }) });
 	};
-	ctx.mjConfig = () => Promise.resolve({ records: { enabled: o.recording !== false } });
+	ctx.mjConfig = () => Promise.resolve({ records: {
+		enabled: o.recording !== false,
+		path: (o.path || '/mnt/mmcblk0p1') + '/%F',
+	} });
 	ctx.mjGet = (cfg, dot) => dot.split('.').reduce((a, k) => (a == null ? undefined : a[k]), cfg);
 	// The real builder's shape, in miniature: the action belongs to the notice,
 	// so a stub that dropped it would hide a banner with nowhere to go.
@@ -102,7 +110,7 @@ async function banners() {
 	group('the banner reaches the pages that were saying nothing');
 
 	{
-		const env = loadBanner({ card: { health: 'absent' } });
+		const env = loadBanner({ card: { health: 'absent', mountpoint: '/mnt/mmcblk0p1' } });
 		await settle();
 		env.beat({ records_state: 0 });
 		check('a dead card is announced on an ordinary page',
@@ -114,7 +122,7 @@ async function banners() {
 	}
 
 	{
-		const env = loadBanner({ card: { health: 'ok' } });
+		const env = loadBanner({ card: { health: 'ok', mountpoint: '/mnt/mmcblk0p1' } });
 		await settle();
 		env.beat({ records_state: 0 });
 		check('a healthy camera is not nagged', env.banner() === '', env.banner());
@@ -125,7 +133,7 @@ async function banners() {
 	{
 		// The camera is not recording to a card at all. A banner about storage
 		// nobody asked to use is what teaches people to ignore banners.
-		const env = loadBanner({ recording: false, card: { health: 'absent' } });
+		const env = loadBanner({ recording: false, card: { health: 'absent', mountpoint: '/mnt/mmcblk0p1' } });
 		await settle();
 		env.beat({ records_state: 0 });
 		check('records.enabled off means no banner and no polling',
@@ -134,15 +142,28 @@ async function banners() {
 	}
 
 	['page-recordings', 'page-sdcard'].forEach(function (page) {
-		const env = loadBanner({ page, card: { health: 'absent' } });
+		const env = loadBanner({ page, card: { health: 'absent', mountpoint: '/mnt/mmcblk0p1' } });
 		check(page + ' is left to say it itself',
 			env.banner() === '' && env.asked.length === 0);
 	});
 
 	{
+		// The whole of the false positive, end to end: no card in the slot, and
+		// a camera that was never recording to the slot.
+		const env = loadBanner({
+			path: '/mnt/usb',
+			card: { health: 'absent', mountpoint: '/mnt/mmcblk0p1' },
+		});
+		await settle();
+		env.beat({ records_state: 0 });
+		check('a camera recording to a USB stick is not told its slot is empty',
+			env.banner() === '', env.banner().slice(0, 90));
+	}
+
+	{
 		// A heartbeat that failed is not a recorder reporting health. The card
 		// half still carries the verdict.
-		const env = loadBanner({ card: { health: 'absent' } });
+		const env = loadBanner({ card: { health: 'absent', mountpoint: '/mnt/mmcblk0p1' } });
 		await settle();
 		env.beat(null);
 		check('a failed heartbeat does not silence the card half',
@@ -152,7 +173,7 @@ async function banners() {
 	{
 		// An older majestic with no records_state at all: the card half is
 		// still the whole answer, and it must not be lost.
-		const env = loadBanner({ card: { health: 'readonly' } });
+		const env = loadBanner({ card: { health: 'readonly', mountpoint: '/mnt/mmcblk0p1' } });
 		await settle();
 		env.beat({ isp_again: 1024 });
 		check('a majestic with no recorder metrics still reports the card',
@@ -166,7 +187,7 @@ function main() {
 	group('every card state that means "not recording" says so');
 
 	TROUBLE.forEach(function (h) {
-		const v = V.of({ health: h, mountpoint: '/mnt/mmcblk0p1' }, rec(0), '');
+		const v = V.of({ health: h, mountpoint: MP }, rec(0), '', ON);
 		check(h + ' is a verdict, not silence', !!v);
 		if (!v) return;
 		check(h + ' is worded for a banner and for a page',
@@ -180,7 +201,7 @@ function main() {
 	});
 
 	{
-		const v = V.of({ health: 'ok' }, rec(0), '');
+		const v = V.of({ health: 'ok', mountpoint: MP }, rec(0), '', ON);
 		check('a healthy card and a happy recorder say nothing', v === null,
 			JSON.stringify(v));
 	}
@@ -191,7 +212,7 @@ function main() {
 		// Measured on the lab camera with the card removed: health "absent",
 		// records_state 0, because the recorder never started. A check that
 		// trusted the recorder alone would call this healthy.
-		const v = V.of({ health: 'absent' }, rec(0), '');
+		const v = V.of({ health: 'absent', mountpoint: MP }, rec(0), '', ON);
 		check('records_state 0 does not overrule an absent card',
 			!!v && v.kind === 'absent', v && v.kind);
 		check('and it is stated as danger, not a hint',
@@ -201,7 +222,7 @@ function main() {
 	{
 		// The other half of the same trap, and the one that was drawing green
 		// on the Dashboard: df reports a read-only card's old free space.
-		const v = V.of({ health: 'readonly' }, rec(0), '');
+		const v = V.of({ health: 'readonly', mountpoint: MP }, rec(0), '', ON);
 		check('a read-only card is danger even with the recorder at 0',
 			!!v && v.level === 'danger' && v.kind === 'readonly', v && v.kind);
 	}
@@ -212,19 +233,19 @@ function main() {
 		// A card that went read-only under the recorder shows up in both, and
 		// "the camera cannot write to the card" is what somebody looking at an
 		// empty archive needs to read.
-		const v = V.of({ health: 'readonly' }, rec(2), '');
+		const v = V.of({ health: 'readonly', mountpoint: MP }, rec(2), '', ON);
 		check('a failing recorder outranks the filesystem verdict',
 			!!v && v.kind === 'failing', v && v.kind);
 	}
 
 	[[3, 'offline'], [2, 'failing'], [1, 'degraded']].forEach(function (p) {
-		const v = V.of({ health: 'ok' }, rec(p[0]), '');
+		const v = V.of({ health: 'ok', mountpoint: MP }, rec(p[0]), '', ON);
 		check('records_state ' + p[0] + ' is reported on a healthy filesystem',
 			!!v && v.kind === p[1], v && v.kind);
 	});
 
 	{
-		const v = V.of({ health: 'ok' }, rec(0), '4 min');
+		const v = V.of({ health: 'ok', mountpoint: MP }, rec(0), '4 min', ON);
 		check('footage dropped by a card that cannot keep up is reported',
 			!!v && v.kind === 'dropping', v && v.kind);
 		check('and the page-measured amount reaches the long form only',
@@ -235,16 +256,72 @@ function main() {
 	group('an unknown card is never painted green');
 
 	check('a card the endpoint could not answer for is not writable',
-		V.writable(null, rec(0)) === false);
+		V.writable(null, rec(0), ON) === false);
 	check('a healthy card whose recorder could not be asked is not writable',
-		V.writable({ health: 'ok' }, UNASKED) === false);
+		V.writable({ health: 'ok', mountpoint: MP }, UNASKED, ON) === false);
 	check('a healthy card on a majestic too old to be asked still is',
-		V.writable({ health: 'ok' }, OLD) === true);
+		V.writable({ health: 'ok', mountpoint: MP }, OLD, ON) === true);
 	check('a healthy card with a happy recorder is',
-		V.writable({ health: 'ok' }, rec(0)) === true);
+		V.writable({ health: 'ok', mountpoint: MP }, rec(0), ON) === true);
 	TROUBLE.forEach(function (h) {
-		check(h + ' is not writable', V.writable({ health: h }, rec(0)) === false);
+		check(h + ' is not writable', V.writable({ health: h, mountpoint: MP }, rec(0), ON) === false);
 	});
+
+
+	group('a camera recording somewhere else is not told about the slot');
+
+	{
+		// j/sdcard.cgi describes the built-in slot and nothing else, and never
+		// reads records.path. Measured on a lab camera pointed at /tmp: with no
+		// card in the slot it was told, on every page, "There is no SD card in
+		// the camera — nothing is being recorded." The first clause was true and
+		// beside the point; the second was simply false.
+		const usb = { health: 'absent', mountpoint: MP };
+		check('an absent slot says nothing about a USB recording',
+			V.of(usb, rec(0), '', '/mnt/usb') === null);
+		check('nor about a network mount',
+			V.of(usb, rec(0), '', '/mnt/nfs/cam1') === null);
+		// A prefix match is not a path match: /mnt/mmcblk0p1x is a different
+		// directory, and so is /mnt/mmc.
+		check('and the match is on the directory, not on the letters',
+			V.of(usb, rec(0), '', MP + 'x') === null);
+		check('while the card itself, and anything under it, still counts',
+			V.of(usb, rec(0), '', MP) !== null &&
+			V.of(usb, rec(0), '', MP + '/clips') !== null);
+	}
+
+	{
+		// The recorder half still speaks, because majestic is reporting on
+		// whatever it was actually pointed at -- but it must not call it a card.
+		const v = V.of({ health: 'absent', mountpoint: MP }, rec(2), '', '/mnt/usb');
+		check('a failing recorder is reported wherever it is writing',
+			!!v && v.kind === 'failing', v && v.kind);
+		check('and is not described as an SD card',
+			!!v && v.short.indexOf('SD card') < 0, v && v.short);
+		check('a card-side failure IS, when that is where the footage goes',
+			(V.of({ health: 'absent', mountpoint: MP }, rec(2), '', MP) || {})
+				.short.indexOf('SD card') >= 0);
+	}
+
+	{
+		// The dot on the clip list: a slot the camera is not using cannot make
+		// its recording unwritable.
+		check('a healthy recorder writing elsewhere is writable',
+			V.writable({ health: 'absent', mountpoint: MP }, rec(0), '/mnt/usb') === true);
+		check('and the same camera pointed at the dead slot is not',
+			V.writable({ health: 'absent', mountpoint: MP }, rec(0), MP) === false);
+	}
+
+	{
+		// records.path is a strftime template; the directory is what comes
+		// before the first field.
+		check('the prefix is the path up to its first strftime field',
+			V.prefixOf('/mnt/mmcblk0p1/%F') === MP, V.prefixOf('/mnt/mmcblk0p1/%F'));
+		check('and a trailing slash is not part of it',
+			V.prefixOf('/mnt/usb///') === '/mnt/usb', V.prefixOf('/mnt/usb///'));
+		check('an unset path leaves the slot as the assumption',
+			V.onCard({ mountpoint: MP }, '') === true);
+	}
 
 	group('the banner and the Recordings page share one vocabulary');
 
@@ -252,9 +329,9 @@ function main() {
 		// Not a spot check: every state this module can reach has to carry
 		// both forms, because the drift being guarded against is one of them
 		// being added later without the other.
-		const all = TROUBLE.map(function (h) { return V.of({ health: h }, rec(0), ''); })
-			.concat([1, 2, 3].map(function (n) { return V.of({ health: 'ok' }, rec(n), ''); }))
-			.concat([V.of({ health: 'ok' }, rec(0), '10 s')]);
+		const all = TROUBLE.map(function (h) { return V.of({ health: h, mountpoint: MP }, rec(0), '', ON); })
+			.concat([1, 2, 3].map(function (n) { return V.of({ health: 'ok', mountpoint: MP }, rec(n), '', ON); }))
+			.concat([V.of({ health: 'ok', mountpoint: MP }, rec(0), '10 s', ON)]);
 		check('every reachable verdict has both forms',
 			all.every(function (v) { return v && v.short && v.detail && v.kind && v.level; }),
 			String(all.length) + ' verdicts');

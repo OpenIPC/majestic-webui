@@ -991,7 +991,7 @@
 	// can still be recording nothing. Called through rather than copied — the
 	// banner on every other page asks the same two questions, and the answers
 	// have to be the same answers.
-	function cardWritable() { return SV.writable(state.card, state.recorder); }
+	function cardWritable() { return SV.writable(state.card, state.recorder, state.prefix); }
 
 	// Why there is no new footage, said on the page people actually arrive at.
 	// The sentences are storage-verdict.js's, which is also what the banner on
@@ -1005,7 +1005,7 @@
 	function cardTrouble() {
 		const lost = droppedSeconds();
 		const v = SV.of(state.card, state.recorder,
-			lost > 0 ? TL.duration(lost) : '');
+			lost > 0 ? TL.duration(lost) : '', state.prefix);
 		return v ? v.detail : '';
 	}
 

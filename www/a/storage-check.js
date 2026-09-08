@@ -31,6 +31,7 @@
 	// thing twice on one screen, which reads as a bug rather than as emphasis.
 	const SAYS_IT_ALREADY = { 'page-recordings': 1, 'page-sdcard': 1 };
 
+	let where = '';          // the directory records.path puts clips in
 	let card = null;         // last answer from the SD-card endpoint
 	let recorder = null;     // null | {absent:true} | {v:…}, as the verdict wants
 	let shown = '';          // what the slot is currently saying
@@ -40,7 +41,7 @@
 	function render() {
 		const el = slot();
 		if (!el) return;
-		const v = V.of(card, recorder, '');
+		const v = V.of(card, recorder, '', where);
 		// The Dashboard's SD badge is the other place a dead card was being
 		// drawn green, and it is drawn from df, which cannot see any of this.
 		badge(v);
@@ -90,6 +91,11 @@
 
 		window.mjConfig().then(function (cfg) {
 			if (!window.mjGet(cfg, 'records.enabled')) return;
+			// Where the camera was actually pointed. The card endpoint only
+			// ever describes the built-in slot, so a camera recording to a USB
+			// stick or a network mount must not be told its SD card is the
+			// reason nothing is being recorded.
+			where = V.prefixOf(window.mjGet(cfg, 'records.path'));
 
 			// The recorder's half for free: records_state and the drop counter
 			// are in the top-level /metrics the heartbeat already fetches
