@@ -542,11 +542,18 @@ window.MajesticWebRTC = (function () {
 					// that as an autoplay refusal reports "no audio" over a
 					// working Opus stream, which is exactly what it did.
 					if (!current(my)) return;
-					// A muted element has no sound to blame: autoplay was refused on a
-					// fresh load with no user activation (#317). Retry on the first gesture.
+					// A muted element has no sound to blame: it was left paused,
+					// which on a fresh load with no user activation is autoplay
+					// being refused (Opera for Android refuses even a muted
+					// MediaStream, #317). Retry on the first gesture, whatever the
+					// rejection was named -- browsers disagree on that (Chrome
+					// NotAllowedError, others AbortError or an unnamed reject), and
+					// the actionable fact is only that a muted picture is paused
+					// and a gesture will start it. No audio track is requested
+					// while muted, so ontrack fires once and this is not the
+					// audio-track AbortError the unmuted branch below guards.
 					if (video.muted) {
-						if (err && err.name === 'NotAllowedError')
-							playOnGesture(video, function () { return current(my); });
+						playOnGesture(video, function () { return current(my); });
 						return;
 					}
 					if (!err || err.name !== 'NotAllowedError') return;

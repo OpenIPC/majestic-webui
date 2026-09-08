@@ -274,10 +274,12 @@ async function playRetriesOnGesture() {
 	// load; the picture is ready but paused. The player must retry play() on the
 	// first user gesture rather than leave it paused for ever.
 	const env = makeEnv();
-	let plays = 0, reject = true;
+	let plays = 0, reject = true, rejectName = 'AbortError';
 	const video = {
 		muted: true, volume: 1, srcObject: null,
-		play() { plays++; return reject ? Promise.reject({ name: 'NotAllowedError' }) : Promise.resolve(); },
+		// Not NotAllowedError: browsers name a refused muted autoplay
+		// differently, and the retry must arm regardless (#317).
+		play() { plays++; return reject ? Promise.reject({ name: rejectName }) : Promise.resolve(); },
 	};
 	env.MajesticWebRTC.attach(video, {});
 	await tick();
