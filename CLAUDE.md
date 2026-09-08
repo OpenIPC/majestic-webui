@@ -321,6 +321,26 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   built client-side by `renderLive()` in `mj-settings.js` (`.mj-live-video`
   elements), though it loads all four preview player scripts. `preview()`
   (in `p/common.cgi`) has exactly one caller: `live.cgi`.
+- **The MSE player seeks for drift, never for lag (`syncLive` in
+  `preview.js`).** It used to seek to the live edge whenever the buffer ran
+  more than a second ahead of the playhead, moving or not, and that read a
+  decoder's own output delay as latency to cut. Chrome's hardware H.264 path
+  sizes its reorder window from the SPS, and an SPS with no
+  `bitstream_restriction` gets the level's whole DPB: 16 frames for the level
+  5.1 1080p an Ingenic T31 emits, 1.7 s at the ~9 fps it delivers. Every seek
+  flushed a decoder that had not produced a frame yet, so nothing reached the
+  screen but the four frames an IDR flushes out, once per 12.6 s GOP — the
+  "MSE needs ten seconds on the T31" report. Measured in Chrome with VA-API:
+  12 frames and 46 seeks in 46 s, while the HiSilicon beside it (a 7-frame
+  window, 0.35 s at 20 fps) never seeked at all — one rule, one camera on
+  each side of the cliff. Now nothing is seeked while the playhead is not
+  advancing, the lag a pipeline runs at is learned from its first movement
+  (and again after every seek) and only drift beyond it is cut, and a start
+  refused autoplay does not get its waiting learned as pipeline lag.
+  `tests/preview-live-edge.test.js` pins it; the cost is that a T31-class
+  stream under a hardware decoder runs ~2 s behind, which no seek could
+  shorten anyway — seeking it once at the start was measured to cost a 1.3 s
+  blackout after the first picture for 0.2 s of latency.
 - **The Live page is settings-free by design.** It is the page every user of
   the future multi-user system gets, read-only, so nothing on it changes the
   camera: no night/IR/light toggles (those live in mj-settings' Live section,
