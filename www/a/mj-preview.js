@@ -28,8 +28,9 @@
 // third consumer of those two modules, not a second copy of them.
 //
 // Requires: preview.js, preview-webrtc.js, preview-swap.js, preview-wasm.js,
-// preview-transport.js, and (optionally) preview-hero.js for the two icon
-// buttons. `apiFetch` is a global from main.js.
+// preview-transport.js, and (optionally) preview-served.js for served-channel
+// reflection and preview-hero.js for the two icon buttons. `apiFetch` is a
+// global from main.js.
 window.MajesticPreview = (function () {
 	'use strict';
 
@@ -140,10 +141,21 @@ window.MajesticPreview = (function () {
 			// had to guess it would guess it differently each time.
 			'<div class="mj-pv-overlay"></div>' +
 			'<p class="mj-pv-alert" hidden></p>' +
+			// The served-channel message: a dismissible toast over a picture that
+			// IS playing, so distinct from the centred no-picture alert above it.
+			// It borrows the adaptation toast's glass; a click anywhere on it
+			// dismisses, and the × is the same for the keyboard.
+			'<div class="mj-pv-msg" hidden>' +
+			'<p class="mj-adapt-toast mj-served-toast" role="status">' +
+			'<span class="mj-pv-msg-why"></span>' +
+			'<button type="button" class="mj-adapt-close" aria-label="Dismiss">×</button>' +
+			'</p></div>' +
 			'<div class="mj-pv-bar"></div>';
 
 		const overlay = stage.querySelector('.mj-pv-overlay');
 		const alertEl = stage.querySelector('.mj-pv-alert');
+		const servedEl = stage.querySelector('.mj-pv-msg');
+		const servedWhy = stage.querySelector('.mj-pv-msg-why');
 		const bar = stage.querySelector('.mj-pv-bar');
 
 		// Everything the bar's right edge holds. Built now and appended last, so
@@ -230,6 +242,13 @@ window.MajesticPreview = (function () {
 		// Which transport the caller was last told is playing, so onPlaying is
 		// an event about a picture rather than about an attempt.
 		let announced = null;
+
+		// A reply that arrived while its session was still a trial: moving the
+		// radios for a session that may yet be thrown away would announce a
+		// switch that never happened, so it is applied only once that session is
+		// the one on screen. The served state itself — which channel, the
+		// viewer's ask, what has been said — lives in the shared applier below.
+		let heldServed = null;
 
 		// Forgetting the frame is news. Everything laid out against the picture —
 		// an overlay's rectangles, a tool that needs to map a drag into it — is
@@ -408,6 +427,14 @@ window.MajesticPreview = (function () {
 						// is adopted by onPromoted instead, once it is.
 						adoptPending();
 					},
+					// The camera's served-channel statement (a new majestic, over
+					// WebRTC). Held against this attachment until it is the one on
+					// screen, for the same reason onCodec's report is: a trial's
+					// reply must not move the radios for a session that may fail.
+					onServed: (info) => {
+						heldServed = { id: attachId, info: info };
+						flushServed();
+					},
 					stream: stream,
 					// Opened with the volume it should have rather than given it
 					// afterwards; see preview-swap.js on why applying
@@ -441,6 +468,13 @@ window.MajesticPreview = (function () {
 				// A trial that reported its codec while it was still being
 				// judged: now it is on screen, what it said is worth publishing.
 				adoptPending();
+				// A served reply held while this session was a trial becomes
+				// real now that it is live. On any non-WebRTC transport the
+				// served channel is moot — MSE and the software rung subscribe
+				// to the exact number they are given — so a prior mismatch's
+				// message is stale and cleared.
+				if (kind === 'webrtc') flushServed();
+				else resetServed();
 				// Only on a promotion a picture earned. The unproven case is
 				// announced by onLive('playing') below instead, which is where
 				// a first attach reports the same news once it is true.
@@ -504,6 +538,70 @@ window.MajesticPreview = (function () {
 				}
 			},
 		});
+
+		// ── The served channel ───────────────────────────────────────────────
+		//
+		// A new majestic states, in the WebRTC signalling, which channel a
+		// session actually serves (#240/#249). When that is not the one asked
+		// for, the picker follows it and a dismissible line says why — the same
+		// rule the Live View page follows, and it IS the same code:
+		// MajesticServed.make() owns the decision and the say-once state, and
+		// this wires it to this stage's radios and message. Gated the same way:
+		// on an older daemon (or with the module missing) no reply is applied and
+		// the picker behaves as before. There is no chip here to also correct —
+		// that is the Live page's — so this wires the radios and the message
+		// alone, and never Auto (this picker has none).
+		const streamName = (n) => n === 0 ? 'Main stream' : 'Sub stream';
+		function showServedMsg(info) {
+			if (!servedWhy || !servedEl) return;
+			const req = streamName(info.requested), got = streamName(info.channel);
+			// The panel words the sentence; the camera only names the cause, and
+			// an unknown code from a future daemon still gets an honest line.
+			servedWhy.textContent =
+				info.reason === 'unavailable'
+					? req + ' isn’t available right now — showing ' + got + ' instead.'
+				: info.reason === 'undecodable'
+					? 'This browser’s WebRTC can’t decode the ' + req +
+						'’s format — showing ' + got + ' instead.'
+				: 'The camera couldn’t serve the ' + req + ' — showing ' + got + ' instead.';
+			servedEl.hidden = false;
+		}
+		function hideServedMsg() { if (servedEl) servedEl.hidden = true; }
+
+		const served = window.MajesticServed && window.MajesticServed.make({
+			// Move by .checked, which fires no change event, so goToStream does
+			// not re-enter and cut the very session that reported this. And
+			// chooseStream is deliberately untouched: a daemon fallback is not
+			// the viewer's choice, and the next mount asks for their channel.
+			adopt: function (ch) {
+				stream = ch;
+				if (s0) s0.checked = ch === 0;
+				if (s1) s1.checked = ch === 1;
+			},
+			show: showServedMsg,
+			hide: hideServedMsg,
+		});
+		// A reply is held against its attachment id until that attachment is the
+		// one on screen; then it is real news. A trial that fails never becomes
+		// live, so its held reply is simply never applied.
+		function flushServed() {
+			if (served && heldServed && swap.isLive(heldServed.id)) {
+				const info = heldServed.info;
+				heldServed = null;
+				served.apply(info);
+			}
+		}
+		// A deliberate channel change is a fresh ask; a non-WebRTC transport
+		// serves the exact number it is given, so a prior mismatch is moot. The
+		// held reply is dropped either way. `n` (a channel) becomes the ask the
+		// next reply is judged against.
+		function resetServed(n) {
+			heldServed = null;
+			if (served) served.reset(n);
+		}
+		// A click anywhere on the toast dismisses it — a message small enough to
+		// need aim at its × is a message that gets missed.
+		if (servedEl) servedEl.addEventListener('click', hideServedMsg);
 
 		// ── The bar ──────────────────────────────────────────────────────────
 		//
@@ -598,6 +696,10 @@ window.MajesticPreview = (function () {
 			// recovery timer: they belonged to the channel being left.
 			wasmGen++;
 			cancelWasmTimers();
+			// A deliberate pick is a fresh ask: the old served answer and its
+			// message described the channel being left, and n is the channel the
+			// next reply is judged against.
+			resetServed(n);
 			// Only when it actually moves. The channels are different pictures —
 			// different size, often a different codec — so what was true of the
 			// old one is not a description of the new one, it is a wrong
