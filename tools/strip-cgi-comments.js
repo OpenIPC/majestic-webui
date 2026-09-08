@@ -75,12 +75,15 @@ function stripHtmlComments(text) {
 
 /* Walk one line of shell, carrying the quoting state in and out. Stops at an
  * unquoted `#` in command position, so an apostrophe inside a comment cannot
- * open a quote that swallows the rest of the file. Reports the first heredoc
- * the line opens. */
+ * open a quote that swallows the rest of the file.
+ *
+ * Reports EVERY heredoc the line opens, in the order the shell will consume
+ * their bodies. `cat <<A <<B` is one command with two of them, and a reader
+ * that remembers only the first treats B's body as code. */
 function scanShellLine(line, quote) {
 	let q = quote;
 	let esc = false;
-	let heredoc = null;
+	const heredocs = [];
 	let i = 0;
 	while (i < line.length) {
 		const c = line[i];
@@ -95,21 +98,21 @@ function scanShellLine(line, quote) {
 		if (c === '\\') { esc = true; i++; continue; }
 		if (c === "'" || c === '"') { q = c; i++; continue; }
 		if (c === '#' && (i === 0 || /[ \t;&|(]/.test(line[i - 1]))) break;
-		if (!heredoc && c === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
+		if (c === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
 			const m = /^<<(-?)[ \t]*(?:'([^']*)'|"([^"]*)"|([A-Za-z_][A-Za-z0-9_]*))/
 				.exec(line.slice(i));
 			if (m) {
-				heredoc = {
+				heredocs.push({
 					dash: m[1] === '-',
 					delim: m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4],
-				};
+				});
 				i += m[0].length;
 				continue;
 			}
 		}
 		i++;
 	}
-	return { quote: q, heredoc };
+	return { quote: q, heredocs };
 }
 
 function stripShell(code, where) {
@@ -117,6 +120,10 @@ function stripShell(code, where) {
 	const out = [];
 	let quote = null;
 	let hd = null;
+	/* Bodies queue up in the order the shell reads them: one command line can
+	 * open several, and the second body starts where the first delimiter
+	 * ended. */
+	const pending = [];
 	let body = [];
 	const flushBody = () => {
 		if (body.length) {
@@ -130,7 +137,7 @@ function stripShell(code, where) {
 			if (t === hd.delim) {
 				flushBody();
 				out.push(line);
-				hd = null;
+				hd = pending.length ? pending.shift() : null;
 			} else {
 				body.push(line);
 			}
@@ -140,7 +147,8 @@ function stripShell(code, where) {
 		out.push(line);
 		const r = scanShellLine(line, quote);
 		quote = r.quote;
-		if (r.heredoc) hd = r.heredoc;
+		pending.push(...r.heredocs);
+		if (pending.length) hd = pending.shift();
 	}
 	if (hd) {
 		throw new Error(
@@ -188,7 +196,66 @@ function stripCgi(src, where) {
 	}
 }
 
-module.exports = { stripCgi, stripShell, stripHtmlComments };
+/* The lines of a .cgi that are actually shell CODE: inside a code block, not a
+ * heredoc body, not literal markup, and not the continuation of a string that
+ * opened on an earlier line. Returned as { line, text } with 1-based source
+ * line numbers.
+ *
+ * Exported so the lint in tests/ walks the same parser this strips with. The
+ * two ask different questions of a .cgi and must not disagree about which
+ * bytes are shell -- that disagreement is the whole reason a comment full of
+ * CSS was once handed to /bin/sh.
+ *
+ * A file with no code block at all is a plain shell script (sbin/, bin/, the
+ * j/*.cgi endpoints), so every line of it is code. */
+function shellLines(src, where) {
+	where = where || '<input>';
+	const out = [];
+
+	/* One walker for both kinds of file. A plain script used to be returned
+	 * line for line, which handed back heredoc BODIES as if they were code --
+	 * sbin/updatewebui's usage text is a heredoc, and a line of it starting
+	 * with a keyword, or holding a brace, is data that would be read as shell.
+	 * The state a code block needs is exactly the state a script needs. */
+	const walk = (code, base) => {
+		let quote = null;
+		let hd = null;
+		const pending = [];
+		code.split('\n').forEach((t, n) => {
+			if (hd) {
+				const d = hd.dash ? t.replace(/^[\t]+/, '') : t;
+				if (d === hd.delim) hd = pending.length ? pending.shift() : null;
+				return;
+			}
+			if (!quote) out.push({ line: base + n, text: t });
+			const r = scanShellLine(t, quote);
+			quote = r.quote;
+			pending.push(...r.heredocs);
+			if (pending.length) hd = pending.shift();
+		});
+	};
+
+	if (src.indexOf('<%') === -1) {
+		walk(src, 1);
+		return out;
+	}
+	let i = 0;
+	for (;;) {
+		const j = src.indexOf('<%', i);
+		if (j === -1) return out;
+		const k = src.indexOf('%>', j);
+		if (k === -1) {
+			throw new Error(`${where}: '<%' at offset ${j} is never closed`);
+		}
+		const kind = src[j + 2];
+		if (kind !== '#' && kind !== '=') {
+			walk(src.slice(j + 2, k), src.slice(0, j + 2).split('\n').length);
+		}
+		i = k + 2;
+	}
+}
+
+module.exports = { stripCgi, stripShell, stripHtmlComments, shellLines };
 
 if (require.main === module) {
 	const fs = require('fs');

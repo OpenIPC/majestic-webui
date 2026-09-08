@@ -69,6 +69,17 @@ check('<%= %> is left exactly alone',
 check('an apostrophe in a comment cannot open a quote',
 	S("<%\n# don't do this\nx=1\n%>") === '<%\nx=1\n%>');
 
+// One command line can open more than one, and the second body begins where
+// the first delimiter ended. Remembering only the first left B's body looking
+// like shell -- which would strip a comment out of emitted text and, worse,
+// read data as code.
+check('two heredocs on one command: both bodies are output',
+	S('<%\ncat <<A <<B\n<!-- gone -->\nkeep a\nA\n<!-- also gone -->\nkeep b\nB\n%>') ===
+	'<%\ncat <<A <<B\nkeep a\nA\nkeep b\nB\n%>');
+
+check('a # line in the second body is data, not a comment',
+	S('<%\ncat <<A <<B\nfirst\nA\n#id { a: b }\nB\n%>').includes('#id { a: b }'));
+
 group('strip-cgi-comments: what fails loudly');
 
 // A `<<` mistaken for a heredoc opener swallows the rest of the file as body.
