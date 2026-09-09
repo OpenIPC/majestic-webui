@@ -70,6 +70,57 @@ function boot(nowStart) {
 	};
 }
 
+// The software rung reports transport 'wasm' and has no RTP-side counters:
+// it belongs on the buffered branch beside MSE, where a stall and a dropped
+// frame are the symptoms, and absent counters are absent — not zero packets
+// lost, zero jitter and an 'excellent' grade nobody measured.
+g('the software rung takes the buffered branch', () => {
+	const env = boot();
+	env.stats.tick({ transport: 'wasm', framesDecoded: 10, queuedMs: 120, fps: 15, rxBytes: 1000, stalls: 0 });
+	env.tickClock(1000);
+	env.stats.tick({ transport: 'wasm', framesDecoded: 25, queuedMs: 140, fps: 15, rxBytes: 90000, stalls: 0 });
+	const fp = env.el('mj-ns-fp').textContent;
+	check('fine print names the software player and the socket', /^transport software H\.265 — fMP4 over WebSocket\/TCP/.test(fp));
+	check('the decoder queue stands in for the buffer depth', /buffered 140 ms/.test(fp));
+	check('re-buffering is what is counted, not packet loss', /re-buffered/.test(env.el('mj-ns-repair').textContent) && !/lost/.test(env.el('mj-ns-repair').textContent));
+	check('talkback is unavailable on a buffered player', /talkback unavailable/.test(fp));
+});
+
+// The same players over the data-channel feed: the camera's own line comes
+// with it (the channel negotiates on the signalling socket), so the network
+// leg and the camera leg are measured, and what the channel saw is printed
+// — holes, camera-flagged gaps, the dc keys verbatim, the capture-to-arrival
+// spread from the producer reference times.
+g('a data-channel feed brings the camera line, the network leg and its own figures', () => {
+	const env = boot();
+	const dc = { feed: 'datachannel', rttMs: 40, seqGaps: 1, camGaps: 2, late: 0, partsReassembled: 3, queueMs: 5,
+		cam: { c2s: '40ms', dc: 'up', dcq: '0/0', dcdrop: '1+2', dcrtt: '44' }, clock: { wallMs: 1000000, atMs: 1000030 } };
+	const base = { transport: 'mse', feed: 'datachannel', fps: 15, totalFrames: 10, droppedFrames: 0, stalls: 0, rxBytes: 1000, bufferedMs: 300, dc: dc,
+		lag: { n: 15, p50: 150, p95: 190, max: 220 }, framesDecoded: 10 };
+	env.stats.tick(base);
+	env.tickClock(1000);
+	env.stats.tick(Object.assign({}, base, { rxBytes: 60000, totalFrames: 25, framesDecoded: 25 }));
+	const fp = env.el('mj-ns-fp').textContent;
+	check('fine print says the bytes came over a data channel', /fMP4 over a WebRTC data channel/.test(fp));
+	check('the channel\'s own line: holes, gaps, round trip', /holes 1 · camera-flagged gaps 2 · late 0 · split messages 3 · round trip 40 ms · camera queue 5 ms/.test(fp));
+	check('the camera\'s dc keys, verbatim', /dc=up dcq=0\/0 dcdrop=1\+2 dcrtt=44/.test(fp));
+	check('capture→arrival from the producer reference times, clock-corrected', /capture→arrival p50 150 ms · p95 190 ms \(15 frames · clock-corrected p50 \d+ ms\)/.test(fp));
+	check('the network leg is half the channel\'s round trip', env.el('mj-ns-l-net').textContent === '20');
+	check('the headline is a full glass-to-glass figure, not a floor', /^≈/.test(env.el('mj-ns-lat').textContent) && /data channel/.test(env.el('mj-ns-lat-sub').textContent));
+});
+
+g('a feed with no round trip yet prints none, not zero', () => {
+	const env = boot();
+	const dc = { feed: 'datachannel', rttMs: null, seqGaps: 0, camGaps: 0, late: 0, partsReassembled: 0, queueMs: 0, cam: {}, clock: null };
+	const base = { transport: 'mse', feed: 'datachannel', fps: 15, totalFrames: 10, droppedFrames: 0, stalls: 0, rxBytes: 1000, bufferedMs: 300, dc: dc, framesDecoded: 10 };
+	env.stats.tick(base);
+	env.tickClock(1000);
+	env.stats.tick(Object.assign({}, base, { rxBytes: 60000, totalFrames: 25, framesDecoded: 25 }));
+	const fp = env.el('mj-ns-fp').textContent;
+	check('round trip is a dash', /round trip - ·/.test(fp));
+	check('and the headline stays a floor', /^≥/.test(env.el('mj-ns-lat').textContent));
+});
+
 g('degradation: an old majestic and a young session claim nothing', () => {
 	const env = boot();
 	env.stats.tick({ cam: {} });

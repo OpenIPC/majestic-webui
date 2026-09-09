@@ -36,7 +36,15 @@ window.MajesticWasm = (function () {
 	// MJ_WASM_BASE overrides it, for a development build or an operator who
 	// would rather host it themselves.
 	const BASE = (window.MJ_WASM_BASE ||
-		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.1.1/dist/');
+		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.2.0/dist/');
+	// The channel feed (preview-datachannel.js), when the camera has one:
+	// the worker is asked to run in its feed mode and this page owns the
+	// transport — a data channel cannot be created in, or transferred into,
+	// a worker. A worker that predates the mode (an operator's own copy
+	// under MJ_WASM_BASE) ignores `feed` and opens its own socket as ever;
+	// nothing here opens a channel until the worker has said it will take
+	// the feed, so an old worker never ends up with two sessions.
+	const DC = () => window.MajesticDataChannel;
 	const LOAD_TIMEOUT_MS = 8000;
 
 	// A Worker cannot be constructed from a cross-origin URL, so the worker
@@ -84,6 +92,53 @@ window.MajesticWasm = (function () {
 		let stream = opts.stream | 0;
 		let worker = null, dead = false, statsTimer = null;
 		let cum = { frames: 0, decodeMs: 0 };
+		// The feed carrying the bytes, when the worker took one; blocked for
+		// this player once it failed, after which the worker holds its own
+		// socket the way it always did.
+		let feedObj = null, dcBlocked = false, feedName = 'websocket';
+		function wsUrl(n) {
+			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+			return proto + '://' + location.host + '/ws/video?stream=' + (n | 0);
+		}
+		function closeFeed() {
+			if (!feedObj) return;
+			const f = feedObj;
+			feedObj = null;
+			f.onopen = f.onmessage = f.onmeta = f.onclose = f.onerror = null;
+			try { f.close(); } catch (e) {}
+		}
+		// Open the channel and wire it to the worker: every message the
+		// channel delivers is posted in verbatim (the bytes transferred,
+		// not copied), a camera-flagged or detected gap becomes `gap`, and
+		// what the worker would have written to its socket goes to the feed.
+		function openFeed() {
+			const D = DC();
+			if (!worker || dead || dcBlocked || !D) return false;
+			feedName = 'datachannel';
+			const f = D.open({ stream: stream, iceServers: opts.iceServers });
+			feedObj = f;
+			let meta = null;
+			f.onmeta = function (m) { meta = m; };
+			f.onmessage = function (e) {
+				if (feedObj !== f || !worker) return;
+				if (typeof e.data === 'string') { worker.postMessage({ type: 'msg', data: e.data }); return; }
+				const m = meta; meta = null;
+				if (m && m.kind === 3 && m.gap) worker.postMessage({ type: 'gap' });
+				worker.postMessage({ type: 'msg', data: e.data, kind: m ? m.kind : undefined }, [e.data]);
+			};
+			f.onclose = function () {
+				if (feedObj !== f) return;
+				feedObj = null;
+				// The channel is gone: the worker takes its own socket from
+				// here, with its own ladder, and this player does not try
+				// the channel again. The reconnect budget in the chain is
+				// untouched — the camera was reachable, the channel was not.
+				dcBlocked = true;
+				feedName = 'websocket';
+				if (worker) worker.postMessage({ type: 'open', url: wsUrl(stream) });
+			};
+			return true;
+		}
 
 		onState('connecting');
 		// This transport carries no audio: the fragments are muxed and splitting
@@ -94,6 +149,7 @@ window.MajesticWasm = (function () {
 		function die(reason) {
 			if (dead) return;
 			dead = true;
+			closeFeed();
 			if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
 			if (worker) { try { worker.terminate(); } catch (e) {} worker = null; }
 			// The worker is gone but its last frame stays on the canvas, and a
@@ -155,6 +211,17 @@ window.MajesticWasm = (function () {
 					}
 				} else if (m.type === 'codec') {
 					onCodec('h265', '', m.width, m.height);
+				} else if (m.type === 'feed') {
+					// The worker will take a feed: open the channel now, and
+					// only now. If it cannot be opened the worker is handed
+					// its socket at once.
+					if (!m.ok || !openFeed()) {
+						worker.postMessage({ type: 'open', url: wsUrl(stream) });
+					}
+				} else if (m.type === 'send') {
+					// A keyframe request from the decoder, the one line the
+					// camera takes on either path.
+					if (feedObj) feedObj.send(m.text);
 				} else if (m.type === 'stats' && onStats) {
 					const s = m.stats;
 					// fps and decode time are MEASURED here, unlike MSE which
@@ -182,14 +249,24 @@ window.MajesticWasm = (function () {
 						rxBytes: s.bytes,
 						width: s.width, height: s.height,
 						codec: 'h265',
+						// The feed and what it measured — absent on a socket,
+						// not zero — and the worker's capture-to-paint lag from
+						// the fragments' producer reference times.
+						feed: feedName,
+						lag: s.lag, lagMs: s.lagMs, gaps: s.gaps, awaitingRap: s.awaitingRap,
+						dc: feedObj && feedObj.stats ? feedObj.stats() : undefined,
 					});
 				}
 			};
-			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+			const D = DC();
+			const wantFeed = !dcBlocked && !!(D && D.eligible && D.eligible());
 			worker.postMessage({
 				type: 'start',
-				url: proto + '://' + location.host + '/ws/video?stream=' + stream,
+				url: wsUrl(stream),
 				canvas: off,
+				// Asked for, never assumed: an old worker ignores it and opens
+				// its own socket; a new one answers `feed` first.
+				feed: wantFeed,
 			}, [off]);
 			if (onStats) statsTimer = setInterval(() => {
 				if (worker) worker.postMessage({ type: 'stats' });
@@ -208,6 +285,15 @@ window.MajesticWasm = (function () {
 					// `mjpeg restart` -- was read by the chain as this rung
 					// giving up, so picking Sub while software decoding dropped
 					// a working picture to MJPEG.
+					//
+					// With a feed the page owns the transport: close it, tell
+					// the worker the stream it had is gone, open the next.
+					if (feedObj) {
+						closeFeed();
+						if (worker) worker.postMessage({ type: 'reset' });
+						if (!openFeed() && worker) worker.postMessage({ type: 'open', url: wsUrl(n) });
+						return;
+					}
 					if (worker) worker.postMessage({ type: 'setStream', stream: n });
 				},
 				requestIdr: function () { if (worker) worker.postMessage({ type: 'idr' }); },

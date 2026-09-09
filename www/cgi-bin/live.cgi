@@ -35,6 +35,7 @@ hide_title=1; full_bleed=1
 
 <script src="/a/preview.js"></script>
 <script src="/a/preview-signal.js"></script>
+<script src="/a/preview-datachannel.js"></script>
 <script src="/a/preview-webrtc.js"></script>
 <script src="/a/preview-swap.js"></script>
 <script src="/a/preview-wasm.js"></script>

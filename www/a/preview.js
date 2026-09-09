@@ -1,6 +1,20 @@
-// Low-latency H.264/H.265 MSE player over the majestic /ws/video WebSocket.
+// Low-latency H.264/H.265 MSE player over the majestic /ws/video WebSocket —
+// or over an RTCDataChannel carrying the same messages, when the camera has
+// one and this browser can open it (preview-datachannel.js). The channel is
+// a FEED inside this player, not a transport of its own: it is tried first,
+// the WebSocket is the fallback within the same attach, and whichever one
+// carries the bytes, everything from the init onward is handled here the
+// same way. What the channel adds is what a socket cannot say — that a frame
+// is a keyframe, that frames were lost before it, when the camera captured
+// it — and that reaches this player through the feed's onmeta.
 window.MajesticVideo = (function () {
 	const MAX_QUEUE = 240;
+	// How many capture-to-arrival samples to keep for the stats tick: the
+	// producer reference time the camera puts before a fragment, against
+	// this clock at arrival. Both ends' clocks, so the absolute figure
+	// carries the camera's offset; the spread is exact.
+	const LAG_KEEP = 240;
+	const DC = () => window.MajesticDataChannel;
 	// Safari wedges its MSE SourceBuffer on high-frequency per-frame appendBuffer
 	// calls for HEVC: /ws/video delivers one fMP4 fragment per frame (~20-30/s),
 	// and appending each on its own froze Safari after a few seconds with NO
@@ -65,6 +79,20 @@ window.MajesticVideo = (function () {
 		let stream = opts.stream | 0;
 		let ws = null, ms = null, sb = null, objUrl = null;
 		let queue = [], started = false, mime = null;
+		// Which feed carries the current session: 'datachannel' or
+		// 'websocket'. A channel that fails — before a picture or after —
+		// blocks the channel for this player's lifetime and the very next
+		// open takes the WebSocket, with no reconnect counted: the camera
+		// was never unreachable, only that path was.
+		let feed = 'websocket', dcBlocked = false;
+		// Frames dropped between a gap and the keyframe that mends it, and
+		// the lag samples the fragments' producer reference times gave.
+		let discarded = 0, awaitKey = false;
+		let lagMs = [];
+		// The channel's word on the next binary message (onmeta precedes
+		// onmessage), so an init segment is known from a fragment by what the
+		// camera said rather than by counting.
+		let nextMeta = null;
 		// HEVC append-coalescing state (see APPEND_BATCH above); pumpTimer bounds
 		// the wait for a full batch. hevc is set from the mime on each (re)init.
 		let pumpTimer = null, hevc = false;
@@ -348,7 +376,14 @@ window.MajesticVideo = (function () {
 			ms.addEventListener('sourceopen', function () {
 				try { sb = ms.addSourceBuffer(mime); }
 				catch (e) { onState('mjpeg', 'mse-error'); stop(); return; }
-				try { sb.mode = 'segments'; } catch (e) {}
+				// Over the channel, frames can be lost and the fragment
+				// timeline then has holes: in 'segments' mode a hole is a
+				// stall until the playhead is seeked across it, in
+				// 'sequence' mode each appended fragment simply follows the
+				// last, and a lost frame costs one frame of time, which is
+				// the whole point of the channel. The socket loses nothing,
+				// so its timeline stays as the camera wrote it.
+				try { sb.mode = feed === 'datachannel' ? 'sequence' : 'segments'; } catch (e) {}
 				sb.addEventListener('updateend', pump);
 				started = true;
 				onState('playing', info.codec);
@@ -437,12 +472,45 @@ window.MajesticVideo = (function () {
 			lagLearn = true;
 		}
 
+		// A fragment that starts with a producer reference time (the camera's
+		// capture instant, ISO 14496-12 prft): sample the lag and append from
+		// the moof, which is what the browser's byte-stream parser expects
+		// first. A view, not a copy. Anything else is appended as it came.
+		function readPrft(u8) {
+			if (u8.length < 32 || u8[4] !== 0x70 || u8[5] !== 0x72 || u8[6] !== 0x66 || u8[7] !== 0x74) return u8;
+			const size = ((u8[0] << 24) | (u8[1] << 16) | (u8[2] << 8) | u8[3]) >>> 0;
+			if (size < 32 || size > u8.length) return u8;
+			const secs = (((u8[16] << 24) | (u8[17] << 16) | (u8[18] << 8) | u8[19]) >>> 0) - 2208988800;
+			const frac = ((u8[20] << 24) | (u8[21] << 16) | (u8[22] << 8) | u8[23]) >>> 0;
+			const wallMs = secs * 1000 + Math.round(frac / 4294967.296);
+			lagMs.push(Date.now() - wallMs);
+			if (lagMs.length > LAG_KEEP) lagMs.shift();
+			return u8.subarray(size);
+		}
+
 		function onBinary(buf) {
+			const meta = nextMeta;
+			nextMeta = null;
+			// The channel names its messages; a fragment before any init, or
+			// while the picture waits for the keyframe after a gap, is not
+			// appended — the decoder would have nothing to decode it against.
+			if (meta && meta.kind === 3) {
+				if (!started && !ms) {
+					discarded++;
+					requestIdrLimited();
+					return;
+				}
+				if (meta.gap) awaitKey = true;
+				if (awaitKey) {
+					if (!meta.key) { discarded++; return; }
+					awaitKey = false;
+				}
+			}
 			// A redundant init (see onInit) is followed by its binary moov; drop
 			// that one segment so it is not re-appended to the running buffer.
 			if (skipInitBinary) { skipInitBinary = false; return; }
 			rxBytes += buf.byteLength || 0;
-			queue.push(new Uint8Array(buf));
+			queue.push(readPrft(new Uint8Array(buf)));
 			if (queue.length > MAX_QUEUE) queue.splice(0, queue.length - MAX_QUEUE);
 			pump();
 			syncLive();
@@ -457,6 +525,26 @@ window.MajesticVideo = (function () {
 			}
 		}
 
+		// A keyframe request of this end's own, rate-limited the way the
+		// software rung limits its: a fragment with nothing to decode it
+		// against is worth one request, not one per fragment.
+		let lastIdrAt = 0;
+		function requestIdrLimited() {
+			const now = Date.now();
+			if (now - lastIdrAt < 3000) return;
+			lastIdrAt = now;
+			requestIdr();
+		}
+
+		// Whether this open goes over the channel: only for a video-only
+		// session (the channel carries no audio track), only when the
+		// channel module says it is worth trying, and never after it failed
+		// on this player.
+		function useChannel() {
+			const D = DC();
+			return !wantAudio && !dcBlocked && !!(D && D.eligible && D.eligible());
+		}
+
 		function open() {
 			if (closed) return;
 			// One socket per player, held where the sockets are made rather
@@ -465,15 +553,27 @@ window.MajesticVideo = (function () {
 			freshVideo();
 			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 			onState('connecting');
-			let url = proto + '://' + location.host + '/ws/video?stream=' + stream;
-			if (wantAudio && audioPrefs) url += '&audio=' + audioPrefs;
+			awaitKey = false;
+			nextMeta = null;
+			gotSignal = false;
+			// The feed: the channel when it can be, else the socket. Both
+			// present the same handlers, so from here on nothing cares.
+			let sock;
+			if (useChannel()) {
+				feed = 'datachannel';
+				sock = DC().open({ stream: stream, iceServers: opts.iceServers });
+				sock.onmeta = function (m) { nextMeta = m; };
+			} else {
+				feed = 'websocket';
+				let url = proto + '://' + location.host + '/ws/video?stream=' + stream;
+				if (wantAudio && audioPrefs) url += '&audio=' + audioPrefs;
+				sock = new WebSocket(url);
+			}
 			// Each handler is bound to its own socket, so an error late in a
 			// session's life closes the session that raised it and not
 			// whichever one happens to be in the slot by then.
-			const sock = new WebSocket(url);
 			ws = sock;
 			sock.binaryType = 'arraybuffer';
-			gotSignal = false;
 			sock.onopen = function () { backoff = 1000; armSignalTimer(); };
 			sock.onmessage = function (e) {
 				if (typeof e.data === 'string') {
@@ -483,7 +583,24 @@ window.MajesticVideo = (function () {
 				}
 				onBinary(e.data);
 			};
-			sock.onclose = function () { ws = null; if (!closed) reconnect(); };
+			sock.onclose = function () {
+				if (ws !== sock) return;
+				ws = null;
+				if (closed) return;
+				if (feed === 'datachannel') {
+					// The channel is gone, for whatever reason: not a
+					// reconnect, which counts toward `unreachable`, but the
+					// same open over the socket, now. The camera was never
+					// out of reach — this path was. Silenced like any retired
+					// socket, so nothing it says later reaches this player.
+					dcBlocked = true;
+					discard(sock);
+					teardownMse();
+					open();
+					return;
+				}
+				reconnect();
+			};
 			sock.onerror = function () { try { sock.close(); } catch (e) {} };
 		}
 
@@ -565,7 +682,21 @@ window.MajesticVideo = (function () {
 		// the finding.
 		function statsTick() {
 			if (!started || closed) return;
-			const s = { transport: 'mse', rxBytes: rxBytes, stalls: stallCount };
+			const s = { transport: 'mse', feed: feed, rxBytes: rxBytes, stalls: stallCount, discarded: discarded };
+			// Capture-to-arrival from the fragments' producer reference times,
+			// when the camera sends them: the summary and the raw samples
+			// since the last tick, for whoever wants its own percentiles.
+			if (lagMs.length) {
+				const sorted = lagMs.slice().sort(function (a, b) { return a - b; });
+				const at = function (p) { return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]; };
+				s.lag = { n: sorted.length, p50: at(0.5), p95: at(0.95), max: sorted[sorted.length - 1] };
+				s.lagMs = lagMs;
+				lagMs = [];
+			}
+			// What the channel measured about itself, beside the element's
+			// own accounting. Only while it is the feed: a socket has none of
+			// these, and absent is not zero.
+			if (feed === 'datachannel' && ws && ws.stats) s.dc = ws.stats();
 			try {
 				const q = video.getVideoPlaybackQuality &&
 					video.getVideoPlaybackQuality();

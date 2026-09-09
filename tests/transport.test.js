@@ -284,4 +284,27 @@ group('which WebRTC endings are worth remembering as a demotion');
 	check('undefined is not', T.durable(undefined) === false);
 }
 
+group('expiring() and remember(): a timestamp under any key, bounded both ways');
+{
+	const HOUR = 60 * 60 * 1000;
+	let T = load(true);
+	check('nothing remembered: false', T.expiring('mj-feed-auto', 6 * HOUR) === false);
+	T.remember('mj-feed-auto');
+	check('just remembered: true', T.expiring('mj-feed-auto', 6 * HOUR) === true);
+	check('and the transport demotion key is untouched by it', T.store['mj-transport-auto'] === undefined);
+	T = load(true, { 'mj-feed-auto': String(Date.now() - 7 * HOUR) });
+	check('older than the window: false, and cleared', T.expiring('mj-feed-auto', 6 * HOUR) === false && T.store['mj-feed-auto'] === undefined);
+	T = load(true, { 'mj-feed-auto': String(Date.now() + HOUR) });
+	check('from the future: a clock that moved — false, and cleared', T.expiring('mj-feed-auto', 6 * HOUR) === false && T.store['mj-feed-auto'] === undefined);
+	T = load(true, { 'mj-feed-auto': 'not a number' });
+	check('a value this code did not write: false, and cleared', T.expiring('mj-feed-auto', 6 * HOUR) === false && T.store['mj-feed-auto'] === undefined);
+	T = load(true);
+	T.demote();
+	check('demote() still writes the transport key, read back through the same rule', T.expiring('mj-transport-auto', 6 * HOUR) === true && T.preferred() === 'mse');
+	T = load(false);
+	check('without storage nothing throws: false', T.expiring('mj-feed-auto', HOUR) === false);
+	T.remember('mj-feed-auto');
+	check('and remember() is a no-op', T.expiring('mj-feed-auto', HOUR) === false);
+}
+
 done();

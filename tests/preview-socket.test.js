@@ -76,8 +76,8 @@ function makeVideo(env) {
 	return env.video;
 }
 
-function load() {
-	const env = { sockets: [], states: [] };
+function load(o) {
+	const env = { sockets: [], states: [], dc: o && o.dc };
 	const video = makeVideo(env);
 
 	const MediaSourceStub = function () {
@@ -103,6 +103,28 @@ function load() {
 	MediaSourceStub.isTypeSupported = () => true;
 
 	const win = { MediaSource: MediaSourceStub };
+	// The data-channel feed, stubbed: a WebSocket-shaped object the test
+	// drives by hand, and an eligibility the test sets. Installed only when
+	// asked, so every existing case sees the player exactly as before.
+	if (env.dc) {
+		env.feeds = [];
+		win.MajesticDataChannel = {
+			eligible: () => env.dc.eligible,
+			open: (o) => {
+				const f = {
+					url: 'dc:' + o.stream, readyState: 0, binaryType: '', closed: false,
+					onopen: null, onmessage: null, onmeta: null, onclose: null, onerror: null,
+					sent: [], stats: () => ({ feed: 'datachannel', rttMs: 12, cam: { dc: 'up' } }),
+					send(t) { this.sent.push(t); },
+					close() { this.closed = true; this.readyState = 3; },
+					fire(ev, arg) { const h = this['on' + ev]; if (h) h(arg); },
+					silent() { return !this.onopen && !this.onmessage && !this.onclose && !this.onerror; },
+				};
+				env.feeds.push(f);
+				return f;
+			},
+		};
+	}
 	env.docHandlers = {};
 	const ctx = {
 		window: win,
@@ -116,13 +138,15 @@ function load() {
 		location: { protocol: 'http:', host: 'camera' },
 		console: console, JSON: JSON, Promise: Promise,
 		setTimeout, clearTimeout, setInterval, clearInterval,
-		Uint8Array,
+		Uint8Array, DataView, ArrayBuffer, Date, Math, TextEncoder, TextDecoder,
 	};
 	vm.createContext(ctx);
 	vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
 
+	env.stats = [];
 	env.player = win.MajesticVideo.attach(video, {
 		onState: (s, d) => env.states.push(d ? s + ' ' + d : s),
+		onStats: (s) => env.stats.push(s),
 	});
 	// The socket is live and the camera has sent its init frame: from here the
 	// player is playing, which is the state every one of these starts from.
@@ -416,6 +440,99 @@ function load() {
 		env.video.fire('playing');
 		check('an ordinary playing element emits no resumed', env.states.indexOf('resumed') < 0,
 			env.states.join(','));
+		env.player.destroy();
+	}
+
+	// ---- the data-channel feed ----------------------------------------------
+	const frag = (withPrft) => {
+		const moof = new Uint8Array([0, 0, 0, 8, 0x6d, 0x6f, 0x6f, 0x66]); // an 8-byte moof
+		if (!withPrft) return moof.buffer;
+		const out = new Uint8Array(32 + 8);
+		const dv = new DataView(out.buffer);
+		dv.setUint32(0, 32); out.set([0x70, 0x72, 0x66, 0x74], 4); out[8] = 1; dv.setUint32(12, 1);
+		const wall = Date.now() - 90;
+		dv.setUint32(16, Math.floor(wall / 1000) + 2208988800);
+		dv.setUint32(20, Math.floor((wall % 1000) / 1000 * 4294967296));
+		out.set(moof, 32);
+		return out.buffer;
+	};
+	const initText = JSON.stringify({ type: 'init', codec: 'h264', codecString: 'avc1.4d001f' });
+
+	group('the channel is the first feed when it is eligible, and only then');
+	{
+		let env = load({ dc: { eligible: false } });
+		check('not eligible: a WebSocket, no feed', env.sockets.length === 1 && env.feeds.length === 0);
+		env = load({ dc: { eligible: true } });
+		check('eligible: the feed, and no WebSocket', env.feeds.length === 1 && env.sockets.length === 0);
+		check('the feed is opened on the exact stream', env.feeds[0].url === 'dc:0');
+	}
+
+	group('a feed that closes falls to the WebSocket at once, uncounted');
+	{
+		const env = load({ dc: { eligible: true } });
+		const f = env.feeds[0];
+		f.fire('close', { reason: 'declined' });
+		await sleep(5);
+		check('the WebSocket opened immediately, with no backoff', env.sockets.length === 1);
+		check('the feed was retired and silenced', f.closed && f.silent());
+		check('no reconnect was counted: the state never said reconnecting', !env.states.some((s) => /unreachable/.test(s)));
+		// A later reopen (a channel change) does not try the feed again.
+		env.player.setStream(1);
+		await sleep(400);
+		check('the channel is not tried again on this player', env.feeds.length === 1 && env.sockets.length === 2);
+		check('the socket went to the new stream', /stream=1/.test(env.sockets[1].url));
+	}
+
+	group('a working feed plays, in sequence mode, keyed by what the camera said');
+	{
+		const env = load({ dc: { eligible: true } });
+		const f = env.feeds[0];
+		f.readyState = 1;
+		f.fire('open', {});
+		// A fragment before any init is not appended, and one keyframe is asked for.
+		f.fire('meta', { seq: 1, kind: 3, key: true, gap: false, prft: false, parts: 1, queueMs: 0 });
+		f.fire('message', { data: frag(false) });
+		check('a frame before the init is dropped and a keyframe requested', f.sent.length === 1 && /idr/.test(f.sent[0]));
+		f.fire('meta', { seq: 1, kind: 1, key: false, gap: false, prft: false, parts: 1, queueMs: 0 });
+		f.fire('message', { data: initText });
+		if (env.ms && env.ms.listeners.sourceopen) env.ms.listeners.sourceopen();
+		check('the init text starts the pipeline', env.states.includes('playing h264') && env.sb);
+		check('the source buffer is in sequence mode over the channel', env.sb.mode === 'sequence');
+		f.fire('meta', { seq: 1, kind: 2, key: false, gap: false, prft: false, parts: 1, queueMs: 0 });
+		f.fire('message', { data: new Uint8Array([0, 0, 0, 8, 0x66, 0x74, 0x79, 0x70]).buffer });
+		f.fire('meta', { seq: 1, kind: 3, key: true, gap: false, prft: true, parts: 1, queueMs: 3 });
+		f.fire('message', { data: frag(true) });
+		await sleep(5);
+		check('the init segment and a keyframe were appended', env.sb.appends === 2);
+		// A gap: deltas are discarded until a keyframe.
+		f.fire('meta', { seq: 3, kind: 3, key: false, gap: true, prft: false, parts: 1, queueMs: 0 });
+		f.fire('message', { data: frag(false) });
+		f.fire('meta', { seq: 4, kind: 3, key: false, gap: false, prft: false, parts: 1, queueMs: 0 });
+		f.fire('message', { data: frag(false) });
+		await sleep(5);
+		check('deltas after a camera-flagged gap are discarded', env.sb.appends === 2);
+		f.fire('meta', { seq: 5, kind: 3, key: true, gap: false, prft: false, parts: 1, queueMs: 0 });
+		f.fire('message', { data: frag(false) });
+		await sleep(5);
+		check('the next keyframe resumes appending', env.sb.appends === 3);
+		// What the tick reports.
+		env.player.__tick && env.player.__tick();
+		await sleep(1100);
+		const st = env.stats[env.stats.length - 1];
+		check('stats name the feed and count the discards (one before the init, two after the gap)', st && st.feed === 'datachannel' && st.discarded === 3);
+		check('stats carry the producer-time lag from the one stamped fragment', st && st.lag && st.lag.n === 1 && st.lag.p50 >= 80 && st.lag.p50 < 2000);
+		check('stats carry the feed\'s own figures', st && st.dc && st.dc.rttMs === 12 && st.dc.cam.dc === 'up');
+		env.player.destroy();
+		check('destroy closes the feed', f.closed);
+	}
+
+	group('a WebSocket session reports its feed too, without the channel\'s figures');
+	{
+		const env = load({ dc: { eligible: false } });
+		env.play();
+		await sleep(1100);
+		const st = env.stats[env.stats.length - 1];
+		check('feed is the websocket, no dc block, no lag', st && st.feed === 'websocket' && st.dc === undefined && st.lag === undefined);
 		env.player.destroy();
 	}
 
