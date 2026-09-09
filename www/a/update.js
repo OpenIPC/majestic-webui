@@ -44,6 +44,73 @@
 	// the camera was already serving again in another tab.
 	const rebootMarker = /Unconditional reboot|Rebooting now/i;
 
+	// The five things a flash does, and the line sysupgrade prints when each one
+	// is behind it. Every marker here is one this file already had to recognise
+	// for another reason — nothing new is being parsed out of the log, so the
+	// strip can only ever say what the transcript already said.
+	//
+	// Sticky, like sawFlash: `recent` is a 512-character rolling window and an
+	// early marker scrolls out of it, so a phase that has been seen is never
+	// unseen.
+	const PHASES = [
+		{ step: 'download', done: /Received and unpacked/i },
+		{ step: 'verify', done: /Protected: flashing|Stopping web server before flashing/i },
+		{ step: 'kernel', done: /Kernel updated/i },
+		{ step: 'rootfs', done: /RootFS updated/i },
+		{ step: 'reboot', done: null },
+	];
+	const seen = {};
+
+	// A percentage sysupgrade printed, and never one this page worked out for
+	// itself: a bar that invents its own progress is worse than no bar, because
+	// it is believed. The download meter redraws one line with a bare \r, so the
+	// number arrives many times a second and stops arriving when the download
+	// ends — which is why the bar is hidden again at the next phase rather than
+	// left sitting at whatever it reached.
+	const pctMarker = /(\d{1,3}(?:\.\d+)?)\s*%/;
+
+	function paintPhases() {
+		const list = $('#fw-steps');
+		if (!list) return;
+		// A step for something this run is not writing would be a lie about what
+		// is happening, so the row is built from what was actually requested.
+		const live = Array.prototype.filter.call(
+			list.children, li => li.style.display !== 'none');
+		let now = true;
+		for (const li of live) {
+			const step = li.dataset.step;
+			li.classList.remove('mj-step-done', 'mj-step-now');
+			if (seen[step]) { li.classList.add('mj-step-done'); continue; }
+			if (now) { li.classList.add('mj-step-now'); now = false; }
+		}
+	}
+
+	function trackPhases(chunk) {
+		let moved = false;
+		for (const p of PHASES) {
+			if (p.done && !seen[p.step] && p.done.test(recent)) { seen[p.step] = true; moved = true; }
+		}
+		// Whatever the log says, a reboot announcement means every write that was
+		// going to happen has happened.
+		if (rebootMarker.test(recent)) {
+			for (const p of PHASES) { if (p.step !== 'reboot') seen[p.step] = true; }
+			moved = true;
+		}
+		const bar = $('#fw-bar');
+		if (bar) {
+			const m = !seen.download && pctMarker.exec(chunk);
+			if (m) {
+				const pct = Math.max(0, Math.min(100, Number(m[1])));
+				bar.hidden = false;
+				bar.setAttribute('aria-valuenow', String(Math.round(pct)));
+				bar.firstElementChild.style.width = pct + '%';
+			} else if (seen.download) {
+				bar.hidden = true;
+			}
+		}
+		if (moved) paintPhases();
+	}
+
 	// Whether --force_ver was requested. It reflashes the same version on purpose,
 	// so an unchanged version afterwards is a success, not a failure.
 	let forced = false;
@@ -155,7 +222,9 @@
 		// the markers below are whole-line messages, and matching them on what was
 		// received rather than on what survived the redraws keeps this decoupled
 		// from the rendering.
-		recent = (recent + term.write(t)).slice(-512);
+		const chunk = term.write(t);
+		recent = (recent + chunk).slice(-512);
+		trackPhases(chunk);
 		if (!sawFlash && flashMarker.test(recent)) sawFlash = true;
 		if (!noop && noopMarker.test(recent)) noop = true;
 		// Said out loud by sysupgrade immediately before it reboots, so there is
@@ -183,9 +252,27 @@
 			}
 		}
 	}
-	function showProgress() {
+	function showProgress(p) {
 		$('#fw-controls').style.display = 'none';
 		$('#fw-progress').style.display = '';
+		const hl = $('#fw-progress-hl');
+		const head = $('#fw-head');
+		const target = (p && p.source === 'github' && head) ? head.dataset.fwLatest : '';
+		if (hl) {
+			hl.textContent = 'Writing ';
+			const b = document.createElement('span');
+			b.className = 'mj-mono';
+			b.textContent = target || 'the uploaded image';
+			hl.appendChild(b);
+		}
+		const list = $('#fw-steps');
+		if (list && p) {
+			for (const li of list.children) {
+				if (li.dataset.step === 'kernel' && !p.kernel) li.style.display = 'none';
+				if (li.dataset.step === 'rootfs' && !p.rootfs) li.style.display = 'none';
+			}
+		}
+		paintPhases();
 		// The camera is about to spend minutes downloading and flashing, often on
 		// one core. Stop the heartbeat at it — every request it can skip is one
 		// less thing asked of the majestic that is streaming this log
@@ -201,10 +288,11 @@
 	function startUpgrade(source) {
 		const p = params(source);
 		if (!p.kernel && !p.rootfs) { status('danger', 'Select kernel and/or rootfs.'); return; }
-		showProgress();
+		showProgress(p);
 		sawFlash = false;
 		aborted = false;
 		recent = '';
+		for (const k of Object.keys(seen)) delete seen[k];
 		forced = p.force;
 		noop = false;
 		startedAt = performance.now();
@@ -439,6 +527,134 @@
 		tick();
 	}
 
+	// ── what the update is worth ─────────────────────────────────────────────
+	//
+	// The site-wide "N builds behind" banner is not rendered on this page — its
+	// own button is how a reader gets here, and the same sentence waiting for
+	// them on arrival is a summons answered twice. What that banner knows is
+	// said here instead, as the page's own subject: the counts beside the
+	// Install button, and the changes in a card of their own, open rather than
+	// collapsed, because here they are what the reader came for.
+	//
+	// The counting is fw-changes.js's, shared with the banner, so the two can
+	// never disagree about the same camera on the same day. Everything below
+	// fails to silence: a browser that cannot reach the feed leaves the pills
+	// absent and the card hidden, and the page is complete without either.
+	const FEED_TIMEOUT_MS = 6000;
+
+	function pill(cls, text) {
+		const el = document.createElement('span');
+		el.className = 'mj-pill' + (cls ? ' mj-pill-' + cls : '');
+		el.textContent = text;
+		return el;
+	}
+
+	function renderCounts(box, C, d) {
+		const t = d.totals;
+		// "at least" belongs to the whole row, not to each count in it: below the
+		// ledger's horizon the totals are a floor rather than a tally, and the
+		// build count is where the banner says so too.
+		box.appendChild(pill('', (d.atLeast ? 'at least ' : '') +
+			C.plural(d.builds, 'build behind', 'builds behind')));
+		if (t.security) box.appendChild(pill('security', C.plural(t.security, 'security fix', 'security fixes')));
+		if (t.feature) box.appendChild(pill('feature', C.plural(t.feature, 'new feature', 'new features')));
+		if (t.fix) box.appendChild(pill('fix', C.plural(t.fix, 'fix', 'fixes')));
+		box.hidden = false;
+	}
+
+	// Grouped, and deliberately with no count on a group heading. The list is
+	// routinely shorter than the totals — a change whose sentence was withheld is
+	// still counted and simply not described — and a "3" beside a group while the
+	// pills say five is how a page draws attention to a gap it is not supposed to
+	// discuss. The pills carry the counts; the groups carry the sentences.
+	const GROUPS = [
+		['security', 'Security'],
+		['feature', 'New features'],
+		['fix', 'Fixes'],
+	];
+
+	function renderNews(body, C, said, vendor) {
+		const listed = C.applies(said, vendor);
+		if (!listed.length) return false;
+		let wrote = false;
+		for (const [cat, label] of GROUPS) {
+			const items = listed.filter(n => n.cat === cat);
+			if (!items.length) continue;
+			// Built rather than written as markup: p/common.cgi's group_head emits
+			// exactly this, and a label going in through innerHTML would be the one
+			// string on this card that is not plain text.
+			const head = document.createElement('div');
+			head.className = 'mj-live-grp-head';
+			const cap = document.createElement('span');
+			cap.className = 'mj-cap';
+			cap.textContent = label;
+			const rule = document.createElement('span');
+			rule.className = 'mj-live-rule';
+			head.appendChild(cap);
+			head.appendChild(rule);
+			body.appendChild(head);
+
+			const ul = document.createElement('ul');
+			ul.className = 'mj-chg';
+			for (const n of items) {
+				const li = document.createElement('li');
+				// textContent, not innerHTML: these sentences are model-written and
+				// published with nobody reading them, so they get the same treatment
+				// as any other remote string.
+				li.textContent = n.text;
+				// A note carrying a vendor reached this list only because it is THIS
+				// camera's vendor — fw-changes.js drops every other one — so the mark
+				// needs no comparison of its own.
+				if (n.vendor) {
+					const tag = document.createElement('span');
+					tag.className = 'mj-chg-tag';
+					tag.textContent = 'This camera';
+					li.appendChild(tag);
+				}
+				ul.appendChild(li);
+			}
+			body.appendChild(ul);
+			wrote = true;
+		}
+		return wrote;
+	}
+
+	function loadChanges() {
+		const head = $('#fw-head');
+		const C = window.MajesticChanges;
+		// Only where there is an image to install. On a camera that is current, or
+		// one that could not ask, a list of changes it is not being offered would
+		// be the contradiction j/fw-latest.cgi exists to prevent (#348).
+		if (!head || !C || head.dataset.fwState !== 'available') return;
+		const build = C.parseBuild(head.dataset.mjVersion);
+		if (!build) return;
+
+		const ctl = ('AbortController' in window) ? new AbortController() : null;
+		const timer = setTimeout(() => ctl && ctl.abort(), FEED_TIMEOUT_MS);
+		C.load(ctl ? ctl.signal : undefined).then(feed => {
+			const d = C.delta(feed, build.rev, build.date);
+			if (!d || d.builds === 0) return;
+			const counts = $('#fw-counts');
+			if (counts) renderCounts(counts, C, d);
+			const news = $('#fw-news');
+			const body = $('#fw-news-body');
+			if (news && body &&
+				renderNews(body, C, d.said, (head.dataset.socVendor || '').toLowerCase())) {
+				news.hidden = false;
+			}
+		}).catch(() => { /* offline, blocked, or malformed: say nothing */ })
+			.then(() => clearTimeout(timer));
+	}
+
+	// fw-changes.js is deferred and this file is not, so it has not run yet:
+	// deferred scripts execute after the document is parsed and before this
+	// event, which is the earliest moment window.MajesticChanges exists.
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', loadChanges);
+	} else {
+		loadChanges();
+	}
+
 	const g = $('#fw-install-github');
 	if (g) g.addEventListener('click', e => { e.preventDefault(); startUpgrade('github'); });
 
@@ -447,7 +663,7 @@
 		e.preventDefault();
 		const f = $('#fw-file').files[0];
 		if (!f) { status('danger', 'Choose a firmware .tgz first.'); return; }
-		showProgress();
+		showProgress(params('/tmp/firmware.tgz'));
 		status('warning', 'Uploading firmware…');
 		try {
 			const r = await rawFetch('/upload', { method: 'POST', headers: { 'File-Location': '/tmp/firmware.tgz' }, body: f });

@@ -5665,3 +5665,330 @@ dialog.mj-modal::backdrop {
 .mj-osd-cost-low {
 	color: var(--bs-warning-text-emphasis, #ffc107);
 }
+
+/* ── Firmware page (update.cgi) ───────────────────────────────────────────
+   The page had four faults and they were one fault: nothing on it said which
+   of the things on offer was the thing to do. A full-width card holding four
+   short rows, a 32rem card of switches floating beside 870px of nothing, and
+   then TWO equal cards each with a filled button at the bottom of the page —
+   with the site-wide "N builds behind" banner still above all of it, after its
+   own button was what brought you here.
+
+   So: one decision at the top, in one card, with the only filled button on the
+   page; the changes that justify it as the page's own subject where the banner
+   used to be; the reference material in a rail beside them; and the file route
+   demoted to the weight it is actually used at. The banner itself is not
+   suppressed here — p/header.cgi does not render its slot on this page at all.
+
+   Nothing below is a new visual language. The severity rule and the 28px mark
+   are .mj-notice's, the foot is .mj-foot, the micro-caps are .mj-cap's, and the
+   list is the settings deck's. What is new is where they sit. */
+
+/* The hero's foot is a direct child of the card rather than of its body, so it
+   has no padding to reach back through: it is already at the card's edge. The
+   1px is the card's own border, which .mj-foot's negative margins would
+   otherwise sit outside of. */
+.card > .mj-foot {
+	margin: 0;
+	border-radius: 0 0 calc(var(--bs-border-radius-lg) - 1px) calc(var(--bs-border-radius-lg) - 1px);
+}
+
+.mj-hero {
+	display: flex;
+	align-items: flex-start;
+	gap: 1rem;
+}
+
+/* Same 28px as .mj-notice-ico, and for the same reason: it is the one thing in
+   the row that says what KIND of state this is before a word is read. */
+.mj-hero-ico {
+	flex: 0 0 auto;
+	width: 28px;
+	height: 28px;
+	margin-top: 0.125rem;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.mj-hero-txt {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.mj-hero-kick {
+	margin: 0 0 0.375rem;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	line-height: 1.4;
+	text-transform: uppercase;
+}
+
+/* The card's own `.card > .card-body h3` rule is the micro-caps every card
+   heading wears, and it outranks a bare class — the headline came out as 11px
+   uppercase. Named the way .mj-live-head already answers the same rule, rather
+   than by !important or by demoting the heading to a <p>: it IS this card's
+   heading and the document outline should keep saying so. */
+.mj-hero-hl,
+.card > .card-body h3.mj-hero-hl {
+	margin: 0 0 0.375rem;
+	color: var(--bs-body-color);
+	font-size: 1.375rem;
+	font-weight: 600;
+	letter-spacing: normal;
+	line-height: 1.3;
+	text-transform: none;
+}
+
+/* Held to a reading measure. The air left between it and the button is what
+   makes the button findable — that was the complaint. */
+.mj-hero-sub {
+	margin: 0;
+	max-width: 74ch;
+	font-size: 0.875rem;
+	line-height: 1.5;
+	color: var(--bs-secondary-color);
+}
+
+/* Level with the headline rather than with the top of the block: that is where
+   the eye is when it decides. */
+.mj-hero-act {
+	flex: 0 0 auto;
+	padding-top: 0.75rem;
+}
+
+/* Severity, carried the way .mj-notice carries it — the rule at 60% of this
+   theme's <sev>-text-emphasis, and the mark and the kicker in the same hue, so
+   all three agree without any of them being a colour somebody picked. */
+.mj-sev-available { border-color: rgba(var(--bs-warning-rgb), 0.45); }
+.mj-sev-current { border-color: rgba(var(--bs-success-rgb), 0.45); }
+.mj-sev-offline { border-color: rgba(var(--bs-info-rgb), 0.45); }
+.mj-sev-progress { border-color: rgba(var(--bs-primary-rgb), 0.55); }
+
+@supports (border-color: color-mix(in srgb, red 60%, transparent)) {
+	.mj-sev-available { border-color: color-mix(in srgb, var(--bs-warning-text-emphasis) 60%, transparent); }
+	.mj-sev-current { border-color: color-mix(in srgb, var(--bs-success-text-emphasis) 60%, transparent); }
+	.mj-sev-offline { border-color: color-mix(in srgb, var(--bs-info-text-emphasis) 60%, transparent); }
+}
+
+.mj-sev-available .mj-hero-ico,
+.mj-sev-available .mj-hero-kick { color: var(--bs-warning-text-emphasis); }
+.mj-sev-current .mj-hero-ico,
+.mj-sev-current .mj-hero-kick { color: var(--bs-success-text-emphasis); }
+.mj-sev-offline .mj-hero-ico,
+.mj-sev-offline .mj-hero-kick { color: var(--bs-info-text-emphasis); }
+.mj-sev-progress .mj-hero-ico,
+.mj-sev-progress .mj-hero-kick { color: var(--bs-primary); }
+
+/* Below sm the action takes a row of its own and fills it: the thing to press
+   is then a full-width target rather than a small box beside a paragraph.
+   .mj-notice already breaks the same way at the same width.
+
+   flex-basis 0 on the text, or the wrap is decided on its CONTENT width and the
+   28px mark is left alone on a line of its own. */
+@media (max-width: 575.98px) {
+	.mj-hero { flex-wrap: wrap; }
+	.mj-hero-txt { flex: 1 1 0; }
+	.mj-hero-act { flex: 1 1 100%; padding-top: 0.875rem; }
+	.mj-hero-act > .btn { width: 100%; }
+
+	/* The foot's two notes are a sentence and an aside, and at 390px they were
+	   two narrow columns of three lines each. The aside takes its own line, as
+	   .mj-notice's actions already do at the same width. Scoped to this page
+	   rather than to .mj-foot: every other foot in the tree carries a note and a
+	   button, which is a different pair. */
+	#page-update .mj-foot { flex-wrap: wrap; }
+	#page-update .mj-foot > .ms-auto { margin-left: 0 !important; }
+}
+
+/* What the update is worth, in the hero, from the same feed the site-wide
+   notice counts — see www/a/fw-changes.js. Built in JS, so the counts are
+   absent rather than zero on a browser that cannot reach the feed. */
+.mj-pills {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin-top: 0.75rem;
+}
+
+.mj-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4375rem;
+	padding: 0.25rem 0.625rem 0.25rem 0.5625rem;
+	background: var(--bs-body-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: 999px;
+	font-size: 0.78125rem;
+	line-height: 1.4;
+	color: var(--bs-secondary-color);
+}
+
+.mj-pill::before {
+	content: "";
+	flex: 0 0 auto;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--bs-tertiary-color);
+}
+
+.mj-pill-security {
+	border-color: rgba(var(--bs-warning-rgb), 0.45);
+	color: var(--bs-warning-text-emphasis);
+}
+
+.mj-pill-security::before { background: var(--bs-warning-text-emphasis); }
+.mj-pill-feature::before { background: var(--bs-primary); }
+
+.mj-mono {
+	font-family: var(--bs-font-monospace);
+	font-size: 0.9375em;
+}
+
+/* The changelog is the wide column and it comes from a public feed, so a
+   browser that cannot reach that feed leaves the column empty — and an empty
+   col-lg-7 beside a col-lg-5 rail is exactly the wide dead margin this layout
+   exists to remove. Without the list the rail IS the page, so it takes the
+   width and deals its cards across it instead of running down one edge.
+   A browser with no :has() keeps the narrow rail, which is no worse than the
+   page was before. */
+.mj-fw-cols:has(> .mj-fw-wide[hidden]) > .mj-fw-rail {
+	flex: 0 0 auto;
+	width: 100%;
+}
+
+@media (min-width: 768px) {
+	.mj-fw-cols:has(> .mj-fw-wide[hidden]) > .mj-fw-rail > .row > .col-12 {
+		flex: 0 0 auto;
+		width: 50%;
+	}
+}
+
+/* The change list. Security first is fw-changes.js's ordering; the groups and
+   their counts are this page's. */
+.mj-chg {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.mj-chg > li {
+	position: relative;
+	margin-bottom: 0.625rem;
+	padding-left: 1rem;
+	font-size: 0.84375rem;
+	line-height: 1.55;
+}
+
+.mj-chg > li:last-child { margin-bottom: 0; }
+
+.mj-chg > li::before {
+	content: "";
+	position: absolute;
+	left: 0.125rem;
+	top: 0.5rem;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--bs-tertiary-color);
+}
+
+/* Which of these are this camera's. The feed carries a vendor on every note —
+   it is how the site-wide sentence earns "cameras like this one" — so saying it
+   per item costs nothing and answers the question a list of eleven repairs
+   raises. A note with no vendor applies everywhere and is not marked. */
+.mj-chg-tag {
+	display: inline-block;
+	margin-left: 0.4375rem;
+	padding: 0.0625rem 0.375rem;
+	vertical-align: 1px;
+	border: 1px solid rgba(var(--bs-primary-rgb), 0.5);
+	border-radius: 0.25rem;
+	font-size: 0.65625rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--bs-primary);
+	white-space: nowrap;
+}
+
+/* ── while it writes ──────────────────────────────────────────────────── */
+
+.mj-steps {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem 1.5rem;
+	margin: 0.875rem 0 0;
+	padding: 0;
+	list-style: none;
+	font-size: 0.78125rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-steps > li {
+	display: flex;
+	align-items: center;
+	gap: 0.4375rem;
+	white-space: nowrap;
+}
+
+.mj-steps > li::before {
+	content: "";
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	border: 1px solid var(--bs-border-color);
+}
+
+.mj-steps > li.mj-step-done {
+	color: var(--bs-body-color);
+}
+
+.mj-steps > li.mj-step-done::before {
+	background: var(--bs-primary);
+	border-color: var(--bs-primary);
+}
+
+.mj-steps > li.mj-step-now {
+	color: var(--bs-body-color);
+}
+
+.mj-steps > li.mj-step-now::before {
+	border-color: var(--bs-primary);
+	box-shadow: inset 0 0 0 3px var(--bs-primary);
+}
+
+#fw-bar {
+	height: 6px;
+	background: var(--bs-body-bg);
+}
+
+/* The caution is the loudest thing on the screen while a write is under way,
+   and it is not a note in a corner: it is the foot of the card that is doing
+   the writing, in the warning colour, with the mark beside it. */
+.mj-foot-loud {
+	background: rgba(var(--bs-warning-rgb), 0.07);
+	border-top-color: rgba(var(--bs-warning-rgb), 0.4);
+}
+
+.mj-foot-loud .mj-foot-note {
+	color: var(--bs-warning-text-emphasis);
+	font-size: 0.84375rem;
+}
+
+.mj-foot-ico {
+	flex: 0 0 auto;
+	width: 18px;
+	height: 18px;
+	fill: none;
+	stroke: var(--bs-warning-text-emphasis);
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}

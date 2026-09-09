@@ -58,6 +58,9 @@ Pragma: no-cache
 	     against the same markup and CSS. -->
 	<script src="/a/main.js"></script>
 	<script src="/a/cameras-switch.js" defer></script>
+	<%# fw-changes.js first: it is the counting both the banner here and the
+	    Firmware page's own changelog read, and neither can run without it. %>
+	<script src="/a/fw-changes.js" defer></script>
 	<script src="/a/update-check.js" defer></script>
 	<script src="/a/storage-verdict.js" defer></script>
 	<script src="/a/storage-check.js" defer></script>
@@ -247,10 +250,19 @@ Pragma: no-cache
     result on a camera with no route out. %>
 <%# Data attributes rather than a <script> block: attr_escape is the escaping
     this file already trusts everywhere else, and nothing the camera reports
-    can close the tag it sits in. %>
+    can close the tag it sits in.
+
+    NOT on the Firmware page. Its own button is how a reader gets there, so the
+    same sentence waiting for them on arrival is a summons answered twice -- and
+    it was the top complaint about that page. update.cgi says all of it as its
+    own subject instead: the counts beside the Install button, the changes in a
+    card of their own, opened rather than collapsed. update-check.js needs no
+    guard for this; a missing slot is already its "say nothing" path. %>
+<% if [ "$pagename" != "update" ]; then %>
 <div id="update-notice"
      data-mj-version="<% attr_escape "$mj_version" %>"
      data-soc-vendor="<% attr_escape "$soc_vendor" %>"></div>
+<% fi %>
 
 <%# Filled by /a/storage-check.js while the camera is recording and its card is
     not taking the footage. Client-side, and on every page, because that is the
