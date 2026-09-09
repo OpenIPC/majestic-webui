@@ -1091,8 +1091,20 @@
 			}
 			// Not while the fallback picture is being held: these describe the
 			// attempt, and the chip has to go on describing the stage.
-			else if (badge && !holdingFallback) {
-				badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
+			// Anything else — connecting, reconnecting, an error — is the
+			// session no longer sitting on a parked frame, so the tap invitation
+			// comes down; it returns only when the picture parks again and the
+			// player re-announces 'gesture'. A tap during a reconnect could not
+			// start anything anyway (the player rebinds its gesture retry to the
+			// new attempt), so an invitation that stayed up would be one the
+			// viewer's tap fell through.
+			else {
+				hideTapPlay();
+				// Not while the fallback picture is being held: these describe the
+				// attempt, and the chip has to go on describing the stage.
+				if (badge && !holdingFallback) {
+					badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
+				}
 			}
 		},
 	});

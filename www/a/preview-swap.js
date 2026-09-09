@@ -98,6 +98,12 @@ window.MajesticSwap = function (opts) {
 		live = s;
 		show(s.slot, true);
 		opts.onPromoted(s.kind, proven === true);
+		// The invitation the trial raised while it was staging (swallowed then,
+		// because a trial owns nothing on screen) belongs to this picture now
+		// that it is the one on screen. Replayed after onPromoted so the page has
+		// finished showing the picture before the button lands on it; the player
+		// takes it back down with 'resumed' the moment the picture plays.
+		if (s.parked) opts.onLive('gesture', null, s.kind);
 	}
 
 	// The trial failed. Leave the screen exactly as it was — unless what is on
@@ -124,7 +130,7 @@ window.MajesticSwap = function (opts) {
 		// Registered before the element is resolved: node() asks kindOf(), and
 		// without this the incoming attach would be handed the outgoing kind's
 		// element.
-		staging = { id: id, p: null, slot: slot, kind: kind };
+		staging = { id: id, p: null, slot: slot, kind: kind, parked: false };
 		const el = node(slot);
 		// The other transport may have used this element a moment ago, and an
 		// element carrying both a MediaSource url and a srcObject is a
@@ -141,6 +147,17 @@ window.MajesticSwap = function (opts) {
 				// connecting, no signal, reconnecting — is exactly what must
 				// not reach the page, because the point is that trying costs
 				// the viewer nothing until it succeeds.
+				//
+				// One exception, and it is not shown now but remembered: a trial
+				// whose muted picture is parked waiting for a tap ('gesture')
+				// would, on some browsers, report its first bytes ('playing', the
+				// promotion) only after that. The state cannot show over the
+				// current live picture, but it describes the picture about to
+				// replace it, so promote() replays it once this trial is the one
+				// on screen — otherwise the player, having emitted it the once,
+				// suppresses it and the promoted picture carries no invitation.
+				if (state === 'gesture') { staging.parked = true; return; }
+				if (state === 'resumed') { staging.parked = false; return; }
 				if (state === 'playing') promote(true);
 				else if (state === 'fallback' || state === 'busy' ||
 					state === 'mjpeg') {

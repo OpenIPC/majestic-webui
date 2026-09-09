@@ -487,11 +487,13 @@ window.MajesticPreview = (function () {
 			onExhausted: (kind, detail) => { chain.next(kind, detail); },
 			onLive: (st, d, kind) => {
 				// A muted picture parked on its first frame waiting for a tap
-				// (#317): raise the invitation, and take it down the moment it
-				// plays. Handled first, and returning, because these describe
-				// autoplay rather than the session and drive nothing else here.
+				// (#317): raise the invitation. Any other state — it played, it
+				// reconnects, it failed — means the picture is no longer parked
+				// on a still frame, so the invitation comes down here and returns
+				// only when 'gesture' is next announced.
 				if (st === 'gesture') { showTapPlay(); return; }
-				if (st === 'resumed') { hideTapPlay(); return; }
+				hideTapPlay();
+				if (st === 'resumed') return;
 				// The live player's own report that it is playing. This is the
 				// only place a FIRST attach can say so — it was promoted before
 				// it had anything, so its picture arrives here rather than as a

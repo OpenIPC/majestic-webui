@@ -33,7 +33,7 @@ const IDS = [
 	'mj-served', 'mj-served-why', 'mj-sub',
 	'mj-talk', 'mj-talk-ctl', 'mj-talk-lbl', 'mj-talk-t', 'mj-transport-w',
 	'mj-transport-m', 'mj-transport-ctl', 'mj-transport-lbl',
-	'mj-vol', 'mj-player', 'mj-stage',
+	'mj-vol', 'mj-player', 'mj-stage', 'mj-tap-play',
 	'toggle-ircut', 'toggle-light', 'toggle-night',
 ];
 
@@ -314,6 +314,58 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			first.el.style.display === 'none', first.el.style.display);
 		check('and the new one is shown',
 			trial.el.style.display === '', trial.el.style.display);
+	}
+
+	// A muted picture can park waiting for a tap (#317). The player says so with
+	// 'gesture' and takes it back with 'resumed'; the swap has to carry that from
+	// a trial onto the screen, and the page has to raise and lower the button.
+	group('a trial parked waiting for a tap carries the invitation onto the screen (#317)');
+	{
+		const env = load('mse');
+		await tick();
+		const first = env.made[0];
+		first.say('playing');
+		env.el('mj-tap-play').hidden = true;   // the markup's starting state
+		pickWebRTC(env);
+		const trial = env.made[1];
+		// Some browsers report the parked picture ('gesture') before the first
+		// bytes that promote it ('playing'): the player emits it while the trial
+		// is still staging, where it cannot show over the live picture.
+		trial.say('gesture');
+		check('a staging trial does not raise the invitation over the live picture',
+			env.el('mj-tap-play').hidden === true, String(env.el('mj-tap-play').hidden));
+		// Its first bytes promote it, and the invitation swallowed while staging
+		// lands on the picture now that it is the one on screen.
+		trial.say('playing');
+		check('the promoted picture carries the invitation',
+			env.el('mj-tap-play').hidden === false, String(env.el('mj-tap-play').hidden));
+		// It plays: down it comes.
+		trial.say('resumed');
+		check('and it comes down once the picture plays',
+			env.el('mj-tap-play').hidden === true, String(env.el('mj-tap-play').hidden));
+	}
+
+	// The invitation belongs only to a picture parked on a still frame: any other
+	// state — a reconnect, an error — takes it down, and it returns only when the
+	// picture parks again (#317). A tap during a reconnect starts nothing anyway.
+	group('the invitation is tied to the parked state, not left stranded (#317)');
+	{
+		const env = load('mse');
+		await tick();
+		const live = env.made[0];   // first attach is live immediately
+		env.el('mj-tap-play').hidden = true;
+		live.say('gesture');
+		check('a parked picture raises the invitation',
+			env.el('mj-tap-play').hidden === false, String(env.el('mj-tap-play').hidden));
+		live.say('connecting');
+		check('a reconnect takes it down', env.el('mj-tap-play').hidden === true,
+			String(env.el('mj-tap-play').hidden));
+		live.say('gesture');
+		check('it returns when the picture parks again',
+			env.el('mj-tap-play').hidden === false, String(env.el('mj-tap-play').hidden));
+		live.say('playing');
+		check('and a picture coming up takes it down for good',
+			env.el('mj-tap-play').hidden === true, String(env.el('mj-tap-play').hidden));
 	}
 
 	group('a busy camera is not remembered as a refusal');
