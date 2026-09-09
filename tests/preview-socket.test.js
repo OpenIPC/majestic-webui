@@ -103,8 +103,13 @@ function load() {
 	MediaSourceStub.isTypeSupported = () => true;
 
 	const win = { MediaSource: MediaSourceStub };
+	env.docHandlers = {};
 	const ctx = {
 		window: win,
+		document: {
+			addEventListener(t, fn) { (env.docHandlers[t] = env.docHandlers[t] || []).push(fn); },
+			removeEventListener(t, fn) { env.docHandlers[t] = (env.docHandlers[t] || []).filter((f) => f !== fn); },
+		},
 		MediaSource: MediaSourceStub,
 		WebSocket: makeSockets(env),
 		URL: { createObjectURL: () => 'blob:stub', revokeObjectURL() {} },
@@ -354,6 +359,40 @@ function load() {
 		check('it rebuilt rather than fell through',
 			env.states.indexOf('mjpeg undecodable h264') < 0 && env.sockets.length === 2,
 			env.states.join(',') + ' / ' + env.sockets.length);
+		env.player.destroy();
+	}
+
+	group('a muted MSE picture that stays paused arms a gesture to start it (#317, Opera)');
+	{
+		const env = load();
+		env.play();
+		// Opera resolves play() without starting it, so the picture is a muted
+		// paused frame. A media frame arrives in that state.
+		env.video.muted = true;
+		env.video.paused = true;
+		let played = 0;
+		env.video.play = () => { played++; return Promise.resolve(); };
+		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
+		check('a one-shot gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
+			JSON.stringify((env.docHandlers.pointerdown || []).length));
+		// The viewer taps: play() is called, and this time it starts.
+		env.video.paused = false;
+		env.docHandlers.pointerdown[0]();
+		check('the tap called play()', played >= 1, played + ' plays');
+		check('and the one-shot listener removed itself', (env.docHandlers.pointerdown || []).length === 0);
+		env.player.destroy();
+	}
+
+	group('an MSE picture that is playing arms no gesture (no regression)');
+	{
+		const env = load();
+		env.play();
+		// Playing: not paused. A frame must not arm any gesture listener.
+		env.video.muted = true;
+		env.video.paused = false;
+		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
+		check('nothing armed while playing', (env.docHandlers.pointerdown || []).length === 0,
+			JSON.stringify((env.docHandlers.pointerdown || []).length));
 		env.player.destroy();
 	}
 

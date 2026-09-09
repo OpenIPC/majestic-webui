@@ -75,16 +75,14 @@ window.MajesticWebRTC = (function () {
 				gestureEvs.forEach(function (t) { try { document.removeEventListener(t, gestureRetry, true); } catch (e) {} });
 			gestureRetry = null;
 		}
-		// Opera for Android RESOLVES play() for a muted MediaStream but does not
-		// actually start playback — the picture is ready and paused, and play()'s
-		// promise never rejects, so a retry armed inside play().catch never arms
-		// (majestic-webui#317). The reporter's A/B test proves this: PR #396
-		// broadened that catch to arm on any muted rejection and behaved exactly
-		// like master, i.e. the catch never ran. So observe the real state
-		// instead: shortly after attaching, if the muted picture is still paused,
-		// arm the gesture-retry regardless of what play()'s promise did. A browser
-		// that actually started (Chrome, measured) is not paused here, so this
-		// never fires for it and cannot regress it.
+		// Opera for Android resolves play() for a muted MediaStream but does not
+		// actually start playback: the picture is ready and paused, and play()'s
+		// promise never rejects, so a retry armed only inside play().catch never
+		// arms and the picture stays paused for ever (majestic-webui#317). Observe
+		// the real state instead: shortly after attaching, if the muted picture is
+		// still paused, arm the gesture-retry whatever play()'s promise did. A
+		// browser that actually started playing is not paused at that point, so
+		// this never fires for it and cannot regress it.
 		let pausedTimer = null;
 		function disarmPausedTimer() {
 			if (pausedTimer) { clearTimeout(pausedTimer); pausedTimer = null; }
