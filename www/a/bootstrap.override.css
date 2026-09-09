@@ -2883,8 +2883,18 @@ button.mj-osd-chip,
    flex item's default min-height is auto, so without it the stage refuses to
    shrink below its content and the page scrolls after all. */
 #page-live {
+	/* The LARGE viewport height, deliberately not the dynamic one. On iOS Safari
+	   the URL bar collapses about a second after load; with 100dvh the page grows
+	   then, the stage grows with it, and preview-zoom re-fits the picture -- a 4:3
+	   stream is height-driven under Fill on a portrait phone, so the picture
+	   visibly jumps size, which reads as a flicker (majestic-webui#335). Sizing
+	   to the large, bar-collapsed height holds the picture the size it will be
+	   from the first frame (the #294 rule); the cost is that the bottom of the
+	   stage sits under the URL bar until it collapses, where the control bar is
+	   overlaid and revealed on demand regardless. On every desktop browser lvh,
+	   dvh and vh are the same value, so nothing there changes. */
 	height: 100vh;
-	height: 100dvh;
+	height: 100lvh;
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
