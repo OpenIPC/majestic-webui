@@ -305,6 +305,10 @@ window.MajesticTransport = (function () {
 	// and used to build this very list for the debug page this replaced. Keep
 	// the two in step: same default, same off-words, same rule about relays.
 	function iceServers(configured, user, cred) {
+		// A harness's override, the way MJ_FEED pins the feed: a list to use
+		// instead of the camera's, for measuring a path the camera's own
+		// configuration would not choose (a relay on the tester's side).
+		if (Array.isArray(window.MJ_ICE)) return window.MJ_ICE;
 		configured = (configured === null || configured === undefined ||
 			configured === '') ? STUN_DEFAULT : String(configured);
 		if (OFF_WORDS.indexOf(configured.toLowerCase()) >= 0) return [];

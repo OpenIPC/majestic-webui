@@ -192,6 +192,15 @@ is('so do spaces and newlines — a YAML block scalar gives one per line',
 	iceServers('stun:a:1 stun:b:2\nstun:c:3', '', ''),
 	[{ urls: 'stun:a:1' }, { urls: 'stun:b:2' }, { urls: 'stun:c:3' }]);
 
+group('a harness may override the whole list');
+{
+	const T = load(true);
+	T.__ctx.window.MJ_ICE = [{ urls: 'turn:relay.example:3478', username: 'u', credential: 'c' }];
+	check('MJ_ICE wins over the configured list', eq(T.iceServers('stun:cam.example:3478', 'x', 'y'), T.__ctx.window.MJ_ICE));
+	delete T.__ctx.window.MJ_ICE;
+	check('and without it the configured list is read as before', eq(T.iceServers('stun:cam.example:3478'), [{ urls: 'stun:cam.example:3478' }]));
+}
+
 group('relays and their credentials');
 // A turn: entry missing either credential makes RTCPeerConnection throw
 // InvalidAccessError — and it throws before the page opens its signalling
