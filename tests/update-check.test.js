@@ -18,8 +18,14 @@ const path = require('path');
 const vm = require('vm');
 const { check, group, done } = require('./assert');
 
-const SRC = fs.readFileSync(
-	path.join(__dirname, '..', 'www', 'a', 'update-check.js'), 'utf8');
+// Two files now: the counting moved to fw-changes.js so the Firmware page can
+// ask the same question and get the same answer, and the banner's wording and
+// silences stayed here. They are loaded into one context in load order, exactly
+// as p/header.cgi loads them, so what is under test is still the whole banner
+// rather than either half of it.
+const SRCS = ['fw-changes.js', 'update-check.js'].map(
+	(f) => fs.readFileSync(path.join(__dirname, '..', 'www', 'a', f), 'utf8'));
+const SRC = SRCS.join('\n');
 
 const DAY = 86400000;
 const iso = (daysAgo) =>
@@ -88,8 +94,9 @@ function run(opts) {
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(opts.feed) });
 		},
 	};
+	ctx.window.fetch = ctx.fetch;
 	vm.createContext(ctx);
-	vm.runInContext(SRC, ctx);
+	for (const src of SRCS) vm.runInContext(src, ctx);
 	if (!handler) throw new Error('update-check.js registered no DOMContentLoaded handler');
 	handler();
 	return new Promise((r) => setTimeout(() => r(painted), 10));
