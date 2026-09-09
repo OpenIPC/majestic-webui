@@ -153,8 +153,32 @@ window.MajesticVideo = (function () {
 			} catch (e) {}
 		}
 
+		// Autoplay of the muted MSE picture is refused on some browsers, and Opera
+		// for Android resolves play() without actually starting it, so the
+		// per-frame retry never gets the picture moving and it sits on one frozen
+		// frame (majestic-webui#317). Arm a one-shot document gesture that plays
+		// it, so the first tap anywhere starts playback. Only armed while paused,
+		// so a browser that autoplays never adds the listener.
+		let gestureRetry = null;
+		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
+		function armPlayGesture() {
+			if (typeof document === 'undefined' || gestureRetry) return;
+			const retry = function () {
+				disarmPlayGesture();
+				try { const p = video.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+			};
+			gestureRetry = retry;
+			gestureEvs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
+		}
+		function disarmPlayGesture() {
+			if (gestureRetry && typeof document !== 'undefined')
+				gestureEvs.forEach(function (t) { try { document.removeEventListener(t, gestureRetry, true); } catch (e) {} });
+			gestureRetry = null;
+		}
+
 		function teardownMse() {
 			started = false; queue = [];
+			disarmPlayGesture();
 			if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
 			// The lag floor describes the pipeline being torn down; the next
 			// one learns its own.
@@ -402,6 +426,9 @@ window.MajesticVideo = (function () {
 			// pipeline needs, and must not be learned as if they were.
 			if (video.paused) {
 				video.play().catch(function () { playRefused = true; });
+				// Whatever play() reported, if it is still a muted paused picture
+				// the first user gesture must be able to start it (#317).
+				if (video.muted) armPlayGesture();
 			}
 		}
 

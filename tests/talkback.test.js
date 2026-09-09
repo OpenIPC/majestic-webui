@@ -303,9 +303,71 @@ async function playRetriesOnGesture() {
 	check('and the one-shot listener removed itself', (env.docHandlers.pointerdown || []).length === 0);
 }
 
+async function playResolvesButStaysPaused() {
+	group('a muted video whose play() resolves but stays paused still retries on a gesture (#317, Opera)');
+	// Opera for Android resolves play() without starting playback: the .catch
+	// never runs, so only the paused-state observer can save it.
+	const env = makeEnv();
+	let plays = 0;
+	const video = {
+		muted: true, volume: 1, srcObject: null, paused: true,
+		play() { plays++; return Promise.resolve(); },   // resolves, yet paused stays true
+	};
+	env.MajesticWebRTC.attach(video, {});
+	await tick();
+	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
+	await tick();
+	check('play() resolved (no reject-path arm)', plays === 1, plays + ' plays');
+	check('nothing armed yet — play() did not reject', (env.docHandlers.pointerdown || []).length === 0,
+		JSON.stringify((env.docHandlers.pointerdown || []).length));
+	// The paused-state observer fires ~800ms on and, seeing it still paused, arms.
+	await tick(850);
+	check('a gesture retry armed from the observed paused state',
+		(env.docHandlers.pointerdown || []).length === 1,
+		JSON.stringify((env.docHandlers.pointerdown || []).length));
+	video.paused = false;
+	env.docHandlers.pointerdown[0]();
+	check('the tap retried play()', plays === 2, plays + ' plays');
+}
+
+async function playbackStartsArmsNothing() {
+	group('a muted video that actually starts playing arms no retry (no Chrome regression) (#317)');
+	const env = makeEnv();
+	let plays = 0;
+	const video = {
+		muted: true, volume: 1, srcObject: null, paused: true,
+		play() { plays++; video.paused = false; return Promise.resolve(); },  // starts playing
+	};
+	env.MajesticWebRTC.attach(video, {});
+	await tick();
+	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
+	await tick(850);
+	check('played, so the paused-state observer armed nothing',
+		(env.docHandlers.pointerdown || []).length === 0,
+		JSON.stringify((env.docHandlers.pointerdown || []).length));
+}
+
+async function pausedTimerClearedOnDestroy() {
+	group('the paused-state timer is cleared on destroy, arming nothing later (#317)');
+	const env = makeEnv();
+	const video = {
+		muted: true, volume: 1, srcObject: null, paused: true,
+		play() { return Promise.resolve(); },
+	};
+	const p = env.MajesticWebRTC.attach(video, {});
+	await tick();
+	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
+	await tick();
+	p.destroy();
+	await tick(850);
+	check('no gesture armed after destroy', (env.docHandlers.pointerdown || []).length === 0,
+		JSON.stringify((env.docHandlers.pointerdown || []).length));
+}
+
 (async () => {
 	for (const t of [reentrancy, cameraTakesMicButSendsNothing, destroyedDuringPrompt, cameraDeclines,
-		trackEndsOnItsOwn, destroyStopsMic, insecureContext, refused, playRetriesOnGesture]) {
+		trackEndsOnItsOwn, destroyStopsMic, insecureContext, refused, playRetriesOnGesture,
+		playResolvesButStaysPaused, playbackStartsArmsNothing, pausedTimerClearedOnDestroy]) {
 		await t();
 	}
 	done();
