@@ -8502,8 +8502,15 @@
 			? 'Clear "' + name + '" and leave it to the camera?'
 			: 'Reset "' + name + '" to its default?')) return;
 		btn.disabled = true;
-		const orig = btn.textContent;
-		btn.textContent = '…';
+		// innerHTML, not textContent: the glyph is an inline SVG, so the button's
+		// text is the empty string — saving that and putting it back at the end
+		// left an empty 13px target where the arrow had been, on success and on
+		// failure alike, for the rest of the leaf's life. It was invisible while
+		// only defaulted keys could be pressed and one press is usually the last
+		// thing anybody does to a row; a page where every no-default key can be
+		// cleared is a page where the second press has to find the button.
+		const orig = btn.innerHTML;
+		btn.innerHTML = '…';
 		clearError();
 		// A 404 is the camera saying it has no such setting — the button stays
 		// down afterwards, and nothing else may lift it. Tracked as a flag
@@ -8527,7 +8534,7 @@
 		} catch (e) {
 			showError('Reset failed: ' + e.message);
 		} finally {
-			btn.textContent = orig;
+			btn.innerHTML = orig;
 			btn.disabled = gone;
 		}
 	}
