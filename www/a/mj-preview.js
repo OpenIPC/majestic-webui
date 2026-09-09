@@ -138,6 +138,14 @@ window.MajesticPreview = (function () {
 			'<video autoplay muted playsinline class="mj-pv-media" data-slot="1" data-kind="video" style="display:none"></video>' +
 			'<canvas class="mj-pv-media" data-slot="0" data-kind="canvas" style="display:none"></canvas>' +
 			'<canvas class="mj-pv-media" data-slot="1" data-kind="canvas" style="display:none"></canvas>' +
+			// Tap-to-play, raised over a muted picture parked waiting for a
+			// gesture and taken down the moment it plays (majestic-webui#317).
+			// A tap anywhere starts it (the player listens on the document); this
+			// is the visible invitation. Hidden until the player asks for it.
+			'<button type="button" class="mj-pv-tap" hidden aria-label="Tap to play the live video">' +
+			'<svg viewBox="0 0 64 64" width="30" height="30" fill="currentColor" aria-hidden="true">' +
+			'<path d="M25 20.5v23a1.5 1.5 0 0 0 2.28 1.28l18.7-11.5a1.5 1.5 0 0 0 0-2.56l-18.7-11.5A1.5 1.5 0 0 0 25 20.5z"></path>' +
+			'</svg></button>' +
 			// An empty layer over the picture and under the bar, for a caller
 			// that draws on the frame — regions, masks, a crop rectangle. It is
 			// here rather than left to the caller because "over the picture but
@@ -157,6 +165,7 @@ window.MajesticPreview = (function () {
 			'<div class="mj-pv-bar"></div>';
 
 		const overlay = stage.querySelector('.mj-pv-overlay');
+		const tapPlay = stage.querySelector('.mj-pv-tap');
 		const alertEl = stage.querySelector('.mj-pv-alert');
 		const servedEl = stage.querySelector('.mj-pv-msg');
 		const servedWhy = stage.querySelector('.mj-pv-msg-why');
@@ -268,7 +277,15 @@ window.MajesticPreview = (function () {
 			if (opts.onFrame) opts.onFrame(null);
 		}
 
+		// The tap-to-play invitation over a picture parked waiting for a gesture
+		// (#317). Raised on the live player's 'gesture' state, taken down on
+		// 'resumed' and whenever a fresh picture is announced or the stage falls
+		// to the no-picture alert, so a stale invitation cannot outlive its frame.
+		function showTapPlay() { if (tapPlay) tapPlay.hidden = false; }
+		function hideTapPlay() { if (tapPlay) tapPlay.hidden = true; }
+
 		function announcePlaying(kind) {
+			hideTapPlay();
 			if (announced === kind) return;
 			announced = kind;
 			if (opts.onPlaying) opts.onPlaying(kind);
@@ -326,6 +343,7 @@ window.MajesticPreview = (function () {
 			return 'The ' + ch + ' stream could not be played in this browser.';
 		}
 		function showAlert(why) {
+			hideTapPlay();
 			alertEl.textContent = alertText(why);
 			alertEl.hidden = false;
 		}
@@ -468,6 +486,12 @@ window.MajesticPreview = (function () {
 			// empty black box is indistinguishable from a camera that is off.
 			onExhausted: (kind, detail) => { chain.next(kind, detail); },
 			onLive: (st, d, kind) => {
+				// A muted picture parked on its first frame waiting for a tap
+				// (#317): raise the invitation, and take it down the moment it
+				// plays. Handled first, and returning, because these describe
+				// autoplay rather than the session and drive nothing else here.
+				if (st === 'gesture') { showTapPlay(); return; }
+				if (st === 'resumed') { hideTapPlay(); return; }
 				// The live player's own report that it is playing. This is the
 				// only place a FIRST attach can say so — it was promoted before
 				// it had anything, so its picture arrives here rather than as a

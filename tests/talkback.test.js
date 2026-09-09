@@ -347,6 +347,41 @@ async function playbackStartsArmsNothing() {
 		JSON.stringify((env.docHandlers.pointerdown || []).length));
 }
 
+async function gestureAndResumedStates() {
+	group('the parked picture is announced to the page, and cleared once it plays (#317)');
+	// The same Opera case as playResolvesButStaysPaused, but watching what the
+	// page is told: it needs one 'gesture' to raise the tap affordance and one
+	// 'resumed' — driven by the element's own 'playing' event, not by the retry —
+	// to take it back down.
+	const env = makeEnv();
+	const states = [];
+	const handlers = {};
+	let plays = 0;
+	const video = {
+		muted: true, volume: 1, srcObject: null, paused: true,
+		play() { plays++; return Promise.resolve(); },
+		addEventListener(ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); },
+		removeEventListener(ev, fn) { handlers[ev] = (handlers[ev] || []).filter((f) => f !== fn); },
+		fire(ev) { (handlers[ev] || []).slice().forEach((f) => f({ target: this })); },
+	};
+	env.MajesticWebRTC.attach(video, { onState: (s) => states.push(s) });
+	await tick();
+	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
+	await tick(850);
+	check('the page was told the picture is waiting for a gesture, once',
+		states.filter((s) => s === 'gesture').length === 1, states.join(','));
+	check('nothing claimed it resumed before it actually played',
+		states.indexOf('resumed') < 0, states.join(','));
+	// The tap starts it and the element fires 'playing' — that is what clears it.
+	video.paused = false;
+	env.docHandlers.pointerdown[0]();
+	check('the tap retried play()', plays >= 2, plays + ' plays');
+	check('a play() resolving is still not a resumed', states.indexOf('resumed') < 0, states.join(','));
+	video.fire('playing');
+	check('the page was told the picture resumed once it played',
+		states.filter((s) => s === 'resumed').length === 1, states.join(','));
+}
+
 async function pausedTimerClearedOnDestroy() {
 	group('the paused-state timer is cleared on destroy, arming nothing later (#317)');
 	const env = makeEnv();
@@ -367,7 +402,8 @@ async function pausedTimerClearedOnDestroy() {
 (async () => {
 	for (const t of [reentrancy, cameraTakesMicButSendsNothing, destroyedDuringPrompt, cameraDeclines,
 		trackEndsOnItsOwn, destroyStopsMic, insecureContext, refused, playRetriesOnGesture,
-		playResolvesButStaysPaused, playbackStartsArmsNothing, pausedTimerClearedOnDestroy]) {
+		playResolvesButStaysPaused, playbackStartsArmsNothing, gestureAndResumedStates,
+		pausedTimerClearedOnDestroy]) {
 		await t();
 	}
 	done();

@@ -1623,6 +1623,42 @@ button.mj-osd-chip,
 .mj-pv-msg[hidden] { display: none; }
 .mj-pv-msg > * { pointer-events: auto; max-width: min(100%, 30rem); cursor: pointer; }
 
+/* Tap-to-play, over a muted picture parked waiting for a gesture (#317) and
+   taken down the moment it plays. Centred on the stage — the letterbox bands a
+   contain view leaves are symmetric, so that is the picture's centre — and
+   never overlapping the centred no-picture alert, which shows only when there
+   is no picture. Black glass like the rest of this stage's chrome, literal in
+   both themes because the surface is the picture. A tap anywhere starts
+   playback (the player listens on the document); this button is the visible
+   invitation and passes the gesture straight through. The [hidden] override is
+   required because the display value below would beat the attribute's own
+   display:none. */
+.mj-pv-tap {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	z-index: 3;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 4rem;
+	height: 4rem;
+	padding: 0 0 0 0.2rem;
+	border-radius: 50%;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	color: #e6e8ee;
+	cursor: pointer;
+	backdrop-filter: blur(10px);
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+	transition: background 0.12s ease, transform 0.12s ease;
+}
+.mj-pv-tap:hover { background: rgba(24, 27, 34, 0.82); }
+.mj-pv-tap:active { transform: translate(-50%, -50%) scale(0.94); }
+.mj-pv-tap:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.55); outline-offset: 2px; }
+.mj-pv-tap[hidden] { display: none; }
+
 /* On-picture chrome: black glass in both themes, because its background is the
    picture and not the page surface. */
 .mj-glass {
@@ -3030,6 +3066,56 @@ button.mj-osd-chip,
 	font-variant-numeric: tabular-nums;
 	pointer-events: none;
 	backdrop-filter: blur(10px);
+}
+
+/* Tap-to-play. Raised over the still first frame while a muted picture is
+   parked waiting for a gesture (majestic-webui#317), and taken down the moment
+   it plays. Centred on the STAGE rather than the picture: the letterbox bands a
+   Fit view leaves are symmetric, so the stage centre is the picture centre in
+   the ordinary case, and centring on --mj-pic-* would have to track a zoom/pan
+   the invitation does not care about. The glass recipe and its literal ink are
+   the chip's: the surface is the picture, so the theme must not repaint it.
+   A tap anywhere on the stage starts playback (the player listens on the
+   document); this button is the visible invitation, so it takes the pointer to
+   look pressable and passes the gesture straight through. */
+.mj-tap-play {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	z-index: 6;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 4.5rem;
+	height: 4.5rem;
+	padding: 0;
+	/* The triangle is a hair right of centre optically; nudge it back. */
+	padding-left: 0.2rem;
+	border-radius: 50%;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	color: #e6e8ee;
+	cursor: pointer;
+	backdrop-filter: blur(10px);
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+	transition: background 0.12s ease, transform 0.12s ease;
+}
+.mj-tap-play:hover {
+	background: rgba(24, 27, 34, 0.82);
+}
+.mj-tap-play:active {
+	transform: translate(-50%, -50%) scale(0.94);
+}
+.mj-tap-play:focus-visible {
+	outline: 2px solid rgba(255, 255, 255, 0.55);
+	outline-offset: 2px;
+}
+/* Author display:flex above beats the UA `[hidden]` rule (author wins over UA
+   at equal specificity), so the attribute alone would not hide it — this is
+   what does. */
+.mj-tap-play[hidden] {
+	display: none;
 }
 
 .mj-stats-overlay {

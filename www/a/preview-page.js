@@ -30,6 +30,7 @@
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), note = $('#mj-note');
+	const tapPlay = $('#mj-tap-play');
 	const noteWhy = $('#mj-note-why'), noteAct = $('#mj-note-act');
 	const servedEl = $('#mj-served'), servedWhy = $('#mj-served-why');
 	let jpegOn = false;
@@ -141,7 +142,15 @@
 		codecFor: () => cfgCodec[stream ? 1 : 0],
 		onExhausted: (kind, detail) => fallThrough(kind, detail),
 	});
+	// The tap-to-play invitation over a picture parked waiting for a gesture
+	// (#317). Shown on the live player's 'gesture' state and hidden on 'resumed';
+	// also hidden by every path that repaints the stage below, so a stale
+	// invitation cannot outlive the picture it was covering.
+	function showTapPlay() { if (tapPlay) tapPlay.hidden = false; }
+	function hideTapPlay() { if (tapPlay) tapPlay.hidden = true; }
+
 	function showVideo() {
+		hideTapPlay();
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = '#000'; }
 		if (note) note.style.display = 'none';
@@ -156,6 +165,7 @@
 		hideStageMsg('fallback');
 	}
 	function showNoSignal() {
+		hideTapPlay();
 		// 'no signal' is a stage of a retry, not its outcome. While the
 		// fallback picture is being held, taking it away for one would cost
 		// the viewer what they had in exchange for a session that may yet
@@ -187,6 +197,7 @@
 	//     stopped, and `player` still held it: a stream click would have
 	//     called setStream() on it and reopened its socket.
 	function showFallback(why) {
+		hideTapPlay();
 		const v = cur();
 		if (v) v.style.display = 'none';
 		fellBack = why || 'unknown';
@@ -1039,6 +1050,12 @@
 		},
 		onLive: (s, d) => {
 			if (s === 'playing') showVideo();
+			// The muted picture is parked on its first frame waiting for a tap
+			// (#317): raise the invitation, and take it down the moment it plays.
+			// Neither state touches the chip — they describe autoplay, not the
+			// session — so they are handled before the generic chip write below.
+			else if (s === 'gesture') showTapPlay();
+			else if (s === 'resumed') hideTapPlay();
 			else if (s === 'nosignal') showNoSignal();
 			// Through the chain, not straight to the floor. This is the path a
 			// first attach takes — it is promoted immediately, so its giving up

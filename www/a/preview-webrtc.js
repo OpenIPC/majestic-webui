@@ -68,7 +68,7 @@ window.MajesticWebRTC = (function () {
 		// happens to carry an activation. Retry play() on the first user gesture
 		// instead. One-shot, capture phase so a tap the controls also handle still
 		// counts, and guarded for the vm tests, which have no document.
-		let gestureRetry = null;
+		let gestureRetry = null, gestureArmed = false;
 		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
 		function disarmGesture() {
 			if (gestureRetry && typeof document !== 'undefined')
@@ -111,7 +111,24 @@ window.MajesticWebRTC = (function () {
 			};
 			gestureRetry = retry;
 			gestureEvs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
+			// Tell the page that a muted picture is parked waiting for a tap, so it
+			// can offer the viewer somewhere to tap (#317). Once per arm: a
+			// reconnect re-arms through here, but the flag is cleared only when the
+			// picture actually plays or the attempt is torn down.
+			if (!gestureArmed) { gestureArmed = true; onState('gesture'); }
 		}
+		// The muted picture actually started moving. Only the element's own
+		// 'playing' event proves it — play() resolving does not, because Opera
+		// resolves it on a picture that never starts (#317) — so this is what
+		// takes the tap affordance down, and it ignores the event unless a gesture
+		// was armed so an ordinary autoplay start costs nothing.
+		function onPlaying() {
+			if (!gestureArmed) return;
+			gestureArmed = false;
+			disarmGesture();
+			onState('resumed');
+		}
+		try { video.addEventListener('playing', onPlaying); } catch (e) {}
 		let closed = false, reconnectTimer = null, backoff = 1000;
 		let failCount = 0, gotMedia = false;
 		// From the caller, not fixed at false: a player staged as a replacement
@@ -753,6 +770,7 @@ window.MajesticWebRTC = (function () {
 			// A new attempt begins here; drop any gesture retry bound to the old
 			// one so this attempt can arm its own if it too is refused autoplay.
 			disarmGesture();
+			gestureArmed = false;
 			disarmPausedTimer();
 			// Retire the attempt before dismantling it. Closing a peer
 			// connection rejects whatever it had in flight, and a rejection
@@ -847,6 +865,8 @@ window.MajesticWebRTC = (function () {
 			// file guards against.
 			releaseMic();
 			disarmGesture();
+			gestureArmed = false;
+			try { video.removeEventListener('playing', onPlaying); } catch (e) {}
 			disarmPausedTimer();
 			if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 			stop();
