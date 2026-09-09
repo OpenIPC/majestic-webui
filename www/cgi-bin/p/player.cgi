@@ -103,6 +103,23 @@ printf '%s' \
 		     other than the on-board one. -->
 		<img id="live-mjpeg" class="mj-stage-media" alt="" style="display:none">
 		<img id="live-mjpeg-b" class="mj-stage-media" alt="" style="display:none">
+		<!-- Tap-to-play. Some browsers refuse to autoplay even a muted picture
+		     until the page has been interacted with, and Opera for Android parks
+		     it on its first frame without ever rejecting the play() that would
+		     tell the player to wait for a gesture (majestic-webui#317). The player
+		     watches the element and, while the picture sits muted and paused,
+		     raises this button so the still frame does not look like a dead page.
+		     preview-page.js shows it on the player's 'gesture' state and hides it
+		     on 'resumed'; a tap ANYWHERE on the stage is what actually starts
+		     playback (the player listens on the document), so this is the visible
+		     invitation to make that tap, not the only place it counts. Hidden
+		     until the player asks for it. -->
+		<button type="button" id="mj-tap-play" class="mj-tap-play" hidden
+			aria-label="Tap to play the live video">
+			<svg viewBox="0 0 64 64" width="34" height="34" fill="currentColor" aria-hidden="true">
+				<path d="M25 20.5v23a1.5 1.5 0 0 0 2.28 1.28l18.7-11.5a1.5 1.5 0 0 0 0-2.56l-18.7-11.5A1.5 1.5 0 0 0 25 20.5z"></path>
+			</svg>
+		</button>
 		<!-- Shown only when there is no MJPEG fallback to show, so it carries
 		     both halves: why the stream could not be played (preview-page.js
 		     rewrites the span from the player's reason code) and the one thing

@@ -375,11 +375,27 @@ function load() {
 		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
 		check('a one-shot gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
 			JSON.stringify((env.docHandlers.pointerdown || []).length));
+		// The page is told once that the picture is parked waiting for a tap, so
+		// it can raise the play affordance (#317).
+		check('the page was told the picture is waiting for a gesture',
+			env.states.filter((s) => s === 'gesture').length === 1, env.states.join(','));
+		// Another paused frame must not re-announce it: the affordance is up, and
+		// a second 'gesture' would be noise.
+		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
+		check('a further paused frame does not re-announce it',
+			env.states.filter((s) => s === 'gesture').length === 1, env.states.join(','));
 		// The viewer taps: play() is called, and this time it starts.
 		env.video.paused = false;
 		env.docHandlers.pointerdown[0]();
 		check('the tap called play()', played >= 1, played + ' plays');
 		check('and the one-shot listener removed itself', (env.docHandlers.pointerdown || []).length === 0);
+		// Only the element's own 'playing' event proves the picture moved; that is
+		// what takes the affordance down, so the page hears 'resumed' then.
+		check('nothing claimed it resumed before it actually played',
+			env.states.indexOf('resumed') < 0, env.states.join(','));
+		env.video.fire('playing');
+		check('the page was told the picture resumed once it played',
+			env.states.filter((s) => s === 'resumed').length === 1, env.states.join(','));
 		env.player.destroy();
 	}
 
@@ -393,6 +409,13 @@ function load() {
 		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
 		check('nothing armed while playing', (env.docHandlers.pointerdown || []).length === 0,
 			JSON.stringify((env.docHandlers.pointerdown || []).length));
+		check('and the page is not told to raise the play affordance',
+			env.states.indexOf('gesture') < 0, env.states.join(','));
+		// The element still fires 'playing' as it runs; with no gesture armed that
+		// must stay silent, or an ordinary autoplay start would emit 'resumed'.
+		env.video.fire('playing');
+		check('an ordinary playing element emits no resumed', env.states.indexOf('resumed') < 0,
+			env.states.join(','));
 		env.player.destroy();
 	}
 

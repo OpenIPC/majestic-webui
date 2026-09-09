@@ -159,7 +159,7 @@ window.MajesticVideo = (function () {
 		// frame (majestic-webui#317). Arm a one-shot document gesture that plays
 		// it, so the first tap anywhere starts playback. Only armed while paused,
 		// so a browser that autoplays never adds the listener.
-		let gestureRetry = null;
+		let gestureRetry = null, gestureArmed = false;
 		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
 		function armPlayGesture() {
 			if (typeof document === 'undefined' || gestureRetry) return;
@@ -169,16 +169,36 @@ window.MajesticVideo = (function () {
 			};
 			gestureRetry = retry;
 			gestureEvs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
+			// Tell the page that a muted picture is parked on its first frame
+			// waiting for a tap, so it can offer the viewer somewhere to tap
+			// (#317). Once per arm: the frame handler calls this on every frame
+			// while paused, but the gestureRetry guard above lets only the first
+			// through, so the page hears 'gesture' once and not on every frame.
+			if (!gestureArmed) { gestureArmed = true; onState('gesture'); }
 		}
 		function disarmPlayGesture() {
 			if (gestureRetry && typeof document !== 'undefined')
 				gestureEvs.forEach(function (t) { try { document.removeEventListener(t, gestureRetry, true); } catch (e) {} });
 			gestureRetry = null;
 		}
+		// The muted picture actually started moving. Only the element's own
+		// 'playing' event says so — play() resolving does not, because Opera
+		// resolves it on a picture that never starts (#317) — so this is the
+		// signal that takes the tap affordance back down, not the retry firing.
+		function onPlaying() {
+			if (!gestureArmed) return;
+			gestureArmed = false;
+			disarmPlayGesture();
+			onState('resumed');
+		}
 
 		function teardownMse() {
 			started = false; queue = [];
 			disarmPlayGesture();
+			// The next pipeline re-arms and re-announces 'gesture' on its own if
+			// its picture is again parked; clear the flag so that emit is not
+			// suppressed by a stale one left from the pipeline being torn down.
+			gestureArmed = false;
 			if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
 			// The lag floor describes the pipeline being torn down; the next
 			// one learns its own.
@@ -258,12 +278,17 @@ window.MajesticVideo = (function () {
 			if (old.parentNode) old.parentNode.replaceChild(nv, old);
 			old.removeEventListener('error', onVideoError);
 			old.removeEventListener('waiting', onWaiting);
+			old.removeEventListener('playing', onPlaying);
 			try { old.removeAttribute('src'); old.load(); } catch (e) {}
 			video = nv;
 			video.addEventListener('error', onVideoError);
 			// A stall is the shape TCP loss takes on this transport: the
 			// picture waits for the retransmission WebRTC would have skipped.
 			video.addEventListener('waiting', onWaiting);
+			// Watched so the tap affordance comes down the moment the picture
+			// truly starts moving (#317); onPlaying ignores the event unless a
+			// gesture was armed, so an ordinary autoplay start costs nothing.
+			video.addEventListener('playing', onPlaying);
 		}
 
 		function onInit(info) {
