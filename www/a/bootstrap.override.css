@@ -279,6 +279,16 @@ body > main > .container > h2 {
 	line-height: 1.3;
 }
 
+/* The Firmware page prints its own title for the same reason and at the same
+   size, but it has no rail to put it in, so it stays a direct child of the
+   container — where `body > main > .container > h2` above still finds it and
+   puts the band's 2rem/1.5rem margins back, which is the whole 94px this was
+   meant to save. camera.cgi never meets that rule because its title is nested
+   two levels inside the row. */
+body > main > .container > h2.mj-page-title {
+	margin: 0 0 0.75rem;
+}
+
 /* This page is capped at the same 1320px as every other page, and the cap is
    written out rather than left to Bootstrap's `.container` — that is a five-step
    ladder (540/720/960/1140/1320), and its step below 1400px is 1140, so simply

@@ -86,10 +86,20 @@
 		fw_state="available"
 	fi
 
+	# The page title is rendered by this page rather than by header.cgi, the way
+	# camera.cgi does it and for the same arithmetic: the full-width band above
+	# the content costs 94px of every window — a 2rem margin, a 32px heading and
+	# the gutter under it — and here it bought a copy of a word the nav's active
+	# item, the browser tab and the card immediately below it all already carry.
+	# Still a real <h2>, so the document keeps its heading (#239).
+	hide_title=1
+
 	fw_kernel="true"
 	fw_rootfs="true"
 %>
 <%in p/header.cgi %>
+
+<h2 class="mj-rail-title mj-page-title"><%= $page_title %></h2>
 
 <%# Where update.js reports what a flash is doing. Above everything and outside
     #fw-controls, because it also carries the two refusals that happen BEFORE a
