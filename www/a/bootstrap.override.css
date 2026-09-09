@@ -136,6 +136,39 @@
 	background-color: var(--bs-primary);
 }
 
+/* A slider that holds nothing. A range input has no empty state: given value=""
+   the browser parks the thumb at the middle of the track and reads that number
+   back, so a field nobody has set draws its handle exactly where a chosen one
+   would be — the night gain multiple (1–64) at 33, the reference enhancement
+   layers (0–3) at 2 of 3. The readout beside the track says the word (see
+   UNSET_WORD in mj-settings.js) and the handle steps off the track, because a
+   handle parked at a number nobody picked is the whole of #416. Hover, focus
+   and the drag itself bring it back: it is still a slider, it just has no
+   position to state until it has a value.
+
+   The two engines' thumb pseudo-elements are written as separate rules on
+   purpose — an unrecognised pseudo-element invalidates the entire selector
+   list, so grouping them would leave both browsers with no rule at all. */
+.range.mj-unset .form-range::-webkit-slider-thumb {
+	opacity: 0;
+}
+
+.range.mj-unset .form-range::-moz-range-thumb {
+	opacity: 0;
+}
+
+.range.mj-unset .form-range:hover::-webkit-slider-thumb,
+.range.mj-unset .form-range:focus::-webkit-slider-thumb,
+.range.mj-unset .form-range:active::-webkit-slider-thumb {
+	opacity: 1;
+}
+
+.range.mj-unset .form-range:hover::-moz-range-thumb,
+.range.mj-unset .form-range:focus::-moz-range-thumb,
+.range.mj-unset .form-range:active::-moz-range-thumb {
+	opacity: 1;
+}
+
 /* small integers (ports, timeouts, sizes…) don't need the full card width */
 .number .input-group {
 	max-width: 10rem;

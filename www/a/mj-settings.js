@@ -149,6 +149,11 @@
 		[640, 360, 'nHD'], [352, 288, 'CIF'],
 	];
 	const RES_CUSTOM = '__custom__';
+	// What a slider prints instead of a number when nothing is chosen. The same
+	// plain word the resolution picker's "Auto · unset" entry ends on, because
+	// it is the same state: the key is absent from the camera's config and the
+	// camera is doing whatever it does without one.
+	const UNSET_WORD = 'Unset';
 	// Sizes an unset field falls back to, per the firmware's own defaulting, so
 	// "no value" reads as a deliberate choice instead of an empty Custom box.
 	const RES_AUTO_LABEL = {
@@ -7673,26 +7678,47 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
 				'<input type="range" id="' + id + '" class="form-control form-range" min="' + min + '" max="' + max + '" step="1" value="' + esc(v) + '">' +
-				'<span class="input-group-text show-value">' + esc(v) + '</span>' +
+				'<span class="input-group-text show-value"></span>' +
 				'</span>';
 			control = p.querySelector('input');
 			const show = p.querySelector('.show-value');
-			control.addEventListener('input', () => { show.textContent = control.value; });
-			// A range input cannot be empty: given value="" the browser parks
-			// the thumb at the midpoint and .value reads that number, so an
-			// unset field reported itself as set — the night gain multiple,
-			// unset on every camera by default, read as 33 — and a note that
-			// applies only while the field holds a value drew under a control
-			// nobody had touched. The display beside the thumb is the page's
-			// own record of "nothing chosen": empty until an input or a real
-			// value arrives, so it is what getValue() asks, and a pushed-in
-			// empty value keeps it empty rather than copying the midpoint in.
-			control._get = () => (show.textContent === '' ? '' : String(control.value));
-			control._set = (v) => {
-				const s = v !== undefined && v !== null ? String(v) : '';
-				control.value = s;
-				show.textContent = s === '' ? '' : String(control.value);
+			// A range input cannot be empty. Given value="" the browser runs its
+			// value-sanitisation algorithm and parks the thumb at the midpoint of
+			// the track — min + (max − min) / 2, snapped up to a whole step — and
+			// .value then reads that number back as if somebody had chosen it.
+			// So a field with no value in the config draws a thumb halfway along
+			// a track, which is what a chosen value looks like: the night gain
+			// multiple (1–64, no default) sits at 33, and the reference
+			// enhancement layers (0–3) sit at 2 of 3, two thirds of the way
+			// across (#416).
+			//
+			// `chosen` is the page's own record of whether anything is set, kept
+			// beside the control rather than read back out of the display, and it
+			// is what getValue() answers with — so an untouched field stays clean
+			// through dirty tracking, Save and the x-requires notes.
+			//
+			// The row then has to SAY so, because the thumb cannot. The readout
+			// beside the track prints the word instead of standing empty, and
+			// .mj-unset takes the thumb off the track until the pointer or the
+			// keyboard reaches for it: a blank readout is an absence, and an
+			// absence is what the reporter of #416 read as the number 33.
+			let chosen = v !== '';
+			const paint = () => {
+				show.textContent = chosen ? String(control.value) : UNSET_WORD;
+				p.classList.toggle('mj-unset', !chosen);
 			};
+			// Any input is a choice — a drag, a click on the track, an arrow key.
+			// Registered before renderField's own updateDirty listener below, so
+			// the value it reads is already a chosen one.
+			control.addEventListener('input', () => { chosen = true; paint(); });
+			control._get = () => (chosen ? String(control.value) : '');
+			control._set = (val) => {
+				const s = val !== undefined && val !== null ? String(val) : '';
+				chosen = s !== '';
+				control.value = s;
+				paint();
+			};
+			paint();
 		} else if (type === 'integer') {
 			p = el('p', 'number mj-row');
 			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
@@ -7952,14 +7978,27 @@
 			// The Live deck's glyph, not U+21BA: a text arrow is a different shape
 			// in every font stack, and these two controls do the same thing.
 			reset.innerHTML = ICON.reset;
-			reset.setAttribute('aria-label', 'Reset ' + desc + ' to default');
-			if (!hasDefault) {
-				reset.disabled = true;
-				reset.title = 'Server has no recorded default for this key.';
-			} else {
-				reset.title = 'Reset to default: ' + String(sub.default);
-				reset.addEventListener('click', () => onReset(dot, reset));
-			}
+			// One button, two answers, because the camera's reset has two. A key
+			// the schema declares a default for goes back to that value; a key it
+			// declares none for is REMOVED, which is the unset state — and on a
+			// slider that is the only way back to it, since a range input cannot
+			// be emptied by hand.
+			//
+			// This used to be switched off wherever the schema had no default, on
+			// the assumption that the camera would refuse. It does not: reset
+			// answers 200 and removes the key, and 404 now means the camera has no
+			// such setting at all. So the one control that could put the night
+			// gain multiple back to "when the exposure runs out" — a different
+			// day/night trigger, not a missing number — was the one control
+			// disabled, and every value typed into it was permanent (#416). The
+			// 404 is still handled, in onReset, where the camera's answer arrives.
+			const clears = !hasDefault;
+			reset.setAttribute('aria-label',
+				clears ? 'Clear ' + desc : 'Reset ' + desc + ' to default');
+			reset.title = clears
+				? 'Clear this setting and leave it to the camera.'
+				: 'Reset to default: ' + String(sub.default);
+			reset.addEventListener('click', () => onReset(dot, reset, desc, clears));
 			// Put the glyph on the control's own line instead of below it. The
 			// live rows are left alone: .mj-live-row.range > .input-group is a
 			// direct-child selector that this wrapper would break.
@@ -8452,18 +8491,32 @@
 		if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
 	}
 
-	async function onReset(dot, btn) {
-		if (!confirm('Reset "' + dot + '" to its declared default?')) return;
+	// `desc` and `clears` are the field's on-screen name and which of the two
+	// things this press does, both settled by renderField. The question names
+	// the setting the way the row above it does rather than by its dotted key:
+	// a key is a second vocabulary, readable only by someone who already knows
+	// the answer, and this sentence is asked of someone deciding.
+	async function onReset(dot, btn, desc, clears) {
+		const name = desc || dot;
+		if (!confirm(clears
+			? 'Clear "' + name + '" and leave it to the camera?'
+			: 'Reset "' + name + '" to its default?')) return;
 		btn.disabled = true;
 		const orig = btn.textContent;
 		btn.textContent = '…';
 		clearError();
+		// A 404 is the camera saying it has no such setting — the button stays
+		// down afterwards, and nothing else may lift it. Tracked as a flag
+		// rather than re-read off the title, which the finally clause used to
+		// match by its opening words: the sentence and the state then had to be
+		// kept in step by hand, and rewording one silently re-enabled the button.
+		let gone = false;
 		try {
 			const res = await apiFetch('/api/v1/reset?key=' + encodeURIComponent(dot), { credentials: 'same-origin' });
 			if (!res.ok) {
 				if (res.status === 404) {
-					btn.title = 'Server has no recorded default for this key.';
-					btn.disabled = true;
+					btn.title = 'This camera has no such setting.';
+					gone = true;
 				} else {
 					const txt = await safeText(res);
 					showError('Reset failed (HTTP ' + res.status + '). ' + txt);
@@ -8475,7 +8528,7 @@
 			showError('Reset failed: ' + e.message);
 		} finally {
 			btn.textContent = orig;
-			if (!btn.title.startsWith('Server has no')) btn.disabled = false;
+			btn.disabled = gone;
 		}
 	}
 
