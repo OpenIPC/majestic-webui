@@ -55,35 +55,63 @@
 
 	# What state the page is in, decided here so the hero can say one thing
 	# plainly instead of printing two versions and leaving the arithmetic to the
-	# reader. $fw_build is GITHUB_VERSION out of /etc/os-release — "master+4c34a66,
-	# 2026-09-06" — so it carries both the revision this camera was built from and
-	# the day it was built.
+	# reader. $fw_build is GITHUB_VERSION out of /etc/os-release, shaped
+	# "<branch>+<rev>, <date>", so it carries both the revision this camera was
+	# built from and the day it was built.
 	#
 	# The comparison is j/fw-latest.cgi's, deliberately down to the prefix match
 	# in both directions: two surfaces that disagree about whether this camera is
 	# current is the fault that endpoint exists to prevent, and it must not arrive
 	# by this road instead.
 	#
-	#   offline   — nothing to offer: no default route, no sysupgrade, or the
-	#               manifest did not answer inside the fifteen seconds.
+	#   offline   — there is nothing to offer.
 	#   current   — both revisions known and the same.
-	#   available — there is an image and it is not provably the installed one.
-	#               "Not provably" rather than "newer": where a revision cannot be
-	#               read the honest answer is to offer the image, which is what
-	#               this page has always done.
+	#   available — there is an image to install.
+	#
+	# Two of those carry a second variable, because a state is not a reason and
+	# this page must not turn one into the other. An absent reading is not a zero
+	# and a failed fetch is not a fact:
+	#
+	#   fw_why  noroute — the camera has no default route. Provable, and the only
+	#                     case in which the page may say the internet is the
+	#                     problem.
+	#           nocheck — it has a route and still came back with nothing: no
+	#                     updater, a request that timed out, a manifest that did
+	#                     not parse. Says it could not check, and names no cause.
+	#
+	#   fw_cmp  newer   — both revisions read, and they differ.
+	#           unknown — this camera reports no revision to compare against, so
+	#                     the image is offered (which is what this page has always
+	#                     done) but not called an update. "Firmware X is ready" is
+	#                     a claim about two builds; with one of them unreadable
+	#                     there is nothing to claim.
 	inst_sha=$(echo "$fw_build" | sed -n 's/.*+\([0-9a-f]\{7,\}\).*/\1/p')
 	inst_date=$(echo "$fw_build" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
 	latest_sha=$(printf '%s' "$ver" | sed -n 's/.*-\([0-9a-f]\{7,\}\)$/\1/p')
+	fw_why=""
+	fw_cmp=""
+	# The rule and the mark, which follow the severity and not the state: an
+	# image this camera cannot be compared against is not a warning, and a check
+	# that did not happen is not a fault.
+	fw_sev=""
 	if [ -z "$ver" ]; then
 		fw_state="offline"
+		fw_sev="info"
+		if [ -z "$network_gateway" ]; then fw_why="noroute"; else fw_why="nocheck"; fi
 	elif [ -n "$latest_sha" ] && [ -n "$inst_sha" ] && {
 		case "$latest_sha" in "$inst_sha"*) true ;; *)
 			case "$inst_sha" in "$latest_sha"*) true ;; *) false ;; esac ;;
 		esac
 	}; then
 		fw_state="current"
+		fw_sev="ok"
 	else
 		fw_state="available"
+		if [ -n "$latest_sha" ] && [ -n "$inst_sha" ]; then
+			fw_cmp="newer"; fw_sev="warn"
+		else
+			fw_cmp="unknown"; fw_sev="info"
+		fi
 	fi
 
 	# The page title is rendered by this page rather than by header.cgi, the way
@@ -117,7 +145,7 @@
 	    and 28px mark: a banner is a thing you close, and this is the page. The
 	    data attributes are what the header's notice slot carries elsewhere —
 	    update.js needs them here because this page renders no slot. %>
-	<div id="fw-head" class="card mj-hero-card mj-sev-<% esc "$fw_state" %>"
+	<div id="fw-head" class="card mj-hero-card mj-sev-<% esc "$fw_sev" %>"
 	     data-mj-version="<% attr_escape "$mj_version" %>"
 	     data-soc-vendor="<% attr_escape "$soc_vendor" %>"
 	     data-fw-state="<% attr_escape "$fw_state" %>"
@@ -133,13 +161,24 @@
 				<% fi %>
 
 				<div class="mj-hero-txt">
-					<% if [ "$fw_state" = "available" ]; then %>
+					<% if [ "$fw_state" = "available" ] && [ "$fw_cmp" = "newer" ]; then %>
 						<p class="mj-hero-kick">Update available</p>
 						<h3 class="mj-hero-hl">Firmware from <% esc "$(say_date "$fw_date")" %> is ready</h3>
 						<p class="mj-hero-sub">
 							<span class="mj-mono"><% esc "$ver" %></span> &middot; built for
 							<% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash. This camera has been
 							running <span class="mj-mono"><% esc "${fw_version}-${fw_variant}" %></span><% if [ -n "$inst_date" ]; then %> since <% esc "$inst_date" %><% fi %>.
+						</p>
+					<% elif [ "$fw_state" = "available" ]; then %>
+						<%# The image is offered, but nothing here calls it an update: with no
+						    readable revision on one side there are not two builds to compare. %>
+						<p class="mj-hero-kick">Build available</p>
+						<h3 class="mj-hero-hl">Firmware from <% esc "$(say_date "$fw_date")" %> is available</h3>
+						<p class="mj-hero-sub">
+							<span class="mj-mono"><% esc "$ver" %></span> &middot; built for
+							<% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash. This camera
+							reports no revision of its own, so whether that is newer than what it is
+							running cannot be established here.
 						</p>
 					<% elif [ "$fw_state" = "current" ]; then %>
 						<p class="mj-hero-kick">Up to date</p>
@@ -148,12 +187,22 @@
 							<span class="mj-mono"><% esc "$ver" %></span> &middot; the latest build
 							published for <% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash.
 						</p>
-					<% else %>
+					<% elif [ "$fw_why" = "noroute" ]; then %>
 						<p class="mj-hero-kick">No connection</p>
 						<h3 class="mj-hero-hl">Can&rsquo;t reach the update server</h3>
 						<p class="mj-hero-sub">
 							This camera has no route to the internet, so it cannot check for new
 							firmware or download any. Everything else on the camera keeps working.
+						</p>
+					<% else %>
+						<%# It has a route and still came back with nothing. That is not evidence
+						    of a network fault, so this names none. %>
+						<p class="mj-hero-kick">Not checked</p>
+						<h3 class="mj-hero-hl">Couldn&rsquo;t check for new firmware</h3>
+						<p class="mj-hero-sub">
+							The camera has a network route, but nothing came back from OpenIPC&rsquo;s
+							build list &mdash; it may be temporarily unreachable, or this build may have
+							no updater. Nothing here says which, and nothing on the camera has changed.
 						</p>
 					<% fi %>
 
@@ -166,7 +215,21 @@
 					<div class="mj-hero-act">
 						<button id="fw-install-github" type="button" class="btn btn-primary btn-lg">Install</button>
 					</div>
-				<% elif [ "$fw_state" = "offline" ]; then %>
+				<% elif [ "$fw_state" = "current" ]; then %>
+					<%# The write-options card offers "Reflash even if the same version", and
+					    on a camera that IS current this was the only page with no button to
+					    act on it — a switch you can set and cannot use. Reinstalling the
+					    build you are on is a real thing to want (a flash you suspect), so
+					    the state that makes it meaningful is the state that offers it.
+					    data-force because that is what the word means here: without it
+					    sysupgrade answers "same version, nothing to update" and writes
+					    nothing, which is a button that does nothing by another road. %>
+					<div class="mj-hero-act">
+						<button id="fw-install-github" type="button" class="btn btn-outline-secondary"
+						        data-force="1"
+						        data-confirm="Reinstall the build this camera is already running?&#10;&#10;It writes the same firmware over itself. Video stops and the camera reboots.">Reinstall</button>
+					</div>
+				<% elif [ "$fw_state" = "offline" ] && [ "$fw_why" = "noroute" ]; then %>
 					<div class="mj-hero-act">
 						<a href="network.cgi" class="btn btn-outline-secondary">Check network settings</a>
 					</div>
@@ -179,7 +242,7 @@
 				<span class="mj-foot-note">Writes the kernel and the rootfs. Video stops and the camera reboots &mdash; do not power it off.</span>
 				<span class="mj-foot-note ms-auto">about 2 minutes</span>
 			<% elif [ "$fw_state" = "current" ]; then %>
-				<span class="mj-foot-note">Checked against OpenIPC&rsquo;s build list just now. Nothing to install.</span>
+				<span class="mj-foot-note">Checked against OpenIPC&rsquo;s build list just now. Nothing to install &mdash; Reinstall writes this same build again.</span>
 			<% else %>
 				<span class="mj-foot-note">Nothing has been downloaded, and nothing on this camera has changed.</span>
 			<% fi %>

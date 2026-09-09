@@ -49,10 +49,12 @@ function makeEl(id) {
 	return el;
 }
 
-// The camera under test: a HiSilicon board two builds behind, worded the way
-// p/common.cgi's mj_version and soc_vendor reach the page.
-const MINE = 'f158e7007';
-const VER = 'Lite HiSilicon (hi3516ev200), master+' + MINE + ', 2026-09-06 17:29';
+// A synthetic build, in the shape p/common.cgi's mj_version and soc_vendor
+// reach the page. Nothing here is a real revision or a real camera: the point
+// is the parsing and the arithmetic, and a fixture that quoted a device would
+// put its build identity in the public tree for no coverage at all.
+const MINE = 'abcdef123';
+const VER = 'Lite HiSilicon (socN), branch+' + MINE + ', 2026-09-06 17:29';
 
 function entry(sha, counts, notes) {
 	return {
@@ -247,8 +249,19 @@ const pillText = (o) => o.counts.children.map((c) => c.textContent).join(' | ');
 		await silent(Object.assign({}, behind, { version: 'Lite HiSilicon, unknown' })));
 	check('a build the ledger has never heard of: nothing',
 		await silent({ feed: { cursor: 'a', builds: [entry('aaaaaaaaa', { fix: 9 })] },
-			version: 'Lite HiSilicon (hi3516ev200), master+deadbeef1' }));
+			version: 'Lite HiSilicon (socN), branch+deadbeef1' }));
 	check('an empty feed: nothing', await silent({ feed: { cursor: 'a', builds: [] } }));
+
+	// A revision short enough to be a prefix of an unrelated one would stop the
+	// walk at the wrong build and report a count with nothing behind it.
+	for (const bad of ['f', 'abc', 'ABCDEF123', 'not-a-sha!', '']) {
+		check('a feed revision of ' + JSON.stringify(bad) + ' counts nothing',
+			await silent({ feed: { cursor: 'a', builds: [
+				{ sha: bad, date: '2026-09-08',
+				  counts: { feature: 0, fix: 3, security: 0, other: 0 }, notes: [] },
+				entry(MINE, {}),
+			] } }));
+	}
 
 	// The page states what it is offering, and the feed says what changed in the
 	// software. On a camera with nothing to install the second without the first

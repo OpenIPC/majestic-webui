@@ -120,7 +120,14 @@
 		let builds = 0, found = false;
 
 		for (const entry of feed.builds || []) {
-			if (typeof entry.sha !== 'string' || !entry.sha) return null;
+			// A revision is a revision, or the entry is not usable. The boundary
+			// below is a prefix match in both directions, which is what lets a
+			// short feed sha meet a long camera one — and it is also what makes a
+			// malformed entry dangerous: `sha: "f"` is a prefix of every revision
+			// starting with f, so it would stop the walk at an unrelated build and
+			// report a count with nothing behind it. Same shape parseBuild demands
+			// of the camera's own revision, so the two ends agree on what one is.
+			if (typeof entry.sha !== 'string' || !/^[0-9a-f]{7,40}$/.test(entry.sha)) return null;
 			if (rev.indexOf(entry.sha) === 0 || entry.sha.indexOf(rev) === 0) {
 				found = true;
 				break;

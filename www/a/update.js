@@ -279,14 +279,20 @@
 		// (issue #120).
 		if (typeof stopHeartbeat === 'function') stopHeartbeat();
 	}
-	function params(source) {
+	// `force` has two sources and they mean the same thing. The switch under
+	// Advanced options is one; the other is the hero's own button on a camera
+	// that is already current, where "Reinstall" can only mean writing the same
+	// build again — without it sysupgrade answers "same version, nothing to
+	// update" and writes nothing, which is a button that does nothing by
+	// another road.
+	function params(source, force) {
 		const on = id => { const el = $('#' + id); return !!(el && el.checked); };
 		return { source, kernel: on('fw_kernel'), rootfs: on('fw_rootfs'),
-			reset: on('fw_reset'), force: on('fw_force') };
+			reset: on('fw_reset'), force: on('fw_force') || !!force };
 	}
 
-	function startUpgrade(source) {
-		const p = params(source);
+	function startUpgrade(source, force) {
+		const p = params(source, force);
 		if (!p.kernel && !p.rootfs) { status('danger', 'Select kernel and/or rootfs.'); return; }
 		showProgress(p);
 		sawFlash = false;
@@ -656,14 +662,23 @@
 	}
 
 	const g = $('#fw-install-github');
-	if (g) g.addEventListener('click', e => { e.preventDefault(); startUpgrade('github'); });
+	if (g) g.addEventListener('click', e => {
+		e.preventDefault();
+		// Asked here rather than through main.js's .btn-danger/.confirm hook: that
+		// one wires on `load`, and this listener is registered while the document
+		// is still parsing, so it would run first and the question would arrive
+		// after the flash had already begun.
+		const ask = g.dataset.confirm;
+		if (ask && !confirm(ask)) return;
+		startUpgrade('github', g.dataset.force === '1');
+	});
 
 	const u = $('#fw-install-upload');
 	if (u) u.addEventListener('click', async e => {
 		e.preventDefault();
 		const f = $('#fw-file').files[0];
 		if (!f) { status('danger', 'Choose a firmware .tgz first.'); return; }
-		showProgress(params('/tmp/firmware.tgz'));
+		showProgress(params('/tmp/firmware.tgz', false));
 		status('warning', 'Uploading firmware…');
 		try {
 			const r = await rawFetch('/upload', { method: 'POST', headers: { 'File-Location': '/tmp/firmware.tgz' }, body: f });

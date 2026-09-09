@@ -5773,23 +5773,27 @@ dialog.mj-modal::backdrop {
 /* Severity, carried the way .mj-notice carries it — the rule at 60% of this
    theme's <sev>-text-emphasis, and the mark and the kicker in the same hue, so
    all three agree without any of them being a colour somebody picked. */
-.mj-sev-available { border-color: rgba(var(--bs-warning-rgb), 0.45); }
-.mj-sev-current { border-color: rgba(var(--bs-success-rgb), 0.45); }
-.mj-sev-offline { border-color: rgba(var(--bs-info-rgb), 0.45); }
+/* Named for the severity rather than for the state, the way .mj-notice's own
+   modifiers are: the page has more states than it has severities — an image it
+   cannot compare against this camera's own revision is not a warning, and a
+   check that did not happen is not a fault. */
+.mj-sev-warn { border-color: rgba(var(--bs-warning-rgb), 0.45); }
+.mj-sev-ok { border-color: rgba(var(--bs-success-rgb), 0.45); }
+.mj-sev-info { border-color: rgba(var(--bs-info-rgb), 0.45); }
 .mj-sev-progress { border-color: rgba(var(--bs-primary-rgb), 0.55); }
 
 @supports (border-color: color-mix(in srgb, red 60%, transparent)) {
-	.mj-sev-available { border-color: color-mix(in srgb, var(--bs-warning-text-emphasis) 60%, transparent); }
-	.mj-sev-current { border-color: color-mix(in srgb, var(--bs-success-text-emphasis) 60%, transparent); }
-	.mj-sev-offline { border-color: color-mix(in srgb, var(--bs-info-text-emphasis) 60%, transparent); }
+	.mj-sev-warn { border-color: color-mix(in srgb, var(--bs-warning-text-emphasis) 60%, transparent); }
+	.mj-sev-ok { border-color: color-mix(in srgb, var(--bs-success-text-emphasis) 60%, transparent); }
+	.mj-sev-info { border-color: color-mix(in srgb, var(--bs-info-text-emphasis) 60%, transparent); }
 }
 
-.mj-sev-available .mj-hero-ico,
-.mj-sev-available .mj-hero-kick { color: var(--bs-warning-text-emphasis); }
-.mj-sev-current .mj-hero-ico,
-.mj-sev-current .mj-hero-kick { color: var(--bs-success-text-emphasis); }
-.mj-sev-offline .mj-hero-ico,
-.mj-sev-offline .mj-hero-kick { color: var(--bs-info-text-emphasis); }
+.mj-sev-warn .mj-hero-ico,
+.mj-sev-warn .mj-hero-kick { color: var(--bs-warning-text-emphasis); }
+.mj-sev-ok .mj-hero-ico,
+.mj-sev-ok .mj-hero-kick { color: var(--bs-success-text-emphasis); }
+.mj-sev-info .mj-hero-ico,
+.mj-sev-info .mj-hero-kick { color: var(--bs-info-text-emphasis); }
 .mj-sev-progress .mj-hero-ico,
 .mj-sev-progress .mj-hero-kick { color: var(--bs-primary); }
 
