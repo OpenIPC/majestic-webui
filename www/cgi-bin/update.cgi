@@ -44,7 +44,20 @@
 		printf '%s %s %s' "$d" "$m" "$y"
 	}
 
-	ver=$(latest_build)
+	# An upgrade is already running when majestic is holding upgrade mode, which
+	# it advertises by dropping /tmp/majestic-upgrade-owner (src/main.c, removed
+	# again by leave_upgrade_mode). update.js reads the flag below and reattaches
+	# to the running /ws/upgrade instead of offering a fresh one, so a page
+	# reloaded mid-flash shows the live transcript and the "do not power off"
+	# warning again rather than a bare Update card. The reported failure was a
+	# browser refresh landing on the old one-session 503 (OpenIPC/majestic#682).
+	fw_active=""
+	[ -f /tmp/majestic-upgrade-owner ] && fw_active=1
+
+	# Skip the network-touching build check while a flash is under way: the page
+	# goes straight to the progress view, so there is nothing to offer, and
+	# `sysupgrade --list-builds` would only add load to a camera mid-upgrade.
+	if [ -n "$fw_active" ]; then ver=""; else ver=$(latest_build); fi
 	if [ -n "$ver" ]; then
 		# nightly-20260717-027aae1 -> 2026-07-17
 		fw_date=$(echo "$ver" | grep -Eo '[0-9]{8}' | head -1 | sed -E 's/(....)(..)(..)/\1-\2-\3/')
@@ -134,6 +147,14 @@
     flash starts — nothing selected to write, no file chosen — and those must not
     land in a block that is still hidden. %>
 <div id="fw-status" role="status" aria-live="polite"></div>
+
+<%# Set when majestic is holding upgrade mode (its /tmp/majestic-upgrade-owner).
+    update.js reads data-active and reattaches to /ws/upgrade instead of offering
+    a fresh upgrade, so a page reloaded mid-flash shows the live transcript and
+    the "do not power off" warning again rather than a bare Update card
+    (OpenIPC/majestic#682). Always present so the reader is `$('#fw-inflight')`,
+    never a missing node. %>
+<div id="fw-inflight" hidden data-active="<% attr_escape "$fw_active" %>"></div>
 
 <div id="fw-controls">
 

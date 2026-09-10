@@ -115,6 +115,12 @@
 	// so an unchanged version afterwards is a success, not a failure.
 	let forced = false;
 
+	// Whether this run attached to an upgrade already in progress (a page
+	// reloaded mid-flash) rather than starting one. We never saw its parameters,
+	// so confirmUpgrade cannot judge the version it comes back on as pass or
+	// fail — it just reports what is running and moves on.
+	let reattached = false;
+
 	// When this run began, so a camera's own uptime can be read as "it booted
 	// during this upgrade". See rebootedAlready().
 	//
@@ -130,6 +136,10 @@
 	let lastData = 0;
 	let polling = false;
 	let quietTimer = null;
+	// Whether any log byte has arrived on this run's socket. attachToRunning uses
+	// it to tell a real attach (majestic replays the transcript at once) from an
+	// upgrade that had already ended by the time the socket opened.
+	let sawData = false;
 	// How long the log may go silent, once the flash is under way, before the
 	// camera is assumed to have gone. Generous, because a quiet stretch is normal
 	// during the download and the time sync — but those happen before any write,
@@ -217,6 +227,7 @@
 
 	function append(t) {
 		lastData = performance.now();
+		sawData = true;
 		// term.write() hands back the chunk with ANSI stripped and nothing else
 		// done to it. Deliberately the raw stream, not what ended up on screen:
 		// the markers below are whole-line messages, and matching them on what was
@@ -252,10 +263,20 @@
 			}
 		}
 	}
-	function showProgress(p) {
+	function showProgress(p, resuming) {
 		$('#fw-controls').style.display = 'none';
 		$('#fw-progress').style.display = '';
 		const hl = $('#fw-progress-hl');
+		// Reattaching to an upgrade this page did not start: we do not know the
+		// target build or which partitions it is writing, so name neither. The
+		// steps stay all-visible for the same reason — hiding one would be a claim
+		// about a run whose parameters we never saw.
+		if (resuming) {
+			if (hl) hl.textContent = 'Firmware upgrade in progress';
+			paintPhases();
+			if (typeof stopHeartbeat === 'function') stopHeartbeat();
+			return;
+		}
 		const head = $('#fw-head');
 		const target = (p && p.source === 'github' && head) ? head.dataset.fwLatest : '';
 		if (hl) {
@@ -291,16 +312,17 @@
 			reset: on('fw_reset'), force: on('fw_force') || !!force };
 	}
 
-	function startUpgrade(source, force) {
-		const p = params(source, force);
-		if (!p.kernel && !p.rootfs) { status('danger', 'Select kernel and/or rootfs.'); return; }
-		showProgress(p);
+	// Shared by the two ways into a flash — starting one, and attaching to one
+	// already running — so both watch the transcript, the reboot and the socket
+	// the same way. Only the run-specific state (force, reattached) is left to
+	// the callers.
+	function resetRunState() {
 		sawFlash = false;
 		aborted = false;
 		recent = '';
 		for (const k of Object.keys(seen)) delete seen[k];
-		forced = p.force;
 		noop = false;
+		sawData = false;
 		startedAt = performance.now();
 		lastData = startedAt;
 		polling = false;
@@ -314,12 +336,18 @@
 			if (polling) { clearInterval(quietTimer); quietTimer = null; return; }
 			if (sawFlash && performance.now() - lastData > QUIET_MS) beginPollBack(true);
 		}, 3000);
-		status('warning', 'Preparing — freeing memory…');
+	}
+
+	// Open /ws/upgrade and wire the log, reboot watch and error handling. onOpen
+	// runs once the socket is up (opened is already set) and is the one thing the
+	// two flows differ by: starting an upgrade sends the JSON params, attaching
+	// to one sends nothing.
+	function connectUpgrade(onOpen) {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		const ws = new WebSocket(proto + '://' + location.host + '/ws/upgrade');
 		ws.binaryType = 'arraybuffer';
 		let opened = false;
-		ws.onopen = () => { opened = true; ws.send(JSON.stringify(p)); status('warning', 'Upgrading — do not power off…'); };
+		ws.onopen = () => { opened = true; onOpen(ws); };
 		ws.onmessage = e => append(dec.decode(new Uint8Array(e.data), { stream: true }));
 		// The socket can close because majestic was killed at the reboot, or
 		// because it idled out during a quiet phase (download / time-sync). Either
@@ -353,6 +381,44 @@
 			status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.');
 			resumeHeartbeat();
 		};
+	}
+
+	function startUpgrade(source, force) {
+		const p = params(source, force);
+		if (!p.kernel && !p.rootfs) { status('danger', 'Select kernel and/or rootfs.'); return; }
+		showProgress(p);
+		resetRunState();
+		forced = p.force;
+		reattached = false;
+		status('warning', 'Preparing — freeing memory…');
+		connectUpgrade(ws => {
+			ws.send(JSON.stringify(p));
+			status('warning', 'Upgrading — do not power off…');
+		});
+	}
+
+	// A page loaded while majestic is already flashing (update.cgi found
+	// /tmp/majestic-upgrade-owner). Attach to the running /ws/upgrade instead of
+	// starting a new one: majestic replays the transcript from the top and leads
+	// it with a "do not power off" banner, so the reload lands on the live log
+	// rather than a bare Update card (OpenIPC/majestic#682). No JSON frame is
+	// sent — sending one is what starts an upgrade, and one is already running.
+	function attachToRunning() {
+		showProgress(null, true);
+		resetRunState();
+		forced = false;
+		reattached = true;
+		status('warning', 'An upgrade is in progress — do not power off…');
+		connectUpgrade(() => {
+			// If the socket opens but nothing arrives, the upgrade ended between the
+			// page render and now (majestic was not in progress, so it did not
+			// replay anything and is waiting for a frame we will never send). Reload
+			// to a fresh page rather than sit on a progress view that will never
+			// move; the reboot/normal state is what the new render shows. A real
+			// attach replays immediately, so this only fires when there was nothing
+			// to attach to.
+			setTimeout(() => { if (!sawData && !polling) location.reload(); }, 5000);
+		});
 	}
 
 	// Read the version the camera is running NOW. Re-fetches this page instead of
@@ -411,6 +477,15 @@
 				return;
 			}
 			now = res.version;
+		}
+		// Attached to an upgrade this page did not start: we never saw whether it
+		// was an update, a reinstall or a reset, so we cannot call the version it
+		// came back on pass or fail. Report what is running and let the dashboard
+		// (and the transcript above) be the record.
+		if (reattached) {
+			status('success', now ? 'Camera is back — now running ' + now + '.' : 'Camera is back online.');
+			setTimeout(() => location.href = 'dashboard.cgi', 1500);
+			return;
 		}
 		if (now && installedBefore && now === installedBefore && !forced) {
 			if (noop) {
@@ -660,6 +735,15 @@
 	} else {
 		loadChanges();
 	}
+
+	// If majestic is already flashing when this page loads, attach to it before
+	// wiring the buttons — the running upgrade is the only thing on this page,
+	// and the transcript and warning come back with it. update.cgi sets
+	// data-active on #fw-inflight from /tmp/majestic-upgrade-owner. This script
+	// is not deferred and sits at the end of the body, so the node above it
+	// already exists. See attachToRunning / OpenIPC/majestic#682.
+	const inflight = $('#fw-inflight');
+	if (inflight && inflight.dataset.active === '1') attachToRunning();
 
 	const g = $('#fw-install-github');
 	if (g) g.addEventListener('click', e => {
