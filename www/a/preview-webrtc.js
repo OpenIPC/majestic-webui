@@ -45,6 +45,11 @@ window.MajesticWebRTC = (function () {
 	// A browser without these cannot be helped by trying.
 	const rtcOk = typeof window.RTCPeerConnection === 'function';
 
+	// The signalling socket lives in preview-signal.js, shared with the
+	// data-channel feed. Resolved at every use rather than captured, the way
+	// the chain resolves its rules: a test may install it after this file.
+	const S = () => window.MajesticSignal;
+
 	function attach(video, opts) {
 		opts = opts || {};
 		const onState = opts.onState || function () {};
@@ -61,7 +66,9 @@ window.MajesticWebRTC = (function () {
 		const onServed = opts.onServed || function () {};
 		let stream = opts.stream | 0;
 
-		let pc = null, ws = null, statsTimer = null, signalTimer = null;
+		// `sig` is the signalling handle (preview-signal.js) for the current
+		// attempt; every handler it was opened with is bound to that attempt.
+		let pc = null, sig = null, statsTimer = null, signalTimer = null;
 		// Autoplay refused on a fresh document load with no user activation (Opera
 		// for Android, majestic-webui#317): the muted picture is ready but paused,
 		// and play() is never retried, so nothing shows until an in-app navigation
@@ -202,9 +209,7 @@ window.MajesticWebRTC = (function () {
 		}
 
 		function send(req, data) {
-			if (ws && ws.readyState === 1) {
-				ws.send(JSON.stringify({ req: req, data: data }));
-			}
+			if (sig) sig.send(req, data);
 		}
 
 		// Resolution and codec come from getStats rather than from the SDP:
@@ -225,7 +230,7 @@ window.MajesticWebRTC = (function () {
 			pc.getStats().then(function (report) {
 				if (!current(my)) return;
 				let codec = '', w = 0, h = 0, bytes = 0;
-				const s = { cam: parseCam(camLine) };
+				const s = { cam: S().parseCam(camLine) };
 				const codecs = {};
 				report.forEach(function (r) {
 					if (r.type === 'codec') codecs[r.id] = r;
@@ -339,20 +344,6 @@ window.MajesticWebRTC = (function () {
 		function rate(now, before) {
 			const d = now - before;
 			return d > 0 ? Math.round((d * 8) / STATS_MS) : 0;
-		}
-
-		// The camera's line is `key=value` pairs separated by spaces, with a
-		// couple of composites (`rtcp=recv/rejected`, `pli=n(+suppressed)`).
-		// Split on the first `=` only and hand the values over as text: the
-		// page renders them, and inventing a schema here would mean changing
-		// two files every time the camera adds a counter.
-		function parseCam(line) {
-			const out = {};
-			(line || '').split(' ').forEach(function (kv) {
-				const i = kv.indexOf('=');
-				if (i > 0) out[kv.slice(0, i)] = kv.slice(i + 1);
-			});
-			return out;
 		}
 
 		// ---- talkback ------------------------------------------------------
@@ -507,17 +498,14 @@ window.MajesticWebRTC = (function () {
 			lastCodec = ''; lastW = 0; lastH = 0;
 		}
 
-		// Detach before closing. A socket closes asynchronously, and until it
-		// does its handlers are still live on a connection nobody wants any
-		// more — including the onclose that would call reconnect() a second
-		// time and the one that would null out a socket the next attempt has
-		// already opened.
+		// The handle detaches its handlers before closing (see
+		// preview-signal.js), so a late close from a retired socket cannot
+		// start a reconnect on top of the attempt that replaced it.
 		function dropSocket() {
-			if (!ws) return;
-			const dead = ws;
-			ws = null;
-			try { dead.onopen = dead.onmessage = dead.onclose = dead.onerror = null; } catch (e) {}
-			try { dead.close(); } catch (e) {}
+			if (!sig) return;
+			const dead = sig;
+			sig = null;
+			dead.close();
 		}
 
 		function open() {
@@ -533,11 +521,7 @@ window.MajesticWebRTC = (function () {
 			// camera's config, the first attach can win a race against that
 			// fetch, and a reconnect should use the answer once it lands
 			// instead of repeating the empty list it started with.
-			let ice = [];
-			try {
-				ice = (typeof opts.iceServers === 'function'
-					? opts.iceServers() : opts.iceServers) || [];
-			} catch (e) { ice = []; }
+			const ice = S().iceOf(opts);
 
 			try {
 				pc = new RTCPeerConnection({ iceServers: ice });
@@ -625,40 +609,35 @@ window.MajesticWebRTC = (function () {
 				else if (s === 'disconnected') onState('error');
 			};
 
-			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-			// Held in a local as well, so every handler below acts on the
-			// socket it was installed on rather than on whatever `ws` happens
-			// to point at by the time it fires.
-			const sock = new WebSocket(
-				proto + '://' + location.host + '/ws/webrtc?stream=' + stream);
-			ws = sock;
 			gotMedia = false;
-
-			sock.onopen = function () {
-				if (!current(my)) return;
-				backoff = 1000;
-				armSignalTimer(my);
-				pc.createOffer()
-					.then(function (offer) {
-						if (!current(my)) return;
-						return pc.setLocalDescription(offer).then(function () {
+			// Every handler is bound to this attempt, and the handle is held
+			// in a local as well, so a handler acts on the socket it was
+			// installed on rather than on whatever `sig` points at by the
+			// time it fires.
+			const handle = S().open(stream, {
+				open: function () {
+					if (!current(my)) return;
+					backoff = 1000;
+					armSignalTimer(my);
+					pc.createOffer()
+						.then(function (offer) {
 							if (!current(my)) return;
-							send('offer', pc.localDescription.sdp);
+							return pc.setLocalDescription(offer).then(function () {
+								if (!current(my)) return;
+								send('offer', pc.localDescription.sdp);
+							});
+						})
+						.catch(function () {
+							// A closed peer connection rejects whatever was in
+							// flight, so this fires on every ordinary teardown
+							// too. Only a live attempt has actually failed to
+							// offer.
+							if (current(my)) onState('fallback', 'offer failed');
 						});
-					})
-					.catch(function () {
-						// A closed peer connection rejects whatever was in
-						// flight, so this fires on every ordinary teardown too.
-						// Only a live attempt has actually failed to offer.
-						if (current(my)) onState('fallback', 'offer failed');
-					});
-			};
-			sock.onmessage = function (e) {
-				if (!current(my)) return;
-				let m; try { m = JSON.parse(e.data); } catch (_) { return; }
-				if (!m) return;
-				if (m.reply === 'answer') {
-					pc.setRemoteDescription({ type: 'answer', sdp: m.data })
+				},
+				answer: function (sdp) {
+					if (!current(my)) return;
+					pc.setRemoteDescription({ type: 'answer', sdp: sdp })
 						.then(function () {
 							if (!current(my)) return;
 							// Did the camera take the audio we offered to
@@ -703,7 +682,9 @@ window.MajesticWebRTC = (function () {
 						.catch(function () {
 							if (current(my)) onState('fallback', 'answer rejected');
 						});
-				} else if (m.reply === 'candidate') {
+				},
+				candidate: function (line, mid) {
+					if (!current(my)) return;
 					// Handed over without waiting for the answer to be applied,
 					// which is safe rather than sloppy: addIceCandidate chains
 					// onto the same operations queue as setRemoteDescription,
@@ -711,14 +692,18 @@ window.MajesticWebRTC = (function () {
 					// Measured on this camera — it trickles three candidates and
 					// one of them does arrive before the answer is installed;
 					// all three reach ICE.
-					pc.addIceCandidate({ candidate: m.data, sdpMid: m.mid })
+					pc.addIceCandidate({ candidate: line, sdpMid: mid })
 						.catch(function () {});
-				} else if (m.reply === 'stats') {
+				},
+				stats: function (line) {
+					if (!current(my)) return;
 					// The camera's own counters, once a second. Kept as text
 					// and parsed at the next poll, so the two sides are read
 					// out together rather than a tick apart.
-					camLine = m.data || '';
-				} else if (m.reply === 'served') {
+					camLine = line || '';
+				},
+				served: function (m) {
+					if (!current(my)) return;
 					// The camera says outright which channel this session
 					// serves — ?stream= was only ever a preference. Adopt it:
 					// setStream() no-ops when asked for the channel it thinks
@@ -737,30 +722,34 @@ window.MajesticWebRTC = (function () {
 								? m.reason : '',
 						});
 					}
-				} else if (m.reply === 'busy') {
+				},
+				busy: function (text) {
+					if (!current(my)) return;
 					// Full, not incapable — every slot is taken and this same
 					// offer would be answered once one frees. Same move as a
 					// refusal, MSE now rather than a frozen page, but reported
 					// apart from one so the caller does not conclude anything
 					// lasting about this browser. No retry either: hammering a
 					// camera that just said it is out of room helps nobody.
-					onState('busy', m.data || 'the camera is serving as many viewers as it can');
+					onState('busy', text || 'the camera is serving as many viewers as it can');
 					stop();
-				} else if (m.reply === 'error') {
+				},
+				error: function (text) {
+					if (!current(my)) return;
 					// The camera could not answer. Much the commonest cause is
 					// a profile this browser will not take — see
 					// docs/webrtc-browser-interop.md — and MSE has no such
 					// problem, so this is a reason to change transport rather
 					// than to keep retrying.
-					onState('fallback', m.data || 'the camera refused the offer');
+					onState('fallback', text || 'the camera refused the offer');
 					stop();
-				}
-			};
-			sock.onclose = function () {
-				if (ws === sock) ws = null;
-				if (current(my)) reconnect();
-			};
-			sock.onerror = function () { try { sock.close(); } catch (e) {} };
+				},
+				close: function () {
+					if (sig === handle) sig = null;
+					if (current(my)) reconnect();
+				},
+			});
+			sig = handle;
 
 			clearInterval(statsTimer);
 			statsTimer = setInterval(pollStats, STATS_MS);

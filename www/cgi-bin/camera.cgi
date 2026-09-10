@@ -121,6 +121,7 @@ fi
 </div>
 
 <script src="/a/preview.js"></script>
+<script src="/a/preview-signal.js"></script>
 <script src="/a/preview-webrtc.js"></script>
 <script src="/a/preview-swap.js"></script>
 <script src="/a/preview-wasm.js"></script>

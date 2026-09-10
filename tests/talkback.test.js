@@ -18,6 +18,9 @@ const vm = require('vm');
 const { check, group, done } = require('./assert');
 
 const SRC = path.join(__dirname, '..', 'www', 'a', 'preview-webrtc.js');
+// The signalling socket is a module of its own now (preview-signal.js),
+// loaded into the same context first, the way the pages load it.
+const SIG = path.join(__dirname, '..', 'www', 'a', 'preview-signal.js');
 
 // --- stubs ---------------------------------------------------------------
 function makeTrack(kind) {
@@ -103,6 +106,7 @@ function makeEnv(o) {
 	};
 	ctx.globalThis = ctx;
 	vm.createContext(ctx);
+	vm.runInContext(fs.readFileSync(SIG, 'utf8'), ctx);
 	vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx);
 	env.MajesticWebRTC = win.MajesticWebRTC;
 	env.video = { muted: true, volume: 1, srcObject: null, play: () => Promise.resolve() };
