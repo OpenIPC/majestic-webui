@@ -295,6 +295,12 @@ window.MajesticStats = (function () {
 		// every absent counter read as zero.)
 		const mse = s.transport === 'mse' || s.transport === 'wasm';
 		const dcFeed = s.feed === 'datachannel' && s.dc;
+		// The element counts frames as total and dropped; the software rung
+		// counts decoded and dropped. One pair for the branch below.
+		const totalFrames = s.totalFrames != null ? s.totalFrames
+			: (s.framesDecoded || 0) + (s.framesDropped || 0);
+		const droppedFrames = s.droppedFrames != null ? s.droppedFrames
+			: (s.framesDropped || 0);
 		const now = performance.now();
 		const dt = lastTickAt ? (now - lastTickAt) / 1000 : 0;
 		lastTickAt = now;
@@ -304,8 +310,8 @@ window.MajesticStats = (function () {
 			decodeTime: s.decodeTime || 0, framesDecoded: s.framesDecoded || 0,
 			packetsLost: s.packetsLost || 0, packetsReceived: s.packetsReceived || 0,
 			nack: s.nack || 0, rtx: parseInt(cam.rtx, 10) || 0,
-			rxBytes: s.rxBytes || 0, totalFrames: s.totalFrames || 0,
-			droppedFrames: s.droppedFrames || 0, stalls: s.stalls || 0,
+			rxBytes: s.rxBytes || 0, totalFrames: totalFrames,
+			droppedFrames: droppedFrames, stalls: s.stalls || 0,
 		};
 		// A cumulative counter that went BACKWARDS means the peer connection
 		// was rebuilt under us (preview-webrtc reconnects internally without
@@ -454,7 +460,10 @@ window.MajesticStats = (function () {
 			// '≈' when every leg is measured — WebRTC, or a data-channel
 			// feed with the camera's anchored pipeline figure — '≥' when
 			// the transport hides some of them.
-			const allLegs = parts.every((v) => v != null);
+			// The camera leg counts as measured only when the camera
+			// measured it: the frame-time model that stands in for it on a
+			// buffered player without a camera line is a floor, not a leg.
+			const allLegs = parts.every((v) => v != null) && !!c2s && !c2s.approx;
 			els.lat.textContent = (mse && !(dcFeed && allLegs) ? '≥' : '≈') + Math.round(shown);
 			els.latSub.textContent = mse
 				? (dcFeed && allLegs
@@ -616,7 +625,7 @@ window.MajesticStats = (function () {
 					: 'WebSocket/TCP · no feedback channel'));
 			fp.push('buffered ' + (bufMs != null ? Math.round(bufMs) : '-') +
 				' ms · re-buffered ' + (s.stalls || 0) + '\u00d7 · dropped ' +
-				(s.droppedFrames || 0) + ' of ' + (s.totalFrames || 0) + ' frames' +
+				droppedFrames + ' of ' + totalFrames + ' frames' +
 				(s.discarded ? ' · discarded after a gap ' + s.discarded : ''));
 			if (dcFeed) {
 				// What the channel itself saw, and what the camera said of it:

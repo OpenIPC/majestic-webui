@@ -109,13 +109,19 @@ const ANSWER_DECLINED = 'v=0\r\nm=application 0 UDP/DTLS/SCTP webrtc-datachannel
 		check('the second part of two, alone, waits', r.push(env.DC.unwrap(header(3, 0, 1, 2, 2, 0, bytes('B')))) === null);
 		const whole = r.push(env.DC.unwrap(header(3, 0, 0, 2, 2, 0, bytes('A'))));
 		check('parts join in index order whatever order they arrived', whole && new TextDecoder().decode(whole) === 'AB');
+		// The camera sends in order, so a message that completes after a
+		// partial — split or not — is proof the partial's missing parts
+		// will never come; it goes then, not when the next split message
+		// happens to complete, or a lost part per keyframe would pile up.
 		r.push(env.DC.unwrap(header(3, 0, 0, 2, 5, 0, bytes('x'))));
+		check('a partial left by a lost part waits', r.stats().pending === 1);
 		r.push(env.DC.unwrap(header(3, 0, 0, 1, 6, 0, bytes('y'))));
-		check('a partial waits while later single messages pass', r.stats().pending === 1);
-		r.push(env.DC.unwrap(header(3, 0, 0, 2, 7, 0, bytes('p'))));
-		r.push(env.DC.unwrap(header(3, 0, 1, 2, 7, 0, bytes('q'))));
-		check('a later message completing evicts the stale partial', r.stats().pending === 0 && r.stats().partsDropped === 1);
-		check('more parts than a message can have are refused', r.push(env.DC.unwrap(header(3, 0, 0, 100, 8, 0, bytes('z')))) === null && r.stats().partsDropped === 2);
+		check('a later single-part message evicts the stale partial', r.stats().pending === 0 && r.stats().partsDropped === 1);
+		r.push(env.DC.unwrap(header(3, 0, 0, 2, 7, 0, bytes('x'))));
+		r.push(env.DC.unwrap(header(3, 0, 0, 2, 8, 0, bytes('p'))));
+		r.push(env.DC.unwrap(header(3, 0, 1, 2, 8, 0, bytes('q'))));
+		check('and so does a later split message completing', r.stats().pending === 0 && r.stats().partsDropped === 2);
+		check('more parts than a message can have are refused', r.push(env.DC.unwrap(header(3, 0, 0, 100, 9, 0, bytes('z')))) === null && r.stats().partsDropped === 3);
 	}
 
 	group('eligibility');

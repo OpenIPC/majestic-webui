@@ -3,8 +3,8 @@
 // The MSE player (preview.js) and the software rung (preview-wasm.js) drink
 // the /ws/video stream — one text `init`, the init segment, then one fMP4
 // fragment per frame. A camera that can also carry those same messages over
-// a WebRTC data channel (OpenIPC/majestic-webui#285) lets a lost packet cost
-// one frame instead of the growing delay a WebSocket turns it into, and
+// a WebRTC data channel lets a lost packet cost one frame instead of the
+// growing delay a WebSocket turns it into, and
 // finds its way to the camera by ICE — through a NAT, or a relay — where a
 // WebSocket needs a route. Nothing about the picture changes, so nothing
 // about the transport picker does either: this is tried first inside the
@@ -132,24 +132,32 @@ window.MajesticDataChannel = (function () {
 		function key(m) { return m.kind + ':' + m.seq; }
 		return {
 			push(m) {
-				if (m.parts <= 1) return m.payload;
 				if (m.parts > MAX_PARTS || m.part >= m.parts) { dropped++; return null; }
-				const k = key(m);
-				let p = pending[k];
-				if (!p) p = pending[k] = { seq: m.seq, got: 0, bytes: 0, parts: new Array(m.parts) };
-				if (!p.parts[m.part]) { p.parts[m.part] = m.payload; p.got++; p.bytes += m.payload.byteLength; }
-				if (p.bytes > MAX_MESSAGE_BYTES) { delete pending[k]; dropped++; return null; }
-				if (p.got < m.parts) return null;
-				delete pending[k];
-				// Anything older still waiting for parts will never get them.
+				let out;
+				if (m.parts <= 1) {
+					out = m.payload;
+				} else {
+					const k = key(m);
+					let p = pending[k];
+					if (!p) p = pending[k] = { seq: m.seq, got: 0, bytes: 0, parts: new Array(m.parts) };
+					if (!p.parts[m.part]) { p.parts[m.part] = m.payload; p.got++; p.bytes += m.payload.byteLength; }
+					if (p.bytes > MAX_MESSAGE_BYTES) { delete pending[k]; dropped++; return null; }
+					if (p.got < m.parts) return null;
+					delete pending[k];
+					const joinedBytes = new Uint8Array(p.bytes);
+					let at = 0;
+					for (let i = 0; i < m.parts; i++) { joinedBytes.set(new Uint8Array(p.parts[i]), at); at += p.parts[i].byteLength; }
+					joined++;
+					out = joinedBytes.buffer;
+				}
+				// The camera sends in order, so anything older than a message
+				// that just completed — split or not — is still waiting for
+				// parts that will never come; it goes now, not when the next
+				// split message happens to complete.
 				Object.keys(pending).forEach(function (o) {
 					if (pending[o].seq < m.seq) { delete pending[o]; dropped++; }
 				});
-				const out = new Uint8Array(p.bytes);
-				let at = 0;
-				for (let i = 0; i < m.parts; i++) { out.set(new Uint8Array(p.parts[i]), at); at += p.parts[i].byteLength; }
-				joined++;
-				return out.buffer;
+				return out;
 			},
 			stats() { return { partsReassembled: joined, partsDropped: dropped, pending: Object.keys(pending).length }; },
 		};

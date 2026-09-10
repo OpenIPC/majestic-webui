@@ -78,9 +78,11 @@ g('the software rung takes the buffered branch', () => {
 	const env = boot();
 	env.stats.tick({ transport: 'wasm', framesDecoded: 10, queuedMs: 120, fps: 15, rxBytes: 1000, stalls: 0 });
 	env.tickClock(1000);
-	env.stats.tick({ transport: 'wasm', framesDecoded: 25, queuedMs: 140, fps: 15, rxBytes: 90000, stalls: 0 });
+	env.stats.tick({ transport: 'wasm', framesDecoded: 25, framesDropped: 5, queuedMs: 140, fps: 15, rxBytes: 90000, stalls: 0 });
 	const fp = env.el('mj-ns-fp').textContent;
 	check('fine print names the software player and the socket', /^transport software H\.265 — fMP4 over WebSocket\/TCP/.test(fp));
+	check('the decoder\'s own drop count reaches the fine print', /dropped 5 of 30 frames/.test(fp));
+	check('the headline is a floor without a camera line', /^≥/.test(env.el('mj-ns-lat').textContent) && /at least/.test(env.el('mj-ns-lat-sub').textContent));
 	check('the decoder queue stands in for the buffer depth', /buffered 140 ms/.test(fp));
 	check('re-buffering is what is counted, not packet loss', /re-buffered/.test(env.el('mj-ns-repair').textContent) && !/lost/.test(env.el('mj-ns-repair').textContent));
 	check('talkback is unavailable on a buffered player', /talkback unavailable/.test(fp));
