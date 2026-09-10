@@ -228,6 +228,12 @@ const ANSWER_DECLINED = 'v=0\r\nm=application 0 UDP/DTLS/SCTP webrtc-datachannel
 		env.now += 5000;
 		dc.onmessage({ data: header(3, 0x02, 0, 1, 7, 0, bytes('moof7')) });
 		check('a camera-flagged gap is passed on and needs no request', metas[metas.length - 1].gap === true && f.stats().camGaps === 1 && env.sock().sent.filter((s) => s.req === 'idr').length === asked);
+		// A hole the camera flagged on the very message that follows it: its
+		// own drop, its own keyframe already asked for. Asking again would
+		// cost the link a second keyframe.
+		env.now += 5000;
+		dc.onmessage({ data: header(3, 0x03, 0, 1, 9, 0, bytes('moof9')) });
+		check('a hole the camera flagged asks nothing either', f.stats().seqGaps === 3 && f.stats().camGaps === 2 && env.sock().sent.filter((s) => s.req === 'idr').length === asked);
 		// Late: an older seq after a newer one is dropped.
 		const before = got.length;
 		dc.onmessage({ data: header(3, 0x00, 0, 1, 5, 0, bytes('moof5')) });

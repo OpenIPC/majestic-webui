@@ -267,13 +267,17 @@ window.MajesticDataChannel = (function () {
 				if (meta.key) keyframes++;
 				if (meta.gap) camGaps++;
 				if (lastSeq && m.seq > lastSeq + 1) {
-					// A hole the camera did not flag: frames it sent and this
-					// end never saw. Discard until a keyframe, and ask for
-					// one — at most every three seconds.
+					// A hole in the sequence: discard until a keyframe. If
+					// the camera flagged this very message, it made the hole
+					// itself and has already asked for that keyframe — this
+					// is that keyframe, as a rule — and asking again costs
+					// the link a second one. Only a hole it did not flag is
+					// frames it sent and this end never saw, and is asked
+					// for — at most every three seconds.
 					seqGaps++;
 					meta.gap = true;
 					const now = Date.now();
-					if (now - lastIdrAt > IDR_MIN_GAP_MS) { lastIdrAt = now; feed.send('{"request":"idr"}'); }
+					if (!(m.flags & FLAG_GAP) && now - lastIdrAt > IDR_MIN_GAP_MS) { lastIdrAt = now; feed.send('{"request":"idr"}'); }
 				}
 				if (lastSeq && m.seq <= lastSeq) { late++; return; }
 				lastSeq = m.seq;
