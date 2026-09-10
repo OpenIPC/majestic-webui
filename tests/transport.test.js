@@ -192,6 +192,15 @@ is('so do spaces and newlines — a YAML block scalar gives one per line',
 	iceServers('stun:a:1 stun:b:2\nstun:c:3', '', ''),
 	[{ urls: 'stun:a:1' }, { urls: 'stun:b:2' }, { urls: 'stun:c:3' }]);
 
+group('a harness may override the whole list');
+{
+	const T = load(true);
+	T.__ctx.window.MJ_ICE = [{ urls: 'turn:relay.example:3478', username: 'u', credential: 'c' }];
+	check('MJ_ICE wins over the configured list', eq(T.iceServers('stun:cam.example:3478', 'x', 'y'), T.__ctx.window.MJ_ICE));
+	delete T.__ctx.window.MJ_ICE;
+	check('and without it the configured list is read as before', eq(T.iceServers('stun:cam.example:3478'), [{ urls: 'stun:cam.example:3478' }]));
+}
+
 group('relays and their credentials');
 // A turn: entry missing either credential makes RTCPeerConnection throw
 // InvalidAccessError — and it throws before the page opens its signalling
@@ -282,6 +291,29 @@ group('which WebRTC endings are worth remembering as a demotion');
 	check("'mjpeg' is not", T.durable('mjpeg') === false);
 	check('an empty string is not', T.durable('') === false);
 	check('undefined is not', T.durable(undefined) === false);
+}
+
+group('expiring() and remember(): a timestamp under any key, bounded both ways');
+{
+	const HOUR = 60 * 60 * 1000;
+	let T = load(true);
+	check('nothing remembered: false', T.expiring('mj-feed-auto', 6 * HOUR) === false);
+	T.remember('mj-feed-auto');
+	check('just remembered: true', T.expiring('mj-feed-auto', 6 * HOUR) === true);
+	check('and the transport demotion key is untouched by it', T.store['mj-transport-auto'] === undefined);
+	T = load(true, { 'mj-feed-auto': String(Date.now() - 7 * HOUR) });
+	check('older than the window: false, and cleared', T.expiring('mj-feed-auto', 6 * HOUR) === false && T.store['mj-feed-auto'] === undefined);
+	T = load(true, { 'mj-feed-auto': String(Date.now() + HOUR) });
+	check('from the future: a clock that moved — false, and cleared', T.expiring('mj-feed-auto', 6 * HOUR) === false && T.store['mj-feed-auto'] === undefined);
+	T = load(true, { 'mj-feed-auto': 'not a number' });
+	check('a value this code did not write: false, and cleared', T.expiring('mj-feed-auto', 6 * HOUR) === false && T.store['mj-feed-auto'] === undefined);
+	T = load(true);
+	T.demote();
+	check('demote() still writes the transport key, read back through the same rule', T.expiring('mj-transport-auto', 6 * HOUR) === true && T.preferred() === 'mse');
+	T = load(false);
+	check('without storage nothing throws: false', T.expiring('mj-feed-auto', HOUR) === false);
+	T.remember('mj-feed-auto');
+	check('and remember() is a no-op', T.expiring('mj-feed-auto', HOUR) === false);
 }
 
 done();

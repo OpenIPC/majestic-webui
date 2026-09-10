@@ -32,7 +32,7 @@ const IDS = [
 	'mj-stream-auto', 'mj-auto',
 	'mj-served', 'mj-served-why', 'mj-sub',
 	'mj-talk', 'mj-talk-ctl', 'mj-talk-lbl', 'mj-talk-t', 'mj-transport-w',
-	'mj-transport-m', 'mj-transport-ctl', 'mj-transport-lbl',
+	'mj-transport-m', 'mj-transport-m-lbl', 'mj-transport-ctl', 'mj-transport-lbl',
 	'mj-vol', 'mj-player', 'mj-stage', 'mj-tap-play',
 	'toggle-ircut', 'toggle-light', 'toggle-night',
 ];

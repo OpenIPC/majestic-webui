@@ -355,7 +355,7 @@ printf '%s' \
 				<label class="mj-seg-lbl" for="mj-transport-w" id="mj-transport-lbl"
 					title="Sub-second video and two-way audio, and the camera fits the stream to your connection — which changes it for everyone else watching that stream too.">WebRTC</label>
 				<input type="radio" class="mj-seg-in" name="mj-transport" id="mj-transport-m" autocomplete="off">
-				<label class="mj-seg-lbl" for="mj-transport-m"
+				<label class="mj-seg-lbl" for="mj-transport-m" id="mj-transport-m-lbl"
 					title="Plain buffered playback. A couple of seconds behind, but nothing adapts and nothing negotiates.">MSE</label>
 			</span>
 

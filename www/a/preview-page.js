@@ -1297,6 +1297,19 @@
 				}
 			},
 			onStats: (s) => {
+				// The buffered players may carry their bytes over a WebRTC
+				// data channel rather than the WebSocket (preview-datachannel.js).
+				// The chip does not change — the transport is still the
+				// buffered one — but the MSE label's tooltip says which feed,
+				// and why the channel was not used when it was not, because
+				// that is the one place the difference lives.
+				const mLbl = $('#mj-transport-m-lbl');
+				if (mLbl && s && (s.transport === 'mse' || s.transport === 'wasm')) {
+					const base = 'Plain buffered playback. A couple of seconds behind, but nothing adapts and nothing negotiates.';
+					mLbl.title = s.feed === 'datachannel'
+						? 'Carried over a WebRTC data channel: a lost packet costs one frame instead of a stall, and the path is found by ICE.\n\n' + base
+						: base;
+				}
 				if (!isLive()) return;
 				if (s.transport === 'wasm') {
 					softwareNote(s);

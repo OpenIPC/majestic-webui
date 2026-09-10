@@ -68,19 +68,31 @@ window.MajesticTransport = (function () {
 		if (carried) write(OLD_KEY, null);
 	}
 
-	// A demotion that has not expired. The window is bounded at both ends: a
-	// timestamp in the future is not a very fresh demotion, it is a clock that
-	// moved or a value this code did not write, and honouring it would suppress
-	// WebRTC for far longer than the six hours advertised.
-	function demoted() {
-		const raw = read(AUTO_KEY);
+	// A timestamp under `key` that is younger than `forMs`. The window is
+	// bounded at both ends: a timestamp in the future is not a very fresh
+	// one, it is a clock that moved or a value this code did not write, and
+	// honouring it would suppress whatever it guards for far longer than
+	// advertised. Anything outside the window is cleared on the way out.
+	// The transport's own demotion is one such key; the data-channel feed
+	// keeps another (preview-datachannel.js), with the same rule.
+	function expiring(key, forMs) {
+		const raw = read(key);
 		const at = /^\d+$/.test(raw || '') ? parseInt(raw, 10) : 0;
 		const age = Date.now() - at;
-		if (!at || age < 0 || age > AUTO_FOR_MS) {
-			if (raw !== null) write(AUTO_KEY, null);
+		if (!at || age < 0 || age > forMs) {
+			if (raw !== null) write(key, null);
 			return false;
 		}
 		return true;
+	}
+	// Stamp `key` now, for expiring() to find.
+	function remember(key) {
+		write(key, String(Date.now()));
+	}
+
+	// A demotion that has not expired.
+	function demoted() {
+		return expiring(AUTO_KEY, AUTO_FOR_MS);
 	}
 
 	function available() {
@@ -293,6 +305,10 @@ window.MajesticTransport = (function () {
 	// and used to build this very list for the debug page this replaced. Keep
 	// the two in step: same default, same off-words, same rule about relays.
 	function iceServers(configured, user, cred) {
+		// A harness's override, the way MJ_FEED pins the feed: a list to use
+		// instead of the camera's, for measuring a path the camera's own
+		// configuration would not choose (a relay on the tester's side).
+		if (Array.isArray(window.MJ_ICE)) return window.MJ_ICE;
 		configured = (configured === null || configured === undefined ||
 			configured === '') ? STUN_DEFAULT : String(configured);
 		if (OFF_WORDS.indexOf(configured.toLowerCase()) >= 0) return [];
@@ -319,6 +335,8 @@ window.MajesticTransport = (function () {
 		preferred: preferred,
 		choose: choose,
 		demote: demote,
+		expiring: expiring,
+		remember: remember,
 		impl: impl,
 		durable: durable,
 		softwareRungFor: softwareRungFor,

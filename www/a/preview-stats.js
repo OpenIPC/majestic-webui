@@ -283,8 +283,24 @@ window.MajesticStats = (function () {
 		if (!ensure()) return;
 		armDisplayProbe(document.getElementById('live-video'));
 		armDisplayProbe(document.getElementById('live-video-b'));
-		const cam = s.cam || {};
-		const mse = s.transport === 'mse';
+		// The camera's own line: the WebRTC player carries it, and so does a
+		// data-channel feed under the MSE player or the software rung — the
+		// channel negotiates on the same signalling socket.
+		const cam = s.cam || (s.dc && s.dc.cam) || {};
+		// `mse` is the BUFFERED branch: the MSE player and the software
+		// rung both read the /ws/video stream through a buffer of their
+		// own and have no RTP-side counters, so everything said of one
+		// holds for the other. (Before the software rung had its own
+		// transport name it fell through to the WebRTC branch here, where
+		// every absent counter read as zero.)
+		const mse = s.transport === 'mse' || s.transport === 'wasm';
+		const dcFeed = s.feed === 'datachannel' && s.dc;
+		// The element counts frames as total and dropped; the software rung
+		// counts decoded and dropped. One pair for the branch below.
+		const totalFrames = s.totalFrames != null ? s.totalFrames
+			: (s.framesDecoded || 0) + (s.framesDropped || 0);
+		const droppedFrames = s.droppedFrames != null ? s.droppedFrames
+			: (s.framesDropped || 0);
 		const now = performance.now();
 		const dt = lastTickAt ? (now - lastTickAt) / 1000 : 0;
 		lastTickAt = now;
@@ -294,8 +310,8 @@ window.MajesticStats = (function () {
 			decodeTime: s.decodeTime || 0, framesDecoded: s.framesDecoded || 0,
 			packetsLost: s.packetsLost || 0, packetsReceived: s.packetsReceived || 0,
 			nack: s.nack || 0, rtx: parseInt(cam.rtx, 10) || 0,
-			rxBytes: s.rxBytes || 0, totalFrames: s.totalFrames || 0,
-			droppedFrames: s.droppedFrames || 0, stalls: s.stalls || 0,
+			rxBytes: s.rxBytes || 0, totalFrames: totalFrames,
+			droppedFrames: droppedFrames, stalls: s.stalls || 0,
 		};
 		// A cumulative counter that went BACKWARDS means the peer connection
 		// was rebuilt under us (preview-webrtc reconnects internally without
@@ -319,7 +335,11 @@ window.MajesticStats = (function () {
 		// counters, held at their last value across a tick that emitted no
 		// frames rather than flapping to zero.
 		const c2s = parseC2s(cam.c2s);
-		const net = s.rttMs != null ? s.rttMs / 2 : null;
+		// Half the round trip: the WebRTC player measures it, and so does a
+		// data-channel feed (its peer connection), where a WebSocket cannot.
+		const rttMs = s.rttMs != null ? s.rttMs
+			: dcFeed && s.dc.rttMs != null ? s.dc.rttMs : null;
+		const net = rttMs != null ? rttMs / 2 : null;
 		if (good) {
 			const dEm = prevT.jbEmitted - p.jbEmitted;
 			if (dEm > 0) hold.buf = (prevT.jbDelay - p.jbDelay) / dEm * 1000;
@@ -376,8 +396,13 @@ window.MajesticStats = (function () {
 		// that separates this transport from WebRTC's jitter buffer. Camera
 		// and network legs do not exist here: TCP tells us nothing about
 		// either, which is the finding rather than a gap.
+		// Over a data-channel feed the network leg IS measured, and the
+		// buffer is the element's depth (MSE) or the decoder's queue (the
+		// software rung).
+		const bufMs = s.bufferedMs != null ? s.bufferedMs
+			: s.queuedMs != null ? s.queuedMs : null;
 		const parts = mse
-			? [camMs, null, s.bufferedMs != null ? s.bufferedMs : null, screen]
+			? [camMs, dcFeed ? net : null, bufMs, screen]
 			: [camMs, net, hold.buf, screen];
 		let total = null;
 		parts.forEach((v) => { if (v != null) total = (total || 0) + v; });
@@ -432,9 +457,18 @@ window.MajesticStats = (function () {
 			const shown = srOk ? srG2gEma : total;
 			// '≥' on MSE, honestly: two of the four legs are unmeasurable
 			// over TCP, so the real figure can only be larger than this.
-			els.lat.textContent = (mse ? '≥' : '≈') + Math.round(shown);
+			// '≈' when every leg is measured — WebRTC, or a data-channel
+			// feed with the camera's anchored pipeline figure — '≥' when
+			// the transport hides some of them.
+			// The camera leg counts as measured only when the camera
+			// measured it: the frame-time model that stands in for it on a
+			// buffered player without a camera line is a floor, not a leg.
+			const allLegs = parts.every((v) => v != null) && !!c2s && !c2s.approx;
+			els.lat.textContent = (mse && !(dcFeed && allLegs) ? '≥' : '≈') + Math.round(shown);
 			els.latSub.textContent = mse
-				? 'at least — includes the player buffer WebRTC skips'
+				? (dcFeed && allLegs
+					? 'glass to glass over the data channel, including the player buffer'
+					: 'at least — includes the player buffer WebRTC skips')
 				: c2s
 				? (c2s.approx ? 'glass to glass, at least' : 'glass to glass')
 				: 'network + player; the camera’s share is not included';
@@ -585,10 +619,41 @@ window.MajesticStats = (function () {
 		// triaging an issue rather than reading the story.
 		const fp = [];
 		if (mse) {
-			fp.push('transport MSE — fMP4 over WebSocket/TCP · no feedback channel');
-			fp.push('buffered ' + (s.bufferedMs != null ? Math.round(s.bufferedMs) : '-') +
+			const player = s.transport === 'wasm' ? 'software H.265' : 'MSE';
+			fp.push('transport ' + player + ' — fMP4 over ' +
+				(dcFeed ? 'a WebRTC data channel (unreliable, unordered)'
+					: 'WebSocket/TCP · no feedback channel'));
+			fp.push('buffered ' + (bufMs != null ? Math.round(bufMs) : '-') +
 				' ms · re-buffered ' + (s.stalls || 0) + '\u00d7 · dropped ' +
-				(s.droppedFrames || 0) + ' of ' + (s.totalFrames || 0) + ' frames');
+				droppedFrames + ' of ' + totalFrames + ' frames' +
+				(s.discarded ? ' · discarded after a gap ' + s.discarded : ''));
+			if (dcFeed) {
+				// What the channel itself saw, and what the camera said of it:
+				// the dc keys of its stats line, verbatim.
+				const d = s.dc;
+				fp.push('channel: holes ' + (d.seqGaps || 0) + ' · camera-flagged gaps ' +
+					(d.camGaps || 0) + ' · late ' + (d.late || 0) + ' · split messages ' +
+					(d.partsReassembled || 0) + ' · round trip ' +
+					(d.rttMs != null ? d.rttMs + ' ms' : '-') + ' · camera queue ' +
+					(d.queueMs != null ? d.queueMs + ' ms' : '-'));
+				const keys = Object.keys(cam).filter((k) => /^dc/.test(k));
+				if (keys.length) fp.push(keys.map((k) => k + '=' + cam[k]).join(' '));
+			}
+			if (s.lag && s.lag.n) {
+				// Capture→arrival from the producer reference times, when the
+				// camera stamps its fragments. The spread is exact; the
+				// absolute figure carries this browser's clock offset from the
+				// camera's, corrected here by the camera's own clock sample
+				// (its sr= key, less half the round trip) when there is one.
+				let corr = '';
+				const clk = dcFeed && s.dc.clock;
+				if (clk && rttMs != null) {
+					const offset = clk.atMs - clk.wallMs - rttMs / 2;
+					corr = ' · clock-corrected p50 ' + Math.round(s.lag.p50 - offset) + ' ms';
+				}
+				fp.push('capture\u2192arrival p50 ' + s.lag.p50 + ' ms · p95 ' + s.lag.p95 +
+					' ms (' + s.lag.n + ' frames' + (corr ? corr : '; relative to this browser\u2019s clock') + ')');
+			}
 		} else {
 			if (cam.ice) fp.push('ice ' + cam.ice + ' · dtls ' + cam.dtls + ' · media ' + cam.media);
 			fp.push((cam.remb ? 'estimate ' + cam.remb : 'estimate -') +
@@ -697,6 +762,7 @@ window.MajesticStats = (function () {
 			rows.push([label + ' × ' + v[key], rt != null ? fmtBps(rt) : '']);
 		};
 		consumer('webrtc_sessions_total', 'WebRTC', 'webrtc_tx_bytes');
+		consumer('webrtc_data_sessions', 'data channel', 'webrtc_data_tx_bytes');
 		consumer('rtsp_clients_total', 'RTSP', 'rtsp_tx_bytes');
 		consumer('outgoing_streams_total', 'Outgoing push', 'outgoing_tx_bytes');
 		consumer('ws_video_clients_total', 'Browser (MSE)', null);
