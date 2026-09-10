@@ -1,14 +1,14 @@
 // Reattaching the Firmware page to an upgrade that is already running.
 //
-// The failure this pins is the one from the field report behind
-// OpenIPC/majestic#682: a browser reloaded mid-flash used to land on the
-// ordinary Update card with no sign that sysupgrade was erasing the flash, and
-// the old one-session /ws/upgrade answered a second connection with 503. The
-// user cut power. So the page must, on load, notice an upgrade in progress
-// (update.cgi sets data-active on #fw-inflight from majestic's
-// /tmp/majestic-upgrade-owner) and ATTACH to the running socket — showing the
-// progress view and streaming the transcript — WITHOUT sending a start frame,
-// because sending one is what begins an upgrade and one is already under way.
+// The failure this pins is a field one: a browser reloaded mid-flash used to
+// land on the ordinary Update card with no sign that sysupgrade was erasing the
+// flash, because the camera keeps a single upgrade session and answered the
+// second connection with 503. The user cut power. So the page must, on load,
+// notice an upgrade in progress (update.cgi sets data-active on #fw-inflight
+// from the camera's upgrade-in-progress marker) and ATTACH to the running
+// socket — showing the progress view and streaming the transcript — WITHOUT
+// sending a start frame, because sending one begins an upgrade and one is
+// already under way.
 //
 // It fails silently the same way the changelog does: attach or not, the page
 // renders something plausible, and only a test can tell "attached to the live
@@ -134,6 +134,21 @@ function load(active) {
 	check('the streamed banner reaches the transcript',
 		r.termWrites.join('').indexOf('Do not power off') !== -1,
 		r.termWrites.join(''));
+
+	group('an older firmware that refuses the second connection keeps the warning');
+
+	// The marker said an upgrade is in progress, but the socket will not open —
+	// what an older single-session firmware does, answering the second
+	// connection with 503. The flash is still running, so the safety warning
+	// must survive rather than be replaced with "could not start the upgrade".
+	r = load('1');
+	r.ws.onerror();
+	check('a failed attach does not report "could not start"',
+		!/could not start/i.test(r.els['fw-status'].textContent),
+		r.els['fw-status'].textContent);
+	check('and the do-not-power-off warning is kept',
+		/do not power off/i.test(r.els['fw-status'].textContent),
+		r.els['fw-status'].textContent);
 
 	group('a page loaded when nothing is flashing does not attach');
 

@@ -44,13 +44,14 @@
 		printf '%s %s %s' "$d" "$m" "$y"
 	}
 
-	# An upgrade is already running when majestic is holding upgrade mode, which
-	# it advertises by dropping /tmp/majestic-upgrade-owner (src/main.c, removed
-	# again by leave_upgrade_mode). update.js reads the flag below and reattaches
-	# to the running /ws/upgrade instead of offering a fresh one, so a page
-	# reloaded mid-flash shows the live transcript and the "do not power off"
-	# warning again rather than a bare Update card. The reported failure was a
-	# browser refresh landing on the old one-session 503 (OpenIPC/majestic#682).
+	# An upgrade is already running when the camera is holding upgrade mode, which
+	# it advertises by keeping the file /tmp/majestic-upgrade-owner present for as
+	# long as it lasts and removing it when the upgrade ends. update.js reads the
+	# flag below and reattaches to the running /ws/upgrade instead of offering a
+	# fresh one, so a page reloaded mid-flash shows the live transcript and the
+	# "do not power off" warning again rather than a bare Update card. Without it
+	# a reload during a flash lost both: the camera keeps a single upgrade session
+	# and answers a second connection with 503, and the user cut power blind.
 	fw_active=""
 	[ -f /tmp/majestic-upgrade-owner ] && fw_active=1
 
@@ -148,12 +149,11 @@
     land in a block that is still hidden. %>
 <div id="fw-status" role="status" aria-live="polite"></div>
 
-<%# Set when majestic is holding upgrade mode (its /tmp/majestic-upgrade-owner).
+<%# Set when the camera is holding upgrade mode (the marker file checked above).
     update.js reads data-active and reattaches to /ws/upgrade instead of offering
     a fresh upgrade, so a page reloaded mid-flash shows the live transcript and
-    the "do not power off" warning again rather than a bare Update card
-    (OpenIPC/majestic#682). Always present so the reader is `$('#fw-inflight')`,
-    never a missing node. %>
+    the "do not power off" warning again rather than a bare Update card. Always
+    present so the reader is `$('#fw-inflight')`, never a missing node. %>
 <div id="fw-inflight" hidden data-active="<% attr_escape "$fw_active" %>"></div>
 
 <div id="fw-controls">

@@ -341,8 +341,10 @@
 	// Open /ws/upgrade and wire the log, reboot watch and error handling. onOpen
 	// runs once the socket is up (opened is already set) and is the one thing the
 	// two flows differ by: starting an upgrade sends the JSON params, attaching
-	// to one sends nothing.
-	function connectUpgrade(onOpen) {
+	// to one sends nothing. onError, if given, replaces the default pre-open
+	// failure handling — the attach flow needs its own, because a failed open
+	// there does not mean "could not start" and must not drop the safety warning.
+	function connectUpgrade(onOpen, onError) {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		const ws = new WebSocket(proto + '://' + location.host + '/ws/upgrade');
 		ws.binaryType = 'arraybuffer';
@@ -378,6 +380,7 @@
 		ws.onerror = () => {
 			if (opened) return;
 			if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
+			if (onError) { onError(); return; }
 			status('danger', 'Could not start the upgrade. Another session may be in progress, or the camera is unreachable.');
 			resumeHeartbeat();
 		};
@@ -397,12 +400,12 @@
 		});
 	}
 
-	// A page loaded while majestic is already flashing (update.cgi found
-	// /tmp/majestic-upgrade-owner). Attach to the running /ws/upgrade instead of
-	// starting a new one: majestic replays the transcript from the top and leads
-	// it with a "do not power off" banner, so the reload lands on the live log
-	// rather than a bare Update card (OpenIPC/majestic#682). No JSON frame is
-	// sent — sending one is what starts an upgrade, and one is already running.
+	// A page loaded while the camera is already flashing (update.cgi found the
+	// upgrade-in-progress marker). Attach to the running /ws/upgrade instead of
+	// starting a new one: the camera replays the transcript from the top and
+	// leads it with a "do not power off" banner, so the reload lands on the live
+	// log rather than a bare Update card. No JSON frame is sent — sending one is
+	// what starts an upgrade, and one is already running.
 	function attachToRunning() {
 		showProgress(null, true);
 		resetRunState();
@@ -411,13 +414,23 @@
 		status('warning', 'An upgrade is in progress — do not power off…');
 		connectUpgrade(() => {
 			// If the socket opens but nothing arrives, the upgrade ended between the
-			// page render and now (majestic was not in progress, so it did not
+			// page render and now (the camera was not in progress, so it did not
 			// replay anything and is waiting for a frame we will never send). Reload
 			// to a fresh page rather than sit on a progress view that will never
 			// move; the reboot/normal state is what the new render shows. A real
 			// attach replays immediately, so this only fires when there was nothing
 			// to attach to.
 			setTimeout(() => { if (!sawData && !polling) location.reload(); }, 5000);
+		}, () => {
+			// The socket would not open, but the page was rendered from a camera
+			// that reported an upgrade in progress — the likeliest cause is an
+			// older firmware that keeps a single upgrade session and refuses this
+			// second connection with 503. The flash is still running and will
+			// reboot when it finishes, so the "do not power off" warning MUST NOT
+			// be replaced with "could not start"; watch for the reboot instead,
+			// which keeps that warning up and then carries on when the camera
+			// returns. We just cannot show the transcript on this firmware.
+			beginPollBack();
 		});
 	}
 
@@ -736,12 +749,12 @@
 		loadChanges();
 	}
 
-	// If majestic is already flashing when this page loads, attach to it before
+	// If the camera is already flashing when this page loads, attach to it before
 	// wiring the buttons — the running upgrade is the only thing on this page,
 	// and the transcript and warning come back with it. update.cgi sets
-	// data-active on #fw-inflight from /tmp/majestic-upgrade-owner. This script
-	// is not deferred and sits at the end of the body, so the node above it
-	// already exists. See attachToRunning / OpenIPC/majestic#682.
+	// data-active on #fw-inflight from the upgrade-in-progress marker. This
+	// script is not deferred and sits at the end of the body, so the node above
+	// it already exists. See attachToRunning.
 	const inflight = $('#fw-inflight');
 	if (inflight && inflight.dataset.active === '1') attachToRunning();
 
