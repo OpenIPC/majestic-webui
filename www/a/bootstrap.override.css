@@ -2969,9 +2969,11 @@ button.mj-osd-chip,
 	   visibly jumps size a second after it appeared. Sizing to the large,
 	   bar-collapsed height holds the picture the size it will be from the first
 	   frame; the cost is that the bottom of the stage sits under the URL bar until
-	   it collapses, where the control bar is overlaid and revealed on demand
-	   regardless. On every desktop browser lvh, dvh and vh are the same value, so
-	   nothing there changes. */
+	   it collapses. The control bar handles that itself -- it is lifted to the
+	   visible bottom by lvh - dvh (see .mj-bar) rather than left at the stage
+	   bottom -- so it stays reachable even where the URL bar never collapses. On
+	   every desktop browser lvh, dvh and vh are the same value, so nothing there
+	   changes. */
 	height: 100vh;
 	height: 100lvh;
 	display: flex;
@@ -3607,6 +3609,17 @@ button.mj-osd-chip,
 .mj-bar {
 	position: absolute;
 	inset: auto 0 0 0;
+	/* Pinned to the VISIBLE bottom, not the stage bottom. The stage is sized to
+	   the large (URL-bar-collapsed) viewport so the picture never reflows (see
+	   #page-live), but on a browser whose URL bar does not collapse -- a
+	   non-scrolling page in Opera for Android -- the stage bottom, and the bar
+	   with it, sit under that bar out of reach (majestic-webui#317). lvh - dvh
+	   is exactly how far the stage bottom is below the visible area right now, so
+	   lifting the bar by that much lands it on the visible bottom and follows the
+	   URL bar if it does move. Zero on every desktop browser and in fullscreen,
+	   where lvh and dvh are equal; a browser too old for the units keeps the
+	   inset's own bottom: 0. */
+	bottom: calc(100lvh - 100dvh);
 	z-index: 6;
 	display: flex;
 	flex-wrap: wrap;

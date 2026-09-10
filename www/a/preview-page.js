@@ -150,7 +150,11 @@
 	function hideTapPlay() { if (tapPlay) tapPlay.hidden = true; }
 
 	function showVideo() {
-		hideTapPlay();
+		// Not hidden here: 'playing' is the pipeline coming up, which is when a
+		// parked picture is about to raise the invitation, not a reason to take
+		// it down. A picture that genuinely replaces the one on screen clears it
+		// through onPromoted; a picture that actually plays clears it through
+		// 'resumed'. Hiding on every 'playing' was the flash on reload (#317).
 		const v = cur();
 		if (v) { v.style.display = ''; v.style.background = '#000'; }
 		if (note) note.style.display = 'none';
@@ -947,6 +951,10 @@
 					audio: audioOn, volume: vol },
 				handlersFor(id, onState))),
 		onPromoted: (kind, proven) => {
+			// A different picture is taking the stage, so any tap invitation the
+			// last one raised belongs to a picture that is gone; take it down. The
+			// incoming picture raises its own, once, if it too parks (#317).
+			hideTapPlay();
 			player = swap.player();
 			liveKind = kind;
 			liveEl = swap.element();
@@ -1091,20 +1099,15 @@
 			}
 			// Not while the fallback picture is being held: these describe the
 			// attempt, and the chip has to go on describing the stage.
-			// Anything else — connecting, reconnecting, an error — is the
-			// session no longer sitting on a parked frame, so the tap invitation
-			// comes down; it returns only when the picture parks again and the
-			// player re-announces 'gesture'. A tap during a reconnect could not
-			// start anything anyway (the player rebinds its gesture retry to the
-			// new attempt), so an invitation that stayed up would be one the
-			// viewer's tap fell through.
-			else {
-				hideTapPlay();
-				// Not while the fallback picture is being held: these describe the
-				// attempt, and the chip has to go on describing the stage.
-				if (badge && !holdingFallback) {
-					badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
-				}
+			// Anything else — connecting, reconnecting, an error — describes the
+			// attempt and only writes the chip. The tap invitation is left as it
+			// is: a picture parked over a brief reconnect is still a picture
+			// waiting for a tap, and taking the button down and putting it back
+			// on every transient was half of the flicker the reporter saw (#317).
+			// Not while the fallback picture is being held: these describe the
+			// attempt, and the chip has to go on describing the stage.
+			else if (badge && !holdingFallback) {
+				badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
 			}
 		},
 	});

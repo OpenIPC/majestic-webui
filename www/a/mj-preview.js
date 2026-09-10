@@ -285,7 +285,6 @@ window.MajesticPreview = (function () {
 		function hideTapPlay() { if (tapPlay) tapPlay.hidden = true; }
 
 		function announcePlaying(kind) {
-			hideTapPlay();
 			if (announced === kind) return;
 			announced = kind;
 			if (opts.onPlaying) opts.onPlaying(kind);
@@ -450,6 +449,10 @@ window.MajesticPreview = (function () {
 			onPromoted: (kind, proven) => {
 				exhausted = false;
 				hideAlert();
+				// A different picture is taking the stage: any tap invitation the
+				// last one raised is for a picture that is gone, so take it down.
+				// The incoming picture raises its own if it too parks (#317).
+				hideTapPlay();
 				// The idle pair of the other kind is hidden by nobody — the swap
 				// only touches the slot it is using — so an empty <video> would
 				// sit visible under a painting canvas.
@@ -486,14 +489,14 @@ window.MajesticPreview = (function () {
 			// empty black box is indistinguishable from a camera that is off.
 			onExhausted: (kind, detail) => { chain.next(kind, detail); },
 			onLive: (st, d, kind) => {
-				// A muted picture parked on its first frame waiting for a tap
-				// (#317): raise the invitation. Any other state — it played, it
-				// reconnects, it failed — means the picture is no longer parked
-				// on a still frame, so the invitation comes down here and returns
-				// only when 'gesture' is next announced.
+				// A muted picture parked on its first frame is waiting for a tap
+				// (#317): raise the invitation on 'gesture', take it down on
+				// 'resumed' (the picture really played). Every other state is the
+				// attempt talking — connecting, a reconnect, its first bytes — and
+				// leaves the invitation alone; a different picture on the stage
+				// clears it through onPromoted, a lost one through showAlert.
 				if (st === 'gesture') { showTapPlay(); return; }
-				hideTapPlay();
-				if (st === 'resumed') return;
+				if (st === 'resumed') { hideTapPlay(); return; }
 				// The live player's own report that it is playing. This is the
 				// only place a FIRST attach can say so — it was promoted before
 				// it had anything, so its picture arrives here rather than as a
