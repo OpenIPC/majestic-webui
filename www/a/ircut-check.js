@@ -882,13 +882,101 @@
 	//
 	// Spoken only while it is the thing in the way. "The exposure is off its
 	// ceiling" on every tick of every night is noise, and the chart is already
-	// showing what is then actually being waited for.
+	// showing what is then actually being waited for. A standing refusal is
+	// the thing in the way when there is one, and it is the more specific
+	// answer, so it silences this one rather than queueing behind it.
 	function stillPinned(v) {
 		if (!v || !('isp_exposureismax' in v)) return '';
 		return v.isp_exposureismax > 0
 			? ' The exposure is still at its ceiling, so day waits whatever ' +
 				'the gain does.'
 			: '';
+	}
+
+	// ── What the last lamp-down check found ────────────────────────────────
+	//
+	// A night spent under the camera's own illuminator argues for day on every
+	// tick: the lamp is most of what the gain is reading. majestic answers that
+	// by dropping the lamp for three seconds before it believes a day, and a
+	// refusal is the CORRECT outcome for a lit room that is not daylight — but
+	// it is invisible here. The gauges go on showing a gain under the day mark
+	// and a countdown that never arrives, which reads as a switch that is
+	// broken (OpenIPC/majestic-webui#370). The verdict lived in the daemon's
+	// log alone until it was published; this is it on the page that sets the
+	// thresholds it is about.
+	//
+	// Absent gauges mean no check has ever completed — no lamp, or a door that
+	// does not decide day on the camera's own gain — and then there is nothing
+	// to say, which is different from a check that said no.
+	const PROBE_REFUSED = 0, PROBE_CONFIRMED = 1, PROBE_UNREADABLE = 2;
+	// How long a confirmed day stays worth mentioning. A refusal explains the
+	// state the camera is in right now and is said for as long as it stands; a
+	// confirmation explains a switch that already happened, and by the middle
+	// of the afternoon "the last check found daylight" is just an old sentence
+	// taking up the line.
+	const PROBE_FRESH_S = 3600;
+
+	// Read as they arrive, and deliberately NOT projected forward the way the
+	// countdown beside them is. The projection the countdown uses measures
+	// time since the monitor's gauges last CHANGED — the streak only moves on
+	// the camera's own tick, which is slower than the poll, so it has to be
+	// read forward — and on a settled night those gauges do not change for
+	// minutes at a stretch. These two are recomputed by the camera on every
+	// scrape, so they are already current: adding that projection to them
+	// would age a check by however long the monitor happened to sit still,
+	// and floor "looks again in" to nothing while a stand-off was still
+	// running. Both are said coarsely enough that a poll period does not
+	// show.
+	function probeState(v) {
+		if (!v || typeof v.night_probe_verdict !== 'number') return null;
+		const milli = v.night_probe_gain_milli;
+		return {
+			verdict: v.night_probe_verdict,
+			// -1 is the camera saying it could not read the gain, which is not
+			// a gain of nothing.
+			gain: typeof milli === 'number' && milli >= 0 ? milli / 1000 : null,
+			age: typeof v.night_probe_age_seconds === 'number'
+				? Math.max(0, v.night_probe_age_seconds) : null,
+			wait: typeof v.night_probe_wait_seconds === 'number'
+				? Math.max(0, v.night_probe_wait_seconds) : 0,
+		};
+	}
+
+	const gainWord = (x) => (x >= 10 ? String(Math.round(x)) : x.toFixed(1)) + 'x';
+	// Coarse on purpose, and never zero: these are read while something is
+	// being decided somewhere else, and a number that ticks is a number that
+	// invites being watched instead of the picture.
+	function agoWord(s) {
+		if (s < 90) return 'a moment ago';
+		if (s < 3600) return Math.round(s / 60) + ' min ago';
+		return Math.round(s / 3600) + ' h ago';
+	}
+	function inWord(s) {
+		return s < 90 ? s + ' s' : Math.round(s / 60) + ' min';
+	}
+
+	function probeNote(p) {
+		if (!p) return '';
+		if (p.verdict === PROBE_UNREADABLE) {
+			return ' The last check could not read the sensor with the lamp ' +
+				'down, so night holds.';
+		}
+		// A camera that states a verdict without an age is stating half of
+		// one. The refusal survives it — it explains the night the camera is
+		// in right now, whenever it was reached — but a confirmation is only
+		// worth saying while it is fresh, and an unageable one cannot be
+		// known to be.
+		const when = p.age === null ? '' : ' ' + agoWord(p.age);
+		const found = p.gain === null ? '' : ' and found ' + gainWord(p.gain);
+		if (p.verdict === PROBE_CONFIRMED) {
+			if (p.age === null || p.age > PROBE_FRESH_S) return '';
+			return ' The last check dropped the lamp' + when +
+				found + ': real daylight.';
+		}
+		if (p.verdict !== PROBE_REFUSED) return '';
+		return ' The last check dropped the lamp' + when + found +
+			' — the light in view is the camera\'s own, so night holds' +
+			(p.wait > 0 ? '; it looks again in ' + inWord(p.wait) : '') + '.';
 	}
 
 	function monitorView(nm, v, ageS) {
@@ -968,8 +1056,21 @@
 			// repeating.
 			const left = typeof dwell === 'number' && streak !== null
 				? Math.max(0, Math.min(dwell, dwell - streak)) : null;
+			// With a refusal standing, "switching in 40 s" is a promise the
+			// camera has already broken once and will break again: what
+			// happens at the end of the dwell is another lamp-down check, and
+			// whether it ends the night is the scene's business, not the
+			// countdown's. Same number, said as what it is.
+			// Only on the way to day. The check stands between this camera
+			// and a DAY; night needs no permission from it, and "checking
+			// again" under "Dark enough for night" would describe a step that
+			// is not in that path at all.
+			const probe = probeState(v);
+			const refused = !!probe && probe.verdict === PROBE_REFUSED;
+			const stands = refused && pend === 2;
 			const inLeft = left === null ? '.' :
-				' — switching in ' + left + ' s if it stays.';
+				(stands ? ' — checking again in ' : ' — switching in ') +
+				left + ' s' + (stands ? '.' : ' if it stays.');
 			const line = pend === 1
 				? 'Dark enough for night' + inLeft
 				: pend === 2
@@ -986,7 +1087,7 @@
 							// the mechanism and claims neither.
 							: inNight === true
 								? '; day comes when the gain settles back ' +
-									'down.' + stillPinned(v)
+									'down.' + (refused ? '' : stillPinned(v))
 								: inNight === false
 									? '; night comes when the exposure runs ' +
 										'out.' + runOut(v)
@@ -994,7 +1095,7 @@
 			return {
 				mode: 'auto', chart: true,
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
-				marks: marks, line: line + lampNote,
+				marks: marks, line: line + lampNote + probeNote(probe),
 				unit: 'x',
 			};
 		}
@@ -1043,7 +1144,7 @@
 					'Comparing raw sensor gain (vendor units) against the ' +
 					'thresholds. It switches on the first check past one, ' +
 					'every ' + everyS + ' s — so there is no countdown.' +
-					lampNote,
+					lampNote + probeNote(probeState(v)),
 				unit: '',
 			};
 		}

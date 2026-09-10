@@ -560,6 +560,136 @@ function runRest() {
 				!/day comes when/.test(unknown), unknown);
 	}
 
+	group('monitorView: the lamp-down check has a verdict, and it is said');
+	{
+		// The state the whole day probe exists for, and the one the page could
+		// not show: a room lit by the camera's own illuminator reads under the
+		// day threshold on every tick, the camera checks with the lamp down
+		// and correctly refuses, and every gauge on this page goes on
+		// promising a day that never comes (#370). The verdict is a gauge now,
+		// so the sentence can say what happened instead of leaving the
+		// countdown to be believed.
+		const lit = (extra) => ic.monitorView({ lightMonitor: true },
+			Object.assign({ night_mode_source: 4, night_enabled: 1,
+				night_auto_gain_milli: 1620 }, extra)).line;
+
+		const refused = lit({ night_probe_verdict: 0,
+			night_probe_gain_milli: 15500, night_probe_age_seconds: 120,
+			night_probe_wait_seconds: 300 });
+		check('a standing refusal is said, with what the scene needed',
+			/dropped the lamp 2 min ago and found 16x/.test(refused), refused);
+		check('...and named as the camera\'s own light',
+			/the light in view is the camera's own, so night holds/.test(refused),
+			refused);
+		check('...and says when it will look again',
+			/it looks again in 5 min/.test(refused), refused);
+
+		// A countdown under a standing refusal is a promise already broken
+		// once. The number is honest; what happens at the end of it is a
+		// check, not a switch.
+		const counting = lit({ night_auto_pending: 2,
+			night_auto_dwell_seconds: 60, night_auto_streak_seconds: 20,
+			night_probe_verdict: 0, night_probe_gain_milli: 15500,
+			night_probe_age_seconds: 30, night_probe_wait_seconds: 0 });
+		check('the countdown says what the camera will actually do',
+			/checking again in 40 s/.test(counting) &&
+				!/switching in/.test(counting), counting);
+
+		// Two explanations for one held night, and the refusal is the
+		// specific one: it says what is in view, where the ceiling clause
+		// only says the exposure has nothing left.
+		const both = lit({ isp_exposureismax: 1, night_probe_verdict: 0,
+			night_probe_gain_milli: 15500, night_probe_age_seconds: 30 });
+		check('the refusal silences the ceiling clause rather than joining it',
+			!/still at its ceiling/.test(both) &&
+				/the light in view is the camera's own/.test(both), both);
+		// And with no refusal standing the ceiling clause is still spoken —
+		// otherwise the check above passes on a sentence that never had one.
+		const ceiling = lit({ isp_exposureismax: 1 });
+		check('...and is otherwise still spoken',
+			/still at its ceiling/.test(ceiling), ceiling);
+
+		// The other direction needs no permission from the check: night is
+		// not what it stands between the camera and, and "checking again"
+		// under "Dark enough for night" describes a step that is not in that
+		// path.
+		const toNight = lit({ night_enabled: 0, night_auto_pending: 1,
+			night_auto_dwell_seconds: 15, night_auto_streak_seconds: 5,
+			night_probe_verdict: 0, night_probe_gain_milli: 15500,
+			night_probe_age_seconds: 30 });
+		check('the night countdown is left alone',
+			/switching in 10 s if it stays/.test(toNight), toNight);
+
+		// The camera that has never run one — no lamp, or a door that does not
+		// decide day on its own gain — publishes nothing, and an absence is
+		// not a refusal.
+		const quiet = lit({});
+		check('no check, nothing said', !/dropped the lamp/.test(quiet), quiet);
+
+		// A confirmation explains a switch that already happened. It is worth
+		// a line while it is what just happened, and by mid-afternoon it is
+		// an old sentence holding the space.
+		const dawn = lit({ night_enabled: 0, night_probe_verdict: 1,
+			night_probe_gain_milli: 1400, night_probe_age_seconds: 90 });
+		check('a fresh confirmation is said', /real daylight/.test(dawn), dawn);
+		const stale = lit({ night_enabled: 0, night_probe_verdict: 1,
+			night_probe_gain_milli: 1400, night_probe_age_seconds: 7200 });
+		check('a stale one is not', !/real daylight/.test(stale), stale);
+
+		const blind = lit({ night_probe_verdict: 2,
+			night_probe_gain_milli: -1, night_probe_age_seconds: 10 });
+		check('a check that could not read says that instead',
+			/could not read the sensor with the lamp down/.test(blind), blind);
+
+		// -1 is the camera saying it could not read the gain. Printing it as a
+		// gain, or as nothing at all, both invent a number it did not give.
+		const nogain = lit({ night_probe_verdict: 0,
+			night_probe_gain_milli: -1, night_probe_age_seconds: 30,
+			night_probe_wait_seconds: 0 });
+		check('a refusal with no readable gain still holds the night',
+			!/and found/.test(nogain) && /so night holds/.test(nogain), nogain);
+
+		// The countdown's projection measures time since the MONITOR's gauges
+		// last changed, which on a settled night is minutes — it exists
+		// because the streak only moves on the camera's own tick. These two
+		// are recomputed on every scrape, so reading them forward by that
+		// same number ages a check by however long the monitor sat still and
+		// floors the next one to nothing while its stand-off is still
+		// running. The camera's numbers, as given.
+		const settled = ic.monitorView({ lightMonitor: true },
+			{ night_mode_source: 4, night_enabled: 1,
+				night_auto_gain_milli: 1620, night_probe_verdict: 0,
+				night_probe_gain_milli: 15500, night_probe_age_seconds: 120,
+				night_probe_wait_seconds: 300 }, 240).line;
+		check('a monitor that has sat still does not age the check with it',
+			/dropped the lamp 2 min ago/.test(settled) &&
+				/looks again in 5 min/.test(settled), settled);
+
+		// A verdict with no age is half a verdict. The refusal survives it —
+		// it explains the night the camera is in now, whenever it was reached
+		// — but a confirmation is only worth saying while it is fresh, and an
+		// unageable one cannot be known to be. Neither may leave the gap where
+		// the time phrase would have gone.
+		const ageless = lit({ night_probe_verdict: 0,
+			night_probe_gain_milli: 15500 });
+		check('a refusal with no age still holds the night, and reads',
+			/dropped the lamp and found 16x/.test(ageless), ageless);
+		const agelessDay = lit({ night_enabled: 0, night_probe_verdict: 1,
+			night_probe_gain_milli: 1400 });
+		check('a confirmation that cannot be dated is not called fresh',
+			!/real daylight/.test(agelessDay), agelessDay);
+
+		// The legacy threshold pair goes through the same check — it is the
+		// door the report came from — so it gets the same sentence.
+		const thr = ic.monitorView(
+			{ lightMonitor: true, minThreshold: 2000, maxThreshold: 14000 },
+			{ night_mode_source: 2, night_enabled: 1, isp_again: 1500,
+				night_probe_verdict: 0, night_probe_gain_milli: 15500,
+				night_probe_age_seconds: 60 }).line;
+		check('the legacy door says it too',
+			/the light in view is the camera's own/.test(thr), thr);
+	}
+
 	group('monitorView: source 0 has two causes and says which');
 	{
 		// The same collision the finding above disentangles, in the panel's own
