@@ -7286,14 +7286,20 @@
 				const bound = window.MajesticFps.boundFor(f.schema, size);
 				if (!isNum(bound)) return;
 
-				// BEFORE touching max. Lowering the max of an <input
-				// type="range"> runs the browser's value-sanitisation algorithm
-				// and clamps .value on the spot, so a "did it need clamping?"
-				// test asked afterwards always answers no — and the readout
-				// beside the slider, which only repaints on an input event, is
-				// then left painting a number the control no longer holds. That
-				// is how a 2560x1440 row came to show 64 above a note saying 26.
-				const before = Number(f.control.value);
+				// The SEMANTIC value, before touching max, and not
+				// f.control.value. Two reasons, and they are different traps.
+				//
+				// Lowering the max of an <input type="range"> runs the browser's
+				// value-sanitisation algorithm and clamps .value on the spot, so
+				// a "did it need clamping?" test asked afterwards always answers
+				// no — that is how a 2560x1440 row came to show 64 with the
+				// slider sitting at its 26 maximum.
+				//
+				// And a range input cannot hold "no value" at all: given
+				// value="" the browser parks the thumb at the midpoint and reads
+				// that back as if somebody had chosen it. The page keeps the
+				// truth beside the control and getValue() answers with it.
+				const before = f.getValue ? String(f.getValue()) : String(f.control.value);
 
 				f.control.max = String(bound);
 				f.control.setAttribute('max', String(bound));
@@ -7303,22 +7309,44 @@
 					num.setAttribute('max', String(bound));
 				}
 
-				const after = isNum(before) ? Math.min(before, bound) : bound;
-				f.control.value = String(after);
+				// Repaint through the control's own setter, never by dispatching
+				// `input`. The range branch treats an input event as a human
+				// moving the thumb and records the field as chosen, so a
+				// synthetic one would turn an untouched frame rate into an
+				// invented number and put it in the next save — on page load, on
+				// every camera, without anyone touching the control.
+				const repaint = (val) => {
+					if (f.control._set) f.control._set(val);
+					else f.control.value = val;
+				};
 
-				// Always, even when the number did not move: the readout repaints
-				// from this event and nothing else, and a max that changed under
-				// an unchanged value still changes what the track means.
-				f.control.dispatchEvent(new Event('input', { bubbles: true }));
-				// Only when it did: `change` is what the dirty count and the
-				// save set read, and firing it on every resolution touch would
-				// mark the field edited when nothing about it was.
+				// Unset stays unset. The track's meaning changed under it, which
+				// is exactly what the repaint is for, but nothing was chosen.
+				if (before === '') {
+					repaint('');
+					return;
+				}
+
+				const after = String(Math.min(Number(before), bound));
+				repaint(after);
+
+				// Only when the number actually moved: `change` is what the dirty
+				// count and the save set read, and firing it on every resolution
+				// touch would mark the field edited when nothing about it was.
 				if (after !== before)
 					f.control.dispatchEvent(new Event('change', { bubbles: true }));
 			};
 
-			sizeCtrl.control.addEventListener('change', retune);
-			sizeCtrl.control.addEventListener('input', retune);
+			// On the resolution's ROW, not its select. "Custom…" puts the
+			// effective value in a separate text input beside the dropdown, so a
+			// listener on the select alone never hears an operator type one —
+			// the bound stayed tied to whatever preset was chosen before, and
+			// offered a rate belonging to a resolution no longer selected.
+			// Both events bubble, and siblingSize() reads the field's value
+			// rather than the select's, so one listener covers both controls.
+			const sizeRow = sizeCtrl.p || sizeCtrl.control;
+			sizeRow.addEventListener('change', retune);
+			sizeRow.addEventListener('input', retune);
 			retune();
 		}
 
