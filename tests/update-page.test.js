@@ -73,8 +73,8 @@ function run(opts) {
 	};
 	for (const id of ['fw-output', 'fw-installed', 'fw-status', 'fw-controls',
 		'fw-progress', 'fw-head', 'fw-counts', 'fw-news', 'fw-news-body',
-		'fw-steps', 'fw-bar', 'fw-progress-hl', 'fw-install-github',
-		'fw-install-upload']) {
+		'fw-steps', 'fw-meter', 'fw-meter-what', 'fw-meter-pct', 'fw-bar',
+		'fw-progress-hl', 'fw-install-github', 'fw-install-upload']) {
 		els[id] = makeEl(id);
 	}
 	els['fw-counts'].hidden = true;

@@ -408,14 +408,34 @@
 					<h3 class="mj-hero-hl" id="fw-progress-hl">Writing firmware</h3>
 					<%# Only ever a percentage sysupgrade itself printed. A bar that
 					    invents its own progress is worse than none: this one is
-					    hidden until the download meter says a number, and hidden
-					    again once it stops. %>
-					<div id="fw-bar" class="progress mt-3" role="progressbar" hidden><div class="progress-bar"></div></div>
+					    hidden whenever nothing on the camera is reporting a number,
+					    and shows whatever the camera last said otherwise.
+
+					    The line above it names what the number is a percentage OF.
+					    One upgrade drives this from zero seven times — the download,
+					    then an erase, a write and a read-back over each partition,
+					    and an eighth if the overlay is wiped too — and a bar doing
+					    that unlabelled reads as one that keeps falling back to the
+					    start. %>
+					<div id="fw-meter" class="mj-meter" hidden>
+						<div class="mj-meter-head">
+							<span id="fw-meter-what"></span>
+							<span id="fw-meter-pct" class="mj-mono"></span>
+						</div>
+						<div id="fw-bar" class="progress" role="progressbar"
+						     aria-valuemin="0" aria-valuemax="100"><div class="progress-bar"></div></div>
+					</div>
+					<%# "Erasing settings" is the overlay wipe, and it is here because
+					    the bar now reports it: without a row of its own the strip
+					    would say "Rebooting" while the bar said the overlay was
+					    being erased. update.js hides it unless this run asked for
+					    the wipe. %>
 					<ol id="fw-steps" class="mj-steps">
 						<li data-step="download">Downloading</li>
 						<li data-step="verify">Verifying</li>
 						<li data-step="kernel">Writing kernel</li>
 						<li data-step="rootfs">Writing rootfs</li>
+						<li data-step="overlay">Erasing settings</li>
 						<li data-step="reboot">Rebooting</li>
 					</ol>
 				</div>

@@ -44,30 +44,175 @@
 	// the camera was already serving again in another tab.
 	const rebootMarker = /Unconditional reboot|Rebooting now/i;
 
-	// The five things a flash does, and the line sysupgrade prints when each one
-	// is behind it. Every marker here is one this file already had to recognise
-	// for another reason — nothing new is being parsed out of the log, so the
-	// strip can only ever say what the transcript already said.
+	// The things a flash does, and the line sysupgrade prints when each one is
+	// behind it. Every marker here is one this file already had to recognise for
+	// another reason — nothing new is being parsed out of the log, so the strip
+	// can only ever say what the transcript already said.
 	//
 	// Sticky, like sawFlash: `recent` is a 512-character rolling window and an
 	// early marker scrolls out of it, so a phase that has been seen is never
 	// unseen.
+	//
+	// The overlay wipe ends into the reboot rather than announcing itself, so it
+	// has no done-marker of its own; the reboot rule below is what closes it.
 	const PHASES = [
 		{ step: 'download', done: /Received and unpacked/i },
 		{ step: 'verify', done: /Protected: flashing|Stopping web server before flashing/i },
 		{ step: 'kernel', done: /Kernel updated/i },
 		{ step: 'rootfs', done: /RootFS updated/i },
+		{ step: 'overlay', done: null },
 		{ step: 'reboot', done: null },
 	];
 	const seen = {};
 
-	// A percentage sysupgrade printed, and never one this page worked out for
-	// itself: a bar that invents its own progress is worse than no bar, because
-	// it is believed. The download meter redraws one line with a bare \r, so the
-	// number arrives many times a second and stops arriving when the download
-	// ends — which is why the bar is hidden again at the next phase rather than
-	// left sitting at whatever it reached.
-	const pctMarker = /(\d{1,3}(?:\.\d+)?)\s*%/;
+	// ── the meter ────────────────────────────────────────────────────────────
+	//
+	// Only ever a percentage sysupgrade itself printed, and never one this page
+	// worked out for itself: a bar that invents its own progress is worse than
+	// no bar, because it is believed. Three tools in one run print one, each
+	// redrawing a single line with a bare \r so the number arrives many times a
+	// second:
+	//
+	//   curl -#          the download          "######            45.0%"
+	//   flashcp -v       every partition       "Erasing block: 13/32 (40%)",
+	//                                          then "Writing kb: 300/2006 (14%)",
+	//                                          then "Verifying kb: …" — busybox's
+	//                                          own three passes, in that order
+	//   flash_eraseall   the overlay wipe      "Erasing 64 Kibyte @ 8a0000 - 61% complete."
+	//
+	// So one upgrade drives the bar from zero seven times, and eight when the
+	// overlay is wiped as well. That is why the caption exists rather than the
+	// bar standing alone: measured on a hi3516ev300 with a 2 MB kernel and a
+	// 5 MB rootfs, the flash is 40 of the 50 seconds and the download is 1.6 of
+	// them, and an unlabelled bar restarting through all of it reads as one
+	// going backwards.
+	const FLASH_PASS = {
+		'Erasing block': 'Erasing', 'Writing kb': 'Writing', 'Verifying kb': 'Verifying',
+	};
+	const PART_WORD = {
+		Kernel: 'kernel', RootFS: 'rootfs', OverlayFS: 'the overlay',
+		'Firmware (combined image)': 'firmware',
+	};
+
+	// One expression over all of it, walked in the order the camera printed it,
+	// because a heading and the first reading under it must not be applied the
+	// other way round — that would put the partition about to be written on the
+	// number the one before it finished at.
+	//
+	// The headings are matched as whole lines. print_sysinfo prints "Kernel" and
+	// "RootFS" too, as the left column of a table, and those carry a tab and a
+	// value after them.
+	const METER = new RegExp([
+		String.raw`(?:^|\n)(Kernel|RootFS|OverlayFS|Firmware \(combined image\))[ \t]*(?=\n)`,
+		String.raw`(Erasing block|Writing kb|Verifying kb): *\d+/\d+ *\((\d{1,3})%\)`,
+		String.raw`Erasing +\d+ +Kibyte +@ *[0-9a-f]+ *- *(\d{1,3})% *complete`,
+	].join('|'), 'g');
+	const DL_METER = /(\d{1,3}(?:\.\d+)?) *%/g;
+
+	// Read from the newly arrived text, not from `recent`. `recent` is half a
+	// kilobyte of history — long enough for the kernel's closing "100%" to still
+	// be in it while the rootfs section is being announced — and a reading has to
+	// be judged against the pass it arrived in. The carry-over is only what it
+	// takes to rejoin a line the socket split in two, which it does: measured
+	// frames have cut "Verifying" in half.
+	let meterTail = '';
+	// Which partition the readings are about, in sysupgrade's own words.
+	let part = '';
+	// What the bar is already saying, so a reading that has not changed does not
+	// touch the DOM several times a second.
+	let meterWhat = '', meterPct = -1;
+
+	function showMeter(pass, pct) {
+		const box = $('#fw-meter');
+		if (!box) return;
+		pct = Math.max(0, Math.min(100, Math.round(pct)));
+		const what = pass + (part ? ' ' + part : '');
+		if (what !== meterWhat) {
+			meterWhat = what;
+			const w = $('#fw-meter-what');
+			if (w) w.textContent = what;
+			const bar = $('#fw-bar');
+			// The caption is the bar's label rather than a live region: a meter
+			// that announced itself at every redraw would be unusable.
+			if (bar) bar.setAttribute('aria-label', what);
+			box.classList.remove('mj-meter-stale');
+		}
+		if (pct !== meterPct) {
+			meterPct = pct;
+			const p = $('#fw-meter-pct');
+			if (p) p.textContent = pct + '%';
+			const bar = $('#fw-bar');
+			if (bar) {
+				bar.setAttribute('aria-valuenow', String(pct));
+				if (bar.firstElementChild) bar.firstElementChild.style.width = pct + '%';
+			}
+		}
+		box.hidden = false;
+	}
+
+	function hideMeter() {
+		const box = $('#fw-meter');
+		if (box) { box.hidden = true; box.classList.remove('mj-meter-stale'); }
+		meterWhat = ''; meterPct = -1;
+	}
+
+	// The transcript can stop with a pass still in flight: majestic streams it
+	// while its own text is being paged in from the partition flashcp is
+	// overwriting, so on some boards the log simply ends mid-meter. The last
+	// reading is still worth keeping — it is where the write actually got to —
+	// but it is not live any more, so it stops looking it. Left addressable
+	// afterwards: if output does resume, the next reading repaints the caption
+	// and takes the class off again.
+	function staleMeter() {
+		const box = $('#fw-meter');
+		if (!box || box.hidden) return;
+		box.classList.add('mj-meter-stale');
+		const w = $('#fw-meter-what');
+		if (w && meterWhat) w.textContent = meterWhat + ' — no longer reporting';
+		meterWhat = '';
+	}
+
+	// The last reading in the window rather than the first: one frame carries
+	// dozens of redraws of the same meter, and the first of them is the stalest
+	// number in it.
+	function trackMeter(chunk) {
+		const win = meterTail + chunk;
+		meterTail = win.slice(-64);
+
+		let pass = null, pct = -1, m;
+		METER.lastIndex = 0;
+		while ((m = METER.exec(win))) {
+			if (m[1]) {
+				// A partition announced. Anything read before it in this frame
+				// belongs to the pass that has just ended, so drop it and wait for
+				// this one to report.
+				part = PART_WORD[m[1]] || '';
+				pass = null; pct = -1;
+			} else if (m[2]) {
+				pass = FLASH_PASS[m[2]]; pct = Number(m[3]);
+			} else {
+				pass = 'Erasing'; pct = Number(m[4]);
+			}
+		}
+		if (pass) { showMeter(pass, pct); return; }
+		// Before the first partition is announced, a percentage in the stream is
+		// curl's. Gated on that rather than on the download being finished: the
+		// frame carrying "100.0%" carries "Received and unpacked" with it, so a
+		// gate on the phase would mark the download done and then refuse to read
+		// the number that says so — leaving the bar short of the end it reached.
+		if (!part) {
+			DL_METER.lastIndex = 0;
+			let d = null, x;
+			while ((x = DL_METER.exec(win))) d = x;
+			if (d) showMeter('Downloading', Number(d[1]));
+		}
+		// Anything else leaves the bar alone. Most frames during a flash carry a
+		// line of prose between two passes — "Kernel updated to …" — and taking
+		// the meter down for each of them would make the card jump; the second or
+		// so between the download's 100% and the first erase is the same case,
+		// and "Downloading 100%" is still true across it. What ends the meter is
+		// the run ending: the reboot, or an abort.
+	}
 
 	function paintPhases() {
 		const list = $('#fw-steps');
@@ -96,18 +241,7 @@
 			for (const p of PHASES) { if (p.step !== 'reboot') seen[p.step] = true; }
 			moved = true;
 		}
-		const bar = $('#fw-bar');
-		if (bar) {
-			const m = !seen.download && pctMarker.exec(chunk);
-			if (m) {
-				const pct = Math.max(0, Math.min(100, Number(m[1])));
-				bar.hidden = false;
-				bar.setAttribute('aria-valuenow', String(Math.round(pct)));
-				bar.firstElementChild.style.width = pct + '%';
-			} else if (seen.download) {
-				bar.hidden = true;
-			}
-		}
+		trackMeter(chunk);
 		if (moved) paintPhases();
 	}
 
@@ -217,6 +351,11 @@
 			term.note('--- no output for ' + (QUIET_MS / 1000) +
 				's; the camera is busy flashing ---');
 		}
+		// Nothing is measuring anything from here on. Where sysupgrade announced
+		// the reboot the passes are all behind us and the bar has nothing left to
+		// say; where the transcript simply stopped, the last reading is where the
+		// write got to and stays on screen, marked as no longer live.
+		if (rebootMarker.test(recent)) hideMeter(); else staleMeter();
 		// "do not power off" is a warning about an interrupted flash, so do not
 		// say it when sysupgrade has already told us it wrote nothing.
 		status('warning', noop
@@ -258,6 +397,7 @@
 				// and it would otherwise tick for the life of the tab.
 				if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
 				term.commit();
+				hideMeter();
 				status('danger', 'The upgrade was aborted — see the log below. Nothing was written to flash, so the camera is unchanged.');
 				resumeHeartbeat();
 			}
@@ -291,6 +431,7 @@
 			for (const li of list.children) {
 				if (li.dataset.step === 'kernel' && !p.kernel) li.style.display = 'none';
 				if (li.dataset.step === 'rootfs' && !p.rootfs) li.style.display = 'none';
+				if (li.dataset.step === 'overlay' && !p.reset) li.style.display = 'none';
 			}
 		}
 		paintPhases();
@@ -320,6 +461,9 @@
 		sawFlash = false;
 		aborted = false;
 		recent = '';
+		meterTail = '';
+		part = '';
+		hideMeter();
 		for (const k of Object.keys(seen)) delete seen[k];
 		noop = false;
 		sawData = false;
@@ -364,6 +508,7 @@
 				// above is the whole story.
 				if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
 				term.commit();
+				hideMeter();
 				return;
 			}
 			// Usually last of the three triggers rather than first — by the time a

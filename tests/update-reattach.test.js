@@ -45,12 +45,13 @@ function makeEl(id) {
 function load(active) {
 	const els = {};
 	for (const id of ['fw-output', 'fw-installed', 'fw-status', 'fw-controls',
-		'fw-progress', 'fw-progress-hl', 'fw-steps', 'fw-bar', 'fw-inflight']) {
+		'fw-progress', 'fw-progress-hl', 'fw-steps', 'fw-meter', 'fw-meter-what',
+		'fw-meter-pct', 'fw-bar', 'fw-inflight']) {
 		els[id] = makeEl(id);
 	}
 	els['fw-inflight'].dataset.active = active;
 	// A step list, so paintPhases has rows to walk.
-	for (const step of ['download', 'verify', 'kernel', 'rootfs', 'reboot']) {
+	for (const step of ['download', 'verify', 'kernel', 'rootfs', 'overlay', 'reboot']) {
 		const li = makeEl('li'); li.dataset.step = step; els['fw-steps'].children.push(li);
 	}
 
