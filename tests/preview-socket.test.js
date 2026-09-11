@@ -476,6 +476,33 @@ function load(o) {
 		env.player.destroy();
 	}
 
+	group('an announced gesture survives a reconnect and is still cleared when the picture plays (#317)');
+	{
+		// The page keeps the invitation up across a reconnect (it is still a
+		// parked picture), so the player must still emit 'resumed' when the
+		// reconnected picture plays — the rebuild must not forget it announced.
+		const env = load();
+		env.play();
+		env.video.muted = true;
+		env.video.paused = true;
+		env.video.play = () => Promise.resolve();
+		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
+		await sleep(600);
+		check('the affordance was announced', env.states.filter((s) => s === 'gesture').length === 1,
+			env.states.join(','));
+		// The socket fails; the player rebuilds and reconnects.
+		env.video.fire('error');
+		await sleep(1300);
+		check('a replacement session opened', env.sockets.length >= 2, env.sockets.length + '');
+		// The replacement's picture plays for real.
+		env.play();
+		env.video.paused = false;
+		env.video.fire('playing');
+		check('resumed is still emitted after the reconnect, so the button is taken down',
+			env.states.filter((s) => s === 'resumed').length === 1, env.states.join(','));
+		env.player.destroy();
+	}
+
 	// ---- the data-channel feed ----------------------------------------------
 	const frag = (withPrft) => {
 		const moof = new Uint8Array([0, 0, 0, 8, 0x6d, 0x6f, 0x6f, 0x66]); // an 8-byte moof

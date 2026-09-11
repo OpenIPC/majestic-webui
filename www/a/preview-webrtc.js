@@ -770,8 +770,12 @@ window.MajesticWebRTC = (function () {
 		function reconnect() {
 			// A new attempt begins here; drop any gesture retry bound to the old
 			// one so this attempt can arm its own if it too is refused autoplay.
+			// gestureArmed is NOT cleared: it records that the page is showing the
+			// invitation and is owed a 'resumed'. A reconnect keeps that debt, so
+			// the picture this attempt brings up still clears the button when it
+			// plays; clearing it here left the button stranded over a reconnected
+			// picture that played (#317). Only 'resumed' and destroy clear it.
 			disarmGesture();
-			gestureArmed = false;
 			disarmPausedTimer();
 			// Retire the attempt before dismantling it. Closing a peer
 			// connection rejects whatever it had in flight, and a rejection

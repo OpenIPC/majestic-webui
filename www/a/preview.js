@@ -241,11 +241,15 @@ window.MajesticVideo = (function () {
 
 		function teardownMse() {
 			started = false; queue = [];
+			// The retry and the pending announcement go (disarmPlayGesture), but
+			// NOT gestureArmed: it records that the page is showing the invitation
+			// and is still owed a 'resumed' to take it back down. A rebuild -- a
+			// reconnect, a codec change -- keeps that debt, so when the picture
+			// this pipeline brings up finally plays, onPlaying still emits
+			// 'resumed'; clearing it here left the button stranded over a picture
+			// that reconnected and played (#317). It is cleared only by that
+			// 'resumed', and dies with the player on destroy.
 			disarmPlayGesture();
-			// The next pipeline re-arms and re-announces 'gesture' on its own if
-			// its picture is again parked; clear the flag so that emit is not
-			// suppressed by a stale one left from the pipeline being torn down.
-			gestureArmed = false;
 			if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
 			// The lag floor describes the pipeline being torn down; the next
 			// one learns its own.
