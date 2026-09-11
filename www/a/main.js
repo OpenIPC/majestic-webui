@@ -207,7 +207,58 @@ function termWriter(el) {
 	// \u001b/\u009b escaped rather than written as the literal ESC and CSI bytes
 	// the two copies of this carried: an invisible control character in a source
 	// file survives only as long as nothing greps, copies or re-encodes the line.
-	const ansi = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+	//
+	// Both halves of this — what counts as a sequence, and how long the writer
+	// will wait for one to finish arriving — are sized from ONE decision, and
+	// they have to be. A stripper that accepts a longer sequence than the holder
+	// below is willing to wait for leaks precisely those, and only when a frame
+	// happens to split one, which is the whole fault this is about (#430). The
+	// repetitions used to be unbounded here and the wait was a round number
+	// picked to look generous; sized that way it covered a plain colour and
+	// broke a 24-bit foreground-and-background set, while every short case went
+	// on passing.
+	//
+	// So: at most 4 introducer characters and at most 16 semicolon-separated
+	// parameter groups, which makes the longest sequence recognised
+	// 1 + 4 + 4 + 15 × 5 + 1 = 85 characters. That is HOLD_MAX. Longer than
+	// anything a terminal actually emits — a full 24-bit foreground and
+	// background together is 38 — and bounded, which is what stops a stream
+	// carrying a stray introducer from holding the pane instead of spoiling a
+	// line of it.
+	const ansi = /[\u001b\u009b][[()#;?]{0,4}(?:[0-9]{1,4}(?:;[0-9]{0,4}){0,15})?[0-9A-ORZcf-nqry=><]/g;
+	// A sequence the socket delivered in two pieces, waiting for the rest of
+	// itself (#430).
+	//
+	// Stripping each chunk on its own loses one: the first piece MATCHES the
+	// expression above as though it were whole — its trailing digits satisfy that
+	// terminator class, which has to accept them because `ESC 7` and `ESC 8` are
+	// real sequences — so the half that follows arrives with no escape character
+	// in front of it and is rendered as text. A frame boundary one byte later
+	// leaves "m" on a line of its own; one byte earlier puts the escape character
+	// itself into the pane.
+	//
+	// So a tail that could still grow into a sequence is held back until the next
+	// chunk says whether it did. "Could still grow" is the precise question, and
+	// not the one the expression above answers — being unable to tell a truncated
+	// sequence from a finished one is the bug. This is that expression with the
+	// terminator taken off: everything a sequence may contain before its last
+	// character, and nothing that could be that character. Past HOLD_MAX there is
+	// no sequence this writer would have stripped anyway, so nothing is held and
+	// the pane keeps painting.
+	const HOLD_MAX = 85;
+	const growing = /^[\u001b\u009b][[()#;?]{0,4}(?:[0-9]{1,4}(?:;[0-9]{0,4}){0,15})?$/;
+	function heldTail(s) {
+		const from = Math.max(0, s.length - HOLD_MAX);
+		for (let i = s.length - 1; i >= from; i--) {
+			const c = s.charCodeAt(i);
+			if (c !== 0x1b && c !== 0x9b) continue;
+			// The rightmost introducer decides it: anything before it has already
+			// been resolved one way or the other.
+			return growing.test(s.slice(i)) ? s.length - i : 0;
+		}
+		return 0;
+	}
+	let pending = '';
 	const doneNode = document.createTextNode('');
 	const lineNode = document.createTextNode('');
 	el.appendChild(doneNode);
@@ -221,11 +272,18 @@ function termWriter(el) {
 	let col = 0;        // cursor position within it
 
 	return {
-		// Returns the chunk with ANSI removed, so a caller matching markers can
-		// feed its rolling window the same text that was rendered rather than
-		// stripping the stream a second time.
+		// Returns the text with ANSI removed, so a caller matching markers can feed
+		// its rolling window the stream itself rather than stripping it a second
+		// time. The stream and not the pane: a \r redraw leaves one line on screen
+		// and every reading in here, which is what stops a marker being missed
+		// because a later redraw painted over the line that carried it. A held-back
+		// escape simply defers its bytes to the next call, and a held tail is an
+		// introducer and parameter bytes, so it can carry no word anyone matches on.
 		write(t) {
-			const s = t.replace(ansi, '');
+			const raw = pending + t;
+			const hold = heldTail(raw);
+			pending = hold ? raw.slice(raw.length - hold) : '';
+			const s = (hold ? raw.slice(0, raw.length - hold) : raw).replace(ansi, '');
 			let commit = '';
 			for (let i = 0; i < s.length; i++) {
 				const ch = s[i];
