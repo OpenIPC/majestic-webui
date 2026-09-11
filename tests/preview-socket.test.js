@@ -79,6 +79,10 @@ function makeVideo(env) {
 function load(o) {
 	const env = { sockets: [], states: [], dc: o && o.dc };
 	const video = makeVideo(env);
+	// iPhone Safari has ONLY window.ManagedMediaSource; drive the same stub
+	// through that global (and no window.MediaSource) to exercise the managed
+	// path — constructor selection, disableRemotePlayback, streaming gate.
+	const managed = !!(o && o.mms);
 
 	const MediaSourceStub = function () {
 		const ms = {
@@ -102,7 +106,7 @@ function load(o) {
 	};
 	MediaSourceStub.isTypeSupported = () => true;
 
-	const win = { MediaSource: MediaSourceStub };
+	const win = managed ? { ManagedMediaSource: MediaSourceStub } : { MediaSource: MediaSourceStub };
 	// The data-channel feed, stubbed: a WebSocket-shaped object the test
 	// drives by hand, and an eligibility the test sets. Installed only when
 	// asked, so every existing case sees the player exactly as before.
@@ -132,7 +136,7 @@ function load(o) {
 			addEventListener(t, fn) { (env.docHandlers[t] = env.docHandlers[t] || []).push(fn); },
 			removeEventListener(t, fn) { env.docHandlers[t] = (env.docHandlers[t] || []).filter((f) => f !== fn); },
 		},
-		MediaSource: MediaSourceStub,
+		MediaSource: managed ? undefined : MediaSourceStub,
 		WebSocket: makeSockets(env),
 		URL: { createObjectURL: () => 'blob:stub', revokeObjectURL() {} },
 		location: { protocol: 'http:', host: 'camera' },
@@ -593,6 +597,34 @@ function load(o) {
 		await sleep(1100);
 		const st = env.stats[env.stats.length - 1];
 		check('feed is the websocket, no dc block, no lag', st && st.feed === 'websocket' && st.dc === undefined && st.lag === undefined);
+		env.player.destroy();
+	}
+
+	group('iPhone ManagedMediaSource: constructed, remote playback off, appends gated on streaming (#335)');
+	{
+		// Only window.ManagedMediaSource exists (no window.MediaSource), as on
+		// iPhone Safari. The player must pick it, opt the element out of remote
+		// playback, and feed only while the source says it is streaming.
+		const env = load({ mms: true });
+		env.play();   // open + init + sourceopen -> managed source built, buffer ready
+		check('a managed source was constructed', (env.msCount || 0) >= 1, String(env.msCount));
+		check('remote playback was disabled (proves the managed branch ran)',
+			env.video.disableRemotePlayback === true, String(env.video.disableRemotePlayback));
+		const s = env.sockets[env.sockets.length - 1];
+		// A media frame while streaming (the default) is appended.
+		s.fire('message', { data: { byteLength: 100 } });
+		check('appends while the source is streaming', env.sb.appends >= 1, String(env.sb.appends));
+		// endstreaming: the source asks the page to hold — further frames queue,
+		// not append. This is the freeze the guard on the source protects.
+		env.ms.listeners.endstreaming();
+		const held = env.sb.appends;
+		s.fire('message', { data: { byteLength: 100 } });
+		check('endstreaming holds further appends', env.sb.appends === held,
+			env.sb.appends + ' vs ' + held);
+		// startstreaming: resume, and the frame held back goes in.
+		env.ms.listeners.startstreaming();
+		check('startstreaming resumes appends', env.sb.appends > held,
+			env.sb.appends + ' vs ' + held);
 		env.player.destroy();
 	}
 

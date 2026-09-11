@@ -15,6 +15,15 @@ window.MajesticVideo = (function () {
 	// carries the camera's offset; the spread is exact.
 	const LAG_KEEP = 240;
 	const DC = () => window.MajesticDataChannel;
+	// The buffered-video API the browser exposes. iPhone Safari has ONLY
+	// ManagedMediaSource — window.MediaSource is undefined there — and it decodes
+	// H.265 all the same, so use whichever exists rather than treating the iPhone
+	// as a browser with no player and dropping it to MJPEG (majestic-webui#335).
+	// Managed Media Source is fed the same way, with two additions handled below:
+	// the element opts out of remote playback, and appends are gated on the
+	// source's streaming state (it tells the page when to feed and when to hold).
+	const MSImpl = window.MediaSource || window.ManagedMediaSource;
+	const usingMMS = !!MSImpl && MSImpl !== window.MediaSource;
 	// Safari wedges its MSE SourceBuffer on high-frequency per-frame appendBuffer
 	// calls for HEVC: /ws/video delivers one fMP4 fragment per frame (~20-30/s),
 	// and appending each on its own froze Safari after a few seconds with NO
@@ -47,9 +56,9 @@ window.MajesticVideo = (function () {
 	// prefers whichever of these it is already encoding.
 	const AUDIO_CODECS = ['opus', 'mp4a.40.2'];
 	const audioPrefs = (function () {
-		if (!('MediaSource' in window)) return '';
+		if (!MSImpl) return '';
 		return AUDIO_CODECS.filter(function (c) {
-			return MediaSource.isTypeSupported('audio/mp4; codecs="' + c + '"');
+			return MSImpl.isTypeSupported('audio/mp4; codecs="' + c + '"');
 		}).join(',');
 	})();
 
@@ -125,7 +134,11 @@ window.MajesticVideo = (function () {
 		// whether play() has been refused since the pipeline was built.
 		let lagFloor = 0, lagLearn = true, lastCt = null, playRefused = false;
 
-		const mseOk = ('MediaSource' in window);
+		const mseOk = !!MSImpl;
+		// ManagedMediaSource only accepts appends while it is "streaming"; it
+		// raises and lowers this through start/endstreaming events (below). Plain
+		// MediaSource has no such notion, so this stays true and gates nothing.
+		let mmsStreaming = true;
 		const NO_SIGNAL_MS = 4000;
 
 		function armSignalTimer() {
@@ -137,7 +150,7 @@ window.MajesticVideo = (function () {
 		function markSignal() { gotSignal = true; clearTimeout(signalTimer); }
 
 		function pump() {
-			if (!sb || sb.updating || !queue.length) return;
+			if (!sb || sb.updating || !queue.length || !mmsStreaming) return;
 			// H.264 keeps its per-frame append. HEVC coalesces: wait briefly for a
 			// full batch (bounded by APPEND_MAX_WAIT so a slow/ending stream still
 			// plays), then append the batch as one buffer.
@@ -151,7 +164,7 @@ window.MajesticVideo = (function () {
 		}
 		function flushAppend() {
 			if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
-			if (!sb || sb.updating || !queue.length) return;
+			if (!sb || sb.updating || !queue.length || !mmsStreaming) return;
 			const n = hevc ? Math.min(queue.length, APPEND_BATCH) : 1;
 			let buf;
 			if (n === 1) {
@@ -358,7 +371,7 @@ window.MajesticVideo = (function () {
 			// would have produced.
 			if (wantAudio && !info.audioCodec) { wantAudio = false; video.muted = true; }
 			const newMime = info.mime || ('video/mp4; codecs="' + info.codecString + '"');
-			if (!mseOk || !MediaSource.isTypeSupported(newMime)) {
+			if (!mseOk || !MSImpl.isTypeSupported(newMime)) {
 				onState('mjpeg', 'undecodable ' + info.codec);
 				stop();
 				return;
@@ -393,8 +406,23 @@ window.MajesticVideo = (function () {
 			lastW = info.width | 0;
 			lastH = info.height | 0;
 			teardownMse();
-			ms = new MediaSource();
+			ms = new MSImpl();
 			objUrl = URL.createObjectURL(ms);
+			// Managed Media Source: a fresh source starts able to stream, and the
+			// element must opt out of remote playback or the source can be handed
+			// to AirPlay and stop feeding. Harmless (and skipped) on plain
+			// MediaSource, which has neither the events nor the property to mind.
+			mmsStreaming = true;
+			if (usingMMS) {
+				// Bound to THIS source: a rebuild makes a new one, and a delayed
+				// endstreaming from the retired source must not lower the gate on
+				// its replacement and wedge every later append. `ms === src` is
+				// false once ms has moved on, so a stale event does nothing.
+				const src = ms;
+				try { video.disableRemotePlayback = true; } catch (e) {}
+				src.addEventListener('startstreaming', function () { if (ms === src) { mmsStreaming = true; pump(); } });
+				src.addEventListener('endstreaming', function () { if (ms === src) mmsStreaming = false; });
+			}
 			video.src = objUrl;
 			ms.addEventListener('sourceopen', function () {
 				try { sb = ms.addSourceBuffer(mime); }
