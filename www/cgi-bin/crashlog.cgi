@@ -1,5 +1,6 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
+<% page_title="Crash report" %>
 <%in p/header.cgi %>
 <%
 # The owner-facing half of the crash report. The firmware preserves a crashed
