@@ -18,7 +18,11 @@
 // Not pinned here: the phase strip during a flash. It fails in front of
 // somebody who is watching it, with sysupgrade's own transcript underneath it
 // saying what actually happened — visible, and corroborated, which is the
-// opposite of everything else in this directory.
+// opposite of everything else in this directory. The progress meter beside it
+// is a different case and has its own file: a bar that never appears is as
+// visible as the strip, but one labelled with the wrong partition is a
+// confident wrong sentence that nothing on the page contradicts. See
+// update-meter.test.js.
 'use strict';
 
 const fs = require('fs');

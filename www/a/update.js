@@ -73,12 +73,12 @@
 	// redrawing a single line with a bare \r so the number arrives many times a
 	// second:
 	//
-	//   curl -#          the download          "######            45.0%"
-	//   flashcp -v       every partition       "Erasing block: 13/32 (40%)",
-	//                                          then "Writing kb: 300/2006 (14%)",
-	//                                          then "Verifying kb: …" — busybox's
-	//                                          own three passes, in that order
-	//   flash_eraseall   the overlay wipe      "Erasing 64 Kibyte @ 8a0000 - 61% complete."
+	//   curl -#          the download       a row of hashes ending "<pct>%"
+	//   flashcp -v       every partition    "Erasing block: <n>/<total> (<pct>%)",
+	//                                       then "Writing kb: …", then
+	//                                       "Verifying kb: …" — busybox's own three
+	//                                       passes over a partition, in that order
+	//   flash_eraseall   the overlay wipe   "Erasing <n> Kibyte @ <offset> - <pct>% complete."
 	//
 	// So one upgrade drives the bar from zero seven times, and eight when the
 	// overlay is wiped as well. That is why the caption exists rather than the
@@ -99,11 +99,14 @@
 	// other way round — that would put the partition about to be written on the
 	// number the one before it finished at.
 	//
-	// The headings are matched as whole lines. print_sysinfo prints "Kernel" and
-	// "RootFS" too, as the left column of a table, and those carry a tab and a
-	// value after them.
+	// The headings are matched as whole lines, and the trailing class takes a
+	// carriage return as well as spaces and tabs: this is a terminal stream and
+	// every meter in it redraws with a bare \r. Matching whole lines is what
+	// separates a heading from the information table the run opens with, which
+	// has "Kernel" and "RootFS" down its left column too — those carry a tab and
+	// a value after them instead of ending the line.
 	const METER = new RegExp([
-		String.raw`(?:^|\n)(Kernel|RootFS|OverlayFS|Firmware \(combined image\))[ \t]*(?=\n)`,
+		String.raw`(?:^|\n)(Kernel|RootFS|OverlayFS|Firmware \(combined image\))[ \t\r]*(?=\n)`,
 		String.raw`(Erasing block|Writing kb|Verifying kb): *\d+/\d+ *\((\d{1,3})%\)`,
 		String.raw`Erasing +\d+ +Kibyte +@ *[0-9a-f]+ *- *(\d{1,3})% *complete`,
 	].join('|'), 'g');
@@ -184,10 +187,13 @@
 		while ((m = METER.exec(win))) {
 			if (m[1]) {
 				// A partition announced. Anything read before it in this frame
-				// belongs to the pass that has just ended, so drop it and wait for
-				// this one to report.
+				// belongs to the pass that has just ENDED, so show it under the
+				// partition still in force and only then move on — the closing
+				// "100%" of a pass shares a frame with the next heading, and
+				// carrying it forward would put this partition's name on it while
+				// dropping it would leave the bar short of where the write got to.
+				if (pass) { showMeter(pass, pct); pass = null; pct = -1; }
 				part = PART_WORD[m[1]] || '';
-				pass = null; pct = -1;
 			} else if (m[2]) {
 				pass = FLASH_PASS[m[2]]; pct = Number(m[3]);
 			} else {
