@@ -397,15 +397,21 @@ function load(o) {
 		let played = 0;
 		env.video.play = () => { played++; return Promise.resolve(); };
 		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
+		// The retry arms at once, so a tap works immediately; the announcement is
+		// held back so a picture about to play does not flash the button.
 		check('a one-shot gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
 			JSON.stringify((env.docHandlers.pointerdown || []).length));
-		// The page is told once that the picture is parked waiting for a tap, so
-		// it can raise the play affordance (#317).
+		check('the affordance is NOT announced immediately', env.states.indexOf('gesture') < 0,
+			env.states.join(','));
+		// Once the picture has stayed parked past the debounce, the page is told
+		// once that it is waiting for a tap.
+		await sleep(600);
 		check('the page was told the picture is waiting for a gesture',
 			env.states.filter((s) => s === 'gesture').length === 1, env.states.join(','));
 		// Another paused frame must not re-announce it: the affordance is up, and
 		// a second 'gesture' would be noise.
 		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
+		await sleep(600);
 		check('a further paused frame does not re-announce it',
 			env.states.filter((s) => s === 'gesture').length === 1, env.states.join(','));
 		// The viewer taps: play() is called, and this time it starts.
@@ -438,8 +444,62 @@ function load(o) {
 		// The element still fires 'playing' as it runs; with no gesture armed that
 		// must stay silent, or an ordinary autoplay start would emit 'resumed'.
 		env.video.fire('playing');
+		await sleep(600);
 		check('an ordinary playing element emits no resumed', env.states.indexOf('resumed') < 0,
 			env.states.join(','));
+		env.player.destroy();
+	}
+
+	group('a muted picture that plays shortly after parking never flashes the affordance (#317)');
+	{
+		// The reporter's flash: on Opera the picture is paused when the first
+		// frame arrives, then a moment later the browser grants muted autoplay
+		// (or a mode switch does). The button must not appear only to vanish.
+		const env = load();
+		env.play();
+		env.video.muted = true;
+		env.video.paused = true;
+		env.video.play = () => Promise.resolve();
+		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
+		check('the retry is armed at once (a tap would still work)',
+			(env.docHandlers.pointerdown || []).length === 1,
+			JSON.stringify((env.docHandlers.pointerdown || []).length));
+		// Playback begins before the debounce is out.
+		await sleep(200);
+		env.video.paused = false;
+		env.video.fire('playing');
+		await sleep(600);
+		check('the affordance never appeared — no flash',
+			env.states.indexOf('gesture') < 0, env.states.join(','));
+		check('and nothing was announced as resumed (it was never up)',
+			env.states.indexOf('resumed') < 0, env.states.join(','));
+		env.player.destroy();
+	}
+
+	group('an announced gesture survives a reconnect and is still cleared when the picture plays (#317)');
+	{
+		// The page keeps the invitation up across a reconnect (it is still a
+		// parked picture), so the player must still emit 'resumed' when the
+		// reconnected picture plays — the rebuild must not forget it announced.
+		const env = load();
+		env.play();
+		env.video.muted = true;
+		env.video.paused = true;
+		env.video.play = () => Promise.resolve();
+		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
+		await sleep(600);
+		check('the affordance was announced', env.states.filter((s) => s === 'gesture').length === 1,
+			env.states.join(','));
+		// The socket fails; the player rebuilds and reconnects.
+		env.video.fire('error');
+		await sleep(1300);
+		check('a replacement session opened', env.sockets.length >= 2, env.sockets.length + '');
+		// The replacement's picture plays for real.
+		env.play();
+		env.video.paused = false;
+		env.video.fire('playing');
+		check('resumed is still emitted after the reconnect, so the button is taken down',
+			env.states.filter((s) => s === 'resumed').length === 1, env.states.join(','));
 		env.player.destroy();
 	}
 

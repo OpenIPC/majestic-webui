@@ -75,9 +75,14 @@ window.MajesticWebRTC = (function () {
 		// happens to carry an activation. Retry play() on the first user gesture
 		// instead. One-shot, capture phase so a tap the controls also handle still
 		// counts, and guarded for the vm tests, which have no document.
-		let gestureRetry = null, gestureArmed = false;
+		// Announcing the affordance is held back this long after the picture is
+		// found parked, so a picture that goes on to play by itself a moment
+		// later never flashes the button (#317).
+		const GESTURE_ANNOUNCE_MS = 500;
+		let gestureRetry = null, gestureArmed = false, gestureTimer = null;
 		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
 		function disarmGesture() {
+			if (gestureTimer) { clearTimeout(gestureTimer); gestureTimer = null; }
 			if (gestureRetry && typeof document !== 'undefined')
 				gestureEvs.forEach(function (t) { try { document.removeEventListener(t, gestureRetry, true); } catch (e) {} });
 			gestureRetry = null;
@@ -118,18 +123,25 @@ window.MajesticWebRTC = (function () {
 			};
 			gestureRetry = retry;
 			gestureEvs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
-			// Tell the page that a muted picture is parked waiting for a tap, so it
-			// can offer the viewer somewhere to tap (#317). Once per arm: a
-			// reconnect re-arms through here, but the flag is cleared only when the
-			// picture actually plays or the attempt is torn down.
-			if (!gestureArmed) { gestureArmed = true; onState('gesture'); }
+			// Then wait out the debounce before telling the page the picture is
+			// waiting for a tap, so the button is offered only for a picture that
+			// really stays parked and never flashes on one about to play. Once
+			// per arm; the timer confirms the picture is still muted and paused.
+			if (!gestureArmed && !gestureTimer) {
+				gestureTimer = setTimeout(function () {
+					gestureTimer = null;
+					if (alive && !alive()) return;
+					if (!gestureArmed && v.muted && v.paused) { gestureArmed = true; onState('gesture'); }
+				}, GESTURE_ANNOUNCE_MS);
+			}
 		}
 		// The muted picture actually started moving. Only the element's own
 		// 'playing' event proves it — play() resolving does not, because Opera
-		// resolves it on a picture that never starts (#317) — so this is what
-		// takes the tap affordance down, and it ignores the event unless a gesture
-		// was armed so an ordinary autoplay start costs nothing.
+		// resolves it on a picture that never starts (#317). It cancels a pending
+		// announcement (the picture played before the debounce was out) and, if
+		// the button was already up, takes it down.
 		function onPlaying() {
+			if (gestureTimer) { clearTimeout(gestureTimer); gestureTimer = null; }
 			if (!gestureArmed) return;
 			gestureArmed = false;
 			disarmGesture();
@@ -758,8 +770,12 @@ window.MajesticWebRTC = (function () {
 		function reconnect() {
 			// A new attempt begins here; drop any gesture retry bound to the old
 			// one so this attempt can arm its own if it too is refused autoplay.
+			// gestureArmed is NOT cleared: it records that the page is showing the
+			// invitation and is owed a 'resumed'. A reconnect keeps that debt, so
+			// the picture this attempt brings up still clears the button when it
+			// plays; clearing it here left the button stranded over a reconnected
+			// picture that played (#317). Only 'resumed' and destroy clear it.
 			disarmGesture();
-			gestureArmed = false;
 			disarmPausedTimer();
 			// Retire the attempt before dismantling it. Closing a peer
 			// connection rejects whatever it had in flight, and a rejection

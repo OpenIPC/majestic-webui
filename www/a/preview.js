@@ -187,33 +187,52 @@ window.MajesticVideo = (function () {
 		// frame (majestic-webui#317). Arm a one-shot document gesture that plays
 		// it, so the first tap anywhere starts playback. Only armed while paused,
 		// so a browser that autoplays never adds the listener.
-		let gestureRetry = null, gestureArmed = false;
+		// Announcing the affordance is held back until the picture has been
+		// parked this long. A picture that goes on to play by itself a moment
+		// later -- a browser that grants muted autoplay after a short delay, or
+		// the picture a transport switch brought up -- must never flash the
+		// button, so the announcement waits to see that the pause is the settled
+		// state and not a step on the way to playing (#317).
+		const GESTURE_ANNOUNCE_MS = 500;
+		let gestureRetry = null, gestureArmed = false, gestureTimer = null;
 		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
 		function armPlayGesture() {
-			if (typeof document === 'undefined' || gestureRetry) return;
-			const retry = function () {
-				disarmPlayGesture();
-				try { const p = video.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
-			};
-			gestureRetry = retry;
-			gestureEvs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
-			// Tell the page that a muted picture is parked on its first frame
-			// waiting for a tap, so it can offer the viewer somewhere to tap
-			// (#317). Once per arm: the frame handler calls this on every frame
-			// while paused, but the gestureRetry guard above lets only the first
-			// through, so the page hears 'gesture' once and not on every frame.
-			if (!gestureArmed) { gestureArmed = true; onState('gesture'); }
+			if (typeof document === 'undefined') return;
+			// Arm the retry at once, so the very first tap starts playback even
+			// before the affordance is announced.
+			if (!gestureRetry) {
+				const retry = function () {
+					disarmPlayGesture();
+					try { const p = video.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+				};
+				gestureRetry = retry;
+				gestureEvs.forEach(function (t) { try { document.addEventListener(t, retry, true); } catch (e) {} });
+			}
+			// Then wait out the debounce before telling the page the picture is
+			// waiting for a tap. The frame handler calls this on every paused
+			// frame; the timer is started once and confirms the picture is still
+			// muted and paused before it announces, so the page hears 'gesture'
+			// once and only for a picture that really is stuck.
+			if (!gestureArmed && !gestureTimer) {
+				gestureTimer = setTimeout(function () {
+					gestureTimer = null;
+					if (!gestureArmed && video.muted && video.paused) { gestureArmed = true; onState('gesture'); }
+				}, GESTURE_ANNOUNCE_MS);
+			}
 		}
 		function disarmPlayGesture() {
+			if (gestureTimer) { clearTimeout(gestureTimer); gestureTimer = null; }
 			if (gestureRetry && typeof document !== 'undefined')
 				gestureEvs.forEach(function (t) { try { document.removeEventListener(t, gestureRetry, true); } catch (e) {} });
 			gestureRetry = null;
 		}
 		// The muted picture actually started moving. Only the element's own
 		// 'playing' event says so — play() resolving does not, because Opera
-		// resolves it on a picture that never starts (#317) — so this is the
-		// signal that takes the tap affordance back down, not the retry firing.
+		// resolves it on a picture that never starts (#317). It cancels a pending
+		// announcement (the picture played before the debounce was out, so the
+		// button never shows) and, if the button was already up, takes it down.
 		function onPlaying() {
+			if (gestureTimer) { clearTimeout(gestureTimer); gestureTimer = null; }
 			if (!gestureArmed) return;
 			gestureArmed = false;
 			disarmPlayGesture();
@@ -222,11 +241,15 @@ window.MajesticVideo = (function () {
 
 		function teardownMse() {
 			started = false; queue = [];
+			// The retry and the pending announcement go (disarmPlayGesture), but
+			// NOT gestureArmed: it records that the page is showing the invitation
+			// and is still owed a 'resumed' to take it back down. A rebuild -- a
+			// reconnect, a codec change -- keeps that debt, so when the picture
+			// this pipeline brings up finally plays, onPlaying still emits
+			// 'resumed'; clearing it here left the button stranded over a picture
+			// that reconnected and played (#317). It is cleared only by that
+			// 'resumed', and dies with the player on destroy.
 			disarmPlayGesture();
-			// The next pipeline re-arms and re-announces 'gesture' on its own if
-			// its picture is again parked; clear the flag so that emit is not
-			// suppressed by a stale one left from the pipeline being torn down.
-			gestureArmed = false;
 			if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
 			// The lag floor describes the pipeline being torn down; the next
 			// one learns its own.

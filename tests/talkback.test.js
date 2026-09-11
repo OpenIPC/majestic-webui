@@ -371,7 +371,13 @@ async function gestureAndResumedStates() {
 	env.MajesticWebRTC.attach(video, { onState: (s) => states.push(s) });
 	await tick();
 	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
+	// The paused-state observer arms at ~800ms; the announcement is then held
+	// back a further debounce, so a picture about to play does not flash it.
 	await tick(850);
+	check('the retry armed but the affordance is not announced yet',
+		(env.docHandlers.pointerdown || []).length === 1 && states.indexOf('gesture') < 0,
+		states.join(',') + ' | arms=' + (env.docHandlers.pointerdown || []).length);
+	await tick(600);
 	check('the page was told the picture is waiting for a gesture, once',
 		states.filter((s) => s === 'gesture').length === 1, states.join(','));
 	check('nothing claimed it resumed before it actually played',
@@ -403,11 +409,44 @@ async function pausedTimerClearedOnDestroy() {
 		JSON.stringify((env.docHandlers.pointerdown || []).length));
 }
 
+async function playsBeforeDebounceNoFlash() {
+	group('a WebRTC picture that plays right after a refused muted play() never flashes the affordance (#317)');
+	// The reject-path arms the retry at once so a tap works, but the
+	// announcement is debounced: a picture that then plays must not flash it.
+	const env = makeEnv();
+	const states = [];
+	const handlers = {};
+	let plays = 0;
+	const video = {
+		muted: true, volume: 1, srcObject: null, paused: true,
+		play() { plays++; return plays === 1 ? Promise.reject(new DOMException('x', 'NotAllowedError')) : Promise.resolve(); },
+		addEventListener(ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); },
+		removeEventListener(ev, fn) { handlers[ev] = (handlers[ev] || []).filter((f) => f !== fn); },
+		fire(ev) { (handlers[ev] || []).slice().forEach((f) => f({ target: this })); },
+	};
+	env.MajesticWebRTC.attach(video, { onState: (s) => states.push(s) });
+	await tick();
+	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
+	await tick();
+	check('the refused muted play() armed the retry at once',
+		(env.docHandlers.pointerdown || []).length === 1,
+		JSON.stringify((env.docHandlers.pointerdown || []).length));
+	check('but nothing is announced yet', states.indexOf('gesture') < 0, states.join(','));
+	// The picture plays before the debounce is out.
+	await tick(150);
+	video.paused = false;
+	video.fire('playing');
+	await tick(600);
+	check('no flash — the affordance never appeared', states.indexOf('gesture') < 0, states.join(','));
+	check('and nothing was announced as resumed (it was never up)',
+		states.indexOf('resumed') < 0, states.join(','));
+}
+
 (async () => {
 	for (const t of [reentrancy, cameraTakesMicButSendsNothing, destroyedDuringPrompt, cameraDeclines,
 		trackEndsOnItsOwn, destroyStopsMic, insecureContext, refused, playRetriesOnGesture,
 		playResolvesButStaysPaused, playbackStartsArmsNothing, gestureAndResumedStates,
-		pausedTimerClearedOnDestroy]) {
+		playsBeforeDebounceNoFlash, pausedTimerClearedOnDestroy]) {
 		await t();
 	}
 	done();

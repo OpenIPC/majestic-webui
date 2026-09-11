@@ -345,10 +345,11 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.el('mj-tap-play').hidden === true, String(env.el('mj-tap-play').hidden));
 	}
 
-	// The invitation belongs only to a picture parked on a still frame: any other
-	// state — a reconnect, an error — takes it down, and it returns only when the
-	// picture parks again (#317). A tap during a reconnect starts nothing anyway.
-	group('the invitation is tied to the parked state, not left stranded (#317)');
+	// Once raised, the invitation persists across the attempt's chatter — a
+	// reconnect, the pipeline's own 'playing' — and comes down only when the
+	// picture ACTUALLY plays ('resumed'). Toggling it on every transient state
+	// was the flicker the reporter saw on reload (#317).
+	group('the invitation persists across transient states, down only on real playback (#317)');
 	{
 		const env = load('mse');
 		await tick();
@@ -358,13 +359,29 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		check('a parked picture raises the invitation',
 			env.el('mj-tap-play').hidden === false, String(env.el('mj-tap-play').hidden));
 		live.say('connecting');
-		check('a reconnect takes it down', env.el('mj-tap-play').hidden === true,
+		check('a reconnect leaves it up', env.el('mj-tap-play').hidden === false,
 			String(env.el('mj-tap-play').hidden));
-		live.say('gesture');
-		check('it returns when the picture parks again',
-			env.el('mj-tap-play').hidden === false, String(env.el('mj-tap-play').hidden));
 		live.say('playing');
-		check('and a picture coming up takes it down for good',
+		check('the pipeline coming back up leaves it up', env.el('mj-tap-play').hidden === false,
+			String(env.el('mj-tap-play').hidden));
+		live.say('resumed');
+		check('it comes down only when the picture actually plays',
+			env.el('mj-tap-play').hidden === true, String(env.el('mj-tap-play').hidden));
+	}
+
+	// A different picture taking the stage clears a stale invitation, even
+	// though the picture that raised it never played (#317).
+	group('a different picture on the stage clears a stale invitation (#317)');
+	{
+		const env = load('mse');
+		await tick();
+		const first = env.made[0];
+		first.say('playing');
+		first.say('gesture');
+		env.el('mj-tap-play').hidden = false;   // the first picture parked, button up
+		pickWebRTC(env);
+		env.made[1].say('playing');   // the trial promotes and takes the stage
+		check('the incoming picture cleared the old invitation',
 			env.el('mj-tap-play').hidden === true, String(env.el('mj-tap-play').hidden));
 	}
 
