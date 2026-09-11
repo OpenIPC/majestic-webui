@@ -208,6 +208,38 @@ function termWriter(el) {
 	// the two copies of this carried: an invisible control character in a source
 	// file survives only as long as nothing greps, copies or re-encodes the line.
 	const ansi = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+	// A sequence the socket delivered in two pieces, waiting for the rest of
+	// itself (#430).
+	//
+	// Stripping each chunk on its own loses one: the first piece MATCHES the
+	// expression above as though it were whole — its trailing digits satisfy that
+	// terminator class, which has to accept them because `ESC 7` and `ESC 8` are
+	// real sequences — so the half that follows arrives with no escape character
+	// in front of it and is rendered as text. A frame boundary one byte later
+	// leaves "m" on a line of its own; one byte earlier puts the escape character
+	// itself into the pane.
+	//
+	// So a tail that could still grow into a sequence is held back until the next
+	// chunk says whether it did. "Could still grow" is the precise question and
+	// not the same one the expression above answers: after the introducer, only
+	// parameter bytes so far and nothing that could end it. The bound is what
+	// keeps a stream with a stray escape in it from holding the pane instead of
+	// spoiling one line of it — past that it is not a sequence, and the old
+	// behaviour is the better wrong answer.
+	const HOLD_MAX = 16;
+	const growing = /^[\u001b\u009b][[()#;?]*[0-9;]*$/;
+	function heldTail(s) {
+		const from = Math.max(0, s.length - HOLD_MAX);
+		for (let i = s.length - 1; i >= from; i--) {
+			const c = s.charCodeAt(i);
+			if (c !== 0x1b && c !== 0x9b) continue;
+			// The rightmost introducer decides it: anything before it has already
+			// been resolved one way or the other.
+			return growing.test(s.slice(i)) ? s.length - i : 0;
+		}
+		return 0;
+	}
+	let pending = '';
 	const doneNode = document.createTextNode('');
 	const lineNode = document.createTextNode('');
 	el.appendChild(doneNode);
@@ -221,11 +253,18 @@ function termWriter(el) {
 	let col = 0;        // cursor position within it
 
 	return {
-		// Returns the chunk with ANSI removed, so a caller matching markers can
-		// feed its rolling window the same text that was rendered rather than
-		// stripping the stream a second time.
+		// Returns the text with ANSI removed, so a caller matching markers can feed
+		// its rolling window the stream itself rather than stripping it a second
+		// time. The stream and not the pane: a \r redraw leaves one line on screen
+		// and every reading in here, which is what stops a marker being missed
+		// because a later redraw painted over the line that carried it. A held-back
+		// escape simply defers its bytes to the next call, and a held tail is an
+		// introducer and parameter bytes, so it can carry no word anyone matches on.
 		write(t) {
-			const s = t.replace(ansi, '');
+			const raw = pending + t;
+			const hold = heldTail(raw);
+			pending = hold ? raw.slice(raw.length - hold) : '';
+			const s = (hold ? raw.slice(0, raw.length - hold) : raw).replace(ansi, '');
 			let commit = '';
 			for (let i = 0; i < s.length; i++) {
 				const ch = s[i];
