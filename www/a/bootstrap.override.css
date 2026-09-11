@@ -6110,9 +6110,52 @@ dialog.mj-modal::backdrop {
 	box-shadow: inset 0 0 0 3px var(--bs-primary);
 }
 
+/* The meter, and the line that says what its number is a percentage of. An
+   upgrade drives the bar from zero seven times — the download, then an erase, a
+   write and a read-back over each partition — so an unlabelled bar reads as one
+   that keeps falling back to the start. */
+.mj-meter {
+	margin-top: 0.875rem;
+	max-width: 34rem;
+}
+
+.mj-meter-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 0.3125rem;
+	font-size: 0.78125rem;
+	color: var(--bs-secondary-color);
+}
+
+#fw-meter-pct {
+	color: var(--bs-body-color);
+}
+
 #fw-bar {
 	height: 6px;
 	background: var(--bs-body-bg);
+}
+
+/* Redraws land several times a second and every pass starts again at zero.
+   Bootstrap's 0.6s ease would spend that transition animating the bar
+   BACKWARDS across the card at each pass boundary, which is the one motion a
+   progress bar must not make. */
+#fw-bar .progress-bar {
+	transition: width 0.12s linear;
+}
+
+/* The transcript can stop with a pass still in flight — majestic streams it
+   while its own text is paged in from the partition being overwritten — and
+   the last reading is still worth keeping, since it is where the write got to.
+   What it is not any more is live, so it stops looking it. */
+.mj-meter-stale {
+	opacity: 0.55;
+}
+
+.mj-meter-stale .progress-bar {
+	background-color: var(--bs-secondary-color);
 }
 
 /* The caution is the loudest thing on the screen while a write is under way,
