@@ -101,12 +101,22 @@ function render(text, cuts) {
 	// the bug was one specific cut of many, and nobody can choose which one a
 	// socket makes.
 	let bad = [];
+	let badRet = [];
 	for (let cut = 1; cut < line.length; cut++) {
 		const r = render(line, [cut]);
 		if (r.pane !== whole.pane) bad.push(cut + ': ' + JSON.stringify(r.pane));
+		// The return is checked at every boundary too, not only at the few this
+		// file names. It is what update.js matches its markers against, and a
+		// defect that only shows at one cut would otherwise sit behind a green
+		// suite exactly the way the original fault sat behind a working pane.
+		if (r.returned !== whole.returned) {
+			badRet.push(cut + ': ' + JSON.stringify(r.returned));
+		}
 	}
 	check('split at any single byte, the pane is unchanged', bad.length === 0,
 		bad.slice(0, 3).join('  '));
+	check('and what write() gave back is unchanged too', badRet.length === 0,
+		badRet.slice(0, 3).join('  '));
 
 	// The worst case a stream can produce, and the cheapest to state.
 	const perChar = render(line, line.split('').map((_, i) => i));
@@ -117,6 +127,42 @@ function render(text, cuts) {
 	const thrice = render(line, [2, 4]);
 	check('an escape spread over three frames is still removed',
 		thrice.pane === whole.pane, JSON.stringify(thrice.pane));
+
+	// A sequence far longer than a colour code, because the tail this holds is
+	// bounded and the bound has to clear the longest thing anyone emits. Sized
+	// for the seven characters a plain colour takes, it broke a 24-bit
+	// foreground-and-background set at eleven of its split points — and passed
+	// every short case while doing it, which is how a bound like this goes wrong.
+	const long = ESC + '[38;2;255;128;0;48;2;0;0;0mHELLO' + ESC + '[0m\n';
+	const longWhole = render(long, []);
+	check('a long parameter list renders to its text', longWhole.pane === 'HELLO\n',
+		JSON.stringify(longWhole.pane));
+	bad = [];
+	badRet = [];
+	for (let cut = 1; cut < long.length; cut++) {
+		const r = render(long, [cut]);
+		if (r.pane !== longWhole.pane) bad.push(cut);
+		if (r.returned !== longWhole.returned) badRet.push(cut);
+	}
+	check('and survives a split at any byte of it', bad.length === 0,
+		'pane corrupted at ' + bad.join(','));
+	check('return value included', badRet.length === 0,
+		'return corrupted at ' + badRet.join(','));
+
+	// The longest sequence the writer recognises at all, which is what the hold
+	// bound is sized from. Sizing the two separately is what let a 24-bit set
+	// through, so the limit is pinned rather than left to a comment.
+	const maxSeq = ESC + '[' + Array.from({ length: 16 }, (_, i) => i).join(';') + 'm';
+	const maxWhole = render(maxSeq + 'END\n', []);
+	check('a sequence at the recognised maximum renders to its text',
+		maxWhole.pane === 'END\n', JSON.stringify(maxWhole.pane));
+	bad = [];
+	for (let cut = 1; cut < maxSeq.length + 4; cut++) {
+		const r = render(maxSeq + 'END\n', [cut]);
+		if (r.pane !== maxWhole.pane || r.returned !== maxWhole.returned) bad.push(cut);
+	}
+	check('and survives a split at any byte of it', bad.length === 0,
+		'corrupted at ' + bad.join(','));
 
 	group('what write() hands back does not depend on the framing');
 
@@ -171,12 +217,23 @@ function render(text, cuts) {
 	// A held tail is bounded, so a stream carrying a stray introducer spoils at
 	// most a line instead of stopping the pane. Past the bound the writer gives
 	// the old wrong answer rather than no answer at all.
+	//
+	// Checked with nothing after it that could release the hold on its own: a
+	// newline or a letter ends it whatever the bound is, so a case carrying one
+	// would pass with no bound at all and say nothing about this.
 	term = load();
 	term.write(ESC + '[');
-	term.write('1234567890123456789012345');
-	term.write('\nnext line\n');
-	check('output resumes once the tail cannot be a sequence any more',
-		/next line/.test(term._pane()), JSON.stringify(term._pane()));
+	term.write('0123456789'.repeat(12));
+	check('a parameter run past the bound is painted rather than held',
+		term._pane().length > 0, JSON.stringify(term._pane()));
+
+	// And the ordinary way a hold ends: something arrives that cannot be part of
+	// a sequence.
+	term = load();
+	term.write(ESC + '[1;3');
+	term.write('7m' + 'next line\n');
+	check('a hold ends when the rest of the sequence turns up',
+		term._pane() === 'next line\n', JSON.stringify(term._pane()));
 
 	// The stream simply ends mid-escape: the bytes are meaningless, and what
 	// matters is that everything before them was shown.

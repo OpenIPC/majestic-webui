@@ -207,7 +207,25 @@ function termWriter(el) {
 	// \u001b/\u009b escaped rather than written as the literal ESC and CSI bytes
 	// the two copies of this carried: an invisible control character in a source
 	// file survives only as long as nothing greps, copies or re-encodes the line.
-	const ansi = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+	//
+	// Both halves of this — what counts as a sequence, and how long the writer
+	// will wait for one to finish arriving — are sized from ONE decision, and
+	// they have to be. A stripper that accepts a longer sequence than the holder
+	// below is willing to wait for leaks precisely those, and only when a frame
+	// happens to split one, which is the whole fault this is about (#430). The
+	// repetitions used to be unbounded here and the wait was a round number
+	// picked to look generous; sized that way it covered a plain colour and
+	// broke a 24-bit foreground-and-background set, while every short case went
+	// on passing.
+	//
+	// So: at most 4 introducer characters and at most 16 semicolon-separated
+	// parameter groups, which makes the longest sequence recognised
+	// 1 + 4 + 4 + 15 × 5 + 1 = 85 characters. That is HOLD_MAX. Longer than
+	// anything a terminal actually emits — a full 24-bit foreground and
+	// background together is 38 — and bounded, which is what stops a stream
+	// carrying a stray introducer from holding the pane instead of spoiling a
+	// line of it.
+	const ansi = /[\u001b\u009b][[()#;?]{0,4}(?:[0-9]{1,4}(?:;[0-9]{0,4}){0,15})?[0-9A-ORZcf-nqry=><]/g;
 	// A sequence the socket delivered in two pieces, waiting for the rest of
 	// itself (#430).
 	//
@@ -220,14 +238,15 @@ function termWriter(el) {
 	// itself into the pane.
 	//
 	// So a tail that could still grow into a sequence is held back until the next
-	// chunk says whether it did. "Could still grow" is the precise question and
-	// not the same one the expression above answers: after the introducer, only
-	// parameter bytes so far and nothing that could end it. The bound is what
-	// keeps a stream with a stray escape in it from holding the pane instead of
-	// spoiling one line of it — past that it is not a sequence, and the old
-	// behaviour is the better wrong answer.
-	const HOLD_MAX = 16;
-	const growing = /^[\u001b\u009b][[()#;?]*[0-9;]*$/;
+	// chunk says whether it did. "Could still grow" is the precise question, and
+	// not the one the expression above answers — being unable to tell a truncated
+	// sequence from a finished one is the bug. This is that expression with the
+	// terminator taken off: everything a sequence may contain before its last
+	// character, and nothing that could be that character. Past HOLD_MAX there is
+	// no sequence this writer would have stripped anyway, so nothing is held and
+	// the pane keeps painting.
+	const HOLD_MAX = 85;
+	const growing = /^[\u001b\u009b][[()#;?]{0,4}(?:[0-9]{1,4}(?:;[0-9]{0,4}){0,15})?$/;
 	function heldTail(s) {
 		const from = Math.max(0, s.length - HOLD_MAX);
 		for (let i = s.length - 1; i >= from; i--) {
