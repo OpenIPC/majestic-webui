@@ -164,6 +164,12 @@ fi
 # tests/tree.test.js can ask it; mj-settings.js has no page without it.
 %>
 <script src="/a/mj-tree.js" defer></script>
+<%
+# What frame rate the camera reaches at each resolution. Its own file, and pure,
+# so tests/fps-caps.test.js can ask it: a control bounded wrongly is still a
+# control, and reproducing one needs a camera with more than one sensor mode.
+%>
+<script src="/a/mj-fps.js"></script>
 <script src="/a/mj-region.js" defer></script>
 <%
 # Where the overlay sits. Its own file for the same reason the tree is: the
