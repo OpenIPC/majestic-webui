@@ -179,7 +179,7 @@ Pragma: no-cache
 if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ]; } && [ "$pagename" != "crashlog" ]; then %>
 	<div class="container mt-3">
 		<div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0" role="alert">
-			<span><strong>This camera recovered from a crash.</strong> A log is ready for a bug report.</span>
+			<span><strong>This camera recovered from a crash.</strong> Open the crash report.</span>
 			<a class="btn btn-sm btn-warning" href="crashlog.cgi">View crash report</a>
 		</div>
 	</div>

@@ -3,12 +3,13 @@
 <% page_title="Crash report" %>
 <%in p/header.cgi %>
 <%
-# The owner-facing half of the crash report. The firmware preserves a crashed
-# boot's pstore log into /etc/crash on the next normal boot (S98crashlog) and
-# drops a breadcrumb when it fell into failsafe (rcS); this page reads that
-# state and hands the log to the owner for a bug report. It never uploads
-# anything and it does not clear the state -- that is Dismiss, which mutates and
-# so lives in crashlog-download.cgi where no page body precedes the redirect.
+# The owner-facing half of the crash report. On the normal boot after a crash
+# the firmware leaves state under /etc/crash -- a preserved, gzipped pstore log
+# (crash.tar.gz plus a "pending" summary) and/or a "failsafe" breadcrumb when
+# the camera fell into failsafe. This page reads that state and hands the log to
+# the owner for a bug report. It never uploads anything and does not clear the
+# state -- that is Dismiss, which mutates and so lives in crashlog-download.cgi
+# where no page body precedes the redirect.
 CRASH=/etc/crash
 crash_utc=$(sed -n 's/^utc=//p' "$CRASH/pending" 2>/dev/null)
 crash_records=$(sed -n 's/^records=//p' "$CRASH/pending" 2>/dev/null)
@@ -40,8 +41,10 @@ fs_utc=$(sed -n 's/^utc=//p' "$CRASH/failsafe" 2>/dev/null)
 			<div class="d-flex gap-2 flex-wrap align-items-center">
 				<% if [ -s "$CRASH/crash.tar.gz" ]; then %>
 				<a class="btn btn-primary" href="crashlog-download.cgi?get=log">Download crash log</a>
+				<% elif [ -n "$fs_utc" ]; then %>
+				<span class="small text-secondary">No kernel panic was captured &mdash; the failsafe event above is on record.</span>
 				<% else %>
-				<span class="small text-secondary">No kernel panic was captured; the failsafe event above is still on record.</span>
+				<span class="small text-secondary">The crash log is no longer available.</span>
 				<% fi %>
 				<form method="post" action="crashlog-download.cgi" class="d-inline m-0">
 					<input type="hidden" name="action" value="dismiss">
