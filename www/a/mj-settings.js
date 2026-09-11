@@ -7265,6 +7265,63 @@
 			update();
 			controllers.add(ctrl);
 		}
+		// A frame-rate bound that depends on the chosen resolution has to move
+		// with it. Same shape as the visibleWhen pass above — find the sibling,
+		// listen to it — but what it updates is the control's range rather than
+		// whether the row is on screen.
+		//
+		// The value is clamped as the bound falls: leaving 60 in a control whose
+		// maximum has just become 26 offers a number the daemon will refuse, and
+		// a <input type="range"> silently reports the maximum anyway while the
+		// number box keeps showing 60. Neither is a state to save from.
+		for (const f of state.fields) {
+			if (!f.schema || !f.schema['x-fps-caps'] || !window.MajesticFps)
+				continue;
+			const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
+			const sizeCtrl = byDot[parent + '.size'];
+			if (!sizeCtrl || !f.control) continue;
+
+			const retune = () => {
+				const size = siblingSize(f.dot, 'size');
+				const bound = window.MajesticFps.boundFor(f.schema, size);
+				if (!isNum(bound)) return;
+
+				// BEFORE touching max. Lowering the max of an <input
+				// type="range"> runs the browser's value-sanitisation algorithm
+				// and clamps .value on the spot, so a "did it need clamping?"
+				// test asked afterwards always answers no — and the readout
+				// beside the slider, which only repaints on an input event, is
+				// then left painting a number the control no longer holds. That
+				// is how a 2560x1440 row came to show 64 above a note saying 26.
+				const before = Number(f.control.value);
+
+				f.control.max = String(bound);
+				f.control.setAttribute('max', String(bound));
+				const num = f.p && f.p.querySelector('.mj-live-num');
+				if (num) {
+					num.max = String(bound);
+					num.setAttribute('max', String(bound));
+				}
+
+				const after = isNum(before) ? Math.min(before, bound) : bound;
+				f.control.value = String(after);
+
+				// Always, even when the number did not move: the readout repaints
+				// from this event and nothing else, and a max that changed under
+				// an unchanged value still changes what the track means.
+				f.control.dispatchEvent(new Event('input', { bubbles: true }));
+				// Only when it did: `change` is what the dirty count and the
+				// save set read, and firing it on every resolution touch would
+				// mark the field edited when nothing about it was.
+				if (after !== before)
+					f.control.dispatchEvent(new Event('change', { bubbles: true }));
+			};
+
+			sizeCtrl.control.addEventListener('change', retune);
+			sizeCtrl.control.addEventListener('input', retune);
+			retune();
+		}
+
 		// An x-requires condition names an absolute path, so its controlling
 		// field is usually on another tab and the saved config answers for it.
 		// Where it does happen to share the page, an unsaved edit to it has to
@@ -7461,6 +7518,41 @@
 		try { held.node.setSelectionRange(held.sel[0], held.sel[1]); } catch (e) { /* no selection */ }
 	}
 
+	// The resolution a channel will actually run at, for a sibling field that
+	// has to reason about it.
+	//
+	// Empty is a VALUE here, not a missing one: the picker's first entry is
+	// "Auto · sensor native", which stores nothing and lets the camera use the
+	// sensor's own size. Reading that as "unset, go and look at the saved
+	// config" is how choosing Auto left the frame rate bounded by the
+	// resolution the operator had just navigated away from.
+	//
+	// So an on-page control answers for itself, empty included, and empty then
+	// resolves through the schema: `default` is what the daemon says an unset
+	// size comes up as, `x-native` the sensor's own geometry behind it.
+	function siblingSize(dot, key) {
+		const parent = dot.slice(0, dot.lastIndexOf('.'));
+		const sibDot = parent + '.' + key;
+		const f = (state.fields || []).find(x => x.dot === sibDot);
+
+		let v;
+		if (f && f.getValue) {
+			v = f.getValue();
+		} else {
+			v = getDotted(state.config, sibDot);
+		}
+		if (v !== undefined && v !== null && String(v) !== '') return String(v);
+
+		const sub = f && f.schema
+			? f.schema
+			: (((state.schema.properties || {})[parent] || {}).properties || {})[key];
+		if (sub) {
+			if (sub.default) return String(sub.default);
+			if (sub['x-native']) return String(sub['x-native']);
+		}
+		return '';
+	}
+
 	function renderField(container, dot, key, sub, eff, opts) {
 		opts = opts || {};
 		const live = !!opts.live;
@@ -7537,6 +7629,14 @@
 				if (show) show.textContent = control.value;
 			}
 		};
+
+		// The bound the control is drawn with. For a field carrying x-fps-caps
+		// this depends on a sibling — the resolution — so it is not sub.maximum,
+		// and applyFpsCaps() below keeps it in step when that sibling changes.
+		const fpsBound = (window.MajesticFps && sub && sub['x-fps-caps'])
+			? window.MajesticFps.boundFor(sub, siblingSize(dot, 'size'))
+			: null;
+		if (isNum(fpsBound)) sub = Object.assign({}, sub, { maximum: fpsBound });
 
 		if (live && type === 'integer' && isNum(sub.maximum)) {
 			// The detent slider. Its fill runs from the schema's own default to
