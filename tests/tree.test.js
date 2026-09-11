@@ -255,4 +255,36 @@ group('Day / Night: every setting is in a heading or on the pin map');
 		'empty: ' + empty.join(', '));
 }
 
+group('a list of objects is one leaf, not one per member');
+{
+	// The destination list is `{type:'array', items:{type:'object', ...}}`, and
+	// the members of an item are drawn inside a row rather than as fields of
+	// their own. A walker that recursed into `items.properties` the way it
+	// recurses into a section's would put `url`, `token` and `channel` on the
+	// page as three separate settings on the Outgoing tab, each editing a list
+	// it has no row to belong to. Nothing about that looks wrong until someone
+	// tries to add a second destination.
+	const s = clone(SCHEMA);
+	s.properties.outgoing.properties.servers = {
+		type: 'array',
+		title: 'Destinations',
+		items: {
+			type: 'object',
+			properties: {
+				url: { type: 'string', title: 'Address' },
+				token: { type: 'string', title: 'Token', 'x-secret': true },
+				channel: { type: 'string', title: 'Source', enum: ['', 'main', 'sub'] },
+			},
+			required: ['url'],
+		},
+	};
+	const t = TREE.build(s, {}, new Set());
+	const dots = allDots(t, s, new Set());
+	const mine = dots.filter(d => d.indexOf('outgoing.servers') === 0);
+	check('the list itself is drawn', mine.indexOf('outgoing.servers') >= 0);
+	check('and nothing else under it is', mine.length === 1,
+		'also drawn: ' + mine.join(', '));
+	everyKeyOnce('with a destination list', t, s, new Set());
+}
+
 done();

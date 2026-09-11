@@ -6176,3 +6176,36 @@ dialog.mj-modal::backdrop {
 	stroke-linecap: round;
 	stroke-linejoin: round;
 }
+
+/* One publishing destination. The rows are a list of addresses the camera
+   pushes to, drawn from the schema's `items`; see mj-servers.js for what a
+   row means. */
+.mj-dest {
+	padding-left: 0.5rem;
+	border-left: 2px solid var(--bs-border-color);
+}
+
+/* The protocol, read off the address rather than chosen: a fixed width keeps
+   the address boxes of a list of destinations aligned with each other. */
+.mj-dest .mj-dest-proto {
+	min-width: 7.5rem;
+	justify-content: center;
+	font-size: 0.78125rem;
+}
+
+/* The member labels line up with the badge above them for the same reason. */
+.mj-dest .mj-dest-member > .input-group-text {
+	min-width: 7.5rem;
+}
+
+.mj-dest .mj-dest-del {
+	/* the ×, which has nothing to line up with and should not stretch */
+	flex: 0 0 auto;
+}
+
+/* Something the row is worth being told — an address with no scheme, a scheme
+   the camera does not publish to. Advisory: the camera is the authority, and
+   this never blocks a save. */
+.mj-dest-note {
+	color: var(--bs-warning-text-emphasis);
+}

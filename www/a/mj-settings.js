@@ -8116,6 +8116,186 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">';
 			control = p.querySelector('input');
+		} else if (type === 'array' && sub.items && sub.items.type === 'object'
+				&& sub.items.properties) {
+			// A list whose items are objects: one editable row per element, with
+			// a control per member drawn from what `items` declares. The camera
+			// publishes to as many destinations as it is given, and until the
+			// schema described the list there was no way to see them, let alone
+			// add one.
+			//
+			// Everything about the row comes from the schema rather than from a
+			// list here: which members exist, what each is called, which is an
+			// enum and which is a secret. A member added on the camera appears
+			// with no change to this page, which is the same bargain every other
+			// field in this form is drawn under.
+			//
+			// The one thing NOT taken from the schema is which members a given
+			// row shows. That is the address's business — a bearer token means
+			// nothing on an RTMP destination — and it lives in mj-servers.js
+			// beside the rest of the reading of an address.
+			const SRV = (typeof window === 'object' && window.MajesticServers) || null;
+			const props = sub.items.properties;
+			// `url` first whatever order the schema lists them in: it is the one
+			// that decides what the rest of the row means.
+			const members = Object.keys(props).sort((a, b) =>
+				(a === 'url' ? -1 : b === 'url' ? 1 : 0));
+
+			p = el('p', 'array objects mj-row');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<div class="mj-dests" id="' + id + '"></div>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-dest-add">'
+				+ '+ Add destination</button>';
+			control = p.querySelector('.mj-dests');
+
+			const rowsOf = () => Array.from(control.querySelectorAll('.mj-dest'))
+				.map(r => {
+					const o = {};
+					members.forEach(m => {
+						const f = r.querySelector('[data-member="' + m + '"]');
+						if (f) o[m] = f.value;
+					});
+					return o;
+				});
+
+			// Redraw what depends on the address: the protocol badge, which
+			// members this row uses, and anything the row is worth being told.
+			const repaint = (row) => {
+				const url = (row.querySelector('[data-member="url"]') || {}).value || '';
+				const badge = row.querySelector('.mj-dest-proto');
+				const proto = SRV ? SRV.protocolOf(url) : null;
+				// An address nobody can read gets no badge rather than a wrong
+				// one — an empty box is honest about not knowing yet.
+				if (badge) badge.textContent = proto || '—';
+				members.forEach(m => {
+					const wrap = row.querySelector('.mj-dest-member[data-for="' + m + '"]');
+					if (!wrap) return;
+					const on = SRV ? SRV.applies(m, url) : true;
+					wrap.hidden = !on;
+				});
+				const note = row.querySelector('.mj-dest-note');
+				if (note && SRV) {
+					const o = {};
+					members.forEach(m => {
+						const f = row.querySelector('[data-member="' + m + '"]');
+						if (f) o[m] = f.value;
+					});
+					const said = SRV.says(o);
+					note.textContent = said;
+					note.hidden = said === '';
+				}
+			};
+
+			const onChange = (row) => { repaint(row); updateDirty(); };
+
+			const addRow = (values) => {
+				const v = values || {};
+				const row = el('div', 'mj-dest mb-2');
+
+				const head = el('div', 'input-group input-group-sm');
+				const badge = el('span', 'input-group-text mj-dest-proto');
+				badge.textContent = '—';
+				const url = el('input', 'form-control');
+				url.type = 'text';
+				url.setAttribute('data-member', 'url');
+				url.value = v.url != null ? String(v.url) : '';
+				const urlLabel = (props.url && props.url.title) || 'Address';
+				url.setAttribute('aria-label', urlLabel);
+				url.placeholder = urlLabel;
+				const del = el('button', 'btn btn-outline-danger mj-dest-del');
+				del.type = 'button';
+				del.textContent = '\u00d7';
+				del.setAttribute('aria-label', 'Remove this destination');
+				del.addEventListener('click', () => { row.remove(); updateDirty(); });
+				head.appendChild(badge);
+				head.appendChild(url);
+				head.appendChild(del);
+				row.appendChild(head);
+
+				members.filter(m => m !== 'url').forEach(m => {
+					const prop = props[m] || {};
+					const wrap = el('div', 'mj-dest-member input-group input-group-sm mt-1');
+					wrap.setAttribute('data-for', m);
+					const name = el('span', 'input-group-text');
+					name.textContent = prop.title || m;
+					wrap.appendChild(name);
+
+					let f;
+					if (Array.isArray(prop.enum)) {
+						f = el('select', 'form-select');
+						prop.enum.forEach(opt => {
+							const o = document.createElement('option');
+							o.value = opt;
+							// The empty member of an enum is the "follow the
+							// setting above" choice, and reads as nothing at all
+							// unless it is given words.
+							o.textContent = opt === '' ? 'Default' : opt;
+							f.appendChild(o);
+						});
+					} else {
+						f = el('input', 'form-control');
+						f.type = (prop['x-secret'] || prop.writeOnly) ? 'password' : 'text';
+						if (f.type === 'password') {
+							f.autocomplete = 'off';
+							f.spellcheck = false;
+						}
+					}
+					f.setAttribute('data-member', m);
+					f.setAttribute('aria-label', prop.title || m);
+					f.value = v[m] != null ? String(v[m]) : '';
+					wrap.appendChild(f);
+					row.appendChild(wrap);
+
+					if (prop.hint) {
+						// Same class pair every other hint on this page uses, so
+						// a member's help reads as help rather than as a new
+						// kind of text.
+						const h = el('div', 'hint text-secondary');
+						h.textContent = prop.hint;
+						row.appendChild(h);
+					}
+				});
+
+				const note = el('div', 'hint mj-dest-note');
+				note.hidden = true;
+				row.appendChild(note);
+
+				row.querySelectorAll('[data-member]').forEach(f => {
+					f.addEventListener('input', () => onChange(row));
+					f.addEventListener('change', () => onChange(row));
+				});
+
+				control.appendChild(row);
+				repaint(row);
+				return row;
+			};
+
+			control._addRow = addRow;
+			// One canonical string per field is what dirty-tracking compares,
+			// the same bargain the string-array control makes with its
+			// comma-join. onSubmit parses it back into the list it POSTs.
+			control._get = () => SRV ? SRV.canon(rowsOf()) : JSON.stringify(rowsOf());
+			control._set = (val) => {
+				control.querySelectorAll('.mj-dest').forEach(r => r.remove());
+				let arr = val;
+				if (typeof arr === 'string') {
+					try { arr = JSON.parse(arr); } catch (e) { arr = []; }
+				}
+				(Array.isArray(arr) ? arr : []).forEach(x => {
+					// A camera upgraded from before destinations had a shape
+					// still carries bare addresses, and majestic still reads
+					// them. Drawing one as the row it means is what stops the
+					// first save on such a camera from being a rewrite of a
+					// list nobody touched.
+					addRow(typeof x === 'string' ? { url: x } : x);
+				});
+			};
+			control._set(eff);
+			p.querySelector('.mj-dest-add').addEventListener('click', () => {
+				addRow({});
+				updateDirty();
+			});
 		} else if (type === 'array') {
 			// MultiRect fields (motionDetect.roi, crop, privacyMasks) are a list of
 			// "AxBxCxD" regions: render one editable row per region, not a single
@@ -8553,9 +8733,15 @@
 		for (const f of dirty) {
 			let val = f.getValue();
 			sent.set(f, val);
-			// array-typed schema fields (MultiRect: roi/crop/privacyMasks) post as a
-			// list of strings, not a comma-joined scalar.
-			if (f.schema && f.schema.type === 'array')
+			// array-typed schema fields post as a list, not as the single
+			// canonical string the control reduces to for dirty-tracking. Which
+			// list depends on what the schema says an item is: objects for the
+			// destination rows, strings for the MultiRect fields
+			// (roi/crop/privacyMasks).
+			if (f.schema && f.schema.type === 'array'
+					&& f.schema.items && f.schema.items.type === 'object') {
+				try { val = JSON.parse(val); } catch (e) { val = []; }
+			} else if (f.schema && f.schema.type === 'array')
 				val = String(val).split(',').map(s => s.trim()).filter(s => s.length);
 			// null is "remove this key" — see clearsToNull for which emptied
 			// controls mean it and which mean an empty string someone chose.
