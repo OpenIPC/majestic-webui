@@ -414,9 +414,14 @@ window.MajesticVideo = (function () {
 			// MediaSource, which has neither the events nor the property to mind.
 			mmsStreaming = true;
 			if (usingMMS) {
+				// Bound to THIS source: a rebuild makes a new one, and a delayed
+				// endstreaming from the retired source must not lower the gate on
+				// its replacement and wedge every later append. `ms === src` is
+				// false once ms has moved on, so a stale event does nothing.
+				const src = ms;
 				try { video.disableRemotePlayback = true; } catch (e) {}
-				ms.addEventListener('startstreaming', function () { mmsStreaming = true; pump(); });
-				ms.addEventListener('endstreaming', function () { mmsStreaming = false; });
+				src.addEventListener('startstreaming', function () { if (ms === src) { mmsStreaming = true; pump(); } });
+				src.addEventListener('endstreaming', function () { if (ms === src) mmsStreaming = false; });
 			}
 			video.src = objUrl;
 			ms.addEventListener('sourceopen', function () {
