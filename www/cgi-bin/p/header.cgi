@@ -119,6 +119,14 @@ Pragma: no-cache
 							<li><h6 class="dropdown-header">Maintenance</h6></li>
 							<li><a class="dropdown-item" href="update.cgi"><% page_label update %></a></li>
 							<li><a class="dropdown-item" href="backup.cgi"><% page_label backup %></a></li>
+							<%# The one item in this bar that ACTS rather than goes somewhere:
+							    following it reboots the camera. Hence the confirm, whose
+							    wording is the same sentence the pending-changes banner and
+							    the Backup page ask, and the colour -- a menu whose every
+							    other item is navigation should not hide a restart among
+							    them looking identical. %>
+							<li><a class="dropdown-item confirm text-danger" href="restart.cgi"
+									data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back."><% page_label restart %></a></li>
 							<li><h6 class="dropdown-header">Diagnostics</h6></li>
 							<li><a class="dropdown-item" href="logs.cgi"><% page_label logs %></a></li>
 							<li><a class="dropdown-item" href="console.cgi"><% page_label console %></a></li>
