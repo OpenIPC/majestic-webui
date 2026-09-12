@@ -172,8 +172,6 @@
 		// disables it separately. What changes here is only the word: a pad
 		// nobody could check is not a pad known to be free.
 		const freeWord = blind.length ? 'not checked — see the note below' : 'free';
-		// Pads the mux has as something else. Absent unless majestic offers it.
-		const notGpio = opts.notGpio || {};
 
 		const wrap = el('div', 'mj-pinmap');
 		const chip = el('div', 'mj-pinmap-chip');
@@ -249,8 +247,7 @@
 			n.textContent = 'Pin ' + pin;
 			head.appendChild(n);
 			const note = el('span');
-			note.textContent = notGpio[pin] ? ('carries ' + notGpio[pin] + ' right now')
-				: (owned[pin] || freeWord);
+			note.textContent = owned[pin] || freeWord;
 			head.appendChild(note);
 			// Somewhere to press. Clicking the pad again closes it too and
 			// Escape works, but neither is discoverable, and a panel with no
@@ -298,11 +295,7 @@
 				b.style.borderColor = '';
 				b.disabled = false;
 				b.title = 'Pin ' + p.pin;
-				if (notGpio[p.pin]) {
-					b.classList.add('mj-pin-off');
-					b.disabled = true;
-					b.title = 'Pin ' + p.pin + ' — carries ' + notGpio[p.pin] + ' right now';
-				} else if (owned[p.pin]) {
+				if (owned[p.pin]) {
 					b.classList.add('mj-pin-owned');
 					b.disabled = true;
 					b.title = 'Pin ' + p.pin + ' — ' + owned[p.pin];
@@ -316,10 +309,8 @@
 					// kernel hands to a driver stays refused even when the
 					// config points a role at it, or the picker would let a
 					// second IR-cut role be assigned to a reset or a regulator.
-					if (!notGpio[p.pin] && !owned[p.pin]) b.disabled = false;
-					else b.title += ' — ' + (notGpio[p.pin]
-						? 'but it carries ' + notGpio[p.pin] + ' right now'
-						: owned[p.pin]);
+					if (!owned[p.pin]) b.disabled = false;
+					else b.title += ' — ' + owned[p.pin];
 				}
 				if (sweeping === p.pin) b.classList.add('mj-pin-try');
 				if (sel === p.pin) b.classList.add('mj-pin-sel');

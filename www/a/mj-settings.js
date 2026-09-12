@@ -20,6 +20,11 @@
 	const EXCLUDE = new Set(boot.exclude || []);
 	const SENSORS = boot.sensors || [];
 	const FONTS = boot.fonts || [];
+	// The part this camera is. Read from the boot blob, which camera.cgi fills
+	// from sysinfo — it used to be read from `window.mjSoc`, a global no file in
+	// this tree ever assigned, so the pin map's caption was empty on every
+	// camera and the pin sweep had no way to know what it was scanning.
+	const SOC = boot.soc || '';
 
 	// The name a font file goes by. The setting stores a path — freetype takes
 	// one — but a path is not what anybody chooses between: on the camera this
@@ -6099,6 +6104,30 @@
 				'IR-cut filter" on to test it.';
 		if (!toBool(getDotted(state.config, 'jpeg.enabled')))
 			return 'The test reads a still picture, and this camera has JPEG snapshots turned off.';
+		// The switch above is the CONFIGURATION, and it is not the encoder. A
+		// camera can have snapshots turned on and still have no encoder to take
+		// one with — measured on an hi3516ev300 whose main stream sits below
+		// the sensor's resolution with a substream beside it, which leaves no
+		// hardware scaler for the MJPEG channel: jpeg.enabled true, /image.jpg
+		// 503. Nothing readable answers that question in advance (the metrics
+		// count requests and responses, so a camera nobody has asked looks
+		// exactly like one that works), so the first press is what finds out —
+		// and after it this stands here rather than the button inviting the
+		// identical failure again. Cleared on arriving at this section and by
+		// refresh(), so a camera that was only briefly busy is one navigation
+		// or one save away from being asked again.
+		//
+		// The status is printed and the body is QUOTED rather than asserted.
+		// What came back is only probably majestic's: a proxy, a captive portal
+		// or anything else in the way can answer a short error of its own, and
+		// this panel must not dress that up as the camera's own diagnosis. The
+		// status is the part we do know.
+		if (state.ircutNoSnap) {
+			const s = state.ircutNoSnap;
+			return 'The test reads a still picture and this camera did not ' +
+				'return one (HTTP ' + s.status + ').' +
+				(s.reason ? ' The reply said: “' + s.reason + '”' : '');
+		}
 		// The monitor re-drives the filter on its own schedule, and a snapshot
 		// taken after it had snapped the filter back would read as "it never
 		// moved" — convicting a correctly wired camera. Refusing to run beats
@@ -6215,14 +6244,29 @@
 			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
 				'. The filter was left where it started.';
 			result.hidden = false;
+			// A camera that cannot take a still cannot run this test at all, so
+			// the refusal is remembered and the button says it instead of
+			// standing ready to fail the same way on the next press. Both
+			// halves are kept: the status, which is a fact about the exchange,
+			// and the body, which is only probably the camera's. `reason` is
+			// absent where refusal() could not reduce the body to one plain
+			// sentence, and the wording above drops the quotation with it.
+			if (e && e.snapshot) {
+				state.ircutNoSnap = { status: e.status, reason: e.reason || null };
+			}
 			state.ircutTestedOn = testedOn;
 			// Edited while the probe ran: the verdict describes wiring that is
 			// no longer on screen, so it goes straight back out.
 			syncVerdict();
 		}).finally(() => {
 			ircutBusy = false;
-			btn.disabled = false;
+			// Re-asked rather than re-enabled. A run that has just found out the
+			// camera cannot take a still has made the button unavailable, and a
+			// bare `disabled = false` here would hand it straight back with the
+			// reason printed underneath it — the one shape this panel is built
+			// to avoid.
 			status.textContent = '';
+			syncTestBtn();
 		});
 	}
 
@@ -6589,6 +6633,15 @@
 
 	function ircutPanel(sec) {
 		if (sec !== 'nightMode' || !IRCUT) return null;
+		// A refused snapshot blanks the Test button until something says to ask
+		// again, and arriving on this section is one of the two things that
+		// does (refresh(), after a save, is the other). Without this the memory
+		// outlived its cause: a camera that was merely busy for one request
+		// kept the button greyed for the rest of the visit, with no way back to
+		// it but saving something unrelated. Leaving and returning is a cheap,
+		// obvious retry, so the blocker never has to guess which HTTP statuses
+		// are transient and which are standing.
+		state.ircutNoSnap = null;
 		const box = el('div', 'mj-ircut');
 		box.innerHTML =
 			'<div id="mj-ircut-findings"></div>' +
@@ -6670,7 +6723,7 @@
 			// configuration — and the fact lives in one key, so it is passed
 			// rather than inferred from the pad assignment.
 			pwmLamp: !!pwmLamp(),
-			soc: (window.mjSoc || '') + (info.banks ? ' · ' + info.banks.length + ' banks' : ''),
+			soc: SOC + (info.banks ? (SOC ? ' · ' : '') + info.banks.length + ' banks' : ''),
 			onChange: (a) => { pushAssign(a); paintRoles(); },
 		});
 		// Leaving the section while this fetch was in flight means the panel
@@ -6923,7 +6976,16 @@
 		// assignment that verdict was measured against stops meaning anything.
 		state.ircutTestedOn = null;
 		const status = box.querySelector('#mj-ircut-status');
-		const list = SCAN.pairs(info, { exclude: state.ircutExclude || [] });
+		// What the wiki's table records about this part: the pairs to try first,
+		// and the pads it names as a reset, a USB enable or an illuminator, to
+		// try last. Absent for a part the table has never seen, which is the
+		// behaviour the sweep had before the table was read at all.
+		const PADS = window.MajesticIrcutPads;
+		const part = PADS ? PADS.forSoc(SOC) : {};
+		const list = SCAN.pairs(info, {
+			exclude: state.ircutExclude || [],
+			part: part,
+		});
 		let stop = false;
 
 		host.hidden = false;
@@ -6947,6 +7009,14 @@
 			'before it is driven, so a camera that has to be restarted comes back knowing ' +
 			'which pad did it.</div>' +
 			'<p class="x-small text-secondary mb-2">Pads already spoken for are skipped. ' +
+			// Said only where it is true. The table is per board, so this is an
+			// order and not a promise — the pads are still driven if nothing
+			// before them moved the filter, which is why the warning above
+			// keeps its wording either way.
+			(part.known
+				? 'Pads that other boards with this SoC use for a reset, a USB enable ' +
+					'or an illuminator are tried last, and the pairs recorded for it first. '
+				: '') +
 			'This reads the picture, so it needs daylight &mdash; at night nothing will ' +
 			'look like it moved.</p>' +
 			'<div class="d-flex gap-2 align-items-center">' +
@@ -8691,6 +8761,14 @@
 		// The pads are only half of it; the role list is drawn from onChange,
 		// which `quiet` just skipped.
 		if (state.ircutRoles) state.ircutRoles();
+		// A refused snapshot is usually a fact about the encoder, and the
+		// encoder is what a save can have just changed — turning a substream
+		// off, or raising the main stream to the sensor's own size, is exactly
+		// how the scaler that was missing comes back. Ask again rather than
+		// hold the refusal over a camera that has since been fixed. Mounting
+		// the section clears it too, which is what keeps a merely-busy moment
+		// from greying the button for the rest of the visit.
+		state.ircutNoSnap = null;
 		syncLegacy();
 		syncTestBtn();
 		updateDirty();

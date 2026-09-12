@@ -1299,5 +1299,55 @@ function runRest() {
 				.every(x => x.level !== 'ok'));
 	}
 
-	done();
+	// -----------------------------------------------------------------------
+	// A refused snapshot used to arrive as `HTTP 503` and nothing else, which
+	// is true, useless, and reads exactly like the camera being off. majestic
+	// answers with a sentence naming the cause and the way out; this is the
+	// only thing standing between that sentence and the person reading it.
+	group('refusal: the camera\'s own words survive the status code');
+	{
+		const res = (status, body, fail) => ({
+			status: status,
+			text: () => (fail ? Promise.reject(new Error('no body'))
+				: Promise.resolve(body)),
+		});
+		const MJ = '<html><head><title>503 Service Unavailable</title></head>' +
+			'<body><h1>503 Service Unavailable</h1>the JPEG encoder is not ' +
+			'running; check the streamer log</body></html>';
+
+		ic.refusal(res(503, MJ)).then((e) => {
+			check('the sentence after the heading is the message',
+				e.message === 'the JPEG encoder is not running; check the streamer log',
+				e.message);
+			check('the status rides along', e.status === 503);
+			check('and the reason is separable from the message',
+				e.reason === e.message);
+			// Taking the whole body would read the status line back twice.
+			check('the heading is not repeated into it',
+				e.message.indexOf('Service Unavailable') < 0);
+
+			// Everything below is a body that is not majestic's: a proxy's
+			// error page, a captive portal, a truncated response. None of them
+			// proves anything about the camera, so none of them may be quoted
+			// at somebody as if the camera had said it.
+			return ic.refusal(res(503, '<html><body>' + 'x'.repeat(900) + '</body></html>'));
+		}).then((e) => {
+			check('an implausibly long body falls back to the status',
+				e.message === 'HTTP 503', e.message);
+			return ic.refusal(res(502, '<html><head></head><body></body></html>'));
+		}).then((e) => {
+			check('so does an empty one', e.message === 'HTTP 502', e.message);
+			return ic.refusal(res(500, '', true));
+		}).then((e) => {
+			check('and a body that could not be read at all',
+				e.message === 'HTTP 500', e.message);
+			// It is going into textContent, so it must come back as text. A
+			// body echoing markup must not arrive still carrying it.
+			return ic.refusal(res(503, '<h1>503</h1>no scaler <b>left</b> for it'));
+		}).then((e) => {
+			check('the tags are stripped rather than passed on',
+				e.message === 'no scaler left for it', e.message);
+			done();
+		});
+	}
 }

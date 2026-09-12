@@ -123,6 +123,97 @@ group('pairs: the pad list is the SoC\'s, never a constant');
 }
 
 // ---------------------------------------------------------------------------
+// The reason this group exists, in one sentence: on an SSC338Q the sweep used
+// to drive the board's RESET pad on trial 1 and USB_ENA on trial 2, nineteen
+// trials before it reached the coils — and both of those pads are named in the
+// very wiki row the pair list was harvested from. A reporter's camera froze and
+// lost its picture there.
+group('pairs: what the part is known for goes first, and what it is known to ' +
+	'need goes last');
+{
+	// The SSC338Q row of en/gpio-settings.md, as ircut-pads.js reduces it.
+	const SSC338Q = { coils: [[23, 24]], busy: [8, 10, 39, 59, 60], known: true };
+	const B16 = banks(16);
+	const at = (list, pin) => list.findIndex((x) => x.indexOf(pin) >= 0);
+
+	const before = scan.pairs(B16);
+	const after = scan.pairs(B16, { part: SSC338Q });
+
+	check('without a part, the flat wiki list still leads', before[0][0] === 11);
+	check('the coils this part is recorded with are tried first',
+		after[0][0] === 23 && after[0][1] === 24, JSON.stringify(after[0]));
+
+	check('its reset pad used to be trial one', at(before, 10) === 0, at(before, 10));
+	check('and is now near the end',
+		at(after, 10) > after.length * 0.9, at(after, 10) + ' of ' + after.length);
+	check('its USB enable moves with it',
+		at(after, 8) > after.length * 0.9, at(after, 8));
+	// The lamp exclusion elsewhere in this file reads the CONFIGURATION, and
+	// the camera that runs a sweep is the one nobody has configured — so on the
+	// cameras it matters on, the lamp was unassigned and driven like any other
+	// pad, changing the picture the scan reads its answer off.
+	check('so do the illuminator pads, which no configuration has named yet',
+		at(after, 59) > after.length * 0.9 && at(after, 60) > after.length * 0.9,
+		at(after, 59) + ', ' + at(after, 60));
+
+	// Demoted, never dropped. These rows are per BOARD: a board the table has
+	// not seen may put a coil exactly where another one with the same part puts
+	// its reset, and that board must still be scannable — slowly.
+	const key = (l) => l.map((x) => Math.min(...x) + ':' + Math.max(...x)).sort().join(' ');
+	check('no pair is lost by the reordering', key(before) === key(after));
+
+	// An unknown part must behave exactly as it did before any of this existed.
+	check('a part the table has never seen is ordered as before',
+		JSON.stringify(scan.pairs(B16, { part: { coils: [], busy: [] } })) ===
+		JSON.stringify(before));
+	check('and so is one with no part at all',
+		JSON.stringify(scan.pairs(B16, {})) === JSON.stringify(before));
+
+	// A pad that is a coil somewhere must never be demoted, or a board whose
+	// coils are another board's reset is scanned last on its own hardware.
+	const clash = scan.pairs(B16, { part: { coils: [[10, 11]], busy: [10] } });
+	check('a pad named as a coil outranks the same pad named as busy',
+		clash[0][0] === 10 && clash[0][1] === 11, JSON.stringify(clash[0]));
+}
+
+group('the harvested pad table');
+{
+	const pads = require(path.join(__dirname, '..', 'www', 'a', 'ircut-pads.js'));
+
+	const s = pads.forSoc('ssc338q');
+	check('the part the report came from is in the table', s.known);
+	check('its coils are the pair its wiki row records',
+		s.coils.length === 1 && s.coils[0][0] === 23 && s.coils[0][1] === 24,
+		JSON.stringify(s.coils));
+	check('its reset pad is busy', s.busy.indexOf(10) >= 0, JSON.stringify(s.busy));
+	check('its USB enable is busy', s.busy.indexOf(8) >= 0);
+	check('neither coil is', s.busy.indexOf(23) < 0 && s.busy.indexOf(24) < 0);
+
+	// The camera spells the part in sysinfo's case, the wiki in its own.
+	check('the lookup does not care how the part is spelled',
+		pads.forSoc('SSC338Q').known && pads.forSoc('Hi3516Ev300').known);
+	// An hi3516ev300 row names pad 63 as a UART line, and a different board
+	// with the same part puts a coil there. Coils win, on both boards.
+	const ev300 = pads.forSoc('hi3516ev300');
+	check('a pad that is a coil on one board is not demoted on another',
+		ev300.busy.indexOf(63) < 0, JSON.stringify(ev300.busy));
+
+	// An unknown part is an ordinary answer, not an error: every caller reads
+	// .coils and .busy without testing first.
+	const none = pads.forSoc('wharrgarbl');
+	check('an unknown part answers with empty lists, not null',
+		none && !none.known && none.coils.length === 0 && none.busy.length === 0);
+	check('and so does no part at all',
+		pads.forSoc('').coils.length === 0 && pads.forSoc(undefined).busy.length === 0);
+
+	// The file is generated; a caller mutating what it hands back would poison
+	// the next lookup for the life of the page.
+	pads.forSoc('ssc338q').busy.push(999);
+	check('what it hands back is a copy',
+		pads.forSoc('ssc338q').busy.indexOf(999) < 0);
+}
+
+// ---------------------------------------------------------------------------
 group('classify: a change, not an absolute');
 {
 	check('open to closed is a hit', scan.classify(1.0, 0.03) !== null);

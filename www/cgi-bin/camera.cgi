@@ -15,8 +15,22 @@ hide_title=1
 # the section of that name rather than the group, which is a different page.
 label="$GET_tab"
 
+# Everything this escapes lands inside <script type="application/json">, which
+# is a RAW TEXT element: the HTML parser looks for `</script` in it and stops
+# there, without caring that it is inside a JSON string. So escaping quotes and
+# backslashes is not enough — a value containing `</script>` closes the block
+# early and whatever follows is parsed as markup in an administrator's page.
+#
+# `<` becomes its \u escape, which JSON.parse reads straight back as `<` and
+# the HTML parser can no longer see. Done in the one helper every field goes
+# through rather than at the four call sites: the font paths come from
+# filenames on a writable filesystem and `soc` from the boot loader's
+# environment, and the next field added here will have the same problem.
+#
+# Order matters and is the order below: backslashes double FIRST, so the ones
+# this rule introduces are not doubled again.
 mj_json_escape() {
-	sed 's/\\/\\\\/g; s/"/\\"/g'
+	sed 's/\\/\\\\/g; s/"/\\"/g; s/</\\u003c/g'
 }
 
 labels=$(sed -n 's/^mj_\([A-Za-z0-9]*\)=\(.*\)/"\1":"\2"/p' j/locale.cgi 2>/dev/null | paste -sd,)
@@ -30,6 +44,14 @@ if [ -e j/exclude.lst ]; then
 		boot_exclude="${boot_exclude}${boot_exclude:+,}\"${e}\""
 	done < j/exclude.lst
 fi
+
+# The part this camera is, as sysinfo spells it. The Day/Night pin map has
+# always had a caption for it and mj-settings.js has always passed
+# `window.mjSoc` — which nothing in this tree ever assigned, so the caption
+# rendered as a bare " · 10 banks" on every camera. It is also what lets the pin
+# sweep read the wiki's per-part pad table (a/ircut-pads.js) instead of driving
+# the same pads in the same order everywhere.
+boot_soc=$(printf '%s' "$soc" | mj_json_escape)
 
 boot_sensors=""
 if [ -d /etc/sensors ]; then
@@ -107,7 +129,7 @@ fi
 	</div>
 
 	<div class="col-12 col-md-9" id="mj-settings-form-col">
-		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>]}</script>
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>]}</script>
 
 		<%
 		# No page-level heading any more: one section is shown at a time and its
@@ -152,6 +174,7 @@ fi
 <script src="/a/mj-luma.js"></script>
 <script src="/a/ircut-check.js" defer></script>
 <script src="/a/ircut-map.js" defer></script>
+<script src="/a/ircut-pads.js" defer></script>
 <script src="/a/ircut-scan.js" defer></script>
 <%
 # The Day/Night section's light-monitor chart shares the dashboard's chart

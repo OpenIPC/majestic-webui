@@ -744,6 +744,41 @@
 		});
 	}
 
+	// What the camera said when it refused, as an Error a person can act on.
+	//
+	// majestic answers a snapshot it cannot take with a sentence naming the
+	// cause and what to do about it — "the JPEG encoder is not running; check
+	// the streamer log — a second video stream and a main stream below sensor
+	// resolution can together leave no hardware scaler for it", or the one
+	// about isp.suspendWhenIdle having stopped the sensor. All of it used to
+	// be thrown away for `new Error('HTTP ' + r.status)`, so the filter test's
+	// only failure message on such a camera was "HTTP 503": true, useless, and
+	// indistinguishable from the camera being off.
+	//
+	// The body is HTML, so the sentence is what follows the heading — taking
+	// the whole text would repeat the status line back. Everything here is
+	// defensive about a body that is not majestic's at all (a proxy's error
+	// page, a captive portal): anything that does not reduce to one plain
+	// sentence of sane length falls back to the status code, and the tags are
+	// stripped rather than parsed because this string is going into
+	// textContent and must never be markup again.
+	const REFUSAL_MAX = 400;
+	function refusal(r) {
+		const code = new Error('HTTP ' + r.status);
+		code.status = r.status;
+		return r.text().then((body) => {
+			const after = String(body || '').split(/<\/h1>/i).pop();
+			const text = after.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+			if (!text || text.length > REFUSAL_MAX) return code;
+			const e = new Error(text);
+			e.status = r.status;
+			// Kept apart from the message so a caller can say the camera's
+			// words in its own sentence rather than appending them to one.
+			e.reason = text;
+			return e;
+		}, () => code);
+	}
+
 	// Browser-side glue: a JPEG URL to a decoded frame's statistics.
 	function snapshot(url) {
 		// Through apiFetch and a blob, never Image.src, for the reason the
@@ -754,7 +789,14 @@
 		// The cache-buster is what makes the second capture a second capture.
 		const bust = url + (url.indexOf('?') < 0 ? '?' : '&') + '_=' + Date.now();
 		return window.apiFetch(bust, { cache: 'no-store', credentials: 'same-origin' })
-			.then(r => r.ok ? r.blob() : Promise.reject(new Error('HTTP ' + r.status)))
+			// Tagged, so a caller can tell "this camera cannot produce a still"
+			// from the other two things the probe talks to and act on it. Said
+			// here rather than in refusal(), which knows nothing about what was
+			// being asked for.
+			.then(r => (r.ok ? r.blob() : refusal(r).then((e) => {
+				e.snapshot = true;
+				return Promise.reject(e);
+			})))
 			.then(blob => new Promise(function (resolve, reject) {
 				const obj = URL.createObjectURL(blob);
 				const img = new Image();
@@ -1188,7 +1230,7 @@
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
-		verdict: verdict, probe: probe, snapshot: snapshot,
+		verdict: verdict, probe: probe, snapshot: snapshot, refusal: refusal,
 		HUNT_WINDOW_S: HUNT_WINDOW_S, HUNT_FLIPS: HUNT_FLIPS,
 		CONFLICT_S: CONFLICT_S, PIC_STREAK: PIC_STREAK,
 	};

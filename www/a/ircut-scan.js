@@ -60,12 +60,32 @@
 
 	// Every candidate pair the kernel's pad list allows, ordered by how likely
 	// it is to be the filter. Tiers, widening:
-	//   1. pairs the wiki has actually seen
+	//   0. the pairs this PART is recorded with, when the caller knows which
+	//      part this is (opts.part, from a/ircut-pads.js)
+	//   1. pairs the wiki has seen on any part
 	//   2. neighbours within one bank — an H-bridge takes both its inputs from
 	//      one place, and every wiki pair but one is same-bank
 	//   3. any two pads in one bank
 	//   4. across banks, only when asked: Anjoy's SSC377 keeps its coils on 11
 	//      and 80, so it exists, but it is thousands of trials
+	//
+	// Then everything touching a pad the table names as something OTHER than a
+	// coil on this part moves to the very end, keeping its order. KNOWN_PAIRS
+	// is a flat list with no part attached, so before this the sweep drove the
+	// same pads in the same order on every camera — and on an SSC338Q, whose
+	// row in that same table gives RESET as pad 10 and USB_ENA as pad 8, the
+	// first two trials were 11/10 and 8/9. The filter (23/24, in the same row)
+	// came twentieth. A reporter's camera froze and lost its picture there.
+	//
+	// Demoted rather than skipped, and the distinction is the whole reason the
+	// two lists are separate in ircut-pads.js. Those rows are per BOARD: a
+	// board this table has never seen may put a coil exactly where another one
+	// with the same part puts its reset. Demotion costs that board a slow scan
+	// and nothing else; exclusion would cost it the scan.
+	//
+	// `part` is injected rather than looked up, for the reason `io` is in
+	// run(): it keeps this file free of siblings and lets the ordering be
+	// tested without a table, a camera or a browser.
 	function pairs(info, opts) {
 		opts = opts || {};
 		const skip = {};
@@ -79,6 +99,15 @@
 		// and driving the lamp mid-sweep would change the very picture the scan
 		// is reading. A pad whose role the camera did not name is skipped as
 		// before — an unnamed job is still a job.
+		//
+		// Note what that rests on: the CAMERA naming the pad, and it names it
+		// from the configuration. The camera that runs a sweep is the one
+		// nobody has configured yet, so on the cameras this matters on the lamp
+		// is unassigned and gets driven like any other pad — flooding the scene
+		// with infrared while the scan reads its answer off the picture, which
+		// is the very thing the paragraph above says must not happen. What
+		// covers that case is the per-part table below, which names the lamp
+		// pads whether or not this camera has been told about them.
 		(info.assigned || []).forEach((a) => {
 			if (a.role !== 'irCutPin1' && a.role !== 'irCutPin2') skip[a.pin] = 1;
 		});
@@ -91,7 +120,6 @@
 		(info.held || []).forEach((h) => {
 			if (h.owner && h.owner !== 'sysfs') skip[h.pin] = 1;
 		});
-		(opts.notGpio || []).forEach((p) => { skip[p] = 1; });
 
 		const banks = (info.banks || []).map((b) => {
 			const pads = [];
@@ -111,6 +139,8 @@
 			out.push([a, b]);
 		};
 
+		const part = opts.part || {};
+		(part.coils || []).forEach((p) => add(p[0], p[1]));
 		KNOWN_PAIRS.forEach((p) => add(p[0], p[1]));
 		banks.forEach((pads) => {
 			for (let i = 0; i + 1 < pads.length; i++)
@@ -125,7 +155,25 @@
 			for (let i = 0; i < flat.length; i++)
 				for (let j = i + 1; j < flat.length; j++) add(flat[i], flat[j]);
 		}
-		return out;
+
+		// Stable, so every tier above keeps its order within each half and a
+		// given pad list always produces the same sweep.
+		//
+		// A pad this part is recorded as having a COIL on is never demoted,
+		// whatever else the table says about it. ircut-pads.js already resolves
+		// that overlap when it generates the table, but the rule is the reason
+		// the demotion is safe at all and it must hold for whatever builds the
+		// lists — otherwise a board whose coils are another board's reset line
+		// gets scanned last on its own hardware, which is the one outcome the
+		// demotion exists to avoid.
+		const busy = {};
+		(part.busy || []).forEach((p) => { busy[p] = 1; });
+		(part.coils || []).forEach((p) => { delete busy[p[0]]; delete busy[p[1]]; });
+		const early = [], late = [];
+		out.forEach((p) => {
+			(busy[p[0]] || busy[p[1]] ? late : early).push(p);
+		});
+		return early.concat(late);
 	}
 
 	// Did the picture move, and which way? Rising gmin means the frame gained
