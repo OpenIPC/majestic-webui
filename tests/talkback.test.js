@@ -279,9 +279,13 @@ async function playRetriesOnGesture() {
 	// first user gesture rather than leave it paused for ever.
 	const env = makeEnv();
 	let plays = 0, reject = true;
+	const vh = {};
 	const video = {
 		muted: true, volume: 1, srcObject: null,
 		play() { plays++; return reject ? Promise.reject({ name: 'NotAllowedError' }) : Promise.resolve(); },
+		addEventListener(ev, fn) { (vh[ev] = vh[ev] || []).push(fn); },
+		removeEventListener(ev, fn) { vh[ev] = (vh[ev] || []).filter((f) => f !== fn); },
+		fire(ev) { (vh[ev] || []).slice().forEach((f) => f({ target: this })); },
 	};
 	env.MajesticWebRTC.attach(video, {});
 	await tick();
@@ -290,7 +294,7 @@ async function playRetriesOnGesture() {
 	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'video' } });
 	await tick();
 	check('play() was attempted and refused', plays === 1, plays + ' plays');
-	check('a one-shot gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
+	check('a gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
 		JSON.stringify(Object.keys(env.docHandlers)));
 	// A second attempt (as a reconnect would make) is also refused: it must
 	// re-arm afresh, not be blocked by the first arming nor stack a second
@@ -300,22 +304,35 @@ async function playRetriesOnGesture() {
 	check('play() attempted again', plays === 2, plays + ' plays');
 	check('still exactly one retry (re-armed, not stacked or blocked)',
 		(env.docHandlers.pointerdown || []).length === 1);
-	// The viewer taps: play() is retried, and this time it is allowed.
+	// The viewer taps: play() is retried, and this time it is allowed. The retry
+	// is NOT removed on the tap -- only the picture actually starting takes it
+	// down, so a tap that does not start it (below) can be followed by another.
 	reject = false;
 	env.docHandlers.pointerdown[0]();
 	check('play() was retried on the gesture', plays === 3, plays + ' plays');
-	check('and the one-shot listener removed itself', (env.docHandlers.pointerdown || []).length === 0);
+	check('the retry stays armed until the picture plays',
+		(env.docHandlers.pointerdown || []).length === 1);
+	video.fire('playing');
+	check('once it plays the listener is removed', (env.docHandlers.pointerdown || []).length === 0);
 }
 
 async function playResolvesButStaysPaused() {
-	group('a muted video whose play() resolves but stays paused still retries on a gesture (#317, Opera)');
+	group('a muted video whose play() resolves but stays paused keeps retrying across taps (#317, Opera)');
 	// Opera for Android resolves play() without starting playback: the .catch
-	// never runs, so only the paused-state observer can save it.
+	// never runs, so only the paused-state observer can save it -- and, the
+	// reporter's case, the TAP's play() no more starts the picture than autoplay
+	// did. A one-shot retry would remove itself on that first dead tap and leave
+	// every later tap doing nothing, the picture parked under an affordance it
+	// cannot dismiss. The retry must stay armed until the picture truly plays.
 	const env = makeEnv();
 	let plays = 0;
+	const vh = {};
 	const video = {
 		muted: true, volume: 1, srcObject: null, paused: true,
 		play() { plays++; return Promise.resolve(); },   // resolves, yet paused stays true
+		addEventListener(ev, fn) { (vh[ev] = vh[ev] || []).push(fn); },
+		removeEventListener(ev, fn) { vh[ev] = (vh[ev] || []).filter((f) => f !== fn); },
+		fire(ev) { (vh[ev] || []).slice().forEach((f) => f({ target: this })); },
 	};
 	env.MajesticWebRTC.attach(video, {});
 	await tick();
@@ -329,9 +346,21 @@ async function playResolvesButStaysPaused() {
 	check('a gesture retry armed from the observed paused state',
 		(env.docHandlers.pointerdown || []).length === 1,
 		JSON.stringify((env.docHandlers.pointerdown || []).length));
-	video.paused = false;
+	// The viewer taps, but the picture still does not start (paused stays true).
+	// The retry must NOT remove itself.
 	env.docHandlers.pointerdown[0]();
 	check('the tap retried play()', plays === 2, plays + ' plays');
+	check('and the retry is still armed for the next tap',
+		(env.docHandlers.pointerdown || []).length === 1,
+		JSON.stringify((env.docHandlers.pointerdown || []).length));
+	// A second tap retries again; when the picture finally starts, its own
+	// 'playing' event is what takes the retry down.
+	env.docHandlers.pointerdown[0]();
+	check('a second tap retried again', plays === 3, plays + ' plays');
+	video.paused = false;
+	video.fire('playing');
+	check('once it plays the retry is removed', (env.docHandlers.pointerdown || []).length === 0,
+		JSON.stringify((env.docHandlers.pointerdown || []).length));
 }
 
 async function playbackStartsArmsNothing() {

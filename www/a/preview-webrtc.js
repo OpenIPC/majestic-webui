@@ -117,8 +117,18 @@ window.MajesticWebRTC = (function () {
 			// the listeners without ever playing -- leaving the picture paused.
 			disarmGesture();
 			const retry = function () {
-				disarmGesture();
-				if (alive && !alive()) return;
+				// A dead attempt's stale retry takes itself down; a live one does
+				// NOT disarm on the tap. On a browser that resolves play() without
+				// starting the picture -- Opera for Android, the same quirk the
+				// paused-state observer exists for -- the tap's play() no more
+				// starts it than autoplay did, and a one-shot retry would remove
+				// itself on that first dead tap and leave every later tap doing
+				// nothing, the picture parked under a ▶ affordance that cannot
+				// dismiss it (#317). Stay armed and keep retrying; the element's
+				// own 'playing' event (onPlaying) is what disarms, once the
+				// picture truly moves -- exactly as the MSE player re-tries on
+				// each frame until it plays.
+				if (alive && !alive()) { disarmGesture(); return; }
 				try { const p = v.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
 			};
 			gestureRetry = retry;
@@ -142,9 +152,13 @@ window.MajesticWebRTC = (function () {
 		// the button was already up, takes it down.
 		function onPlaying() {
 			if (gestureTimer) { clearTimeout(gestureTimer); gestureTimer = null; }
+			// Playback truly started, so the gesture-retry has done its job and
+			// comes down here -- whether or not the affordance was ever announced.
+			// This, not the tap, is what disarms: a tap on a browser that does not
+			// start the picture must leave the retry armed for the next one (#317).
+			disarmGesture();
 			if (!gestureArmed) return;
 			gestureArmed = false;
-			disarmGesture();
 			onState('resumed');
 		}
 		try { video.addEventListener('playing', onPlaying); } catch (e) {}
