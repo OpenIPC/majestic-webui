@@ -8142,7 +8142,9 @@
 			const members = Object.keys(props).sort((a, b) =>
 				(a === 'url' ? -1 : b === 'url' ? 1 : 0));
 
-			p = el('p', 'array objects mj-row');
+			// mj-wide: opt out of the 20rem cap .array carries for the
+			// MultiRect fields, which is half an address.
+			p = el('p', 'array objects mj-wide mj-row');
 			p.innerHTML =
 				'<label class="form-label">' + labelHtml + '</label>' +
 				'<div class="mj-dests" id="' + id + '"></div>' +

@@ -231,6 +231,14 @@
 	max-width: 20rem;
 }
 
+/* …but not a list of destinations. 20rem is a sensible ceiling for the
+   MultiRect fields the cap was written for — "1920x1080x0x0" needs nothing
+   like it — and it is half an address. A WHIP URL showed as far as its port
+   with the column half empty beside it. Same opt-out .select.mj-wide uses. */
+.array.mj-wide .mj-ctl-in {
+	max-width: none;
+}
+
 /* A boolean's label is a block above the switch now, like every other type's,
    so the wrapper holds the switch and the lit word and nothing else. */
 .boolean .mj-ctl-in {
