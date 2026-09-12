@@ -6207,13 +6207,21 @@ dialog.mj-modal::backdrop {
    left a 4K WHIP URL showing as far as its port and no further. */
 .mj-dest .mj-dest-proto,
 .mj-dest .mj-dest-member > .input-group-text {
-	flex: 0 0 4.5rem;
-	min-width: 4.5rem;
-	justify-content: center;
+	flex: 0 0 5.5rem;
+	min-width: 5.5rem;
 	font-size: 0.78125rem;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	display: block;
+	line-height: 1.6;
+}
+
+/* The badge is a word on its own and centres; a member's name reads as a
+   label and starts at the left, so one too long for the column loses its end
+   to the ellipsis rather than both of its ends to a centred overflow. */
+.mj-dest .mj-dest-proto {
+	text-align: center;
 }
 
 /* Flex items refuse to shrink below their content by default, so without this

@@ -20,20 +20,29 @@
 (function () {
 	'use strict';
 
-	// Scheme -> what to call it, and whether the credential applies.
+	// Scheme -> what to call it, and which per-protocol members it uses.
 	//
-	// `token` is the WHIP bearer, and WHIP is the only one of these that has a
+	// `token` is the WHIP bearer, and WHIP is the only one of these with a
 	// notion of one: RTMP carries its credentials in the URL's userinfo, and
-	// neither RTP nor a Unix socket authenticates at all. Showing the field on
-	// a row that cannot use it would be offering a setting that does nothing.
+	// neither RTP nor a Unix socket authenticates at all.
+	//
+	// `naluSize` is the RTP fragmentation MTU, so it belongs to the two that
+	// fragment: RTMP frames its own and WHIP sizes itself from the WebRTC
+	// track. Showing either on a row that cannot use it would be offering a
+	// setting that does nothing — which is the whole reason this table exists
+	// rather than the row drawing everything the schema declares.
 	const SCHEMES = {
-		rtmp: { name: 'RTMP', token: false },
-		rtmps: { name: 'RTMPS', token: false },
-		udp: { name: 'RTP', token: false },
-		unix: { name: 'UNIX', token: false },
-		http: { name: 'WHIP', token: true },
-		https: { name: 'WHIP', token: true },
+		rtmp: { name: 'RTMP', token: false, naluSize: false },
+		rtmps: { name: 'RTMPS', token: false, naluSize: false },
+		udp: { name: 'RTP', token: false, naluSize: true },
+		unix: { name: 'UNIX', token: false, naluSize: true },
+		http: { name: 'WHIP', token: true, naluSize: false },
+		https: { name: 'WHIP', token: true, naluSize: false },
 	};
+
+	// The members this knows to be protocol-specific. Anything else the schema
+	// declares is shown on every row.
+	const SCOPED = ['token', 'naluSize'];
 
 	// The scheme of an address, lowercased, or '' when it names none.
 	//
@@ -61,11 +70,11 @@
 	// rather than hidden: a field that appears the moment you finish typing the
 	// scheme reads as the form arguing with you.
 	function applies(prop, url) {
-		if (prop !== 'token') return true;
+		if (SCOPED.indexOf(prop) < 0) return true;
 		const sch = schemeOf(url);
 		if (!sch) return true;
 		const known = SCHEMES[sch];
-		return known ? known.token : true;
+		return known ? !!known[prop] : true;
 	}
 
 	// One row, tidied: strings trimmed, empties dropped, nothing invented.

@@ -59,6 +59,24 @@ check('a member this knows nothing about is always shown',
 	S.applies('channel', 'rtmp://a.example/live/key')
 	&& S.applies('channel', 'https://mtx.lan/cam/whip'));
 
+// The RTP fragmentation size belongs to the protocols that fragment. RTMP
+// frames its own and WHIP sizes itself from the WebRTC track, so offering it
+// on either is a box that changes nothing — the same failure as a token on an
+// RTMP row, which is why both go through one table.
+check('the packet size is for RTP', S.applies('naluSize', 'udp://1.2.3.4:5600'));
+check('and for a unix socket', S.applies('naluSize', 'unix:/tmp/s.sock'));
+check('not for WHIP', !S.applies('naluSize', 'https://mtx.lan/cam/whip'));
+check('not for RTMP', !S.applies('naluSize', 'rtmp://a.example/live/key'));
+check('an empty address shows it rather than guessing',
+	S.applies('naluSize', ''));
+
+// A row can carry a number, and a number is not a string to be trimmed away.
+check('a numeric member survives tidying',
+	S.tidy({ url: 'udp://1.2.3.4:5600', naluSize: 1400 }).naluSize === 1400);
+check('an edited packet size is a change',
+	S.canon([{ url: 'udp://a:1', naluSize: 1400 }])
+	!== S.canon([{ url: 'udp://a:1', naluSize: 4000 }]));
+
 group('tidying a row');
 
 check('strings are trimmed',

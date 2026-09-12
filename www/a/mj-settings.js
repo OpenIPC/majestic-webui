@@ -8222,6 +8222,9 @@
 					wrap.setAttribute('data-for', m);
 					const name = el('span', 'input-group-text');
 					name.textContent = prop.title || m;
+					// The column is narrow on purpose, so a name that does not
+					// fit is readable on hover rather than only guessable.
+					name.title = prop.title || m;
 					wrap.appendChild(name);
 
 					let f;
@@ -8236,6 +8239,17 @@
 							o.textContent = opt === '' ? 'Default' : opt;
 							f.appendChild(o);
 						});
+					} else if (prop.type === 'integer') {
+						// A number, typed with the keyboard a number wants and
+						// with whatever bounds the camera declared. Left empty
+						// it means the member is unset, which is a different
+						// thing from zero — tidy() drops an empty string and
+						// the camera then falls back to its own default.
+						f = el('input', 'form-control');
+						f.type = 'number';
+						f.inputMode = 'numeric';
+						if (isNum(prop.minimum)) f.min = prop.minimum;
+						if (isNum(prop.maximum)) f.max = prop.maximum;
 					} else {
 						f = el('input', 'form-control');
 						f.type = (prop['x-secret'] || prop.writeOnly) ? 'password' : 'text';
