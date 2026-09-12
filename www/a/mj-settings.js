@@ -8205,7 +8205,8 @@
 				url.value = v.url != null ? String(v.url) : '';
 				const urlLabel = (props.url && props.url.title) || 'Address';
 				url.setAttribute('aria-label', urlLabel);
-				url.placeholder = urlLabel;
+				url.placeholder =
+					(props.url && props.url['x-placeholder']) || urlLabel;
 				const del = el('button', 'btn btn-outline-danger mj-dest-del');
 				del.type = 'button';
 				del.textContent = '\u00d7';
@@ -8215,17 +8216,27 @@
 				head.appendChild(url);
 				head.appendChild(del);
 				row.appendChild(head);
+				if (props.url && props.url.hint) {
+					const h = el('div', 'hint text-secondary');
+					h.textContent = props.url.hint;
+					row.appendChild(h);
+				}
 
 				members.filter(m => m !== 'url').forEach(m => {
 					const prop = props[m] || {};
-					const wrap = el('div', 'mj-dest-member input-group input-group-sm mt-1');
+					// The member is a block, not just the control row: its
+					// explanation belongs to it and has to disappear with it.
+					// Appending the hint as a sibling left every RTMP row
+					// carrying a paragraph about WHIP bearer tokens.
+					const wrap = el('div', 'mj-dest-member');
 					wrap.setAttribute('data-for', m);
+					const line = el('div', 'input-group input-group-sm mt-1');
 					const name = el('span', 'input-group-text');
 					name.textContent = prop.title || m;
 					// The column is narrow on purpose, so a name that does not
 					// fit is readable on hover rather than only guessable.
 					name.title = prop.title || m;
-					wrap.appendChild(name);
+					line.appendChild(name);
 
 					let f;
 					if (Array.isArray(prop.enum)) {
@@ -8274,7 +8285,16 @@
 					f.setAttribute('data-member', m);
 					f.setAttribute('aria-label', prop.title || m);
 					f.value = v[m] != null ? String(v[m]) : '';
-					wrap.appendChild(f);
+					if (prop['x-placeholder']) f.placeholder = prop['x-placeholder'];
+					line.appendChild(f);
+					wrap.appendChild(line);
+					// Same markup every other field on this page puts under
+					// its control.
+					if (prop.hint) {
+						const h = el('div', 'hint text-secondary');
+						h.textContent = prop.hint;
+						wrap.appendChild(h);
+					}
 					row.appendChild(wrap);
 				});
 
@@ -8318,24 +8338,6 @@
 				updateDirty();
 			});
 
-			// What the members mean, said once under the list rather than once
-			// per row. A hint describes the member, not the destination that
-			// happens to use it, so repeating it down a list of five is five
-			// copies of one paragraph — and on a row whose protocol does not
-			// use the member it was worse than noise: the RTMP rows carried a
-			// paragraph about WHIP bearer tokens.
-			const notes = members
-				.filter(m => props[m] && props[m].hint)
-				.map(m => (props[m].title || m) + ': ' + props[m].hint);
-			if (notes.length) {
-				const help = el('div', 'hint text-secondary');
-				notes.forEach(t => {
-					const line = document.createElement('div');
-					line.textContent = t;
-					help.appendChild(line);
-				});
-				p.appendChild(help);
-			}
 		} else if (type === 'array') {
 			// MultiRect fields (motionDetect.roi, crop, privacyMasks) are a list of
 			// "AxBxCxD" regions: render one editable row per region, not a single
