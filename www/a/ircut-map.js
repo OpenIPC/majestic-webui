@@ -61,13 +61,23 @@
 	// series set, so a pad and its row in the list always agree.
 	const ROLES = [
 		// Which coil is which is majestic's to say, not ours, and it is the
-		// opposite of what reads naturally from the key names. night.c drives
-		// pin1 high for NIGHT and pin2 high for DAY (double_ircut_set(night):
-		// set_gpio(pin1, night); set_gpio(pin2, !night)), and night is the
-		// filter swung OUT of the light path. So pin1 is the opening coil and
-		// pin2 the closing one. Measured on the 85H50AI these were written
-		// against: pad 11 driven high opens, pad 10 closes, and its config is
-		// irCutPin1=11 / irCutPin2=10.
+		// opposite of what reads naturally from the key names. With BOTH coils
+		// assigned — the pair these two labels are about — switching a camera
+		// to night raises irCutPin1 and lowers irCutPin2, and night is the
+		// filter swung OUT of the light path. So irCutPin1 is the OPENING coil
+		// and irCutPin2 the closing one.
+		//
+		// Said of the PAIR deliberately. One assigned coil is a different mode:
+		// the camera then holds that single pad at a level, and the polarity
+		// chip beside it chooses which level means night — so on such a board
+		// night can hold irCutPin1 LOW. A blanket "night raises irCutPin1"
+		// would be false on exactly the cameras this map has to describe.
+		//
+		// Measured, not read, on the 85H50AI these were written against, whose
+		// config is irCutPin1=11 / irCutPin2=10: driving pad 11 high against 10
+		// turns a daylight picture magenta, and driving pad 10 high against 11
+		// gives the colour back. Anyone can repeat that on their own camera,
+		// which is the point of writing it down this way round.
 		//
 		// They were the wrong way round here for a release. Nothing broke,
 		// because the labels only name what the fields already do -- but every
