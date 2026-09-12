@@ -6245,6 +6245,96 @@ dialog.mj-modal::backdrop {
 	flex: 0 0 auto;
 }
 
+/* What the camera says a destination is doing. Sits under the address and
+   above the settings, because the verdict is what somebody came to read and
+   the fields are what they change because of it. */
+.mj-dest-status {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: .25rem .5rem;
+	margin-top: .35rem;
+	font-size: .8125rem;
+}
+
+/* The sentence is what somebody came to read, so it takes the width and the
+   readings wrap below it. Without a basis to wrap at, a settings column this
+   narrow gave it the gutter the rate and the trace left over — five lines of
+   text in a hundred pixels. */
+.mj-dest-line {
+	flex: 1 1 13rem;
+	min-width: 0;
+}
+
+.mj-dest-meter {
+	display: flex;
+	align-items: center;
+	gap: .5rem;
+	flex: 0 0 auto;
+}
+
+/* Tabular figures so a rate does not jitter sideways as it changes. */
+.mj-dest-rate {
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	color: var(--bs-secondary-color);
+}
+
+.mj-dest-spark {
+	flex: 0 0 5rem;
+	margin-left: 0;
+}
+
+/* Last on whichever line it lands on. */
+.mj-dest-more {
+	flex: 0 0 auto;
+	margin-left: auto;
+	padding: 0;
+	font-size: .8125rem;
+	text-decoration: none;
+}
+
+.mj-dest-detail {
+	margin-top: .4rem;
+	padding-top: .4rem;
+	border-top: 1px solid var(--bs-border-color);
+	font-size: .8125rem;
+}
+
+.mj-dest-explain,
+.mj-dest-why {
+	margin: 0 0 .4rem;
+}
+
+/* Device text of unknown shape, including a reason phrase a remote server
+   chose: it wraps anywhere rather than pushing the row wide. */
+.mj-dest-reason {
+	font-family: var(--bs-font-monospace);
+	overflow-wrap: anywhere;
+}
+
+.mj-dest-facts {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: .1rem .75rem;
+	margin: 0 0 .4rem;
+}
+
+.mj-dest-facts dt {
+	font-weight: 400;
+	color: var(--bs-secondary-color);
+}
+
+.mj-dest-facts dd {
+	margin: 0;
+	font-variant-numeric: tabular-nums;
+}
+
+.mj-dest-limits {
+	margin: 0 0 .25rem;
+	color: var(--bs-secondary-color);
+}
+
 /* A destination that is switched off. Greyed rather than hidden or moved: it
    is still configured, still worth reading, and still one click from being on
    again — which is the whole reason the switch is per-row. The switch itself

@@ -8212,7 +8212,26 @@
 			// nothing on an RTMP destination — and it lives in mj-servers.js
 			// beside the rest of the reading of an address.
 			const SRV = (typeof window === 'object' && window.MajesticServers) || null;
+			// The verdict module. Absent on an older build of this page, and
+			// everything below degrades to the list as it was.
+			const OUT = (typeof window === 'object' && window.MajesticOutgoing) || null;
 			const props = sub.items.properties;
+
+			// What the camera last said, and when. Null until the first
+			// answer, and null again after two failures — holding the last
+			// good one is how a badge stays green through an outage.
+			let outFeed = null;
+			let outAt = 0;
+			let outFails = 0;
+			let outSeq = 0;
+			// A fact about the build, not about this visit: an older camera
+			// does not grow the endpoint while the page is open.
+			let outGone = false;
+			// Which rows the reader opened, by camera index, so a rebuild
+			// does not close them.
+			const outOpen = Object.create(null);
+			// Per index: the last byte count and when, for the rate.
+			const outPrev = Object.create(null);
 			// `url` first whatever order the schema lists them in: it is the one
 			// that decides what the rest of the row means.
 			//
@@ -8254,6 +8273,162 @@
 			const rowsOf = () => Array.from(control.querySelectorAll('.mj-dest'))
 				.map(readRow);
 
+			// Which camera index a row is showing, and how confident the
+			// match is. The list being edited may not be the list the camera
+			// is running: a row deleted here has not been deleted there until
+			// Save, so matching by position alone would slide every later
+			// row's numbers onto the wrong address.
+			//
+			// Four passes, each claiming a baseline entry once: exact content
+			// in place, exact content anywhere, same address in place, same
+			// address anywhere. Anything unmatched is a row the camera has
+			// never seen.
+			const joinRows = () => {
+				if (!OUT || !SRV) return;
+				let baseline = [];
+				try {
+					baseline = JSON.parse(state.initial[dot] || '[]');
+				} catch (e) { baseline = []; }
+				if (!Array.isArray(baseline)) baseline = [];
+
+				const rows = Array.from(control.querySelectorAll('.mj-dest'));
+				const mine = rows.map(r => {
+					const o = readRow(r);
+					const url = typeof o.url === 'string' ? o.url.trim() : '';
+					return { row: r, url: url, canon: SRV.canon([o]) };
+				});
+				const base = baseline.map(b => ({
+					url: typeof b.url === 'string' ? b.url.trim() : '',
+					canon: SRV.canon([b]),
+				}));
+				const taken = base.map(() => false);
+				mine.forEach(m => { m.row._mjIdx = undefined; m.row._mjTier = 'none'; });
+
+				const claim = (m, i, tier) => {
+					taken[i] = true;
+					m.row._mjIdx = i;
+					m.row._mjTier = tier;
+					m.done = true;
+				};
+				mine.forEach((m, i) => {
+					if (m.done || i >= base.length || taken[i]) return;
+					if (m.canon === base[i].canon) claim(m, i, 'exact');
+				});
+				mine.forEach(m => {
+					if (m.done) return;
+					for (let i = 0; i < base.length; i++) {
+						if (!taken[i] && m.canon === base[i].canon) { claim(m, i, 'exact'); return; }
+					}
+				});
+				mine.forEach((m, i) => {
+					if (m.done || i >= base.length || taken[i] || !m.url) return;
+					if (m.url === base[i].url) claim(m, i, 'edited');
+				});
+				mine.forEach(m => {
+					if (m.done || !m.url) return;
+					for (let i = 0; i < base.length; i++) {
+						if (!taken[i] && m.url === base[i].url) { claim(m, i, 'edited'); return; }
+					}
+				});
+			};
+
+			// Draw one row's status. Everything below is a DOM write, so an
+			// unchanged verdict returns before any of it.
+			const paintDest = (row) => {
+				if (!OUT) return;
+				const bar = row.querySelector('.mj-dest-status');
+				const panel = row.querySelector('.mj-dest-detail');
+				if (!bar) return;
+
+				const idx = row._mjIdx;
+				const st = (outFeed && idx !== undefined)
+					? (outFeed.byIndex[idx] || null) : null;
+
+				// If the row's own address and the camera's answer disagree,
+				// the join is wrong — one destination's numbers under
+				// another's address is worse than none.
+				const url = (row.querySelector('[data-member="url"]') || {}).value || '';
+				const ok = !st || !SRV || OUT.agrees(st, SRV.protocolOf(url));
+
+				const enabled = row.querySelector('[data-member="enabled"]');
+				const v = OUT.verdict(ok ? st : null, {
+					rowEnabled: !!enabled && enabled.checked,
+					ageMs: outAt ? Date.now() - outAt : 0,
+				});
+
+				const open = panel && !panel.hidden;
+				const sig = [v.known, v.sev, v.badge, v.short, v.reason,
+					row._mjTier, open].join('\u0001');
+				if (row._mjSig === sig) return;
+				row._mjSig = sig;
+
+				bar.hidden = !v.known;
+				if (!v.known) return;
+
+				const TONE = { ok: 'success', warn: 'warning', danger: 'danger' };
+				const badge = bar.querySelector('.mj-dest-state');
+				badge.className = 'badge mj-dest-state text-bg-' +
+					(TONE[v.sev] || 'secondary');
+				badge.textContent = v.badge;
+				badge.hidden = v.badge === '';
+
+				let line = v.short;
+				// Said under the status rather than in it: the camera is
+				// still running the settings it was last given.
+				if (row._mjTier === 'edited') {
+					line = line + ' Changed here but not saved, so the camera ' +
+						'is still on the previous settings.';
+				}
+				bar.querySelector('.mj-dest-line').textContent = line;
+
+				if (panel) {
+					panel.innerHTML = '';
+					v.detail.forEach(t => {
+						const el2 = el('p', 'mj-dest-explain');
+						el2.textContent = t;
+						panel.appendChild(el2);
+					});
+					if (v.reason) {
+						const why = el('p', 'mj-dest-why');
+						why.textContent = v.reasonLead + ' ';
+						const q = el('span', 'mj-dest-reason');
+						// Device text, and for one protocol partly a remote
+						// server's: textContent, never markup.
+						q.textContent = v.reason;
+						why.appendChild(q);
+						panel.appendChild(why);
+					}
+					const rows2 = OUT.facts(st, row._mjBps);
+					if (rows2.length) {
+						const dl = el('dl', 'mj-dest-facts');
+						rows2.forEach(([k, val]) => {
+							const dt = el('dt', ''); dt.textContent = k;
+							const dd = el('dd', ''); dd.textContent = val;
+							dl.appendChild(dt); dl.appendChild(dd);
+						});
+						panel.appendChild(dl);
+					}
+					v.limits.forEach(t => {
+						const li = el('p', 'mj-dest-limits');
+						li.textContent = t;
+						panel.appendChild(li);
+					});
+					// A switched-off destination has measured nothing and
+					// explains nothing, so the panel is empty and the button
+					// that opens it would be an offer of a blank box.
+					const more = bar.querySelector('.mj-dest-more');
+					const empty = panel.childElementCount === 0;
+					if (more) more.hidden = empty;
+					if (empty && !panel.hidden) {
+						panel.hidden = true;
+						if (more) {
+							more.textContent = 'Details';
+							more.setAttribute('aria-expanded', 'false');
+						}
+					}
+				}
+			};
+
 			// Redraw what depends on the address: the protocol badge, which
 			// members this row uses, and anything the row is worth being told.
 			const repaint = (row) => {
@@ -8281,6 +8456,7 @@
 				// losing what it would do if switched back on.
 				const on = row.querySelector('[data-member="enabled"]');
 				row.classList.toggle('mj-dest-off', !!on && !on.checked);
+				paintDest(row);
 			};
 
 			const onChange = (row) => { repaint(row); updateDirty(); };
@@ -8313,6 +8489,50 @@
 					const h = el('div', 'hint text-secondary');
 					h.textContent = props.url.hint;
 					row.appendChild(h);
+				}
+
+				// What the camera says this destination is doing. Built here
+				// rather than appended later because _set() wipes and rebuilds
+				// every row — on mount, on refresh, and on a per-row reset —
+				// so anything attached outside addRow never comes back.
+				if (OUT) {
+					const bar = el('div', 'mj-dest-status');
+					bar.hidden = true;
+					const badge = el('span', 'badge mj-dest-state');
+					const line = el('span', 'mj-dest-line');
+					// Rate and trace travel together: they are two readings
+					// of one thing, and on a narrow column they wrap onto
+					// their own line rather than squeezing the sentence into
+					// a gutter.
+					const meter = el('span', 'mj-dest-meter');
+					const rateEl = el('span', 'mj-dest-rate');
+					const spark = el('span', 'spark spark-row mj-dest-spark');
+					meter.appendChild(rateEl);
+					meter.appendChild(spark);
+					const more = el('button', 'btn btn-sm btn-link mj-dest-more');
+					// Inside a form, a bare button submits it — clicking
+					// Details would save the camera.
+					more.type = 'button';
+					more.textContent = 'Details';
+					more.setAttribute('aria-expanded', 'false');
+					bar.appendChild(badge);
+					bar.appendChild(line);
+					bar.appendChild(meter);
+					bar.appendChild(more);
+					row.appendChild(bar);
+
+					const panel = el('div', 'mj-dest-detail');
+					panel.hidden = true;
+					row.appendChild(panel);
+					more.addEventListener('click', () => {
+						const open = panel.hidden;
+						panel.hidden = !open;
+						more.setAttribute('aria-expanded', open ? 'true' : 'false');
+						more.textContent = open ? 'Hide' : 'Details';
+						if (open) { outOpen[row._mjIdx] = true; }
+						else { delete outOpen[row._mjIdx]; }
+						paintDest(row);
+					});
 				}
 
 				members.filter(m => m !== 'url').forEach(m => {
@@ -8455,12 +8675,128 @@
 					// list nobody touched.
 					addRow(typeof x === 'string' ? { url: x } : x);
 				});
+				// The rows are new objects with no camera index yet, so
+				// without this a refresh or a per-row reset blanks every
+				// status until the next poll two seconds later.
+				if (OUT) {
+					joinRows();
+					control.querySelectorAll('.mj-dest').forEach(r => paintDest(r));
+				}
 			};
 			control._set(eff);
 			p.querySelector('.mj-dest-add').addEventListener('click', () => {
 				addRow({});
 				updateDirty();
 			});
+
+			// Ask the camera how each of these is doing.
+			//
+			// Its own timer rather than the shared heartbeat: that one has no
+			// unsubscribe, so a handler registered per mount would outlive
+			// every visit to this tab. This one is torn down with the leaf.
+			if (OUT && dot === 'outgoing.servers') {
+				const paintAll = () => {
+					joinRows();
+					control.querySelectorAll('.mj-dest').forEach(r => {
+						// The trace and the rate ride the poll, not the
+						// verdict signature, so they are computed here.
+						const st = (outFeed && r._mjIdx !== undefined)
+							? outFeed.byIndex[r._mjIdx] : null;
+						const host = r.querySelector('.mj-dest-spark');
+						if (st && host) {
+							const prev = outPrev[r._mjIdx];
+							const bps = prev
+								? OUT.rate(prev.bytes, st.txBytes, outAt - prev.at)
+								: null;
+							r._mjBps = bps;
+							const rateEl = r.querySelector('.mj-dest-rate');
+							if (rateEl) rateEl.textContent = bps === null ? '' : OUT.bps(bps);
+							// A rate that cannot be computed pushes nothing:
+							// pushSpark would plot a confident zero.
+							const MC = window.MjCharts;
+							if (bps !== null && MC && MC.pushSpark) {
+								if (!r._mjSpark) {
+									const ink = (getComputedStyle(document.documentElement)
+										.getPropertyValue('--st-c1') || '#4c60d8').trim();
+									r._mjSpark = MC.makeSpark(host, ink, 0, null, 60, 2);
+								}
+								MC.pushSpark(r._mjSpark, bps);
+							}
+						}
+						if (st && st.txBytes !== undefined) {
+							outPrev[r._mjIdx] = { bytes: st.txBytes, at: outAt };
+						} else if (!st) {
+							// The camera no longer lists this row. Its last
+							// rate is now a number about nothing, and keeping
+							// the sample would let the trace bridge the gap
+							// if the same index comes back.
+							const rateEl = r.querySelector('.mj-dest-rate');
+							if (rateEl) rateEl.textContent = '';
+							r._mjBps = null;
+							if (r._mjIdx !== undefined) delete outPrev[r._mjIdx];
+						}
+						if (r._mjIdx !== undefined && outOpen[r._mjIdx]) {
+							const panel = r.querySelector('.mj-dest-detail');
+							const more = r.querySelector('.mj-dest-more');
+							if (panel && panel.hidden) {
+								panel.hidden = false;
+								if (more) {
+									more.textContent = 'Hide';
+									more.setAttribute('aria-expanded', 'true');
+								}
+							}
+						}
+						// Only the panel reads the rate, and only the poll
+						// changes it: the sentence above has its own clock
+						// and the signature already catches what it says.
+						const shown = r.querySelector('.mj-dest-detail');
+						if (shown && !shown.hidden) r._mjSig = undefined;
+						paintDest(r);
+					});
+				};
+
+				const poll = () => {
+					if (outGone) return;
+					const my = ++outSeq;
+					apiFetch('/api/v1/outgoing.json')
+						.then(r => {
+							if (r.status === 404) { outGone = true; return null; }
+							if (!r.ok) return Promise.reject(r.status);
+							return r.json();
+						})
+						.then(j => {
+							if (my !== outSeq || j === null) return;
+							const read = OUT.read(j);
+							if (!read) return;
+							outFeed = read;
+							outAt = Date.now();
+							outFails = 0;
+							paintAll();
+						})
+						.catch(() => {
+							if (my !== outSeq) return;
+							// One dropped poll is not a camera that stopped
+							// answering; two is, and then the rows go quiet
+							// rather than showing an hour-old green.
+							if (++outFails >= 2) { outFeed = null; paintAll(); }
+						});
+				};
+
+				poll();
+				const t = setInterval(poll, 2000);
+				// A second clock so a countdown ticks between polls rather
+				// than lurching every two seconds.
+				const t1 = setInterval(() => {
+					control.querySelectorAll('.mj-dest').forEach(r => paintDest(r));
+				}, 1000);
+				state.liveCleanup.push(() => {
+					clearInterval(t);
+					clearInterval(t1);
+					// An answer in flight is stale on arrival.
+					outSeq++;
+					outFeed = null;
+				});
+			}
 
 		} else if (type === 'array') {
 			// MultiRect fields (motionDetect.roi, crop, privacyMasks) are a list of
