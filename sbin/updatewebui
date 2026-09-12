@@ -19,7 +19,7 @@
 # WebUI exactly as it was.
 
 scr_name=updatewebui
-scr_version=7
+scr_version=8
 
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
@@ -39,6 +39,7 @@ LEGACY_SHARED='/usr/sbin/openwall /usr/sbin/setnetwork /usr/sbin/telegram
 
 branch=
 zip_url=
+resolved_sha=
 mode=install
 dry_run=0
 do_backup=1
@@ -233,7 +234,19 @@ fetch_tree() {
 	if [ -n "$zip_url" ]; then
 		source_name=$zip_url
 	else
-		zip_url="https://github.com/$REPO/archive/refs/heads/$branch.zip"
+		# Resolve the branch to its exact commit and fetch THAT commit's
+		# archive, so the tree installed and the version recorded for it are the
+		# same revision by construction: a branch that advances between the
+		# fetch and the stamp cannot leave them naming different trees. The
+		# branch zip is the fallback when the commit cannot be resolved
+		# (offline, rate limited), paired with a branch-only stamp.
+		resolved_sha=$(curl -fsSL --connect-timeout 10 "https://api.github.com/repos/$REPO/commits/$branch" 2>/dev/null |
+			grep -m1 '"sha"' | sed -n 's/.*"sha": *"\([0-9a-f]\{40\}\).*/\1/p')
+		if [ -n "$resolved_sha" ]; then
+			zip_url="https://github.com/$REPO/archive/$resolved_sha.zip"
+		else
+			zip_url="https://github.com/$REPO/archive/refs/heads/$branch.zip"
+		fi
 		source_name=$branch
 	fi
 	# Handed over, the download is already made and already reported; doing
@@ -688,6 +701,42 @@ hand_over() {
 	die "cannot start installer v$newv, nothing has been changed"
 }
 
+# Record which WebUI this run deployed, so the Dashboard can show it -- there is
+# otherwise nothing on the camera that says which build is installed, and a
+# reporter cannot tell whether an install carried a given fix. It is written to
+# the state dir rather than into /var/www, and the Dashboard reads it in
+# preference to the image's own www/.version: an install hides that image copy
+# without replacing it (the fetched source tree carries none), so reading
+# /var/www/.version after an install would show the firmware's version, not
+# what was just deployed. Best-effort throughout -- a failure here never fails
+# an install that has otherwise succeeded. Format mirrors majestic's -v.
+write_version() {
+	when=$(date '+%Y-%m-%d %H:%M')
+	if [ -n "$zip_url_given" ]; then
+		# A --url source can carry credentials or a signed query; persist and
+		# show neither. Drop any user:pass@ and any ?query, leaving the scheme,
+		# host and path -- enough to say where it came from.
+		safe=$(printf '%s' "$source_name" | sed -e 's#://[^/@]*@#://#' -e 's/[?].*$//')
+		stamp="$safe, $when"
+	else
+		# Prefer the commit fetch_tree resolved and installed by -- the tree and
+		# its stamp are then the same revision. Only if that was unavailable (or
+		# this is a handed-over run that copied the staged zip rather than
+		# fetching) ask the API for the branch head, and fall back to the branch
+		# name alone. Never a guessed id.
+		sha=$resolved_sha
+		[ -n "$sha" ] || sha=$(curl -fsSL --connect-timeout 10 "https://api.github.com/repos/$REPO/commits/$branch" 2>/dev/null |
+			grep -m1 '"sha"' | sed -n 's/.*"sha": *"\([0-9a-f]\{40\}\).*/\1/p')
+		if [ -n "$sha" ]; then stamp="$branch+$(echo "$sha" | cut -c1-7), $when"; else stamp="$branch, $when"; fi
+	fi
+	# Atomic: a truncated or interrupted write must not leave a partial file
+	# that still wins the Dashboard's non-empty check over the image's own stamp.
+	mkdir -p "$STATE_DIR" &&
+		printf '%s\n' "$stamp" >"$STATE_DIR/webui.version.tmp" &&
+		mv -f "$STATE_DIR/webui.version.tmp" "$STATE_DIR/webui.version" ||
+		echo "$scr_name: could not record the deployed version in $STATE_DIR/webui.version" >&2
+}
+
 do_install() {
 	fetch_tree
 	hand_over
@@ -698,6 +747,11 @@ do_install() {
 		echo
 		echo "Already up to date."
 		write_manifest
+		# Still record the version: an up-to-date tree may carry no stamp yet
+		# (the file matched /rom, or a prior install predates this record), and
+		# the Dashboard should show what is actually installed.
+		write_version
+		rm -f /tmp/webui/sysinfo.txt
 		return 0
 	fi
 	echo
@@ -708,6 +762,7 @@ do_install() {
 	settle_view
 	write_manifest
 	write_dirs
+	write_version
 	# The per-boot sysinfo cache was written by the release this one just
 	# replaced, and everything derived at detection time — PTZ backend and
 	# support, most visibly — stays frozen at the old release's answers until
@@ -1092,6 +1147,12 @@ do_restore() {
 	# tell your files from ours.
 	mkdir -p "$STATE_DIR" && : >"$MANIFEST" ||
 		echo "$scr_name: could not empty $MANIFEST" >&2
+	# The deployed-version record dies with the install: what shows through now
+	# is the firmware's own WebUI, whose version is its www/.version (or none),
+	# not what an install had put here. Drop the per-boot cache too, or the
+	# Dashboard keeps sourcing the removed version until something else
+	# regenerates it.
+	rm -f "$STATE_DIR/webui.version" /tmp/webui/sysinfo.txt
 	settle_view
 	restore_local
 	settle_view

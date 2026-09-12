@@ -266,6 +266,7 @@ done) %>
 				<dt>Firmware</dt><dd><% esc "${fw_version}-${fw_variant}" %></dd>
 				<dt>Build</dt><dd class="text-break"><% esc "$fw_build" %></dd>
 				<dt>Majestic</dt><dd><% esc "$mj_version" %></dd>
+				<dt>WebUI</dt><dd class="text-break"><% esc "${webui_version:-unknown}" %></dd>
 				<% if [ -n "$uboot_version" ]; then %>
 					<dt>U-Boot</dt><dd><% esc "$uboot_version" %></dd>
 				<% fi %>

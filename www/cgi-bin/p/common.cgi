@@ -584,6 +584,23 @@ update_caminfo() {
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow | cut -d: -f2)
+	# The deployed WebUI's own version, shown on the Dashboard the way majestic's
+	# is. What updatewebui recorded wins over the image's own stamp: an install
+	# hides the image's www/.version without replacing it, so that file still
+	# reads as the firmware's version after a newer WebUI was laid over it. Empty
+	# on an image too old to carry either, which the Dashboard renders "unknown".
+	if [ -s /etc/webui/webui.version ]; then
+		webui_version=$(cat /etc/webui/webui.version)
+	elif [ -s /var/www/.version ]; then
+		webui_version=$(cat /var/www/.version)
+	else
+		webui_version=""
+	fi
+	# This value is cached into the shell-sourced sysinfo file and shown on the
+	# Dashboard; keep it to characters that cannot break out of either. It is a
+	# version string, so a printable subset loses nothing real. Testing -s above
+	# (not -f) means a truncated or empty stamp falls through rather than winning.
+	webui_version=$(printf '%s' "$webui_version" | tr -cd 'A-Za-z0-9 .,:+/@()_-')
 	# PTZ preview controls. The switch is the U-Boot ptz_control variable
 	# (#227): it names the method — "gpio" (gpio-motors, pins in ptz_gpio,
 	# with the legacy gpio_motors as an alias on both sides), "pelco-d"
@@ -687,7 +704,7 @@ update_caminfo() {
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		af_support ptz_backend ptz_caps sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password"
+		af_support ptz_backend ptz_caps sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file}
 
 	local v
