@@ -1,10 +1,14 @@
-# The same block from a camera whose driver DOES have a level to give: an
-# Ingenic T31 on a Realtek RTL8188FU, which publishes the real dBm in
-# /proc/net/rtl8188fu/wlan0/rx_signal ("rssi:-55") even though its wext level
-# is a relative 46/100. Captured 2026-09-12.
+# SYNTHETIC test data, not a capture from any device.
 #
-# The pair is the point: the same panel, the same five possible readings, and
-# the measure the plot can honestly use is different on each.
+# The Wi-Fi block as an adapter that HAS a signal level publishes it: a level
+# in dBm alongside the link quality, the bitrate and the two counters. It is
+# the counterpart of metrics-wifi-8189fs.txt, which carries the same block
+# from an adapter with no level to give, and the pair is what the measure
+# choice is tested against — same panel, same five possible readings, and a
+# different answer to "what can this chart honestly plot".
+#
+# The values are chosen to be unremarkable: a level in the middle of the good
+# band, a quality likewise, and counters at rest.
 # HELP wifi_link_quality_ratio Wi-Fi link quality, percent of the driver's own maximum
 # TYPE wifi_link_quality_ratio gauge
 wifi_link_quality_ratio 88

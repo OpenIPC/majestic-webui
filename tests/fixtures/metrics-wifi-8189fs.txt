@@ -1,11 +1,10 @@
-# The Wi-Fi block of /metrics from the camera in issue #435: a Wyze Cam v3
-# (Ingenic T31X, GC2053) whose Wi-Fi module is a Realtek RTL8189FS, reported by
-# duke2k1 on 2026-09-12. Four readings arrive and the signal LEVEL is not among
-# them: that driver exports neither the rx_signal proc file its 8188fu sibling
-# does nor a wext level flagged as dBm, so majestic publishes no wifi_rssi_dbm
-# rather than converting a relative number into a figure with units on it.
+# The Wi-Fi block of /metrics as reported in issue #435 by the owner of a
+# camera whose Wi-Fi module is a Realtek RTL8189FS. Four readings arrive and
+# the signal LEVEL is not among them: that driver offers no level in dBm, and
+# a relative 0-100 number is not one — so the camera publishes no
+# wifi_rssi_dbm rather than a figure with units it has not measured.
 #
-# This is the shape the Dashboard's Wi-Fi block could not draw — the fact line
+# This is the shape the Dashboard's Wi-Fi block could not draw: the fact line
 # filled in from these four while the plot, fed by the absent fifth, stayed
 # empty for the life of the page.
 # HELP wifi_link_quality_ratio Wi-Fi link quality, percent of the driver's own maximum

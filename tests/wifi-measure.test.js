@@ -1,18 +1,17 @@
 // Which reading the Dashboard's Wi-Fi panel plots, and how it grades it.
 //
-// This earns a file because the failure is silent and needs hardware nobody
-// here has to reach. A chart fed from a metric the camera never publishes is
-// not an error and not a gap: it is a panel that mounts, captions itself,
-// fills in its fact line from the readings that DID arrive, and draws no line
-// at all — which looks exactly like a camera with nothing to say. That is
-// issue #435, found by a reporter on a Wyze Cam v3 and invisible on every
-// camera in this project, because the Realtek 8188fu on the bench publishes a
-// dBm level and the 8189fs in his camera does not.
+// This earns a file because the failure is silent and needs hardware to
+// reach. A chart fed from a metric the camera never publishes is not an error
+// and not a gap: it is a panel that mounts, captions itself, fills in its fact
+// line from the readings that DID arrive, and draws no line at all — which
+// looks exactly like a camera with nothing to say. That is issue #435,
+// reported from a camera whose Wi-Fi module publishes link quality and no
+// signal level, and invisible to anyone whose module publishes both.
 //
 // Reproducing it needs a second Wi-Fi module with a different driver, an
 // association to hold still, and somebody watching a plot for long enough to
-// believe it is never coming. The two fixtures are that pair of cameras, held
-// still: one that reports a level and one that reports only link quality.
+// believe the line is never coming. The two fixtures are those two adapters
+// held still: one that reports a level and one that reports only quality.
 //
 // What must hold:
 //   * a camera with a level plots the level, one without plots the quality,
@@ -65,8 +64,8 @@ function fixture(name) {
 	return parseMetrics(fs.readFileSync(
 		path.join(__dirname, 'fixtures', name), 'utf8')).v;
 }
-const NO_LEVEL = fixture('metrics-wifi-8189fs.txt'); // Wyze Cam v3, #435
-const LEVEL = fixture('metrics-wifi-8188fu.txt');    // the bench camera
+const NO_LEVEL = fixture('metrics-wifi-8189fs.txt');   // as reported in #435
+const LEVEL = fixture('metrics-wifi-with-level.txt'); // synthetic counterpart
 
 
 // check() asks whether a condition holds and prints the third argument only
@@ -74,18 +73,18 @@ const LEVEL = fixture('metrics-wifi-8188fu.txt');    // the bench camera
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const saw = (x) => 'got ' + JSON.stringify(x);
 
-group('the fixtures are the two cameras they claim to be');
-check('the 8189fs camera publishes no level',
+group('the fixtures are the two adapters they claim to be');
+check('the reported adapter publishes no level',
 	!('wifi_rssi_dbm' in NO_LEVEL),
 	saw(NO_LEVEL.wifi_rssi_dbm));
-check('the 8189fs camera does publish a quality',
+check('it does publish a quality',
 	NO_LEVEL.wifi_link_quality_ratio === 70,
 	saw(NO_LEVEL.wifi_link_quality_ratio));
-check('the 8188fu camera publishes a level',
+check('the counterpart publishes a level',
 	LEVEL.wifi_rssi_dbm === -54, saw(LEVEL.wifi_rssi_dbm));
 // Both report a bitrate and both counters, so the fact line under the plot
-// fills in identically on the two cameras — which is exactly why the empty
-// plot read as a puzzle rather than as a missing reading.
+// fills in identically on the two — which is exactly why the empty plot read
+// as a puzzle rather than as a missing reading.
 check('both report a bitrate and both counters',
 	['wifi_bitrate_mbps', 'wifi_retries_total', 'wifi_missed_beacons_total']
 		.every(k => k in NO_LEVEL && k in LEVEL),
@@ -112,7 +111,7 @@ check('a quality arriving after nothing takes the empty slot',
 check('a level arriving after nothing takes it too',
 	measure(LEVEL, null) === 'dbm', saw(measure(LEVEL, null)));
 // undefined is the real first call — nothing decided yet — and null is the
-// settled "this camera publishes neither". Both must fall through to the
+// settled "this adapter publishes neither". Both must fall through to the
 // quality test, or an adapter that starts out reporting only a bitrate would
 // never pick up a quality that arrives a poll later.
 check('nothing decided yet reads the camera fresh',
@@ -150,9 +149,9 @@ check('the two measures are read from different keys',
 
 group('a reading is graded on the measure being shown');
 const g = (v, u) => { const r = grade(v, u); return r && r[0]; };
-check('the 8189fs camera reads good on quality',
+check('the reported adapter reads good on quality',
 	g(NO_LEVEL, 'pct') === 'good', saw(g(NO_LEVEL, 'pct')));
-check('the 8188fu camera reads good on its level',
+check('the counterpart reads good on its level',
 	g(LEVEL, 'dbm') === 'good', saw(g(LEVEL, 'dbm')));
 check('a weak level is named and answered',
 	g({ wifi_rssi_dbm: -80 }, 'dbm') === 'weak — move the camera or the AP',

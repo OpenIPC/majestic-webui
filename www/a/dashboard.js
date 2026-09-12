@@ -344,15 +344,14 @@
 	//
 	// WHICH reading is plotted is the camera's answer, not this page's. A
 	// level in dBm is the better measure and is what the panel was built for,
-	// but not every adapter has one to give: majestic publishes a level only
-	// from a genuine dBm source, and a Realtek 8189fs — the module in a Wyze
-	// Cam v3 — exports neither the proc file its 8188fu sibling does nor a
-	// wext level flagged as dBm, so it reports link quality and nothing else.
-	// The block used to mount on the strength of ANY Wi-Fi reading and then
-	// feed the chart from the level alone, so those cameras got a plot that
-	// could never draw a line, beneath a fact line that filled in normally and
-	// a tile whose headline number was a dash (#435). The chart is now built
-	// for whichever measure arrived.
+	// but not every Wi-Fi adapter has one to give: where the driver offers no
+	// dBm the camera publishes no level at all, rather than dressing a
+	// relative 0-100 number up in units it never measured, and link quality is
+	// then the only reading of signal there is. The block used to mount on the
+	// strength of ANY Wi-Fi reading and then feed the chart from the level
+	// alone, so those cameras got a plot that could never draw a line, beneath
+	// a fact line that filled in normally and a tile whose headline number was
+	// a dash (#435). The chart is now built for whichever measure arrived.
 	let chWifi = null;
 	// 'dbm' | 'pct' — what the tile and plot show; null once the camera has
 	// been found to publish neither, and undefined until it has answered at
@@ -470,13 +469,17 @@
 		// climbing with a sagging signal is the whole story. The quality is
 		// left out of this line when it is the one being plotted above, where
 		// it already has a number, a scale and a grade; the bitrate joins it
-		// only where there is no grade line to carry it, which is the adapter
-		// that reports no reading to grade.
+		// only on the adapter that has no reading to grade, since the tile's
+		// grade line is where it otherwise lives. That is keyed on the ABSENCE
+		// OF A MEASURE and not on the absence of a grade, which are not the
+		// same thing: a level that blinks out for one poll drops the grade for
+		// that poll too, and keying on it would have the bitrate hop from the
+		// tile to this line and back every time the link re-associates.
 		const parts = [];
 		if ('wifi_link_quality_ratio' in v && wifiUnit !== 'pct')
 			parts.push('quality ' + v.wifi_link_quality_ratio + ' %');
 		if ('wifi_snr_db' in v) parts.push('SNR ' + v.wifi_snr_db + ' dB');
-		if ('wifi_bitrate_mbps' in v && !grade)
+		if ('wifi_bitrate_mbps' in v && wifiUnit === null)
 			parts.push(v.wifi_bitrate_mbps + ' Mb/s');
 		if (s.prev && s.dt > 0) {
 			[['wifi_retries_total', 'retries'], ['wifi_missed_beacons_total', 'missed beacons']].forEach(k => {
