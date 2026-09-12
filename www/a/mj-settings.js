@@ -8246,15 +8246,6 @@
 					f.value = v[m] != null ? String(v[m]) : '';
 					wrap.appendChild(f);
 					row.appendChild(wrap);
-
-					if (prop.hint) {
-						// Same class pair every other hint on this page uses, so
-						// a member's help reads as help rather than as a new
-						// kind of text.
-						const h = el('div', 'hint text-secondary');
-						h.textContent = prop.hint;
-						row.appendChild(h);
-					}
 				});
 
 				const note = el('div', 'hint mj-dest-note');
@@ -8296,6 +8287,25 @@
 				addRow({});
 				updateDirty();
 			});
+
+			// What the members mean, said once under the list rather than once
+			// per row. A hint describes the member, not the destination that
+			// happens to use it, so repeating it down a list of five is five
+			// copies of one paragraph — and on a row whose protocol does not
+			// use the member it was worse than noise: the RTMP rows carried a
+			// paragraph about WHIP bearer tokens.
+			const notes = members
+				.filter(m => props[m] && props[m].hint)
+				.map(m => (props[m].title || m) + ': ' + props[m].hint);
+			if (notes.length) {
+				const help = el('div', 'hint text-secondary');
+				notes.forEach(t => {
+					const line = document.createElement('div');
+					line.textContent = t;
+					help.appendChild(line);
+				});
+				p.appendChild(help);
+			}
 		} else if (type === 'array') {
 			// MultiRect fields (motionDetect.roi, crop, privacyMasks) are a list of
 			// "AxBxCxD" regions: render one editable row per region, not a single

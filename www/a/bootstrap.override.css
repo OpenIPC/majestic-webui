@@ -6181,8 +6181,15 @@ dialog.mj-modal::backdrop {
    pushes to, drawn from the schema's `items`; see mj-servers.js for what a
    row means. */
 .mj-dest {
-	padding-left: 0.5rem;
-	border-left: 2px solid var(--bs-border-color);
+	/* A destination is several controls that belong together, stacked among
+	   other destinations that look exactly like it. Without something saying
+	   where one ends the list reads as one long form, and the Source belonging
+	   to the row above it is a guess. */
+	padding: 0.5rem;
+	margin-bottom: 0.5rem;
+	border-left: 3px solid var(--bs-primary);
+	border-radius: 0.25rem;
+	background-color: rgba(var(--bs-body-color-rgb), 0.04);
 }
 
 /* The protocol, read off the address rather than chosen: a fixed width keeps
