@@ -375,19 +375,32 @@
 		},
 	};
 
-	// A level wins whenever one appears, and the choice is never handed back.
-	// Both halves matter. A level that is merely missing this second — the
-	// link re-associating, which is when the collector refuses a non-negative
-	// one — must not park the plot on percent for the life of the page; and a
-	// plot whose axis, bands and units changed under a standing trace would be
-	// lying about its own history, so the upgrade starts the level's chart
-	// clean rather than continuing the percentage's.
-	function wifiMeasure(v, cur) {
+	// How many polls running a chosen measure may say nothing before the page
+	// stops believing in it. At the 2s heartbeat this is about a minute: far
+	// longer than a re-association, far shorter than sitting and watching.
+	const WIFI_LAPSE = 30;
+	let wifiMissing = 0;
+
+	// A level wins the moment one appears, and the choice is otherwise kept —
+	// but not for ever. One sample promotes and only a sustained silence
+	// demotes, which is the asymmetry the two failure modes ask for.
+	//
+	// Keeping it is what stops a level that is merely missing this second —
+	// the link re-associating, which is when the collector refuses a
+	// non-negative one — from parking the plot on percent for the life of the
+	// page. Letting go of it after `lapsed` is what stops the mirror image:
+	// one level slipping through during association would otherwise latch a
+	// dBm chart on an adapter that never reports another, and that chart can
+	// then never draw a line — the exact fault of #435, reintroduced on a
+	// camera that was working. A lapse re-decides from what is arriving now,
+	// in either direction, so a quality that stops coming gives its plot up
+	// too.
+	function wifiMeasure(v, cur, lapsed) {
 		if ('wifi_rssi_dbm' in v) return 'dbm';
 		// Undefined (nothing decided yet) and null (decided: neither reading)
 		// both fall through to the quality test, so an adapter that starts by
 		// reporting only a bitrate still picks up a quality that arrives later.
-		if (cur) return cur;
+		if (cur && !lapsed) return cur;
 		return ('wifi_link_quality_ratio' in v) ? 'pct' : null;
 	}
 
@@ -406,6 +419,7 @@
 	function mountWifi(unit) {
 		const sc = WIFI_SCALE[unit];
 		wifiUnit = unit;
+		wifiMissing = 0;
 		if (chWifi) MC.dropChart(chWifi);
 		chWifi = null;
 		const host = $('#ch-wifi');
@@ -440,11 +454,25 @@
 		// The block is not frozen at first sight: a link arriving later must
 		// mount it, and one leaving (interface down) must hide it again
 		// rather than overwrite rows with "undefined dBm".
-		if (tile) tile.hidden = !has;
 		if (panel) panel.hidden = !has;
-		if (!has) return;
-		const unit = wifiMeasure(v, wifiUnit);
+		if (!has) {
+			if (tile) tile.hidden = true;
+			// An interface that has gone is not a measure that has lapsed, so
+			// its absence must not count towards giving one up.
+			wifiMissing = 0;
+			return;
+		}
+		const cur = WIFI_SCALE[wifiUnit];
+		wifiMissing = (cur && !(cur.key in v)) ? wifiMissing + 1 : 0;
+		const unit = wifiMeasure(v, wifiUnit, wifiMissing >= WIFI_LAPSE);
 		if (unit !== wifiUnit) mountWifi(unit);
+		// A KPI tile is a headline number with a unit under a caption. An
+		// adapter that reports no signal reading has no headline to give it,
+		// and a tile showing a dash is the #435 complaint in miniature — so
+		// there is no tile, and the panel below carries the facts and says
+		// why. Judged every poll, since a reading arriving later brings it
+		// back.
+		if (tile) tile.hidden = wifiUnit === null;
 		const sc = WIFI_SCALE[wifiUnit];
 		const val = $('#st-wifi-val'), gr = $('#st-wifi-grade');
 		// A single gauge can go missing on its own — the level does while the
@@ -468,18 +496,19 @@
 		// Gauges with units, counters as per-second rates — a retry *rate*
 		// climbing with a sagging signal is the whole story. The quality is
 		// left out of this line when it is the one being plotted above, where
-		// it already has a number, a scale and a grade; the bitrate joins it
-		// only on the adapter that has no reading to grade, since the tile's
-		// grade line is where it otherwise lives. That is keyed on the ABSENCE
-		// OF A MEASURE and not on the absence of a grade, which are not the
-		// same thing: a level that blinks out for one poll drops the grade for
-		// that poll too, and keying on it would have the bitrate hop from the
-		// tile to this line and back every time the link re-associates.
+		// it already has a number, a scale and a grade.
+		//
+		// The bitrate lives on the tile's grade line and appears here only
+		// when there is no grade line for it to live on — keyed on the grade
+		// rather than on the measure, so that on a poll where the reading has
+		// blinked out it MOVES rather than going out altogether. Either is a
+		// change on the screen, and of the two a fact that relocates beats a
+		// fact that disappears.
 		const parts = [];
 		if ('wifi_link_quality_ratio' in v && wifiUnit !== 'pct')
 			parts.push('quality ' + v.wifi_link_quality_ratio + ' %');
 		if ('wifi_snr_db' in v) parts.push('SNR ' + v.wifi_snr_db + ' dB');
-		if ('wifi_bitrate_mbps' in v && wifiUnit === null)
+		if ('wifi_bitrate_mbps' in v && !grade)
 			parts.push(v.wifi_bitrate_mbps + ' Mb/s');
 		if (s.prev && s.dt > 0) {
 			[['wifi_retries_total', 'retries'], ['wifi_missed_beacons_total', 'missed beacons']].forEach(k => {

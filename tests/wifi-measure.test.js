@@ -44,12 +44,15 @@ function lift(re, what) {
 	return m[0];
 }
 const src = lift(/\n\tconst WIFI_SCALE = \{[\s\S]*?\n\t\};\n/, 'WIFI_SCALE') +
-	lift(/\n\tfunction wifiMeasure\(v, cur\) \{[\s\S]*?\n\t\}\n/, 'wifiMeasure()') +
+	lift(/\n\tconst WIFI_LAPSE = \d+;\n/, 'WIFI_LAPSE') +
+	lift(/\n\tfunction wifiMeasure\(v, cur, lapsed\) \{[\s\S]*?\n\t\}\n/, 'wifiMeasure()') +
 	lift(/\n\tfunction wifiGrade\(v, unit\) \{[\s\S]*?\n\t\}\n/, 'wifiGrade()');
 const lifted = vm.runInNewContext(
 	'(function(){' + src +
-	'return {S: WIFI_SCALE, measure: wifiMeasure, grade: wifiGrade}})()', {});
+	'return {S: WIFI_SCALE, LAPSE: WIFI_LAPSE, measure: wifiMeasure, ' +
+	'grade: wifiGrade}})()', {});
 const S = lifted.S, measure = lifted.measure, grade = lifted.grade;
+const LAPSE = lifted.LAPSE;
 
 // The parser is main.js's; reuse it so the fixtures are read exactly as the
 // browser reads them.
@@ -119,6 +122,30 @@ check('nothing decided yet reads the camera fresh',
 	saw([measure(NO_LEVEL, undefined), measure(LEVEL, undefined)]));
 check('settled on neither still lets a quality arrive later',
 	measure(NO_LEVEL, null) === 'pct', saw(measure(NO_LEVEL, null)));
+
+group('the choice is given up again after a sustained silence');
+// The mirror of the rule above, and the reason it is not a latch. One level
+// slipping through while the link associates would otherwise pin a dBm chart
+// on an adapter that never reports another — and that chart can never draw a
+// line, which is the fault this whole file exists about, reintroduced on a
+// camera that was working.
+check('a level gone long enough hands the plot back to the quality',
+	measure(NO_LEVEL, 'dbm', true) === 'pct',
+	saw(measure(NO_LEVEL, 'dbm', true)));
+check('and a quality gone long enough gives its own plot up too',
+	measure({ wifi_bitrate_mbps: 72.2 }, 'pct', true) === null,
+	saw(measure({ wifi_bitrate_mbps: 72.2 }, 'pct', true)));
+// Promotion still costs one sample and demotion a whole lapse: that asymmetry
+// is the thing keeping a re-association from moving anything.
+check('a lapse never outranks a level that is actually there',
+	measure(LEVEL, 'pct', true) === 'dbm', saw(measure(LEVEL, 'pct', true)));
+check('a lapse with nothing else to offer changes nothing',
+	measure({ wifi_bitrate_mbps: 72.2 }, 'dbm', true) === null,
+	saw(measure({ wifi_bitrate_mbps: 72.2 }, 'dbm', true)));
+// The window has to be longer than a re-association and shorter than sitting
+// watching the page: at the 2s heartbeat, between half a minute and five.
+check('the lapse window is measured in tens of seconds, not polls or hours',
+	LAPSE * 2 >= 30 && LAPSE * 2 <= 300, saw(LAPSE * 2 + ' s'));
 
 group('the grade words and the plot bands are one judgement');
 // Each scale's grade edges must lie inside its own plot, or a band is drawn
