@@ -23,6 +23,21 @@ cp -r www LICENSE "$PKG"/
 [ -d sbin ] && cp -r sbin "$PKG"/ || true
 [ -d bin ]  && cp -r bin  "$PKG"/ || true
 
+# Stamp the tree with its own version, so the Dashboard can show which WebUI is
+# deployed the way it shows majestic's -- there is otherwise nothing on the
+# camera that records it, and a reporter running an install cannot say which
+# build they are on. Best-effort: a build with no git checkout (buildroot
+# unpacking a release tarball) ships no stamp, and the Dashboard says "unknown"
+# rather than a wrong answer. Format mirrors majestic's -v: `<ref>+<sha>, <date>`.
+if git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then
+	sha=$(git -C "$PWD" rev-parse --short HEAD 2>/dev/null)
+	when=$(git -C "$PWD" show -s --format=%cd --date=format:'%Y-%m-%d %H:%M' HEAD 2>/dev/null)
+	ref=${GITHUB_REF_NAME:-$(git -C "$PWD" rev-parse --abbrev-ref HEAD 2>/dev/null)}
+	case $ref in '' | HEAD) stamp="$sha" ;; *) stamp="$ref+$sha" ;; esac
+	[ -n "$when" ] && stamp="$stamp, $when"
+	[ -n "$stamp" ] && printf '%s\n' "$stamp" >"$PKG/www/.version"
+fi
+
 # CGIs are exec'd directly by majestic, so a non-executable one 500s the page.
 # Guarantee the exec bit here even if a file was committed without it (a recurring
 # slip) — defence in depth on top of the repo's own modes. Same for sbin helpers.

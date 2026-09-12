@@ -19,7 +19,7 @@
 # WebUI exactly as it was.
 
 scr_name=updatewebui
-scr_version=7
+scr_version=8
 
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
@@ -688,6 +688,32 @@ hand_over() {
 	die "cannot start installer v$newv, nothing has been changed"
 }
 
+# Record which WebUI this run deployed, so the Dashboard can show it -- there is
+# otherwise nothing on the camera that says which build is installed, and a
+# reporter cannot tell whether an install carried a given fix. It is written to
+# the state dir rather than into /var/www, and the Dashboard reads it in
+# preference to the image's own www/.version: an install hides that image copy
+# without replacing it (the fetched source tree carries none), so reading
+# /var/www/.version after an install would show the firmware's version, not
+# what was just deployed. Best-effort throughout -- a failure here never fails
+# an install that has otherwise succeeded. Format mirrors majestic's -v.
+write_version() {
+	when=$(date '+%Y-%m-%d %H:%M')
+	if [ -n "$zip_url_given" ]; then
+		stamp="$source_name, $when"
+	else
+		# The branch head at install time, resolved from GitHub -- the branch
+		# zip carries no commit id of its own. One short call; the branch name
+		# alone is the honest answer when it cannot be made (offline, rate
+		# limited), never a guess.
+		sha=$(curl -fsSL --connect-timeout 10 "https://api.github.com/repos/$REPO/commits/$branch" 2>/dev/null |
+			grep -m1 '"sha"' | sed -n 's/.*"sha": *"\([0-9a-f]\{7\}\).*/\1/p')
+		if [ -n "$sha" ]; then stamp="$branch+$sha, $when"; else stamp="$branch, $when"; fi
+	fi
+	mkdir -p "$STATE_DIR" && printf '%s\n' "$stamp" >"$STATE_DIR/webui.version" ||
+		echo "$scr_name: could not record the deployed version in $STATE_DIR/webui.version" >&2
+}
+
 do_install() {
 	fetch_tree
 	hand_over
@@ -698,6 +724,11 @@ do_install() {
 		echo
 		echo "Already up to date."
 		write_manifest
+		# Still record the version: an up-to-date tree may carry no stamp yet
+		# (the file matched /rom, or a prior install predates this record), and
+		# the Dashboard should show what is actually installed.
+		write_version
+		rm -f /tmp/webui/sysinfo.txt
 		return 0
 	fi
 	echo
@@ -708,6 +739,7 @@ do_install() {
 	settle_view
 	write_manifest
 	write_dirs
+	write_version
 	# The per-boot sysinfo cache was written by the release this one just
 	# replaced, and everything derived at detection time — PTZ backend and
 	# support, most visibly — stays frozen at the old release's answers until
@@ -1092,6 +1124,10 @@ do_restore() {
 	# tell your files from ours.
 	mkdir -p "$STATE_DIR" && : >"$MANIFEST" ||
 		echo "$scr_name: could not empty $MANIFEST" >&2
+	# The deployed-version record dies with the install: what shows through now
+	# is the firmware's own WebUI, whose version is its www/.version (or none),
+	# not what an install had put here.
+	rm -f "$STATE_DIR/webui.version"
 	settle_view
 	restore_local
 	settle_view
