@@ -379,10 +379,18 @@ log_create() {
 #
 # The last one is not decoration. main.js hangs its confirm() off .btn-danger
 # and .btn-warning, so that class is a promise that pressing does something
-# worth asking about; today exactly one href earns it, restart.cgi, which
-# reboots the camera on GET. Putting it on a link that merely navigates is how
-# the recordings banner came within one initAll() timing accident of asking
-# "Are you sure?" before letting somebody read a page.
+# worth asking about; today exactly one destination earns it, restart.cgi.
+# Putting it on a link that merely navigates is how the recordings banner came
+# within one initAll() timing accident of asking "Are you sure?" before letting
+# somebody read a page.
+#
+# An action that earns it is also written as a form submit rather than an
+# anchor, because that confirm() guards one gesture and not a link: a middle
+# click delivers `auxclick` and never `click`, and "Open link in new tab"
+# delivers nothing, so an acting anchor is followed without the question by two
+# things people do to menu items every day (#442). restart.cgi refuses to
+# reboot on anything but a POST, which is the half of that pair no markup here
+# can get wrong.
 #
 # The vocabulary drifted once already, because it is written in three languages
 # -- this argument, hand-written .mj-notice-acts markup, and an `acts:` literal

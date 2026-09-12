@@ -107,14 +107,11 @@
 		if (!f) { alertEl.style.display = 'none'; return; }
 		if (alertWhy) alertWhy.textContent = f.title + ' — ' + f.detail;
 		if (alertAct) {
+			// A destination and its words. The prompt that used to be wired
+			// here went with the one in the Dashboard's copy: restart.cgi asks
+			// for itself now, on anything that is not a POST (#442).
 			alertAct.textContent = f.act.label + ' →';
 			alertAct.href = f.act.href;
-			// Assigned rather than added, so a repaint replaces the prompt
-			// instead of stacking another one. See the same line in status.js:
-			// main.js wires `.confirm` at load and this link is written later.
-			alertAct.onclick = f.act.confirm
-				? (ev) => { if (!confirm(f.act.confirm)) ev.preventDefault(); }
-				: null;
 		}
 		if (alertHelp) {
 			alertHelp.hidden = !f.help;

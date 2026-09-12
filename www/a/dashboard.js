@@ -158,16 +158,11 @@
 			if (t) t.textContent = f.title;
 			if (d) d.textContent = f.detail;
 			if (a) {
+				// A destination and its words, and nothing else to wire: a
+				// finding's action no longer carries a prompt, because the one
+				// action that costs anything asks for itself on arrival (#442).
 				a.textContent = f.act.label;
 				a.href = f.act.href;
-				// Assigned, not added: this anchor is rewritten on every
-				// finding and addEventListener would stack a prompt per
-				// repaint. main.js cannot help here — it wires `.confirm` once
-				// at load and this link does not exist in its final form until
-				// long after.
-				a.onclick = f.act.confirm
-					? (ev) => { if (!confirm(f.act.confirm)) ev.preventDefault(); }
-					: null;
 			}
 			const h = $('#st-alert-novideo-h');
 			if (h) {

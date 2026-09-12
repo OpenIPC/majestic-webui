@@ -4,7 +4,21 @@ Cache-Control: no-store
 Pragma: no-cache
 
 <!DOCTYPE html>
-<!-- Not escaped, and the include that would make escaping possible is not
+<!-- Two pages in one file, chosen by method. A POST reboots the camera and
+     renders the waiting screen below; anything else renders the question, with
+     a button that POSTs.
+
+     That split IS the protection, and nothing lighter was enough (#442). The
+     confirmation used to live entirely in the browser, as a confirm() main.js
+     hung off the `click` event of the links that offer this page -- which
+     covers a plain left click and nothing else. Measured in a real browser: a
+     middle click delivers `auxclick` and never `click`, and "Open link in new
+     tab" delivers no event at all, so both reached this page and rebooted the
+     camera without asking. A prefetcher, a crawler, a restored tab, a typed
+     URL and a client with JavaScript off all did the same. A GET cannot now
+     reach the reboot at all, whoever sends it and however it was sent.
+
+     Not escaped, and the include that would make escaping possible is not
      wanted here. This page carries no includes at all: it runs reboot below and
      has to render while the system is going down, so it pulls in no auth gate
      and sources nothing. That also means webui_theme is never set on this page
@@ -65,6 +79,23 @@ Pragma: no-cache
 		<h1>OpenIPC</h1>
 		<%# a plain heading on purpose: this page carries no includes, so the
 		    card_head helper does not exist here %>
+<% if [ "$REQUEST_METHOD" != "POST" ]; then %>
+		<%# The question. Answered with 200 rather than refused with 405: this
+		    is where an old bookmark, a shared link and every gesture that is
+		    not a plain click now arrive, and the useful thing to hand somebody
+		    who meant to restart the camera is the button, not an error. The
+		    ones that did not mean it -- a prefetch, a crawler -- read a page
+		    and leave, which is all they ever wanted. %>
+		<h3>Restart the camera?</h3>
+		<p class="lead">Settings are kept. Video and recording stop for about
+			half a minute while it comes back.</p>
+		<form method="post" action="restart.cgi">
+			<button type="submit" class="btn btn-danger btn-lg">Restart camera</button>
+		</form>
+	</main>
+</body>
+</html>
+<% exit 0; fi %>
 		<h3>Restarting. Please wait...</h3>
 		<progress max="20" value="0"></progress>
 	</main>

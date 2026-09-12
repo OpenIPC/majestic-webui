@@ -100,7 +100,7 @@ fi
     plain text rather than a link, about a daemon that has stopped. The log is
     where majestic says why it died -- and it is what an owner can screenshot
     for whoever sold them the camera -- and a restart is the thing to try. %>
-<% notice danger '<b>Majestic is not running</b> &mdash; the daemon that streams the video and answers for every setting on this page is stopped, so there is nothing here to configure.' '<a class="btn btn-sm btn-secondary" href="logs.cgi">Open the log</a><a class="btn btn-sm btn-danger" href="restart.cgi" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. The camera is unreachable for about half a minute while it comes back.">Restart camera</a>' %>
+<% notice danger '<b>Majestic is not running</b> &mdash; the daemon that streams the video and answers for every setting on this page is stopped, so there is nothing here to configure.' '<a class="btn btn-sm btn-secondary" href="logs.cgi">Open the log</a><form method="post" action="restart.cgi" class="d-inline"><button type="submit" class="btn btn-sm btn-danger confirm" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. The camera is unreachable for about half a minute while it comes back.">Restart camera</button></form>' %>
 
 <% else %>
 
