@@ -31,6 +31,7 @@
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), note = $('#mj-note');
 	const tapPlay = $('#mj-tap-play');
+	const snapshot = $('#mj-snapshot');
 	const noteWhy = $('#mj-note-why'), noteAct = $('#mj-note-act');
 	const servedEl = $('#mj-served'), servedWhy = $('#mj-served-why');
 	let jpegOn = false;
@@ -146,8 +147,20 @@
 	// (#317). Shown on the live player's 'gesture' state and hidden on 'resumed';
 	// also hidden by every path that repaints the stage below, so a stale
 	// invitation cannot outlive the picture it was covering.
-	function showTapPlay() { if (tapPlay) tapPlay.hidden = false; }
-	function hideTapPlay() { if (tapPlay) tapPlay.hidden = true; }
+	// While the button is up, put the camera's current JPEG under it, so a WebRTC
+	// picture parked black (no buffered frame, unlike MSE) shows the scene it is
+	// about to resume rather than a void (#317). Only when jpeg.enabled serves a
+	// snapshot; the src is set on show (cache-busted, so it is current) and
+	// cleared on hide so nothing keeps fetching it. A guarded $ lookup, since the
+	// element is absent in the bare-vm player tests.
+	function showTapPlay() {
+		if (snapshot && jpegOn) { try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {} }
+		if (tapPlay) tapPlay.hidden = false;
+	}
+	function hideTapPlay() {
+		if (snapshot) { snapshot.hidden = true; try { snapshot.removeAttribute('src'); } catch (e) {} }
+		if (tapPlay) tapPlay.hidden = true;
+	}
 
 	function showVideo() {
 		// Not hidden here: 'playing' is the pipeline coming up, which is when a

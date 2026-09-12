@@ -208,7 +208,9 @@ window.MajesticVideo = (function () {
 		// state and not a step on the way to playing (#317).
 		const GESTURE_ANNOUNCE_MS = 500;
 		let gestureRetry = null, gestureArmed = false, gestureTimer = null;
-		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
+		// 'click' leads: it is the event that actually grants a muted play() on the
+		// first tap on WebKit, where a pointerdown retry needed a second (#317).
+		const gestureEvs = ['click', 'pointerdown', 'touchstart', 'keydown'];
 		function armPlayGesture() {
 			if (typeof document === 'undefined') return;
 			// Arm the retry at once, so the very first tap starts playback even
