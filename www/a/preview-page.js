@@ -37,6 +37,13 @@
 	let jpegOn = false;
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
+		// The invitation can be raised before this fetch resolves (attach wins the
+		// config timeout), and showTapPlay only paints the snapshot when jpegOn is
+		// already known true. So if the button is up now and the answer just came
+		// back true, paint it -- otherwise it sits over black for the whole pause (#317).
+		if (jpegOn && tapPlay && !tapPlay.hidden && snapshot) {
+			try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {}
+		}
 		// Read before the fallback is re-decided below: the codec is what says
 		// whether a socket that gave up is worth handing to the software rung,
 		// and that decision has to be made with the real answer.

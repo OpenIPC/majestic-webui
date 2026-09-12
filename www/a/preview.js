@@ -217,7 +217,14 @@ window.MajesticVideo = (function () {
 			// before the affordance is announced.
 			if (!gestureRetry) {
 				const retry = function () {
-					disarmPlayGesture();
+					// Not disarmed on the tap: on WebKit a pointerdown does not grant
+					// a muted play() but the same tap's trusted click does, and
+					// disarming on the pointerdown would take the click listener down
+					// before it fires -- the click then reaches nothing and playback
+					// waits for another gesture (#317). Stay armed; onPlaying disarms
+					// once the picture truly plays. onBinary re-arms on each paused
+					// frame, and armPlayGesture is a no-op while already armed, so
+					// this does not stack listeners.
 					try { const p = video.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
 				};
 				gestureRetry = retry;
@@ -248,9 +255,12 @@ window.MajesticVideo = (function () {
 		// button never shows) and, if the button was already up, takes it down.
 		function onPlaying() {
 			if (gestureTimer) { clearTimeout(gestureTimer); gestureTimer = null; }
+			// Playback truly started, so the retry has done its job and comes down
+			// here rather than on the tap -- a tap that does not start the picture
+			// must leave it armed for the next one (#317).
+			disarmPlayGesture();
 			if (!gestureArmed) return;
 			gestureArmed = false;
-			disarmPlayGesture();
 			onState('resumed');
 		}
 

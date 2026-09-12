@@ -403,7 +403,7 @@ function load(o) {
 		env.sockets[env.sockets.length - 1].fire('message', { data: { byteLength: 100 } });
 		// The retry arms at once, so a tap works immediately; the announcement is
 		// held back so a picture about to play does not flash the button.
-		check('a one-shot gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
+		check('a gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
 			JSON.stringify((env.docHandlers.pointerdown || []).length));
 		check('the affordance is NOT announced immediately', env.states.indexOf('gesture') < 0,
 			env.states.join(','));
@@ -418,16 +418,24 @@ function load(o) {
 		await sleep(600);
 		check('a further paused frame does not re-announce it',
 			env.states.filter((s) => s === 'gesture').length === 1, env.states.join(','));
-		// The viewer taps: play() is called, and this time it starts.
-		env.video.paused = false;
+		// The viewer taps and play() is called, but the retry must NOT remove
+		// itself on the tap: on WebKit the tap's pointerdown may not start the
+		// picture and the same tap's click must still find a listener; only the
+		// picture actually playing takes it down (#317).
 		env.docHandlers.pointerdown[0]();
 		check('the tap called play()', played >= 1, played + ' plays');
-		check('and the one-shot listener removed itself', (env.docHandlers.pointerdown || []).length === 0);
+		check('the retry stays armed until the picture plays',
+			(env.docHandlers.pointerdown || []).length === 1,
+			JSON.stringify((env.docHandlers.pointerdown || []).length));
 		// Only the element's own 'playing' event proves the picture moved; that is
-		// what takes the affordance down, so the page hears 'resumed' then.
+		// what takes the affordance down and disarms, so the page hears 'resumed' then.
 		check('nothing claimed it resumed before it actually played',
 			env.states.indexOf('resumed') < 0, env.states.join(','));
+		env.video.paused = false;
 		env.video.fire('playing');
+		check('the listener is removed once it plays',
+			(env.docHandlers.pointerdown || []).length === 0,
+			JSON.stringify((env.docHandlers.pointerdown || []).length));
 		check('the page was told the picture resumed once it played',
 			env.states.filter((s) => s === 'resumed').length === 1, env.states.join(','));
 		env.player.destroy();
