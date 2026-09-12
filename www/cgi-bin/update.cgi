@@ -425,16 +425,23 @@
 						<div id="fw-bar" class="progress" role="progressbar"
 						     aria-valuemin="0" aria-valuemax="100"><div class="progress-bar"></div></div>
 					</div>
-					<%# "Erasing settings" is the overlay wipe, and it is here because
-					    the bar now reports it: without a row of its own the strip
-					    would say "Rebooting" while the bar said the overlay was
-					    being erased. update.js hides it unless this run asked for
-					    the wipe. %>
+					<%# The step names deliberately avoid the words the bar's own
+					    passes use -- "Erasing", "Writing", "Verifying" -- so the
+					    strip and the bar under it never show the same word meaning
+					    two different things: a step "Writing kernel" above a bar
+					    reading "Writing 40%" read as one thing said twice (#426).
+					    So the flash steps say "Update", and the pre-flash image
+					    check is "Checking image" rather than a second "Verifying".
+					    "Erasing settings" is the overlay wipe, here because the bar
+					    now reports it: without a row of its own the strip would say
+					    "Rebooting" while the bar said the overlay was being erased;
+					    it names what is erased, which the bar's bare "Erasing" does
+					    not. update.js hides it unless this run asked for the wipe. %>
 					<ol id="fw-steps" class="mj-steps">
 						<li data-step="download">Downloading</li>
-						<li data-step="verify">Verifying</li>
-						<li data-step="kernel">Writing kernel</li>
-						<li data-step="rootfs">Writing rootfs</li>
+						<li data-step="verify">Checking image</li>
+						<li data-step="kernel">Update kernel</li>
+						<li data-step="rootfs">Update rootfs</li>
 						<li data-step="overlay">Erasing settings</li>
 						<li data-step="reboot">Rebooting</li>
 					</ol>
