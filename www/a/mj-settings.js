@@ -6258,7 +6258,12 @@
 				.then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
 			wait: (ms) => new Promise(r => setTimeout(r, ms)),
 			onStep: (s) => { status.textContent = IRCUT_STEP[s] || ''; },
-		}, start).then((out) => {
+			// Read from the SAVED config, like every other input to this test:
+			// the blocker above guarantees the two agree, and the camera is what
+			// the probe measures. It decides only what a stuck filter is told to
+			// go and look at — with a pair assigned, the likeliest cause is a
+			// one-pad board being pulsed as two rather than anything unplugged.
+		}, start, { twoCoil: isNumish(nightCfg().irCutPin2) }).then((out) => {
 			const v = out.verdict;
 			// A test that could not put the filter back outranks whatever it
 			// found: the camera is sitting in the wrong position right now, and
