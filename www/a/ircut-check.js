@@ -703,16 +703,52 @@
 	// correctly" has left a camera magenta in daylight — precisely the fault
 	// this feature exists to find. The verdict is still returned, with
 	// `restored: false` beside it, and the caller has to say so.
+	// TWO FRAMES CANNOT TELL A STUCK FILTER FROM A CAMERA THAT HAS LOST TRACK OF
+	// IT, and the difference is the whole verdict. `io.state()` is the daemon's
+	// record of where the filter is, and it is a record rather than a
+	// measurement: nothing on the camera can see the filter. Change which pads
+	// the coils are on and that record survives, describing a position reached
+	// under the old assignment — so the next drive to the "other" position can
+	// put the pads exactly where the filter already is, nothing moves, and both
+	// captures come back identical. Reported as "stuck", on correct wiring and a
+	// working filter, with advice pointing at the one thing that is not wrong.
+	//
+	// Reproduced on an hi3516ev300 wired 11 opening / 10 closing: drive the pads
+	// open by hand while the daemon still says day, run the test, and it answers
+	// "The filter did not move — it is stuck open. Both positions gave a magenta
+	// picture, so the pulse is not reaching the solenoid."
+	//
+	// One more trial separates them, and the parity is the elegant part. Two
+	// agreeing frames are followed by a second toggle:
+	//
+	//   it moves     the filter was fine and the record was out of step. The
+	//                drive has just put the two back IN step, so the second and
+	//                third frames are honestly labelled and give a real verdict.
+	//   it does not  nothing the daemon does reaches the filter. Stuck, as said.
+	//
+	// And an even number of toggles leaves the daemon's record where it began
+	// while the filter now genuinely matches it — so that path wants no restore
+	// at all, where the ordinary one-toggle path does. Hence a count rather than
+	// a flag: the restore is owed on an odd number of moves and on no other.
 	function probe(io, startIrcut) {
 		const settle = io.settleMs || 1500;
-		let moved = false;
+		let toggles = 0;
 		const step = (s) => { if (io.onStep) io.onStep(s); };
 
 		const restore = () => {
-			if (!moved) return Promise.resolve(true);
+			if (toggles % 2 === 0) return Promise.resolve(true);
 			step('restore');
 			return io.toggle().then(() => true, () => false);
 		};
+
+		// `resynced` is not a detail of how the answer was reached — it is the
+		// answer to a second question the caller has to pass on, because the
+		// camera was lying about where its filter was and has only just stopped.
+		const done = (v, day, other, resynced) =>
+			restore().then((ok) => ({
+				verdict: v, day: day, other: other, restored: ok,
+				resynced: !!resynced,
+			}));
 
 		const where = io.state
 			? Promise.resolve().then(io.state).catch(() => null)
@@ -727,7 +763,7 @@
 				.then((first) => {
 					step('toggle');
 					return io.toggle()
-						.then(() => { moved = true; return io.wait(settle); })
+						.then(() => { toggles++; return io.wait(settle); })
 						.then(() => { step('second'); return io.snap(); })
 						.then((second) => ({ first: first, second: second }));
 				})
@@ -737,9 +773,32 @@
 					const day = start ? pair.second : pair.first;
 					const other = start ? pair.first : pair.second;
 					const v = verdict(day, other);
-					return restore().then((ok) => ({
-						verdict: v, day: day, other: other, restored: ok,
-					}));
+					// Anything but two agreeing frames is already decided: the
+					// filter demonstrably moved, or neither frame said enough to
+					// judge and a third would not either.
+					if (v.id !== 'stuck-open' && v.id !== 'stuck-closed')
+						return done(v, day, other);
+
+					step('again');
+					return io.toggle()
+						.then(() => { toggles++; return io.wait(settle); })
+						.then(() => { step('third'); return io.snap(); })
+						.then((third) => {
+							// Still nothing. The daemon drove the pads twice in
+							// opposite directions and the picture never changed,
+							// which no record-keeping error can produce.
+							if (look(third) === look(pair.second) &&
+								irLook(third) === irLook(pair.second))
+								return done(v, day, other);
+							// It moves. The drive that produced `third` also put
+							// the record back in step with the filter, so these
+							// two frames are labelled by a gauge that is now
+							// telling the truth: `second` was captured at the
+							// position opposite to `start`, `third` at `start`.
+							const d2 = start ? pair.second : third;
+							const o2 = start ? third : pair.second;
+							return done(verdict(d2, o2), d2, o2, true);
+						});
 				}, (err) => restore().then(() => { throw err; }));
 		});
 	}
