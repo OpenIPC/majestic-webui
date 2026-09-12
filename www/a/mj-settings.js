@@ -6300,8 +6300,20 @@
 			// A test that could not finish reports that it could not finish. It
 			// must never fall through to a verdict — half a measurement is not
 			// evidence about the filter.
-			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
-				'. The filter was left where it started.';
+			// Where the filter is, said only as far as it is known. A run that
+			// drove nothing left it alone and can say so. A run that drove it
+			// and then failed cannot: the restore is skipped on an even number
+			// of moves because the camera's RECORD is back where it began, and
+			// in the out-of-step case that record was the thing that was wrong
+			// — the filter really can be in the opposite position. Promising
+			// otherwise is how somebody walks away from a camera that has been
+			// left magenta.
+			result.textContent = 'The test could not finish: ' +
+				(e && e.message ? e.message : e) + '. ' +
+				(e && e.moves ? 'It had already started moving the filter, so ' +
+					'that may not be where it was — the picture says which, and ' +
+					'the IR-cut switch on Live adjustments moves it back.'
+					: 'The filter was not moved.');
 			result.hidden = false;
 			// A camera that cannot take a still cannot run this test at all, so
 			// the refusal is remembered and the button says it instead of

@@ -41,6 +41,11 @@ const near = (a, b, eps) => Math.abs(a - b) <= (eps || 1e-9);
 const MAGENTA = [200, 40, 190];   // an open filter in daylight, exaggerated
 const GREENY = [40, 200, 40];     // an ordinary scene with foliage in it
 const GREY = [128, 128, 128];     // colorToGray night
+// Below the DARK floor, so every pixel is discarded and the frame yields no
+// usable statistic at all: a lens cap, an unlit scene, a capture caught while
+// the filter was still swinging. look() calls it 'none', and 'none' is a frame
+// that says nothing rather than a frame that says something different.
+const DARK = [5, 5, 5];
 
 const st = (c, w, h) => ic.stats(flat(c)(w || 20, h || 20), w || 20, h || 20);
 
@@ -381,12 +386,129 @@ group('probe: the sequence, and which frame was the day one');
 								e.log.join(',') === 'snap,toggle,snap,toggle',
 								e.log.join(','));
 							check('reporting no resync', re.resynced === false);
-							runRest();
+							return next8();
 						});
 					});
 				});
 			});
 		});
+	}
+
+	function next8() {
+		group('probe: the extra trial must not be believed on an unreadable frame');
+		// look() maps a frame it cannot read to 'none', and 'none' differs from
+		// 'open' without saying anything. Counting that as movement would
+		// announce that the filter works and the camera is back in step on the
+		// strength of a frame nobody could read — the one thing this file exists
+		// not to do.
+		const mk = (frames, live) => {
+			const f = frames.slice();
+			const log = [];
+			return {
+				log: log,
+				snap: () => { log.push('snap'); return Promise.resolve(f.shift()); },
+				toggle: () => { log.push('toggle'); return Promise.resolve(1); },
+				wait: () => Promise.resolve(),
+				state: () => Promise.resolve(live),
+				settleMs: 0,
+			};
+		};
+		// DARK is what a lens cap, a night scene or a capture caught mid-swing
+		// gives: too few usable pixels for either statistic to mean anything.
+		const a = mk([st(MAGENTA), st(MAGENTA), st(DARK)], 0);
+		return ic.probe(a, 0).then((ra) => {
+			check('an unreadable third frame claims no resync',
+				ra.resynced === false, String(ra.resynced));
+			// And it must not leave the earlier "stuck" standing either: that
+			// reading rests on the very assumption this trial went to test, and
+			// the trial came back unreadable.
+			check('and answers that it could not tell',
+				ra.verdict.id === 'unclear', ra.verdict.id);
+
+			// A third snapshot that FAILS after the second toggle. The record is
+			// back where it began so restore() correctly drives nothing — but in
+			// the out-of-step case the first drive moves nothing and the second
+			// moves the filter, so it is NOT where it started and the caller
+			// must be told how many drives went out.
+			const f = [st(MAGENTA), st(MAGENTA)];
+			let n = 0;
+			const b = {
+				log: [],
+				snap: function () {
+					b.log.push('snap');
+					return ++n <= 2 ? Promise.resolve(f.shift())
+						: Promise.reject(new Error('camera busy'));
+				},
+				toggle: function () { b.log.push('toggle'); return Promise.resolve(1); },
+				wait: () => Promise.resolve(),
+				state: () => Promise.resolve(0),
+				settleMs: 0,
+			};
+			return ic.probe(b, 0).then(
+				() => check('a failed third snapshot must not resolve', false),
+				(err) => {
+					check('the failure carries how many drives went out',
+						err.moves === 2, String(err.moves));
+					check('and no restore was attempted on an even count',
+						b.log.join(',') === 'snap,toggle,snap,toggle,snap',
+						b.log.join(','));
+					// The mirror: nothing was driven at all, so the caller may
+					// say so.
+					const c = {
+						log: [],
+						snap: function () {
+							c.log.push('snap');
+							return Promise.reject(new Error('no camera'));
+						},
+						toggle: function () { c.log.push('toggle'); return Promise.resolve(1); },
+						wait: () => Promise.resolve(),
+						state: () => Promise.resolve(0),
+						settleMs: 0,
+					};
+					return ic.probe(c, 0).then(
+						() => check('a failed first snapshot must not resolve', false),
+						(e2) => {
+							check('a run that drove nothing reports no moves',
+								!e2.moves, String(e2.moves));
+							return failingSecondToggle();
+						});
+				});
+		});
+
+		// The extra trial lives inside a .then handler, and a handler's own
+		// rejection is NOT caught by the onRejected argument of that same .then.
+		// Written that way, a toggle failing mid-trial sailed past the restore
+		// and left the filter wherever the last drive put it — which is the one
+		// outcome probe() is written around. A trailing .catch is what makes the
+		// restore cover the whole sequence rather than its first half.
+		function failingSecondToggle() {
+			const f = [st(MAGENTA), st(MAGENTA)];
+			let t = 0;
+			const d = {
+				log: [],
+				snap: function () { d.log.push('snap'); return Promise.resolve(f.shift()); },
+				toggle: function () {
+					d.log.push('toggle');
+					// Only the trial's own second drive fails; the restore that
+					// follows must still be attempted, and must succeed.
+					return ++t === 2 ? Promise.reject(new Error('pads busy'))
+						: Promise.resolve(1);
+				},
+				wait: () => Promise.resolve(),
+				state: () => Promise.resolve(0),
+				settleMs: 0,
+			};
+			return ic.probe(d, 0).then(
+				() => check('a failed second toggle must not resolve', false),
+				(err) => {
+					check('a toggle failing inside the extra trial still restores',
+						d.log.join(',') === 'snap,toggle,snap,toggle,toggle',
+						d.log.join(','));
+					check('and the odd move count is what asked for that restore',
+						err.moves === 1, String(err.moves));
+					runRest();
+				});
+		}
 	}
 }
 

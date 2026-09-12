@@ -784,22 +784,74 @@
 						.then(() => { toggles++; return io.wait(settle); })
 						.then(() => { step('third'); return io.snap(); })
 						.then((third) => {
-							// Still nothing. The daemon drove the pads twice in
-							// opposite directions and the picture never changed,
-							// which no record-keeping error can produce.
-							if (look(third) === look(pair.second) &&
-								irLook(third) === irLook(pair.second))
+							// A DIFFERENCE IS NOT MOVEMENT UNLESS BOTH FRAMES
+							// SAY SOMETHING. look() maps a frame it cannot read
+							// — too dark, too few usable pixels, caught
+							// mid-swing — to 'none', and 'none' differs from
+							// 'open' without telling us anything at all.
+							// Counting that as movement would claim the filter
+							// works and the record is back in step on the
+							// strength of a frame nobody could read, which is
+							// the one thing this whole file refuses to do.
+							//
+							// Both frames reaching this point: `second` is
+							// always decisive, because the branch is only
+							// entered when the first two agreed AND agreed on a
+							// verdict, which needs both readable. So only the
+							// third can be 'none'.
+							const decisive = look(third) !== 'none';
+
+							// Two readable frames that agree, taken either side
+							// of opposite drives. Nothing a record-keeping error
+							// can produce — the filter is stuck, as said.
+							if (decisive && look(third) === look(pair.second))
 								return done(v, day, other);
-							// It moves. The drive that produced `third` also put
-							// the record back in step with the filter, so these
-							// two frames are labelled by a gauge that is now
-							// telling the truth: `second` was captured at the
-							// position opposite to `start`, `third` at `start`.
+
+							// Labelled by a gauge that is telling the truth
+							// again: the drive that produced `third` put the
+							// record back in step, so `second` sits at the
+							// position opposite to `start` and `third` at
+							// `start`.
 							const d2 = start ? pair.second : third;
 							const o2 = start ? third : pair.second;
-							return done(verdict(d2, o2), d2, o2, true);
+							// An unreadable third frame drops through here too,
+							// and lands on 'Not enough light to tell' by
+							// construction, since verdict() needs both sides to
+							// say something. That is the honest answer: the two
+							// agreeing frames cannot mean 'stuck' any more —
+							// the assumption behind that reading is exactly what
+							// this trial exists to test — and the trial came
+							// back unreadable. What must NOT follow is the
+							// resync claim, hence the flag rather than a
+							// constant.
+							return done(verdict(d2, o2), d2, o2, decisive);
 						});
-				}, (err) => restore().then(() => { throw err; }));
+				})
+				// A trailing catch, NOT the second argument of the .then above.
+				// That form only sees rejections from the stages BEFORE it, and
+				// the extra trial now lives inside that handler — so a toggle or
+				// a snapshot failing in there sailed straight past the restore
+				// and left the filter wherever the last drive put it.
+				.catch((err) => restore().then(() => {
+					// How many drives actually went out, so the caller can stop
+					// asserting where the filter is when it cannot know.
+					//
+					// The even count is the trap: two drives leave the RECORD
+					// where it began, so restore() correctly does nothing — but
+					// in the very condition this trial exists for, the first
+					// drive moves nothing and the second moves the filter. A
+					// third snapshot that then fails leaves it in the opposite
+					// physical position. On a camera whose record said night
+					// over a closed filter, that is daylight rendered magenta
+					// under a sentence promising nothing had moved.
+					//
+					// Guarded, because a rejection is not required to be an
+					// object and assigning to a primitive throws under strict
+					// mode — which would replace the real failure with a
+					// TypeError about the report of it.
+					if (err && typeof err === 'object') err.moves = toggles;
+					throw err;
+				}));
 		});
 	}
 
