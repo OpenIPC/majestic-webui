@@ -33,7 +33,11 @@ if git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then
 	sha=$(git -C "$PWD" rev-parse --short HEAD 2>/dev/null)
 	when=$(git -C "$PWD" show -s --format=%cd --date=format:'%Y-%m-%d %H:%M' HEAD 2>/dev/null)
 	ref=${GITHUB_REF_NAME:-$(git -C "$PWD" rev-parse --abbrev-ref HEAD 2>/dev/null)}
-	case $ref in '' | HEAD) stamp="$sha" ;; *) stamp="$ref+$sha" ;; esac
+	# The payload above is copied from the working tree, not from HEAD, so a
+	# tree with uncommitted or untracked changes to what ships must not
+	# advertise a clean commit. Judge only the paths that go into the package.
+	[ -n "$(git -C "$PWD" status --porcelain -- www sbin bin LICENSE 2>/dev/null)" ] && dirty="-dirty" || dirty=""
+	case $ref in '' | HEAD) stamp="$sha$dirty" ;; *) stamp="$ref+$sha$dirty" ;; esac
 	[ -n "$when" ] && stamp="$stamp, $when"
 	[ -n "$stamp" ] && printf '%s\n' "$stamp" >"$PKG/www/.version"
 fi

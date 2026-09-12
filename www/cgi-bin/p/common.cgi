@@ -589,13 +589,18 @@ update_caminfo() {
 	# hides the image's www/.version without replacing it, so that file still
 	# reads as the firmware's version after a newer WebUI was laid over it. Empty
 	# on an image too old to carry either, which the Dashboard renders "unknown".
-	if [ -f /etc/webui/webui.version ]; then
+	if [ -s /etc/webui/webui.version ]; then
 		webui_version=$(cat /etc/webui/webui.version)
-	elif [ -f /var/www/.version ]; then
+	elif [ -s /var/www/.version ]; then
 		webui_version=$(cat /var/www/.version)
 	else
 		webui_version=""
 	fi
+	# This value is cached into the shell-sourced sysinfo file and shown on the
+	# Dashboard; keep it to characters that cannot break out of either. It is a
+	# version string, so a printable subset loses nothing real. Testing -s above
+	# (not -f) means a truncated or empty stamp falls through rather than winning.
+	webui_version=$(printf '%s' "$webui_version" | tr -cd 'A-Za-z0-9 .,:+/@()_-')
 	# PTZ preview controls. The switch is the U-Boot ptz_control variable
 	# (#227): it names the method — "gpio" (gpio-motors, pins in ptz_gpio,
 	# with the legacy gpio_motors as an alias on both sides), "pelco-d"
