@@ -106,6 +106,25 @@ check('an edited packet size is a change',
 	S.canon([{ url: 'udp://a:1', naluSize: 1400 }])
 	!== S.canon([{ url: 'udp://a:1', naluSize: 4000 }]));
 
+group('a member the camera has superseded is offered to nobody');
+
+// The row editor is the third walker over this schema, after renderProps()
+// and mj-tree.js. Both skip x-hidden; this one used to build its members from
+// every key in items.properties, so a member the camera had stopped offering
+// everywhere else would still be drawn in a row — and saved back.
+{
+	const props = {
+		url: { type: 'string' },
+		token: { type: 'string' },
+		legacy: { type: 'string', 'x-hidden': true },
+	};
+	const shown = Object.keys(props).filter(m => !props[m]['x-hidden']);
+	check('a hidden member is not among the row\'s members',
+		shown.indexOf('legacy') < 0);
+	check('and the rest still are',
+		shown.indexOf('url') >= 0 && shown.indexOf('token') >= 0);
+}
+
 group('a member leaves in the type the schema declared');
 
 // Everything on the page answers in strings, and the camera type-checks each

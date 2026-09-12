@@ -280,6 +280,7 @@ group('a list of objects is one leaf, not one per member');
 				enabled: { type: 'boolean', title: 'Enabled', default: true },
 				token: { type: 'string', title: 'Token', 'x-secret': true },
 				channel: { type: 'string', title: 'Source', enum: ['', 'main', 'sub'] },
+				legacy: { type: 'string', title: 'Superseded', 'x-hidden': true },
 			},
 			required: ['url'],
 		},

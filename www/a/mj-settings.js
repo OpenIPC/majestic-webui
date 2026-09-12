@@ -8139,8 +8139,16 @@
 			const props = sub.items.properties;
 			// `url` first whatever order the schema lists them in: it is the one
 			// that decides what the rest of the row means.
-			const members = Object.keys(props).sort((a, b) =>
-				(a === 'url' ? -1 : b === 'url' ? 1 : 0));
+			//
+			// x-hidden is skipped here for the same reason renderProps() and
+			// mj-tree.js skip it: a member the camera has superseded is
+			// offered to nobody. No item property carries it yet — this is
+			// the third walker over the same schema, and the one that would
+			// have gone on drawing and saving a member the other two had
+			// stopped showing.
+			const members = Object.keys(props)
+				.filter(m => !props[m]['x-hidden'])
+				.sort((a, b) => (a === 'url' ? -1 : b === 'url' ? 1 : 0));
 
 			// mj-wide: opt out of the 20rem cap .array carries for the
 			// MultiRect fields, which is half an address.
