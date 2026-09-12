@@ -1,0 +1,26 @@
+# SYNTHETIC test data, not a capture from any device.
+#
+# The Wi-Fi block as an adapter that HAS a signal level publishes it: a level
+# in dBm alongside the link quality, the bitrate and the two counters. It is
+# the counterpart of metrics-wifi-8189fs.txt, which carries the same block
+# from an adapter with no level to give, and the pair is what the measure
+# choice is tested against — same panel, same five possible readings, and a
+# different answer to "what can this chart honestly plot".
+#
+# The values are chosen to be unremarkable: a level in the middle of the good
+# band, a quality likewise, and counters at rest.
+# HELP wifi_link_quality_ratio Wi-Fi link quality, percent of the driver's own maximum
+# TYPE wifi_link_quality_ratio gauge
+wifi_link_quality_ratio 88
+# HELP wifi_retries_total Wi-Fi transmit retries
+# TYPE wifi_retries_total counter
+wifi_retries_total 0
+# HELP wifi_missed_beacons_total Wi-Fi beacons missed from the associated AP
+# TYPE wifi_missed_beacons_total counter
+wifi_missed_beacons_total 0
+# HELP wifi_rssi_dbm Wi-Fi signal strength (RSSI) at the station, dBm
+# TYPE wifi_rssi_dbm gauge
+wifi_rssi_dbm -54
+# HELP wifi_bitrate_mbps Wi-Fi negotiated bitrate, Mbit/s
+# TYPE wifi_bitrate_mbps gauge
+wifi_bitrate_mbps 72.2

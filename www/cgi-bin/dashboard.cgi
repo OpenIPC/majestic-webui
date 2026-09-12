@@ -149,9 +149,14 @@ done) %>
 		<div class="x-small text-secondary" id="st-enc-sub">main stream</div>
 		<div id="spark-enc" class="spark st-tile-spark"></div>
 	</div>
+	<%# Caption, unit and scale are all decided by dashboard.js from what this
+	    camera actually publishes: a signal LEVEL in dBm where the Wi-Fi driver
+	    has one, the link QUALITY percentage where it does not (#435). Hence no
+	    unit in the markup -- a stale " dBm" beside a percentage is the one
+	    reading this tile must never invite. %>
 	<div class="st-panel st-tile" id="st-wifi-tile" hidden>
-		<div class="mj-cap">Wi-Fi signal</div>
-		<div class="st-val"><span id="st-wifi-dbm">&ndash;</span><span class="st-unit"> dBm</span></div>
+		<div class="mj-cap mj-cap-wifi">Wi-Fi signal</div>
+		<div class="st-val"><span id="st-wifi-val">&ndash;</span><span class="st-unit" id="st-wifi-unit"></span></div>
 		<div class="x-small text-secondary" id="st-wifi-grade"></div>
 		<div id="spark-wifi" class="spark st-tile-spark"></div>
 	</div>
@@ -200,10 +205,15 @@ done) %>
 			</div>
 			<div class="st-panel st-chartbox" id="st-wifi-panel" hidden>
 				<div class="st-chart-head">
-					<span class="mj-cap">Wi-Fi signal</span>
-					<span class="st-now" id="st-rssi-now"></span>
+					<span class="mj-cap mj-cap-wifi">Wi-Fi signal</span>
+					<span class="st-now" id="st-wifi-now"></span>
 				</div>
-				<div class="mj-chart" id="ch-rssi"></div>
+				<div class="mj-chart" id="ch-wifi"></div>
+				<%# Shown in place of the plot on an adapter that reports neither
+				    a level nor a quality -- the facts below are then all there
+				    is, and an empty plot box would promise a line that is never
+				    coming. %>
+				<div class="x-small text-secondary" id="st-wifi-none" hidden></div>
 				<div class="x-small text-secondary" id="st-wifi-sub"></div>
 			</div>
 		</div>

@@ -17,7 +17,6 @@
 	let motionEl = null;
 	let motionSpark = null;
 	let lastV = null;
-	let wifiSeen = false;
 
 	// Theme-resolved series colors (--st-c* in bootstrap.override.css). The
 	// theme is fixed at page load, so one read suffices.
@@ -339,24 +338,115 @@
 		}
 	}
 
-	// ── Wi-Fi: a KPI tile, an RSSI chart with grade bands, and a fact line.
-	// The grade line translates dBm into words for whoever has never seen one.
-	let chRssi = null;
-	function wifiGrade(v) {
-		let grade = null;
-		if ('wifi_rssi_dbm' in v) {
-			const r = v.wifi_rssi_dbm;
-			grade = r >= -60 ? ['good', 'text-success']
-				: r >= -75 ? ['fair', 'text-warning']
-				: ['weak — move the camera or the AP', 'text-danger'];
-		} else if ('wifi_link_quality_ratio' in v) {
-			const q = v.wifi_link_quality_ratio;
-			grade = q >= 70 ? ['good', 'text-success']
-				: q >= 40 ? ['fair', 'text-warning']
-				: ['weak — move the camera or the AP', 'text-danger'];
-		}
-		return grade;
+	// ── Wi-Fi: a KPI tile, a signal chart with grade bands, and a fact line.
+	// The grade line translates the reading into words for whoever has never
+	// seen one.
+	//
+	// WHICH reading is plotted is the camera's answer, not this page's. A
+	// level in dBm is the better measure and is what the panel was built for,
+	// but not every Wi-Fi adapter has one to give: where the driver offers no
+	// dBm the camera publishes no level at all, rather than dressing a
+	// relative 0-100 number up in units it never measured, and link quality is
+	// then the only reading of signal there is. The block used to mount on the
+	// strength of ANY Wi-Fi reading and then feed the chart from the level
+	// alone, so those cameras got a plot that could never draw a line, beneath
+	// a fact line that filled in normally and a tile whose headline number was
+	// a dash (#435). The chart is now built for whichever measure arrived.
+	let chWifi = null;
+	// 'dbm' | 'pct' — what the tile and plot show; null once the camera has
+	// been found to publish neither, and undefined until it has answered at
+	// all. The three states are distinct and each has to be: mounting is what
+	// the undefined one is for, and a second flag saying "mounted" would be
+	// the same fact written twice.
+	let wifiUnit;
+
+	// The scale each measure is read on: the two grade edges, the ends of the
+	// plot, the unit its numbers carry and the word above them. One table,
+	// because the grade words and the chart's bands are the same judgement
+	// and would drift apart the moment they were written twice.
+	const WIFI_SCALE = {
+		dbm: {
+			key: 'wifi_rssi_dbm', cap: 'Wi-Fi signal', unit: ' dBm',
+			lo: -90, hi: -30, good: -60, fair: -75,
+		},
+		pct: {
+			key: 'wifi_link_quality_ratio', cap: 'Wi-Fi quality', unit: ' %',
+			lo: 0, hi: 100, good: 70, fair: 40,
+		},
+	};
+
+	// How many polls running a chosen measure may say nothing before the page
+	// stops believing in it. At the 2s heartbeat this is about a minute: far
+	// longer than a re-association, far shorter than sitting and watching.
+	const WIFI_LAPSE = 30;
+	let wifiMissing = 0;
+
+	// A level wins the moment one appears, and the choice is otherwise kept —
+	// but not for ever. One sample promotes and only a sustained silence
+	// demotes, which is the asymmetry the two failure modes ask for.
+	//
+	// Keeping it is what stops a level that is merely missing this second —
+	// the link re-associating, which is when the collector refuses a
+	// non-negative one — from parking the plot on percent for the life of the
+	// page. Letting go of it after `lapsed` is what stops the mirror image:
+	// one level slipping through during association would otherwise latch a
+	// dBm chart on an adapter that never reports another, and that chart can
+	// then never draw a line — the exact fault of #435, reintroduced on a
+	// camera that was working. A lapse re-decides from what is arriving now,
+	// in either direction, so a quality that stops coming gives its plot up
+	// too.
+	function wifiMeasure(v, cur, lapsed) {
+		if ('wifi_rssi_dbm' in v) return 'dbm';
+		// Undefined (nothing decided yet) and null (decided: neither reading)
+		// both fall through to the quality test, so an adapter that starts by
+		// reporting only a bitrate still picks up a quality that arrives later.
+		if (cur && !lapsed) return cur;
+		return ('wifi_link_quality_ratio' in v) ? 'pct' : null;
 	}
+
+	// Graded on the measure being SHOWN, so a dBm tile whose level has gone
+	// missing grades nothing rather than quietly grading the percentage under
+	// a caption that says dBm.
+	function wifiGrade(v, unit) {
+		const sc = WIFI_SCALE[unit];
+		if (!sc || !(sc.key in v)) return null;
+		const x = v[sc.key];
+		return x >= sc.good ? ['good', 'text-success']
+			: x >= sc.fair ? ['fair', 'text-warning']
+			: ['weak — move the camera or the AP', 'text-danger'];
+	}
+
+	function mountWifi(unit) {
+		const sc = WIFI_SCALE[unit];
+		wifiUnit = unit;
+		wifiMissing = 0;
+		if (chWifi) MC.dropChart(chWifi);
+		chWifi = null;
+		const host = $('#ch-wifi');
+		if (host) host.textContent = '';
+		sparks.wifi = makeSpark('#spark-wifi', C1, null, null);
+		if (sc) {
+			chWifi = makeChart('#ch-wifi', {
+				h: 110, lo: sc.lo, hi: sc.hi, colors: [C1],
+				bands: [
+					{ from: sc.good, to: sc.hi, color: 'rgba(47,182,115,.07)', label: 'good' },
+					{ from: sc.fair, to: sc.good, color: 'rgba(255,193,7,.06)', label: 'fair' },
+					{ from: sc.lo, to: sc.fair, color: 'rgba(224,84,78,.06)', label: 'weak' },
+				],
+			});
+		}
+		$$('.mj-cap-wifi').forEach(el => { el.textContent = sc ? sc.cap : 'Wi-Fi link'; });
+		const u = $('#st-wifi-unit');
+		if (u) u.textContent = sc ? sc.unit : '';
+		if (host) host.hidden = !sc;
+		const none = $('#st-wifi-none');
+		if (none) {
+			none.hidden = !!sc;
+			none.textContent = 'This adapter reports no signal reading — ' +
+				'only the link facts below.';
+		}
+	}
+
 	function updateWifi(s, v) {
 		const has = ['wifi_rssi_dbm', 'wifi_link_quality_ratio', 'wifi_bitrate_mbps',
 			'wifi_retries_total', 'wifi_missed_beacons_total'].some(k => k in v);
@@ -364,27 +454,32 @@
 		// The block is not frozen at first sight: a link arriving later must
 		// mount it, and one leaving (interface down) must hide it again
 		// rather than overwrite rows with "undefined dBm".
-		if (tile) tile.hidden = !has;
 		if (panel) panel.hidden = !has;
-		if (!has) return;
-		if (!wifiSeen) {
-			wifiSeen = true;
-			sparks.wifi = makeSpark('#spark-wifi', C1, null, null);
-			chRssi = makeChart('#ch-rssi', {
-				h: 110, lo: -90, hi: -30, colors: [C1],
-				bands: [
-					{ from: -60, to: -30, color: 'rgba(47,182,115,.07)', label: 'good' },
-					{ from: -75, to: -60, color: 'rgba(255,193,7,.06)', label: 'fair' },
-					{ from: -90, to: -75, color: 'rgba(224,84,78,.06)', label: 'weak' },
-				],
-			});
+		if (!has) {
+			if (tile) tile.hidden = true;
+			// An interface that has gone is not a measure that has lapsed, so
+			// its absence must not count towards giving one up.
+			wifiMissing = 0;
+			return;
 		}
-		const dbm = $('#st-wifi-dbm'), gr = $('#st-wifi-grade');
-		const r = ('wifi_rssi_dbm' in v) ? v.wifi_rssi_dbm : null;
-		// A single gauge can go missing on its own — the RSSI does while the
+		const cur = WIFI_SCALE[wifiUnit];
+		wifiMissing = (cur && !(cur.key in v)) ? wifiMissing + 1 : 0;
+		const unit = wifiMeasure(v, wifiUnit, wifiMissing >= WIFI_LAPSE);
+		if (unit !== wifiUnit) mountWifi(unit);
+		// A KPI tile is a headline number with a unit under a caption. An
+		// adapter that reports no signal reading has no headline to give it,
+		// and a tile showing a dash is the #435 complaint in miniature — so
+		// there is no tile, and the panel below carries the facts and says
+		// why. Judged every poll, since a reading arriving later brings it
+		// back.
+		if (tile) tile.hidden = wifiUnit === null;
+		const sc = WIFI_SCALE[wifiUnit];
+		const val = $('#st-wifi-val'), gr = $('#st-wifi-grade');
+		// A single gauge can go missing on its own — the level does while the
 		// link re-associates, since the collector refuses a non-negative one.
-		if (dbm) dbm.textContent = r != null ? r : '–';
-		const grade = wifiGrade(v);
+		const r = sc && (sc.key in v) ? v[sc.key] : null;
+		if (val) val.textContent = r != null ? r : '–';
+		const grade = wifiGrade(v, wifiUnit);
 		if (gr) {
 			gr.textContent = '';
 			if (grade) {
@@ -395,14 +490,26 @@
 					('wifi_bitrate_mbps' in v ? ' · ' + v.wifi_bitrate_mbps + ' Mb/s' : '')));
 			}
 		}
-		if (r != null) { pushSpark(sparks.wifi, r); pushChart(chRssi, [r]); }
-		const now = $('#st-rssi-now');
-		if (now) now.textContent = r != null ? r + ' dBm' : '';
+		if (r != null) { pushSpark(sparks.wifi, r); pushChart(chWifi, [r]); }
+		const now = $('#st-wifi-now');
+		if (now) now.textContent = r != null ? r + sc.unit : '';
 		// Gauges with units, counters as per-second rates — a retry *rate*
-		// climbing with a sagging RSSI is the whole story.
+		// climbing with a sagging signal is the whole story. The quality is
+		// left out of this line when it is the one being plotted above, where
+		// it already has a number, a scale and a grade.
+		//
+		// The bitrate lives on the tile's grade line and appears here only
+		// when there is no grade line for it to live on — keyed on the grade
+		// rather than on the measure, so that on a poll where the reading has
+		// blinked out it MOVES rather than going out altogether. Either is a
+		// change on the screen, and of the two a fact that relocates beats a
+		// fact that disappears.
 		const parts = [];
-		if ('wifi_link_quality_ratio' in v) parts.push('quality ' + v.wifi_link_quality_ratio + ' %');
+		if ('wifi_link_quality_ratio' in v && wifiUnit !== 'pct')
+			parts.push('quality ' + v.wifi_link_quality_ratio + ' %');
 		if ('wifi_snr_db' in v) parts.push('SNR ' + v.wifi_snr_db + ' dB');
+		if ('wifi_bitrate_mbps' in v && !grade)
+			parts.push(v.wifi_bitrate_mbps + ' Mb/s');
 		if (s.prev && s.dt > 0) {
 			[['wifi_retries_total', 'retries'], ['wifi_missed_beacons_total', 'missed beacons']].forEach(k => {
 				if (k[0] in v && k[0] in s.prev.v)
