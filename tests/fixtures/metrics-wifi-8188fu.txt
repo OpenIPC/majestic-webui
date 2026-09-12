@@ -1,0 +1,22 @@
+# The same block from a camera whose driver DOES have a level to give: an
+# Ingenic T31 on a Realtek RTL8188FU, which publishes the real dBm in
+# /proc/net/rtl8188fu/wlan0/rx_signal ("rssi:-55") even though its wext level
+# is a relative 46/100. Captured 2026-09-12.
+#
+# The pair is the point: the same panel, the same five possible readings, and
+# the measure the plot can honestly use is different on each.
+# HELP wifi_link_quality_ratio Wi-Fi link quality, percent of the driver's own maximum
+# TYPE wifi_link_quality_ratio gauge
+wifi_link_quality_ratio 88
+# HELP wifi_retries_total Wi-Fi transmit retries
+# TYPE wifi_retries_total counter
+wifi_retries_total 0
+# HELP wifi_missed_beacons_total Wi-Fi beacons missed from the associated AP
+# TYPE wifi_missed_beacons_total counter
+wifi_missed_beacons_total 0
+# HELP wifi_rssi_dbm Wi-Fi signal strength (RSSI) at the station, dBm
+# TYPE wifi_rssi_dbm gauge
+wifi_rssi_dbm -54
+# HELP wifi_bitrate_mbps Wi-Fi negotiated bitrate, Mbit/s
+# TYPE wifi_bitrate_mbps gauge
+wifi_bitrate_mbps 72.2
