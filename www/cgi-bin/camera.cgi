@@ -31,6 +31,14 @@ if [ -e j/exclude.lst ]; then
 	done < j/exclude.lst
 fi
 
+# The part this camera is, as sysinfo spells it. The Day/Night pin map has
+# always had a caption for it and mj-settings.js has always passed
+# `window.mjSoc` — which nothing in this tree ever assigned, so the caption
+# rendered as a bare " · 10 banks" on every camera. It is also what lets the pin
+# sweep read the wiki's per-part pad table (a/ircut-pads.js) instead of driving
+# the same pads in the same order everywhere.
+boot_soc=$(printf '%s' "$soc" | mj_json_escape)
+
 boot_sensors=""
 if [ -d /etc/sensors ]; then
 	for f in $(find /etc/sensors -maxdepth 1 -type f 2>/dev/null); do
@@ -107,7 +115,7 @@ fi
 	</div>
 
 	<div class="col-12 col-md-9" id="mj-settings-form-col">
-		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>]}</script>
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>]}</script>
 
 		<%
 		# No page-level heading any more: one section is shown at a time and its
@@ -152,6 +160,7 @@ fi
 <script src="/a/mj-luma.js"></script>
 <script src="/a/ircut-check.js" defer></script>
 <script src="/a/ircut-map.js" defer></script>
+<script src="/a/ircut-pads.js" defer></script>
 <script src="/a/ircut-scan.js" defer></script>
 <%
 # The Day/Night section's light-monitor chart shares the dashboard's chart

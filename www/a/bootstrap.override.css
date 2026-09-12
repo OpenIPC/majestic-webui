@@ -5185,20 +5185,15 @@ dialog.mj-modal::backdrop {
 	color: #fff;
 }
 
-/* Two different absences, and they must not look alike: a pad with an owner
-   is unavailable, a pad the mux has as something else is not a GPIO at all. */
+/* A pad with an owner is unavailable. There was a second state beside this one
+   for a pad the mux has as something other than a GPIO, which nothing ever
+   reached: the camera does not report the mux, so the option that fed it was
+   populated by no caller in the tree. Removed rather than left to imply a code
+   path that never existed. */
 .mj-pin-owned {
 	background: var(--bs-tertiary-bg);
 	border-color: var(--bs-border-color);
 	color: var(--bs-tertiary-color);
-	cursor: not-allowed;
-}
-
-.mj-pin-off {
-	background: var(--bs-body-bg);
-	border-color: var(--bs-border-color);
-	color: var(--bs-tertiary-color);
-	opacity: 0.55;
 	cursor: not-allowed;
 }
 
