@@ -61,22 +61,22 @@ fi
 			</details>
 		</div></div>
 
+		<%
+			# One control, and it is the one that cannot be undone.
+			#
+			# "Restart camera" stood here too until the System menu grew it (issue
+			# #444), which is where somebody looks for a reboot; here it was a
+			# second copy on a page nobody opens to restart a camera. Its going
+			# leaves this card with a single purpose, and that is worth keeping:
+			# the two once sat in one flex row a gap apart asking the identical
+			# "Are you sure?", so the only thing between a reboot and a factory
+			# wipe was reading the button (issue #160). A rule and a second
+			# heading were what separated them afterwards, and neither is needed
+			# by a control that is alone behind its own. Do not put a second one
+			# in here -- a wipe should be arrived at, never landed on.
+		%>
 		<div class="card"><div class="card-body">
-			<% card_head "Maintenance" %>
-			<div>
-				<a class="btn btn-outline-secondary confirm" href="restart.cgi"
-					data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>
-				<p class="x-small text-secondary mt-1 mb-0">Reboot to apply settings and clear temporary files.</p>
-			</div>
-			<%
-				# Deliberately not beside "Restart camera" any more. The two sat in one
-				# flex row, a gap apart, and asked the identical "Are you sure?" — so the
-				# only thing separating a reboot from a factory wipe was reading the
-				# button (issue #160). A rule and a heading break the run of controls, so
-				# the destructive one has to be arrived at rather than landed on.
-			%>
-			<hr class="my-4">
-			<h4 class="h6 text-danger mb-1">Danger zone</h4>
+			<% card_head "Danger zone" %>
 			<div>
 				<a class="btn btn-danger" href="factory-reset.cgi"
 					data-confirm="Reset this camera to factory state?&#10;&#10;Every configuration change is erased: network and Wi-Fi, video and image settings, timezone, passwords, and every extension you have configured.&#10;&#10;You will need to set the camera up again from scratch, and reach it on whatever address DHCP gives it. This cannot be undone.">Reset firmware</a>
