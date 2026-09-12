@@ -6120,9 +6120,9 @@ dialog.mj-modal::backdrop {
 .mj-meter {
 	margin-top: 0.875rem;
 	/* No width cap: the bar spans the card, so the number it carries is easier
-	   to follow across a wide screen than a 34rem bar stranded mid-row was
-	   (#426). The step strip below sets the readable measure; the bar is a gauge,
-	   not prose, and wants the room. */
+	   to follow across a wide screen than a 34rem bar stranded mid-row was. The
+	   step strip below sets the readable measure; the bar is a gauge, not prose,
+	   and wants the room. */
 }
 
 .mj-meter-head {
