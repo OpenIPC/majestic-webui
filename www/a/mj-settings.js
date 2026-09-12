@@ -8298,6 +8298,10 @@
 						f = el('input', 'form-control');
 						f.type = 'number';
 						f.inputMode = 'numeric';
+						// Whole numbers only: without a step a browser accepts
+						// a decimal here, and one fractional packet size is a
+						// refusal of the whole save rather than of the field.
+						f.step = '1';
 						if (isNum(prop.minimum)) f.min = prop.minimum;
 						if (isNum(prop.maximum)) f.max = prop.maximum;
 					} else {

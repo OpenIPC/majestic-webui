@@ -30,10 +30,11 @@
 	// fragment: RTMP frames its own and WHIP sizes itself from the WebRTC
 	// track.
 	//
-	// The audio members are RTMP's alone. Only src/rtmp-stream.c reads them —
-	// WHIP publishes no audio at all, and an RTP destination follows the
-	// camera's own audio codec — which is why the codec list is the set FLV
-	// can frame and says so.
+	// The audio members are RTMP's alone. A WHIP destination publishes no
+	// audio track at all, and an RTP one carries whatever the camera's own
+	// audio codec setting says — neither reads these — so only an RTMP row
+	// can act on them, which is also why the codec list the schema offers is
+	// the set FLV can frame.
 	//
 	// Showing any of them on a row that cannot use it would be offering a
 	// setting that does nothing, which is the whole reason this table exists
@@ -65,6 +66,12 @@
 		'audioFile'];
 
 	// The scheme of an address, lowercased, or '' when it names none.
+	//
+	// Lowercased because the camera compares it that way, as RFC 3986 says a
+	// scheme is compared. Both ends used to disagree with themselves about
+	// that, and a HTTPS:// destination was dropped before anything published
+	// to it; the badge here would have promised something that did not
+	// happen.
 	//
 	// Deliberately not a URL parse: `unix:/tmp/stream.sock` is a legal
 	// destination and not a legal URL, and half-typed text is the normal state
@@ -123,7 +130,16 @@
 	// value, tidy() drops it, and the camera answers from its own default.
 	function memberValue(type, raw) {
 		if (type === 'boolean') return !!raw;
-		if (type === 'integer') return raw === '' ? '' : Number(raw);
+		if (type === 'integer') {
+			if (raw === '') return '';
+			const n = Number(raw);
+			// A fraction is not an integer member, and quietly rounding one
+			// would store a value nobody typed. Left as it was typed instead:
+			// the control carries step="1" so a browser refuses it first, and
+			// the camera refuses it after that rather than keeping half of a
+			// packet size.
+			return Number.isInteger(n) ? n : raw;
+		}
 		return raw;
 	}
 

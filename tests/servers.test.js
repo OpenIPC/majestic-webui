@@ -21,13 +21,13 @@ group('the protocol is read off the address');
 
 check('rtmp is RTMP', S.protocolOf('rtmp://a.example/live/key') === 'RTMP');
 check('rtmps is named separately', S.protocolOf('rtmps://a.example/l/k') === 'RTMPS');
-check('udp is RTP', S.protocolOf('udp://192.168.1.10:5600') === 'RTP');
+check('udp is RTP', S.protocolOf('udp://192.0.2.10:5600') === 'RTP');
 check('unix is the socket', S.protocolOf('unix:/tmp/rtpstream.sock') === 'UNIX');
 check('http is WHIP', S.protocolOf('http://mtx.lan:8889/cam/whip') === 'WHIP');
 check('https is WHIP too', S.protocolOf('https://mtx.lan:8889/cam/whip') === 'WHIP');
 
-// The camera lowercases nothing on its side, but a person typing into a form
-// does not know that, and a scheme is case-insensitive everywhere else.
+// A scheme is case-insensitive (RFC 3986) and the camera compares it that way,
+// so the badge has to as well — it is a reading of what the camera will do.
 check('the scheme is matched case-insensitively',
 	S.protocolOf('RTMP://a.example/live/key') === 'RTMP');
 
@@ -46,7 +46,7 @@ group('a member is shown where it means something');
 // bearer token on an RTMP destination is a box that does nothing.
 check('the token is for WHIP', S.applies('token', 'https://mtx.lan/cam/whip'));
 check('and not for RTMP', !S.applies('token', 'rtmp://a.example/live/key'));
-check('nor for RTP', !S.applies('token', 'udp://192.168.1.10:5600'));
+check('nor for RTP', !S.applies('token', 'udp://192.0.2.10:5600'));
 check('nor for a unix socket', !S.applies('token', 'unix:/tmp/s.sock'));
 
 // A row nobody has addressed yet is one box, not the union of every
@@ -85,8 +85,9 @@ check('not for RTMP', !S.applies('naluSize', 'rtmp://a.example/live/key'));
 check('and not on a row with no address at all',
 	!S.applies('naluSize', ''));
 
-// Audio is RTMP's alone: only src/rtmp-stream.c reads these, WHIP publishes
-// no audio at all, and an RTP destination follows the camera's own codec.
+// Audio is RTMP's alone: a WHIP destination publishes no audio track and an
+// RTP one carries whatever the camera's own audio codec setting says, so
+// neither can act on these.
 // They were section-wide settings describing the RTMP rows while sitting
 // above a list that is mostly not RTMP.
 check('audio belongs to RTMP',
@@ -115,6 +116,14 @@ check('a checkbox becomes a real boolean',
 	&& S.memberValue('boolean', false) === false);
 check('a number box becomes a real number',
 	S.memberValue('integer', '4000') === 4000);
+// A fraction is not an integer member. Rounding it would store a value nobody
+// typed, and sending it as a JSON 1.5 is the camera refusing the whole save
+// over one field — so it is left exactly as typed, and the control carries
+// step="1" so a browser refuses it before either happens.
+check('a fraction is not quietly rounded',
+	S.memberValue('integer', '1.5') === '1.5');
+check('nor is text that is not a number at all',
+	S.memberValue('integer', 'abc') === 'abc');
 // Not 0, and not NaN: an empty box is a row saying it named no value, which
 // tidy() drops so the camera answers from its own default.
 check('an empty number box stays empty',
