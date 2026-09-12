@@ -427,6 +427,24 @@ window.MajesticVideo = (function () {
 			ms.addEventListener('sourceopen', function () {
 				try { sb = ms.addSourceBuffer(mime); }
 				catch (e) { onState('mjpeg', 'mse-error'); stop(); return; }
+				// This is a live feed with no end. Say so, by setting the
+				// duration to Infinity: without it the source has no duration of
+				// its own, so the browser takes the end of the buffered range as
+				// the media's duration and moves it forward on every append. On
+				// Safari that finite, growing duration makes an unrecoverable
+				// trap at the live edge -- when the playhead reaches the last
+				// buffered frame (which it does at startup, on a 0.13 s buffer,
+				// and whenever a hardware decoder drains faster than fragments
+				// arrive) currentTime equals duration, the element fires 'ended'
+				// and rewinds to zero, and the picture flashes black until the
+				// next syncLive() seek jumps it back to the edge (#335). An
+				// infinite duration is never reached, so 'ended' never fires and
+				// the buffer's end stays what syncLive() seeks toward, not what
+				// the clock counts down to. Set once, before any append: a
+				// smaller value than what is already buffered would throw, and
+				// Infinity is above every finite append so the browser never
+				// lowers it back.
+				try { ms.duration = Infinity; } catch (e) {}
 				// Over the channel, frames can be lost and the fragment
 				// timeline then has holes: in 'segments' mode a hole is a
 				// stall until the playhead is seeked across it, in
