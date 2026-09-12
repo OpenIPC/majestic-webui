@@ -644,13 +644,14 @@
 	// moves in the dark changes nothing a camera can see, and a camera is never
 	// convicted on a test that could not look.
 	// WHY A FILTER THAT WILL NOT MOVE IS OFTEN A CONFIGURATION, NOT A WIRE.
-	// With two coils assigned majestic pulses the pair and then RELEASES both
-	// pads to nothing 150 ms later — right for a filter with two windings,
-	// where the release is what holds the mechanical position at zero current.
-	// It is wrong for a board where one pad's LEVEL is the position: the
-	// release parks such a filter wherever a low pad puts it, whichever
-	// direction was asked for. Day and night then both settle to the same
-	// place, and the test sees one picture twice.
+	// With two coils assigned the camera pulses the pair and then puts BOTH
+	// PADS LOW again — read them after any transition, day or night, and that
+	// is what they say. On a filter with two windings that is the brake: it
+	// holds the mechanical position at zero current, which is the whole point.
+	// It is wrong for a board where one pad's LEVEL is the position, because
+	// both-low then parks such a filter wherever a low pad puts it, whichever
+	// direction was asked for. Day and night settle in the same place, and the
+	// test sees one picture twice.
 	//
 	// That is a reporter's camera, and every symptom followed from it: night
 	// looked right because the colour killer hid it, day came back magenta,
