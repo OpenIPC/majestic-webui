@@ -4,8 +4,8 @@
 //
 // Two protocols behind one pad. Stepped backends (gpio-motors, the motor
 // profiles) take ?h=&v= magnitudes and buttons carry data-dir; the Pelco-D
-// backend takes ?act= verbs — four directions, zoom, focus — driven by
-// majestic, which owns that wire, and buttons carry data-act.
+// motor service takes ?act= verbs — four directions, zoom, focus — and
+// buttons carry data-act.
 // The markup decides which kind this camera has; this file just reads what
 // the buttons say.
 //
@@ -18,100 +18,221 @@
 (function () {
 	const pad = $('#mj-ptz-pad'), fn = $('#mj-ptz-fn');
 	const mount = $('#mj-ptz'), stage = $('#mj-stage');
+	function stored(name, fallback) {
+		try {
+			const value = localStorage.getItem(name);
+			return value == null ? fallback : value;
+		} catch (e) { return fallback; }
+	}
+	function storedMs(name, fallback, min, max) {
+		const value = parseInt(stored(name, String(fallback)), 10);
+		return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+	}
 	// Either piece may be absent on its own: ptz_caps can leave a camera
 	// with only the zoom/focus group (an XM zoom block has no pan/tilt) —
 	// the pad must not be the thing the whole mount hinges on.
 	if (!mount || (!pad && !fn)) return;
+	if (stored('openipc.motor.controls', 'auto') === 'hidden') return;
 	if (fn) { mount.appendChild(fn); fn.hidden = false; }
 	if (pad) { mount.appendChild(pad); pad.hidden = false; }
 	mount.hidden = false;
 
+	let afOverlay = null, afPollTimer = null, afHideTimer = null;
+	let afSeenRunning = false, afWatchUntil = 0;
+	function showAf(text, state) {
+		if (stored('openipc.af.overlay', 'active') === 'off') return;
+		if (!afOverlay) {
+			afOverlay = document.createElement('div');
+			afOverlay.className = 'mj-af-overlay';
+			afOverlay.setAttribute('role', 'status');
+			afOverlay.setAttribute('aria-live', 'polite');
+			stage.appendChild(afOverlay);
+		}
+		afOverlay.textContent = text;
+		afOverlay.dataset.state = state || 'running';
+		afOverlay.hidden = false;
+	}
+	function hideAfLater() {
+		clearTimeout(afHideTimer);
+		afHideTimer = setTimeout(() => { if (afOverlay) afOverlay.hidden = true; }, 2000);
+	}
+	function pollAf() {
+		afPollTimer = null;
+		apiFetch('/autofocus/status', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.text() : Promise.reject())
+			.then(body => {
+				const status = body.trim();
+				const running = status.match(/^running(?: step=([^ ]+) fv=(\d+) peak=(\d+))?/);
+				if (running) {
+					afSeenRunning = true;
+					const step = running[1] ? running[1].replace(/-/g, ' ') : 'starting';
+					const metric = running[2] && running[2] !== '0' ? ' · FV ' + running[2] : '';
+					const peak = running[3] && running[3] !== '0' ? ' · peak ' + running[3] : '';
+					showAf('AF · ' + step + metric + peak, 'running');
+					afPollTimer = setTimeout(pollAf, 250);
+					return;
+				}
+
+				if (afSeenRunning) {
+					const done = status.match(/^done fv=(\d+) peak=(\d+)/);
+					if (done) showAf('AF done · FV ' + done[1] + ' · peak ' + done[2], 'done');
+					else if (status === 'preempted') showAf('AF stopped', 'stopped');
+					else showAf('AF · ' + (status || 'status unavailable'), 'failed');
+					hideAfLater();
+					return;
+				}
+
+				// A zoom pulse starts AF only after its motor request completes.
+				// Ignore the previous pass result during that short gap.
+				if (Date.now() < afWatchUntil) afPollTimer = setTimeout(pollAf, 250);
+			})
+			.catch(() => {
+				if (Date.now() < afWatchUntil || afSeenRunning)
+					afPollTimer = setTimeout(pollAf, 500);
+			});
+	}
+	function watchAf() {
+		afWatchUntil = Date.now() + 10000;
+		afSeenRunning = false;
+		clearTimeout(afHideTimer);
+		if (!afPollTimer) afPollTimer = setTimeout(pollAf, 100);
+	}
+
 	const STEP = 5, TICK_MS = 250;
+	const PULSE_MS = {
+		focus: storedMs('openipc.motor.focusClickMs', 70, 20, 1000),
+		motor: storedMs('openipc.motor.moveClickMs', 150, 20, 1000),
+		maximum: storedMs('openipc.motor.maxHoldMs', 5000, 500, 10000),
+	};
 	const DIRS = {
 		ul: [-1, 1], uc: [0, 1], ur: [1, 1],
 		lc: [-1, 0], cc: [0, 0], rc: [1, 0],
 		dl: [-1, -1], dc: [0, -1], dr: [1, -1],
 	};
-	let inflight = false, holdTimer = null, queuedStop = null;
-	// Which input owns the current hold, and which button it is driving. A
-	// release only ends the hold it started: two fingers on the pad, or an
-	// arrow pressed while another is still down, used to let the older one's
-	// release stop the newer one's move — harmless while every press was a
-	// self-terminating pulse, not harmless now that a release stops a motor.
-	let holdBtn = null, holdOwner = null;
+	let inflight = false, activeKind = null, activeAbort = null;
+	let activeTimeout = null;
+	let holdTimer = null, queuedCommand = null, heldButton = null, holdOwner = null;
+	let holdStarted = 0, releaseTimer = null, releaseAxis = null;
 
-	// One request in flight at a time — a hold does not queue moves behind a
-	// slow camera, it just measures out what the camera keeps up with. For
-	// Pelco each tick re-arms the camera's auto-stop deadline, so the motor
-	// runs continuously while the button is down rather than in steps. The
-	// one press that must NOT be droppable is stop: a move is under way when
-	// it is sent, and a stop that vanished would leave the motor running
-	// until its deadline — so it queues, and goes out the moment the current
-	// request answers. apiFetch rather than fetch: a lapsed session redirects
-	// to the login page instead of 401ing invisibly at 4 Hz.
-	function req(query, isStop) {
+	// Keep one normal request in flight. A manual move can cancel the AF HTTP
+	// request and wait behind it. Axis stop requests use separate connections,
+	// so pointer release does not wait behind the active movement request.
+	// apiFetch also sends an expired session to the login page.
+	function req(query, kind) {
+		// A release must stop its axis while the movement request is open.
+		// Use a second connection because the service accepts an authorized
+		// stop independently of the current lease owner.
+		if (kind === 'stop') {
+			apiFetch('/cgi-bin/j/ptz.cgi?' + query,
+				{ method: 'POST', credentials: 'same-origin' })
+				.then(r => r.text()).catch(() => {});
+			return;
+		}
 		if (inflight) {
-			if (isStop) queuedStop = query;
+			if (activeKind === 'af') {
+				queuedCommand = { query, kind };
+				if (activeKind === 'af' && activeAbort) activeAbort.abort();
+			}
 			return;
 		}
 		inflight = true;
-		// POST, always: every request this makes moves a motor or steps a
-		// pad, and the endpoint refuses anything else. A GET would be
-		// issuable by any page the operator happens to have open.
-		apiFetch('/cgi-bin/j/ptz.cgi?' + query,
-			{ method: 'POST', credentials: 'same-origin' })
+		activeKind = kind;
+		activeAbort = new AbortController();
+		// A movement is limited to five seconds. Do not let a lost CGI reply
+		// disable this pad for the rest of the page session. AF has its own
+		// longer server-side wait budget.
+		activeTimeout = setTimeout(() => activeAbort && activeAbort.abort(),
+			kind === 'af' ? 65000 : 8000);
+		apiFetch('/cgi-bin/j/ptz.cgi?' + query, {
+			method: 'POST',
+			credentials: 'same-origin',
+			signal: activeAbort.signal,
+		})
 			// The body, not just the headers: j/ptz.cgi answers 200 before it
-			// does anything, so the headers arrive in milliseconds. Reading
-			// to the end of the body is what keeps one request in flight at
-			// a time — the stepped backends still block for the length of
-			// their step, and the AF verb holds its request for the whole
-			// pass.
+			// execs anything, so the headers arrive in milliseconds while the
+			// motor is still moving. The body closes when the CGI exits —
+			// that is the end of a Pelco pulse, and it is what makes a held
+			// button string pulses end to end instead of stacking requests
+			// four times a second behind the camera's port lock.
 			.then(r => r.text())
 			.catch(() => {})
 			.finally(() => {
+				clearTimeout(activeTimeout);
+				activeTimeout = null;
 				inflight = false;
-				const q = queuedStop;
-				queuedStop = null;
-				if (q) req(q, true);
+				activeKind = null;
+				activeAbort = null;
+				const next = queuedCommand;
+				queuedCommand = null;
+				if (next) req(next.query, next.kind);
 			});
 	}
 	// What one press of this button means, from its own dataset.
-	function fire(btn) {
+	function axisFor(action) {
+		if (action === 'left' || action === 'right') return 'pan';
+		if (action === 'up' || action === 'down') return 'tilt';
+		if (action === 'wide' || action === 'tele') return 'zoom';
+		if (action === 'near' || action === 'far') return 'focus';
+		return 'all';
+	}
+	function fire(btn, durationMs) {
 		if (btn.dataset.act) {
-			req('act=' + btn.dataset.act, btn.dataset.act === 'stop');
+			const action = btn.dataset.act;
+			if (action === 'af' || action === 'wide' || action === 'tele') watchAf();
+			const kind = action === 'af' ? 'af' : action === 'stop' ? 'stop' : 'move';
+			let query = 'act=' + action;
+			if (durationMs) query += '&duration_ms=' + durationMs;
+			req(query, kind);
 			return;
 		}
 		const d = DIRS[btn.dataset.dir];
-		if (d) req('h=' + d[0] * STEP + '&v=' + d[1] * STEP);
+		if (d) req('h=' + d[0] * STEP + '&v=' + d[1] * STEP, 'move');
 	}
 	function startHold(btn, owner) {
-		// Supersede whatever was held without sending a stop: the new verb is
-		// going out in the same breath and would override it anyway.
-		clearHold();
-		holdBtn = btn;
+		if (releaseTimer) {
+			clearTimeout(releaseTimer);
+			releaseTimer = null;
+			req('act=stop&axis=' + releaseAxis, 'stop');
+			releaseAxis = null;
+		}
+		if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+		heldButton = null;
 		holdOwner = owner;
+		if (btn.dataset.act) {
+			heldButton = btn;
+			holdStarted = performance.now();
+			fire(btn, PULSE_MS.maximum);
+			holdTimer = setTimeout(() => {
+				holdTimer = null;
+				heldButton = null;
+				holdOwner = null;
+			}, PULSE_MS.maximum);
+			return;
+		}
 		fire(btn);
 		holdTimer = setInterval(() => fire(btn), TICK_MS);
 	}
-	function clearHold() {
-		if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
-		holdBtn = null;
-		holdOwner = null;
-	}
-	// Releasing a Pelco button has to say so. The camera runs the motor until
-	// a deadline it re-arms on every request, which is what lets a hold be one
-	// continuous move instead of a train of 500 ms steps — but it also means
-	// the motor keeps going for that long after the last tick unless the
-	// release is sent. (It stops by itself either way: that deadline is what
-	// makes a closed tab or a dropped link safe.) The stepped backends move by
-	// a fixed step per request and have nothing to stop.
-	// `owner` names the input letting go; null means "whatever is held, stop"
-	// (the Stop button, losing the window, the tab going away).
 	function stopHold(owner) {
 		if (owner != null && owner !== holdOwner) return;
-		const btn = holdBtn;
-		clearHold();
-		if (btn && btn.dataset.act) req('act=stop', true);
+		if (heldButton) {
+			const btn = heldButton;
+			heldButton = null;
+			holdOwner = null;
+			if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+			const elapsed = performance.now() - holdStarted;
+			releaseAxis = axisFor(btn.dataset.act);
+			const minimum = releaseAxis === 'focus' ? PULSE_MS.focus : PULSE_MS.motor;
+			const finish = () => {
+				releaseTimer = null;
+				req('act=stop&axis=' + releaseAxis, 'stop');
+				releaseAxis = null;
+			};
+			if (elapsed < minimum) releaseTimer = setTimeout(finish, minimum - elapsed);
+			else finish();
+			return;
+		}
+		if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+		holdOwner = null;
 	}
 
 	// The centre is a single press on both pads: the stepped backends call it
@@ -142,7 +263,11 @@
 		// Enter/Space on a focused button: a single step or pulse, so the
 		// keyboard can nudge precisely; sweeping is what the stage-level
 		// arrows are for.
-		btn.addEventListener('click', e => { if (e.detail === 0) fire(btn); });
+		btn.addEventListener('click', e => {
+			if (e.detail !== 0) return;
+			const axis = axisFor(btn.dataset.act);
+			fire(btn, axis === 'focus' ? PULSE_MS.focus : PULSE_MS.motor);
+		});
 	});
 
 	if (stage && pad) {

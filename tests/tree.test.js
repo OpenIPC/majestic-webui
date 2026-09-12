@@ -98,6 +98,27 @@ group('the image section is absorbed onto the Live leaf');
 	everyKeyOnce('shipped schema', t, SCHEMA);
 }
 
+group('autofocus can move to a synthetic Motors category');
+{
+	const t = TREE.build(SCHEMA, {
+		exclude: [], liveOrder: ORDER, liveId: 'live',
+		extracted: [{ id: 'autofocus', from: 'isp.autofocus' }],
+		customGroups: [{ id: 'motor', label: 'Motors',
+			sections: ['autofocus', 'motorControls'], customLeaves: ['motorControls'] }],
+	});
+	const motor = t.groups().find(g => g.id === 'motor');
+	check('the Motors category exists', !!motor);
+	check('the category contains both pages',
+		!!motor && t.leafIds(motor).join() === 'autofocus,motorControls');
+	check('Autofocus keeps its stored ISP paths',
+		t.leafFields('autofocus').every(f => f.dot.startsWith('isp.autofocus.')));
+	check('ISP no longer draws the Autofocus fields',
+		t.sectionFields('isp').every(f => !f.dot.startsWith('isp.autofocus.')));
+	const afDots = t.leafFields('autofocus').map(f => f.dot);
+	check('each Autofocus field is drawn once',
+		afDots.length > 0 && afDots.every(dot => leafOf(t, dot).length === 1));
+}
+
 group('a section the leaf lifts a minority of keeps its page');
 {
 	const s = clone(SCHEMA);

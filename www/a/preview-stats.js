@@ -29,7 +29,7 @@ window.MajesticStats = (function () {
 	const GRID = 'rgba(255,255,255,.14)';
 
 	let els = null;
-	let latSpark = null, bwChart = null, rssiSpark = null;
+	let latSpark = null, bwChart = null, rssiSpark = null, focusSpark = null;
 	let open = false;
 	// Per-destination egress, asked for only while somebody is looking. See
 	// the block above outPoll().
@@ -39,6 +39,7 @@ window.MajesticStats = (function () {
 	// tell whether the next one describes the same destination.
 	const outPrev = Object.create(null);
 	const outRate = Object.create(null);   // camera index → bytes/s
+	let focusTimer = null;
 	let prevT = null;      // previous tick's cumulative counters
 	let lastTickAt = 0;
 	let hold = { buf: null, dec: null }; // per-frame figures across empty deltas
@@ -135,6 +136,11 @@ window.MajesticStats = (function () {
 			'<div class="mj-ns-cap">Camera is serving</div>' +
 			'<div class="mj-ns-rows" id="mj-ns-eg-rows"></div>' +
 		'</section>' +
+		'<section class="mj-ns-sec" id="mj-ns-focus" hidden>' +
+			'<div class="mj-ns-cap">Focus metric <span class="mj-ns-grade" id="mj-ns-focus-value">–</span></div>' +
+			'<div class="mj-ns-spark" id="mj-ns-focus-sp"></div>' +
+			'<div class="mj-ns-note">Higher means sharper for the current scene.</div>' +
+		'</section>' +
 		'<section class="mj-ns-fine" id="mj-ns-fp"></section>' +
 		'</div>';
 
@@ -228,11 +234,14 @@ window.MajesticStats = (function () {
 			rWrate: g('mj-ns-r-wrate'), wrate: g('mj-ns-wrate'),
 			rWretr: g('mj-ns-r-wretr'), wretr: g('mj-ns-wretr'),
 			egress: g('mj-ns-egress'), egRows: g('mj-ns-eg-rows'),
+			focus: g('mj-ns-focus'), focusValue: g('mj-ns-focus-value'),
 			fp: g('mj-ns-fp'),
 		};
+		els.focus.hidden = true;
 		const MC = window.MjCharts;
 		latSpark = MC.makeSpark(g('mj-ns-lat-sp'), C1, 0, null, 120);
 		rssiSpark = MC.makeSpark(g('mj-ns-rssi-sp'), C1, -90, -30, 60);
+		focusSpark = MC.makeSpark(g('mj-ns-focus-sp'), C2, null, null, 120);
 		bwChart = MC.makeChart(g('mj-ns-bw'), {
 			h: 56, lo: 0, hi: null, colors: [C1, C2], grid: GRID,
 			fmt: (x) => x >= 10 ? String(Math.round(x)) : x.toFixed(1),
@@ -246,6 +255,30 @@ window.MajesticStats = (function () {
 			document.addEventListener('fullscreenchange', measureRefresh);
 		}
 		return true;
+	}
+
+	function updateFocusStatus(status) {
+		if (!ensure()) return false;
+		const m = /(?:^| )metric_fv=(\d+)(?: |$)/.exec(status || '') ||
+			/(?:^| )fv=(\d+)(?: |$)/.exec(status || '');
+		if (!m) return false;
+		const value = +m[1];
+		els.focus.hidden = false;
+		els.focusValue.textContent = String(value);
+		window.MjCharts.pushSpark(focusSpark, value);
+		return true;
+	}
+
+	function pollFocus() {
+		focusTimer = null;
+		if (!open || typeof window.fetch !== 'function') return;
+		window.fetch('/autofocus/status', { credentials: 'same-origin' })
+			.then((r) => r.ok ? r.text() : Promise.reject())
+			.then(updateFocusStatus)
+			.catch(() => {})
+			.finally(() => {
+				if (open) focusTimer = setTimeout(pollFocus, 250);
+			});
 	}
 
 	// ── the 1 Hz WebRTC tick ────────────────────────────────────────────────
@@ -1036,11 +1069,17 @@ window.MajesticStats = (function () {
 		// asking starts and stops with the panel rather than running for
 		// every minute somebody leaves Live View up.
 		if (open) outStart(); else outStop();
+		if (open && !focusTimer) pollFocus();
+		if (!open && focusTimer) {
+			clearTimeout(focusTimer);
+			focusTimer = null;
+		}
 		// Pixel-space charts skip rendering while [hidden] leaves them 0
 		// wide; the first frame after opening is when they can measure.
 		if (open && window.MjCharts)
 			requestAnimationFrame(() => window.MjCharts.renderAll());
 	}
 
-	return { tick: tick, reset: reset, setOpen: setOpen };
+	return { tick: tick, reset: reset, setOpen: setOpen,
+		updateFocusStatus: updateFocusStatus };
 })();

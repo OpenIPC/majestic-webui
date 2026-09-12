@@ -199,6 +199,20 @@ g('degradation: an old majestic and a young session claim nothing', () => {
 	check('no capacity estimate hides its row', env.el('mj-ns-r-cap').hidden === true);
 });
 
+g('focus metric appears only when the AF service provides it', () => {
+	const env = boot();
+	env.stats.tick({ cam: {} });
+	check('focus section starts hidden', env.el('mj-ns-focus').hidden === true);
+	check('ordinary AF status without a sample is ignored',
+		env.stats.updateFocusStatus('idle') === false);
+	check('the current sample is accepted',
+		env.stats.updateFocusStatus('idle metric_fv=1935 t_mono_ms=123') === true);
+	check('focus section becomes visible', env.el('mj-ns-focus').hidden === false);
+	check('focus value is printed', env.el('mj-ns-focus-value').textContent === '1935');
+	check('focus value reaches the graph',
+		env.pushedSparks[env.pushedSparks.length - 1] === 1935);
+});
+
 g('the delay legs sum, and the caption says what the number is', () => {
 	const env = boot();
 	// First tick sets baselines; no deltas exist yet.

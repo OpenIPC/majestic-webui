@@ -90,6 +90,10 @@ if [ -d /usr/share/fonts ]; then
 	set +f
 	IFS=$_ifs
 fi
+boot_motor_backend=$(echo -n "$ptz_backend" | mj_json_escape)
+boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escape)
+[ -n "$ptz_backend" ] && boot_motor_available=true || boot_motor_available=false
+[ -n "$af_support" ] && boot_motor_af=true || boot_motor_af=false
 %>
 
 <%in p/header.cgi %>
@@ -129,7 +133,7 @@ fi
 	</div>
 
 	<div class="col-12 col-md-9" id="mj-settings-form-col">
-		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>]}</script>
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>],"motor":{"available":<%= $boot_motor_available %>,"backend":"<%= $boot_motor_backend %>","axes":"<%= $boot_motor_axes %>","af":<%= $boot_motor_af %>}}</script>
 
 		<%
 		# No page-level heading any more: one section is shown at a time and its
