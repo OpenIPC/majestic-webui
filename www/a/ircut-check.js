@@ -643,9 +643,42 @@
 	// outcomes, and the fourth is the one that keeps this honest: a filter that
 	// moves in the dark changes nothing a camera can see, and a camera is never
 	// convicted on a test that could not look.
-	function verdict(day, other) {
+	// WHY A FILTER THAT WILL NOT MOVE IS OFTEN A CONFIGURATION, NOT A WIRE.
+	// With two coils assigned the camera pulses the pair and then puts BOTH
+	// PADS LOW again — read them after any transition, day or night, and that
+	// is what they say. On a filter with two windings that is the brake: it
+	// holds the mechanical position at zero current, which is the whole point.
+	// It is wrong for a board where one pad's LEVEL is the position, because
+	// both-low then parks such a filter wherever a low pad puts it, whichever
+	// direction was asked for. Day and night settle in the same place, and the
+	// test sees one picture twice.
+	//
+	// That is a reporter's camera, and every symptom followed from it: night
+	// looked right because the colour killer hid it, day came back magenta,
+	// and driving one pad by hand fixed it while the other pad did nothing at
+	// all. Sending them to "check which pads the coils are connected to" —
+	// which is what this said — pointed at the one thing that was not wrong.
+	//
+	// So `twoCoil` changes what a stuck filter is told to look at. It is a
+	// suggestion with a cheap test attached, not a diagnosis: nothing here can
+	// see how many pads the board really has.
+	function verdict(day, other, opts) {
+		const twoCoil = !!(opts && opts.twoCoil);
 		const dOpen = irLook(day), oOpen = irLook(other);
 		const dCol = colourLook(day), oCol = colourLook(other);
+		// What to go and look at, when nothing the camera did reached the
+		// filter. Shared by both stuck verdicts, which differ only in what the
+		// picture looked like while it was not moving.
+		const chase = twoCoil
+			? 'Both coils are assigned, so the camera pulses the pair and then ' +
+				'releases both pads. That is right for a filter with two ' +
+				'windings and wrong for a board where one pad’s level ' +
+				'holds the position — the release parks that kind wherever ' +
+				'a released pad leaves it, whichever way you asked. Drive the ' +
+				'second pad by hand: if the picture does not change, this board ' +
+				'has one, and clearing the closing coil on the pin map makes the ' +
+				'camera hold a level instead of pulsing a pair.'
+			: 'Check which pad the coil is connected to.';
 		if (dCol && oOpen) return {
 			id: 'ok', level: 'ok',
 			title: 'The IR-cut filter is wired correctly',
@@ -663,9 +696,8 @@
 		if (dOpen && oOpen) return {
 			id: 'stuck-open', level: 'danger',
 			title: 'The filter did not move — it is stuck open',
-			detail: 'Both positions gave a magenta picture, so the pulse is not ' +
-				'reaching the solenoid. Check which pads the two coils are ' +
-				'connected to.',
+			detail: 'Both positions gave a magenta picture, so nothing the ' +
+				'camera did reached the filter. ' + chase,
 		};
 		if (dCol && oCol) return {
 			id: 'stuck-closed', level: 'warning',
@@ -674,7 +706,7 @@
 				'will look right and night will be almost black on a camera ' +
 				'lit by infrared, because the filter goes on blocking exactly ' +
 				'the light the illuminator emits; a white-light illuminator is ' +
-				'not affected. Check which pads the two coils are connected to.',
+				'not affected. ' + chase,
 		};
 		return {
 			id: 'unclear', level: 'info',
@@ -730,7 +762,11 @@
 	// while the filter now genuinely matches it — so that path wants no restore
 	// at all, where the ordinary one-toggle path does. Hence a count rather than
 	// a flag: the restore is owed on an odd number of moves and on no other.
-	function probe(io, startIrcut) {
+	// `opts` carries what the CONFIGURATION says, which the pictures cannot:
+	// {twoCoil} is whether both coils are assigned, and it only ever changes
+	// what a stuck filter is told to go and look at. Passed in rather than read
+	// here, because this file is given its world and does not fetch one.
+	function probe(io, startIrcut, opts) {
 		const settle = io.settleMs || 1500;
 		let toggles = 0;
 		const step = (s) => { if (io.onStep) io.onStep(s); };
@@ -772,7 +808,7 @@
 					// filter started, not on the order they were captured in.
 					const day = start ? pair.second : pair.first;
 					const other = start ? pair.first : pair.second;
-					const v = verdict(day, other);
+					const v = verdict(day, other, opts);
 					// Anything but two agreeing frames is already decided: the
 					// filter demonstrably moved, or neither frame said enough to
 					// judge and a third would not either.
@@ -824,7 +860,7 @@
 							// back unreadable. What must NOT follow is the
 							// resync claim, hence the flag rather than a
 							// constant.
-							return done(verdict(d2, o2), d2, o2, decisive);
+							return done(verdict(d2, o2, opts), d2, o2, decisive);
 						});
 				})
 				// A trailing catch, NOT the second argument of the .then above.

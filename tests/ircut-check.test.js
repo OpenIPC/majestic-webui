@@ -153,6 +153,51 @@ group('verdict: four outcomes, and the fourth is "could not look"');
 		ic.verdict(st([8, 8, 8]), st([8, 8, 8])).id === 'unclear');
 	check('only "ok" is not a fault', ic.verdict(colour, open).level === 'ok' &&
 		ic.verdict(open, colour).level === 'danger');
+
+	// A filter that will not move is often a CONFIGURATION, not a wire. With
+	// two coils assigned the camera pulses the pair and then releases both
+	// pads — right for a filter with two windings, and wrong for a board where
+	// one pad's level IS the position, because the release then parks it in the
+	// same place whichever direction was asked for. Day and night settle
+	// together and the test sees one picture twice.
+	//
+	// That was a reporter's camera, and the old wording sent him to "check
+	// which pads the two coils are connected to" — the one thing that was not
+	// wrong. He spent days on it.
+	const stuck2 = ic.verdict(open, open, { twoCoil: true });
+	check('a stuck filter with two coils assigned names the one-pad case',
+		/one pad|second pad/i.test(stuck2.detail), stuck2.detail);
+	check('and gives the test that settles it',
+		/by hand/i.test(stuck2.detail), stuck2.detail);
+	check('and the action, on the control that carries it',
+		/pin map/i.test(stuck2.detail), stuck2.detail);
+	// Still the same fault, so it must not be softened into advice.
+	check('without losing the verdict itself',
+		stuck2.id === 'stuck-open' && stuck2.level === 'danger');
+
+	// Stuck CLOSED is the same cause and the same fix. It is also the one that
+	// looks perfect until nightfall, so it must not be the branch that misses
+	// the explanation.
+	const shut2 = ic.verdict(colour, colour, { twoCoil: true });
+	check('stuck closed carries the same explanation',
+		/one pad|second pad/i.test(shut2.detail), shut2.detail);
+
+	// With one coil assigned there is no pair to blame, and the two-coil
+	// paragraph would be nonsense. Nothing about releasing a pair may appear.
+	const stuck1 = ic.verdict(open, open, { twoCoil: false });
+	check('a one-coil camera is not told about releasing a pair',
+		!/releases both|second pad/i.test(stuck1.detail), stuck1.detail);
+	check('it is pointed at its single pad instead',
+		/which pad the coil/i.test(stuck1.detail), stuck1.detail);
+	check('and no options at all behaves as one coil',
+		ic.verdict(open, open).detail === stuck1.detail);
+
+	// The wording only ever rides on a stuck verdict: a working filter must not
+	// be handed a paragraph about boards it is not.
+	check('a correct verdict says nothing about pads',
+		!/second pad|pin map/i.test(ic.verdict(colour, open, { twoCoil: true }).detail));
+	check('nor does an unclear one',
+		!/second pad/i.test(ic.verdict(grey, grey, { twoCoil: true }).detail));
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +458,21 @@ group('probe: the sequence, and which frame was the day one');
 				settleMs: 0,
 			};
 		};
+		// probe() has TWO verdict() calls — the ordinary one and the one after
+		// the extra trial — and the configuration has to reach both, or a
+		// genuinely stuck filter found the long way round loses the paragraph
+		// that names its likeliest cause. That second call is the one a stuck
+		// camera actually lands on, since a stuck pair is exactly what sends it
+		// down the extra trial.
+		const t = mk([st(MAGENTA), st(MAGENTA), st(MAGENTA)], 0);
+		return ic.probe(t, 0, { twoCoil: true }).then((rt) => {
+			check('a stuck verdict reached through the extra trial keeps the ' +
+				'two-coil explanation',
+				/second pad/i.test(rt.verdict.detail), rt.verdict.detail);
+			return unreadable();
+		});
+
+		function unreadable() {
 		// DARK is what a lens cap, a night scene or a capture caught mid-swing
 		// gives: too few usable pixels for either statistic to mean anything.
 		const a = mk([st(MAGENTA), st(MAGENTA), st(DARK)], 0);
@@ -474,6 +534,7 @@ group('probe: the sequence, and which frame was the day one');
 						});
 				});
 		});
+		}
 
 		// The extra trial lives inside a .then handler, and a handler's own
 		// rejection is NOT caught by the onRejected argument of that same .then.
