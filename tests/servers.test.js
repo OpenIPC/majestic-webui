@@ -70,6 +70,19 @@ check('not for RTMP', !S.applies('naluSize', 'rtmp://a.example/live/key'));
 check('an empty address shows it rather than guessing',
 	S.applies('naluSize', ''));
 
+// Audio is RTMP's alone: only src/rtmp-stream.c reads these, WHIP publishes
+// no audio at all, and an RTP destination follows the camera's own codec.
+// They were section-wide settings describing the RTMP rows while sitting
+// above a list that is mostly not RTMP.
+check('audio belongs to RTMP',
+	S.applies('audioSource', 'rtmp://a.example/live/key')
+	&& S.applies('audioCodec', 'rtmps://a.example/live/key')
+	&& S.applies('audioFile', 'rtmp://a.example/live/key'));
+check('not to WHIP', !S.applies('audioSource', 'https://mtx.lan/cam/whip')
+	&& !S.applies('audioCodec', 'https://mtx.lan/cam/whip'));
+check('not to RTP', !S.applies('audioSource', 'udp://1.2.3.4:5600')
+	&& !S.applies('audioCodec', 'udp://1.2.3.4:5600'));
+
 // A row can carry a number, and a number is not a string to be trimmed away.
 check('a numeric member survives tidying',
 	S.tidy({ url: 'udp://1.2.3.4:5600', naluSize: 1400 }).naluSize === 1400);

@@ -28,21 +28,41 @@
 	//
 	// `naluSize` is the RTP fragmentation MTU, so it belongs to the two that
 	// fragment: RTMP frames its own and WHIP sizes itself from the WebRTC
-	// track. Showing either on a row that cannot use it would be offering a
-	// setting that does nothing — which is the whole reason this table exists
+	// track.
+	//
+	// The audio members are RTMP's alone. Only src/rtmp-stream.c reads them —
+	// WHIP publishes no audio at all, and an RTP destination follows the
+	// camera's own audio codec — which is why the codec list is the set FLV
+	// can frame and says so.
+	//
+	// Showing any of them on a row that cannot use it would be offering a
+	// setting that does nothing, which is the whole reason this table exists
 	// rather than the row drawing everything the schema declares.
+	const RTMP = {
+		token: false, naluSize: false,
+		audioSource: true, audioCodec: true, audioFile: true,
+	};
+	const RTP = {
+		token: false, naluSize: true,
+		audioSource: false, audioCodec: false, audioFile: false,
+	};
+	const WHIP = {
+		token: true, naluSize: false,
+		audioSource: false, audioCodec: false, audioFile: false,
+	};
 	const SCHEMES = {
-		rtmp: { name: 'RTMP', token: false, naluSize: false },
-		rtmps: { name: 'RTMPS', token: false, naluSize: false },
-		udp: { name: 'RTP', token: false, naluSize: true },
-		unix: { name: 'UNIX', token: false, naluSize: true },
-		http: { name: 'WHIP', token: true, naluSize: false },
-		https: { name: 'WHIP', token: true, naluSize: false },
+		rtmp: Object.assign({ name: 'RTMP' }, RTMP),
+		rtmps: Object.assign({ name: 'RTMPS' }, RTMP),
+		udp: Object.assign({ name: 'RTP' }, RTP),
+		unix: Object.assign({ name: 'UNIX' }, RTP),
+		http: Object.assign({ name: 'WHIP' }, WHIP),
+		https: Object.assign({ name: 'WHIP' }, WHIP),
 	};
 
 	// The members this knows to be protocol-specific. Anything else the schema
 	// declares is shown on every row.
-	const SCOPED = ['token', 'naluSize'];
+	const SCOPED = ['token', 'naluSize', 'audioSource', 'audioCodec',
+		'audioFile'];
 
 	// The scheme of an address, lowercased, or '' when it names none.
 	//

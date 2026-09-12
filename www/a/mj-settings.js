@@ -8239,6 +8239,19 @@
 							o.textContent = opt === '' ? 'Default' : opt;
 							f.appendChild(o);
 						});
+						// A stored value the camera does not offer: a codec
+						// compiled out of this build, or a config written for
+						// a different one. Listing it keeps the select showing
+						// what the file says instead of going blank — and
+						// keeps a save from quietly replacing the value with
+						// whichever option happened to be first.
+						const cur = v[m] != null ? String(v[m]) : '';
+						if (cur !== '' && prop.enum.indexOf(cur) < 0) {
+							const o = document.createElement('option');
+							o.value = cur;
+							o.textContent = cur + ' (unsupported)';
+							f.appendChild(o);
+						}
 					} else if (prop.type === 'integer') {
 						// A number, typed with the keyboard a number wants and
 						// with whatever bounds the camera declared. Left empty
