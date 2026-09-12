@@ -7250,6 +7250,7 @@
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
 			const sub = props[key];
+			if (sub && sub['x-hidden']) continue; // superseded; see mj-tree.js
 			if (lifted().has(dot)) continue;      // mounted on the Live leaf, beside the picture
 			if (skip && skip.has(dot)) continue;
 			if (isGroup(sub)) {
@@ -8116,6 +8117,275 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">';
 			control = p.querySelector('input');
+		} else if (type === 'array' && sub.items && sub.items.type === 'object'
+				&& sub.items.properties) {
+			// A list whose items are objects: one editable row per element, with
+			// a control per member drawn from what `items` declares. The camera
+			// publishes to as many destinations as it is given, and until the
+			// schema described the list there was no way to see them, let alone
+			// add one.
+			//
+			// Everything about the row comes from the schema rather than from a
+			// list here: which members exist, what each is called, which is an
+			// enum and which is a secret. A member added on the camera appears
+			// with no change to this page, which is the same bargain every other
+			// field in this form is drawn under.
+			//
+			// The one thing NOT taken from the schema is which members a given
+			// row shows. That is the address's business — a bearer token means
+			// nothing on an RTMP destination — and it lives in mj-servers.js
+			// beside the rest of the reading of an address.
+			const SRV = (typeof window === 'object' && window.MajesticServers) || null;
+			const props = sub.items.properties;
+			// `url` first whatever order the schema lists them in: it is the one
+			// that decides what the rest of the row means.
+			//
+			// x-hidden is skipped here for the same reason renderProps() and
+			// mj-tree.js skip it: a member the camera has superseded is
+			// offered to nobody. No item property carries it yet — this is
+			// the third walker over the same schema, and the one that would
+			// have gone on drawing and saving a member the other two had
+			// stopped showing.
+			const members = Object.keys(props)
+				.filter(m => !props[m]['x-hidden'])
+				.sort((a, b) => (a === 'url' ? -1 : b === 'url' ? 1 : 0));
+
+			// mj-wide: opt out of the 20rem cap .array carries for the
+			// MultiRect fields, which is half an address.
+			p = el('p', 'array objects mj-wide mj-row');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<div class="mj-dests" id="' + id + '"></div>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-dest-add">'
+				+ '+ Add destination</button>';
+			control = p.querySelector('.mj-dests');
+
+			// A member leaves here in the type `items` declares for it, which
+			// is mj-servers.js's job — see memberValue() there for why a
+			// string would be a 400.
+			const readRow = (r) => {
+				const o = {};
+				members.forEach(m => {
+					const f = r.querySelector('[data-member="' + m + '"]');
+					if (!f) return;
+					const t = (props[m] || {}).type;
+					const raw = f.type === 'checkbox' ? f.checked : f.value;
+					o[m] = SRV ? SRV.memberValue(t, raw) : raw;
+				});
+				return o;
+			};
+
+			const rowsOf = () => Array.from(control.querySelectorAll('.mj-dest'))
+				.map(readRow);
+
+			// Redraw what depends on the address: the protocol badge, which
+			// members this row uses, and anything the row is worth being told.
+			const repaint = (row) => {
+				const url = (row.querySelector('[data-member="url"]') || {}).value || '';
+				const badge = row.querySelector('.mj-dest-proto');
+				const proto = SRV ? SRV.protocolOf(url) : null;
+				// An address nobody can read gets no badge rather than a wrong
+				// one — an empty box is honest about not knowing yet.
+				if (badge) badge.textContent = proto || '—';
+				members.forEach(m => {
+					const wrap = row.querySelector('.mj-dest-member[data-for="' + m + '"]');
+					if (!wrap) return;
+					const on = SRV ? SRV.applies(m, url) : true;
+					wrap.hidden = !on;
+				});
+				const note = row.querySelector('.mj-dest-note');
+				if (note && SRV) {
+					const said = SRV.says(readRow(row));
+					note.textContent = said;
+					note.hidden = said === '';
+				}
+				// A destination that is off is still configured, and still
+				// worth reading — it is greyed rather than hidden, so the
+				// list shows what the camera is doing at a glance without
+				// losing what it would do if switched back on.
+				const on = row.querySelector('[data-member="enabled"]');
+				row.classList.toggle('mj-dest-off', !!on && !on.checked);
+			};
+
+			const onChange = (row) => { repaint(row); updateDirty(); };
+
+			const addRow = (values) => {
+				const v = values || {};
+				const row = el('div', 'mj-dest mb-2');
+
+				const head = el('div', 'input-group input-group-sm');
+				const badge = el('span', 'input-group-text mj-dest-proto');
+				badge.textContent = '—';
+				const url = el('input', 'form-control');
+				url.type = 'text';
+				url.setAttribute('data-member', 'url');
+				url.value = v.url != null ? String(v.url) : '';
+				const urlLabel = (props.url && props.url.title) || 'Address';
+				url.setAttribute('aria-label', urlLabel);
+				url.placeholder =
+					(props.url && props.url['x-placeholder']) || urlLabel;
+				const del = el('button', 'btn btn-outline-danger mj-dest-del');
+				del.type = 'button';
+				del.textContent = '\u00d7';
+				del.setAttribute('aria-label', 'Remove this destination');
+				del.addEventListener('click', () => { row.remove(); updateDirty(); });
+				head.appendChild(badge);
+				head.appendChild(url);
+				head.appendChild(del);
+				row.appendChild(head);
+				if (props.url && props.url.hint) {
+					const h = el('div', 'hint text-secondary');
+					h.textContent = props.url.hint;
+					row.appendChild(h);
+				}
+
+				members.filter(m => m !== 'url').forEach(m => {
+					const prop = props[m] || {};
+					// The member is a block, not just the control row: its
+					// explanation belongs to it and has to disappear with it.
+					// Appending the hint as a sibling left every RTMP row
+					// carrying a paragraph about WHIP bearer tokens.
+					const wrap = el('div', 'mj-dest-member');
+					wrap.setAttribute('data-for', m);
+					const line = el('div', 'input-group input-group-sm mt-1');
+					// Named, not positional: the width rule that lines these
+					// up with the protocol badge has to find the label and
+					// not whatever else a member's control puts in the group.
+					const name = el('span', 'input-group-text mj-dest-name');
+					name.textContent = prop.title || m;
+					// The column is narrow on purpose, so a name that does not
+					// fit is readable on hover rather than only guessable.
+					name.title = prop.title || m;
+					line.appendChild(name);
+
+					let f;
+					if (Array.isArray(prop.enum)) {
+						f = el('select', 'form-select');
+						prop.enum.forEach(opt => {
+							const o = document.createElement('option');
+							o.value = opt;
+							// The empty member of an enum is the "follow the
+							// setting above" choice, and reads as nothing at all
+							// unless it is given words.
+							o.textContent = opt === '' ? 'Default' : opt;
+							f.appendChild(o);
+						});
+						// A stored value the camera does not offer: a codec
+						// compiled out of this build, or a config written for
+						// a different one. Listing it keeps the select showing
+						// what the file says instead of going blank — and
+						// keeps a save from quietly replacing the value with
+						// whichever option happened to be first.
+						const cur = v[m] != null ? String(v[m]) : '';
+						if (cur !== '' && prop.enum.indexOf(cur) < 0) {
+							const o = document.createElement('option');
+							o.value = cur;
+							o.textContent = cur + ' (unsupported)';
+							f.appendChild(o);
+						}
+					} else if (prop.type === 'boolean') {
+						// The switch sits where every other member's control
+						// sits, so the label column stays a column. Bootstrap
+						// wants the checkbox inside something with a height
+						// of its own or it collapses against the group.
+						const box = el('span', 'input-group-text');
+						f = el('input', 'form-check-input mt-0');
+						f.type = 'checkbox';
+						box.appendChild(f);
+						line.appendChild(box);
+						// Marked by what it is rather than by its name, so a
+						// row drawn greyed-out because it is switched off
+						// leaves the switch itself lit.
+						wrap.classList.add('mj-dest-switch');
+					} else if (prop.type === 'integer') {
+						// A number, typed with the keyboard a number wants and
+						// with whatever bounds the camera declared. Left empty
+						// it means the member is unset, which is a different
+						// thing from zero — tidy() drops an empty string and
+						// the camera then falls back to its own default.
+						f = el('input', 'form-control');
+						f.type = 'number';
+						f.inputMode = 'numeric';
+						// Whole numbers only: without a step a browser accepts
+						// a decimal here, and one fractional packet size is a
+						// refusal of the whole save rather than of the field.
+						f.step = '1';
+						if (isNum(prop.minimum)) f.min = prop.minimum;
+						if (isNum(prop.maximum)) f.max = prop.maximum;
+					} else {
+						f = el('input', 'form-control');
+						f.type = (prop['x-secret'] || prop.writeOnly) ? 'password' : 'text';
+						if (f.type === 'password') {
+							f.autocomplete = 'off';
+							f.spellcheck = false;
+						}
+					}
+					f.setAttribute('data-member', m);
+					f.setAttribute('aria-label', prop.title || m);
+					if (f.type === 'checkbox') {
+						// What the row says, or what the schema says a row
+						// that says nothing means. A destination the camera
+						// would publish to must not draw itself as off.
+						f.checked = v[m] != null
+							? (v[m] !== false && v[m] !== 'false')
+							: prop.default !== false;
+					} else {
+						f.value = v[m] != null ? String(v[m]) : '';
+						if (prop['x-placeholder'])
+							f.placeholder = prop['x-placeholder'];
+						line.appendChild(f);
+					}
+					wrap.appendChild(line);
+					// Same markup every other field on this page puts under
+					// its control.
+					if (prop.hint) {
+						const h = el('div', 'hint text-secondary');
+						h.textContent = prop.hint;
+						wrap.appendChild(h);
+					}
+					row.appendChild(wrap);
+				});
+
+				const note = el('div', 'hint mj-dest-note');
+				note.hidden = true;
+				row.appendChild(note);
+
+				row.querySelectorAll('[data-member]').forEach(f => {
+					f.addEventListener('input', () => onChange(row));
+					f.addEventListener('change', () => onChange(row));
+				});
+
+				control.appendChild(row);
+				repaint(row);
+				return row;
+			};
+
+			control._addRow = addRow;
+			// One canonical string per field is what dirty-tracking compares,
+			// the same bargain the string-array control makes with its
+			// comma-join. onSubmit parses it back into the list it POSTs.
+			control._get = () => SRV ? SRV.canon(rowsOf()) : JSON.stringify(rowsOf());
+			control._set = (val) => {
+				control.querySelectorAll('.mj-dest').forEach(r => r.remove());
+				let arr = val;
+				if (typeof arr === 'string') {
+					try { arr = JSON.parse(arr); } catch (e) { arr = []; }
+				}
+				(Array.isArray(arr) ? arr : []).forEach(x => {
+					// A camera upgraded from before destinations had a shape
+					// still carries bare addresses, and majestic still reads
+					// them. Drawing one as the row it means is what stops the
+					// first save on such a camera from being a rewrite of a
+					// list nobody touched.
+					addRow(typeof x === 'string' ? { url: x } : x);
+				});
+			};
+			control._set(eff);
+			p.querySelector('.mj-dest-add').addEventListener('click', () => {
+				addRow({});
+				updateDirty();
+			});
+
 		} else if (type === 'array') {
 			// MultiRect fields (motionDetect.roi, crop, privacyMasks) are a list of
 			// "AxBxCxD" regions: render one editable row per region, not a single
@@ -8553,9 +8823,15 @@
 		for (const f of dirty) {
 			let val = f.getValue();
 			sent.set(f, val);
-			// array-typed schema fields (MultiRect: roi/crop/privacyMasks) post as a
-			// list of strings, not a comma-joined scalar.
-			if (f.schema && f.schema.type === 'array')
+			// array-typed schema fields post as a list, not as the single
+			// canonical string the control reduces to for dirty-tracking. Which
+			// list depends on what the schema says an item is: objects for the
+			// destination rows, strings for the MultiRect fields
+			// (roi/crop/privacyMasks).
+			if (f.schema && f.schema.type === 'array'
+					&& f.schema.items && f.schema.items.type === 'object') {
+				try { val = JSON.parse(val); } catch (e) { val = []; }
+			} else if (f.schema && f.schema.type === 'array')
 				val = String(val).split(',').map(s => s.trim()).filter(s => s.length);
 			// null is "remove this key" — see clearsToNull for which emptied
 			// controls mean it and which mean an empty string someone chose.

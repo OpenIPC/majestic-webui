@@ -231,6 +231,14 @@
 	max-width: 20rem;
 }
 
+/* …but not a list of destinations. 20rem is a sensible ceiling for the
+   MultiRect fields the cap was written for — "1920x1080x0x0" needs nothing
+   like it — and it is half an address. A WHIP URL showed as far as its port
+   with the column half empty beside it. Same opt-out .select.mj-wide uses. */
+.array.mj-wide .mj-ctl-in {
+	max-width: none;
+}
+
 /* A boolean's label is a block above the switch now, like every other type's,
    so the wrapper holds the switch and the lit word and nothing else. */
 .boolean .mj-ctl-in {
@@ -6175,4 +6183,83 @@ dialog.mj-modal::backdrop {
 	stroke-width: 1.8;
 	stroke-linecap: round;
 	stroke-linejoin: round;
+}
+
+/* One publishing destination. The rows are a list of addresses the camera
+   pushes to, drawn from the schema's `items`; see mj-servers.js for what a
+   row means. */
+.mj-dest {
+	/* A destination is several controls that belong together, stacked among
+	   other destinations that look exactly like it. Without something saying
+	   where one ends the list reads as one long form, and the Source belonging
+	   to the row above it is a guess. */
+	padding: 0.5rem;
+	margin-bottom: 0.5rem;
+	border-left: 3px solid var(--bs-primary);
+	border-radius: 0.25rem;
+	background-color: rgba(var(--bs-body-color-rgb), 0.04);
+}
+
+/* The protocol, read off the address rather than chosen. Narrow, and the
+   member labels below it match so the boxes still line up: the address is the
+   longest thing in the row and the only one that cannot be guessed from
+   context, so it gets the width. At 7.5rem the badge and the delete button
+   left a 4K WHIP URL showing as far as its port and no further. */
+.mj-dest .mj-dest-proto,
+.mj-dest .mj-dest-name {
+	flex: 0 0 5.5rem;
+	min-width: 5.5rem;
+	font-size: 0.78125rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	display: block;
+	line-height: 1.6;
+}
+
+/* The badge is a word on its own and centres; a member's name reads as a
+   label and starts at the left, so one too long for the column loses its end
+   to the ellipsis rather than both of its ends to a centred overflow. */
+.mj-dest .mj-dest-proto {
+	text-align: center;
+}
+
+/* Flex items refuse to shrink below their content by default, so without this
+   a long address pushes the delete button off the row instead of scrolling
+   inside its own box. */
+.mj-dest .form-control,
+.mj-dest .form-select {
+	min-width: 0;
+}
+
+.mj-dest .mj-dest-del {
+	/* the ×, which has nothing to line up with and should not stretch */
+	flex: 0 0 auto;
+}
+
+/* A destination that is switched off. Greyed rather than hidden or moved: it
+   is still configured, still worth reading, and still one click from being on
+   again — which is the whole reason the switch is per-row. The switch itself
+   keeps its colour, or the control that undoes this would be the hardest
+   thing on the row to find. */
+.mj-dest.mj-dest-off {
+	border-left-color: var(--bs-secondary-color);
+}
+
+/* The address stays lit so the row can still be told from its neighbours, and
+   so does the switch, which is the thing you came to the row to click. */
+.mj-dest.mj-dest-off > .mj-dest-member,
+.mj-dest.mj-dest-off > .hint {
+	opacity: 0.55;
+}
+
+.mj-dest.mj-dest-off > .mj-dest-member.mj-dest-switch {
+	opacity: 1;
+}
+
+/* Something the row is worth being told — an address with no scheme, a scheme
+   the camera does not publish to. Advisory: the camera is the authority, and
+   this never blocks a save. */
+.mj-dest-note {
+	color: var(--bs-warning-text-emphasis);
 }

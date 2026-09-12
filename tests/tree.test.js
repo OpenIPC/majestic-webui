@@ -43,6 +43,11 @@ function allDots(t, schema, exclude) {
 		for (const key of Object.keys(props)) {
 			const dot = base + '.' + key, sub = props[key];
 			if (skip.has(dot) || !sub) continue;
+			// Mirrors mj-tree.js. This walker exists to say what SHOULD be
+			// drawn, so it has to know the same exclusions the tree does, or
+			// the invariant reports a key as drawn nowhere when nowhere is
+			// exactly where it belongs.
+			if (sub['x-hidden']) continue;
 			if (sub.type === 'object' && sub.properties) walk(dot, sub.properties);
 			else if (TREE.RENDERABLE.has(sub.type)) out.push(dot);
 		}
@@ -253,6 +258,47 @@ group('Day / Night: every setting is in a heading or on the pin map');
 	const empty = groups.filter(g => !drawn(g).length).map(g => g.id);
 	check('no heading is left with nothing under it', !empty.length,
 		'empty: ' + empty.join(', '));
+}
+
+group('a list of objects is one leaf, not one per member');
+{
+	// The destination list is `{type:'array', items:{type:'object', ...}}`, and
+	// the members of an item are drawn inside a row rather than as fields of
+	// their own. A walker that recursed into `items.properties` the way it
+	// recurses into a section's would put `url`, `token` and `channel` on the
+	// page as three separate settings on the Outgoing tab, each editing a list
+	// it has no row to belong to. Nothing about that looks wrong until someone
+	// tries to add a second destination.
+	const s = clone(SCHEMA);
+	s.properties.outgoing.properties.servers = {
+		type: 'array',
+		title: 'Destinations',
+		items: {
+			type: 'object',
+			properties: {
+				url: { type: 'string', title: 'Address' },
+				enabled: { type: 'boolean', title: 'Enabled', default: true },
+				token: { type: 'string', title: 'Token', 'x-secret': true },
+				channel: { type: 'string', title: 'Source', enum: ['', 'main', 'sub'] },
+				legacy: { type: 'string', title: 'Superseded', 'x-hidden': true },
+			},
+			required: ['url'],
+		},
+	};
+	// A key the camera declares but has superseded is offered to nobody: the
+	// list replaced the single Address, so drawing both is a question about
+	// which one wins. It stays in the schema for the API's sake, which is why
+	// the tree has to be told rather than left to infer it from absence.
+	s.properties.outgoing.properties.server['x-hidden'] = true;
+	const t = TREE.build(s, {}, new Set());
+	const dots = allDots(t, s, new Set());
+	check('a hidden key is drawn nowhere',
+		dots.indexOf('outgoing.server') < 0);
+	const mine = dots.filter(d => d.indexOf('outgoing.servers') === 0);
+	check('the list itself is drawn', mine.indexOf('outgoing.servers') >= 0);
+	check('and nothing else under it is', mine.length === 1,
+		'also drawn: ' + mine.join(', '));
+	everyKeyOnce('with a destination list', t, s, new Set());
 }
 
 done();
