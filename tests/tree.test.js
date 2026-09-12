@@ -43,6 +43,11 @@ function allDots(t, schema, exclude) {
 		for (const key of Object.keys(props)) {
 			const dot = base + '.' + key, sub = props[key];
 			if (skip.has(dot) || !sub) continue;
+			// Mirrors mj-tree.js. This walker exists to say what SHOULD be
+			// drawn, so it has to know the same exclusions the tree does, or
+			// the invariant reports a key as drawn nowhere when nowhere is
+			// exactly where it belongs.
+			if (sub['x-hidden']) continue;
 			if (sub.type === 'object' && sub.properties) walk(dot, sub.properties);
 			else if (TREE.RENDERABLE.has(sub.type)) out.push(dot);
 		}
@@ -278,8 +283,15 @@ group('a list of objects is one leaf, not one per member');
 			required: ['url'],
 		},
 	};
+	// A key the camera declares but has superseded is offered to nobody: the
+	// list replaced the single Address, so drawing both is a question about
+	// which one wins. It stays in the schema for the API's sake, which is why
+	// the tree has to be told rather than left to infer it from absence.
+	s.properties.outgoing.properties.server['x-hidden'] = true;
 	const t = TREE.build(s, {}, new Set());
 	const dots = allDots(t, s, new Set());
+	check('a hidden key is drawn nowhere',
+		dots.indexOf('outgoing.server') < 0);
 	const mine = dots.filter(d => d.indexOf('outgoing.servers') === 0);
 	check('the list itself is drawn', mine.indexOf('outgoing.servers') >= 0);
 	check('and nothing else under it is', mine.length === 1,

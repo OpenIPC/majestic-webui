@@ -7250,6 +7250,7 @@
 			const dot = basePath + '.' + key;
 			if (EXCLUDE.has(dot)) continue;
 			const sub = props[key];
+			if (sub && sub['x-hidden']) continue; // superseded; see mj-tree.js
 			if (lifted().has(dot)) continue;      // mounted on the Live leaf, beside the picture
 			if (skip && skip.has(dot)) continue;
 			if (isGroup(sub)) {

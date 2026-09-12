@@ -30,7 +30,7 @@
 		rtmp: { name: 'RTMP', token: false },
 		rtmps: { name: 'RTMPS', token: false },
 		udp: { name: 'RTP', token: false },
-		unix: { name: 'Unix socket', token: false },
+		unix: { name: 'UNIX', token: false },
 		http: { name: 'WHIP', token: true },
 		https: { name: 'WHIP', token: true },
 	};

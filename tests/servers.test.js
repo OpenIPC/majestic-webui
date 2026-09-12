@@ -22,7 +22,7 @@ group('the protocol is read off the address');
 check('rtmp is RTMP', S.protocolOf('rtmp://a.example/live/key') === 'RTMP');
 check('rtmps is named separately', S.protocolOf('rtmps://a.example/l/k') === 'RTMPS');
 check('udp is RTP', S.protocolOf('udp://192.168.1.10:5600') === 'RTP');
-check('unix is the socket', S.protocolOf('unix:/tmp/rtpstream.sock') === 'Unix socket');
+check('unix is the socket', S.protocolOf('unix:/tmp/rtpstream.sock') === 'UNIX');
 check('http is WHIP', S.protocolOf('http://mtx.lan:8889/cam/whip') === 'WHIP');
 check('https is WHIP too', S.protocolOf('https://mtx.lan:8889/cam/whip') === 'WHIP');
 

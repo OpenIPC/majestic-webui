@@ -6192,17 +6192,28 @@ dialog.mj-modal::backdrop {
 	background-color: rgba(var(--bs-body-color-rgb), 0.04);
 }
 
-/* The protocol, read off the address rather than chosen: a fixed width keeps
-   the address boxes of a list of destinations aligned with each other. */
-.mj-dest .mj-dest-proto {
-	min-width: 7.5rem;
+/* The protocol, read off the address rather than chosen. Narrow, and the
+   member labels below it match so the boxes still line up: the address is the
+   longest thing in the row and the only one that cannot be guessed from
+   context, so it gets the width. At 7.5rem the badge and the delete button
+   left a 4K WHIP URL showing as far as its port and no further. */
+.mj-dest .mj-dest-proto,
+.mj-dest .mj-dest-member > .input-group-text {
+	flex: 0 0 4.5rem;
+	min-width: 4.5rem;
 	justify-content: center;
 	font-size: 0.78125rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-/* The member labels line up with the badge above them for the same reason. */
-.mj-dest .mj-dest-member > .input-group-text {
-	min-width: 7.5rem;
+/* Flex items refuse to shrink below their content by default, so without this
+   a long address pushes the delete button off the row instead of scrolling
+   inside its own box. */
+.mj-dest .form-control,
+.mj-dest .form-select {
+	min-width: 0;
 }
 
 .mj-dest .mj-dest-del {
