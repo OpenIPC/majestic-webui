@@ -253,6 +253,7 @@ window.MajesticVideo = (function () {
 		}
 
 		function teardownMse() {
+			mjlog('teardownMse (started=' + started + ')'); // #335 diagnostic
 			started = false; queue = [];
 			// The retry and the pending announcement go (disarmPlayGesture), but
 			// NOT gestureArmed: it records that the page is showing the invitation
@@ -318,11 +319,14 @@ window.MajesticVideo = (function () {
 			// Strikes far apart in time are a one-off, not an inability, so a gap
 			// longer than DECODE_RESET_MS starts the count over.
 			var code = video.error && video.error.code;
+			mjlog('onVideoError code=' + code + ' msg=' + ((video.error && video.error.message) || '').slice(0, 80)); // #335 diagnostic
 			if (code === 3) {
 				var now = Date.now();
 				if (now - lastDecodeAt > DECODE_RESET_MS) decodeErrs = 0;
 				lastDecodeAt = now;
+				mjlog('DECODE strike ' + decodeErrs + '+1 / ' + DECODE_MAX); // #335 diagnostic
 				if (++decodeErrs >= DECODE_MAX) {
+					mjlog('DECODE_MAX reached -> software/mjpeg fallback'); // #335 diagnostic
 					onState('mjpeg', 'undecodable ' + (lastCodec || 'h265'));
 					stop();
 					return;
@@ -333,6 +337,30 @@ window.MajesticVideo = (function () {
 		// The element is replaced on every (re)connect, so mute and volume have
 		// to be re-applied — cloneNode does not carry them, and defaulting to
 		// muted would silence the stream the user just asked to hear.
+		// #335 DIAGNOSTIC BUILD -- temporary. Prints the MSE player's timeline to
+		// the browser console so a reporter can capture what a Safari that still
+		// flashes is actually doing. Remove before this is anything but a probe.
+		function mjlog(m) {
+			try { console.log('MJ335 ' + Math.round(performance.now()) + ' ' + m); } catch (e) {}
+		}
+		function bufStr(v) {
+			try {
+				var b = v.buffered, o = [], i;
+				for (i = 0; i < b.length; i++) o.push(b.start(i).toFixed(2) + '-' + b.end(i).toFixed(2));
+				return '[' + o.join(',') + ']';
+			} catch (e) { return '[?]'; }
+		}
+		function diagAttach(v) {
+			['emptied', 'loadstart', 'loadedmetadata', 'durationchange', 'playing',
+				'pause', 'waiting', 'stalled', 'seeking', 'seeked', 'ended', 'error'].forEach(function (ev) {
+				v.addEventListener(ev, function () {
+					mjlog(ev + ' err=' + (v.error && v.error.code || 0) +
+						' ct=' + (+(v.currentTime || 0)).toFixed(2) +
+						' dur=' + v.duration + ' rs=' + v.readyState + ' buf=' + bufStr(v));
+				});
+			});
+		}
+
 		function freshVideo() {
 			const old = video;
 			const nv = old.cloneNode(false);
@@ -353,6 +381,7 @@ window.MajesticVideo = (function () {
 			// truly starts moving (#317); onPlaying ignores the event unless a
 			// gesture was armed, so an ordinary autoplay start costs nothing.
 			video.addEventListener('playing', onPlaying);
+			diagAttach(video); // #335 diagnostic
 		}
 
 		function onInit(info) {
@@ -395,12 +424,17 @@ window.MajesticVideo = (function () {
 			// and its fragments would reach a buffer set up for the old size. A
 			// real reconfigure -- codec, resolution or audio -- takes the rebuild
 			// path below.
+			mjlog('onInit codec=' + info.codec + ' ' + (info.width | 0) + 'x' + (info.height | 0) +
+				' cs=' + info.codecString + ' mime=' + (info.mime || '-')); // #335 diagnostic
 			if (started && sb && ms && ms.readyState === 'open' &&
 					newMime === mime && (info.width | 0) === lastW &&
 					(info.height | 0) === lastH) {
+				mjlog('onInit -> re-announcement, kept running decoder (no rebuild)'); // #335 diagnostic
 				skipInitBinary = true;
 				return;
 			}
+			mjlog('onInit -> REBUILD (mimeEq=' + (newMime === mime) + ' whEq=' +
+				((info.width | 0) === lastW && (info.height | 0) === lastH) + ' started=' + started + ')'); // #335 diagnostic
 			mime = newMime;
 			hevc = /hvc1|hev1/i.test(newMime);
 			lastW = info.width | 0;
@@ -534,6 +568,7 @@ window.MajesticVideo = (function () {
 			} catch (e) {}
 		}
 		function seekLive(start, end) {
+			mjlog('seekLive ct=' + (+video.currentTime).toFixed(2) + ' -> ' + Math.max(start, end - 0.1).toFixed(2) + ' (buf ' + start.toFixed(2) + '-' + end.toFixed(2) + ')'); // #335 diagnostic
 			video.currentTime = Math.max(start, end - 0.1);
 			// Read back rather than assumed: the browser may clamp it, and the
 			// jump itself must not count as the playhead advancing.
@@ -674,6 +709,7 @@ window.MajesticVideo = (function () {
 		}
 
 		function reconnect() {
+			mjlog('reconnect feed=' + feed + ' failCount=' + failCount); // #335 diagnostic
 			// Before the backoff rather than after it: until this socket is
 			// closed the camera is still encoding and sending for it, and the
 			// reconnect is about to ask for a second one. The video element
