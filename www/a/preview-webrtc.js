@@ -80,7 +80,16 @@ window.MajesticWebRTC = (function () {
 		// later never flashes the button (#317).
 		const GESTURE_ANNOUNCE_MS = 500;
 		let gestureRetry = null, gestureArmed = false, gestureTimer = null;
-		const gestureEvs = ['pointerdown', 'touchstart', 'keydown'];
+		// 'click' leads the list because it is the event that actually grants a
+		// muted play() on the first tap: a reporter's standalone player starts on
+		// the first tap of a real button (a click handler calling play()), where
+		// this player's pointerdown retry needed a second tap on Opera for Android
+		// (#317). A trusted click is a stronger activation than pointerdown there.
+		// The others stay -- a pointerdown that does start costs nothing, and
+		// keydown covers the keyboard -- and the retry no longer disarms until the
+		// picture truly plays, so one tap firing pointerdown then click just tries
+		// twice and stops at the one that works.
+		const gestureEvs = ['click', 'pointerdown', 'touchstart', 'keydown'];
 		function disarmGesture() {
 			if (gestureTimer) { clearTimeout(gestureTimer); gestureTimer = null; }
 			if (gestureRetry && typeof document !== 'undefined')

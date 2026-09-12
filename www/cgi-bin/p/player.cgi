@@ -103,6 +103,14 @@ printf '%s' \
 		     other than the on-board one. -->
 		<img id="live-mjpeg" class="mj-stage-media" alt="" style="display:none">
 		<img id="live-mjpeg-b" class="mj-stage-media" alt="" style="display:none">
+		<!-- The still under the tap-to-play button. A WebRTC picture parked
+		     awaiting a gesture is black -- there is no buffered frame to show, as
+		     there is on MSE -- so the button floated over nothing (majestic-webui#317).
+		     preview-page.js points this at the camera's JPEG snapshot while the
+		     button is up (only when jpeg.enabled serves one) and clears it when the
+		     picture plays, so the invitation sits over the scene it will resume.
+		     Hidden until then. -->
+		<img id="mj-snapshot" class="mj-stage-media" alt="" hidden>
 		<!-- Tap-to-play. Some browsers refuse to autoplay even a muted picture
 		     until the page has been interacted with, and Opera for Android parks
 		     it on its first frame without ever rejecting the play() that would

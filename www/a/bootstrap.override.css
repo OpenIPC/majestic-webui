@@ -3131,6 +3131,11 @@ button.mj-osd-chip,
    A tap anywhere on the stage starts playback (the player listens on the
    document); this button is the visible invitation, so it takes the pointer to
    look pressable and passes the gesture straight through. */
+/* The tap-to-play still sits above the (black, paused) video but below the
+   button, so the ▶ reads as being on top of the scene it resumes (#317). */
+#mj-snapshot {
+	z-index: 5;
+}
 .mj-tap-play {
 	position: absolute;
 	top: 50%;

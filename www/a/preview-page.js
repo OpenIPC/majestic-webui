@@ -31,11 +31,19 @@
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), note = $('#mj-note');
 	const tapPlay = $('#mj-tap-play');
+	const snapshot = $('#mj-snapshot');
 	const noteWhy = $('#mj-note-why'), noteAct = $('#mj-note-act');
 	const servedEl = $('#mj-served'), servedWhy = $('#mj-served-why');
 	let jpegOn = false;
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
+		// The invitation can be raised before this fetch resolves (attach wins the
+		// config timeout), and showTapPlay only paints the snapshot when jpegOn is
+		// already known true. So if the button is up now and the answer just came
+		// back true, paint it -- otherwise it sits over black for the whole pause (#317).
+		if (jpegOn && tapPlay && !tapPlay.hidden && snapshot) {
+			try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {}
+		}
 		// Read before the fallback is re-decided below: the codec is what says
 		// whether a socket that gave up is worth handing to the software rung,
 		// and that decision has to be made with the real answer.
@@ -146,8 +154,20 @@
 	// (#317). Shown on the live player's 'gesture' state and hidden on 'resumed';
 	// also hidden by every path that repaints the stage below, so a stale
 	// invitation cannot outlive the picture it was covering.
-	function showTapPlay() { if (tapPlay) tapPlay.hidden = false; }
-	function hideTapPlay() { if (tapPlay) tapPlay.hidden = true; }
+	// While the button is up, put the camera's current JPEG under it, so a WebRTC
+	// picture parked black (no buffered frame, unlike MSE) shows the scene it is
+	// about to resume rather than a void (#317). Only when jpeg.enabled serves a
+	// snapshot; the src is set on show (cache-busted, so it is current) and
+	// cleared on hide so nothing keeps fetching it. A guarded $ lookup, since the
+	// element is absent in the bare-vm player tests.
+	function showTapPlay() {
+		if (snapshot && jpegOn) { try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {} }
+		if (tapPlay) tapPlay.hidden = false;
+	}
+	function hideTapPlay() {
+		if (snapshot) { snapshot.hidden = true; try { snapshot.removeAttribute('src'); } catch (e) {} }
+		if (tapPlay) tapPlay.hidden = true;
+	}
 
 	function showVideo() {
 		// Not hidden here: 'playing' is the pipeline coming up, which is when a
