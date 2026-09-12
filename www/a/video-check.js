@@ -179,18 +179,16 @@
 				title: 'The encoder has stopped',
 				detail: 'The camera is running, but the encoder has stopped ' +
 					'producing frames while everything else looks alive.',
-				// The confirmation travels WITH the action, because the anchor
-				// it lands on is written at runtime and main.js wired
-				// `.confirm` once at load — so the class the banner this
-				// replaced carried would never have been seen, and the link
-				// restarted the camera on one click. Whoever renders a finding
-				// is responsible for asking; both consumers do.
-				act: {
-					href: 'restart.cgi', label: 'Restart camera',
-					confirm: 'Restart the camera now?\n\nSettings are kept. ' +
-						'Video and recording stop for about half a minute ' +
-						'while it comes back.',
-				},
+				// No prompt travels with this action, and it used to. The
+				// anchor a finding lands on is written at runtime, long after
+				// main.js wired `.confirm` at load, so neither consumer could
+				// borrow that wiring and each carried its own confirm() —
+				// which covered a left click and none of the other ways a link
+				// gets followed. restart.cgi asks for itself now: reaching it
+				// with anything but a POST renders the question rather than
+				// rebooting (#442). A finding points at a destination; what
+				// that destination costs is the destination's to ask.
+				act: { href: 'restart.cgi', label: 'Restart camera' },
 				help: HELP,
 			};
 		}

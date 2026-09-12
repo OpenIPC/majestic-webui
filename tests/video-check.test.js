@@ -140,15 +140,16 @@ group('what it does say');
 		hold(st, sample({ venc_empty_frames_run: 40 }), 2), null);
 	check('a stalled encoder is a finding', !!stall && stall.code === 'stall');
 	check('and it offers a restart', !!stall && /restart\.cgi/.test(stall.act.href));
-	// The banner this replaced carried .confirm + data-confirm, which main.js
-	// wires at load — and the anchor it lands on now is written at runtime, so
-	// that wiring would never see it. The prompt travels with the action
-	// instead, or one click restarts the camera.
-	check('and restarting asks first',
-		!!stall && typeof stall.act.confirm === 'string' &&
-		/Restart the camera/.test(stall.act.confirm));
-	check('while a settings link does not ask',
-		!!off && !off.act.confirm);
+	// A finding names a destination and nothing more. It used to carry the
+	// prompt too, because the anchor it lands on is written at runtime and
+	// main.js wires `.confirm` at load, so neither consumer could borrow that
+	// wiring — and a confirm() on a `click` listener guards one gesture rather
+	// than a link anyway. restart.cgi asks for itself now, refusing to reboot
+	// on anything but a POST (#442), so a prompt here would be a second
+	// question asked about the same press.
+	check('no finding carries a prompt of its own any more',
+		[stall, off].every((f) => !f || f.act.confirm === undefined),
+		'a finding still carries a confirm the destination now asks for itself');
 
 	const tr = vc.tracker();
 	const blind = vc.diagnose(BOTH_ON, sample(BLIND), hold(tr, sample(BLIND), 12), null);

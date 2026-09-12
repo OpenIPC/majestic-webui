@@ -176,14 +176,22 @@ group('one vocabulary for the actions, wherever they are written');
 // like one: every action is a button, and the colour says what pressing costs.
 // btn-primary goes to the page that fixes the finding, btn-secondary is a
 // second diagnostic destination beside it, and btn-danger is the press that
-// acts on the camera rather than going anywhere — today one href, restart.cgi,
-// which reboots on GET.
+// acts on the camera rather than going anywhere — today one destination,
+// restart.cgi.
 //
 // btn-danger is the load-bearing one. main.js hangs its confirm() off
 // .btn-danger and .btn-warning, so wearing that class is a promise that
 // pressing does something worth asking about; the recordings banner wore it
 // over a plain navigation and came within one initAll() timing accident of
 // asking "Are you sure?" before letting somebody read a page.
+//
+// An acting action is also not an ANCHOR, and that half is newer (#442). A
+// confirm() on a `click` listener guards one gesture and not a link: a middle
+// click delivers `auxclick` and never `click`, and "Open link in new tab"
+// delivers nothing at all, so an acting anchor is followed without the
+// question by two things people do to menu items every day. Every acting
+// action submits a form instead, and restart.cgi refuses to reboot on
+// anything but a POST, so the two halves cannot disagree.
 //
 // The rule is worth a test rather than a paragraph because it is written in
 // three languages at once — a haserl argument, hand-written .mj-notice-acts
@@ -299,15 +307,27 @@ const groups = walk(WWW).flatMap((f) =>
 
 const found = [];
 groups.forEach((g) => {
-	const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/g;
+	// Both shapes: a destination is an <a> naming its page in href, an action
+	// is a <button> whose page is the action of the form around it. Reading
+	// only anchors would leave the scan blind to every acting call site, which
+	// is the half of the rule it most needs to cover.
+	const re = /<(a|button)\b([^>]*)>([\s\S]*?)<\/\1>/g;
 	let a;
 	while ((a = re.exec(g.html))) {
-		const attrs = a[1], text = a[2].trim();
+		const tag = a[1], attrs = a[2], text = a[3].trim();
 		const cls = (/\bclass="([^"]*)"/.exec(attrs) || ['', ''])[1].split(/\s+/);
-		const href = (/\bhref="([^"]*)"/.exec(attrs) || ['', ''])[1];
-		const page = href.split(/[?#]/)[0].replace(/^.*\//, '');
+		let target;
+		if (tag === 'a') {
+			target = (/\bhref="([^"]*)"/.exec(attrs) || ['', ''])[1];
+		} else {
+			const open = g.html.lastIndexOf('<form', a.index);
+			target = open < 0 ? ''
+				: (/\baction="([^"]*)"/.exec(g.html.slice(open, a.index)) || ['', ''])[1];
+		}
+		const page = target.split(/[?#]/)[0].replace(/^.*\//, '');
 		const where = g.file + ': ' + a[0];
 		const has = (c) => cls.indexOf(c) >= 0;
+		const acts = ACTS_ON_CAMERA.has(page);
 		found.push(g.file + ' ' + page + ' "' + text + '"');
 
 		check(page + ' in ' + g.file + ' is a button', has('btn'),
@@ -315,10 +335,19 @@ groups.forEach((g) => {
 
 		// The confirm() class, spent only where pressing really does something.
 		check(page + ' in ' + g.file + ' asks before it acts, or does not claim to',
-			(has('btn-danger') || has('btn-warning')) === ACTS_ON_CAMERA.has(page),
-			ACTS_ON_CAMERA.has(page)
+			(has('btn-danger') || has('btn-warning')) === acts,
+			acts
 				? where + '\n    acts on the camera without the class that asks first'
 				: where + '\n    navigation wearing the class main.js hangs confirm() off');
+
+		// And it submits rather than links, so the gestures a click listener
+		// never hears cannot reach it either.
+		check(page + ' in ' + g.file + ' submits rather than links, or has nothing to submit',
+			(tag === 'button') === acts,
+			acts
+				? where + '\n    an acting anchor: middle-click and open-in-new-tab ' +
+					'follow it without the question'
+				: where + '\n    plain navigation written as a form submit');
 
 		// An arrow said what the button shape already says, so it went (#347).
 		// Pinned so it cannot creep back one banner at a time.

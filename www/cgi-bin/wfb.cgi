@@ -409,7 +409,7 @@ update_wfbinfo
             </form>
             <hr class="my-3">
             <p class="small text-secondary mb-2">Reboot to apply new WFB settings.</p>
-            <a class="btn btn-sm btn-outline-secondary confirm" href="restart.cgi">Restart camera</a>
+            <form method="post" action="restart.cgi" class="d-inline"><button type="submit" class="btn btn-sm btn-outline-secondary confirm" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</button></form>
         </div></div>
     </div>
 

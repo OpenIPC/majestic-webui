@@ -322,7 +322,7 @@ if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ]; } && [ "$pagename"
     where a flag would go on saying "waiting for a restart" about a change
     that had since been undone. %>
 <% if [ -e /tmp/system-reboot ] || [ -n "$restart_pending" ]; then %>
-<% notice warn '<b>Settings are waiting for a restart</b> &mdash; video and recording stop for about half a minute while the camera comes back.' '<a class="btn btn-sm btn-danger" href="restart.cgi" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</a>' %>
+<% notice warn '<b>Settings are waiting for a restart</b> &mdash; video and recording stop for about half a minute while the camera comes back.' '<form method="post" action="restart.cgi" class="d-inline"><button type="submit" class="btn btn-sm btn-danger confirm" data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back.">Restart camera</button></form>' %>
 <% fi %>
 
 <% if [ -z "$hide_title" ]; then %><h2><%= $page_title %></h2><% fi %>
