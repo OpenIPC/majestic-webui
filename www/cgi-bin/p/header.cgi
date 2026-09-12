@@ -119,6 +119,29 @@ Pragma: no-cache
 							<li><h6 class="dropdown-header">Maintenance</h6></li>
 							<li><a class="dropdown-item" href="update.cgi"><% page_label update %></a></li>
 							<li><a class="dropdown-item" href="backup.cgi"><% page_label backup %></a></li>
+							<%# The one item in this bar that ACTS rather than goes somewhere:
+							    following it reboots the camera. Hence the confirm, whose
+							    wording is the same sentence the pending-changes banner and
+							    the Backup page ask, and the colour -- a menu whose every
+							    other item is navigation should not hide a restart among
+							    them looking identical.
+
+							    It is a FORM rather than a link, and that is the part that
+							    is load-bearing rather than tidy. main.js hangs its
+							    confirm() off the `click` event, and a middle click fires
+							    `auxclick` and never `click`, while "Open link in new tab"
+							    fires nothing at all -- both were measured. As an <a> this
+							    entry would therefore reboot the camera, with no question
+							    asked, for anyone who opened a menu item the way they open
+							    every other menu item. A button has no URL to open in a new
+							    tab, none to prefetch or restore with a tab, and nothing to
+							    middle-click. %>
+							<li>
+								<form action="restart.cgi" method="post">
+									<button type="submit" class="dropdown-item confirm text-danger"
+											data-confirm="Restart the camera now?&#10;&#10;Settings are kept. Video and recording stop for about half a minute while it comes back."><% page_label restart %></button>
+								</form>
+							</li>
 							<li><h6 class="dropdown-header">Diagnostics</h6></li>
 							<li><a class="dropdown-item" href="logs.cgi"><% page_label logs %></a></li>
 							<li><a class="dropdown-item" href="console.cgi"><% page_label console %></a></li>

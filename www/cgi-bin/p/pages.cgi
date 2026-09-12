@@ -36,6 +36,7 @@ page_label() {
 	access)         printf '%s' "Access" ;;
 	update)         printf '%s' "Update" ;;
 	backup)         printf '%s' "Backup &amp; Restore" ;;
+	restart)        printf '%s' "Restart camera" ;;
 	logs)           printf '%s' "Logs" ;;
 	console)        printf '%s' "Console" ;;
 	files)          printf '%s' "File Manager" ;;
