@@ -6089,11 +6089,50 @@
 
 	function nightCfg() { return (state.config && state.config.nightMode) || {}; }
 
+	// The settings whose value decides what the filter test measures: which pad
+	// each coil is on, whether one pad drives the filter and which level means
+	// night there, and whether the daemon drives the filter at all. Narrower
+	// than the map's whole set on purpose — moving the daylight sensor changes
+	// nothing about a pulse, and a blocker that fires on it is one that gets
+	// read past.
+	const TEST_DEPENDS = [
+		'nightMode.irCutPin1', 'nightMode.irCutPin2',
+		'nightMode.irCutSingleInvert', 'nightMode.irCutEnabled',
+	];
+	function wiringStaged() {
+		return state.fields.some((f) => TEST_DEPENDS.indexOf(f.dot) >= 0 &&
+			f.getValue() !== state.initial[f.dot]);
+	}
+
 	// Why the button cannot run, or null. Each reason is specific: a disabled
 	// control that will not say what it wants is the thing this whole panel
 	// exists to stop being.
 	function testBlocker() {
 		const nm = nightCfg();
+		// FIRST, because everything below it reads the configuration the camera
+		// is running and this is the case where that is not what is on screen.
+		//
+		// The pin map only STAGES: it writes into the hidden fields and raises
+		// the save bar, while the camera goes on driving the coils it was
+		// already given. A test started now pulses the OLD pair and returns a
+		// verdict about it — and the verdict is then stamped with the STAGED
+		// assignment (`state.ircutTestedOn = fieldAssign()`), so syncVerdict()
+		// finds nothing changed since and leaves it standing as though it
+		// described what you can see.
+		//
+		// Measured on an hi3516ev300 wired 11 opening / 10 closing: swap the
+		// two on the map, do not save, press Test — and the page answers "The
+		// IR-cut filter is wired correctly" about an assignment that is
+		// backwards and has never been on the camera. A wrong verdict that
+		// reads as reassurance is the worst thing this panel can produce. The
+		// rule was already written down for the sweep's own disabled tooltip
+		// ("Set the coils by hand on the pin map, Save, then Test"); it had
+		// simply never reached the button it matters most on.
+		if (wiringStaged())
+			return 'The wiring on the pin map has not been saved yet. This test ' +
+				'moves the filter on the camera, which is still driving the coils ' +
+				'it was given before — so save first, or the verdict is about the ' +
+				'wiring you have just replaced.';
 		if (!isNumish(nm.irCutPin1))
 			return 'Nothing is connected to the filter yet, so there is nothing to test.';
 		// Parked outranks wired: the daemon refuses to move a parked filter,
@@ -6177,6 +6216,10 @@
 		first: 'Reading the picture…',
 		toggle: 'Moving the filter…',
 		second: 'Reading it again…',
+		// Only ever reached when the first two frames agreed, which is the one
+		// case two frames cannot decide.
+		again: 'The picture did not change — moving it the other way…',
+		third: 'Reading it once more…',
 		restore: 'Putting the filter back…',
 	};
 
@@ -6230,7 +6273,23 @@
 				? '<b>The filter could not be put back.</b> It is still in the ' +
 				'position the test left it in &mdash; use the IR-cut switch on ' +
 				'Live adjustments to move it back. The test itself found: '
-				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail);
+				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail) +
+				// Said after the verdict, because it explains why the test took
+				// an extra move rather than changing what it found. The camera
+				// keeps a RECORD of where the filter is and cannot see it, so
+				// changing which pads the coils are on leaves that record
+				// describing a position reached under the old assignment. The
+				// first move then went where the filter already was and nothing
+				// changed; the second proved it moves and put the two back in
+				// step. Worth saying because the day/night switch was wrong
+				// until this ran, and would have been until a restart.
+				(out.resynced
+					? ' <span class="d-block mt-1">The first move changed nothing: ' +
+					'the camera’s record of where the filter was did not match ' +
+					'where it actually was, which is what changing the coils leaves ' +
+					'behind. Moving it again proved it works and put the two back in ' +
+					'step, so day and night are the right way round from now on.</span>'
+					: '');
 			result.hidden = false;
 			state.ircutTestedOn = testedOn;
 			// Edited while the probe ran: the verdict describes wiring that is
@@ -6241,8 +6300,20 @@
 			// A test that could not finish reports that it could not finish. It
 			// must never fall through to a verdict — half a measurement is not
 			// evidence about the filter.
-			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
-				'. The filter was left where it started.';
+			// Where the filter is, said only as far as it is known. A run that
+			// drove nothing left it alone and can say so. A run that drove it
+			// and then failed cannot: the restore is skipped on an even number
+			// of moves because the camera's RECORD is back where it began, and
+			// in the out-of-step case that record was the thing that was wrong
+			// — the filter really can be in the opposite position. Promising
+			// otherwise is how somebody walks away from a camera that has been
+			// left magenta.
+			result.textContent = 'The test could not finish: ' +
+				(e && e.message ? e.message : e) + '. ' +
+				(e && e.moves ? 'It had already started moving the filter, so ' +
+					'that may not be where it was — the picture says which, and ' +
+					'the IR-cut switch on Live adjustments moves it back.'
+					: 'The filter was not moved.');
 			result.hidden = false;
 			// A camera that cannot take a still cannot run this test at all, so
 			// the refusal is remembered and the button says it instead of
@@ -8605,6 +8676,13 @@
 		// and the four pin fields directly, which is the path that matters when
 		// the pad map could not be read and they are exposed as plain numbers.
 		syncVerdict();
+		// And the same edits decide whether the filter test may run at all: it
+		// measures the camera, so it must stand down the moment the screen and
+		// the camera stop agreeing about the wiring. Hung off the funnel rather
+		// than off the map's own onChange, for the reason above — the pin
+		// fields are editable directly on a camera whose pad list could not be
+		// read, and that is exactly the camera nobody is watching this on.
+		syncTestBtn();
 	}
 
 	// One visibility rule for both buttons: show each only while its action can

@@ -703,16 +703,52 @@
 	// correctly" has left a camera magenta in daylight — precisely the fault
 	// this feature exists to find. The verdict is still returned, with
 	// `restored: false` beside it, and the caller has to say so.
+	// TWO FRAMES CANNOT TELL A STUCK FILTER FROM A CAMERA THAT HAS LOST TRACK OF
+	// IT, and the difference is the whole verdict. `io.state()` is the daemon's
+	// record of where the filter is, and it is a record rather than a
+	// measurement: nothing on the camera can see the filter. Change which pads
+	// the coils are on and that record survives, describing a position reached
+	// under the old assignment — so the next drive to the "other" position can
+	// put the pads exactly where the filter already is, nothing moves, and both
+	// captures come back identical. Reported as "stuck", on correct wiring and a
+	// working filter, with advice pointing at the one thing that is not wrong.
+	//
+	// Reproduced on an hi3516ev300 wired 11 opening / 10 closing: drive the pads
+	// open by hand while the daemon still says day, run the test, and it answers
+	// "The filter did not move — it is stuck open. Both positions gave a magenta
+	// picture, so the pulse is not reaching the solenoid."
+	//
+	// One more trial separates them, and the parity is the elegant part. Two
+	// agreeing frames are followed by a second toggle:
+	//
+	//   it moves     the filter was fine and the record was out of step. The
+	//                drive has just put the two back IN step, so the second and
+	//                third frames are honestly labelled and give a real verdict.
+	//   it does not  nothing the daemon does reaches the filter. Stuck, as said.
+	//
+	// And an even number of toggles leaves the daemon's record where it began
+	// while the filter now genuinely matches it — so that path wants no restore
+	// at all, where the ordinary one-toggle path does. Hence a count rather than
+	// a flag: the restore is owed on an odd number of moves and on no other.
 	function probe(io, startIrcut) {
 		const settle = io.settleMs || 1500;
-		let moved = false;
+		let toggles = 0;
 		const step = (s) => { if (io.onStep) io.onStep(s); };
 
 		const restore = () => {
-			if (!moved) return Promise.resolve(true);
+			if (toggles % 2 === 0) return Promise.resolve(true);
 			step('restore');
 			return io.toggle().then(() => true, () => false);
 		};
+
+		// `resynced` is not a detail of how the answer was reached — it is the
+		// answer to a second question the caller has to pass on, because the
+		// camera was lying about where its filter was and has only just stopped.
+		const done = (v, day, other, resynced) =>
+			restore().then((ok) => ({
+				verdict: v, day: day, other: other, restored: ok,
+				resynced: !!resynced,
+			}));
 
 		const where = io.state
 			? Promise.resolve().then(io.state).catch(() => null)
@@ -727,7 +763,7 @@
 				.then((first) => {
 					step('toggle');
 					return io.toggle()
-						.then(() => { moved = true; return io.wait(settle); })
+						.then(() => { toggles++; return io.wait(settle); })
 						.then(() => { step('second'); return io.snap(); })
 						.then((second) => ({ first: first, second: second }));
 				})
@@ -737,10 +773,85 @@
 					const day = start ? pair.second : pair.first;
 					const other = start ? pair.first : pair.second;
 					const v = verdict(day, other);
-					return restore().then((ok) => ({
-						verdict: v, day: day, other: other, restored: ok,
-					}));
-				}, (err) => restore().then(() => { throw err; }));
+					// Anything but two agreeing frames is already decided: the
+					// filter demonstrably moved, or neither frame said enough to
+					// judge and a third would not either.
+					if (v.id !== 'stuck-open' && v.id !== 'stuck-closed')
+						return done(v, day, other);
+
+					step('again');
+					return io.toggle()
+						.then(() => { toggles++; return io.wait(settle); })
+						.then(() => { step('third'); return io.snap(); })
+						.then((third) => {
+							// A DIFFERENCE IS NOT MOVEMENT UNLESS BOTH FRAMES
+							// SAY SOMETHING. look() maps a frame it cannot read
+							// — too dark, too few usable pixels, caught
+							// mid-swing — to 'none', and 'none' differs from
+							// 'open' without telling us anything at all.
+							// Counting that as movement would claim the filter
+							// works and the record is back in step on the
+							// strength of a frame nobody could read, which is
+							// the one thing this whole file refuses to do.
+							//
+							// Both frames reaching this point: `second` is
+							// always decisive, because the branch is only
+							// entered when the first two agreed AND agreed on a
+							// verdict, which needs both readable. So only the
+							// third can be 'none'.
+							const decisive = look(third) !== 'none';
+
+							// Two readable frames that agree, taken either side
+							// of opposite drives. Nothing a record-keeping error
+							// can produce — the filter is stuck, as said.
+							if (decisive && look(third) === look(pair.second))
+								return done(v, day, other);
+
+							// Labelled by a gauge that is telling the truth
+							// again: the drive that produced `third` put the
+							// record back in step, so `second` sits at the
+							// position opposite to `start` and `third` at
+							// `start`.
+							const d2 = start ? pair.second : third;
+							const o2 = start ? third : pair.second;
+							// An unreadable third frame drops through here too,
+							// and lands on 'Not enough light to tell' by
+							// construction, since verdict() needs both sides to
+							// say something. That is the honest answer: the two
+							// agreeing frames cannot mean 'stuck' any more —
+							// the assumption behind that reading is exactly what
+							// this trial exists to test — and the trial came
+							// back unreadable. What must NOT follow is the
+							// resync claim, hence the flag rather than a
+							// constant.
+							return done(verdict(d2, o2), d2, o2, decisive);
+						});
+				})
+				// A trailing catch, NOT the second argument of the .then above.
+				// That form only sees rejections from the stages BEFORE it, and
+				// the extra trial now lives inside that handler — so a toggle or
+				// a snapshot failing in there sailed straight past the restore
+				// and left the filter wherever the last drive put it.
+				.catch((err) => restore().then(() => {
+					// How many drives actually went out, so the caller can stop
+					// asserting where the filter is when it cannot know.
+					//
+					// The even count is the trap: two drives leave the RECORD
+					// where it began, so restore() correctly does nothing — but
+					// in the very condition this trial exists for, the first
+					// drive moves nothing and the second moves the filter. A
+					// third snapshot that then fails leaves it in the opposite
+					// physical position. On a camera whose record said night
+					// over a closed filter, that is daylight rendered magenta
+					// under a sentence promising nothing had moved.
+					//
+					// Guarded, because a rejection is not required to be an
+					// object and assigning to a primitive throws under strict
+					// mode — which would replace the real failure with a
+					// TypeError about the report of it.
+					if (err && typeof err === 'object') err.moves = toggles;
+					throw err;
+				}));
 		});
 	}
 
