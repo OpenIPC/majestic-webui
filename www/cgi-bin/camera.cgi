@@ -15,8 +15,22 @@ hide_title=1
 # the section of that name rather than the group, which is a different page.
 label="$GET_tab"
 
+# Everything this escapes lands inside <script type="application/json">, which
+# is a RAW TEXT element: the HTML parser looks for `</script` in it and stops
+# there, without caring that it is inside a JSON string. So escaping quotes and
+# backslashes is not enough — a value containing `</script>` closes the block
+# early and whatever follows is parsed as markup in an administrator's page.
+#
+# `<` becomes its \u escape, which JSON.parse reads straight back as `<` and
+# the HTML parser can no longer see. Done in the one helper every field goes
+# through rather than at the four call sites: the font paths come from
+# filenames on a writable filesystem and `soc` from the boot loader's
+# environment, and the next field added here will have the same problem.
+#
+# Order matters and is the order below: backslashes double FIRST, so the ones
+# this rule introduces are not doubled again.
 mj_json_escape() {
-	sed 's/\\/\\\\/g; s/"/\\"/g'
+	sed 's/\\/\\\\/g; s/"/\\"/g; s/</\\u003c/g'
 }
 
 labels=$(sed -n 's/^mj_\([A-Za-z0-9]*\)=\(.*\)/"\1":"\2"/p' j/locale.cgi 2>/dev/null | paste -sd,)

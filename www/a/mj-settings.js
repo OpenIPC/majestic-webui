@@ -6112,12 +6112,22 @@
 		// 503. Nothing readable answers that question in advance (the metrics
 		// count requests and responses, so a camera nobody has asked looks
 		// exactly like one that works), so the first press is what finds out —
-		// and after it, the camera's own sentence stands here rather than the
-		// button inviting the identical failure again. Cleared by refresh(),
-		// since a save is the thing most likely to have freed the scaler.
-		if (state.ircutNoSnap)
-			return 'This camera could not produce a still picture for the test: ' +
-				state.ircutNoSnap;
+		// and after it this stands here rather than the button inviting the
+		// identical failure again. Cleared on arriving at this section and by
+		// refresh(), so a camera that was only briefly busy is one navigation
+		// or one save away from being asked again.
+		//
+		// The status is printed and the body is QUOTED rather than asserted.
+		// What came back is only probably majestic's: a proxy, a captive portal
+		// or anything else in the way can answer a short error of its own, and
+		// this panel must not dress that up as the camera's own diagnosis. The
+		// status is the part we do know.
+		if (state.ircutNoSnap) {
+			const s = state.ircutNoSnap;
+			return 'The test reads a still picture and this camera did not ' +
+				'return one (HTTP ' + s.status + ').' +
+				(s.reason ? ' The reply said: “' + s.reason + '”' : '');
+		}
 		// The monitor re-drives the filter on its own schedule, and a snapshot
 		// taken after it had snapped the filter back would read as "it never
 		// moved" — convicting a correctly wired camera. Refusing to run beats
@@ -6234,12 +6244,15 @@
 			result.textContent = 'The test could not finish: ' + (e && e.message ? e.message : e) +
 				'. The filter was left where it started.';
 			result.hidden = false;
-			// A camera that cannot take a still cannot run this test at all, and
-			// that is a standing condition rather than a bad moment — so it is
-			// remembered and the button says it, instead of standing ready to
-			// fail the same way on the next press.
+			// A camera that cannot take a still cannot run this test at all, so
+			// the refusal is remembered and the button says it instead of
+			// standing ready to fail the same way on the next press. Both
+			// halves are kept: the status, which is a fact about the exchange,
+			// and the body, which is only probably the camera's. `reason` is
+			// absent where refusal() could not reduce the body to one plain
+			// sentence, and the wording above drops the quotation with it.
 			if (e && e.snapshot) {
-				state.ircutNoSnap = e.reason || ('HTTP ' + e.status);
+				state.ircutNoSnap = { status: e.status, reason: e.reason || null };
 			}
 			state.ircutTestedOn = testedOn;
 			// Edited while the probe ran: the verdict describes wiring that is
@@ -6620,6 +6633,15 @@
 
 	function ircutPanel(sec) {
 		if (sec !== 'nightMode' || !IRCUT) return null;
+		// A refused snapshot blanks the Test button until something says to ask
+		// again, and arriving on this section is one of the two things that
+		// does (refresh(), after a save, is the other). Without this the memory
+		// outlived its cause: a camera that was merely busy for one request
+		// kept the button greyed for the rest of the visit, with no way back to
+		// it but saving something unrelated. Leaving and returning is a cheap,
+		// obvious retry, so the blocker never has to guess which HTTP statuses
+		// are transient and which are standing.
+		state.ircutNoSnap = null;
 		const box = el('div', 'mj-ircut');
 		box.innerHTML =
 			'<div id="mj-ircut-findings"></div>' +
@@ -8739,11 +8761,13 @@
 		// The pads are only half of it; the role list is drawn from onChange,
 		// which `quiet` just skipped.
 		if (state.ircutRoles) state.ircutRoles();
-		// A refused snapshot is a fact about the encoder, and the encoder is
-		// what a save can have just changed — turning a substream off, or
-		// raising the main stream to the sensor's own size, is exactly how the
-		// scaler that was missing comes back. Ask again rather than hold the
-		// refusal over a camera that has since been fixed.
+		// A refused snapshot is usually a fact about the encoder, and the
+		// encoder is what a save can have just changed — turning a substream
+		// off, or raising the main stream to the sensor's own size, is exactly
+		// how the scaler that was missing comes back. Ask again rather than
+		// hold the refusal over a camera that has since been fixed. Mounting
+		// the section clears it too, which is what keeps a merely-busy moment
+		// from greying the button for the rest of the visit.
 		state.ircutNoSnap = null;
 		syncLegacy();
 		syncTestBtn();

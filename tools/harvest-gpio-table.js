@@ -62,8 +62,14 @@ function pads(cell) {
 	return out;
 }
 
-const coils = {};   // soc -> [[a,b], …]
+const coils = {};   // soc -> [[a,b], …] the pairs to try first
 const busy = {};    // soc -> Set of pads the table names as something else
+// soc -> Set of every pad named in a COIL column on any board with this part,
+// which is a superset of the pads in `coils`: a cell may name two, and a
+// single-coil board names one without making a pair at all. This is what the
+// busy list is filtered against, so it has to be the wider set — a pad left out
+// of it is a coil that gets scanned last on its own hardware.
+const safe = {};
 const rows = { total: 0, kept: 0 };
 
 let head = null;
@@ -88,10 +94,15 @@ md.split('\n').forEach((line) => {
 		const p = pads(cell);
 		if (!p.length) return;
 		if (COIL_COLS.indexOf(col) >= 0) {
+			// The PAIR takes the first pad, because a pair is two pads and a
+			// cell naming more does not say which of them the other column is
+			// wired against. But EVERY pad named in a coil column goes into
+			// `safe`: a cell reading `60/59` says both are coils on that
+			// board, and a pad that is a coil anywhere must never be demoted
+			// on a board that calls it something else.
 			pair[COIL_COLS.indexOf(col)] = p[0];
-			// A board listing two pads in one coil column still puts both
-			// beyond demotion — either may be a coil somewhere.
-			p.forEach((n) => { (coils[soc] = coils[soc] || []); });
+			safe[soc] = safe[soc] || new Set();
+			p.forEach((n) => safe[soc].add(n));
 		} else if (SOC_COLS.indexOf(col) < 0) {
 			busy[soc] = busy[soc] || new Set();
 			p.forEach((n) => busy[soc].add(n));
@@ -102,15 +113,6 @@ md.split('\n').forEach((line) => {
 		if (!coils[soc].some((q) => q[0] === pair[0] && q[1] === pair[1]))
 			coils[soc].push([pair[0], pair[1]]);
 	}
-	// A single-coil board still tells us that pad is a coil, which is enough to
-	// keep it off the busy list even though it names no pair.
-	if (pair[0] !== undefined || pair[1] !== undefined) {
-		coils[soc] = coils[soc] || [];
-		coils[soc].single = coils[soc].single || new Set();
-		[pair[0], pair[1]].forEach((n) => {
-			if (n !== undefined) coils[soc].single.add(n);
-		});
-	}
 });
 
 // A pad that is a coil on ANY board with this part is never demoted on any
@@ -119,11 +121,9 @@ md.split('\n').forEach((line) => {
 // scan, a promoted reset line costs the camera. Coils win.
 const out = {};
 Object.keys(busy).concat(Object.keys(coils)).forEach((soc) => {
-	const safe = new Set();
-	((coils[soc] || []).single || new Set()).forEach((n) => safe.add(n));
-	(coils[soc] || []).forEach((q) => { safe.add(q[0]); safe.add(q[1]); });
+	const keep = safe[soc] || new Set();
 	const b = Array.from(busy[soc] || new Set())
-		.filter((n) => !safe.has(n))
+		.filter((n) => !keep.has(n))
 		.sort((x, y) => x - y);
 	const c = (coils[soc] || []).map((q) => [q[0], q[1]]);
 	if (!b.length && !c.length) return;
