@@ -61,10 +61,17 @@
 	// series set, so a pad and its row in the list always agree.
 	const ROLES = [
 		// Which coil is which is majestic's to say, not ours, and it is the
-		// opposite of what reads naturally from the key names. Switch a camera
-		// to night and the pad named irCutPin1 is the one that goes high —
-		// and night is the filter swung OUT of the light path. So irCutPin1 is
-		// the OPENING coil and irCutPin2 the closing one.
+		// opposite of what reads naturally from the key names. With BOTH coils
+		// assigned — the pair these two labels are about — switching a camera
+		// to night raises irCutPin1 and lowers irCutPin2, and night is the
+		// filter swung OUT of the light path. So irCutPin1 is the OPENING coil
+		// and irCutPin2 the closing one.
+		//
+		// Said of the PAIR deliberately. One assigned coil is a different mode:
+		// the camera then holds that single pad at a level, and the polarity
+		// chip beside it chooses which level means night — so on such a board
+		// night can hold irCutPin1 LOW. A blanket "night raises irCutPin1"
+		// would be false on exactly the cameras this map has to describe.
 		//
 		// Measured, not read, on the 85H50AI these were written against, whose
 		// config is irCutPin1=11 / irCutPin2=10: driving pad 11 high against 10

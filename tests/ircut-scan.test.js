@@ -433,10 +433,10 @@ group('run: it finds the pair, and only the pair');
 	// was inverted (#273).
 	//
 	// It is invisible by construction. A swapped label renders perfectly and
-	// reads plausibly; the only way to know is to watch a camera — switch it to
-	// night and irCutPin1 is the pad that goes high, while night is the filter
-	// swung out of the light path. So the check is written here, where the
-	// measurement is, rather than trusted to a reader of either file alone.
+	// reads plausibly; the only way to know is to watch a camera — with both
+	// coils assigned, switching to night raises irCutPin1, and night is the
+	// filter swung out of the light path. So the check is written here, where
+	// the measurement is, rather than trusted to a reader of either file alone.
 	function eleventh() {
 		group('the measured pad and the name on its field are one fact');
 		const map = require(path.join(__dirname, '..', 'www', 'a', 'ircut-map.js'));
