@@ -6206,7 +6206,7 @@ dialog.mj-modal::backdrop {
    context, so it gets the width. At 7.5rem the badge and the delete button
    left a 4K WHIP URL showing as far as its port and no further. */
 .mj-dest .mj-dest-proto,
-.mj-dest .mj-dest-member > .input-group-text {
+.mj-dest .mj-dest-name {
 	flex: 0 0 5.5rem;
 	min-width: 5.5rem;
 	font-size: 0.78125rem;
@@ -6235,6 +6235,26 @@ dialog.mj-modal::backdrop {
 .mj-dest .mj-dest-del {
 	/* the ×, which has nothing to line up with and should not stretch */
 	flex: 0 0 auto;
+}
+
+/* A destination that is switched off. Greyed rather than hidden or moved: it
+   is still configured, still worth reading, and still one click from being on
+   again — which is the whole reason the switch is per-row. The switch itself
+   keeps its colour, or the control that undoes this would be the hardest
+   thing on the row to find. */
+.mj-dest.mj-dest-off {
+	border-left-color: var(--bs-secondary-color);
+}
+
+/* The address stays lit so the row can still be told from its neighbours, and
+   so does the switch, which is the thing you came to the row to click. */
+.mj-dest.mj-dest-off > .mj-dest-member,
+.mj-dest.mj-dest-off > .hint {
+	opacity: 0.55;
+}
+
+.mj-dest.mj-dest-off > .mj-dest-member.mj-dest-switch {
+	opacity: 1;
 }
 
 /* Something the row is worth being told — an address with no scheme, a scheme

@@ -108,6 +108,25 @@
 		return SCOPED.indexOf(prop) < 0 ? true : !!known[prop];
 	}
 
+	// One member, in the type the schema declared for it.
+	//
+	// Every control on a settings page answers in strings — a checkbox's
+	// .value is "on" whether it is ticked or not, a number input's is text —
+	// and the camera type-checks each member of a stored element against what
+	// `items` says, answering 400 for a string where it wanted an integer or
+	// a boolean. So the conversion has to happen before the row is canonical,
+	// not on the way out of the POST.
+	//
+	// `raw` is what the control gave: a boolean from a checkbox's .checked,
+	// text from everything else. An empty number box stays the empty string
+	// rather than becoming 0 or NaN — that is how a row says it named no
+	// value, tidy() drops it, and the camera answers from its own default.
+	function memberValue(type, raw) {
+		if (type === 'boolean') return !!raw;
+		if (type === 'integer') return raw === '' ? '' : Number(raw);
+		return raw;
+	}
+
 	// One row, tidied: strings trimmed, empties dropped, nothing invented.
 	//
 	// An absent member and an empty one are the same thing to the camera — the
@@ -171,8 +190,16 @@
 			// what goes there, and normalise() drops it if they never do.
 			// Worth saying only once the row carries something else, where
 			// the missing address is the reason none of it will be used.
-			const others = Object.keys(tidy(row)).filter(k => k !== 'url');
-			return others.length
+			// What somebody typed, which is a string or a number. A switch
+			// is neither: every row carries one, so counting it would make
+			// this fire on a row that has just been added and holds nothing
+			// at all.
+			const t = tidy(row);
+			const typed = Object.keys(t).filter(function (k) {
+				return k !== 'url'
+					&& (typeof t[k] === 'string' || typeof t[k] === 'number');
+			});
+			return typed.length
 				? 'This destination has no address, so none of it is used.'
 				: '';
 		}
@@ -187,6 +214,7 @@
 
 	const api = {
 		schemeOf: schemeOf, protocolOf: protocolOf, applies: applies,
+		memberValue: memberValue,
 		tidy: tidy, normalise: normalise, canon: canon, says: says,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;

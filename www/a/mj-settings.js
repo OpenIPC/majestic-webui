@@ -8152,15 +8152,23 @@
 				+ '+ Add destination</button>';
 			control = p.querySelector('.mj-dests');
 
-			const rowsOf = () => Array.from(control.querySelectorAll('.mj-dest'))
-				.map(r => {
-					const o = {};
-					members.forEach(m => {
-						const f = r.querySelector('[data-member="' + m + '"]');
-						if (f) o[m] = f.value;
-					});
-					return o;
+			// A member leaves here in the type `items` declares for it, which
+			// is mj-servers.js's job — see memberValue() there for why a
+			// string would be a 400.
+			const readRow = (r) => {
+				const o = {};
+				members.forEach(m => {
+					const f = r.querySelector('[data-member="' + m + '"]');
+					if (!f) return;
+					const t = (props[m] || {}).type;
+					const raw = f.type === 'checkbox' ? f.checked : f.value;
+					o[m] = SRV ? SRV.memberValue(t, raw) : raw;
 				});
+				return o;
+			};
+
+			const rowsOf = () => Array.from(control.querySelectorAll('.mj-dest'))
+				.map(readRow);
 
 			// Redraw what depends on the address: the protocol badge, which
 			// members this row uses, and anything the row is worth being told.
@@ -8179,15 +8187,16 @@
 				});
 				const note = row.querySelector('.mj-dest-note');
 				if (note && SRV) {
-					const o = {};
-					members.forEach(m => {
-						const f = row.querySelector('[data-member="' + m + '"]');
-						if (f) o[m] = f.value;
-					});
-					const said = SRV.says(o);
+					const said = SRV.says(readRow(row));
 					note.textContent = said;
 					note.hidden = said === '';
 				}
+				// A destination that is off is still configured, and still
+				// worth reading — it is greyed rather than hidden, so the
+				// list shows what the camera is doing at a glance without
+				// losing what it would do if switched back on.
+				const on = row.querySelector('[data-member="enabled"]');
+				row.classList.toggle('mj-dest-off', !!on && !on.checked);
 			};
 
 			const onChange = (row) => { repaint(row); updateDirty(); };
@@ -8231,7 +8240,10 @@
 					const wrap = el('div', 'mj-dest-member');
 					wrap.setAttribute('data-for', m);
 					const line = el('div', 'input-group input-group-sm mt-1');
-					const name = el('span', 'input-group-text');
+					// Named, not positional: the width rule that lines these
+					// up with the protocol badge has to find the label and
+					// not whatever else a member's control puts in the group.
+					const name = el('span', 'input-group-text mj-dest-name');
 					name.textContent = prop.title || m;
 					// The column is narrow on purpose, so a name that does not
 					// fit is readable on hover rather than only guessable.
@@ -8263,6 +8275,20 @@
 							o.textContent = cur + ' (unsupported)';
 							f.appendChild(o);
 						}
+					} else if (prop.type === 'boolean') {
+						// The switch sits where every other member's control
+						// sits, so the label column stays a column. Bootstrap
+						// wants the checkbox inside something with a height
+						// of its own or it collapses against the group.
+						const box = el('span', 'input-group-text');
+						f = el('input', 'form-check-input mt-0');
+						f.type = 'checkbox';
+						box.appendChild(f);
+						line.appendChild(box);
+						// Marked by what it is rather than by its name, so a
+						// row drawn greyed-out because it is switched off
+						// leaves the switch itself lit.
+						wrap.classList.add('mj-dest-switch');
 					} else if (prop.type === 'integer') {
 						// A number, typed with the keyboard a number wants and
 						// with whatever bounds the camera declared. Left empty
@@ -8284,9 +8310,19 @@
 					}
 					f.setAttribute('data-member', m);
 					f.setAttribute('aria-label', prop.title || m);
-					f.value = v[m] != null ? String(v[m]) : '';
-					if (prop['x-placeholder']) f.placeholder = prop['x-placeholder'];
-					line.appendChild(f);
+					if (f.type === 'checkbox') {
+						// What the row says, or what the schema says a row
+						// that says nothing means. A destination the camera
+						// would publish to must not draw itself as off.
+						f.checked = v[m] != null
+							? (v[m] !== false && v[m] !== 'false')
+							: prop.default !== false;
+					} else {
+						f.value = v[m] != null ? String(v[m]) : '';
+						if (prop['x-placeholder'])
+							f.placeholder = prop['x-placeholder'];
+						line.appendChild(f);
+					}
 					wrap.appendChild(line);
 					// Same markup every other field on this page puts under
 					// its control.

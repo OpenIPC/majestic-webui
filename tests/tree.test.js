@@ -277,6 +277,7 @@ group('a list of objects is one leaf, not one per member');
 			type: 'object',
 			properties: {
 				url: { type: 'string', title: 'Address' },
+				enabled: { type: 'boolean', title: 'Enabled', default: true },
 				token: { type: 'string', title: 'Token', 'x-secret': true },
 				channel: { type: 'string', title: 'Source', enum: ['', 'main', 'sub'] },
 			},

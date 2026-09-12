@@ -66,6 +66,14 @@ check('a member every protocol has appears with the scheme',
 	&& S.applies('channel', 'https://mtx.lan/cam/whip')
 	&& S.applies('channel', 'udp://1.2.3.4:5600'));
 
+// Every destination can be switched off, whatever it speaks. The switch used
+// to be one control above the whole list, which meant turning off the one
+// endpoint that had started refusing connections took the other two with it.
+check('so does the switch', S.applies('enabled', 'rtmp://a.example/live/key')
+	&& S.applies('enabled', 'https://mtx.lan/cam/whip')
+	&& S.applies('enabled', 'unix:/tmp/s.sock'));
+check('but not on a row with no address', !S.applies('enabled', ''));
+
 // The RTP fragmentation size belongs to the protocols that fragment. RTMP
 // frames its own and WHIP sizes itself from the WebRTC track, so offering it
 // on either is a box that changes nothing — the same failure as a token on an
@@ -97,6 +105,25 @@ check('an edited packet size is a change',
 	S.canon([{ url: 'udp://a:1', naluSize: 1400 }])
 	!== S.canon([{ url: 'udp://a:1', naluSize: 4000 }]));
 
+group('a member leaves in the type the schema declared');
+
+// Everything on the page answers in strings, and the camera type-checks each
+// member of a stored element: a string where `items` said integer or boolean
+// is a 400, so the whole save fails on one number box.
+check('a checkbox becomes a real boolean',
+	S.memberValue('boolean', true) === true
+	&& S.memberValue('boolean', false) === false);
+check('a number box becomes a real number',
+	S.memberValue('integer', '4000') === 4000);
+// Not 0, and not NaN: an empty box is a row saying it named no value, which
+// tidy() drops so the camera answers from its own default.
+check('an empty number box stays empty',
+	S.memberValue('integer', '') === '');
+check('a string member is left alone',
+	S.memberValue('string', ' rtmp://a/k ') === ' rtmp://a/k ');
+check('and so is a member of a type this knows nothing about',
+	S.memberValue(undefined, 'x') === 'x');
+
 group('tidying a row');
 
 check('strings are trimmed',
@@ -111,6 +138,15 @@ check('nothing is invented',
 	Object.keys(S.tidy({ url: 'rtmp://a/k' })).length === 1);
 check('a non-object is an empty row',
 	Object.keys(S.tidy(null)).length === 0);
+// `false` is what a switched-off destination says, and dropping it as empty
+// would leave the row saying nothing — which is how the camera spells on.
+check('a switch that is off survives',
+	S.tidy({ url: 'rtmp://a/k', enabled: false }).enabled === false);
+check('and one that is on stays a boolean',
+	S.tidy({ url: 'rtmp://a/k', enabled: true }).enabled === true);
+// A number member arrives as a number, because the camera type-checks it.
+check('a number survives as a number',
+	S.tidy({ url: 'udp://a:1', naluSize: 4000 }).naluSize === 4000);
 
 group('normalising the list');
 
@@ -131,6 +167,16 @@ check('an edited address is a different list',
 check('an edited token is a different list',
 	S.canon([{ url: 'https://m/whip', token: 'a' }])
 	!== S.canon([{ url: 'https://m/whip', token: 'b' }]));
+check('switching a destination off is a different list',
+	S.canon([{ url: 'rtmp://a/k', enabled: true }])
+	!== S.canon([{ url: 'rtmp://a/k', enabled: false }]));
+// Every row the page reads carries one, so a saved list must carry it too:
+// a file whose rows say nothing about the switch is what a file written
+// before the switch moved onto the rows looks like, and the camera reads
+// that as off.
+check('and the saved list says so either way',
+	JSON.parse(S.canon([{ url: 'rtmp://a/k', enabled: true }]))[0].enabled
+		=== true);
 check('a member added is a different list',
 	S.canon([{ url: 'rtmp://a/k' }])
 	!== S.canon([{ url: 'rtmp://a/k', channel: 'sub' }]));
@@ -162,8 +208,15 @@ check('a WHIP row says nothing', S.says({ url: 'https://m.lan/cam/whip' }) === '
 // A row somebody just added has nothing to be told: it is empty because they
 // have not typed yet, and the placeholder already says what goes there.
 check('a freshly added row is not scolded', S.says({ url: '' }) === '');
+// The switch is on every row and defaults to on, so a row that holds nothing
+// still arrives here carrying one. Counting it would scold every new row.
+check('nor is one carrying only its switch',
+	S.says({ url: '', enabled: true }) === ''
+	&& S.says({ url: '', enabled: false }) === '');
 check('but one carrying settings and no address is',
 	S.says({ url: '', token: 'x' }) !== '');
+check('a typed number counts as settings too',
+	S.says({ url: '', naluSize: 4000 }) !== '');
 check('an address with no scheme is told what one looks like',
 	/scheme/.test(S.says({ url: 'a.example/live' })));
 check('a scheme the camera cannot use names itself',
