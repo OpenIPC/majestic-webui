@@ -285,8 +285,13 @@ group('probe: the sequence, and which frame was the day one');
 			check('but the failed restore is reported', r.restored === false, String(r.restored));
 			// The happy path must say so too, or the caller cannot tell the
 			// difference between "restored" and "never asked".
+			// A filter that MOVES, so one toggle happens and a real restore is
+			// owed. (Two identical frames no longer take this path: they are
+			// the ambiguous case and get a third trial, which comes back to an
+			// even number of moves and nothing to put back.)
+			const f = [st(GREENY), st(MAGENTA)];
 			const ok = {
-				snap: () => Promise.resolve(st(GREENY)),
+				snap: () => Promise.resolve(f.shift()),
 				toggle: () => Promise.resolve(1),
 				wait: () => Promise.resolve(),
 				state: () => Promise.resolve(0),
@@ -294,7 +299,92 @@ group('probe: the sequence, and which frame was the day one');
 			};
 			return ic.probe(ok, 0).then((r2) => {
 				check('a successful restore is reported as such', r2.restored === true);
-				runRest();
+				next7();
+			});
+		});
+	}
+
+	function next7() {
+		group('probe: two agreeing frames are not a stuck filter yet');
+		// The camera keeps a RECORD of where the filter is; nothing on it can
+		// see the filter. Change which pads the coils are on and that record
+		// survives, describing a position reached under the old assignment — so
+		// the next drive to the "other" position can put the pads exactly where
+		// the filter already is. Nothing moves, both captures match, and the
+		// old code called that a stuck solenoid on correct wiring.
+		//
+		// Reproduced on an hi3516ev300 before this existed, and the wording it
+		// produced is the wording a reporter sent in.
+		const mk = (frames, live) => {
+			const f = frames.slice();
+			const log = [];
+			return {
+				log: log,
+				snap: () => { log.push('snap'); return Promise.resolve(f.shift()); },
+				toggle: () => { log.push('toggle'); return Promise.resolve(1); },
+				wait: () => Promise.resolve(),
+				state: () => Promise.resolve(live),
+				settleMs: 0,
+			};
+		};
+
+		// Started open with the camera saying DAY. First drive goes to night =
+		// open, where it already is, so frames 1 and 2 match. The third drive
+		// closes it.
+		const a = mk([st(MAGENTA), st(MAGENTA), st(GREENY)], 0);
+		return ic.probe(a, 0).then((ra) => {
+			check('a filter that only looked stuck is judged on the extra trial',
+				ra.verdict.id === 'ok', ra.verdict.id);
+			check('and the caller is told the camera had lost track of it',
+				ra.resynced === true, String(ra.resynced));
+			// Two moves put the record back where it began AND the filter now
+			// genuinely matches it, so there is nothing to put back. A third
+			// move here would leave daylight magenta.
+			check('two moves need no restore',
+				a.log.join(',') === 'snap,toggle,snap,toggle,snap', a.log.join(','));
+
+			// The same shape the other way up: the record said night, the
+			// filter was closed.
+			const b = mk([st(GREENY), st(GREENY), st(MAGENTA)], 1);
+			return ic.probe(b, 1).then((rb) => {
+				check('and the same holds starting from the night position',
+					rb.verdict.id === 'ok', rb.verdict.id);
+				check('resynced there too', rb.resynced === true);
+
+				// A filter that really is stuck: three frames, no change. The
+				// verdict stands, and it is the one the operator needs.
+				const c = mk([st(MAGENTA), st(MAGENTA), st(MAGENTA)], 0);
+				return ic.probe(c, 0).then((rc) => {
+					check('a filter that never moves is still reported stuck',
+						rc.verdict.id === 'stuck-open', rc.verdict.id);
+					check('and is NOT claimed to have been resynced',
+						rc.resynced === false, String(rc.resynced));
+					check('the extra trial was actually taken',
+						c.log.join(',') === 'snap,toggle,snap,toggle,snap',
+						c.log.join(','));
+
+					// Stuck closed is the same case and must not be skipped:
+					// it is the one that looks fine until nightfall.
+					const d = mk([st(GREENY), st(GREENY), st(GREENY)], 0);
+					return ic.probe(d, 0).then((rd) => {
+						check('a filter stuck closed gets the extra trial too',
+							rd.verdict.id === 'stuck-closed', rd.verdict.id);
+						check('and no resync is claimed', rd.resynced === false);
+
+						// An ordinary decisive pair must NOT pay for an extra
+						// move: the filter is physical and every trial is wear.
+						const e = mk([st(GREENY), st(MAGENTA)], 0);
+						return ic.probe(e, 0).then((re) => {
+							check('a decisive pair takes no third frame',
+								re.verdict.id === 'ok', re.verdict.id);
+							check('and moves the filter exactly twice',
+								e.log.join(',') === 'snap,toggle,snap,toggle',
+								e.log.join(','));
+							check('reporting no resync', re.resynced === false);
+							runRest();
+						});
+					});
+				});
 			});
 		});
 	}
