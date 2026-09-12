@@ -49,15 +49,22 @@ check('and not for RTMP', !S.applies('token', 'rtmp://a.example/live/key'));
 check('nor for RTP', !S.applies('token', 'udp://192.168.1.10:5600'));
 check('nor for a unix socket', !S.applies('token', 'unix:/tmp/s.sock'));
 
-// On a row with no address the answer is not knowable, and a field that
-// appears the moment you finish typing "https:" reads as the form arguing.
-check('an empty address shows it rather than guessing',
-	S.applies('token', ''));
-check('an unknown scheme shows it too', S.applies('token', 'srt://a:9000'));
+// A row nobody has addressed yet is one box, not the union of every
+// protocol's settings. Clicking Add used to open a token, a packet size,
+// three audio controls and six paragraphs for a destination with no name —
+// and all but two of them would turn out not to apply.
+check('an unaddressed row offers nothing but the address',
+	!S.applies('token', '') && !S.applies('naluSize', '')
+	&& !S.applies('audioSource', '') && !S.applies('channel', ''));
+check('nor does a scheme the camera cannot publish to',
+	!S.applies('token', 'srt://a:9000')
+	&& !S.applies('channel', 'srt://a:9000'));
 
-check('a member this knows nothing about is always shown',
+// …and the moment the scheme says what the row is, its members arrive.
+check('a member every protocol has appears with the scheme',
 	S.applies('channel', 'rtmp://a.example/live/key')
-	&& S.applies('channel', 'https://mtx.lan/cam/whip'));
+	&& S.applies('channel', 'https://mtx.lan/cam/whip')
+	&& S.applies('channel', 'udp://1.2.3.4:5600'));
 
 // The RTP fragmentation size belongs to the protocols that fragment. RTMP
 // frames its own and WHIP sizes itself from the WebRTC track, so offering it
@@ -67,8 +74,8 @@ check('the packet size is for RTP', S.applies('naluSize', 'udp://1.2.3.4:5600'))
 check('and for a unix socket', S.applies('naluSize', 'unix:/tmp/s.sock'));
 check('not for WHIP', !S.applies('naluSize', 'https://mtx.lan/cam/whip'));
 check('not for RTMP', !S.applies('naluSize', 'rtmp://a.example/live/key'));
-check('an empty address shows it rather than guessing',
-	S.applies('naluSize', ''));
+check('and not on a row with no address at all',
+	!S.applies('naluSize', ''));
 
 // Audio is RTMP's alone: only src/rtmp-stream.c reads these, WHIP publishes
 // no audio at all, and an RTP destination follows the camera's own codec.
@@ -152,7 +159,11 @@ group('what a row is worth being told');
 
 check('a good row says nothing', S.says({ url: 'rtmp://a.example/live/k' }) === '');
 check('a WHIP row says nothing', S.says({ url: 'https://m.lan/cam/whip' }) === '');
-check('an empty row is told so', S.says({ url: '' }) !== '');
+// A row somebody just added has nothing to be told: it is empty because they
+// have not typed yet, and the placeholder already says what goes there.
+check('a freshly added row is not scolded', S.says({ url: '' }) === '');
+check('but one carrying settings and no address is',
+	S.says({ url: '', token: 'x' }) !== '');
 check('an address with no scheme is told what one looks like',
 	/scheme/.test(S.says({ url: 'a.example/live' })));
 check('a scheme the camera cannot use names itself',
@@ -160,6 +171,6 @@ check('a scheme the camera cannot use names itself',
 // The verdict is advisory and rendered as text; it must never be the word
 // "undefined" or an exception on a half-built row.
 check('a row with no url member at all is handled',
-	typeof S.says({}) === 'string' && S.says({}) !== '');
+	typeof S.says({}) === 'string');
 
 done();

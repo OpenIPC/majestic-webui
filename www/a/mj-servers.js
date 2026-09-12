@@ -84,17 +84,28 @@
 
 	// Whether an item property applies to a row with this address.
 	//
-	// Everything the schema declares is shown by default. A property this knows
-	// to be protocol-specific is shown only where it means something — and on a
-	// row with no address yet, where the answer is not knowable, it is shown
-	// rather than hidden: a field that appears the moment you finish typing the
-	// scheme reads as the form arguing with you.
+	// Nothing but the address, until the address says what this is. A new row
+	// otherwise opens as the whole union of every protocol's settings — a
+	// token, a packet size, three audio controls and six paragraphs — for a
+	// destination nobody has named yet, and all but two of them will turn out
+	// not to apply.
+	//
+	// The first version of this showed them, on the reasoning that a control
+	// appearing as you type reads as the form arguing with you. That was
+	// backwards: appearing is the form answering. Type rtmp:// and the audio
+	// controls arrive because RTMP has audio; type https:// and a token
+	// arrives instead. The scheme is the question the rest of the row is an
+	// answer to.
+	//
+	// An unrecognised scheme shows nothing either — the camera will not
+	// publish to it at all, and says() is what tells you so.
 	function applies(prop, url) {
-		if (SCOPED.indexOf(prop) < 0) return true;
-		const sch = schemeOf(url);
-		if (!sch) return true;
-		const known = SCHEMES[sch];
-		return known ? !!known[prop] : true;
+		const known = SCHEMES[schemeOf(url)];
+		// No scheme, or one the camera does not publish to: this is not a
+		// destination yet, so it has no settings yet. Unscoped members belong
+		// to any destination — but not to a row that is not one.
+		if (!known) return false;
+		return SCOPED.indexOf(prop) < 0 ? true : !!known[prop];
 	}
 
 	// One row, tidied: strings trimmed, empties dropped, nothing invented.
@@ -154,7 +165,17 @@
 	// two answers worth having before the save round-trips.
 	function says(row) {
 		const url = row && typeof row.url === 'string' ? row.url.trim() : '';
-		if (url === '') return 'This destination has no address.';
+		if (url === '') {
+			// A row somebody just added has nothing to be told. It is empty
+			// because they have not typed yet, the placeholder already says
+			// what goes there, and normalise() drops it if they never do.
+			// Worth saying only once the row carries something else, where
+			// the missing address is the reason none of it will be used.
+			const others = Object.keys(tidy(row)).filter(k => k !== 'url');
+			return others.length
+				? 'This destination has no address, so none of it is used.'
+				: '';
+		}
 		if (protocolOf(url) === null) {
 			const sch = schemeOf(url);
 			return sch
