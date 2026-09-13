@@ -729,9 +729,15 @@ fi
 					}
 					function opt(id, pad, quiet,   sel, tail) {
 						sel = (id == cur) ? " selected" : ""
+						# Short because the row has to fit the control, and on a
+						# 390px phone "mt7601u-generic - no power-up pad" missed
+						# by seven pixels -- a <select> does not wrap, it clips.
+						# The group heading above already says these are one
+						# driver's board variants, so the pad number alone is
+						# the whole of what distinguishes them.
 						tail = quiet ? "" \
-							: (pad == "-" || pad == "") ? " &mdash; no power-up pad" \
-							: " &mdash; raises pad " e(pad) " first"
+							: (pad == "-" || pad == "") ? " &mdash; no pad" \
+							: " &mdash; pad " e(pad)
 						printf "<option value=\"%s\"%s>%s%s</option>\n", e(id), sel, e(id), tail
 					}
 					$3 == "" { next }
@@ -765,7 +771,7 @@ fi
 				' %>
 			</select>
 			</span></span>
-			<span class="hint text-secondary">Start with the entry that raises no pad. The others are the same driver for boards whose dongle is held powered off until a pad is raised &mdash; pick the one named after your board, or try them if your adapter never appears.</span>
+			<span class="hint text-secondary">Start with the entry that needs no pad. The others are the same driver for boards that hold the dongle powered off until a GPIO pad is raised, and each says which &mdash; pick the one named after your board, or try them if your adapter never appears.</span>
 		</p>
 		<%# Not field_string: the effective address belongs in the box as a
 		    placeholder, so an empty field shows what the camera will actually
