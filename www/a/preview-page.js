@@ -32,6 +32,11 @@
 	const badge = $('#mj-badge'), note = $('#mj-note');
 	const tapPlay = $('#mj-tap-play');
 	const snapshot = $('#mj-snapshot');
+	// Bumped on every poster paint and on hide, so a frame that finishes reading
+	// after the invitation moved on (a stream switch, a hide) is not written into
+	// the shared snapshot -- otherwise a departed stream's frame could land under
+	// the current one's button (#317).
+	let posterGen = 0;
 	const noteWhy = $('#mj-note-why'), noteAct = $('#mj-note-act');
 	const servedEl = $('#mj-served'), servedWhy = $('#mj-served-why');
 	let jpegOn = false;
@@ -176,8 +181,14 @@
 		let reader = null;
 		try {
 			reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
-			const res = await reader.read();
-			const frame = res && res.value;
+			// Bounded: a track that has stopped yielding frames must not hang the
+			// read for ever, or the /image.jpg fallback below is never reached and
+			// the button sits over black (#317). Whichever wins, the reader is
+			// cancelled in the finally, so no read is left pending across repaints.
+			const frame = await Promise.race([
+				reader.read().then(function (r) { return r && r.value; }),
+				new Promise(function (res) { setTimeout(function () { res(null); }, 700); }),
+			]);
 			if (!frame) return null;
 			try {
 				const c = document.createElement('canvas');
@@ -186,7 +197,7 @@
 				c.getContext('2d').drawImage(frame, 0, 0);
 				return c.toDataURL('image/jpeg', 0.85);
 			} finally { try { frame.close(); } catch (e) {} }
-		} catch (e) { return null; } finally { try { reader && reader.releaseLock(); } catch (e) {} }
+		} catch (e) { return null; } finally { try { reader && reader.cancel(); } catch (e) {} }
 	}
 	// The camera's plain JPEG snapshot -- the fallback's fallback, left exactly as
 	// the camera serves it. The WebUI never tunes /image.jpg: WebRTC is the adaptive
@@ -198,10 +209,13 @@
 	}
 	function paintPoster() {
 		if (!snapshot) return;
+		const gen = ++posterGen;
 		const track = liveVideoTrack();
 		if (track && typeof MediaStreamTrackProcessor !== 'undefined') {
 			captureTrackFrame(track).then(function (url) {
-				if (!tapPlay || tapPlay.hidden) return; // invitation gone before the frame arrived
+				// Superseded (a newer paint or a hide) or the invitation is gone:
+				// the frame is for a picture no longer on the button, so drop it.
+				if (gen !== posterGen || !tapPlay || tapPlay.hidden) return;
 				if (url) { try { snapshot.src = url; snapshot.hidden = false; } catch (e) {} }
 				else jpegPoster();
 			});
@@ -214,6 +228,7 @@
 		paintPoster();
 	}
 	function hideTapPlay() {
+		posterGen++; // a capture still in flight must not repaint after this
 		if (snapshot) { snapshot.hidden = true; try { snapshot.removeAttribute('src'); } catch (e) {} }
 		if (tapPlay) tapPlay.hidden = true;
 	}
