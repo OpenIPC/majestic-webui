@@ -1093,11 +1093,94 @@ function runRest() {
 			gpio.chart === false && gpio.value === null && !gpio.marks.length);
 		check('and says which way the sensor is pointing',
 			/^Day\. The daylight sensor decides/.test(gpio.line), gpio.line);
+		// The ADC reading is published now, so this source charts like the
+		// gain pair rather than apologising for having nothing. It must chart
+		// ITS OWN gauge: isp_again is in view on the same camera and is a
+		// different quantity in different units, so reading it here would put a
+		// confident line under the wrong measurement.
 		const adc = ic.monitorView(
 			{ lightMonitor: true, minThreshold: 100, maxThreshold: 400 },
-			{ night_mode_source: 3, isp_again: 200 });
-		check('an ADC source has nothing continuous to chart either',
-			adc.chart === false && adc.mode === 'adc', adc.line);
+			{ night_mode_source: 3, night_adc_raw: 271, isp_again: 200 });
+		check('an ADC source charts its own reading, not the gain',
+			adc.chart === true && adc.mode === 'adc' && adc.value === 271,
+			JSON.stringify([adc.chart, adc.value]));
+		// 0 is a real darkness reading on this pad — the reporter measured 11
+		// with the sensor covered — so an absent gauge cannot be coerced to one.
+		// And charts.js draws nothing at all until a point is pushed, so a view
+		// that says chart:true with no reading behind it reserves 110px of empty
+		// frame under a sentence promising a comparison. Measured on a t31 held
+		// in ADC mode: an empty box, no rules, no axis. That state is the
+		// first check on any camera, and permanent on one whose ADC node answers
+		// ioctls but not read() — which is the failure the reporter's board is
+		// most at risk of, and the one where an empty frame would be read as the
+		// page working.
+		const adcQuiet = ic.monitorView({ lightMonitor: true, minThreshold: 100,
+			maxThreshold: 400 }, { night_mode_source: 3 });
+		check('...and a reading it has not taken yet is a gap, not a zero',
+			adcQuiet.value === null);
+		check('...which claims no plot, rather than an empty frame',
+			adcQuiet.chart === false && !adcQuiet.marks.length,
+			JSON.stringify([adcQuiet.chart, adcQuiet.marks.length]));
+		check('...and says so instead of leaving the gap unexplained',
+			/nothing to plot/.test(adcQuiet.line), adcQuiet.line);
+		check('...while a genuine zero is charted as zero',
+			ic.monitorView({ lightMonitor: true, minThreshold: 100,
+				maxThreshold: 400 },
+			{ night_mode_source: 3, night_adc_raw: 0 }).value === 0);
+		// Unwired, the pad reads LOW in daylight and the two thresholds mean
+		// what their names say.
+		check('the plain sense labels the lower rule day',
+			adc.marks[0].v === 100 && adc.marks[0].label === 'day' &&
+			adc.marks[1].v === 400 && adc.marks[1].label === 'night',
+			JSON.stringify(adc.marks));
+		check('...and says which way it reads',
+			/reads low in daylight, so day is below the lower threshold/.test(adc.line),
+			adc.line);
+		// The reported fault in one assertion. With the photocell reading high
+		// in the light the camera's comparison reverses, so the lower rule is
+		// the one it goes to NIGHT at. Labelling these off the key names would
+		// print "day" across it, which is the page stating the opposite of what
+		// the camera does — and stating it most confidently on the wiring this
+		// setting exists for.
+		const adcHi = ic.monitorView(
+			{ lightMonitor: true, minThreshold: 40, maxThreshold: 120,
+				adcReadout: true, adcInvert: true },
+			{ night_mode_source: 3, night_adc_raw: 14, night_enabled: 1 });
+		check('an inverted pad labels the lower rule night, and the upper day',
+			adcHi.marks[0].v === 40 && adcHi.marks[0].label === 'night' &&
+			adcHi.marks[1].v === 120 && adcHi.marks[1].label === 'day',
+			JSON.stringify(adcHi.marks));
+		check('...and the sentence reverses with it',
+			/reads high in daylight, so night is below the lower threshold/
+				.test(adcHi.line), adcHi.line);
+		// Same mechanism as the gain pair: one comparison per check and no
+		// dwell, at the camera's floor of five where nothing is configured.
+		check('the ADC line says there is no countdown either',
+			/every 5 s/.test(adc.line) && /no countdown/.test(adc.line), adc.line);
+		check('...at the configured interval when there is one',
+			/every 30 s/.test(ic.monitorView(
+				{ lightMonitor: true, minThreshold: 100, maxThreshold: 400,
+					monitorDelay: 30 },
+				{ night_mode_source: 3, night_adc_raw: 271 }).line));
+		// This source never probes — majestic runs the lamp-down check for the
+		// gain sources only — and the probe gauges outlive the configuration
+		// that produced them, so reading them here would report a check that
+		// is not running from a verdict reached under another mechanism.
+		check('and no lamp-down verdict is repeated under a source that never probes',
+			!/dropped the lamp/.test(ic.monitorView(
+				{ lightMonitor: true, minThreshold: 100, maxThreshold: 400 },
+				{ night_mode_source: 3, night_adc_raw: 271, night_enabled: 1,
+					night_probe_verdict: 1, night_probe_gain_milli: 4000,
+					night_probe_age_seconds: 10 }).line));
+		// The control for that one: the SAME gauges under the gain pair, which
+		// does probe, are printed. Without this the assertion above would pass
+		// just as well on a fixture that says nothing.
+		check('...and the gain pair, which does probe, still prints it',
+			/dropped the lamp/.test(ic.monitorView(
+				{ lightMonitor: true, minThreshold: 100, maxThreshold: 400 },
+				{ night_mode_source: 2, isp_again: 200, night_enabled: 1,
+					night_probe_verdict: 1, night_probe_gain_milli: 4000,
+					night_probe_age_seconds: 10 }).line));
 		const off = ic.monitorView({}, vAuto);
 		check('monitor off charts nothing', off.chart === false);
 		check('and points at the switch by the name the page prints on it',

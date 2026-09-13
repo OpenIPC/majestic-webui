@@ -6495,8 +6495,14 @@
 			'</span>' +
 			'<span class="mj-state" aria-hidden="true"></span>' +
 			'</span></span>' +
+			// What the pair is compared AGAINST is not the switch's to decide:
+			// with the light level read from the ADC these same two fields are
+			// read in the ADC's units instead of in sensor gain. Naming only the
+			// gain sent an operator setting up a photocell looking for another
+			// switch, and this is the one that reveals the fields they need.
 			'<div class="hint text-secondary">Off: the camera decides from its own ' +
-			'exposure. On: the older pair of raw sensor-gain thresholds.</div>';
+			'exposure. On: the older pair of thresholds — raw sensor gain, or the ' +
+			'ADC reading where that is the source.</div>';
 		const box = p.querySelector('input');
 		const word = p.querySelector('.mj-state');
 		const paint = () => {

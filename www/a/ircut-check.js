@@ -1289,10 +1289,13 @@
 			};
 		}
 
-		// Source 3 (ADC) is deliberately not here: its reading never appears
-		// on /metrics, so there is nothing continuous to chart and isp_again
-		// would be a different quantity wearing the monitor's clothes. It gets
-		// a sentence of its own below instead.
+		// Source 3 (ADC) has a chart of its own below rather than sharing this
+		// one. It used to have no chart at all, because its reading appeared
+		// nowhere — night_mode_source said 3 and that was the whole of it, so
+		// the thresholds could only be picked over ssh with the log turned up.
+		// It is a separate branch and not another arm of this one because the
+		// quantity differs: isp_again plotted under an ADC monitor's caption
+		// would be a different measurement wearing its clothes.
 		//
 		// The `src === null` half is the older daemon that publishes no
 		// source, and there the precedence has to be reproduced rather than
@@ -1347,9 +1350,67 @@
 				'reading to plot here.' + lampNote);
 		}
 		if (src === 3) {
-			return say('adc', modeWord + 'A voltage on the daylight sensor pad ' +
-				'decides. The camera does not publish that voltage, so there ' +
-				'is nothing to plot here.' + lampNote);
+			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
+			// Which way the pad runs decides which threshold is which, so the
+			// labels are read off the camera's own comparison rather than off
+			// the two keys' names. A photocell reading high in daylight is
+			// night BELOW the lower threshold and day again ABOVE the upper
+			// one — the exact reverse of the gain pair those names were
+			// written for — so labelling by name would print "day" across the
+			// level this camera goes to night at. Either way the lower one has
+			// to stay below the upper for there to be a band at all, which is
+			// what the hysteresis finding says when it does not.
+			const bright = on(nm.adcInvert);
+			const DAY = '#2fb673', NIGHT = '#e0a020';
+			const marks = [];
+			if (lo !== null) {
+				marks.push({ v: lo, color: bright ? NIGHT : DAY,
+					label: bright ? 'night' : 'day' });
+			}
+			if (hi !== null) {
+				marks.push({ v: hi, color: bright ? DAY : NIGHT,
+					label: bright ? 'day' : 'night' });
+			}
+			// Same period and same absent countdown as the gain pair: one
+			// comparison per check, no dwell to serve out. majestic floors an
+			// unset or zero one at 5 s, so this is the number in force.
+			const period = pin(nm.monitorDelay);
+			const everyS = period > 0 ? period : 5;
+			// 0 is a real darkness reading on this pad — the pad that prompted
+			// all this measured 11 with the sensor covered — so an absent gauge
+			// can never be coerced to one. It is absent for the first check on
+			// any camera, and absent for GOOD on one whose ADC node answers
+			// ioctls but not read(): the camera reports no reading at all
+			// rather than a wrong one, and says so in its log. Both look the
+			// same from here, so the panel claims no plot it cannot fill —
+			// charts.js draws nothing at all until a point is pushed, and an
+			// empty frame under a sentence promising a comparison is the same
+			// confident silence this whole panel exists to stop.
+			const raw = ('night_adc_raw' in v) ? v.night_adc_raw : null;
+			return {
+				mode: 'adc', chart: raw !== null,
+				value: raw,
+				marks: raw !== null ? marks : [],
+				// The direction is said against the THRESHOLDS rather than
+				// against the lines on the plot, because the sentence has to
+				// stand on the camera that has no plot.
+				line: modeWord +
+					'Comparing the light sensor on the ADC pad against the ' +
+					'thresholds, in the ADC\'s own units. ' +
+					(bright
+						? 'It reads high in daylight, so night is below the lower '
+							+ 'threshold and day again above the upper one. '
+						: 'It reads low in daylight, so day is below the lower '
+							+ 'threshold and night above the upper one. ') +
+					'It switches on the first check past one, every ' +
+					everyS + ' s — so there is no countdown.' +
+					(raw === null
+						? ' Nothing has come back from the pad yet, so there is '
+							+ 'nothing to plot.'
+						: '') +
+					lampNote,
+				unit: '',
+			};
 		}
 		// The monitor is on and the daemon says nothing is driving it. The
 		// finding above names the way out; this only says the state — and it
