@@ -4,7 +4,10 @@
 <%
 params="address dhcp gateway hostname nameserver netmask interface wlan_ssid wlan_password"
 
-network_list="$(ls /sys/class/net | grep -e eth0 -e wlan0)"
+# -x, so these are the two interfaces and not every name containing them. The
+# loose form matched veth0, br-eth0 and eth0.100 as well, and those reach an
+# href, a page heading and a setnetwork argument.
+network_list="$(ls /sys/class/net | grep -x -e eth0 -e wlan0)"
 # Four U-Boot variables, one read of the environment. fw_printenv costs about
 # 50 ms on this flash -- it is the single most expensive thing this page does --
 # and asking it four separate times was a fifth of a second for nothing. The
@@ -28,27 +31,6 @@ done <<EOF
 $(fw_printenv 2>/dev/null)
 EOF
 
-# The adapters THIS firmware can actually bring up.
-#
-# /etc/wireless/{usb,sdio,modem} name 66 boards between them, and offering all
-# 66 asks the owner of a camera to pick their hardware out of a catalogue. It
-# is also a catalogue of things that cannot work here: an image ships one or
-# two wireless drivers, so nearly every id in those scripts modprobes a module
-# that is not on this camera and could only fail.
-#
-# So an entry is offered on two conditions. Every module its arm loads has to
-# be present under /lib/modules -- that is exact, not a guess, and it is what
-# cuts 66 to single figures. And where the id names a SoC, it has to be this
-# camera's: those entries differ only in a power-up sequence for one board, and
-# another board's sequence drives the wrong pads.
-#
-# Ids naming no SoC are kept: `-generic` is a plain modprobe, and a few are
-# named after a product rather than its chip, which is not proof they are
-# somebody else's. The residue is small and honest either way.
-#
-# Scraped rather than listed here because the scripts ship in the firmware and
-# gain entries with every board somebody adds; a copy written here goes stale
-# silently.
 # The adapters THIS firmware can actually bring up.
 #
 # /etc/wireless/{usb,sdio,modem} name 66 boards between them, and offering all
@@ -150,7 +132,10 @@ iface_word() {
 	case "$1" in
 		eth0) printf 'Ethernet' ;;
 		wlan0) printf 'Wi-Fi' ;;
-		*) printf '%s' "$1" ;;
+		# Escaped: the two words above are literals, but anything else is a
+		# device name on its way into page text, and a kernel interface name
+		# may hold characters that are markup here.
+		*) esc "$1" ;;
 	esac
 }
 
@@ -166,12 +151,27 @@ iface_word() {
 # The page has to know this or it lies twice: it offers a form whose file
 # nothing will open, and it raises a restart banner for a difference no
 # restart can resolve.
+# Is the configured adapter a cellular modem rather than Wi-Fi? Asked of the
+# script itself rather than of the filtered list, so the answer holds for an id
+# this image has no driver for -- which is exactly the camera whose owner needs
+# to be told the truth about it.
+adapter_is_modem() {
+	[ -n "$network_adapter" ] || return 1
+	grep -qF "\"$network_adapter\"" /etc/wireless/modem 2>/dev/null
+}
+
 iface_is_booted() {
-	if [ -n "$network_adapter" ]; then
-		[ "$1" = "wlan0" ]
-	else
+	if [ -z "$network_adapter" ]; then
 		[ "$1" = "eth0" ]
+		return
 	fi
+	# set_wireless tries usb, then sdio, then modem. A modem takes the third
+	# arm, which runs `ifup usb0` and `ifup eth1` -- wlan0 is never brought up
+	# at all, and eth0 still gets the fixed address. So on a modem camera
+	# NEITHER of the two interfaces this page edits comes up from its file, and
+	# saying wlan0 does would promise a restart that changes nothing.
+	adapter_is_modem && return 1
+	[ "$1" = "wlan0" ]
 }
 
 # The interface the camera is on. The default route names it when there is
@@ -348,8 +348,12 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			done
 			[ -z "$adapter_ok" ] && set_error_flag "Unknown wireless adapter: $(esc "$POST_network_adapter")"
 
+			# Every octet 0-255. Four groups of up to three digits also
+			# describes 999.999.999.999, which would reach fw_setenv and leave
+			# the Ethernet port with no usable address after a restart -- on a
+			# camera whose Wi-Fi is the only other way in.
 			if [ -n "$POST_network_fallback" ] &&
-				! echo "$POST_network_fallback" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+				! echo "$POST_network_fallback" | grep -Eq '^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'; then
 				set_error_flag "Ethernet fallback address is not an IPv4 address: $(esc "$POST_network_fallback")"
 			fi
 
@@ -360,16 +364,40 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				# one that is absent behave alike there, but only the absent
 				# one leaves the environment as a camera without an adapter
 				# has it.
+				# fw_setenv writes flash and can fail -- a full or bad-block
+				# environment sector, a read-only mount. Reporting a save that
+				# did not happen is bad here in a particular way: the answer it
+				# gives is "restart the camera", and a camera restarted onto an
+				# adapter that was never stored comes back somewhere its owner
+				# may not be able to reach.
+				#
+				# The second write is guarded by the first: wlandev alone
+				# decides whether there is Wi-Fi at all, so if the fallback
+				# address cannot be stored the adapter is put back rather than
+				# left set with an unknown Ethernet address beside it.
 				if [ -n "$POST_network_adapter" ]; then
-					fw_setenv wlandev "$POST_network_adapter"
+					out=$(fw_setenv wlandev "$POST_network_adapter" 2>&1)
 				else
-					fw_setenv wlandev
+					out=$(fw_setenv wlandev 2>&1)
 				fi
+				if [ $? -ne 0 ]; then
+					redirect_back "danger" "The wireless adapter was not saved: $(esc "$out")"
+				fi
+
 				if [ -n "$POST_network_fallback" ]; then
-					fw_setenv netaddr_fallback "$POST_network_fallback"
+					out=$(fw_setenv netaddr_fallback "$POST_network_fallback" 2>&1)
 				else
-					fw_setenv netaddr_fallback
+					out=$(fw_setenv netaddr_fallback 2>&1)
 				fi
+				if [ $? -ne 0 ]; then
+					if [ -n "$network_adapter" ]; then
+						fw_setenv wlandev "$network_adapter" 2>/dev/null
+					else
+						fw_setenv wlandev 2>/dev/null
+					fi
+					redirect_back "danger" "The Ethernet fallback address was not saved, so the adapter was left as it was: $(esc "$out")"
+				fi
+
 				update_caminfo
 				touch /tmp/system-reboot
 				redirect_to "network.cgi" "success" \
@@ -538,7 +566,9 @@ fi
 </div>
 
 <% if ! iface_is_booted "$edit_iface"; then %>
-	<% if [ -n "$network_adapter" ]; then %>
+	<% if adapter_is_modem; then %>
+	<% notice warn "<b>The camera does not bring $(iface_word "$edit_iface") up from this file.</b> A cellular modem is the configured adapter, so the firmware brings up <code>usb0</code>/<code>eth1</code> instead &mdash; which this page does not edit &mdash; and puts the Ethernet port on a fixed address (<code>$(esc "${network_fallback:-192.168.2.10}")</code>). What you save here applies if the adapter is cleared." %>
+	<% elif [ -n "$network_adapter" ]; then %>
 	<% notice warn "<b>The camera does not bring $(iface_word "$edit_iface") up from this file.</b> While a wireless adapter is set, the firmware puts the Ethernet port on a fixed address (<code>$(esc "${network_fallback:-192.168.2.10}")</code>) and never reads this interface's file. What you save here applies if the adapter is cleared." %>
 	<% else %>
 	<% notice warn "<b>The camera does not bring $(iface_word "$edit_iface") up from this file.</b> No wireless adapter is set, so no driver is loaded for it. What you save here applies once one is chosen under <b>Wireless adapter</b>." %>
@@ -638,7 +668,14 @@ fi
 			<% field_text "network_gateway" "Router" %>
 			<% field_text "network_nameserver" "DNS" %>
 		</div>
+		<%# Emitted only in Automatic. It used to render always and be hidden by
+		    toggleStatic(), so a statically configured camera whose script did
+		    not load told its owner that the address they had typed was set by
+		    the router. network.js still toggles it; this decides the state the
+		    page ARRIVES in. %>
+		<% if [ "$network_dhcp" = "true" ]; then %>
 		<p class="mj-card-note" id="ip-auto-note">Set by the router. Choose Manual to enter them yourself.</p>
+		<% fi %>
 	</div></div>
 	</div>
 
