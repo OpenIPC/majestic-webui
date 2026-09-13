@@ -775,7 +775,7 @@ fi
 				' %>
 			</select>
 			</span></span>
-			<span class="hint text-secondary">Start with the entry that needs no pad. The others are the same driver for boards that hold the dongle powered off until a GPIO pad is raised, and each says which &mdash; pick the one named after your board, or try them if your adapter never appears.</span>
+			<span class="hint text-secondary">Within a Wi-Fi driver, start with the entry that needs no pad. The others are that same driver for boards which hold the dongle powered off until a GPIO pad is raised, and each names the pad &mdash; pick the one named after your board, or try them if your adapter never appears.</span>
 		</p>
 		<%# Not field_string: the effective address belongs in the box as a
 		    placeholder, so an empty field shows what the camera will actually
