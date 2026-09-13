@@ -608,8 +608,10 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   fires `?settle`.
 
   **The camera owns the Pelco wire.** `j/ptz.cgi` and `update_caminfo` ask it
-  (`mj_ptz` in `p/majestic.sh`, `GET /ptz`); a bare `GET /ptz` is the
-  capability probe that decides whether the pad renders at all. This repo
+  (`mj_ptz` in `p/majestic.sh`): `POST /ptz?move=<verb>` moves the lens, and a
+  bare `GET /ptz` is the capability probe that decides whether the pad renders
+  at all — reading what the lens can do is safe from anywhere, moving it is
+  not, the same split `gpio_cgi` uses for the pads. This repo
   shipped `bin/btzoom` and `bin/btzoom-xm` until they were deleted for opening
   the same tty the camera was already driving for autofocus, shared through a
   `/tmp/btzoom.lock` mkdir lock — which cannot make a three-step movement
@@ -619,7 +621,7 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   after the button was released. A Pelco camera now needs
   `fw_setenv ptz_control pelco-d` (or `pelco-xm`) AND the motor driver
   package, [majestic-af](https://github.com/OpenIPC/majestic-af); without it
-  `GET /ptz` answers 503 and the pad says so rather than claiming the camera
+  `/ptz` answers 503 and the pad says so rather than claiming the camera
   has no PTZ. `mj_ptz` keeps those apart the way `mj_cfg` does — *could not
   ask* never becomes a statement about the hardware.
 

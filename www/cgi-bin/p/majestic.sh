@@ -73,8 +73,11 @@ mj_cfg() {
 #
 #   mj_ptz <verb>   start or continue a move; the camera stops the motor on
 #                   its own deadline, so a lost release cannot run a lens into
-#                   its end stop
-#   mj_ptz          the capability line (actuator, port, speed, pulse, verbs)
+#                   its end stop. POST, because it changes the world -- a GET
+#                   is what a browser issues on its own, and it carries the
+#                   session with it.
+#   mj_ptz          the capability line (actuator, port, speed, pulse, verbs),
+#                   a plain GET: reading what the lens can do is safe.
 #
 # Return codes, kept apart the way mj_cfg keeps them apart -- "could not ask"
 # must never reach the operator as a statement about their hardware:
@@ -83,8 +86,13 @@ mj_cfg() {
 #   3  it does, but the motor driver is not on this build (503)
 #   2  could not ask
 mj_ptz() {
-	_mj_r=$(curl -s -m 3 -w '|%{http_code}' \
-		"http://127.0.0.1/ptz${1:+?move=$1}" 2>/dev/null) || return 2
+	if [ -n "$1" ]; then
+		_mj_r=$(curl -s -m 3 -X POST -w '|%{http_code}' \
+			"http://127.0.0.1/ptz?move=$1" 2>/dev/null) || return 2
+	else
+		_mj_r=$(curl -s -m 3 -w '|%{http_code}' \
+			"http://127.0.0.1/ptz" 2>/dev/null) || return 2
+	fi
 	_mj_code=${_mj_r##*|}
 	case "$_mj_code" in
 		200) ;;
