@@ -8695,7 +8695,17 @@
 			}
 		} else if (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100) {
 			p = el('p', 'range mj-row' + liveCls);
-			const min = isNum(sub.minimum) ? sub.minimum : 0;
+			// A frame rate of 0 is this field's own declared default — the
+			// sensor's rate, which the camera names beside it — and a track
+			// that starts at 1 cannot show it: the browser sanitises the value
+			// up to the floor, so a camera delivering 25 reads as 1 frame a
+			// second and the row counts as off stock. Where the camera names
+			// the sensor's rate, the track starts at 0 whatever floor the
+			// schema carries, which is what keeps this right on a camera whose
+			// schema still puts the default outside its own range.
+			const min = (isNum(sub['x-fps-sensor']) && Number(sub.default) === 0)
+				? 0
+				: (isNum(sub.minimum) ? sub.minimum : 0);
 			const max = sub.maximum;
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
@@ -9749,11 +9759,12 @@
 			// Where this press leaves a SWITCH, which is the one thing on this
 			// page that can stop a stream — see onReset. Two ways to land on
 			// off and the warning is owed for both: a declared default of
-			// false, and no declared default at all, since majestic reads an
-			// absent key as false for every boolean it has. The second is not
-			// the page guessing: `config_get_boolean` answers false for a key
-			// that is not there, and every generated boolean accessor funnels
-			// through it, so clearing and switching off reach the same camera.
+			// false, and no declared default at all, because a switch whose key
+			// is absent reads off. The second is measured rather than assumed —
+			// clearing the main stream's Enable stopped the encoder and the row
+			// came back off — and it holds for every switch the camera
+			// publishes no default for, since clearing one and turning it off
+			// leave the camera in the same state.
 			const offs = type === 'boolean' && (clears || stockOf(sub) === 'false');
 			reset.setAttribute('aria-label',
 				clears ? 'Clear ' + desc : 'Reset ' + desc + ' to default');
