@@ -102,3 +102,39 @@ mj_ptz() {
 	esac
 	printf '%s' "${_mj_r%|*}"
 }
+
+# mj_set <dotted.key> <value> -- write one key through majestic's own API.
+#
+# The nested body is built from the dotted path, because that shape is the
+# literal input of the config walker: records.onClose goes out as
+# {"records":{"onClose":"…"}}. Writing it any other way would mean opening
+# /etc/majestic.yaml, which is majestic's file and holds only what differs
+# from its defaults.
+#
+# Same three answers as mj_cfg, and for the same reason -- a write that never
+# reached the camera must not be reported as one that did:
+#
+#   0  the camera took it
+#   1  the camera refused it (4xx)
+#   2  the camera could not be asked
+mj_set() {
+	_mj_val=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
+	_mj_body="\"${_mj_val}\""
+	_mj_path=$1
+	while [ -n "$_mj_path" ]; do
+		_mj_body="{\"${_mj_path##*.}\":${_mj_body}}"
+		case "$_mj_path" in
+		*.*) _mj_path=${_mj_path%.*} ;;
+		*) _mj_path= ;;
+		esac
+	done
+
+	_mj_r=$(curl -s -m 3 -w '|%{http_code}' -X POST \
+		-H 'Content-Type: application/json' -d "$_mj_body" \
+		"http://127.0.0.1/api/v1/config" 2>/dev/null) || return 2
+	case "${_mj_r##*|}" in
+	200 | 202) return 0 ;;
+	4*) return 1 ;;
+	*) return 2 ;;
+	esac
+}

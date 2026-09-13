@@ -2,7 +2,7 @@
 <%in p/common.cgi %>
 <%
 config_file=/etc/webui/telegram.conf
-params="enabled token channel thread_id interval caption crontab document heif proxy"
+params="enabled token channel thread_id interval caption crontab clips document heif proxy"
 
 # webhook for remote send, returns [t|f]
 #
@@ -39,6 +39,8 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			echo "*/${telegram_interval} * * * * /usr/sbin/telegram" >> /etc/crontabs/root
 		fi
 
+		clip_hook_sync
+
 		redirect_back "success" "Telegram config updated."
 	fi
 
@@ -64,6 +66,7 @@ fi
 				<% field_text "telegram_channel" "Channel" "Channel to post the images to." %>
 				<% field_text "telegram_thread_id" "Message thread id" "Topic to post to (forum supergroups only)." %>
 				<% group_head "Submission" %>
+				<% field_switch "telegram_clips" "Send motion clips" "eval" "Post the recording itself when movement ends. Needs recording on motion to be switched on." %>
 				<% field_string "telegram_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
 				<% field_switch "telegram_crontab" "Add to crontab" "eval" "Send pictures timed by interval." %>
 				<% field_text "telegram_caption" "Caption" "Location or short description." %>

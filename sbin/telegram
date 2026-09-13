@@ -1,5 +1,7 @@
 #!/bin/sh
-[ -e "/etc/webui/telegram.conf" ] && source /etc/webui/telegram.conf
+# `.` rather than `source`: busybox ash takes either, but /bin/sh on a
+# developer machine is often dash, which has only the POSIX spelling.
+[ -e "/etc/webui/telegram.conf" ] && . /etc/webui/telegram.conf
 
 if [ "$telegram_enabled" != "true" ]; then
 	echo "Sending to Telegram is not enabled"
@@ -31,18 +33,33 @@ fi
 workdir=$(mktemp -d /tmp/telegram.XXXXXX) || exit 1
 trap 'rm -rf "$workdir"' EXIT INT TERM
 
-filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
-if [ "$telegram_heif" = "true" ]; then
-	snapshot=$workdir/${filename}.heif
-	wget -q -T1 localhost/image.heif -O "$snapshot"
+# Called with a path, send that file instead of taking a picture. That is how
+# majestic hands over a finished recording, and the recording is the whole
+# point of the call: a still taken now shows what the camera can see now, not
+# what set the recorder off a minute ago.
+#
+# The file belongs to whoever called, so it is never put in the workdir and
+# never removed -- the trap above only takes away what this script created.
+if [ -n "$1" ]; then
+	snapshot=$1
+	if [ ! -s "$snapshot" ]; then
+		echo "Nothing to send: $snapshot"
+		exit 1
+	fi
 else
-	snapshot=$workdir/${filename}.jpg
-	wget -q -T1 localhost/image.jpg -O "$snapshot"
-fi
+	filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
+	if [ "$telegram_heif" = "true" ]; then
+		snapshot=$workdir/${filename}.heif
+		wget -q -T1 localhost/image.heif -O "$snapshot"
+	else
+		snapshot=$workdir/${filename}.jpg
+		wget -q -T1 localhost/image.jpg -O "$snapshot"
+	fi
 
-if [ ! -e "$snapshot" ]; then
-	echo "Snapshot file not found"
-	exit 1
+	if [ ! -e "$snapshot" ]; then
+		echo "Snapshot file not found"
+		exit 1
+	fi
 fi
 
 command="curl --verbose"
@@ -50,7 +67,7 @@ command="${command} --connect-timeout 100"
 command="${command} --max-time 100"
 
 if [ "$telegram_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
-	source /etc/webui/proxy.conf
+	. /etc/webui/proxy.conf
 	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
 	command="${command} --proxy-user ${socks5_username}:${socks5_password}"
 fi
@@ -62,16 +79,21 @@ fi
 command="${command} --url https://api.telegram.org/bot${telegram_token}"
 
 # HEIF is not a valid sendPhoto format (Telegram only accepts JPEG/PNG/GIF/WEBP),
-# so always send it via sendDocument.
+# so always send it via sendDocument. A clip goes to sendVideo, which is what
+# gives the reader a player rather than a file to download first -- unless the
+# document switch is on, which says the sender wants the bytes untouched.
 if [ "$telegram_document" = "true" ] || [ "${snapshot##*.}" = "heif" ]; then
 	command="${command}/sendDocument"
 	command="${command} -F 'document=@${snapshot}'"
-	command="${command} -F 'caption=${telegram_message}'"
+elif [ "${snapshot##*.}" = "mp4" ]; then
+	command="${command}/sendVideo"
+	command="${command} -F 'video=@${snapshot}'"
+	command="${command} -F 'supports_streaming=true'"
 else
 	command="${command}/sendPhoto"
 	command="${command} -F 'photo=@${snapshot}'"
-	command="${command} -F 'caption=${telegram_message}'"
 fi
+command="${command} -F 'caption=${telegram_message}'"
 
 # The response body still goes to stdout for anyone running this by hand or out
 # of cron. What is new is the exit status: this used to `exit 0` unconditionally,

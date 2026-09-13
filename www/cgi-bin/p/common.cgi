@@ -461,6 +461,51 @@ include() {
 	[ -f "$1" ] && . "$1"
 }
 
+# Whether anything installed on this camera still wants finished recordings.
+#
+# Each sender answers for itself, in its own config, and is read in a subshell
+# so that the second one cannot see what the first one set.
+clip_hook_wanted() {
+	for _ch_name in telegram ntfy; do
+		[ -e "/etc/webui/${_ch_name}.conf" ] || continue
+		if (
+			. "/etc/webui/${_ch_name}.conf"
+			eval "[ \"\$${_ch_name}_enabled\" = true ] &&
+				[ \"\$${_ch_name}_clips\" = true ]"
+		); then
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+# Keep the camera's own setting in step with those answers.
+#
+# The camera runs one command when a recording finishes, and it is not ours to
+# take: an operator who has pointed it at a script of their own gets to keep
+# it, and is told rather than overruled. So this only ever writes the
+# dispatcher over an empty setting, and only ever clears the dispatcher — never
+# anything else that happens to be there.
+#
+# Called after the config file is written, because the answer is read back out
+# of it.
+clip_hook_sync() {
+	_ch_hook=/usr/sbin/record.sh
+	_ch_now=$(mj_cfg records.onClose) || _ch_now=""
+
+	if clip_hook_wanted; then
+		case "$_ch_now" in
+		"$_ch_hook") ;;
+		"") mj_set records.onClose "$_ch_hook" ||
+			set_error_flag "The camera would not take the setting that sends recordings." ;;
+		*) set_error_flag "The camera already runs a command of its own when a recording finishes, so it was left alone. Clear it to send recordings from here." ;;
+		esac
+	elif [ "$_ch_now" = "$_ch_hook" ]; then
+		mj_set records.onClose ""
+	fi
+}
+
 # pre "text" "classes" "extras"
 #
 # The <pre> twin of ex, for a text blob the camera produced rather than a
