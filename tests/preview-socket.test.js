@@ -45,34 +45,27 @@ function makeSockets(env) {
 	};
 }
 
-// The element the player owns. freshVideo() clones and replaces it on every
-// (re)connect, so the test has to follow the current node the same way the DOM
-// does — anything holding the first one is holding a detached node.
+// The element the player owns. freshVideo() resets it in place on every
+// (re)connect — src/srcObject cleared and load() — so the node the test holds
+// stays the one the player uses; nothing is cloned or replaced out from under it.
 function makeVideo(env) {
-	function node() {
-		const v = {
-			muted: false, volume: 1, src: '', paused: false,
-			videoWidth: 1280, videoHeight: 720,
-			buffered: { length: 0 },
-			handlers: {},
-			addEventListener(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); },
-			removeEventListener(ev, fn) {
-				this.handlers[ev] = (this.handlers[ev] || []).filter((f) => f !== fn);
-			},
-			removeAttribute() { this.src = ''; },
-			load() {}, play() { return Promise.resolve(); },
-			cloneNode() { return node(); },
-			getVideoPlaybackQuality() { return { totalVideoFrames: 0, droppedVideoFrames: 0 }; },
-			fire(ev) {
-				(this.handlers[ev] || []).slice().forEach((f) => f({ target: this }));
-			},
-		};
-		v.parentNode = {
-			replaceChild(fresh) { env.video = fresh; },
-		};
-		return v;
-	}
-	env.video = node();
+	const v = {
+		muted: false, volume: 1, src: '', srcObject: null, paused: false,
+		videoWidth: 1280, videoHeight: 720,
+		buffered: { length: 0 },
+		handlers: {},
+		addEventListener(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); },
+		removeEventListener(ev, fn) {
+			this.handlers[ev] = (this.handlers[ev] || []).filter((f) => f !== fn);
+		},
+		removeAttribute() { this.src = ''; },
+		load() {}, play() { return Promise.resolve(); },
+		getVideoPlaybackQuality() { return { totalVideoFrames: 0, droppedVideoFrames: 0 }; },
+		fire(ev) {
+			(this.handlers[ev] || []).slice().forEach((f) => f({ target: this }));
+		},
+	};
+	env.video = v;
 	return env.video;
 }
 

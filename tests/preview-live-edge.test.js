@@ -32,33 +32,30 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 function load(opts) {
 	opts = opts || {};
 	const env = { sockets: [], seeks: [], seekEnds: [], start: 0, end: 0, ct: 0, refuse: false };
-	function node() {
-		const v = {
-			muted: false, volume: 1, src: '', paused: true,
-			videoWidth: 1920, videoHeight: 1080,
-			buffered: {
-				get length() { return env.end > 0 ? 1 : 0; },
-				start() { return env.start; },
-				end() { return env.end; },
-			},
-			get currentTime() { return env.ct; },
-			set currentTime(t) { env.seeks.push(+t.toFixed(2)); env.seekEnds.push(env.end); env.ct = t; },
-			handlers: {},
-			addEventListener(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); },
-			removeEventListener() {},
-			removeAttribute() {}, load() {},
-			play() {
-				if (env.refuse) return Promise.reject(new Error('NotAllowedError'));
-				this.paused = false;
-				return Promise.resolve();
-			},
-			cloneNode() { return node(); },
-			getVideoPlaybackQuality() { return { totalVideoFrames: 0, droppedVideoFrames: 0 }; },
-		};
-		v.parentNode = { replaceChild(fresh) { env.video = fresh; } };
-		return v;
-	}
-	env.video = node();
+	// The player resets this element in place on every (re)connect (freshVideo
+	// clears src/srcObject and reloads); it is never cloned or replaced, so the
+	// single node the test holds is the one the player keeps using.
+	env.video = {
+		muted: false, volume: 1, src: '', srcObject: null, paused: true,
+		videoWidth: 1920, videoHeight: 1080,
+		buffered: {
+			get length() { return env.end > 0 ? 1 : 0; },
+			start() { return env.start; },
+			end() { return env.end; },
+		},
+		get currentTime() { return env.ct; },
+		set currentTime(t) { env.seeks.push(+t.toFixed(2)); env.seekEnds.push(env.end); env.ct = t; },
+		handlers: {},
+		addEventListener(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); },
+		removeEventListener() {},
+		removeAttribute() {}, load() {},
+		play() {
+			if (env.refuse) return Promise.reject(new Error('NotAllowedError'));
+			this.paused = false;
+			return Promise.resolve();
+		},
+		getVideoPlaybackQuality() { return { totalVideoFrames: 0, droppedVideoFrames: 0 }; },
+	};
 	const MediaSourceStub = function () {
 		const ms = {
 			readyState: 'open', listeners: {},

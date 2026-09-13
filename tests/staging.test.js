@@ -75,10 +75,10 @@ function makePlayers(env) {
 	function impl(kind) {
 		return {
 			attach(el, opts) {
-				// The real MSE player replaces its element on every reconnect
-				// (cloneNode plus replaceChild, keeping the id), so anything
-				// holding the old node is holding a detached one. Model that.
-				if (kind === 'mse') el = env.replaceNode(el.id);
+				// The real MSE player resets its element in place on every
+				// reconnect (freshVideo clears src/srcObject and reloads, keeping
+				// the same node), so the element the swap handed over is the one
+				// the player keeps using — no clone, no replaceChild.
 				const p = {
 					kind: kind, el: el, destroyed: false, opts: opts,
 					streamSet: null, audioCalls: 0,
@@ -118,13 +118,6 @@ function makePlayers(env) {
 function load(pickedTransport, cfg, cfgDelay, wasmOk, srcs, srcDelay, store) {
 	const env = { made: [], els: {}, storage: store || {} };
 	IDS.forEach((id) => { env.els['#' + id] = makeEl(id); });
-	// Swap in a fresh node under the same id, as replaceChild does.
-	env.replaceNode = (id) => {
-		const fresh = makeEl(id);
-		fresh.style = Object.assign({}, env.els['#' + id].style);
-		env.els['#' + id] = fresh;
-		return fresh;
-	};
 	const impls = makePlayers(env);
 
 	const win = {
@@ -1023,14 +1016,15 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			after.kind !== 'wasm', after.kind);
 	}
 
-	group('a cloned MSE element does not strand the swap');
+	group('the live MSE element stays put when the swap picks a spare');
 	{
 		const env = load('mse');
 		await tick();
 		const first = env.made[0];
 		first.say('playing');
-		// MSE has since replaced its node; the swap must not be holding the
-		// detached one when it picks a spare.
+		// MSE keeps its element in place (freshVideo resets it, never replaces
+		// it), so the swap and the player agree on which node the live picture
+		// is on when a spare is taken for a trial.
 		check('the live player is on the current node',
 			first.el === env.el('live-video'), 'stale');
 
