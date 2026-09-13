@@ -4,8 +4,8 @@
 //
 // Two protocols behind one pad. Stepped backends (gpio-motors, the motor
 // profiles) take ?h=&v= magnitudes and buttons carry data-dir; the Pelco-D
-// backend (btzoom) takes ?act= verbs — four directions, zoom, focus — each a
-// fixed timed pulse the camera ends by itself, and buttons carry data-act.
+// backend takes ?act= verbs — four directions, zoom, focus — driven by
+// majestic, which owns that wire, and buttons carry data-act.
 // The markup decides which kind this camera has; this file just reads what
 // the buttons say.
 //
@@ -32,18 +32,17 @@
 		lc: [-1, 0], cc: [0, 0], rc: [1, 0],
 		dl: [-1, -1], dc: [0, -1], dr: [1, -1],
 	};
-	let inflight = false, holdTimer = null, queuedStop = null;
+	let inflight = false, holdTimer = null, queuedStop = null, holdBtn = null;
 
 	// One request in flight at a time — a hold does not queue moves behind a
 	// slow camera, it just measures out what the camera keeps up with. For
-	// Pelco this is also the pulse pacing: btzoom answers only after its
-	// pulse has ended, so a hold strings pulses end to end rather than
-	// stacking them. The one press that must NOT be droppable is stop: a
-	// Pelco pulse is in flight half the time, and a stop that vanished into
-	// that window would let the hold's next pulse move a camera the user
-	// just told to stand still — so it queues, and goes out the moment the
-	// current request answers. apiFetch rather than fetch: a lapsed session
-	// redirects to the login page instead of 401ing invisibly at 4 Hz.
+	// Pelco each tick re-arms the camera's auto-stop deadline, so the motor
+	// runs continuously while the button is down rather than in steps. The
+	// one press that must NOT be droppable is stop: a move is under way when
+	// it is sent, and a stop that vanished would leave the motor running
+	// until its deadline — so it queues, and goes out the moment the current
+	// request answers. apiFetch rather than fetch: a lapsed session redirects
+	// to the login page instead of 401ing invisibly at 4 Hz.
 	function req(query, isStop) {
 		if (inflight) {
 			if (isStop) queuedStop = query;
@@ -52,11 +51,11 @@
 		inflight = true;
 		apiFetch('/cgi-bin/j/ptz.cgi?' + query, { credentials: 'same-origin' })
 			// The body, not just the headers: j/ptz.cgi answers 200 before it
-			// execs anything, so the headers arrive in milliseconds while the
-			// motor is still moving. The body closes when the CGI exits —
-			// that is the end of a Pelco pulse, and it is what makes a held
-			// button string pulses end to end instead of stacking requests
-			// four times a second behind the camera's port lock.
+			// does anything, so the headers arrive in milliseconds. Reading
+			// to the end of the body is what keeps one request in flight at
+			// a time — the stepped backends still block for the length of
+			// their step, and the AF verb holds its request for the whole
+			// pass.
 			.then(r => r.text())
 			.catch(() => {})
 			.finally(() => {
@@ -78,10 +77,21 @@
 	function startHold(btn) {
 		stopHold();
 		fire(btn);
+		holdBtn = btn;
 		holdTimer = setInterval(() => fire(btn), TICK_MS);
 	}
+	// Releasing a Pelco button has to say so. The camera runs the motor until
+	// a deadline it re-arms on every request, which is what lets a hold be one
+	// continuous move instead of a train of 500 ms steps — but it also means
+	// the motor keeps going for that long after the last tick unless the
+	// release is sent. (It stops by itself either way: that deadline is what
+	// makes a closed tab or a dropped link safe.) The stepped backends move by
+	// a fixed step per request and have nothing to stop.
 	function stopHold() {
 		if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+		const btn = holdBtn;
+		holdBtn = null;
+		if (btn && btn.dataset.act) req('act=stop', true);
 	}
 
 	// The centre is a single press on both pads: the stepped backends call it

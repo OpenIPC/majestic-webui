@@ -4,9 +4,9 @@
 #
 #   ?h=<±N>&v=<±N>   step move — GPIO stepper (gpio-motors) or profile motor
 #                    (/usr/bin/motor)
-#   ?act=<verb>      timed pulse — Pelco-D (/usr/bin/btzoom) or the XiongMai
-#                    variant (/usr/bin/btzoom-xm) over serial:
-#                    up down left right stop wide tele near far
+#   ?act=<verb>      serial motor — majestic drives it (GET /ptz), because
+#                    majestic owns that wire: up down left right stop wide
+#                    tele near far
 #
 # Both shapes answer 200 first, like the rest of j/; the pad never reads the
 # body. act= wins when both are present — a caller that sends both knows the
@@ -46,15 +46,26 @@ echo "$VERTICAL" | grep -qE '^-?[0-9]{1,2}$' || VERTICAL=0
 ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 
 pelco_ok=0
-pelco_bin=""
+pelco_why=""
 gpio_ok=0
 motor_ok=0
 profile=""
 case "$ptz_control" in
-	# Two Pelco-shaped serial protocols, one verb set: btzoom is classic
-	# Pelco-D, btzoom-xm the XiongMai near-Pelco wire (sandbox#31).
-	pelco-d) pelco_bin=/usr/bin/btzoom; [ -x "$pelco_bin" ] && pelco_ok=1 ;;
-	pelco-xm) pelco_bin=/usr/bin/btzoom-xm; [ -x "$pelco_bin" ] && pelco_ok=1 ;;
+	# Two Pelco-shaped serial protocols, one verb set, one driver: majestic
+	# holds the port and the WebUI asks it for a verb. This used to exec
+	# /usr/bin/btzoom or /usr/bin/btzoom-xm, which opened the same tty
+	# majestic's autofocus was driving and raced it for every press.
+	pelco-d|pelco-xm)
+		mj_ptz > /dev/null 2>&1
+		case $? in
+			0) pelco_ok=1 ;;
+			3) pelco_why="Motor driver (majestic-af) is not installed on this camera." ;;
+			1) pelco_why="majestic reports no motorized lens on this camera." ;;
+			# Could not ask is not an answer about the hardware: keep the
+			# verb reachable and let the attempt report its own failure.
+			*) pelco_ok=1 ;;
+		esac
+		;;
 	gpio)
 		# Binary AND a pin list (either name — the binary reads ptz_gpio
 		# first, legacy gpio_motors second), mirroring update_caminfo.
@@ -87,11 +98,13 @@ has_cap() {
 	return 1
 }
 
-# The verb is matched against the closed list, never passed through: the
-# scripts dispatch on the verb ("pelcoD_$1"), so an unlisted word must never
-# reach them raw. (start/day/night exist in btzoom but are lens maintenance,
-# not viewing controls — not reachable from here.) Both Pelco variants take
-# the same nine verbs, which is why one pad serves them both.
+# The verb is matched against the closed list, never passed through. majestic
+# validates it too — the word becomes a frame on a wire, and it refuses
+# anything not in its own table — but this endpoint must not be the layer that
+# relies on that. (day/night exist on the Pelco-D wire but are lens
+# maintenance, not viewing controls: reachable by name through majestic, never
+# from here.) Both Pelco variants take the same nine verbs, which is why one
+# pad serves them both.
 # Is majestic's autofocus engine switched on?
 #
 # Asked separately from the rest of the gate so that "the camera did not
@@ -121,10 +134,10 @@ af_enabled() {
 
 if [ -n "$ACTION" ]; then
 	# Autofocus is majestic's engine, not a pelco verb: the daemon reads the
-	# ISP's focus statistic and drives the same motor, holding btzoom's port
-	# lock. The request stays open while the pass runs — request lifetime is
-	# how the pad paces itself — but the trigger answers immediately, so a
-	# poll loop stands in for the pass's duration.
+	# ISP's focus statistic and drives the same motor it drives for the pad.
+	# The request stays open while the pass runs — request lifetime is how the
+	# pad paces itself — but the trigger answers immediately, so a poll loop
+	# stands in for the pass's duration.
 	if [ "$ACTION" = "af" ]; then
 		if ! af_enabled; then
 			echo "Autofocus not available on this camera."
@@ -175,31 +188,24 @@ if [ -n "$ACTION" ]; then
 					echo "Not supported by this camera's PTZ."
 					exit 1
 				fi
-				"$pelco_bin" "$ACTION"
+				# One request per press, and one more every quarter second
+				# while the button is held: each re-arms the camera's own
+				# auto-stop deadline, so the motor runs continuously and
+				# stops by itself if the release never arrives. The
+				# follow-up focus after a zoom is booked inside majestic
+				# now -- it knows when the operator stopped driving, which
+				# is what the old ?settle call was trying to guess from a
+				# lock file.
+				out=$(mj_ptz "$ACTION")
 				rc=$?
-				# A zoom step on a motorized lens leaves focus behind, so it
-				# books a one-shot pass. ?settle makes the engine wait for
-				# the port to go quiet first: a held button's pulse train
-				# never yields the quiet window, so the pass runs exactly
-				# once, after the zooming is over. Repeat triggers answer
-				# "busy" and collapse into that one pass.
-				if [ "$rc" = 0 ]; then
-					case "$ACTION" in
-						wide|tele)
-							af_enabled &&
-								curl -s -m 2 \
-									"http://127.0.0.1/autofocus?settle" \
-									> /dev/null
-							;;
-					esac
-				fi
+				[ -n "$out" ] && echo "$out"
 				exit $rc
 				;;
 		esac
 		echo "Unknown PTZ action."
 		exit 1
 	fi
-	echo "Pelco PTZ not available on this device."
+	echo "${pelco_why:-Pelco PTZ not available on this device.}"
 	exit 1
 fi
 

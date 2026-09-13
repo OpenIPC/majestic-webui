@@ -612,11 +612,14 @@ update_caminfo() {
 	# PTZ preview controls. The switch is the U-Boot ptz_control variable
 	# (#227): it names the method — "gpio" (gpio-motors, pins in ptz_gpio,
 	# with the legacy gpio_motors as an alias on both sides), "pelco-d"
-	# (btzoom over serial, port/rate in ptz_port and ptz_speed), "pelco-xm"
-	# (btzoom-xm, the XiongMai UART protocol — same verbs, same pad,
-	# different wire), or "motor" (a motor profile in ptz_profile or the
-	# legacy ptz value). An explicit method is trusted but still needs its
-	# binary — a pad whose every press fails is worse than no pad. Unset
+	# (Pelco-D over serial, port/rate in ptz_port and ptz_speed), "pelco-xm"
+	# (the XiongMai UART protocol — same verbs, same pad, different wire),
+	# or "motor" (a motor profile in ptz_profile or the legacy ptz value).
+	# An explicit method is trusted but still needs something that can
+	# actually drive it — a pad whose every press fails is worse than no
+	# pad. For the two Pelco wires that something is majestic, which owns
+	# the port; the WebUI shipped its own btzoom/btzoom-xm scripts for it
+	# until they were removed for racing the daemon on the same tty. Unset
 	# means no PTZ, exactly like "none" (#227): a camera without ptz_control
 	# shows no pad, so the old auto-detection from gpio_motors/ptz alone is
 	# gone and a field camera configured that way must set ptz_control once.
@@ -636,15 +639,16 @@ update_caminfo() {
 				ptz_support="1"; ptz_backend="gpio"
 			fi
 			;;
-		pelco-d)
-			if [ -x /usr/bin/btzoom ]; then
-				ptz_support="1"; ptz_backend="pelco"
-			fi
-			;;
-		pelco-xm)
-			if [ -x /usr/bin/btzoom-xm ]; then
-				ptz_support="1"; ptz_backend="pelco"
-			fi
+		pelco-d|pelco-xm)
+			# Ask the daemon whether it can drive this wire. Its answers are
+			# kept apart the way af_support keeps them apart: a camera that
+			# could not be asked keeps its pad and lets a press report its
+			# own failure, and only a camera that answered and said no has
+			# the pad withdrawn.
+			mj_ptz > /dev/null 2>&1
+			case $? in
+				0|2) ptz_support="1"; ptz_backend="pelco" ;;
+			esac
 			;;
 		motor)
 			# Same rule: the profile is what the binary is called with, so a

@@ -7,8 +7,8 @@
 
      Which pad depends on the backend common.cgi detected. The stepped
      backends (gpio-motors, motor) take eight directions with magnitudes; the
-     Pelco-D backend (btzoom) speaks four directions in fixed timed pulses and
-     adds zoom and focus.
+     Pelco backend speaks four directions, holding while the button is down,
+     and adds zoom and focus.
 
      The glyphs are gone. Every arrow was Unicode geometry (U+25B2 and
      friends) and the two focus buttons were emoji diamonds, U+1F536 and

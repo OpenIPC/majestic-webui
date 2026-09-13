@@ -577,11 +577,9 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   `ptz_support`). The switch is U-Boot `ptz_control` (#227): `gpio`
   (`gpio-motors` binary; pins in `ptz_gpio`, legacy `gpio_motors` accepted
   as an alias on both sides since firmware#2341), `pelco-d`
-  (`/usr/bin/btzoom`; `ptz_port` default `/dev/ttyAMA0`, `ptz_speed`
-  default 115200 from a whitelist of standard rates), `pelco-xm`
-  (`/usr/bin/btzoom-xm`, the XiongMai near-Pelco UART protocol from
-  sandbox#31 — same nine verbs and the same pad, its own framing and
-  checksum, `ptz_port` default `/dev/ttyAMA1`), or `motor`
+  (standard Pelco-D over serial; `ptz_port`, `ptz_speed`), `pelco-xm`
+  (the XiongMai near-Pelco UART protocol from sandbox#31 — same nine verbs
+  and the same pad, its own framing and checksum), or `motor`
   (`/usr/bin/motor`; profile in `ptz_profile`, legacy `ptz` value as
   fallback). **Unset means no PTZ**, exactly like `none` — the reporter of
   #227 ruled that a camera without `ptz_control` shows no pad, so the old
@@ -591,8 +589,9 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   stepped eight-way pads speaking `j/ptz.cgi?h=&v=` (validated as small
   signed ints); `pelco` covers both serial variants — four
   directions, zoom and focus, each a fixed timed pulse — speaking
-  `j/ptz.cgi?act=<verb>` against a closed whitelist (the scripts dispatch on
-  the verb, so it must never pass through raw). `ptz_caps` narrows the pad
+  `j/ptz.cgi?act=<verb>` against a closed whitelist (the verb becomes a frame
+  on a wire, so it must never pass through raw — majestic validates it again
+  at its end). `ptz_caps` narrows the pad
   to the axes the hardware actually has (`fw_setenv ptz_caps 'zoom focus'`
   for an XM zoom block, tokens pan/tilt/zoom/focus; unset = all): sanitised
   in `update_caminfo`, honoured by `p/motor.cgi` (missing pelco-pad axes
@@ -603,19 +602,33 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   `.isp.autofocus.enabled` true in majestic's config AND a focus axis,
   `update_caminfo` sets `af_support`, the pelco pad grows an **AF** button
   (`data-act="af"`), and `j/ptz.cgi` maps it to majestic's `GET /autofocus`
-  (polling `/autofocus/status` so the pad's request-lifetime pacing holds);
-  after a successful `wide`/`tele` it also fires `GET /autofocus?settle` —
-  the engine waits for btzoom's port lock to go quiet, so a held zoom's
-  pulse train finishes before the one queued pass runs. `bin/btzoom` and
-  `bin/btzoom-xm` ship in this repo (adopted from OpenIPC/sandbox
-  `scripts/pelcoD`, the xm variant hardened to btzoom's standard: shared
-  `/tmp/btzoom.lock`, `ptz_port`/`ptz_speed`, idempotent per-command `stty`)
-  so a Pelco camera needs only `fw_setenv ptz_control pelco-d` (or
-  `pelco-xm`). A held
-  Pelco button strings pulses end-to-end via the one-request-in-flight
-  guard — the script answers only after its pulse ends. To render either pad on
-  a camera without hardware: set the env vars, `touch`+`chmod +x` fake
-  binaries, and remove `/tmp/webui/sysinfo.txt` (no reboot needed).
+  (polling `/autofocus/status` so the pad's request-lifetime pacing holds).
+  The follow-up focus after a zoom is majestic's business now, not this
+  endpoint's: it knows when the operator stopped driving, so nothing here
+  fires `?settle`.
+
+  **majestic owns the Pelco wire.** `j/ptz.cgi` and `update_caminfo` ask it
+  (`mj_ptz` in `p/majestic.sh`, `GET /ptz`); a bare `GET /ptz` is the
+  capability probe that decides whether the pad renders at all. This repo
+  shipped `bin/btzoom` and `bin/btzoom-xm` until they were deleted for
+  opening the same tty majestic's autofocus was driving: they took a
+  `/tmp/btzoom.lock` mkdir lock, which cannot make a three-step movement
+  (drive, wait, stop) atomic against another process. Measured on an
+  hi3516ev300, presses were dropped outright while a pass held the lock and
+  presses that landed were undone by the pass a previous zoom had booked. A
+  Pelco camera now needs `fw_setenv ptz_control pelco-d` (or `pelco-xm`) AND
+  majestic's motor driver, `/usr/lib/majestic-af.so`; without it `GET /ptz`
+  answers 503 and the pad says so rather than claiming the camera has no PTZ.
+  `mj_ptz` keeps those apart the way `mj_cfg` does — *could not ask* never
+  becomes a statement about the hardware.
+
+  A held Pelco button is one continuous move, not a train of pulses: each
+  request re-arms majestic's auto-stop deadline (`isp.autofocus.pulse`,
+  default 500 ms), the release sends `act=stop`, and the motor stops on that
+  deadline anyway if the release never arrives. To render either pad on a
+  camera without hardware: set the env vars, and for the stepped backends
+  `touch`+`chmod +x` a fake binary; then remove `/tmp/webui/sysinfo.txt` (no
+  reboot needed).
 - **Two clocks, and the page says which one it is printing.** Every second in
   `recordings.js` and `timeline.js` is **camera-local** and must stay that way:
   clips are named by the camera's own strftime, so day folders, the ribbon and

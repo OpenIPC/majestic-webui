@@ -767,8 +767,8 @@ do_install() {
 	# replaced, and everything derived at detection time — PTZ backend and
 	# support, most visibly — stays frozen at the old release's answers until
 	# something regenerates it. Drop it; the next request rebuilds it with
-	# the new code. (A camera that gained /usr/bin/btzoom from this very
-	# install would otherwise hide its pad until a reboot.)
+	# the new code. (A camera whose PTZ availability changed in this very
+	# install would otherwise hide or show its pad only after a reboot.)
 	rm -f /tmp/webui/sysinfo.txt
 	echo
 	echo "WebUI updated to $source_name."

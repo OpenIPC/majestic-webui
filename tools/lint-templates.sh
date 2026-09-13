@@ -118,8 +118,9 @@ esac
 # inside the label.
 #
 # bin/ is in the sweep because sbin/updatewebui's PAYLOAD installs it to
-# /usr/bin -- btzoom, btzoom-xm and ntfy.sh are shipped scripts like any other,
-# and were the only ones nothing checked.
+# /usr/bin -- ntfy.sh is a shipped script like any other, and was one of the
+# ones nothing checked. (btzoom and btzoom-xm were the others, until majestic
+# took the motor UART over and they were deleted.)
 find www sbin bin -type f 2>/dev/null | sort | while IFS= read -r s; do
 	if ! first_line "$s"; then
 		printf '%s: cannot read\n' "$s" >> "$FAILS"

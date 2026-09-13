@@ -58,3 +58,38 @@ mj_cfg() {
 	esac
 	printf '%s' "${_mj_r%|*}"
 }
+
+# Drive the motor, or ask what this camera's motor can do.
+#
+# majestic owns the PTZ wire -- the out-of-core majestic-af plugin is the only
+# writer on it -- so the WebUI asks for a verb instead of opening the port
+# itself. It used to open it: bin/btzoom and bin/btzoom-xm wrote Pelco frames
+# to the same tty the autofocus pass was driving, arbitrated by a lock
+# directory that could not make a three-step movement (drive, wait, stop)
+# atomic against another process. Presses were dropped while a pass held the
+# lock, and presses that landed were undone by the pass a previous zoom had
+# booked.
+#
+#   mj_ptz <verb>   start or continue a move; the camera stops the motor on
+#                   its own deadline, so a lost release cannot run a lens into
+#                   its end stop
+#   mj_ptz          the capability line (actuator, port, speed, pulse, verbs)
+#
+# Return codes, kept apart the way mj_cfg keeps them apart -- "could not ask"
+# must never reach the operator as a statement about their hardware:
+#   0  answered; the reply is on stdout
+#   1  this camera declares no motorized lens (404)
+#   3  it does, but the motor driver is not on this build (503)
+#   2  could not ask
+mj_ptz() {
+	_mj_r=$(curl -s -m 3 -w '|%{http_code}' \
+		"http://127.0.0.1/ptz${1:+?move=$1}" 2>/dev/null) || return 2
+	_mj_code=${_mj_r##*|}
+	case "$_mj_code" in
+		200) ;;
+		404) return 1 ;;
+		503) return 3 ;;
+		*) return 2 ;;
+	esac
+	printf '%s' "${_mj_r%|*}"
+}
