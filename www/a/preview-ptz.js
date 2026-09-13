@@ -55,7 +55,11 @@
 			return;
 		}
 		inflight = true;
-		apiFetch('/cgi-bin/j/ptz.cgi?' + query, { credentials: 'same-origin' })
+		// POST, always: every request this makes moves a motor or steps a
+		// pad, and the endpoint refuses anything else. A GET would be
+		// issuable by any page the operator happens to have open.
+		apiFetch('/cgi-bin/j/ptz.cgi?' + query,
+			{ method: 'POST', credentials: 'same-origin' })
 			// The body, not just the headers: j/ptz.cgi answers 200 before it
 			// does anything, so the headers arrive in milliseconds. Reading
 			// to the end of the body is what keeps one request in flight at

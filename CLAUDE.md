@@ -590,8 +590,11 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   signed ints); `pelco` covers both serial variants — four
   directions, zoom and focus, each a fixed timed pulse — speaking
   `j/ptz.cgi?act=<verb>` against a closed whitelist (the verb becomes a frame
-  on a wire, so it must never pass through raw — majestic validates it again
-  at its end). `ptz_caps` narrows the pad
+  on a wire, so it must never pass through raw — the camera validates it again
+  at its end). **Both pads POST**, and `j/ptz.cgi` answers 405 to anything
+  else: a GET is what a browser issues on its own, it carries the session, and
+  a CGI that turned one into a camera command would be the deputy that undoes
+  the camera's own refusal of a GET. `ptz_caps` narrows the pad
   to the axes the hardware actually has (`fw_setenv ptz_caps 'zoom focus'`
   for an XM zoom block, tokens pan/tilt/zoom/focus; unset = all): sanitised
   in `update_caminfo`, honoured by `p/motor.cgi` (missing pelco-pad axes

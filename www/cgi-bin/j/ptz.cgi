@@ -14,6 +14,22 @@
 
 . "$(dirname "$0")/../p/majestic.sh"
 
+# Moving hardware is not a safe method. A GET is what a browser issues on its
+# own -- a prefetch, a restored tab, an <img> or a form on somebody else's page
+# -- and it carries the session with it. The camera refuses a GET on its own
+# /ptz for exactly that reason, and refusing it here too is what stops this
+# endpoint being the deputy that turns an attacker's GET into a legitimate
+# POST: everything below either drives a motor or steps a pad.
+if [ "$REQUEST_METHOD" != "POST" ]; then
+	echo "HTTP/1.1 405 Method Not Allowed
+Content-type: text/plain; charset=UTF-8
+Allow: POST
+Cache-Control: no-store
+
+Use POST to move the camera."
+	exit 1
+fi
+
 echo "HTTP/1.1 200 OK
 Content-type: text/plain; charset=UTF-8
 Cache-Control: no-store
