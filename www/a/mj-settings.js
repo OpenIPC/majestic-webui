@@ -217,6 +217,15 @@
 	const LIVE_ID = 'live';
 	const ROI_ID = 'roi';
 	const ROI_DOT = 'motionDetect.roi';
+	const AF_ID = 'autofocus';
+	const MOTOR_ID = 'motorControls';
+	const PREF = {
+		overlay: 'openipc.af.overlay',
+		controls: 'openipc.motor.controls',
+		focusMs: 'openipc.motor.focusClickMs',
+		moveMs: 'openipc.motor.moveClickMs',
+		holdMs: 'openipc.motor.maxHoldMs',
+	};
 	// matches the col-md-3 stacking point: below it the rail is full width and
 	// the categories collapse to an accordion
 	const WIDE = window.matchMedia('(min-width: 768px)');
@@ -259,6 +268,8 @@
 	}
 
 	function label(key) {
+		if (key === AF_ID) return 'Autofocus';
+		if (key === MOTOR_ID) return 'Motor controls';
 		return (boot.labels && boot.labels[key]) ||
 			(key ? key.charAt(0).toUpperCase() + key.slice(1) : key);
 	}
@@ -276,6 +287,9 @@
 		if (!state.tree || state.tree.schema !== state.schema) {
 			state.tree = TREE.build(state.schema, {
 				exclude: EXCLUDE, liveOrder: LIVE_ORDER, liveId: LIVE_ID, liveLabel,
+				extracted: [{ id: AF_ID, from: 'isp.autofocus' }],
+				customGroups: [{ id: 'motor', label: 'Motors',
+					sections: [AF_ID, MOTOR_ID], customLeaves: [MOTOR_ID] }],
 			});
 			state.tree.schema = state.schema;
 		}
@@ -784,6 +798,229 @@
 		liveTimer = setTimeout(() => { liveTimer = null; postLive(liveQuery(liveValue)); }, 120);
 	}
 
+	function preference(key, fallback) {
+		try {
+			const value = localStorage.getItem(key);
+			return value == null ? fallback : value;
+		} catch (e) {
+			return fallback;
+		}
+	}
+
+	function setPreference(key, value) {
+		try { localStorage.setItem(key, value); } catch (e) {}
+	}
+
+	function settingsCard(form, title) {
+		const card = el('div', 'card');
+		const body = el('div', 'card-body');
+		const head = el('div', 'mj-live-head');
+		const h = el('h3', 'mj-cap');
+		h.textContent = title;
+		head.appendChild(h);
+		head.appendChild(el('span', 'mj-live-rule'));
+		body.appendChild(head);
+		const cols = el('div', 'mj-cols');
+		cols.appendChild(el('div', 'mj-col'));
+		cols.appendChild(el('div', 'mj-col'));
+		body.appendChild(cols);
+		card.appendChild(body);
+		form.appendChild(card);
+		state.cols = cols;
+		return cols;
+	}
+
+	function preferenceSelect(container, title, hint, key, choices, fallback) {
+		const row = el('div', 'mb-3');
+		const id = 'pref-' + key.replace(/[^a-z0-9]+/gi, '-');
+		const lab = el('label', 'form-label');
+		lab.htmlFor = id;
+		lab.textContent = title;
+		const select = el('select', 'form-select');
+		select.id = id;
+		for (const choice of choices) {
+			const option = el('option');
+			option.value = choice[0];
+			option.textContent = choice[1];
+			select.appendChild(option);
+		}
+		select.value = preference(key, fallback);
+		select.addEventListener('change', () => setPreference(key, select.value));
+		row.appendChild(lab);
+		row.appendChild(select);
+		const note = el('div', 'form-text');
+		note.textContent = hint;
+		row.appendChild(note);
+		container.appendChild(row);
+	}
+
+	function preferenceNumber(container, title, hint, key, fallback, min, max) {
+		const row = el('div', 'mb-3');
+		const id = 'pref-' + key.replace(/[^a-z0-9]+/gi, '-');
+		const lab = el('label', 'form-label');
+		lab.htmlFor = id;
+		lab.textContent = title;
+		const input = el('input', 'form-control');
+		input.id = id;
+		input.type = 'number';
+		input.min = String(min);
+		input.max = String(max);
+		input.step = '10';
+		input.value = preference(key, String(fallback));
+		input.addEventListener('change', () => {
+			let value = parseInt(input.value, 10);
+			if (!Number.isFinite(value)) value = fallback;
+			value = Math.max(min, Math.min(max, value));
+			input.value = String(value);
+			setPreference(key, String(value));
+		});
+		row.appendChild(lab);
+		row.appendChild(input);
+		const note = el('div', 'form-text');
+		note.textContent = hint;
+		row.appendChild(note);
+		container.appendChild(row);
+	}
+
+	function renderAutofocus(form) {
+		const cols = settingsCard(form, 'Autofocus');
+		const isp = (state.schema.properties || {}).isp || {};
+		const af = (isp.properties || {}).autofocus || {};
+		renderProps(cols.firstElementChild, 'isp.autofocus', af.properties || {});
+		preferenceSelect(cols.lastElementChild, 'AF overlay',
+			'This choice applies to this browser.', PREF.overlay,
+			[['active', 'During AF'], ['off', 'Off']], 'active');
+	}
+
+	function renderMotorControls(form) {
+		const cols = settingsCard(form, 'Motor controls');
+		const status = el('div');
+		const motor = boot.motor || {};
+		const rows = [
+			['Service', motor.available ? 'Available' : 'Not detected'],
+			['Backend', motor.backend || 'None'],
+			['Axes', motor.axes || 'None'],
+			['Autofocus', motor.af ? 'Available' : 'Not detected'],
+		];
+		for (const item of rows) {
+			const p = el('p', 'mb-2');
+			const name = el('strong');
+			name.textContent = item[0] + ': ';
+			p.appendChild(name);
+			p.appendChild(document.createTextNode(item[1]));
+			status.appendChild(p);
+		}
+		cols.firstElementChild.appendChild(status);
+		preferenceSelect(cols.lastElementChild, 'Show motor controls',
+			'This choice applies to this browser and does not disable the motor service.',
+			PREF.controls, [['auto', 'Automatic'], ['hidden', 'Hidden']], 'auto');
+		preferenceNumber(cols.lastElementChild, 'Focus click time',
+			'Movement from one short focus click, in milliseconds.',
+			PREF.focusMs, 70, 20, 1000);
+		preferenceNumber(cols.lastElementChild, 'Movement click time',
+			'Movement from one short pan, tilt, or zoom click, in milliseconds.',
+			PREF.moveMs, 150, 20, 1000);
+		preferenceNumber(cols.lastElementChild, 'Maximum hold time',
+			'Maximum movement from one held control, in milliseconds.',
+			PREF.holdMs, 5000, 500, 10000);
+		renderDeviceControls(form);
+	}
+
+	async function renderDeviceControls(form) {
+		if (!(boot.motor || {}).available) return;
+		let description;
+		try {
+			const response = await apiFetch('/cgi-bin/j/ptz.cgi?describe=1', {
+				credentials: 'same-origin',
+			});
+			description = await response.json();
+			if (!description.ok) return;
+		} catch (e) { return; }
+		if (state.sec !== MOTOR_ID) return;
+
+		const controls = new Map((description.controls || []).map(item => [item.id, item]));
+		if (!controls.size) return;
+		const cols = settingsCard(form, description.label || 'Device settings');
+		(description.menus || []).forEach((menu, menuIndex) => {
+			const column = cols.children[menuIndex % 2];
+			const heading = el('h4', 'h6 mt-2 mb-3');
+			heading.textContent = menu.label || menu.id;
+			column.appendChild(heading);
+			(menu.items || []).forEach(id => {
+				if (id.indexOf('__') === 0) return;
+				const control = controls.get(id);
+				if (control) renderDeviceControl(column, control);
+			});
+		});
+	}
+
+	function renderDeviceControl(container, control) {
+		const row = el('div', 'mb-3');
+		const label = el('label', 'form-label');
+		label.textContent = control.label || control.name;
+		row.appendChild(label);
+		let input = null;
+		if (control.type === 'number') {
+			input = el('input', 'form-control');
+			input.type = 'number';
+			if (control.min !== undefined) input.min = String(control.min);
+			if (control.max !== undefined) input.max = String(control.max);
+			if (control.step !== undefined) input.step = String(control.step);
+			input.value = control.default !== undefined ? String(control.default) : '';
+			row.appendChild(input);
+		} else if (control.type === 'choice' || control.type === 'toggle') {
+			input = el('select', 'form-select');
+			(control.options || []).forEach(item => {
+				const option = el('option');
+				option.value = item.value;
+				option.textContent = item.label || item.value;
+				input.appendChild(option);
+			});
+			if (control.default !== undefined) input.value = String(control.default);
+			row.appendChild(input);
+		}
+		const button = el('button', 'btn btn-outline-primary mt-2');
+		button.type = 'button';
+		button.textContent = control.type === 'action' ? (control.label || 'Run') : 'Apply';
+		const result = el('div', 'form-text');
+		button.addEventListener('click', async () => {
+			const warning = control.warning || control.description;
+			if (control.confirm && !window.confirm(warning || 'Run this command?')) return;
+			if (control.type === 'number') {
+				const value = Number(input.value);
+				const below = control.min !== undefined && value < Number(control.min);
+				const above = control.max !== undefined && value > Number(control.max);
+				if (!Number.isFinite(value) || below || above) {
+					result.textContent = 'Enter a value in the allowed range.';
+					return;
+				}
+			}
+			button.disabled = true;
+			result.textContent = 'Sending…';
+			let query = 'command=' + encodeURIComponent(control.name);
+			if (input) query += '&value=' + encodeURIComponent(input.value);
+			try {
+				const response = await apiFetch('/cgi-bin/j/ptz.cgi?' + query, {
+					method: 'POST',
+					credentials: 'same-origin',
+				});
+				const body = await response.text();
+				if (!body.includes('"ok":true')) throw new Error();
+				result.textContent = 'Command sent. The camera does not report this value.';
+			} catch (e) {
+				result.textContent = 'Command failed.';
+			} finally { button.disabled = false; }
+		});
+		row.appendChild(button);
+		if (control.description) {
+			const note = el('div', 'form-text');
+			note.textContent = control.description;
+			row.appendChild(note);
+		}
+		row.appendChild(result);
+		container.appendChild(row);
+	}
+
 	async function load(tab, push) {
 		const form = document.getElementById('mj-settings-form');
 		if (!form) return;
@@ -843,6 +1080,10 @@
 		// down the left as a single strip of controls.
 		if (sec === LIVE_ID) {
 			renderLive(form);
+		} else if (sec === AF_ID) {
+			renderAutofocus(form);
+		} else if (sec === MOTOR_ID) {
+			renderMotorControls(form);
 		} else if (sec === 'osd') {
 			renderOsd(form);
 		} else if (sec === 'motionDetect') {
@@ -886,7 +1127,8 @@
 			const props = ((state.schema.properties || {})[sec] || {}).properties || {};
 			// all rows into the first column; layoutCols() deals the tail over
 			// into the second once applyVisibility() has settled what is on screen
-			renderProps(cols.firstElementChild, sec, props);
+			const moved = sec === 'isp' ? new Set(['isp.autofocus']) : undefined;
+			renderProps(cols.firstElementChild, sec, props, moved);
 			// The destinations board is the section, not a field in it. Dealt
 			// into one of two columns it gets half the card — which is the
 			// narrow strip the board exists to replace — so it is lifted out

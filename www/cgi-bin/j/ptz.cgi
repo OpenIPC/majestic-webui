@@ -20,7 +20,8 @@
 # /ptz for exactly that reason, and refusing it here too is what stops this
 # endpoint being the deputy that turns an attacker's GET into a legitimate
 # POST: everything below either drives a motor or steps a pad.
-if [ "$REQUEST_METHOD" != "POST" ]; then
+if [ "$REQUEST_METHOD" != "POST" ] &&
+	{ [ "$REQUEST_METHOD" != "GET" ] || [ "$QUERY_STRING" != "describe=1" ]; }; then
 	echo "HTTP/1.1 405 Method Not Allowed
 Content-type: text/plain; charset=UTF-8
 Allow: POST
@@ -40,11 +41,19 @@ Pragma: no-cache
 HORIZONTAL=0
 VERTICAL=0
 ACTION=""
+DURATION_MS=""
+DESCRIBE=""
+COMMAND=""
+VALUE=""
 for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 	case "$param" in
 		h=*) HORIZONTAL="${param#*=}" ;;
 		v=*) VERTICAL="${param#*=}" ;;
 		act=*) ACTION="${param#*=}" ;;
+		duration_ms=*) DURATION_MS="${param#*=}" ;;
+		describe=*) DESCRIBE="${param#*=}" ;;
+		command=*) COMMAND="${param#*=}" ;;
+		value=*) VALUE="${param#*=}" ;;
 	esac
 done
 
@@ -54,6 +63,45 @@ done
 # zero, same as j/time.cgi's pattern.
 echo "$HORIZONTAL" | grep -qE '^-?[0-9]{1,2}$' || HORIZONTAL=0
 echo "$VERTICAL" | grep -qE '^-?[0-9]{1,2}$' || VERTICAL=0
+echo "$DURATION_MS" | grep -qE '^[0-9]{1,4}$' || DURATION_MS=""
+if [ -n "$DURATION_MS" ] &&
+	{ [ "$DURATION_MS" -lt 1 ] || [ "$DURATION_MS" -gt 5000 ]; }; then
+	DURATION_MS=""
+fi
+
+service_ok=0
+if [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]; then
+	motor_caps=$(/usr/bin/motorsctl --socket /run/motorsd.sock \
+		'{"version":1,"id":"webui-caps","op":"capabilities"}' 2>/dev/null)
+	case "$motor_caps" in *'"available":true'*) service_ok=1 ;; esac
+fi
+
+if [ "$DESCRIBE" = 1 ]; then
+	[ "$service_ok" = 1 ] || {
+		echo '{"version":1,"id":"webui-settings","ok":false,"error":"motor service unavailable"}'
+		exit 1
+	}
+	exec /usr/bin/motorsctl --socket /run/motorsd.sock \
+		'{"version":1,"id":"webui-settings","op":"describe"}'
+fi
+
+if [ -n "$COMMAND" ]; then
+	if [ "$service_ok" != 1 ] ||
+		! echo "$COMMAND" | grep -qE '^[a-z0-9]+([.][a-z0-9]+)*$'; then
+		echo "Invalid or unavailable motor command."
+		exit 1
+	fi
+	if [ -n "$VALUE" ]; then
+		echo "$VALUE" | grep -qE '^[A-Za-z0-9_-]{1,64}$' || {
+			echo "Invalid motor command value."
+			exit 1
+		}
+		exec /usr/bin/motorsctl --socket /run/motorsd.sock \
+			"{\"version\":1,\"id\":\"webui-command\",\"op\":\"command\",\"name\":\"$COMMAND\",\"value\":\"$VALUE\"}"
+	fi
+	exec /usr/bin/motorsctl --socket /run/motorsd.sock \
+		"{\"version\":1,\"id\":\"webui-command\",\"op\":\"command\",\"name\":\"$COMMAND\"}"
+fi
 
 # The same switch update_caminfo honours (#227): ptz_control names the
 # method outright. Unset means no PTZ, same as "none" or an unknown method —
@@ -212,7 +260,11 @@ if [ -n "$ACTION" ]; then
 				# now -- it knows when the operator stopped driving, which
 				# is what the old ?settle call was trying to guess from a
 				# lock file.
-				out=$(mj_ptz "$ACTION")
+				if [ -n "$DURATION_MS" ] && [ "$ACTION" != "stop" ]; then
+					out=$(mj_ptz "$ACTION:$DURATION_MS")
+				else
+					out=$(mj_ptz "$ACTION")
+				fi
 				rc=$?
 				[ -n "$out" ] && echo "$out"
 				exit $rc

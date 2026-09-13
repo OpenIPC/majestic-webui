@@ -16,8 +16,8 @@
      nothing about focus, in a typeface nobody controls. They are inline SVG
      on a 20px grid now, the same set the rest of the stage uses.
 
-     Zoom and focus also gained the words they send. A magnifier is read by
-     everybody, so zoom keeps its icon and adds WIDE/TELE; focus has no glyph
+     Zoom and focus also gained direct labels. A magnifier is read by
+     everybody, so zoom keeps its icon and adds IN/OUT; focus has no glyph
      anyone decodes — photography's flower and mountain mean close-up and
      landscape MODES on a stills camera, not "pull focus nearer" on a moving
      lens — so NEAR and FAR carry it, with the icon holding only the idea of
@@ -57,13 +57,13 @@ has_cap() {
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
 			<circle cx="8.8" cy="8.8" r="5.6"></circle><path d="M12.9 12.9 17 17M6.4 8.8h4.8"></path>
 		</svg>
-		<span>Wide</span>
+		<span>Out</span>
 	</button>
 	<button type="button" class="mj-ptz-fnbtn" data-act="tele" aria-label="Zoom in" title="Zoom in (tele)">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
 			<circle cx="8.8" cy="8.8" r="5.6"></circle><path d="M12.9 12.9 17 17M6.4 8.8h4.8M8.8 6.4v4.8"></path>
 		</svg>
-		<span>Tele</span>
+		<span>In</span>
 	</button>
 	<% fi %>
 	<% if has_cap focus; then %>
