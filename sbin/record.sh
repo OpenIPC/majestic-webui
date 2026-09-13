@@ -28,20 +28,27 @@ reason=$2
 
 # A subshell per extension: both configs are read into this shell, and the
 # second one must not see what the first one set.
+#
+# A sender that was asked to run and failed makes this fail too. The camera
+# does not read the status, but a person running it by hand does, and "the
+# clip went nowhere" must not look like "nothing to do".
+rc=0
+
 if [ -x /usr/sbin/telegram ] && [ -e /etc/webui/telegram.conf ]; then
 	(
 		. /etc/webui/telegram.conf
-		[ "$telegram_enabled" = "true" ] && [ "$telegram_clips" = "true" ] &&
-			/usr/sbin/telegram "$clip"
-	)
+		[ "$telegram_enabled" = "true" ] && [ "$telegram_clips" = "true" ] ||
+			exit 0
+		/usr/sbin/telegram "$clip"
+	) || rc=1
 fi
 
 if [ -x /usr/bin/ntfy.sh ] && [ -e /etc/webui/ntfy.conf ]; then
 	(
 		. /etc/webui/ntfy.conf
-		[ "$ntfy_enabled" = "true" ] && [ "$ntfy_clips" = "true" ] &&
-			/usr/bin/ntfy.sh "$clip"
-	)
+		[ "$ntfy_enabled" = "true" ] && [ "$ntfy_clips" = "true" ] || exit 0
+		/usr/bin/ntfy.sh "$clip"
+	) || rc=1
 fi
 
-exit 0
+exit $rc

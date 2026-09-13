@@ -204,7 +204,12 @@ server.listen(0, '127.0.0.1', async () => {
 			req.parts.caption.body.toString() === 'lab-cam cam',
 			req.parts && req.parts.caption && req.parts.caption.body.toString());
 		check('exits 0 on 200', r.status === 0, 'status ' + r.status);
-		check('never prints the token', !r.stdout.includes('BOTTOKEN'), r.stdout.slice(0, 80));
+		// stderr as well as stdout: curl's --verbose wrote the request line
+		// there, and the request line carries the bot token. Nothing read it
+		// while this ran from cron; a hook that runs per clip hands its
+		// stderr to whatever called it.
+		check('never prints the token', !(r.stdout + r.stderr).includes('BOTTOKEN'),
+			(r.stdout + r.stderr).slice(0, 120));
 	}
 
 	group('telegram — a clip, given its path');
@@ -281,7 +286,9 @@ server.listen(0, '127.0.0.1', async () => {
 			['localhost/image.heif', '127.0.0.1:' + port + '/image.heif'],
 		], 'ntfy-auth.sh');
 		const a = await run(authed, [clip]);
-		check('never prints the password', !a.stdout.includes('s3cr3t'), a.stdout.slice(0, 80));
+		check('never prints the password',
+			!(a.stdout + a.stderr).includes('s3cr3t'),
+			(a.stdout + a.stderr).slice(0, 120));
 
 		reset();
 		const off = conf('ntfy-off.conf', 'ntfy_enabled="false"\nntfy_topic="doorbell"\n');
@@ -293,6 +300,30 @@ server.listen(0, '127.0.0.1', async () => {
 		const o = await run(offed, []);
 		check('a disabled integration exits non-zero', o.status !== 0, 'status ' + o.status);
 		check('and sends nothing', sent.length === 0, sent.length + ' request(s)');
+	}
+
+	group('both — a clip whose name could close a quote');
+	{
+		// records.path is a pattern an operator types, and both senders build
+		// a command string that is eval'd. A quote in the name used to end
+		// the quoting and hand the rest of it to sh.
+		const odd = path.join(tmp, "o'brien cam.mp4");
+		fs.writeFileSync(odd, CLIP);
+
+		reset();
+		const t = await run(telegram, [odd]);
+		const treq = sent[0] || {};
+		const video = treq.parts && treq.parts.video;
+		check('telegram sends it whole', !!video && video.body.equals(CLIP),
+			video ? video.body.length + ' bytes' : 'no video part');
+		check('telegram exits 0', t.status === 0, 'status ' + t.status);
+
+		reset();
+		const n = await run(ntfy, [odd]);
+		const nreq = sent[0] || {};
+		check('ntfy sends it whole', !!nreq.body && nreq.body.equals(CLIP),
+			nreq.body && nreq.body.length + ' bytes');
+		check('ntfy exits 0', n.status === 0, 'status ' + n.status);
 	}
 
 	group('both — a clip that is not there');

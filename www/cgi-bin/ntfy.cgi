@@ -38,9 +38,11 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         for p in $params; do
             echo "ntfy_${p}=\"$(eval echo \$ntfy_${p})\"" >> "$config_file"
         done
-        clip_hook_sync
+        if clip_hook_sync; then
+            redirect_back "success" "Ntfy config updated."
+        fi
 
-        redirect_back "success" "Ntfy config updated."
+        redirect_back "warning" "Ntfy config updated. $clip_hook_msg"
     fi
 
     redirect_to "$SCRIPT_NAME"

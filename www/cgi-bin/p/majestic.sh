@@ -117,9 +117,25 @@ mj_ptz() {
 #   0  the camera took it
 #   1  the camera refused it (4xx)
 #   2  the camera could not be asked
+# mj_clear <dotted.key> -- remove a key, rather than store an empty value.
+#
+# A null leaf is how the config API is told to REMOVE a key; "" reaches the
+# setter and stores an empty string, which is a key that is set to nothing
+# rather than a key nobody set. For an optional setting those are different
+# states, and only the second is how the camera was found.
+mj_clear() {
+	mj_set "$1" null raw
+}
+
+# The third argument is for mj_clear alone: `raw` sends the value as a JSON
+# literal instead of a string, which is what makes `null` a removal.
 mj_set() {
-	_mj_val=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
-	_mj_body="\"${_mj_val}\""
+	if [ "$3" = raw ]; then
+		_mj_body=$2
+	else
+		_mj_val=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
+		_mj_body="\"${_mj_val}\""
+	fi
 	_mj_path=$1
 	while [ -n "$_mj_path" ]; do
 		_mj_body="{\"${_mj_path##*.}\":${_mj_body}}"

@@ -39,9 +39,11 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			echo "*/${telegram_interval} * * * * /usr/sbin/telegram" >> /etc/crontabs/root
 		fi
 
-		clip_hook_sync
+		if clip_hook_sync; then
+			redirect_back "success" "Telegram config updated."
+		fi
 
-		redirect_back "success" "Telegram config updated."
+		redirect_back "warning" "Telegram config updated. $clip_hook_msg"
 	fi
 
 	redirect_to "$SCRIPT_NAME"

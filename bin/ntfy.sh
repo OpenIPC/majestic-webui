@@ -87,6 +87,17 @@ if [ "$ntfy_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
     fi
 fi
 
+
+# The path reaches a shell twice: once written into the command string and once
+# when that string is eval'd. It used to be ours -- mktemp plus a hostname and
+# a timestamp -- and is now whatever the caller hands over, which is a
+# recording path built from an operator's strftime pattern. A single quote in
+# it would close the quoting and hand the rest of the name to sh, so it is
+# escaped rather than trusted: close the quote, escape one, reopen.
+esc_path=$(printf '%s' "$snapshot" | sed "s/'/'\\\\''/g")
+esc_name=$(basename "$snapshot" | sed "s/'/'\\\\''/g")
+esc_message=$(printf '%s' "$ntfy_message" | sed "s/'/'\\\\''/g")
+
 # === SENDING TO NTFY ===
 command="curl -s"
 command="${command} --connect-timeout 100"
@@ -101,12 +112,12 @@ fi
 command="${command} -H 'Title: Motion Detected'"
 command="${command} -H 'Priority: ${ntfy_priority}'"
 command="${command} -H 'Tags: warning,rotating_light'"
-command="${command} -H 'Message: ${ntfy_message}'"
-command="${command} -H 'Filename: $(basename "$snapshot")'"
+command="${command} -H 'Message: ${esc_message}'"
+command="${command} -H 'Filename: ${esc_name}'"
 command="${command} -H 'Content-Type: ${content_type}'"
 
 # Sending a file
-command="${command} -T '${snapshot}'"
+command="${command} -T '${esc_path}'"
 command="${command} '${ntfy_server}/${ntfy_topic}'"
 
 # Login and password
