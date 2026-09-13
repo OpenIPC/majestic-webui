@@ -729,12 +729,16 @@ fi
 					}
 					function opt(id, pad, quiet,   sel, tail) {
 						sel = (id == cur) ? " selected" : ""
-						# Short because the row has to fit the control, and on a
-						# 390px phone "mt7601u-generic - no power-up pad" missed
-						# by seven pixels -- a <select> does not wrap, it clips.
-						# The group heading above already says these are one
-						# driver's board variants, so the pad number alone is
-						# the whole of what distinguishes them.
+						# Short because the row has to fit the control: on a
+						# 390px phone the longest option missed by seven pixels,
+						# and a <select> does not wrap, it clips. The group
+						# heading above already says these rows are the board
+						# variants of one driver, so the pad number alone is the
+						# whole of what separates them.
+						#
+						# No apostrophes in here. This is an awk program inside
+						# a shell single-quoted string, so one closes the string
+						# and hands the rest of the program to the shell.
 						tail = quiet ? "" \
 							: (pad == "-" || pad == "") ? " &mdash; no pad" \
 							: " &mdash; pad " e(pad)
