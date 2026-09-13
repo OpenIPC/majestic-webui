@@ -4,9 +4,9 @@
 // Everything else here reads source: `npm test` reads markup and JS,
 // lint-templates.sh parses the haserl, regen-bootstrap-css.sh diffs the purged
 // CSS. All of it is blind to what a page LOOKS like once a browser has laid it
-// out, and that blind spot has a measured cost -- five faults reached a reader
-// on one PR and not one was catchable by reading the file: a heading printed
-// twice, a <select> clipped to "rtl8188fu-generic - no po", a Save bar 4px past
+// out, and that blind spot has a measured cost. #464 records five faults that
+// reached a reader, not one of them catchable by reading the file: a heading
+// printed twice, a <select> clipped to "rtl8188fu-generic - no po", a Save bar 4px past
 // the viewport at 390px (and the same on time.cgi), and a grid row half empty.
 //
 //   WEBUI_LOGIN=root:pw node tools/check-layout.mjs http://<camera>/cgi-bin/network.cgi
@@ -220,16 +220,34 @@ async function run(browser, url, setContent, seen = new Set()) {
 		const page = await browser.newPage();
 		await page.setViewport({ width: w, height: h });
 		if (!setContent && process.env.WEBUI_LOGIN) await signIn(page, url);
+		let res = null;
 		if (setContent) await page.setContent(url);
-		else await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+		else res = await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
 		const R = await page.evaluate(measure);
+		const landed = setContent ? null : page.url();
 		await page.close();
 
 		console.log(`\n  ${label} ${w}x${h}`);
-		// Refuse to report on a page that is not the one asked for. Silence
-		// about the wrong page is the failure mode this whole file exists for.
-		if (!setContent && /sign in/i.test(R.title)) {
-			console.log(`    NOT LOGGED IN — measured "${R.title}". Set WEBUI_LOGIN=user:pass.`);
+		// Refuse to report on a page that is not the one asked for. Measuring
+		// the wrong document and calling it clean is the exact failure this
+		// file exists to stop, so the guard is about the page's IDENTITY rather
+		// than one title string: a 404, a 500, a mistyped path and a redirect
+		// to the sign-in or first-boot page all used to reach the measurements
+		// below and come back "clean".
+		const wrong = setContent
+			? null
+			: !res || !res.ok()
+				? `HTTP ${res ? res.status() : 'no response'}`
+				: new URL(landed).pathname !== new URL(url).pathname
+					? `redirected to ${new URL(landed).pathname}`
+					: /sign in/i.test(R.title)
+						? `sign-in page ("${R.title}")`
+						: null;
+		if (wrong) {
+			console.log(
+				`    NOT THE PAGE ASKED FOR — ${wrong}.` +
+					(/sign|redirect/i.test(wrong) ? ' Set WEBUI_LOGIN=user:pass.' : ''),
+			);
 			bad++;
 			continue;
 		}
