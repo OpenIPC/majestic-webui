@@ -316,17 +316,45 @@ net_read "$edit_iface"
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
 		changemac)
-			if echo "$POST_mac_address" | grep -Eiq '^([0-9a-f]{2}[:-]){5}([0-9a-f]{2})$'; then
+			# Which addresses are usable is the firmware's call, not this
+			# page's. Shape is all a regex can check, and the camera refuses
+			# more than that -- the bootloader placeholders it repairs at boot,
+			# a multicast address, the all-zero one. Accepting any of those
+			# here reported success, asked for a reboot, and brought the camera
+			# back on a different address than the one that was typed, because
+			# the boot-time repair had replaced it.
+			#
+			# So it asks the applet that owns the rule and reports what it
+			# says. Empty is answered first: called with no address, set_mac
+			# mints a fresh random one, which is not what an empty field means.
+			#
+			# The reflected value is escaped. The flash message is rendered as
+			# HTML by notice(), and this is the one handler that echoes a POST
+			# field back into it.
+			mac_shown=$(esc "$POST_mac_address" | tr -d '\r\n')
+
+			if [ -z "$POST_mac_address" ]; then
+				redirect_back "warning" "Empty MAC address."
+			elif command -v set_mac >/dev/null 2>&1; then
+				# stderr only -- the applet prints the address it stored on stdout.
+				if mac_err=$(set_mac "$POST_mac_address" 2>&1 >/dev/null); then
+					update_caminfo
+					touch /tmp/system-reboot
+					redirect_back "success" "MAC address updated."
+				else
+					# The applet's own sentence already names the address,
+					# so it is shown as-is rather than with it appended twice.
+					mac_err=$(printf '%s' "${mac_err#set_mac: }" | tr -d '\r\n')
+					redirect_back "warning" "$(esc "${mac_err:-Invalid MAC address: $POST_mac_address}" | tr -d '\r\n')"
+				fi
+			elif echo "$POST_mac_address" | grep -Eiq '^([0-9a-f]{2}[:-]){5}([0-9a-f]{2})$'; then
+				# Firmware without the applet: shape is all there is to go on.
 				fw_setenv ethaddr "$POST_mac_address"
 				update_caminfo
 				touch /tmp/system-reboot
 				redirect_back "success" "MAC address updated."
 			else
-				if [ -z "$POST_mac_address" ]; then
-					redirect_back "warning" "Empty MAC address."
-				else
-					redirect_back "warning" "Invalid MAC address: ${POST_mac_address}"
-				fi
+				redirect_back "warning" "Invalid MAC address: ${mac_shown}"
 			fi
 			;;
 
