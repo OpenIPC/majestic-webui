@@ -211,7 +211,12 @@
 		if (!snapshot) return;
 		const gen = ++posterGen;
 		const track = liveVideoTrack();
-		if (track && typeof MediaStreamTrackProcessor !== 'undefined') {
+		// Only WebRTC needs a poster: its parked picture is black. MSE keeps its own
+		// buffered frame under the button (a srcObject-less element, so no track
+		// here), so painting anything over it -- a slow, wrong-channel /image.jpg
+		// included -- would only hide the real picture (#317). No track, no poster.
+		if (!track) return;
+		if (typeof MediaStreamTrackProcessor !== 'undefined') {
 			captureTrackFrame(track).then(function (url) {
 				// Superseded (a newer paint or a hide) or the invitation is gone:
 				// the frame is for a picture no longer on the button, so drop it.
@@ -221,6 +226,9 @@
 			});
 			return;
 		}
+		// WebRTC where the capture API is absent (Safari/Firefox): the plain JPEG
+		// is the only still available, and those browsers generally autoplay muted
+		// so this rarely shows at all.
 		jpegPoster();
 	}
 	function showTapPlay() {
