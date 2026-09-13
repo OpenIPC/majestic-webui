@@ -657,7 +657,7 @@ update_caminfo() {
 				0|2) ptz_support="1"; ptz_backend="pelco" ;;
 				3)
 					ptz_support="1"; ptz_backend="pelco"
-					ptz_reason="Motor driver (majestic-af) is not installed on this camera."
+					ptz_reason="This camera has no PTZ driver installed: add the majestic-af package to its firmware."
 					;;
 			esac
 			;;

@@ -61,14 +61,15 @@ mj_cfg() {
 
 # Drive the motor, or ask what this camera's motor can do.
 #
-# majestic owns the PTZ wire -- the out-of-core majestic-af plugin is the only
-# writer on it -- so the WebUI asks for a verb instead of opening the port
-# itself. It used to open it: bin/btzoom and bin/btzoom-xm wrote Pelco frames
-# to the same tty the autofocus pass was driving, arbitrated by a lock
-# directory that could not make a three-step movement (drive, wait, stop)
-# atomic against another process. Presses were dropped while a pass held the
-# lock, and presses that landed were undone by the pass a previous zoom had
-# booked.
+# The camera owns the PTZ serial port, so the WebUI asks it for a verb instead
+# of opening that port itself. It used to open it: bin/btzoom and bin/btzoom-xm
+# wrote Pelco frames to the same tty the camera was already driving for
+# autofocus, sharing it through a lock directory. That could never work -- a
+# Pelco movement is three steps (drive, wait, stop) and a lock cannot make them
+# atomic against another process. What an operator saw, measured on an
+# hi3516ev300: button presses that did nothing at all for seconds at a time,
+# and focus adjustments that undid themselves about ten seconds after the
+# finger came off.
 #
 #   mj_ptz <verb>   start or continue a move; the camera stops the motor on
 #                   its own deadline, so a lost release cannot run a lens into

@@ -51,16 +51,16 @@ gpio_ok=0
 motor_ok=0
 profile=""
 case "$ptz_control" in
-	# Two Pelco-shaped serial protocols, one verb set, one driver: majestic
+	# Two Pelco-shaped serial protocols, one verb set, one driver: the camera
 	# holds the port and the WebUI asks it for a verb. This used to exec
-	# /usr/bin/btzoom or /usr/bin/btzoom-xm, which opened the same tty
-	# majestic's autofocus was driving and raced it for every press.
+	# /usr/bin/btzoom or /usr/bin/btzoom-xm, which opened the same tty the
+	# camera was already driving for autofocus and raced it for every press.
 	pelco-d|pelco-xm)
 		mj_ptz > /dev/null 2>&1
 		case $? in
 			0) pelco_ok=1 ;;
-			3) pelco_why="Motor driver (majestic-af) is not installed on this camera." ;;
-			1) pelco_why="majestic reports no motorized lens on this camera." ;;
+			3) pelco_why="This camera has no PTZ driver installed: add the majestic-af package to its firmware." ;;
+			1) pelco_why="This camera reports no motorized lens." ;;
 			# Could not ask is not an answer about the hardware: keep the
 			# verb reachable and let the attempt report its own failure.
 			*) pelco_ok=1 ;;

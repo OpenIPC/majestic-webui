@@ -607,23 +607,24 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   endpoint's: it knows when the operator stopped driving, so nothing here
   fires `?settle`.
 
-  **majestic owns the Pelco wire.** `j/ptz.cgi` and `update_caminfo` ask it
+  **The camera owns the Pelco wire.** `j/ptz.cgi` and `update_caminfo` ask it
   (`mj_ptz` in `p/majestic.sh`, `GET /ptz`); a bare `GET /ptz` is the
   capability probe that decides whether the pad renders at all. This repo
-  shipped `bin/btzoom` and `bin/btzoom-xm` until they were deleted for
-  opening the same tty majestic's autofocus was driving: they took a
-  `/tmp/btzoom.lock` mkdir lock, which cannot make a three-step movement
-  (drive, wait, stop) atomic against another process. Measured on an
-  hi3516ev300, presses were dropped outright while a pass held the lock and
-  presses that landed were undone by the pass a previous zoom had booked. A
-  Pelco camera now needs `fw_setenv ptz_control pelco-d` (or `pelco-xm`) AND
-  majestic's motor driver, `/usr/lib/majestic-af.so`; without it `GET /ptz`
-  answers 503 and the pad says so rather than claiming the camera has no PTZ.
-  `mj_ptz` keeps those apart the way `mj_cfg` does — *could not ask* never
-  becomes a statement about the hardware.
+  shipped `bin/btzoom` and `bin/btzoom-xm` until they were deleted for opening
+  the same tty the camera was already driving for autofocus, shared through a
+  `/tmp/btzoom.lock` mkdir lock — which cannot make a three-step movement
+  (drive, wait, stop) atomic against another process. What that cost an
+  operator, measured on an hi3516ev300: presses that did nothing for seconds
+  at a time, and focus adjustments that undid themselves about ten seconds
+  after the button was released. A Pelco camera now needs
+  `fw_setenv ptz_control pelco-d` (or `pelco-xm`) AND the motor driver
+  package, [majestic-af](https://github.com/OpenIPC/majestic-af); without it
+  `GET /ptz` answers 503 and the pad says so rather than claiming the camera
+  has no PTZ. `mj_ptz` keeps those apart the way `mj_cfg` does — *could not
+  ask* never becomes a statement about the hardware.
 
   A held Pelco button is one continuous move, not a train of pulses: each
-  request re-arms majestic's auto-stop deadline (`isp.autofocus.pulse`,
+  request re-arms the camera's auto-stop deadline (`isp.autofocus.pulse`,
   default 500 ms), the release sends `act=stop`, and the motor stops on that
   deadline anyway if the release never arrives. To render either pad on a
   camera without hardware: set the env vars, and for the stepped backends
