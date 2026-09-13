@@ -271,11 +271,10 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 	{
 		const env = load({ box: [640, 360], picked: 'auto' });
 		await tick();
-		// The stage, not the video nodes: MSE replaces those on every
-		// reconnect, so an observer on them would be watching detached
-		// elements within a session. And the stage rather than #mj-player,
-		// because the viewport clamp resizes the stage on height-only
-		// viewport changes the parent never sees.
+		// The stage, not the video nodes, and not #mj-player: the viewport
+		// clamp resizes the stage on height-only viewport changes the parent
+		// never sees, so the stage is the element whose size actually tracks
+		// the picture.
 		check('the stage is what is observed',
 			env.observed.length === 1 && env.observed[0].id === 'mj-stage',
 			env.observed.map(e => e.id).join(',') || 'nothing');

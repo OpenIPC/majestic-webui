@@ -342,21 +342,24 @@ window.MajesticVideo = (function () {
 			}
 			reconnect();
 		}
-		// The element is replaced on every (re)connect, so mute and volume have
-		// to be re-applied — cloneNode does not carry them, and defaulting to
+		// Reset the media element for a fresh (re)connect. Reuse the element in
+		// place and clear its source — do NOT replace it with a clone. A freshly
+		// cloned <video> attached to a MediaSource faults Safari's hardware
+		// VideoToolbox HEVC decoder: MEDIA_ERR_DECODE within the first GOP, which
+		// the DECODE_MAX rebuild loop then turns into the ~2 s flash of
+		// majestic-webui#335 (it never reproduced on the software decode of the
+		// safari-hevc-qa CI runners, only on a real Mac's hardware decoder).
+		// Clearing src/srcObject and calling load() gives the same clean reset
+		// without a new element for the decoder to choke on. mute and volume are
+		// re-applied because a reconnect may have changed them, and defaulting to
 		// muted would silence the stream the user just asked to hear.
 		function freshVideo() {
-			const old = video;
-			const nv = old.cloneNode(false);
-			nv.removeAttribute('src');
-			nv.muted = !wantAudio;
-			nv.volume = volume;
-			if (old.parentNode) old.parentNode.replaceChild(nv, old);
-			old.removeEventListener('error', onVideoError);
-			old.removeEventListener('waiting', onWaiting);
-			old.removeEventListener('playing', onPlaying);
-			try { old.removeAttribute('src'); old.load(); } catch (e) {}
-			video = nv;
+			try { video.removeAttribute('src'); video.srcObject = null; video.load(); } catch (e) {}
+			video.muted = !wantAudio;
+			video.volume = volume;
+			video.removeEventListener('error', onVideoError);
+			video.removeEventListener('waiting', onWaiting);
+			video.removeEventListener('playing', onPlaying);
 			video.addEventListener('error', onVideoError);
 			// A stall is the shape TCP loss takes on this transport: the
 			// picture waits for the retransmission WebRTC would have skipped.
