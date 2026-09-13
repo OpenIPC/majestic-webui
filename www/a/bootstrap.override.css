@@ -6210,7 +6210,12 @@ dialog.mj-modal::backdrop {
  * rate, trace; everything else waits behind the expander. */
 .mj-dests {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+	/* min(), not a bare 19rem: the board sits inside the page container and a
+	   padded card body, and on a 320px phone those leave about 264px — less
+	   than the track's own minimum, so the cards stopped reflowing and
+	   overflowed sideways instead. min() lets a track fall below 19rem when
+	   that is all there is, which is exactly the single-column case. */
+	grid-template-columns: repeat(auto-fill, minmax(min(19rem, 100%), 1fr));
 	gap: .75rem;
 	align-items: start;
 }
