@@ -833,6 +833,10 @@
 		// writing into a row that is no longer in the document
 		state.reqUpdaters = [];
 		state.legacyBox = null;
+		// Same reason as legacyBox above: a save re-asks the soundcheck's gate
+		// through this reference, and every section that is not Audio has to
+		// leave it empty or that ask lands on a node no longer in the document.
+		state.audioBox = null;
 
 		// Exactly one section on the page, so it gets the whole width — and its
 		// fields are dealt into the two columns of .mj-cols, rather than run
@@ -870,6 +874,8 @@
 			// came to read, and the switch is what they change because of it.
 			const ipeye = ipeyePanel(sec);
 			if (ipeye) body.appendChild(ipeye);
+			const audio = audioPanel(sec);
+			if (audio) body.appendChild(audio);
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
@@ -6911,6 +6917,415 @@
 		return wrap;
 	}
 
+	// ------------------------------------------------------------------
+	// Speaker and microphone soundcheck
+	//
+	// Everything on this panel is measured in the browser, from samples the
+	// camera already streams. There is no level anywhere in its API, and the
+	// alternative — asking a camera with 32 MB of RAM and no floating point to
+	// compute one — would be paying a running cost on every camera for a page
+	// almost nobody has open. The raw capture stream is already there, and
+	// arithmetic over it is free here.
+	//
+	// The shape of the panel follows the one on Day / Night: a gate that says
+	// why it cannot run, a confirmation that names what will happen in the
+	// room, progress in words, and a verdict whose class carries the severity.
+	// ------------------------------------------------------------------
+
+	const AUDIO = (typeof window === 'object' && window.MajesticAudio) || null;
+
+	// How long each half of the probe listens. The quiet reading only has to
+	// establish a floor; the sound is three seconds and is measured across the
+	// middle of it.
+	const AUDIO_QUIET_MS = 1200;
+	const AUDIO_SOUND_MS = 2400;
+	const AUDIO_CLIP_S = 3;
+	// Enough for the slope to be learnt and acted on twice over; the loop
+	// stops as soon as a reading lands in the window, so this is a ceiling
+	// rather than a duration.
+	const AUDIO_TUNE_ROUNDS = 6;
+
+	const AUDIO_STEP = {
+		quiet: 'Listening to the room…',
+		playing: 'Playing the test sound…',
+		done: 'Working it out…',
+		tune: 'Measuring, adjusting, measuring again…',
+	};
+
+	let audioBusy = false;
+
+	// The capture rate the camera says it is running at. The stream carries no
+	// header, so the samples mean nothing without it — and a wrong rate makes a
+	// tone play at the wrong pitch and every duration wrong with it.
+	function audioRate() {
+		const v = mjGet(state.config, 'audio.srate');
+		const n = parseInt(v, 10);
+		return n > 0 ? n : 8000;
+	}
+
+	// What stops the test, as a sentence. Re-asked rather than remembered: the
+	// two switches it reads are on this very page, and a blocker that outlived
+	// the reason for it would grey the button out for the rest of the visit.
+	function audioBlocker() {
+		if (!AUDIO) return { blocked: true, why: 'This page is missing part of itself.' };
+		return AUDIO.diagnose(state.config);
+	}
+
+	// Reads the camera's capture stream for `ms` and measures it.
+	//
+	// A reader over the response body rather than a whole-body fetch: the
+	// stream never ends on its own, so awaiting it would await forever. The
+	// controller is aborted on the way out, which is what closes the request —
+	// leaving it open costs the camera a subscriber for the life of the page.
+	async function audioListen(ms) {
+		const ctl = new AbortController();
+		const timer = setTimeout(() => ctl.abort(), ms + 2000);
+		try {
+			const res = await apiFetch('/audio.pcm', {
+				signal: ctl.signal, cache: 'no-store', credentials: 'same-origin',
+			});
+			if (!res.ok || !res.body) return null;
+			const reader = res.body.getReader();
+			const out = await AUDIO.listen(async () => {
+				const r = await reader.read();
+				return r.done ? null : r.value;
+			}, ms);
+			try { await reader.cancel(); } catch (e) { /* already gone */ }
+			return out;
+		} catch (e) {
+			return null; /* a failed fetch is not a reading */
+		} finally {
+			clearTimeout(timer);
+			ctl.abort();
+		}
+	}
+
+	// Plays one burst through the camera's speaker.
+	//
+	// The body is raw samples at the camera's own rate — the endpoint plays
+	// what it is given and parses no container, so anything else arrives as
+	// noise. Rejects with what the camera said, so the verdict can repeat it:
+	// it distinguishes a speaker switched off from an upgrade in progress from
+	// a clip it had no memory for, and "it failed" would throw all of that away.
+	async function audioPlay(seconds) {
+		const pcm = AUDIO.stimulus(audioRate(), seconds);
+		const res = await apiFetch('/play_audio', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/octet-stream' },
+			credentials: 'same-origin',
+			body: pcm,
+		});
+		if (!res.ok) {
+			const said = (await res.text().catch(() => '')).trim();
+			throw new Error(said || ('the camera answered ' + res.status));
+		}
+	}
+
+	// Push a level without saving it, so a drag is heard as it moves. The
+	// camera applies it and forgets it; Save is what keeps it.
+	async function audioPreview(key, value) {
+		const body = { audio: {} };
+		body.audio[key] = String(value);
+		const res = await apiFetch('/api/v1/live', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'same-origin',
+			body: JSON.stringify(body),
+		});
+		if (!res.ok) return null;
+		return res.json().catch(() => null);
+	}
+
+	function audioSay(box, text) {
+		const s = box.querySelector('#mj-audio-status');
+		if (s) s.textContent = text || '';
+	}
+
+	function audioResult(box, v) {
+		const out = box.querySelector('#mj-audio-result');
+		if (!out) return;
+		const cls = v.severity === 'success' ? 'alert-success'
+			: v.severity === 'warning' ? 'alert-warning'
+			: v.severity === 'danger' ? 'alert-danger' : 'alert-secondary';
+		out.className = 'alert ' + cls + ' py-2 px-3 mt-2 mb-0 small';
+		out.innerHTML = '<b>' + esc(v.title) + '</b> ' + esc(v.detail || '');
+		out.hidden = false;
+	}
+
+	// Whether each control can be used, and why not when it cannot. Asked at
+	// mount, after every save, and at the end of every run — never computed
+	// once, because the two switches it reads are fields on this same page.
+	function audioSync(box) {
+		const b = audioBlocker();
+		const why = box.querySelector('#mj-audio-why');
+		const test = box.querySelector('#mj-audio-test');
+		const tune = box.querySelector('#mj-audio-tune');
+		const listen = box.querySelector('#mj-audio-listen');
+
+		const blocked = !!(b && b.blocked);
+		// A speaker with no microphone can still be tested; it just cannot be
+		// measured. Refusing both would hide a test that would have worked.
+		const speakerOk = !blocked || b.speakerOnly === true;
+
+		if (test) test.disabled = audioBusy || !speakerOk;
+		if (tune) tune.disabled = audioBusy || blocked;
+		if (listen) listen.disabled = audioBusy || blocked;
+
+		if (why) {
+			why.textContent = b ? b.why : '';
+			why.hidden = !b;
+		}
+	}
+
+	// The speaker test, and the measurement of what came back.
+	async function audioRunTest(box) {
+		if (audioBusy) return;
+		const b = audioBlocker();
+		const speakerOnly = !!(b && b.speakerOnly);
+
+		if (!confirm(
+			'Play a test sound through this camera\'s speaker?\n\n' +
+			'It is a short tone and sweep, loud enough to hear across a room. ' +
+			'Anyone near the camera will hear it.'))
+			return;
+
+		audioBusy = true;
+		audioSync(box);
+		box.querySelector('#mj-audio-result').hidden = true;
+
+		try {
+			if (speakerOnly) {
+				// Nothing can measure it, so this is the honest half: the
+				// camera either accepted the sound or said why it would not.
+				audioSay(box, AUDIO_STEP.playing);
+				await audioPlay(AUDIO_CLIP_S);
+				audioResult(box, {
+					severity: 'secondary',
+					title: 'The camera played the test sound.',
+					detail:
+						'Whether anything came out of the speaker is something only ' +
+						'you can tell from the room — the microphone is switched ' +
+						'off, so nothing here could listen.',
+				});
+				return;
+			}
+
+			const v = await AUDIO.probe({
+				onStep: (s) => audioSay(box, AUDIO_STEP[s] || ''),
+				quietMs: AUDIO_QUIET_MS,
+				soundMs: AUDIO_SOUND_MS,
+				listen: audioListen,
+				play: () => audioPlay(AUDIO_CLIP_S),
+			});
+			audioResult(box, v);
+		} catch (e) {
+			// Never a verdict from a run that did not finish: half a
+			// measurement is not evidence, and a confident sentence built on
+			// one is worse than no sentence at all.
+			audioResult(box, {
+				severity: 'danger',
+				title: 'The test did not finish.',
+				detail: String((e && e.message) || e),
+			});
+		} finally {
+			audioBusy = false;
+			audioSay(box, '');
+			audioSync(box);
+		}
+	}
+
+	// Find a microphone level by measuring, adjusting and measuring again.
+	//
+	// Each round plays the test sound and measures the microphone WHILE it
+	// plays. Measuring a silent room instead would set the level against the
+	// room's own noise floor — which drives the gain up until the air
+	// conditioning reads at the target, and leaves anything anyone actually
+	// says clipping. The speaker is the only sound here whose loudness is
+	// known, so it is the one to calibrate against, and it is also the thing
+	// this camera will be asked to reproduce.
+	//
+	// No table of what a level means in hardware, because that differs per chip
+	// and per board. The step is read off the camera's own curve between the
+	// last two rounds, after a first guess that only has to be in the right
+	// direction. Nothing is saved: the value lands in the field and the
+	// ordinary Save button is what keeps it, so the panel never writes behind
+	// the form.
+	async function audioRunTune(box) {
+		if (audioBusy) return;
+		const field = state.fields.filter((f) => f.dot === 'audio.volume')[0];
+		if (!field) return;
+
+		if (!confirm(
+			'Play the test sound a few times and set the microphone level from ' +
+			'what comes back?\n\n' +
+			'Anyone near the camera will hear it, several times over about half ' +
+			'a minute. Nothing is saved until you press Save Changes.'))
+			return;
+
+		audioBusy = true;
+		audioSync(box);
+		box.querySelector('#mj-audio-result').hidden = true;
+		audioSay(box, AUDIO_STEP.tune);
+
+		const started = parseInt(field.getValue(), 10);
+		let level = isFinite(started) ? started : 50;
+		let previous = null;
+		let last = null;
+		let outcome = null;
+
+		try {
+			for (let round = 0; round < AUDIO_TUNE_ROUNDS; round++) {
+				const applied = await audioPreview('volume', level);
+				// A camera whose build cannot carry this level without a
+				// rebuild says so by naming the key, and going on would measure
+				// rounds that all used the saved level.
+				if (applied && applied.refused &&
+					/audio\.volume/.test(applied.keys || '')) {
+					outcome = {
+						severity: 'secondary',
+						title: 'This camera cannot change the level while you listen.',
+						detail:
+							'It accepts a new level only when the video pipeline is ' +
+							'rebuilt, so each attempt would interrupt every stream. ' +
+							'Set it by hand and use Save Changes.',
+					};
+					return;
+				}
+
+				// Played and measured together: the reading has to be of the
+				// sound, not of the room after it.
+				const playing = audioPlay(AUDIO_CLIP_S);
+				const reading = await audioListen(AUDIO_SOUND_MS);
+				try { await playing; } catch (e) {
+					outcome = {
+						severity: 'danger',
+						title: 'The camera stopped playing the test sound.',
+						detail: String((e && e.message) || e),
+					};
+					return;
+				}
+
+				last = reading;
+				const next = AUDIO.recommend(reading, level, { previous: previous });
+				if (next.failed) {
+					outcome = {
+						severity: 'danger',
+						title: 'The microphone is not sending anything.',
+						detail:
+							'Its samples are all silence, which is not what a working ' +
+							'input produces even in a quiet room. Nothing here can ' +
+							'choose a level for an input that is not there.',
+					};
+					return;
+				}
+				if (next.done) break;
+				previous = reading && isFinite(reading.rmsDb)
+					? { level: level, rmsDb: reading.rmsDb } : null;
+				level = next.level;
+			}
+
+			field.setValue(String(level));
+			updateDirty();
+			const landed = last && isFinite(last.rmsDb) &&
+				Math.abs(last.rmsDb - AUDIO.TARGET_DBFS) <= AUDIO.TARGET_WINDOW;
+			outcome = {
+				severity: landed ? 'success' : 'warning',
+				title: landed
+					? 'Microphone level set to ' + level + '.'
+					: 'Microphone level left at ' + level + '.',
+				detail:
+					(last && isFinite(last.rmsDb)
+						? 'The test sound came back at ' + last.rmsDb.toFixed(1) +
+							' dBFS. '
+						: '') +
+					(landed
+						? ''
+						: 'That is as close as the dial gets on this camera. ') +
+					'Nothing has been saved yet — use Save Changes to keep it, or ' +
+					'leave the page to put it back.',
+			};
+		} catch (e) {
+			outcome = {
+				severity: 'danger',
+				title: 'The measurement did not finish.',
+				detail: String((e && e.message) || e),
+			};
+		} finally {
+			// Whatever happened, the camera must not be left on a level nobody
+			// chose. An empty value is how this endpoint is told to put the
+			// saved one back.
+			try { await audioPreview('volume', ''); } catch (e) { /* nothing to undo */ }
+			audioBusy = false;
+			audioSay(box, '');
+			audioSync(box);
+			if (outcome) audioResult(box, outcome);
+		}
+	}
+
+	// Hear the microphone in the browser.
+	//
+	// The camera sends an Ogg stream with no useful content type, so the
+	// element is told what it is rather than left to guess. Behind a button
+	// because a browser will not start audio without one.
+	function audioListenToggle(box, btn) {
+		const host = box.querySelector('#mj-audio-monitor');
+		if (!host) return;
+		const playing = host.firstChild;
+		if (playing) {
+			host.innerHTML = '';
+			btn.textContent = 'Listen to the microphone';
+			return;
+		}
+		const a = el('audio');
+		a.controls = true;
+		a.autoplay = true;
+		a.className = 'mj-audio-mon';
+		const src = el('source');
+		src.src = '/audio.opus';
+		src.type = 'audio/ogg; codecs=opus';
+		a.appendChild(src);
+		host.appendChild(a);
+		btn.textContent = 'Stop listening';
+	}
+
+	function audioPanel(sec) {
+		if (sec !== 'audio' || !AUDIO) return null;
+
+		const box = el('div', 'mj-audio');
+		box.innerHTML =
+			'<div class="mj-live-grp-head"><span class="mj-cap">Soundcheck</span>' +
+			'<span class="mj-live-rule"></span></div>' +
+			'<p class="small text-secondary mb-2">Play a sound through the speaker ' +
+			'and measure what the microphone hears, to find levels that suit this ' +
+			'camera and the room it is in.</p>' +
+			'<div class="mj-audio-acts">' +
+			'<button type="button" class="btn btn-primary btn-sm" id="mj-audio-test">Test the speaker</button>' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-audio-tune">Set the microphone level</button>' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-audio-listen">Listen to the microphone</button>' +
+			'</div>' +
+			'<div class="small text-secondary mt-2" id="mj-audio-why" hidden></div>' +
+			'<div class="small text-secondary mt-2" id="mj-audio-status"></div>' +
+			'<div id="mj-audio-result" class="small" hidden></div>' +
+			'<div id="mj-audio-monitor" class="mt-2"></div>';
+
+		const test = box.querySelector('#mj-audio-test');
+		test.addEventListener('click', () => {
+			if (!test.disabled) audioRunTest(box);
+		});
+		const tune = box.querySelector('#mj-audio-tune');
+		tune.addEventListener('click', () => {
+			if (!tune.disabled) audioRunTune(box);
+		});
+		const listen = box.querySelector('#mj-audio-listen');
+		listen.addEventListener('click', () => {
+			if (!listen.disabled) audioListenToggle(box, listen);
+		});
+
+		state.audioBox = box;
+		audioSync(box);
+		return box;
+	}
+
 	function ircutPanel(sec) {
 		if (sec !== 'nightMode' || !IRCUT) return null;
 		// A refused snapshot blanks the Test button until something says to ask
@@ -9743,6 +10158,11 @@
 		state.ircutNoSnap = null;
 		syncLegacy();
 		syncTestBtn();
+		// The soundcheck's gate reads the two audio switches, which are fields
+		// on this very page — so a save that turns one on has to hand the panel
+		// back, and one that turns it off has to take it away. Asking again is
+		// the whole reason the blocker is a function rather than a value.
+		if (state.audioBox) audioSync(state.audioBox);
 		updateDirty();
 	}
 

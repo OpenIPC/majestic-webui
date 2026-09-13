@@ -6627,3 +6627,29 @@ body > main > .container > form > .mj-foot {
 		grid-template-columns: minmax(0, 1fr);
 	}
 }
+
+/* The soundcheck on the Audio section. Own-prefix classes only: a Bootstrap
+   class added here would need the purged subset regenerating with it, and
+   nothing on this panel wants one Bootstrap does not already ship. */
+.mj-audio {
+	margin-bottom: 1rem;
+}
+
+/* Wraps, unlike the Day/Night row it is modelled on: three buttons with real
+   sentences on them do not fit a phone in one line, and a row that scrolls
+   sideways hides the third. */
+.mj-audio-acts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin-top: 0.75rem;
+}
+
+/* The browser's own audio element, which every engine draws differently. Only
+   its width is set: styling the rest means replacing the controls, and a
+   play button somebody already recognises is worth more than a matching one. */
+.mj-audio-mon {
+	width: 100%;
+	max-width: 22rem;
+	display: block;
+}

@@ -172,6 +172,14 @@ fi
 # needs nothing from the camera and no endpoint of its own.
 %>
 <script src="/a/mj-luma.js"></script>
+<%
+# The Audio section's soundcheck: the measurement, the verdict table and the
+# loop that chooses a level. Its own file because every tier of it fails
+# silently, and tests/audio-check.test.js drives all of them without a camera.
+# Deferred like the rest — the panel is built by mj-settings.js, which is
+# deferred too and runs after it.
+%>
+<script src="/a/audio-check.js" defer></script>
 <script src="/a/ircut-check.js" defer></script>
 <script src="/a/ircut-map.js" defer></script>
 <script src="/a/ircut-pads.js" defer></script>
