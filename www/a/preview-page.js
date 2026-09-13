@@ -38,12 +38,12 @@
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
 		// The invitation can be raised before this fetch resolves (attach wins the
-		// config timeout), and showTapPlay only paints the snapshot when jpegOn is
-		// already known true. So if the button is up now and the answer just came
-		// back true, paint it -- otherwise it sits over black for the whole pause (#317).
-		if (jpegOn && tapPlay && !tapPlay.hidden && snapshot) {
-			try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {}
-		}
+		// config timeout). The WebRTC-frame poster does not need jpegOn, but the
+		// /image.jpg fallback does, so if the button is already up when the answer
+		// lands, repaint -- otherwise a non-Chromium browser sits over black for the
+		// whole pause (#317). paintPoster prefers the track frame and won't fetch
+		// /image.jpg when jpegOn is false.
+		if (tapPlay && !tapPlay.hidden && snapshot) paintPoster();
 		// Read before the fallback is re-decided below: the codec is what says
 		// whether a socket that gave up is worth handing to the software rung,
 		// and that decision has to be made with the real answer.
@@ -154,15 +154,64 @@
 	// (#317). Shown on the live player's 'gesture' state and hidden on 'resumed';
 	// also hidden by every path that repaints the stage below, so a stale
 	// invitation cannot outlive the picture it was covering.
-	// While the button is up, put the camera's current JPEG under it, so a WebRTC
-	// picture parked black (no buffered frame, unlike MSE) shows the scene it is
-	// about to resume rather than a void (#317). Only when jpeg.enabled serves a
-	// snapshot; the src is set on show (cache-busted, so it is current) and
-	// cleared on hide so nothing keeps fetching it. A guarded $ lookup, since the
-	// element is absent in the bare-vm player tests.
+	// The still under the button (paintPoster below), cleared on hide so nothing
+	// keeps fetching it.
+	function liveVideoTrack() {
+		try {
+			const vids = document.querySelectorAll('#mj-stage video');
+			for (let i = 0; i < vids.length; i++) {
+				const s = vids[i].srcObject;
+				const t = s && s.getVideoTracks && s.getVideoTracks()[0];
+				if (t && t.readyState === 'live') return t;
+			}
+		} catch (e) {}
+		return null;
+	}
+	// A frame grabbed from the WebRTC track being viewed -- the exact channel and
+	// crop of the stream itself. Only Chromium/Opera expose MediaStreamTrackProcessor
+	// on window, but that is precisely the browser family that refuses muted autoplay
+	// and raises this button, so the capture is there where it is needed. Frames flow
+	// on the track even while the element is paused, so the first read returns at once.
+	async function captureTrackFrame(track) {
+		let reader = null;
+		try {
+			reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+			const res = await reader.read();
+			const frame = res && res.value;
+			if (!frame) return null;
+			try {
+				const c = document.createElement('canvas');
+				c.width = frame.displayWidth || frame.codedWidth;
+				c.height = frame.displayHeight || frame.codedHeight;
+				c.getContext('2d').drawImage(frame, 0, 0);
+				return c.toDataURL('image/jpeg', 0.85);
+			} finally { try { frame.close(); } catch (e) {} }
+		} catch (e) { return null; } finally { try { reader && reader.releaseLock(); } catch (e) {} }
+	}
+	// The camera's plain JPEG snapshot -- the fallback's fallback, left exactly as
+	// the camera serves it. The WebUI never tunes /image.jpg: WebRTC is the adaptive
+	// path and this is only a poster.
+	function jpegPoster() {
+		if (snapshot && jpegOn && tapPlay && !tapPlay.hidden) {
+			try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {}
+		}
+	}
+	function paintPoster() {
+		if (!snapshot) return;
+		const track = liveVideoTrack();
+		if (track && typeof MediaStreamTrackProcessor !== 'undefined') {
+			captureTrackFrame(track).then(function (url) {
+				if (!tapPlay || tapPlay.hidden) return; // invitation gone before the frame arrived
+				if (url) { try { snapshot.src = url; snapshot.hidden = false; } catch (e) {} }
+				else jpegPoster();
+			});
+			return;
+		}
+		jpegPoster();
+	}
 	function showTapPlay() {
-		if (snapshot && jpegOn) { try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {} }
 		if (tapPlay) tapPlay.hidden = false;
+		paintPoster();
 	}
 	function hideTapPlay() {
 		if (snapshot) { snapshot.hidden = true; try { snapshot.removeAttribute('src'); } catch (e) {} }
