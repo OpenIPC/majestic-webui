@@ -53,12 +53,13 @@ function boot(nowStart, opts) {
 	let metricsFn = null;
 	const timers = [];
 	const asked = [];
+	let aborts = 0;
 	const sandbox = {
 		window: {},
 		performance: { now: () => nowMs, timeOrigin: 0 },
 		requestAnimationFrame: (f) => f(),
-		setInterval: (fn, ms) => { timers.push({ fn: fn, ms: ms }); return timers.length; },
-		clearInterval: (h) => { if (h) timers[h - 1] = null; },
+		setTimeout: (fn, ms) => { timers.push({ fn: fn, ms: ms }); return timers.length; },
+		clearTimeout: (h) => { if (h) timers[h - 1] = null; },
 		document: {
 			getElementById(id) { return els[id] || (els[id] = makeEl(id)); },
 			createElement(tag) { return makeEl(''); },
@@ -68,9 +69,19 @@ function boot(nowStart, opts) {
 	};
 	if (o.answers) {
 		sandbox.window.MajesticOutgoing = OUTGOING;
+		// Enough of one to be recognised and to record that it fired. The
+		// page's own guard is `typeof AbortController === 'function'`, so a
+		// context without one takes the no-deadline path instead.
+		sandbox.AbortController = function () {
+			this.signal = { aborted: false };
+			this.abort = () => { aborts++; this.signal.aborted = true; };
+		};
 		sandbox.apiFetch = (url) => {
 			asked.push(url);
 			const a = o.answers.length > 1 ? o.answers.shift() : o.answers[0];
+			// A bare promise is an answer that never comes — a camera too
+			// busy to reply, which is the case worth not stacking on.
+			if (a instanceof Promise) return a;
 			if (a instanceof Error) return Promise.reject(a);
 			return Promise.resolve({
 				status: a.status, ok: a.status >= 200 && a.status < 300,
@@ -93,10 +104,15 @@ function boot(nowStart, opts) {
 		tickClock: (ms) => { nowMs += ms; },
 		metrics: (s) => metricsFn && metricsFn(s),
 		mkEl: (id) => sandbox.document.getElementById(id),
-		// Fire every armed interval once, the way five seconds would.
-		fireTimers: () => timers.forEach((t) => { if (t) t.fn(); }),
+		// Fire every armed timeout, the way five seconds would. One-shot, and
+		// anything armed from inside a callback waits for the next call —
+		// which is what setTimeout does.
+		fireTimers: () => timers.forEach((t, i) => {
+			if (t) { timers[i] = null; t.fn(); }
+		}),
 		liveTimers: () => timers.filter(Boolean).length,
 		asked: asked,
+		aborted: () => aborts,
 		// The stub answers resolve in microtasks; let them.
 		settle: () => new Promise((r) => setTimeout(r, 0)),
 		pushedSparks, pushedCharts,
@@ -806,8 +822,122 @@ async function aPageWithoutTheModuleDrawsTheOldRow() {
 	check('and nothing is left ticking', env.liveTimers() === 0);
 }
 
+async function closingClearsWhatWasDrawn() {
+	group('a closed panel leaves nothing of the last answer');
+	const env = boot(undefined, { answers: [{ status: 200, body: FEED() }] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('the rows are there while it is open',
+		egDest(env).length === 3);
+	env.stats.setOpen(false);
+	// Only the heartbeat writes this list and the next one is two seconds
+	// away, so without clearing here a reopen shows the states and rates of
+	// a destination nobody is reading any more.
+	check('and gone the moment it closes',
+		egLabels(env).length === 0 && env.el('mj-ns-egress').hidden === true);
+}
+
+async function oneRequestAtATime() {
+	group('a hung camera is asked once, not forever');
+	// An answer that never settles: the fetch is still open when the next
+	// five seconds would have come round.
+	const env = boot(undefined, { answers: [new Promise(() => {})] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	check('the first ask is out', env.asked.length === 1);
+	// What is armed is this request's deadline, not a clock running beside
+	// it: the repeat comes from the answer, so there is nothing to fire
+	// while the answer has not come.
+	check('with a deadline on it, not a repeat behind it',
+		env.liveTimers() === 1);
+	env.tickClock(4000);
+	env.fireTimers();
+	await env.settle();
+	check('the deadline gives up on a request that hangs', env.aborted() === 1);
+	check('and no second request stacked on the first',
+		env.asked.length === 1);
+	env.stats.setOpen(false);
+	check('closing the panel leaves nothing ticking', env.liveTimers() === 0);
+}
+
+async function aTruncatedAnswerKeepsTheTotal() {
+	group('more destinations than the camera will name');
+	const env = boot(undefined, { answers: [{ status: 200,
+		body: Object.assign(FEED(), { truncated: true }) }] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	const labels = egLabels(env);
+	check('the ones it named are listed',
+		labels.indexOf('RTMP · live') >= 0 && labels.indexOf('WHIP · limited') >= 0);
+	// Without this the destinations the endpoint could not fit take their
+	// share of the uplink off the panel altogether.
+	check('and the combined count stays, so the rest are not simply missing',
+		labels.some((t) => t === 'Outgoing push × 3'));
+}
+
+async function aReplacedDestinationGetsNoRate() {
+	group('an index that changed hands');
+	// The camera's index is a position in the saved list. Somebody re-saves
+	// the list in another tab and index 0 is now a different publisher, with
+	// a larger counter — which would subtract into a plausible, wrong rate.
+	const env = boot(undefined, { answers: [
+		{ status: 200, body: { destinations: [
+			{ index: 0, protocol: 'rtmp', state: 'live', sinceMs: 900000,
+				txBytes: 1000000 }] } },
+		{ status: 200, body: { destinations: [
+			{ index: 0, protocol: 'whip', state: 'live', sinceMs: 4000,
+				txBytes: 9000000 }] } },
+		{ status: 200, body: { destinations: [
+			{ index: 0, protocol: 'whip', state: 'live', sinceMs: 9000,
+				txBytes: 9500000 }] } },
+	] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.tickClock(5000); env.fireTimers(); await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('a different protocol at the same index is a different destination',
+		egDest(env)[0][0] === 'WHIP · live' && egDest(env)[0][1] === '');
+	// And once two samples do belong together, the rate comes back.
+	env.tickClock(5000); env.fireTimers(); await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('and the one after that measures the new one',
+		egDest(env)[0][1] === '800 kbit/s');
+}
+
+async function aRestartedDestinationGetsNoRate() {
+	group('a destination that restarted under the same index');
+	const env = boot(undefined, { answers: [
+		{ status: 200, body: { destinations: [
+			{ index: 0, protocol: 'rtmp', state: 'live', sinceMs: 900000,
+				txBytes: 1000000 }] } },
+		// Same protocol, same index, but it has been up four seconds: this is
+		// a reconnect, and the counter behind it is a different run.
+		{ status: 200, body: { destinations: [
+			{ index: 0, protocol: 'rtmp', state: 'live', sinceMs: 4000,
+				txBytes: 8000000 }] } },
+	] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.tickClock(5000); env.fireTimers(); await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('a clock that went backwards is not a rate',
+		egDest(env)[0][1] === '');
+}
+
 (async () => {
 	await eachDestinationGetsALine();
+	await closingClearsWhatWasDrawn();
+	await oneRequestAtATime();
+	await aTruncatedAnswerKeepsTheTotal();
+	await aReplacedDestinationGetsNoRate();
+	await aRestartedDestinationGetsNoRate();
 	await itAsksOnlyWhileSomebodyIsLooking();
 	await anOlderCameraIsAskedOnce();
 	await oneDroppedAnswerIsNotAnOutage();
