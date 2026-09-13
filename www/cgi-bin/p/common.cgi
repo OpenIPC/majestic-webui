@@ -461,6 +461,89 @@ include() {
 	[ -f "$1" ] && . "$1"
 }
 
+# Whether anything installed on this camera still wants finished recordings.
+#
+# Each sender answers for itself, in its own config, and is read in a subshell
+# so that the second one cannot see what the first one set.
+clip_hook_wanted() {
+	for _ch_name in telegram ntfy; do
+		[ -e "/etc/webui/${_ch_name}.conf" ] || continue
+		if (
+			. "/etc/webui/${_ch_name}.conf"
+			eval "[ \"\$${_ch_name}_enabled\" = true ] &&
+				[ \"\$${_ch_name}_clips\" = true ]"
+		); then
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+# Keep the camera's own setting in step with those answers.
+#
+# The camera runs one command when a recording finishes, and it is not ours to
+# take: an operator who has pointed it at a script of their own gets to keep
+# it, and is told rather than overruled. So this only ever writes the
+# dispatcher over an EMPTY setting, and only ever clears the dispatcher --
+# never anything else that happens to be there.
+#
+# Returns non-zero when the camera was not left in the state the page asked
+# for, with the sentence to show in $clip_hook_msg. The caller decides what to
+# say, because its own redirect would otherwise overwrite anything written to
+# the flash log here.
+#
+# Called after the config file is written, because the answer is read back out
+# of it.
+clip_hook_sync() {
+	clip_hook_msg=""
+	_ch_hook=/usr/sbin/record.sh
+	_ch_now=$(mj_cfg records.onClose)
+
+	# Three answers, kept apart. Collapsing "not set" and "could not ask"
+	# would let a failed request -- a camera mid-restart, a build without the
+	# setting -- read as an empty one, and the empty branch below WRITES.
+	case $? in
+	0) ;;
+	1) _ch_now="" ;;
+	*)
+		clip_hook_msg="The camera could not be asked what it runs when a recording finishes, so that was left alone."
+		return 1
+		;;
+	esac
+
+	if clip_hook_wanted; then
+		case "$_ch_now" in
+		"$_ch_hook") ;;
+		"")
+			if ! mj_set records.onClose "$_ch_hook"; then
+				clip_hook_msg="The camera would not take the setting that sends recordings."
+				return 1
+			fi
+			# Read back rather than trusting the answer: this API can accept
+			# a write and keep nothing, and a page that reported success on
+			# the strength of the status code would say the opposite of what
+			# the camera is doing.
+			if [ "$(mj_cfg records.onClose)" != "$_ch_hook" ]; then
+				clip_hook_msg="The camera did not keep the setting that sends recordings."
+				return 1
+			fi
+			;;
+		*)
+			clip_hook_msg="The camera already runs a command of its own when a recording finishes, so it was left alone. Clear it to send recordings from here."
+			return 1
+			;;
+		esac
+	elif [ "$_ch_now" = "$_ch_hook" ]; then
+		if ! mj_clear records.onClose; then
+			clip_hook_msg="The camera would not stop running the recording sender."
+			return 1
+		fi
+	fi
+
+	return 0
+}
+
 # pre "text" "classes" "extras"
 #
 # The <pre> twin of ex, for a text blob the camera produced rather than a

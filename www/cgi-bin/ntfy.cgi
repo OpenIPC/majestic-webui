@@ -3,7 +3,7 @@
 <%
 config_file=/etc/webui/ntfy.conf
 # The list of parameters that we will save
-params="enabled server topic user pass caption heif priority"
+params="enabled server topic user pass caption clips heif priority"
 
 # === TEST DISPATCH LOGIC ===
 if [ "$GET_send" = "test" ]; then
@@ -38,7 +38,11 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         for p in $params; do
             echo "ntfy_${p}=\"$(eval echo \$ntfy_${p})\"" >> "$config_file"
         done
-        redirect_back "success" "Ntfy config updated."
+        if clip_hook_sync; then
+            redirect_back "success" "Ntfy config updated."
+        fi
+
+        redirect_back "warning" "Ntfy config updated. $clip_hook_msg"
     fi
 
     redirect_to "$SCRIPT_NAME"
@@ -70,6 +74,7 @@ fi
 				<% field_text "ntfy_caption" "Caption" "Supports %hostname, %datetime, %soctemp." %>
 				<% field_string "ntfy_priority" "Priority" "eval" "1 2 3 4 5" "1 = min, 5 = max (urgent)." %>
 				<% field_switch "ntfy_heif" "Use HEIF format" "eval" "Smaller files (best with H265)." %>
+				<% field_switch "ntfy_clips" "Send motion clips" "eval" "Push the recording itself when movement ends. Needs recording on motion to be switched on." %>
 				<% button_submit %>
 			</form>
 		</div></div>
