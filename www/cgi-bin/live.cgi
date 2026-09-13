@@ -45,6 +45,7 @@ hide_title=1; full_bleed=1
 <script src="/a/preview-chain.js"></script>
 <script src="/a/preview-served.js"></script>
 <script src="/a/charts.js"></script>
+<script src="/a/mj-outgoing.js"></script>
 <script src="/a/preview-adapt.js"></script>
 <script src="/a/preview-stats.js"></script>
 <!-- preview-zoom.js before preview-page.js, and that order is load-bearing:

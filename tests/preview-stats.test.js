@@ -27,23 +27,38 @@ function makeEl(id) {
 		id: id || '', style: {}, hidden: false, className: '',
 		_kids: [],
 		appendChild(k) { this._kids.push(k); },
-		// Like the real DOM: textContent stringifies whatever is assigned.
-		set textContent(v) { text = String(v); },
+		// Like the real DOM: textContent stringifies whatever is assigned —
+		// and replaces the children, which is how the egress list clears
+		// itself between paints.
+		set textContent(v) { text = String(v); this._kids.length = 0; },
 		get textContent() { return text; },
 		set innerHTML(_) { /* template paint; ids resolve via getElementById */ },
 		get innerHTML() { return ''; },
 	};
 }
 
-function boot(nowStart) {
+// The verdict module the Live panel borrows its words from. Loaded for real
+// rather than stubbed: the point of the rows is that both pages call one
+// destination by one name, and a stub would let those drift.
+const OUTGOING = require(path.join(__dirname, '..', 'www', 'a', 'mj-outgoing.js'));
+
+// `opts.answers` is what apiFetch hands back, one per call, each either a
+// { status, body } or an Error to reject with. Absent, the page has no fetch
+// helper at all — which is the shape an older page and the vm tests share.
+function boot(nowStart, opts) {
+	const o = opts || {};
 	const els = Object.create(null);
 	let nowMs = nowStart != null ? nowStart : 100000;
 	const pushedSparks = [], pushedCharts = [];
 	let metricsFn = null;
+	const timers = [];
+	const asked = [];
 	const sandbox = {
 		window: {},
 		performance: { now: () => nowMs, timeOrigin: 0 },
 		requestAnimationFrame: (f) => f(),
+		setInterval: (fn, ms) => { timers.push({ fn: fn, ms: ms }); return timers.length; },
+		clearInterval: (h) => { if (h) timers[h - 1] = null; },
 		document: {
 			getElementById(id) { return els[id] || (els[id] = makeEl(id)); },
 			createElement(tag) { return makeEl(''); },
@@ -51,6 +66,18 @@ function boot(nowStart) {
 		mjMetricsSubscribe(fn) { metricsFn = fn; },
 		console,
 	};
+	if (o.answers) {
+		sandbox.window.MajesticOutgoing = OUTGOING;
+		sandbox.apiFetch = (url) => {
+			asked.push(url);
+			const a = o.answers.length > 1 ? o.answers.shift() : o.answers[0];
+			if (a instanceof Error) return Promise.reject(a);
+			return Promise.resolve({
+				status: a.status, ok: a.status >= 200 && a.status < 300,
+				json: () => Promise.resolve(a.body),
+			});
+		};
+	}
 	sandbox.window.MjCharts = {
 		makeSpark: () => ({ spark: true }),
 		pushSpark: (s, y) => pushedSparks.push(y),
@@ -66,8 +93,31 @@ function boot(nowStart) {
 		tickClock: (ms) => { nowMs += ms; },
 		metrics: (s) => metricsFn && metricsFn(s),
 		mkEl: (id) => sandbox.document.getElementById(id),
+		// Fire every armed interval once, the way five seconds would.
+		fireTimers: () => timers.forEach((t) => { if (t) t.fn(); }),
+		liveTimers: () => timers.filter(Boolean).length,
+		asked: asked,
+		// The stub answers resolve in microtasks; let them.
+		settle: () => new Promise((r) => setTimeout(r, 0)),
 		pushedSparks, pushedCharts,
 	};
+}
+
+// The labels the egress list is showing, in order. The list ends with the
+// panel's own summary lines — the encoder's output and the total leaving the
+// camera — which are not consumers; dest() is the part above them.
+function egLabels(env) {
+	return env.el('mj-ns-eg-rows')._kids.map((k) => k._kids[0].textContent);
+}
+function egValues(env) {
+	return env.el('mj-ns-eg-rows')._kids.map((k) => k._kids[1].textContent);
+}
+const SUMMARY = /^(encoder producing|total leaving camera)$/;
+function egDest(env) {
+	const labels = egLabels(env), values = egValues(env);
+	const out = [];
+	labels.forEach((t, i) => { if (!SUMMARY.test(t)) out.push([t, values[i]]); });
+	return out;
 }
 
 // The software rung reports transport 'wasm' and has no RTP-side counters:
@@ -631,4 +681,136 @@ g('a fresh page never invents a stall', () => {
 		env.el('mj-ns-grade').textContent === 'excellent');
 });
 
-done('preview-stats');
+// ── one row per destination ─────────────────────────────────────────────────
+//
+// "Outgoing push × 3" said the camera was pushing and nothing about which of
+// the three had stopped. Everything below must also hold when the camera
+// cannot answer, because the panel has to render completely without it.
+
+const FEED = () => ({ destinations: [
+	{ index: 0, protocol: 'rtmp', state: 'live', txBytes: 1000000 },
+	{ index: 2, protocol: 'rtp', state: 'retrying', txBytes: 5000 },
+	{ index: 1, protocol: 'whip', state: 'live', txBytes: 2000000,
+		bandwidthLimited: true, peerEstimateKbps: 900 },
+] });
+const FEED2 = () => ({ destinations: [
+	{ index: 0, protocol: 'rtmp', state: 'live', txBytes: 1500000 },
+	{ index: 1, protocol: 'whip', state: 'live', txBytes: 2000000,
+		bandwidthLimited: true, peerEstimateKbps: 900 },
+	{ index: 2, protocol: 'rtp', state: 'retrying', txBytes: 5000 },
+] });
+// Enough of a heartbeat to draw the egress section, and a combined count that
+// must lose to the per-destination rows wherever they exist.
+const HEARTBEAT = { ok: true, dt: 2, tx: 3000, prev: { tx: 1000, v: {} },
+	m: { v: { outgoing_streams_total: 3, outgoing_tx_bytes: 9000 } } };
+
+async function eachDestinationGetsALine() {
+	group('the egress list names each destination');
+	const env = boot(undefined, { answers: [
+		{ status: 200, body: FEED() }, { status: 200, body: FEED2() },
+	] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+
+	check('the endpoint is the only thing asked for',
+		env.asked.length === 1 && env.asked[0] === '/api/v1/outgoing.json');
+	check('one line per destination, in the order the camera keeps them',
+		JSON.stringify(egDest(env).map((r) => r[0])) === JSON.stringify(
+			['RTMP · live', 'WHIP · limited', 'RTP · reconnecting']),
+		'got ' + JSON.stringify(egDest(env)));
+	check('and the combined count is gone',
+		egLabels(env).every((t) => t.indexOf('Outgoing push') < 0));
+	// A destination URL carries the ingest host and often the stream key, and
+	// this panel is on the page most likely to be on somebody else's screen.
+	check('a label is a protocol and a state word, never an address',
+		egDest(env).every(([t]) =>
+			/^(RTMP|RTMPS|RTP|UNIX|WHIP|Outgoing)( · [a-z ]+)?$/.test(t)));
+	check('the first answer carries no rate — one sample is not a rate',
+		egDest(env).every(([, v]) => v === ''));
+
+	// Five seconds on, and the counter has moved.
+	env.tickClock(5000);
+	env.fireTimers();
+	await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('the second answer measures one',
+		egDest(env)[0][1] === '800 kbit/s', 'got ' + JSON.stringify(egDest(env)));
+	check('and a destination whose counter stood still reads zero, not blank',
+		egDest(env)[2][1] === '0 kbit/s');
+}
+
+async function itAsksOnlyWhileSomebodyIsLooking() {
+	group('the asking starts and stops with the panel');
+	const env = boot(undefined, { answers: [{ status: 200, body: FEED() }] });
+	env.stats.tick({ cam: {} });
+	check('a closed panel asks nothing', env.asked.length === 0 &&
+		env.liveTimers() === 0);
+	env.stats.setOpen(true);
+	await env.settle();
+	check('opening it asks at once and arms the repeat',
+		env.asked.length === 1 && env.liveTimers() === 1);
+	env.stats.setOpen(false);
+	check('closing it takes the timer down', env.liveTimers() === 0);
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('and the list falls back to the combined row',
+		egLabels(env).some((t) => t === 'Outgoing push × 3'));
+}
+
+async function anOlderCameraIsAskedOnce() {
+	group('a camera that does not answer');
+	const env = boot(undefined, { answers: [{ status: 404, body: null }] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('a 404 puts the combined row back',
+		egLabels(env).some((t) => t === 'Outgoing push × 3'));
+	// The endpoint does not appear while the page is open, so asking again
+	// is asking a question already answered.
+	env.tickClock(5000);
+	env.fireTimers();
+	await env.settle();
+	check('and it is not asked a third time', env.asked.length === 1);
+	check('with no timer left running', env.liveTimers() === 0);
+}
+
+async function oneDroppedAnswerIsNotAnOutage() {
+	group('a poll that fails');
+	const env = boot(undefined, { answers: [
+		{ status: 200, body: FEED() }, new Error('offline'), new Error('offline'),
+	] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.tickClock(5000); env.fireTimers(); await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('one dropped answer keeps the rows it had',
+		egDest(env)[0][0] === 'RTMP · live');
+	env.tickClock(5000); env.fireTimers(); await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('two make it fall back rather than show a stale state',
+		egLabels(env).some((t) => t === 'Outgoing push × 3'));
+}
+
+async function aPageWithoutTheModuleDrawsTheOldRow() {
+	group('a page carrying neither the module nor a fetch helper');
+	const env = boot();   // no answers: no apiFetch, no MajesticOutgoing
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	check('the combined row is exactly what it was',
+		egLabels(env).some((t) => t === 'Outgoing push × 3'));
+	check('and nothing is left ticking', env.liveTimers() === 0);
+}
+
+(async () => {
+	await eachDestinationGetsALine();
+	await itAsksOnlyWhileSomebodyIsLooking();
+	await anOlderCameraIsAskedOnce();
+	await oneDroppedAnswerIsNotAnOutage();
+	await aPageWithoutTheModuleDrawsTheOldRow();
+	done('preview-stats');
+})();
