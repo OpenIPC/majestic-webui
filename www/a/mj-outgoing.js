@@ -19,18 +19,22 @@
 	'use strict';
 
 	const STATES = ['off', 'connecting', 'live', 'retrying', 'failed'];
-	const PROTOCOLS = ['rtmp', 'rtmps', 'rtp', 'unix', 'whip'];
+	const PROTOCOLS = ['rtmp', 'rtmps', 'rtp', 'unix', 'whip', 'ipeye'];
 
 	// Must stay in step with the scheme table in mj-servers.js: the page
 	// corroborates a row's address against the protocol the camera reports,
 	// and a disagreement means the two are describing different destinations.
 	const PROTO_NAME = {
 		rtmp: 'RTMP', rtmps: 'RTMPS', rtp: 'RTP',
-		unix: 'UNIX', whip: 'WHIP',
+		unix: 'UNIX', whip: 'WHIP', ipeye: 'IPEYE',
 	};
 
 	// Long enough to say what went wrong, short enough not to become the page.
 	const ERR_MAX = 200;
+
+	// What a named destination may be called. Deliberately narrow: this is an
+	// identifier the page matches on and puts nowhere near markup.
+	const ID_RE = /^[a-z][a-z0-9-]{0,15}$/;
 
 	// Loss worth mentioning. Below this a link is doing what links do.
 	const LOSS_NOTICEABLE = 20;   // 2%
@@ -48,11 +52,21 @@
 	// a shape this does not recognise, is dropped rather than coerced — a
 	// string "918273645" is not a byte count, and Number() on it would invent
 	// one.
+	// A destination is identified by its position in the saved list, or — for
+	// one configured somewhere else entirely, with no position to have — by a
+	// name. Exactly one of the two, and an entry carrying neither is an entry
+	// this page cannot line up with anything, so it is dropped.
 	function readOne(raw) {
 		if (!raw || typeof raw !== 'object') return null;
-		if (!Number.isInteger(raw.index) || raw.index < 0) return null;
 
-		const st = { index: raw.index };
+		const st = {};
+		if (typeof raw.id === 'string' && ID_RE.test(raw.id)) {
+			st.id = raw.id;
+		} else if (Number.isInteger(raw.index) && raw.index >= 0) {
+			st.index = raw.index;
+		} else {
+			return null;
+		}
 		if (STATES.indexOf(raw.state) >= 0) st.state = raw.state;
 		if (PROTOCOLS.indexOf(raw.protocol) >= 0) st.protocol = raw.protocol;
 		if (Number.isInteger(raw.channel)) st.channel = raw.channel;
@@ -84,18 +98,22 @@
 		if (!Array.isArray(json.destinations)) return null;
 
 		const byIndex = Object.create(null);
+		const byId = Object.create(null);
 		let count = 0;
 		json.destinations.forEach(function (raw) {
 			const st = readOne(raw);
 			if (!st) return;
+			const into = st.id !== undefined ? byId : byIndex;
+			const key = st.id !== undefined ? st.id : st.index;
 			// First wins, the way the metrics parser resolves a duplicate.
-			if (st.index in byIndex) return;
-			byIndex[st.index] = st;
+			if (key in into) return;
+			into[key] = st;
 			count++;
 		});
 		return {
 			known: true,
 			byIndex: byIndex,
+			byId: byId,
 			count: count,
 			truncated: json.truncated === true,
 		};
@@ -190,6 +208,14 @@
 		const noRate = !isNum(st.peerEstimateKbps);
 		// A destination with no back channel at all answers both questions
 		// the same way, and two paragraphs of it in a row read as a stutter.
+		if (st.protocol === 'ipeye') {
+			// Not "this kind of destination cannot say": the service could,
+			// and the camera is the half that does not read it back. Whose
+			// shortcoming it is decides who could ever fix it.
+			out.push('The camera does not report how much of the stream is ' +
+				'reaching this service, or how much the connection can carry.');
+			return out;
+		}
 		if (noLoss && noRate && st.protocol !== 'rtp' && st.protocol !== 'whip') {
 			out.push('This kind of destination does not tell the camera what ' +
 				'reaches the far end, so nothing here can say how much of the ' +

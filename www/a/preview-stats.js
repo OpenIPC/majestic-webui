@@ -754,8 +754,14 @@ window.MajesticStats = (function () {
 		outFails = 0;
 		outFeed = read;
 		const at = performance.now();
-		Object.keys(read.byIndex).forEach((k) => {
-			const st = read.byIndex[k];
+		/* Keyed so a name and a position can never collide: "ipeye" and index
+		   0 are different destinations and must not share a sample. */
+		const seen = Object.create(null);
+		Object.keys(read.byId || {}).forEach((k) => { seen['id:' + k] = read.byId[k]; });
+		Object.keys(read.byIndex).forEach((k) => { seen[k] = read.byIndex[k]; });
+
+		Object.keys(seen).forEach((k) => {
+			const st = seen[k];
 			const prev = outPrev[k];
 			// The camera's index is a position in the saved list, so a list
 			// re-saved while this panel is open can put a different
@@ -780,7 +786,7 @@ window.MajesticStats = (function () {
 		});
 		// A destination the camera has stopped listing keeps no sample.
 		Object.keys(outPrev).forEach((k) => {
-			if (!(k in read.byIndex)) { delete outPrev[k]; delete outRate[k]; }
+			if (!(k in seen)) { delete outPrev[k]; delete outRate[k]; }
 		});
 	}
 
@@ -838,17 +844,27 @@ window.MajesticStats = (function () {
 	function outRows() {
 		const OUT = window.MajesticOutgoing;
 		if (!OUT || !outFeed) return [];
-		return Object.keys(outFeed.byIndex)
+
+		const line = (st, key) => {
+			const word = OUT.verdict(st, {}).badge;
+			const name = OUT.PROTO_NAME[st.protocol] || 'Outgoing';
+			const r = outRate[key];
+			return [word ? name + ' \u00b7 ' + word.toLowerCase() : name,
+				typeof r === 'number' ? fmtBps(r) : ''];
+		};
+
+		/* Named destinations first, then positional ones in order — the same
+		   order the camera sorts them into, so this list and the settings page
+		   read down the same way. A destination configured in its own section
+		   has no position to sort among the rest. */
+		const named = Object.keys(outFeed.byId || {})
+			.sort()
+			.map((k) => line(outFeed.byId[k], 'id:' + k));
+		const positional = Object.keys(outFeed.byIndex)
 			.map(Number)
 			.sort((a, b) => a - b)
-			.map((i) => {
-				const st = outFeed.byIndex[i];
-				const word = OUT.verdict(st, {}).badge;
-				const name = OUT.PROTO_NAME[st.protocol] || 'Outgoing';
-				const r = outRate[i];
-				return [word ? name + ' \u00b7 ' + word.toLowerCase() : name,
-					typeof r === 'number' ? fmtBps(r) : ''];
-			});
+			.map((i) => line(outFeed.byIndex[i], i));
+		return named.concat(positional);
 	}
 
 	// ── the 2 s /metrics heartbeat ──────────────────────────────────────────

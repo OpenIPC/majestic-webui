@@ -163,6 +163,44 @@ check('a destination that is not running is told none of it',
 	vd({ state: 'connecting', protocol: 'rtp' }).limits.length === 0 &&
 	vd({ state: 'failed', protocol: 'unix' }).limits.length === 0);
 
+group('a destination with a name instead of a position');
+
+// IPEYE is configured in its own section — a switch and no address — so it has
+// no position in the destinations list to be identified by. The camera names it
+// instead, and exactly one of the two identifies any entry.
+const named = O.read({ destinations: [
+	{ id: 'ipeye', protocol: 'ipeye', state: 'live', channel: 0, txBytes: 12 },
+	{ index: 0, protocol: 'whip', state: 'live' },
+] });
+check('a named entry is kept apart from the positional ones',
+	named.byId.ipeye !== undefined && named.byIndex[0] !== undefined &&
+	named.byId[0] === undefined && named.byIndex.ipeye === undefined);
+check('and both are counted', named.count === 2);
+check('the named one carries no index',
+	named.byId.ipeye.index === undefined);
+
+// An entry this page cannot line up with anything is worse than no entry: its
+// numbers would have to be shown against something.
+const junk = O.read({ destinations: [
+	{ protocol: 'ipeye', state: 'live' },
+	{ id: '', protocol: 'ipeye', state: 'live' },
+	{ id: 'Not An Id!', protocol: 'ipeye', state: 'live' },
+	{ id: 'a'.repeat(64), protocol: 'ipeye', state: 'live' },
+] });
+check('an entry identified by neither is dropped', junk.count === 0);
+
+check('a duplicate name keeps the first, like a duplicate position',
+	O.read({ destinations: [
+		{ id: 'ipeye', protocol: 'ipeye', state: 'live' },
+		{ id: 'ipeye', protocol: 'ipeye', state: 'failed' },
+	] }).byId.ipeye.state === 'live');
+
+check('the camera\'s "ipeye" has a badge',
+	O.PROTO_NAME.ipeye === 'IPEYE');
+check('and it says the camera is the half that cannot report',
+	/camera does not report/.test(
+		vd({ state: 'live', protocol: 'ipeye' }).limits.join(' ')));
+
 group('the vocabulary a person reads');
 
 // Nothing here may name a setting, a scheme, or an internal. The page has its
@@ -181,6 +219,7 @@ let unpunctuated = [];
 	{ state: 'failed' }, { state: 'off' },
 	{ state: 'live', protocol: 'unix' }, { state: 'live', protocol: 'rtp' },
 	{ state: 'live', protocol: 'whip' },
+	{ state: 'live', protocol: 'ipeye' }, { state: 'retrying', protocol: 'ipeye' },
 ].forEach((o) => {
 	[true, false].forEach((on) => {
 		const v = vd(o, { rowEnabled: on });

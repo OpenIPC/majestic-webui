@@ -866,6 +866,10 @@
 			// change because of it.
 			const ircut = ircutPanel(sec);
 			if (ircut) body.appendChild(ircut);
+			// Same placement and the same reason: the verdict is what someone
+			// came to read, and the switch is what they change because of it.
+			const ipeye = ipeyePanel(sec);
+			if (ipeye) body.appendChild(ipeye);
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
@@ -6707,6 +6711,206 @@
 		return a;
 	}
 
+	/* What the cloud connection is doing, above the switch that turns it on.
+	 *
+	 * Its own panel rather than the destination row's machinery, and not for
+	 * want of trying to share: that lives inside the object-array control, is
+	 * keyed to `outgoing.servers`, and every part of it — the four-pass join,
+	 * the address corroboration, the baseline — needs a row with a URL in a
+	 * saved array. IPEYE is a section with a switch and no address. What is
+	 * shared is the part worth sharing: mj-outgoing.js decides the words, so
+	 * the two pages call one destination one thing.
+	 */
+	function ipeyePanel(sec) {
+		const OUT = window.MajesticOutgoing;
+		if (sec !== 'ipeye' || !OUT) return null;
+
+		const box = el('div', 'mj-dest-status mj-sec-status');
+		box.hidden = true;
+		const badge = el('span', 'badge mj-dest-state');
+		const line = el('span', 'mj-dest-line');
+		const meter = el('span', 'mj-dest-meter');
+		const rate = el('span', 'mj-dest-rate');
+		const spark = el('span', 'spark spark-row mj-dest-spark');
+		meter.appendChild(rate);
+		meter.appendChild(spark);
+		const more = el('button', 'btn btn-sm btn-link mj-dest-more');
+		// Inside the settings form a bare button submits it, so this one
+		// would save the camera.
+		more.type = 'button';
+		more.textContent = 'Details';
+		more.setAttribute('aria-expanded', 'false');
+		box.appendChild(badge);
+		box.appendChild(line);
+		box.appendChild(meter);
+		box.appendChild(more);
+
+		const panel = el('div', 'mj-dest-detail');
+		panel.hidden = true;
+		more.addEventListener('click', () => {
+			const open = panel.hidden;
+			panel.hidden = !open;
+			more.setAttribute('aria-expanded', open ? 'true' : 'false');
+			more.textContent = open ? 'Hide' : 'Details';
+		});
+
+		const wrap = el('div', '');
+		wrap.appendChild(box);
+		wrap.appendChild(panel);
+
+		let feed = null, at = 0, fails = 0, seq = 0, gone = false, sig = '';
+		let prev = null, chart = null, bps = null;
+
+		const paint = () => {
+			const on = document.getElementById('ipeye.enabled');
+			const want = !!on && on.checked;
+			// What the camera is running is what it was last told. A switch
+			// flipped and not yet saved describes an intention, and the
+			// status above it does not.
+			const edited = !!on &&
+				String(want) !== String(state.initial['ipeye.enabled']);
+			const v = OUT.verdict(feed, {
+				rowEnabled: want,
+				ageMs: at ? Date.now() - at : 0,
+			});
+			const key = [v.known, v.sev, v.badge, v.short, v.reason, edited,
+				!panel.hidden].join('\u0001');
+			if (key === sig) return;
+			sig = key;
+
+			box.hidden = !v.known;
+			if (!v.known) return;
+
+			const TONE = { ok: 'success', warn: 'warning', danger: 'danger' };
+			badge.className =
+				'badge mj-dest-state text-bg-' + (TONE[v.sev] || 'secondary');
+			badge.textContent = v.badge;
+			badge.hidden = v.badge === '';
+			line.textContent = edited
+				? v.short + ' Changed here but not saved, so the camera is ' +
+					'still on the previous settings.'
+				: v.short;
+
+			panel.innerHTML = '';
+			v.detail.forEach((t) => {
+				const p2 = el('p', 'mj-dest-explain');
+				p2.textContent = t;
+				panel.appendChild(p2);
+			});
+			if (v.reason) {
+				const why = el('p', 'mj-dest-why');
+				why.textContent = v.reasonLead + ' ';
+				const q = el('span', 'mj-dest-reason');
+				// The camera's own words, and partly the service's: text.
+				q.textContent = v.reason;
+				why.appendChild(q);
+				panel.appendChild(why);
+			}
+			const rows = OUT.facts(feed, bps);
+			if (rows.length) {
+				const dl = el('dl', 'mj-dest-facts');
+				rows.forEach(([k, val]) => {
+					const dt = el('dt', ''); dt.textContent = k;
+					const dd = el('dd', ''); dd.textContent = val;
+					dl.appendChild(dt); dl.appendChild(dd);
+				});
+				panel.appendChild(dl);
+			}
+			v.limits.forEach((t) => {
+				const li = el('p', 'mj-dest-limits');
+				li.textContent = t;
+				panel.appendChild(li);
+			});
+			const empty = panel.childElementCount === 0;
+			more.hidden = empty;
+			if (empty && !panel.hidden) {
+				panel.hidden = true;
+				more.textContent = 'Details';
+				more.setAttribute('aria-expanded', 'false');
+			}
+		};
+
+		const took = (st) => {
+			// Same destination, or no rate: the connector restarts its byte
+			// count with each life, so a counter that went backwards is a
+			// fresh one rather than a slower link.
+			const same = prev && !(typeof prev.since === 'number' &&
+				typeof st.sinceMs === 'number' && st.sinceMs < prev.since);
+			bps = same ? OUT.rate(prev.bytes, st.txBytes, at - prev.at) : null;
+			rate.textContent = bps === null ? '' : OUT.bps(bps);
+			const MC = window.MjCharts;
+			if (bps !== null && MC && MC.pushSpark) {
+				if (!chart) {
+					const ink = (getComputedStyle(document.documentElement)
+						.getPropertyValue('--st-c1') || '#4c60d8').trim();
+					chart = MC.makeSpark(spark, ink, 0, null, 60, 2);
+				}
+				MC.pushSpark(chart, bps);
+			}
+			if (typeof st.txBytes === 'number') {
+				prev = { bytes: st.txBytes, at: at, since: st.sinceMs };
+			}
+		};
+
+		const lost = () => {
+			feed = null;
+			prev = null;
+			bps = null;
+			rate.textContent = '';
+			sig = '';
+			paint();
+		};
+
+		const poll = () => {
+			if (gone) return;
+			const my = ++seq;
+			apiFetch('/api/v1/outgoing.json')
+				.then((r) => {
+					// A fact about the build, not about this visit.
+					if (r.status === 404) { gone = true; return null; }
+					if (!r.ok) return Promise.reject(r.status);
+					return r.json();
+				})
+				.then((j) => {
+					if (my !== seq || j === null) return;
+					const read = OUT.read(j);
+					// A reply nobody can read is not a reading, and counts the
+					// same as one that never came.
+					if (!read) {
+						if (++fails >= 2) lost();
+						return;
+					}
+					fails = 0;
+					at = Date.now();
+					// Absent means the connector is not running — switched
+					// off, or the pipeline is down. Silence, not a stale green.
+					const st = read.byId ? read.byId.ipeye : null;
+					if (!st) { lost(); return; }
+					feed = st;
+					took(st);
+					sig = '';
+					paint();
+				})
+				.catch(() => {
+					if (my !== seq) return;
+					if (++fails >= 2) lost();
+				});
+		};
+
+		poll();
+		const t = setInterval(poll, 2000);
+		// A second clock so a countdown ticks between polls rather than
+		// lurching every two seconds.
+		const t1 = setInterval(paint, 1000);
+		state.liveCleanup.push(() => {
+			clearInterval(t);
+			clearInterval(t1);
+			// An answer in flight is stale on arrival.
+			seq++;
+		});
+		return wrap;
+	}
+
 	function ircutPanel(sec) {
 		if (sec !== 'nightMode' || !IRCUT) return null;
 		// A refused snapshot blanks the Test button until something says to ask
@@ -8702,7 +8906,51 @@
 			// unsubscribe, so a handler registered per mount would outlive
 			// every visit to this tab. This one is torn down with the leaf.
 			if (OUT && dot === 'outgoing.servers') {
+				/* The cloud connection, read-only, above the list.
+				 *
+				 * It is a place this camera publishes to, and a page called
+				 * Outgoing that does not list it is a page you can read to the
+				 * end and still be wrong about where the uplink is going. It
+				 * is not editable here because it is not one of these rows —
+				 * it has a switch and no address, and its settings live on
+				 * their own leaf. Outside `control`, so _set() does not sweep
+				 * it away with the rows. */
+				const cloud = el('div', 'mj-dest-cloud');
+				cloud.hidden = true;
+				const cloudName = el('span', 'mj-dest-proto');
+				cloudName.textContent = 'IPEYE';
+				const cloudBadge = el('span', 'badge mj-dest-state');
+				const cloudLine = el('span', 'mj-dest-line');
+				// Somewhere to go. Seeing that the cloud connection is in
+				// trouble and having nowhere to click is worse than not
+				// listing it: its settings are one leaf away and this says
+				// which. A plain link, so it survives the page being
+				// bookmarked or opened in another tab.
+				const cloudTo = el('a', 'mj-dest-to');
+				cloudTo.href = '?tab=ipeye';
+				cloudTo.textContent = 'Settings';
+				cloud.appendChild(cloudName);
+				cloud.appendChild(cloudBadge);
+				cloud.appendChild(cloudLine);
+				cloud.appendChild(cloudTo);
+				control.parentNode.insertBefore(cloud, control);
+
+				const paintCloud = () => {
+					const st = (outFeed && outFeed.byId)
+						? outFeed.byId.ipeye : null;
+					const v = OUT.verdict(st, { ageMs: outAt ? Date.now() - outAt : 0 });
+					cloud.hidden = !v.known;
+					if (!v.known) return;
+					const TONE = { ok: 'success', warn: 'warning', danger: 'danger' };
+					cloudBadge.className =
+						'badge mj-dest-state text-bg-' + (TONE[v.sev] || 'secondary');
+					cloudBadge.textContent = v.badge;
+					cloudBadge.hidden = v.badge === '';
+					cloudLine.textContent = v.short;
+				};
+
 				const paintAll = () => {
+					paintCloud();
 					joinRows();
 					control.querySelectorAll('.mj-dest').forEach(r => {
 						// The trace and the rate ride the poll, not the
@@ -8815,6 +9063,7 @@
 				// A second clock so a countdown ticks between polls rather
 				// than lurching every two seconds.
 				const t1 = setInterval(() => {
+					paintCloud();
 					control.querySelectorAll('.mj-dest').forEach(r => paintDest(r));
 				}, 1000);
 				state.liveCleanup.push(() => {

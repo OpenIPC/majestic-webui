@@ -931,8 +931,44 @@ async function aRestartedDestinationGetsNoRate() {
 		egDest(env)[0][1] === '');
 }
 
+async function theCloudConnectionIsListedToo() {
+	group('a destination the camera names instead of numbering');
+	const feed = () => ({ destinations: [
+		{ index: 0, protocol: 'rtmp', state: 'live', txBytes: 1000000 },
+		{ id: 'ipeye', protocol: 'ipeye', state: 'live', txBytes: 500000 },
+	] });
+	const env = boot(undefined, { answers: [
+		{ status: 200, body: feed() },
+		{ status: 200, body: { destinations: [
+			{ index: 0, protocol: 'rtmp', state: 'live', txBytes: 1500000 },
+			{ id: 'ipeye', protocol: 'ipeye', state: 'live', txBytes: 700000 },
+		] } },
+	] });
+	env.stats.tick({ cam: {} });
+	env.stats.setOpen(true);
+	await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+
+	// Named first, then positions — the order the camera sorts them into, so
+	// this list and the settings page read down the same way.
+	check('the cloud connection is listed, named first',
+		JSON.stringify(egDest(env).map((r) => r[0])) ===
+			JSON.stringify(['IPEYE · live', 'RTMP · live']),
+		'got ' + JSON.stringify(egDest(env)));
+
+	env.tickClock(5000);
+	env.fireTimers();
+	await env.settle();
+	env.metrics(Object.assign({}, HEARTBEAT));
+	// A name and a position must not share a rate sample.
+	check('each is measured on its own counter',
+		egDest(env)[0][1] === '320 kbit/s' && egDest(env)[1][1] === '800 kbit/s',
+		'got ' + JSON.stringify(egDest(env)));
+}
+
 (async () => {
 	await eachDestinationGetsALine();
+	await theCloudConnectionIsListedToo();
 	await closingClearsWhatWasDrawn();
 	await oneRequestAtATime();
 	await aTruncatedAnswerKeepsTheTotal();
