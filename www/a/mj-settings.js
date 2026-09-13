@@ -7947,8 +7947,10 @@
 		});
 	}
 
-	// "all N at stock" / "N of M off stock" for the section head — the question
-	// the per-row ↺ can only answer one row at a time. Counted over what is on
+	// "all N at stock" / "N of M off stock" for the section head, and the same
+	// judgement marked on every row it counted — the head can say how many and
+	// never which, and a reader who cannot find the four has been handed a
+	// number they can do nothing with. Counted over what is on
 	// screen (a visibleWhen-hidden row is not one of the section's N from here)
 	// and over fields the schema records a default for, so the sentence is
 	// provable: a key with no recorded default can never be shown to be either.
@@ -7963,33 +7965,55 @@
 	// Measured against the default rather than against the last save, so it goes
 	// on saying "off stock" after Save — it is a fact about the camera.
 	function paintStock() {
-		const note = document.getElementById('mj-stock-note');
-		if (!note) return;
-		let shown = 0, known = 0, off = 0;
+		let shown = 0, known = 0, offN = 0;
 		for (const f of state.fields) {
 			if (!f.p || f.p.style.display === 'none' || f.p.hidden) continue;
 			shown++;
-			if (!f.schema || !Object.prototype.hasOwnProperty.call(f.schema, 'default')) continue;
+			if (!f.schema || !schemaHasDefault(f.schema)) continue;
 			known++;
-			// The default has to be serialised the way the control serialises its
-			// own value or the two are not comparable: an array control reads back
-			// as ", "-joined (getValue → _rows().join(', ')) while String([a,b])
-			// joins on a bare comma, so an untouched two-region default would count
-			// as off stock. Every array default majestic ships today is [], which
-			// stringifies to "" either way — this is the case that has not bitten
-			// yet, not the one that cannot.
-			const def = f.schema.default;
-			const defStr = Array.isArray(def) ? def.join(', ') : String(def);
-			if (String(f.getValue()) !== defStr) off++;
+			const off = String(f.getValue()) !== stockOf(f.schema);
+			if (off) offN++;
+			// The same count, said row by row. Which four of the seventeen the
+			// head is talking about is the one thing it cannot say, and nothing
+			// else on the row could say it either: the amber left border is
+			// taken (it means unsaved), and the value alone does not tell you
+			// what stock was. The ↺ is the free channel and the honest one — it
+			// is the undo for exactly this fact, so it lights when there is
+			// something to undo and hides when there is not.
+			f.p.classList.toggle('mj-off-stock', off);
+			f.p.classList.toggle('mj-at-stock', !off);
+			if (f.setStock) f.setStock(off);
 		}
+		const note = document.getElementById('mj-stock-note');
+		// Painted on every leaf, the note only on the ones that have a head:
+		// renderLive, renderOsd and renderMotion draw their own, and the rows
+		// under them are the same rows with the same question about them. This
+		// used to return here first, which left those three leaves marking
+		// nothing.
+		if (!note) return;
 		// The denominator is the rows on screen, so it matches what can be
 		// counted; "all at stock" carries no number at all, because the honest
 		// one is the number of *defaulted* fields and printing "all 9" beside
 		// twelve visible rows invites exactly the wrong reading.
 		note.textContent = !known ? ''
-			: off ? off + ' of ' + shown + ' off stock'
+			: offN ? offN + ' of ' + shown + ' off stock'
 				: 'all at stock';
-		note.classList.toggle('mj-off-stock', off > 0);
+		note.classList.toggle('mj-off-stock', offN > 0);
+	}
+
+	function schemaHasDefault(schema) {
+		return Object.prototype.hasOwnProperty.call(schema, 'default');
+	}
+
+	// The default as the CONTROL would serialise it, or the two are not
+	// comparable: an array control reads back as ", "-joined (getValue →
+	// _rows().join(', ')) while String([a,b]) joins on a bare comma, so an
+	// untouched two-region default would count as off stock. Every array
+	// default majestic ships today is [], which stringifies to "" either way —
+	// this is the case that has not bitten yet, not the one that cannot.
+	function stockOf(schema) {
+		const def = schema.default;
+		return Array.isArray(def) ? def.join(', ') : String(def);
 	}
 
 	// `skip` is a set of dots a caller has already mounted elsewhere on the same
@@ -8468,7 +8492,7 @@
 		const liveCls = live ? ' mj-live-row' : '';
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
-		const hasDefault = Object.prototype.hasOwnProperty.call(sub, 'default');
+		const hasDefault = schemaHasDefault(sub);
 		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
 		const isFontFile = isFontPath(dot) && FONTS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
@@ -9688,6 +9712,9 @@
 			return null;
 		}
 
+		// Assigned below on a row that has a default to be off, and called by
+		// paintStock, which is the only place that knows whether it is.
+		let setStock = null;
 		// live knobs share one "Reset all" in the panel header — no per-knob reset
 		if (!live) {
 			const reset = document.createElement('button');
@@ -9713,10 +9740,28 @@
 			const clears = !hasDefault;
 			reset.setAttribute('aria-label',
 				clears ? 'Clear ' + desc : 'Reset ' + desc + ' to default');
+			// An empty default is a real one — the crop region's [] is "the whole
+			// frame" — and it used to print as a sentence that stopped at its
+			// colon. The word is what the row's own hint calls it.
+			const defWord = hasDefault ? (stockOf(sub) || 'empty') : '';
 			reset.title = clears
 				? 'Clear this setting and leave it to the camera.'
-				: 'Reset to default: ' + String(sub.default);
+				: 'Reset to default: ' + defWord;
 			reset.addEventListener('click', () => onReset(dot, reset, desc, clears));
+			// Whether this row is off stock is not known here — it changes with
+			// every keystroke — so the button lends paintStock a hatch and stays
+			// out of the judgement. The colour is for the reader who can see it;
+			// this is the same fact for the one who cannot.
+			if (!clears) setStock = (off) => {
+				// A 404 has already replaced both of these with the camera's own
+				// answer, and that one outlives every repaint — same rule as the
+				// button it left down.
+				if (reset.dataset.gone) return;
+				reset.title = (off ? 'Off stock. Reset to default: ' : 'Reset to default: ')
+					+ defWord;
+				reset.setAttribute('aria-label',
+					'Reset ' + desc + ' to default' + (off ? ', currently off stock' : ''));
+			};
 			// Put the glyph on the control's own line instead of below it. The
 			// live rows are left alone: .mj-live-row.range > .input-group is a
 			// direct-child selector that this wrapper would break.
@@ -9834,7 +9879,7 @@
 			control.addEventListener('change', pushLive);
 		}
 
-		return { dot, key, schema: sub, type, control, p, getValue, setValue, pushes };
+		return { dot, key, schema: sub, type, control, p, getValue, setValue, pushes, setStock };
 	}
 
 	function updateDirty() {
@@ -10254,6 +10299,7 @@
 			if (!res.ok) {
 				if (res.status === 404) {
 					btn.title = 'This camera has no such setting.';
+					btn.dataset.gone = '1';
 					gone = true;
 				} else {
 					const txt = await safeText(res);

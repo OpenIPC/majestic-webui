@@ -682,6 +682,35 @@ pre#output[data-cmd] {
 	opacity: 0.12;
 }
 
+/* Three weights down that rail, because the head's "4 of 17 off stock" names a
+   number and nothing on the page said WHICH four — every row carried the same
+   muted glyph whether or not it had anything to undo, so the count could only
+   be acted on by opening the config file. The row's own left border could not
+   carry it: amber there already means unsaved, and off stock is a different
+   fact that survives Save.
+
+   Lit, in the amber the count is printed in: off stock, and this is the undo.
+   Hidden until the row is reached: at stock, where majestic keeps no key at
+   all — it writes back only what differs from the build's defaults — so the
+   press provably changes nothing. Muted, always: a key the schema gives no
+   default for, which is not a claim that it is at stock but an admission that
+   this page cannot tell, and where the glyph is the only way back to unset
+   (#416). Hover keeps the colour and answers with the background instead: it
+   is state, not a link. */
+.mj-row.mj-off-stock .mj-reset {
+	color: var(--bs-warning);
+	opacity: 1;
+}
+
+.mj-row.mj-at-stock .mj-reset {
+	visibility: hidden;
+}
+
+.mj-row.mj-at-stock:hover .mj-reset,
+.mj-row.mj-at-stock:focus-within .mj-reset {
+	visibility: visible;
+}
+
 /* ── settings navigation tree ───────────────────────────────────────────────
    Categories are static headings on >=md and accordion toggles below it, where
    the rail is full width and 21 sections would otherwise be a screen and a half
