@@ -134,6 +134,20 @@ group('diagnose');
 
 	check('with both on there is nothing in the way',
 		ac.diagnose({ audio: { enabled: true, outputEnabled: true } }) === null);
+
+	// Absent is not false. A camera that never sent the key has not said its
+	// microphone is off, and a panel that turns silence into "switched off"
+	// sends somebody hunting for a control that may not be there at all.
+	const quietOnTheSubject = ac.diagnose({ audio: { volume: 40 } });
+	check('a camera that said nothing is not a camera that said no',
+		quietOnTheSubject.unknown === true);
+	check('and it is blocked, because there is nothing to measure against',
+		quietOnTheSubject.blocked === true);
+	check('one switch missing is still unknown',
+		ac.diagnose({ audio: { enabled: true } }).unknown === true);
+	check('a switch that is genuinely false is NOT unknown',
+		ac.diagnose({ audio: { enabled: false, outputEnabled: true } }).unknown !==
+			true);
 }
 
 group('stimulus');
@@ -217,17 +231,28 @@ group('the loop converges on a camera whose gain curve it cannot know');
 
 	// Carries the previous point, which is what lets the step be read off the
 	// camera's own curve instead of guessed. The panel does the same.
+	// Eight tries, which is what the panel gives it. Testing with a budget the
+	// panel does not have would pass a loop that gives up on a real camera
+	// halfway down the dial and reports a level that is still distorting.
+	const ROUNDS = 8;
+
+	// Returns the level the panel would STAGE, which is the last one actually
+	// measured — never the one the loop was about to try when it ran out. A
+	// helper that returned the latter would be asserting on a reading nobody
+	// took, and would call a loop good that stopped one try short.
 	function converge(cam, start) {
 		let level = start;
 		let previous = null;
-		for (let i = 0; i < 8; i++) {
+		let measuredAt = null;
+		for (let i = 0; i < ROUNDS; i++) {
 			const reading = cam(level);
+			measuredAt = level;
 			const r = ac.recommend(reading, level, { previous: previous });
-			if (r.done) return { level: level, rounds: i };
+			if (r.done) return { level: measuredAt, rounds: i + 1 };
 			previous = { level: level, rmsDb: reading.rmsDb };
 			level = r.level;
 		}
-		return { level: level, rounds: 8, gaveUp: true };
+		return { level: measuredAt, rounds: ROUNDS, gaveUp: true };
 	}
 
 	// Three different cameras, and from both ends of the dial on each.
@@ -238,6 +263,11 @@ group('the loop converges on a camera whose gain curve it cannot know');
 		// The one that broke the fixed step on a camera: twelve points moved the
 		// reading by 57 dB. A guessed slope oscillates between the rails here.
 		{ name: 'a very steep dial, as measured on hardware', k: 4.75, offset: -200 },
+		// Also measured: a camera whose top half is all rail. Levels 55 through
+		// 100 every one of them read within a couple of dB of full scale, so
+		// there is no slope to be had up there and the only way out is down.
+		// A timid clipped step spends every try crossing it.
+		{ name: 'a dial whose top half is saturated', k: 0.7, offset: -37 },
 	];
 	for (const c of curves) {
 		const cam = camera(c.k, c.offset);
@@ -247,6 +277,9 @@ group('the loop converges on a camera whose gain curve it cannot know');
 			const inWindow =
 				Math.abs(reading.rmsDb - ac.TARGET_DBFS) <= ac.TARGET_WINDOW &&
 				!reading.clipping;
+			// What the operator is left holding: the staged level reads well,
+			// and the loop got there inside the budget rather than being cut
+			// off mid-descent.
 			check(
 				c.name + ', starting at ' + start + ', lands in the window',
 				inWindow && !got.gaveUp,
@@ -291,15 +324,22 @@ group('probe drives the whole sequence');
 		const res = await ac.probe({
 			onStep: (s) => steps.push(s),
 			play: async () => {
+				// Outlasts the reading, as a three-second burst outlasts a
+				// two-and-a-half-second measurement. A stub that finished first
+				// would measure the room after the sound and call a working
+				// speaker silent — which is the bug, not the test.
 				playing = true;
-				await new Promise((r) => setTimeout(r, 5));
+				await new Promise((r) => setTimeout(r, 40));
 				playing = false;
 			},
-			listen: async () => {
-				// The room is quiet until the sound is playing, which is what
-				// the sequence is supposed to arrange.
+			listen: async (ms, onReady) => {
+				// Samples are flowing, which is the signal that releases the
+				// sound. Then a beat, so the burst has started before the
+				// reading is taken — the room is quiet until it does, which is
+				// what the sequence is supposed to arrange.
+				if (onReady) onReady();
+				await new Promise((r) => setTimeout(r, 8));
 				const amp = playing ? 3000 : 30;
-				await new Promise((r) => setTimeout(r, 1));
 				return ac.measure(sine(4800, amp));
 			},
 		});
@@ -319,16 +359,54 @@ group('probe drives the whole sequence');
 				await new Promise((r) => setTimeout(r, 20));
 				order.push('play-end');
 			},
-			listen: async () => {
+			listen: async (ms, onReady) => {
 				order.push('listen');
-				await new Promise((r) => setTimeout(r, 1));
+				if (onReady) onReady();
+				await new Promise((r) => setTimeout(r, 8));
 				return ac.measure(sine(4800, 1000));
 			},
 		});
-		check('the second reading is taken before the sound has finished',
-			order.indexOf('play-start') < order.lastIndexOf('listen') &&
-				order.lastIndexOf('listen') < order.indexOf('play-end'),
+		check('the sound plays while the second reading is being taken',
+			order.indexOf('play-start') > 0 &&
+				order.indexOf('play-start') < order.indexOf('play-end') &&
+				order.lastIndexOf('listen') < order.indexOf('play-start'),
 			order.join(','));
+	}
+
+	{
+		// The race that would fail a working speaker: a capture subscription
+		// that takes a moment to open. Playing first lets the whole burst
+		// finish before anything is listening, and the verdict then says the
+		// microphone heard nothing. The sound must not start until samples are
+		// actually arriving.
+		let opened = false;
+		let playedBeforeOpen = false;
+		await ac.probe({
+			listen: async (ms, onReady) => {
+				// Slow to open, as a real subscription is.
+				await new Promise((r) => setTimeout(r, 30));
+				opened = true;
+				if (onReady) onReady();
+				await new Promise((r) => setTimeout(r, 5));
+				return ac.measure(sine(4800, 2000));
+			},
+			play: async () => {
+				if (!opened) playedBeforeOpen = true;
+			},
+		});
+		check('the sound does not start before the microphone is listening',
+			playedBeforeOpen === false);
+	}
+
+	{
+		// ...and a stream that never delivers must not hang the panel waiting
+		// for a readiness signal that will never come.
+		const res = await ac.probe({
+			listen: async () => null,
+			play: async () => {},
+		});
+		check('a stream that never arrives still reaches a verdict',
+			res.ok === false && res.severity === 'danger');
 	}
 
 	{
@@ -352,6 +430,20 @@ group('probe drives the whole sequence');
 
 		check('and nothing arriving is not silence',
 			(await ac.listen(async () => null, 50)) === null);
+
+		// Fired on the first chunk, not on the call: a request that has
+		// resolved has not necessarily delivered a sample yet, and that gap is
+		// the whole of the race above.
+		let readyAt = -1, got = 0;
+		await ac.listen(async () => {
+			got++;
+			return got <= 2 ? bytesOf(sine(500, 4000)) : null;
+		}, 500, () => { readyAt = got; });
+		check('readiness is announced on the first chunk', readyAt === 1);
+
+		let never = false;
+		await ac.listen(async () => null, 30, () => { never = true; });
+		check('and never announced when nothing arrives', never === false);
 	}
 
 	done();

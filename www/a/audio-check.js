@@ -170,6 +170,22 @@
 				why: 'The camera has not said what its audio settings are yet.',
 			};
 
+		// Absent is not false. A camera that never sent the key has not said
+		// its microphone is off — it has said nothing — and a panel that turns
+		// silence into "switched off" sends somebody looking for a control to
+		// change that may not even be there.
+		const micSaid = get('enabled') !== undefined;
+		const spkSaid = get('outputEnabled') !== undefined;
+		if (!micSaid || !spkSaid)
+			return {
+				blocked: true,
+				unknown: true,
+				why:
+					'This camera has not said whether its microphone and speaker ' +
+					'are switched on, so there is no way to tell what a test would ' +
+					'be measuring.',
+			};
+
 		const mic = get('enabled') === true;
 		const spk = get('outputEnabled') === true;
 
@@ -273,15 +289,27 @@
 	// `read` is injected: on a camera it pulls from the capture stream, in a
 	// test it hands back whatever the test wants to have arrived. It returns
 	// byte chunks, or null when there are no more.
-	async function listen(read, ms) {
+	//
+	// `onReady` fires once the FIRST chunk has arrived, which is the only
+	// honest signal that samples are flowing — a request that has resolved has
+	// not necessarily delivered anything yet. probe() waits for it before
+	// starting the sound, because a subscription that takes a moment to open
+	// would otherwise let a short burst finish before anything was listening,
+	// and a working speaker would be reported as silent.
+	async function listen(read, ms, onReady) {
 		const deadline = Date.now() + (ms > 0 ? ms : 1000);
 		const chunks = [];
 		let total = 0;
+		let announced = false;
 
 		for (;;) {
 			if (Date.now() >= deadline) break;
 			const chunk = await read();
 			if (!chunk || !chunk.length) break;
+			if (!announced) {
+				announced = true;
+				if (onReady) onReady();
+			}
 			chunks.push(chunk);
 			total += chunk.length;
 		}
@@ -342,8 +370,17 @@
 				why: 'the microphone is not sending anything',
 			};
 
+		// A clipped reading carries no usable level: every sample is pinned at
+		// the rail, so dBFS says "about zero" whatever the dial is doing, and a
+		// slope computed from two such readings is describing noise. So step
+		// blind — but step FULLY. Measured on a camera whose top third all
+		// reads within 2 dB of full scale, a timid step spends the entire round
+		// budget crossing ground that was never in doubt and then reports a
+		// level that is still distorting. Undershooting is the cheaper mistake:
+		// the reading below is real, so the very next round has a slope and
+		// climbs back on evidence.
 		if (reading.clipping) {
-			const next = Math.max(lo, Math.round(level - 15));
+			const next = Math.max(lo, Math.round(level - maxStep));
 			return {
 				done: next === level,
 				level: next,
@@ -484,11 +521,24 @@
 		const before = await deps.listen(deps.quietMs || 1000);
 
 		step('playing');
-		// Started, not awaited: the sound plays while the microphone is read,
-		// which is the entire measurement. Awaiting it first would measure the
-		// room after the sound had finished.
+		// The order here is the measurement. Listening is started first and the
+		// sound only begins once samples are actually arriving: the burst is a
+		// few seconds long and a capture subscription does not open instantly,
+		// so playing first lets part or all of it finish before anything is
+		// listening — and a working speaker then gets the "nothing was heard"
+		// verdict. Started and not awaited, because the two have to overlap.
+		let startPlaying;
+		const listening = new Promise((resolve) => {
+			startPlaying = resolve;
+		});
+		const during = deps.listen(deps.soundMs || 2000, startPlaying);
+		// ...but not for ever: if nothing ever arrives, onReady never fires, and
+		// waiting on it alone would hang the panel. The measurement settling is
+		// the other way out, and it carries the null that says so.
+		await Promise.race([listening, during]);
+
 		const played = deps.play();
-		const during = await deps.listen(deps.soundMs || 2000);
+		const measured = await during;
 		let playError = null;
 		try {
 			await played;
@@ -506,7 +556,7 @@
 				detail: String((playError && playError.message) || playError),
 			};
 
-		return verdict(before, during, deps);
+		return verdict(before, measured, deps);
 	}
 
 	const api = {
