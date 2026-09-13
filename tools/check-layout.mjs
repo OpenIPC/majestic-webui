@@ -9,10 +9,10 @@
 // twice, a <select> clipped to "rtl8188fu-generic - no po", a Save bar 4px past
 // the viewport at 390px (and the same on time.cgi), and a grid row half empty.
 //
-//   node tools/check-layout.mjs http://<camera>/cgi-bin/network.cgi [more…]
+//   WEBUI_LOGIN=root:pw node tools/check-layout.mjs http://<camera>/cgi-bin/network.cgi
 //   node tools/check-layout.mjs --self-test
 //
-// A camera needs credentials: WEBUI_AUTH=root:secret. A chromium binary comes
+// A camera needs credentials: WEBUI_LOGIN=root:secret. A chromium binary comes
 // from CHROME=, or the usual paths. Neither is installed by this repo -- it is
 // a developer tool run against a running camera, not a CI job.
 //
@@ -180,19 +180,46 @@ const SELF_TEST_PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
   <div class="spill"></div>
 </main></body></html>`;
 
+// Sign in the way the browser does.
+//
+// NOT a Basic header and NOT page.authenticate(): HTTP Basic is the deprecated
+// path here, and page.authenticate() cannot work anyway -- it waits for a 401
+// challenge, and majestic deliberately redirects an unauthenticated browser
+// navigation to /login.html instead of challenging, so the browser lands on the
+// sign-in page and every measurement describes THAT rather than the page asked
+// for. Three clean runs in a row were of the login page.
+//
+// So this is what www/login.html itself does: POST the credentials to /login
+// as a form, which answers `Set-Cookie: session=...`, and let the browser's own
+// jar carry it into every later request. Posting it from a page already on the
+// camera's origin is what makes the cookie land and what keeps this on the
+// supported path rather than beside it.
+async function signIn(page, url) {
+	const origin = new URL(url).origin;
+	await page.goto(origin + '/login.html', { waitUntil: 'domcontentloaded', timeout: 45000 });
+	const [user, ...rest] = process.env.WEBUI_LOGIN.split(':');
+	const status = await page.evaluate(
+		async (u, p) =>
+			(
+				await fetch('/login', {
+					method: 'POST',
+					credentials: 'same-origin',
+					headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+					body: 'username=' + encodeURIComponent(u) + '&password=' + encodeURIComponent(p),
+				})
+			).status,
+		user,
+		rest.join(':'),
+	);
+	if (status >= 400) throw new Error(`sign-in refused with HTTP ${status} — check WEBUI_LOGIN`);
+}
+
 async function run(browser, url, setContent, seen = new Set()) {
 	let bad = 0;
 	for (const [w, h, label] of VIEWPORTS) {
 		const page = await browser.newPage();
-		if (process.env.WEBUI_AUTH)
-			// NOT page.authenticate(): that waits for a 401, and majestic
-			// deliberately redirects an unauthenticated browser navigation to
-			// /login.html rather than challenging -- so the browser lands on the
-			// sign-in page and every measurement below describes THAT.
-			await page.setExtraHTTPHeaders({
-				authorization: 'Basic ' + Buffer.from(process.env.WEBUI_AUTH).toString('base64'),
-			});
 		await page.setViewport({ width: w, height: h });
+		if (!setContent && process.env.WEBUI_LOGIN) await signIn(page, url);
 		if (setContent) await page.setContent(url);
 		else await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
 		const R = await page.evaluate(measure);
@@ -202,7 +229,7 @@ async function run(browser, url, setContent, seen = new Set()) {
 		// Refuse to report on a page that is not the one asked for. Silence
 		// about the wrong page is the failure mode this whole file exists for.
 		if (!setContent && /sign in/i.test(R.title)) {
-			console.log(`    NOT LOGGED IN — measured "${R.title}". Set WEBUI_AUTH=user:pass.`);
+			console.log(`    NOT LOGGED IN — measured "${R.title}". Set WEBUI_LOGIN=user:pass.`);
 			bad++;
 			continue;
 		}
