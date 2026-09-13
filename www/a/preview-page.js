@@ -32,18 +32,23 @@
 	const badge = $('#mj-badge'), note = $('#mj-note');
 	const tapPlay = $('#mj-tap-play');
 	const snapshot = $('#mj-snapshot');
+	// Bumped on every poster paint and on hide, so a frame that finishes reading
+	// after the invitation moved on (a stream switch, a hide) is not written into
+	// the shared snapshot -- otherwise a departed stream's frame could land under
+	// the current one's button (#317).
+	let posterGen = 0;
 	const noteWhy = $('#mj-note-why'), noteAct = $('#mj-note-act');
 	const servedEl = $('#mj-served'), servedWhy = $('#mj-served-why');
 	let jpegOn = false;
 	mjConfig().then(cfg => {
 		jpegOn = mjGet(cfg, 'jpeg.enabled') === true;
 		// The invitation can be raised before this fetch resolves (attach wins the
-		// config timeout), and showTapPlay only paints the snapshot when jpegOn is
-		// already known true. So if the button is up now and the answer just came
-		// back true, paint it -- otherwise it sits over black for the whole pause (#317).
-		if (jpegOn && tapPlay && !tapPlay.hidden && snapshot) {
-			try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {}
-		}
+		// config timeout). The WebRTC-frame poster does not need jpegOn, but the
+		// /image.jpg fallback does, so if the button is already up when the answer
+		// lands, repaint -- otherwise a non-Chromium browser sits over black for the
+		// whole pause (#317). paintPoster prefers the track frame and won't fetch
+		// /image.jpg when jpegOn is false.
+		if (tapPlay && !tapPlay.hidden && snapshot) paintPoster();
 		// Read before the fallback is re-decided below: the codec is what says
 		// whether a socket that gave up is worth handing to the software rung,
 		// and that decision has to be made with the real answer.
@@ -154,17 +159,84 @@
 	// (#317). Shown on the live player's 'gesture' state and hidden on 'resumed';
 	// also hidden by every path that repaints the stage below, so a stale
 	// invitation cannot outlive the picture it was covering.
-	// While the button is up, put the camera's current JPEG under it, so a WebRTC
-	// picture parked black (no buffered frame, unlike MSE) shows the scene it is
-	// about to resume rather than a void (#317). Only when jpeg.enabled serves a
-	// snapshot; the src is set on show (cache-busted, so it is current) and
-	// cleared on hide so nothing keeps fetching it. A guarded $ lookup, since the
-	// element is absent in the bare-vm player tests.
+	// The still under the button (paintPoster below), cleared on hide so nothing
+	// keeps fetching it.
+	function liveVideoTrack() {
+		try {
+			const vids = document.querySelectorAll('#mj-stage video');
+			for (let i = 0; i < vids.length; i++) {
+				const s = vids[i].srcObject;
+				const t = s && s.getVideoTracks && s.getVideoTracks()[0];
+				if (t && t.readyState === 'live') return t;
+			}
+		} catch (e) {}
+		return null;
+	}
+	// A frame grabbed from the WebRTC track being viewed -- the exact channel and
+	// crop of the stream itself. Only Chromium/Opera expose MediaStreamTrackProcessor
+	// on window, but that is precisely the browser family that refuses muted autoplay
+	// and raises this button, so the capture is there where it is needed. Frames flow
+	// on the track even while the element is paused, so the first read returns at once.
+	async function captureTrackFrame(track) {
+		let reader = null;
+		try {
+			reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+			// Bounded: a track that has stopped yielding frames must not hang the
+			// read for ever, or the /image.jpg fallback below is never reached and
+			// the button sits over black (#317). Whichever wins, the reader is
+			// cancelled in the finally, so no read is left pending across repaints.
+			const frame = await Promise.race([
+				reader.read().then(function (r) { return r && r.value; }),
+				new Promise(function (res) { setTimeout(function () { res(null); }, 700); }),
+			]);
+			if (!frame) return null;
+			try {
+				const c = document.createElement('canvas');
+				c.width = frame.displayWidth || frame.codedWidth;
+				c.height = frame.displayHeight || frame.codedHeight;
+				c.getContext('2d').drawImage(frame, 0, 0);
+				return c.toDataURL('image/jpeg', 0.85);
+			} finally { try { frame.close(); } catch (e) {} }
+		} catch (e) { return null; } finally { try { reader && reader.cancel(); } catch (e) {} }
+	}
+	// The camera's plain JPEG snapshot -- the fallback's fallback, left exactly as
+	// the camera serves it. The WebUI never tunes /image.jpg: WebRTC is the adaptive
+	// path and this is only a poster.
+	function jpegPoster() {
+		if (snapshot && jpegOn && tapPlay && !tapPlay.hidden) {
+			try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {}
+		}
+	}
+	function paintPoster() {
+		if (!snapshot) return;
+		const gen = ++posterGen;
+		const track = liveVideoTrack();
+		// Only WebRTC needs a poster: its parked picture is black. MSE keeps its own
+		// buffered frame under the button (a srcObject-less element, so no track
+		// here), so painting anything over it -- a slow, wrong-channel /image.jpg
+		// included -- would only hide the real picture (#317). No track, no poster.
+		if (!track) return;
+		if (typeof MediaStreamTrackProcessor !== 'undefined') {
+			captureTrackFrame(track).then(function (url) {
+				// Superseded (a newer paint or a hide) or the invitation is gone:
+				// the frame is for a picture no longer on the button, so drop it.
+				if (gen !== posterGen || !tapPlay || tapPlay.hidden) return;
+				if (url) { try { snapshot.src = url; snapshot.hidden = false; } catch (e) {} }
+				else jpegPoster();
+			});
+			return;
+		}
+		// WebRTC where the capture API is absent (Safari/Firefox): the plain JPEG
+		// is the only still available, and those browsers generally autoplay muted
+		// so this rarely shows at all.
+		jpegPoster();
+	}
 	function showTapPlay() {
-		if (snapshot && jpegOn) { try { snapshot.src = '/image.jpg?t=' + Date.now(); snapshot.hidden = false; } catch (e) {} }
 		if (tapPlay) tapPlay.hidden = false;
+		paintPoster();
 	}
 	function hideTapPlay() {
+		posterGen++; // a capture still in flight must not repaint after this
 		if (snapshot) { snapshot.hidden = true; try { snapshot.removeAttribute('src'); } catch (e) {} }
 		if (tapPlay) tapPlay.hidden = true;
 	}
