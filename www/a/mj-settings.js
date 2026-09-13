@@ -8712,7 +8712,19 @@
 						const host = r.querySelector('.mj-dest-spark');
 						if (st && host) {
 							const prev = outPrev[r._mjIdx];
-							const bps = prev
+							// The camera's index is a position in its saved
+							// list, so a list re-saved elsewhere can put a
+							// different destination at the same one — and two
+							// publishers' counters subtract into a rate that
+							// looks reasonable and is about nothing. A changed
+							// protocol says so; a sinceMs that went backwards
+							// says whatever is there restarted, which for a
+							// rate is the same answer.
+							const same = prev && prev.proto === st.protocol &&
+								!(typeof prev.since === 'number' &&
+									typeof st.sinceMs === 'number' &&
+									st.sinceMs < prev.since);
+							const bps = same
 								? OUT.rate(prev.bytes, st.txBytes, outAt - prev.at)
 								: null;
 							r._mjBps = bps;
@@ -8731,7 +8743,8 @@
 							}
 						}
 						if (st && st.txBytes !== undefined) {
-							outPrev[r._mjIdx] = { bytes: st.txBytes, at: outAt };
+							outPrev[r._mjIdx] = { bytes: st.txBytes, at: outAt,
+								proto: st.protocol, since: st.sinceMs };
 						} else if (!st) {
 							// The camera no longer lists this row. Its last
 							// rate is now a number about nothing, and keeping

@@ -31,6 +31,14 @@ window.MajesticStats = (function () {
 	let els = null;
 	let latSpark = null, bwChart = null, rssiSpark = null;
 	let open = false;
+	// Per-destination egress, asked for only while somebody is looking. See
+	// the block above outPoll().
+	let outTimer = null, outFeed = null, outSeq = 0, outFails = 0, outGone = false;
+	let outStopped = true, outAbort = null;
+	// camera index → { bytes, at, proto, since }: the sample, and enough to
+	// tell whether the next one describes the same destination.
+	const outPrev = Object.create(null);
+	const outRate = Object.create(null);   // camera index → bytes/s
 	let prevT = null;      // previous tick's cumulative counters
 	let lastTickAt = 0;
 	let hold = { buf: null, dec: null }; // per-frame figures across empty deltas
@@ -692,6 +700,157 @@ window.MajesticStats = (function () {
 		els.fp.textContent = fp.join('\n');
 	}
 
+	// ── per-destination egress ──────────────────────────────────────────────
+	//
+	// "Outgoing push × 3" said the camera was pushing and nothing about which
+	// of the three had stopped. This asks the same endpoint the Outgoing
+	// settings tab asks, at a fifth of the rate and only while the panel is
+	// open, and gives each destination a line of its own.
+	//
+	// A pointer, not a diagnosis. The protocol, one state word and the rate;
+	// what is wrong and what to do about it lives on the settings tab, which
+	// has the room for it. No address ever appears here — this panel is on
+	// the page a camera owner is most likely to be showing somebody else, and
+	// a destination URL carries the ingest host and often the stream key.
+	//
+	// Everything degrades to the old combined row: an older camera answers
+	// 404, a browser without the verdict module never starts, a failed poll
+	// falls back after the second one. The panel must render completely
+	// without any of it.
+	function outStop() {
+		outStopped = true;
+		if (outTimer) { clearTimeout(outTimer); outTimer = null; }
+		if (outAbort) { outAbort.abort(); outAbort = null; }
+		// An answer in flight is stale on arrival, and a rate measured across
+		// a closed panel is an average over however long it was closed rather
+		// than anything happening now.
+		outSeq++;
+		outFeed = null;
+		// A fresh open is a fresh question; only the 404 is a fact that
+		// outlives it.
+		outFails = 0;
+		Object.keys(outPrev).forEach((k) => { delete outPrev[k]; });
+		Object.keys(outRate).forEach((k) => { delete outRate[k]; });
+		// And the rows already drawn, which are that answer. Only the
+		// heartbeat writes this list and the next one is two seconds away —
+		// long enough to reopen the panel onto a state word and a rate for a
+		// destination nobody is reading any more. Empty for those two seconds
+		// is the honest version.
+		if (els !== null && els.egRows) {
+			els.egRows.textContent = '';
+			els.egress.hidden = true;
+		}
+	}
+
+	function outRead(j) {
+		const OUT = window.MajesticOutgoing;
+		const read = OUT.read(j);
+		if (!read) {
+			// A reply nobody can read is not a reading, and counts the same
+			// as a refused one.
+			if (++outFails >= 2) { outFeed = null; }
+			return;
+		}
+		outFails = 0;
+		outFeed = read;
+		const at = performance.now();
+		Object.keys(read.byIndex).forEach((k) => {
+			const st = read.byIndex[k];
+			const prev = outPrev[k];
+			// The camera's index is a position in the saved list, so a list
+			// re-saved while this panel is open can put a different
+			// destination at the same one. Two publishers' counters subtract
+			// into a rate that looks perfectly reasonable and is about
+			// nothing. A changed protocol says so outright; a sinceMs that
+			// went backwards says whatever is at this index restarted, which
+			// for a rate is the same answer.
+			const same = prev !== undefined && prev.proto === st.protocol &&
+				!(typeof prev.since === 'number' &&
+					typeof st.sinceMs === 'number' && st.sinceMs < prev.since);
+			const bits = same
+				? OUT.rate(prev.bytes, st.txBytes, at - prev.at) : null;
+			// bytes/s, because that is what this panel's formatter takes and
+			// one panel should not carry two rate styles.
+			if (bits === null) delete outRate[k];
+			else outRate[k] = bits / 8;
+			if (typeof st.txBytes === 'number') {
+				outPrev[k] = { bytes: st.txBytes, at: at,
+					proto: st.protocol, since: st.sinceMs };
+			}
+		});
+		// A destination the camera has stopped listing keeps no sample.
+		Object.keys(outPrev).forEach((k) => {
+			if (!(k in read.byIndex)) { delete outPrev[k]; delete outRate[k]; }
+		});
+	}
+
+	function outPoll() {
+		if (outStopped) return;
+		// A 404 on an earlier turn, or a page carrying neither the verdict
+		// module nor a fetch helper. Either way there is nothing to ask.
+		if (outGone) { outStop(); return; }
+		if (!window.MajesticOutgoing || typeof apiFetch !== 'function') {
+			outGone = true;
+			outStop();
+			return;
+		}
+		const my = ++outSeq;
+		// Bounded, and the next one armed only once this has settled — the
+		// same bargain the /metrics heartbeat makes, and for the same reason:
+		// a fetch left hanging by a busy camera would otherwise have another
+		// queued behind it every five seconds, on exactly the camera that can
+		// least afford them.
+		const ctl =
+			typeof AbortController === 'function' ? new AbortController() : null;
+		outAbort = ctl;
+		const deadline = ctl ? setTimeout(() => ctl.abort(), 4000) : null;
+		apiFetch('/api/v1/outgoing.json', ctl ? { signal: ctl.signal } : undefined)
+			.then((r) => {
+				// A fact about the build, not about this visit: an older
+				// camera does not grow the endpoint while the page is open.
+				if (r.status === 404) { outGone = true; return null; }
+				if (!r.ok) return Promise.reject(r.status);
+				return r.json();
+			})
+			.then((j) => {
+				if (my !== outSeq || j === null) return;
+				outRead(j);
+			})
+			.catch(() => {
+				if (my !== outSeq) return;
+				if (++outFails >= 2) outFeed = null;
+			})
+			.finally(() => {
+				if (deadline !== null) clearTimeout(deadline);
+				if (my === outSeq) outAbort = null;
+				if (!outStopped && !outGone) outTimer = setTimeout(outPoll, 5000);
+			});
+	}
+
+	function outStart() {
+		if (!outStopped || outGone) return;
+		outStopped = false;
+		outPoll();
+	}
+
+	// One [label, rate] pair per destination, or nothing at all — which is
+	// what puts the combined row back.
+	function outRows() {
+		const OUT = window.MajesticOutgoing;
+		if (!OUT || !outFeed) return [];
+		return Object.keys(outFeed.byIndex)
+			.map(Number)
+			.sort((a, b) => a - b)
+			.map((i) => {
+				const st = outFeed.byIndex[i];
+				const word = OUT.verdict(st, {}).badge;
+				const name = OUT.PROTO_NAME[st.protocol] || 'Outgoing';
+				const r = outRate[i];
+				return [word ? name + ' \u00b7 ' + word.toLowerCase() : name,
+					typeof r === 'number' ? fmtBps(r) : ''];
+			});
+	}
+
 	// ── the 2 s /metrics heartbeat ──────────────────────────────────────────
 
 	function egRow(rows, label, val) {
@@ -764,7 +923,23 @@ window.MajesticStats = (function () {
 		consumer('webrtc_sessions_total', 'WebRTC', 'webrtc_tx_bytes');
 		consumer('webrtc_data_sessions', 'data channel', 'webrtc_data_tx_bytes');
 		consumer('rtsp_clients_total', 'RTSP', 'rtsp_tx_bytes');
-		consumer('outgoing_streams_total', 'Outgoing push', 'outgoing_tx_bytes');
+		// One line per destination where the camera will name them, and the
+		// combined count where it will not.
+		const dests = outRows();
+		if (dests.length) {
+			dests.forEach((d) => rows.push(d));
+			// A camera with more destinations than the endpoint will name
+			// keeps the combined count as well, or the ones it could not name
+			// would take their share of the uplink off the panel entirely.
+			if (outFeed !== null && outFeed.truncated) {
+				consumer(
+					'outgoing_streams_total', 'Outgoing push',
+					'outgoing_tx_bytes');
+			}
+		} else {
+			consumer(
+				'outgoing_streams_total', 'Outgoing push', 'outgoing_tx_bytes');
+		}
 		consumer('ws_video_clients_total', 'Browser (MSE)', null);
 		consumer('hls_clients_total', 'HLS', null);
 		els.egress.hidden = !rows.length;
@@ -841,6 +1016,10 @@ window.MajesticStats = (function () {
 
 	function setOpen(o) {
 		open = !!o;
+		// The only consumer of the destination endpoint on this page, so the
+		// asking starts and stops with the panel rather than running for
+		// every minute somebody leaves Live View up.
+		if (open) outStart(); else outStop();
 		// Pixel-space charts skip rendering while [hidden] leaves them 0
 		// wide; the first frame after opening is when they can measure.
 		if (open && window.MjCharts)
