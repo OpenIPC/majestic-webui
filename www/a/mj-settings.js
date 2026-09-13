@@ -9738,6 +9738,15 @@
 			// disabled, and every value typed into it was permanent (#416). The
 			// 404 is still handled, in onReset, where the camera's answer arrives.
 			const clears = !hasDefault;
+			// Where this press leaves a SWITCH, which is the one thing on this
+			// page that can stop a stream — see onReset. Two ways to land on
+			// off and the warning is owed for both: a declared default of
+			// false, and no declared default at all, since majestic reads an
+			// absent key as false for every boolean it has. The second is not
+			// the page guessing: `config_get_boolean` answers false for a key
+			// that is not there, and every generated boolean accessor funnels
+			// through it, so clearing and switching off reach the same camera.
+			const offs = type === 'boolean' && (clears || stockOf(sub) === 'false');
 			reset.setAttribute('aria-label',
 				clears ? 'Clear ' + desc : 'Reset ' + desc + ' to default');
 			// An empty default is a real one — the crop region's [] is "the whole
@@ -9745,9 +9754,15 @@
 			// colon. The word is what the row's own hint calls it.
 			const defWord = hasDefault ? (stockOf(sub) || 'empty') : '';
 			reset.title = clears
-				? 'Clear this setting and leave it to the camera.'
+				? offs
+					? 'Clear this setting. With no value set the camera reads it as off.'
+					: 'Clear this setting and leave it to the camera.'
 				: 'Reset to default: ' + defWord;
-			reset.addEventListener('click', () => onReset(dot, reset, desc, clears));
+			// Asked at the press, not at mount: a switch already off has nothing
+			// to be warned about, and a warning that fires anyway is one the
+			// next reader presses through without looking.
+			reset.addEventListener('click', () =>
+				onReset(dot, reset, desc, clears, offs && String(getValue()) === 'true'));
 			// Whether this row is off stock is not known here — it changes with
 			// every keystroke — so the button lends paintStock a hatch and stays
 			// out of the judgement. The colour is for the reader who can see it;
@@ -10272,11 +10287,26 @@
 	// the setting the way the row above it does rather than by its dotted key:
 	// a key is a second vocabulary, readable only by someone who already knows
 	// the answer, and this sentence is asked of someone deciding.
-	async function onReset(dot, btn, desc, clears) {
+	//
+	// `offs` is the third thing, and it is the one that had to be said out loud:
+	// this press is about to turn a switch that is currently on off. Neither of
+	// the two questions said so. "Leave it to the camera" reads as a promise
+	// that the camera has a sensible answer of its own, and on a switch with no
+	// declared default it has exactly one, which is off; "reset to its default"
+	// says nothing about what the default IS. Pressed on this lab camera's
+	// video0.Enable, it took the main stream down — the encoder stopped and the
+	// page then correctly showed a switch nobody had touched sitting at off.
+	async function onReset(dot, btn, desc, clears, offs) {
 		const name = desc || dot;
 		if (!confirm(clears
-			? 'Clear "' + name + '" and leave it to the camera?'
-			: 'Reset "' + name + '" to its default?')) return;
+			? offs
+				? 'Clear "' + name + '"?\n\nThis camera publishes no default for it, '
+					+ 'and with no value set it reads the switch as OFF.'
+				: 'Clear "' + name + '" and leave it to the camera?'
+			: offs
+				? 'Reset "' + name + '" to its default?\n\nThe default is OFF, '
+					+ 'so this switches it off.'
+				: 'Reset "' + name + '" to its default?')) return;
 		btn.disabled = true;
 		// innerHTML, not textContent: the glyph is an inline SVG, so the button's
 		// text is the empty string — saving that and putting it back at the end
