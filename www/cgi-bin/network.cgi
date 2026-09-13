@@ -729,9 +729,19 @@ fi
 					}
 					function opt(id, pad, quiet,   sel, tail) {
 						sel = (id == cur) ? " selected" : ""
+						# Short because the row has to fit the control: on a
+						# 390px phone the longest option missed by seven pixels,
+						# and a <select> does not wrap, it clips. The group
+						# heading above already says these rows are the board
+						# variants of one driver, so the pad number alone is the
+						# whole of what separates them.
+						#
+						# No apostrophes in here. This is an awk program inside
+						# a shell single-quoted string, so one closes the string
+						# and hands the rest of the program to the shell.
 						tail = quiet ? "" \
-							: (pad == "-" || pad == "") ? " &mdash; no power-up pad" \
-							: " &mdash; raises pad " e(pad) " first"
+							: (pad == "-" || pad == "") ? " &mdash; no pad" \
+							: " &mdash; pad " e(pad)
 						printf "<option value=\"%s\"%s>%s%s</option>\n", e(id), sel, e(id), tail
 					}
 					$3 == "" { next }
@@ -765,7 +775,7 @@ fi
 				' %>
 			</select>
 			</span></span>
-			<span class="hint text-secondary">Start with the entry that raises no pad. The others are the same driver for boards whose dongle is held powered off until a pad is raised &mdash; pick the one named after your board, or try them if your adapter never appears.</span>
+			<span class="hint text-secondary">Within a Wi-Fi driver, start with the entry that needs no pad. The others are that same driver for boards which hold the dongle powered off until a GPIO pad is raised, and each names the pad &mdash; pick the one named after your board, or try them if your adapter never appears.</span>
 		</p>
 		<%# Not field_string: the effective address belongs in the box as a
 		    placeholder, so an empty field shows what the camera will actually
