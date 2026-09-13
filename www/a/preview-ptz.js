@@ -32,7 +32,13 @@
 		lc: [-1, 0], cc: [0, 0], rc: [1, 0],
 		dl: [-1, -1], dc: [0, -1], dr: [1, -1],
 	};
-	let inflight = false, holdTimer = null, queuedStop = null, holdBtn = null;
+	let inflight = false, holdTimer = null, queuedStop = null;
+	// Which input owns the current hold, and which button it is driving. A
+	// release only ends the hold it started: two fingers on the pad, or an
+	// arrow pressed while another is still down, used to let the older one's
+	// release stop the newer one's move — harmless while every press was a
+	// self-terminating pulse, not harmless now that a release stops a motor.
+	let holdBtn = null, holdOwner = null;
 
 	// One request in flight at a time — a hold does not queue moves behind a
 	// slow camera, it just measures out what the camera keeps up with. For
@@ -74,11 +80,19 @@
 		const d = DIRS[btn.dataset.dir];
 		if (d) req('h=' + d[0] * STEP + '&v=' + d[1] * STEP);
 	}
-	function startHold(btn) {
-		stopHold();
-		fire(btn);
+	function startHold(btn, owner) {
+		// Supersede whatever was held without sending a stop: the new verb is
+		// going out in the same breath and would override it anyway.
+		clearHold();
 		holdBtn = btn;
+		holdOwner = owner;
+		fire(btn);
 		holdTimer = setInterval(() => fire(btn), TICK_MS);
+	}
+	function clearHold() {
+		if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+		holdBtn = null;
+		holdOwner = null;
 	}
 	// Releasing a Pelco button has to say so. The camera runs the motor until
 	// a deadline it re-arms on every request, which is what lets a hold be one
@@ -87,10 +101,12 @@
 	// release is sent. (It stops by itself either way: that deadline is what
 	// makes a closed tab or a dropped link safe.) The stepped backends move by
 	// a fixed step per request and have nothing to stop.
-	function stopHold() {
-		if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+	// `owner` names the input letting go; null means "whatever is held, stop"
+	// (the Stop button, losing the window, the tab going away).
+	function stopHold(owner) {
+		if (owner != null && owner !== holdOwner) return;
 		const btn = holdBtn;
-		holdBtn = null;
+		clearHold();
 		if (btn && btn.dataset.act) req('act=stop', true);
 	}
 
@@ -107,7 +123,7 @@
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco
 			// the request itself is the un-droppable kind.
-			btn.addEventListener('click', () => { stopHold(); fire(btn); });
+			btn.addEventListener('click', () => { stopHold(null); fire(btn); });
 			return;
 		}
 		btn.addEventListener('pointerdown', e => {
@@ -115,10 +131,10 @@
 			// Capture keeps pointerup coming to this button however far the
 			// finger or cursor wanders mid-hold.
 			try { btn.setPointerCapture(e.pointerId); } catch (err) {}
-			startHold(btn);
+			startHold(btn, 'p' + e.pointerId);
 		});
-		btn.addEventListener('pointerup', stopHold);
-		btn.addEventListener('pointercancel', stopHold);
+		btn.addEventListener('pointerup', e => stopHold('p' + e.pointerId));
+		btn.addEventListener('pointercancel', e => stopHold('p' + e.pointerId));
 		// Enter/Space on a focused button: a single step or pulse, so the
 		// keyboard can nudge precisely; sweeping is what the stage-level
 		// arrows are for.
@@ -145,14 +161,16 @@
 			e.preventDefault();
 			if (e.repeat) return;
 			const btn = pad.querySelector(KEYS[e.key]);
-			if (btn) startHold(btn);
+			if (btn) startHold(btn, 'k' + e.key);
 		});
-		stage.addEventListener('keyup', e => { if (KEYS[e.key]) stopHold(); });
+		stage.addEventListener('keyup', e => {
+			if (KEYS[e.key]) stopHold('k' + e.key);
+		});
 	}
 	// A hold must not outlive the page's attention: keyup and pointerup never
 	// arrive in a window that lost focus mid-hold.
-	window.addEventListener('blur', stopHold);
+	window.addEventListener('blur', () => stopHold(null));
 	document.addEventListener('visibilitychange', () => {
-		if (document.hidden) stopHold();
+		if (document.hidden) stopHold(null);
 	});
 })();

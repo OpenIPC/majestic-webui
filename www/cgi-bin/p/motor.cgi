@@ -42,6 +42,15 @@ has_cap() {
 <% if [ "$ptz_backend" = "pelco" ]; then %>
 <% if has_cap zoom || has_cap focus; then %>
 <div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom and focus" hidden>
+	<!-- Why the buttons below will not move anything. Set when the camera
+	     declares a motorized lens (ptz_control) but majestic has no motor
+	     driver to serve it, which is one install away and worth saying: the
+	     alternative is a camera that looks like it never had PTZ at all.
+	     `small` only — a class the stylesheet already carries, so the pad
+	     gains no new CSS. -->
+	<% if [ -n "$ptz_reason" ]; then %>
+	<p class="small" role="status"><%= $ptz_reason %></p>
+	<% fi %>
 	<% if has_cap zoom; then %>
 	<span class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">

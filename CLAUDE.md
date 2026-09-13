@@ -578,8 +578,8 @@ The journal is the one write whose failure **stops** the actuation — it is wha
   (`gpio-motors` binary; pins in `ptz_gpio`, legacy `gpio_motors` accepted
   as an alias on both sides since firmware#2341), `pelco-d`
   (standard Pelco-D over serial; `ptz_port`, `ptz_speed`), `pelco-xm`
-  (the XiongMai near-Pelco UART protocol from sandbox#31 — same nine verbs
-  and the same pad, its own framing and checksum), or `motor`
+  (the XiongMai near-Pelco UART protocol — same nine verbs and the same pad,
+  its own framing and checksum), or `motor`
   (`/usr/bin/motor`; profile in `ptz_profile`, legacy `ptz` value as
   fallback). **Unset means no PTZ**, exactly like `none` — the reporter of
   #227 ruled that a camera without `ptz_control` shows no pad, so the old
