@@ -6393,3 +6393,237 @@ dialog.mj-modal::backdrop {
 .mj-dest-note {
 	color: var(--bs-warning-text-emphasis);
 }
+
+/* ── Network page ──────────────────────────────────────────────────────────
+   The page carries its cards in the same `row g-4` grid, at the same shared
+   width, with the same controls as every other settings page. What is page-
+   specific below is page-specific CONTENT — the interface switcher, the
+   connection ribbon, the address block — and not a second style vocabulary for
+   things the rest of the UI already has one for. */
+
+/* Title and the interface switcher on one line. The h2 is nested here rather
+   than a direct child of .container, so `body > main > .container > h2` no
+   longer reaches it — its colour and rhythm are restated to be exactly that
+   rule, not a variation on it, so the heading lands where every other page's
+   does and the switcher simply sits beside it. */
+.mj-net-head {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.75rem 1rem;
+	margin: 2rem 0 1.5rem;
+}
+
+.mj-net-head > h2 {
+	margin: 0;
+	color: var(--bs-primary);
+}
+
+.mj-net-head > .mj-seg {
+	margin-left: auto;
+}
+
+/* The interface switcher reuses the segmented control the stream picker and the
+   theme switcher already use (.mj-seg / .mj-seg-in / .mj-seg-lbl, above) —
+   this adds the one thing that component did not have, a segment that is a
+   LINK. Switching interface reloads the page for it, so it has to navigate
+   and cannot be a radio without script.
+
+   Everything else about it is inherited on purpose. A second segmented control
+   with its own padding and radius is how one page starts looking like a
+   different product, and defining `.mj-seg` again here would not even be
+   confined to this page: it is later in the file, so it would quietly restyle
+   the two that already exist. */
+a.mj-seg-lbl {
+	text-decoration: none;
+}
+
+a.mj-seg-lbl.active {
+	background: var(--bs-primary);
+	color: #fff;
+}
+
+/* What the camera is on, in one line. This replaces a nine-row definition
+   list that answered the same question and made you read all nine to find it:
+   the identity on the left, the two values you would copy into a terminal on
+   the right, in the face addresses are legible in. */
+.mj-status {
+	display: flex;
+	align-items: center;
+	gap: 0.875rem;
+	padding: 0.875rem 1.125rem;
+	margin-bottom: 1.25rem;
+	background: var(--bs-card-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: var(--bs-box-shadow-sm);
+}
+
+.mj-status-ico {
+	display: flex;
+	flex: 0 0 auto;
+	color: var(--bs-success);
+}
+
+.mj-status-ico svg {
+	width: 22px;
+	height: 22px;
+}
+
+.mj-status-off .mj-status-ico {
+	color: var(--bs-secondary-color);
+}
+
+.mj-status-txt,
+.mj-status-val {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	min-width: 0;
+}
+
+.mj-status-txt b {
+	overflow: hidden;
+	font-size: 0.9375rem;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mj-status-txt > span,
+.mj-status-val > span {
+	font-size: 0.78125rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-status-val {
+	flex: 0 0 auto;
+	margin-left: auto;
+	text-align: right;
+}
+
+.mj-status-val b {
+	font-family: var(--bs-font-monospace);
+	font-size: 0.9375rem;
+	font-weight: 400;
+}
+
+.mj-status-val > span {
+	font-family: var(--bs-font-monospace);
+	font-size: 0.75rem;
+}
+
+/* The four address fields read as one block, two up on anything but a phone.
+   Under Automatic they are the lease the router handed out: shown, because
+   that is the answer to "what did I get", and dashed and monospaced because
+   they are a reading rather than something to type into. */
+.mj-ip-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 0 1rem;
+	margin-top: 0.875rem;
+}
+
+.mj-ip-grid.is-auto .form-control {
+	border-style: dashed;
+	background: transparent;
+	color: var(--bs-secondary-color);
+	font-family: var(--bs-font-monospace);
+	font-size: 0.8125rem;
+}
+
+.mj-card-note {
+	max-width: 66ch;
+	margin: 0.5rem 0 0.9rem;
+	font-size: 0.78125rem;
+	line-height: 1.5;
+	color: var(--bs-secondary-color);
+}
+
+/* Pulled up against the field it belongs to: the row above already carries a
+   row's margin, and left alone the Scan button floated between the two fields
+   looking like a third one. */
+.mj-inline-act {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+	margin: -0.5rem 0 1rem;
+}
+
+#page-network #wifi-results:not(.d-none) {
+	margin-bottom: 1rem;
+}
+
+/* button_submit's bar is built to sit INSIDE a card body: its negative margins
+   reach for that body's padding so the bar meets the card's edges. A form that
+   spans several cards has its single Save as their sibling instead, and there
+   the bar hung 1rem outside the column on both sides with nothing behind it.
+   Standing on its own it gets the card's own surface — which is also the
+   honest picture, since it is one Save for everything above it.
+
+   Hung off a class on the CELL rather than a structural path. This bar lives
+   in a grid cell so it lines up with the cards it saves, and a path like
+   `form > .mj-foot` stopped matching the moment it moved in there: the in-card
+   rule applied again and its -1rem margins pushed the bar 4px past the
+   viewport on a phone. A class names the bar that is meant and cannot be moved
+   out from under. Forms INSIDE a card body (access.cgi's two, this page's
+   adapter card) keep the helper's own rule, which is right for them.
+
+   The second selector is time.cgi, which has the older shape -- the bar a
+   direct child of a form that is a direct child of the container. Same defect,
+   measured the same way: 4px past the viewport at 390px. Fixing only the page
+   in hand would have left the two settings pages disagreeing about where a
+   Save button sits, which is the drift this file exists to avoid. */
+.mj-save > .mj-foot,
+body > main > .container > form > .mj-foot {
+	margin: 0 0 1.25rem;
+	padding: 0.875rem 1.125rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+	box-shadow: var(--bs-box-shadow-sm);
+}
+
+#page-network .mj-advanced {
+	margin-top: 1.75rem;
+}
+
+#page-network .mj-advanced > summary {
+	font-size: 0.875rem;
+	color: var(--bs-secondary-color);
+	cursor: pointer;
+}
+
+@media (max-width: 575.98px) {
+	.mj-net-head > h2 {
+		font-size: 1.5rem;
+	}
+
+	/* The switcher takes the full width and splits it evenly, so both targets
+	   are thumb-sized rather than two chips in the corner. */
+	.mj-net-head > .mj-seg {
+		width: 100%;
+		margin-left: 0;
+	}
+
+	.mj-net-head > .mj-seg > .mj-seg-lbl {
+		flex: 1 1 0;
+		justify-content: center;
+	}
+
+	/* The addresses move under the name rather than being squeezed beside it,
+	   indented to the icon's column so the block still reads as one thing. */
+	.mj-status {
+		flex-wrap: wrap;
+	}
+
+	.mj-status-val {
+		width: 100%;
+		margin-left: 0;
+		padding-left: calc(22px + 0.875rem);
+		text-align: left;
+	}
+
+	.mj-ip-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}

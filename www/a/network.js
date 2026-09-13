@@ -1,21 +1,34 @@
-// Network settings: DHCP/interface field toggles + Wi-Fi scan.
+// Network settings: address-mode presentation + Wi-Fi scan.
+//
+// Which interface the page is about is a tab the server renders, so wlan0's
+// fields exist only on wlan0's tab -- they used to be hidden markup on every
+// tab, toggled by a select that also decided which file a save landed in
+// (#458).
+//
+// Nothing here is load-bearing. Without script the address fields are plain
+// editable inputs holding the lease, the radios still post, and the save is
+// unaffected; the script only marks the Automatic ones as the reading they
+// are, so that a field you cannot change does not look like one you can.
 (function () {
-	const iface = $('#network_interface'), dhcp = $('#network_dhcp');
+	const auto = $('#network_dhcp_auto'), manual = $('#network_dhcp_manual');
 
 	function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+	// Automatic is not "these fields are gone" -- it is "these are what the
+	// router gave you". They stay on screen and stay readable; readonly rather
+	// than disabled, because a disabled input is dropped from the submission
+	// and skipped by the keyboard, and neither is true of a value the page is
+	// showing you on purpose.
 	function toggleStatic() {
-		const on = dhcp && dhcp.checked;
+		const on = auto && auto.checked;
+		const grid = $('.mj-ip-grid');
+		if (grid) grid.classList.toggle('is-auto', on);
 		['network_address', 'network_netmask', 'network_gateway', 'network_nameserver'].forEach(id => {
-			const inp = $('#' + id), wrap = $('#' + id + '_wrap');
-			if (inp) inp.disabled = on;
-			if (wrap) wrap.classList.toggle('d-none', on);
+			const inp = $('#' + id);
+			if (inp) inp.readOnly = on;
 		});
-	}
-
-	function toggleInterface() {
-		const sec = $('#wifi-section');
-		if (sec) sec.classList.toggle('d-none', !(iface && iface.value === 'wlan0'));
+		const note = $('#ip-auto-note');
+		if (note) note.hidden = !on;
 	}
 
 	function scan() {
@@ -60,13 +73,12 @@
 	const genMac = $('#generate-mac-address');
 	if (genMac) genMac.addEventListener('click', generateMac);
 
-	if (iface) iface.addEventListener('change', toggleInterface);
-	if (dhcp) dhcp.addEventListener('change', toggleStatic);
+	if (auto) auto.addEventListener('change', toggleStatic);
+	if (manual) manual.addEventListener('change', toggleStatic);
 	const scanBtn = $('#wifi-scan');
 	if (scanBtn) scanBtn.addEventListener('click', scan);
 	const sel = $('#wifi-results');
 	if (sel) sel.addEventListener('change', () => { const i = $('#network_wlan_ssid'); if (sel.value && i) i.value = sel.value; });
 
-	toggleInterface();
 	toggleStatic();
 })();
