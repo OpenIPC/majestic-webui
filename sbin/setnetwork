@@ -1,7 +1,24 @@
 #!/bin/sh
 TEMPLATE_COMMON="iface %s inet %s\n"
 
-TEMPLATE_MAC="    hwaddress ether \$(fw_printenv -n ethaddr || echo 00:00:23:34:45:66)\n"
+# Asks the firmware, rather than carrying a fallback of its own.
+#
+# This line is written into interfaces.d/eth0 every time network settings
+# change, so a literal here is not a fallback -- it is an address put back on
+# the camera whenever its owner visits the network page. The one that used to
+# be here is a bootloader placeholder shared across a whole family of cameras,
+# and two of them on one segment break ARP.
+#
+# get_mac is the firmware's own answer to what address eth0 should carry: the
+# one it has persisted, or the one the interface is already using. Firmware
+# without it falls through to the `cat`, which yields the address eth0 already
+# has and makes the assignment a no-op -- still better than handing every
+# camera the same one.
+#
+# It must never resolve to empty. busybox ifup runs the whole stanza as a
+# single `ip link set addr <mac> eth0 up`, treats a failed command as fatal,
+# and never starts udhcpc, so the camera would boot with no address at all.
+TEMPLATE_MAC="    hwaddress ether \$(get_mac %s 2>/dev/null || cat /sys/class/net/%s/address)\n"
 TEMPLATE_STATIC="    address %s\n    netmask %s\n"
 
 TEMPLATE_WIRELESS="    pre-up wpa_passphrase \"\$(fw_printenv -n wlanssid)\" \"\$(fw_printenv -n wlanpass)\" > /tmp/wpa_supplicant.conf
@@ -115,7 +132,7 @@ iface_file="/etc/network/interfaces.d/${network_interface}"
 printf "$TEMPLATE_COMMON" $network_interface $network_mode > "$iface_file"
 
 if [ "$network_interface" = "eth0" ]; then
-	printf "$TEMPLATE_MAC" >> "$iface_file"
+	printf "$TEMPLATE_MAC" "$network_interface" "$network_interface" >> "$iface_file"
 fi
 
 if [ "$network_mode" = "static" ]; then
