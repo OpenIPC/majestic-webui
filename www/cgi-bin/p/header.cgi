@@ -264,12 +264,23 @@ if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ]; } && [ "$pagename"
 <% notice warn '<b>No default gateway</b> &mdash; nothing outside the local network is reachable from this camera.' '<a class="btn btn-sm btn-primary" href="network.cgi">Network settings</a>' %>
 <% fi %>
 
-<%# The address the firmware falls back to when the camera's own was not put
-    back after flashing. The fix is network.cgi's own "Change MAC address"
-    card, which has been there all along -- the banner used to carry a second
-    copy of that form, on every page, until somebody used one of them. %>
-<% if [ "$network_macaddr" = "00:00:23:34:45:66" ] && [ -f /etc/shadow- ] && [ -n $(grep root /etc/shadow- | cut -d: -f2) ]; then %>
-<% notice danger "<b>This camera's MAC address is a placeholder</b> &mdash; <code>00:00:23:34:45:66</code> is what the firmware falls back to when the camera's own address was not put back after flashing, and two cameras carrying it on one network will collide." '<a class="btn btn-sm btn-primary" href="network.cgi#mac">Set the MAC address</a>' %>
+<%# The whole 00:00:23:34:45:xx prefix, not one literal: the last octet tracks
+    the bootloader build rather than the camera, and :88 turns up in the field
+    alongside the more common :66. 00:00:23 is a registered OUI OpenIPC does
+    not own, so none of the 256 belongs to any camera here.
+
+    What the banner is entitled to claim depends on what the firmware can do,
+    so it asks rather than assumes. Where the camera repairs this itself at
+    boot, an address in this range is one somebody chose deliberately -- this
+    very page will set one -- so the notice stays on the collision and says
+    nothing about firmware age. Where it cannot, an upgrade is the lasting fix
+    and it says so.
+
+    Prefix-stripped rather than matched with a case or a grep: this runs on
+    every page of every camera, and the expansion costs no fork. %>
+<% if [ "${network_macaddr#00:00:23:34:45:}" != "$network_macaddr" ] && [ -f /etc/shadow- ] && [ -n $(grep root /etc/shadow- | cut -d: -f2) ]; then %>
+<% if command -v get_mac >/dev/null 2>&1; then mac_advice="Set a different one here."; else mac_advice="Firmware that replaces it at boot is available, and upgrading is the lasting fix."; fi %>
+<% notice danger "<b>This camera's MAC address is a placeholder</b> &mdash; <code>$(esc "$network_macaddr")</code> is one of the addresses a bootloader hands out when the camera's own was never set, and two cameras carrying it on one network will collide. $mac_advice" '<a class="btn btn-sm btn-primary" href="network.cgi#mac">Set the MAC address</a>' %>
 <% fi %>
 
 <% if [ ! -e $(get_config) ]; then %>

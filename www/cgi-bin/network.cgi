@@ -304,11 +304,18 @@ fi
 			    the MAC address would find it on. %>
 			<div class="card" id="mac"><div class="card-body">
 				<% card_head "Change MAC address" %>
-				<p class="small text-secondary">Override the Ethernet MAC address. <span class="text-danger">Requires a reboot.</span> The camera will most likely come back on a different IP address, because the DHCP server hands out leases by MAC.</p>
+				<%# The self-assignment sentence is true only where the firmware can
+				    actually do it, so it is gated on that being so rather than
+				    asserted for every camera this WebUI runs on. %>
+				<% if command -v get_mac >/dev/null 2>&1; then %>
+				<p class="small text-secondary">The camera gives itself a stable unique address on first boot and keeps it, so you do not need to set one. This is for overriding that &mdash; to put back the address on the camera's own label, or to separate two cameras that ended up sharing one. <span class="text-danger">Requires a reboot.</span> The camera will most likely come back on a different IP address, because the DHCP server hands out leases by MAC.</p>
+				<% else %>
+				<p class="small text-secondary">Override the Ethernet MAC address &mdash; to put back the address on the camera's own label, or to separate two cameras that ended up sharing one. <span class="text-danger">Requires a reboot.</span> The camera will most likely come back on a different IP address, because the DHCP server hands out leases by MAC.</p>
+				<% fi %>
 				<form action="<%= $SCRIPT_NAME %>" method="post">
 					<% field_hidden "action" "changemac" %>
 					<% field_string "mac_address" "MAC address" "$network_macaddr" %>
-					<p class="small mb-3"><a href="#" id="generate-mac-address">Generate a valid random one</a></p>
+					<p class="small mb-3"><a href="#" id="generate-mac-address">Or generate a random one</a></p>
 					<% button_submit "Update MAC" "danger" %>
 				</form>
 
