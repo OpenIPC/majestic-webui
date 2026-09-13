@@ -887,6 +887,14 @@
 			// all rows into the first column; layoutCols() deals the tail over
 			// into the second once applyVisibility() has settled what is on screen
 			renderProps(cols.firstElementChild, sec, props);
+			// The destinations board is the section, not a field in it. Dealt
+			// into one of two columns it gets half the card — which is the
+			// narrow strip the board exists to replace — so it is lifted out
+			// above them, where ircutPanel and ipeyePanel already sit, and
+			// layoutCols never sees it. The section's remaining settings deal
+			// into the columns underneath as before.
+			const board = cols.firstElementChild.querySelector('.mj-dest-board');
+			if (board) body.insertBefore(board, cols);
 			// After the rows exist and before layoutCols deals them, so the
 			// switch is dealt with everything else and the hidden set is
 			// already settled when the cut is chosen.
@@ -8942,6 +8950,38 @@
 			// Which rows the reader opened, by camera index, so a rebuild
 			// does not close them.
 			const outOpen = Object.create(null);
+
+			// The expander now reveals the settings as well as the diagnostics,
+			// so it says so: somebody looking for Source must not have to guess
+			// it is behind a button labelled Details.
+			const MORE_SHUT = 'Details & settings';
+			const MORE_OPEN = 'Hide';
+
+			// `settings` carries the open state, not the detail panel: the panel
+			// is empty on a destination that has measured nothing, and an empty
+			// panel is hidden whether the card is open or not.
+			const isOpen = (row) => {
+				const st = row.querySelector('.mj-dest-settings');
+				return !!st && !st.hidden;
+			};
+
+			const setOpen = (row, open) => {
+				const settings = row.querySelector('.mj-dest-settings');
+				const panel = row.querySelector('.mj-dest-detail');
+				const more = row.querySelector('.mj-dest-more');
+				if (settings) settings.hidden = !open;
+				if (panel) {
+					panel.hidden = !open || panel.childElementCount === 0;
+				}
+				if (more) {
+					more.textContent = open ? MORE_OPEN : MORE_SHUT;
+					more.setAttribute('aria-expanded', open ? 'true' : 'false');
+				}
+				if (row._mjIdx !== undefined) {
+					if (open) outOpen[row._mjIdx] = true;
+					else delete outOpen[row._mjIdx];
+				}
+			};
 			// Per index: the last byte count and when, for the rate.
 			const outPrev = Object.create(null);
 			// `url` first whatever order the schema lists them in: it is the one
@@ -8959,9 +8999,13 @@
 
 			// mj-wide: opt out of the 20rem cap .array carries for the
 			// MultiRect fields, which is half an address.
-			p = el('p', 'array objects mj-wide mj-row');
+			p = el('p', 'array objects mj-wide mj-row mj-dest-board');
+			// No field label. This is the only object array the camera
+			// declares, it is lifted to the top of its own section, and the
+			// section is already headed Outgoing — so a "Destinations" label
+			// under it was the same word twice, with a rule between them.
+			// Its text still reaches the search through the schema.
 			p.innerHTML =
-				'<label class="form-label">' + labelHtml + '</label>' +
 				'<div class="mj-dests" id="' + id + '"></div>' +
 				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-dest-add">'
 				+ '+ Add destination</button>';
@@ -9075,13 +9119,23 @@
 					ageMs: outAt ? Date.now() - outAt : 0,
 				});
 
-				const open = panel && !panel.hidden;
+				const open = isOpen(row);
 				const sig = [v.known, v.sev, v.badge, v.short, v.reason,
 					row._mjTier, open].join('\u0001');
 				if (row._mjSig === sig) return;
 				row._mjSig = sig;
 
 				bar.hidden = !v.known;
+				// The rail down the card's edge carries the same verdict as
+				// the badge, so a grid of them is scannable without reading
+				// a word. Written as whole class names: the stylesheet scan
+				// cannot see one built by concatenation.
+				row.classList.remove('mj-dest-sev-ok', 'mj-dest-sev-warn',
+					'mj-dest-sev-danger', 'mj-dest-sev-none');
+				row.classList.add(!v.known ? 'mj-dest-sev-none'
+					: v.sev === 'ok' ? 'mj-dest-sev-ok'
+					: v.sev === 'warn' ? 'mj-dest-sev-warn'
+					: v.sev === 'danger' ? 'mj-dest-sev-danger' : 'mj-dest-sev-none');
 				if (!v.known) return;
 
 				const TONE = { ok: 'success', warn: 'warning', danger: 'danger' };
@@ -9133,18 +9187,11 @@
 						panel.appendChild(li);
 					});
 					// A switched-off destination has measured nothing and
-					// explains nothing, so the panel is empty and the button
-					// that opens it would be an offer of a blank box.
-					const more = bar.querySelector('.mj-dest-more');
-					const empty = panel.childElementCount === 0;
-					if (more) more.hidden = empty;
-					if (empty && !panel.hidden) {
-						panel.hidden = true;
-						if (more) {
-							more.textContent = 'Details';
-							more.setAttribute('aria-expanded', 'false');
-						}
-					}
+					// explains nothing, so this half is empty — but the
+					// expander stays, because the settings behind it are
+					// not. It used to vanish with the panel, which is what
+					// made the button an offer of a blank box.
+					panel.hidden = !open || panel.childElementCount === 0;
 				}
 			};
 
@@ -9214,6 +9261,13 @@
 				// rather than appended later because _set() wipes and rebuilds
 				// every row — on mount, on refresh, and on a per-row reset —
 				// so anything attached outside addRow never comes back.
+				// Everything a card holds beyond its address and its verdict
+				// lives behind one expander: the diagnostics the camera sent,
+				// and the settings for this destination alone. Collapsed, the
+				// card is a reading; opened, it is the row it used to be.
+				const settings = el('div', 'mj-dest-settings');
+				settings.hidden = true;
+
 				if (OUT) {
 					const bar = el('div', 'mj-dest-status');
 					bar.hidden = true;
@@ -9228,31 +9282,32 @@
 					const spark = el('span', 'spark spark-row mj-dest-spark');
 					meter.appendChild(rateEl);
 					meter.appendChild(spark);
-					const more = el('button', 'btn btn-sm btn-link mj-dest-more');
-					// Inside a form, a bare button submits it — clicking
-					// Details would save the camera.
-					more.type = 'button';
-					more.textContent = 'Details';
-					more.setAttribute('aria-expanded', 'false');
 					bar.appendChild(badge);
 					bar.appendChild(line);
 					bar.appendChild(meter);
-					bar.appendChild(more);
 					row.appendChild(bar);
 
 					const panel = el('div', 'mj-dest-detail');
 					panel.hidden = true;
 					row.appendChild(panel);
-					more.addEventListener('click', () => {
-						const open = panel.hidden;
-						panel.hidden = !open;
-						more.setAttribute('aria-expanded', open ? 'true' : 'false');
-						more.textContent = open ? 'Hide' : 'Details';
-						if (open) { outOpen[row._mjIdx] = true; }
-						else { delete outOpen[row._mjIdx]; }
-						paintDest(row);
-					});
 				}
+
+				// Outside the status bar, and outside the `if (OUT)` with it:
+				// a build without the status module still has settings to
+				// reach, and a camera that has said nothing yet still has a
+				// bar that paintDest keeps hidden.
+				const more = el('button', 'btn btn-sm btn-link mj-dest-more');
+				// Inside a form, a bare button submits it — clicking this
+				// would save the camera.
+				more.type = 'button';
+				more.textContent = MORE_SHUT;
+				more.setAttribute('aria-expanded', 'false');
+				row.appendChild(more);
+				row.appendChild(settings);
+				more.addEventListener('click', () => {
+					setOpen(row, settings.hidden);
+					if (OUT) paintDest(row);
+				});
 
 				members.filter(m => m !== 'url').forEach(m => {
 					const prop = props[m] || {};
@@ -9358,7 +9413,7 @@
 						h.textContent = prop.hint;
 						wrap.appendChild(h);
 					}
-					row.appendChild(wrap);
+					settings.appendChild(wrap);
 				});
 
 				const note = el('div', 'hint mj-dest-note');
@@ -9511,22 +9566,14 @@
 							r._mjBps = null;
 							if (r._mjIdx !== undefined) delete outPrev[r._mjIdx];
 						}
-						if (r._mjIdx !== undefined && outOpen[r._mjIdx]) {
-							const panel = r.querySelector('.mj-dest-detail');
-							const more = r.querySelector('.mj-dest-more');
-							if (panel && panel.hidden) {
-								panel.hidden = false;
-								if (more) {
-									more.textContent = 'Hide';
-									more.setAttribute('aria-expanded', 'true');
-								}
-							}
+						if (r._mjIdx !== undefined && outOpen[r._mjIdx]
+							&& !isOpen(r)) {
+							setOpen(r, true);
 						}
 						// Only the panel reads the rate, and only the poll
 						// changes it: the sentence above has its own clock
 						// and the signature already catches what it says.
-						const shown = r.querySelector('.mj-dest-detail');
-						if (shown && !shown.hidden) r._mjSig = undefined;
+						if (isOpen(r)) r._mjSig = undefined;
 						paintDest(r);
 					});
 				};
