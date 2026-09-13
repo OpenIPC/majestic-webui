@@ -559,7 +559,7 @@ fi
 	<% if [ "$(echo "$network_list" | wc -w)" -gt 1 ]; then %>
 	<div class="mj-seg" role="group" aria-label="Interface">
 		<% for i in $network_list; do %>
-		<a class="mj-seg-lbl<% [ "$i" = "$edit_iface" ] && printf ' active' %>" href="?iface=<% esc "$i" %>"><% iface_word "$i" %></a>
+		<a class="mj-seg-lbl<% [ "$i" = "$edit_iface" ] && printf ' active' %>" href="?iface=<% attr_escape "$i" %>"><% iface_word "$i" %></a>
 		<% done %>
 	</div>
 	<% fi %>
