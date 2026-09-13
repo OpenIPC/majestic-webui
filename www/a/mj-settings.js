@@ -8310,14 +8310,21 @@
 					m.row._mjTier = tier;
 					m.done = true;
 				};
+				// Both passes want an address on each side. canon() drops a
+				// row that has none, so every blank row reduces to the same
+				// string as every other — and would claim the first blank
+				// baseline entry it came to, along with whatever index that
+				// entry sits at.
 				mine.forEach((m, i) => {
 					if (m.done || i >= base.length || taken[i]) return;
+					if (!m.url || !base[i].url) return;
 					if (m.canon === base[i].canon) claim(m, i, 'exact');
 				});
 				mine.forEach(m => {
-					if (m.done) return;
+					if (m.done || !m.url) return;
 					for (let i = 0; i < base.length; i++) {
-						if (!taken[i] && m.canon === base[i].canon) { claim(m, i, 'exact'); return; }
+						if (taken[i] || !base[i].url) continue;
+						if (m.canon === base[i].canon) { claim(m, i, 'exact'); return; }
 					}
 				});
 				mine.forEach((m, i) => {
@@ -8767,7 +8774,15 @@
 						.then(j => {
 							if (my !== outSeq || j === null) return;
 							const read = OUT.read(j);
-							if (!read) return;
+							// A reply nobody can read is not a reading. It
+							// counts the same as a failed fetch, or a camera
+							// answering 200 with rubbish would hold the last
+							// good verdict open for as long as it kept doing
+							// it.
+							if (!read) {
+								if (++outFails >= 2) { outFeed = null; paintAll(); }
+								return;
+							}
 							outFeed = read;
 							outAt = Date.now();
 							outFails = 0;

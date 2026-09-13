@@ -281,10 +281,20 @@
 			}
 
 			if (limited(st)) {
-				v.detail.push('The receiver reports it can take about ' +
-					bps(st.peerEstimateKbps * 1000) + ', and the camera is holding ' +
-					'what it sends down to match. The picture arriving there is ' +
-					'coarser or jerkier than the camera is set to produce.');
+				// The flag and the figure are two readings, and a reply may
+				// carry one without the other. Quoting a number that is not
+				// there renders "can take about , and" and claims the camera
+				// is matching a capacity the panel below says nobody reported.
+				v.detail.push(isNum(st.peerEstimateKbps)
+					? 'The receiver reports it can take about ' +
+						bps(st.peerEstimateKbps * 1000) + ', and the camera is ' +
+						'holding what it sends down to match. The picture ' +
+						'arriving there is coarser or jerkier than the camera ' +
+						'is set to produce.'
+					: 'The camera is holding down what it sends here because ' +
+						'the connection cannot take all of it. The picture ' +
+						'arriving there is coarser or jerkier than the camera ' +
+						'is set to produce.');
 				v.detail.push('This is the network between the camera and the ' +
 					'receiver, not the camera itself. A stronger signal, a wired ' +
 					'link, a lower bitrate, or sending the sub stream to this ' +

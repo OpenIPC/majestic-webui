@@ -12,6 +12,7 @@
 // "the camera is failing" is the difference between somebody checking their
 // uplink and somebody returning the camera.
 
+const fs = require('fs');
 const path = require('path');
 const { check, group, done } = require('./assert.js');
 
@@ -91,6 +92,21 @@ check('an unmeasured link claims neither',
 	(unk.short + unk.detail.join(' ')).indexOf('keeping up') < 0);
 check('but says so among the limits',
 	/does not tell the camera/.test(unk.limits.join(' ')));
+
+// The flag and the figure are separate keys, and a reply may carry the first
+// without the second. A sentence that quotes the missing one reads "can take
+// about , and" and claims a capacity the limits panel says nobody reported.
+const limNoFig = vd({ state: 'live', bandwidthLimited: true });
+check('a limited link with no figure still says it is limited',
+	limNoFig.sev === 'warn' && /cannot carry/.test(limNoFig.short));
+check('and quotes no capacity it was not given',
+	limNoFig.detail.concat([limNoFig.short]).every(
+		s => !/take about\s*,/.test(s) && s.indexOf('NaN') < 0 &&
+			!/reports it can take/.test(s)));
+check('while the one that was given is still quoted',
+	/take about 900\.0 kbit\/s/.test(
+		vd({ state: 'live', bandwidthLimited: true, peerEstimateKbps: 900 })
+			.detail.join(' ')));
 
 check('measured zero loss is not a warning',
 	vd({ state: 'live', lossPermille: 0 }).sev === 'ok');
@@ -221,5 +237,30 @@ check('an absent duration is empty', O.since(undefined) === '');
 check('facts list only what was measured',
 	O.facts(st({ txBytes: 1000 }), null).length === 1);
 check('and nothing at all for no answer', O.facts(null, null).length === 0);
+
+group('how the row carries it');
+
+// Two properties of the wiring in mj-settings.js that no unit test can reach
+// and that both fail destructively rather than visibly.
+const SETTINGS = fs.readFileSync(
+	path.join(__dirname, '..', 'www', 'a', 'mj-settings.js'), 'utf8');
+const rowStart = SETTINGS.indexOf('const addRow = (values) => {');
+const rowEnd = SETTINGS.indexOf('control._addRow = addRow;', rowStart);
+const inRow = SETTINGS.slice(rowStart, rowEnd);
+
+// _set() wipes and rebuilds every row — on mount, on refresh, and on a
+// per-row reset — so a status bar attached anywhere else never comes back
+// and the row goes permanently silent after the first refresh.
+check('the status bar is built with the row it belongs to',
+	rowStart > 0 && rowEnd > rowStart &&
+	inRow.indexOf("el('div', 'mj-dest-status')") > 0 &&
+	inRow.indexOf("el('div', 'mj-dest-detail')") > 0);
+
+// A bare button inside the settings form submits it, so clicking Details
+// would save the camera.
+// Anchored to the start of a line so a commented-out assignment does not
+// read as one.
+check('and its Details button is not a submit',
+	/mj-dest-more'\);[\s\S]{0,240}?\n\t+more\.type = 'button';/.test(inRow));
 
 done();
