@@ -7981,7 +7981,6 @@
 			// is the undo for exactly this fact, so it lights when there is
 			// something to undo and hides when there is not.
 			f.p.classList.toggle('mj-off-stock', off);
-			f.p.classList.toggle('mj-at-stock', !off);
 			if (f.setStock) f.setStock(off);
 		}
 		const note = document.getElementById('mj-stock-note');
@@ -8728,8 +8727,17 @@
 			// keyboard reaches for it: a blank readout is an absence, and an
 			// absence is what the reporter of #416 read as the number 33.
 			let chosen = v !== '';
+			// A frame rate of 0 is not a rate: it is "run at whatever the sensor
+			// mode gives", which the camera publishes as x-fps-sensor and is the
+			// state a channel nobody has configured is in. Printing the number
+			// says a camera delivering 25 is delivering 0 — and with the floor
+			// that used to sit at 1, the control rounded that up and said 1.
+			const sensorFps = isNum(sub['x-fps-sensor']) ? sub['x-fps-sensor'] : null;
 			const paint = () => {
-				show.textContent = chosen ? String(control.value) : UNSET_WORD;
+				show.textContent = !chosen ? UNSET_WORD
+					: (sensorFps !== null && Number(control.value) === 0)
+						? 'Auto · ' + sensorFps
+						: String(control.value);
 				p.classList.toggle('mj-unset', !chosen);
 			};
 			// Any input is a choice — a drag, a click on the track, an arrow key.
@@ -9749,10 +9757,13 @@
 			const offs = type === 'boolean' && (clears || stockOf(sub) === 'false');
 			reset.setAttribute('aria-label',
 				clears ? 'Clear ' + desc : 'Reset ' + desc + ' to default');
-			// An empty default is a real one — the crop region's [] is "the whole
-			// frame" — and it used to print as a sentence that stopped at its
-			// colon. The word is what the row's own hint calls it.
-			const defWord = hasDefault ? (stockOf(sub) || 'empty') : '';
+			// The default in the words the row itself uses: an empty default is
+			// a real one — the crop region's [] is "the whole frame" — and a
+			// frame rate of 0 is the sensor's own rate rather than no frames.
+			const defWord = !hasDefault ? ''
+				: (isNum(sub['x-fps-sensor']) && Number(sub.default) === 0)
+					? 'Auto · ' + sub['x-fps-sensor']
+					: (stockOf(sub) || 'empty');
 			reset.title = clears
 				? offs
 					? 'Clear this setting. With no value set the camera reads it as off.'

@@ -690,24 +690,27 @@ pre#output[data-cmd] {
    fact that survives Save.
 
    Lit, in the amber the count is printed in: off stock, and this is the undo.
-   Hidden until the row is reached: at stock, where majestic keeps no key at
-   all — it writes back only what differs from the build's defaults — so the
-   press provably changes nothing. Muted, always: a key the schema gives no
-   default for, which is not a claim that it is at stock but an admission that
-   this page cannot tell, and where the glyph is the only way back to unset
-   (#416). Hover keeps the colour and answers with the background instead: it
-   is state, not a link. */
+   Hidden until the pointer or the keyboard reaches the row: everything else —
+   a row at its default, where majestic keeps no key at all (it writes back
+   only what differs from the build's defaults) so the press provably changes
+   nothing, and a row whose key the schema gives no default for, where the
+   glyph is a CLEAR rather than an undo and the page cannot show it has
+   anything to clear. Reachable either way, because clearing is still the only
+   route back to unset on a control that cannot be emptied by hand (#416).
+   So a glyph on screen means one thing: this row is off stock. Hover keeps
+   the colour and answers with the background instead: it is state, not a
+   link. */
 .mj-row.mj-off-stock .mj-reset {
 	color: var(--bs-warning);
 	opacity: 1;
 }
 
-.mj-row.mj-at-stock .mj-reset {
+.mj-row:not(.mj-off-stock) .mj-reset {
 	visibility: hidden;
 }
 
-.mj-row.mj-at-stock:hover .mj-reset,
-.mj-row.mj-at-stock:focus-within .mj-reset {
+.mj-row:not(.mj-off-stock):hover .mj-reset,
+.mj-row:not(.mj-off-stock):focus-within .mj-reset {
 	visibility: visible;
 }
 
