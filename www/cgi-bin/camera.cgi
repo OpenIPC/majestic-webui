@@ -195,6 +195,7 @@ fi
 <script src="/a/mj-fps.js"></script>
 <script src="/a/mj-region.js" defer></script>
 <script src="/a/mj-servers.js" defer></script>
+<script src="/a/mj-outgoing.js" defer></script>
 <%
 # Where the overlay sits. Its own file for the same reason the tree is: the
 # arithmetic is the subject of issue #340, it fails silently — an overlay placed
