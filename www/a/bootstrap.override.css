@@ -6196,17 +6196,46 @@ dialog.mj-modal::backdrop {
 /* One publishing destination. The rows are a list of addresses the camera
    pushes to, drawn from the schema's `items`; see mj-servers.js for what a
    row means. */
-.mj-dest {
-	/* A destination is several controls that belong together, stacked among
-	   other destinations that look exactly like it. Without something saying
-	   where one ends the list reads as one long form, and the Source belonging
-	   to the row above it is a guess. */
-	padding: 0.5rem;
-	margin-bottom: 0.5rem;
-	border-left: 3px solid var(--bs-primary);
-	border-radius: 0.25rem;
-	background-color: rgba(var(--bs-body-color-rgb), 0.04);
+/* Destinations are a board, not a list.
+ *
+ * They were one column of narrow rows, each carrying an address, a verdict, a
+ * rate, a trace and up to six settings — so the question somebody opens this
+ * page to ask, "is everything getting out?", took reading every row to answer,
+ * and none of it was legible at a glance.
+ *
+ * Now each destination is a card in a grid that reflows on its own: auto-fill
+ * against a 19rem minimum gives one column on a phone, two or three in the
+ * settings pane and as many as fit on a large monitor, with no breakpoints to
+ * keep in step. A collapsed card shows what a reading is — address, verdict,
+ * rate, trace; everything else waits behind the expander. */
+.mj-dests {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+	gap: .75rem;
+	align-items: start;
 }
+
+.mj-dest {
+	display: flex;
+	flex-direction: column;
+	padding: .85rem .95rem .75rem;
+	/* The rail is the verdict now, coloured below, rather than the same
+	   accent on every row alike. */
+	border: 1px solid var(--bs-border-color);
+	border-left: 3px solid var(--bs-secondary-color);
+	border-radius: var(--bs-border-radius);
+	background-color: var(--bs-card-bg);
+	box-shadow: var(--bs-box-shadow-sm);
+}
+
+/* One verdict said twice: the badge in a word, the rail in a colour, so a
+   grid of cards sorts itself out before anything is read. Whole class names,
+   because the stylesheet scan cannot see one built by concatenation — and
+   scoped to .mj-dest, because .mj-sev-* already belongs to the hero cards. */
+.mj-dest.mj-dest-sev-ok { border-left-color: var(--bs-success); }
+.mj-dest.mj-dest-sev-warn { border-left-color: var(--bs-warning); }
+.mj-dest.mj-dest-sev-danger { border-left-color: var(--bs-danger); }
+.mj-dest.mj-dest-sev-none { border-left-color: var(--bs-border-color); }
 
 /* The protocol, read off the address rather than chosen. Narrow, and the
    member labels below it match so the boxes still line up: the address is the
@@ -6298,32 +6327,63 @@ dialog.mj-modal::backdrop {
 	margin-bottom: .5rem;
 }
 
+/* Reading order down a card: the verdict, then the figure and its trace,
+ * then the sentence. The meter takes a line of its own so a long verdict
+ * cannot push the rate onto a third one. */
 .mj-dest-meter {
 	display: flex;
 	align-items: center;
-	gap: .5rem;
-	flex: 0 0 auto;
+	flex-wrap: wrap;
+	gap: .35rem .5rem;
+	flex: 1 1 100%;
+	order: 2;
 }
 
-/* Tabular figures so a rate does not jitter sideways as it changes. */
+.mj-dest .mj-dest-state { order: 1; }
+.mj-dest .mj-dest-line { order: 3; }
+
+/* Tabular figures so a rate does not jitter sideways as it changes — and
+ * large, because it is the reading the card exists to give. At .8125rem in
+ * the old row it was the same size as the sentence beside it. */
 .mj-dest-rate {
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
-	color: var(--bs-secondary-color);
+	font-size: 1.5rem;
+	font-weight: 700;
+	line-height: 1.1;
+	color: var(--bs-body-color);
+}
+
+/* The trace takes the card's width instead of the 5rem stub it had at the end
+ * of a row, which is enough to show a stall rather than merely admit one. */
+.mj-dest-spark,
+.mj-dest-spark svg {
+	height: 34px;
 }
 
 .mj-dest-spark {
-	flex: 0 0 5rem;
+	flex: 1 1 100%;
 	margin-left: 0;
+	margin-top: .35rem;
 }
 
-/* Last on whichever line it lands on. */
+/* The card's own control, at its foot and in the reading order rather than
+ * pushed to the end of whichever line it landed on. It is the only way to the
+ * settings now, so it is never hidden. */
 .mj-dest-more {
-	flex: 0 0 auto;
-	margin-left: auto;
+	align-self: flex-start;
+	margin-top: .5rem;
 	padding: 0;
 	font-size: .8125rem;
 	text-decoration: none;
+}
+
+/* What used to be the rest of the row. Opened, a card is the form it was;
+ * closed, it is a reading. */
+.mj-dest-settings {
+	margin-top: .5rem;
+	padding-top: .6rem;
+	border-top: 1px solid var(--bs-border-color);
 }
 
 .mj-dest-detail {
