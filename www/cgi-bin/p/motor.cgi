@@ -7,8 +7,8 @@
 
      Which pad depends on the backend common.cgi detected. The stepped
      backends (gpio-motors, motor) take eight directions with magnitudes; the
-     Pelco-D backend (btzoom) speaks four directions in fixed timed pulses and
-     adds zoom and focus.
+     Pelco backend speaks four directions, holding while the button is down,
+     and adds zoom and focus.
 
      The glyphs are gone. Every arrow was Unicode geometry (U+25B2 and
      friends) and the two focus buttons were emoji diamonds, U+1F536 and
@@ -42,6 +42,15 @@ has_cap() {
 <% if [ "$ptz_backend" = "pelco" ]; then %>
 <% if has_cap zoom || has_cap focus; then %>
 <div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom and focus" hidden>
+	<!-- Why the buttons below will not move anything. Set when the camera
+	     declares a motorized lens (ptz_control) but majestic has no motor
+	     driver to serve it, which is one install away and worth saying: the
+	     alternative is a camera that looks like it never had PTZ at all.
+	     `small` only — a class the stylesheet already carries, so the pad
+	     gains no new CSS. -->
+	<% if [ -n "$ptz_reason" ]; then %>
+	<p class="small" role="status"><%= $ptz_reason %></p>
+	<% fi %>
 	<% if has_cap zoom; then %>
 	<span class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">

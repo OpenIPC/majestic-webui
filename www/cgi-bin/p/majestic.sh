@@ -58,3 +58,47 @@ mj_cfg() {
 	esac
 	printf '%s' "${_mj_r%|*}"
 }
+
+# Drive the motor, or ask what this camera's motor can do.
+#
+# The camera owns the PTZ serial port, so the WebUI asks it for a verb instead
+# of opening that port itself. It used to open it: bin/btzoom and bin/btzoom-xm
+# wrote Pelco frames to the same tty the camera was already driving for
+# autofocus, sharing it through a lock directory. That could never work -- a
+# Pelco movement is three steps (drive, wait, stop) and a lock cannot make them
+# atomic against another process. What an operator saw, measured on an
+# hi3516ev300: button presses that did nothing at all for seconds at a time,
+# and focus adjustments that undid themselves about ten seconds after the
+# finger came off.
+#
+#   mj_ptz <verb>   start or continue a move; the camera stops the motor on
+#                   its own deadline, so a lost release cannot run a lens into
+#                   its end stop. POST, because it changes the world -- a GET
+#                   is what a browser issues on its own, and it carries the
+#                   session with it.
+#   mj_ptz          the capability line (actuator, port, speed, pulse, verbs),
+#                   a plain GET: reading what the lens can do is safe.
+#
+# Return codes, kept apart the way mj_cfg keeps them apart -- "could not ask"
+# must never reach the operator as a statement about their hardware:
+#   0  answered; the reply is on stdout
+#   1  this camera declares no motorized lens (404)
+#   3  it does, but the motor driver is not on this build (503)
+#   2  could not ask
+mj_ptz() {
+	if [ -n "$1" ]; then
+		_mj_r=$(curl -s -m 3 -X POST -w '|%{http_code}' \
+			"http://127.0.0.1/ptz?move=$1" 2>/dev/null) || return 2
+	else
+		_mj_r=$(curl -s -m 3 -w '|%{http_code}' \
+			"http://127.0.0.1/ptz" 2>/dev/null) || return 2
+	fi
+	_mj_code=${_mj_r##*|}
+	case "$_mj_code" in
+		200) ;;
+		404) return 1 ;;
+		503) return 3 ;;
+		*) return 2 ;;
+	esac
+	printf '%s' "${_mj_r%|*}"
+}

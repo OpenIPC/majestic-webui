@@ -612,18 +612,21 @@ update_caminfo() {
 	# PTZ preview controls. The switch is the U-Boot ptz_control variable
 	# (#227): it names the method — "gpio" (gpio-motors, pins in ptz_gpio,
 	# with the legacy gpio_motors as an alias on both sides), "pelco-d"
-	# (btzoom over serial, port/rate in ptz_port and ptz_speed), "pelco-xm"
-	# (btzoom-xm, the XiongMai UART protocol — same verbs, same pad,
-	# different wire), or "motor" (a motor profile in ptz_profile or the
-	# legacy ptz value). An explicit method is trusted but still needs its
-	# binary — a pad whose every press fails is worse than no pad. Unset
+	# (Pelco-D over serial, port/rate in ptz_port and ptz_speed), "pelco-xm"
+	# (the XiongMai UART protocol — same verbs, same pad, different wire),
+	# or "motor" (a motor profile in ptz_profile or the legacy ptz value).
+	# An explicit method is trusted but still needs something that can
+	# actually drive it — a pad whose every press fails is worse than no
+	# pad. For the two Pelco wires that something is majestic, which owns
+	# the port; the WebUI shipped its own btzoom/btzoom-xm scripts for it
+	# until they were removed for racing the daemon on the same tty. Unset
 	# means no PTZ, exactly like "none" (#227): a camera without ptz_control
 	# shows no pad, so the old auto-detection from gpio_motors/ptz alone is
 	# gone and a field camera configured that way must set ptz_control once.
 	# The backend decides which pad p/motor.cgi draws — gpio and motor are
 	# stepped eight-way pan/tilt, the Pelco variants are four directions in
 	# timed pulses plus zoom and focus.
-	ptz_support=""; ptz_backend=""
+	ptz_support=""; ptz_backend=""; ptz_reason=""
 	ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 	case "$ptz_control" in
 		gpio)
@@ -636,15 +639,27 @@ update_caminfo() {
 				ptz_support="1"; ptz_backend="gpio"
 			fi
 			;;
-		pelco-d)
-			if [ -x /usr/bin/btzoom ]; then
-				ptz_support="1"; ptz_backend="pelco"
-			fi
-			;;
-		pelco-xm)
-			if [ -x /usr/bin/btzoom-xm ]; then
-				ptz_support="1"; ptz_backend="pelco"
-			fi
+		pelco-d|pelco-xm)
+			# Ask the daemon whether it can drive this wire. Its answers are
+			# kept apart the way af_support keeps them apart: a camera that
+			# could not be asked keeps its pad and lets a press report its
+			# own failure, and only a camera that answered "no motorized
+			# lens" has the pad withdrawn.
+			#
+			# A missing driver (3) is NOT that answer. The lens is declared
+			# and the operator has one thing to do about it, so the pad
+			# renders and carries the reason: withdrawing it here would say
+			# "this camera has no PTZ", which is the confusion this endpoint
+			# exists to end, and would put the explanation j/ptz.cgi
+			# prepares somewhere nothing can reach.
+			mj_ptz > /dev/null 2>&1
+			case $? in
+				0|2) ptz_support="1"; ptz_backend="pelco" ;;
+				3)
+					ptz_support="1"; ptz_backend="pelco"
+					ptz_reason="This camera has no PTZ driver installed: add the majestic-af package to its firmware."
+					;;
+			esac
 			;;
 		motor)
 			# Same rule: the profile is what the binary is called with, so a
@@ -712,7 +727,7 @@ update_caminfo() {
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		af_support ptz_backend ptz_caps sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
+		af_support ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file}
 
 	local v

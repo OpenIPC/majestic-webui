@@ -3820,7 +3820,7 @@ button.mj-osd-chip,
 	user-select: none;
 }
 
-/* Zoom and focus carry the verb they send. Held is a real state here: btzoom
+/* Zoom and focus carry the verb they send. Held is a real state here: the motor
    answers only once its pulse has ended, so the button stays lit that long. */
 .mj-ptz-fnbtn {
 	flex-direction: column;
