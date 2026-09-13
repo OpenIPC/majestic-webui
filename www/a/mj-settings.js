@@ -7947,8 +7947,10 @@
 		});
 	}
 
-	// "all N at stock" / "N of M off stock" for the section head — the question
-	// the per-row ↺ can only answer one row at a time. Counted over what is on
+	// "all N at stock" / "N of M off stock" for the section head, and the same
+	// judgement marked on every row it counted — the head can say how many and
+	// never which, and a reader who cannot find the four has been handed a
+	// number they can do nothing with. Counted over what is on
 	// screen (a visibleWhen-hidden row is not one of the section's N from here)
 	// and over fields the schema records a default for, so the sentence is
 	// provable: a key with no recorded default can never be shown to be either.
@@ -7963,33 +7965,54 @@
 	// Measured against the default rather than against the last save, so it goes
 	// on saying "off stock" after Save — it is a fact about the camera.
 	function paintStock() {
-		const note = document.getElementById('mj-stock-note');
-		if (!note) return;
-		let shown = 0, known = 0, off = 0;
+		let shown = 0, known = 0, offN = 0;
 		for (const f of state.fields) {
 			if (!f.p || f.p.style.display === 'none' || f.p.hidden) continue;
 			shown++;
-			if (!f.schema || !Object.prototype.hasOwnProperty.call(f.schema, 'default')) continue;
+			if (!f.schema || !schemaHasDefault(f.schema)) continue;
 			known++;
-			// The default has to be serialised the way the control serialises its
-			// own value or the two are not comparable: an array control reads back
-			// as ", "-joined (getValue → _rows().join(', ')) while String([a,b])
-			// joins on a bare comma, so an untouched two-region default would count
-			// as off stock. Every array default majestic ships today is [], which
-			// stringifies to "" either way — this is the case that has not bitten
-			// yet, not the one that cannot.
-			const def = f.schema.default;
-			const defStr = Array.isArray(def) ? def.join(', ') : String(def);
-			if (String(f.getValue()) !== defStr) off++;
+			const off = String(f.getValue()) !== stockOf(f.schema);
+			if (off) offN++;
+			// The same count, said row by row. Which four of the seventeen the
+			// head is talking about is the one thing it cannot say, and nothing
+			// else on the row could say it either: the amber left border is
+			// taken (it means unsaved), and the value alone does not tell you
+			// what stock was. The ↺ is the free channel and the honest one — it
+			// is the undo for exactly this fact, so it lights when there is
+			// something to undo and hides when there is not.
+			f.p.classList.toggle('mj-off-stock', off);
+			if (f.setStock) f.setStock(off);
 		}
+		const note = document.getElementById('mj-stock-note');
+		// Painted on every leaf, the note only on the ones that have a head:
+		// renderLive, renderOsd and renderMotion draw their own, and the rows
+		// under them are the same rows with the same question about them. This
+		// used to return here first, which left those three leaves marking
+		// nothing.
+		if (!note) return;
 		// The denominator is the rows on screen, so it matches what can be
 		// counted; "all at stock" carries no number at all, because the honest
 		// one is the number of *defaulted* fields and printing "all 9" beside
 		// twelve visible rows invites exactly the wrong reading.
 		note.textContent = !known ? ''
-			: off ? off + ' of ' + shown + ' off stock'
+			: offN ? offN + ' of ' + shown + ' off stock'
 				: 'all at stock';
-		note.classList.toggle('mj-off-stock', off > 0);
+		note.classList.toggle('mj-off-stock', offN > 0);
+	}
+
+	function schemaHasDefault(schema) {
+		return Object.prototype.hasOwnProperty.call(schema, 'default');
+	}
+
+	// The default as the CONTROL would serialise it, or the two are not
+	// comparable: an array control reads back as ", "-joined (getValue →
+	// _rows().join(', ')) while String([a,b]) joins on a bare comma, so an
+	// untouched two-region default would count as off stock. Every array
+	// default majestic ships today is [], which stringifies to "" either way —
+	// this is the case that has not bitten yet, not the one that cannot.
+	function stockOf(schema) {
+		const def = schema.default;
+		return Array.isArray(def) ? def.join(', ') : String(def);
 	}
 
 	// `skip` is a set of dots a caller has already mounted elsewhere on the same
@@ -8468,7 +8491,7 @@
 		const liveCls = live ? ' mj-live-row' : '';
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
-		const hasDefault = Object.prototype.hasOwnProperty.call(sub, 'default');
+		const hasDefault = schemaHasDefault(sub);
 		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
 		const isFontFile = isFontPath(dot) && FONTS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
@@ -8672,7 +8695,17 @@
 			}
 		} else if (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100) {
 			p = el('p', 'range mj-row' + liveCls);
-			const min = isNum(sub.minimum) ? sub.minimum : 0;
+			// A frame rate of 0 is this field's own declared default — the
+			// sensor's rate, which the camera names beside it — and a track
+			// that starts at 1 cannot show it: the browser sanitises the value
+			// up to the floor, so a camera delivering 25 reads as 1 frame a
+			// second and the row counts as off stock. Where the camera names
+			// the sensor's rate, the track starts at 0 whatever floor the
+			// schema carries, which is what keeps this right on a camera whose
+			// schema still puts the default outside its own range.
+			const min = (isNum(sub['x-fps-sensor']) && Number(sub.default) === 0)
+				? 0
+				: (isNum(sub.minimum) ? sub.minimum : 0);
 			const max = sub.maximum;
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
@@ -8704,8 +8737,17 @@
 			// keyboard reaches for it: a blank readout is an absence, and an
 			// absence is what the reporter of #416 read as the number 33.
 			let chosen = v !== '';
+			// A frame rate of 0 is not a rate: it is "run at whatever the sensor
+			// mode gives", which the camera publishes as x-fps-sensor and is the
+			// state a channel nobody has configured is in. Printing the number
+			// says a camera delivering 25 is delivering 0 — and with the floor
+			// that used to sit at 1, the control rounded that up and said 1.
+			const sensorFps = isNum(sub['x-fps-sensor']) ? sub['x-fps-sensor'] : null;
 			const paint = () => {
-				show.textContent = chosen ? String(control.value) : UNSET_WORD;
+				show.textContent = !chosen ? UNSET_WORD
+					: (sensorFps !== null && Number(control.value) === 0)
+						? 'Auto · ' + sensorFps
+						: String(control.value);
 				p.classList.toggle('mj-unset', !chosen);
 			};
 			// Any input is a choice — a drag, a click on the track, an arrow key.
@@ -9688,6 +9730,9 @@
 			return null;
 		}
 
+		// Assigned below on a row that has a default to be off, and called by
+		// paintStock, which is the only place that knows whether it is.
+		let setStock = null;
 		// live knobs share one "Reset all" in the panel header — no per-knob reset
 		if (!live) {
 			const reset = document.createElement('button');
@@ -9711,12 +9756,49 @@
 			// disabled, and every value typed into it was permanent (#416). The
 			// 404 is still handled, in onReset, where the camera's answer arrives.
 			const clears = !hasDefault;
+			// Where this press leaves a SWITCH, which is the one thing on this
+			// page that can stop a stream — see onReset. Two ways to land on
+			// off and the warning is owed for both: a declared default of
+			// false, and no declared default at all, because a switch whose key
+			// is absent reads off. The second is measured rather than assumed —
+			// clearing the main stream's Enable stopped the encoder and the row
+			// came back off — and it holds for every switch the camera
+			// publishes no default for, since clearing one and turning it off
+			// leave the camera in the same state.
+			const offs = type === 'boolean' && (clears || stockOf(sub) === 'false');
 			reset.setAttribute('aria-label',
 				clears ? 'Clear ' + desc : 'Reset ' + desc + ' to default');
+			// The default in the words the row itself uses: an empty default is
+			// a real one — the crop region's [] is "the whole frame" — and a
+			// frame rate of 0 is the sensor's own rate rather than no frames.
+			const defWord = !hasDefault ? ''
+				: (isNum(sub['x-fps-sensor']) && Number(sub.default) === 0)
+					? 'Auto · ' + sub['x-fps-sensor']
+					: (stockOf(sub) || 'empty');
 			reset.title = clears
-				? 'Clear this setting and leave it to the camera.'
-				: 'Reset to default: ' + String(sub.default);
-			reset.addEventListener('click', () => onReset(dot, reset, desc, clears));
+				? offs
+					? 'Clear this setting. With no value set the camera reads it as off.'
+					: 'Clear this setting and leave it to the camera.'
+				: 'Reset to default: ' + defWord;
+			// Asked at the press, not at mount: a switch already off has nothing
+			// to be warned about, and a warning that fires anyway is one the
+			// next reader presses through without looking.
+			reset.addEventListener('click', () =>
+				onReset(dot, reset, desc, clears, offs && String(getValue()) === 'true'));
+			// Whether this row is off stock is not known here — it changes with
+			// every keystroke — so the button lends paintStock a hatch and stays
+			// out of the judgement. The colour is for the reader who can see it;
+			// this is the same fact for the one who cannot.
+			if (!clears) setStock = (off) => {
+				// A 404 has already replaced both of these with the camera's own
+				// answer, and that one outlives every repaint — same rule as the
+				// button it left down.
+				if (reset.dataset.gone) return;
+				reset.title = (off ? 'Off stock. Reset to default: ' : 'Reset to default: ')
+					+ defWord;
+				reset.setAttribute('aria-label',
+					'Reset ' + desc + ' to default' + (off ? ', currently off stock' : ''));
+			};
 			// Put the glyph on the control's own line instead of below it. The
 			// live rows are left alone: .mj-live-row.range > .input-group is a
 			// direct-child selector that this wrapper would break.
@@ -9834,7 +9916,7 @@
 			control.addEventListener('change', pushLive);
 		}
 
-		return { dot, key, schema: sub, type, control, p, getValue, setValue, pushes };
+		return { dot, key, schema: sub, type, control, p, getValue, setValue, pushes, setStock };
 	}
 
 	function updateDirty() {
@@ -10227,11 +10309,26 @@
 	// the setting the way the row above it does rather than by its dotted key:
 	// a key is a second vocabulary, readable only by someone who already knows
 	// the answer, and this sentence is asked of someone deciding.
-	async function onReset(dot, btn, desc, clears) {
+	//
+	// `offs` is the third thing, and it is the one that had to be said out loud:
+	// this press is about to turn a switch that is currently on off. Neither of
+	// the two questions said so. "Leave it to the camera" reads as a promise
+	// that the camera has a sensible answer of its own, and on a switch with no
+	// declared default it has exactly one, which is off; "reset to its default"
+	// says nothing about what the default IS. Pressed on this lab camera's
+	// video0.Enable, it took the main stream down — the encoder stopped and the
+	// page then correctly showed a switch nobody had touched sitting at off.
+	async function onReset(dot, btn, desc, clears, offs) {
 		const name = desc || dot;
 		if (!confirm(clears
-			? 'Clear "' + name + '" and leave it to the camera?'
-			: 'Reset "' + name + '" to its default?')) return;
+			? offs
+				? 'Clear "' + name + '"?\n\nThis camera publishes no default for it, '
+					+ 'and with no value set it reads the switch as OFF.'
+				: 'Clear "' + name + '" and leave it to the camera?'
+			: offs
+				? 'Reset "' + name + '" to its default?\n\nThe default is OFF, '
+					+ 'so this switches it off.'
+				: 'Reset "' + name + '" to its default?')) return;
 		btn.disabled = true;
 		// innerHTML, not textContent: the glyph is an inline SVG, so the button's
 		// text is the empty string — saving that and putting it back at the end
@@ -10254,6 +10351,7 @@
 			if (!res.ok) {
 				if (res.status === 404) {
 					btn.title = 'This camera has no such setting.';
+					btn.dataset.gone = '1';
 					gone = true;
 				} else {
 					const txt = await safeText(res);
