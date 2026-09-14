@@ -308,4 +308,42 @@ group('a list of objects is one leaf, not one per member');
 	everyKeyOnce('with a destination list', t, s, new Set());
 }
 
+// A section whose leaf is not a form.
+//
+// Rule 4 drops a section with nothing to draw, and that is the right rule: it
+// is what keeps an absorbed section, or one whose keys are all lifted, from
+// leaving an empty tab behind. `pins` is the exception — one key, hidden,
+// because the page draws the chip from /api/v1/pinmux rather than from the
+// schema. The exception has to be NAMED, or the leaf silently disappears the
+// moment the daemon stops sending a visible key, which is exactly the kind of
+// silent loss this file exists for.
+{
+	group('a section whose leaf draws something other than its fields');
+	const s = clone(SCHEMA);
+	s.properties.pins = {
+		type: 'object',
+		properties: {
+			assignments: { type: 'array', title: 'Pins', 'x-hidden': true },
+		},
+	};
+	for (const g of s['x-groups']) {
+		if (g.id === 'system') g.sections.push('pins');
+	}
+
+	const plain = TREE.build(s, { liveOrder: ORDER, liveId: 'live' });
+	const sys = plain.groups().find(g => g.id === 'system');
+	check('unnamed, a section with only hidden keys has no leaf',
+		plain.leafIds(sys).indexOf('pins') < 0);
+
+	const named = TREE.build(s, { liveOrder: ORDER, liveId: 'live', custom: ['pins'] });
+	const sys2 = named.groups().find(g => g.id === 'system');
+	check('named as custom, it keeps its leaf',
+		named.leafIds(sys2).indexOf('pins') >= 0);
+	check('and it still draws no fields of its own',
+		named.leafFields('pins').length === 0);
+	check('naming it changes nothing about any other leaf',
+		JSON.stringify(named.leafIds(sys2).filter(l => l !== 'pins')) ===
+		JSON.stringify(plain.leafIds(sys)));
+}
+
 done();

@@ -1,0 +1,689 @@
+// The pins page: the chip on the board, drawn, and what is soldered to each
+// pin.
+//
+// This is for somebody who can solder to the SoC board — not for an embedded
+// engineer. They have attached a thing, a lamp or a button or an I²C sensor,
+// and they know what they attached. They do not know, and are never asked,
+// which register holds the selector for that pad. Nothing on this page is a
+// register address, a selector value or a name out of the chip's manual: the
+// camera does that translation behind /api/v1/pinmux and hands back the words
+// a person who solders already uses.
+//
+// It is deliberately NOT the Day / Night pin map. ircut-map.js draws the banks
+// the kernel reports as rows of tiles, and says at the top why it is not a
+// package drawing: "a package drawing would have to re-pitch itself per SoC,
+// and on a BGA its pin numbers would be a fiction anyway." Both halves of that
+// are still true and both are answered here rather than ignored. The pitch is
+// one CSS custom property every other size derives from, so the package
+// re-pitches itself for any pad count; and the positions ARE a drawing, which
+// is why the page says so under the chip rather than implying a footprint.
+// What this page has that the other one never did is the pad TABLE — which
+// register, which selector, which alternatives — so it can draw the pads the
+// part actually has, in the order the part has them, including the ones an
+// owner must never touch.
+//
+// Those are drawn and left blank. The flash, the eMMC and the picture sensor's
+// own lanes carry no number and nothing to press, because there is nothing an
+// owner can do with them and showing them as options invites the one change
+// that bricks a camera. A chip with pins missing is not a chip, so they are on
+// the drawing; they are simply not offered.
+(function () {
+	'use strict';
+
+	const API = '/api/v1/pinmux';
+
+	// The six FAMILIES a pin can belong to, in the camera's own spelling, with
+	// the words the page shows. A family is how the categories are grouped; it
+	// is NOT what a person picks, because a family is not solderable — "Serial"
+	// does not say TX or RX, and one pad routinely offers two different serial
+	// ports. What they pick is a SIGNAL: the camera sends `uart3.rx` with the
+	// family, the port number and the wire's own name, and the page composes
+	// "Serial 3 · RX" out of them.
+	const USES = [
+		{ k: 'gpio', label: 'On / off signal', hint: 'a lamp, a relay, a switch', c: 'a' },
+		{ k: 'pwm', label: 'Dimmable output', hint: 'brightness or speed control', c: 'b' },
+		{ k: 'i2c', label: 'Sensor bus', hint: 'an I²C sensor or module', c: 'c' },
+		{ k: 'spi', label: 'Add-on board', hint: 'an SPI display or module', c: 'd' },
+		{ k: 'uart', label: 'Serial', hint: 'a console or serial device', c: 'e' },
+		{ k: 'sd', label: 'SD card', hint: 'a memory card slot', c: 'f' },
+	];
+	const BY_KEY = {};
+	USES.forEach((u) => { BY_KEY[u.k] = u; });
+
+	// The camera drives these itself; the rest it only wires up and leaves
+	// alone. The consequence differs, so the detail pane says which — never
+	// leaving somebody to infer it from the word.
+	const DRIVEN = { gpio: true, pwm: true };
+
+	// How one choice reads: the family, the port or channel where the chip has
+	// more than one, and the wire's own name. The wire names are the ones
+	// printed on the module being soldered to — TX, SDA, MOSI, DATA2 — never
+	// the chip manual's UART1_RXD or SPI0_SDI.
+	function offerLabel(c) {
+		const fam = BY_KEY[c.use];
+		let out = fam ? fam.label : c.use;
+		if (typeof c.bus === 'number') out += ' ' + c.bus;
+		if (c.line) out += ' \u00b7 ' + c.line;
+		if (c.variant) out += ' (' + c.variant + ')';
+		return out;
+	}
+
+	// What a family's instances are called. A person wiring an I²C sensor has to
+	// put SDA and SCL on the SAME bus, and a page that says only "Sensor bus,
+	// 8 pins" does not tell them there are four of them to get wrong.
+	const INSTANCE = {
+		i2c: ['bus', 'buses'],
+		spi: ['bus', 'buses'],
+		uart: ['port', 'ports'],
+		sd: ['slot', 'slots'],
+		pwm: ['channel', 'channels'],
+	};
+
+	// And what it is for, which is the family's hint plus, where it matters,
+	// what this particular wire does. Nothing here repeats the label.
+	const LINE_HINT = {
+		TX: 'the camera sends on this wire',
+		RX: 'the camera listens on this wire',
+		CTS: 'flow control, from the other end',
+		RTS: 'flow control, to the other end',
+		SDA: 'the data wire of the pair',
+		SCL: 'the clock wire of the pair',
+		MOSI: 'data out to the module',
+		MISO: 'data back from the module',
+		SCK: 'the clock',
+		DATA: 'the one data wire, in and out',
+		CS: 'pulled low while the module is being talked to',
+		CLK: 'the clock',
+		CMD: 'commands to the card',
+		DETECT: 'goes low when a card is in the slot',
+		POWER: 'switches power to the slot',
+		WP: 'the card\u2019s write-protect tab',
+	};
+
+	function offerHint(c) {
+		if (c.line) {
+			const k = c.line.replace(/[0-9]+$/, '');
+			if (k === 'DATA' && /[0-9]$/.test(c.line))
+				return 'one of the card\u2019s four data wires';
+			if (LINE_HINT[k]) return LINE_HINT[k];
+		}
+		const fam = BY_KEY[c.use];
+		return fam ? fam.hint : '';
+	}
+
+	function el(tag, cls, text) {
+		const n = document.createElement(tag);
+		if (cls) n.className = cls;
+		if (text != null) n.textContent = text;
+		return n;
+	}
+
+	// Which pads go on which side, walked anticlockwise from the corner mark —
+	// the way a chip is numbered. The top takes the remainder so the four sides
+	// differ by at most one, whatever the part's pad count is.
+	function sides(n) {
+		const base = Math.floor(n / 4);
+		const left = base, bottom = base, right = base;
+		return { left: left, bottom: bottom, right: right, top: n - left - bottom - right };
+	}
+
+	// The lead pitch that makes a package of `cols` leads a side fit in `width`
+	// pixels. Every other size in the stylesheet derives from this one number,
+	// so fitting the chip is solving for it.
+	//
+	// It is computed rather than keyed to a media query because the page's
+	// content column is not the window: the settings rail insets it by some
+	// hundreds of pixels, and a viewport breakpoint sized the chip for a width
+	// it never had — at a 1680px window the package overflowed its column by
+	// about 200px and had to be scrolled to. Measuring is the only thing that
+	// is right on every screen AND on a column whose width the chip does not
+	// choose.
+	//
+	// The sum is the stylesheet's own: the body is `cols` pitches wide, and each
+	// side adds a label box, two gaps, a pad and a track. A pad on the left and
+	// right sides is turned end-on — 0.8 of a pitch across rather than 0.55 —
+	// which is the half-pitch either side that had the right-hand numbers
+	// clipped when this was first written against the top pad's dimensions.
+	//
+	// Two cases because the label stops shrinking at 9px, and its box at 13px,
+	// so the numbers stay readable on a phone: above that the width is linear
+	// in the pitch, below it there is a constant 13px of label either side.
+	function pitchFor(width, cols) {
+		const MIN = 9, MAX = 23, FLOOR_AT = 16.25;
+		if (!(width > 0) || !(cols > 0)) return MAX;
+		let p = width / (cols + 7.1);
+		if (p < FLOOR_AT) p = (width - 26) / (cols + 5.5);
+		return Math.max(MIN, Math.min(MAX, p));
+	}
+
+	function mount(host, opts) {
+		opts = opts || {};
+		let doc = null;          // the last answer from the camera
+		let sel = null;          // the pin whose detail is open
+		let pending = {};        // pin -> use, changed here and not kept
+		let trying = false;      // a window is open on the camera
+		let left = 0;            // seconds of it remaining
+		let tick = null, beat = null;
+		let note = '';           // the line the change bar shows
+		// Set by destroy(). Every callback that could start or keep a window
+		// open checks it: a try whose reply lands after the section has gone
+		// would otherwise begin a heartbeat on a detached page and hold the
+		// pads open with nobody watching — which is the one state the window
+		// exists to end.
+		let dead = false;
+
+		const root = el('div', 'mj-pins');
+		host.appendChild(root);
+
+		// Through the shared wrapper, like every other page: it turns a 401
+		// into the login redirect rather than letting a signed-out session
+		// parse an error body as pin data, and it carries the header the
+		// camera's cross-site check looks for.
+		//
+		// A refusal now arrives as a status as well as a body, so this reads
+		// the body either way and never resolves without one — a rejected
+		// promise with no catch left the countdown running and the bar
+		// claiming a trial that was not there.
+		const FETCH = (typeof window === 'object' && window.apiFetch) || fetch;
+
+		function post(action, pins) {
+			const body = pins ? JSON.stringify({ pins: pins }) : null;
+			return FETCH(API + '?do=' + action, {
+				method: 'POST',
+				headers: body ? { 'Content-Type': 'application/json' } : {},
+				body: body,
+				credentials: 'same-origin',
+			}).then(
+				(r) => r.json().catch(() => ({ error: 'the camera answered with '
+					+ (r.status || 'nothing this page could read') })),
+				(e) => ({ error: 'the camera could not be reached: ' + e.message }));
+		}
+
+		// What the camera has been told a pin is: the edit on this page if
+		// there is one, otherwise the saved row. `null` in `pending` is the
+		// deliberate "set it back to nothing" — distinct from having no edit,
+		// which is what makes clearing a saved pin possible at all.
+		function savedUse(pin) {
+			const row = ((doc && doc.saved) || []).find((r) => r.pin === pin);
+			return row ? row.signal : null;
+		}
+		function currentUse(pin) {
+			return Object.prototype.hasOwnProperty.call(pending, pin)
+				? pending[pin] : savedUse(pin);
+		}
+
+		// Every edit that actually changes something. Choosing what a pin
+		// already is is not a change, and must not arm the bar.
+		function changed() {
+			return Object.keys(pending)
+				.map(Number)
+				.filter((p) => pending[p] !== savedUse(p));
+		}
+
+		// The WHOLE list, because the camera replaces its list with what
+		// arrives: a pin left out is one set back to nothing, which is exactly
+		// what a cleared pin should be.
+		function wholeList() {
+			const out = [];
+			const seen = {};
+			Object.keys(pending).forEach((k) => {
+				const pin = Number(k);
+				seen[pin] = true;
+				if (pending[k] != null) out.push({ pin: pin, signal: pending[k] });
+			});
+			((doc && doc.saved) || []).forEach((row) => {
+				if (!seen[row.pin]) out.push({ pin: row.pin, signal: row.signal });
+			});
+			return out;
+		}
+
+		// The camera's description of one signal on one pad.
+		function offerOf(pad, id) {
+			if (!pad || !id) return null;
+			return (pad.can || []).find((c) => c.id === id) || null;
+		}
+
+		function stopClocks() {
+			if (tick) { clearInterval(tick); tick = null; }
+			if (beat) { clearInterval(beat); beat = null; }
+		}
+
+		// While the page is open and healthy it tells the camera so, which is
+		// why nobody watching ever sees the window expire. It fires only when
+		// the thing that would have noticed is gone.
+		function startClocks(seconds, beatSeconds) {
+			if (dead) { post('undo').catch(() => {}); return; }
+			stopClocks();
+			trying = true;
+			left = seconds;
+			paint();
+			tick = setInterval(() => {
+				left = Math.max(0, left - 1);
+				if (left === 0) { stopClocks(); trying = false; refresh(); }
+				else paintBar();
+			}, 1000);
+			beat = setInterval(() => {
+				post('beat').then((r) => {
+					if (dead) return;
+					if (!r || !r.alive) { stopClocks(); trying = false; refresh(); return; }
+					left = r.seconds;
+				});
+			}, Math.max(1, beatSeconds || 10) * 1000);
+		}
+
+		function refresh() {
+			return FETCH(API, { credentials: 'same-origin' })
+				.then((r) => r.json())
+				.then((d) => {
+					if (dead) return;
+					doc = d;
+					if (sel == null) {
+						const first = (d.pads || []).find((p) => p.pin != null);
+						sel = first ? first.pin : null;
+					}
+					paint();
+				})
+				.catch((e) => {
+					if (dead) return;
+					root.textContent = '';
+					root.appendChild(el('p', 'mj-pins-empty',
+						'The camera did not answer: ' + e.message));
+				});
+		}
+
+		// ── the chip ──────────────────────────────────────────────────────────
+
+		function lead(pad) {
+			const b = el('button', 'mj-pin-lead');
+			b.type = 'button';
+			const usable = pad.pin != null;
+			const lbl = el('span', 'mj-pin-lbl', usable ? String(pad.pin) : '');
+			const dot = el('span', 'mj-pin-pad');
+			const trace = el('span', 'mj-pin-trace');
+			b.appendChild(lbl);
+			b.appendChild(dot);
+			b.appendChild(trace);
+
+			if (!usable) {
+				// Power, ground, the flash, the picture sensor's own lanes.
+				b.className += ' mj-pin-own';
+				b.tabIndex = -1;
+				b.setAttribute('aria-hidden', 'true');
+				return b;
+			}
+
+			const want = currentUse(pad.pin);
+			const shown = want || pad.now;
+			const c = offerOf(pad, shown);
+			const u = c ? BY_KEY[c.use] : null;
+			if (want !== savedUse(pad.pin)) b.className += ' mj-pin-changed';
+			else if (pad.used || want) b.className += ' mj-pin-taken mj-pin-c' + (u ? u.c : 'a');
+			if (sel === pad.pin) b.className += ' mj-pin-sel';
+
+			b.title = 'Pin ' + pad.pin + ' \u2014 ' +
+				(pad.used || (c && c.use !== 'gpio' ? offerLabel(c) : 'free'));
+			b.addEventListener('click', () => { sel = pad.pin; paint(); });
+			return b;
+		}
+
+		let pkgEl = null, chipPane = null, cols = 0;
+
+		// The body is as wide as the side with the most leads, so a part with
+		// more or fewer pads than another gets a package that still looks like
+		// one rather than a rectangle with leads hanging off the ends.
+		function fit() {
+			if (!pkgEl || !chipPane) return;
+			const w = chipPane.clientWidth;
+			if (!w) return;
+			const p = pitchFor(w, cols);
+			pkgEl.style.setProperty('--mj-pitch', p.toFixed(2) + 'px');
+			pkgEl.style.setProperty('--mj-body', 'calc(var(--mj-pitch) * ' + cols + ')');
+			// Below about twelve pixels a two-digit number is wider than its own
+			// slot and the row reads as one long number, so the top and bottom
+			// go onto two rows the way a dense pinout drawing does. Keyed to the
+			// pitch rather than to the viewport, because the pitch is what
+			// actually decides it: a wide window with a narrow content column
+			// hits this and a media query did not.
+			pkgEl.classList.toggle('mj-pkg-stagger', p < 12);
+		}
+
+		function chip() {
+			const pads = (doc && doc.pads) || [];
+			const s = sides(pads.length);
+			cols = Math.max(s.top, s.bottom, 1);
+			const cut = {
+				left: pads.slice(0, s.left),
+				bottom: pads.slice(s.left, s.left + s.bottom),
+				right: pads.slice(s.left + s.bottom, s.left + s.bottom + s.right).reverse(),
+				top: pads.slice(s.left + s.bottom + s.right).reverse(),
+			};
+
+			const pkg = el('div', 'mj-pkg');
+			const row = (name) => {
+				const d = el('div', 'mj-pkg-' + name);
+				cut[name].forEach((p) => d.appendChild(lead(p)));
+				return d;
+			};
+			pkg.appendChild(row('top'));
+			const mid = el('div', 'mj-pkg-mid');
+			mid.appendChild(row('left'));
+			const body = el('div', 'mj-pkg-body');
+			// The only orientation mark a real package carries, and the thing
+			// you actually look for with the board in front of you.
+			body.appendChild(el('span', 'mj-pkg-key'));
+			const die = el('span', 'mj-pkg-die');
+			die.appendChild(el('span', 'mj-pkg-name', (doc && doc.chip) || ''));
+			body.appendChild(die);
+			mid.appendChild(body);
+			mid.appendChild(row('right'));
+			pkg.appendChild(mid);
+			pkg.appendChild(row('bottom'));
+			pkgEl = pkg;
+			return pkg;
+		}
+
+		// ── the three panes ───────────────────────────────────────────────────
+
+		function kindsPane() {
+			const pane = el('div', 'mj-pins-kinds');
+			pane.appendChild(head('What you can connect'));
+			const pads = (doc && doc.pads) || [];
+			USES.forEach((u) => {
+				const mine = pads.filter(
+					(p) => (p.can || []).some((c) => c.use === u.k));
+				if (!mine.length) return; // not a family this chip has
+				const b = el('button', 'mj-pins-kind');
+				b.type = 'button';
+				b.appendChild(el('span', 'mj-pins-dot mj-pins-c' + u.c));
+				const txt = el('span', 'mj-pins-kind-txt');
+				txt.appendChild(el('span', null, u.label));
+
+				// Which buses, ports, slots or channels this chip has, because
+				// the pins of one are not interchangeable with the pins of
+				// another: SDA on bus 1 and SCL on bus 2 is not a bus.
+				const buses = [];
+				mine.forEach((p) => (p.can || []).forEach((c) => {
+					if (c.use === u.k && typeof c.bus === 'number' &&
+						buses.indexOf(c.bus) < 0) buses.push(c.bus);
+				}));
+				buses.sort((x, y) => x - y);
+				const words = INSTANCE[u.k];
+				if (words && buses.length) {
+					txt.appendChild(el('em', null,
+						(buses.length === 1 ? words[0] : words[1]) + ' ' +
+						buses.join(', ')));
+				}
+				b.appendChild(txt);
+				b.appendChild(el('span', 'mj-pins-n', String(mine.length)));
+				pane.appendChild(b);
+			});
+
+			const used = pads.filter((p) => p.used);
+			if (used.length) {
+				const box = el('div', 'mj-pins-uses');
+				box.appendChild(head('The camera is using'));
+				used.forEach((p) => {
+					const line = el('p', 'mj-pins-use');
+					const b = el('b', null, 'Pin ' + p.pin);
+					line.appendChild(b);
+					line.appendChild(document.createTextNode(' — ' + p.used));
+					box.appendChild(line);
+				});
+				pane.appendChild(box);
+			}
+			return pane;
+		}
+
+		function head(text) {
+			const h = el('div', 'mj-live-head');
+			h.appendChild(el('h3', 'mj-cap', text));
+			h.appendChild(el('span', 'mj-live-rule'));
+			return h;
+		}
+
+		function detailPane() {
+			const pane = el('div', 'mj-pins-detail');
+			const pad = ((doc && doc.pads) || []).find((p) => p.pin === sel);
+			const h = head(pad ? 'Pin ' + pad.pin : 'Pin');
+			pane.appendChild(h);
+			if (!pad) {
+				pane.appendChild(el('p', 'mj-pins-empty', 'Pick a pin to see what it can be.'));
+				return pane;
+			}
+
+			const want = currentUse(pad.pin);
+			const edited = want !== savedUse(pad.pin);
+			// Two different facts, and the pane says the same one twice rather
+			// than one in the heading and the other underneath. What the pad IS
+			// comes from the register; what the camera was TOLD comes from the
+			// list, and a pad set by the boot rather than by anybody here has
+			// the first without the second. `shown` is whichever of them the
+			// pane is describing, so the heading and the ticked choice can
+			// never disagree — the first draft headed a pin Serial and then
+			// said nothing was connected to it, with Nothing ticked.
+			const nowOffer = offerOf(pad, pad.now);
+			pane.appendChild(el('p', 'mj-pins-what',
+				pad.used ? pad.used
+					: nowOffer && nowOffer.use !== 'gpio'
+						? offerLabel(nowOffer) : 'Free'));
+			pane.appendChild(el('p', 'mj-pins-sub',
+				edited ? 'Changed here. Not kept yet.'
+					: pad.used ? 'The camera drives this pin itself.'
+						: want ? 'You told the camera this, and it comes back after a reboot.'
+							: nowOffer && nowOffer.use !== 'gpio'
+								? 'The board came up this way. The camera did not set it, ' +
+								'and leaves it alone.'
+								: 'Nothing is connected to this pin yet.'));
+
+			pane.appendChild(head('Use this pin for'));
+			// One row per SIGNAL the pad offers, grouped by family so a pad with
+			// eight of them still reads as a short list rather than a jumble.
+			const offers = (pad.can || []).slice().sort((a, b2) => {
+				const ia = USES.findIndex((u) => u.k === a.use);
+				const ib = USES.findIndex((u) => u.k === b2.use);
+				if (ia !== ib) return ia - ib;
+				return (a.bus || 0) - (b2.bus || 0);
+			});
+			const rows = [{ id: null, label: 'Nothing',
+				hint: 'the camera leaves this pin alone', c: 'z' }]
+				.concat(offers.map((c) => ({
+					id: c.id,
+					label: offerLabel(c),
+					hint: offerHint(c),
+					c: (BY_KEY[c.use] || {}).c || 'z',
+				})));
+			rows.forEach((o) => {
+				const b = el('button', 'mj-pins-choice');
+				b.type = 'button';
+				if (o.id === want) b.className += ' mj-pins-choice-on';
+				b.appendChild(el('span', 'mj-pins-dot mj-pins-c' + o.c));
+				const txt = el('span', 'mj-pins-choice-txt');
+				txt.appendChild(el('b', null, o.label));
+				txt.appendChild(el('em', null, o.hint));
+				b.appendChild(txt);
+				b.addEventListener('click', () => {
+					pending[pad.pin] = o.id;
+					paint();
+				});
+				pane.appendChild(b);
+			});
+
+			const wantOffer = offerOf(pad, want);
+			if (wantOffer) {
+				pane.appendChild(el('p', 'mj-pins-drives', DRIVEN[wantOffer.use]
+					? 'The camera drives this pin itself.'
+					: 'The camera sets this pin up and leaves it alone — whatever you ' +
+					'soldered to it takes over from there.'));
+			}
+			return pane;
+		}
+
+		// ── the change bar ────────────────────────────────────────────────────
+
+		let bar = null;
+
+		function paintBar() {
+			if (!bar) return;
+			bar.textContent = '';
+			const n = changed().length;
+			const msg = el('span', 'mj-pins-msg', trying
+				? 'Trying it. ' + left + (left === 1 ? ' second' : ' seconds') +
+				' left before the camera puts it back.'
+				: note || (n === 0 ? 'Nothing changed'
+					: n === 1 ? '1 change not kept yet' : n + ' changes not kept yet'));
+			bar.appendChild(msg);
+			bar.appendChild(el('span', 'mj-pins-spacer'));
+
+			const add = (label, cls, fn, disabled) => {
+				const b = el('button', 'btn btn-sm ' + cls, label);
+				b.type = 'button';
+				b.disabled = !!disabled;
+				b.addEventListener('click', fn);
+				bar.appendChild(b);
+				return b;
+			};
+
+			if (trying) {
+				add('Put it back now', 'btn-outline-secondary', () => {
+					stopClocks();
+					trying = false;
+					note = '';
+					post('undo').then(() => { if (!dead) refresh(); });
+				});
+				add('Keep it', 'btn-primary', () => {
+					const list = wholeList();
+					stopClocks();
+					trying = false;
+					post('keep', list).then((r) => {
+						if (dead) return;
+						note = r && r.kept ? 'Saved. These pins come back this way after a reboot.'
+							: 'Not saved: ' + ((r && r.error) || 'the camera refused');
+						if (r && r.kept) pending = {};
+						refresh();
+					});
+				});
+				return;
+			}
+
+			add('Undo', 'btn-outline-secondary', () => {
+				pending = {};
+				note = '';
+				paint();
+			}, n === 0);
+			// Nothing to try when the change is "nothing is soldered to
+			// anything": there is no pad to hold open and nothing to watch
+			// happen. Keeping it is still the way to record that.
+			add('Try it', 'btn-outline-secondary', () => {
+				note = '';
+				post('try', wholeList()).then((r) => {
+					if (dead) return;
+					if (!r || !r.done) {
+						note = 'Not tried: ' + ((r && r.error) || 'the camera refused');
+						paintBar();
+						return;
+					}
+					startClocks(r.seconds, r.beat);
+				});
+			}, n === 0 || wholeList().length === 0);
+			add('Keep it', 'btn-primary', () => {
+				post('keep', wholeList()).then((r) => {
+					if (dead) return;
+					note = r && r.kept ? 'Saved. These pins come back this way after a reboot.'
+						: 'Not saved: ' + ((r && r.error) || 'the camera refused');
+					if (r && r.kept) pending = {};
+					refresh();
+				});
+			}, n === 0);
+		}
+
+		// ── the whole page ────────────────────────────────────────────────────
+
+		function paint() {
+			root.textContent = '';
+			if (!doc) {
+				root.appendChild(el('p', 'mj-pins-empty', 'Reading the chip…'));
+				return;
+			}
+			if (!doc.have) {
+				// Said plainly rather than drawn as an empty chip. Every vendor
+				// but HiSilicon, and a HiSilicon part whose id is not known.
+				root.appendChild(el('p', 'mj-pins-empty',
+					'This camera cannot say what its pins can do, so there is nothing ' +
+					'to draw. The Day / Night page can still find the IR-cut wiring.'));
+				return;
+			}
+
+			root.appendChild(el('p', 'mj-pins-intro',
+				'Soldered something to the chip? Tell the camera which pin it went to. ' +
+				'The blank pads are the camera’s own — power, ground, the flash, the ' +
+				'picture sensor.'));
+
+			const survived = doc.lastTry && doc.lastTry.started && doc.lastTry.survived === false;
+			if (survived) {
+				const warn = el('p', 'mj-pins-warn',
+					'The camera restarted while a change was being tried, so the change ' +
+					'was never kept. Whatever was on those pins took it down.');
+				const b = el('button', 'btn btn-sm btn-outline-secondary', 'Dismiss');
+				b.type = 'button';
+				b.addEventListener('click', () =>
+					post('forget').then(() => { if (!dead) refresh(); }));
+				warn.appendChild(b);
+				root.appendChild(warn);
+			}
+
+			const panes = el('div', 'mj-pins-panes');
+			panes.appendChild(kindsPane());
+			const mid = el('div', 'mj-pins-chip');
+			chipPane = mid;
+			mid.appendChild(chip());
+			if (ro) { ro.disconnect(); ro.observe(mid); }
+			const cap = el('p', 'mj-pins-cap',
+				'Where each pin sits on this drawing is not the chip’s footprint — ' +
+				'the numbers and what each one can be are the camera’s own.');
+			mid.appendChild(cap);
+			panes.appendChild(mid);
+			panes.appendChild(detailPane());
+			root.appendChild(panes);
+
+			bar = el('div', 'mj-pins-bar');
+			root.appendChild(bar);
+			paintBar();
+			// After the panes are in the document, so the column has a width.
+			fit();
+		}
+
+		// The column changes width without the window doing so — the rail
+		// collapses, a scrollbar appears — so this watches the element rather
+		// than listening for a resize.
+		let ro = null;
+		if (typeof ResizeObserver === 'function') {
+			ro = new ResizeObserver(() => fit());
+		} else {
+			window.addEventListener('resize', fit);
+		}
+
+		paint();
+		refresh();
+
+		return {
+			destroy: () => {
+				dead = true;
+				stopClocks();
+				if (ro) ro.disconnect();
+				else window.removeEventListener('resize', fit);
+				// A window left open is one nothing is watching. Put the pads
+				// back rather than leave the camera holding a change whose page
+				// has gone. Sent unconditionally: a try still in flight would
+				// not have set `trying` yet, and its reply lands on a page that
+				// is already gone.
+				post('undo');
+			},
+			refresh: refresh,
+		};
+	}
+
+	const api = { mount: mount, sides: sides, pitchFor: pitchFor, USES: USES,
+		offerLabel: offerLabel, offerHint: offerHint };
+	if (typeof module === 'object' && module.exports) module.exports = api;
+	if (typeof window === 'object') window.MajesticPins = api;
+})();

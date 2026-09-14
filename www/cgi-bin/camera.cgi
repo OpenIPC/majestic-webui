@@ -185,6 +185,12 @@ fi
 <script src="/a/ircut-pads.js" defer></script>
 <script src="/a/ircut-scan.js" defer></script>
 <%
+# The pins page: the chip on the board, drawn from the pad table the camera
+# reports at /api/v1/pinmux. Its own file, and pure where it can be, so
+# tests/pins.test.js can ask it how a pad count is dealt round the four sides.
+%>
+<script src="/a/mj-pins.js" defer></script>
+<%
 # The Day/Night section's light-monitor chart shares the dashboard's chart
 # primitives rather than growing its own.
 %>
