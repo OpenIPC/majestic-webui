@@ -155,6 +155,12 @@ pr_compliances:
     objective: >
       There is no build step and the camera serves every byte off its own flash, which
       on the smallest boards is the difference between fitting and not.
+
+      Five things are exempt, and the list is closed. Each is a large optional
+      component that only some cameras and some operators ever ask for, and carrying
+      any of them in the image would cost every board the bytes so that a minority
+      could use them. They are named below rather than described by a shape, because a
+      rule that says "anything optional may come from a CDN" is not this rule.
     success_criteria: >
       New front-end code is vanilla JS in www/a/, loaded with a plain <script> tag, and
       any asset it needs is committed to this tree. A page may additionally read
@@ -165,14 +171,55 @@ pr_compliances:
       metal under it. It must also render completely when that fetch fails, is blocked,
       or returns nonsense, and treat what comes back as untrusted input rather than
       markup.
+
+      THE EXEMPT COMPONENTS, in full:
+
+      (1) the HEVC decoder — OpenIPC/hevc-wasm, pinned, loaded by www/a/preview-wasm.js.
+      A rung of the preview chain, selected after `undecodable`, `unreachable` or
+      `mse-error` when the configured codec is one it handles; without it the walk
+      carries on past it, which on the live page means the camera's MJPEG channel where
+      the source has one, and the explanation where it does not.
+      (2) the terminal — xterm.js, loaded by cgi-bin/console.cgi; without it the console
+      falls back to the one-command-at-a-time runner it ships with.
+      (3) the file editor — CodeMirror, loaded by www/a/files.js; without it the editor
+      is a plain textarea, which still opens, edits and saves.
+      (4) the raw editor — OpenIPC/raw-editor, pinned, loaded by www/a/raw-loader.js;
+      without it the raw page still captures a frame and hands it over as a file, and
+      says why it cannot develop one.
+      (5) the webfonts — Montserrat and PT Mono from Google Fonts, in cgi-bin/p/header.cgi;
+      without them the page renders in the fallback stack the CSS already names, and
+      first paint never waits on them.
+
+      The first four are fetched on demand, and are held to all of: pinned to an exact
+      version, never a moving tag; requested only when someone opens the thing that
+      needs it, not on every page; never holding first paint; and the page that uses one
+      stays USABLE without it — degraded is allowed, broken and blank are not, and it
+      has to say which of its functions is missing rather than leave a control that
+      silently does nothing.
+
+      (5) is a different shape and is held to a different condition, because it cannot
+      meet those: the fonts are wanted on every page, and Google serves css2 as a moving
+      resource by design, so there is no revision to pin. What stands in for pinning is
+      that they can never block. The <link> goes out as media="print" with an onload
+      that promotes it once it has arrived, so first paint never waits on it, and
+      bootstrap.override.css names the system stack that is read until then. Making that
+      request render-blocking — dropping the media attribute, adding a <noscript> twin,
+      moving it ahead of the local stylesheets — fails this gate.
     failure_criteria: >
       The diff adds a runtime npm dependency, a bundler or transpiler step, a framework,
-      or a <script>/<link>/@import pointing at a third-party host; or a fetch of anything
-      the page needs in order to render — a script, a style, a font, an image, a
-      template. A data fetch from an endpoint the project does not publish — somebody
-      else's API, CDN, analytics or telemetry — fails this too, as does one whose
-      failure leaves the page incomplete, broken or visibly waiting: an offline camera
-      must look normal, not degraded.
+      or a <script>/<link>/@import pointing at a third-party host other than the five
+      components named above; or a fetch of anything the page needs in order to render —
+      a script, a style, a font, an image, a template. A data fetch from an endpoint the
+      project does not publish — somebody else's API, CDN, analytics or telemetry —
+      fails this too, as does one whose failure leaves the page incomplete, broken or
+      visibly waiting.
+
+      For the first four: pointing one at a moving tag rather than an exact version,
+      loading one before the operator has opened the thing that needs it, letting one
+      hold first paint, or leaving its absence as a blank area, a dead control or a page
+      that cannot do its remaining job. For the fonts: anything that puts them on the
+      render path. Adding a sixth fails this gate — the list is closed, and widening it
+      is an edit to this file, argued on its own.
 
   - title: "A new page is registered, not named twice"
     compliance_label: true
