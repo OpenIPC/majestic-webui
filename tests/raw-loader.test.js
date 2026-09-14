@@ -1,17 +1,17 @@
-// What the raw page is allowed to conclude about a camera, and what it must
-// not.
+// What the loader may do before the module has arrived, and what it must not.
 //
-// Four states hide behind one config key and three of them look alike from a
-// distance: a build with no raw support, a build with it switched off, and a
-// request that never arrived. Collapsing the last into the first tells an
-// operator their camera cannot do something it can, over one bad request on a
-// slow link — which is the failure this file exists to prevent, and the one an
-// earlier version of the loader had, because mjConfig() answers {} for a failed
-// fetch and an absent key reads exactly the same way.
+// A camera with no route out pays a timeout for every attempt unless the first
+// failure is remembered. The way to ask again is a fresh page: the banner's
+// "Try again" is a link back to the page, which builds a loader that has never
+// tried. A browser that cannot run the module must be told so without a round
+// trip at all.
 //
-// The load latch is the other half. A camera with no route out pays a timeout
-// for every attempt unless the first failure is remembered — and an operator
-// pressing "try again" has to be able to clear it, or the button is a lie.
+// The loader no longer guesses whether a camera serves raw from its config.
+// It did, and got the interesting part right — an absent key and a failed
+// request are not the same answer — but the question is better put to
+// /image.dng, which says 404 for a build without raw, 501 for one with it
+// switched off and 503 for one that cannot spare the memory just now. Nothing
+// is claimed about the camera until someone asks it for a frame.
 'use strict';
 
 const fs = require('fs');
@@ -23,9 +23,9 @@ const SRC = fs.readFileSync(
 	path.join(__dirname, '..', 'www', 'a', 'raw-loader.js'), 'utf8');
 
 // A sandbox with just enough of a browser for the loader to decide things in.
-// `fetch` is what the support check really turns on, so it is modelled exactly:
-// a rejection, a non-ok status and a body that will not parse are all different
-// from a body that parsed and had no key in it.
+// The loader makes no requests of its own any more, so there is no fetch here:
+// what it decides turns on the capabilities it is given and on whether the
+// module import resolves.
 function load(opts) {
 	opts = opts || {};
 	const sandbox = {
@@ -33,18 +33,6 @@ function load(opts) {
 		WebAssembly: opts.noWasm ? undefined : {},
 		Promise: Promise, Object: Object, Error: Error,
 		setTimeout: setTimeout, clearTimeout: clearTimeout,
-		apiFetch: function () {
-			if (opts.fetchRejects) return Promise.reject(new Error('offline'));
-			return Promise.resolve({
-				ok: opts.status === undefined ? true : opts.status < 400,
-				status: opts.status || 200,
-				json: () => (opts.badJson
-					? Promise.reject(new Error('not json'))
-					: Promise.resolve(opts.cfg === undefined ? {} : opts.cfg)),
-			});
-		},
-		mjGet: (cfg, dot) => dot.split('.').reduce(
-			(o, k) => (o == null ? undefined : o[k]), cfg),
 	};
 	sandbox.window = sandbox;
 	// import() cannot be intercepted inside vm, so the loader is handed a stub
@@ -60,28 +48,6 @@ function load(opts) {
 }
 
 (async () => {
-	group('a request that did not arrive is not a camera without raw');
-
-	let r = await load({ fetchRejects: true }).support();
-	check('a failed request answers unknown, never absent', r.state === 'unknown', r.state);
-	r = await load({ status: 500 }).support();
-	check('and so does a camera that answered 500', r.state === 'unknown', r.state);
-	r = await load({ badJson: true }).support();
-	check('and a body that will not parse', r.state === 'unknown', r.state);
-
-	group('what the camera is allowed to say about itself');
-
-	r = await load({ cfg: {} }).support();
-	check('a build with no such setting is absent, not unknown',
-		r.state === 'absent' && r.mode === null, JSON.stringify(r));
-	r = await load({ cfg: { isp: { rawMode: 'none' } } }).support();
-	check('switched off is not the same as absent',
-		r.state === 'off' && r.mode === 'none', JSON.stringify(r));
-	r = await load({ cfg: { isp: { rawMode: 'slow' } } }).support();
-	check('on demand serves raw', r.state === 'on' && r.mode === 'slow', JSON.stringify(r));
-	r = await load({ cfg: { isp: { rawMode: 'fast' } } }).support();
-	check('always ready serves raw too', r.state === 'on', JSON.stringify(r));
-
 	group('a browser that cannot run it is not asked to fetch it');
 
 	let m = load({ noWorker: true });
@@ -91,7 +57,7 @@ function load(opts) {
 	check('and load refuses without a round trip', err === 'unsupported-browser', err);
 	check('no WebAssembly means not available', load({ noWasm: true }).available === false);
 
-	group('a camera with no route out pays the timeout once, and can try again');
+	group('a camera with no route out pays the timeout once');
 
 	m = load({ importFails: true });
 	err = '';
@@ -100,10 +66,12 @@ function load(opts) {
 	err = '';
 	try { await m.load(); } catch (e) { err = e.message; }
 	check('the second is refused from memory, not retried', err === 'unavailable', err);
-	m.retry();
+	// The way back is a fresh page, not a method: a reload builds a new loader
+	// with no memory of the attempt that failed, which is what the banner's
+	// "Try again" link does.
 	err = '';
-	try { await m.load(); } catch (e) { err = e.message; }
-	check('until someone asks, and then it really tries again', err === 'boom', err);
+	try { await load({ importFails: true }).load(); } catch (e) { err = e.message; }
+	check('a fresh loader really tries again', err === 'boom', err);
 
 	group('the pin');
 
