@@ -672,12 +672,14 @@ update_caminfo() {
 	fw_build=$(grep "GITHUB_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
 	mj_version=$($mj_bin_file -v)
 	uboot_version=$(fw_printenv -n ver)
-	# Which majestic answered the questions below. Not shown anywhere — it is
-	# what lets the next page load tell a cached answer from a stale one; see
-	# caminfo_stale. Empty when the daemon is not running, which is its own
-	# fact and is read as one.
+	# Which majestic answered the questions below, and which RUN of it. Neither
+	# is shown anywhere — together they are what lets the next page load tell a
+	# cached answer from a stale one; see caminfo_stale. Both empty when the
+	# daemon is not running, which is its own fact and is read as one.
 	mj_pid=$(pidof majestic 2>/dev/null)
 	mj_pid=${mj_pid%% *}
+	mj_started=""
+	[ -n "$mj_pid" ] && read_starttime "$mj_pid" && mj_started=$mj_started_now
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow | cut -d: -f2)
@@ -814,7 +816,7 @@ update_caminfo() {
 		tz_name="Etc/GMT"; echo "$tz_name" > /etc/timezone
 	fi
 
-	local variables="flash_size flash_type fw_build fw_variant fw_version mj_pid mj_version network_address
+	local variables="flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		af_support ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file}
@@ -851,23 +853,52 @@ sysinfo_file=/tmp/webui/sysinfo.txt
 # It has to notice for free. Measured on an hi3516ev300, a page load reusing
 # the cache is ~100ms and one that rebuilds it is ~500ms, which is the whole
 # reason the cache exists -- so a check that forks `pidof` (10ms) would spend a
-# tenth of the saving on every page of the UI. The recorded pid turns it into
-# builtins: /proc/<pid>/comm is read without a subshell, and a majestic that
-# restarted is a pid that is gone or is now something else.
+# tenth of the saving on every page of the UI. The recorded identity turns it
+# into builtins, and the loop below runs in the noise of an empty one.
+
+# The task's start time, in jiffies since boot: field 22 of /proc/<pid>/stat.
+# This is what makes a pid an identity rather than a number -- pids are unique
+# only while their process lives, so a name alone would accept a later majestic
+# that happened to land on the same one. Monotonic, so unlike a file mtime it
+# is also indifferent to the clock being stepped.
+#
+# Sets a variable rather than echoing one: a command substitution would fork,
+# and not forking is the entire point of this path.
+read_starttime() {
+	mj_started_now=""
+	local line=""
+	# Read before the set -- below, which takes $1 away.
+	# Grouped, because ash reports an unopenable redirection itself and does it
+	# before the command's own 2> can catch it: a pid that has since exited
+	# would otherwise write "can't open" to the httpd's log on every page.
+	{ read line < "/proc/$1/stat"; } 2>/dev/null
+	[ -n "$line" ] || return 1
+	# -f for just this expansion, and restored right after: field 2 is the
+	# command name in parentheses, and a glob character in it would otherwise
+	# be matched against the working directory. Callers check the name first,
+	# so it cannot happen from here -- but the guard is one word and the next
+	# caller may not.
+	set -f
+	set -- $line
+	set +f
+	mj_started_now=${22}
+	[ -n "$mj_started_now" ]
+}
+
 caminfo_stale() {
 	# The path every page takes.
-	if [ -n "$mj_pid" ]; then
+	if [ -n "$mj_pid" ] && [ -n "$mj_started" ]; then
 		local comm=""
-		# Grouped, because ash reports an unopenable redirection itself and
-		# does it before the command's own 2> can catch it: a pid that has
-		# since exited would otherwise write "can't open" to the httpd's log
-		# on every page. An unreadable comm leaves it empty, which is the
-		# same answer as a wrong one.
+		# Same grouping, same reason as above. An unreadable comm leaves it
+		# empty, which is the same answer as a wrong one. Checked before the
+		# start time because it is what makes the field split below safe.
 		{ read comm < "/proc/$mj_pid/comm"; } 2>/dev/null
-		[ "$comm" = "majestic" ] && return 1
+		[ "$comm" = "majestic" ] || return 0
+		read_starttime "$mj_pid" || return 0
+		[ "$mj_started_now" = "$mj_started" ] && return 1
 		return 0
 	fi
-	# No pid recorded: a cache written before this existed, or written while
+	# Nothing recorded: a cache written before this existed, or written while
 	# majestic was down. Worth one fork to find out -- and only one, because
 	# a daemon that is still down leaves the record alone rather than paying
 	# 400ms on every page of the UI somebody is using to go and fix it.
