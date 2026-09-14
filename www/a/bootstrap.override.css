@@ -6916,12 +6916,18 @@ body > main > .container > form > .mj-foot {
 	grid-area: chip;
 	min-width: 0;
 	overflow-x: auto;
-	/* Room above and below for the second tier of wire names, which steps
-	   outwards past the package so four lit in a row can be read. overflow-x on
-	   one axis makes the other axis scroll rather than overflow, so without
-	   this the raised tier is simply cut off. Constant, so it costs the drawing
-	   a fixed fourteen pixels and never moves it. */
-	padding: 14px 0 calc(14px + 0.25rem);
+	/* Room around the package for the wire names: above and below for the
+	   second tier, which steps outwards so four lit in a row can be read, and
+	   to the left and right for the names on those columns, which are five
+	   characters at their longest and would otherwise sit under their own pad's
+	   ring. overflow-x on one axis makes the other axis scroll rather than
+	   overflow, so without this they are simply cut off.
+
+	   Constant, and mj-pins.js subtracts the same twenty pixels a side when it
+	   solves for the lead pitch — so the package is drawn a little smaller than
+	   the column and everything fits, rather than resizing on hover and moving
+	   under the pointer. */
+	padding: 18px 20px calc(18px + 0.25rem);
 }
 
 /* A big screen gets a bigger chip, not a stretched layout. */
@@ -7124,6 +7130,13 @@ body > main > .container > form > .mj-foot {
 	--mj-lbl-h: max(11px, calc(var(--mj-pitch) * 0.58));
 	--mj-lbl-w: max(13px, calc(var(--mj-pitch) * 0.8));
 	--mj-lbl-f: max(9px, calc(var(--mj-pitch) * 0.45));
+	/* How far a label stands off its pad. A ring reaches five or six pixels out
+	   — the selected pin wears one at all times, a lit one wears its bus's
+	   colour — and a label flush against the pad is drawn over by it. The same
+	   value serves the number and the wire name, and mj-pins.js subtracts it
+	   when it solves for the pitch, so the package makes the room rather than
+	   overflowing into it. */
+	--mj-clear: 6px;
 	--mj-body: calc(var(--mj-pitch) * 24);
 	display: inline-block;
 }
@@ -7192,12 +7205,26 @@ body > main > .container > form > .mj-foot {
 .mj-pkg-top .mj-pin-lbl,
 .mj-pkg-bottom .mj-pin-lbl {
 	width: var(--mj-pitch);
-	height: var(--mj-lbl-h);
+	height: calc(var(--mj-lbl-h) + var(--mj-clear));
 	text-align: center;
 }
 
-.mj-pkg-left .mj-pin-lbl { width: var(--mj-lbl-w); text-align: right; }
-.mj-pkg-right .mj-pin-lbl { width: var(--mj-lbl-w); text-align: left; }
+/* The clearance is padding rather than a wider gap, because the gap also sits
+   between the pad and its track, and the track has to reach the pad. */
+.mj-pkg-top .mj-pin-lbl { padding-bottom: var(--mj-clear); }
+.mj-pkg-bottom .mj-pin-lbl { padding-top: var(--mj-clear); }
+
+.mj-pkg-left .mj-pin-lbl {
+	width: calc(var(--mj-lbl-w) + var(--mj-clear));
+	padding-right: var(--mj-clear);
+	text-align: right;
+}
+
+.mj-pkg-right .mj-pin-lbl {
+	width: calc(var(--mj-lbl-w) + var(--mj-clear));
+	padding-left: var(--mj-clear);
+	text-align: left;
+}
 
 /* A solder pad, tinned, and the track back into the package. */
 .mj-pin-pad {
@@ -7441,22 +7468,30 @@ body > main > .container > form > .mj-foot {
 	white-space: nowrap;
 }
 
-/* Out from the package on every side, so the name is never under its own pad. */
+/* Out from the package on every side, and clear of the ring a lit pad wears:
+   it reaches six pixels out, and a name flush against the pad reads with its
+   last letter struck through — CLK as CL, DATA3 as TA3. */
 .mj-pins[data-lit] .mj-pkg-left .mj-pin-lbl::after {
-	right: 0;
+	right: var(--mj-clear);
 	top: 50%;
 	transform: translateY(-50%);
 }
 
 .mj-pins[data-lit] .mj-pkg-right .mj-pin-lbl::after {
-	left: 0;
+	left: var(--mj-clear);
 	top: 50%;
 	transform: translateY(-50%);
 }
 
-.mj-pins[data-lit] .mj-pkg-top .mj-pin-lbl::after,
+.mj-pins[data-lit] .mj-pkg-top .mj-pin-lbl::after {
+	left: 50%;
+	bottom: var(--mj-clear);
+	transform: translateX(-50%);
+}
+
 .mj-pins[data-lit] .mj-pkg-bottom .mj-pin-lbl::after {
 	left: 50%;
+	top: var(--mj-clear);
 	transform: translateX(-50%);
 }
 

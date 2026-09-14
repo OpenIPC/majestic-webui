@@ -77,7 +77,9 @@ group('fitting the package to the column it is drawn in');
 		// arithmetic this test exists to hold, because getting it wrong clipped
 		// the right-hand numbers off the drawing and nothing reported it.
 		const lbl = Math.max(13, p * 0.8);
-		return cols * p + 2 * (lbl + p * 0.1 + p * 0.8 + p * 0.1 + p * 1.75);
+		return cols * p +
+			2 * (lbl + PINS.RING_CLEAR + p * 0.1 + p * 0.8 + p * 0.1 + p * 1.75) +
+			2 * PINS.WIRE_GUTTER;
 	};
 
 	let over = null;
@@ -93,6 +95,14 @@ group('fitting the package to the column it is drawn in');
 
 	check('a desktop column gets the biggest pitch the design allows',
 		PINS.pitchFor(1000, 24) === 23, String(PINS.pitchFor(1000, 24)));
+	check('and the package leaves room beside it for the wire names',
+		PINS.WIRE_GUTTER >= 20 &&
+		PINS.pitchFor(600, 24) < PINS.pitchFor(600 + 2 * PINS.WIRE_GUTTER, 24));
+	// A ring reaches five or six pixels out from a pad, and the selected pin
+	// wears one at all times — a label flush against the pad is struck through
+	// by it, which is what happened to the selected pin's number.
+	check('and every label stands off its pad by more than a ring reaches',
+		PINS.RING_CLEAR >= 6, String(PINS.RING_CLEAR));
 	check('a phone gets a pitch that keeps the numbers readable',
 		PINS.pitchFor(342, 24) >= 9 && PINS.pitchFor(342, 24) < 12,
 		String(PINS.pitchFor(342, 24)));

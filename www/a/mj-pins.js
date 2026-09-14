@@ -231,6 +231,24 @@
 		return { left: left, bottom: bottom, right: right, top: n - left - bottom - right };
 	}
 
+	// Room kept beside the package for the wire names on its left and right
+	// columns. The longest of them is five characters — DATA3, POWER — and the
+	// ring around a lit pad reaches six pixels out from it, so without a gutter
+	// the name sits under its own ring: CLK read as CL, DATA3 as TA3.
+	//
+	// Reserved always, not while lit, because a package that resized itself on
+	// hover would move under the pointer. It is what makes the chip a little
+	// smaller than the column it is drawn in.
+	const WIRE_GUTTER = 20;
+
+	// How far every label stands off its pad. A ring reaches five or six pixels
+	// out — the selected pin wears one at all times, a lit one wears its bus's
+	// colour — and a label flush against the pad is drawn over by it: the
+	// selected pin's number was struck through by its own ring on every visit
+	// to this page. The same clearance serves the number and the wire name, so
+	// the two cannot drift apart. */
+	const RING_CLEAR = 6;
+
 	// The lead pitch that makes a package of `cols` leads a side fit in `width`
 	// pixels. Every other size in the stylesheet derives from this one number,
 	// so fitting the chip is solving for it.
@@ -243,20 +261,16 @@
 	// is right on every screen AND on a column whose width the chip does not
 	// choose.
 	//
-	// The sum is the stylesheet's own: the body is `cols` pitches wide, and each
-	// side adds a label box, two gaps, a pad and a track. A pad on the left and
-	// right sides is turned end-on — 0.8 of a pitch across rather than 0.55 —
-	// which is the half-pitch either side that had the right-hand numbers
-	// clipped when this was first written against the top pad's dimensions.
-	//
 	// Two cases because the label stops shrinking at 9px, and its box at 13px,
 	// so the numbers stay readable on a phone: above that the width is linear
 	// in the pitch, below it there is a constant 13px of label either side.
 	function pitchFor(width, cols) {
 		const MIN = 9, MAX = 23, FLOOR_AT = 16.25;
 		if (!(width > 0) || !(cols > 0)) return MAX;
-		let p = width / (cols + 7.1);
-		if (p < FLOOR_AT) p = (width - 26) / (cols + 5.5);
+		const room = width - 2 * WIRE_GUTTER;
+		if (room <= 0) return MIN;
+		let p = (room - 2 * RING_CLEAR) / (cols + 7.1);
+		if (p < FLOOR_AT) p = (room - 2 * (13 + RING_CLEAR)) / (cols + 5.5);
 		return Math.max(MIN, Math.min(MAX, p));
 	}
 
@@ -927,6 +941,7 @@
 	const api = { mount: mount, sides: sides, pitchFor: pitchFor, USES: USES,
 		offerLabel: offerLabel, offerHint: offerHint, padsFor: padsFor,
 		wiresFor: wiresFor, busColour: busColour,
+		WIRE_GUTTER: WIRE_GUTTER, RING_CLEAR: RING_CLEAR,
 		RESTING: RESTING, litSentence: litSentence };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticPins = api;
