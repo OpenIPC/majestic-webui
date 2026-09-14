@@ -175,9 +175,10 @@ pr_compliances:
       THE EXEMPT COMPONENTS, in full:
 
       (1) the HEVC decoder — OpenIPC/hevc-wasm, pinned, loaded by www/a/preview-wasm.js.
-      It is itself the last rung of the preview fallback chain, reached only when the
-      browser has already said `undecodable`; without it the chain ends one rung
-      earlier and the page says the stream cannot be previewed here.
+      A rung of the preview chain, selected after `undecodable`, `unreachable` or
+      `mse-error` when the configured codec is one it handles; without it the walk
+      carries on past it, which on the live page means the camera's MJPEG channel where
+      the source has one, and the explanation where it does not.
       (2) the terminal — xterm.js, loaded by cgi-bin/console.cgi; without it the console
       falls back to the one-command-at-a-time runner it ships with.
       (3) the file editor — CodeMirror, loaded by www/a/files.js; without it the editor
@@ -189,11 +190,21 @@ pr_compliances:
       without them the page renders in the fallback stack the CSS already names, and
       first paint never waits on them.
 
-      An exempt component must be pinned to an exact version, never a moving tag; must
-      be requested only when something is actually opened, not on every page; must not
-      hold first paint; and the page that uses it must stay USABLE without it — degraded
-      is allowed, broken and blank are not, and the page has to say which of its
-      functions is missing rather than leave a control that silently does nothing.
+      The first four are fetched on demand, and are held to all of: pinned to an exact
+      version, never a moving tag; requested only when someone opens the thing that
+      needs it, not on every page; never holding first paint; and the page that uses one
+      stays USABLE without it — degraded is allowed, broken and blank are not, and it
+      has to say which of its functions is missing rather than leave a control that
+      silently does nothing.
+
+      (5) is a different shape and is held to a different condition, because it cannot
+      meet those: the fonts are wanted on every page, and Google serves css2 as a moving
+      resource by design, so there is no revision to pin. What stands in for pinning is
+      that they can never block. The <link> goes out as media="print" with an onload
+      that promotes it once it has arrived, so first paint never waits on it, and
+      bootstrap.override.css names the system stack that is read until then. Making that
+      request render-blocking — dropping the media attribute, adding a <noscript> twin,
+      moving it ahead of the local stylesheets — fails this gate.
     failure_criteria: >
       The diff adds a runtime npm dependency, a bundler or transpiler step, a framework,
       or a <script>/<link>/@import pointing at a third-party host other than the five
@@ -203,11 +214,12 @@ pr_compliances:
       fails this too, as does one whose failure leaves the page incomplete, broken or
       visibly waiting.
 
-      For the five: pointing one at a moving tag rather than an exact version, loading
-      one before the operator has opened the thing that needs it, letting one hold first
-      paint, or leaving its absence as a blank area, a dead control or a page that
-      cannot do its remaining job. Adding a sixth fails this gate — the list is closed,
-      and widening it is an edit to this file, argued on its own.
+      For the first four: pointing one at a moving tag rather than an exact version,
+      loading one before the operator has opened the thing that needs it, letting one
+      hold first paint, or leaving its absence as a blank area, a dead control or a page
+      that cannot do its remaining job. For the fonts: anything that puts them on the
+      render path. Adding a sixth fails this gate — the list is closed, and widening it
+      is an edit to this file, argued on its own.
 
   - title: "A new page is registered, not named twice"
     compliance_label: true
