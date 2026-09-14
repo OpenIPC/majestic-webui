@@ -1,52 +1,56 @@
 #!/usr/bin/haserl
 <%in p/common.cgi %>
 
+<%
+# The editor IS this page. It mounts fixed over the viewport as soon as it
+# arrives, so nothing here is a step on the way to it -- there is no capture
+# card, no status list and no frame strip, because those verbs now live in the
+# editor's own chrome where the frame they act on is.
+#
+# full_bleed for the same reason live.cgi asks for it: no container, no status
+# strip, no footer. What remains under the editor is the navbar, and the
+# editor's own Back button is what leaves.
+hide_title=1; full_bleed=1
+%>
 <%in p/header.cgi %>
 
-<!-- Ships hidden. raw.js unhides it with whatever the camera turns out to say:
-     a build with no raw support, a camera with it switched off, a capture that
-     failed, or an editor that could not be fetched. Claiming any of those
-     before the camera has answered would be a banner at every visitor whose
-     camera is fine. -->
-<div id="raw-note" class="mj-notice" role="alert" hidden></div>
+<!-- The editor mounts here and covers the viewport. -->
+<div id="raw-editor-host"></div>
 
-<div class="row g-4 mb-4">
-	<div class="col-12 col-lg-8">
-		<div class="card">
-			<div class="card-body">
-				<% card_head "Capture" "the sensor's own data, before the image pipeline" %>
-				<p>
-					<button type="button" class="btn btn-primary" id="raw-capture" disabled>Capture a frame</button>
-					<button type="button" class="btn btn-secondary" id="raw-download" disabled>Download</button>
-					<button type="button" class="btn btn-secondary" id="raw-open" disabled>Open editor</button>
-				</p>
-				<span class="hint text-secondary">A raw frame is several megabytes and is kept in
-					this browser tab, never on the camera — its flash holds the firmware.</span>
-				<div class="mj-live-grp-head"><h3 class="mj-cap">This session</h3><span class="mj-live-rule"></span></div>
-				<div id="raw-strip"></div>
-			</div>
-		</div>
-	</div>
-
-	<div class="col-12 col-lg-4">
-		<div class="card">
-			<div class="card-body">
-				<% card_head "Status" %>
-				<dl class="list">
-					<dt>Raw mode</dt><dd id="raw-mode">&mdash;</dd>
-					<dt>Last capture</dt><dd id="raw-took">&mdash;</dd>
-				</dl>
-				<span class="hint text-secondary">The editor is fetched the first time you open
-					it and then cached by your browser. Nothing is downloaded until then, and
-					nothing is stored on the camera.</span>
-			</div>
-		</div>
-	</div>
+<!-- Shown from first paint, and covered by the editor the moment it arrives.
+     The editor is fetched from a CDN, so on a camera with no route out this is
+     what the page is for the few seconds before the attempt gives up; without
+     it those seconds are a blank page and no word about why. -->
+<div id="raw-loading" class="container py-4">
+	<p class="text-secondary">
+		<span class="spinner-border spinner-border-sm"></span>
+		Loading the editor&hellip;
+	</p>
+	<span class="hint text-secondary">It is fetched from the internet the first time
+		it is opened, and cached by your browser afterwards.</span>
 </div>
 
-<!-- The editor mounts here and covers the viewport. Empty and hidden until
-     someone asks for it, so a camera with no route out never notices. -->
-<div id="raw-editor-host" hidden></div>
+<!-- The one thing that has to exist before the editor does, because it is what
+     gets said when the editor never arrives. Raw frames come from the camera
+     either way, so this offers the frame itself rather than an apology. -->
+<div id="raw-fallback" class="container py-4" hidden>
+	<div class="mj-notice mj-notice-warn">
+		<div class="mj-notice-txt" id="raw-fallback-txt"></div>
+		<!-- A link, not a click handler: reloading the page is the retry. It
+		     starts a fresh loader with no memory of the attempt that failed,
+		     which is exactly what someone who has just plugged in a cable is
+		     asking for. -->
+		<span class="mj-notice-acts">
+			<a class="btn btn-sm btn-primary" href="raw.cgi">Try again</a>
+		</span>
+	</div>
+	<p class="mt-3">
+		<button type="button" class="btn btn-primary" id="raw-plain">Download a raw frame</button>
+		<a class="btn btn-secondary" href="camera.cgi">Back to Camera</a>
+	</p>
+	<span class="hint text-secondary">A raw frame is several megabytes and is kept in
+		this browser tab, never on the camera &mdash; its flash holds the firmware.</span>
+</div>
 
 <script src="/a/raw-loader.js"></script>
 <script src="/a/raw.js"></script>

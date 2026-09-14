@@ -1,193 +1,122 @@
 /*
- * The raw capture page.
+ * The raw page, which is the editor and nothing else.
  *
- * Everything here works with no route out of the network: capture a frame from
- * majestic, keep it in the tab, hand it to the browser as a file. The editor is
- * an extra on top, fetched only when someone asks for it, and its absence
- * leaves an ordinary working page rather than a broken one.
+ * Everything a person does here -- take a frame, look at it, save it -- is done
+ * in the editor's own chrome. This file's whole job is to mount it, tell it how
+ * to reach the camera, and say something useful on the one path where it never
+ * arrives.
  *
- * Frames are never written to the camera. A raw frame is 4.9 MB and the flash
- * it would land on is the one holding the firmware.
+ * Frames are never written to the camera. A raw frame is several megabytes and
+ * the flash it would land on is the one holding the firmware.
  */
 (function () {
 	const $ = (id) => document.getElementById(id);
-	const shots = [];          // { name, bytes, at }
-	let selected = -1;
 	let editor = null;
 
-	function fmtBytes(n) {
-		return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
-			: Math.round(n / 1024) + ' kB';
+	function stamp() {
+		return 'raw-' + new Date().toISOString()
+			.replace(/[-:]/g, '').slice(0, 15) + '.dng';
 	}
 
-	function note(kind, text, actionText, action) {
-		const box = $('raw-note');
-		if (!box) return;
-		box.className = 'mj-notice mj-notice-' + kind;
-		box.textContent = '';
-		const txt = document.createElement('div');
-		txt.className = 'mj-notice-txt';
-		txt.textContent = text;
-		box.append(txt);
-		if (actionText) {
-			const acts = document.createElement('span');
-			acts.className = 'mj-notice-acts';
-			const b = document.createElement('button');
-			b.type = 'button';
-			b.className = 'btn btn-sm btn-primary';
-			b.textContent = actionText;
-			b.addEventListener('click', action);
-			acts.append(b);
-			box.append(acts);
-		}
-		box.hidden = false;
-	}
-
-	function renderStrip() {
-		const strip = $('raw-strip');
-		if (!strip) return;
-		strip.textContent = '';
-		if (!shots.length) {
-			const p = document.createElement('p');
-			p.className = 'hint text-secondary mb-0';
-			p.textContent = 'Frames you capture stay in this tab until you leave it.';
-			strip.append(p);
-			return;
-		}
-		// Built from classes the stylesheet already carries: PurgeCSS keeps
-		// only what this repository's markup literally contains, so a class
-		// invented here would need the whole sheet regenerated to survive.
-		shots.forEach(function (s, i) {
-			const card = document.createElement('button');
-			card.type = 'button';
-			card.className = 'btn btn-sm me-2 mb-2 ' +
-				(i === selected ? 'btn-primary' : 'btn-outline-secondary');
-			card.textContent = s.at + '  ' + fmtBytes(s.bytes.length);
-			card.addEventListener('click', function () { selected = i; sync(); });
-			strip.append(card);
-		});
-	}
-
-	// Nothing is offered until the camera has answered. The button ships
-	// disabled in the markup for the same reason: a visitor who pressed it in
-	// the first moments would have asked a camera that may not serve raw at
-	// all.
-	let mayCapture = false;
-
-	function sync() {
-		const has = selected >= 0 && shots[selected];
-		$('raw-capture').disabled = !mayCapture;
-		$('raw-download').disabled = !has;
-		const open = $('raw-open');
-		if (open) open.disabled = !has || !window.MajesticRaw || !MajesticRaw.available;
-		renderStrip();
-	}
-
+	/*
+	 * How the editor gets a frame.
+	 *
+	 * The status codes are answered by hand rather than passed through, because
+	 * the editor shows whatever this throws and "the camera answered 501" is not
+	 * something to put in front of an operator. Three of them mean three
+	 * different things they can act on.
+	 */
 	function capture() {
-		const btn = $('raw-capture');
-		btn.disabled = true;
-		const began = Date.now();
-		apiFetch('/image.dng', { credentials: 'same-origin' })
+		return apiFetch('/image.dng', { credentials: 'same-origin' })
 			.then(function (r) {
 				if (r.status === 501)
-					return Promise.reject(new Error('Raw capture is switched off on this camera.'));
-				if (!r.ok) return Promise.reject(new Error('The camera answered ' + r.status + '.'));
+					throw new Error('Raw capture is switched off for this camera. ' +
+						'Turn it on in Settings, under Live — the image settings are ' +
+						'drawn there, not on a page of their own.');
+				if (r.status === 404)
+					throw new Error('This firmware does not serve raw frames. Raw capture ' +
+						'needs a HiSilicon or Goke part whose SDK exposes the sensor’s own data.');
+				if (r.status === 503)
+					throw new Error('The camera could not spare the memory for a raw frame ' +
+						'just now. Try again in a moment.');
+				if (!r.ok) throw new Error('The camera answered ' + r.status + '.');
 				return r.arrayBuffer();
 			})
 			.then(function (buf) {
-				const d = new Date();
-				shots.unshift({
-					name: 'raw-' + d.toISOString().replace(/[-:]/g, '').slice(0, 15) + '.dng',
-					bytes: new Uint8Array(buf),
-					at: d.toTimeString().slice(0, 8),
-				});
-				selected = 0;
-				$('raw-note').hidden = true;
-				$('raw-took').textContent = ((Date.now() - began) / 1000).toFixed(2) + ' s';
-				sync();
+				return { bytes: new Uint8Array(buf), name: stamp() };
+			});
+	}
+
+	/* The editor could not be fetched. Say so once, and still offer the frame:
+	 * a camera with no route out can capture and save perfectly well, it just
+	 * cannot develop. */
+	function fallback(e) {
+		const host = $('raw-editor-host');
+		if (host) host.hidden = true;
+		$('raw-loading').hidden = true;
+		// The import runs in the browser, not on the camera, and everything from a
+		// blocked request to a parse error arrives here the same way. Naming a
+		// cause the page never observed sends people to check a network that was
+		// never the problem, so it says what happened and stops there.
+		$('raw-fallback-txt').textContent = e && e.message === 'unsupported-browser'
+			? 'This browser is missing what the editor needs to run. Raw frames can ' +
+				'still be downloaded and opened in a desktop raw converter.'
+			: 'The editor could not be loaded. It is fetched from the internet the ' +
+				'first time it is opened, so a camera with no route out never gets it. ' +
+				'Raw frames can still be downloaded and opened in a desktop raw converter.';
+		$('raw-fallback').hidden = false;
+	}
+
+	function plainDownload() {
+		const btn = $('raw-plain');
+		btn.disabled = true;
+		capture()
+			.then(function (got) {
+				const url = URL.createObjectURL(new Blob([got.bytes],
+					{ type: 'image/x-adobe-dng' }));
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = got.name;
+				a.click();
+				setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
 			})
-			.catch(function (e) { note('danger', e.message); })
+			.catch(function (err) { $('raw-fallback-txt').textContent = err.message; })
 			.then(function () { btn.disabled = false; });
 	}
 
-	function download() {
-		const s = shots[selected];
-		if (!s) return;
-		const url = URL.createObjectURL(new Blob([s.bytes],
-			{ type: 'application/octet-stream' }));
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = s.name;
-		a.click();
-		// Revoked on a turn of the event loop: a download that has not started
-		// by then never will.
-		setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
-	}
-
-	function openEditor() {
-		const s = shots[selected];
-		if (!s) return;
-		const btn = $('raw-open');
-		btn.disabled = true;
+	function mount() {
+		$('raw-fallback').hidden = true;
+		$('raw-loading').hidden = false;
 		const host = $('raw-editor-host');
 		host.hidden = false;
-		MajesticRaw.mount(host, {
-			onExit: function () {
-				if (editor) { editor.destroy(); editor = null; }
-				host.hidden = true;
-				sync();
-			},
+		return MajesticRaw.mount(host, {
+			capture: capture,
+			// The editor covers the navbar, so its Back button is the only way
+			// out of this page. It goes where the nav entry came from.
+			onExit: function () { location.href = 'camera.cgi'; },
 		}).then(function (ed) {
 			editor = ed;
-			// A copy: the editor takes ownership of what it is given, and this
-			// frame stays in the strip for a second look.
-			return ed.open(s.bytes.slice(), s.name);
-		}).catch(function (e) {
-			host.hidden = true;
-			note('warn',
-				'The editor could not be loaded — it is fetched from the internet the first ' +
-				'time it is opened, and this camera has no route out. Capture and download ' +
-				'still work.' + (e && e.message === 'unsupported-browser'
-					? ' This browser is also missing what it needs to run.' : ''),
-				'Try again', function () {
-					$('raw-note').hidden = true;
-					MajesticRaw.retry();
-					openEditor();
-				});
-			sync();
-		});
+			// The editor covers the viewport, so the placeholder under it is
+			// only wasted paint now.
+			$('raw-loading').hidden = true;
+		}).catch(fallback);
 	}
 
 	document.addEventListener('DOMContentLoaded', function () {
-		if (!$('raw-capture')) return;
-		$('raw-capture').addEventListener('click', capture);
-		$('raw-download').addEventListener('click', download);
-		$('raw-open').addEventListener('click', openEditor);
-		sync();
-
-		// What the camera says about itself. Until it answers, the page claims
-		// nothing: a config that did not arrive is not a camera without raw.
-		MajesticRaw.support().then(function (s) {
-			if (s.state === 'unknown') {
-				// The camera did not answer. That is a fact about one request,
-				// not about the camera, so nothing is claimed and the button is
-				// offered: pressing it asks the camera directly, which is a
-				// better answer than any guess made here.
-				$('raw-mode').textContent = '—';
-				mayCapture = true;
-			} else if (s.state === 'absent') {
-				$('raw-mode').textContent = 'not available';
-				note('info', 'This firmware does not serve raw frames. Raw capture needs a ' +
-					'HiSilicon or Goke part whose SDK exposes the sensor’s own data.');
-			} else if (s.state === 'off') {
-				$('raw-mode').textContent = s.mode;
-				note('info', 'Raw capture is switched off for this camera. Turn it on in ' +
-					'Settings to capture frames.');
-			} else {
-				$('raw-mode').textContent = s.mode;
-				mayCapture = true;
-			}
-			sync();
-		});
+		if (!$('raw-editor-host')) return;
+		$('raw-plain').addEventListener('click', plainDownload);
+		// A browser too old to parse the loader's dynamic import never defines
+		// MajesticRaw at all, and reaching for it here would throw before the
+		// fallback had been shown -- leaving exactly the blank page this whole
+		// path exists to avoid.
+		if (typeof MajesticRaw === 'undefined' || !MajesticRaw.available) {
+			fallback(new Error('unsupported-browser'));
+			return;
+		}
+		mount();
 	});
+
+	// Kept reachable for a console poke and so the editor is not garbage from
+	// the module's point of view while the page lives.
+	window.MajesticRawPage = { current: function () { return editor; } };
 })();
