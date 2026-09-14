@@ -31,7 +31,8 @@
 			.then(function (r) {
 				if (r.status === 501)
 					throw new Error('Raw capture is switched off for this camera. ' +
-						'Turn it on in Settings, under Image.');
+						'Turn it on in Settings, under Live — the image settings are ' +
+						'drawn there, not on a page of their own.');
 				if (r.status === 404)
 					throw new Error('This firmware does not serve raw frames. Raw capture ' +
 						'needs a HiSilicon or Goke part whose SDK exposes the sensor’s own data.');
@@ -52,12 +53,16 @@
 	function fallback(e) {
 		const host = $('raw-editor-host');
 		if (host) host.hidden = true;
+		// The import runs in the browser, not on the camera, and everything from a
+		// blocked request to a parse error arrives here the same way. Naming a
+		// cause the page never observed sends people to check a network that was
+		// never the problem, so it says what happened and stops there.
 		$('raw-fallback-txt').textContent = e && e.message === 'unsupported-browser'
 			? 'This browser is missing what the editor needs to run. Raw frames can ' +
 				'still be downloaded and opened in a desktop raw converter.'
-			: 'The editor could not be loaded — it is fetched from the internet the ' +
-				'first time it is opened, and this camera has no route out. Raw frames ' +
-				'can still be downloaded and opened in a desktop raw converter.';
+			: 'The editor could not be loaded. It is fetched from the internet the ' +
+				'first time it is opened, so a camera with no route out never gets it. ' +
+				'Raw frames can still be downloaded and opened in a desktop raw converter.';
 		$('raw-fallback').hidden = false;
 	}
 
@@ -94,7 +99,14 @@
 	document.addEventListener('DOMContentLoaded', function () {
 		if (!$('raw-editor-host')) return;
 		$('raw-plain').addEventListener('click', plainDownload);
-		if (!MajesticRaw.available) { fallback(new Error('unsupported-browser')); return; }
+		// A browser too old to parse the loader's dynamic import never defines
+		// MajesticRaw at all, and reaching for it here would throw before the
+		// fallback had been shown -- leaving exactly the blank page this whole
+		// path exists to avoid.
+		if (typeof MajesticRaw === 'undefined' || !MajesticRaw.available) {
+			fallback(new Error('unsupported-browser'));
+			return;
+		}
 		mount();
 	});
 
