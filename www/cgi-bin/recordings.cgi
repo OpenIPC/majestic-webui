@@ -123,6 +123,7 @@ hide_title=1
 
 <script src="/a/timeline.js"></script>
 <script src="/a/mp4index.js"></script>
+<script src="/a/mp4meta.js"></script>
 <script src="/a/mjcrypto.js"></script>
 <script src="/a/mp4crypt.js"></script>
 <script src="/a/reckeys.js"></script>

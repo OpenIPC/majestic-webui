@@ -444,8 +444,24 @@
 		let xform = null;
 
 		function through(what, bytes) {
-			if (!xform || !xform[what]) return bytes;
-			return xform[what](bytes);
+			const out = (xform && xform[what]) ? xform[what](bytes) : bytes;
+			// And the camera's analytics metadata track comes back out, on
+			// every clip, whether or not it is sealed.
+			//
+			// The camera can store detection boxes in the recording as an ISO
+			// 14496-12 timed metadata track. Safari 26.6 refuses such a file
+			// alongside H.264 — MEDIA_ERR_DECODE at t=0, measured on macOS 15
+			// against the same recording without the track — while accepting
+			// it alongside H.265, and macOS 14 accepts both. majestic records
+			// H.264 by default, so that is most cameras, not a corner.
+			//
+			// Unconditional because the cost of asking is one walk of the box
+			// list: a clip without the track is handed straight back, the
+			// same object, uncopied. After the decryption transform, not
+			// before, so there is one order to reason about rather than two.
+			const META = window.MajesticMp4Meta;
+			if (!META) return out;
+			return what === 'init' ? META.stripInit(out) : META.stripFragment(out);
 		}
 
 		function fill() {
