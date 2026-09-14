@@ -3449,11 +3449,18 @@ button.mj-osd-chip,
 /* The PTZ toast (p/motor.cgi, relocated by preview-ptz.js) is the one that
    carries no ×: the driver is missing until somebody installs it, there is no
    state to clear, and a message that came back on the next page load would
-   only look broken. So it takes back the room the corner button needs and
-   stops offering a pointer for a click that does nothing. */
+   only look broken. So it takes back the room the corner button needs.
+
+   And it gives up the stack's pointer-events. `auto` is right for a toast a
+   press does something to — the other two are dismissed by tapping them — but
+   this one answers nothing, and preview-hero.js reads a touch anywhere inside
+   #mj-toasts as an interaction with a toast rather than a tap on the picture.
+   Left hit-testable it was 293x75 of phone screen where the control bar could
+   not be toggled. Nothing here takes a press, so nothing here intercepts one;
+   the cursor then comes from the picture underneath, which is the truth. */
 .mj-ptz-why {
 	padding-right: 0.6rem;
-	cursor: default;
+	pointer-events: none;
 }
 
 /* ── on-video chrome ────────────────────────────────────────────────────────
