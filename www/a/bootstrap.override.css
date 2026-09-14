@@ -6804,3 +6804,469 @@ body > main > .container > form > .mj-foot {
 	max-width: 22rem;
 	display: block;
 }
+
+/* ── the pins page ────────────────────────────────────────────────────────
+   The chip on the board, drawn: a square package with tracks running out of
+   all four sides to the pads you solder to. Deliberately not the Day / Night
+   pin map above, which draws four GPIO banks as rows of tiles because it is
+   answering which of four wires the IR-cut is on. This one draws the part you
+   are holding the iron to.
+
+   One number sets the whole package — the lead pitch — and every other size is
+   derived from it, so the chip scales to the screen and to the part's pad
+   count instead of being pinned to desktop pixels. The numbers stop shrinking
+   before they stop being readable, and on a phone the ones along the top and
+   bottom go onto two rows rather than running together. */
+
+.mj-pins-intro,
+.mj-pins-empty {
+	font-size: 0.8125rem;
+	color: var(--bs-secondary-color);
+	max-width: 62ch;
+	margin: 0 0 1.1rem;
+}
+
+.mj-pins-warn {
+	display: flex;
+	gap: 0.75rem;
+	align-items: center;
+	flex-wrap: wrap;
+	padding: 0.6rem 0.75rem;
+	margin: 0 0 1.1rem;
+	border: 1px solid var(--bs-border-color);
+	border-left: 3px solid var(--bs-warning);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-body-bg);
+	font-size: 0.8125rem;
+}
+
+.mj-pins-panes {
+	display: grid;
+	gap: 1.25rem;
+	align-items: start;
+	grid-template-columns: 12rem minmax(0, 1fr) 16rem;
+	grid-template-areas: "kinds chip detail";
+}
+
+.mj-pins-kinds { grid-area: kinds; }
+.mj-pins-detail { grid-area: detail; }
+
+.mj-pins-chip {
+	grid-area: chip;
+	min-width: 0;
+	overflow-x: auto;
+	padding-bottom: 0.25rem;
+}
+
+/* A big screen gets a bigger chip, not a stretched layout. */
+@media (min-width: 1600px) {
+	.mj-pins-panes {
+		grid-template-columns: 13rem minmax(0, 1fr) 17rem;
+		gap: 1.75rem;
+	}
+}
+
+/* A laptop keeps all three panes; everything just narrows. */
+@media (max-width: 1299px) {
+	.mj-pins-panes { grid-template-columns: 11rem minmax(0, 1fr) 15rem; }
+}
+
+/* Narrower and the detail pane takes a column beside both the others. */
+@media (max-width: 1099px) {
+	.mj-pins-panes {
+		grid-template-columns: minmax(0, 1fr) 15rem;
+		grid-template-areas: "kinds detail" "chip detail";
+	}
+}
+
+/* A phone reads it top to bottom, and the pitch comes off the viewport. */
+@media (max-width: 939px) {
+	.mj-pins-panes {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-areas: "kinds" "chip" "detail";
+	}
+}
+
+@media (max-width: 599px) {
+	.mj-pins-bar { flex-wrap: wrap; }
+	.mj-pins-msg { flex: 1 0 100%; }
+	.mj-pins-spacer { display: none; }
+	.mj-pins-bar .btn { flex: 1 1 auto; }
+}
+
+/* what you can connect */
+
+.mj-pins-kind {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	width: 100%;
+	padding: 0.45rem 0.55rem;
+	border: 0;
+	border-left: 2px solid transparent;
+	border-radius: 0 var(--bs-border-radius) var(--bs-border-radius) 0;
+	background: none;
+	color: var(--bs-secondary-color);
+	font: inherit;
+	font-size: 0.8125rem;
+	text-align: left;
+}
+
+.mj-pins-n {
+	margin-left: auto;
+	font-family: var(--bs-font-monospace);
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+	font-variant-numeric: tabular-nums;
+}
+
+.mj-pins-uses {
+	margin-top: 1.25rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--bs-border-color);
+}
+
+.mj-pins-use {
+	font-size: 0.8125rem;
+	color: var(--bs-secondary-color);
+	margin: 0 0 0.45rem;
+}
+
+.mj-pins-use b {
+	font-weight: 500;
+	color: var(--bs-body-color);
+}
+
+.mj-pins-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	flex: 0 0 auto;
+	border-radius: 2px;
+	background: var(--bs-border-color);
+}
+
+.mj-pins-ca { background: var(--st-c1); }
+.mj-pins-cb { background: var(--st-c3); }
+.mj-pins-cc { background: var(--st-c2); }
+.mj-pins-cd { background: var(--st-c4); }
+.mj-pins-ce { background: #8a94b8; }
+.mj-pins-cf { background: #5f9ea0; }
+
+/* this pin */
+
+.mj-pins-what {
+	font-size: 1rem;
+	font-weight: 500;
+	margin: 0 0 0.2rem;
+}
+
+.mj-pins-sub {
+	font-size: 0.8125rem;
+	color: var(--bs-secondary-color);
+	margin: 0 0 1.1rem;
+}
+
+.mj-pins-choice {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.6rem;
+	width: 100%;
+	margin-bottom: 0.3rem;
+	padding: 0.5rem 0.6rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-card-bg);
+	color: var(--bs-body-color);
+	font: inherit;
+	text-align: left;
+	transition: border-color var(--mj-ease);
+}
+
+.mj-pins-choice:hover { border-color: var(--bs-primary); }
+.mj-pins-choice .mj-pins-dot { margin-top: 0.35rem; }
+.mj-pins-choice-on {
+	border-color: var(--bs-primary);
+	box-shadow: 0 0 0 1px rgba(var(--bs-primary-rgb), 0.35);
+}
+
+.mj-pins-choice-txt {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.mj-pins-choice-txt b {
+	display: block;
+	font-size: 0.8125rem;
+	font-weight: 500;
+}
+
+.mj-pins-choice-txt em {
+	font-style: normal;
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-pins-drives {
+	margin-top: 0.9rem;
+	padding: 0.55rem 0.65rem;
+	border-radius: var(--bs-border-radius);
+	background: var(--bs-body-bg);
+	font-size: 0.6875rem;
+	color: var(--bs-secondary-color);
+	line-height: 1.5;
+}
+
+/* the change bar */
+
+.mj-pins-bar {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-top: 1.25rem;
+	padding: 0.875rem 1rem;
+	background: var(--bs-body-bg);
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-lg);
+}
+
+.mj-pins-msg {
+	font-size: 0.8125rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-pins-spacer { flex: 1 1 auto; }
+
+.mj-pins-cap {
+	margin: 0.9rem 0 0;
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+	max-width: 44ch;
+}
+
+/* the package */
+
+.mj-pkg {
+	/* The value the package is drawn at before the page has measured its
+	   column; mj-pins.js replaces it on the element, and everything else here
+	   is derived from it. */
+	--mj-pitch: 16px;
+	--mj-pad-w: calc(var(--mj-pitch) * 0.55);
+	--mj-pad-h: calc(var(--mj-pitch) * 0.8);
+	--mj-trace: calc(var(--mj-pitch) * 1.75);
+	--mj-lead-gap: calc(var(--mj-pitch) * 0.1);
+	--mj-lbl-h: max(11px, calc(var(--mj-pitch) * 0.58));
+	--mj-lbl-w: max(13px, calc(var(--mj-pitch) * 0.8));
+	--mj-lbl-f: max(9px, calc(var(--mj-pitch) * 0.45));
+	--mj-body: calc(var(--mj-pitch) * 24);
+	display: inline-block;
+}
+
+.mj-pkg-top,
+.mj-pkg-bottom {
+	display: flex;
+	justify-content: center;
+}
+
+.mj-pkg-mid {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.mj-pkg-left,
+.mj-pkg-right {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
+
+.mj-pin-lead {
+	display: flex;
+	align-items: center;
+	padding: 0;
+	border: 0;
+	background: none;
+	font: inherit;
+	cursor: pointer;
+}
+
+.mj-pkg-top .mj-pin-lead,
+.mj-pkg-bottom .mj-pin-lead {
+	width: var(--mj-pitch);
+	flex-direction: column;
+	gap: var(--mj-lead-gap);
+}
+
+.mj-pkg-bottom .mj-pin-lead { flex-direction: column-reverse; }
+
+.mj-pkg-left .mj-pin-lead,
+.mj-pkg-right .mj-pin-lead {
+	height: var(--mj-pitch);
+	flex-direction: row;
+	gap: var(--mj-lead-gap);
+}
+
+.mj-pkg-right .mj-pin-lead { flex-direction: row-reverse; }
+
+.mj-pin-lead:focus-visible {
+	outline: 2px solid var(--bs-primary);
+	outline-offset: 1px;
+	border-radius: 3px;
+}
+
+.mj-pin-lbl {
+	font-family: var(--bs-font-monospace);
+	font-size: var(--mj-lbl-f);
+	line-height: 1;
+	color: var(--bs-tertiary-color);
+	font-variant-numeric: tabular-nums;
+}
+
+.mj-pkg-top .mj-pin-lbl,
+.mj-pkg-bottom .mj-pin-lbl {
+	width: var(--mj-pitch);
+	height: var(--mj-lbl-h);
+	text-align: center;
+}
+
+.mj-pkg-left .mj-pin-lbl { width: var(--mj-lbl-w); text-align: right; }
+.mj-pkg-right .mj-pin-lbl { width: var(--mj-lbl-w); text-align: left; }
+
+/* A solder pad, tinned, and the track back into the package. */
+.mj-pin-pad {
+	border-radius: 2px;
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22);
+	background: linear-gradient(170deg, #f4f6fa 0%, #ccd1dc 52%, #a5abb9 100%);
+	transition: box-shadow var(--mj-ease);
+}
+
+.mj-pkg-top .mj-pin-pad,
+.mj-pkg-bottom .mj-pin-pad {
+	width: var(--mj-pad-w);
+	height: var(--mj-pad-h);
+}
+
+.mj-pkg-left .mj-pin-pad,
+.mj-pkg-right .mj-pin-pad {
+	width: var(--mj-pad-h);
+	height: var(--mj-pad-w);
+	background: linear-gradient(260deg, #f4f6fa 0%, #ccd1dc 52%, #a5abb9 100%);
+}
+
+.mj-pin-trace {
+	background: var(--bs-tertiary-color);
+	opacity: 0.55;
+}
+
+.mj-pkg-top .mj-pin-trace,
+.mj-pkg-bottom .mj-pin-trace { width: 2px; height: var(--mj-trace); }
+
+.mj-pkg-left .mj-pin-trace,
+.mj-pkg-right .mj-pin-trace { width: var(--mj-trace); height: 2px; }
+
+.mj-pin-taken .mj-pin-pad { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22); }
+.mj-pin-ca .mj-pin-pad { background: var(--st-c1); }
+.mj-pin-cb .mj-pin-pad { background: var(--st-c3); }
+.mj-pin-cc .mj-pin-pad { background: var(--st-c2); }
+.mj-pin-cd .mj-pin-pad { background: var(--st-c4); }
+.mj-pin-ce .mj-pin-pad { background: #8a94b8; }
+.mj-pin-cf .mj-pin-pad { background: #5f9ea0; }
+
+.mj-pin-changed .mj-pin-pad {
+	background: linear-gradient(170deg, #ffe9a8, var(--bs-warning) 60%, #c99a06);
+}
+
+.mj-pin-sel .mj-pin-pad {
+	box-shadow: 0 0 0 2px var(--bs-body-color), 0 0 0 4px var(--bs-card-bg),
+		0 0 0 5px var(--bs-body-color);
+}
+
+.mj-pin-sel .mj-pin-lbl {
+	color: var(--bs-body-color);
+	font-weight: 700;
+}
+
+/* Power, ground, the flash, the picture sensor's own lanes. Drawn because the
+   chip has them, and left blank because there is nothing an owner can do with
+   them — a chip with pins missing is not a chip. */
+.mj-pin-own { cursor: default; pointer-events: none; }
+.mj-pin-own .mj-pin-pad { background: var(--bs-border-color); box-shadow: none; }
+.mj-pin-own .mj-pin-trace { opacity: 0.25; }
+
+.mj-pkg-body {
+	position: relative;
+	width: var(--mj-body);
+	height: var(--mj-body);
+	border-radius: 7px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background:
+		radial-gradient(120% 90% at 26% 10%, rgba(255, 255, 255, 0.05),
+			rgba(255, 255, 255, 0) 58%),
+		linear-gradient(150deg, #2b303c 0%, #1c2029 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07),
+		0 14px 38px rgba(0, 0, 0, 0.32);
+}
+
+.mj-pkg-die {
+	width: 46%;
+	height: 46%;
+	border-radius: 5px;
+	border: 1px solid rgba(255, 255, 255, 0.13);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.mj-pkg-name {
+	font-family: var(--bs-font-monospace);
+	font-size: max(8px, calc(var(--mj-pitch) * 0.6));
+	letter-spacing: 0.26em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.3);
+}
+
+/* Which way round it goes — the only orientation mark a real package has. */
+.mj-pkg-key {
+	position: absolute;
+	top: calc(var(--mj-pitch) * 0.9);
+	left: calc(var(--mj-pitch) * 0.9);
+	width: calc(var(--mj-pitch) * 0.75);
+	height: calc(var(--mj-pitch) * 0.75);
+	border-radius: 50%;
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	background: rgba(255, 255, 255, 0.05);
+}
+
+/* Where the pitch has come down far enough that a two-digit number is wider
+   than its own slot, the numbers along the top and bottom sit on two rows, as a
+   dense pinout drawing does. The sides are unaffected: theirs are already a
+   whole lead apart.
+
+   The class is set from the measured pitch, not from a media query. A wide
+   window whose content column is narrow — which is every settings page, behind
+   its rail — reaches this while no viewport breakpoint would. */
+.mj-pkg-stagger .mj-pkg-top .mj-pin-lbl,
+.mj-pkg-stagger .mj-pkg-bottom .mj-pin-lbl {
+	position: relative;
+	height: calc(var(--mj-lbl-f) * 2.5);
+}
+
+.mj-pkg-stagger .mj-pkg-top .mj-pin-lead:nth-child(even) .mj-pin-lbl,
+.mj-pkg-stagger .mj-pkg-bottom .mj-pin-lead:nth-child(even) .mj-pin-lbl {
+	top: calc(var(--mj-lbl-f) * 1.4);
+}
+
+.mj-pins-kind-txt {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.mj-pins-kind-txt em {
+	display: block;
+	font-style: normal;
+	font-size: 0.625rem;
+	color: var(--bs-tertiary-color);
+}

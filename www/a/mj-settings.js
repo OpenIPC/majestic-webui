@@ -216,6 +216,11 @@
 	// sections, but they are things you navigate to, so the tree carries them
 	const LIVE_ID = 'live';
 	const ROI_ID = 'roi';
+	// `pins` IS a config section, but its only key is hidden and the leaf draws
+	// the chip from /api/v1/pinmux rather than a form. The tree drops a section
+	// with nothing to draw, which is the right rule, so this is the exception
+	// named to it.
+	const PINS_ID = 'pins';
 	const ROI_DOT = 'motionDetect.roi';
 	// matches the col-md-3 stacking point: below it the rail is full width and
 	// the categories collapse to an accordion
@@ -276,6 +281,7 @@
 		if (!state.tree || state.tree.schema !== state.schema) {
 			state.tree = TREE.build(state.schema, {
 				exclude: EXCLUDE, liveOrder: LIVE_ORDER, liveId: LIVE_ID, liveLabel,
+				custom: [PINS_ID],
 			});
 			state.tree.schema = state.schema;
 		}
@@ -643,6 +649,15 @@
 			try { state.preview.destroy(); } catch (e) { /* best-effort */ }
 			state.preview = null;
 		}
+
+		// And the pins page holds a heartbeat that keeps a pad change alive.
+		// Leaving it running past the section would hold pads open with nobody
+		// watching, which is the one state the thirty-second window exists to
+		// end; its destroy() puts them back.
+		if (state.pins) {
+			try { state.pins.destroy(); } catch (e) { /* best-effort */ }
+			state.pins = null;
+		}
 	}
 
 	// What one x-live field is worth right now, and what the schema says it
@@ -843,6 +858,8 @@
 		// down the left as a single strip of controls.
 		if (sec === LIVE_ID) {
 			renderLive(form);
+		} else if (sec === PINS_ID) {
+			renderPins(form);
 		} else if (sec === 'osd') {
 			renderOsd(form);
 		} else if (sec === 'motionDetect') {
@@ -1792,6 +1809,28 @@
 		if (n.state === 'quiet') { el.textContent = 'nothing moving'; return; }
 		const more = n.total > n.n ? ' of ' + n.total : '';
 		el.textContent = n.n + more + (n.n === 1 ? ' detection' : ' detections');
+	}
+
+	// The pins leaf. Everything on it comes from /api/v1/pinmux and goes back
+	// the same way — there is no config row to save with the rest of the page,
+	// because a pin change is applied to the hardware and held open for thirty
+	// seconds before it is kept, which no settings form can express.
+	function renderPins(form) {
+		const head = el('div', 'mj-live-head');
+		head.innerHTML = '<h3 class="mj-cap">' + esc(label('pins')) + '</h3>' +
+			'<span class="mj-live-rule"></span>';
+		form.appendChild(head);
+
+		if (!window.MajesticPins) {
+			const p = el('p', 'mj-pins-empty');
+			p.textContent = 'The pin map did not load.';
+			form.appendChild(p);
+			return;
+		}
+		// Torn down with the section, like the preview and the region overlay:
+		// the module holds a heartbeat to the camera, and a heartbeat nobody is
+		// watching is the exact thing the back-out window exists to end.
+		state.pins = window.MajesticPins.mount(form, {});
 	}
 
 	function renderMotion(form) {
