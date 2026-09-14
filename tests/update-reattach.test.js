@@ -154,6 +154,18 @@ function load(active) {
 		r.termWrites.join('') === '\ufffdNOTICE\r\n\u20ac',
 		JSON.stringify(r.termWrites));
 
+	// The other end of the same boundary. A frame carries however much of the log
+	// a read returned, so the last one need not end on a character — and what the
+	// decoder is still holding is bytes the camera sent. They belong in the pane,
+	// as the one character left of them, rather than disappearing with the socket.
+	r = load('1');
+	r.ws.onopen();
+	r.ws.onmessage({ data: Uint8Array.from([0x6f, 0x6b, 0xe2, 0x82]) });
+	r.ws.onclose();
+	check('a partial character left over at the close still reaches the transcript',
+		r.termWrites.join('') === 'ok\ufffd',
+		JSON.stringify(r.termWrites));
+
 	group('an older firmware that refuses the second connection keeps the warning');
 
 	// The marker said an upgrade is in progress, but the socket will not open —
