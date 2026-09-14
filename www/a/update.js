@@ -500,15 +500,27 @@
 		ws.binaryType = 'arraybuffer';
 		let opened = false;
 		ws.onopen = () => { opened = true; onOpen(ws); };
+		// Decode by frame type, never by assumption. `binaryType` above governs
+		// BINARY frames only: a text frame always arrives as a DOMString, and
+		// `new Uint8Array(aString)` is a ZERO-LENGTH array rather than a throw —
+		// the typed-array constructor takes the iterable path only for an object,
+		// so a primitive string goes down the length path, where ToIndex of it is
+		// NaN and therefore 0. A handler written for bytes alone therefore renders
+		// every text frame as the empty string and reports nothing.
+		//
+		// Text is the frame type the camera says things ON: the refusals it answers
+		// a bad or unstartable upgrade with, and the two endings it sends when the
+		// updater exits without rebooting. None of them reached a browser until
+		// #477 — the pane simply stopped after the updater's last line.
 		ws.onmessage = e => {
 			if (typeof e.data !== 'string') {
 				append(dec.decode(new Uint8Array(e.data), { stream: true }));
 				return;
 			}
 			// A text frame cannot continue a UTF-8 sequence split across binary
-			// frames. Flush any pending bytes before preserving frame order.
-			append(dec.decode());
-			append(e.data);
+			// frames, so flush what the decoder still holds in front of it rather
+			// than leave it to prefix whatever arrives next.
+			append(dec.decode() + e.data);
 		};
 		// The socket can close because majestic was killed at the reboot, or
 		// because it idled out during a quiet phase (download / time-sync). Either
@@ -518,6 +530,13 @@
 		// server-side concern: majestic pings /ws/upgrade while the child is idle.)
 		ws.onclose = () => {
 			if (!opened) return;   // handshake failed → onerror reports it
+			// The same boundary as the text branch above, at the other end of the
+			// stream. A frame carries however much of the log a read returned, so the
+			// last one need not end on a character; what the decoder is still holding
+			// is bytes the camera sent, and they belong in the pane as the
+			// replacement character rather than disappearing with the socket.
+			const tail = dec.decode();
+			if (tail) append(tail);
 			if (aborted && !sawFlash) {
 				// Gave up before touching flash; no reboot is coming, and the log
 				// above is the whole story.
