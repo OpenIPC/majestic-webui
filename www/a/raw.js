@@ -65,10 +65,29 @@
 		return Array.prototype.map.call(m, function (v) { return (+v).toFixed(4); }).join(' ');
 	}
 
+	/*
+	 * Both keys in one POST /api/v1/config, which is the batch write: the
+	 * server walks every leaf, aborts on the first one it rejects, and only
+	 * then reloads and saves. Two keys that must agree cannot be written by two
+	 * requests, and /api/v1/set is the single-key variant the WebUI does not
+	 * use.
+	 *
+	 * null REMOVES a leaf. That is the only way to put an optional setting back
+	 * the way it was found -- an empty string reaches the setter and is a value
+	 * like any other -- and putting things back is this whole feature's safety
+	 * net, so the difference is the point rather than a detail.
+	 */
+	function configBody(colorMatrix, dngColorMatrix) {
+		return JSON.stringify({ isp: { colorMatrix: colorMatrix, dngColorMatrix: dngColorMatrix } });
+	}
+
 	function setKeys(colorMatrix, dngColorMatrix) {
-		const q = '/api/v1/set?isp.colorMatrix=' + encodeURIComponent(colorMatrix) +
-			'&isp.dngColorMatrix=' + encodeURIComponent(dngColorMatrix);
-		return apiFetch(q, { credentials: 'same-origin' }).then(function (r) {
+		return apiFetch('/api/v1/config', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'same-origin',
+			body: configBody(colorMatrix, dngColorMatrix),
+		}).then(function (r) {
 			if (!r.ok) throw new Error('The camera answered ' + r.status + '.');
 		});
 	}
@@ -81,10 +100,25 @@
 			})
 			.then(function (cfg) {
 				const isp = (cfg && cfg.isp) || {};
-				// Absent and empty mean the same thing to majestic -- the key is
-				// unset and the sensor keeps its own -- so both restore as empty.
-				return { colorMatrix: isp.colorMatrix || '', dngColorMatrix: isp.dngColorMatrix || '' };
+				// null for a key that was not there, so restoring removes it
+				// again rather than leaving an empty value behind.
+				return {
+					colorMatrix: 'colorMatrix' in isp ? isp.colorMatrix : null,
+					dngColorMatrix: 'dngColorMatrix' in isp ? isp.dngColorMatrix : null,
+				};
 			});
+	}
+
+	/* Older majestic answers 202 and ignores null leaves, so a revert that
+	 * meant to remove a key has to be checked rather than assumed -- the same
+	 * reason mj-settings.js re-reads after a save. */
+	function confirmRestored(was) {
+		return readKeys().then(function (now) {
+			if (now.colorMatrix === was.colorMatrix &&
+				now.dngColorMatrix === was.dngColorMatrix) return;
+			throw new Error('the camera did not take the old settings back; ' +
+				'this firmware may be too old to remove a setting.');
+		});
 	}
 
 	/* Best effort if the tab goes away mid-countdown. keepalive lets a request
@@ -101,9 +135,15 @@
 		unloadArmed = true;
 		window.addEventListener('pagehide', function () {
 			if (!previous) return;
-			const q = '/api/v1/set?isp.colorMatrix=' + encodeURIComponent(previous.colorMatrix) +
-				'&isp.dngColorMatrix=' + encodeURIComponent(previous.dngColorMatrix);
-			try { fetch(q, { credentials: 'same-origin', keepalive: true }); } catch (e) { /* gone */ }
+			try {
+				fetch('/api/v1/config', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'same-origin',
+					keepalive: true,
+					body: configBody(previous.colorMatrix, previous.dngColorMatrix),
+				});
+			} catch (e) { /* the page is going; nothing to report it to */ }
 		});
 	}
 
@@ -119,9 +159,9 @@
 		revert: function () {
 			if (!previous) return Promise.resolve();
 			const was = previous;
-			return setKeys(was.colorMatrix, was.dngColorMatrix).then(function () {
-				previous = null;
-			});
+			return setKeys(was.colorMatrix, was.dngColorMatrix)
+				.then(function () { return confirmRestored(was); })
+				.then(function () { previous = null; });
 		},
 		/* Confirmed. Forgetting what was there before is what stands the unload
 		 * handler down -- without this it would put the old matrix back the
