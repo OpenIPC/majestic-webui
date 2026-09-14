@@ -336,7 +336,11 @@
 	// exactly the case worth telling a reader about rather than hiding.
 	function loadMotion(name, token) {
 		state.motion = null;
-		state.motionWhy = '';
+		// Set BEFORE the request, not left empty: until the camera answers,
+		// what this lane knows is nothing, and the fallback caption states a
+		// fact about the camera ("keeps no index") that no answer supports
+		// yet. Every branch below replaces it with what actually happened.
+		state.motionWhy = 'Motion — asking the camera';
 
 		// The '.' day is a records.path with no date in it, so every clip
 		// lands in one directory and the camera's index is keyed by real date.
@@ -355,7 +359,16 @@
 						'Motion — this camera is too old to keep an index';
 					return null;
 				}
-				return r.ok ? r.json() : null;
+				// A refusal or a fault is NOT evidence that the camera keeps
+				// no index — 403 says this account may not read it and 500
+				// says the camera broke. Only the 404 above is a statement
+				// about what the firmware has.
+				if (!r.ok) {
+					state.motionWhy = 'Motion — the camera refused (HTTP ' +
+						r.status + ')';
+					return null;
+				}
+				return r.json();
 			})
 			.then(function (j) {
 				if (token !== dayToken) return;
@@ -364,12 +377,25 @@
 					renderMotion();
 					return;
 				}
+				// The shape is checked rather than coerced. `spans || []`
+				// turns a truncated or half-written answer into "nothing
+				// moved", which is a claim about the premises; a malformed
+				// answer is an unknown, and unknown is what the hatched lane
+				// is for.
+				if (!Array.isArray(j.spans) || !Array.isArray(j.watched)) {
+					state.motionWhy = 'Motion — the camera answered with nonsense';
+					renderMotion();
+					return;
+				}
+				const num = function (v) {
+					return typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0;
+				};
 				state.motion = {
-					spans: j.spans || [],
-					watched: j.watched || [],
-					events: j.events || 0,
-					seconds: j.seconds || 0,
-					merged: j.merged || 0,
+					spans: j.spans,
+					watched: j.watched,
+					events: num(j.events),
+					seconds: num(j.seconds),
+					merged: num(j.merged),
 					capped: !!j.capped,
 					torn: !!j.torn,
 				};
@@ -1379,7 +1405,9 @@
 		if (!state.motion) {
 			el.className = 'rec-motion unknown';
 			el.innerHTML = '';
-			if (note) note.textContent = state.motionWhy || 'Motion — this camera keeps no index';
+			// motionWhy is always set by loadMotion before it asks, so the
+			// fallback is only reached before any day has been selected.
+			if (note) note.textContent = state.motionWhy || 'Motion';
 			return;
 		}
 		el.className = 'rec-motion';
