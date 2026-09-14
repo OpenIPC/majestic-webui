@@ -47,6 +47,78 @@
 			});
 	}
 
+	/*
+	 * Writing a solved matrix to the camera, and being able to take it back.
+	 *
+	 * Both keys go together because one Calibrate produces both, and they are
+	 * different transforms: isp.colorMatrix drives the live picture, and
+	 * isp.dngColorMatrix is what a RAW snapshot carries. Neither is derived
+	 * from the other.
+	 *
+	 * What makes this safe is remembering what was there first. A matrix that
+	 * ruins the picture also ruins the view you would use to notice, and the
+	 * setting survives a reboot, so the camera would come back still wrong.
+	 */
+	let previous = null;
+
+	function fmt(m) {
+		return Array.prototype.map.call(m, function (v) { return (+v).toFixed(4); }).join(' ');
+	}
+
+	function setKeys(colorMatrix, dngColorMatrix) {
+		const q = '/api/v1/set?isp.colorMatrix=' + encodeURIComponent(colorMatrix) +
+			'&isp.dngColorMatrix=' + encodeURIComponent(dngColorMatrix);
+		return apiFetch(q, { credentials: 'same-origin' }).then(function (r) {
+			if (!r.ok) throw new Error('The camera answered ' + r.status + '.');
+		});
+	}
+
+	function readKeys() {
+		return apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
+			.then(function (r) {
+				if (!r.ok) throw new Error('The camera would not say what it is set to now.');
+				return r.json();
+			})
+			.then(function (cfg) {
+				const isp = (cfg && cfg.isp) || {};
+				// Absent and empty mean the same thing to majestic -- the key is
+				// unset and the sensor keeps its own -- so both restore as empty.
+				return { colorMatrix: isp.colorMatrix || '', dngColorMatrix: isp.dngColorMatrix || '' };
+			});
+	}
+
+	/* Best effort if the tab goes away mid-countdown. keepalive lets a request
+	 * outlive the page; nothing guarantees it arrives, which is why the editor
+	 * asks for confirmation rather than treating this as the safety net. */
+	function armUnloadRevert() {
+		if (!previous) return;
+		const q = '/api/v1/set?isp.colorMatrix=' + encodeURIComponent(previous.colorMatrix) +
+			'&isp.dngColorMatrix=' + encodeURIComponent(previous.dngColorMatrix);
+		window.addEventListener('pagehide', function onHide() {
+			window.removeEventListener('pagehide', onHide);
+			if (!previous) return;
+			try { fetch(q, { credentials: 'same-origin', keepalive: true }); } catch (e) { /* gone */ }
+		});
+	}
+
+	const calibrate = {
+		holdSeconds: 30,
+		apply: function (solved) {
+			return readKeys().then(function (was) {
+				previous = was;
+				armUnloadRevert();
+				return setKeys(fmt(solved.ccm), fmt(solved.colorMatrix));
+			});
+		},
+		revert: function () {
+			if (!previous) return Promise.resolve();
+			const was = previous;
+			return setKeys(was.colorMatrix, was.dngColorMatrix).then(function () {
+				previous = null;
+			});
+		},
+	};
+
 	/* The editor could not be fetched. Say so once, and still offer the frame:
 	 * a camera with no route out can capture and save perfectly well, it just
 	 * cannot develop. */
@@ -91,6 +163,7 @@
 		host.hidden = false;
 		return MajesticRaw.mount(host, {
 			capture: capture,
+			calibrate: calibrate,
 			// The editor covers the navbar, so its Back button is the only way
 			// out of this page. It goes where the nav entry came from.
 			onExit: function () { location.href = 'camera.cgi'; },
