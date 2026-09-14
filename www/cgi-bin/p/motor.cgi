@@ -40,17 +40,29 @@ has_cap() {
 }
 %>
 <% if [ "$ptz_backend" = "pelco" ]; then %>
+<!-- Why the pads will not move anything. Set when the camera declares a
+     motorized lens (ptz_control) but majestic has no motor driver to serve
+     it, which is one install away and worth saying: the alternative is a
+     camera that looks like it never had PTZ at all.
+
+     A sentence, so it belongs outside the pads and not in one. Both are CSS
+     grids with no width of their own: prose put inside either is a grid item
+     and sizes the track it lands in, which is how this line once took a
+     quarter of the picture. preview-ptz.js moves it into #mj-toasts instead,
+     where the standing explanations already live -- the served-channel
+     message is the same shape, true for the whole session with nothing to
+     time out -- and that stack bounds its own width.
+
+     Emitted for the pelco backend as a whole rather than inside the
+     zoom/focus group, so a camera whose ptz_caps names only pan/tilt gets
+     the explanation too. Pressing a button says the same thing -- j/ptz.cgi
+     answers with this text -- so nothing is lost if the relocation never
+     happens. -->
+<% if [ -n "$ptz_reason" ]; then %>
+<p id="mj-ptz-why" class="mj-adapt-toast mj-ptz-why small" role="status" hidden><%= $ptz_reason %></p>
+<% fi %>
 <% if has_cap zoom || has_cap focus; then %>
 <div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom and focus" hidden>
-	<!-- Why the buttons below will not move anything. Set when the camera
-	     declares a motorized lens (ptz_control) but majestic has no motor
-	     driver to serve it, which is one install away and worth saying: the
-	     alternative is a camera that looks like it never had PTZ at all.
-	     `small` only — a class the stylesheet already carries, so the pad
-	     gains no new CSS. -->
-	<% if [ -n "$ptz_reason" ]; then %>
-	<p class="small" role="status"><%= $ptz_reason %></p>
-	<% fi %>
 	<% if has_cap zoom; then %>
 	<span class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">

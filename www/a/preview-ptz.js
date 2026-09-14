@@ -18,6 +18,12 @@
 (function () {
 	const pad = $('#mj-ptz-pad'), fn = $('#mj-ptz-fn');
 	const mount = $('#mj-ptz'), stage = $('#mj-stage');
+	// The reason the pads will not move anything, when there is one, joins the
+	// toast stack — it is a sentence, and everything below is a grid of 40px
+	// buttons. Independent of the mount: the stack bounds its own width and
+	// sits under the chip, so this shows whether or not a pad does.
+	const why = $('#mj-ptz-why'), toasts = $('#mj-toasts');
+	if (why && toasts) { toasts.appendChild(why); why.hidden = false; }
 	// Either piece may be absent on its own: ptz_caps can leave a camera
 	// with only the zoom/focus group (an XM zoom block has no pan/tilt) —
 	// the pad must not be the thing the whole mount hinges on.
