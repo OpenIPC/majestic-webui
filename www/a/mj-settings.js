@@ -1777,6 +1777,23 @@
 	// fields go through Save, so none of them is a lit toggle on the bar; the
 	// only thing added there is Draw regions, which is a tool rather than a
 	// setting, exactly as Zoom to an area is on the Live View page.
+	// What the live-detection overlay says underneath the picture. Four
+	// states, and they are deliberately not three: a camera with nothing to
+	// report and a camera that has stopped reporting look identical on screen
+	// and mean opposite things, so they get different words.
+	function paintLiveNote(el, n) {
+		if (!el || !n) return;
+		if (n.state === 'waiting') { el.textContent = ''; return; }
+		if (n.state === 'stale') {
+			el.textContent = 'detector quiet for ' +
+				Math.round(n.age / 1000) + 's';
+			return;
+		}
+		if (n.state === 'quiet') { el.textContent = 'nothing moving'; return; }
+		const more = n.total > n.n ? ' of ' + n.total : '';
+		el.textContent = n.n + more + (n.n === 1 ? ' detection' : ' detections');
+	}
+
 	function renderMotion(form) {
 		const fields = sectionFields('motionDetect');
 
@@ -1858,6 +1875,29 @@
 			foot.appendChild(rall);
 			strip.appendChild(foot);
 			if (!strip.querySelector('.mj-live-row')) strip.remove();
+		}
+
+		// The camera's own detections, live, over the same picture the regions
+		// are drawn on. Mounted BEFORE the region editor so its layer sits
+		// underneath: the editor hit-tests its gestures by DOM order, and a
+		// layer above it that swallowed a press would stop new regions being
+		// drawn (the detection layer is pointer-transparent, but the z-order
+		// is the contract, not the CSS).
+		if (preview && window.MajesticAnalytics && window.MajesticRegion) {
+			const live = window.MajesticAnalytics.mount(preview, {
+				// How a main-stream detection lands on the stream being shown,
+				// from the same report the region outlines use. Undefined
+				// until the camera has answered, which means "do not draw
+				// yet" rather than "no mapping": an outline placed by a guess
+				// moves once the answer arrives, and a box that jumps reads
+				// as the camera being wrong about where the movement was.
+				view: () => camRects.ok && !camRects.known
+					? undefined
+					: window.MajesticRegion.view(
+						camRects.group, camRects.views, 0, preview.stream()),
+				onNote: (n) => paintLiveNote(note, n),
+			});
+			if (live) state.liveCleanup.push(() => live.destroy());
 		}
 
 		if (roiField && preview && window.MajesticRegion) {

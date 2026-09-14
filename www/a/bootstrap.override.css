@@ -2647,6 +2647,43 @@ button.mj-osd-chip,
 		padding-inline: 0.85rem;
 	}
 }
+/* ── Live detections on the picture ──────────────────────────────────────
+   What the camera's detectors are seeing right now, as opposed to the regions
+   below, which are what the operator asked it to watch. The two share this
+   overlay and must not be confused for one another on sight, so the regions
+   are the solid primary outline they always were and a detection is a thinner
+   dashed one in its own hue.
+
+   Strictly pointer-transparent. The region editor underneath hit-tests its
+   gestures by DOM order, and a layer over it that took a press would stop new
+   regions being drawn at all. */
+.mj-an-layer {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.mj-an-box {
+	position: absolute;
+	border: 1px dashed rgba(var(--bs-warning-rgb), 0.95);
+	background: rgba(var(--bs-warning-rgb), 0.10);
+	border-radius: 2px;
+	pointer-events: none;
+	/* The bus publishes a few times a second against a picture at twenty-odd,
+	   so a box that appeared and vanished instantly would read as a flicker
+	   rather than as a detection. The store holds each one for its linger;
+	   this softens the two edges of that hold. */
+	transition: opacity 120ms linear;
+}
+
+/* Classified detections get their own colour, so a face is not read as motion
+   and the reverse. Everything a detector has not classified stays the warning
+   hue above — the honest default, since none of them classifies today. */
+.mj-an-box[data-src="face"] {
+	border-color: rgba(var(--bs-info-rgb), 0.95);
+	background: rgba(var(--bs-info-rgb), 0.10);
+}
+
 /* ── Motion detection: regions on the picture ────────────────────────────
    What replaced the Visual editor's iframe. Everything here lives inside
    mj-preview.js's stage — the rectangles and the drag catcher on its overlay
