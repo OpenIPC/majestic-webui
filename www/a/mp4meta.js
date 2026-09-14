@@ -9,12 +9,12 @@
 //   MEDIA_ERR_DECODE at t=0, and accepts the identical track alongside
 //   H.265. Safari on macOS 14 accepts both. Chrome accepts everything.
 //
-// That is measured, not inferred — OpenIPC/safari-hevc-qa runs every fixture
-// paired against the same recording without the track, on both runners, and
-// a synthetic H.265 clip from the same ffmpeg invocation as the H.264 one
-// passes where the H.264 fails, which is what pins it to the codec rather
-// than to the file's provenance. majestic records H.264 by default on most
-// cameras, so this is not a corner.
+// That is measured, not inferred: every fixture was played in real Safari on
+// both macOS versions, paired against the same recording WITHOUT the track, so
+// each result has its own control. A synthetic H.265 clip from the same
+// ffmpeg invocation as the H.264 one passes where the H.264 fails, which is
+// what pins the fault to the codec rather than to the file's provenance.
+// majestic records H.264 by default on most cameras, so this is not a corner.
 //
 // So the player removes the track on the way in. The file keeps it — that is
 // the whole point of storing it — and the picture plays everywhere.
@@ -90,9 +90,19 @@
 		for (const k of kids) {
 			if (k[0] !== 'trak') continue;
 			const tkhd = child(u8, k[1] + 8, k[2], 'tkhd');
-			// tkhd v0: version/flags 4, creation 4, modification 4, then the id.
-			if (!tkhd || tkhd[1] + 24 > tkhd[2]) continue;
-			if (be32(u8, tkhd[1] + 20) === META_TRACK_ID) { trak = k; break; }
+			if (!tkhd || tkhd[1] + 13 > tkhd[2]) continue;
+			// After the 8-byte box header and the 4-byte version/flags come
+			// creation and modification times, 32 bits each in a version-0
+			// tkhd and 64 in a version 1, and then the track id. majestic
+			// writes version 0, but this reads whatever it is handed and
+			// mp4crypt.js already carries both offsets — a stripper that
+			// assumed version 0 would miss the trak on a version-1 header
+			// while still finding its trex by track id, and hand MediaSource
+			// an init segment declaring half a track.
+			const v1 = u8[tkhd[1] + 8] === 1;
+			const idAt = tkhd[1] + (v1 ? 28 : 20);
+			if (idAt + 4 > tkhd[2]) continue;
+			if (be32(u8, idAt) === META_TRACK_ID) { trak = k; break; }
 		}
 
 		const mvex = child(u8, moov[1] + 8, moov[2], 'mvex');
