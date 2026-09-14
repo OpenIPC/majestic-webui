@@ -40,17 +40,31 @@ has_cap() {
 }
 %>
 <% if [ "$ptz_backend" = "pelco" ]; then %>
+<!-- Why the pads will not move anything. Set when the camera declares a
+     motorized lens (ptz_control) but majestic has no motor driver to serve
+     it, which is one install away and worth saying: the alternative is a
+     camera that looks like it never had PTZ at all.
+
+     A sentence, so it goes to the stage's toast stack and not inside a pad.
+     It used to be a <p class="small"> in #mj-ptz-fn, which is a two-column
+     grid of 3.875rem buttons: a paragraph dropped in there is a grid ITEM,
+     both `1fr` columns sized to its own max-content, and the pad rendered
+     1181x250 on a 1280px page -- 27% of the picture, against 134x211 when
+     the driver is present. `small` was indeed a class the stylesheet already
+     carried; what it could not carry was the parent's formatting context.
+
+     preview-ptz.js moves it into #mj-toasts, where the standing explanations
+     already live (the served-channel message is the same shape: true for the
+     whole session, nothing to time out). Emitted for the pelco backend as a
+     whole rather than inside the zoom/focus group, so a camera whose
+     ptz_caps names only pan/tilt gets the explanation too. Pressing a button
+     says the same thing -- j/ptz.cgi answers with this text -- so nothing is
+     lost if the relocation never happens. -->
+<% if [ -n "$ptz_reason" ]; then %>
+<p id="mj-ptz-why" class="mj-adapt-toast mj-ptz-why small" role="status" hidden><%= $ptz_reason %></p>
+<% fi %>
 <% if has_cap zoom || has_cap focus; then %>
 <div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom and focus" hidden>
-	<!-- Why the buttons below will not move anything. Set when the camera
-	     declares a motorized lens (ptz_control) but majestic has no motor
-	     driver to serve it, which is one install away and worth saying: the
-	     alternative is a camera that looks like it never had PTZ at all.
-	     `small` only — a class the stylesheet already carries, so the pad
-	     gains no new CSS. -->
-	<% if [ -n "$ptz_reason" ]; then %>
-	<p class="small" role="status"><%= $ptz_reason %></p>
-	<% fi %>
 	<% if has_cap zoom; then %>
 	<span class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">

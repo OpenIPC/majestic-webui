@@ -3446,6 +3446,16 @@ button.mj-osd-chip,
    document order is what puts the served message below the adaptation one —
    so the class stays on the markup as a label and carries no rule. */
 
+/* The PTZ toast (p/motor.cgi, relocated by preview-ptz.js) is the one that
+   carries no ×: the driver is missing until somebody installs it, there is no
+   state to clear, and a message that came back on the next page load would
+   only look broken. So it takes back the room the corner button needs and
+   stops offering a pointer for a click that does nothing. */
+.mj-ptz-why {
+	padding-right: 0.6rem;
+	cursor: default;
+}
+
 /* ── on-video chrome ────────────────────────────────────────────────────────
    The same vocabulary the Live adjustments deck uses — black glass, micro-caps
    labels, a lit indicator where there is state, stroked 20px icons — so the
