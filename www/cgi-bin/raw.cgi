@@ -16,7 +16,7 @@
 			<div class="card-body">
 				<% card_head "Capture" "the sensor's own data, before the image pipeline" %>
 				<p>
-					<button type="button" class="btn btn-primary" id="raw-capture">Capture a frame</button>
+					<button type="button" class="btn btn-primary" id="raw-capture" disabled>Capture a frame</button>
 					<button type="button" class="btn btn-secondary" id="raw-download" disabled>Download</button>
 					<button type="button" class="btn btn-secondary" id="raw-open" disabled>Open editor</button>
 				</p>

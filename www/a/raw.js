@@ -68,8 +68,15 @@
 		});
 	}
 
+	// Nothing is offered until the camera has answered. The button ships
+	// disabled in the markup for the same reason: a visitor who pressed it in
+	// the first moments would have asked a camera that may not serve raw at
+	// all.
+	let mayCapture = false;
+
 	function sync() {
 		const has = selected >= 0 && shots[selected];
+		$('raw-capture').disabled = !mayCapture;
 		$('raw-download').disabled = !has;
 		const open = $('raw-open');
 		if (open) open.disabled = !has || !window.MajesticRaw || !MajesticRaw.available;
@@ -142,7 +149,11 @@
 				'time it is opened, and this camera has no route out. Capture and download ' +
 				'still work.' + (e && e.message === 'unsupported-browser'
 					? ' This browser is also missing what it needs to run.' : ''),
-				'Try again', function () { $('raw-note').hidden = true; openEditor(); });
+				'Try again', function () {
+					$('raw-note').hidden = true;
+					MajesticRaw.retry();
+					openEditor();
+				});
 			sync();
 		});
 	}
@@ -157,16 +168,26 @@
 		// What the camera says about itself. Until it answers, the page claims
 		// nothing: a config that did not arrive is not a camera without raw.
 		MajesticRaw.support().then(function (s) {
-			$('raw-mode').textContent = s.mode === null ? 'not available' : s.mode;
-			if (s.mode === null) {
+			if (s.state === 'unknown') {
+				// The camera did not answer. That is a fact about one request,
+				// not about the camera, so nothing is claimed and the button is
+				// offered: pressing it asks the camera directly, which is a
+				// better answer than any guess made here.
+				$('raw-mode').textContent = '—';
+				mayCapture = true;
+			} else if (s.state === 'absent') {
+				$('raw-mode').textContent = 'not available';
 				note('info', 'This firmware does not serve raw frames. Raw capture needs a ' +
 					'HiSilicon or Goke part whose SDK exposes the sensor’s own data.');
-				$('raw-capture').disabled = true;
-			} else if (!s.serves) {
+			} else if (s.state === 'off') {
+				$('raw-mode').textContent = s.mode;
 				note('info', 'Raw capture is switched off for this camera. Turn it on in ' +
 					'Settings to capture frames.');
-				$('raw-capture').disabled = true;
+			} else {
+				$('raw-mode').textContent = s.mode;
+				mayCapture = true;
 			}
+			sync();
 		});
 	});
 })();
