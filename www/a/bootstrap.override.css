@@ -6867,6 +6867,26 @@ body > main > .container > form > .mj-foot {
 	margin: 0 0 1.1rem;
 }
 
+/* The line above the chip holds two sentences in ONE grid cell: the resting
+   one, hidden and carrying the height, and whichever one is live on top of it.
+   The box is as tall as the taller of the two at whatever width the column
+   happens to be, so moving the pointer down the category list cannot move the
+   chip — which is the thing being pointed at. A single paragraph whose text
+   was swapped looked right and was not: the resting sentence wraps to two
+   lines where most lit ones fit on one. */
+.mj-pins-intro {
+	display: grid;
+}
+
+.mj-pins-intro > * {
+	grid-area: 1 / 1;
+	margin: 0;
+}
+
+.mj-pins-intro-rest {
+	visibility: hidden;
+}
+
 .mj-pins-warn {
 	display: flex;
 	gap: 0.75rem;
@@ -7310,4 +7330,100 @@ body > main > .container > form > .mj-foot {
 	font-style: normal;
 	font-size: 0.625rem;
 	color: var(--bs-tertiary-color);
+}
+
+/* ── lighting up what a category can go on ────────────────────────────────
+   Hovering "Sensor bus" has to answer "which pins, then?" on the drawing
+   itself, at a glance and without a click. Every lead carries a class per
+   family it can be, so this is one attribute on the wrapper and no repaint —
+   a pointer crossing the six rows would otherwise rebuild ninety-three
+   buttons six times over.
+
+   Dimming the rest rather than only brightening the few is what makes it
+   readable: on a package of ninety-three leads, eight brighter ones are lost
+   among the others, and eight un-dimmed ones are not. */
+
+.mj-pins[data-lit] .mj-pin-lead {
+	opacity: 0.2;
+	transition: opacity var(--mj-ease);
+}
+
+.mj-pins[data-lit="gpio"] .mj-pin-lead.has-gpio,
+.mj-pins[data-lit="pwm"] .mj-pin-lead.has-pwm,
+.mj-pins[data-lit="i2c"] .mj-pin-lead.has-i2c,
+.mj-pins[data-lit="spi"] .mj-pin-lead.has-spi,
+.mj-pins[data-lit="uart"] .mj-pin-lead.has-uart,
+.mj-pins[data-lit="sd"] .mj-pin-lead.has-sd {
+	opacity: 1;
+}
+
+/* A ring on the pad as well as the contrast, because on a phone the whole
+   lead is a few pixels wide and opacity alone is a weak signal. */
+.mj-pins[data-lit="gpio"] .mj-pin-lead.has-gpio .mj-pin-pad,
+.mj-pins[data-lit="pwm"] .mj-pin-lead.has-pwm .mj-pin-pad,
+.mj-pins[data-lit="i2c"] .mj-pin-lead.has-i2c .mj-pin-pad,
+.mj-pins[data-lit="spi"] .mj-pin-lead.has-spi .mj-pin-pad,
+.mj-pins[data-lit="uart"] .mj-pin-lead.has-uart .mj-pin-pad,
+.mj-pins[data-lit="sd"] .mj-pin-lead.has-sd .mj-pin-pad {
+	box-shadow: 0 0 0 2px var(--bs-body-bg), 0 0 0 4px var(--bs-primary);
+}
+
+/* The number of a lit pin is the thing you are about to write down, so it
+   comes forward with the pad rather than staying at label grey. */
+.mj-pins[data-lit="gpio"] .mj-pin-lead.has-gpio .mj-pin-lbl,
+.mj-pins[data-lit="pwm"] .mj-pin-lead.has-pwm .mj-pin-lbl,
+.mj-pins[data-lit="i2c"] .mj-pin-lead.has-i2c .mj-pin-lbl,
+.mj-pins[data-lit="spi"] .mj-pin-lead.has-spi .mj-pin-lbl,
+.mj-pins[data-lit="uart"] .mj-pin-lead.has-uart .mj-pin-lbl,
+.mj-pins[data-lit="sd"] .mj-pin-lead.has-sd .mj-pin-lbl {
+	color: var(--bs-body-color);
+	font-weight: 700;
+}
+
+/* The row doing the lighting. Pressed — a click holds it — reads stronger
+   than hovered, because the pointer has left it by then. */
+.mj-pins-kind {
+	cursor: pointer;
+	border-radius: var(--bs-border-radius);
+	transition: background-color var(--mj-ease), color var(--mj-ease);
+}
+
+.mj-pins-kind:hover,
+.mj-pins-kind:focus-visible {
+	background: var(--bs-tertiary-bg);
+	color: var(--bs-body-color);
+}
+
+.mj-pins-kind.is-lit {
+	background: var(--bs-tertiary-bg);
+	color: var(--bs-body-color);
+}
+
+.mj-pins-kind[aria-pressed="true"] {
+	box-shadow: inset 2px 0 0 var(--bs-primary);
+}
+
+.mj-pins-kind:focus-visible {
+	outline: 2px solid var(--bs-primary);
+	outline-offset: -2px;
+}
+
+/* The line above the chip carries the answer in words while a family is lit,
+   so it never reads as a decoration whose meaning you have to guess. */
+.mj-pins[data-lit] .mj-pins-intro-live {
+	color: var(--bs-body-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mj-pins .mj-pin-lead,
+	.mj-pins-kind {
+		transition: none;
+	}
+}
+
+/* The pin you have open stays findable while another family is lit. Dimmed to
+   the same 0.2 as the rest it would vanish, and a page that loses your place
+   the moment you ask a question about it is a page you stop asking. */
+.mj-pins[data-lit] .mj-pin-lead.mj-pin-sel {
+	opacity: 0.55;
 }

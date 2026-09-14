@@ -150,6 +150,97 @@ group('which wire, and which bus');
 		samples.every(c => !manual.test(label(c)) && !manual.test(hint(c))));
 }
 
+group('lighting up what a category can go on');
+
+// Hovering a category has to light the pins it could actually go on. A
+// highlight that lights the wrong ones looks exactly like one that lights the
+// right ones, which is why the set is arithmetic over the camera's answer
+// rather than something the DOM works out as it goes.
+{
+	// A slice of what a hi3516ev300 reports: pin 3 carries SCL and pin 4 SDA of
+	// the same bus, so an I²C sensor needs both, and pin 12 is on a different
+	// bus entirely — the case a family name alone cannot tell apart.
+	const pads = [
+		{ pin: 1, can: [{ id: 'gpio', use: 'gpio' },
+			{ id: 'uart0.rx', use: 'uart', bus: 0, line: 'RX' }] },
+		{ pin: 3, can: [{ id: 'gpio', use: 'gpio' },
+			{ id: 'pwm0', use: 'pwm', bus: 0 },
+			{ id: 'i2c1.scl', use: 'i2c', bus: 1, line: 'SCL' }] },
+		{ pin: 4, can: [{ id: 'gpio', use: 'gpio' },
+			{ id: 'i2c1.sda', use: 'i2c', bus: 1, line: 'SDA' }] },
+		{ pin: 12, can: [{ id: 'gpio', use: 'gpio' },
+			{ id: 'i2c2.sda', use: 'i2c', bus: 2, line: 'SDA' }] },
+		{},   // a pad that is the camera's own: no number, nothing to light
+	];
+	const of = (use) => PINS.padsFor(pads, use).pads.map(p => p.pin);
+
+	check('a family lights exactly the pins that offer it',
+		JSON.stringify(of('i2c')) === JSON.stringify([3, 4, 12]),
+		JSON.stringify(of('i2c')));
+	check('and never a pad the owner cannot use',
+		PINS.padsFor(pads, 'gpio').pads.every(p => p.pin != null));
+	check('a family only one pin has lights only that one',
+		JSON.stringify(of('pwm')) === JSON.stringify([3]), JSON.stringify(of('pwm')));
+	check('a family this chip does not have lights nothing',
+		of('spi').length === 0);
+
+	// The buses are what stops somebody wiring SDA on one to SCL on another.
+	check('the buses a family reaches are listed, in order and without repeats',
+		JSON.stringify(PINS.padsFor(pads, 'i2c').buses) === JSON.stringify([1, 2]),
+		JSON.stringify(PINS.padsFor(pads, 'i2c').buses));
+	check('a family with no bus number reports none',
+		PINS.padsFor(pads, 'gpio').buses.length === 0);
+
+	// Whatever the camera sends, this runs over it.
+	check('an empty answer is not an error', PINS.padsFor([], 'i2c').pads.length === 0);
+	check('and neither is a missing one', PINS.padsFor(null, 'i2c').pads.length === 0);
+}
+
+group('the line above the chip never changes height');
+
+// The chip must not move as the pointer goes down the category list. It did:
+// one paragraph whose text was swapped wraps to two lines at rest and one line
+// while lit, so every row the pointer crossed shifted the drawing it was
+// pointing at. The box now holds the resting sentence and the live one in the
+// same grid cell, which makes its height the taller of the two — and that is
+// only constant while no lit sentence is longer than the resting one.
+{
+	// The worst case this page can produce: the longest family name, the most
+	// pins, and every bus the chip could have.
+	const worst = [];
+	for (let i = 0; i < 40; i++) {
+		worst.push({ pin: i, can: [
+			{ id: 'gpio', use: 'gpio' },
+			{ id: 'i2c' + (i % 8) + '.sda', use: 'i2c', bus: i % 8, line: 'SDA' },
+			{ id: 'sd' + (i % 4) + '.clk', use: 'sd', bus: i % 4, line: 'CLK' },
+			{ id: 'uart' + (i % 5) + '.rx', use: 'uart', bus: i % 5, line: 'RX' },
+			{ id: 'spi' + (i % 4) + '.mosi', use: 'spi', bus: i % 4, line: 'MOSI' },
+			{ id: 'pwm' + (i % 8), use: 'pwm', bus: i % 8 },
+		] });
+	}
+	let longest = '';
+	PINS.USES.forEach((u) => {
+		const line = PINS.litSentence(u.k, worst);
+		if (line.length > longest.length) longest = line;
+	});
+	check('no lit sentence is longer than the resting one, even at the worst ' +
+		'the page can produce',
+		longest.length <= PINS.RESTING.length,
+		longest.length + ' > ' + PINS.RESTING.length + ': ' + longest);
+
+	// And it still says the useful thing.
+	const line = PINS.litSentence('i2c', [
+		{ pin: 3, can: [{ id: 'i2c1.scl', use: 'i2c', bus: 1, line: 'SCL' }] },
+		{ pin: 4, can: [{ id: 'i2c1.sda', use: 'i2c', bus: 1, line: 'SDA' }] },
+	]);
+	check('and it names the family, the count and the bus',
+		line.indexOf('Sensor bus') === 0 && line.indexOf('2 pins') > 0 &&
+		line.indexOf('bus 1') > 0, line);
+	check('one pin is a pin, not 1 pins',
+		PINS.litSentence('gpio', [{ pin: 1, can: [{ id: 'gpio', use: 'gpio' }] }])
+			.indexOf('1 pin on') > 0);
+}
+
 group('the words on the page');
 
 // The six things a person can pick, and the vocabulary rule that governs them:
