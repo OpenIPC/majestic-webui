@@ -3,8 +3,8 @@
 // Some majestic settings are requests rather than decisions: the camera reads
 // them, finds the thing they depend on switched off, substitutes something it
 // can do, and carries on. `outgoing.substream` is the one this was written for
-// -- it publishes the second stream only when `video1.enabled` is true, and
-// with video1 off the camera publishes the MAIN stream instead.
+// -- it published the second stream only when `video1.enabled` is true, and
+// with video1 off the camera published the MAIN stream instead.
 //
 // That substitution is right. Publishing the main stream beats publishing
 // nothing, the setting is a legitimate thing to want, and it starts working
@@ -15,6 +15,13 @@
 // change -- with video1 off both positions mean the same thing -- and reported
 // that it made no difference, which reads as the setting not mattering rather
 // than as it being inert.
+//
+// Past tense, because that key is gone: the stream a destination publishes
+// belongs to the destination, so it is a member of a row in the destinations
+// list now and the camera says the same thing in that member's own hint. The
+// mechanism here is unchanged and still needed -- `records.substream` carries
+// the identical condition, the day/night keys carry the other shape below, and
+// a camera running an older majestic still sends the outgoing one.
 //
 // majestic now ships the condition in its schema, beside `x-live` and
 // `x-reload`:

@@ -287,8 +287,15 @@ group('a list of objects is one leaf, not one per member');
 	};
 	// A key the camera declares but has superseded is offered to nobody: the
 	// list replaced the single Address, so drawing both is a question about
-	// which one wins. It stays in the schema for the API's sake, which is why
-	// the tree has to be told rather than left to infer it from absence.
+	// which one wins. The tree has to be TOLD that, rather than left to infer
+	// it from absence, because the key is still in the schema being sent.
+	//
+	// Current majestic no longer sends it at all -- the singular outgoing
+	// settings are deprecated and converted onto the rows on load, so nothing
+	// in that section is hidden any more. This stays exactly as it is: the
+	// page talks to whatever daemon the camera is running, and one that
+	// predates the conversion still marks the old Address hidden and still
+	// expects a page not to draw it.
 	s.properties.outgoing.properties.server['x-hidden'] = true;
 	const t = TREE.build(s, {}, new Set());
 	const dots = allDots(t, s, new Set());
