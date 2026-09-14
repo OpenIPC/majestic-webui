@@ -1822,8 +1822,12 @@
 		form.appendChild(head);
 
 		if (!window.MajesticPins) {
+			// A dead end otherwise: this leaf draws no form, so there is no
+			// fallback control to fall back TO. Say what is still reachable.
 			const p = el('p', 'mj-pins-empty');
-			p.textContent = 'The pin map did not load.';
+			p.textContent = 'The pin map did not load, so there is nothing to ' +
+				'draw. Reload the page; what each pin is set to is still ' +
+				'readable at /api/v1/pinmux.';
 			form.appendChild(p);
 			return;
 		}

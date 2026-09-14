@@ -6,8 +6,8 @@
 // and they know what they attached. They do not know, and are never asked,
 // which register holds the selector for that pad. Nothing on this page is a
 // register address, a selector value or a name out of the chip's manual: the
-// camera does that translation in src/pinmux.c and hands back the six words a
-// person who solders already uses.
+// camera does that translation behind /api/v1/pinmux and hands back the words
+// a person who solders already uses.
 //
 // It is deliberately NOT the Day / Night pin map. ircut-map.js draws the banks
 // the kernel reports as rows of tiles, and says at the top why it is not a
@@ -165,18 +165,38 @@
 		let left = 0;            // seconds of it remaining
 		let tick = null, beat = null;
 		let note = '';           // the line the change bar shows
+		// Set by destroy(). Every callback that could start or keep a window
+		// open checks it: a try whose reply lands after the section has gone
+		// would otherwise begin a heartbeat on a detached page and hold the
+		// pads open with nobody watching — which is the one state the window
+		// exists to end.
+		let dead = false;
 
 		const root = el('div', 'mj-pins');
 		host.appendChild(root);
 
+		// Through the shared wrapper, like every other page: it turns a 401
+		// into the login redirect rather than letting a signed-out session
+		// parse an error body as pin data, and it carries the header the
+		// camera's cross-site check looks for.
+		//
+		// A refusal now arrives as a status as well as a body, so this reads
+		// the body either way and never resolves without one — a rejected
+		// promise with no catch left the countdown running and the bar
+		// claiming a trial that was not there.
+		const FETCH = (typeof window === 'object' && window.apiFetch) || fetch;
+
 		function post(action, pins) {
 			const body = pins ? JSON.stringify({ pins: pins }) : null;
-			return fetch(API + '?do=' + action, {
+			return FETCH(API + '?do=' + action, {
 				method: 'POST',
 				headers: body ? { 'Content-Type': 'application/json' } : {},
 				body: body,
 				credentials: 'same-origin',
-			}).then((r) => r.json());
+			}).then(
+				(r) => r.json().catch(() => ({ error: 'the camera answered with '
+					+ (r.status || 'nothing this page could read') })),
+				(e) => ({ error: 'the camera could not be reached: ' + e.message }));
 		}
 
 		// What the camera has been told a pin is: the edit on this page if
@@ -232,6 +252,7 @@
 		// why nobody watching ever sees the window expire. It fires only when
 		// the thing that would have noticed is gone.
 		function startClocks(seconds, beatSeconds) {
+			if (dead) { post('undo').catch(() => {}); return; }
 			stopClocks();
 			trying = true;
 			left = seconds;
@@ -243,16 +264,18 @@
 			}, 1000);
 			beat = setInterval(() => {
 				post('beat').then((r) => {
+					if (dead) return;
 					if (!r || !r.alive) { stopClocks(); trying = false; refresh(); return; }
 					left = r.seconds;
-				}).catch(() => {});
+				});
 			}, Math.max(1, beatSeconds || 10) * 1000);
 		}
 
 		function refresh() {
-			return fetch(API, { credentials: 'same-origin' })
+			return FETCH(API, { credentials: 'same-origin' })
 				.then((r) => r.json())
 				.then((d) => {
+					if (dead) return;
 					doc = d;
 					if (sel == null) {
 						const first = (d.pads || []).find((p) => p.pin != null);
@@ -261,6 +284,7 @@
 					paint();
 				})
 				.catch((e) => {
+					if (dead) return;
 					root.textContent = '';
 					root.appendChild(el('p', 'mj-pins-empty',
 						'The camera did not answer: ' + e.message));
@@ -524,13 +548,14 @@
 					stopClocks();
 					trying = false;
 					note = '';
-					post('undo').then(refresh);
+					post('undo').then(() => { if (!dead) refresh(); });
 				});
 				add('Keep it', 'btn-primary', () => {
 					const list = wholeList();
 					stopClocks();
 					trying = false;
 					post('keep', list).then((r) => {
+						if (dead) return;
 						note = r && r.kept ? 'Saved. These pins come back this way after a reboot.'
 							: 'Not saved: ' + ((r && r.error) || 'the camera refused');
 						if (r && r.kept) pending = {};
@@ -551,6 +576,7 @@
 			add('Try it', 'btn-outline-secondary', () => {
 				note = '';
 				post('try', wholeList()).then((r) => {
+					if (dead) return;
 					if (!r || !r.done) {
 						note = 'Not tried: ' + ((r && r.error) || 'the camera refused');
 						paintBar();
@@ -561,6 +587,7 @@
 			}, n === 0 || wholeList().length === 0);
 			add('Keep it', 'btn-primary', () => {
 				post('keep', wholeList()).then((r) => {
+					if (dead) return;
 					note = r && r.kept ? 'Saved. These pins come back this way after a reboot.'
 						: 'Not saved: ' + ((r && r.error) || 'the camera refused');
 					if (r && r.kept) pending = {};
@@ -598,7 +625,8 @@
 					'was never kept. Whatever was on those pins took it down.');
 				const b = el('button', 'btn btn-sm btn-outline-secondary', 'Dismiss');
 				b.type = 'button';
-				b.addEventListener('click', () => post('forget').then(refresh));
+				b.addEventListener('click', () =>
+					post('forget').then(() => { if (!dead) refresh(); }));
 				warn.appendChild(b);
 				root.appendChild(warn);
 			}
@@ -639,13 +667,16 @@
 
 		return {
 			destroy: () => {
+				dead = true;
 				stopClocks();
 				if (ro) ro.disconnect();
 				else window.removeEventListener('resize', fit);
 				// A window left open is one nothing is watching. Put the pads
 				// back rather than leave the camera holding a change whose page
-				// has gone.
-				if (trying) post('undo').catch(() => {});
+				// has gone. Sent unconditionally: a try still in flight would
+				// not have set `trying` yet, and its reply lands on a page that
+				// is already gone.
+				post('undo');
 			},
 			refresh: refresh,
 		};
