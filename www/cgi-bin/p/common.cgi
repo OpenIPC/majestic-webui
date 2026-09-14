@@ -672,6 +672,12 @@ update_caminfo() {
 	fw_build=$(grep "GITHUB_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
 	mj_version=$($mj_bin_file -v)
 	uboot_version=$(fw_printenv -n ver)
+	# Which majestic answered the questions below. Not shown anywhere — it is
+	# what lets the next page load tell a cached answer from a stale one; see
+	# caminfo_stale. Empty when the daemon is not running, which is its own
+	# fact and is read as one.
+	mj_pid=$(pidof majestic 2>/dev/null)
+	mj_pid=${mj_pid%% *}
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow | cut -d: -f2)
@@ -808,7 +814,7 @@ update_caminfo() {
 		tz_name="Etc/GMT"; echo "$tz_name" > /etc/timezone
 	fi
 
-	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
+	local variables="flash_size flash_type fw_build fw_variant fw_version mj_pid mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		af_support ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file}
@@ -829,7 +835,49 @@ sysinfo_file=/tmp/webui/sysinfo.txt
 [ ! -d /etc/webui ] && mkdir -p /etc/webui
 [ ! -d /tmp/webui ] && mkdir -p /tmp/webui
 
-[ ! -f $sysinfo_file ] && update_caminfo
+# Some of what update_caminfo caches is not a fact about the camera but an
+# answer the daemon gave -- mj_version, and the whole PTZ/autofocus verdict,
+# which asks majestic whether it can drive the motor wire. Those are good for
+# exactly as long as the majestic instance that gave them, and nothing said so.
+#
+# The cache lives in /tmp, so a reboot cleared it, and that covered the only
+# case anyone hit -- until it didn't: install the motor driver package on a
+# running camera, restart majestic, and the Live page went on telling the
+# operator to install the package they had just installed. The answer was
+# minutes old and from a process that no longer existed. There is no hook to
+# invalidate it from either, the way a save on this page has one: what changed
+# is outside the WebUI entirely, so the cache has to notice by itself.
+#
+# It has to notice for free. Measured on an hi3516ev300, a page load reusing
+# the cache is ~100ms and one that rebuilds it is ~500ms, which is the whole
+# reason the cache exists -- so a check that forks `pidof` (10ms) would spend a
+# tenth of the saving on every page of the UI. The recorded pid turns it into
+# builtins: /proc/<pid>/comm is read without a subshell, and a majestic that
+# restarted is a pid that is gone or is now something else.
+caminfo_stale() {
+	# The path every page takes.
+	if [ -n "$mj_pid" ]; then
+		local comm=""
+		# Grouped, because ash reports an unopenable redirection itself and
+		# does it before the command's own 2> can catch it: a pid that has
+		# since exited would otherwise write "can't open" to the httpd's log
+		# on every page. An unreadable comm leaves it empty, which is the
+		# same answer as a wrong one.
+		{ read comm < "/proc/$mj_pid/comm"; } 2>/dev/null
+		[ "$comm" = "majestic" ] && return 1
+		return 0
+	fi
+	# No pid recorded: a cache written before this existed, or written while
+	# majestic was down. Worth one fork to find out -- and only one, because
+	# a daemon that is still down leaves the record alone rather than paying
+	# 400ms on every page of the UI somebody is using to go and fix it.
+	pidof majestic >/dev/null 2>&1
+}
+
+include $sysinfo_file
+if [ ! -f $sysinfo_file ] || caminfo_stale; then
+	update_caminfo
+fi
 include $sysinfo_file
 
 pagename=$(basename "$SCRIPT_NAME")
