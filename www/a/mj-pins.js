@@ -155,11 +155,43 @@
 		return groups;
 	}
 
+	// What ONE pad can say about a family, which is not always its wire.
+	//
+	// A pad routinely offers the same family more than once, and on this chip's
+	// SD card the two are different wires: pad 34 is DATA0 on slot 0 and DATA3
+	// on slot 1, pad 35 is DATA1 or DATA2, pad 36 the other way round. Writing
+	// each offer over the last left the drawing claiming slot 1's name for
+	// every one of them — so somebody wiring slot 0 would have joined their
+	// card's DATA0 to the pad labelled DATA3 and got nothing, with no clue why.
+	//
+	// So the drawing claims only what is true of the pad WHATEVER choice is
+	// made: the wire where every offer agrees on it, the bus where every offer
+	// agrees on that. Where they do not agree it says nothing — the pad keeps
+	// its number and a neutral ring, and the legend beside the chip is where
+	// the choice is read.
+	function padWire(pad, use) {
+		const offers = ((pad && pad.can) || []).filter((c) => c.use === use);
+		if (!offers.length) return { line: null, bus: null };
+		const line = offers.every((c) => c.line && c.line === offers[0].line)
+			? offers[0].line : null;
+		const bus = offers.every((c) => c.bus === offers[0].bus)
+			? offers[0].bus : null;
+		return { line: line, bus: typeof bus === 'number' ? bus : null };
+	}
+
 	// Which pads a family could go on, and which buses, ports, slots or
 	// channels those pads reach. Pure, and exported, because it is what the
 	// highlight and the sentence above the chip both come from — and a
 	// highlight that lights the wrong pins looks exactly like one that lights
 	// the right ones.
+	//
+	// An answer the camera did not give reads the same here as a family it has
+	// no pins for: an empty set. That is safe ONLY because every caller gates
+	// on the set being non-empty rather than rendering its size — litNow()
+	// refuses to light a family with no pins, so the sentence above the chip
+	// can never say "0 pins on this chip", and paintWires() draws no legend.
+	// Reading the count without that gate would state as a fact something the
+	// camera never said.
 	function padsFor(pads, use) {
 		const mine = (pads || []).filter(
 			(p) => (p.can || []).some((c) => c.use === use));
@@ -294,7 +326,7 @@
 		// the click is for reading the chip afterwards without the pointer
 		// having to stay on the row, and it is the whole of the interaction on
 		// a touch screen, which has no hover at all.
-		let litPinned = null, litHover = null;
+		let litPinned = null, litPointer = null, litFocus = null;
 		let introEl = null, wiresEl = null;
 
 		const root = el('div', 'mj-pins');
@@ -370,7 +402,18 @@
 		// pinned previews the second and goes back to the first on the way out
 		// — a hover that did nothing because something was pinned reads as a
 		// page that has stopped responding.
-		function litNow() { return litHover || litPinned; }
+		// The pointer and the keyboard are tracked apart. Sharing one slot meant
+		// a pointer entering and leaving a second row cleared the highlight off
+		// a row that still had focus.
+		function litNow() {
+			const want = litPointer || litFocus || litPinned;
+			// A family the camera reports no pins for is not lit at all: lighting
+			// it would dim every lead and say "0 pins on this chip", which is a
+			// sentence about nothing. Reachable when a refresh answers with less
+			// than it did while a category is pinned.
+			if (!want) return null;
+			return padsFor((doc && doc.pads) || [], want).pads.length ? want : null;
+		}
 
 		// One row per bus: its name, then each wire and the pin it is on.
 		function paintWires() {
@@ -510,14 +553,24 @@
 			// touched at all — a pointer crossing six rows would otherwise
 			// rebuild ninety-three buttons six times, and the chip has to
 			// answer at a glance.
+			const fams = [];
 			(pad.can || []).forEach((c) => {
-				if (b.className.indexOf(' has-' + c.use) < 0)
-					b.className += ' has-' + c.use;
-				if (c.line) lbl.setAttribute('data-wire-' + c.use, c.line);
+				if (fams.indexOf(c.use) < 0) fams.push(c.use);
+			});
+			fams.forEach((use) => {
+				b.className += ' has-' + use;
+				// Once per FAMILY, not once per offer: a pad that offers one
+				// twice would otherwise have each write over the last, and the
+				// drawing would claim the final one as though it were the only
+				// one.
+				const w = padWire(pad, use);
+				if (w.line) lbl.setAttribute('data-wire-' + use, w.line);
 				// The bus this pad belongs to, as a colour the stylesheet reads
 				// when that family is lit. One rule per family then covers
-				// every bus, rather than one rule per family per bus.
-				b.style.setProperty('--bus-' + c.use, busColour(c.bus));
+				// every bus. A pad that spans two buses takes neither colour:
+				// it belongs to both until somebody chooses.
+				b.style.setProperty('--bus-' + use,
+					w.bus === null ? 'var(--bs-primary)' : busColour(w.bus));
 			});
 
 			const want = currentUse(pad.pin);
@@ -609,15 +662,22 @@
 				// a click holds them lit so the chip can be read with the
 				// pointer somewhere else — and a click is the whole of it on a
 				// touch screen, which has no hover to offer.
-				const light = () => { litHover = u.k; applyLit(); };
-				const unlight = () => {
-					if (litHover === u.k) litHover = null;
+				b.addEventListener('mouseenter', () => {
+					litPointer = u.k;
 					applyLit();
-				};
-				b.addEventListener('mouseenter', light);
-				b.addEventListener('mouseleave', unlight);
-				b.addEventListener('focus', light);
-				b.addEventListener('blur', unlight);
+				});
+				b.addEventListener('mouseleave', () => {
+					if (litPointer === u.k) litPointer = null;
+					applyLit();
+				});
+				b.addEventListener('focus', () => {
+					litFocus = u.k;
+					applyLit();
+				});
+				b.addEventListener('blur', () => {
+					if (litFocus === u.k) litFocus = null;
+					applyLit();
+				});
 				b.addEventListener('click', () => {
 					litPinned = litPinned === u.k ? null : u.k;
 					applyLit();
@@ -912,7 +972,8 @@
 		const onKey = (e) => {
 			if (e.key !== 'Escape' || !litNow()) return;
 			litPinned = null;
-			litHover = null;
+			litPointer = null;
+			litFocus = null;
 			applyLit();
 		};
 		document.addEventListener('keydown', onKey);
@@ -940,7 +1001,7 @@
 
 	const api = { mount: mount, sides: sides, pitchFor: pitchFor, USES: USES,
 		offerLabel: offerLabel, offerHint: offerHint, padsFor: padsFor,
-		wiresFor: wiresFor, busColour: busColour,
+		wiresFor: wiresFor, busColour: busColour, padWire: padWire,
 		WIRE_GUTTER: WIRE_GUTTER, RING_CLEAR: RING_CLEAR,
 		RESTING: RESTING, litSentence: litSentence };
 	if (typeof module === 'object' && module.exports) module.exports = api;

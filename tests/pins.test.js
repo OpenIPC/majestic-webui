@@ -201,9 +201,22 @@ group('lighting up what a category can go on');
 	check('a family with no bus number reports none',
 		PINS.padsFor(pads, 'gpio').buses.length === 0);
 
-	// Whatever the camera sends, this runs over it.
-	check('an empty answer is not an error', PINS.padsFor([], 'i2c').pads.length === 0);
-	check('and neither is a missing one', PINS.padsFor(null, 'i2c').pads.length === 0);
+	// An answer the camera did not give reads the same here as a family it has
+	// no pins for, and that is safe only because every caller gates on the set
+	// being non-empty rather than rendering its size. Nothing may turn either
+	// into a count on screen: a camera that said nothing is not a camera that
+	// said nought.
+	check('a family with no pins yields nothing to light, not a count of none',
+		PINS.padsFor([], 'i2c').pads.length === 0 &&
+		PINS.padsFor([], 'i2c').buses.length === 0);
+	check('and an answer that never arrived yields the same nothing',
+		PINS.padsFor(null, 'i2c').pads.length === 0 &&
+		PINS.padsFor(undefined, 'i2c').pads.length === 0);
+	check('so no sentence is ever composed from an empty set',
+		// litSentence is only reached for a family that HAS pins; asked about
+		// one that has none it would say "0 pins", which is why the caller
+		// gates instead of trusting it.
+		PINS.litSentence('i2c', []).indexOf('0 pins') > 0);
 }
 
 group('the line above the chip never changes height');
@@ -333,6 +346,55 @@ group('a colour per bus');
 	// Beyond the palette it cycles rather than running out; the legend names
 	// every bus, so a repeated colour is a hint that has ended, not a lie.
 	check('beyond the palette it cycles', c(4) === c(0) && c(5) === c(1));
+}
+
+group('a pad that is more than one thing says so by saying nothing');
+
+// THE ONE THAT WOULD HAVE MIS-WIRED SOMEBODY. A pad offers the same family more
+// than once, and on a real hi3516ev300's SD card the two are DIFFERENT wires:
+// pad 34 is DATA0 on slot 0 and DATA3 on slot 1, pad 35 is DATA1 or DATA2, pad
+// 36 the other way round. Written one over the other, the drawing claimed slot
+// 1's name for every one of them — so wiring slot 0 meant joining the card's
+// DATA0 to the pad labelled DATA3.
+//
+// The drawing may claim only what is true whatever choice is made.
+{
+	const pad = (...offers) => ({ pin: 34, can: offers });
+
+	const two = pad(
+		{ id: 'sd0.data0', use: 'sd', bus: 0, line: 'DATA0' },
+		{ id: 'sd1.data3', use: 'sd', bus: 1, line: 'DATA3' });
+	check('a pad that is two different wires names neither',
+		PINS.padWire(two, 'sd').line === null,
+		String(PINS.padWire(two, 'sd').line));
+	check('and belongs to neither bus',
+		PINS.padWire(two, 'sd').bus === null,
+		String(PINS.padWire(two, 'sd').bus));
+
+	// Same wire, two slots: the wire is not in doubt, the slot is.
+	const clk = pad(
+		{ id: 'sd0.clk', use: 'sd', bus: 0, line: 'CLK' },
+		{ id: 'sd1.clk', use: 'sd', bus: 1, line: 'CLK' });
+	check('a pad that is one wire on two buses still names the wire',
+		PINS.padWire(clk, 'sd').line === 'CLK', String(PINS.padWire(clk, 'sd').line));
+	check('but takes neither bus\u2019s colour',
+		PINS.padWire(clk, 'sd').bus === null);
+
+	// The ordinary case still answers.
+	const one = pad({ id: 'i2c1.sda', use: 'i2c', bus: 1, line: 'SDA' });
+	check('a pad that is one thing names it', PINS.padWire(one, 'i2c').line === 'SDA' &&
+		PINS.padWire(one, 'i2c').bus === 1);
+	check('a family the pad does not offer names nothing',
+		PINS.padWire(one, 'spi').line === null && PINS.padWire(one, 'spi').bus === null);
+	check('and neither does nothing at all',
+		PINS.padWire(null, 'i2c').line === null &&
+		PINS.padWire({}, 'i2c').line === null);
+
+	// A wire with no bus number at all — the older parts spell I2C_SDA.
+	const nobus = pad({ id: 'i2c.sda', use: 'i2c', line: 'SDA' });
+	check('a wire with no bus number names the wire and no bus',
+		PINS.padWire(nobus, 'i2c').line === 'SDA' &&
+		PINS.padWire(nobus, 'i2c').bus === null);
 }
 
 group('the words on the page');
