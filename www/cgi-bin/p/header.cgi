@@ -106,6 +106,7 @@ Pragma: no-cache
 								<li><a class="dropdown-item" href="usb.cgi"><% page_label usb %></a></li>
 							<% fi %>
 							<li><a class="dropdown-item" href="stream-urls.cgi"><% page_label stream-urls %></a></li>
+							<li><a class="dropdown-item" href="raw.cgi"><% page_label raw %></a></li>
 							<li><a class="dropdown-item" href="config.cgi"><% page_label config %></a></li>
 						</ul>
 					</li>
