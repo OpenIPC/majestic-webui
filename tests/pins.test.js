@@ -241,6 +241,90 @@ group('the line above the chip never changes height');
 			.indexOf('1 pin on') > 0);
 }
 
+group('which wire, with which');
+
+// The drawing can say a lit pad is TX. It cannot say THIS TX goes with THAT RX
+// — and SDA on one bus wired to SCL on another is not a bus at all, which is
+// the mistake the legend exists to prevent.
+{
+	const pads = [
+		{ pin: 12, can: [{ id: 'uart0.tx', use: 'uart', bus: 0, line: 'TX' }] },
+		{ pin: 13, can: [{ id: 'uart0.rx', use: 'uart', bus: 0, line: 'RX' }] },
+		{ pin: 44, can: [{ id: 'uart1.rts', use: 'uart', bus: 1, line: 'RTS' }] },
+		{ pin: 40, can: [{ id: 'uart1.tx', use: 'uart', bus: 1, line: 'TX' }] },
+		{ pin: 41, can: [{ id: 'uart1.rx', use: 'uart', bus: 1, line: 'RX' }] },
+		{},                                   // the camera's own: no pin, no row
+		{ pin: 9, can: [{ id: 'gpio', use: 'gpio' }] },  // a family with no wire
+	];
+	const g = PINS.wiresFor(pads, 'uart');
+
+	check('one row per port, in order', g.length === 2 && g[0].bus === 0 && g[1].bus === 1,
+		JSON.stringify(g.map(x => x.bus)));
+	check('every wire of a port appears once, with the pins that offer it',
+		JSON.stringify(g[1].wires.map(w => w.line + ' ' + w.pins.join('/'))) ===
+		JSON.stringify(['TX 40', 'RX 41', 'RTS 44']),
+		JSON.stringify(g[1].wires));
+	check('and the pair reads in the order it is wired, not the order it arrived',
+		g[1].wires[0].line === 'TX' && g[1].wires[1].line === 'RX');
+	check('a pad the owner cannot use contributes nothing',
+		g.every(x => x.wires.every(w => w.pins.every(n => n != null))));
+
+	// The real hi3516ev300 case: one port's TX is on two different pads. That
+	// is a choice of pad, not two transmit wires, and read as two it looks like
+	// a port with four wires where the chip has two.
+	const twice = PINS.wiresFor([
+		{ pin: 3, can: [{ id: 'uart1.tx', use: 'uart', bus: 1, line: 'TX' }] },
+		{ pin: 60, can: [{ id: 'uart1.tx', use: 'uart', bus: 1, line: 'TX' }] },
+		{ pin: 4, can: [{ id: 'uart1.rx', use: 'uart', bus: 1, line: 'RX' }] },
+	], 'uart');
+	check('one wire on two pads is one wire with two pins',
+		twice.length === 1 && twice[0].wires.length === 2 &&
+		twice[0].wires[0].line === 'TX' &&
+		twice[0].wires[0].pins.join(',') === '3,60',
+		JSON.stringify(twice));
+	check('a family whose pins carry no wire name has no rows',
+		PINS.wiresFor(pads, 'gpio').length === 0);
+	check('and a family this chip does not have has none either',
+		PINS.wiresFor(pads, 'spi').length === 0);
+	check('a missing answer is not an error', PINS.wiresFor(null, 'uart').length === 0);
+
+	// The case the whole thing exists for: two buses, same two wire names.
+	const i2c = PINS.wiresFor([
+		{ pin: 3, can: [{ id: 'i2c1.scl', use: 'i2c', bus: 1, line: 'SCL' }] },
+		{ pin: 4, can: [{ id: 'i2c1.sda', use: 'i2c', bus: 1, line: 'SDA' }] },
+		{ pin: 56, can: [{ id: 'i2c2.sda', use: 'i2c', bus: 2, line: 'SDA' }] },
+		{ pin: 57, can: [{ id: 'i2c2.scl', use: 'i2c', bus: 2, line: 'SCL' }] },
+	], 'i2c');
+	check('two buses with the same wire names stay apart',
+		i2c.length === 2 &&
+		i2c[0].wires.map(w => w.line + w.pins.join()).join(' ') === 'SDA4 SCL3' &&
+		i2c[1].wires.map(w => w.line + w.pins.join()).join(' ') === 'SDA56 SCL57',
+		JSON.stringify(i2c));
+}
+
+group('a colour per bus');
+
+// Eight lit pads and three buses: which three-of-eight belong together is the
+// only question that matters, and the drawing cannot answer it with one colour.
+// The legend and the rings take the SAME colour from the same function, which
+// is what joins them — read the name in the list, find the ring on the chip.
+{
+	const c = PINS.busColour;
+	check('each bus gets its own colour',
+		new Set([c(0), c(1), c(2), c(3)]).size === 4,
+		[c(0), c(1), c(2), c(3)].join(' '));
+	check('and they are the palette this page already uses, not new ones',
+		[c(0), c(1), c(2), c(3)].every(v => /^var\(--st-c[1-4]\)$/.test(v)),
+		[c(0), c(1), c(2), c(3)].join(' '));
+	check('a family with no bus number still gets a colour',
+		typeof c(-1) === 'string' && c(-1).length > 0, String(c(-1)));
+	check('and so does one the page was handed nothing for',
+		typeof c(undefined) === 'string' && c(undefined).length > 0);
+	// Beyond the palette it cycles rather than running out; the legend names
+	// every bus, so a repeated colour is a hint that has ended, not a lie.
+	check('beyond the palette it cycles', c(4) === c(0) && c(5) === c(1));
+}
+
 group('the words on the page');
 
 // The six things a person can pick, and the vocabulary rule that governs them:

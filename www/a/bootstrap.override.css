@@ -6916,7 +6916,12 @@ body > main > .container > form > .mj-foot {
 	grid-area: chip;
 	min-width: 0;
 	overflow-x: auto;
-	padding-bottom: 0.25rem;
+	/* Room above and below for the second tier of wire names, which steps
+	   outwards past the package so four lit in a row can be read. overflow-x on
+	   one axis makes the other axis scroll rather than overflow, so without
+	   this the raised tier is simply cut off. Constant, so it costs the drawing
+	   a fixed fourteen pixels and never moves it. */
+	padding: 14px 0 calc(14px + 0.25rem);
 }
 
 /* A big screen gets a bigger chip, not a stretched layout. */
@@ -7359,13 +7364,113 @@ body > main > .container > form > .mj-foot {
 
 /* A ring on the pad as well as the contrast, because on a phone the whole
    lead is a few pixels wide and opacity alone is a weak signal. */
-.mj-pins[data-lit="gpio"] .mj-pin-lead.has-gpio .mj-pin-pad,
-.mj-pins[data-lit="pwm"] .mj-pin-lead.has-pwm .mj-pin-pad,
-.mj-pins[data-lit="i2c"] .mj-pin-lead.has-i2c .mj-pin-pad,
-.mj-pins[data-lit="spi"] .mj-pin-lead.has-spi .mj-pin-pad,
-.mj-pins[data-lit="uart"] .mj-pin-lead.has-uart .mj-pin-pad,
+/* The ring takes the colour of the BUS the pad belongs to, not of the family:
+   a chip with three I²C buses lights eight pads, and which three-of-eight
+   belong together is the whole question. Each lead carries its bus's colour as
+   a custom property per family, so one rule here covers every bus. */
+.mj-pins[data-lit="gpio"] .mj-pin-lead.has-gpio .mj-pin-pad {
+	box-shadow: 0 0 0 2px var(--bs-body-bg), 0 0 0 4px var(--bus-gpio, var(--bs-primary));
+}
+
+.mj-pins[data-lit="pwm"] .mj-pin-lead.has-pwm .mj-pin-pad {
+	box-shadow: 0 0 0 2px var(--bs-body-bg), 0 0 0 4px var(--bus-pwm, var(--bs-primary));
+}
+
+.mj-pins[data-lit="i2c"] .mj-pin-lead.has-i2c .mj-pin-pad {
+	box-shadow: 0 0 0 2px var(--bs-body-bg), 0 0 0 4px var(--bus-i2c, var(--bs-primary));
+}
+
+.mj-pins[data-lit="spi"] .mj-pin-lead.has-spi .mj-pin-pad {
+	box-shadow: 0 0 0 2px var(--bs-body-bg), 0 0 0 4px var(--bus-spi, var(--bs-primary));
+}
+
+.mj-pins[data-lit="uart"] .mj-pin-lead.has-uart .mj-pin-pad {
+	box-shadow: 0 0 0 2px var(--bs-body-bg), 0 0 0 4px var(--bus-uart, var(--bs-primary));
+}
+
 .mj-pins[data-lit="sd"] .mj-pin-lead.has-sd .mj-pin-pad {
-	box-shadow: 0 0 0 2px var(--bs-body-bg), 0 0 0 4px var(--bs-primary);
+	box-shadow: 0 0 0 2px var(--bs-body-bg), 0 0 0 4px var(--bus-sd, var(--bs-primary));
+}
+
+/* WHICH WIRE, on the drawing. A lit pad shows the wire it would be — TX, SDA,
+   MOSI — in place of its number, so eight lit leads can be told apart at a
+   glance instead of one hover-and-wait at a time.
+
+   In place of, not beside: a second label needs room reserved for it on all
+   four sides, which costs the package about a tenth of its size permanently
+   for something used while hovering — and un-reserved it collides, because
+   adjacent lit pins are the common case, not the rare one (3 and 4 are one
+   bus's SCL and SDA). The number is a keystroke away: it comes back the moment
+   the pointer leaves, the pad's own tooltip carries it, and the legend under
+   the chip lists every one of them.
+
+   font-size:0 on the box rather than hiding it, so the box keeps the width and
+   height it had and nothing on the drawing moves. */
+.mj-pins[data-lit="gpio"] .mj-pin-lead.has-gpio .mj-pin-lbl[data-wire-gpio],
+.mj-pins[data-lit="pwm"] .mj-pin-lead.has-pwm .mj-pin-lbl[data-wire-pwm],
+.mj-pins[data-lit="i2c"] .mj-pin-lead.has-i2c .mj-pin-lbl[data-wire-i2c],
+.mj-pins[data-lit="spi"] .mj-pin-lead.has-spi .mj-pin-lbl[data-wire-spi],
+.mj-pins[data-lit="uart"] .mj-pin-lead.has-uart .mj-pin-lbl[data-wire-uart],
+.mj-pins[data-lit="sd"] .mj-pin-lead.has-sd .mj-pin-lbl[data-wire-sd] {
+	font-size: 0;
+}
+
+.mj-pins[data-lit="gpio"] .mj-pin-lead.has-gpio .mj-pin-lbl::after { content: attr(data-wire-gpio); }
+.mj-pins[data-lit="pwm"] .mj-pin-lead.has-pwm .mj-pin-lbl::after { content: attr(data-wire-pwm); }
+.mj-pins[data-lit="i2c"] .mj-pin-lead.has-i2c .mj-pin-lbl::after { content: attr(data-wire-i2c); }
+.mj-pins[data-lit="spi"] .mj-pin-lead.has-spi .mj-pin-lbl::after { content: attr(data-wire-spi); }
+.mj-pins[data-lit="uart"] .mj-pin-lead.has-uart .mj-pin-lbl::after { content: attr(data-wire-uart); }
+.mj-pins[data-lit="sd"] .mj-pin-lead.has-sd .mj-pin-lbl::after { content: attr(data-wire-sd); }
+
+/* Absolutely positioned, which is what lets a four-character wire name sit in
+   a box sized for two digits: it overflows outwards, away from the package,
+   into the room the drawing already has — rather than to the right, under the
+   pad, where "RX" rendered as "R". And being out of flow it cannot move
+   anything, so lighting a family still shifts nothing on the page. */
+.mj-pin-lbl {
+	position: relative;
+}
+
+.mj-pins[data-lit] .mj-pin-lbl::after {
+	position: absolute;
+	/* A shade under the number's size: four characters where there were two
+	   digits, and it is read at a glance rather than transcribed. */
+	font-size: max(8px, calc(var(--mj-lbl-f) * 0.9));
+	font-weight: 700;
+	letter-spacing: -0.03em;
+	white-space: nowrap;
+}
+
+/* Out from the package on every side, so the name is never under its own pad. */
+.mj-pins[data-lit] .mj-pkg-left .mj-pin-lbl::after {
+	right: 0;
+	top: 50%;
+	transform: translateY(-50%);
+}
+
+.mj-pins[data-lit] .mj-pkg-right .mj-pin-lbl::after {
+	left: 0;
+	top: 50%;
+	transform: translateY(-50%);
+}
+
+.mj-pins[data-lit] .mj-pkg-top .mj-pin-lbl::after,
+.mj-pins[data-lit] .mj-pkg-bottom .mj-pin-lbl::after {
+	left: 50%;
+	transform: translateX(-50%);
+}
+
+/* Along the top and bottom the names sit a lead apart, and four lit in a row is
+   the ordinary case — a port's RTS, CTS, RX and TX are adjacent. So every
+   other one steps outwards onto a second line. A transform, not a margin: two
+   tiers must cost the drawing no height, or the chip would move the moment a
+   category was lit. */
+.mj-pins[data-lit] .mj-pkg-top .mj-pin-lead:nth-child(even) .mj-pin-lbl::after {
+	transform: translate(-50%, -105%);
+}
+
+.mj-pins[data-lit] .mj-pkg-bottom .mj-pin-lead:nth-child(even) .mj-pin-lbl::after {
+	transform: translate(-50%, 105%);
 }
 
 /* The number of a lit pin is the thing you are about to write down, so it
@@ -7426,4 +7531,90 @@ body > main > .container > form > .mj-foot {
    the moment you ask a question about it is a page you stop asking. */
 .mj-pins[data-lit] .mj-pin-lead.mj-pin-sel {
 	opacity: 0.55;
+}
+
+/* WHICH, WITH WHICH. The legend at the foot of the category list, while a
+   family is lit: one row per bus, port, slot or channel, carrying that bus's
+   colour and each of its wires with the pin it is on. The drawing can say a lit
+   pad is SDA; it cannot say WHICH SDA, and on this chip's three I²C buses that
+   is the only question that matters.
+
+   At the foot of the pane, with nothing under it, so it can appear and go
+   without moving anything. Under the drawing it would have needed room
+   reserved for the widest family the chip has — four channels here, eight
+   buses on other parts — which is a stripe of empty space at all times. */
+.mj-pins-wires {
+	margin-top: 1.25rem;
+}
+
+.mj-pins-wires:empty {
+	margin-top: 0;
+}
+
+.mj-pins-wires-head {
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--bs-tertiary-color);
+	margin-bottom: 0.5rem;
+}
+
+.mj-pins-wire-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.3rem 0.4rem;
+	margin: 0 0 0.45rem;
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-pins-wire-row:last-child {
+	margin-bottom: 0;
+}
+
+.mj-pins-wire-row b {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	flex: 0 0 100%;
+	font-weight: 600;
+	color: var(--bs-body-color);
+}
+
+/* The same colour the pads of this bus are ringed in, which is what joins the
+   two halves: read the name here, find the ring there. */
+.mj-pins-wire-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+	flex: 0 0 auto;
+}
+
+/* The wire, then the pin it is on — the two things you write down together. */
+.mj-pins-wire {
+	display: inline-flex;
+	align-items: stretch;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius-sm);
+	overflow: hidden;
+	line-height: 1.6;
+}
+
+.mj-pins-wire i {
+	font-style: normal;
+	font-weight: 700;
+	padding: 0 0.3rem;
+	background: var(--bs-tertiary-bg);
+	color: var(--bs-body-color);
+	letter-spacing: 0.02em;
+}
+
+.mj-pins-wire em {
+	font-style: normal;
+	padding: 0 0.35rem;
+	font-family: var(--bs-font-monospace);
+	color: var(--bs-body-color);
+	font-variant-numeric: tabular-nums;
 }

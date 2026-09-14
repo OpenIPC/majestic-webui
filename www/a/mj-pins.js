@@ -92,6 +92,69 @@
 		return out + '. They are the bright ones.';
 	}
 
+	// A colour per bus, so a family with more than one can be told apart on the
+	// drawing at a glance: on this chip's I²C there are three, and SDA on one
+	// wired to SCL on another is not a bus at all.
+	//
+	// The four the dashboard already uses, which are validated for
+	// colour-vision separation against this card. Beyond four it cycles — the
+	// legend names every bus, so a repeated colour is a hint that has run out
+	// rather than a statement that is wrong.
+	const BUS_COLOURS = ['var(--st-c1)', 'var(--st-c2)', 'var(--st-c3)',
+		'var(--st-c4)'];
+
+	function busColour(bus) {
+		if (typeof bus !== 'number' || bus < 0) return 'var(--bs-primary)';
+		return BUS_COLOURS[bus % BUS_COLOURS.length];
+	}
+
+	// The wires of one family, grouped by the bus, port, slot or channel they
+	// belong to. This is the half the drawing cannot show: a lit pad can say it
+	// is TX, but not that THIS TX goes with THAT RX, and wiring bus 0's SDA to
+	// bus 1's SCL is not a bus at all.
+	//
+	// Pure, so the shape can be tested against what a camera actually sends.
+	function wiresFor(pads, use) {
+		const groups = [];
+		const at = {};
+		(pads || []).forEach((p) => {
+			if (p.pin == null) return;
+			(p.can || []).forEach((c) => {
+				if (c.use !== use || !c.line) return;
+				const key = typeof c.bus === 'number' ? c.bus : -1;
+				if (!(key in at)) {
+					at[key] = { bus: key, wires: [], byLine: {} };
+					groups.push(at[key]);
+				}
+				const g = at[key];
+				// One entry per wire, listing every pin that offers it. A port
+				// whose TX is on either of two pads is a CHOICE of pad, not two
+				// transmit wires — and read as two it looks like a port with
+				// four wires where the chip has two.
+				if (!(c.line in g.byLine)) {
+					g.byLine[c.line] = { line: c.line, pins: [] };
+					g.wires.push(g.byLine[c.line]);
+				}
+				if (g.byLine[c.line].pins.indexOf(p.pin) < 0)
+					g.byLine[c.line].pins.push(p.pin);
+			});
+		});
+		groups.sort((a, b) => a.bus - b.bus);
+		// A pair reads best in the order it is wired: the outgoing wire first.
+		const ORDER = ['TX', 'RX', 'CTS', 'RTS', 'SDA', 'SCL', 'MOSI', 'MISO',
+			'SCK', 'CS', 'CLK', 'CMD'];
+		groups.forEach((g) => {
+			g.wires.sort((a, b) => {
+				const ia = ORDER.indexOf(a.line), ib = ORDER.indexOf(b.line);
+				if (ia !== ib) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+				return a.line < b.line ? -1 : a.line > b.line ? 1 : 0;
+			});
+			g.wires.forEach((w) => w.pins.sort((x, y) => x - y));
+			delete g.byLine;
+		});
+		return groups;
+	}
+
 	// Which pads a family could go on, and which buses, ports, slots or
 	// channels those pads reach. Pure, and exported, because it is what the
 	// highlight and the sentence above the chip both come from — and a
@@ -218,7 +281,7 @@
 		// having to stay on the row, and it is the whole of the interaction on
 		// a touch screen, which has no hover at all.
 		let litPinned = null, litHover = null;
-		let introEl = null;
+		let introEl = null, wiresEl = null;
 
 		const root = el('div', 'mj-pins');
 		host.appendChild(root);
@@ -295,6 +358,37 @@
 		// page that has stopped responding.
 		function litNow() { return litHover || litPinned; }
 
+		// One row per bus: its name, then each wire and the pin it is on.
+		function paintWires() {
+			if (!wiresEl) return;
+			wiresEl.textContent = '';
+			const use = litNow();
+			if (!use) return;
+			const words = INSTANCE[use];
+			const groups = wiresFor((doc && doc.pads) || [], use);
+			if (!groups.length) return;
+			wiresEl.appendChild(el('div', 'mj-pins-wires-head',
+				groups.length === 1 ? 'The wires' : 'Which bus, and its wires'));
+			groups.forEach((g) => {
+				const row = el('p', 'mj-pins-wire-row');
+				if (words && g.bus >= 0) {
+					const name = el('b', null, words[0] + ' ' + g.bus);
+					const dot = el('span', 'mj-pins-wire-dot');
+					dot.style.background = busColour(g.bus);
+					name.insertBefore(dot, name.firstChild);
+					row.appendChild(name);
+				}
+				g.wires.forEach((w) => {
+					const chip = el('span', 'mj-pins-wire');
+					chip.appendChild(el('i', null, w.line));
+					// Every pin that offers this wire: pick one of them.
+					chip.appendChild(el('em', null, w.pins.join(' or ')));
+					row.appendChild(chip);
+				});
+				wiresEl.appendChild(row);
+			});
+		}
+
 		function applyLit() {
 			if (!root) return;
 			const now = litNow();
@@ -308,6 +402,7 @@
 			});
 
 			if (introEl) introEl.textContent = introText();
+			paintWires();
 
 		}
 
@@ -395,13 +490,20 @@
 				return b;
 			}
 
-			// Every family this pad can be, as a class. Lighting a category is
-			// then one attribute on the wrapper and no repaint at all — a
-			// pointer crossing six rows would otherwise rebuild ninety-three
-			// buttons six times, and the chip has to answer at a glance.
+			// Every family this pad can be, as a class, and the WIRE it would be
+			// in each, as an attribute the stylesheet reads. Lighting a
+			// category is then one attribute on the wrapper and no lead is
+			// touched at all — a pointer crossing six rows would otherwise
+			// rebuild ninety-three buttons six times, and the chip has to
+			// answer at a glance.
 			(pad.can || []).forEach((c) => {
 				if (b.className.indexOf(' has-' + c.use) < 0)
 					b.className += ' has-' + c.use;
+				if (c.line) lbl.setAttribute('data-wire-' + c.use, c.line);
+				// The bus this pad belongs to, as a colour the stylesheet reads
+				// when that family is lit. One rule per family then covers
+				// every bus, rather than one rule per family per bus.
+				b.style.setProperty('--bus-' + c.use, busColour(c.bus));
 			});
 
 			const want = currentUse(pad.pin);
@@ -526,6 +628,13 @@
 				pane.appendChild(b);
 			});
 
+			// The wire legend goes at the FOOT of this pane: beside the row the
+			// pointer is on rather than below the drawing, and with nothing
+			// underneath it, so it can appear and disappear without moving
+			// anything. Under the chip it would have needed room reserved for
+			// the widest family this chip has — four channels on this part,
+			// eight buses on others — which is a stripe of empty space under
+			// the drawing at all times.
 			const used = pads.filter((p) => p.used);
 			if (used.length) {
 				const box = el('div', 'mj-pins-uses');
@@ -539,6 +648,8 @@
 				});
 				pane.appendChild(box);
 			}
+			wiresEl = el('div', 'mj-pins-wires');
+			pane.appendChild(wiresEl);
 			return pane;
 		}
 
@@ -815,6 +926,7 @@
 
 	const api = { mount: mount, sides: sides, pitchFor: pitchFor, USES: USES,
 		offerLabel: offerLabel, offerHint: offerHint, padsFor: padsFor,
+		wiresFor: wiresFor, busColour: busColour,
 		RESTING: RESTING, litSentence: litSentence };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticPins = api;
