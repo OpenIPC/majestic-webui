@@ -1070,6 +1070,15 @@
 
 			const want = currentChoice(pad.pin);
 			const edited = !sameChoice(want, savedChoice(pad.pin));
+			// `used` covers two different things and they must not be treated
+			// alike. A pad the CAMERA drives -- an IR-cut coil, the
+			// illuminator -- is not the owner's to touch here. A pad the
+			// camera reports because THIS PAGE claimed it is theirs entirely,
+			// and shadowing it would take the level control away the moment
+			// somebody kept one, which is when they are most likely to want
+			// it again.
+			const ours = ((doc && doc.saved) || []).some((r) => r.pin === pad.pin);
+			const cameraOwns = !!pad.used && !ours;
 			// Two different facts, and the pane says the same one twice rather
 			// than one in the heading and the other underneath. What the pad IS
 			// comes from the register; what the camera was TOLD comes from the
@@ -1087,14 +1096,14 @@
 				: want && want.signal === 'gpio' && want.level === 'high'
 					? 'Held high' : null;
 			whatEl = el('p', 'mj-pins-what',
-				pad.used ? pad.used
+				cameraOwns ? pad.used
 					: heldWord ? heldWord
 						: nowOffer && nowOffer.use !== 'gpio'
 							? offerLabel(nowOffer) : 'Free');
 			pane.appendChild(whatEl);
 			pane.appendChild(el('p', 'mj-pins-sub',
 				edited ? 'Changed here. Not kept yet.'
-					: pad.used ? 'The camera drives this pin itself.'
+					: cameraOwns ? 'The camera drives this pin itself.'
 						: want ? 'You told the camera this, and it comes back after a reboot.'
 							: nowOffer && nowOffer.use !== 'gpio'
 								? 'The board came up this way. The camera did not set it, ' +
@@ -1153,7 +1162,7 @@
 			// anyway. The `pad.used` belt is here as well as the gate falling
 			// out of currentChoice() being null, because a saved row for a pin
 			// the camera has since claimed would otherwise slip through.
-			const levels = pad.used ? [] : levelsFor(doc, wantOffer);
+			const levels = cameraOwns ? [] : levelsFor(doc, wantOffer);
 			if (levels.length > 1) {
 				pane.appendChild(head('What the camera does with it'));
 				const seg = el('div', 'mj-seg mj-seg-stack');
@@ -1187,7 +1196,17 @@
 				pane.appendChild(seg);
 			}
 
-			if (wantOffer) {
+			// A pad the camera drives itself keeps saying so, whatever is
+			// ticked in the list above. The choice is not the owner's to make
+			// here -- the camera refuses it -- so describing what it WOULD do
+			// would be the pane telling somebody the camera reads a pin it is
+			// driving the IR-cut filter with.
+			if (cameraOwns) {
+				drivesEl = el('p', 'mj-pins-drives',
+					'The camera drives this pin itself, for ' + pad.used +
+					'. Change what it is for where that is set, not here.');
+				pane.appendChild(drivesEl);
+			} else if (wantOffer) {
 				drivesEl = el('p', 'mj-pins-drives',
 					drivesSentence(wantOffer, want && want.level));
 				pane.appendChild(drivesEl);
@@ -1205,7 +1224,7 @@
 			// over it, so text arriving cannot change the pane's height.
 			nowEl = null;
 			if ((doc && doc.levels && doc.levels.length) &&
-				(wantOffer ? wantOffer.use === 'gpio' : !!pad.used)) {
+				(wantOffer ? wantOffer.use === 'gpio' : cameraOwns)) {
 				const box = el('div', 'mj-pins-now');
 				box.appendChild(el('span', 'mj-pins-now-sizer', LEVEL_RESTING));
 				nowEl = el('span', 'mj-pins-now-live');
@@ -1222,11 +1241,13 @@
 		function refreshChoice(pad) {
 			const want = currentChoice(pad.pin);
 			const wantOffer = offerOf(pad, want && want.signal);
-			if (drivesEl) {
+			const ours = ((doc && doc.saved) || []).some((r) => r.pin === pad.pin);
+			const cameraOwns = !!pad.used && !ours;
+			if (drivesEl && !cameraOwns) {
 				drivesEl.textContent = drivesSentence(wantOffer, want && want.level);
 			}
 			if (whatEl) {
-				whatEl.textContent = pad.used ? pad.used
+				whatEl.textContent = cameraOwns ? pad.used
 					: want && want.signal === 'gpio' && want.level === 'low' ? 'Held low'
 						: want && want.signal === 'gpio' && want.level === 'high' ? 'Held high'
 							: (() => {
