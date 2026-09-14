@@ -136,6 +136,24 @@ function load(active) {
 		r.termWrites.join('').indexOf('Do not power off') !== -1,
 		r.termWrites.join(''));
 
+	const refusal = 'ERROR: invalid upgrade parameters\r\n';
+	r.ws.onmessage({ data: refusal });
+	check('a text-frame refusal reaches the transcript unchanged',
+		r.termWrites.join('').indexOf(refusal) !== -1,
+		r.termWrites.join(''));
+
+	// Changing frame type terminates the preceding binary byte stream. Flush a
+	// partial character before the text frame, then prove later binary UTF-8 is
+	// decoded independently instead of inheriting the stale prefix.
+	r = load('1');
+	r.ws.onopen();
+	r.ws.onmessage({ data: Uint8Array.from([0xe2, 0x82]) });
+	r.ws.onmessage({ data: 'NOTICE\r\n' });
+	r.ws.onmessage({ data: Uint8Array.from([0xe2, 0x82, 0xac]) });
+	check('a text frame flushes pending binary UTF-8 in frame order',
+		r.termWrites.join('') === '\ufffdNOTICE\r\n\u20ac',
+		JSON.stringify(r.termWrites));
+
 	group('an older firmware that refuses the second connection keeps the warning');
 
 	// The marker said an upgrade is in progress, but the socket will not open —
