@@ -87,13 +87,29 @@
 		return LEVELS.filter((l) => known.indexOf(l.k) >= 0);
 	}
 
-	// Clamp a level to what is on offer. Everything that reaches the DOM or a
-	// comparison goes through here, so a spelling this page does not know —
-	// from a newer camera, or a hand-edited file — reads as "not driven"
-	// rather than becoming an attribute nothing styles.
+	// Resolve a saved level for display and comparison.
+	//
+	// An ABSENT level really is "don't drive it" — the camera reads a row with
+	// no level exactly that way — so it resolves to the inert one, and ticking
+	// that option is correctly not a change.
+	//
+	// A level that is PRESENT and not one this page can offer is a different
+	// thing and is carried through untouched. Coercing it to the inert one put
+	// a tick against "Don't drive it" for a pin a newer camera was doing
+	// something else with, which is the page claiming to know a setting it
+	// does not. Nothing is ticked for it, and unknownLevel() below is what the
+	// pane says instead.
 	function normLevel(levels, level) {
 		if (!levels || !levels.length) return null;
-		return levels.some((l) => l.k === level) ? level : levels[0].k;
+		if (level == null || level === '') return levels[0].k;
+		return levels.some((l) => l.k === level) ? level : level;
+	}
+
+	// Whether a resolved level is one this page has a control for. False means
+	// the camera is doing something this version does not know about — which
+	// is worth saying rather than papering over.
+	function knownLevel(levels, level) {
+		return !!levels && levels.some((l) => l.k === level);
 	}
 
 	// Two facts now, and either one of them is a change. This is the function
@@ -195,6 +211,13 @@
 		}
 		if (level === 'low') return 'The camera pulls this pin down and holds it there.';
 		if (level === 'high') return 'The camera pushes this pin up and holds it there.';
+		if (level && level !== 'float') {
+			// A newer camera doing something this page has no word for. Saying
+			// "reads this pin and drives nothing onto it" would be a guess,
+			// and the wrong one — somebody could wire to it on that basis.
+			return 'This camera is doing something with this pin that this ' +
+				'page does not know about. Updating the page will explain it.';
+		}
 		return 'The camera reads this pin and drives nothing onto it.';
 	}
 
@@ -1185,6 +1208,7 @@
 				seg.setAttribute('role', 'group');
 				seg.setAttribute('aria-label', 'What the camera does with pin ' + pad.pin);
 				const name = 'mj-pin-level-' + pad.pin;
+				const ticked = knownLevel(levels, want.level);
 				levels.forEach((lv) => {
 					const id = name + '-' + lv.k;
 					const inp = el('input', 'mj-seg-in');
@@ -1192,7 +1216,7 @@
 					inp.name = name;
 					inp.id = id;
 					inp.autocomplete = 'off';
-					if (lv.k === want.level) inp.checked = true;
+					if (ticked && lv.k === want.level) inp.checked = true;
 					const lbl = el('label', 'mj-seg-lbl', lv.label);
 					lbl.setAttribute('for', id);
 					inp.addEventListener('change', () => {
@@ -1478,6 +1502,7 @@
 		WIRE_GUTTER: WIRE_GUTTER, RING_CLEAR: RING_CLEAR,
 		RESTING: RESTING, litSentence: litSentence,
 		LEVELS: LEVELS, levelsFor: levelsFor, normLevel: normLevel,
+		knownLevel: knownLevel,
 		sameChoice: sameChoice, mergePins: mergePins, changedPins: changedPins,
 		drivesSentence: drivesSentence, levelSentence: levelSentence,
 		levelAttrs: levelAttrs, LEVEL_RESTING: LEVEL_RESTING };

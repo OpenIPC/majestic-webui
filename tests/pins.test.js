@@ -424,14 +424,27 @@ group('a level belongs to a plain on/off pin and to nothing else');
 		PINS.levelsFor({ levels: ['float'] }, gpio).length === 1);
 
 	const three = PINS.levelsFor(camera, gpio);
-	check('a level this page does not know clamps to the inert one',
-		PINS.normLevel(three, 'floating') === 'float',
-		String(PINS.normLevel(three, 'floating')));
-	check('and so does a missing one',
+	// An absent level really IS "don't drive it" — the camera reads a row with
+	// no level exactly that way — so resolving it to the inert one is true,
+	// and ticking that option is correctly not a change.
+	check('a row that never had a level resolves to the inert one',
 		PINS.normLevel(three, undefined) === 'float');
+	check('and so does an empty one', PINS.normLevel(three, '') === 'float');
 	check('a level it does know survives',
 		PINS.normLevel(three, 'high') === 'high');
-	check('with nothing on offer there is no level to clamp to',
+	// But a level that is PRESENT and unrecognised is a different thing. It
+	// used to be coerced to the inert one, which put a tick against "Don't
+	// drive it" for a pin a newer camera was doing something else with — the
+	// page claiming to know a setting it does not.
+	check('a level a newer camera set is carried, not coerced',
+		PINS.normLevel(three, 'pulse') === 'pulse',
+		String(PINS.normLevel(three, 'pulse')));
+	check('and it is not one the page has a control for',
+		!PINS.knownLevel(three, 'pulse') && PINS.knownLevel(three, 'low'));
+	check('so the pane says so rather than guessing at a behaviour',
+		PINS.drivesSentence(gpio, 'pulse').indexOf('does not know about') > 0,
+		PINS.drivesSentence(gpio, 'pulse'));
+	check('with nothing on offer there is no level to resolve',
 		PINS.normLevel([], 'high') === null);
 }
 
@@ -446,6 +459,7 @@ group('the words for a level');
 
 	const said = PINS.LEVELS.map((l) => l.label)
 		.concat(['float', 'low', 'high'].map((k) => PINS.drivesSentence(gpio, k)))
+		.concat([PINS.drivesSentence(gpio, 'pulse')])
 		.concat([PINS.levelSentence('live', 'low'), PINS.levelSentence('live', 'high'),
 			PINS.levelSentence('gone', null), PINS.LEVEL_RESTING]);
 
