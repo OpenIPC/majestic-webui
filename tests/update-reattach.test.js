@@ -136,6 +136,12 @@ function load(active) {
 		r.termWrites.join('').indexOf('Do not power off') !== -1,
 		r.termWrites.join(''));
 
+	const refusal = 'ERROR: invalid upgrade parameters\r\n';
+	r.ws.onmessage({ data: refusal });
+	check('a text-frame refusal reaches the transcript unchanged',
+		r.termWrites.join('').indexOf(refusal) !== -1,
+		r.termWrites.join(''));
+
 	group('an older firmware that refuses the second connection keeps the warning');
 
 	// The marker said an upgrade is in progress, but the socket will not open —

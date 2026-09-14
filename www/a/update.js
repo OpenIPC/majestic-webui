@@ -500,7 +500,9 @@
 		ws.binaryType = 'arraybuffer';
 		let opened = false;
 		ws.onopen = () => { opened = true; onOpen(ws); };
-		ws.onmessage = e => append(dec.decode(new Uint8Array(e.data), { stream: true }));
+		ws.onmessage = e => append(typeof e.data === 'string'
+			? e.data
+			: dec.decode(new Uint8Array(e.data), { stream: true }));
 		// The socket can close because majestic was killed at the reboot, or
 		// because it idled out during a quiet phase (download / time-sync). Either
 		// way the flash may still be running, so confirm an actual reboot
