@@ -4579,19 +4579,60 @@ button.mj-osd-chip,
 	white-space: nowrap;
 }
 
-/* Reserved and empty on purpose. Majestic's motion detection is hardware
-   assisted but is never written to the card, so there is no event data to
-   draw — an empty labelled lane is honest where a missing one would imply
-   the feature is simply absent. */
+/* When the camera saw movement, under the band it is aligned to. It reserved
+   this lane and drew nothing in it for a long time, because nothing wrote the
+   data; the camera keeps a day index now and serves it.
+
+   The lane keeps its own background and border whether or not anything is in
+   it. An empty lane that also loses its outline reads as a rendering failure,
+   and the one thing this must never be ambiguous about is the difference
+   between "nothing moved", "nobody was looking" and "nothing answered" — see
+   the three rules below, each of which draws one of them. */
 .rec-motion {
+	position: relative;
+	overflow: hidden;
 	height: 14px;
 	margin-top: 0.35rem;
 	border-radius: 3px;
-	border: 1px dashed var(--bs-border-color);
-	background: repeating-linear-gradient(135deg,
-		transparent, transparent 5px,
-		rgba(var(--bs-body-color-rgb), 0.05) 5px,
-		rgba(var(--bs-body-color-rgb), 0.05) 10px);
+	border: 1px solid var(--bs-border-color);
+	background: rgba(var(--bs-body-color-rgb), 0.03);
+}
+
+/* What the camera saw, under the band it is aligned to. Presence only: WHEN
+   it saw movement, never where in frame — the geometry stays inside the clip,
+   where the recording's own encryption can reach it. */
+.rec-motion .blip {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	background: rgba(var(--bs-warning-rgb), 0.85);
+	border-radius: 1px;
+	cursor: pointer;
+}
+
+.rec-motion .blip:hover {
+	background: rgba(var(--bs-warning-rgb), 1);
+}
+
+/* Stretches nobody was watching, which is NOT the same as stretches where
+   nothing moved — a plain empty lane says the second when it means the first.
+   A day recorded before the camera kept an index is hatched end to end. */
+.rec-motion .unwatched {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	background: repeating-linear-gradient(
+		45deg,
+		rgba(var(--bs-secondary-rgb), 0.18) 0 4px,
+		transparent 4px 8px);
+}
+
+/* And the whole lane, when the camera gave no answer at all. */
+.rec-motion.unknown {
+	background: repeating-linear-gradient(
+		45deg,
+		rgba(var(--bs-secondary-rgb), 0.10) 0 4px,
+		transparent 4px 8px);
 }
 
 .rec-export {

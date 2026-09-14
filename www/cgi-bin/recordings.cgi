@@ -73,16 +73,26 @@ hide_title=1
 				</div>
 				<div class="rec-band" id="rec-band"></div>
 
-				<!-- Still reserved, and still deliberately empty, but for a narrower
-				     reason than before. Recording on motion (records.mode) writes one
-				     clip per event, so in that mode the band above IS the event record
-				     and drawing it twice would say nothing new. What no camera writes
-				     is where the movement was WITHIN a clip, which is the only thing
-				     this lane could add — so it stays empty until something records
-				     that. The caption below is set from the mode by recordings.js. -->
-				<div class="rec-motion"></div>
+				<!-- The camera's own record of when it saw movement, which it now
+				     keeps and serves: /api/v1/analytics/day. This lane was reserved
+				     and empty for a long time because nothing wrote that.
+
+				     PRESENCE ONLY, and that is the design rather than a limitation.
+				     The camera reports WHEN it saw movement and never where in
+				     frame: the rectangles live inside the clip as a metadata track,
+				     sealed with the media when the recording is encrypted, and a
+				     lane in the clear showing where somebody moved would hand back
+				     exactly what that encryption withholds.
+
+				     Three things are drawn: blips for movement, hatching for
+				     stretches nobody was watching, and — when the camera gave no
+				     answer at all — hatching over the whole lane. The last two
+				     matter as much as the first: "nothing moved" and "nobody was
+				     looking" are indistinguishable on a plain empty lane and mean
+				     opposite things. recordings.js sets the caption. -->
+				<div class="rec-motion" id="rec-motion"></div>
 				<div class="rec-ticks" id="rec-ticks"></div>
-				<div class="x-small text-secondary mt-1" id="rec-motion-note">Motion — lights up once the camera records detection events</div>
+				<div class="x-small text-secondary mt-1" id="rec-motion-note">Motion</div>
 
 				<div id="rec-export" class="d-none"></div>
 

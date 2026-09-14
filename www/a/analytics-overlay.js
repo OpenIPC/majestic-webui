@@ -146,17 +146,26 @@
 			const m = opts.view ? opts.view() : null;
 			const ready = m !== undefined;
 
-			let html = '';
+			// Built with DOM calls rather than an HTML string, because `src`
+			// comes off the websocket. The camera only ever sends one of three
+			// literals, but this page must not be the thing that makes that
+			// load-bearing: a src closing the attribute and adding an event
+			// handler would run in the browser of whoever is signed in. Every
+			// other value here is a number this file computed.
+			while (layer.firstChild) layer.removeChild(layer.firstChild);
 			for (let i = 0; ready && i < boxes.length; i++) {
 				const b = boxes[i];
 				const box = RGN.place(m, p, b);
 				if (!box || box.w <= 0 || box.h <= 0) continue;
-				html += '<div class="mj-an-box" data-src="' + b.src +
-					'" style="left:' + box.x.toFixed(1) + 'px;top:' +
-					box.y.toFixed(1) + 'px;width:' + box.w.toFixed(1) +
-					'px;height:' + box.h.toFixed(1) + 'px"></div>';
+				const el = document.createElement('div');
+				el.className = 'mj-an-box';
+				el.dataset.src = String(b.src);
+				el.style.left = box.x.toFixed(1) + 'px';
+				el.style.top = box.y.toFixed(1) + 'px';
+				el.style.width = box.w.toFixed(1) + 'px';
+				el.style.height = box.h.toFixed(1) + 'px';
+				layer.appendChild(el);
 			}
-			layer.innerHTML = html;
 			if (opts.onNote) opts.onNote(st.note(now));
 		}
 
