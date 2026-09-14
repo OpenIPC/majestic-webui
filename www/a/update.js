@@ -500,9 +500,16 @@
 		ws.binaryType = 'arraybuffer';
 		let opened = false;
 		ws.onopen = () => { opened = true; onOpen(ws); };
-		ws.onmessage = e => append(typeof e.data === 'string'
-			? e.data
-			: dec.decode(new Uint8Array(e.data), { stream: true }));
+		ws.onmessage = e => {
+			if (typeof e.data !== 'string') {
+				append(dec.decode(new Uint8Array(e.data), { stream: true }));
+				return;
+			}
+			// A text frame cannot continue a UTF-8 sequence split across binary
+			// frames. Flush any pending bytes before preserving frame order.
+			append(dec.decode());
+			append(e.data);
+		};
 		// The socket can close because majestic was killed at the reboot, or
 		// because it idled out during a quiet phase (download / time-sync). Either
 		// way the flash may still be running, so confirm an actual reboot
