@@ -202,6 +202,7 @@ fi
 %>
 <script src="/a/mj-fps.js"></script>
 <script src="/a/mj-region.js" defer></script>
+<script src="/a/analytics-overlay.js" defer></script>
 <script src="/a/mj-servers.js" defer></script>
 <script src="/a/mj-outgoing.js" defer></script>
 <%

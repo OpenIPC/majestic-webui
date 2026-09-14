@@ -172,8 +172,58 @@
 		};
 	}
 
+	// Where the picture actually is inside a stage of w x h, given the frame
+	// the player is showing. object-fit: contain letterboxes anything that is
+	// not the stage's own ratio, and anything drawn against the stage rather
+	// than against the picture sits off the scene by the size of that
+	// letterbox. Null when the frame size has not arrived yet — it comes from
+	// the player's codec event, a beat after the first picture.
+	function pic(frame, w, h) {
+		if (!frame || !frame.w || !frame.h || !w || !h) return null;
+		const s = Math.min(w / frame.w, h / frame.h);
+		// The frame rides along in the answer. place() needs both the box on
+		// screen and the pixel space that box is showing, and handing them
+		// over separately is an invitation to pass one that does not match
+		// the other.
+		return { x: (w - frame.w * s) / 2, y: (h - frame.h * s) / 2,
+			w: frame.w * s, h: frame.h * s, f: { w: frame.w, h: frame.h } };
+	}
+
+	// A rectangle in MAIN-stream pixels to a box in stage pixels. `m` is
+	// view()'s answer, or null when the shown stream IS the main one and the
+	// two spaces coincide.
+	//
+	// The camera writes every detection in main-stream pixels — that is the
+	// space its detectors normalise to — while the page may well be showing
+	// the sub stream, cropped, at another size. So there are two maps here and
+	// not one: main to shown, which is the camera's business and comes from
+	// /api/v1/osd, and shown to screen, which is the letterbox above.
+	function place(m, p, r) {
+		if (!p || !r) return null;
+		// With a mapping, `r` is in main-stream pixels and `m` carries the
+		// main-to-shown scale. Without one there are two cases and they are
+		// not the same: a rectangle that names the frame it was measured in
+		// (a detection from the camera, which always measures in main-stream
+		// pixels even when the page is showing the sub stream) is scaled from
+		// that frame; one that names none is already in the shown stream's
+		// space, which is what an editor dragging on this picture produces.
+		//
+		// Getting this wrong is invisible on the common camera, where main
+		// and sub are the same scene at the same ratio and the two answers
+		// coincide -- and then a sub-stream preview puts every box at a
+		// fraction of where the movement was.
+		const f = m ? m.f : (r.frame && r.frame.w && r.frame.h ? r.frame : p.f);
+		const k = m ? m.k : { x: 1, y: 1 };
+		const o = m ? m.o : { x: 0, y: 0 };
+		if (!f.w || !f.h) return null;
+		const sx = (x) => p.x + (k.x * x + o.x) / f.w * p.w;
+		const sy = (y) => p.y + (k.y * y + o.y) / f.h * p.h;
+		const x0 = sx(r.x), y0 = sy(r.y);
+		return { x: x0, y: y0, w: sx(r.x + r.w) - x0, h: sy(r.y + r.h) - y0 };
+	}
+
 	const api = { parse: parse, clip: clip, verdict: verdict, tally: tally,
-		view: view };
+		view: view, pic: pic, place: place };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticRegion = api;
 })();
