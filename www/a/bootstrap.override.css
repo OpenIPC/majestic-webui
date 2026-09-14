@@ -1095,6 +1095,19 @@ mark {
 	color: #fff;
 }
 
+/* Three answers whose words are sentences, in a sixteen-rem column. Laid on
+   its side rather than given its own control: same radios, same focus ring,
+   same checked state. Three of these across came to roughly 250px against a
+   16rem detail column, and 15rem at the 1299px breakpoint — it overflowed. */
+.mj-seg-stack {
+	flex-direction: column;
+	width: 100%;
+}
+
+.mj-seg-stack .mj-seg-lbl {
+	justify-content: flex-start;
+}
+
 .mj-seg-in:focus-visible + .mj-seg-lbl {
 	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
 }
@@ -4040,6 +4053,13 @@ button.mj-osd-chip,
 	--st-c3: #c96a2e;
 	--st-c4: #8a5cd8;
 	--st-grid: #edeff5;
+	/* A pin's live level on the pins page. Deliberately outside --st-c1..c4:
+	   on that drawing a bus ring and a level mark sit inches apart saying
+	   different things, and the same colour for both would be worse than no
+	   mark. Separated by lightness as well as hue, so the two do not depend on
+	   colour vision to tell apart. */
+	--mj-lvl-lo: #6b7280;
+	--mj-lvl-hi: #d4a017;
 }
 
 [data-bs-theme=dark] {
@@ -4061,6 +4081,8 @@ button.mj-osd-chip,
 	--st-c3: #d1793a;
 	--st-c4: #a06ee0;
 	--st-grid: #262b36;
+	--mj-lvl-lo: #8b93a3;
+	--mj-lvl-hi: #e8b93a;
 }
 
 /* solid accent primary button in dark (replaces the old washed-out translucent
@@ -7079,6 +7101,27 @@ body > main > .container > form > .mj-foot {
 	color: var(--bs-tertiary-color);
 }
 
+/* What the pin IS right now, as opposed to what it was told. Two sentences
+   stacked in one grid cell — a hidden sizer holding the longest, and the live
+   one over it — so a level arriving cannot change the pane's height. Same
+   trick, same reason, as .mj-pins-intro above. */
+.mj-pins-now {
+	display: grid;
+	margin-top: 0.5rem;
+	padding: 0 0.65rem;
+	font-size: 0.6875rem;
+	color: var(--bs-secondary-color);
+	line-height: 1.5;
+}
+
+.mj-pins-now > * {
+	grid-area: 1 / 1;
+}
+
+.mj-pins-now-sizer {
+	visibility: hidden;
+}
+
 .mj-pins-drives {
 	margin-top: 0.9rem;
 	padding: 0.55rem 0.65rem;
@@ -7257,6 +7300,28 @@ body > main > .container > form > .mj-foot {
 
 .mj-pkg-left .mj-pin-trace,
 .mj-pkg-right .mj-pin-trace { width: var(--mj-trace); height: 2px; }
+
+/* A live level rides the TRACE, which is the one element in the drawing
+   carrying no state of its own: the pad's box-shadow is taken three times over
+   (the lit ring, .mj-pin-taken, .mj-pin-sel) and its background twice
+   (.mj-pin-c*, .mj-pin-changed).
+
+   COLOUR AND CROSS-AXIS THICKNESS ONLY. --mj-trace is the trace's LENGTH, and
+   it is a term in the lead-stack sum that tests/pins.test.js reproduces by
+   hand to check the package fits its column; changing it here would let that
+   test go on passing while the real chip overflowed. The lead is a fixed
+   --mj-pitch across, so a fatter trace cannot widen it. Anything that moves
+   the pad or label dimensions has to change the test's width() in the same
+   commit. */
+.mj-pin-lead[data-level] .mj-pin-trace { opacity: 1; }
+.mj-pin-lead[data-level="low"] .mj-pin-trace { background: var(--mj-lvl-lo); }
+.mj-pin-lead[data-level="high"] .mj-pin-trace { background: var(--mj-lvl-hi); }
+
+.mj-pkg-top .mj-pin-lead[data-level] .mj-pin-trace,
+.mj-pkg-bottom .mj-pin-lead[data-level] .mj-pin-trace { width: 4px; }
+
+.mj-pkg-left .mj-pin-lead[data-level] .mj-pin-trace,
+.mj-pkg-right .mj-pin-lead[data-level] .mj-pin-trace { height: 4px; }
 
 .mj-pin-taken .mj-pin-pad { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22); }
 .mj-pin-ca .mj-pin-pad { background: var(--st-c1); }

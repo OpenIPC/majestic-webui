@@ -397,6 +397,235 @@ group('a pad that is more than one thing says so by saying nothing');
 		PINS.padWire(nobus, 'i2c').bus === null);
 }
 
+group('a level belongs to a plain on/off pin and to nothing else');
+
+// The narrowing is the rule, and it has two halves that fail differently: a
+// bus offered a level is a control that could never do anything, and a camera
+// that does not do levels offered one is a page claiming a capability it has
+// no way to reach.
+{
+	const gpio = { id: 'gpio', use: 'gpio' };
+	const uart = { id: 'uart3.rx', use: 'uart', bus: 3, line: 'RX' };
+	const camera = { levels: ['float', 'low', 'high'] };
+
+	check('a plain on/off pin is offered all three',
+		PINS.levelsFor(camera, gpio).length === 3,
+		String(PINS.levelsFor(camera, gpio).length));
+	check('a serial pin is offered none, whatever the camera says',
+		PINS.levelsFor(camera, uart).length === 0);
+	check('and a camera that does not do levels offers none at all',
+		PINS.levelsFor({}, gpio).length === 0 &&
+		PINS.levelsFor({ levels: [] }, gpio).length === 0);
+	check('a camera that only knows some of them offers only those',
+		PINS.levelsFor({ levels: ['float', 'low'] }, gpio).length === 2);
+	// One offer left is one the control must not draw: a segmented control
+	// with a single option is a label pretending to be a choice.
+	check('a pad narrowed to one is below the bar the control draws at',
+		PINS.levelsFor({ levels: ['float'] }, gpio).length === 1);
+
+	const three = PINS.levelsFor(camera, gpio);
+	// An absent level really IS "don't drive it" — the camera reads a row with
+	// no level exactly that way — so resolving it to the inert one is true,
+	// and ticking that option is correctly not a change.
+	check('a row that never had a level resolves to the inert one',
+		PINS.normLevel(three, undefined) === 'float');
+	check('and so does an empty one', PINS.normLevel(three, '') === 'float');
+	check('a level it does know survives',
+		PINS.normLevel(three, 'high') === 'high');
+	// But a level that is PRESENT and unrecognised is a different thing. It
+	// used to be coerced to the inert one, which put a tick against "Don't
+	// drive it" for a pin a newer camera was doing something else with — the
+	// page claiming to know a setting it does not.
+	check('a level a newer camera set is carried, not coerced',
+		PINS.normLevel(three, 'pulse') === 'pulse',
+		String(PINS.normLevel(three, 'pulse')));
+	check('and it is not one the page has a control for',
+		!PINS.knownLevel(three, 'pulse') && PINS.knownLevel(three, 'low'));
+	check('so the pane says so rather than guessing at a behaviour',
+		PINS.drivesSentence(gpio, 'pulse').indexOf('does not know about') > 0,
+		PINS.drivesSentence(gpio, 'pulse'));
+	check('with nothing on offer there is no level to resolve',
+		PINS.normLevel([], 'high') === null);
+}
+
+group('the words for a level');
+
+// The same vocabulary rule as the rest of the page, and one more: the page
+// cannot know the rail, so it must never name a voltage.
+{
+	const manual = /(pull-?up|pull-?down|push-?pull|open.?drain|tri-?state|hi-?z|GPIO|muxctrl|0x)/i;
+	const volts = /\d\s*(\.\d)?\s*V\b|volt/i;
+	const gpio = { use: 'gpio' };
+
+	const said = PINS.LEVELS.map((l) => l.label)
+		.concat(['float', 'low', 'high'].map((k) => PINS.drivesSentence(gpio, k)))
+		.concat([PINS.drivesSentence(gpio, 'pulse')])
+		.concat([PINS.levelSentence('live', 'low'), PINS.levelSentence('live', 'high'),
+			PINS.levelSentence('gone', null), PINS.LEVEL_RESTING]);
+
+	check('nothing says a datasheet word',
+		said.every((t) => !manual.test(t)), said.filter((t) => manual.test(t)).join(' | '));
+	check('and nothing claims a voltage the page cannot know',
+		said.every((t) => !volts.test(t)), said.filter((t) => volts.test(t)).join(' | '));
+
+	// "Input" as the first option is the way this feature misleads: it makes a
+	// control read as a readout, and somebody concludes the camera is ignoring
+	// them.
+	check('the inert choice is not called "Input"',
+		!/^input$/i.test(PINS.LEVELS[0].label), PINS.LEVELS[0].label);
+	check('the choices are imperative and the reading is not',
+		PINS.LEVELS[1].label !== PINS.levelSentence('live', 'low'));
+
+	// The pane must not change height as the three are clicked through.
+	const longest = Math.max.apply(null,
+		['float', 'low', 'high'].map((k) => PINS.drivesSentence(gpio, k).length));
+	const shortest = Math.min.apply(null,
+		['float', 'low', 'high'].map((k) => PINS.drivesSentence(gpio, k).length));
+	check('the three consequences are close enough in length not to reflow',
+		longest - shortest < 24, longest + ' vs ' + shortest);
+
+	// The pre-existing bug this change had to fix on the way past: a plain
+	// on/off pin the camera merely wires up is an INPUT, and the pane said the
+	// camera drove it.
+	check('a pin the camera is not holding is not described as driven',
+		PINS.drivesSentence(gpio, 'float').indexOf('drives this pin itself') < 0,
+		PINS.drivesSentence(gpio, 'float'));
+	check('a dimmable output still is',
+		PINS.drivesSentence({ use: 'pwm' }, null).indexOf('drives this pin itself') > 0);
+	check('and a bus still says whatever is soldered to it takes over',
+		PINS.drivesSentence({ use: 'i2c' }, null).indexOf('takes over') > 0);
+}
+
+group('a change is two facts now, and either one of them is a change');
+
+// The function the Keep button hangs on. A level-only edit has the same signal
+// as the row it replaces, so comparing signals alone left the bar grey over a
+// real change — which reads as a page that has stopped responding.
+{
+	const g = (level) => ({ signal: 'gpio', level: level });
+
+	check('the same signal and the same level is not a change',
+		PINS.sameChoice(g('low'), g('low')));
+	check('the same signal and a DIFFERENT level is a change',
+		!PINS.sameChoice(g('low'), g('high')));
+	check('nothing and nothing is not a change', PINS.sameChoice(null, null));
+	check('nothing and something is', !PINS.sameChoice(null, g('float')));
+	check('a level and no level are told apart',
+		!PINS.sameChoice(g('low'), { signal: 'gpio' }));
+
+	const saved = [{ pin: 12, signal: 'gpio', level: 'float' }];
+	check('a level-only edit arms the bar',
+		JSON.stringify(PINS.changedPins({ 12: g('high') }, saved)) === '[12]',
+		JSON.stringify(PINS.changedPins({ 12: g('high') }, saved)));
+	check('choosing what a pin already is still does not',
+		PINS.changedPins({ 12: g('float') }, saved).length === 0);
+	check('and clearing a saved pin does',
+		JSON.stringify(PINS.changedPins({ 12: null }, saved)) === '[12]');
+}
+
+group('the list the camera is sent');
+
+{
+	const saved = [
+		{ pin: 3, signal: 'i2c1.scl' },
+		{ pin: 12, signal: 'gpio', level: 'low' },
+	];
+	// What this camera says it knows. Passed on every call, because the list
+	// the camera is sent has to be one the camera will take.
+	const known = ['float', 'low', 'high'];
+
+	const untouched = PINS.mergePins({}, saved, known);
+	check('with no edits the camera gets back what it had',
+		untouched.length === 2 && untouched[0].pin === 3 && untouched[1].level === 'low',
+		JSON.stringify(untouched));
+
+	const one = PINS.mergePins({ 12: { signal: 'gpio', level: 'high' } }, saved, known);
+	check('a level-only edit still sends every other pin',
+		one.length === 2 && one.some((r) => r.pin === 3),
+		JSON.stringify(one));
+	check('and carries the new level',
+		one.find((r) => r.pin === 12).level === 'high');
+
+	const cleared = PINS.mergePins({ 3: null }, saved, known);
+	check('a pin set back to nothing is left out entirely',
+		cleared.length === 1 && cleared[0].pin === 12,
+		JSON.stringify(cleared));
+
+	const pins = PINS.mergePins({ 3: { signal: 'i2c1.scl' } }, saved, known).map((r) => r.pin);
+	check('no pin appears twice', pins.length === new Set(pins).size, pins.join(','));
+
+	const bus = PINS.mergePins({ 3: { signal: 'i2c1.scl', level: 'low' } }, saved, known)
+		.find((r) => r.pin === 3);
+	check('a bus row carries no level, whatever is in the edit',
+		!('level' in bus), JSON.stringify(bus));
+
+	// The difference between "the owner chose not to drive this one" and "a
+	// page that never knew about levels wrote this row". The camera re-applies
+	// the stored list at every start, and this decides whether it lets go of a
+	// pad it used to hold.
+	const inert = PINS.mergePins({ 12: { signal: 'gpio', level: 'float' } }, saved, known)
+		.find((r) => r.pin === 12);
+	check('a plain on/off row carries its level even when it is the inert one',
+		inert.level === 'float', JSON.stringify(inert));
+}
+
+// A camera refuses a level word it does not know, and the page sends the WHOLE
+// list on every save — so one unrecognised value in an untouched row would have
+// the entire save refused, and the owner could not change any pin at all.
+{
+	const known = ['float', 'low', 'high'];
+	const saved = [
+		{ pin: 12, signal: 'gpio', level: 'shorted' },
+		{ pin: 13, signal: 'gpio' },
+	];
+	const out = PINS.mergePins({}, saved, known);
+	check('a level word this page does not know is not passed back through',
+		out.find((r) => r.pin === 12).level === 'float',
+		JSON.stringify(out.find((r) => r.pin === 12)));
+	check('and a row that never had one is made explicit',
+		out.find((r) => r.pin === 13).level === 'float',
+		JSON.stringify(out.find((r) => r.pin === 13)));
+	check('a camera with no levels at all gets no level member',
+		PINS.mergePins({}, saved, null).every((r) => !('level' in r)),
+		JSON.stringify(PINS.mergePins({}, saved, null)));
+}
+
+group('the drawing never claims a level the socket is not carrying');
+
+// The rule the whole live readout hangs on. A pin shown as low that is
+// actually high is a wiring decision made on a lie, so the moment the feed
+// stops every mark comes off.
+{
+	const pads = [{ pin: 12 }, { pin: 13 }, { pin: null }];
+	const at = { 12: 1, 13: 0 };
+
+	check('a closed socket claims nothing',
+		Object.keys(PINS.levelAttrs('gone', at, pads)).length === 0);
+	check('nor does one that has not answered yet',
+		Object.keys(PINS.levelAttrs('opening', at, pads)).length === 0);
+	check('nor one that was never opened',
+		Object.keys(PINS.levelAttrs('shut', at, pads)).length === 0);
+
+	const live = PINS.levelAttrs('live', at, pads);
+	check('a live socket marks what it carries',
+		live[12] === 'high' && live[13] === 'low', JSON.stringify(live));
+
+	check('a pin the camera reports that is not on this chip is dropped',
+		!('99' in PINS.levelAttrs('live', { 99: 1 }, pads)));
+	check('a value outside the vocabulary never becomes an attribute',
+		Object.keys(PINS.levelAttrs('live', { 12: 'yes', 13: null }, pads)).length === 0,
+		JSON.stringify(PINS.levelAttrs('live', { 12: 'yes', 13: null }, pads)));
+
+	// Silence is not a level, so the sentence for it must name neither.
+	check('a page with no feed says so without naming a level',
+		PINS.levelSentence('gone', 'high').indexOf('high') < 0 &&
+		PINS.levelSentence('gone', 'low').indexOf('low') < 0,
+		PINS.levelSentence('gone', 'high'));
+	check('and the resting sentence is the longest, so it can size the cell',
+		PINS.LEVEL_RESTING.length >= PINS.levelSentence('live', 'high').length &&
+		PINS.LEVEL_RESTING.length >= PINS.levelSentence('opening', null).length);
+}
+
 group('the words on the page');
 
 // The six things a person can pick, and the vocabulary rule that governs them:
