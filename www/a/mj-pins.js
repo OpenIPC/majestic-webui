@@ -108,7 +108,14 @@
 	// The list the camera is sent, composed out of the edits on this page and
 	// the rows it already had. Pure and exported because its bug is silent: a
 	// pin dropped here is a pin the camera stops managing.
-	function mergePins(pending, saved) {
+	// `known` is the list of level keys this camera advertises. A row the page
+	// is NOT editing still has to go back in a shape the camera will take: it
+	// refuses a level word it does not know, so passing one through
+	// untouched would have the whole save refused — and the owner could not
+	// then change any pin at all. Anything unrecognised is sent as the inert
+	// one, which is what the camera does with an absent level anyway.
+	function mergePins(pending, saved, known) {
+		const ok = (lv) => (known && known.indexOf(lv) >= 0 ? lv : 'float');
 		const out = [];
 		const seen = {};
 		Object.keys(pending || {}).forEach((k) => {
@@ -122,13 +129,13 @@
 			// this row" are not the same bytes. The camera re-applies this at
 			// every start, and the difference decides whether it lets go of a
 			// pad it used to hold.
-			if (e.signal === 'gpio' && e.level) row.level = e.level;
+			if (e.signal === 'gpio' && known && known.length) row.level = ok(e.level);
 			out.push(row);
 		});
 		(saved || []).forEach((row) => {
 			if (seen[row.pin]) return;
 			const r = { pin: row.pin, signal: row.signal };
-			if (row.signal === 'gpio' && row.level) r.level = row.level;
+			if (row.signal === 'gpio' && known && known.length) r.level = ok(row.level);
 			out.push(r);
 		});
 		return out;
@@ -560,7 +567,8 @@
 		// arrives: a pin left out is one set back to nothing, which is exactly
 		// what a cleared pin should be.
 		function wholeList() {
-			return mergePins(pending, (doc && doc.saved) || []);
+			return mergePins(pending, (doc && doc.saved) || [],
+				(doc && doc.levels) || null);
 		}
 
 		// Lighting a family is one attribute and one sentence. Nothing is
@@ -782,7 +790,15 @@
 					// complete — including pins that will never change and so
 					// will never produce one. Seeded, not shown: nothing is
 					// drawn until the socket says it is live.
-					if (d.at && typeof d.at === 'object') {
+					//
+					// NOT while the socket is live, though. refresh() is also
+					// called after a keep and after a reconnect, and a delta
+					// landing between the request going out and the reply
+					// coming back is NEWER than the reply: overwriting with
+					// the older snapshot would leave those pins showing a
+					// stale level with no later delta bound to correct them.
+					if (feed === 'live') { /* the socket is the authority */ }
+					else if (d.at && typeof d.at === 'object') {
 						at = {};
 						Object.keys(d.at).forEach((k) => {
 							const v = d.at[k];

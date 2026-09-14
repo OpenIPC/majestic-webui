@@ -516,28 +516,31 @@ group('the list the camera is sent');
 		{ pin: 3, signal: 'i2c1.scl' },
 		{ pin: 12, signal: 'gpio', level: 'low' },
 	];
+	// What this camera says it knows. Passed on every call, because the list
+	// the camera is sent has to be one the camera will take.
+	const known = ['float', 'low', 'high'];
 
-	const untouched = PINS.mergePins({}, saved);
+	const untouched = PINS.mergePins({}, saved, known);
 	check('with no edits the camera gets back what it had',
 		untouched.length === 2 && untouched[0].pin === 3 && untouched[1].level === 'low',
 		JSON.stringify(untouched));
 
-	const one = PINS.mergePins({ 12: { signal: 'gpio', level: 'high' } }, saved);
+	const one = PINS.mergePins({ 12: { signal: 'gpio', level: 'high' } }, saved, known);
 	check('a level-only edit still sends every other pin',
 		one.length === 2 && one.some((r) => r.pin === 3),
 		JSON.stringify(one));
 	check('and carries the new level',
 		one.find((r) => r.pin === 12).level === 'high');
 
-	const cleared = PINS.mergePins({ 3: null }, saved);
+	const cleared = PINS.mergePins({ 3: null }, saved, known);
 	check('a pin set back to nothing is left out entirely',
 		cleared.length === 1 && cleared[0].pin === 12,
 		JSON.stringify(cleared));
 
-	const pins = PINS.mergePins({ 3: { signal: 'i2c1.scl' } }, saved).map((r) => r.pin);
+	const pins = PINS.mergePins({ 3: { signal: 'i2c1.scl' } }, saved, known).map((r) => r.pin);
 	check('no pin appears twice', pins.length === new Set(pins).size, pins.join(','));
 
-	const bus = PINS.mergePins({ 3: { signal: 'i2c1.scl', level: 'low' } }, saved)
+	const bus = PINS.mergePins({ 3: { signal: 'i2c1.scl', level: 'low' } }, saved, known)
 		.find((r) => r.pin === 3);
 	check('a bus row carries no level, whatever is in the edit',
 		!('level' in bus), JSON.stringify(bus));
@@ -546,10 +549,31 @@ group('the list the camera is sent');
 	// page that never knew about levels wrote this row". The camera re-applies
 	// the stored list at every start, and this decides whether it lets go of a
 	// pad it used to hold.
-	const inert = PINS.mergePins({ 12: { signal: 'gpio', level: 'float' } }, saved)
+	const inert = PINS.mergePins({ 12: { signal: 'gpio', level: 'float' } }, saved, known)
 		.find((r) => r.pin === 12);
 	check('a plain on/off row carries its level even when it is the inert one',
 		inert.level === 'float', JSON.stringify(inert));
+}
+
+// A camera refuses a level word it does not know, and the page sends the WHOLE
+// list on every save — so one unrecognised value in an untouched row would have
+// the entire save refused, and the owner could not change any pin at all.
+{
+	const known = ['float', 'low', 'high'];
+	const saved = [
+		{ pin: 12, signal: 'gpio', level: 'shorted' },
+		{ pin: 13, signal: 'gpio' },
+	];
+	const out = PINS.mergePins({}, saved, known);
+	check('a level word this page does not know is not passed back through',
+		out.find((r) => r.pin === 12).level === 'float',
+		JSON.stringify(out.find((r) => r.pin === 12)));
+	check('and a row that never had one is made explicit',
+		out.find((r) => r.pin === 13).level === 'float',
+		JSON.stringify(out.find((r) => r.pin === 13)));
+	check('a camera with no levels at all gets no level member',
+		PINS.mergePins({}, saved, null).every((r) => !('level' in r)),
+		JSON.stringify(PINS.mergePins({}, saved, null)));
 }
 
 group('the drawing never claims a level the socket is not carrying');
