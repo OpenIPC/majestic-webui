@@ -89,14 +89,20 @@
 
 	/* Best effort if the tab goes away mid-countdown. keepalive lets a request
 	 * outlive the page; nothing guarantees it arrives, which is why the editor
-	 * asks for confirmation rather than treating this as the safety net. */
+	 * asks for confirmation rather than treating this as the safety net.
+	 *
+	 * Registered once and kept, reading `previous` when it fires rather than
+	 * closing over it. Arming a fresh one per apply left a handler per
+	 * calibration, and clearing `previous` is then the single thing that
+	 * disarms all of it -- which is what keep() below does. */
+	let unloadArmed = false;
 	function armUnloadRevert() {
-		if (!previous) return;
-		const q = '/api/v1/set?isp.colorMatrix=' + encodeURIComponent(previous.colorMatrix) +
-			'&isp.dngColorMatrix=' + encodeURIComponent(previous.dngColorMatrix);
-		window.addEventListener('pagehide', function onHide() {
-			window.removeEventListener('pagehide', onHide);
+		if (unloadArmed) return;
+		unloadArmed = true;
+		window.addEventListener('pagehide', function () {
 			if (!previous) return;
+			const q = '/api/v1/set?isp.colorMatrix=' + encodeURIComponent(previous.colorMatrix) +
+				'&isp.dngColorMatrix=' + encodeURIComponent(previous.dngColorMatrix);
 			try { fetch(q, { credentials: 'same-origin', keepalive: true }); } catch (e) { /* gone */ }
 		});
 	}
@@ -116,6 +122,13 @@
 			return setKeys(was.colorMatrix, was.dngColorMatrix).then(function () {
 				previous = null;
 			});
+		},
+		/* Confirmed. Forgetting what was there before is what stands the unload
+		 * handler down -- without this it would put the old matrix back the
+		 * next time the page closed, undoing a calibration on purpose kept. */
+		keep: function () {
+			previous = null;
+			return Promise.resolve();
 		},
 	};
 
