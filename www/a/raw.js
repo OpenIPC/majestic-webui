@@ -53,6 +53,7 @@
 	function fallback(e) {
 		const host = $('raw-editor-host');
 		if (host) host.hidden = true;
+		$('raw-loading').hidden = true;
 		// The import runs in the browser, not on the camera, and everything from a
 		// blocked request to a parse error arrives here the same way. Naming a
 		// cause the page never observed sends people to check a network that was
@@ -85,6 +86,7 @@
 
 	function mount() {
 		$('raw-fallback').hidden = true;
+		$('raw-loading').hidden = false;
 		const host = $('raw-editor-host');
 		host.hidden = false;
 		return MajesticRaw.mount(host, {
@@ -92,8 +94,12 @@
 			// The editor covers the navbar, so its Back button is the only way
 			// out of this page. It goes where the nav entry came from.
 			onExit: function () { location.href = 'camera.cgi'; },
-		}).then(function (ed) { editor = ed; })
-			.catch(fallback);
+		}).then(function (ed) {
+			editor = ed;
+			// The editor covers the viewport, so the placeholder under it is
+			// only wasted paint now.
+			$('raw-loading').hidden = true;
+		}).catch(fallback);
 	}
 
 	document.addEventListener('DOMContentLoaded', function () {

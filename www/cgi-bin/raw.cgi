@@ -14,9 +14,21 @@ hide_title=1; full_bleed=1
 %>
 <%in p/header.cgi %>
 
-<!-- The editor mounts here and covers the viewport. Empty until then: a
-     placeholder would be a page in front of the page. -->
+<!-- The editor mounts here and covers the viewport. -->
 <div id="raw-editor-host"></div>
+
+<!-- Shown from first paint, and covered by the editor the moment it arrives.
+     The editor is fetched from a CDN, so on a camera with no route out this is
+     what the page is for the few seconds before the attempt gives up; without
+     it those seconds are a blank page and no word about why. -->
+<div id="raw-loading" class="container py-4">
+	<p class="text-secondary">
+		<span class="spinner-border spinner-border-sm"></span>
+		Loading the editor&hellip;
+	</p>
+	<span class="hint text-secondary">It is fetched from the internet the first time
+		it is opened, and cached by your browser afterwards.</span>
+</div>
 
 <!-- The one thing that has to exist before the editor does, because it is what
      gets said when the editor never arrives. Raw frames come from the camera
