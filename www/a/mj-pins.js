@@ -53,7 +53,100 @@
 	// The camera drives these itself; the rest it only wires up and leaves
 	// alone. The consequence differs, so the detail pane says which — never
 	// leaving somebody to infer it from the word.
-	const DRIVEN = { gpio: true, pwm: true };
+	//
+	// `gpio` is NOT in here, and that is a correction rather than an omission.
+	// A plain on/off pin the camera merely wires up is an INPUT: something
+	// else drives it and the camera reads it. Saying "the camera drives this
+	// pin itself" of one was wrong before levels existed and is visibly wrong
+	// now that the owner can choose. drivesSentence() below says which,
+	// because with a level the answer depends on the level.
+	const DRIVEN = { pwm: true };
+
+	// What the camera can be told to do with a plain on/off pin.
+	//
+	// Imperatives, all three, because this is a control and not a readout —
+	// see levelSentence(), which is declarative for exactly that reason. The
+	// first one is not called "Input": that single word is the whole
+	// difference between "the camera reads this" and "this is what the pin
+	// is", and it is the way this feature misleads.
+	const LEVELS = [
+		{ k: 'float', label: 'Don’t drive it' },
+		{ k: 'low', label: 'Hold it low' },
+		{ k: 'high', label: 'Hold it high' },
+	];
+
+	// Which levels are on offer here. Empty for anything but a plain on/off
+	// pin — a bus drives its own wires — and empty for a camera that did not
+	// send a `levels` list, which is how an older one says it does not do this
+	// at all. The page then shows no control, reserves no space and claims
+	// nothing.
+	function levelsFor(doc, offer) {
+		const known = (doc && doc.levels) || null;
+		if (!known || !known.length) return [];
+		if (!offer || offer.use !== 'gpio') return [];
+		return LEVELS.filter((l) => known.indexOf(l.k) >= 0);
+	}
+
+	// Clamp a level to what is on offer. Everything that reaches the DOM or a
+	// comparison goes through here, so a spelling this page does not know —
+	// from a newer camera, or a hand-edited file — reads as "not driven"
+	// rather than becoming an attribute nothing styles.
+	function normLevel(levels, level) {
+		if (!levels || !levels.length) return null;
+		return levels.some((l) => l.k === level) ? level : levels[0].k;
+	}
+
+	// Two facts now, and either one of them is a change. This is the function
+	// the Keep button hangs on: a level-only edit has the same signal as the
+	// saved row, and comparing signals alone left the bar grey over a real
+	// change.
+	function sameChoice(a, b) {
+		if (!a || !b) return !a && !b;
+		return a.signal === b.signal && (a.level || null) === (b.level || null);
+	}
+
+	// The list the camera is sent, composed out of the edits on this page and
+	// the rows it already had. Pure and exported because its bug is silent: a
+	// pin dropped here is a pin the camera stops managing.
+	function mergePins(pending, saved) {
+		const out = [];
+		const seen = {};
+		Object.keys(pending || {}).forEach((k) => {
+			const pin = Number(k);
+			seen[pin] = true;
+			const e = pending[k];
+			if (!e) return;
+			const row = { pin: pin, signal: e.signal };
+			// Sent even when it is "float", so that "the owner chose not to
+			// drive this one" and "a page that never knew about levels wrote
+			// this row" are not the same bytes. The camera re-applies this at
+			// every start, and the difference decides whether it lets go of a
+			// pad it used to hold.
+			if (e.signal === 'gpio' && e.level) row.level = e.level;
+			out.push(row);
+		});
+		(saved || []).forEach((row) => {
+			if (seen[row.pin]) return;
+			const r = { pin: row.pin, signal: row.signal };
+			if (row.signal === 'gpio' && row.level) r.level = row.level;
+			out.push(r);
+		});
+		return out;
+	}
+
+	// Every edit that actually changes something. Choosing what a pin already
+	// is is not a change, and must not arm the bar.
+	function changedPins(pending, saved) {
+		const rows = saved || [];
+		return Object.keys(pending || {})
+			.map(Number)
+			.filter((p) => {
+				const row = rows.find((r) => r.pin === p);
+				const was = row
+					? { signal: row.signal, level: row.level || null } : null;
+				return !sameChoice(pending[p] || null, was);
+			});
+	}
 
 	// How one choice reads: the family, the port or channel where the chip has
 	// more than one, and the wire's own name. The wire names are the ones
@@ -75,6 +168,66 @@
 	const RESTING = 'Soldered something to the chip? Tell the camera which pin ' +
 		'it went to. The blank pads are the camera\u2019s own \u2014 power, ground, ' +
 		'the flash, the picture sensor.';
+
+	// What the camera does with this pin, given what it has been told. One
+	// line that changes in place, which is the idiom this pane already has —
+	// a segmented control has no room for a hint under each option, and three
+	// hints would say the same thing three ways.
+	//
+	// No volts anywhere: the page cannot know the rail. No "pull-up",
+	// "open-drain", "tri-state" or "high-Z" either — those are the datasheet's
+	// words, and "pulls it down" is what somebody says with an iron in their
+	// hand.
+	function drivesSentence(offer, level) {
+		if (!offer) return '';
+		if (offer.use !== 'gpio') {
+			return DRIVEN[offer.use]
+				? 'The camera drives this pin itself.'
+				: 'The camera sets this pin up and leaves it alone — whatever you ' +
+				'soldered to it takes over from there.';
+		}
+		if (level === 'low') return 'The camera pulls this pin down and holds it there.';
+		if (level === 'high') return 'The camera pushes this pin up and holds it there.';
+		return 'The camera reads this pin and drives nothing onto it.';
+	}
+
+	// The sizer for the live-level cell, and the honest answer when there is
+	// nothing to say. Same double duty as RESTING above.
+	const LEVEL_RESTING = 'The camera is not saying what this pin is doing right now.';
+
+	// What the pin IS, as opposed to what it was told. Declarative, where the
+	// control is imperative: "Hold it high" is a instruction that may not have
+	// taken, "Right now it is high" is a reading. If both rendered the same
+	// word with the same weight, people would read the control as a readout
+	// and conclude the camera was not obeying them.
+	function levelSentence(feed, level) {
+		if (feed === 'live' && level === 'high') return 'Right now it is high.';
+		if (feed === 'live' && level === 'low') return 'Right now it is low.';
+		if (feed === 'opening') return 'Asking the camera what it is right now\u2026';
+		return LEVEL_RESTING;
+	}
+
+	// Pin -> the attribute the drawing carries, and NOTHING unless the feed is
+	// live. This is the rule the whole live readout hangs on: a pin shown as
+	// low that is actually high is a wiring decision made on a lie, so the
+	// moment the socket closes every mark comes off. Separated out so a test
+	// can hold it without a DOM.
+	function levelAttrs(feed, at, pads) {
+		const out = {};
+		if (feed !== 'live' || !at) return out;
+		const known = {};
+		(pads || []).forEach((p) => { if (p.pin != null) known[p.pin] = true; });
+		Object.keys(at).forEach((k) => {
+			const v = at[k];
+			// A value off a websocket must not become a DOM attribute unvetted,
+			// and a pin the camera reports that is not on this chip is not
+			// ours to draw.
+			if (!known[k]) return;
+			if (v === 0 || v === 'low') out[k] = 'low';
+			else if (v === 1 || v === 'high') out[k] = 'high';
+		});
+		return out;
+	}
 
 	// And the line while a family is lit. Pure, so tests/pins.test.js can check
 	// the one thing the no-jump layout depends on — that none of these is
@@ -360,38 +513,54 @@
 		// there is one, otherwise the saved row. `null` in `pending` is the
 		// deliberate "set it back to nothing" — distinct from having no edit,
 		// which is what makes clearing a saved pin possible at all.
-		function savedUse(pin) {
+		//
+		// An ENTRY is one object, {signal, level}, not a signal here and a
+		// level in a second map beside it. Two maps would break the three
+		// things this file depends on: a level-only edit would be absent from
+		// `pending` entirely, so changed() would miss it and the Keep button
+		// would stay grey over a real change; a pin taken from gpio to a bus
+		// and back would leave a stale level behind, and Keep would start
+		// driving a pad somebody has a relay on; and "set it back to nothing"
+		// is one null here with no partner over there.
+		function savedChoice(pin) {
 			const row = ((doc && doc.saved) || []).find((r) => r.pin === pin);
-			return row ? row.signal : null;
+			if (!row) return null;
+			const offer = offerOfPin(pin, row.signal);
+			const levels = levelsFor(doc, offer);
+			return {
+				signal: row.signal,
+				level: levels.length ? normLevel(levels, row.level) : null,
+			};
+		}
+		function currentChoice(pin) {
+			return Object.prototype.hasOwnProperty.call(pending, pin)
+				? pending[pin] : savedChoice(pin);
+		}
+		// The signal alone, for the callers that only want that.
+		function savedUse(pin) {
+			const c = savedChoice(pin);
+			return c ? c.signal : null;
 		}
 		function currentUse(pin) {
-			return Object.prototype.hasOwnProperty.call(pending, pin)
-				? pending[pin] : savedUse(pin);
+			const c = currentChoice(pin);
+			return c ? c.signal : null;
+		}
+		function offerOfPin(pin, id) {
+			return offerOf(((doc && doc.pads) || []).find((p) => p.pin === pin), id);
 		}
 
-		// Every edit that actually changes something. Choosing what a pin
-		// already is is not a change, and must not arm the bar.
+		// Every edit that actually changes something.
 		function changed() {
 			return Object.keys(pending)
 				.map(Number)
-				.filter((p) => pending[p] !== savedUse(p));
+				.filter((p) => !sameChoice(pending[p] || null, savedChoice(p)));
 		}
 
 		// The WHOLE list, because the camera replaces its list with what
 		// arrives: a pin left out is one set back to nothing, which is exactly
 		// what a cleared pin should be.
 		function wholeList() {
-			const out = [];
-			const seen = {};
-			Object.keys(pending).forEach((k) => {
-				const pin = Number(k);
-				seen[pin] = true;
-				if (pending[k] != null) out.push({ pin: pin, signal: pending[k] });
-			});
-			((doc && doc.saved) || []).forEach((row) => {
-				if (!seen[row.pin]) out.push({ pin: row.pin, signal: row.signal });
-			});
-			return out;
+			return mergePins(pending, (doc && doc.saved) || []);
 		}
 
 		// Lighting a family is one attribute and one sentence. Nothing is
@@ -483,6 +652,99 @@
 			if (beat) { clearInterval(beat); beat = null; }
 		}
 
+		// ── what the pins are doing, live ─────────────────────────────────────
+
+		let ws = null, reopen = null, retry = 1000, everOpen = false;
+		let queued = false;
+
+		// Coalesced onto a frame. A pin toggling fast would otherwise call
+		// applyLevels() at whatever rate the camera publishes. A background tab
+		// stops firing rAF, so the flag stays set and one apply runs on return
+		// with the latest state — which is the right behaviour, not a bug.
+		function levelsArrived() {
+			if (queued || dead) return;
+			queued = true;
+			const run = () => { queued = false; if (!dead) applyLevels(); };
+			if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+			else setTimeout(run, 16);
+		}
+
+		function wsOpen() {
+			// Only once the GET has succeeded. A handshake reaches JS as an
+			// opaque onerror with no status, so a socket can never be the thing
+			// that discovers the session has gone — refresh() goes through the
+			// shared fetch, which is what turns a signed-out session into the
+			// login redirect.
+			if (dead || ws || reopen) return;
+			if (!doc || !doc.have || !doc.levels || !doc.levels.length) return;
+			feed = 'opening';
+			applyLevels();
+			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+			try {
+				ws = new WebSocket(proto + '://' + location.host + '/ws/pins');
+			} catch (e) {
+				// A blocked or mixed-content URL throws right here, and an
+				// uncaught throw would take the rest of refresh() with it.
+				ws = null;
+				feed = 'gone';
+				applyLevels();
+				return;
+			}
+			ws.onopen = () => {
+				if (dead) return;
+				retry = 1000;
+				// A reconnect has missed every change in between. The camera
+				// sends a whole state on connect, so this is the belt rather
+				// than the braces — but a page that has been away deserves the
+				// saved list re-read too.
+				if (everOpen) refresh();
+				everOpen = true;
+			};
+			ws.onmessage = (ev) => {
+				if (dead) return;
+				let d = null;
+				try { d = JSON.parse(ev.data); } catch (e) { return; }
+				if (!d || !Array.isArray(d.pins)) return;
+				if (d.full) at = {};
+				d.pins.forEach((r) => {
+					if (r == null || typeof r.pin !== 'number') return;
+					if (r.gone) { delete at[r.pin]; return; }
+					// null is "it would not answer", which is not a level and
+					// must not be drawn as one.
+					if (r.level === 0 || r.level === 1) at[r.pin] = r.level;
+					else delete at[r.pin];
+				});
+				feed = 'live';
+				levelsArrived();
+			};
+			ws.onerror = () => { /* onclose follows; nothing to do here */ };
+			ws.onclose = () => {
+				ws = null;
+				if (dead) return;
+				// Every mark comes off the moment the feed stops. A stale level
+				// is worse than none: a pin shown as low that is actually high
+				// is a wiring decision made on a lie.
+				feed = 'gone';
+				at = {};
+				applyLevels();
+				reopen = setTimeout(() => { reopen = null; wsOpen(); }, retry);
+				retry = Math.min(retry * 2, 30000);
+			};
+		}
+
+		function wsShut() {
+			if (reopen) { clearTimeout(reopen); reopen = null; }
+			if (ws) {
+				// Nulled before closing, so a close landing after teardown
+				// cannot schedule a reconnect onto a page that has gone.
+				ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+				try { ws.close(); } catch (e) { /* already gone */ }
+				ws = null;
+			}
+			feed = 'shut';
+			at = {};
+		}
+
 		// While the page is open and healthy it tells the camera so, which is
 		// why nobody watching ever sees the window expire. It fires only when
 		// the thing that would have noticed is gone.
@@ -516,7 +778,19 @@
 						const first = (d.pads || []).find((p) => p.pin != null);
 						sel = first ? first.pin : null;
 					}
+					// The whole first state, so the first delta is already
+					// complete — including pins that will never change and so
+					// will never produce one. Seeded, not shown: nothing is
+					// drawn until the socket says it is live.
+					if (d.at && typeof d.at === 'object') {
+						at = {};
+						Object.keys(d.at).forEach((k) => {
+							const v = d.at[k];
+							if (v === 0 || v === 1) at[k] = v;
+						});
+					}
 					paint();
+					wsOpen();
 				})
 				.catch((e) => {
 					if (dead) return;
@@ -527,6 +801,49 @@
 		}
 
 		// ── the chip ──────────────────────────────────────────────────────────
+
+		// Pin -> its lead button, so a level arriving does not have to query
+		// the DOM. Cleared and refilled by chip().
+		let leadByPin = {};
+
+		// What the camera says the pins are doing, and whether it is still
+		// saying it. `at` is NEVER merged into `pending`: `pending` is what the
+		// owner asked for and `at` is what the pin is, and keeping them apart
+		// is what makes "a pushed level armed the Keep button" impossible
+		// rather than merely unlikely.
+		let at = {};
+		let feed = 'shut'; // 'shut' | 'opening' | 'live' | 'gone'
+
+		function padTitle(pad, c, want) {
+			let t = 'Pin ' + pad.pin + ' \u2014 ' +
+				(pad.used || (c && c.use !== 'gpio' ? offerLabel(c) : 'free'));
+			if (want && want.signal === 'gpio' && want.level === 'low') t += ', held low';
+			else if (want && want.signal === 'gpio' && want.level === 'high') t += ', held high';
+			const live = levelAttrs(feed, at, (doc && doc.pads) || [])[pad.pin];
+			if (live) t += ' \u2014 right now it is ' + live;
+			return t;
+		}
+
+		// One attribute per lead, and nothing else touched — the same shape as
+		// applyLit(), and for the same reason: the hover highlight depends on
+		// there being no repaint, so a level arriving must never rebuild.
+		function applyLevels() {
+			const marks = levelAttrs(feed, at, (doc && doc.pads) || []);
+			Object.keys(leadByPin).forEach((k) => {
+				const b = leadByPin[k];
+				if (!b) return;
+				if (marks[k]) b.setAttribute('data-level', marks[k]);
+				else b.removeAttribute('data-level');
+			});
+			if (nowEl) {
+				nowEl.textContent = levelSentence(feed,
+					sel == null ? null : marks[sel]);
+			}
+		}
+
+		// The live-level paragraph in the detail pane, when the pane has one,
+		// and the two lines refreshChoice() rewrites in place.
+		let nowEl = null, drivesEl = null, whatEl = null;
 
 		function lead(pad) {
 			const b = el('button', 'mj-pin-lead');
@@ -573,16 +890,19 @@
 					w.bus === null ? 'var(--bs-primary)' : busColour(w.bus));
 			});
 
-			const want = currentUse(pad.pin);
-			const shown = want || pad.now;
+			const want = currentChoice(pad.pin);
+			const shown = (want && want.signal) || pad.now;
 			const c = offerOf(pad, shown);
 			const u = c ? BY_KEY[c.use] : null;
-			if (want !== savedUse(pad.pin)) b.className += ' mj-pin-changed';
+			if (!sameChoice(want, savedChoice(pad.pin))) b.className += ' mj-pin-changed';
 			else if (pad.used || want) b.className += ' mj-pin-taken mj-pin-c' + (u ? u.c : 'a');
 			if (sel === pad.pin) b.className += ' mj-pin-sel';
 
-			b.title = 'Pin ' + pad.pin + ' \u2014 ' +
-				(pad.used || (c && c.use !== 'gpio' ? offerLabel(c) : 'free'));
+			b.title = padTitle(pad, c, want);
+			// Registered so applyLevels() can reach this lead without asking
+			// the DOM for it. Rebuilt every paint(), because paint() throws
+			// every button away.
+			leadByPin[pad.pin] = b;
 			b.addEventListener('click', () => { sel = pad.pin; paint(); });
 			return b;
 		}
@@ -609,6 +929,10 @@
 		}
 
 		function chip() {
+			// Every lead is about to be thrown away and rebuilt, so the map
+			// starts empty rather than holding buttons that are no longer in
+			// the document.
+			leadByPin = {};
 			const pads = (doc && doc.pads) || [];
 			const s = sides(pads.length);
 			cols = Math.max(s.top, s.bottom, 1);
@@ -744,8 +1068,8 @@
 				return pane;
 			}
 
-			const want = currentUse(pad.pin);
-			const edited = want !== savedUse(pad.pin);
+			const want = currentChoice(pad.pin);
+			const edited = !sameChoice(want, savedChoice(pad.pin));
 			// Two different facts, and the pane says the same one twice rather
 			// than one in the heading and the other underneath. What the pad IS
 			// comes from the register; what the camera was TOLD comes from the
@@ -755,10 +1079,19 @@
 			// never disagree — the first draft headed a pin Serial and then
 			// said nothing was connected to it, with Nothing ticked.
 			const nowOffer = offerOf(pad, pad.now);
-			pane.appendChild(el('p', 'mj-pins-what',
+			// A pin the owner is holding is not free — the camera has hold of
+			// it. Saying "Free" at the top of the pane about a pad that is
+			// being driven is the first thing read and the wrongest.
+			const heldWord = want && want.signal === 'gpio' && want.level === 'low'
+				? 'Held low'
+				: want && want.signal === 'gpio' && want.level === 'high'
+					? 'Held high' : null;
+			whatEl = el('p', 'mj-pins-what',
 				pad.used ? pad.used
-					: nowOffer && nowOffer.use !== 'gpio'
-						? offerLabel(nowOffer) : 'Free'));
+					: heldWord ? heldWord
+						: nowOffer && nowOffer.use !== 'gpio'
+							? offerLabel(nowOffer) : 'Free');
+			pane.appendChild(whatEl);
 			pane.appendChild(el('p', 'mj-pins-sub',
 				edited ? 'Changed here. Not kept yet.'
 					: pad.used ? 'The camera drives this pin itself.'
@@ -788,27 +1121,127 @@
 			rows.forEach((o) => {
 				const b = el('button', 'mj-pins-choice');
 				b.type = 'button';
-				if (o.id === want) b.className += ' mj-pins-choice-on';
+				if (o.id === (want && want.signal)) b.className += ' mj-pins-choice-on';
 				b.appendChild(el('span', 'mj-pins-dot mj-pins-c' + o.c));
 				const txt = el('span', 'mj-pins-choice-txt');
 				txt.appendChild(el('b', null, o.label));
 				txt.appendChild(el('em', null, o.hint));
 				b.appendChild(txt);
 				b.addEventListener('click', () => {
-					pending[pad.pin] = o.id;
+					if (!o.id) { pending[pad.pin] = null; paint(); return; }
+					// The level is carried across only when the pin stays a
+					// plain on/off signal; anything else starts from the inert
+					// one. THE DEFAULT MUST BE INERT: picking "On / off signal"
+					// must never begin driving a pad, and this is the line
+					// where that would go wrong.
+					const levels = levelsFor(doc, offerOf(pad, o.id));
+					const carried = want && want.signal === 'gpio' ? want.level : null;
+					pending[pad.pin] = {
+						signal: o.id,
+						level: levels.length ? normLevel(levels, carried) : null,
+					};
 					paint();
 				});
 				pane.appendChild(b);
 			});
 
-			const wantOffer = offerOf(pad, want);
+			const wantOffer = offerOf(pad, want && want.signal);
+
+			// The level control. Only where the chosen signal is a plain on/off
+			// pin, and never on a pad the camera drives itself — that one is
+			// not the owner's to hold, and the camera refuses it at the door
+			// anyway. The `pad.used` belt is here as well as the gate falling
+			// out of currentChoice() being null, because a saved row for a pin
+			// the camera has since claimed would otherwise slip through.
+			const levels = pad.used ? [] : levelsFor(doc, wantOffer);
+			if (levels.length > 1) {
+				pane.appendChild(head('What the camera does with it'));
+				const seg = el('div', 'mj-seg mj-seg-stack');
+				seg.setAttribute('role', 'group');
+				seg.setAttribute('aria-label', 'What the camera does with pin ' + pad.pin);
+				const name = 'mj-pin-level-' + pad.pin;
+				levels.forEach((lv) => {
+					const id = name + '-' + lv.k;
+					const inp = el('input', 'mj-seg-in');
+					inp.type = 'radio';
+					inp.name = name;
+					inp.id = id;
+					inp.autocomplete = 'off';
+					if (lv.k === want.level) inp.checked = true;
+					const lbl = el('label', 'mj-seg-lbl', lv.label);
+					lbl.setAttribute('for', id);
+					inp.addEventListener('change', () => {
+						if (!inp.checked) return;
+						pending[pad.pin] = { signal: want.signal, level: lv.k };
+						// NOT paint(). The choice rows above call it, which
+						// destroys the clicked button and drops focus to the
+						// body — survivable for a button, fatal for a control
+						// you navigate with the arrow keys, where every press
+						// would rebuild the radios and the keyboard user could
+						// move exactly once.
+						refreshChoice(pad);
+					});
+					seg.appendChild(inp);
+					seg.appendChild(lbl);
+				});
+				pane.appendChild(seg);
+			}
+
 			if (wantOffer) {
-				pane.appendChild(el('p', 'mj-pins-drives', DRIVEN[wantOffer.use]
-					? 'The camera drives this pin itself.'
-					: 'The camera sets this pin up and leaves it alone — whatever you ' +
-					'soldered to it takes over from there.'));
+				drivesEl = el('p', 'mj-pins-drives',
+					drivesSentence(wantOffer, want && want.level));
+				pane.appendChild(drivesEl);
+			} else {
+				drivesEl = null;
+			}
+
+			// What the pin IS right now, as opposed to what it was told. Shown
+			// for a pad the camera drives itself too, even though that one gets
+			// no control: "the IR-cut opening coil is high right now" is worth
+			// knowing, and a readout is a fact rather than a permission.
+			//
+			// Two stacked in one grid cell, the same trick the intro box uses:
+			// a hidden sizer holding the longest sentence, and the live one
+			// over it, so text arriving cannot change the pane's height.
+			nowEl = null;
+			if ((doc && doc.levels && doc.levels.length) &&
+				(wantOffer ? wantOffer.use === 'gpio' : !!pad.used)) {
+				const box = el('div', 'mj-pins-now');
+				box.appendChild(el('span', 'mj-pins-now-sizer', LEVEL_RESTING));
+				nowEl = el('span', 'mj-pins-now-live');
+				box.appendChild(nowEl);
+				pane.appendChild(box);
 			}
 			return pane;
+		}
+
+		// Everything a level change alters, written in place. No node is
+		// created or destroyed, so focus and the hover highlight both survive
+		// — which is the whole reason it exists beside paint() rather than
+		// being paint().
+		function refreshChoice(pad) {
+			const want = currentChoice(pad.pin);
+			const wantOffer = offerOf(pad, want && want.signal);
+			if (drivesEl) {
+				drivesEl.textContent = drivesSentence(wantOffer, want && want.level);
+			}
+			if (whatEl) {
+				whatEl.textContent = pad.used ? pad.used
+					: want && want.signal === 'gpio' && want.level === 'low' ? 'Held low'
+						: want && want.signal === 'gpio' && want.level === 'high' ? 'Held high'
+							: (() => {
+								const n = offerOf(pad, pad.now);
+								return n && n.use !== 'gpio' ? offerLabel(n) : 'Free';
+							})();
+			}
+			const b = leadByPin[pad.pin];
+			if (b) {
+				const c = offerOf(pad, (want && want.signal) || pad.now);
+				b.title = padTitle(pad, c, want);
+				const changedNow = !sameChoice(want, savedChoice(pad.pin));
+				b.classList.toggle('mj-pin-changed', changedNow);
+			}
+			paintBar();
 		}
 
 		// ── the change bar ────────────────────────────────────────────────────
@@ -955,8 +1388,10 @@
 			fit();
 			// A repaint rebuilds every row and every lead, so whatever was lit
 			// has to be put back or choosing a pin would drop the highlight
-			// that led you to it.
+			// that led you to it. The level marks go back on for the same
+			// reason and in the same breath.
 			applyLit();
+			applyLevels();
 		}
 
 		// The column changes width without the window doing so — the rail
@@ -986,6 +1421,7 @@
 				dead = true;
 				document.removeEventListener('keydown', onKey);
 				stopClocks();
+				wsShut();
 				if (ro) ro.disconnect();
 				else window.removeEventListener('resize', fit);
 				// A window left open is one nothing is watching. Put the pads
@@ -1003,7 +1439,11 @@
 		offerLabel: offerLabel, offerHint: offerHint, padsFor: padsFor,
 		wiresFor: wiresFor, busColour: busColour, padWire: padWire,
 		WIRE_GUTTER: WIRE_GUTTER, RING_CLEAR: RING_CLEAR,
-		RESTING: RESTING, litSentence: litSentence };
+		RESTING: RESTING, litSentence: litSentence,
+		LEVELS: LEVELS, levelsFor: levelsFor, normLevel: normLevel,
+		sameChoice: sameChoice, mergePins: mergePins, changedPins: changedPins,
+		drivesSentence: drivesSentence, levelSentence: levelSentence,
+		levelAttrs: levelAttrs, LEVEL_RESTING: LEVEL_RESTING };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticPins = api;
 })();
