@@ -194,26 +194,42 @@ ssr_byte() {
 # could show its owner separated the two, so "use a faster card" was advice
 # nobody could act on (OpenIPC/firmware#1747).
 #
+# Answers in two ways, and the difference is the whole point of the second one:
+# `rating` when the register decoded, `ratingWhy` when it did not. WHY it did
+# not is not a detail — the sysfs attribute does not exist at all on some
+# platforms (absent on Ingenic T31's 3.10 kernel, present on HiSilicon's 4.9),
+# and saying "this card does not report its speed ratings" there blames a card
+# that reports them perfectly well for something its camera cannot read.
+#
+#   platform    the kernel here has no such attribute — nothing to do with
+#               this card, and another camera would read it
+#   unreadable  the attribute is there and did not decode
+#   notsd       an SD structure asked of something that is not an SD card
+#
 # Every field is checked against the set the spec defines, and the WHOLE
 # register is dropped if any one of them falls outside it. A rating decoded
 # wrongly and printed as fact is worse than no rating at all, and a kernel that
 # filled this register in differently is exactly what an unexpected value looks
-# like. SSR is an SD-card structure, so a slot holding anything else has none.
+# like.
 card_rating() {
-	[ "$(sysf type)" = "SD" ] || return 1
+	[ "$(sysf type)" = "SD" ] || { printf '"ratingWhy":"notsd",'; return; }
+	[ -e "$SYS/device/ssr" ] || { printf '"ratingWhy":"platform",'; return; }
 	r_s=$(sysf ssr | tr -d ' \n')
-	[ ${#r_s} -eq 128 ] || return 1
-	r_sc=$(ssr_byte "$r_s" 8)  || return 1
-	r_ug=$(ssr_byte "$r_s" 14) || return 1
-	r_vc=$(ssr_byte "$r_s" 15) || return 1
-	r_ac=$(ssr_byte "$r_s" 21) || return 1
+	[ ${#r_s} -eq 128 ] || { printf '"ratingWhy":"unreadable",'; return; }
+	{
+		r_sc=$(ssr_byte "$r_s" 8)  &&
+		r_ug=$(ssr_byte "$r_s" 14) &&
+		r_vc=$(ssr_byte "$r_s" 15) &&
+		r_ac=$(ssr_byte "$r_s" 21)
+	} || { printf '"ratingWhy":"unreadable",'; return; }
 	# UHS grade is the high nibble of its byte, app class the low nibble of its.
 	r_ug=$((r_ug / 16)); r_ac=$((r_ac % 16))
 	# Speed class is an enum, not the number printed on the card.
-	case "$r_sc" in 0) r_sc=0;; 1) r_sc=2;; 2) r_sc=4;; 3) r_sc=6;; 4) r_sc=10;; *) return 1;; esac
-	case "$r_ug" in 0|1|3) ;; *) return 1;; esac
-	case "$r_vc" in 0|6|10|30|60|90) ;; *) return 1;; esac
-	case "$r_ac" in 0|1|2) ;; *) return 1;; esac
+	case "$r_sc" in 0) r_sc=0;; 1) r_sc=2;; 2) r_sc=4;; 3) r_sc=6;; 4) r_sc=10;;
+		*) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_ug" in 0|1|3) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_vc" in 0|6|10|30|60|90) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_ac" in 0|1|2) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
 	printf '"rating":{"speedClass":%s,"uhsGrade":%s,"videoClass":%s,"appClass":%s},' \
 		"$r_sc" "$r_ug" "$r_vc" "$r_ac"
 }

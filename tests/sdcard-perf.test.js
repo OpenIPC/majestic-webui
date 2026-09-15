@@ -164,13 +164,38 @@ async function main() {
 	}
 
 	{
-		// No register, no claim. A dash in the row would read as "this card is
-		// rated for nothing", which is a different and much worse sentence.
-		const h = await drawn(load(card(), beat()));
-		check('a card that reports no ratings is not given an empty one',
-			h.indexOf('does not report its speed ratings') >= 0, h.slice(0, 200));
-		check('and is not marked as lacking an app rating it never claimed',
+		// The attribute does not exist on this platform. The card is very
+		// likely rated perfectly well and another camera would read it, so the
+		// sentence must not be about the card — this is the case that made the
+		// distinction necessary: measured on an Ingenic T31 (3.10 kernel) whose
+		// slot held a 2021 SanDisk 64 GB, against a HiSilicon 4.9 that reads
+		// the same register without trouble.
+		const h = await drawn(load(card({ ratingWhy: 'platform' }), beat()));
+		check('a platform that cannot read the register says so about itself',
+			h.indexOf('this camera cannot read card speed ratings') >= 0, h.slice(0, 300));
+		check('and does not blame the card for it',
+			h.indexOf('this card’s speed ratings could not be read') < 0 &&
+			h.indexOf('does not report its speed ratings') < 0, 'blamed the card');
+		check('nor is the card marked as lacking an app rating it never claimed',
 			h.indexOf('sequential only') < 0, 'convicted on no evidence');
+	}
+
+	{
+		const h = await drawn(load(card({ ratingWhy: 'unreadable' }), beat()));
+		check('a register that is there and will not decode blames neither',
+			h.indexOf('speed ratings could not be read') >= 0, h.slice(0, 300));
+		check('and still prints no rating of its own',
+			h.indexOf('Class ') < 0, 'invented a rating');
+	}
+
+	{
+		// An SD structure asked of something that is not an SD card. There is
+		// no answer worth printing, so the row is not drawn at all.
+		const h = await drawn(load(card({ ratingWhy: 'notsd' }), beat()));
+		check('a slot holding no SD card is given no ratings row',
+			h.indexOf('Rated') < 0, h.slice(0, 300));
+		check('while the rest of the panel still draws',
+			h.indexOf('Performance') >= 0, 'lost the panel');
 	}
 
 	group('what the card is actually doing');

@@ -190,11 +190,22 @@
 	// (OpenIPC/firmware#1747).
 	function ratingRow(d) {
 		const r = d.rating;
-		// Not every slot holds an SD card, and not every kernel fills the
-		// register in. Saying nothing is the honest answer; a dash in the row
-		// would read as "this card is rated for nothing".
 		if (!r) {
-			return '<dt>Rated</dt><dd class="text-secondary">this card does not report its speed ratings</dd>';
+			// WHY there is no rating decides who is at fault, and getting that
+			// backwards is the easy mistake here. The sysfs attribute does not
+			// exist on every platform — it is absent on the Ingenic 3.10
+			// kernels and present on HiSilicon's 4.9 — so the same card reads
+			// as unrated on one camera and A2 on another. Saying "this card
+			// does not report its ratings" on the first blames the card for
+			// something only the camera is short of.
+			//
+			// An SD structure asked of an eMMC has no answer worth printing at
+			// all, so that row is simply not drawn.
+			if (d.ratingWhy === 'notsd') return '';
+			const why = d.ratingWhy === 'platform'
+				? 'this camera cannot read card speed ratings'
+				: 'this card’s speed ratings could not be read';
+			return '<dt>Rated</dt><dd class="text-secondary">' + why + '</dd>';
 		}
 		const badges = [];
 		if (r.speedClass) badges.push('Class ' + r.speedClass);
