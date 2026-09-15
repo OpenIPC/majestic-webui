@@ -1146,16 +1146,47 @@
 		if (!night) return;
 		const active = v => v !== false && v != null;
 		const lm = active(getDotted(state.config, 'nightMode.lightMonitor'));
+		// A switch that is OFF, in any of the spellings one can arrive in.
+		// majestic writes booleans as booleans, but a hand-edited
+		// majestic.yaml can leave "false" quoted and nothing on the way in
+		// retypes it — the same reason ircut-check carries this pair. Not
+		// !truthy: these four keys default ON, so absent has to stay distinct
+		// from off, or a camera whose daemon predates a key would read as
+		// having switched it off.
+		const isOff = v => v === false || v === 'false' || v === 0 || v === '0';
+		const cfgOff = k => isOff(getDotted(state.config, 'nightMode.' + k));
+		// Whether day and night move each actuator at all. Distinct from
+		// parked: a filter that does not follow dusk is still the daemon's to
+		// drive, and the switch below still moves it, which is the whole point
+		// of the setting.
+		const ircutFollows = !cfgOff('irCutAuto');
+		const lightFollows = !cfgOff('backlightAuto');
 
-		// The monitor is driving all three, so three dead switches say less than
-		// one sentence naming what has the wheel — and where to go to take it
-		// back. The old panel showed the switches anyway with a small link
-		// beside them.
+		// The monitor drives what it drives, and that is no longer always all
+		// three. Where it has everything, three dead switches say less than
+		// one sentence naming what has the wheel and where to take it back.
+		// Where an actuator has been told not to follow day/night, its switch
+		// is the only way to move it, so the group stays and the monitor's own
+		// switches are the dead ones.
 		if (lm) {
-			const grp = root.querySelector('.mj-hud-rt');
-			if (grp) grp.hidden = true;
-			if (lightmon) lightmon.hidden = false;
-			return;
+			const drives = ['night'].concat(
+				ircutFollows ? ['IR\u2011cut'] : [],
+				lightFollows ? ['the lamp'] : []);
+			const named = drives.length > 1
+				? drives.slice(0, -1).join(', ') + ' and ' + drives[drives.length - 1]
+				: drives[0];
+			if (lightmon) {
+				const say = 'Automatic day/night is driving ' + named;
+				const a = lightmon.querySelector('a');
+				if (a) a.textContent = say;
+				lightmon.title = say.replace(/\u2011/g, '-');
+				lightmon.hidden = false;
+			}
+			if (ircutFollows && lightFollows) {
+				const grp = root.querySelector('.mj-hud-rt');
+				if (grp) grp.hidden = true;
+				return;
+			}
 		}
 
 		// Parked (nightMode.*Enabled: false) outranks wired: the daemon
@@ -1164,38 +1195,70 @@
 		// was never given is one it knows nothing about, and reading that as
 		// "switched off" would grey out the control on a camera whose filter
 		// is working perfectly.
-		const ircutParked =
-			getDotted(state.config, 'nightMode.irCutEnabled') === false;
-		const lightParked =
-			getDotted(state.config, 'nightMode.backlightEnabled') === false;
-		ircut.disabled = ircutParked ||
+		const ircutParked = cfgOff('irCutEnabled');
+		const lightParked = cfgOff('backlightEnabled');
+		// Reached only where something is still the operator's, so anything
+		// the monitor does drive is dead here — pressing it would move and
+		// snap back on the monitor's next tick.
+		const monNight = lm, monIrcut = lm && ircutFollows,
+			monLight = lm && lightFollows;
+		night.disabled = monNight;
+		ircut.disabled = monIrcut || ircutParked ||
 			!active(getDotted(state.config, 'nightMode.irCutPin1'));
-		light.disabled = lightParked ||
+		light.disabled = monLight || lightParked ||
 			!active(getDotted(state.config, 'nightMode.backlightPin'));
 		// A control that cannot work should say which pin is missing — or that
-		// the actuator is deliberately parked — rather than just refusing.
+		// the actuator is deliberately parked, or that the monitor has it —
+		// rather than just refusing.
+		const MON = 'Automatic day/night is driving this one.';
+		if (night.disabled && lbl('toggle-night'))
+			lbl('toggle-night').title = MON;
 		if (ircut.disabled && lbl('toggle-ircut'))
-			lbl('toggle-ircut').title = ircutParked
+			lbl('toggle-ircut').title = monIrcut ? MON : ircutParked
 				? 'The IR-cut filter is switched off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
-			lbl('toggle-light').title = lightParked
+			lbl('toggle-light').title = monLight ? MON : lightParked
 				? 'The lamp is switched off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the night illuminator.';
 
-		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
-			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
-				.then(r => r.text()).then(v => { el2.checked = +v > 0; })
-				.catch(() => {}));
+		// Where each of the three actually is, from the camera. Used again
+		// after a night toggle, for the reason below.
+		//
+		// A reading that did not arrive leaves the switch alone rather than
+		// showing it off: a failed fetch is not a fact, and an empty or
+		// unparseable body coerces to 0 — which would report a lit lamp dark
+		// on a camera that simply did not answer.
+		//
+		// And the batches are generation-stamped, because there are two of
+		// them now: the one at mount and one after every toggle. Responses can
+		// land in any order, and an older one assigning last would put the
+		// pre-toggle reading back on the switch.
+		let gen = 0;
+		const readGauges = () => {
+			const mine = ++gen;
+			[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
+				apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
+					.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+					.then(v => {
+						if (mine !== gen) return;
+						const num = Number(String(v).trim());
+						if (String(v).trim() !== '' && !isNaN(num)) el2.checked = num > 0;
+					})
+					.catch(() => {}));
+		};
+		readGauges();
 
 		night.addEventListener('click', () => {
 			apiFetch('/night/toggle', { credentials: 'same-origin' })
 				.then(r => r.json()).then(data => {
 					night.checked = data;
-					// Night mode drives the filter and the light where they are
-					// not independently pinned, so the controls follow it.
-					if (!ircut.disabled) ircut.checked = data;
-					if (!light.disabled) light.checked = data;
+					// What the mode did to the other two is the camera's
+					// answer, not this page's guess. It used to assume both
+					// followed; an actuator told not to follow day/night does
+					// not move with it, and the switch would then show a
+					// filter somewhere it had not gone.
+					readGauges();
 				}).catch(() => {});
 		});
 		ircut.addEventListener('click', () => {
@@ -6074,7 +6137,11 @@
 			// absence (#325). One place builds the sample now, and both pages
 			// ask the same question of the same object.
 			ircutSample = s;
-			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
+			// The same question the Dashboard asks: a filter that does not
+			// follow day/night is supposed to disagree with it, so the clock
+			// behind the conflict finding must not run while it does not.
+			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000,
+				IRCUT.follows(nightCfg()));
 			paintNightInert(ircutSample.src);
 			paintFindings();
 			paintMonitor(s);

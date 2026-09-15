@@ -1357,6 +1357,65 @@ function runRest() {
 		check('day with a closed filter agrees',
 			!ic.diagnose(cfg, { night: 0, ircut: 0 }, { conflictS: 600, flips: 0 })
 				.some(x => x.id === 'conflict'));
+
+		// A filter told not to follow day/night is not merely allowed to
+		// disagree with the mode — disagreeing IS the setting working. The
+		// camera goes to night, the filter stays where its owner put it, and
+		// the two gauges differ for as long as that lasts, which is for ever.
+		// Convicting on it would make the one configuration that asks for this
+		// unusable, which is how it reached the daemon in the first place.
+		const notFollowing = Object.assign({ irCutAuto: false }, cfg);
+		check('a filter that does not follow day/night may disagree with it',
+			!ic.diagnose(notFollowing, conflicted, { conflictS: 600, flips: 0 })
+				.some(x => x.id === 'conflict'));
+		// Absent is not off: every camera before this key followed.
+		check('...while an absent switch still means it follows',
+			ic.diagnose(cfg, conflicted, { conflictS: 600, flips: 0 })
+				.some(x => x.id === 'conflict'));
+		check('...and so does an explicit true',
+			ic.diagnose(Object.assign({ irCutAuto: true }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
+		// It is the conflict rule that stands down, not the whole section: a
+		// camera hunting between day and night is hunting whatever the filter
+		// is doing.
+		check('the hunting finding is untouched by it',
+			ic.diagnose(notFollowing, conflicted, { conflictS: 0, flips: 9 })
+				.some(x => x.id === 'hunting'));
+
+		// A hand-edited majestic.yaml can leave a boolean quoted, and nothing
+		// on the way into the browser retypes it. Reading "false" as following
+		// would raise the banner on exactly the camera the setting exists for.
+		check('a quoted false is still off',
+			!ic.diagnose(Object.assign({ irCutAuto: 'false' }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
+		check('...and a quoted true is still on',
+			ic.diagnose(Object.assign({ irCutAuto: 'true' }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
+		// The same spellings on the park switch, which shared the strict
+		// comparison and the same failure.
+		check('a quoted false parks the filter too',
+			ic.diagnose(Object.assign({ irCutEnabled: 'false' }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).every(x => x.id !== 'conflict'));
+
+		// The clock, not just the sentence. Disagreement while the filter is
+		// not following is not a fault being tolerated, it is not a fault —
+		// so it must not be BANKED either, or turning following back on hands
+		// the finding an hour it was never entitled to.
+		const tr = ic.tracker();
+		tr.push(conflicted, 0, false);
+		const banked = tr.push(conflicted, 600, false);
+		check('time does not accrue while the filter may disagree',
+			banked.conflictS === 0, banked.conflictS);
+		const after = tr.push(conflicted, 601, true);
+		check('and the clock starts from when it began to matter',
+			after.conflictS === 0, after.conflictS);
+		check('...then runs normally', tr.push(conflicted, 661, true).conflictS === 60);
+		// Flips are the camera swinging between day and night, which it does
+		// whatever the filter follows.
+		const fl = ic.tracker();
+		fl.push({ night: 0, ircut: 0 }, 0, false);
+		fl.push({ night: 1, ircut: 1 }, 1, false);
+		check('flips are counted either way', fl.push({ night: 0, ircut: 0 }, 2, false).flips === 2);
 	}
 
 	group('projector: the local clock the countdown is read forward by');
