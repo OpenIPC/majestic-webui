@@ -28,6 +28,12 @@
 (function () {
 	'use strict';
 
+	// The section's own classes, set on every repaint because each card
+	// replaces the last. Both, always: two of these four used to set only the
+	// first, and the second is what gives the section its margin on the page it
+	// now lives on.
+	const HOST_CLASS = 'mj-ircut-scan mj-pins-hunt';
+
 	const SCAN = () => window.MajesticIrcutScan;
 	const SWEEP = () => window.MajesticPinSweep;
 
@@ -75,7 +81,7 @@
 		const named = both ? 'pins ' + esc(pins.join(' and ')) : 'pin ' + esc(String(pins[0]));
 
 		host.hidden = false;
-		host.className = 'mj-ircut-scan';
+		host.className = HOST_CLASS;
 		let body, cls, acts;
 		if (v.kind === 'down') {
 			cls = 'alert-warning';
@@ -406,7 +412,7 @@
 		const todo = prog ? S.remaining(list, prog.done) : list;
 
 		host.hidden = false;
-		host.className = 'mj-ircut-scan';
+		host.className = HOST_CLASS;
 		// Dressed as a group of this section, not as an announcement inside it:
 		// micro-caps head, hairline to the margin, note on the right, small body
 		// — the same head the deck gives Wiring and Connected to. A lead
@@ -674,7 +680,7 @@
 		const host = hostOf();
 		if (!host) return;
 		host.hidden = false;
-		host.className = 'mj-ircut-scan mj-pins-hunt';
+		host.className = HOST_CLASS;
 
 		const why = cannotHunt(info);
 		const sp = sweepProgress();
@@ -782,7 +788,7 @@
 		let stop = false;
 
 		host.hidden = false;
-		host.className = 'mj-ircut-scan mj-pins-hunt';
+		host.className = HOST_CLASS;
 		host.innerHTML =
 			'<div class="mj-live-grp-head"><span class="mj-cap">Find what a pin ' +
 			'is wired to</span><span class="mj-live-rule"></span>' +

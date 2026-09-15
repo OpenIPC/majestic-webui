@@ -6915,12 +6915,11 @@
 	function syncVerdict() {
 		const r = document.getElementById('mj-ircut-result');
 		if (!r || r.hidden || !state.ircutTestedOn) return;
-		// The scan borrows this same element, and its own hit writes the pins
-		// it found — which lands here as a changed assignment. Hiding it then
-		// would take the Stop button away from a sweep that is still driving
-		// pads, on the one control in this UI that can stop a camera
-		// answering. Only ever hide a verdict.
-		if (r.classList.contains('mj-ircut-scan')) return;
+		// This element used to be shared with the pin hunt, which meant a
+		// changed assignment could hide the Stop button out from under a sweep
+		// that was still driving pads. The hunt lives on the Pins page now and
+		// draws into a box of its own, so this holds a verdict and nothing
+		// else.
 		if (state.ircutTestedOn !== fieldAssign()) {
 			r.hidden = true;
 			state.ircutTestedOn = null;
