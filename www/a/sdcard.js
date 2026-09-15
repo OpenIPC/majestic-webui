@@ -438,6 +438,8 @@
 		let acts = '<button class="btn btn-sm btn-outline-secondary" data-act="browse"' + (d.mounted ? '' : ' disabled') + '>Browse files</button>';
 		if (d.mounted) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="unmount">Unmount</button>';
 		else if (d.fs) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="mount">Mount</button>';
+		if (d.mounted && d.health !== 'readonly')
+			acts += '<button class="btn btn-sm btn-outline-secondary" data-act="swap">Change the card…</button>';
 		if (d.canFsck) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="fsck">Check</button>';
 		acts += '<button class="btn btn-sm btn-outline-danger" data-act="format">Format…</button>';
 
@@ -494,6 +496,7 @@
 			const act = b.dataset.act;
 			if (act === 'browse') { location = 'files.cgi?cd=' + encodeURIComponent(state.mountpoint); return; }
 			if (act === 'format') { openFormat(); return; }
+			if (act === 'swap') { openSwap(); return; }
 			if (act === 'fsck' && !confirm('Unmount and check the filesystem?')) return;
 			busy(b); op({ op: act }).then(after);
 		});
@@ -526,6 +529,137 @@
 			const tog = e.target.closest('#sd-rec-toggle'); if (!tog) return;
 			tog.disabled = true; setConfig({ records: { enabled: tog.checked } }).then(load);
 		});
+	}
+
+	// Drive the swap engine, and draw what it reports.
+	//
+	// The engine is in a/sdcard-swap.js and knows nothing about any of this:
+	// everything the camera does arrives through `io`, which is what lets the
+	// flow be tested without a hand on a card slot. What lives here is the
+	// half that cannot be: which endpoint each verb is, and what the words on
+	// screen are.
+	//
+	// Note which side talks to whom. Pausing and resuming the recorder go
+	// straight to majestic, because majestic is what owns the recorder and the
+	// browser can reach it. Mounting, unmounting and re-probing go to the CGI,
+	// because they are the camera around the daemon rather than the daemon —
+	// the filesystem and the SD host controller — and the daemon cannot do
+	// them.
+	const SWAP_WORDS = {
+		pausing: 'Pausing the recorder…',
+		releasing: 'Letting go of the card…',
+		remove: 'Take the old card out now.',
+		waiting: 'Waiting for the new card…',
+		reprobe: 'Asking the camera to look again…',
+		mounting: 'Making the new card ready…',
+		resuming: 'Starting recording again…',
+		done: 'Recording to the new card.',
+	};
+
+	function openSwap() {
+		const head = $('#sd-swap-head'), st = $('#sd-swap-status');
+		const go = $('#sd-swap-go'), stopBtn = $('#sd-swap-stop');
+		const steps = $('#sd-swap-steps');
+		let stopped = false, running = false;
+
+		const paint = (name) => {
+			const order = ['pausing', 'releasing', 'remove', 'waiting', 'mounting', 'resuming'];
+			const at = order.indexOf(name === 'reprobe' ? 'waiting' : name);
+			const lis = steps ? steps.querySelectorAll('li') : [];
+			for (let i = 0; i < lis.length; i++) {
+				const k = lis[i].getAttribute('data-step');
+				const j = order.indexOf(k);
+				lis[i].className = (name === 'done' || (at >= 0 && j < at))
+					? 'mj-step-done' : (j === at ? 'mj-step-now' : '');
+			}
+		};
+
+		// The one step that waits on a person gets the whole notice, because
+		// it is the only moment where doing the wrong thing costs a recording.
+		const say = (name, extra) => {
+			st.textContent = SWAP_WORDS[name] || '';
+			head.innerHTML = name === 'remove'
+				? mjNotice('ok', '<strong>Safe to remove the card.</strong> ' +
+					'The camera has closed the recording and let go of ' +
+					esc((extra && extra.mountpoint) || 'the card') +
+					'. Take it out and put the new one in.')
+				: '';
+			paint(name);
+		};
+
+		const io = {
+			now: () => Date.now(),
+			wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+			stopped: () => stopped,
+			onStep: (e) => say(e.step, e),
+			look: () => api(''),
+			unmount: () => op({ op: 'unmount' }),
+			mount: () => op({ op: 'mount' }),
+			reprobe: () => op({ op: 'reprobe' }),
+			standDown: () => apiFetch('/api/v1/records/standdown', {
+				method: 'POST', credentials: 'same-origin',
+			}).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); }),
+			resume: () => apiFetch('/api/v1/records/resume', {
+				method: 'POST', credentials: 'same-origin',
+			}).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); }),
+		};
+
+		const ENDINGS = {
+			done: ['ok', 'The new card is in and the camera is recording to it.'],
+			stillthere: ['warn', 'The card never came out, so recording has been started again on it.'],
+			nonewcard: ['warn', 'No new card arrived, so recording has been started again with the slot as it is.'],
+			elsewhere: ['danger', 'The new card mounted somewhere else, which is what a card with no partition table does — the recording path still points at the old place, so nothing would be recorded. Close this and use Format on the card, then change it again.'],
+			mountfailed: ['danger', 'The new card could not be mounted.'],
+			unmountfailed: ['danger', 'The card could not be released, so nothing was changed and recording has been started again.'],
+			pausefailed: ['danger', 'The recorder could not be paused, so nothing was changed. This camera may be running a majestic that does not know how.'],
+			nocard: ['warn', 'There is no mounted card to change.'],
+			stopped: ['warn', 'Stopped. Recording has been started again.'],
+		};
+
+		const reset = () => {
+			head.innerHTML = ''; st.textContent = '';
+			paint(''); go.disabled = false; go.textContent = 'Start';
+			stopBtn.textContent = 'Cancel'; running = false; stopped = false;
+		};
+		reset();
+		head.innerHTML = mjNotice('info',
+			'<strong>Recording pauses while you do this.</strong> The camera closes what it is ' +
+			'writing, lets go of the card, and tells you when it is safe to take out. It starts ' +
+			'recording again as soon as the new card is in — and on its own within ten minutes ' +
+			'if you walk away.');
+
+		const modal = bootstrap.Modal.getOrCreateInstance('#sd-swap');
+		stopBtn.onclick = () => {
+			if (!running) { modal.hide(); return; }
+			stopped = true;
+			st.textContent = 'Stopping…';
+		};
+		go.onclick = () => {
+			if (running) return;
+			running = true; stopped = false;
+			go.disabled = true; go.textContent = 'Changing…';
+			stopBtn.textContent = 'Stop';
+			window.MajesticSdSwap.run(io).then((r) => {
+				const [lvl, msg] = ENDINGS[r.outcome] || ['danger', 'The swap did not finish.'];
+				const extra = (r.error ? ' ' + esc(r.error) : '') +
+					(r.resumeFailed ? ' Recording could not be started again from here; ' +
+						'the camera does it on its own within ten minutes.' : '') +
+					(r.sameCard ? ' That looks like the same card going back in.' : '');
+				// No action button in here. The page's own Format button is
+				// the one that works: this dialog lives outside #sd, which is
+				// where the delegated data-act handler listens, so a copy of
+				// it here would have looked like a way forward and done
+				// nothing at all. It is also the class main.js hangs confirm()
+				// off, and that wiring does not reach in here either.
+				head.innerHTML = mjNotice(lvl, msg + extra);
+				st.textContent = '';
+				paint(r.outcome === 'done' ? 'done' : '');
+				go.disabled = false; go.textContent = 'Start again';
+				stopBtn.textContent = 'Close'; running = false;
+				load();
+			});
+		};
+		modal.show();
 	}
 
 	function openFormat() {

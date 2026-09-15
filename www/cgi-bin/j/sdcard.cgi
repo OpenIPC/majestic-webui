@@ -705,6 +705,52 @@ do_speedtest() {
 		"$wrote" "$wms" "$((worst * 10))" "$rms")
 }
 
+# Make the controller look for a card again.
+#
+# A slot whose card-detect line is not wired raises no event when a card is
+# pushed in, so the kernel never learns there is one and nothing here can see
+# it. There is no rescan knob for MMC in sysfs on these kernels; unbinding the
+# platform driver and binding it again re-probes the controller, which is the
+# only thing left that finds a card inserted after boot.
+#
+# The controller and its driver are derived rather than named, because the
+# driver differs by family -- himci on some HiSilicon parts, sdhci-hisi on
+# others -- and the device id has the peripheral's base address in it. Walking
+# up from the mmc host to the first node with a driver gets there on all of
+# them, and works with an empty slot, which is exactly when this is needed.
+#
+# Refused while anything is mounted: re-probing pulls the controller out from
+# under a live filesystem, and a card that is already visible is not the
+# problem this solves.
+do_reprobe() {
+	if [ -n "$(awk '$1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts)" ]; then
+		err="a card is already mounted; nothing needs re-detecting"
+		return
+	fi
+
+	rp_dev=$(readlink -f /sys/class/mmc_host/mmc0/device 2>/dev/null)
+	[ -n "$rp_dev" ] || { err="this camera has no SD host controller to re-detect with"; return; }
+	while [ -n "$rp_dev" ] && [ "$rp_dev" != / ] && [ ! -e "$rp_dev/driver" ]; do
+		rp_dev=$(dirname "$rp_dev")
+	done
+	rp_drv=$(readlink -f "$rp_dev/driver" 2>/dev/null)
+	[ -n "$rp_drv" ] && [ -w "$rp_drv/unbind" ] && [ -w "$rp_drv/bind" ] ||
+		{ err="the SD host driver here cannot be asked to look again"; return; }
+
+	rp_id=$(basename "$rp_dev")
+	logln "# re-probe $rp_id via $(basename "$rp_drv")"
+	printf '%s' "$rp_id" > "$rp_drv/unbind" 2>/dev/null
+	sleep 1
+	printf '%s' "$rp_id" > "$rp_drv/bind" 2>/dev/null || {
+		err="the SD host controller did not come back after being re-probed"
+		return
+	}
+	# The kernel enumerates a card asynchronously after the bind, and the
+	# hotplug rules mount it. Give that a moment so the caller's next look is
+	# of a settled slot rather than of the gap.
+	sleep 3
+}
+
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	json_hdr
 	L=""; err=""; EXTRA=""
@@ -714,6 +760,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		unmount) do_unmount;;
 		fsck) do_fsck;;
 		speedtest) do_speedtest;;
+		reprobe) do_reprobe;;
 		*) err="unknown op";;
 	esac
 	if [ -z "$err" ]; then

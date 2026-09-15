@@ -166,6 +166,36 @@
 		return null;
 	}
 
+	// A swap somebody asked for is not a fault, and every other sentence in
+	// this file is about a fault.
+	//
+	// While the recorder is stood down it is not recording, and the card is
+	// very often not even in the slot -- so without this the page would reach
+	// for one of the five sentences that end "nothing is being recorded",
+	// about a camera doing exactly what its operator told it to. That is the
+	// same false alarm as calling an unmounted card a failure, arriving during
+	// the one minute nobody wants to be alarmed.
+	//
+	// Read from records_stood_down rather than from anything this page holds,
+	// so every tab agrees: the gauge rides the heartbeat each page already
+	// runs, and a swap started on the SD-card page silences the banner on a
+	// dashboard somebody left open in another window. Absent means a majestic
+	// that cannot report it, which is not the same as a camera that is not
+	// swapping -- so it is gated on the number being there.
+	function swapping(recorder) {
+		const v = recorder && recorder.v;
+		if (!v || typeof v.records_stood_down !== 'number') return null;
+		if (!v.records_stood_down) return null;
+		return {
+			kind: 'swapping', level: 'info',
+			short: 'Recording is paused while the SD card is being changed.',
+			detail: '<strong>Recording is paused while the SD card is being changed.</strong> ' +
+				'The camera has let go of the card so it can be taken out safely. ' +
+				'Recording starts again as soon as a card is back in — and on its own ' +
+				'within ten minutes if nothing else does it first.',
+		};
+	}
+
 	function fromCard(card) {
 		if (!card) return null;
 		switch (card.health) {
@@ -224,7 +254,11 @@
 		// answer about recording when that is where the recording goes. The
 		// recorder's half always is -- majestic is reporting on whatever it was
 		// actually pointed at.
-		return fromRecorder(recorder, dropped, on) || (on ? fromCard(card) : null);
+		// The swap is asked first, ahead of both halves. It is the one state
+		// here that is not a fault, and every sentence it would otherwise
+		// reach describes the camera as broken.
+		return swapping(recorder) || fromRecorder(recorder, dropped, on) ||
+			(on ? fromCard(card) : null);
 	}
 
 	window.MajesticStorageVerdict = {

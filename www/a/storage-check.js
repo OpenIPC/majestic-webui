@@ -133,7 +133,13 @@
 			const b = row.querySelector('.mj-sd-badge');
 			const why = row.querySelector('.mj-sd-why');
 			let cls = 'text-bg-secondary';
-			if (v) cls = v.level === 'danger' ? 'text-bg-danger' : 'text-bg-warning';
+			// A deliberate swap is not amber. Mapping anything that is not
+			// danger to warning painted the Dashboard row the colour of a
+			// fault while the operator was standing at the camera doing what
+			// the page told them to.
+			if (v && v.level === 'danger') cls = 'text-bg-danger';
+			else if (v && v.level === 'info') cls = 'text-bg-secondary';
+			else if (v) cls = 'text-bg-warning';
 			else if (V.writable(card, recorder, where)) cls = 'text-bg-success';
 			if (b) b.className = 'badge flex-shrink-0 mj-sd-badge ' + cls;
 			if (why) why.textContent = v ? ' — ' + v.short : '';
