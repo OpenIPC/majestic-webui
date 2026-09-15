@@ -1683,6 +1683,79 @@ function runRest() {
 	}
 
 	// -----------------------------------------------------------------------
+	// The picture raises a suspicion and says so; the test is the measurement
+	// that answers it. A page that goes on asking after the answer is a page
+	// with no way out of a question it asked — which is what sent the reporter
+	// of #492 looking for a dismiss button (#498).
+	group('diagnose: a verdict settles what the picture only suspected');
+	{
+		const day = { night: 0, ircut: 0 };
+		const wired = { irCutPin1: 11, irCutPin2: 10 };
+		const open = { look: 'open', streak: 9 };
+		const said = (nm, tested) => ic.diagnose(nm, day, {}, open, tested)
+			.some(x => x.id === 'picture-open');
+		const ok = (nm) => ({ id: 'ok', wiring: ic.wiringKey(nm), at: 1 });
+
+		check('with no test on record the picture is still asked about',
+			said(wired, null));
+		check('a test that found the filter moves settles it',
+			!said(wired, ok(wired)));
+
+		// Each of the four settings a verdict depends on, because a verdict
+		// about one wiring is not a verdict about another. The daylight sensor
+		// and the lamp are deliberately NOT in that set: moving them changes
+		// nothing about what a pulse does.
+		check('...but not after the coils are swapped',
+			said(wired, ok({ irCutPin1: 10, irCutPin2: 11 })));
+		check('...nor after a coil is cleared',
+			said(wired, ok({ irCutPin1: 11 })));
+		check('...nor after the single-pad invert is turned on',
+			said(wired, ok({ irCutPin1: 11, irCutPin2: 10, irCutSingleInvert: true })));
+		check('...nor after the filter is parked and driven again',
+			said(wired, ok({ irCutPin1: 11, irCutPin2: 10, irCutEnabled: false })));
+		check('while moving the daylight sensor keeps it',
+			!said(Object.assign({ lightSensorPin: 66 }, wired), ok(wired)));
+
+		// A verdict that found a FAULT is not an answer that silences: the
+		// fault is the news. The page forgets rather than storing those, and
+		// one arriving here from an older store must not silence either.
+		['inverted', 'stuck-open', 'stuck-closed', 'unclear'].forEach((id) =>
+			check('a verdict of "' + id + '" does not silence the picture',
+				said(wired, { id: id, wiring: ic.wiringKey(wired), at: 1 })));
+
+		// Shape, because the record comes out of a store anyone can edit.
+		check('a record with no wiring silences nothing',
+			said(wired, { id: 'ok' }));
+		check('an empty record silences nothing', said(wired, {}));
+
+		// It settles the PICTURE, and nothing else. A camera that cannot move
+		// its filter at all is a configuration fault, and no measurement of a
+		// different wiring speaks to it.
+		const noPins = ic.diagnose({}, day, {}, open,
+			{ id: 'ok', wiring: ic.wiringKey({}), at: 1 });
+		check('a settled verdict does not silence the missing-pin finding',
+			noPins.some(x => x.id === 'no-pins'), noPins.map(x => x.id).join(','));
+	}
+
+	group('wiringKey: what a verdict is about');
+	{
+		const k = ic.wiringKey;
+		check('two spellings of the same wiring agree',
+			k({ irCutPin1: 11, irCutPin2: 10 }) === k({ irCutPin1: '11', irCutPin2: '10' }));
+		// Absent and parked are different states of the same camera, and a
+		// verdict taken in one says nothing about the other.
+		check('an absent key is not the same as a set one',
+			k({ irCutPin1: 11 }) !== k({ irCutPin1: 11, irCutPin2: 0 }));
+		// GPIO 0 is a real pad, so it must not read as "no pad".
+		check('pad 0 is a pad', k({ irCutPin1: 0 }) !== k({}));
+		// Absent means the daemon drives the filter: an older majestic has no
+		// such key, and reading that as parked would discard every verdict
+		// taken on one.
+		check('an absent drive switch reads as on',
+			k({ irCutPin1: 11 }) === k({ irCutPin1: 11, irCutEnabled: true }));
+	}
+
+	// -----------------------------------------------------------------------
 	// A refused snapshot used to arrive as `HTTP 503` and nothing else, which
 	// is true, useless, and reads exactly like the camera being off. majestic
 	// answers with a sentence naming the cause and the way out; this is the

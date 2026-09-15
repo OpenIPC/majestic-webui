@@ -98,13 +98,63 @@
 			' s, up from the ' + asked + ' s set below. ';
 	}
 
+	// The wiring a verdict was measured against, as one comparable string.
+	//
+	// Four settings, and only four: the two pads, the single-pad invert, and
+	// whether the daemon drives the filter at all. Everything else on the pin
+	// map — the daylight sensor, the lamp — changes nothing about what a pulse
+	// does, and a key that fires on them is one that throws away a good
+	// measurement for an unrelated edit. Same set the test's own blocker
+	// guards, because it is the same question: does this verdict describe the
+	// camera as it is now.
+	function wiringKey(nm) {
+		nm = nm || {};
+		return [pin(nm.irCutPin1), pin(nm.irCutPin2),
+			on(nm.irCutSingleInvert) ? 1 : 0,
+			nm.irCutEnabled === false ? 0 : 1].join('/');
+	}
+
+	// Has somebody driven this filter and watched the picture change?
+	//
+	// The passive check is a suspicion — it says so itself, naming what it
+	// cannot rule out — and the test is the measurement that answers it. So a
+	// verdict outranks the picture, and once one exists the suspicion has been
+	// adjudicated and must stop being raised (#498).
+	//
+	// ONLY 'ok', and only while the wiring it was measured against still
+	// stands. A verdict that found a fault leaves the finding alone: the fault
+	// is the news, and it is not this function's to report.
+	//
+	// It is not the dismissal #367 removed, and the difference is where the
+	// invalidation lives. That one recorded an OPINION ("no filter here") that
+	// had to be dropped when the wiring contradicted it — an event, needing a
+	// witness, on a page where the event never happens. This is a MEASUREMENT
+	// carrying the wiring it was taken against, compared against the camera's
+	// own configuration every time it is read. There is no moment to catch and
+	// nothing to keep in step: a record that no longer describes the camera
+	// simply stops counting.
+	//
+	// It does not expire, and that is an argument rather than an omission. The
+	// case it silences is a picture that looks open on a camera whose filter
+	// demonstrably moves — a scene with magenta light in it — and in that case
+	// the picture has ALREADY stopped being able to tell a later fault from
+	// the scene. Expiry would buy no detection back; it would only re-ask a
+	// question that has been answered, on a timer.
+	function settledBy(nm, tested) {
+		return !!tested && tested.id === 'ok' && tested.wiring === wiringKey(nm);
+	}
+
 	// Findings, worst first. `fix` names the section to send someone to; the
 	// consumer decides whether that becomes a link or a tab switch.
 	//
 	// `pic` is optional and is what the camera's own picture says: {look,
 	// streak} from look() and tracker().picture(). It is deliberately never a
 	// verdict on its own — see the note above the picture rules below.
-	function diagnose(nm, sample, track, pic) {
+	//
+	// `tested` is optional and is the remembered result of the IR-cut test,
+	// as {id, wiring, at}. The page reads it; the rule above is what decides
+	// whether it still means anything.
+	function diagnose(nm, sample, track, pic, tested) {
 		nm = nm || {};
 		track = track || {};
 		const out = [];
@@ -196,11 +246,13 @@
 					'"Drive the IR-cut filter" and nothing here will ask again.',
 				fix: 'nightMode',
 			});
-		} else if (pictureOpen) {
+		} else if (pictureOpen && !settledBy(nm, tested)) {
 			// Pins are set, so the configuration looks right and only the
 			// picture disagrees. That is a reason to MEASURE, not to accuse:
 			// the innocent readings are named, and the answer is one button
-			// away on the section this points at.
+			// away on the section this points at — and once that button has
+			// been pressed and the filter has moved, this stops asking, since
+			// asking again is asking a question that has been answered.
 			out.push({
 				id: 'picture-open', level: 'warning',
 				title: 'The picture looks like an open IR-cut filter',
@@ -1475,6 +1527,7 @@
 
 	const api = {
 		diagnose: diagnose, tracker: tracker, monitorView: monitorView,
+		wiringKey: wiringKey, settledBy: settledBy,
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,

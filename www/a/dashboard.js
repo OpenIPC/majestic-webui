@@ -210,6 +210,67 @@
 		paintIrcut();
 	}).catch(() => {});
 
+	// What the IR-cut test found, if this browser has ever run one. Read on
+	// every paint rather than once: a test run in another tab takes effect on
+	// the next heartbeat, and a store that has been cleared since stops
+	// counting immediately.
+	//
+	// Unreadable reads as "never tested", never as "tested and fine" — the
+	// direction that keeps asking rather than the one that goes quiet. Some
+	// privacy configurations throw on the accessor itself.
+	//
+	// This is per browser, which is the honest limit of it: the fact is a
+	// measurement made here, and the only camera-side place to put it would be
+	// a second store of the kind #367 deleted. Someone opening the Dashboard
+	// from another machine is asked the question again, and answering it there
+	// is one press.
+	//
+	// And what the record is compared against has to be the wiring the camera
+	// has NOW. mjConfig() resolves once and is cached for the life of the
+	// page, which is fine for a finding that merely describes a snapshot and
+	// not fine for one that can be SILENCED by a record: change the coils from
+	// the settings page in another tab and this one would go on matching the
+	// verdict against the assignment it loaded with. So while a record exists
+	// the wiring is re-read on a slow beat of its own. Only while one exists —
+	// a browser that has never tested has nothing that could be silenced, and
+	// pays nothing.
+	//
+	// A refresh that fails leaves the last reading standing rather than
+	// counting as a change: a failed fetch is not a fact, and a camera that
+	// cannot be reached is already saying so through the stale banner.
+	const WIRING_REFRESH_MS = 30000;
+	const IRCUT_TESTED = 'mj-ircut-tested';
+	function ircutTested() {
+		try {
+			const v = JSON.parse(localStorage.getItem(IRCUT_TESTED) || 'null');
+			// Shape-checked rather than trusted: a record from a hand edit or
+			// an older key would otherwise be compared field by field against
+			// undefined, and `undefined === undefined` would silence the
+			// banner on a camera nobody has tested.
+			return (v && typeof v.id === 'string' && typeof v.wiring === 'string')
+				? v : null;
+		} catch (e) { return null; }
+	}
+
+	// Re-read the wiring a record is judged against. Driven from the
+	// heartbeat, so it stops on its own while the camera is unreachable rather
+	// than piling up fetches at something that is not answering.
+	let wiringAt = 0;
+	function refreshWiring() {
+		if (!IC || !nmCfg || !ircutTested()) return;
+		const now = Date.now();
+		if (now - wiringAt < WIRING_REFRESH_MS) return;
+		wiringAt = now;
+		apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
+			.then(r => (r.ok ? r.json() : null))
+			.then((c) => {
+				if (!c || !Object.keys(c).length) return;
+				nmCfg = c.nightMode || {};
+				paintIrcut();
+			})
+			.catch(() => {});
+	}
+
 	// There was a dismissal here — a × that recorded "this camera has no IR-cut
 	// filter" in /etc/webui/ircut.conf through a CGI of its own, so the banner
 	// would stop asking an owner to wire a filter they do not have.
@@ -265,7 +326,7 @@
 		// is down is never. Every other caller already refused to paint here;
 		// this refuses centrally so a new one cannot forget.
 		if (!IC || !nmCfg) return;
-		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
+		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic, ircutTested())
 			.filter(x => x.level !== 'info')[0];
 
 		if (f) {
@@ -709,6 +770,7 @@
 				' · lamp ' + lampWord +
 				srcWord;
 		renderIrcut(s);
+		refreshWiring();
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means
 		// the encoder has stopped producing frames while all else looks alive.
 		// The encoder tile and chart obey the same rule as Wi-Fi and
