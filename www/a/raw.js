@@ -37,8 +37,9 @@
 					throw new Error('This firmware does not serve raw frames. Raw capture ' +
 						'needs a HiSilicon or Goke part whose SDK exposes the sensor’s own data.');
 				if (r.status === 503)
-					throw new Error('The camera could not spare the memory for a raw frame ' +
-						'just now. Try again in a moment.');
+					throw new Error('The camera is already busy with a raw frame. Most ' +
+						'cameras take them one at a time — wait for that one to finish ' +
+						'and ask again.');
 				if (!r.ok) throw new Error('The camera answered ' + r.status + '.');
 				return r.arrayBuffer();
 			})
