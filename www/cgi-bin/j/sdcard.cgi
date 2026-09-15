@@ -515,14 +515,48 @@ mount_after_format() {
 # worth reporting verbatim rather than flattening to "mount failed".
 first_line() { printf '%s' "$1" | sed -n '1p'; }
 
+# What a camera's card actually is, in the order it is worth trying, and the
+# same list /lib/mdev/automount.sh uses -- the WebUI mounting a card by a
+# different route than the hotplug rules do is its own hazard.
+#
+# Naming them is not tidiness. An unqualified mount is `-t auto`, which walks
+# /proc/filesystems in the order the kernel lists it, and on a camera that
+# reads squashfs, yaffs, yaffs2, vfat -- so a FAT card is offered to yaffs2
+# first. yaffs2 accepts a block device rather than refusing one, and the
+# kernel log of a camera mounted this way is a run of
+#
+#   yaffs: Attempting MTD mount of 179.1,"mmcblk0p1"
+#
+# before the card lands on vfat at all. Nothing here noticed, because it did
+# land eventually.
+MOUNT_FSTYPES="vfat exfat ext4 ext3 ext2 f2fs msdos ntfs iso9660 udf"
+
+# mount_card <device> <dir> [known-fstype]
+#
+# Sets mt_err to the refusal worth reporting, or empty on success. The first
+# refusal is the diagnosis and not the last: the list is in the order a
+# camera's card is likely to be, so vfat's "invalid argument" means a damaged
+# filesystem, where the tail of the list only ever reports the drivers this
+# kernel was not built with.
+mount_card() {
+	mt_err=""
+	mt_first=""
+	mt_o=""
+	for mt_fs in ${3:-$MOUNT_FSTYPES}; do
+		mt_o=$(mount -t "$mt_fs" "$1" "$2" 2>&1) && { mt_first=""; break; }
+		[ -n "$mt_first" ] || mt_first="$mt_o"
+	done
+	[ -n "$mt_o" ] && logln "$mt_o"
+	mountpoint -q "$2" || mt_err="${mt_first:-${mt_o:-mount failed}}"
+}
+
 do_mount() {
 	swap_guard || return
 	ensure_node
 	t=$(target); base=${t##*/}; mkdir -p "/mnt/$base"
 	logln "# mount $t /mnt/$base"
-	o=$(mount "$t" "/mnt/$base" 2>&1)
-	[ -n "$o" ] && logln "$o"
-	mountpoint -q "/mnt/$base" || err="$(first_line "${o:-mount failed}")"
+	mount_card "$t" "/mnt/$base"
+	[ -n "$mt_err" ] && err="$(first_line "$mt_err")"
 	# The card is back. Whatever this swap was owning, it is finished with.
 	if [ -z "$err" ]; then swap_release; fi
 }
@@ -561,9 +595,12 @@ do_fsck() {
 	logln "$o"
 	if [ -n "$was" ]; then
 		logln "# mount $t $was"
-		m=$(mount "$t" "$was" 2>&1)
-		[ -n "$m" ] && logln "$m"
-		mountpoint -q "$was" || { err="checked, but the card would not mount again"; return; }
+		# The type it was mounted as is already known here, so say it. An
+		# unqualified mount is `-t auto`, which walks /proc/filesystems -- and
+		# on a camera that reads squashfs, yaffs, yaffs2, vfat, a FAT card is
+		# offered to yaffs2 before vfat.
+		mount_card "$t" "$was" "$fs"
+		[ -n "$mt_err" ] && { err="checked, but the card would not mount again"; return; }
 	fi
 	[ "$rc" -le 1 ] || err="fsck reported errors"
 }
