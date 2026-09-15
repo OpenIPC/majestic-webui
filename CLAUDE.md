@@ -740,6 +740,49 @@ thumbnail goes on getting one after the schedule has been switched to video.
 configured. **Requires a majestic with `/video.mp4?duration=`**; the two ship
 together, so there is no fallback path and none is written.
 
+**Movement reaches a card-less camera through the OTHER hook.** The clip hook
+fires when a recording is *finished*, so on a camera with nowhere to record it
+never fires at all — no card, no recorder, no clip, and "send me something when
+it moves" quietly does nothing. The camera also runs `/usr/sbin/motion.sh` the
+moment movement *starts*, whether or not anything is recording, and
+`sbin/motion-notify.sh` is what that leads to: it records a few seconds as it
+sends them and hands the one clip to every sender that wants movement. Both
+paths are the same switch on the page — which mechanism runs is the camera's
+business, not the operator's.
+
+They must never both fire for one event, so the script asks the daemon whether
+the recorder is set to record on movement and stands aside when it is: that
+path produces the better clip, covering the whole event and opening before it.
+A camera that cannot be asked is given the benefit of the doubt and the clip is
+sent, because a missed event is worse than a duplicate and a camera that will
+not answer is usually one that is restarting. What the card-less clip costs is
+worth saying plainly, and both pages do: it starts at the trigger rather than
+before it, and it is as long as the setting says rather than as long as the
+movement lasted.
+
+There is **no configuration key** for the movement hook — majestic runs that
+path if the file is there and executable — so wiring it means writing the file,
+and `motion_hook_sync` follows the same rule `clip_hook_sync` follows for the
+clip hook: it writes only a file that is absent, recognises its own by a marker
+line, removes only what it wrote, and tells the operator rather than overruling
+them when something else is already there. `notify_hooks_sync` runs both and
+returns one sentence, so a page cannot report half the answer. The hook is
+wired whenever either page wants movement sent, card or no card: the script
+decides at the moment of the event, so pulling the card later leaves the
+setting working instead of silently stopping.
+
+One capture serves both senders — recording it twice would ask a camera with
+one encoder for two simultaneous streams of the same thing — at the longer of
+the two configured lengths, since the longer clip contains the shorter one. A
+`mkdir` lock keeps one capture at a time camera-wide, and a lock older than any
+capture could be is taken over, or one `kill -9` would silence the camera until
+somebody rebooted it.
+
+**The bounding box majestic passes that hook is deliberately ignored**, and
+anything else reading it should know why: its four numbers are the corners of
+the box on HiSilicon and the corner plus its size on SigmaStar and Ingenic, so
+a script that measures what moved is wrong on two vendors out of three.
+
 ## Conventions for new code
 
 - **Bash, busybox-flavoured.** No bash-isms unavailable in busybox `ash`/`sh`; the FPV `fpv_common.cgi` uses `#!/bin/sh` semantics throughout. No GNU-only `sed`/`awk` flags.
