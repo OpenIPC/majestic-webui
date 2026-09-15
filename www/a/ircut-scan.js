@@ -112,6 +112,14 @@
 			if (a.role !== 'irCutPin1' && a.role !== 'irCutPin2') skip[a.pin] = 1;
 		});
 		(opts.exclude || []).forEach((p) => { skip[p] = 1; });
+		// What the CAMERA has been told to leave alone — a pin that took it
+		// down, or one the owner ruled out. It refuses these itself, so a pair
+		// containing one would come back refused and cost a round trip for
+		// nothing; more to the point, the list outlives this page, which is
+		// the whole reason it lives on the camera.
+		(info.avoid || []).forEach((a) => {
+			if (a && typeof a.pin === 'number') skip[a.pin] = 1;
+		});
 		// A line a kernel DRIVER holds is wired to something deliberate and is
 		// the class of pad that resets a PHY or drops a rail. "sysfs" is only an
 		// export — majestic's, and on a brake-held board it keeps those pads
@@ -121,9 +129,29 @@
 			if (h.owner && h.owner !== 'sysfs') skip[h.pin] = 1;
 		});
 
+		// A range the owner drew, as a limit on WHICH PADS may be tried rather
+		// than where to start.
+		//
+		// The console script this replaces takes `<from> <to>` and walks
+		// straight through, so "start at 14" is the natural way to ask there.
+		// It does not translate: this list is prioritised PAIRS, commonest
+		// wiring first, and a start index would fight the ordering that makes
+		// the scan find things quickly. What somebody actually needs after a
+		// pin took their camera down is "leave that one out" (opts.exclude)
+		// and "don't redo the forty that already passed" (the caller's
+		// progress) — and a range for the case where they already know which
+		// end of the chip to look at.
+		const only = opts.only;
+		const inRange = (pin) => !only ||
+			((only.from === undefined || pin >= only.from) &&
+				(only.to === undefined || pin <= only.to));
+
 		const banks = (info.banks || []).map((b) => {
 			const pads = [];
-			for (let i = 0; i < b.n; i++) if (!skip[b.base + i]) pads.push(b.base + i);
+			for (let i = 0; i < b.n; i++) {
+				const pin = b.base + i;
+				if (!skip[pin] && inRange(pin)) pads.push(pin);
+			}
 			return pads;
 		});
 		const all = {};
@@ -174,6 +202,68 @@
 			(busy[p[0]] || busy[p[1]] ? late : early).push(p);
 		});
 		return early.concat(late);
+	}
+
+	// ── coming back to a scan that was interrupted ───────────────────────────
+	//
+	// Progress is remembered in the BROWSER, and the asymmetry is deliberate:
+	// the camera is the thing that reboots, the browser is not. Recording every
+	// tried pair on the camera would mean several hundred growing, synced
+	// writes to flash during a single sweep, to remember something the page
+	// already knows. What must live on the camera is the far smaller fact that
+	// a pin is dangerous — that one has to survive the reboot it caused.
+
+	// A fingerprint of the pad layout. Progress is only meaningful against the
+	// chip it was measured on, and a remembered list of pairs replayed against
+	// a different board would skip pads that were never tried. Same trick the
+	// filter-test verdict plays with its wiring stamp.
+	function stamp(info) {
+		return ((info && info.banks) || [])
+			.map((b) => b.base + ':' + b.n).join(',');
+	}
+
+	// What is left of `list` once everything in `done` is taken out. Order is
+	// preserved, so a resumed sweep still tries the likeliest wiring first
+	// among the pairs it has not reached.
+	function remaining(list, done) {
+		const seen = {};
+		(done || []).forEach((k) => { seen[k] = 1; });
+		return (list || []).filter((p) => !seen[key(p[0], p[1])]);
+	}
+
+	// What to say to somebody coming back to an interrupted scan.
+	//
+	// Three different things can have happened and they need three different
+	// answers, which is the whole reason this is a function and not an `if`:
+	//
+	//   'down'   the camera stopped answering. It already knows — the journal
+	//            was synced before the pad was touched and the pin is on the
+	//            avoid list by now. Nothing to ask; just say so.
+	//   'cut'    the camera stayed up, so something else ended the run: the
+	//            network, a closed lid, a reload. THIS IS THE CASE NOBODY
+	//            COULD ACT ON BEFORE. Toggling a pad can take ethernet down
+	//            without troubling the camera at all, and those pins are
+	//            exactly the ones an owner wants out — but the camera has no
+	//            way to know it happened, because from where it stands nothing
+	//            went wrong.
+	//   'more'   nothing went wrong, there is simply work left.
+	//
+	// `saved` is what this browser stored; `info` is what the camera says now.
+	function resumeVerdict(info, saved, total) {
+		if (!saved || saved.sig !== stamp(info)) return null;
+		const done = (saved.done || []).length;
+
+		const dead = casualty(info);
+		if (dead) return { kind: 'down', pins: dead.pins, done: done, total: total };
+
+		if (saved.inflight) {
+			const pins = saved.inflight.split(':').map(Number);
+			if (pins.length === 2 && !isNaN(pins[0]) && !isNaN(pins[1]))
+				return { kind: 'cut', pins: pins, done: done, total: total };
+		}
+		if (done > 0 && done < total)
+			return { kind: 'more', pins: null, done: done, total: total };
+		return null;
 	}
 
 	// Did the picture move, and which way? Rising gmin means the frame gained
@@ -327,6 +417,7 @@
 
 	const api = {
 		pairs: pairs, classify: classify, casualty: casualty, run: run, finish: finish,
+		stamp: stamp, remaining: remaining, resumeVerdict: resumeVerdict, key: key,
 		KNOWN_PAIRS: KNOWN_PAIRS, HIT_DELTA: HIT_DELTA, SETTLE_MS: SETTLE_MS,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;

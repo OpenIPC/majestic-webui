@@ -10,6 +10,8 @@
 // the viewport at 390px (and the same on time.cgi), and a grid row half empty.
 //
 //   WEBUI_LOGIN=root:pw node tools/check-layout.mjs http://<camera>/cgi-bin/network.cgi
+//   WEBUI_LOGIN=root:pw node tools/check-layout.mjs --open "Day / Night" \
+//       http://<camera>/cgi-bin/camera.cgi
 //   node tools/check-layout.mjs --self-test
 //
 // A camera needs credentials: WEBUI_LOGIN=root:secret. A chromium binary comes
@@ -214,7 +216,34 @@ async function signIn(page, url) {
 	if (status >= 400) throw new Error(`sign-in refused with HTTP ${status} — check WEBUI_LOGIN`);
 }
 
-async function run(browser, url, setContent, seen = new Set()) {
+// Press things before measuring.
+//
+// Every settings section past the first is behind a click, and so is anything
+// a button reveals -- which is to say most of what this file exists to
+// measure has never been reachable by it. A URL alone lands on the default
+// section, so a clean run said nothing at all about the other twenty.
+//
+// Matched on the VISIBLE TEXT of a leaf element, because that is what a person
+// would say: "open Day / Night, then press Find them for me". Ids drift and
+// are invisible to whoever writes the command.
+async function open(page, labels) {
+	for (const want of labels) {
+		const hit = await page.evaluate((w) => {
+			const el = [...document.querySelectorAll('a,button,li,div,span')]
+				.filter((e) => e.children.length === 0 &&
+					(e.textContent || '').trim() === w)[0];
+			if (!el) return false;
+			el.click();
+			return true;
+		}, want);
+		if (!hit) throw new Error(`nothing on the page reads "${want}"`);
+		// Sections fetch before they draw, and measuring the half-built one is
+		// how this would report a clean page that is not finished.
+		await new Promise((r) => setTimeout(r, 2500));
+	}
+}
+
+async function run(browser, url, setContent, seen = new Set(), labels = []) {
 	let bad = 0;
 	for (const [w, h, label] of VIEWPORTS) {
 		const page = await browser.newPage();
@@ -223,6 +252,17 @@ async function run(browser, url, setContent, seen = new Set()) {
 		let res = null;
 		if (setContent) await page.setContent(url);
 		else res = await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+		if (!setContent && labels.length) {
+			try {
+				await open(page, labels);
+			} catch (e) {
+				console.log(`\n  ${label} ${w}x${h}`);
+				console.log(`    COULD NOT GET THERE — ${e.message}`);
+				await page.close();
+				bad++;
+				continue;
+			}
+		}
 		const R = await page.evaluate(measure);
 		const landed = setContent ? null : page.url();
 		await page.close();
@@ -291,12 +331,23 @@ if (args[0] === '--self-test') {
 		console.log(`\nself-test ok: ${found} findings, all ${want.length} rules fired`);
 	}
 } else if (!args.length) {
-	console.error('usage: node tools/check-layout.mjs <url> [url…]   |   --self-test');
+	console.error('usage: node tools/check-layout.mjs [--open "Label" …] <url> [url…]');
+	console.error('       node tools/check-layout.mjs --self-test');
+	console.error('');
+	console.error('--open presses things before measuring, by their visible text,');
+	console.error('in order. Most of this UI is behind a click: without it a run');
+	console.error('only ever describes whichever section a page opens on.');
 	status = 2;
 } else {
-	for (const url of args) {
-		console.log(`\n=== ${url} ===`);
-		status = (await run(browser, url, false)) ? 1 : status;
+	const labels = [];
+	const urls = [];
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === '--open') labels.push(args[++i]);
+		else urls.push(args[i]);
+	}
+	for (const url of urls) {
+		console.log(`\n=== ${url}${labels.length ? ' — ' + labels.join(' → ') : ''} ===`);
+		status = (await run(browser, url, false, new Set(), labels)) ? 1 : status;
 	}
 }
 await browser.close();

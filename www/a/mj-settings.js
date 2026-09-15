@@ -6915,12 +6915,11 @@
 	function syncVerdict() {
 		const r = document.getElementById('mj-ircut-result');
 		if (!r || r.hidden || !state.ircutTestedOn) return;
-		// The scan borrows this same element, and its own hit writes the pins
-		// it found — which lands here as a changed assignment. Hiding it then
-		// would take the Stop button away from a sweep that is still driving
-		// pads, on the one control in this UI that can stop a camera
-		// answering. Only ever hide a verdict.
-		if (r.classList.contains('mj-ircut-scan')) return;
+		// This element used to be shared with the pin hunt, which meant a
+		// changed assignment could hide the Stop button out from under a sweep
+		// that was still driving pads. The hunt lives on the Pins page now and
+		// draws into a box of its own, so this holds a verdict and nothing
+		// else.
 		if (state.ircutTestedOn !== fieldAssign()) {
 			r.hidden = true;
 			state.ircutTestedOn = null;
@@ -7643,7 +7642,12 @@
 			'<span class="mj-live-rule"></span></div>' +
 			'<div id="mj-ircut-rolelist"></div>' +
 			'<div class="mj-ircut-acts">' +
-			'<button type="button" class="btn btn-primary btn-sm" id="mj-ircut-find">Find them for me</button>' +
+			// btn-outline-secondary, not -primary: the shipped stylesheet is
+			// purged down to the classes this UI actually uses, and
+			// btn-outline-primary is not one of them -- it rendered as bare
+			// text beside a real button. regen-bootstrap-css.sh is what would
+			// add it, and one navigation link is not worth growing the sheet.
+			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-find">Find them on the Pins page</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
 			'</div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-find-why" hidden></div>' +
@@ -7716,6 +7720,21 @@
 			pwmLamp: !!pwmLamp(),
 			soc: SOC + (info.banks ? (SOC ? ' · ' : '') + info.banks.length + ' banks' : ''),
 			onChange: (a) => { pushAssign(a); paintRoles(); },
+			// Ruling a pad out of the scan, from the pad itself. The list is
+			// the camera's, so this re-reads rather than patching a local copy
+			// — the camera is the one that enforces it and the one that
+			// remembers it across the reboot that may have caused it.
+			onAvoid: (pin, on) => {
+				scanAvoid(pin, on)
+					.then(() => apiFetch('/api/v1/gpio', { credentials: 'same-origin' }))
+					.then((r) => r.json())
+					.then((fresh) => {
+						if (state.ircutMap !== map) return;
+						state.ircutInfo = fresh;
+						map.reinfo(fresh);
+					})
+					.catch(() => { /* the pad keeps the state the camera has */ });
+			},
 		});
 		// Leaving the section while this fetch was in flight means the panel
 		// this map belongs to is already gone; mounting it now would strand a
@@ -7872,269 +7891,28 @@
 		}
 		paintRoles();
 
+		// Finding the pins by driving them is on the Pins page. The reason
+		// it is not here is that it drives arbitrary pads across the whole
+		// chip and has to know what each one is already carrying — which is
+		// the Pins page's whole subject, and none of it is about day or night.
+		// This panel keeps the half that is: which pad each coil is on.
 		const find = box.querySelector('#mj-ircut-find');
-		// Re-read the pads rather than reusing the mount-time snapshot. That
-		// snapshot carries `assigned`, and pairs() skips every pad in it — so
-		// after clearing the pins and saving, the scan went on skipping the two
-		// pads it was being asked to find, and reported nothing. Reloading the
-		// page "fixed" it, which is the tell that the staleness was in here and
-		// not on the camera (#273). The pad list can also move underneath the
-		// page for reasons of its own, majestic releasing an export among them.
-		if (find) find.addEventListener('click', async () => {
-			let fresh = info;
-			try {
-				const r = await apiFetch('/api/v1/gpio',
-					{ credentials: 'same-origin' });
-				if (!r.ok) throw new Error('HTTP ' + r.status);
-				fresh = await r.json();
-				state.ircutInfo = fresh;
-			} catch (e) {
-				// The cached list is stale, not wrong: every pad it names is
-				// still a pad. Scanning with it beats refusing to scan.
-			}
-			openScan(box, map, fresh);
-		});
-
-		// A sweep drives pads, and the camera refuses to drive any pair while it
-		// cannot say what the pads already are — no debugfs to name a line's
-		// owner, or no boot loader environment to see the PTZ pads. Offering the
-		// button anyway would spend a press to be told no, once per pad, so the
-		// reason is said here instead. Picking a pin by hand still works: that
-		// writes a number into a field and moves nothing.
-		if (find && (info.ownersUnknown || info.ptzUnknown)) {
-			const cant = [];
-			if (info.ownersUnknown) cant.push('which pads the kernel already holds');
-			if (info.ptzUnknown) cant.push('which pads the PTZ driver is on');
-			find.disabled = true;
-			// What is refused is the SWEEP, and only the sweep: it is the one
-			// thing here that drives pads nobody has vouched for. Testing a
-			// filter the camera already knows about still works, and still
-			// moves it. "Nothing may be driven" said otherwise, and then the
-			// same sentence sent the reader to a control that drives.
-			//
-			// It ends at Save because the pin map only STAGES: the map writes
-			// into the hidden fields, while the test reads the configuration
-			// the camera is running on. Skip the save and the verdict is about
-			// the old wiring — which is the one answer this panel must never
-			// give. The scan's own success path has always said it this way.
-			const why = 'This camera cannot say ' + cant.join(' or ') +
-				', so the sweep may not drive pads it has not been told about. ' +
-				'Set the coils by hand on the pin map, Save, then Test the ' +
-				'filter checks them.';
-			find.title = why;
-			// The reason goes on the page and not only in the title, for the
-			// reason syncTestBtn() says two controls down: a tooltip is not an
-			// explanation on a touchscreen, where there is no hover at all.
-			// This button was the one place in the panel that broke that rule,
-			// and the greyed-out control it left had to be asked about.
-			const note = box.querySelector('#mj-ircut-find-why');
-			if (note) {
-				note.textContent = why;
-				note.hidden = false;
-			}
-		}
-
-		// A camera that came back from the dead mid-scan says so before anything
-		// else — the pad that did it is named and excluded.
-		const dead = window.MajesticIrcutScan &&
-			window.MajesticIrcutScan.casualty(info);
-		if (dead) {
-			// The journal records the PAIR that was being driven, because a pair
-			// is what an actuation takes. Reading one pin off it printed
-			// "undefined" and excluded nothing, which left the pair that
-			// rebooted the camera free to be tried again on the next scan —
-			// the exact outcome the journal exists to prevent.
-			const pins = (dead.pins || []).map(Number).filter((n) => !isNaN(n));
-			const w = el('div', 'alert alert-warning py-2 px-3 mb-2 small');
-			w.innerHTML = '<b>The last pin scan stopped the camera.</b> It was driving ' +
-				(pins.length > 1 ? 'pins ' + esc(pins.join(' and ')) : 'pin ' + esc(String(pins[0]))) +
-				' when it stopped answering, and the watchdog restarted it. ' +
-				(pins.length > 1 ? 'Those pins have' : 'That pin has') +
-				' been excluded from further scans.';
-			box.querySelector('#mj-ircut-findings').appendChild(w);
-			state.ircutExclude = (state.ircutExclude || []).concat(pins);
-		}
-	}
-
-	// Finding the pins by driving them. This is the only control in the WebUI
-	// that can stop a camera answering, so it asks first, in those words, and
-	// the endpoint behind it journals each pad to flash before touching it.
-	function openScan(box, map, info) {
-		const SCAN = window.MajesticIrcutScan;
-		if (!SCAN) return;
-		const host = box.querySelector('#mj-ircut-result');
-		// Taking the element over destroys whatever verdict was in it, so the
-		// assignment that verdict was measured against stops meaning anything.
-		state.ircutTestedOn = null;
-		const status = box.querySelector('#mj-ircut-status');
-		// What the wiki's table records about this part: the pairs to try first,
-		// and the pads it names as a reset, a USB enable or an illuminator, to
-		// try last. Absent for a part the table has never seen, which is the
-		// behaviour the sweep had before the table was read at all.
-		const PADS = window.MajesticIrcutPads;
-		const part = PADS ? PADS.forSoc(SOC) : {};
-		const list = SCAN.pairs(info, {
-			exclude: state.ircutExclude || [],
-			part: part,
-		});
-		let stop = false;
-
-		host.hidden = false;
-		host.className = 'mj-ircut-scan';
-		// Dressed as a group of this section, not as an announcement inside it:
-		// micro-caps head, hairline to the margin, note on the right, small body
-		// — the same head the deck gives Wiring and Connected to. A lead
-		// paragraph at full body size was the only 1rem text on the page.
-		host.innerHTML =
-			'<div class="mj-live-grp-head"><span class="mj-cap">Find the pins</span>' +
-			'<span class="mj-live-rule"></span>' +
-			'<span class="mj-live-note" id="mj-scan-n"></span></div>' +
-			'<p class="small mb-2">Each pad is driven against another while the ' +
-			'picture is watched for the filter to move. An IR-cut filter is driven ' +
-			'across two pads, so pairs are what get tried; the pairs other boards ' +
-			'use go first, so this usually ends in seconds.</p>' +
-			'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
-			'<b>This drives pads whose job is unknown.</b> One of them may reset the ' +
-			'network, cut power to the sensor, or stop the camera answering. That risk ' +
-			'cannot be removed &mdash; only made survivable: each pad is written to flash ' +
-			'before it is driven, so a camera that has to be restarted comes back knowing ' +
-			'which pad did it.</div>' +
-			'<p class="x-small text-secondary mb-2">Pads already spoken for are skipped. ' +
-			// Said only where it is true. The table is per board, so this is an
-			// order and not a promise — the pads are still driven if nothing
-			// before them moved the filter, which is why the warning above
-			// keeps its wording either way.
-			(part.known
-				? 'Pads that other boards with this SoC use for a reset, a USB enable ' +
-					'or an illuminator are tried last, and the pairs recorded for it first. '
-				: '') +
-			'This reads the picture, so it needs daylight &mdash; at night nothing will ' +
-			'look like it moved.</p>' +
-			'<div class="d-flex gap-2 align-items-center">' +
-			'<button type="button" class="btn btn-primary btn-sm" id="mj-scan-go">Start</button>' +
-			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-no">Cancel</button>' +
-			'</div>';
-		host.querySelector('#mj-scan-n').textContent = list.length + ' pairs to try';
-		host.querySelector('#mj-scan-no').addEventListener('click', () => {
-			stop = true; host.hidden = true;
-		});
-		host.querySelector('#mj-scan-go').addEventListener('click', () => {
-			host.innerHTML =
-				'<div class="mj-live-grp-head"><span class="mj-cap">Scanning</span>' +
-				'<span class="mj-live-rule"></span>' +
-				'<span class="mj-live-note" id="mj-scan-s"></span></div>' +
-				'<p class="small mb-2" id="mj-scan-t">Starting&hellip;</p>' +
-				'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-stop">Stop</button>';
-			const t = host.querySelector('#mj-scan-t');
-			const s = host.querySelector('#mj-scan-s');
-			host.querySelector('#mj-scan-stop').addEventListener('click', () => { stop = true; });
-
-			SCAN.run({
-				// A refusal and a failure are not the same answer. The endpoint
-				// guards pads with owners and says so with a 200 carrying
-				// done:false — that pair is skipped and the sweep goes on. A
-				// request that does not arrive at all is a camera that has
-				// stopped answering, and flattening it into "this pair did not
-				// move anything" made the scan keep firing GPIO writes at a dead
-				// camera for another two hundred pairs and then report that
-				// nothing moved. It rejects now, and the sweep stops.
-				// POST, not GET: driving a pad is a mutation, and a GET is what
-				// a browser issues by itself — a prefetch, a restored tab, a
-				// link from anywhere — carrying the session with it.
-				drive: (a, b) => apiFetch('/api/v1/gpio?pair=' + a + ',' + b,
-					{ method: 'POST', credentials: 'same-origin' })
-					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
-				release: (a, b) => apiFetch('/api/v1/gpio?park=' + a + ',' + b + '&mode=float',
-					{ method: 'POST', credentials: 'same-origin' })
-					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
-				look: () => IRCUT.snapshot('/image.jpg'),
-				wait: (ms) => new Promise((r) => setTimeout(r, ms)),
-				stopped: () => stop,
-				onStep: (st) => {
-					t.textContent = 'Trying pins ' + st.a + ' and ' + st.b;
-					s.textContent = (st.index + 1) + ' of ' + st.total;
-					map.sweep(st.a);
-				},
-			}, list).then((res) => {
-				map.sweep(null);
-				const found = res.pins;
-				if (!found) {
-					host.innerHTML = '<div class="mj-live-grp-head">' +
-						'<span class="mj-cap">Find the pins</span>' +
-						'<span class="mj-live-rule"></span></div>' +
-						'<div class="alert alert-secondary py-2 px-3 mb-0 small">' +
-						'<b>Nothing moved the picture.</b> Either the filter is on a pair this ' +
-						'scan did not reach, or there is not enough light to see it move. ' +
-						'Try again in daylight, or set the pins by hand.' +
-						// Named because it is a real class of camera the sweep
-						// cannot reach, rather than a gap in the pad list. A
-						// single-pad filter is moved by HOLDING one pad at a
-						// level, and holding a pad is the thing this scan may
-						// not do: on a two-coil board it would leave a winding
-						// carrying current, which is why every actuation here
-						// is a brief pulse across a pair. So that wiring is
-						// found by hand and confirmed by the test (#273).
-						'<br><br>A filter driven from a single pad is not something ' +
-						'this sweep can find: it works by pulsing pairs, and a ' +
-						'single-pad filter is moved by holding one pad at a level, ' +
-						'which is not safe to do to a pad whose job is unknown. ' +
-						'If yours is wired that way, put the pad on the opening coil ' +
-						'yourself and press <b>Test the filter</b>.</div>';
-					return;
-				}
-				// The pair itself was watched moving the picture, so it is
-				// reported either way; what may be missing is the classification
-				// and the guarantee that the filter was left closed.
-				// brakeHeld is three-valued. null is a test that did not run:
-				// one of these pads is already majestic's, so it was braked
-				// rather than let go of, and there is no way to see whether the
-				// filter would have sprung open. Saying "it holds its position
-				// on its own" from that would be a claim made about a pad
-				// nothing released (#273).
-				const tail = !found.settled
-					? 'The checks after that did not finish, so the filter may not have ' +
-						'been left closed &mdash; look at the picture before trusting it.'
-					: found.brakeHeld === null
-						? 'Whether it holds its position on its own was not tested: ' +
-							'majestic is already driving one of these pads, and letting ' +
-							'go of it here would have moved the filter.'
-						: found.brakeHeld
-							? 'It springs open when the pins are released, so they have to stay driven.'
-							: 'It holds its position on its own.';
-				host.innerHTML = '<div class="mj-live-grp-head">' +
-					'<span class="mj-cap">Find the pins</span>' +
-					'<span class="mj-live-rule"></span></div>' +
-					'<div class="alert ' + (found.settled ? 'alert-success' : 'alert-warning') +
-					' py-2 px-3 mb-2 small"><b>' +
-					(found.settled ? 'Found it.' : 'Found the pins, but not cleanly.') + '</b> ' +
-					'Pins ' + esc(String(found.irCutPin1)) + ' and ' + esc(String(found.irCutPin2)) +
-					' drive the filter &mdash; ' + esc(String(found.closesWhenHigh)) +
-					' is the one that closes it. ' + tail +
-					'</div><button type="button" class="btn btn-primary btn-sm" id="mj-scan-use">' +
-					'Use these pins</button>';
-				host.querySelector('#mj-scan-use').addEventListener('click', () => {
-					// Staged, never written behind the person's back: the map
-					// fills the fields and the save bar appears like any edit.
-					const a = map.get();
-					a.irCutPin1 = found.irCutPin1;
-					a.irCutPin2 = found.irCutPin2;
-					// set() fires onChange, which pushes the fields and repaints
-					// the roles — no second push needed.
-					map.set(a);
-					host.hidden = true;
-					if (status) status.textContent = 'Pins staged — Save, then test the filter.';
-				});
-			}).catch((e) => {
-				map.sweep(null);
-				host.innerHTML = '<div class="mj-live-grp-head">' +
-					'<span class="mj-cap">Find the pins</span>' +
-					'<span class="mj-live-rule"></span></div>' +
-					'<div class="alert alert-danger py-2 px-3 mb-0 small">' +
-					'The scan could not finish: ' + esc(e && e.message ? e.message : String(e)) +
-					'</div>';
+		if (find) {
+			find.addEventListener('click', () => {
+				// The same in-page navigation the tree uses, so this does not
+				// reload the camera's WebUI to move one section.
+				location.hash = 'pins';
 			});
-		});
+		}
 	}
+
+	// The scan that finds these pins by driving them lives on the Pins page
+	// now. What it does is drive arbitrary pads across the whole chip, and
+	// everything that makes that safe is about GPIO in general -- it was here
+	// only because the filter is what it was built to find. This page keeps
+	// what is genuinely its own: which pad each coil is on, and testing the
+	// filter once they are set.
+
 
 	// "all N at stock" / "N of M off stock" for the section head, and the same
 	// judgement marked on every row it counted — the head can say how many and
