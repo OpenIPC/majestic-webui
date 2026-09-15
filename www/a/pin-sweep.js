@@ -28,12 +28,6 @@
 (function () {
 	'use strict';
 
-	// Long enough for the slowest thing that can answer. A USB device has to
-	// be reset, addressed and read before it is a device; a card negotiates; a
-	// driver binds. Under about a third of a second every pad looks dead.
-	// The camera clamps this to its own ceiling either way.
-	const HOLD_MS = 1200;
-
 	// High first, then low, and both because neither is the obvious one: an
 	// enable line is usually active high, a reset usually active low, and a
 	// board that wires either way round is normal. A whole pass at one level
@@ -201,10 +195,11 @@
 		return step(0);
 	}
 
+	// describe() and LEVELS stay inside: one is how sentence() is built and the
+	// other is what steps() defaults to, and neither is anybody else's.
 	const api = {
 		pads: pads, steps: steps, remaining: remaining, run: run,
-		describe: describe, sentence: sentence, key: key,
-		HOLD_MS: HOLD_MS, LEVELS: LEVELS,
+		sentence: sentence, key: key,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticPinSweep = api;

@@ -859,7 +859,6 @@
 		// read, which the hunt treats as "cannot run" rather than as an empty
 		// chip.
 		let gpio = null;
-		let hunt = null;
 		// The pair under the bridge right now, so the drawing can light it.
 		let sweeping = null;
 
@@ -1434,7 +1433,7 @@
 			if (!HUNT || !gpio) return;
 			const box = el('div', 'mj-pins-hunt');
 			root.appendChild(box);
-			hunt = HUNT.mount(box, {
+			HUNT.mount(box, {
 				info: gpio,
 				soc: (doc && doc.chip) || '',
 				// The drawing, lent to the hunt. It never reaches in here: it
@@ -1445,8 +1444,6 @@
 						sweeping = a == null ? null : { a: a, b: b == null ? null : b };
 						applyHunt();
 					},
-					assign: () => ({}),
-					setAssign: () => {},
 					// Open a pin's detail from the hunt. A find ends with "pin
 					// 47, held high" and the next thing the owner wants is that
 					// pin's own controls, which are on this page and not the

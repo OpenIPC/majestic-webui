@@ -1018,8 +1018,9 @@
 
 	// `pins` is the Pins page's own handle, injected the way `io` is injected
 	// into run(): this file never reaches into that page's DOM, and the two can
-	// be changed apart. It owes us sweep(a, b), assign()/setAssign() for the
-	// pins a find should be written to, and refresh().
+	// be changed apart. It owes us sweep(a, b) to light what is being driven,
+	// select(pin) to open one pin's own controls, and changed() for when the
+	// camera's answer has moved under it.
 	const state = { info: null, range: null, soc: '', host: null, pins: null };
 	let pins = null;
 	const hostOf = () => state.host;
@@ -1030,7 +1031,7 @@
 		state.soc = opts.soc || '';
 		state.info = opts.info || null;
 		pins = opts.pins || {};
-		if (!SCAN() || !state.info) return null;
+		if (!SCAN() || !state.info) return;
 
 		// The way in. Always drawn, because this is now the only place the
 		// hunt can be started from -- on the page it came from there was a
@@ -1040,12 +1041,6 @@
 		// And on top of it where a previous run did not finish, because
 		// "carry on from pair 84" is a different offer from "start".
 		resumeCard(state.info);
-		return {
-			open: () => openScan(state.info),
-			reinfo: (fresh) => { state.info = fresh; },
-			avoid: (pin, on) => scanAvoid(pin, on),
-			info: () => state.info,
-		};
 	}
 
 	const api = { mount: mount };
