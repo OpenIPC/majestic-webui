@@ -281,6 +281,38 @@
 	// exactly the camera whose owner has come here to find out whether the card
 	// is the problem. The counters above are silent until recording has worked
 	// at least once.
+	// The sequential floor the card's own marks promise, in MB/s, or 0 when it
+	// claims none. Class N and UHS U1/U3 and V-classes are all minimum
+	// sustained sequential write rates, so the highest of them is the number
+	// the card is holding itself to.
+	function ratedFloor(r) {
+		if (!r) return 0;
+		const uhs = r.uhsGrade === 3 ? 30 : (r.uhsGrade === 1 ? 10 : 0);
+		return Math.max(r.speedClass || 0, uhs, r.videoClass || 0);
+	}
+
+	// Measured well under what the card promises — and the card is not
+	// necessarily the one at fault.
+	//
+	// Written after measuring a Class 10 card at 4.7 MB/s on a hi3518ev200,
+	// where a RAW read straight off the block device managed the same 4.7 MB/s
+	// against a CPU that copies 40 MB/s: the host controller was the ceiling,
+	// not the card. Printing "claims 10, delivers 4.7" there invites somebody
+	// to replace a perfectly good card and measure exactly the same figure
+	// again. The rated floors are quoted for a card reader, not for a camera
+	// built around a 440 MHz ARM926.
+	//
+	// So this says the two numbers disagree and declines to say which is
+	// wrong, which is all the page actually knows.
+	function shortfallNote(d, mbs) {
+		const floor = ratedFloor(d.rating);
+		if (!floor || mbs >= floor * 0.8) return '';
+		return '<div class="x-small text-secondary mb-2">' +
+			'That is below the ' + floor + ' MB/s this card’s markings promise — but the rating is quoted for a ' +
+			'card reader, and on some cameras the slot itself is the slower half. A figure under the rating ' +
+			'does not on its own mean the card is at fault.</div>';
+	}
+
 	function speedBlock(d) {
 		let out = '';
 		if (speed) {
@@ -293,6 +325,7 @@
 				out += '<dt>Read back</dt><dd>' + esc((speed.bytes / (speed.readMs / 1000) / 1048576).toFixed(1)) + ' MB/s</dd>';
 			}
 			out += '<dt>Longest pause</dt><dd>' + esc(pause(speed.worstMs / 1000)) + '</dd></dl>';
+			out += shortfallNote(d, w / 1048576);
 			// Measured against a card that had a second writer on it. Saying so
 			// is the difference between a figure and a misleading figure — a
 			// test run beside a live recorder reads slower than the card is,

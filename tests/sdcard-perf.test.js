@@ -28,13 +28,23 @@ const A = (f) => path.join(__dirname, '..', 'www', 'a', f);
 function makeEl(id) {
 	const el = {
 		id: id, innerHTML: '', textContent: '', className: '', hidden: false,
-		dataset: {}, style: {},
+		dataset: {}, style: {}, handlers: { click: [], change: [] },
 		classList: { add() {}, remove() {}, contains: () => false },
-		addEventListener() {}, removeAttribute() {}, setAttribute() {},
+		addEventListener(ev, fn) { (this.handlers[ev] || (this.handlers[ev] = [])).push(fn); },
+		removeAttribute() {}, setAttribute() {},
 		querySelector: () => null, querySelectorAll: () => [],
 		closest: () => null, appendChild() {},
 	};
 	return el;
+}
+
+// Press a delegated control the way a browser would, so the page's own handler
+// runs. Planting the result instead is not possible and would not be worth much
+// if it were: the state this asserts on lives inside the module closure, and
+// reaching past the handler would be testing a fixture rather than the code.
+function press(el, sel) {
+	const ev = { target: { closest: (s) => (s === sel ? { dataset: {}, disabled: false } : null) } };
+	(el.handlers.click || []).forEach((fn) => fn(ev));
 }
 
 function card(over) {
@@ -75,7 +85,7 @@ function beat(over, prevBytes, dt) {
 // it drew. `sample` of null is a heartbeat that never landed — which is not
 // the same as one that landed empty, and is the distinction most of these
 // cases turn on.
-function load(cardJson, sample) {
+function load(cardJson, sample, speedAnswer) {
 	const SD = makeEl('sd');
 	let subscriber = null;
 	const env = { SD: SD };
@@ -85,7 +95,11 @@ function load(cardJson, sample) {
 		if (url.indexOf('/api/v1/config.json') === 0) {
 			return json({ records: { enabled: true, path: '/mnt/sd/%F', split: 20, maxUsage: 95 } });
 		}
-		if (url.indexOf('/cgi-bin/j/sdcard.cgi') === 0) return json(cardJson);
+		if (url.indexOf('/cgi-bin/j/sdcard.cgi') === 0) {
+			// The POST is the measurement; the GET is the card.
+			const post = arguments[1] && arguments[1].method === 'POST';
+			return json(post ? { ok: true, speed: speedAnswer } : cardJson);
+		}
 		return Promise.reject(new Error('unstubbed ' + url));
 	}
 
@@ -109,6 +123,7 @@ function load(cardJson, sample) {
 		encodeURIComponent: encodeURIComponent,
 		alert() {}, confirm: () => true,
 		setTimeout, clearTimeout, clearInterval, setInterval: () => 0,
+		URLSearchParams: URLSearchParams,
 	};
 	ctx.window.document = ctx.document;
 	ctx.window.mjMetricsSubscribe = (fn) => { subscriber = fn; };
@@ -119,6 +134,7 @@ function load(cardJson, sample) {
 		vm.runInContext(fs.readFileSync(A(f), 'utf8'), ctx);
 	}
 	if (sample && subscriber) subscriber(sample);
+	env.press = (sel) => press(SD, sel);
 	env.html = () => SD.innerHTML;
 	return env;
 }
@@ -128,6 +144,17 @@ async function drawn(env) {
 	const end = Date.now() + PATIENCE;
 	while (Date.now() < end) {
 		if (env.html().indexOf('Performance') >= 0) return env.html();
+		await new Promise((r) => setTimeout(r, 5));
+	}
+	return env.html();
+}
+
+// Press Measure and wait for the figures to reach the page.
+async function measured(env) {
+	env.press('#sd-speed');
+	const end = Date.now() + PATIENCE;
+	while (Date.now() < end) {
+		if (env.html().indexOf('Sequential write') >= 0) return env.html();
 		await new Promise((r) => setTimeout(r, 5));
 	}
 	return env.html();
@@ -276,6 +303,48 @@ async function main() {
 			h.indexOf('Longest pause') < 0 && h.indexOf('Footage dropped') < 0, h.slice(0, 400));
 		check('and is told why there is nothing to show',
 			h.indexOf('Nothing has been recorded to this card') >= 0, 'silent');
+	}
+
+	group('a measurement under the card’s own rating blames nobody');
+
+	{
+		// Measured on a hi3518ev200: a Class 10 card at 4.7 MB/s, where a raw
+		// read off the block device managed the same 4.7 against a CPU good for
+		// 40 — the host was the ceiling, not the card. The page must not turn
+		// that into an accusation, or somebody replaces a good card and
+		// measures the same number again.
+		const env = load(
+			card({ rating: { speedClass: 10, uhsGrade: 0, videoClass: 0, appClass: 0 } }),
+			beat(), { bytes: 33554432, writeMs: 6820, worstMs: 450, readMs: 3720, recording: false });
+		await drawn(env);
+		const h = await measured(env);
+		check('a figure under the rating is pointed out',
+			h.indexOf('below the 10 MB/s') >= 0, h.slice(-700));
+		check('and the camera is named as a possible cause',
+			h.indexOf('the slot itself is the slower half') >= 0, 'missing');
+		check('without convicting the card',
+			h.indexOf('does not on its own mean the card is at fault') >= 0, 'convicted the card');
+	}
+
+	{
+		// Comfortably at its rating: nothing to say.
+		const env = load(
+			card({ rating: { speedClass: 10, uhsGrade: 1, videoClass: 10, appClass: 2 } }),
+			beat(), { bytes: 33554432, writeMs: 2000, worstMs: 100, readMs: 900, recording: false });
+		await drawn(env);
+		const h = await measured(env);
+		check('a card meeting its rating is not editorialised about',
+			h.indexOf('below the') < 0, h.slice(-400));
+	}
+
+	{
+		// No rating to fall short of.
+		const env = load(card({ ratingWhy: 'platform' }), beat(),
+			{ bytes: 33554432, writeMs: 9000, worstMs: 800, readMs: 4000, recording: false });
+		await drawn(env);
+		const h = await measured(env);
+		check('a card with no known rating is measured against nothing',
+			h.indexOf('below the') < 0, h.slice(-400));
 	}
 
 	group('the measurement itself');
