@@ -43,6 +43,34 @@
 	// waiting for anything later is what made this page sit doing nothing while
 	// the camera was already serving again in another tab.
 	const rebootMarker = /Unconditional reboot|Rebooting now/i;
+	// Sticky, like sawFlash and for the same reason: `recent` is a 512-character
+	// rolling window, so an announcement followed by enough further output scrolls
+	// out of it. Every read of this used to ask the expression directly, which
+	// left them one long transcript away from forgetting a reboot they had already
+	// seen. factory-reset.js, the same machinery against the same updater, has
+	// latched it all along.
+	let sawReboot = false;
+
+	// The camera's own account of the ending, and the only DEFINITIVE one here.
+	// Everything above is sysupgrade's output read over its shoulder; this is the
+	// daemon that ran it, reporting that the updater exited WITHOUT rebooting —
+	// either after restarting video, or having failed to. It arrives on a text
+	// frame, which is why none of it reached a browser before #477.
+	const incompleteMarker = /Upgrade did not complete/i;
+	const videoLostMarker = /video could not be restarted/i;
+
+	// The refusals the camera answers with when it will not start the upgrade at
+	// all. Nothing is spawned on those paths, so there is no transcript: this one
+	// line is the whole of the output there will ever be, which is exactly the
+	// report this came from — an upload line, and then the page's own guess that
+	// the camera was rebooting (#474).
+	//
+	// Enumerated and anchored, never "any line beginning ERROR:". The transcript
+	// is other people's tool output — curl, tar, flashcp — and a pattern loose
+	// enough to catch one of their lines would end a run while a flash was under
+	// way. A refusal this list has not heard of falls through to the old
+	// behaviour, which is the safe direction to be wrong in.
+	const refusedMarker = /^ERROR: (?:invalid upgrade parameters|cannot start sysupgrade|cannot stream upgrade log|cannot watch the upgrade)/mi;
 
 	// The things a flash does, and the line sysupgrade prints when each one is
 	// behind it. Every marker here is one this file already had to recognise for
@@ -243,9 +271,10 @@
 		}
 		// Whatever the log says, a reboot announcement means every write that was
 		// going to happen has happened.
-		if (rebootMarker.test(recent)) {
-			for (const p of PHASES) { if (p.step !== 'reboot') seen[p.step] = true; }
-			moved = true;
+		if (sawReboot) {
+			for (const p of PHASES) {
+				if (p.step !== 'reboot' && !seen[p.step]) { seen[p.step] = true; moved = true; }
+			}
 		}
 		trackMeter(chunk);
 		if (moved) paintPhases();
@@ -321,7 +350,36 @@
 	function endLog() {
 		if (logClosed) return;
 		logClosed = true;
-		term.note('--- connection to the camera ended here; it is rebooting ---');
+		// Only what was observed. A flash marker means the camera is going down
+		// whatever happens next, and the announcement says so outright — with
+		// either behind it the reboot is a fact about the run. With neither, a
+		// socket that closed is a socket that closed, and the note claiming
+		// otherwise was the whole of what the reporter of #474 had to go on.
+		term.note(sawFlash || sawReboot
+			? '--- connection to the camera ended here; it is rebooting ---'
+			: '--- connection to the camera ended here ---');
+	}
+
+	// Nothing more is coming, and the CAMERA is what said so. Every ending it
+	// states outright arrives here — the pre-flash abort, its own "Upgrade did not
+	// complete", and the refusals it answers before the updater is spawned — so
+	// the log above is the whole story and there is nothing left to wait for.
+	//
+	// A socket that merely closed must never call this. "The camera said it is
+	// over" and "the camera stopped talking" are the two states this file exists
+	// to keep apart, and only the first of them is evidence.
+	let over = false;
+	function stopWaiting(cls, msg) {
+		if (over) return;
+		over = true;
+		// The quiet timer is armed before the socket is, and these are the exits
+		// that can leave the socket open — a log nothing will append to again means
+		// ws.onclose may never fire, and this would tick for the life of the tab.
+		if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
+		term.commit();
+		hideMeter();
+		status(cls, msg);
+		resumeHeartbeat();
 	}
 
 	// Start watching for the camera to come back. Three things can get us here
@@ -335,7 +393,9 @@
 	// working: pollBack only watches, and rebootedAlready() keeps answering false
 	// while the reported uptime is older than this run.
 	function beginPollBack(quiet) {
-		if (polling) return;
+		// `over` as well as `polling`: once the camera has stated the run is over,
+		// no caller may start a watch for a reboot it said is not coming.
+		if (polling || over) return;
 		polling = true;
 		if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
 		// Tidy the half-drawn meter, but do NOT declare the stream over: the
@@ -361,12 +421,20 @@
 		// the reboot the passes are all behind us and the bar has nothing left to
 		// say; where the transcript simply stopped, the last reading is where the
 		// write got to and stays on screen, marked as no longer live.
-		if (rebootMarker.test(recent)) hideMeter(); else staleMeter();
+		if (sawReboot) hideMeter(); else staleMeter();
 		// "do not power off" is a warning about an interrupted flash, so do not
 		// say it when sysupgrade has already told us it wrote nothing.
+		// And "waiting for the camera to reboot" is itself a claim about what the
+		// camera is doing. It is earned by a flash marker, by the announcement, or
+		// by update.cgi having found the upgrade-in-progress marker before this
+		// page was drawn. With none of those, all that is known is that the stream
+		// ended — the flash may be running unseen, so the warning stays, but the
+		// sentence in front of it stops asserting a reboot (#478).
 		status('warning', noop
 			? 'Already up to date — waiting for the camera to come back…'
-			: 'Waiting for the camera to reboot — do not power off…');
+			: (sawFlash || sawReboot || reattached)
+				? 'Waiting for the camera to reboot — do not power off…'
+				: 'The connection ended before any flash was reported — waiting in case the camera reboots anyway. Do not power off…');
 		pollBack();
 	}
 
@@ -380,12 +448,15 @@
 		// from the rendering.
 		const chunk = term.write(t);
 		recent = (recent + chunk).slice(-512);
-		trackPhases(chunk);
+		// Latch every marker FIRST, then let the readers below run off the flags
+		// rather than off a window that is about to scroll out from under them.
 		if (!sawFlash && flashMarker.test(recent)) sawFlash = true;
 		if (!noop && noopMarker.test(recent)) noop = true;
+		if (!sawReboot && rebootMarker.test(recent)) sawReboot = true;
+		trackPhases(chunk);
 		// Said out loud by sysupgrade immediately before it reboots, so there is
 		// nothing left to wait for.
-		if (rebootMarker.test(recent)) beginPollBack();
+		if (sawReboot) beginPollBack();
 		if (!aborted && abortMarker.test(recent)) {
 			aborted = true;
 			if (sawFlash) {
@@ -396,17 +467,26 @@
 			} else {
 				// Nothing reached flash, so no reboot is coming and the log above is
 				// the whole story. Say so now instead of waiting out pollBack.
-				//
-				// This is the one exit that leaves the socket open: sysupgrade gave up
-				// without rebooting, so the `tail -F` behind it never emits again and
-				// ws.onclose may never fire. Nothing else will stop the quiet timer,
-				// and it would otherwise tick for the life of the tab.
-				if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
-				term.commit();
-				hideMeter();
-				status('danger', 'The upgrade was aborted — see the log below. Nothing was written to flash, so the camera is unchanged.');
-				resumeHeartbeat();
+				stopWaiting('danger', 'The upgrade was aborted — see the log below. Nothing was written to flash, so the camera is unchanged.');
 			}
+		}
+		// The camera's own two endings, and the refusals it answers before an
+		// updater exists. Only where nothing has said a write began: past that
+		// point the camera is going down whatever a message claims, and no
+		// sentence is worth standing a reader down beside a flash that may still
+		// be running.
+		if (!sawFlash && incompleteMarker.test(recent)) {
+			stopWaiting('danger', videoLostMarker.test(recent)
+				? 'The upgrade did not complete and the camera could not restart its video — see the log below. Reboot the camera.'
+				: 'The upgrade did not complete — see the log below. The camera restarted its video and is still on the firmware it started with.');
+		}
+		// A refusal, and never on a reattached run: there the page was drawn from a
+		// camera that had already reported an upgrade in progress, so being refused
+		// a second view of it says nothing about the flash. That is the reasoning
+		// attachToRunning's own error path is built on, and it must not be undone
+		// from here.
+		if (!sawFlash && !reattached && refusedMarker.test(recent)) {
+			stopWaiting('danger', 'The camera could not start the upgrade — see the log below. Nothing was written to flash, so the camera is unchanged.');
 		}
 	}
 	function showProgress(p, resuming) {
@@ -465,6 +545,7 @@
 	// the callers.
 	function resetRunState() {
 		sawFlash = false;
+		sawReboot = false;
 		aborted = false;
 		recent = '';
 		meterTail = '';
@@ -477,6 +558,7 @@
 		lastData = startedAt;
 		polling = false;
 		logClosed = false;
+		over = false;
 		if (quietTimer) clearInterval(quietTimer);
 		// The log dying mid-flash is the other way the camera leaves without
 		// saying so — majestic is simply overwritten, and "Unconditional reboot"
@@ -537,9 +619,12 @@
 			// replacement character rather than disappearing with the socket.
 			const tail = dec.decode();
 			if (tail) append(tail);
-			if (aborted && !sawFlash) {
-				// Gave up before touching flash; no reboot is coming, and the log
-				// above is the whole story.
+			if (over) {
+				// The camera already said the run was over — the pre-flash abort, its
+				// own "Upgrade did not complete", or a refusal. No reboot is coming,
+				// the status already says why, and nothing may be written under the
+				// camera's last word. All that is left is to tidy whatever the closing
+				// frame was half-way through.
 				if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
 				term.commit();
 				hideMeter();
