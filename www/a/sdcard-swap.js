@@ -105,6 +105,31 @@
 		if (!started || !started.present || !started.mounted) {
 			return { outcome: 'nocard' };
 		}
+
+		// One swap at a time, camera-wide rather than tab-wide.
+		//
+		// Two browsers can each be sure they are the only one. The second one
+		// to reach the unmount finds the card already gone, treats that as a
+		// failure, puts it back and starts the recorder again -- while the
+		// first is still displaying SAFE TO REMOVE over a card that is now
+		// mounted and being written to. That is the one arrangement in this
+		// flow that can cost somebody a filesystem.
+		//
+		// The camera's own stand-down flag is what is asked, because it is
+		// camera-wide and already published; a flag held in the page would be
+		// invisible to exactly the second page that needs to see it.
+		if (io.swapping) {
+			let busy = false;
+			try {
+				busy = await io.swapping();
+			} catch (e) {
+				// Cannot tell, so do not block the operator in front of the
+				// camera on the strength of a failed read.
+				busy = false;
+			}
+			if (busy) return { outcome: 'busy' };
+		}
+
 		const was = { serial: started.serial, mountpoint: started.mountpoint };
 
 		// From here on the recorder is stopped, so every exit has to start it
@@ -169,6 +194,15 @@
 		};
 
 		try {
+			// Stop, pressed while the stand-down was in flight.
+			//
+			// It used to be noticed only inside the polling loops, which are
+			// downstream of the unmount -- so asking to stop during the one
+			// step that takes a visible moment still released the filesystem
+			// and still flashed SAFE TO REMOVE before putting it all back.
+			// Somebody reading that word has their hand on the card.
+			if (io.stopped && io.stopped()) return await finish({ outcome: 'stopped' });
+
 			step(io, 'releasing');
 			const un = await io.unmount();
 			if (!ok(un)) {

@@ -65,6 +65,7 @@ function card(over) {
 function beat(over, prevBytes, dt) {
 	const v = Object.assign({
 		records_state: 0,
+		records_stood_down: 0,
 		records_fragments_written_total: 1000,
 		records_bytes_written_total: 0,
 		records_fsync_us_max: 0,
@@ -430,6 +431,41 @@ async function main() {
 		const h = await drawn(load(card({ health: 'readonly' }), beat()));
 		check('nor can a read-only one',
 			h.indexOf('disabled') >= 0, h.slice(-400));
+	}
+
+	group('a control this camera cannot honour is not offered as if it could');
+
+	{
+		// Everything the swap does is downstream of pausing the recorder, so
+		// on a majestic too old to have the endpoint the wizard fails on its
+		// first operation -- and tells the operator their camera is broken. It
+		// is not broken, it is older, and the button should say so before it
+		// is pressed rather than after.
+		//
+		// The capability is read from the gauge the same change added, not
+		// guessed from a version string.
+		const h = await drawn(load(card(), beat()));
+		check('a camera that can pause its recorder offers the swap',
+			h.indexOf('data-act="swap"') >= 0 && h.indexOf('data-act="swap" disabled') < 0,
+			h.slice(-600));
+	}
+
+	{
+		const old = beat();
+		delete old.m.v.records_stood_down;
+		const h = await drawn(load(card(), old));
+		check('a camera that cannot is offered a disabled one',
+			h.indexOf('data-act="swap" disabled') >= 0, h.slice(-600));
+		check('and told why', h.indexOf('cannot pause') >= 0, h.slice(-600));
+	}
+
+	{
+		// Before the first heartbeat nothing is known, and a disabled button
+		// drawn then is a verdict on evidence that has not arrived. It appears
+		// a moment later instead.
+		const h = await drawn(load(card(), null));
+		check('a camera that has not said yet is offered neither',
+			h.indexOf('data-act="swap"') < 0, h.slice(-600));
 	}
 
 	done();

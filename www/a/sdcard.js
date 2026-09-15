@@ -397,6 +397,24 @@
 			'show. The test below writes to the card itself and times it.</div>';
 	}
 
+	// Can this camera pause its recorder on request?
+	//
+	// Every step of the swap is downstream of that one, so a camera that
+	// cannot do it is offered a wizard that fails on its first operation and
+	// tells the operator their camera is broken -- it is not, it is older.
+	// The capability is read from the heartbeat rather than guessed from a
+	// version string: the gauge exists exactly when the endpoints do, because
+	// the same change added both.
+	//
+	// Three answers. Before the first heartbeat nothing is known, and drawing
+	// a disabled button then would be a verdict on evidence that has not
+	// arrived yet -- the button appears a moment later instead.
+	function swapSupport() {
+		if (!recorder) return 'unknown';
+		if (recorder.absent) return 'no';
+		return typeof recorder.v.records_stood_down === 'number' ? 'yes' : 'no';
+	}
+
 	// Is the recorder writing to THIS card right now?
 	//
 	// Both halves are already on this page: where the clips are configured to
@@ -443,8 +461,12 @@
 		let acts = '<button class="btn btn-sm btn-outline-secondary" data-act="browse"' + (d.mounted ? '' : ' disabled') + '>Browse files</button>';
 		if (d.mounted) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="unmount">Unmount</button>';
 		else if (d.fs) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="mount">Mount</button>';
-		if (d.mounted && d.health !== 'readonly')
-			acts += '<button class="btn btn-sm btn-outline-secondary" data-act="swap">Change the card…</button>';
+		if (d.mounted && d.health !== 'readonly' && swapSupport() !== 'unknown')
+			acts += '<button class="btn btn-sm btn-outline-secondary" data-act="swap"'
+				+ (swapSupport() === 'yes' ? '' : ' disabled title="This camera\'s majestic cannot pause '
+					+ 'recording on request, which is the first thing changing a card needs. Unmount, '
+					+ 'change the card and mount it again instead."')
+				+ '>Change the card…</button>';
 		if (d.canFsck) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="fsck">Check</button>';
 		acts += '<button class="btn btn-sm btn-outline-danger" data-act="format">Format…</button>';
 
@@ -596,6 +618,9 @@
 			now: () => Date.now(),
 			wait: (ms) => new Promise((r) => setTimeout(r, ms)),
 			stopped: () => swapStopped,
+			// Camera-wide, not tab-wide: this is the heartbeat every page
+			// receives, so a swap started in another browser is visible here.
+			swapping: () => !!(recorder && recorder.v && recorder.v.records_stood_down === 1),
 			onStep: (e) => say(e.step, e),
 			look: () => api(''),
 			unmount: () => op({ op: 'unmount' }),
@@ -625,6 +650,7 @@
 			unmountfailed: ['danger', 'The card could not be released, so nothing was changed and recording has been started again.'],
 			pausefailed: ['danger', 'The recorder could not be paused, so nothing was changed. This camera may be running a majestic that does not know how.'],
 			nocard: ['warn', 'There is no mounted card to change.'],
+			busy: ['warn', 'This camera is already having its card changed, somewhere else. Finish that one first — two at once is how a card gets pulled while the camera has started writing to it again.'],
 			stopped: ['warn', 'Stopped. Recording has been started again.'],
 		};
 

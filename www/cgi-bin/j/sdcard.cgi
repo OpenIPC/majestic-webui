@@ -723,10 +723,10 @@ do_speedtest() {
 # under a live filesystem, and a card that is already visible is not the
 # problem this solves.
 do_reprobe() {
-	if [ -n "$(awk '$1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts)" ]; then
-		err="a card is already mounted; nothing needs re-detecting"
-		return
-	fi
+	rp_mounted() { awk '$1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts; }
+
+	[ -z "$(rp_mounted)" ] ||
+		{ err="a card is already mounted; nothing needs re-detecting"; return; }
 
 	rp_dev=$(readlink -f /sys/class/mmc_host/mmc0/device 2>/dev/null)
 	[ -n "$rp_dev" ] || { err="this camera has no SD host controller to re-detect with"; return; }
@@ -738,13 +738,42 @@ do_reprobe() {
 		{ err="the SD host driver here cannot be asked to look again"; return; }
 
 	rp_id=$(basename "$rp_dev")
+
+	# Asked again, immediately before the unbind rather than only at the top.
+	# Finding the controller walks sysfs and the hotplug helper mounts a card
+	# asynchronously, so a card pushed in during those few milliseconds can be
+	# mounted by the time we get here -- and detaching the host under a live
+	# filesystem is how a card gets corrupted by the tool that was meant to
+	# find it.
+	[ -z "$(rp_mounted)" ] ||
+		{ err="a card appeared while looking; nothing needs re-detecting"; return; }
+
 	logln "# re-probe $rp_id via $(basename "$rp_drv")"
-	printf '%s' "$rp_id" > "$rp_drv/unbind" 2>/dev/null
-	sleep 1
-	printf '%s' "$rp_id" > "$rp_drv/bind" 2>/dev/null || {
-		err="the SD host controller did not come back after being re-probed"
+	if ! printf '%s' "$rp_id" > "$rp_drv/unbind" 2>/dev/null; then
+		# Nothing was detached, so there is nothing to put back.
+		err="the SD host controller would not let go to be re-probed"
 		return
-	}
+	fi
+
+	# Past this point the controller is DETACHED, and every exit has to put it
+	# back. One bind attempt whose result nobody checked would leave a camera
+	# with no SD slot at all until it was rebooted -- worse than the missing
+	# card this is trying to find, and in the same way: silently.
+	rp_i=0
+	while [ "$rp_i" -lt 5 ]; do
+		printf '%s' "$rp_id" > "$rp_drv/bind" 2>/dev/null
+		# The write can report success and the probe still fail, so the driver
+		# link coming back is what is actually checked.
+		[ -e "$rp_dev/driver" ] && break
+		sleep 1
+		rp_i=$((rp_i + 1))
+	done
+	if [ ! -e "$rp_dev/driver" ]; then
+		err="the SD host controller did not come back after being re-probed; rebooting the camera will restore it"
+		logln "# WARNING: $rp_id is left unbound"
+		return
+	fi
+
 	# The kernel enumerates a card asynchronously after the bind, and the
 	# hotplug rules mount it. Give that a moment so the caller's next look is
 	# of a settled slot rather than of the gap.

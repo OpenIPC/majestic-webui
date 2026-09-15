@@ -31,6 +31,10 @@ function rig(cards, opts) {
     let t = 0;
     let i = 0;
     let unmounted = false;
+    // Stop pressed while a request is still in flight, rather than between
+    // two of them. The engine used to notice only inside the polling loops,
+    // all of which are downstream of the unmount.
+    let stoppedNow = false;
     const env = {
         log,
         io: {
@@ -38,7 +42,12 @@ function rig(cards, opts) {
             // Time only moves when the engine waits, so a two-minute budget
             // costs no real seconds and a timeout is reached deterministically.
             wait: (ms) => { t += ms; return Promise.resolve(); },
-            stopped: () => !!(o.stopAfter && log.length >= o.stopAfter),
+            stopped: () => stoppedNow || !!(o.stopAfter && log.length >= o.stopAfter),
+            swapping: () => {
+                log.push('swapping');
+                if (o.swappingThrows) return Promise.reject(new Error('no metrics'));
+                return Promise.resolve(!!o.swapping);
+            },
             onStep: (e) => log.push('step:' + e.step),
             look: () => {
                 const c = cards[Math.min(i, cards.length - 1)];
@@ -58,6 +67,7 @@ function rig(cards, opts) {
             },
             standDown: () => {
                 log.push('standDown');
+                if (o.stopDuringStandDown) stoppedNow = true;
                 return o.standDownFails
                     ? Promise.reject(new Error('HTTP 404'))
                     : Promise.resolve();
@@ -98,6 +108,43 @@ const EMPTY = { present: false };
 function ran(log, what) { return log.indexOf(what) >= 0; }
 
 async function main() {
+    group('Stop means stop, including mid-request');
+    {
+        // The stand-down is the one step with a visible pause in it, so it is
+        // the step somebody presses Stop during. Noticing that only in the
+        // polling loops meant the card was released and SAFE TO REMOVE was
+        // displayed on the way to honouring it -- and the word "safe" is
+        // acted on by a person with their hand on the card.
+        const e = rig([A], { stopDuringStandDown: true });
+        const r = await swap.run(e.io);
+        check('stopping during the pause ends the swap', r.outcome === 'stopped', r.outcome);
+        check('and the card is never released', !ran(e.log, 'unmount'), e.log.join(','));
+        check('so it never says the card is safe to remove',
+            !ran(e.log, 'step:remove'), e.log.join(','));
+        check('and recording is started again', ran(e.log, 'resume'), e.log.join(','));
+    }
+
+    group('one swap at a time, camera-wide');
+    {
+        // Two browsers, one slot. The second to unmount finds the card gone,
+        // calls that a failure, mounts it back and resumes -- while the first
+        // is still showing SAFE TO REMOVE over a card the camera has started
+        // writing to again. A flag held in the page cannot see this; the
+        // camera's own stand-down gauge can.
+        const e = rig([A], { swapping: true });
+        const r = await swap.run(e.io);
+        check('a swap already running elsewhere is refused', r.outcome === 'busy', r.outcome);
+        check('nothing is paused', !ran(e.log, 'standDown'), e.log.join(','));
+        check('and nothing is released', !ran(e.log, 'unmount'), e.log.join(','));
+    }
+    {
+        // Not knowing is not the same as knowing somebody else is swapping.
+        // Refusing on a failed read would strand the operator at the camera.
+        const e = rig([A, A, EMPTY, EMPTY, B, B], { swappingThrows: true });
+        const r = await swap.run(e.io);
+        check('an unreadable flag does not block the swap', r.outcome === 'done', r.outcome);
+    }
+
     group('the swap that works');
     {
         const e = rig([A, A, EMPTY, EMPTY, B, B]);
