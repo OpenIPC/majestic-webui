@@ -5379,9 +5379,19 @@ dialog.mj-modal::backdrop {
    cursor and stays enabled. Hatch and a struck-through number, because fill is
    already spoken for three times over and the outer ring twice. */
 .mj-pin-avoid {
-	position: relative;
-	color: var(--bs-secondary-color);
+	/* NO `position` here. .mj-pin is absolute and the map places every pad with
+	   style.left/top, so setting `relative` took each excluded pad out of the
+	   grid and dropped it wherever normal flow put it -- a hole in one row and
+	   a pad floating past the edge of the chip. The ::after below anchors to
+	   the pad without it, because an absolutely-positioned element is already
+	   a containing block. */
+	/* Fixed colours, not theme tokens. The pad map paints itself the same in
+	   both themes -- .mj-pin is a light chip on a dark page -- so a
+	   --bs-secondary-color number came out near-white on near-white and the
+	   pad read as blank rather than crossed out. */
+	color: #a4a9b6;
 	text-decoration: line-through;
+	text-decoration-thickness: 1px;
 }
 
 .mj-pin-avoid::after {
@@ -5392,8 +5402,8 @@ dialog.mj-modal::backdrop {
 	pointer-events: none;
 	background: repeating-linear-gradient(
 		135deg,
-		rgba(var(--bs-body-color-rgb), 0.16) 0 2px,
-		rgba(var(--bs-body-color-rgb), 0) 2px 5px);
+		rgba(31, 36, 48, 0.18) 0 2px,
+		rgba(31, 36, 48, 0) 2px 5px);
 }
 
 /* The scan still lights it while explaining why it is skipped, so the hatch
