@@ -10,8 +10,8 @@
 // It did, and got the interesting part right — an absent key and a failed
 // request are not the same answer — but the question is better put to
 // /image.dng, which says 404 for a build without raw, 501 for one with it
-// switched off and 503 for one that cannot spare the memory just now. Nothing
-// is claimed about the camera until someone asks it for a frame.
+// switched off and 503 for one already busy with a frame. Nothing is claimed
+// about the camera until someone asks it for a frame.
 'use strict';
 
 const fs = require('fs');
