@@ -2,7 +2,7 @@
 <%in p/common.cgi %>
 <%
 config_file=/etc/webui/telegram.conf
-params="enabled token channel thread_id interval caption crontab clips document heif proxy"
+params="enabled token channel thread_id interval caption crontab clips video video_seconds document heif proxy"
 
 # webhook for remote send, returns [t|f]
 #
@@ -11,10 +11,17 @@ params="enabled token channel thread_id interval caption crontab clips document 
 # failure path finally answers: the old pipeline emitted an EMPTY body whenever
 # telegram bailed out before curl ran (unconfigured, no token, no channel),
 # because there was no JSON for jsonfilter to find an `ok` in.
-if [ "$GET_send" = "image" ]; then
+#
+# Two verbs, and each asks for exactly what it is named -- ?send=image goes on
+# meaning a picture on a camera whose schedule has been switched over to video,
+# which is what a dashboard fetching a thumbnail every minute wants. The switch
+# on this page governs the SCHEDULE, where nobody is present to say.
+if [ "$GET_send" = "image" ] || [ "$GET_send" = "clip" ]; then
 	echo "Content-type: text/html; charset=UTF-8"
 	echo
-	if telegram >/dev/null 2>&1; then echo true; else echo false; fi
+	send_what=--image
+	[ "$GET_send" = "clip" ] && send_what=--clip
+	if telegram "$send_what" >/dev/null 2>&1; then echo true; else echo false; fi
 	exit 0
 fi
 
@@ -52,6 +59,9 @@ fi
 [ -e "$config_file" ] && include $config_file
 [ -z "$telegram_crontab" ] && telegram_crontab="true"
 [ -z "$telegram_interval" ] && telegram_interval="15"
+# The sender's own default, said here too: a page offering a list of lengths
+# with none of them picked would show the first and mean the fourth.
+[ -z "$telegram_video_seconds" ] && telegram_video_seconds="10"
 %>
 
 <%in p/header.cgi %>
@@ -60,7 +70,7 @@ fi
 	<div class="col-12 col-lg-8">
 		<div class="card"><div class="card-body">
 			<% card_head "Telegram" "$([ "$telegram_enabled" = "true" ] && echo on || echo off)" %>
-			<p class="small text-secondary">Post snapshots to a Telegram channel, on a schedule or via the webhook.</p>
+			<p class="small text-secondary">Post a picture, or a few seconds of video, to a Telegram channel — on a schedule or via the webhook.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_switch "telegram_enabled" "Enable Telegram" "eval" %>
 				<% group_head "Bot" %>
@@ -69,6 +79,8 @@ fi
 				<% field_text "telegram_thread_id" "Message thread id" "Topic to post to (forum supergroups only)." %>
 				<% group_head "Submission" %>
 				<% field_switch "telegram_clips" "Send motion clips" "eval" "Post the recording itself when movement ends. Needs recording on motion to be switched on." %>
+				<% field_switch "telegram_video" "Send video on a schedule" "eval" "Record a few seconds and post that, instead of a single picture. Needs no card and no recording." %>
+				<% field_string "telegram_video_seconds" "Video length" "eval" "5 10 15 30 60" "Seconds to record. A send that overlaps another one also gets the seconds before it started; a send on its own begins where it was triggered." %>
 				<% field_string "telegram_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
 				<% field_switch "telegram_crontab" "Add to crontab" "eval" "Send pictures timed by interval." %>
 				<% field_text "telegram_caption" "Caption" "Location or short description." %>
@@ -85,10 +97,12 @@ fi
 		<div class="card"><div class="card-body">
 			<% card_head "Remote send" %>
 			<dl class="small list mb-0">
-				<dt>Webhook</dt>
+				<dt>Picture</dt>
 				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/telegram.cgi?send=image</dd>
+				<dt>Video</dt>
+				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/telegram.cgi?send=clip</dd>
 			</dl>
-			<p class="small text-secondary mt-2">Call this URL to trigger an image send. Click to copy, then replace <code>PASSWORD</code> with your WebUI password.</p>
+			<p class="small text-secondary mt-2">Call either URL to trigger a send — the second records <% esc "$telegram_video_seconds" %> seconds first. Click to copy, then replace <code>PASSWORD</code> with your WebUI password.</p>
 		</div></div>
 	</div>
 </div>

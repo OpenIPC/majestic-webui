@@ -3,16 +3,28 @@
 <%
 config_file=/etc/webui/ntfy.conf
 # The list of parameters that we will save
-params="enabled server topic user pass caption clips heif priority"
+params="enabled server topic user pass caption clips video video_seconds heif priority"
 
-# === TEST DISPATCH LOGIC ===
-if [ "$GET_send" = "test" ]; then
+# === TEST AND WEBHOOK DISPATCH ===
+#
+# Three verbs over one path. ?send=test is the button on this page and sends
+# whatever the settings say, because that is what a test is for. ?send=image
+# and ?send=clip are for something outside the camera -- a doorbell, a home
+# automation rule, a motion sensor of its own -- and each asks for exactly
+# what it is named, so a dashboard fetching a thumbnail goes on getting one
+# after the settings here have been switched over to video.
+#
+# OK/FAIL rather than true/false: that is what a/ntfy.js already reads.
+if [ "$GET_send" = "test" ] || [ "$GET_send" = "image" ] ||
+    [ "$GET_send" = "clip" ]; then
     echo "Content-type: text/html; charset=UTF-8"
     echo
-    # Run the sending script.
-    # Redirect the output to /dev/null so as not to clog up the response.
-    # Check the return code (exit code). 0 = success.
-    if /usr/bin/ntfy.sh > /dev/null 2>&1; then
+    send_what=""
+    [ "$GET_send" = "image" ] && send_what=--image
+    [ "$GET_send" = "clip" ] && send_what=--clip
+    # Unquoted on purpose: an empty word must disappear rather than arrive as
+    # an empty first argument, which the sender would read as a file path.
+    if /usr/bin/ntfy.sh $send_what > /dev/null 2>&1; then
         echo "OK"
     else
         echo "FAIL"
@@ -54,6 +66,9 @@ fi
 # Default values
 [ -z "$ntfy_server" ] && ntfy_server="https://ntfy.sh"
 [ -z "$ntfy_priority" ] && ntfy_priority="4"
+# The sender's own default, said here too: a page offering a list of lengths
+# with none of them picked would show the first and mean the fourth.
+[ -z "$ntfy_video_seconds" ] && ntfy_video_seconds="10"
 %>
 
 <%in p/header.cgi %>
@@ -62,7 +77,7 @@ fi
 	<div class="col-12 col-lg-8">
 		<div class="card"><div class="card-body">
 			<% card_head "Ntfy notifications" %>
-			<p class="small text-secondary">Push a snapshot notification to an <a href="https://ntfy.sh">ntfy</a> topic.</p>
+			<p class="small text-secondary">Push a picture, or a few seconds of video, to an <a href="https://ntfy.sh">ntfy</a> topic.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_switch "ntfy_enabled" "Enable Ntfy" "eval" %>
 				<% group_head "Connection" %>
@@ -74,7 +89,10 @@ fi
 				<% field_text "ntfy_caption" "Caption" "Supports %hostname, %datetime, %soctemp." %>
 				<% field_string "ntfy_priority" "Priority" "eval" "1 2 3 4 5" "1 = min, 5 = max (urgent)." %>
 				<% field_switch "ntfy_heif" "Use HEIF format" "eval" "Smaller files (best with H265)." %>
+				<% group_head "Submission" %>
 				<% field_switch "ntfy_clips" "Send motion clips" "eval" "Push the recording itself when movement ends. Needs recording on motion to be switched on." %>
+				<% field_switch "ntfy_video" "Send video" "eval" "Record a few seconds and push that, instead of a single picture. Needs no card and no recording." %>
+				<% field_string "ntfy_video_seconds" "Video length" "eval" "5 10 15 30 60" "Seconds to record. A push that overlaps another one also gets the seconds before it started; a push on its own begins where it was triggered." %>
 				<% button_submit %>
 			</form>
 		</div></div>
@@ -86,6 +104,17 @@ fi
 			<p class="small text-secondary">Send a test notification using the saved settings.</p>
 			<button type="button" id="ntfy-test" class="btn btn-sm btn-outline-secondary">Send test notification</button>
 			<span id="ntfy-status" class="small ms-2"></span>
+		</div></div>
+
+		<div class="card mt-4"><div class="card-body">
+			<% card_head "Remote send" %>
+			<dl class="small list mb-0">
+				<dt>Picture</dt>
+				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/ntfy.cgi?send=image</dd>
+				<dt>Video</dt>
+				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/ntfy.cgi?send=clip</dd>
+			</dl>
+			<p class="small text-secondary mt-2">Call either URL to push a notification — the second records <% esc "$ntfy_video_seconds" %> seconds first. Click to copy, then replace <code>PASSWORD</code> with your WebUI password.</p>
 		</div></div>
 	</div>
 </div>

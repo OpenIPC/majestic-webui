@@ -43,6 +43,38 @@ fi
 workdir=$(mktemp -d /tmp/ntfy.XXXXXX) || exit 1
 trap 'rm -rf "$workdir"' EXIT INT TERM
 
+# What to send, in the order the answers are allowed to win: the caller's file,
+# the caller's word, then the configuration.
+#
+# --clip and --image are for a webhook that knows what it wants -- a doorbell
+# button asking for video, a dashboard asking for a thumbnail -- and are read
+# before the path, because a path is the one argument that means "send this, I
+# have already made it". sbin/telegram takes the same two.
+mode=config
+case "$1" in
+--clip)
+    mode=clip
+    shift
+    ;;
+--image)
+    mode=image
+    shift
+    ;;
+esac
+
+# A clip of one's own: how many seconds of it, clamped. A configured value is
+# an operator's, so it is checked rather than trusted -- it reaches a URL and
+# an arithmetic expansion, and the page that usually writes it is not the only
+# thing that can.
+clip_seconds=$ntfy_video_seconds
+case "$clip_seconds" in
+'' | *[!0-9]* | ????*) clip_seconds=10 ;;
+esac
+[ "$clip_seconds" -lt 1 ] && clip_seconds=10
+[ "$clip_seconds" -gt 60 ] && clip_seconds=60
+
+filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
+
 # Called with a path, send that file instead of taking a picture -- that is how
 # majestic hands over a finished recording. The file belongs to the caller, so
 # it is never put in the workdir and never removed.
@@ -57,9 +89,53 @@ if [ -n "$1" ]; then
     *.heif) content_type="image/heif" ;;
     *) content_type="image/jpeg" ;;
     esac
-else
-    filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
+elif [ "$mode" = "clip" ] ||
+    { [ "$mode" = "config" ] && [ "$ntfy_video" = "true" ]; }; then
+    # The camera records this one itself. It needs no card and no recorder --
+    # /video.mp4 holds the muxer up for as long as this request is open and
+    # gives it back afterwards -- so it is the one way a camera with no
+    # storage can push what it saw rather than what it can see now.
+    #
+    # ?pre= asks for the seconds BEFORE the request as well, and is usually
+    # answered with none. The camera holds a run-up only while another
+    # request that asked for one is open -- in practice another send still
+    # running -- so a lone one starts at the trigger. Watching the Live page
+    # does not make one: that is WebRTC or MSE, and neither asks this
+    # endpoint for anything. Measured on an hi3516ev300, a second send six
+    # seconds into a ten-second capture opened four seconds earlier than it
+    # was started; the first got nothing. The response says which, and so
+    # does the line printed below.
+    #
+    # The deadline is the clip plus half a minute: ?duration= counts media
+    # rather than wall clock, the first fragment can be a GOP away, and the
+    # cut lands on a whole fragment after that.
+    snapshot=$workdir/${filename}.mp4
+    content_type="video/mp4"
+    http=$(curl --silent --show-error \
+        --max-time $((clip_seconds + 30)) \
+        --dump-header "$workdir/clip.head" \
+        --output "$snapshot" --write-out '%{http_code}' \
+        "localhost/video.mp4?pre=${clip_seconds}&duration=${clip_seconds}")
 
+    # An empty 200 counts as a refusal. A chunked reply that ends before it
+    # carries a fragment is the shape a torn-down pipeline leaves behind, and
+    # pushing a zero-byte video is worse than saying nothing.
+    if [ "$http" != "200" ] || [ ! -s "$snapshot" ]; then
+        echo "The camera would not record a clip (HTTP ${http:-none})"
+        exit 1
+    fi
+
+    # The camera says how much of the clip came from before the request. An
+    # ABSENT header is not a run-up of zero -- it is a camera that did not
+    # say -- so the sentence loses the clause rather than inventing a figure.
+    run_up=$(sed -n 's/^[Xx]-[Pp]re[Rr]oll-[Ss]econds:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+        "$workdir/clip.head")
+    if [ -n "$run_up" ]; then
+        echo "Recorded ${clip_seconds}s, run-up ${run_up}s"
+    else
+        echo "Recorded ${clip_seconds}s"
+    fi
+else
     # Format verification (HEIF or JPG)
     if [ "$ntfy_heif" = "true" ]; then
         snapshot=$workdir/${filename}.heif

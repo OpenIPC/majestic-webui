@@ -697,12 +697,48 @@ The FPV-specific code is exactly two files:
 
 Each extension is a CGI for the form + a sbin script invoked by cron or webhook:
 
-- `telegram.cgi` ↔ `sbin/telegram` (image push on motion / on interval).
+- `telegram.cgi` ↔ `sbin/telegram` (picture or clip push on motion / on interval).
 - `ntfy.cgi` ↔ `bin/ntfy.sh` (ntfy.sh notifications, reuses `/etc/webui/proxy.conf`).
 - `openwall.cgi` ↔ `sbin/openwall`.
 - `wireguard.cgi`, `vtun.cgi`, `proxy.cgi`, `backup-create.cgi` — VPN / SOCKS5 / config backup.
 
 Each extension's CGI typically: defines a `params` list, loops `POST_<name>` into shell vars, validates, rewrites its single `/etc/webui/<name>.conf`, and `sed -i /<name>/d /etc/crontabs/root` before re-adding the cron line if scheduling is on. Webhooks like `?send=image` short-circuit before `header.cgi` and emit their own `Content-type`.
+
+**The two senders can record what they send, and a card is no longer what
+decides that.** Both answer three questions in order — a path argument is a
+file somebody else made (`sbin/record.sh` handing over the recording majestic
+has just closed, which is the motion itself and must never be answered by
+capturing a second clip a minute later), then `--clip`/`--image` from a caller
+that knows what it wants, then the page's own switch. Where the answer is a
+clip with no file in hand, the sender fetches
+`localhost/video.mp4?pre=N&duration=N` and sends that. That endpoint holds the
+muxer up for the life of one request and gives it back afterwards, so this
+needs no card, no recorder and no HLS playlist — which is the whole point, as
+the alternative on a card-less camera was a still picture of what the camera
+can see *now* rather than what set the trigger off.
+
+`?pre=` is asked for and is usually answered with nothing, which is the
+endpoint's design rather than a fault. The camera holds a run-up only while
+another request **that asked for one** is open, so in practice it exists when
+two sends overlap and at no other time — watching the Live page does not make
+one, because that is WebRTC or MSE and neither goes near this endpoint.
+Measured on an hi3516ev300: a plain `/video.mp4` viewer open throughout, run-up
+0; a second send started six seconds into a ten-second capture, run-up 4, with
+the first send reporting 0. The response says which (`X-Preroll-Seconds`) and
+the sender prints it — and prints no figure at all when the camera did not say,
+since an absent header is not a run-up of zero.
+
+A refusal is a refusal: a non-200, or a 200 carrying no bytes (the shape a
+pipeline torn down mid-clip leaves behind), ends the send rather than falling
+back to a picture. A silent downgrade would leave an operator believing the
+clips they configured are arriving.
+
+The webhook verbs name their payload rather than asking the settings:
+`?send=image` and `?send=clip` on both pages, so a dashboard pulling a
+thumbnail goes on getting one after the schedule has been switched to video.
+`ntfy.cgi?send=test` stays the page's own button and sends whatever is
+configured. **Requires a majestic with `/video.mp4?duration=`**; the two ship
+together, so there is no fallback path and none is written.
 
 ## Conventions for new code
 
