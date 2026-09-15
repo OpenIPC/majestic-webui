@@ -117,11 +117,11 @@
 	// onChange(assign). The map owns no config: it reports, the page saves.
 	function mount(host, opts) {
 		opts = opts || {};
-		const info = opts.info || { banks: [] };
+		let info = opts.info || { banks: [] };
 		const geo = geometry(info.banks);
 		let assign = Object.assign({}, opts.assign || {});
 		let sel = null;
-		let sweeping = null;
+		let sweeping = null; /* {a, b} while a pair is being driven */
 
 		// Pads with an owner that is not one of our four roles.
 		//
@@ -294,6 +294,48 @@
 			clr.appendChild(t0);
 			clr.addEventListener('click', () => setRole(pin, null));
 			pop.appendChild(clr);
+
+			// Ruling a pad out of the scan, next to where its role is set
+			// rather than in a separate list of numbers somewhere else. This
+			// is the control for the case the camera cannot detect on its own:
+			// a pad that takes the network down without troubling the camera.
+			if (opts.onAvoid) {
+				const av = avoidOf(pin);
+				const a = el('button', 'mj-pinmap-role mj-pinmap-avoid');
+				a.type = 'button';
+				const d1 = el('span', 'mj-pinmap-dot');
+				a.appendChild(d1);
+				const t1 = el('span');
+				t1.textContent = av ? 'Allow the scan to try it' : 'Don\u2019t try this one';
+				a.appendChild(t1);
+				const tick = el('em');
+				// A pad the camera went down on is reported, not offered back:
+				// the owner did not choose it and undoing it is not a
+				// preference. Saying so beats a control that silently does
+				// nothing.
+				tick.textContent = av ? esc0(av) : '';
+				a.appendChild(tick);
+				a.addEventListener('click', () => opts.onAvoid(pin, !av));
+				pop.appendChild(a);
+			}
+		}
+
+		// The popover builds with textContent everywhere else; this one string
+		// is short enough to want shortening rather than escaping.
+		function esc0(s) {
+			return s.length > 22 ? s.slice(0, 21) + '\u2026' : s;
+		}
+
+		// Pads the CAMERA has been told to leave alone, and why. Distinct from
+		// `owned` on purpose: owned is the camera's own wiring and is not the
+		// owner's to change here, while this list is theirs and must stay one
+		// click from being taken back. So an avoided pad is drawn differently
+		// and stays ENABLED.
+		function avoidOf(pin) {
+			const a = ((info && info.avoid) || [])
+				.filter((x) => x && x.pin === pin)[0];
+			return a ? (a.why === 'asked' ? 'you asked for it to be left alone'
+				: 'it stopped the camera') : null;
 		}
 
 		function paint() {
@@ -322,7 +364,17 @@
 					if (!owned[p.pin]) b.disabled = false;
 					else b.title += ' — ' + owned[p.pin];
 				}
-				if (sweeping === p.pin) b.classList.add('mj-pin-try');
+				const avoid = avoidOf(p.pin);
+				if (avoid) {
+					// A channel nothing else uses: fill is spoken for three
+					// times over (owned, role colour, sweep) and the outer ring
+					// twice. A hatch and a struck-through number read as
+					// "crossed out", which is what it is.
+					b.classList.add('mj-pin-avoid');
+					b.title = 'Pin ' + p.pin + ' — not driven, ' + avoid;
+				}
+				if (sweeping && (sweeping.a === p.pin || sweeping.b === p.pin))
+					b.classList.add('mj-pin-try');
 				if (sel === p.pin) b.classList.add('mj-pin-sel');
 			});
 			if (sel === null) { pop.hidden = true; return; }
@@ -383,7 +435,15 @@
 			},
 			// Called by the scan so the pad being driven lights up on the same
 			// map the person is about to click.
-			sweep: (pin) => { sweeping = pin; paint(); },
+			// Both pads of the pair, because a pair is what gets driven: with
+			// only the first lit, the drawing disagreed with the sentence
+			// above it naming two.
+			sweep: (a, b) => { sweeping = { a: a, b: b === undefined ? null : b }; paint(); },
+			// A fresh answer from the camera, for the one fact that changes
+			// without the map being rebuilt: which pads it has been told to
+			// leave alone. Rebuilding would close the popover the press came
+			// from, which is exactly where the person still is.
+			reinfo: (fresh) => { info = fresh || info; paint(); },
 			select: (pin) => { sel = pin; paint(); },
 			close: close,
 			// The map outlives a section change only if nothing tears it down,

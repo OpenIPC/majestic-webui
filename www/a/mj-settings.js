@@ -7716,6 +7716,21 @@
 			pwmLamp: !!pwmLamp(),
 			soc: SOC + (info.banks ? (SOC ? ' · ' : '') + info.banks.length + ' banks' : ''),
 			onChange: (a) => { pushAssign(a); paintRoles(); },
+			// Ruling a pad out of the scan, from the pad itself. The list is
+			// the camera's, so this re-reads rather than patching a local copy
+			// — the camera is the one that enforces it and the one that
+			// remembers it across the reboot that may have caused it.
+			onAvoid: (pin, on) => {
+				scanAvoid(pin, on)
+					.then(() => apiFetch('/api/v1/gpio', { credentials: 'same-origin' }))
+					.then((r) => r.json())
+					.then((fresh) => {
+						if (state.ircutMap !== map) return;
+						state.ircutInfo = fresh;
+						map.reinfo(fresh);
+					})
+					.catch(() => { /* the pad keeps the state the camera has */ });
+			},
 		});
 		// Leaving the section while this fetch was in flight means the panel
 		// this map belongs to is already gone; mounting it now would strand a
@@ -7934,26 +7949,198 @@
 			}
 		}
 
-		// A camera that came back from the dead mid-scan says so before anything
-		// else — the pad that did it is named and excluded.
-		const dead = window.MajesticIrcutScan &&
-			window.MajesticIrcutScan.casualty(info);
-		if (dead) {
-			// The journal records the PAIR that was being driven, because a pair
-			// is what an actuation takes. Reading one pin off it printed
-			// "undefined" and excluded nothing, which left the pair that
-			// rebooted the camera free to be tried again on the next scan —
-			// the exact outcome the journal exists to prevent.
-			const pins = (dead.pins || []).map(Number).filter((n) => !isNaN(n));
-			const w = el('div', 'alert alert-warning py-2 px-3 mb-2 small');
-			w.innerHTML = '<b>The last pin scan stopped the camera.</b> It was driving ' +
-				(pins.length > 1 ? 'pins ' + esc(pins.join(' and ')) : 'pin ' + esc(String(pins[0]))) +
-				' when it stopped answering, and the watchdog restarted it. ' +
-				(pins.length > 1 ? 'Those pins have' : 'That pin has') +
-				' been excluded from further scans.';
-			box.querySelector('#mj-ircut-findings').appendChild(w);
-			state.ircutExclude = (state.ircutExclude || []).concat(pins);
+		scanResumeCard(box, map, info);
+	}
+
+	// What to say to somebody coming back to a scan that did not finish.
+	//
+	// Three things can have ended it and they need three different answers —
+	// see resumeVerdict() in ircut-scan.js, where the distinction is drawn.
+	// The one that matters most is 'cut': a pad can take ethernet down without
+	// troubling the camera at all, so from the camera's side nothing went
+	// wrong and it has no way to know. Only the browser saw the request
+	// vanish, and only the person can say whether that pad is the reason.
+	//
+	// IN #mj-ircut-result, NEVER #mj-ircut-findings. The metrics heartbeat
+	// wipes that element on every tick (paintFindings, called from
+	// watchIrcut), so the warning this replaces was destroyed within seconds
+	// of being shown while the exclusion it announced stayed invisible.
+	function scanResumeCard(box, map, info) {
+		const SCAN = window.MajesticIrcutScan;
+		const host = box.querySelector('#mj-ircut-result');
+		if (!SCAN || !host) return;
+
+		const PADS = window.MajesticIrcutPads;
+		const part = PADS ? PADS.forSoc(SOC) : {};
+		const total = SCAN.pairs(info, { part: part }).length;
+		const v = SCAN.resumeVerdict(info, scanProgress(), total);
+		if (!v) return;
+
+		const pins = (v.pins || []).map(Number).filter((n) => !isNaN(n));
+		const both = pins.length > 1;
+		const named = both ? 'pins ' + esc(pins.join(' and ')) : 'pin ' + esc(String(pins[0]));
+
+		host.hidden = false;
+		host.className = 'mj-ircut-scan';
+		let body, cls, acts;
+		if (v.kind === 'down') {
+			cls = 'alert-warning';
+			body = '<b>The last scan stopped the camera.</b> It was driving ' + named +
+				' when it stopped answering. ' + (both ? 'Those pins have' : 'That pin has') +
+				' been put on the camera\u2019s do-not-drive list and will not be tried ' +
+				'again \u2014 by this page or anything else.';
+			acts = [['Carry on', 'primary', 'go'], ['Start over', 'outline-secondary', 'reset']];
+		} else if (v.kind === 'cut') {
+			cls = 'alert-warning';
+			body = '<b>The scan stopped while driving ' + named + '.</b> The camera stayed ' +
+				'up, so something cut the connection rather than the camera crashing \u2014 ' +
+				'which can be exactly what driving that pad does, if the network is on it. ' +
+				'The camera has no way to know: from where it stands nothing went wrong.';
+			acts = [['Never try ' + (both ? 'those two' : 'that one'), 'primary', 'avoid'],
+				[(both ? 'They were' : 'It was') + ' fine, carry on', 'outline-secondary', 'go']];
+		} else {
+			cls = 'alert-secondary';
+			body = '<b>' + v.done + ' of ' + v.total + ' pairs done.</b> The scan did not ' +
+				'finish. Carrying on picks up the pairs it never reached.';
+			acts = [['Carry on', 'primary', 'go'], ['Start over', 'outline-secondary', 'reset']];
 		}
+
+		host.innerHTML =
+			'<div class="mj-live-grp-head"><span class="mj-cap">Find the pins</span>' +
+			'<span class="mj-live-rule"></span></div>' +
+			'<div class="alert ' + cls + ' py-2 px-3 mb-2 small">' + body + '</div>' +
+			'<div class="d-flex gap-2 align-items-center">' +
+			acts.map((a) => '<button type="button" class="btn btn-' + a[1] +
+				' btn-sm" data-do="' + a[2] + '">' + a[0] + '</button>').join('') +
+			'</div>';
+
+		host.querySelectorAll('button[data-do]').forEach((b) => {
+			b.addEventListener('click', () => {
+				const act = b.getAttribute('data-do');
+				const go = () => openScan(box, map, state.ircutInfo || info);
+				if (act === 'reset') {
+					// Forgetting where it got to is not forgetting what hurt
+					// it. The camera keeps its list; only this browser's
+					// progress goes.
+					scanRemember(null);
+					go();
+					return;
+				}
+				const p = scanProgress();
+				if (p) { p.inflight = null; scanRemember(p); }
+				if (act !== 'avoid') { go(); return; }
+				Promise.all(pins.map((n) => scanAvoid(n, true)))
+					.then(() => apiFetch('/api/v1/gpio', { credentials: 'same-origin' }))
+					.then((r) => r.json())
+					.then((fresh) => { state.ircutInfo = fresh; openScan(box, map, fresh); })
+					.catch(() => go());
+			});
+		});
+	}
+
+	// ── remembering where a scan got to ─────────────────────────────────────
+	//
+	// In the BROWSER, and the asymmetry is the point: the camera is the thing
+	// that reboots, the browser is not. Recording every tried pair on the
+	// camera would be several hundred growing, synced writes to flash during
+	// one sweep, to remember something this page already knows. What has to
+	// live on the camera is the much smaller fact that a pin is dangerous —
+	// that one must survive the reboot it caused, and it does.
+	//
+	// Same shape as mj-ircut-tested above: try/catch at both ends, a shape
+	// check on read, and a stamp of the state it was measured against so it
+	// invalidates itself rather than being replayed against a different board.
+	const SCAN_KEY = 'mj-ircut-scan';
+
+	function scanProgress() {
+		try {
+			const v = JSON.parse(localStorage.getItem(SCAN_KEY) || 'null');
+			if (!v || typeof v.sig !== 'string' || !Array.isArray(v.done)) return null;
+			return v;
+		} catch (e) {
+			return null;
+		}
+	}
+
+	function scanRemember(v) {
+		try {
+			if (v === null) localStorage.removeItem(SCAN_KEY);
+			else localStorage.setItem(SCAN_KEY, JSON.stringify(v));
+		} catch (e) {
+			/* Not remembered is a worse scan, not a broken one. */
+		}
+	}
+
+	// Ask the camera to leave a pad alone, or take that back. The list is the
+	// camera's because it has to outlive this page and the reboot that made it.
+	function scanAvoid(pin, on) {
+		return apiFetch('/api/v1/gpio?' + (on ? 'avoid=' : 'unavoid=') + pin,
+			{ method: 'POST', credentials: 'same-origin' })
+			.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
+	}
+
+	// What the scan is going to leave alone, in one line and a list.
+	//
+	// Counted from the same facts the sweep is built from rather than
+	// described in the abstract, so the number cannot drift away from what
+	// actually happens.
+	function scanSkipped(info, map, range, full) {
+		const owned = {}, avoided = {}, down = {};
+		(info.assigned || []).forEach((a) => {
+			if (a.role !== 'irCutPin1' && a.role !== 'irCutPin2') owned[a.pin] = 'the camera needs it';
+		});
+		(info.held || []).forEach((h) => {
+			if (h.owner && h.owner !== 'sysfs') owned[h.pin] = 'a kernel driver holds it';
+		});
+		// What the chip says a pad is carrying right now. Present only where
+		// the camera could ask — absent means "cannot check", not "all clear",
+		// and the two must not read the same.
+		const now = info.padNow;
+		if (now) {
+			Object.keys(now).forEach((k) => {
+				owned[k] = now[k] ? 'carrying ' + now[k] : 'the camera needs it';
+			});
+		}
+		(info.avoid || []).forEach((a) => {
+			if (!a || typeof a.pin !== 'number') return;
+			if (a.why === 'asked') avoided[a.pin] = 'you excluded it';
+			else down[a.pin] = 'it stopped the camera';
+		});
+
+		let pads = 0;
+		(info.banks || []).forEach((b) => { pads += b.n; });
+		const nOwned = Object.keys(owned).length;
+		const nAsked = Object.keys(avoided).length;
+		const nDown = Object.keys(down).length;
+
+		const bits = [];
+		if (nOwned) bits.push(nOwned + ' the camera needs');
+		if (nAsked) bits.push(nAsked + ' you excluded');
+		if (nDown) bits.push(nDown + ' that stopped the camera');
+
+		let words = '<b>' + full.length + ' pairs</b> across ' + pads + ' pads. ';
+		words += bits.length
+			? '<b>' + (nOwned + nAsked + nDown) + ' pads are being left alone</b> &mdash; ' +
+				esc(bits.join(', ')) + '.'
+			: 'Nothing is being left alone.';
+		if (range) {
+			words += ' Limited to pins ' +
+				esc(range.from === undefined ? 'the start' : String(range.from)) + '&ndash;' +
+				esc(range.to === undefined ? 'the end' : String(range.to)) + '.';
+		}
+		// Said plainly rather than implied by a smaller number: a camera whose
+		// pads cannot be read has NOT been checked, and a page that stayed
+		// quiet about that would be promising a safety the scan does not have.
+		if (!now) {
+			words += ' This camera cannot say what its pads are carrying, so only ' +
+				'pads it has been told about are skipped.';
+		}
+
+		const rows = [];
+		const add = (m) => Object.keys(m).sort((a, b) => a - b)
+			.forEach((k) => rows.push('Pin ' + esc(k) + ' &mdash; ' + esc(m[k])));
+		add(down); add(avoided); add(owned);
+		return { words: words, detail: rows.length ? rows.join('<br>') : null };
 	}
 
 	// Finding the pins by driving them. This is the only control in the WebUI
@@ -7973,11 +8160,24 @@
 		// behaviour the sweep had before the table was read at all.
 		const PADS = window.MajesticIrcutPads;
 		const part = PADS ? PADS.forSoc(SOC) : {};
-		const list = SCAN.pairs(info, {
-			exclude: state.ircutExclude || [],
-			part: part,
-		});
+		// `exclude` is gone: what the camera has been told to leave alone
+		// arrives in `info.avoid` and outlives this page, which the old
+		// in-memory list did not — a second pin taking the camera down used to
+		// lose the first.
+		const range = state.ircutRange || null;
+		const list = SCAN.pairs(info, { part: part, only: range });
+		const full = range ? SCAN.pairs(info, { part: part }) : list;
 		let stop = false;
+
+		// Where this browser got to, if it was here before and the chip has
+		// not changed under it.
+		const sig = SCAN.stamp(info);
+		let prog = scanProgress();
+		if (prog && prog.sig !== sig) {
+			prog = null;
+			scanRemember(null);
+		}
+		const todo = prog ? SCAN.remaining(list, prog.done) : list;
 
 		host.hidden = false;
 		host.className = 'mj-ircut-scan';
@@ -8014,7 +8214,63 @@
 			'<button type="button" class="btn btn-primary btn-sm" id="mj-scan-go">Start</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-no">Cancel</button>' +
 			'</div>';
-		host.querySelector('#mj-scan-n').textContent = list.length + ' pairs to try';
+		host.querySelector('#mj-scan-n').textContent =
+			(todo.length === list.length
+				? list.length + ' pairs to try'
+				: todo.length + ' of ' + list.length + ' left');
+
+		// What is being left alone, counted and named. Somebody is about to
+		// press a button that can take the camera away; the honest thing is to
+		// say what it will touch before they do, rather than after.
+		const left = scanSkipped(info, map, range, full);
+		const sum = el('p', 'x-small text-secondary mb-2');
+		sum.innerHTML = left.words;
+		if (left.detail) {
+			const more = el('button', 'btn btn-link btn-sm p-0 align-baseline x-small');
+			more.type = 'button';
+			more.textContent = 'show';
+			const det = el('div', 'x-small text-secondary mb-2');
+			det.hidden = true;
+			det.innerHTML = left.detail;
+			more.addEventListener('click', () => {
+				det.hidden = !det.hidden;
+				more.textContent = det.hidden ? 'show' : 'hide';
+			});
+			sum.appendChild(document.createTextNode(' '));
+			sum.appendChild(more);
+			host.insertBefore(sum, host.querySelector('.d-flex'));
+			host.insertBefore(det, host.querySelector('.d-flex'));
+		} else {
+			host.insertBefore(sum, host.querySelector('.d-flex'));
+		}
+
+		// "Only try pins N to M". The console script this replaces takes a
+		// from/to range and walks straight through; here the list is
+		// prioritised pairs, so a range limits WHICH PADS are in play rather
+		// than where the walk starts. Carrying on from where a scan stopped is
+		// a different thing and is handled above, better than a start number
+		// could — it skips exactly what was tried, in any order.
+		const rng = el('p', 'x-small text-secondary mb-2');
+		rng.innerHTML = 'Only try pins <input type="number" class="mj-live-num" ' +
+			'id="mj-scan-from" min="0" step="1" style="width:4.5rem"> to ' +
+			'<input type="number" class="mj-live-num" id="mj-scan-to" min="0" ' +
+			'step="1" style="width:4.5rem"> <span class="text-secondary">' +
+			'&mdash; leave both empty for the whole chip</span>';
+		host.insertBefore(rng, host.querySelector('.d-flex'));
+		const from = rng.querySelector('#mj-scan-from');
+		const to = rng.querySelector('#mj-scan-to');
+		if (range && range.from !== undefined) from.value = range.from;
+		if (range && range.to !== undefined) to.value = range.to;
+		const reRange = () => {
+			const f = from.value === '' ? undefined : Number(from.value);
+			const t = to.value === '' ? undefined : Number(to.value);
+			state.ircutRange = (f === undefined && t === undefined)
+				? null : { from: f, to: t };
+			openScan(box, map, info);
+		};
+		from.addEventListener('change', reRange);
+		to.addEventListener('change', reRange);
+
 		host.querySelector('#mj-scan-no').addEventListener('click', () => {
 			stop = true; host.hidden = true;
 		});
@@ -8041,9 +8297,25 @@
 				// POST, not GET: driving a pad is a mutation, and a GET is what
 				// a browser issues by itself — a prefetch, a restored tab, a
 				// link from anywhere — carrying the session with it.
-				drive: (a, b) => apiFetch('/api/v1/gpio?pair=' + a + ',' + b,
-					{ method: 'POST', credentials: 'same-origin' })
-					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
+				// The in-flight pair is written BEFORE the request goes out and
+				// cleared when it comes back. That one field is what lets a
+				// later visit tell "the camera went down" from "something cut
+				// the connection" — the camera journals the first for itself,
+				// but the second leaves no trace on it at all, because from
+				// where it stands nothing went wrong.
+				drive: (a, b) => {
+					const pr = scanProgress() || { sig: sig, done: [] };
+					pr.inflight = SCAN.key(a, b);
+					scanRemember(pr);
+					return apiFetch('/api/v1/gpio?pair=' + a + ',' + b,
+						{ method: 'POST', credentials: 'same-origin' })
+						.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+						.then((j) => {
+							const p2 = scanProgress();
+							if (p2) { p2.inflight = null; scanRemember(p2); }
+							return j;
+						});
+				},
 				release: (a, b) => apiFetch('/api/v1/gpio?park=' + a + ',' + b + '&mode=float',
 					{ method: 'POST', credentials: 'same-origin' })
 					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
@@ -8053,10 +8325,24 @@
 				onStep: (st) => {
 					t.textContent = 'Trying pins ' + st.a + ' and ' + st.b;
 					s.textContent = (st.index + 1) + ' of ' + st.total;
-					map.sweep(st.a);
+					// Both pads, not just the first. A pair is what gets
+					// driven, and lighting one of the two made the drawing
+					// disagree with the sentence above it.
+					map.sweep(st.a, st.b);
+					// Everything before this one is done. Recorded per step
+					// rather than at the end, because the end is exactly what
+					// an interrupted scan does not reach.
+					if (st.index > 0) {
+						const pr = scanProgress() || { sig: sig, done: [] };
+						const k = SCAN.key(todo[st.index - 1][0], todo[st.index - 1][1]);
+						if (pr.done.indexOf(k) < 0) pr.done.push(k);
+						scanRemember(pr);
+					}
 				},
-			}, list).then((res) => {
-				map.sweep(null);
+			}, todo).then((res) => {
+				map.sweep(null, null);
+				// A sweep that ran to the end has nothing to carry on from.
+				if (res.done) scanRemember(null);
 				const found = res.pins;
 				if (!found) {
 					host.innerHTML = '<div class="mj-live-grp-head">' +
@@ -8125,7 +8411,7 @@
 					if (status) status.textContent = 'Pins staged — Save, then test the filter.';
 				});
 			}).catch((e) => {
-				map.sweep(null);
+				map.sweep(null, null);
 				host.innerHTML = '<div class="mj-live-grp-head">' +
 					'<span class="mj-cap">Find the pins</span>' +
 					'<span class="mj-live-rule"></span></div>' +

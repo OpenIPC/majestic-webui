@@ -5359,11 +5359,50 @@ dialog.mj-modal::backdrop {
 	cursor: not-allowed;
 }
 
+/* The pad being driven right now. `outline` rather than `box-shadow`, because
+   .mj-pin-sel below uses the shadow for the selection ring and the two are
+   routinely the same pad -- the scan lights a pad the person has just clicked.
+   One property, last rule wins, and the selection silently vanished for as
+   long as that pad was under the sweep. Outline and shadow compose. */
 .mj-pin-try {
 	background: #1f2430;
 	border-color: #1f2430;
 	color: #fff;
-	box-shadow: 0 0 0 3px rgba(31, 36, 48, 0.18);
+	outline: 3px solid rgba(31, 36, 48, 0.18);
+	outline-offset: 0;
+}
+
+/* A pad the camera has been told to leave alone.
+   Deliberately NOT the greyed-out treatment .mj-pin-owned gets: that one is
+   the camera's own wiring and is not the owner's to change, while this is
+   theirs and has to stay one click from being taken back -- so it keeps its
+   cursor and stays enabled. Hatch and a struck-through number, because fill is
+   already spoken for three times over and the outer ring twice. */
+.mj-pin-avoid {
+	position: relative;
+	color: var(--bs-secondary-color);
+	text-decoration: line-through;
+}
+
+.mj-pin-avoid::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	pointer-events: none;
+	background: repeating-linear-gradient(
+		135deg,
+		rgba(var(--bs-body-color-rgb), 0.16) 0 2px,
+		rgba(var(--bs-body-color-rgb), 0) 2px 5px);
+}
+
+/* The scan still lights it while explaining why it is skipped, so the hatch
+   must not sit on top of the dark fill. */
+.mj-pin-avoid.mj-pin-try::after { opacity: 0.35; }
+
+.mj-pinmap-avoid em {
+	color: var(--bs-secondary-color);
+	font-style: normal;
 }
 
 .mj-pin-sel {
