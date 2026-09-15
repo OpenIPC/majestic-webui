@@ -49,6 +49,9 @@ function rig(cards, opts) {
                 if (!c.present) unmounted = false;
                 const seen = Object.assign({}, c);
                 if (unmounted && seen.present) seen.mounted = false;
+                if (o.lookAlwaysThrows && log.filter((x) => x === 'look').length > 1) {
+                    return Promise.reject(new Error('endpoint down'));
+                }
                 return o.lookThrows && log.filter((x) => x === 'look').length === o.lookThrows
                     ? Promise.reject(new Error('endpoint down'))
                     : Promise.resolve(seen);
@@ -65,17 +68,24 @@ function rig(cards, opts) {
             },
             unmount: () => {
                 log.push('unmount');
+                if (o.unmountThrows) return Promise.reject(new Error('connection lost'));
+                if (o.unmountBlank) return Promise.resolve({});
                 if (o.unmountFails) return Promise.resolve({ ok: false, error: 'busy' });
                 unmounted = true;
                 return Promise.resolve({ ok: true });
             },
             mount: () => {
                 log.push('mount');
+                if (o.mountBlank) return Promise.resolve({});
                 if (o.mountFails) return Promise.resolve({ ok: false, error: 'no fs' });
                 unmounted = false;
                 return Promise.resolve({ ok: true });
             },
-            reprobe: () => { log.push('reprobe'); return Promise.resolve({ ok: true }); },
+            reprobe: () => {
+                log.push('reprobe');
+                return Promise.resolve(
+                    o.reprobeFails ? { ok: false, error: 'no host controller' } : { ok: true });
+            },
         },
     };
     return env;
@@ -114,7 +124,8 @@ async function main() {
         // the card, and only a card that ARRIVES is mounted by the hotplug
         // rules -- so giving up without putting this one back leaves the
         // recorder running with nowhere to write, forever. Measured on a
-        // camera before it was fixed: records_state 3, counter frozen.
+        // camera before it was fixed: the recorder reported its storage
+        // offline and its fragment counter stopped moving, indefinitely.
         check('and the card it unmounted is put back',
             ran(e.log, 'mount'), e.log.join(','));
         check('before the recorder is started, not after',
@@ -164,8 +175,12 @@ async function main() {
         check('the swap refuses to start', r.outcome === 'pausefailed', r.outcome);
         check('the card is not unmounted underneath a live recorder',
             !ran(e.log, 'unmount'), e.log.join(','));
-        check('and nothing is resumed, because nothing was paused',
-            !ran(e.log, 'resume'), e.log.join(','));
+        // A rejected request is not proof the daemon did not act on it: the
+        // reply can be lost after the pause was applied. Asking for a resume
+        // that was not needed costs nothing; skipping one that was needed
+        // costs ten minutes of a camera not recording.
+        check('but a resume is asked for anyway, in case the pause landed',
+            ran(e.log, 'resume'), e.log.join(','));
     }
 
     group('a slot that never announces the new card');
@@ -182,6 +197,55 @@ async function main() {
         check('and the swap ends rather than waiting forever',
             r.outcome === 'nonewcard', r.outcome);
         check('with recording started again', ran(e.log, 'resume'), e.log.join(','));
+    }
+
+    group('answers that do not say they worked');
+    {
+        // `{}` is what a half-written or truncated JSON reply looks like. The
+        // step it guards is the unmount, and the next thing the page does is
+        // tell somebody it is safe to pull the card out.
+        const e = rig([A], { unmountBlank: true });
+        const r = await swap.run(e.io);
+        check('an unmount that does not say it worked is not success',
+            r.outcome === 'unmountfailed', r.outcome);
+        check('and nobody is told the card is safe to remove',
+            !ran(e.log, 'step:remove'), e.log.join(','));
+    }
+    {
+        // The card is back in the slot but will not mount. The camera has
+        // nowhere to record, and an ending that reports a tidy swap over the
+        // top of that is the failure this flow exists to avoid.
+        const e = rig([A], { mountBlank: true });
+        const r = await swap.run(e.io);
+        check('a remount that does not say it worked is reported',
+            r.remountFailed === true, JSON.stringify(r));
+    }
+    {
+        // Every look failed. Nothing is known about the card, and "it never
+        // came out" is a confident sentence with nothing behind it.
+        const e = rig([A], { lookAlwaysThrows: true });
+        const r = await swap.run(e.io);
+        check('an endpoint that never answered is not a card that never moved',
+            r.outcome === 'unknown', r.outcome);
+    }
+    {
+        // The controller cannot be re-probed. That establishes the camera
+        // cannot tell, not that no card arrived.
+        const e = rig([A, A, EMPTY], { reprobeFails: true });
+        const r = await swap.run(e.io);
+        check('a camera that cannot look again says so',
+            r.outcome === 'cannotdetect', r.outcome);
+        check('and recording is started again', ran(e.log, 'resume'), e.log.join(','));
+    }
+    {
+        // Something threw where nothing was expected to. The recorder is
+        // stopped at that point, so the one thing that must still happen is
+        // the resume.
+        const e = rig([A], { unmountThrows: true });
+        const r = await swap.run(e.io);
+        check('an unexpected failure still starts the recorder again',
+            ran(e.log, 'resume'), e.log.join(','));
+        check('and does not claim to know what happened', r.outcome === 'unknown', r.outcome);
     }
 
     group('the card that mounts somewhere else');

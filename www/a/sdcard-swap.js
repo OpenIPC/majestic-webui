@@ -42,26 +42,44 @@
 		if (io.onStep) io.onStep(Object.assign({ step: name }, extra || {}));
 	}
 
+	// A camera op counts as done only if it says so.
+	//
+	// `!r || r.ok === false` let an empty or half-written JSON object through
+	// as success, and the op it guards is the unmount -- after which the page
+	// tells somebody it is safe to pull the card. An answer that does not say
+	// it worked is not proof that it did.
+	function ok(r) { return !!(r && r.ok === true); }
+
 	// Poll `look()` until `want` is satisfied, or the budget runs out.
 	//
-	// Returns the reading that satisfied it, or null on timeout. A look that
-	// throws is not a card that is absent — the endpoint may simply not have
-	// answered — so it is swallowed and retried rather than counted either way.
+	// Three answers, not two. A timeout after real readings means the card did
+	// not move; a timeout during which EVERY look failed means the endpoint
+	// was unreachable and nothing at all is known -- and saying "the card never
+	// came out" on the strength of that is a confident sentence with nothing
+	// behind it, which is this UI's recurring bug class.
+	//
+	//   { seen }    the reading that satisfied it
+	//   { blind }   the whole window went by with no usable reading
+	//   {}          looked, and it never happened
 	async function until(io, want, budgetMs, name) {
 		const end = io.now() + budgetMs;
+		let anyRead = false;
 		while (io.now() < end) {
-			if (io.stopped && io.stopped()) return null;
+			if (io.stopped && io.stopped()) return { stopped: true };
 			let seen = null;
 			try {
 				seen = await io.look();
 			} catch (e) {
 				seen = null;
 			}
-			if (seen && want(seen)) return seen;
+			if (seen) {
+				anyRead = true;
+				if (want(seen)) return { seen: seen };
+			}
 			step(io, name, { waitedMs: budgetMs - (end - io.now()) });
 			await io.wait(POLL_MS);
 		}
-		return null;
+		return anyRead ? {} : { blind: true };
 	}
 
 	// Is this a different card from the one that was in the slot?
@@ -78,23 +96,40 @@
 	}
 
 	async function run(io) {
-		const started = await io.look();
+		let started = null;
+		try {
+			started = await io.look();
+		} catch (e) {
+			return { outcome: 'unknown' };
+		}
 		if (!started || !started.present || !started.mounted) {
 			return { outcome: 'nocard' };
 		}
 		const was = { serial: started.serial, mountpoint: started.mountpoint };
 
 		// From here on the recorder is stopped, so every exit has to start it
-		// again. `finish` is the only way out for that reason.
+		// again -- including the ones nobody wrote down, which is why the body
+		// below runs inside a try and `finish` is in the finally path of every
+		// branch. A request that rejects halfway used to leave the camera
+		// paused with the dialog still spinning, and the camera's own
+		// ten-minute timer was all that eventually fixed it.
 		step(io, 'pausing');
 		try {
 			await io.standDown();
 		} catch (e) {
+			// A rejected request is not proof the daemon did not act on it --
+			// the reply can be lost after the pause was applied. So ask for a
+			// resume before giving up: a resume the recorder did not need is
+			// harmless, and skipping one it did need is ten minutes of a
+			// camera not recording.
+			try {
+				await io.resume();
+			} catch (e2) { /* the camera's own timer is the backstop */ }
 			return { outcome: 'pausefailed', error: String(e && e.message || e) };
 		}
 
-		// The only way out, and it has two jobs: put the card back, then start
-		// the recorder.
+		// The only way out. Two jobs: put the card back, then start the
+		// recorder.
 		//
 		// The mount half is the one that is easy to forget and silent when it
 		// is missing. Every path below this point has already unmounted the
@@ -106,12 +141,19 @@
 		// A camera that looks fine and records nothing, which is the exact
 		// failure this whole flow exists to avoid.
 		//
-		// Measured before it was fixed: give-up path left records_state 3 with
-		// the fragment counter frozen, indefinitely.
+		// Measured before it was fixed: the give-up path left the recorder
+		// reporting storage offline with its fragment counter frozen,
+		// indefinitely.
 		const finish = async (result) => {
 			try {
 				const now = await io.look();
-				if (now && now.present && !now.mounted) await io.mount();
+				if (now && now.present && !now.mounted) {
+					// Checked, not assumed. A card that cannot be mounted
+					// again leaves the camera with nowhere to record, and the
+					// caller has to be able to say so rather than reporting a
+					// tidy ending over the top of it.
+					if (!ok(await io.mount())) result.remountFailed = true;
+				}
 			} catch (e) {
 				result.remountFailed = true;
 			}
@@ -126,81 +168,114 @@
 			return result;
 		};
 
-		step(io, 'releasing');
-		const un = await io.unmount();
-		if (!un || un.ok === false) {
-			// Nothing was taken away from anybody: the card is still mounted
-			// and the recorder is about to have it back.
-			return finish({ outcome: 'unmountfailed', error: (un && un.error) || '' });
-		}
-
-		// The card is now safe to remove, and saying so is the whole point of
-		// the two steps above.
-		step(io, 'remove', { mountpoint: was.mountpoint });
-
-		const gone = await until(io, (d) => !d.present, WAIT_OUT_MS, 'remove');
-		if (!gone) {
-			if (io.stopped && io.stopped()) return finish({ outcome: 'stopped' });
-			// The card never left. Nothing is broken and nothing was lost —
-			// it is simply still there, and putting it back to work is the
-			// right end to this.
-			return finish({ outcome: 'stillthere' });
-		}
-
-		step(io, 'waiting');
-		let arrived = await until(io, (d) => d.present, WAIT_IN_MS, 'waiting');
-		if (!arrived) {
-			if (io.stopped && io.stopped()) return finish({ outcome: 'stopped' });
-			// A slot whose card-detect is not wired never raises the event
-			// that would have told the kernel a card arrived, so the card can
-			// be in and unseen. Asking the controller to look again is the
-			// only thing left, and it is worth one try before giving up.
-			if (io.reprobe) {
-				step(io, 'reprobe');
-				try {
-					await io.reprobe();
-				} catch (e) { /* the look below is the real answer */ }
-				arrived = await until(io, (d) => d.present, 30000, 'waiting');
+		try {
+			step(io, 'releasing');
+			const un = await io.unmount();
+			if (!ok(un)) {
+				// Nothing was taken away from anybody: the card is still
+				// mounted and the recorder is about to have it back.
+				return await finish({
+					outcome: 'unmountfailed', error: (un && un.error) || '',
+				});
 			}
-			if (!arrived) return finish({ outcome: 'nonewcard' });
-		}
 
-		step(io, 'mounting');
-		// The hotplug rules mount a card on their own, so this is usually
-		// already true by the time it is asked. Mounting is only for the card
-		// they could not take — and a failure here is the card's, not the
-		// swap's, so it is reported with the card's own words.
-		if (!arrived.mounted) {
-			const m = await io.mount();
-			if (!m || m.ok === false) {
-				return finish({ outcome: 'mountfailed', error: (m && m.error) || '' });
+			// The card is now safe to remove, and saying so is the whole point
+			// of the two steps above. It is said only after an unmount that
+			// reported success.
+			step(io, 'remove', { mountpoint: was.mountpoint });
+
+			const gone = await until(io, (d) => !d.present, WAIT_OUT_MS, 'remove');
+			if (gone.stopped) return await finish({ outcome: 'stopped' });
+			if (gone.blind) return await finish({ outcome: 'unknown' });
+			if (!gone.seen) {
+				// The card never left. Nothing is broken and nothing was lost
+				// -- it is simply still there, and putting it back to work is
+				// the right end to this.
+				return await finish({ outcome: 'stillthere' });
 			}
-			arrived = await io.look();
-		}
 
-		// Where the clips are configured to go is a path, and the hotplug
-		// rules name a mount after the device. A card with no partition table
-		// mounts as the whole disk under a different name, which resolves to
-		// no directory at all — recording would fail with nothing obviously
-		// wrong with the card.
-		if (!arrived || !arrived.mounted) {
-			return finish({ outcome: 'mountfailed', error: '' });
-		}
-		if (arrived.mountpoint !== was.mountpoint) {
-			return finish({
-				outcome: 'elsewhere',
-				mountpoint: arrived.mountpoint, expected: was.mountpoint,
+			step(io, 'waiting');
+			let came = await until(io, (d) => d.present, WAIT_IN_MS, 'waiting');
+			if (came.stopped) return await finish({ outcome: 'stopped' });
+			if (!came.seen && !came.blind) {
+				// A slot whose card-detect is not wired never raises the event
+				// that would have told the kernel a card arrived, so the card
+				// can be in and unseen. Asking the controller to look again is
+				// the only thing left, and it is worth one try.
+				let asked = null;
+				if (io.reprobe) {
+					step(io, 'reprobe');
+					try {
+						asked = await io.reprobe();
+					} catch (e) {
+						asked = null;
+					}
+					if (ok(asked)) came = await until(io, (d) => d.present, 30000, 'waiting');
+				}
+				if (!came.seen) {
+					// A camera that could not be asked to look again has not
+					// established that no card arrived -- it has established
+					// that it cannot tell. Those are different sentences and
+					// only one of them is about the card.
+					if (io.reprobe && !ok(asked)) {
+						return await finish({
+							outcome: 'cannotdetect',
+							error: (asked && asked.error) || '',
+						});
+					}
+					if (came.blind) return await finish({ outcome: 'unknown' });
+					return await finish({ outcome: 'nonewcard' });
+				}
+			}
+			if (came.blind && !came.seen) return await finish({ outcome: 'unknown' });
+			let arrived = came.seen;
+
+			step(io, 'mounting');
+			// The hotplug rules mount a card on their own, so this is usually
+			// already true by the time it is asked. Mounting is only for the
+			// card they could not take -- and a failure here is the card's,
+			// not the swap's, so it is reported with the card's own words.
+			if (!arrived.mounted) {
+				const m = await io.mount();
+				if (!ok(m)) {
+					return await finish({
+						outcome: 'mountfailed', error: (m && m.error) || '',
+					});
+				}
+				arrived = await io.look();
+			}
+
+			// Where the clips are configured to go is a path, and the hotplug
+			// rules name a mount after the device. A card with no partition
+			// table mounts as the whole disk under a different name, which
+			// resolves to no directory at all -- recording would fail with
+			// nothing obviously wrong with the card.
+			if (!arrived || !arrived.mounted) {
+				return await finish({ outcome: 'mountfailed', error: '' });
+			}
+			if (arrived.mountpoint !== was.mountpoint) {
+				return await finish({
+					outcome: 'elsewhere',
+					mountpoint: arrived.mountpoint, expected: was.mountpoint,
+				});
+			}
+
+			step(io, 'resuming');
+			const done = await finish({
+				outcome: 'done',
+				sameCard: !looksNew(was, arrived),
+				mountpoint: arrived.mountpoint,
+			});
+			if (!done.resumeFailed && !done.remountFailed) step(io, 'done');
+			return done;
+		} catch (e) {
+			// Anything that got out of the block above did so with the
+			// recorder stopped. This is the one branch that exists purely so
+			// that cannot happen.
+			return await finish({
+				outcome: 'unknown', error: String(e && e.message || e),
 			});
 		}
-
-		step(io, 'resuming');
-		const done = await finish({
-			outcome: 'done',
-			sameCard: !looksNew(was, arrived),
-			mountpoint: arrived.mountpoint,
-		});
-		step(io, 'done');
-		return done;
 	}
 
 	const api = { run: run, looksNew: looksNew };

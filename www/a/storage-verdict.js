@@ -189,8 +189,16 @@
 		return {
 			kind: 'swapping', level: 'info',
 			short: 'Recording is paused while the SD card is being changed.',
+			// Says the recording is paused, and nothing about the card.
+			//
+			// The pause comes first and the unmount follows it, so there is a
+			// moment where this is true and the card is still mounted. A
+			// banner that said the card had been let go would be wrong for
+			// that moment -- and it is a banner on every page, read by someone
+			// who may be standing at the camera. Only the swap dialog, which
+			// knows the unmount returned, says it is safe to take out.
 			detail: '<strong>Recording is paused while the SD card is being changed.</strong> ' +
-				'The camera has let go of the card so it can be taken out safely. ' +
+				'Wait for the SD card page to say the card is safe to take out. ' +
 				'Recording starts again as soon as a card is back in — and on its own ' +
 				'within ten minutes if nothing else does it first.',
 		};
