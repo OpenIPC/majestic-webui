@@ -114,10 +114,18 @@
 				const go = () => openScan(state.info || info);
 				if (act === 'reset') {
 					// Forgetting where it got to is not forgetting what hurt
-					// it. The camera keeps its list; only this browser's
-					// progress goes.
+					// it. forget=progress drops the camera's record of the last
+					// pads it drove and keeps its leave-alone list; this
+					// browser's own progress goes with it.
+					//
+					// Clearing only the browser's half -- which is what this
+					// did -- left the camera's record standing for good, and
+					// that record is what a later visit reads to decide whether
+					// anything went wrong.
 					scanRemember(null);
-					go();
+					forgetProgress()
+						.then(() => refreshInfo())
+						.then((fresh) => openScan(fresh), () => go());
 					return;
 				}
 				const p = scanProgress();
@@ -178,9 +186,123 @@
 	// Ask the camera to leave a pad alone, or take that back. The list is the
 	// camera's because it has to outlive this page and the reboot that made it.
 	function scanAvoid(pin, on) {
-		return FETCH('/api/v1/gpio?' + (on ? 'avoid=' : 'unavoid=') + pin,
+		return FETCH(API + '?' + (on ? 'avoid=' : 'unavoid=') + pin,
 			{ method: 'POST', credentials: 'same-origin' })
 			.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
+	}
+
+	// Re-read what the camera says, because every one of these changes it and
+	// redrawing from a stale copy shows the owner their press doing nothing.
+	function refreshInfo() {
+		return FETCH(API, { credentials: 'same-origin' })
+			.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+			.then((fresh) => { state.info = fresh; return fresh; });
+	}
+
+	// Starting over is TWO records, and until now this page cleared only one.
+	//
+	// The browser remembers which pairs it has tried; the camera separately
+	// remembers the last pads it drove, written to flash before it touched
+	// them so that it describes a camera which may never have come back.
+	// Clearing the browser's half alone left the camera's standing for good,
+	// and it is the half a later visit reads to decide whether anything went
+	// wrong.
+	//
+	// forget=progress, never forget=all: the camera keeps what it has been
+	// told to leave alone either way, and starting over is not a reason to
+	// walk back onto a pad that stopped it.
+	function forgetProgress() {
+		return FETCH(API + '?forget=progress',
+			{ method: 'POST', credentials: 'same-origin' })
+			.then((r) => r.ok ? r.json() : null, () => null);
+	}
+
+	// The deliberate one. It is the only way back for a pad the camera went
+	// down on, and the only thing here that throws evidence away -- so it asks
+	// twice, and says what is being lost.
+	function forgetAvoid() {
+		return FETCH(API + '?forget=avoid',
+			{ method: 'POST', credentials: 'same-origin' })
+			.then((r) => r.ok ? r.json() : null, () => null);
+	}
+
+	// What the camera has been told to leave alone, in words and with a way
+	// back. The list lives on the camera because it must outlive this page and
+	// the reboot that made it -- and until now nothing here could show it
+	// whole, or take any of it back except one pad at a time in the drawing.
+	function avoidBlock(info) {
+		const rows = (info.avoid || [])
+			.filter((a) => a && typeof a.pin === 'number')
+			.sort((a, b) => a.pin - b.pin);
+		if (!rows.length) return '';
+		const down = rows.filter((a) => a.why !== 'asked').length;
+		const asked = rows.length - down;
+		const bits = [];
+		if (asked) bits.push(asked + ' you excluded');
+		if (down) bits.push(down + ' that stopped the camera');
+
+		return '<p class="x-small text-secondary mb-1 mt-3">The camera is ' +
+			'leaving <b>' + rows.length + ' pin' + (rows.length > 1 ? 's' : '') +
+			'</b> alone &mdash; ' + esc(bits.join(', ')) + '. ' +
+			'<button type="button" class="btn btn-link btn-sm p-0 align-baseline ' +
+			'x-small" data-do="show-avoid">show</button></p>' +
+			'<div class="x-small text-secondary mb-0" id="mj-hunt-avoid" hidden>' +
+			rows.map((a) => 'Pin ' + esc(String(a.pin)) + ' &mdash; ' +
+				(a.why === 'asked' ? 'you excluded it' : 'it stopped the camera') +
+				' <button type="button" class="btn btn-link btn-sm p-0 ' +
+				'align-baseline x-small" data-try="' + esc(String(a.pin)) +
+				'">try it again</button>').join('<br>') +
+			'<p class="mb-0 mt-2" id="mj-hunt-forget">' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+			'data-do="forget-avoid">Forget the whole list</button>' +
+			(down
+				? ' Including the pin' + (down > 1 ? 's' : '') + ' that stopped ' +
+					'the camera. Nothing else anywhere remembers ' +
+					(down > 1 ? 'those' : 'that') + '.'
+				: '') +
+			'</p></div>';
+	}
+
+	// Draw it, and wire the three things it can do.
+	function wireAvoid(host, info) {
+		const show = host.querySelector('button[data-do="show-avoid"]');
+		const list = host.querySelector('#mj-hunt-avoid');
+		if (show && list) {
+			show.addEventListener('click', () => {
+				list.hidden = !list.hidden;
+				show.textContent = list.hidden ? 'show' : 'hide';
+			});
+		}
+		const redraw = () => refreshInfo()
+			.then((fresh) => {
+				if (pins.changed) pins.changed();
+				idleCard(fresh);
+			})
+			.catch(() => idleCard(state.info || info));
+
+		host.querySelectorAll('button[data-try]').forEach((b) => {
+			b.addEventListener('click',
+				() => scanAvoid(Number(b.getAttribute('data-try')), false)
+					.then(redraw, redraw));
+		});
+
+		const gone = host.querySelector('button[data-do="forget-avoid"]');
+		if (!gone) return;
+		gone.addEventListener('click', () => {
+			// Asked twice on purpose. A pad the camera went down on is proof
+			// that cost a crash and a reboot to earn, and there is no backup of
+			// it anywhere -- one press should not be able to spend that.
+			const p = host.querySelector('#mj-hunt-forget');
+			p.innerHTML = '<b>Forget all of them?</b> ' +
+				'<button type="button" class="btn btn-danger btn-sm" ' +
+				'id="mj-hunt-forget-yes">Yes, forget</button> ' +
+				'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+				'id="mj-hunt-forget-no">Keep them</button>';
+			p.querySelector('#mj-hunt-forget-no')
+				.addEventListener('click', () => idleCard(state.info || info));
+			p.querySelector('#mj-hunt-forget-yes')
+				.addEventListener('click', () => forgetAvoid().then(redraw, redraw));
+		});
 	}
 
 	// What the scan is going to leave alone, in one line and a list.
@@ -576,7 +698,11 @@
 				'alive when it gets a signal \u2014 a wireless card, a card slot, a ' +
 				'second network port, a relay board. The camera holds each pin in ' +
 				'turn and tells you the moment something appears, or disappears.' +
-				(carry ? ' <b>' + carry + ' pins already tried.</b>' : '') +
+				(carry
+					? ' <b>' + carry + ' already tried.</b> <button type="button" ' +
+						'class="btn btn-link btn-sm p-0 align-baseline x-small" ' +
+						'data-do="sweep-reset">start over</button>'
+					: '') +
 				'</p></div>' +
 				'<div class="mj-hunt-offer">' +
 				'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
@@ -585,12 +711,24 @@
 				'thing on these pins the camera can see through its own lens, so ' +
 				'this one works differently: it drives pins two at a time and ' +
 				'watches the picture. Needs daylight.</p></div>' +
-				'</div>');
+				'</div>') +
+			avoidBlock(info);
 
 		const go = host.querySelector('#mj-hunt-go');
 		if (go) go.addEventListener('click', () => openScan(state.info || info));
 		const sw = host.querySelector('#mj-hunt-sweep');
 		if (sw) sw.addEventListener('click', () => openSweep(state.info || info));
+		const rst = host.querySelector('button[data-do="sweep-reset"]');
+		if (rst) {
+			rst.addEventListener('click', () => {
+				sweepRemember(null);
+				// Both records, not just this browser's -- see forgetProgress().
+				forgetProgress()
+					.then(() => refreshInfo())
+					.then((fresh) => idleCard(fresh), () => idleCard(state.info || info));
+			});
+		}
+		wireAvoid(host, info);
 	}
 
 	// ── the general hunt: hold one pin, see what turns up ────────────────────
