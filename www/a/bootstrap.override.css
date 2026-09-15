@@ -7350,6 +7350,47 @@ body > main > .container > form > .mj-foot {
 .mj-pkg-left .mj-pin-trace,
 .mj-pkg-right .mj-pin-trace { width: var(--mj-trace); height: 2px; }
 
+/* The hunt, on the chip drawing.
+   Two states on the same leads the level marks use, and for the same reason:
+   the sweep touches a pad a second, and rebuilding the chip at that rate would
+   drop the highlight the person is following. Attributes, never a repaint. */
+
+/* The pair under the bridge right now. The pad itself, not its trace, because
+   a pad being DRIVEN is a stronger fact than what it is wired to and has to
+   read at a glance from across the drawing. */
+.mj-pin-lead[data-hunt="driving"] .mj-pin-pad {
+	background: var(--bs-warning);
+	box-shadow: 0 0 0 3px rgba(var(--bs-warning-rgb), 0.35);
+}
+
+/* A pad the camera has been told never to drive. Struck through and hatched,
+   and the number stays readable: this is a pad the owner may want back, and
+   greyed-into-nothing is what the camera's OWN pads look like. */
+.mj-pin-lead[data-avoid] .mj-pin-lbl {
+	text-decoration: line-through;
+	opacity: 0.75;
+}
+
+.mj-pin-lead[data-avoid] .mj-pin-pad {
+	background: repeating-linear-gradient(
+		135deg,
+		var(--bs-secondary-color) 0 2px,
+		var(--bs-tertiary-bg) 2px 5px);
+}
+
+/* Proof outranks a preference, so it reads differently: a pad the camera went
+   down on is not one the owner chose. */
+.mj-pin-lead[data-avoid="down"] .mj-pin-pad {
+	background: repeating-linear-gradient(
+		135deg,
+		var(--bs-danger) 0 2px,
+		var(--bs-tertiary-bg) 2px 5px);
+}
+
+.mj-pins-hunt {
+	margin-top: 1.25rem;
+}
+
 /* A live level rides the TRACE, which is the one element in the drawing
    carrying no state of its own: the pad's box-shadow is taken three times over
    (the lit ring, .mj-pin-taken, .mj-pin-sel) and its background twice
