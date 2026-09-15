@@ -40,14 +40,56 @@
 	// and the last green it was given stands.
 	let mnt = '';
 	let recorder = null;     // null | {absent:true} | {v:…}, as the verdict wants
+	// Where the drop counter stood when this page opened, so the banner reports
+	// footage lost while somebody has been here rather than everything since
+	// the camera booted — a total from three days ago is not news, and a banner
+	// that cannot be made to go away is one people learn to ignore.
+	let droppedAt = null;
+	// Consecutive heartbeats in which the recorder wrote nothing.
+	//
+	// The dropping verdict is a claim in the PRESENT tense — "the card cannot
+	// keep up" — and it stops being true the moment the recorder stops asking
+	// anything of the card. records.enabled is read once, at startup, so a
+	// camera whose recording is switched off while this page is open would
+	// otherwise go on showing a loss that is no longer happening, with nothing
+	// able to clear it short of a reload.
+	//
+	// Several samples rather than one: a recorder between clips writes nothing
+	// for a moment, and a banner that blinks off and back on is read as a bug
+	// rather than as precision.
+	let idleTicks = 0;
+	const IDLE_TICKS = 8;   // ~16 s at the 2 s heartbeat
 	let shown = '';          // what the slot is currently saying
 
 	function slot() { return document.getElementById(SLOT); }
 
+	// Seconds of footage dropped since this page loaded, from the counter of
+	// presentation time lost — microseconds, as the Recordings page reads it.
+	// The fragment count beside it is not seconds: fragment length is
+	// configurable, so counting fragments and calling them seconds is right
+	// only at the default.
+	function droppedSeconds() {
+		const v = recorder && recorder.v;
+		if (!v || typeof v.records_dropped_ticks_total !== 'number') return 0;
+		if (droppedAt === null) return 0;
+		return Math.max(0, (v.records_dropped_ticks_total - droppedAt) / 1e6);
+	}
+
 	function render() {
 		const el = slot();
 		if (!el) return;
-		const v = V.of(card, recorder, '', where);
+		// The dropped figure, which this banner has never passed. The verdict
+		// has said "cannot keep up — footage is being lost" since it was
+		// written, but only the Recordings page ever supplied the evidence for
+		// it, so on every other page a card that was mounted, writable and
+		// reporting itself healthy while silently discarding clips drew nothing
+		// at all. That is the one storage fault with no other symptom
+		// (OpenIPC/firmware#1747).
+		// Suppressed, not forgotten: the counter keeps its baseline, so a
+		// recorder that starts writing again reports what it loses from then
+		// on rather than re-announcing what it lost before it paused.
+		const lost = idleTicks >= IDLE_TICKS ? 0 : droppedSeconds();
+		const v = V.of(card, recorder, lost > 0 ? V.duration(lost) : '', where);
 		// The Dashboard's SD badge is the other place a dead card was being
 		// drawn green, and it is drawn from df, which cannot see any of this.
 		badge(v);
@@ -146,6 +188,17 @@
 				const v = s.m.v;
 				recorder = typeof v.records_state === 'number'
 					? { v: v } : { absent: true };
+				if (droppedAt === null &&
+					typeof v.records_dropped_ticks_total === 'number')
+					droppedAt = v.records_dropped_ticks_total;
+				// Is the recorder still writing? Absent counters leave this
+				// alone: a build that does not publish them is not a camera
+				// reporting that nothing is being written.
+				const pv = s.prev && s.prev.v;
+				const b = v.records_bytes_written_total;
+				const pb = pv && pv.records_bytes_written_total;
+				if (typeof b === 'number' && typeof pb === 'number')
+					idleTicks = b > pb ? 0 : idleTicks + 1;
 				render();
 			});
 

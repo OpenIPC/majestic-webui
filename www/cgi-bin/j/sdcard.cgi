@@ -167,6 +167,71 @@ json_errs() {
 	done
 }
 
+# Centisecond monotonic clock. busybox `date` here has no %N, and the `time`
+# keyword writes a format that has to be parsed back out of a temp file;
+# /proc/uptime is two decimals of a clock nothing can step, which is finer than
+# any figure this endpoint quotes.
+now_cs() {
+	set -- $(cat /proc/uptime 2>/dev/null)
+	case "$1" in *.*) printf '%s%s' "${1%.*}" "${1#*.}";; *) return 1;; esac
+}
+
+# Byte n of the 64-byte SD Status register, as a decimal number.
+ssr_byte() {
+	r_b=$(printf '%s' "$1" | cut -c$((2 * $2 + 1))-$((2 * $2 + 2)))
+	case "$r_b" in [0-9a-fA-F][0-9a-fA-F]) echo $((0x$r_b));; *) return 1;; esac
+}
+
+# What the card says it is, from the SD Status register the kernel already read
+# when it probed the slot. This is the only thing about a card's SPEED that can
+# be known without writing to it, and it is the distinction that decides
+# whether recording survives: the sequential classes (C10, U1, U3, V-) are
+# measured on one long streaming write, while A1/A2 is the only one that
+# promises anything about random I/O — which is what a filesystem does while a
+# recorder is deleting old clips underneath it. Until this, nothing the camera
+# could show its owner separated the two, so "use a faster card" was advice
+# nobody could act on (OpenIPC/firmware#1747).
+#
+# Answers in two ways, and the difference is the whole point of the second one:
+# `rating` when the register decoded, `ratingWhy` when it did not. WHY it did
+# not is not a detail — the sysfs attribute does not exist at all on some
+# platforms (absent on Ingenic T31's 3.10 kernel, present on HiSilicon's 4.9),
+# and saying "this card does not report its speed ratings" there blames a card
+# that reports them perfectly well for something its camera cannot read.
+#
+#   platform    the kernel here has no such attribute — nothing to do with
+#               this card, and another camera would read it
+#   unreadable  the attribute is there and did not decode
+#   notsd       an SD structure asked of something that is not an SD card
+#
+# Every field is checked against the set the spec defines, and the WHOLE
+# register is dropped if any one of them falls outside it. A rating decoded
+# wrongly and printed as fact is worse than no rating at all, and a kernel that
+# filled this register in differently is exactly what an unexpected value looks
+# like.
+card_rating() {
+	[ "$(sysf type)" = "SD" ] || { printf '"ratingWhy":"notsd",'; return; }
+	[ -e "$SYS/device/ssr" ] || { printf '"ratingWhy":"platform",'; return; }
+	r_s=$(sysf ssr | tr -d ' \n')
+	[ ${#r_s} -eq 128 ] || { printf '"ratingWhy":"unreadable",'; return; }
+	{
+		r_sc=$(ssr_byte "$r_s" 8)  &&
+		r_ug=$(ssr_byte "$r_s" 14) &&
+		r_vc=$(ssr_byte "$r_s" 15) &&
+		r_ac=$(ssr_byte "$r_s" 21)
+	} || { printf '"ratingWhy":"unreadable",'; return; }
+	# UHS grade is the high nibble of its byte, app class the low nibble of its.
+	r_ug=$((r_ug / 16)); r_ac=$((r_ac % 16))
+	# Speed class is an enum, not the number printed on the card.
+	case "$r_sc" in 0) r_sc=0;; 1) r_sc=2;; 2) r_sc=4;; 3) r_sc=6;; 4) r_sc=10;;
+		*) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_ug" in 0|1|3) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_vc" in 0|6|10|30|60|90) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_ac" in 0|1|2) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
+	printf '"rating":{"speedClass":%s,"uhsGrade":%s,"videoClass":%s,"appClass":%s},' \
+		"$r_sc" "$r_ug" "$r_vc" "$r_ac"
+}
+
 # the active target partition/device and its conventional mount point
 target() { if [ -b "${DEV}p1" ]; then printf '%sp1' "$DEV"; else printf '%s' "$DEV"; fi; }
 
@@ -223,6 +288,7 @@ get_info() {
 	fi
 	printf '{"present":true,"device":"%s","target":"%s","mountpoint":"%s","mounted":%s,"partitioned":%s,' \
 		"$DEV" "$t" "$(json_str "${mp:-/mnt/$base}")" "$mounted" "$partd"
+	printf '%s' "$(card_rating)"
 	printf '"model":"%s","cardtype":"%s","manfid":"%s","oemid":"%s","date":"%s","serial":"%s",' \
 		"$(json_str "$(sysf name)")" "$(json_str "$(sysf type)")" "$(json_str "$(sysf manfid)")" \
 		"$(json_str "$(sysf oemid)")" "$(json_str "$(sysf date)")" "$(json_str "$(sysf serial)")"
@@ -493,18 +559,165 @@ do_fsck() {
 	[ "$rc" -le 1 ] || err="fsck reported errors"
 }
 
+# Measure what the card actually does, for a camera that is not recording yet.
+#
+# The counters majestic publishes answer this for a camera that IS recording —
+# they are the achieved rate and the worst flush, measured on the real
+# workload — but they say nothing at all before recording has ever worked,
+# which is the state somebody is in when they come looking. A camera whose card
+# takes a fraction of what the vendor firmware managed is the report this is
+# for, and it went a year and a half without a single number attached to it
+# because nothing on the camera would produce one.
+#
+# Bounded three ways, and each bound is a failure somebody would otherwise
+# wait through: SPEED_CHUNKS caps the work, SPEED_BUDGET_CS stops a slow card
+# between chunks, and SPEED_CHUNK_SECS stops a wedged one INSIDE a chunk —
+# without that last one the budget is only consulted after a flush returns, so
+# a card that stops answering blocks the request for as long as the kernel
+# waits on it. A card that cannot take 2 MB in ten seconds has answered the
+# question.
+#
+# conv=fsync on every chunk, because the flush is where an SD card stalls. A
+# write that only reaches the page cache measures the page cache.
+SPEED_CHUNK=2097152
+SPEED_CHUNKS=16
+SPEED_BUDGET_CS=2000
+SPEED_CHUNK_SECS=10
+SPEED_LOCK=/tmp/webui/sdspeed.lock
+# How long a lock may stand before it is assumed to belong to a run that died.
+# Longer than any measurement can legitimately take: the budget is 20 s, plus
+# the read-back and one chunk's grace.
+SPEED_LOCK_STALE=120
+
+do_speedtest() {
+	t=$(target)
+	mp=$(awk -v d="$t" '$1==d{print $2; exit}' /proc/mounts)
+	[ -n "$mp" ] || { err="the card is not mounted, so there is nothing to measure"; return; }
+	case ",$(awk -v d="$t" '$1==d{print $4; exit}' /proc/mounts)," in
+		*,ro,*) err="the card is mounted read-only, so nothing can be written to it"; return;;
+	esac
+	# Enough room that the test cannot be what fills the card. majestic deletes
+	# the oldest clip when the card reaches records.maxUsage, and a test that
+	# triggers that has destroyed footage to measure a disk.
+	avail=$(df -k "$mp" 2>/dev/null | awk 'NR==2{print $4}')
+	case "$avail" in ''|*[!0-9]*) avail=0;; esac
+	[ "$avail" -ge 65536 ] ||
+		{ err="under 64 MB is free on the card — too little to measure a write speed without deleting recordings to make room"; return; }
+
+	# One at a time, camera-wide: two of these at once measure each other.
+	#
+	# A lock that only a completed run removes is a lock that disables the
+	# feature for good the first time a request is cancelled mid-flush — the
+	# client hangs up, the CGI is killed inside a blocking dd, and every later
+	# test is refused as "already running" with nothing to clear it. So the
+	# lock carries the time it was taken and is reclaimed once that is older
+	# than any measurement could be.
+	mkdir -p /tmp/webui 2>/dev/null
+	sp_now=$(date +%s 2>/dev/null)
+	case "$sp_now" in ''|*[!0-9]*) sp_now=0;; esac
+	if ! mkdir "$SPEED_LOCK" 2>/dev/null; then
+		sp_at=$(cat "$SPEED_LOCK/at" 2>/dev/null)
+		case "$sp_at" in ''|*[!0-9]*) sp_at=0;; esac
+		if [ "$sp_at" -gt 0 ] && [ "$sp_now" -gt 0 ] &&
+			[ $((sp_now - sp_at)) -lt "$SPEED_LOCK_STALE" ]; then
+			err="a speed test is already running on this camera"
+			return
+		fi
+		# Whatever held this is gone. Take the lock over, and sweep the scratch
+		# file its run left on the card.
+		rm -f "$mp"/.openipc-speedtest.* 2>/dev/null
+	fi
+	printf '%s' "$sp_now" > "$SPEED_LOCK/at" 2>/dev/null
+
+	# Named per run, so a file an operator happens to keep on the card is never
+	# what gets deleted, and so a reclaimed lock's leftovers are distinguishable
+	# from this run's.
+	f="$mp/.openipc-speedtest.$$"
+	# Released on EVERY exit, not only the tidy one. This is the half that makes
+	# the lock safe to take at all.
+	# rm -r, not rmdir: the lock is a directory with the timestamp inside it,
+	# and rmdir refuses a directory that is not empty. It failed silently on
+	# every successful run, so the lock leaked every time and the next test
+	# within the stale window was refused as "already running".
+	trap 'rm -f "$f" 2>/dev/null; rm -rf "$SPEED_LOCK" 2>/dev/null' EXIT INT TERM HUP
+	rm -f "$f" 2>/dev/null
+
+	# A measurement with no clock behind it is not a measurement. now_cs only
+	# fails on a /proc/uptime this cannot parse, but a figure derived from an
+	# unread clock is one this endpoint invented.
+	sp_t0=$(now_cs) || { err="the camera's clock could not be read, so nothing here could be timed"; return; }
+
+	logln "# write $((SPEED_CHUNK / 1048576)) MB chunks to $f, flushing each"
+	wrote=0; worst=0; sp_i=0; sp_stalled=false; sp_wfail=false
+	while [ "$sp_i" -lt "$SPEED_CHUNKS" ]; do
+		sp_c0=$(now_cs) || break
+		timeout "$SPEED_CHUNK_SECS" dd if=/dev/zero of="$f" bs="$SPEED_CHUNK" \
+			count=1 seek="$sp_i" conv=fsync,notrunc 2>/dev/null
+		sp_rc=$?
+		if [ "$sp_rc" -ne 0 ]; then
+			# 124 is GNU timeout's, 143 is busybox's SIGTERM. Either way the
+			# card did not finish a 2 MB flush in ten seconds, which is a
+			# different answer from "slow" and is worth saying as one.
+			case "$sp_rc" in 124|143) sp_stalled=true;; *) sp_wfail=true;; esac
+			break
+		fi
+		sp_c1=$(now_cs) || break
+		sp_d=$((sp_c1 - sp_c0))
+		[ "$sp_d" -gt "$worst" ] && worst=$sp_d
+		wrote=$((wrote + SPEED_CHUNK))
+		sp_i=$((sp_i + 1))
+		[ $((sp_c1 - sp_t0)) -ge "$SPEED_BUDGET_CS" ] && break
+	done
+
+	if [ "$sp_stalled" = true ]; then
+		err="the card stopped accepting data part-way through the test — it did not finish a $((SPEED_CHUNK / 1048576)) MB write in ${SPEED_CHUNK_SECS} seconds"
+		return
+	fi
+	if [ "$sp_wfail" = true ]; then
+		err="a write to the card failed part-way through the test"
+		return
+	fi
+	[ "$wrote" -gt 0 ] || { err="the card accepted no data at all"; return; }
+
+	# The clock at both ends, or no figure. Fabricating the second read from
+	# the first is what turns an unreadable clock into a zero duration, and a
+	# zero duration into an infinite speed on the page.
+	sp_t1=$(now_cs) || { err="the camera's clock could not be read back, so the write could not be timed"; return; }
+	wms=$(( (sp_t1 - sp_t0) * 10 ))
+	[ "$wms" -gt 0 ] || { err="the write completed too quickly to time on this camera's clock"; return; }
+
+	# Read it back cold, or the figure is the page cache's. Reported only when
+	# the read actually finished AND both ends of it were read: dd's status is
+	# checked here because a read that failed half way would otherwise be
+	# divided into the full byte count and published as a throughput.
+	uncache
+	rms=-1
+	if sp_r0=$(now_cs); then
+		if timeout $((SPEED_CHUNK_SECS * SPEED_CHUNKS)) dd if="$f" of=/dev/null \
+			bs="$SPEED_CHUNK" 2>/dev/null; then
+			sp_r1=$(now_cs) && [ $((sp_r1 - sp_r0)) -gt 0 ] &&
+				rms=$(( (sp_r1 - sp_r0) * 10 ))
+		fi
+	fi
+
+	logln "# wrote $((wrote / 1048576)) MB in ${wms} ms, read back in ${rms} ms"
+	EXTRA=$(printf '"speed":{"bytes":%s,"writeMs":%s,"worstMs":%s,"readMs":%s},' \
+		"$wrote" "$wms" "$((worst * 10))" "$rms")
+}
+
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	json_hdr
-	L=""; err=""
+	L=""; err=""; EXTRA=""
 	case "$POST_op" in
 		format) do_format;;
 		mount) do_mount;;
 		unmount) do_unmount;;
 		fsck) do_fsck;;
+		speedtest) do_speedtest;;
 		*) err="unknown op";;
 	esac
 	if [ -z "$err" ]; then
-		printf '{"ok":true,"log":"%s"}' "$(json_log "$L")"
+		printf '{"ok":true,%s"log":"%s"}' "$EXTRA" "$(json_log "$L")"
 	else
 		printf '{"ok":false,"error":"%s","log":"%s"}' "$(json_str "$err")" "$(json_log "$L")"
 	fi
