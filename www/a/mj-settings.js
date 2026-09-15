@@ -1146,16 +1146,41 @@
 		if (!night) return;
 		const active = v => v !== false && v != null;
 		const lm = active(getDotted(state.config, 'nightMode.lightMonitor'));
+		// Whether day and night move each actuator at all. Absent means they
+		// do — that is the default, and a key this page was not given is one
+		// it knows nothing about. Distinct from parked: a filter that does not
+		// follow dusk is still the daemon's to drive, and the switch below
+		// still moves it, which is the whole point of the setting.
+		const ircutFollows =
+			getDotted(state.config, 'nightMode.irCutAuto') !== false;
+		const lightFollows =
+			getDotted(state.config, 'nightMode.backlightAuto') !== false;
 
-		// The monitor is driving all three, so three dead switches say less than
-		// one sentence naming what has the wheel — and where to go to take it
-		// back. The old panel showed the switches anyway with a small link
-		// beside them.
+		// The monitor drives what it drives, and that is no longer always all
+		// three. Where it has everything, three dead switches say less than
+		// one sentence naming what has the wheel and where to take it back.
+		// Where an actuator has been told not to follow day/night, its switch
+		// is the only way to move it, so the group stays and the monitor's own
+		// switches are the dead ones.
 		if (lm) {
-			const grp = root.querySelector('.mj-hud-rt');
-			if (grp) grp.hidden = true;
-			if (lightmon) lightmon.hidden = false;
-			return;
+			const drives = ['night'].concat(
+				ircutFollows ? ['IR\u2011cut'] : [],
+				lightFollows ? ['the lamp'] : []);
+			const named = drives.length > 1
+				? drives.slice(0, -1).join(', ') + ' and ' + drives[drives.length - 1]
+				: drives[0];
+			if (lightmon) {
+				const say = 'Automatic day/night is driving ' + named;
+				const a = lightmon.querySelector('a');
+				if (a) a.textContent = say;
+				lightmon.title = say.replace(/\u2011/g, '-');
+				lightmon.hidden = false;
+			}
+			if (ircutFollows && lightFollows) {
+				const grp = root.querySelector('.mj-hud-rt');
+				if (grp) grp.hidden = true;
+				return;
+			}
 		}
 
 		// Parked (nightMode.*Enabled: false) outranks wired: the daemon
@@ -1168,34 +1193,50 @@
 			getDotted(state.config, 'nightMode.irCutEnabled') === false;
 		const lightParked =
 			getDotted(state.config, 'nightMode.backlightEnabled') === false;
-		ircut.disabled = ircutParked ||
+		// Reached only where something is still the operator's, so anything
+		// the monitor does drive is dead here — pressing it would move and
+		// snap back on the monitor's next tick.
+		const monNight = lm, monIrcut = lm && ircutFollows,
+			monLight = lm && lightFollows;
+		night.disabled = monNight;
+		ircut.disabled = monIrcut || ircutParked ||
 			!active(getDotted(state.config, 'nightMode.irCutPin1'));
-		light.disabled = lightParked ||
+		light.disabled = monLight || lightParked ||
 			!active(getDotted(state.config, 'nightMode.backlightPin'));
 		// A control that cannot work should say which pin is missing — or that
-		// the actuator is deliberately parked — rather than just refusing.
+		// the actuator is deliberately parked, or that the monitor has it —
+		// rather than just refusing.
+		const MON = 'Automatic day/night is driving this one.';
+		if (night.disabled && lbl('toggle-night'))
+			lbl('toggle-night').title = MON;
 		if (ircut.disabled && lbl('toggle-ircut'))
-			lbl('toggle-ircut').title = ircutParked
+			lbl('toggle-ircut').title = monIrcut ? MON : ircutParked
 				? 'The IR-cut filter is switched off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
-			lbl('toggle-light').title = lightParked
+			lbl('toggle-light').title = monLight ? MON : lightParked
 				? 'The lamp is switched off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the night illuminator.';
 
-		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
-			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
-				.then(r => r.text()).then(v => { el2.checked = +v > 0; })
-				.catch(() => {}));
+		// Where each of the three actually is, from the camera. Used again
+		// after a night toggle, for the reason below.
+		const readGauges = () =>
+			[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
+				apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
+					.then(r => r.text()).then(v => { el2.checked = +v > 0; })
+					.catch(() => {}));
+		readGauges();
 
 		night.addEventListener('click', () => {
 			apiFetch('/night/toggle', { credentials: 'same-origin' })
 				.then(r => r.json()).then(data => {
 					night.checked = data;
-					// Night mode drives the filter and the light where they are
-					// not independently pinned, so the controls follow it.
-					if (!ircut.disabled) ircut.checked = data;
-					if (!light.disabled) light.checked = data;
+					// What the mode did to the other two is the camera's
+					// answer, not this page's guess. It used to assume both
+					// followed; an actuator told not to follow day/night does
+					// not move with it, and the switch would then show a
+					// filter somewhere it had not gone.
+					readGauges();
 				}).catch(() => {});
 		});
 		ircut.addEventListener('click', () => {

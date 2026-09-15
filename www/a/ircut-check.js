@@ -173,6 +173,11 @@
 		// two. Nothing here can tell those boards apart, so this is stated
 		// rather than judged (#273).
 		const single = driveable && !has(nm.irCutPin2);
+		// Whether day and night move the filter at all. Absent means they do:
+		// that is the default, and a key this page was not given is one it
+		// knows nothing about. Distinct from parked — the filter is still the
+		// daemon's to drive, and a hand on the IR-cut switch still moves it.
+		const ircutFollows = nm.irCutAuto !== false;
 
 		// The one gate the picture gets, and it is the only portable one there
 		// is. An open filter at NIGHT is correct, so the picture may only speak
@@ -510,7 +515,13 @@
 		// A parked filter cannot follow the monitor, so the disagreement the
 		// conflict finding convicts on is the expected state, not a fault.
 		if (monitor && driveable && !ircutParked && known(sample)) {
-			if (!agrees(sample) && track.conflictS >= CONFLICT_S) {
+			// And a filter told not to follow day/night is not merely allowed
+			// to disagree with it — disagreeing is the setting working. The
+			// camera goes to night, the filter stays where its owner put it,
+			// and the gauges differ for as long as that lasts, which is for
+			// ever. Convicting on it would make the one configuration that
+			// asks for this unusable.
+			if (ircutFollows && !agrees(sample) && track.conflictS >= CONFLICT_S) {
 				out.push({
 					id: 'conflict', level: 'danger',
 					title: 'Night mode and the IR-cut filter disagree',

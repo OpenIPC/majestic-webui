@@ -1357,6 +1357,30 @@ function runRest() {
 		check('day with a closed filter agrees',
 			!ic.diagnose(cfg, { night: 0, ircut: 0 }, { conflictS: 600, flips: 0 })
 				.some(x => x.id === 'conflict'));
+
+		// A filter told not to follow day/night is not merely allowed to
+		// disagree with the mode — disagreeing IS the setting working. The
+		// camera goes to night, the filter stays where its owner put it, and
+		// the two gauges differ for as long as that lasts, which is for ever.
+		// Convicting on it would make the one configuration that asks for this
+		// unusable, which is how it reached the daemon in the first place.
+		const notFollowing = Object.assign({ irCutAuto: false }, cfg);
+		check('a filter that does not follow day/night may disagree with it',
+			!ic.diagnose(notFollowing, conflicted, { conflictS: 600, flips: 0 })
+				.some(x => x.id === 'conflict'));
+		// Absent is not off: every camera before this key followed.
+		check('...while an absent switch still means it follows',
+			ic.diagnose(cfg, conflicted, { conflictS: 600, flips: 0 })
+				.some(x => x.id === 'conflict'));
+		check('...and so does an explicit true',
+			ic.diagnose(Object.assign({ irCutAuto: true }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
+		// It is the conflict rule that stands down, not the whole section: a
+		// camera hunting between day and night is hunting whatever the filter
+		// is doing.
+		check('the hunting finding is untouched by it',
+			ic.diagnose(notFollowing, conflicted, { conflictS: 0, flips: 9 })
+				.some(x => x.id === 'hunting'));
 	}
 
 	group('projector: the local clock the countdown is read forward by');
