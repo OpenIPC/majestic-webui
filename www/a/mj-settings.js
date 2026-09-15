@@ -7326,12 +7326,13 @@
 		const tune = box.querySelector('#mj-audio-tune');
 		const listen = box.querySelector('#mj-audio-listen');
 
+		// Everything the panel does needs both halves of the audio block, the
+		// speaker test included: the camera brings its output up with its
+		// capture, so there is no state in which one of these three buttons is
+		// usable and the others are not.
 		const blocked = !!(b && b.blocked);
-		// A speaker with no microphone can still be tested; it just cannot be
-		// measured. Refusing both would hide a test that would have worked.
-		const speakerOk = !blocked || b.speakerOnly === true;
 
-		if (test) test.disabled = audioBusy || !speakerOk;
+		if (test) test.disabled = audioBusy || blocked;
 		if (tune) tune.disabled = audioBusy || blocked;
 		if (listen) listen.disabled = audioBusy || blocked;
 
@@ -7344,8 +7345,6 @@
 	// The speaker test, and the measurement of what came back.
 	async function audioRunTest(box) {
 		if (audioBusy) return;
-		const b = audioBlocker();
-		const speakerOnly = !!(b && b.speakerOnly);
 		const rate = audioRate();
 		if (!rate) return;
 
@@ -7361,28 +7360,13 @@
 		let outcome = null;
 
 		try {
-			if (speakerOnly) {
-				// Nothing can measure it, so this is the honest half: the
-				// camera either accepted the sound or said why it would not.
-				audioSay(box, AUDIO_STEP.playing);
-				await audioPlay(AUDIO_CLIP_S, rate);
-				outcome = {
-					severity: 'secondary',
-					title: 'The camera played the test sound.',
-					detail:
-						'Whether anything came out of the speaker is something only ' +
-						'you can tell from the room — the microphone is switched ' +
-						'off, so nothing here could listen.',
-				};
-			} else {
-				outcome = await AUDIO.probe({
-					onStep: (s) => audioSay(state.audioBox || box, AUDIO_STEP[s] || ''),
-					quietMs: AUDIO_QUIET_MS,
-					soundMs: AUDIO_SOUND_MS,
-					listen: audioListen,
-					play: () => audioPlay(AUDIO_CLIP_S, rate),
-				});
-			}
+			outcome = await AUDIO.probe({
+				onStep: (s) => audioSay(state.audioBox || box, AUDIO_STEP[s] || ''),
+				quietMs: AUDIO_QUIET_MS,
+				soundMs: AUDIO_SOUND_MS,
+				listen: audioListen,
+				play: () => audioPlay(AUDIO_CLIP_S, rate),
+			});
 		} catch (e) {
 			// Never a verdict from a run that did not finish: half a
 			// measurement is not evidence, and a confident sentence built on
