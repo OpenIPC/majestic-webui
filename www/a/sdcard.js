@@ -15,7 +15,7 @@
 	// its `dt` are there for exactly this, and main.js explains why the window
 	// is the browser's monotonic clock and not the camera's.
 	let rateBps = null;
-	let speed = null, speedBusy = false, speedErr = '';
+	let speed = null, speedBusy = false, speedErr = '', speedRec = false;
 
 	function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 	function humanBytes(n) {
@@ -303,10 +303,10 @@
 	// Measured well under what the card promises — and the card is not
 	// necessarily the one at fault.
 	//
-	// Written after measuring a Class 10 card at 4.7 MB/s on a hi3518ev200,
-	// where a RAW read straight off the block device managed the same 4.7 MB/s
-	// against a CPU that copies 40 MB/s: the host controller was the ceiling,
-	// not the card. Printing "claims 10, delivers 4.7" there invites somebody
+	// Written after measuring a Class 10 card at 4.7 MB/s on an hi3518ev200 +
+	// jxf22, where a RAW read straight off the block device managed the same
+	// 4.7 MB/s against a CPU that copies 40 MB/s: the host controller was the
+	// ceiling, not the card. Printing "claims 10, delivers 4.7" there invites somebody
 	// to replace a perfectly good card and measure exactly the same figure
 	// again. The rated floors are quoted for a card reader, not for a camera
 	// built around a 440 MHz ARM926.
@@ -325,24 +325,40 @@
 	function speedBlock(d) {
 		let out = '';
 		if (speed) {
-			const mb = speed.bytes / 1048576;
-			const w = speed.bytes / (speed.writeMs / 1000);
-			out += '<dl class="small list mb-2">'
-				+ '<dt>Sequential write</dt><dd>' + esc((w / 1048576).toFixed(1)) + ' MB/s'
-				+ ' <span class="text-secondary">(' + esc(mb.toFixed(0)) + ' MB)</span></dd>';
-			if (speed.readMs > 0) {
-				out += '<dt>Read back</dt><dd>' + esc((speed.bytes / (speed.readMs / 1000) / 1048576).toFixed(1)) + ' MB/s</dd>';
+			const bytes = num(speed, 'bytes'), wms = num(speed, 'writeMs');
+			const rms = num(speed, 'readMs'), worst = num(speed, 'worstMs');
+			const rows = [];
+			let mbs = null;
+			// Every figure gated on the pair it is made of. A duration of zero
+			// is not a fast card, it is a clock that was not read — and
+			// dividing by it puts "Infinity MB/s" on the page as a measurement.
+			if (bytes !== null && wms !== null && wms > 0) {
+				mbs = bytes / (wms / 1000) / 1048576;
+				rows.push('<dt>Sequential write</dt><dd>' + esc(mbs.toFixed(1)) + ' MB/s'
+					+ ' <span class="text-secondary">(' + esc((bytes / 1048576).toFixed(0)) + ' MB)</span></dd>');
 			}
-			out += '<dt>Longest pause</dt><dd>' + esc(pause(speed.worstMs / 1000)) + '</dd></dl>';
-			out += shortfallNote(d, w / 1048576);
+			if (bytes !== null && rms !== null && rms > 0) {
+				rows.push('<dt>Read back</dt><dd>'
+					+ esc((bytes / (rms / 1000) / 1048576).toFixed(1)) + ' MB/s</dd>');
+			}
+			if (worst !== null) {
+				rows.push('<dt>Longest pause</dt><dd>' + esc(pause(worst / 1000)) + '</dd>');
+			}
+			if (rows.length) out += '<dl class="small list mb-2">' + rows.join('') + '</dl>';
 			// Measured against a card that had a second writer on it. Saying so
-			// is the difference between a figure and a misleading figure — a
-			// test run beside a live recorder reads slower than the card is,
-			// and somebody would otherwise replace a card that was fine.
-			if (speed.recording === true) {
+			// is the difference between a figure and a misleading one: a test
+			// run beside a live recorder reads slower than the card is, and
+			// somebody would otherwise replace a card that was fine.
+			//
+			// Known here rather than asked of the endpoint: the configured
+			// destination is in the config this page already holds and whether
+			// bytes are moving is in the heartbeat it already receives, so
+			// nothing needs to fetch it back out of the daemon.
+			if (speedRec) {
 				out += '<div class="x-small text-secondary mb-2">The camera was recording to this card while it was measured, ' +
 					'so both were writing at once — the card on its own is faster than this.</div>';
 			}
+			if (mbs !== null) out += shortfallNote(d, mbs);
 		}
 		if (speedErr) out += mjNotice('warn', esc(speedErr));
 		const dis = (!d.mounted || d.health === 'readonly' || speedBusy) ? ' disabled' : '';
@@ -374,6 +390,26 @@
 		return '<div class="x-small text-secondary mb-3">' +
 			'Nothing has been recorded to this card since the camera started, so there is nothing measured to ' +
 			'show. The test below writes to the card itself and times it.</div>';
+	}
+
+	// Is the recorder writing to THIS card right now?
+	//
+	// Both halves are already on this page: where the clips are configured to
+	// go, from the config it fetches every five seconds, and whether bytes are
+	// actually moving, from the heartbeat every page receives. Asking the
+	// endpoint to work it out and hand the answer back would be a CGI relaying
+	// what the daemon already tells the browser directly — and a relay can be
+	// wrong about it in a way the daemon never is.
+	function recordingHere() {
+		if (!state || !state.mounted || !state.mountpoint) return false;
+		if (mjGet(cfg, 'records.enabled') !== true) return false;
+		const pre = recPrefix();
+		if (!pre) return false;
+		if (pre !== state.mountpoint &&
+			pre.lastIndexOf(state.mountpoint + '/', 0) !== 0) return false;
+		// Configured here is not the same as writing here. A rate that has not
+		// been derived yet is not evidence of either.
+		return rateBps !== null && rateBps > 1000;
 	}
 
 	function perfCard(d) {
@@ -469,14 +505,16 @@
 			const b = e.target.closest('#sd-speed'); if (!b || speedBusy) return;
 			// Asked only while the recorder is actually writing here, because
 			// then it is a real question: the test and the recorder compete for
-			// the same card, and on a card with little headroom left the test
-			// is enough to make the recorder drop footage. Measured on a lab
-			// camera — a 32 MB run beside a live recorder took the worst flush
+			// the same card, and on one with little headroom left the test is
+			// enough to make the recorder drop footage. Measured on an
+			// hi3516av300 + imx415 recording its 4K main stream to a Class 10
+			// card — a 32 MB run beside the live recorder took the worst flush
 			// from 2 s to 13 s and lost five fragments doing it.
-			if (rateBps !== null && rateBps > 1000 &&
+			const rec = recordingHere();
+			if (rec &&
 				!confirm('The camera is recording to this card now. Measuring it makes both write at once, ' +
 					'which can drop a few seconds of footage. Measure anyway?')) return;
-			speedBusy = true; speedErr = ''; speed = null; render();
+			speedBusy = true; speedErr = ''; speed = null; speedRec = rec; render();
 			op({ op: 'speedtest' }).then(r => {
 				speedBusy = false;
 				if (r && r.ok && r.speed) speed = r.speed;

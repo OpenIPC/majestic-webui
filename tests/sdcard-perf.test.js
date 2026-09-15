@@ -149,6 +149,19 @@ async function drawn(env) {
 	return env.html();
 }
 
+// Press Measure and wait for the run to finish, however it finished — used
+// where the answer deliberately carries no figures to wait for.
+async function pressed(env) {
+	env.press('#sd-speed');
+	const end = Date.now() + PATIENCE;
+	while (Date.now() < end) {
+		const h = env.html();
+		if (h.indexOf('Measuring…') < 0 && h.indexOf('Measure this card') >= 0) return h;
+		await new Promise((r) => setTimeout(r, 5));
+	}
+	return env.html();
+}
+
 // Press Measure and wait for the figures to reach the page.
 async function measured(env) {
 	env.press('#sd-speed');
@@ -345,6 +358,64 @@ async function main() {
 		const h = await measured(env);
 		check('a card with no known rating is measured against nothing',
 			h.indexOf('below the') < 0, h.slice(-400));
+	}
+
+	group('a duration that was never read is not a speed');
+
+	{
+		// The endpoint refuses to time a write it could not time, but the page
+		// may not assume that: a zero here divided into the byte count puts
+		// "Infinity MB/s" on screen as a measurement, which is the shape of
+		// every bug this file exists to catch.
+		const env = load(card(), beat(),
+			{ bytes: 33554432, writeMs: 0, worstMs: 450, readMs: 3720 });
+		await drawn(env);
+		const h = await pressed(env);
+		check('a zero write duration yields no write figure at all',
+			h.indexOf('Sequential write') < 0, h.slice(-500));
+		check('and certainly not an infinite one',
+			h.indexOf('Infinity') < 0 && h.indexOf('NaN') < 0, 'published a non-number');
+		check('while a reading that IS good still shows',
+			h.indexOf('Read back') >= 0, 'lost the read figure too');
+	}
+
+	{
+		// -1 is how the endpoint says the read-back did not finish. A read that
+		// failed half way, divided into the full byte count, would be published
+		// as a throughput nothing achieved.
+		const env = load(card(), beat(),
+			{ bytes: 33554432, writeMs: 4000, worstMs: 300, readMs: -1 });
+		await drawn(env);
+		const h = await measured(env);
+		check('a read that did not finish yields no read figure',
+			h.indexOf('Read back') < 0, h.slice(-500));
+		check('and does not suppress the write figure beside it',
+			h.indexOf('Sequential write') >= 0, 'lost the write figure');
+	}
+
+	group('the recorder competing for the card is the page’s own answer');
+
+	{
+		// Derived in the browser from the config it already holds and the
+		// heartbeat it already receives — the endpoint is not asked and does
+		// not answer. Writing at ~8 Mbit/s to the mount the clips are
+		// configured for.
+		const env = load(card(), beat({ records_bytes_written_total: 4194304 }, 2097152, 2),
+			{ bytes: 33554432, writeMs: 4000, worstMs: 300, readMs: 900 });
+		await drawn(env);
+		const h = await measured(env);
+		check('a measurement taken beside a live recorder says so',
+			h.indexOf('both were writing at once') >= 0, h.slice(-500));
+	}
+
+	{
+		// Same card, same configuration, but nothing is being written.
+		const env = load(card(), beat({ records_bytes_written_total: 4194304 }, 4194304, 2),
+			{ bytes: 33554432, writeMs: 4000, worstMs: 300, readMs: 900 });
+		await drawn(env);
+		const h = await measured(env);
+		check('an idle recorder does not get the caption',
+			h.indexOf('both were writing at once') < 0, h.slice(-500));
 	}
 
 	group('the measurement itself');

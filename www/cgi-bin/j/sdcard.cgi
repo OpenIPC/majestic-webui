@@ -24,8 +24,6 @@
 #                that was free when it happened.
 #   ok           mounted read-write
 
-. "$(dirname "$0")/../p/majestic.sh"
-
 DEV=/dev/mmcblk0
 SYS=/sys/block/mmcblk0
 
@@ -566,24 +564,30 @@ do_fsck() {
 # The counters majestic publishes answer this for a camera that IS recording —
 # they are the achieved rate and the worst flush, measured on the real
 # workload — but they say nothing at all before recording has ever worked,
-# which is the state somebody is in when they come looking. A card that takes
-# 256 KB/s where the vendor firmware managed 5 MB/s is the report this is for,
-# and it went sixteen months without a single number attached to it because
-# nothing on the camera would produce one (OpenIPC/firmware#1747).
+# which is the state somebody is in when they come looking. A camera whose card
+# takes a fraction of what the vendor firmware managed is the report this is
+# for, and it went a year and a half without a single number attached to it
+# because nothing on the camera would produce one.
 #
-# Bounded by bytes AND by time, and the time budget is the one that matters:
-# 32 MB onto a healthy card is three seconds, and onto the card in that report
-# it is two minutes. A test that cannot finish on a slow card is useless
-# exactly where it is needed, so it stops at the budget and reports what it
-# managed — a short measurement of a slow card is still the number that was
-# missing.
+# Bounded three ways, and each bound is a failure somebody would otherwise
+# wait through: SPEED_CHUNKS caps the work, SPEED_BUDGET_CS stops a slow card
+# between chunks, and SPEED_CHUNK_SECS stops a wedged one INSIDE a chunk —
+# without that last one the budget is only consulted after a flush returns, so
+# a card that stops answering blocks the request for as long as the kernel
+# waits on it. A card that cannot take 2 MB in ten seconds has answered the
+# question.
 #
 # conv=fsync on every chunk, because the flush is where an SD card stalls. A
 # write that only reaches the page cache measures the page cache.
 SPEED_CHUNK=2097152
 SPEED_CHUNKS=16
 SPEED_BUDGET_CS=2000
+SPEED_CHUNK_SECS=10
 SPEED_LOCK=/tmp/webui/sdspeed.lock
+# How long a lock may stand before it is assumed to belong to a run that died.
+# Longer than any measurement can legitimately take: the budget is 20 s, plus
+# the read-back and one chunk's grace.
+SPEED_LOCK_STALE=120
 
 do_speedtest() {
 	t=$(target)
@@ -600,40 +604,63 @@ do_speedtest() {
 	[ "$avail" -ge 65536 ] ||
 		{ err="under 64 MB is free on the card — too little to measure a write speed without deleting recordings to make room"; return; }
 
-	# One at a time, camera-wide. Two of these at once measure each other.
+	# One at a time, camera-wide: two of these at once measure each other.
+	#
+	# A lock that only a completed run removes is a lock that disables the
+	# feature for good the first time a request is cancelled mid-flush — the
+	# client hangs up, the CGI is killed inside a blocking dd, and every later
+	# test is refused as "already running" with nothing to clear it. So the
+	# lock carries the time it was taken and is reclaimed once that is older
+	# than any measurement could be.
 	mkdir -p /tmp/webui 2>/dev/null
-	mkdir "$SPEED_LOCK" 2>/dev/null ||
-		{ err="a speed test is already running on this camera"; return; }
-
-	f="$mp/.openipc-speedtest.tmp"
-	rm -f "$f" 2>/dev/null
-	sp_done() { rm -f "$f" 2>/dev/null; rmdir "$SPEED_LOCK" 2>/dev/null; }
-
-	# Is the recorder writing to this card while we measure? Then the figures
-	# below are a card under two writers, not one, and the page has to say so
-	# rather than quietly report a worse number than the card deserves. Unknown
-	# stays unknown: mj_cfg returns 2 when the daemon did not answer, and a
-	# failed ask is not a fact.
-	rec=""
-	if sp_path=$(mj_cfg records.path) && sp_en=$(mj_cfg records.enabled); then
-		rec=false
-		if [ "$sp_en" = "true" ]; then
-			pre=$(printf '%s' "$sp_path" | sed 's/%.*//; s#/*$##')
-			case "$pre" in "$mp"|"$mp"/*) rec=true;; esac
+	sp_now=$(date +%s 2>/dev/null)
+	case "$sp_now" in ''|*[!0-9]*) sp_now=0;; esac
+	if ! mkdir "$SPEED_LOCK" 2>/dev/null; then
+		sp_at=$(cat "$SPEED_LOCK/at" 2>/dev/null)
+		case "$sp_at" in ''|*[!0-9]*) sp_at=0;; esac
+		if [ "$sp_at" -gt 0 ] && [ "$sp_now" -gt 0 ] &&
+			[ $((sp_now - sp_at)) -lt "$SPEED_LOCK_STALE" ]; then
+			err="a speed test is already running on this camera"
+			return
 		fi
+		# Whatever held this is gone. Take the lock over, and sweep the scratch
+		# file its run left on the card.
+		rm -f "$mp"/.openipc-speedtest.* 2>/dev/null
 	fi
+	printf '%s' "$sp_now" > "$SPEED_LOCK/at" 2>/dev/null
+
+	# Named per run, so a file an operator happens to keep on the card is never
+	# what gets deleted, and so a reclaimed lock's leftovers are distinguishable
+	# from this run's.
+	f="$mp/.openipc-speedtest.$$"
+	# Released on EVERY exit, not only the tidy one. This is the half that makes
+	# the lock safe to take at all.
+	# rm -r, not rmdir: the lock is a directory with the timestamp inside it,
+	# and rmdir refuses a directory that is not empty. It failed silently on
+	# every successful run, so the lock leaked every time and the next test
+	# within the stale window was refused as "already running".
+	trap 'rm -f "$f" 2>/dev/null; rm -rf "$SPEED_LOCK" 2>/dev/null' EXIT INT TERM HUP
+	rm -f "$f" 2>/dev/null
 
 	# A measurement with no clock behind it is not a measurement. now_cs only
-	# fails on a /proc/uptime this cannot parse, but reporting a figure derived
-	# from an unread clock would be inventing one.
-	sp_t0=$(now_cs) || { err="the camera's clock could not be read, so nothing here could be timed"; sp_done; return; }
+	# fails on a /proc/uptime this cannot parse, but a figure derived from an
+	# unread clock is one this endpoint invented.
+	sp_t0=$(now_cs) || { err="the camera's clock could not be read, so nothing here could be timed"; return; }
 
 	logln "# write $((SPEED_CHUNK / 1048576)) MB chunks to $f, flushing each"
-	wrote=0; worst=0; sp_i=0
+	wrote=0; worst=0; sp_i=0; sp_stalled=false; sp_wfail=false
 	while [ "$sp_i" -lt "$SPEED_CHUNKS" ]; do
 		sp_c0=$(now_cs) || break
-		dd if=/dev/zero of="$f" bs="$SPEED_CHUNK" count=1 seek="$sp_i" \
-			conv=fsync,notrunc 2>/dev/null || break
+		timeout "$SPEED_CHUNK_SECS" dd if=/dev/zero of="$f" bs="$SPEED_CHUNK" \
+			count=1 seek="$sp_i" conv=fsync,notrunc 2>/dev/null
+		sp_rc=$?
+		if [ "$sp_rc" -ne 0 ]; then
+			# 124 is GNU timeout's, 143 is busybox's SIGTERM. Either way the
+			# card did not finish a 2 MB flush in ten seconds, which is a
+			# different answer from "slow" and is worth saying as one.
+			case "$sp_rc" in 124|143) sp_stalled=true;; *) sp_wfail=true;; esac
+			break
+		fi
 		sp_c1=$(now_cs) || break
 		sp_d=$((sp_c1 - sp_c0))
 		[ "$sp_d" -gt "$worst" ] && worst=$sp_d
@@ -641,25 +668,41 @@ do_speedtest() {
 		sp_i=$((sp_i + 1))
 		[ $((sp_c1 - sp_t0)) -ge "$SPEED_BUDGET_CS" ] && break
 	done
-	sp_t1=$(now_cs) || sp_t1=$sp_t0
-	[ "$wrote" -gt 0 ] || { err="the card accepted no data at all"; sp_done; return; }
+
+	if [ "$sp_stalled" = true ]; then
+		err="the card stopped accepting data part-way through the test — it did not finish a $((SPEED_CHUNK / 1048576)) MB write in ${SPEED_CHUNK_SECS} seconds"
+		return
+	fi
+	if [ "$sp_wfail" = true ]; then
+		err="a write to the card failed part-way through the test"
+		return
+	fi
+	[ "$wrote" -gt 0 ] || { err="the card accepted no data at all"; return; }
+
+	# The clock at both ends, or no figure. Fabricating the second read from
+	# the first is what turns an unreadable clock into a zero duration, and a
+	# zero duration into an infinite speed on the page.
+	sp_t1=$(now_cs) || { err="the camera's clock could not be read back, so the write could not be timed"; return; }
 	wms=$(( (sp_t1 - sp_t0) * 10 ))
+	[ "$wms" -gt 0 ] || { err="the write completed too quickly to time on this camera's clock"; return; }
 
 	# Read it back cold, or the figure is the page cache's. Reported only when
-	# both ends of it were read; a read that could not be timed is left out
-	# rather than sent as a zero, which the page would draw as infinitely fast.
+	# the read actually finished AND both ends of it were read: dd's status is
+	# checked here because a read that failed half way would otherwise be
+	# divided into the full byte count and published as a throughput.
 	uncache
 	rms=-1
 	if sp_r0=$(now_cs); then
-		dd if="$f" of=/dev/null bs="$SPEED_CHUNK" 2>/dev/null
-		sp_r1=$(now_cs) && rms=$(( (sp_r1 - sp_r0) * 10 ))
+		if timeout $((SPEED_CHUNK_SECS * SPEED_CHUNKS)) dd if="$f" of=/dev/null \
+			bs="$SPEED_CHUNK" 2>/dev/null; then
+			sp_r1=$(now_cs) && [ $((sp_r1 - sp_r0)) -gt 0 ] &&
+				rms=$(( (sp_r1 - sp_r0) * 10 ))
+		fi
 	fi
 
-	sp_done
 	logln "# wrote $((wrote / 1048576)) MB in ${wms} ms, read back in ${rms} ms"
-	EXTRA=$(printf '"speed":{"bytes":%s,"writeMs":%s,"worstMs":%s,"readMs":%s%s},' \
-		"$wrote" "$wms" "$((worst * 10))" "$rms" \
-		"$([ -n "$rec" ] && printf ',"recording":%s' "$rec")")
+	EXTRA=$(printf '"speed":{"bytes":%s,"writeMs":%s,"worstMs":%s,"readMs":%s},' \
+		"$wrote" "$wms" "$((worst * 10))" "$rms")
 }
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
