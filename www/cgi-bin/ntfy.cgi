@@ -66,9 +66,19 @@ fi
 # Default values
 [ -z "$ntfy_server" ] && ntfy_server="https://ntfy.sh"
 [ -z "$ntfy_priority" ] && ntfy_priority="4"
-# The sender's own default, said here too: a page offering a list of lengths
-# with none of them picked would show the first and mean the fourth.
-[ -z "$ntfy_video_seconds" ] && ntfy_video_seconds="10"
+# The sender's own default and the sender's own clamp, both said here too.
+# The page reads whatever is in the file, which nothing obliges to be one of
+# the lengths offered: a hand-edited 600 would select none of them, so the
+# list would show 5, the webhook card would promise 600, and the send would
+# ask the camera for the 60 it clamps to -- three numbers for one setting.
+# These are the SENDER's bounds rather than the offered list's, because what
+# the card promises has to be what the send does; a hand-edited length the
+# list does not offer is still honoured, it just cannot be shown as picked.
+case "$ntfy_video_seconds" in
+"" | *[!0-9]* | ????*) ntfy_video_seconds="10" ;;
+esac
+[ "$ntfy_video_seconds" -lt 1 ] && ntfy_video_seconds="10"
+[ "$ntfy_video_seconds" -gt 60 ] && ntfy_video_seconds="60"
 %>
 
 <%in p/header.cgi %>

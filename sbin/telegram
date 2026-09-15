@@ -105,10 +105,22 @@ elif [ "$mode" = "clip" ] ||
 		--dump-header "$workdir/clip.head" \
 		--output "$snapshot" --write-out '%{http_code}' \
 		"localhost/video.mp4?pre=${clip_seconds}&duration=${clip_seconds}")
+	rc=$?
 
-	# An empty 200 counts as a refusal. A chunked reply that ends before it
-	# carries a fragment is the shape a torn-down pipeline leaves behind, and
-	# sending a zero-byte video is worse than saying nothing.
+	# Three ways this is not a clip, and the first is the one a status line
+	# cannot show. curl writes the code it was given the moment the headers
+	# arrive, so a transfer that stalls, resets or runs into the deadline
+	# after a 200 leaves a partial file behind a successful-looking status.
+	# Its own exit status is what says the body arrived whole, and a
+	# half-written video is worse than no video: it plays, up to the point
+	# where it stops, and nothing about it says it was cut.
+	#
+	# An empty 200 is a refusal too -- a reply that ends before it carries a
+	# fragment is the shape a torn-down pipeline leaves behind.
+	if [ "$rc" -ne 0 ]; then
+		echo "The clip did not arrive whole (curl exit ${rc})"
+		exit 1
+	fi
 	if [ "$http" != "200" ] || [ ! -s "$snapshot" ]; then
 		echo "The camera would not record a clip (HTTP ${http:-none})"
 		exit 1

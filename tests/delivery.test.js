@@ -82,6 +82,20 @@ const server = http.createServer((req, res) => {
 			clips.push(req.url);
 			const head = { 'Content-Type': 'video/mp4' };
 			if (clipPlan.preroll !== null) head['X-Preroll-Seconds'] = clipPlan.preroll;
+
+			// A camera that answers, starts sending, and then goes away: the
+			// status line is already a 200 and some of the file is already on
+			// disk. Announcing more than is written and then destroying the
+			// socket is what a stall, a reset or a deadline looks like from
+			// the client's side.
+			if (clipPlan.truncate) {
+				head['Content-Length'] = String(clipPlan.body.length + 4096);
+				res.writeHead(200, head);
+				res.write(clipPlan.body);
+				setTimeout(() => req.socket.destroy(), 30);
+				return;
+			}
+
 			res.writeHead(clipPlan.status, head);
 			res.end(clipPlan.body);
 			return;
@@ -206,7 +220,7 @@ server.listen(0, '127.0.0.1', async () => {
 		stills.length = 0;
 		clips.length = 0;
 		plan = { status: status || 200, body: body || '{"ok":true}' };
-		clipPlan = { status: 200, body: CLIP, preroll: '0' };
+		clipPlan = { status: 200, body: CLIP, preroll: '0', truncate: false };
 	};
 
 	// The same two senders, configured to record a clip of their own rather
@@ -511,6 +525,23 @@ server.listen(0, '127.0.0.1', async () => {
 		check('sends nothing at all', sent.length === 0, sent.length + ' request(s)');
 		check('and does not fall back to a picture', stills.length === 0,
 			stills.join(','));
+
+		// The transfer that dies after the status line. curl reports the 200
+		// it was given and leaves a partial file, so a sender judging only
+		// those two sends half a video -- which plays, up to where it stops,
+		// with nothing about it saying it was cut.
+		reset();
+		clipPlan = { status: 200, body: CLIP, preroll: '0', truncate: true };
+		const t2 = await run(telegramRec('telegram-cut'), []);
+		check('a transfer cut short is a refusal', t2.status !== 0, 'status ' + t2.status);
+		check('with nothing sent', sent.length === 0, sent.length + ' request(s)');
+		check('and no picture in its place', stills.length === 0, stills.join(','));
+
+		reset();
+		clipPlan = { status: 200, body: CLIP, preroll: '0', truncate: true };
+		const n2 = await run(ntfyRec('ntfy-cut'), []);
+		check('ntfy refuses it too', n2.status !== 0, 'status ' + n2.status);
+		check('with nothing sent', sent.length === 0, sent.length + ' request(s)');
 
 		// A 200 that carries nothing is the shape a pipeline torn down
 		// mid-clip leaves behind, and a zero-byte video is worse than silence.
