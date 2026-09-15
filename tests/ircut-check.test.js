@@ -122,14 +122,41 @@ group('irLook needs BOTH statistics, or a night frame fires it');
 		!ic.irLook(st(GREY)) && !ic.colourLook(st(GREY)));
 }
 
-group('irLook refuses to answer from too few pixels');
+group('irLook refuses to answer from a frame with no picture in it');
 {
-	// 10x10 = 100 usable pixels, below the floor: an almost-dark frame must not
-	// be allowed to reach a verdict on a handful of lit pixels.
-	const tiny = st(MAGENTA, 10, 10);
-	check('100 pixels is below the floor', tiny.n === 100, tiny.n);
-	check('and yields no verdict either way',
-		!ic.irLook(tiny) && !ic.colourLook(tiny));
+	// The floor is a SHARE of the frame, so the sample's size cannot outvote
+	// it. It used to be a count — 200 — against a 14,400-pixel sample, which
+	// let 1.4% of a frame speak for all of it: the thing the count's own
+	// comment said must never happen.
+	const mostlyDark = ic.stats(
+		frame(160, 90, i => (i < 1440 ? MAGENTA : DARK)), 160, 90);
+	check('a tenth of the frame lit is enough pixels to count',
+		mostlyDark.n === 1440, mostlyDark.n);
+	check('...and still no verdict either way',
+		!ic.irLook(mostlyDark) && !ic.colourLook(mostlyDark), mostlyDark.lit);
+	// Where the line is: half the frame lit is a frame, and it answers.
+	const half = ic.stats(frame(160, 90, i => (i % 2 ? MAGENTA : DARK)), 160, 90);
+	check('half a frame of magenta does read as an open filter',
+		ic.irLook(half) === true, half.lit);
+
+	// THE REGRESSION, and it is the whole of #492. A camera with no
+	// illumination shows a black picture at night, and a black picture is not
+	// black: it is the sensor's noise floor with the white-balance gains on
+	// it, a few counts of red and blue above green. The magenta excess is
+	// normalised by the pixel's own brightness, so those few counts ARE a
+	// magenta frame at a luminance of 21 — 0.23 against a bar of 0.15 — and
+	// green is the minimum in every pixel of it. Both statistics fired, on a
+	// picture its owner would describe as completely black, and the dashboard
+	// warned that the IR-cut filter was open. It could not be dismissed
+	// because nothing about it was dismissible: it was wrong.
+	const NOISE = [24, 18, 22];
+	const noise = st(NOISE);
+	check('a noise floor puts green at the minimum everywhere',
+		noise.gmin === 1, noise.gmin);
+	check('...and clears the magenta bar on three counts of imbalance',
+		noise.mex25 >= 0.15, noise.mex25);
+	check('...and is refused anyway, because none of it is lit',
+		ic.irLook(noise) === false && ic.look(noise) === 'none', noise.lit);
 }
 
 // ---------------------------------------------------------------------------
