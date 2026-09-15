@@ -314,7 +314,12 @@
 	function renderIrcut(s) {
 		if (!IC || !nmCfg) return;
 		ircutSample = s;
-		ircutTrackNow = ircutTrack.push(s, performance.now() / 1000);
+		// Whether a day/night disagreement means anything on this camera. A
+		// filter told not to follow day/night is SUPPOSED to differ from it,
+		// so the clock behind the conflict finding must not run — see the
+		// tracker's own note. Absent reads as following, which is the default.
+		ircutTrackNow = ircutTrack.push(s, performance.now() / 1000,
+			!nmCfg || IC.follows(nmCfg));
 		paintIrcut();
 	}
 

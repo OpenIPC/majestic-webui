@@ -50,6 +50,20 @@
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and nothing on the way in retypes it.
 	const on = (v) => v === true || v === 'true' || v === 1 || v === '1';
+	// The mirror, and it is not !on(): these keys default ON, so ABSENT has to
+	// stay distinct from off. A key this page was never given is one it knows
+	// nothing about, and reading that as "switched off" would stand a finding
+	// down on every camera whose daemon predates the switch.
+	const off = (v) => v === false || v === 'false' || v === 0 || v === '0';
+
+	// Does day/night move the IR-cut filter at all? Off leaves it where its
+	// owner put it while the pad stays claimed and the manual switch still
+	// moves it — distinct from parked, which gives the pad up altogether.
+	// Asked in three places (this file's conflict rule and both pages'
+	// trackers), so it is written once.
+	function follows(nm) {
+		return !off((nm || {}).irCutAuto);
+	}
 
 	// Agreement, and the direction is measured rather than assumed: with the
 	// filter in the day position majestic reports ircut_enabled 0 and the
@@ -177,7 +191,7 @@
 		// that is the default, and a key this page was not given is one it
 		// knows nothing about. Distinct from parked — the filter is still the
 		// daemon's to drive, and a hand on the IR-cut switch still moves it.
-		const ircutFollows = nm.irCutAuto !== false;
+		const ircutFollows = follows(nm);
 
 		// The one gate the picture gets, and it is the only portable one there
 		// is. An open filter at NIGHT is correct, so the picture may only speak
@@ -205,7 +219,7 @@
 		// about a filter that does not move stands down, and one observation
 		// says what is going on and where the switch is. Explicit === false:
 		// an older daemon has no such key, and absent must not read as off.
-		const ircutParked = nm.irCutEnabled === false;
+		const ircutParked = off(nm.irCutEnabled);
 		if (ircutParked) {
 			if (driveable) {
 				out.push({
@@ -576,7 +590,15 @@
 				openRun = (l === 'open') ? openRun + 1 : 0;
 				return openRun;
 			},
-			push: function (sample, nowS) {
+			// `watch` is whether a disagreement means anything right now — false
+			// while the filter is not following day/night, where differing IS
+			// the setting working. Not merely un-reported: the clock must not
+			// RUN, or turning following back on would hand the finding an hour
+			// of disagreement that was legitimate while it accrued, and the
+			// sentence would state a duration that was never a fault.
+			// Flips are counted either way: a camera swinging between day and
+			// night is doing that whatever the filter follows.
+			push: function (sample, nowS, watch) {
 				// An unreachable camera is not a camera holding still. Returning
 				// zeroes without forgetting what came before let the next good
 				// sample bill the whole offline gap as one continuing
@@ -597,7 +619,7 @@
 				// Timed from when the disagreement STARTED, not counted in
 				// samples: the heartbeat backs off and skips ticks on a busy
 				// camera, so a sample count is not a duration.
-				if (agrees(sample)) conflictAt = null;
+				if (agrees(sample) || watch === false) conflictAt = null;
 				else if (conflictAt === null) conflictAt = nowS;
 
 				return {
@@ -1538,7 +1560,7 @@
 
 	const api = {
 		diagnose: diagnose, tracker: tracker, monitorView: monitorView,
-		wiringKey: wiringKey, settledBy: settledBy,
+		wiringKey: wiringKey, settledBy: settledBy, follows: follows,
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,

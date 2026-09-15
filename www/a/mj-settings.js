@@ -1146,15 +1146,21 @@
 		if (!night) return;
 		const active = v => v !== false && v != null;
 		const lm = active(getDotted(state.config, 'nightMode.lightMonitor'));
-		// Whether day and night move each actuator at all. Absent means they
-		// do — that is the default, and a key this page was not given is one
-		// it knows nothing about. Distinct from parked: a filter that does not
-		// follow dusk is still the daemon's to drive, and the switch below
-		// still moves it, which is the whole point of the setting.
-		const ircutFollows =
-			getDotted(state.config, 'nightMode.irCutAuto') !== false;
-		const lightFollows =
-			getDotted(state.config, 'nightMode.backlightAuto') !== false;
+		// A switch that is OFF, in any of the spellings one can arrive in.
+		// majestic writes booleans as booleans, but a hand-edited
+		// majestic.yaml can leave "false" quoted and nothing on the way in
+		// retypes it — the same reason ircut-check carries this pair. Not
+		// !truthy: these four keys default ON, so absent has to stay distinct
+		// from off, or a camera whose daemon predates a key would read as
+		// having switched it off.
+		const isOff = v => v === false || v === 'false' || v === 0 || v === '0';
+		const cfgOff = k => isOff(getDotted(state.config, 'nightMode.' + k));
+		// Whether day and night move each actuator at all. Distinct from
+		// parked: a filter that does not follow dusk is still the daemon's to
+		// drive, and the switch below still moves it, which is the whole point
+		// of the setting.
+		const ircutFollows = !cfgOff('irCutAuto');
+		const lightFollows = !cfgOff('backlightAuto');
 
 		// The monitor drives what it drives, and that is no longer always all
 		// three. Where it has everything, three dead switches say less than
@@ -1189,10 +1195,8 @@
 		// was never given is one it knows nothing about, and reading that as
 		// "switched off" would grey out the control on a camera whose filter
 		// is working perfectly.
-		const ircutParked =
-			getDotted(state.config, 'nightMode.irCutEnabled') === false;
-		const lightParked =
-			getDotted(state.config, 'nightMode.backlightEnabled') === false;
+		const ircutParked = cfgOff('irCutEnabled');
+		const lightParked = cfgOff('backlightEnabled');
 		// Reached only where something is still the operator's, so anything
 		// the monitor does drive is dead here — pressing it would move and
 		// snap back on the monitor's next tick.
@@ -1220,11 +1224,29 @@
 
 		// Where each of the three actually is, from the camera. Used again
 		// after a night toggle, for the reason below.
-		const readGauges = () =>
+		//
+		// A reading that did not arrive leaves the switch alone rather than
+		// showing it off: a failed fetch is not a fact, and an empty or
+		// unparseable body coerces to 0 — which would report a lit lamp dark
+		// on a camera that simply did not answer.
+		//
+		// And the batches are generation-stamped, because there are two of
+		// them now: the one at mount and one after every toggle. Responses can
+		// land in any order, and an older one assigning last would put the
+		// pre-toggle reading back on the switch.
+		let gen = 0;
+		const readGauges = () => {
+			const mine = ++gen;
 			[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
 				apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
-					.then(r => r.text()).then(v => { el2.checked = +v > 0; })
+					.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+					.then(v => {
+						if (mine !== gen) return;
+						const num = Number(String(v).trim());
+						if (String(v).trim() !== '' && !isNaN(num)) el2.checked = num > 0;
+					})
 					.catch(() => {}));
+		};
 		readGauges();
 
 		night.addEventListener('click', () => {
@@ -6115,7 +6137,11 @@
 			// absence (#325). One place builds the sample now, and both pages
 			// ask the same question of the same object.
 			ircutSample = s;
-			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
+			// The same question the Dashboard asks: a filter that does not
+			// follow day/night is supposed to disagree with it, so the clock
+			// behind the conflict finding must not run while it does not.
+			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000,
+				IRCUT.follows(nightCfg()));
 			paintNightInert(ircutSample.src);
 			paintFindings();
 			paintMonitor(s);
