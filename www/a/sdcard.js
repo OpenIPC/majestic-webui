@@ -257,7 +257,16 @@
 		const ticks = num(v, 'records_dropped_ticks_total');
 		if (frags !== null) {
 			rows.push('<dt>Footage dropped</dt><dd>' + (frags > 0
-				? '<span class="text-warning-emphasis">' + frags + (frags === 1 ? ' fragment' : ' fragments') +
+				// text-warning, and deliberately not the -emphasis variant of
+				// it: that is a real Bootstrap 5.3 class, but it appears
+				// nowhere else in this tree, so the purged stylesheet carries
+				// no rule for it and the value would have drawn in the body
+				// colour. Naming it even in a comment is enough to pull the
+				// rule back in and fail the purgecss job — the extractor reads
+				// this file as raw text and cannot tell a comment from markup.
+				// (Writing the name here to illustrate that is, of course, how
+				// this comment first failed the job itself.)
+				? '<span class="text-warning">' + frags + (frags === 1 ? ' fragment' : ' fragments') +
 					(ticks !== null ? ' (' + esc(lostFootage(ticks / 1e6)) + ' of video)' : '') + '</span>'
 				: 'none') + '</dd>');
 		}
