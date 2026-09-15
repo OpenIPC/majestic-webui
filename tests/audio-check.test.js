@@ -127,10 +127,15 @@ group('diagnose');
 	const noMic = ac.diagnose({ audio: { enabled: false, outputEnabled: true } });
 	check('a microphone switched off blocks the measurement',
 		noMic.blocked === true);
-	// The half that still works must not be hidden behind the half that does
-	// not, or a camera with no microphone loses a speaker test that would have
-	// told its owner something.
-	check('but the speaker can still be tested alone', noMic.speakerOnly === true);
+	// And it blocks the SPEAKER too, which is the half that looks as though it
+	// should still work. The camera brings its audio output up with its
+	// capture, so a microphone switched off leaves no speaker to play through —
+	// a test offered here is one that cannot pass, and its "only you can tell
+	// from the room" answer sends its reader to the speaker wiring.
+	check('and the speaker is not offered on its own',
+		noMic.speakerOnly === undefined);
+	check('the microphone is named as the thing to switch on',
+		/microphone/.test(noMic.why) && /speaker/.test(noMic.why));
 
 	check('with both on there is nothing in the way',
 		ac.diagnose({ audio: { enabled: true, outputEnabled: true } }) === null);
