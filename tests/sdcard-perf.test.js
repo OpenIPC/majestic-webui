@@ -47,6 +47,13 @@ function press(el, sel) {
 	(el.handlers.click || []).forEach((fn) => fn(ev));
 }
 
+// The same, for a data-act control: the delegated handler reads dataset.act,
+// so an event whose closest() answers with an empty dataset presses nothing.
+function pressAct(el, act) {
+	const ev = { target: { closest: (s) => (s === '[data-act]' ? { dataset: { act: act }, disabled: false } : null) } };
+	(el.handlers.click || []).forEach((fn) => fn(ev));
+}
+
 function card(over) {
 	return Object.assign({
 		present: true, mounted: true, health: 'ok', mountpoint: '/mnt/sd',
@@ -65,6 +72,7 @@ function card(over) {
 function beat(over, prevBytes, dt) {
 	const v = Object.assign({
 		records_state: 0,
+		records_stood_down: 0,
 		records_fragments_written_total: 1000,
 		records_bytes_written_total: 0,
 		records_fsync_us_max: 0,
@@ -103,15 +111,23 @@ function load(cardJson, sample, speedAnswer) {
 		return Promise.reject(new Error('unstubbed ' + url));
 	}
 
+	// One element per selector, not one element for the whole page. The swap
+	// dialog assigns handlers to several of its controls in turn, so a harness
+	// that answers every lookup with the same object silently lets the last
+	// assignment overwrite all the others -- and then agrees with whatever the
+	// code does.
+	const els = { '#sd': SD };
+	const pick = (sel) => els[sel] || (els[sel] = makeEl(sel));
+
 	const win = { console: console };
 	const ctx = {
 		window: win,
 		document: {
-			getElementById: () => SD, querySelector: () => SD,
+			getElementById: (id) => pick('#' + id), querySelector: pick,
 			querySelectorAll: () => [], createElement: () => makeEl('made'),
 			addEventListener() {}, body: makeEl('body'), hidden: false,
 		},
-		$: () => SD,
+		$: pick,
 		apiFetch: apiFetch,
 		// The real notice builder, so this file asserts against the markup the
 		// page actually emits rather than against a stub of its own.
@@ -122,6 +138,9 @@ function load(cardJson, sample, speedAnswer) {
 		isNaN: isNaN, parseInt: parseInt, parseFloat: parseFloat,
 		encodeURIComponent: encodeURIComponent,
 		alert() {}, confirm: () => true,
+		// The page opens its dialogs through the bootstrap shim in main.js,
+		// which is not loaded here.
+		bootstrap: { Modal: { getOrCreateInstance: () => ({ show() {}, hide() {} }) } },
 		setTimeout, clearTimeout, clearInterval, setInterval: () => 0,
 		URLSearchParams: URLSearchParams,
 	};
@@ -135,6 +154,16 @@ function load(cardJson, sample, speedAnswer) {
 	}
 	if (sample && subscriber) subscriber(sample);
 	env.press = (sel) => press(SD, sel);
+	env.pressAct = (act) => pressAct(SD, act);
+	env.ctx = ctx;
+	env.el = pick;
+	// Stand in for the engine and keep the swap running, so the page's own
+	// cancellation can be exercised against a live one.
+	env.armSwap = () => {
+		let io = null;
+		ctx.window.MajesticSdSwap = { run: (given) => { io = given; return new Promise(() => {}); } };
+		return { io: () => io };
+	};
 	env.html = () => SD.innerHTML;
 	return env;
 }
@@ -430,6 +459,69 @@ async function main() {
 		const h = await drawn(load(card({ health: 'readonly' }), beat()));
 		check('nor can a read-only one',
 			h.indexOf('disabled') >= 0, h.slice(-400));
+	}
+
+	group('a control this camera cannot honour is not offered as if it could');
+
+	{
+		// Everything the swap does is downstream of pausing the recorder, so
+		// on a majestic too old to have the endpoint the wizard fails on its
+		// first operation -- and tells the operator their camera is broken. It
+		// is not broken, it is older, and the button should say so before it
+		// is pressed rather than after.
+		//
+		// The capability is read from the gauge the same change added, not
+		// guessed from a version string.
+		const h = await drawn(load(card(), beat()));
+		check('a camera that can pause its recorder offers the swap',
+			h.indexOf('data-act="swap"') >= 0 && h.indexOf('data-act="swap" disabled') < 0,
+			h.slice(-600));
+	}
+
+	{
+		const old = beat();
+		delete old.m.v.records_stood_down;
+		const h = await drawn(load(card(), old));
+		check('a camera that cannot is offered a disabled one',
+			h.indexOf('data-act="swap" disabled') >= 0, h.slice(-600));
+		check('and told why', h.indexOf('cannot pause') >= 0, h.slice(-600));
+	}
+
+	{
+		// Before the first heartbeat nothing is known, and a disabled button
+		// drawn then is a verdict on evidence that has not arrived. It appears
+		// a moment later instead.
+		const h = await drawn(load(card(), null));
+		check('a camera that has not said yet is offered neither',
+			h.indexOf('data-act="swap"') < 0, h.slice(-600));
+	}
+
+	group('closing the dialog stops the swap it was showing');
+
+	{
+		// Escape, the backdrop and the close button all fire the dialog's
+		// `close` -- and none of them touch the footer Stop button. A swap
+		// cancelled only from that button goes on polling for minutes behind
+		// a dialog that is no longer on screen, with its status and its Stop
+		// control gone, while the page is willing to start a second one.
+		//
+		// This drives the real handler and asks the engine's own `io`, not a
+		// flag reached past it: the state lives in the module closure and a
+		// fixture that reported it would be testing itself.
+		const env = load(card(), beat());
+		await drawn(env);
+		const armed = env.armSwap();
+		env.pressAct('swap');
+		env.el('#sd-swap-go').onclick();
+		const io = armed.io();
+		check('the swap actually started', !!io, String(!!io));
+		check('and is not stopped to begin with', io.stopped() === false, String(io.stopped()));
+
+		const closers = env.el('#sd-swap').handlers.close || [];
+		check('the dialog has a close handler at all', closers.length > 0, String(closers.length));
+		closers.forEach((fn) => fn());
+		check('closing the dialog cancels the running swap',
+			io.stopped() === true, String(io.stopped()));
 	}
 
 	done();

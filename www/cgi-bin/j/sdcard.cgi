@@ -515,20 +515,63 @@ mount_after_format() {
 # worth reporting verbatim rather than flattening to "mount failed".
 first_line() { printf '%s' "$1" | sed -n '1p'; }
 
+# What a camera's card actually is, in the order it is worth trying, and the
+# same list /lib/mdev/automount.sh uses -- the WebUI mounting a card by a
+# different route than the hotplug rules do is its own hazard.
+#
+# Naming them is not tidiness. An unqualified mount is `-t auto`, which walks
+# /proc/filesystems in the order the kernel lists it, and on a camera that
+# reads squashfs, yaffs, yaffs2, vfat -- so a FAT card is offered to yaffs2
+# first. yaffs2 accepts a block device rather than refusing one, and the
+# kernel log of a camera mounted this way is a run of
+#
+#   yaffs: Attempting MTD mount of 179.1,"mmcblk0p1"
+#
+# before the card lands on vfat at all. Nothing here noticed, because it did
+# land eventually.
+MOUNT_FSTYPES="vfat exfat ext4 ext3 ext2 f2fs msdos ntfs iso9660 udf"
+
+# mount_card <device> <dir> [known-fstype]
+#
+# Sets mt_err to the refusal worth reporting, or empty on success. The first
+# refusal is the diagnosis and not the last: the list is in the order a
+# camera's card is likely to be, so vfat's "invalid argument" means a damaged
+# filesystem, where the tail of the list only ever reports the drivers this
+# kernel was not built with.
+mount_card() {
+	mt_err=""
+	mt_first=""
+	mt_o=""
+	for mt_fs in ${3:-$MOUNT_FSTYPES}; do
+		mt_o=$(mount -t "$mt_fs" "$1" "$2" 2>&1) && { mt_first=""; break; }
+		[ -n "$mt_first" ] || mt_first="$mt_o"
+	done
+	[ -n "$mt_o" ] && logln "$mt_o"
+	mountpoint -q "$2" || mt_err="${mt_first:-${mt_o:-mount failed}}"
+}
+
 do_mount() {
+	swap_guard || return
 	ensure_node
 	t=$(target); base=${t##*/}; mkdir -p "/mnt/$base"
 	logln "# mount $t /mnt/$base"
-	o=$(mount "$t" "/mnt/$base" 2>&1)
-	[ -n "$o" ] && logln "$o"
-	mountpoint -q "/mnt/$base" || err="$(first_line "${o:-mount failed}")"
+	mount_card "$t" "/mnt/$base"
+	[ -n "$mt_err" ] && err="$(first_line "$mt_err")"
+	# The card is back. Whatever this swap was owning, it is finished with.
+	if [ -z "$err" ]; then swap_release; fi
 }
 
 do_unmount() {
+	swap_guard || return
+	# Taken before the card is released rather than after: the gap between the
+	# two is precisely the window a second browser would have to slip into.
+	swap_take
 	t=$(target)
 	logln "# umount $t"
 	o=$(umount "$t" 2>&1) || err="$(first_line "${o:-unmount failed (in use?)}")"
 	[ -n "$o" ] && logln "$o"
+	# Nothing was released, so nothing is owed an owner.
+	if [ -n "$err" ]; then swap_release; fi
 }
 
 do_fsck() {
@@ -552,9 +595,12 @@ do_fsck() {
 	logln "$o"
 	if [ -n "$was" ]; then
 		logln "# mount $t $was"
-		m=$(mount "$t" "$was" 2>&1)
-		[ -n "$m" ] && logln "$m"
-		mountpoint -q "$was" || { err="checked, but the card would not mount again"; return; }
+		# The type it was mounted as is already known here, so say it. An
+		# unqualified mount is `-t auto`, which walks /proc/filesystems -- and
+		# on a camera that reads squashfs, yaffs, yaffs2, vfat, a FAT card is
+		# offered to yaffs2 before vfat.
+		mount_card "$t" "$was" "$fs"
+		[ -n "$mt_err" ] && { err="checked, but the card would not mount again"; return; }
 	fi
 	[ "$rc" -le 1 ] || err="fsck reported errors"
 }
@@ -588,6 +634,76 @@ SPEED_LOCK=/tmp/webui/sdspeed.lock
 # Longer than any measurement can legitimately take: the budget is 20 s, plus
 # the read-back and one chunk's grace.
 SPEED_LOCK_STALE=120
+
+SWAP_LOCK=/tmp/webui/sdswap.lock
+# A swap spans many requests with a person in the middle of it, so unlike the
+# speed-test lock this one cannot be bounded by how long one request may take.
+# It is refreshed by the status poll the wizard is already making once a second,
+# so a browser that dies stops refreshing and the lock is reclaimable a minute
+# and a half later -- rather than leaving the card unmounted and unmountable for
+# as long as the whole flow is allowed to take.
+SWAP_LOCK_STALE=90
+
+# Who holds the swap, if anyone still does. Prints the token; prints nothing if
+# the lock is free or has gone stale.
+swap_holder() {
+	sw_at=$(cat "$SWAP_LOCK/at" 2>/dev/null)
+	case "$sw_at" in ''|*[!0-9]*) sw_at=0;; esac
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	[ "$sw_at" -gt 0 ] && [ "$sw_now" -gt 0 ] &&
+		[ $((sw_now - sw_at)) -lt "$SWAP_LOCK_STALE" ] || return 0
+	cat "$SWAP_LOCK/who" 2>/dev/null
+}
+
+# One swap at a time, camera-wide and with an owner.
+#
+# Two browsers can each be sure they are the only one, and the page's own check
+# of the stand-down gauge narrows that to a heartbeat's width rather than
+# closing it. What is left is the arrangement that costs a filesystem: the
+# second browser to reach the unmount finds the card already gone, calls that a
+# failure, mounts it back and resumes -- while the first is still displaying
+# SAFE TO REMOVE over a card the camera has started writing to.
+#
+# mkdir is the atomic part. Anything that changes what is mounted asks this
+# first, including the manual Mount and Unmount buttons: an operator pressing
+# those during somebody else's swap is the same hazard as a second wizard.
+swap_guard() {
+	mkdir -p /tmp/webui 2>/dev/null
+	sw_who=$(swap_holder)
+	[ -n "$sw_who" ] || return 0
+	[ "$sw_who" = "$POST_swap" ] && return 0
+	err="a card change is in progress on this camera; finish or stop that one first"
+	return 1
+}
+
+# Take or refresh the lock for this swap. Called by the unmount, which is the
+# step that makes the card removable and so the step worth owning.
+swap_take() {
+	[ -n "$POST_swap" ] || return 0
+	mkdir -p /tmp/webui 2>/dev/null
+	mkdir "$SWAP_LOCK" 2>/dev/null
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	printf '%s' "$POST_swap" > "$SWAP_LOCK/who" 2>/dev/null
+	printf '%s' "$sw_now" > "$SWAP_LOCK/at" 2>/dev/null
+}
+
+# Give it up. Only the holder may, so a request arriving late from an abandoned
+# run cannot unlock somebody else's swap. rm -r, not rmdir: the lock directory
+# holds its own bookkeeping, and rmdir fails silently on a non-empty directory
+# -- which is how the speed-test lock leaked one per run until it was noticed on
+# a camera rather than in a test.
+swap_release() {
+	sw_who=$(swap_holder)
+	[ -z "$sw_who" ] || [ "$sw_who" = "$POST_swap" ] || return 0
+	rm -rf "$SWAP_LOCK" 2>/dev/null
+}
+
+do_swaprelease() {
+	[ -n "$POST_swap" ] || { err="no swap to release"; return; }
+	swap_release
+}
 
 do_speedtest() {
 	t=$(target)
@@ -705,6 +821,82 @@ do_speedtest() {
 		"$wrote" "$wms" "$((worst * 10))" "$rms")
 }
 
+# Make the controller look for a card again.
+#
+# A slot whose card-detect line is not wired raises no event when a card is
+# pushed in, so the kernel never learns there is one and nothing here can see
+# it. There is no rescan knob for MMC in sysfs on these kernels; unbinding the
+# platform driver and binding it again re-probes the controller, which is the
+# only thing left that finds a card inserted after boot.
+#
+# The controller and its driver are derived rather than named, because the
+# driver differs by family -- himci on some HiSilicon parts, sdhci-hisi on
+# others -- and the device id has the peripheral's base address in it. Walking
+# up from the mmc host to the first node with a driver gets there on all of
+# them, and works with an empty slot, which is exactly when this is needed.
+#
+# Refused while anything is mounted: re-probing pulls the controller out from
+# under a live filesystem, and a card that is already visible is not the
+# problem this solves.
+do_reprobe() {
+	swap_guard || return
+	rp_mounted() { awk '$1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts; }
+
+	[ -z "$(rp_mounted)" ] ||
+		{ err="a card is already mounted; nothing needs re-detecting"; return; }
+
+	rp_dev=$(readlink -f /sys/class/mmc_host/mmc0/device 2>/dev/null)
+	[ -n "$rp_dev" ] || { err="this camera has no SD host controller to re-detect with"; return; }
+	while [ -n "$rp_dev" ] && [ "$rp_dev" != / ] && [ ! -e "$rp_dev/driver" ]; do
+		rp_dev=$(dirname "$rp_dev")
+	done
+	rp_drv=$(readlink -f "$rp_dev/driver" 2>/dev/null)
+	[ -n "$rp_drv" ] && [ -w "$rp_drv/unbind" ] && [ -w "$rp_drv/bind" ] ||
+		{ err="the SD host driver here cannot be asked to look again"; return; }
+
+	rp_id=$(basename "$rp_dev")
+
+	# Asked again, immediately before the unbind rather than only at the top.
+	# Finding the controller walks sysfs and the hotplug helper mounts a card
+	# asynchronously, so a card pushed in during those few milliseconds can be
+	# mounted by the time we get here -- and detaching the host under a live
+	# filesystem is how a card gets corrupted by the tool that was meant to
+	# find it.
+	[ -z "$(rp_mounted)" ] ||
+		{ err="a card appeared while looking; nothing needs re-detecting"; return; }
+
+	logln "# re-probe $rp_id via $(basename "$rp_drv")"
+	if ! printf '%s' "$rp_id" > "$rp_drv/unbind" 2>/dev/null; then
+		# Nothing was detached, so there is nothing to put back.
+		err="the SD host controller would not let go to be re-probed"
+		return
+	fi
+
+	# Past this point the controller is DETACHED, and every exit has to put it
+	# back. One bind attempt whose result nobody checked would leave a camera
+	# with no SD slot at all until it was rebooted -- worse than the missing
+	# card this is trying to find, and in the same way: silently.
+	rp_i=0
+	while [ "$rp_i" -lt 5 ]; do
+		printf '%s' "$rp_id" > "$rp_drv/bind" 2>/dev/null
+		# The write can report success and the probe still fail, so the driver
+		# link coming back is what is actually checked.
+		[ -e "$rp_dev/driver" ] && break
+		sleep 1
+		rp_i=$((rp_i + 1))
+	done
+	if [ ! -e "$rp_dev/driver" ]; then
+		err="the SD host controller did not come back after being re-probed; rebooting the camera will restore it"
+		logln "# WARNING: $rp_id is left unbound"
+		return
+	fi
+
+	# The kernel enumerates a card asynchronously after the bind, and the
+	# hotplug rules mount it. Give that a moment so the caller's next look is
+	# of a settled slot rather than of the gap.
+	sleep 3
+}
+
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	json_hdr
 	L=""; err=""; EXTRA=""
@@ -714,6 +906,8 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		unmount) do_unmount;;
 		fsck) do_fsck;;
 		speedtest) do_speedtest;;
+		reprobe) do_reprobe;;
+		swaprelease) do_swaprelease;;
 		*) err="unknown op";;
 	esac
 	if [ -z "$err" ]; then
@@ -722,6 +916,15 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		printf '{"ok":false,"error":"%s","log":"%s"}' "$(json_str "$err")" "$(json_log "$L")"
 	fi
 	exit 0
+fi
+
+# The wizard's own once-a-second status poll is what keeps its lock alive. No
+# extra request for it, and a browser that stops polling -- closed, crashed,
+# carried out of range -- stops holding the slot within SWAP_LOCK_STALE.
+if [ -n "$GET_swap" ] && [ "$(swap_holder)" = "$GET_swap" ]; then
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	printf '%s' "$sw_now" > "$SWAP_LOCK/at" 2>/dev/null
 fi
 
 json_hdr
