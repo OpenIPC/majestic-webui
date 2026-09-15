@@ -1,24 +1,35 @@
-// Hunting for a pin by driving it and watching for something to change.
+// Finding out what a pin is wired to, by driving it and watching.
 //
-// This lived on the Day / Night page, because what it was built to find is the
-// IR-cut filter and it reads its answer off the picture. But what it DOES is
-// drive arbitrary pads across the whole chip, and everything that makes it
-// safe to do that -- the list of pads that must not be driven, the range, the
-// record that survives the reboot a pad caused, the chip saying which pads are
-// already carrying something -- is about GPIO in general and has nothing to do
-// with day or night. Somebody hunting a WiFi enable reached for it too.
+// TWO HUNTS, ONE DOOR, and the difference between them is the DETECTOR.
 //
-// So it lives with the pins now, and the filter is the thing it watches for
-// rather than its identity. Day / Night keeps what is genuinely its own: which
-// pad each coil is on, and testing the filter once they are set.
+// The older one drives pins in PAIRS and reads its answer off the picture,
+// because that is what an IR-cut filter is: two pins across a bridge, and the
+// one thing on these pins the camera's own lens can see. It lived on the Day /
+// Night page for that reason. But it finds a filter and it can never find
+// anything else, and the person who prompted this work was soldering a
+// wireless module to a converted camera -- he wanted the pin that switches it
+// on, which changes nothing in frame.
 //
-// The pure half -- which pairs to try, in what order, and what to make of an
-// interrupted run -- stays in ircut-scan.js and is tested without a browser.
-// This file is the part you can see.
+// So there is a second hunt, and it asks a different question: not "did the
+// picture change" but "did anything plug itself into this camera". A module
+// coming up is not subtle -- an interface appears, a device enumerates, a card
+// announces itself -- and the camera can see all of it without anyone
+// watching. Hold a pin, look again, and the difference names what the pin
+// does.
+//
+// That is why the whole thing lives with the pins now rather than with day and
+// night: the filter is one of the things it can find, not its identity. Day /
+// Night keeps what is genuinely its own -- which pin each coil is on, and
+// testing the filter once they are set.
+//
+// The pure halves -- which pins to try, in what order, and what to make of an
+// interrupted run -- stay in ircut-scan.js and pin-sweep.js, where they are
+// tested without a browser. This file is the part you can see.
 (function () {
 	'use strict';
 
 	const SCAN = () => window.MajesticIrcutScan;
+	const SWEEP = () => window.MajesticPinSweep;
 
 	function el(tag, cls, text) {
 		const e = document.createElement(tag);
@@ -89,8 +100,8 @@
 		}
 
 		host.innerHTML =
-			'<div class="mj-live-grp-head"><span class="mj-cap">Find the pins</span>' +
-			'<span class="mj-live-rule"></span></div>' +
+			'<div class="mj-live-grp-head"><span class="mj-cap">Find the day/night ' +
+			'filter</span><span class="mj-live-rule"></span></div>' +
 			'<div class="alert ' + cls + ' py-2 px-3 mb-2 small">' + body + '</div>' +
 			'<div class="d-flex gap-2 align-items-center">' +
 			acts.map((a) => '<button type="button" class="btn btn-' + a[1] +
@@ -134,11 +145,15 @@
 	// it was measured against so it invalidates itself rather than being
 	// replayed against a different board -- the idiom every other store in
 	// this directory uses.
+	// One store per hunt. They cover different ground -- pairs on one side,
+	// single pads at a level on the other -- so a key shared between them
+	// would have each skipping what the other had tried.
 	const SCAN_KEY = 'mj-ircut-scan';
+	const SWEEP_KEY = 'mj-pin-sweep';
 
-	function scanProgress() {
+	function progressIn(key) {
 		try {
-			const v = JSON.parse(localStorage.getItem(SCAN_KEY) || 'null');
+			const v = JSON.parse(localStorage.getItem(key) || 'null');
 			if (!v || typeof v.sig !== 'string' || !Array.isArray(v.done)) return null;
 			return v;
 		} catch (e) {
@@ -146,14 +161,19 @@
 		}
 	}
 
-	function scanRemember(v) {
+	function rememberIn(key, v) {
 		try {
-			if (v === null) localStorage.removeItem(SCAN_KEY);
-			else localStorage.setItem(SCAN_KEY, JSON.stringify(v));
+			if (v === null) localStorage.removeItem(key);
+			else localStorage.setItem(key, JSON.stringify(v));
 		} catch (e) {
-			/* Not remembered is a worse scan, not a broken one. */
+			/* Not remembered is a worse hunt, not a broken one. */
 		}
 	}
+
+	const scanProgress = () => progressIn(SCAN_KEY);
+	const scanRemember = (v) => rememberIn(SCAN_KEY, v);
+	const sweepProgress = () => progressIn(SWEEP_KEY);
+	const sweepRemember = (v) => rememberIn(SWEEP_KEY, v);
 
 	// Ask the camera to leave a pad alone, or take that back. The list is the
 	// camera's because it has to outlive this page and the reboot that made it.
@@ -168,7 +188,7 @@
 	// Counted from the same facts the sweep is built from rather than
 	// described in the abstract, so the number cannot drift away from what
 	// actually happens.
-	function skipped(info, range, full) {
+	function skipped(info, range) {
 		const owned = {}, avoided = {}, down = {};
 		(info.assigned || []).forEach((a) => {
 			if (a.role !== 'irCutPin1' && a.role !== 'irCutPin2') owned[a.pin] = 'the camera needs it';
@@ -202,9 +222,10 @@
 		if (nAsked) bits.push(nAsked + ' you excluded');
 		if (nDown) bits.push(nDown + ' that stopped the camera');
 
-		let words = '<b>' + full.length + ' pairs</b> across ' + pads + ' pads. ';
+		let words = '';
 		words += bits.length
-			? '<b>' + (nOwned + nAsked + nDown) + ' pads are being left alone</b> &mdash; ' +
+			? '<b>' + (nOwned + nAsked + nDown) + ' of ' + pads +
+				' pins are being left alone</b> &mdash; ' +
 				esc(bits.join(', ')) + '.'
 			: 'Nothing is being left alone.';
 		if (range) {
@@ -250,7 +271,6 @@
 		// lose the first.
 		const range = state.range || null;
 		const list = S.pairs(info, { part: part, only: range });
-		const full = range ? S.pairs(info, { part: part }) : list;
 		let stop = false;
 
 		// Where this browser got to, if it was here before and the chip has
@@ -270,26 +290,26 @@
 		// — the same head the deck gives Wiring and Connected to. A lead
 		// paragraph at full body size was the only 1rem text on the page.
 		host.innerHTML =
-			'<div class="mj-live-grp-head"><span class="mj-cap">Find the pins</span>' +
-			'<span class="mj-live-rule"></span>' +
+			'<div class="mj-live-grp-head"><span class="mj-cap">Find the day/night ' +
+			'filter</span><span class="mj-live-rule"></span>' +
 			'<span class="mj-live-note" id="mj-scan-n"></span></div>' +
-			'<p class="small mb-2">Each pad is driven against another while the ' +
-			'picture is watched for the filter to move. An IR-cut filter is driven ' +
-			'across two pads, so pairs are what get tried; the pairs other boards ' +
-			'use go first, so this usually ends in seconds.</p>' +
+			'<p class="small mb-2">Each pin is driven against another while the ' +
+			'picture is watched for the filter to move. A filter is driven across ' +
+			'two pins, so pairs are what get tried; the pairs other boards use go ' +
+			'first, so this usually ends in seconds.</p>' +
 			'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
-			'<b>This drives pads whose job is unknown.</b> One of them may reset the ' +
+			'<b>This drives pins whose job is unknown.</b> One of them may reset the ' +
 			'network, cut power to the sensor, or stop the camera answering. That risk ' +
-			'cannot be removed &mdash; only made survivable: each pad is written to flash ' +
+			'cannot be removed &mdash; only made survivable: each pin is written to flash ' +
 			'before it is driven, so a camera that has to be restarted comes back knowing ' +
-			'which pad did it.</div>' +
-			'<p class="x-small text-secondary mb-2">Pads already spoken for are skipped. ' +
+			'which pin did it.</div>' +
+			'<p class="x-small text-secondary mb-2">Pins already spoken for are skipped. ' +
 			// Said only where it is true. The table is per board, so this is an
 			// order and not a promise — the pads are still driven if nothing
 			// before them moved the filter, which is why the warning above
 			// keeps its wording either way.
 			(part.known
-				? 'Pads that other boards with this SoC use for a reset, a USB enable ' +
+				? 'Pins that other boards with this chip use for a reset, a USB enable ' +
 					'or an illuminator are tried last, and the pairs recorded for it first. '
 				: '') +
 			'This reads the picture, so it needs daylight &mdash; at night nothing will ' +
@@ -306,7 +326,7 @@
 		// What is being left alone, counted and named. Somebody is about to
 		// press a button that can take the camera away; the honest thing is to
 		// say what it will touch before they do, rather than after.
-		const left = skipped(info, range, full);
+		const left = skipped(info, range);
 		const sum = el('p', 'x-small text-secondary mb-2');
 		sum.innerHTML = left.words;
 		if (left.detail) {
@@ -431,7 +451,7 @@
 				const found = res.pins;
 				if (!found) {
 					host.innerHTML = '<div class="mj-live-grp-head">' +
-						'<span class="mj-cap">Find the pins</span>' +
+						'<span class="mj-cap">Find the day/night filter</span>' +
 						'<span class="mj-live-rule"></span></div>' +
 						'<div class="alert alert-secondary py-2 px-3 mb-0 small">' +
 						'<b>Nothing moved the picture.</b> Either the filter is on a pair this ' +
@@ -473,7 +493,7 @@
 							? 'It springs open when the pins are released, so they have to stay driven.'
 							: 'It holds its position on its own.';
 				host.innerHTML = '<div class="mj-live-grp-head">' +
-					'<span class="mj-cap">Find the pins</span>' +
+					'<span class="mj-cap">Find the day/night filter</span>' +
 					'<span class="mj-live-rule"></span></div>' +
 					'<div class="alert ' + (found.settled ? 'alert-success' : 'alert-warning') +
 					' py-2 px-3 mb-2 small"><b>' +
@@ -515,7 +535,7 @@
 			}).catch((e) => {
 				pins.sweep(null, null);
 				host.innerHTML = '<div class="mj-live-grp-head">' +
-					'<span class="mj-cap">Find the pins</span>' +
+					'<span class="mj-cap">Find the day/night filter</span>' +
 					'<span class="mj-live-rule"></span></div>' +
 					'<div class="alert alert-danger py-2 px-3 mb-0 small">' +
 					'The scan could not finish: ' + esc(e && e.message ? e.message : String(e)) +
@@ -535,20 +555,309 @@
 		host.className = 'mj-ircut-scan mj-pins-hunt';
 
 		const why = cannotHunt(info);
+		const sp = sweepProgress();
+		const carry = sp && sp.sig === SCAN().stamp(info) && sp.done.length
+			? sp.done.length : 0;
+
 		host.innerHTML =
 			'<div class="mj-live-grp-head"><span class="mj-cap">Find a pin</span>' +
 			'<span class="mj-live-rule"></span></div>' +
-			'<p class="small mb-2">Do not know which pad something is on? The ' +
-			'camera can drive pads in pairs and watch the picture for the ' +
-			'IR-cut filter to move. It is the way to find a filter nobody has ' +
-			'written down &mdash; and it drives pads whose job it does not ' +
-			'know, so it asks before it starts.</p>' +
-			(why
-				? '<p class="x-small text-secondary mb-0">' + esc(why) + '</p>'
-				: '<button type="button" class="btn btn-primary btn-sm" ' +
-					'id="mj-hunt-go">Find the IR-cut filter</button>');
+			'<p class="small mb-3">Something is soldered to a pin and you do not ' +
+			'know which one. The camera can work it out on its own: it drives ' +
+			'pins, one at a time, and watches for anything to change. You do not ' +
+			'have to sit and watch \u2014 it does the watching.</p>' +
+			(why ? '<p class="x-small text-secondary mb-0">' + esc(why) + '</p>' : '') +
+			(why ? '' :
+				'<div class="mj-hunt-offers">' +
+				'<div class="mj-hunt-offer">' +
+				'<button type="button" class="btn btn-primary btn-sm" id="mj-hunt-sweep">' +
+				(carry ? 'Carry on finding it' : 'What is my pin wired to?') + '</button>' +
+				'<p class="x-small text-secondary mb-0 mt-1">For anything that comes ' +
+				'alive when it gets a signal \u2014 a wireless card, a card slot, a ' +
+				'second network port, a relay board. The camera holds each pin in ' +
+				'turn and tells you the moment something appears, or disappears.' +
+				(carry ? ' <b>' + carry + ' pins already tried.</b>' : '') +
+				'</p></div>' +
+				'<div class="mj-hunt-offer">' +
+				'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+				'id="mj-hunt-go">Which pins move the day/night filter?</button>' +
+				'<p class="x-small text-secondary mb-0 mt-1">The filter is the one ' +
+				'thing on these pins the camera can see through its own lens, so ' +
+				'this one works differently: it drives pins two at a time and ' +
+				'watches the picture. Needs daylight.</p></div>' +
+				'</div>');
+
 		const go = host.querySelector('#mj-hunt-go');
 		if (go) go.addEventListener('click', () => openScan(state.info || info));
+		const sw = host.querySelector('#mj-hunt-sweep');
+		if (sw) sw.addEventListener('click', () => openSweep(state.info || info));
+	}
+
+	// ── the general hunt: hold one pin, see what turns up ────────────────────
+	//
+	// This is the half that answers "how am I supposed to find a GPIO?". The
+	// filter sweep next door reads its answer off the picture, which finds a
+	// filter and can never find anything else: the pin that switches on a
+	// wireless module changes nothing in frame.
+	//
+	// So the detector is the camera's own account of what is attached to it.
+	// It lists that, holds one pin at a level, lists again, and the difference
+	// names what the pin does. Nobody watches anything, which is the only way
+	// a hunt over two hundred pins ever gets finished.
+
+	function sweepSkipped(info, range, all) {
+		const SW = SWEEP();
+		const shown = SW.pads(info, { only: range });
+		let pads = 0;
+		(info.banks || []).forEach((b) => { pads += b.n; });
+		let words = '<b>' + shown.length + ' pins</b> out of ' + pads +
+			' will be tried, at two levels each. ';
+		const left = pads - all.length;
+		words += left
+			? '<b>' + left + ' are being left alone</b> \u2014 they already have a ' +
+				'job, or you told the camera to stay off them.'
+			: 'Nothing is being left alone.';
+		if (range) {
+			words += ' Limited to pins ' +
+				esc(range.from === undefined ? 'the start' : String(range.from)) + '\u2013' +
+				esc(range.to === undefined ? 'the end' : String(range.to)) + '.';
+		}
+		if (!info.padNow) {
+			words += ' This camera cannot say what its pins are carrying, so only ' +
+				'pins it has been told about are skipped.';
+		}
+		return words;
+	}
+
+	function openSweep(info) {
+		const SW = SWEEP(), S = SCAN();
+		const host = hostOf();
+		if (!SW || !S || !host) return;
+
+		const range = state.range || null;
+		const all = SW.pads(info);
+		const list = SW.steps(SW.pads(info, { only: range }));
+		const sig = S.stamp(info);
+		let prog = sweepProgress();
+		if (prog && prog.sig !== sig) { prog = null; sweepRemember(null); }
+		const todo = prog ? SW.remaining(list, prog.done) : list;
+		let stop = false;
+
+		host.hidden = false;
+		host.className = 'mj-ircut-scan mj-pins-hunt';
+		host.innerHTML =
+			'<div class="mj-live-grp-head"><span class="mj-cap">Find what a pin ' +
+			'is wired to</span><span class="mj-live-rule"></span>' +
+			'<span class="mj-live-note">' +
+			(todo.length === list.length
+				? list.length + ' to try'
+				: todo.length + ' of ' + list.length + ' left') +
+			'</span></div>' +
+			'<p class="small mb-2">The camera writes down everything plugged into ' +
+			'it, then holds one pin at a time and looks again. If something came ' +
+			'online \u2014 or went away \u2014 that pin is the one, and the camera ' +
+			'says what it was. It stops as soon as it finds something.</p>' +
+			'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
+			'<b>This drives pins whose job is unknown.</b> One of them may reset ' +
+			'the network, cut power to the sensor, or stop the camera answering. ' +
+			'That risk cannot be removed \u2014 only made survivable: each pin is ' +
+			'written to flash before it is driven, so a camera that has to be ' +
+			'restarted comes back knowing which pin did it, and will not try it ' +
+			'again.</div>' +
+			'<p class="x-small text-secondary mb-2" id="mj-sweep-left"></p>' +
+			'<p class="x-small text-secondary mb-2">Only try pins ' +
+			'<input type="number" class="mj-live-num" id="mj-sweep-from" min="0" ' +
+			'step="1" style="width:4.5rem"> to <input type="number" ' +
+			'class="mj-live-num" id="mj-sweep-to" min="0" step="1" ' +
+			'style="width:4.5rem"> <span class="text-secondary">\u2014 leave both ' +
+			'empty for the whole chip</span></p>' +
+			'<div class="d-flex gap-2 align-items-center">' +
+			'<button type="button" class="btn btn-primary btn-sm" id="mj-sweep-go">Start</button>' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-sweep-no">Cancel</button>' +
+			'</div>';
+		host.querySelector('#mj-sweep-left').innerHTML =
+			sweepSkipped(info, range, all);
+
+		const from = host.querySelector('#mj-sweep-from');
+		const to = host.querySelector('#mj-sweep-to');
+		if (range && range.from !== undefined) from.value = range.from;
+		if (range && range.to !== undefined) to.value = range.to;
+		const reRange = () => {
+			const f = from.value === '' ? undefined : Number(from.value);
+			const t = to.value === '' ? undefined : Number(to.value);
+			state.range = (f === undefined && t === undefined) ? null : { from: f, to: t };
+			openSweep(info);
+		};
+		from.addEventListener('change', reRange);
+		to.addEventListener('change', reRange);
+
+		host.querySelector('#mj-sweep-no').addEventListener('click', () => {
+			stop = true;
+			idleCard(state.info || info);
+		});
+		host.querySelector('#mj-sweep-go').addEventListener('click', () => {
+			host.innerHTML =
+				'<div class="mj-live-grp-head"><span class="mj-cap">Looking</span>' +
+				'<span class="mj-live-rule"></span>' +
+				'<span class="mj-live-note" id="mj-sweep-s"></span></div>' +
+				'<p class="small mb-2" id="mj-sweep-t">Starting&hellip;</p>' +
+				'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+				'id="mj-sweep-stop">Stop</button>';
+			const t = host.querySelector('#mj-sweep-t');
+			const s = host.querySelector('#mj-sweep-s');
+			host.querySelector('#mj-sweep-stop')
+				.addEventListener('click', () => { stop = true; });
+
+			SW.run({
+				// POST, not GET: holding a pin is a mutation, and a GET is what
+				// a browser issues by itself -- a prefetch, a restored tab, a
+				// link from anywhere -- carrying the session with it.
+				//
+				// The pin in flight is written BEFORE the request goes out and
+				// cleared when it comes back. That one field is what lets a
+				// later visit say which pin cut the connection: the camera
+				// journals a pin that took it DOWN, but a pin that only took
+				// the network away leaves no trace on it at all, because from
+				// where it stands nothing went wrong.
+				hold: (pin, level) => {
+					const pr = sweepProgress() || { sig: sig, done: [] };
+					pr.inflight = SW.key(pin, level);
+					sweepRemember(pr);
+					return FETCH(API + '?hold=' + pin + '&level=' + level,
+						{ method: 'POST', credentials: 'same-origin' })
+						.then((r) => r.ok ? r.json()
+							: Promise.reject(new Error('HTTP ' + r.status)))
+						.then((j) => {
+							const p2 = sweepProgress();
+							if (p2) { p2.inflight = null; sweepRemember(p2); }
+							return j;
+						});
+				},
+				stopped: () => stop,
+				onStep: (st) => {
+					t.textContent = 'Holding pin ' + st.pin + ' ' + st.level;
+					s.textContent = (st.index + 1) + ' of ' + st.total;
+					pins.sweep(st.pin, null);
+					if (st.index > 0) {
+						const pr = sweepProgress() || { sig: sig, done: [] };
+						const k = SW.key(todo[st.index - 1][0], todo[st.index - 1][1]);
+						if (pr.done.indexOf(k) < 0) pr.done.push(k);
+						sweepRemember(pr);
+					}
+				},
+			}, todo).then((res) => {
+				pins.sweep(null, null);
+				sweepFound(info, res, todo.length);
+			}).catch((e) => {
+				pins.sweep(null, null);
+				host.innerHTML = '<div class="mj-live-grp-head">' +
+					'<span class="mj-cap">Find a pin</span>' +
+					'<span class="mj-live-rule"></span></div>' +
+					'<div class="alert alert-danger py-2 px-3 mb-0 small">' +
+					'The hunt could not finish: ' +
+					esc(e && e.message ? e.message : String(e)) + '</div>';
+			});
+		});
+	}
+
+	// What the hunt turned up, and the one thing to do about it.
+	function sweepFound(info, res, tried) {
+		const SW = SWEEP();
+		const host = hostOf();
+		const head = '<div class="mj-live-grp-head"><span class="mj-cap">' +
+			'Find a pin</span><span class="mj-live-rule"></span></div>';
+
+		if (res.lost) {
+			// The reported case, and the one nobody could act on before: a pin
+			// can take ethernet down without troubling the camera at all. The
+			// request simply never comes back, and only the browser saw which
+			// pin was in flight.
+			const p = res.lost.pin;
+			host.innerHTML = head +
+				'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
+				'<b>The camera stopped answering while holding pin ' + esc(String(p)) +
+				' ' + esc(res.lost.level) + '.</b> If it is back now, the pin did ' +
+				'not crash it \u2014 it cut this connection, which usually means ' +
+				'the network is on that pin. That is worth knowing, and it is ' +
+				'worth never touching again.</div>' +
+				'<div class="d-flex gap-2 align-items-center">' +
+				'<button type="button" class="btn btn-primary btn-sm" data-do="avoid">' +
+				'Never try pin ' + esc(String(p)) + ' again</button>' +
+				'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+				'data-do="go">It was fine, carry on</button></div>';
+			host.querySelectorAll('button[data-do]').forEach((b) => {
+				b.addEventListener('click', () => {
+					const pr = sweepProgress();
+					if (pr) { pr.inflight = null; sweepRemember(pr); }
+					if (b.getAttribute('data-do') !== 'avoid') {
+						openSweep(state.info || info);
+						return;
+					}
+					scanAvoid(p, true)
+						.then(() => pins.changed ? pins.changed() : null)
+						.then(() => FETCH(API, { credentials: 'same-origin' }))
+						.then((r) => r.json())
+						.then((fresh) => { state.info = fresh; openSweep(fresh); })
+						.catch(() => openSweep(state.info || info));
+				});
+			});
+			return;
+		}
+
+		if (!res.hit) {
+			// A finished hunt has nothing to carry on from.
+			if (!res.stopped) sweepRemember(null);
+			host.innerHTML = head +
+				'<div class="alert alert-secondary py-2 px-3 mb-2 small">' +
+				(res.stopped
+					? '<b>Stopped.</b> ' + res.tried.length + ' of ' + tried +
+						' done; carrying on picks up where this left off.'
+					: '<b>Nothing came or went.</b> Every pin the camera would ' +
+						'touch was held high and then low, and nothing plugged into ' +
+						'the camera changed. Either what you are looking for is on ' +
+						'one of the pins being left alone, or it does not announce ' +
+						'itself to the camera at all \u2014 a plain lamp or a relay ' +
+						'with nothing behind it never will.') +
+				(res.refused.length
+					? '<br><br>' + res.refused.length + ' were refused: ' +
+						esc(res.refused.slice(0, 3).map((r) => r.why).join('; ')) +
+						(res.refused.length > 3 ? '\u2026' : '')
+					: '') +
+				'</div>' +
+				'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+				'id="mj-sweep-again">Back</button>';
+			host.querySelector('#mj-sweep-again')
+				.addEventListener('click', () => idleCard(state.info || info));
+			return;
+		}
+
+		// Found. The sweep stops at the first difference on purpose: whatever
+		// just came online is still online when the next pin is held, so every
+		// later pin would report it again, or report it leaving.
+		const hit = res.hit;
+		sweepRemember(null);
+		host.innerHTML = head +
+			'<div class="alert alert-success py-2 px-3 mb-2 small">' +
+			'<b>' + esc(SW.sentence(hit)) + '</b>' +
+			(hit.partial
+				? ' <br><br>The camera had more plugged into it than it can list, ' +
+					'so check this one is really new before trusting it.'
+				: '') +
+			'<br><br>To have the camera do this at every start, pick pin ' +
+			esc(String(hit.pin)) + ' in the drawing above, set it to <b>' +
+			esc(hit.level === 'high' ? 'hold high' : 'hold low') + '</b> and keep it. ' +
+			'It will be set that way before anything else runs, and it survives a ' +
+			'power cut.</div>' +
+			'<div class="d-flex gap-2 align-items-center">' +
+			'<button type="button" class="btn btn-primary btn-sm" id="mj-sweep-pick">' +
+			'Show me pin ' + esc(String(hit.pin)) + '</button>' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+			'id="mj-sweep-done">Done</button></div>';
+		host.querySelector('#mj-sweep-done')
+			.addEventListener('click', () => idleCard(state.info || info));
+		host.querySelector('#mj-sweep-pick').addEventListener('click', () => {
+			if (pins.select) pins.select(hit.pin);
+		});
 	}
 
 	// A sweep drives pads, and the camera refuses to drive any pair while it

@@ -7391,6 +7391,23 @@ body > main > .container > form > .mj-foot {
 	margin-top: 1.25rem;
 }
 
+/* Two ways in, side by side on a desktop and stacked on a phone. They are not
+   variants of one button: the two hunts look for different things by different
+   means, so each carries the sentence that says which one you want. Aligning
+   the buttons on a row of their own would separate each from its own
+   explanation, which is the only part that distinguishes them. */
+.mj-pins-hunt .mj-hunt-offers {
+	display: grid;
+	gap: 1rem 1.5rem;
+	grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+	align-items: start;
+}
+
+.mj-pins-hunt .mj-hunt-offer > button {
+	white-space: normal;
+	text-align: left;
+}
+
 /* A live level rides the TRACE, which is the one element in the drawing
    carrying no state of its own: the pad's box-shadow is taken three times over
    (the lit ring, .mj-pin-taken, .mj-pin-sel) and its background twice

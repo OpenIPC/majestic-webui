@@ -1447,6 +1447,18 @@
 					},
 					assign: () => ({}),
 					setAssign: () => {},
+					// Open a pin's detail from the hunt. A find ends with "pin
+					// 47, held high" and the next thing the owner wants is that
+					// pin's own controls, which are on this page and not the
+					// hunt's to draw -- so the hunt asks and this page decides
+					// what opening means.
+					select: (pin) => {
+						sel = pin;
+						paint();
+						const b = root.querySelector('.mj-pin-sel');
+						if (b && b.scrollIntoView)
+							b.scrollIntoView({ block: 'nearest' });
+					},
 					refresh: refresh,
 					// A pad the owner ruled out, or took back. The list is the
 					// camera's, so this re-reads rather than patching a copy.

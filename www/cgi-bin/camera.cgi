@@ -184,6 +184,7 @@ fi
 <script src="/a/ircut-map.js" defer></script>
 <script src="/a/ircut-pads.js" defer></script>
 <script src="/a/ircut-scan.js" defer></script>
+<script src="/a/pin-sweep.js" defer></script>
 <script src="/a/pin-hunt.js" defer></script>
 <%
 # The pins page: the chip on the board, drawn from the pad table the camera
