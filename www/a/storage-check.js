@@ -40,14 +40,39 @@
 	// and the last green it was given stands.
 	let mnt = '';
 	let recorder = null;     // null | {absent:true} | {v:…}, as the verdict wants
+	// Where the drop counter stood when this page opened, so the banner reports
+	// footage lost while somebody has been here rather than everything since
+	// the camera booted — a total from three days ago is not news, and a banner
+	// that cannot be made to go away is one people learn to ignore.
+	let droppedAt = null;
 	let shown = '';          // what the slot is currently saying
 
 	function slot() { return document.getElementById(SLOT); }
 
+	// Seconds of footage dropped since this page loaded, from the counter of
+	// presentation time lost — microseconds, as the Recordings page reads it.
+	// The fragment count beside it is not seconds: fragment length is
+	// configurable, so counting fragments and calling them seconds is right
+	// only at the default.
+	function droppedSeconds() {
+		const v = recorder && recorder.v;
+		if (!v || typeof v.records_dropped_ticks_total !== 'number') return 0;
+		if (droppedAt === null) return 0;
+		return Math.max(0, (v.records_dropped_ticks_total - droppedAt) / 1e6);
+	}
+
 	function render() {
 		const el = slot();
 		if (!el) return;
-		const v = V.of(card, recorder, '', where);
+		// The dropped figure, which this banner has never passed. The verdict
+		// has said "cannot keep up — footage is being lost" since it was
+		// written, but only the Recordings page ever supplied the evidence for
+		// it, so on every other page a card that was mounted, writable and
+		// reporting itself healthy while silently discarding clips drew nothing
+		// at all. That is the one storage fault with no other symptom
+		// (OpenIPC/firmware#1747).
+		const lost = droppedSeconds();
+		const v = V.of(card, recorder, lost > 0 ? V.duration(lost) : '', where);
 		// The Dashboard's SD badge is the other place a dead card was being
 		// drawn green, and it is drawn from df, which cannot see any of this.
 		badge(v);
@@ -146,6 +171,9 @@
 				const v = s.m.v;
 				recorder = typeof v.records_state === 'number'
 					? { v: v } : { absent: true };
+				if (droppedAt === null &&
+					typeof v.records_dropped_ticks_total === 'number')
+					droppedAt = v.records_dropped_ticks_total;
 				render();
 			});
 

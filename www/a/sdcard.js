@@ -2,6 +2,20 @@
 (function () {
 	const SD = $('#sd');
 	let state = null, cfg = {}, timer = null;
+	// The recorder half, which the SD endpoint cannot see: a card can be mounted
+	// read-write with room on it and still be losing footage, and nothing in the
+	// filesystem says so.
+	//
+	//   { v: … }         a reading
+	//   { absent: true } majestic answered and has no such endpoint
+	//   null             not asked yet, or the ask failed
+	let recorder = null;
+	// Achieved write rate, derived from the heartbeat's own snapshot of the
+	// previous poll rather than from bookkeeping of our own — that snapshot and
+	// its `dt` are there for exactly this, and main.js explains why the window
+	// is the browser's monotonic clock and not the camera's.
+	let rateBps = null;
+	let speed = null, speedBusy = false, speedErr = '';
 
 	function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 	function humanBytes(n) {
@@ -134,6 +148,194 @@
 			+ '<div class="storage-bar mb-2">' + bar + '</div><div class="storage-legend x-small mb-2">' + leg + '</div>';
 	}
 
+	// Video rates are read in Mbit/s from about 1 Mbit/s up, which is where the
+	// switch belongs — on the figure being shown, not on the bytes behind it.
+	// Deciding at 1e6 BYTES put the changeover at 8 Mbit/s and printed an
+	// ordinary stream as "3439 kbit/s".
+	function bitrate(bps) {
+		const bits = bps * 8;
+		if (bits >= 1e6) return (bits / 1e6).toFixed(1) + ' Mbit/s';
+		return Math.round(bits / 1e3) + ' kbit/s';
+	}
+	// A latency, not a length of footage — which is why this is here and not
+	// the verdict file's duration(). A pause is worth reading to the
+	// millisecond and never rounds up to a friendly word; footage lost is the
+	// opposite, and the two must not be formatted by the same function just
+	// because both are made of seconds.
+	function pause(n) {
+		if (n >= 60) return Math.floor(n / 60) + ' min ' + Math.round(n % 60) + ' s';
+		if (n >= 10) return n.toFixed(0) + ' s';
+		if (n >= 1) return n.toFixed(2) + ' s';
+		return Math.round(n * 1000) + ' ms';
+	}
+	// Footage, in the words every other page uses for it.
+	function lostFootage(sec) {
+		const V = window.MajesticStorageVerdict;
+		return V ? V.duration(sec) : Math.round(sec) + ' s';
+	}
+	function num(v, k) { return (v && typeof v[k] === 'number') ? v[k] : null; }
+
+	// What is printed on the card, and what it is worth.
+	//
+	// The C, U and V classes are all measured the same way — one long
+	// uninterrupted sequential write — and a camera that only ever streamed to
+	// the card would be well served by them. It does not: it deletes old clips
+	// to make room while it is still writing new ones, which is small scattered
+	// I/O against the same flash. A1/A2 is the only rating that promises
+	// anything about that, and a card without one can pass every sequential
+	// test on the box and still stall long enough to lose footage.
+	//
+	// So the absence of an A rating is the line worth spelling out, and it is
+	// the one thing an owner can act on before buying the next card
+	// (OpenIPC/firmware#1747).
+	function ratingRow(d) {
+		const r = d.rating;
+		// Not every slot holds an SD card, and not every kernel fills the
+		// register in. Saying nothing is the honest answer; a dash in the row
+		// would read as "this card is rated for nothing".
+		if (!r) {
+			return '<dt>Rated</dt><dd class="text-secondary">this card does not report its speed ratings</dd>';
+		}
+		const badges = [];
+		if (r.speedClass) badges.push('Class ' + r.speedClass);
+		if (r.uhsGrade) badges.push('U' + r.uhsGrade);
+		if (r.videoClass) badges.push('V' + r.videoClass);
+		badges.push(r.appClass ? 'A' + r.appClass : 'no A1/A2 rating');
+		return '<dt>Rated</dt><dd>' + esc(badges.join(' · ')) +
+			(r.appClass ? '' : ' <span class="badge text-bg-warning">sequential only</span>') + '</dd>';
+	}
+
+	function ratingNote(d) {
+		const r = d.rating;
+		if (!r || r.appClass) return '';
+		return '<div class="x-small text-secondary mb-3">' +
+			'The Class, U and V marks on a card are all measured on one long uninterrupted write. ' +
+			'<strong>A1 and A2 are the only ones that promise anything about many small reads and writes at once</strong> — ' +
+			'which is what this camera does when it deletes old clips to make room while it is still recording. ' +
+			'A card without one can meet every number on its label and still pause long enough to lose footage.' +
+			'</div>';
+	}
+
+	// What the card is actually doing, which is the half no filesystem check
+	// can reach. Every figure is gated on having been read: a counter this
+	// majestic does not publish is left out, never drawn as a zero, because a
+	// zero here reads as "nothing has gone wrong".
+	function liveRows() {
+		if (!recorder || recorder.absent || !recorder.v) return '';
+		const v = recorder.v;
+		// A recorder that has written nothing has measured nothing, and its
+		// counters all sit at zero. Drawing them would answer "has this card
+		// kept up?" with a row of reassuring noughts on a camera that has never
+		// asked the card for anything.
+		if (num(v, 'records_fragments_written_total') === 0) return '';
+		const rows = [];
+		if (rateBps !== null) {
+			rows.push('<dt>Writing now</dt><dd>' + (rateBps > 1000
+				? esc(bitrate(rateBps))
+				: '<span class="text-secondary">nothing is being written</span>') + '</dd>');
+		}
+		const worst = num(v, 'records_fsync_us_max');
+		if (worst !== null) {
+			rows.push('<dt>Longest pause</dt><dd>' + esc(pause(worst / 1e6)) + '</dd>');
+		}
+		// Ticks are microseconds of presentation time — the same derivation the
+		// Recordings page makes. The fragment count beside it is not seconds:
+		// fragment length is configurable, so counting fragments and calling
+		// them seconds is right only at the default.
+		const frags = num(v, 'records_fragments_dropped_total');
+		const ticks = num(v, 'records_dropped_ticks_total');
+		if (frags !== null) {
+			rows.push('<dt>Footage dropped</dt><dd>' + (frags > 0
+				? '<span class="text-warning-emphasis">' + frags + (frags === 1 ? ' fragment' : ' fragments') +
+					(ticks !== null ? ' (' + esc(lostFootage(ticks / 1e6)) + ' of video)' : '') + '</span>'
+				: 'none') + '</dd>');
+		}
+		// Both error counters in one row: they are the same fault caught at
+		// different depths, and listing them apart invites reading two zeroes
+		// as twice the reassurance. records_short_writes_total is deliberately
+		// not among them — a write that took more than one call succeeded.
+		const errs = ['records_write_errors_total', 'records_sync_errors_total']
+			.map(k => num(v, k)).filter(n => n !== null);
+		if (errs.length) {
+			const total = errs.reduce((a, b) => a + b, 0);
+			rows.push('<dt>Write errors</dt><dd>' + (total > 0
+				? '<span class="text-danger">' + total + '</span>' : 'none') + '</dd>');
+		}
+		const q = num(v, 'records_queue_fragments');
+		if (q !== null) rows.push('<dt>Waiting to be written</dt><dd>' + q + '</dd>');
+		return rows.join('');
+	}
+
+	// The measured half, for a camera that is not recording yet — which is
+	// exactly the camera whose owner has come here to find out whether the card
+	// is the problem. The counters above are silent until recording has worked
+	// at least once.
+	function speedBlock(d) {
+		let out = '';
+		if (speed) {
+			const mb = speed.bytes / 1048576;
+			const w = speed.bytes / (speed.writeMs / 1000);
+			out += '<dl class="small list mb-2">'
+				+ '<dt>Sequential write</dt><dd>' + esc((w / 1048576).toFixed(1)) + ' MB/s'
+				+ ' <span class="text-secondary">(' + esc(mb.toFixed(0)) + ' MB)</span></dd>';
+			if (speed.readMs > 0) {
+				out += '<dt>Read back</dt><dd>' + esc((speed.bytes / (speed.readMs / 1000) / 1048576).toFixed(1)) + ' MB/s</dd>';
+			}
+			out += '<dt>Longest pause</dt><dd>' + esc(pause(speed.worstMs / 1000)) + '</dd></dl>';
+			// Measured against a card that had a second writer on it. Saying so
+			// is the difference between a figure and a misleading figure — a
+			// test run beside a live recorder reads slower than the card is,
+			// and somebody would otherwise replace a card that was fine.
+			if (speed.recording === true) {
+				out += '<div class="x-small text-secondary mb-2">The camera was recording to this card while it was measured, ' +
+					'so both were writing at once — the card on its own is faster than this.</div>';
+			}
+		}
+		if (speedErr) out += mjNotice('warn', esc(speedErr));
+		const dis = (!d.mounted || d.health === 'readonly' || speedBusy) ? ' disabled' : '';
+		out += '<button class="btn btn-sm btn-outline-secondary" id="sd-speed"' + dis + '>'
+			+ (speedBusy ? '<span class="spinner-border spinner-border-sm"></span> Measuring…' : 'Measure this card')
+			+ '</button>';
+		return out;
+	}
+
+	// Why there are no figures, when there are none — and the three reasons are
+	// not one sentence.
+	//
+	//   null            the heartbeat has not landed, or failed. Nothing is
+	//                   established, so nothing is said: an unknown may not be
+	//                   turned into a fact, here as anywhere else.
+	//   { absent }      majestic answered and publishes no recording counters.
+	//                   That is a fact about this build, not about this card,
+	//                   and the measurement below still works.
+	//   nothing written the counters exist and are empty because the camera has
+	//                   never asked this card for anything.
+	function liveNote() {
+		if (recorder === null) return '';
+		if (recorder.absent) {
+			return '<div class="x-small text-secondary mb-3">' +
+				'This camera does not report what its recorder is doing, so the measurement below is the only ' +
+				'thing that can speak for the card here.</div>';
+		}
+		if (num(recorder.v, 'records_fragments_written_total') !== 0) return '';
+		return '<div class="x-small text-secondary mb-3">' +
+			'Nothing has been recorded to this card since the camera started, so there is nothing measured to ' +
+			'show. The test below writes to the card itself and times it.</div>';
+	}
+
+	function perfCard(d) {
+		const live = liveRows();
+		return '<div class="col-12"><div class="card"><div class="card-body">'
+			+ '<h3 class="mb-3">Performance</h3>'
+			+ '<dl class="small list mb-2">' + ratingRow(d) + live + '</dl>'
+			+ (live ? '<div class="x-small text-secondary mb-3">Pauses, dropped footage and errors are '
+				+ 'counted since the camera last started.</div>' : '')
+			+ ratingNote(d)
+			+ liveNote()
+			+ speedBlock(d)
+			+ '</div></div></div>';
+	}
+
 	function render() {
 		const d = state;
 		const head = '<div class="d-flex align-items-center gap-3 mb-4"><h2 class="text-primary m-0">SD Card</h2>' + badge(d || {}) + '</div>';
@@ -184,7 +386,9 @@
 				: (d.mounted && d.health !== 'readonly'
 					? '<button class="btn btn-sm btn-primary mb-3" id="sd-use">Use this card for recording</button>' : ''))
 			+ '<div><a class="small" href="camera.cgi?tab=records">Recording settings →</a></div>'
-			+ '</div></div></div></div>';
+			+ '</div></div></div>'
+			+ perfCard(d)
+			+ '</div>';
 	}
 
 	function busy(btn) { if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; } }
@@ -207,6 +411,25 @@
 		SD.addEventListener('click', e => {
 			const use = e.target.closest('#sd-use'); if (!use) return;
 			busy(use); setConfig({ records: { path: state.mountpoint + '/%F', enabled: true } }).then(load);
+		});
+		SD.addEventListener('click', e => {
+			const b = e.target.closest('#sd-speed'); if (!b || speedBusy) return;
+			// Asked only while the recorder is actually writing here, because
+			// then it is a real question: the test and the recorder compete for
+			// the same card, and on a card with little headroom left the test
+			// is enough to make the recorder drop footage. Measured on a lab
+			// camera — a 32 MB run beside a live recorder took the worst flush
+			// from 2 s to 13 s and lost five fragments doing it.
+			if (rateBps !== null && rateBps > 1000 &&
+				!confirm('The camera is recording to this card now. Measuring it makes both write at once, ' +
+					'which can drop a few seconds of footage. Measure anyway?')) return;
+			speedBusy = true; speedErr = ''; speed = null; render();
+			op({ op: 'speedtest' }).then(r => {
+				speedBusy = false;
+				if (r && r.ok && r.speed) speed = r.speed;
+				else speedErr = (r && r.error) || 'The measurement did not complete.';
+				render();
+			}).catch(() => { speedBusy = false; speedErr = 'The measurement did not complete.'; render(); });
 		});
 		SD.addEventListener('change', e => {
 			const tog = e.target.closest('#sd-rec-toggle'); if (!tog) return;
@@ -233,6 +456,31 @@
 		modal.show();
 	}
 
+	// The recorder's half rides the 2 s heartbeat every page already runs, so
+	// this page adds no request for it — the same bargain storage-check.js
+	// makes, and the reason j/pulse.cgi was cut back to what /metrics cannot
+	// answer.
+	//
+	// Rendering is left to the 5 s cycle below rather than driven from here:
+	// render() rebuilds the whole page, and doing that every two seconds
+	// restarts transitions and drops anything being selected mid-read. The one
+	// exception is the first reading, which is worth showing without waiting
+	// for the next poll.
+	function onMetrics(s) {
+		if (!s || !s.ok || !s.m) { recorder = null; rateBps = null; return; }
+		const v = s.m.v;
+		const had = recorder !== null;
+		recorder = typeof v.records_state === 'number' ? { v: v } : { absent: true };
+		// Two readings and the interval between them. A counter that went
+		// backwards is majestic having restarted, not a negative rate.
+		const pv = s.prev && s.prev.v;
+		const b = v.records_bytes_written_total, pb = pv && pv.records_bytes_written_total;
+		rateBps = (typeof b === 'number' && typeof pb === 'number' && s.dt > 0 && b >= pb)
+			? (b - pb) / s.dt : null;
+		if (!had && state) render();
+	}
+
 	wire();
+	if (window.mjMetricsSubscribe) window.mjMetricsSubscribe(onMetrics);
 	load().then(() => { clearInterval(timer); timer = setInterval(() => { if (!document.hidden) load(); }, 5000); });
 })();

@@ -24,6 +24,8 @@
 #                that was free when it happened.
 #   ok           mounted read-write
 
+. "$(dirname "$0")/../p/majestic.sh"
+
 DEV=/dev/mmcblk0
 SYS=/sys/block/mmcblk0
 
@@ -167,6 +169,55 @@ json_errs() {
 	done
 }
 
+# Centisecond monotonic clock. busybox `date` here has no %N, and the `time`
+# keyword writes a format that has to be parsed back out of a temp file;
+# /proc/uptime is two decimals of a clock nothing can step, which is finer than
+# any figure this endpoint quotes.
+now_cs() {
+	set -- $(cat /proc/uptime 2>/dev/null)
+	case "$1" in *.*) printf '%s%s' "${1%.*}" "${1#*.}";; *) return 1;; esac
+}
+
+# Byte n of the 64-byte SD Status register, as a decimal number.
+ssr_byte() {
+	r_b=$(printf '%s' "$1" | cut -c$((2 * $2 + 1))-$((2 * $2 + 2)))
+	case "$r_b" in [0-9a-fA-F][0-9a-fA-F]) echo $((0x$r_b));; *) return 1;; esac
+}
+
+# What the card says it is, from the SD Status register the kernel already read
+# when it probed the slot. This is the only thing about a card's SPEED that can
+# be known without writing to it, and it is the distinction that decides
+# whether recording survives: the sequential classes (C10, U1, U3, V-) are
+# measured on one long streaming write, while A1/A2 is the only one that
+# promises anything about random I/O — which is what a filesystem does while a
+# recorder is deleting old clips underneath it. Until this, nothing the camera
+# could show its owner separated the two, so "use a faster card" was advice
+# nobody could act on (OpenIPC/firmware#1747).
+#
+# Every field is checked against the set the spec defines, and the WHOLE
+# register is dropped if any one of them falls outside it. A rating decoded
+# wrongly and printed as fact is worse than no rating at all, and a kernel that
+# filled this register in differently is exactly what an unexpected value looks
+# like. SSR is an SD-card structure, so a slot holding anything else has none.
+card_rating() {
+	[ "$(sysf type)" = "SD" ] || return 1
+	r_s=$(sysf ssr | tr -d ' \n')
+	[ ${#r_s} -eq 128 ] || return 1
+	r_sc=$(ssr_byte "$r_s" 8)  || return 1
+	r_ug=$(ssr_byte "$r_s" 14) || return 1
+	r_vc=$(ssr_byte "$r_s" 15) || return 1
+	r_ac=$(ssr_byte "$r_s" 21) || return 1
+	# UHS grade is the high nibble of its byte, app class the low nibble of its.
+	r_ug=$((r_ug / 16)); r_ac=$((r_ac % 16))
+	# Speed class is an enum, not the number printed on the card.
+	case "$r_sc" in 0) r_sc=0;; 1) r_sc=2;; 2) r_sc=4;; 3) r_sc=6;; 4) r_sc=10;; *) return 1;; esac
+	case "$r_ug" in 0|1|3) ;; *) return 1;; esac
+	case "$r_vc" in 0|6|10|30|60|90) ;; *) return 1;; esac
+	case "$r_ac" in 0|1|2) ;; *) return 1;; esac
+	printf '"rating":{"speedClass":%s,"uhsGrade":%s,"videoClass":%s,"appClass":%s},' \
+		"$r_sc" "$r_ug" "$r_vc" "$r_ac"
+}
+
 # the active target partition/device and its conventional mount point
 target() { if [ -b "${DEV}p1" ]; then printf '%sp1' "$DEV"; else printf '%s' "$DEV"; fi; }
 
@@ -223,6 +274,7 @@ get_info() {
 	fi
 	printf '{"present":true,"device":"%s","target":"%s","mountpoint":"%s","mounted":%s,"partitioned":%s,' \
 		"$DEV" "$t" "$(json_str "${mp:-/mnt/$base}")" "$mounted" "$partd"
+	printf '%s' "$(card_rating)"
 	printf '"model":"%s","cardtype":"%s","manfid":"%s","oemid":"%s","date":"%s","serial":"%s",' \
 		"$(json_str "$(sysf name)")" "$(json_str "$(sysf type)")" "$(json_str "$(sysf manfid)")" \
 		"$(json_str "$(sysf oemid)")" "$(json_str "$(sysf date)")" "$(json_str "$(sysf serial)")"
@@ -493,18 +545,120 @@ do_fsck() {
 	[ "$rc" -le 1 ] || err="fsck reported errors"
 }
 
+# Measure what the card actually does, for a camera that is not recording yet.
+#
+# The counters majestic publishes answer this for a camera that IS recording —
+# they are the achieved rate and the worst flush, measured on the real
+# workload — but they say nothing at all before recording has ever worked,
+# which is the state somebody is in when they come looking. A card that takes
+# 256 KB/s where the vendor firmware managed 5 MB/s is the report this is for,
+# and it went sixteen months without a single number attached to it because
+# nothing on the camera would produce one (OpenIPC/firmware#1747).
+#
+# Bounded by bytes AND by time, and the time budget is the one that matters:
+# 32 MB onto a healthy card is three seconds, and onto the card in that report
+# it is two minutes. A test that cannot finish on a slow card is useless
+# exactly where it is needed, so it stops at the budget and reports what it
+# managed — a short measurement of a slow card is still the number that was
+# missing.
+#
+# conv=fsync on every chunk, because the flush is where an SD card stalls. A
+# write that only reaches the page cache measures the page cache.
+SPEED_CHUNK=2097152
+SPEED_CHUNKS=16
+SPEED_BUDGET_CS=2000
+SPEED_LOCK=/tmp/webui/sdspeed.lock
+
+do_speedtest() {
+	t=$(target)
+	mp=$(awk -v d="$t" '$1==d{print $2; exit}' /proc/mounts)
+	[ -n "$mp" ] || { err="the card is not mounted, so there is nothing to measure"; return; }
+	case ",$(awk -v d="$t" '$1==d{print $4; exit}' /proc/mounts)," in
+		*,ro,*) err="the card is mounted read-only, so nothing can be written to it"; return;;
+	esac
+	# Enough room that the test cannot be what fills the card. majestic deletes
+	# the oldest clip when the card reaches records.maxUsage, and a test that
+	# triggers that has destroyed footage to measure a disk.
+	avail=$(df -k "$mp" 2>/dev/null | awk 'NR==2{print $4}')
+	case "$avail" in ''|*[!0-9]*) avail=0;; esac
+	[ "$avail" -ge 65536 ] ||
+		{ err="under 64 MB is free on the card — too little to measure a write speed without deleting recordings to make room"; return; }
+
+	# One at a time, camera-wide. Two of these at once measure each other.
+	mkdir -p /tmp/webui 2>/dev/null
+	mkdir "$SPEED_LOCK" 2>/dev/null ||
+		{ err="a speed test is already running on this camera"; return; }
+
+	f="$mp/.openipc-speedtest.tmp"
+	rm -f "$f" 2>/dev/null
+	sp_done() { rm -f "$f" 2>/dev/null; rmdir "$SPEED_LOCK" 2>/dev/null; }
+
+	# Is the recorder writing to this card while we measure? Then the figures
+	# below are a card under two writers, not one, and the page has to say so
+	# rather than quietly report a worse number than the card deserves. Unknown
+	# stays unknown: mj_cfg returns 2 when the daemon did not answer, and a
+	# failed ask is not a fact.
+	rec=""
+	if sp_path=$(mj_cfg records.path) && sp_en=$(mj_cfg records.enabled); then
+		rec=false
+		if [ "$sp_en" = "true" ]; then
+			pre=$(printf '%s' "$sp_path" | sed 's/%.*//; s#/*$##')
+			case "$pre" in "$mp"|"$mp"/*) rec=true;; esac
+		fi
+	fi
+
+	# A measurement with no clock behind it is not a measurement. now_cs only
+	# fails on a /proc/uptime this cannot parse, but reporting a figure derived
+	# from an unread clock would be inventing one.
+	sp_t0=$(now_cs) || { err="the camera's clock could not be read, so nothing here could be timed"; sp_done; return; }
+
+	logln "# write $((SPEED_CHUNK / 1048576)) MB chunks to $f, flushing each"
+	wrote=0; worst=0; sp_i=0
+	while [ "$sp_i" -lt "$SPEED_CHUNKS" ]; do
+		sp_c0=$(now_cs) || break
+		dd if=/dev/zero of="$f" bs="$SPEED_CHUNK" count=1 seek="$sp_i" \
+			conv=fsync,notrunc 2>/dev/null || break
+		sp_c1=$(now_cs) || break
+		sp_d=$((sp_c1 - sp_c0))
+		[ "$sp_d" -gt "$worst" ] && worst=$sp_d
+		wrote=$((wrote + SPEED_CHUNK))
+		sp_i=$((sp_i + 1))
+		[ $((sp_c1 - sp_t0)) -ge "$SPEED_BUDGET_CS" ] && break
+	done
+	sp_t1=$(now_cs) || sp_t1=$sp_t0
+	[ "$wrote" -gt 0 ] || { err="the card accepted no data at all"; sp_done; return; }
+	wms=$(( (sp_t1 - sp_t0) * 10 ))
+
+	# Read it back cold, or the figure is the page cache's. Reported only when
+	# both ends of it were read; a read that could not be timed is left out
+	# rather than sent as a zero, which the page would draw as infinitely fast.
+	uncache
+	rms=-1
+	if sp_r0=$(now_cs); then
+		dd if="$f" of=/dev/null bs="$SPEED_CHUNK" 2>/dev/null
+		sp_r1=$(now_cs) && rms=$(( (sp_r1 - sp_r0) * 10 ))
+	fi
+
+	sp_done
+	logln "# wrote $((wrote / 1048576)) MB in ${wms} ms, read back in ${rms} ms"
+	EXTRA=$(printf '"speed":{"bytes":%s,"writeMs":%s,"worstMs":%s,"readMs":%s%s},' \
+		"$wrote" "$wms" "$((worst * 10))" "$rms" \
+		"$([ -n "$rec" ] && printf ',"recording":%s' "$rec")")
+}
+
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	json_hdr
-	L=""; err=""
+	L=""; err=""; EXTRA=""
 	case "$POST_op" in
 		format) do_format;;
 		mount) do_mount;;
 		unmount) do_unmount;;
 		fsck) do_fsck;;
+		speedtest) do_speedtest;;
 		*) err="unknown op";;
 	esac
 	if [ -z "$err" ]; then
-		printf '{"ok":true,"log":"%s"}' "$(json_log "$L")"
+		printf '{"ok":true,%s"log":"%s"}' "$EXTRA" "$(json_log "$L")"
 	else
 		printf '{"ok":false,"error":"%s","log":"%s"}' "$(json_str "$err")" "$(json_log "$L")"
 	fi

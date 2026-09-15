@@ -69,6 +69,29 @@
 		return recorder && recorder.v ? recorder.v.records_state : null;
 	}
 
+	// Seconds of lost footage, in words.
+	//
+	// Here rather than in timeline.js because the banner on every page needs it
+	// and timeline.js loads only on Recordings — and because two formatters are
+	// how one page comes to say "0 s" where another says "under a second" about
+	// the same loss, which is the drift this file exists to prevent.
+	//
+	// Sub-second losses are real and must not round to zero: a discarded
+	// fragment is only as long as the recorder was told to make it, and on a
+	// camera dropping partial ones the whole window can sit under a second.
+	// "0 s of video has been dropped" is a sentence that reports a loss and
+	// then denies it.
+	function duration(sec) {
+		const s = Math.max(0, sec);
+		if (s < 1) return 'under a second';
+		const w = Math.round(s);
+		if (w < 60) return w + ' s';
+		const m = Math.floor(w / 60), ss = w % 60;
+		if (m < 60) return ss ? m + ' min ' + ss + ' s' : m + ' min';
+		const h = Math.floor(m / 60), mm = m % 60;
+		return mm ? h + ' h ' + mm + ' min' : h + ' h';
+	}
+
 	function known(recorder) {
 		return !!recorder;
 	}
@@ -206,6 +229,7 @@
 
 	window.MajesticStorageVerdict = {
 		of: of, writable: writable, state: state, known: known,
+		duration: duration,
 		onCard: onCard, prefixOf: prefixOf,
 	};
 }());

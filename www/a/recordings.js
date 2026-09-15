@@ -1113,7 +1113,7 @@
 	function cardTrouble() {
 		const lost = droppedSeconds();
 		const v = SV.of(state.card, state.recorder,
-			lost > 0 ? TL.duration(lost) : '', state.prefix);
+			lost > 0 ? SV.duration(lost) : '', state.prefix);
 		return v ? v.detail : '';
 	}
 
