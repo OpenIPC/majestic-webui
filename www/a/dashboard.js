@@ -210,6 +210,33 @@
 		paintIrcut();
 	}).catch(() => {});
 
+	// What the IR-cut test found, if this browser has ever run one. Read on
+	// every paint rather than once: a test run in another tab takes effect on
+	// the next heartbeat, and a store that has been cleared since stops
+	// counting immediately.
+	//
+	// Unreadable reads as "never tested", never as "tested and fine" — the
+	// direction that keeps asking rather than the one that goes quiet. Some
+	// privacy configurations throw on the accessor itself.
+	//
+	// This is per browser, which is the honest limit of it: the fact is a
+	// measurement made here, and the only camera-side place to put it would be
+	// a second store of the kind #367 deleted. Someone opening the Dashboard
+	// from another machine is asked the question again, and answering it there
+	// is one press.
+	const IRCUT_TESTED = 'mj-ircut-tested';
+	function ircutTested() {
+		try {
+			const v = JSON.parse(localStorage.getItem(IRCUT_TESTED) || 'null');
+			// Shape-checked rather than trusted: a record from a hand edit or
+			// an older key would otherwise be compared field by field against
+			// undefined, and `undefined === undefined` would silence the
+			// banner on a camera nobody has tested.
+			return (v && typeof v.id === 'string' && typeof v.wiring === 'string')
+				? v : null;
+		} catch (e) { return null; }
+	}
+
 	// There was a dismissal here — a × that recorded "this camera has no IR-cut
 	// filter" in /etc/webui/ircut.conf through a CGI of its own, so the banner
 	// would stop asking an owner to wire a filter they do not have.
@@ -265,7 +292,7 @@
 		// is down is never. Every other caller already refused to paint here;
 		// this refuses centrally so a new one cannot forget.
 		if (!IC || !nmCfg) return;
-		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
+		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic, ircutTested())
 			.filter(x => x.level !== 'info')[0];
 
 		if (f) {

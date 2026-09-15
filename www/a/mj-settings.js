@@ -6313,6 +6313,32 @@
 		});
 	}
 
+	// The one thing a browser knows about this camera that the camera does not:
+	// somebody drove the filter and watched the picture follow. The Dashboard
+	// reads it to stop asking a question this has answered (#498); the rule
+	// that decides whether it still means anything lives beside the finding,
+	// in ircut-check's settledBy().
+	//
+	// 'ok' is remembered and everything else FORGETS, deliberately: a verdict
+	// that found a fault must not leave a stale "fine" standing behind it, and
+	// re-testing after a repair is what replaces it.
+	//
+	// Both ends are guarded. localStorage throws outright in some privacy
+	// configurations, and a store that cannot be written is a Dashboard that
+	// goes on asking — which is the right way for this to fail.
+	const IRCUT_TESTED = 'mj-ircut-tested';
+	function rememberTest(wiring, id) {
+		try {
+			if (id === 'ok') {
+				localStorage.setItem(IRCUT_TESTED, JSON.stringify({
+					id: id, wiring: wiring, at: Math.floor(Date.now() / 1000),
+				}));
+			} else {
+				localStorage.removeItem(IRCUT_TESTED);
+			}
+		} catch (e) { /* not remembered; the banner simply asks again */ }
+	}
+
 	const IRCUT_STEP = {
 		first: 'Reading the picture…',
 		toggle: 'Moving the filter…',
@@ -6347,6 +6373,13 @@
 		// against — and syncVerdict() would then find them matching and keep a
 		// stale verdict on screen.
 		const testedOn = fieldAssign();
+		// The wiring this run is about to measure, in the form the Dashboard
+		// compares against. Captured here for the same reason as the line
+		// above — the run takes seconds and the configuration underneath it is
+		// live — and read from the SAVED config rather than the fields,
+		// because the camera is what the probe measures and the blocker has
+		// already guaranteed the two agree.
+		const wiringOn = IRCUT.wiringKey(nightCfg());
 
 		IRCUT.probe({
 			settleMs: 1500,
@@ -6397,6 +6430,16 @@
 					'step, so day and night are the right way round from now on.</span>'
 					: '');
 			result.hidden = false;
+			// What the Dashboard is owed: this filter has been driven and the
+			// picture followed, so the suspicion it raises from the picture
+			// alone has been answered (#498).
+			//
+			// A failed restore is NOT an answer, whatever the verdict says
+			// about the wiring: the filter is sitting in the position the test
+			// left it in, so if that is open the picture is magenta because
+			// the filter really is open right now. Remembering "fine" there
+			// would silence the one accusation that is true.
+			rememberTest(wiringOn, out.restored === false ? null : v.id);
 			state.ircutTestedOn = testedOn;
 			// Edited while the probe ran: the verdict describes wiring that is
 			// no longer on screen, so it goes straight back out.
@@ -6431,6 +6474,11 @@
 			if (e && e.snapshot) {
 				state.ircutNoSnap = { status: e.status, reason: e.reason || null };
 			}
+			// Half a measurement is not evidence about the filter, so it is
+			// not evidence for the Dashboard either — and a run that stopped
+			// part way may have left the filter moved. Any earlier answer for
+			// this wiring goes with it.
+			rememberTest(wiringOn, null);
 			state.ircutTestedOn = testedOn;
 			// Edited while the probe ran: the verdict describes wiring that is
 			// no longer on screen, so it goes straight back out.
