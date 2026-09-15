@@ -224,6 +224,21 @@
 	// a second store of the kind #367 deleted. Someone opening the Dashboard
 	// from another machine is asked the question again, and answering it there
 	// is one press.
+	//
+	// And what the record is compared against has to be the wiring the camera
+	// has NOW. mjConfig() resolves once and is cached for the life of the
+	// page, which is fine for a finding that merely describes a snapshot and
+	// not fine for one that can be SILENCED by a record: change the coils from
+	// the settings page in another tab and this one would go on matching the
+	// verdict against the assignment it loaded with. So while a record exists
+	// the wiring is re-read on a slow beat of its own. Only while one exists —
+	// a browser that has never tested has nothing that could be silenced, and
+	// pays nothing.
+	//
+	// A refresh that fails leaves the last reading standing rather than
+	// counting as a change: a failed fetch is not a fact, and a camera that
+	// cannot be reached is already saying so through the stale banner.
+	const WIRING_REFRESH_MS = 30000;
 	const IRCUT_TESTED = 'mj-ircut-tested';
 	function ircutTested() {
 		try {
@@ -235,6 +250,25 @@
 			return (v && typeof v.id === 'string' && typeof v.wiring === 'string')
 				? v : null;
 		} catch (e) { return null; }
+	}
+
+	// Re-read the wiring a record is judged against. Driven from the
+	// heartbeat, so it stops on its own while the camera is unreachable rather
+	// than piling up fetches at something that is not answering.
+	let wiringAt = 0;
+	function refreshWiring() {
+		if (!IC || !nmCfg || !ircutTested()) return;
+		const now = Date.now();
+		if (now - wiringAt < WIRING_REFRESH_MS) return;
+		wiringAt = now;
+		apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
+			.then(r => (r.ok ? r.json() : null))
+			.then((c) => {
+				if (!c || !Object.keys(c).length) return;
+				nmCfg = c.nightMode || {};
+				paintIrcut();
+			})
+			.catch(() => {});
 	}
 
 	// There was a dismissal here — a × that recorded "this camera has no IR-cut
@@ -736,6 +770,7 @@
 				' · lamp ' + lampWord +
 				srcWord;
 		renderIrcut(s);
+		refreshWiring();
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means
 		// the encoder has stopped producing frames while all else looks alive.
 		// The encoder tile and chart obey the same rule as Wi-Fi and

@@ -6380,6 +6380,13 @@
 		// because the camera is what the probe measures and the blocker has
 		// already guaranteed the two agree.
 		const wiringOn = IRCUT.wiringKey(nightCfg());
+		// Forgotten BEFORE the first toggle, not after the last one. From the
+		// moment this run starts, the filter is being moved and no earlier
+		// verdict describes a camera at rest — and if the page goes away mid
+		// run neither completion handler gets to say so, leaving a "fine" in
+		// the store for a filter this run may have left open. Written again at
+		// the end, if the end agrees.
+		rememberTest(wiringOn, null);
 
 		IRCUT.probe({
 			settleMs: 1500,
