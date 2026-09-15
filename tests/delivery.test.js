@@ -38,7 +38,13 @@ const CLIP = Buffer.from('\x00\x00\x00\x18ftypisomMP4-FROM-THE-RECORDER', 'binar
 // so a rejection can be tested without a rejection being arranged.
 const sent = [];
 const stills = [];
+// Every ?pre=/?duration= the senders asked the camera for. The query is the
+// subject of half these checks: a clamp that silently sent 600 to the camera
+// would look exactly like one that worked, since the fake camera answers
+// whatever it is asked.
+const clips = [];
 let plan = { status: 200, body: '{"ok":true}' };
+let clipPlan = { status: 200, body: CLIP, preroll: '0' };
 
 function parseMultipart(buf, type) {
 	const m = /boundary=(?:"([^"]+)"|([^;]+))/.exec(type || '');
@@ -71,6 +77,29 @@ const server = http.createServer((req, res) => {
 	req.on('end', () => {
 		const body = Buffer.concat(chunks);
 		const url = req.url.split('?')[0];
+
+		if (url === '/video.mp4') {
+			clips.push(req.url);
+			const head = { 'Content-Type': 'video/mp4' };
+			if (clipPlan.preroll !== null) head['X-Preroll-Seconds'] = clipPlan.preroll;
+
+			// A camera that answers, starts sending, and then goes away: the
+			// status line is already a 200 and some of the file is already on
+			// disk. Announcing more than is written and then destroying the
+			// socket is what a stall, a reset or a deadline looks like from
+			// the client's side.
+			if (clipPlan.truncate) {
+				head['Content-Length'] = String(clipPlan.body.length + 4096);
+				res.writeHead(200, head);
+				res.write(clipPlan.body);
+				setTimeout(() => req.socket.destroy(), 30);
+				return;
+			}
+
+			res.writeHead(clipPlan.status, head);
+			res.end(clipPlan.body);
+			return;
+		}
 
 		if (url === '/image.jpg' || url === '/image.heif') {
 			// Recorded as well as served: "it did not go and take a picture"
@@ -169,24 +198,59 @@ server.listen(0, '127.0.0.1', async () => {
 		'',
 	].join('\n'));
 
+	const cam = (s) => [s, '127.0.0.1:' + port + s.slice('localhost'.length)];
+
 	const telegram = rewrite('sbin/telegram', [
 		['/etc/webui/telegram.conf', tgConf],
 		['https://api.telegram.org', origin],
-		['localhost/image.jpg', '127.0.0.1:' + port + '/image.jpg'],
-		['localhost/image.heif', '127.0.0.1:' + port + '/image.heif'],
+		cam('localhost/image.jpg'),
+		cam('localhost/image.heif'),
+		cam('localhost/video.mp4'),
 	], 'telegram');
 
 	const ntfy = rewrite('bin/ntfy.sh', [
 		['/etc/webui/ntfy.conf', ntfyConf],
-		['localhost/image.jpg', '127.0.0.1:' + port + '/image.jpg'],
-		['localhost/image.heif', '127.0.0.1:' + port + '/image.heif'],
+		cam('localhost/image.jpg'),
+		cam('localhost/image.heif'),
+		cam('localhost/video.mp4'),
 	], 'ntfy.sh');
 
 	const reset = (status, body) => {
 		sent.length = 0;
 		stills.length = 0;
+		clips.length = 0;
 		plan = { status: status || 200, body: body || '{"ok":true}' };
+		clipPlan = { status: 200, body: CLIP, preroll: '0', truncate: false };
 	};
+
+	// The same two senders, configured to record a clip of their own rather
+	// than take a picture. Built per case so a case can say what else is set,
+	// and through the same rewrite() as the originals, so a substitution that
+	// stops matching fails here too.
+	const telegramRec = (name, extra) => rewrite('sbin/telegram', [
+		['/etc/webui/telegram.conf', conf(name + '.conf', [
+			'telegram_enabled="true"',
+			'telegram_token="BOTTOKEN"',
+			'telegram_channel="-100123"',
+			'telegram_video="true"',
+		].concat(extra || [], ['']).join('\n'))],
+		['https://api.telegram.org', origin],
+		cam('localhost/image.jpg'),
+		cam('localhost/image.heif'),
+		cam('localhost/video.mp4'),
+	], name);
+
+	const ntfyRec = (name, extra) => rewrite('bin/ntfy.sh', [
+		['/etc/webui/ntfy.conf', conf(name + '.conf', [
+			'ntfy_enabled="true"',
+			'ntfy_topic="doorbell"',
+			'ntfy_server="' + origin + '"',
+			'ntfy_video="true"',
+		].concat(extra || [], ['']).join('\n'))],
+		cam('localhost/image.jpg'),
+		cam('localhost/image.heif'),
+		cam('localhost/video.mp4'),
+	], name);
 
 	group('telegram — a still, with no argument');
 	{
@@ -334,6 +398,186 @@ server.listen(0, '127.0.0.1', async () => {
 		const n = await run(ntfy, [path.join(tmp, 'gone.mp4')]);
 		check('ntfy refuses', n.status !== 0, 'status ' + n.status);
 		check('neither sends anything', sent.length === 0, sent.length + ' request(s)');
+	}
+
+	// ------------------------------------------------- clips of their own ---
+	//
+	// The camera can now be asked for a clip without a card, a recorder or an
+	// HLS playlist -- /video.mp4?duration=N holds the muxer up for one request
+	// and gives it back. These are the two senders as its first consumers, and
+	// what is checked here is the part neither script can be read for: which
+	// URL was asked for, and whether the bytes that came back are the bytes
+	// that went out.
+
+	group('telegram — records its own clip when the schedule says video');
+	{
+		reset();
+		clipPlan.preroll = '3';
+		const r = await run(telegramRec('telegram-rec'), []);
+		const req = sent[0] || {};
+		const video = req.parts && req.parts.video;
+		check('asked the camera for a clip', clips.length === 1, clips.join(','));
+		check('asked for the configured length, run-up included',
+			clips[0] === '/video.mp4?pre=10&duration=10', clips[0]);
+		check('posts to sendVideo', req.url === '/botBOTTOKEN/sendVideo', req.url);
+		check('sends the bytes the camera gave it',
+			!!video && video.body.equals(CLIP),
+			video ? video.body.length + ' bytes' : 'no video part');
+		check('names it .mp4', !!video && /\.mp4$/.test(video.filename || ''),
+			video && video.filename);
+		check('took no picture', stills.length === 0, stills.join(','));
+		check('says how much run-up it got', r.stdout.includes('run-up 3s'),
+			r.stdout.trim());
+		check('exits 0', r.status === 0, 'status ' + r.status);
+
+		// A camera that says nothing about the run-up is not a camera
+		// reporting none of it, and the line must not invent the figure.
+		reset();
+		clipPlan.preroll = null;
+		const q = await run(telegramRec('telegram-quiet'), []);
+		check('a camera that does not say gets no figure',
+			q.stdout.includes('Recorded') && !q.stdout.includes('run-up'),
+			q.stdout.trim());
+		check('and the clip still goes out',
+			(sent[0] || {}).url === '/botBOTTOKEN/sendVideo', (sent[0] || {}).url);
+	}
+
+	group('telegram — the webhook verbs outrank the schedule');
+	{
+		// ?send=image on a camera whose schedule sends video: a dashboard
+		// pulling a thumbnail must go on getting one.
+		reset();
+		const rec = telegramRec('telegram-verbs');
+		const img = await run(rec, ['--image']);
+		check('--image takes a picture', stills.length === 1, stills.join(','));
+		check('and asks for no clip', clips.length === 0, clips.join(','));
+		check('posting it to sendPhoto',
+			(sent[0] || {}).url === '/botBOTTOKEN/sendPhoto', (sent[0] || {}).url);
+		check('exits 0', img.status === 0, 'status ' + img.status);
+
+		// And the other way round: a still-picture camera asked for video.
+		reset();
+		const clip = await run(telegram, ['--clip']);
+		check('--clip records one even with the switch off', clips.length === 1,
+			clips.join(','));
+		check('taking no picture', stills.length === 0, stills.join(','));
+		check('and sending it as video',
+			(sent[0] || {}).url === '/botBOTTOKEN/sendVideo', (sent[0] || {}).url);
+		check('exits 0', clip.status === 0, 'status ' + clip.status);
+	}
+
+	group('telegram — a handed-over recording still wins');
+	{
+		// record.sh calls the sender with the clip majestic has just closed.
+		// A camera that also records its own must not answer that by recording
+		// a second one: the file in hand is the motion, a fresh capture is
+		// whatever is happening a minute later.
+		reset();
+		const r = await run(telegramRec('telegram-rec-path'), [clip]);
+		const video = (sent[0] || {}).parts && sent[0].parts.video;
+		check('sends the file it was given', !!video && video.body.equals(CLIP),
+			video ? video.body.length + ' bytes' : 'no video part');
+		check('keeps its name', !!video && video.filename === '19-28-cam0.mp4',
+			video && video.filename);
+		check('records nothing itself', clips.length === 0, clips.join(','));
+		check('exits 0', r.status === 0, 'status ' + r.status);
+	}
+
+	group('both — a length that is not one');
+	{
+		// records.preRollSec is a number on a page; this one reaches a URL and
+		// an arithmetic expansion, so what arrives is clamped rather than
+		// trusted. A camera answering whatever it is asked cannot show this.
+		reset();
+		await run(telegramRec('telegram-long', ['telegram_video_seconds="600"']), []);
+		check('too long is cut to a minute',
+			clips[0] === '/video.mp4?pre=60&duration=60', clips[0]);
+
+		reset();
+		await run(telegramRec('telegram-junk', ['telegram_video_seconds="ten"']), []);
+		check('a word falls back to the default',
+			clips[0] === '/video.mp4?pre=10&duration=10', clips[0]);
+
+		reset();
+		await run(ntfyRec('ntfy-short', ['ntfy_video_seconds="5"']), []);
+		check('and a real figure is passed through',
+			clips[0] === '/video.mp4?pre=5&duration=5', clips[0]);
+	}
+
+	group('both — a camera that will not record');
+	{
+		// The refusal /video.mp4 answers with when there is no video channel
+		// to mux. Quietly sending a picture instead would leave an operator
+		// believing the clips they configured are being sent.
+		reset();
+		clipPlan = { status: 503, body: Buffer.alloc(0), preroll: null };
+		const t = await run(telegramRec('telegram-503'), []);
+		check('telegram refuses', t.status !== 0, 'status ' + t.status);
+		check('sends nothing at all', sent.length === 0, sent.length + ' request(s)');
+		check('and does not fall back to a picture', stills.length === 0,
+			stills.join(','));
+		check('naming the code', t.stdout.includes('503'), t.stdout.trim());
+
+		reset();
+		clipPlan = { status: 503, body: Buffer.alloc(0), preroll: null };
+		const n = await run(ntfyRec('ntfy-503'), []);
+		check('ntfy refuses', n.status !== 0, 'status ' + n.status);
+		check('sends nothing at all', sent.length === 0, sent.length + ' request(s)');
+		check('and does not fall back to a picture', stills.length === 0,
+			stills.join(','));
+
+		// The transfer that dies after the status line. curl reports the 200
+		// it was given and leaves a partial file, so a sender judging only
+		// those two sends half a video -- which plays, up to where it stops,
+		// with nothing about it saying it was cut.
+		reset();
+		clipPlan = { status: 200, body: CLIP, preroll: '0', truncate: true };
+		const t2 = await run(telegramRec('telegram-cut'), []);
+		check('a transfer cut short is a refusal', t2.status !== 0, 'status ' + t2.status);
+		check('with nothing sent', sent.length === 0, sent.length + ' request(s)');
+		check('and no picture in its place', stills.length === 0, stills.join(','));
+
+		reset();
+		clipPlan = { status: 200, body: CLIP, preroll: '0', truncate: true };
+		const n2 = await run(ntfyRec('ntfy-cut'), []);
+		check('ntfy refuses it too', n2.status !== 0, 'status ' + n2.status);
+		check('with nothing sent', sent.length === 0, sent.length + ' request(s)');
+
+		// A 200 that carries nothing is the shape a pipeline torn down
+		// mid-clip leaves behind, and a zero-byte video is worse than silence.
+		reset();
+		clipPlan = { status: 200, body: Buffer.alloc(0), preroll: '0' };
+		const e = await run(telegramRec('telegram-empty'), []);
+		check('an empty clip is a refusal too', e.status !== 0, 'status ' + e.status);
+		check('with nothing sent', sent.length === 0, sent.length + ' request(s)');
+	}
+
+	group('ntfy — records its own clip when told to');
+	{
+		reset();
+		const r = await run(ntfyRec('ntfy-rec'), []);
+		const req = sent[0] || {};
+		check('asked the camera for a clip',
+			clips[0] === '/video.mp4?pre=10&duration=10', clips[0]);
+		check('PUTs the bytes the camera gave it',
+			!!req.body && req.body.equals(CLIP),
+			req.body && req.body.length + ' bytes');
+		check('says it is video',
+			!!req.headers && req.headers['content-type'] === 'video/mp4',
+			req.headers && req.headers['content-type']);
+		check('names it .mp4',
+			!!req.headers && /\.mp4$/.test(req.headers.filename || ''),
+			req.headers && req.headers.filename);
+		check('took no picture', stills.length === 0, stills.join(','));
+		check('exits 0', r.status === 0, 'status ' + r.status);
+
+		reset();
+		const img = await run(ntfyRec('ntfy-verbs'), ['--image']);
+		check('--image overrides it', stills.length === 1 && clips.length === 0,
+			stills.join(',') + ' / ' + clips.join(','));
+		check('pushing a jpeg', (sent[0] || {}).headers['content-type'] === 'image/jpeg',
+			(sent[0] || {}).headers['content-type']);
+		check('exits 0', img.status === 0, 'status ' + img.status);
 	}
 
 	server.close();
