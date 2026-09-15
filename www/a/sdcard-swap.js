@@ -190,6 +190,17 @@
 				// failing the swap over.
 				result.resumeFailed = true;
 			}
+			// Let go of the camera-wide lock on every path, not only the ones
+			// that ended with a mounted card. A successful mount releases it
+			// at the camera already, so this is for the endings that did not
+			// get one -- and holding it after this run has stopped caring is
+			// how the next operator is told a swap is in progress by a swap
+			// that is over.
+			if (io.release) {
+				try {
+					await io.release();
+				} catch (e) { /* it expires on its own if this never lands */ }
+			}
 			return result;
 		};
 

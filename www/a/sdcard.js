@@ -614,6 +614,12 @@
 			paint(name);
 		};
 
+		// This run's name, so the camera can tell one swap from another. The
+		// lock the CGI keeps is owned rather than anonymous: an anonymous one
+		// cannot tell "somebody else is mid-swap" from "my own earlier
+		// request", and would refuse the second half of this very flow.
+		const token = 'sw' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+
 		const io = {
 			now: () => Date.now(),
 			wait: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -622,10 +628,14 @@
 			// receives, so a swap started in another browser is visible here.
 			swapping: () => !!(recorder && recorder.v && recorder.v.records_stood_down === 1),
 			onStep: (e) => say(e.step, e),
-			look: () => api(''),
-			unmount: () => op({ op: 'unmount' }),
-			mount: () => op({ op: 'mount' }),
-			reprobe: () => op({ op: 'reprobe' }),
+			// The poll carries the token because it is also what keeps the
+			// lock alive -- see the CGI. A swap whose browser goes away stops
+			// polling and stops holding the slot.
+			look: () => api('swap=' + encodeURIComponent(token)),
+			unmount: () => op({ op: 'unmount', swap: token }),
+			mount: () => op({ op: 'mount', swap: token }),
+			reprobe: () => op({ op: 'reprobe', swap: token }),
+			release: () => op({ op: 'swaprelease', swap: token }),
 			standDown: () => apiFetch('/api/v1/records/standdown', {
 				method: 'POST', credentials: 'same-origin',
 			}).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); }),

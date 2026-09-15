@@ -516,19 +516,28 @@ mount_after_format() {
 first_line() { printf '%s' "$1" | sed -n '1p'; }
 
 do_mount() {
+	swap_guard || return
 	ensure_node
 	t=$(target); base=${t##*/}; mkdir -p "/mnt/$base"
 	logln "# mount $t /mnt/$base"
 	o=$(mount "$t" "/mnt/$base" 2>&1)
 	[ -n "$o" ] && logln "$o"
 	mountpoint -q "/mnt/$base" || err="$(first_line "${o:-mount failed}")"
+	# The card is back. Whatever this swap was owning, it is finished with.
+	if [ -z "$err" ]; then swap_release; fi
 }
 
 do_unmount() {
+	swap_guard || return
+	# Taken before the card is released rather than after: the gap between the
+	# two is precisely the window a second browser would have to slip into.
+	swap_take
 	t=$(target)
 	logln "# umount $t"
 	o=$(umount "$t" 2>&1) || err="$(first_line "${o:-unmount failed (in use?)}")"
 	[ -n "$o" ] && logln "$o"
+	# Nothing was released, so nothing is owed an owner.
+	if [ -n "$err" ]; then swap_release; fi
 }
 
 do_fsck() {
@@ -588,6 +597,76 @@ SPEED_LOCK=/tmp/webui/sdspeed.lock
 # Longer than any measurement can legitimately take: the budget is 20 s, plus
 # the read-back and one chunk's grace.
 SPEED_LOCK_STALE=120
+
+SWAP_LOCK=/tmp/webui/sdswap.lock
+# A swap spans many requests with a person in the middle of it, so unlike the
+# speed-test lock this one cannot be bounded by how long one request may take.
+# It is refreshed by the status poll the wizard is already making once a second,
+# so a browser that dies stops refreshing and the lock is reclaimable a minute
+# and a half later -- rather than leaving the card unmounted and unmountable for
+# as long as the whole flow is allowed to take.
+SWAP_LOCK_STALE=90
+
+# Who holds the swap, if anyone still does. Prints the token; prints nothing if
+# the lock is free or has gone stale.
+swap_holder() {
+	sw_at=$(cat "$SWAP_LOCK/at" 2>/dev/null)
+	case "$sw_at" in ''|*[!0-9]*) sw_at=0;; esac
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	[ "$sw_at" -gt 0 ] && [ "$sw_now" -gt 0 ] &&
+		[ $((sw_now - sw_at)) -lt "$SWAP_LOCK_STALE" ] || return 0
+	cat "$SWAP_LOCK/who" 2>/dev/null
+}
+
+# One swap at a time, camera-wide and with an owner.
+#
+# Two browsers can each be sure they are the only one, and the page's own check
+# of the stand-down gauge narrows that to a heartbeat's width rather than
+# closing it. What is left is the arrangement that costs a filesystem: the
+# second browser to reach the unmount finds the card already gone, calls that a
+# failure, mounts it back and resumes -- while the first is still displaying
+# SAFE TO REMOVE over a card the camera has started writing to.
+#
+# mkdir is the atomic part. Anything that changes what is mounted asks this
+# first, including the manual Mount and Unmount buttons: an operator pressing
+# those during somebody else's swap is the same hazard as a second wizard.
+swap_guard() {
+	mkdir -p /tmp/webui 2>/dev/null
+	sw_who=$(swap_holder)
+	[ -n "$sw_who" ] || return 0
+	[ "$sw_who" = "$POST_swap" ] && return 0
+	err="a card change is in progress on this camera; finish or stop that one first"
+	return 1
+}
+
+# Take or refresh the lock for this swap. Called by the unmount, which is the
+# step that makes the card removable and so the step worth owning.
+swap_take() {
+	[ -n "$POST_swap" ] || return 0
+	mkdir -p /tmp/webui 2>/dev/null
+	mkdir "$SWAP_LOCK" 2>/dev/null
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	printf '%s' "$POST_swap" > "$SWAP_LOCK/who" 2>/dev/null
+	printf '%s' "$sw_now" > "$SWAP_LOCK/at" 2>/dev/null
+}
+
+# Give it up. Only the holder may, so a request arriving late from an abandoned
+# run cannot unlock somebody else's swap. rm -r, not rmdir: the lock directory
+# holds its own bookkeeping, and rmdir fails silently on a non-empty directory
+# -- which is how the speed-test lock leaked one per run until it was noticed on
+# a camera rather than in a test.
+swap_release() {
+	sw_who=$(swap_holder)
+	[ -z "$sw_who" ] || [ "$sw_who" = "$POST_swap" ] || return 0
+	rm -rf "$SWAP_LOCK" 2>/dev/null
+}
+
+do_swaprelease() {
+	[ -n "$POST_swap" ] || { err="no swap to release"; return; }
+	swap_release
+}
 
 do_speedtest() {
 	t=$(target)
@@ -723,6 +802,7 @@ do_speedtest() {
 # under a live filesystem, and a card that is already visible is not the
 # problem this solves.
 do_reprobe() {
+	swap_guard || return
 	rp_mounted() { awk '$1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts; }
 
 	[ -z "$(rp_mounted)" ] ||
@@ -790,6 +870,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		fsck) do_fsck;;
 		speedtest) do_speedtest;;
 		reprobe) do_reprobe;;
+		swaprelease) do_swaprelease;;
 		*) err="unknown op";;
 	esac
 	if [ -z "$err" ]; then
@@ -798,6 +879,15 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		printf '{"ok":false,"error":"%s","log":"%s"}' "$(json_str "$err")" "$(json_log "$L")"
 	fi
 	exit 0
+fi
+
+# The wizard's own once-a-second status poll is what keeps its lock alive. No
+# extra request for it, and a browser that stops polling -- closed, crashed,
+# carried out of range -- stops holding the slot within SWAP_LOCK_STALE.
+if [ -n "$GET_swap" ] && [ "$(swap_holder)" = "$GET_swap" ]; then
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	printf '%s' "$sw_now" > "$SWAP_LOCK/at" 2>/dev/null
 fi
 
 json_hdr

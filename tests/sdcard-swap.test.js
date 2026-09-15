@@ -91,6 +91,10 @@ function rig(cards, opts) {
                 unmounted = false;
                 return Promise.resolve({ ok: true });
             },
+            release: () => {
+                log.push('release');
+                return Promise.resolve({ ok: true });
+            },
             reprobe: () => {
                 log.push('reprobe');
                 return Promise.resolve(
@@ -108,6 +112,29 @@ const EMPTY = { present: false };
 function ran(log, what) { return log.indexOf(what) >= 0; }
 
 async function main() {
+    group('the camera-wide lock is given back on every ending');
+    {
+        // Held after the run has stopped caring, the lock tells the next
+        // operator a swap is in progress on the strength of one that is over.
+        // The camera expires it on its own, but only after long enough for the
+        // card to be left unmounted and unmountable in the meantime.
+        const e = rig([A, A, EMPTY, EMPTY, B, B]);
+        const r = await swap.run(e.io);
+        check('the swap that works gives it back', ran(e.log, 'release'), r.outcome);
+    }
+    {
+        const e = rig([A], { unmountFails: true });
+        const r = await swap.run(e.io);
+        check('and so does one that could not release the card',
+            ran(e.log, 'release'), r.outcome);
+    }
+    {
+        const e = rig([A, A, EMPTY, EMPTY, B, B], { mountFails: true });
+        const r = await swap.run(e.io);
+        check('and so does one whose new card would not mount',
+            ran(e.log, 'release'), r.outcome);
+    }
+
     group('Stop means stop, including mid-request');
     {
         // The stand-down is the one step with a visible pause in it, so it is
