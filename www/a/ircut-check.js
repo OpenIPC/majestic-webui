@@ -552,9 +552,40 @@
 	// Pixels darker than this carry no usable colour, and pixels this bright
 	// are at or near clipping, where the ratio below is meaningless.
 	const DARK = 15, CLIP = 247;
-	// Below this many usable pixels the frame is night, a lens cap or a
-	// teardown, and nothing here may be concluded from it.
-	const MIN_PX = 200;
+	// BOTH statistics drift toward "an open filter" as the light goes away,
+	// and neither drifts back, so an unlit frame is the one place they must
+	// not be allowed to answer at all.
+	//
+	// The magenta excess is normalised by the pixel's own brightness, so a
+	// FIXED channel offset — black-level residue with the white-balance gains
+	// on top of it — says something different at each end of the range. Three
+	// counts between (R+B)/2 and green clears the 0.15 bar at a luminance of
+	// 20; at 80 it takes twelve. The same imbalance is a magenta frame in the
+	// dark and is nothing at all in daylight. And green is the minimum
+	// wherever red and blue carry the larger white-balance gain, which in a
+	// frame made of amplified noise is essentially every pixel: measured on
+	// one daylight frame from an hi3516ev300 with the filter CLOSED, green is
+	// the valley in 0.001 of the pixels above luminance 96 and in 0.426 of
+	// those below 16 — the same frame, either end of its own histogram.
+	//
+	// So a pixel has to carry real signal before its channel order means
+	// anything, and enough of the frame has to carry it before the percentile
+	// is about the frame. Measured over daylight and indoor scenes on three
+	// cameras, the share of the sample at or above LIT ran 0.62 to 0.99, and
+	// an open filter in daylight 0.99; the two verdicts are unchanged by the
+	// floor. A picture a person would call black does not come near it.
+	//
+	// This is not the brightness gate the finding above refuses to make. That
+	// one would ask the scene how dark it is, and auto-exposure makes that
+	// unanswerable — a correctly exposed midnight frame and a correctly
+	// exposed noon frame have the same mean by construction. Auto-exposure is
+	// exactly what makes THIS question answerable: it lifts any scene it can
+	// reach to its target, so a frame still sitting under the floor is one the
+	// camera could not lift, and that is the frame whose colour is its own
+	// noise. The question is whether there is a picture here to take a
+	// statistic of, which is the precondition of the statistics rather than a
+	// claim about the hour.
+	const LIT = 48, MIN_LIT = 0.5;
 	// The sample is a thumbnail, not the frame: these are statistics, and
 	// 160x90 is 14,400 pixels, plenty for a percentile and small enough that
 	// neither the decode nor the readback is felt on a 5s poll.
@@ -578,39 +609,48 @@
 	//         a magenta frame. A warm cast cannot do it at any strength:
 	//         sunset and tungsten are R>G>B monotone, and green is never the
 	//         valley in a monotone ramp.
+	// lit   — the share of the WHOLE sample bright enough for either of those
+	//         to be about a picture rather than about a noise floor. It is a
+	//         share and not a count because it is the frame it describes: the
+	//         count it replaced was 200 against a 14,400-pixel sample, so a
+	//         frame 98.6% of which was under the dark floor could still reach
+	//         a verdict on the 1.4% that was not — the thing its own comment
+	//         said must never happen (#492).
 	function stats(data, w, h) {
 		const n = w * h;
 		const vals = new Float64Array(n);
-		let k = 0, valley = 0;
+		let k = 0, valley = 0, lit = 0;
 		for (let i = 0; i < n; i++) {
 			const p = i * 4, r = data[p], g = data[p + 1], b = data[p + 2];
 			const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+			if (mx >= LIT && mx < CLIP) lit++;
 			if (mx <= DARK || mx >= CLIP) continue;
 			const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
 			if (g <= mn) valley++;
 			const lum = (r + g + b) / 3;
 			vals[k++] = ((r + b) / 2 - g) / (lum > 1 ? lum : 1);
 		}
-		if (!k) return { n: 0, gmin: 0, mex25: 0 };
+		const share = n ? lit / n : 0;
+		if (!k) return { n: 0, lit: share, gmin: 0, mex25: 0 };
 		const a = Array.prototype.slice.call(vals.subarray(0, k))
 			.sort(function (x, y) { return x - y; });
-		return { n: k, gmin: valley / k, mex25: a[Math.floor(k * 0.25)] };
+		return { n: k, lit: share, gmin: valley / k, mex25: a[Math.floor(k * 0.25)] };
 	}
 
 	// Both conditions, never either alone. A night frame under colorToGray is
 	// R=G=B, which satisfies "green is the minimum" in every pixel and would
 	// fire gmin on its own; its magenta excess is 0, which is what stops it.
 	function irLook(st) {
-		return st.n >= MIN_PX && st.gmin >= 0.90 && st.mex25 >= 0.15;
+		return st.lit >= MIN_LIT && st.gmin >= 0.90 && st.mex25 >= 0.15;
 	}
 	// An ordinary coloured frame: green is the valley in only a minority of
 	// pixels, which no amount of warm cast produces (a sunset is R>G>B, and
 	// green is never the valley in a monotone ramp).
 	function colourLook(st) {
-		return st.n >= MIN_PX && st.gmin < 0.6;
+		return st.lit >= MIN_LIT && st.gmin < 0.6;
 	}
 	// The three answers a frame can give, including "I cannot tell" — which is
-	// what a night scene, a lens cap and a mid-swing capture all return.
+	// what an unlit scene, a lens cap and a mid-swing capture all return.
 	function look(st) {
 		if (irLook(st)) return 'open';
 		if (colourLook(st)) return 'colour';
