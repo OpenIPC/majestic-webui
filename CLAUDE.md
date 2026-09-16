@@ -756,10 +756,13 @@ recorder is **demonstrably** doing the job: recording switched on, mode
 matter, and the first is the easy one to forget — `records.mode` keeps saying
 `motion` after recording is switched off, the gauge stays at 0 because nothing
 has tried, and the write counter keeps whatever it reached before, so the other
-three can describe a camera that will never finish another clip. A camera that
-cannot be asked at all is given the benefit of the doubt and the clip is sent,
-because a missed event is worse than a duplicate and a camera that will not
-answer is usually one that is restarting.
+three can describe a camera that will never finish another clip. The predicate has three answers rather than two —
+covered, not covered, and could not tell — for the reason the config helper
+next door keeps three: a question that could not be asked is not an answer
+about the camera. On "could not tell" the clip is still sent, because a missed
+event is worse than a duplicate and a camera that will not answer is usually
+one that is restarting, but it says so in the log where somebody chasing
+duplicate messages can find it.
 
 Anything worth knowing goes to the camera's log through `logger`, where the
 Logs page shows it: nothing reads this script's exit status, so a delivery that

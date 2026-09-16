@@ -96,12 +96,24 @@ seconds() {
 	printf '%s' "$_s"
 }
 
-# Stand aside when the recorder is demonstrably doing this already.
+# Is the recorder demonstrably doing this already?
+#
+#   0  yes -- it is recording on movement and writing
+#   1  no  -- it is not, and this script is the only thing that will send
+#   2  cannot tell -- the camera did not answer
+#
+# Three answers rather than two, for the reason the config helper next door
+# keeps three: a question that could not be asked is not an answer about the
+# camera, and collapsing it into "no" would hide the one case where this script
+# and the recorder can both fire for the same movement. The caller still sends
+# on a 2 -- a missed event is worse than a duplicate, and a camera that will
+# not answer is usually one that is restarting -- but it says so where somebody
+# chasing duplicate messages can find it.
 #
 # A camera recording on motion finishes a clip when the movement stops and
-# hands it to the clip hook, which sends it. Both paths firing would mean two
-# messages for one event -- and the recorder's is the better one, covering the
-# whole event and opening before it.
+# hands it to the clip hook, which sends it. That clip is the better one,
+# covering the whole event and opening before it, which is why this stands
+# aside for it.
 #
 # Four things have to be true, and the fourth is the one that is easy to
 # forget: recording switched ON. records.mode keeps saying `motion` after
@@ -115,33 +127,41 @@ seconds() {
 # hi3516ev300 with no card and records.path left at its default, the recorder
 # reported itself ok from boot and only went offline on the first event, when
 # it discovered the path was on internal flash.
-#
-# A camera that cannot be asked at all goes ahead and sends. That is a
-# deliberate trade: the cost of being wrong is one duplicate message, the cost
-# of the other choice is a missed event on the camera least able to afford one.
 recorder_covers_it() {
-	[ -r "$MJ_SH" ] || return 1
+	[ -r "$MJ_SH" ] || return 2
 	. "$MJ_SH"
 
-	_en=$(mj_cfg records.enabled) || return 1
+	_en=$(mj_cfg records.enabled)
+	case $? in
+	0) ;;
+	1) return 1 ;;   # not set, so not on
+	*) return 2 ;;
+	esac
 	[ "$_en" = "true" ] || return 1
-	_mode=$(mj_cfg records.mode) || return 1
+
+	_mode=$(mj_cfg records.mode)
+	case $? in
+	0) ;;
+	1) return 1 ;;
+	*) return 2 ;;
+	esac
 	[ "$_mode" = "motion" ] || return 1
 
 	# Unauthenticated, no forks, and the same figures the Dashboard reads.
-	_m=$(curl -s -m 2 "localhost/metrics/records" 2>/dev/null) || return 1
-	[ -n "$_m" ] || return 1
+	_m=$(curl -s -m 2 "localhost/metrics/records" 2>/dev/null) || return 2
+	[ -n "$_m" ] || return 2
 
 	# 0 is the only state in which a clip can be written; 1, 2 and 3 are
-	# degraded, failed and offline.
+	# degraded, failed and offline. A build that does not publish the gauge at
+	# all has told us nothing.
 	_state=$(printf '%s\n' "$_m" | sed -n 's/^records_state \([0-9]*\).*/\1/p')
+	[ -n "$_state" ] || return 2
 	[ "$_state" = "0" ] || return 1
 
 	_written=$(printf '%s\n' "$_m" |
 		sed -n 's/^records_fragments_written_total \([0-9]*\).*/\1/p')
-	case "$_written" in
-	'' | 0) return 1 ;;
-	esac
+	[ -n "$_written" ] || return 2
+	[ "$_written" = "0" ] && return 1
 
 	return 0
 }
@@ -200,9 +220,15 @@ if [ "$tg" = "no" ] && [ "$nf" = "no" ]; then
 	exit 0
 fi
 
-if recorder_covers_it; then
+recorder_covers_it
+case $? in
+0)
 	exit 0
-fi
+	;;
+2)
+	say "could not tell whether the recorder is covering this; sending anyway, which may duplicate a recording that also gets sent"
+	;;
+esac
 
 # One capture serves both senders where they ask for the same length, which is
 # the ordinary case. Where they differ, each gets what its own page promised:

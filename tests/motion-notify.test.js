@@ -58,9 +58,13 @@ const server = http.createServer((req, res) => {
 
 	if (url === '/metrics/records') {
 		asked.push('metrics');
-		res.writeHead(200, { 'Content-Type': 'text/plain' }).end(
-			'records_state ' + recorder.state + '\n' +
-			'records_fragments_written_total ' + recorder.written + '\n');
+		let body = '';
+		if (recorder.state !== null) body += 'records_state ' + recorder.state + '\n';
+		if (recorder.written !== null)
+			body += 'records_fragments_written_total ' + recorder.written + '\n';
+		// Never empty: an empty body is "could not ask", which is a different
+		// case with its own test.
+		res.writeHead(200, { 'Content-Type': 'text/plain' }).end(body || '# no records metrics\n');
 		return;
 	}
 
@@ -293,6 +297,19 @@ server.listen(0, '127.0.0.1', async () => {
 		check('records its own clip', clips.length === 2, clips.join(','));
 		check('and sends it', sentLines().length === 2, JSON.stringify(sentLines()));
 		check('exits 0', r.status === 0, 'status ' + r.status);
+	}
+
+	group('a metrics endpoint that says nothing is not an answer');
+	{
+		// A build that publishes no such gauge has told us nothing about its
+		// recorder, which is a different thing from telling us it is idle.
+		reset();
+		both();
+		config = { 'records.enabled': 'true', 'records.mode': 'motion' };
+		recorder = { state: null, written: null };
+		const quiet = await run(build());
+		check('sends rather than assuming', clips.length === 2, clips.join(','));
+		check('exits 0', quiet.status === 0, 'status ' + quiet.status);
 	}
 
 	group('a camera that cannot be asked is given the benefit of the doubt');
