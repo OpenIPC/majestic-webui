@@ -65,9 +65,17 @@
 		return 'Autofocus failed: ' + why + '.';
 	}
 
-	// `mag=-1.0` means the lens MCU never reported its zoom position, so the
-	// engine has no parfocal seed and every pass seeks the near stop first.
-	// That is why autofocus is slow on this camera, and nothing else says so.
+	// `mag=-1.0` means the camera does not currently KNOW where the zoom is — not
+	// that the lens cannot say. This lens reports its position perfectly well
+	// (it is what the OSD's x2.7 comes from), but only while the zoom motor is
+	// turning, and the camera holds the answer in memory only: a restart
+	// forgets a fact about the hardware that never changed.
+	//
+	// It matters because the search is seeded from it. With the position
+	// unknown the engine treats the lens as fully wide, whose parfocal target
+	// is the near stop, so it drives hard to near and then sweeps only eight
+	// seconds back — measured on an 85H50AI, short of the ~9 s where focus
+	// actually is. That is the "it goes the wrong way" an operator sees.
 	function magUnknown(s) {
 		return / mag=-1\.0(?:\D|$)/.test(s);
 	}
@@ -245,10 +253,10 @@
 						// and lands on its peak exactly, in about 8 seconds.
 						return {
 							say: magUnknown(s)
-								? 'Autofocus stopped short, and it is searching ' +
-									'blind: the lens has not reported its zoom ' +
-									'position since the camera restarted. Nudge ' +
-									'the zoom once — it settles after that.'
+								? 'Autofocus searched from the wrong end: the ' +
+									'camera does not know where the zoom is, so ' +
+									'it started at the near stop. Nudge the zoom ' +
+									'once to tell it, then focus again.'
 								: 'Autofocus stopped short — the picture is less ' +
 									'sharp than this pass had already seen. ' +
 									'Press Autofocus again.',
@@ -258,8 +266,9 @@
 					let say = 'Autofocus finished.';
 					if (magUnknown(s) && !saidMagOnce) {
 						saidMagOnce = true;
-						say += ' This lens does not report its zoom position, ' +
-							'so every autofocus searches the whole range.';
+						say += ' The camera does not know where the zoom is, ' +
+							'though — nudge the zoom once and autofocus gets ' +
+							'faster and more reliable.';
 					}
 					return { say: say, poll: false, settled: true, transient: true };
 				}

@@ -203,7 +203,8 @@ const DONE_NOMAG = 'done fv=13288 peak=13288 start=10832 mag=-1.0 pos=2610 steps
 	af.step('running', 500);
 	const bad = af.step(COLD, 53000);
 	check('a pass that parked below its own peak is not reported as success',
-		/stopped short/.test(bad.say), bad.say);
+		bad.say !== 'Autofocus finished.' && /wrong end|stopped short/.test(bad.say),
+		bad.say);
 	// The remedy has to match the state. With the zoom position unknown, five
 	// passes in a row took the full-range path and every one stopped short, so
 	// "press again" is not a fix — it is another 50 seconds of the same. A
@@ -218,7 +219,8 @@ const DONE_NOMAG = 'done fv=13288 peak=13288 start=10832 mag=-1.0 pos=2610 steps
 	const worse = af3.step(GAVE_UP, 50000);
 	check('a pass that ended blurrier than it began is caught too, ' +
 		'though it sat on its own peak',
-		/stopped short/.test(worse.say), worse.say);
+		worse.say !== 'Autofocus finished.' &&
+			/wrong end|stopped short/.test(worse.say), worse.say);
 
 	// Same shortfall, but the lens HAS reported its zoom: here the seeded path
 	// is reachable and pressing again is the real remedy.
@@ -243,8 +245,13 @@ const DONE_NOMAG = 'done fv=13288 peak=13288 start=10832 mag=-1.0 pos=2610 steps
 	af.trigger('started', 'idle', 0);
 	af.step('running', 500);
 	const first = af.step(DONE_NOMAG, 9000);
-	check('a lens with no zoom report explains itself',
-		/searches the whole range/.test(first.say), first.say);
+	// The lens reports its position perfectly well — the camera has simply
+	// forgotten it. Saying the lens cannot report was wrong about the hardware,
+	// and it sent the operator looking for a fault that is not there.
+	check('an unknown zoom position is named as the camera not knowing, ' +
+		'never as the lens not saying',
+		/does not know where the zoom is/.test(first.say) &&
+			!/does not report/.test(first.say), first.say);
 	af.trigger('started', 'idle', 20000);
 	af.step('running', 20500);
 	const second = af.step(DONE_NOMAG, 30000);
