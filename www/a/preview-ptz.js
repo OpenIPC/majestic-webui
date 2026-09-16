@@ -96,24 +96,20 @@
 	// not a new flag — the markup already decides it, and always did:
 	// `data-act` is the serial pad, `data-dir` the stepped one.
 	//
-	// Nothing paces this but the ticker. j/ptz.cgi's exit used to mark the end
-	// of a pulse, so the one-in-flight rule measured the hold out; /ptz answers
-	// in about 30 ms (measured on an hi3516ev300, for a move asked to run 2 s),
-	// because the motor's deadline lives in the daemon. That is what the
-	// camera's design wants anyway: every request re-arms the deadline, so a
-	// 250 ms ticker is a continuous move and a lost release still stops.
-	//
 	// `ms` is the query parameter, not the `verb:ms` the plugin ABI uses —
-	// majestic parses move/ms properly (evhttp_parse_query_str, not a
-	// substring sniff) and composes the plugin's form itself.
+	// majestic parses move/ms properly (evhttp_parse_query_str, not a substring
+	// sniff) and composes the plugin's form itself.
+	//
 	// Held ticks are NOT gated on a request being in flight, and that inversion
 	// is the point. j/ptz.cgi's exit marked the end of a pulse, so dropping a
-	// tick while one was outstanding was how a hold measured itself out. Here a
-	// tick exists only to re-arm the motor's deadline, so the moment one is in
-	// flight is the moment the next one matters most: dropped, the deadline
-	// expires and the sweep stalls mid-press. Measured on this camera over the
-	// lab link — a round trip near 500 ms against a 250 ms ticker left one
-	// coarse request in a 1.2 s hold and a gap before the release.
+	// tick while one was outstanding was how a hold measured itself out. /ptz
+	// answers in about 30 ms (measured on an hi3516ev300, for a move asked to
+	// run two seconds) because the motor's deadline lives in the daemon, so a
+	// tick now exists only to re-arm that deadline — and the moment one request
+	// is outstanding is the moment the next one matters most. Dropped, the
+	// deadline expires and the sweep stalls mid-press: measured over the lab
+	// link, a 250 ms ticker against a ~500 ms round trip left ONE coarse
+	// request in a 1.2 s hold, and the release landed 376 ms late.
 	//
 	// Bounded rather than free: past a few outstanding requests the link, not
 	// the ticker, is the problem, and piling on cannot help. `stop` is never
@@ -160,10 +156,24 @@
 	const afState = window.MajesticAfState ? window.MajesticAfState.create() : null;
 	let afTimer = null, zoomTouched = false;
 
-	function say(text) {
+	// A result is news, not a standing condition: "Autofocus finished" that
+	// never leaves is clutter over the picture within a minute of using the
+	// pad. Outcomes clear themselves; only a `failed:` — which describes
+	// something still true about the camera — stays until the next pass
+	// replaces it.
+	let sayTimer = null;
+	function say(text, transient) {
 		if (!afSay) return;
+		if (sayTimer) { clearTimeout(sayTimer); sayTimer = null; }
 		afSay.textContent = text || '';
 		afSay.hidden = !text;
+		if (text && transient) {
+			sayTimer = setTimeout(() => {
+				sayTimer = null;
+				afSay.textContent = '';
+				afSay.hidden = true;
+			}, 4000);
+		}
 	}
 	// majestic answers /autofocus and /ptz with a bodyless 200 when the sensor
 	// driver did not come up, so the status code alone is not an answer. Every
@@ -183,7 +193,7 @@
 			afTimer = null;
 			afText(AF_STATUS_URL).then(s => {
 				const r = afState.step(s, Date.now());
-				if (r.say !== null && r.say !== undefined) say(r.say);
+				if (r.say !== null && r.say !== undefined) say(r.say, r.transient);
 				if (r.poll) afTick(1000);
 			}, () => {
 				// A failed poll is not a verdict about the pass. Keep watching
@@ -201,13 +211,21 @@
 			// itself. `observe()` keeps the last idle sighting, and passing
 			// undefined keeps it.
 			const r = afState.trigger(reply, undefined, Date.now());
-			say(r.say);
+			say(r.say, r.transient);
 			if (r.withdraw) {
 				const b = mount.querySelector('[data-act="af"]');
 				if (b) b.hidden = true;
 			}
 			if (r.poll) afTick(200);
 		}, () => say('The camera did not answer.'));
+	}
+	// "Best sharpness since you started focusing" is only meaningful within one
+	// scene at one zoom, so the stats panel's high-water mark is cleared
+	// whenever either moves. Guarded: the panel is a separate module and may
+	// not be loaded at all.
+	function focusReset() {
+		const st = window.MajesticStats;
+		if (st && typeof st.focusReset === 'function') st.focusReset();
 	}
 	function afManual(verb) {
 		if (!afState) return;
@@ -274,9 +292,12 @@
 			// happily; the browser never asked it to. Triggering directly and
 			// watching the status is what ends that, rather than a longer
 			// timeout somewhere.
-			if (act === 'af') { triggerAf(); return; }
+			if (act === 'af') { triggerAf(); focusReset(); return; }
 			move(act, ms, act === 'stop');
-			if (act === 'wide' || act === 'tele') zoomTouched = true;
+			if (act === 'wide' || act === 'tele') {
+				zoomTouched = true;
+				focusReset();
+			}
 			else if (act === 'near' || act === 'far') afManual(act);
 			return;
 		}

@@ -23,8 +23,6 @@
 //
 //   operator    the Autofocus button was pressed; the trigger's own reply
 //               (`started`/`restarted`) is proof a pass exists
-//   adopted     the trigger answered `busy`; someone else's pass is running and
-//               we have said so, so we may as well report its end
 //   afterZoom   a zoom verb was released; majestic books a pass ~1.2 s later.
 //               There is NO reply to prove it, so this generation may only claim
 //               a terminal status after it has actually seen `running`.
@@ -83,7 +81,7 @@
 		// terminal string equal to this one proves nothing — it is what was
 		// already standing.
 		let baseline = null;
-		let kind = null;          // 'operator' | 'adopted' | 'afterZoom' | null
+		let kind = null;          // 'operator' | 'afterZoom' | null
 		let armedAt = 0;
 		let sawRunning = false;
 		let held = false;         // one of our own lens buttons is down
@@ -161,9 +159,9 @@
 			if (isTerminal(s)) {
 				// afterZoom has no trigger reply to link it to a pass, so a
 				// terminal string only belongs to it once `running` was seen.
-				// operator/adopted may accept a terminal string that merely
-				// differs from the baseline — an instant `failed:` never reaches
-				// `running` and would otherwise be swallowed.
+				// An operator generation may accept a terminal string that
+				// merely differs from the baseline — an instant `failed:` never
+				// reaches `running` and would otherwise be swallowed.
 				const ours = sawRunning ||
 					(kind !== 'afterZoom' && s !== baseline);
 				if (!ours) {
@@ -182,14 +180,14 @@
 						say += ' This lens does not report its zoom position, ' +
 							'so every autofocus searches the whole range.';
 					}
-					return { say: say, poll: false, settled: true };
+					return { say: say, poll: false, settled: true, transient: true };
 				}
 				if (isFailure(s))
 					return { say: failureWords(s), poll: false, sticky: true };
 				// preempted
 				if (ours2)
-					return { say: 'Autofocus cancelled.', poll: false };
-				return { say: 'Autofocus was interrupted.', poll: false };
+					return { say: 'Autofocus cancelled.', poll: false, transient: true };
+				return { say: 'Autofocus was interrupted.', poll: false, transient: true };
 			}
 
 			// `idle`, or anything unrecognised, while armed: nothing has happened
@@ -197,7 +195,10 @@
 			// finished.
 			if (now - armedAt >= budget) {
 				disarm();
-				return { say: 'Autofocus did not report a result.', poll: false };
+				return {
+					say: 'Autofocus did not report a result.',
+					poll: false, transient: true,
+				};
 			}
 			return { say: null, poll: true };
 		}
@@ -215,8 +216,14 @@
 				return { say: 'Autofocus…', poll: true };
 			}
 			if (r === 'busy') {
-				arm('adopted', status, now);
-				return { say: 'Autofocus is already running.', poll: true };
+				// NOT "one is already running". A trigger that lands on a
+				// running pass answers `restarted` and preempts it; `busy` is
+				// af_trigger's -1 — the engine unavailable or shutting down.
+				// So nothing started, there is nothing to watch, and there is
+				// nothing worth putting over the picture either: the press did
+				// not take and pressing again is the whole remedy.
+				disarm();
+				return { say: null, poll: false };
 			}
 			if (r === 'unavailable') {
 				disarm();
@@ -225,7 +232,7 @@
 			// No reply at all. The request did not get through, which is not a
 			// statement about the lens — the control stays exactly as it was.
 			disarm();
-			return { say: 'The camera did not answer.', poll: false };
+			return { say: 'The camera did not answer.', poll: false, transient: true };
 		}
 
 		function zoomReleased(status, now) {

@@ -67,12 +67,17 @@ const DONE_NOMAG = 'done fv=9062 peak=13288 start=10832 mag=-1.0 pos=2610 steps=
 	eq('restarted keeps polling', t.poll, true);
 }
 
+// `busy` is af_trigger's -1 — the engine unavailable or shutting down. It is
+// NOT "a pass is already running": a trigger that lands on a running pass
+// answers `restarted` and preempts it. Saying "already running" described a
+// state this reply never means, and put a standing sentence over the picture
+// for a press that did nothing.
 {
 	const af = AF.create();
 	const t = af.trigger('busy', 'running', 0);
-	eq('busy is adopted, not an error', t.say, 'Autofocus is already running.');
-	eq('an adopted pass reports its end',
-		af.step(DONE, 9000).say, 'Autofocus finished.');
+	eq('busy claims nothing', t.say, null);
+	eq('and starts no watch', t.poll, false);
+	eq('and arms no generation', af.armed(), null);
 }
 
 {
