@@ -29,6 +29,46 @@ CONF_DIR=/etc/webui
 MJ_SH=/var/www/cgi-bin/p/majestic.sh
 LOCK=/tmp/motion-notify.lock
 
+# The senders, in the order they are tried.
+#
+# A name is the whole interface: it names the config file
+# ($CONF_DIR/<name>.conf), the settings inside it (<name>_enabled,
+# <name>_clips, <name>_video_seconds), the program sender_bin gives back, and
+# the prefix on anything this script logs about it. A fourth sender is a word
+# here and an arm below; nothing else in this file knows how many there are.
+#
+# A name is a shell variable prefix, so it is [a-z][a-z0-9_]* -- wants() and
+# seconds() build ${name}_enabled and hand it to eval, and a hyphen would not
+# survive that. The order is written down rather than found by globbing
+# $CONF_DIR, which also holds proxy, vtun, wireguard and backup: those are
+# extensions, not senders, and a directory's order is nobody's decision.
+#
+# sbin/record.sh and p/common.cgi's clip_hook_wanted carry the same list, and
+# tools/lint-templates.sh fails the build when the three disagree. Repeated
+# rather than sourced from one file because the failure is asymmetric: a shared
+# file that went missing would leave every reader believing there are no
+# senders, and for clip_hook_wanted that answer does not merely skip work, it
+# CLEARS records.onClose and removes the movement hook. A camera would quietly
+# unwire itself. Three words in three files are cheaper than that risk.
+SENDERS='telegram ntfy max'
+
+# A name's program on stdout; 1 for a name with no program, which is a typo in
+# the list above rather than a state a camera can be in.
+#
+# One `case` rather than a variable per name: this script sources majestic.sh
+# into its own shell, and a table kept in variables is a table something else
+# can overwrite. It is also the only copy of each path now -- the executable
+# test and the dispatch used to hold one each, so an edit to one would have
+# tested one file and run another.
+sender_bin() {
+	case "$1" in
+	telegram) printf '%s' '/usr/sbin/telegram' ;;
+	ntfy) printf '%s' '/usr/bin/ntfy.sh' ;;
+	max) printf '%s' '/usr/sbin/max' ;;
+	*) return 1 ;;
+	esac
+}
+
 say() { logger -t motion-notify "$1" 2>/dev/null || true; }
 
 # One capture at a time, camera-wide.
@@ -198,25 +238,37 @@ capture_to() {
 		return 1
 	fi
 
+	# The log line belongs to the sender that produced it. _bad used to be both
+	# "this one failed" and "something failed", so the first failure made every
+	# later sender log too -- printing the SUCCESSFUL sender's own stdout, which
+	# says the clip went out, under its name as though it had not.
 	_bad=0
 	for _who in "$@"; do
-		case "$_who" in
-		telegram) _out=$(/usr/sbin/telegram "$_clip" 2>&1) || _bad=1 ;;
-		ntfy) _out=$(/usr/bin/ntfy.sh "$_clip" 2>&1) || _bad=1 ;;
-		esac
-		[ "$_bad" = 1 ] && say "${_who}: ${_out}"
+		_bin=$(sender_bin "$_who") || continue
+		_out=$("$_bin" "$_clip" 2>&1) || {
+			_bad=1
+			say "${_who}: ${_out}"
+		}
 	done
 
 	rm -rf "$_work"
 	return "$_bad"
 }
 
-tg=no
-nf=no
-[ -x /usr/sbin/telegram ] && wants telegram && tg=yes
-[ -x /usr/bin/ntfy.sh ] && wants ntfy && nf=yes
+# Who wants to hear about this movement, asked in the table's order. A list
+# rather than a flag per sender, so a fourth needs no new variable and no new
+# branch. The executable test comes first, as it always did: an FPV build ships
+# no telegram sender, and a program that is not there has no settings worth
+# reading.
+wanted=''
+for _name in $SENDERS; do
+	_bin=$(sender_bin "$_name") || continue
+	[ -x "$_bin" ] || continue
+	wants "$_name" || continue
+	wanted="${wanted}${wanted:+ }${_name}"
+done
 
-if [ "$tg" = "no" ] && [ "$nf" = "no" ]; then
+if [ -z "$wanted" ]; then
 	exit 0
 fi
 
@@ -230,25 +282,44 @@ case $? in
 	;;
 esac
 
-# One capture serves both senders where they ask for the same length, which is
-# the ordinary case. Where they differ, each gets what its own page promised:
-# handing both the longer clip would silently lengthen one service's video
-# because the other was switched on, while its page went on showing the shorter
-# figure.
+# One capture per DISTINCT length. Where the senders agree -- the ordinary case
+# -- that is one capture handed to all of them. Where they differ, each gets
+# what its own page promised: handing everybody the longest clip would silently
+# lengthen one service's video because another was switched on, while its page
+# went on showing the shorter figure.
+#
+# The lengths are read here rather than above, so a camera that stands aside
+# for the recorder reads no _video_seconds at all.
+#
+# No arrays in this shell, so the plan is a string of name:seconds pairs and
+# the lengths already taken are a space-padded string matched with `case`. The
+# padding is what stops 1 matching inside 10. Both are walked in the table's
+# order, so the first sender at a given length decides where that capture sits
+# in the sequence: two cameras configured alike capture in the same order.
+plan=''
+for _name in $wanted; do
+	plan="${plan}${plan:+ }${_name}:$(seconds "$_name")"
+done
+
 rc=0
-if [ "$tg" = "yes" ] && [ "$nf" = "yes" ]; then
-	tgs=$(seconds telegram)
-	nfs=$(seconds ntfy)
-	if [ "$tgs" = "$nfs" ]; then
-		capture_to "$tgs" telegram ntfy || rc=1
-	else
-		capture_to "$tgs" telegram || rc=1
-		capture_to "$nfs" ntfy || rc=1
-	fi
-elif [ "$tg" = "yes" ]; then
-	capture_to "$(seconds telegram)" telegram || rc=1
-else
-	capture_to "$(seconds ntfy)" ntfy || rc=1
-fi
+captured=' '
+for _entry in $plan; do
+	_secs=${_entry#*:}
+	case "$captured" in
+	*" $_secs "*) continue ;;
+	esac
+	captured="${captured}${_secs} "
+
+	group=''
+	for _other in $plan; do
+		if [ "${_other#*:}" = "$_secs" ]; then
+			group="${group}${group:+ }${_other%%:*}"
+		fi
+	done
+
+	# Unquoted on purpose: $group is a list of names taken from the table at
+	# the top of this file, which is the one thing here a camera cannot set.
+	capture_to "$_secs" $group || rc=1
+done
 
 exit $rc

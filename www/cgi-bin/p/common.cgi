@@ -465,8 +465,19 @@ include() {
 #
 # Each sender answers for itself, in its own config, and is read in a subshell
 # so that the second one cannot see what the first one set.
+#
+# The same list sbin/motion-notify.sh and sbin/record.sh carry;
+# tools/lint-templates.sh fails the build when the three disagree. A name
+# missing HERE is the expensive one: this predicate gates both hook syncs, and
+# answering "nobody wants clips" does not merely skip wiring -- it clears the
+# camera's finished-recording hook and removes the movement one. A camera with
+# only the missing sender switched on would quietly unwire itself.
+#
+# Names only, and no executable test: a sender switched on in a build that does
+# not ship it still wires the hooks, exactly as before, and record.sh passes
+# over it at the moment it would have run.
 clip_hook_wanted() {
-	for _ch_name in telegram ntfy; do
+	for _ch_name in telegram ntfy max; do
 		[ -e "/etc/webui/${_ch_name}.conf" ] || continue
 		if (
 			. "/etc/webui/${_ch_name}.conf"
