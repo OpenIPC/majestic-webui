@@ -50,11 +50,18 @@
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and nothing on the way in retypes it.
 	const on = (v) => v === true || v === 'true' || v === 1 || v === '1';
-	// The mirror, and it is not !on(): these keys default ON, so ABSENT has to
-	// stay distinct from off. A key this page was never given is one it knows
-	// nothing about, and reading that as "switched off" would stand a finding
-	// down on every camera whose daemon predates the switch.
-	const off = (v) => v === false || v === 'false' || v === 0 || v === '0';
+	// What may drive one actuator, from the one key that says it: 'off' (the
+	// pad is not claimed at all), 'manual' (held, moved on request, dusk
+	// leaves it alone) or 'auto'. Anything else — absent, a typo, a value a
+	// newer daemon has learnt — reads as auto, which is both the default and
+	// the safe answer: it is the state every camera was in before the key
+	// existed, and the one that raises findings rather than standing them
+	// down. An unquoted `off` in a hand-edited file is YAML's boolean false
+	// by the time it reaches here, so that spelling comes in too — the same
+	// accommodation the daemon's own reader makes.
+	const mode = (v) =>
+		(v === 'off' || v === false || v === 'false') ? 'off'
+			: v === 'manual' ? 'manual' : 'auto';
 
 	// Does day/night move the IR-cut filter at all? Off leaves it where its
 	// owner put it while the pad stays claimed and the manual switch still
@@ -62,7 +69,7 @@
 	// Asked in three places (this file's conflict rule and both pages'
 	// trackers), so it is written once.
 	function follows(nm) {
-		return !off((nm || {}).irCutAuto);
+		return mode((nm || {}).irCut) === 'auto';
 	}
 
 	// Agreement, and the direction is measured rather than assumed: with the
@@ -125,7 +132,13 @@
 		nm = nm || {};
 		return [pin(nm.irCutPin1), pin(nm.irCutPin2),
 			on(nm.irCutSingleInvert) ? 1 : 0,
-			nm.irCutEnabled === false ? 0 : 1].join('/');
+			// Whether the filter is DRIVEN, not which of the two driven modes
+			// it is in. A verdict says the filter moves when the camera
+			// pulses it, and moving day/night in or out of that is not a
+			// change to what a pulse does — stamping the mode itself would
+			// throw a good measurement away every time somebody turned
+			// automatic switching on.
+			mode(nm.irCut) === 'off' ? 0 : 1].join('/');
 	}
 
 	// Has somebody driven this filter and watched the picture change?
@@ -219,7 +232,7 @@
 		// about a filter that does not move stands down, and one observation
 		// says what is going on and where the switch is. Explicit === false:
 		// an older daemon has no such key, and absent must not read as off.
-		const ircutParked = off(nm.irCutEnabled);
+		const ircutParked = mode(nm.irCut) === 'off';
 		if (ircutParked) {
 			if (driveable) {
 				out.push({
@@ -498,7 +511,7 @@
 
 		// The lamp's own park switch, same shape as the filter's: wiring
 		// kept, nothing driven, said once as an observation.
-		if (nm.backlightEnabled === false &&
+		if (mode(nm.backlight) === 'off' &&
 			(has(nm.backlightPin) || (nm.backlightPwmChannel &&
 				nm.backlightPwmChannel !== 'none'))) {
 			out.push({
@@ -1561,6 +1574,7 @@
 	const api = {
 		diagnose: diagnose, tracker: tracker, monitorView: monitorView,
 		wiringKey: wiringKey, settledBy: settledBy, follows: follows,
+		mode: mode,
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
