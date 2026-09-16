@@ -79,9 +79,12 @@ Where:
   -r, --restore      Remove what a previous run installed and go back to the
                      WebUI the firmware itself ships, putting back the edits
                      an install archived. Anything edited since is left in
-                     place, so this is repeatable. Downloads nothing. Ends by
-                     offering to remove the directories left empty in the
-                     overlay, a step that reboots the camera.
+                     place, so this is repeatable. Downloads nothing itself,
+                     and the stub that starts it prefers the copy in
+                     $STATE_DIR over fetching one, so a camera that has run an
+                     install before needs no network here. Ends by offering to
+                     remove the directories left empty in the overlay, a step
+                     that reboots the camera.
   -n, --dry-run      Report what would change, then exit without touching
                      anything.
       --no-backup    Do not archive locally modified files before they are

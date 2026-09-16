@@ -4,28 +4,31 @@
 #
 # This is what a camera carries as /usr/sbin/updatewebui. The installer itself
 # is not on the image: it is a 48 KB shell script whose only job is to download
-# a tree from GitHub and copy it into place, so a camera that cannot reach
-# GitHub cannot use it anyway -- and the rootfs is a fixed-size squashfs
+# a tree and copy it into place, and the rootfs is a fixed-size squashfs
 # partition that several boards are already at the edge of. An 8 MB gk7202v300
-# was 12 KB over its 5120 KB partition and would not build at all; the installer
-# was 12 KB of it.
-#
-# The download path is not new. Every image already ships a majestic_webui()
-# function in /etc/profile that fetches this same file and runs it out of /tmp.
-# What this adds is the command still being called updatewebui, arguments
-# reaching it, and the copy being kept.
+# was 12 KB over its 5120 KB and would not build at all; the installer was
+# 12 KB of it.
 #
 # It is also a fix rather than only a saving. The installer is part of the tree
 # it installs, so the copy that ran an install was always the one the PREVIOUS
-# install left behind -- a fix to the installer landed on the camera but did not
-# act on it until the run after the one that fetched it. That is backwards for
-# the run that matters, the one bringing the fix down, and the old answer was
-# for the downloaded tree to take the run over mid-flight (hand_over, guarded by
-# scr_version and a one-hop environment variable). Fetching first makes the
-# running copy the newest by construction, and all of that machinery goes.
+# install left behind -- a fix to the installer landed on the camera but did
+# not act on it until the run after the one that fetched it. That is backwards
+# for the run that matters, the one bringing the fix down, and the old answer
+# was for the downloaded tree to take the run over mid-flight. Fetching first
+# makes the running copy the newest by construction, and all of that goes.
 #
-# What it costs: --restore downloads nothing today, and that stays true only
-# where a copy has already been cached here. See the restore branch below.
+# Where the installer comes from, in order:
+#
+#   --restore with a copy already here   the copy, untouched
+#   --url=...                            the archive that was named
+#   anything else                        the branch being installed, on GitHub
+#   any of those having failed           the copy already here, if there is one
+#
+# The --url rule is what keeps this usable with no internet at all. An archive
+# reached over file:// carries its own installer, so a camera with the zip on
+# it needs nothing else -- which is how the WebUI is deployed onto cameras that
+# must not be given a network route, and it worked before this split because
+# the installer was on the image. It must go on working.
 
 scr_name=updatewebui
 REPO=openipc/majestic-webui
@@ -37,15 +40,19 @@ die() {
 	exit 1
 }
 
-# Which branch's installer to fetch, in the three spellings the installer
-# itself accepts: -b NAME, --branch=NAME, and a bare argument. Best-effort by
-# design -- what gets installed comes from the tree, how it is installed does
-# not, so a miss here means the run is done by master's installer rather than
-# by the wrong tree. It matters for one person: whoever is testing a branch
-# that changes the installer, which is exactly who the old handover served.
+# What this run is, in the spellings the installer itself accepts: -b NAME,
+# --branch=NAME, --url=URL, and a bare argument for the branch.
+#
+# Which branch is best-effort by design -- what gets installed comes from the
+# tree, how it is installed does not, so a miss means the run is done by
+# master's installer rather than by the wrong tree. It matters for one person:
+# whoever is testing a branch that changes the installer.
 branch=
+url=
 want=
 restore=0
+dry_run=0
+help=0
 for arg in "$@"; do
 	if [ -n "$want" ]; then
 		branch=$arg
@@ -55,7 +62,10 @@ for arg in "$@"; do
 	case $arg in
 	-b) want=1 ;;
 	--branch=*) branch=${arg#--branch=} ;;
+	--url=*) url=${arg#--url=} ;;
 	-r | --restore) restore=1 ;;
+	-n | --dry-run) dry_run=1 ;;
+	-h | --help) help=1 ;;
 	-*) ;;
 	*) branch=$arg ;;
 	esac
@@ -70,46 +80,133 @@ case $branch in
 *[!A-Za-z0-9._/-]*) die "not a branch name: $branch" ;;
 esac
 
-run() {
-	[ -x "$CACHE" ] || chmod +x "$CACHE" 2>/dev/null
-	# Fed to a shell rather than executed, for the reason the installer gives
-	# about its own staging: a mode that did not survive, or a filesystem
-	# mounted noexec, must not be what decides whether a camera can be updated.
-	exec /bin/sh "$CACHE" "$@"
+tmp=$(mktemp -d) || die "cannot create a temporary directory"
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# Everything is staged under /tmp and only a run that is going to keep its
+# installer touches $STATE_DIR. A camera that has never had one has no
+# /etc/webui either, and pointing curl straight at a file inside it is a
+# download that fails before it starts.
+staged=$tmp/$scr_name
+
+# Both checks matter. -f is what stops curl writing a 404's body to the file
+# and exiting 0; the marker check is the failure -f cannot see, a 200 carrying
+# something that is not this script.
+usable() {
+	[ -s "$1" ] || return 1
+	head -n 1 "$1" | grep -q '^#!/bin/sh' || return 1
+	grep -q "^scr_name=$scr_name\$" "$1"
 }
 
-# --restore is the one mode that reaches no network, and that is a promise its
-# help text makes: it puts back what an install took away, which is exactly
-# what somebody does when a deploy went wrong. So a cached installer is used
-# as-is rather than being refreshed first. Any cache is a copy that ran an
-# install here, so it knows how to undo one.
+# Kept only where it was asked for from the place it is meant to come from,
+# and never by a --dry-run: that mode promises to touch nothing, and a cache
+# is something on the camera that was not there before.
+promote() {
+	[ "$dry_run" = 1 ] && return 0
+	[ -n "$url" ] && return 0
+	mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+	cp "$staged" "$CACHE.new" 2>/dev/null &&
+		chmod +x "$CACHE.new" 2>/dev/null &&
+		mv -f "$CACHE.new" "$CACHE" 2>/dev/null || rm -f "$CACHE.new"
+	return 0
+}
+
+# Fed to a shell rather than executed, for the reason the installer gives about
+# its own staging: a mode that did not survive a copy, or a filesystem mounted
+# noexec, must not be what decides whether a camera can be updated.
+run() {
+	_script=$1
+	shift
+	exec /bin/sh "$_script" "$@"
+}
+
+run_staged() {
+	promote
+	exec /bin/sh "$staged" "$@"
+}
+
+# --restore is the one mode the installer runs without a network, and a camera
+# reaching for it has usually just had an install go wrong. A copy already here
+# is therefore used as it is rather than refreshed.
 if [ "$restore" = 1 ] && [ -s "$CACHE" ]; then
-	run "$@"
+	chmod +x "$CACHE" 2>/dev/null
+	run "$CACHE" "$@"
 fi
 
-url="https://raw.githubusercontent.com/$REPO/$branch/sbin/$scr_name"
-tmp=$CACHE.new
-
-# -f, without which curl writes the server's error page to the file and exits
-# 0: a 404 would be cached and then fed to sh. Two checks on what came back,
-# because a 200 carrying the wrong thing is the failure -f cannot see.
-if curl -fsSL --connect-timeout 15 -m 120 -o "$tmp" "$url"; then
-	if head -n 1 "$tmp" | grep -q '^#!/bin/sh' &&
-		grep -q "^scr_name=$scr_name\$" "$tmp"; then
-		mkdir -p "$STATE_DIR" 2>/dev/null
-		chmod +x "$tmp" 2>/dev/null
-		mv -f "$tmp" "$CACHE" || die "cannot store the installer in $CACHE"
-	else
-		rm -f "$tmp"
-		die "what $url returned is not the installer"
+# An archive names its own installer. This is the path that needs no internet:
+# a zip already on the camera is enough. An archive from before this split
+# carries the installer as sbin/updatewebui and a newer one carries it there
+# too -- the stub is a separate file -- so either way what comes out of the
+# archive is what installs the archive, and a tree carrying an installer fix
+# applies it to its own install rather than to the next one.
+if [ -n "$url" ]; then
+	# file:// by hand rather than through curl: it is the case that has to work
+	# on a camera with no route out, and whether this curl was built with the
+	# file protocol compiled in is not something to find out there.
+	case $url in
+	file://*) cp "${url#file://}" "$tmp/tree.zip" 2>/dev/null ;;
+	*) curl -fsSL --connect-timeout 15 -m 300 -o "$tmp/tree.zip" "$url" 2>/dev/null ;;
+	esac
+	if [ -s "$tmp/tree.zip" ] &&
+		unzip -qo -d "$tmp/x" "$tmp/tree.zip" "*/sbin/$scr_name" >/dev/null 2>&1; then
+		found=$(find "$tmp/x" -name "$scr_name" -type f 2>/dev/null | head -1)
+		if [ -n "$found" ] && usable "$found"; then
+			cp "$found" "$staged" && chmod +x "$staged" 2>/dev/null
+			run_staged "$@"
+		fi
 	fi
-elif [ -s "$CACHE" ]; then
-	rm -f "$tmp"
-	echo "$scr_name: cannot reach GitHub; using the installer cached in $CACHE" >&2
-else
-	rm -f "$tmp"
-	die "cannot reach GitHub, and no installer has been cached in $STATE_DIR yet.
-Fetch it on a camera that can:  curl -fsSL $url -o $CACHE"
+	# The archive could not supply one. A copy already here still knows how to
+	# unpack it, so that is better than stopping.
+	if [ -s "$CACHE" ]; then
+		echo "$scr_name: that archive carries no installer; using the one in $CACHE" >&2
+		chmod +x "$CACHE" 2>/dev/null
+		run "$CACHE" "$@"
+	fi
+	die "that archive carries no $scr_name, and none is cached in $STATE_DIR"
 fi
 
-run "$@"
+url_raw="https://raw.githubusercontent.com/$REPO/$branch/sbin/$scr_name"
+
+if curl -fsSL --connect-timeout 15 -m 120 -o "$staged" "$url_raw" 2>/dev/null; then
+	usable "$staged" || die "what $url_raw returned is not the installer"
+	chmod +x "$staged" 2>/dev/null
+	run_staged "$@"
+fi
+
+if [ -s "$CACHE" ]; then
+	echo "$scr_name: cannot reach GitHub; using the installer kept in $CACHE" >&2
+	chmod +x "$CACHE" 2>/dev/null
+	run "$CACHE" "$@"
+fi
+
+# Nothing to run. --help still has to say something: a camera with no route out
+# is exactly where somebody needs to be told what the options are, and "cannot
+# reach GitHub" is not an answer to "what does this command do".
+if [ "$help" = 1 ]; then
+	cat <<EOF
+OpenIPC WebUI installer (fetcher)
+
+Usage: $scr_name [options] [branch]
+
+This command downloads the installer and runs it, so its full help comes from
+the copy it fetches -- and neither $CACHE nor GitHub is reachable right now.
+What it accepts:
+
+  -b, --branch=NAME  Install this branch of $REPO (default: master).
+      --url=URL      Install from this zip instead. file:// works, which is
+                     how a camera with no route out is updated.
+  -r, --restore      Put back the WebUI the firmware ships. Needs an installer
+                     kept in $STATE_DIR, which any previous run leaves there.
+  -n, --dry-run      Report what would change and touch nothing.
+      --no-backup    Do not archive locally modified files first.
+  -h, --help         This, or the installer's own once one can be fetched.
+
+To fetch the installer by hand:
+  curl -fsSL $url_raw -o $CACHE
+EOF
+	exit 0
+fi
+
+die "cannot reach GitHub, and no installer is kept in $STATE_DIR yet.
+Fetch one on a camera that can:  curl -fsSL $url_raw -o $CACHE
+Or install from a zip already here:  $scr_name --url=file:///path/to/tree.zip"
