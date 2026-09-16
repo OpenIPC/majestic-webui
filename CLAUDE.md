@@ -794,9 +794,65 @@ backstop. A run only ever removes its own lock, or one whose lock was taken
 from it would take away its successor's on the way out.
 
 **The bounding box majestic passes that hook is deliberately ignored**, and
-anything else reading it should know why: its four numbers are the corners of
-the box on HiSilicon and the corner plus its size on SigmaStar and Ingenic, so
-a script that measures what moved is wrong on two vendors out of three.
+anything else reading it should know why. Its four numbers used to be the
+corners of the box on HiSilicon and the corner plus its size on SigmaStar and
+Ingenic, so a script that measured what moved was wrong on two vendors out of
+three and nothing in the numbers said which camera it was on. Every backend
+passes the corner and the size now (OpenIPC/majestic#781), but this script
+still has no use for them, and a hook of somebody's own that does should read
+them as x, y, width, height.
+
+**Both notification pages lead with a sentence, and `www/a/notify.js` is where
+it is written.** They were two flat lists of switches with implementation words
+on them — `Send as document`, `Use HEIF format`, `Add to crontab`, `Message
+thread id`, `Interval` — and no answer anywhere to the only question anybody
+opens them with: *will this message me, and with what?* So the first thing on
+either page is now one line that answers it, in the shared `.mj-status`
+component: **Ready — 10-second video — when something moves and when something
+asks**, or *Switched off*, *Not set up yet*, *Partly ready*, or *This firmware
+cannot send to Telegram*.
+
+`NotifyStatus.verdict()` is that line, pure and exported and shared by both
+pages, and `tests/notify-status.test.js` walks it. It earns a test for the
+reason everything in `tests/` does — every branch produces a fluent, confident
+sentence, and a wrong one reads exactly as well as a right one. What cannot be
+reproduced on demand is the third answer: `mjConfig()` resolves `{}` when the
+camera does not answer, so *we could not ask* and *the detector is off* arrive
+at the function as nearly the same value, and only one of them may accuse the
+camera. Every clause that would blame a setting is gated on `camera.known`.
+
+The verdict is computed from what the **camera** reports, not from what was
+typed into the form. Movement is the one trigger with a prerequisite — nothing
+is sent if nothing is watching — so with the detector off the row dims, says
+*The camera is not watching for movement, so this cannot happen. Everything
+else here works without it*, links to the page that switches it on, and the
+headline drops to **Partly ready**. It is dimmed rather than hidden: a control
+that vanishes takes its own explanation with it. And *when something asks* is
+always in the list, because the two webhook links are live the moment the
+service is on and addressed, whatever the switches say.
+
+**The server renders the same verdict before any script runs.** A page whose
+only status line is built in JS says nothing at all on a camera whose browser
+never got the file, and this is the one line that has to be there; the script
+then fills in the half that needs the camera (`checking what the camera can
+do…`). The rest of the shape: a Picture|Video segmented control with a worded
+length beside it, one `.mj-trig` row per reason the camera might send, a **Try
+it** button that reports in plain words and gives up after two minutes rather
+than sitting disabled for the sender's full hundred seconds, and a
+`<details class="mj-advanced">` holding the bot token, the attachment format
+and the proxy — the things a person touches once.
+
+Six defects came out of the same work and are fixed with it. `telegram_interval`
+went into the cron **minute** field, so `*/60` and `*/120` both matched only
+minute 0 and neither was the hour or two hours the page offered; the intervals
+are words now (`Every hour` → `0 * * * *`). The raw-configuration block printed
+the bot token and the ntfy password in clear to anyone who could open the WebUI;
+both are masked. `ntfy_pass` was a `field_text`, so the password was on screen
+as it was typed. `ntfy_proxy` was read by the sender and written by nothing, so
+that branch was dead unless the file was hand-edited. ntfy's priority default
+disagreed with its sender's, so an untouched camera sent at a loudness the page
+did not show. And the Telegram page had no test button at all, though
+`?send=image` had been answering `true`/`false` the whole time.
 
 ## Conventions for new code
 
