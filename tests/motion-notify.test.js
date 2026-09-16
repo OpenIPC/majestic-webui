@@ -97,6 +97,17 @@ fs.mkdirSync(conf);
 
 fs.writeFileSync(path.join(bin, 'hostname'), '#!/bin/sh\necho lab-cam\n', { mode: 0o755 });
 
+// What the script said out loud. say() goes to `logger -t motion-notify "$1"`,
+// which nothing captured before, so every claim about which sender gets blamed
+// for a failure was untestable.
+const said = path.join(tmp, 'said.log');
+fs.writeFileSync(path.join(bin, 'logger'),
+	'#!/bin/sh\nprintf "%s\\n" "$3" >> ' + JSON.stringify(said) + '\n', { mode: 0o755 });
+function saidLines() {
+	if (!fs.existsSync(said)) return [];
+	return fs.readFileSync(said, 'utf8').trim().split('\n').filter(Boolean);
+}
+
 // The senders, stubbed to write down what they were handed. They must be
 // handed a path to a real file, and the SAME path as each other.
 const sent = path.join(tmp, 'sent.log');
@@ -165,6 +176,8 @@ server.listen(0, '127.0.0.1', async () => {
 	const tg = sender('telegram-stub', 0);
 	const nf = sender('ntfy-stub', 0);
 	const tgFails = sender('telegram-fails', 1);
+	const mx = sender('max-stub', 0);
+	const mxFails = sender('max-fails', 1);
 
 	const build = (opts) => rewrite('sbin/motion-notify.sh', [
 		['CONF_DIR=/etc/webui', 'CONF_DIR=' + conf],
@@ -174,12 +187,20 @@ server.listen(0, '127.0.0.1', async () => {
 		['localhost/metrics/records', '127.0.0.1:' + port + '/metrics/records'],
 		['/usr/sbin/telegram', (opts || {}).tg || tg],
 		['/usr/bin/ntfy.sh', nf],
+		['/usr/sbin/max', (opts || {}).max || mx],
 	], (opts || {}).out || 'motion-notify.sh');
 
 	const reset = () => {
 		clips.length = 0;
 		asked.length = 0;
 		fs.rmSync(sent, { force: true });
+		// Only this one. reset() deliberately leaves the other configs behind
+		// -- a later group rewrites telegram.conf and relies on a disabled
+		// ntfy.conf an earlier one left -- so clearing them all would change
+		// what those cases mean. Clearing max.conf keeps the third sender out
+		// of every group written before it existed.
+		fs.rmSync(path.join(conf, 'max.conf'), { force: true });
+		fs.rmSync(said, { force: true });
 		fs.rmSync(lock, { recursive: true, force: true });
 		config = { 'records.enabled': null, 'records.mode': null };
 		recorder = { state: 0, written: 0 };
@@ -444,6 +465,102 @@ server.listen(0, '127.0.0.1', async () => {
 		const leftovers = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('motion.'));
 		check('no working directory survives', leftovers.length === 0, leftovers.join(','));
 		check('and the lock is released', !fs.existsSync(lock), 'lock still held');
+	}
+
+	// --- three senders, which is what the fan-out was rewritten for --------
+	//
+	// The two-sender rule was a branch comparing two lengths. Written as a
+	// branch it does not survive a third sender, and the thing it protects is
+	// worth protecting: one capture per DISTINCT length, so that switching on
+	// a second service cannot silently lengthen the first one's video.
+
+	const all3 = (tgs, nfs, mxs) => {
+		writeConf('telegram', ['telegram_enabled="true"', 'telegram_clips="true"', 'telegram_video_seconds="' + tgs + '"']);
+		writeConf('ntfy', ['ntfy_enabled="true"', 'ntfy_clips="true"', 'ntfy_video_seconds="' + nfs + '"']);
+		writeConf('max', ['max_enabled="true"', 'max_clips="true"', 'max_video_seconds="' + mxs + '"']);
+	};
+
+	group('three senders that agree still take one capture');
+	{
+		reset();
+		all3(10, 10, 10);
+		const r = await run(build());
+		const out = sentLines();
+		check('one capture, not three', clips.length === 1, JSON.stringify(clips));
+		check('and it asked for the agreed length',
+			clips[0] === '/video.mp4?pre=10&duration=10', clips[0]);
+		check('all three were handed something', out.length === 3, JSON.stringify(out));
+		check('and it was the same file for each',
+			out.length === 3 && out[0].file === out[1].file && out[1].file === out[2].file,
+			JSON.stringify(out.map((o) => o.file)));
+		check('each got the whole clip',
+			out.every((o) => Number(o.size) === CLIP.length), JSON.stringify(out));
+		check('and the run succeeded', r.status === 0, 'exit ' + r.status);
+	}
+
+	group('a length two of them share is still shared');
+	{
+		// telegram 10, ntfy 15, max 10: two captures, and the pair on 10 must
+		// get the same file rather than a capture each.
+		reset();
+		all3(10, 15, 10);
+		const r = await run(build());
+		const out = sentLines();
+		check('two captures, one per distinct length',
+			clips.length === 2, JSON.stringify(clips));
+		check('and the shared length went first, as the table orders it',
+			clips[0] === '/video.mp4?pre=10&duration=10', clips[0]);
+		check('the other asked for its own length',
+			clips[1] === '/video.mp4?pre=15&duration=15', clips[1]);
+
+		const byWho = {};
+		out.forEach((o) => { byWho[o.who] = o.file; });
+		check('all three still got one',
+			Object.keys(byWho).length === 3, JSON.stringify(byWho));
+		check('the two that agreed share a file',
+			byWho['telegram-stub'] === byWho['max-stub'], JSON.stringify(byWho));
+		check('and the one that differed got its own',
+			byWho['ntfy-stub'] !== byWho['telegram-stub'], JSON.stringify(byWho));
+		check('the run succeeded', r.status === 0, 'exit ' + r.status);
+	}
+
+	group('a sender this build does not ship is passed over');
+	{
+		// The FPV case: the page and its config are there, the program is not.
+		// Nothing had covered the executable test before.
+		reset();
+		all3(10, 10, 10);
+		const r = await run(build({ max: '/nonexistent/max', out: 'motion-no-max.sh' }));
+		const out = sentLines();
+		check('the others still went', out.length === 2, JSON.stringify(out));
+		check('and the missing one is not among them',
+			!out.some((o) => o.who === 'max-stub'), JSON.stringify(out));
+		check('one capture still served them', clips.length === 1, JSON.stringify(clips));
+		check('and nothing was reported as a failure', r.status === 0, 'exit ' + r.status);
+	}
+
+	group('a sender that fails is named, and only it');
+	{
+		// _bad used to be both "this one failed" and "something failed", so the
+		// first failure made every LATER sender log too -- printing that
+		// sender's own stdout, which says the clip went out, under its name as
+		// though it had not.
+		//
+		// It has to be the FIRST sender that fails, or the fault is invisible:
+		// a failure in the last one leaves nobody after it to be mislabelled.
+		// The first draft of this test failed `max`, which is last in the
+		// table, and passed just as happily with the quirk back in place.
+		reset();
+		all3(10, 10, 10);
+		const r = await run(build({ tg: tgFails, out: 'motion-tg-fails3.sh' }));
+		const out = sentLines();
+		const log = saidLines();
+		check('the other two still got the clip',
+			out.filter((o) => o.who !== 'telegram-fails').length === 2, JSON.stringify(out));
+		check('exactly one failure was reported', log.length === 1, JSON.stringify(log));
+		check('and it names the sender that actually failed',
+			log.length === 1 && log[0].indexOf('telegram:') === 0, JSON.stringify(log));
+		check('the run reports the failure', r.status !== 0, 'exit ' + r.status);
 	}
 
 	server.close();

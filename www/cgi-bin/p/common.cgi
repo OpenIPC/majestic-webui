@@ -465,17 +465,48 @@ include() {
 #
 # Each sender answers for itself, in its own config, and is read in a subshell
 # so that the second one cannot see what the first one set.
+#
+# The same list sbin/motion-notify.sh and sbin/record.sh carry;
+# tools/lint-templates.sh fails the build when the three disagree. A name
+# missing HERE is the expensive one: this predicate gates both hook syncs, and
+# answering "nobody wants clips" does not merely skip wiring -- it clears the
+# camera's finished-recording hook and removes the movement one. A camera with
+# only the missing sender switched on would quietly unwire itself.
+#
+# Names only, and no executable test: a sender switched on in a build that does
+# not ship it still wires the hooks, exactly as before, and record.sh passes
+# over it at the moment it would have run.
+# Three answers, not two: wanted (0), nobody wants it (1), and a config that
+# could not be read (2).
+#
+# The third exists because of what the callers do with a no. "Nobody wants
+# clips" is not a shrug here -- it is authority to clear the camera's
+# finished-recording setting and delete the movement hook. A config file that
+# will not parse must not buy that authority: it is not a sender declining, it
+# is a question that could not be asked, and answering it as a decline would
+# unwire a camera on the strength of a typo in an unrelated file. Same rule as
+# mj_cfg next door, and the same one sbin/record.sh keeps for the same read.
+#
+# A sourced file that will not parse leaves 2 behind, which is what makes the
+# three cases separable at all; a file that parses and declines leaves 1.
 clip_hook_wanted() {
-	for _ch_name in telegram ntfy; do
+	_ch_unsure=0
+
+	for _ch_name in telegram ntfy max; do
 		[ -e "/etc/webui/${_ch_name}.conf" ] || continue
-		if (
+		(
 			. "/etc/webui/${_ch_name}.conf"
 			eval "[ \"\$${_ch_name}_enabled\" = true ] &&
 				[ \"\$${_ch_name}_clips\" = true ]"
-		); then
-			return 0
-		fi
+		)
+		case $? in
+		0) return 0 ;;
+		1) ;;
+		*) _ch_unsure=1 ;;
+		esac
 	done
+
+	[ "$_ch_unsure" = 1 ] && return 2
 
 	return 1
 }
@@ -512,7 +543,19 @@ clip_hook_sync() {
 		;;
 	esac
 
-	if clip_hook_wanted; then
+	clip_hook_wanted
+	_ch_want=$?
+
+	# A config that could not be read is not a decline, so nothing is torn
+	# down on the strength of it. Said out loud rather than passed over: the
+	# operator has a file the camera cannot read, and the recording sender is
+	# left exactly as it was until they fix it.
+	if [ "$_ch_want" = 2 ]; then
+		clip_hook_msg="One of the notification settings files could not be read, so what the camera runs when a recording finishes was left alone."
+		return 1
+	fi
+
+	if [ "$_ch_want" = 0 ]; then
 		case "$_ch_now" in
 		"$_ch_hook") ;;
 		"")
@@ -572,7 +615,17 @@ motion_hook_mark="# written by the OpenIPC WebUI notification pages"
 motion_hook_sync() {
 	motion_hook_msg=""
 
-	if clip_hook_wanted; then
+	clip_hook_wanted
+	_mh_want=$?
+
+	# As above: a config that could not be read is not permission to remove
+	# somebody's movement hook.
+	if [ "$_mh_want" = 2 ]; then
+		motion_hook_msg="One of the notification settings files could not be read, so what the camera runs when movement starts was left alone."
+		return 1
+	fi
+
+	if [ "$_mh_want" = 0 ]; then
 		# Saying nothing here would be the page confirming a setting whose
 		# other half cannot run: on a build that ships no sender the whole
 		# card-less path is missing, and the operator would be told their

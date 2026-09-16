@@ -26,29 +26,43 @@ reason=$2
 [ -n "$clip" ] && [ -s "$clip" ] || exit 1
 [ "$reason" = "motion" ] || exit 0
 
-# A subshell per extension: both configs are read into this shell, and the
-# second one must not see what the first one set.
-#
 # A sender that was asked to run and failed makes this fail too. The camera
-# does not read the status, but a person running it by hand does, and "the
-# clip went nowhere" must not look like "nothing to do".
+# does not read the status, but a person running it by hand does, and "the clip
+# went nowhere" must not look like "nothing to do".
+#
+# The same list sbin/motion-notify.sh fans a capture out to and p/common.cgi's
+# clip_hook_wanted decides the hooks from; tools/lint-templates.sh fails the
+# build when the three disagree. See the comment on SENDERS in motion-notify.sh
+# for why it is repeated rather than sourced from one place.
 rc=0
 
-if [ -x /usr/sbin/telegram ] && [ -e /etc/webui/telegram.conf ]; then
-	(
-		. /etc/webui/telegram.conf
-		[ "$telegram_enabled" = "true" ] && [ "$telegram_clips" = "true" ] ||
-			exit 0
-		/usr/sbin/telegram "$clip"
-	) || rc=1
-fi
+for name in telegram ntfy max; do
+	case $name in
+	telegram) bin='/usr/sbin/telegram' ;;
+	ntfy) bin='/usr/bin/ntfy.sh' ;;
+	max) bin='/usr/sbin/max' ;;
+	esac
 
-if [ -x /usr/bin/ntfy.sh ] && [ -e /etc/webui/ntfy.conf ]; then
+	[ -x "$bin" ] && [ -e "/etc/webui/$name.conf" ] || continue
+
+	# A subshell for the QUESTION only: every config is read into one shell and
+	# the next must not see what the last one set. The sender itself runs out
+	# here, because a config that happened to set `clip` -- or now `bin` --
+	# would otherwise change which file was sent, or which program sent it.
+	# The settings are named after the sender, so the test is built as a string
+	# and eval'd; $name comes from the list above and from nowhere else.
 	(
-		. /etc/webui/ntfy.conf
-		[ "$ntfy_enabled" = "true" ] && [ "$ntfy_clips" = "true" ] || exit 0
-		/usr/bin/ntfy.sh "$clip"
-	) || rc=1
-fi
+		. "/etc/webui/$name.conf"
+		eval "[ \"\$${name}_enabled\" = true ] && [ \"\$${name}_clips\" = true ]"
+	)
+	# Three answers, not two: a config that will not even parse leaves a
+	# non-zero status that is not this sender declining, and collapsing it into
+	# "does not want clips" would turn a broken file into a silent success.
+	case $? in
+	0) "$bin" "$clip" || rc=1 ;;
+	1) ;;
+	*) rc=1 ;;
+	esac
+done
 
 exit $rc

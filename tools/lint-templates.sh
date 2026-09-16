@@ -222,6 +222,40 @@ find www -name '*.cgi' -o -name '*.js' -o -name '*.html' | sort | while IFS= rea
 		done
 done
 
+# --- 7. the sender list, in the three files that carry it -----------------
+#
+# sbin/motion-notify.sh fans a movement capture out to the senders,
+# sbin/record.sh hands them a finished recording, and p/common.cgi's
+# clip_hook_wanted decides from the same names whether the camera's hooks are
+# wired at all. They are repeated rather than sourced from one file because the
+# failure is asymmetric: a shared file that went missing would have every
+# reader believe there are no senders, and for clip_hook_wanted that answer
+# clears records.onClose and removes the movement hook -- a camera unwiring
+# itself in silence. Three words in three files cost nothing; this is what
+# stops them drifting apart.
+sender_list_mn=$(sed -n "s/^SENDERS='\([a-z0-9_ ]*\)'.*/\1/p" sbin/motion-notify.sh | head -1)
+sender_list_rec=$(sed -n 's/^for name in \([a-z0-9_ ]*\); do$/\1/p' sbin/record.sh | head -1)
+sender_list_cgi=$(sed -n 's/^[[:space:]]*for _ch_name in \([a-z0-9_ ]*\); do$/\1/p' www/cgi-bin/p/common.cgi | head -1)
+
+# A check that matched nothing is a broken selector, not a clean tree — the
+# same rule the two counts below follow.
+if [ -z "$sender_list_mn" ] || [ -z "$sender_list_rec" ] || [ -z "$sender_list_cgi" ]; then
+	echo "lint: the sender list could not be read out of all three files, so the check did not run" >> "$FAILS"
+elif [ "$sender_list_mn" != "$sender_list_rec" ] ||
+	[ "$sender_list_mn" != "$sender_list_cgi" ]; then
+	printf 'the sender lists disagree: motion-notify.sh [%s], record.sh [%s], p/common.cgi [%s]\n' \
+		"$sender_list_mn" "$sender_list_rec" "$sender_list_cgi" >> "$FAILS"
+fi
+
+# And every name needs a program behind it in both scripts that run one.
+for sender in $sender_list_mn; do
+	grep -q "^	$sender) printf " sbin/motion-notify.sh ||
+		printf 'sbin/motion-notify.sh: sender %s has no program in sender_bin\n' \
+			"$sender" >> "$FAILS"
+	grep -q "^	$sender) bin=" sbin/record.sh ||
+		printf 'sbin/record.sh: sender %s has no program\n' "$sender" >> "$FAILS"
+done
+
 ntpl=$(grep -c '^t$' "$SEEN")
 nsh=$(grep -c '^s$' "$SEEN")
 
