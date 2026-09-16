@@ -7733,7 +7733,12 @@
 			onAvoid: (pin, on) => {
 				scanAvoid(pin, on)
 					.then(() => apiFetch('/api/v1/gpio', { credentials: 'same-origin' }))
-					.then((r) => r.json())
+					// A refusal has a JSON body too, and painting the map from
+					// it would replace a real pad list with an error object --
+					// every pad quietly unknown, on the drawing somebody reads
+					// to decide what is safe to drive.
+					.then((r) => r.ok ? r.json()
+						: Promise.reject(new Error('HTTP ' + r.status)))
 					.then((fresh) => {
 						if (state.ircutMap !== map) return;
 						state.ircutInfo = fresh;
@@ -7905,9 +7910,20 @@
 		const find = box.querySelector('#mj-ircut-find');
 		if (find) {
 			find.addEventListener('click', () => {
-				// The same in-page navigation the tree uses, so this does not
-				// reload the camera's WebUI to move one section.
-				location.hash = 'pins';
+				// This page routes on ?tab= and never looks at the fragment, so
+				// setting location.hash changed the URL and left the reader
+				// exactly where they were -- a button that appears to do
+				// nothing.
+				//
+				// Pressing the rail's own link rather than navigating here is
+				// what keeps the unsaved-changes prompt: wireNav() owns that,
+				// and a second copy of it would be one to keep in step. The
+				// rail can be missing a section while a search is filtering it,
+				// so a plain load is the fallback.
+				const link = document.querySelector(
+					'#mj-settings-nav a.nav-link[href*="tab=pins"]');
+				if (link) link.click();
+				else location.href = 'camera.cgi?tab=pins';
 			});
 		}
 	}

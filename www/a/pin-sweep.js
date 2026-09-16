@@ -95,6 +95,25 @@
 		return out;
 	}
 
+	// The range a hunt was STARTED with, read back out of its stored progress.
+	//
+	// A range is part of what a resumed hunt IS, not a preference that happens
+	// to be set alongside it. It lived in page memory, so a reload dropped it
+	// and "carry on" rebuilt the list over the whole chip -- driving pins the
+	// owner had explicitly fenced off, on the one control here that can stop a
+	// camera answering. Anything that is not a real bound is no bound: a stored
+	// null, a string, an absent half.
+	function storedRange(saved) {
+		const r = saved && saved.range;
+		if (!r || typeof r !== 'object') return null;
+		const num = (v) =>
+			(typeof v === 'number' && isFinite(v)) ? v : undefined;
+		const from = num(r.from), to = num(r.to);
+		return (from === undefined && to === undefined)
+			? null
+			: { from: from, to: to };
+	}
+
 	// What is left of `list` once everything in `done` is taken out, in order.
 	function remaining(list, done) {
 		const seen = {};
@@ -199,7 +218,7 @@
 	// other is what steps() defaults to, and neither is anybody else's.
 	const api = {
 		pads: pads, steps: steps, remaining: remaining, run: run,
-		sentence: sentence, key: key,
+		sentence: sentence, key: key, storedRange: storedRange,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticPinSweep = api;

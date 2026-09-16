@@ -132,6 +132,28 @@ group('pin sweep: the order it tries them');
 		left.map((s) => s.join(':')).join(','), '6:high,4:low,5:low,6:low');
 }
 
+group('pin sweep: the range a hunt was started with');
+
+{
+	// The range is part of what a resumed hunt IS. It used to live in page
+	// memory, so a reload dropped it and "carry on" rebuilt the list over the
+	// whole chip -- driving the pins the owner had explicitly fenced off.
+	const r = sweep.storedRange({ range: { from: 40, to: 47 } });
+	eq('a stored range comes back', r.from + '-' + r.to, '40-47');
+	eq('an open-ended one keeps its one bound',
+		sweep.storedRange({ range: { from: 40 } }).to, undefined);
+	eq('no progress, no range', sweep.storedRange(null), null);
+	eq('no range on the progress', sweep.storedRange({ done: [] }), null);
+	// Whatever is in localStorage was put there by an older version of this
+	// page, or by hand. A bound that is not a number is not a bound, and
+	// half-believing one would fence off the wrong pins.
+	eq('a stored null is no range', sweep.storedRange({ range: null }), null);
+	eq('a string is not a bound',
+		sweep.storedRange({ range: { from: '40', to: '47' } }), null);
+	eq('neither is a NaN', sweep.storedRange({ range: { from: NaN } }), null);
+	eq('an empty object is no range', sweep.storedRange({ range: {} }), null);
+}
+
 group('pin sweep: the run');
 
 const WLAN = [

@@ -397,8 +397,6 @@
 		// arrives in `info.avoid` and outlives this page, which the old
 		// in-memory list did not — a second pin taking the camera down used to
 		// lose the first.
-		const range = state.range || null;
-		const list = S.pairs(info, { part: part, only: range });
 		let stop = false;
 
 		// Where this browser got to, if it was here before and the chip has
@@ -409,6 +407,12 @@
 			prog = null;
 			scanRemember(null);
 		}
+		// The range the scan was STARTED with outranks whatever this page
+		// happens to hold: a reload empties state.range, and carrying on over
+		// the whole chip is not carrying on.
+		const range = (prog ? SWEEP().storedRange(prog) : null) || state.range || null;
+		state.range = range;
+		const list = S.pairs(info, { part: part, only: range });
 		const todo = prog ? S.remaining(list, prog.done) : list;
 
 		host.hidden = false;
@@ -538,6 +542,7 @@
 				// where it stands nothing went wrong.
 				drive: (a, b) => {
 					const pr = scanProgress() || { sig: sig, done: [] };
+					pr.range = range;
 					pr.inflight = S.key(a, b);
 					scanRemember(pr);
 					return FETCH('/api/v1/gpio?pair=' + a + ',' + b,
@@ -549,12 +554,30 @@
 							return j;
 						});
 				},
-				release: (a, b) => FETCH('/api/v1/gpio?park=' + a + ',' + b + '&mode=float',
-					{ method: 'POST', credentials: 'same-origin' })
-					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
+				// Releasing a pair is the scan saying it is RULED OUT, so that
+				// is where the pair is written down as done.
+				//
+				// It used to be recorded one step behind, at the start of the
+				// next pair, which never recorded the last one: stopping a scan
+				// and carrying on re-drove the pair it had just finished. The
+				// range it was started with rides along, because a reload
+				// empties the page's copy and resuming over the whole chip is
+				// not resuming.
+				release: (a, b) => {
+					const pr = scanProgress() || { sig: sig, done: [] };
+					pr.range = range;
+					const k = S.key(a, b);
+					if (pr.done.indexOf(k) < 0) pr.done.push(k);
+					scanRemember(pr);
+					return FETCH(
+						'/api/v1/gpio?park=' + a + ',' + b + '&mode=float',
+						{ method: 'POST', credentials: 'same-origin' })
+						.then((r) => r.ok ? r.json()
+							: Promise.reject(new Error('HTTP ' + r.status)));
+				},
 				look: () => window.MajesticIrcut.snapshot('/image.jpg'),
 				wait: (ms) => new Promise((r) => setTimeout(r, ms)),
-				stopped: () => stop,
+				stopped: () => stop || stopped,
 				onStep: (st) => {
 					t.textContent = 'Trying pins ' + st.a + ' and ' + st.b;
 					s.textContent = (st.index + 1) + ' of ' + st.total;
@@ -562,15 +585,6 @@
 					// driven, and lighting one of the two made the drawing
 					// disagree with the sentence above it.
 					pins.sweep(st.a, st.b);
-					// Everything before this one is done. Recorded per step
-					// rather than at the end, because the end is exactly what
-					// an interrupted scan does not reach.
-					if (st.index > 0) {
-						const pr = scanProgress() || { sig: sig, done: [] };
-						const k = S.key(todo[st.index - 1][0], todo[st.index - 1][1]);
-						if (pr.done.indexOf(k) < 0) pr.done.push(k);
-						scanRemember(pr);
-					}
 				},
 			}, todo).then((res) => {
 				pins.sweep(null, null);
@@ -643,15 +657,49 @@
 					// Which pad OPENS and which CLOSES is the measurement, not a
 					// convention -- swapping them leaves a filter that moves the
 					// wrong way at dusk, which looks like a broken camera.
-					const q = 'nightMode.irCutPin1=' + found.irCutPin1 +
-						'&nightMode.irCutPin2=' + found.irCutPin2;
+					//
+					// POST /api/v1/config, which is the WebUI's write: the
+					// server walks every leaf, aborts on the first it rejects
+					// and only then reloads and saves, so there is no partial
+					// credit. These two keys MUST agree -- one pin without the
+					// other is a filter that cannot move -- and two requests
+					// cannot promise that. GET /api/v1/set is the single-key
+					// variant the WebUI does not use, and sending a
+					// configuration change over a method a browser reissues on
+					// its own was wrong twice over.
+					//
+					// Then read it back, because an accepted request is not a
+					// stored one: older majestic answers 202 and goes on to
+					// ignore what it was sent, and "Saved." over a camera that
+					// kept its old wiring is the one outcome worse than an
+					// error.
 					said.textContent = 'Saving\u2026';
-					FETCH('/api/v1/set?' + q, { credentials: 'same-origin' })
+					FETCH('/api/v1/config', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						credentials: 'same-origin',
+						body: JSON.stringify({ nightMode: {
+							irCutPin1: found.irCutPin1,
+							irCutPin2: found.irCutPin2,
+						} }),
+					})
 						.then((r) => {
 							if (!r.ok) throw new Error('HTTP ' + r.status);
+							return FETCH('/api/v1/config.json',
+								{ credentials: 'same-origin' });
+						})
+						.then((r) => r.ok ? r.json() : Promise.reject(
+							new Error('the camera would not say what it stored')))
+						.then((cfg) => {
+							const nm = (cfg && cfg.nightMode) || {};
+							if (Number(nm.irCutPin1) !== found.irCutPin1 ||
+								Number(nm.irCutPin2) !== found.irCutPin2) {
+								throw new Error('the camera took the request '
+									+ 'and kept its old wiring');
+							}
 							said.innerHTML = 'Saved. Test the filter on the ' +
-								'<a href="#nightMode">Day / Night</a> page, which is ' +
-								'where day and night are set up.';
+								'<a href="camera.cgi?tab=nightMode">Day / Night</a>' +
+								' page, which is where day and night are set up.';
 						})
 						.catch((e) => {
 							said.textContent = 'The camera would not store that: ' +
@@ -683,6 +731,15 @@
 		host.className = HOST_CLASS;
 
 		const why = cannotHunt(info);
+		// Can this camera hold ONE pin and say what turned up?
+		//
+		// `attached` is the inventory the hold hunt diffs, and it arrives in
+		// the same answer. A camera without it is one whose daemon predates
+		// the hunt: the endpoint ignores an unknown parameter and hands back
+		// its pad list, which this page would have read as "held it, nothing
+		// happened" -- two hundred times, cheerfully, finding nothing. Offer
+		// the hunt that exists rather than the one that does not.
+		const canHold = !!(info && info.attached);
 		const sp = sweepProgress();
 		const carry = sp && sp.sig === SCAN().stamp(info) && sp.done.length
 			? sp.done.length : 0;
@@ -697,6 +754,7 @@
 			(why ? '<p class="x-small text-secondary mb-0">' + esc(why) + '</p>' : '') +
 			(why ? '' :
 				'<div class="mj-hunt-offers">' +
+				(!canHold ? '' :
 				'<div class="mj-hunt-offer">' +
 				'<button type="button" class="btn btn-primary btn-sm" id="mj-hunt-sweep">' +
 				(carry ? 'Carry on finding it' : 'What is my pin wired to?') + '</button>' +
@@ -709,7 +767,7 @@
 						'class="btn btn-link btn-sm p-0 align-baseline x-small" ' +
 						'data-do="sweep-reset">start over</button>'
 					: '') +
-				'</p></div>' +
+				'</p></div>') +
 				'<div class="mj-hunt-offer">' +
 				'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
 				'id="mj-hunt-go">Which pins move the day/night filter?</button>' +
@@ -717,7 +775,12 @@
 				'thing on these pins the camera can see through its own lens, so ' +
 				'this one works differently: it drives pins two at a time and ' +
 				'watches the picture. Needs daylight.</p></div>' +
-				'</div>') +
+				'</div>' +
+				(canHold ? '' :
+					'<p class="x-small text-secondary mb-0 mt-2">This camera\u2019s ' +
+					'software is too old to hold a single pin and report what ' +
+					'turned up, so only the filter hunt is offered. Updating it ' +
+					'adds the other one.</p>')) +
 			avoidBlock(info);
 
 		const go = host.querySelector('#mj-hunt-go');
@@ -735,6 +798,51 @@
 			});
 		}
 		wireAvoid(host, info);
+	}
+
+	// A pin the camera stopped answering on, offered back to its owner.
+	//
+	// The browser is the only witness: the camera journals a pad that took it
+	// DOWN, but one that merely cut the connection leaves no trace on it at all
+	// because from where it stands nothing went wrong. Shown both while the
+	// hunt is running and on a later visit, because a reload is exactly how
+	// this ends.
+	function lostCard(info, pin, level) {
+		const host = hostOf();
+		host.hidden = false;
+		host.className = HOST_CLASS;
+		host.innerHTML =
+			'<div class="mj-live-grp-head"><span class="mj-cap">Find a pin</span>' +
+			'<span class="mj-live-rule"></span></div>' +
+			'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
+			'<b>The camera stopped answering while holding pin ' +
+			esc(String(pin)) + ' ' + esc(level) + '.</b> If it is back now, the ' +
+			'pin did not crash it \u2014 it cut this connection, which usually ' +
+			'means the network is on that pin. That is worth knowing, and it is ' +
+			'worth never touching again.</div>' +
+			'<div class="d-flex gap-2 align-items-center">' +
+			'<button type="button" class="btn btn-primary btn-sm" data-do="avoid">' +
+			'Never try pin ' + esc(String(pin)) + ' again</button>' +
+			'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
+			'data-do="go">It was fine, carry on</button></div>';
+
+		host.querySelectorAll('button[data-do]').forEach((b) => {
+			b.addEventListener('click', () => {
+				// Cleared either way: kept, it would offer the same choice
+				// again on the next visit whatever was answered.
+				const pr = sweepProgress();
+				if (pr) { pr.inflight = null; sweepRemember(pr); }
+				if (b.getAttribute('data-do') !== 'avoid') {
+					openSweep(state.info || info);
+					return;
+				}
+				scanAvoid(pin, true)
+					.then(() => (pins.changed ? pins.changed() : null))
+					.then(() => refreshInfo())
+					.then((fresh) => openSweep(fresh),
+						() => openSweep(state.info || info));
+			});
+		});
 	}
 
 	// ── the general hunt: hold one pin, see what turns up ────────────────────
@@ -778,12 +886,30 @@
 		const host = hostOf();
 		if (!SW || !S || !host) return;
 
-		const range = state.range || null;
-		const all = SW.pads(info);
-		const list = SW.steps(SW.pads(info, { only: range }));
 		const sig = S.stamp(info);
 		let prog = sweepProgress();
 		if (prog && prog.sig !== sig) { prog = null; sweepRemember(null); }
+
+		// A pin whose request never came back is answered before anything else
+		// is offered, because carrying on would put it straight back in the
+		// list and cut the connection again.
+		if (prog && prog.inflight) {
+			const bits = String(prog.inflight).split(':');
+			if (bits.length === 2 && bits[0] !== '' && !isNaN(Number(bits[0]))) {
+				lostCard(info, Number(bits[0]), bits[1]);
+				return;
+			}
+			prog.inflight = null;
+			sweepRemember(prog);
+		}
+
+		// The range the hunt was STARTED with outranks whatever this page
+		// happens to hold: a reload empties state.range, and resuming over the
+		// whole chip is not resuming.
+		const range = (prog ? SWEEP().storedRange(prog) : null) || state.range || null;
+		state.range = range;
+		const all = SW.pads(info);
+		const list = SW.steps(SW.pads(info, { only: range }));
 		const todo = prog ? SW.remaining(list, prog.done) : list;
 		let stop = false;
 
@@ -865,6 +991,7 @@
 				// where it stands nothing went wrong.
 				hold: (pin, level) => {
 					const pr = sweepProgress() || { sig: sig, done: [] };
+					pr.range = range;
 					pr.inflight = SW.key(pin, level);
 					sweepRemember(pr);
 					return FETCH(API + '?hold=' + pin + '&level=' + level,
@@ -877,20 +1004,27 @@
 							return j;
 						});
 				},
-				stopped: () => stop,
+				stopped: () => stop || stopped,
 				onStep: (st) => {
 					t.textContent = 'Holding pin ' + st.pin + ' ' + st.level;
 					s.textContent = (st.index + 1) + ' of ' + st.total;
 					pins.sweep(st.pin, null);
-					if (st.index > 0) {
-						const pr = sweepProgress() || { sig: sig, done: [] };
-						const k = SW.key(todo[st.index - 1][0], todo[st.index - 1][1]);
-						if (pr.done.indexOf(k) < 0) pr.done.push(k);
-						sweepRemember(pr);
-					}
 				},
 			}, todo).then((res) => {
 				pins.sweep(null, null);
+				// Recorded from the run's own list rather than one step behind
+				// it. Writing "the previous one is done" at the START of each
+				// step never records the LAST one, so stopping a hunt and
+				// carrying on re-drove the pin it had just finished -- which on
+				// a pin that cuts the network is not a wasted second, it is the
+				// failure again.
+				const pr = sweepProgress() || { sig: sig, done: [] };
+				pr.range = range;
+				pr.inflight = null;
+				(res.tried || []).forEach((k) => {
+					if (pr.done.indexOf(k) < 0) pr.done.push(k);
+				});
+				sweepRemember(pr);
 				sweepFound(info, res, todo.length);
 			}).catch((e) => {
 				pins.sweep(null, null);
@@ -912,39 +1046,7 @@
 			'Find a pin</span><span class="mj-live-rule"></span></div>';
 
 		if (res.lost) {
-			// The reported case, and the one nobody could act on before: a pin
-			// can take ethernet down without troubling the camera at all. The
-			// request simply never comes back, and only the browser saw which
-			// pin was in flight.
-			const p = res.lost.pin;
-			host.innerHTML = head +
-				'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
-				'<b>The camera stopped answering while holding pin ' + esc(String(p)) +
-				' ' + esc(res.lost.level) + '.</b> If it is back now, the pin did ' +
-				'not crash it \u2014 it cut this connection, which usually means ' +
-				'the network is on that pin. That is worth knowing, and it is ' +
-				'worth never touching again.</div>' +
-				'<div class="d-flex gap-2 align-items-center">' +
-				'<button type="button" class="btn btn-primary btn-sm" data-do="avoid">' +
-				'Never try pin ' + esc(String(p)) + ' again</button>' +
-				'<button type="button" class="btn btn-outline-secondary btn-sm" ' +
-				'data-do="go">It was fine, carry on</button></div>';
-			host.querySelectorAll('button[data-do]').forEach((b) => {
-				b.addEventListener('click', () => {
-					const pr = sweepProgress();
-					if (pr) { pr.inflight = null; sweepRemember(pr); }
-					if (b.getAttribute('data-do') !== 'avoid') {
-						openSweep(state.info || info);
-						return;
-					}
-					scanAvoid(p, true)
-						.then(() => pins.changed ? pins.changed() : null)
-						.then(() => FETCH(API, { credentials: 'same-origin' }))
-						.then((r) => r.json())
-						.then((fresh) => { state.info = fresh; openSweep(fresh); })
-						.catch(() => openSweep(state.info || info));
-				});
-			});
+			lostCard(info, res.lost.pin, res.lost.level);
 			return;
 		}
 
@@ -1031,8 +1133,17 @@
 	let pins = null;
 	const hostOf = () => state.host;
 
+	/* Every running sweep asks this before its next pad.
+	 *
+	 * A hunt is hundreds of requests that each drive hardware, and its Stop
+	 * button lives in a box the page throws away whenever it repaints. Without
+	 * a way in from outside, leaving the section detached the only control and
+	 * left the sweep working through the chip with nobody watching it. */
+	let stopped = false;
+
 	function mount(host, opts) {
 		opts = opts || {};
+		stopped = false;
 		state.host = host;
 		state.soc = opts.soc || '';
 		state.info = opts.info || null;
@@ -1047,6 +1158,10 @@
 		// And on top of it where a previous run did not finish, because
 		// "carry on from pair 84" is a different offer from "start".
 		resumeCard(state.info);
+
+		/* The page owns this section's lifetime, so it owns stopping what is
+		 * running in it. */
+		return { stop: () => { stopped = true; } };
 	}
 
 	const api = { mount: mount };

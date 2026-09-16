@@ -859,6 +859,10 @@
 		// read, which the hunt treats as "cannot run" rather than as an empty
 		// chip.
 		let gpio = null;
+		// The running hunt, so repainting or leaving this section can stop it.
+		// It drives hardware and its own Stop button lives in a box this page
+		// throws away on every repaint.
+		let hunt = null;
 		// The pair under the bridge right now, so the drawing can light it.
 		let sweeping = null;
 
@@ -1433,7 +1437,8 @@
 			if (!HUNT || !gpio) return;
 			const box = el('div', 'mj-pins-hunt');
 			root.appendChild(box);
-			HUNT.mount(box, {
+			if (hunt && hunt.stop) hunt.stop();
+			hunt = HUNT.mount(box, {
 				info: gpio,
 				soc: (doc && doc.chip) || '',
 				// The drawing, lent to the hunt. It never reaches in here: it
@@ -1570,6 +1575,7 @@
 		return {
 			destroy: () => {
 				dead = true;
+				if (hunt && hunt.stop) hunt.stop();
 				document.removeEventListener('keydown', onKey);
 				stopClocks();
 				wsShut();
