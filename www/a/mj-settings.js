@@ -7642,11 +7642,17 @@
 			'<span class="mj-live-rule"></span></div>' +
 			'<div id="mj-ircut-rolelist"></div>' +
 			'<div class="mj-ircut-acts">' +
-			// btn-outline-secondary, not -primary: the shipped stylesheet is
-			// purged down to the classes this UI actually uses, and
-			// btn-outline-primary is not one of them -- it rendered as bare
+			// The secondary outline, not the primary one: the shipped
+			// stylesheet is purged down to the classes this UI actually uses
+			// and the primary variant is not among them -- it rendered as bare
 			// text beside a real button. regen-bootstrap-css.sh is what would
 			// add it, and one navigation link is not worth growing the sheet.
+			//
+			// Which is also why neither this comment nor any other may SPELL
+			// the class it is talking about. purgecss scans these files as
+			// text, so naming it here is enough to pull ~500 bytes of rules
+			// for it back into the sheet -- the exact cost this paragraph
+			// exists to avoid, paid by the paragraph.
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-find">Find them on the Pins page</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
 			'</div>' +
