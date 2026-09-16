@@ -144,6 +144,13 @@ mx_cron=false;  [ "$max_crontab" = "true" ] && mx_cron=true
 
 mx_who="адрес не указан"
 [ "$mx_addressed" = "true" ] && mx_who="в чат $(esc "$max_chat_id")"
+
+# This page is Russian, so the document says so: a screen reader picks its
+# voice from it, and so do a browser's own language features.
+page_lang=ru
+# and the shared hook messages with it: a failed save must not answer a Russian
+# page in English at the one moment something did not work.
+notify_hooks_lang=ru
 %>
 
 <%in p/header.cgi %>

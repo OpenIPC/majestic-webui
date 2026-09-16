@@ -33,7 +33,14 @@ Cache-Control: no-store
 Pragma: no-cache
 
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="<% attr_escape "${webui_theme:=dark}" %>">
+<%
+# The document's language. Every page but one is English; the MAX page is
+# Russian throughout, and a page that says lang="en" while its text is Russian
+# tells a screen reader to pronounce it with the wrong voice. A page sets
+# page_lang before including this file, exactly as it may set page_title.
+: "${page_lang:=en}"
+%>
+<html lang="<% attr_escape "$page_lang" %>" data-bs-theme="<% attr_escape "${webui_theme:=dark}" %>">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">

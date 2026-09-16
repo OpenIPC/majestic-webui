@@ -674,7 +674,13 @@ function heartbeat() {
 		}
 		if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
 		e.preventDefault();
-		const items = Array.from(menu.querySelectorAll('.dropdown-item:not(.disabled)'));
+		// Only the items a reader can actually reach. An entry inside a hidden
+		// <li> -- the MAX one, on a browser that does not read Russian -- is
+		// still matched by the selector, and focusing something that is not
+		// rendered leaves focus where it was: every ArrowDown then targets that
+		// same first item and the keys stop walking the menu at all.
+		const items = Array.from(menu.querySelectorAll('.dropdown-item:not(.disabled)'))
+			.filter(el => !el.closest('[hidden]'));
 		if (!items.length) return;
 		const cur = items.indexOf(document.activeElement);
 		let next;
