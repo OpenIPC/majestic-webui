@@ -8937,7 +8937,20 @@
 			// place to hold it the browser falls back to the first option and the page
 			// reports a codec that is not the one in effect, so carry the live value
 			// as an explicitly-unsupported entry instead.
-			const cur = eff === undefined || eff === null ? '' : String(eff);
+			//
+			// An ABSENT value is a different thing again, and the browser's
+			// answer to it is the worst available: with nothing selected it
+			// takes the FIRST option, which has no relationship to the key's
+			// default — isp.slowShutter defaults to medium and would read
+			// disabled, and nightMode.irCut defaults to auto and would read
+			// off, which is a control claiming an actuator is parked and a
+			// Save away from parking it. The schema states the default; a
+			// reading that is not there resolves through it rather than
+			// through option order.
+			const dflt = sub.default === undefined || sub.default === null
+				? '' : String(sub.default);
+			const eff2 = eff === undefined || eff === null ? dflt : eff;
+			const cur = eff2 === undefined || eff2 === null ? '' : String(eff2);
 			const unlisted = cur !== '' && !enumVals.some(o => String(o) === cur);
 			const opts =
 				(unlisted ? option(cur, true, cur + ' (unsupported)') : '') +
