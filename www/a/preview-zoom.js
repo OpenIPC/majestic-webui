@@ -60,6 +60,7 @@
 	let ox = 0, oy = 0;    // the picture's left/top inside the stage
 	let placed = false;    // has a layout run against a known frame
 	let onScale = null;    // who to tell when the scale moves
+	const onView = [];     // and who to tell when the VIEW moves
 
 	const saved = read(KEY);
 	if (MODES.indexOf(saved) >= 0) mode = saved;
@@ -76,6 +77,44 @@
 		if (onScale && prev !== scale) {
 			try { onScale(); } catch (e) {}
 		}
+	}
+
+	// The VISIBLE RECTANGLE moved, which is a different event from the scale
+	// moving and fires far more often: a pan changes what is on screen without
+	// changing the scale at all, and announce() above is deliberately silent
+	// there because the chip it repaints prints only a percentage.
+	//
+	// A list rather than a slot. onScale is a slot, and preview-page.js has
+	// already taken it; a second consumer assigning over it would stop the chip
+	// repainting and nothing would report that. Guarded per listener so one
+	// that throws cannot stop the next -- and cannot stop the pan either, since
+	// this is called from the middle of the gesture.
+	function announceView() {
+		for (let i = 0; i < onView.length; i++) {
+			try { onView[i](viewNow()); } catch (e) {}
+		}
+	}
+
+	// What of the frame is on screen.
+	//
+	// In FRAME pixels -- the stream's own -- because that is the only space
+	// that means anything to the camera, which is the one consumer this has.
+	// The frame rides along because a rectangle is meaningless without the
+	// picture it is a part of, and handing the two over separately is an
+	// invitation to pass one that does not match the other.
+	//
+	// Null until a layout has run against a known frame, which a caller must
+	// treat as "not yet" rather than as a frame of no size.
+	function viewNow() {
+		if (!frame || !placed) return null;
+		const p = picRect();
+		return {
+			frame: { w: frame.w, h: frame.h },
+			visible: {
+				x: (p.x - ox) / scale, y: (p.y - oy) / scale,
+				w: (p.r - p.x) / scale, h: (p.b - p.y) / scale,
+			},
+		};
 	}
 
 	// ---- laying the picture out -------------------------------------------
@@ -194,6 +233,7 @@
 		annotate(sw, sh, picW, picH);
 		setAffordance(sw, sh, picW, picH);
 		announce(prev);
+		announceView();
 	}
 
 	// Free zoom is bounded by what is worth looking at. Out: no further than
@@ -213,6 +253,7 @@
 		if (picW > sw) ox = clamp(ox + dx, sw - picW, 0);
 		if (picH > sh) oy = clamp(oy + dy, sh - picH, 0);
 		place(picW, picH);
+		announceView();
 	}
 
 	// Zoom to a rectangle drawn on the picture. The scale falls out of the
@@ -253,6 +294,7 @@
 		setAffordance(sw, sh, picW, picH);
 		syncRadios();
 		announce(prev);
+		announceView();
 	}
 
 	// Zoom about a point on the screen -- the pointer, or the midpoint between
@@ -281,6 +323,7 @@
 		setAffordance(sw, sh, picW, picH);
 		syncRadios();
 		announce(prev);
+		announceView();
 	}
 
 	// ---- the control -------------------------------------------------------
@@ -310,6 +353,14 @@
 	function setFrame(w, h) {
 		if (!w || !h) return;
 		const changed = !frame || frame.w !== w || frame.h !== h;
+		// A frame that has not changed asks for no layout, and that is not an
+		// optimisation. The multipart rung fires `load` on EVERY JPEG, and each
+		// one arrives here with the size it had last time -- so a layout per
+		// frame would publish a view per frame, and anything debouncing on the
+		// view (the encoder region does, at 350 ms) would have its timer reset
+		// twenty times a second and never fire. A continuous preview would
+		// silently never reach the camera.
+		if (!changed && placed) return;
 		frame = { w: w, h: h };
 		if (changed && mode === 'free') {
 			mode = lastPreset;
@@ -586,6 +637,14 @@
 	window.MajesticZoom = {
 		// The stream's real pixel size, from the player's codec report.
 		setFrame: setFrame,
+
+		// What of the frame is on screen, or null before the first layout,
+		// in the stream's own pixels -- the space the camera reasons in.
+		view: viewNow,
+
+		// Every time that rectangle moves, PANS INCLUDED. A list, unlike
+		// onScale, because that one is already spoken for.
+		onView: function (fn) { if (typeof fn === 'function') onView.push(fn); },
 
 		// Called whenever the scale moves for a reason the player does not know
 		// about — a preset, a pinch, a resize. preview-page.js repaints the

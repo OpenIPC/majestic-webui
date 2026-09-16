@@ -562,6 +562,15 @@
 	// that is actually on screen. A getter, because that changes.
 	window.MajesticLiveCamera = () => camera;
 
+	// And which CHANNEL is on screen, for preview-roi.js: the part of the
+	// picture a viewer has zoomed into is measured in that channel's pixels,
+	// and mapping it onto the others starts from knowing which one it came
+	// from. servedStream(), not `stream`
+	// -- WebRTC's ?stream= is a preference the camera may not honour, and a
+	// region placed against the channel we ASKED for would land on the wrong
+	// part of the scene whenever it served the other one.
+	window.MajesticLiveStream = () => servedStream();
+
 	// The /api/v1/sources entry for the current source, or null before the
 	// answer arrives. The transport gate reads it: what is worth trying depends
 	// on what this source publishes, not on what the on-board sensor does.
@@ -718,6 +727,25 @@
 		return served === 0 ? ' · Main stream' : ' · Sub stream';
 	}
 
+	// What the encoder-region module wants said, or nothing. Asked rather than
+	// pushed, and guarded like every other optional module: the file may not be
+	// loaded at all, and in the bare vm the tests run it certainly is not.
+	//
+	// It goes on the chip rather than into a note of its own because there is
+	// no control to explain -- the region follows the zoom by itself -- and a
+	// banner for something nobody pressed would be the page talking about
+	// itself. The full sentence is the chip's tooltip.
+	function roiNote() {
+		const n = window.MajesticRoi && window.MajesticRoi.note
+			? window.MajesticRoi.note() : null;
+		if (badge) badge.title = n ? n.title : '';
+		return n ? n.chip : '';
+	}
+
+	// Published so the region module can ask for a repaint when what it wants
+	// said changes -- it has no other reason to know this file exists.
+	window.MajesticPreviewChip = () => setChip();
+
 	function setChip() {
 		// The fallback owns the chip until a player takes the stage back.
 		// chipMedia is cleared with it, so this is belt and braces — but the
@@ -752,7 +780,7 @@
 			chipMedia.w + '×' + chipMedia.h +
 			(fps ? ' · ' + Math.round(fps) + ' fps' : '') +
 			(pct ? ' · ' + pct + '%' : '') +
-			servedNote();
+			servedNote() + roiNote();
 		// Its height is what the toast stack hangs off, and a caption that wraps
 		// to a second line has just changed it. Its WIDTH decides nothing about
 		// placement any more (#302).
@@ -1787,6 +1815,17 @@
 		servedCh = null;
 		servedShownKey = '';
 		hideServedMsg();
+		// AFTER `stream` has moved, and that ordering is the whole of it:
+		// anything measured against the channel being left has to be dropped,
+		// and a listener asking which channel is shown must not be answered
+		// with the one it is leaving. Fired here rather than at the top of the
+		// function, where it was, because there `shownStream()` still returned
+		// the old channel and the region module picked its strength from that
+		// channel's bitrate. Announced rather than called: the only listener is
+		// optional and this file must not learn what it does.
+		try {
+			window.dispatchEvent(new CustomEvent('mj-stream-changed'));
+		} catch (e) {}
 		// Nothing is attached: the chain ran out and the stage is showing the
 		// MJPEG fallback or the note. The pick is still a request worth
 		// honouring — an H.264 substream plays in a browser that refused an

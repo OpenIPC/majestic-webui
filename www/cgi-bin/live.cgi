@@ -55,6 +55,13 @@ hide_title=1; full_bleed=1
      asks -- so a build missing either file still works. -->
 <script src="/a/preview-zoom.js"></script>
 <script src="/a/preview-page.js"></script>
+<!-- Where the camera spends its bits: whatever the viewer has zoomed in on
+     becomes an encoder region. After the page, because it asks it which
+     channel is on screen; before nothing, because nothing asks it anything.
+     mj-region.js is the coordinate map it borrows -- the same one the settings
+     page uses to land a rectangle from one stream on another. -->
+<script src="/a/mj-region.js"></script>
+<script src="/a/preview-roi.js"></script>
 <script src="/a/preview-hero.js"></script>
 <!-- Is the camera seeing anything? Nothing the player can answer — a camera on
      the wrong sensor driver plays perfectly and plays black — so this reads the
