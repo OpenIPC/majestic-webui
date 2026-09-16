@@ -88,11 +88,10 @@
 	// cameras.
 	//
 	// `start` belongs in it because the two failures observed look nothing
-	// alike. One sweeps past a good peak and parks a quarter below it
-	// (fv=9427 peak=13050 start=10809). The other gives up early on a peak
-	// that was never as sharp as where it began (fv=9612 peak=9688
-	// start=12045) — which passes a peak-only test at 99% while having plainly
-	// made the picture worse. Both are "I pressed Autofocus and it got blurry".
+	// alike. One sweeps past a good peak and parks well below it. The other
+	// stops on a peak that was never as sharp as where it began — which passes
+	// a peak-only test at around 99% while having plainly made the picture
+	// worse. Both are "I pressed Autofocus and it got blurry".
 	//
 	// Null when anything is missing or the best is zero: nothing was
 	// measurable, which is a different story and not this one's to tell.
@@ -101,7 +100,15 @@
 		const pk = /(?:^|\s)peak=(\d+)/.exec(s);
 		const st = /(?:^|\s)start=(\d+)/.exec(s);
 		if (!fv || !pk) return null;
-		const best = Math.max(+pk[1], st ? +st[1] : 0);
+		// A reading that did not arrive is left out of the comparison rather
+		// than counted as zero. Zero would be harmless inside a max() today,
+		// but it is the shape of the mistake this tree keeps having to undo —
+		// an absent number standing in for a measured one — and a later edit
+		// that reaches for `best` elsewhere would inherit it. Without `start`
+		// the test narrows to "did it return to the peak it found", which is
+		// still sound; it just stops catching the pass that ended below where
+		// it began.
+		const best = st ? Math.max(+pk[1], +st[1]) : +pk[1];
 		return best > 0 ? +fv[1] / best : null;
 	}
 
@@ -212,8 +219,15 @@
 				// An operator generation may accept a terminal string that
 				// merely differs from the baseline — an instant `failed:` never
 				// reaches `running` and would otherwise be swallowed.
+				// `baseline === null` means the mount probe has not answered
+				// yet, so there is nothing to have differed FROM. Treating a
+				// terminal string as ours on that basis would accept whatever
+				// was already standing — a `done` or `failed:` from a previous
+				// session — as the result of a press made a moment ago, which
+				// is the exact announcement this module exists to prevent.
+				// Unknown baseline waits for `running`, like afterZoom does.
 				const ours = sawRunning ||
-					(kind !== 'afterZoom' && s !== baseline);
+					(kind !== 'afterZoom' && baseline !== null && s !== baseline);
 				if (!ours) {
 					if (now - armedAt >= budget) {
 						disarm();
@@ -307,11 +321,11 @@
 			}
 			if (r === 'busy') {
 				// NOT "one is already running". A trigger that lands on a
-				// running pass answers `restarted` and preempts it; `busy` is
-				// af_trigger's -1 — the engine unavailable or shutting down.
-				// So nothing started, there is nothing to watch, and there is
-				// nothing worth putting over the picture either: the press did
-				// not take and pressing again is the whole remedy.
+				// running pass is answered with `restarted` and preempts it;
+				// `busy` is what comes back when the camera cannot start one at
+				// all. So nothing started, there is nothing to watch, and there
+				// is nothing worth putting over the picture either: the press
+				// did not take, and pressing again is the whole remedy.
 				disarm();
 				return { say: null, poll: false };
 			}

@@ -38,29 +38,43 @@ fi
 # -- but a browser holding cached HTTP Basic credentials attaches those, and
 # that is the ordinary state of a WebUI session.
 #
-# majestic's own /ptz answers this with Sec-Fetch-Site, and those headers are
-# NOT available here: the CGI environment it builds is an allowlist -- QUERY_
-# STRING, SCRIPT_NAME, HTTP_HOST, HTTP_REFERER, HTTP_COOKIE, REQUEST_METHOD,
-# CONTENT_TYPE, CONTENT_LENGTH -- so a Sec-Fetch test written in this file can
-# never fire, however right it looks. Referer is what does arrive, and a
-# browser sends it on a cross-site form POST by default.
+# The camera's own /ptz answers this by asking the browser where the request
+# came from, and the header it reads is not among the few this script is given.
+# So two tests, and the ORDER of trust matters: the second is the one that
+# actually holds.
 #
-# So: a Referer from another origin is refused; no Referer at all is allowed,
-# because that is curl and the CLI, which are supported callers here. Like the
-# daemon's own check, this refuses the attack it can SEE and does not pretend to
-# be the whole answer -- an attacker who suppresses Referer still gets through,
-# and closing that needs majestic to pass Sec-Fetch-Site to CGIs.
+# 1. A Referer naming another origin is refused. Cheap, and it catches the
+#    ordinary case -- but an attacker sets `Referrer-Policy: no-referrer` and
+#    sends none at all, so its absence can prove nothing and must be allowed
+#    (that is also every command-line caller).
+#
+# 2. A form's Content-Type is refused outright. This is the half that cannot be
+#    sidestepped: a cross-site POST that carries no preflight is exactly a POST
+#    a plain HTML form could have made, and a form can only send these three
+#    types. Anything wanting another type needs a preflight, which this endpoint
+#    never answers, so the browser stops it before it arrives.
+#
+# What still gets through is what should: this page's own fetch, which sends its
+# arguments in the query string and so carries no body and no Content-Type at
+# all, and a command-line POST, which carries none either.
+cross_site=""
 if [ -n "$HTTP_REFERER" ]; then
 	ref_origin="${HTTP_REFERER#*://}"
 	ref_origin="${ref_origin%%/*}"
-	if [ "$ref_origin" != "$HTTP_HOST" ]; then
-		echo "HTTP/1.1 400 Bad Request
+	[ "$ref_origin" = "$HTTP_HOST" ] || cross_site=1
+fi
+case "$CONTENT_TYPE" in
+	application/x-www-form-urlencoded*|multipart/form-data*|text/plain*)
+		cross_site=1
+		;;
+esac
+if [ -n "$cross_site" ]; then
+	echo "HTTP/1.1 400 Bad Request
 Content-type: text/plain; charset=UTF-8
 Cache-Control: no-store
 
 Cross-site PTZ refused."
-		exit 1
-	fi
+	exit 1
 fi
 
 echo "HTTP/1.1 200 OK

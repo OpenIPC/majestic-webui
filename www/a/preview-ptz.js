@@ -96,9 +96,10 @@
 	// not a new flag — the markup already decides it, and always did:
 	// `data-act` is the serial pad, `data-dir` the stepped one.
 	//
-	// `ms` is the query parameter, not the `verb:ms` the plugin ABI uses —
-	// majestic parses move/ms properly (evhttp_parse_query_str, not a substring
-	// sniff) and composes the plugin's form itself.
+	// The duration rides as its own query parameter. The camera parses `move`
+	// and `ms` as parameters rather than sniffing the URL for a word, so a verb
+	// cannot be smuggled inside another value, and it is the camera that
+	// decides how to pass the pair on to the motor.
 	//
 	// Held ticks are NOT gated on a request being in flight, and that inversion
 	// is the point. j/ptz.cgi's exit marked the end of a pulse, so dropping a
@@ -146,10 +147,11 @@
 	// same origin, which is the standing rule — a CGI carries only what the
 	// daemon cannot answer, and this is the daemon's own business.
 	//
-	// The status path is fetched EXACTLY. majestic matches `/autofocus/status`
-	// with strcmp and everything else under `/autofocus` with a substring test,
-	// so `/autofocus/status?t=1` is not a poll — it is a trigger, and a cache
-	// buster here would start a focus pass every time it fired.
+	// The status path is fetched EXACTLY, with no query string of any kind.
+	// The camera answers the status only for that precise path and treats
+	// anything else beginning `/autofocus` as a request to RUN one — so
+	// `/autofocus/status?t=1` is not a poll, and a cache buster appended here
+	// would start a focus pass every time it fired.
 	const AF_URL = '/autofocus';
 	const AF_STATUS_URL = '/autofocus/status';
 	const afSay = $('#mj-af-say');
@@ -297,6 +299,11 @@
 			if (act === 'wide' || act === 'tele') {
 				zoomTouched = true;
 				focusReset();
+				// A zoom preempts a running pass exactly as a focus nudge does,
+				// so the reducer has to know this page caused it. Without this
+				// the interruption read as a stranger's and the operator was
+				// told autofocus "was interrupted" by their own zoom.
+				afManual(act);
 			}
 			else if (act === 'near' || act === 'far') afManual(act);
 			return;
@@ -359,10 +366,15 @@
 			(btn.dataset.act === 'wide' || btn.dataset.act === 'tele')) {
 			zoomTouched = false;
 			if (afState && afSay) {
-				afText(AF_STATUS_URL).catch(() => null).then(s => {
-					afState.zoomReleased(s, Date.now());
-					afTick(1200);
-				});
+				// Armed synchronously, on the release itself. It used to read
+				// the status first and arm in the callback, which let a slow
+				// answer land after the operator had pressed Autofocus and
+				// relabel their own pass as an automatic one. Nothing needed
+				// that round trip: passing no status keeps the baseline the
+				// mount probe recorded, which is the same thing the trigger
+				// does.
+				afState.zoomReleased(undefined, Date.now());
+				afTick(1200);
 			}
 		}
 		if (afState) { afState.release(); }
@@ -396,7 +408,22 @@
 		// Enter/Space on a focused button: a single step or pulse, so the
 		// keyboard can nudge precisely; sweeping is what the stage-level
 		// arrows are for.
-		btn.addEventListener('click', e => { if (e.detail === 0) fire(btn); });
+		//
+		// It goes through the same press-and-release pair as a pointer rather
+		// than calling fire() alone, because everything that has to happen when
+		// a lens button comes UP lives in stopHold(): the autofocus watch a zoom
+		// books, and the release of the flag that tells the status reducer a
+		// button is down. A keyboard nudge that only fired left that flag set
+		// for the life of the page, and from then on the reducer deferred every
+		// reading and no pass ever reported a result — an autofocus that looked
+		// like it never converged, from one press of Space on Near.
+		btn.addEventListener('click', e => {
+			if (e.detail !== 0) return;
+			const axis = axisFor(btn.dataset.act);
+			startHold(btn, 'kb');
+			stopHold('kb');
+			void axis;
+		});
 	});
 
 	if (stage && pad) {

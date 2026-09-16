@@ -20,13 +20,16 @@ const eq = (name, got, want) =>
 	check(name, got === want, 'got ' + JSON.stringify(got));
 const AF = require('../www/a/af-state.js');
 
-// A pass that LANDED on its peak — the attribution cases below are about whose
-// pass it was, not how well it went, so they must not trip the quality rule.
-// Measured on an 85H50AI.
-const DONE = 'done fv=12666 peak=12666 start=10430 mag=2.7 pos=9032 steps=60 path=1';
-// Landed on its peak, so the wording under test is the mag note and not
-// the stopped-short one.
-const DONE_NOMAG = 'done fv=13288 peak=13288 start=10832 mag=-1.0 pos=2610 steps=107 path=1';
+// Illustrative status lines, not captures: what each test needs is the SHAPE of
+// the line and the ratios between its readings.
+//
+// A pass that LANDED on its peak. The attribution cases below are about whose
+// pass it was rather than how well it went, so they must not trip the quality
+// rule.
+const DONE = 'done fv=12500 peak=12500 start=10000 mag=2.7 pos=9000 steps=60 path=1';
+// Also landed on its peak, so the wording under test is the note about the
+// unknown zoom position and not the stopped-short one.
+const DONE_NOMAG = 'done fv=13000 peak=13000 start=11000 mag=-1.0 pos=2600 steps=107 path=1';
 
 // A fresh page on a camera whose last pass was interrupted days ago. The whole
 // reason this module exists.
@@ -190,14 +193,14 @@ const DONE_NOMAG = 'done fv=13288 peak=13288 start=10832 mag=-1.0 pos=2610 steps
 // A pass that ends far below the peak it found has not finished, whatever the
 // word says. These two lines are real, measured back to back on an 85H50AI.
 {
-	// Two failure shapes, both measured on an 85H50AI and both "I pressed
-	// Autofocus and the picture got blurry". The first sweeps past a good peak
-	// and parks a quarter below it. The second gives up early on a peak that
-	// was never as sharp as where it began — 99% of its own peak, and a fifth
-	// blurrier than before the press, so a peak-only test calls it a success.
-	const COLD = 'done fv=9427 peak=13050 start=10809 mag=-1.0 pos=3260 steps=113 path=2';
-	const GAVE_UP = 'done fv=9612 peak=9688 start=12045 mag=-1.0 pos=2450 steps=28 path=2';
-	const TRACK = 'done fv=12490 peak=12490 start=11990 mag=2.7 pos=8952 steps=62 path=1';
+	// Two failure shapes, both of them "I pressed Autofocus and the picture got
+	// blurry". COLD sweeps past a good peak and parks well below it. GAVE_UP
+	// stops on a peak that was never as sharp as where it began — it sits at
+	// 99% of its own peak while being a fifth blurrier than before the press,
+	// so a peak-only test would call it a success.
+	const COLD = 'done fv=9000 peak=13000 start=11000 mag=-1.0 pos=3000 steps=113 path=2';
+	const GAVE_UP = 'done fv=9600 peak=9700 start=12000 mag=-1.0 pos=2500 steps=28 path=2';
+	const TRACK = 'done fv=12500 peak=12500 start=12000 mag=2.7 pos=9000 steps=62 path=1';
 	const af = AF.create();
 	af.trigger('started', 'idle', 0);
 	af.step('running', 500);
@@ -224,7 +227,7 @@ const DONE_NOMAG = 'done fv=13288 peak=13288 start=10832 mag=-1.0 pos=2610 steps
 
 	// Same shortfall, but the lens HAS reported its zoom: here the seeded path
 	// is reachable and pressing again is the real remedy.
-	const SHORT_KNOWN = 'done fv=9474 peak=12864 start=7733 mag=2.7 pos=6880 steps=122 path=2';
+	const SHORT_KNOWN = 'done fv=9500 peak=12900 start=7700 mag=2.7 pos=6900 steps=122 path=2';
 	const af4 = AF.create();
 	af4.trigger('started', 'idle', 0);
 	af4.step('running', 500);
@@ -284,6 +287,73 @@ const DONE_NOMAG = 'done fv=13288 peak=13288 start=10832 mag=-1.0 pos=2610 steps
 	eq('a pass that never reported is not a pass that worked',
 		r.say, 'Autofocus did not report a result.');
 	eq('and the watch ends', r.poll, false);
+}
+
+// --- cases a review found, each of which produced a confident wrong sentence --
+
+// The mount probe is a fetch, so a press can beat it. With no baseline recorded
+// there is nothing for a terminal string to have DIFFERED from, and accepting
+// one on that basis hands the operator a previous session's result as the
+// answer to the press they just made.
+{
+	const STICKY = 'done fv=9000 peak=13000 start=11000 mag=-1.0 pos=3000 steps=113 path=2';
+	const af = AF.create();
+	af.trigger('started', undefined, 0);        // probe still in flight
+	const r = af.step(STICKY, 500);             // sticky residue arrives first
+	eq('a terminal string cannot be ours before any baseline is known',
+		r.say, null);
+	eq('and the watch continues', r.poll, true);
+	af.step('running', 1000);
+	check('once the pass is seen running, its result is ours',
+		af.step(STICKY, 9000).say !== null, 'stayed silent');
+}
+
+// A zoom preempts a running pass exactly as a focus nudge does. Until the page
+// told the reducer so, the operator was informed that their own zoom was an
+// outside interruption.
+{
+	const af = AF.create();
+	af.trigger('started', 'idle', 0);
+	af.step('running', 500);
+	af.manual('tele', 1000);
+	af.release();
+	eq('a zoom of ours is not a stranger interrupting',
+		af.step('preempted', 2000).say, 'Autofocus cancelled.');
+}
+
+// `held` is set by a press and cleared by the release. A path that pressed
+// without releasing left it set for the life of the page, and from then on
+// every reading was deferred and no pass ever reported anything.
+{
+	const af = AF.create();
+	af.trigger('started', 'idle', 0);
+	af.step('running', 500);
+	af.manual('near', 1000);
+	af.release();
+	const r = af.step('preempted', 2000);
+	eq('a press that released does not wedge the watch', r.say,
+		'Autofocus cancelled.');
+	eq('and the watch ends with it', r.poll, false);
+}
+
+// A reading that did not arrive is left out of the comparison rather than
+// counted as zero, so a line without `start` narrows the test instead of
+// voiding it or inventing a floor.
+{
+	const NO_START = 'done fv=9000 peak=13000 mag=2.7 pos=3000 steps=90 path=2';
+	const af = AF.create();
+	af.trigger('started', 'idle', 0);
+	af.step('running', 500);
+	check('a shortfall is still caught with no start reading',
+		/wrong end|stopped short/.test(af.step(NO_START, 9000).say),
+		af.armed());
+
+	const LANDED_NO_START = 'done fv=12500 peak=12500 mag=2.7 pos=9000 steps=60 path=1';
+	const af2b = AF.create();
+	af2b.trigger('started', 'idle', 0);
+	af2b.step('running', 500);
+	eq('and a landed pass is still plainly finished',
+		af2b.step(LANDED_NO_START, 8000).say, 'Autofocus finished.');
 }
 
 done();

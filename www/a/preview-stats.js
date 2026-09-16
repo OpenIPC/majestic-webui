@@ -921,10 +921,17 @@ window.MajesticStats = (function () {
 		// HiSilicon gen4 and Ingenic T31 thing). Absent hides the section and
 		// says nothing: a camera that cannot measure focus is not a camera that
 		// is out of focus.
-		const hasFv = 'isp_afmetrics' in v;
+		// Present AND finite. `in` separates absent from zero, which is the
+		// distinction that matters most here — 0 is a real reading from a black
+		// scene — but it says nothing about the number being usable: the shared
+		// metrics parser will hand back Infinity for a malformed line, and that
+		// reaches the rounding, the high-water mark and the sparkline's own
+		// bounds, where it becomes non-finite SVG coordinates and no chart at
+		// all. A reading that cannot be drawn is not a reading.
+		const fv = v.isp_afmetrics;
+		const hasFv = 'isp_afmetrics' in v && Number.isFinite(fv) && fv >= 0;
 		els.focus.hidden = !hasFv;
 		if (hasFv) {
-			const fv = v.isp_afmetrics;
 			els.fv.textContent = String(Math.round(fv));
 			// The best THIS run of focusing has reached, not an all-time high
 			// and not the `peak=` of some earlier pass: both of those describe
@@ -1096,10 +1103,17 @@ window.MajesticStats = (function () {
 	function focusReset() {
 		fvBest = null;
 		if (els && els.fvMax) els.fvMax.textContent = '–';
-		// The series itself is left alone: the trend across a zoom is exactly
-		// what makes the new scene's numbers readable, and a chart that blanked
-		// on every press would never draw anything on a pad being used.
-		if (fvSpark) { fvSpark.ks = []; fvSpark.ys = []; }
+		// Emptying the arrays is not enough: the sparkline keeps its drawn
+		// paths until something renders it again, so the graph went on showing
+		// the previous scene's measurements beside a blanked "best". Push the
+		// cleared state through the same draw the ticker uses, so the panel
+		// says nothing rather than something stale.
+		if (fvSpark) {
+			fvSpark.ks = [];
+			fvSpark.ys = [];
+			if (fvSpark.fill) fvSpark.fill.setAttribute('d', '');
+			if (fvSpark.line) fvSpark.line.setAttribute('d', '');
+		}
 	}
 
 	return { tick: tick, reset: reset, setOpen: setOpen, focusReset: focusReset };
