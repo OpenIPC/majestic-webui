@@ -1,0 +1,115 @@
+#!/bin/sh
+#
+# Fetch the WebUI installer, then hand the run to it.
+#
+# This is what a camera carries as /usr/sbin/updatewebui. The installer itself
+# is not on the image: it is a 48 KB shell script whose only job is to download
+# a tree from GitHub and copy it into place, so a camera that cannot reach
+# GitHub cannot use it anyway -- and the rootfs is a fixed-size squashfs
+# partition that several boards are already at the edge of. An 8 MB gk7202v300
+# was 12 KB over its 5120 KB partition and would not build at all; the installer
+# was 12 KB of it.
+#
+# The download path is not new. Every image already ships a majestic_webui()
+# function in /etc/profile that fetches this same file and runs it out of /tmp.
+# What this adds is the command still being called updatewebui, arguments
+# reaching it, and the copy being kept.
+#
+# It is also a fix rather than only a saving. The installer is part of the tree
+# it installs, so the copy that ran an install was always the one the PREVIOUS
+# install left behind -- a fix to the installer landed on the camera but did not
+# act on it until the run after the one that fetched it. That is backwards for
+# the run that matters, the one bringing the fix down, and the old answer was
+# for the downloaded tree to take the run over mid-flight (hand_over, guarded by
+# scr_version and a one-hop environment variable). Fetching first makes the
+# running copy the newest by construction, and all of that machinery goes.
+#
+# What it costs: --restore downloads nothing today, and that stays true only
+# where a copy has already been cached here. See the restore branch below.
+
+scr_name=updatewebui
+REPO=openipc/majestic-webui
+STATE_DIR=/etc/webui
+CACHE=$STATE_DIR/updatewebui.sh
+
+die() {
+	echo "$scr_name: $1" >&2
+	exit 1
+}
+
+# Which branch's installer to fetch, in the three spellings the installer
+# itself accepts: -b NAME, --branch=NAME, and a bare argument. Best-effort by
+# design -- what gets installed comes from the tree, how it is installed does
+# not, so a miss here means the run is done by master's installer rather than
+# by the wrong tree. It matters for one person: whoever is testing a branch
+# that changes the installer, which is exactly who the old handover served.
+branch=
+want=
+restore=0
+for arg in "$@"; do
+	if [ -n "$want" ]; then
+		branch=$arg
+		want=
+		continue
+	fi
+	case $arg in
+	-b) want=1 ;;
+	--branch=*) branch=${arg#--branch=} ;;
+	-r | --restore) restore=1 ;;
+	-*) ;;
+	*) branch=$arg ;;
+	esac
+done
+[ -n "$branch" ] || branch=master
+
+# The branch reaches a URL. curl would answer a traversal with a 404 rather
+# than anything dangerous, but a name that cannot be a branch is a mistake
+# worth naming where it was made.
+case $branch in
+-* | *..*) die "not a branch name: $branch" ;;
+*[!A-Za-z0-9._/-]*) die "not a branch name: $branch" ;;
+esac
+
+run() {
+	[ -x "$CACHE" ] || chmod +x "$CACHE" 2>/dev/null
+	# Fed to a shell rather than executed, for the reason the installer gives
+	# about its own staging: a mode that did not survive, or a filesystem
+	# mounted noexec, must not be what decides whether a camera can be updated.
+	exec /bin/sh "$CACHE" "$@"
+}
+
+# --restore is the one mode that reaches no network, and that is a promise its
+# help text makes: it puts back what an install took away, which is exactly
+# what somebody does when a deploy went wrong. So a cached installer is used
+# as-is rather than being refreshed first. Any cache is a copy that ran an
+# install here, so it knows how to undo one.
+if [ "$restore" = 1 ] && [ -s "$CACHE" ]; then
+	run "$@"
+fi
+
+url="https://raw.githubusercontent.com/$REPO/$branch/sbin/$scr_name"
+tmp=$CACHE.new
+
+# -f, without which curl writes the server's error page to the file and exits
+# 0: a 404 would be cached and then fed to sh. Two checks on what came back,
+# because a 200 carrying the wrong thing is the failure -f cannot see.
+if curl -fsSL --connect-timeout 15 -m 120 -o "$tmp" "$url"; then
+	if head -n 1 "$tmp" | grep -q '^#!/bin/sh' &&
+		grep -q "^scr_name=$scr_name\$" "$tmp"; then
+		mkdir -p "$STATE_DIR" 2>/dev/null
+		chmod +x "$tmp" 2>/dev/null
+		mv -f "$tmp" "$CACHE" || die "cannot store the installer in $CACHE"
+	else
+		rm -f "$tmp"
+		die "what $url returned is not the installer"
+	fi
+elif [ -s "$CACHE" ]; then
+	rm -f "$tmp"
+	echo "$scr_name: cannot reach GitHub; using the installer cached in $CACHE" >&2
+else
+	rm -f "$tmp"
+	die "cannot reach GitHub, and no installer has been cached in $STATE_DIR yet.
+Fetch it on a camera that can:  curl -fsSL $url -o $CACHE"
+fi
+
+run "$@"

@@ -17,9 +17,26 @@
 # Nothing on the camera is touched until the download has been fetched,
 # verified and unpacked, so a failed or interrupted download leaves the running
 # WebUI exactly as it was.
+#
+# This file is NOT on the camera. What the image carries as
+# /usr/sbin/updatewebui is sbin/updatewebui-fetch, a stub that downloads this
+# script -- from the branch being installed, where one was named -- caches it
+# in /etc/webui and runs it. Two reasons, and the second is the better one:
+#
+#   * the rootfs is a fixed-size squashfs partition and several boards are at
+#     the edge of it. This script is 48 KB of a 5120 KB partition that an
+#     8 MB gk7202v300 had 12 KB of headroom in.
+#   * a script that installs itself is always one release behind: the copy
+#     running an install was the one the PREVIOUS install left, so a fix to
+#     the installer took effect on the run after the one that fetched it --
+#     exactly backwards for the run bringing the fix down. Fetching first
+#     makes the running copy the newest by construction.
+#
+# Nothing is lost by it: this script's only purpose is to download a tree from
+# GitHub, so a camera that cannot reach GitHub could not use it either way.
 
 scr_name=updatewebui
-scr_version=9
+scr_version=10
 
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
@@ -43,7 +60,6 @@ resolved_sha=
 mode=install
 dry_run=0
 do_backup=1
-self_update=1
 
 die() {
 	echo "$scr_name: $1" >&2
@@ -71,9 +87,6 @@ Where:
       --no-backup    Do not archive locally modified files before they are
                      replaced, and with --restore do not put archived files
                      back either.
-      --no-self-update
-                     Do the install with this installer, even when the tree
-                     being installed ships a newer one.
   -h, --help         Display this help and exit.
 
 Notes:
@@ -97,11 +110,12 @@ Notes:
   there, so anything edited since is recognised as a customization and is
   left in place.
 
-  The installer is part of the tree it installs, so a downloaded tree can
-  carry a newer one than the copy you started. When it does, that newer one
-  takes the run over and does the install, and its fixes apply to this run
-  rather than to the next (see --no-self-update). Nothing has been written at
-  that point: the handover happens on the unpacked download.
+  This script is not on the camera. /usr/sbin/$scr_name is a small stub that
+  downloads it -- from the branch being installed, where one was named -- and
+  keeps a copy in $STATE_DIR. So the installer running an install is always
+  the current one, rather than whatever the previous install happened to
+  leave behind, and --restore goes on working from the kept copy with no
+  network at all.
 
   Only the files meant for this firmware's variant (BUILD_OPTION in
   /etc/os-release) are installed, mirroring what the firmware itself ships:
@@ -121,7 +135,6 @@ while [ $# -gt 0 ]; do
 	-r | --restore) mode=restore ;;
 	-n | --dry-run) dry_run=1 ;;
 	--no-backup) do_backup=0 ;;
-	--no-self-update) self_update=0 ;;
 	-h | --help)
 		print_usage
 		exit 0
@@ -137,7 +150,8 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$branch" ] || branch=master
 # fetch_tree fills zip_url in from the branch, so what the caller actually
-# asked for has to be kept apart from it for hand_over to pass on.
+# asked for has to be kept apart from it: write_version reports the source, and
+# must report the one that was requested rather than the one derived from it.
 zip_url_given=$zip_url
 
 # Where a write to / physically lands, and where the firmware's own copy of a
@@ -160,40 +174,11 @@ lower=/rom
 # buildroot has.
 variant=$(sed -n 's/^BUILD_OPTION=//p' /etc/os-release 2>/dev/null | tr -d '"')
 
-# A run that hand_over() started arrives with the download its predecessor had
-# already fetched, staged in this directory together with the script now being
-# executed. Its presence is also what stops a second handover: one hop is the
-# whole feature, and a loop here would be a camera that never installs anything.
-#
-# The value comes from the environment, which is to say from whoever started
-# this run, and it is both an archive to install from and an rm -rf target. So
-# it is accepted only in the one shape hand_over() writes: a direct child of
-# /tmp - no slash in the name, which is what rules out "/tmp/../etc" and every
-# other way back out of /tmp - carrying the prefix used below. A future version
-# that renames its staging directory has to keep that prefix, or the run it
-# hands over to will quietly re-download instead of using the staged copy.
-handover=
-handover_name=${UPDATEWEBUI_HANDOVER:-}
-case $handover_name in
-/tmp/?*)
-	handover_name=${handover_name#/tmp/}
-	case $handover_name in
-	*/*) ;;
-	"$scr_name.handover."?*)
-		[ -d "/tmp/$handover_name" ] &&
-			handover=/tmp/$handover_name
-		;;
-	esac
-	;;
-esac
-unset UPDATEWEBUI_HANDOVER
-
 tmp=$(mktemp -d) || die "cannot create a temporary directory"
 # The staged directory holds the script this shell is reading, which on Linux
 # survives its own unlink for as long as the shell holds it open.
 cleanup() {
 	rm -rf "$tmp"
-	[ -n "$handover" ] && rm -rf "$handover"
 	return 0
 }
 trap cleanup EXIT INT TERM
@@ -249,18 +234,9 @@ fetch_tree() {
 		fi
 		source_name=$branch
 	fi
-	# Handed over, the download is already made and already reported; doing
-	# it again would ask the network twice for the same bytes and could even
-	# answer differently, leaving the run installing a tree other than the
-	# one whose installer is doing the installing.
-	if [ -n "$handover" ] && [ -f "$handover/webui.zip" ]; then
-		cp "$handover/webui.zip" "$tmp/webui.zip" ||
-			die "cannot read the download staged for this run, nothing has been changed"
-	else
-		echo "Fetch $zip_url"
-		curl -fsSL --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
-			die "download failed, nothing has been changed"
-	fi
+	echo "Fetch $zip_url"
+	curl -fsSL --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
+		die "download failed, nothing has been changed"
 	# Unpacking into the scratch directory is the whole validation: it rejects
 	# what is not a zip and what is a truncated one, and it needs no option
 	# beyond the four busybox unzip has always had.
@@ -311,14 +287,26 @@ build_plan() {
 				# fpv-wfb.cgi is the pre-rename name of wfb.cgi. Both
 				# are listed so this script installs an older tree and
 				# a newer one correctly -- which it must, since --url
-				# and --branch will both hand it either. scr_version
-				# went to 7 for this: the copy that runs an install is
-				# the one the PREVIOUS install left, so without the
-				# bump the run that delivers the new name is handled by
-				# a script that has never heard of it, and wfb.cgi
-				# lands on a standard build. Measured, not reasoned:
-				# that is what happened on the lite lab camera.
+				# and --branch will both hand it either. That used to
+				# need a version bump as well, because the copy running
+				# an install was the one the PREVIOUS install left, so
+				# the run delivering a new name was handled by a script
+				# that had never heard of it and wfb.cgi landed on a
+				# standard build -- measured on the lite lab camera,
+				# not reasoned. Fetching the installer first is what
+				# retired that whole class of fault.
 				case $sub/$rel in
+				sbin/$scr_name)
+					# The installer is downloaded, never installed:
+					# the camera carries the stub below under this
+					# name instead. Not counted as skipped -- that
+					# line means "for another firmware variant", and
+					# this path is owned by the stub a line later.
+					continue
+					;;
+				sbin/$scr_name-fetch)
+					d=$root/$scr_name
+					;;
 				www/cgi-bin/wfb.cgi | www/cgi-bin/fpv-wfb.cgi | www/cgi-bin/p/fpv_common.cgi)
 					if [ "$variant" != fpv ]; then
 						echo "$d" >>"$tmp/skipped"
@@ -635,72 +623,6 @@ write_dirs() {
 	return 0
 }
 
-# This script installs itself along with the rest of the tree, so the copy that
-# runs an install is always the one the *previous* install left behind: a fix to
-# the installer lands on the camera but does not act on it until the run after
-# the one that fetched it. That is exactly backwards for the run that matters -
-# the one bringing the fix down - so the tree's own installer takes the run over
-# and does the install itself, from the download that is already unpacked.
-#
-# Only ever forwards, by scr_version. An older tree is installed perfectly well
-# by a newer installer - what to install comes from the tree, how to install it
-# does not - whereas handing the camera to an older one would run the very bugs
-# this version exists to have fixed, on a user who asked for nothing of the
-# sort. Its copy still gets installed as part of the payload, so the next run
-# uses it and the downgrade is complete either way.
-#
-# Nothing has been written when this runs: the download is fetched, verified and
-# unpacked, and the handover happens before build_plan touches the camera at all.
-hand_over() {
-	[ "$self_update" = 1 ] || return 0
-	[ -z "$handover" ] || return 0
-	new=$src/sbin/$scr_name
-	[ -f "$new" ] || return 0
-	newv=$(sed -n 's/^scr_version=\([0-9][0-9]*\)$/\1/p' "$new" | head -1)
-	case $newv in
-	'' | *[!0-9]*) return 0 ;;
-	esac
-	[ "$newv" -gt "$scr_version" ] || return 0
-
-	# Staged outside the scratch directory because exec runs no EXIT trap:
-	# this run's scratch goes now, and what is staged here is handed to the
-	# new script to remove with its own. Named by mktemp rather than after
-	# the pid, so nothing can have the name waiting in /tmp beforehand; the
-	# prefix is what the run being handed over checks for.
-	keep=$(mktemp -d "/tmp/$scr_name.handover.XXXXXX") || {
-		echo "$scr_name: cannot stage installer v$newv, doing the install with v$scr_version" >&2
-		return 0
-	}
-	cp "$tmp/webui.zip" "$keep/webui.zip" &&
-		cp "$new" "$keep/$scr_name" || {
-		rm -rf "$keep"
-		echo "$scr_name: cannot stage installer v$newv, doing the install with v$scr_version" >&2
-		return 0
-	}
-	echo "This tree ships installer v$newv; handing the run over to it."
-
-	# Rebuilt from what was parsed rather than replayed from "$@", so the
-	# new script is asked for the same run in the spelling it understands.
-	set --
-	[ "$dry_run" = 1 ] && set -- "$@" --dry-run
-	[ "$do_backup" = 1 ] || set -- "$@" --no-backup
-	if [ -n "$zip_url_given" ]; then
-		set -- "$@" "--url=$zip_url_given"
-	else
-		set -- "$@" "--branch=$branch"
-	fi
-	UPDATEWEBUI_HANDOVER=$keep
-	export UPDATEWEBUI_HANDOVER
-	rm -rf "$tmp"
-	# Fed to a shell rather than executed, so a /tmp mounted noexec - and a
-	# copy whose mode did not survive the staging - is not what decides
-	# whether the camera can be updated.
-	exec /bin/sh "$keep/$scr_name" "$@"
-	# Only reached if exec failed, and the unpacked tree is already gone.
-	rm -rf "$keep"
-	die "cannot start installer v$newv, nothing has been changed"
-}
-
 # Record which WebUI this run deployed, so the Dashboard can show it -- there is
 # otherwise nothing on the camera that says which build is installed, and a
 # reporter cannot tell whether an install carried a given fix. It is written to
@@ -739,7 +661,6 @@ write_version() {
 
 do_install() {
 	fetch_tree
-	hand_over
 	build_plan
 	report_plan
 	[ "$dry_run" = 1 ] && exit 0
