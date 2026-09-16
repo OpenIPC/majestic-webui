@@ -20,8 +20,13 @@ const eq = (name, got, want) =>
 	check(name, got === want, 'got ' + JSON.stringify(got));
 const AF = require('../www/a/af-state.js');
 
-const DONE = 'done fv=10217 peak=12982 start=10945 mag=1.7 pos=1190 steps=90 path=2';
-const DONE_NOMAG = 'done fv=9062 peak=13288 start=10832 mag=-1.0 pos=2610 steps=107 path=1';
+// A pass that LANDED on its peak — the attribution cases below are about whose
+// pass it was, not how well it went, so they must not trip the quality rule.
+// Measured on an 85H50AI.
+const DONE = 'done fv=12666 peak=12666 start=10430 mag=2.7 pos=9032 steps=60 path=1';
+// Landed on its peak, so the wording under test is the mag note and not
+// the stopped-short one.
+const DONE_NOMAG = 'done fv=13288 peak=13288 start=10832 mag=-1.0 pos=2610 steps=107 path=1';
 
 // A fresh page on a camera whose last pass was interrupted days ago. The whole
 // reason this module exists.
@@ -182,6 +187,56 @@ const DONE_NOMAG = 'done fv=9062 peak=13288 start=10832 mag=-1.0 pos=2610 steps=
 		'Autofocus… (searching the full range)');
 }
 
+// A pass that ends far below the peak it found has not finished, whatever the
+// word says. These two lines are real, measured back to back on an 85H50AI.
+{
+	// Two failure shapes, both measured on an 85H50AI and both "I pressed
+	// Autofocus and the picture got blurry". The first sweeps past a good peak
+	// and parks a quarter below it. The second gives up early on a peak that
+	// was never as sharp as where it began — 99% of its own peak, and a fifth
+	// blurrier than before the press, so a peak-only test calls it a success.
+	const COLD = 'done fv=9427 peak=13050 start=10809 mag=-1.0 pos=3260 steps=113 path=2';
+	const GAVE_UP = 'done fv=9612 peak=9688 start=12045 mag=-1.0 pos=2450 steps=28 path=2';
+	const TRACK = 'done fv=12490 peak=12490 start=11990 mag=2.7 pos=8952 steps=62 path=1';
+	const af = AF.create();
+	af.trigger('started', 'idle', 0);
+	af.step('running', 500);
+	const bad = af.step(COLD, 53000);
+	check('a pass that parked below its own peak is not reported as success',
+		/stopped short/.test(bad.say), bad.say);
+	// The remedy has to match the state. With the zoom position unknown, five
+	// passes in a row took the full-range path and every one stopped short, so
+	// "press again" is not a fix — it is another 50 seconds of the same. A
+	// single zoom is what makes the MCU report the position, and the search
+	// settles after that.
+	check('with the zoom position unknown it sends you to the zoom, not the button',
+		/zoom/.test(bad.say) && !/Press Autofocus again/.test(bad.say), bad.say);
+
+	const af3 = AF.create();
+	af3.trigger('started', 'idle', 0);
+	af3.step('running', 500);
+	const worse = af3.step(GAVE_UP, 50000);
+	check('a pass that ended blurrier than it began is caught too, ' +
+		'though it sat on its own peak',
+		/stopped short/.test(worse.say), worse.say);
+
+	// Same shortfall, but the lens HAS reported its zoom: here the seeded path
+	// is reachable and pressing again is the real remedy.
+	const SHORT_KNOWN = 'done fv=9474 peak=12864 start=7733 mag=2.7 pos=6880 steps=122 path=2';
+	const af4 = AF.create();
+	af4.trigger('started', 'idle', 0);
+	af4.step('running', 500);
+	const known = af4.step(SHORT_KNOWN, 45000);
+	check('with the zoom position known it says to press again',
+		/Press Autofocus again/.test(known.say), known.say);
+
+	const af2 = AF.create();
+	af2.trigger('started', 'idle', 0);
+	af2.step('running', 500);
+	eq('a pass that landed on its peak is plainly finished',
+		af2.step(TRACK, 8000).say, 'Autofocus finished.');
+}
+
 // mag=-1.0 is why autofocus is slow on that camera, and it is said once.
 {
 	const af = AF.create();
@@ -194,6 +249,24 @@ const DONE_NOMAG = 'done fv=9062 peak=13288 start=10832 mag=-1.0 pos=2610 steps=
 	af.step('running', 20500);
 	const second = af.step(DONE_NOMAG, 30000);
 	eq('but only once a session', second.say, 'Autofocus finished.');
+}
+
+// A pass that never ENDS has to be bounded too. `running` used to return
+// before the budget check, so an engine stuck in it left "searching the full
+// range" on the picture for as long as the page stayed open — a progress
+// message with no terminating case, which is exactly what an autofocus that
+// never converges looks like from the outside.
+{
+	const af = AF.create({ budgetMs: 1000 });
+	af.trigger('started', 'idle', 0);
+	eq('a running pass inside the budget keeps polling',
+		af.step('running', 500).poll, true);
+	const r = af.step('running', 2000);
+	eq('past it, the page stops claiming a search is under way', r.poll, false);
+	check('and names the lens as the suspect',
+		/still searching/.test(r.say), r.say);
+	eq('a standing fault is not swept away by a timer', r.sticky, true);
+	eq('and the generation is over', af.armed(), null);
 }
 
 // Budget expiry must never read as success.

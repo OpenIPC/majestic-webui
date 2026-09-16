@@ -72,6 +72,31 @@
 		return / mag=-1\.0(?:\D|$)/.test(s);
 	}
 
+	// Where the lens ended up, against the best sharpness this pass has any
+	// evidence for: the peak the sweep saw, or the reading it started from,
+	// whichever is higher. All three numbers come from the same pass on the
+	// same scene, so they ARE comparable — which is what makes this the one
+	// honest judgement available about a statistic that has no scale between
+	// cameras.
+	//
+	// `start` belongs in it because the two failures observed look nothing
+	// alike. One sweeps past a good peak and parks a quarter below it
+	// (fv=9427 peak=13050 start=10809). The other gives up early on a peak
+	// that was never as sharp as where it began (fv=9612 peak=9688
+	// start=12045) — which passes a peak-only test at 99% while having plainly
+	// made the picture worse. Both are "I pressed Autofocus and it got blurry".
+	//
+	// Null when anything is missing or the best is zero: nothing was
+	// measurable, which is a different story and not this one's to tell.
+	function shortOfBest(s) {
+		const fv = /(?:^|\s)fv=(\d+)/.exec(s);
+		const pk = /(?:^|\s)peak=(\d+)/.exec(s);
+		const st = /(?:^|\s)start=(\d+)/.exec(s);
+		if (!fv || !pk) return null;
+		const best = Math.max(+pk[1], st ? +st[1] : 0);
+		return best > 0 ? +fv[1] / best : null;
+	}
+
 	function create(opts) {
 		const o = opts || {};
 		const budget = o.budgetMs || BUDGET_MS;
@@ -143,6 +168,23 @@
 
 			if (s === 'running') {
 				sawRunning = true;
+				// The budget bounds a pass that never ENDS, not only one that
+				// never starts. `running` used to return here before the check
+				// below, so an engine stuck in it left "searching the full
+				// range" on the picture for as long as the page stayed open —
+				// a progress message with no terminating case, which reads as
+				// an autofocus that never converges even when the fault is the
+				// lens not answering.
+				if (now - armedAt >= budget) {
+					disarm();
+					return {
+						say: 'Autofocus is still searching after ' +
+							Math.round(budget / 1000) +
+							' seconds. Something is wrong with the lens or its ' +
+							'wiring — press Near or Far to take it back.',
+						poll: false, sticky: true,
+					};
+				}
 				const word = kind === 'afterZoom'
 					? 'Autofocus after zoom…'
 					: 'Autofocus…';
@@ -174,6 +216,45 @@
 				const ours2 = causedByUs;
 				disarm();
 				if (isDone(s)) {
+					// A pass that ends well below the best it has evidence
+					// for did not finish, whatever the word says. Measured on
+					// an 85H50AI, the full-range search fails in two shapes:
+					// it sweeps past a good peak and parks a quarter below it
+					// (four passes out of four), or it gives up early on a
+					// peak lower than where it began — 50 seconds to leave the
+					// picture a fifth blurrier than before the press. A seeded
+					// search lands on its peak exactly, in a fifth of the
+					// time. Calling the first kind "finished" is how autofocus
+					// comes to look broken while the page endorses it.
+					//
+					// Pressing again IS the remedy, and that is not a guess:
+					// the second press has the position the first one left, so
+					// it takes the seeded path. Measured, back to back: 53 s
+					// ending at 73% of peak, then 8 s ending at 100%.
+					const q = shortOfBest(s);
+					if (q !== null && q < 0.9) {
+						// Which remedy is true depends on whether the lens has
+						// told the camera where its zoom is. Measured on an
+						// 85H50AI: with the position UNKNOWN, five passes in a
+						// row took the full-range path and every one stopped
+						// short — pressing again is not a fix, and saying so
+						// would send the operator round the same 50 seconds.
+						// A single zoom is what makes the MCU report the
+						// position (it only reports while the motor turns);
+						// after that the search settles onto the seeded path
+						// and lands on its peak exactly, in about 8 seconds.
+						return {
+							say: magUnknown(s)
+								? 'Autofocus stopped short, and it is searching ' +
+									'blind: the lens has not reported its zoom ' +
+									'position since the camera restarted. Nudge ' +
+									'the zoom once — it settles after that.'
+								: 'Autofocus stopped short — the picture is less ' +
+									'sharp than this pass had already seen. ' +
+									'Press Autofocus again.',
+							poll: false, settled: true, transient: true,
+						};
+					}
 					let say = 'Autofocus finished.';
 					if (magUnknown(s) && !saidMagOnce) {
 						saidMagOnce = true;
