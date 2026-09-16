@@ -544,6 +544,93 @@ clip_hook_sync() {
 	return 0
 }
 
+# The other half of the answer above: what the camera runs when movement
+# STARTS, rather than when a recording finishes.
+#
+# It exists because the clip hook cannot cover a camera with no memory card.
+# With nowhere to record there is no recorder, so no clip is ever finished and
+# records.onClose never fires -- and "send me something when it moves" is
+# exactly what such a camera's owner asked for. /usr/sbin/motion-notify.sh
+# records a few seconds as it sends them, which needs no card at all, and
+# stands aside on its own whenever the recorder is set to record on movement.
+#
+# There is NO configuration key for this one. majestic runs /usr/sbin/motion.sh
+# if that file is there and executable, so wiring it means writing the file --
+# and the same rule holds as for the clip hook: an operator who has put a
+# script of their own there keeps it and is told, rather than being overruled.
+# This only ever writes a file that is absent, and only ever removes one it
+# wrote itself, which is what the marker line is for.
+#
+# It is wired whenever either page wants movement sent, including on a camera
+# that has a card today: the script decides at the moment of the event, so
+# pulling the card later leaves the setting working instead of silently
+# stopping.
+motion_hook_path=/usr/sbin/motion.sh
+motion_hook_worker=/usr/sbin/motion-notify.sh
+motion_hook_mark="# written by the OpenIPC WebUI notification pages"
+
+motion_hook_sync() {
+	motion_hook_msg=""
+
+	if clip_hook_wanted; then
+		# Saying nothing here would be the page confirming a setting whose
+		# other half cannot run: on a build that ships no sender the whole
+		# card-less path is missing, and the operator would be told their
+		# settings were saved with movement quietly going nowhere.
+		if [ ! -x "$motion_hook_worker" ]; then
+			motion_hook_msg="This firmware does not include the part that sends movement from a camera with no memory card, so only recordings can be sent."
+			return 1
+		fi
+
+		if [ -e "$motion_hook_path" ]; then
+			if grep -qF "$motion_hook_mark" "$motion_hook_path" 2>/dev/null; then
+				return 0
+			fi
+			motion_hook_msg="The camera already runs a script of its own when movement starts, so it was left alone. Remove ${motion_hook_path} to have movement sent from here on a camera with no memory card."
+			return 1
+		fi
+
+		cat > "$motion_hook_path" <<-HOOK
+			#!/bin/sh
+			${motion_hook_mark}
+			#
+			# Delete this file to stop movement being sent, or replace it with
+			# a script of your own -- nothing here will overwrite one.
+			exec ${motion_hook_worker} "\$@"
+		HOOK
+		# Written, then checked: a full flash writes a truncated file without
+		# saying so, and a hook the camera cannot execute is one it silently
+		# never runs. Both leave the operator told it worked.
+		if [ ! -s "$motion_hook_path" ] || ! chmod 0755 "$motion_hook_path" ||
+			[ ! -x "$motion_hook_path" ]; then
+			rm -f "$motion_hook_path"
+			motion_hook_msg="The camera would not take the script that sends movement."
+			return 1
+		fi
+		return 0
+	fi
+
+	if [ -e "$motion_hook_path" ] &&
+		grep -qF "$motion_hook_mark" "$motion_hook_path" 2>/dev/null; then
+		rm -f "$motion_hook_path"
+	fi
+
+	return 0
+}
+
+# Both hooks, and one sentence for whatever did not happen. The pages call this
+# rather than the two separately, so that a page can never report one of them
+# as the whole answer.
+notify_hooks_sync() {
+	notify_hooks_msg=""
+
+	clip_hook_sync || notify_hooks_msg="$clip_hook_msg"
+	motion_hook_sync ||
+		notify_hooks_msg="${notify_hooks_msg}${notify_hooks_msg:+ }${motion_hook_msg}"
+
+	[ -z "$notify_hooks_msg" ]
+}
+
 # pre "text" "classes" "extras"
 #
 # The <pre> twin of ex, for a text blob the camera produced rather than a

@@ -740,6 +740,64 @@ thumbnail goes on getting one after the schedule has been switched to video.
 configured. **Requires a majestic with `/video.mp4?duration=`**; the two ship
 together, so there is no fallback path and none is written.
 
+**Movement reaches a card-less camera through the OTHER hook.** The clip hook
+fires when a recording is *finished*, so on a camera with nowhere to record it
+never fires at all — no card, no recorder, no clip, and "send me something when
+it moves" quietly does nothing. The camera also runs `/usr/sbin/motion.sh` the
+moment movement *starts*, whether or not anything is recording, and
+`sbin/motion-notify.sh` is what that leads to: it records a few seconds as it
+sends them and hands the one clip to every sender that wants movement. Both
+paths are the same switch on the page — which mechanism runs is the camera's
+business, not the operator's.
+
+They must never both fire for one event, so the script stands aside when the
+recorder is **demonstrably** doing the job: recording switched on, mode
+`motion`, the health gauge at 0, and something actually written. All four
+matter, and the first is the easy one to forget — `records.mode` keeps saying
+`motion` after recording is switched off, the gauge stays at 0 because nothing
+has tried, and the write counter keeps whatever it reached before, so the other
+three can describe a camera that will never finish another clip. The predicate has three answers rather than two —
+covered, not covered, and could not tell — for the reason the config helper
+next door keeps three: a question that could not be asked is not an answer
+about the camera. On "could not tell" the clip is still sent, because a missed
+event is worse than a duplicate and a camera that will not answer is usually
+one that is restarting, but it says so in the log where somebody chasing
+duplicate messages can find it.
+
+Anything worth knowing goes to the camera's log through `logger`, where the
+Logs page shows it: nothing reads this script's exit status, so a delivery that
+failed would otherwise leave no trace anywhere. What the card-less clip costs is
+worth saying plainly, and both pages do: it starts at the trigger rather than
+before it, and it is as long as the setting says rather than as long as the
+movement lasted.
+
+There is **no configuration key** for the movement hook — majestic runs that
+path if the file is there and executable — so wiring it means writing the file,
+and `motion_hook_sync` follows the same rule `clip_hook_sync` follows for the
+clip hook: it writes only a file that is absent, recognises its own by a marker
+line, removes only what it wrote, and tells the operator rather than overruling
+them when something else is already there. `notify_hooks_sync` runs both and
+returns one sentence, so a page cannot report half the answer. The hook is
+wired whenever either page wants movement sent, card or no card: the script
+decides at the moment of the event, so pulling the card later leaves the
+setting working instead of silently stopping.
+
+One capture serves both senders where they ask for the same length, which is
+the ordinary case; where they differ each gets what its own page promised,
+because handing both the longer clip silently lengthens one service's video
+because the other was switched on. A `mkdir` lock keeps one capture at a time
+camera-wide and records the pid holding it: a run can legitimately last minutes
+— a capture plus two uploads over a slow link — and any age short enough to
+recover from a `kill -9` is also short enough to expire under a delivery still
+in progress, so a pid that is gone is the proof and the age is only the
+backstop. A run only ever removes its own lock, or one whose lock was taken
+from it would take away its successor's on the way out.
+
+**The bounding box majestic passes that hook is deliberately ignored**, and
+anything else reading it should know why: its four numbers are the corners of
+the box on HiSilicon and the corner plus its size on SigmaStar and Ingenic, so
+a script that measures what moved is wrong on two vendors out of three.
+
 ## Conventions for new code
 
 - **Bash, busybox-flavoured.** No bash-isms unavailable in busybox `ash`/`sh`; the FPV `fpv_common.cgi` uses `#!/bin/sh` semantics throughout. No GNU-only `sed`/`awk` flags.

@@ -46,11 +46,11 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			echo "*/${telegram_interval} * * * * /usr/sbin/telegram" >> /etc/crontabs/root
 		fi
 
-		if clip_hook_sync; then
+		if notify_hooks_sync; then
 			redirect_back "success" "Telegram config updated."
 		fi
 
-		redirect_back "warning" "Telegram config updated. $clip_hook_msg"
+		redirect_back "warning" "Telegram config updated. $notify_hooks_msg"
 	fi
 
 	redirect_to "$SCRIPT_NAME"
@@ -88,7 +88,7 @@ esac
 				<% field_text "telegram_channel" "Channel" "Channel to post the images to." %>
 				<% field_text "telegram_thread_id" "Message thread id" "Topic to post to (forum supergroups only)." %>
 				<% group_head "Submission" %>
-				<% field_switch "telegram_clips" "Send motion clips" "eval" "Post the recording itself when movement ends. Needs recording on motion to be switched on." %>
+				<% field_switch "telegram_clips" "Send motion clips" "eval" "Post something when the camera sees movement. With a memory card it sends the recording once the movement has stopped, as long as the movement lasted and starting a little before it; with no card it records a few seconds as the movement begins." %>
 				<% field_switch "telegram_video" "Send video on a schedule" "eval" "Record a few seconds and post that, instead of a single picture. Needs no card and no recording." %>
 				<% field_string "telegram_video_seconds" "Video length" "eval" "5 10 15 30 60" "Seconds to record. A send that overlaps another one also gets the seconds before it started; a send on its own begins where it was triggered." %>
 				<% field_string "telegram_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
