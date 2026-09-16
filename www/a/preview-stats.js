@@ -29,7 +29,7 @@ window.MajesticStats = (function () {
 	const GRID = 'rgba(255,255,255,.14)';
 
 	let els = null;
-	let latSpark = null, bwChart = null, rssiSpark = null;
+	let latSpark = null, bwChart = null, rssiSpark = null, fvSpark = null;
 	let open = false;
 	// Per-destination egress, asked for only while somebody is looking. See
 	// the block above outPoll().
@@ -70,6 +70,10 @@ window.MajesticStats = (function () {
 	// of it, and printing the ceiling next to "you receive" read as massive
 	// loss when nothing was lost.
 	let vencRate = [null, null];
+	// The best sharpness seen since focusing began. Null until the first
+	// reading, and cleared by focusReset() — a zoom or a new autofocus pass
+	// changes what "best" could even mean.
+	let fvBest = null;
 
 	function fmtK(k) {
 		if (k == null) return '-';
@@ -130,6 +134,21 @@ window.MajesticStats = (function () {
 				'<div class="mj-ns-row" id="mj-ns-r-wretr" hidden><span>radio retries</span><b id="mj-ns-wretr">–</b></div>' +
 			'</div>' +
 			'<div class="mj-ns-spark" id="mj-ns-rssi-sp"></div>' +
+		'</section>' +
+		// Focus. A TREND, never a score: the ISP's focus statistic has no
+		// common scale — the repo's own Ingenic fixture reads 1198384 where
+		// this hi3516ev300 reads 6318 — so a percentage, a bar or a
+		// good/bad grade would be inventing a ceiling. And it arrives on the
+		// 2 s heartbeat, which cannot be a focusing viewfinder; it is a
+		// confirmation instrument, for "did that trim help?", which is why
+		// it lives in the opt-in panel and not next to the buttons.
+		'<section class="mj-ns-sec" id="mj-ns-focus" hidden>' +
+			'<div class="mj-ns-cap">Focus</div>' +
+			'<div class="mj-ns-rows">' +
+				'<div class="mj-ns-row"><span>sharpness now</span><b id="mj-ns-fv">–</b></div>' +
+				'<div class="mj-ns-row"><span>best since you started focusing</span><b id="mj-ns-fvmax">–</b></div>' +
+			'</div>' +
+			'<div class="mj-ns-spark" id="mj-ns-fv-sp"></div>' +
 		'</section>' +
 		'<section class="mj-ns-sec" id="mj-ns-egress" hidden>' +
 			'<div class="mj-ns-cap">Camera is serving</div>' +
@@ -227,12 +246,17 @@ window.MajesticStats = (function () {
 			radio: g('mj-ns-radio'), wifi: g('mj-ns-wifi'),
 			rWrate: g('mj-ns-r-wrate'), wrate: g('mj-ns-wrate'),
 			rWretr: g('mj-ns-r-wretr'), wretr: g('mj-ns-wretr'),
+			focus: g('mj-ns-focus'), fv: g('mj-ns-fv'), fvMax: g('mj-ns-fvmax'),
 			egress: g('mj-ns-egress'), egRows: g('mj-ns-eg-rows'),
 			fp: g('mj-ns-fp'),
 		};
 		const MC = window.MjCharts;
 		latSpark = MC.makeSpark(g('mj-ns-lat-sp'), C1, 0, null, 120);
 		rssiSpark = MC.makeSpark(g('mj-ns-rssi-sp'), C1, -90, -30, 60);
+		// Auto-scaled at BOTH ends (lo and hi null): the focus statistic has no
+		// common scale across vendors, so pinning either end would be inventing
+		// a floor or a ceiling this camera never had.
+		fvSpark = MC.makeSpark(g('mj-ns-fv-sp'), C2, null, null, 120);
 		bwChart = MC.makeChart(g('mj-ns-bw'), {
 			h: 56, lo: 0, hi: null, colors: [C1, C2], grid: GRID,
 			fmt: (x) => x >= 10 ? String(Math.round(x)) : x.toFixed(1),
@@ -891,6 +915,34 @@ window.MajesticStats = (function () {
 		vencRate[0] = rate('venc0_rcvd_bytes');
 		vencRate[1] = rate('venc1_rcvd_bytes');
 
+		// Focus. `in v` rather than a truthiness test, because 0 is a real
+		// reading — a black scene has no detail to measure — and absent is a
+		// camera whose SoC publishes no focus statistic at all (the gauge is a
+		// HiSilicon gen4 and Ingenic T31 thing). Absent hides the section and
+		// says nothing: a camera that cannot measure focus is not a camera that
+		// is out of focus.
+		// Present AND finite. `in` separates absent from zero, which is the
+		// distinction that matters most here — 0 is a real reading from a black
+		// scene — but it says nothing about the number being usable: the shared
+		// metrics parser will hand back Infinity for a malformed line, and that
+		// reaches the rounding, the high-water mark and the sparkline's own
+		// bounds, where it becomes non-finite SVG coordinates and no chart at
+		// all. A reading that cannot be drawn is not a reading.
+		const fv = v.isp_afmetrics;
+		const hasFv = 'isp_afmetrics' in v && Number.isFinite(fv) && fv >= 0;
+		els.focus.hidden = !hasFv;
+		if (hasFv) {
+			els.fv.textContent = String(Math.round(fv));
+			// The best THIS run of focusing has reached, not an all-time high
+			// and not the `peak=` of some earlier pass: both of those describe
+			// a scene and a zoom that have since moved on, and drawing the bar
+			// against one would state a target that no longer exists. Reset by
+			// whoever is focusing — see MajesticStats.focusReset().
+			if (fvBest === null || fv > fvBest) fvBest = fv;
+			els.fvMax.textContent = String(Math.round(fvBest));
+			if (fvSpark) window.MjCharts.pushSpark(fvSpark, fv);
+		}
+
 		// Radio: words first, the dBm beside them. Rows vanish on a wired
 		// camera rather than standing full of dashes. Presence is judged
 		// across the whole wifi_* family and the grade falls back to the
@@ -1042,5 +1094,27 @@ window.MajesticStats = (function () {
 			requestAnimationFrame(() => window.MjCharts.renderAll());
 	}
 
-	return { tick: tick, reset: reset, setOpen: setOpen };
+	// "Best since you started focusing" only means anything within one scene at
+	// one zoom. The pad calls this when either changes — a zoom verb, or a new
+	// autofocus pass — so the figure describes the session of focusing the
+	// operator is actually in, rather than a high-water mark from a framing
+	// they have left behind. Guarded at the call site like every other entry
+	// point here, because preview-page.js runs under a bare vm in two tests.
+	function focusReset() {
+		fvBest = null;
+		if (els && els.fvMax) els.fvMax.textContent = '–';
+		// Emptying the arrays is not enough: the sparkline keeps its drawn
+		// paths until something renders it again, so the graph went on showing
+		// the previous scene's measurements beside a blanked "best". Push the
+		// cleared state through the same draw the ticker uses, so the panel
+		// says nothing rather than something stale.
+		if (fvSpark) {
+			fvSpark.ks = [];
+			fvSpark.ys = [];
+			if (fvSpark.fill) fvSpark.fill.setAttribute('d', '');
+			if (fvSpark.line) fvSpark.line.setAttribute('d', '');
+		}
+	}
+
+	return { tick: tick, reset: reset, setOpen: setOpen, focusReset: focusReset };
 })();

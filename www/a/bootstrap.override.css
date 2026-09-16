@@ -3890,6 +3890,19 @@ button.mj-osd-chip,
 	grid-template-columns: repeat(2, 1fr);
 }
 
+/* Autofocus takes the whole row under its own caption, like the captions
+   themselves. Wide, Tele, Near and Far are movements the operator owns; this
+   is a procedure that drives the same motor for up to three minutes and runs
+   by itself after every zoom. In a two-column grid it landed alone in the left
+   cell of a fifth row, which drew it as their fifth sibling — and that is how
+   the pad was read. Full width also buys it the room to say "Autofocus"
+   instead of "AF". */
+.mj-ptz-af {
+	grid-column: span 2;
+	flex-direction: row;
+	gap: 0.4rem;
+}
+
 .mj-ptz-group {
 	grid-column: span 2;
 	padding: 0.2rem 0 0.05rem;
