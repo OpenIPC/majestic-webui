@@ -989,24 +989,27 @@ update_caminfo() {
 	done
 	ptz_caps="${ptz_caps# }"
 
-	# Autofocus: the engine lives in majestic (GET /autofocus, #227's board
-	# being the first) and exists only when its config enables it; the pad's
-	# AF button additionally needs a focus axis to make sense. Cached like
-	# the rest so pages don't shell out per request.
-	af_support=""
-	# A camera that could not be asked keeps the button rather than losing it:
-	# withdrawing the control would state, from a failed request, that this
-	# hardware does not have the feature. Only an answer saying it is off
-	# withdraws it.
-	_af=$(mj_cfg isp.autofocus.enabled); _afrc=$?
-	_af_on=""
-	[ "$_afrc" = 0 ] && [ "$_af" = "true" ] && _af_on=1
-	[ "$_afrc" -gt 1 ] && _af_on=1
-	if [ -n "$ptz_support" ] && [ -n "$_af_on" ]; then
-		case " ${ptz_caps:-focus} " in
-			*" focus "*) af_support="1" ;;
-		esac
-	fi
+	# Autofocus has NO cached flag here, deliberately, and this comment is the
+	# tombstone of the one that used to be.
+	#
+	# `af_support` combined two facts with very different lifetimes: whether
+	# this board has a motor and a focus axis (U-Boot, effectively permanent)
+	# and whether majestic's engine is switched on (isp.autofocus.enabled,
+	# changed from the settings page whenever anybody likes). The whole file is
+	# invalidated by caminfo_stale(), which compares majestic's pid and start
+	# time -- and saving a config key is a SIGHUP reload, not a restart, so the
+	# pid never moves. Turning "Motorized lens" on therefore did nothing
+	# visible until majestic was restarted for some unrelated reason, and there
+	# is no server-side hook that could fix it: Save goes from the browser
+	# straight to /api/v1/config with no CGI anywhere in the path.
+	#
+	# So the slow half stays cached ($ptz_support, $ptz_caps, both derived from
+	# U-Boot above) and p/motor.cgi draws the control on those. The fast half is
+	# majestic's own configuration, and the browser asks majestic for it --
+	# preview-ptz.js probes GET /autofocus/status at mount, which 404s when the
+	# engine is off. That is the standing rule stated as a fix: config comes
+	# from the daemon, and a second copy needs an invalidation rule that has a
+	# witness at the event. This one never had one.
 
 	# Network
 	network_interface=$(ip route | awk '/default/ {print $5}' | head -n1)
@@ -1028,7 +1031,7 @@ update_caminfo() {
 
 	local variables="flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		af_support ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
+		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file}
 
 	local v

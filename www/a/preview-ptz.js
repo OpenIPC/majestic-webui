@@ -2,12 +2,13 @@
 // includes only when the camera has motors. `$` and `apiFetch` are globals
 // from main.js.
 //
-// Two protocols behind one pad. Stepped backends (gpio-motors, the motor
-// profiles) take ?h=&v= magnitudes and buttons carry data-dir; the Pelco-D
-// backend takes ?act= verbs — four directions, zoom, focus — driven by
-// majestic, which owns that wire, and buttons carry data-act.
-// The markup decides which kind this camera has; this file just reads what
-// the buttons say.
+// Two protocols behind one pad, and two doors. Stepped backends (gpio-motors,
+// the motor profiles) are binaries on the camera, so they go through
+// j/ptz.cgi as ?h=&v= magnitudes and their buttons carry data-dir. The serial
+// backends are majestic's — it owns that UART — so those go straight to
+// POST /ptz?move=, and their buttons carry data-act. The markup decides which
+// kind this camera has; this file just reads what the buttons say, which is
+// why the door needs no flag of its own.
 //
 // The pads are emitted after the player (the stage is already closed when
 // the include runs) and moved into the stage's #mj-ptz mount here.
@@ -52,7 +53,7 @@
 	// arrow pressed while another is still down, used to let the older one's
 	// release stop the newer one's move — harmless while every press was a
 	// self-terminating pulse, not harmless now that a release stops a motor.
-	let holdBtn = null, holdOwner = null;
+	let holdBtn = null, holdOwner = null, holdKick = null, holdStart = 0;
 
 	// One request in flight at a time — a hold does not queue moves behind a
 	// slow camera, it just measures out what the camera keeps up with. For
@@ -78,8 +79,7 @@
 			// does anything, so the headers arrive in milliseconds. Reading
 			// to the end of the body is what keeps one request in flight at
 			// a time — the stepped backends still block for the length of
-			// their step, and the AF verb holds its request for the whole
-			// pass.
+			// their step.
 			.then(r => r.text())
 			.catch(() => {})
 			.finally(() => {
@@ -89,6 +89,60 @@
 				if (q) req(q, true);
 			});
 	}
+
+	// The serial backends are majestic's: it owns that UART and serves the
+	// verbs at POST /ptz?move=…, so the browser asks it rather than forking a
+	// shell to relay the same words over loopback. Which door a button uses is
+	// not a new flag — the markup already decides it, and always did:
+	// `data-act` is the serial pad, `data-dir` the stepped one.
+	//
+	// Nothing paces this but the ticker. j/ptz.cgi's exit used to mark the end
+	// of a pulse, so the one-in-flight rule measured the hold out; /ptz answers
+	// in about 30 ms (measured on an hi3516ev300, for a move asked to run 2 s),
+	// because the motor's deadline lives in the daemon. That is what the
+	// camera's design wants anyway: every request re-arms the deadline, so a
+	// 250 ms ticker is a continuous move and a lost release still stops.
+	//
+	// `ms` is the query parameter, not the `verb:ms` the plugin ABI uses —
+	// majestic parses move/ms properly (evhttp_parse_query_str, not a
+	// substring sniff) and composes the plugin's form itself.
+	// Held ticks are NOT gated on a request being in flight, and that inversion
+	// is the point. j/ptz.cgi's exit marked the end of a pulse, so dropping a
+	// tick while one was outstanding was how a hold measured itself out. Here a
+	// tick exists only to re-arm the motor's deadline, so the moment one is in
+	// flight is the moment the next one matters most: dropped, the deadline
+	// expires and the sweep stalls mid-press. Measured on this camera over the
+	// lab link — a round trip near 500 ms against a 250 ms ticker left one
+	// coarse request in a 1.2 s hold and a gap before the release.
+	//
+	// Bounded rather than free: past a few outstanding requests the link, not
+	// the ticker, is the problem, and piling on cannot help. `stop` is never
+	// bounded and never dropped — a stop that vanished leaves a motor running
+	// to its deadline, which is the one failure with a physical cost.
+	let outstanding = 0;
+	function move(verb, ms, isStop) {
+		let url = '/ptz?move=' + encodeURIComponent(verb);
+		if (ms) url += '&ms=' + ms;
+		if (!isStop && outstanding >= 3) return;
+		outstanding++;
+		apiFetch(url, { method: 'POST', credentials: 'same-origin' })
+			// The body decides, not the status. majestic answers /ptz with a
+			// BODYLESS 200 when the sensor driver did not come up, and the
+			// plugin answers `unavailable` — also 200 — when the focus port is
+			// closed, which is the state a camera lands in after the motorized
+			// lens setting is toggled without a restart. A status-code check
+			// calls both of those a move.
+			.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+			.then(t => {
+				const body = t.trim();
+				if (body === 'unavailable') say(LENS_SHUT);
+				else if (body && afLine && afLine.textContent === LENS_SHUT) say('');
+			})
+			.catch(() => {})
+			.finally(() => { outstanding--; });
+	}
+	const LENS_SHUT = 'The camera is not driving the lens. Restart majestic to ' +
+		'load the motor driver.';
 	// ---- Autofocus -------------------------------------------------------
 	//
 	// The engine is majestic's, so the browser asks majestic: `GET /autofocus`
@@ -160,14 +214,55 @@
 		afState.manual(verb, Date.now());
 		if (!afState.armed()) { afStop(); say(''); }
 	}
-	// One status read at mount, never spoken — it is the sticky residue the
-	// reducer needs to recognise so it can ignore it. Without it the first
-	// press would take whatever was standing (a `preempted` from days ago) as
-	// its own generation's starting point.
-	if (afState && afSay) afText(AF_STATUS_URL).then(s => afState.observe(s), () => {});
+	// One status read at mount, doing two jobs.
+	//
+	// The reply is the sticky residue the reducer has to recognise in order to
+	// ignore it — without it the first press would take whatever was standing
+	// (a `preempted` from days ago) as its own generation's starting point.
+	//
+	// And whether there IS a reply is the capability answer. majestic 404s
+	// /autofocus and /ptz outright when isp.autofocus.enabled is off, so a
+	// definite 404 withdraws the control and the focus caption stays plain. An
+	// answer promotes the caption to "Manual focus", because now there is
+	// something automatic to contrast it with. Anything else — a timeout, a
+	// proxy, a camera mid-restart — changes nothing: could not ask is not an
+	// answer about the hardware, and this is exactly the camera where the
+	// operator has just turned the setting on and is waiting to see it.
+	if (afState && afSay) {
+		apiFetch(AF_STATUS_URL, { credentials: 'same-origin' }).then((r) => {
+			if (r.status === 404) {
+				const cap = $('#mj-af-cap');
+				const btn = mount.querySelector('[data-act="af"]');
+				if (cap) cap.hidden = true;
+				if (btn) btn.hidden = true;
+				return;
+			}
+			if (!r.ok) return;
+			const fc = $('#mj-focus-cap');
+			if (fc) fc.textContent = 'Manual focus';
+			return r.text().then((s) => afState.observe(s.trim()));
+		}, () => {});
+	}
+
+	// A tap is a nudge, a hold is a sweep — the same split Axis's optics API
+	// makes with ±smallStep and ±bigStep, and the reason manual focus on a
+	// 500 ms step is unusable for anything delicate. The COARSE step is the
+	// operator's own isp.autofocus.pulse: send no duration and the camera uses
+	// it, so anyone who tuned that keeps exactly what they tuned. The FINE step
+	// is a fifth of it, floored at the key's own minimum. No new setting, and
+	// nothing in localStorage — the camera already stores this, and a step that
+	// lived in one browser would not be the step the next operator got.
+	let fineMs = 100;
+	if (typeof mjConfig === 'function') {
+		mjConfig().then((c) => {
+			const af = c && c.isp && c.isp.autofocus;
+			const n = parseInt(af && af.pulse, 10);
+			if (n >= 50) fineMs = Math.max(50, Math.round(n / 5));
+		}, () => {});
+	}
 
 	// What one press of this button means, from its own dataset.
-	function fire(btn) {
+	function fire(btn, ms) {
 		if (btn.dataset.act) {
 			const act = btn.dataset.act;
 			// Autofocus is not a move and must not take the lease. j/ptz.cgi
@@ -180,7 +275,7 @@
 			// watching the status is what ends that, rather than a longer
 			// timeout somewhere.
 			if (act === 'af') { triggerAf(); return; }
-			req('act=' + act, act === 'stop');
+			move(act, ms, act === 'stop');
 			if (act === 'wide' || act === 'tele') zoomTouched = true;
 			else if (act === 'near' || act === 'far') afManual(act);
 			return;
@@ -194,11 +289,22 @@
 		clearHold();
 		holdBtn = btn;
 		holdOwner = owner;
-		fire(btn);
-		holdTimer = setInterval(() => fire(btn), TICK_MS);
+		holdStart = Date.now();
+		// The press cannot yet know whether it is a tap or a hold, so it sends
+		// the fine step and the ticker takes over. The first coarse tick is
+		// timed to land as that fine pulse expires rather than at the usual
+		// quarter second, or a hold would be a nudge, a stall, then motion.
+		const fine = (btn.dataset.act && btn.dataset.act !== 'stop') ? fineMs : 0;
+		fire(btn, fine);
+		holdKick = setTimeout(() => {
+			holdKick = null;
+			fire(btn);
+			holdTimer = setInterval(() => fire(btn), TICK_MS);
+		}, fine || TICK_MS);
 	}
 	function clearHold() {
 		if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+		if (holdKick) { clearTimeout(holdKick); holdKick = null; }
 		holdBtn = null;
 		holdOwner = null;
 	}
@@ -214,8 +320,14 @@
 	function stopHold(owner) {
 		if (owner != null && owner !== holdOwner) return;
 		const btn = holdBtn;
+		const heldMs = Date.now() - holdStart;
 		clearHold();
-		if (btn && btn.dataset.act) req('act=stop', true);
+		// A tap must not be cut short by its own release. The fine pulse is
+		// self-terminating — the camera stops the motor on the deadline that
+		// press armed — so a press shorter than the step sends no stop and the
+		// nudge completes. Anything longer is a sweep, and a sweep has to be
+		// told to stop or the motor runs on to its deadline.
+		if (btn && btn.dataset.act && heldMs >= fineMs) move('stop', 0, true);
 		// Letting go of a zoom is what books a focus pass: majestic waits for
 		// the wire to go quiet (700 ms) after the move's own deadline and then
 		// runs one. Nothing told the operator that, so a picture that went soft

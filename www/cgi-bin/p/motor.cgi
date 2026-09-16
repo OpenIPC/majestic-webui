@@ -39,11 +39,12 @@ has_cap() {
 	return 1
 }
 
-# Near and Far are only "manual" focus in contrast to something automatic. On a
-# camera with no autofocus engine there is nothing to contrast them with, and
-# the word would be describing a distinction the operator cannot see.
+# Near and Far are only "manual" focus in contrast to something automatic, so
+# the caption starts plain and preview-ptz.js promotes it once the camera has
+# answered that an engine is there. Server-side this cannot be known without
+# asking majestic on every page load, and the cached answer that used to be
+# here went stale the moment anybody saved the setting (see p/common.cgi).
 focus_label="Focus"
-[ -n "$af_support" ] && focus_label="Manual focus"
 %>
 <% if [ "$ptz_backend" = "pelco" ]; then %>
 <!-- Why the pads will not move anything. Set when the camera declares a
@@ -77,7 +78,7 @@ focus_label="Focus"
      #mj-ptz-why does: preview-hero.js measures the pad to place the control bar
      (--mj-ptz-h, .mj-ptz-beside), so a line appearing and disappearing inside
      it would re-flow the bar mid-pass, under the operator's finger. -->
-<% if [ -n "$af_support" ]; then %>
+<% if has_cap focus; then %>
 <p id="mj-af-say" class="mj-adapt-toast mj-ptz-why small" role="status" aria-live="polite" hidden></p>
 <% fi %>
 <% if has_cap zoom || has_cap focus; then %>
@@ -98,7 +99,7 @@ focus_label="Focus"
 	</button>
 	<% fi %>
 	<% if has_cap focus; then %>
-	<span class="mj-ptz-group"><%= $focus_label %></span>
+	<span class="mj-ptz-group" id="mj-focus-cap"><%= $focus_label %></span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="near" aria-label="Focus near" title="Pull focus nearer">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
@@ -114,11 +115,18 @@ focus_label="Focus"
 		<span>Far</span>
 	</button>
 	<% fi %>
-	<% if [ -n "$af_support" ]; then %>
+	<% if has_cap focus; then %>
 	<!-- One-shot contrast autofocus: majestic's engine drives the same
 	     focus motor off the ISP's focus statistic. The icon is the focus
 	     bracket family with a filled subject: the camera choosing the
-	     distance itself. af_support already implies the focus axis.
+	     distance itself.
+
+	     Drawn on the focus axis alone -- a U-Boot fact that does not change
+	     under anybody's feet -- and WITHDRAWN at runtime by preview-ptz.js if
+	     majestic answers 404 to the status probe, which is what a camera with
+	     the engine switched off says. The gate used to be a cached
+	     `af_support` that mixed this permanent fact with a config key, and
+	     nothing invalidated it when the key changed.
 
 	     It gets a caption and a row of its own, spanning both columns,
 	     because it is not a fifth direction. Wide, Tele, Near and Far are
@@ -127,7 +135,7 @@ focus_label="Focus"
 	     them, and runs by itself after every zoom. Sharing their grid cell
 	     said it was their sibling, and that is what the pad was read as.
 	     The button can spell the word out at this width. -->
-	<span class="mj-ptz-group">Autofocus</span>
+	<span class="mj-ptz-group" id="mj-af-cap">Autofocus</span>
 	<button type="button" class="mj-ptz-fnbtn mj-ptz-af" data-act="af" aria-label="Autofocus" title="Focus the camera once, now. Trim with Near and Far AFTER it finishes: a manual move first makes the next autofocus search the whole range.">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
