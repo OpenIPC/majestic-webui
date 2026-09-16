@@ -2,140 +2,256 @@
 <%in p/common.cgi %>
 <%
 config_file=/etc/webui/ntfy.conf
-# The list of parameters that we will save
-params="enabled server topic user pass caption clips video video_seconds heif priority"
+params="enabled server topic user pass caption clips video video_seconds heif priority proxy"
 
-# === TEST AND WEBHOOK DISPATCH ===
-#
 # Three verbs over one path. ?send=test is the button on this page and sends
-# whatever the settings say, because that is what a test is for. ?send=image
-# and ?send=clip are for something outside the camera -- a doorbell, a home
-# automation rule, a motion sensor of its own -- and each asks for exactly
-# what it is named, so a dashboard fetching a thumbnail goes on getting one
-# after the settings here have been switched over to video.
+# whatever the settings say, because that is what a test is for. ?send=image and
+# ?send=clip are for something outside the camera -- a doorbell, a home
+# automation rule, a motion sensor of its own -- and each asks for exactly what
+# it is named, so a dashboard fetching a thumbnail goes on getting one after the
+# settings here have been switched over to video.
 #
-# OK/FAIL rather than true/false: that is what a/ntfy.js already reads.
+# OK/FAIL rather than true/false: that is what a/notify.js reads, and what the
+# page said before it.
 if [ "$GET_send" = "test" ] || [ "$GET_send" = "image" ] ||
-    [ "$GET_send" = "clip" ]; then
-    echo "Content-type: text/html; charset=UTF-8"
-    echo
-    send_what=""
-    [ "$GET_send" = "image" ] && send_what=--image
-    [ "$GET_send" = "clip" ] && send_what=--clip
-    # Unquoted on purpose: an empty word must disappear rather than arrive as
-    # an empty first argument, which the sender would read as a file path.
-    if /usr/bin/ntfy.sh $send_what > /dev/null 2>&1; then
-        echo "OK"
-    else
-        echo "FAIL"
-    fi
-    exit 0
+	[ "$GET_send" = "clip" ]; then
+	echo "Content-type: text/html; charset=UTF-8"
+	echo
+	send_what=""
+	[ "$GET_send" = "image" ] && send_what=--image
+	[ "$GET_send" = "clip" ] && send_what=--clip
+	# Unquoted on purpose: an empty word must disappear rather than arrive as
+	# an empty first argument, which the sender would read as a file path.
+	if /usr/bin/ntfy.sh $send_what > /dev/null 2>&1; then
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+	exit 0
 fi
 
-# === LOGIC OF SAVING SETTINGS ===
 if [ "$REQUEST_METHOD" = "POST" ]; then
-    for p in $params; do
-        eval ntfy_${p}=\$POST_ntfy_${p}
-    done
+	for p in $params; do
+		eval ntfy_${p}=\$POST_ntfy_${p}
+	done
 
-    # Validation
-    if [ "$ntfy_enabled" = "true" ]; then
-        [ -z "$ntfy_server" ] && set_error_flag "Server URL cannot be empty."
-        [ -z "$ntfy_topic" ] && set_error_flag "Topic cannot be empty."
-    fi
+	if [ "$ntfy_enabled" = "true" ]; then
+		[ -z "$ntfy_server" ] && set_error_flag "Enter the server before switching Ntfy on."
+		[ -z "$ntfy_topic" ] && set_error_flag "Enter a topic before switching Ntfy on."
+	fi
 
-    # Writing to a file
-    if [ -z "$error" ]; then
-        rm -f "$config_file"
-        for p in $params; do
-            echo "ntfy_${p}=\"$(eval echo \$ntfy_${p})\"" >> "$config_file"
-        done
-        if notify_hooks_sync; then
-            redirect_back "success" "Ntfy config updated."
-        fi
+	if [ -z "$error" ]; then
+		rm -f "$config_file"
+		for p in $params; do
+			echo "ntfy_${p}=\"$(eval echo \$ntfy_${p})\"" >> "$config_file"
+		done
 
-        redirect_back "warning" "Ntfy config updated. $notify_hooks_msg"
-    fi
+		if notify_hooks_sync; then
+			redirect_back "success" "Ntfy settings saved."
+		fi
 
-    redirect_to "$SCRIPT_NAME"
+		redirect_back "warning" "Ntfy settings saved. $notify_hooks_msg"
+	fi
+
+	redirect_to "$SCRIPT_NAME"
 fi
 
-# === LOADING CURRENT SETTINGS ===
 [ -e "$config_file" ] && include $config_file
 
-# Default values
 [ -z "$ntfy_server" ] && ntfy_server="https://ntfy.sh"
-[ -z "$ntfy_priority" ] && ntfy_priority="4"
-# The sender's own default and the sender's own clamp, both said here too.
-# The page reads whatever is in the file, which nothing obliges to be one of
-# the lengths offered: a hand-edited 600 would select none of them, so the
-# list would show 5, the webhook card would promise 600, and the send would
-# ask the camera for the 60 it clamps to -- three numbers for one setting.
-# These are the SENDER's bounds rather than the offered list's, because what
-# the card promises has to be what the send does; a hand-edited length the
-# list does not offer is still honoured, it just cannot be shown as picked.
+# The sender's default, said here too: the page used to offer 4 while the
+# sender fell back to 3, so a camera nobody had touched sent at a loudness the
+# page did not show.
+[ -z "$ntfy_priority" ] && ntfy_priority="3"
+
+# The sender's own default and the sender's own clamp. A hand-edited length the
+# list does not offer is still honoured; it just cannot be shown as picked.
 case "$ntfy_video_seconds" in
 "" | *[!0-9]* | ????*) ntfy_video_seconds="10" ;;
 esac
 [ "$ntfy_video_seconds" -lt 1 ] && ntfy_video_seconds="10"
 [ "$ntfy_video_seconds" -gt 60 ] && ntfy_video_seconds="60"
+
+# What the status line says before any script runs.
+nf_sender=false
+[ -x /usr/bin/ntfy.sh ] && nf_sender=true
+nf_addressed=false
+[ -n "$ntfy_server" ] && [ -n "$ntfy_topic" ] && nf_addressed=true
+
+if [ "$nf_sender" != "true" ]; then
+	nf_head="This firmware cannot send to Ntfy"
+	nf_level=" mj-status-bad"
+	nf_what="&mdash;"
+	nf_when="the part that does the sending is not installed"
+elif [ "$ntfy_enabled" != "true" ]; then
+	nf_head="Switched off"
+	nf_level=" mj-status-off"
+	nf_what="&mdash;"
+	nf_when="nothing will be sent"
+elif [ "$nf_addressed" != "true" ]; then
+	nf_head="Not set up yet"
+	nf_level=" mj-status-off"
+	nf_what="&mdash;"
+	nf_when="it needs a topic"
+else
+	nf_head="Ready"
+	nf_level=""
+	nf_what="$([ "$ntfy_video" = "true" ] && echo "${ntfy_video_seconds}-second video" || echo "Picture")"
+	nf_when="checking what the camera can do&hellip;"
+fi
+
+nf_who="not addressed yet"
+[ "$nf_addressed" = "true" ] && nf_who="to a private topic on $(esc "${ntfy_server#*://}")"
 %>
 
 <%in p/header.cgi %>
 
+<script type="application/json" id="mj-notify-boot">{"key":"ntfy","label":"Ntfy","sender":<%= $nf_sender %>,"addressed":<%= $nf_addressed %>,"missing":"it needs a topic","schedulable":false,"who":"<% attr_escape "$nf_who" %>"}</script>
+
+<div class="mj-status<%= $nf_level %>" id="mj-notify-status">
+	<span class="mj-status-ico">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.7"/><path d="M12 11.2v5.2"/><path d="M12 7.7h.01"/></svg>
+	</span>
+	<span class="mj-status-txt">
+		<b class="mj-notify-head"><%= $nf_head %></b>
+		<span class="mj-notify-who"><%= $nf_who %></span>
+	</span>
+	<span class="mj-status-val">
+		<b class="mj-notify-what"><%= $nf_what %></b>
+		<span class="mj-notify-when"><%= $nf_when %></span>
+	</span>
+</div>
+
+<form action="<%= $SCRIPT_NAME %>" method="post">
 <div class="row g-4">
 	<div class="col-12 col-lg-8">
 		<div class="card"><div class="card-body">
-			<% card_head "Ntfy notifications" %>
-			<p class="small text-secondary">Push a picture, or a few seconds of video, to an <a href="https://ntfy.sh">ntfy</a> topic.</p>
-			<form action="<%= $SCRIPT_NAME %>" method="post">
-				<% field_switch "ntfy_enabled" "Enable Ntfy" "eval" %>
-				<% group_head "Connection" %>
-				<% field_text "ntfy_server" "Server URL" "e.g. https://ntfy.sh" %>
-				<% field_text "ntfy_topic" "Topic" "Unique topic name for notifications." %>
-				<% field_text "ntfy_user" "Username" "Leave empty if no auth." %>
-				<% field_text "ntfy_pass" "Password" "Leave empty if no auth." %>
-				<% group_head "Message" %>
-				<% field_text "ntfy_caption" "Caption" "Supports %hostname, %datetime, %soctemp." %>
-				<% field_string "ntfy_priority" "Priority" "eval" "1 2 3 4 5" "1 = min, 5 = max (urgent)." %>
-				<% field_switch "ntfy_heif" "Use HEIF format" "eval" "Smaller files (best with H265)." %>
-				<% group_head "Submission" %>
-				<% field_switch "ntfy_clips" "Send motion clips" "eval" "Push something when the camera sees movement. With a memory card it sends the recording once the movement has stopped, as long as the movement lasted and starting a little before it; with no card it records a few seconds as the movement begins." %>
-				<% field_switch "ntfy_video" "Send video" "eval" "Record a few seconds and push that, instead of a single picture. Needs no card and no recording." %>
-				<% field_string "ntfy_video_seconds" "Video length" "eval" "5 10 15 30 60" "Seconds to record. A push that overlaps another one also gets the seconds before it started; a push on its own begins where it was triggered." %>
-				<% button_submit %>
-			</form>
+			<% card_head "What it sends" %>
+
+			<% field_switch "ntfy_enabled" "Send to Ntfy" "eval" %>
+
+			<% group_head "The message" %>
+			<p class="boolean mj-row">
+				<label for="ntfy_video" class="form-label">Picture or video</label>
+				<span class="mj-ctl"><span class="mj-ctl-in">
+					<span class="mj-seg" role="group" aria-label="Picture or video">
+						<input type="radio" class="mj-seg-in" name="ntfy_video" id="ntfy_video_off" value="false" <% [ "$ntfy_video" != "true" ] && echo checked %>>
+						<label class="mj-seg-lbl" for="ntfy_video_off">Picture</label>
+						<input type="radio" class="mj-seg-in" name="ntfy_video" id="ntfy_video" value="true" <% [ "$ntfy_video" = "true" ] && echo checked %>>
+						<label class="mj-seg-lbl" for="ntfy_video">Video</label>
+					</span>
+				</span></span>
+				<span class="hint text-secondary">The camera records the video as it sends it, so this works with no memory card in the camera.</span>
+			</p>
+
+			<p class="select mj-row" id="ntfy_video_seconds_wrap">
+				<label for="ntfy_video_seconds" class="form-label">How long</label>
+				<span class="mj-ctl"><span class="mj-ctl-in">
+					<select class="form-select" id="ntfy_video_seconds" name="ntfy_video_seconds">
+						<option value="5" <% [ "$ntfy_video_seconds" = "5" ] && echo selected %>>5 seconds</option>
+						<option value="10" <% [ "$ntfy_video_seconds" = "10" ] && echo selected %>>10 seconds</option>
+						<option value="15" <% [ "$ntfy_video_seconds" = "15" ] && echo selected %>>15 seconds</option>
+						<option value="30" <% [ "$ntfy_video_seconds" = "30" ] && echo selected %>>30 seconds</option>
+						<option value="60" <% [ "$ntfy_video_seconds" = "60" ] && echo selected %>>A minute</option>
+					</select>
+				</span></span>
+				<span class="hint text-secondary">Movement is the exception: with a memory card the camera sends the whole recording, which lasts as long as the movement did.</span>
+			</p>
+
+			<% field_text "ntfy_caption" "What it says" "Your own wording. <code>%hostname</code> becomes the camera's name, <code>%datetime</code> the time and <code>%soctemp</code> how warm it is." %>
+
+			<p class="select mj-row" id="ntfy_priority_wrap">
+				<label for="ntfy_priority" class="form-label">How loudly</label>
+				<span class="mj-ctl"><span class="mj-ctl-in">
+					<select class="form-select" id="ntfy_priority" name="ntfy_priority">
+						<option value="1" <% [ "$ntfy_priority" = "1" ] && echo selected %>>Silent</option>
+						<option value="2" <% [ "$ntfy_priority" = "2" ] && echo selected %>>Quiet</option>
+						<option value="3" <% [ "$ntfy_priority" = "3" ] && echo selected %>>Normal</option>
+						<option value="4" <% [ "$ntfy_priority" = "4" ] && echo selected %>>Loud</option>
+						<option value="5" <% [ "$ntfy_priority" = "5" ] && echo selected %>>Urgent</option>
+					</select>
+				</span></span>
+				<span class="hint text-secondary">Urgent breaks through Do Not Disturb. Keep it for things that matter at 3am.</span>
+			</p>
 		</div></div>
+
+		<div class="card mt-4"><div class="card-body">
+			<% card_head "When it sends" %>
+
+			<div class="mj-trig" id="mj-trig-motion">
+				<span class="mj-trig-t">
+					<b>When something moves</b>
+					<span>With a memory card the camera sends the recording once the movement has stopped, starting a little before it began. With no card it records a few seconds as the movement begins.</span>
+					<span class="mj-trig-why" id="mj-trig-motion-why" hidden></span>
+				</span>
+				<span class="form-check form-switch">
+					<input type="hidden" name="ntfy_clips" value="false">
+					<input type="checkbox" class="form-check-input" id="ntfy_clips" name="ntfy_clips" value="true" <% [ "$ntfy_clips" = "true" ] && echo checked %> aria-label="When something moves">
+				</span>
+			</div>
+
+			<div class="mj-trig">
+				<span class="mj-trig-t">
+					<b>When something asks for it</b>
+					<span>Always available. The two links on the right are for a doorbell, a motion sensor or a home-automation rule to call.</span>
+				</span>
+			</div>
+		</div></div>
+
+		<details class="mj-advanced">
+			<summary>Settings you will probably never need</summary>
+			<div class="card mt-3"><div class="card-body">
+				<% card_head "Where it goes" %>
+				<% field_text "ntfy_server" "Server" "The public one is <code>https://ntfy.sh</code>, or the address of one you run yourself." %>
+				<% field_text "ntfy_topic" "Topic" "Make one up that nobody would guess &mdash; the name is the only thing keeping your notifications yours." %>
+				<% field_text "ntfy_user" "Username" "Only if your server asks for one." %>
+				<% field_password "ntfy_pass" "Password" "Only if your server asks for one." %>
+
+				<% group_head "How a picture is attached" %>
+				<% field_switch "ntfy_heif" "Use the smaller format" "eval" "About half the size, best with H265. Some phones need an app to open it." %>
+
+				<% group_head "Connection" %>
+				<% field_switch "ntfy_proxy" "Send through a proxy" "eval" "Uses the <a href=\"proxy.cgi\">proxy settings</a>. Cameras are built without proxy support unless you ask for it." %>
+			</div></div>
+		</details>
 	</div>
 
 	<div class="col-12 col-lg-4">
 		<div class="card"><div class="card-body">
-			<% card_head "Test" %>
-			<p class="small text-secondary">Send a test notification using the saved settings.</p>
-			<button type="button" id="ntfy-test" class="btn btn-sm btn-outline-secondary">Send test notification</button>
-			<span id="ntfy-status" class="small ms-2"></span>
+			<% card_head "Try it" %>
+			<p class="small text-secondary">Sends one now, with these settings as they were last saved.</p>
+			<button type="button" id="mj-notify-test" class="btn btn-sm btn-primary" data-send="test">Send me a test</button>
+			<span class="mj-say text-secondary" id="mj-notify-test-say"></span>
 		</div></div>
 
 		<div class="card mt-4"><div class="card-body">
-			<% card_head "Remote send" %>
+			<% card_head "Ask for one" %>
 			<dl class="small list mb-0">
 				<dt>Picture</dt>
 				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/ntfy.cgi?send=image</dd>
 				<dt>Video</dt>
 				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/ntfy.cgi?send=clip</dd>
 			</dl>
-			<p class="small text-secondary mt-2">Call either URL to push a notification — the second records <% esc "$ntfy_video_seconds" %> seconds first. Click to copy, then replace <code>PASSWORD</code> with your WebUI password.</p>
+			<p class="small text-secondary mt-2">Call either link to send one — the second records <% esc "$ntfy_video_seconds" %> seconds first. Click to copy, then replace <code>PASSWORD</code> with your WebUI password.</p>
+		</div></div>
+
+		<div class="card mt-4"><div class="card-body">
+			<% card_head "On your phone" %>
+			<p class="small text-secondary mb-0">Install <b>ntfy</b> from your app store, add the topic from <b>Where it goes</b>, and every message lands on your phone. There is no account to make.</p>
 		</div></div>
 	</div>
-</div>
 
-<details class="mt-4">
-	<summary class="text-secondary small">Advanced — raw configuration</summary>
+	<div class="col-12 mj-save"><% button_submit "Save" %></div>
+</div>
+</form>
+
+<details class="mj-advanced">
+	<summary>Raw configuration</summary>
 	<div class="mt-3">
-		<% [ -e "$config_file" ] && ex "cat $config_file" %>
+		<% [ -e "$config_file" ] && ex "sed -e 's/^ntfy_pass=.*/ntfy_pass=\"(hidden)\"/' $config_file" %>
 	</div>
 </details>
 
-<script src="/a/ntfy.js"></script>
+<script src="/a/notify.js" defer></script>
 
 <%in p/footer.cgi %>
