@@ -800,10 +800,21 @@
 		}
 
 		function refresh() {
-			return FETCH(API, { credentials: 'same-origin' })
-				.then((r) => r.json())
-				.then((d) => {
+			// Two documents, because they answer two different questions and
+			// one of them is answerable on cameras the other is not. /pinmux
+			// is the chip's own pad table -- what each pad CAN be. /gpio is
+			// the kernel's: which pads exist, who already holds them, and
+			// which ones the camera has been told never to drive. The hunt
+			// needs the second; the drawing needs the first.
+			return Promise.all([
+				FETCH(API, { credentials: 'same-origin' }).then((r) => r.json()),
+				FETCH('/api/v1/gpio', { credentials: 'same-origin' })
+					.then((r) => (r.ok ? r.json() : null))
+					.catch(() => null),
+			])
+				.then(([d, g]) => {
 					if (dead) return;
+					gpio = g;
 					doc = d;
 					if (sel == null) {
 						const first = (d.pads || []).find((p) => p.pin != null);
@@ -844,6 +855,16 @@
 		// Pin -> its lead button, so a level arriving does not have to query
 		// the DOM. Cleared and refilled by chip().
 		let leadByPin = {};
+		// The kernel's view, from /api/v1/gpio. Null where it could not be
+		// read, which the hunt treats as "cannot run" rather than as an empty
+		// chip.
+		let gpio = null;
+		// The running hunt, so repainting or leaving this section can stop it.
+		// It drives hardware and its own Stop button lives in a box this page
+		// throws away on every repaint.
+		let hunt = null;
+		// The pair under the bridge right now, so the drawing can light it.
+		let sweeping = null;
 
 		// What the camera says the pins are doing, and whether it is still
 		// saying it. `at` is NEVER merged into `pending`: `pending` is what the
@@ -878,6 +899,30 @@
 				nowEl.textContent = levelSentence(feed,
 					sel == null ? null : marks[sel]);
 			}
+			applyHunt();
+		}
+
+		// What the hunt is doing to the drawing: the pair under the bridge
+		// right now, and the pads it has been told never to drive. Attributes
+		// on the leads that are already there, like applyLit() and the level
+		// marks — the sweep touches a pad a second, and rebuilding the chip at
+		// that rate would make the page unusable and drop the highlight the
+		// person is following.
+		function applyHunt() {
+			const avoid = {};
+			((gpio && gpio.avoid) || []).forEach((a) => {
+				if (a && typeof a.pin === 'number') avoid[a.pin] = a.why || 'asked';
+			});
+			Object.keys(leadByPin).forEach((k) => {
+				const b = leadByPin[k];
+				if (!b) return;
+				const n = Number(k);
+				if (sweeping && (sweeping.a === n || sweeping.b === n))
+					b.setAttribute('data-hunt', 'driving');
+				else b.removeAttribute('data-hunt');
+				if (avoid[n]) b.setAttribute('data-avoid', avoid[n]);
+				else b.removeAttribute('data-avoid');
+			});
 		}
 
 		// The live-level paragraph in the detail pane, when the pane has one,
@@ -1385,6 +1430,45 @@
 
 		// ── the whole page ────────────────────────────────────────────────────
 
+		// The hunt's own section, mounted once per paint. It owns everything
+		// inside its host; this page owns the drawing and lends it out.
+		function huntPane() {
+			const HUNT = window.MajesticPinHunt;
+			if (!HUNT || !gpio) return;
+			const box = el('div', 'mj-pins-hunt');
+			root.appendChild(box);
+			if (hunt && hunt.stop) hunt.stop();
+			hunt = HUNT.mount(box, {
+				info: gpio,
+				soc: (doc && doc.chip) || '',
+				// The drawing, lent to the hunt. It never reaches in here: it
+				// asks for a pair to be lit and for the pins it found to be
+				// staged, and this page decides what that looks like.
+				pins: {
+					sweep: (a, b) => {
+						sweeping = a == null ? null : { a: a, b: b == null ? null : b };
+						applyHunt();
+					},
+					// Open a pin's detail from the hunt. A find ends with "pin
+					// 47, held high" and the next thing the owner wants is that
+					// pin's own controls, which are on this page and not the
+					// hunt's to draw -- so the hunt asks and this page decides
+					// what opening means.
+					select: (pin) => {
+						sel = pin;
+						paint();
+						const b = root.querySelector('.mj-pin-sel');
+						if (b && b.scrollIntoView)
+							b.scrollIntoView({ block: 'nearest' });
+					},
+					refresh: refresh,
+					// A pad the owner ruled out, or took back. The list is the
+					// camera's, so this re-reads rather than patching a copy.
+					changed: () => refresh(),
+				},
+			});
+		}
+
 		function paint() {
 			root.textContent = '';
 			if (!doc) {
@@ -1394,9 +1478,14 @@
 			if (!doc.have) {
 				// Said plainly rather than drawn as an empty chip. Every vendor
 				// but HiSilicon, and a HiSilicon part whose id is not known.
+				// Every vendor ipctool has a pad table for answers now, so
+				// this is a part whose id it does not recognise rather than a
+				// whole family — and the hunt below does not need the table,
+				// only the kernel's own pad list, so it is still offered.
 				root.appendChild(el('p', 'mj-pins-empty',
 					'This camera cannot say what its pins can do, so there is nothing ' +
-					'to draw. The Day / Night page can still find the IR-cut wiring.'));
+					'to draw. Hunting for a pin by driving it still works.'));
+				huntPane();
 				return;
 			}
 
@@ -1442,6 +1531,12 @@
 			panes.appendChild(detailPane());
 			root.appendChild(panes);
 
+			// Hunting for a pin by driving it. Below the chip, because it is
+			// the thing you reach for when the drawing has not told you what
+			// you needed — and it drives pads, so it does not belong beside
+			// the controls that merely describe them.
+			huntPane();
+
 			bar = el('div', 'mj-pins-bar');
 			root.appendChild(bar);
 			paintBar();
@@ -1480,6 +1575,7 @@
 		return {
 			destroy: () => {
 				dead = true;
+				if (hunt && hunt.stop) hunt.stop();
 				document.removeEventListener('keydown', onKey);
 				stopClocks();
 				wsShut();

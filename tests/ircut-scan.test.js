@@ -421,6 +421,81 @@ group('run: it finds the pair, and only the pair');
 		check('one from this boot is not a casualty',
 			scan.casualty({ boot: 2000, scan: { pins: [47, 48], started: 2100 } }) === null);
 		check('no journal, no casualty', scan.casualty({ boot: 2000, scan: {} }) === null);
+
+		group('pads the scan is told to leave alone');
+		// opts.exclude has carried this whole feature since #273 and had no
+		// test at all. It is also now the path the camera's own avoid list
+		// arrives by, so it is worth pinning in both positions of a pair.
+		const ex = scan.pairs(B10, { exclude: [11] });
+		check('an excluded pad is in no pair, either way round',
+			ex.every((p) => p[0] !== 11 && p[1] !== 11),
+			JSON.stringify(ex.filter((p) => p[0] === 11 || p[1] === 11)));
+		check('and the rest of the sweep is still there', ex.length > 100);
+
+		// The camera refuses these itself; the page drops them so a refused
+		// pair does not cost a round trip, and so the count it shows is true.
+		const av = scan.pairs({ ...B10, avoid: [{ pin: 10, why: 'down' }] }, {});
+		check('the camera\u2019s own avoid list is honoured',
+			av.every((p) => p[0] !== 10 && p[1] !== 10));
+		check('a malformed avoid entry is ignored rather than throwing',
+			scan.pairs({ ...B10, avoid: [null, {}, { pin: 'x' }] }, {}).length > 100);
+
+		group('a range limits which pads may be tried');
+		const r = scan.pairs(B10, { only: { from: 16, to: 31 } });
+		check('no pad outside the range appears',
+			r.every((p) => p[0] >= 16 && p[0] <= 31 && p[1] >= 16 && p[1] <= 31),
+			JSON.stringify(r.filter((p) => p[0] < 16 || p[1] > 31).slice(0, 3)));
+		check('and pads inside it do', r.length > 0);
+		check('the prioritised order survives inside the range',
+			r[0][0] >= 16 && r[0][1] >= 16);
+		// An empty range must yield nothing, not everything — the failure that
+		// would quietly scan the whole chip when somebody asked for two pads.
+		check('a range with nothing in it yields no pairs',
+			scan.pairs(B10, { only: { from: 900, to: 999 } }).length === 0);
+		check('an open-ended range is allowed',
+			scan.pairs(B10, { only: { from: 64 } }).every((p) => p[0] >= 64 && p[1] >= 64));
+		check('no range at all is the whole chip',
+			scan.pairs(B10, {}).length === scan.pairs(B10, { only: undefined }).length);
+
+		group('coming back to a scan that was interrupted');
+		const sig = scan.stamp(B10);
+		check('the stamp describes the pad layout',
+			sig === scan.stamp(B10) && sig !== scan.stamp(banks(9)));
+
+		const list = [[1, 2], [3, 4], [5, 6]];
+		check('what is left skips what is done',
+			JSON.stringify(scan.remaining(list, ['1:2'])) === '[[3,4],[5,6]]',
+			JSON.stringify(scan.remaining(list, ['1:2'])));
+		check('and order is preserved, so the likeliest wiring is still first',
+			scan.remaining(list, ['3:4'])[0][0] === 1);
+		check('a pair keys the same either way round',
+			scan.remaining([[2, 1]], ['1:2']).length === 0);
+
+		// The three answers, because they need three different things said.
+		const live = { boot: 2000, scan: { pins: [9, 9], started: 2100, survived: true } };
+		const wentDown = { boot: 2000, banks: B10.banks, scan: { pins: [47, 48], started: 1900 } };
+		check('the camera going down is reported, not asked about',
+			scan.resumeVerdict(wentDown, { sig: sig, done: ['1:2'] }, 10).kind === 'down');
+		check('the camera staying up means something else cut the run',
+			scan.resumeVerdict({ ...live, banks: B10.banks },
+				{ sig: sig, done: ['1:2'], inflight: '45:46' }, 10).kind === 'cut');
+		check('and it names the pair to offer',
+			scan.resumeVerdict({ ...live, banks: B10.banks },
+				{ sig: sig, done: ['1:2'], inflight: '45:46' }, 10).pins.join(',') === '45,46');
+		check('with nothing wrong there is just work left',
+			scan.resumeVerdict({ ...live, banks: B10.banks },
+				{ sig: sig, done: ['1:2'] }, 10).kind === 'more');
+		check('a finished sweep has nothing to resume',
+			scan.resumeVerdict({ ...live, banks: B10.banks },
+				{ sig: sig, done: ['1:2'] }, 1) === null);
+		// The guard that stops progress from one board being replayed on
+		// another, where the same pair numbers mean different pads.
+		check('progress measured on another chip is discarded',
+			scan.resumeVerdict({ ...live, banks: B10.banks },
+				{ sig: 'nonsense', done: ['1:2'], inflight: '45:46' }, 10) === null);
+		check('and no stored progress resumes nothing',
+			scan.resumeVerdict({ ...live, banks: B10.banks }, null, 10) === null);
+
 		return eleventh();
 	}
 
