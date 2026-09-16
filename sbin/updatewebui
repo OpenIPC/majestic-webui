@@ -300,12 +300,19 @@ build_plan() {
 				# retired that whole class of fault.
 				case $sub/$rel in
 				sbin/$scr_name)
-					# The installer is downloaded, never installed:
-					# the camera carries the stub below under this
-					# name instead. Not counted as skipped -- that
-					# line means "for another firmware variant", and
-					# this path is owned by the stub a line later.
-					continue
+					# The installer is downloaded, never
+					# installed -- but only where this tree
+					# actually carries the stub that downloads
+					# it. A tree from before the split, or one
+					# already reduced to the shipped shape (the
+					# stub sitting at this very path), has
+					# nothing else to put here, and installing
+					# what is in front of it is what those two
+					# cases need. Not counted as skipped: that
+					# line means "for another firmware variant".
+					if [ -f "$src/sbin/$scr_name-fetch" ]; then
+						continue
+					fi
 					;;
 				sbin/$scr_name-fetch)
 					d=$root/$scr_name

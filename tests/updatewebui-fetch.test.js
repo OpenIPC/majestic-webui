@@ -344,6 +344,75 @@ function passthrough() {
 	const args = ['--branch=topic', '--no-backup'];
 	run(args, () => {
 		check('every argument, in order', (ranWith() || []).join(' ') === args.join(' '), JSON.stringify(ranWith()));
-		done();
+		payload();
+	});
+}
+
+// ------------------------------------------------------------ payload ------
+
+// What a camera actually receives, which is decided in tools/build-dist.sh.
+//
+// This is the silent one. If that step stopped renaming the stub onto the
+// canonical name, the tarball would carry the 48 KB installer again and the
+// boards this exists for would quietly go back over their partition; if it
+// renamed and the stub were missing, cameras would ship no updatewebui at all
+// and nothing would report either. The rename is EXECUTED here, lifted out of
+// the script rather than re-typed, so a change to it is what this sees.
+function payload() {
+	group('the dist payload carries the stub under the canonical name');
+
+	const build = fs.readFileSync(path.join(__dirname, '..', 'tools', 'build-dist.sh'), 'utf8');
+	// Extracted as a whole function, so a change INSIDE it shows up as changed
+	// behaviour here rather than as a pattern that stopped matching.
+	const m = build.match(/^stub_over_installer\(\) \{[\s\S]*?^\}$/m);
+	check('build-dist.sh still has the rename step', !!m, 'stub_over_installer is gone or was renamed');
+	if (!m) return done();
+
+	const stage = (files) => {
+		const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'uwp-'));
+		fs.mkdirSync(path.join(pkg, 'sbin'));
+		for (const [n, body] of files) fs.writeFileSync(path.join(pkg, 'sbin', n), body);
+		fs.writeFileSync(path.join(pkg, 'step.sh'), 'PKG=' + q(pkg) + NL + m[0] + NL + 'stub_over_installer' + NL);
+		return pkg;
+	};
+
+	const pkg = stage([
+		['updatewebui', 'the 48 KB installer'],
+		['updatewebui-fetch', 'the stub'],
+	]);
+
+	execFile('/bin/sh', [path.join(pkg, 'step.sh')], () => {
+		const at = (n) => {
+			try {
+				return fs.readFileSync(path.join(pkg, 'sbin', n), 'utf8');
+			} catch (e) {
+				return null;
+			}
+		};
+		check('the stub ends up under the name people type', at('updatewebui') === 'the stub', String(at('updatewebui')));
+		check('and the installer is not shipped beside it', at('updatewebui-fetch') === null, 'it is still there');
+
+		// The shipped tree therefore has the stub sitting at sbin/updatewebui
+		// and no -fetch. The installer's own walk must not skip that file, or
+		// a camera installing such a tree would end up with no updatewebui —
+		// so the skip is conditional on the -fetch file being present.
+		const inst = fs.readFileSync(path.join(__dirname, '..', 'sbin', 'updatewebui'), 'utf8');
+		const guard = /sbin\/\$scr_name\)[\s\S]*?if \[ -f "\$src\/sbin\/\$scr_name-fetch" \]; then[\s\S]*?continue/;
+		check('and the installer only skips it when the stub is beside it', guard.test(inst), 'the skip is unconditional');
+
+		// The stub going missing from the tree must STOP the build. Guarded,
+		// it would leave the 48 KB installer at that path and ship a green
+		// build, which is the silent regression this whole change removes.
+		const bare = stage([['updatewebui', 'the 48 KB installer']]);
+		execFile('/bin/sh', [path.join(bare, 'step.sh')], (err, out, errout) => {
+			check('a payload with no stub fails the build', !!err, 'the build step succeeded');
+			check('and says what would have shipped', /would ship the 48 KB installer/.test(errout), errout.trim());
+			check(
+				'leaving the installer where it was rather than half-renamed',
+				fs.readFileSync(path.join(bare, 'sbin', 'updatewebui'), 'utf8') === 'the 48 KB installer',
+				'the file was changed',
+			);
+			done();
+		});
 	});
 }
