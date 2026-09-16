@@ -764,6 +764,47 @@ documentation names `platform-api2`, which resolves but does not answer; this
 one returns a proper `401` to an unauthenticated call, and the camera's own
 curl and CA set reach it without a proxy.
 
+**The MAX page is Russian, and it is in the menu only for Russian readers.**
+MAX is a Russian service, and its bots can only be registered by a Russian
+business — an organisation, a sole trader or a registered self-employed person,
+after identity verification. So an English MAX page would be a translation
+nobody who can actually use the feature needs, and a menu entry for everyone
+else is one they can neither read nor act on. `p/header.cgi` renders the entry
+`hidden` and `main.js` reveals it when `navigator.languages` mentions Russian;
+it leads the Notifications group, because for a reader who sees it at all it is
+the likeliest of the three. Hiding is **not** access control — the page answers
+a direct link exactly as before, which is what a bookmark and the webhook URLs
+depend on.
+
+Where `setup.html` picks ONE language by precedence, because it can display
+only one agreement, this tests for Russian appearing anywhere in the list: a
+menu entry is not exclusive, and somebody who prefers English but also reads
+Russian can use the page perfectly well.
+
+**`www/a/notify.js` therefore holds a words table rather than English.** Every
+sentence the shared script can say is a key with an English default, and a page
+may override any subset through `words` in its boot tag; MAX overrides all of
+them. A table rather than a copy of the file per language, because the logic
+that decides WHICH sentence is the part that fails silently and must not be
+duplicated. Keys a page does not translate fall back rather than rendering
+blank, and `tests/notify-status.test.js` leaves one untranslated on purpose to
+pin that.
+
+**The strip says why, not just what.** The line under the headline carries the
+destination while things are fine and the reason when they are not — so
+"Partly ready" is answered on the spot instead of sending the reader down the
+page. The trigger row keeps the full sentence and the link that acts on it:
+summary and detail, not the same text twice.
+
+**What a page cannot do is file its required settings under "you will probably
+never need this".** All three pages used to keep the bot token, the chat or the
+server inside the advanced fold, on the reasoning that they are set once and
+never touched again. That is true of the second visit and wrong about the
+first: without them the feature cannot work at all. Each page now leads with
+the fields it cannot run without, and the fold keeps what is genuinely optional
+— a forum topic, the attachment format, the proxy, and credentials only a
+self-hosted ntfy would ask for.
+
 The protocol knowledge is ported from
 [AT-Lee/MAX-for-OpenIPC](https://github.com/AT-Lee/MAX-for-OpenIPC) (MIT), and
 the licence notice travels with it in `sbin/max`. What was NOT taken is that

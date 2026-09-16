@@ -168,4 +168,61 @@ group('a camera that has not answered is not a camera reporting off');
 		quiet.when === 'every 15 minutes and when something asks', quiet.when);
 }
 
+group('a page that brings its own words');
+{
+	// The MAX page is Russian throughout, because MAX is a Russian service
+	// whose bots only a Russian business can register -- an English MAX page
+	// would be a translation nobody who can use the feature needs. So the
+	// sentences come from the page and the logic stays here, once, rather than
+	// this file being copied per language.
+	//
+	// What is checked is that a translation cannot quietly half-apply: the
+	// words reach every branch, and a key the page did NOT translate still
+	// says something rather than going blank.
+	const RU = {
+		ready: 'Готово',
+		partly: 'Частично готово',
+		videoN: 'видео {n} с',
+		onMovement: 'когда что-то движется',
+		onRequest: 'когда кто-то запросит',
+		and: ' и ',
+		detectorOff: 'Камера не следит за движением.',
+	};
+	const win2 = {};
+	const sandbox2 = {
+		window: win2,
+		document: {
+			getElementById: (id) => (id === 'mj-notify-boot'
+				? { textContent: JSON.stringify({ key: 'max', label: 'MAX', sender: true,
+					addressed: true, missing: 'нужны бот и чат', schedulable: true,
+					words: RU }) }
+				: null),
+			readyState: 'complete',
+			addEventListener: () => {},
+		},
+		setTimeout: () => {},
+	};
+	vm.createContext(sandbox2);
+	vm.runInContext(src, sandbox2);
+	const ruVerdict = win2.NotifyStatus.verdict;
+	const ruAsk = (over) => ruVerdict(Object.assign({}, base, { serviceName: 'MAX' }, over));
+
+	const r = ruAsk({});
+	check('the headline is the page\'s word', r.head === 'Готово', r.head);
+	check('and so is what it will send', r.what === 'видео 10 с', r.what);
+	check('the reasons are joined in the page\'s language',
+		r.when === 'когда что-то движется и когда кто-то запросит', r.when);
+
+	const blocked = ruAsk({ camera: { known: true, motionDetect: false } });
+	check('a blocked detector reads in the page\'s language too',
+		blocked.head === 'Частично готово' && blocked.why.motion === 'Камера не следит за движением.',
+		blocked.head + ' / ' + blocked.why.motion);
+
+	// `off` was deliberately left out of RU above.
+	const off = ruAsk({ enabled: false });
+	check('a word the page did not translate still says something',
+		off.head === 'Switched off', off.head);
+	check('and is not blank', off.when.length > 0, JSON.stringify(off.when));
+}
+
 done();

@@ -158,6 +158,13 @@ nf_who="not addressed yet"
 <div class="row g-4">
 	<div class="col-12 col-lg-8">
 		<div class="card"><div class="card-body">
+			<% card_head "Where it goes" %>
+			<p class="small text-secondary">Without these two there is nowhere to send.</p>
+			<% field_text "ntfy_server" "Server" "The public one is <code>https://ntfy.sh</code>, or the address of one you run yourself." %>
+			<% field_text "ntfy_topic" "Topic" "Make one up that nobody would guess &mdash; the name is the only thing keeping your notifications yours." %>
+		</div></div>
+
+		<div class="card mt-4"><div class="card-body">
 			<% card_head "What it sends" %>
 
 			<% field_switch "ntfy_enabled" "Send to Ntfy" "eval" %>
@@ -233,9 +240,7 @@ nf_who="not addressed yet"
 		<details class="mj-advanced">
 			<summary>Settings you will probably never need</summary>
 			<div class="card mt-3"><div class="card-body">
-				<% card_head "Where it goes" %>
-				<% field_text "ntfy_server" "Server" "The public one is <code>https://ntfy.sh</code>, or the address of one you run yourself." %>
-				<% field_text "ntfy_topic" "Topic" "Make one up that nobody would guess &mdash; the name is the only thing keeping your notifications yours." %>
+				<% card_head "If your server asks who you are" %>
 				<% field_text "ntfy_user" "Username" "Only if your server asks for one." %>
 				<% field_password "ntfy_pass" "Password" "Only if your server asks for one." %>
 

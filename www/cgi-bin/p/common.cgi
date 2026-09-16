@@ -461,6 +461,76 @@ include() {
 	[ -f "$1" ] && . "$1"
 }
 
+# The hook messages, in the language of the page that asked.
+#
+# These sentences reach a person at the one moment something did not work, so
+# a page that is Russian throughout must not answer a failed save in English.
+# The page sets notify_hooks_lang before calling notify_hooks_sync; anything
+# else, or a key with no translation, stays English.
+#
+# A case rather than one variable per sentence, for the reason pages.cgi gives:
+# a table in variables is a table something else can overwrite, and this file
+# is sourced into every page's own shell.
+hook_say() {
+	if [ "$notify_hooks_lang" = ru ]; then
+		case "$1" in
+		clip_unreadable)
+			printf '%s' "Один из файлов настроек уведомлений не читается, поэтому то, что камера запускает по окончании записи, осталось без изменений."
+			return ;;
+		clip_cannot_ask)
+			printf '%s' "Не удалось спросить камеру, что она запускает по окончании записи, поэтому настройка осталась без изменений."
+			return ;;
+		clip_refused)
+			printf '%s' "Камера не приняла настройку отправки записей."
+			return ;;
+		clip_not_kept)
+			printf '%s' "Камера не сохранила настройку отправки записей."
+			return ;;
+		clip_taken)
+			printf '%s' "По окончании записи камера уже запускает свою команду, поэтому её не трогали. Очистите её, чтобы отправлять записи отсюда."
+			return ;;
+		clip_stop_refused)
+			printf '%s' "Камера не смогла прекратить запуск отправки записей."
+			return ;;
+		motion_unreadable)
+			printf '%s' "Один из файлов настроек уведомлений не читается, поэтому то, что камера запускает при начале движения, осталось без изменений."
+			return ;;
+		motion_no_worker)
+			printf '%s' "В этой прошивке нет части, которая отправляет движение с камеры без карты памяти, поэтому отправлять можно только записи."
+			return ;;
+		motion_taken)
+			printf '%s' "При начале движения камера уже запускает свой скрипт, поэтому его не трогали. Удалите ${motion_hook_path}, чтобы отправлять движение отсюда на камере без карты памяти."
+			return ;;
+		motion_refused)
+			printf '%s' "Камера не приняла скрипт, который отправляет движение."
+			return ;;
+		esac
+	fi
+
+	case "$1" in
+	clip_unreadable)
+		printf '%s' "One of the notification settings files could not be read, so what the camera runs when a recording finishes was left alone." ;;
+	clip_cannot_ask)
+		printf '%s' "The camera could not be asked what it runs when a recording finishes, so that was left alone." ;;
+	clip_refused)
+		printf '%s' "The camera would not take the setting that sends recordings." ;;
+	clip_not_kept)
+		printf '%s' "The camera did not keep the setting that sends recordings." ;;
+	clip_taken)
+		printf '%s' "The camera already runs a command of its own when a recording finishes, so it was left alone. Clear it to send recordings from here." ;;
+	clip_stop_refused)
+		printf '%s' "The camera would not stop running the recording sender." ;;
+	motion_unreadable)
+		printf '%s' "One of the notification settings files could not be read, so what the camera runs when movement starts was left alone." ;;
+	motion_no_worker)
+		printf '%s' "This firmware does not include the part that sends movement from a camera with no memory card, so only recordings can be sent." ;;
+	motion_taken)
+		printf '%s' "The camera already runs a script of its own when movement starts, so it was left alone. Remove ${motion_hook_path} to have movement sent from here on a camera with no memory card." ;;
+	motion_refused)
+		printf '%s' "The camera would not take the script that sends movement." ;;
+	esac
+}
+
 # Whether anything installed on this camera still wants finished recordings.
 #
 # Each sender answers for itself, in its own config, and is read in a subshell
@@ -538,7 +608,7 @@ clip_hook_sync() {
 	0) ;;
 	1) _ch_now="" ;;
 	*)
-		clip_hook_msg="The camera could not be asked what it runs when a recording finishes, so that was left alone."
+		clip_hook_msg=$(hook_say clip_cannot_ask)
 		return 1
 		;;
 	esac
@@ -551,7 +621,7 @@ clip_hook_sync() {
 	# operator has a file the camera cannot read, and the recording sender is
 	# left exactly as it was until they fix it.
 	if [ "$_ch_want" = 2 ]; then
-		clip_hook_msg="One of the notification settings files could not be read, so what the camera runs when a recording finishes was left alone."
+		clip_hook_msg=$(hook_say clip_unreadable)
 		return 1
 	fi
 
@@ -560,7 +630,7 @@ clip_hook_sync() {
 		"$_ch_hook") ;;
 		"")
 			if ! mj_set records.onClose "$_ch_hook"; then
-				clip_hook_msg="The camera would not take the setting that sends recordings."
+				clip_hook_msg=$(hook_say clip_refused)
 				return 1
 			fi
 			# Read back rather than trusting the answer: this API can accept
@@ -568,18 +638,18 @@ clip_hook_sync() {
 			# the strength of the status code would say the opposite of what
 			# the camera is doing.
 			if [ "$(mj_cfg records.onClose)" != "$_ch_hook" ]; then
-				clip_hook_msg="The camera did not keep the setting that sends recordings."
+				clip_hook_msg=$(hook_say clip_not_kept)
 				return 1
 			fi
 			;;
 		*)
-			clip_hook_msg="The camera already runs a command of its own when a recording finishes, so it was left alone. Clear it to send recordings from here."
+			clip_hook_msg=$(hook_say clip_taken)
 			return 1
 			;;
 		esac
 	elif [ "$_ch_now" = "$_ch_hook" ]; then
 		if ! mj_clear records.onClose; then
-			clip_hook_msg="The camera would not stop running the recording sender."
+			clip_hook_msg=$(hook_say clip_stop_refused)
 			return 1
 		fi
 	fi
@@ -621,7 +691,7 @@ motion_hook_sync() {
 	# As above: a config that could not be read is not permission to remove
 	# somebody's movement hook.
 	if [ "$_mh_want" = 2 ]; then
-		motion_hook_msg="One of the notification settings files could not be read, so what the camera runs when movement starts was left alone."
+		motion_hook_msg=$(hook_say motion_unreadable)
 		return 1
 	fi
 
@@ -631,7 +701,7 @@ motion_hook_sync() {
 		# card-less path is missing, and the operator would be told their
 		# settings were saved with movement quietly going nowhere.
 		if [ ! -x "$motion_hook_worker" ]; then
-			motion_hook_msg="This firmware does not include the part that sends movement from a camera with no memory card, so only recordings can be sent."
+			motion_hook_msg=$(hook_say motion_no_worker)
 			return 1
 		fi
 
@@ -639,7 +709,7 @@ motion_hook_sync() {
 			if grep -qF "$motion_hook_mark" "$motion_hook_path" 2>/dev/null; then
 				return 0
 			fi
-			motion_hook_msg="The camera already runs a script of its own when movement starts, so it was left alone. Remove ${motion_hook_path} to have movement sent from here on a camera with no memory card."
+			motion_hook_msg=$(hook_say motion_taken)
 			return 1
 		fi
 
@@ -657,7 +727,7 @@ motion_hook_sync() {
 		if [ ! -s "$motion_hook_path" ] || ! chmod 0755 "$motion_hook_path" ||
 			[ ! -x "$motion_hook_path" ]; then
 			rm -f "$motion_hook_path"
-			motion_hook_msg="The camera would not take the script that sends movement."
+			motion_hook_msg=$(hook_say motion_refused)
 			return 1
 		fi
 		return 0

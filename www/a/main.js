@@ -674,7 +674,13 @@ function heartbeat() {
 		}
 		if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
 		e.preventDefault();
-		const items = Array.from(menu.querySelectorAll('.dropdown-item:not(.disabled)'));
+		// Only the items a reader can actually reach. An entry inside a hidden
+		// <li> -- the MAX one, on a browser that does not read Russian -- is
+		// still matched by the selector, and focusing something that is not
+		// rendered leaves focus where it was: every ArrowDown then targets that
+		// same first item and the keys stop walking the menu at all.
+		const items = Array.from(menu.querySelectorAll('.dropdown-item:not(.disabled)'))
+			.filter(el => !el.closest('[hidden]'));
 		if (!items.length) return;
 		const cur = items.indexOf(document.activeElement);
 		let next;
@@ -777,6 +783,29 @@ document.addEventListener('click', e => {
 
 function initAll() {
 	$$('form').forEach(el => el.autocomplete = 'off');
+
+	// The MAX entry, for readers whose browser says they read Russian.
+	//
+	// MAX is a Russian service, its bots can only be registered by a Russian
+	// business, and the page is Russian throughout — so to everyone else it is
+	// a menu entry they can neither read nor act on. It is hidden in the markup
+	// and revealed here rather than the other way round, so a browser that runs
+	// no script shows it to nobody instead of showing it to everybody.
+	//
+	// Presence anywhere in the preference list, not first place. setup.html
+	// picks ONE language for the agreement it displays, so there precedence
+	// decides; a menu entry is not exclusive, and somebody who lists English
+	// first and Russian second can still read this page perfectly well.
+	//
+	// Hiding it is not access control. The page answers a direct link as it
+	// always did, which is what a bookmark and the webhook URLs depend on.
+	const navMax = $('#nav-max');
+	if (navMax) {
+		const langs = navigator.languages || [navigator.language || ''];
+		if (Array.prototype.some.call(langs, (l) => /^ru\b/i.test(l))) {
+			navMax.hidden = false;
+		}
+	}
 
 	// For .warning and .danger buttons, ask confirmation on action.
 	//

@@ -39,8 +39,8 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 	done
 
 	if [ "$max_enabled" = "true" ]; then
-		[ -z "$max_token" ] && set_error_flag "Enter the bot token before switching MAX on."
-		[ -z "$max_chat_id" ] && set_error_flag "Enter the chat before switching MAX on."
+		[ -z "$max_token" ] && set_error_flag "Укажите токен бота, прежде чем включать MAX."
+		[ -z "$max_chat_id" ] && set_error_flag "Укажите чат, прежде чем включать MAX."
 	fi
 
 	if [ -z "$error" ]; then
@@ -68,10 +68,10 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		fi
 
 		if notify_hooks_sync; then
-			redirect_back "success" "MAX settings saved."
+			redirect_back "success" "Настройки MAX сохранены."
 		fi
 
-		redirect_back "warning" "MAX settings saved. $notify_hooks_msg"
+		redirect_back "warning" "Настройки MAX сохранены. $notify_hooks_msg"
 	fi
 
 	redirect_to "$SCRIPT_NAME"
@@ -114,25 +114,25 @@ mx_addressed=false
 [ -n "$max_token" ] && [ -n "$max_chat_id" ] && mx_addressed=true
 
 if [ "$mx_sender" != "true" ]; then
-	mx_head="This firmware cannot send to MAX"
+	mx_head="Эта прошивка не умеет отправлять в MAX"
 	mx_level=" mj-status-bad"
 	mx_what="&mdash;"
-	mx_when="the part that does the sending is not installed"
+	mx_when="часть, которая отправляет, не установлена"
 elif [ "$max_enabled" != "true" ]; then
-	mx_head="Switched off"
+	mx_head="Выключено"
 	mx_level=" mj-status-off"
 	mx_what="&mdash;"
-	mx_when="nothing will be sent"
+	mx_when="ничего отправляться не будет"
 elif [ "$mx_addressed" != "true" ]; then
-	mx_head="Not set up yet"
+	mx_head="Ещё не настроено"
 	mx_level=" mj-status-off"
 	mx_what="&mdash;"
-	mx_when="it needs a bot and a chat"
+	mx_when="нужны бот и чат"
 else
-	mx_head="Ready"
+	mx_head="Готово"
 	mx_level=""
-	mx_what="$([ "$max_video" = "true" ] && echo "${max_video_seconds}-second video" || echo "Picture")"
-	mx_when="checking what the camera can do&hellip;"
+	mx_what="$([ "$max_video" = "true" ] && echo "видео ${max_video_seconds} с" || echo "Снимок")"
+	mx_when="выясняем, что умеет камера&hellip;"
 fi
 
 # What the form holds as saved, as JSON literals, so the page can tell a
@@ -142,13 +142,20 @@ mx_vid=false;   [ "$max_video" = "true" ] && mx_vid=true
 mx_clips=false; [ "$max_clips" = "true" ] && mx_clips=true
 mx_cron=false;  [ "$max_crontab" = "true" ] && mx_cron=true
 
-mx_who="not addressed yet"
-[ "$mx_addressed" = "true" ] && mx_who="to chat $(esc "$max_chat_id")"
+mx_who="адрес не указан"
+[ "$mx_addressed" = "true" ] && mx_who="в чат $(esc "$max_chat_id")"
+
+# This page is Russian, so the document says so: a screen reader picks its
+# voice from it, and so do a browser's own language features.
+page_lang=ru
+# and the shared hook messages with it: a failed save must not answer a Russian
+# page in English at the one moment something did not work.
+notify_hooks_lang=ru
 %>
 
 <%in p/header.cgi %>
 
-<script type="application/json" id="mj-notify-boot">{"key":"max","label":"MAX","sender":<%= $mx_sender %>,"addressed":<%= $mx_addressed %>,"missing":"it needs a bot and a chat","schedulable":true,"saved":{"enabled":<%= $mx_on %>,"video":<%= $mx_vid %>,"seconds":<%= $max_video_seconds %>,"clips":<%= $mx_clips %>,"crontab":<%= $mx_cron %>,"interval":<%= $max_interval %>}}</script>
+<script type="application/json" id="mj-notify-boot">{"key":"max","label":"MAX","sender":<%= $mx_sender %>,"addressed":<%= $mx_addressed %>,"missing":"нужны бот и чат","words":{"cannotSend":"\u042d\u0442\u0430 \u043f\u0440\u043e\u0448\u0438\u0432\u043a\u0430 \u043d\u0435 \u0443\u043c\u0435\u0435\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0442\u044c \u0432 ","noSender":"\u0447\u0430\u0441\u0442\u044c, \u043a\u043e\u0442\u043e\u0440\u0430\u044f \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u0442, \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430","off":"\u0412\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u043e","nothingSent":"\u043d\u0438\u0447\u0435\u0433\u043e \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0442\u044c\u0441\u044f \u043d\u0435 \u0431\u0443\u0434\u0435\u0442","notSetUp":"\u0415\u0449\u0451 \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u043e","ready":"\u0413\u043e\u0442\u043e\u0432\u043e","partly":"\u041d\u0435 \u0432\u0441\u0451 \u0431\u0443\u0434\u0435\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0442\u044c\u0441\u044f","checking":"\u0432\u044b\u044f\u0441\u043d\u044f\u0435\u043c, \u0447\u0442\u043e \u0443\u043c\u0435\u0435\u0442 \u043a\u0430\u043c\u0435\u0440\u0430\u2026","onMovement":"\u043a\u043e\u0433\u0434\u0430 \u0447\u0442\u043e-\u0442\u043e \u0434\u0432\u0438\u0436\u0435\u0442\u0441\u044f","onRequest":"\u043a\u043e\u0433\u0434\u0430 \u043a\u0442\u043e-\u0442\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0438\u0442","everyHour":"\u043a\u0430\u0436\u0434\u044b\u0439 \u0447\u0430\u0441","everySixHours":"\u043a\u0430\u0436\u0434\u044b\u0435 \u0448\u0435\u0441\u0442\u044c \u0447\u0430\u0441\u043e\u0432","onTimer":"\u043f\u043e \u0440\u0430\u0441\u043f\u0438\u0441\u0430\u043d\u0438\u044e","everyN":"\u043a\u0430\u0436\u0434\u044b\u0435 {n} \u043c\u0438\u043d","picture":"\u0421\u043d\u0438\u043c\u043e\u043a","videoN":"\u0432\u0438\u0434\u0435\u043e {n} \u0441","none":"\u2014","and":" \u0438 ","comma":", ","detectorOff":"\u041a\u0430\u043c\u0435\u0440\u0430 \u043d\u0435 \u0441\u043b\u0435\u0434\u0438\u0442 \u0437\u0430 \u0434\u0432\u0438\u0436\u0435\u043d\u0438\u0435\u043c, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u044d\u0442\u043e \u043d\u0435 \u0441\u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442. \u0412\u0441\u0451 \u043e\u0441\u0442\u0430\u043b\u044c\u043d\u043e\u0435 \u043d\u0430 \u044d\u0442\u043e\u0439 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0435 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u0438 \u0431\u0435\u0437 \u043d\u0435\u0433\u043e.","detectorUnknown":"\u041a\u0430\u043c\u0435\u0440\u0430 \u043d\u0435 \u043e\u0442\u0432\u0435\u0442\u0438\u043b\u0430 \u043d\u0430 \u0432\u043e\u043f\u0440\u043e\u0441, \u0441\u043b\u0435\u0434\u0438\u0442 \u043b\u0438 \u043e\u043d\u0430 \u0437\u0430 \u0434\u0432\u0438\u0436\u0435\u043d\u0438\u0435\u043c, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u044d\u0442\u043e \u043c\u043e\u0436\u0435\u0442 \u043d\u0435 \u0441\u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c.","switchItOn":"\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c","unsaved":"\u0422\u0430\u043a \u0431\u0443\u0434\u0435\u0442 \u043f\u043e\u0441\u043b\u0435 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f. \u041f\u043e\u043a\u0430 \u043a\u0430\u043c\u0435\u0440\u0430 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u0441 \u0442\u0435\u043c\u0438 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430\u043c\u0438, \u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u0431\u044b\u043b\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b \u0432 \u043f\u0440\u043e\u0448\u043b\u044b\u0439 \u0440\u0430\u0437.","recording":"\u0417\u0430\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u043c \u0438 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u043c. \u042d\u0442\u043e \u0437\u0430\u0439\u043c\u0451\u0442 \u043d\u0435\u0441\u043a\u043e\u043b\u044c\u043a\u043e \u0441\u0435\u043a\u0443\u043d\u0434.","sending":"\u041e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u043c\u2026","sent":"\u041e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043e. \u0417\u0430\u0433\u043b\u044f\u043d\u0438\u0442\u0435 \u0432 {service}.","sendFailed":"\u041a\u0430\u043c\u0435\u0440\u0430 \u043d\u0435 \u0441\u043c\u043e\u0433\u043b\u0430 \u043e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c. \u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u043d\u0438\u0436\u0435; \u043f\u0440\u0438\u0447\u0438\u043d\u0430 \u0435\u0441\u0442\u044c \u0432 \u0436\u0443\u0440\u043d\u0430\u043b\u0435 \u043a\u0430\u043c\u0435\u0440\u044b.","tooSlow":"\u041a\u0430\u043c\u0435\u0440\u0430 \u043d\u0435 \u043e\u0442\u0432\u0435\u0442\u0438\u043b\u0430 \u0437\u0430 \u0434\u0432\u0435 \u043c\u0438\u043d\u0443\u0442\u044b. \u0412\u043e\u0437\u043c\u043e\u0436\u043d\u043e, \u043e\u043d\u0430 \u0435\u0449\u0451 \u043f\u044b\u0442\u0430\u0435\u0442\u0441\u044f.","unreachable":"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u0432\u044f\u0437\u0430\u0442\u044c\u0441\u044f \u0441 \u043a\u0430\u043c\u0435\u0440\u043e\u0439.","partlyWhy":"\u043a\u0430\u043c\u0435\u0440\u0430 \u043d\u0435 \u0441\u043b\u0435\u0434\u0438\u0442 \u0437\u0430 \u0434\u0432\u0438\u0436\u0435\u043d\u0438\u0435\u043c","unknownWhy":"\u043a\u0430\u043c\u0435\u0440\u0430 \u043d\u0435 \u043e\u0442\u0432\u0435\u0442\u0438\u043b\u0430, \u0441\u043b\u0435\u0434\u0438\u0442 \u043b\u0438 \u043e\u043d\u0430 \u0437\u0430 \u0434\u0432\u0438\u0436\u0435\u043d\u0438\u0435\u043c"},"schedulable":true,"saved":{"enabled":<%= $mx_on %>,"video":<%= $mx_vid %>,"seconds":<%= $max_video_seconds %>,"clips":<%= $mx_clips %>,"crontab":<%= $mx_cron %>,"interval":<%= $max_interval %>}}</script>
 
 <div class="mj-status<%= $mx_level %>" id="mj-notify-status">
 	<span class="mj-status-ico">
@@ -170,122 +177,136 @@ mx_who="not addressed yet"
 <div class="row g-4">
 	<div class="col-12 col-lg-8">
 		<div class="card"><div class="card-body">
-			<% card_head "What it sends" %>
-
-			<% field_switch "max_enabled" "Send to MAX" "eval" %>
-
-			<% group_head "The message" %>
-			<p class="boolean mj-row">
-				<label for="max_video" class="form-label">Picture or video</label>
-				<span class="mj-ctl"><span class="mj-ctl-in">
-					<span class="mj-seg" role="group" aria-label="Picture or video">
-						<input type="radio" class="mj-seg-in" name="max_video" id="max_video_off" value="false" <% [ "$max_video" != "true" ] && echo checked %>>
-						<label class="mj-seg-lbl" for="max_video_off">Picture</label>
-						<input type="radio" class="mj-seg-in" name="max_video" id="max_video" value="true" <% [ "$max_video" = "true" ] && echo checked %>>
-						<label class="mj-seg-lbl" for="max_video">Video</label>
-					</span>
-				</span></span>
-				<span class="hint text-secondary">The camera records the video as it sends it, so this works with no memory card in the camera.</span>
-			</p>
-
-			<p class="select mj-row" id="max_video_seconds_wrap">
-				<label for="max_video_seconds" class="form-label">How long</label>
-				<span class="mj-ctl"><span class="mj-ctl-in">
-					<select class="form-select" id="max_video_seconds" name="max_video_seconds">
-						<option value="5" <% [ "$max_video_seconds" = "5" ] && echo selected %>>5 seconds</option>
-						<option value="10" <% [ "$max_video_seconds" = "10" ] && echo selected %>>10 seconds</option>
-						<option value="15" <% [ "$max_video_seconds" = "15" ] && echo selected %>>15 seconds</option>
-						<option value="30" <% [ "$max_video_seconds" = "30" ] && echo selected %>>30 seconds</option>
-						<option value="60" <% [ "$max_video_seconds" = "60" ] && echo selected %>>A minute</option>
-					</select>
-				</span></span>
-				<span class="hint text-secondary">Movement is the exception: with a memory card the camera sends the whole recording, which lasts as long as the movement did.</span>
-			</p>
-
-			<% field_text "max_caption" "What it says" "Your own wording. <code>%hostname</code> becomes the camera's name, <code>%datetime</code> the time and <code>%soctemp</code> how warm it is." %>
+			<% card_head "Бот" %>
+			<p class="small text-secondary">Без этих двух полей отправлять некуда. Как получить бота &mdash; справа.</p>
+			<% field_password "max_token" "Токен" "Выдаётся в личном кабинете после модерации бота. Это длинная строка — вставьте её целиком." %>
+			<% field_text "max_chat_id" "Чат" "Номер чата, куда отправлять; у группы он отрицательный. Сначала добавьте бота в чат &mdash; пока этого нет, он не видит ни одного чата." %>
 		</div></div>
 
 		<div class="card mt-4"><div class="card-body">
-			<% card_head "When it sends" %>
+			<% card_head "Что отправлять" %>
+
+			<% field_switch "max_enabled" "Отправлять в MAX" "eval" %>
+
+			<% group_head "Сообщение" %>
+			<p class="boolean mj-row">
+				<label for="max_video" class="form-label">Снимок или видео</label>
+				<span class="mj-ctl"><span class="mj-ctl-in">
+					<span class="mj-seg" role="group" aria-label="Снимок или видео">
+						<input type="radio" class="mj-seg-in" name="max_video" id="max_video_off" value="false" <% [ "$max_video" != "true" ] && echo checked %>>
+						<label class="mj-seg-lbl" for="max_video_off">Снимок</label>
+						<input type="radio" class="mj-seg-in" name="max_video" id="max_video" value="true" <% [ "$max_video" = "true" ] && echo checked %>>
+						<label class="mj-seg-lbl" for="max_video">Видео</label>
+					</span>
+				</span></span>
+				<span class="hint text-secondary">Камера записывает видео прямо во время отправки, поэтому карта памяти не нужна.</span>
+			</p>
+
+			<p class="select mj-row" id="max_video_seconds_wrap">
+				<label for="max_video_seconds" class="form-label">Длительность</label>
+				<span class="mj-ctl"><span class="mj-ctl-in">
+					<select class="form-select" id="max_video_seconds" name="max_video_seconds">
+						<option value="5" <% [ "$max_video_seconds" = "5" ] && echo selected %>>5 секунд</option>
+						<option value="10" <% [ "$max_video_seconds" = "10" ] && echo selected %>>10 секунд</option>
+						<option value="15" <% [ "$max_video_seconds" = "15" ] && echo selected %>>15 секунд</option>
+						<option value="30" <% [ "$max_video_seconds" = "30" ] && echo selected %>>30 секунд</option>
+						<option value="60" <% [ "$max_video_seconds" = "60" ] && echo selected %>>Минута</option>
+					</select>
+				</span></span>
+				<span class="hint text-secondary">Движение — исключение: с картой памяти камера отправит всю запись целиком, длиной ровно столько, сколько длилось движение.</span>
+			</p>
+
+			<% field_text "max_caption" "Подпись" "Ваш текст. <code>%hostname</code> подставит имя камеры, <code>%datetime</code> — время, <code>%soctemp</code> — температуру." %>
+		</div></div>
+
+		<div class="card mt-4"><div class="card-body">
+			<% card_head "Когда отправлять" %>
 
 			<div class="mj-trig" id="mj-trig-motion">
 				<span class="mj-trig-t">
-					<b>When something moves</b>
-					<span>With a memory card the camera sends the recording once the movement has stopped, starting a little before it began. With no card it records a few seconds as the movement begins.</span>
+					<b>Когда что-то движется</b>
+					<span>С картой памяти камера отправит запись, когда движение закончится, начав её чуть раньше самого движения. Без карты — запишет несколько секунд с момента, когда движение началось.</span>
 					<span class="mj-trig-why" id="mj-trig-motion-why" hidden></span>
 				</span>
 				<span class="form-check form-switch">
 					<input type="hidden" name="max_clips" value="false">
-					<input type="checkbox" class="form-check-input" id="max_clips" name="max_clips" value="true" <% [ "$max_clips" = "true" ] && echo checked %> aria-label="When something moves">
+					<input type="checkbox" class="form-check-input" id="max_clips" name="max_clips" value="true" <% [ "$max_clips" = "true" ] && echo checked %> aria-label="Когда что-то движется">
 				</span>
 			</div>
 
 			<div class="mj-trig" id="mj-trig-schedule">
 				<span class="mj-trig-t">
-					<b>Every so often</b>
-					<span>On a timer, whatever is happening in front of the camera.</span>
+					<b>Время от времени</b>
+					<span>По расписанию, независимо от того, что происходит перед камерой.</span>
 					<span style="display:flex; align-items:center; gap:.6rem; margin-top:.6rem">
-						<select class="form-select form-select-sm" id="max_interval" name="max_interval" style="max-width:11rem" aria-label="How often">
-							<option value="15" <% [ "$max_interval" = "15" ] && echo selected %>>Every 15 minutes</option>
-							<option value="30" <% [ "$max_interval" = "30" ] && echo selected %>>Every 30 minutes</option>
-							<option value="60" <% [ "$max_interval" = "60" ] && echo selected %>>Every hour</option>
-							<option value="360" <% [ "$max_interval" = "360" ] && echo selected %>>Every six hours</option>
+						<select class="form-select form-select-sm" id="max_interval" name="max_interval" style="max-width:11rem" aria-label="Как часто">
+							<option value="15" <% [ "$max_interval" = "15" ] && echo selected %>>Каждые 15 минут</option>
+							<option value="30" <% [ "$max_interval" = "30" ] && echo selected %>>Каждые 30 минут</option>
+							<option value="60" <% [ "$max_interval" = "60" ] && echo selected %>>Каждый час</option>
+							<option value="360" <% [ "$max_interval" = "360" ] && echo selected %>>Каждые шесть часов</option>
 						</select>
 					</span>
 				</span>
 				<span class="form-check form-switch">
 					<input type="hidden" name="max_crontab" value="false">
-					<input type="checkbox" class="form-check-input" id="max_crontab" name="max_crontab" value="true" <% [ "$max_crontab" = "true" ] && echo checked %> aria-label="Every so often">
+					<input type="checkbox" class="form-check-input" id="max_crontab" name="max_crontab" value="true" <% [ "$max_crontab" = "true" ] && echo checked %> aria-label="Время от времени">
 				</span>
 			</div>
 
 			<div class="mj-trig">
 				<span class="mj-trig-t">
-					<b>When something asks for it</b>
-					<span>Always available. The two links on the right are for a doorbell, a motion sensor or a home-automation rule to call.</span>
+					<b>Когда кто-то запросит</b>
+					<span>Работает всегда. Ссылки справа — для дверного звонка, датчика движения или сценария умного дома.</span>
 				</span>
 			</div>
 		</div></div>
 
 		<details class="mj-advanced">
-			<summary>Settings you will probably never need</summary>
+			<summary>Настройки, которые вам, скорее всего, не понадобятся</summary>
 			<div class="card mt-3"><div class="card-body">
-				<% card_head "The bot" %>
-				<% field_password "max_token" "Token" "From MAX's own bot-making bot. It is a long string; paste it whole." %>
-				<% field_text "max_chat_id" "Chat" "The number of the chat to post in, which is negative for a group. Add the bot to the chat first &mdash; until you do, it can see no chats at all." %>
-
-				<% group_head "Connection" %>
-				<% field_switch "max_proxy" "Send through a proxy" "eval" "Uses the <a href=\"proxy.cgi\">proxy settings</a>. Cameras are built without proxy support unless you ask for it." %>
+				<% card_head "Соединение" %>
+				<% field_switch "max_proxy" "Через прокси" "eval" "Использует <a href=\"proxy.cgi\">настройки прокси</a>. В обычной сборке поддержка прокси отключена." %>
 			</div></div>
 		</details>
 	</div>
 
 	<div class="col-12 col-lg-4">
 		<div class="card"><div class="card-body">
-			<% card_head "Try it" %>
-			<p class="small text-secondary">Sends one now, with these settings as they were last saved.</p>
-			<button type="button" id="mj-notify-test" class="btn btn-sm btn-primary" data-send="<% [ "$max_video" = "true" ] && echo clip || echo image %>">Send me a test</button>
+			<% card_head "Как получить бота" %>
+			<p class="small text-secondary"><b>Кому доступно.</b> Только организациям, ИП и <a href="https://www.nalog.gov.ru/rn53/news/activities_fts/16491143/">самозанятым</a> &mdash; физическому лицу без такого статуса бота не создать. Нужен телефон и верификация: через Госуслуги, банковский ID или вручную.</p>
+			<ol class="small text-secondary mb-0 ps-3">
+				<li class="mb-2">Зайдите на <a href="https://business.max.ru/self/">business.max.ru</a>, введите телефон и подтвердите профиль через Госуслуги или поддерживаемый банк. Занимает несколько минут.</li>
+				<li class="mb-2">В личном кабинете откройте раздел <a href="https://business.max.ru/self/chat-bots">«Чат-боты»</a> и нажмите «Создать».</li>
+				<li class="mb-2">Заполните карточку бота: название и описание. Никнейм сгенерируется сам. Дождитесь модерации &mdash; обычно до 24 часов &mdash; после неё в настройках появится токен.</li>
+				<li>Добавьте бота в нужный чат и вставьте токен в поле <b>Токен</b> слева.</li>
+			</ol>
+		</div></div>
+
+		<div class="card mt-4"><div class="card-body">
+			<% card_head "Проверка" %>
+			<p class="small text-secondary">Отправит одно сообщение прямо сейчас, с настройками в том виде, в каком они были сохранены.</p>
+			<button type="button" id="mj-notify-test" class="btn btn-sm btn-primary" data-send="<% [ "$max_video" = "true" ] && echo clip || echo image %>">Отправить проверочное</button>
 			<span class="mj-say text-secondary" id="mj-notify-test-say"></span>
 		</div></div>
 
 		<div class="card mt-4"><div class="card-body">
-			<% card_head "Ask for one" %>
+			<% card_head "Запросить отправку" %>
 			<dl class="small list mb-0">
-				<dt>Picture</dt>
+				<dt>Снимок</dt>
 				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/max.cgi?send=image</dd>
-				<dt>Video</dt>
+				<dt>Видео</dt>
 				<dd class="text-break cp2cb"><span class="ep-http">http</span>://root:PASSWORD@<span class="ep-host"><% esc "$network_address" %></span>/cgi-bin/max.cgi?send=clip</dd>
 			</dl>
-			<p class="small text-secondary mt-2">Call either link to send one — the second records <% esc "$max_video_seconds" %> seconds first. Click to copy, then replace <code>PASSWORD</code> with your WebUI password.</p>
+			<p class="small text-secondary mt-2">Вызов любой из ссылок отправит одно сообщение; вторая сначала запишет <% esc "$max_video_seconds" %> с. Нажмите, чтобы скопировать, затем замените <code>PASSWORD</code> на пароль от веб-интерфейса.</p>
 		</div></div>
 	</div>
 
-	<div class="col-12 mj-save"><% button_submit "Save" %></div>
+	<div class="col-12 mj-save"><% button_submit "Сохранить" %></div>
 </div>
 </form>
 
 <details class="mj-advanced">
-	<summary>Raw configuration</summary>
+	<summary>Файл настроек</summary>
 	<div class="mt-3">
 		<% [ -e "$config_file" ] && ex "sed -e 's/^max_token=.*/max_token=\"(hidden)\"/' $config_file" %>
 		<% ex "grep /usr/sbin/max /etc/crontabs/root" %>
