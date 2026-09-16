@@ -573,7 +573,14 @@ motion_hook_sync() {
 	motion_hook_msg=""
 
 	if clip_hook_wanted; then
-		[ -x "$motion_hook_worker" ] || return 0
+		# Saying nothing here would be the page confirming a setting whose
+		# other half cannot run: on a build that ships no sender the whole
+		# card-less path is missing, and the operator would be told their
+		# settings were saved with movement quietly going nowhere.
+		if [ ! -x "$motion_hook_worker" ]; then
+			motion_hook_msg="This firmware does not include the part that sends movement from a camera with no memory card, so only recordings can be sent."
+			return 1
+		fi
 
 		if [ -e "$motion_hook_path" ]; then
 			if grep -qF "$motion_hook_mark" "$motion_hook_path" 2>/dev/null; then
@@ -591,12 +598,15 @@ motion_hook_sync() {
 			# a script of your own -- nothing here will overwrite one.
 			exec ${motion_hook_worker} "\$@"
 		HOOK
-		if [ ! -s "$motion_hook_path" ]; then
+		# Written, then checked: a full flash writes a truncated file without
+		# saying so, and a hook the camera cannot execute is one it silently
+		# never runs. Both leave the operator told it worked.
+		if [ ! -s "$motion_hook_path" ] || ! chmod 0755 "$motion_hook_path" ||
+			[ ! -x "$motion_hook_path" ]; then
 			rm -f "$motion_hook_path"
 			motion_hook_msg="The camera would not take the script that sends movement."
 			return 1
 		fi
-		chmod 0755 "$motion_hook_path"
 		return 0
 	fi
 

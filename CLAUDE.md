@@ -750,12 +750,20 @@ sends them and hands the one clip to every sender that wants movement. Both
 paths are the same switch on the page — which mechanism runs is the camera's
 business, not the operator's.
 
-They must never both fire for one event, so the script asks the daemon whether
-the recorder is set to record on movement and stands aside when it is: that
-path produces the better clip, covering the whole event and opening before it.
-A camera that cannot be asked is given the benefit of the doubt and the clip is
-sent, because a missed event is worse than a duplicate and a camera that will
-not answer is usually one that is restarting. What the card-less clip costs is
+They must never both fire for one event, so the script stands aside when the
+recorder is **demonstrably** doing the job: recording switched on, mode
+`motion`, the health gauge at 0, and something actually written. All four
+matter, and the first is the easy one to forget — `records.mode` keeps saying
+`motion` after recording is switched off, the gauge stays at 0 because nothing
+has tried, and the write counter keeps whatever it reached before, so the other
+three can describe a camera that will never finish another clip. A camera that
+cannot be asked at all is given the benefit of the doubt and the clip is sent,
+because a missed event is worse than a duplicate and a camera that will not
+answer is usually one that is restarting.
+
+Anything worth knowing goes to the camera's log through `logger`, where the
+Logs page shows it: nothing reads this script's exit status, so a delivery that
+failed would otherwise leave no trace anywhere. What the card-less clip costs is
 worth saying plainly, and both pages do: it starts at the trigger rather than
 before it, and it is as long as the setting says rather than as long as the
 movement lasted.
@@ -771,12 +779,16 @@ wired whenever either page wants movement sent, card or no card: the script
 decides at the moment of the event, so pulling the card later leaves the
 setting working instead of silently stopping.
 
-One capture serves both senders — recording it twice would ask a camera with
-one encoder for two simultaneous streams of the same thing — at the longer of
-the two configured lengths, since the longer clip contains the shorter one. A
-`mkdir` lock keeps one capture at a time camera-wide, and a lock older than any
-capture could be is taken over, or one `kill -9` would silence the camera until
-somebody rebooted it.
+One capture serves both senders where they ask for the same length, which is
+the ordinary case; where they differ each gets what its own page promised,
+because handing both the longer clip silently lengthens one service's video
+because the other was switched on. A `mkdir` lock keeps one capture at a time
+camera-wide and records the pid holding it: a run can legitimately last minutes
+— a capture plus two uploads over a slow link — and any age short enough to
+recover from a `kill -9` is also short enough to expire under a delivery still
+in progress, so a pid that is gone is the proof and the age is only the
+backstop. A run only ever removes its own lock, or one whose lock was taken
+from it would take away its successor's on the way out.
 
 **The bounding box majestic passes that hook is deliberately ignored**, and
 anything else reading it should know why: its four numbers are the corners of

@@ -100,7 +100,7 @@ esac
 				<% field_string "ntfy_priority" "Priority" "eval" "1 2 3 4 5" "1 = min, 5 = max (urgent)." %>
 				<% field_switch "ntfy_heif" "Use HEIF format" "eval" "Smaller files (best with H265)." %>
 				<% group_head "Submission" %>
-				<% field_switch "ntfy_clips" "Send motion clips" "eval" "Push something when movement stops. With a memory card that is the recording itself, as long as the movement lasted; with no card the camera records a few seconds as it sends them." %>
+				<% field_switch "ntfy_clips" "Send motion clips" "eval" "Push something when the camera sees movement. With a memory card it sends the recording once the movement has stopped, as long as the movement lasted and starting a little before it; with no card it records a few seconds as the movement begins." %>
 				<% field_switch "ntfy_video" "Send video" "eval" "Record a few seconds and push that, instead of a single picture. Needs no card and no recording." %>
 				<% field_string "ntfy_video_seconds" "Video length" "eval" "5 10 15 30 60" "Seconds to record. A push that overlaps another one also gets the seconds before it started; a push on its own begins where it was triggered." %>
 				<% button_submit %>

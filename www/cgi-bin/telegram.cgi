@@ -88,7 +88,7 @@ esac
 				<% field_text "telegram_channel" "Channel" "Channel to post the images to." %>
 				<% field_text "telegram_thread_id" "Message thread id" "Topic to post to (forum supergroups only)." %>
 				<% group_head "Submission" %>
-				<% field_switch "telegram_clips" "Send motion clips" "eval" "Post something when movement stops. With a memory card that is the recording itself, as long as the movement lasted; with no card the camera records a few seconds as it sends them." %>
+				<% field_switch "telegram_clips" "Send motion clips" "eval" "Post something when the camera sees movement. With a memory card it sends the recording once the movement has stopped, as long as the movement lasted and starting a little before it; with no card it records a few seconds as the movement begins." %>
 				<% field_switch "telegram_video" "Send video on a schedule" "eval" "Record a few seconds and post that, instead of a single picture. Needs no card and no recording." %>
 				<% field_string "telegram_video_seconds" "Video length" "eval" "5 10 15 30 60" "Seconds to record. A send that overlaps another one also gets the seconds before it started; a send on its own begins where it was triggered." %>
 				<% field_string "telegram_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>

@@ -187,21 +187,41 @@ server.listen(0, '127.0.0.1', async () => {
 		writeConf('ntfy', ['ntfy_enabled="true"', 'ntfy_clips="true"', 'ntfy_video_seconds="15"']);
 	};
 
-	group('one capture, both senders, the longer ask');
+	group('one capture where both want the same length');
 	{
 		reset();
-		both();
+		writeConf('telegram', ['telegram_enabled="true"', 'telegram_clips="true"', 'telegram_video_seconds="10"']);
+		writeConf('ntfy', ['ntfy_enabled="true"', 'ntfy_clips="true"', 'ntfy_video_seconds="10"']);
 		const r = await run(build());
 		const out = sentLines();
 		check('asked the camera once', clips.length === 1, clips.join(','));
-		check('for the longer of the two lengths',
-			clips[0] === '/video.mp4?pre=15&duration=15', clips[0]);
+		check('for that length', clips[0] === '/video.mp4?pre=10&duration=10', clips[0]);
 		check('handed it to both senders', out.length === 2, JSON.stringify(out));
 		check('and handed them the same file',
 			out.length === 2 && out[0].file === out[1].file,
 			out.map((o) => o.file).join(' vs '));
 		check('which held the clip', out.every((o) => o.size === String(CLIP.length)),
 			out.map((o) => o.size).join(','));
+		check('exits 0', r.status === 0, 'status ' + r.status);
+	}
+
+	group('two captures where they want different lengths');
+	{
+		// Handing both the longer clip would silently lengthen one service's
+		// video because the other was switched on, while its own page went on
+		// showing the shorter figure.
+		reset();
+		both();   // telegram 10, ntfy 15
+		const r = await run(build());
+		const out = sentLines();
+		check('asked the camera twice', clips.length === 2, clips.join(','));
+		check('each for what its own page promised',
+			clips.includes('/video.mp4?pre=10&duration=10') &&
+			clips.includes('/video.mp4?pre=15&duration=15'), clips.join(','));
+		check('one clip each', out.length === 2, JSON.stringify(out));
+		check('and they are different files',
+			out.length === 2 && out[0].file !== out[1].file,
+			out.map((o) => o.file).join(' vs '));
 		check('exits 0', r.status === 0, 'status ' + r.status);
 	}
 
@@ -229,7 +249,7 @@ server.listen(0, '127.0.0.1', async () => {
 		config = { 'records.enabled': 'true', 'records.mode': 'motion' };
 		recorder = { state: 3, written: 0 };
 		const offline = await run(build());
-		check('sends anyway when the recorder is offline', clips.length === 1, clips.join(','));
+		check('sends anyway when the recorder is offline', clips.length === 2, clips.join(','));
 		check('to both senders', sentLines().length === 2, JSON.stringify(sentLines()));
 		check('exits 0', offline.status === 0, 'status ' + offline.status);
 
@@ -241,8 +261,23 @@ server.listen(0, '127.0.0.1', async () => {
 		config = { 'records.enabled': 'true', 'records.mode': 'motion' };
 		recorder = { state: 0, written: 0 };
 		const fresh = await run(build());
-		check('sends when the recorder has recorded nothing yet', clips.length === 1, clips.join(','));
+		check('sends when the recorder has recorded nothing yet', clips.length === 2, clips.join(','));
 		check('exits 0', fresh.status === 0, 'status ' + fresh.status);
+	}
+
+	group('recording switched off is not cover, however healthy it looks');
+	{
+		// records.mode keeps saying motion after recording is turned off, the
+		// health gauge stays at 0 because nothing has tried, and the write
+		// counter keeps whatever it reached before. All three can look like a
+		// working recorder on a camera that will never finish another clip.
+		reset();
+		both();
+		config = { 'records.enabled': 'false', 'records.mode': 'motion' };
+		recorder = { state: 0, written: 8123 };
+		const r = await run(build());
+		check('sends anyway', clips.length === 2, clips.join(','));
+		check('exits 0', r.status === 0, 'status ' + r.status);
 	}
 
 	group('recording, but not on movement, is not cover');
@@ -255,7 +290,7 @@ server.listen(0, '127.0.0.1', async () => {
 		config = { 'records.enabled': 'true', 'records.mode': 'continuous' };
 		recorder = { state: 0, written: 9000 };
 		const r = await run(build());
-		check('records its own clip', clips.length === 1, clips.join(','));
+		check('records its own clip', clips.length === 2, clips.join(','));
 		check('and sends it', sentLines().length === 2, JSON.stringify(sentLines()));
 		check('exits 0', r.status === 0, 'status ' + r.status);
 	}
@@ -267,7 +302,7 @@ server.listen(0, '127.0.0.1', async () => {
 		reset();
 		both();
 		const r = await run(build({ mj: false, out: 'motion-no-helper.sh' }));
-		check('goes ahead', clips.length === 1, clips.join(','));
+		check('goes ahead', clips.length === 2, clips.join(','));
 		check('and sends', sentLines().length === 2, JSON.stringify(sentLines()));
 		check('exits 0', r.status === 0, 'status ' + r.status);
 	}
@@ -347,26 +382,41 @@ server.listen(0, '127.0.0.1', async () => {
 
 	group('one at a time, camera-wide');
 	{
+		// A live holder keeps the lock however long it runs: a capture plus two
+		// uploads over a slow link is minutes, and any age short enough to
+		// recover from a kill -9 is short enough to expire under a delivery
+		// that is still going.
 		reset();
 		both();
 		fs.mkdirSync(lock);
-		const r = await run(build());
-		check('a held lock means no second capture', clips.length === 0, clips.join(','));
+		fs.writeFileSync(path.join(lock, 'pid'), String(process.pid));
+		const held = await run(build());
+		check('a live holder means no second capture', clips.length === 0, clips.join(','));
 		check('and no send', sentLines().length === 0, JSON.stringify(sentLines()));
-		check('exits 0', r.status === 0, 'status ' + r.status);
-		fs.rmdirSync(lock);
+		check('exits 0', held.status === 0, 'status ' + held.status);
+		fs.rmSync(lock, { recursive: true, force: true });
 
-		// A run killed outright cannot clean up after itself; a lock nothing
-		// can be holding any more must not silence the camera for good.
+		// A holder that is gone is proof, and needs no waiting: a run killed
+		// outright must not silence the camera until somebody reboots it.
 		reset();
 		both();
 		fs.mkdirSync(lock);
-		const old = Date.now() - 10 * 60 * 1000;
-		fs.utimesSync(lock, old / 1000, old / 1000);
-		const after = await run(build());
-		check('a stale lock is taken over', clips.length === 1, clips.join(','));
+		fs.writeFileSync(path.join(lock, 'pid'), '999999');
+		const dead = await run(build());
+		check('a dead holder is taken over at once', clips.length === 2, clips.join(','));
 		check('and the event is sent', sentLines().length === 2, JSON.stringify(sentLines()));
-		check('exits 0', after.status === 0, 'status ' + after.status);
+		check('exits 0', dead.status === 0, 'status ' + dead.status);
+
+		// And the run whose lock was taken from it must not take away the one
+		// its successor is holding.
+		reset();
+		both();
+		fs.mkdirSync(lock);
+		fs.writeFileSync(path.join(lock, 'pid'), '999998');
+		await run(build());
+		check('the successor still holds a lock of its own',
+			!fs.existsSync(lock) || fs.readFileSync(path.join(lock, 'pid'), 'utf8').trim() !== '999998',
+			'the stale pid file survived');
 	}
 
 	group('it leaves nothing behind');

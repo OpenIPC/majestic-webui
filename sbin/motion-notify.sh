@@ -10,36 +10,64 @@
 #
 # Here the camera records the clip as it sends it -- localhost/video.mp4 holds
 # the muxer up for the life of one request -- which needs no card, no recorder
-# and no playlist. What that costs, and it is worth saying plainly: the clip
-# starts at the trigger rather than before it, and it is as long as the setting
-# says rather than as long as the movement lasts. A camera with a card sends
-# the real recording instead, which is better on both counts, and this script
-# stands aside for it.
+# and no playlist. What that costs, and both pages say so: the clip starts at
+# the trigger rather than before it, and it is as long as the setting says
+# rather than as long as the movement lasts. A camera with a card sends the
+# real recording instead, which is better on both counts, and this stands aside
+# for it.
 #
-# The bounding box majestic passes is deliberately ignored. Its four numbers do
-# not mean the same thing on every camera -- on HiSilicon they are the corners
-# of the box, on SigmaStar and Ingenic the corner and its size -- so a script
-# that reads them is wrong on two vendors out of three. Nothing here needs them.
+# The bounding box majestic passes is deliberately ignored. Older cameras put
+# the box's far corner in the last two arguments and newer ones put its size,
+# and the two cannot be told apart from the numbers, so anything that read them
+# would be guessing. Nothing here needs them.
+#
+# Nothing reads this script's exit status -- majestic starts it and forgets it
+# -- so anything worth knowing goes to the camera's log, where the Logs page
+# shows it.
 
 CONF_DIR=/etc/webui
 MJ_SH=/var/www/cgi-bin/p/majestic.sh
 LOCK=/tmp/motion-notify.lock
 
+say() { logger -t motion-notify "$1" 2>/dev/null || true; }
+
 # One capture at a time, camera-wide.
 #
-# mkdir is the lock because it is atomic and needs no tools. A run killed
-# outright cannot clean up after itself, so a lock older than any capture could
-# possibly be is taken to be dead and removed -- otherwise one `kill -9` would
-# silence the camera until somebody rebooted it.
-if ! mkdir "$LOCK" 2>/dev/null; then
-	if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +3 2>/dev/null)" ]; then
-		rmdir "$LOCK" 2>/dev/null
-		mkdir "$LOCK" 2>/dev/null || exit 0
-	else
-		exit 0
+# The lock records the pid holding it, because a run can legitimately last
+# several minutes -- a capture plus two uploads over a slow link -- and any
+# age-based guess short enough to recover from a kill -9 is also short enough
+# to expire under an upload that is still going. A pid that is gone is proof;
+# the age is only the backstop for a pid the kernel has recycled.
+take_lock() {
+	if mkdir "$LOCK" 2>/dev/null; then
+		echo $$ > "$LOCK/pid"
+		return 0
 	fi
-fi
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+	_held=$(cat "$LOCK/pid" 2>/dev/null)
+	if [ -n "$_held" ] && kill -0 "$_held" 2>/dev/null; then
+		return 1
+	fi
+	if [ -z "$_held" ] &&
+		[ -z "$(find "$LOCK" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+		return 1
+	fi
+
+	say "taking over a lock left behind by pid ${_held:-unknown}"
+	rm -rf "$LOCK"
+	mkdir "$LOCK" 2>/dev/null || return 1
+	echo $$ > "$LOCK/pid"
+	return 0
+}
+
+# Only ever remove our own: a run whose lock was taken from it must not take
+# its successor's away on the way out.
+drop_lock() {
+	[ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$LOCK"
+}
+
+take_lock || exit 0
+trap 'drop_lock' EXIT INT TERM
 
 # Does this sender want to hear about movement? The same two answers record.sh
 # asks of the same two files, in a subshell so the first config read cannot
@@ -75,24 +103,28 @@ seconds() {
 # messages for one event -- and the recorder's is the better one, covering the
 # whole event and opening before it.
 #
-# "Configured to record on motion" is the wrong question, and asking it is what
-# would break the very camera this script exists for: a card-less camera whose
-# settings still say motion recording is on looks identical to a working one
-# until the recorder actually tries. Measured on an hi3516ev300 with no card
-# and records.path left at its default, the recorder reported itself ok from
-# boot and only went offline on the first event, when it discovered the path
-# was on internal flash -- so a script trusting the configuration would have
-# stayed silent through exactly the events it was installed to send.
+# Four things have to be true, and the fourth is the one that is easy to
+# forget: recording switched ON. records.mode keeps saying `motion` after
+# recording is turned off, the health gauge stays at 0 because nothing has
+# tried, and the write counter keeps whatever it reached before -- so the other
+# three can all look like a working recorder on a camera that will never finish
+# another clip.
 #
-# So this asks what the recorder is DOING: the mode it is in, and whether it is
-# both healthy and has actually written something. A camera that has recorded
-# nothing yet -- freshly restarted, card or no card -- is not taken to be
-# covered, which costs one duplicate message on the first event of a camera
-# that does have a card, and never costs a missed event on one that does not.
-# That is the right way round.
+# "Configured to record on motion" is not enough on its own either, and asking
+# only that is what would break the camera this exists for: measured on an
+# hi3516ev300 with no card and records.path left at its default, the recorder
+# reported itself ok from boot and only went offline on the first event, when
+# it discovered the path was on internal flash.
+#
+# A camera that cannot be asked at all goes ahead and sends. That is a
+# deliberate trade: the cost of being wrong is one duplicate message, the cost
+# of the other choice is a missed event on the camera least able to afford one.
 recorder_covers_it() {
 	[ -r "$MJ_SH" ] || return 1
 	. "$MJ_SH"
+
+	_en=$(mj_cfg records.enabled) || return 1
+	[ "$_en" = "true" ] || return 1
 	_mode=$(mj_cfg records.mode) || return 1
 	[ "$_mode" = "motion" ] || return 1
 
@@ -114,6 +146,51 @@ recorder_covers_it() {
 	return 0
 }
 
+# Record one clip and hand it to the senders named. The file belongs to this
+# function: the senders send what they are given and delete nothing.
+capture_to() {
+	_secs=$1
+	shift
+
+	_work=$(mktemp -d /tmp/motion.XXXXXX) || return 1
+	_clip=$_work/"$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')".mp4
+
+	# ?pre= costs nothing and is usually answered with nothing: the camera
+	# holds a run-up only while another request that asked for one is open.
+	# When two events overlap, the second opens before its own trigger.
+	_http=$(curl --silent --show-error \
+		--max-time $((_secs + 30)) \
+		--output "$_clip" --write-out '%{http_code}' \
+		"localhost/video.mp4?pre=${_secs}&duration=${_secs}")
+	_rc=$?
+
+	# The same three tests the senders make of their own captures: a transfer
+	# that died after the status line leaves a partial file behind a
+	# successful-looking code, and half a video is worse than none.
+	if [ "$_rc" -ne 0 ]; then
+		say "the clip did not arrive whole (curl exit ${_rc})"
+		rm -rf "$_work"
+		return 1
+	fi
+	if [ "$_http" != "200" ] || [ ! -s "$_clip" ]; then
+		say "the camera would not record a clip (HTTP ${_http:-none})"
+		rm -rf "$_work"
+		return 1
+	fi
+
+	_bad=0
+	for _who in "$@"; do
+		case "$_who" in
+		telegram) _out=$(/usr/sbin/telegram "$_clip" 2>&1) || _bad=1 ;;
+		ntfy) _out=$(/usr/bin/ntfy.sh "$_clip" 2>&1) || _bad=1 ;;
+		esac
+		[ "$_bad" = 1 ] && say "${_who}: ${_out}"
+	done
+
+	rm -rf "$_work"
+	return "$_bad"
+}
+
 tg=no
 nf=no
 [ -x /usr/sbin/telegram ] && wants telegram && tg=yes
@@ -127,46 +204,25 @@ if recorder_covers_it; then
 	exit 0
 fi
 
-# One capture for both senders: recording it twice would ask the camera for two
-# simultaneous streams of the same thing, and the longer of the two requests
-# contains the shorter one anyway.
-secs=5
-[ "$tg" = "yes" ] && secs=$(seconds telegram)
-if [ "$nf" = "yes" ]; then
-	nsecs=$(seconds ntfy)
-	[ "$nsecs" -gt "$secs" ] && secs=$nsecs
-fi
-
-workdir=$(mktemp -d /tmp/motion.XXXXXX) || exit 1
-trap 'rm -rf "$workdir"; rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
-
-clip=$workdir/"$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')".mp4
-
-# ?pre= costs nothing and is usually answered with nothing: the camera holds a
-# run-up only while another request that asked for one is open. When two events
-# overlap, the second one opens before its own trigger.
-http=$(curl --silent --show-error \
-	--max-time $((secs + 30)) \
-	--output "$clip" --write-out '%{http_code}' \
-	"localhost/video.mp4?pre=${secs}&duration=${secs}")
-rc=$?
-
-# The same three tests the senders make of their own captures: a transfer that
-# died after the status line leaves a partial file behind a successful-looking
-# code, and half a video is worse than none.
-if [ "$rc" -ne 0 ] || [ "$http" != "200" ] || [ ! -s "$clip" ]; then
-	exit 1
-fi
-
-# A sender that was asked to run and failed makes this fail too. Nothing reads
-# the status -- majestic starts this and forgets it -- but a person running it
-# by hand is the one who needs the answer.
+# One capture serves both senders where they ask for the same length, which is
+# the ordinary case. Where they differ, each gets what its own page promised:
+# handing both the longer clip would silently lengthen one service's video
+# because the other was switched on, while its page went on showing the shorter
+# figure.
 rc=0
-if [ "$tg" = "yes" ]; then
-	/usr/sbin/telegram "$clip" >/dev/null 2>&1 || rc=1
-fi
-if [ "$nf" = "yes" ]; then
-	/usr/bin/ntfy.sh "$clip" >/dev/null 2>&1 || rc=1
+if [ "$tg" = "yes" ] && [ "$nf" = "yes" ]; then
+	tgs=$(seconds telegram)
+	nfs=$(seconds ntfy)
+	if [ "$tgs" = "$nfs" ]; then
+		capture_to "$tgs" telegram ntfy || rc=1
+	else
+		capture_to "$tgs" telegram || rc=1
+		capture_to "$nfs" ntfy || rc=1
+	fi
+elif [ "$tg" = "yes" ]; then
+	capture_to "$(seconds telegram)" telegram || rc=1
+else
+	capture_to "$(seconds ntfy)" ntfy || rc=1
 fi
 
 exit $rc
