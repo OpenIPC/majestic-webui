@@ -24,6 +24,14 @@
 	// sits under the chip, so this shows whether or not a pad does.
 	const why = $('#mj-ptz-why'), toasts = $('#mj-toasts');
 	if (why && toasts) { toasts.appendChild(why); why.hidden = false; }
+	// The autofocus line joins the same stack, and for the same reason the
+	// sentence above does — but it stays `hidden`, because it has nothing to
+	// say until a pass this page started or booked is under way. Left where
+	// haserl emitted it, it renders BELOW the video instead of over it: the
+	// pads are emitted after the player and relocated, and this is emitted with
+	// them.
+	const afLine = $('#mj-af-say');
+	if (afLine && toasts) toasts.appendChild(afLine);
 	// Either piece may be absent on its own: ptz_caps can leave a camera
 	// with only the zoom/focus group (an XM zoom block has no pan/tilt) —
 	// the pad must not be the thing the whole mount hinges on.
@@ -81,10 +89,100 @@
 				if (q) req(q, true);
 			});
 	}
+	// ---- Autofocus -------------------------------------------------------
+	//
+	// The engine is majestic's, so the browser asks majestic: `GET /autofocus`
+	// to trigger and `GET /autofocus/status` to watch. Both are served on this
+	// same origin, which is the standing rule — a CGI carries only what the
+	// daemon cannot answer, and this is the daemon's own business.
+	//
+	// The status path is fetched EXACTLY. majestic matches `/autofocus/status`
+	// with strcmp and everything else under `/autofocus` with a substring test,
+	// so `/autofocus/status?t=1` is not a poll — it is a trigger, and a cache
+	// buster here would start a focus pass every time it fired.
+	const AF_URL = '/autofocus';
+	const AF_STATUS_URL = '/autofocus/status';
+	const afSay = $('#mj-af-say');
+	const afState = window.MajesticAfState ? window.MajesticAfState.create() : null;
+	let afTimer = null, zoomTouched = false;
+
+	function say(text) {
+		if (!afSay) return;
+		afSay.textContent = text || '';
+		afSay.hidden = !text;
+	}
+	// majestic answers /autofocus and /ptz with a bodyless 200 when the sensor
+	// driver did not come up, so the status code alone is not an answer. Every
+	// caller here judges the body.
+	function afText(url) {
+		return apiFetch(url, { credentials: 'same-origin' })
+			.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+			.then(t => t.trim());
+	}
+	function afStop() {
+		if (afTimer) { clearTimeout(afTimer); afTimer = null; }
+	}
+	function afTick(delay) {
+		afStop();
+		if (!afState) return;
+		afTimer = setTimeout(() => {
+			afTimer = null;
+			afText(AF_STATUS_URL).then(s => {
+				const r = afState.step(s, Date.now());
+				if (r.say !== null && r.say !== undefined) say(r.say);
+				if (r.poll) afTick(1000);
+			}, () => {
+				// A failed poll is not a verdict about the pass. Keep watching
+				// on a longer beat; the budget inside the reducer ends it.
+				if (afState.armed()) afTick(2000);
+			});
+		}, delay);
+	}
+	function triggerAf() {
+		if (!afState) return;
+		afText(AF_URL).then(reply => {
+			// No status read here on purpose. The baseline has to be what stood
+			// BEFORE this pass — read after the trigger it would be this pass's
+			// own `running`, i.e. the generation comparing itself against
+			// itself. `observe()` keeps the last idle sighting, and passing
+			// undefined keeps it.
+			const r = afState.trigger(reply, undefined, Date.now());
+			say(r.say);
+			if (r.withdraw) {
+				const b = mount.querySelector('[data-act="af"]');
+				if (b) b.hidden = true;
+			}
+			if (r.poll) afTick(200);
+		}, () => say('The camera did not answer.'));
+	}
+	function afManual(verb) {
+		if (!afState) return;
+		afState.manual(verb, Date.now());
+		if (!afState.armed()) { afStop(); say(''); }
+	}
+	// One status read at mount, never spoken — it is the sticky residue the
+	// reducer needs to recognise so it can ignore it. Without it the first
+	// press would take whatever was standing (a `preempted` from days ago) as
+	// its own generation's starting point.
+	if (afState && afSay) afText(AF_STATUS_URL).then(s => afState.observe(s), () => {});
+
 	// What one press of this button means, from its own dataset.
 	function fire(btn) {
 		if (btn.dataset.act) {
-			req('act=' + btn.dataset.act, btn.dataset.act === 'stop');
+			const act = btn.dataset.act;
+			// Autofocus is not a move and must not take the lease. j/ptz.cgi
+			// used to hold its HTTP request open for the whole pass — 60 polls
+			// of `sleep 1` plus a `curl -m 2` each, so up to about three
+			// minutes of a held connection — and because `req` allows one
+			// request in flight, every Near/Far/Wide/Tele press during that
+			// window was silently dropped. The camera would have preempted
+			// happily; the browser never asked it to. Triggering directly and
+			// watching the status is what ends that, rather than a longer
+			// timeout somewhere.
+			if (act === 'af') { triggerAf(); return; }
+			req('act=' + act, act === 'stop');
+			if (act === 'wide' || act === 'tele') zoomTouched = true;
+			else if (act === 'near' || act === 'far') afManual(act);
 			return;
 		}
 		const d = DIRS[btn.dataset.dir];
@@ -118,6 +216,23 @@
 		const btn = holdBtn;
 		clearHold();
 		if (btn && btn.dataset.act) req('act=stop', true);
+		// Letting go of a zoom is what books a focus pass: majestic waits for
+		// the wire to go quiet (700 ms) after the move's own deadline and then
+		// runs one. Nothing told the operator that, so a picture that went soft
+		// and re-sharpened a second after they stopped touching anything read
+		// as the camera misbehaving. Arm the watch here and it announces
+		// itself.
+		if (btn && zoomTouched &&
+			(btn.dataset.act === 'wide' || btn.dataset.act === 'tele')) {
+			zoomTouched = false;
+			if (afState && afSay) {
+				afText(AF_STATUS_URL).catch(() => null).then(s => {
+					afState.zoomReleased(s, Date.now());
+					afTick(1200);
+				});
+			}
+		}
+		if (afState) { afState.release(); }
 	}
 
 	// The centre is a single press on both pads: the stepped backends call it

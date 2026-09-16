@@ -38,6 +38,12 @@ has_cap() {
 	case " $ptz_caps " in *" $1 "*) return 0 ;; esac
 	return 1
 }
+
+# Near and Far are only "manual" focus in contrast to something automatic. On a
+# camera with no autofocus engine there is nothing to contrast them with, and
+# the word would be describing a distinction the operator cannot see.
+focus_label="Focus"
+[ -n "$af_support" ] && focus_label="Manual focus"
 %>
 <% if [ "$ptz_backend" = "pelco" ]; then %>
 <!-- Why the pads will not move anything. Set when the camera declares a
@@ -61,6 +67,19 @@ has_cap() {
 <% if [ -n "$ptz_reason" ]; then %>
 <p id="mj-ptz-why" class="mj-adapt-toast mj-ptz-why small" role="status" hidden><%= $ptz_reason %></p>
 <% fi %>
+<!-- What the autofocus is doing, when it is doing something. Empty and hidden
+     at render: this says nothing until this page has itself started or booked a
+     pass, because /autofocus/status is STICKY -- `preempted` and `failed:` stand
+     until the next pass overwrites them, so a freshly loaded page reading the
+     status out loud would announce an interruption from last week as news.
+
+     It joins the toast stack rather than the pad for the same reason
+     #mj-ptz-why does: preview-hero.js measures the pad to place the control bar
+     (--mj-ptz-h, .mj-ptz-beside), so a line appearing and disappearing inside
+     it would re-flow the bar mid-pass, under the operator's finger. -->
+<% if [ -n "$af_support" ]; then %>
+<p id="mj-af-say" class="mj-adapt-toast mj-ptz-why small" role="status" aria-live="polite" hidden></p>
+<% fi %>
 <% if has_cap zoom || has_cap focus; then %>
 <div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom and focus" hidden>
 	<% if has_cap zoom; then %>
@@ -79,7 +98,7 @@ has_cap() {
 	</button>
 	<% fi %>
 	<% if has_cap focus; then %>
-	<span class="mj-ptz-group">Focus</span>
+	<span class="mj-ptz-group"><%= $focus_label %></span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="near" aria-label="Focus near" title="Pull focus nearer">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
@@ -99,13 +118,22 @@ has_cap() {
 	<!-- One-shot contrast autofocus: majestic's engine drives the same
 	     focus motor off the ISP's focus statistic. The icon is the focus
 	     bracket family with a filled subject: the camera choosing the
-	     distance itself. af_support already implies the focus axis. -->
-	<button type="button" class="mj-ptz-fnbtn" data-act="af" aria-label="Autofocus" title="Autofocus (one shot)">
+	     distance itself. af_support already implies the focus axis.
+
+	     It gets a caption and a row of its own, spanning both columns,
+	     because it is not a fifth direction. Wide, Tele, Near and Far are
+	     movements the operator owns; this is a procedure that drives the
+	     same motor for up to three minutes, is cancelled by touching any of
+	     them, and runs by itself after every zoom. Sharing their grid cell
+	     said it was their sibling, and that is what the pad was read as.
+	     The button can spell the word out at this width. -->
+	<span class="mj-ptz-group">Autofocus</span>
+	<button type="button" class="mj-ptz-fnbtn mj-ptz-af" data-act="af" aria-label="Autofocus" title="Focus the camera once, now. Trim with Near and Far AFTER it finishes: a manual move first makes the next autofocus search the whole range.">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
 			<circle cx="10" cy="10" r="2.2" fill="currentColor" stroke="none"></circle>
 		</svg>
-		<span>AF</span>
+		<span>Autofocus</span>
 	</button>
 	<% fi %>
 </div>
@@ -214,4 +242,8 @@ has_cap() {
 </div>
 <% fi %>
 <% fi %>
+<!-- Before the pad: preview-ptz.js reads window.MajesticAfState at mount. It
+     degrades rather than breaks if this one is missing — the pad still drives
+     the lens, it just stops narrating the autofocus. -->
+<script src="/a/af-state.js"></script>
 <script src="/a/preview-ptz.js"></script>

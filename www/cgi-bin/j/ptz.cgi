@@ -30,6 +30,39 @@ Use POST to move the camera."
 	exit 1
 fi
 
+# POST alone was never enough, and the comment above says why in the GET case:
+# this must not be the deputy that launders somebody else's request into a
+# camera command. A cross-site HTML form POSTs with no preflight and no custom
+# header, so `enctype=multipart/form-data` on a page the operator merely visits
+# reaches this script. The session cookie is SameSite=Strict and does not ride
+# -- but a browser holding cached HTTP Basic credentials attaches those, and
+# that is the ordinary state of a WebUI session.
+#
+# majestic's own /ptz answers this with Sec-Fetch-Site, and those headers are
+# NOT available here: the CGI environment it builds is an allowlist -- QUERY_
+# STRING, SCRIPT_NAME, HTTP_HOST, HTTP_REFERER, HTTP_COOKIE, REQUEST_METHOD,
+# CONTENT_TYPE, CONTENT_LENGTH -- so a Sec-Fetch test written in this file can
+# never fire, however right it looks. Referer is what does arrive, and a
+# browser sends it on a cross-site form POST by default.
+#
+# So: a Referer from another origin is refused; no Referer at all is allowed,
+# because that is curl and the CLI, which are supported callers here. Like the
+# daemon's own check, this refuses the attack it can SEE and does not pretend to
+# be the whole answer -- an attacker who suppresses Referer still gets through,
+# and closing that needs majestic to pass Sec-Fetch-Site to CGIs.
+if [ -n "$HTTP_REFERER" ]; then
+	ref_origin="${HTTP_REFERER#*://}"
+	ref_origin="${ref_origin%%/*}"
+	if [ "$ref_origin" != "$HTTP_HOST" ]; then
+		echo "HTTP/1.1 400 Bad Request
+Content-type: text/plain; charset=UTF-8
+Cache-Control: no-store
+
+Cross-site PTZ refused."
+		exit 1
+	fi
+fi
+
 echo "HTTP/1.1 200 OK
 Content-type: text/plain; charset=UTF-8
 Cache-Control: no-store
@@ -161,7 +194,13 @@ if [ -n "$ACTION" ]; then
 		fi
 		r=$(curl -s -m 2 "http://127.0.0.1/autofocus")
 		case "$r" in
-			started|busy) ;;
+			# `restarted` is what the engine answers when this trigger
+			# preempted a pass that was already running and re-armed it —
+			# a second press, which is a legitimate "the scene changed, go
+			# again". It was missing here, so the one case where autofocus
+			# had most obviously just started was reported as a camera that
+			# never answered.
+			started|restarted|busy) ;;
 			*)
 				# A transport failure is not a pass: say so and fail, or the
 				# pad reads a dead engine as instant success.
