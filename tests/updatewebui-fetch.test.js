@@ -344,6 +344,53 @@ function passthrough() {
 	const args = ['--branch=topic', '--no-backup'];
 	run(args, () => {
 		check('every argument, in order', (ranWith() || []).join(' ') === args.join(' '), JSON.stringify(ranWith()));
+		payload();
+	});
+}
+
+// ------------------------------------------------------------ payload ------
+
+// What a camera actually receives, which is decided in tools/build-dist.sh.
+//
+// This is the silent one. If that step stopped renaming the stub onto the
+// canonical name, the tarball would carry the 48 KB installer again and the
+// boards this exists for would quietly go back over their partition; if it
+// renamed and the stub were missing, cameras would ship no updatewebui at all
+// and nothing would report either. The rename is EXECUTED here, lifted out of
+// the script rather than re-typed, so a change to it is what this sees.
+function payload() {
+	group('the dist payload carries the stub under the canonical name');
+
+	const build = fs.readFileSync(path.join(__dirname, '..', 'tools', 'build-dist.sh'), 'utf8');
+	const m = build.match(/^if \[ -f "\$PKG\/sbin\/updatewebui-fetch" \][\s\S]*?^fi$/m);
+	check('build-dist.sh still has the rename step', !!m, 'the step is gone or was renamed');
+	if (!m) return done();
+
+	const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'uwp-'));
+	fs.mkdirSync(path.join(pkg, 'sbin'));
+	fs.writeFileSync(path.join(pkg, 'sbin', 'updatewebui'), 'the 48 KB installer');
+	fs.writeFileSync(path.join(pkg, 'sbin', 'updatewebui-fetch'), 'the stub');
+	const script = path.join(pkg, 'step.sh');
+	fs.writeFileSync(script, 'PKG=' + q(pkg) + NL + m[0] + NL);
+
+	execFile('/bin/sh', [script], () => {
+		const at = (n) => {
+			try {
+				return fs.readFileSync(path.join(pkg, 'sbin', n), 'utf8');
+			} catch (e) {
+				return null;
+			}
+		};
+		check('the stub ends up under the name people type', at('updatewebui') === 'the stub', String(at('updatewebui')));
+		check('and the installer is not shipped beside it', at('updatewebui-fetch') === null, 'it is still there');
+
+		// The shipped tree therefore has the stub sitting at sbin/updatewebui
+		// and no -fetch. The installer's own walk must not skip that file, or
+		// a camera installing such a tree would end up with no updatewebui —
+		// so the skip is conditional on the -fetch file being present.
+		const inst = fs.readFileSync(path.join(__dirname, '..', 'sbin', 'updatewebui'), 'utf8');
+		const guard = /sbin\/\$scr_name\)[\s\S]*?if \[ -f "\$src\/sbin\/\$scr_name-fetch" \]; then[\s\S]*?continue/;
+		check('and the installer only skips it when the stub is beside it', guard.test(inst), 'the skip is unconditional');
 		done();
 	});
 }
