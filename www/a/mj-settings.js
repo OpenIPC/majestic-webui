@@ -1146,21 +1146,23 @@
 		if (!night) return;
 		const active = v => v !== false && v != null;
 		const lm = active(getDotted(state.config, 'nightMode.lightMonitor'));
-		// A switch that is OFF, in any of the spellings one can arrive in.
-		// majestic writes booleans as booleans, but a hand-edited
-		// majestic.yaml can leave "false" quoted and nothing on the way in
-		// retypes it — the same reason ircut-check carries this pair. Not
-		// !truthy: these four keys default ON, so absent has to stay distinct
-		// from off, or a camera whose daemon predates a key would read as
-		// having switched it off.
-		const isOff = v => v === false || v === 'false' || v === 0 || v === '0';
-		const cfgOff = k => isOff(getDotted(state.config, 'nightMode.' + k));
-		// Whether day and night move each actuator at all. Distinct from
-		// parked: a filter that does not follow dusk is still the daemon's to
-		// drive, and the switch below still moves it, which is the whole point
-		// of the setting.
-		const ircutFollows = !cfgOff('irCutAuto');
-		const lightFollows = !cfgOff('backlightAuto');
+		// What may drive each actuator, from the one key that says it: off
+		// (the pad is not claimed at all), manual (held, moved from here,
+		// dusk leaves it alone) or auto. Anything else reads as auto — the
+		// default, and the state every camera was in before the key existed.
+		// An unquoted `off` in a hand-edited file arrives as YAML's boolean
+		// false, so that spelling comes in too.
+		const modeOf = (k) => {
+			const v = getDotted(state.config, 'nightMode.' + k);
+			return (v === 'off' || v === false || v === 'false') ? 'off'
+				: v === 'manual' ? 'manual' : 'auto';
+		};
+		const ircutMode = modeOf('irCut'), lightMode = modeOf('backlight');
+		// Distinct from off: an actuator that does not follow dusk is still
+		// the daemon's to drive, and the switch below still moves it, which is
+		// the whole point of that mode.
+		const ircutFollows = ircutMode === 'auto';
+		const lightFollows = lightMode === 'auto';
 
 		// The monitor drives what it drives, and that is no longer always all
 		// three. Where it has everything, three dead switches say less than
@@ -1182,7 +1184,12 @@
 				lightmon.title = say.replace(/\u2011/g, '-');
 				lightmon.hidden = false;
 			}
-			if (ircutFollows && lightFollows) {
+			// The group earns its place only if something in it is live, and
+			// that is MANUAL rather than merely not-auto: an actuator set to
+			// off is not the operator's to move either, so keeping the group
+			// open for it shows three dead switches — which is the thing the
+			// sentence above replaced.
+			if (ircutMode !== 'manual' && lightMode !== 'manual') {
 				const grp = root.querySelector('.mj-hud-rt');
 				if (grp) grp.hidden = true;
 				return;
@@ -1195,8 +1202,8 @@
 		// was never given is one it knows nothing about, and reading that as
 		// "switched off" would grey out the control on a camera whose filter
 		// is working perfectly.
-		const ircutParked = cfgOff('irCutEnabled');
-		const lightParked = cfgOff('backlightEnabled');
+		const ircutParked = ircutMode === 'off';
+		const lightParked = lightMode === 'off';
 		// Reached only where something is still the operator's, so anything
 		// the monitor does drive is dead here — pressing it would move and
 		// snap back on the monitor's next tick.
@@ -1215,11 +1222,11 @@
 			lbl('toggle-night').title = MON;
 		if (ircut.disabled && lbl('toggle-ircut'))
 			lbl('toggle-ircut').title = monIrcut ? MON : ircutParked
-				? 'The IR-cut filter is switched off in Day / Night settings; its wiring is kept.'
+				? 'The IR-cut filter is set to Off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
 			lbl('toggle-light').title = monLight ? MON : lightParked
-				? 'The lamp is switched off in Day / Night settings; its wiring is kept.'
+				? 'The camera light is set to Off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the night illuminator.';
 
 		// Where each of the three actually is, from the camera. Used again
@@ -6265,11 +6272,24 @@
 	// read past.
 	const TEST_DEPENDS = [
 		'nightMode.irCutPin1', 'nightMode.irCutPin2',
-		'nightMode.irCutSingleInvert', 'nightMode.irCutEnabled',
+		'nightMode.irCutSingleInvert',
 	];
+	// nightMode.irCut is in that set for one of its three values only. A
+	// verdict is about what happens when the camera pulses the pads, and
+	// moving day/night in or out of the job does not change that — a blocker
+	// firing on manual-to-auto is one that gets read past. Whether the pads
+	// are DRIVEN at all is a different matter, and it is what the blocker
+	// below refuses on.
+	const driveStaged = () => {
+		const f = state.fields.find((x) => x.dot === 'nightMode.irCut');
+		if (!f) return false;
+		const was = String(state.initial['nightMode.irCut']) === 'off';
+		return was !== (String(f.getValue()) === 'off');
+	};
 	function wiringStaged() {
-		return state.fields.some((f) => TEST_DEPENDS.indexOf(f.dot) >= 0 &&
-			f.getValue() !== state.initial[f.dot]);
+		return driveStaged() ||
+			state.fields.some((f) => TEST_DEPENDS.indexOf(f.dot) >= 0 &&
+				f.getValue() !== state.initial[f.dot]);
 	}
 
 	// Why the button cannot run, or null. Each reason is specific: a disabled
@@ -6306,9 +6326,9 @@
 		// Parked outranks wired: the daemon refuses to move a parked filter,
 		// so the test's toggle would silently do nothing and every verdict
 		// would read "stuck" on a filter that is fine.
-		if (nm.irCutEnabled === false)
-			return 'The filter is switched off (its wiring is kept). Turn "Drive the ' +
-				'IR-cut filter" on to test it.';
+		if (IRCUT.mode(nm.irCut) === 'off')
+			return 'The filter is set to Off (its wiring is kept). Set the ' +
+				'IR-cut filter to Manual or Automatic to test it.';
 		if (!toBool(getDotted(state.config, 'jpeg.enabled')))
 			return 'The test reads a still picture, and this camera has JPEG snapshots turned off.';
 		// The switch above is the CONFIGURATION, and it is not the encoder. A
@@ -8917,7 +8937,20 @@
 			// place to hold it the browser falls back to the first option and the page
 			// reports a codec that is not the one in effect, so carry the live value
 			// as an explicitly-unsupported entry instead.
-			const cur = eff === undefined || eff === null ? '' : String(eff);
+			//
+			// An ABSENT value is a different thing again, and the browser's
+			// answer to it is the worst available: with nothing selected it
+			// takes the FIRST option, which has no relationship to the key's
+			// default — isp.slowShutter defaults to medium and would read
+			// disabled, and nightMode.irCut defaults to auto and would read
+			// off, which is a control claiming an actuator is parked and a
+			// Save away from parking it. The schema states the default; a
+			// reading that is not there resolves through it rather than
+			// through option order.
+			const dflt = sub.default === undefined || sub.default === null
+				? '' : String(sub.default);
+			const eff2 = eff === undefined || eff === null ? dflt : eff;
+			const cur = eff2 === undefined || eff2 === null ? '' : String(eff2);
 			const unlisted = cur !== '' && !enumVals.some(o => String(o) === cur);
 			const opts =
 				(unlisted ? option(cur, true, cur + ' (unsupported)') : '') +

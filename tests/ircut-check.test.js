@@ -1260,7 +1260,7 @@ function runRest() {
 	group('diagnose: parked actuators are decisions, not defects');
 	{
 		const wired = { irCutPin1: 11, irCutPin2: 10 };
-		const parked = Object.assign({ irCutEnabled: false }, wired);
+		const parked = Object.assign({ irCut: 'off' }, wired);
 		const f = ic.diagnose(parked, { night: 1, ircut: 0, light: 0 },
 			{ conflictS: 999, flips: 0 });
 		check('a parked filter is an observation',
@@ -1284,7 +1284,7 @@ function runRest() {
 		// in a file of its own — is gone with everything that went wrong with
 		// it (#367). Nothing here says it out loud, so nothing but this test
 		// would notice it coming back.
-		const unfitted = { irCutEnabled: false };
+		const unfitted = { irCut: 'off' };
 		check('switched off with nothing wired says nothing at all',
 			ic.diagnose(unfitted, { night: 0, ircut: 0, light: 0 },
 				{ conflictS: 999, flips: 0 }).length === 0);
@@ -1302,18 +1302,18 @@ function runRest() {
 		check('alongside the fault itself',
 			/Nothing is connected to the filter/.test(noPins({})));
 		check('a parked lamp with wiring says so',
-			ic.diagnose({ backlightEnabled: false, backlightPin: 52 },
+			ic.diagnose({ backlight: 'off', backlightPin: 52 },
 				null, null)
 				.some(x => x.id === 'light-parked' && x.level === 'info'));
 		check('a parked lamp on a PWM channel says so too',
-			ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 'pwm1' },
+			ic.diagnose({ backlight: 'off', backlightPwmChannel: 'pwm1' },
 				null, null)
 				.some(x => x.id === 'light-parked'));
 		check('a lamp with no wiring at all stays silent',
-			!ic.diagnose({ backlightEnabled: false }, null, null)
+			!ic.diagnose({ backlight: 'off' }, null, null)
 				.some(x => x.id === 'light-parked'));
 		check('channel "none" is not wiring',
-			!ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 'none' },
+			!ic.diagnose({ backlight: 'off', backlightPwmChannel: 'none' },
 				null, null)
 				.some(x => x.id === 'light-parked'));
 	}
@@ -1364,7 +1364,7 @@ function runRest() {
 		// the two gauges differ for as long as that lasts, which is for ever.
 		// Convicting on it would make the one configuration that asks for this
 		// unusable, which is how it reached the daemon in the first place.
-		const notFollowing = Object.assign({ irCutAuto: false }, cfg);
+		const notFollowing = Object.assign({ irCut: 'manual' }, cfg);
 		check('a filter that does not follow day/night may disagree with it',
 			!ic.diagnose(notFollowing, conflicted, { conflictS: 600, flips: 0 })
 				.some(x => x.id === 'conflict'));
@@ -1373,7 +1373,7 @@ function runRest() {
 			ic.diagnose(cfg, conflicted, { conflictS: 600, flips: 0 })
 				.some(x => x.id === 'conflict'));
 		check('...and so does an explicit true',
-			ic.diagnose(Object.assign({ irCutAuto: true }, cfg), conflicted,
+			ic.diagnose(Object.assign({ irCut: 'auto' }, cfg), conflicted,
 				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
 		// It is the conflict rule that stands down, not the whole section: a
 		// camera hunting between day and night is hunting whatever the filter
@@ -1382,20 +1382,23 @@ function runRest() {
 			ic.diagnose(notFollowing, conflicted, { conflictS: 0, flips: 9 })
 				.some(x => x.id === 'hunting'));
 
-		// A hand-edited majestic.yaml can leave a boolean quoted, and nothing
-		// on the way into the browser retypes it. Reading "false" as following
-		// would raise the banner on exactly the camera the setting exists for.
-		check('a quoted false is still off',
-			!ic.diagnose(Object.assign({ irCutAuto: 'false' }, cfg), conflicted,
+		// An unquoted `off` in a hand-edited majestic.yaml is YAML's boolean
+		// false by the time it reaches a browser, and nothing on the way in
+		// retypes it. Reading that as following would raise the banner on
+		// exactly the camera the mode exists for.
+		check('an off that arrived as a boolean is still off',
+			!ic.diagnose(Object.assign({ irCut: false }, cfg), conflicted,
 				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
-		check('...and a quoted true is still on',
-			ic.diagnose(Object.assign({ irCutAuto: 'true' }, cfg), conflicted,
+		check('...and the string spelling of it too',
+			!ic.diagnose(Object.assign({ irCut: 'false' }, cfg), conflicted,
 				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
-		// The same spellings on the park switch, which shared the strict
-		// comparison and the same failure.
-		check('a quoted false parks the filter too',
-			ic.diagnose(Object.assign({ irCutEnabled: 'false' }, cfg), conflicted,
-				{ conflictS: 600, flips: 0 }).every(x => x.id !== 'conflict'));
+		// A mode nobody recognises — a typo, or a value a newer daemon has
+		// learnt — reads as auto. That is the state every camera was in before
+		// the key existed, and the one that keeps ASKING: reading it as off
+		// would stand a real fault down on a misspelling.
+		check('an unreadable mode still follows day/night',
+			ic.diagnose(Object.assign({ irCut: 'atuo' }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
 
 		// The clock, not just the sentence. Disagreement while the filter is
 		// not following is not a fault being tolerated, it is not a fault —
@@ -1771,7 +1774,7 @@ function runRest() {
 		check('...nor after the single-pad invert is turned on',
 			said(wired, ok({ irCutPin1: 11, irCutPin2: 10, irCutSingleInvert: true })));
 		check('...nor after the filter is parked and driven again',
-			said(wired, ok({ irCutPin1: 11, irCutPin2: 10, irCutEnabled: false })));
+			said(wired, ok({ irCutPin1: 11, irCutPin2: 10, irCut: 'off' })));
 		check('while moving the daylight sensor keeps it',
 			!said(Object.assign({ lightSensorPin: 66 }, wired), ok(wired)));
 
@@ -1811,7 +1814,20 @@ function runRest() {
 		// such key, and reading that as parked would discard every verdict
 		// taken on one.
 		check('an absent drive switch reads as on',
-			k({ irCutPin1: 11 }) === k({ irCutPin1: 11, irCutEnabled: true }));
+			k({ irCutPin1: 11 }) === k({ irCutPin1: 11, irCut: 'auto' }));
+
+		// The stamp is whether the filter is DRIVEN, not which of the two
+		// driven modes it is in. A verdict says the filter moves when the
+		// camera pulses the pads; moving day/night in or out of the job does
+		// not change what a pulse does, and stamping the mode itself would
+		// throw a good measurement away the moment somebody turned automatic
+		// switching on.
+		check('manual and auto are the same wiring to a verdict',
+			k({ irCutPin1: 11, irCut: 'manual' }) === k({ irCutPin1: 11, irCut: 'auto' }));
+		check('...and off is not',
+			k({ irCutPin1: 11, irCut: 'off' }) !== k({ irCutPin1: 11, irCut: 'auto' }));
+		check('an unreadable mode reads as driven',
+			k({ irCutPin1: 11, irCut: 'atuo' }) === k({ irCutPin1: 11, irCut: 'auto' }));
 	}
 
 	// -----------------------------------------------------------------------

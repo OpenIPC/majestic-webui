@@ -1158,19 +1158,21 @@
           "title": "Colorless night mode",
           "default": true
         },
-        "irCutEnabled": {
-          "type": "boolean",
-          "title": "Drive the IR-cut filter",
-          "default": true,
+        "irCut": {
+          "type": "string",
+          "title": "IR-cut filter",
+          "default": "auto",
+          "enum": ["off", "manual", "auto"],
           "x-reload": "service:night",
-          "hint": "Off parks the filter: the pins stay configured but nothing moves it, so running without the filter for a while does not mean clearing pin numbers and hunting for them later."
+          "hint": "Off keeps the wiring and drives nothing. Manual leaves the filter where it is at dusk and dawn, and you move it yourself."
         },
-        "backlightEnabled": {
-          "type": "boolean",
-          "title": "Drive the camera light",
-          "default": true,
+        "backlight": {
+          "type": "string",
+          "title": "Camera light",
+          "default": "auto",
+          "enum": ["off", "manual", "auto"],
           "x-reload": "service:night",
-          "hint": "Off parks the lamp: its pin (or PWM channel) stays configured but night mode leaves it dark. The wiring is kept for when it is wanted again."
+          "hint": "Off keeps the wiring and lights nothing. Manual leaves the lamp alone at dusk and dawn, and you switch it yourself."
         },
         "irCutPin1": {
           "type": "integer",
