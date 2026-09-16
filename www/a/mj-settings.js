@@ -194,6 +194,10 @@
 		schema: null,
 		config: null,
 		fields: [],
+		// Rows whose text depends on fields OTHER than their own, repainted
+		// by updateDirty(). Cleared with the fields, since the closures hold
+		// nodes from the section being replaced.
+		repaint: [],
 		initial: {},
 		// the mj-tree.js instance for state.schema, built on first use
 		tree: null,
@@ -841,6 +845,7 @@
 		form.appendChild(err);
 
 		state.fields = [];
+		state.repaint = [];
 		state.initial = {};
 		state.cols = null;
 		state.liveSync = [];
@@ -9918,6 +9923,54 @@
 		// settings coincide, or a list that must all hold for a setting that
 		// several others outrank. Every shape is decided by mj-requires.js;
 		// this only has to recognise that there is a requirement to paint.
+		// An actuator with nothing wired to it has nothing for its mode to
+		// mean. All three choices do the same nothing, and a dropdown that
+		// offers three of them is the page pretending to a decision the
+		// camera cannot act on — which is what the reporter of #492 was
+		// reading when he concluded a state must be redundant.
+		//
+		// Said rather than disabled, the same call x-requires makes: the mode
+		// is a legitimate thing to set before the wire is on, it is
+		// remembered, and it starts meaning something the moment a pad is
+		// assigned. Repainted on every edit of the row's own value and on
+		// every map change, because the pads are what it is about and they
+		// are assigned on the same page.
+		if (!live && (dot === 'nightMode.irCut' || dot === 'nightMode.backlight')) {
+			const lamp = dot === 'nightMode.backlight';
+			const warn = el('div', 'hint mj-requires');
+			const paint = () => {
+				const pads = lamp
+					? [getDotted(state.config, 'nightMode.backlightPin')]
+					: [getDotted(state.config, 'nightMode.irCutPin1'),
+						getDotted(state.config, 'nightMode.irCutPin2')];
+				const mounted = (k) => {
+					const f = (state.fields || []).find(x => x.dot === 'nightMode.' + k);
+					return f ? f.getValue() : undefined;
+				};
+				const live2 = lamp ? [mounted('backlightPin')]
+					: [mounted('irCutPin1'), mounted('irCutPin2')];
+				// A pad staged on the map counts: the row should stop saying
+				// this the moment one is assigned, not after the save.
+				const has = pads.concat(live2).some(
+					(v) => v !== undefined && v !== null && v !== '' && !isNaN(Number(v)));
+				// A dimmable lamp lives on a PWM channel and may have no pad at
+				// all, so for the lamp that is the other way to be wired.
+				const chan = lamp
+					? (mounted('backlightPwmChannel') !== undefined
+						? mounted('backlightPwmChannel')
+						: getDotted(state.config, 'nightMode.backlightPwmChannel'))
+					: null;
+				const wired = has || (chan && chan !== 'none');
+				warn.textContent = wired ? '' : (lamp
+					? 'Nothing is connected to the camera light yet — assign its pad on the map above, or a PWM channel below, and this will start to mean something.'
+					: 'Nothing is connected to the IR-cut filter yet — assign its coils on the map above, and this will start to mean something.');
+				warn.hidden = wired;
+			};
+			paint();
+			p.appendChild(warn);
+			state.repaint.push(paint);
+		}
+
 		if (!live && sub['x-requires']
 			&& (sub['x-requires'].field || Array.isArray(sub['x-requires'].any)
 				|| Array.isArray(sub['x-requires'].all))) {
@@ -10010,6 +10063,11 @@
 		// fields are editable directly on a camera whose pad list could not be
 		// read, and that is exactly the camera nobody is watching this on.
 		syncTestBtn();
+		// Rows whose text depends on OTHER fields — the actuator modes, which
+		// say when nothing is wired to them — repaint here for the same reason
+		// the test button does: the pads are assigned by the map, and the map
+		// funnels through this and nothing else.
+		state.repaint.forEach((fn) => fn());
 	}
 
 	// One visibility rule for both buttons: show each only while its action can
