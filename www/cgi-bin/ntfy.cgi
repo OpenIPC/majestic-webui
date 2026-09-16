@@ -11,15 +11,39 @@ params="enabled server topic user pass caption clips video video_seconds heif pr
 # it is named, so a dashboard fetching a thumbnail goes on getting one after the
 # settings here have been switched over to video.
 #
+# The page's own button POSTs, and test answers nothing else. A GET is what a
+# browser issues on its own -- a prefetch, a restored tab, a link from anywhere
+# -- and it carries the session with it, so a control on a page this repo draws
+# must not actuate a camera through one. The same rule the PTZ pad follows.
+#
+# image and clip still answer a GET, and that is deliberate rather than an
+# oversight: they are published on this page for something outside the camera
+# to call, a curl without -L follows no redirect, and turning them into POST
+# would break every doorbell already wired to them. They accept POST too, which
+# is what the button uses.
+#
 # OK/FAIL rather than true/false: that is what a/notify.js reads, and what the
 # page said before it.
-if [ "$GET_send" = "test" ] || [ "$GET_send" = "image" ] ||
-	[ "$GET_send" = "clip" ]; then
+send_verb=$GET_send
+[ -z "$send_verb" ] && send_verb=$POST_send
+if [ "$send_verb" = "test" ] && [ "$REQUEST_METHOD" != "POST" ]; then
+	# A whole status line rather than a CGI Status: header -- that is what the
+	# camera's web server passes through, and what j/ptz.cgi refuses a GET with.
+	echo "HTTP/1.1 405 Method Not Allowed
+Content-type: text/plain; charset=UTF-8
+Allow: POST
+Cache-Control: no-store
+
+Use POST to send a test."
+	exit 0
+fi
+if [ "$send_verb" = "test" ] || [ "$send_verb" = "image" ] ||
+	[ "$send_verb" = "clip" ]; then
 	echo "Content-type: text/html; charset=UTF-8"
 	echo
 	send_what=""
-	[ "$GET_send" = "image" ] && send_what=--image
-	[ "$GET_send" = "clip" ] && send_what=--clip
+	[ "$send_verb" = "image" ] && send_what=--image
+	[ "$send_verb" = "clip" ] && send_what=--clip
 	# Unquoted on purpose: an empty word must disappear rather than arrive as
 	# an empty first argument, which the sender would read as a file path.
 	if /usr/bin/ntfy.sh $send_what > /dev/null 2>&1; then
@@ -100,13 +124,19 @@ else
 	nf_when="checking what the camera can do&hellip;"
 fi
 
+# What the form holds as saved, as JSON literals. Ntfy has no schedule, so the
+# two schedule fields are constants the page will always find equal.
+nf_on=false;    [ "$ntfy_enabled" = "true" ] && nf_on=true
+nf_vid=false;   [ "$ntfy_video" = "true" ] && nf_vid=true
+nf_clips=false; [ "$ntfy_clips" = "true" ] && nf_clips=true
+
 nf_who="not addressed yet"
 [ "$nf_addressed" = "true" ] && nf_who="to a private topic on $(esc "${ntfy_server#*://}")"
 %>
 
 <%in p/header.cgi %>
 
-<script type="application/json" id="mj-notify-boot">{"key":"ntfy","label":"Ntfy","sender":<%= $nf_sender %>,"addressed":<%= $nf_addressed %>,"missing":"it needs a topic","schedulable":false,"who":"<% attr_escape "$nf_who" %>"}</script>
+<script type="application/json" id="mj-notify-boot">{"key":"ntfy","label":"Ntfy","sender":<%= $nf_sender %>,"addressed":<%= $nf_addressed %>,"missing":"it needs a topic","schedulable":false,"saved":{"enabled":<%= $nf_on %>,"video":<%= $nf_vid %>,"seconds":<%= $ntfy_video_seconds %>,"clips":<%= $nf_clips %>,"crontab":false,"interval":0}}</script>
 
 <div class="mj-status<%= $nf_level %>" id="mj-notify-status">
 	<span class="mj-status-ico">
@@ -121,6 +151,8 @@ nf_who="not addressed yet"
 		<span class="mj-notify-when"><%= $nf_when %></span>
 	</span>
 </div>
+
+<span class="mj-say text-secondary" id="mj-notify-unsaved" hidden></span>
 
 <form action="<%= $SCRIPT_NAME %>" method="post">
 <div class="row g-4">

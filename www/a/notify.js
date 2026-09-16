@@ -59,12 +59,40 @@
 		/* Movement is the one trigger with a prerequisite, and the prerequisite
 		 * is the detector rather than a memory card: with a card the recorder's
 		 * clip is sent, without one the camera records a few seconds as the
-		 * movement begins. Neither happens if nothing is watching. */
+		 * movement begins. Neither happens if nothing is watching.
+		 *
+		 * Three answers, not two, and the third is why this is written out
+		 * rather than folded into a boolean. `known` false with `asked` false
+		 * is the moment before the camera has replied, and the line says it is
+		 * still looking - which is exactly what the server rendered, so the
+		 * page does not flicker between two claims. `known` false with `asked`
+		 * true is a camera that was asked twice and did not answer: movement
+		 * is NOT counted, because a failed read must never become a promise,
+		 * and the reason says we could not ask rather than accusing the camera
+		 * of a setting nobody has seen.
+		 */
 		var motionWorks = !!trig.motion;
-		if (trig.motion && cam.known && cam.motionDetect === false) {
+		var stillAsking = false;
+		if (trig.motion && !cam.known) {
+			if (cam.asked) {
+				motionWorks = false;
+				out.why.motion = 'The camera did not answer when it was asked ' +
+					'whether it is watching for movement, so this may not happen.';
+			} else {
+				stillAsking = true;
+			}
+		} else if (trig.motion && cam.known && cam.motionDetect === false) {
 			motionWorks = false;
 			out.why.motion = 'The camera is not watching for movement, so this ' +
 				'cannot happen. Everything else here works without it.';
+		}
+
+		/* Nothing is claimed about when until the prerequisite is settled. */
+		if (stillAsking) {
+			out.what = describe(s);
+			out.head = 'Ready';
+			out.when = 'checking what the camera can do\u2026';
+			return out;
 		}
 
 		var when = [];
@@ -124,7 +152,7 @@
 		return;
 	}
 	var cfg = JSON.parse(boot.textContent);
-	var camera = { known: false };
+	var camera = { known: false, asked: false };
 
 	function el(id) { return document.getElementById(id); }
 	function val(id) { var e = el(id); return e ? e.value : ''; }
@@ -148,6 +176,25 @@
 		};
 	}
 
+	/* Has anything been touched since the page was drawn? Compared against the
+	 * snapshot the server put in the boot tag rather than against the controls'
+	 * own defaultValue, because a select restored by the browser on a back
+	 * navigation carries the restored value as its default. */
+	function unsaved() {
+		var was = cfg.saved;
+		if (!was) {
+			return false;
+		}
+		var now = state();
+		return was.enabled !== on(cfg.key + '_enabled') ||
+			was.video !== (now.payload === 'video') ||
+			String(was.seconds) !== String(now.seconds) ||
+			was.clips !== now.triggers.motion ||
+			(cfg.schedulable && (
+				was.crontab !== on(cfg.key + '_crontab') ||
+				String(was.interval) !== String(now.interval)));
+	}
+
 	var ICONS = {
 		ok: '<circle cx="12" cy="12" r="8.7"/><path d="m8.3 12.3 2.6 2.6 4.9-5.3"/>',
 		warn: '<path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/>',
@@ -162,7 +209,8 @@
 
 		/* Rewriting identical markup restarts transitions and drops a text
 		 * selection, so nothing is touched unless it actually moved. */
-		var sig = [v.level, v.head, v.what, v.when, v.why.motion || ''].join('|');
+		var sig = [v.level, v.head, v.what, v.when, v.why.motion || '',
+			unsaved() ? 'dirty' : ''].join('|');
 		if (sig === shown) {
 			return;
 		}
@@ -179,6 +227,22 @@
 			strip.querySelector('.mj-notify-head').textContent = v.head;
 			strip.querySelector('.mj-notify-what').textContent = v.what;
 			strip.querySelector('.mj-notify-when').textContent = v.when;
+		}
+
+		/* A live preview is worth having -- change the length and the line
+		 * changes with it -- but the same line is also the answer to "what is
+		 * my camera doing", and the senders go on using the last SAVED
+		 * settings until this form is submitted. So the preview is allowed,
+		 * and it is labelled the moment it stops matching what was saved. */
+		var un = el('mj-notify-unsaved');
+		if (un) {
+			if (unsaved()) {
+				un.textContent = 'This is what Save will set. Until then the ' +
+					'camera is still using the settings it last saved.';
+				un.hidden = false;
+			} else {
+				un.hidden = true;
+			}
 		}
 
 		var row = el('mj-trig-motion');
@@ -207,6 +271,7 @@
 	 */
 	function askCamera() {
 		if (!window.mjConfig) {
+			camera = { known: false, asked: true };
 			paint();
 			return;
 		}
@@ -214,22 +279,36 @@
 			var md = window.mjGet ? window.mjGet(c, 'motionDetect.enabled') : undefined;
 			if (md === undefined) {
 				/* Nothing usable came back. Ask once more, in case the camera
-				 * was restarting, and otherwise stay quiet for good. */
+				 * was restarting. */
 				setTimeout(function () {
 					window.mjConfig().then(function (c2) {
 						var md2 = window.mjGet
 							? window.mjGet(c2, 'motionDetect.enabled')
 							: undefined;
-						if (md2 !== undefined) {
-							camera = { known: true, motionDetect: md2 === true };
-							paint();
-						}
+						camera = md2 === undefined
+							? { known: false, asked: true }
+							: { known: true, motionDetect: md2 === true };
+						/* Painted either way. Giving up silently would leave
+						 * the line saying it was still checking for as long as
+						 * the page stayed open, which is a promise of an answer
+						 * that is not coming. */
+						paint();
+					}, function () {
+						camera = { known: false, asked: true };
+						paint();
 					});
 				}, 15000);
 				return;
 			}
 			camera = { known: true, motionDetect: md === true };
 			paint();
+		}, function () {
+			/* A rejected fetch is not an answer about the camera either, but it
+			 * is not final yet -- the retry above is still owed. */
+			setTimeout(function () {
+				camera = { known: false, asked: true };
+				paint();
+			}, 15000);
 		});
 	}
 
@@ -255,7 +334,15 @@
 				? 'Recording and sending. This takes a few seconds.'
 				: 'Sending...';
 
-			window.apiFetch('?send=' + verb, { signal: ctl.signal })
+			/* POST, because this actuates the camera: it records and sends.
+			 * A GET is what a browser issues on its own and carries the
+			 * session with it. The published webhook URLs on this page still
+			 * answer a GET, which is a separate contract with whatever is
+			 * calling them from outside. */
+			window.apiFetch('?send=' + verb, {
+				method: 'POST',
+				signal: ctl.signal
+			})
 				.then(function (r) { return r.text(); })
 				.then(function (body) {
 					var said = body.trim();

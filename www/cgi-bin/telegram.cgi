@@ -17,11 +17,20 @@ params="enabled token channel thread_id interval caption crontab clips video vid
 # which is what a dashboard fetching a thumbnail every minute wants. The switch
 # on this page governs the SCHEDULE, where nobody is present to say. The Try it
 # button asks for whichever the page is set to send.
-if [ "$GET_send" = "image" ] || [ "$GET_send" = "clip" ]; then
+# The page's own button POSTs. A GET is what a browser issues on its own -- a
+# prefetch, a restored tab, a link from anywhere -- and it carries the session
+# with it, so a control on a page this repo draws must not actuate a camera
+# through one; the PTZ pad follows the same rule. Both verbs still answer a GET
+# because they are published on this page for something outside the camera to
+# call, and turning them into POST would break every doorbell already wired to
+# them.
+send_verb=$GET_send
+[ -z "$send_verb" ] && send_verb=$POST_send
+if [ "$send_verb" = "image" ] || [ "$send_verb" = "clip" ]; then
 	echo "Content-type: text/html; charset=UTF-8"
 	echo
 	send_what=--image
-	[ "$GET_send" = "clip" ] && send_what=--clip
+	[ "$send_verb" = "clip" ] && send_what=--clip
 	if telegram "$send_what" >/dev/null 2>&1; then echo true; else echo false; fi
 	exit 0
 fi
@@ -115,13 +124,20 @@ else
 	tg_when="checking what the camera can do&hellip;"
 fi
 
+# What the form holds as saved, as JSON literals, so the page can tell a
+# preview of unsaved edits from what the camera is actually set to do.
+tg_on=false;    [ "$telegram_enabled" = "true" ] && tg_on=true
+tg_vid=false;   [ "$telegram_video" = "true" ] && tg_vid=true
+tg_clips=false; [ "$telegram_clips" = "true" ] && tg_clips=true
+tg_cron=false;  [ "$telegram_crontab" = "true" ] && tg_cron=true
+
 tg_who="not addressed yet"
 [ "$tg_addressed" = "true" ] && tg_who="to chat $(esc "$telegram_channel")"
 %>
 
 <%in p/header.cgi %>
 
-<script type="application/json" id="mj-notify-boot">{"key":"telegram","label":"Telegram","sender":<%= $tg_sender %>,"addressed":<%= $tg_addressed %>,"missing":"it needs a bot and a chat","schedulable":true,"who":"<% attr_escape "$tg_who" %>"}</script>
+<script type="application/json" id="mj-notify-boot">{"key":"telegram","label":"Telegram","sender":<%= $tg_sender %>,"addressed":<%= $tg_addressed %>,"missing":"it needs a bot and a chat","schedulable":true,"saved":{"enabled":<%= $tg_on %>,"video":<%= $tg_vid %>,"seconds":<%= $telegram_video_seconds %>,"clips":<%= $tg_clips %>,"crontab":<%= $tg_cron %>,"interval":<%= $telegram_interval %>}}</script>
 
 <div class="mj-status<%= $tg_level %>" id="mj-notify-status">
 	<span class="mj-status-ico">
@@ -136,6 +152,8 @@ tg_who="not addressed yet"
 		<span class="mj-notify-when"><%= $tg_when %></span>
 	</span>
 </div>
+
+<span class="mj-say text-secondary" id="mj-notify-unsaved" hidden></span>
 
 <form action="<%= $SCRIPT_NAME %>" method="post">
 <div class="row g-4">

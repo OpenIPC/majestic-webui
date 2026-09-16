@@ -46,7 +46,7 @@ const base = {
 	seconds: '10',
 	interval: '15',
 	triggers: { motion: true, schedule: false },
-	camera: { known: false },
+	camera: { known: true, motionDetect: true },
 };
 
 const ask = (over) => verdict(Object.assign({}, base, over));
@@ -135,17 +135,37 @@ group('a camera that has not answered is not a camera reporting off');
 {
 	// mjConfig() resolves {} on failure. If that read as "motion detection is
 	// off", every page on a camera mid-restart would accuse it of a
-	// misconfiguration it does not have.
-	const unknown = ask({ camera: { known: false } });
-	check('no accusation while nothing is known', !unknown.why.motion, unknown.why.motion);
-	check('and movement is still counted',
-		unknown.when === 'when something moves and when something asks', unknown.when);
-	check('the verdict stays ready', unknown.level === 'ok', unknown.level);
+	// misconfiguration it does not have. But it must not read as "on" either:
+	// a failed fetch is not a fact, and the whole point of the line is that it
+	// only claims what the camera has confirmed.
+	const asking = ask({ camera: { known: false, asked: false } });
+	check('while the answer is still coming, nothing is claimed about when',
+		asking.when === 'checking what the camera can do\u2026', asking.when);
+	check('and nobody is accused', !asking.why.motion, asking.why.motion);
+	check('but what it would send is already known',
+		asking.what === '10-second video', asking.what);
+
+	const gaveUp = ask({ camera: { known: false, asked: true } });
+	check('a camera asked twice that never answered does not get a promise',
+		gaveUp.when === 'when something asks', gaveUp.when);
+	check('the verdict says it is only partly ready',
+		gaveUp.level === 'warn' && gaveUp.head === 'Partly ready', gaveUp.head);
+	check('and the reason says we could not ask, not that it is switched off',
+		/did not answer/.test(gaveUp.why.motion || '') &&
+			!/not watching/.test(gaveUp.why.motion || ''), gaveUp.why.motion);
 
 	// The shape mjConfig() actually returns on a failure, one level up.
 	const empty = ask({ camera: { known: true, motionDetect: undefined } });
 	check('and an answer with the key missing accuses nobody either',
 		!empty.why.motion, empty.why.motion);
+
+	// Nothing above applies when nobody asked for movement.
+	const quiet = ask({
+		triggers: { motion: false, schedule: true },
+		camera: { known: false, asked: false },
+	});
+	check('an unanswered camera holds nothing up when movement is off',
+		quiet.when === 'every 15 minutes and when something asks', quiet.when);
 }
 
 done();
