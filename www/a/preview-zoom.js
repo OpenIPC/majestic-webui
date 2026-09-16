@@ -353,6 +353,14 @@
 	function setFrame(w, h) {
 		if (!w || !h) return;
 		const changed = !frame || frame.w !== w || frame.h !== h;
+		// A frame that has not changed asks for no layout, and that is not an
+		// optimisation. The multipart rung fires `load` on EVERY JPEG, and each
+		// one arrives here with the size it had last time -- so a layout per
+		// frame would publish a view per frame, and anything debouncing on the
+		// view (the encoder region does, at 350 ms) would have its timer reset
+		// twenty times a second and never fire. A continuous preview would
+		// silently never reach the camera.
+		if (!changed && placed) return;
 		frame = { w: w, h: h };
 		if (changed && mode === 'free') {
 			mode = lastPreset;

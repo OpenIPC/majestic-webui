@@ -1802,15 +1802,6 @@
 		// The viewer changed channel: a software-rung retry pending from the
 		// channel being left must not fire onto the new one.
 		chain.cancel();
-		// And anything measured against the channel being left was measured
-		// against a picture that is about to stop being on screen. Announced
-		// rather than called, because the only listener is optional and this
-		// file must not learn what it does. No detail on the event: a listener
-		// that needs the new channel asks for it, and one nobody reads is one
-		// more thing to keep true.
-		try {
-			window.dispatchEvent(new CustomEvent('mj-stream-changed'));
-		} catch (e) {}
 		stream = wantSubtype = n;
 		// The two channels are two encoders; the baseline and any toast on
 		// screen describe the one being left.
@@ -1824,6 +1815,17 @@
 		servedCh = null;
 		servedShownKey = '';
 		hideServedMsg();
+		// AFTER `stream` has moved, and that ordering is the whole of it:
+		// anything measured against the channel being left has to be dropped,
+		// and a listener asking which channel is shown must not be answered
+		// with the one it is leaving. Fired here rather than at the top of the
+		// function, where it was, because there `shownStream()` still returned
+		// the old channel and the region module picked its strength from that
+		// channel's bitrate. Announced rather than called: the only listener is
+		// optional and this file must not learn what it does.
+		try {
+			window.dispatchEvent(new CustomEvent('mj-stream-changed'));
+		} catch (e) {}
 		// Nothing is attached: the chain ran out and the stage is showing the
 		// MJPEG fallback or the note. The pick is still a request worth
 		// honouring — an H.264 substream plays in a browser that refused an

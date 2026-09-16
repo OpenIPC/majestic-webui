@@ -89,6 +89,7 @@ window.MajesticRoi = (function () {
 
 	let supported = false;   // the camera declares the keys
 	let channels = [];       // the encoders to mark, in majestic's numbering
+	const sizes = {};        // each channel's configured frame, as a fallback
 	let engaged = false;     // is a region in force right now
 	let sent = null;         // the rectangle last pushed, in frame pixels
 	let timer = null;
@@ -103,9 +104,20 @@ window.MajesticRoi = (function () {
 	// Live page has already fetched this.
 	mjConfig().then((cfg) => {
 		if (mjGet(cfg, 'video0.roiRect') === undefined) return;
-		for (let n = 0; n < 2; n++)
-			if (mjGet(cfg, 'video' + n + '.enabled') !== false) channels.push(n);
+		for (let n = 0; n < 2; n++) {
+			if (mjGet(cfg, 'video' + n + '.enabled') === false) continue;
+			channels.push(n);
+			const wh = String(mjGet(cfg, 'video' + n + '.size') || '').split('x');
+			if (wh.length === 2 && +wh[0] > 0 && +wh[1] > 0)
+				sizes[n] = { w: +wh[0], h: +wh[1] };
+		}
 		supported = channels.length > 0;
+		// The view that arrived while this was in flight was dropped, and no
+		// other is coming: a viewer who zoomed and then held the picture still
+		// gets no further layout. Ask the question again against the view as it
+		// stands, or the first zoom of a visit reaches the camera only if
+		// something else happens to move the picture afterwards.
+		if (supported) consider(ZOOM.view());
 	});
 
 	// ---- where the picture is, in the camera's own terms -------------------
@@ -127,13 +139,21 @@ window.MajesticRoi = (function () {
 		return window.MajesticLiveStream ? (window.MajesticLiveStream() | 0) : 0;
 	}
 
+	// A channel's frame size. The camera's report where there is one, and the
+	// CONFIGURATION where there is not -- an older daemon 404s /api/v1/osd, and
+	// a fallback that needed the very answer it is a fallback for left every
+	// channel but the one on screen unprogrammed. That is the case this is for:
+	// a camera whose encoder has regions but whose daemon does not describe its
+	// crops still has a `videoN.size`, and while nothing is cropped the two say
+	// the same thing.
 	function frameOf(n) {
-		if (!rects) return null;
-		for (let i = 0; i < rects.streams.length; i++) {
-			const s = rects.streams[i];
-			if (s.stream === n) return { w: s.frame[0], h: s.frame[1] };
+		if (rects) {
+			for (let i = 0; i < rects.streams.length; i++) {
+				const s = rects.streams[i];
+				if (s.stream === n) return { w: s.frame[0], h: s.frame[1] };
+			}
 		}
-		return null;
+		return sizes[n] || null;
 	}
 
 	// One rectangle, from the channel it was measured on to the channel that is
@@ -230,24 +250,47 @@ window.MajesticRoi = (function () {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
 		})
-			.then(rp => rp.ok ? rp.json().catch(() => ({})) : Promise.reject(rp.status))
+			.then(rp => rp.ok ? rp.json().catch(() => null) : Promise.reject(rp.status))
 			.then((j) => {
+				// The reply has a shape, and anything else is not a yes. A
+				// body that would not parse used to become `{}`, whose missing
+				// `refused` then read as "applied" -- so an empty or malformed
+				// 200 had the page claim the recording was being re-tuned with
+				// nothing from the camera saying so.
+				if (!j || typeof j.refused !== 'number') return false;
 				// The camera names what it could not carry. A refusal is this
 				// camera saying its encoder has no regions after all, so the
 				// feature puts itself away for the rest of the visit rather
 				// than asking again on every pan.
-				if (j && j.refused) { supported = false; return false; }
+				if (j.refused) { supported = false; return false; }
 				return true;
 			})
 			.catch(() => false);
 	}
 
+	// Every push is stamped with the generation it belongs to, and a clear
+	// moves it on. Without that, a settle timer that had already fired could
+	// finish its round trip AFTER the view opened out or the tab went away and
+	// mark the old rectangle engaged again -- against a picture nobody is
+	// watching, with the chip put back to match.
+	let gen = 0;
+
 	function clear() {
 		if (timer) { clearTimeout(timer); timer = null; }
+		gen++;
 		if (!engaged) return;
-		engaged = false;
 		sent = null;
-		push(null);
+		// `engaged` stays TRUE until the camera has confirmed it let go. It is
+		// what the chip reads, and a page that said nothing was in force while
+		// the encoder still held a region would be claiming the recording was
+		// untouched when it was not -- the one thing this feature must never
+		// get wrong, because there is no control on screen to check it against.
+		const mine = gen;
+		push(null).then((ok) => {
+			if (gen !== mine) return;
+			engaged = !ok;
+			repaintChip();
+		});
 		repaintChip();
 	}
 
@@ -277,9 +320,14 @@ window.MajesticRoi = (function () {
 		// move -- on a camera whose whole HTTP server is one thread.
 		if (timer) clearTimeout(timer);
 		const r = { x: vis.x, y: vis.y, w: vis.w, h: vis.h };
+		const mine = gen;
 		timer = setTimeout(() => {
 			timer = null;
 			readRects().then(() => push(r)).then((ok) => {
+				// A clear happened while this was in flight. Its own push has
+				// already gone; landing this one on top would put the region
+				// back on a camera nobody is watching.
+				if (gen !== mine) return;
 				if (!ok) { engaged = false; sent = null; repaintChip(); return; }
 				engaged = true;
 				sent = r;

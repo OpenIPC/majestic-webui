@@ -56,9 +56,19 @@ function boot(opts) {
 					}) });
 			}
 			pushes.push(JSON.parse(init.body));
+			if (opts.reject || failOnce) {
+				failOnce = false;
+				return Promise.resolve({ ok: false, status: 500 });
+			}
+			if (opts.slow)
+				return new Promise((r) => { held.push(
+					() => r({ ok: true, json: () => Promise.resolve({ refused: 0 }) })); });
 			return Promise.resolve({ ok: true,
-				json: () => Promise.resolve(opts.refuse
-					? { refused: 1, keys: 'video0.roiRect' } : { refused: 0 }) });
+				json: () => opts.badReply
+					? Promise.reject(new Error('not json'))
+					: Promise.resolve(opts.refuse
+						? { refused: 1, keys: 'video0.roiRect' }
+						: { refused: 0 }) });
 		},
 		setTimeout: (fn, ms) => { const t = { fn, ms }; pending.push(t); return t; },
 		clearTimeout: (t) => { const i = pending.indexOf(t); if (i >= 0) pending.splice(i, 1); },
@@ -68,6 +78,8 @@ function boot(opts) {
 		},
 	};
 	const pending = [];
+	const held = [];
+	let failOnce = false;
 	sandbox.window = sandbox;
 	sandbox.MajesticRegion = { view: () => null };
 	sandbox.MajesticZoom = { onView: (fn) => { onView = fn; }, view: () => null };
@@ -85,9 +97,6 @@ function boot(opts) {
 	// harness comes to assert against a state the code has not reached yet.
 	const drain = () => new Promise((r) => setImmediate(r));
 
-	// The config gate is a promise; let it settle before anything is asked.
-	const ready = drain();
-
 	// A view where `share` of the frame's AREA is on screen, anchored so the
 	// rectangle is somewhere a viewer might plausibly have gone.
 	const viewOf = (share, at) => {
@@ -96,6 +105,17 @@ function boot(opts) {
 		const x = (at || 0) * (FRAME.w - w);
 		return { frame: FRAME, visible: { x, y: 0, w, h } };
 	};
+
+	// The config gate is a promise. `zoomFirst` delivers a view BEFORE it
+	// settles, which is what a real page does: the zoom module publishes one
+	// the moment it lays out, well before the configuration comes back.
+	const ready = (async () => {
+		if (opts.zoomFirst) {
+			await drain();
+			onView(viewOf(opts.zoomFirst, 0));
+		}
+		await drain();
+	})();
 
 	// Fire a view, then run the settle timer the module armed -- which is what
 	// a viewer letting go of the picture does -- then let the push settle.
@@ -117,7 +137,22 @@ function boot(opts) {
 		listeners.visibilitychange();
 	};
 
-	return { ready, look, rate, hide, pushes,
+	// What the chip would say — the page's only disclosure that the camera is
+	// being re-tuned, so a test of "does it claim" has to read exactly this.
+	const claims = () => !!(sandbox.MajesticRoi && sandbox.MajesticRoi.note());
+
+	// Run the settle timer without firing a view first — for the case where the
+	// view was delivered before the module was ready to take it.
+	const settle = async () => {
+		await drain();
+		const t = pending.shift();
+		if (t) t.fn();
+		await drain();
+	};
+
+	return { ready, look, rate, hide, pushes, claims, drain, settle,
+		failNext: () => { failOnce = true; },
+		release: () => { while (held.length) held.shift()(); },
 		last: () => pushes[pushes.length - 1],
 		armed: () => pending.length };
 }
@@ -252,6 +287,79 @@ group('a camera with no region keys never asks at all');
 	await b.look(0.25);
 	check('nothing pushed', b.pushes.length === 0,
 		'pushed ' + JSON.stringify(b.pushes));
+}
+
+group('a reply that is not the contract is not a confirmation');
+{
+	// A 200 whose body will not parse used to become {}, whose missing
+	// `refused` read as "applied" — so the page claimed the recording was
+	// being re-tuned with nothing from the camera saying so.
+	const b = boot({ badReply: true });
+	await b.ready;
+	await b.look(0.25);
+	check('the push was made', b.pushes.length === 1);
+	check('but nothing is claimed on an unparseable 200', !b.claims());
+}
+
+group('the region is not disowned until the camera has let go of it');
+{
+	// The page has no control on screen to check against, so saying "nothing
+	// is in force" while the encoder still holds a region is the one thing it
+	// must never get wrong.
+	const b = boot({ reject: true });
+	await b.ready;
+	await b.look(0.25);
+	check('a failed push claims nothing', !b.claims());
+}
+{
+	const b = boot();
+	await b.ready;
+	await b.look(0.25);
+	check('claimed while it is in force', b.claims());
+	b.failNext();
+	await b.look(0.95);
+	check('a failed CLEAR keeps the claim standing', b.claims(),
+		'the camera may still hold the region');
+}
+
+group('a push that lands after a clear does not put the region back');
+{
+	const b = boot({ slow: true });
+	await b.ready;
+	b.look(0.25);            // armed and fired, but the reply is held
+	await b.drain();
+	b.hide(true);            // the viewer goes away before it lands
+	await b.drain();
+	b.release();             // the held reply arrives now
+	await b.drain();
+	await b.drain();
+	check('the stale completion is dropped', !b.claims(),
+		'a region was restored against a picture nobody is watching');
+}
+
+group('a zoom that happened before the camera answered is not lost');
+{
+	const b = boot({ zoomFirst: 0.25 });
+	await b.ready;
+	await b.settle();
+	check('the held view is replayed once the keys are known',
+		b.pushes.length === 1, 'got ' + b.pushes.length);
+}
+
+group('a camera that does not describe its crops still marks every channel');
+{
+	const b = boot({ osd: false, config: {
+		video0: { roiRect: [], roiQp: '', enabled: true, bitrate: 4096,
+			size: '2592x1520' },
+		video1: { roiRect: [], roiQp: '', enabled: true, bitrate: 1024,
+			size: '704x576' },
+	} });
+	await b.ready;
+	await b.look(0.25);
+	const p = b.last();
+	check('the shown channel is marked', !!(p && p.video0));
+	check('and so is the other one, from its configured size',
+		!!(p && p.video1), 'the recording got none of the promised detail');
 }
 
 done();
