@@ -48,7 +48,7 @@ let clipPlan = { status: 200, body: CLIP, preroll: '0' };
 const maxCalls = [];
 const maxUploads = [];
 const maxMessages = [];
-let maxPlan = { slotStatus: 200, notReady: 0, messageBody: '{"message":{"body":{"mid":"m1"}}}' };
+let maxPlan = { slotStatus: 200, notReady: 0, messageStatus: 200, messageBody: '{"message":{"body":{"mid":"m1"}}}' };
 // The upload slot MAX hands back points at this same server, and the handler
 // runs before listen() has bound a port, so the origin is filled in there.
 let selfOrigin = '';
@@ -139,12 +139,13 @@ const server = http.createServer((req, res) => {
 
 		if (url === '/messages') {
 			maxMessages.push({ url: req.url, body: body.toString() });
-			res.writeHead(200, { 'Content-Type': 'application/json' });
 			if (maxPlan.notReady > 0) {
 				maxPlan.notReady -= 1;
+				res.writeHead(200, { 'Content-Type': 'application/json' });
 				res.end('{"code":"attachment.not.ready","message":"not processed"}');
 				return;
 			}
+			res.writeHead(maxPlan.messageStatus, { 'Content-Type': 'application/json' });
 			res.end(maxPlan.messageBody);
 			return;
 		}
@@ -313,7 +314,7 @@ server.listen(0, '127.0.0.1', async () => {
 		maxCalls.length = 0;
 		maxUploads.length = 0;
 		maxMessages.length = 0;
-		maxPlan = { slotStatus: 200, notReady: 0, messageBody: '{"message":{"body":{"mid":"m1"}}}' };
+		maxPlan = { slotStatus: 200, notReady: 0, messageStatus: 200, messageBody: '{"message":{"body":{"mid":"m1"}}}' };
 	};
 
 	const ntfyRec = (name, extra) => rewrite('bin/ntfy.sh', [
@@ -754,6 +755,37 @@ server.listen(0, '127.0.0.1', async () => {
 		check('as a video, from the extension it was given',
 			/"type":"video"/.test(lastMsg().body), lastMsg().body);
 		check('and it says it sent', r.status === 0, r.stdout + r.stderr);
+	}
+
+	group('max — a refusal that looks like a success');
+	{
+		// MAX puts a `message` field in its ERRORS as well: a camera with the
+		// wrong token gets {"code":"verify.token","message":"No access token"}
+		// back. A sender that looked for the word rather than the shape called
+		// that a delivery, which is the worst thing a notifier can do -- every
+		// send reported as sent, nothing arriving.
+		reset();
+		resetMax();
+		maxPlan.messageStatus = 401;
+		maxPlan.messageBody = '{"code":"verify.token","message":"No access token"}';
+		const r = await run(maxRec('max-badtoken'));
+		check('the send fails', r.status !== 0, 'exit ' + r.status);
+		check('and says so rather than claiming it sent',
+			!/Sent to MAX/.test(r.stdout) && /refused/.test(r.stdout + r.stderr),
+			r.stdout + r.stderr);
+	}
+
+	group('max — an error with a 200 is still an error');
+	{
+		// The status alone is not enough either: the shape has to say a message
+		// was created, or a service answering 200 with an error body would read
+		// as a delivery.
+		reset();
+		resetMax();
+		maxPlan.messageBody = '{"code":"chat.not.found","message":"no such chat"}';
+		const r = await run(maxRec('max-nochat'));
+		check('it does not report a send', !/Sent to MAX/.test(r.stdout), r.stdout);
+		check('and exits non-zero', r.status !== 0, 'exit ' + r.status);
 	}
 
 	group('max — a length that is not one');

@@ -151,12 +151,23 @@ case "$snapshot" in
 *) kind=image ;;
 esac
 
-curl_opts="--silent --show-error --connect-timeout 30 --max-time 120"
-if [ "$max_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
-	. /etc/webui/proxy.conf
-	curl_opts="${curl_opts} --socks5-hostname ${socks5_host}:${socks5_port}"
-	curl_opts="${curl_opts} --proxy-user ${socks5_username}:${socks5_password}"
-fi
+# curl, with the proxy settings if they are wanted.
+#
+# A function rather than a string of options, because a string has to be
+# expanded unquoted to become arguments -- and a proxy password with a space or
+# a `*` in it would then be split into several arguments or matched against the
+# filenames in the working directory. The credentials are somebody's, so they
+# are passed as single arguments and never through the shell's word splitting.
+mx_curl() {
+	if [ "$max_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
+		( . /etc/webui/proxy.conf
+		  curl --silent --show-error --connect-timeout 30 --max-time 120 \
+			--socks5-hostname "${socks5_host}:${socks5_port}" \
+			--proxy-user "${socks5_username}:${socks5_password}" "$@" )
+		return $?
+	fi
+	curl --silent --show-error --connect-timeout 30 --max-time 120 "$@"
+}
 
 # Step one: ask for somewhere to put it.
 #
@@ -165,7 +176,7 @@ fi
 # reference; for an image it carries only a URL, and the token comes back from
 # the upload itself. Measured against the live service, not inferred: a video
 # slot answers {"url","token"} and an image slot answers {"url"}.
-slot=$(curl $curl_opts -X POST -H "Authorization: ${max_token}" \
+slot=$(mx_curl -X POST -H "Authorization: ${max_token}" \
 	"${max_server}/uploads?type=${kind}")
 upload_url=$(printf '%s' "$slot" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p' | sed 's/\\\//\//g')
 
@@ -181,7 +192,7 @@ fi
 # Step two: the bytes. The upload host is not the API host and does not answer
 # in JSON for a video -- it returns <retval>1</retval> -- so nothing is parsed
 # out of this for that kind. For an image this reply is where the token is.
-up=$(curl $curl_opts -X POST \
+up=$(mx_curl -X POST \
 	-F "file=@${snapshot};filename=$(basename "$snapshot")" "$upload_url")
 rc=$?
 if [ "$rc" -ne 0 ]; then
@@ -219,10 +230,22 @@ body="{\"text\":\"${esc_message}\",\"attachments\":[{\"type\":\"${kind}\",\"payl
 # service, an ordinary clip went through on the first attempt.
 attempt=1
 while :; do
-	reply=$(curl $curl_opts -X POST \
+	# The status comes back separately from the body: the body is needed to
+	# recognise the not-ready refusal, and the status is what says the message
+	# was actually created.
+	reply=$(mx_curl -X POST \
 		-H "Authorization: ${max_token}" \
 		-H "Content-Type: application/json" \
-		-d "$body" "${max_server}/messages?chat_id=${max_chat_id}")
+		-d "$body" --write-out '\n%{http_code}' \
+		"${max_server}/messages?chat_id=${max_chat_id}")
+	rc=$?
+	http=$(printf '%s' "$reply" | sed -n '$p')
+	reply=$(printf '%s' "$reply" | sed '$d')
+
+	if [ "$rc" -ne 0 ]; then
+		echo "The message to MAX did not go (curl exit ${rc})"
+		exit 1
+	fi
 
 	case "$reply" in
 	*attachment.not.ready*) ;;
@@ -237,11 +260,25 @@ while :; do
 	attempt=$((attempt + 1))
 done
 
-# The reply carries the message it created, or an error naming what was wrong.
-# Printed either way: this is what the page's test button shows and what a
-# person running it by hand reads.
+# Created, or refused. Both are judged, because neither alone is enough.
+#
+# A bare search for "message" is not proof of anything: MAX puts a `message`
+# field in its ERRORS too -- {"code":"verify.token","message":"No access
+# token"} is what a camera with the wrong token gets back -- so a sender that
+# looked only for the word reported every rejected send as delivered, which is
+# the worst thing a notifier can do. The success reply opens the field as an
+# OBJECT, `"message":{`, where an error carries a string; that plus a 200 is
+# what is required here.
+case "$http" in
+2??) ;;
+*)
+	echo "MAX refused the message (HTTP ${http}: ${reply})"
+	exit 1
+	;;
+esac
+
 case "$reply" in
-*'"message"'*)
+*'"message":{'*)
 	echo "Sent to MAX"
 	exit 0
 	;;

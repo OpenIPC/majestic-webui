@@ -79,7 +79,17 @@ fi
 
 [ -e "$config_file" ] && include $config_file
 [ -z "$max_crontab" ] && max_crontab="true"
-[ -z "$max_interval" ] && max_interval="15"
+
+# The interval is written into a <script type="application/json"> block, so it
+# is narrowed to the four values this page offers rather than rendered as
+# whatever the file happens to hold. A hand-edited value carrying </script>
+# would otherwise end the JSON block early and put the rest of itself on the
+# page as markup. The same reason the seconds below are clamped: what the page
+# shows has to be one of the things the page can mean.
+case "$max_interval" in
+15 | 30 | 60 | 360) ;;
+*) max_interval="15" ;;
+esac
 
 # The sender's own default and the sender's own clamp, both said here too.
 # The page reads whatever is in the file, which nothing obliges to be one of

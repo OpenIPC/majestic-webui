@@ -755,10 +755,14 @@ service finishes processing the upload, so it is retried with growing waits.
 It asks immediately first: waiting up front would put that delay on every send
 when the ordinary case goes through on the first attempt.
 
-The API host is `platform-api.max.ru` and is configurable. The published
+The API host is fixed at `platform-api.max.ru`, and deliberately not a
+setting: `api.telegram.org` is not one either, for the same reason. MAX is a
+service you join rather than one you can run, so there is nothing an owner
+could point it at — `ntfy_server` exists because ntfy genuinely is
+self-hostable, which is the difference rather than a gap here. The published
 documentation names `platform-api2`, which resolves but does not answer; this
-one returns a proper `401` to an unauthenticated call. The camera's own curl
-and CA set reach it without a proxy.
+one returns a proper `401` to an unauthenticated call, and the camera's own
+curl and CA set reach it without a proxy.
 
 The protocol knowledge is ported from
 [AT-Lee/MAX-for-OpenIPC](https://github.com/AT-Lee/MAX-for-OpenIPC) (MIT), and
