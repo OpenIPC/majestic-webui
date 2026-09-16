@@ -362,18 +362,26 @@ function payload() {
 	group('the dist payload carries the stub under the canonical name');
 
 	const build = fs.readFileSync(path.join(__dirname, '..', 'tools', 'build-dist.sh'), 'utf8');
-	const m = build.match(/^if \[ -f "\$PKG\/sbin\/updatewebui-fetch" \][\s\S]*?^fi$/m);
-	check('build-dist.sh still has the rename step', !!m, 'the step is gone or was renamed');
+	// Extracted as a whole function, so a change INSIDE it shows up as changed
+	// behaviour here rather than as a pattern that stopped matching.
+	const m = build.match(/^stub_over_installer\(\) \{[\s\S]*?^\}$/m);
+	check('build-dist.sh still has the rename step', !!m, 'stub_over_installer is gone or was renamed');
 	if (!m) return done();
 
-	const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'uwp-'));
-	fs.mkdirSync(path.join(pkg, 'sbin'));
-	fs.writeFileSync(path.join(pkg, 'sbin', 'updatewebui'), 'the 48 KB installer');
-	fs.writeFileSync(path.join(pkg, 'sbin', 'updatewebui-fetch'), 'the stub');
-	const script = path.join(pkg, 'step.sh');
-	fs.writeFileSync(script, 'PKG=' + q(pkg) + NL + m[0] + NL);
+	const stage = (files) => {
+		const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'uwp-'));
+		fs.mkdirSync(path.join(pkg, 'sbin'));
+		for (const [n, body] of files) fs.writeFileSync(path.join(pkg, 'sbin', n), body);
+		fs.writeFileSync(path.join(pkg, 'step.sh'), 'PKG=' + q(pkg) + NL + m[0] + NL + 'stub_over_installer' + NL);
+		return pkg;
+	};
 
-	execFile('/bin/sh', [script], () => {
+	const pkg = stage([
+		['updatewebui', 'the 48 KB installer'],
+		['updatewebui-fetch', 'the stub'],
+	]);
+
+	execFile('/bin/sh', [path.join(pkg, 'step.sh')], () => {
 		const at = (n) => {
 			try {
 				return fs.readFileSync(path.join(pkg, 'sbin', n), 'utf8');
@@ -391,6 +399,20 @@ function payload() {
 		const inst = fs.readFileSync(path.join(__dirname, '..', 'sbin', 'updatewebui'), 'utf8');
 		const guard = /sbin\/\$scr_name\)[\s\S]*?if \[ -f "\$src\/sbin\/\$scr_name-fetch" \]; then[\s\S]*?continue/;
 		check('and the installer only skips it when the stub is beside it', guard.test(inst), 'the skip is unconditional');
-		done();
+
+		// The stub going missing from the tree must STOP the build. Guarded,
+		// it would leave the 48 KB installer at that path and ship a green
+		// build, which is the silent regression this whole change removes.
+		const bare = stage([['updatewebui', 'the 48 KB installer']]);
+		execFile('/bin/sh', [path.join(bare, 'step.sh')], (err, out, errout) => {
+			check('a payload with no stub fails the build', !!err, 'the build step succeeded');
+			check('and says what would have shipped', /would ship the 48 KB installer/.test(errout), errout.trim());
+			check(
+				'leaving the installer where it was rather than half-renamed',
+				fs.readFileSync(path.join(bare, 'sbin', 'updatewebui'), 'utf8') === 'the 48 KB installer',
+				'the file was changed',
+			);
+			done();
+		});
 	});
 }

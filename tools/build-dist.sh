@@ -36,9 +36,19 @@ cp -r www LICENSE "$PKG"/
 # leaves no second file list to keep in step. sbin/updatewebui stays in git --
 # that path is the URL the stub fetches, and /etc/profile has pointed at it for
 # years.
-if [ -f "$PKG/sbin/updatewebui-fetch" ]; then
+# Mandatory, not guarded. A rename that quietly does nothing when the stub has
+# gone missing would leave the 48 KB installer sitting at that path and ship a
+# green build -- and the boards this exists for would go back over their
+# partition with nothing anywhere reporting it. That is the exact silent
+# regression the split removes, so its absence stops the build instead.
+stub_over_installer() {
+	[ -f "$PKG/sbin/updatewebui-fetch" ] || {
+		echo "build-dist: sbin/updatewebui-fetch is missing; the payload would ship the 48 KB installer" >&2
+		return 1
+	}
 	mv -f "$PKG/sbin/updatewebui-fetch" "$PKG/sbin/updatewebui"
-fi
+}
+stub_over_installer
 
 # Stamp the tree with its own version, so the Dashboard can show which WebUI is
 # deployed the way it shows majestic's -- there is otherwise nothing on the
