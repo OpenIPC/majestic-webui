@@ -46,6 +46,7 @@ page_label() {
 	openwall)       printf '%s' "OpenWall" ;;
 	telegram)       printf '%s' "Telegram" ;;
 	ntfy)           printf '%s' "Ntfy" ;;
+	max)            printf '%s' "MAX" ;;
 	vtun)           printf '%s' "VTun" ;;
 	wireguard)      printf '%s' "WireGuard" ;;
 	proxy)          printf '%s' "Proxy" ;;
@@ -73,7 +74,7 @@ page_menu() {
 		printf '%s' "Camera" ;;
 	network|time|access|update|backup|logs|console|files|sdcard)
 		printf '%s' "System" ;;
-	openwall|telegram|ntfy|vtun|wireguard|proxy)
+	openwall|telegram|ntfy|max|vtun|wireguard|proxy)
 		printf '%s' "Services" ;;
 	esac
 }

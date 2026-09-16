@@ -704,8 +704,8 @@ Each extension is a CGI for the form + a sbin script invoked by cron or webhook:
 
 Each extension's CGI typically: defines a `params` list, loops `POST_<name>` into shell vars, validates, rewrites its single `/etc/webui/<name>.conf`, and `sed -i /<name>/d /etc/crontabs/root` before re-adding the cron line if scheduling is on. Webhooks like `?send=image` short-circuit before `header.cgi` and emit their own `Content-type`.
 
-**The two senders can record what they send, and a card is no longer what
-decides that.** Both answer three questions in order — a path argument is a
+**The senders can record what they send, and a card is no longer what
+decides that.** All three answer three questions in order — a path argument is a
 file somebody else made (`sbin/record.sh` handing over the recording majestic
 has just closed, which is the motion itself and must never be answered by
 capturing a second clip a minute later), then `--clip`/`--image` from a caller
@@ -732,6 +732,40 @@ A refusal is a refusal: a non-200, or a 200 carrying no bytes (the shape a
 pipeline torn down mid-clip leaves behind), ends the send rather than falling
 back to a picture. A silent downgrade would leave an operator believing the
 clips they configured are arriving.
+
+**A third service, and what porting it cost.** MAX is the same shape as the
+other two from the page's side — `sbin/max`, `www/cgi-bin/max.cgi`, one config
+in `/etc/webui` — and deliberately so: it takes a path argument, `--clip` and
+`--image`, and the page's own switch, which is the contract that lets
+`sbin/motion-notify.sh` hand all three senders one capture.
+
+What is different is the wire. Telegram takes the file on the message call;
+MAX takes **three** calls — ask for an upload slot, put the bytes there, then
+post a message referencing a token — and the two payload kinds disagree about
+where that token comes from. A **video** slot answers `{"url","token"}` and the
+upload itself answers `<retval>1</retval>`, which is not JSON at all; an
+**image** slot answers `{"url"}` alone and the token comes back from the
+upload, as `{"photos":{…:{"token":…}}}`. Measured against the live service,
+because a port written from the API documentation would have shared one code
+path and shipped a Picture switch that silently failed. Both are pinned in
+`tests/delivery.test.js`.
+
+The message post can also be refused with `attachment.not.ready` while the
+service finishes processing the upload, so it is retried with growing waits.
+It asks immediately first: waiting up front would put that delay on every send
+when the ordinary case goes through on the first attempt.
+
+The API host is `platform-api.max.ru` and is configurable. The published
+documentation names `platform-api2`, which resolves but does not answer; this
+one returns a proper `401` to an unauthenticated call. The camera's own curl
+and CA set reach it without a proxy.
+
+The protocol knowledge is ported from
+[AT-Lee/MAX-for-OpenIPC](https://github.com/AT-Lee/MAX-for-OpenIPC) (MIT), and
+the licence notice travels with it in `sbin/max`. What was NOT taken is that
+module's capture engine: it required HLS to be switched on, which the clip
+endpoint made unnecessary, and truncated its own recording with `kill -9` after
+a sleep rather than letting `?duration=` end the response.
 
 The webhook verbs name their payload rather than asking the settings:
 `?send=image` and `?send=clip` on both pages, so a dashboard pulling a

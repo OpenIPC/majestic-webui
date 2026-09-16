@@ -159,6 +159,7 @@ Pragma: no-cache
 							<li><a class="dropdown-item" href="openwall.cgi"><% page_label openwall %></a></li>
 							<li><a class="dropdown-item" href="telegram.cgi"><% page_label telegram %></a></li>
 							<li><a class="dropdown-item" href="ntfy.cgi"><% page_label ntfy %></a></li>
+							<li><a class="dropdown-item" href="max.cgi"><% page_label max %></a></li>
 							<li><h6 class="dropdown-header">Networking</h6></li>
 							<li><a class="dropdown-item" href="https://openipc.cloud">P2P network</a></li>
 							<li><a class="dropdown-item" href="vtun.cgi"><% page_label vtun %></a></li>

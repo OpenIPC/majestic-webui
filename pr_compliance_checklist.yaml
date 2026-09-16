@@ -55,6 +55,27 @@ pr_compliances:
       or commit id, or pasted console/log output or screenshots captured from a lab
       device.
 
+  - title: "Someone's real account is not test data"
+    compliance_label: true
+    objective: >
+      Test fixtures, examples and documentation use invented identifiers, never the
+      credentials or addresses of a real account used to verify the work. Proving a
+      sender against a live service means holding a real token, a real chat and a
+      real bot for as long as the test runs; none of that may survive into the tree.
+      A bot token is a credential. A chat or room id is not secret in the way a token
+      is, but it names a private group to everyone who reads a public repository, and
+      it is exactly what someone needs to aim an unrelated bot at it.
+    success_criteria: >
+      Identifiers in fixtures are obviously invented and locally consistent — a chat
+      of -100123, a token of BOTTOKEN, a topic of doorbell — so a reader can tell at
+      a glance that nothing here belongs to anybody.
+    failure_criteria: >
+      The diff adds a token, key or password for a live third-party service; a real
+      chat, room, channel or group id; a real bot or account username; or a topic or
+      endpoint that a real deployment is actually using. This includes test fixtures
+      and assertions, which is where a verification identifier is most likely to be
+      pasted and least likely to be noticed.
+
   - title: "Configuration comes from the daemon, never from its file"
     compliance_label: true
     objective: >
