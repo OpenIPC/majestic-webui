@@ -9939,28 +9939,28 @@
 			const lamp = dot === 'nightMode.backlight';
 			const warn = el('div', 'hint mj-requires');
 			const paint = () => {
-				const pads = lamp
-					? [getDotted(state.config, 'nightMode.backlightPin')]
-					: [getDotted(state.config, 'nightMode.irCutPin1'),
-						getDotted(state.config, 'nightMode.irCutPin2')];
-				const mounted = (k) => {
+				// A control on the page wins over the saved value, per key —
+				// the precedence mj-requires uses, and for the same reason: an
+				// edit that has not been saved yet is what the operator can
+				// see. Read as two lists and merged, a pad CLEARED on the map
+				// went on being satisfied by the saved one underneath it, so
+				// the sentence came back only after a save. Assigning worked
+				// and clearing did not, which is the half nobody tests.
+				const padOf = (k) => {
 					const f = (state.fields || []).find(x => x.dot === 'nightMode.' + k);
-					return f ? f.getValue() : undefined;
+					return f ? f.getValue() : getDotted(state.config, 'nightMode.' + k);
 				};
-				const live2 = lamp ? [mounted('backlightPin')]
-					: [mounted('irCutPin1'), mounted('irCutPin2')];
-				// A pad staged on the map counts: the row should stop saying
-				// this the moment one is assigned, not after the save.
-				const has = pads.concat(live2).some(
-					(v) => v !== undefined && v !== null && v !== '' && !isNaN(Number(v)));
+				// isNumish, not a predicate of its own: GPIO 0 is a real pad
+				// and Number(false) is 0, so a hand-edited `irCutPin1: false`
+				// would otherwise read as one — the trap ircut-check's pin()
+				// carries a paragraph about. One spelling of "is this a pad",
+				// and it is the one testBlocker already asks with.
+				const wiredPad = (lamp ? ['backlightPin'] : ['irCutPin1', 'irCutPin2'])
+					.some((k) => isNumish(padOf(k)));
 				// A dimmable lamp lives on a PWM channel and may have no pad at
 				// all, so for the lamp that is the other way to be wired.
-				const chan = lamp
-					? (mounted('backlightPwmChannel') !== undefined
-						? mounted('backlightPwmChannel')
-						: getDotted(state.config, 'nightMode.backlightPwmChannel'))
-					: null;
-				const wired = has || (chan && chan !== 'none');
+				const chan = lamp ? padOf('backlightPwmChannel') : null;
+				const wired = wiredPad || (chan && chan !== 'none');
 				warn.textContent = wired ? '' : (lamp
 					? 'Nothing is connected to the camera light yet — assign its pad on the map above, or a PWM channel below, and this will start to mean something.'
 					: 'Nothing is connected to the IR-cut filter yet — assign its coils on the map above, and this will start to mean something.');
