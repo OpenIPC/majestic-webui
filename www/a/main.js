@@ -875,9 +875,9 @@ function initAll() {
 
 	// ...and RTSP's own port is the one value on that page location cannot
 	// supply, along with whether majestic is serving everything unauthenticated.
-	// Both used to be read server-side out of /api/v1/config.json with
-	// jsonfilter, which cost the camera a shell-out to a JSON parser -- and the
-	// firmware a 63KB libubox -- to do what JSON.parse does here for nothing.
+	// Both used to be read server-side out of /api/v1/config.json, which cost
+	// the camera a shell-out to a JSON parser -- and the firmware a 63KB
+	// libubox -- to do what JSON.parse does here for nothing.
 	// Guarded on the spans so only stream-urls.cgi pays for the config fetch;
 	// mjConfig() caches, so a page that already asked does not ask twice.
 	//
@@ -901,12 +901,12 @@ function initAll() {
 		// is indistinguishable from "unsafe is off" if you only test the leaf, and
 		// answering that with the authenticated note would be a security warning
 		// failing open. The old server-side read did fail open that way (an empty
-		// jsonfilter result rendered the authenticated note), but the read lived on
+		// parsed result rendered the authenticated note), but the read lived on
 		// the camera, where the only way to come back empty was localhost failing.
 		// From the browser the ways to come back empty are far broader, so the
 		// section has to be present before either note is trusted.
 		//
-		// The string form is accepted alongside the boolean because jsonfilter
+		// The string form is accepted alongside the boolean because the parser
 		// printed `true` for either. A majestic too old to report the key at all
 		// still has a system section, so it keeps the authenticated note, as before.
 		if (mjGet(cfg, 'system')) {

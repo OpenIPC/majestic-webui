@@ -19,7 +19,7 @@
 # WebUI exactly as it was.
 
 scr_name=updatewebui
-scr_version=8
+scr_version=9
 
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
@@ -325,7 +325,7 @@ build_plan() {
 						continue
 					fi
 					;;
-				sbin/telegram | sbin/openwall)
+				sbin/telegram | sbin/max | sbin/openwall)
 					if [ "$variant" = fpv ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue

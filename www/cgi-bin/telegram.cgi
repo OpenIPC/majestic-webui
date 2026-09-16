@@ -7,10 +7,10 @@ params="enabled token channel thread_id interval caption crontab clips video vid
 # webhook for remote send, returns [t|f]
 #
 # sbin/telegram reports the send through its exit status, so the answer does not
-# mean parsing Telegram's JSON reply with jsonfilter. It also means the failure
-# path answers at all: the old pipeline emitted an EMPTY body whenever telegram
-# bailed out before curl ran (unconfigured, no token, no channel), because there
-# was no JSON for jsonfilter to find an `ok` in.
+# mean picking `ok` out of Telegram's JSON reply. It also means the failure path
+# answers at all: the old pipeline emitted an EMPTY body whenever telegram bailed
+# out before curl ran (unconfigured, no token, no channel), because there was no
+# reply for it to read that field from.
 #
 # Two verbs, and each asks for exactly what it is named -- ?send=image goes on
 # meaning a picture on a camera whose schedule has been switched over to video,

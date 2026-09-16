@@ -45,6 +45,13 @@ const stills = [];
 const clips = [];
 let plan = { status: 200, body: '{"ok":true}' };
 let clipPlan = { status: 200, body: CLIP, preroll: '0' };
+const maxCalls = [];
+const maxUploads = [];
+const maxMessages = [];
+let maxPlan = { slotStatus: 200, notReady: 0, messageStatus: 200, messageBody: '{"message":{"body":{"mid":"m1"}}}' };
+// The upload slot MAX hands back points at this same server, and the handler
+// runs before listen() has bound a port, so the origin is filled in there.
+let selfOrigin = '';
 
 function parseMultipart(buf, type) {
 	const m = /boundary=(?:"([^"]+)"|([^;]+))/.exec(type || '');
@@ -98,6 +105,48 @@ const server = http.createServer((req, res) => {
 
 			res.writeHead(clipPlan.status, head);
 			res.end(clipPlan.body);
+			return;
+		}
+
+		// MAX is three calls, not one, and the two payload kinds do not agree
+		// on where the token comes from -- for a video it is in the slot, for
+		// an image it comes back from the upload. Measured against the live
+		// service; a stand-in that made them alike would let a sender that
+		// handles only one of them pass.
+		if (url === '/uploads') {
+			maxCalls.push(req.url);
+			const kind = /type=([a-z]+)/.exec(req.url);
+			res.writeHead(maxPlan.slotStatus, { 'Content-Type': 'application/json' });
+			res.end(maxPlan.slotStatus !== 200 ? '{"code":"no"}'
+				: JSON.stringify(kind && kind[1] === 'image'
+					? { url: selfOrigin + '/max-upload?kind=image' }
+					: { url: selfOrigin + '/max-upload?kind=video', token: 'VIDEO-TOKEN' }));
+			return;
+		}
+
+		if (url === '/max-upload') {
+			maxUploads.push({ url: req.url, parts: parseMultipart(body, req.headers['content-type']) });
+			if (/kind=image/.test(req.url)) {
+				res.writeHead(200, { 'Content-Type': 'application/json' });
+				res.end('{"photos":{"a/b+c=":{"token":"IMAGE-TOKEN"}}}');
+				return;
+			}
+			// What the real upload host answers for a video: not JSON at all.
+			res.writeHead(200, { 'Content-Type': 'text/xml' });
+			res.end('<retval>1</retval>');
+			return;
+		}
+
+		if (url === '/messages') {
+			maxMessages.push({ url: req.url, body: body.toString() });
+			if (maxPlan.notReady > 0) {
+				maxPlan.notReady -= 1;
+				res.writeHead(200, { 'Content-Type': 'application/json' });
+				res.end('{"code":"attachment.not.ready","message":"not processed"}');
+				return;
+			}
+			res.writeHead(maxPlan.messageStatus, { 'Content-Type': 'application/json' });
+			res.end(maxPlan.messageBody);
 			return;
 		}
 
@@ -181,6 +230,7 @@ function conf(name, body) {
 server.listen(0, '127.0.0.1', async () => {
 	const port = server.address().port;
 	const origin = 'http://127.0.0.1:' + port;
+	selfOrigin = origin;
 
 	const tgConf = conf('telegram.conf', [
 		'telegram_enabled="true"',
@@ -239,6 +289,33 @@ server.listen(0, '127.0.0.1', async () => {
 		cam('localhost/image.heif'),
 		cam('localhost/video.mp4'),
 	], name);
+
+	const maxRec = (name, extra) => rewrite('sbin/max', [
+		['/etc/webui/max.conf', conf(name + '.conf', [
+			'max_enabled="true"',
+			'max_token="MAXTOKEN"',
+			'max_chat_id="-99001122334455"',
+			'max_video="true"',
+		].concat(extra || [], ['']).join('\n'))],
+		['https://platform-api.max.ru', origin],
+		cam('localhost/image.jpg'),
+		cam('localhost/video.mp4'),
+	], name);
+
+	// A sender that bails out early posts nothing, and indexing an empty list
+	// throws -- which reports a crash where the interesting thing is WHICH
+	// check failed. Reading through this keeps a missing message an ordinary
+	// failed assertion.
+	const lastMsg = () => maxMessages[maxMessages.length - 1] || { url: '', body: '(no message was posted)' };
+	const lastUp = () => maxUploads[maxUploads.length - 1] ||
+		{ url: '', parts: { file: { body: Buffer.from('(nothing was uploaded)') } } };
+
+	const resetMax = () => {
+		maxCalls.length = 0;
+		maxUploads.length = 0;
+		maxMessages.length = 0;
+		maxPlan = { slotStatus: 200, notReady: 0, messageStatus: 200, messageBody: '{"message":{"body":{"mid":"m1"}}}' };
+	};
 
 	const ntfyRec = (name, extra) => rewrite('bin/ntfy.sh', [
 		['/etc/webui/ntfy.conf', conf(name + '.conf', [
@@ -578,6 +655,146 @@ server.listen(0, '127.0.0.1', async () => {
 		check('pushing a jpeg', (sent[0] || {}).headers['content-type'] === 'image/jpeg',
 			(sent[0] || {}).headers['content-type']);
 		check('exits 0', img.status === 0, 'status ' + img.status);
+	}
+
+	// ------------------------------------------------------------ max ---
+	//
+	// MAX takes three calls where Telegram takes one, and the awkward part is
+	// that the two payload kinds disagree about where the token lives. A
+	// sender that assumed they were alike would work for video and silently
+	// fail for stills, which is the shape of bug the page could not show.
+
+	group('max — a clip of its own, in three steps');
+	{
+		reset();
+		resetMax();
+		const r = await run(maxRec('max-clip', ['max_video_seconds="10"']));
+		check('it recorded rather than taking a picture',
+			clips.length === 1 && stills.length === 0,
+			JSON.stringify({ clips, stills }));
+		check('and asked for the length it was set to',
+			clips[0] === '/video.mp4?pre=10&duration=10', clips[0]);
+		check('it asked for a video slot',
+			maxCalls.length === 1 && /type=video/.test(maxCalls[0]), JSON.stringify(maxCalls));
+		check('then put the bytes at the slot it was given',
+			maxUploads.length === 1 && lastUp().parts.file.body.equals(CLIP),
+			JSON.stringify(maxUploads.map((u) => u.url)));
+		check('and posted one message afterwards',
+			maxMessages.length === 1, JSON.stringify(maxMessages.map((m) => m.url)));
+		check('to the chat it was given',
+			/chat_id=-99001122334455/.test(lastMsg().url), lastMsg().url);
+		check('carrying the token the SLOT gave, which is where a video keeps it',
+			/"token":"VIDEO-TOKEN"/.test(lastMsg().body), lastMsg().body);
+		check('as a video attachment',
+			/"type":"video"/.test(lastMsg().body), lastMsg().body);
+		check('and it says it sent', r.status === 0 && /Sent to MAX/.test(r.stdout),
+			r.stdout + r.stderr);
+	}
+
+	group('max — a still takes its token from the upload, not the slot');
+	{
+		reset();
+		resetMax();
+		const r = await run(maxRec('max-still', ['max_video="false"']));
+		check('it took a picture', stills.length === 1 && clips.length === 0,
+			JSON.stringify({ clips, stills }));
+		check('and asked for an image slot',
+			/type=image/.test(maxCalls[0]), JSON.stringify(maxCalls));
+		check('the message carries the token the UPLOAD answered with',
+			/"token":"IMAGE-TOKEN"/.test(lastMsg().body), lastMsg().body);
+		check('and never the video one',
+			!/VIDEO-TOKEN/.test(lastMsg().body), lastMsg().body);
+		check('as an image attachment',
+			/"type":"image"/.test(lastMsg().body), lastMsg().body);
+		check('and it says it sent', r.status === 0, r.stdout + r.stderr);
+	}
+
+	group('max — an attachment the service has not finished with');
+	{
+		// The upload is accepted before it is processed, and the message post
+		// is refused until it is. Asking again is the whole remedy; waiting
+		// first would put that delay on every send instead of the rare one.
+		reset();
+		resetMax();
+		maxPlan.notReady = 2;
+		const r = await run(maxRec('max-notready'));
+		check('it asked more than once', maxMessages.length === 3,
+			'posts: ' + maxMessages.length);
+		check('it did not upload again for each try', maxUploads.length === 1,
+			'uploads: ' + maxUploads.length);
+		check('and the send succeeded in the end', r.status === 0, r.stdout + r.stderr);
+	}
+
+	group('max — a refusal is a refusal');
+	{
+		reset();
+		resetMax();
+		maxPlan.slotStatus = 403;
+		const r = await run(maxRec('max-refused'));
+		check('nothing was uploaded', maxUploads.length === 0, JSON.stringify(maxUploads));
+		check('and no message was posted', maxMessages.length === 0,
+			JSON.stringify(maxMessages));
+		check('the send reports failure', r.status !== 0, 'exit ' + r.status);
+		check('and says MAX would not take it',
+			/would not take an upload/.test(r.stdout + r.stderr), r.stdout + r.stderr);
+	}
+
+	group('max — a recording handed over is sent, not replaced');
+	{
+		// What sbin/motion-notify.sh does: one capture, handed to every
+		// sender. A sender that went and recorded its own would send a
+		// different moment from its neighbours.
+		reset();
+		resetMax();
+		const r = await run(maxRec('max-handed'), [clip]);
+		check('it recorded nothing of its own',
+			clips.length === 0 && stills.length === 0, JSON.stringify({ clips, stills }));
+		check('and uploaded the file it was handed',
+			maxUploads.length === 1 && lastUp().parts.file.body.equals(CLIP),
+			JSON.stringify(maxUploads.map((u) => u.url)));
+		check('as a video, from the extension it was given',
+			/"type":"video"/.test(lastMsg().body), lastMsg().body);
+		check('and it says it sent', r.status === 0, r.stdout + r.stderr);
+	}
+
+	group('max — a refusal that looks like a success');
+	{
+		// MAX puts a `message` field in its ERRORS as well: a camera with the
+		// wrong token gets {"code":"verify.token","message":"No access token"}
+		// back. A sender that looked for the word rather than the shape called
+		// that a delivery, which is the worst thing a notifier can do -- every
+		// send reported as sent, nothing arriving.
+		reset();
+		resetMax();
+		maxPlan.messageStatus = 401;
+		maxPlan.messageBody = '{"code":"verify.token","message":"No access token"}';
+		const r = await run(maxRec('max-badtoken'));
+		check('the send fails', r.status !== 0, 'exit ' + r.status);
+		check('and says so rather than claiming it sent',
+			!/Sent to MAX/.test(r.stdout) && /refused/.test(r.stdout + r.stderr),
+			r.stdout + r.stderr);
+	}
+
+	group('max — an error with a 200 is still an error');
+	{
+		// The status alone is not enough either: the shape has to say a message
+		// was created, or a service answering 200 with an error body would read
+		// as a delivery.
+		reset();
+		resetMax();
+		maxPlan.messageBody = '{"code":"chat.not.found","message":"no such chat"}';
+		const r = await run(maxRec('max-nochat'));
+		check('it does not report a send', !/Sent to MAX/.test(r.stdout), r.stdout);
+		check('and exits non-zero', r.status !== 0, 'exit ' + r.status);
+	}
+
+	group('max — a length that is not one');
+	{
+		reset();
+		resetMax();
+		await run(maxRec('max-clamp', ['max_video_seconds="600"']));
+		check('the camera is asked for the clamped length, not the typed one',
+			clips[0] === '/video.mp4?pre=60&duration=60', clips[0]);
 	}
 
 	server.close();
