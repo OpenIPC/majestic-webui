@@ -7752,6 +7752,50 @@
 		// second set of document listeners with nothing to remove them.
 		if (state.sec !== 'nightMode') { map.destroy(); return; }
 		state.ircutMap = map;
+
+		// A find carried over from the pin hunt on the Pins page.
+		//
+		// The hunt drives the pads and works out which pair moves the filter;
+		// this page owns the wiring fields, the dirty tracking and the Save
+		// bar. So the find arrives as a PROPOSAL and is staged here through the
+		// same path the map's own edits take -- nothing is written to majestic
+		// behind anyone's back, which is what lets the filter test keep
+		// refusing to run against wiring the camera has not been given.
+		//
+		// Read once and removed whatever happens next: a proposal that survived
+		// being staged would re-apply itself over every later edit of these
+		// fields, on the page where getting them backwards looks like a broken
+		// camera.
+		(function stageProposal() {
+			let raw = null;
+			try {
+				raw = sessionStorage.getItem('mj-ircut-proposal');
+				if (raw !== null) sessionStorage.removeItem('mj-ircut-proposal');
+			} catch (e) {
+				return; /* no storage, no proposal */
+			}
+			if (!raw) return;
+			let p = null;
+			try { p = JSON.parse(raw); } catch (e) { return; }
+			const ok = (v) => typeof v === 'number' && isFinite(v) && v >= 0;
+			if (!p || !ok(p.irCutPin1) || !ok(p.irCutPin2)) return;
+
+			const a = Object.assign({}, currentAssign());
+			a.irCutPin1 = p.irCutPin1;
+			a.irCutPin2 = p.irCutPin2;
+			pushAssign(a);
+			map.set(a);
+			paintRoles();
+
+			const note = box.querySelector('#mj-ircut-status');
+			if (note) {
+				note.innerHTML = '<b>From the pin hunt:</b> pins ' +
+					p.irCutPin1 + ' and ' + p.irCutPin2 + ' are filled in ' +
+					'below and <b>nothing is saved yet</b>. Press Save to keep ' +
+					'them, then Test the filter.';
+			}
+		})();
+
 		// refresh() re-syncs the map from config with `quiet`, which suppresses
 		// onChange — and onChange is what repaints this list. Without a handle
 		// to it the pads moved and the roles beside them did not, so a coil the

@@ -162,6 +162,12 @@
 	// One store per hunt. They cover different ground -- pairs on one side,
 	// single pads at a level on the other -- so a key shared between them
 	// would have each skipping what the other had tried.
+	/* A find on its way to the page that owns the wiring fields. sessionStorage
+	 * rather than localStorage: a proposal must not outlive the tab, or a
+	 * reader comes back next week to a Save bar holding pins from a board that
+	 * is no longer on the desk. */
+	const PROPOSAL_KEY = 'mj-ircut-proposal';
+
 	const SCAN_KEY = 'mj-ircut-scan';
 	const SWEEP_KEY = 'mj-pin-sweep';
 
@@ -644,78 +650,51 @@
 					' drive the filter &mdash; ' + esc(String(found.closesWhenHigh)) +
 					' is the one that closes it. ' + tail +
 					'</div><button type="button" class="btn btn-primary btn-sm" id="mj-scan-use">' +
-					'Save these as the IR-cut filter</button>' +
+					'Use these as the filter&rsquo;s pins</button>' +
 					'<p class="x-small text-secondary mb-0 mt-2" id="mj-scan-used"></p>';
 				const said = host.querySelector('#mj-scan-used');
 				host.querySelector('#mj-scan-use').addEventListener('click', () => {
-					// Written, and said out loud. On the page this came from the
-					// find was staged into a form and the person pressed Save;
-					// there is no such form here, and a button that quietly did
-					// nothing until you found the right page would be worse than
-					// one that writes and tells you.
+					// PROPOSED, not written. "Nothing is written to majestic
+					// behind anyone's back: the proposal is staged into the
+					// hidden fields and the ordinary save bar appears"
+					// (CLAUDE.md), and that is not a convention about where a
+					// button lives -- the Day / Night page's filter test reads
+					// the camera's wiring through those fields, and refuses to
+					// run while they are dirty precisely so a verdict cannot
+					// describe an assignment the camera never had. Writing the
+					// config from another page steps around the one mechanism
+					// that keeps that honest.
 					//
-					// Which pad OPENS and which CLOSES is the measurement, not a
-					// convention -- swapping them leaves a filter that moves the
-					// wrong way at dusk, which looks like a broken camera.
+					// So the find crosses the page boundary as a PROPOSAL and
+					// is staged on arrival, where the save bar and the dirty
+					// tracking already are. sessionStorage because it must not
+					// outlive the tab: a proposal restored a week later would
+					// stage wiring from a board that is no longer on the desk.
 					//
-					// POST /api/v1/config, which is the WebUI's write: the
-					// server walks every leaf, aborts on the first it rejects
-					// and only then reloads and saves, so there is no partial
-					// credit. These two keys MUST agree -- one pin without the
-					// other is a filter that cannot move -- and two requests
-					// cannot promise that. GET /api/v1/set is the single-key
-					// variant the WebUI does not use, and sending a
-					// configuration change over a method a browser reissues on
-					// its own was wrong twice over.
-					//
-					// Then read it back, because an accepted request is not a
-					// stored one: older majestic answers 202 and goes on to
-					// ignore what it was sent, and "Saved." over a camera that
-					// kept its old wiring is the one outcome worse than an
-					// error.
-					said.textContent = 'Saving\u2026';
-					FETCH('/api/v1/config', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						credentials: 'same-origin',
-						body: JSON.stringify({ nightMode: {
+					// Which pad OPENS and which CLOSES is the measurement, not
+					// a convention -- swapping them leaves a filter that moves
+					// the wrong way at dusk, which looks like a broken camera.
+					try {
+						sessionStorage.setItem(PROPOSAL_KEY, JSON.stringify({
 							irCutPin1: found.irCutPin1,
 							irCutPin2: found.irCutPin2,
-						} }),
-					})
-						.then((r) => {
-							if (!r.ok) throw new Error('HTTP ' + r.status);
-							return FETCH('/api/v1/config.json',
-								{ credentials: 'same-origin' });
-						})
-						.then((r) => r.ok ? r.json() : Promise.reject(
-							new Error('the camera would not say what it stored')))
-						.then((cfg) => {
-							const nm = (cfg && cfg.nightMode) || {};
-							if (Number(nm.irCutPin1) !== found.irCutPin1 ||
-								Number(nm.irCutPin2) !== found.irCutPin2) {
-								throw new Error('the camera took the request '
-									+ 'and kept its old wiring');
-							}
-							said.innerHTML = 'Saved. Test the filter on the ' +
-								'<a href="camera.cgi?tab=nightMode">Day / Night</a>' +
-								' page, which is where day and night are set up.';
-						})
-						.catch((e) => {
-							said.textContent = 'The camera would not store that: ' +
-								e.message + '. The pins are ' + found.irCutPin1 +
-								' and ' + found.irCutPin2 + ' if you want to set ' +
-								'them by hand.';
-						});
+							sig: SCAN().stamp(state.info || info),
+						}));
+					} catch (e) {
+						said.textContent = 'This browser would not carry the '
+							+ 'find across. The pins are ' + found.irCutPin1
+							+ ' and ' + found.irCutPin2 + '; set them on the '
+							+ 'Day / Night page.';
+						return;
+					}
+					said.innerHTML = 'Taking you to <b>Day / Night</b>, where '
+						+ 'these land in the wiring fields with the Save bar '
+						+ 'up \u2014 nothing is written until you press it.';
+					const link = document.querySelector(
+						'#mj-settings-nav a.nav-link[href*="tab=nightMode"]');
+					if (link) link.click();
+					else location.href = 'camera.cgi?tab=nightMode';
 				});
-			}).catch((e) => {
-				pins.sweep(null, null);
-				host.innerHTML = '<div class="mj-live-grp-head">' +
-					'<span class="mj-cap">Find the day/night filter</span>' +
-					'<span class="mj-live-rule"></span></div>' +
-					'<div class="alert alert-danger py-2 px-3 mb-0 small">' +
-					'The scan could not finish: ' + esc(e && e.message ? e.message : String(e)) +
-					'</div>';
 			});
 		});
 	}
