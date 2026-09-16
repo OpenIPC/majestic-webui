@@ -27,6 +27,77 @@
 	 * that would otherwise accuse the camera of a misconfiguration is gated on
 	 * it.
 	 */
+	/* Everything this file says out loud, in one place.
+	 *
+	 * English is the default because two of the three pages are in English.
+	 * The MAX page is not: MAX is a Russian service whose bots can only be
+	 * registered by a Russian business, so an English MAX page would be a
+	 * translation nobody who can use the feature needs. It passes its own
+	 * `words` in the boot tag and every sentence below comes from there.
+	 *
+	 * A table rather than a second copy of this file: the logic that decides
+	 * WHICH sentence is the part that fails silently, and it must not be
+	 * duplicated per language. Keys missing from an override fall back, so a
+	 * page may translate as much or as little as it has words for.
+	 */
+	var EN = {
+		cannotSend: 'This firmware cannot send to ',
+		noSender: 'the part that does the sending is not installed',
+		off: 'Switched off',
+		nothingSent: 'nothing will be sent',
+		notSetUp: 'Not set up yet',
+		ready: 'Ready',
+		partly: 'Partly ready',
+		partlyWhy: 'the camera is not watching for movement',
+		unknownWhy: 'the camera did not say whether it is watching for movement',
+		checking: 'checking what the camera can do\u2026',
+		onMovement: 'when something moves',
+		onRequest: 'when something asks',
+		everyHour: 'every hour',
+		everySixHours: 'every six hours',
+		onTimer: 'on a timer',
+		everyN: 'every {n} minutes',
+		picture: 'Picture',
+		videoN: '{n}-second video',
+		none: '\u2014',
+		and: ' and ',
+		comma: ', ',
+		detectorOff: 'The camera is not watching for movement, so this cannot ' +
+			'happen. Everything else here works without it.',
+		detectorUnknown: 'The camera did not answer when it was asked whether ' +
+			'it is watching for movement, so this may not happen.',
+		switchItOn: 'Switch it on',
+		unsaved: 'This is what Save will set. Until then the camera is still ' +
+			'using the settings it last saved.',
+		recording: 'Recording and sending. This takes a few seconds.',
+		sending: 'Sending\u2026',
+		sent: 'Sent. Have a look in {service}.',
+		sendFailed: 'The camera could not send it. Check the settings below; ' +
+			'the reason is in the camera log.',
+		tooSlow: 'The camera did not answer within two minutes. It may still ' +
+			'be trying.',
+		unreachable: 'Could not reach the camera.'
+	};
+
+	var W = EN;
+
+	function t(key, vars) {
+		var out = (W && W[key]) || EN[key] || '';
+		if (vars) {
+			for (var k in vars) {
+				if (Object.prototype.hasOwnProperty.call(vars, k)) {
+					out = out.split('{' + k + '}').join(vars[k]);
+				}
+			}
+		}
+		return out;
+	}
+
+	/* The summary half of a reason. The strip says WHY in a few words, beside
+	 * the headline that raises the question; the trigger row below keeps the
+	 * full sentence and the link that acts on it. Summary and detail, not the
+	 * same text twice -- somebody reading "not everything will be sent" should
+	 * not have to go looking for the cause. */
 	function verdict(s) {
 		var cam = s.camera || {};
 		var trig = s.triggers || {};
@@ -34,24 +105,24 @@
 
 		if (!s.senderInstalled) {
 			out.level = 'bad';
-			out.head = 'This firmware cannot send to ' + s.serviceName;
-			out.what = '—';
-			out.when = 'the part that does the sending is not installed';
+			out.head = t('cannotSend') + s.serviceName;
+			out.what = t('none');
+			out.when = t('noSender');
 			return out;
 		}
 
 		if (!s.enabled) {
 			out.level = 'off';
-			out.head = 'Switched off';
+			out.head = t('off');
 			out.what = describe(s);
-			out.when = 'nothing will be sent';
+			out.when = t('nothingSent');
 			return out;
 		}
 
 		if (!s.addressed) {
 			out.level = 'off';
-			out.head = 'Not set up yet';
-			out.what = '—';
+			out.head = t('notSetUp');
+			out.what = t('none');
 			out.when = s.missing;
 			return out;
 		}
@@ -76,28 +147,28 @@
 		if (trig.motion && !cam.known) {
 			if (cam.asked) {
 				motionWorks = false;
-				out.why.motion = 'The camera did not answer when it was asked ' +
-					'whether it is watching for movement, so this may not happen.';
+				out.why.motion = t('detectorUnknown');
+				out.why.brief = t('unknownWhy');
 			} else {
 				stillAsking = true;
 			}
 		} else if (trig.motion && cam.known && cam.motionDetect === false) {
 			motionWorks = false;
-			out.why.motion = 'The camera is not watching for movement, so this ' +
-				'cannot happen. Everything else here works without it.';
+			out.why.motion = t('detectorOff');
+			out.why.brief = t('partlyWhy');
 		}
 
 		/* Nothing is claimed about when until the prerequisite is settled. */
 		if (stillAsking) {
 			out.what = describe(s);
-			out.head = 'Ready';
-			out.when = 'checking what the camera can do\u2026';
+			out.head = t('ready');
+			out.when = t('checking');
 			return out;
 		}
 
 		var when = [];
 		if (motionWorks) {
-			when.push('when something moves');
+			when.push(t('onMovement'));
 		}
 		if (trig.schedule) {
 			when.push(everyWords(s.interval));
@@ -106,41 +177,41 @@
 		 * service is switched on and addressed, whatever the switches above
 		 * say. A page that answered "nothing will be sent" with every switch
 		 * off would be wrong the first time a doorbell called one of them. */
-		when.push('when something asks');
+		when.push(t('onRequest'));
 
 		out.what = describe(s);
 		out.level = out.why.motion ? 'warn' : 'ok';
-		out.head = out.why.motion ? 'Partly ready' : 'Ready';
+		out.head = out.why.motion ? t('partly') : t('ready');
 		out.when = join(when);
 		return out;
 	}
 
 	function describe(s) {
 		if (s.payload === 'video') {
-			return s.seconds + '-second video';
+			return t('videoN', { n: s.seconds });
 		}
-		return 'Picture';
+		return t('picture');
 	}
 
 	function everyWords(mins) {
 		var m = parseInt(mins, 10);
 		if (m === 60) {
-			return 'every hour';
+			return t('everyHour');
 		}
 		if (m === 360) {
-			return 'every six hours';
+			return t('everySixHours');
 		}
 		if (!m) {
-			return 'on a timer';
+			return t('onTimer');
 		}
-		return 'every ' + m + ' minutes';
+		return t('everyN', { n: m });
 	}
 
 	function join(list) {
 		if (list.length === 1) {
 			return list[0];
 		}
-		return list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
+		return list.slice(0, -1).join(t('comma')) + t('and') + list[list.length - 1];
 	}
 
 	window.NotifyStatus = { verdict: verdict, everyWords: everyWords };
@@ -153,6 +224,19 @@
 	}
 	var cfg = JSON.parse(boot.textContent);
 	var camera = { known: false, asked: false };
+
+	/* The page's own words, if it brought any. Merged OVER the English rather
+	 * than replacing it, so a page that translates half its sentences still
+	 * says something in the other half instead of showing a blank. */
+	if (cfg.words) {
+		W = {};
+		for (var _k in EN) {
+			if (Object.prototype.hasOwnProperty.call(EN, _k)) {
+				W[_k] = Object.prototype.hasOwnProperty.call(cfg.words, _k)
+					? cfg.words[_k] : EN[_k];
+			}
+		}
+	}
 
 	function el(id) { return document.getElementById(id); }
 	function val(id) { var e = el(id); return e ? e.value : ''; }
@@ -209,7 +293,7 @@
 
 		/* Rewriting identical markup restarts transitions and drops a text
 		 * selection, so nothing is touched unless it actually moved. */
-		var sig = [v.level, v.head, v.what, v.when, v.why.motion || '',
+		var sig = [v.level, v.head, v.what, v.when, v.why.motion || '', v.why.brief || '',
 			unsaved() ? 'dirty' : ''].join('|');
 		if (sig === shown) {
 			return;
@@ -225,6 +309,25 @@
 				'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ' +
 				'aria-hidden="true">' + ICONS[v.level] + '</svg>';
 			strip.querySelector('.mj-notify-head').textContent = v.head;
+
+			/* The slot under the headline carries the destination while things
+			 * are fine, and the reason when they are not. A reader who is told
+			 * that not everything will be sent needs the cause more than the
+			 * chat number, and it is the same line either way rather than a
+			 * new one appearing and shifting the page. The server rendered the
+			 * destination there, so it is only replaced once there is
+			 * something to replace it with. */
+			var who = strip.querySelector('.mj-notify-who');
+			if (who) {
+				if (v.why.brief) {
+					if (who.dataset.who === undefined) {
+						who.dataset.who = who.textContent;
+					}
+					who.textContent = v.why.brief;
+				} else if (who.dataset.who !== undefined) {
+					who.textContent = who.dataset.who;
+				}
+			}
 			strip.querySelector('.mj-notify-what').textContent = v.what;
 			strip.querySelector('.mj-notify-when').textContent = v.when;
 		}
@@ -237,8 +340,7 @@
 		var un = el('mj-notify-unsaved');
 		if (un) {
 			if (unsaved()) {
-				un.textContent = 'This is what Save will set. Until then the ' +
-					'camera is still using the settings it last saved.';
+				un.textContent = t('unsaved');
 				un.hidden = false;
 			} else {
 				un.hidden = true;
@@ -253,7 +355,7 @@
 		if (why) {
 			if (v.why.motion) {
 				why.innerHTML = v.why.motion +
-					' <a href="camera.cgi?tab=motionDetect">Switch it on</a>';
+					' <a href="camera.cgi?tab=motionDetect">' + t('switchItOn') + '</a>';
 				why.hidden = false;
 			} else {
 				why.hidden = true;
@@ -330,9 +432,7 @@
 
 			btn.disabled = true;
 			out.className = 'mj-say text-secondary';
-			out.textContent = verb === 'clip'
-				? 'Recording and sending. This takes a few seconds.'
-				: 'Sending...';
+			out.textContent = verb === 'clip' ? t('recording') : t('sending');
 
 			/* POST, because this actuates the camera: it records and sends.
 			 * A GET is what a browser issues on its own and carries the
@@ -349,15 +449,13 @@
 					var ok = said === 'true' || said === 'OK';
 					out.className = 'mj-say ' + (ok ? 'text-success' : 'text-danger');
 					out.textContent = ok
-						? 'Sent. Have a look in ' + cfg.label + '.'
-						: 'The camera could not send it. Check the settings below; ' +
-							'the reason is in the camera log.';
+						? t('sent', { service: cfg.label })
+						: t('sendFailed');
 				})
 				.catch(function (e) {
 					out.className = 'mj-say text-danger';
 					out.textContent = e && e.name === 'AbortError'
-						? 'The camera did not answer within two minutes. It may still be trying.'
-						: 'Could not reach the camera.';
+						? t('tooSlow') : t('unreachable');
 				})
 				.finally(function () {
 					clearTimeout(deadline);

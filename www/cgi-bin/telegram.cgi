@@ -159,6 +159,13 @@ tg_who="not addressed yet"
 <div class="row g-4">
 	<div class="col-12 col-lg-8">
 		<div class="card"><div class="card-body">
+			<% card_head "The bot" %>
+			<p class="small text-secondary">Without these two there is nowhere to send. Get a token from <b>@BotFather</b> in Telegram, with <code>/newbot</code>.</p>
+			<% field_password "telegram_token" "Token" "The long string BotFather gives you. Paste it whole." %>
+			<% field_text "telegram_channel" "Chat" "The chat, channel or group to post in." %>
+		</div></div>
+
+		<div class="card mt-4"><div class="card-body">
 			<% card_head "What it sends" %>
 
 			<% field_switch "telegram_enabled" "Send to Telegram" "eval" %>
@@ -239,10 +246,8 @@ tg_who="not addressed yet"
 		<details class="mj-advanced">
 			<summary>Settings you will probably never need</summary>
 			<div class="card mt-3"><div class="card-body">
-				<% card_head "The bot" %>
-				<% field_password "telegram_token" "Token" "From @BotFather in Telegram, after <code>/newbot</code>." %>
-				<% field_text "telegram_channel" "Chat" "The chat, channel or group to post in." %>
-				<% field_text "telegram_thread_id" "Topic in a forum group" "Leave empty unless the group has topics." %>
+				<% card_head "Forum groups" %>
+				<% field_text "telegram_thread_id" "Topic to post in" "Leave empty unless the group has topics." %>
 
 				<% group_head "How a picture is attached" %>
 				<% field_switch "telegram_document" "Send as a file" "eval" "It arrives exactly as the camera wrote it, rather than as a picture in the chat." %>

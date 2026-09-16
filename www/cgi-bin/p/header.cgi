@@ -156,10 +156,22 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownServices" role="button">Services</a>
 						<ul aria-labelledby="dropdownServices" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Notifications</h6></li>
+							<!-- First, and hidden from almost everyone.
+							     MAX is a Russian service whose bots only a Russian
+							     business can register, and this page is Russian
+							     throughout, so it is revealed only to a browser that
+							     says its reader speaks Russian -- for whom it is the
+							     most likely choice of the three, which is why it leads.
+							     Everyone else sees the list starting at OpenWall, with
+							     no gap where this was: an entry nobody else can read is
+							     not a thing they are missing.
+							     main.js does the revealing. Hiding it is not access
+							     control -- the page still answers a direct link, which
+							     is what a bookmark and the webhook URLs rely on. -->
+							<li id="nav-max" hidden><a class="dropdown-item" href="max.cgi"><% page_label max %></a></li>
 							<li><a class="dropdown-item" href="openwall.cgi"><% page_label openwall %></a></li>
 							<li><a class="dropdown-item" href="telegram.cgi"><% page_label telegram %></a></li>
 							<li><a class="dropdown-item" href="ntfy.cgi"><% page_label ntfy %></a></li>
-							<li><a class="dropdown-item" href="max.cgi"><% page_label max %></a></li>
 							<li><h6 class="dropdown-header">Networking</h6></li>
 							<li><a class="dropdown-item" href="https://openipc.cloud">P2P network</a></li>
 							<li><a class="dropdown-item" href="vtun.cgi"><% page_label vtun %></a></li>
