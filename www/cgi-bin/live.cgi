@@ -72,6 +72,12 @@ hide_title=1; full_bleed=1
      preview-zoom.js, whose placement and rubber band it uses, and after
      preview-still.js for the same reason. Guarded like it: a build missing
      the file, or a camera without the door, leaves the page as it was. -->
+<!-- The embeddable player (the settings pages' picture), which the peer
+     control mounts inside its loupe to play the OTHER camera. After the
+     transport modules it hangs together -- preview.js, preview-swap.js,
+     preview-transport.js, preview-chain.js -- and before preview-peer.js,
+     which checks for it and falls back to snapshots without it. -->
+<script src="/a/mj-preview.js"></script>
 <script src="/a/preview-peer.js"></script>
 <script src="/a/preview-hero.js"></script>
 <!-- Is the camera seeing anything? Nothing the player can answer — a camera on

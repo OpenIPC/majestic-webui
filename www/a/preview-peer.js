@@ -59,6 +59,11 @@
 	const OUTLINE_PLACE_MS = 250;
 	const STILL_MS = 1000;
 	const INSET_MS = 125;
+	/* A loupe smaller than this shows nothing anyone can read, so a smaller
+	 * drawing is grown around its centre to it (kept on the picture); one
+	 * still narrower than the toolbar hides its tag. */
+	const LOUPE_MIN_W = 160, LOUPE_MIN_H = 90;
+	const LOUPE_CRAMPED_W = 220, LOUPE_CRAMPED_H = 120;
 
 	let peers = [];         /* names the calibration knows, as the camera spelt them */
 	let geom = null;        /* null means NOT KNOWN -- never assume 1:1 */
@@ -463,6 +468,7 @@
 	function layout() {
 		if (!L.el || !L.box) return;
 		const b = loupeBox();
+		L.el.classList.toggle('mj-loupe-cramped', b.w < LOUPE_CRAMPED_W || b.h < LOUPE_CRAMPED_H);
 		const st = L.el.style;
 		st.left = b.x + 'px';
 		st.top = b.y + 'px';
@@ -844,6 +850,18 @@
 	}
 	const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+	/* The drawn box, grown around its centre to the loupe's minimum where it
+	 * is smaller, and kept on the picture. The rectangle asked of the camera
+	 * is this one, so what the loupe shows is what its box says. */
+	function roomy(b) {
+		const p = picRect();
+		let w = Math.max(b.w, LOUPE_MIN_W), h = Math.max(b.h, LOUPE_MIN_H);
+		w = Math.min(w, p.r - p.x); h = Math.min(h, p.b - p.y);
+		let x = b.x + b.w / 2 - w / 2, y = b.y + b.h / 2 - h / 2;
+		x = clamp(x, p.x, p.r - w); y = clamp(y, p.y, p.b - h);
+		return { x: x, y: y, w: w, h: h };
+	}
+
 	function bandRect(e) {
 		const s = stage.getBoundingClientRect(), p = picRect();
 		const x = clamp(e.clientX - s.left, p.x, p.r), y = clamp(e.clientY - s.top, p.y, p.b);
@@ -883,10 +901,11 @@
 		const minH = Math.max(16, stage.clientHeight * 0.02);
 		const was = loupeOpen();
 		if (b && b.w >= minW && b.h >= minH) {
-			const m = toMain(b);
+			const rb = roomy(b);
+			const m = toMain(rb);
 			if (m.rect) {
 				if (was) closeLoupe();
-				openLoupe(b, m.rect);
+				openLoupe(rb, m.rect);
 			} else {
 				say(m.why);
 			}

@@ -322,6 +322,22 @@ async function armAndDraw(env, x0, y0, x1, y1) {
 		ok(env.outline().hidden, 'the outline goes with it');
 	}
 
+	group('a loupe needs room');
+	{
+		const env = boot();
+		await env.tick();
+		// A 40x30 drawing at (500,400): grown around its centre to 160x90.
+		await armAndDraw(env, 600, 450, 640, 480);
+		const l = env.loupe();
+		ok(l && !l.hidden, 'a small drawing still opens a loupe');
+		ok(l.style.width === '160px' && l.style.height === '90px', 'at the minimum size');
+		ok(l.style.left === '440px' && l.style.top === '370px', 'centred on what was drawn');
+		ok(env.asked.some((u) => u === '/api/v1/calibration/map?peer=tele&rect=1140x959x416x234'),
+			'and the camera was asked for the grown rectangle, so the box shows what it says');
+		ok(l.classList.contains('mj-loupe-cramped'), 'and it is cramped: the tag hides, the toolbar stays');
+		env.esc();
+	}
+
 	group('a rectangle that cannot be answered is a sentence, not a loupe');
 	{
 		const env = boot({ answer: { status: 400, body: null } });

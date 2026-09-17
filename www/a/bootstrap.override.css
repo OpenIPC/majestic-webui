@@ -8192,3 +8192,6 @@ body > main > .container > form > .mj-foot {
 	border-radius: var(--bs-border-radius);
 }
 .mj-peer-pair-why { flex-basis: 100%; color: #b9bec9; }
+/* Cramped: a box too small for the tag and the toolbar together keeps the
+   toolbar (it is the way out) and drops the tag. */
+.mj-loupe-cramped .mj-loupe-tag { display: none; }
