@@ -299,6 +299,26 @@ async function armAndDraw(env, x0, y0, x1, y1) {
 		ok(env.api().loupe().session.id === 's1', 'the session is held');
 		ok(!env.outline().hidden, 'the outline stays while the loupe is open');
 
+		// A press on the toolbar is the loupe's, stopped at the stage so the
+		// page neither pans nor captures the pointer; it starts no grab.
+		let stopped = 0;
+		const btn = l.find('[data-act="swap"]');
+		env.els['#mj-stage'].fire('pointerdown', { pointerId: 9, clientX: 580, clientY: 400, button: 0, target: btn, stopImmediatePropagation() { stopped++; } });
+		ok(stopped === 1, 'a press on the toolbar is stopped at the stage');
+		env.els['#mj-stage'].fire('pointerup', { pointerId: 9, clientX: 580, clientY: 400, button: 0, target: btn, stopImmediatePropagation() { stopped++; } });
+		ok(stopped === 2, 'and so is its release');
+		ok(l.style.left === '470px', 'and nothing moved');
+		// A drag on the loupe's body moves it and asks the camera again.
+		const body = l.find('.mj-loupe-host');
+		const before = env.asked.length;
+		env.els['#mj-stage'].fire('pointerdown', { pointerId: 9, clientX: 600, clientY: 450, button: 0, target: body, stopImmediatePropagation() {} });
+		env.els['#mj-stage'].fire('pointermove', { pointerId: 9, clientX: 620, clientY: 460, target: body, stopImmediatePropagation() {} });
+		env.els['#mj-stage'].fire('pointerup', { pointerId: 9, clientX: 620, clientY: 460, target: body, stopImmediatePropagation() {} });
+		await env.tick();
+		await env.tick();
+		ok(l.style.left === '490px' && l.style.top === '340px', 'dragged by (20,10)');
+		ok(env.asked.length > before && /rect=1270x881x778x571$/.test(env.asked[env.asked.length - 1]), 'and the moved rectangle was asked of the camera');
+
 		// Whole: the entire peer picture fits the box.
 		l.find('[data-act="whole"]').fire('click');
 		const kw = Math.min(300 / 2592, 220 / 1944);

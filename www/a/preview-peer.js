@@ -427,10 +427,6 @@
 		L.el.appendChild(L.bar);
 		L.el.appendChild(L.tag);
 		L.el.appendChild(L.grip);
-		L.el.addEventListener('pointerdown', loupeDown);
-		L.el.addEventListener('pointermove', loupeMove);
-		L.el.addEventListener('pointerup', (e) => loupeUp(e, true));
-		L.el.addEventListener('pointercancel', (e) => loupeUp(e, false));
 		L.el.addEventListener('dblclick', (e) => {
 			if (e && e.target && e.target.closest && e.target.closest('.mj-loupe-bar, .mj-loupe-inset')) return;
 			setSwapped(!L.swapped);
@@ -791,21 +787,25 @@
 		try { m.requestPictureInPicture().catch(() => say('the browser refused to pop the video out')); } catch (e) {}
 	}
 
-	/* Moving and resizing, on the loupe's own element, in the bubbling phase
-	 * (the stage's capture listeners below ignore a press inside the loupe). */
+	/* Moving and resizing. A press inside the loupe reaches these from the
+	 * stage's capture listeners below, which run before the zoom module's
+	 * and stop the event there: otherwise the page would start a pan and
+	 * capture the pointer, and a click on the toolbar would never land on
+	 * its button. A press on the toolbar or the inset starts no grab. */
 	let grab = null;
+	function inLoupe(e) {
+		return loupeOpen() && e.target && e.target.closest && !!e.target.closest('#mj-peer-loupe');
+	}
 	function loupeDown(e) {
 		if (L.swapped || !L.box) return;
 		if (e.button != null && e.button > 0) return;
 		if (e.target && e.target.closest && e.target.closest('.mj-loupe-bar, .mj-loupe-inset')) return;
-		if (e.stopPropagation) e.stopPropagation();
 		const resize = !!(e.target && e.target.closest && e.target.closest('.mj-loupe-grip'));
 		grab = { id: e.pointerId, x: e.clientX, y: e.clientY, box: Object.assign({}, L.box), resize: resize };
 		try { L.el.setPointerCapture(e.pointerId); } catch (err) {}
 	}
 	function loupeMove(e) {
 		if (!grab || e.pointerId !== grab.id) return;
-		if (e.stopPropagation) e.stopPropagation();
 		const dx = e.clientX - grab.x, dy = e.clientY - grab.y;
 		const p = picRect();
 		const b = grab.box;
@@ -820,7 +820,6 @@
 	}
 	function loupeUp(e, commit) {
 		if (!grab || e.pointerId !== grab.id) return;
-		if (e.stopPropagation) e.stopPropagation();
 		try { L.el.releasePointerCapture(e.pointerId); } catch (err) {}
 		const moved = grab.box.x !== L.box.x || grab.box.y !== L.box.y || grab.box.w !== L.box.w || grab.box.h !== L.box.h;
 		grab = null;
@@ -879,6 +878,7 @@
 	}
 
 	function down(e) {
+		if (inLoupe(e)) { e.stopImmediatePropagation(); loupeDown(e); return; }
 		if (!armed) return;
 		if (e.button != null && e.button > 0) return;
 		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
@@ -889,6 +889,7 @@
 		try { stage.setPointerCapture(e.pointerId); } catch (err) {}
 	}
 	function move(e) {
+		if (grab) { e.stopImmediatePropagation(); loupeMove(e); return; }
 		if (!drawing || e.pointerId !== drawing.id) return;
 		e.stopImmediatePropagation();
 		const b = bandRect(e);
@@ -899,6 +900,8 @@
 		band.style.height = b.h + 'px';
 	}
 	function finish(e, commit) {
+		if (grab) { e.stopImmediatePropagation(); loupeUp(e, commit); return; }
+		if (inLoupe(e)) { e.stopImmediatePropagation(); return; }
 		if (!drawing || e.pointerId !== drawing.id) return;
 		e.stopImmediatePropagation();
 		const b = commit ? bandRect(e) : null;

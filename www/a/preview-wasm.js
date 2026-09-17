@@ -118,7 +118,8 @@ window.MajesticWasm = (function () {
 			const D = DC();
 			if (!worker || dead || dcBlocked || !D) return false;
 			feedName = 'datachannel';
-			const f = D.open({ stream: stream, iceServers: opts.iceServers });
+			const f = D.open({ stream: stream, iceServers: opts.iceServers,
+				origin: opts.origin, session: opts.session });
 			feedObj = f;
 			let meta = null;
 			f.onmeta = function (m) { meta = m; };
