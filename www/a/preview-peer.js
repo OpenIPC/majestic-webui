@@ -57,6 +57,11 @@
 	const PLACE_MS = 250;
 	const STILL_MS = 1000;
 	const CLICK_SLOP = 6;
+	/* The snapshot stays on top this long after the video says it plays: the
+	 * software rung paints what it decodes from the first packet, and until
+	 * a keyframe arrives that is a grey field, not a picture. A keyframe is
+	 * asked for at the same moment, so this is a ceiling, not a delay. */
+	const PLAY_GRACE_MS = 1500;
 
 	let peers = [];         /* names the calibration knows, as the camera spelt them */
 	let myConfig = null;    /* this camera's configuration, for the peer player's ICE settings */
@@ -476,7 +481,20 @@
 				if (codec) O.codec = String(codec);
 				placeOverlay();
 			},
-			onPlaying: () => { O.playing = true; O.lost = false; stopStills(); placeOutline(); },
+			onPlaying: () => {
+				O.playing = true;
+				O.lost = false;
+				if (O.stillTimer) { clearInterval(O.stillTimer); O.stillTimer = null; }
+				/* A fresh keyframe now, so the picture under the snapshot is a
+				 * picture by the time the snapshot goes. */
+				try {
+					const p = O.handle && O.handle.player ? O.handle.player() : null;
+					if (p && typeof p.requestIdr === 'function') p.requestIdr();
+				} catch (e) {}
+				const my = gen;
+				setTimeout(() => { if (my === gen && O.on && O.playing) stopStills(); }, PLAY_GRACE_MS);
+				placeOutline();
+			},
 			onLost: () => { O.playing = false; fallbackToStills(); },
 		});
 		if (!O.handle) { fallbackToStills(); return; }

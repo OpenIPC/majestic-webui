@@ -120,7 +120,8 @@ function boot(opts) {
 					const stage = makeEl('div');
 					stage.className = 'mj-pv-stage';
 					host.appendChild(stage);
-					const h = { stage: stage, opts: o, destroyed: 0, stream: () => 0, setStream() {}, destroy() { this.destroyed++; } };
+					const player = { idr: 0, requestIdr() { this.idr++; } };
+					const h = { stage: stage, opts: o, destroyed: 0, stream: () => 0, setStream() {}, player: () => player, destroy() { this.destroyed++; } };
 					mounts.push(h);
 					return h;
 				},
@@ -303,7 +304,10 @@ function apply(matrix, X, Y) {
 		const q2 = apply(env.api().overlay().matrix, 320, 240);
 		ok(near(q2.x, c[2].x) && near(q2.y, c[2].y), 'and still lands on the third corner');
 		m.onPlaying('webrtc');
-		ok(still.hidden, 'the snapshot goes once the video plays');
+		ok(env.mounts[0].player().idr === 1, 'a keyframe is asked for the moment it plays');
+		ok(!still.hidden, 'the snapshot stays on top for a moment: the first frames may be no picture yet');
+		await new Promise((r) => setTimeout(r, 1700));
+		ok(still.hidden, 'and goes once the grace has passed');
 		ok(/tele · LIVE/.test(env.outline().find('text').textContent), 'the label says live');
 		ok(/mj-peer-dim-off/.test(env.outline().find('.mj-peer-dim').getAttribute('class')), 'the dimming lifts');
 		// A second click takes it away; Esc would too.
