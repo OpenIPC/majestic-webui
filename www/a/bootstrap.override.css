@@ -3621,6 +3621,19 @@ button.mj-osd-chip,
 	gap: 0;
 }
 
+/* The peer picker, shown only when there are two or more cameras to choose
+   between: the bar's own glass, no chrome of its own. */
+.mj-peer-pick {
+	margin-left: 0.25rem;
+	max-width: 9rem;
+	font-size: inherit;
+	color: inherit;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: var(--bs-border-radius);
+	padding: 0 0.3rem;
+}
+
 /* The indicator is the point of a stateful control: what the camera is doing,
    readable at a glance without hunting for a pressed-looking button. */
 .mj-led {

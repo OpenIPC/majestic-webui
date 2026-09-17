@@ -67,6 +67,12 @@ hide_title=1; full_bleed=1
      preview-zoom.js, which is what tells it. Like preview-roi.js it is in
      neither test's SRCS list: preview-page.js does not know it exists. -->
 <script src="/a/preview-still.js"></script>
+<!-- The other camera's view of the part you drew: a rectangle on this picture
+     asked of the camera's calibration and answered as the peer's crop. After
+     preview-zoom.js, whose placement and rubber band it uses, and after
+     preview-still.js for the same reason. Guarded like it: a build missing
+     the file, or a camera without the door, leaves the page as it was. -->
+<script src="/a/preview-peer.js"></script>
 <script src="/a/preview-hero.js"></script>
 <!-- Is the camera seeing anything? Nothing the player can answer — a camera on
      the wrong sensor driver plays perfectly and plays black — so this reads the
