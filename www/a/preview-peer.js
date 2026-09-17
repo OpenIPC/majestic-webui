@@ -429,8 +429,16 @@
 	}
 
 	/* The peer's picture as this page has it: the decoded frame when the
-	 * player has one, else the size the calibration row declared. */
-	function peerFrame() { return O.frame || O.size || null; }
+	 * player has one, else the stream it is asked for, else the size the
+	 * calibration row declared. All of them are the same picture at
+	 * different sizes -- the transform is per size -- so any of them places
+	 * the snapshot before the video says. */
+	function peerFrame() {
+		if (O.frame) return O.frame;
+		const s = streamOf(wantSub() ? 1 : 0);
+		if (s && s.w > 0 && s.h > 0) return { w: s.w, h: s.h };
+		return O.size || null;
+	}
 
 	/* Put the peer's picture on the outline: the player's stage (and the
 	 * snapshot behind it) sized to the frame, at the stage's origin, with the
@@ -454,14 +462,25 @@
 		});
 	}
 
-	/* The configuration the embedded player reads: the peer's codec once its
-	 * stream said, else assumed H.265 so the software rung is on the ladder;
-	 * no sub channel, because the point is detail; this camera's ICE
+	/* Which of the peer's streams to watch. The sub stream when the peer has
+	 * one in H.264: every browser decodes that natively, and 1280x720 is more
+	 * than an overlay a few hundred pixels wide can show, while a 2592x1944
+	 * H.265 main stream through the software rung is eight frames a second of
+	 * mostly grey in a browser without hardware HEVC. The main stream when
+	 * there is nothing else, and the codec the peer named for each, so the
+	 * transport ladder knows what it is being handed. */
+	function streamOf(id) { return O.sess && O.sess.streams ? O.sess.streams.find((s) => s.id === id) : null; }
+	function wantSub() { const s = streamOf(1); return !!(s && s.codec === 'h264'); }
+
+	/* The configuration the embedded player reads: the peer's codecs as it
+	 * named them (else H.265 assumed, so the software rung is on the ladder),
+	 * whether there is a sub stream to prefer, and this camera's ICE
 	 * settings, which are the LAN's. */
 	function peerConfig() {
+		const main = streamOf(0), sub = streamOf(1);
 		return {
-			video0: { codec: O.codec || 'h265' },
-			video1: { enabled: false },
+			video0: { codec: (main && main.codec) || O.codec || 'h265' },
+			video1: { enabled: wantSub(), codec: (sub && sub.codec) || 'h264' },
 			webrtc: myConfig && myConfig.webrtc ? myConfig.webrtc : {},
 		};
 	}
@@ -498,7 +517,11 @@
 			onLost: () => { O.playing = false; fallbackToStills(); },
 		});
 		if (!O.handle) { fallbackToStills(); return; }
-		if (O.handle.stream && O.handle.stream() !== 0 && O.handle.setStream) O.handle.setStream(0);
+		/* The player starts on the sub stream when the configuration offers
+		 * one and nothing was remembered; said explicitly here so a
+		 * remembered choice from another page never decides for this one. */
+		const want = wantSub() ? 1 : 0;
+		if (O.handle.stream && O.handle.stream() !== want && O.handle.setStream) O.handle.setStream(want);
 		placeOverlay();
 	}
 
@@ -554,7 +577,11 @@
 		if (!res) { say('could not reach the camera'); return null; }
 		if (res.ok && body && typeof body.session === 'string' && typeof body.url === 'string') {
 			const expires = Number.isFinite(body.expires) && body.expires > 0 ? body.expires : null;
-			return { url: body.url.replace(/\/+$/, ''), id: body.session, expires: expires, size: parseSize(body.size) };
+			const streams = Array.isArray(body.streams)
+				? body.streams.filter((s) => s && Number.isFinite(s.id) && typeof s.codec === 'string')
+					.map((s) => ({ id: s.id | 0, codec: s.codec, w: s.width | 0, h: s.height | 0 }))
+				: [];
+			return { url: body.url.replace(/\/+$/, ''), id: body.session, expires: expires, size: parseSize(body.size), streams: streams };
 		}
 		if (res.status === 409 && body && body.paired === false) {
 			offerPairing(peer, retry, typeof body.url === 'string' && /^https?:\/\//.test(body.url) ? body.url : '');

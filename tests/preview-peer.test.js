@@ -121,7 +121,8 @@ function boot(opts) {
 					stage.className = 'mj-pv-stage';
 					host.appendChild(stage);
 					const player = { idr: 0, requestIdr() { this.idr++; } };
-					const h = { stage: stage, opts: o, destroyed: 0, stream: () => 0, setStream() {}, player: () => player, destroy() { this.destroyed++; } };
+					const h = { stage: stage, opts: o, destroyed: 0, streamNow: o.config().video1.enabled ? 1 : 0, setStream(n) { this.streamNow = n; this.set = (this.set || 0) + 1; }, player: () => player, destroy() { this.destroyed++; } };
+					h.stream = () => h.streamNow;
 					mounts.push(h);
 					return h;
 				},
@@ -145,6 +146,7 @@ function boot(opts) {
 				if (!state.paired) return reply(409, { peer: 'tele', paired: false, reason: 'this camera is not paired with that one', url: 'http://192.0.2.7:80' });
 				state.sessions++;
 				const body = { peer: 'tele', paired: true, url: 'http://192.0.2.7:80', session: 's' + state.sessions, size: '640x480' };
+				if (opts.streams) body.streams = opts.streams;
 				if (!opts.noExpires) body.expires = 900;
 				if (opts.slowPeer) return new Promise((r) => { heldPeer.push(() => r({ ok: true, status: 200, json: () => Promise.resolve(body) })); });
 				return reply(200, body);
@@ -318,6 +320,42 @@ function apply(matrix, X, Y) {
 		ok(!env.outline().hidden && /click inside/.test(env.outline().find('text').textContent), 'the outline stays, and invites again');
 		env.esc();
 		ok(env.outline().hidden, 'Esc then disarms');
+	}
+
+	group('the peer\'s streams: the native one, big enough');
+	{
+		const env = boot({ streams: [{ id: 0, codec: 'h265', width: 2592, height: 1944 }, { id: 1, codec: 'h264', width: 1280, height: 720 }] });
+		await env.tick();
+		await env.arm();
+		await env.click(MID.x, MID.y);
+		const m = env.mounts[0];
+		ok(m.opts.config().video1.enabled === true && m.opts.config().video1.codec === 'h264', 'an H.264 sub stream is offered to the player');
+		ok(m.opts.config().video0.codec === 'h265', 'and the main stream\'s codec is what the peer said');
+		ok(m.stream() === 1 && !m.set, 'the player starts on the sub stream without being switched');
+		const f = env.api().overlay().frame;
+		ok(f.w === 1280 && f.h === 720, 'the snapshot is placed at the sub stream\'s size until the decoder says');
+		const mat = env.api().overlay().matrix, c = env.api().corners();
+		const p2 = apply(mat, 1280, 720);
+		ok(near(p2.x, c[2].x) && near(p2.y, c[2].y), 'and lands on the outline all the same');
+		env.esc();
+	}
+	{
+		const env = boot({ streams: [{ id: 0, codec: 'h264', width: 1920, height: 1080 }] });
+		await env.tick();
+		await env.arm();
+		await env.click(MID.x, MID.y);
+		const m = env.mounts[0];
+		ok(m.opts.config().video1.enabled === false && m.stream() === 0, 'no sub stream: the main one');
+		ok(m.opts.config().video0.codec === 'h264', 'with its codec');
+		env.esc();
+	}
+	{
+		const env = boot({ streams: [{ id: 0, codec: 'h265', width: 2592, height: 1944 }, { id: 1, codec: 'h265', width: 1280, height: 720 }] });
+		await env.tick();
+		await env.arm();
+		await env.click(MID.x, MID.y);
+		ok(env.mounts[0].stream() === 0, 'an H.265 sub stream is no better than the main: the main');
+		env.esc();
 	}
 
 	group('a perspective quadrilateral is a perspective transform');
