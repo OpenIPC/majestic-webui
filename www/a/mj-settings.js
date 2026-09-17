@@ -249,6 +249,7 @@
 		}
 		buildNav();
 		publishRailTop();
+		watchRailTop();
 		wireSearch();
 		watchIrcut();
 		// the rail is a tree on >=md and an accordion below it; re-render rather
@@ -282,6 +283,13 @@
 	// once, here, like REQ — but there is no page without it, so load() says so
 	// rather than throwing at the first lookup.
 	const TREE = (typeof window === 'object' && window.MajesticTree) || null;
+
+	// Where the rail's list has to sit and whether a pick has to move the page —
+	// two pieces of rectangle arithmetic, in mj-rail.js so tests/rail.test.js can
+	// ask them. Unlike the tree there IS a page without it, so its absence
+	// degrades to the behaviour this page had before the rail had a scroller of
+	// its own rather than to a fatal.
+	const RAIL = (typeof window === 'object' && window.MajesticRail) || null;
 	function treeOf() {
 		if (!state.tree || state.tree.schema !== state.schema) {
 			state.tree = TREE.build(state.schema, {
@@ -433,11 +441,37 @@
 	// message or the restart banner adds its own. Read off the COLUMN, never off
 	// the rail: the rail is the sticky one, so once it has stuck its own box is
 	// no longer where the document put it.
+	let railTop = null;
 	function publishRailTop() {
 		const col = document.querySelector('#page-camera .row > .col-md-3');
 		if (!col) return;
 		const top = Math.round(col.getBoundingClientRect().top + window.scrollY);
+		// Written only when it has actually moved. The observer below fires on
+		// every layout change on the page, and a property whose value the
+		// stylesheet reads is not a free thing to set.
+		if (top === railTop) return;
+		railTop = top;
 		document.documentElement.style.setProperty('--mj-rail-top', top + 'px');
+	}
+
+	// A banner arriving after the page has loaded moves the row down, and the
+	// offset published above does not know. Then the rail is capped as though it
+	// still began where it did, its own last rows hang below the fold, and the
+	// fault this rail exists to have fixed is back one layer down — measured with
+	// the card warning that /a/storage-check.js raises on a heartbeat: the rail's
+	// scrollport ended 74px past the bottom of the window.
+	//
+	// Both notice slots are filled from something that arrives — a release feed,
+	// a heartbeat verdict — and both are emptied again when the camera recovers,
+	// so a watcher rather than a list of moments. The body rather than the slots:
+	// a list of the things that can move the row is a second copy of the page's
+	// own structure, and it would be wrong the first time a page grew a third
+	// banner. Everything else it fires for costs one rect and no write at all.
+	function watchRailTop() {
+		if (typeof ResizeObserver !== 'function') return;
+		try {
+			new ResizeObserver(() => publishRailTop()).observe(document.body);
+		} catch (e) { /* the resize handler below is the fallback */ }
 	}
 
 	// Put the section you are on in front of the eye looking for it, inside the
@@ -446,16 +480,16 @@
 	// or from a search that has just rebuilt the list — which resets the pane to
 	// its top — can sit below the fold of a list nobody has scrolled yet.
 	//
-	// scrollTop arithmetic rather than scrollIntoView({ block: 'nearest' }),
-	// which walks every scrollable ancestor and would move the PAGE too. Not
-	// moving the page is the whole reason the rail has a scroller of its own.
+	// The offset itself is mj-rail.js's, along with every boundary it has — a row
+	// flush against an edge is inside, a row taller than the pane shows its
+	// beginning, a pane with nothing to scroll is left alone — because all of
+	// that fails silently and a fixture can hold it still where a camera cannot.
 	function revealInRail(link) {
 		const nav = document.getElementById('mj-settings-nav');
-		if (!nav || !link || nav.scrollHeight <= nav.clientHeight) return;
-		const n = nav.getBoundingClientRect();
-		const l = link.getBoundingClientRect();
-		if (l.top < n.top) nav.scrollTop -= n.top - l.top;
-		else if (l.bottom > n.bottom) nav.scrollTop += l.bottom - n.bottom;
+		if (!RAIL || !nav || !link) return;
+		nav.scrollTop = RAIL.scrollTopFor(
+			nav.getBoundingClientRect(), link.getBoundingClientRect(),
+			nav.scrollTop, nav.scrollHeight - nav.clientHeight);
 	}
 
 	function buildNav() {
@@ -556,16 +590,9 @@
 	// is stacked *above* the form rather than beside it, so a tap left them
 	// looking at navigation with the fields they asked for below the fold (#199).
 	//
-	// From md up the rail is beside the form and scrolls inside itself, so
-	// picking a section moves nothing and there is usually nothing to correct.
-	// Usually: a long section is taller than the window, and reading one to the
-	// bottom leaves the page scrolled past the form column's top edge. Pick a
-	// short section from there and the document it is clamped against has just
-	// become much shorter, so the browser lands wherever it can — measured at
-	// 1280x900, 282px above the card it was asked for, with an empty column on
-	// screen. So the correction is asked of the geometry rather than of the
-	// breakpoint: bring the column back only when its top edge is off the top of
-	// the window, and never jump a section that is already in front of you.
+	// From md up the rail is beside the form and scrolls inside itself, so a pick
+	// moves nothing and there is usually nothing to correct — usually, and
+	// mj-rail.js's revealsForm() holds both the exception and why.
 	//
 	// The whole column rather than the section's card: the live leaf renders a
 	// row of two panels and no card at all, so there is no single card to aim at
@@ -612,7 +639,12 @@
 		// bare scrollIntoView() animates like every other scroll on the site and
 		// stops animating for anyone who asked it to. Naming 'smooth' or 'instant'
 		// here would opt this one navigation out of both.
-		if (!WIDE.matches || col.getBoundingClientRect().top < 0) col.scrollIntoView();
+		// Without mj-rail.js, the rule this page had before it: travel below md,
+		// and never above it.
+		const move = RAIL
+			? RAIL.revealsForm(WIDE.matches, col.getBoundingClientRect().top)
+			: !WIDE.matches;
+		if (move) col.scrollIntoView();
 	}
 
 	function onPopState(ev) {

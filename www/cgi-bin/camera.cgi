@@ -204,6 +204,14 @@ fi
 %>
 <script src="/a/mj-tree.js" defer></script>
 <%
+# Where the rail's list has to sit and whether a pick has to move the page. Its
+# own file for the reason mj-fps.js is: rectangle arithmetic that fails silently
+# — a list scrolled to the wrong offset is still a list — and tests/rail.test.js
+# is what can ask it without a camera carrying enough sections to overflow a
+# window.
+%>
+<script src="/a/mj-rail.js" defer></script>
+<%
 # What frame rate the camera reaches at each resolution. Its own file, and pure,
 # so tests/fps-caps.test.js can ask it: a control bounded wrongly is still a
 # control, and reproducing one needs a camera with more than one sensor mode.

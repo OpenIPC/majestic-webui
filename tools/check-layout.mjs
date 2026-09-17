@@ -147,26 +147,29 @@ function measure() {
 		}
 
 	// A sticky box taller than the window. `position: sticky` pins the TOP of a
-	// box and does nothing else, so one taller than the screen has a bottom that
-	// is reachable only by scrolling the PAGE -- which is exactly what the
-	// sticky was there to avoid, and which carries whatever sits beside it off
-	// the top of the screen on the way. The settings rail was 1083px against a
-	// 900px window: picking a section from the bottom of the tree left the form
-	// column 282px above the fold and the answer was to scroll back up.
+	// box and does nothing else, so the part of one that does not fit is off
+	// screen at EVERY offset, and reaching it means scrolling the PAGE -- which
+	// is exactly what the sticky was there to avoid, and which carries whatever
+	// sits beside it off the top of the screen on the way. The settings rail was
+	// 1083px against a 900px window: picking a section from the bottom of the
+	// tree left the form column 282px above the fold and the answer was to
+	// scroll back up.
 	//
-	// An inner scroller is the fix, so a box that HAS one is not reported: what
-	// is wrong is a tall sticky with nowhere for the overflow to go.
+	// The RENDERED box is the whole measurement and nothing exempts it. An inner
+	// scroller is the fix, but only because it is what lets the box itself fit:
+	// a scrollport inside a box that is still too tall has its own last rows
+	// below the fold, which is the same fault one layer down. So a scrolling
+	// descendant proves nothing -- an earlier cut of this rule took any of them
+	// as proof, which would have let a tall sticky holding an overflowing <pre>
+	// report clean.
 	for (const e of document.querySelectorAll('body *')) {
-		const cs = getComputedStyle(e);
-		if (cs.position !== 'sticky') continue;
+		if (getComputedStyle(e).position !== 'sticky') continue;
 		const r = e.getBoundingClientRect();
 		if (r.height <= window.innerHeight) continue;
-		const scroller = [e, ...e.querySelectorAll('*')].some((k) => {
-			const o = getComputedStyle(k).overflowY;
-			return (o === 'auto' || o === 'scroll') && k.scrollHeight > k.clientHeight;
-		});
-		if (!scroller)
-			R.tall.push(`${nm(e)}: ${Math.round(r.height)}px of sticky in a ${window.innerHeight}px window, and nothing inside it scrolls`);
+		R.tall.push(
+			`${nm(e)}: ${Math.round(r.height)}px of sticky in a ${window.innerHeight}px window` +
+				' -- the part past the fold is unreachable without scrolling the page',
+		);
 	}
 
 	// A grid line that leaves a hole. One card alone on a second row beside
@@ -203,7 +206,14 @@ const SELF_TEST_PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
   <div class="card" style="position:absolute;top:10px;left:10px;width:200px">A</div>
   <div class="card" style="position:absolute;top:20px;left:20px;width:200px">B</div>
   <div class="spill"></div>
-  <div class="tall-sticky" style="position:sticky;top:0;height:200vh"></div>
+  <div class="tall-sticky" style="position:sticky;top:0;height:200vh">
+    <pre style="overflow-y:auto;height:40px;margin:0">a
+scrolling
+descendant
+that
+proves
+nothing</pre>
+  </div>
 </main></body></html>`;
 
 // Sign in the way the browser does.
@@ -339,7 +349,7 @@ const browser = await puppeteer.launch({
 let status = 0;
 const args = process.argv.slice(2);
 if (args[0] === '--self-test') {
-	console.log('self-test: a page with a clipped select, an overlap, a half-empty row, a spill and an unscrollable tall sticky');
+	console.log('self-test: a page with a clipped select, an overlap, a half-empty row, a spill and a tall sticky (holding a scroller that must not excuse it)');
 	const seen = new Set();
 	const found = await run(browser, SELF_TEST_PAGE, true, seen);
 	// EVERY rule has to fire, not merely some total. A count is green while a
