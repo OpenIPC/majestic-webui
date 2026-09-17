@@ -100,6 +100,11 @@
 	// tenth of what the camera that prompted this was doing, so it is
 	// neither a hair trigger nor a number that waits for damage.
 	const CAM_FLIPS_1H = 8;
+	// night_mode_source, as the endpoint documents it: 0 manual, 1 GPIO
+	// sensor, 2 gain thresholds, 3 ADC, 4 automatic. Only 4 runs on the gain
+	// multiples, and only 4 is named here — the findings below ask "is the
+	// automatic monitor deciding", never "which of the other four is".
+	const SRC_AUTO = 4;
 	// Sensor gain is reported in multiples of 1x and bottoms out at exactly
 	// 1x, so a night threshold of 1 is true at every gain the part can
 	// produce. Nothing above this is a judgement call — it is arithmetic.
@@ -548,17 +553,36 @@
 		// evidence, and the fault they describe produces plenty of evidence —
 		// it just produces it at a distant camera with nobody looking.
 		//
-		// Measured on a gk7205v300 + IMX335, 2026-09-17: autoNightGain
-		// of 1 with the scene pinned at 1.0x gain and the AE nowhere near its
-		// limit, driving the filter back and forth on a 45 s cycle for hours.
-		// Neither majestic nor this page had a word to say about it.
+		// The shape they catch, on a gk7205v300 + IMX335 with automatic
+		// day/night and a five-second delay each way: a night gain multiple
+		// of 1, a well-lit scene sitting at 1.0x gain with the exposure well
+		// under its ceiling, and the filter driven back and forth on a
+		// 45 s cycle — autoDayDelay x8, the anti-flap penalty at its
+		// ceiling, plus autoNightDelay. Reproducible from those settings on
+		// any camera; nothing about the scene is needed.
 		const nightGain = pin(nm.autoNightGain);
 		// Only under the automatic monitor. With a pin, a threshold pair or
-		// the ADC deciding, this key is inert — majestic says so itself at
-		// load — and warning about a setting that is not running would send
-		// someone to fix the wrong thing.
-		const gainDecides = monitor && !has(nm.lightSensorPin) &&
-			!(has(nm.minThreshold) && has(nm.maxThreshold));
+		// the ADC deciding, these keys are inert, and warning about a setting
+		// that is not running sends someone to fix the wrong thing.
+		//
+		// Asked of the camera first, and the config only when the camera has
+		// not answered. Which mechanism is live is the camera's to say — the
+		// same rule the settings page states for the notes it puts under
+		// these very fields — and it is not fully reconstructable from here:
+		// the ADC source has no control on this page at all, so a config-only
+		// test cannot name it and would read a camera on its light sensor pad
+		// as running on gain.
+		//
+		// The fallback is not dropped, because the whole value of these two
+		// findings is that they need nothing observed: a daemon too old to
+		// publish the source gauge, or a page in the two seconds before its
+		// first heartbeat, still gets an answer. It is just the weaker one,
+		// and it errs the only safe way — silent when it cannot tell.
+		const srcSaid = sample && typeof sample.src === 'number';
+		const gainDecides = srcSaid
+			? sample.src === SRC_AUTO
+			: monitor && !has(nm.lightSensorPin) &&
+				!(has(nm.minThreshold) && has(nm.maxThreshold));
 		if (gainDecides && nightGain !== null && nightGain < NIGHT_GAIN_FLOOR) {
 			out.push({
 				id: 'nightgain-tautology', level: 'danger',
@@ -577,22 +601,39 @@
 		}
 
 		// A value the camera accepted only because nothing on the file path
-		// checks. The web form refuses these and the API rejects them, so a
-		// camera carrying one was hand-edited, and the number it is really
-		// using is the one written in the file.
+		// checks. The form refuses these and the API rejects them, so a
+		// camera carrying one was edited by hand.
+		//
+		// Both keys belong to the automatic monitor, so whether the camera is
+		// actually RUNNING on the value depends on which mechanism won — and
+		// a flat "it is being used as written" on a camera whose gains are
+		// shadowed by a pin contradicts the note the settings page puts under
+		// the same field. Said either way, because the value is wrong either
+		// way and bites the moment the other mechanism is cleared; what
+		// changes is the tense.
 		Object.keys(RANGES).forEach(function (key) {
 			const v = pin(nm[key]);
 			if (v === null) return;
 			const lo = RANGES[key][0], hi = RANGES[key][1];
-			if (v >= lo && v <= hi) return;
+			// Integers, both of them. A hand-edited 2.5 sits inside the
+			// bounds and is still not a value the form or the API would
+			// take, so bounds alone would let it through in silence — and it
+			// is exactly the shape a hand edit takes.
+			if (v >= lo && v <= hi && Number.isInteger(v)) return;
+			const what = !Number.isInteger(v)
+				? 'is not a whole number, which this setting requires'
+				: 'is outside the ' + lo + '–' + hi + ' it accepts';
 			out.push({
 				id: 'range-' + key, level: 'warning',
-				title: 'A day/night setting is outside the range it accepts',
-				detail: 'nightMode.' + key + ' is ' + v + ', outside the ' +
-					lo + '–' + hi + ' this setting accepts. The camera is ' +
-					'using it exactly as written — only the file path skips ' +
-					'the check, so this was edited by hand rather than set ' +
-					'here. Put it back inside the range.',
+				title: 'A day/night setting is not one the camera accepts',
+				detail: 'nightMode.' + key + ' is ' + v + ', which ' + what +
+					'. ' + (gainDecides
+						? 'The camera is running on it as written'
+						: 'It decides nothing while another mechanism is in ' +
+							'force, but would be used as written if ' +
+							'automatic day/night took over') +
+					'. Only the file skips this check, so it was edited by ' +
+					'hand rather than set here.',
 				fix: 'nightMode',
 			});
 		});
@@ -681,7 +722,7 @@
 						? 'The IR-cut filter is a latching solenoid and this ' +
 							'is wearing it out. Fix the setting above and it ' +
 							'stops.'
-						: (sample && sample.src === 4
+						: (sample && sample.src === SRC_AUTO
 							? stretched(nm, sample) +
 								'Something in view is moving the light on and off — ' +
 								'a security lamp, headlights, a sign. Raising ' +

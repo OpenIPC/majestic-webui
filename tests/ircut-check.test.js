@@ -1597,7 +1597,7 @@ function runRest() {
 
 	group('diagnose: the config that cannot settle, before anything is seen');
 	{
-		// The gk7205v300 + IMX335 found flapping on 2026-09-17. Every runtime
+		// The configuration a gk7205v300 + IMX335 flaps on. Every runtime
 		// check in this file needed somebody to be watching; these need
 		// nothing but the config, which is what a distant owner opening this
 		// page for ten seconds actually has.
@@ -1626,13 +1626,59 @@ function runRest() {
 				autoDayGain: 2 }), null, null)
 				.some(x => x.id === 'nightgain-tautology'));
 
-		// The key is inert under any other source -- majestic says so itself
-		// at load -- and a finding about a setting that is not running sends
-		// someone to fix the wrong thing.
+		// Which mechanism is live is the camera's to say, not something to
+		// rebuild out of config keys -- the settings page states that rule
+		// for the notes it puts under these same fields. It matters here
+		// because the ADC source has no control on this page at all: a
+		// config-only test cannot name it, so a camera on its light sensor
+		// pad would be read as running on gain and accused of a fault that
+		// is not deciding anything.
+		const withSrc = (src) => ic.diagnose(
+			{ lightMonitor: true, irCutPin1: 11, autoNightGain: 1 },
+			{ night: 0, ircut: 0, src: src }, null);
+		check('the camera saying "automatic" is what raises it',
+			withSrc(4).some(x => x.id === 'nightgain-tautology'));
+		check('a camera on its ADC pad is not accused',
+			!withSrc(3).some(x => x.id === 'nightgain-tautology'));
+		check('nor one on a sensor pin it reported itself',
+			!withSrc(1).some(x => x.id === 'nightgain-tautology'));
+		check('nor one on thresholds it reported itself',
+			!withSrc(2).some(x => x.id === 'nightgain-tautology'));
+		// The fallback is the whole value of this finding: it must still
+		// answer before the first heartbeat, and on a daemon too old to
+		// publish the gauge at all.
+		check('with no sample yet the config still answers',
+			ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+				autoNightGain: 1 }, null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+
+		// The key is inert under any other source, and a finding about a
+		// setting that is not running sends someone to fix the wrong thing.
 		check('a camera on a light sensor pin is not accused of it',
 			!ic.diagnose({ lightMonitor: true, irCutPin1: 11,
 				lightSensorPin: 66, autoNightGain: 1 }, null, null)
 				.some(x => x.id === 'nightgain-tautology'));
+
+		// Both are declared as whole numbers. 2.5 sits inside the bounds and
+		// is still not a value the form or the API would take, so a bounds
+		// test alone lets through exactly the shape a hand edit produces.
+		const dec = ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+			autoNightGain: 2.5 }, { night: 0, ircut: 0, src: 4 }, null)
+			.filter(x => x.id === 'range-autoNightGain')[0];
+		check('a fractional gain is caught even though it is in range', !!dec);
+		check('and is named as the fraction it is, not as out of range',
+			dec && /not a whole number/.test(dec.detail), dec && dec.detail);
+
+		// One boot must not say a value is both shadowed and in use.
+		const shadowed = ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+			autoDayGain: 200 }, { night: 0, ircut: 0, src: 1 }, null)
+			.filter(x => x.id === 'range-autoDayGain')[0];
+		check('a shadowed out-of-range value is still reported', !!shadowed);
+		check('but not as one the camera is running on',
+			shadowed && !/running on it/.test(shadowed.detail),
+			shadowed && shadowed.detail);
+		check('and it says when it would bite instead',
+			shadowed && /would be used as written if/.test(shadowed.detail));
 		check('nor one on a threshold pair',
 			!ic.diagnose({ lightMonitor: true, irCutPin1: 11,
 				minThreshold: 100, maxThreshold: 200, autoNightGain: 1 },
