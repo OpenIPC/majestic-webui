@@ -36,19 +36,40 @@
 	 * Asking for the whole picture to find out whether the endpoint exists
 	 * would move twelve megabytes off the camera on every page load, take a
 	 * capture slot while it did, and freeze nothing for anybody's benefit. A
-	 * 16x16 crop is 384 bytes and answers the same question -- and it answers
-	 * the one that actually matters, which is not "is there a /image.yuv420"
-	 * but "does this build understand ?crop= and say what it sent". An older
-	 * majestic serves the endpoint and ignores the parameter, so it would come
-	 * back with a whole frame and no geometry headers; that is a no. */
+	 * 16x16 crop is 384 bytes and answers the better question, which is not
+	 * "is there a /image.yuv420" but "does this build understand ?crop=, say
+	 * what it sent, and send something this page can actually decode". An
+	 * older majestic serves the endpoint and ignores the parameter, so it
+	 * comes back with a whole frame and no geometry headers; that is a no. */
 	const PROBE = '/image.yuv420?crop=0x0x16x16';
 
+	/* The layouts this page knows how to turn into pixels. A camera answering
+	 * with anything else is not a camera to guess at: every unknown string
+	 * decoded as NV12 would come out with red and blue swapped, or worse, and
+	 * look like a broken camera rather than an unsupported one. */
+	const FORMATS = ['NV12', 'NV21', 'GREY'];
+
+	/* How long one grab may take before it is given up on. Without this a
+	 * request that never settles leaves the module busy for the rest of the
+	 * page's life and the control refuses every later press. */
+	const GRAB_TIMEOUT_MS = 20000;
+
 	let supported = null;   /* null until asked: unknown is not "no" */
-	let map = null;         /* main-stream <-> shown-stream, when the camera says */
-	let mainSize = null;    /* the channel the crop is measured in */
+	let geom = null;        /* null means NOT KNOWN -- never assume 1:1 */
 	let shown = null;       /* the still on screen, or null */
 	let busy = false;
 	let gen = 0;            /* so a slow grab cannot land after a newer one */
+	let inflight = null;    /* AbortController for the grab in progress */
+
+	/* Everything majestic serves goes through apiFetch, which turns a 401 into
+	 * the login redirect. Reaching for window.fetch here would make an expired
+	 * session look like a camera that cannot do this: the probe would fail and
+	 * the control would quietly never appear. */
+	function api(url, init) {
+		return typeof apiFetch === 'function'
+			? apiFetch(url, init)
+			: fetch(url, init);
+	}
 
 	function get(res, name) {
 		const v = res.headers.get(name);
@@ -58,40 +79,74 @@
 
 	async function probe() {
 		try {
-			const res = await fetch(PROBE, { credentials: 'same-origin' });
+			const res = await api(PROBE, { credentials: 'same-origin' });
 			if (!res.ok) return false;
 			/* Read rather than trusted: a build that ignores ?crop= answers 200
 			 * with the whole frame, and 16 is the width we asked for. */
 			const w = get(res, 'X-Frame-Width'), h = get(res, 'X-Frame-Height');
+			const fmt = res.headers.get('X-Pixel-Format') || '';
 			await res.arrayBuffer();
-			return w === 16 && h === 16 && !!res.headers.get('X-Pixel-Format');
+			return w === 16 && h === 16 && FORMATS.indexOf(fmt) >= 0;
 		} catch (e) {
 			return false;
 		}
 	}
 
-	/* Where the crop is measured. /image.yuv420 always takes from the MAIN
-	 * channel, whatever the page happens to be watching, so a viewer on the sub
-	 * stream still gets main-resolution detail -- that is most of the point.
-	 * The rectangle therefore has to be expressed in main-stream pixels, and
-	 * mj-region.js already owns that conversion for the motion and privacy
-	 * editors. */
+	/* Which stream is on screen, or null when nobody will say.
+	 *
+	 * Null, never 0. The crop is measured in the MAIN channel's pixels, so
+	 * believing a silent page is showing the main stream is precisely the
+	 * mistake that grabs a different part of the scene -- and a crop of the
+	 * wrong place still looks like a picture, so nothing would say so. */
+	function shownStream() {
+		if (typeof window.MajesticLiveStream !== 'function') return null;
+		const n = window.MajesticLiveStream();
+		return Number.isFinite(n) ? n | 0 : null;
+	}
+
+	/* What is needed to turn the rectangle on screen into one the camera can
+	 * cut: the main channel's size, and the transform from the shown stream to
+	 * it. Either the camera tells us both or this stays null and the feature
+	 * says so -- see scales().
+	 *
+	 * Tagged with the stream it was learnt for, because the served channel can
+	 * change without an event: the page may ask for one and be given the other
+	 * on older firmware, and a map built for the channel just left converts the
+	 * new view confidently to the wrong place. */
 	async function learnGeometry() {
+		const at = shownStream();
+		if (at === null) { geom = null; return; }
 		try {
-			const res = await fetch('/api/v1/osd', { credentials: 'same-origin' });
-			if (!res.ok) return;
+			const res = await api('/api/v1/osd', { credentials: 'same-origin' });
+			if (!res.ok) { geom = null; return; }
 			const j = await res.json();
 			const streams = Array.isArray(j.streams) ? j.streams : [];
+
+			let mainSize = null;
 			for (let i = 0; i < streams.length; i++) {
-				const s = streams[i];
-				if (s && s.stream === 0 && Array.isArray(s.frame))
-					mainSize = { w: s.frame[0], h: s.frame[1] };
+				const st = streams[i];
+				if (st && st.stream === 0 && Array.isArray(st.frame) &&
+					st.frame[0] > 0 && st.frame[1] > 0)
+					mainSize = { w: st.frame[0], h: st.frame[1] };
 			}
-			const now = window.MajesticLiveStream ? window.MajesticLiveStream() : 0;
-			if (window.MajesticRegion && j.group)
-				map = window.MajesticRegion.view(j.group, streams, 0, now | 0);
+			if (!mainSize) { geom = null; return; }
+
+			/* Watching the main stream IS the crop space, so there is nothing
+			 * to map and nothing that can be missing. Any other channel needs
+			 * the camera's own per-stream windows, and if it will not give
+			 * them this page does not get to invent them. */
+			let map = null;
+			if (at !== 0) {
+				map = window.MajesticRegion && j.group
+					? window.MajesticRegion.view(j.group, streams, 0, at)
+					: null;
+				if (!map || !map.k || !map.k.x || !map.k.y) { geom = null; return; }
+			}
+			geom = { at: at, mainSize: mainSize, map: map };
 		} catch (e) {
-			/* Not knowing is not a mapping of 1:1 -- see scales(). */
+			/* A failed fetch is not a fact, and least of all the fact that the
+			 * two channels frame the same scene. */
+			geom = null;
 		}
 	}
 
@@ -99,16 +154,13 @@
 	 *
 	 * mj-region's map runs main -> shown, which is the direction every editor
 	 * needs; this is the only caller that wants both ways, so the inverse lives
-	 * here rather than getting a second spelling there. Without a map the two
-	 * channels are assumed to frame the same scene, which is what every
-	 * ordinary camera does and what the settings page already assumes -- and if
-	 * that is wrong the crop is wrong by a scale factor, visibly, rather than
-	 * silently. */
-	function scales(frame) {
-		if (map && map.k && map.k.x && map.k.y)
-			return { kx: map.k.x, ky: map.k.y, ox: map.o.x, oy: map.o.y };
-		if (mainSize && mainSize.w && mainSize.h && frame && frame.w && frame.h)
-			return { kx: frame.w / mainSize.w, ky: frame.h / mainSize.h, ox: 0, oy: 0 };
+	 * here rather than getting a second spelling there. */
+	function scales() {
+		if (!geom) return null;
+		if (geom.map) return {
+			kx: geom.map.k.x, ky: geom.map.k.y,
+			ox: geom.map.o.x, oy: geom.map.o.y,
+		};
 		return { kx: 1, ky: 1, ox: 0, oy: 0 };
 	}
 
@@ -116,20 +168,21 @@
 	 *
 	 * The two have to be derived from the SAME rectangle, and that rectangle
 	 * has to be the one the camera will actually cut -- not the one asked for.
-	 * The camera snaps a crop to the chroma grid -- origin down to an even
-	 * pixel, far edge up to one -- because a 4:2:0 frame carries one chroma
-	 * sample per 2x2 block of luma and an odd edge has no chroma of its own. So
-	 * a request of 677x367x643x339 comes back as 676x366x644x340: up to a pixel
-	 * wider on each side, and shifted. The reply says what was sent, in
-	 * X-Frame-Width and X-Frame-Height, so this never has to guess.
+	 * The camera snaps a crop to the chroma grid (origin down to an even pixel,
+	 * far edge up to one), because a 4:2:0 frame carries one chroma sample per
+	 * 2x2 block of luma and an odd edge has no chroma of its own. So a request
+	 * of 677x367x643x339 comes back as 676x366x644x340 -- up to a pixel wider
+	 * on each side, and shifted.
 	 *
 	 * Laying that over the live picture as though it were the rectangle asked
-	 * for puts it a pixel or two out, and at 260% one frame pixel is two and a
+	 * for puts it a pixel or two out, and at 250% one frame pixel is two and a
 	 * half on screen, so the seam is plainly visible when the still goes up.
 	 * Aligning here first makes the answer predictable: the camera is handed a
-	 * rectangle that is already on its grid, so it returns exactly that, and
-	 * the same rectangle decides where the picture is drawn. */
+	 * rectangle already on its grid, so it returns exactly that, and the same
+	 * rectangle decides where the picture is drawn. */
 	function plan() {
+		const k = scales();
+		if (!k) return null;
 		const zoom = window.MajesticZoom;
 		if (!zoom || typeof zoom.view !== 'function') return null;
 		const v = zoom.view();
@@ -138,14 +191,10 @@
 		const s = v.visible;
 		if (!(s.w > 0) || !(s.h > 0)) return null;
 
-		const k = scales(v.frame);
-		/* Into main-channel pixels, where the crop is measured. */
 		let x = (s.x - k.ox) / k.kx, y = (s.y - k.oy) / k.ky;
 		let r = x + s.w / k.kx, b = y + s.h / k.ky;
 
-		/* Onto the chroma grid, outward, exactly as the camera would. */
-		const bw = mainSize && mainSize.w ? mainSize.w : Math.round(v.frame.w / k.kx);
-		const bh = mainSize && mainSize.h ? mainSize.h : Math.round(v.frame.h / k.ky);
+		const bw = geom.mainSize.w, bh = geom.mainSize.h;
 		x = Math.max(0, Math.floor(x / 2) * 2);
 		y = Math.max(0, Math.floor(y / 2) * 2);
 		r = Math.min(bw, Math.ceil(r / 2) * 2);
@@ -158,14 +207,13 @@
 		 * preview-zoom places the video with -- so the still lands on the same
 		 * pixels rather than near them. */
 		const sx = k.kx * x + k.ox, sy = k.ky * y + k.oy;
-		const sw = k.kx * w, sh = k.ky * h;
 		return {
 			crop: { x: x, y: y, w: w, h: h },
 			box: {
 				left: v.pic.x + (sx - s.x) * v.scale,
 				top: v.pic.y + (sy - s.y) * v.scale,
-				width: sw * v.scale,
-				height: sh * v.scale,
+				width: k.kx * w * v.scale,
+				height: k.ky * h * v.scale,
 			},
 		};
 	}
@@ -254,6 +302,15 @@
 		note.hidden = !msg;
 	}
 
+	/* One place that lets go of a blob, because there are four ways to stop
+	 * using one and every path that forgets leaks a whole PNG until the page
+	 * unloads -- on a camera that is real memory. */
+	function dropSrc() {
+		const src = still.getAttribute('src');
+		if (src && src.indexOf('blob:') === 0) URL.revokeObjectURL(src);
+		still.removeAttribute('src');
+	}
+
 	/* The still's geometry is set HERE, not left to the stylesheet.
 	 *
 	 * It used to rely on .mj-still-media in bootstrap.override.css, and that is
@@ -264,13 +321,13 @@
 	 * picture, which reads as "the still did not arrive" when in fact it did
 	 * and is sitting underneath. Inline styles cannot go stale. The stylesheet
 	 * rule stays as the same thing said twice, for anyone reading the CSS. */
-	function dress(box) {
+	function dress(box2) {
 		const st = still.style;
 		st.position = 'absolute';
-		st.left = box.left.toFixed(2) + 'px';
-		st.top = box.top.toFixed(2) + 'px';
-		st.width = box.width.toFixed(2) + 'px';
-		st.height = box.height.toFixed(2) + 'px';
+		st.left = box2.left.toFixed(2) + 'px';
+		st.top = box2.top.toFixed(2) + 'px';
+		st.width = box2.width.toFixed(2) + 'px';
+		st.height = box2.height.toFixed(2) + 'px';
 		/* fill, not contain: the box IS the rectangle these pixels came from,
 		 * so any letterboxing would be the picture disagreeing with itself. */
 		st.objectFit = 'fill';
@@ -282,40 +339,68 @@
 		gen++;
 		shown = null;
 		still.hidden = true;
-		if (still.src && still.src.indexOf('blob:') === 0) URL.revokeObjectURL(still.src);
-		still.removeAttribute('src');
+		dropSrc();
 		stage.classList.remove('mj-stilled');
 		if (box.checked) box.checked = false;
 		say('');
+		/* Stop the grab as well as forgetting it. Marking it stale alone left
+		 * `busy` set until it finished on its own, and a request that never
+		 * finished wedged the control for the rest of the session. */
+		if (inflight) { inflight.abort(); inflight = null; }
+	}
+
+	function refuse(msg) {
+		say(msg);
+		box.checked = false;
 	}
 
 	async function grab() {
-		if (busy) return;
+		if (busy) { refuse('still finishing the last grab'); return; }
+
+		/* Re-learn if the geometry is unknown, or was learnt for a channel that
+		 * is no longer the one on screen. The served channel can change without
+		 * an event -- older firmware may hand back the other stream than the
+		 * one asked for -- so this is checked at the moment it matters rather
+		 * than trusted from startup. */
+		if (!geom || geom.at !== shownStream()) {
+			say('checking what the camera is showing…');
+			await learnGeometry();
+		}
+
 		const p = plan();
-		if (!p) { say('nothing to grab yet'); box.checked = false; return; }
+		if (!p) {
+			/* Said plainly rather than guessed around: without the camera's own
+			 * geometry there is no honest way to turn what is on screen into a
+			 * rectangle of the main channel, and a crop of the wrong place
+			 * looks exactly like a crop of the right one. */
+			refuse(geom
+				? 'nothing to grab yet'
+				: 'the camera did not say how its streams line up');
+			return;
+		}
 		const r = p.crop;
 
 		busy = true;
 		const mine = ++gen;
+		const ac = typeof AbortController === 'function' ? new AbortController() : null;
+		inflight = ac;
+		const timer = setTimeout(() => { if (ac) ac.abort(); }, GRAB_TIMEOUT_MS);
 		say('grabbing…');
 		try {
 			const url = '/image.yuv420?crop=' + r.x + 'x' + r.y + 'x' + r.w + 'x' + r.h;
-			const res = await fetch(url, { credentials: 'same-origin' });
+			const res = await api(url,
+				ac ? { credentials: 'same-origin', signal: ac.signal }
+				   : { credentials: 'same-origin' });
 			if (mine !== gen) return;
 
 			if (res.status === 503) {
 				/* Not an error, and worth saying in those words: the camera
 				 * takes one uncompressed frame at a time, so this is somebody
 				 * else's grab in flight -- or the operator's own, twice. */
-				say('the camera is busy with another grab');
-				box.checked = false;
+				refuse('the camera is busy with another grab');
 				return;
 			}
-			if (!res.ok) {
-				say('the camera refused: ' + res.status);
-				box.checked = false;
-				return;
-			}
+			if (!res.ok) { refuse('the camera refused: ' + res.status); return; }
 
 			const w = get(res, 'X-Frame-Width'), h = get(res, 'X-Frame-Height');
 			const fmt = res.headers.get('X-Pixel-Format') || '';
@@ -323,16 +408,21 @@
 			const sc = get(res, 'X-Stride-Chroma') || sy;
 			const buf = new Uint8Array(await res.arrayBuffer());
 			if (mine !== gen) return;
-			if (!w || !h || !fmt) { say('the camera did not say what it sent'); box.checked = false; return; }
+			if (!w || !h) { refuse('the camera did not say what it sent'); return; }
+			if (FORMATS.indexOf(fmt) < 0) {
+				refuse('this page cannot read ' + (fmt || 'that format'));
+				return;
+			}
 
 			const need = sy * h + (fmt === 'GREY' ? 0 : sc * (h >> 1));
-			if (buf.length < need) { say('the frame arrived short'); box.checked = false; return; }
+			if (buf.length < need) { refuse('the frame arrived short'); return; }
 
 			const cv = document.createElement('canvas');
 			cv.width = w; cv.height = h;
 			cv.getContext('2d').putImageData(toRGBA(buf, w, h, sy, sc, fmt), 0, 0);
 			const blob = await new Promise((ok) => cv.toBlob(ok, 'image/png'));
-			if (mine !== gen || !blob) return;
+			if (mine !== gen) return;
+			if (!blob) { refuse('the still could not be encoded'); return; }
 
 			/* The camera should have returned exactly the rectangle asked for,
 			 * since it was handed one already on the grid. If it did not -- an
@@ -342,7 +432,7 @@
 				left: p.box.left, top: p.box.top,
 				width: p.box.width * (w / r.w), height: p.box.height * (h / r.h),
 			};
-			if (still.src && still.src.indexOf('blob:') === 0) URL.revokeObjectURL(still.src);
+			dropSrc();
 			dress(box2);
 			still.src = URL.createObjectURL(blob);
 
@@ -350,29 +440,27 @@
 			 * whose source fails reports complete with a natural size of zero
 			 * and paints nothing at all -- so without this the page would go on
 			 * to announce a still, and keep counting its age, over a live
-			 * picture that never stopped moving. */
+			 * picture that never stopped moving.
+			 *
+			 * The load events rather than img.decode(): the element is still
+			 * hidden here, and decode() is specified against a displayed image
+			 * -- some browsers reject it for one that is display:none, which
+			 * would report a perfectly good still as a failure. */
 			try {
-				/* The load events rather than img.decode(): the element is
-				 * still hidden at this point, and decode() is specified
-				 * against a displayed image -- some browsers reject it for one
-				 * that is display:none, which would report a perfectly good
-				 * still as a failure. */
 				await new Promise((ok, no) => {
 					still.onload = ok;
 					still.onerror = () => no(new Error('decode'));
 				});
 			} catch (e) {
 				if (mine !== gen) return;
-				say('the still could not be displayed');
-				box.checked = false;
-				still.removeAttribute('src');
+				dropSrc();
+				refuse('the still could not be displayed');
 				return;
 			}
 			if (mine !== gen) return;
 			if (!still.naturalWidth) {
-				say('the still came back empty');
-				box.checked = false;
-				still.removeAttribute('src');
+				dropSrc();
+				refuse('the still came back empty');
 				return;
 			}
 
@@ -381,8 +469,13 @@
 			shown = { w: w, h: h, at: Date.now() };
 			paintNote();
 		} catch (e) {
-			if (mine === gen) { say('could not reach the camera'); box.checked = false; }
+			if (mine !== gen) return;
+			refuse(e && e.name === 'AbortError'
+				? 'the grab took too long and was given up'
+				: 'could not reach the camera');
 		} finally {
+			clearTimeout(timer);
+			if (inflight === ac) inflight = null;
 			busy = false;
 		}
 	}
@@ -415,10 +508,12 @@
 	/* The map is per SHOWN stream, so it goes stale the moment the viewer
 	 * changes channel -- and a stale one is worse than none: it converts the
 	 * visible rectangle with the other channel's scale and grabs a region that
-	 * is confidently somewhere else in the scene. Nothing on screen would say
-	 * so, because a crop of the wrong place still looks like a picture. */
+	 * is confidently somewhere else in the scene. Dropped FIRST, so a grab
+	 * arriving before the refresh lands finds nothing rather than the old
+	 * channel's transform. */
 	window.addEventListener('mj-stream-changed', () => {
 		if (shown || busy) clear();
+		geom = null;
 		learnGeometry();
 	});
 
