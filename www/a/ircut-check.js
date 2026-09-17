@@ -93,6 +93,23 @@
 	const HUNT_WINDOW_S = 300;
 	const HUNT_FLIPS = 3;
 	const CONFLICT_S = 30;
+
+	// The camera's own hour-wide count, which is a different measurement from
+	// the tracker's five-minute one and needs its own bar. Eight an hour is
+	// four times what a correct camera does in a whole DAY (dusk, dawn) and a
+	// tenth of what the camera that prompted this was doing, so it is
+	// neither a hair trigger nor a number that waits for damage.
+	const CAM_FLIPS_1H = 8;
+	// Sensor gain is reported in multiples of 1x and bottoms out at exactly
+	// 1x, so a night threshold of 1 is true at every gain the part can
+	// produce. Nothing above this is a judgement call — it is arithmetic.
+	const NIGHT_GAIN_FLOOR = 2;
+	// What the camera accepts, declared in majestic's schema but NOT enforced
+	// on the path a hand-edited majestic.yaml takes.
+	const RANGES = {
+		autoNightGain: [1, 64],
+		autoDayGain: [1, 16],
+	};
 	// Consecutive open-looking frames before the picture is allowed to say
 	// anything. The dashboard samples every 5s, so this is ~20s of agreement —
 	// enough that a frame caught mid-swing, or one magenta lorry crossing the
@@ -523,6 +540,63 @@
 			});
 		}
 
+		// ── the configuration, before anything has been observed ────────────
+		//
+		// These need no sample, no clock and no history, which is the whole
+		// point of them: they are true the instant the page loads, on a
+		// camera nobody has been watching. Everything below this waits for
+		// evidence, and the fault they describe produces plenty of evidence —
+		// it just produces it at a distant camera with nobody looking.
+		//
+		// Measured on a gk7205v300 + IMX335, 2026-09-17: autoNightGain
+		// of 1 with the scene pinned at 1.0x gain and the AE nowhere near its
+		// limit, driving the filter back and forth on a 45 s cycle for hours.
+		// Neither majestic nor this page had a word to say about it.
+		const nightGain = pin(nm.autoNightGain);
+		// Only under the automatic monitor. With a pin, a threshold pair or
+		// the ADC deciding, this key is inert — majestic says so itself at
+		// load — and warning about a setting that is not running would send
+		// someone to fix the wrong thing.
+		const gainDecides = monitor && !has(nm.lightSensorPin) &&
+			!(has(nm.minThreshold) && has(nm.maxThreshold));
+		if (gainDecides && nightGain !== null && nightGain < NIGHT_GAIN_FLOOR) {
+			out.push({
+				id: 'nightgain-tautology', level: 'danger',
+				title: 'Night is set to trigger at any brightness',
+				detail: '"Gain multiple that means night" is ' + nightGain +
+					'x, and ' + NIGHT_GAIN_FLOOR + 'x is the lowest setting ' +
+					'that can ever be false — a sensor never reports less ' +
+					'than 1x gain. So the camera switches back to night a few ' +
+					'seconds after every day, in any light, and keeps doing ' +
+					'it. This is not a tuning problem: raising the delays ' +
+					'only makes the cycle slower. Set it to ' +
+					NIGHT_GAIN_FLOOR + ' or more, or clear it and let the ' +
+					'camera decide for itself.',
+				fix: 'nightMode',
+			});
+		}
+
+		// A value the camera accepted only because nothing on the file path
+		// checks. The web form refuses these and the API rejects them, so a
+		// camera carrying one was hand-edited, and the number it is really
+		// using is the one written in the file.
+		Object.keys(RANGES).forEach(function (key) {
+			const v = pin(nm[key]);
+			if (v === null) return;
+			const lo = RANGES[key][0], hi = RANGES[key][1];
+			if (v >= lo && v <= hi) return;
+			out.push({
+				id: 'range-' + key, level: 'warning',
+				title: 'A day/night setting is outside the range it accepts',
+				detail: 'nightMode.' + key + ' is ' + v + ', outside the ' +
+					lo + '–' + hi + ' this setting accepts. The camera is ' +
+					'using it exactly as written — only the file path skips ' +
+					'the check, so this was edited by hand rather than set ' +
+					'here. Put it back inside the range.',
+				fix: 'nightMode',
+			});
+		});
+
 		if (driveable && !monitor) {
 			out.push({
 				id: 'manual-only', level: 'info',
@@ -561,13 +635,53 @@
 					fix: 'nightMode',
 				});
 			}
-			if (track.flips >= HUNT_FLIPS) {
+			// Two ways to know the camera is hunting, and the camera's own is
+			// strictly better wherever it exists.
+			//
+			// track.flips is counted HERE, in this browser, from the moment
+			// this page loaded. It can only see a flap somebody is already
+			// watching: at the 45 s cycle measured in the lab, three flips is
+			// two minutes of sitting on this page, and at one flip every ten
+			// minutes — still hundreds of coil pulses a week, still fatal to
+			// the filter — it is half an hour. Nobody does that to a camera on
+			// a pole in another town, which is how a board flapped for hours
+			// without anyone noticing.
+			//
+			// night_flips_1h is counted by the daemon, which is the only
+			// observer that is always there, over an hour rather than five
+			// minutes, and it is already true when the page opens. The tracker
+			// stays as the fallback for a camera too old to publish it.
+			const camFlips = sample && typeof sample.flips1h === 'number'
+				? sample.flips1h : null;
+			const hunting = camFlips !== null
+				? camFlips >= CAM_FLIPS_1H : track.flips >= HUNT_FLIPS;
+			if (hunting) {
+				// A configuration that can never settle is not a scene
+				// problem, and the advice for the two is opposite: sitting
+				// out a passing lamp is the fix for one and makes the other
+				// slower without making it stop. Where the config finding
+				// above has already named the cause, this says what is
+				// happening and leaves the explanation to it — the same rule
+				// the Dashboard applies to its no-video banner.
+				const explained = out.some(f => f.id === 'nightgain-tautology');
+				const count = camFlips !== null
+					? camFlips + ' switches in the last hour, counted by the ' +
+						'camera itself'
+					: track.flips + ' switches in the last ' +
+						(HUNT_WINDOW_S / 60) + ' minutes';
 				out.push({
-					id: 'hunting', level: 'warning',
+					// Rising to danger on the camera's own count: this is a
+					// latching solenoid being driven through its whole travel
+					// several times an hour, which is wear, not a nuisance.
+					id: 'hunting',
+					level: camFlips !== null && camFlips >= CAM_FLIPS_1H
+						? 'danger' : 'warning',
 					title: 'The camera keeps switching between day and night',
-					detail: track.flips + ' switches in the last ' +
-						(HUNT_WINDOW_S / 60) + ' minutes. ' +
-						(sample && sample.src === 4
+					detail: count + '. ' + (explained
+						? 'The IR-cut filter is a latching solenoid and this ' +
+							'is wearing it out. Fix the setting above and it ' +
+							'stops.'
+						: (sample && sample.src === 4
 							? stretched(nm, sample) +
 								'Something in view is moving the light on and off — ' +
 								'a security lamp, headlights, a sign. Raising ' +
@@ -575,7 +689,7 @@
 								'of darkness before night" makes the camera sit ' +
 								'each one out.'
 							: 'Widen the gap between the day and night thresholds ' +
-								'so dusk cannot sit on the boundary.'),
+								'so dusk cannot sit on the boundary.')),
 					fix: 'nightMode',
 				});
 			}
