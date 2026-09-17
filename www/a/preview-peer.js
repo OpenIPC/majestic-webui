@@ -223,12 +223,16 @@
 	/* Pairing, once, right here: the other camera's password goes to this
 	 * camera, which signs in there and keeps only the token it is handed
 	 * back. `then` runs once the pairing took. */
-	function offerPairing(peer, then) {
+	function offerPairing(peer, then, at) {
 		empty(note);
 		const form = document.createElement('form');
 		form.className = 'mj-peer-pair';
 		const label = document.createElement('span');
-		label.textContent = 'To see ' + peer + ' here, this camera needs its password once. ';
+		/* With the address the password is about to go to: the camera's
+		 * roster is filled by whatever announces itself on the link, and the
+		 * operator is the one who knows whether that address is the peer. */
+		label.textContent = 'To see ' + peer + ' here, this camera needs its password once' +
+			(at ? ', which it sends to ' + at : '') + '. ';
 		const input = document.createElement('input');
 		input.type = 'password';
 		input.autocomplete = 'off';
@@ -592,7 +596,7 @@
 			return true;
 		}
 		if (res.status === 409 && body && body.paired === false) {
-			offerPairing(peer, retry);
+			offerPairing(peer, retry, typeof body.url === 'string' && /^https?:\/\//.test(body.url) ? body.url : '');
 			return false;
 		}
 		say((body && body.reason) || ('the camera could not reach ' + peer + ' (' + res.status + ')'));

@@ -152,7 +152,7 @@ function boot(opts) {
 			}
 			if (url.indexOf('/api/v1/calibration/peer?') === 0) {
 				asked.push(url);
-				if (!state.paired) return reply(409, { peer: 'tele', paired: false, reason: 'this camera is not paired with that one' });
+				if (!state.paired) return reply(409, { peer: 'tele', paired: false, reason: 'this camera is not paired with that one', url: 'http://192.0.2.7:80' });
 				state.sessions++;
 				return reply(200, { peer: 'tele', paired: true, url: 'http://192.0.2.7:80', session: 's' + state.sessions, expires: 900, size: '2592x1944' });
 			}
@@ -406,6 +406,7 @@ async function armAndDraw(env, x0, y0, x1, y1) {
 		ok(!env.loupe() || env.loupe().hidden, 'not paired: no loupe yet');
 		const form = env.els['#mj-peer-note'].find('.mj-peer-pair');
 		ok(form, 'the pairing form is offered');
+		ok(form.find('span').textContent.indexOf('sends to http://192.0.2.7:80') > 0, 'and says where the password goes');
 		const input = form.find('input');
 		ok(input.type === 'password', 'as a password field');
 		input.value = 'wrong';
