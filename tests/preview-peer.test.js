@@ -367,6 +367,28 @@ async function armAndDraw(env, x0, y0, x1, y1) {
 		ok(env.els['#mj-peer-note'].hidden, 'and the hint is gone');
 		env.esc();
 	}
+	{
+		// A stream change while armed keeps the hint; disarming never takes
+		// the pairing form, which is an answer.
+		const env = boot({ paired: false });
+		await env.tick();
+		env.els['#mj-peer'].checked = true;
+		env.els['#mj-peer'].fire('change');
+		await env.tick();
+		(env.winListeners['mj-stream-changed'] || []).forEach((fn) => fn());
+		await env.tick();
+		ok(!env.els['#mj-peer-note'].hidden && env.els['#mj-peer-note'].text().indexOf('draw a rectangle') === 0,
+			'the hint survives a stream change while armed');
+		drag(env, 570, 380, 870, 600);
+		await env.tick();
+		await env.tick();
+		ok(env.els['#mj-peer-note'].find('.mj-peer-pair'), 'the pairing form is offered');
+		env.els['#mj-peer'].checked = true;
+		env.els['#mj-peer'].fire('change');
+		env.esc();
+		ok(!env.els['#mj-peer-note'].hidden && env.els['#mj-peer-note'].find('.mj-peer-pair'),
+			'arming and disarming again leaves the form standing');
+	}
 
 	group('a loupe needs room');
 	{

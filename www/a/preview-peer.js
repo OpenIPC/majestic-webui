@@ -240,6 +240,8 @@
 	 * back. `then` runs once the pairing took. */
 	function offerPairing(peer, then, at) {
 		empty(note);
+		/* The form is an answer, not the hint: disarming must not take it. */
+		hinting = false;
 		const form = document.createElement('form');
 		form.className = 'mj-peer-pair';
 		const label = document.createElement('span');
@@ -1021,6 +1023,7 @@
 	window.addEventListener('mj-stream-changed', () => {
 		geom = null;
 		clearNote();
+		if (armed) hint();
 		learnGeometry().then(placeOutline);
 	});
 
