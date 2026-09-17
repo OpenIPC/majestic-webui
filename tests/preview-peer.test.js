@@ -265,6 +265,11 @@ function apply(matrix, X, Y) {
 		const miss = await env.click(900, 550);
 		ok(!miss.stopped, 'a press outside the outline is left to the page');
 		ok(!env.asked.some((u) => u.indexOf('/api/v1/calibration/peer?') === 0), 'and asks for nothing');
+		// Inside, but with the zoom-to-area tool armed: the page's drag.
+		env.els['#mj-area'].checked = true;
+		const zoom = await env.click(MID.x, MID.y);
+		env.els['#mj-area'].checked = false;
+		ok(!zoom.stopped && !env.api().overlay().on, 'with the area tool armed a press inside is the page\'s zoom rectangle');
 		// Inside.
 		const hit = await env.click(MID.x, MID.y);
 		ok(hit.stopped === 2, 'a press inside, and its release, are stopped at the stage');

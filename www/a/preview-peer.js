@@ -651,6 +651,11 @@
 		if (!armed) return;
 		if (e.button != null && e.button > 0) return;
 		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
+		/* The zoom-to-area tool draws its rectangle over the outline too,
+		 * and that is how the overlay gets looked at closely: its drag is
+		 * the page's, not ours. */
+		const area = $('#mj-area');
+		if (area && area.checked) return;
 		const p = stagePoint(e);
 		if (!inside(p.x, p.y)) return;
 		e.stopImmediatePropagation();
