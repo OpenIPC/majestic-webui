@@ -142,7 +142,19 @@
 					: null;
 				if (!map || !map.k || !map.k.x || !map.k.y) { geom = null; return; }
 			}
-			geom = { at: at, mainSize: mainSize, map: map };
+			/* The size the camera says that stream is. The map below is built
+			 * against it, and what the player actually receives need not match
+			 * -- see scales(). */
+			let declared = at === 0 ? mainSize : null;
+			for (let i = 0; i < streams.length && !declared; i++) {
+				const st = streams[i];
+				if (st && st.stream === at && Array.isArray(st.frame) &&
+					st.frame[0] > 0 && st.frame[1] > 0)
+					declared = { w: st.frame[0], h: st.frame[1] };
+			}
+			if (!declared) { geom = null; return; }
+
+			geom = { at: at, mainSize: mainSize, map: map, declared: declared };
 		} catch (e) {
 			/* A failed fetch is not a fact, and least of all the fact that the
 			 * two channels frame the same scene. */
@@ -155,13 +167,26 @@
 	 * mj-region's map runs main -> shown, which is the direction every editor
 	 * needs; this is the only caller that wants both ways, so the inverse lives
 	 * here rather than getting a second spelling there. */
-	function scales() {
-		if (!geom) return null;
-		if (geom.map) return {
-			kx: geom.map.k.x, ky: geom.map.k.y,
-			ox: geom.map.o.x, oy: geom.map.o.y,
+	function scales(frame) {
+		if (!geom || !frame || !frame.w || !frame.h) return null;
+
+		/* main -> the stream as the camera DECLARES it. */
+		const k = geom.map
+			? { kx: geom.map.k.x, ky: geom.map.k.y, ox: geom.map.o.x, oy: geom.map.o.y }
+			: { kx: 1, ky: 1, ox: 0, oy: 0 };
+
+		/* And on to the stream as it is actually ARRIVING, which is not always
+		 * the same thing: WebRTC will send a smaller picture than the channel
+		 * is configured for when the link asks it to, and the zoom module
+		 * measures what the decoder produced. Treating the two as one leaves
+		 * every crop out by that ratio -- and for the main stream, where there
+		 * is no map to hide it, it would be a plain 1:1 assumption about a
+		 * picture that had been scaled underneath us. */
+		const ax = frame.w / geom.declared.w, ay = frame.h / geom.declared.h;
+		return {
+			kx: k.kx * ax, ky: k.ky * ay,
+			ox: k.ox * ax, oy: k.oy * ay,
 		};
-		return { kx: 1, ky: 1, ox: 0, oy: 0 };
 	}
 
 	/* What to ask the camera for, and where to put what comes back.
@@ -181,13 +206,13 @@
 	 * rectangle already on its grid, so it returns exactly that, and the same
 	 * rectangle decides where the picture is drawn. */
 	function plan() {
-		const k = scales();
-		if (!k) return null;
 		const zoom = window.MajesticZoom;
 		if (!zoom || typeof zoom.view !== 'function') return null;
 		const v = zoom.view();
 		if (!v || !v.frame || !v.visible || !v.frame.w || !v.frame.h) return null;
 		if (!v.pic || !v.scale) return null;
+		const k = scales(v.frame);
+		if (!k) return null;
 		const s = v.visible;
 		if (!(s.w > 0) || !(s.h > 0)) return null;
 
