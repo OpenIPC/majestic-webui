@@ -37,8 +37,13 @@
 
 	const ENDPOINT = '/api/v1/calibration/map';
 
+	/* Where a press belongs to the control under it rather than to the
+	 * picture -- preview-zoom's list, for the same bar. */
+	const CHROME = '.mj-bar, .mj-ptz, #mj-stats, #mj-toasts';
+
 	let peers = [];         /* names the calibration knows, as the camera spelt them */
 	let geom = null;        /* null means NOT KNOWN -- never assume 1:1 */
+	let geomGen = 0;        /* so an older /api/v1/osd answer cannot overwrite a newer */
 	let armed = false, drawing = null;
 	let gen = 0;            /* so a slow answer cannot land after a newer one */
 
@@ -89,31 +94,37 @@
 	 * the scene while still looking like an answer. Null where the camera will
 	 * not say, and the control then says so rather than guess. */
 	async function learnGeometry() {
+		const my = ++geomGen;
 		const at = shownStream();
 		if (at === null) { geom = null; return; }
+		let next = null;
 		try {
 			const res = await api('/api/v1/osd', { credentials: 'same-origin' });
-			if (!res.ok) { geom = null; return; }
-			const j = await res.json();
-			const streams = Array.isArray(j.streams) ? j.streams : [];
-			let main = null, declared = null;
-			streams.forEach((st) => {
-				if (!st || !Array.isArray(st.frame) || !(st.frame[0] > 0) || !(st.frame[1] > 0)) return;
-				if (st.stream === 0) main = { w: st.frame[0], h: st.frame[1] };
-				if (st.stream === at) declared = { w: st.frame[0], h: st.frame[1] };
-			});
-			if (!main || !declared) { geom = null; return; }
-			let map = null;
-			if (at !== 0) {
-				map = window.MajesticRegion && j.group
-					? window.MajesticRegion.view(j.group, streams, 0, at)
-					: null;
-				if (!map || !map.k || !map.k.x || !map.k.y) { geom = null; return; }
+			if (res.ok) {
+				const j = await res.json();
+				const streams = Array.isArray(j.streams) ? j.streams : [];
+				let main = null, declared = null;
+				streams.forEach((st) => {
+					if (!st || !Array.isArray(st.frame) || !(st.frame[0] > 0) || !(st.frame[1] > 0)) return;
+					if (st.stream === 0) main = { w: st.frame[0], h: st.frame[1] };
+					if (st.stream === at) declared = { w: st.frame[0], h: st.frame[1] };
+				});
+				let map = null, usable = !!(main && declared);
+				if (usable && at !== 0) {
+					map = window.MajesticRegion && j.group
+						? window.MajesticRegion.view(j.group, streams, 0, at)
+						: null;
+					usable = !!(map && map.k && map.k.x && map.k.y);
+				}
+				if (usable) next = { at: at, main: main, declared: declared, map: map };
 			}
-			geom = { at: at, main: main, declared: declared, map: map };
 		} catch (e) {
-			geom = null;
+			next = null;
 		}
+		/* Only the newest question's answer is kept: two in flight -- a
+		 * stream change on the heels of the first page load -- could land in
+		 * either order, and the older one would describe a stream just left. */
+		if (my === geomGen) geom = next;
 	}
 
 	/* A rectangle in stage pixels to one in the main channel's, or null with a
@@ -127,6 +138,16 @@
 		const v = zoom.view();
 		if (!v || !v.frame || !v.visible || !v.pic || !v.scale) return { why: 'the picture has not been placed yet' };
 		if (!geom) return { why: 'the camera has not said which stream is on screen' };
+		/* The served channel can change without the event the user-selection
+		 * path sends -- the camera may answer a request for one stream with
+		 * the other -- and a map for the stream just left converts this one
+		 * confidently to the wrong place. Learnt again, and this drag is
+		 * refused rather than guessed. */
+		if (geom.at !== shownStream()) {
+			geom = null;
+			learnGeometry();
+			return { why: 'the stream on screen changed; draw again' };
+		}
 		const ax = v.frame.w / geom.declared.w, ay = v.frame.h / geom.declared.h;
 		const k = geom.map
 			? { kx: geom.map.k.x * ax, ky: geom.map.k.y * ay, ox: geom.map.o.x * ax, oy: geom.map.o.y * ay }
@@ -148,7 +169,7 @@
 
 	/* ---- the note -------------------------------------------------------- */
 
-	function say(text, link) {
+	function say(text, link, peer) {
 		while (note.firstChild) note.removeChild(note.firstChild);
 		note.appendChild(document.createTextNode(text));
 		if (link) {
@@ -157,7 +178,9 @@
 			a.href = link;
 			a.target = '_blank';
 			a.rel = 'noopener noreferrer';
-			a.textContent = 'open on ' + peerName();
+			/* The camera that was asked, not the one the picker shows now: a
+			 * slow answer must not be labelled with a choice made after it. */
+			a.textContent = 'open on ' + peer;
 			note.appendChild(a);
 		}
 		note.hidden = false;
@@ -190,7 +213,7 @@
 		const at = body.rect.split('x');
 		const where = at.length === 4 ? at[0] + ',' + at[1] + ' ' + at[2] + '×' + at[3] : body.rect;
 		const url = typeof body.url === 'string' && /^https?:\/\//.test(body.url) ? body.url : null;
-		say('lands at ' + where + ' on ' + peer + (url ? '' : ' (not on this link, so no address)'), url);
+		say('lands at ' + where + ' on ' + peer + (url ? '' : ' (not on this link, so no address)'), url, peer);
 	}
 
 	/* ---- the rubber band, preview-zoom's rules ----------------------------- */
@@ -233,6 +256,7 @@
 	function down(e) {
 		if (!armed) return;
 		if (e.button != null && e.button > 0) return;
+		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
 		if (drawing) return;
 		e.stopImmediatePropagation();
 		const r = stage.getBoundingClientRect();

@@ -51,6 +51,7 @@ function boot(opts) {
 		.forEach((s) => { els[s] = el(s); });
 	if (opts.noPick) delete els['#mj-peer-pick'];
 	const asked = [];
+	const held = [], heldAnswers = [];
 	const docListeners = {};
 	const winListeners = {};
 
@@ -75,7 +76,7 @@ function boot(opts) {
 		},
 		window: {
 			MajesticZoom: { view: () => view },
-			MajesticLiveStream: () => (opts.shown == null ? 0 : opts.shown),
+			MajesticLiveStream: opts.shownFn || (() => (opts.shown == null ? 0 : opts.shown)),
 			MajesticRegion: require('../www/a/mj-region.js'),
 			addEventListener: (t, fn) => { (winListeners[t] = winListeners[t] || []).push(fn); },
 		},
@@ -85,13 +86,18 @@ function boot(opts) {
 		apiFetch: (url) => {
 			if (url === '/api/v1/calibration/map')
 				return Promise.resolve({ status: opts.absent ? 404 : 400, ok: false });
-			if (url === '/api/v1/osd')
-				return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(osd) });
+			if (url === '/api/v1/osd') {
+				const reply = { ok: true, status: 200, json: () => Promise.resolve(osd) };
+				if (opts.slowOsd) return new Promise((r) => { held.push(() => r(reply)); });
+				return Promise.resolve(reply);
+			}
 			if (url.indexOf('/api/v1/calibration/map?') === 0) {
 				asked.push(url);
 				const a = opts.answer || { ok: true, status: 200,
 					body: { rect: '884x586x850x746', url: 'http://192.0.2.7:80/image.jpg?crop=884x586x850x746' } };
-				return Promise.resolve({ ok: a.ok, status: a.status, json: () => Promise.resolve(a.body) });
+				const reply = { ok: a.ok, status: a.status, json: () => Promise.resolve(a.body) };
+				if (opts.slowAnswer) return new Promise((r) => { heldAnswers.push(() => r(reply)); });
+				return Promise.resolve(reply);
 			}
 			return Promise.resolve({ ok: false, status: 404 });
 		},
@@ -102,7 +108,7 @@ function boot(opts) {
 	vm.createContext(sandbox);
 	vm.runInContext(fs.readFileSync(SRC, 'utf8'), sandbox, { filename: 'preview-peer.js' });
 	const tick = () => new Promise((r) => setTimeout(r, 5));
-	return { els, asked, sandbox, docListeners, winListeners, tick };
+	return { els, asked, sandbox, docListeners, winListeners, tick, held, heldAnswers };
 }
 
 // A drag from (x0,y0) to (x1,y1) in CLIENT coordinates on a stage whose box
@@ -245,6 +251,75 @@ function drag(env, x0, y0, x1, y1) {
 		drag(env, 300, 200, 500, 350);
 		await env.tick();
 		ok(env.els['#mj-peer-note'].link() === null, 'only an http(s) address is a link');
+	}
+
+	group('the map is for the stream on screen, and only the newest answer is kept');
+	{
+		// Learnt for the main stream; then the camera serves the sub stream
+		// without the event. The drag is refused, the map re-learnt.
+		let shown = 0;
+		const env = boot({ shownFn: () => shown });
+		await env.tick();
+		shown = 1;
+		env.els['#mj-peer'].checked = true;
+		env.els['#mj-peer'].fire('change', {});
+		drag(env, 300, 200, 500, 350);
+		await env.tick();
+		ok(env.asked.length === 0, 'a map for the stream just left converts nothing');
+		ok(/stream on screen changed/.test(env.els['#mj-peer-note'].text()), 'and says so: ' + env.els['#mj-peer-note'].text());
+		// The re-learnt map is for the sub stream: the next drag is answered.
+		await env.tick();
+		env.els['#mj-peer'].checked = true;
+		env.els['#mj-peer'].fire('change', {});
+		drag(env, 300, 200, 500, 350);
+		await env.tick();
+		ok(env.asked.length === 1, 'once re-learnt, the drag is a question again');
+	}
+	{
+		// Two answers in flight, the older arriving last: it is discarded.
+		const env = boot({ slowOsd: true });
+		await env.tick();
+		env.winListeners['mj-stream-changed'].forEach((fn) => fn());
+		ok(env.held.length === 2, 'two geometry questions in flight');
+		env.held[1](); await env.tick();   // the newer answer lands first
+		env.held[0](); await env.tick();   // then the older
+		env.els['#mj-peer'].checked = true;
+		env.els['#mj-peer'].fire('change', {});
+		drag(env, 300, 200, 500, 350);
+		await env.tick();
+		ok(env.asked.length === 1, 'the map in force is the newer answer, so the drag is answered');
+	}
+
+	group('a press on the bar is the bar\'s, armed or not');
+	{
+		const env = boot();
+		await env.tick();
+		env.els['#mj-peer'].checked = true;
+		env.els['#mj-peer'].fire('change', {});
+		let stopped = 0;
+		const st = env.els['#mj-stage'];
+		const onChrome = { pointerId: 9, clientX: 300, clientY: 200, button: 0,
+			target: { closest: (sel) => (sel.indexOf('.mj-bar') >= 0 ? {} : null) },
+			stopImmediatePropagation() { stopped++; } };
+		st.fire('pointerdown', onChrome);
+		ok(stopped === 0, 'the press reaches the control under it');
+		st.fire('pointerup', onChrome);
+		ok(env.els['#mj-stage'].classList.contains('mj-armed'), 'and the control stays armed for the drag to come');
+	}
+
+	group('a slow answer is labelled with the camera that was asked');
+	{
+		const env = boot({ config: { calibration: { peers: [{ peer: 'tele' }, { peer: 'far' }] } }, slowAnswer: true });
+		await env.tick();
+		env.els['#mj-peer-pick'].value = 'tele';
+		env.els['#mj-peer'].checked = true;
+		env.els['#mj-peer'].fire('change', {});
+		drag(env, 300, 200, 500, 350);
+		await env.tick();
+		env.els['#mj-peer-pick'].value = 'far';   // the operator changes their mind meanwhile
+		env.heldAnswers[0](); await env.tick();
+		const a = env.els['#mj-peer-note'].link();
+		ok(a && a.textContent === 'open on tele', 'the link names the camera the answer is for: ' + (a && a.textContent));
 	}
 
 	group('arming this control disarms zoom-to-area');
