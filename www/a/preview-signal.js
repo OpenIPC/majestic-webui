@@ -16,9 +16,29 @@
 window.MajesticSignal = (function () {
 	'use strict';
 
-	function url(stream) {
-		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-		return proto + '://' + location.host + '/ws/webrtc?stream=' + (stream | 0);
+	// Where a socket goes. This page's own camera unless `ep` names another
+	// one: `origin` is that camera's http(s) origin as the camera under this
+	// page announced it, and `session` the media-scoped session it brokered
+	// (preview-peer.js), which rides the URL because a cookie for one origin
+	// never travels to another. Either may be a function, read at every open,
+	// so a session refreshed mid-life is the one the next reconnect carries.
+	function endpoint(ep) {
+		const v = (x) => (typeof x === 'function' ? x() : x);
+		const origin = ep ? String(v(ep.origin) || '') : '';
+		const session = ep ? String(v(ep.session) || '') : '';
+		let base;
+		if (/^https?:\/\//i.test(origin)) {
+			base = origin.replace(/^http/i, 'ws').replace(/\/+$/, '');
+		} else {
+			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+			base = proto + '://' + location.host;
+		}
+		return { base: base, query: session ? '&session=' + encodeURIComponent(session) : '' };
+	}
+
+	function url(stream, ep) {
+		const e = endpoint(ep);
+		return e.base + '/ws/webrtc?stream=' + (stream | 0) + e.query;
 	}
 
 	// Open one socket for `stream`. `on` maps what the camera sends to the
@@ -34,9 +54,9 @@ window.MajesticSignal = (function () {
 	//   close()                the socket closed, for any reason
 	// Returns a handle: send(req, data), close(), live(), and the socket
 	// itself for whoever needs to look at it.
-	function open(stream, on) {
+	function open(stream, on, ep) {
 		on = on || {};
-		const sock = new WebSocket(url(stream));
+		const sock = new WebSocket(url(stream, ep));
 		sock.onopen = function () { if (on.open) on.open(); };
 		sock.onmessage = function (e) {
 			let m; try { m = JSON.parse(e.data); } catch (_) { return; }
@@ -100,5 +120,5 @@ window.MajesticSignal = (function () {
 		} catch (e) { return []; }
 	}
 
-	return { open: open, url: url, parseCam: parseCam, sdpPort: sdpPort, iceOf: iceOf };
+	return { open: open, url: url, endpoint: endpoint, parseCam: parseCam, sdpPort: sdpPort, iceOf: iceOf };
 })();

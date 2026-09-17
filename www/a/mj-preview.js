@@ -439,6 +439,11 @@ window.MajesticPreview = (function () {
 						get('webrtc.iceServers'),
 						get('webrtc.turnUsername'),
 						get('webrtc.turnCredential')),
+					// Another camera's picture, when the caller says so: its
+					// origin and the media-scoped session brokered for it
+					// (preview-signal.js). Absent, this is this page's camera.
+					origin: opts.origin,
+					session: opts.session,
 					onState: onState,
 				});
 			},

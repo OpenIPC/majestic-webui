@@ -98,7 +98,10 @@ window.MajesticWasm = (function () {
 		let feedObj = null, dcBlocked = false, feedName = 'websocket';
 		function wsUrl(n) {
 			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-			return proto + '://' + location.host + '/ws/video?stream=' + (n | 0);
+			const ep = window.MajesticSignal && window.MajesticSignal.endpoint
+				? window.MajesticSignal.endpoint(opts)
+				: { base: proto + '://' + location.host, query: '' };
+			return ep.base + '/ws/video?stream=' + (n | 0) + ep.query;
 		}
 		function closeFeed() {
 			if (!feedObj) return;
