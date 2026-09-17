@@ -1595,6 +1595,150 @@ function runRest() {
 			many.map(x => x.level).join(','));
 	}
 
+	group('diagnose: the config that cannot settle, before anything is seen');
+	{
+		// The configuration a gk7205v300 + IMX335 flaps on. Every runtime
+		// check in this file needed somebody to be watching; these need
+		// nothing but the config, which is what a distant owner opening this
+		// page for ten seconds actually has.
+		const bad = { lightMonitor: true, irCutPin1: 11, irCutPin2: 10,
+			autoNightDelay: 5, autoDayDelay: 5,
+			autoNightGain: 1, autoDayGain: 200 };
+		const f = ic.diagnose(bad, null, null);
+		const taut = f.filter(x => x.id === 'nightgain-tautology')[0];
+		check('a 1x night threshold is called out with no sample at all',
+			!!taut);
+		check('and as a fault, not a nuisance',
+			taut && taut.level === 'danger', taut && taut.level);
+		check('it says why raising the delays will not help',
+			taut && /only makes the cycle slower/.test(taut.detail),
+			taut && taut.detail);
+		check('the out-of-range day gain is reported too',
+			f.some(x => x.id === 'range-autoDayGain'));
+		check('and the in-range night gain is not',
+			!f.some(x => x.id === 'range-autoNightGain'));
+
+		// 2x is the lowest threshold that can ever be false. A camera
+		// deliberately switching at the first doubling of gain is a normal
+		// setup and must sail through.
+		check('2x is a workable threshold and is left alone',
+			!ic.diagnose(Object.assign({}, bad, { autoNightGain: 2,
+				autoDayGain: 2 }), null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+
+		// Which mechanism is live is the camera's to say, not something to
+		// rebuild out of config keys -- the settings page states that rule
+		// for the notes it puts under these same fields. It matters here
+		// because the ADC source has no control on this page at all: a
+		// config-only test cannot name it, so a camera on its light sensor
+		// pad would be read as running on gain and accused of a fault that
+		// is not deciding anything.
+		const withSrc = (src) => ic.diagnose(
+			{ lightMonitor: true, irCutPin1: 11, autoNightGain: 1 },
+			{ night: 0, ircut: 0, src: src }, null);
+		check('the camera saying "automatic" is what raises it',
+			withSrc(4).some(x => x.id === 'nightgain-tautology'));
+		check('a camera on its ADC pad is not accused',
+			!withSrc(3).some(x => x.id === 'nightgain-tautology'));
+		check('nor one on a sensor pin it reported itself',
+			!withSrc(1).some(x => x.id === 'nightgain-tautology'));
+		check('nor one on thresholds it reported itself',
+			!withSrc(2).some(x => x.id === 'nightgain-tautology'));
+		// The fallback is the whole value of this finding: it must still
+		// answer before the first heartbeat, and on a daemon too old to
+		// publish the gauge at all.
+		check('with no sample yet the config still answers',
+			ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+				autoNightGain: 1 }, null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+
+		// The key is inert under any other source, and a finding about a
+		// setting that is not running sends someone to fix the wrong thing.
+		check('a camera on a light sensor pin is not accused of it',
+			!ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+				lightSensorPin: 66, autoNightGain: 1 }, null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+
+		// Both are declared as whole numbers. 2.5 sits inside the bounds and
+		// is still not a value the form or the API would take, so a bounds
+		// test alone lets through exactly the shape a hand edit produces.
+		const dec = ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+			autoNightGain: 2.5 }, { night: 0, ircut: 0, src: 4 }, null)
+			.filter(x => x.id === 'range-autoNightGain')[0];
+		check('a fractional gain is caught even though it is in range', !!dec);
+		check('and is named as the fraction it is, not as out of range',
+			dec && /not a whole number/.test(dec.detail), dec && dec.detail);
+
+		// One boot must not say a value is both shadowed and in use.
+		const shadowed = ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+			autoDayGain: 200 }, { night: 0, ircut: 0, src: 1 }, null)
+			.filter(x => x.id === 'range-autoDayGain')[0];
+		check('a shadowed out-of-range value is still reported', !!shadowed);
+		check('but not as one the camera is running on',
+			shadowed && !/running on it/.test(shadowed.detail),
+			shadowed && shadowed.detail);
+		check('and it says when it would bite instead',
+			shadowed && /would be used as written if/.test(shadowed.detail));
+		check('nor one on a threshold pair',
+			!ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+				minThreshold: 100, maxThreshold: 200, autoNightGain: 1 },
+			null, null).some(x => x.id === 'nightgain-tautology'));
+		check('nor one with automatic day/night switched off',
+			!ic.diagnose({ lightMonitor: false, irCutPin1: 11,
+				autoNightGain: 1 }, null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+	}
+
+	group('diagnose: the camera\'s own hour beats the browser\'s five minutes');
+	{
+		const cfg = { irCutPin1: 11, irCutPin2: 10, lightMonitor: true,
+			autoNightGain: 8, autoDayGain: 2 };
+		const at = (flips1h, trackFlips) => ic.diagnose(cfg,
+			{ night: 0, ircut: 0, src: 4, flips1h: flips1h },
+			{ flips: trackFlips, conflictS: 0 })
+			.filter(x => x.id === 'hunting')[0];
+
+		// The whole point: the tracker has seen nothing, because this page
+		// has only just loaded. The camera has been counting the entire time.
+		check('a flap is caught on a freshly opened page',
+			!!at(40, 0));
+		check('and reported as wear, not a nuisance',
+			at(40, 0).level === 'danger', at(40, 0).level);
+		check('the count is attributed to the camera, not to us',
+			/40 switches in the last hour, counted by the camera itself/
+				.test(at(40, 0).detail), at(40, 0).detail);
+		check('a settled camera says nothing however long we watch',
+			!at(0, 9));
+		check('and two honest switches in an hour are not a flap',
+			!at(2, 0));
+
+		// The fallback has to keep working, or every camera running a daemon
+		// older than these gauges silently loses the check it already had.
+		const old = ic.diagnose(cfg, { night: 0, ircut: 0, src: 4 },
+			{ flips: 3, conflictS: 0 }).filter(x => x.id === 'hunting')[0];
+		check('a daemon that publishes no count falls back to the tracker',
+			!!old);
+		check('and is still only a warning, since five minutes is weaker',
+			old.level === 'warning', old.level);
+		check('with the count worded as ours',
+			/3 switches in the last 5 minutes/.test(old.detail), old.detail);
+
+		// Two banners for one fault, with contradictory advice, is worse than
+		// one: sitting out a passing security lamp is the fix for a scene
+		// problem and is exactly wrong for a config that can never settle.
+		const both = ic.diagnose(
+			Object.assign({}, cfg, { autoNightGain: 1 }),
+			{ night: 0, ircut: 0, src: 4, flips1h: 40 },
+			{ flips: 0, conflictS: 0 });
+		const h = both.filter(x => x.id === 'hunting')[0];
+		check('with the cause already named, the advice defers to it',
+			!/security lamp/.test(h.detail), h.detail);
+		check('and says what the flapping is costing',
+			/wearing it out/.test(h.detail), h.detail);
+		check('the fault sorts above the symptom',
+			both[0].id === 'nightgain-tautology', both[0].id);
+	}
+
 	group('tracker: durations from the clock, never from a sample count');
 	{
 		const t = ic.tracker();

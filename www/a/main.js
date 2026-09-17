@@ -573,6 +573,15 @@ function heartbeat() {
 				src: ('night_mode_source' in v) ? v.night_mode_source : null,
 				dwell: ('night_auto_dwell_seconds' in v)
 					? v.night_auto_dwell_seconds : null,
+				// Switches in the last hour, counted by the camera. The only
+				// day/night number here that describes a stretch of time
+				// rather than an instant, and the only one that survives this
+				// page being closed — everything else above is where the
+				// camera is standing right now, and a camera that is
+				// oscillating is never standing anywhere for long. Same
+				// null-not-zero rule: absent on a daemon that does not publish
+				// it, and 0 is a real answer meaning "it has settled".
+				flips1h: ('night_flips_1h' in v) ? v.night_flips_1h : null,
 				rx: m.rx, tx: m.tx, m,
 				// Consumers do their own counter deltas (net, venc bytes, md rects)
 				// against this snapshot; CPU% is computed here because its state
