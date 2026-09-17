@@ -283,8 +283,17 @@
 		outline.appendChild(outlineDim);
 		outline.appendChild(outlinePoly);
 		outline.appendChild(outlineTag);
-		outline.hidden = true;
+		showOutline(false);
 		stage.appendChild(outline);
+	}
+
+	/* An SVG element has no `hidden` property -- HTMLElement's -- and the
+	 * attribute set from script is easy to get wrong; the style is what the
+	 * browser reads either way. Mirrored onto the property for callers that
+	 * ask. */
+	function showOutline(on) {
+		outline.style.display = on ? '' : 'none';
+		outline.hidden = !on;
 	}
 
 	function tagText() {
@@ -300,10 +309,10 @@
 	 * placement now; and the overlay with it. */
 	function placeOutline() {
 		if (!outline) return;
-		if (!quad || !armed && !O.on) { outline.hidden = true; corners = null; placeOverlay(); return; }
+		if (!quad || !armed && !O.on) { showOutline(false); corners = null; placeOverlay(); return; }
 		if (geom && geom.at !== shownStream()) { geometryFresh().then(placeOutline); return; }
 		const pts = quad.map((c) => toStage(c[0], c[1]));
-		if (pts.some((p) => !p)) { outline.hidden = true; corners = null; placeOverlay(); return; }
+		if (pts.some((p) => !p)) { showOutline(false); corners = null; placeOverlay(); return; }
 		corners = pts;
 		const ring = pts.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
 		outlinePoly.setAttribute('points', ring);
@@ -314,7 +323,7 @@
 		outlineTag.setAttribute('x', top.x.toFixed(1));
 		outlineTag.setAttribute('y', (top.y - 6).toFixed(1));
 		outlineTag.textContent = tagText();
-		outline.hidden = false;
+		showOutline(true);
 		placeOverlay();
 	}
 
@@ -577,11 +586,12 @@
 		if (!res) { say('could not reach the camera'); return null; }
 		if (res.ok && body && typeof body.session === 'string' && typeof body.url === 'string') {
 			const expires = Number.isFinite(body.expires) && body.expires > 0 ? body.expires : null;
+			const at = Date.now();
 			const streams = Array.isArray(body.streams)
 				? body.streams.filter((s) => s && Number.isFinite(s.id) && typeof s.codec === 'string')
 					.map((s) => ({ id: s.id | 0, codec: s.codec, w: s.width | 0, h: s.height | 0 }))
 				: [];
-			return { url: body.url.replace(/\/+$/, ''), id: body.session, expires: expires, size: parseSize(body.size), streams: streams };
+			return { url: body.url.replace(/\/+$/, ''), id: body.session, expires: expires, at: at, size: parseSize(body.size), streams: streams };
 		}
 		if (res.status === 409 && body && body.paired === false) {
 			offerPairing(peer, retry, typeof body.url === 'string' && /^https?:\/\//.test(body.url) ? body.url : '');
@@ -602,13 +612,23 @@
 			const my = gen;
 			const s = await ensureSession(peer, () => {});
 			if (my !== gen || !O.on) return;
-			if (!s) { overlayOff(); return; }
+			if (!s) { overlayOff(true); return; }
 			O.sess = s;
 			scheduleRefresh(peer);
 		}, ms);
 	}
 
 	/* ---- on and off ---------------------------------------------------------- */
+
+	/* A session kept from the last time, still good for a while, for this
+	 * peer: a click on, off and on again is one session on the peer, not
+	 * three, and the peer keeps only so many. */
+	function sessionStillGood(peer) {
+		const s = O.sess;
+		if (!s || O.peer !== peer) return false;
+		const ttl = (s.expires || 900) * 1000;
+		return Date.now() - s.at < ttl * 0.8;
+	}
 
 	async function overlayOn() {
 		const peer = peerName();
@@ -620,7 +640,7 @@
 		const my = ++gen;
 		O.pending = true;
 		try {
-			const s = await ensureSession(peer, overlayOn);
+			const s = sessionStillGood(peer) ? O.sess : await ensureSession(peer, overlayOn);
 			if (my !== gen) return;
 			if (!s) return;
 			buildOverlay();
@@ -638,16 +658,18 @@
 		}
 	}
 
-	function overlayOff() {
+	/* Off. The session is kept (not refreshed) for a next click while it is
+	 * good; `forget` drops it too, for a peer that is no longer the one. */
+	function overlayOff(forget) {
 		/* Anything still in flight -- a session, a map -- lands on an overlay
 		 * that is gone, and must not switch it back on. */
 		gen++;
 		O.pending = false;
-		if (!O.on && !O.sess) return;
+		if (O.sessTimer) { clearTimeout(O.sessTimer); O.sessTimer = null; }
+		if (forget) O.sess = null;
+		if (!O.on) return;
 		unmountPlayer();
 		stopStills();
-		if (O.sessTimer) { clearTimeout(O.sessTimer); O.sessTimer = null; }
-		O.sess = null;
 		O.on = false;
 		O.codec = '';
 		O.size = null;
@@ -671,13 +693,13 @@
 			area.checked = false;
 			area.dispatchEvent(new Event('change'));
 		}
-		if (!armed) overlayOff();
+		if (!armed) overlayOff(true);
 		outlineOn(armed);
 	}
 	box.addEventListener('change', () => setArmed(box.checked));
 	if (pick) pick.addEventListener('change', () => {
 		/* The overlay, its session and its outline were the previous peer's. */
-		overlayOff();
+		overlayOff(true);
 		quad = null;
 		corners = null;
 		if (armed) askOutline();

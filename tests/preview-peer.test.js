@@ -221,7 +221,7 @@ function apply(matrix, X, Y) {
 		await env.arm();
 		ok(env.asked.some((u) => u === '/api/v1/calibration/coverage?peer=tele'), 'the coverage was asked, for the peer, with no magnification (the camera knows its lens)');
 		const o = env.outline();
-		ok(o && !o.hidden, 'the outline is on');
+		ok(o && o.style.display === '' && !o.hidden, 'the outline is on');
 		const pts = o.find('polygon').getAttribute('points').split(' ').map((p) => p.split(',').map(Number));
 		ok(near(pts[1][0], 270 * 1000 / 2592) && near(pts[1][1], -25 * 1000 / 2592), 'a corner is placed through the zoom map');
 		ok(o.find('text').textContent.indexOf('tele sees this') === 0 && /click inside/.test(o.find('text').textContent), 'labelled with the peer and what to do');
@@ -231,7 +231,7 @@ function apply(matrix, X, Y) {
 		ok(!env.api().inside(800, 500), 'the far side of the stage is not');
 		env.esc();
 		await env.tick();
-		ok(env.outline().hidden, 'Esc disarms and the outline goes');
+		ok(env.outline().style.display === 'none' && env.outline().hidden, 'Esc disarms and the outline goes, by style: an SVG element has no hidden property');
 		ok(!env.els['#mj-stage'].classList.contains('mj-peer-armed'), 'and the stage knows');
 	}
 	{
@@ -316,10 +316,17 @@ function apply(matrix, X, Y) {
 		await env.click(MID.x, MID.y);
 		ok(ov.hidden && !env.api().overlay().on, 'a click inside takes it away');
 		ok(env.mounts[0].destroyed === 1, 'the player was destroyed');
-		ok(env.api().overlay().session === null, 'the session was let go');
-		ok(!env.outline().hidden && /click inside/.test(env.outline().find('text').textContent), 'the outline stays, and invites again');
+		ok(env.api().overlay().session && env.api().overlay().session.id === 's1', 'the session is kept for the next click');
+		ok(env.outline().style.display === '' && /click inside/.test(env.outline().find('text').textContent), 'the outline stays, and invites again');
+		const before = env.asked.filter((u) => u.indexOf('/api/v1/calibration/peer?') === 0).length;
+		await env.click(MID.x, MID.y);
+		ok(env.api().overlay().on && env.mounts.length === 2 && env.mounts[1].opts.session() === 's1', 'the next click reuses it');
+		ok(env.asked.filter((u) => u.indexOf('/api/v1/calibration/peer?') === 0).length === before, 'without asking the camera again');
 		env.esc();
-		ok(env.outline().hidden, 'Esc then disarms');
+		ok(!env.api().overlay().on, 'Esc takes the overlay');
+		env.esc();
+		ok(env.outline().style.display === 'none', 'Esc then disarms');
+		ok(env.api().overlay().session === null, 'and disarming lets the session go');
 	}
 
 	group('the peer\'s streams: the native one, big enough');
@@ -432,7 +439,7 @@ function apply(matrix, X, Y) {
 		await env.click(MID.x, MID.y);
 		env.els['#mj-peer'].checked = false;
 		env.els['#mj-peer'].fire('change');
-		ok(!env.api().overlay().on && env.outline().hidden, 'off is off: overlay and outline both gone');
+		ok(!env.api().overlay().on && env.outline().style.display === 'none', 'off is off: overlay and outline both gone');
 	}
 
 	group('a camera that cannot fetch the picture says so');
