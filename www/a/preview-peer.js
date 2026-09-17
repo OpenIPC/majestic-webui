@@ -165,18 +165,25 @@
 		return { v: v, k: k };
 	}
 
+	/* The map is for the stream it was learnt on, and the served channel can
+	 * change without the event the user-selection path sends: the camera may
+	 * answer a request for one stream with the other, and the page then shows
+	 * a picture the map does not describe. Anything about to convert asks for
+	 * a fresh map first; one learning at a time. */
+	let learning = null;
+	function geometryFresh() {
+		if (geom && geom.at === shownStream()) return Promise.resolve(true);
+		if (!learning) learning = learnGeometry().then(() => { learning = null; return !!geom; });
+		return learning;
+	}
+
 	function toMain(b) {
 		const p = placement();
 		if (!p) return { why: geom ? 'the picture has not been placed yet' : 'the camera has not said which stream is on screen' };
-		/* The served channel can change without the event the user-selection
-		 * path sends, and a map for the stream just left converts this one
-		 * confidently to the wrong place. Learnt again, and this drag is
-		 * refused rather than guessed. */
-		if (geom.at !== shownStream()) {
-			geom = null;
-			learnGeometry();
-			return { why: 'the stream on screen changed; draw again' };
-		}
+		/* A map for the stream just left converts this one confidently to the
+		 * wrong place; refused rather than guessed. The callers ask
+		 * geometryFresh() first, so this is the stream moving mid-drag. */
+		if (geom.at !== shownStream()) return { why: 'the stream on screen changed; draw again' };
 		const { v, k } = p;
 		const shownX = (x) => v.visible.x + (x - v.pic.x) / v.scale;
 		const shownY = (y) => v.visible.y + (y - v.pic.y) / v.scale;
@@ -291,6 +298,7 @@
 	function placeOutline() {
 		if (!outline) return;
 		if (!quad || !armed && !loupeOpen()) { outline.hidden = true; return; }
+		if (geom && geom.at !== shownStream()) { geometryFresh().then(placeOutline); return; }
 		const pts = quad.map((c) => toStage(c[0], c[1]));
 		if (pts.some((p) => !p)) { outline.hidden = true; return; }
 		outlinePoly.setAttribute('points', pts.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' '));
@@ -658,6 +666,7 @@
 	/* The rectangle moved or grew: the peer is asked where it lands now; the
 	 * session and the player stay. */
 	async function reframe() {
+		await geometryFresh();
 		const m = toMain(L.box);
 		if (!m.rect) { say(m.why); return; }
 		const my = ++gen;
@@ -902,13 +911,15 @@
 		const was = loupeOpen();
 		if (b && b.w >= minW && b.h >= minH) {
 			const rb = roomy(b);
-			const m = toMain(rb);
-			if (m.rect) {
-				if (was) closeLoupe();
-				openLoupe(rb, m.rect);
-			} else {
-				say(m.why);
-			}
+			geometryFresh().then(() => {
+				const m = toMain(rb);
+				if (m.rect) {
+					if (was) closeLoupe();
+					openLoupe(rb, m.rect);
+				} else {
+					say(m.why);
+				}
+			});
 		}
 		setArmed(false);
 	}

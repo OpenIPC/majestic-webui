@@ -338,6 +338,29 @@ async function armAndDraw(env, x0, y0, x1, y1) {
 		env.esc();
 	}
 
+	group('a served stream that moved is learnt again, not refused');
+	{
+		let shown = 0;
+		const env = boot({ shownFn: () => shown, osd: { group: [2592, 1944], streams: [
+			{ stream: 0, frame: [2592, 1944], view: [0, 0, 2592, 1944] },
+			{ stream: 1, frame: [1280, 720], view: [0, 0, 1296, 972] } ] },
+			view: { frame: { w: 1280, h: 720 }, visible: { x: 0, y: 0, w: 1280, h: 720 },
+				pic: { x: 0, y: 0, w: 1000, h: 562.5 }, scale: 1000 / 1280 } });
+		await env.tick();
+		// The camera served the sub stream after the map for the main one was
+		// learnt; the page's picture is now the sub stream's.
+		shown = 1;
+		await armAndDraw(env, 570, 380, 870, 600);
+		await env.tick();
+		ok(env.loupe() && !env.loupe().hidden, 'the drag opened a loupe on the fresh map');
+		// Stage (470,330)-(770,550) is sub-stream (601.6,422.4)-(985.6,704),
+		// which through the quarter crop (1280/1296 across, 720/972 down) is
+		// main (609,570)-(998,951).
+		ok(env.asked.some((u) => u === '/api/v1/calibration/map?peer=tele&rect=609x570x389x381'),
+			'converted through the sub stream\'s map');
+		env.esc();
+	}
+
 	group('a rectangle that cannot be answered is a sentence, not a loupe');
 	{
 		const env = boot({ answer: { status: 400, body: null } });
