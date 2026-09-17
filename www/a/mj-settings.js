@@ -8820,15 +8820,21 @@
 				paint();
 			};
 			paint();
-		} else if (type === 'integer') {
+		} else if (type === 'integer' || type === 'number') {
 			p = el('p', 'number mj-row');
 			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
 			const maxA = isNum(sub.maximum) ? ' max="' + sub.maximum + '"' : '';
+			// A camera declares `number` for a quantity whose useful values sit
+			// between the integers — isp.exposure, where the unit is a
+			// millisecond and daylight is a fraction of one. `any` rather than a
+			// step of our own: the schema says nothing about a grain, and
+			// inventing one would refuse values the camera accepts.
+			const stepA = type === 'number' ? ' step="any"' : ' step="1"';
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
-				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + ' step="1" value="' + esc(v) + '">' +
+				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA + ' value="' + esc(v) + '">' +
 				'</span>';
 			control = p.querySelector('input');
 		} else if (isResolution) {
@@ -9891,7 +9897,8 @@
 			// only plain number inputs gain a range hint; sliders (max ≤ 100)
 			// already show their bounds via the track and the live value box
 			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
-			if (type === 'integer' && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
+			const numeric = type === 'integer' || type === 'number';
+			if (numeric && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
 				hintParts.push(esc(sub.minimum + '–' + sub.maximum));
 			if (hintParts.length) {
 				// block-level so it sits on its own line below the control row
