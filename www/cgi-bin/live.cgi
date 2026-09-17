@@ -62,6 +62,11 @@ hide_title=1; full_bleed=1
      page uses to land a rectangle from one stream on another. -->
 <script src="/a/mj-region.js"></script>
 <script src="/a/preview-roi.js"></script>
+<!-- The uncompressed still. After mj-region.js, whose main-to-shown map it
+     inverts to say which rectangle of the MAIN channel is on screen, and after
+     preview-zoom.js, which is what tells it. Like preview-roi.js it is in
+     neither test's SRCS list: preview-page.js does not know it exists. -->
+<script src="/a/preview-still.js"></script>
 <script src="/a/preview-hero.js"></script>
 <!-- Is the camera seeing anything? Nothing the player can answer — a camera on
      the wrong sensor driver plays perfectly and plays black — so this reads the

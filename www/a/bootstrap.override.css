@@ -3147,6 +3147,20 @@ button.mj-osd-chip,
 	pointer-events: none;
 }
 
+/* The uncompressed still. Fills the stage and letterboxes, and takes no part
+   in the zoom layout -- see the note on #mj-still in p/player.cgi. Above the
+   live media, which carry no z-index of their own, and below the chrome that
+   annotates the picture (.mj-toasts is 5). */
+.mj-still-media {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	background: #000;
+	z-index: 2;
+}
+
 .mj-stage-media {
 	position: absolute;
 	/* The fallback, and it is a real one: with no preview-zoom.js the media
