@@ -66,6 +66,7 @@
 	const LOUPE_CRAMPED_W = 220, LOUPE_CRAMPED_H = 120;
 
 	let peers = [];         /* names the calibration knows, as the camera spelt them */
+	let myConfig = null;    /* this camera's configuration, for the peer player's ICE settings */
 	let geom = null;        /* null means NOT KNOWN -- never assume 1:1 */
 	let geomGen = 0;        /* so an older /api/v1/osd answer cannot overwrite a newer */
 	let armed = false, drawing = null;
@@ -96,6 +97,7 @@
 	async function learnPeers() {
 		if (typeof mjConfig !== 'function' || typeof mjGet !== 'function') return [];
 		const cfg = await mjConfig();
+		myConfig = cfg || null;
 		const rows = mjGet(cfg, 'calibration.peers');
 		const out = [];
 		if (!Array.isArray(rows)) return out;
@@ -352,6 +354,8 @@
 		el: null, host: null, still: null, inset: null, tag: null, bar: null, grip: null,
 		peer: '', box: null,          /* stage px */
 		rect: '', peerRect: null,      /* this camera's main px; the peer's main px {x,y,w,h} */
+		lastBox: null,                 /* the box the camera last answered for */
+		pending: false,                /* a loupe is being opened: questions in flight */
 		size: null,                    /* the peer's declared picture {w,h}, from the map row */
 		frame: null, codec: '',        /* what the peer's decoder produced */
 		handle: null, playing: false, lost: false,
@@ -514,11 +518,10 @@
 	 * no sub channel, because the point of the loupe is detail; this camera's
 	 * ICE settings, which are the LAN's. */
 	function peerConfig() {
-		const mine = typeof mjConfigNow === 'function' ? mjConfigNow() : null;
 		return {
 			video0: { codec: L.codec || 'h265' },
 			video1: { enabled: false },
-			webrtc: mine && mine.webrtc ? mine.webrtc : {},
+			webrtc: myConfig && myConfig.webrtc ? myConfig.webrtc : {},
 		};
 	}
 
@@ -579,40 +582,45 @@
 
 	/* ---- the session on the peer ------------------------------------------ */
 
-	/* Ask this camera for a way in to the peer. Resolves true with L.sess set,
-	 * or false having said why -- and, when the answer is "not paired", having
-	 * offered pairing, after which `retry` runs. */
+	/* Ask this camera for a way in to the peer. Resolves the session -- {url,
+	 * id, expires (seconds, or null where the camera did not say), size} --
+	 * or null having said why; when the answer is "not paired", having
+	 * offered pairing, after which `retry` runs. Writes nothing into the
+	 * loupe: the caller decides whether its operation is still the current
+	 * one by the time this answers, and only then keeps the session. */
 	async function ensureSession(peer, retry) {
 		let res = null, body = null;
 		try {
 			res = await api(PEER + '?peer=' + encodeURIComponent(peer), { credentials: 'same-origin' });
 			try { body = await res.json(); } catch (e) { body = null; }
 		} catch (e) { res = null; }
-		if (!res) { say('could not reach the camera'); return false; }
+		if (!res) { say('could not reach the camera'); return null; }
 		if (res.ok && body && typeof body.session === 'string' && typeof body.url === 'string') {
-			L.sess = { url: body.url.replace(/\/+$/, ''), id: body.session, expires: body.expires | 0 };
-			if (!L.size) L.size = parseSize(body.size);
-			scheduleRefresh(peer);
-			return true;
+			const expires = Number.isFinite(body.expires) && body.expires > 0 ? body.expires : null;
+			return { url: body.url.replace(/\/+$/, ''), id: body.session, expires: expires, size: parseSize(body.size) };
 		}
 		if (res.status === 409 && body && body.paired === false) {
 			offerPairing(peer, retry, typeof body.url === 'string' && /^https?:\/\//.test(body.url) ? body.url : '');
-			return false;
+			return null;
 		}
 		say((body && body.reason) || ('the camera could not reach ' + peer + ' (' + res.status + ')'));
-		return false;
+		return null;
 	}
 
-	/* The session is good for a quarter of an hour; a fresh one is fetched
-	 * before it runs out so a reconnect never carries a dead one. */
+	/* The session is good for a quarter of an hour (the camera's word, else
+	 * assumed); a fresh one is fetched before it runs out so a reconnect never
+	 * carries a dead one. The answer is kept only for the loupe that asked. */
 	function scheduleRefresh(peer) {
 		if (L.sessTimer) clearTimeout(L.sessTimer);
-		const ms = Math.max(30, (L.sess.expires || 900) * 0.8) * 1000;
+		const ms = Math.max(30, (L.sess && L.sess.expires ? L.sess.expires : 900) * 0.8) * 1000;
 		L.sessTimer = setTimeout(async () => {
 			L.sessTimer = null;
-			if (!loupeOpen()) return;
-			const ok = await ensureSession(peer, () => {});
-			if (!ok) closeLoupe();
+			const my = gen;
+			const s = await ensureSession(peer, () => {});
+			if (my !== gen || !loupeOpen()) return;
+			if (!s) { closeLoupe(); return; }
+			L.sess = s;
+			scheduleRefresh(peer);
 		}, ms);
 	}
 
@@ -638,6 +646,15 @@
 
 	async function openLoupe(b, rect) {
 		const my = ++gen;
+		L.pending = true;
+		try {
+			await openLoupeNow(my, b, rect);
+		} finally {
+			if (my === gen) L.pending = false;
+		}
+	}
+
+	async function openLoupeNow(my, b, rect) {
 		const a = await ask(rect);
 		if (my !== gen || !a || !a.rect) return;
 		buildLoupe();
@@ -651,10 +668,17 @@
 			return;
 		}
 		const retry = () => openLoupe(b, rect);
-		if (!L.sess && !(await ensureSession(a.peer, retry))) return;
-		if (my !== gen) return;
+		if (!L.sess) {
+			const s = await ensureSession(a.peer, retry);
+			if (my !== gen) return;
+			if (!s) return;
+			L.sess = s;
+			if (!L.size && s.size) L.size = s.size;
+			scheduleRefresh(a.peer);
+		}
 		clearNote();
 		L.el.hidden = false;
+		L.lastBox = Object.assign({}, b);
 		layout();
 		mountPlayer();
 		tag();
@@ -666,14 +690,22 @@
 	/* The rectangle moved or grew: the peer is asked where it lands now; the
 	 * session and the player stay. */
 	async function reframe() {
-		await geometryFresh();
-		const m = toMain(L.box);
-		if (!m.rect) { say(m.why); return; }
 		const my = ++gen;
-		const a = await ask(m.rect);
-		if (my !== gen || !a || !a.rect) return;
+		await geometryFresh();
+		if (my !== gen) return;
+		const m = toMain(L.box);
+		const a = m.rect ? await ask(m.rect) : null;
+		if (my !== gen) return;
+		if (!a || !a.rect) {
+			/* The box moved before the camera was asked; back to the last
+			 * place it answered, so the crop on show is the crop of the box. */
+			if (!m.rect) say(m.why);
+			if (L.lastBox) { L.box = Object.assign({}, L.lastBox); layout(); }
+			return;
+		}
 		L.rect = m.rect;
 		L.peerRect = a.rect;
+		L.lastBox = Object.assign({}, L.box);
 		if (a.size) L.size = a.size;
 		clearNote();
 		layout();
@@ -682,6 +714,9 @@
 
 	function closeLoupe() {
 		if (!L.el) return;
+		/* Anything still in flight for this loupe -- a session, a map -- lands
+		 * on a loupe that is gone, and must not reopen it. */
+		gen++;
 		setSwapped(false);
 		unmountPlayer();
 		stopStills();
@@ -689,7 +724,10 @@
 		L.sess = null;
 		L.el.hidden = true;
 		L.box = null;
+		L.lastBox = null;
 		L.peerRect = null;
+		L.size = null;
+		L.codec = '';
 		L.whole = false;
 		L.el.classList.remove('mj-loupe-whole');
 		outlineOn(armed);
@@ -848,7 +886,12 @@
 		outlineOn(armed || loupeOpen());
 	}
 	box.addEventListener('change', () => setArmed(box.checked));
-	if (pick) pick.addEventListener('change', () => { quad = null; if (armed || loupeOpen()) askOutline(); });
+	if (pick) pick.addEventListener('change', () => {
+		/* The loupe, its session and its map were the previous peer's. */
+		if (loupeOpen()) closeLoupe();
+		quad = null;
+		if (armed) askOutline();
+	});
 
 	function picRect() {
 		const sw = stage.clientWidth, sh = stage.clientHeight;
@@ -938,6 +981,9 @@
 	document.addEventListener('keydown', (e) => {
 		if (e.key !== 'Escape') return;
 		if (armed) { setArmed(false); e.stopPropagation(); return; }
+		/* A loupe still being opened -- the camera asked, the peer's session
+		 * on its way -- is cancelled: whatever answers now answers nobody. */
+		if (L.pending) { gen++; L.pending = false; clearNote(); e.stopPropagation(); return; }
 		if (loupeOpen() && L.swapped) { setSwapped(false); e.stopPropagation(); return; }
 		if (loupeOpen()) { closeLoupe(); e.stopPropagation(); return; }
 		if (!note.hidden) { clearNote(); e.stopPropagation(); }

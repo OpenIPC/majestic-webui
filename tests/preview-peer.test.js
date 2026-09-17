@@ -101,6 +101,7 @@ function boot(opts) {
 		],
 	};
 	const state = { paired: opts.paired !== false, sessions: 0 };
+	const heldPeer = [];   /* peer-session replies parked by opts.slowPeer */
 
 	const reply = (status, body) => Promise.resolve({ ok: status >= 200 && status < 300, status: status, json: () => Promise.resolve(body) });
 
@@ -154,7 +155,10 @@ function boot(opts) {
 				asked.push(url);
 				if (!state.paired) return reply(409, { peer: 'tele', paired: false, reason: 'this camera is not paired with that one', url: 'http://192.0.2.7:80' });
 				state.sessions++;
-				return reply(200, { peer: 'tele', paired: true, url: 'http://192.0.2.7:80', session: 's' + state.sessions, expires: 900, size: '2592x1944' });
+				const body = { peer: 'tele', paired: true, url: 'http://192.0.2.7:80', session: 's' + state.sessions, size: '2592x1944' };
+				if (!opts.noExpires) body.expires = 900;
+				if (opts.slowPeer) return new Promise((r) => { heldPeer.push(() => r({ ok: true, status: 200, json: () => Promise.resolve(body) })); });
+				return reply(200, body);
 			}
 			if (url === '/api/v1/calibration/pair' && init && init.method === 'POST') {
 				posted.push(JSON.parse(init.body));
@@ -172,7 +176,7 @@ function boot(opts) {
 	const tick = () => new Promise((r) => setTimeout(r, 8));
 	const stage = els['#mj-stage'];
 	return {
-		els, asked, posted, mounts, sandbox, docListeners, winListeners, tick, state, media,
+		els, asked, posted, mounts, sandbox, docListeners, winListeners, tick, state, media, opts, heldPeer,
 		outline: () => stage.find('#mj-peer-outline'),
 		loupe: () => stage.find('#mj-peer-loupe'),
 		api: () => sandbox.window.MajesticPeerCrop,
@@ -378,6 +382,75 @@ async function armAndDraw(env, x0, y0, x1, y1) {
 		// main (609,570)-(998,951).
 		ok(env.asked.some((u) => u === '/api/v1/calibration/map?peer=tele&rect=609x570x389x381'),
 			'converted through the sub stream\'s map');
+		env.esc();
+	}
+
+	group('what belongs to one loupe stays with it');
+	{
+		// A session that answers after Esc lands on a loupe that is gone.
+		const env = boot({ slowPeer: true });
+		await env.tick();
+		await armAndDraw(env, 570, 380, 870, 600);
+		ok(!env.loupe() || env.loupe().hidden, 'no loupe while the session is on its way');
+		env.esc();
+		ok(env.heldPeer.length === 1, 'the session was asked for');
+		env.heldPeer.shift()();
+		await env.tick();
+		await env.tick();
+		ok(!env.loupe() || env.loupe().hidden, 'the late session did not reopen it');
+		ok(env.mounts.length === 0, 'and no player was mounted');
+		ok(env.api().loupe().session === null, 'and no session is held');
+	}
+	{
+		// A move the camera cannot answer goes back to the last answered place.
+		const env = boot();
+		await env.tick();
+		await armAndDraw(env, 570, 380, 870, 600);
+		const l = env.loupe();
+		const body = l.find('.mj-loupe-host');
+		env.opts.answer = { status: 400, body: null };
+		env.els['#mj-stage'].fire('pointerdown', { pointerId: 9, clientX: 600, clientY: 450, button: 0, target: body, stopImmediatePropagation() {} });
+		env.els['#mj-stage'].fire('pointermove', { pointerId: 9, clientX: 700, clientY: 500, target: body, stopImmediatePropagation() {} });
+		ok(l.style.left === '570px', 'the box follows the pointer');
+		env.els['#mj-stage'].fire('pointerup', { pointerId: 9, clientX: 700, clientY: 500, target: body, stopImmediatePropagation() {} });
+		await env.tick();
+		await env.tick();
+		ok(l.style.left === '470px' && l.style.top === '330px', 'and goes back where the camera last answered');
+		ok(env.api().loupe().peerRect.x === 884, 'with the crop of that place');
+		ok(env.els['#mj-peer-note'].text().indexOf('lands nowhere') >= 0, 'and the reason is said');
+		env.esc();
+	}
+	{
+		// The codec learnt from one peer is not the next one's.
+		const env = boot();
+		await env.tick();
+		await armAndDraw(env, 570, 380, 870, 600);
+		env.mounts[0].opts.onFrame(2592, 1944, 'h264');
+		ok(env.mounts[0].opts.config().video0.codec === 'h264', 'the peer said h264');
+		env.esc();
+		await armAndDraw(env, 570, 380, 870, 600);
+		ok(env.mounts.length === 2 && env.mounts[1].opts.config().video0.codec === 'h265', 'the next loupe assumes nothing');
+		env.esc();
+	}
+	{
+		// Picking another peer closes the loupe that was the first one's.
+		const env = boot({ config: { calibration: { peers: [{ peer: 'tele' }, { peer: 'other' }] } } });
+		await env.tick();
+		ok(!env.els['#mj-peer-pick'].hidden, 'two peers: the picker shows');
+		await armAndDraw(env, 570, 380, 870, 600);
+		ok(env.loupe() && !env.loupe().hidden, 'a loupe on the first');
+		env.els['#mj-peer-pick'].value = 'other';
+		env.els['#mj-peer-pick'].fire('change');
+		ok(env.loupe().hidden, 'picking the other closes it');
+		ok(env.mounts[0].destroyed === 1, 'and its player');
+	}
+	{
+		// This camera's ICE settings reach the peer player; an absent expiry stays absent.
+		const env = boot({ noExpires: true, config: { calibration: { peers: [{ peer: 'tele' }] }, webrtc: { iceServers: 'stun:stun.example:3478' } } });
+		await env.tick();
+		await armAndDraw(env, 570, 380, 870, 600);
+		ok(env.mounts[0].opts.config().webrtc.iceServers === 'stun:stun.example:3478', 'the LAN\'s ICE settings');
+		ok(env.api().loupe().session.expires === null, 'an expiry the camera did not give is not zero');
 		env.esc();
 	}
 

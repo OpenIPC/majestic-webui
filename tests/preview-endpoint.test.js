@@ -49,27 +49,27 @@ group('a secure page stays secure');
 group('another camera, with the session brokered for it');
 {
 	const S = load();
-	const e = S.endpoint({ origin: 'http://10.0.0.7:80', session: 'abc123' });
-	ok(e.base === 'ws://10.0.0.7:80', 'its http origin becomes a ws base');
+	const e = S.endpoint({ origin: 'http://192.0.2.7:80', session: 'abc123' });
+	ok(e.base === 'ws://192.0.2.7:80', 'its http origin becomes a ws base');
 	ok(e.query === '&session=abc123', 'the session rides the query');
-	ok(S.url(0, { origin: 'http://10.0.0.7:80', session: 'abc123' }) === 'ws://10.0.0.7:80/ws/webrtc?stream=0&session=abc123',
+	ok(S.url(0, { origin: 'http://192.0.2.7:80', session: 'abc123' }) === 'ws://192.0.2.7:80/ws/webrtc?stream=0&session=abc123',
 		'the signalling URL carries both');
 	ok(S.endpoint({ origin: 'https://cam.far/', session: 's' }).base === 'wss://cam.far',
 		'https becomes wss, and a trailing slash goes');
-	ok(S.endpoint({ origin: 'http://[fd00::7]:81', session: 's' }).base === 'ws://[fd00::7]:81',
+	ok(S.endpoint({ origin: 'http://[2001:db8::7]:81', session: 's' }).base === 'ws://[2001:db8::7]:81',
 		'an IPv6 origin keeps its brackets');
-	ok(S.endpoint({ origin: 'http://10.0.0.7', session: 'a b&c' }).query === '&session=a%20b%26c',
+	ok(S.endpoint({ origin: 'http://192.0.2.7', session: 'a b&c' }).query === '&session=a%20b%26c',
 		'the session is encoded for a URL');
 	ok(S.endpoint({ origin: 'ftp://x', session: 's' }).base === 'ws://cam.local',
 		'an origin that is not http(s) is ignored, not sent');
-	ok(S.endpoint({ origin: 'http://10.0.0.7' }).query === '', 'an origin without a session: no query');
+	ok(S.endpoint({ origin: 'http://192.0.2.7' }).query === '', 'an origin without a session: no query');
 }
 
 group('a value given as a function is read when asked');
 {
 	const S = load();
 	let sess = 'first';
-	const ep = { origin: () => 'http://10.0.0.7', session: () => sess };
+	const ep = { origin: () => 'http://192.0.2.7', session: () => sess };
 	ok(S.url(0, ep).endsWith('&session=first'), 'the first open carries the first session');
 	sess = 'second';
 	ok(S.url(0, ep).endsWith('&session=second'), 'a reconnect carries the refreshed one');
