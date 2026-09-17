@@ -346,6 +346,28 @@ async function armAndDraw(env, x0, y0, x1, y1) {
 		ok(env.outline().hidden, 'the outline goes with it');
 	}
 
+	group('switching Peer on says what to do, and a click is a question too');
+	{
+		const env = boot();
+		await env.tick();
+		env.els['#mj-peer'].checked = true;
+		env.els['#mj-peer'].fire('change');
+		await env.tick();
+		ok(!env.els['#mj-peer-note'].hidden && env.els['#mj-peer-note'].text().indexOf('draw a rectangle inside the outline') === 0,
+			'the note says how');
+		env.esc();
+		ok(env.els['#mj-peer-note'].hidden, 'and goes with the arming');
+		// A click (a drag below the floor) at stage (500,400) opens a 320x180
+		// loupe centred there.
+		await armAndDraw(env, 600, 450, 603, 452);
+		const l = env.loupe();
+		ok(l && !l.hidden, 'a click opens a loupe');
+		ok(l.style.width === '320px' && l.style.height === '180px', 'of the set size');
+		ok(l.style.left === '342px' && l.style.top === '311px', 'centred on the click');
+		ok(env.els['#mj-peer-note'].hidden, 'and the hint is gone');
+		env.esc();
+	}
+
 	group('a loupe needs room');
 	{
 		const env = boot();

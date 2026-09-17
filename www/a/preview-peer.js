@@ -64,6 +64,9 @@
 	 * still narrower than the toolbar hides its tag. */
 	const LOUPE_MIN_W = 160, LOUPE_MIN_H = 90;
 	const LOUPE_CRAMPED_W = 220, LOUPE_CRAMPED_H = 120;
+	/* A click, rather than a drag, opens a loupe of this size around it. */
+	const LOUPE_CLICK_W = 320, LOUPE_CLICK_H = 180;
+	const HINT = 'draw a rectangle inside the outline, or click in it';
 
 	let peers = [];         /* names the calibration knows, as the camera spelt them */
 	let myConfig = null;    /* this camera's configuration, for the peer player's ICE settings */
@@ -215,12 +218,22 @@
 
 	function empty(el) { while (el.firstChild) el.removeChild(el.firstChild); }
 
+	let hinting = false;   /* the note is the armed-state hint, not an answer */
 	function say(text) {
 		empty(note);
 		note.appendChild(document.createTextNode(text));
 		note.hidden = false;
+		hinting = false;
 	}
-	function clearNote() { note.hidden = true; }
+	function clearNote() { note.hidden = true; hinting = false; }
+	/* What to do now that Peer is on: the outline says where, this says how.
+	 * Only while nothing else is being said, and gone with the arming. */
+	function hint() {
+		if (!note.hidden && !hinting) return;
+		say(HINT);
+		hinting = true;
+	}
+	function unhint() { if (hinting) clearNote(); }
 
 	/* Pairing, once, right here: the other camera's password goes to this
 	 * camera, which signs in there and keeps only the token it is handed
@@ -884,6 +897,7 @@
 			area.dispatchEvent(new Event('change'));
 		}
 		outlineOn(armed || loupeOpen());
+		if (armed) hint(); else unhint();
 	}
 	box.addEventListener('change', () => setArmed(box.checked));
 	if (pick) pick.addEventListener('change', () => {
@@ -951,14 +965,25 @@
 		if (inLoupe(e)) { e.stopImmediatePropagation(); return; }
 		if (!drawing || e.pointerId !== drawing.id) return;
 		e.stopImmediatePropagation();
-		const b = commit ? bandRect(e) : null;
+		let b = commit ? bandRect(e) : null;
 		try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
 		drawing = null;
 		/* The same floor as zoom-to-area: below it a drag is a slip or a
-		 * click, and neither is a question. */
+		 * click. A click is a question too -- the commonest one, "show me
+		 * this" -- and opens a loupe of a set size around the point; the
+		 * rectangle is for when the size matters. */
 		const minW = Math.max(16, stage.clientWidth * 0.02);
 		const minH = Math.max(16, stage.clientHeight * 0.02);
 		const was = loupeOpen();
+		if (b && (b.w < minW || b.h < minH)) {
+			const p = picRect();
+			const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+			b = {
+				x: Math.round(clamp(cx - LOUPE_CLICK_W / 2, p.x, Math.max(p.x, p.r - LOUPE_CLICK_W))),
+				y: Math.round(clamp(cy - LOUPE_CLICK_H / 2, p.y, Math.max(p.y, p.b - LOUPE_CLICK_H))),
+				w: Math.min(LOUPE_CLICK_W, p.r - p.x), h: Math.min(LOUPE_CLICK_H, p.b - p.y),
+			};
+		}
 		if (b && b.w >= minW && b.h >= minH) {
 			const rb = roomy(b);
 			geometryFresh().then(() => {
