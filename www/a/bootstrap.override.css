@@ -828,6 +828,60 @@ pre#output[data-cmd] {
 	}
 }
 
+/* The whole tree open is taller than the screen, so the tree scrolls on its own.
+   Measured on an hi3516av300 at 1280x900: six categories and twenty-three
+   sections are 1083px of rail against a 900px window. `position: sticky` pins
+   the TOP of a box that tall and does nothing else, so the last sections were
+   reachable only by scrolling the PAGE — which carries the form column off the
+   top of the screen with it, because the two start at the same line. Pick
+   Watchdog from down there and the browser, now clamping against a short
+   section's much shorter document, leaves the card at -282px: the right-hand
+   column is empty and the only way back to the setting you just asked for is to
+   scroll up again.
+
+   So the list takes what is left of the window and scrolls inside itself, while
+   the title and the search box stay put above it — the box that filters the list
+   should not be the first thing to leave when the list is scrolled.
+
+   --mj-rail-top is how far the rail sits from the top of the DOCUMENT, published
+   by mj-settings.js, and the subtraction is what keeps the whole scrollport on
+   screen at scroll 0 as well as when the rail is stuck: a cap of a bare 100dvh
+   would hang its own last rows below the fold, which is the fault above in
+   smaller clothes. It is measured rather than written down because what sits
+   above the row is not a constant — 110px from 992 up, 130px at 768 where the
+   navbar's brand line takes another row. The fallback covers the taller of the
+   two, for the first paint and for a rail whose script has not run. */
+@media (min-width: 768px) {
+	#page-camera .row > .col-md-3 > .sticky-md-top {
+		display: flex;
+		flex-direction: column;
+		max-height: calc(100dvh - var(--mj-rail-top, 8.25rem));
+	}
+
+	#page-camera #mj-settings-nav {
+		/* min-width:0's twin, and load-bearing for the same reason: a flex item
+		   will not shrink below its content, so without this the list keeps its
+		   full 1083px and the cap above changes nothing. */
+		min-height: 0;
+		/* Bootstrap's .nav is flex-wrap: wrap, which does nothing at all to a
+		   column of links until the column is given a height — and then it wraps
+		   them into a SECOND COLUMN rather than overflowing downwards. Measured
+		   the moment the cap above went in: the tree laid itself out 365px wide
+		   in a 281px pane, scrolled sideways instead of down, and put the last
+		   six sections in a column of their own off the right-hand edge. */
+		flex-wrap: nowrap;
+		overflow-y: auto;
+		/* The rail is its own pane. Wheeling past the end of the tree should not
+		   start moving the page underneath it. */
+		overscroll-behavior: contain;
+		/* Searching adds and removes rows, and with it the scrollbar; without a
+		   reserved gutter every label shifts sideways as you type. */
+		scrollbar-gutter: stable;
+		/* room under the last section, so it does not sit flush on the edge */
+		padding-bottom: 0.5rem;
+	}
+}
+
 /* Below md the rail stops being a rail. It is full width, it is the page's
    primary navigation, and it sits directly under the navbar's own accordion —
    so it should read like that one rather than like a column label (#183).
@@ -872,14 +926,8 @@ pre#output[data-cmd] {
 		font-size: 1rem;
 	}
 
-	/* Where a section lands when you pick it from the rail (#199). scrollIntoView
-	   aligns the border box, and the column's own 1.5rem row gutter is a margin
-	   outside it, so without this the card sits flush against the top edge of the
-	   screen. Nothing is fixed at the top here — the navbar scrolls away — so this
-	   is a breathing gap rather than a chrome offset. */
 	#mj-settings-form-col {
-		scroll-margin-top: 1rem;
-		/* And the room to get there. The rail above the form is most of a screen,
+		/* The room to get there. The rail above the form is most of a screen,
 		   so a short section leaves too little page below it to scroll with, and
 		   the browser clamps you part of the way down: measured at 500x844 on an
 		   hi3516av300, half the sections stopped between 27 and 576px short of the
@@ -887,6 +935,17 @@ pre#output[data-cmd] {
 		   short card and makes every section land in the same place. */
 		min-height: 100vh;
 	}
+}
+
+/* Where a section lands when you pick it from the rail (#199). scrollIntoView
+   aligns the border box, and the column's own 1.5rem row gutter is a margin
+   outside it, so without this the card sits flush against the top edge of the
+   screen. Nothing is fixed at the top here — the navbar scrolls away — so this
+   is a breathing gap rather than a chrome offset. At every width: below md a
+   pick always travels, and from md up it travels when a long section has left
+   the column's top edge above the window. */
+#mj-settings-form-col {
+	scroll-margin-top: 1rem;
 }
 
 /* search hits, in the tree and in the field labels/hints of the open section */
