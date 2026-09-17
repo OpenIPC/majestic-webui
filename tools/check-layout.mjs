@@ -59,7 +59,7 @@ if (!CHROME) {
 // Returned rather than logged so the self-test can assert on it. Each rule
 // exists because something shipped past it.
 function measure() {
-	const R = { clipped: [], overlap: [], empty: [], spill: null, title: document.title };
+	const R = { clipped: [], overlap: [], empty: [], tall: [], spill: null, title: document.title };
 	const nm = (e) =>
 		e.id
 			? '#' + e.id
@@ -146,6 +146,29 @@ function measure() {
 				R.overlap.push(`${nm(a.e)} overlaps ${nm(b.e)} by ${Math.round(ox)}x${Math.round(oy)}px`);
 		}
 
+	// A sticky box taller than the window. `position: sticky` pins the TOP of a
+	// box and does nothing else, so one taller than the screen has a bottom that
+	// is reachable only by scrolling the PAGE -- which is exactly what the
+	// sticky was there to avoid, and which carries whatever sits beside it off
+	// the top of the screen on the way. The settings rail was 1083px against a
+	// 900px window: picking a section from the bottom of the tree left the form
+	// column 282px above the fold and the answer was to scroll back up.
+	//
+	// An inner scroller is the fix, so a box that HAS one is not reported: what
+	// is wrong is a tall sticky with nowhere for the overflow to go.
+	for (const e of document.querySelectorAll('body *')) {
+		const cs = getComputedStyle(e);
+		if (cs.position !== 'sticky') continue;
+		const r = e.getBoundingClientRect();
+		if (r.height <= window.innerHeight) continue;
+		const scroller = [e, ...e.querySelectorAll('*')].some((k) => {
+			const o = getComputedStyle(k).overflowY;
+			return (o === 'auto' || o === 'scroll') && k.scrollHeight > k.clientHeight;
+		});
+		if (!scroller)
+			R.tall.push(`${nm(e)}: ${Math.round(r.height)}px of sticky in a ${window.innerHeight}px window, and nothing inside it scrolls`);
+	}
+
 	// A grid line that leaves a hole. One card alone on a second row beside
 	// half a screen of nothing reads as a mistake, because it is one.
 	for (const row of document.querySelectorAll('main .row')) {
@@ -180,6 +203,7 @@ const SELF_TEST_PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
   <div class="card" style="position:absolute;top:10px;left:10px;width:200px">A</div>
   <div class="card" style="position:absolute;top:20px;left:20px;width:200px">B</div>
   <div class="spill"></div>
+  <div class="tall-sticky" style="position:sticky;top:0;height:200vh"></div>
 </main></body></html>`;
 
 // Sign in the way the browser does.
@@ -296,12 +320,13 @@ async function run(browser, url, setContent, seen = new Set(), labels = []) {
 			...R.clipped.map((m) => `clipped: ${m}`),
 			...R.overlap.map((m) => `overlap: ${m}`),
 			...R.empty.map((m) => `empty:   ${m}`),
+			...R.tall.map((m) => `tall:    ${m}`),
 		];
 		if (!found.length) console.log('    clean');
 		found.forEach((m) => console.log('    ' + m));
 		bad += found.length;
 		if (R.spill) seen.add('spill');
-		for (const k of ['clipped', 'overlap', 'empty']) if (R[k].length) seen.add(k);
+		for (const k of ['clipped', 'overlap', 'empty', 'tall']) if (R[k].length) seen.add(k);
 	}
 	return bad;
 }
@@ -314,14 +339,14 @@ const browser = await puppeteer.launch({
 let status = 0;
 const args = process.argv.slice(2);
 if (args[0] === '--self-test') {
-	console.log('self-test: a page with a clipped select, an overlap, a half-empty row and a spill');
+	console.log('self-test: a page with a clipped select, an overlap, a half-empty row, a spill and an unscrollable tall sticky');
 	const seen = new Set();
 	const found = await run(browser, SELF_TEST_PAGE, true, seen);
 	// EVERY rule has to fire, not merely some total. A count is green while a
 	// whole rule sits silent -- which is how the first cut of this shipped with
 	// its half-empty-row check never once running, because the page it was
 	// proved against had a row with a single cell and the rule needs two.
-	const want = ['spill', 'clipped', 'overlap', 'empty'];
+	const want = ['spill', 'clipped', 'overlap', 'empty', 'tall'];
 	const missing = want.filter((k) => !seen.has(k));
 	if (missing.length) {
 		console.error(`\nself-test FAILED: these rules never fired: ${missing.join(', ')}.`);

@@ -248,11 +248,12 @@
 			return;
 		}
 		buildNav();
+		publishRailTop();
 		wireSearch();
 		watchIrcut();
 		// the rail is a tree on >=md and an accordion below it; re-render rather
 		// than try to keep both shapes live at once
-		const onWidth = () => buildNav();
+		const onWidth = () => { buildNav(); publishRailTop(); };
 		if (WIDE.addEventListener) WIDE.addEventListener('change', onWidth);
 		else if (WIDE.addListener) WIDE.addListener(onWidth);
 		window.addEventListener('popstate', onPopState);
@@ -262,7 +263,7 @@
 		let rt = 0;
 		window.addEventListener('resize', () => {
 			clearTimeout(rt);
-			rt = setTimeout(layoutCols, 120);
+			rt = setTimeout(() => { layoutCols(); publishRailTop(); }, 120);
 		});
 		await load(state.sec, /*push*/ false);
 	}
@@ -420,6 +421,43 @@
 				f.dot.split('.').pop().toLowerCase().includes(q))).length;
 	}
 
+	// How far the rail sits from the top of the DOCUMENT, handed to the
+	// stylesheet, which caps the rail at the window less that much so the whole
+	// of it — scrollport included — is on screen whether the page is at the top
+	// or scrolled far enough for the rail to have stuck. Capping at a bare
+	// window height instead would hang the tree's own last rows below the fold,
+	// which is the fault this rail exists to have fixed, in smaller clothes.
+	//
+	// Measured rather than written into the stylesheet because what stands above
+	// the row is not a constant: 110px from 992 up, 130px at 768, and a flash
+	// message or the restart banner adds its own. Read off the COLUMN, never off
+	// the rail: the rail is the sticky one, so once it has stuck its own box is
+	// no longer where the document put it.
+	function publishRailTop() {
+		const col = document.querySelector('#page-camera .row > .col-md-3');
+		if (!col) return;
+		const top = Math.round(col.getBoundingClientRect().top + window.scrollY);
+		document.documentElement.style.setProperty('--mj-rail-top', top + 'px');
+	}
+
+	// Put the section you are on in front of the eye looking for it, inside the
+	// rail's own scroller and NOWHERE else. From md up the tree is taller than
+	// its pane, so the section arrived at from a bookmark, from the back button,
+	// or from a search that has just rebuilt the list — which resets the pane to
+	// its top — can sit below the fold of a list nobody has scrolled yet.
+	//
+	// scrollTop arithmetic rather than scrollIntoView({ block: 'nearest' }),
+	// which walks every scrollable ancestor and would move the PAGE too. Not
+	// moving the page is the whole reason the rail has a scroller of its own.
+	function revealInRail(link) {
+		const nav = document.getElementById('mj-settings-nav');
+		if (!nav || !link || nav.scrollHeight <= nav.clientHeight) return;
+		const n = nav.getBoundingClientRect();
+		const l = link.getBoundingClientRect();
+		if (l.top < n.top) nav.scrollTop -= n.top - l.top;
+		else if (l.bottom > n.bottom) nav.scrollTop += l.bottom - n.bottom;
+	}
+
 	function buildNav() {
 		const nav = document.getElementById('mj-settings-nav');
 		if (!nav) return;
@@ -517,8 +555,17 @@
 	// Put the person in front of the section they just picked. Below md the rail
 	// is stacked *above* the form rather than beside it, so a tap left them
 	// looking at navigation with the fields they asked for below the fold (#199).
-	// On >=md the rail is sticky-md-top and stays on screen at every offset, so
-	// there is nothing there to correct and nothing worth jumping for.
+	//
+	// From md up the rail is beside the form and scrolls inside itself, so
+	// picking a section moves nothing and there is usually nothing to correct.
+	// Usually: a long section is taller than the window, and reading one to the
+	// bottom leaves the page scrolled past the form column's top edge. Pick a
+	// short section from there and the document it is clamped against has just
+	// become much shorter, so the browser lands wherever it can — measured at
+	// 1280x900, 282px above the card it was asked for, with an empty column on
+	// screen. So the correction is asked of the geometry rather than of the
+	// breakpoint: bring the column back only when its top edge is off the top of
+	// the window, and never jump a section that is already in front of you.
 	//
 	// The whole column rather than the section's card: the live leaf renders a
 	// row of two panels and no card at all, so there is no single card to aim at
@@ -565,7 +612,7 @@
 		// bare scrollIntoView() animates like every other scroll on the site and
 		// stops animating for anyone who asked it to. Naming 'smooth' or 'instant'
 		// here would opt this one navigation out of both.
-		if (!WIDE.matches) col.scrollIntoView();
+		if (!WIDE.matches || col.getBoundingClientRect().top < 0) col.scrollIntoView();
 	}
 
 	function onPopState(ev) {
@@ -958,14 +1005,16 @@
 	}
 
 	function setActiveNav(tab) {
+		let active = null;
 		document.querySelectorAll('#mj-settings-nav .nav-link').forEach(link => {
 			const u = new URL(link.href);
 			const t = u.searchParams.get('tab');
-			const active = t === tab;
-			link.classList.toggle('active', active);
-			if (active) link.setAttribute('aria-current', 'page');
+			const on = t === tab;
+			link.classList.toggle('active', on);
+			if (on) { link.setAttribute('aria-current', 'page'); active = link; }
 			else link.removeAttribute('aria-current');
 		});
+		revealInRail(active);
 	}
 
 	function hasDirty() {
