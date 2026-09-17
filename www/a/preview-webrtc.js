@@ -783,7 +783,7 @@ window.MajesticWebRTC = (function () {
 					if (sig === handle) sig = null;
 					if (current(my)) reconnect();
 				},
-			});
+			}, { origin: opts.origin, session: opts.session });
 			sig = handle;
 
 			clearInterval(statsTimer);

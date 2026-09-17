@@ -354,7 +354,7 @@ window.MajesticDataChannel = (function () {
 			error: function () { finish('refused'); },
 			closed: function () { finish(feed.readyState === 1 ? 'closed' : 'signal-closed'); },
 			close: function () { finish(feed.readyState === 1 ? 'closed' : 'signal-closed'); },
-		});
+		}, { origin: opts.origin, session: opts.session });
 		return feed;
 	}
 

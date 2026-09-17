@@ -212,11 +212,10 @@ printf '%s' \
 		     surface: same stack, same glass, no × because the picture itself
 		     dismisses it. -->
 		<p id="mj-still-note" class="mj-adapt-toast small" role="status" hidden></p>
-		<!-- Where a drawn rectangle lands in the other camera's picture, with
-		     the way to it (preview-peer.js). Same surface as the still's
-		     note; the link opens the peer's own crop in a new tab, under that
-		     camera's login, because a cookie for this camera never travels to
-		     another one. -->
+		<!-- What the peer control has to say (preview-peer.js): why a
+		     rectangle could not be answered, or -- once -- the pairing form
+		     that lets this camera fetch the other one's picture. Same surface
+		     as the still's note. -->
 		<p id="mj-peer-note" class="mj-adapt-toast small" role="status" hidden></p>
 		<p id="mj-adapt" class="mj-adapt-toast small" role="status" hidden>
 			<span id="mj-adapt-rates" class="mj-adapt-rates"></span>
@@ -332,15 +331,16 @@ printf '%s' \
 				</label>
 			</span>
 
-			<!-- Peer. Draw a rectangle and see where it lands in the picture of
-			     another camera this one is calibrated against, with a link to
-			     that camera's crop of it. Shipped hidden and unhidden only by a
-			     camera that has both the endpoint and a calibrated peer
-			     (preview-peer.js); the picker shows only with two or more. -->
+			<!-- Peer. Switch it on and the other camera's outline is drawn on
+			     this picture; draw a rectangle inside it and the rectangle
+			     becomes that camera's live video of the same place, right
+			     there (preview-peer.js). Shipped hidden and unhidden only by a
+			     camera that has both the endpoint and a calibrated peer; the
+			     picker shows only with two or more. -->
 			<span class="mj-hud mj-tog-wrap" id="mj-peer-ctl" hidden>
 				<input type="checkbox" class="mj-tog-in" id="mj-peer" autocomplete="off">
 				<label class="mj-tog" for="mj-peer"
-					title="Draw a rectangle on the picture to see where the same part of the scene is in another camera this one has been calibrated against. The answer is a link to that camera's snapshot cropped to it, opened in a new tab under that camera's own login. Esc cancels.">
+					title="See another camera's view of this scene. Its outline appears on the picture; draw a rectangle inside it and the rectangle becomes that camera's live video of the same place. Drag it, resize it by the corner, double-click to swap the two pictures. Esc backs out.">
 					<span class="mj-led"></span>
 					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 						<rect x="2.5" y="5" width="8" height="10" rx="1.2"></rect>

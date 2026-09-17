@@ -645,12 +645,20 @@ window.MajesticVideo = (function () {
 			let sock;
 			if (useChannel()) {
 				feed = 'datachannel';
-				sock = DC().open({ stream: stream, iceServers: opts.iceServers });
+				sock = DC().open({ stream: stream, iceServers: opts.iceServers,
+					origin: opts.origin, session: opts.session });
 				sock.onmeta = function (m) { nextMeta = m; };
 			} else {
 				feed = 'websocket';
-				let url = proto + '://' + location.host + '/ws/video?stream=' + stream;
+				// The camera this player watches: this page's own, or the
+				// one `opts.origin` names with the session it brokered
+				// (preview-signal.js says how the two are spelt).
+				const ep = window.MajesticSignal && window.MajesticSignal.endpoint
+					? window.MajesticSignal.endpoint(opts)
+					: { base: proto + '://' + location.host, query: '' };
+				let url = ep.base + '/ws/video?stream=' + stream;
 				if (wantAudio && audioPrefs) url += '&audio=' + audioPrefs;
+				url += ep.query;
 				sock = new WebSocket(url);
 			}
 			// Each handler is bound to its own socket, so an error late in a

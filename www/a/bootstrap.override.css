@@ -8004,3 +8004,194 @@ body > main > .container > form > .mj-foot {
 	color: var(--bs-body-color);
 	font-variant-numeric: tabular-nums;
 }
+
+/* ── the other camera's picture, in place (preview-peer.js) ──────────────── */
+
+/* Where the other camera looks: its picture's outline on this one, drawn the
+   moment Peer is switched on so the operator knows where to draw. Under the
+   toasts (5) and the rubber band (6), over the media (auto); takes no
+   pointer, because the drag it invites goes to the stage. */
+.mj-peer-outline {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 4;
+	pointer-events: none;
+	overflow: visible;
+}
+.mj-peer-outline polygon {
+	fill: rgba(92, 112, 232, 0.12);
+	stroke: rgba(255, 255, 255, 0.85);
+	stroke-width: 1.5;
+	stroke-dasharray: 6 4;
+}
+.mj-peer-outline text {
+	fill: #d8dbe4;
+	font-size: 12px;
+	font-family: ui-monospace, Menlo, Consolas, monospace;
+	letter-spacing: 0.02em;
+	paint-order: stroke;
+	stroke: rgba(13, 15, 20, 0.85);
+	stroke-width: 3px;
+}
+
+/* The loupe: the other camera's live video in the rectangle you drew. The
+   same edge as the rubber band, a shadow so it reads as a thing on top of the
+   picture rather than a hole in it, and black behind it while the video
+   connects. Above the outline and the band; below the bar (10). */
+.mj-loupe {
+	position: absolute;
+	z-index: 7;
+	overflow: hidden;
+	background: #000;
+	border: 1px solid rgba(255, 255, 255, 0.9);
+	border-radius: 3px;
+	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+	cursor: move;
+	touch-action: none;
+}
+.mj-loupe-host {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+}
+/* The embedded player's stage, sized and offset by preview-peer.js so the
+   part you asked for fills the box: everything the settings-page geometry
+   gives it -- the viewport-derived width, the 16:9 box, the card edge -- is
+   wrong here and is taken back. Its own bar is the page's job. */
+.mj-loupe .mj-pv-stage,
+.mj-loupe .mj-pv-stage.mj-pv-inline {
+	position: absolute;
+	margin: 0;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	aspect-ratio: auto;
+	width: auto;
+	max-width: none;
+	background: #000;
+}
+.mj-loupe .mj-pv-bar { display: none; }
+.mj-loupe .mj-pv-media { background: #000; }
+/* No video: the other camera's snapshots, cropped, filling the box. */
+.mj-loupe-still {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+.mj-loupe-whole .mj-loupe-still { object-fit: contain; }
+/* The toolbar, top left inside the box, only while pointed at (or while the
+   box has the keyboard); the age tag, bottom left, always. Both on the
+   page's glass. */
+.mj-loupe-bar {
+	position: absolute;
+	left: 0.4rem;
+	top: 0.4rem;
+	z-index: 2;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	cursor: default;
+}
+.mj-loupe:hover .mj-loupe-bar,
+.mj-loupe:focus-within .mj-loupe-bar,
+.mj-loupe-swapped .mj-loupe-bar { opacity: 1; }
+.mj-loupe-btn { width: 1.9rem; height: 1.75rem; }
+.mj-loupe-tag {
+	position: absolute;
+	left: 0.4rem;
+	bottom: 0.4rem;
+	z-index: 2;
+	padding: 0.15rem 0.5rem;
+	border-radius: var(--bs-border-radius);
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	color: #d8dbe4;
+	font-size: 0.75rem;
+	font-family: ui-monospace, Menlo, Consolas, monospace;
+	letter-spacing: 0.02em;
+	pointer-events: none;
+	white-space: nowrap;
+}
+.mj-loupe-tag.mj-loupe-live::before {
+	content: '';
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	margin-right: 0.4rem;
+	border-radius: 50%;
+	background: #e35c5c;
+	vertical-align: middle;
+}
+/* The corner that resizes. */
+.mj-loupe-grip {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	width: 16px;
+	height: 16px;
+	z-index: 2;
+	cursor: nwse-resize;
+	border-right: 2px solid rgba(255, 255, 255, 0.9);
+	border-bottom: 2px solid rgba(255, 255, 255, 0.9);
+	box-sizing: border-box;
+}
+/* Swapped: the other camera fills the stage and this one is the inset, top
+   right, drawn by the page from its own live picture with the outline and
+   the rectangle on it. Click it to swap back. */
+.mj-loupe-swapped {
+	inset: 0 !important;
+	width: auto !important;
+	height: auto !important;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	cursor: default;
+}
+.mj-loupe-swapped .mj-loupe-grip { display: none; }
+.mj-loupe-inset {
+	position: absolute;
+	right: 0.75rem;
+	top: 0.75rem;
+	width: min(30%, 26rem);
+	z-index: 3;
+	border: 1px solid rgba(255, 255, 255, 0.9);
+	border-radius: 3px;
+	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+	cursor: pointer;
+	background: #000;
+}
+/* Pairing, once, in the note: a password field and a button on the toast. */
+.mj-peer-pair {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+	margin: 0;
+}
+.mj-peer-pair input {
+	flex: 1 1 8rem;
+	min-width: 0;
+	padding: 0.2rem 0.5rem;
+	font-size: inherit;
+	color: inherit;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	border-radius: var(--bs-border-radius);
+}
+.mj-peer-pair button {
+	padding: 0.2rem 0.7rem;
+	font-size: inherit;
+	font-weight: 600;
+	color: #fff;
+	background: var(--bs-primary);
+	border: 0;
+	border-radius: var(--bs-border-radius);
+}
+.mj-peer-pair-why { flex-basis: 100%; color: #b9bec9; }
+/* Cramped: a box too small for the tag and the toolbar together keeps the
+   toolbar (it is the way out) and drops the tag. */
+.mj-loupe-cramped .mj-loupe-tag { display: none; }
