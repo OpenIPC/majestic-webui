@@ -300,7 +300,9 @@
 		const name = peerName();
 		if (O.on) {
 			const what = O.lost ? 'snapshots' : O.playing ? 'LIVE' : 'connecting…';
-			return name + ' · ' + what + ' · click or Esc to hide';
+			const f = peerFrame();
+			const only = adaptRefused === 0 ? ' · main stream not served here' : '';
+			return name + ' · ' + what + (f ? ' ' + f.w + '×' + f.h : '') + only + ' · click or Esc to hide';
 		}
 		return name + ' sees this · click inside to see its picture here';
 	}
@@ -325,6 +327,7 @@
 		outlineTag.textContent = tagText();
 		showOutline(true);
 		placeOverlay();
+		adapt();
 	}
 
 	async function askOutline() {
@@ -444,7 +447,7 @@
 	 * the snapshot before the video says. */
 	function peerFrame() {
 		if (O.frame) return O.frame;
-		const s = streamOf(wantSub() ? 1 : 0);
+		const s = streamOf(currentStream());
 		if (s && s.w > 0 && s.h > 0) return { w: s.w, h: s.h };
 		return O.size || null;
 	}
@@ -472,14 +475,74 @@
 	}
 
 	/* Which of the peer's streams to watch. The sub stream when the peer has
-	 * one in H.264: every browser decodes that natively, and 1280x720 is more
-	 * than an overlay a few hundred pixels wide can show, while a 2592x1944
-	 * H.265 main stream through the software rung is eight frames a second of
-	 * mostly grey in a browser without hardware HEVC. The main stream when
-	 * there is nothing else, and the codec the peer named for each, so the
-	 * transport ladder knows what it is being handed. */
+	 * one in H.264 -- every browser decodes that natively, and 1280x720 is
+	 * more than an overlay a few hundred pixels wide can show, while a
+	 * 2592x1944 H.265 main stream through the software rung is eight frames
+	 * a second of mostly grey in a browser without hardware HEVC -- for as
+	 * long as the picture on screen is narrower than the sub stream is. Zoom
+	 * in past that and the sub stream is the thing being upscaled, so the
+	 * main stream takes over; zoom back out and the sub returns. Hysteresis
+	 * either side and a dwell of a few placements, so a wheel gesture does not
+	 * switch back and forth on its way. The main stream alone when there is
+	 * nothing else, and the codec the peer named for each, so the transport
+	 * ladder knows what it is being handed.
+	 *
+	 * The ask is a preference, not an order: the peer can answer it with the
+	 * other channel -- a codec this browser's WebRTC cannot take, a channel
+	 * not there right now -- and the player follows what it was served. A
+	 * channel the player was moved off after being asked for it is that
+	 * answer, and it stands for as long as this player is mounted; asking
+	 * again would reconnect once a second for ever, and never play. */
+	const ADAPT_UP = 1.0, ADAPT_DOWN = 0.8, ADAPT_TICKS = 3;
+	let adaptWant = -1, adaptTicks = 0, adaptAsked = -1, adaptRefused = -1;
 	function streamOf(id) { return O.sess && O.sess.streams ? O.sess.streams.find((s) => s.id === id) : null; }
-	function wantSub() { const s = streamOf(1); return !!(s && s.codec === 'h264'); }
+	function subNative() { const s = streamOf(1); return !!(s && s.codec === 'h264'); }
+	function currentStream() { return O.handle && O.handle.stream ? O.handle.stream() : (subNative() ? 1 : 0); }
+	/* The peer picture's width on screen, in device pixels: its top edge as
+	 * placed, which is what the zoom scales. */
+	function shownWidth() {
+		if (!corners) return 0;
+		const w = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+		return w * (window.devicePixelRatio || 1);
+	}
+	function wantStream() {
+		const sub = streamOf(1), main = streamOf(0);
+		if (!subNative()) return 0;
+		if (!main) return 1;
+		const cur = currentStream(), w = shownWidth();
+		if (!(sub.w > 0) || !w) return cur;
+		let want = cur;
+		if (cur === 1 && w > sub.w * ADAPT_UP) want = 0;
+		else if (cur === 0 && w < sub.w * ADAPT_DOWN) want = 1;
+		return want === adaptRefused ? cur : want;
+	}
+	function askStream(want) {
+		adaptAsked = want;
+		O.handle.setStream(want);
+	}
+	function adapt() {
+		if (!O.on || !O.handle || !O.handle.setStream || !O.handle.stream) return;
+		const cur = O.handle.stream();
+		if (adaptAsked >= 0 && cur !== adaptAsked) {
+			adaptRefused = adaptAsked;
+			adaptAsked = -1;
+			placeOutline();
+			return;
+		}
+		const want = wantStream();
+		if (want === cur) { adaptWant = -1; adaptTicks = 0; return; }
+		if (want !== adaptWant) { adaptWant = want; adaptTicks = 0; }
+		if (++adaptTicks < ADAPT_TICKS) return;
+		adaptTicks = 0;
+		adaptWant = -1;
+		/* The switch reconnects; the snapshot bridges it, as at switch-on,
+		 * and the last decoded size is the old stream's. */
+		O.frame = null;
+		O.playing = false;
+		showStillOnce();
+		askStream(want);
+		placeOverlay();
+	}
 
 	/* The configuration the embedded player reads: the peer's codecs as it
 	 * named them (else H.265 assumed, so the software rung is on the ladder),
@@ -489,7 +552,7 @@
 		const main = streamOf(0), sub = streamOf(1);
 		return {
 			video0: { codec: (main && main.codec) || O.codec || 'h265' },
-			video1: { enabled: wantSub(), codec: (sub && sub.codec) || 'h264' },
+			video1: { enabled: subNative(), codec: (sub && sub.codec) || 'h264' },
 			webrtc: myConfig && myConfig.webrtc ? myConfig.webrtc : {},
 		};
 	}
@@ -527,10 +590,15 @@
 		});
 		if (!O.handle) { fallbackToStills(); return; }
 		/* The player starts on the sub stream when the configuration offers
-		 * one and nothing was remembered; said explicitly here so a
-		 * remembered choice from another page never decides for this one. */
-		const want = wantSub() ? 1 : 0;
-		if (O.handle.stream && O.handle.stream() !== want && O.handle.setStream) O.handle.setStream(want);
+		 * one and nothing was remembered; said explicitly here -- for the
+		 * size on screen right now -- so a remembered choice from another
+		 * page never decides for this one. */
+		adaptWant = -1;
+		adaptTicks = 0;
+		adaptAsked = -1;
+		adaptRefused = -1;
+		const want = wantStream();
+		if (O.handle.stream && O.handle.stream() !== want && O.handle.setStream) askStream(want);
 		placeOverlay();
 	}
 
@@ -795,8 +863,10 @@
 		corners: () => (corners ? corners.map((p) => ({ x: p.x, y: p.y })) : null),
 		overlay: () => ({
 			on: O.on, pending: O.pending, playing: O.playing, lost: O.lost, peer: O.peer,
-			matrix: O.matrix, frame: peerFrame(),
+			matrix: O.matrix, frame: peerFrame(), stream: currentStream(), shownWidth: shownWidth(), refused: adaptRefused,
 			session: O.sess ? Object.assign({}, O.sess) : null,
 		}),
+		/* One placement, for the tests: what the 250 ms tick does. */
+		place: placeOutline,
 	};
 })();

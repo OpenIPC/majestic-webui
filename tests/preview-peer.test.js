@@ -347,6 +347,67 @@ function apply(matrix, X, Y) {
 		env.esc();
 	}
 	{
+		// Zoomed in past the sub stream's width the main takes over; zoomed
+		// back out the sub returns; a wheel gesture on its way switches nothing.
+		const env = boot({ streams: [{ id: 0, codec: 'h265', width: 2592, height: 1944 }, { id: 1, codec: 'h264', width: 1280, height: 720 }] });
+		await env.tick();
+		await env.arm();
+		await env.click(MID.x, MID.y);
+		const m = env.mounts[0];
+		m.opts.onFrame(1280, 720, 'h264'); m.opts.onPlaying('webrtc');
+		ok(m.stream() === 1, 'on screen the picture is ' + Math.round(env.api().overlay().shownWidth) + ' px wide: the sub stream');
+		// The page zooms in: the outline is 320 main px wide, at scale 12 that is 3840 on screen.
+		env.sandbox.window.MajesticZoom.view().scale = 12;
+		env.api().place(); env.api().place();
+		ok(m.stream() === 1 && !m.set, 'two placements past the threshold switch nothing yet');
+		env.api().place();
+		ok(m.stream() === 0 && m.set === 1, 'the third switches to the main stream');
+		ok(env.api().overlay().frame.w === 2592, 'the snapshot is placed at the main stream\'s size until the decoder says');
+		ok(!env.overlay().find('.mj-peer-still').hidden, 'and the snapshot bridges the switch');
+		// A gesture that comes back before the dwell is over: nothing.
+		env.sandbox.window.MajesticZoom.view().scale = 1000 / 2592;
+		env.api().place(); env.api().place();
+		env.sandbox.window.MajesticZoom.view().scale = 12;
+		env.api().place(); env.api().place(); env.api().place();
+		ok(m.stream() === 0 && m.set === 1, 'a gesture that turned back switched nothing');
+		// Zoomed out for good: back to the sub stream.
+		env.sandbox.window.MajesticZoom.view().scale = 1000 / 2592;
+		env.api().place(); env.api().place(); env.api().place();
+		ok(m.stream() === 1 && m.set === 2, 'zoomed out, the sub stream returns');
+		env.sandbox.window.MajesticZoom.view().scale = 1000 / 2592;
+		env.esc();
+	}
+	{
+		// The peer answers the ask for its main stream with the sub -- a codec
+		// this browser cannot take -- and the player follows: that answer
+		// stands, for as long as this player is mounted.
+		const env = boot({ streams: [{ id: 0, codec: 'h265', width: 2592, height: 1944 }, { id: 1, codec: 'h264', width: 1280, height: 720 }] });
+		await env.tick();
+		await env.arm();
+		await env.click(MID.x, MID.y);
+		const m = env.mounts[0];
+		m.opts.onFrame(1280, 720, 'h264'); m.opts.onPlaying('webrtc');
+		env.sandbox.window.MajesticZoom.view().scale = 12;
+		env.api().place(); env.api().place(); env.api().place();
+		ok(m.stream() === 0 && m.set === 1, 'zoomed in, the main stream is asked for');
+		m.streamNow = 1; m.opts.onFrame(1280, 720, 'h264'); m.opts.onPlaying('webrtc');
+		for (let i = 0; i < 8; i++) env.api().place();
+		ok(m.stream() === 1 && m.set === 1, 'served the sub instead, it is not asked for again');
+		ok(env.api().overlay().refused === 0, 'the refusal is remembered');
+		ok(/main stream not served here/.test(env.outline().find('text').textContent), 'and the tag says so: ' + env.outline().find('text').textContent);
+		env.sandbox.window.MajesticZoom.view().scale = 1000 / 2592;
+		for (let i = 0; i < 4; i++) env.api().place();
+		env.sandbox.window.MajesticZoom.view().scale = 12;
+		for (let i = 0; i < 4; i++) env.api().place();
+		ok(m.set === 1, 'nor after zooming out and in again');
+		env.esc();
+		await env.click(MID.x, MID.y);
+		const m2 = env.mounts[1];
+		ok(m2 && m2.stream() === 0 && m2.set === 1, 'a fresh player, zoomed in from the start, asks once more');
+		env.sandbox.window.MajesticZoom.view().scale = 1000 / 2592;
+		env.esc();
+	}
+	{
 		const env = boot({ streams: [{ id: 0, codec: 'h264', width: 1920, height: 1080 }] });
 		await env.tick();
 		await env.arm();
