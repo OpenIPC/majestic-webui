@@ -414,9 +414,17 @@
 	// screen changes until the replacement is known to work" forbids. The
 	// promotion carries its own report -- the stats tick that says `playing`
 	// is the one that names the size -- so nothing is lost by ignoring this.
+	//
+	// And only from the page's own media -- the elements this module places,
+	// which carry .mj-stage-media. Anything else that plays inside the stage
+	// (the peer control lays another camera's picture over this one, with a
+	// player of its own) reports its OWN size through the same events, and
+	// taking it for the picture's re-laid the whole page out against a frame
+	// that was never on it.
 	function fromMedia(e) {
 		const el = e.target;
 		if (!el || !el.videoWidth) return;
+		if (!el.classList || !el.classList.contains('mj-stage-media')) return;
 		if (getComputedStyle(el).display === 'none') return;
 		setFrame(el.videoWidth, el.videoHeight);
 	}
