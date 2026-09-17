@@ -114,6 +114,13 @@
 				x: (p.x - ox) / scale, y: (p.y - oy) / scale,
 				w: (p.r - p.x) / scale, h: (p.b - p.y) / scale,
 			},
+			// Where that rectangle actually IS, in stage pixels, and how many
+			// stage pixels one frame pixel covers. A caller drawing its own
+			// picture over this one needs both: `visible` alone says what is on
+			// screen but not where, and assuming it fills the stage is wrong
+			// under Fit and wrong again the moment a letterbox appears.
+			pic: { x: p.x, y: p.y, w: p.r - p.x, h: p.b - p.y },
+			scale: scale,
 		};
 	}
 

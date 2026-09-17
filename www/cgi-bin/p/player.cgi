@@ -111,6 +111,15 @@ printf '%s' \
 		     picture plays, so the invitation sits over the scene it will resume.
 		     Hidden until then. -->
 		<img id="mj-snapshot" class="mj-stage-media" alt="" hidden>
+		<!-- The uncompressed still, over the live picture while it is up.
+		     Deliberately NOT .mj-stage-media: preview-zoom.js sizes every one
+		     of those to the whole FRAME at the current zoom, and this picture
+		     is already only the part of the frame on screen. Wearing that class
+		     it was magnified a second time by the zoom it had itself been
+		     cropped to -- at 248% it showed a fifth of what it replaced, and
+		     looked plausible doing it. It fills the stage instead, letterboxed,
+		     which is where the same rectangle already was. -->
+		<img id="mj-still" class="mj-still-media" alt="Uncompressed still" hidden>
 		<!-- Tap-to-play. Some browsers refuse to autoplay even a muted picture
 		     until the page has been interacted with, and Opera for Android parks
 		     it on its first frame without ever rejecting the play() that would
@@ -196,6 +205,13 @@ printf '%s' \
 		     text lands; the × is the keyboard's dismissal (click-anywhere
 		     only serves a pointer) and focusing it pins the toast the same
 		     way hovering does. -->
+		<!-- What the still is, and how old. A frozen picture that reads as a
+		     live one is the single dangerous thing this feature can do, so the
+		     age keeps counting for as long as the still is up rather than being
+		     stated once while nobody is worried. Borrows the adaptation toast's
+		     surface: same stack, same glass, no × because the picture itself
+		     dismisses it. -->
+		<p id="mj-still-note" class="mj-adapt-toast small" role="status" hidden></p>
 		<p id="mj-adapt" class="mj-adapt-toast small" role="status" hidden>
 			<span id="mj-adapt-rates" class="mj-adapt-rates"></span>
 			<span id="mj-adapt-why" class="mj-adapt-why"></span>
@@ -277,6 +293,26 @@ printf '%s' \
 			     Armed rather than modal: one drag, then it disarms itself.
 			     A mode you can forget you are in is the wrong thing to put
 			     over a live picture that also steers a camera. -->
+			<!-- Detail. The one thing on this bar that stops the picture, so it
+			     says so in a word and lights while it holds one. Shipped hidden
+			     and unhidden only by a camera that answered the probe in
+			     preview-still.js, because a control that offers the best
+			     possible picture and then cannot produce one is worse than no
+			     control. -->
+			<span class="mj-hud mj-tog-wrap" id="mj-detail-ctl" hidden>
+				<input type="checkbox" class="mj-tog-in" id="mj-detail" autocomplete="off">
+				<label class="mj-tog" for="mj-detail"
+					title="Freeze the part of the scene you are looking at and show it uncompressed, at the main stream's full resolution — no quantiser, no encoder, no enlargement. Trades motion for detail: nothing moves while it is up. Esc or a click returns to live, and so does any zoom or pan.">
+					<span class="mj-led"></span>
+					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<circle cx="8.8" cy="8.8" r="5.2"></circle>
+						<path d="M12.6 12.6 17 17"></path>
+						<path d="M6.9 8.8h3.8M8.8 6.9v3.8"></path>
+					</svg>
+					<span class="mj-tog-t">Detail</span>
+				</label>
+			</span>
+
 			<span class="mj-hud mj-tog-wrap" id="mj-area-ctl" hidden>
 				<input type="checkbox" class="mj-tog-in" id="mj-area" autocomplete="off">
 				<label class="mj-tog" for="mj-area"
