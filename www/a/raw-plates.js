@@ -94,8 +94,8 @@ window.MajesticPlates = (function () {
 	 * It is not a limit on how many frames a caller may have. Asking for them
 	 * one at a time uses no accumulator at all — each is an ordinary capture —
 	 * so that path keeps the ceiling it always had. They are two different
-	 * numbers because they are two different constraints, and collapsing them
-	 * would quietly cut a forty-frame rejection down to sixteen. */
+	 * numbers because they are two different constraints, and folding one into
+	 * the other would quietly cut a forty-frame rejection down to sixteen. */
 	const BURST_MAX = 16;
 	const SEPARATE_MAX = 64;
 
