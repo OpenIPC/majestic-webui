@@ -177,11 +177,13 @@ pr_compliances:
       There is no build step and the camera serves every byte off its own flash, which
       on the smallest boards is the difference between fitting and not.
 
-      Five things are exempt, and the list is closed. Each is a large optional
+      Six things are exempt, and the list is closed. Each is a large optional
       component that only some cameras and some operators ever ask for, and carrying
       any of them in the image would cost every board the bytes so that a minority
       could use them. They are named below rather than described by a shape, because a
-      rule that says "anything optional may come from a CDN" is not this rule.
+      rule that says "anything optional may come from a CDN" is not this rule. Adding
+      a seventh means amending this list in the diff that needs it and saying why —
+      which is how (6) arrived.
     success_criteria: >
       New front-end code is vanilla JS in www/a/, loaded with a plain <script> tag, and
       any asset it needs is committed to this tree. A page may additionally read
@@ -210,8 +212,16 @@ pr_compliances:
       (5) the webfonts — Montserrat and PT Mono from Google Fonts, in cgi-bin/p/header.cgi;
       without them the page renders in the fallback stack the CSS already names, and
       first paint never waits on them.
+      (6) the plate reader — OpenIPC/lpr-wasm, pinned, loaded by www/a/lpr-loader.js;
+      without it the raw editor grows no Plates tab at all, because raw.js hands the
+      editor no plate capability, so nothing is degraded — the feature is simply not
+      offered. Unlike the other five it has NO DEFAULT SOURCE: the models are
+      CC BY-NC 4.0, non-commercial use only, and majestic is a commercial product, so
+      an operator names the base in `webui_lpr_base` (/etc/webui/webui.conf) or no
+      camera fetches anything. That condition is part of the exemption, not a detail
+      of it: giving this one a default would fail this gate.
 
-      The first four are fetched on demand, and are held to all of: pinned to an exact
+      (1)-(4) and (6) are fetched on demand, and are held to all of: pinned to an exact
       version, never a moving tag; requested only when someone opens the thing that
       needs it, not on every page; never holding first paint; and the page that uses one
       stays USABLE without it — degraded is allowed, broken and blank are not, and it
@@ -228,14 +238,14 @@ pr_compliances:
       moving it ahead of the local stylesheets — fails this gate.
     failure_criteria: >
       The diff adds a runtime npm dependency, a bundler or transpiler step, a framework,
-      or a <script>/<link>/@import pointing at a third-party host other than the five
+      or a <script>/<link>/@import pointing at a third-party host other than the six
       components named above; or a fetch of anything the page needs in order to render —
       a script, a style, a font, an image, a template. A data fetch from an endpoint the
       project does not publish — somebody else's API, CDN, analytics or telemetry —
       fails this too, as does one whose failure leaves the page incomplete, broken or
       visibly waiting.
 
-      For the first four: pointing one at a moving tag rather than an exact version,
+      For (1)-(4) and (6): pointing one at a moving tag rather than an exact version,
       loading one before the operator has opened the thing that needs it, letting one
       hold first paint, or leaving its absence as a blank area, a dead control or a page
       that cannot do its remaining job. For the fonts: anything that puts them on the

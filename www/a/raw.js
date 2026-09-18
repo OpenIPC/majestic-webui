@@ -218,6 +218,20 @@
 		return MajesticRaw.mount(host, {
 			capture: capture,
 			calibrate: calibrate,
+			/* Plate reading, and only when there is somewhere to read from.
+			 *
+			 * The models are an opt-in download under a non-commercial licence
+			 * (see lpr-loader.js), so on a camera nobody has configured one for
+			 * there is no reader — and without a reader there is nothing to
+			 * detect, so nothing to meter or stack either. Passing the
+			 * capability anyway would grow a Plates tab that could only ever
+			 * apologise. The editor's own rule, the one the Capture button
+			 * follows: a control that can never work is worse than none.
+			 *
+			 * An older editor ignores this key, which is why raw-loader.js is
+			 * pinned to the release that reads it. */
+			plates: (window.MajesticPlates && window.MajesticPlates.readerSupported)
+				? window.MajesticPlates : undefined,
 			// The editor covers the navbar, so its Back button is the only way
 			// out of this page. It goes where the nav entry came from.
 			onExit: function () { location.href = 'camera.cgi'; },
