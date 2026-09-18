@@ -57,9 +57,9 @@ window.MajesticPlates = (function () {
 		return new Error('The camera answered ' + status + '.');
 	}
 
-	function getDng(query) {
+	function getDng(query, signal) {
 		return apiFetch('/image.dng' + (query ? '?crop=' + query : ''),
-			{ credentials: 'same-origin' })
+			{ credentials: 'same-origin', signal: signal })
 			.then(function (r) {
 				if (!r.ok) throw dngErr(r.status);
 				return r.arrayBuffer();
@@ -70,8 +70,9 @@ window.MajesticPlates = (function () {
 	/* As getDng, but reporting what the camera says it averaged. The header is
 	 * the only way to tell a build that honoured `?frames=` from one that has
 	 * never heard of it -- both answer 200 with a frame. */
-	function getDngWithCount(query) {
-		return apiFetch('/image.dng?crop=' + query, { credentials: 'same-origin' })
+	function getDngWithCount(query, signal) {
+		return apiFetch('/image.dng?crop=' + query,
+			{ credentials: 'same-origin', signal: signal })
 			.then(function (r) {
 				if (!r.ok) throw dngErr(r.status);
 				const n = parseInt(r.headers && r.headers.get
@@ -86,10 +87,17 @@ window.MajesticPlates = (function () {
 	 * several megabytes and the flash it would land on holds the firmware. */
 	function frame() { return getDng(null); }
 
-	/* The most frames the camera will average in one request. Its accumulator
+	/* The most frames the camera will average in ONE request. Its accumulator
 	 * is four bytes a pixel for the duration, which is why a burst without a
-	 * crop is refused rather than attempted. Asking for more earns a 400. */
+	 * crop is refused rather than attempted. Asking for more earns a 400.
+	 *
+	 * It is not a limit on how many frames a caller may have. Asking for them
+	 * one at a time uses no accumulator at all — each is an ordinary capture —
+	 * so that path keeps the ceiling it always had. They are two different
+	 * numbers because they are two different constraints, and collapsing them
+	 * would quietly cut a forty-frame rejection down to sixteen. */
 	const BURST_MAX = 16;
+	const SEPARATE_MAX = 64;
 
 	/*
 	 * A burst of one region, and there are two ways to get one.
@@ -124,7 +132,9 @@ window.MajesticPlates = (function () {
 	function burst(opts) {
 		opts = opts || {};
 		const want = opts.rect;
-		const frames = Math.max(1, Math.min(opts.frames || BURST_MAX, BURST_MAX));
+		const separate = opts.separate === true;
+		const frames = Math.max(1, Math.min(opts.frames || BURST_MAX,
+			separate ? SEPARATE_MAX : BURST_MAX));
 		const cut = ROI.alignCrop(want, opts.frameW, opts.frameH, opts.bits || 12);
 		if (!cut) {
 			return Promise.reject(new Error(
@@ -133,13 +143,21 @@ window.MajesticPlates = (function () {
 		}
 		const query = ROI.cropQuery(cut);
 
+		function cancelled() {
+			return opts.signal && opts.signal.aborted;
+		}
+
 		function oneAtATime(n, already) {
 			const out = already || [];
+			// A frame already in hand still counts. Reporting it only once the
+			// NEXT one lands would skip a step and make the first wait look
+			// twice as long as the rest.
+			if (out.length && opts.onProgress) opts.onProgress(out.length, n);
 			let chain = Promise.resolve();
 			for (let i = out.length; i < n; i++) {
 				chain = chain.then(function () {
-					if (opts.signal && opts.signal.aborted) throw new Error('cancelled');
-					return getDng(query);
+					if (cancelled()) throw new Error('cancelled');
+					return getDng(query, opts.signal);
 				}).then(function (bytes) {
 					out.push(bytes);
 					if (opts.onProgress) opts.onProgress(out.length, n);
@@ -150,20 +168,34 @@ window.MajesticPlates = (function () {
 			});
 		}
 
-		if (opts.separate === true || frames === 1) return oneAtATime(frames);
+		if (separate || frames === 1) return oneAtATime(frames);
 
-		// The fast path. `getDngWithCount` reports what the camera says it
-		// averaged, which is 1 on a build that does not know the parameter.
-		if (opts.onProgress) opts.onProgress(0, 1);
-		return getDngWithCount(query + '&frames=' + frames)
+		/* The fast path. No `onProgress` on it at all: there is one request and
+		 * one capture, so a frame counter would be a progress bar with a single
+		 * step — and if this turns out to be an old camera the counter has to
+		 * start again with a different total. The caller says what it is doing
+		 * and the counter appears only if the slow path is reached. */
+		if (cancelled()) return Promise.reject(new Error('cancelled'));
+		return getDngWithCount(query + '&frames=' + frames, opts.signal)
 			.then(function (got) {
-				if (got.averaged >= frames) {
-					if (opts.onProgress) opts.onProgress(1, 1);
+				/* Anything above one frame was averaged BY THE CAMERA, and the
+				 * count is the camera's own: it drops a frame whose geometry
+				 * does not match the first, so a burst of sixteen can honestly
+				 * come back as fourteen. That is a smaller stack, not a failed
+				 * one, and it is reported as what it is.
+				 *
+				 * Exactly one frame is the other thing entirely: a build that
+				 * has never heard of `?frames=` answers 200 with a single
+				 * ordinary capture and no header. Mixing that averaged file
+				 * back in with individual frames would put an average and its
+				 * own constituents in one array and call them all single
+				 * frames, which is why the two cases are told apart here and
+				 * not by how many were asked for. */
+				if (got.averaged > 1) {
 					return { rect: cut, asked: want, frames: [got.bytes],
 						averaged: got.averaged, inCamera: true };
 				}
-				// Too old for it, and it sent one frame rather than failing.
-				// Keep that frame and fetch the rest one at a time.
+				// Too old for it. Keep the frame it did send and fetch the rest.
 				return oneAtATime(frames, [got.bytes]);
 			});
 	}
