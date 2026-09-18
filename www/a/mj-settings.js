@@ -252,6 +252,7 @@
 		watchRailTop();
 		wireSearch();
 		watchIrcut();
+		watchRc();
 		// the rail is a tree on >=md and an accordion below it; re-render rather
 		// than try to keep both shapes live at once
 		const onWidth = () => { buildNav(); publishRailTop(); };
@@ -977,6 +978,11 @@
 			if (ipeye) body.appendChild(ipeye);
 			const audio = audioPanel(sec);
 			if (audio) body.appendChild(audio);
+			// Same placement and the same reason as the two above: on a video
+			// section the verdict is what someone came to read, and maxQp and
+			// bitrate are the fields they will change because of it.
+			const rcv = rcPanel(sec);
+			if (rcv) body.appendChild(rcv);
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
@@ -7725,6 +7731,59 @@
 		state.audioBox = box;
 		audioSync(box);
 		return box;
+	}
+
+	// Is this channel's encoder meeting the rate this very form sets?
+	//
+	// The camera reaches the verdict (venc*_rc_state, a thirty second window
+	// with its own hysteresis) and rc-check.js turns it into a sentence; this
+	// only mounts it beside the settings it names. Nothing here re-derives a
+	// judgement -- the form and the camera log must not be able to disagree.
+	//
+	// Absent on a camera too old to publish the verdict, which is the same
+	// thing as a camera with nothing wrong: the box simply stays empty.
+	function rcPanel(sec) {
+		const chn = sec === 'video0' ? 0 : sec === 'video1' ? 1 : -1;
+		if (chn < 0 || !window.MajesticRcCheck) return null;
+		state.rcChn = chn;
+		const box = el('div');
+		box.id = 'mj-rc-findings';
+		paintRcFindings();
+		return box;
+	}
+
+	let rcSample = null;
+
+	function paintRcFindings() {
+		const box = document.getElementById('mj-rc-findings');
+		if (!box || !window.MajesticRcCheck) return;
+		const chn = state.rcChn;
+		const cfg = {
+			bitrate: getDotted(state.config, 'video' + chn + '.bitrate'),
+			fps: getDotted(state.config, 'video' + chn + '.fps'),
+		};
+		const f = window.MajesticRcCheck.diagnose(rcSample, cfg, chn);
+		box.innerHTML = '';
+		if (!f) return;
+		const cls = f.level === 'warning' ? 'alert-warning' : 'alert-secondary';
+		const d = el('div', 'alert ' + cls + ' py-2 px-3 mb-2 small');
+		d.innerHTML = '<b>' + esc(f.title) + '</b> ' + esc(f.detail);
+		box.appendChild(d);
+	}
+
+	// Subscribed once for the page, not once per mount: main.js keeps no
+	// unsubscribe, so re-subscribing on every visit to a video section would
+	// leave a live handler behind for each one. The same reasoning, and the
+	// same shape, as watchIrcut().
+	function watchRc() {
+		if (!window.MajesticRcCheck || typeof mjMetricsSubscribe !== 'function')
+			return;
+		mjMetricsSubscribe((s) => {
+			// A verdict is a claim about right now, and an unreachable camera
+			// has no right now to claim anything about.
+			rcSample = s.ok ? s : null;
+			paintRcFindings();
+		});
 	}
 
 	function ircutPanel(sec) {

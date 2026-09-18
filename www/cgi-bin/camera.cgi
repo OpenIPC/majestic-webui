@@ -181,6 +181,7 @@ fi
 %>
 <script src="/a/audio-check.js" defer></script>
 <script src="/a/ircut-check.js" defer></script>
+<script src="/a/rc-check.js" defer></script>
 <script src="/a/ircut-map.js" defer></script>
 <script src="/a/ircut-pads.js" defer></script>
 <script src="/a/ircut-scan.js" defer></script>

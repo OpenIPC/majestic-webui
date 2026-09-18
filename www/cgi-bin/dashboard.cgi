@@ -189,6 +189,12 @@ done) %>
 					<span class="st-now" id="st-enc-now"></span>
 				</div>
 				<div class="mj-chart" id="ch-enc"></div>
+				<%# Beside the chart rather than in the KPI tile above: a second
+				    line inside .st-tile lifts every tile in the grid with it
+				    (see .st-tile .st-sub in bootstrap.override.css), and this
+				    one is a sentence rather than a figure. Same shape and same
+				    place as #st-luma-note under Scene luminance. %>
+				<div class="x-small text-secondary" id="st-enc-note"></div>
 			</div>
 		</div>
 
@@ -342,6 +348,7 @@ done) %>
 <script src="/a/charts.js" defer></script>
 <script src="/a/ircut-check.js" defer></script>
 <script src="/a/video-check.js" defer></script>
+<script src="/a/rc-check.js" defer></script>
 <script src="/a/dashboard.js" defer></script>
 
 <%in p/footer.cgi %>
