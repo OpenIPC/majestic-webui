@@ -293,6 +293,7 @@ function apply(matrix, X, Y) {
 		ok(env.asked.some((u) => u === '/api/v1/calibration/peer?peer=tele'), 'a session on the peer was brokered by this camera');
 		const ov = env.overlay();
 		ok(ov && !ov.hidden, 'the overlay is on');
+		ok(env.els['#mj-stage'].classList.contains('mj-peer-on'), 'and the stage says so, for the cursor');
 		ok(env.api().overlay().on && env.api().overlay().peer === 'tele', 'and the module says so');
 		ok(env.mounts.length === 1, 'the embeddable player was mounted once');
 		const m = env.mounts[0].opts;
@@ -334,6 +335,7 @@ function apply(matrix, X, Y) {
 		// A second click takes it away; Esc would too.
 		await env.click(MID.x, MID.y);
 		ok(ov.hidden && !env.api().overlay().on, 'a click inside takes it away');
+		ok(!env.els['#mj-stage'].classList.contains('mj-peer-on'), 'and the stage no longer says it is up');
 		ok(env.mounts[0].destroyed === 1, 'the player was destroyed');
 		ok(env.api().overlay().session && env.api().overlay().session.id === 's1', 'the session is kept for the next click');
 		ok(env.outline().style.display === '' && /click inside/.test(env.outline().find('text').textContent), 'the outline stays, and invites again');

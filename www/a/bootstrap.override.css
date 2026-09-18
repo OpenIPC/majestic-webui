@@ -8042,9 +8042,15 @@ body > main > .container > form > .mj-foot {
 	stroke: rgba(13, 15, 20, 0.9);
 	stroke-width: 3px;
 }
-/* The cursor says what a press will do: nothing outside the outline. */
-.mj-stage.mj-peer-armed { cursor: not-allowed; }
-.mj-stage.mj-peer-armed.mj-peer-in { cursor: crosshair; }
+/* The cursor says what a press will do, and a press is the page's
+   everywhere -- a pan, or a rectangle -- so the page's cursor shows, with
+   Peer on as with it off. The one thing Peer adds is the click inside the
+   outline that brings the other camera's picture, and the hand says so
+   while that picture is not yet up. Once it is, the click merely hides it
+   again and the drag is the point, so the page's cursor returns; the area
+   tool's crosshair and a pan in progress win either way. */
+.mj-stage.mj-peer-armed.mj-peer-in:not(.mj-peer-on):not(.mj-armed):not(.mj-panning),
+.mj-stage.mj-peer-armed.mj-peer-in:not(.mj-peer-on):not(.mj-armed):not(.mj-panning) .mj-stage-media { cursor: pointer; }
 
 /* The overlay: the other camera's live picture, warped onto the outline.
    Over the media (auto), under the outline (4) and the toasts (5). The

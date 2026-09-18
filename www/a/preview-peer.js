@@ -722,6 +722,7 @@
 			scheduleRefresh(peer);
 			clearNote();
 			O.on = true;
+			stage.classList.add('mj-peer-on');
 			showStillOnce();
 			mountPlayer();
 			placeOutline();
@@ -743,6 +744,7 @@
 		unmountPlayer();
 		stopStills();
 		O.on = false;
+		stage.classList.remove('mj-peer-on');
 		O.codec = '';
 		O.size = null;
 		if (O.el) O.el.hidden = true;
