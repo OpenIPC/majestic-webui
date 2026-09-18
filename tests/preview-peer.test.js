@@ -91,6 +91,7 @@ function boot(opts) {
 		frame: { w: 2592, h: 1944 }, visible: { x: 0, y: 0, w: 2592, h: 1944 },
 		pic: { x: 0, y: 0, w: 1000, h: 750 }, scale: 1000 / 2592,
 	};
+	const zoomStub = { view: () => view, ceiling: undefined, setCeiling(fn) { zoomStub.ceiling = fn; } };
 	const osd = opts.osd || {
 		group: [2592, 1944],
 		streams: [
@@ -112,7 +113,7 @@ function boot(opts) {
 			addEventListener: (t, fn) => { (docListeners[t] = docListeners[t] || []).push(fn); },
 		},
 		window: {
-			MajesticZoom: { view: () => view },
+			MajesticZoom: zoomStub,
 			MajesticLiveStream: opts.shownFn || (() => (opts.shown == null ? 0 : opts.shown)),
 			MajesticRegion: require('../www/a/mj-region.js'),
 			MajesticPreview: opts.noPlayer ? undefined : {
@@ -167,7 +168,7 @@ function boot(opts) {
 	const tick = () => new Promise((r) => setTimeout(r, 8));
 	const stage = els['#mj-stage'];
 	return {
-		els, asked, posted, mounts, sandbox, docListeners, winListeners, tick, state, opts, heldPeer,
+		els, asked, posted, mounts, sandbox, docListeners, winListeners, tick, state, opts, heldPeer, zoom: zoomStub,
 		outline: () => stage.find('#mj-peer-outline'),
 		overlay: () => stage.find('#mj-peer-overlay'),
 		api: () => sandbox.window.MajesticPeerCrop,
@@ -294,6 +295,9 @@ function apply(matrix, X, Y) {
 		const ov = env.overlay();
 		ok(ov && !ov.hidden, 'the overlay is on');
 		ok(env.els['#mj-stage'].classList.contains('mj-peer-on'), 'and the stage says so, for the cursor');
+		// The page may now zoom to 3x of the peer's pixels: its 640 px picture over the outline's top edge.
+		const wq = Math.hypot(QUAD[1][0] - QUAD[0][0], QUAD[1][1] - QUAD[0][1]);
+		ok(typeof env.zoom.ceiling === 'function' && near(env.zoom.ceiling(), 3 * 640 / wq), 'the zoom ceiling is raised to 3x of the peer\'s picture: ' + (env.zoom.ceiling && env.zoom.ceiling().toFixed(2)));
 		ok(env.api().overlay().on && env.api().overlay().peer === 'tele', 'and the module says so');
 		ok(env.mounts.length === 1, 'the embeddable player was mounted once');
 		const m = env.mounts[0].opts;
@@ -318,6 +322,7 @@ function apply(matrix, X, Y) {
 		// The decoder reports a smaller frame: re-sized, same corners.
 		m.onFrame(320, 240, 'h265');
 		ok(env.mounts[0].stage.style.width === '320px', 'the player follows the decoded frame');
+		ok(near(env.zoom.ceiling(), 3 * 320 / wq), 'and so does the ceiling');
 		const q2 = apply(env.api().overlay().matrix, 320, 240);
 		ok(near(q2.x, c[2].x) && near(q2.y, c[2].y), 'and still lands on the third corner');
 		m.onPlaying('webrtc');
@@ -326,6 +331,7 @@ function apply(matrix, X, Y) {
 		await new Promise((r) => setTimeout(r, 1700));
 		ok(still.hidden, 'and goes once the grace has passed');
 		ok(/tele · LIVE/.test(env.outline().find('text').textContent), 'the label says live');
+		ok(/ · \d+% · /.test(env.outline().find('text').textContent), 'and how far in the picture is: ' + env.outline().find('text').textContent);
 		ok(/mj-peer-dim-off/.test(env.outline().find('.mj-peer-dim').getAttribute('class')), 'the dimming lifts');
 		// A drag inside is the page's -- a pan, or the zoom rectangle -- and the overlay stays.
 		const drag = await env.drag(MID.x, MID.y, MID.x + 40, MID.y + 30);
@@ -336,6 +342,7 @@ function apply(matrix, X, Y) {
 		await env.click(MID.x, MID.y);
 		ok(ov.hidden && !env.api().overlay().on, 'a click inside takes it away');
 		ok(!env.els['#mj-stage'].classList.contains('mj-peer-on'), 'and the stage no longer says it is up');
+		ok(env.zoom.ceiling === null, 'and the zoom ceiling is the page\'s own again');
 		ok(env.mounts[0].destroyed === 1, 'the player was destroyed');
 		ok(env.api().overlay().session && env.api().overlay().session.id === 's1', 'the session is kept for the next click');
 		ok(env.outline().style.display === '' && /click inside/.test(env.outline().find('text').textContent), 'the outline stays, and invites again');

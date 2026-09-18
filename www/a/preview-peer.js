@@ -306,7 +306,11 @@
 			const what = O.lost ? 'snapshots' : O.playing ? 'LIVE' : 'connecting…';
 			const f = peerFrame();
 			const only = adaptRefused === 0 ? ' · main stream not served here' : '';
-			return name + ' · ' + what + (f ? ' ' + f.w + '×' + f.h : '') + only + ' · click or Esc to hide';
+			/* Its magnification, the way the page's chip states its own: the
+			 * picture's width on screen against its pixels. */
+			const css = shownWidth() / (window.devicePixelRatio || 1);
+			const pct = f && css > 0 ? ' · ' + Math.round(100 * css / f.w) + '%' : '';
+			return name + ' · ' + what + (f ? ' ' + f.w + '×' + f.h : '') + pct + only + ' · click or Esc to hide';
 		}
 		return name + ' sees this · click inside to see its picture here';
 	}
@@ -454,6 +458,26 @@
 		const s = streamOf(currentStream());
 		if (s && s.w > 0 && s.h > 0) return { w: s.w, h: s.h };
 		return O.size || null;
+	}
+
+	/* How far the page may zoom while the other camera's picture is up: the
+	 * page's own ceiling is 3x of ITS pixels, and the other camera's picture
+	 * occupies a few hundred of them, so at that ceiling it is shown below
+	 * its native size -- no magnification at all, where its own page reaches
+	 * 3x. So 3x of the peer picture's pixels, in this frame's terms: the
+	 * outline's top edge in the served stream's pixels, against the peer
+	 * frame's width. Read by the zoom module at every zoom, so a switch
+	 * from the peer's sub stream to its main raises it on the spot. */
+	function peerCeiling() {
+		if (!O.on || !quad) return 0;
+		const p = placement(), f = peerFrame();
+		if (!p || !f || !(f.w > 0)) return 0;
+		const w = Math.hypot(p.k.kx * (quad[1][0] - quad[0][0]), p.k.ky * (quad[1][1] - quad[0][1]));
+		return w > 0 ? 3 * f.w / w : 0;
+	}
+	function setCeiling(on) {
+		const z = window.MajesticZoom;
+		if (z && typeof z.setCeiling === 'function') z.setCeiling(on ? peerCeiling : null);
 	}
 
 	/* Put the peer's picture on the outline: the player's stage (and the
@@ -723,6 +747,7 @@
 			clearNote();
 			O.on = true;
 			stage.classList.add('mj-peer-on');
+			setCeiling(true);
 			showStillOnce();
 			mountPlayer();
 			placeOutline();
@@ -745,6 +770,7 @@
 		stopStills();
 		O.on = false;
 		stage.classList.remove('mj-peer-on');
+		setCeiling(false);
 		O.codec = '';
 		O.size = null;
 		if (O.el) O.el.hidden = true;

@@ -251,7 +251,16 @@
 	// you touched it. Not `kFill * 3`: that read the enlargement Fill already
 	// needed as the thing to triple, and offered 1092% on that substream.
 	function zoomFloor(kFit) { return Math.min(kFit, 1); }
-	function zoomCeiling(kFill) { return Math.max(kFill, 3); }
+	// And a caller can raise the ceiling. The peer overlay does, while another
+	// camera's picture sits on this one: 3x of THAT picture's pixels is then
+	// what is worth looking at, and it can be a dozen times this frame's. The
+	// hook answers a scale in this frame's terms, or nothing.
+	let ceilingHook = null;
+	function zoomCeiling(kFill) {
+		let more = 0;
+		if (ceilingHook) { try { more = +ceilingHook() || 0; } catch (e) { more = 0; } }
+		return Math.max(kFill, 3, more);
+	}
 
 	function panBy(dx, dy) {
 		if (!frame || !placed) return;
@@ -652,6 +661,17 @@
 	window.MajesticZoom = {
 		// The stream's real pixel size, from the player's codec report.
 		setFrame: setFrame,
+
+		// How far in a zoom may go beyond 3x native: a function answering a
+		// scale in the frame's own terms (or 0), read at every zoom; null to
+		// withdraw it. A free zoom already past the ceiling that leaves is
+		// pulled back to it, about the middle of the stage.
+		setCeiling: function (fn) {
+			ceilingHook = typeof fn === 'function' ? fn : null;
+			if (mode !== 'free' || !frame || !placed) return;
+			const r = stage.getBoundingClientRect();
+			zoomAt(1, r.left + stage.clientWidth / 2, r.top + stage.clientHeight / 2);
+		},
 
 		// What of the frame is on screen, or null before the first layout,
 		// in the stream's own pixels -- the space the camera reasons in.
