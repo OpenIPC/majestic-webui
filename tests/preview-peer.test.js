@@ -501,8 +501,11 @@ function apply(matrix, X, Y) {
 		await env.arm();
 		await env.click(MID.x, MID.y);
 		ok(env.api().overlay().pending, 'the session is on its way');
+		// A second click meanwhile: neither another ask nor a cancel.
+		await env.click(MID.x, MID.y);
+		ok(env.heldPeer.length === 1 && env.api().overlay().pending, 'a click while it is on its way asks for nothing and cancels nothing');
 		env.esc();
-		ok(env.heldPeer.length === 1, 'the session was asked for');
+		ok(env.heldPeer.length === 1, 'the session was asked for once');
 		env.heldPeer.shift()();
 		await env.tick();
 		await env.tick();
@@ -593,6 +596,25 @@ function apply(matrix, X, Y) {
 		ok(env.api().overlay().on, 'and the overlay came on by itself');
 		ok(env.mounts.length === 1 && env.mounts[0].opts.session() === 's1', 'with the session brokered after pairing');
 		env.esc();
+	}
+
+	{
+		// The form outlives nothing of the control's: disarming takes it
+		// away, and a password typed into a form that was left open brings
+		// no overlay once Peer is off.
+		const env = boot({ paired: false });
+		await env.tick();
+		await env.arm();
+		await env.click(MID.x, MID.y);
+		const form = env.els['#mj-peer-note'].find('.mj-peer-pair');
+		ok(form && !env.els['#mj-peer-note'].hidden, 'the form is offered');
+		env.esc();
+		ok(env.els['#mj-peer-note'].hidden && !env.els['#mj-peer'].checked, 'Esc disarms Peer and takes the form with it');
+		form.find('input').value = 'right';
+		form.fire('submit');
+		await env.tick(); await env.tick(); await env.tick();
+		ok(env.state.paired, 'the pairing itself went through');
+		ok(!env.api().overlay().on && env.mounts.length === 0, 'but with Peer off it switches nothing on');
 	}
 
 	group('no player: the peer\'s snapshots, warped, and honestly labelled');

@@ -760,7 +760,13 @@
 		const my = ++gen;
 		O.pending = true;
 		try {
-			const s = sessionStillGood(peer) ? O.sess : await ensureSession(peer, overlayOn);
+			/* Pairing, when it has to be offered, comes back here -- but only
+			 * while the control is still armed and the peer is still the one
+			 * the form was offered for. The form can sit there while either
+			 * changes, and a password typed into it then must not switch on
+			 * an overlay nobody asked for. */
+			const again = () => { if (armed && peerName() === peer) overlayOn(); };
+			const s = sessionStillGood(peer) ? O.sess : await ensureSession(peer, again);
 			if (my !== gen) return;
 			if (!s) return;
 			buildOverlay();
@@ -811,13 +817,17 @@
 		stage.classList.toggle('mj-peer-armed', armed);
 		if (!armed) stage.classList.remove('mj-peer-in');
 		if (box.checked !== armed) box.checked = armed;
-		if (!armed) overlayOff(true);
+		/* Off takes everything of this control's with it: the overlay, its
+		 * session, and a note -- a pairing form, say -- still open. */
+		if (!armed) { overlayOff(true); clearNote(); }
 		outlineOn(armed);
 	}
 	box.addEventListener('change', () => setArmed(box.checked));
 	if (pick) pick.addEventListener('change', () => {
-		/* The overlay, its session and its outline were the previous peer's. */
+		/* The overlay, its session, its outline and any note were the
+		 * previous peer's. */
 		overlayOff(true);
+		clearNote();
 		quad = null;
 		corners = null;
 		if (armed) askOutline();
@@ -857,6 +867,11 @@
 		const click = commit && Math.abs(p.x - press.x) <= CLICK_SLOP && Math.abs(p.y - press.y) <= CLICK_SLOP;
 		press = null;
 		if (!click) return;
+		/* A click while the session is still being asked for is neither a
+		 * second ask -- the camera would broker another session for an
+		 * answer this page then throws away -- nor a cancel, which Esc is.
+		 * The answer is on its way. */
+		if (O.pending) return;
 		if (O.on) overlayOff(); else overlayOn();
 	}
 	/* Two clicks inside the outline have already toggled the overlay twice;
