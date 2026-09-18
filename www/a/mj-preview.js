@@ -94,6 +94,11 @@ window.MajesticPreview = (function () {
 	//              height. The default geometry reserves room below the picture
 	//              for the Live leaf's knob strip, which is exactly wrong for a
 	//              picture sitting in an ordinary card.
+	//   demote     false to keep a durable WebRTC failure on THIS stage from
+	//              demoting the browser's transport preference (which is one
+	//              per browser, not per stage): a page watching another
+	//              camera through this stage must not have its own player
+	//              parked on MSE for six hours by that camera's refusal.
 	//   onPlaying  (kind) — a picture is on screen, on this transport.
 	//   onLost     (detail) — every transport has been tried and none of them
 	//              played. The stage says so itself; this is for a caller that
@@ -485,7 +490,7 @@ window.MajesticPreview = (function () {
 				// camera is full, which it will not be for long. The rule lives
 				// in one place now, asked here and by the live-player branch
 				// below (MajesticTransport.durable, #402).
-				if (kind === 'webrtc' && window.MajesticTransport.durable(state)) {
+				if (kind === 'webrtc' && opts.demote !== false && window.MajesticTransport.durable(state)) {
 					window.MajesticTransport.demote();
 				}
 			},
@@ -526,7 +531,7 @@ window.MajesticPreview = (function () {
 				}
 				if (st === 'fallback' || st === 'busy') {
 					// The same demote rule as the trial-drop path above (#402).
-					if (window.MajesticTransport.durable(st)) {
+					if (opts.demote !== false && window.MajesticTransport.durable(st)) {
 						window.MajesticTransport.demote();
 					}
 					// Its picture is frozen from here; the replacement is staged

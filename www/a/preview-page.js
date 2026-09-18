@@ -163,7 +163,9 @@
 	// keeps fetching it.
 	function liveVideoTrack() {
 		try {
-			const vids = document.querySelectorAll('#mj-stage video');
+			// The page's own media only: another camera's picture, played in
+			// the stage by the peer overlay, is not this picture's poster.
+			const vids = document.querySelectorAll('#mj-stage video.mj-stage-media');
 			for (let i = 0; i < vids.length; i++) {
 				const s = vids[i].srcObject;
 				const t = s && s.getVideoTracks && s.getVideoTracks()[0];

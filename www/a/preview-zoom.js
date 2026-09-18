@@ -251,7 +251,16 @@
 	// you touched it. Not `kFill * 3`: that read the enlargement Fill already
 	// needed as the thing to triple, and offered 1092% on that substream.
 	function zoomFloor(kFit) { return Math.min(kFit, 1); }
-	function zoomCeiling(kFill) { return Math.max(kFill, 3); }
+	// And a caller can raise the ceiling. The peer overlay does, while another
+	// camera's picture sits on this one: 3x of THAT picture's pixels is then
+	// what is worth looking at, and it can be a dozen times this frame's. The
+	// hook answers a scale in this frame's terms, or nothing.
+	let ceilingHook = null;
+	function zoomCeiling(kFill) {
+		let more = 0;
+		if (ceilingHook) { try { more = +ceilingHook() || 0; } catch (e) { more = 0; } }
+		return Math.max(kFill, 3, more);
+	}
 
 	function panBy(dx, dy) {
 		if (!frame || !placed) return;
@@ -414,9 +423,17 @@
 	// screen changes until the replacement is known to work" forbids. The
 	// promotion carries its own report -- the stats tick that says `playing`
 	// is the one that names the size -- so nothing is lost by ignoring this.
+	//
+	// And only from the page's own media -- the elements this module places,
+	// which carry .mj-stage-media. Anything else that plays inside the stage
+	// (the peer control lays another camera's picture over this one, with a
+	// player of its own) reports its OWN size through the same events, and
+	// taking it for the picture's re-laid the whole page out against a frame
+	// that was never on it.
 	function fromMedia(e) {
 		const el = e.target;
 		if (!el || !el.videoWidth) return;
+		if (!el.classList || !el.classList.contains('mj-stage-media')) return;
 		if (getComputedStyle(el).display === 'none') return;
 		setFrame(el.videoWidth, el.videoHeight);
 	}
@@ -644,6 +661,18 @@
 	window.MajesticZoom = {
 		// The stream's real pixel size, from the player's codec report.
 		setFrame: setFrame,
+
+		// How far in a zoom may go beyond 3x native: a function answering a
+		// scale in the frame's own terms (or 0), read at every zoom; null to
+		// withdraw it. A free zoom already past the ceiling that leaves is
+		// pulled back to it, about the middle of the stage.
+		setCeiling: function (fn) {
+			ceilingHook = typeof fn === 'function' ? fn : null;
+			// The way a stage resize pulls a free zoom back inside its
+			// bounds: layout() clamps the scale about what the middle of the
+			// stage was looking at. One path for that, not two.
+			if (mode === 'free') layout();
+		},
 
 		// What of the frame is on screen, or null before the first layout,
 		// in the stream's own pixels -- the space the camera reasons in.

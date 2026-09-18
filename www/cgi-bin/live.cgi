@@ -67,13 +67,14 @@ hide_title=1; full_bleed=1
      preview-zoom.js, which is what tells it. Like preview-roi.js it is in
      neither test's SRCS list: preview-page.js does not know it exists. -->
 <script src="/a/preview-still.js"></script>
-<!-- The other camera's view of the part you drew: a rectangle on this picture
-     asked of the camera's calibration and answered as the peer's crop. After
-     preview-zoom.js, whose placement and rubber band it uses, and after
-     preview-still.js for the same reason. Guarded like it: a build missing
-     the file, or a camera without the door, leaves the page as it was. -->
+<!-- The other camera's picture laid over this one where its calibration
+     says it belongs: an outline while Peer is on, the live picture warped
+     onto it on a click inside. After preview-zoom.js, whose placement and
+     view events it follows, and after preview-still.js for the same reason.
+     Guarded like it: a build missing the file, or a camera without the
+     door, leaves the page as it was. -->
 <!-- The embeddable player (the settings pages' picture), which the peer
-     control mounts inside its loupe to play the OTHER camera. After the
+     control mounts inside its overlay to play the OTHER camera. After the
      transport modules it hangs together -- preview.js, preview-swap.js,
      preview-transport.js, preview-chain.js -- and before preview-peer.js,
      which checks for it and falls back to snapshots without it. -->

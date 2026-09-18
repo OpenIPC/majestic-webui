@@ -212,10 +212,10 @@ printf '%s' \
 		     surface: same stack, same glass, no × because the picture itself
 		     dismisses it. -->
 		<p id="mj-still-note" class="mj-adapt-toast small" role="status" hidden></p>
-		<!-- What the peer control has to say (preview-peer.js): why a
-		     rectangle could not be answered, or -- once -- the pairing form
-		     that lets this camera fetch the other one's picture. Same surface
-		     as the still's note. -->
+		<!-- What the peer control has to say (preview-peer.js): why the other
+		     camera's picture could not be fetched, or -- once -- the pairing
+		     form that lets this camera fetch it. Same surface as the still's
+		     note. -->
 		<p id="mj-peer-note" class="mj-adapt-toast small" role="status" hidden></p>
 		<p id="mj-adapt" class="mj-adapt-toast small" role="status" hidden>
 			<span id="mj-adapt-rates" class="mj-adapt-rates"></span>
@@ -332,15 +332,15 @@ printf '%s' \
 			</span>
 
 			<!-- Peer. Switch it on and the other camera's outline is drawn on
-			     this picture; draw a rectangle inside it and the rectangle
-			     becomes that camera's live video of the same place, right
-			     there (preview-peer.js). Shipped hidden and unhidden only by a
-			     camera that has both the endpoint and a calibrated peer; the
-			     picker shows only with two or more. -->
+			     this picture; click inside it and that camera's live picture
+			     is laid over exactly that quadrilateral, aligned with this one
+			     (preview-peer.js). Shipped hidden and unhidden only by a camera
+			     that has both the endpoint and a calibrated peer; the picker
+			     shows only with two or more. -->
 			<span class="mj-hud mj-tog-wrap" id="mj-peer-ctl" hidden>
 				<input type="checkbox" class="mj-tog-in" id="mj-peer" autocomplete="off">
 				<label class="mj-tog" for="mj-peer"
-					title="See another camera's view of this scene. Its outline appears on the picture; draw a rectangle inside it and the rectangle becomes that camera's live video of the same place. Drag it, resize it by the corner, double-click to swap the two pictures. Esc backs out.">
+					title="See another camera's view of this scene. Its outline appears on the picture; click inside it and that camera's live picture is laid over the outline, aligned with this one. Zoom as usual to look closer. Click again or press Esc to take it away.">
 					<span class="mj-led"></span>
 					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 						<rect x="2.5" y="5" width="8" height="10" rx="1.2"></rect>

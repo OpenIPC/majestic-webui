@@ -1,16 +1,16 @@
-/* The other camera's picture, in place, on this page.
+/* The other camera's picture, laid over this one where it belongs.
  *
  * A camera calibrated against another one that sees the same scene can say
- * two things about it: where that camera's whole picture lies in this one
- * (GET /api/v1/calibration/coverage), and where a rectangle of this picture
- * lands in that one (GET /api/v1/calibration/map). This control is both, on
- * the live picture. Switch Peer on and the other camera's OUTLINE is drawn
- * on this picture, so you know where it looks before you draw anything.
- * Draw a rectangle inside it and the rectangle becomes a LOUPE: the other
- * camera's live video, cropped to the part you drew, in the place you drew
- * it. Drag it to move, drag its corner to resize; its toolbar shows the
- * whole of the other picture, swaps it with this one, goes full screen, pops
- * the video out, or closes it. Esc backs out one step.
+ * where that camera's whole picture lies in its own: the four corners,
+ * through the inverse of the calibrated ground-plane homography
+ * (GET /api/v1/calibration/coverage). Switch Peer on and that outline is
+ * drawn on the live picture, so you know where the other camera looks.
+ * Click inside it and the other camera's live video is warped onto exactly
+ * that quadrilateral: the same place, the same scale, aligned with this
+ * picture on the plane the calibration was measured on, and sharper,
+ * because the other camera has many more pixels on it. Click again, or
+ * press Esc, and it is gone. Zoom the page as usual and the overlay comes
+ * with it, which is where the magnification is.
  *
  * The video comes from the other camera directly, and without a second
  * login: this camera holds a pairing with it (a token, never a password,
@@ -18,17 +18,20 @@
  * (GET /api/v1/calibration/peer) -- good for that camera's video for a
  * quarter of an hour and for nothing else, carried in the socket's URL
  * because a cookie for one origin never travels to another. The player is
- * mj-preview.js's, mounted inside the loupe and pointed at that origin; a
+ * mj-preview.js's, mounted off to the side and pointed at that origin, and
+ * its whole stage is put in place with one CSS perspective transform. A
  * page whose build lacks it, or a browser that cannot play the stream, gets
- * the other camera's snapshots instead, cropped and polled.
+ * the other camera's snapshots instead, warped the same way.
  *
  * Its own file, like preview-still.js and preview-roi.js: tests/auto-source
  * and tests/staging run preview-page.js in a bare vm with no layout, no fetch
- * and no canvas, and preview-page.js does not know this exists. The rubber
- * band is preview-zoom's element and preview-zoom's drawing rules, copied
- * rather than shared: while this control is armed its listeners run first,
- * in the capture phase, and stop the event there, so the same drag does not
- * also pan or zoom.
+ * and no canvas, and preview-page.js does not know this exists. While the
+ * control is armed its listeners run first, in the capture phase, and watch
+ * a press inside the outline: a release within a few pixels of it is a
+ * click, and toggles the overlay. The press itself stays the page's
+ * throughout, so a drag inside the outline pans, or draws the zoom
+ * rectangle, exactly as it does with the control off. Only a double-click
+ * is kept from the page there, because two clicks already mean something.
  */
 (function () {
 	'use strict';
@@ -36,42 +39,41 @@
 	const $ = (s) => document.querySelector(s);
 
 	const stage = $('#mj-stage');
-	const band = $('#mj-marquee');
 	const ctl = $('#mj-peer-ctl');
 	const box = $('#mj-peer');
 	const pick = $('#mj-peer-pick');
 	const note = $('#mj-peer-note');
-	if (!stage || !band || !ctl || !box || !note) return;
+	if (!stage || !ctl || !box || !note) return;
 
-	const MAP = '/api/v1/calibration/map';
 	const COVERAGE = '/api/v1/calibration/coverage';
 	const PEER = '/api/v1/calibration/peer';
 	const PAIR = '/api/v1/calibration/pair';
 
 	/* Where a press belongs to the control under it rather than to the
-	 * picture -- preview-zoom's list, for the same bar, plus the loupe. */
-	const CHROME = '.mj-bar, .mj-ptz, #mj-stats, #mj-toasts, #mj-peer-loupe';
+	 * picture -- preview-zoom's list, for the same bar. */
+	const CHROME = '.mj-bar, .mj-ptz, #mj-stats, #mj-toasts';
 
 	/* The outline is asked of the camera again this often while Peer is on
-	 * (the lens may have moved), and laid out again this often (the viewer
-	 * may have panned or zoomed). The snapshot fallback polls at this rate. */
+	 * (the lens may have moved), and everything is laid out again this often
+	 * (the viewer may have panned or zoomed). The snapshot fallback polls at
+	 * this rate. A press that moves less than this is a click. */
 	const OUTLINE_ASK_MS = 5000;
-	const OUTLINE_PLACE_MS = 250;
+	const PLACE_MS = 250;
 	const STILL_MS = 1000;
-	const INSET_MS = 125;
-	/* A loupe smaller than this shows nothing anyone can read, so a smaller
-	 * drawing is grown around its centre to it (kept on the picture); one
-	 * still narrower than the toolbar hides its tag. */
-	const LOUPE_MIN_W = 160, LOUPE_MIN_H = 90;
-	const LOUPE_CRAMPED_W = 220, LOUPE_CRAMPED_H = 120;
+	const CLICK_SLOP = 6;
+	/* The snapshot stays on top this long after the video says it plays: the
+	 * software rung paints what it decodes from the first packet, and until
+	 * a keyframe arrives that is a grey field, not a picture. A keyframe is
+	 * asked for at the same moment, so this is a ceiling, not a delay. */
+	const PLAY_GRACE_MS = 1500;
 
 	let peers = [];         /* names the calibration knows, as the camera spelt them */
 	let myConfig = null;    /* this camera's configuration, for the peer player's ICE settings */
 	let geom = null;        /* null means NOT KNOWN -- never assume 1:1 */
 	let geomGen = 0;        /* so an older /api/v1/osd answer cannot overwrite a newer */
-	let armed = false, drawing = null;
+	let armed = false;
 	let gen = 0;            /* so a slow answer cannot land after a newer one */
-	let doors = { map: false, peer: false };
+	let doors = { coverage: false, peer: false };
 
 	function api(url, init) {
 		return typeof apiFetch === 'function'
@@ -80,8 +82,8 @@
 	}
 
 	/* A door exists when it refuses an empty question with 400. A camera that
-	 * answers 404 has no such door. The map is what makes the control worth
-	 * showing; without the peer door the loupe cannot fetch anything and the
+	 * answers 404 has no such door. The coverage is what makes the control
+	 * worth showing; without the peer door nothing can be fetched and the
 	 * control says so instead of offering a feature the camera cannot do. */
 	async function probe(url) {
 		try {
@@ -116,9 +118,9 @@
 
 	/* The main channel's size and the map from the shown stream to it -- the
 	 * same two things preview-still.js learns, for the same reason: the camera
-	 * calibrates in the MAIN channel's pixels, and a rectangle drawn on the sub
-	 * stream converted as though it were the main one lands somewhere else in
-	 * the scene while still looking like an answer. */
+	 * calibrates in the MAIN channel's pixels, and a corner placed on the sub
+	 * stream as though it were the main one lands somewhere else in the scene
+	 * while still looking like an answer. */
 	async function learnGeometry() {
 		const my = ++geomGen;
 		const at = shownStream();
@@ -150,10 +152,10 @@
 		if (my === geomGen) geom = next;
 	}
 
-	/* Stage pixels <-> the main channel's. Stage to shown-stream pixels is
-	 * preview-zoom's placement run backwards; shown to main is the camera's
-	 * map, scaled by what the decoder actually produced against what the
-	 * channel declares (WebRTC may send a smaller picture than configured). */
+	/* The main channel's pixels to stage pixels: through the camera's map to
+	 * the shown stream, scaled by what the decoder actually produced against
+	 * what the channel declares (WebRTC may send a smaller picture than
+	 * configured), then preview-zoom's placement. */
 	function placement() {
 		const zoom = window.MajesticZoom;
 		if (!zoom || typeof zoom.view !== 'function') return null;
@@ -170,31 +172,19 @@
 	/* The map is for the stream it was learnt on, and the served channel can
 	 * change without the event the user-selection path sends: the camera may
 	 * answer a request for one stream with the other, and the page then shows
-	 * a picture the map does not describe. Anything about to convert asks for
-	 * a fresh map first; one learning at a time. */
-	let learning = null;
+	 * a picture the map does not describe. Anything about to place asks for a
+	 * fresh map first; one learning at a time. */
+	let learning = null, geomTried = 0;
 	function geometryFresh() {
 		if (geom && geom.at === shownStream()) return Promise.resolve(true);
-		if (!learning) learning = learnGeometry().then(() => { learning = null; return !!geom; });
+		/* Asked again after a failure, but not on every tick: what failed a
+		 * moment ago has not changed. */
+		if (!geom && !learning && Date.now() - geomTried < 2000) return Promise.resolve(false);
+		if (!learning) {
+			geomTried = Date.now();
+			learning = learnGeometry().then(() => { learning = null; return !!geom; });
+		}
 		return learning;
-	}
-
-	function toMain(b) {
-		const p = placement();
-		if (!p) return { why: geom ? 'the picture has not been placed yet' : 'the camera has not said which stream is on screen' };
-		/* A map for the stream just left converts this one confidently to the
-		 * wrong place; refused rather than guessed. The callers ask
-		 * geometryFresh() first, so this is the stream moving mid-drag. */
-		if (geom.at !== shownStream()) return { why: 'the stream on screen changed; draw again' };
-		const { v, k } = p;
-		const shownX = (x) => v.visible.x + (x - v.pic.x) / v.scale;
-		const shownY = (y) => v.visible.y + (y - v.pic.y) / v.scale;
-		let x0 = (shownX(b.x) - k.ox) / k.kx, y0 = (shownY(b.y) - k.oy) / k.ky;
-		let x1 = (shownX(b.x + b.w) - k.ox) / k.kx, y1 = (shownY(b.y + b.h) - k.oy) / k.ky;
-		x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
-		x1 = Math.min(geom.main.w, Math.ceil(x1)); y1 = Math.min(geom.main.h, Math.ceil(y1));
-		if (!(x1 - x0 >= 1) || !(y1 - y0 >= 1)) return { why: 'the rectangle is off the picture' };
-		return { rect: x0 + 'x' + y0 + 'x' + (x1 - x0) + 'x' + (y1 - y0) };
 	}
 
 	/* A point of the main channel, in stage pixels; null until placeable. */
@@ -224,15 +214,13 @@
 
 	/* Pairing, once, right here: the other camera's password goes to this
 	 * camera, which signs in there and keeps only the token it is handed
-	 * back. `then` runs once the pairing took. */
+	 * back. `then` runs once the pairing took. `at` is where the password is
+	 * about to go, for the operator to see before typing. */
 	function offerPairing(peer, then, at) {
 		empty(note);
 		const form = document.createElement('form');
 		form.className = 'mj-peer-pair';
 		const label = document.createElement('span');
-		/* With the address the password is about to go to: the camera's
-		 * roster is filled by whatever announces itself on the link, and the
-		 * operator is the one who knows whether that address is the peer. */
 		label.textContent = 'To see ' + peer + ' here, this camera needs its password once' +
 			(at ? ', which it sends to ' + at : '') + '. ';
 		const input = document.createElement('input');
@@ -283,9 +271,10 @@
 	/* ---- the outline: where the other camera looks ------------------------ */
 
 	const SVG = 'http://www.w3.org/2000/svg';
-	let outline = null, outlinePoly = null, outlineTag = null;
+	let outline = null, outlineDim = null, outlinePoly = null, outlineTag = null;
 	let quad = null;            /* main-channel corners of the peer's picture */
-	let askTimer = null, placeTimer = null;
+	let corners = null;         /* the same, in stage pixels, as last placed */
+	let askTimer = null, placeTimer = null, outlineGen = 0, saidCoverage = false;
 
 	function buildOutline() {
 		if (outline || typeof document.createElementNS !== 'function') return;
@@ -293,53 +282,138 @@
 		outline.setAttribute('class', 'mj-peer-outline');
 		outline.setAttribute('id', 'mj-peer-outline');
 		outline.setAttribute('aria-hidden', 'true');
+		/* Everything but the outline, dimmed a little while the control waits
+		 * for a click: the one place a click does anything is the one place
+		 * left bright. */
+		outlineDim = document.createElementNS(SVG, 'path');
+		outlineDim.setAttribute('class', 'mj-peer-dim');
+		outlineDim.setAttribute('fill-rule', 'evenodd');
 		outlinePoly = document.createElementNS(SVG, 'polygon');
 		outlineTag = document.createElementNS(SVG, 'text');
+		outline.appendChild(outlineDim);
 		outline.appendChild(outlinePoly);
 		outline.appendChild(outlineTag);
-		outline.hidden = true;
+		showOutline(false);
 		stage.appendChild(outline);
 	}
 
+	/* An SVG element has no `hidden` property -- HTMLElement's -- and the
+	 * attribute set from script is easy to get wrong; the style is what the
+	 * browser reads either way. Mirrored onto the property for callers that
+	 * ask. */
+	function showOutline(on) {
+		outline.style.display = on ? '' : 'none';
+		outline.hidden = !on;
+	}
+
+	function tagText() {
+		const name = peerName();
+		if (O.on) {
+			const what = O.lost ? 'snapshots' : O.playing ? 'LIVE' : 'connecting…';
+			const f = peerFrame();
+			const only = adaptRefused === 0 ? ' · main stream not served here' : '';
+			/* Its magnification, the way the page's chip states its own: the
+			 * picture's width on screen against its pixels. */
+			const css = shownWidth() / (window.devicePixelRatio || 1);
+			const pct = f && css > 0 ? ' · ' + Math.round(100 * css / f.w) + '%' : '';
+			return name + ' · ' + what + (f ? ' ' + f.w + '×' + f.h : '') + pct + only + ' · click or Esc to hide';
+		}
+		return name + ' sees this · click inside to see its picture here';
+	}
+
+	/* The outline in stage pixels, from the corners the camera gave and the
+	 * placement now; and the overlay with it. */
+	/* What was last written into the outline, so a placement that moved
+	 * nothing writes nothing: this runs on every view change and every
+	 * 250 ms, and an SVG attribute set to the value it already has still
+	 * costs a layout. Reads come before writes for the same reason. */
+	let placedRing = '', placedDim = '', placedDimClass = '', placedTag = '';
 	function placeOutline() {
 		if (!outline) return;
-		if (!quad || !armed && !loupeOpen()) { outline.hidden = true; return; }
-		if (geom && geom.at !== shownStream()) { geometryFresh().then(placeOutline); return; }
+		if (!quad || !armed && !O.on) { showOutline(false); corners = null; placeOverlay(); return; }
+		if (!geom || geom.at !== shownStream()) {
+			/* One placement when the map lands, not one per tick spent
+			 * waiting for it -- and none chained when nothing was asked. */
+			const first = !learning;
+			const p = geometryFresh();
+			if (first && learning) p.then(placeOutline);
+			return;
+		}
 		const pts = quad.map((c) => toStage(c[0], c[1]));
-		if (pts.some((p) => !p)) { outline.hidden = true; return; }
-		outlinePoly.setAttribute('points', pts.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' '));
-		const top = pts.reduce((a, p) => (p.y < a.y ? p : a), pts[0]);
-		outlineTag.setAttribute('x', top.x.toFixed(1));
-		outlineTag.setAttribute('y', (top.y - 6).toFixed(1));
-		outlineTag.textContent = peerName() + ' sees this';
-		outline.hidden = false;
+		if (pts.some((p) => !p)) { showOutline(false); corners = null; placeOverlay(); return; }
+		corners = pts;
+		const sw = stage.clientWidth, sh = stage.clientHeight;
+		const ring = pts.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+		const dim = 'M0,0H' + sw + 'V' + sh + 'H0Z M' + ring.replace(/ /g, 'L') + 'Z';
+		const dimClass = 'mj-peer-dim' + (O.on ? ' mj-peer-dim-off' : '');
+		const tag = tagText();
+		if (ring !== placedRing) {
+			outlinePoly.setAttribute('points', ring);
+			/* Above the outline's top corner -- and inside the stage, which
+			 * clips: zoomed into the picture the corner is off the top, and
+			 * the tag is the one thing that says whether that picture is
+			 * live, so it stays where it can be read. */
+			const top = pts.reduce((a, p) => (p.y < a.y ? p : a), pts[0]);
+			outlineTag.setAttribute('x', Math.min(Math.max(top.x, 4), Math.max(4, sw - 4)).toFixed(1));
+			outlineTag.setAttribute('y', Math.min(Math.max(top.y - 6, 16), Math.max(16, sh - 6)).toFixed(1));
+			placedRing = ring;
+		}
+		if (dim !== placedDim) { outlineDim.setAttribute('d', dim); placedDim = dim; }
+		if (dimClass !== placedDimClass) { outlineDim.setAttribute('class', dimClass); placedDimClass = dimClass; }
+		if (tag !== placedTag) { outlineTag.textContent = tag; placedTag = tag; }
+		showOutline(true);
+		placeOverlay();
+	}
+
+	/* The 250 ms tick: a placement, and the stream question the placement
+	 * feeds. Not one function, because a placement also runs on every view
+	 * change, and the question's dwell counts ticks, not pointer moves. */
+	function tick() {
+		placeOutline();
+		adapt();
 	}
 
 	async function askOutline() {
 		const peer = peerName();
-		if (!peer || !doors.map) return;
+		if (!peer || !doors.coverage) return;
 		const my = ++outlineGen;
-		let next = null;
+		let next = null, size = null, answered = false;
 		try {
 			const res = await api(COVERAGE + '?peer=' + encodeURIComponent(peer), { credentials: 'same-origin' });
 			if (res.ok) {
+				answered = true;
 				const j = await res.json();
 				if (j && Array.isArray(j.quad) && j.quad.length === 4 &&
-					j.quad.every((c) => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1])))
+					j.quad.every((c) => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]))) {
 					next = j.quad;
+					size = j.row ? parseSize(j.row.size) : null;
+				}
+			} else if (res.status >= 400 && res.status < 500) {
+				/* The camera's word: no coverage for this peer. Said once, the
+				 * first time, so the operator knows why nothing is drawn. */
+				answered = true;
+				let body = null;
+				try { body = await res.json(); } catch (e) { body = null; }
+				if (!saidCoverage) {
+					saidCoverage = true;
+					say((body && body.reason) || ('this camera has no calibration for ' + peer));
+				}
 			}
-		} catch (e) { next = null; }
+			/* Anything else -- a 5xx, a body that cannot be read -- is the
+			 * camera failing to answer, not answering no: the last outline
+			 * stands, and with it the overlay and the zoom it allows. */
+		} catch (e) { answered = false; }
 		if (my !== outlineGen) return;
-		quad = next;
+		if (answered) quad = next;
+		if (size) O.size = size;
 		placeOutline();
 	}
-	let outlineGen = 0;
 
 	function outlineOn(on) {
 		buildOutline();
 		if (on) {
 			if (!askTimer) { askOutline(); askTimer = setInterval(askOutline, OUTLINE_ASK_MS); }
-			if (!placeTimer) placeTimer = setInterval(placeOutline, OUTLINE_PLACE_MS);
+			if (!placeTimer) placeTimer = setInterval(tick, PLACE_MS);
 		} else {
 			if (askTimer) { clearInterval(askTimer); askTimer = null; }
 			if (placeTimer) { clearInterval(placeTimer); placeTimer = null; }
@@ -348,236 +422,354 @@
 		}
 	}
 
-	/* ---- the loupe: the other camera's video where you drew --------------- */
+	/* Is a stage point inside the outline? Ray casting over the four
+	 * corners; false until the outline has been placed. */
+	function inside(x, y) {
+		if (!corners) return false;
+		let hit = false;
+		for (let i = 0, j = 3; i < 4; j = i++) {
+			const a = corners[i], b = corners[j];
+			if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) hit = !hit;
+		}
+		return hit;
+	}
 
-	const L = {
-		el: null, host: null, still: null, inset: null, tag: null, bar: null, grip: null,
-		peer: '', box: null,          /* stage px */
-		rect: '', peerRect: null,      /* this camera's main px; the peer's main px {x,y,w,h} */
-		lastBox: null,                 /* the box the camera last answered for */
-		pending: false,                /* a loupe is being opened: questions in flight */
-		size: null,                    /* the peer's declared picture {w,h}, from the map row */
+	/* ---- the overlay: the other camera's picture on its quadrilateral ------ */
+
+	const O = {
+		el: null, host: null, still: null,
+		on: false, peer: '',
+		size: null,                    /* the peer's declared picture {w,h}, from the row */
+		recovered: false,              /* a fresh session was already asked for, this overlay */
 		frame: null, codec: '',        /* what the peer's decoder produced */
 		handle: null, playing: false, lost: false,
-		sess: null, sessTimer: null, stillTimer: null, insetTimer: null,
-		whole: false, swapped: false,
+		sess: null, sessTimer: null, stillTimer: null,
+		pending: false,                /* being switched on: questions in flight */
+		matrix: '',                    /* the transform last applied, for the tests */
 	};
-
-	function loupeOpen() { return !!(L.el && !L.el.hidden); }
-
-	function icon(d) {
-		if (typeof document.createElementNS !== 'function') return document.createTextNode('');
-		const s = document.createElementNS(SVG, 'svg');
-		s.setAttribute('viewBox', '0 0 20 20');
-		s.setAttribute('width', '16');
-		s.setAttribute('height', '16');
-		s.setAttribute('fill', 'none');
-		s.setAttribute('stroke', 'currentColor');
-		s.setAttribute('stroke-width', '1.6');
-		s.setAttribute('stroke-linecap', 'round');
-		s.setAttribute('stroke-linejoin', 'round');
-		s.setAttribute('aria-hidden', 'true');
-		const p = document.createElementNS(SVG, 'path');
-		p.setAttribute('d', d);
-		s.appendChild(p);
-		return s;
-	}
-
-	function button(name, title, d, onClick) {
-		const b = document.createElement('button');
-		b.type = 'button';
-		b.className = 'mj-hud-ico mj-loupe-btn';
-		b.setAttribute('data-act', name);
-		b.title = title;
-		b.setAttribute('aria-label', title);
-		b.appendChild(icon(d));
-		b.addEventListener('click', (e) => { if (e && e.stopPropagation) e.stopPropagation(); onClick(); });
-		return b;
-	}
-
-	function buildLoupe() {
-		if (L.el) return;
-		L.el = document.createElement('div');
-		L.el.id = 'mj-peer-loupe';
-		L.el.className = 'mj-loupe';
-		L.el.hidden = true;
-		L.host = document.createElement('div');
-		L.host.className = 'mj-loupe-host';
-		L.still = document.createElement('img');
-		L.still.className = 'mj-loupe-still';
-		L.still.alt = '';
-		L.still.hidden = true;
-		L.inset = document.createElement('canvas');
-		L.inset.className = 'mj-loupe-inset';
-		L.inset.hidden = true;
-		L.inset.title = 'This camera. Click to swap back.';
-		L.inset.addEventListener('click', (e) => { if (e && e.stopPropagation) e.stopPropagation(); setSwapped(false); });
-		L.tag = document.createElement('span');
-		L.tag.className = 'mj-loupe-tag';
-		L.bar = document.createElement('div');
-		L.bar.className = 'mj-hud mj-loupe-bar';
-		L.bar.appendChild(button('whole', 'Whole picture of the other camera',
-			'M3 5.5A1.5 1.5 0 0 1 4.5 4h11A1.5 1.5 0 0 1 17 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5zM7 8h6v4H7z',
-			() => setWhole(!L.whole)));
-		L.bar.appendChild(button('swap', 'Swap: the other camera fills the screen, this one becomes the inset',
-			'M4 7h10l-3-3M16 13H6l3 3', () => setSwapped(!L.swapped)));
-		L.bar.appendChild(button('fullscreen', 'Full screen',
-			'M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4', fullscreen));
-		L.bar.appendChild(button('popout', 'Pop the video out into its own window',
-			'M3 5.5A1.5 1.5 0 0 1 4.5 4h11A1.5 1.5 0 0 1 17 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5zM9 9h6v5H9z', popOut));
-		L.bar.appendChild(button('close', 'Close (Esc)', 'M5 5l10 10M15 5L5 15', closeLoupe));
-		L.grip = document.createElement('div');
-		L.grip.className = 'mj-loupe-grip';
-		L.grip.title = 'Drag to resize';
-		L.el.appendChild(L.host);
-		L.el.appendChild(L.still);
-		L.el.appendChild(L.inset);
-		L.el.appendChild(L.bar);
-		L.el.appendChild(L.tag);
-		L.el.appendChild(L.grip);
-		L.el.addEventListener('dblclick', (e) => {
-			if (e && e.target && e.target.closest && e.target.closest('.mj-loupe-bar, .mj-loupe-inset')) return;
-			setSwapped(!L.swapped);
-		});
-		stage.appendChild(L.el);
-	}
 
 	function parseSize(s) {
 		const m = typeof s === 'string' ? /^(\d+)x(\d+)$/.exec(s) : null;
 		return m && +m[1] > 0 && +m[2] > 0 ? { w: +m[1], h: +m[2] } : null;
 	}
-	function parseRect(s) {
-		const m = typeof s === 'string' ? /^(\d+)x(\d+)x(\d+)x(\d+)$/.exec(s) : null;
-		return m && +m[3] > 0 && +m[4] > 0 ? { x: +m[1], y: +m[2], w: +m[3], h: +m[4] } : null;
+
+	function buildOverlay() {
+		if (O.el) return;
+		O.el = document.createElement('div');
+		O.el.id = 'mj-peer-overlay';
+		O.el.className = 'mj-peer-overlay';
+		O.el.hidden = true;
+		O.host = document.createElement('div');
+		O.host.className = 'mj-peer-host';
+		O.still = document.createElement('img');
+		O.still.className = 'mj-peer-still';
+		O.still.alt = '';
+		O.still.hidden = true;
+		O.el.appendChild(O.host);
+		O.el.appendChild(O.still);
+		stage.appendChild(O.el);
+	}
+
+	/* The projective map from a W x H picture to the four stage corners --
+	 * (0,0) to the first, (W,0) to the second, (W,H) to the third, (0,H) to
+	 * the fourth, the order the camera gives the peer's corners in -- as the
+	 * sixteen numbers of a CSS matrix3d with the origin at the top left.
+	 * Heckbert's square-to-quad, then the picture's size folded in. Null for
+	 * a quadrilateral that has collapsed. */
+	function quadTransform(w, h, p) {
+		if (!(w > 0) || !(h > 0) || !p || p.length !== 4) return null;
+		const x0 = p[0].x, y0 = p[0].y, x1 = p[1].x, y1 = p[1].y, x2 = p[2].x, y2 = p[2].y, x3 = p[3].x, y3 = p[3].y;
+		const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+		const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+		let g = 0, hh = 0;
+		if (dx3 !== 0 || dy3 !== 0) {
+			const det = dx1 * dy2 - dx2 * dy1;
+			if (!det) return null;
+			g = (dx3 * dy2 - dx2 * dy3) / det;
+			hh = (dx1 * dy3 - dx3 * dy1) / det;
+		}
+		const a = x1 - x0 + g * x1, b = x3 - x0 + hh * x3, c = x0;
+		const d = y1 - y0 + g * y1, e = y3 - y0 + hh * y3, f = y0;
+		const m = [a / w, d / w, 0, g / w, b / h, e / h, 0, hh / h, 0, 0, 1, 0, c, f, 0, 1];
+		if (m.some((v) => !Number.isFinite(v))) return null;
+		if (Math.abs(a * e - b * d) < 1e-9) return null;
+		/* Full precision: the perspective terms are tiny and a rounded one
+		 * moves a far corner by pixels. */
+		return 'matrix3d(' + m.join(',') + ')';
 	}
 
 	/* The peer's picture as this page has it: the decoded frame when the
-	 * player has one, else the size the calibration row declared. The
-	 * rectangle is in the declared size's pixels, so it is scaled when the
-	 * decoder produced something else. */
+	 * player has one, else the stream it is asked for, else the size the
+	 * calibration row declared. All of them are the same picture at
+	 * different sizes -- the transform is per size -- so any of them places
+	 * the snapshot before the video says. */
 	function peerFrame() {
-		return L.frame || L.size || null;
-	}
-	function peerRectInFrame() {
-		const f = peerFrame(), r = L.peerRect;
-		if (!f || !r) return null;
-		const s = L.size || f;
-		const ax = f.w / s.w, ay = f.h / s.h;
-		return { x: r.x * ax, y: r.y * ay, w: r.w * ax, h: r.h * ay };
+		if (O.frame) return O.frame;
+		const s = streamOf(currentStream());
+		if (s && s.w > 0 && s.h > 0) return { w: s.w, h: s.h };
+		return O.size || null;
 	}
 
-	/* Where the loupe is on the stage: the box you drew, or the whole stage
-	 * when swapped. */
-	function loupeBox() {
-		if (L.swapped) return { x: 0, y: 0, w: stage.clientWidth, h: stage.clientHeight };
-		return L.box;
+	/* How far the page may zoom while the other camera's picture is up: the
+	 * page's own ceiling is 3x of ITS pixels, and the other camera's picture
+	 * occupies a few hundred of them, so at that ceiling it is shown below
+	 * its native size -- no magnification at all, where its own page reaches
+	 * 3x. So 3x of the peer picture's pixels, in this frame's terms: the
+	 * outline's top edge in the served stream's pixels, against the peer
+	 * frame's width. Read by the zoom module at every zoom, so a switch
+	 * from the peer's sub stream to its main raises it on the spot. */
+	function peerCeiling() {
+		if (!O.on || !quad) return 0;
+		const p = placement(), f = peerFrame();
+		if (!p || !f || !(f.w > 0)) return 0;
+		const q = quad.map((c) => ({ x: p.k.kx * c[0], y: p.k.ky * c[1] }));
+		const w = edgeWidth(q[0], q[1], q[2], q[3]);
+		return w > 0 ? 3 * f.w / w : 0;
+	}
+	function setCeiling(on) {
+		const z = window.MajesticZoom;
+		if (z && typeof z.setCeiling === 'function') z.setCeiling(on ? peerCeiling : null);
 	}
 
-	/* Position the loupe, and inside it the player's stage, so the part of
-	 * the peer's picture you asked for fills the box (cover), or the whole of
-	 * it fits (contain). What the player draws is the whole frame; the crop
-	 * is the box's edge. */
-	function layout() {
-		if (!L.el || !L.box) return;
-		const b = loupeBox();
-		L.el.classList.toggle('mj-loupe-cramped', b.w < LOUPE_CRAMPED_W || b.h < LOUPE_CRAMPED_H);
-		const st = L.el.style;
-		st.left = b.x + 'px';
-		st.top = b.y + 'px';
-		st.width = b.w + 'px';
-		st.height = b.h + 'px';
-		const f = peerFrame(), r = peerRectInFrame();
-		const inner = L.handle ? L.handle.stage : null;
-		if (!inner || !f) return;
-		let k, left, top;
-		if (L.whole || !r) {
-			k = Math.min(b.w / f.w, b.h / f.h);
-			left = (b.w - f.w * k) / 2;
-			top = (b.h - f.h * k) / 2;
-		} else {
-			k = Math.max(b.w / r.w, b.h / r.h);
-			left = -(r.x * k) + (b.w - r.w * k) / 2;
-			top = -(r.y * k) + (b.h - r.h * k) / 2;
+	/* Put the peer's picture on the outline: the player's stage (and the
+	 * snapshot behind it) sized to the frame, at the stage's origin, with the
+	 * one transform that lands its corners on the outline's. */
+	function placeOverlay() {
+		if (!O.el) return;
+		const f = peerFrame();
+		const show = O.on && !!corners && !!f;
+		O.el.hidden = !show;
+		if (!show) return;
+		const t = quadTransform(f.w, f.h, corners);
+		if (!t) { O.el.hidden = true; return; }
+		O.matrix = t;
+		/* Written once per value, per element: a style set to what it
+		 * already holds is still a fresh transform on a promoted layer. The
+		 * key lives on the element, so a player mounted anew is placed anew. */
+		const key = f.w + 'x' + f.h + '|' + t;
+		[O.handle ? O.handle.stage : null, O.still].forEach((el) => {
+			if (!el || el.mjPeerPlaced === key) return;
+			el.mjPeerPlaced = key;
+			const s = el.style;
+			s.width = f.w + 'px';
+			s.height = f.h + 'px';
+			s.transformOrigin = '0 0';
+			s.transform = t;
+		});
+	}
+
+	/* Which of the peer's streams to watch. The sub stream when the peer has
+	 * one in H.264 -- every browser decodes that natively, and 1280x720 is
+	 * more than an overlay a few hundred pixels wide can show, while a
+	 * 2592x1944 H.265 main stream through the software rung is eight frames
+	 * a second of mostly grey in a browser without hardware HEVC -- for as
+	 * long as the picture on screen is narrower than the sub stream is. Zoom
+	 * in past that and the sub stream is the thing being upscaled, so the
+	 * main stream takes over; zoom back out and the sub returns. Hysteresis
+	 * either side and a dwell of a few placements, so a wheel gesture does not
+	 * switch back and forth on its way. The main stream alone when there is
+	 * nothing else, and the codec the peer named for each, so the transport
+	 * ladder knows what it is being handed.
+	 *
+	 * The ask is a preference, not an order: the peer can answer it with the
+	 * other channel -- a codec this browser's WebRTC cannot take, a channel
+	 * not there right now -- and the player follows what it was served. A
+	 * channel the player was moved off after being asked for it is that
+	 * answer, and it stands for as long as this player is mounted; asking
+	 * again would reconnect once a second for ever, and never play. */
+	const ADAPT_UP = 1.0, ADAPT_DOWN = 0.8, ADAPT_TICKS = 3;
+	let adaptWant = -1, adaptTicks = 0, adaptAsked = -1, adaptRefused = -1;
+	function streamOf(id) { return O.sess && O.sess.streams ? O.sess.streams.find((s) => s.id === id) : null; }
+	function subNative() { const s = streamOf(1); return !!(s && s.codec === 'h264'); }
+	function currentStream() { return O.handle && O.handle.stream ? O.handle.stream() : (subNative() ? 1 : 0); }
+	/* The peer picture's width on screen, in device pixels: its top edge as
+	 * placed, which is what the zoom scales. */
+	/* The longer of the picture's two horizontal edges: under a perspective
+	 * they differ, and the longer is where the pixels are. */
+	function edgeWidth(a, b, c, d) {
+		return Math.max(Math.hypot(b.x - a.x, b.y - a.y), Math.hypot(c.x - d.x, c.y - d.y));
+	}
+	function shownWidth() {
+		if (!corners) return 0;
+		return edgeWidth(corners[0], corners[1], corners[2], corners[3]) * (window.devicePixelRatio || 1);
+	}
+	function wantStream() {
+		const sub = streamOf(1), main = streamOf(0);
+		const cur = currentStream();
+		let want = cur;
+		if (!subNative()) want = 0;
+		else if (!main) want = 1;
+		else {
+			const w = shownWidth();
+			if (cur === 1 && sub.w > 0 && w > sub.w * ADAPT_UP) want = 0;
+			else if (cur === 0 && sub.w > 0 && w > 0 && w < sub.w * ADAPT_DOWN) want = 1;
 		}
-		const s = inner.style;
-		s.width = (f.w * k).toFixed(2) + 'px';
-		s.height = (f.h * k).toFixed(2) + 'px';
-		s.left = left.toFixed(2) + 'px';
-		s.top = top.toFixed(2) + 'px';
+		/* Whatever the rule says, a channel the peer refused is not asked
+		 * for again: the answer stands, and the page follows it. */
+		return want === adaptRefused ? cur : want;
+	}
+	function askStream(want) {
+		adaptAsked = want;
+		O.handle.setStream(want);
+	}
+	function adapt() {
+		if (!O.on || !O.handle || !O.handle.setStream || !O.handle.stream) return;
+		const cur = O.handle.stream();
+		if (adaptAsked >= 0 && cur !== adaptAsked) {
+			adaptRefused = adaptAsked;
+			adaptAsked = -1;
+			placeOutline();
+			return;
+		}
+		const want = wantStream();
+		if (want === cur) { adaptWant = -1; adaptTicks = 0; return; }
+		if (want !== adaptWant) { adaptWant = want; adaptTicks = 0; }
+		if (++adaptTicks < ADAPT_TICKS) return;
+		adaptTicks = 0;
+		adaptWant = -1;
+		/* The switch reconnects; the snapshot bridges it, as at switch-on,
+		 * and the last decoded size is the old stream's. */
+		O.frame = null;
+		O.playing = false;
+		showStillOnce();
+		askStream(want);
+		placeOverlay();
 	}
 
-	function tag() {
-		if (!L.tag) return;
-		const what = L.lost ? 'snapshots' : L.playing ? 'LIVE' : 'connecting…';
-		L.tag.textContent = what + ' · ' + L.peer + (L.whole ? ' · whole picture' : '');
-		L.tag.classList.toggle('mj-loupe-live', !!L.playing && !L.lost);
-	}
-
-	/* The configuration the embedded player reads: the peer's codec once its
-	 * stream said, else assumed H.265 so the software rung is on the ladder;
-	 * no sub channel, because the point of the loupe is detail; this camera's
-	 * ICE settings, which are the LAN's. */
+	/* The configuration the embedded player reads: the peer's codecs as it
+	 * named them (else H.265 assumed, so the software rung is on the ladder),
+	 * whether there is a sub stream to prefer, and this camera's ICE
+	 * settings, which are the LAN's. */
 	function peerConfig() {
+		const main = streamOf(0), sub = streamOf(1);
 		return {
-			video0: { codec: L.codec || 'h265' },
-			video1: { enabled: false },
+			video0: { codec: (main && main.codec) || O.codec || 'h265' },
+			video1: { enabled: subNative(), codec: (sub && sub.codec) || 'h264' },
 			webrtc: myConfig && myConfig.webrtc ? myConfig.webrtc : {},
 		};
 	}
 
+	let playSeq = 0;
 	function mountPlayer() {
-		if (L.handle || !L.sess) return;
+		if (O.handle || !O.sess) return;
 		const P = window.MajesticPreview;
 		if (!P || typeof P.mount !== 'function') { fallbackToStills(); return; }
-		L.handle = P.mount(L.host, {
+		O.handle = P.mount(O.host, {
 			config: peerConfig,
 			where: 'peer',
 			picker: false, snapshot: false, fullscreen: false, inline: true,
-			origin: () => (L.sess ? L.sess.url : ''),
-			session: () => (L.sess ? L.sess.id : ''),
+			/* The other camera's WebRTC refusing is nothing about this
+			 * browser's transport: it must not park THIS page on MSE. */
+			demote: false,
+			origin: () => (O.sess ? O.sess.url : ''),
+			session: () => (O.sess ? O.sess.id : ''),
 			onFrame: (w, h, codec) => {
-				L.frame = w > 0 && h > 0 ? { w: w, h: h } : null;
-				if (codec) L.codec = String(codec);
-				layout();
+				const before = O.frame ? O.frame.w : 0;
+				O.frame = w > 0 && h > 0 ? { w: w, h: h } : null;
+				if (codec) O.codec = String(codec);
+				placeOverlay();
+				/* A smaller frame is a lower ceiling, and a view already past
+				 * it is pulled back now rather than on the next wheel notch. */
+				if (O.on && (O.frame ? O.frame.w : 0) !== before) setCeiling(true);
 			},
-			onPlaying: () => { L.playing = true; L.lost = false; stopStills(); tag(); },
-			onLost: () => { L.playing = false; fallbackToStills(); },
+			onPlaying: () => {
+				O.playing = true;
+				O.lost = false;
+				/* A loss after a picture is a new incident, with its own
+				 * fresh session to ask for. */
+				O.recovered = false;
+				if (O.stillTimer) { clearInterval(O.stillTimer); O.stillTimer = null; }
+				/* A fresh keyframe now, so the picture under the snapshot is a
+				 * picture by the time the snapshot goes. */
+				try {
+					const p = O.handle && O.handle.player ? O.handle.player() : null;
+					if (p && typeof p.requestIdr === 'function') p.requestIdr();
+				} catch (e) {}
+				/* Keyed to this play, not to the overlay: a stream switch or a
+				 * remount within the grace would otherwise have the OLD play's
+				 * timer take the snapshot off the NEW stream's first frames. */
+				const my = ++playSeq;
+				setTimeout(() => { if (my === playSeq && O.on && O.playing) stopStills(); }, PLAY_GRACE_MS);
+				placeOutline();
+			},
+			onLost: () => { O.playing = false; recover(); },
 		});
-		if (!L.handle) { fallbackToStills(); return; }
-		if (L.handle.stream && L.handle.stream() !== 0 && L.handle.setStream) L.handle.setStream(0);
-		layout();
-		tag();
+		if (!O.handle) { fallbackToStills(); return; }
+		/* The player starts on the sub stream when the configuration offers
+		 * one and nothing was remembered; said explicitly here -- for the
+		 * size on screen right now -- so a remembered choice from another
+		 * page never decides for this one. */
+		adaptWant = -1;
+		adaptTicks = 0;
+		adaptAsked = -1;
+		adaptRefused = -1;
+		const want = wantStream();
+		if (O.handle.stream && O.handle.stream() !== want && O.handle.setStream) askStream(want);
+		placeOverlay();
+	}
+
+	/* The player ran out of transports. On a pair like this the usual
+	 * reason is not the network: the peer restarted and forgot every session
+	 * it had minted, while this camera still answers the old one from its
+	 * cache and this page still holds it, both with minutes left on their
+	 * clocks. So, once per overlay, a fresh session is asked for -- the
+	 * camera drops its cache on that word -- and the player is mounted again
+	 * on it. A second loss is a real one: the snapshots, honestly labelled
+	 * (they ride the same session, so they too are good only once it is). */
+	async function recover() {
+		if (O.recovered || !O.on || !O.peer) { fallbackToStills(); return; }
+		O.recovered = true;
+		const my = gen, peer = O.peer;
+		const s = await ensureSession(peer, afterPairing(peer), true, () => my === gen);
+		if (my !== gen || !O.on) return;
+		if (!s) { fallbackToStills(); return; }
+		O.sess = s;
+		scheduleRefresh(peer);
+		unmountPlayer();
+		showStillOnce();
+		mountPlayer();
+		placeOutline();
 	}
 
 	function unmountPlayer() {
-		if (L.handle && L.handle.destroy) { try { L.handle.destroy(); } catch (e) {} }
-		L.handle = null;
-		L.frame = null;
-		L.playing = false;
+		if (O.handle && O.handle.destroy) { try { O.handle.destroy(); } catch (e) {} }
+		O.handle = null;
+		O.frame = null;
+		O.playing = false;
+		/* The stream question's state was this player's. */
+		adaptWant = -1;
+		adaptTicks = 0;
+		adaptAsked = -1;
+		adaptRefused = -1;
 	}
 
-	/* No video: the peer's snapshot, cropped to the rectangle, once a second.
-	 * A frozen picture that reads as live is the one dangerous thing here,
-	 * so the tag says "snapshots" the whole time. */
+	function stillUrl() {
+		return O.sess.url + '/image.jpg?session=' + encodeURIComponent(O.sess.id) + '&t=' + Date.now().toString(36);
+	}
+
+	/* The peer's snapshot, warped the same way: once at switch-on, so there
+	 * is a picture within a second while the video connects, and once a
+	 * second for as long as no video plays. A frozen picture that reads as
+	 * live is the one dangerous thing here, so the tag says which it is. */
+	function showStillOnce() {
+		if (!O.still || !O.sess) return;
+		O.still.src = stillUrl();
+		O.still.hidden = false;
+	}
 	function fallbackToStills() {
-		L.lost = true;
-		tag();
-		if (!L.still || L.stillTimer) return;
-		L.still.hidden = false;
-		const poll = () => {
-			if (!L.sess || !L.peerRect) return;
-			const r = L.whole ? null : L.peerRect;
-			L.still.src = L.sess.url + '/image.jpg?' +
-				(r ? 'crop=' + r.x + 'x' + r.y + 'x' + r.w + 'x' + r.h + '&' : '') +
-				'session=' + encodeURIComponent(L.sess.id) + '&t=' + Date.now().toString(36);
-		};
+		if (!O.on) return;
+		O.lost = true;
+		placeOutline();
+		if (!O.still || O.stillTimer) return;
+		O.still.hidden = false;
+		const poll = () => { if (O.sess) O.still.src = stillUrl(); };
 		poll();
-		L.stillTimer = setInterval(poll, STILL_MS);
+		O.stillTimer = setInterval(poll, STILL_MS);
 	}
 	function stopStills() {
-		if (L.stillTimer) { clearInterval(L.stillTimer); L.stillTimer = null; }
-		if (L.still) { L.still.hidden = true; L.still.removeAttribute && L.still.removeAttribute('src'); }
-		L.lost = false;
+		if (O.stillTimer) { clearInterval(O.stillTimer); O.stillTimer = null; }
+		if (O.still) { O.still.hidden = true; if (O.still.removeAttribute) O.still.removeAttribute('src'); }
+		O.lost = false;
 	}
 
 	/* ---- the session on the peer ------------------------------------------ */
@@ -586,19 +778,29 @@
 	 * id, expires (seconds, or null where the camera did not say), size} --
 	 * or null having said why; when the answer is "not paired", having
 	 * offered pairing, after which `retry` runs. Writes nothing into the
-	 * loupe: the caller decides whether its operation is still the current
+	 * overlay: the caller decides whether its operation is still the current
 	 * one by the time this answers, and only then keeps the session. */
-	async function ensureSession(peer, retry) {
+	async function ensureSession(peer, retry, fresh, still) {
 		let res = null, body = null;
 		try {
-			res = await api(PEER + '?peer=' + encodeURIComponent(peer), { credentials: 'same-origin' });
+			res = await api(PEER + '?peer=' + encodeURIComponent(peer) + (fresh ? '&fresh=1' : ''), { credentials: 'same-origin' });
 			try { body = await res.json(); } catch (e) { body = null; }
 		} catch (e) { res = null; }
-		if (!res) { say('could not reach the camera'); return null; }
+		/* `still` says whether the ask is still wanted by the time it is
+		 * answered: an ask cancelled by Esc offers no pairing form and says
+		 * nothing, whatever came back. */
+		const wanted = !still || still();
+		if (!res) { if (wanted) say('could not reach the camera'); return null; }
 		if (res.ok && body && typeof body.session === 'string' && typeof body.url === 'string') {
 			const expires = Number.isFinite(body.expires) && body.expires > 0 ? body.expires : null;
-			return { url: body.url.replace(/\/+$/, ''), id: body.session, expires: expires, size: parseSize(body.size) };
+			const at = Date.now();
+			const streams = Array.isArray(body.streams)
+				? body.streams.filter((s) => s && Number.isFinite(s.id) && typeof s.codec === 'string')
+					.map((s) => ({ id: s.id | 0, codec: s.codec, w: s.width | 0, h: s.height | 0 }))
+				: [];
+			return { url: body.url.replace(/\/+$/, ''), id: body.session, expires: expires, at: at, size: parseSize(body.size), streams: streams };
 		}
+		if (!wanted) return null;
 		if (res.status === 409 && body && body.paired === false) {
 			offerPairing(peer, retry, typeof body.url === 'string' && /^https?:\/\//.test(body.url) ? body.url : '');
 			return null;
@@ -607,402 +809,233 @@
 		return null;
 	}
 
+	/* What a pairing made from the form leads to. The overlay, if the
+	 * control is still armed, the peer is still the one the form was offered
+	 * for and nothing is already on its way; with the overlay up on snapshots
+	 * -- the peer refused its session and then refused the token -- a fresh
+	 * session for it; with the overlay up and playing, nothing. */
+	function afterPairing(peer) {
+		return () => {
+			if (!armed || peerName() !== peer || O.pending) return;
+			if (O.on) { if (O.lost) { O.recovered = false; recover(); } return; }
+			overlayOn();
+		};
+	}
+
+	/* A page served over https cannot open a socket, or an image, on an
+	 * http camera: the browser refuses mixed content, silently. */
+	function mixed(url) {
+		return typeof location !== 'undefined' && location.protocol === 'https:' && /^http:/i.test(url);
+	}
+
 	/* The session is good for a quarter of an hour (the camera's word, else
 	 * assumed); a fresh one is fetched before it runs out so a reconnect never
-	 * carries a dead one. The answer is kept only for the loupe that asked. */
+	 * carries a dead one. The answer is kept only for the overlay that asked. */
 	function scheduleRefresh(peer) {
-		if (L.sessTimer) clearTimeout(L.sessTimer);
-		const ms = Math.max(30, (L.sess && L.sess.expires ? L.sess.expires : 900) * 0.8) * 1000;
-		L.sessTimer = setTimeout(async () => {
-			L.sessTimer = null;
+		if (O.sessTimer) clearTimeout(O.sessTimer);
+		/* From the session's own age, not from now: a session kept from an
+		 * earlier click has already spent some of its quarter-hour. */
+		const ttl = (O.sess && O.sess.expires ? O.sess.expires : 900) * 1000;
+		const at = O.sess && O.sess.at ? O.sess.at : Date.now();
+		const ms = Math.max(30 * 1000, at + ttl * 0.8 - Date.now());
+		O.sessTimer = setTimeout(async () => {
+			O.sessTimer = null;
 			const my = gen;
-			const s = await ensureSession(peer, () => {});
-			if (my !== gen || !loupeOpen()) return;
-			if (!s) { closeLoupe(); return; }
-			L.sess = s;
+			const s = await ensureSession(peer, afterPairing(peer), false, () => my === gen);
+			if (my !== gen || !O.on) return;
+			if (!s) { overlayOff(true); return; }
+			O.sess = s;
 			scheduleRefresh(peer);
 		}, ms);
 	}
 
-	/* ---- opening, moving, closing ----------------------------------------- */
+	/* ---- on and off ---------------------------------------------------------- */
 
-	async function ask(rect) {
+	/* A session kept from the last time, still good for a while, for this
+	 * peer: a click on, off and on again is one session on the peer, not
+	 * three, and the peer keeps only so many. */
+	function sessionStillGood(peer) {
+		const s = O.sess;
+		if (!s || O.peer !== peer) return false;
+		const ttl = (s.expires || 900) * 1000;
+		return Date.now() - s.at < ttl * 0.8;
+	}
+
+	async function overlayOn() {
 		const peer = peerName();
-		if (!peer) return null;
-		let res, body = null;
-		try {
-			res = await api(MAP + '?peer=' + encodeURIComponent(peer) + '&rect=' + rect, { credentials: 'same-origin' });
-			if (res.ok) body = await res.json();
-		} catch (e) { res = null; }
-		if (!res) { say('could not reach the camera'); return null; }
-		if (!res.ok || !body || typeof body.rect !== 'string') {
-			say(res.status === 404 ? 'this camera is not calibrated against ' + peer
-				: res.status === 400 ? 'that rectangle lands nowhere in ' + peer + '’s picture'
-					: 'the camera could not answer (' + (res.status || '?') + ')');
-			return null;
-		}
-		return { peer: peer, rect: parseRect(body.rect), size: body.row ? parseSize(body.row.size) : null };
-	}
-
-	async function openLoupe(b, rect) {
-		const my = ++gen;
-		L.pending = true;
-		try {
-			await openLoupeNow(my, b, rect);
-		} finally {
-			if (my === gen) L.pending = false;
-		}
-	}
-
-	async function openLoupeNow(my, b, rect) {
-		const a = await ask(rect);
-		if (my !== gen || !a || !a.rect) return;
-		buildLoupe();
-		L.peer = a.peer;
-		L.box = b;
-		L.rect = rect;
-		L.peerRect = a.rect;
-		if (a.size) L.size = a.size;
+		if (!peer) return;
 		if (!doors.peer) {
-			say('this camera cannot fetch ' + a.peer + '’s picture; its majestic predates the feature');
+			say('this camera cannot fetch ' + peer + '’s picture; its majestic predates the feature');
 			return;
 		}
-		const retry = () => openLoupe(b, rect);
-		if (!L.sess) {
-			const s = await ensureSession(a.peer, retry);
+		const my = ++gen;
+		O.pending = true;
+		try {
+			const s = sessionStillGood(peer) ? O.sess : await ensureSession(peer, afterPairing(peer), false, () => my === gen);
 			if (my !== gen) return;
 			if (!s) return;
-			L.sess = s;
-			if (!L.size && s.size) L.size = s.size;
-			scheduleRefresh(a.peer);
+			if (mixed(s.url)) {
+				say('this page is https and ' + peer + ' is http: the browser will not connect to it from here');
+				return;
+			}
+			buildOverlay();
+			O.peer = peer;
+			O.sess = s;
+			if (s.size) O.size = s.size;
+			scheduleRefresh(peer);
+			clearNote();
+			O.on = true;
+			O.recovered = false;
+			stage.classList.add('mj-peer-on');
+			setCeiling(true);
+			showStillOnce();
+			mountPlayer();
+			placeOutline();
+		} finally {
+			if (my === gen) O.pending = false;
 		}
-		clearNote();
-		L.el.hidden = false;
-		L.lastBox = Object.assign({}, b);
-		layout();
-		mountPlayer();
-		tag();
-		/* Disarming after the drag stopped the outline while this answer was
-		 * in flight; a loupe is a reason to keep drawing it. */
-		outlineOn(true);
 	}
 
-	/* The rectangle moved or grew: the peer is asked where it lands now; the
-	 * session and the player stay. */
-	async function reframe() {
-		const my = ++gen;
-		await geometryFresh();
-		if (my !== gen) return;
-		const m = toMain(L.box);
-		const a = m.rect ? await ask(m.rect) : null;
-		if (my !== gen) return;
-		if (!a || !a.rect) {
-			/* The box moved before the camera was asked; back to the last
-			 * place it answered, so the crop on show is the crop of the box. */
-			if (!m.rect) say(m.why);
-			if (L.lastBox) { L.box = Object.assign({}, L.lastBox); layout(); }
-			return;
-		}
-		L.rect = m.rect;
-		L.peerRect = a.rect;
-		L.lastBox = Object.assign({}, L.box);
-		if (a.size) L.size = a.size;
-		clearNote();
-		layout();
-		if (L.lost) { stopStills(); fallbackToStills(); }
-	}
-
-	function closeLoupe() {
-		if (!L.el) return;
-		/* Anything still in flight for this loupe -- a session, a map -- lands
-		 * on a loupe that is gone, and must not reopen it. */
+	/* Off. The session is kept (not refreshed) for a next click while it is
+	 * good; `forget` drops it too, for a peer that is no longer the one. */
+	function overlayOff(forget) {
+		/* Anything still in flight -- a session being brokered, the grace
+		 * timer -- lands on an overlay
+		 * that is gone, and must not switch it back on. */
 		gen++;
-		setSwapped(false);
+		O.pending = false;
+		if (O.sessTimer) { clearTimeout(O.sessTimer); O.sessTimer = null; }
+		if (forget) { O.sess = null; O.size = null; O.codec = ''; }
+		if (!O.on) return;
+		/* Off first: a player torn down below may report its loss on the
+		 * way out, and a loss on an overlay that is off asks for nothing. */
+		O.on = false;
 		unmountPlayer();
 		stopStills();
-		if (L.sessTimer) { clearTimeout(L.sessTimer); L.sessTimer = null; }
-		L.sess = null;
-		L.el.hidden = true;
-		L.box = null;
-		L.lastBox = null;
-		L.peerRect = null;
-		L.size = null;
-		L.codec = '';
-		L.whole = false;
-		L.el.classList.remove('mj-loupe-whole');
-		outlineOn(armed);
+		stage.classList.remove('mj-peer-on');
+		setCeiling(false);
+		O.codec = '';
+		O.size = null;
+		if (O.el) O.el.hidden = true;
+		placeOutline();
 	}
 
-	function setWhole(on) {
-		L.whole = !!on;
-		if (L.el) L.el.classList.toggle('mj-loupe-whole', L.whole);
-		layout();
-		tag();
-		if (L.lost) { stopStills(); fallbackToStills(); }
-	}
+	/* ---- arming and the click ---------------------------------------------- */
 
-	/* Swapped: the peer fills the stage and this camera becomes the inset, a
-	 * canvas painted from this page's own live picture with the outline and
-	 * the rectangle on it, so the context you drew in stays in view. Click
-	 * the inset, double-click the picture, or Esc to swap back. */
-	function setSwapped(on) {
-		on = !!on;
-		if (!L.el || L.swapped === on) return;
-		L.swapped = on;
-		L.el.classList.toggle('mj-loupe-swapped', on);
-		stage.classList.toggle('mj-peer-swapped', on);
-		if (on) {
-			L.inset.hidden = false;
-			drawInset();
-			L.insetTimer = setInterval(drawInset, INSET_MS);
-		} else {
-			if (L.insetTimer) { clearInterval(L.insetTimer); L.insetTimer = null; }
-			L.inset.hidden = true;
-		}
-		layout();
-	}
-
-	function liveMedia() {
-		const els = stage.querySelectorAll ? stage.querySelectorAll('.mj-stage-media') : [];
-		for (let i = 0; i < els.length; i++) {
-			const e = els[i];
-			if (e.style && e.style.display === 'none') continue;
-			if (e.tagName === 'VIDEO' && e.readyState >= 2) return e;
-			if (e.tagName === 'CANVAS') return e;
-		}
-		return null;
-	}
-
-	function drawInset() {
-		const c = L.inset;
-		if (!c || c.hidden || !c.getContext) return;
-		const p = placement();
-		const media = liveMedia();
-		if (!p || !media) return;
-		const fw = p.v.frame.w, fh = p.v.frame.h;
-		const cw = Math.max(1, Math.round(c.clientWidth || 320));
-		const ch = Math.max(1, Math.round(cw * fh / fw));
-		if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
-		const ctx = c.getContext('2d');
-		if (!ctx) return;
-		try { ctx.drawImage(media, 0, 0, cw, ch); } catch (e) { return; }
-		/* Main-channel pixels onto the inset: shown-stream pixels through the
-		 * map, then scaled to the canvas. */
-		const k = p.k, sx = cw / fw, sy = ch / fh;
-		const at = (x, y) => [(k.kx * x + k.ox) * sx, (k.ky * y + k.oy) * sy];
-		if (quad) {
-			ctx.beginPath();
-			quad.forEach((q, i) => { const [x, y] = at(q[0], q[1]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
-			ctx.closePath();
-			ctx.fillStyle = 'rgba(92, 112, 232, 0.14)';
-			ctx.fill();
-			ctx.setLineDash([5, 3]);
-			ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-			ctx.lineWidth = 1;
-			ctx.stroke();
-			ctx.setLineDash([]);
-		}
-		const r = parseRect(L.rect);
-		if (r) {
-			const [x0, y0] = at(r.x, r.y), [x1, y1] = at(r.x + r.w, r.y + r.h);
-			ctx.strokeStyle = '#fff';
-			ctx.lineWidth = 1.5;
-			ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-		}
-	}
-
-	function fullscreen() {
-		if (!L.swapped) setSwapped(true);
-		if (document.fullscreenElement) return;
-		if (stage.requestFullscreen) { try { stage.requestFullscreen().catch(() => {}); } catch (e) {} }
-	}
-
-	/* The browser's own picture-in-picture, which floats above every window;
-	 * only a <video> can do it, so the software-decode rung and the snapshot
-	 * fallback cannot. */
-	function popOut() {
-		const m = L.handle && L.handle.media ? L.handle.media() : null;
-		if (!m || m.tagName !== 'VIDEO' || typeof m.requestPictureInPicture !== 'function') {
-			say('this video cannot be popped out in this browser');
-			return;
-		}
-		try { m.requestPictureInPicture().catch(() => say('the browser refused to pop the video out')); } catch (e) {}
-	}
-
-	/* Moving and resizing. A press inside the loupe reaches these from the
-	 * stage's capture listeners below, which run before the zoom module's
-	 * and stop the event there: otherwise the page would start a pan and
-	 * capture the pointer, and a click on the toolbar would never land on
-	 * its button. A press on the toolbar or the inset starts no grab. */
-	let grab = null;
-	function inLoupe(e) {
-		return loupeOpen() && e.target && e.target.closest && !!e.target.closest('#mj-peer-loupe');
-	}
-	function loupeDown(e) {
-		if (L.swapped || !L.box) return;
-		if (e.button != null && e.button > 0) return;
-		if (e.target && e.target.closest && e.target.closest('.mj-loupe-bar, .mj-loupe-inset')) return;
-		const resize = !!(e.target && e.target.closest && e.target.closest('.mj-loupe-grip'));
-		grab = { id: e.pointerId, x: e.clientX, y: e.clientY, box: Object.assign({}, L.box), resize: resize };
-		try { L.el.setPointerCapture(e.pointerId); } catch (err) {}
-	}
-	function loupeMove(e) {
-		if (!grab || e.pointerId !== grab.id) return;
-		const dx = e.clientX - grab.x, dy = e.clientY - grab.y;
-		const p = picRect();
-		const b = grab.box;
-		let nb;
-		if (grab.resize) {
-			nb = { x: b.x, y: b.y, w: clamp(b.w + dx, 24, p.r - b.x), h: clamp(b.h + dy, 24, p.b - b.y) };
-		} else {
-			nb = { x: clamp(b.x + dx, p.x, p.r - b.w), y: clamp(b.y + dy, p.y, p.b - b.h), w: b.w, h: b.h };
-		}
-		L.box = nb;
-		layout();
-	}
-	function loupeUp(e, commit) {
-		if (!grab || e.pointerId !== grab.id) return;
-		try { L.el.releasePointerCapture(e.pointerId); } catch (err) {}
-		const moved = grab.box.x !== L.box.x || grab.box.y !== L.box.y || grab.box.w !== L.box.w || grab.box.h !== L.box.h;
-		grab = null;
-		if (commit && moved) reframe();
-	}
-
-	/* ---- the rubber band, preview-zoom's rules ----------------------------- */
-
+	let press = null;
 	function setArmed(on) {
 		armed = !!on;
-		drawing = null;
-		band.hidden = true;
-		stage.classList.toggle('mj-armed', armed);
+		press = null;
+		stage.classList.toggle('mj-peer-armed', armed);
+		if (!armed) stage.classList.remove('mj-peer-in');
+		if (armed) saidCoverage = false;
 		if (box.checked !== armed) box.checked = armed;
-		/* One drawing control at a time: the other one is disarmed rather
-		 * than left to fire on the same drag. */
-		const area = $('#mj-area');
-		if (armed && area && area.checked) {
-			area.checked = false;
-			area.dispatchEvent(new Event('change'));
-		}
-		outlineOn(armed || loupeOpen());
+		/* Off takes everything of this control's with it: the overlay, its
+		 * session, and a note -- a pairing form, say -- still open. */
+		if (!armed) { overlayOff(true); clearNote(); }
+		outlineOn(armed);
 	}
 	box.addEventListener('change', () => setArmed(box.checked));
 	if (pick) pick.addEventListener('change', () => {
-		/* The loupe, its session and its map were the previous peer's. */
-		if (loupeOpen()) closeLoupe();
+		/* The overlay, its session, its outline and any note were the
+		 * previous peer's. */
+		overlayOff(true);
+		clearNote();
 		quad = null;
+		corners = null;
 		if (armed) askOutline();
 	});
 
-	function picRect() {
-		const sw = stage.clientWidth, sh = stage.clientHeight;
-		const zoom = window.MajesticZoom;
-		const v = zoom && typeof zoom.view === 'function' ? zoom.view() : null;
-		if (!v || !v.pic) return { x: 0, y: 0, r: sw, b: sh };
-		return {
-			x: Math.max(0, v.pic.x), y: Math.max(0, v.pic.y),
-			r: Math.min(sw, v.pic.x + v.pic.w), b: Math.min(sh, v.pic.y + v.pic.h),
-		};
-	}
-	const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-
-	/* The drawn box, grown around its centre to the loupe's minimum where it
-	 * is smaller, and kept on the picture. The rectangle asked of the camera
-	 * is this one, so what the loupe shows is what its box says. */
-	function roomy(b) {
-		const p = picRect();
-		let w = Math.max(b.w, LOUPE_MIN_W), h = Math.max(b.h, LOUPE_MIN_H);
-		w = Math.min(w, p.r - p.x); h = Math.min(h, p.b - p.y);
-		let x = b.x + b.w / 2 - w / 2, y = b.y + b.h / 2 - h / 2;
-		x = clamp(x, p.x, p.r - w); y = clamp(y, p.y, p.b - h);
-		return { x: x, y: y, w: w, h: h };
+	function stagePoint(e) {
+		const r = stage.getBoundingClientRect();
+		return { x: e.clientX - r.left, y: e.clientY - r.top };
 	}
 
-	function bandRect(e) {
-		const s = stage.getBoundingClientRect(), p = picRect();
-		const x = clamp(e.clientX - s.left, p.x, p.r), y = clamp(e.clientY - s.top, p.y, p.b);
-		const x0 = clamp(drawing.x, p.x, p.r), y0 = clamp(drawing.y, p.y, p.b);
-		return { x: Math.min(x0, x), y: Math.min(y0, y), w: Math.abs(x - x0), h: Math.abs(y - y0) };
-	}
-
+	/* A press inside the outline is watched, never taken: it stays the
+	 * page's, which pans on it or draws its zoom rectangle exactly as it
+	 * does with the control off. A release within a few pixels of the
+	 * press is a click, and toggles the overlay. With the zoom-to-area tool
+	 * armed the press is that tool's rectangle over the outline, click or
+	 * not. A press anywhere else is the page's, as it always was. */
 	function down(e) {
-		if (inLoupe(e)) { e.stopImmediatePropagation(); loupeDown(e); return; }
+		/* A second pointer while one is pressed is a pinch, not a click:
+		 * neither finger's release toggles anything. */
+		if (press) { press = null; return; }
 		if (!armed) return;
 		if (e.button != null && e.button > 0) return;
 		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
-		if (drawing) return;
-		e.stopImmediatePropagation();
-		const r = stage.getBoundingClientRect();
-		drawing = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
-		try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+		const area = $('#mj-area');
+		if (area && area.checked) return;
+		const p = stagePoint(e);
+		if (!inside(p.x, p.y)) return;
+		press = { id: e.pointerId, x: p.x, y: p.y };
 	}
 	function move(e) {
-		if (grab) { e.stopImmediatePropagation(); loupeMove(e); return; }
-		if (!drawing || e.pointerId !== drawing.id) return;
-		e.stopImmediatePropagation();
-		const b = bandRect(e);
-		band.hidden = false;
-		band.style.left = b.x + 'px';
-		band.style.top = b.y + 'px';
-		band.style.width = b.w + 'px';
-		band.style.height = b.h + 'px';
-	}
-	function finish(e, commit) {
-		if (grab) { e.stopImmediatePropagation(); loupeUp(e, commit); return; }
-		if (inLoupe(e)) { e.stopImmediatePropagation(); return; }
-		if (!drawing || e.pointerId !== drawing.id) return;
-		e.stopImmediatePropagation();
-		const b = commit ? bandRect(e) : null;
-		try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
-		drawing = null;
-		/* The same floor as zoom-to-area: below it a drag is a slip or a
-		 * click, and neither is a question. */
-		const minW = Math.max(16, stage.clientWidth * 0.02);
-		const minH = Math.max(16, stage.clientHeight * 0.02);
-		const was = loupeOpen();
-		if (b && b.w >= minW && b.h >= minH) {
-			const rb = roomy(b);
-			geometryFresh().then(() => {
-				const m = toMain(rb);
-				if (m.rect) {
-					if (was) closeLoupe();
-					openLoupe(rb, m.rect);
-				} else {
-					say(m.why);
-				}
-			});
+		if (armed && !press) {
+			const p = stagePoint(e);
+			stage.classList.toggle('mj-peer-in', inside(p.x, p.y));
 		}
-		setArmed(false);
+	}
+	function up(e, commit) {
+		if (!press || e.pointerId !== press.id) return;
+		const p = stagePoint(e);
+		const click = commit && Math.abs(p.x - press.x) <= CLICK_SLOP && Math.abs(p.y - press.y) <= CLICK_SLOP;
+		press = null;
+		if (!click) return;
+		/* A click while the session is still being asked for is neither a
+		 * second ask -- the camera would broker another session for an
+		 * answer this page then throws away -- nor a cancel, which Esc is.
+		 * The answer is on its way. */
+		if (O.pending) return;
+		if (O.on) overlayOff(); else overlayOn();
+	}
+	/* Two clicks inside the outline have already toggled the overlay twice;
+	 * the page's double-click -- Fill to Fit and back -- must not also jump
+	 * the view from under them. */
+	function dbl(e) {
+		if (!armed) return;
+		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
+		const p = stagePoint(e);
+		if (inside(p.x, p.y)) e.stopImmediatePropagation();
 	}
 	stage.addEventListener('pointerdown', down, true);
 	stage.addEventListener('pointermove', move, true);
-	stage.addEventListener('pointerup', (e) => finish(e, true), true);
-	stage.addEventListener('pointercancel', (e) => finish(e, false), true);
+	stage.addEventListener('pointerup', (e) => up(e, true), true);
+	stage.addEventListener('pointercancel', (e) => up(e, false), true);
+	stage.addEventListener('dblclick', dbl, true);
 
+	/* In the capture phase, so this runs before the page's own Esc -- which
+	 * drops a free zoom back to its preset -- and can stop it: with the
+	 * other camera's picture up under a zoom, Esc takes the picture and
+	 * leaves the zoom; the next Esc is the page's. */
 	document.addEventListener('keydown', (e) => {
 		if (e.key !== 'Escape') return;
+		if (O.on || O.pending) { overlayOff(); e.stopPropagation(); return; }
 		if (armed) { setArmed(false); e.stopPropagation(); return; }
-		/* A loupe still being opened -- the camera asked, the peer's session
-		 * on its way -- is cancelled: whatever answers now answers nobody. */
-		if (L.pending) { gen++; L.pending = false; clearNote(); e.stopPropagation(); return; }
-		if (loupeOpen() && L.swapped) { setSwapped(false); e.stopPropagation(); return; }
-		if (loupeOpen()) { closeLoupe(); e.stopPropagation(); return; }
 		if (!note.hidden) { clearNote(); e.stopPropagation(); }
-	});
+	}, true);
 
 	/* The map is per shown stream and goes stale the moment the viewer changes
-	 * channel; dropped first, so a drag arriving before the refresh lands
-	 * converts nothing rather than converting wrongly. The loupe stays where
-	 * it is on the stage; the outline is laid out again from the new map. */
+	 * channel; dropped first, so a placement arriving before the refresh
+	 * lands converts nothing rather than converting wrongly. */
 	window.addEventListener('mj-stream-changed', () => {
 		geom = null;
+		geomTried = 0;
 		clearNote();
-		learnGeometry().then(placeOutline);
+		geometryFresh().then(placeOutline);
 	});
+	/* Every time the view moves -- a pan, a zoom, the stage resized under a
+	 * banner or into fullscreen -- the outline and the picture on it move
+	 * with it at once, rather than at the next tick. The tick stays for what
+	 * is not a view change. A page without the zoom module's view events
+	 * falls back to the window. */
+	if (window.MajesticZoom && typeof window.MajesticZoom.onView === 'function') window.MajesticZoom.onView(() => placeOutline());
+	else window.addEventListener('resize', () => placeOutline());
 
 	(async function () {
-		const [hasMap, hasPeer, names] = await Promise.all([probe(MAP), probe(PEER), learnPeers()]);
-		if (!hasMap || !names.length) return;   /* left hidden */
-		doors = { map: true, peer: hasPeer };
+		const [hasCoverage, hasPeer, names] = await Promise.all([probe(COVERAGE), probe(PEER), learnPeers()]);
+		if (!hasCoverage || !names.length) return;   /* left hidden */
+		doors = { coverage: true, peer: hasPeer };
 		peers = names;
 		if (pick) {
 			empty(pick);
@@ -1014,20 +1047,23 @@
 			});
 			pick.hidden = names.length < 2;
 		}
-		await learnGeometry();
+		await geometryFresh();
 		ctl.hidden = false;
 	})();
 
 	window.MajesticPeerCrop = {
-		toMain: toMain,
 		toStage: toStage,
+		inside: inside,
+		quadTransform: quadTransform,
 		peers: () => peers.slice(),
 		outline: () => (quad ? quad.map((c) => c.slice()) : null),
-		loupe: () => ({
-			open: loupeOpen(), box: L.box, rect: L.rect, peerRect: L.peerRect,
-			whole: L.whole, swapped: L.swapped, playing: L.playing, lost: L.lost,
-			session: L.sess ? Object.assign({}, L.sess) : null,
+		corners: () => (corners ? corners.map((p) => ({ x: p.x, y: p.y })) : null),
+		overlay: () => ({
+			on: O.on, pending: O.pending, playing: O.playing, lost: O.lost, peer: O.peer,
+			matrix: O.matrix, frame: peerFrame(), stream: currentStream(), shownWidth: shownWidth(), refused: adaptRefused,
+			session: O.sess ? Object.assign({}, O.sess) : null,
 		}),
-		layout: layout,
+		/* One tick, for the tests: a placement and the stream question. */
+		place: tick,
 	};
 })();
