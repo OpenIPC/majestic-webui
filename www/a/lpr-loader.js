@@ -29,8 +29,42 @@
 window.MajesticLpr = (function () {
 	'use strict';
 
+	/*
+	 * Where the base comes from, and why it is read out of the document.
+	 *
+	 * raw.cgi writes it into a <meta content>, because the value comes from a
+	 * file an operator edits by hand and the only escaper available there is an
+	 * HTML-attribute one. In an attribute that is correct by construction and
+	 * the DOM parser gives the string back verbatim -- a query string survives,
+	 * and a newline cannot end a statement it was never inside.
+	 *
+	 * Only http(s). The file is root-owned, so this is not a hostile input, but
+	 * a typo that made the base a `javascript:` or `data:` URL would turn a
+	 * configuration mistake into a module import from somewhere unintended, and
+	 * refusing costs one comparison.
+	 *
+	 * window.MJ_LPR_BASE still wins, for a development build.
+	 */
+	function configuredBase() {
+		let v = window.MJ_LPR_BASE;
+		if (!v && typeof document === 'object' && document.querySelector) {
+			const m = document.querySelector('meta[name="mj-lpr-base"]');
+			v = m && m.content;
+		}
+		if (!v) return null;
+		if (!/^https?:\/\//i.test(v)) return null;
+		/* A missing trailing slash is the likeliest way to mistype this, and
+		 * 'dist' + 'lpr.js' resolves somewhere else entirely. Completed only
+		 * when there is nothing after the path: appending a slash to a base
+		 * carrying a query string or a fragment would land it in the wrong
+		 * place, and such a base cannot take a filename by concatenation
+		 * anyway, so it is left exactly as the operator wrote it. */
+		if (v.indexOf('?') !== -1 || v.indexOf('#') !== -1) return v;
+		return v.charAt(v.length - 1) === '/' ? v : v + '/';
+	}
+
 	// No fallback. An unset base is a decision, not a misconfiguration.
-	const BASE = window.MJ_LPR_BASE || null;
+	const BASE = configuredBase();
 	const LOAD_TIMEOUT_MS = 8000;
 
 	let loadFailed = false;

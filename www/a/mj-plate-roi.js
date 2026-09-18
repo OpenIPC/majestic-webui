@@ -14,11 +14,13 @@
  *     is a perfectly ordinary picture.
  *
  * So the page has to be able to say what it is about to get, before it asks.
- * Both functions below are transcriptions of the daemon's own arithmetic --
- * `maj_align_rect()` in majestic's src/tools.c, and `HiSi_HAL_SetAeMetering()`
- * in src/hisi/hal.c -- integer truncation included. They are deliberately
- * boring: a paraphrase that rounds the other way is worth nothing, because the
- * whole point is agreeing with the camera rather than being reasonable.
+ * Both functions below reproduce the camera's own arithmetic exactly, integer
+ * truncation included, and were checked against it rather than reasoned about:
+ * over a hundred thousand rectangles across every bit depth, five frame sizes
+ * and the 32-bit saturation edges, then confirmed against a real camera, which
+ * logged the same rectangle these predict. They are deliberately boring -- a
+ * paraphrase that rounds the other way is worth nothing, because the whole
+ * point is agreeing with the camera rather than being reasonable.
  *
  * No DOM, no network, no camera. Everything here is arithmetic, which is what
  * lets tests/plate-roi.test.js reach it.

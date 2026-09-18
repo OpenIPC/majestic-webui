@@ -68,11 +68,17 @@ hide_title=1; full_bleed=1
 # Unset, no base reaches the page, lpr-loader.js reports no reader, raw.js
 # passes no plate capability and the editor builds no Plates tab.
 #
-# attr_escape, not raw: this lands inside a quoted JS string literal and the
-# value comes out of a file somebody edits by hand.
+# A <meta>, not an inline script, and that is the whole point of the shape.
+# attr_escape is an HTML-ATTRIBUTE escaper: it turns & into &amp; and knows
+# nothing about JavaScript string literals. Dropped into `window.X = "..."` it
+# would mangle a base carrying a query string and would not stop a newline from
+# ending the statement -- so a perfectly reasonable mirror URL could break the
+# page or, worse, quietly load from somewhere else. In an attribute it is
+# correct by construction, and the DOM parser hands the value back exactly as
+# it was written.
 if [ -n "$webui_lpr_base" ]; then
 %>
-<script>window.MJ_LPR_BASE = "<% attr_escape "$webui_lpr_base" %>";</script>
+<meta name="mj-lpr-base" content="<% attr_escape "$webui_lpr_base" %>">
 <% fi %>
 <script src="/a/mj-plate-roi.js"></script>
 <script src="/a/lpr-loader.js"></script>

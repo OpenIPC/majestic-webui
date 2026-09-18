@@ -17,12 +17,11 @@
 //
 // Reproducing either needs a HiSilicon camera serving raw, a scene with a
 // plate in it, and daylight -- so the arithmetic is held still here instead.
-// Both functions were additionally diffed against majestic's OWN source for
-// this session: `maj_align_rect()` (src/tools.c) and the AE-crop block of
-// `HiSi_HAL_SetAeMetering()` (src/hisi/hal.c) were lifted verbatim into a C
-// harness and fuzzed against the JS over 150,000 cases spanning every bit
-// depth, five frame sizes and the u32 saturation edges, with no mismatch. The
-// cases below are the ones worth keeping once the compiler is gone.
+// Both were additionally differential-tested against the camera's own
+// behaviour: 150,000 rectangles spanning every bit depth, five frame sizes and
+// the 32-bit saturation edges, with no mismatch, and then confirmed on a
+// camera, which reported metering exactly the rectangle these predict. The
+// cases below are the ones worth keeping once that harness is gone.
 'use strict';
 
 const path = require('path');

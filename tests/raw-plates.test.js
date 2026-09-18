@@ -235,6 +235,24 @@ const ARM = { rect: PLATE, exposureMs: 1, aGain: 1024, dGain: 1024, aeStrategy: 
 	check('hold:false leaves the duty with the caller', cam.config.isp.exposure === 1);
 	await api.exposure.revert();
 
+	// Re-arming is ordinary — nudge the shutter, pick a different plate — and it
+	// must not move the restore target. `apply` used to snapshot on every call,
+	// so a second one recorded the ARMED configuration as "what was there
+	// before" and every way back then restored the camera to armed and called
+	// it done: the countdown, the unload handler and an explicit revert alike.
+	cam = makeCamera({ isp: { exposure: 12.5 } });
+	L = load(cam); api = L.api;
+	await api.exposure.apply(Object.assign({ hold: false }, ARM, { exposureMs: 1 }));
+	await api.exposure.apply(Object.assign({ hold: false }, ARM, { exposureMs: 2 }));
+	check('the second arming took effect', cam.config.isp.exposure === 2,
+		JSON.stringify(cam.config.isp));
+	await api.exposure.revert();
+	check('and revert goes back to before the FIRST arming, not the second',
+		cam.config.isp.exposure === 12.5, JSON.stringify(cam.config.isp));
+	check('with the keys that were never set removed again',
+		!('meterRect' in cam.config.isp) && !('aGain' in cam.config.isp),
+		JSON.stringify(cam.config.isp));
+
 	group('the unload handler is armed once, and keep() stands it down');
 
 	cam = makeCamera({ isp: {} });

@@ -30,6 +30,11 @@ function load(opts) {
 		Promise: Promise, Object: Object, Error: Error,
 		setTimeout: setTimeout, clearTimeout: clearTimeout,
 		MJ_LPR_BASE: opts.base,
+		// raw.cgi writes the base into a <meta>; opts.meta puts one there.
+		document: opts.meta === undefined ? undefined : {
+			querySelector: (sel) => (sel === 'meta[name="mj-lpr-base"]'
+				? { content: opts.meta } : null),
+		},
 	};
 	sandbox.window = sandbox;
 	// import() cannot be intercepted inside vm, so the loader is handed a stub
@@ -71,10 +76,43 @@ const CDN = 'https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/';
 	await m.open();
 	check('which fetches the module once', state.imports === 1);
 
-	// A private mirror is the whole reason this is a string and not a constant.
-	({ m } = load({ base: 'http://192.168.1.5/lpr/' }));
-	check('any base will do — a mirror, a private host',
-		m.BASE === 'http://192.168.1.5/lpr/', m.BASE);
+	// A mirror of one's own is the whole reason this is a string and not a
+	// constant. The literal is a documentation host, not an address: a fixture
+	// carrying somebody's real network is a fixture that leaks it.
+	({ m } = load({ base: 'https://lpr.example/dist/' }));
+	check('any base will do — a mirror, a host of one\'s own',
+		m.BASE === 'https://lpr.example/dist/', m.BASE);
+
+	group('the base is read from the document, where the escaping is right');
+
+	// raw.cgi has only an HTML-attribute escaper, so the value travels in an
+	// attribute and the DOM parser hands it back. A query string has to survive
+	// that trip intact — in a JS string literal the same escaper turns & into
+	// &amp; and the mirror silently becomes a different URL.
+	({ m } = load({ meta: 'https://mirror.example/lpr/?v=1&x=2' }));
+	check('a meta base is used when no override is set, ampersand intact',
+		m.BASE === 'https://mirror.example/lpr/?v=1&x=2', m.BASE);
+
+	({ m } = load({ base: 'https://override.example/', meta: 'https://meta.example/' }));
+	check('an explicit override still wins, for a development build',
+		m.BASE === 'https://override.example/', m.BASE);
+
+	// A missing trailing slash is the likeliest way to mistype this, and
+	// 'dist' + 'lpr.js' resolves somewhere else entirely.
+	({ m } = load({ meta: 'https://mirror.example/lpr' }));
+	check('a base without a trailing slash is completed rather than broken',
+		m.BASE === 'https://mirror.example/lpr/', m.BASE);
+
+	// The file is root-owned, so this is a typo guard rather than a hostile
+	// input — but a base that is not http(s) would import from somewhere the
+	// operator did not mean.
+	for (const bad of ['javascript:alert(1)', 'data:text/javascript,0', 'file:///etc/', '/relative/']) {
+		({ m } = load({ meta: bad }));
+		check('a base that is not http(s) is no base at all: ' + bad.slice(0, 18),
+			m.BASE === null && m.available === false, String(m.BASE));
+	}
+	({ m } = load({ meta: '' }));
+	check('and an empty meta is simply unset', m.BASE === null && m.available === false);
 
 	group('a browser that cannot run it is not asked to fetch it');
 

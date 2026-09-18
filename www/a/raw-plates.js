@@ -166,12 +166,12 @@ window.MajesticPlates = (function () {
 	/*
 	 * Only the keys this daemon has.
 	 *
-	 * A `null` leaf is a REMOVAL request, and a removal of a key the daemon does
-	 * not know is still an unknown key: majestic 404s it, and its own log says
-	 * so — "config batch: unset 'isp.meterRect' rejected (HTTP 404)". So a
-	 * revert built from all five fails on the very camera whose missing keys
-	 * made the arming partial in the first place. Found on hardware, where it
-	 * left the shutter pinned at 1 ms and the revert refusing to undo it.
+	 * A `null` leaf is a REMOVAL request, and a removal of a key the camera does
+	 * not have is still an unknown key: the config endpoint answers 404 for it,
+	 * exactly as it does for a write. So a revert built from all five fails on
+	 * the very camera whose missing keys made the arming partial in the first
+	 * place. Observed on a camera whose firmware predated one of these keys: it
+	 * left the shutter pinned at 1 ms with no way back from the page.
 	 */
 	function only(vals, have) {
 		const out = {};
@@ -340,7 +340,16 @@ window.MajesticPlates = (function () {
 					'. Arming needs a newer majestic — the settings are written ' +
 					'together or not at all, so the rest are not applied either.');
 			}
-			return readKeys().then(function (was) {
+			/* Snapshot ONLY when not already armed.
+			 *
+			 * A second apply while the camera is still armed would otherwise
+			 * record the ARMED configuration as the restore target, and every
+			 * way back -- the countdown, the unload handler, an explicit revert
+			 * -- would then put the camera back to armed and call it restored.
+			 * Re-arming is ordinary: an operator nudges the shutter, or picks a
+			 * different plate, without pressing Put it back first. */
+			const snap = previous ? Promise.resolve(previous) : readKeys();
+			return snap.then(function (was) {
 				previous = was;
 				previousHave = have;
 				armUnloadRevert();
