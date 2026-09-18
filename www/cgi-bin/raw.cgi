@@ -52,7 +52,37 @@ hide_title=1; full_bleed=1
 		this browser tab, never on the camera &mdash; its flash holds the firmware.</span>
 </div>
 
+<%
+# Plate reading is opt-in, per camera, and off unless somebody turned it on.
+#
+# The models are fetched from a CDN under CC BY-NC 4.0 -- attribution, and
+# non-commercial use only. majestic is a commercial product, so reaching for
+# them on every camera would make that choice on behalf of everyone running
+# one. The operator makes it instead, once, in the file that already carries
+# this camera's own decisions and that survives `updatewebui`:
+#
+#   echo 'webui_lpr_base="https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/"' \
+#       >> /etc/webui/webui.conf
+#
+# p/common.cgi sources that file on every request, so the value is simply here.
+# Unset, no base reaches the page, lpr-loader.js reports no reader, raw.js
+# passes no plate capability and the editor builds no Plates tab.
+#
+# attr_escape, not raw: this lands inside a quoted JS string literal and the
+# value comes out of a file somebody edits by hand.
+if [ -n "$webui_lpr_base" ]; then
+%>
+<script>window.MJ_LPR_BASE = "<% attr_escape "$webui_lpr_base" %>";</script>
+<% fi %>
+<script src="/a/mj-plate-roi.js"></script>
+<script src="/a/lpr-loader.js"></script>
 <script src="/a/raw-loader.js"></script>
+<%
+# After the two loaders: it reads both at definition time, because whether a
+# plate reader can be had at all is a question raw.js asks before it mounts,
+# not one it discovers in a rejected promise.
+%>
+<script src="/a/raw-plates.js"></script>
 <script src="/a/raw.js"></script>
 
 <%in p/footer.cgi %>

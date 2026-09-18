@@ -97,7 +97,7 @@ This is the most important file to read before editing anything. It defines:
 ### Persistent state — paths to remember
 
 - `/etc/majestic.yaml` — Majestic config. Written by majestic and nothing else; the WebUI reads `/api/v1/get` and writes `/api/v1/config`, and never opens the file.
-- `/etc/webui/webui.conf` — UI theme.
+- `/etc/webui/webui.conf` — UI theme, and `webui_lpr_base` (see *Plate reading is opt-in* below). Sourced by `p/common.cgi` on every request, so anything in it is simply a shell variable on every page.
 - `/etc/webui/{telegram,ntfy,proxy,openwall,vtun,wireguard,backup}.conf` — one per extension, sourced as shell.
 - `/etc/network/interfaces.d/{eth0,wlan0}` — written by `sbin/setnetwork` (not by the CGI directly), and applied by nothing but the boot script's `ifup`: a saved address exists nowhere else until the camera restarts. So `network.cgi` draws its **form** from the file (what it edits) and its **Current connection** card from the kernel (what is running), and while the two disagree it raises the restart banner by setting `restart_pending` before including the header — judged on every draw, so it clears itself on a restart or on a save that puts things back. Drawing the form from the kernel too, as it used to, showed a static address that had just been saved as still absent, visible only in the file dumped under Diagnostics (OpenIPC/majestic#311).
 - `/etc/crontabs/root` — extensions add/remove their own lines with `sed -i /name/d` then append.
@@ -932,6 +932,35 @@ that branch was dead unless the file was hand-edited. ntfy's priority default
 disagreed with its sender's, so an untouched camera sent at a loudness the page
 did not show. And the Telegram page had no test button at all, though
 `?send=image` had been answering `true`/`false` the whole time.
+
+### Plate reading is opt-in, and the licence is why
+
+`raw.cgi` grows a **Plates** tab in the raw editor only when the camera has been
+told where a plate reader comes from:
+
+```sh
+echo 'webui_lpr_base="https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/"' \
+    >> /etc/webui/webui.conf
+```
+
+Unset — which is every camera out of the box — no base reaches the page,
+`lpr-loader.js` reports no reader, `raw.js` passes **no** `plates` capability to
+the editor, and the editor builds no tab. Not a tab that apologises: none. The
+same rule its Capture button follows, and the reason the gate is in `raw.js`
+rather than in the editor is that only this side knows what the camera was
+configured for.
+
+**Do not give `lpr-loader.js` a default base to match `raw-loader.js`.** They
+look like the same pattern and are not. The editor is MIT and carries no
+weights; the plate reader's models are **CC BY-NC 4.0** — attribution, and
+non-commercial use only — and majestic is a commercial product, so a default
+here would fetch them on every camera and make that licensing decision for
+every vendor shipping one. `tests/lpr-loader.test.js` fails if a default
+reappears.
+
+`raw-loader.js` is pinned to `raw-editor@v0.11.0`, the first release whose
+`mountEditor` reads `plates` at all; an older one ignores the key in silence,
+which is what makes the pin part of the feature rather than housekeeping.
 
 ## Conventions for new code
 
