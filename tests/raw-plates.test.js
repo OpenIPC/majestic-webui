@@ -84,11 +84,20 @@ function makeCamera(opts) {
 			cam.dngs.push(url);
 			cam.inFlight++;
 			cam.maxInFlight = Math.max(cam.maxInFlight, cam.inFlight);
+			// A build that knows ?frames= averages in the camera and says so in
+			// the header; `oldDng` is one that has never heard of it and sends a
+			// single frame with no header at all.
+			const m = /[?&]frames=(\d+)/.exec(url);
+			const averaged = (m && !opts.oldDng) ? m[1] : null;
 			return new Promise(function (res) {
 				setTimeout(function () {
 					cam.inFlight--;
 					if (cam.dngStatus !== 200) { res({ ok: false, status: cam.dngStatus }); return; }
-					res({ ok: true, status: 200, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) });
+					res({
+						ok: true, status: 200,
+						headers: { get: (h) => (/^x-frames-averaged$/i.test(h) ? averaged : null) },
+						arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+					});
 				}, 1);
 			});
 		}
@@ -270,23 +279,68 @@ const ARM = { rect: PLATE, exposureMs: 1, aGain: 1024, dGain: 1024, aeStrategy: 
 	L.handlers.pagehide[0]();
 	check('after keep() the same handler sends nothing', cam.posts.length === before);
 
-	group('a burst is sequential, and says what was actually cut');
+	group('a burst is averaged BY THE CAMERA unless the frames themselves are wanted');
 
+	// The default path. One request and one capture, with the camera's raw dump
+	// left running so the frames are consecutive -- 0.8 s of sensor time at 20
+	// fps for sixteen, against the thirteen seconds sixteen separate captures
+	// take. Getting this wrong is not a crash; it is a feature that takes an
+	// order of magnitude longer than it needs to, and looks identical.
 	cam = makeCamera({});
 	L = load(cam); api = L.api;
+	let got = await api.burst({
+		rect: { left: 887, top: 1431, width: 223, height: 111 },
+		frameW: FRAME_W, frameH: FRAME_H, frames: 8,
+	});
+	check('one request, not eight', cam.dngs.length === 1, String(cam.dngs.length));
+	check('and it asked the camera to average them',
+		cam.dngs[0] === '/image.dng?crop=886x1430x224x112&frames=8', cam.dngs[0]);
+	check('what comes back is a single averaged frame', got.frames.length === 1);
+	check('and it says how many went into it', got.averaged === 8, String(got.averaged));
+	check('and that the camera did the averaging', got.inCamera === true);
+
 	// Odd on every edge: the camera snaps outward, and the caller has to be
 	// told, because every pixel of a misaligned rectangle changes colour.
-	const got = await api.burst({
-		rect: { left: 887, top: 1431, width: 223, height: 111 },
-		frameW: FRAME_W, frameH: FRAME_H, frames: 5,
-	});
-	check('one frame in flight at a time', cam.maxInFlight === 1, String(cam.maxInFlight));
-	check('it asked for the number of frames requested', got.frames.length === 5);
-	check('every request used the same snapped rectangle',
-		cam.dngs.every((u) => u === '/image.dng?crop=886x1430x224x112'), cam.dngs[0]);
-	check('and the snapped rectangle is reported back',
+	check('the snapped rectangle is reported back',
 		got.rect.left === 886 && got.rect.width === 224);
 	check('beside the one that was asked for', got.asked.left === 887);
+
+	// Rejection and a before-and-after comparison both need the individuals,
+	// and an average cannot be taken apart again.
+	cam = makeCamera({});
+	L = load(cam); api = L.api;
+	got = await api.burst({
+		rect: { left: 887, top: 1431, width: 223, height: 111 },
+		frameW: FRAME_W, frameH: FRAME_H, frames: 5, separate: true,
+	});
+	check('separate:true fetches them one at a time', cam.dngs.length === 5);
+	check('one frame in flight at a time', cam.maxInFlight === 1, String(cam.maxInFlight));
+	check('and hands back every frame', got.frames.length === 5);
+	check('none of those requests asked the camera to average',
+		cam.dngs.every((u) => u.indexOf('frames=') === -1), cam.dngs[0]);
+	check('and it says the averaging was not done for us', got.inCamera === false);
+
+	// The camera's accumulator is four bytes a pixel for the duration, so the
+	// daemon caps a burst at sixteen and answers 400 above it. Asking for more
+	// would fail the whole request rather than get more frames.
+	cam = makeCamera({});
+	L = load(cam); api = L.api;
+	got = await api.burst({ rect: { left: 886, top: 1430, width: 224, height: 112 },
+		frameW: FRAME_W, frameH: FRAME_H, frames: 40 });
+	check('a request over the camera\'s limit is clamped, not refused',
+		cam.dngs[0].indexOf('frames=16') !== -1, cam.dngs[0]);
+
+	// An older build answers 200 and sends one frame, with no header. Believing
+	// it would silently give a "sixteen-frame stack" that is one frame.
+	cam = makeCamera({ oldDng: true });
+	L = load(cam); api = L.api;
+	got = await api.burst({ rect: { left: 886, top: 1430, width: 224, height: 112 },
+		frameW: FRAME_W, frameH: FRAME_H, frames: 4 });
+	check('a camera too old for ?frames= is noticed rather than believed',
+		got.averaged === 1 && got.inCamera === false,
+		'averaged=' + got.averaged + ' inCamera=' + got.inCamera);
+	check('and the rest are fetched one at a time instead', got.frames.length === 4);
+	check('reusing the frame it already sent', cam.dngs.length === 4, String(cam.dngs.length));
 
 	let bad = '';
 	await api.burst({ rect: { left: 0, top: 0, width: 0, height: 10 }, frameW: FRAME_W, frameH: FRAME_H })

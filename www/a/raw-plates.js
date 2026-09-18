@@ -67,26 +67,55 @@ window.MajesticPlates = (function () {
 			.then(function (buf) { return new Uint8Array(buf); });
 	}
 
+	/* As getDng, but reporting what the camera says it averaged. The header is
+	 * the only way to tell a build that honoured `?frames=` from one that has
+	 * never heard of it -- both answer 200 with a frame. */
+	function getDngWithCount(query) {
+		return apiFetch('/image.dng?crop=' + query, { credentials: 'same-origin' })
+			.then(function (r) {
+				if (!r.ok) throw dngErr(r.status);
+				const n = parseInt(r.headers && r.headers.get
+					? r.headers.get('X-Frames-Averaged') : '', 10);
+				return r.arrayBuffer().then(function (buf) {
+					return { bytes: new Uint8Array(buf), averaged: n > 0 ? n : 1 };
+				});
+			});
+	}
+
 	/* One whole frame. Frames are never written to the camera: a raw frame is
 	 * several megabytes and the flash it would land on holds the firmware. */
 	function frame() { return getDng(null); }
 
+	/* The most frames the camera will average in one request. Its accumulator
+	 * is four bytes a pixel for the duration, which is why a burst without a
+	 * crop is refused rather than attempted. Asking for more earns a 400. */
+	const BURST_MAX = 16;
+
 	/*
-	 * A burst of one region.
+	 * A burst of one region, and there are two ways to get one.
 	 *
-	 * Sequential, never parallel: most cameras take raw frames one at a time and
-	 * a second request while one is in flight is answered 503, so overlapping
-	 * them would turn a burst into a string of failures.
+	 * IN THE CAMERA, which is the default and is what you want. `?frames=N`
+	 * averages N CONSECUTIVE sensor frames into a single file and hands back one
+	 * frame with the noise already down by the square root of the count. It is
+	 * ONE request and one capture: the camera keeps its raw dump running for the
+	 * duration, so the frames are consecutive — 0.8 s of sensor time at 20 fps
+	 * for the full sixteen — rather than the better part of a second apart.
 	 *
-	 * The cost of that is WALL CLOCK, and it is much larger than it looks. Each
-	 * request is an independent capture, not a read out of a ring of frames the
-	 * sensor already took: measured on an hi3516ev300, about 0.79 s each
-	 * whatever the rectangle's size, so twenty of them span roughly sixteen
-	 * SECONDS. That is why `onProgress` exists rather than a spinner, and it is
-	 * worth knowing before choosing how to combine them — over sixteen seconds a
-	 * car can move, a cloud can pass and a light can switch, which is the case
-	 * outlier rejection exists for. These are not adjacent sensor frames and
-	 * nothing here should suggest they are.
+	 * ONE AT A TIME, when the caller needs the frames themselves. Outlier
+	 * rejection and a before-and-after comparison both need the individuals, and
+	 * an average cannot be taken apart again. This costs about 0.79 s PER FRAME,
+	 * because each request is a fresh capture rather than a read out of frames
+	 * the sensor already took — sixteen of them is around thirteen seconds, over
+	 * which a car can move and a cloud can pass. `onProgress` exists for this
+	 * path, and `separate: true` is how a caller asks for it deliberately.
+	 *
+	 * Sequential, never parallel, on that path: most cameras take raw frames one
+	 * at a time and answer 503 to a second in flight, so overlapping them turns
+	 * a burst into a string of failures.
+	 *
+	 * A camera too old for `?frames=` ignores it and sends one frame. It says so
+	 * in `X-Frames-Averaged`, so that is read rather than assumed, and the slow
+	 * path picks up the rest.
 	 *
 	 * `asked` is what the caller wanted; `rect` is what the camera cut. They
 	 * differ whenever the request was off the colour mosaic, and the difference
@@ -95,7 +124,7 @@ window.MajesticPlates = (function () {
 	function burst(opts) {
 		opts = opts || {};
 		const want = opts.rect;
-		const frames = Math.max(1, Math.min(opts.frames || 20, 64));
+		const frames = Math.max(1, Math.min(opts.frames || BURST_MAX, BURST_MAX));
 		const cut = ROI.alignCrop(want, opts.frameW, opts.frameH, opts.bits || 12);
 		if (!cut) {
 			return Promise.reject(new Error(
@@ -103,20 +132,40 @@ window.MajesticPlates = (function () {
 				'area and start inside the picture.'));
 		}
 		const query = ROI.cropQuery(cut);
-		const out = [];
-		let chain = Promise.resolve();
-		for (let i = 0; i < frames; i++) {
-			chain = chain.then(function () {
-				if (opts.signal && opts.signal.aborted) throw new Error('cancelled');
-				return getDng(query);
-			}).then(function (bytes) {
-				out.push(bytes);
-				if (opts.onProgress) opts.onProgress(out.length, frames);
+
+		function oneAtATime(n, already) {
+			const out = already || [];
+			let chain = Promise.resolve();
+			for (let i = out.length; i < n; i++) {
+				chain = chain.then(function () {
+					if (opts.signal && opts.signal.aborted) throw new Error('cancelled');
+					return getDng(query);
+				}).then(function (bytes) {
+					out.push(bytes);
+					if (opts.onProgress) opts.onProgress(out.length, n);
+				});
+			}
+			return chain.then(function () {
+				return { rect: cut, asked: want, frames: out, averaged: 1, inCamera: false };
 			});
 		}
-		return chain.then(function () {
-			return { rect: cut, asked: want, frames: out };
-		});
+
+		if (opts.separate === true || frames === 1) return oneAtATime(frames);
+
+		// The fast path. `getDngWithCount` reports what the camera says it
+		// averaged, which is 1 on a build that does not know the parameter.
+		if (opts.onProgress) opts.onProgress(0, 1);
+		return getDngWithCount(query + '&frames=' + frames)
+			.then(function (got) {
+				if (got.averaged >= frames) {
+					if (opts.onProgress) opts.onProgress(1, 1);
+					return { rect: cut, asked: want, frames: [got.bytes],
+						averaged: got.averaged, inCamera: true };
+				}
+				// Too old for it, and it sent one frame rather than failing.
+				// Keep that frame and fetch the rest one at a time.
+				return oneAtATime(frames, [got.bytes]);
+			});
 	}
 
 	/* ---------------------------------------------------------------- camera */
