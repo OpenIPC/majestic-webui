@@ -391,6 +391,7 @@
 		el: null, host: null, still: null,
 		on: false, peer: '',
 		size: null,                    /* the peer's declared picture {w,h}, from the row */
+		recovered: false,              /* a fresh session was already asked for, this overlay */
 		frame: null, codec: '',        /* what the peer's decoder produced */
 		handle: null, playing: false, lost: false,
 		sess: null, sessTimer: null, stillTimer: null,
@@ -614,7 +615,7 @@
 				setTimeout(() => { if (my === gen && O.on && O.playing) stopStills(); }, PLAY_GRACE_MS);
 				placeOutline();
 			},
-			onLost: () => { O.playing = false; fallbackToStills(); },
+			onLost: () => { O.playing = false; recover(); },
 		});
 		if (!O.handle) { fallbackToStills(); return; }
 		/* The player starts on the sub stream when the configuration offers
@@ -628,6 +629,29 @@
 		const want = wantStream();
 		if (O.handle.stream && O.handle.stream() !== want && O.handle.setStream) askStream(want);
 		placeOverlay();
+	}
+
+	/* The player ran out of transports. On a pair like this the usual
+	 * reason is not the network: the peer restarted and forgot every session
+	 * it had minted, while this camera still answers the old one from its
+	 * cache and this page still holds it, both with minutes left on their
+	 * clocks. So, once per overlay, a fresh session is asked for -- the
+	 * camera drops its cache on that word -- and the player is mounted again
+	 * on it. A second loss is a real one: the snapshots, honestly labelled
+	 * (they ride the same session, so they too are good only once it is). */
+	async function recover() {
+		if (O.recovered || !O.on || !O.peer) { fallbackToStills(); return; }
+		O.recovered = true;
+		const my = gen, peer = O.peer;
+		const s = await ensureSession(peer, () => {}, true);
+		if (my !== gen || !O.on) return;
+		if (!s) { fallbackToStills(); return; }
+		O.sess = s;
+		scheduleRefresh(peer);
+		unmountPlayer();
+		showStillOnce();
+		mountPlayer();
+		placeOutline();
 	}
 
 	function unmountPlayer() {
@@ -673,10 +697,10 @@
 	 * offered pairing, after which `retry` runs. Writes nothing into the
 	 * overlay: the caller decides whether its operation is still the current
 	 * one by the time this answers, and only then keeps the session. */
-	async function ensureSession(peer, retry) {
+	async function ensureSession(peer, retry, fresh) {
 		let res = null, body = null;
 		try {
-			res = await api(PEER + '?peer=' + encodeURIComponent(peer), { credentials: 'same-origin' });
+			res = await api(PEER + '?peer=' + encodeURIComponent(peer) + (fresh ? '&fresh=1' : ''), { credentials: 'same-origin' });
 			try { body = await res.json(); } catch (e) { body = null; }
 		} catch (e) { res = null; }
 		if (!res) { say('could not reach the camera'); return null; }
@@ -746,6 +770,7 @@
 			scheduleRefresh(peer);
 			clearNote();
 			O.on = true;
+			O.recovered = false;
 			stage.classList.add('mj-peer-on');
 			setCeiling(true);
 			showStillOnce();

@@ -454,6 +454,31 @@ function apply(matrix, X, Y) {
 		env.esc();
 	}
 
+	group('the peer restarted: the session it forgot is replaced once, then the snapshots');
+	{
+		const env = boot();
+		await env.tick();
+		await env.arm();
+		await env.click(MID.x, MID.y);
+		ok(env.mounts.length === 1 && env.mounts[0].opts.session() === 's1', 'the player is on the first session');
+		env.mounts[0].opts.onLost('unreachable');
+		await env.tick(); await env.tick(); await env.tick();
+		ok(env.asked.some((u) => u === '/api/v1/calibration/peer?peer=tele&fresh=1'), 'a fresh session is asked for, and the camera told to forget its cache');
+		ok(env.mounts.length === 2 && env.mounts[1].opts.session() === 's2' && env.mounts[0].destroyed === 1, 'the player is mounted again on it');
+		ok(!env.api().overlay().lost && env.api().overlay().on, 'and nothing has been given up on');
+		ok(!env.overlay().find('.mj-peer-still').hidden && String(env.overlay().find('.mj-peer-still').src).indexOf('session=s2') > 0, 'the snapshot bridges it, on the fresh session');
+		env.mounts[1].opts.onLost('unreachable');
+		await env.tick(); await env.tick(); await env.tick();
+		ok(env.mounts.length === 2 && env.api().overlay().lost, 'a second loss is a real one: the snapshots, and no third player');
+		env.esc();
+		// The next overlay may ask again.
+		await env.click(MID.x, MID.y);
+		env.mounts[2].opts.onLost('unreachable');
+		await env.tick(); await env.tick(); await env.tick();
+		ok(env.mounts.length === 4, 'the next overlay gets its own fresh ask');
+		env.esc();
+	}
+
 	group('a perspective quadrilateral is a perspective transform');
 	{
 		const env = boot();
