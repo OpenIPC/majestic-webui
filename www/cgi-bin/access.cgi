@@ -3,6 +3,29 @@
 <%
 config_file="/etc/webui/webui.conf"
 
+# Set one key in webui.conf and leave the rest of the file alone.
+#
+# This was `echo "key=value" > "$config_file"`, which truncated it: changing
+# the theme deleted every other setting in there. That is not a cosmetic
+# loss -- `webui_lpr_base`, the camera owner's opt-in to the plate reader,
+# lives in this file, and its only symptom is a Plates tab that stops
+# existing with nothing said and nowhere obvious to look.
+#
+# Written to a temporary file and moved into place so a camera that loses
+# power halfway through still has a whole file afterwards.
+set_webui_conf() {
+	_k="$1"
+	_v="$2"
+	_tmp="${config_file}.$$"
+	mkdir -p "$(dirname "$config_file")" 2>/dev/null
+	{
+		[ -f "$config_file" ] && grep -v "^${_k}=" "$config_file"
+		echo "${_k}=\"${_v}\""
+	} > "$_tmp" || { rm -f "$_tmp"; return 1; }
+	chmod 0644 "$_tmp" 2>/dev/null
+	mv "$_tmp" "$config_file"
+}
+
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
 		access)
@@ -26,7 +49,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				light|dark|auto) webui_theme="$POST_webui_theme";;
 				*) webui_theme="dark";;
 			esac
-			echo "webui_theme=\"$webui_theme\"" > "$config_file"
+			set_webui_conf webui_theme "$webui_theme"
 			update_caminfo
 			redirect_back "success" "Settings updated."
 			;;
