@@ -8083,7 +8083,9 @@ body > main > .container > form > .mj-foot {
 /* The player's own served-channel toast would be warped along with the
  * picture and its dismissing click would hide the overlay instead; the
  * outline's tag says it. */
-.mj-peer-overlay .mj-pv-msg { display: none; }
+.mj-peer-overlay .mj-pv-msg,
+.mj-peer-overlay .mj-pv-alert,
+.mj-peer-overlay .mj-pv-tap,
 .mj-peer-overlay .mj-pv-bar { display: none; }
 .mj-peer-overlay .mj-pv-media { background: transparent; }
 .mj-peer-still {

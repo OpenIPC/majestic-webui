@@ -174,10 +174,16 @@
 	 * answer a request for one stream with the other, and the page then shows
 	 * a picture the map does not describe. Anything about to place asks for a
 	 * fresh map first; one learning at a time. */
-	let learning = null;
+	let learning = null, geomTried = 0;
 	function geometryFresh() {
 		if (geom && geom.at === shownStream()) return Promise.resolve(true);
-		if (!learning) learning = learnGeometry().then(() => { learning = null; return !!geom; });
+		/* Asked again after a failure, but not on every tick: what failed a
+		 * moment ago has not changed. */
+		if (!geom && !learning && Date.now() - geomTried < 2000) return Promise.resolve(false);
+		if (!learning) {
+			geomTried = Date.now();
+			learning = learnGeometry().then(() => { learning = null; return !!geom; });
+		}
 		return learning;
 	}
 
@@ -268,7 +274,7 @@
 	let outline = null, outlineDim = null, outlinePoly = null, outlineTag = null;
 	let quad = null;            /* main-channel corners of the peer's picture */
 	let corners = null;         /* the same, in stage pixels, as last placed */
-	let askTimer = null, placeTimer = null, outlineGen = 0;
+	let askTimer = null, placeTimer = null, outlineGen = 0, saidCoverage = false;
 
 	function buildOutline() {
 		if (outline || typeof document.createElementNS !== 'function') return;
@@ -317,24 +323,53 @@
 
 	/* The outline in stage pixels, from the corners the camera gave and the
 	 * placement now; and the overlay with it. */
+	/* What was last written into the outline, so a placement that moved
+	 * nothing writes nothing: this runs on every view change and every
+	 * 250 ms, and an SVG attribute set to the value it already has still
+	 * costs a layout. Reads come before writes for the same reason. */
+	let placedRing = '', placedDim = '', placedDimClass = '', placedTag = '';
 	function placeOutline() {
 		if (!outline) return;
 		if (!quad || !armed && !O.on) { showOutline(false); corners = null; placeOverlay(); return; }
-		if (geom && geom.at !== shownStream()) { geometryFresh().then(placeOutline); return; }
+		if (!geom || geom.at !== shownStream()) {
+			/* One placement when the map lands, not one per tick spent
+			 * waiting for it -- and none chained when nothing was asked. */
+			const first = !learning;
+			const p = geometryFresh();
+			if (first && learning) p.then(placeOutline);
+			return;
+		}
 		const pts = quad.map((c) => toStage(c[0], c[1]));
 		if (pts.some((p) => !p)) { showOutline(false); corners = null; placeOverlay(); return; }
 		corners = pts;
-		const ring = pts.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
-		outlinePoly.setAttribute('points', ring);
 		const sw = stage.clientWidth, sh = stage.clientHeight;
-		outlineDim.setAttribute('d', 'M0,0H' + sw + 'V' + sh + 'H0Z M' + ring.replace(/ /g, 'L') + 'Z');
-		outlineDim.setAttribute('class', 'mj-peer-dim' + (O.on ? ' mj-peer-dim-off' : ''));
-		const top = pts.reduce((a, p) => (p.y < a.y ? p : a), pts[0]);
-		outlineTag.setAttribute('x', top.x.toFixed(1));
-		outlineTag.setAttribute('y', (top.y - 6).toFixed(1));
-		outlineTag.textContent = tagText();
+		const ring = pts.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+		const dim = 'M0,0H' + sw + 'V' + sh + 'H0Z M' + ring.replace(/ /g, 'L') + 'Z';
+		const dimClass = 'mj-peer-dim' + (O.on ? ' mj-peer-dim-off' : '');
+		const tag = tagText();
+		if (ring !== placedRing) {
+			outlinePoly.setAttribute('points', ring);
+			/* Above the outline's top corner -- and inside the stage, which
+			 * clips: zoomed into the picture the corner is off the top, and
+			 * the tag is the one thing that says whether that picture is
+			 * live, so it stays where it can be read. */
+			const top = pts.reduce((a, p) => (p.y < a.y ? p : a), pts[0]);
+			outlineTag.setAttribute('x', Math.min(Math.max(top.x, 4), Math.max(4, sw - 4)).toFixed(1));
+			outlineTag.setAttribute('y', Math.min(Math.max(top.y - 6, 16), Math.max(16, sh - 6)).toFixed(1));
+			placedRing = ring;
+		}
+		if (dim !== placedDim) { outlineDim.setAttribute('d', dim); placedDim = dim; }
+		if (dimClass !== placedDimClass) { outlineDim.setAttribute('class', dimClass); placedDimClass = dimClass; }
+		if (tag !== placedTag) { outlineTag.textContent = tag; placedTag = tag; }
 		showOutline(true);
 		placeOverlay();
+	}
+
+	/* The 250 ms tick: a placement, and the stream question the placement
+	 * feeds. Not one function, because a placement also runs on every view
+	 * change, and the question's dwell counts ticks, not pointer moves. */
+	function tick() {
+		placeOutline();
 		adapt();
 	}
 
@@ -342,20 +377,34 @@
 		const peer = peerName();
 		if (!peer || !doors.coverage) return;
 		const my = ++outlineGen;
-		let next = null, size = null;
+		let next = null, size = null, answered = false;
 		try {
 			const res = await api(COVERAGE + '?peer=' + encodeURIComponent(peer), { credentials: 'same-origin' });
 			if (res.ok) {
+				answered = true;
 				const j = await res.json();
 				if (j && Array.isArray(j.quad) && j.quad.length === 4 &&
 					j.quad.every((c) => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]))) {
 					next = j.quad;
 					size = j.row ? parseSize(j.row.size) : null;
 				}
+			} else if (res.status >= 400 && res.status < 500) {
+				/* The camera's word: no coverage for this peer. Said once, the
+				 * first time, so the operator knows why nothing is drawn. */
+				answered = true;
+				let body = null;
+				try { body = await res.json(); } catch (e) { body = null; }
+				if (!saidCoverage) {
+					saidCoverage = true;
+					say((body && body.reason) || ('this camera has no calibration for ' + peer));
+				}
 			}
-		} catch (e) { next = null; }
+			/* Anything else -- a 5xx, a body that cannot be read -- is the
+			 * camera failing to answer, not answering no: the last outline
+			 * stands, and with it the overlay and the zoom it allows. */
+		} catch (e) { answered = false; }
 		if (my !== outlineGen) return;
-		quad = next;
+		if (answered) quad = next;
 		if (size) O.size = size;
 		placeOutline();
 	}
@@ -364,7 +413,7 @@
 		buildOutline();
 		if (on) {
 			if (!askTimer) { askOutline(); askTimer = setInterval(askOutline, OUTLINE_ASK_MS); }
-			if (!placeTimer) placeTimer = setInterval(placeOutline, PLACE_MS);
+			if (!placeTimer) placeTimer = setInterval(tick, PLACE_MS);
 		} else {
 			if (askTimer) { clearInterval(askTimer); askTimer = null; }
 			if (placeTimer) { clearInterval(placeTimer); placeTimer = null; }
@@ -473,7 +522,8 @@
 		if (!O.on || !quad) return 0;
 		const p = placement(), f = peerFrame();
 		if (!p || !f || !(f.w > 0)) return 0;
-		const w = Math.hypot(p.k.kx * (quad[1][0] - quad[0][0]), p.k.ky * (quad[1][1] - quad[0][1]));
+		const q = quad.map((c) => ({ x: p.k.kx * c[0], y: p.k.ky * c[1] }));
+		const w = edgeWidth(q[0], q[1], q[2], q[3]);
 		return w > 0 ? 3 * f.w / w : 0;
 	}
 	function setCeiling(on) {
@@ -493,8 +543,13 @@
 		const t = quadTransform(f.w, f.h, corners);
 		if (!t) { O.el.hidden = true; return; }
 		O.matrix = t;
+		/* Written once per value, per element: a style set to what it
+		 * already holds is still a fresh transform on a promoted layer. The
+		 * key lives on the element, so a player mounted anew is placed anew. */
+		const key = f.w + 'x' + f.h + '|' + t;
 		[O.handle ? O.handle.stage : null, O.still].forEach((el) => {
-			if (!el) return;
+			if (!el || el.mjPeerPlaced === key) return;
+			el.mjPeerPlaced = key;
 			const s = el.style;
 			s.width = f.w + 'px';
 			s.height = f.h + 'px';
@@ -529,20 +584,28 @@
 	function currentStream() { return O.handle && O.handle.stream ? O.handle.stream() : (subNative() ? 1 : 0); }
 	/* The peer picture's width on screen, in device pixels: its top edge as
 	 * placed, which is what the zoom scales. */
+	/* The longer of the picture's two horizontal edges: under a perspective
+	 * they differ, and the longer is where the pixels are. */
+	function edgeWidth(a, b, c, d) {
+		return Math.max(Math.hypot(b.x - a.x, b.y - a.y), Math.hypot(c.x - d.x, c.y - d.y));
+	}
 	function shownWidth() {
 		if (!corners) return 0;
-		const w = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
-		return w * (window.devicePixelRatio || 1);
+		return edgeWidth(corners[0], corners[1], corners[2], corners[3]) * (window.devicePixelRatio || 1);
 	}
 	function wantStream() {
 		const sub = streamOf(1), main = streamOf(0);
-		if (!subNative()) return 0;
-		if (!main) return 1;
-		const cur = currentStream(), w = shownWidth();
-		if (!(sub.w > 0) || !w) return cur;
+		const cur = currentStream();
 		let want = cur;
-		if (cur === 1 && w > sub.w * ADAPT_UP) want = 0;
-		else if (cur === 0 && w < sub.w * ADAPT_DOWN) want = 1;
+		if (!subNative()) want = 0;
+		else if (!main) want = 1;
+		else {
+			const w = shownWidth();
+			if (cur === 1 && sub.w > 0 && w > sub.w * ADAPT_UP) want = 0;
+			else if (cur === 0 && sub.w > 0 && w > 0 && w < sub.w * ADAPT_DOWN) want = 1;
+		}
+		/* Whatever the rule says, a channel the peer refused is not asked
+		 * for again: the answer stands, and the page follows it. */
 		return want === adaptRefused ? cur : want;
 	}
 	function askStream(want) {
@@ -586,6 +649,7 @@
 		};
 	}
 
+	let playSeq = 0;
 	function mountPlayer() {
 		if (O.handle || !O.sess) return;
 		const P = window.MajesticPreview;
@@ -594,16 +658,26 @@
 			config: peerConfig,
 			where: 'peer',
 			picker: false, snapshot: false, fullscreen: false, inline: true,
+			/* The other camera's WebRTC refusing is nothing about this
+			 * browser's transport: it must not park THIS page on MSE. */
+			demote: false,
 			origin: () => (O.sess ? O.sess.url : ''),
 			session: () => (O.sess ? O.sess.id : ''),
 			onFrame: (w, h, codec) => {
+				const before = O.frame ? O.frame.w : 0;
 				O.frame = w > 0 && h > 0 ? { w: w, h: h } : null;
 				if (codec) O.codec = String(codec);
 				placeOverlay();
+				/* A smaller frame is a lower ceiling, and a view already past
+				 * it is pulled back now rather than on the next wheel notch. */
+				if (O.on && (O.frame ? O.frame.w : 0) !== before) setCeiling(true);
 			},
 			onPlaying: () => {
 				O.playing = true;
 				O.lost = false;
+				/* A loss after a picture is a new incident, with its own
+				 * fresh session to ask for. */
+				O.recovered = false;
 				if (O.stillTimer) { clearInterval(O.stillTimer); O.stillTimer = null; }
 				/* A fresh keyframe now, so the picture under the snapshot is a
 				 * picture by the time the snapshot goes. */
@@ -611,8 +685,11 @@
 					const p = O.handle && O.handle.player ? O.handle.player() : null;
 					if (p && typeof p.requestIdr === 'function') p.requestIdr();
 				} catch (e) {}
-				const my = gen;
-				setTimeout(() => { if (my === gen && O.on && O.playing) stopStills(); }, PLAY_GRACE_MS);
+				/* Keyed to this play, not to the overlay: a stream switch or a
+				 * remount within the grace would otherwise have the OLD play's
+				 * timer take the snapshot off the NEW stream's first frames. */
+				const my = ++playSeq;
+				setTimeout(() => { if (my === playSeq && O.on && O.playing) stopStills(); }, PLAY_GRACE_MS);
 				placeOutline();
 			},
 			onLost: () => { O.playing = false; recover(); },
@@ -643,7 +720,7 @@
 		if (O.recovered || !O.on || !O.peer) { fallbackToStills(); return; }
 		O.recovered = true;
 		const my = gen, peer = O.peer;
-		const s = await ensureSession(peer, () => {}, true);
+		const s = await ensureSession(peer, afterPairing(peer), true, () => my === gen);
 		if (my !== gen || !O.on) return;
 		if (!s) { fallbackToStills(); return; }
 		O.sess = s;
@@ -659,6 +736,11 @@
 		O.handle = null;
 		O.frame = null;
 		O.playing = false;
+		/* The stream question's state was this player's. */
+		adaptWant = -1;
+		adaptTicks = 0;
+		adaptAsked = -1;
+		adaptRefused = -1;
 	}
 
 	function stillUrl() {
@@ -675,6 +757,7 @@
 		O.still.hidden = false;
 	}
 	function fallbackToStills() {
+		if (!O.on) return;
 		O.lost = true;
 		placeOutline();
 		if (!O.still || O.stillTimer) return;
@@ -697,13 +780,17 @@
 	 * offered pairing, after which `retry` runs. Writes nothing into the
 	 * overlay: the caller decides whether its operation is still the current
 	 * one by the time this answers, and only then keeps the session. */
-	async function ensureSession(peer, retry, fresh) {
+	async function ensureSession(peer, retry, fresh, still) {
 		let res = null, body = null;
 		try {
 			res = await api(PEER + '?peer=' + encodeURIComponent(peer) + (fresh ? '&fresh=1' : ''), { credentials: 'same-origin' });
 			try { body = await res.json(); } catch (e) { body = null; }
 		} catch (e) { res = null; }
-		if (!res) { say('could not reach the camera'); return null; }
+		/* `still` says whether the ask is still wanted by the time it is
+		 * answered: an ask cancelled by Esc offers no pairing form and says
+		 * nothing, whatever came back. */
+		const wanted = !still || still();
+		if (!res) { if (wanted) say('could not reach the camera'); return null; }
 		if (res.ok && body && typeof body.session === 'string' && typeof body.url === 'string') {
 			const expires = Number.isFinite(body.expires) && body.expires > 0 ? body.expires : null;
 			const at = Date.now();
@@ -713,6 +800,7 @@
 				: [];
 			return { url: body.url.replace(/\/+$/, ''), id: body.session, expires: expires, at: at, size: parseSize(body.size), streams: streams };
 		}
+		if (!wanted) return null;
 		if (res.status === 409 && body && body.paired === false) {
 			offerPairing(peer, retry, typeof body.url === 'string' && /^https?:\/\//.test(body.url) ? body.url : '');
 			return null;
@@ -721,16 +809,39 @@
 		return null;
 	}
 
+	/* What a pairing made from the form leads to. The overlay, if the
+	 * control is still armed, the peer is still the one the form was offered
+	 * for and nothing is already on its way; with the overlay up on snapshots
+	 * -- the peer refused its session and then refused the token -- a fresh
+	 * session for it; with the overlay up and playing, nothing. */
+	function afterPairing(peer) {
+		return () => {
+			if (!armed || peerName() !== peer || O.pending) return;
+			if (O.on) { if (O.lost) { O.recovered = false; recover(); } return; }
+			overlayOn();
+		};
+	}
+
+	/* A page served over https cannot open a socket, or an image, on an
+	 * http camera: the browser refuses mixed content, silently. */
+	function mixed(url) {
+		return typeof location !== 'undefined' && location.protocol === 'https:' && /^http:/i.test(url);
+	}
+
 	/* The session is good for a quarter of an hour (the camera's word, else
 	 * assumed); a fresh one is fetched before it runs out so a reconnect never
 	 * carries a dead one. The answer is kept only for the overlay that asked. */
 	function scheduleRefresh(peer) {
 		if (O.sessTimer) clearTimeout(O.sessTimer);
-		const ms = Math.max(30, (O.sess && O.sess.expires ? O.sess.expires : 900) * 0.8) * 1000;
+		/* From the session's own age, not from now: a session kept from an
+		 * earlier click has already spent some of its quarter-hour. */
+		const ttl = (O.sess && O.sess.expires ? O.sess.expires : 900) * 1000;
+		const at = O.sess && O.sess.at ? O.sess.at : Date.now();
+		const ms = Math.max(30 * 1000, at + ttl * 0.8 - Date.now());
 		O.sessTimer = setTimeout(async () => {
 			O.sessTimer = null;
 			const my = gen;
-			const s = await ensureSession(peer, () => {});
+			const s = await ensureSession(peer, afterPairing(peer), false, () => my === gen);
 			if (my !== gen || !O.on) return;
 			if (!s) { overlayOff(true); return; }
 			O.sess = s;
@@ -760,15 +871,13 @@
 		const my = ++gen;
 		O.pending = true;
 		try {
-			/* Pairing, when it has to be offered, comes back here -- but only
-			 * while the control is still armed and the peer is still the one
-			 * the form was offered for. The form can sit there while either
-			 * changes, and a password typed into it then must not switch on
-			 * an overlay nobody asked for. */
-			const again = () => { if (armed && peerName() === peer) overlayOn(); };
-			const s = sessionStillGood(peer) ? O.sess : await ensureSession(peer, again);
+			const s = sessionStillGood(peer) ? O.sess : await ensureSession(peer, afterPairing(peer), false, () => my === gen);
 			if (my !== gen) return;
 			if (!s) return;
+			if (mixed(s.url)) {
+				say('this page is https and ' + peer + ' is http: the browser will not connect to it from here');
+				return;
+			}
 			buildOverlay();
 			O.peer = peer;
 			O.sess = s;
@@ -790,16 +899,19 @@
 	/* Off. The session is kept (not refreshed) for a next click while it is
 	 * good; `forget` drops it too, for a peer that is no longer the one. */
 	function overlayOff(forget) {
-		/* Anything still in flight -- a session, a map -- lands on an overlay
+		/* Anything still in flight -- a session being brokered, the grace
+		 * timer -- lands on an overlay
 		 * that is gone, and must not switch it back on. */
 		gen++;
 		O.pending = false;
 		if (O.sessTimer) { clearTimeout(O.sessTimer); O.sessTimer = null; }
-		if (forget) O.sess = null;
+		if (forget) { O.sess = null; O.size = null; O.codec = ''; }
 		if (!O.on) return;
+		/* Off first: a player torn down below may report its loss on the
+		 * way out, and a loss on an overlay that is off asks for nothing. */
+		O.on = false;
 		unmountPlayer();
 		stopStills();
-		O.on = false;
 		stage.classList.remove('mj-peer-on');
 		setCeiling(false);
 		O.codec = '';
@@ -816,6 +928,7 @@
 		press = null;
 		stage.classList.toggle('mj-peer-armed', armed);
 		if (!armed) stage.classList.remove('mj-peer-in');
+		if (armed) saidCoverage = false;
 		if (box.checked !== armed) box.checked = armed;
 		/* Off takes everything of this control's with it: the overlay, its
 		 * session, and a note -- a pairing form, say -- still open. */
@@ -845,7 +958,9 @@
 	 * armed the press is that tool's rectangle over the outline, click or
 	 * not. A press anywhere else is the page's, as it always was. */
 	function down(e) {
-		press = null;
+		/* A second pointer while one is pressed is a pinch, not a click:
+		 * neither finger's release toggles anything. */
+		if (press) { press = null; return; }
 		if (!armed) return;
 		if (e.button != null && e.button > 0) return;
 		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
@@ -889,22 +1004,33 @@
 	stage.addEventListener('pointercancel', (e) => up(e, false), true);
 	stage.addEventListener('dblclick', dbl, true);
 
+	/* In the capture phase, so this runs before the page's own Esc -- which
+	 * drops a free zoom back to its preset -- and can stop it: with the
+	 * other camera's picture up under a zoom, Esc takes the picture and
+	 * leaves the zoom; the next Esc is the page's. */
 	document.addEventListener('keydown', (e) => {
 		if (e.key !== 'Escape') return;
 		if (O.on || O.pending) { overlayOff(); e.stopPropagation(); return; }
 		if (armed) { setArmed(false); e.stopPropagation(); return; }
 		if (!note.hidden) { clearNote(); e.stopPropagation(); }
-	});
+	}, true);
 
 	/* The map is per shown stream and goes stale the moment the viewer changes
 	 * channel; dropped first, so a placement arriving before the refresh
 	 * lands converts nothing rather than converting wrongly. */
 	window.addEventListener('mj-stream-changed', () => {
 		geom = null;
+		geomTried = 0;
 		clearNote();
-		learnGeometry().then(placeOutline);
+		geometryFresh().then(placeOutline);
 	});
-	window.addEventListener('resize', () => placeOutline());
+	/* Every time the view moves -- a pan, a zoom, the stage resized under a
+	 * banner or into fullscreen -- the outline and the picture on it move
+	 * with it at once, rather than at the next tick. The tick stays for what
+	 * is not a view change. A page without the zoom module's view events
+	 * falls back to the window. */
+	if (window.MajesticZoom && typeof window.MajesticZoom.onView === 'function') window.MajesticZoom.onView(() => placeOutline());
+	else window.addEventListener('resize', () => placeOutline());
 
 	(async function () {
 		const [hasCoverage, hasPeer, names] = await Promise.all([probe(COVERAGE), probe(PEER), learnPeers()]);
@@ -921,7 +1047,7 @@
 			});
 			pick.hidden = names.length < 2;
 		}
-		await learnGeometry();
+		await geometryFresh();
 		ctl.hidden = false;
 	})();
 
@@ -937,7 +1063,7 @@
 			matrix: O.matrix, frame: peerFrame(), stream: currentStream(), shownWidth: shownWidth(), refused: adaptRefused,
 			session: O.sess ? Object.assign({}, O.sess) : null,
 		}),
-		/* One placement, for the tests: what the 250 ms tick does. */
-		place: placeOutline,
+		/* One tick, for the tests: a placement and the stream question. */
+		place: tick,
 	};
 })();

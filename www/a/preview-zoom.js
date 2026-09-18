@@ -668,9 +668,10 @@
 		// pulled back to it, about the middle of the stage.
 		setCeiling: function (fn) {
 			ceilingHook = typeof fn === 'function' ? fn : null;
-			if (mode !== 'free' || !frame || !placed) return;
-			const r = stage.getBoundingClientRect();
-			zoomAt(1, r.left + stage.clientWidth / 2, r.top + stage.clientHeight / 2);
+			// The way a stage resize pulls a free zoom back inside its
+			// bounds: layout() clamps the scale about what the middle of the
+			// stage was looking at. One path for that, not two.
+			if (mode === 'free') layout();
 		},
 
 		// What of the frame is on screen, or null before the first layout,

@@ -271,6 +271,8 @@ function apply(matrix, X, Y) {
 		await env.tick();
 		await env.arm();
 		ok(!env.outline() || env.outline().hidden, 'a camera without coverage draws nothing, and the control still arms');
+		const noteText = (n) => (n.textContent || '') + (n.children || []).map((c) => c.textContent || '').join('');
+		ok(!env.els['#mj-peer-note'].hidden && /no calibration for tele/.test(noteText(env.els['#mj-peer-note'])), 'and says why, once: ' + noteText(env.els['#mj-peer-note']).slice(0, 60));
 		env.esc();
 	}
 
@@ -470,12 +472,55 @@ function apply(matrix, X, Y) {
 		env.mounts[1].opts.onLost('unreachable');
 		await env.tick(); await env.tick(); await env.tick();
 		ok(env.mounts.length === 2 && env.api().overlay().lost, 'a second loss is a real one: the snapshots, and no third player');
+		// But a picture in between makes the next loss a new incident.
+		env.mounts[1].opts.onPlaying('webrtc');
+		env.mounts[1].opts.onLost('unreachable');
+		await env.tick(); await env.tick(); await env.tick();
+		ok(env.mounts.length === 3 && env.mounts[2].opts.session() === 's3', 'a loss after a picture asks afresh');
 		env.esc();
 		// The next overlay may ask again.
 		await env.click(MID.x, MID.y);
-		env.mounts[2].opts.onLost('unreachable');
+		env.mounts[3].opts.onLost('unreachable');
 		await env.tick(); await env.tick(); await env.tick();
-		ok(env.mounts.length === 4, 'the next overlay gets its own fresh ask');
+		ok(env.mounts.length === 5, 'the next overlay gets its own fresh ask');
+		env.esc();
+	}
+
+	group('a channel the peer refused is not asked for again, whatever the rule says');
+	{
+		// No H.264 sub in the list: the rule says main, always. The peer
+		// serves the sub for it (its main is H.265 this browser lacks); the
+		// answer stands.
+		const env = boot({ streams: [{ id: 0, codec: 'h265', width: 2592, height: 1944 }] });
+		await env.tick();
+		await env.arm();
+		await env.click(MID.x, MID.y);
+		const m = env.mounts[0];
+		ok(m.stream() === 0 && !m.set, 'the main is what the player starts on');
+		m.streamNow = 1; m.opts.onFrame(1280, 720, 'h264'); m.opts.onPlaying('webrtc');
+		for (let i = 0; i < 4; i++) env.api().place();
+		ok(m.set === 1, 'moved to the sub by the peer, the main is asked for once');
+		m.streamNow = 1;
+		for (let i = 0; i < 12; i++) env.api().place();
+		ok(m.set === 1 && env.api().overlay().refused === 0, 'served the sub again, the ask is not repeated');
+		env.esc();
+	}
+
+	group('a second finger is a pinch, not a click');
+	{
+		const env = boot();
+		await env.tick();
+		await env.arm();
+		const stage = env.els['#mj-stage'];
+		const ev = (id) => ({ pointerId: id, clientX: MID.x, clientY: MID.y, button: 0, target: { closest: () => null }, stopImmediatePropagation() {} });
+		stage.fire('pointerdown', ev(7));
+		stage.fire('pointerdown', ev(8));
+		stage.fire('pointerup', ev(7));
+		stage.fire('pointerup', ev(8));
+		await env.tick(); await env.tick();
+		ok(!env.api().overlay().on && !env.api().overlay().pending, 'two fingers down and up inside the outline toggle nothing');
+		await env.click(MID.x, MID.y);
+		ok(env.api().overlay().on, 'and the next single click does');
 		env.esc();
 	}
 
