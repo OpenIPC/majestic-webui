@@ -26,8 +26,12 @@
  * Its own file, like preview-still.js and preview-roi.js: tests/auto-source
  * and tests/staging run preview-page.js in a bare vm with no layout, no fetch
  * and no canvas, and preview-page.js does not know this exists. While the
- * control is armed its listeners run first, in the capture phase, and stop a
- * press inside the outline there, so the click does not also pan or zoom.
+ * control is armed its listeners run first, in the capture phase, and watch
+ * a press inside the outline: a release within a few pixels of it is a
+ * click, and toggles the overlay. The press itself stays the page's
+ * throughout, so a drag inside the outline pans, or draws the zoom
+ * rectangle, exactly as it does with the control off. Only a double-click
+ * is kept from the page there, because two clicks already mean something.
  */
 (function () {
 	'use strict';
@@ -754,13 +758,6 @@
 		stage.classList.toggle('mj-peer-armed', armed);
 		if (!armed) stage.classList.remove('mj-peer-in');
 		if (box.checked !== armed) box.checked = armed;
-		/* One drawing control at a time: the other one is disarmed rather
-		 * than left to fire on the same press. */
-		const area = $('#mj-area');
-		if (armed && area && area.checked) {
-			area.checked = false;
-			area.dispatchEvent(new Event('change'));
-		}
 		if (!armed) overlayOff(true);
 		outlineOn(armed);
 	}
@@ -778,22 +775,21 @@
 		return { x: e.clientX - r.left, y: e.clientY - r.top };
 	}
 
-	/* A press inside the outline is this control's, and is stopped here in
-	 * the capture phase so the page neither pans nor captures the pointer; a
-	 * release within a few pixels of it is a click, and toggles the overlay.
-	 * A press anywhere else is the page's, as it always was. */
+	/* A press inside the outline is watched, never taken: it stays the
+	 * page's, which pans on it or draws its zoom rectangle exactly as it
+	 * does with the control off. A release within a few pixels of the
+	 * press is a click, and toggles the overlay. With the zoom-to-area tool
+	 * armed the press is that tool's rectangle over the outline, click or
+	 * not. A press anywhere else is the page's, as it always was. */
 	function down(e) {
+		press = null;
 		if (!armed) return;
 		if (e.button != null && e.button > 0) return;
 		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
-		/* The zoom-to-area tool draws its rectangle over the outline too,
-		 * and that is how the overlay gets looked at closely: its drag is
-		 * the page's, not ours. */
 		const area = $('#mj-area');
 		if (area && area.checked) return;
 		const p = stagePoint(e);
 		if (!inside(p.x, p.y)) return;
-		e.stopImmediatePropagation();
 		press = { id: e.pointerId, x: p.x, y: p.y };
 	}
 	function move(e) {
@@ -801,22 +797,29 @@
 			const p = stagePoint(e);
 			stage.classList.toggle('mj-peer-in', inside(p.x, p.y));
 		}
-		if (!press || e.pointerId !== press.id) return;
-		e.stopImmediatePropagation();
 	}
 	function up(e, commit) {
 		if (!press || e.pointerId !== press.id) return;
-		e.stopImmediatePropagation();
 		const p = stagePoint(e);
 		const click = commit && Math.abs(p.x - press.x) <= CLICK_SLOP && Math.abs(p.y - press.y) <= CLICK_SLOP;
 		press = null;
 		if (!click) return;
 		if (O.on) overlayOff(); else overlayOn();
 	}
+	/* Two clicks inside the outline have already toggled the overlay twice;
+	 * the page's double-click -- Fill to Fit and back -- must not also jump
+	 * the view from under them. */
+	function dbl(e) {
+		if (!armed) return;
+		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
+		const p = stagePoint(e);
+		if (inside(p.x, p.y)) e.stopImmediatePropagation();
+	}
 	stage.addEventListener('pointerdown', down, true);
 	stage.addEventListener('pointermove', move, true);
 	stage.addEventListener('pointerup', (e) => up(e, true), true);
 	stage.addEventListener('pointercancel', (e) => up(e, false), true);
+	stage.addEventListener('dblclick', dbl, true);
 
 	document.addEventListener('keydown', (e) => {
 		if (e.key !== 'Escape') return;

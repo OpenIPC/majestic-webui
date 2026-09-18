@@ -183,6 +183,20 @@ function boot(opts) {
 			await tick(); await tick(); await tick();
 			return d;
 		},
+		drag: async (x, y, x2, y2) => {
+			const d = { stopped: 0 };
+			const mk = (px, py) => ({ pointerId: 7, clientX: px, clientY: py, button: 0, target: { closest: () => null }, stopImmediatePropagation() { d.stopped++; } });
+			stage.fire('pointerdown', mk(x, y));
+			stage.fire('pointermove', mk((x + x2) / 2, (y + y2) / 2));
+			stage.fire('pointerup', mk(x2, y2));
+			await tick(); await tick(); await tick();
+			return d;
+		},
+		dbl: (x, y) => {
+			const d = { stopped: 0 };
+			stage.fire('dblclick', { clientX: x, clientY: y, target: { closest: () => null }, stopImmediatePropagation() { d.stopped++; } });
+			return d;
+		},
 	};
 }
 
@@ -275,7 +289,7 @@ function apply(matrix, X, Y) {
 		ok(!zoom.stopped && !env.api().overlay().on, 'with the area tool armed a press inside is the page\'s zoom rectangle');
 		// Inside.
 		const hit = await env.click(MID.x, MID.y);
-		ok(hit.stopped === 2, 'a press inside, and its release, are stopped at the stage');
+		ok(hit.stopped === 0, 'a press inside, and its release, stay the page\'s: nothing is stopped');
 		ok(env.asked.some((u) => u === '/api/v1/calibration/peer?peer=tele'), 'a session on the peer was brokered by this camera');
 		const ov = env.overlay();
 		ok(ov && !ov.hidden, 'the overlay is on');
@@ -312,6 +326,11 @@ function apply(matrix, X, Y) {
 		ok(still.hidden, 'and goes once the grace has passed');
 		ok(/tele · LIVE/.test(env.outline().find('text').textContent), 'the label says live');
 		ok(/mj-peer-dim-off/.test(env.outline().find('.mj-peer-dim').getAttribute('class')), 'the dimming lifts');
+		// A drag inside is the page's -- a pan, or the zoom rectangle -- and the overlay stays.
+		const drag = await env.drag(MID.x, MID.y, MID.x + 40, MID.y + 30);
+		ok(!drag.stopped && env.api().overlay().on && env.mounts.length === 1, 'a drag inside the outline is the page\'s, and the overlay stays');
+		ok(env.dbl(MID.x, MID.y).stopped === 1, 'a double-click inside is kept from the page');
+		ok(env.dbl(900, 550).stopped === 0, 'outside, it is the page\'s');
 		// A second click takes it away; Esc would too.
 		await env.click(MID.x, MID.y);
 		ok(ov.hidden && !env.api().overlay().on, 'a click inside takes it away');
