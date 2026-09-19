@@ -25,6 +25,33 @@ const src = fs.readFileSync(CGI, 'utf8');
 // Sliced from card_id through the end of scan_frag, so a change inside either
 // shows up here as changed behaviour rather than as a pattern that stopped
 // matching.
+const sp_a = src.indexOf('scan_pid() {');
+const sp_b = sp_a >= 0 ? src.indexOf('\n}\n', sp_a) : -1;
+if (sp_a < 0 || sp_b < 0) {
+	throw new Error('scan_pid was not found in the CGI; this test is testing nothing');
+}
+const scanPid = src.slice(sp_a, sp_b + 3);
+if (scanPid.indexOf('/stat') < 0) {
+	throw new Error('the start-time check is gone from scan_pid; this test is testing nothing');
+}
+
+// Ask scan_pid whether a lock is held, with the lock written by hand.
+function held(pid, start) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdpid-'));
+	try {
+		const lock = path.join(dir, 'lock');
+		fs.mkdirSync(lock);
+		if (pid !== null) fs.writeFileSync(path.join(lock, 'pid'), String(pid));
+		if (start !== null) fs.writeFileSync(path.join(lock, 'start'), String(start));
+		const script = 'SCAN_LOCK=' + JSON.stringify(lock) + '\n' + scanPid + '\nscan_pid\necho\n';
+		return execFileSync('sh', ['-c', script], { encoding: 'utf8' }).trim();
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+const myStart = fs.readFileSync('/proc/' + process.pid + '/stat', 'utf8').split(' ')[21];
+
 const a = src.indexOf('card_id() {');
 const e = src.indexOf('scan_frag() {');
 const b = a >= 0 && e > a ? src.indexOf('\n}\n', e) : -1;
@@ -98,6 +125,28 @@ function main() {
 		check('a truncated journal is dropped', frag_for('{"state":"do', CARD_A) === '');
 		check('an empty journal is dropped', frag_for('', CARD_A) === '');
 		check('a missing journal is dropped', frag_for(null, CARD_A) === '');
+	}
+
+	group('the endpoint asks the same question of the lock as the worker does');
+	{
+		// This one test decides two things: whether the page says a scan is
+		// running, and whether a stop request may be written. A pid alone
+		// settles neither, because pids are recycled -- a scan killed at some
+		// pid leaves a lock that an unrelated long-lived process inherits, and
+		// every later scan is then refused for as long as that process lives,
+		// while a stop can be aimed at a run nobody established ownership of.
+		check('a live pid with its own start time is held',
+			held(process.pid, myStart) === String(process.pid), held(process.pid, myStart));
+		check('the same pid with somebody else\'s start time is not',
+			held(process.pid, '1') === '', JSON.stringify(held(process.pid, '1')));
+		check('a pid that is gone is not held', held(999999, myStart) === '');
+		check('an empty lock is not held', held(null, null) === '');
+		check('rubbish in the pid file is not held', held('nonsense', myStart) === '');
+		// A lock written before this carries no start time. Trusting the pid
+		// there is the conservative way to be wrong: it costs a refused scan
+		// rather than two of them reading one card at once.
+		check('a lock from before this still counts as held',
+			held(process.pid, null) === String(process.pid), held(process.pid, null));
 	}
 
 	done();

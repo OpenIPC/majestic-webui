@@ -1177,7 +1177,23 @@ SCAN_LOCK=/tmp/webui/sdscan.lock
 scan_pid() {
 	sp_p=$(cat "$SCAN_LOCK/pid" 2>/dev/null)
 	case "$sp_p" in ''|*[!0-9]*) return 0;; esac
-	kill -0 "$sp_p" 2>/dev/null && printf '%s' "$sp_p"
+	kill -0 "$sp_p" 2>/dev/null || return 0
+	# The same identity check the worker's own lock makes, and for the same
+	# reason: `kill -0` answers for whatever holds that number NOW. Pids are
+	# recycled, so a scan killed at some pid leaves a lock an unrelated
+	# long-lived process inherits -- and this test decides both whether the page
+	# says a scan is running and whether a stop request may be written, so
+	# without it a stop can be aimed at a run whose ownership was never
+	# established, and every later scan is refused for as long as that process
+	# lives. The start time from /proc/<pid>/stat is the moment that process
+	# began, so a recycled pid reads a different one.
+	sp_s=$(cat "$SCAN_LOCK/start" 2>/dev/null)
+	sp_now=$(awk '{print $22}' /proc/"$sp_p"/stat 2>/dev/null)
+	# A lock from before this carries no start. Trusting the pid alone there is
+	# the conservative way to be wrong: it costs a refused scan rather than two
+	# reading one card at once.
+	[ -z "$sp_s" ] || [ "$sp_s" = "$sp_now" ] || return 0
+	printf '%s' "$sp_p"
 }
 
 # Where the worker is. /usr/sbin is where sbin/updatewebui installs it; PATH is
