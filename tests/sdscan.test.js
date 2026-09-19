@@ -48,8 +48,17 @@ done
 if [ -n "$MJ_ROT_FILE" ] && [ "$src" = "$MJ_ROT_FILE" ]; then
 	off=$((skip * bs))
 	if [ "$off" -ge "$MJ_ROT_FROM" ] && [ "$off" -lt "$MJ_ROT_TO" ]; then
-		# Short, and successful, which is the whole point.
-		exec ${realDd} if="$src" bs="$bs" skip="$skip" count=1 of=/dev/null
+		# One sector, delivered through a pipe so the final dd counts it as a
+		# PARTIAL block and says "0+1 records out" -- short, and exiting 0,
+		# which is the shape this is here to reproduce.
+		#
+		# Two earlier attempts did not reproduce anything, both because the
+		# records line is counted in blocks: reading one block instead of
+		# sixteen is not short when a chunk is one block, and reading a whole
+		# smaller block still prints "1+0" whatever its size.
+		${realDd} if="$src" bs=512 skip=$((off / 512)) count=1 2>/dev/null |
+			${realDd} bs="$bs" count=1 of=/dev/null
+		exit 0
 	fi
 fi
 exec ${realDd} "$@"
@@ -67,11 +76,11 @@ function stage(opts) {
 	// Two clips and a device image. Small, but several chunks each: the chunk
 	// size is read out of the shipped script so a change to it cannot leave
 	// this test silently covering one chunk per file.
-	const CH = Number((src.match(/^BS=(\d+)$/m) || [])[1]) *
-		Number((src.match(/^BLOCKS=(\d+)$/m) || [])[1]);
+	const BSZ = Number((src.match(/^BS=(\d+)$/m) || [])[1]);
+	const CH = BSZ * (opts.blocks || Number((src.match(/^BLOCKS=(\d+)$/m) || [])[1]));
 	if (!CH) throw new Error('the chunk size is gone from sbin/sdscan; this test is testing nothing');
 	const clip = path.join(mp, '2026-09-18', '20-13.mp4');
-	fs.writeFileSync(clip, Buffer.alloc(CH * 3 + 4096, 0x41));
+	fs.writeFileSync(clip, Buffer.alloc(CH * (opts.clipChunks || 3) + 4096, 0x41));
 	fs.writeFileSync(path.join(mp, '2026-09-18', '20-18.mp4'), Buffer.alloc(CH + 17, 0x42));
 	const dev = path.join(dir, 'mmcblk0');
 	fs.writeFileSync(dev, Buffer.alloc(opts.devBytes === undefined ? CH * 2 : opts.devBytes, 0x43));
@@ -82,10 +91,16 @@ function stage(opts) {
 function run(st, opts) {
 	opts = opts || {};
 	let s = src;
-	for (const [k, v] of [
+	const subs = [
 		['SCAN_DIR=/tmp/webui/sdscan', 'SCAN_DIR=' + st.tmp + '/sdscan'],
 		['LOCK=/tmp/webui/sdscan.lock', 'LOCK=' + st.tmp + '/sdscan.lock'],
-	]) {
+	];
+	// A chunk is sixteen megabytes, so filling the findings cap honestly would
+	// need a third of a gigabyte of test file. One block per chunk gets the
+	// same number of chunks out of twenty-one megabytes, and it is the real
+	// add_finding that is under test either way.
+	if (opts.blocks) subs.push(['BLOCKS=16', 'BLOCKS=' + opts.blocks]);
+	for (const [k, v] of subs) {
 		if (s.indexOf(k) < 0) throw new Error(k + ' is gone from sbin/sdscan; this test is testing nothing');
 		s = s.replace(k, v);
 	}
@@ -184,6 +199,26 @@ function main() {
 			fs.writeFileSync(path.join(lock, 'pid'), '999999');
 			const j = run(st);
 			check('a holder that has died is stepped over', j.state === 'done', JSON.stringify(j));
+		} finally { fs.rmSync(st.dir, { recursive: true, force: true }); }
+	}
+
+	group('findings are capped, and the overflow is counted rather than dropped');
+	{
+		const cap = Number((src.match(/^MAX_FINDINGS=(\d+)$/m) || [])[1]);
+		if (!cap) throw new Error('MAX_FINDINGS is gone from sbin/sdscan; this test is testing nothing');
+		// Every chunk of the first clip comes back short. This document is
+		// polled on every page by the site-wide storage banner, on a camera
+		// with a few megabytes of RAM, so a card failing everywhere must not
+		// be able to grow it without bound.
+		const st = stage({ devBytes: 0, clipChunks: cap + 6, blocks: 1 });
+		try {
+			const j = run(st, { rot: { file: st.clip, from: 0, to: 1 << 30 }, blocks: 1 });
+			check('the list stops at the cap', j.findings.length === cap,
+				j.findings.length + ' of ' + cap);
+			check('the rest are counted, not silently dropped', j.moreFindings > 0, String(j.moreFindings));
+			check('and every one of them was still counted as bad',
+				j.badChunks === j.findings.length + j.moreFindings,
+				j.badChunks + ' vs ' + (j.findings.length + j.moreFindings));
 		} finally { fs.rmSync(st.dir, { recursive: true, force: true }); }
 	}
 
