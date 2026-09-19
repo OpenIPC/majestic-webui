@@ -8307,3 +8307,287 @@ body > main > .container > form > .mj-foot {
 .mj-health-row code {
 	word-break: break-all;
 }
+
+/* ── SD card (sdcard.cgi) ──────────────────────────────────────────────────
+   The page leads with a verdict and puts the detail behind a tab strip, so
+   its container matches the settings page's rather than Bootstrap's default:
+   two pages of camera tabs side by side should not be two different widths. */
+#page-sdcard > main > .container {
+	max-width: min(96vw, 1320px);
+}
+
+/* dl.list right-aligns its value so a column of addresses lines up on its own
+   edge, which is right in the ~500px card it was written for. The readouts
+   here sit in tab panels that run the full 1320px, where it put the label at
+   one end of the screen and the value at the other with a metre of nothing
+   between them. Scoped, because network.cgi, update.cgi and backup.cgi all
+   want the original. */
+#page-sdcard dl.list {
+	grid-template-columns: max-content minmax(0, auto);
+	justify-content: start;
+	column-gap: 1.5rem;
+}
+
+#page-sdcard dl.list dd {
+	text-align: left;
+}
+
+/* The verdict: a mark, the sentence, and what the card is. */
+.mj-verdict {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.9rem;
+}
+
+.mj-verdict-mark {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.5rem;
+	height: 2.5rem;
+	border-radius: 50%;
+	font-size: 1.35rem;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.mj-verdict-txt {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+/* The headline is the module's own sentence and carries the weight the page
+   used to give its own name. A real <h3>, so the heading order holds. */
+.mj-verdict-h,
+.card > .card-body .mj-verdict-h {
+	margin: 0.15rem 0 0;
+	color: var(--bs-body-color);
+	font-size: 1.375rem;
+	font-weight: 600;
+	letter-spacing: normal;
+	line-height: 1.25;
+	text-transform: none;
+}
+
+/* What the card is, on one quiet line: five dl rows of model, capacity,
+   filesystem, mount and date said more briefly than a five-row grid can. */
+.mj-verdict-id {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.35rem 0.5rem;
+	margin-top: 0.4rem;
+	font-size: 0.8125rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-verdict-id .mj-sep {
+	color: var(--bs-tertiary-color);
+}
+
+.mj-verdict-id .mj-mono {
+	font-family: var(--bs-font-monospace);
+}
+
+/* Level tints for the mark. Kept apart from the text-* utilities the rows use:
+   a 40px disc wants a wash behind it, and `none` -- never checked -- must read
+   as neutral rather than as a pass, which is the distinction this whole panel
+   exists to make. */
+.mj-lv-ok { color: var(--bs-success-text-emphasis); }
+.mj-lv-warn { color: var(--bs-warning-text-emphasis); }
+.mj-lv-bad { color: var(--bs-danger-text-emphasis); }
+.mj-lv-unknown,
+.mj-lv-none { color: var(--bs-tertiary-color); }
+
+.mj-lv-ok { background: rgba(var(--bs-success-rgb), 0.14); }
+.mj-lv-warn { background: rgba(var(--bs-warning-rgb), 0.14); }
+.mj-lv-bad { background: rgba(var(--bs-danger-rgb), 0.14); }
+.mj-lv-unknown,
+.mj-lv-none { background: var(--bs-tertiary-bg); }
+
+/* The three lines of evidence, under a rule that separates them from the
+   verdict they add up to. */
+.mj-evidence {
+	margin-top: 1.35rem;
+	padding-top: 1.1rem;
+	border-top: 1px solid var(--bs-border-color);
+}
+
+/* The label, the rule and the action share one line; the sentence sits under
+   them at a readable size. The action was below the sentence, which put the
+   thing you press furthest from the words telling you to press it. */
+.mj-ev-head {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	min-height: 1.75rem;
+}
+
+.mj-ev-txt {
+	max-width: 78ch;
+	margin-top: 0.15rem;
+	font-size: 0.875rem;
+	line-height: 1.5;
+	color: var(--bs-secondary-color);
+}
+
+/* Where the recorder starts deleting the oldest clip to make room. Drawn on a
+   wrapper rather than inside .storage-bar, which clips its children and is
+   shared with the Dashboard and the Recordings page. */
+.mj-ret {
+	position: relative;
+}
+
+.mj-ret-mark {
+	position: absolute;
+	top: -3px;
+	width: 2px;
+	height: 20px;
+	border-radius: 1px;
+	background: var(--bs-body-color);
+	opacity: 0.8;
+}
+
+.mj-ret-cap {
+	position: relative;
+	height: 1.1rem;
+	margin-top: 0.1rem;
+	font-size: 0.6875rem;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-ret-cap > span {
+	position: absolute;
+	transform: translateX(-50%);
+	white-space: nowrap;
+}
+
+/* The steps of a card swap, down the dialog rather than across it: six of them
+   wrapped to three ragged lines at the modal's width, which read as a list of
+   unrelated phrases rather than as one sequence. */
+.mj-steps-v {
+	margin: 0.25rem 0 0;
+	padding: 0;
+	list-style: none;
+}
+
+.mj-steps-v > li {
+	position: relative;
+	display: grid;
+	grid-template-columns: 1.5rem minmax(0, 1fr);
+	gap: 0.75rem;
+	padding-bottom: 0.85rem;
+}
+
+.mj-steps-v > li:last-child {
+	padding-bottom: 0;
+}
+
+/* The thread joining one step to the next, stopping at the last. */
+.mj-steps-v > li::before {
+	content: "";
+	position: absolute;
+	top: 1.5rem;
+	bottom: -0.1rem;
+	left: 0.6875rem;
+	width: 2px;
+	background: var(--bs-border-color);
+}
+
+.mj-steps-v > li:last-child::before {
+	display: none;
+}
+
+.mj-steps-v .mj-pip {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.5rem;
+	height: 1.5rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: 50%;
+	background: var(--bs-body-bg);
+	color: var(--bs-tertiary-color);
+	font-size: 0.75rem;
+	font-weight: 600;
+}
+
+.mj-steps-v .mj-step-name {
+	color: var(--bs-tertiary-color);
+	font-size: 0.875rem;
+	line-height: 1.5rem;
+}
+
+.mj-steps-v .mj-step-sub {
+	margin-top: 0.1rem;
+	font-size: 0.78125rem;
+	line-height: 1.45;
+	color: var(--bs-tertiary-color);
+}
+
+.mj-steps-v > li.mj-step-done .mj-pip {
+	border-color: var(--bs-primary);
+	background: var(--bs-primary);
+	color: #fff;
+}
+
+.mj-steps-v > li.mj-step-done::before {
+	background: var(--bs-primary);
+}
+
+.mj-steps-v > li.mj-step-done .mj-step-name {
+	color: var(--bs-secondary-color);
+}
+
+.mj-steps-v > li.mj-step-now .mj-pip {
+	border-color: var(--bs-primary);
+	box-shadow: inset 0 0 0 3px var(--bs-primary);
+}
+
+.mj-steps-v > li.mj-step-now .mj-step-name {
+	color: var(--bs-body-color);
+	font-weight: 600;
+}
+
+/* The acknowledgement that gates a format. It replaced a native confirm(),
+   which was at least keyboard-operable -- so this is a real checkbox with a
+   real label, not a div that listens for clicks. */
+.mj-ack {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.6rem;
+	margin-top: 0.9rem;
+	padding: 0.7rem 0.85rem;
+	border: 1px solid rgba(var(--bs-danger-rgb), 0.45);
+	border-radius: var(--bs-border-radius);
+	font-size: 0.8125rem;
+	line-height: 1.45;
+	color: var(--bs-secondary-color);
+	cursor: pointer;
+}
+
+.mj-ack .form-check-input {
+	flex: 0 0 auto;
+	margin-top: 0.1rem;
+}
+
+/* What a format does, in the order it does it -- the capacity check runs
+   first, and that is the step that catches a card which is not the size it
+   claims. */
+.mj-willdo {
+	margin-top: 0.9rem;
+	padding: 0.75rem 0.9rem;
+	background: var(--bs-secondary-bg);
+	border-radius: var(--bs-border-radius);
+}
+
+.mj-willdo ol {
+	margin: 0.5rem 0 0;
+	padding-left: 1.1rem;
+	font-size: 0.8125rem;
+	line-height: 1.7;
+	color: var(--bs-secondary-color);
+}
