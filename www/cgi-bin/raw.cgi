@@ -53,20 +53,18 @@ hide_title=1; full_bleed=1
 </div>
 
 <%
-# Plate reading is opt-in, per camera, and off unless somebody turned it on.
+# Where this camera fetches the plate reader from, when it is not the pinned
+# default in lpr-loader.js. A mirror of one's own is the reason to set it: the
+# models come from a public CDN otherwise, and a camera that must not reach one
+# is pointed somewhere it can:
 #
-# The models are fetched from a CDN under CC BY-NC 4.0 -- attribution, and
-# non-commercial use only. majestic is a commercial product, so reaching for
-# them on every camera would make that choice on behalf of everyone running
-# one. The operator makes it instead, once, in the file that already carries
-# this camera's own decisions and that survives `updatewebui`:
-#
-#   echo 'webui_lpr_base="https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/"' \
+#   echo 'webui_lpr_base="https://mirror.example/lpr-wasm/dist/"' \
 #       >> /etc/webui/webui.conf
 #
-# p/common.cgi sources that file on every request, so the value is simply here.
-# Unset, no base reaches the page, lpr-loader.js reports no reader, raw.js
-# passes no plate capability and the editor builds no Plates tab.
+# It lives in the file that already carries this camera's own decisions and
+# that survives `updatewebui`. p/common.cgi sources it on every request, so the
+# value is simply here. Unset, no <meta> is written and lpr-loader.js uses its
+# own pinned tag.
 #
 # A <meta>, not an inline script, and that is the whole point of the shape.
 # attr_escape is an HTML-ATTRIBUTE escaper: it turns & into &amp; and knows
