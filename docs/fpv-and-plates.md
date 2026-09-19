@@ -3,9 +3,12 @@
 ## FPV variant
 
 `$fw_variant` comes from `/etc/os-release:BUILD_OPTION`. In practice the split is
-much smaller than it looks: **every** page — `wfb.cgi` included — uses
-`p/header.cgi`, `p/common.cgi` and `j/locale.cgi`, and `$fw_variant` drives only
-cosmetics (a `<body>` class and the brand label).
+much smaller than it looks: `wfb.cgi` goes through `p/common.cgi` and
+`p/header.cgi` like every other page, and `$fw_variant` drives only cosmetics (a
+`<body>` class and the brand label). It builds its own labels from `wfb_*`
+variables and does **not** read `j/locale.cgi` — that file is read by
+`camera.cgi`, `p/player.cgi` and `www/a/preview-page.js`, and nothing else, so
+editing it will not move an FPV label.
 
 The FPV-specific code is exactly two files: `p/fpv_common.cgi`, its own
 `yaml_get_value`/`yaml_set_value` helpers, included by `wfb.cgi` only; and

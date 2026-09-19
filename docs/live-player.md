@@ -24,10 +24,18 @@ written once and picks a transport at attach time. **WebRTC is the default.**
 does **not** share that markup — its live tab is built client-side by
 `renderLive()` in `mj-settings.js` — though it loads all four preview scripts.
 
-- **The fallback chain is WebRTC → MSE → MJPEG → note**, and the middle step
-  matters: WebRTC negotiates, so it can fail where MSE cannot (Firefox offers
-  only H.264 Baseline whatever it can decode). A player reporting `'fallback'`
-  therefore asks for the other transport, not for MJPEG.
+- **The chain is WebRTC → MSE → software decode → the caller's floor.** The
+  middle step matters: WebRTC negotiates, so it can fail where MSE cannot
+  (Firefox's stack offers only H.264 Baseline whatever its decoder can do), and
+  a player reporting a failure is asking for the next rung, not for the floor.
+  The third rung is **not a transport and gets no radio** — it is the same
+  `/ws/video` bytes the MSE player just failed on, decoded in WebAssembly, so a
+  transport picker names the transport exactly once and a codec problem never
+  touches a remembered preference. Which rungs below MSE are open is decided by
+  rules in `preview-transport.js` and read through it, never off the decoder
+  module directly, because the tests drive those gates from a stub. **MJPEG is
+  the Live page's floor, not a rung**: `onExhausted` is where each caller
+  decides, and the settings preview shows an alert instead.
 - **The walk is one copy, `preview-chain.js`** — it used to be written in both
   consumers and the same fault fixed once in each. `decide()` is the pure walk;
   `make()` owns the retry timer and a budget refilled **only** by frames a live
