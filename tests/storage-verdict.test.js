@@ -390,6 +390,46 @@ async function banners() {
 			V.headroom(total, used, 95).known === true);
 	}
 
+	group('a window with a hole in it is not a window');
+	{
+		// The falling-behind warning is a claim about a queue that has not
+		// drained over CONSECUTIVE samples. A poll that failed is not a sample,
+		// so two queued readings either side of one are not consecutive -- and
+		// counting them as such raises a warning, or holds one up, on evidence
+		// that was never continuous. The recorder half is set to nothing having
+		// been lost, so the queue is the only thing that could raise it.
+		const MPT = '/mnt/mmcblk0p1';
+		const busy = { records_state: 0, records_queue_fragments: 3,
+			records_fragments_dropped_total: 0, records_dropped_ticks_total: 0 };
+
+		const env = loadBanner({ rows: [MPT], card: { health: 'ok', mountpoint: MPT } });
+		await settle();
+		env.beat(busy);
+		check('one queued sample is not yet a warning',
+			!/falling behind/.test(env.banner()), env.banner());
+		env.beat(busy);
+		check('two in a row is', /falling behind/.test(env.banner()), env.banner());
+
+		const env2 = loadBanner({ rows: [MPT], card: { health: 'ok', mountpoint: MPT } });
+		await settle();
+		env2.beat(busy);
+		env2.beat(null);          // the camera did not answer
+		env2.beat(busy);
+		check('a failed poll between them is not a window',
+			!/falling behind/.test(env2.banner()), env2.banner());
+		env2.beat(busy);
+		check('and the count starts again rather than resuming',
+			/falling behind/.test(env2.banner()), env2.banner());
+
+		// It also has to be able to stop. A warning that cannot clear itself is
+		// another flag nothing turns off.
+		env2.beat({ records_state: 0, records_queue_fragments: 0,
+			records_fragments_dropped_total: 0, records_dropped_ticks_total: 0 });
+		check('a drained queue takes the warning back',
+			!/falling behind/.test(env2.banner()), env2.banner());
+
+	}
+
 	done();
 }
 

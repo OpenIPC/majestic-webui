@@ -182,7 +182,7 @@
 	// caller — it is a claim about a window only the caller can define, so it
 	// is passed in rather than computed here, and '' means "none, or nobody
 	// measured".
-	function fromRecorder(recorder, dropped, on) {
+	function fromRecorder(recorder, dropped, on, queued) {
 		const it = noun(on);
 		const It = it.charAt(0).toUpperCase() + it.slice(1);
 		const rs = state(recorder);
@@ -227,6 +227,26 @@
 					esc(dropped) + ' of video has been dropped while this ' +
 					'page has been open, because it could not take the video in time. ' +
 					'Faster storage, or a lower bitrate, is the fix.',
+			};
+		}
+		// Behind, but nothing lost yet — and this is the only sentence in
+		// this file that arrives while there is still time to act on it.
+		// Everything above fires once footage is already gone, which makes
+		// them a record of a loss rather than a warning about one.
+		//
+		// `queued` comes in already judged, exactly as `dropped` does and for
+		// the identical reason: the counters are since-boot, so whether a
+		// queue is a moment's backlog or a card that cannot keep up is a claim
+		// about a window, and only the caller knows what window it is watching.
+		// It invents no threshold — a fragment waiting to be written is behind
+		// by definition.
+		if (queued) {
+			return {
+				kind: 'marginal', level: 'warn',
+				short: It + ' is falling behind — clips are waiting to be written.',
+				detail: '<strong>' + It + ' is falling behind.</strong> ' +
+					'Clips are queuing up waiting to be written, though none have been lost yet. ' +
+					'If it keeps up, footage will start to go missing.',
 			};
 		}
 		return null;
@@ -322,7 +342,7 @@
 	// Returns null while the card is fine — including while it is merely full,
 	// which is normal operation: majestic deletes the oldest clips at
 	// records.maxUsage and carries on.
-	function of(card, recorder, dropped, path) {
+	function of(card, recorder, dropped, path, queued) {
 		const on = onCard(card, path);
 		// The card's own half is an answer about the SD slot, so it is only an
 		// answer about recording when that is where the recording goes. The
@@ -331,7 +351,7 @@
 		// The swap is asked first, ahead of both halves. It is the one state
 		// here that is not a fault, and every sentence it would otherwise
 		// reach describes the camera as broken.
-		return swapping(recorder) || fromRecorder(recorder, dropped, on) ||
+		return swapping(recorder) || fromRecorder(recorder, dropped, on, queued) ||
 			(on ? fromCard(card) : null);
 	}
 

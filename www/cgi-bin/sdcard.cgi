@@ -36,6 +36,7 @@
 	<div class="modal-footer"><span class="small text-secondary me-auto" id="sd-swap-status"></span><button class="btn btn-secondary" id="sd-swap-stop" type="button">Stop</button><button class="btn btn-primary" id="sd-swap-go" type="button">Start</button></div>
 </dialog>
 
+<script src="/a/sdcard-health.js" defer></script>
 <script src="/a/sdcard-swap.js" defer></script>
 <script src="/a/sdcard.js" defer></script>
 

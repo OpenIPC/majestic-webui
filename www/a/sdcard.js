@@ -16,6 +16,21 @@
 	// is the browser's monotonic clock and not the camera's.
 	let rateBps = null;
 	let speed = null, speedBusy = false, speedErr = '', speedRec = false;
+	// In-flight presses, and errors from them. Module scope for the reason
+	// everything else here is: load() re-renders the page every five seconds
+	// underneath whatever the operator is doing, so anything a render has to
+	// put back must survive one.
+	let scanBusy = false, scanErr = '', checkBusy = false, checkErr = '';
+	// Has the recorder been behind for long enough to be worth saying so?
+	//
+	// The claim is about a WINDOW, and only this side can define one: the
+	// counters are since-boot, so a single queued clip during a thunderstorm
+	// last Tuesday would otherwise leave the page warning for ever. Two
+	// consecutive heartbeats with something waiting is the shortest window
+	// that is not just one sample's noise, and it clears itself the moment the
+	// queue drains — which is what makes it an early warning rather than
+	// another flag nothing can turn off.
+	let queuedTicks = 0;
 	// Module scope, not per-invocation: the dialog's close listener is
 	// attached once, so a flag living inside openSwap() would go on setting
 	// the first swap's variable for the life of the page. Only one swap can
@@ -23,6 +38,11 @@
 	let swapStopped = false;
 
 	function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+	// esc() above does not touch quotes, which is fine everywhere it is used --
+	// between tags. A value going into a quoted attribute needs the quote as
+	// well, and using the wrong one there is how a title attribute ends and
+	// markup begins.
+	function attrEsc(s) { return esc(s).replace(/"/g, '&quot;'); }
 	function humanBytes(n) {
 		n = +n || 0;
 		if (n >= 1073741824) return (n / 1073741824).toFixed(1) + ' GB';
@@ -287,7 +307,23 @@
 				? '<span class="text-danger">' + total + '</span>' : 'none') + '</dd>');
 		}
 		const q = num(v, 'records_queue_fragments');
-		if (q !== null) rows.push('<dt>Waiting to be written</dt><dd>' + q + '</dd>');
+		if (q !== null) {
+			const qb = num(v, 'records_queue_bytes');
+			rows.push('<dt>Waiting to be written</dt><dd>' + q +
+				(q > 0 && qb ? ' <span class="text-secondary">(' + humanBytes(qb) + ')</span>' : '') + '</dd>');
+		}
+		// Counters majestic has always published and nothing read. Each one is
+		// a fact about the card that the four above cannot show: a reopen is
+		// the recorder having had to start the file again, a skip is a fragment
+		// it never attempted, and a cleanup is a clip deleted to make room --
+		// which on a card that is quietly smaller than it claims is the number
+		// that climbs while everything else stays at zero.
+		const reopens = num(v, 'records_reopens_total');
+		if (reopens) rows.push('<dt>Files reopened</dt><dd>' + reopens + '</dd>');
+		const skipped = num(v, 'records_fragments_skipped_total');
+		if (skipped) rows.push('<dt>Fragments skipped</dt><dd>' + skipped + '</dd>');
+		const unlinks = num(v, 'records_cleanup_unlinks_total');
+		if (unlinks) rows.push('<dt>Old clips deleted for room</dt><dd>' + unlinks + '</dd>');
 		return rows.join('');
 	}
 
@@ -435,6 +471,159 @@
 		return rateBps !== null && rateBps > 1000;
 	}
 
+	// ------------------------------------------------------ Card health ---
+	//
+	// Three kinds of evidence about one card, in one place, each saying which
+	// state its own evidence is in. The wording is MajesticSdHealth's, which is
+	// pure and tested; what lives here is the markup and the two buttons.
+	//
+	// Without that module the block simply does not render -- the page keeps
+	// everything else it had, rather than showing three empty rows.
+	const HEALTH_ICON = { ok: '✓', warn: '!', bad: '✕', unknown: '?', none: '–' };
+	const HEALTH_CLS = {
+		ok: 'text-success', warn: 'text-warning', bad: 'text-danger',
+		unknown: 'text-secondary', none: 'text-secondary',
+	};
+
+	function healthLine(label, line, extra) {
+		return '<div class="mj-health-row">'
+			+ '<div class="mj-health-mark ' + HEALTH_CLS[line.level] + '">'
+			+ esc(HEALTH_ICON[line.level] || '–') + '</div>'
+			+ '<div><div class="fw-semibold">' + esc(label) + '</div>'
+			+ '<div class="small text-secondary">' + esc(line.text) + '</div>'
+			+ (extra || '') + '</div></div>';
+	}
+
+	// What the scan is doing, as a bar and a sentence -- and the bar is only
+	// ever the worker's own two numbers. A page that works out its own
+	// percentage is worse than one with no bar at all, because it is believed.
+	function scanProgress(d) {
+		const sc = d.scan;
+		if (!sc || sc.state !== 'running') return '';
+		const total = +sc.total || 0, got = +sc.bytes || 0;
+		const pct = total > 0 ? Math.min(100, Math.round(got * 100 / total)) : 0;
+		return '<div class="progress mt-2" style="height:.5rem">'
+			+ '<div class="progress-bar" style="width:' + pct + '%"></div></div>'
+			+ '<div class="x-small text-secondary mt-1">'
+			+ humanBytes(got) + ' of ' + humanBytes(total) + ' — '
+			+ (sc.phase === 2
+				// Says what the sweep actually does. It starts at the beginning
+				// of the device and runs to the end, so it covers the
+				// recordings again on its way through -- describing it as only
+				// the space between them would be a claim about work that is
+				// not being done, and would not account for the progress total.
+				? 'now sweeping the whole card, including the parts already read.'
+				: 'reading the recordings.')
+			+ (sc.direct === false
+				? ' This camera cannot read past its own cache, so the check is slower and the '
+					+ 'camera’s memory is being used for it.'
+				: '')
+			+ '</div>';
+	}
+
+	// Where an unreadable piece is. A filename and an offset, because that is
+	// what phase one can give and what somebody can act on; phase two can only
+	// give an address, and says so by naming the device instead of a clip.
+	function scanFindings(d) {
+		const sc = d.scan;
+		const f = (sc && sc.findings) || [];
+		if (!f.length) return '';
+		return '<ul class="small mt-2 mb-0">'
+			+ f.map(x => '<li><code>' + esc(x.where || '') + '</code> — '
+				+ humanBytes(+x.len || 0) + ' at ' + humanBytes(+x.offset || 0)
+				+ (x.why === 'timeout' ? ' (the card stopped answering)' : ' (came back short)')
+				+ '</li>').join('')
+			+ (sc.moreFindings ? '<li class="text-secondary">and ' + sc.moreFindings + ' more</li>' : '')
+			+ '</ul>';
+	}
+
+	// How long a full pass will take on THIS card, from a rate this page has
+	// actually measured -- the read-back figure from the speed test, or the one
+	// a previous scan achieved. With neither, it says nothing rather than
+	// quoting a number from somewhere else's hardware.
+	function scanEstimate(d) {
+		const total = (+d.sizeBytes || 0) + (+d.usedKb || 0) * 1024;
+		let bps = 0;
+		if (speed && +speed.readMs > 0) bps = (+speed.bytes) / (+speed.readMs / 1000);
+		const sc = d.scan;
+		if (!bps && sc && +sc.bytes > 0 && +sc.updatedAt > +sc.startedAt) {
+			bps = (+sc.bytes) / (+sc.updatedAt - +sc.startedAt);
+		}
+		if (!bps || !total) return '';
+		const mins = Math.round(total / bps / 60);
+		return mins < 1 ? 'about a minute' : 'about ' + mins + ' minute' + (mins === 1 ? '' : 's');
+	}
+
+	function scanControls(d) {
+		if (d.canScan === false) {
+			return '<div class="x-small text-secondary mt-3">This camera does not have the card '
+				+ 'checker installed, so the card cannot be read back here.</div>';
+		}
+		if (d.scanRunning) {
+			return '<button class="btn btn-sm btn-outline-secondary mt-3" data-act="scanstop"'
+				+ (scanBusy ? ' disabled' : '') + '>Stop the check</button>';
+		}
+		if (!d.mounted) return '';
+		const est = scanEstimate(d);
+		// The cost is stated before the press, not discovered after it. Both
+		// halves are real: the pass competes with the recorder for the card,
+		// and it takes as long as it takes.
+		const title = 'Reads every byte on the card and reports what cannot be read'
+			+ (est ? ', taking ' + est : '')
+			+ '. The camera goes on recording throughout, and may lose a few seconds of footage.';
+		return '<button class="btn btn-sm btn-outline-secondary mt-3" data-act="scanstart"'
+			+ ' title="' + attrEsc(title) + '"' + (scanBusy ? ' disabled' : '') + '>'
+			+ (scanBusy ? '<span class="spinner-border spinner-border-sm"></span> Starting…' : 'Read the card back')
+			+ '</button>'
+			+ '<div class="x-small text-secondary mt-1">' + esc(title) + '</div>';
+	}
+
+	// Offered only where there is nothing to lose. A card with a filesystem on
+	// it is somebody's archive, mounted or not, and this erases the card -- so
+	// on any other card there is no button at all rather than a disabled one
+	// with an explanation nobody asked for. Format runs the same check anyway.
+	function checkControls(d) {
+		// Everywhere else, say where the check DOES happen. "Never checked"
+		// with no way forward is a dead end on the one line whose whole job is
+		// to tell somebody what they have not established yet.
+		if (d.health !== 'unformatted' && d.health !== 'unreadable') {
+			return d.probe ? '' : '<div class="x-small text-secondary mt-1">'
+				+ 'This check erases the card, so it runs as part of Format rather than on its own.</div>';
+		}
+		return '<button class="btn btn-sm btn-outline-danger mt-3" data-act="cardcheck"'
+			+ (checkBusy ? ' disabled' : '') + '>'
+			+ (checkBusy ? '<span class="spinner-border spinner-border-sm"></span> Checking…' : 'Check this card')
+			+ '</button>'
+			+ '<div class="x-small text-secondary mt-1">Writes a marker to a few dozen places across '
+			+ 'the whole card and reads them back, which is what catches a card that is smaller than it '
+			+ 'says. It takes seconds, and it erases the card.</div>';
+	}
+
+	function healthCard(d) {
+		const H = window.MajesticSdHealth;
+		if (!H) return '';
+		const v = H.verdict({
+			recorder: recorder,
+			card: d,
+			probe: d.probe,
+			scan: d.scan,
+			queued: queuedTicks >= 2,
+		});
+		return '<div class="col-12"><div class="card"><div class="card-body">'
+			+ '<div class="d-flex align-items-center gap-2 mb-3">'
+			+ '<h3 class="m-0">Card health</h3>'
+			+ '<span class="small ' + HEALTH_CLS[v.head.level] + '">' + esc(v.head.text) + '</span>'
+			+ '</div>'
+			+ '<div class="mj-health">'
+			+ healthLine('Keeping up with the recorder', v.keeping)
+			+ healthLine('Stores what it is given', v.stores, checkControls(d)
+				+ (checkErr ? mjNotice('warn', esc(checkErr)) : ''))
+			+ healthLine('Reads back what it holds', v.reads,
+				scanProgress(d) + scanFindings(d) + scanControls(d)
+				+ (scanErr ? mjNotice('warn', esc(scanErr)) : ''))
+			+ '</div></div></div></div>';
+	}
+
 	function perfCard(d) {
 		const live = liveRows();
 		return '<div class="col-12"><div class="card"><div class="card-body">'
@@ -505,8 +694,51 @@
 					? '<button class="btn btn-sm btn-primary mb-3" id="sd-use">Use this card for recording</button>' : ''))
 			+ '<div><a class="small" href="camera.cgi?tab=records">Recording settings →</a></div>'
 			+ '</div></div></div>'
+			+ healthCard(d)
 			+ perfCard(d)
 			+ '</div>';
+	}
+
+	// Starting, stopping and checking. Each one renders immediately so the
+	// press is acknowledged, then lets the five-second poll take over -- the
+	// scan's progress lives in the worker's journal and arrives through the
+	// ordinary status request, so there is nothing for this side to track.
+	function startScan(d) {
+		const est = scanEstimate(d);
+		if (!confirm('Read the whole card back?\n\n'
+			+ 'This reads every recording and then the rest of the card'
+			+ (est ? ', which will take ' + est : '') + '. '
+			+ 'The camera keeps recording throughout, but the two share the card, '
+			+ 'so a few seconds of footage may be lost.\n\n'
+			+ 'You can stop it at any point and keep what it found.')) return;
+		scanBusy = true; scanErr = ''; render();
+		op({ op: 'scanstart' }).then(r => {
+			scanBusy = false;
+			if (!r || r.ok === false) scanErr = (r && r.error) || 'The check could not be started.';
+			return load();
+		}).catch(() => { scanBusy = false; scanErr = 'The check could not be started.'; render(); });
+	}
+
+	function stopScan() {
+		scanBusy = true; scanErr = ''; render();
+		op({ op: 'scanstop' }).then(r => {
+			scanBusy = false;
+			if (!r || r.ok === false) scanErr = (r && r.error) || 'The check could not be stopped.';
+			return load();
+		}).catch(() => { scanBusy = false; scanErr = 'The check could not be stopped.'; render(); });
+	}
+
+	function startCheck() {
+		if (!confirm('Check this card?\n\n'
+			+ 'This writes markers across the whole card and reads them back, which is what '
+			+ 'catches a card that is smaller than it claims to be.\n\n'
+			+ 'IT ERASES EVERYTHING ON THE CARD.')) return;
+		checkBusy = true; checkErr = ''; render();
+		op({ op: 'cardcheck' }).then(r => {
+			checkBusy = false;
+			if (!r || r.ok === false) checkErr = (r && r.error) || 'The card could not be checked.';
+			return load();
+		}).catch(() => { checkBusy = false; checkErr = 'The card could not be checked.'; render(); });
 	}
 
 	function busy(btn) { if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; } }
@@ -521,10 +753,23 @@
 		SD.addEventListener('click', e => {
 			const b = e.target.closest('[data-act]'); if (!b) return;
 			const act = b.dataset.act;
+			const d0 = state || {};
 			if (act === 'browse') { location = 'files.cgi?cd=' + encodeURIComponent(state.mountpoint); return; }
 			if (act === 'format') { openFormat(); return; }
 			if (act === 'swap') { openSwap(); return; }
 			if (act === 'fsck' && !confirm('Unmount and check the filesystem?')) return;
+			// These three report inline rather than through after()'s alert().
+			// A scan runs for a long time and its outcome belongs beside the
+			// line it is about, and the capacity check's refusals are
+			// sentences somebody has to be able to read twice.
+			//
+			// The confirms are here rather than on the class main.js hangs
+			// confirm() off: that runs once on load, and #sd is rebuilt every
+			// five seconds, so a button drawn by a later render would never
+			// have been wired. The same reason fsck's confirm is above.
+			if (act === 'scanstart') { startScan(d0); return; }
+			if (act === 'scanstop') { stopScan(); return; }
+			if (act === 'cardcheck') { startCheck(); return; }
 			busy(b); op({ op: act }).then(after);
 		});
 		SD.addEventListener('click', e => {
@@ -760,7 +1005,12 @@
 	// exception is the first reading, which is worth showing without waiting
 	// for the next poll.
 	function onMetrics(s) {
-		if (!s || !s.ok || !s.m) { recorder = null; rateBps = null; return; }
+		// A poll that failed ends the run of consecutive samples. The warning
+		// below says the queue has not drained over a window of them, and a
+		// window with a hole in it is not that window -- two queued readings
+		// either side of an unanswered poll would otherwise raise it, or hold
+		// it up, on evidence that was never continuous.
+		if (!s || !s.ok || !s.m) { recorder = null; rateBps = null; queuedTicks = 0; return; }
 		const v = s.m.v;
 		const had = recorder !== null;
 		recorder = typeof v.records_state === 'number' ? { v: v } : { absent: true };
@@ -770,6 +1020,13 @@
 		const b = v.records_bytes_written_total, pb = pv && pv.records_bytes_written_total;
 		rateBps = (typeof b === 'number' && typeof pb === 'number' && s.dt > 0 && b >= pb)
 			? (b - pb) / s.dt : null;
+		// Two consecutive samples with something waiting is the window the
+		// health block's early warning is made over. Counted here because this
+		// is where the samples arrive, and cleared the moment the queue drains
+		// -- a warning that could not turn itself off would be another flag
+		// nothing clears, which is the shape this tree keeps removing.
+		const qn = v.records_queue_fragments;
+		queuedTicks = (typeof qn === 'number' && qn > 0) ? queuedTicks + 1 : 0;
 		if (!had && state) render();
 	}
 
