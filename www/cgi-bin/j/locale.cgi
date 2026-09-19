@@ -24,3 +24,7 @@ mj_sip=SIP
 mj_cloud=Cloud (WebRTC)
 mj_source_sensor=Sensor
 mj_source_usb=USB camera
+mj_fpv=FPV
+mj_analytics=Analytics
+mj_calibration=Calibration
+mj_pins=Pins
