@@ -6,6 +6,13 @@
 	// instead of throwing at the first conditional row.
 	const REQ = (typeof window === 'object' && window.MajesticRequires) || null;
 
+	// Which of a field's three texts goes where, and whether the row needs the
+	// "?" that opens the rest. Resolved the same way and for the same reason:
+	// without it the page keeps the two-tier hints it has always drawn, which
+	// is a page that is merely less helpful rather than one that has lost its
+	// search or grown a control that opens nothing.
+	const HELP = (typeof window === 'object' && window.MajesticHelp) || null;
+
 	const bootEl = document.getElementById('mj-settings-boot');
 	if (!bootEl) return;
 
@@ -265,7 +272,10 @@
 		let rt = 0;
 		window.addEventListener('resize', () => {
 			clearTimeout(rt);
-			rt = setTimeout(() => { layoutCols(); publishRailTop(); }, 120);
+			// foldHints after layoutCols for the same reason it follows it at
+			// mount: the column's width is what decides how many lines a hint
+			// takes, and narrow-to-wide has to give back the cuts it made.
+			rt = setTimeout(() => { layoutCols(); foldHints(); publishRailTop(); }, 120);
 		});
 		await load(state.sec, /*push*/ false);
 	}
@@ -421,13 +431,23 @@
 		return /^osd\.overlays\./.test(dot) || /^osd\.mark\./.test(dot);
 	}
 
+	// The predicate lives in mj-help.js so a test can ask it, and so the three
+	// tiers are named in one place rather than two. It matters most for `help`:
+	// the daemon's split moves the most identifying words in the schema out of
+	// `hint`, and a search that did not follow would simply return fewer rows —
+	// which reads as the setting not existing.
+	//
+	// The inline form is kept as the fallback, matching what the page did
+	// before the module existed. A file that failed to load should cost the
+	// long text, never the search.
 	function matchCount(secId, q) {
 		return leafFields(secId).filter(f => !isOverlayMember(f.dot) && fieldVisible(f) &&
-			((f.title || '').toLowerCase().includes(q) ||
-				(f.hint || '').toLowerCase().includes(q) ||
-				// four of ~170 fields ship no title; renderField falls back to the
-				// key for display, so the search matches it too
-				f.dot.split('.').pop().toLowerCase().includes(q))).length;
+			(HELP ? HELP.matches(f, q)
+				: ((f.title || '').toLowerCase().includes(q) ||
+					(f.hint || '').toLowerCase().includes(q) ||
+					// four of ~170 fields ship no title; renderField falls back to the
+					// key for display, so the search matches it too
+					f.dot.split('.').pop().toLowerCase().includes(q)))).length;
 	}
 
 	// How far the rail sits from the top of the DOCUMENT, handed to the
@@ -680,10 +700,18 @@
 		const input = document.getElementById('mj-search');
 		if (!wrap || !input) return;
 		wrap.classList.remove('d-none');
+		let requiz = 0;
 		input.addEventListener('input', () => {
 			state.q = input.value;
 			buildNav();
 			highlightPanel();
+			// A <mark> carries padding, so adding or removing one can move a
+			// hint across the four-line boundary and make the clamp verdict
+			// taken at mount wrong. Re-measured, but on a debounce rather than
+			// per keystroke: the reading costs a layout flush, and the answer
+			// only matters once somebody has stopped typing.
+			clearTimeout(requiz);
+			requiz = setTimeout(foldHints, 120);
 		});
 	}
 
@@ -695,7 +723,152 @@
 			n.textContent = '';
 			n.appendChild(hi(n.dataset.hl));
 		});
+		// The marks have just been rebuilt, so this is the moment the answer to
+		// "is the hit inside something folded away" is current.
+		revealFolds();
 	}
+
+	// ── the "?" that opens a field's long explanation ───────────────────────
+	//
+	// Two worlds behind one control, and the invariant is that it means the
+	// same thing in both: THERE IS MORE TEXT HERE. Where the daemon authored a
+	// `help`, the mark reveals it. Where it did not and the hint itself runs
+	// past four lines, the mark un-cuts the hint. No camera emits `help` yet,
+	// so the second is the only one anybody sees today — which is why the cut
+	// is decided by MEASURING the box rather than by counting characters, and
+	// why a box that cannot be measured is left alone rather than guessed at.
+
+	// The long text this row folds away, if it has one.
+	function foldBody(hint) {
+		const p = hint.parentNode;
+		return p ? p.querySelector(':scope > .mj-help-body') : null;
+	}
+
+	// Open or shut one fold, and say which in the mark's own name.
+	//
+	// A row can have both things to open -- a hint past the cut and a help
+	// underneath -- and one press means both. Two marks for one intent would
+	// be a reader deciding which half of an explanation they wanted.
+	function setFold(hint, open) {
+		const more = hint.querySelector(':scope > .mj-help');
+		if (!more) return;
+		const body = foldBody(hint);
+		if (body) {
+			if (open) body.removeAttribute('hidden');
+			else body.setAttribute('hidden', 'until-found');
+		}
+		const txt = hint.querySelector(':scope > .mj-hint-txt');
+		// Only a hint that was measured to overflow carries the clamp, so this
+		// never cuts one that fits.
+		if (txt) txt.classList.toggle('mj-clamp',
+			!open && hint.dataset.mjClamped === '1');
+		more.setAttribute('aria-expanded', open ? 'true' : 'false');
+		const name = open ? more.dataset.nameOpen : more.dataset.nameShut;
+		if (name) {
+			more.title = name;
+			more.setAttribute('aria-label', name);
+		}
+	}
+
+	// A fold is open when the reader opened it OR the search found something
+	// inside it. The OR is the whole point: deciding on the hit alone — the
+	// obvious implementation — slams every hand-opened fold shut the moment
+	// somebody types a character.
+	function revealFolds() {
+		document.querySelectorAll('#mj-settings-form .mj-hint-fold').forEach(hint => {
+			const more = hint.querySelector(':scope > .mj-help');
+			if (!more || more.hidden) return;
+			// A match in EITHER region opens the row, including one on the
+			// first line of a clamped hint that was never hidden. Deliberate
+			// over-reaction: "a search shows you the whole of what matched" is
+			// one rule, and telling a visible mark from a cut-off one needs a
+			// wrap position that cannot be computed.
+			const body = foldBody(hint);
+			const hit = !!((body && body.querySelector('mark')) ||
+				(hint.dataset.mjClamped === '1' && hint.querySelector('mark')));
+			setFold(hint, HELP ? HELP.foldState(hint.dataset.mjOpen === '1', hit)
+				: (hint.dataset.mjOpen === '1' || hit));
+		});
+	}
+
+	// Measure every hint on the page and decide which ones need cutting.
+	//
+	// The box is measured BEFORE it is clamped, so its rendered height is its
+	// content height — no scrollHeight/clientHeight dance with -webkit-box,
+	// which is the least portable part of this. Reads first, writes after, so
+	// thirty rows cost one reflow rather than thirty.
+	//
+	// It must run after layoutCols(), which toggles .mj-solo and so decides how
+	// wide a column is, and after highlightPanel(), because <mark> carries
+	// padding and an active query can change a hint's line count. It must NOT
+	// call layoutCols() itself — re-dealing the columns moves the control the
+	// reader is pointing at, which is the whole of #189.
+	function foldHints() {
+		if (!HELP) return;
+		const form = document.getElementById('mj-settings-form');
+		if (!form) return;
+		const rows = [];
+		form.querySelectorAll('.mj-hint-fold').forEach(hint => {
+			const more = hint.querySelector(':scope > .mj-help');
+			const txt = hint.querySelector(':scope > .mj-hint-txt');
+			if (!more || !txt) return;
+			// Measured whether or not the row has authored help. A hint is not
+			// guaranteed short just because a help exists beside it -- a
+			// daemon can ship both long -- and a row that cut one and not the
+			// other would answer half of what its mark promises.
+			txt.classList.remove('mj-clamp');
+			const cs = getComputedStyle(txt);
+			rows.push({ hint, more, txt, hasHelp: !!foldBody(hint),
+				h: txt.getBoundingClientRect().height,
+				lh: parseFloat(cs.lineHeight) });
+		});
+		rows.forEach(r => {
+			const over = HELP.overflows(r.h, r.lh, HELP.LINES);
+			if (over === null) {
+				// Not "it fits" — a display:none row measures zero and a
+				// stylesheet that has not arrived measures nothing either.
+				// Leave the row exactly as it renders and ask again when
+				// something reveals it. A help row keeps its mark: the long
+				// text is there to open whether or not the hint could be read.
+				delete r.hint.dataset.mjClamped;
+				r.more.hidden = !r.hasHelp;
+				return;
+			}
+			r.hint.dataset.mjClamped = over ? '1' : '0';
+			r.more.hidden = !(over || r.hasHelp);
+			if (!r.more.hidden) setFold(r.hint, r.hint.dataset.mjOpen === '1');
+		});
+		revealFolds();
+	}
+
+	// The browser's own find-in-page reached inside a folded body and is about
+	// to reveal it. Record that as the reader having opened it, or the next
+	// keystroke in the page's own search box would shut it again over the hit
+	// they were just taken to -- and the mark beside it would still read
+	// "more" while the text was on screen.
+	//
+	// Delegated on `document` because beforematch does not bubble past its own
+	// tree in every build, and captured for the same reason.
+	document.addEventListener('beforematch', (e) => {
+		const body = e.target && e.target.closest
+			? e.target.closest('.mj-help-body') : null;
+		if (!body || !body.parentNode) return;
+		const hint = body.parentNode.querySelector(':scope > .mj-hint-fold');
+		if (!hint) return;
+		hint.dataset.mjOpen = '1';
+		setFold(hint, true);
+	}, true);
+
+	// One handler for the whole form rather than one per row: the rows are
+	// rebuilt on every section change, and a delegated listener outlives them.
+	document.addEventListener('click', (e) => {
+		const more = e.target.closest && e.target.closest('.mj-hint-fold > .mj-help');
+		const form = document.getElementById('mj-settings-form');
+		if (!more || !form || !form.contains(more)) return;
+		const hint = more.parentNode;
+		hint.dataset.mjOpen = hint.dataset.mjOpen === '1' ? '0' : '1';
+		revealFolds();
+	});
 
 	function liveLabel(key, sub) {
 		const meta = LIVE_META[key];
@@ -927,7 +1100,7 @@
 		state.fields = [];
 		state.repaint = [];
 		state.initial = {};
-		state.cols = null;
+		state.cols = [];
 		state.liveSync = [];
 		// dropped with the fields they paint: a stale closure would keep
 		// writing into a row that is no longer in the document
@@ -986,7 +1159,7 @@
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
-			state.cols = cols;
+			state.cols.push(cols);
 			body.appendChild(cols);
 			card.appendChild(body);
 			form.appendChild(card);
@@ -1035,6 +1208,12 @@
 		// the section just mounted has to pick up the marks too, or navigating
 		// to a hit highlights its hints and not its field names.
 		highlightPanel();
+
+		// And only now can a hint be measured. layoutCols() above has settled
+		// how wide a column is (.mj-solo switches the basis), and highlightPanel
+		// has just added whatever <mark> padding the live query costs — measure
+		// before either and the line count is of a box that does not exist.
+		foldHints();
 
 		// Counts are read off the mounted controls, so swapping sections changes
 		// what they are read from — including when the swap discarded unsaved
@@ -1778,11 +1957,33 @@
 		const mirror = fields.find(f => f.key === 'mirror' && f.sub.type === 'boolean');
 		const flip = fields.find(f => f.key === 'flip' && f.sub.type === 'boolean');
 		const useGeo = !!(mirror && flip);
-		// The strip is for knobs, so it is integers that decide whether there is
-		// one. A build that marks only booleans x-live has no strip and loses
-		// nothing: they render in the row below, where a switch has room to be a
-		// switch rather than a fifth cell of a four-cell instrument.
-		const hasTone = fields.some(f => f.sub.type === 'integer');
+		// What this leaf has an instrument for, and what it has not.
+		//
+		// LIVE_META is the leaf's whole vocabulary: four tone knobs it has a
+		// name, a Scene preset and a Stock button for, and the two switches the
+		// Orientation pad replaces. What arrives, though, is the daemon's
+		// decision — every x-live key of the owning group is lifted here
+		// (mj-tree.js, rule 2) — so the two sets were never the same set; they
+		// merely coincided, and nothing said what should happen when they stopped.
+		//
+		// They stopped when majestic classed eight isp keys live. Three of them
+		// are integers, and this used to read `f.sub.type === 'integer'`, which
+		// put every one of them in the strip — whose cells are dealt
+		// `flex: 1 1 0`. Seven knobs then shared the 851px four were drawn for:
+		// 110px each, the readout printed over the name, each label broken to one
+		// word a line. The picture paid for it as well, since --mj-pv-reserve
+		// holds room for ONE 76px row of knobs and the strip had become two.
+		//
+		// So the strip is the knobs this leaf knows, and nothing ever joins them.
+		// A lifted key it cannot name is drawn under the deck in its own
+		// section's card, as ordinary rows in the ordinary two columns — the same
+		// place, and the same shape, as the leftovers of a section the leaf
+		// absorbed. The picture keeps its reserve whatever the daemon lifts next,
+		// and a key that arrives tomorrow is on the page rather than in the
+		// instrument. A build that marks only booleans x-live has no strip and
+		// loses nothing, exactly as before.
+		const isKnob = f => f.sub.type === 'integer' && !!LIVE_META[f.key];
+		const hasTone = fields.some(isKnob);
 
 		// Out here rather than beside the stage: the knobs write to the camera
 		// whether or not the player scripts loaded, so the promise to put it
@@ -1812,14 +2013,71 @@
 		deck.appendChild(colGeo);
 		form.appendChild(deck);
 
+		// Under the deck: one card per section, holding what the deck has no
+		// place for. Made on demand and remembered, because two things end up
+		// here for two different reasons — the keys above that this leaf cannot
+		// name, and the leftovers of a section it absorbed — and a section that
+		// has both must not appear twice under two copies of its own name.
+		//
+		// A section the leaf did NOT absorb still has a leaf of its own, so its
+		// card says so: the page it came from carries liftedNote() pointing here,
+		// and this is the other half of that sentence. An absorbed section has no
+		// page left to point at and gets no note.
+		const restCards = new Map();
+		function restCols(sec) {
+			let cols = restCards.get(sec);
+			if (cols) return cols;
+			const card = el('div', 'card mj-live-rest');
+			const body = el('div', 'card-body');
+			const head = el('div', 'mj-live-head');
+			const h = el('h3', 'mj-cap');
+			h.textContent = label(sec);
+			head.appendChild(h);
+			head.appendChild(el('span', 'mj-live-rule'));
+			if (!absorbed(sec)) {
+				// Named once. The heading above already says which section this
+				// is, so the note says only where the rest of it went — the other
+				// half of the sentence liftedNote() prints over there.
+				const note = el('span', 'mj-live-note');
+				note.innerHTML = 'the rest is on <a href="?tab=' + esc(sec) +
+					'">its own page</a>';
+				head.appendChild(note);
+			}
+			body.appendChild(head);
+			cols = el('div', 'mj-cols');
+			cols.appendChild(el('div', 'mj-col'));
+			cols.appendChild(el('div', 'mj-col'));
+			state.cols.push(cols);
+			body.appendChild(cols);
+			card.appendChild(body);
+			form.appendChild(card);
+			restCards.set(sec, cols);
+			return cols;
+		}
+
 		for (const f of fields) {
 			const geoField = useGeo && (f === mirror || f === flip);
 			// The geometry checkboxes stay real fields — hidden — beside the pad
 			// that replaces them, so Save and dirty tracking never learn any of
 			// this happened.
-			const box = (!geoField && f.sub.type === 'integer') ? strip : colGeo;
+			const box = isKnob(f) ? strip
+				: geoField ? colGeo
+				: restCols(f.section).firstElementChild;
+			// `live` is the STRIP's presentation, not the live-write behaviour:
+			// it swaps the detent slider in and drops the hint, the help, the
+			// range and the x-requires warning, because a knob is four cells of
+			// an instrument with no room for prose. Right in the strip; wrong
+			// in the card under the deck, where it left the three gain rows
+			// with no explanation at all while the selects beside them kept
+			// theirs — a row missing its hint looks exactly like a row that
+			// never had one, which is the failure this leaf exists to stop.
+			//
+			// Whether the field WRITES live is decided from the schema
+			// (`pushes`, below the widget dispatch) and is untouched by this,
+			// so a knob in the card still moves the picture as it is dragged.
 			const field = renderField(box, f.dot, f.key, f.sub,
-				getDotted(state.config, f.dot), { live: true, hidden: geoField });
+				getDotted(state.config, f.dot),
+				{ live: isKnob(f) || geoField, hidden: geoField });
 			if (!field) continue;
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
@@ -1919,22 +2177,7 @@
 		const claimed = new Set(state.fields.map(f => f.dot));
 		for (const sec of absorbedSections()) {
 			if (!sectionFields(sec).some(f => !claimed.has(f.dot))) continue;
-			const card = el('div', 'card mj-live-rest');
-			const body = el('div', 'card-body');
-			const head = el('div', 'mj-live-head');
-			const h = el('h3', 'mj-cap');
-			h.textContent = label(sec);
-			head.appendChild(h);
-			head.appendChild(el('span', 'mj-live-rule'));
-			body.appendChild(head);
-			const cols = el('div', 'mj-cols');
-			cols.appendChild(el('div', 'mj-col'));
-			cols.appendChild(el('div', 'mj-col'));
-			state.cols = cols;
-			body.appendChild(cols);
-			card.appendChild(body);
-			form.appendChild(card);
-			renderProps(cols.firstElementChild, sec,
+			renderProps(restCols(sec).firstElementChild, sec,
 				((state.schema.properties || {})[sec] || {}).properties || {}, claimed);
 		}
 	}
@@ -8481,7 +8724,16 @@
 		// isp.iris.type to DC reveals eight rows and the count read one of them —
 		// "1 of 13 off stock" against thirteen rows on a screen showing twenty.
 		for (const ctrl of controllers) {
-			const recount = () => { paintStock(); if (state.q.trim()) buildNav(); };
+			// foldHints, because a row this controller reveals was display:none
+			// when the page last measured — height 0, which is deliberately
+			// UNKNOWN rather than "it fits", so it is still carrying no verdict
+			// at all. Not layoutCols: re-dealing the columns on a visibility
+			// change is #189 exactly, and the comment on that function says so.
+			const recount = () => {
+				paintStock();
+				foldHints();
+				if (state.q.trim()) buildNav();
+			};
 			ctrl.control.addEventListener('change', recount);
 			ctrl.control.addEventListener('input', recount);
 		}
@@ -8507,8 +8759,16 @@
 	// here instead — at mount and on resize, never while a row toggles. Showing
 	// or hiding a row then only moves what is under it in its own column, which
 	// is what makes the form predictable to edit.
+	// Every .mj-cols the page put up, not one. The Live adjustments leaf can
+	// carry more than one card under its deck — a section it lifted keys out of
+	// gets a card of its own — and a box nobody deals keeps all of its rows in
+	// the first column with the second one empty beside it, which is the
+	// half-empty grid line tools/check-layout.mjs exists to catch.
 	function layoutCols() {
-		const box = state.cols;
+		(state.cols || []).forEach(dealCols);
+	}
+
+	function dealCols(box) {
 		// below md the columns stack, and every split reads the same stacked
 		if (!box || !WIDE.matches) return;
 		const a = box.children[0], b = box.children[1];
@@ -10035,24 +10295,96 @@
 			p.appendChild(ctl);
 		}
 
-		// detailed help under the control (skipped on the compact live-panel rows):
-		// the authored `hint` plus auto-context (value range for bounded integers).
+		// The explanation under the control, skipped on the compact live-panel
+		// rows where a knob is four cells of an instrument with no room for
+		// prose. Three tiers arrive here: the authored `hint`, the auto-context
+		// (a value range, for bounded integers), and the authored `help` —
+		// which goes behind a "?" so nobody pays for it who did not ask.
+		//
+		// Built with DOM calls rather than innerHTML. `dataset.hl = text` needs
+		// no escaping at all, where the string form had to esc() into an
+		// attribute and then parse it back out.
+		//
+		// Every [data-hl] node here must stay a TEXT-ONLY LEAF: highlightPanel()
+		// empties and refills each one on every keystroke, so an element child
+		// would vanish at the first character typed and never come back. That
+		// is why the "?" is a sibling of the hint's leaf and not inside it.
 		if (!live) {
-			const hintParts = [];
-			if (sub.hint) hintParts.push('<span data-hl="' + esc(sub.hint) + '"></span>');
+			const helpText = HELP ? HELP.text(sub.help) : '';
 			// only plain number inputs gain a range hint; sliders (max ≤ 100)
 			// already show their bounds via the track and the live value box
 			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
 			const numeric = type === 'integer' || type === 'number';
-			if (numeric && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
-				hintParts.push(esc(sub.minimum + '–' + sub.maximum));
-			if (hintParts.length) {
+			const range = (numeric && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
+				? sub.minimum + '–' + sub.maximum : '';
+			if (sub.hint || range || helpText) {
 				// block-level so it sits on its own line below the control row
 				const hint = el('div', 'hint text-secondary');
-				hint.innerHTML = hintParts.join(' · ');
-				const authored = hint.querySelector('[data-hl]');
-				if (authored) authored.appendChild(hi(sub.hint));
+				const txt = el('span', 'mj-hint-txt');
+				if (sub.hint) {
+					const authored = el('span');
+					authored.dataset.hl = sub.hint;
+					authored.appendChild(hi(sub.hint));
+					txt.appendChild(authored);
+				}
+				// Outside [data-hl] on purpose: the range is ours, not the
+				// daemon's, and marking it would highlight a number nobody
+				// searched for.
+				if (range) txt.appendChild(document.createTextNode(
+					(sub.hint ? ' · ' : '') + range));
+				hint.appendChild(txt);
+
+				// The long text, and the mark that opens it. The mark is built
+				// hidden in the clamp world and revealed only by a positive
+				// measurement (foldHints), so a row whose height could not be
+				// read never grows a control that opens nothing.
+				let body = null;
+				if (helpText) {
+					body = el('div', 'mj-help-body');
+					body.id = 'mjh-' + dot.replace(/\./g, '-');
+					// `until-found` rather than a bare `hidden`, so the
+					// BROWSER's own find-in-page can reach the text and open
+					// the fold on its own. Set as an attribute because in a
+					// browser that has never heard of it any value still means
+					// hidden, which is exactly the old behaviour.
+					body.setAttribute('hidden', 'until-found');
+					const long = el('span');
+					long.dataset.hl = helpText;
+					long.appendChild(hi(helpText));
+					body.appendChild(long);
+				}
+				if (helpText || sub.hint) {
+					hint.classList.add('mj-hint-fold');
+					const more = el('button', 'mj-help');
+					more.type = 'button';   // a bare button in this form saves the camera
+					more.textContent = '?';
+					more.setAttribute('aria-expanded', 'false');
+					// A help row's mark is always there; a clamp row's waits
+					// for a measurement to say the hint is actually cut.
+					more.hidden = !helpText;
+					// The mark owns whatever it can open. On a row with BOTH a
+					// long hint and a help it owns the two together, because a
+					// reader pressing "more" means both and a second control
+					// beside the first would be two marks for one intent.
+					txt.id = 'mjh-' + dot.replace(/\./g, '-') + '-h';
+					more.setAttribute('aria-controls',
+						body ? body.id + ' ' + txt.id : txt.id);
+					// The two worlds do not promise the same thing and must not
+					// say they do. `hidden` takes the long text out of the
+					// accessibility tree, so the mark genuinely reveals it; a
+					// clamp hides nothing from a screen reader, which is read
+					// the whole hint either way, so there the mark is a visual
+					// control and its name says so.
+					more.dataset.nameOpen = helpText
+						? 'Less about ' + desc : 'Shorten the explanation for ' + desc;
+					more.dataset.nameShut = helpText
+						? 'More about ' + desc : 'Show the whole explanation for ' + desc;
+					hint.appendChild(more);
+				}
 				p.appendChild(hint);
+				// After the hint and before the x-requires warning below: what
+				// the setting means, then what the camera is doing about it.
+				if (body) p.appendChild(body);
 			}
 		}
 

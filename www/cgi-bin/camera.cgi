@@ -205,6 +205,15 @@ fi
 %>
 <script src="/a/mj-tree.js" defer></script>
 <%
+# Which of a field's three texts goes where, and whether the row needs the "?"
+# that opens the rest. Its own file for the reason mj-tree.js is: every answer
+# it gives produces a page that looks entirely ordinary when it is wrong -- a
+# mark that opens nothing, a hint cut where nothing was hidden, a search that
+# quietly stops covering the words it used to -- and only a module can be asked
+# by a test. Without it the page keeps the two-tier hints it always drew.
+%>
+<script src="/a/mj-help.js" defer></script>
+<%
 # Where the rail's list has to sit and whether a pick has to move the page. Its
 # own file for the reason mj-fps.js is: rectangle arithmetic that fails silently
 # — a list scrolled to the wrong offset is still a list — and tests/rail.test.js

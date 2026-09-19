@@ -251,11 +251,20 @@
 /* The word beside the switch. A switch states its position; it does not state
    what the position means, and "Off" next to a lit dot is the vocabulary the
    Live bar's toggles already use. */
-/* The "?" beside a WFB label. It was a filled secondary badge carrying a
-   Bootstrap tooltip that has not worked since the JS bundle was dropped; the
-   text comes from the title attribute, and the mark now reads as part of the
-   micro-caps label rather than a chip stuck to it. */
+/* The "?" beside a WFB label, and the one that opens a settings field's long
+   explanation. One circle, two jobs, deliberately: a second spelling of the
+   same mark would read as a different kind of thing.
+
+   It was a filled secondary badge carrying a Bootstrap tooltip that has not
+   worked since the JS bundle was dropped; the text comes from the title
+   attribute, and the mark now reads as part of the micro-caps label rather
+   than a chip stuck to it.
+
+   Written for a <span>; `background` and `padding` are inert there and are what
+   a <button> needs to stop being a button-shaped box. */
 .mj-help {
+	background: none;
+	padding: 0;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -275,6 +284,118 @@
 .mj-help:hover {
 	border-color: var(--bs-primary);
 	color: var(--bs-primary);
+}
+
+/* `cursor: help` above is right for the WFB mark, which is a tooltip and does
+   nothing when pressed. This one acts, so it says so. */
+button.mj-help {
+	cursor: pointer;
+}
+
+/* Open. Lit rather than rotated or swapped for a different glyph: the mark has
+   to stay findable by the reader who is about to close it again. */
+button.mj-help[aria-expanded="true"] {
+	border-color: var(--bs-primary);
+	color: var(--bs-primary);
+}
+
+.mj-help:focus-visible {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+	outline-offset: 1px;
+}
+
+/* ── a hint with more behind it ─────────────────────────────────────────────
+   The "?" is absolutely positioned rather than made a flex item or a float,
+   because the box beside it becomes a -webkit-box when it clamps and that
+   layout has opinions about its children. Out of the flow it has none of them.
+
+   `fit-content` so the mark follows a SHORT hint like a footnote mark instead
+   of stranding at the column's right edge; a hint that fills the measure puts
+   it at that edge on line one either way. Both are a fixed, scannable place,
+   and neither costs a pixel of height.
+
+   Pinned to the FIRST line, which is the property that makes expanding in place
+   safe: the fold grows downward from below the mark, so pressing it never moves
+   it and a second press lands. */
+.mj-hint-fold {
+	position: relative;
+	width: fit-content;
+	padding-right: 1.35rem;
+}
+
+.mj-hint-fold > .mj-help {
+	position: absolute;
+	top: 0.15rem;
+	right: 0;
+	margin-left: 0;
+}
+
+/* Four lines, from the measurement rather than from a character count. A hint
+   line holds 43 characters at 390px, 48 at 1280px and 63 at 2560px, so four
+   lines is 172, 192 and 252 — just above the band most hints live in (48 of 199
+   run 121-180) and just below the 29 that pass 180 and reach eight to ten lines
+   on a phone. Three lines would cut at 129 on a laptop and put the mark on 77
+   rows out of 199, which is furniture rather than a signal.
+
+   Because the page MEASURES instead of counting, the mark appears at the width
+   where the text actually overflows and is simply absent from rows that fit on
+   a wide monitor. A character threshold cannot have that property.
+
+   Both spellings, and no fallback needed: a browser honouring neither shows the
+   whole hint, which is what every camera did before this and is not a fault. */
+.mj-hint-txt.mj-clamp {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 4;
+	line-clamp: 4;
+	overflow: hidden;
+}
+
+/* The long explanation. Same size and measure as the hint — it is the same kind
+   of text, only more of it — with a rule down its left to say it belongs to the
+   hint above rather than to the row below.
+
+   Its own class and NOT `hint`: that class sets `display: block`, and only the
+   `!important` in Bootstrap's reboot keeps `[hidden]` winning over it. Do not
+   tidy the two together later. */
+/* Hidden, and findable anyway.
+ *
+ * `hidden="until-found"` keeps the text out of the picture while leaving it
+ * reachable by the browser's OWN find-in-page, which then fires beforematch
+ * and opens the fold on the reader's behalf. It is the one kind of search this
+ * page cannot implement for itself, and the text most worth searching is
+ * exactly the text folded away.
+ *
+ * The !important is a fight with Bootstrap's reboot and has to be. Its
+ * `[hidden]{display:none!important}` matches `hidden="until-found"` as
+ * readily as a bare one -- any value of the attribute means hidden -- and
+ * display:none takes the content out of the find index, so the feature is
+ * silently off. `content-visibility: hidden` is what hides it INSTEAD, and is
+ * what the attribute is defined in terms of.
+ *
+ * And the override is gated on the property it depends on. Without the
+ * @supports it is a trade of one failure for a worse one: a browser with no
+ * content-visibility drops that declaration, keeps the display:block, and
+ * renders EVERY authored explanation open with no way to shut it -- the exact
+ * state hidden was doing correctly before any of this. A browser that has
+ * never heard of until-found now simply keeps it hidden, which is the
+ * behaviour without this rule and is not a fault. */
+@supports (content-visibility: hidden) {
+	.mj-help-body[hidden="until-found"] {
+		display: block !important;
+		content-visibility: hidden;
+	}
+}
+
+.mj-help-body {
+	max-width: 66ch;
+	margin-top: 0.4rem;
+	padding-left: 0.6rem;
+	border-left: 2px solid var(--bs-border-color);
+	color: var(--bs-secondary-color);
+	font-size: 0.78125rem;
+	line-height: 1.45;
+	white-space: pre-line;
 }
 
 .mj-state {
@@ -709,8 +830,18 @@ pre#output[data-cmd] {
 	visibility: hidden;
 }
 
+/* Scoped to .mj-ctl, not the whole row. A bare :focus-within lights the undo
+   glyph whenever anything in the row takes focus, and the row now holds a "?"
+   that somebody may sit on for as long as it takes to read a paragraph — so a
+   row at stock would wear a reset mark the whole time, breaking the one thing
+   the glyph is supposed to mean.
+   Safe because .mj-reset and the .mj-ctl wrapper are built in the same block of
+   renderField, so every row that has a reset has a .mj-ctl around its control.
+   The tab chain still works: focusing the control reveals the glyph, which
+   takes it out of visibility:hidden and so into the tab order, and focus is
+   still inside .mj-ctl when it gets there. */
 .mj-row:not(.mj-off-stock):hover .mj-reset,
-.mj-row:not(.mj-off-stock):focus-within .mj-reset {
+.mj-row:not(.mj-off-stock) .mj-ctl:focus-within .mj-reset {
 	visibility: visible;
 }
 
