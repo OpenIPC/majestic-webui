@@ -10569,10 +10569,10 @@
 		// A sticky bar does not push anything; it sits on whatever is at the
 		// bottom of the window — which can be a control, and a covered control
 		// is one that does nothing when pressed. The form grows by the bar's
-		// height instead, so the last row has somewhere to scroll to. It used
-		// to be the PICTURE that gave the room back, which shrank the video by
-		// 9% at the moment somebody nudged a knob: see .mj-has-toolbar in the
-		// stylesheet.
+		// height while it is there, so the last row has somewhere to scroll
+		// to; a picture on the leaf keeps its size either way. See
+		// .mj-has-toolbar in the stylesheet for why the room comes from the
+		// page rather than from the stage.
 		if (bar.parentNode) bar.parentNode.classList.toggle('mj-has-toolbar', show);
 
 		const lbl = document.getElementById('mj-dirty-count');

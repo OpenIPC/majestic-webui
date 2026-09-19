@@ -3173,28 +3173,27 @@ button.mj-osd-chip,
    one of them has something to do. It is the form's last child, so appearing
    and disappearing costs nothing above it — measured: the section card's top
    is identical with the bar shown and hidden. */
-/* The room it needs comes out of the PAGE, not out of the picture.
+/* The room the bar needs comes out of the PAGE, never out of a picture.
    renderToolbar() sets this class on the form, because the bar is the only
    thing that knows when it is there.
 
-   It used to come out of the picture: the stage is sized from the viewport
-   height, so `.mj-has-toolbar .mj-pv-stage` gave the bar its 4.95rem back by
-   shrinking the video. That solved the right problem the wrong way. The
-   problem is that a sticky bar sits ON whatever is at the bottom of the
-   window, so it can cover the control row under the picture and a press then
-   does nothing -- and the last row on the page is the one case that cannot be
-   scrolled clear, because there is nothing below it to scroll into view.
-   Padding is what that case actually wants: it gives the last row somewhere to
-   go, so nothing is ever unreachable, and it costs the picture nothing.
+   The bar is sticky, so it sits ON whatever is at the bottom of the window and
+   can cover a control -- a press then does nothing, with nothing to say why.
+   Only the LAST row on the page is really at risk: every other one can be
+   scrolled clear, and the last one has nothing below it to scroll into view.
+   Padding is what that case wants. It gives the last row somewhere to go, so
+   nothing is ever unreachable, and it asks nothing of the picture.
 
-   Shrinking cost the Live leaf the thing it is for. Measured on a 1512x860
-   window: nudging brightness from 50 to 51 took the stage from 976x549 to
-   887x499 -- the picture you are judging the change against jumped 9% smaller
-   at the moment you changed it, and grew back on Save. That is #340's finding
-   about the Overlay leaf ("a picture that moves under the hand costs trust in
-   everything placed on it") arriving at the leaf where the picture IS the
-   instrument. The Overlay leaf keeps its own permanent reserve on
-   .mj-osd-stage and is untouched by this. */
+   Taking it from the picture instead is what a stage sized from the viewport
+   height invites, and it is wrong wherever the picture is the instrument being
+   judged: on the Live adjustments leaf the video shrank 976x549 -> 887x499 on
+   a 1512x860 window the moment a knob moved, and grew back on Save. A picture
+   that moves under the hand costs trust in everything placed on it, which is
+   the same fault the mask editor was reported for in #340.
+
+   The Overlay leaf reserves its room permanently on .mj-osd-stage instead, and
+   is deliberately left that way: it holds still by never giving the room up,
+   and its own comment there says what it pays for that. */
 .mj-has-toolbar {
 	padding-bottom: 4.95rem;
 }
