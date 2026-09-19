@@ -1206,11 +1206,29 @@
 		// arrived without its usage, or a configuration fetch that failed and
 		// resolved to {}, both reach here looking like ordinary numbers — and
 		// both would produce a confident duration out of a reading nobody took.
+		// Is anything actually being written? Both halves of the line below are
+		// present-tense claims about a running recorder, and neither survives
+		// one that is off: nothing is being deleted to make room when nothing
+		// needs room, and there is no "footage left" to count down when no
+		// footage is arriving. A camera switched off at the threshold, or one
+		// whose recorder has failed, sits in exactly that state — with a full
+		// card and a healthy filesystem, which is what carried it past the
+		// checks above.
+		//
+		// `enabled` is safe to require as a reading here: a configuration fetch
+		// that failed takes the threshold with it, so head.known is already
+		// false and nothing is claimed at all.
+		const rs = SV.state(state.recorder);
+		const writing = mjGet(state.cfg, 'records.enabled') === true &&
+			(rs === null || rs === 0 || rs === 1);
 		const left = (d.health !== 'ok' || !rate || !head.known) ? ''
 			: (capped && room <= 0)
-				? ' · the oldest clips are being deleted to make room for new ones'
-				: ' · about ' + TL.duration(room / rate) + ' of footage left' +
-					(capped ? ' before the oldest is deleted' : '');
+				? (writing
+					? ' · the oldest clips are being deleted to make room for new ones'
+					: ' · at the point where the oldest clips start being deleted')
+				: !writing ? ''
+					: ' · about ' + TL.duration(room / rate) + ' of footage left' +
+						(capped ? ' before the oldest is deleted' : '');
 
 		card.hidden = false;
 		el.innerHTML =
