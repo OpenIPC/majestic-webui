@@ -1188,10 +1188,25 @@
 		// footage actually costs per second.
 		const day = state.day.clips.reduce(function (a, c) { return a + c.dur; }, 0);
 		const bytes = state.day.clips.reduce(function (a, c) { return a + c.size; }, 0);
+		// Room before the OLDEST CLIPS START GOING, which is not the free
+		// space — see MajesticStorageVerdict.headroom for why, and for what
+		// reading the free space here was measured to promise.
+		const head = SV.headroom(total, used, mjGet(state.cfg, 'records.maxUsage'));
+		const room = head.room, capped = head.capped;
 		// A projection of how long the card will last is a promise about future
 		// writes, so it is only offered while future writes are possible.
-		const left = (d.health === 'ok' && day > 0 && bytes > 0)
-			? ' · about ' + TL.duration(free / (bytes / day)) + ' of footage left' : '';
+		//
+		// Past the threshold there is no such promise to make: the archive is a
+		// rolling window, and a duration there would be answering "how much
+		// more" with a number when the answer is "no more — it is trading the
+		// oldest for the newest now". That is the state a full camera sits in
+		// for the rest of its life, so it is the sentence most people will see.
+		const rate = (day > 0 && bytes > 0) ? bytes / day : 0;
+		const left = (d.health !== 'ok' || !rate) ? ''
+			: (capped && room <= 0)
+				? ' · the oldest clips are being deleted to make room for new ones'
+				: ' · about ' + TL.duration(room / rate) + ' of footage left' +
+					(capped ? ' before the oldest is deleted' : '');
 
 		card.hidden = false;
 		el.innerHTML =

@@ -96,6 +96,34 @@
 		return !!recorder;
 	}
 
+	// How much more footage the card can take before the oldest starts going.
+	//
+	// NOT the free space, which is the question it is easy to ask by mistake.
+	// The camera deletes the oldest recording once the card reaches
+	// records.maxUsage, so what can still be ADDED is the room up to that line,
+	// and the free space runs past it by whatever the threshold holds back.
+	// Measured on a 29 GB card at 94% with the threshold at 95%: 1.81 GB free
+	// against 0.36 GB of real headroom, so a page reading the free space
+	// promised five times the footage the camera was going to add.
+	//
+	// The shape of that error is worse than its size. Free space never falls
+	// below the reserve — at the threshold this card still has 1.46 GB of it —
+	// so a projection built on it has a floor it can never go under, and goes
+	// on offering that much footage for ever while the camera deletes a clip
+	// for every clip it writes.
+	//
+	// Here rather than on the page for the reason everything else in this file
+	// is: two places ask this question, and two sums are how they come to
+	// answer it differently. `capped` is the caller's cue that there is a
+	// threshold at all — without one the card really does fill up, and the free
+	// space is the right number.
+	function headroom(total, used, cap) {
+		const t = +total || 0, u = +used || 0, c = +cap;
+		const free = Math.max(0, t - u);
+		if (!(c > 0) || c >= 100) return { room: free, capped: false };
+		return { room: Math.max(0, t * c / 100 - u), capped: true };
+	}
+
 	// Positive claims need positive evidence. A card is only known writable
 	// when the endpoint said so; a request that failed, or an answer this
 	// release does not understand, is an unknown card, and an unknown card
@@ -271,6 +299,7 @@
 
 	window.MajesticStorageVerdict = {
 		of: of, writable: writable, state: state, known: known,
+		headroom: headroom,
 		duration: duration,
 		onCard: onCard, prefixOf: prefixOf,
 	};
