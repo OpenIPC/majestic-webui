@@ -1,26 +1,24 @@
 /*
- * Where the plate reader comes from — and it comes from nowhere by default.
+ * Where the plate reader comes from.
  *
- * Unlike the raw editor next door, this one is NOT pinned to a CDN tag here.
- * The models it fetches are published under CC BY-NC 4.0: attribution, and
- * non-commercial use only. majestic is a commercial product, so a WebUI that
- * reached for those weights on every camera would be making that decision on
- * behalf of everyone running one, including the vendors who ship cameras for a
- * living.
+ * Same rule as the raw editor next door, the HEVC decoder in preview-wasm.js
+ * and CodeMirror in files.js: about nine megabytes of model and runtime is far
+ * too big to sit in a camera's flash, so it is fetched, version-pinned, with an
+ * error path. A camera with no route to it is offered the tab anyway and says
+ * so when asked to read — the same bargain the editor itself makes, and the
+ * reason `loadFailed` below is remembered. Nothing else on the raw page depends
+ * on it.
  *
- * So the operator opts in, once, on the camera:
+ * jsDelivr serves the tag straight from the repository, so there is no npm step
+ * between a release and this URL.
  *
- *     echo 'webui_lpr_base="https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/"' \
- *         >> /etc/webui/webui.conf
- *
- * raw.cgi turns that into `window.MJ_LPR_BASE` and this file uses it. With no
- * base there is no reader, `available` is false, and the page passes no plate
- * capability to the editor at all — so the Plates tab is never built, rather
- * than appearing and failing. A control that can never work is worse than none.
- *
- * `/etc` rather than a file in this tree because that is where a camera's own
+ * `webui_lpr_base` in /etc/webui/webui.conf points a camera somewhere else: a
+ * mirror of one's own, for a camera that must not reach a public CDN. `/etc`
+ * rather than a file in this tree because that is where a camera's own
  * decisions live: `sbin/updatewebui` replaces `/var/www`, and a choice made
- * here has to outlive that.
+ * here has to outlive that. raw.cgi turns the value into a <meta>, which is why
+ * it is read out of the document below. window.MJ_LPR_BASE wins over both, for
+ * a development build.
  *
  * Everything else follows raw-loader.js: a capability check that costs nothing,
  * a deadline, and a remembered failure so a camera with no route out pays the
@@ -44,6 +42,12 @@ window.MajesticLpr = (function () {
 	 * refusing costs one comparison.
 	 *
 	 * window.MJ_LPR_BASE still wins, for a development build.
+	 *
+	 * Three answers, not two. `undefined` is "nothing was configured", and the
+	 * pinned default below is used. `null` is "something was configured and
+	 * refused", and there is then no reader at all: a camera is pointed at a
+	 * mirror precisely when it must not reach a public CDN, so a typo in that
+	 * address must not quietly send it to one.
 	 */
 	function configuredBase() {
 		let v = window.MJ_LPR_BASE;
@@ -51,7 +55,7 @@ window.MajesticLpr = (function () {
 			const m = document.querySelector('meta[name="mj-lpr-base"]');
 			v = m && m.content;
 		}
-		if (!v) return null;
+		if (!v) return undefined;
 		if (!/^https?:\/\//i.test(v)) return null;
 		/* A missing trailing slash is the likeliest way to mistype this, and
 		 * 'dist' + 'lpr.js' resolves somewhere else entirely. Completed only
@@ -63,8 +67,11 @@ window.MajesticLpr = (function () {
 		return v.charAt(v.length - 1) === '/' ? v : v + '/';
 	}
 
-	// No fallback. An unset base is a decision, not a misconfiguration.
-	const BASE = configuredBase();
+	const DEFAULT_BASE = 'https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/';
+
+	// Unset means the pinned default; refused means no reader. See above.
+	const CONFIGURED = configuredBase();
+	const BASE = CONFIGURED === undefined ? DEFAULT_BASE : CONFIGURED;
 	const LOAD_TIMEOUT_MS = 8000;
 
 	let loadFailed = false;
@@ -79,7 +86,7 @@ window.MajesticLpr = (function () {
 		typeof Promise === 'function';
 
 	function load() {
-		if (!BASE) return Promise.reject(new Error('not-configured'));
+		if (!BASE) return Promise.reject(new Error('bad-base'));
 		if (!available) return Promise.reject(new Error('unsupported-browser'));
 		if (loadFailed) return Promise.reject(new Error('unavailable'));
 		if (loading) return loading;

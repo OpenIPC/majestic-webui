@@ -1,12 +1,12 @@
-// Where the plate reader comes from, and that it comes from nowhere unless
-// somebody said otherwise (www/a/lpr-loader.js).
+// Where the plate reader comes from (www/a/lpr-loader.js).
 //
-// The opt-in is the whole point of this file and it fails SILENTLY in the
-// expensive direction. The models are CC BY-NC 4.0 — attribution, and
-// non-commercial use only — and majestic is a commercial product. A default
-// base slipped in here would have every camera fetch them, which is a
-// licensing decision made on behalf of everyone running one, and nothing about
-// the page would look wrong afterwards: the tab would simply work.
+// A camera that was told nothing uses the pinned tag, the same as the raw
+// editor next door. The interesting half is what a camera that WAS told
+// something does: `webui_lpr_base` is set by an operator whose camera must not
+// reach a public CDN, so a base this file refuses must leave no reader at all
+// rather than falling back to the default. That failure would be silent and in
+// the expensive direction — the tab would simply work, off the public CDN the
+// mirror existed to avoid.
 //
 // The rest is raw-loader.test.js's ground: a camera with no route out must pay
 // the timeout once rather than once per press, and a browser that cannot run
@@ -53,20 +53,14 @@ function load(opts) {
 const CDN = 'https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/';
 
 (async () => {
-	group('nothing is fetched until a camera has been configured for it');
+	group('a camera that was told nothing uses the pinned tag');
 
-	let { m, state } = load({});                 // no MJ_LPR_BASE
-	check('no base means no reader', m.available === false);
-	check('and no base is invented', m.BASE === null, String(m.BASE));
+	let { m, state } = load({});                 // no MJ_LPR_BASE, no meta
+	check('the default is the pinned tag', m.BASE === CDN, String(m.BASE));
+	check('and a reader is on offer', m.available === true);
 	let err = '';
-	await m.load().catch((e) => { err = e.message; });
-	check('load says it is not configured, not that it failed',
-		err === 'not-configured', err);
-	check('and nothing was fetched', state.imports === 0);
-	err = '';
-	await m.open().catch((e) => { err = e.message; });
-	check('opening a session says the same', err === 'not-configured', err);
-	check('still nothing fetched', state.imports === 0);
+	await m.open();
+	check('which fetches the module once', state.imports === 1);
 
 	group('a configured camera uses exactly what it was given');
 
@@ -105,14 +99,23 @@ const CDN = 'https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/';
 
 	// The file is root-owned, so this is a typo guard rather than a hostile
 	// input — but a base that is not http(s) would import from somewhere the
-	// operator did not mean.
+	// operator did not mean. It leaves no reader rather than falling back to
+	// the pinned default: the mirror was named to keep this camera off a public
+	// CDN, and a typo must not undo that quietly.
 	for (const bad of ['javascript:alert(1)', 'data:text/javascript,0', 'file:///etc/', '/relative/']) {
 		({ m } = load({ meta: bad }));
 		check('a base that is not http(s) is no base at all: ' + bad.slice(0, 18),
 			m.BASE === null && m.available === false, String(m.BASE));
+		err = '';
+		await m.load().catch((e) => { err = e.message; });
+		check('and it says so rather than reporting a load failure',
+			err === 'bad-base', err);
 	}
+	// raw.cgi writes no <meta> for an empty setting, so empty is unset, and
+	// unset is the default.
 	({ m } = load({ meta: '' }));
-	check('and an empty meta is simply unset', m.BASE === null && m.available === false);
+	check('an empty meta is simply unset', m.BASE === CDN && m.available === true,
+		String(m.BASE));
 
 	group('a browser that cannot run it is not asked to fetch it');
 

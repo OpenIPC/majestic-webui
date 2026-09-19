@@ -3,14 +3,15 @@
 // `/etc/webui/webui.conf` is where a camera's own decisions about the web
 // interface live -- the ones that have to survive `updatewebui` replacing the
 // whole of /var/www. There are two keys in it today: the theme, which the
-// interface writes, and `webui_lpr_base`, which the owner adds by hand to opt
-// in to the plate reader.
+// interface writes, and `webui_lpr_base`, which the owner adds by hand to
+// point the plate reader at a mirror of their own.
 //
 // The theme was written with `echo ... > "$config_file"`, which truncates. So
-// picking a different theme deleted the opt-in, and the only symptom was a
-// Plates tab that had quietly stopped existing -- no error, nothing in a log,
-// and the file it came from is not one anybody thinks to look at after
-// changing a colour.
+// picking a different theme deleted that mirror, and the only symptom was a
+// camera quietly going back to the public CDN -- or, on one with no route to
+// it, a Plates tab that had stopped existing. No error, nothing in a log, and
+// the file it came from is not one anybody thinks to look at after changing a
+// colour.
 //
 // The write is shell and shell is what runs here: the function is taken out of
 // the CGI that ships and driven with a real `sh`, because asserting against a
@@ -55,7 +56,7 @@ const themeArm = 'POST_webui_theme="$1"\n' + arm
 	.replace(/redirect_back[^\n]*/g, ':')
 	.replace(/update_caminfo/g, ':');
 
-group('the opt-in survives a change of theme');
+group('the mirror survives a change of theme');
 
 let out = run('webui_theme="dark"\nwebui_lpr_base="https://example.invalid/lpr/"\n',
 	'set_webui_conf webui_theme light');

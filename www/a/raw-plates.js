@@ -21,10 +21,11 @@
  * nobody confirms undoes itself, and makes a best effort even if the tab goes
  * away mid-countdown.
  *
- * GRACEFUL ABSENCE. The reader is a separate, opt-in download (see
- * lpr-loader.js). `readerSupported` is false when nothing is configured, and
- * raw.js then passes no plate capability at all — so the editor builds no
- * Plates tab rather than one that cannot work.
+ * GRACEFUL ABSENCE. The reader is a separate, fetched download (see
+ * lpr-loader.js). `readerSupported` is false where it cannot be had — a browser
+ * without WebAssembly in a worker, or a camera pointed at a base that file
+ * refuses — and raw.js then passes no plate capability at all, so the editor
+ * builds no Plates tab rather than one that cannot work.
  */
 window.MajesticPlates = (function () {
 	'use strict';

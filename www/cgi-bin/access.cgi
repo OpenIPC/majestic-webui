@@ -7,9 +7,10 @@ config_file="/etc/webui/webui.conf"
 #
 # This was `echo "key=value" > "$config_file"`, which truncated it: changing
 # the theme deleted every other setting in there. That is not a cosmetic
-# loss -- `webui_lpr_base`, the camera owner's opt-in to the plate reader,
-# lives in this file, and its only symptom is a Plates tab that stops
-# existing with nothing said and nowhere obvious to look.
+# loss -- `webui_lpr_base`, which points a camera at its own mirror of the
+# plate reader, lives in this file, and its only symptom is a camera that
+# quietly goes back to fetching from the public CDN, or stops finding the
+# reader at all if it has no route to one.
 #
 # Written to a temporary file and moved into place so a camera that loses
 # power halfway through still has a whole file afterwards.

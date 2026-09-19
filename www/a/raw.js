@@ -220,12 +220,12 @@
 			calibrate: calibrate,
 			/* Plate reading, and only when there is somewhere to read from.
 			 *
-			 * The models are an opt-in download under a non-commercial licence
-			 * (see lpr-loader.js), so on a camera nobody has configured one for
-			 * there is no reader — and without a reader there is nothing to
-			 * detect, so nothing to meter or stack either. Passing the
-			 * capability anyway would grow a Plates tab that could only ever
-			 * apologise. The editor's own rule, the one the Capture button
+			 * The models are a fetched download (see lpr-loader.js), so a
+			 * browser that cannot run them, or a camera pointed at a base this
+			 * one refuses, has no reader — and without a reader there is
+			 * nothing to detect, so nothing to meter or stack either. Passing
+			 * the capability anyway would grow a Plates tab that could only
+			 * ever apologise. The editor's own rule, the one the Capture button
 			 * follows: a control that can never work is worse than none.
 			 *
 			 * An older editor ignores this key, which is why raw-loader.js is
