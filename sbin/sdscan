@@ -130,6 +130,7 @@ files_done=0
 chunks=0
 badchunks=0
 done_chunks=0
+vanished=0
 median=0
 b1=0; b2=0; b3=0; b4=0
 findings=""
@@ -153,6 +154,7 @@ save() {
 			"$bytes" "$total" "$nfiles" "$files_done"
 		printf '"chunks":%s,"badChunks":%s,"medianMs":%s,"chunkBytes":%s,' \
 			"$chunks" "$badchunks" "$((median * 10))" "$CHUNK"
+		printf '"vanished":%s,' "$vanished"
 		printf '"buckets":[%s,%s,%s,%s],"direct":%s,' "$b1" "$b2" "$b3" "$b4" "${direct:-false}"
 		printf '"findings":[%s],"moreFindings":%s,' "$findings" "$more_findings"
 		printf '"startedAt":%s,"updatedAt":%s,"stoppedBy":"%s"}' \
@@ -236,8 +238,10 @@ read_chunk() {
 }
 
 # ------------------------------------------------------------- the passes ----
+# Walk one source. $4 is set when it is a FILE rather than the raw device,
+# which decides whether a failed read is allowed to blame the card.
 scan_one() {
-	so_src=$1; so_size=$2; so_label=$3
+	so_src=$1; so_size=$2; so_label=$3; so_file=$4
 	so_off=0
 	while [ "$so_off" -lt "$so_size" ]; do
 		[ -f "$STOP" ] && finish stopped user
@@ -246,7 +250,12 @@ scan_one() {
 		[ $((so_off + CHUNK)) -gt "$so_size" ] && so_want=$((so_size - so_off))
 
 		read_chunk "$so_src" "$so_off" "$so_want"
-		case $? in
+		so_rc=$?
+		# 2 is the card having stopped answering inside one chunk, 1 is a chunk
+		# that came back short. Stashed before the case, because `$?` is the
+		# status of whatever the branch last ran.
+		[ "$so_rc" = 2 ] && so_why=timeout || so_why=short
+		case "$so_rc" in
 		0)
 			chunks=$((chunks + 1))
 			if [ -n "$median" ] && [ "$median" -gt 0 ]; then
@@ -257,13 +266,26 @@ scan_one() {
 				[ "$ncal" -ge "$CALIB" ] && settle_median
 			fi
 			;;
-		1)
+		1|2)
+			# Was the clip still there? majestic deletes the oldest recording
+			# whenever the card reaches records.maxUsage, and on a card that is
+			# already 91% full that happens WHILE this is running -- every few
+			# minutes, to the very files at the front of the list this walks
+			# oldest-first. A read of a file that has just been unlinked fails
+			# exactly like a read of a bad block, so without this the scan
+			# would report unreadable footage on a perfectly healthy card, and
+			# report more of it the fuller the card was.
+			#
+			# Only asked for files. The raw device does not go away, and `-f`
+			# is false for a block device, so the test has to know which it is
+			# looking at rather than being applied to both.
+			if [ -n "$so_file" ] && [ ! -f "$so_src" ]; then
+				vanished=$((vanished + 1))
+				save
+				return
+			fi
 			badchunks=$((badchunks + 1))
-			add_finding "$so_label" "$so_off" "$so_want" short
-			;;
-		2)
-			badchunks=$((badchunks + 1))
-			add_finding "$so_label" "$so_off" "$so_want" timeout
+			add_finding "$so_label" "$so_off" "$so_want" "$so_why"
 			;;
 		3)
 			# No clock, no measurement. Everything after this would be a figure
@@ -347,7 +369,7 @@ while IFS= read -r f; do
 	[ -f "$f" ] || continue
 	sz=$(stat -c %s "$f" 2>/dev/null)
 	case "$sz" in ''|*[!0-9]*) sz=0;; esac
-	[ "$sz" -gt 0 ] && scan_one "$f" "$sz" "${f#$MP/}"
+	[ "$sz" -gt 0 ] && scan_one "$f" "$sz" "${f#$MP/}" file
 	files_done=$((files_done + 1))
 	save
 done < "$LIST"
@@ -355,7 +377,7 @@ done < "$LIST"
 phase=2
 phase_name=device
 save
-[ "$span" -gt 0 ] && scan_one "$DEV" "$span" "$(basename "$DEV")"
+[ "$span" -gt 0 ] && scan_one "$DEV" "$span" "$(basename "$DEV")" ""
 
 # The median may never have settled on a run short enough to end inside the
 # calibration window. Settling it here is what keeps a two-chunk scan from
