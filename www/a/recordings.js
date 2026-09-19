@@ -1202,7 +1202,11 @@
 		// oldest for the newest now". That is the state a full camera sits in
 		// for the rest of its life, so it is the sentence most people will see.
 		const rate = (day > 0 && bytes > 0) ? bytes / day : 0;
-		const left = (d.health !== 'ok' || !rate) ? ''
+		// head.known is the gate, and it is not optional. A card response that
+		// arrived without its usage, or a configuration fetch that failed and
+		// resolved to {}, both reach here looking like ordinary numbers — and
+		// both would produce a confident duration out of a reading nobody took.
+		const left = (d.health !== 'ok' || !rate || !head.known) ? ''
 			: (capped && room <= 0)
 				? ' · the oldest clips are being deleted to make room for new ones'
 				: ' · about ' + TL.duration(room / rate) + ' of footage left' +

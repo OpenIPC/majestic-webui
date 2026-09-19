@@ -114,14 +114,52 @@
 	//
 	// Here rather than on the page for the reason everything else in this file
 	// is: two places ask this question, and two sums are how they come to
-	// answer it differently. `capped` is the caller's cue that there is a
-	// threshold at all — without one the card really does fill up, and the free
-	// space is the right number.
+	// answer it differently.
+	//
+	// THREE answers, not two, and the third is the one this whole function is
+	// about. `known` false means a reading did not arrive — the card's own
+	// figures, or the threshold — and nothing may be said about how much
+	// footage is left, because the alternative is the very error being fixed
+	// here wearing different clothes:
+	//
+	//   - coercing an absent `used` to zero computes the headroom of an EMPTY
+	//     card, so a partial answer from the endpoint reads as a card with
+	//     everything still to give;
+	//   - treating an absent threshold as "no threshold" is worse, because the
+	//     page's configuration fetch resolves to {} when it FAILS. A request
+	//     that did not happen would then be evidence that the camera fills its
+	//     card to the brim, and the estimate would go back to counting free
+	//     space — which is exactly what this function exists to stop.
+	//
+	// `capped` stays the caller's cue that a threshold applies, and is only
+	// ever meaningful when `known`.
+	// A number, or NaN for anything that is not one.
+	//
+	// Written out rather than done with `+x`, because unary plus turns null,
+	// '' and false into 0 — all of which are ways a reading fails to arrive,
+	// and every one of them would pass an isFinite() check as a perfectly good
+	// zero. A usage of null read that way computes the headroom of an EMPTY
+	// card, which is the largest wrong answer this function can give.
+	function fin(x) {
+		if (typeof x === 'number') return isFinite(x) ? x : NaN;
+		if (typeof x === 'string' && x.trim() !== '') {
+			const n = +x;
+			return isFinite(n) ? n : NaN;
+		}
+		return NaN;
+	}
+
 	function headroom(total, used, cap) {
-		const t = +total || 0, u = +used || 0, c = +cap;
+		const t = fin(total), u = fin(used), c = fin(cap);
+		if (!isFinite(t) || !isFinite(u) || t <= 0 || u < 0) {
+			return { room: 0, capped: false, known: false };
+		}
 		const free = Math.max(0, t - u);
-		if (!(c > 0) || c >= 100) return { room: free, capped: false };
-		return { room: Math.max(0, t * c / 100 - u), capped: true };
+		// A successful read always carries this key, because majestic answers
+		// with its defaults filled in. Absent means the answer never came.
+		if (!isFinite(c)) return { room: free, capped: false, known: false };
+		if (c <= 0 || c >= 100) return { room: free, capped: false, known: true };
+		return { room: Math.max(0, t * c / 100 - u), capped: true, known: true };
 	}
 
 	// Positive claims need positive evidence. A card is only known writable
