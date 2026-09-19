@@ -11,6 +11,10 @@
 	let tempAbsent = false;
 	let cfgFps0 = null;
 	let encSetMbit = null;
+	// What video0 was asked for, as rc-check.js wants it. The camera
+	// reaches the verdict; this is only the numbers its sentences quote
+	// back, and null until the config arrives.
+	let encCfg = null;
 	let mdEnabled = false;
 	let ispEls = null;    // metric name → value <span>, built on the first good sample
 	const ispSparks = {}; // metric name → sparkline in the same row
@@ -674,6 +678,22 @@
 			: '';
 	}
 
+	// The encoder's own verdict on whether it is meeting its rate, in a line.
+	//
+	// The judgement is the camera's -- venc0_rc_state is reached over a thirty
+	// second window with its own hysteresis, and it is what the camera log
+	// says. Deriving a second opinion here from the byte counter would smooth
+	// an already-smoothed number and disagree with the log the moment the two
+	// drifted. Empty string on the negative branch rather than an early
+	// return, so a verdict that has been withdrawn clears the line.
+	function setEncNote(s) {
+		const note = $('#st-enc-note');
+		if (!note) return;
+		note.textContent = (s && window.MajesticRcCheck)
+			? window.MajesticRcCheck.note(s, encCfg, 0)
+			: '';
+	}
+
 	function onSample(s) {
 		if (!s.ok) {
 			// Tracking consumes EVERY sample, failures included, and is not
@@ -693,6 +713,7 @@
 			// sample's warnings as current next to "not responding".
 			if (s.fails >= 2) {
 				setLumaNote(null);
+				setEncNote(null);
 				renderNoVideo(s);
 				// Not cleared, narrowed: an unset irCutPin1 is still unset
 				// while the camera is unreachable, but a day/night
@@ -821,6 +842,7 @@
 		// left beside a banner saying the camera is not responding, which is
 		// the last good sample presented as current.
 		setLumaNote(v);
+		setEncNote(s);
 
 		if (s.prev && s.dt > 0) {
 			// A negative delta is a counter reset or an interface bounce, not
@@ -916,10 +938,21 @@
 			// Encoder tile + chart learn the configured target.
 			if (main && br) {
 				encSetMbit = br / 1000;
+				encCfg = { bitrate: br, fps: cfgFps0 };
 				$('#st-enc-sub').textContent = 'of ' + encSetMbit.toFixed(1) + ' set · ' + codec;
 				if (chEnc) {
 					chEnc.cfg.hi = Math.max(MC.niceCeil(encSetMbit * 1.15), 2);
 					chEnc.cfg.ref = { v: encSetMbit, label: 'set ' + encSetMbit.toFixed(1) };
+					// Everything above the set rate, shaded, so a sustained
+					// overshoot reads as history rather than as a number that
+					// happens to be large right now. A band and not a second
+					// `ref`: cfg.ref is singular and sits outside the
+					// auto-scale pass, so a second level above the data would
+					// silently vanish, while bands are scaled with the series
+					// and `to: null` is the supported "and everything above".
+					chEnc.cfg.bands = [
+						{ from: encSetMbit, to: null, color: 'rgba(255,193,7,.10)' },
+					];
 				}
 			}
 			// The chip names the stream the play button opens — the picture
