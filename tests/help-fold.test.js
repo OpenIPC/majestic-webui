@@ -88,6 +88,20 @@ check('a hand-opened fold stays open under a hit', HELP.foldState(true, true) ==
 check('a hand-opened fold survives the query ceasing to match',
 	HELP.foldState(true, false) === true);
 
+// A daemon may ship both texts long, and then the row has two things to open.
+// One press means both: two marks for one intent would be a reader choosing
+// which half of an explanation they wanted.
+group('a row can have a long hint AND a help, and one mark opens both');
+check('help still decides which world the row is in',
+	HELP.foldOf({ hint: 'x'.repeat(400), help: 'and a long one' }, true) === 'help');
+check('the hint is still measured in that world',
+	HELP.overflows(lines(9), LH, 4) === true);
+// The regression this guards: an earlier cut skipped the measurement whenever
+// a help was present, so a 10-line hint sat open above a mark that claimed to
+// be hiding something.
+check('a short hint beside a help is not clamped',
+	HELP.overflows(lines(2), LH, 4) === false);
+
 group('the search follows the words wherever they went');
 const F = { dot: 'records.encryption', title: 'Encrypt recordings',
 	hint: 'What protects a finished clip.', help: 'chip binds every clip to this SoC.' };

@@ -730,17 +730,30 @@
 	// is decided by MEASURING the box rather than by counting characters, and
 	// why a box that cannot be measured is left alone rather than guessed at.
 
+	// The long text this row folds away, if it has one.
+	function foldBody(hint) {
+		const p = hint.parentNode;
+		return p ? p.querySelector(':scope > .mj-help-body') : null;
+	}
+
 	// Open or shut one fold, and say which in the mark's own name.
+	//
+	// A row can have both things to open -- a hint past the cut and a help
+	// underneath -- and one press means both. Two marks for one intent would
+	// be a reader deciding which half of an explanation they wanted.
 	function setFold(hint, open) {
 		const more = hint.querySelector(':scope > .mj-help');
 		if (!more) return;
-		const body = more.getAttribute('aria-controls')
-			? document.getElementById(more.getAttribute('aria-controls')) : null;
-		if (body && body.classList.contains('mj-help-body')) body.hidden = !open;
+		const body = foldBody(hint);
+		if (body) {
+			if (open) body.removeAttribute('hidden');
+			else body.setAttribute('hidden', 'until-found');
+		}
 		const txt = hint.querySelector(':scope > .mj-hint-txt');
 		// Only a hint that was measured to overflow carries the clamp, so this
 		// never cuts one that fits.
-		if (txt && hint.dataset.mjClamped === '1') txt.classList.toggle('mj-clamp', !open);
+		if (txt) txt.classList.toggle('mj-clamp',
+			!open && hint.dataset.mjClamped === '1');
 		more.setAttribute('aria-expanded', open ? 'true' : 'false');
 		const name = open ? more.dataset.nameOpen : more.dataset.nameShut;
 		if (name) {
@@ -757,14 +770,14 @@
 		document.querySelectorAll('#mj-settings-form .mj-hint-fold').forEach(hint => {
 			const more = hint.querySelector(':scope > .mj-help');
 			if (!more || more.hidden) return;
-			const id = more.getAttribute('aria-controls');
-			const region = id ? document.getElementById(id) : null;
-			// A match anywhere in the region opens it, including one on the
+			// A match in EITHER region opens the row, including one on the
 			// first line of a clamped hint that was never hidden. Deliberate
 			// over-reaction: "a search shows you the whole of what matched" is
 			// one rule, and telling a visible mark from a cut-off one needs a
 			// wrap position that cannot be computed.
-			const hit = !!(region && region.querySelector('mark'));
+			const body = foldBody(hint);
+			const hit = !!((body && body.querySelector('mark')) ||
+				(hint.dataset.mjClamped === '1' && hint.querySelector('mark')));
 			setFold(hint, HELP ? HELP.foldState(hint.dataset.mjOpen === '1', hit)
 				: (hint.dataset.mjOpen === '1' || hit));
 		});
@@ -791,16 +804,13 @@
 			const more = hint.querySelector(':scope > .mj-help');
 			const txt = hint.querySelector(':scope > .mj-hint-txt');
 			if (!more || !txt) return;
-			// A row with authored help already has its mark and never clamps:
-			// its hint is short by construction and the long text is the thing
-			// behind the fold.
-			const body = more.getAttribute('aria-controls')
-				? document.getElementById(more.getAttribute('aria-controls')) : null;
-			if (body && body.classList.contains('mj-help-body')) return;
-			// Measure it whole. A fold the reader opened is already whole.
+			// Measured whether or not the row has authored help. A hint is not
+			// guaranteed short just because a help exists beside it -- a
+			// daemon can ship both long -- and a row that cut one and not the
+			// other would answer half of what its mark promises.
 			txt.classList.remove('mj-clamp');
 			const cs = getComputedStyle(txt);
-			rows.push({ hint, more, txt,
+			rows.push({ hint, more, txt, hasHelp: !!foldBody(hint),
 				h: txt.getBoundingClientRect().height,
 				lh: parseFloat(cs.lineHeight) });
 		});
@@ -810,17 +820,36 @@
 				// Not "it fits" — a display:none row measures zero and a
 				// stylesheet that has not arrived measures nothing either.
 				// Leave the row exactly as it renders and ask again when
-				// something reveals it.
+				// something reveals it. A help row keeps its mark: the long
+				// text is there to open whether or not the hint could be read.
 				delete r.hint.dataset.mjClamped;
-				r.more.hidden = true;
+				r.more.hidden = !r.hasHelp;
 				return;
 			}
 			r.hint.dataset.mjClamped = over ? '1' : '0';
-			r.more.hidden = !over;
-			if (over) setFold(r.hint, r.hint.dataset.mjOpen === '1');
+			r.more.hidden = !(over || r.hasHelp);
+			if (!r.more.hidden) setFold(r.hint, r.hint.dataset.mjOpen === '1');
 		});
 		revealFolds();
 	}
+
+	// The browser's own find-in-page reached inside a folded body and is about
+	// to reveal it. Record that as the reader having opened it, or the next
+	// keystroke in the page's own search box would shut it again over the hit
+	// they were just taken to -- and the mark beside it would still read
+	// "more" while the text was on screen.
+	//
+	// Delegated on `document` because beforematch does not bubble past its own
+	// tree in every build, and captured for the same reason.
+	document.addEventListener('beforematch', (e) => {
+		const body = e.target && e.target.closest
+			? e.target.closest('.mj-help-body') : null;
+		if (!body || !body.parentNode) return;
+		const hint = body.parentNode.querySelector(':scope > .mj-hint-fold');
+		if (!hint) return;
+		hint.dataset.mjOpen = '1';
+		setFold(hint, true);
+	}, true);
 
 	// One handler for the whole form rather than one per row: the rows are
 	// rebuilt on every section change, and a delegated listener outlives them.
@@ -10292,7 +10321,12 @@
 				if (helpText) {
 					body = el('div', 'mj-help-body');
 					body.id = 'mjh-' + dot.replace(/\./g, '-');
-					body.hidden = true;
+					// `until-found` rather than a bare `hidden`, so the
+					// BROWSER's own find-in-page can reach the text and open
+					// the fold on its own. Set as an attribute because in a
+					// browser that has never heard of it any value still means
+					// hidden, which is exactly the old behaviour.
+					body.setAttribute('hidden', 'until-found');
 					const long = el('span');
 					long.dataset.hl = helpText;
 					long.appendChild(hi(helpText));
@@ -10304,13 +10338,16 @@
 					more.type = 'button';   // a bare button in this form saves the camera
 					more.textContent = '?';
 					more.setAttribute('aria-expanded', 'false');
+					// A help row's mark is always there; a clamp row's waits
+					// for a measurement to say the hint is actually cut.
 					more.hidden = !helpText;
-					if (body) {
-						more.setAttribute('aria-controls', body.id);
-					} else {
-						txt.id = 'mjh-' + dot.replace(/\./g, '-');
-						more.setAttribute('aria-controls', txt.id);
-					}
+					// The mark owns whatever it can open. On a row with BOTH a
+					// long hint and a help it owns the two together, because a
+					// reader pressing "more" means both and a second control
+					// beside the first would be two marks for one intent.
+					txt.id = 'mjh-' + dot.replace(/\./g, '-') + '-h';
+					more.setAttribute('aria-controls',
+						body ? body.id + ' ' + txt.id : txt.id);
 					// The two worlds do not promise the same thing and must not
 					// say they do. `hidden` takes the long text out of the
 					// accessibility tree, so the mark genuinely reveals it; a

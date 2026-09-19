@@ -358,6 +358,28 @@ button.mj-help[aria-expanded="true"] {
    Its own class and NOT `hint`: that class sets `display: block`, and only the
    `!important` in Bootstrap's reboot keeps `[hidden]` winning over it. Do not
    tidy the two together later. */
+/* Hidden, and findable anyway.
+ *
+ * `hidden="until-found"` keeps the text out of the picture while leaving it
+ * reachable by the browser's OWN find-in-page, which then fires beforematch
+ * and opens the fold on the reader's behalf. It is the one kind of search this
+ * page cannot implement for itself, and the text most worth searching is
+ * exactly the text folded away.
+ *
+ * The !important is a fight with Bootstrap's reboot and has to be. Its
+ * `[hidden]{display:none!important}` matches `hidden="until-found"` as
+ * readily as a bare one -- any value of the attribute means hidden -- and
+ * display:none takes the content out of the find index, so the feature is
+ * silently off. `content-visibility: hidden` is what hides it INSTEAD, and is
+ * what the attribute is defined in terms of.
+ *
+ * A browser that has never heard of until-found simply keeps it hidden, which
+ * is the behaviour without this rule and is not a fault. */
+.mj-help-body[hidden="until-found"] {
+	display: block !important;
+	content-visibility: hidden;
+}
+
 .mj-help-body {
 	max-width: 66ch;
 	margin-top: 0.4rem;

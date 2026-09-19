@@ -174,6 +174,23 @@ One IIFE, vanilla JS, no dependencies beyond `fetch` and the boot JSON tag.
 
     The mark means one thing in both worlds — *there is more text here* — and the second world is the one that matters today, since no camera emits `help` yet: where there is none and the hint itself runs past four lines, the mark **un-cuts the hint**. Four lines rather than three because a hint line holds 43 characters at 390px, 48 at 1280px and 63 at 2560px, so three would cut at 129 on a laptop and put a mark on 77 of 199 rows — furniture rather than a signal. The cut is decided by MEASURING the box before it is clamped, never by counting characters, which is what lets the mark be absent from a row that fits on a wide monitor and present on the same row on a phone. A height of **zero is not "it fits"** — a `display: none` row measures nothing — so `overflows()` has three answers and an unmeasurable row is left exactly as it renders (`foldHints` re-asks from the `recount` closure when a `visibleWhen` controller reveals one).
 
+    **The long text is hidden, and findable anyway.** The body carries
+    `hidden="until-found"`, so the BROWSER's own find-in-page reaches into it and
+    fires `beforematch`, which the page records as the reader having opened the
+    fold — otherwise the next keystroke in the page's own search box would shut
+    it again over the hit they had just been taken to. It needs one `!important`
+    to work at all: reboot's `[hidden]{display:none!important}` matches
+    `until-found` as readily as a bare `hidden` (any value of the attribute means
+    hidden), and `display: none` takes the text out of the find index, so the
+    feature would be silently off. `content-visibility: hidden` hides it instead.
+    A browser that has never heard of `until-found` simply keeps it hidden.
+
+    **A row can have both things to open, and one mark opens both.** A daemon may
+    ship a long hint and a long help on the same field, so the hint is measured
+    whether or not a help exists beside it, and the mark's `aria-controls` names
+    the two regions together. Two marks for one intent would be a reader choosing
+    which half of an explanation they wanted.
+
     Two things constrain the markup and will silently break if they are undone. Every `[data-hl]` node must be a **text-only leaf**, because `highlightPanel()` empties and refills each one on every keystroke — so the `?` is a SIBLING of the hint's leaf, never inside it. And `foldHints()` must run after `layoutCols()` (which decides a column's width through `.mj-solo`) and after `highlightPanel()` (because `<mark>` carries padding and an active query can change a line count), while never CALLING `layoutCols()` itself: re-dealing the columns moves the control under the reader's cursor, which is the whole of #189. An open fold therefore pushes only the rows below it in its own column, and the columns stay unbalanced until the next resize — the same trade `visibleWhen` already makes. Search follows the words wherever they went: `matchCount` reads all three tiers through `mj-help.js`, and a hit inside folded text opens the fold (tagged, so clearing the query closes only what the search opened and a hand-opened fold survives every keystroke).
 
     Each row is wrapped in `<p class="<type> mj-row">` exactly like the old `field_*` helpers emitted. The control and a bare `↺` reset button (`.mj-reset`) then share one flex line, `<span class="mj-ctl"><span class="mj-ctl-in">…control…</span><button class="mj-reset">↺</button></span>` — which is why the width caps live on `.mj-ctl-in` rather than on the control itself, or the glyph would strand at the card edge. The reset button is disabled when the schema has no `default` for that key. Live-panel rows are **not** wrapped: `.mj-live-row.range > .input-group` is a direct-child selector.
