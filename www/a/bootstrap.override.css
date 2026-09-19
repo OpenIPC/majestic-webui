@@ -3173,11 +3173,29 @@ button.mj-osd-chip,
    one of them has something to do. It is the form's last child, so appearing
    and disappearing costs nothing above it — measured: the section card's top
    is identical with the bar shown and hidden. */
-/* The picture makes room for it: see --mj-pv-toolbar. renderToolbar() sets the
-   class on the form, because the bar is the only thing that knows when it is
-   there and the stage is the only thing that has to care. */
-.mj-has-toolbar .mj-pv-stage {
-	--mj-pv-toolbar: 4.95rem;
+/* The room the bar needs comes out of the PAGE, never out of a picture.
+   renderToolbar() sets this class on the form, because the bar is the only
+   thing that knows when it is there.
+
+   The bar is sticky, so it sits ON whatever is at the bottom of the window and
+   can cover a control -- a press then does nothing, with nothing to say why.
+   Only the LAST row on the page is really at risk: every other one can be
+   scrolled clear, and the last one has nothing below it to scroll into view.
+   Padding is what that case wants. It gives the last row somewhere to go, so
+   nothing is ever unreachable, and it asks nothing of the picture.
+
+   Taking it from the picture instead is what a stage sized from the viewport
+   height invites, and it is wrong wherever the picture is the instrument being
+   judged: on the Live adjustments leaf the video shrank 976x549 -> 887x499 on
+   a 1512x860 window the moment a knob moved, and grew back on Save. A picture
+   that moves under the hand costs trust in everything placed on it, which is
+   the same fault the mask editor was reported for in #340.
+
+   The Overlay leaf reserves its room permanently on .mj-osd-stage instead, and
+   is deliberately left that way: it holds still by never giving the room up,
+   and its own comment there says what it pays for that. */
+.mj-has-toolbar {
+	padding-bottom: 4.95rem;
 }
 
 .mj-toolbar {
