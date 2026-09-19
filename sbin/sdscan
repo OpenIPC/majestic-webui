@@ -1,0 +1,365 @@
+#!/bin/sh
+# Read back everything the SD card holds, and report what could not be read.
+#
+# This is NOT a surface map, and the difference is the whole design. An SD card
+# keeps a translation layer between the addresses a host uses and the flash
+# underneath: the mapping is rewritten on every write, wear levelling moves data
+# about, and retired blocks are swapped out of a spare pool invisibly. A camera
+# is the worst case for that, because it rewrites its card in a ring -- majestic
+# deletes the oldest clip at records.maxUsage -- so every address lands on
+# different silicon each time round. A picture of "the surface" plotted by
+# address would therefore be a picture of a mapping that no longer exists, and
+# on the card measured here the card's own allocation unit was 4 MB, four times
+# the block such a picture would colour.
+#
+# What IS a fact about the flash is whether the bytes come back. So:
+#
+#   phase 1  every file on the card, read in chunks and verified. These are the
+#            addresses that are actually mapped, they name themselves, and a
+#            finding here is "this clip cannot be read" rather than "something
+#            is wrong at sector 9666560".
+#   phase 2  the whole device, for the parts no file occupies. It necessarily
+#            re-covers phase 1's bytes, because working out which addresses the
+#            files sit on means parsing the filesystem by hand -- busybox has no
+#            filefrag -- and the page says so rather than implying otherwise.
+#
+# Latency is reported RELATIVE TO THIS CARD'S OWN MEDIAN, never against fixed
+# millisecond thresholds. The only clock here is /proc/uptime at 10 ms (busybox
+# date has no %N), and at the 1 MiB block a fixed-threshold tool would use, a
+# healthy card's chunks come back as 30/40/50/60 ms -- four values, four ticks,
+# which colour in and out of a "< 50 ms" bucket on nothing but quantisation. At
+# 16 MiB a chunk is ~400 ms, so the tick is 2.5% of it and a slow chunk is a
+# slow chunk.
+#
+# Usage: sdscan <mountpoint> <device>
+# Writes its progress to $SCAN_DIR/state.json and nothing to stdout.
+
+MP=$1
+DEV=$2
+[ -n "$MP" ] && [ -n "$DEV" ] || exit 2
+
+SCAN_DIR=/tmp/webui/sdscan
+STATE=$SCAN_DIR/state.json
+STOP=$SCAN_DIR/stop
+LOCK=/tmp/webui/sdscan.lock
+
+# 16 MiB, as sixteen 1 MiB blocks rather than one 16 MiB block, because dd
+# reports what it delivered in blocks: with bs=16M a partial read is "0+1
+# records", which could be one byte or sixteen megabytes minus one. With
+# bs=1M it is "11+1", which can be checked against what was asked for.
+BS=1048576
+BLOCKS=16
+CHUNK=$((BS * BLOCKS))
+
+# A wedged card must not hold a chunk open for ever. Sixteen megabytes at the
+# slowest rate worth waiting for is well inside this.
+CHUNK_SECS=30
+
+# The throttle. A chunk is ~400 ms on the card this was measured on, so a tenth
+# of a second gives back about a fifth of the bus -- and the reads below are
+# O_DIRECT, which is the half that matters: a cached 512 MiB read was measured
+# pushing 460 MB of majestic's working set out of the page cache, and a direct
+# one pushes out none. `pause` is defined once at startup; see below.
+pause() { :; }
+
+# How many chunks to time before deciding what this card's normal looks like.
+CALIB=64
+
+# Findings are carried in a document the SD-card page polls every five seconds,
+# on a camera with a few megabytes of RAM. The first twenty say everything the
+# twenty-first would.
+MAX_FINDINGS=20
+
+# ---------------------------------------------------------------- the lock ---
+#
+# Pid-based, not age-based, and copied from sbin/motion-notify.sh because the
+# reasoning there is exactly this case: a run legitimately lasts many minutes --
+# hours on a large card -- and any age short enough to recover from a kill -9 is
+# also short enough to expire under a scan that is still going. A pid that is
+# gone is proof; the age is only the backstop for a pid the kernel has recycled.
+take_lock() {
+	mkdir -p /tmp/webui 2>/dev/null
+	if mkdir "$LOCK" 2>/dev/null; then
+		echo $$ > "$LOCK/pid"
+		return 0
+	fi
+	_held=$(cat "$LOCK/pid" 2>/dev/null)
+	if [ -n "$_held" ] && kill -0 "$_held" 2>/dev/null; then
+		return 1
+	fi
+	if [ -z "$_held" ] &&
+		[ -z "$(find "$LOCK" -maxdepth 0 -mmin +360 2>/dev/null)" ]; then
+		return 1
+	fi
+	rm -rf "$LOCK"
+	mkdir "$LOCK" 2>/dev/null || return 1
+	echo $$ > "$LOCK/pid"
+	return 0
+}
+
+# Only ever our own: a run whose lock was taken from it must not take its
+# successor's away on the way out.
+drop_lock() {
+	[ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$LOCK"
+}
+
+# --------------------------------------------------------------- the clock ---
+#
+# Centiseconds from /proc/uptime. busybox date here has no %N and the `time`
+# keyword writes a format that has to be parsed back out of a file; this is two
+# decimals of a clock nothing can step. The same derivation j/sdcard.cgi makes,
+# and a figure with no clock behind it is one this script invented -- so a
+# reading that cannot be parsed ends the chunk rather than being guessed at.
+now_cs() {
+	set -- $(cat /proc/uptime 2>/dev/null)
+	case "$1" in *.*) printf '%s%s' "${1%.*}" "${1#*.}";; *) return 1;; esac
+}
+
+json_str() {
+	printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# ------------------------------------------------------------------ state ----
+state=running
+phase=1
+phase_name=files
+bytes=0
+total=0
+nfiles=0
+files_done=0
+chunks=0
+badchunks=0
+done_chunks=0
+median=0
+b1=0; b2=0; b3=0; b4=0
+findings=""
+nfind=0
+more_findings=0
+stopped_by=""
+direct=""
+started=$(date +%s 2>/dev/null || echo 0)
+cal=""
+ncal=0
+
+# Written to a private name and renamed into place. The page polls this file
+# every five seconds: `> "$STATE"` truncates first and fills after, so a reader
+# arriving between the two gets a half-written answer carrying a fresh mtime.
+# rename is atomic, so a reader sees either the old answer or the new one.
+save() {
+	mkdir -p "$SCAN_DIR" 2>/dev/null
+	{
+		printf '{"state":"%s","phase":%s,"phaseName":"%s",' "$state" "$phase" "$phase_name"
+		printf '"bytes":%s,"total":%s,"files":%s,"filesDone":%s,' \
+			"$bytes" "$total" "$nfiles" "$files_done"
+		printf '"chunks":%s,"badChunks":%s,"medianMs":%s,"chunkBytes":%s,' \
+			"$chunks" "$badchunks" "$((median * 10))" "$CHUNK"
+		printf '"buckets":[%s,%s,%s,%s],"direct":%s,' "$b1" "$b2" "$b3" "$b4" "${direct:-false}"
+		printf '"findings":[%s],"moreFindings":%s,' "$findings" "$more_findings"
+		printf '"startedAt":%s,"updatedAt":%s,"stoppedBy":"%s"}' \
+			"$started" "$(date +%s 2>/dev/null || echo 0)" "$stopped_by"
+	} > "$STATE.$$" 2>/dev/null &&
+		{ mv -f "$STATE.$$" "$STATE" 2>/dev/null || rm -f "$STATE.$$" 2>/dev/null; } ||
+		rm -f "$STATE.$$" 2>/dev/null
+}
+
+finish() {
+	state=$1
+	stopped_by=$2
+	save
+	drop_lock
+	exit 0
+}
+
+add_finding() {
+	if [ "$nfind" -ge "$MAX_FINDINGS" ]; then
+		more_findings=$((more_findings + 1))
+		return
+	fi
+	findings="$findings${findings:+,}$(printf '{"where":"%s","offset":%s,"len":%s,"why":"%s"}' \
+		"$(json_str "$1")" "$2" "$3" "$4")"
+	nfind=$((nfind + 1))
+}
+
+# Classify one chunk's duration against what this card's normal turned out to
+# be. Held back until the median is known, then applied to the calibration
+# chunks too, so no chunk is counted against a threshold that did not exist yet.
+bucket() {
+	bu=$1
+	if [ "$bu" -le $((median * 2)) ]; then b1=$((b1 + 1))
+	elif [ "$bu" -le $((median * 5)) ]; then b2=$((b2 + 1))
+	elif [ "$bu" -le $((median * 10)) ]; then b3=$((b3 + 1))
+	else b4=$((b4 + 1))
+	fi
+}
+
+settle_median() {
+	median=$(printf '%s\n' $cal | sort -n | awk '{v[NR]=$1} END{if(NR)print v[int((NR+1)/2)]}')
+	case "$median" in ''|*[!0-9]*) median=0;; esac
+	# A median of zero would put every chunk in the top bucket through a
+	# division that means nothing. One tick is the smallest duration this clock
+	# can express, so it is the smallest honest floor.
+	[ "$median" -lt 1 ] && median=1
+	for bk in $cal; do bucket "$bk"; done
+	cal=""
+}
+
+# ------------------------------------------------------------- one chunk -----
+#
+# Reads $CHUNK bytes at $2 from $1 and judges the result on the BYTE COUNT dd
+# delivered, never on its exit status. Measured on an hi3516av300: a read that
+# ran off the end of the device returned "0+0 records out" and exited 0, and a
+# short read in the middle of a file returns "2+1 records out" and exits 0 as
+# well. A scan that trusted $? would call both of those a clean read.
+#
+# Returns 0 read in full, 1 short, 2 timed out, 3 the clock could not be read.
+read_chunk() {
+	rc_src=$1; rc_off=$2; rc_want=$3
+	rc_full=$((rc_want / BS))
+	rc_part=0
+	[ $((rc_want % BS)) -gt 0 ] && rc_part=1
+	rc_expect="$rc_full+$rc_part records out"
+
+	rc_t0=$(now_cs) || return 3
+	rc_out=$(timeout "$CHUNK_SECS" dd if="$rc_src" bs="$BS" count="$BLOCKS" \
+		skip=$((rc_off / BS)) $direct_flag of=/dev/null 2>&1)
+	rc_st=$?
+	rc_t1=$(now_cs) || return 3
+	chunk_cs=$((rc_t1 - rc_t0))
+
+	# 124 is GNU timeout's, 143 is busybox's SIGTERM. Either way the card did
+	# not finish sixteen megabytes in half a minute, which is a different answer
+	# from "slow" and worth saying as one.
+	case "$rc_st" in 124|143) return 2;; esac
+
+	case "$rc_out" in *"$rc_expect"*) return 0;; esac
+	return 1
+}
+
+# ------------------------------------------------------------- the passes ----
+scan_one() {
+	so_src=$1; so_size=$2; so_label=$3
+	so_off=0
+	while [ "$so_off" -lt "$so_size" ]; do
+		[ -f "$STOP" ] && finish stopped user
+
+		so_want=$CHUNK
+		[ $((so_off + CHUNK)) -gt "$so_size" ] && so_want=$((so_size - so_off))
+
+		read_chunk "$so_src" "$so_off" "$so_want"
+		case $? in
+		0)
+			chunks=$((chunks + 1))
+			if [ -n "$median" ] && [ "$median" -gt 0 ]; then
+				bucket "$chunk_cs"
+			else
+				cal="$cal $chunk_cs"
+				ncal=$((ncal + 1))
+				[ "$ncal" -ge "$CALIB" ] && settle_median
+			fi
+			;;
+		1)
+			badchunks=$((badchunks + 1))
+			add_finding "$so_label" "$so_off" "$so_want" short
+			;;
+		2)
+			badchunks=$((badchunks + 1))
+			add_finding "$so_label" "$so_off" "$so_want" timeout
+			;;
+		3)
+			# No clock, no measurement. Everything after this would be a figure
+			# with nothing behind it.
+			finish failed clock
+			;;
+		esac
+
+		bytes=$((bytes + so_want))
+		so_off=$((so_off + CHUNK))
+		# Counted separately from `chunks`, which only advances on a chunk that
+		# read cleanly: a card whose every chunk fails would otherwise never
+		# reach a save, and the page would watch a scan that looked stuck.
+		done_chunks=$((done_chunks + 1))
+		[ $((done_chunks % 8)) -eq 0 ] && save
+		pause
+	done
+}
+
+# ------------------------------------------------------------------ main -----
+take_lock || exit 0
+trap 'drop_lock' EXIT INT TERM HUP
+rm -f "$STOP" 2>/dev/null
+
+# Settle the throttle once. A `sleep 0.1 || sleep 1` per chunk would turn a
+# shell without fractional sleep into eight hours of sleeping on a large card,
+# and would reach for the fallback on an interrupted sleep too. busybox 1.36
+# takes the fraction; where it does not, a whole second every tenth chunk is
+# the same duty cycle by another route.
+if sleep 0.1 2>/dev/null; then
+	pause() { sleep 0.1; }
+else
+	pause() { [ $((done_chunks % 10)) -eq 0 ] && sleep 1; return 0; }
+fi
+
+# Is O_DIRECT available here at all? Asked once, and the answer is published,
+# because falling back quietly would mean evicting majestic's page cache for the
+# length of the scan without anybody being told.
+# The file list, and the total to measure progress against. `find` and `stat`
+# over a full card took 240 ms on the camera this was written for, so this is
+# free next to what follows.
+LIST=$SCAN_DIR/files
+mkdir -p "$SCAN_DIR" 2>/dev/null
+find "$MP" -type f 2>/dev/null > "$LIST" 2>/dev/null
+
+# Is O_DIRECT available here? Asked once, and on BOTH the things that get read:
+# the raw device and a file on the mounted filesystem are different code paths
+# in the kernel and one can take it while the other refuses. Refusing arrives as
+# a failed read, which this would otherwise record as the card failing to hand
+# back a file -- the worst thing it could say, and about the wrong subject.
+#
+# The answer is published rather than being quietly acted on, because falling
+# back means evicting majestic's page cache for the length of the scan and
+# somebody should be able to see that that is what happened.
+direct_flag=""
+direct=false
+if dd if="$DEV" bs=4096 count=1 iflag=direct of=/dev/null 2>/dev/null; then
+	first=$(head -n 1 "$LIST" 2>/dev/null)
+	if [ -z "$first" ] ||
+		dd if="$first" bs=4096 count=1 iflag=direct of=/dev/null 2>/dev/null; then
+		direct_flag="iflag=direct"
+		direct=true
+	fi
+fi
+nfiles=$(wc -l < "$LIST" 2>/dev/null)
+case "$nfiles" in ''|*[!0-9]*) nfiles=0;; esac
+total=0
+while IFS= read -r f; do
+	sz=$(stat -c %s "$f" 2>/dev/null)
+	case "$sz" in ''|*[!0-9]*) sz=0;; esac
+	total=$((total + sz))
+done < "$LIST"
+
+span=$(cat "/sys/block/$(basename "$DEV")/size" 2>/dev/null)
+case "$span" in ''|*[!0-9]*) span=0;; esac
+span=$((span * 512))
+total=$((total + span))
+save
+
+while IFS= read -r f; do
+	[ -f "$f" ] || continue
+	sz=$(stat -c %s "$f" 2>/dev/null)
+	case "$sz" in ''|*[!0-9]*) sz=0;; esac
+	[ "$sz" -gt 0 ] && scan_one "$f" "$sz" "${f#$MP/}"
+	files_done=$((files_done + 1))
+	save
+done < "$LIST"
+
+phase=2
+phase_name=device
+save
+[ "$span" -gt 0 ] && scan_one "$DEV" "$span" "$(basename "$DEV")"
+
+# The median may never have settled on a run short enough to end inside the
+# calibration window. Settling it here is what keeps a two-chunk scan from
+# reporting no buckets at all.
+[ "$median" -eq 0 ] && [ -n "$cal" ] && settle_median
+
+finish done ""

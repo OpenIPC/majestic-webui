@@ -8124,3 +8124,37 @@ body > main > .container > form > .mj-foot {
 	border-radius: var(--bs-border-radius);
 }
 .mj-peer-pair-why { flex-basis: 100%; color: #b9bec9; }
+
+/* Card health: three kinds of evidence about one SD card, each row a mark, a
+   label and a sentence. A grid rather than a flex row per line so the marks
+   share one column and the sentences all begin at the same x — three rows whose
+   text starts in three different places reads as three unrelated widgets rather
+   than as one answer in three parts.
+
+   The mark column is fixed at the width of the widest glyph it can hold, and
+   the second column is `minmax(0, 1fr)`: without the zero minimum a long
+   finding — a clip path, which can be long — makes the grid wider than the card
+   and the whole page scrolls sideways. */
+.mj-health {
+	display: grid;
+	gap: 1rem;
+}
+
+.mj-health-row {
+	display: grid;
+	grid-template-columns: 1.25rem minmax(0, 1fr);
+	gap: 0.75rem;
+	align-items: start;
+}
+
+.mj-health-mark {
+	font-size: 1rem;
+	line-height: 1.45;
+	text-align: center;
+}
+
+/* Findings carry a filesystem path, which has no spaces to break at. Anywhere
+   is better than off the edge of the card. */
+.mj-health-row code {
+	word-break: break-all;
+}
