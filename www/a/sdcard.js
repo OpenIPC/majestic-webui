@@ -48,6 +48,15 @@
 	// found the shape unchanged, painted into blocks the notice had replaced,
 	// and painted into nothing at all.
 	let loadErr = false;
+	// Which panel is showing. A module variable rather than localStorage, which
+	// throws outright in some privacy configurations -- and this is a choice
+	// worth keeping across a poll, not across a visit.
+	let tab = 'perf';
+	// The two traces on the Performance panel. Handles rather than samples:
+	// MjCharts keeps its own history against its own host, so a rebuild -- rare,
+	// and only when the page really changed -- starts them again rather than
+	// replaying points at timestamps they did not have.
+	let chRate = null, chQueue = null;
 
 	function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 	// esc() above does not touch quotes, which is fine everywhere it is used --
@@ -181,8 +190,29 @@
 		const cap = d.health === 'readonly'
 			? '<span class="text-danger">' + humanBytes(free) + ' free, but nothing can be written</span>'
 			: '<span class="text-secondary">' + humanBytes(used) + ' of ' + humanBytes(total) + ' used</span>';
+		// Where the recorder starts deleting the oldest clip to make room. It
+		// is the number that explains why a card sits at 94% for ever and is
+		// not filling up, which is the commonest thing people read as a fault.
+		//
+		// It is also a promise about future writes, so it is not drawn where
+		// there are none: a read-only card, or one the span probe found
+		// smaller than it claims, reports free space that is fiction, and a
+		// line saying when deletion starts would be the same fiction twice.
+		// It also needs something to be deleting. records.maxUsage is one global
+		// threshold, and a card the recorder is not pointed at is never swept
+		// by it -- a spare card in the slot would otherwise be told its oldest
+		// clips go at 95% when nothing will ever touch them.
+		const maxUse = +mjGet(cfg, 'records.maxUsage');
+		const trusted = d.health === 'ok' && configuredHere(d)
+			&& !(d.probe && (d.probe.state === 'wrapped' || d.probe.state === 'unstored'));
+		const mark = (trusted && maxUse > 0 && maxUse < 100) ? maxUse : 0;
 		return '<div class="d-flex justify-content-between x-small mb-1"><span class="fw-semibold">Storage</span>' + cap + '</div>'
-			+ '<div class="storage-bar mb-2">' + bar + '</div><div class="storage-legend x-small mb-2">' + leg + '</div>';
+			+ '<div class="mj-ret"><div class="storage-bar">' + bar + '</div>'
+			+ (mark ? '<div class="mj-ret-mark" style="left:' + mark + '%"></div>' : '')
+			+ '</div>'
+			+ (mark ? '<div class="mj-ret-cap"><span style="left:' + mark + '%">oldest clips deleted at '
+				+ esc(String(mark)) + '%</span></div>' : '<div class="mb-2"></div>')
+			+ '<div class="storage-legend x-small mb-2">' + leg + '</div>';
 	}
 
 	// Video rates are read in Mbit/s from about 1 Mbit/s up, which is where the
@@ -211,47 +241,6 @@
 		return V ? V.duration(sec) : Math.round(sec) + ' s';
 	}
 	function num(v, k) { return (v && typeof v[k] === 'number') ? v[k] : null; }
-
-	// What is printed on the card, and what it is worth.
-	//
-	// The C, U and V classes are all measured the same way — one long
-	// uninterrupted sequential write — and a camera that only ever streamed to
-	// the card would be well served by them. It does not: it deletes old clips
-	// to make room while it is still writing new ones, which is small scattered
-	// I/O against the same flash. A1/A2 is the only rating that promises
-	// anything about that, and a card without one can pass every sequential
-	// test on the box and still stall long enough to lose footage.
-	//
-	// So the absence of an A rating is the line worth spelling out, and it is
-	// the one thing an owner can act on before buying the next card
-	// (OpenIPC/firmware#1747).
-	function ratingRow(d) {
-		const r = d.rating;
-		if (!r) {
-			// WHY there is no rating decides who is at fault, and getting that
-			// backwards is the easy mistake here. The sysfs attribute does not
-			// exist on every platform — it is absent on the Ingenic 3.10
-			// kernels and present on HiSilicon's 4.9 — so the same card reads
-			// as unrated on one camera and A2 on another. Saying "this card
-			// does not report its ratings" on the first blames the card for
-			// something only the camera is short of.
-			//
-			// An SD structure asked of an eMMC has no answer worth printing at
-			// all, so that row is simply not drawn.
-			if (d.ratingWhy === 'notsd') return '';
-			const why = d.ratingWhy === 'platform'
-				? 'this camera cannot read card speed ratings'
-				: 'this card’s speed ratings could not be read';
-			return '<dt>Rated</dt><dd class="text-secondary">' + why + '</dd>';
-		}
-		const badges = [];
-		if (r.speedClass) badges.push('Class ' + r.speedClass);
-		if (r.uhsGrade) badges.push('U' + r.uhsGrade);
-		if (r.videoClass) badges.push('V' + r.videoClass);
-		badges.push(r.appClass ? 'A' + r.appClass : 'no A1/A2 rating');
-		return '<dt>Rated</dt><dd>' + esc(badges.join(' · ')) +
-			(r.appClass ? '' : ' <span class="badge text-bg-warning">sequential only</span>') + '</dd>';
-	}
 
 	function ratingNote(d) {
 		const r = d.rating;
@@ -471,13 +460,25 @@
 	// endpoint to work it out and hand the answer back would be a CGI relaying
 	// what the daemon already tells the browser directly — and a relay can be
 	// wrong about it in a way the daemon never is.
-	function recordingHere() {
-		if (!state || !state.mounted || !state.mountpoint) return false;
+	// Is the recorder CONFIGURED to write to this card? Enabled, and pointed at
+	// the mountpoint or somewhere under it -- records.path is a strftime
+	// template, so the directory it starts in is the part that names a card.
+	//
+	// Its own function because three things ask it and they must not disagree:
+	// whether to say "recording to this card", whether to offer the button
+	// that makes it so, and whether the storage bar may draw the line the
+	// recorder deletes at. A second card in a reader is mounted and healthy
+	// and nothing deletes from it.
+	function configuredHere(d) {
+		if (!d || !d.mounted || !d.mountpoint) return false;
 		if (mjGet(cfg, 'records.enabled') !== true) return false;
 		const pre = recPrefix();
 		if (!pre) return false;
-		if (pre !== state.mountpoint &&
-			pre.lastIndexOf(state.mountpoint + '/', 0) !== 0) return false;
+		return pre === d.mountpoint || pre.lastIndexOf(d.mountpoint + '/', 0) === 0;
+	}
+
+	function recordingHere() {
+		if (!configuredHere(state)) return false;
 		// Configured here is not the same as writing here. A rate that has not
 		// been derived yet is not evidence of either.
 		return rateBps !== null && rateBps > 1000;
@@ -497,13 +498,20 @@
 		unknown: 'text-secondary', none: 'text-secondary',
 	};
 
-	function healthLine(label, line, extra) {
+	// One line of evidence: a mark, a label, the action that settles it, and
+	// the sentence. The action shares the label's line rather than sitting
+	// under the sentence, which is where it used to be -- furthest from the
+	// words telling you to press it, and below a paragraph that on the
+	// counterfeit verdict runs to four lines.
+	function healthLine(label, line, opts) {
+		const o = opts || {};
 		return '<div class="mj-health-row">'
 			+ '<div class="mj-health-mark ' + HEALTH_CLS[line.level] + '">'
 			+ esc(HEALTH_ICON[line.level] || '–') + '</div>'
-			+ '<div><div class="fw-semibold">' + esc(label) + '</div>'
-			+ '<div class="small text-secondary">' + esc(line.text) + '</div>'
-			+ (extra || '') + '</div></div>';
+			+ '<div><div class="mj-ev-head"><span class="mj-cap">' + esc(label) + '</span>'
+			+ '<span class="mj-live-rule"></span>' + (o.btn || '') + '</div>'
+			+ '<div class="mj-ev-txt">' + esc(line.text) + '</div>'
+			+ (o.below || '') + '</div></div>';
 	}
 
 	// What the scan is doing, as a bar and a sentence -- and the bar is only
@@ -566,16 +574,19 @@
 		return mins < 1 ? 'about a minute' : 'about ' + mins + ' minute' + (mins === 1 ? '' : 's');
 	}
 
+	// Split into the button and the words about it, because they no longer sit
+	// together: the button belongs on the line's own head, the explanation
+	// under its sentence.
 	function scanControls(d) {
 		if (d.canScan === false) {
-			return '<div class="x-small text-secondary mt-3">This camera does not have the card '
-				+ 'checker installed, so the card cannot be read back here.</div>';
+			return { btn: '', note: '<div class="x-small text-secondary mt-2">This camera does not have the card '
+				+ 'checker installed, so the card cannot be read back here.</div>' };
 		}
 		if (d.scanRunning) {
-			return '<button class="btn btn-sm btn-outline-secondary mt-3" data-act="scanstop"'
-				+ (scanBusy ? ' disabled' : '') + '>Stop the check</button>';
+			return { btn: '<button class="btn btn-sm btn-outline-secondary" data-act="scanstop"'
+				+ (scanBusy ? ' disabled' : '') + '>Stop the check</button>', note: '' };
 		}
-		if (!d.mounted) return '';
+		if (!d.mounted) return { btn: '', note: '' };
 		const est = scanEstimate(d);
 		// The cost is stated before the press, not discovered after it. Both
 		// halves are real: the pass competes with the recorder for the card,
@@ -583,11 +594,13 @@
 		const title = 'Reads every byte on the card and reports what cannot be read'
 			+ (est ? ', taking ' + est : '')
 			+ '. The camera goes on recording throughout, and may lose a few seconds of footage.';
-		return '<button class="btn btn-sm btn-outline-secondary mt-3" data-act="scanstart"'
-			+ ' title="' + attrEsc(title) + '"' + (scanBusy ? ' disabled' : '') + '>'
-			+ (scanBusy ? '<span class="spinner-border spinner-border-sm"></span> Starting…' : 'Read the card back')
-			+ '</button>'
-			+ '<div class="x-small text-secondary mt-1">' + esc(title) + '</div>';
+		return {
+			btn: '<button class="btn btn-sm btn-outline-secondary" data-act="scanstart"'
+				+ ' title="' + attrEsc(title) + '"' + (scanBusy ? ' disabled' : '') + '>'
+				+ (scanBusy ? '<span class="spinner-border spinner-border-sm"></span> Starting…' : 'Read the card back')
+				+ '</button>',
+			note: '<div class="x-small text-secondary mt-2">' + esc(title) + '</div>',
+		};
 	}
 
 	// Offered only where there is nothing to lose. A card with a filesystem on
@@ -599,46 +612,220 @@
 		// with no way forward is a dead end on the one line whose whole job is
 		// to tell somebody what they have not established yet.
 		if (d.health !== 'unformatted' && d.health !== 'unreadable') {
-			return d.probe ? '' : '<div class="x-small text-secondary mt-1">'
-				+ 'This check erases the card, so it runs as part of Format rather than on its own.</div>';
+			return { btn: '', note: d.probe ? '' : '<div class="x-small text-secondary mt-2">'
+				+ 'This check erases the card, so it runs as part of Format rather than on its own.</div>' };
 		}
-		return '<button class="btn btn-sm btn-outline-danger mt-3" data-act="cardcheck"'
-			+ (checkBusy ? ' disabled' : '') + '>'
-			+ (checkBusy ? '<span class="spinner-border spinner-border-sm"></span> Checking…' : 'Check this card')
-			+ '</button>'
-			+ '<div class="x-small text-secondary mt-1">Writes a marker to a few dozen places across '
-			+ 'the whole card and reads them back, which is what catches a card that is smaller than it '
-			+ 'says. It takes seconds, and it erases the card.</div>';
+		return {
+			btn: '<button class="btn btn-sm btn-outline-danger" data-act="cardcheck"'
+				+ (checkBusy ? ' disabled' : '') + '>'
+				+ (checkBusy ? '<span class="spinner-border spinner-border-sm"></span> Checking…' : 'Check this card')
+				+ '</button>',
+			note: '<div class="x-small text-secondary mt-2">Writes a marker to a few dozen places across '
+				+ 'the whole card and reads them back, which is what catches a card that is smaller than it '
+				+ 'says. It takes seconds, and it erases the card.</div>',
+		};
 	}
 
-	function healthCard(d, L) {
+	// What the card IS, said on one line. This replaced a five-row dl of model,
+	// capacity, filesystem, mount and manufacture date: those are five facts
+	// nobody reads one at a time, and as a grid across a full-width card they
+	// were five labels at one edge and five values at the other.
+	function identity(d) {
+		const bits = [];
+		bits.push(esc(d.model || '\u2014') + ' <span class="mj-mono">' + humanBytes(d.sizeBytes) + '</span>');
+		bits.push('<span class="mj-mono">' + (d.fs
+			? esc(d.fs) + (d.mounted ? ' on ' + esc(d.mountpoint) : '')
+			: '<span class="text-danger">' + (d.health === 'unreadable' ? 'no filesystem readable' : 'unformatted') + '</span>')
+			+ '</span>');
+		if (d.date) bits.push('made ' + esc(d.date));
+		const r = ratingPills(d);
+		if (r) bits.push(r);
+		return '<div class="mj-verdict-id">'
+			+ bits.join('<span class="mj-sep">\u00b7</span>') + '</div>';
+	}
+
+	// What is printed on the card, and what it is worth.
+	//
+	// The C, U and V classes are all measured the same way — one long
+	// uninterrupted sequential write — and a camera that only ever streamed to
+	// the card would be well served by them. It does not: it deletes old clips
+	// to make room while it is still writing new ones, which is small scattered
+	// I/O against the same flash. A1/A2 is the only rating that promises
+	// anything about that, and a card without one can pass every sequential
+	// test on the box and still stall long enough to lose footage.
+	//
+	// So the absence of an A rating is the line worth spelling out, and it is
+	// the one thing an owner can act on before buying the next card. Chips
+	// rather than a run of text: the same words, and the missing rating gets a
+	// colour of its own instead of arriving as a phrase at the end of a
+	// sentence.
+	function ratingPills(d) {
+		const r = d.rating;
+		if (!r) {
+			// WHY there is no rating decides who is at fault, and getting that
+			// backwards is the easy mistake here. The sysfs attribute does not
+			// exist on every platform — it is absent on the Ingenic 3.10
+			// kernels and present on HiSilicon's 4.9 — so the same card reads
+			// as unrated on one camera and A2 on another. Saying "this card
+			// does not report its ratings" on the first blames the card for
+			// something only the camera is short of.
+			//
+			// An SD structure asked of an eMMC has no answer worth printing at
+			// all, so nothing is drawn.
+			if (d.ratingWhy === 'notsd') return '';
+			return '<span class="text-secondary">' + (d.ratingWhy === 'platform'
+				? 'this camera cannot read card speed ratings'
+				: 'this card\u2019s speed ratings could not be read') + '</span>';
+		}
+		const pills = [];
+		if (r.speedClass) pills.push('<span class="mj-pill">Class ' + esc(String(r.speedClass)) + '</span>');
+		if (r.uhsGrade) pills.push('<span class="mj-pill">U' + esc(String(r.uhsGrade)) + '</span>');
+		if (r.videoClass) pills.push('<span class="mj-pill">V' + esc(String(r.videoClass)) + '</span>');
+		pills.push(r.appClass
+			? '<span class="mj-pill">A' + esc(String(r.appClass)) + '</span>'
+			: '<span class="mj-pill mj-pill-security">no A1/A2 rating</span>');
+		return '<span class="mj-pills">' + pills.join('') + '</span>'
+			+ (r.appClass ? '' : ' <span class="badge text-bg-warning">sequential only</span>');
+	}
+
+	// The verdict, and everything that is evidence for it, in one card at the
+	// top of the page.
+	//
+	// The three lines and the headline need the health module; the identity,
+	// the badge and the storage bar do not, and must not go with it. A build
+	// that has not shipped sdcard-health.js is not a camera whose card has no
+	// model number -- the same reason the pin map's fields render hidden rather
+	// than not at all.
+	function heroCard(d, L) {
 		const H = window.MajesticSdHealth;
-		if (!H) return '';
-		const v = H.verdict({
+		const v = H ? H.verdict({
 			recorder: recorder,
 			card: d,
 			probe: d.probe,
 			scan: d.scan,
 			queued: queuedTicks >= 2,
-		});
+		}) : null;
+		const chk = checkControls(d), scn = scanControls(d);
 		return '<div class="col-12"><div class="card"><div class="card-body">'
-			+ '<div class="d-flex align-items-center gap-2 mb-3">'
-			+ '<h3 class="m-0">Card health</h3>'
-			+ '<span class="small ' + HEALTH_CLS[v.head.level] + '">' + esc(v.head.text) + '</span>'
+			+ '<div class="mj-verdict">'
+			+ '<div class="mj-verdict-mark mj-lv-' + (v ? v.head.level : 'none') + '">'
+			+ esc(v ? (HEALTH_ICON[v.head.level] || '\u2013') : '\u2013') + '</div>'
+			+ '<div class="mj-verdict-txt">'
+			+ (v ? '<h3 class="mj-verdict-h">' + esc(v.head.text) + '</h3>' : '')
+			+ identity(d)
 			+ '</div>'
-			+ '<div class="mj-health">'
-			+ healthLine('Keeping up with the recorder', v.keeping)
-			+ healthLine('Stores what it is given', v.stores, checkControls(d)
-				+ (checkErr ? mjNotice('warn', esc(checkErr)) : ''))
-			+ healthLine('Reads back what it holds', v.reads,
-				'<div data-mj="scan">' + L.scan + '</div>' + scanFindings(d) + scanControls(d)
-				+ (scanErr ? mjNotice('warn', esc(scanErr)) : ''))
-			+ '</div></div></div></div>';
+			+ badge(d)
+			+ '</div>'
+			+ '<div class="mt-4" data-mj="storage">' + L.storage + '</div>'
+			+ (v ? '<div class="mj-evidence mj-health">'
+				+ healthLine('Keeping up with the recorder', v.keeping)
+				+ healthLine('Stores what it is given', v.stores, {
+					btn: chk.btn,
+					below: chk.note + (checkErr ? mjNotice('warn', esc(checkErr)) : ''),
+				})
+				+ healthLine('Reads back what it holds', v.reads, {
+					btn: scn.btn,
+					below: '<div data-mj="scan">' + L.scan + '</div>' + scanFindings(d) + scn.note
+						+ (scanErr ? mjNotice('warn', esc(scanErr)) : ''),
+				})
+				+ '</div>' : '')
+			+ '</div></div></div>';
 	}
 
-	function perfCard(d, L) {
-		return '<div class="col-12"><div class="card"><div class="card-body">'
-			+ '<h3 class="mb-3">Performance</h3>'
+	// One panel at a time, and all three in the markup.
+	//
+	// Hidden rather than unbuilt, for two reasons: switching is then a `hidden`
+	// toggle that rebuilds nothing and so loses nothing, and everything the
+	// page can say stays findable with the browser's own find.
+	const TABS = [
+		{ id: 'perf', name: 'Performance' },
+		{ id: 'rec', name: 'Recording' },
+		{ id: 'card', name: 'Card & slot' },
+	];
+
+	// Which tab is open is deliberately NOT in the markup build() produces, and
+	// so is not part of the page's shape. If it were, clicking a tab would
+	// change the shape, and the next heartbeat two seconds later would rebuild
+	// the page -- taking the focus off the tab just pressed. It is applied to
+	// the DOM instead, after every draw and on every click, and render() never
+	// hears about it.
+	function tabStrip() {
+		return '<ul class="nav nav-pills mb-3" id="sd-tabs">'
+			+ TABS.map((t) => '<li class="nav-item"><button type="button" class="nav-link"'
+				+ ' data-tab="' + t.id + '">' + esc(t.name) + '</button></li>').join('')
+			+ '</ul>';
+	}
+
+	function panel(id, body) {
+		return '<div class="card mb-4" data-panel="' + id + '">'
+			+ '<div class="card-body">' + body + '</div></div>';
+	}
+
+	// Built after every draw, because a draw replaced the hosts they were
+	// attached to. Dropped first, or the module's registry accumulates detached
+	// hosts and their history for the life of the tab.
+	function mountCharts() {
+		const MC = window.MjCharts;
+		if (!MC) return;
+		if (chRate) MC.dropChart(chRate);
+		if (chQueue) MC.dropChart(chQueue);
+		chRate = SD.querySelector('#sd-ch-rate')
+			? MC.makeChart('#sd-ch-rate', { h: 84, lo: 0, hi: null, colors: ['#5c70e8'] }) : null;
+		chQueue = SD.querySelector('#sd-ch-queue')
+			? MC.makeChart('#sd-ch-queue', { h: 84, lo: 0, hi: null, colors: ['#d1793a'] }) : null;
+	}
+
+	// A pixel-space chart renders nothing while its host is zero wide, which is
+	// exactly what a hidden panel is. The frame after it opens is the first one
+	// that can measure.
+	function wakeCharts() {
+		const MC = window.MjCharts;
+		if (!MC || tab !== 'perf') return;
+		if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => MC.renderAll());
+		else MC.renderAll();
+	}
+
+	function applyTab() {
+		const panels = SD.querySelectorAll('[data-panel]');
+		for (let i = 0; i < panels.length; i++) {
+			panels[i].hidden = panels[i].getAttribute('data-panel') !== tab;
+		}
+		const btns = SD.querySelectorAll('#sd-tabs .nav-link');
+		for (let i = 0; i < btns.length; i++) {
+			btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === tab);
+			btns[i].setAttribute('aria-current', btns[i].getAttribute('data-tab') === tab ? 'true' : 'false');
+		}
+	}
+
+	// What the card is doing, as a shape rather than a number.
+	//
+	// Two traces, and neither is the longest pause: records_fsync_us_max is a
+	// high-water mark since boot, so plotting it over time draws a staircase
+	// that only ever goes up and says nothing about now. It stays a figure in
+	// the rows below. What does move is how fast the camera is writing, and how
+	// many clips are waiting to be -- and the queue is the one warning that
+	// arrives while there is still time to act on it, before anything is lost.
+	// Each trace is gated on the counter that feeds it, not on the recorder
+	// being reportable at all. A build that publishes records_state but not the
+	// byte total, or not the queue gauge, would otherwise get a labelled panel
+	// that never draws a line -- which is the same mistake as printing a zero
+	// for a reading nobody took, made in a bigger box.
+	function chartBoxes() {
+		const v = (recorder && !recorder.absent) ? recorder.v : null;
+		if (!v) return '';
+		const box = (id, cap) => '<div class="col-12 col-lg-6"><div class="st-panel">'
+			+ '<div class="st-chart-head"><span class="mj-cap">' + cap + '</span></div>'
+			+ '<div class="mj-chart" id="' + id + '"></div></div></div>';
+		let out = '';
+		if (typeof v.records_bytes_written_total === 'number') out += box('sd-ch-rate', 'Write rate');
+		if (typeof v.records_queue_fragments === 'number') out += box('sd-ch-queue', 'Clips waiting to be written');
+		return out ? '<div class="row g-3 mb-3">' + out + '</div>' : '';
+	}
+
+	function perfPanel(d, L) {
+		return '<div class="mj-live-head"><h3 class="mj-cap">Performance</h3>'
+			+ '<span class="mj-live-rule"></span></div>'
+			+ chartBoxes()
 			+ '<dl class="small list mb-2" data-mj="perfrows">' + L.perfrows + '</dl>'
 			// Presence, not value: the note belongs to rows that exist at all,
 			// so it reads `hasLive` -- which survives blanking -- rather than
@@ -647,8 +834,59 @@
 				+ 'counted since the camera last started.</div>' : '')
 			+ ratingNote(d)
 			+ liveNote()
-			+ speedBlock(d)
-			+ '</div></div></div>';
+			+ speedBlock(d);
+	}
+
+	function recPanel(d) {
+		const recEnabled = mjGet(cfg, 'records.enabled') === true;
+		const onThisCard = configuredHere(d);
+		return '<div class="mj-live-head"><h3 class="mj-cap">Recording</h3>'
+			+ '<span class="mj-live-rule"></span>'
+			+ '<div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="sd-rec-toggle"'
+			+ (recEnabled ? ' checked' : '') + '></div></div>'
+			+ '<dl class="small list mb-3">'
+			+ '<dt>Status</dt><dd>' + (recEnabled ? '<span class="badge text-bg-success">Enabled</span>' : '<span class="badge text-bg-secondary">Disabled</span>') + '</dd>'
+			+ '<dt>Path</dt><dd class="text-break">' + esc(mjGet(cfg, 'records.path') || '\u2014') + '</dd>'
+			+ '<dt>Split</dt><dd>' + (mjGet(cfg, 'records.split') || '\u2014') + ' min</dd>'
+			+ '<dt>Max usage</dt><dd>' + (mjGet(cfg, 'records.maxUsage') || '\u2014') + ' %</dd>'
+			+ '</dl>'
+			+ (onThisCard
+				// "Recording to this card" is a claim about what is happening,
+				// not about what is configured, so it has to know the card is
+				// writable before it makes it.
+				? (d.health === 'readonly'
+					? '<div class="x-small text-danger mb-3">Configured to record here, but the card is read-only \u2014 nothing is being written.</div>'
+					: '<div class="x-small text-success mb-3">\u2713 Recording to this card</div>')
+				: (d.mounted && d.health !== 'readonly'
+					? '<button class="btn btn-sm btn-primary mb-3" id="sd-use">Use this card for recording</button>' : ''))
+			+ '<div><a class="small" href="camera.cgi?tab=records">Recording settings \u2192</a></div>';
+	}
+
+	function cardPanel(d) {
+		let acts = '<button class="btn btn-sm btn-outline-secondary" data-act="browse"' + (d.mounted ? '' : ' disabled') + '>Browse files</button>';
+		if (d.mounted) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="unmount">Unmount</button>';
+		else if (d.fs) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="mount">Mount</button>';
+		if (d.mounted && d.health !== 'readonly' && swapSupport() !== 'unknown')
+			acts += '<button class="btn btn-sm btn-outline-secondary" data-act="swap"'
+				+ (swapSupport() === 'yes' ? '' : ' disabled title="This camera\'s majestic cannot pause '
+					+ 'recording on request, which is the first thing changing a card needs. Unmount, '
+					+ 'change the card and mount it again instead."')
+				+ '>Change the card\u2026</button>';
+		if (d.canFsck) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="fsck">Check</button>';
+		acts += '<button class="btn btn-sm btn-outline-danger" data-act="format">Format\u2026</button>';
+		return '<div class="mj-live-head"><h3 class="mj-cap">Card &amp; slot</h3>'
+			+ '<span class="mj-live-rule"></span></div>'
+			+ '<dl class="small list mb-3">'
+			+ '<dt>Model</dt><dd>' + esc(d.model || '\u2014') + ' <span class="text-secondary">(' + esc(d.cardtype || 'SD') + ')</span></dd>'
+			+ '<dt>Capacity</dt><dd>' + humanBytes(d.sizeBytes) + '</dd>'
+			+ '<dt>Filesystem</dt><dd>' + (d.fs ? esc(d.fs)
+				: '<span class="text-danger">' + (d.health === 'unreadable' ? 'none readable' : 'unformatted') + '</span>') + '</dd>'
+			+ '<dt>Mount</dt><dd>' + (d.mounted
+				? esc(d.mountpoint) + (d.health === 'readonly' ? ' <span class="text-danger">\u2014 read-only</span>' : '')
+				: 'not mounted') + '</dd>'
+			+ '<dt>Manufactured</dt><dd class="text-secondary">' + esc(d.date || '\u2014') + '</dd>'
+			+ '</dl>'
+			+ '<div class="d-flex flex-wrap gap-2" id="sd-actions">' + acts + '</div>';
 	}
 
 	// The page as one string. Pure: everything it varies on arrives in `d` and
@@ -658,63 +896,16 @@
 		// Drawn without the page's own head, as it always has been: this is the
 		// whole page replaced by the reason there isn't one.
 		if (loadErr) return mjNotice('danger', 'Failed to read SD-card status.');
-		const head = '<div class="d-flex align-items-center gap-3 mb-4"><h2 class="text-primary m-0">SD Card</h2>' + badge(d || {}) + '</div>';
+		const head = '<h2 class="mj-page-title">SD Card</h2>';
 		if (!d || !d.present) {
 			return head + mjNotice('info', 'No SD card detected. Insert a card and reload.');
 		}
-		const rp = recPrefix(), recEnabled = mjGet(cfg, 'records.enabled') === true;
-		const onThisCard = d.mounted && rp === d.mountpoint;
-
-		let acts = '<button class="btn btn-sm btn-outline-secondary" data-act="browse"' + (d.mounted ? '' : ' disabled') + '>Browse files</button>';
-		if (d.mounted) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="unmount">Unmount</button>';
-		else if (d.fs) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="mount">Mount</button>';
-		if (d.mounted && d.health !== 'readonly' && swapSupport() !== 'unknown')
-			acts += '<button class="btn btn-sm btn-outline-secondary" data-act="swap"'
-				+ (swapSupport() === 'yes' ? '' : ' disabled title="This camera\'s majestic cannot pause '
-					+ 'recording on request, which is the first thing changing a card needs. Unmount, '
-					+ 'change the card and mount it again instead."')
-				+ '>Change the card…</button>';
-		if (d.canFsck) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="fsck">Check</button>';
-		acts += '<button class="btn btn-sm btn-outline-danger" data-act="format">Format…</button>';
-
-		return head + health(d) + '<div class="row g-4">'
-			+ '<div class="col-12 col-lg-7"><div class="card h-100"><div class="card-body">'
-			+ '<dl class="small list mb-3">'
-			+ '<dt>Model</dt><dd>' + esc(d.model || '—') + ' <span class="text-secondary">(' + esc(d.cardtype || 'SD') + ')</span></dd>'
-			+ '<dt>Capacity</dt><dd>' + humanBytes(d.sizeBytes) + '</dd>'
-			+ '<dt>Filesystem</dt><dd>' + (d.fs ? esc(d.fs)
-				: '<span class="text-danger">' + (d.health === 'unreadable' ? 'none readable' : 'unformatted') + '</span>') + '</dd>'
-			+ '<dt>Mount</dt><dd>' + (d.mounted
-				? esc(d.mountpoint) + (d.health === 'readonly' ? ' <span class="text-danger">— read-only</span>' : '')
-				: 'not mounted') + '</dd>'
-			+ '<dt>Manufactured</dt><dd class="text-secondary">' + esc(d.date || '—') + '</dd>'
-			+ '</dl>'
-			+ '<div data-mj="storage">' + L.storage + '</div>'
-			+ '<div class="d-flex flex-wrap gap-2 mt-2" id="sd-actions">' + acts + '</div>'
-			+ '</div></div></div>'
-			+ '<div class="col-12 col-lg-5"><div class="card h-100"><div class="card-body">'
-			+ '<div class="d-flex align-items-center mb-3"><h3 class="m-0 me-auto">Recording</h3>'
-			+ '<div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="sd-rec-toggle"' + (recEnabled ? ' checked' : '') + '></div></div>'
-			+ '<dl class="small list mb-3">'
-			+ '<dt>Status</dt><dd>' + (recEnabled ? '<span class="badge text-bg-success">Enabled</span>' : '<span class="badge text-bg-secondary">Disabled</span>') + '</dd>'
-			+ '<dt>Path</dt><dd class="text-break">' + esc(mjGet(cfg, 'records.path') || '—') + '</dd>'
-			+ '<dt>Split</dt><dd>' + (mjGet(cfg, 'records.split') || '—') + ' min</dd>'
-			+ '<dt>Max usage</dt><dd>' + (mjGet(cfg, 'records.maxUsage') || '—') + ' %</dd>'
-			+ '</dl>'
-			+ (onThisCard
-				// "Recording to this card" is a claim about what is happening,
-				// not about what is configured, so it has to know the card is
-				// writable before it makes it.
-				? (d.health === 'readonly'
-					? '<div class="x-small text-danger mb-3">Configured to record here, but the card is read-only — nothing is being written.</div>'
-					: '<div class="x-small text-success mb-3">✓ Recording to this card</div>')
-				: (d.mounted && d.health !== 'readonly'
-					? '<button class="btn btn-sm btn-primary mb-3" id="sd-use">Use this card for recording</button>' : ''))
-			+ '<div><a class="small" href="camera.cgi?tab=records">Recording settings →</a></div>'
-			+ '</div></div></div>'
-			+ healthCard(d, L)
-			+ perfCard(d, L)
-			+ '</div>';
+		return head + health(d)
+			+ '<div class="row g-4 mb-4">' + heroCard(d, L) + '</div>'
+			+ tabStrip()
+			+ panel('perf', perfPanel(d, L))
+			+ panel('rec', recPanel(d))
+			+ panel('card', cardPanel(d));
 	}
 
 	// The three blocks that move on their own while nothing about the page's
@@ -729,7 +920,7 @@
 		const rows = liveRows();
 		return {
 			storage: storageBar(d),
-			perfrows: ratingRow(d) + rows,
+			perfrows: rows,
 			scan: scanProgress(d),
 			hasLive: !!rows,
 		};
@@ -772,6 +963,9 @@
 			SD.innerHTML = build(d, L);
 			lastShape = shape;
 			lastLive = L;
+			applyTab();
+			mountCharts();
+			wakeCharts();
 			return;
 		}
 		paint(L);
@@ -828,6 +1022,18 @@
 	// seconds. Delegating from here also lets the health alert offer the same
 	// data-act buttons as the actions row.
 	function wire() {
+		// The tab strip. Nothing is rebuilt: all three panels are already in
+		// the page, so switching is showing one and hiding two, and anything
+		// the others hold -- a selection, a scroll position -- is still there
+		// when you come back.
+		SD.addEventListener('click', e => {
+			const t = e.target.closest('[data-tab]'); if (!t) return;
+			const id = t.getAttribute('data-tab');
+			if (!id || id === tab) return;
+			tab = id;
+			applyTab();
+			wakeCharts();
+		});
 		SD.addEventListener('click', e => {
 			const b = e.target.closest('[data-act]'); if (!b) return;
 			const act = b.dataset.act;
@@ -919,8 +1125,19 @@
 			for (let i = 0; i < lis.length; i++) {
 				const k = lis[i].getAttribute('data-step');
 				const j = order.indexOf(k);
-				lis[i].className = (name === 'done' || (at >= 0 && j < at))
-					? 'mj-step-done' : (j === at ? 'mj-step-now' : '');
+				const isDone = name === 'done' || (at >= 0 && j < at);
+				const isNow = j === at;
+				lis[i].className = isDone ? 'mj-step-done' : (isNow ? 'mj-step-now' : '');
+				// A step that has happened is ticked; one that has not still
+				// says which number it is, so the list reads as a sequence
+				// with a position in it rather than as six identical bullets.
+				const pip = lis[i].querySelector('.mj-pip');
+				if (pip) pip.textContent = isDone ? '\u2713' : String(j + 1);
+				// The words for the step in flight go against the step, not
+				// only in the footer -- that is where somebody holding a card
+				// is looking.
+				const sub = lis[i].querySelector('.mj-step-sub');
+				if (sub) sub.textContent = isNow ? (SWAP_WORDS[name] || '') : '';
 			}
 		};
 
@@ -1055,20 +1272,43 @@
 
 	function openFormat() {
 		const sel = $('#sd-format-fs'), log = $('#sd-format-log'), st = $('#sd-format-status'), go = $('#sd-format-go');
+		const ack = $('#sd-format-ack'), ackTxt = $('#sd-format-ack-txt');
 		const fss = (state.mkfs && state.mkfs.length) ? state.mkfs : ['vfat'];
 		sel.innerHTML = fss.map(f => '<option value="' + f + '">' + f.toUpperCase() + (f === 'vfat' ? ' (FAT32)' : '') + '</option>').join('');
 		log.classList.add('d-none'); log.textContent = ''; st.textContent = '';
-		go.disabled = false; go.textContent = 'Format';
+		// Name what is about to go, where the camera knows. "Everything on the
+		// card" is true and abstract; "the 24.1 GB of recordings on this card"
+		// is the same sentence about something somebody can picture.
+		if (ackTxt) {
+			ackTxt.textContent = (state && state.recBytes > 0)
+				? 'I understand this erases the ' + humanBytes(state.recBytes) + ' of recordings on this card.'
+				: 'I understand this erases everything on the card.';
+		}
+		// Re-armed on every open, so a dialog closed and reopened asks again.
+		if (ack) {
+			ack.checked = false;
+			ack.onchange = () => { go.disabled = !ack.checked; };
+		}
+		go.disabled = !!ack;
+		go.textContent = 'Format';
 		const modal = bootstrap.Modal.getOrCreateInstance('#sd-format');
+		// No confirm() box: the acknowledgement is in the dialog the press was
+		// launched from, where it can name what is being erased.
 		go.onclick = () => {
-			if (!confirm('Erase ALL data and format the card as ' + sel.value + '?')) return;
+			if (ack && !ack.checked) return;
 			go.disabled = true; st.textContent = 'Formatting… do not power off';
 			op({ op: 'format', fs: sel.value }).then(r => {
 				st.textContent = r.ok ? 'Done' : ('Failed: ' + (r.error || ''));
 				if (r.log) { log.classList.remove('d-none'); log.textContent = r.log; }
-				if (r.ok) { setTimeout(() => { modal.hide(); load(); }, 800); } else { go.disabled = false; }
-			}).catch(() => { st.textContent = 'Request failed'; go.disabled = false; });
+				// A failed format re-arms the acknowledgement rather than leaving
+				// the button live: the next press is a second destructive act,
+				// and it is asked for the same way the first was.
+				if (r.ok) { setTimeout(() => { modal.hide(); load(); }, 800); } else { reArm(); }
+			}).catch(() => { st.textContent = 'Request failed'; reArm(); });
 		};
+		function reArm() {
+			if (ack) { ack.checked = false; go.disabled = true; } else { go.disabled = false; }
+		}
 		modal.show();
 	}
 
@@ -1106,6 +1346,14 @@
 		// nothing clears, which is the shape this tree keeps removing.
 		const qn = v.records_queue_fragments;
 		queuedTicks = (typeof qn === 'number' && qn > 0) ? queuedTicks + 1 : 0;
+		// Only readings that were actually taken. A counter this build does not
+		// publish must not be plotted as a zero -- a flat line at the bottom of
+		// a chart is a claim that nothing is queued, not that nobody asked.
+		const MC = window.MjCharts;
+		if (MC) {
+			if (chRate && rateBps !== null) MC.pushChart(chRate, [rateBps * 8 / 1e6]);
+			if (chQueue && typeof qn === 'number') MC.pushChart(chQueue, [qn]);
+		}
 		if (state) render();
 	}
 

@@ -103,7 +103,8 @@ function beat(over, prevBytes) {
 // the heartbeat the page subscribed to. Every later draw in these cases is
 // driven through that heartbeat, because that is the two-second clock the
 // regression was measured on.
-function load(cardJson) {
+function load(cardJson, opts) {
+	const o = opts || {};
 	const SD = makeSd();
 	let subscriber = null;
 
@@ -148,13 +149,30 @@ function load(cardJson) {
 	ctx.window.document = ctx.document;
 	ctx.window.mjMetricsSubscribe = (fn) => { subscriber = fn; };
 	vm.createContext(ctx);
-	for (const f of ['storage-verdict.js', 'sdcard-health.js', 'sdcard.js']) {
+	// Which modules the page finds. A build without sdcard-health.js is a real
+	// camera -- the page must still say what the card IS on one.
+	const mods = o.noHealth
+		? ['storage-verdict.js', 'sdcard.js']
+		: ['storage-verdict.js', 'sdcard-health.js', 'sdcard.js'];
+	for (const f of mods) {
 		vm.runInContext(fs.readFileSync(A(f), 'utf8'), ctx);
+	}
+	// Press a delegated control the way a browser would, so the page's own
+	// handler runs against its own markup.
+	function press(attr, val) {
+		const ev = {
+			target: {
+				closest: (sel) => (sel === '[' + attr + ']'
+					? { dataset: {}, disabled: false, getAttribute: () => val } : null),
+			},
+		};
+		(SD.handlers.click || []).forEach((fn) => fn(ev));
 	}
 	return {
 		SD: SD,
 		beat: (s) => subscriber && subscriber(s),
 		poll: () => poll && poll(),
+		tab: (id) => press('data-tab', id),
 	};
 }
 
@@ -285,6 +303,97 @@ async function drawn(env) {
 		await settled(env, 'Performance');
 		check('the page comes back when the camera does',
 			env.SD.innerHTML.indexOf('Failed to read SD-card status') < 0, 'still stuck');
+	}
+
+	group('the page says what the card is, with or without the health module');
+
+	{
+		const env = load({ now: card() }, { noHealth: true });
+		await drawn(env);
+		const h = env.SD.innerHTML;
+		// The verdict and its three lines need the module. What the card IS
+		// does not, and must not go with it -- a build that has not shipped
+		// sdcard-health.js is not a camera whose card has no model number.
+		check('the card is still named', h.indexOf('SD16G') >= 0, h.slice(0, 200));
+		check('its mount is still shown', h.indexOf('/mnt/sd') >= 0, 'lost the mount');
+		check('its ratings are still shown', h.indexOf('Class 10') >= 0, 'lost the rating');
+		check('the storage bar is still drawn', h.indexOf('storage-bar') >= 0, 'lost the bar');
+		check('and the actions are still reachable',
+			h.indexOf('data-act="format"') >= 0, 'lost the actions');
+		check('but no verdict is claimed on evidence it cannot read',
+			h.indexOf('mj-evidence') < 0, 'invented a verdict');
+	}
+
+	group('a card nothing records to is not told when its clips will go');
+
+	{
+		// records.maxUsage is one global threshold and the recorder sweeps one
+		// path. A second card, mounted and healthy and pointed at by nothing,
+		// would otherwise be told its oldest clips go at 95% when nothing will
+		// ever touch them.
+		const here = load({ now: card({ mountpoint: '/mnt/sd' }) });
+		await drawn(here);
+		check('the card being recorded to shows the deletion line',
+			here.SD.innerHTML.indexOf('oldest clips deleted at 95%') >= 0, 'missing');
+
+		const spare = load({ now: card({ mountpoint: '/mnt/other' }) });
+		await drawn(spare);
+		check('a card the recorder is not pointed at does not',
+			spare.SD.innerHTML.indexOf('oldest clips deleted at') < 0, 'promised a sweep');
+		check('and its storage bar is still drawn',
+			spare.SD.innerHTML.indexOf('storage-bar') >= 0, 'lost the bar');
+	}
+
+	group('a chart with no counter behind it is not drawn at all');
+
+	{
+		const env = load({ now: card() });
+		await drawn(env);
+		// A build that reports its recorder's state but not the byte total, nor
+		// the queue gauge. A labelled panel that never draws a line is the same
+		// mistake as printing a zero for a reading nobody took, in a bigger box.
+		env.beat({
+			ok: true, dt: 2, prev: null,
+			m: { v: { records_state: 0, records_fragments_written_total: 1000 } },
+		});
+		const h = env.SD.innerHTML;
+		check('no write-rate chart without the byte counter',
+			h.indexOf('sd-ch-rate') < 0, 'drew an empty chart');
+		check('no queue chart without the queue gauge',
+			h.indexOf('sd-ch-queue') < 0, 'drew an empty chart');
+
+		const full = load({ now: card() });
+		await drawn(full);
+		full.beat(beat());
+		check('both are drawn where both counters are published',
+			full.SD.innerHTML.indexOf('sd-ch-rate') >= 0
+			&& full.SD.innerHTML.indexOf('sd-ch-queue') >= 0, 'lost the charts');
+	}
+
+	group('switching tabs costs nothing, because nothing is rebuilt');
+
+	{
+		const env = load({ now: card() });
+		await drawn(env);
+		env.beat(beat());
+		const h = env.SD.innerHTML;
+		// All three panels are in the page at once. That is what makes a
+		// switch a `hidden` toggle rather than a redraw -- and it keeps every
+		// word on the page findable with the browser's own find.
+		check('every panel is in the markup',
+			h.indexOf('data-panel="perf"') >= 0 && h.indexOf('data-panel="rec"') >= 0
+			&& h.indexOf('data-panel="card"') >= 0, 'a panel is missing');
+		const settled = env.SD.writes;
+		env.tab('card');
+		check('pressing a tab rewrites nothing', env.SD.writes === settled,
+			'writes ' + settled + ' -> ' + env.SD.writes);
+		// The real property: which tab is open is not part of the page's
+		// shape, so the heartbeat two seconds later does not rebuild the page
+		// and take the focus off the tab just pressed.
+		env.beat(beat());
+		env.beat(beat());
+		check('and the heartbeat after it does not either', env.SD.writes === settled,
+			'writes ' + settled + ' -> ' + env.SD.writes);
 	}
 
 	done();
