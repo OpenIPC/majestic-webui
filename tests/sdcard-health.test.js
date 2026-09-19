@@ -18,7 +18,23 @@
 const { check, group, done } = require('./assert');
 const H = require('../www/a/sdcard-health.js');
 
-const recording = { v: { records_state: 0, records_fragments_written_total: 400 } };
+// A recorder that has published everything needed to call the card healthy.
+// Saying "nothing is wrong" needs every counter that could say otherwise to
+// have been READ, so the fixture carries them all and the cases below take
+// them away one at a time.
+const FULL = {
+	records_state: 0,
+	records_fragments_written_total: 400,
+	records_fragments_dropped_total: 0,
+	records_write_errors_total: 0,
+	records_sync_errors_total: 0,
+};
+const recording = { v: FULL };
+const without = (k) => {
+	const v = Object.assign({}, FULL);
+	delete v[k];
+	return { v: v };
+};
 const clean = { state: 'ok', kept: 17, seen: 17, total: 17, at: -1, from: -1 };
 const readAll = { state: 'done', bytes: 60134761873, badChunks: 0, findings: [], phase: 2 };
 
@@ -44,6 +60,36 @@ function main() {
 		check('a heartbeat that has not landed claims nothing at all',
 			asking.level === 'unknown' && !/card/.test(asking.text), asking.text);
 		check('only the reading is allowed to be ok', live.level === 'ok' && asking.level !== 'ok' && absent.level !== 'ok');
+	}
+
+	group('a counter that was never published is not a counter that read zero');
+	{
+		// The mistake this guards is one line of arithmetic: summing the two
+		// error counters with a `|| 0` fallback turns "this build does not
+		// report write errors" into "no write has failed", and the healthy
+		// branch then calls the card fine on the strength of a reading nobody
+		// took. Every clause above the healthy one is silent when its counter
+		// is missing, which is right — but silence from all of them is not
+		// evidence of health.
+		for (const k of ['records_write_errors_total', 'records_sync_errors_total',
+			'records_fragments_dropped_total']) {
+			const partial = H.keeping(without(k));
+			check('without ' + k.replace('records_', '') + ' the card is not called healthy',
+				partial.level !== 'ok', JSON.stringify(partial));
+			check('and it says the camera does not publish enough',
+				/does not publish/.test(partial.text), partial.text);
+		}
+		// Zeroes that were actually read are a different thing entirely, and
+		// must still be allowed to mean what they say.
+		check('but counters that read zero do say the card is keeping up',
+			H.keeping(recording).level === 'ok', JSON.stringify(H.keeping(recording)));
+		// A real failure still outranks the missing-counter branch: the point
+		// is not to go quiet, it is not to reassure.
+		const bad = without('records_sync_errors_total');
+		bad.v.records_write_errors_total = 3;
+		check('a failure that WAS reported is still reported',
+			H.keeping(bad).level === 'bad' && /3 writes/.test(H.keeping(bad).text),
+			JSON.stringify(H.keeping(bad)));
 	}
 
 	group('a card nothing has been recorded to has measured nothing');

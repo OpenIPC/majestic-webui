@@ -32,6 +32,11 @@
 
 	function num(v, k) { return (v && typeof v[k] === 'number') ? v[k] : null; }
 
+	// The two counters that have to have been READ before the card may be
+	// called healthy. They are the same fault caught at different depths, which
+	// is why they are summed into one sentence rather than listed apart.
+	var ERR_KEYS = ['records_write_errors_total', 'records_sync_errors_total'];
+
 	// ---------------------------------------------------------- keeping up ---
 	//
 	// The three-state gate every consumer of the heartbeat in this tree uses:
@@ -80,7 +85,17 @@
 					' been dropped since the camera started.',
 			};
 		}
-		var errs = (num(v, 'records_write_errors_total') || 0) + (num(v, 'records_sync_errors_total') || 0);
+		// `|| 0` here would have been the exact mistake this module is about.
+		// Summing two counters with a zero fallback turns "this build does not
+		// publish write errors" into "no write has failed", and the healthy
+		// branch below then says the card is keeping up on the strength of a
+		// reading nobody took. Absent and zero are collected separately, and
+		// only a counter that actually arrived may be added up.
+		var seen = 0, errs = 0, i;
+		for (i = 0; i < ERR_KEYS.length; i++) {
+			var n = num(v, ERR_KEYS[i]);
+			if (n !== null) { seen++; errs += n; }
+		}
 		if (errs) {
 			return {
 				kind: 'errors', level: 'bad',
@@ -97,6 +112,18 @@
 				kind: 'marginal', level: 'warn',
 				text: 'The card is falling behind — clips are waiting to be written, though none have ' +
 					'been lost yet.',
+			};
+		}
+		// Everything above is a reason to say something is WRONG, and each one
+		// is silent when its counter is missing. Saying the card is fine is the
+		// opposite kind of claim: it needs every one of those counters to have
+		// been read and come back clean. A build that reports the recorder's
+		// state but not its failures cannot support it, so it does not get it.
+		if (seen < ERR_KEYS.length || dropped === null) {
+			return {
+				kind: 'partial', level: 'unknown',
+				text: 'Nothing has gone wrong that this camera can report, but it does not publish ' +
+					'everything needed to say the card is keeping up.',
 			};
 		}
 		return { kind: 'ok', level: 'ok', text: 'The card is keeping up with the recorder.' };
