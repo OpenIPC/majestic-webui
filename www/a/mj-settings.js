@@ -700,10 +700,18 @@
 		const input = document.getElementById('mj-search');
 		if (!wrap || !input) return;
 		wrap.classList.remove('d-none');
+		let requiz = 0;
 		input.addEventListener('input', () => {
 			state.q = input.value;
 			buildNav();
 			highlightPanel();
+			// A <mark> carries padding, so adding or removing one can move a
+			// hint across the four-line boundary and make the clamp verdict
+			// taken at mount wrong. Re-measured, but on a debounce rather than
+			// per keystroke: the reading costs a layout flush, and the answer
+			// only matters once somebody has stopped typing.
+			clearTimeout(requiz);
+			requiz = setTimeout(foldHints, 120);
 		});
 	}
 
@@ -2055,8 +2063,21 @@
 			const box = isKnob(f) ? strip
 				: geoField ? colGeo
 				: restCols(f.section).firstElementChild;
+			// `live` is the STRIP's presentation, not the live-write behaviour:
+			// it swaps the detent slider in and drops the hint, the help, the
+			// range and the x-requires warning, because a knob is four cells of
+			// an instrument with no room for prose. Right in the strip; wrong
+			// in the card under the deck, where it left the three gain rows
+			// with no explanation at all while the selects beside them kept
+			// theirs — a row missing its hint looks exactly like a row that
+			// never had one, which is the failure this leaf exists to stop.
+			//
+			// Whether the field WRITES live is decided from the schema
+			// (`pushes`, below the widget dispatch) and is untouched by this,
+			// so a knob in the card still moves the picture as it is dragged.
 			const field = renderField(box, f.dot, f.key, f.sub,
-				getDotted(state.config, f.dot), { live: true, hidden: geoField });
+				getDotted(state.config, f.dot),
+				{ live: isKnob(f) || geoField, hidden: geoField });
 			if (!field) continue;
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
