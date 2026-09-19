@@ -196,7 +196,11 @@
 				// A failed poll is not a reading. The heartbeat says so, and
 				// turning that into "the recorder is fine" is the one answer
 				// that must never be invented.
-				if (!s || !s.ok || !s.m) { recorder = null; render(); return; }
+				// A failed poll ends the run of consecutive samples, the same
+				// rule the SD-card page follows against the same heartbeat: the
+				// warning below is about a queue that has not drained over a
+				// window, and a window with a hole in it is not that window.
+				if (!s || !s.ok || !s.m) { recorder = null; queuedTicks = 0; render(); return; }
 				const v = s.m.v;
 				recorder = typeof v.records_state === 'number'
 					? { v: v } : { absent: true };

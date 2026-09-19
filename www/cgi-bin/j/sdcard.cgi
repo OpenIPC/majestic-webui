@@ -344,6 +344,41 @@ probe_span() {
 SCAN_DIR=/tmp/webui/sdscan
 PROBE_FILE=$SCAN_DIR/probe.json
 
+# One destructive operation at a time, camera-wide.
+#
+# Format and the standalone capacity check both write raw markers across the
+# whole device, and format additionally repartitions and makes a filesystem.
+# Interleaved, they read back each other's markers and reach verdicts about a
+# card neither of them was alone with -- and one can be writing sector zero
+# while the other is mounting what it just made. Each guards mount state on its
+# own way in, but that check is a moment and these run for many seconds.
+WIPE_LOCK=/tmp/webui/sdwipe.lock
+WIPE_LOCK_STALE=300
+
+wipe_guard() {
+	mkdir -p /tmp/webui 2>/dev/null
+	if mkdir "$WIPE_LOCK" 2>/dev/null; then
+		printf '%s' "$(date +%s 2>/dev/null || echo 0)" > "$WIPE_LOCK/at" 2>/dev/null
+		return 0
+	fi
+	wg_at=$(cat "$WIPE_LOCK/at" 2>/dev/null)
+	case "$wg_at" in ''|*[!0-9]*) wg_at=0;; esac
+	wg_now=$(date +%s 2>/dev/null)
+	case "$wg_now" in ''|*[!0-9]*) wg_now=0;; esac
+	if [ "$wg_at" -gt 0 ] && [ "$wg_now" -gt 0 ] &&
+		[ $((wg_now - wg_at)) -lt "$WIPE_LOCK_STALE" ]; then
+		err="the card is already being formatted or checked on this camera"
+		return 1
+	fi
+	# Whatever held this is gone. rm -r, never rmdir: the lock carries its own
+	# timestamp inside it, and rmdir fails silently on a directory that is not
+	# empty, which is how the speed-test lock leaked one per run.
+	rm -rf "$WIPE_LOCK" 2>/dev/null
+	mkdir "$WIPE_LOCK" 2>/dev/null || { err="the card could not be reserved for this"; return 1; }
+	printf '%s' "$wg_now" > "$WIPE_LOCK/at" 2>/dev/null
+	return 0
+}
+
 # Turn what probe_span measured into the log and the stored record. One place,
 # so the format path and the standalone check cannot come to word it differently
 # -- the drift p/pages.cgi exists to prevent, in a smaller place.
@@ -363,9 +398,10 @@ span_report() {
 		;;
 	esac
 	mkdir -p "$SCAN_DIR" 2>/dev/null
-	if printf '{"state":"%s","kept":%s,"seen":%s,"total":%s,"at":%s,"from":%s,"span":%s,"at_s":%s}' \
+	if printf '{"state":"%s","kept":%s,"seen":%s,"total":%s,"at":%s,"from":%s,"span":%s,"card":"%s","at_s":%s}' \
 		"$span_state" "$span_kept" "$span_seen" "$span_total" "$span_at" "$span_from" \
-		"${sn_span:-0}" "$(date +%s 2>/dev/null || echo 0)" > "$PROBE_FILE.$$" 2>/dev/null
+		"${sn_span:-0}" "$(json_str "$(card_id)")" "$(date +%s 2>/dev/null || echo 0)" \
+		> "$PROBE_FILE.$$" 2>/dev/null
 	then
 		mv -f "$PROBE_FILE.$$" "$PROBE_FILE" 2>/dev/null || rm -f "$PROBE_FILE.$$" 2>/dev/null
 	else
@@ -617,6 +653,8 @@ ensure_node() {
 }
 
 do_format() {
+	wipe_guard || return
+	trap 'rm -rf "$WIPE_LOCK" 2>/dev/null' EXIT INT TERM HUP
 	fs="${POST_fs:-vfat}"
 	case "$fs" in vfat|ext4|exfat) ;; *) err="unsupported filesystem"; return;; esac
 	command -v "mkfs.$fs" >/dev/null 2>&1 || { err="mkfs.$fs not installed"; return; }
@@ -1098,6 +1136,8 @@ do_speedtest() {
 # mounted between the render and the press.
 do_cardcheck() {
 	swap_guard || return
+	wipe_guard || return
+	trap 'rm -rf "$WIPE_LOCK" 2>/dev/null' EXIT INT TERM HUP
 	cc_mounted=$(awk '$1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts)
 	[ -z "$cc_mounted" ] ||
 		{ err="the card is mounted; this erases it, so unmount it first"; return; }
@@ -1160,11 +1200,12 @@ do_scanstart() {
 	sc_bin=$(sdscan_bin)
 	[ -n "$sc_bin" ] || { err="this camera does not have the card checker installed"; return; }
 
-	# Cleared here rather than only in the worker, so a stop raised against the
-	# previous run cannot end this one before it starts.
-	mkdir -p "$SCAN_DIR" 2>/dev/null
-	rm -f "$STOP_FILE" "$STATE_FILE" 2>/dev/null
-
+	# Nothing is cleared here, deliberately. Two requests can both get past the
+	# check above -- it is a moment, and the worker's own lock is what actually
+	# decides -- and a loser that had already removed these files would have
+	# taken the winner's stop flag and its fresh journal with it. The worker
+	# clears them once it owns the lock, which is the only point at which it is
+	# known who they belong to.
 	# Detached, with ALL THREE descriptors closed. This is not tidiness: the
 	# background job inherits the pipe the web server reads this CGI's output
 	# from, and while it holds that pipe open the HTTP response is never
@@ -1200,11 +1241,32 @@ do_scanstop() {
 # rename on a filesystem that does not give us the atomic swap we asked for. A
 # half-written object would be spliced into this document and break the parse
 # for every client, including the banner on every page.
+# The card in the slot right now, by its own CID register. Empty when there is
+# none, or when the kernel does not expose it.
+card_id() { cat "$SYS/device/cid" 2>/dev/null; }
+
 scan_frag() {
 	sf_body=$(cat "$1" 2>/dev/null)
 	case "$sf_body" in
-		'{'*'}') printf '"%s":%s,' "$2" "$sf_body";;
+		'{'*'}') ;;
+		*) return 0;;
 	esac
+	# Does this journal describe the card that is in the slot NOW?
+	#
+	# Neither file is removed when a card is taken out -- nothing is watching
+	# the slot -- so without this a completed scan or capacity check is served
+	# as a verdict about whatever card follows it. On a page whose whole premise
+	# is never claiming what has not been established, handing a fresh card the
+	# previous one's "every point held what was written to it" is the worst
+	# thing it could say.
+	#
+	# A journal written before this carried no card at all. It is dropped rather
+	# than shown, for the same reason: it cannot be matched, so it cannot be
+	# vouched for.
+	sf_now=$(card_id)
+	sf_was=$(printf '%s' "$sf_body" | sed -n 's/.*"card":"\([^"]*\)".*/\1/p')
+	[ -n "$sf_now" ] && [ "$sf_was" = "$sf_now" ] || return 0
+	printf '"%s":%s,' "$2" "$sf_body"
 }
 
 # Make the controller look for a card again.

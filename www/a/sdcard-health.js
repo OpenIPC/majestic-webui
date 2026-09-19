@@ -108,10 +108,17 @@
 		// that will not drain says the card is behind while there is still
 		// time to do something about it.
 		if (queued) {
+			// "though none have been lost yet" is a claim, and it rests on a
+			// counter. On a build that publishes the queue depth but not the
+			// dropped count, saying it would be reassurance the camera never
+			// offered -- so the clause is gated on the reading, not the warning.
 			return {
 				kind: 'marginal', level: 'warn',
-				text: 'The card is falling behind — clips are waiting to be written, though none have ' +
-					'been lost yet.',
+				text: dropped === null
+					? 'The card is falling behind — clips are waiting to be written. This camera does ' +
+						'not report whether any have been lost.'
+					: 'The card is falling behind — clips are waiting to be written, though none have ' +
+						'been lost yet.',
 			};
 		}
 		// Everything above is a reason to say something is WRONG, and each one

@@ -254,6 +254,59 @@ function main() {
 		} finally { fs.rmSync(st.dir, { recursive: true, force: true }); }
 	}
 
+	group('a newline in a filename does not make a file disappear');
+	{
+		const st = stage({ devBytes: 0 });
+		try {
+			// A newline is legal in a filename, and a newline-delimited list
+			// turns one such file into two paths that are not files. Both
+			// halves then fail the existence test, so the file is never read
+			// while the counts go on describing a walk that did not happen.
+			const odd = path.join(st.mp, '2026-09-18', 'a\nb.mp4');
+			fs.writeFileSync(odd, Buffer.alloc(st.CH + 32, 0x44));
+			const j = run(st);
+			check('the run finished', j.state === 'done', JSON.stringify(j));
+			check('all three files were counted', j.files === 3, String(j.files));
+			check('and all three were walked', j.filesDone === 3, String(j.filesDone));
+			// The one that proves it was actually read rather than skipped as
+			// missing: a file nobody read is not a file anybody vanished.
+			check('none of them went missing', j.vanished === 0, String(j.vanished));
+			check('nothing was blamed on the card', j.badChunks === 0, JSON.stringify(j.findings));
+		} finally { fs.rmSync(st.dir, { recursive: true, force: true }); }
+	}
+
+	group('a lock is only held by the process that took it');
+	{
+		const st = stage({ devBytes: 0 });
+		try {
+			fs.mkdirSync(st.tmp, { recursive: true });
+			const lock = path.join(st.tmp, 'sdscan.lock');
+			fs.mkdirSync(lock);
+			// A pid that is alive, with a start time that is not its own. This
+			// is a recycled pid: `kill -0` answers for whatever holds the
+			// number now, so without the start time a scan killed at some pid
+			// stays locked out for as long as an unrelated long-lived process
+			// happens to hold it -- which can be for ever.
+			fs.writeFileSync(path.join(lock, 'pid'), String(process.pid));
+			fs.writeFileSync(path.join(lock, 'start'), '1');
+			const j = run(st);
+			check('a live pid with the wrong start time does not hold it',
+				j.state === 'done', JSON.stringify(j));
+
+			// And the same pid with its real start time does hold it.
+			const real = fs.readFileSync('/proc/' + process.pid + '/stat', 'utf8').split(' ')[21];
+			fs.mkdirSync(lock, { recursive: true });
+			fs.writeFileSync(path.join(lock, 'pid'), String(process.pid));
+			fs.writeFileSync(path.join(lock, 'start'), real);
+			fs.rmSync(path.join(st.tmp, 'sdscan'), { recursive: true, force: true });
+			let kept = false;
+			try { run(st); } catch (e) { kept = true; }
+			kept = kept || !fs.existsSync(path.join(st.tmp, 'sdscan', 'state.json'));
+			check('a live pid with its own start time keeps a scan out', kept,
+				'the second run wrote state anyway');
+		} finally { fs.rmSync(st.dir, { recursive: true, force: true }); }
+	}
+
 	group('the state file is always whole');
 	{
 		const st = stage({});
@@ -261,7 +314,7 @@ function main() {
 			const j = run(st);
 			check('it parses as JSON', typeof j === 'object' && j !== null);
 			for (const k of ['state', 'phase', 'bytes', 'total', 'chunks', 'badChunks',
-				'medianMs', 'buckets', 'findings', 'direct', 'startedAt']) {
+				'medianMs', 'buckets', 'findings', 'direct', 'startedAt', 'vanished', 'card']) {
 				check('it carries ' + k, Object.prototype.hasOwnProperty.call(j, k), Object.keys(j).join(','));
 			}
 			// Published rather than acted on quietly: without O_DIRECT the scan

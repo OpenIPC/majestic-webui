@@ -507,7 +507,12 @@
 			+ '<div class="x-small text-secondary mt-1">'
 			+ humanBytes(got) + ' of ' + humanBytes(total) + ' — '
 			+ (sc.phase === 2
-				? 'now reading the parts of the card no recording occupies.'
+				// Says what the sweep actually does. It starts at the beginning
+				// of the device and runs to the end, so it covers the
+				// recordings again on its way through -- describing it as only
+				// the space between them would be a claim about work that is
+				// not being done, and would not account for the progress total.
+				? 'now sweeping the whole card, including the parts already read.'
 				: 'reading the recordings.')
 			+ (sc.direct === false
 				? ' This camera cannot read past its own cache, so the check is slower and the '
@@ -1000,7 +1005,12 @@
 	// exception is the first reading, which is worth showing without waiting
 	// for the next poll.
 	function onMetrics(s) {
-		if (!s || !s.ok || !s.m) { recorder = null; rateBps = null; return; }
+		// A poll that failed ends the run of consecutive samples. The warning
+		// below says the queue has not drained over a window of them, and a
+		// window with a hole in it is not that window -- two queued readings
+		// either side of an unanswered poll would otherwise raise it, or hold
+		// it up, on evidence that was never continuous.
+		if (!s || !s.ok || !s.m) { recorder = null; rateBps = null; queuedTicks = 0; return; }
 		const v = s.m.v;
 		const had = recorder !== null;
 		recorder = typeof v.records_state === 'number' ? { v: v } : { absent: true };

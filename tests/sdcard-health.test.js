@@ -188,6 +188,26 @@ function main() {
 		check('a fault found mid-run is still reported at once', /2 pieces/.test(v2.reads.text), v2.reads.text);
 	}
 
+	group('the queue warning does not promise what the camera never reported');
+	{
+		// "though none have been lost yet" is a claim, and it rests on the
+		// dropped counter. On a build that publishes the queue depth but not
+		// that counter, saying it is reassurance nobody offered -- and it is
+		// reassurance attached to a warning, which is where it is least likely
+		// to be questioned.
+		const noDropped = without('records_fragments_dropped_total');
+		const warned = H.keeping(noDropped, true);
+		check('it still warns about the queue', warned.level === 'warn', JSON.stringify(warned));
+		check('but it does not say nothing has been lost',
+			!/none have been lost/.test(warned.text), warned.text);
+		check('it says the camera cannot tell',
+			/does not report whether any have been lost/.test(warned.text), warned.text);
+		// With the counter present and zero, the reassurance is earned.
+		const full = H.keeping(recording, true);
+		check('a camera that does report it keeps the reassurance',
+			/none have been lost/.test(full.text), full.text);
+	}
+
 	group('the headline takes the worst line, never an average');
 	{
 		const v = ask({
