@@ -927,7 +927,7 @@
 		state.fields = [];
 		state.repaint = [];
 		state.initial = {};
-		state.cols = null;
+		state.cols = [];
 		state.liveSync = [];
 		// dropped with the fields they paint: a stale closure would keep
 		// writing into a row that is no longer in the document
@@ -986,7 +986,7 @@
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
-			state.cols = cols;
+			state.cols.push(cols);
 			body.appendChild(cols);
 			card.appendChild(body);
 			form.appendChild(card);
@@ -1778,11 +1778,33 @@
 		const mirror = fields.find(f => f.key === 'mirror' && f.sub.type === 'boolean');
 		const flip = fields.find(f => f.key === 'flip' && f.sub.type === 'boolean');
 		const useGeo = !!(mirror && flip);
-		// The strip is for knobs, so it is integers that decide whether there is
-		// one. A build that marks only booleans x-live has no strip and loses
-		// nothing: they render in the row below, where a switch has room to be a
-		// switch rather than a fifth cell of a four-cell instrument.
-		const hasTone = fields.some(f => f.sub.type === 'integer');
+		// What this leaf has an instrument for, and what it has not.
+		//
+		// LIVE_META is the leaf's whole vocabulary: four tone knobs it has a
+		// name, a Scene preset and a Stock button for, and the two switches the
+		// Orientation pad replaces. What arrives, though, is the daemon's
+		// decision — every x-live key of the owning group is lifted here
+		// (mj-tree.js, rule 2) — so the two sets were never the same set; they
+		// merely coincided, and nothing said what should happen when they stopped.
+		//
+		// They stopped when majestic classed eight isp keys live. Three of them
+		// are integers, and this used to read `f.sub.type === 'integer'`, which
+		// put every one of them in the strip — whose cells are dealt
+		// `flex: 1 1 0`. Seven knobs then shared the 851px four were drawn for:
+		// 110px each, the readout printed over the name, each label broken to one
+		// word a line. The picture paid for it as well, since --mj-pv-reserve
+		// holds room for ONE 76px row of knobs and the strip had become two.
+		//
+		// So the strip is the knobs this leaf knows, and nothing ever joins them.
+		// A lifted key it cannot name is drawn under the deck in its own
+		// section's card, as ordinary rows in the ordinary two columns — the same
+		// place, and the same shape, as the leftovers of a section the leaf
+		// absorbed. The picture keeps its reserve whatever the daemon lifts next,
+		// and a key that arrives tomorrow is on the page rather than in the
+		// instrument. A build that marks only booleans x-live has no strip and
+		// loses nothing, exactly as before.
+		const isKnob = f => f.sub.type === 'integer' && !!LIVE_META[f.key];
+		const hasTone = fields.some(isKnob);
 
 		// Out here rather than beside the stage: the knobs write to the camera
 		// whether or not the player scripts loaded, so the promise to put it
@@ -1812,12 +1834,56 @@
 		deck.appendChild(colGeo);
 		form.appendChild(deck);
 
+		// Under the deck: one card per section, holding what the deck has no
+		// place for. Made on demand and remembered, because two things end up
+		// here for two different reasons — the keys above that this leaf cannot
+		// name, and the leftovers of a section it absorbed — and a section that
+		// has both must not appear twice under two copies of its own name.
+		//
+		// A section the leaf did NOT absorb still has a leaf of its own, so its
+		// card says so: the page it came from carries liftedNote() pointing here,
+		// and this is the other half of that sentence. An absorbed section has no
+		// page left to point at and gets no note.
+		const restCards = new Map();
+		function restCols(sec) {
+			let cols = restCards.get(sec);
+			if (cols) return cols;
+			const card = el('div', 'card mj-live-rest');
+			const body = el('div', 'card-body');
+			const head = el('div', 'mj-live-head');
+			const h = el('h3', 'mj-cap');
+			h.textContent = label(sec);
+			head.appendChild(h);
+			head.appendChild(el('span', 'mj-live-rule'));
+			if (!absorbed(sec)) {
+				// Named once. The heading above already says which section this
+				// is, so the note says only where the rest of it went — the other
+				// half of the sentence liftedNote() prints over there.
+				const note = el('span', 'mj-live-note');
+				note.innerHTML = 'the rest is on <a href="?tab=' + esc(sec) +
+					'">its own page</a>';
+				head.appendChild(note);
+			}
+			body.appendChild(head);
+			cols = el('div', 'mj-cols');
+			cols.appendChild(el('div', 'mj-col'));
+			cols.appendChild(el('div', 'mj-col'));
+			state.cols.push(cols);
+			body.appendChild(cols);
+			card.appendChild(body);
+			form.appendChild(card);
+			restCards.set(sec, cols);
+			return cols;
+		}
+
 		for (const f of fields) {
 			const geoField = useGeo && (f === mirror || f === flip);
 			// The geometry checkboxes stay real fields — hidden — beside the pad
 			// that replaces them, so Save and dirty tracking never learn any of
 			// this happened.
-			const box = (!geoField && f.sub.type === 'integer') ? strip : colGeo;
+			const box = isKnob(f) ? strip
+				: geoField ? colGeo
+				: restCols(f.section).firstElementChild;
 			const field = renderField(box, f.dot, f.key, f.sub,
 				getDotted(state.config, f.dot), { live: true, hidden: geoField });
 			if (!field) continue;
@@ -1919,22 +1985,7 @@
 		const claimed = new Set(state.fields.map(f => f.dot));
 		for (const sec of absorbedSections()) {
 			if (!sectionFields(sec).some(f => !claimed.has(f.dot))) continue;
-			const card = el('div', 'card mj-live-rest');
-			const body = el('div', 'card-body');
-			const head = el('div', 'mj-live-head');
-			const h = el('h3', 'mj-cap');
-			h.textContent = label(sec);
-			head.appendChild(h);
-			head.appendChild(el('span', 'mj-live-rule'));
-			body.appendChild(head);
-			const cols = el('div', 'mj-cols');
-			cols.appendChild(el('div', 'mj-col'));
-			cols.appendChild(el('div', 'mj-col'));
-			state.cols = cols;
-			body.appendChild(cols);
-			card.appendChild(body);
-			form.appendChild(card);
-			renderProps(cols.firstElementChild, sec,
+			renderProps(restCols(sec).firstElementChild, sec,
 				((state.schema.properties || {})[sec] || {}).properties || {}, claimed);
 		}
 	}
@@ -8507,8 +8558,16 @@
 	// here instead — at mount and on resize, never while a row toggles. Showing
 	// or hiding a row then only moves what is under it in its own column, which
 	// is what makes the form predictable to edit.
+	// Every .mj-cols the page put up, not one. The Live adjustments leaf can
+	// carry more than one card under its deck — a section it lifted keys out of
+	// gets a card of its own — and a box nobody deals keeps all of its rows in
+	// the first column with the second one empty beside it, which is the
+	// half-empty grid line tools/check-layout.mjs exists to catch.
 	function layoutCols() {
-		const box = state.cols;
+		(state.cols || []).forEach(dealCols);
+	}
+
+	function dealCols(box) {
 		// below md the columns stack, and every split reads the same stacked
 		if (!box || !WIDE.matches) return;
 		const a = box.children[0], b = box.children[1];
