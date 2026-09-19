@@ -2239,6 +2239,51 @@ button.mj-osd-chip,
 	}
 }
 
+/* A lifted knob that did not make it into the strip.
+ *
+ * .mj-live-row is the STRIP's shape: a name pinned at 5.75rem with the track
+ * filling the rest, which works when the name is "Brightness" and does not
+ * when it is "Sensor digital gain" -- that wraps to two lines inside 92px and
+ * sits in a card whose other rows put their label above their control, so one
+ * card ends up drawn two ways.
+ *
+ * So a knob in the rest card takes the same quarter-turn the strip's own rows
+ * take: name and readout on the first line, the track with the whole of the
+ * second. Same grid, same reason -- a track sharing a line with a name has
+ * about ninety pixels to drag on -- and now the card reads as one card. */
+.mj-live-rest .mj-live-row {
+	display: grid;
+	grid-template-columns: 1fr auto auto auto;
+	grid-template-areas:
+		"name num delta rst"
+		"track track track track";
+	align-items: center;
+	gap: 0.3rem 0.4rem;
+}
+
+.mj-live-rest .mj-live-name {
+	grid-area: name;
+	flex: none;
+}
+
+.mj-live-rest .mj-live-track {
+	grid-area: track;
+	height: 1.25rem;
+}
+
+.mj-live-rest .mj-live-num {
+	grid-area: num;
+	width: 2.75rem;
+}
+
+.mj-live-rest .mj-live-delta {
+	grid-area: delta;
+}
+
+.mj-live-rest .mj-live-rst {
+	grid-area: rst;
+}
+
 .mj-live-track {
 	position: relative;
 	flex: 1 1 auto;
