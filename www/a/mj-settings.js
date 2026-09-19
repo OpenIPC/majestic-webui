@@ -10567,11 +10567,12 @@
 		bar.classList.toggle('d-flex', show);
 		bar.classList.toggle('d-none', !show);
 		// A sticky bar does not push anything; it sits on whatever is at the
-		// bottom of the window. On a leaf whose picture is sized from the
-		// viewport height that is the control row under the picture, so the
-		// picture gives the bar its height back while it is there — except
-		// on the Overlay leaf, which keeps that room at all times: see
-		// --mj-pv-toolbar in the stylesheet.
+		// bottom of the window — which can be a control, and a covered control
+		// is one that does nothing when pressed. The form grows by the bar's
+		// height instead, so the last row has somewhere to scroll to. It used
+		// to be the PICTURE that gave the room back, which shrank the video by
+		// 9% at the moment somebody nudged a knob: see .mj-has-toolbar in the
+		// stylesheet.
 		if (bar.parentNode) bar.parentNode.classList.toggle('mj-has-toolbar', show);
 
 		const lbl = document.getElementById('mj-dirty-count');
