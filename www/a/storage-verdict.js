@@ -96,6 +96,72 @@
 		return !!recorder;
 	}
 
+	// How much more footage the card can take before the oldest starts going.
+	//
+	// NOT the free space, which is the question it is easy to ask by mistake.
+	// The camera deletes the oldest recording once the card reaches
+	// records.maxUsage, so what can still be ADDED is the room up to that line,
+	// and the free space runs past it by whatever the threshold holds back.
+	// Measured on a 29 GB card at 94% with the threshold at 95%: 1.81 GB free
+	// against 0.36 GB of real headroom, so a page reading the free space
+	// promised five times the footage the camera was going to add.
+	//
+	// The shape of that error is worse than its size. Free space never falls
+	// below the reserve — at the threshold this card still has 1.46 GB of it —
+	// so a projection built on it has a floor it can never go under, and goes
+	// on offering that much footage for ever while the camera deletes a clip
+	// for every clip it writes.
+	//
+	// Here rather than on the page for the reason everything else in this file
+	// is: two places ask this question, and two sums are how they come to
+	// answer it differently.
+	//
+	// THREE answers, not two, and the third is the one this whole function is
+	// about. `known` false means a reading did not arrive — the card's own
+	// figures, or the threshold — and nothing may be said about how much
+	// footage is left, because the alternative is the very error being fixed
+	// here wearing different clothes:
+	//
+	//   - coercing an absent `used` to zero computes the headroom of an EMPTY
+	//     card, so a partial answer from the endpoint reads as a card with
+	//     everything still to give;
+	//   - treating an absent threshold as "no threshold" is worse, because the
+	//     page's configuration fetch resolves to {} when it FAILS. A request
+	//     that did not happen would then be evidence that the camera fills its
+	//     card to the brim, and the estimate would go back to counting free
+	//     space — which is exactly what this function exists to stop.
+	//
+	// `capped` stays the caller's cue that a threshold applies, and is only
+	// ever meaningful when `known`.
+	// A number, or NaN for anything that is not one.
+	//
+	// Written out rather than done with `+x`, because unary plus turns null,
+	// '' and false into 0 — all of which are ways a reading fails to arrive,
+	// and every one of them would pass an isFinite() check as a perfectly good
+	// zero. A usage of null read that way computes the headroom of an EMPTY
+	// card, which is the largest wrong answer this function can give.
+	function fin(x) {
+		if (typeof x === 'number') return isFinite(x) ? x : NaN;
+		if (typeof x === 'string' && x.trim() !== '') {
+			const n = +x;
+			return isFinite(n) ? n : NaN;
+		}
+		return NaN;
+	}
+
+	function headroom(total, used, cap) {
+		const t = fin(total), u = fin(used), c = fin(cap);
+		if (!isFinite(t) || !isFinite(u) || t <= 0 || u < 0) {
+			return { room: 0, capped: false, known: false };
+		}
+		const free = Math.max(0, t - u);
+		// A successful read always carries this key, because majestic answers
+		// with its defaults filled in. Absent means the answer never came.
+		if (!isFinite(c)) return { room: free, capped: false, known: false };
+		if (c <= 0 || c >= 100) return { room: free, capped: false, known: true };
+		return { room: Math.max(0, t * c / 100 - u), capped: true, known: true };
+	}
+
 	// Positive claims need positive evidence. A card is only known writable
 	// when the endpoint said so; a request that failed, or an answer this
 	// release does not understand, is an unknown card, and an unknown card
@@ -271,6 +337,7 @@
 
 	window.MajesticStorageVerdict = {
 		of: of, writable: writable, state: state, known: known,
+		headroom: headroom,
 		duration: duration,
 		onCard: onCard, prefixOf: prefixOf,
 	};

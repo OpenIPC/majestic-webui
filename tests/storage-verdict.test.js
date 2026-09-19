@@ -312,6 +312,84 @@ async function banners() {
 			/read-only/.test(env.banner()), env.banner().slice(0, 90));
 	}
 
+	group('how much footage is left is not how much free space there is');
+	{
+		const GB = 1073741824;
+		// The card this was measured on: 29.2 GB, 94% used, threshold at 95%.
+		const total = 30582176 * 1024, used = 28680560 * 1024;
+		const free = total - used;
+		const h = V.headroom(total, used, 95);
+		check('it is the room up to the threshold, not to the end of the card',
+			Math.abs(h.room - (total * 0.95 - used)) < 1, h.room + ' vs ' + free);
+		check('and it says a threshold applies', h.capped === true);
+		// The size of the error, on a real card: the page promised five times
+		// the footage the camera was going to add.
+		check('the free space overstates it several times over',
+			free / h.room > 4, (free / h.room).toFixed(1) + 'x');
+
+		// The shape of the error, which is worse than its size. At the
+		// threshold the card still holds 5% free, so a projection built on free
+		// space has a floor it can never go under -- it would go on promising
+		// 1.4 GB of footage for ever while the camera deleted a clip for every
+		// clip it wrote.
+		const atCap = V.headroom(total, total * 0.95, 95);
+		check('at the threshold there is no room left at all', atCap.room === 0, String(atCap.room));
+		check('though the card is not full', total - total * 0.95 > GB,
+			((total - total * 0.95) / GB).toFixed(2) + ' GB still free');
+		check('and past it there is still none',
+			V.headroom(total, total * 0.98, 95).room === 0);
+
+		// A threshold of 0 or 100 is a card that really does fill up, and there
+		// the free space is the right number rather than the wrong one. Both
+		// are READINGS, so both are known.
+		check('a threshold of zero means the free space', V.headroom(total, used, 0).room === free);
+		check('and it is a known answer', V.headroom(total, used, 0).known === true);
+		check('100 is the same thing said differently',
+			V.headroom(total, used, 100).room === free &&
+			V.headroom(total, used, 100).capped === false &&
+			V.headroom(total, used, 100).known === true);
+
+		// A card reporting more used than it has is nonsense, but it must not
+		// come back as a negative duration on the page.
+		check('an over-full card has no room rather than negative room',
+			V.headroom(total, total * 2, 95).room === 0 &&
+			V.headroom(total, total * 2, 0).room === 0);
+	}
+
+	group('a reading that never arrived is not a reading of zero');
+	{
+		const total = 30582176 * 1024, used = 28680560 * 1024;
+		// This is the same error the headroom sum exists to fix, wearing
+		// different clothes. Each of these would have produced a confident
+		// duration out of something nobody measured.
+
+		// The page's configuration fetch resolves to {} when it FAILS, so an
+		// absent threshold is not proof that the camera fills its card — it is
+		// proof of nothing. Reading it as "no threshold" sends the estimate
+		// straight back to counting free space.
+		for (const cap of [undefined, null, 'x', NaN]) {
+			const h = V.headroom(total, used, cap);
+			check('a threshold of ' + String(cap) + ' is not an answer', h.known === false,
+				JSON.stringify(h));
+		}
+
+		// An absent `used` coerced to zero computes the headroom of an EMPTY
+		// card, so a partial answer from the endpoint reads as one with
+		// everything still to give.
+		for (const u of [undefined, null, NaN, 'x']) {
+			const h = V.headroom(total, u, 95);
+			check('a usage of ' + String(u) + ' is not an answer', h.known === false, JSON.stringify(h));
+			check('and it offers no room at all', h.room === 0, JSON.stringify(h));
+		}
+		check('nor is a card with no size', V.headroom(0, used, 95).known === false);
+		check('nor one whose size did not arrive', V.headroom(undefined, used, 95).known === false);
+
+		// And the ordinary case is still known, or the gate above would have
+		// silenced the feature rather than corrected it.
+		check('a complete set of readings is still an answer',
+			V.headroom(total, used, 95).known === true);
+	}
+
 	done();
 }
 

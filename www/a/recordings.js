@@ -1188,10 +1188,47 @@
 		// footage actually costs per second.
 		const day = state.day.clips.reduce(function (a, c) { return a + c.dur; }, 0);
 		const bytes = state.day.clips.reduce(function (a, c) { return a + c.size; }, 0);
+		// Room before the OLDEST CLIPS START GOING, which is not the free
+		// space — see MajesticStorageVerdict.headroom for why, and for what
+		// reading the free space here was measured to promise.
+		const head = SV.headroom(total, used, mjGet(state.cfg, 'records.maxUsage'));
+		const room = head.room, capped = head.capped;
 		// A projection of how long the card will last is a promise about future
 		// writes, so it is only offered while future writes are possible.
-		const left = (d.health === 'ok' && day > 0 && bytes > 0)
-			? ' · about ' + TL.duration(free / (bytes / day)) + ' of footage left' : '';
+		//
+		// Past the threshold there is no such promise to make: the archive is a
+		// rolling window, and a duration there would be answering "how much
+		// more" with a number when the answer is "no more — it is trading the
+		// oldest for the newest now". That is the state a full camera sits in
+		// for the rest of its life, so it is the sentence most people will see.
+		const rate = (day > 0 && bytes > 0) ? bytes / day : 0;
+		// head.known is the gate, and it is not optional. A card response that
+		// arrived without its usage, or a configuration fetch that failed and
+		// resolved to {}, both reach here looking like ordinary numbers — and
+		// both would produce a confident duration out of a reading nobody took.
+		// Is anything actually being written? Both halves of the line below are
+		// present-tense claims about a running recorder, and neither survives
+		// one that is off: nothing is being deleted to make room when nothing
+		// needs room, and there is no "footage left" to count down when no
+		// footage is arriving. A camera switched off at the threshold, or one
+		// whose recorder has failed, sits in exactly that state — with a full
+		// card and a healthy filesystem, which is what carried it past the
+		// checks above.
+		//
+		// `enabled` is safe to require as a reading here: a configuration fetch
+		// that failed takes the threshold with it, so head.known is already
+		// false and nothing is claimed at all.
+		const rs = SV.state(state.recorder);
+		const writing = mjGet(state.cfg, 'records.enabled') === true &&
+			(rs === null || rs === 0 || rs === 1);
+		const left = (d.health !== 'ok' || !rate || !head.known) ? ''
+			: (capped && room <= 0)
+				? (writing
+					? ' · the oldest clips are being deleted to make room for new ones'
+					: ' · at the point where the oldest clips start being deleted')
+				: !writing ? ''
+					: ' · about ' + TL.duration(room / rate) + ' of footage left' +
+						(capped ? ' before the oldest is deleted' : '');
 
 		card.hidden = false;
 		el.innerHTML =
