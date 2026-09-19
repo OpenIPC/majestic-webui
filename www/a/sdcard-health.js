@@ -169,11 +169,20 @@
 		var how = scan.state === 'stopped'
 			? 'Stopped part-way, after reading ' + bytes(read)
 			: 'Read back ' + bytes(read);
+		// Clips the recorder deleted to make room while this was running. Not
+		// a fault, but they were not checked, so a clean result must not be
+		// read as covering them.
+		var gone = typeof scan.vanished === 'number' ? scan.vanished : 0;
+		var skipped = gone
+			? ' ' + gone + (gone === 1 ? ' clip was' : ' clips were') +
+				' deleted by the recorder while reading and were not checked.'
+			: '';
 		if (bad) {
 			return {
 				kind: 'bad', level: 'bad',
 				text: how + '. ' + bad + (bad === 1 ? ' piece' : ' pieces') + ' could not be read' +
-					(scan.moreFindings ? ' (the first ' + (scan.findings || []).length + ' are listed)' : '') + '.',
+					(scan.moreFindings ? ' (the first ' + (scan.findings || []).length + ' are listed)' : '') +
+					'.' + skipped,
 			};
 		}
 		// Deliberately not "the card is healthy". Everything that was there
@@ -182,7 +191,7 @@
 		return {
 			kind: 'ok', level: scan.state === 'stopped' ? 'unknown' : 'ok',
 			text: how + ', and all of it came back' +
-				(scan.state === 'stopped' ? ' — but the rest was not looked at.' : '.'),
+				(scan.state === 'stopped' ? ' — but the rest was not looked at.' : '.') + skipped,
 		};
 	}
 

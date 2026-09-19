@@ -45,6 +45,13 @@ for a in "$@"; do
 		count=*) count=\${a#count=};;
 	esac
 done
+if [ -n "$MJ_GONE_FILE" ] && [ "$src" = "$MJ_GONE_FILE" ]; then
+	off=$((skip * bs))
+	if [ "$off" -ge "$MJ_GONE_AT" ]; then
+		rm -f "$src"
+		exit 1
+	fi
+fi
 if [ -n "$MJ_ROT_FILE" ] && [ "$src" = "$MJ_ROT_FILE" ]; then
 	off=$((skip * bs))
 	if [ "$off" -ge "$MJ_ROT_FROM" ] && [ "$off" -lt "$MJ_ROT_TO" ]; then
@@ -120,6 +127,10 @@ function run(st, opts) {
 		env.MJ_ROT_FILE = opts.rot.file;
 		env.MJ_ROT_FROM = String(opts.rot.from);
 		env.MJ_ROT_TO = String(opts.rot.to);
+	}
+	if (opts.gone) {
+		env.MJ_GONE_FILE = opts.gone.file;
+		env.MJ_GONE_AT = String(opts.gone.at);
 	}
 	execFileSync('sh', [script, st.mp, st.dev], { encoding: 'utf8', env, stdio: 'pipe' });
 	return JSON.parse(fs.readFileSync(path.join(st.tmp, 'sdscan', 'state.json'), 'utf8'));
@@ -199,6 +210,27 @@ function main() {
 			fs.writeFileSync(path.join(lock, 'pid'), '999999');
 			const j = run(st);
 			check('a holder that has died is stepped over', j.state === 'done', JSON.stringify(j));
+		} finally { fs.rmSync(st.dir, { recursive: true, force: true }); }
+	}
+
+	group('a clip the recorder deleted mid-scan is not a fault of the card');
+	{
+		const st = stage({ devBytes: 0 });
+		try {
+			// majestic deletes the oldest clip whenever the card reaches
+			// records.maxUsage. On a card at 91% that happens every few
+			// minutes, to the very files at the front of the oldest-first list
+			// this walks — and an unlinked file reads exactly like a bad
+			// block, so without the guard a healthy full card reports
+			// unreadable footage, and more of it the fuller it is.
+			const j = run(st, { gone: { file: st.clip, at: st.CH } });
+			check('the run finished', j.state === 'done', JSON.stringify(j));
+			check('the card is not blamed', j.badChunks === 0, JSON.stringify(j));
+			check('and nothing is listed against it', j.findings.length === 0, JSON.stringify(j.findings));
+			// Counted rather than ignored: those bytes were not checked, so a
+			// clean result must not be read as covering them.
+			check('the clip is counted as skipped', j.vanished === 1, String(j.vanished));
+			check('the other clip was still walked', j.filesDone === 2, JSON.stringify(j));
 		} finally { fs.rmSync(st.dir, { recursive: true, force: true }); }
 	}
 
