@@ -198,8 +198,12 @@
 		// there are none: a read-only card, or one the span probe found
 		// smaller than it claims, reports free space that is fiction, and a
 		// line saying when deletion starts would be the same fiction twice.
+		// It also needs something to be deleting. records.maxUsage is one global
+		// threshold, and a card the recorder is not pointed at is never swept
+		// by it -- a spare card in the slot would otherwise be told its oldest
+		// clips go at 95% when nothing will ever touch them.
 		const maxUse = +mjGet(cfg, 'records.maxUsage');
-		const trusted = d.health === 'ok'
+		const trusted = d.health === 'ok' && configuredHere(d)
 			&& !(d.probe && (d.probe.state === 'wrapped' || d.probe.state === 'unstored'));
 		const mark = (trusted && maxUse > 0 && maxUse < 100) ? maxUse : 0;
 		return '<div class="d-flex justify-content-between x-small mb-1"><span class="fw-semibold">Storage</span>' + cap + '</div>'
@@ -456,13 +460,25 @@
 	// endpoint to work it out and hand the answer back would be a CGI relaying
 	// what the daemon already tells the browser directly — and a relay can be
 	// wrong about it in a way the daemon never is.
-	function recordingHere() {
-		if (!state || !state.mounted || !state.mountpoint) return false;
+	// Is the recorder CONFIGURED to write to this card? Enabled, and pointed at
+	// the mountpoint or somewhere under it -- records.path is a strftime
+	// template, so the directory it starts in is the part that names a card.
+	//
+	// Its own function because three things ask it and they must not disagree:
+	// whether to say "recording to this card", whether to offer the button
+	// that makes it so, and whether the storage bar may draw the line the
+	// recorder deletes at. A second card in a reader is mounted and healthy
+	// and nothing deletes from it.
+	function configuredHere(d) {
+		if (!d || !d.mounted || !d.mountpoint) return false;
 		if (mjGet(cfg, 'records.enabled') !== true) return false;
 		const pre = recPrefix();
 		if (!pre) return false;
-		if (pre !== state.mountpoint &&
-			pre.lastIndexOf(state.mountpoint + '/', 0) !== 0) return false;
+		return pre === d.mountpoint || pre.lastIndexOf(d.mountpoint + '/', 0) === 0;
+	}
+
+	function recordingHere() {
+		if (!configuredHere(state)) return false;
 		// Configured here is not the same as writing here. A rate that has not
 		// been derived yet is not evidence of either.
 		return rateBps !== null && rateBps > 1000;
@@ -753,8 +769,10 @@
 		if (!MC) return;
 		if (chRate) MC.dropChart(chRate);
 		if (chQueue) MC.dropChart(chQueue);
-		chRate = MC.makeChart('#sd-ch-rate', { h: 84, lo: 0, hi: null, colors: ['#5c70e8'] });
-		chQueue = MC.makeChart('#sd-ch-queue', { h: 84, lo: 0, hi: null, colors: ['#d1793a'] });
+		chRate = SD.querySelector('#sd-ch-rate')
+			? MC.makeChart('#sd-ch-rate', { h: 84, lo: 0, hi: null, colors: ['#5c70e8'] }) : null;
+		chQueue = SD.querySelector('#sd-ch-queue')
+			? MC.makeChart('#sd-ch-queue', { h: 84, lo: 0, hi: null, colors: ['#d1793a'] }) : null;
 	}
 
 	// A pixel-space chart renders nothing while its host is zero wide, which is
@@ -787,21 +805,27 @@
 	// the rows below. What does move is how fast the camera is writing, and how
 	// many clips are waiting to be -- and the queue is the one warning that
 	// arrives while there is still time to act on it, before anything is lost.
+	// Each trace is gated on the counter that feeds it, not on the recorder
+	// being reportable at all. A build that publishes records_state but not the
+	// byte total, or not the queue gauge, would otherwise get a labelled panel
+	// that never draws a line -- which is the same mistake as printing a zero
+	// for a reading nobody took, made in a bigger box.
 	function chartBoxes() {
-		return '<div class="row g-3 mb-3">'
-			+ '<div class="col-12 col-lg-6"><div class="st-panel">'
-			+ '<div class="st-chart-head"><span class="mj-cap">Write rate</span></div>'
-			+ '<div class="mj-chart" id="sd-ch-rate"></div></div></div>'
-			+ '<div class="col-12 col-lg-6"><div class="st-panel">'
-			+ '<div class="st-chart-head"><span class="mj-cap">Clips waiting to be written</span></div>'
-			+ '<div class="mj-chart" id="sd-ch-queue"></div></div></div>'
-			+ '</div>';
+		const v = (recorder && !recorder.absent) ? recorder.v : null;
+		if (!v) return '';
+		const box = (id, cap) => '<div class="col-12 col-lg-6"><div class="st-panel">'
+			+ '<div class="st-chart-head"><span class="mj-cap">' + cap + '</span></div>'
+			+ '<div class="mj-chart" id="' + id + '"></div></div></div>';
+		let out = '';
+		if (typeof v.records_bytes_written_total === 'number') out += box('sd-ch-rate', 'Write rate');
+		if (typeof v.records_queue_fragments === 'number') out += box('sd-ch-queue', 'Clips waiting to be written');
+		return out ? '<div class="row g-3 mb-3">' + out + '</div>' : '';
 	}
 
 	function perfPanel(d, L) {
 		return '<div class="mj-live-head"><h3 class="mj-cap">Performance</h3>'
 			+ '<span class="mj-live-rule"></span></div>'
-			+ (recorder && !recorder.absent ? chartBoxes() : '')
+			+ chartBoxes()
 			+ '<dl class="small list mb-2" data-mj="perfrows">' + L.perfrows + '</dl>'
 			// Presence, not value: the note belongs to rows that exist at all,
 			// so it reads `hasLive` -- which survives blanking -- rather than
@@ -814,8 +838,8 @@
 	}
 
 	function recPanel(d) {
-		const rp = recPrefix(), recEnabled = mjGet(cfg, 'records.enabled') === true;
-		const onThisCard = d.mounted && rp === d.mountpoint;
+		const recEnabled = mjGet(cfg, 'records.enabled') === true;
+		const onThisCard = configuredHere(d);
 		return '<div class="mj-live-head"><h3 class="mj-cap">Recording</h3>'
 			+ '<span class="mj-live-rule"></span>'
 			+ '<div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="sd-rec-toggle"'

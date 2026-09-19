@@ -324,6 +324,52 @@ async function drawn(env) {
 			h.indexOf('mj-evidence') < 0, 'invented a verdict');
 	}
 
+	group('a card nothing records to is not told when its clips will go');
+
+	{
+		// records.maxUsage is one global threshold and the recorder sweeps one
+		// path. A second card, mounted and healthy and pointed at by nothing,
+		// would otherwise be told its oldest clips go at 95% when nothing will
+		// ever touch them.
+		const here = load({ now: card({ mountpoint: '/mnt/sd' }) });
+		await drawn(here);
+		check('the card being recorded to shows the deletion line',
+			here.SD.innerHTML.indexOf('oldest clips deleted at 95%') >= 0, 'missing');
+
+		const spare = load({ now: card({ mountpoint: '/mnt/other' }) });
+		await drawn(spare);
+		check('a card the recorder is not pointed at does not',
+			spare.SD.innerHTML.indexOf('oldest clips deleted at') < 0, 'promised a sweep');
+		check('and its storage bar is still drawn',
+			spare.SD.innerHTML.indexOf('storage-bar') >= 0, 'lost the bar');
+	}
+
+	group('a chart with no counter behind it is not drawn at all');
+
+	{
+		const env = load({ now: card() });
+		await drawn(env);
+		// A build that reports its recorder's state but not the byte total, nor
+		// the queue gauge. A labelled panel that never draws a line is the same
+		// mistake as printing a zero for a reading nobody took, in a bigger box.
+		env.beat({
+			ok: true, dt: 2, prev: null,
+			m: { v: { records_state: 0, records_fragments_written_total: 1000 } },
+		});
+		const h = env.SD.innerHTML;
+		check('no write-rate chart without the byte counter',
+			h.indexOf('sd-ch-rate') < 0, 'drew an empty chart');
+		check('no queue chart without the queue gauge',
+			h.indexOf('sd-ch-queue') < 0, 'drew an empty chart');
+
+		const full = load({ now: card() });
+		await drawn(full);
+		full.beat(beat());
+		check('both are drawn where both counters are published',
+			full.SD.innerHTML.indexOf('sd-ch-rate') >= 0
+			&& full.SD.innerHTML.indexOf('sd-ch-queue') >= 0, 'lost the charts');
+	}
+
 	group('switching tabs costs nothing, because nothing is rebuilt');
 
 	{
