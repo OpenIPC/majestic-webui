@@ -963,13 +963,15 @@ here would fetch them on every camera and make that licensing decision for
 every vendor shipping one. `tests/lpr-loader.test.js` fails if a default
 reappears.
 
-`raw-loader.js` is pinned to `raw-editor@v0.11.1`. v0.11.0 was the first release
+`raw-loader.js` is pinned to `raw-editor@v0.11.2`. v0.11.0 was the first release
 whose `mountEditor` reads `plates` at all — an older one ignores the key in
 silence, which is what makes the pin part of the feature rather than
 housekeeping — and v0.11.1 is the one whose burst goes through `?frames=`
-instead of asking sixteen times. Pinning the older tag against the burst below
-is not a compile error, it is a Plates tab that takes thirteen seconds where it
-should take one and averages frames a car has moved between.
+instead of asking sixteen times, and v0.11.2 warns when Develop is set to a
+demosaic the reader cannot read through. None of these is a compile error when
+pinned too low — they are a Plates tab that takes thirteen seconds where it
+should take one and averages frames a car has moved between, and one that reads
+a crippled picture in silence.
 
 ## Conventions for new code
 
