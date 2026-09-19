@@ -112,9 +112,14 @@ function load(cardJson) {
 		if (url.indexOf('/api/v1/config.json') === 0) {
 			return json({ records: { enabled: true, path: '/mnt/sd/%F', split: 20, maxUsage: 95 } });
 		}
-		if (url.indexOf('/cgi-bin/j/sdcard.cgi') === 0) return json(cardJson.now);
+		if (url.indexOf('/cgi-bin/j/sdcard.cgi') === 0) {
+			return cardJson.now ? json(cardJson.now) : Promise.reject(new Error('camera unreachable'));
+		}
 		return Promise.reject(new Error('unstubbed ' + url));
 	}
+	// The page's own five-second poll, held rather than fired, so a case can
+	// say when the next one lands.
+	let poll = null;
 
 	const els = { '#sd': SD };
 	const pick = (sel) => els[sel] || (els[sel] = makeEl(sel));
@@ -136,7 +141,8 @@ function load(cardJson) {
 		encodeURIComponent: encodeURIComponent,
 		alert() {}, confirm: () => true,
 		bootstrap: { Modal: { getOrCreateInstance: () => ({ show() {}, hide() {} }) } },
-		setTimeout, clearTimeout, clearInterval, setInterval: () => 0,
+		setTimeout, clearTimeout, clearInterval,
+		setInterval: (fn) => { poll = fn; return 1; },
 		URLSearchParams: URLSearchParams,
 	};
 	ctx.window.document = ctx.document;
@@ -145,10 +151,23 @@ function load(cardJson) {
 	for (const f of ['storage-verdict.js', 'sdcard-health.js', 'sdcard.js']) {
 		vm.runInContext(fs.readFileSync(A(f), 'utf8'), ctx);
 	}
-	return { SD: SD, beat: (s) => subscriber && subscriber(s) };
+	return {
+		SD: SD,
+		beat: (s) => subscriber && subscriber(s),
+		poll: () => poll && poll(),
+	};
 }
 
 const PATIENCE = 5000;
+async function settled(env, want) {
+	const end = Date.now() + PATIENCE;
+	while (Date.now() < end) {
+		if (env.SD.innerHTML.indexOf(want) >= 0) return;
+		await new Promise((r) => setTimeout(r, 5));
+	}
+	throw new Error('never saw ' + JSON.stringify(want));
+}
+
 async function drawn(env) {
 	const end = Date.now() + PATIENCE;
 	while (Date.now() < end) {
@@ -232,6 +251,40 @@ async function drawn(env) {
 			h.indexOf('Longest pause') < 0, h.slice(0, 200));
 		check('and no dropped-footage count either',
 			h.indexOf('Footage dropped') < 0, h.slice(0, 200));
+	}
+
+	group('a poll that failed does not leave the page stuck on the failure');
+
+	{
+		// The shape cache is what decides whether the page is rebuilt, so
+		// anything that writes to the page WITHOUT going through it leaves that
+		// cache describing something nobody can see. The failure notice used to
+		// be written exactly that way: the next poll to succeed found the shape
+		// unchanged, painted into the blocks the notice had replaced, found
+		// none of them, and left the camera reading as unreachable for good.
+		const fixture = { now: card() };
+		const env = load(fixture);
+		await drawn(env);
+		env.beat(beat());
+
+		fixture.now = null;                       // the camera stops answering
+		env.poll();
+		await settled(env, 'Failed to read SD-card status');
+		check('a failed poll says so', true, '');
+		// A heartbeat arriving while it is down must not paint stale figures
+		// over the notice, nor rewrite it.
+		const atErr = env.SD.writes;
+		env.beat(beat());
+		check('a heartbeat during the outage neither repaints nor rewrites it',
+			env.SD.writes === atErr
+			&& env.SD.innerHTML.indexOf('Failed to read SD-card status') >= 0,
+			'writes ' + atErr + ' -> ' + env.SD.writes);
+
+		fixture.now = card();                     // and comes back
+		env.poll();
+		await settled(env, 'Performance');
+		check('the page comes back when the camera does',
+			env.SD.innerHTML.indexOf('Failed to read SD-card status') < 0, 'still stuck');
 	}
 
 	done();

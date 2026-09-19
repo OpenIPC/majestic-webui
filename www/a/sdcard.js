@@ -40,6 +40,14 @@
 	// actually written. Together they are what lets a poll that changed nothing
 	// leave the page alone -- see render().
 	let lastShape = null, lastLive = null;
+	// Did the last status poll fail? It has to be a state rather than something
+	// written straight to the page, because render() decides what is on screen
+	// by comparing against what it last drew -- and anything that writes behind
+	// its back leaves that comparison describing a page nobody can see. A
+	// failure that did so left the notice up for good: the next poll to succeed
+	// found the shape unchanged, painted into blocks the notice had replaced,
+	// and painted into nothing at all.
+	let loadErr = false;
 
 	function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 	// esc() above does not touch quotes, which is fine everywhere it is used --
@@ -77,8 +85,8 @@
 		return apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
 			.then(r => r.ok ? r.json() : {}).catch(() => ({}))
 			.then(c => { cfg = c; const rp = recPrefix(); return api(rp ? 'rec=' + encodeURIComponent(rp) : ''); })
-			.then(d => { state = d; render(); })
-			.catch(() => { SD.innerHTML = mjNotice('danger', 'Failed to read SD-card status.'); });
+			.then(d => { state = d; loadErr = false; render(); })
+			.catch(() => { loadErr = true; render(); });
 	}
 
 	// `ok` is spelled out rather than left as the default: render() calls this
@@ -647,6 +655,9 @@
 	// `L`, so it can be run twice -- once with the live chunks blanked, to ask
 	// whether anything structural moved -- without touching the DOM either time.
 	function build(d, L) {
+		// Drawn without the page's own head, as it always has been: this is the
+		// whole page replaced by the reason there isn't one.
+		if (loadErr) return mjNotice('danger', 'Failed to read SD-card status.');
 		const head = '<div class="d-flex align-items-center gap-3 mb-4"><h2 class="text-primary m-0">SD Card</h2>' + badge(d || {}) + '</div>';
 		if (!d || !d.present) {
 			return head + mjNotice('info', 'No SD card detected. Insert a card and reload.');
