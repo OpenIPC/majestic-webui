@@ -213,13 +213,12 @@ pr_compliances:
       without them the page renders in the fallback stack the CSS already names, and
       first paint never waits on them.
       (6) the plate reader — OpenIPC/lpr-wasm, pinned, loaded by www/a/lpr-loader.js;
-      without it the raw editor grows no Plates tab at all, because raw.js hands the
-      editor no plate capability, so nothing is degraded — the feature is simply not
-      offered. Unlike the other five it has NO DEFAULT SOURCE: the models are
-      CC BY-NC 4.0, non-commercial use only, and majestic is a commercial product, so
-      an operator names the base in `webui_lpr_base` (/etc/webui/webui.conf) or no
-      camera fetches anything. That condition is part of the exemption, not a detail
-      of it: giving this one a default would fail this gate.
+      without it the raw editor's Plates tab says it cannot read rather than reading,
+      and nothing else on the raw page is affected. `webui_lpr_base`
+      (/etc/webui/webui.conf) points a camera at a mirror of its own instead, for one
+      that must not reach a public CDN; a base lpr-loader.js refuses leaves no reader
+      at all rather than falling back to the default, because a mirror is named
+      precisely when that default is not wanted.
 
       (1)-(4) and (6) are fetched on demand, and are held to all of: pinned to an exact
       version, never a moving tag; requested only when someone opens the thing that
