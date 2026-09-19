@@ -1028,6 +1028,8 @@
 		// Paints from whatever the heartbeat has already published; the
 		// subscription keeps it current from there.
 		paintFindings();
+		// Same moment, same reason: the panel is in the document now.
+		paintRcFindings();
 
 		// renderField writes labels as plain text; with a query already active,
 		// the section just mounted has to pick up the marks too, or navigating
@@ -7748,7 +7750,11 @@
 		state.rcChn = chn;
 		const box = el('div');
 		box.id = 'mj-rc-findings';
-		paintRcFindings();
+		// Not painted here: the box is still detached, and paintRcFindings()
+		// looks the id up in the live document. Painting from the mount site
+		// once everything is appended is what ircutPanel does, and for the
+		// same reason -- a verdict the heartbeat had already delivered would
+		// otherwise stay blank until the next one arrived.
 		return box;
 	}
 

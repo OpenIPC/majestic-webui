@@ -51,6 +51,17 @@
 		return (v && (key in v)) ? v[key] : null;
 	}
 
+	// Settings are named the way the form names them, not by their dotted
+	// keys. An operator reads a finding on the page that holds the control;
+	// "video0.maxQp" is the daemon's word for it and the camera log's, and it
+	// is not what the field beside the sentence is labelled. Matches how
+	// ircut-check.js words its findings.
+	const CEILING = '"Most compression allowed (QP)"';
+
+	function stream(chn) {
+		return chn === 0 ? 'main stream' : 'sub stream';
+	}
+
 	// One finding, or null when there is nothing to say.
 	//
 	// `s` is the heartbeat sample. `cfg` supplies what the camera was asked
@@ -61,7 +72,12 @@
 		const c = (typeof chn === 'number') ? chn : 0;
 		const v = s.m && s.m.v;
 		const state = readState(v, c);
-		if (state === null || state === OK) return null;
+		// Only the verdicts this file knows how to explain. A newer camera
+		// publishing a fourth state, or a malformed one, would otherwise fall
+		// through to the rate branch and be given confident advice about a
+		// diagnosis it never made.
+		if (state !== MARGINAL && state !== OVER && state !== STARVED)
+			return null;
 
 		const setKbps = cfg ? cfg.bitrate : null;
 		const setFps = cfg ? cfg.fps : null;
@@ -76,8 +92,8 @@
 			return {
 				code: 'starved', level: 'warning',
 				title: 'The camera is not delivering the frame rate it was set to',
-				detail: 'The encoder is receiving far fewer frames than video' +
-					c + '.fps asks for' +
+				detail: 'The encoder is receiving far fewer frames than the ' +
+					stream(c) + ' asks for' +
 					(setFps ? ' (' + setFps + ' fps)' : '') +
 					'. In low light the sensor holds the shutter open longer ' +
 					'than one frame period and slows down to suit, which is ' +
@@ -109,28 +125,32 @@
 		// The one real exception is a ceiling already at the top of the range,
 		// where there is nothing left to raise and the rate itself has to move.
 		// That is a fact about the setting, not a threshold picked by eye.
-		const atLimit = (maxQp !== null && maxQp >= 51);
+		// Both readings or neither. They arrive from the same optional vendor
+		// hook, but nothing here may ASSUME they are published together: a
+		// camera offering the ceiling without the mean would otherwise have
+		// "quantiser null" rendered at an operator as though it were measured.
+		const haveQp = (meanQp !== null && maxQp !== null);
+		const atLimit = (haveQp && maxQp >= 51);
 		const over = state === OVER;
 
-		let detail = 'The encoder is producing more than video' + c +
-			'.bitrate allows' + (setKbps ? ' (' + setKbps + ' kbit/s)' : '') +
+		let detail = 'The ' + stream(c) + ' is producing more than its ' +
+			'bitrate allows' + (setKbps ? ' (' + setKbps + ' kbit/s)' : '') +
 			'. ';
 		if (atLimit) {
-			detail += 'video' + c + '.maxQp is already at 51, the most ' +
-				'compression the encoder allows, so there is no headroom left ' +
-				'to give it. This scene needs a higher bitrate, a smaller ' +
-				'frame, or fewer frames per second.';
-		} else if (maxQp !== null) {
+			detail += CEILING + ' is already at 51, the most compression the ' +
+				'encoder allows, so there is no headroom left to give it. ' +
+				'This scene needs a higher bitrate, a smaller frame, or fewer ' +
+				'frames per second.';
+		} else if (haveQp) {
 			detail += 'It is averaging quantiser ' + meanQp + ' against a ' +
 				'ceiling of ' + maxQp + ', and on a constant-bitrate channel ' +
 				'running out of quantiser is what an overshoot means. Raising ' +
-				'video' + c + '.maxQp is what lets rate control reach the ' +
-				'number.';
+				CEILING + ' is what lets rate control reach the number.';
 		} else {
-			detail += 'A quantiser ceiling set too low is the usual cause -- ' +
-				'the encoder cannot compress harder than video' + c +
-				'.maxQp permits, so it exceeds the bitrate instead. A scene ' +
-				'too busy for the rate will do it too.';
+			detail += 'A compression ceiling set too low is the usual cause -- ' +
+				'the encoder cannot compress harder than ' + CEILING + ' ' +
+				'permits, so it exceeds the bitrate instead. A scene too busy ' +
+				'for the rate will do it too.';
 		}
 
 		return {
@@ -157,19 +177,20 @@
 		const maxQp = readNum(v, 'venc' + c + '_max_qp');
 
 		if (f.code === 'starved') {
-			return 'Far fewer frames than video' + c + '.fps asks for — the ' +
-				'sensor is slowed by a long exposure, not the encoder.';
+			return 'Far fewer frames than this stream asks for — the sensor ' +
+				'is slowed by a long exposure, not the encoder.';
 		}
 		const lead = f.code === 'over-rate'
 			? 'Over its set rate'
 			: 'Drifting past its set rate';
-		if (maxQp !== null && maxQp >= 51) {
-			return lead + ' with the quantiser ceiling already at its ' +
+		const haveQp = (meanQp !== null && maxQp !== null);
+		if (haveQp && maxQp >= 51) {
+			return lead + ' with the compression ceiling already at its ' +
 				'maximum — the rate, the size or the frame rate has to move.';
 		}
-		if (maxQp !== null) {
+		if (haveQp) {
 			return lead + ' — quantiser ' + meanQp + ' against a ' + maxQp +
-				' ceiling. Raise video' + c + '.maxQp.';
+				' ceiling. Raise ' + CEILING + '.';
 		}
 		return lead + '.';
 	}
