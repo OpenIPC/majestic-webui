@@ -98,6 +98,31 @@ group('the image section is absorbed onto the Live leaf');
 	everyKeyOnce('shipped schema', t, SCHEMA);
 }
 
+// The flattened record is what the search reads, and a tier missing from it is
+// a word the page shows and the search cannot find -- which reads as the
+// setting not existing rather than as a broken index. No camera emits `help`
+// yet, so this is planted rather than found.
+group('the flattened record carries all three documentation tiers');
+{
+	const s = clone(SCHEMA);
+	s.properties.video0.properties.bitrate.help = 'a long technical explanation';
+	s.properties.image.properties.luminance.help = 'and one on a lifted knob';
+	const t = build(s);
+	const bitrate = t.sectionFields('video0').find(f => f.dot === 'video0.bitrate');
+	check('a section record carries the daemon\'s help',
+		bitrate && bitrate.help === 'a long technical explanation');
+	check('it still carries the hint beside it',
+		bitrate && typeof bitrate.hint === 'string');
+	// The Live leaf draws neither hint nor help, but the search counts both --
+	// see the comment at the lift in mj-tree.js. Pinned so the mirror is not
+	// quietly broken on one side.
+	const knob = t.leafFields('live').find(f => f.dot === 'image.luminance');
+	check('a lifted knob carries it too',
+		knob && knob.help === 'and one on a lifted knob');
+	check('a field the daemon said nothing more about carries an empty string',
+		t.sectionFields('video0').every(f => typeof f.help === 'string'));
+}
+
 group('a section the leaf lifts a minority of keeps its page');
 {
 	const s = clone(SCHEMA);
