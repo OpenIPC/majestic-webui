@@ -655,10 +655,10 @@
 	// test on the box and still stall long enough to lose footage.
 	//
 	// So the absence of an A rating is the line worth spelling out, and it is
-	// the one thing an owner can act on before buying the next card
-	// (OpenIPC/firmware#1747). Chips rather than a run of text: the same words,
-	// and the missing rating gets a colour of its own instead of arriving as a
-	// phrase at the end of a sentence.
+	// the one thing an owner can act on before buying the next card. Chips
+	// rather than a run of text: the same words, and the missing rating gets a
+	// colour of its own instead of arriving as a phrase at the end of a
+	// sentence.
 	function ratingPills(d) {
 		const r = d.rating;
 		if (!r) {
