@@ -36,6 +36,18 @@
 	// the first swap's variable for the life of the page. Only one swap can
 	// run at a time, which is what makes one flag the right shape.
 	let swapStopped = false;
+	// The last markup drawn with its live chunks blanked, and the last chunks
+	// actually written. Together they are what lets a poll that changed nothing
+	// leave the page alone -- see render().
+	let lastShape = null, lastLive = null;
+	// Did the last status poll fail? It has to be a state rather than something
+	// written straight to the page, because render() decides what is on screen
+	// by comparing against what it last drew -- and anything that writes behind
+	// its back leaves that comparison describing a page nobody can see. A
+	// failure that did so left the notice up for good: the next poll to succeed
+	// found the shape unchanged, painted into blocks the notice had replaced,
+	// and painted into nothing at all.
+	let loadErr = false;
 
 	function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 	// esc() above does not touch quotes, which is fine everywhere it is used --
@@ -73,8 +85,8 @@
 		return apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
 			.then(r => r.ok ? r.json() : {}).catch(() => ({}))
 			.then(c => { cfg = c; const rp = recPrefix(); return api(rp ? 'rec=' + encodeURIComponent(rp) : ''); })
-			.then(d => { state = d; render(); })
-			.catch(() => { SD.innerHTML = mjNotice('danger', 'Failed to read SD-card status.'); });
+			.then(d => { state = d; loadErr = false; render(); })
+			.catch(() => { loadErr = true; render(); });
 	}
 
 	// `ok` is spelled out rather than left as the default: render() calls this
@@ -599,7 +611,7 @@
 			+ 'says. It takes seconds, and it erases the card.</div>';
 	}
 
-	function healthCard(d) {
+	function healthCard(d, L) {
 		const H = window.MajesticSdHealth;
 		if (!H) return '';
 		const v = H.verdict({
@@ -619,17 +631,19 @@
 			+ healthLine('Stores what it is given', v.stores, checkControls(d)
 				+ (checkErr ? mjNotice('warn', esc(checkErr)) : ''))
 			+ healthLine('Reads back what it holds', v.reads,
-				scanProgress(d) + scanFindings(d) + scanControls(d)
+				'<div data-mj="scan">' + L.scan + '</div>' + scanFindings(d) + scanControls(d)
 				+ (scanErr ? mjNotice('warn', esc(scanErr)) : ''))
 			+ '</div></div></div></div>';
 	}
 
-	function perfCard(d) {
-		const live = liveRows();
+	function perfCard(d, L) {
 		return '<div class="col-12"><div class="card"><div class="card-body">'
 			+ '<h3 class="mb-3">Performance</h3>'
-			+ '<dl class="small list mb-2">' + ratingRow(d) + live + '</dl>'
-			+ (live ? '<div class="x-small text-secondary mb-3">Pauses, dropped footage and errors are '
+			+ '<dl class="small list mb-2" data-mj="perfrows">' + L.perfrows + '</dl>'
+			// Presence, not value: the note belongs to rows that exist at all,
+			// so it reads `hasLive` -- which survives blanking -- rather than
+			// the chunk, which does not.
+			+ (L.hasLive ? '<div class="x-small text-secondary mb-3">Pauses, dropped footage and errors are '
 				+ 'counted since the camera last started.</div>' : '')
 			+ ratingNote(d)
 			+ liveNote()
@@ -637,12 +651,16 @@
 			+ '</div></div></div>';
 	}
 
-	function render() {
-		const d = state;
+	// The page as one string. Pure: everything it varies on arrives in `d` and
+	// `L`, so it can be run twice -- once with the live chunks blanked, to ask
+	// whether anything structural moved -- without touching the DOM either time.
+	function build(d, L) {
+		// Drawn without the page's own head, as it always has been: this is the
+		// whole page replaced by the reason there isn't one.
+		if (loadErr) return mjNotice('danger', 'Failed to read SD-card status.');
 		const head = '<div class="d-flex align-items-center gap-3 mb-4"><h2 class="text-primary m-0">SD Card</h2>' + badge(d || {}) + '</div>';
 		if (!d || !d.present) {
-			SD.innerHTML = head + mjNotice('info', 'No SD card detected. Insert a card and reload.');
-			return;
+			return head + mjNotice('info', 'No SD card detected. Insert a card and reload.');
 		}
 		const rp = recPrefix(), recEnabled = mjGet(cfg, 'records.enabled') === true;
 		const onThisCard = d.mounted && rp === d.mountpoint;
@@ -659,7 +677,7 @@
 		if (d.canFsck) acts += '<button class="btn btn-sm btn-outline-secondary" data-act="fsck">Check</button>';
 		acts += '<button class="btn btn-sm btn-outline-danger" data-act="format">Format…</button>';
 
-		SD.innerHTML = head + health(d) + '<div class="row g-4">'
+		return head + health(d) + '<div class="row g-4">'
 			+ '<div class="col-12 col-lg-7"><div class="card h-100"><div class="card-body">'
 			+ '<dl class="small list mb-3">'
 			+ '<dt>Model</dt><dd>' + esc(d.model || '—') + ' <span class="text-secondary">(' + esc(d.cardtype || 'SD') + ')</span></dd>'
@@ -671,7 +689,7 @@
 				: 'not mounted') + '</dd>'
 			+ '<dt>Manufactured</dt><dd class="text-secondary">' + esc(d.date || '—') + '</dd>'
 			+ '</dl>'
-			+ storageBar(d)
+			+ '<div data-mj="storage">' + L.storage + '</div>'
 			+ '<div class="d-flex flex-wrap gap-2 mt-2" id="sd-actions">' + acts + '</div>'
 			+ '</div></div></div>'
 			+ '<div class="col-12 col-lg-5"><div class="card h-100"><div class="card-body">'
@@ -694,9 +712,69 @@
 					? '<button class="btn btn-sm btn-primary mb-3" id="sd-use">Use this card for recording</button>' : ''))
 			+ '<div><a class="small" href="camera.cgi?tab=records">Recording settings →</a></div>'
 			+ '</div></div></div>'
-			+ healthCard(d)
-			+ perfCard(d)
+			+ healthCard(d, L)
+			+ perfCard(d, L)
 			+ '</div>';
+	}
+
+	// The three blocks that move on their own while nothing about the page's
+	// shape does: the storage figures, the recorder's counters, and a running
+	// scan's bar. Everything else here changes only when the camera does
+	// something -- a card appears, a button becomes available, a verdict turns.
+	//
+	// `hasLive` rides along because it is presence rather than value: blanking
+	// the chunks must not take the note that belongs to them with it.
+	const LIVE = ['storage', 'perfrows', 'scan'];
+	function chunks(d) {
+		const rows = liveRows();
+		return {
+			storage: storageBar(d),
+			perfrows: ratingRow(d) + rows,
+			scan: scanProgress(d),
+			hasLive: !!rows,
+		};
+	}
+	function blanked(L) {
+		const out = { hasLive: L.hasLive };
+		LIVE.forEach((k) => { out[k] = ''; });
+		return out;
+	}
+
+	// Write the live chunks into the page that is already there. Only the ones
+	// that actually differ, so a value nobody is watching does not throw away a
+	// selection inside its own block.
+	function paint(L) {
+		LIVE.forEach((k) => {
+			if (lastLive && lastLive[k] === L[k]) return;
+			const n = SD.querySelector('[data-mj="' + k + '"]');
+			if (n) n.innerHTML = L[k];
+		});
+		lastLive = L;
+	}
+
+	// Draw, but only as much as is actually needed.
+	//
+	// This runs on every five-second poll and on every two-second heartbeat,
+	// and the page it draws is usually identical to the one already on screen.
+	// Rewriting it anyway is what used to take the focus off a button, drop a
+	// selection being read, close a title tooltip mid-hover and restart the
+	// scan bar's transition -- once every five seconds, for ever.
+	//
+	// So the shape is compared first: the same markup with the live chunks
+	// blanked. Unchanged, and only those chunks are written. Changed -- a card
+	// went away, a button became available, a verdict turned -- and the page is
+	// rebuilt, which is honest, because something really is different.
+	function render() {
+		const d = state;
+		const L = chunks(d || {});
+		const shape = build(d, blanked(L));
+		if (shape !== lastShape) {
+			SD.innerHTML = build(d, L);
+			lastShape = shape;
+			lastLive = L;
+			return;
+		}
+		paint(L);
 	}
 
 	// Starting, stopping and checking. Each one renders immediately so the
@@ -999,11 +1077,13 @@
 	// makes, and the reason j/pulse.cgi was cut back to what /metrics cannot
 	// answer.
 	//
-	// Rendering is left to the 5 s cycle below rather than driven from here:
-	// render() rebuilds the whole page, and doing that every two seconds
-	// restarts transitions and drops anything being selected mid-read. The one
-	// exception is the first reading, which is worth showing without waiting
-	// for the next poll.
+	// Rendering IS driven from here, every two seconds. It used to be left to
+	// the five-second cycle below, because a render rebuilt the whole page and
+	// doing that twice as often would have restarted every transition and
+	// dropped anything being read mid-selection. render() now decides for
+	// itself whether the page moved, and the counters this hands it are exactly
+	// the ones that can move without it -- so the fast half of the page follows
+	// the heartbeat, and the rest is left alone.
 	function onMetrics(s) {
 		// A poll that failed ends the run of consecutive samples. The warning
 		// below says the queue has not drained over a window of them, and a
@@ -1012,7 +1092,6 @@
 		// it up, on evidence that was never continuous.
 		if (!s || !s.ok || !s.m) { recorder = null; rateBps = null; queuedTicks = 0; return; }
 		const v = s.m.v;
-		const had = recorder !== null;
 		recorder = typeof v.records_state === 'number' ? { v: v } : { absent: true };
 		// Two readings and the interval between them. A counter that went
 		// backwards is majestic having restarted, not a negative rate.
@@ -1027,7 +1106,7 @@
 		// nothing clears, which is the shape this tree keeps removing.
 		const qn = v.records_queue_fragments;
 		queuedTicks = (typeof qn === 'number' && qn > 0) ? queuedTicks + 1 : 0;
-		if (!had && state) render();
+		if (state) render();
 	}
 
 	wire();
