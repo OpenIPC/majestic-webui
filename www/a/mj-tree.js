@@ -228,33 +228,43 @@
 	// arrives as one undifferentiated deal of nineteen controls (#325).
 	const SECTION_GROUPS = {
 		nightMode: [
-			// One heading for switching, holding both mechanisms: which of them
-			// is on screen is the Legacy row's business, not the grouping's.
-			// The pause inside a switch belongs here as well — it is the gap
-			// between the picture changing and the filter swinging, which is
+			// What day and night is, and what it moves. The two mechanism
+			// switches lead — automatic mode, and, on the Legacy row beside it,
+			// which pair of numbers that mode consults — and the filter and the
+			// lamp follow, each saying whether day and night moves it, whether
+			// you do, or whether nothing does.
+			//
+			// Those two had a heading of their own for one release, and the
+			// reporter who asked for them here in the first place said why it
+			// could not work: a heading states something, and "driven by
+			// day/night" is contradicted by the row under it the moment that row
+			// reads manual or off (#548). Next to "Automatic day/night" the
+			// relationship is read off the rows, which can say either answer.
+			{ id: 'switching', label: 'Switching', keys: ['lightMonitor', 'irCut', 'backlight'] },
+			{ id: 'picture', label: 'Night picture', keys: ['colorToGray', 'overrideDrc'] },
+			// The numbers that decide when, kept as a heading of their own rather
+			// than piled under Switching. Not taste: the section is dealt into two
+			// columns and the cut is taken between headings wherever one will
+			// serve, because a cut inside a group opens the second column on a row
+			// with no heading over it (#325). A Switching that held all ten of
+			// these rows leaves no between-heading cut that balances, and
+			// layoutCols falls back to cutting anywhere.
+			//
+			// Both mechanisms' numbers are here, and only one pair is ever on
+			// screen: which of them is the Legacy row's business, not the
+			// grouping's. The pause inside a switch is here as well — it is the
+			// gap between the picture changing and the filter swinging, which is
 			// the switch taking place and nothing the lamp does.
-			{ id: 'switching', label: 'Switching', keys: [
-				'lightMonitor',
+			{ id: 'levels', label: 'Levels and timing', keys: [
 				'autoNightGain', 'autoDayGain', 'autoNightDelay', 'autoDayDelay',
 				'minThreshold', 'maxThreshold', 'monitorDelay', 'transitionDelayMs'] },
-			// The filter and the lamp each answer one question, and it is the
-			// same question: does day and night move this, do you, or is it
-			// left alone. That shared question is the heading, and it is why
-			// they are one group — a heading each introduced a single row
-			// repeating the words of the heading above it, twice over (#548).
-			// They are not folded into Switching instead: that group then
-			// grows too tall for a cut to fall between groups at all, because
-			// layoutCols drops the between-group preference once the best such
-			// cut still leaves the taller column past 75% of the section. The
-			// second column then opens on a row with no heading over it, which
-			// is the fault #325 was about.
-			{ id: 'driven', label: 'Driven by day/night', keys: ['irCut', 'backlight'] },
-			{ id: 'picture', label: 'Night picture', keys: ['colorToGray', 'overrideDrc'] },
-			// What is left to the lamp once its own control is above: the
-			// channel, rate and duty of a PWM lamp, on a build that has them.
-			// On one that has not, the heading is dropped rather than drawn
-			// empty, which is what it already did for these same keys.
-			{ id: 'lamp', label: 'Camera light', keys: [
+			// What is left to the lamp once its own control is above: the channel,
+			// rate and duty of a dimmable one, on a build that has them. On one
+			// that has not, the heading is dropped rather than drawn empty, which
+			// is what it already did for these same keys. Named for the dimming
+			// rather than for the lamp, so that it does not repeat the words of
+			// the Camera light row above it.
+			{ id: 'lamp', label: 'Dimmable lamp', keys: [
 				'backlightPwmChannel', 'backlightPwmFreq',
 				'backlightPwmMin', 'backlightPwmMax'] },
 		],
