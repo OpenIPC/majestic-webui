@@ -7433,9 +7433,32 @@
 		});
 	}
 
+	// The row this switch belongs above: the first of the numbers it swaps, in
+	// document order, whichever of the two sets is on screen.
+	//
+	// It used to be anchored under "Automatic day/night" instead, on the
+	// reading that both are mechanism switches. That is true and it is not
+	// where the control belongs: everything this switch does happens inside
+	// Levels and timing, so under the other heading it sat a column away from
+	// the eight rows it was swapping, and it stood between Automatic day/night
+	// and the two rows #548 asked to have directly beneath it.
+	//
+	// Resolved from the rows rather than named, because which of the two sets
+	// exists is the camera's business and the hidden one is still a row in the
+	// document. A camera declaring none of them gets no switch, which is
+	// right: it would govern nothing.
+	function legacyAnchor() {
+		const rows = LEGACY_KEYS.concat(AUTO_KEYS)
+			.map(pinField).filter(Boolean).map((f) => f.p);
+		if (!rows.length) return null;
+		return rows.reduce((first, row) =>
+			(row.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
+				? row : first);
+	}
+
 	function mountLegacy(container) {
-		const host = pinField('lightMonitor');
-		if (!host) return;
+		const anchor = legacyAnchor();
+		if (!anchor) return;
 		const id = 'mjf-nightMode-legacy';
 		const p = el('p', 'boolean mj-row');
 		// The same shape renderField gives a boolean once its reset wrap has run:
@@ -7484,7 +7507,7 @@
 		});
 		box.checked = legacyOn();
 		paint();
-		host.p.parentNode.insertBefore(p, host.p.nextSibling);
+		anchor.parentNode.insertBefore(p, anchor);
 		state.legacyBox = box;
 		showLegacy(box.checked);
 	}
@@ -9808,8 +9831,14 @@
 			}
 		} else if (type === 'string' && enumVals && enumVals.length) {
 			p = el('p', 'select mj-row');
-			// short enums get a moderate width cap; long-option enums stay full-width
-			if (enumVals.some(o => String(o).length > 14)) p.classList.add('mj-wide');
+			// short enums get a moderate width cap; long-option enums stay full-width.
+			// Measured on the WORDS, not on the values: a titled member is as
+			// long as its title, and a select does not wrap, it truncates --
+			// so sizing "Follows day/night" by the four letters of `auto`
+			// would clip it silently.
+			const optText = enumVals.map(o => enumTitle(sub, o)
+				|| (String(o) === '' ? 'Auto' : String(o)));
+			if (optText.some(t => t.length > 14)) p.classList.add('mj-wide');
 			// A select can only show a value it has an option for. majestic narrows
 			// some enums to what that consumer can actually carry (outgoing.audioCodec
 			// drops opus, which FLV cannot frame), but a hand-written majestic.yaml
@@ -9834,7 +9863,7 @@
 			const unlisted = cur !== '' && !enumVals.some(o => String(o) === cur);
 			const opts =
 				(unlisted ? option(cur, true, cur + ' (unsupported)') : '') +
-				enumVals.map(o => option(o, !unlisted && cur === String(o))).join('');
+				enumVals.map((o, i) => option(o, !unlisted && cur === String(o), optText[i])).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
@@ -10331,7 +10360,8 @@
 							// The empty member of an enum is the "follow the
 							// setting above" choice, and reads as nothing at all
 							// unless it is given words.
-							o.textContent = opt === '' ? 'Default' : opt;
+							o.textContent = enumTitle(prop, opt)
+								|| (opt === '' ? 'Default' : opt);
 							f.appendChild(o);
 						});
 						// A stored value the camera does not offer: a codec
@@ -11527,6 +11557,38 @@
 
 	function esc(s) {
 		return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+	}
+
+	// The word a value goes by on screen, where the schema gives it one.
+	//
+	// An enum member is a machine token -- `auto`, `off`, `pwm1` -- and a page
+	// that prints it raw asks the reader to infer the behaviour from it. That
+	// is the same job `title` does for the row, so it is the schema's to
+	// answer, and `x-enum-titles` is where: the daemon's per-value title,
+	// beside the enum it belongs to.
+	//
+	// A MAP keyed by value rather than a list parallel to `enum`, for two
+	// reasons. A schema can name the one member that needs words and leave the
+	// obvious ones alone; and neither side can silently mis-align, which a
+	// parallel list does the moment a member is inserted -- relabelling every
+	// option after it with no error anywhere.
+	//
+	// The value written is untouched either way: this is what the option SAYS,
+	// never what it posts.
+	function enumTitle(sub, v) {
+		const m = sub && sub['x-enum-titles'];
+		// An ARRAY is refused rather than read. It is the shape a parallel
+		// list would arrive in, and indexing one by the member's value is
+		// nonsense for a string enum and quietly plausible for a numeric one
+		// -- `["Off","On"]` against the values 0 and 1 would appear to work
+		// and relabel by position the day a member is inserted.
+		if (!m || typeof m !== 'object' || Array.isArray(m)) return '';
+		if (!Object.prototype.hasOwnProperty.call(m, String(v))) return '';
+		const t = m[String(v)];
+		// An empty or absent title is not a title. Handing one back would
+		// print an option with no words in it, which is worse than the token
+		// it was meant to replace.
+		return typeof t === 'string' && t.trim() ? t : '';
 	}
 
 	// An empty enum member is a real choice — majestic uses it for "inherit"
