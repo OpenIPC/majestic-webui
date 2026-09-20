@@ -165,52 +165,49 @@ else
     fi
 fi
 
-# === PROXY CONFIGURATION (Takes from the standard OpenIPC config) ===
-PROXY_OPTS=""
+# === SENDING TO NTFY ===
+#
+# An argument list, not a command line handed to eval.
+#
+# Every value below crosses into curl from somewhere a person can type: the
+# server, topic, priority and credentials come off the ntfy page, the message
+# is free prose, and the path is a recording name built from an operator's
+# strftime pattern. The version this replaced pasted them all into one string
+# and eval'd it, so a single quote anywhere ended the quoting and handed the
+# rest of the upload to sh. Three of the values were escaped by hand against
+# exactly that; the password, which is the likeliest of the lot to hold a
+# space or a dollar sign, was pasted in bare (#547).
+#
+# Passing "$@" retires the question. Nothing here is re-parsed by a shell, so
+# no value needs escaping and none can be split, globbed or truncated -- and
+# the hand-rolled escaping those three carried is gone with the eval that
+# required it.
+set -- curl -s --connect-timeout 100 --max-time 100
+
+# Add a proxy, if available
 if [ "$ntfy_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
     . /etc/webui/proxy.conf
-    PROXY_OPTS="--socks5-hostname ${socks5_host}:${socks5_port}"
+    set -- "$@" --socks5-hostname "${socks5_host}:${socks5_port}"
     if [ -n "$socks5_username" ] && [ -n "$socks5_password" ]; then
-        PROXY_OPTS="${PROXY_OPTS} --proxy-user ${socks5_username}:${socks5_password}"
+        set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
     fi
 fi
 
-
-# The path reaches a shell twice: once written into the command string and once
-# when that string is eval'd. It used to be ours -- mktemp plus a hostname and
-# a timestamp -- and is now whatever the caller hands over, which is a
-# recording path built from an operator's strftime pattern. A single quote in
-# it would close the quoting and hand the rest of the name to sh, so it is
-# escaped rather than trusted: close the quote, escape one, reopen.
-esc_path=$(printf '%s' "$snapshot" | sed "s/'/'\\\\''/g")
-esc_name=$(basename "$snapshot" | sed "s/'/'\\\\''/g")
-esc_message=$(printf '%s' "$ntfy_message" | sed "s/'/'\\\\''/g")
-
-# === SENDING TO NTFY ===
-command="curl -s"
-command="${command} --connect-timeout 100"
-command="${command} --max-time 100"
-
-# Add a proxy, if available
-if [ -n "$PROXY_OPTS" ]; then
-    command="${command} ${PROXY_OPTS}"
-fi
-
 # Headlines
-command="${command} -H 'Title: Motion Detected'"
-command="${command} -H 'Priority: ${ntfy_priority}'"
-command="${command} -H 'Tags: warning,rotating_light'"
-command="${command} -H 'Message: ${esc_message}'"
-command="${command} -H 'Filename: ${esc_name}'"
-command="${command} -H 'Content-Type: ${content_type}'"
+set -- "$@" -H "Title: Motion Detected"
+set -- "$@" -H "Priority: ${ntfy_priority}"
+set -- "$@" -H "Tags: warning,rotating_light"
+set -- "$@" -H "Message: ${ntfy_message}"
+set -- "$@" -H "Filename: $(basename "$snapshot")"
+set -- "$@" -H "Content-Type: ${content_type}"
 
 # Sending a file
-command="${command} -T '${esc_path}'"
-command="${command} '${ntfy_server}/${ntfy_topic}'"
+set -- "$@" -T "$snapshot"
+set -- "$@" "${ntfy_server}/${ntfy_topic}"
 
 # Login and password
 if [ -n "$ntfy_user" ]; then
-    command="${command} -u ${ntfy_user}:${ntfy_pass}"
+    set -- "$@" -u "${ntfy_user}:${ntfy_pass}"
 fi
 
 # Execution
@@ -224,9 +221,9 @@ fi
 # firmware, the very release that added --fail-with-body, so going through the
 # status code leaves no version floor to trip over later.
 body=$workdir/response.txt
-command="${command} --output '${body}' --write-out '%{http_code}'"
+set -- "$@" --output "$body" --write-out '%{http_code}'
 
-http=$(eval "$command")
+http=$("$@")
 [ -s "$body" ] && cat "$body"
 
 case "$http" in

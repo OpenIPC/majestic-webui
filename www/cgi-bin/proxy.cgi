@@ -7,7 +7,14 @@ params="host port username password"
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	rm -f "$config_file"
 	for p in $params; do
-		echo "socks5_${p}=\"$(eval echo \$POST_socks5_${p})\"" >> "$config_file"
+		# shq, and t_value rather than `eval echo`: this file is sourced
+		# back by this page and by all three senders, so a value in it has
+		# to survive being read as shell. Wrapped in double quotes and
+		# never escaped, a proxy password containing a quote broke every
+		# reader of the file, one containing $(...) ran on each of those
+		# reads, and `eval echo` collapsed the spaces out of the rest
+		# (#547).
+		echo "socks5_${p}=$(shq "$(t_value "POST_socks5_${p}")")" >> "$config_file"
 	done
 
 	redirect_to "$SCRIPT_NAME"
