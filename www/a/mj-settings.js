@@ -1669,6 +1669,17 @@
 		f.control.dispatchEvent(new Event('input', { bubbles: true }));
 	}
 
+	// The Automatic mode, through the field rather than at its checkbox.
+	// setValue is where a boolean field's own normalisation lives and where
+	// refresh() and the reset paths already go; writing `.checked` beside
+	// them is a second way to set the same field that would quietly stop
+	// matching the first. `change` is what the lock and the mode row hang
+	// off, and setValue fires nothing.
+	function setAuto(f, on) {
+		f.setValue(on ? 'true' : 'false');
+		f.control.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
 	// The strip's knobs back to their schema defaults — staged, exactly like the
 	// per-row ↺ and for the same reason. This used to call /api/v1/reset, which
 	// wrote the camera the moment it was pressed while the sliders beside it
@@ -1784,18 +1795,59 @@
 		// of the four knobs would otherwise get a control that half-works.
 		if (!LIVE_PRESETS.every(p => Object.keys(p.v).every(k => byKey[k]))) return;
 
+		// One row of mutually exclusive modes, Automatic among them: picking
+		// it hands the picture to the camera, and picking any of the others
+		// takes it back and applies that look. Which one is in force is the
+		// lit chip rather than a sentence anywhere.
+		//
+		// The constraint this exists to hold: every chip stays actionable,
+		// whichever mode is in force. Disabling the ones that do not apply
+		// leaves buttons that look exactly like working buttons and do
+		// nothing when pressed, with the reason available only as prose the
+		// reader has to find and connect — and it forces whatever turns
+		// Automatic on to live elsewhere on the page, so changing your mind
+		// means moving between two controls that disagree. A mode you are
+		// not in is something to press; a dead control is a puzzle.
+		const autoField = state.fields.find(f => f.dot === 'image.tuning');
 		const row = el('div', 'mj-scene-row');
+
+		let autoChip = null;
+		if (autoField && autoField.control) {
+			autoChip = el('button', 'mj-scene-chip mj-scene-chip-auto');
+			autoChip.type = 'button';
+			autoChip.textContent = 'Automatic';
+			autoChip.title = 'Let the camera follow the scene. It works from ' +
+				'these settings and returns to them.';
+			autoChip.addEventListener('click', () => {
+				if (autoField.control.checked) return;
+				setAuto(autoField, true);
+			});
+			row.appendChild(autoChip);
+		}
+
 		const chips = LIVE_PRESETS.map(p => {
 			const b = el('button', 'mj-scene-chip');
 			b.type = 'button';
 			b.textContent = p.label;
 			b.addEventListener('click', () => {
+				// Leaving Automatic is part of choosing a look, and doing it
+				// first means the knobs are writable by the time the preset
+				// lands on them.
+				if (autoField && autoField.control && autoField.control.checked)
+					setAuto(autoField, false);
 				Object.keys(p.v).forEach(k => setLive(byKey[k], p.v[k]));
 			});
 			row.appendChild(b);
 			return b;
 		});
 		container.appendChild(row);
+		// Nothing in this row is ever disabled now.
+		toneOwned.chips = [];
+		toneModeRow = !!autoChip;
+
+		// What Automatic is doing right now, directly under the chip that
+		// turns it on -- the only place a reader looks after pressing it.
+		if (autoChip) renderAutoStatus(container);
 
 		const status = el('div', 'mj-scene-status');
 		status.innerHTML = '<span class="mj-pip"></span><span></span>';
@@ -1804,12 +1856,22 @@
 		const text = status.querySelector('span:last-child');
 
 		const sync = () => {
+			const auto = !!(autoField && autoField.control &&
+				autoField.control.checked);
 			const cur = {};
 			Object.keys(byKey).forEach(k => { cur[k] = Number(byKey[k].getValue()); });
 			const hit = LIVE_PRESETS.find(p =>
 				Object.keys(p.v).every(k => cur[k] === p.v[k]));
+			if (autoChip) {
+				autoChip.classList.toggle('mj-scene-chip-on', auto);
+				autoChip.setAttribute('aria-pressed', auto ? 'true' : 'false');
+			}
 			chips.forEach((b, i) => {
-				const on = !!hit && LIVE_PRESETS[i].id === hit.id;
+				// A preset only reads as in force when the camera is not
+				// running the picture itself. Under Automatic the numbers may
+				// still happen to match Indoor, and lighting it then would
+				// say the operator chose a look they did not.
+				const on = !auto && !!hit && LIVE_PRESETS[i].id === hit.id;
 				b.classList.toggle('mj-scene-chip-on', on);
 				b.setAttribute('aria-pressed', on ? 'true' : 'false');
 			});
@@ -1842,8 +1904,209 @@
 			f.control.addEventListener('input', sync);
 			f.control.addEventListener('change', sync);
 		});
+		// The mode is one of the things this row draws, so a change of mode
+		// has to re-read it. Without this, pressing Automatic locked the
+		// sliders -- which is a different listener -- while the row went on
+		// showing Indoor as the one in force.
+		if (autoField && autoField.control)
+			autoField.control.addEventListener('change', sync);
 		state.liveSync.push(sync);
 		sync();
+	}
+
+	// What the camera's own tone controller is doing, directly under the
+	// switch that turns it on. Shaped like the Scene line — bold head, em
+	// dash, tail — because it is the same kind of statement about the same
+	// knobs.
+	//
+	// Under the SWITCH, and not beside the knobs it moves, because the first
+	// question anyone asks of a control is whether pressing it did anything.
+	// It lived in the Scene column for one revision and the answer to
+	// switching the feature off was that a line in a different column
+	// silently vanished, which is indistinguishable from a page that never
+	// had one.
+	//
+	// So OFF is a state this draws rather than a reason to disappear. The one
+	// thing it stays silent about is not knowing: until a metrics poll has
+	// actually landed, "off" would be a guess, and a wrong guess sitting
+	// under the switch is worse than a blank line for two seconds.
+	function renderAutoStatus(container) {
+		if (!window.MajesticToneCheck || !container ||
+			typeof window.mjMetricsSubscribe !== 'function') return;
+
+		const row = el('div', 'mj-scene-status mj-tone-status');
+		row.hidden = true;
+		row.innerHTML = '<span class="mj-pip"></span><span></span>';
+		container.appendChild(row);
+		const pip = row.querySelector('.mj-pip');
+		const text = row.querySelector('span:last-child');
+
+		// The operator's SAVED value for a dotted key, which is the baseline
+		// the controller works from — not what the control currently reads. A
+		// half-dragged slider is not a baseline, and comparing against one
+		// would make the camera look like it was fighting the drag.
+		const saved = (dot) => {
+			const v = state.initial[dot];
+			if (v !== undefined && v !== null && v !== '') return v;
+			const c = getDotted(state.config, dot);
+			return (c === undefined || c === null || c === '') ? null : c;
+		};
+
+		const off = window.mjMetricsSubscribe((s) => {
+			// Cleared, not frozen, when the poll fails: a stale verdict
+			// presented as live is worse than none, and this one moves. This
+			// is also the only branch that hides the row, because it is the
+			// only one where the page does not know.
+			if (!s || !s.ok || !s.tone) {
+				row.hidden = true;
+				paintAutoMarks(null, null);
+				return;
+			}
+			// Whether the feature is ON is the switch's answer, not the
+			// gauges'. A build that predates these metrics can have it
+			// enabled and publish none of them, and "Off" printed beside a
+			// lit Automatic chip is a confident lie.
+			const d = window.MajesticToneCheck.describe(s.tone, saved,
+				toneAutoOn());
+			row.hidden = !d.known;
+			if (!d.known) { paintAutoMarks(null, null); return; }
+			pip.className = 'mj-pip mj-pip-' + d.tone;
+			text.innerHTML = '<b>' + esc(d.head) + '</b> \u2014 ' + esc(d.tail);
+			// Only while the camera is actually measuring. Paused, the four
+			// actuator gauges are as frozen as the span beside them, and
+			// painting them into the locked read-outs would present a
+			// reading from before the operator started as where the camera
+			// is right now.
+			paintAutoMarks(d, d.measuring ? {
+				'image.contrast': s.tone.contrast,
+				'image.luminance': s.tone.luminance,
+				'image.saturation': s.tone.saturation,
+			} : null);
+		});
+		// mjMetricsSubscribe predates returning an unsubscribe, so it may hand
+		// back nothing; the guard keeps this working either way.
+		state.liveCleanup.push(() => { if (typeof off === 'function') off(); });
+	}
+
+	// Where the camera is holding each knob, drawn on the knob's own track.
+	//
+	// Three marks on one track, and they mean three different things: the
+	// tick is the schema's factory default, the thumb is the operator's
+	// value, and this is what the ISP is running right now. The last one is
+	// the only one that moves on its own, which is why it is worth drawing at
+	// all — without it the slider says 50 while the camera runs 84 and
+	// nothing on the page accounts for the difference.
+	//
+	// Hidden when it coincides with the thumb, which is most of the time: a
+	// mark permanently under the handle is furniture, and furniture is how a
+	// reader learns to stop looking at something.
+	let autoMarks = [];
+	// Everything else automatic tuning takes over while it is on: the Scene
+	// chips, the Stock button, and the note that says where the switch is.
+	let toneOwned = { chips: [], buttons: [], notes: [] };
+	let toneLocked = null;
+	// Whether the Scene row carries the Automatic chip. When it does, the
+	// image.tuning switch is redundant and is hidden.
+	let toneModeRow = false;
+
+	// The three the controller actually drives on this strip. Hue is not one
+	// of them and stays the operator's throughout — a mode that greys out
+	// controls it does not touch is as misleading as one that leaves live the
+	// ones it does.
+	const DRIVEN = { 'image.contrast': 1, 'image.luminance': 1, 'image.saturation': 1 };
+
+	function mountAutoMark(field, f) {
+		if (!field || !field.control) return;
+		const track = field.control.parentNode;
+		if (!track || !track.classList.contains('mj-live-track')) return;
+		const min = isNum(f.sub.minimum) ? f.sub.minimum : 0;
+		const max = isNum(f.sub.maximum) ? f.sub.maximum : 100;
+		if (max <= min) return;
+		const mark = el('span', 'mj-live-auto');
+		mark.hidden = true;
+		track.appendChild(mark);
+		const row = track.closest('.mj-live-row');
+		// The camera's own number, shown in place of the editable one while
+		// the row is locked. A separate node rather than writing the input:
+		// the input's value is what Save persists and what dirty tracking
+		// compares, and putting a transient reading into it would offer to
+		// save the camera's current mood as the operator's setting.
+		let cam = null;
+		if (row && DRIVEN[f.dot]) {
+			cam = el('span', 'mj-live-cam');
+			cam.hidden = true;
+			const num = row.querySelector('.mj-live-num');
+			if (num) row.insertBefore(cam, num);
+		}
+		autoMarks.push({ dot: f.dot, mark: mark, min: min, max: max,
+			row: row, cam: cam, driven: !!DRIVEN[f.dot] });
+	}
+
+	// Automatic owns the three knobs it drives, so while it is on they stop
+	// being controls and become read-outs. A slider left live under it would
+	// write a real value that the camera walks away from two seconds later,
+	// which is a control that lies; labelling does not fix that. The same
+	// bargain auto-exposure has always made.
+	//
+	// Driven from the SWITCH rather than from the metrics gauges, so the
+	// page answers the click at once instead of at the next poll two seconds
+	// later. A mode change that appears to do nothing for two seconds reads
+	// as a mode change that did nothing.
+	function applyToneLock(locked) {
+		if (locked === toneLocked) return;
+		toneLocked = locked;
+		for (const a of autoMarks) {
+			if (!a.driven || !a.row) continue;
+			a.row.classList.toggle('mj-live-locked', locked);
+			a.row.querySelectorAll('.mj-live-input, .mj-live-num, .mj-live-rst')
+				.forEach(n => { n.disabled = locked; });
+			if (a.cam) a.cam.hidden = !locked;
+		}
+		toneOwned.chips.forEach(c => { c.disabled = locked; });
+		// Hidden, not disabled. The whole point of the mode row is that a
+		// control which cannot be used is not left on the page looking as
+		// though it can.
+		toneOwned.buttons.forEach(b => { b.hidden = locked; });
+		toneOwned.notes.forEach(n => { n.hidden = !locked; });
+	}
+
+	// The switch's state, read live. Falls back to the saved config for the
+	// moment before the field exists.
+	function toneAutoOn() {
+		const f = state.fields.find(x => x.dot === 'image.tuning');
+		if (f && f.control) return !!f.control.checked;
+		return toBool(getDotted(state.config, 'image.tuning'));
+	}
+
+	function paintAutoMarks(d, live) {
+		if (!autoMarks.length) return;
+		const by = {};
+		(d && d.moved ? d.moved : []).forEach(m => { by[m.dot] = m; });
+		// The readout is every driven knob's CURRENT value, not only the ones
+		// that differ from the baseline: while the row is locked this number
+		// is the only one on it, so leaving it blank whenever the camera
+		// happens to agree with the saved value would blank a third of the
+		// strip at random.
+		for (const a of autoMarks) {
+			if (a.cam) {
+				const v = live ? live[a.dot] : null;
+				a.cam.textContent = (v == null) ? '—' : String(v);
+			}
+			const m = by[a.dot];
+			// Nothing to show, or a value outside the control's own range —
+			// which would paint outside the track and imply the camera is
+			// somewhere the slider cannot go.
+			if (!m || m.live < a.min || m.live > a.max) {
+				a.mark.hidden = true;
+				a.mark.removeAttribute('title');
+				continue;
+			}
+			a.mark.hidden = false;
+			a.mark.style.left =
+				((m.live - a.min) / (a.max - a.min) * 100).toFixed(3) + '%';
+			a.mark.title = 'Automatic tuning is running this at ' + m.live +
+				'; your saved value is ' + m.base;
+		}
 	}
 
 	// The luma histogram. Everything it needs is already in the browser — the
@@ -1859,6 +2122,14 @@
 			'</svg>' +
 			'<span class="mj-luma-clip mj-luma-clip-l" hidden></span>' +
 			'<span class="mj-luma-clip mj-luma-clip-r" hidden></span>' +
+			// The camera's own reading of the same picture, as a bracket
+			// across the bottom of the plot. Two measurements of one scene,
+			// deliberately shown together: this one is what the controller
+			// decides on, and the shape above is what the viewer is actually
+			// being served. They should agree, and an installer who can see
+			// that they do not has learnt something no single number tells
+			// them. Absent entirely until the camera reports a span.
+			'<span class="mj-luma-band" hidden><i></i></span>' +
 			'</div>' +
 			'<div class="mj-luma-read"><span class="mj-luma-verdict"></span>' +
 			'<span class="mj-luma-scale">Y&#8242; 0&#8211;255</span></div>';
@@ -1869,6 +2140,7 @@
 		const clipR = wrap.querySelector('.mj-luma-clip-r');
 		const verdict = wrap.querySelector('.mj-luma-verdict');
 		const meanEl = container.parentNode.querySelector('.mj-luma-mean');
+		mountLumaBand(wrap.querySelector('.mj-luma-band'));
 
 		const sampler = window.MajesticLuma.start({
 			// Whichever element the stage currently has a picture on. It was a
@@ -1903,8 +2175,42 @@
 		state.liveCleanup.push(() => sampler.stop());
 	}
 
+	// The camera's measured span, under the browser's histogram of the same
+	// scene. Its own subscription rather than a hook in the status line's,
+	// because the two are independent: a build with no player has no
+	// histogram to draw on and must still get the sentence, and a camera with
+	// the controller off has a histogram and no band.
+	function mountLumaBand(band) {
+		if (!band || !window.MajesticToneCheck ||
+			typeof window.mjMetricsSubscribe !== 'function') return;
+		const bar = band.firstElementChild;
+		const off = window.mjMetricsSubscribe((s) => {
+			const b = (s && s.ok && s.tone)
+				? window.MajesticToneCheck.spanBand(s.tone) : null;
+			if (!b) { band.hidden = true; return; }
+			band.hidden = false;
+			bar.style.left = (b.lo * 100).toFixed(2) + '%';
+			bar.style.width = ((b.hi - b.lo) * 100).toFixed(2) + '%';
+			// The camera reports a WIDTH, not two ends, so the bracket is
+			// centred rather than placed — said in the tooltip so nobody
+			// reads its position as the camera's opinion of where the
+			// picture sits.
+			band.title = 'The camera measures this picture as spanning ' +
+				b.span + ' of 255. Drawn centred: it reports the width, ' +
+				'not where on the scale it falls.';
+		});
+		state.liveCleanup.push(() => { if (typeof off === 'function') off(); });
+	}
+
 	function renderLive(form) {
 		const fields = liveFields();
+		// Rebuilt with the leaf. Left alone, a section switch would leave the
+		// painter writing into marks on a detached track for the rest of the
+		// page's life, and the new ones would never be found.
+		autoMarks = [];
+		toneOwned = { chips: [], buttons: [], notes: [] };
+		toneLocked = null;
+		toneModeRow = false;
 
 		// The only place the leaf names itself — the rail's active item says it
 		// too. The stream picker used to share this line; it is on the picture
@@ -2122,6 +2428,7 @@
 			if (!field) continue;
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
+			if (isKnob(f)) mountAutoMark(field, f);
 		}
 
 		// Hold to compare shows the picture at stock while it is held. At stock
@@ -2160,13 +2467,30 @@
 			rall.title = 'Reset all four to their factory defaults';
 			rall.addEventListener('click', resetLiveAll);
 			foot.appendChild(rall);
+			// Resets the very knobs Automatic is driving, so it goes with
+			// them.
+			toneOwned.buttons.push(rall);
 			strip.appendChild(foot);
+		}
+
+		// Before the Scene row, not after it as this used to be. image.tuning
+		// is one of these leftovers, and the mode row is built out of it --
+		// it cannot pick up a field that does not exist yet. The cards still
+		// land under the deck either way, because the deck was appended long
+		// before any of them.
+		const claimed = new Set(state.fields.map(f => f.dot));
+		for (const sec of absorbedSections()) {
+			if (!sectionFields(sec).some(f => !claimed.has(f.dot))) continue;
+			renderProps(restCols(sec).firstElementChild, sec,
+				((state.schema.properties || {})[sec] || {}).properties || {}, claimed);
 		}
 
 		const toneFields = state.fields.filter(f =>
 			f.schema && f.schema['x-live'] && f.type === 'integer');
 		if (hasTone && toneFields.length) {
-			renderScene(liveGroup(colScene, 'Scene', 'starting points'), toneFields);
+			renderScene(
+				liveGroup(colScene, 'Scene', 'automatic, or a look you pick'),
+				toneFields);
 		}
 
 		if (preview) {
@@ -2215,11 +2539,41 @@
 		// purpose: the rows come from the schema, so a key the section grows
 		// tomorrow lands here rather than on a page that no longer exists. What
 		// the deck already claimed (the quarter turns) is skipped by dot.
-		const claimed = new Set(state.fields.map(f => f.dot));
-		for (const sec of absorbedSections()) {
-			if (!sectionFields(sec).some(f => !claimed.has(f.dot))) continue;
-			renderProps(restCols(sec).firstElementChild, sec,
-				((state.schema.properties || {})[sec] || {}).properties || {}, claimed);
+		// Last, because the switch it answers for is drawn by the loop above
+		// and there is no row to hang a status line under until there is.
+		// Absent on a build that does not carry the key at all, which is
+		// every vendor but this one — a line about a feature the camera does
+		// not have is worse than no line.
+		const tuning = state.fields.find(f => f.dot === 'image.tuning');
+		if (tuning && tuning.control) {
+			// The mode row is this switch now, so the switch itself goes --
+			// hidden rather than removed, exactly as the Orientation pad
+			// treats the mirror and flip checkboxes it replaces, so Save and
+			// dirty tracking never learn anything happened. Two controls for
+			// one setting, in two places, is the thing this avoids.
+			const rowEl = tuning.control.closest('.mj-row');
+			if (rowEl && toneModeRow) {
+				rowEl.hidden = true;
+				// The card it sat in may now hold nothing at all: on this
+				// build image.tuning is the whole of what the Live leaf
+				// absorbed from the image section. A card that is a heading
+				// and 3rem of nothing is worse than no card.
+				const card = rowEl.closest('.mj-live-rest');
+				if (card && !card.querySelector('.mj-row:not([hidden])')) {
+					// Detached, not destroyed: state.fields still holds the
+					// field and Save reads the control, which does not care
+					// whether it is in the document.
+					card.hidden = true;
+				}
+			} else if (rowEl) {
+				renderAutoStatus(rowEl.parentNode);
+			}
+			const relock = () => applyToneLock(toneAutoOn());
+			tuning.control.addEventListener('change', relock);
+			// Also on a refresh or a discard, which put the switch back
+			// without anybody pressing a chip.
+			state.liveSync.push(relock);
+			relock();
 		}
 	}
 
