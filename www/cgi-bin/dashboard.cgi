@@ -56,7 +56,7 @@ done) %>
 	     × recording "the camera has no IR-cut filter" in a file of its own,
 	     because nothing measurable separates a filter nobody wired from one
 	     that was never fitted. But majestic already stores that statement:
-	     "Drive the IR-cut filter" off is it, and with it off and no pads
+	     "IR-cut filter" set to off is it, and with it off and no pads
 	     assigned there is no finding to show in the first place. So the way to
 	     silence this is on the page the button already opens, in the camera's
 	     own configuration, where a backup carries it and the daemon agrees with
