@@ -7,9 +7,11 @@
 // has in fact stood down for low light, and nothing else on the page
 // contradicts it.
 //
-// The gauge values below are real readings taken off two lab cameras on
-// 2026-09-20 — a hi3516ev300 + IMX335 courtyard camera in full sun, and the
-// same camera with its contrast baseline dropped to flatten the picture.
+// The gauge values below are measured ones rather than invented: a scene
+// already using its range, the same scene flattened, and one carrying both
+// deep shade and full sun at once. That last combination is the one a made-up
+// fixture never has — wide and clipping at the same time — and it is exactly
+// the case a controller watching span alone gets wrong.
 'use strict';
 
 const path = require('path');
@@ -30,32 +32,52 @@ const STOCK = savedFrom({
 	'image.saturation': 50,
 });
 
-group('tone-check: the controller is not running');
+group('tone-check: off, and the three ways of not knowing');
 
-// image.tuning off, or a backend with no controller at all: majestic publishes
-// none of the gauges. The distinction that matters is between this and a
-// controller that is running and idle — they are one word apart on screen and
-// completely different situations.
+// With the feature switched off the camera publishes none of these gauges.
+// Absent gauges are therefore ambiguous on their own, and the switch — which
+// the settings page knows independently — is what resolves them. Getting this
+// wrong prints a confident "Off" beside a lit Automatic chip.
 {
-	const d = tc.describe(null, STOCK);
-	check('null sample is reported as off', d.on === false && d.head === 'Off');
+	const d = tc.describe(null, STOCK, false);
+	check('no sample, switch off: definitely off',
+		d.on === false && d.known === true && d.head === 'Off');
 	check('and claims no knob has moved', d.moved.length === 0);
+	check('and is not claiming to measure anything', d.measuring === false);
 }
 {
-	const d = tc.describe({ state: null, span: null }, STOCK);
-	check('a sample with no state is also off', d.on === false);
+	const d = tc.describe({ state: null, span: null }, STOCK, false);
+	check('a sample with no state and the switch off is off',
+		d.on === false && d.known === true && d.head === 'Off');
+}
+{
+	// A build that has the feature and does not publish these metrics. It is
+	// ON — the switch says so — and this page cannot say what it is doing.
+	// The one answer that must never appear here is "Off".
+	const d = tc.describe({ state: null }, STOCK, true);
+	check('switch on but no state gauge is not reported as off',
+		d.head !== 'Off');
+	check('it is reported as unanswered', d.known === false);
+	check('and warns rather than reassuring', d.tone === 'warn');
+}
+{
+	// The page has not worked out the switch yet. Saying either thing would
+	// be a guess, so it says nothing and the caller hides the row.
+	const d = tc.describe({ state: null }, STOCK, null);
+	check('an unknown switch yields nothing to render', d.known === false);
+	check('and no sentence to render it with', d.head === '');
 }
 
 group('tone-check: running and idle');
 
-// 12:53 UTC, courtyard, full sun. Span 195 of 255, nothing clipped: the
-// correct action is none, and the panel has to say that without sounding
-// like the feature is broken.
+// A scene already using 195 of the 255 available, nothing clipped: the
+// correct action is none, and the panel has to say so without sounding like
+// the feature is broken.
 {
 	const d = tc.describe({
 		state: 1, headroom: 100, span: 195, clipLo: 0, clipHi: 0,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
-	}, STOCK);
+	}, STOCK, true);
 	check('idle is on', d.on === true);
 	check('idle reads as nothing to do', d.head === 'Nothing to do');
 	check('and quotes the span it measured', d.tail.indexOf('195') >= 0);
@@ -65,8 +87,8 @@ group('tone-check: running and idle');
 
 group('tone-check: working');
 
-// 12:14 UTC, same camera, contrast baseline dropped to 22 to flatten it.
-// Mid-ramp: dehaze and saturation lifted, contrast not yet.
+// The same scene flattened by a low contrast baseline, caught mid-ramp:
+// dehaze and saturation lifted, contrast not yet.
 {
 	const s = {
 		state: 2, headroom: 100, span: 88, clipLo: 0, clipHi: 0,
@@ -98,21 +120,22 @@ group('tone-check: working');
 	const d = tc.describe({
 		state: 2, headroom: 100, span: 71, clipLo: 0, clipHi: 0,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
-	}, STOCK);
+	}, STOCK, true);
 	check('working with nothing moved still has a tail', d.tail.length > 0);
 	check('and falls back to the span', d.tail.indexOf('71') >= 0);
 }
 
 group('tone-check: the two standing-down states');
 
-// 09:57 UTC, courtyard, full sun with deep shade: 4.07% of the frame already
-// crushed. The controller stops rather than trade shadows for range, and this
-// is the state where the reader most needs to be told WHY nothing is moving.
+// Deep shade and full sun in one frame: span 210, and 4.07% of the picture
+// already crushed. The controller stops rather than trade shadows for range,
+// and this is the state where the reader most needs telling WHY nothing is
+// moving.
 {
 	const d = tc.describe({
 		state: 3, headroom: 100, span: 210, clipLo: 40670, clipHi: 6291,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
-	}, STOCK);
+	}, STOCK, true);
 	check('holding says it is held', d.head === 'Holding back');
 	check('holding warns', d.tone === 'warn');
 	check('and prints the crushed share as a percentage',
@@ -123,7 +146,7 @@ group('tone-check: the two standing-down states');
 	const d = tc.describe({
 		state: 4, headroom: 20, span: 96, clipLo: 0, clipHi: 0,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
-	}, STOCK);
+	}, STOCK, true);
 	check('low light says so', d.head === 'Too dark to help');
 	check('low light warns', d.tone === 'warn');
 	check('and quotes the headroom left', d.tail.indexOf('20%') >= 0);
@@ -132,7 +155,7 @@ group('tone-check: the two standing-down states');
 	const d = tc.describe({
 		state: 0, headroom: null, span: null, clipLo: null, clipHi: null,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
-	}, STOCK);
+	}, STOCK, true);
 	// On with no measurement is NOT the same as idle, and must not be
 	// softened into it: a camera whose sampling source never answers sits
 	// here for ever.
@@ -142,22 +165,34 @@ group('tone-check: the two standing-down states');
 
 group('tone-check: paused while somebody adjusts by hand');
 
-// The driver stops sampling during a hold, so every gauge freezes at its
-// last value. Reported as its own state precisely so the page stops
-// presenting those as current: on hardware this was observed insisting "the
-// picture already spans 90 of 255" for a full minute while the picture
-// spanned 192.
+// Nothing is sampled during a hold, so every gauge freezes at its last
+// value. It is its own state precisely so the page stops presenting those as
+// current — otherwise the panel states a span from minutes ago as the
+// picture's own, with every number in the sentence real and none of it true
+// any more.
 {
 	const d = tc.describe({
 		state: 5, headroom: 100, span: 90, clipLo: 0, clipHi: 0,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
-	}, STOCK);
+	}, STOCK, true);
 	check('paused is on', d.on === true);
 	check('paused says it is paused', d.head === 'Paused');
 	check('and quotes no measurement at all',
 		d.tail.indexOf('90') < 0 && d.tail.indexOf('span') < 0);
 	check('paused is not dressed as a verdict about the picture',
 		d.tone === 'off');
+	check('paused says it is not measuring', d.measuring === false);
+}
+{
+	// The four actuator gauges freeze with the rest. Reporting them as moved
+	// would keep the slider marks and locked read-outs claiming to show
+	// where the camera is right now.
+	const d = tc.describe({
+		state: 5, headroom: 100, span: 90, clipLo: 0, clipHi: 0,
+		dehaze: 255, contrast: 85, luminance: 62, saturation: 90,
+	}, STOCK, true);
+	check('paused reports no knob as moved, however far they were',
+		d.moved.length === 0);
 }
 
 group('tone-check: a missing number never becomes a wrong one');
@@ -166,7 +201,7 @@ group('tone-check: a missing number never becomes a wrong one');
 	const d = tc.describe({
 		state: 1, headroom: null, span: null, clipLo: null, clipHi: null,
 		dehaze: null, contrast: null, luminance: null, saturation: null,
-	}, STOCK);
+	}, STOCK, true);
 	check('idle without a span omits the number', d.tail.indexOf('0') < 0);
 	check('and does not claim a knob moved', d.moved.length === 0);
 }
@@ -177,12 +212,12 @@ group('tone-check: a missing number never becomes a wrong one');
 	const d = tc.describe({
 		state: 2, headroom: 100, span: 88,
 		dehaze: 255, contrast: 50, luminance: 50, saturation: 50,
-	}, savedFrom({ 'image.contrast': 50, 'image.luminance': 50, 'image.saturation': 50 }));
+	}, savedFrom({ 'image.contrast': 50, 'image.luminance': 50, 'image.saturation': 50 }), true);
 	check('an unknown baseline is not compared',
 		d.moved.every(m => m.key !== 'dehaze'));
 }
 {
-	const d = tc.describe({ state: 9, span: 100 }, STOCK);
+	const d = tc.describe({ state: 9, span: 100 }, STOCK, true);
 	check('an unknown verdict still renders', d.on === true && d.head === 'Tuning');
 	check('and says which one it did not know', d.tail.indexOf('9') >= 0);
 }

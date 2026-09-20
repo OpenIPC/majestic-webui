@@ -1669,6 +1669,17 @@
 		f.control.dispatchEvent(new Event('input', { bubbles: true }));
 	}
 
+	// The Automatic mode, through the field rather than at its checkbox.
+	// setValue is where a boolean field's own normalisation lives and where
+	// refresh() and the reset paths already go; writing `.checked` beside
+	// them is a second way to set the same field that would quietly stop
+	// matching the first. `change` is what the lock and the mode row hang
+	// off, and setValue fires nothing.
+	function setAuto(f, on) {
+		f.setValue(on ? 'true' : 'false');
+		f.control.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
 	// The strip's knobs back to their schema defaults — staged, exactly like the
 	// per-row ↺ and for the same reason. This used to call /api/v1/reset, which
 	// wrote the camera the moment it was pressed while the sliders beside it
@@ -1784,19 +1795,19 @@
 		// of the four knobs would otherwise get a control that half-works.
 		if (!LIVE_PRESETS.every(p => Object.keys(p.v).every(k => byKey[k]))) return;
 
-		// Automatic is one of the choices here, not a switch somewhere else.
+		// One row of mutually exclusive modes, Automatic among them: picking
+		// it hands the picture to the camera, and picking any of the others
+		// takes it back and applies that look. Which one is in force is the
+		// lit chip rather than a sentence anywhere.
 		//
-		// It was a switch somewhere else for one revision, and the presets
-		// were disabled while it was on. That is the shape this is written to
-		// avoid: three buttons that look exactly like working buttons, do
-		// nothing when pressed, and answer "why" only in a line of grey text
-		// beside them. A dead control gives the reader a puzzle; a mode they
-		// are not currently in gives them something to press.
-		//
-		// So the two are one row. Picking Automatic hands the picture to the
-		// camera; picking any of the others takes it back and applies that
-		// look. Nothing is ever disabled, and which mode is in force is the
-		// lit chip rather than a sentence.
+		// The constraint this exists to hold: every chip stays actionable,
+		// whichever mode is in force. Disabling the ones that do not apply
+		// leaves buttons that look exactly like working buttons and do
+		// nothing when pressed, with the reason available only as prose the
+		// reader has to find and connect — and it forces whatever turns
+		// Automatic on to live elsewhere on the page, so changing your mind
+		// means moving between two controls that disagree. A mode you are
+		// not in is something to press; a dead control is a puzzle.
 		const autoField = state.fields.find(f => f.dot === 'image.tuning');
 		const row = el('div', 'mj-scene-row');
 
@@ -1809,8 +1820,7 @@
 				'these settings and returns to them.';
 			autoChip.addEventListener('click', () => {
 				if (autoField.control.checked) return;
-				autoField.control.checked = true;
-				autoField.control.dispatchEvent(new Event('change', { bubbles: true }));
+				setAuto(autoField, true);
 			});
 			row.appendChild(autoChip);
 		}
@@ -1823,11 +1833,8 @@
 				// Leaving Automatic is part of choosing a look, and doing it
 				// first means the knobs are writable by the time the preset
 				// lands on them.
-				if (autoField && autoField.control && autoField.control.checked) {
-					autoField.control.checked = false;
-					autoField.control.dispatchEvent(
-						new Event('change', { bubbles: true }));
-				}
+				if (autoField && autoField.control && autoField.control.checked)
+					setAuto(autoField, false);
 				Object.keys(p.v).forEach(k => setLive(byKey[k], p.v[k]));
 			});
 			row.appendChild(b);
@@ -1955,15 +1962,26 @@
 				paintAutoMarks(null, null);
 				return;
 			}
-			const d = window.MajesticToneCheck.describe(s.tone, saved);
-			row.hidden = false;
+			// Whether the feature is ON is the switch's answer, not the
+			// gauges'. A build that predates these metrics can have it
+			// enabled and publish none of them, and "Off" printed beside a
+			// lit Automatic chip is a confident lie.
+			const d = window.MajesticToneCheck.describe(s.tone, saved,
+				toneAutoOn());
+			row.hidden = !d.known;
+			if (!d.known) { paintAutoMarks(null, null); return; }
 			pip.className = 'mj-pip mj-pip-' + d.tone;
 			text.innerHTML = '<b>' + esc(d.head) + '</b> \u2014 ' + esc(d.tail);
-			paintAutoMarks(d, {
+			// Only while the camera is actually measuring. Paused, the four
+			// actuator gauges are as frozen as the span beside them, and
+			// painting them into the locked read-outs would present a
+			// reading from before the operator started as where the camera
+			// is right now.
+			paintAutoMarks(d, d.measuring ? {
 				'image.contrast': s.tone.contrast,
 				'image.luminance': s.tone.luminance,
 				'image.saturation': s.tone.saturation,
-			});
+			} : null);
 		});
 		// mjMetricsSubscribe predates returning an unsubscribe, so it may hand
 		// back nothing; the guard keeps this working either way.
@@ -2024,16 +2042,16 @@
 			row: row, cam: cam, driven: !!DRIVEN[f.dot] });
 	}
 
-	// Automatic tuning owns the three knobs it drives, so while it is on they
-	// stop being controls. Locked rather than left live and annotated: a
-	// slider that writes a value the camera walks away from two seconds later
-	// is a control that lies, and no amount of labelling fixes that. This is
-	// the same bargain auto-exposure has always made.
+	// Automatic owns the three knobs it drives, so while it is on they stop
+	// being controls and become read-outs. A slider left live under it would
+	// write a real value that the camera walks away from two seconds later,
+	// which is a control that lies; labelling does not fix that. The same
+	// bargain auto-exposure has always made.
 	//
-	// Driven from the SWITCH, not from the metrics gauges, so the page
-	// answers the click at once rather than at the next poll two seconds
-	// later — the whole complaint being answered here is that toggling the
-	// feature appeared to do nothing.
+	// Driven from the SWITCH rather than from the metrics gauges, so the
+	// page answers the click at once instead of at the next poll two seconds
+	// later. A mode change that appears to do nothing for two seconds reads
+	// as a mode change that did nothing.
 	function applyToneLock(locked) {
 		if (locked === toneLocked) return;
 		toneLocked = locked;
@@ -2531,9 +2549,8 @@
 			// The mode row is this switch now, so the switch itself goes --
 			// hidden rather than removed, exactly as the Orientation pad
 			// treats the mirror and flip checkboxes it replaces, so Save and
-			// dirty tracking never learn anything happened. Leaving both on
-			// the page is what made the reader scroll between a switch and
-			// the buttons it silently disabled.
+			// dirty tracking never learn anything happened. Two controls for
+			// one setting, in two places, is the thing this avoids.
 			const rowEl = tuning.control.closest('.mj-row');
 			if (rowEl && toneModeRow) {
 				rowEl.hidden = true;

@@ -2761,10 +2761,16 @@ button.mj-osd-chip,
 	pointer-events: auto;
 }
 
+/* min-width, because a span of zero is a real measurement — a black or flat
+   picture — and a zero-width element draws nothing at all, which is the same
+   thing on screen as no measurement. Pulled back by half of it so the line
+   stays centred on the value it reports. */
 .mj-luma-band i {
 	position: absolute;
 	bottom: 2px;
 	height: 2px;
+	min-width: 2px;
+	margin-left: -1px;
 	border-radius: 1px;
 	background: var(--bs-primary);
 	opacity: 0.75;

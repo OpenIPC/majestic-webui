@@ -340,16 +340,38 @@ let mjFails = 0;
 let mjTickN = 0;
 
 // Other scripts (status.js) consume the poll through here instead of running a
-// second one. A subscriber that registers after a tick gets the latest good
-// sample immediately; failures are announced but never remembered.
+// second one. A subscriber that registers after a tick is handed the most
+// recent PUBLICATION straight away — including a failed one.
+//
+// Not the most recent success, which is what this replayed before. A panel
+// mounted after the camera stopped answering was then given the last good
+// sample as though it were current, while every subscriber that had been
+// there all along had already been told the poll failed — so the same page
+// showed live and stale readings side by side depending on when each part of
+// it happened to mount.
+//
+// Returns a function that removes this subscriber, idempotently. Without one
+// there was no way to unsubscribe at all, and a page section that mounts a
+// panel on every visit left a detached closure running on every heartbeat
+// for the rest of the session.
 function mjMetricsSubscribe(fn) {
 	mjMetricsSubs.push(fn);
 	if (mjMetricsLast) fn(mjMetricsLast);
+	let gone = false;
+	return function () {
+		if (gone) return;
+		gone = true;
+		const i = mjMetricsSubs.indexOf(fn);
+		if (i >= 0) mjMetricsSubs.splice(i, 1);
+	};
 }
 
 function mjMetricsPublish(s) {
-	if (s.ok) mjMetricsLast = s;
-	mjMetricsSubs.forEach(fn => { try { fn(s); } catch (e) {} });
+	mjMetricsLast = s;
+	// A copy, because a subscriber that unsubscribes from inside its own
+	// callback would otherwise shorten the array being walked and skip the
+	// next one along.
+	mjMetricsSubs.slice().forEach(fn => { try { fn(s); } catch (e) {} });
 }
 
 // Prometheus text → { v, cpuTotal, cpuIdle, rx, tx }. `v` maps every unlabelled

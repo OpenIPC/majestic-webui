@@ -14,6 +14,12 @@
 // not measured, which is the whole reason this file talks about null: a span
 // of 0 is a black picture and a missing span is no measurement, and a panel
 // that shows the first when it means the second is worse than a blank one.
+//
+// Absent is not the same as off, either. Whether the feature is ON is the
+// image.tuning switch's answer and is passed in; the gauges only say what it
+// is DOING. Every result carries `known` -- whether this page can say
+// anything at all -- and `measuring` -- whether the numbers beside the
+// sentence describe the picture at this moment rather than some earlier one.
 (function () {
 	'use strict';
 
@@ -78,10 +84,33 @@
 	// `tone` is for the pip beside it: 'off' grey, 'ok' quiet, 'work' active,
 	// 'warn' for the two standing-down states, which are the ones where the
 	// camera is deliberately NOT doing what the operator switched it on for.
-	function describe(s, saved) {
-		if (!s || s.state == null)
-			return { on: false, tone: 'off', head: 'Off',
-				tail: 'the camera is not tuning itself', moved: [] };
+	// `autoOn` is what the settings page knows about the image.tuning switch:
+	// true, false, or null where it cannot say. It is asked for because an
+	// absent state gauge is NOT evidence that tuning is off — a camera whose
+	// build predates these metrics can have the feature enabled and publish
+	// none of them, and answering "Off" there is a confident lie printed
+	// beside a lit Automatic chip. The switch is the only thing that actually
+	// knows, so the two are separated: the gauge says what it is DOING, the
+	// switch says whether it is ON.
+	//
+	// `measuring` tells the caller whether the numbers beside this sentence
+	// describe the picture right now. False while paused and whenever the
+	// state is unknown, because in both the gauges are a reading from some
+	// earlier moment.
+	function describe(s, saved, autoOn) {
+		if (!s || s.state == null) {
+			if (autoOn === false)
+				return { on: false, known: true, measuring: false, tone: 'off',
+					head: 'Off', tail: 'the camera is not tuning itself',
+					moved: [] };
+			if (autoOn === true)
+				return { on: true, known: false, measuring: false,
+					tone: 'warn', head: 'No answer',
+					tail: 'the camera is not reporting what it is doing',
+					moved: [] };
+			return { on: false, known: false, measuring: false, tone: 'off',
+				head: '', tail: '', moved: [] };
+		}
 
 		const mv = moved(s, saved);
 		// Read once here rather than in four branches: every sentence below
@@ -93,39 +122,42 @@
 
 		switch (s.state) {
 		case PAUSED:
-			// Deliberately says nothing about the picture: the numbers to
-			// hand describe the scene as it was before the operator started
-			// moving things.
-			return { on: true, tone: 'off', head: 'Paused',
+			// Says nothing about the picture, and reports no knob as moved.
+			// Every gauge to hand describes the scene as it was before the
+			// operator started moving things -- including the four actuator
+			// values, which would otherwise keep painting marks and
+			// read-outs that claim to be where the camera is now.
+			return { on: true, known: true, measuring: false, tone: 'off',
+				head: 'Paused',
 				tail: 'standing aside while you adjust the picture',
-				moved: mv };
+				moved: [] };
 		case UNAVAILABLE:
 			// On, and has nothing to go on. Said plainly rather than dressed
 			// as calm: a camera whose sampling source never answers sits here
 			// for ever, and "nothing to do" would hide that completely.
-			return { on: true, tone: 'warn', head: 'No reading',
+			return { on: true, known: true, measuring: true, tone: 'warn', head: 'No reading',
 				tail: 'nothing measurable from the picture yet', moved: mv };
 		case IDLE:
-			return { on: true, tone: 'ok', head: 'Nothing to do',
+			return { on: true, known: true, measuring: true, tone: 'ok', head: 'Nothing to do',
 				tail: span == null
 					? 'the picture already fills the range'
 					: 'the picture already spans ' + span + ' of 255',
 				moved: mv };
 		case WORKING:
-			return { on: true, tone: 'work', head: 'Lifting the picture',
+			return { on: true, known: true, measuring: true, tone: 'work', head: 'Lifting the picture',
 				tail: mv.length
 					? mv.map(m => m.label + ' ' + m.live).join(', ')
 					: (span == null ? 'reaching for more range'
 						: 'span ' + span + ', reaching for more'),
 				moved: mv };
 		case HOLDING:
-			return { on: true, tone: 'warn', head: 'Holding back',
+			return { on: true, known: true, measuring: true, tone: 'warn', head: 'Holding back',
 				tail: clip.length
 					? 'stretching further would clip — ' + clip.join(' and ')
 					: 'stretching further would start clipping',
 				moved: mv };
 		case LOWLIGHT:
-			return { on: true, tone: 'warn', head: 'Too dark to help',
+			return { on: true, known: true, measuring: true, tone: 'warn', head: 'Too dark to help',
 				tail: headroom == null
 					? 'the sensor gain is too high to stretch without amplifying noise'
 					: 'the sensor gain leaves ' + headroom +
@@ -135,7 +167,8 @@
 		// A verdict this build does not know. Not silence: the camera is
 		// running something, and a panel that goes blank on an unrecognised
 		// number looks identical to one whose camera stopped.
-		return { on: true, tone: 'off', head: 'Tuning',
+		return { on: true, known: true, measuring: false, tone: 'off',
+			head: 'Tuning',
 			tail: 'the camera reports a state this page does not know (' +
 				s.state + ')', moved: mv };
 	}
