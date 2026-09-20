@@ -7433,9 +7433,32 @@
 		});
 	}
 
+	// The row this switch belongs above: the first of the numbers it swaps, in
+	// document order, whichever of the two sets is on screen.
+	//
+	// It used to be anchored under "Automatic day/night" instead, on the
+	// reading that both are mechanism switches. That is true and it is not
+	// where the control belongs: everything this switch does happens inside
+	// Levels and timing, so under the other heading it sat a column away from
+	// the eight rows it was swapping, and it stood between Automatic day/night
+	// and the two rows #548 asked to have directly beneath it.
+	//
+	// Resolved from the rows rather than named, because which of the two sets
+	// exists is the camera's business and the hidden one is still a row in the
+	// document. A camera declaring none of them gets no switch, which is
+	// right: it would govern nothing.
+	function legacyAnchor() {
+		const rows = LEGACY_KEYS.concat(AUTO_KEYS)
+			.map(pinField).filter(Boolean).map((f) => f.p);
+		if (!rows.length) return null;
+		return rows.reduce((first, row) =>
+			(row.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
+				? row : first);
+	}
+
 	function mountLegacy(container) {
-		const host = pinField('lightMonitor');
-		if (!host) return;
+		const anchor = legacyAnchor();
+		if (!anchor) return;
 		const id = 'mjf-nightMode-legacy';
 		const p = el('p', 'boolean mj-row');
 		// The same shape renderField gives a boolean once its reset wrap has run:
@@ -7484,7 +7507,7 @@
 		});
 		box.checked = legacyOn();
 		paint();
-		host.p.parentNode.insertBefore(p, host.p.nextSibling);
+		anchor.parentNode.insertBefore(p, anchor);
 		state.legacyBox = box;
 		showLegacy(box.checked);
 	}

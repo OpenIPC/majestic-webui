@@ -228,11 +228,10 @@
 	// arrives as one undifferentiated deal of nineteen controls (#325).
 	const SECTION_GROUPS = {
 		nightMode: [
-			// What day and night is, and what it moves. The two mechanism
-			// switches lead — automatic mode, and, on the Legacy row beside it,
-			// which pair of numbers that mode consults — and the filter and the
-			// lamp follow, each saying whether day and night moves it, whether
-			// you do, or whether nothing does.
+			// What day and night is, and what it moves: whether the camera
+			// switches on its own, and then the filter and the lamp, each
+			// saying whether day and night moves it, whether you do, or
+			// whether nothing does.
 			//
 			// Those two had a heading of their own for one release, and the
 			// reporter who asked for them here in the first place said why it
@@ -241,6 +240,20 @@
 			// reads manual or off (#548). Next to "Automatic day/night" the
 			// relationship is read off the rows, which can say either answer.
 			{ id: 'switching', label: 'Switching', keys: ['lightMonitor', 'irCut', 'backlight'] },
+			// Second, and the position is load-bearing rather than editorial.
+			// The cut is taken at the best heading boundary there is, so the
+			// ORDER of the groups decides which boundaries exist: with these two
+			// rows last, the only usable cut leaves 458px of column beside
+			// 1133, and between Switching and the numbers it leaves 666 beside
+			// 925. Both are legal and one of them is a card with a column of
+			// white down its left. Measured on a camera at 1280 and 2560, not
+			// counted: the rows differ enough in height -- a switch against a
+			// slider with a two-line hint -- that counting them predicts the cut
+			// badly.
+			//
+			// It reads better here too: what night looks like is a plainer
+			// question than what the thresholds are, and Colorless night mode is
+			// asked for far more often than any number below it.
 			{ id: 'picture', label: 'Night picture', keys: ['colorToGray', 'overrideDrc'] },
 			// The numbers that decide when, kept as a heading of their own rather
 			// than piled under Switching. Not taste: the section is dealt into two
@@ -250,11 +263,18 @@
 			// these rows leaves no between-heading cut that balances, and
 			// layoutCols falls back to cutting anywhere.
 			//
-			// Both mechanisms' numbers are here, and only one pair is ever on
-			// screen: which of them is the Legacy row's business, not the
-			// grouping's. The pause inside a switch is here as well — it is the
-			// gap between the picture changing and the filter swinging, which is
-			// the switch taking place and nothing the lamp does.
+			// Both mechanisms' numbers are here and only one pair is ever on
+			// screen. Which of them is the Legacy switch's business, and that
+			// switch is drawn at the head of this group rather than among the
+			// switches above: every row it reveals or hides is in here, and a
+			// control a column away from everything it moves is one whose
+			// effect nobody sees. It has no key of its own, so mj-settings.js
+			// mounts it against the first of these rows instead of being named
+			// here.
+			//
+			// The pause inside a switch is here as well — it is the gap between
+			// the picture changing and the filter swinging, which is the switch
+			// taking place and nothing the lamp does.
 			{ id: 'levels', label: 'Levels and timing', keys: [
 				'autoNightGain', 'autoDayGain', 'autoNightDelay', 'autoDayDelay',
 				'minThreshold', 'maxThreshold', 'monitorDelay', 'transitionDelayMs'] },
