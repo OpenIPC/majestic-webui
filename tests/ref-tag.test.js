@@ -15,6 +15,22 @@
 // beside it. Neither shows on screen, neither fails a lint, and the only
 // witness is a dashboard in another project counting events that simply stop
 // — which reads the same as nobody having clicked.
+//
+// The scan reads every href in the tree and lets URL decide which ones point
+// at the site, rather than matching the host and the query with patterns of
+// its own. Two ways such a pattern gets it wrong, and both fail open — the
+// link goes out untagged and the suite stays green:
+//
+//   https://openipc.org?x=1          a query straight after the authority,
+//                                    with no path between them, which a
+//                                    pattern expecting `/` never collects
+//   https://openipc.org/w#a?ref=…    a tag that looks like a query but sits
+//                                    inside the fragment, which the browser
+//                                    keeps to itself and never sends
+//
+// URL settles both without a special case: the first parses to this hostname
+// like any other, and the second puts everything after the # in `hash`, where
+// searchParams cannot see it.
 'use strict';
 
 const fs = require('fs');
@@ -23,12 +39,37 @@ const { check, group, done } = require('./assert');
 
 const ROOT = path.join(__dirname, '..');
 const WWW = path.join(ROOT, 'www');
-const TAG = 'ref=webui';
+const TAG = 'webui';
 
 // The host, and only the host: wiki.openipc.org is a different site with its
 // own counting, and the snapshot upload in sbin/openwall is a machine talking
 // to an API rather than a person arriving somewhere.
-const LINK = /href\s*=\s*(["'])(https?:\/\/(?:www\.)?openipc\.org(?:\/[^"']*)?)\1/g;
+const HOSTS = ['openipc.org', 'www.openipc.org'];
+
+// Every href, not only the ones that look like they lead here. Resolving each
+// against a base means a relative link parses as harmlessly as an absolute
+// one, and a haserl expression in the attribute is just another path that
+// belongs to no host we count.
+const HREF = /href\s*=\s*(["'])([^"']*)\1/g;
+const BASE = 'https://camera.invalid/cgi-bin/';
+
+// null for a link that is none of our business; otherwise whether the browser
+// would actually send the word. searchParams, so it counts only where it is
+// sent: not in the fragment, not glued into the path, and not as the prefix of
+// a longer value that happens to start the same way.
+function classify(raw) {
+	let url = null;
+	try {
+		url = new URL(raw, BASE);
+	} catch (e) {
+		// Unparseable is not "not ours". Anything naming the site has to reach
+		// the assertions and fail there with its text on screen, rather than be
+		// dropped by the reader that could not read it.
+		return raw.indexOf('openipc.org') === -1 ? null : { url: null, tagged: false };
+	}
+	if (HOSTS.indexOf(url.hostname) === -1) return null;
+	return { url: url, tagged: url.searchParams.get('ref') === TAG };
+}
 
 function walk(dir, out) {
 	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -42,10 +83,12 @@ function walk(dir, out) {
 const links = [];
 for (const file of walk(WWW, [])) {
 	const src = fs.readFileSync(file, 'utf8');
+	const where = path.relative(ROOT, file);
 	let m;
-	LINK.lastIndex = 0;
-	while ((m = LINK.exec(src)) !== null) {
-		links.push({ file: path.relative(ROOT, file), url: m[2] });
+	HREF.lastIndex = 0;
+	while ((m = HREF.exec(src)) !== null) {
+		const verdict = classify(m[2]);
+		if (verdict) links.push({ file: where, raw: m[2], verdict: verdict });
 	}
 }
 
@@ -59,14 +102,15 @@ group('every openipc.org link in www/ carries the tag');
 		links.length + ' found');
 
 	for (const link of links) {
-		check(link.file + ' — ' + link.url, link.url.indexOf(TAG) !== -1,
-			'no ' + TAG);
+		const url = link.verdict.url;
+		check(link.file + ' — ' + link.raw, link.verdict.tagged,
+			url ? 'ref=' + url.searchParams.get('ref') : 'unparseable');
 	}
 }
 
 group('the two links the footer and the Open Wall card put on screen');
 {
-	const byFile = (f) => links.filter((l) => l.file === f).map((l) => l.url);
+	const byFile = (f) => links.filter((l) => l.file === f).map((l) => l.raw);
 
 	const footer = byFile('www/cgi-bin/p/footer.cgi');
 	check('the footer, which every page with chrome renders, links to the site',
@@ -78,17 +122,39 @@ group('the two links the footer and the Open Wall card put on screen');
 	check('the Open Wall card links to the wall itself', wall.length === 1, wall.join(' '));
 	check('and it is tagged too', wall[0] === 'https://openipc.org/open-wall?ref=webui',
 		wall[0]);
+}
 
-	// The tag is a query parameter, not part of the path: a link that ends up
-	// as /open-wall/ref=webui or //?ref=webui reaches a 404 the page gives no
-	// sign of, since nothing here ever follows it.
-	for (const link of links) {
-		const q = link.url.indexOf('?');
-		check(link.file + ' — the tag is in the query, after a single ?',
-			q !== -1 && link.url.indexOf('?', q + 1) === -1 &&
-				link.url.slice(q + 1).split('&').indexOf(TAG) !== -1,
-			link.url);
-	}
+// classify() is the part of this file that can quietly stop working, so it is
+// driven directly on shapes the tree does not contain: a link it waves through
+// is a link nobody checks, and one it never collects is the same thing.
+group('the scan reads a URL the way a browser will');
+{
+	const verdict = (raw) => {
+		const v = classify(raw);
+		return v === null ? 'not ours' : v.tagged;
+	};
+
+	check('a query straight after the host is still collected, and untagged fails',
+		verdict('https://openipc.org?campaign=x') === false);
+	check('a tag in the fragment is not a tag',
+		verdict('https://openipc.org/open-wall#a?ref=webui') === false);
+	check('nor is one glued onto the path',
+		verdict('https://openipc.org/open-wall/ref=webui') === false);
+	check('a longer value that merely starts with the word is not the word',
+		verdict('https://openipc.org/?ref=webuix') === false);
+	check('the tagged front page passes',
+		verdict('https://openipc.org/?ref=webui') === true);
+	check('so does a tag standing beside another parameter',
+		verdict('https://openipc.org/open-wall?a=1&ref=webui') === true);
+
+	check('the wiki is a different site and is not collected',
+		verdict('https://wiki.openipc.org/') === 'not ours');
+	check('so is a host that merely ends with the name',
+		verdict('https://notopenipc.org/') === 'not ours');
+	check('a relative link on the camera is not a visit anywhere',
+		verdict('openwall.cgi') === 'not ours');
+	check('nor is a haserl expression standing where a path goes',
+		verdict('<%= $SCRIPT_NAME %>') === 'not ours');
 }
 
 done();
