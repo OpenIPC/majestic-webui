@@ -1,9 +1,10 @@
 // Every control name quoted in a sentence is a control that still exists.
 //
-// The page explains a problem by naming the row that fixes it — CLAUDE.md
-// requires exactly that: "Never name a config key in text a person reads. Use
-// the words the page puts on screen." So the prose quotes schema TITLES, and a
-// title belongs to the daemon, which is free to rename or remove one.
+// The page explains a problem by naming the row that fixes it, in the words the
+// page puts on screen rather than by the dotted key underneath — a key is a
+// second vocabulary, readable only by someone who already knows the answer. So
+// the prose quotes schema TITLES, and a title belongs to the daemon, which is
+// free to rename or remove one.
 //
 // Nothing noticed when it did. The daemon folded each Day/Night actuator's two
 // booleans into one three-state mode; two titles went away with them, and three
@@ -62,21 +63,52 @@ const TITLES = new Set(JSON.parse(fs.readFileSync(
 const FILES = ['ircut-check.js', 'rc-check.js', 'video-check.js',
 	'audio-check.js', 'storage-check.js', 'update-check.js', 'mj-settings.js'];
 
+// A SENTENCE WRAPPED AT THE COLUMN LIMIT IS ONE STRING TO A READER AND TWO
+// LITERALS TO THE PARSER, and this file wraps at 72 columns everywhere. Scanning
+// physical lines therefore looked past every label that straddled a wrap —
+// measured, 3 of 15 occurrences and one label outright, which is a blind spot
+// exactly where the prose is longest and most likely to name something. The
+// literals are joined back first, keeping the line the sentence STARTS on so a
+// failure still points somewhere.
+function logicalLines(src) {
+	const lines = src.split('\n');
+	const out = [];
+	let i = 0;
+	while (i < lines.length) {
+		const head = lines[i].trim();
+		if (head.startsWith('//') || head.startsWith('*')) { i++; continue; }
+		let text = lines[i];
+		const at = i + 1;
+		while (/'\s*\+\s*$/.test(text) && i + 1 < lines.length) {
+			const next = lines[i + 1].trim();
+			// Only a literal continues a literal. A comment or an expression
+			// between the two ends the join rather than being spliced into it.
+			if (next.charAt(0) !== '\'') break;
+			text = text.replace(/'\s*\+\s*$/, '') + next.slice(1);
+			i++;
+		}
+		out.push({ text: text, line: at });
+		i++;
+	}
+	return out;
+}
+
 // Pulled out so the rule itself can be tested rather than only its result.
 function quotedLabels(src) {
 	const out = [];
-	src.split('\n').forEach((line, i) => {
-		const t = line.trim();
-		if (t.startsWith('//') || t.startsWith('*')) return;
-		const re = /"([^"]{4,70})"/g;
+	logicalLines(src).forEach((ln) => {
+		// No upper bound on the length. One shipped title runs to 109
+		// characters, and a cap is a quiet way for the longest names — the ones
+		// most in need of checking — to skip the check entirely.
+		const re = /"([^"]{4,})"/g;
 		let m;
-		while ((m = re.exec(line)) !== null) {
+		while ((m = re.exec(ln.text)) !== null) {
 			const lab = m[1];
-			if (m.index && line[m.index - 1] === '=') continue;
+			if (m.index && ln.text[m.index - 1] === '=') continue;
 			if (lab === lab.toUpperCase()) continue;
 			if (lab.indexOf(' ') < 0) continue;
 			if (!/^[A-Z]/.test(lab)) continue;
-			out.push({ label: lab, line: i + 1 });
+			out.push({ label: lab, line: ln.line });
 		}
 	});
 	return out;
@@ -97,6 +129,19 @@ group('the extractor tells prose from markup');
 		quotedLabels('x = \'the "Dismiss" button\';').length === 0);
 	check('a comment line is skipped',
 		quotedLabels('\t// the "Drive the IR-cut filter" switch').length === 0);
+	// The case the line-by-line version looked straight past.
+	const wrapped = "\t\tdetail: 'and \"Single ' +\n\t\t\t'IRcut is inverted\" swaps it.',";
+	check('a label split across a wrapped concatenation is found whole',
+		quotedLabels(wrapped).some(h => h.label === 'Single IRcut is inverted'),
+		JSON.stringify(quotedLabels(wrapped)));
+	check('...and is reported against the line it starts on',
+		(quotedLabels(wrapped)[0] || {}).line === 1);
+	// Longer than any cap would have allowed. The longest shipped title is 109
+	// characters, so a bound is a way for the biggest names to go unchecked.
+	const longLab = 'A title that is deliberately far longer than seventy characters so that no cap can hide it';
+	check('a title longer than seventy characters is still found',
+		quotedLabels('x = \'Set "' + longLab + '" first.\';')
+			.some(h => h.label === longLab));
 }
 
 group('every control a sentence names is a control some camera has');
@@ -113,7 +158,7 @@ group('every control a sentence names is a control some camera has');
 	});
 	// A rule that matched nothing would pass this file for ever while the prose
 	// rotted behind it, which is the failure this test exists to end.
-	check('the prose quotes some control names at all', checked >= 7,
+	check('the prose quotes some control names at all', checked >= 15,
 		'found ' + checked);
 	check('and every one of them is a title on a real schema',
 		strays.length === 0, strays.join(' | '));
