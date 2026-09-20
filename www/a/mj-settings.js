@@ -1,3 +1,35 @@
+// The settings page: majestic's own schema, rendered as a form.
+//
+// Nothing here knows what any particular setting means. camera.cgi hands over a
+// boot blob and /api/v1/config.schema.json, and the tree, the rail, the widget
+// for each row, the search and the reset all fall out of those — which is why a
+// key the daemon adds appears here without anyone editing this file, and why a
+// key it drops stops appearing. `docs/settings-page.md` carries that contract:
+// the boot blob, the widget dispatch, save and reset, the column deal and the
+// three tiers of field text.
+//
+// The exceptions are the panels a form row cannot be: Live adjustments, the
+// Orientation group, the OSD template builder, the motion-region editor, the
+// Pins drawing and the Day / Night pad map and filter hunt. Each replaces
+// several rows, and each does it the same way — the rows it stands for are
+// rendered `{hidden: true}` and driven with setValue, so the save machinery,
+// the dirty tracking and the per-row reset know nothing about the control and
+// the fields are still there on a camera where it cannot mount.
+//
+// WHAT THIS FILE REFUSES:
+//
+// It never writes to majestic outside a Save. Every panel proposes into the
+// hidden fields and raises the ordinary save bar instead — including a find
+// from the IR-cut filter hunt it mounts, which is what lets the filter test go
+// on refusing to judge wiring the camera was never given (`docs/day-night.md`).
+//
+// It never reads configuration from anywhere but the daemon, and it holds no
+// second copy of a fact the daemon already keeps.
+//
+// And it stops what it started. A panel that put a listener on `document` or
+// left hardware moving — the pad map's key and pointer handlers, a filter sweep
+// driving pins — is torn down when the section goes, not when a replacement
+// happens to mount: leaving a section detaches the only Stop button there is.
 (() => {
 	'use strict';
 
@@ -897,6 +929,16 @@
 			try { state.ircutMap.destroy(); } catch (e) { /* best-effort */ }
 			state.ircutMap = null;
 			state.ircutRoles = null;
+		}
+
+		// And the sweep, which outlives its own Stop button: that button lives
+		// in a card this section throws away, while the run is hundreds of
+		// requests that each drive hardware. Leaving the page without this
+		// detaches the only control and leaves it working through the chip
+		// with nobody watching it.
+		if (state.ircutHunt && state.ircutHunt.stop) {
+			try { state.ircutHunt.stop(); } catch (e) { /* best-effort */ }
+			state.ircutHunt = null;
 		}
 
 		// The stage closes its own transports — including a trial still being
@@ -8056,25 +8098,34 @@
 			'<span class="mj-live-rule"></span></div>' +
 			'<div id="mj-ircut-rolelist"></div>' +
 			'<div class="mj-ircut-acts">' +
-			// The secondary outline, not the primary one: the shipped
-			// stylesheet is purged down to the classes this UI actually uses
-			// and the primary variant is not among them -- it rendered as bare
-			// text beside a real button. regen-bootstrap-css.sh is what would
-			// add it, and one navigation link is not worth growing the sheet.
+			// The two are not the same weight and must not look it. One starts
+			// a search for wiring nobody knows; the other measures wiring that
+			// is already set. While they matched, the only thing telling them
+			// apart was their words (#552).
 			//
-			// Which is also why neither this comment nor any other may SPELL
-			// the class it is talking about. purgecss scans these files as
-			// text, so naming it here is enough to pull ~500 bytes of rules
-			// for it back into the sheet -- the exact cost this paragraph
-			// exists to avoid, paid by the paragraph.
-			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-find">Find them on the Pins page</button>' +
+			// The solid fill is in the shipped stylesheet; the outlined
+			// variant of the same colour is not, because the sheet is purged
+			// down to what this UI uses. That is why no comment here may SPELL
+			// either class name: purgecss scans these files as text, so naming
+			// one is enough to pull its rules back into the sheet -- the exact
+			// cost this paragraph exists to avoid, paid by the paragraph.
+			'<button type="button" class="btn btn-primary btn-sm" id="mj-ircut-find">Find them for me</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
 			'</div>' +
+			// Why the sweep may not run, where it may not. It is the camera's
+			// refusal rather than this panel's -- the kernel would not say who
+			// holds which pad -- and it is drawn under the button it disables
+			// so the two are read together.
 			'<div class="small text-secondary mt-2" id="mj-ircut-find-why" hidden></div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-why" hidden></div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-status"></div>' +
 			'<div id="mj-ircut-result" class="small" hidden></div>' +
 			'</div></div>' +
+			// The sweep's own card, full width under the wiring rather than in
+			// the roles column beside it: it carries a warning, a range and a
+			// count of what is being left alone, and a 499px column turns that
+			// into a ladder. Hidden until the button above asks for it.
+			'<div id="mj-ircut-hunt" hidden></div>' +
 			'<div id="mj-ircut-mon" hidden>' +
 			'<div class="mj-live-grp-head mt-3"><span class="mj-cap">Automatic day/night</span>' +
 			'<span class="mj-live-rule"></span></div>' +
@@ -8360,29 +8411,88 @@
 		}
 		paintRoles();
 
-		// Finding the pins by driving them is on the Pins page. The reason
-		// it is not here is that it drives arbitrary pads across the whole
-		// chip and has to know what each one is already carrying — which is
-		// the Pins page's whole subject, and none of it is about day or night.
-		// This panel keeps the half that is: which pad each coil is on.
-		const find = box.querySelector('#mj-ircut-find');
-		if (find) {
-			find.addEventListener('click', () => {
-				// This page routes on ?tab= and never looks at the fragment, so
-				// setting location.hash changed the URL and left the reader
-				// exactly where they were -- a button that appears to do
-				// nothing.
-				//
-				// Pressing the rail's own link rather than navigating here is
-				// what keeps the unsaved-changes prompt: wireNav() owns that,
-				// and a second copy of it would be one to keep in step. The
-				// rail can be missing a section while a search is filtering it,
-				// so a plain load is the fallback.
-				const link = document.querySelector(
-					'#mj-settings-nav a.nav-link[href*="tab=pins"]');
-				if (link) link.click();
-				else location.href = 'camera.cgi?tab=pins';
+		// Finding the pins by driving them, here, beside the roles it fills
+		// in. It was moved to the Pins page and moved back: what it DRIVES is
+		// arbitrary pads, which is that page's subject, but what it can FIND
+		// is an IR-cut filter and nothing else — its detector is the picture.
+		// Sending the reader away for it measured at three presses and a page
+		// change, two of which visibly did nothing because the door and then
+		// the Start button were below the fold (#552). The Pins page keeps its
+		// copy of the same door for somebody who arrives there instead.
+		//
+		// pin-hunt.js owns everything inside the host and never reaches out of
+		// it; the map is lent to it the way the Pins page lends its drawing.
+		const hunt = window.MajesticPinHunt && window.MajesticPinHunt.mount(
+			box.querySelector('#mj-ircut-hunt'), {
+				info: info,
+				soc: SOC,
+				only: 'filter',
+				pins: {
+					// The pair under the bridge, lit on the map the reader is
+					// already looking at.
+					sweep: (a, b) => { if (state.ircutMap === map) map.sweep(a, b); },
+					select: (pin) => { if (state.ircutMap === map) map.select(pin); },
+					changed: () => {
+						apiFetch('/api/v1/gpio', { credentials: 'same-origin' })
+							.then((r) => r.ok ? r.json()
+								: Promise.reject(new Error('HTTP ' + r.status)))
+							.then((fresh) => {
+								if (state.ircutMap !== map) return;
+								state.ircutInfo = fresh;
+								map.reinfo(fresh);
+							})
+							.catch(() => { /* the pads keep what the camera has */ });
+					},
+					// A find made HERE has nowhere to travel to. It is staged
+					// through the same path the map's own edits take, so the
+					// save bar and the dirty tracking pick it up and nothing
+					// reaches majestic until Save is pressed — which is what
+					// lets the filter test go on refusing to judge wiring the
+					// camera was never given.
+					use: (found, said) => {
+						const a = Object.assign({}, currentAssign());
+						a.irCutPin1 = found.irCutPin1;
+						a.irCutPin2 = found.irCutPin2;
+						pushAssign(a);
+						map.set(a);
+						paintRoles();
+						if (said) {
+							said.innerHTML = 'Pins ' + found.irCutPin1 + ' and ' +
+								found.irCutPin2 + ' are filled in above and ' +
+								'<b>nothing is saved yet</b>. Press Save to keep ' +
+								'them, then <b>Test the filter</b>.';
+						}
+					},
+				},
 			});
+		state.ircutHunt = hunt || null;
+
+		const find = box.querySelector('#mj-ircut-find');
+		if (find && hunt) {
+			// The camera's own refusal, said under the button rather than
+			// discovered by pressing it: without a debugfs the kernel will not
+			// name which pads it already holds, and nothing here drives a pad
+			// it has not been told about.
+			const why = hunt.blocked();
+			if (why) {
+				find.disabled = true;
+				const w = box.querySelector('#mj-ircut-find-why');
+				if (w) { w.textContent = why; w.hidden = false; }
+			} else {
+				find.addEventListener('click', () => {
+					hunt.open();
+					// The card is drawn below the wiring, so on a short window
+					// the press would otherwise land entirely off screen — the
+					// fault that made the old route read as a dead button.
+					const h = box.querySelector('#mj-ircut-hunt');
+					if (h && h.scrollIntoView)
+						h.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+				});
+			}
+		} else if (find) {
+			// No hunt module, no sweep. The pads are still settable by hand on
+			// the map, so this is one button missing rather than a dead end.
+			find.hidden = true;
 		}
 	}
 
