@@ -210,7 +210,13 @@
 			+ '<div class="mj-ret"><div class="storage-bar">' + bar + '</div>'
 			+ (mark ? '<div class="mj-ret-mark" style="left:' + mark + '%"></div>' : '')
 			+ '</div>'
-			+ (mark ? '<div class="mj-ret-cap"><span style="left:' + mark + '%">oldest clips deleted at '
+			// Past the middle of the bar the caption is hung by its right edge
+			// from the mark, before it by its left, so it always grows back into
+			// the bar instead of off the side of the card. See the rule in the
+			// stylesheet for what centring it used to cost a phone (#566).
+			+ (mark ? '<div class="mj-ret-cap"><span style="'
+				+ (mark > 50 ? 'right:' + (100 - mark) : 'left:' + mark)
+				+ '%">oldest clips deleted at '
 				+ esc(String(mark)) + '%</span></div>' : '<div class="mb-2"></div>')
 			+ '<div class="storage-legend x-small mb-2">' + leg + '</div>';
 	}

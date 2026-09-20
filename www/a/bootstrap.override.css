@@ -5453,6 +5453,7 @@ dialog.mj-modal::backdrop {
 
 .st-chart-head {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: baseline;
 	gap: 0.75rem;
 	margin-bottom: 0.4rem;
@@ -5473,9 +5474,15 @@ dialog.mj-modal::backdrop {
 	font-variant-numeric: tabular-nums;
 }
 
+/* The five keys wrap rather than holding one line. Unwrapped they are 269px
+   of min-content, and a flex item's min-content is a floor its parent cannot
+   go under -- so this one key row set the width of the whole charts column,
+   gave the Dashboard a 387px minimum and scrolled every phone narrower than
+   that sideways, tile, charts and all (#566). */
 .st-legend {
 	margin-left: auto;
 	display: flex;
+	flex-wrap: wrap;
 	gap: 0.75rem;
 }
 
@@ -8588,16 +8595,22 @@ body > main > .container > form > .mj-foot {
 
 .mj-ret-cap {
 	position: relative;
-	height: 1.1rem;
+	min-height: 1.1rem;
 	margin-top: 0.1rem;
 	font-size: 0.6875rem;
 	color: var(--bs-tertiary-color);
 }
 
+/* The caption hangs off the mark by its nearer edge, never centred on it.
+   Centred, a label 145px wide sitting at 95% of the bar put half of itself
+   past the card, and a phone then scrolled the whole page sideways to reach
+   text that says nothing you cannot read where it is (#566). Anchoring the
+   edge costs nothing -- the tick is still what the sentence points at -- and
+   it cannot leave the bar from either end. max-width is the floor under that
+   promise on a card too narrow for the sentence at all. */
 .mj-ret-cap > span {
 	position: absolute;
-	transform: translateX(-50%);
-	white-space: nowrap;
+	max-width: 100%;
 }
 
 /* The steps of a card swap, down the dialog rather than across it: six of them
