@@ -242,10 +242,12 @@
 			// left alone. That shared question is the heading, and it is why
 			// they are one group — a heading each introduced a single row
 			// repeating the words of the heading above it, twice over (#548).
-			// Both of them under Switching was what was asked for, and was
-			// measured instead of argued: that group then grows too tall for
-			// any cut to fall between groups, so the second column opens on a
-			// row with no heading over it — the fault #325 was about.
+			// They are not folded into Switching instead: that group then
+			// grows too tall for a cut to fall between groups at all, because
+			// layoutCols drops the between-group preference once the best such
+			// cut still leaves the taller column past 75% of the section. The
+			// second column then opens on a row with no heading over it, which
+			// is the fault #325 was about.
 			{ id: 'driven', label: 'Driven by day/night', keys: ['irCut', 'backlight'] },
 			{ id: 'picture', label: 'Night picture', keys: ['colorToGray', 'overrideDrc'] },
 			// What is left to the lamp once its own control is above: the
