@@ -127,7 +127,7 @@ ex() {
 field_hidden() {
 	local n="$1"
 	local v="$2"
-	echo "<input type=\"hidden\" name=\"${n}\" id=\"${n}\" value=\"${v}\" class=\"form-hidden\">"
+	echo "<input type=\"hidden\" name=\"${n}\" id=\"${n}\" value=\"$(attr_escape "$v")\" class=\"form-hidden\">"
 }
 
 # field_password "name" "label" "hint"
@@ -139,7 +139,7 @@ field_password() {
 	echo "<p class=\"password mj-row\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\"><span class=\"input-group\">" \
-		"<input type=\"password\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+		"<input type=\"password\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"$(attr_escape "$v")\">" \
 		"<label class=\"input-group-text\">" \
 		"<input type=\"checkbox\" class=\"form-check-input me-1\" data-for=\"${n}\"> show" \
 		"</label></span></span></span>"
@@ -190,6 +190,67 @@ esc() {
 	s=${s//>/&gt;}
 	s=${s//\"/&quot;}
 	printf '%s' "$s"
+}
+
+# Quote a value so that a shell reading it back gets the value unchanged.
+#
+# For the two kinds of file this WebUI writes and then SOURCES: the extension
+# configs under /etc/webui and the sysinfo cache in /tmp/webui. Both are read
+# with `.`, so whatever they contain is shell, and a value that arrives from a
+# form goes round the loop a second time on its way back in. Wrapped in double
+# quotes -- which is how every one of them used to be written -- a caption
+# reading `Motion at the "front door"` truncates at the second quote and hands
+# `door` to the shell as a command name, and one containing $(...) or backticks
+# runs on every page load, because a sourced file expands those inside double
+# quotes (#547).
+#
+# Single quotes are the only wrapper a shell does not look inside, so the sole
+# character needing attention is the single quote itself: close the string,
+# emit an escaped one, reopen. The result is what the value was, byte for byte,
+# including spaces, globs, backslashes and newlines.
+#
+# A sed pipeline rather than the substitution esc uses next door, even though
+# this costs a fork per key and update_caminfo writes twenty-eight of them.
+# ${s//x/y} is not POSIX: busybox ash on the camera takes it, which is why esc
+# can, but dash -- /bin/sh on most machines a developer or CI runs this on --
+# PARSES it and then fails at run time with "Bad substitution". The lint's
+# `sh -n` therefore cannot see the difference, so the one helper whose whole
+# job is to get quoting right is the last one that should depend on it.
+#
+# Streamed, with no $(...) inside it, so that conf_write below can be exact.
+# A caller is free to capture it -- `$(shq "$x")` is how the network page
+# renders its log line -- but capturing costs every trailing newline the value
+# had, so anything writing a file uses conf_write instead.
+shq() {
+	printf "'"
+	printf '%s' "$1" | sed "s/'/'\\\\''/g"
+	printf "'"
+}
+
+# conf_write "name" "value"
+#
+# One line of a file that will be sourced: `name='value'`, on stdout, for the
+# caller to redirect. This is the only thing that should write into the
+# extension configs or the sysinfo cache.
+#
+# The value never passes through command substitution, and that is the whole
+# reason this exists rather than `printf '%s\n' "name=$(shq "$v")"`. POSIX
+# command substitution strips EVERY trailing newline from what it captures, so
+# the obvious spelling silently rewrites any value that ends in one -- and it
+# would do it twice over in the config writers, which used to capture t_value
+# on the way in as well. The value is streamed instead: name, equals, opening
+# quote, escaped value, closing quote, newline.
+#
+# printf rather than echo for the same reason throughout. dash's echo acts on
+# the backslashes in its argument, so a stored `C:\cams\front` came out as
+# `name='C:` -- \c ends echo's output -- leaving a file that will not parse.
+# The camera's busybox echo leaves them alone, so this was latent on a camera
+# rather than live, but a writer that depends on which echo it got is a writer
+# waiting to lose a value.
+conf_write() {
+	printf '%s=' "$1"
+	shq "$2"
+	printf '\n'
 }
 
 # field_switch "name" "label" "value" "hint" "confirm"
@@ -260,7 +321,7 @@ field_string() {
 		echo "<p class=\"string mj-row\" id=\"${n}_wrap\">" \
 			"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 			"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">" \
-			"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+			"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"$(attr_escape "$v")\">" \
 			"</span></span>"
 	fi
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
@@ -276,7 +337,7 @@ field_text() {
 	echo "<p class=\"string mj-row\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">" \
-		"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+		"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"$(attr_escape "$v")\">" \
 		"</span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
@@ -849,8 +910,16 @@ signature() {
 	cat $signature_file
 }
 
+# The value of the variable named by $1 -- how the field_* helpers read the
+# value they are about to render out of the environment.
+#
+# printf into an escaped pair of double quotes, not `echo $var`. Unquoted, the
+# expansion is word-split and globbed before echo ever sees it, so a stored
+# password of `p@ss  word` came back with one space and one of `*` came back as
+# a listing of the current directory. And echo would eat a leading -n or act on
+# a backslash. Neither can happen to a quoted printf '%s' (#547).
 t_value() {
-	eval "echo \$${1}"
+	eval "printf '%s' \"\$${1}\""
 }
 
 update_caminfo() {
@@ -1034,9 +1103,26 @@ update_caminfo() {
 		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file}
 
-	local v
+	# Through shq, because this file is SOURCED on every request and several of
+	# these values come off the device or out of a form. The line this replaced
+	# wrapped each one in single quotes and escaped nothing in it, so a camera
+	# named with an apostrophe wrote
+	#
+	#     network_hostname='cam'apos'
+	#
+	# and every page in the WebUI answered 500 from then on -- the file no longer
+	# parsed, and common.cgi sources it before it can render anything, so there
+	# was no page left to say so and no way back but SSH. The network form used
+	# to refuse such a name by accident, its own quoting being broken in a way
+	# that rejected the apostrophe before it reached /etc/hostname; fixing that
+	# is what made this reachable (#547).
+	#
+	# The assignment is the escaped `\$${v}` form on purpose: an assignment's
+	# right-hand side is not word-split or globbed, so the value arrives whole.
+	local v val
 	for v in $variables; do
-		eval "echo ${v}=\'\$${v}\' >> ${sysinfo_file}"
+		eval "val=\$${v}"
+		conf_write "$v" "$val" >> ${sysinfo_file}
 	done
 
 	generate_signature

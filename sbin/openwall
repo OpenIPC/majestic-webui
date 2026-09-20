@@ -1,5 +1,5 @@
 #!/bin/sh
-[ -e "/etc/webui/openwall.conf" ] && source /etc/webui/openwall.conf
+[ -e "/etc/webui/openwall.conf" ] && . /etc/webui/openwall.conf
 
 flash_size=$(awk '{sum+=sprintf("0x%s", $2);} END{print sum/1048576;}' /proc/mtd)
 fw_variant=$(grep "BUILD_OPTION" /etc/os-release | cut -d= -f2 | tr -d '"')
@@ -45,30 +45,41 @@ if [ -z "$network_macaddr" ]; then
 	exit 1
 fi
 
-command="curl --verbose"
-command="${command} --connect-timeout 100"
-command="${command} --max-time 100"
+# An argument list, not a command line handed to eval.
+#
+# Almost everything below is read off the device or out of a form, and several
+# of them can hold a space or a quote: the caption is free prose an operator
+# typed, the camera's own name is whatever `hostname` returns, and the proxy
+# credentials come from the proxy page. The lines this replaced wrapped each
+# value in single quotes and escaped nothing inside them, so an apostrophe in
+# any one of them -- a caption reading `Ivan's yard` -- ended the quoting early
+# and handed the remainder of the upload to the shell, while the proxy user and
+# password were pasted in with no quoting at all. Passed as "$@" the values need
+# no quoting rules: each one reaches curl whole (#547).
+set -- curl --verbose --connect-timeout 100 --max-time 100
 
 if [ "$openwall_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
-	source /etc/webui/proxy.conf
-	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
-	command="${command} --proxy-user ${socks5_username}:${socks5_password}"
+	. /etc/webui/proxy.conf
+	set -- "$@" --socks5-hostname "${socks5_host}:${socks5_port}"
+	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
 fi
 
-command="${command} --url https://openipc.org/snapshots"
-command="${command} -F 'mac_address=${network_macaddr}'"
-command="${command} -F 'firmware=${fw_version}-${fw_variant:-lite}'"
-command="${command} -F 'flash_size=${flash_size}'"
-command="${command} -F 'hostname=${network_hostname}'"
-command="${command} -F 'caption=${openwall_caption}'"
-command="${command} -F 'sensor=${sensor}'"
-command="${command} -F 'soc=${soc}'"
-command="${command} -F 'soc_temperature=${temperature}'"
-command="${command} -F 'streamer=${streamer}'"
-command="${command} -F 'uptime=${uptime}'"
-command="${command} -F 'file=@${snapshot};type=${content_type}'"
+set -- "$@" --url https://openipc.org/snapshots
+set -- "$@" -F "mac_address=${network_macaddr}"
+set -- "$@" -F "firmware=${fw_version}-${fw_variant:-lite}"
+set -- "$@" -F "flash_size=${flash_size}"
+set -- "$@" -F "hostname=${network_hostname}"
+set -- "$@" -F "caption=${openwall_caption}"
+set -- "$@" -F "sensor=${sensor}"
+set -- "$@" -F "soc=${soc}"
+set -- "$@" -F "soc_temperature=${temperature}"
+set -- "$@" -F "streamer=${streamer}"
+set -- "$@" -F "uptime=${uptime}"
+set -- "$@" -F "file=@${snapshot};type=${content_type}"
 
-echo "$command"
-eval "$command"
+# The command line is not echoed. It carries --proxy-user, and this runs from
+# cron, so the credential went wherever that camera sends its cron output. The
+# two notification senders each dropped the same echo for the same reason.
+"$@"
 
 exit 0

@@ -48,7 +48,20 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 	if [ -z "$error" ]; then
 		rm -f "$config_file"
 		for p in $params; do
-			echo "telegram_${p}=\"$(eval echo \$telegram_${p})\"" >> "$config_file"
+			# conf_write, so that what a shell reads back out of
+			# this file is exactly what was posted. It is sourced by the page, by
+			# clip_hook_wanted and by the sender, so a value in it has to survive
+			# being read as shell: wrapped in double quotes and never escaped, a
+			# caption saying `Motion at the "front door"` truncated at the second
+			# quote and left `door` to be run as a command, and the `eval echo`
+			# that read it globbed on the way in -- a caption of `snap *` was
+			# stored as a directory listing (#547).
+			#
+			# The value is taken with a plain assignment rather than $(t_value ...):
+			# an assignment's right-hand side is not word-split, and it does not
+			# strip the trailing newlines a command substitution would.
+			eval "_v=\$telegram_${p}"
+			conf_write "telegram_${p}" "$_v" >> "$config_file"
 		done
 
 		# The interval is a WORD in the cron line, not a number to drop into the

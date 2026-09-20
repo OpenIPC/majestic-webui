@@ -152,52 +152,58 @@ else
 fi
 
 
-# The path reaches a shell twice: once written into the command string and once
-# when that string is eval'd. It used to be ours -- mktemp plus a hostname and
-# a timestamp -- and is now whatever the caller hands over, which is a
-# recording path built from an operator's strftime pattern. A single quote in
-# it would close the quoting and hand the rest of the name to sh, so it is
-# escaped rather than trusted: close the quote, escape one, reopen.
-esc_path=$(printf '%s' "$snapshot" | sed "s/'/'\\\\''/g")
-esc_message=$(printf '%s' "$telegram_message" | sed "s/'/'\\\\''/g")
-
+# An argument list, not a command line handed to eval.
+#
+# Every value below crosses into curl from somewhere a person can type: the
+# snapshot path is a recording name built from an operator's strftime pattern,
+# the message is free prose, and the token, chat, thread and proxy credentials
+# all come off the extension pages. The version this replaced pasted them into
+# one string and eval'd it, which made a single quote anywhere a way to end the
+# quoting and hand the rest of the upload to sh. Two of the values were escaped
+# by hand against exactly that; the other five were not (#547).
+#
+# Passing "$@" retires the question. Nothing here is re-parsed by a shell, so
+# no value needs escaping and none can be split, globbed or truncated -- and
+# the hand-rolled escaping those two carried is gone with the eval that
+# required it.
+#
 # No --verbose. It writes the request line to stderr, and the request line
 # carries the bot token -- which went nowhere while this ran from cron, and
 # goes wherever the caller's stderr goes now that a hook calls it per clip.
 # The response body is printed below either way, and the exit status is the
 # answer.
-command="curl --silent --show-error"
-command="${command} --connect-timeout 100"
-command="${command} --max-time 100"
+set -- curl --silent --show-error --connect-timeout 100 --max-time 100
 
 if [ "$telegram_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
 	. /etc/webui/proxy.conf
-	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
-	command="${command} --proxy-user ${socks5_username}:${socks5_password}"
+	set -- "$@" --socks5-hostname "${socks5_host}:${socks5_port}"
+	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
 fi
 
-command="${command} -F 'chat_id=${telegram_channel}'"
+set -- "$@" -F "chat_id=${telegram_channel}"
 if [ -n "$telegram_thread_id" ]; then
-	command="${command} -F 'message_thread_id=${telegram_thread_id}'"
-fi 
-command="${command} --url https://api.telegram.org/bot${telegram_token}"
+	set -- "$@" -F "message_thread_id=${telegram_thread_id}"
+fi
 
 # HEIF is not a valid sendPhoto format (Telegram only accepts JPEG/PNG/GIF/WEBP),
 # so always send it via sendDocument. A clip goes to sendVideo, which is what
 # gives the reader a player rather than a file to download first -- unless the
 # document switch is on, which says the sender wants the bytes untouched.
+#
+# The method now picks the endpoint and the file field into variables, because
+# the URL is one argument rather than the tail of a string being appended to.
 if [ "$telegram_document" = "true" ] || [ "${snapshot##*.}" = "heif" ]; then
-	command="${command}/sendDocument"
-	command="${command} -F 'document=@${esc_path}'"
+	method=sendDocument
+	set -- "$@" -F "document=@${snapshot}"
 elif [ "${snapshot##*.}" = "mp4" ]; then
-	command="${command}/sendVideo"
-	command="${command} -F 'video=@${esc_path}'"
-	command="${command} -F 'supports_streaming=true'"
+	method=sendVideo
+	set -- "$@" -F "video=@${snapshot}" -F "supports_streaming=true"
 else
-	command="${command}/sendPhoto"
-	command="${command} -F 'photo=@${esc_path}'"
+	method=sendPhoto
+	set -- "$@" -F "photo=@${snapshot}"
 fi
-command="${command} -F 'caption=${esc_message}'"
+set -- "$@" -F "caption=${telegram_message}"
+set -- "$@" --url "https://api.telegram.org/bot${telegram_token}/${method}"
 
 # The response body still goes to stdout for anyone running this by hand or out
 # of cron. What is new is the exit status: this used to `exit 0` unconditionally,
@@ -213,9 +219,9 @@ command="${command} -F 'caption=${esc_message}'"
 # The command line is no longer echoed. It carries the bot token, and printing it
 # was the only reason the webhook had to filter its own output before parsing it.
 body=$workdir/response.json
-command="${command} --output '${body}' --write-out '%{http_code}'"
+set -- "$@" --output "$body" --write-out '%{http_code}'
 
-http=$(eval "$command")
+http=$("$@")
 [ -s "$body" ] && cat "$body"
 
 case "$http" in

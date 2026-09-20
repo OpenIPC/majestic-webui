@@ -484,28 +484,59 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			fi
 
 			if [ -z "$error" ]; then
-				command="setnetwork"
-				command="${command} -i $network_interface"
-				command="${command} -m $network_mode"
-				command="${command} -h $network_hostname"
+				# An argument list, not a command line handed to eval.
+				#
+				# These are the values an operator typed, and a passphrase is
+				# entitled to contain a space, a quote or a dollar sign. The
+				# lines this replaced pasted each one into a string that was
+				# then eval'd, so the shell parsed the operator's input as
+				# shell: `my camera` reached setnetwork as -h my with a stray
+				# word after it and the page still reported the save as done,
+				# a quote or an apostrophe anywhere ended the save with a raw
+				# "unterminated quoted string" on screen, and a semicolon ran
+				# what followed it (#547).
+				#
+				# setnetwork was never the problem -- it reads getopts, so it
+				# has always taken its values as separate arguments. It just
+				# had no way to receive them as separate arguments while the
+				# caller was building one string. Nothing here needs quoting
+				# rules now: "$@" carries each value whole, whatever is in it.
+				set -- -i "$network_interface" -m "$network_mode" -h "$network_hostname"
 
 				if [ "$network_interface" = "wlan0" ]; then
-					command="${command} -s $network_wlan_ssid"
-					command="${command} -p $network_wlan_password"
+					set -- "$@" -s "$network_wlan_ssid" -p "$network_wlan_password"
 				fi
 
 				if [ "$network_mode" != "dhcp" ]; then
-					command="${command} -a $network_address"
-					command="${command} -n $network_netmask"
-					[ -n "$network_gateway" ] && command="${command} -g $network_gateway"
-					[ -n "$network_nameserver" ] && command="${command} -d $network_nameserver"
+					set -- "$@" -a "$network_address" -n "$network_netmask"
+					[ -n "$network_gateway" ] && set -- "$@" -g "$network_gateway"
+					[ -n "$network_nameserver" ] && set -- "$@" -d "$network_nameserver"
 				fi
 
-				echo "$command" >> /tmp/webui.log
+				# What was asked for, for the Diagnostics dump -- rendered
+				# separately from the arguments actually passed, and with the
+				# wireless passphrase held back. The line this replaced echoed
+				# the command it was about to eval, so /tmp/webui.log kept the
+				# WiFi password of every camera it had ever been set on, in
+				# clear, for anyone who could read a log. Both notification
+				# senders stopped echoing their curl line for that same reason.
+				log_line="setnetwork"
+				log_hide=
+				for log_arg in "$@"; do
+					if [ -n "$log_hide" ]; then
+						log_line="$log_line ********"
+						log_hide=
+						continue
+					fi
+					[ "$log_arg" = "-p" ] && log_hide=1
+					log_line="$log_line $(shq "$log_arg")"
+				done
+				printf '%s\n' "$log_line" >> /tmp/webui.log
+
 				# setnetwork refuses on its own checks and says why on stdout;
 				# its status used to be dropped, so a refused save was
 				# reported as a save.
-				if ! out=$(eval "$command" 2>&1); then
+				if ! out=$(setnetwork "$@" 2>&1); then
 					redirect_back "danger" "Network settings were not saved: $(esc "$out")"
 				fi
 

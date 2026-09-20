@@ -256,6 +256,51 @@ for sender in $sender_list_mn; do
 		printf 'sbin/record.sh: sender %s has no program\n' "$sender" >> "$FAILS"
 done
 
+# --- 8. values that reach a shell a second time ---------------------------
+# Three shapes that each hand user input back to a shell to be parsed, and each
+# of which shipped here (#547). All three are banned flat, on the same grounds
+# as the yaml-cli check above: after the change that added this section the
+# legitimate count is zero, so a match is a regression and not a judgement.
+#
+# This does NOT ban eval. Several uses are correct and deliberate: an
+# assignment (`eval val=\$$v`) does not word-split its right-hand side, a
+# lookup by a name taken from a fixed in-script list is a lookup and nothing
+# more, and p/common.cgi's ex() and j/run.cgi exist precisely to run a command
+# -- run.cgi IS the root console. What is banned is the three ways a VALUE gets
+# re-parsed.
+#
+# Each pattern is anchored with ^[^#]* so it reads code and not prose. Stating
+# any of these rules requires naming the construct it forbids, and the first
+# draft of this section was failed by its own explanation of itself.
+
+# 8a. `eval echo $x` reads a variable by splitting and globbing it. A stored
+# password of `p@ss  word` came back with one space; one of `*` came back as a
+# directory listing. p/common.cgi's t_value does the same read with a quoted
+# printf.
+if grep -rnE '^[^#]*\beval[[:space:]]+echo\b' www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ eval echo splits and globs the value it reads: use t_value (p/common.cgi)" >> "$FAILS"
+fi
+
+# 8b. A command assembled into a string and eval'd. The values pasted in are
+# parsed as shell, so a space truncates an argument, a quote aborts the whole
+# command and a semicolon starts another one. Build an argument list with
+# `set --` and run "$@" -- sbin/max never did this and is the model.
+if grep -rnE '^[^#]*\beval[[:space:]]+"?\$\{?(command|cmd)\}?"?' www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ a command built as a string and eval'd re-parses every value in it:" >> "$FAILS"
+	echo "  accumulate arguments with set -- and run \"\$@\" (see sbin/max)" >> "$FAILS"
+fi
+
+# 8c. A value written into one of the sourced config files inside DOUBLE
+# quotes. Those files are read back with `.`, so a quote in the value truncates
+# it and leaves the remainder to be run as a command, and a $(...) in it
+# executes on every read -- which for /etc/webui/*.conf means every page load.
+# p/common.cgi's shq wraps a value so that a shell reading it gets it back
+# unchanged.
+if grep -rnE '^[^#]*=\\"\$.*>>[[:space:]]*"?\$config_file' www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ a config file is sourced, so a double-quoted value in it is re-expanded" >> "$FAILS"
+	echo "  on every read: write it through shq (p/common.cgi)" >> "$FAILS"
+fi
+
 ntpl=$(grep -c '^t$' "$SEEN")
 nsh=$(grep -c '^s$' "$SEEN")
 
