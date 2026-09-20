@@ -582,6 +582,39 @@ function heartbeat() {
 				// null-not-zero rule: absent on a daemon that does not publish
 				// it, and 0 is a real answer meaning "it has settled".
 				flips1h: ('night_flips_1h' in v) ? v.night_flips_1h : null,
+				// What automatic tone tuning is doing, and what it has
+				// measured. Lifted here rather than polled by the Live page
+				// because the heartbeat is already asking /metrics every two
+				// seconds and a second poll of the same document on the same
+				// page is the thing this subscription exists to avoid.
+				//
+				// Same null-not-zero rule as the day/night block above, and
+				// it carries more weight here: majestic leaves every one of
+				// these ABSENT rather than zero when the controller is not
+				// running or has not yet measured, so a missing span is "no
+				// measurement" and a span of 0 is a black picture. Collapsing
+				// the two would have the panel describe a scene the camera
+				// never saw.
+				tone: {
+					state: ('image_tune_state' in v) ? v.image_tune_state : null,
+					headroom: ('image_tune_headroom' in v)
+						? v.image_tune_headroom : null,
+					dist: ('image_tune_scene_dist' in v)
+						? v.image_tune_scene_dist : null,
+					span: ('image_tune_span' in v) ? v.image_tune_span : null,
+					clipLo: ('image_tune_clip_lo_ppm' in v)
+						? v.image_tune_clip_lo_ppm : null,
+					clipHi: ('image_tune_clip_hi_ppm' in v)
+						? v.image_tune_clip_hi_ppm : null,
+					dehaze: ('image_tune_dehaze' in v)
+						? v.image_tune_dehaze : null,
+					contrast: ('image_tune_contrast' in v)
+						? v.image_tune_contrast : null,
+					luminance: ('image_tune_luminance' in v)
+						? v.image_tune_luminance : null,
+					saturation: ('image_tune_saturation' in v)
+						? v.image_tune_saturation : null,
+				},
 				rx: m.rx, tx: m.tx, m,
 				// Consumers do their own counter deltas (net, venc bytes, md rects)
 				// against this snapshot; CPU% is computed here because its state

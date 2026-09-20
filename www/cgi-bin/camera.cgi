@@ -173,6 +173,14 @@ fi
 %>
 <script src="/a/mj-luma.js"></script>
 <%
+# What automatic tone tuning is doing, said in a sentence, and which knobs the
+# camera is holding away from the operator's own values. Its own file for the
+# reason ircut-check.js is: it renders a confident sentence whichever branch it
+# takes, and reaching most of those branches on a real camera needs fog or
+# darkness. tests/tone-check.test.js drives every one of them.
+%>
+<script src="/a/tone-check.js" defer></script>
+<%
 # The Audio section's soundcheck: the measurement, the verdict table and the
 # loop that chooses a level. Its own file because every tier of it fails
 # silently, and tests/audio-check.test.js drives all of them without a camera.

@@ -2408,6 +2408,72 @@ button.mj-osd-chip,
 	background: var(--bs-tertiary-color);
 }
 
+/* A knob automatic tuning has taken over. The editable parts go quiet and the
+   camera's own number takes the readout's place; the amber mark below is then
+   the only handle on the track, which is correct — the position shown is the
+   camera's, not a value anybody can drag. The native thumb is hidden rather
+   than merely disabled, because a thumb sitting at the saved baseline while
+   the mark sits somewhere else reads as two competing handles. */
+.mj-live-locked .mj-live-fill {
+	opacity: 0.25;
+}
+
+.mj-live-locked .mj-live-input {
+	pointer-events: none;
+}
+
+.mj-live-locked .mj-live-input::-webkit-slider-thumb {
+	opacity: 0;
+}
+
+.mj-live-locked .mj-live-input::-moz-range-thumb {
+	opacity: 0;
+}
+
+.mj-live-locked .mj-live-name,
+.mj-live-locked .mj-live-delta {
+	opacity: 0.55;
+}
+
+.mj-live-locked .mj-live-num,
+.mj-live-locked .mj-live-rst {
+	display: none;
+}
+
+/* The camera's value, in the readout's place while the row is locked. Same
+   metrics as the number input it stands in for, so the strip's columns do not
+   shift when the feature is switched on. */
+.mj-live-cam {
+	min-width: 2.75rem;
+	text-align: center;
+	font-family: var(--bs-font-monospace);
+	font-variant-numeric: tabular-nums;
+	font-size: 0.8125rem;
+	color: var(--bs-warning);
+}
+
+/* Where the camera is holding this knob, which is a different kind of fact
+   from the two marks already on the track: the tick is the factory default
+   and the thumb is the operator's value, and both of those only move when
+   somebody moves them. This one moves on its own, so it is drawn ABOVE the
+   thumb rather than notched into the track — a mark that changes while
+   nobody is touching the control has to look like it is on top of the
+   control, not part of it. Warning-coloured because it is the camera
+   overriding what the slider says, which is exactly the surprise worth
+   colouring; z-index 3 puts it over the transparent range input. */
+.mj-live-auto {
+	position: absolute;
+	top: 0.15rem;
+	z-index: 3;
+	width: 2px;
+	height: 1.15rem;
+	margin-left: -1px;
+	border-radius: 1px;
+	background: var(--bs-warning);
+	box-shadow: 0 0 0 1px var(--bs-body-bg);
+	pointer-events: none;
+}
+
 /* The range input is transparent and sits on top: it keeps the drag, the
    keyboard and the touch handling, while the three spans above draw. */
 .mj-live-input {
@@ -2561,6 +2627,27 @@ button.mj-osd-chip,
 	color: var(--bs-body-color);
 }
 
+/* Automatic is a different KIND of choice from the three beside it — one
+   hands the picture to the camera, the others are looks a person picked — so
+   it is set apart by a rule rather than by colour, which is already carrying
+   "this is the one in force". */
+.mj-scene-chip-auto {
+	flex: 1.1 1 0;
+	margin-right: 0.35rem;
+	border-right-width: 1px;
+	position: relative;
+}
+
+.mj-scene-chip-auto::after {
+	content: "";
+	position: absolute;
+	top: 20%;
+	bottom: 20%;
+	right: -0.35rem;
+	width: 1px;
+	background: var(--bs-border-color);
+}
+
 .mj-scene-chip-on {
 	background: var(--bs-primary);
 	border-color: var(--bs-primary);
@@ -2587,6 +2674,27 @@ button.mj-osd-chip,
 	height: 5px;
 	border-radius: 50%;
 	background: var(--bs-primary);
+}
+
+/* The tone controller's line, under the Scene line and reading as its
+   neighbour. The pip carries the state so the sentence does not have to open
+   with a colour word: quiet when there is nothing to do, primary while it is
+   working, warning for the two states where the camera has deliberately
+   stopped doing what it was switched on for. */
+.mj-pip-ok {
+	background: #2fb673;
+}
+
+.mj-pip-work {
+	background: var(--bs-primary);
+}
+
+.mj-pip-warn {
+	background: var(--bs-warning);
+}
+
+.mj-pip-off {
+	background: var(--bs-tertiary-color);
 }
 
 /* ── luma histogram ─────────────────────────────────────────────────────────
@@ -2637,6 +2745,29 @@ button.mj-osd-chip,
 .mj-luma-clip-r {
 	right: 0;
 	background: linear-gradient(270deg, rgba(255, 193, 7, 0.32), transparent);
+}
+
+/* The camera's own measurement of the same scene, as a bracket along the
+   bottom of the plot. A bracket rather than a band across the whole height:
+   the camera reports a WIDTH and not two ends, so anything filling the plot
+   would be claiming to place the picture on the scale as well. It sits under
+   the histogram it is measuring, which is where a scale belongs. */
+.mj-luma-band {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 6px;
+	pointer-events: auto;
+}
+
+.mj-luma-band i {
+	position: absolute;
+	bottom: 2px;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--bs-primary);
+	opacity: 0.75;
 }
 
 .mj-luma-read {
