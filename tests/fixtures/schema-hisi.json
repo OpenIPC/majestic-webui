@@ -1311,6 +1311,16 @@
           "title": "Maximum lamp duty (%)",
           "default": 100,
           "x-reload": "service:night"
+        },
+        "transitionDelayMs": {
+          "minimum": 0,
+          "maximum": 2000,
+          "type": "integer",
+          "title": "Pause inside a day/night switch (ms)",
+          "default": 0,
+          "x-reload": "service:night",
+          "hint": "The wait between the picture changing and the IR-cut filter moving. Raise it, try 150, if a coloured frame still shows as day returns.",
+          "help": "The picture goes grey before the filter opens, and back to colour after it shuts, so this is the gap in between. How long a filter takes to swing is a property of the board, which is why the number above is what one camera wanted rather than the answer."
         }
       }
     },
