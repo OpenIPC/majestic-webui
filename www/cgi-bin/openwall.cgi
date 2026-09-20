@@ -54,7 +54,9 @@ fi
 	<div class="col-12 col-lg-6">
 		<div class="card"><div class="card-body">
 			<% card_head "OpenWall" %>
-			<p class="small text-secondary">Share snapshots on the <a href="https://openipc.org/open-wall">Open Wall</a> to help compare image quality across cameras. Also sends your MAC address, chipset, sensor, flash size, firmware version and uptime.</p>
+			<%# ?ref carries the same word the footer's link to the same site
+			    carries, and for the same reason; p/footer.cgi says what it is. %>
+			<p class="small text-secondary">Share snapshots on the <a href="https://openipc.org/open-wall?ref=webui">Open Wall</a> to help compare image quality across cameras. Also sends your MAC address, chipset, sensor, flash size, firmware version and uptime.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_switch "openwall_enabled" "Enable OpenWall" "eval" %>
 				<% group_head "Submission" %>
