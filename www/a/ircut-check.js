@@ -642,7 +642,14 @@
 			});
 		});
 
-		if (driveable && !monitor) {
+		// Not while the filter is parked. This says the camera is yours to
+		// drive instead of dusk's, and a filter set to off is nobody's to
+		// drive — the daemon refuses to move it, which is why the filter test
+		// stands down on it and the Live tab's toggle is disabled. Without the
+		// term it landed beside "The IR-cut filter is switched off" and told
+		// the reader the API was a way out of it (#555). The runtime check
+		// below already excludes parked for the same reason.
+		if (driveable && !monitor && !ircutParked) {
 			out.push({
 				id: 'manual-only', level: 'info',
 				title: 'Day/night switching is manual',

@@ -720,6 +720,20 @@ function runRest() {
 		check('pins wired but no monitor is only an observation',
 			ic.diagnose({ irCutPin1: 11 }, null, null)
 				.some(x => x.id === 'manual-only' && x.level === 'info'));
+		// But not about a filter nobody can drive. That observation offers the
+		// API as the thing moving the filter instead of dusk, and a filter set
+		// to off is not the API's to move either — so on a parked filter it
+		// contradicted the finding printed directly above it (#555).
+		const parkedManual = ic.diagnose({ irCutPin1: 11, irCut: 'off' },
+			null, null);
+		check('...but a parked filter is not offered the API as a way out',
+			!parkedManual.some(x => x.id === 'manual-only'),
+			parkedManual.map(x => x.id).join(', '));
+		check('...while still saying it is switched off',
+			parkedManual.some(x => x.id === 'ircut-parked'));
+		check('manual mode is still driveable, so it keeps the observation',
+			ic.diagnose({ irCutPin1: 11, irCut: 'manual' }, null, null)
+				.some(x => x.id === 'manual-only'));
 		const auto = ic.diagnose({ irCutPin1: 11, lightMonitor: true },
 			{ night: 0, ircut: 0, light: 0, src: 4 }, null);
 		check('an automatic monitor is an observation, not a fault',
