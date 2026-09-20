@@ -271,10 +271,16 @@ group('Day / Night: every setting is in a heading or on the pin map');
 	check('every key in the shipped schema is accounted for', !orphans.length,
 		'unplaced: ' + orphans.join(', '));
 
-	// The reverse is deliberately NOT "the map names only keys that exist". It
-	// has to be able to name one the daemon has not shipped yet — this fixture
-	// predates backlightInvert, which a current camera has — and naming one
-	// costs nothing, because a key that is absent simply is not rendered.
+	// The reverse is deliberately NOT "the map names only keys that exist".
+	// The map has to stay free to name a key this build does not ship, and
+	// naming one costs nothing: a key that is absent is simply not rendered.
+	//
+	// Every key named in the map happens to be in this fixture, so nothing
+	// here demonstrates that — but the case is live on real hardware. The six
+	// dimmable-lamp keys are offered by an hi3516ev300 and by no hi3516av300,
+	// which answers 404 for the channel; this fixture is the shape of a camera
+	// that has them. Do not read "no key here is missing" as licence to start
+	// asserting the reverse.
 	//
 	// What would cost something is a HEADING left with nothing under it: a
 	// micro-caps name and a rule across the column, introducing no settings.
