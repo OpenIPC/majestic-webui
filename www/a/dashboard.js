@@ -279,16 +279,16 @@
 	// filter" in /etc/webui/ircut.conf through a CGI of its own, so the banner
 	// would stop asking an owner to wire a filter they do not have.
 	//
-	// It was a second way to say something majestic already stores. "Drive the
-	// IR-cut filter" off IS that statement: the daemon holds it, Day / Night
-	// shows it, a config backup carries it, every browser reads the same value,
-	// and diagnose() has always fallen silent on a camera with it off and no
-	// pads — the finding below is in the `else` of that switch. So the × said
-	// the same thing in a place nothing else could see, and everything that
-	// went wrong with it followed from the duplication: a private claim has to
-	// be invalidated when the wiring contradicts it, that invalidation ran here
-	// on a page where nobody wires anything, and it therefore never ran at the
-	// moment that mattered (#367).
+	// It was a second way to say something majestic already stores. Setting
+	// "IR-cut filter" to off IS that statement: the daemon holds it, Day /
+	// Night shows it, a config backup carries it, every browser reads the same
+	// value, and diagnose() has always fallen silent on a camera with it off
+	// and no pads — the finding below is in the `else` of that branch. So the ×
+	// said the same thing in a place nothing else could see, and everything
+	// that went wrong with it followed from the duplication: a private claim
+	// has to be invalidated when the wiring contradicts it, that invalidation
+	// ran here on a page where nobody wires anything, and it therefore never
+	// ran at the moment that mattered (#367).
 	//
 	// One statement, in the camera's own configuration. Nothing to keep in
 	// step, and nothing left that can go stale.

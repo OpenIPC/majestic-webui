@@ -1297,14 +1297,35 @@ function runRest() {
 			ic.diagnose({}, null, null).some(x => x.id === 'no-pins'));
 		const noPins = (nm) =>
 			ic.diagnose(nm, null, null).filter(x => x.id === 'no-pins')[0].detail;
-		check('and that finding names the switch that answers it',
-			/turn off "Drive the IR-cut filter"/.test(noPins({})));
+		check('and that finding names the setting that answers it',
+			/set "IR-cut filter" to off/.test(noPins({})));
 		check('alongside the fault itself',
 			/Nothing is connected to the filter/.test(noPins({})));
+		// The way back is BOTH modes, and in the words the select prints.
+		// auto hands the actuator to dusk and manual hands it to the operator
+		// — a sentence offering only auto tells a manual-mode owner the wrong
+		// thing, and the Live toggle stays live in manual precisely because it
+		// is a way to move the filter. Nothing pinned these sentences before,
+		// which is how they went on naming a switch the daemon had removed.
+		const parkedSaid = f.filter(x => x.id === 'ircut-parked')[0].detail;
+		check('a parked filter offers both ways back, as the page spells them',
+			/set back to auto/.test(parkedSaid) && /manual/.test(parkedSaid),
+			parkedSaid);
+		check('...and names no control the daemon has taken away',
+			!/Drive the /.test(parkedSaid), parkedSaid);
+
 		check('a parked lamp with wiring says so',
 			ic.diagnose({ backlight: 'off', backlightPin: 52 },
 				null, null)
 				.some(x => x.id === 'light-parked' && x.level === 'info'));
+		const lampSaid = ic.diagnose({ backlight: 'off', backlightPin: 52 },
+			null, null).filter(x => x.id === 'light-parked')[0].detail;
+		check('and the lamp offers both ways back too',
+			/set back to auto/.test(lampSaid) && /manual/.test(lampSaid),
+			lampSaid);
+		check('...naming the row rather than a switch that is gone',
+			/"Camera light"/.test(lampSaid) && !/Drive the /.test(lampSaid),
+			lampSaid);
 		check('a parked lamp on a PWM channel says so too',
 			ic.diagnose({ backlight: 'off', backlightPwmChannel: 'pwm1' },
 				null, null)

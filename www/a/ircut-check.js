@@ -249,11 +249,12 @@
 		const pictureOpen = !!(pic && pic.look === 'open' && pic.streak >= PIC_STREAK &&
 			sample && sample.night === 0);
 
-		// Parked: the operator switched the filter off while keeping
-		// its wiring. That is a decision, not a defect — every accusation
+		// Parked: the operator set the filter to off while keeping its
+		// wiring. That is a decision, not a defect — every accusation
 		// about a filter that does not move stands down, and one observation
-		// says what is going on and where the switch is. Explicit === false:
-		// an older daemon has no such key, and absent must not read as off.
+		// says what is going on and which setting says so. Only an explicit
+		// off counts: an older daemon has no such key, and absent must not
+		// read as off.
 		const ircutParked = mode(nm.irCut) === 'off';
 		if (ircutParked) {
 			if (driveable) {
@@ -261,10 +262,11 @@
 					id: 'ircut-parked', level: 'info',
 					title: 'The IR-cut filter is switched off',
 					detail: 'Its pins stay configured, but nothing moves the ' +
-						'filter until "Drive the IR-cut filter" is turned back ' +
-						'on. Wherever it sits now is where it stays — open in ' +
-						'daylight reads magenta, and that is the switch, not ' +
-						'the wiring.',
+						'filter until "IR-cut filter" is set back to auto, ' +
+						'where dusk moves it, or manual, where you do. ' +
+						'Wherever it sits now is where it stays — open in ' +
+						'daylight reads magenta, and that is the setting, ' +
+						'not the wiring.',
 					fix: 'nightMode',
 				});
 			}
@@ -295,9 +297,10 @@
 					// which said the same thing where only that banner could
 					// read it (#367). Said unconditionally: the WebUI and the
 					// daemon ship in one firmware image, so a camera running
-					// this page has the switch this sentence names.
-					' If this camera has no IR-cut filter fitted, turn off ' +
-					'"Drive the IR-cut filter" and nothing here will ask again.',
+					// this page has the row this sentence names, and off is one
+					// of the three values it offers.
+					' If this camera has no IR-cut filter fitted, set ' +
+					'"IR-cut filter" to off and nothing here will ask again.',
 				fix: 'nightMode',
 			});
 		} else if (pictureOpen && !settledBy(nm, tested)) {
@@ -531,8 +534,8 @@
 			});
 		}
 
-		// The lamp's own park switch, same shape as the filter's: wiring
-		// kept, nothing driven, said once as an observation.
+		// The lamp's own mode, same shape as the filter's: wiring kept,
+		// nothing driven, said once as an observation.
 		if (mode(nm.backlight) === 'off' &&
 			(has(nm.backlightPin) || (nm.backlightPwmChannel &&
 				nm.backlightPwmChannel !== 'none'))) {
@@ -540,7 +543,8 @@
 				id: 'light-parked', level: 'info',
 				title: 'The camera light is switched off',
 				detail: 'Its wiring stays configured, but night mode leaves ' +
-					'it dark until "Drive the camera light" is turned back on.',
+					'it dark until "Camera light" is set back to auto, ' +
+					'where night lights it, or manual, where you do.',
 				fix: 'nightMode',
 			});
 		}

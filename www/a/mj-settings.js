@@ -1511,12 +1511,11 @@
 			}
 		}
 
-		// Parked (nightMode.*Enabled: false) outranks wired: the daemon
-		// refuses the toggle, so a live-looking switch would move and snap
-		// back. Explicit === false, because absent is not off: a key the page
-		// was never given is one it knows nothing about, and reading that as
-		// "switched off" would grey out the control on a camera whose filter
-		// is working perfectly.
+		// An actuator set to off outranks wired: the daemon refuses the
+		// toggle, so a live-looking switch would move and snap back. Only an
+		// explicit off, because absent is not off: a key the page was never
+		// given is one it knows nothing about, and reading that as off would
+		// grey out the control on a camera whose filter is working perfectly.
 		const ircutParked = ircutMode === 'off';
 		const lightParked = lightMode === 'off';
 		// Reached only where something is still the operator's, so anything
@@ -1537,11 +1536,11 @@
 			lbl('toggle-night').title = MON;
 		if (ircut.disabled && lbl('toggle-ircut'))
 			lbl('toggle-ircut').title = monIrcut ? MON : ircutParked
-				? 'The IR-cut filter is set to Off in Day / Night settings; its wiring is kept.'
+				? 'The IR-cut filter is set to off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
 			lbl('toggle-light').title = monLight ? MON : lightParked
-				? 'The camera light is set to Off in Day / Night settings; its wiring is kept.'
+				? 'The camera light is set to off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the night illuminator.';
 
 		// Where each of the three actually is, from the camera. Used again
@@ -6706,8 +6705,8 @@
 		// so the test's toggle would silently do nothing and every verdict
 		// would read "stuck" on a filter that is fine.
 		if (IRCUT.mode(nm.irCut) === 'off')
-			return 'The filter is set to Off (its wiring is kept). Set the ' +
-				'IR-cut filter to Manual or Automatic to test it.';
+			return 'The filter is set to off (its wiring is kept). Set ' +
+				'"IR-cut filter" to manual or auto to test it.';
 		if (!toBool(getDotted(state.config, 'jpeg.enabled')))
 			return 'The test reads a still picture, and this camera has JPEG snapshots turned off.';
 		// The switch above is the CONFIGURATION, and it is not the encoder. A
