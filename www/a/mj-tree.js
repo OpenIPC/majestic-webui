@@ -228,21 +228,34 @@
 	// arrives as one undifferentiated deal of nineteen controls (#325).
 	const SECTION_GROUPS = {
 		nightMode: [
-			// One control, three states, and it is the filter's — so the
-			// heading is the filter, symmetrically with the lamp's below.
-			// It read "Wiring" while the key beneath it was a switch called
-			// "Drive the IR-cut filter" and the pin map sat above; the pads
-			// are still the map's, and this is what may drive them.
-			{ id: 'filter', label: 'IR-cut filter', keys: ['irCut'] },
 			// One heading for switching, holding both mechanisms: which of them
 			// is on screen is the Legacy row's business, not the grouping's.
+			// The pause inside a switch belongs here as well — it is the gap
+			// between the picture changing and the filter swinging, which is
+			// the switch taking place and nothing the lamp does.
 			{ id: 'switching', label: 'Switching', keys: [
 				'lightMonitor',
 				'autoNightGain', 'autoDayGain', 'autoNightDelay', 'autoDayDelay',
-				'minThreshold', 'maxThreshold', 'monitorDelay'] },
+				'minThreshold', 'maxThreshold', 'monitorDelay', 'transitionDelayMs'] },
+			// The filter and the lamp each answer one question, and it is the
+			// same question: does day and night move this, do you, or is it
+			// left alone. That shared question is the heading, and it is why
+			// they are one group — a heading each introduced a single row
+			// repeating the words of the heading above it, twice over (#548).
+			// They are not folded into Switching instead: that group then
+			// grows too tall for a cut to fall between groups at all, because
+			// layoutCols drops the between-group preference once the best such
+			// cut still leaves the taller column past 75% of the section. The
+			// second column then opens on a row with no heading over it, which
+			// is the fault #325 was about.
+			{ id: 'driven', label: 'Driven by day/night', keys: ['irCut', 'backlight'] },
 			{ id: 'picture', label: 'Night picture', keys: ['colorToGray', 'overrideDrc'] },
+			// What is left to the lamp once its own control is above: the
+			// channel, rate and duty of a PWM lamp, on a build that has them.
+			// On one that has not, the heading is dropped rather than drawn
+			// empty, which is what it already did for these same keys.
 			{ id: 'lamp', label: 'Camera light', keys: [
-				'backlight', 'backlightPwmChannel', 'backlightPwmFreq',
+				'backlightPwmChannel', 'backlightPwmFreq',
 				'backlightPwmMin', 'backlightPwmMax'] },
 		],
 	};
