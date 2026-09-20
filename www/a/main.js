@@ -529,7 +529,7 @@ function renderTopbar(s) {
 
 	const up = $('#uptime');
 	if (up && s.sysUptimeS != null)
-		up.textContent = 'Uptime:️ ' + uptimeStr(s.sysUptimeS);
+		up.textContent = 'Uptime: ' + uptimeStr(s.sysUptimeS);
 }
 
 function heartbeat() {
