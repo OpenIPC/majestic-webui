@@ -16,16 +16,20 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 	if [ -z "$error" ]; then
 		rm -f "$config_file"
 		for p in $params; do
-			# shq, and t_value rather than `eval echo`: this file is
-			# sourced back by the page, by clip_hook_wanted and by the
-			# sender, so a value in it has to survive being read as
-			# shell. Wrapped in double quotes and never escaped, a
-			# caption saying `Motion at the "front door"` truncated at
-			# the second quote and left `door` to be run as a command,
-			# and `eval echo` globbed the value on the way in -- a
-			# caption of `snap *` was stored as a directory listing
-			# (#547).
-			echo "openwall_${p}=$(shq "$(t_value "openwall_${p}")")" >> "$config_file"
+			# conf_write, so that what a shell reads back out of
+			# this file is exactly what was posted. It is sourced by the page, by
+			# clip_hook_wanted and by the sender, so a value in it has to survive
+			# being read as shell: wrapped in double quotes and never escaped, a
+			# caption saying `Motion at the "front door"` truncated at the second
+			# quote and left `door` to be run as a command, and the `eval echo`
+			# that read it globbed on the way in -- a caption of `snap *` was
+			# stored as a directory listing (#547).
+			#
+			# The value is taken with a plain assignment rather than $(t_value ...):
+			# an assignment's right-hand side is not word-split, and it does not
+			# strip the trailing newlines a command substitution would.
+			eval "_v=\$openwall_${p}"
+			conf_write "openwall_${p}" "$_v" >> "$config_file"
 		done
 
 		sed -i /openwall/d /etc/crontabs/root

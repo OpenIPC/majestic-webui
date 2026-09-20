@@ -531,7 +531,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 					[ "$log_arg" = "-p" ] && log_hide=1
 					log_line="$log_line $(shq "$log_arg")"
 				done
-				echo "$log_line" >> /tmp/webui.log
+				printf '%s\n' "$log_line" >> /tmp/webui.log
 
 				# setnetwork refuses on its own checks and says why on stdout;
 				# its status used to be dropped, so a refused save was

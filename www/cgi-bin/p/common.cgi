@@ -216,8 +216,41 @@ esc() {
 # PARSES it and then fails at run time with "Bad substitution". The lint's
 # `sh -n` therefore cannot see the difference, so the one helper whose whole
 # job is to get quoting right is the last one that should depend on it.
+#
+# Streamed, with no $(...) inside it, so that conf_write below can be exact.
+# A caller is free to capture it -- `$(shq "$x")` is how the network page
+# renders its log line -- but capturing costs every trailing newline the value
+# had, so anything writing a file uses conf_write instead.
 shq() {
-	printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+	printf "'"
+	printf '%s' "$1" | sed "s/'/'\\\\''/g"
+	printf "'"
+}
+
+# conf_write "name" "value"
+#
+# One line of a file that will be sourced: `name='value'`, on stdout, for the
+# caller to redirect. This is the only thing that should write into the
+# extension configs or the sysinfo cache.
+#
+# The value never passes through command substitution, and that is the whole
+# reason this exists rather than `printf '%s\n' "name=$(shq "$v")"`. POSIX
+# command substitution strips EVERY trailing newline from what it captures, so
+# the obvious spelling silently rewrites any value that ends in one -- and it
+# would do it twice over in the config writers, which used to capture t_value
+# on the way in as well. The value is streamed instead: name, equals, opening
+# quote, escaped value, closing quote, newline.
+#
+# printf rather than echo for the same reason throughout. dash's echo acts on
+# the backslashes in its argument, so a stored `C:\cams\front` came out as
+# `name='C:` -- \c ends echo's output -- leaving a file that will not parse.
+# The camera's busybox echo leaves them alone, so this was latent on a camera
+# rather than live, but a writer that depends on which echo it got is a writer
+# waiting to lose a value.
+conf_write() {
+	printf '%s=' "$1"
+	shq "$2"
+	printf '\n'
 }
 
 # field_switch "name" "label" "value" "hint" "confirm"
@@ -1089,7 +1122,7 @@ update_caminfo() {
 	local v val
 	for v in $variables; do
 		eval "val=\$${v}"
-		echo "${v}=$(shq "$val")" >> ${sysinfo_file}
+		conf_write "$v" "$val" >> ${sysinfo_file}
 	done
 
 	generate_signature

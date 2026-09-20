@@ -37,9 +37,15 @@ function extract(name) {
 }
 
 const shq = extract('shq');
+const confWrite = extract('conf_write');
 const tValue = extract('t_value');
-if (shq.indexOf("'%s'") < 0)
-	throw new Error('shq no longer wraps in single quotes; this test is testing nothing');
+
+// extract() throwing is the only "this test is testing nothing" guard here.
+// There is deliberately no check on HOW shq is spelled: the round trips below
+// fail on any spelling that does not preserve the value, and a structural
+// assertion would only get in their way -- an earlier draft asserted that the
+// body contained a quoted '%s', which made every rewrite fail as "testing
+// nothing" before the case that would have named the real fault could run.
 
 // The awkward values, each for a reason. The last four are the ones that were
 // actually reaching cameras: a caption is free prose, and an apostrophe, a
@@ -62,6 +68,11 @@ const VALUES = [
 	['a double quote', 'Motion at the "front door"'],
 	['a glob', 'snap *'],
 	['non-ascii', 'двор'],
+	// Command substitution strips every trailing newline from what it
+	// captures, so a writer that captures the value -- or captures the
+	// quoted form -- rewrites these two without saying so.
+	['a trailing newline', 'front door\n'],
+	['several trailing newlines', 'front door\n\n\n'],
 ];
 
 // Write the value the way a config writer does, source the file back the way
@@ -69,6 +80,13 @@ const VALUES = [
 // SENTINEL is watched throughout: a value that RUNS on the way in or out is a
 // different failure from one that merely comes back wrong, and the round-trip
 // assertion alone would not separate them.
+//
+// The line is written by the shipped conf_write rather than by a spelling of
+// it invented here, because two of the faults this guards are in the WRITER
+// and not in shq: an `echo` whose dash implementation eats the backslashes in
+// `C:\cams\front`, and a `$(...)` anywhere on the path that silently drops a
+// trailing newline.
+//
 // The write and the read are two separate shells launched from here rather
 // than one nested inside the other: a nested `sh -c` would have its $caption
 // expanded by the outer shell before the inner one ever ran, which is the same
@@ -83,7 +101,7 @@ function roundTrip(value) {
 	fs.writeFileSync(path.join(dir, 'decoy-b'), '');
 	try {
 		execFileSync('sh', ['-c',
-			shq + '\nv=$1\necho "caption=$(shq "$v")" > "$2"\n', 'sh', value, conf],
+			shq + '\n' + confWrite + '\nconf_write caption "$1" > "$2"\n', 'sh', value, conf],
 			{ cwd: dir, encoding: 'utf8' });
 		const line = fs.readFileSync(conf, 'utf8');
 		// A file that will not parse is the loudest form of this failure and
