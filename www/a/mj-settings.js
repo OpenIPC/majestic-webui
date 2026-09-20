@@ -1,3 +1,35 @@
+// The settings page: majestic's own schema, rendered as a form.
+//
+// Nothing here knows what any particular setting means. camera.cgi hands over a
+// boot blob and /api/v1/config.schema.json, and the tree, the rail, the widget
+// for each row, the search and the reset all fall out of those — which is why a
+// key the daemon adds appears here without anyone editing this file, and why a
+// key it drops stops appearing. `docs/settings-page.md` carries that contract:
+// the boot blob, the widget dispatch, save and reset, the column deal and the
+// three tiers of field text.
+//
+// The exceptions are the panels a form row cannot be: Live adjustments, the
+// Orientation group, the OSD template builder, the motion-region editor, the
+// Pins drawing and the Day / Night pad map and filter hunt. Each replaces
+// several rows, and each does it the same way — the rows it stands for are
+// rendered `{hidden: true}` and driven with setValue, so the save machinery,
+// the dirty tracking and the per-row reset know nothing about the control and
+// the fields are still there on a camera where it cannot mount.
+//
+// WHAT THIS FILE REFUSES:
+//
+// It never writes to majestic outside a Save. Every panel proposes into the
+// hidden fields and raises the ordinary save bar instead — including a find
+// from the IR-cut filter hunt it mounts, which is what lets the filter test go
+// on refusing to judge wiring the camera was never given (`docs/day-night.md`).
+//
+// It never reads configuration from anywhere but the daemon, and it holds no
+// second copy of a fact the daemon already keeps.
+//
+// And it stops what it started. A panel that put a listener on `document` or
+// left hardware moving — the pad map's key and pointer handlers, a filter sweep
+// driving pins — is torn down when the section goes, not when a replacement
+// happens to mount: leaving a section detaches the only Stop button there is.
 (() => {
 	'use strict';
 
