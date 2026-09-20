@@ -25,6 +25,21 @@ usually a configuration rather than a wire. What reaches beyond those files:
   behind anyone's back — a proposal is staged into the hidden fields and the
   ordinary save bar appears — and a pad assignment is only ever *claimed* correct
   by `probe()`, which measures.
+- **The sweep's UI is `pin-hunt.js`, mounted twice.** The Pins page offers both
+  hunts; Day / Night passes `only: 'filter'` and gets that half alone, opened by
+  the panel's own button rather than by a resting card. The two differ in the
+  door and in where a find lands — nowhere else, and the pure half stays in
+  `ircut-scan.js`. The split is by *detector*, not by page: the general hunt
+  holds one pin and diffs the camera's device inventory, so it can find
+  anything and belongs with the chip; this one pulses **pairs** and reads the
+  **picture**, so an IR-cut filter is the only thing it can ever find, and it
+  belongs beside the wiring fields its answer goes into. Running it from the
+  other page cost three presses, a page change, and two presses that visibly
+  did nothing because the door and then `Start` were below the fold (#552).
+  A find made on Day / Night is staged through the host's `pins.use`; only one
+  made on the Pins page has to cross in `sessionStorage`, and it must stay
+  session-scoped — a proposal that outlived the tab would raise a save bar next
+  week holding pins from a board no longer on the desk.
 - **The test refuses to run while the pin map has unsaved wiring**, and the check
   hangs off `updateDirty()` — the funnel every settings edit goes through — not
   off the map's own `onChange`, because the pin fields stay editable directly on

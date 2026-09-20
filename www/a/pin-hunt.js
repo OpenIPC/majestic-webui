@@ -17,10 +17,23 @@
 // watching. Hold a pin, look again, and the difference names what the pin
 // does.
 //
-// That is why the whole thing lives with the pins now rather than with day and
-// night: the filter is one of the things it can find, not its identity. Day /
-// Night keeps what is genuinely its own -- which pin each coil is on, and
-// testing the filter once they are set.
+// That is why the general hunt lives with the pins rather than with day and
+// night: the filter is one of the things it can find, not its identity.
+//
+// THE FILTER HUNT IS MOUNTED IN BOTH PLACES, and that is not a hedge. Sending
+// somebody from Day / Night to another page to run it was measured at three
+// presses and a page change, with the door and then the Start button below the
+// fold at every viewport but the tallest -- two presses that visibly did
+// nothing (#552). The context that argued for the move is on both pages
+// anyway: ircut-map.js draws the avoid list, the pads the kernel holds, the
+// pads another role has, and what it could not check. And the answer belongs
+// to Day / Night, which owns the wiring fields, the dirty tracking and the
+// Save bar -- so a find made there is staged straight into them, and only a
+// find made on the Pins page has to travel.
+//
+// `only: 'filter'` is how a host asks for that half alone. What differs
+// between the two mounts is the door and where a find lands; the sweep, the
+// confirm card, the journal and the resume are one copy.
 //
 // The pure halves -- which pins to try, in what order, and what to make of an
 // interrupted run -- stay in ircut-scan.js and pin-sweep.js, where they are
@@ -30,8 +43,9 @@
 
 	// The section's own classes, set on every repaint because each card
 	// replaces the last. Both, always: two of these four used to set only the
-	// first, and the second is what gives the section its margin on the page it
-	// now lives on.
+	// first, and the second is what gives the section its margin. Both mounts
+	// wear both — the first draws the card's box and the second its gap, and
+	// neither is about which page it is on.
 	const HOST_CLASS = 'mj-ircut-scan mj-pins-hunt';
 
 	const SCAN = () => window.MajesticIrcutScan;
@@ -404,6 +418,7 @@
 		// in-memory list did not — a second pin taking the camera down used to
 		// lose the first.
 		let stop = false;
+		const gen = generation;
 
 		// Where this browser got to, if it was here before and the chip has
 		// not changed under it.
@@ -583,7 +598,7 @@
 				},
 				look: () => window.MajesticIrcut.snapshot('/image.jpg'),
 				wait: (ms) => new Promise((r) => setTimeout(r, ms)),
-				stopped: () => stop || stopped,
+				stopped: () => stop || stopped || generation !== gen,
 				onStep: (st) => {
 					t.textContent = 'Trying pins ' + st.a + ' and ' + st.b;
 					s.textContent = (st.index + 1) + ' of ' + st.total;
@@ -654,6 +669,11 @@
 					'<p class="x-small text-secondary mb-0 mt-2" id="mj-scan-used"></p>';
 				const said = host.querySelector('#mj-scan-used');
 				host.querySelector('#mj-scan-use').addEventListener('click', () => {
+					// Mounted beside the wiring fields, a find has nowhere to
+					// travel to: the host stages it into them directly, the
+					// same path the pad map's own edits take, and the Save bar
+					// comes up. Only the Pins page needs the hand-over below.
+					if (pins.use) { pins.use(found, said); return; }
 					// PROPOSED, not written. "Nothing is written to majestic
 					// behind anyone's back: the proposal is staged into the
 					// hidden fields and the ordinary save bar appears"
@@ -706,6 +726,17 @@
 	function idleCard(info) {
 		const host = hostOf();
 		if (!host) return;
+		// Mounted filter-only, this section has no resting state of its own.
+		// The door is the host page's own button, sitting beside the roles a
+		// find fills in, and its refusal is drawn there through blocked() --
+		// so cancelling closes the card rather than replacing it with a
+		// standing offer to do the same thing again, and an idle panel costs
+		// the page no height.
+		if (filterOnly()) {
+			host.hidden = true;
+			host.textContent = '';
+			return;
+		}
 		host.hidden = false;
 		host.className = HOST_CLASS;
 
@@ -891,6 +922,7 @@
 		const list = SW.steps(SW.pads(info, { only: range }));
 		const todo = prog ? SW.remaining(list, prog.done) : list;
 		let stop = false;
+		const gen = generation;
 
 		host.hidden = false;
 		host.className = HOST_CLASS;
@@ -983,7 +1015,7 @@
 							return j;
 						});
 				},
-				stopped: () => stop || stopped,
+				stopped: () => stop || stopped || generation !== gen,
 				onStep: (st) => {
 					t.textContent = 'Holding pin ' + st.pin + ' ' + st.level;
 					s.textContent = (st.index + 1) + ' of ' + st.total;
@@ -1096,9 +1128,14 @@
 		if (info.ownersUnknown) cant.push('which pads the kernel already holds');
 		if (info.ptzUnknown) cant.push('which pads the PTZ driver is on');
 		if (!cant.length) return null;
+		// Where "by hand" is depends on where this is mounted. Beside the pad
+		// map it is the map; on the Pins page the coils are not on screen at
+		// all, so the reader has to be told which page they are on.
 		return 'This camera cannot say ' + cant.join(' or ') +
 			', so it will not drive pads it has not been told about. Set the ' +
-			'coils by hand on the Day / Night page instead.';
+			'coils by hand ' + (filterOnly()
+				? 'on the map above instead.'
+				: 'on the Day / Night page instead.');
 	}
 
 	// ── mounting ────────────────────────────────────────────────────────────
@@ -1108,7 +1145,13 @@
 	// be changed apart. It owes us sweep(a, b) to light what is being driven,
 	// select(pin) to open one pin's own controls, and changed() for when the
 	// camera's answer has moved under it.
-	const state = { info: null, range: null, soc: '', host: null, pins: null };
+	const state = { info: null, range: null, soc: '', host: null, pins: null,
+		only: null };
+	// Filter-only, i.e. mounted beside the wiring it is looking for rather than
+	// on the page about the chip. It changes three things and nothing else:
+	// which doors are offered, where a find lands, and which page a refusal
+	// sends the reader to set the coils by hand on.
+	const filterOnly = () => state.only === 'filter';
 	let pins = null;
 	const hostOf = () => state.host;
 
@@ -1120,27 +1163,59 @@
 	 * left the sweep working through the chip with nobody watching it. */
 	let stopped = false;
 
+	/* Which mount a running sweep belongs to, because `stopped` is one flag and
+	 * there are two doors into this file now.
+	 *
+	 * Stopping and mounting happen in the same task when a reader leaves one
+	 * section for another: the teardown sets the flag and the new mount clears
+	 * it, so a sweep that was told to stop would find it false again on its
+	 * next pad and carry on driving with its Stop button already thrown away.
+	 * A run holds the generation it started under and stops when that is no
+	 * longer the current one, which no later mount can undo. */
+	let generation = 0;
+
 	function mount(host, opts) {
 		opts = opts || {};
 		stopped = false;
+		// A new mount supersedes whatever the last one left running.
+		generation++;
+		// Two callers now, so the host is worth checking rather than assumed:
+		// a page that has not drawn its box yet would otherwise take the whole
+		// panel down with it.
+		if (!host) return;
 		state.host = host;
 		state.soc = opts.soc || '';
 		state.info = opts.info || null;
+		state.only = opts.only || null;
 		pins = opts.pins || {};
 		if (!SCAN() || !state.info) return;
 
-		// The way in. Always drawn, because this is now the only place the
-		// hunt can be started from -- on the page it came from there was a
-		// button beside the pad map, and moving the panel without moving the
-		// door left a section that could only ever resume something.
-		idleCard(state.info);
-		// And on top of it where a previous run did not finish, because
-		// "carry on from pair 84" is a different offer from "start".
+		// The way in, on the page where this section IS the door: drawn
+		// always, because a section that could only ever resume something is
+		// a section nobody can start anything from.
+		//
+		// Mounted filter-only the door is the host's own button instead, so
+		// there is nothing to rest here and the panel stays closed until it
+		// is asked for.
+		if (!filterOnly()) idleCard(state.info);
+		else { host.hidden = true; host.textContent = ''; }
+		// And on top of either, where a previous run did not finish: "carry on
+		// from pair 84" is a different offer from "start", and a run that took
+		// the camera down has to be answered wherever the reader turns up.
 		resumeCard(state.info);
 
 		/* The page owns this section's lifetime, so it owns stopping what is
-		 * running in it. */
-		return { stop: () => { stopped = true; } };
+		 * running in it — and, where the door is the page's own button, opening
+		 * it and asking whether it may be pressed at all. */
+		return {
+			stop: () => { stopped = true; },
+			open: () => { if (state.info) openScan(state.info); },
+			// Null when the sweep may run. A sentence when it may not, which
+			// is a fact about the camera rather than about this section: the
+			// kernel would not say who holds which pad, so nothing here will
+			// drive one it has not been told about.
+			blocked: () => (state.info ? cannotHunt(state.info) : null),
+		};
 	}
 
 	const api = { mount: mount };
