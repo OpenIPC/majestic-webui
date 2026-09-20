@@ -255,6 +255,35 @@
 			// question than what the thresholds are, and Colorless night mode is
 			// asked for far more often than any number below it.
 			{ id: 'picture', label: 'Night picture', keys: ['colorToGray', 'overrideDrc'] },
+			// What is left to the lamp once its own control is above: the
+			// channel, rate, duty, curve and highlight backoff of a dimmable
+			// one, on a build that has them. On one that has not, the heading
+			// is dropped rather than drawn empty, which is what it already did
+			// for these same keys. Named for the dimming rather than for the
+			// lamp, so that it does not repeat the words of the Camera light
+			// row above it.
+			//
+			// The curve and the backoff were named nowhere here until a real
+			// hi3516ev300 was asked what it declares. They rendered anyway --
+			// an unplaced key falls in after the last group -- and this group
+			// was last, so they landed under the right heading by luck and
+			// looked entirely correct. That is the same fault as the pause
+			// inside a switch (#550), minus the symptom. tests/tree.test.js
+			// could not see it either: its fixture predated both keys, so the
+			// assertion that every key is placed was reading a schema no
+			// camera has had for a while.
+			//
+			// Before the numbers rather than after them, which costs a camera
+			// without these keys nothing at all -- the group is not drawn, so
+			// the order it would have had cannot matter -- and buys a camera
+			// with them a cut that balances: 1441px beside 925 where putting
+			// it last gave 1575 beside 791. It reads the same way round as
+			// Night picture above: what the camera DOES first, the numbers
+			// that time it last.
+			{ id: 'lamp', label: 'Dimmable lamp', keys: [
+				'backlightPwmChannel', 'backlightPwmFreq',
+				'backlightPwmMin', 'backlightPwmMax',
+				'backlightPwmGamma', 'backlightHighlightPct'] },
 			// The numbers that decide when, kept as a heading of their own rather
 			// than piled under Switching. Not taste: the section is dealt into two
 			// columns and the cut is taken between headings wherever one will
@@ -278,15 +307,6 @@
 			{ id: 'levels', label: 'Levels and timing', keys: [
 				'autoNightGain', 'autoDayGain', 'autoNightDelay', 'autoDayDelay',
 				'minThreshold', 'maxThreshold', 'monitorDelay', 'transitionDelayMs'] },
-			// What is left to the lamp once its own control is above: the channel,
-			// rate and duty of a dimmable one, on a build that has them. On one
-			// that has not, the heading is dropped rather than drawn empty, which
-			// is what it already did for these same keys. Named for the dimming
-			// rather than for the lamp, so that it does not repeat the words of
-			// the Camera light row above it.
-			{ id: 'lamp', label: 'Dimmable lamp', keys: [
-				'backlightPwmChannel', 'backlightPwmFreq',
-				'backlightPwmMin', 'backlightPwmMax'] },
 		],
 	};
 	function sectionGroups(section) { return SECTION_GROUPS[section] || null; }

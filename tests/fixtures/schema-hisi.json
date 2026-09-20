@@ -1196,6 +1196,13 @@
           "title": "GPIO pin for camera light",
           "x-reload": "service:night"
         },
+        "backlightInvert": {
+          "type": "boolean",
+          "title": "Camera light is inverted",
+          "default": false,
+          "x-reload": "service:night",
+          "hint": "For a board whose lamp driver is active-low. Covers a PWM lamp too."
+        },
         "overrideDrc": {
           "type": "integer",
           "title": "DRC value in night mode",
@@ -1310,6 +1317,25 @@
           "type": "integer",
           "title": "Maximum lamp duty (%)",
           "default": 100,
+          "x-reload": "service:night"
+        },
+        "backlightPwmGamma": {
+          "type": "number",
+          "title": "Lamp brightness curve",
+          "minimum": 0.2,
+          "maximum": 4.0,
+          "default": 1.0,
+          "hint": "1.0 drives the duty asked for. Above 1.0 gives finer control at the dim end, for a lamp that is already bright at low duty. Off and full brightness do not move.",
+          "x-reload": "service:night"
+        },
+        "backlightHighlightPct": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Back the lamp off above this much clipping (%)",
+          "default": 0,
+          "hint": "Above 0, the lamp dims when more than this share of the picture has run out of room. 0 leaves it to the scene's average brightness alone.",
+          "help": "An average that looks right can still burn out a close subject. Watch isp_highlight to pick a number.",
           "x-reload": "service:night"
         },
         "transitionDelayMs": {
