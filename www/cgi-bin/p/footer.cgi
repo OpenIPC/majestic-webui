@@ -6,10 +6,14 @@
 <footer class="x-small">
 <div class="container pt-3">
 <div class="row">
-<div class="col col-2">
+<div class="col-auto">
+	<%# The uptime sits in a track as wide as the uptime, rather than a fixed
+	    twelfth of the footer. A twelfth is about 70px on a phone, which broke
+	    "Uptime: 11h 22m" over three lines while 226px of the space beside it
+	    stood empty (#564). %>
 	<p id="uptime" class="text-secondary"></p>
 </div>
-<div class="col col-10">
+<div class="col">
 	<%# The ?ref word is how a visit that starts here becomes countable at all:
 	    a browser opening this link sends either no referrer or a private
 	    address, and neither says which door the person came through. It is a
