@@ -32,6 +32,23 @@ json_str() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"
 json_log() { printf '%s' "$1" | tr -d '\000-\010\013-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk 'BEGIN{ORS=""}{print (NR>1?"\\n":"") $0}'; }
 sysf() { cat "$SYS/device/$1" 2>/dev/null; }
 
+# One identity field, emitted ONLY where the kernel actually exports it.
+#
+# An attribute that is not there and an attribute that is there and empty are
+# different facts about different things -- the first is this kernel, the second
+# is the card -- and `cat` renders both as the empty string. Collapsing them let
+# the page tell an owner their card reports no product name when what really
+# happened is that this kernel does not publish one, which is a data-collection
+# gap being read out as a fault of the hardware.
+#
+# An absent key is how the rest of this endpoint says "not measured" (scan_frag
+# omits its key for the same reason), and every consumer already renders a
+# missing model exactly as it renders an empty one.
+sysf_kv() {
+	[ -e "$SYS/device/$1" ] || return 0
+	printf '"%s":"%s",' "$2" "$(json_str "$(sysf "$1")")"
+}
+
 # Append one line to the op log shown in the browser. `L="${L}x\n"` does not
 # interpret the escape in POSIX sh, so what reached the page was a literal
 # backslash-n between every line; the newline has to be a real one for
@@ -180,12 +197,20 @@ span_offsets() {
 	so_span=$1
 	echo 0
 	so_off=1048576
+	so_last=0
 	while [ "$so_off" -lt "$so_span" ]; do
 		echo "$so_off"
+		so_last=$so_off
 		so_off=$((so_off * 2))
 	done
+	# The near-the-end point, and it must not land on a rung already emitted.
+	# Where the span is exactly a power of two plus one MiB it does, and the
+	# duplicate is not harmless: the write pass stamps the same sector twice,
+	# the read pass then finds the later point's stamp where the earlier one's
+	# was expected, and that is the signature probe_span convicts a card on.
+	# A healthy card would be reported as folding one address onto another.
 	so_top=$(((so_span - 1048576) / 512 * 512))
-	[ "$so_top" -gt 0 ] && echo "$so_top"
+	[ "$so_top" -gt "$so_last" ] && echo "$so_top"
 }
 
 # Does this card keep what it is given ACROSS ITS WHOLE SIZE?
@@ -561,9 +586,8 @@ get_info() {
 	printf '{"present":true,"device":"%s","target":"%s","mountpoint":"%s","mounted":%s,"partitioned":%s,' \
 		"$DEV" "$t" "$(json_str "${mp:-/mnt/$base}")" "$mounted" "$partd"
 	printf '%s' "$(card_rating)"
-	printf '"model":"%s","cardtype":"%s","manfid":"%s","oemid":"%s","date":"%s","serial":"%s",' \
-		"$(json_str "$(sysf name)")" "$(json_str "$(sysf type)")" "$(json_str "$(sysf manfid)")" \
-		"$(json_str "$(sysf oemid)")" "$(json_str "$(sysf date)")" "$(json_str "$(sysf serial)")"
+	sysf_kv name model; sysf_kv type cardtype; sysf_kv manfid manfid
+	sysf_kv oemid oemid; sysf_kv date date; sysf_kv serial serial
 	canfsck=false; command -v "fsck.$fs" >/dev/null 2>&1 && canfsck=true
 	if [ "$ro" = true ]; then health=readonly
 	elif [ "$mounted" = true ]; then health=ok

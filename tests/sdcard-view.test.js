@@ -396,5 +396,38 @@ async function drawn(env) {
 			'writes ' + settled + ' -> ' + env.SD.writes);
 	}
 
+	group('an alarm needs two samples that were actually consecutive');
+	{
+		// `s.prev` belongs to the heartbeat and SURVIVES a failed poll, so on
+		// the first success after a gap it is the reading from BEFORE the gap.
+		// A dropped count that moved somewhere in that unobserved interval
+		// would otherwise be read as "clips are being lost right now" and raise
+		// a fault on two samples that were never consecutive.
+		const drop = (n, prevN) => ({
+			ok: true, dt: 2,
+			m: { v: Object.assign({}, beat().m.v, { records_fragments_dropped_total: n }) },
+			prev: prevN === undefined ? null
+				: { v: { records_fragments_dropped_total: prevN } },
+		});
+		const env = await load({ now: card() });
+		await drawn(env);
+
+		env.beat(drop(0, 0));
+		env.beat({ ok: false });                 // the hole
+		env.beat(drop(5, 0));                    // first success after it
+		check('a jump across a failed poll is not an active loss',
+			env.SD.innerHTML.indexOf('still being lost') < 0,
+			'claimed an active loss on a delta that spans a gap');
+		check('and the loss is still reported, as a standing total',
+			env.SD.innerHTML.indexOf('but none while this page has been watching') >= 0,
+			'the standing loss went unmentioned');
+
+		// Two genuinely consecutive samples that move DO raise it.
+		env.beat(drop(6, 5));
+		check('two consecutive samples that move do raise it',
+			env.SD.innerHTML.indexOf('still being lost') >= 0,
+			'an active loss was not reported');
+	}
+
 	done();
 })();

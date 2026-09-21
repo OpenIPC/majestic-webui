@@ -23,12 +23,22 @@ const H = require('../www/a/sdcard-health.js');
 // have been READ, so the fixture carries them all and the cases below take
 // them away one at a time.
 const FULL = {
+	records_enabled: 1,
 	records_state: 0,
 	records_fragments_written_total: 400,
 	records_fragments_dropped_total: 0,
 	records_write_errors_total: 0,
 	records_sync_errors_total: 0,
 };
+// A recorder reading with the counters overridden, for the cases below that
+// are about one gauge at a time.
+const rec = (over) => ({ v: Object.assign({}, FULL, over) });
+// The three cards this was written against. Two are real no-name cards from
+// the lab and one is a genuine SanDisk; the second of them was PROVEN genuine
+// by a whole-device write and verify, which is why nothing here may convict.
+const CARD_SANDISK = { manfid: '0x000003', oemid: '0x5344', model: 'SD64G', sizeBytes: 124735488 * 512, date: '05/2021' };
+const CARD_MISNAMED = { manfid: '0x0000f1', oemid: '0x3432', model: 'SD16G', sizeBytes: 61194240 * 512, date: '06/2020' };
+const CARD_NAMELESS = { manfid: '0x000056', oemid: '0x3456', model: 'SD', sizeBytes: 122138624 * 512, date: '01/2012' };
 const recording = { v: FULL };
 const without = (k) => {
 	const v = Object.assign({}, FULL);
@@ -169,11 +179,23 @@ function main() {
 			/none have been lost/.test(behind.keeping.text), behind.keeping.text);
 		check('the headline warns too', behind.head.level === 'warn', behind.head.text);
 		// Losing footage outranks queuing: once clips are gone, saying they are
-		// merely waiting would be the wrong sentence.
-		const lost = H.keeping({
+		// merely waiting would be the wrong sentence. A loss still HAPPENING
+		// outranks it outright; a loss that has stopped does not take the lead
+		// from a queue backing up right now, but it must still take away the
+		// reassurance, because "none have been lost yet" would be false.
+		const losing = H.keeping({
 			v: { records_state: 0, records_fragments_written_total: 400, records_fragments_dropped_total: 2 },
-		}, true);
-		check('an actual loss outranks the queue', lost.level === 'bad' && /dropped/.test(lost.text), lost.text);
+		}, true, true);
+		check('a loss still happening outranks the queue',
+			losing.level === 'bad' && /still being lost/.test(losing.text), losing.text);
+		const settledLoss = H.keeping({
+			v: { records_state: 0, records_fragments_written_total: 400, records_fragments_dropped_total: 2 },
+		}, true, false);
+		check('a stopped loss leaves the live queue leading',
+			settledLoss.kind === 'marginal', settledLoss.kind + ' ' + settledLoss.text);
+		check('but never claims nothing has been lost',
+			!/none have been lost/.test(settledLoss.text) && /2 have already been lost/.test(settledLoss.text),
+			settledLoss.text);
 	}
 
 	group('a running scan does not quote a figure the progress bar also quotes');
@@ -215,6 +237,157 @@ function main() {
 			scan: { state: 'done', bytes: 1, badChunks: 1, findings: [{}], phase: 2 },
 		});
 		check('two good lines do not outvote one bad one', v.head.level === 'bad', JSON.stringify(v));
+	}
+
+	group('a card the camera cannot open is not a card nobody has used (#544)');
+	{
+		// Each of these is a recorder that has written NOTHING -- because it
+		// cannot write. Read in the other order the fragment count silences
+		// the verdict, and the page reports a dead card as an idle one.
+		const cases = [
+			[3, /cannot open the card/],
+			[2, /failing/],
+			[1, /intermittently/],
+		];
+		cases.forEach(([st, wants]) => {
+			const k = H.keeping(rec({ records_state: st, records_fragments_written_total: 0 }));
+			check('verdict ' + st + ' with nothing written is bad', k.level === 'bad', k.level + ' ' + k.text);
+			check('verdict ' + st + ' keeps its own sentence', wants.test(k.text), k.text);
+		});
+		const v = H.verdict({ recorder: rec({ records_state: 3, records_fragments_written_total: 0 }) });
+		check('and the headline says so', v.head.text === 'This card has a problem.', v.head.text);
+	}
+
+	group('but an idle camera does not accuse its card (#544)');
+	{
+		// The verdict gauge is not cleared when recording is switched off; it
+		// keeps whatever it last said, so on an idle camera it can still read
+		// `offline` from a failed attempt long ago. A plain reorder would have
+		// made that camera report a broken card.
+		const off = H.keeping(rec({ records_enabled: 0, records_state: 3, records_fragments_written_total: 0 }));
+		check('recording switched off is not bad', off.level !== 'bad', off.level + ' ' + off.text);
+		check('and it says why it has nothing to report', /switched off/.test(off.text), off.text);
+
+		// A build that does not publish the gauge cannot tell a live verdict
+		// from a stale one, so an idle camera keeps the older, quieter answer.
+		const old = H.keeping({ v: (() => {
+			const o = Object.assign({}, FULL, { records_state: 3, records_fragments_written_total: 0 });
+			delete o.records_enabled;
+			return o;
+		})() });
+		check('an unpublished gauge keeps the quiet answer', old.kind === 'idle', old.kind + ' ' + old.text);
+	}
+
+	group('a loss that has stopped is a note, not an alarm (#545)');
+	{
+		// The case this exists for: a card recording normally, with an empty
+		// queue and no errors, reporting a fault for the rest of the daemon's
+		// life because a maintenance remount briefly cost it a few clips.
+		const settled = H.keeping(rec({ records_fragments_dropped_total: 33 }), false, false);
+		check('a standing total is a warning, not a fault', settled.level === 'warn', settled.level + ' ' + settled.text);
+		check('and it still says clips were lost', /33 clips/.test(settled.text), settled.text);
+		check('and says the loss has stopped', /none while this page/.test(settled.text), settled.text);
+
+		const active = H.keeping(rec({ records_fragments_dropped_total: 33 }), false, true);
+		check('a count still moving is a fault', active.level === 'bad', active.level + ' ' + active.text);
+		check('and says it is still happening', /still being lost/.test(active.text), active.text);
+
+		// The caller owns the window, so with no judgement offered the page
+		// must not invent one and must not raise the alarm.
+		const unjudged = H.keeping(rec({ records_fragments_dropped_total: 33 }));
+		check('no window judgement means no alarm', unjudged.level === 'warn', unjudged.level);
+	}
+
+	group('the card is named only when it names itself twice over (#546)');
+	{
+		check('matching ids give the maker', H.vendorOf(CARD_SANDISK) === 'SanDisk', String(H.vendorOf(CARD_SANDISK)));
+		check('an unknown id gives no name', H.vendorOf(CARD_MISNAMED) === null, String(H.vendorOf(CARD_MISNAMED)));
+		// A wrong row in the table must fail silent rather than print somebody
+		// else's brand: the OEM string has to agree with the id.
+		const mismatched = Object.assign({}, CARD_SANDISK, { oemid: '0x3432' });
+		check('a disagreeing OEM id gives no name', H.vendorOf(mismatched) === null, String(H.vendorOf(mismatched)));
+		check('no card at all is not a crash', H.vendorOf(null) === null && H.vendorOf({}) === null);
+	}
+
+	group('provenance prompts a check and never delivers a verdict (#546)');
+	{
+		check('a coherent card says nothing', H.provenance(CARD_SANDISK) === null, JSON.stringify(H.provenance(CARD_SANDISK)));
+
+		const mis = H.provenance(CARD_MISNAMED);
+		check('a name that disagrees with the device is noticed',
+			mis && /product name says 16 GB/.test(mis.text), mis && mis.text);
+		// The device's size is on the identity line already, and this module
+		// formats bytes differently from the page. Quoting it again is how a
+		// page ends up printing two different sizes for one card.
+		check('and it does not quote a second size for the same card',
+			mis && !/\d+(\.\d+)? GB device/.test(mis.text), mis && mis.text);
+		const nam = H.provenance(CARD_NAMELESS);
+		check('an empty product name is noticed',
+			nam && /no real product name/.test(nam.text), nam && nam.text);
+
+		// The invariant this whole feature turns on. CARD_MISNAMED was proven
+		// genuine by a whole-device write and verify, so nothing here may be
+		// ranked, coloured or counted as a finding.
+		[mis, nam].forEach((p) => {
+			check('it carries no level to be ranked by', p.level === undefined, JSON.stringify(p));
+		});
+		const base = H.verdict({ recorder: recording, probe: clean, scan: readAll });
+		[CARD_SANDISK, CARD_MISNAMED, CARD_NAMELESS].forEach((c) => {
+			const v = H.verdict({ recorder: recording, probe: clean, scan: readAll, card: c });
+			check('the headline is untouched by provenance',
+				JSON.stringify(v.head) === JSON.stringify(base.head), JSON.stringify(v.head));
+		});
+		check('and it points at the check that settles it',
+			/the check above is what settles it/.test(mis.text), mis.text);
+
+		// A merely old card is not a suspicious one; plenty of genuine cards
+		// are old. Only a date that could not have happened counts.
+		check('an old but possible date is not a tell',
+			!/dated/.test(nam.text), nam.text);
+		const future = H.provenance(Object.assign({}, CARD_SANDISK, { date: '01/' + (new Date().getFullYear() + 5) }));
+		check('a date in the future is', future && /has not happened yet/.test(future.text), future && future.text);
+	}
+
+	group('a reading nobody took is not a fact about the card (#567 review)');
+	{
+		// The endpoint omits an identity key the kernel does not export. An
+		// absent field is a fact about that kernel; an empty one is a fact
+		// about the card. Only the second is the card's to answer for.
+		check('no identity readings at all says nothing',
+			H.provenance({ sizeBytes: 32e9 }) === null,
+			JSON.stringify(H.provenance({ sizeBytes: 32e9 })));
+		check('an unpublished product name is not a missing one',
+			H.provenance({ manfid: '0x000003', oemid: '0x5344', sizeBytes: 64e9, date: '05/2021' }) === null,
+			JSON.stringify(H.provenance({ manfid: '0x000003', oemid: '0x5344', sizeBytes: 64e9, date: '05/2021' })));
+		// But a name that WAS read and came back empty still counts.
+		const empty = H.provenance(Object.assign({}, CARD_SANDISK, { model: '' }));
+		check('a name read back empty is still a tell',
+			empty && /no real product name/.test(empty.text), empty && empty.text);
+		check('an unpublished manufacturer id is not an unrecognised one',
+			H.provenance({ model: 'SD64G', sizeBytes: 64e9 }) === null,
+			JSON.stringify(H.provenance({ model: 'SD64G', sizeBytes: 64e9 })));
+	}
+
+	group('a manufacture date is compared as a whole month (#567 review)');
+	{
+		const now = new Date();
+		const ym = (y, m) => ('0' + m).slice(-2) + '/' + y;
+		const withDate = (d) => H.provenance(Object.assign({}, CARD_SANDISK, { date: d }));
+
+		// A year-only comparison let every one of these through.
+		const notADate = withDate('13/2020');
+		check('an impossible month is caught', notADate && /is not a date/.test(notADate.text), notADate && notADate.text);
+
+		const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+		const soon = withDate(ym(nextMonth.getFullYear(), nextMonth.getMonth() + 1));
+		check('next month has not happened yet', soon && /has not happened yet/.test(soon.text), soon && soon.text);
+
+		const nextYear = withDate(ym(now.getFullYear() + 1, 6));
+		check('next year has not happened yet', nextYear && /has not happened yet/.test(nextYear.text), nextYear && nextYear.text);
+
+		// This month is fine, and so is any past month.
+		check('this month is not a tell', withDate(ym(now.getFullYear(), now.getMonth() + 1)) === null);
+		check('a past month is not a tell', withDate('01/2015') === null);
 	}
 
 	done();

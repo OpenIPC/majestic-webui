@@ -226,6 +226,37 @@ function main() {
 			Number(r.seen) < Number(r.total), r.raw);
 	}
 
+	group('the ladder never stamps one sector twice');
+	{
+		// Where the span is a power of two plus one MiB, the near-the-end point
+		// lands exactly on a rung already emitted. That duplicate is not
+		// harmless: the write pass stamps the sector twice, the read pass finds
+		// the later point's stamp where the earlier one's belongs, and that is
+		// precisely the signature probe_span convicts a card on. A healthy card
+		// would be reported as folding one address onto another.
+		const body = [
+			SPAN.slice(0, SPAN.indexOf('# Does this card keep')),
+			'for mb in 3 5 9 17 33 65 8 64 29880; do',
+			'  span=$((mb * 1048576))',
+			'  n=$(span_offsets $span | wc -l)',
+			'  u=$(span_offsets $span | sort -u | wc -l)',
+			'  [ "$n" = "$u" ] || echo "dup at ${mb}MiB: $n points, $u distinct"',
+			'done',
+			'echo done',
+		].join('\n');
+		const out = execFileSync('sh', ['-c', body], { encoding: 'utf8' }).trim();
+		check('no span emits the same offset twice', out === 'done', out);
+
+		// And the point near the end is still there on an ordinary card, or the
+		// ladder would stop covering the top of the device -- which is the one
+		// address a wrapping card is most likely to alias.
+		const tail = execFileSync('sh', ['-c',
+			SPAN.slice(0, SPAN.indexOf('# Does this card keep')) +
+			'\nspan_offsets $((29880 * 1048576)) | tail -1'], { encoding: 'utf8' }).trim();
+		check('the near-the-end point survives on a real card',
+			Number(tail) > 17179869184 && Number(tail) < 29880 * 1048576, tail);
+	}
+
 	done();
 }
 
