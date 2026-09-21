@@ -31,6 +31,8 @@
 	// queue drains — which is what makes it an early warning rather than
 	// another flag nothing can turn off.
 	let queuedTicks = 0;
+	let dropping = false;
+	let sawPrev = false;
 	// Module scope, not per-invocation: the dialog's close listener is
 	// attached once, so a flag living inside openSwap() would go on setting
 	// the first swap's variable for the life of the page. Only one swap can
@@ -638,7 +640,14 @@
 	// were five labels at one edge and five values at the other.
 	function identity(d) {
 		const bits = [];
-		bits.push(esc(d.model || '\u2014') + ' <span class="mj-mono">' + humanBytes(d.sizeBytes) + '</span>');
+		// The maker, where the card's two identity fields agree on one. They
+		// have been read on every poll since this page existed and shown to
+		// nobody (#546). Absent where they disagree or the id is unknown --
+		// silence rather than a guessed brand.
+		const SH = window.MajesticSdHealth;
+		const maker = SH && SH.vendorOf ? SH.vendorOf(d) : null;
+		bits.push(esc((maker ? maker + ' ' : '') + (d.model || '\u2014'))
+			+ ' <span class="mj-mono">' + humanBytes(d.sizeBytes) + '</span>');
 		bits.push('<span class="mj-mono">' + (d.fs
 			? esc(d.fs) + (d.mounted ? ' on ' + esc(d.mountpoint) : '')
 			: '<span class="text-danger">' + (d.health === 'unreadable' ? 'no filesystem readable' : 'unformatted') + '</span>')
@@ -710,6 +719,7 @@
 			probe: d.probe,
 			scan: d.scan,
 			queued: queuedTicks >= 2,
+			dropping: dropping,
 		}) : null;
 		const chk = checkControls(d), scn = scanControls(d);
 		return '<div class="col-12"><div class="card"><div class="card-body">'
@@ -727,7 +737,14 @@
 				+ healthLine('Keeping up with the recorder', v.keeping)
 				+ healthLine('Stores what it is given', v.stores, {
 					btn: chk.btn,
-					below: chk.note + (checkErr ? mjNotice('warn', esc(checkErr)) : ''),
+					// Under THIS line because the check on it is the action the
+					// sentence points at. It carries no mark and no level of its
+					// own: a card can describe itself oddly and be perfectly
+					// genuine, and one in this lab does.
+					below: (v.provenance
+						? '<div class="x-small text-secondary mt-2">' + esc(v.provenance.text) + '</div>'
+						: '')
+						+ chk.note + (checkErr ? mjNotice('warn', esc(checkErr)) : ''),
 				})
 				+ healthLine('Reads back what it holds', v.reads, {
 					btn: scn.btn,
@@ -1336,7 +1353,7 @@
 		// window with a hole in it is not that window -- two queued readings
 		// either side of an unanswered poll would otherwise raise it, or hold
 		// it up, on evidence that was never continuous.
-		if (!s || !s.ok || !s.m) { recorder = null; rateBps = null; queuedTicks = 0; return; }
+		if (!s || !s.ok || !s.m) { recorder = null; rateBps = null; queuedTicks = 0; dropping = false; sawPrev = false; return; }
 		const v = s.m.v;
 		recorder = typeof v.records_state === 'number' ? { v: v } : { absent: true };
 		// Two readings and the interval between them. A counter that went
@@ -1352,6 +1369,24 @@
 		// nothing clears, which is the shape this tree keeps removing.
 		const qn = v.records_queue_fragments;
 		queuedTicks = (typeof qn === 'number' && qn > 0) ? queuedTicks + 1 : 0;
+		// Is the dropped count still MOVING? The total is cumulative for the
+		// life of the daemon, so on its own it says clips were lost once, never
+		// that they are being lost now -- and read as the second it pins the
+		// health block to an alarm nothing can clear (#545). Judged here, over
+		// the same two samples rateBps uses, because this is where the window
+		// exists; the health module is handed the answer rather than the
+		// counter, exactly as it is for the queue above.
+		// `s.prev` is the heartbeat's own last sample and SURVIVES a failed
+		// poll, so on the first success after a gap it is the reading from
+		// before the gap. A counter that moved somewhere in that unobserved
+		// interval would then be read as "clips are being lost right now" and
+		// raise the alarm on two samples that were never consecutive -- the
+		// same hole the queue window above refuses, and this one has to refuse
+		// it too. `sawPrev` is that refusal: it is cleared on every failure and
+		// only set once a sample has actually been observed.
+		const dn = v.records_fragments_dropped_total, pd = pv && pv.records_fragments_dropped_total;
+		dropping = sawPrev && typeof dn === 'number' && typeof pd === 'number' && dn > pd;
+		sawPrev = true;
 		// Only readings that were actually taken. A counter this build does not
 		// publish must not be plotted as a zero -- a flat line at the bottom of
 		// a chart is a claim that nothing is queued, not that nobody asked.

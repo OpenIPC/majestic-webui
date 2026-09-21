@@ -80,6 +80,34 @@ function frag_for(journal, cardInSlot) {
 	}
 }
 
+// The identity emitter, sliced out of the shipped CGI the same way.
+const kvA = src.indexOf('sysf() {');
+const kvB = src.indexOf('# Append one line to the op log');
+if (kvA < 0 || kvB <= kvA) {
+	throw new Error('sysf/sysf_kv were not found in the CGI; this test is testing nothing');
+}
+const kv = src.slice(kvA, kvB);
+if (kv.indexOf('sysf_kv() {') < 0 || kv.indexOf('-e "$SYS/device/$1"') < 0) {
+	throw new Error('the presence guard is gone from sysf_kv; this test is testing nothing');
+}
+
+// Ask sysf_kv for a field, with the attribute present / present-and-empty /
+// not exported at all.
+function kv_for(attr, contents) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdkv-'));
+	try {
+		const sys = path.join(dir, 'sys');
+		fs.mkdirSync(path.join(sys, 'device'), { recursive: true });
+		if (contents !== null) fs.writeFileSync(path.join(sys, 'device', attr), contents);
+		const script = 'SYS=' + JSON.stringify(sys) + '\n' +
+			'json_str() { printf \'%s\' "$1"; }\n' + kv +
+			'\nsysf_kv ' + attr + ' model\necho\n';
+		return execFileSync('sh', ['-c', script], { encoding: 'utf8' }).trim();
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 const CARD_A = '035344534333324780c1a2b3c400e900';
 const CARD_B = '02544d53413034478f1122334400d500';
 const done_for = (cid) =>
@@ -147,6 +175,22 @@ function main() {
 		// rather than two of them reading one card at once.
 		check('a lock from before this still counts as held',
 			held(process.pid, null) === String(process.pid), held(process.pid, null));
+	}
+
+	group('an attribute this kernel does not export is not an empty one');
+	{
+		// The page judges a card partly on what it says about itself. An
+		// attribute that is missing and one that is present and blank are
+		// different facts about different things -- the first is the kernel,
+		// the second is the card -- and `cat` renders both as "". Collapsing
+		// them had the page telling an owner their card reports no product
+		// name when nothing had ever asked it.
+		check('a readable attribute is emitted',
+			kv_for('name', 'SD64G\n') === '"model":"SD64G",', kv_for('name', 'SD64G\n'));
+		check('an attribute that is there and empty is still emitted',
+			kv_for('name', '') === '"model":"",', JSON.stringify(kv_for('name', '')));
+		check('an attribute this kernel does not export is omitted entirely',
+			kv_for('name', null) === '', JSON.stringify(kv_for('name', null)));
 	}
 
 	done();
