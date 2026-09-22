@@ -202,3 +202,131 @@ recording and in every other viewer's picture.
   mattering.
 - Change the save URL or batch shape → update both `onSubmit` and the
   server-side handler that consumes it.
+
+## The Live leaf's tone mode
+
+`image.tuning` is a mode, and the two modes **share no controls**. Automatic
+shows what the camera is doing and the way to take it back; Manual shows the
+presets and the knobs and reports no status. Nothing is on the page in both,
+which is the whole of the rule and the reason `toneManual` and `toneAutomatic`
+are two lists rather than one list of things to grey out.
+
+The alternative — leave the driven knobs on the page, disabled, with the
+camera's number beside them — is half a step, and this page already argues
+against it for the Stock button: *a control which cannot be used is not left on
+the page looking as though it can*. A greyed slider is exactly that. It was
+reported on a camera as "I see both Automatic and Outdoor", which is the same
+complaint one control further along: Automatic and Indoor are not alternatives
+on one axis, so they are not chips in one row. One control says who is driving;
+the others say what look to apply, and they only exist when the answer to the
+first is "you do".
+
+**Manual** is the way back, and it is the *only* way back. An earlier revision
+also put an "Adjust the picture" button under the status sentence, reasoning
+that somebody who came to change the picture should get a thing to press
+rather than a thing to notice. It called `handOver()` — the same function,
+with the same argument — ten pixels below the Manual option that calls it.
+Two controls doing one job on one card is not a second affordance, it is a
+question about what the difference is; the unlit half of a two-state control
+is already the answer.
+
+The order inside `handOver()` is **seed the knobs from what the camera is
+holding, then switch**, so the operator continues from what they were looking at
+rather than jumping to values they never chose. The seeded values stage like any
+other edit — the save bar is what says they are not permanent.
+
+Two things about that ordering are worth being exact on, because the obvious
+reading of it is wrong.
+
+**It is not two network writes.** `setLive` and `setAuto` both dispatch into the
+same 120 ms debounce, so the camera receives *one* `POST /api/v1/image` carrying
+the seeded values *and* `tuning=0`. What preserves the order is the daemon:
+`live_dispatch()` applies the CSC write first and lowers the preview second, in
+that function, in that order. Splitting this into two awaited requests would buy
+nothing the daemon does not already guarantee.
+
+**It seeds three knobs but moves two.** What to seed comes from
+`MajesticToneCheck.KNOBS` rather than from whatever the strip holds, because
+`isp.dehaze` is one of them and is drawn in another card entirely — but dehaze is
+*not* a live key on `/api/v1/image`, since the daemon's dehaze applier re-reads
+the config on purpose. It stages, and reaches the ISP on Save. Meanwhile
+`tonetune_preview(true)` drops the ISP's dehaze to the operator's *saved*
+baseline. So a hand-over on a camera holding a haze correction does move the
+picture in that one respect, with the slider showing the value that puts it back.
+Contrast and saturation do not move.
+
+The reading itself is `lastTone`, kept only while the camera is actually
+measuring — paused, those gauges are as frozen as the span beside them, and
+seeding from one would hand over a picture from before the operator started. It
+is cleared on every mode transition and again as soon as a hand-over consumes it:
+a reading belongs to the Automatic session it was taken in, and Manual → edit →
+Automatic → Manual inside one heartbeat would otherwise let the first session's
+sample write over the edits made in between.
+
+`handOver()` switches to Manual **whether or not it had anything to seed from**.
+No tone gauges on older firmware, a failed poll, or a paused controller all leave
+`lastTone` null; it then falls back to the saved values, which is where Manual
+would have started before any of this existed. Refusing the mode because the page
+could not read the camera would be a control that sometimes does nothing.
+
+### The sentence and the figures under it
+
+Automatic renders a verdict and then the measurement it is a verdict on, and
+**no number appears in both**. `describe()` returns the sentence in plain
+words; `figures()` returns the four labelled readings — range in use, shadows,
+highlights, sensor headroom.
+
+The split is not cosmetic. The sentence used to carry the numbers, and the
+state where that mattered most read *"Holding back — stretching further would
+clip — 2.1% crushed and 0.3% blown"*. It was reported, correctly, as useless:
+it reads as a fault report when the camera has in fact reached the best this
+scene allows, it names its failure mode in jargon, and it quotes two shares
+against budgets the page does not hold and should not learn. It is now
+*"At its limit — as wide as this scene goes without losing detail"*, with the
+two shares under it as Shadows and Highlights. A figure repeated two lines
+below its own label is furniture, and the sentence that has to carry one
+cannot be written in plain words.
+
+The fourth figure is the controller's **headroom**, not a sensor gain.
+`isp_again`/`isp_dgain` are raw vendor numbers — Q10 on HiSilicon, another
+scale on Ingenic, absent on most parts — so a gain printed here would be a
+unit guess that reads as fact on the vendors it is wrong for.
+`image_tune_headroom` is the daemon's own vendor-neutral answer to the same
+question, derived from both gains, and it is what the controller acts on.
+
+`figures()` gates itself on `describe()`'s `measuring` flag, so a pause empties
+the row: PAUSED freezes every gauge at the reading taken before the operator
+started, and four real numbers none of which are true any more, under a
+sentence saying the camera has stopped looking, is the exact failure the state
+exists to prevent. Per gauge the rule is the usual one — absent is left out,
+never zeroed — so a part whose AE will not state its gain shows a row of three.
+
+### Manual is a mode; the live `tuning` key is a press
+
+`POST /api/v1/image?tuning=0` is a **momentary preview**, built for the compare
+button: it expires after sixty seconds so an abandoned press cannot leave a
+camera showing somebody's comparison for ever. Manual is a **mode** and lasts
+until the operator leaves it. The daemon cannot tell the two callers apart, so
+the page — which can — says which one it is by renewing the preview.
+
+Measured on the lab hi3516ev300: switch to Manual, touch nothing, and at +63 s
+the controller took the picture back and began driving it while the page still
+said Manual and the sliders still claimed to own it.
+
+`TONE_KEEPALIVE_MS` is 30 s, **half** the daemon's `TONE_HOLD_TICKS`, so the
+hold is renewed at its midpoint and never runs out. Renewing on the *lapse*
+instead also works — measured, it was back inside one heartbeat — but "works"
+there means the controller got one tick of the picture every minute, which is a
+visible blip on a camera someone is watching. The lapse test stays as the second
+arm and is not redundant: a dropped write, a daemon restart, or a hold shorter
+than this interval all land there. Both arms go quiet the moment the mode is
+saved — the controller stops, publishes no state, and `d.known` goes false.
+`toneKeptAt` resets to 0 with the leaf, so a remount renews on its first
+heartbeat rather than assuming it inherited a fresh hold.
+
+Two traps worth knowing. Every half of this carries an author `display`, which
+beats the UA's `[hidden]` rule whatever the specificity, so each needs its own
+`[hidden] { display: none }` — without them the mode lights up and nothing
+moves. And `renderAutoStatus` sets `row.hidden` on every heartbeat, so it gates
+on `d.on` as well as `d.known`; otherwise the next poll puts the status back two
+seconds after the mode took it away.

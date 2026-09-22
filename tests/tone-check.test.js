@@ -3,9 +3,9 @@
 // Here for the reason ircut-check's table is: every branch renders a
 // confident sentence, so a wrong branch reads exactly like a right one, and
 // reaching most of them on a real camera needs weather. "Nothing to do — the
-// picture already spans 198 of 255" is what a reader sees when the controller
-// has in fact stood down for low light, and nothing else on the page
-// contradicts it.
+// picture already uses the range it has" is what a reader sees when the
+// controller has in fact stood down for low light, and nothing else on the
+// page contradicts it.
 //
 // The gauge values below are measured ones rather than invented: a scene
 // already using its range, the same scene flattened, and one carrying both
@@ -80,7 +80,9 @@ group('tone-check: running and idle');
 	}, STOCK, true);
 	check('idle is on', d.on === true);
 	check('idle reads as nothing to do', d.head === 'Nothing to do');
-	check('and quotes the span it measured', d.tail.indexOf('195') >= 0);
+	// The span is a FIGURE, not a clause: figures() prints it under this
+	// sentence with a label, and a number in both places is furniture.
+	check('and leaves the span to the figure row', d.tail.indexOf('195') < 0);
 	check('idle is a quiet tone', d.tone === 'ok');
 	check('no knob is held away from the operator', d.moved.length === 0);
 }
@@ -99,7 +101,7 @@ group('tone-check: working');
 		'image.luminance': 42, 'image.saturation': 50,
 	});
 	const d = tc.describe(s, saved);
-	check('working says it is lifting', d.head === 'Lifting the picture');
+	check('working says it is widening', d.head === 'Widening the picture');
 	check('working is an active tone', d.tone === 'work');
 	// The two that actually differ from the operator's saved values, and not
 	// the two that match them — a panel that lists all four teaches the
@@ -122,25 +124,31 @@ group('tone-check: working');
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
 	}, STOCK, true);
 	check('working with nothing moved still has a tail', d.tail.length > 0);
-	check('and falls back to the span', d.tail.indexOf('71') >= 0);
+	check('and does not fall back to quoting the span', d.tail.indexOf('71') < 0);
 }
 
 group('tone-check: the two standing-down states');
 
 // Deep shade and full sun in one frame: span 210, and 4.07% of the picture
-// already crushed. The controller stops rather than trade shadows for range,
-// and this is the state where the reader most needs telling WHY nothing is
-// moving.
+// already crushed. The controller stops rather than trade shadows for range.
+//
+// The reader needs to know that nothing more is coming, and NOT to be handed
+// "stretching further would clip — 4.1% crushed and 0.6% blown", which reads
+// as a fault report, names its failure mode in jargon, and quotes two shares
+// against budgets this page does not hold. The picture is as good as this
+// scene allows, and the two shares are figures with labels.
 {
 	const d = tc.describe({
 		state: 3, headroom: 100, span: 210, clipLo: 40670, clipHi: 6291,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
 	}, STOCK, true);
-	check('holding says it is held', d.head === 'Holding back');
-	check('holding warns', d.tone === 'warn');
-	check('and prints the crushed share as a percentage',
-		d.tail.indexOf('4.1% crushed') >= 0);
-	check('and the blown share too', d.tail.indexOf('0.6% blown') >= 0);
+	check('holding says it has reached the limit', d.head === 'At its limit');
+	check('holding is not dressed as a fault', d.tone === 'ok');
+	check('and states it in plain words',
+		d.tail.indexOf('detail') >= 0);
+	check('and quotes neither clipping share',
+		d.tail.indexOf('4.1') < 0 && d.tail.indexOf('0.6') < 0 &&
+		d.tail.indexOf('%') < 0);
 }
 {
 	const d = tc.describe({
@@ -148,8 +156,10 @@ group('tone-check: the two standing-down states');
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
 	}, STOCK, true);
 	check('low light says so', d.head === 'Too dark to help');
-	check('low light warns', d.tone === 'warn');
-	check('and quotes the headroom left', d.tail.indexOf('20%') >= 0);
+	check('low light warns -- it is the state where it cannot help',
+		d.tone === 'warn');
+	check('and says why in words, leaving the number to the figure',
+		d.tail.indexOf('noise') >= 0 && d.tail.indexOf('20%') < 0);
 }
 {
 	const d = tc.describe({
@@ -202,7 +212,7 @@ group('tone-check: a missing number never becomes a wrong one');
 		state: 1, headroom: null, span: null, clipLo: null, clipHi: null,
 		dehaze: null, contrast: null, luminance: null, saturation: null,
 	}, STOCK, true);
-	check('idle without a span omits the number', d.tail.indexOf('0') < 0);
+	check('idle with nothing measured still has a sentence', d.tail.length > 0);
 	check('and does not claim a knob moved', d.moved.length === 0);
 }
 {
@@ -220,6 +230,63 @@ group('tone-check: a missing number never becomes a wrong one');
 	const d = tc.describe({ state: 9, span: 100 }, STOCK, true);
 	check('an unknown verdict still renders', d.on === true && d.head === 'Tuning');
 	check('and says which one it did not know', d.tail.indexOf('9') >= 0);
+}
+
+group('tone-check: the figures under the sentence');
+
+// The four a reader can act on, and the rule that governs all of them: a
+// figure is printed because the camera published it, never because the row
+// wants four cells.
+{
+	const s = {
+		state: 3, headroom: 100, span: 172, clipLo: 20851, clipHi: 3495,
+		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
+	};
+	const f = tc.figures(s, true);
+	check('four gauges, four figures', f.length === 4);
+	check('in the order the picture is read in',
+		f.map(x => x.key).join(',') === 'span,clipLo,clipHi,headroom');
+	check('the range carries its scale', f[0].value === '172 of 255');
+	check('the clipping shares are percentages',
+		f[1].value === '2.1%' && f[2].value === '0.3%');
+	check('headroom is a percentage of the range, not a gain',
+		f[3].value === '100%' && f[3].label.indexOf('gain') < 0);
+	check('every figure is labelled in words, not gauge names',
+		f.every(x => x.label.indexOf('_') < 0 && /^[A-Z]/.test(x.label)));
+}
+{
+	// A part whose AE will not state its gain publishes no headroom, ever.
+	// Three figures is the honest row; a fourth reading 0% would say the
+	// sensor is out of range in broad daylight.
+	const f = tc.figures({
+		state: 1, headroom: null, span: 195, clipLo: 0, clipHi: 0,
+	}, true);
+	check('an absent gauge is left out, not zeroed', f.length === 3);
+	check('and the ones present are unaffected',
+		f.map(x => x.key).join(',') === 'span,clipLo,clipHi');
+}
+{
+	// Zero IS a reading: no pixel is crushed. It must survive the same test
+	// that drops an absent gauge, which is why figures() tests for null
+	// rather than for truth.
+	const f = tc.figures({ state: 1, span: 0, clipLo: 0, clipHi: 0,
+		headroom: 0 }, true);
+	check('a measured zero is printed, not dropped', f.length === 4);
+	check('a black picture reads as a zero range', f[0].value === '0 of 255');
+	check('and no headroom reads as none', f[3].value === '0%');
+}
+{
+	// PAUSED: every gauge here is frozen at the reading taken before the
+	// operator started adjusting. Four real numbers, none of them true any
+	// more, under a sentence that says the camera has stopped looking.
+	const s = { state: 5, headroom: 100, span: 90, clipLo: 0, clipHi: 0 };
+	const d = tc.describe(s, STOCK, true);
+	check('paused is not measuring', d.measuring === false);
+	check('and publishes no figures at all',
+		tc.figures(s, d.measuring).length === 0);
+}
+{
+	check('no sample, no figures', tc.figures(null, true).length === 0);
 }
 
 group('tone-check: the span band drawn over the histogram');
