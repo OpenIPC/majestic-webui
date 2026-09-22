@@ -2008,6 +2008,35 @@
 			// under the knobs of the operator who had just taken them. It is
 			// written on every heartbeat, so it has to re-derive this rather
 			// than trust what applyToneMode left behind.
+			// Manual is a MODE; the live `tuning` key is a momentary
+			// PREVIEW built for a held button, and it expires so an abandoned
+			// press cannot leave a camera showing somebody's comparison for
+			// ever. Those are different lifetimes and the daemon cannot tell
+			// the two callers apart, so the page -- which can -- says which
+			// one it is by keeping the preview alive. Measured on the lab
+			// hi3516ev300: switch to Manual, touch nothing, and at +63 s the
+			// controller took the picture back and began driving it while the
+			// page still said Manual and the sliders still claimed to own it.
+			//
+			// Refreshed BEFORE the expiry, not after it. Re-asserting on the
+			// lapse works -- measured, it was back inside one heartbeat -- but
+			// "works" there means the controller got one tick of the picture
+			// first, every minute, which is a visible blip on a camera the
+			// operator is watching. TONE_KEEPALIVE_MS is half the daemon's
+			// hold, so the hold is renewed at its midpoint and never runs out.
+			//
+			// The lapse test stays as the second arm, and it is not
+			// redundant: a dropped write, a daemon restart, or a hold shorter
+			// than this interval all land there, and it costs one comparison
+			// against a number the row is reading anyway. Both arms go quiet
+			// the moment the mode is saved -- the controller stops, publishes
+			// no state, and `d.known` goes false.
+			if (!auto && d.known &&
+				(s.tone.state !== window.MajesticToneCheck.STATE.PAUSED ||
+					Date.now() - toneKeptAt > TONE_KEEPALIVE_MS)) {
+				toneKeptAt = Date.now();
+				pushLive();
+			}
 			row.hidden = !(auto && d.known);
 			// Hidden with the sentence, and empty whenever the sentence is
 			// not a claim about the picture right now: figures() enforces the
@@ -2044,6 +2073,13 @@
 	// reader learns to stop looking at something.
 	// The camera's last live reading, which is what a hand-over seeds from.
 	let lastTone = null;
+	// When the Manual preview was last renewed. Half of the daemon's sixty
+	// second hold (TONE_HOLD_TICKS in src/tonetune.c), which is the longest
+	// interval that cannot let it lapse -- and the page has no way to read
+	// that number, so the second arm of the test above covers a daemon whose
+	// hold is shorter than this.
+	const TONE_KEEPALIVE_MS = 30000;
+	let toneKeptAt = 0;
 	// Everything else automatic tuning takes over while it is on: the Scene
 	// chips, the Stock button, and the note that says where the switch is.
 	// What belongs to each mode, collected as the leaf renders and shown or
@@ -2226,6 +2262,10 @@
 		// painter writing into marks on a detached track for the rest of the
 		// page's life, and the new ones would never be found.
 		lastTone = null;
+		// Zero rather than now: a leaf remounted into Manual must renew the
+		// preview on its first heartbeat, not thirty seconds into a hold it
+		// did not start and whose remaining life it cannot know.
+		toneKeptAt = 0;
 		toneManual = [];
 		toneAutomatic = [];
 		toneModeAuto = [];

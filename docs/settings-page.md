@@ -276,6 +276,29 @@ sentence saying the camera has stopped looking, is the exact failure the state
 exists to prevent. Per gauge the rule is the usual one — absent is left out,
 never zeroed — so a part whose AE will not state its gain shows a row of three.
 
+### Manual is a mode; the live `tuning` key is a press
+
+`POST /api/v1/image?tuning=0` is a **momentary preview**, built for the compare
+button: it expires after sixty seconds so an abandoned press cannot leave a
+camera showing somebody's comparison for ever. Manual is a **mode** and lasts
+until the operator leaves it. The daemon cannot tell the two callers apart, so
+the page — which can — says which one it is by renewing the preview.
+
+Measured on the lab hi3516ev300: switch to Manual, touch nothing, and at +63 s
+the controller took the picture back and began driving it while the page still
+said Manual and the sliders still claimed to own it.
+
+`TONE_KEEPALIVE_MS` is 30 s, **half** the daemon's `TONE_HOLD_TICKS`, so the
+hold is renewed at its midpoint and never runs out. Renewing on the *lapse*
+instead also works — measured, it was back inside one heartbeat — but "works"
+there means the controller got one tick of the picture every minute, which is a
+visible blip on a camera someone is watching. The lapse test stays as the second
+arm and is not redundant: a dropped write, a daemon restart, or a hold shorter
+than this interval all land there. Both arms go quiet the moment the mode is
+saved — the controller stops, publishes no state, and `d.known` goes false.
+`toneKeptAt` resets to 0 with the leaf, so a remount renews on its first
+heartbeat rather than assuming it inherited a fresh hold.
+
 Two traps worth knowing. Every half of this carries an author `display`, which
 beats the UA's `[hidden]` rule whatever the specificity, so each needs its own
 `[hidden] { display: none }` — without them the mode lights up and nothing
