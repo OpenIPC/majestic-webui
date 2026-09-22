@@ -225,14 +225,26 @@
 		// A build that does not publish it gets no line at all rather than an
 		// empty one: this is an extra fact, and its absence says nothing about
 		// the card that the reader needs to hear.
-		if (n === null) return null;
+		//
+		// num() answers with whatever number the scrape parsed, and a counter
+		// that arrives as Infinity, NaN or a negative is not a reading. The
+		// guard has to be here rather than left to bytes(), which returns ''
+		// for exactly those -- and '' interpolated into the sentence below
+		// reads as "This camera has written  to this card", a confident claim
+		// with the number missing out of it.
+		if (n === null || !isFinite(n) || n < 0) return null;
 
 		var since = num(v, 'records_card_start_time_seconds');
 		// 0 is the camera saying it has never had a clock it could believe --
 		// most of these boards have no battery-backed RTC. The total is still
 		// real; only the date it started is unknown, and saying "since 1 January
-		// 1970" would be the module inventing one.
-		var when = (since && since > 0) ? new Date(since * 1000) : null;
+		// 1970" would be the module inventing one. Anything that is not a
+		// finite second count is treated the same way: `new Date` of it renders
+		// the words "Invalid Date" into the sentence rather than failing.
+		var when = (since !== null && isFinite(since) && since > 0)
+			? new Date(since * 1000) : null;
+		// And a date the browser could not make sense of is no date.
+		if (when && isNaN(when.getTime())) when = null;
 		if (n === 0) {
 			return {
 				kind: 'none', level: 'none',

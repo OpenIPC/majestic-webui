@@ -436,6 +436,26 @@ function main() {
 		check('but claims no date for it',
 			!/since/.test(noclock.text) && !/1970/.test(noclock.text), noclock.text);
 
+		// A daemon answering nonsense must produce no line rather than a
+		// confident sentence with the number missing out of the middle of it.
+		[Infinity, -Infinity, NaN, -1].forEach(function (bad) {
+			var r = w({ records_card_bytes_written_total: bad, records_card_start_time_seconds: 1762041600 });
+			check('a total of ' + bad + ' is not a reading', r === null,
+				r && r.text);
+		});
+
+		// ...and a start time that is not a second count must not reach
+		// `new Date`, which renders the words "Invalid Date" into the sentence
+		// rather than failing.
+		[Infinity, NaN, -5].forEach(function (bad) {
+			var r = w({ records_card_bytes_written_total: 41802354, records_card_start_time_seconds: bad });
+			check('a start time of ' + bad + ' claims no date',
+				r && !/since/.test(r.text) && !/Invalid/.test(r.text),
+				r && r.text);
+			check('but the total still gets said', r && /has written/.test(r.text),
+				r && r.text);
+		});
+
 		// It rides on verdict() but must not colour it.
 		const v = H.verdict({
 			recorder: rec({
