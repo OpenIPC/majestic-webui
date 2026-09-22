@@ -3018,10 +3018,22 @@ button.mj-osd-chip,
 
 /* Classified detections get their own colour, so a face is not read as motion
    and the reverse. Everything a detector has not classified stays the warning
-   hue above — the honest default, since none of them classifies today. */
+   hue above.
+
+   Giving each classifier a hue is not decoration. Motion fires on anything that
+   changed — headlights, rain, a branch — while these two say what the thing is,
+   and a viewer who cannot tell the two apart on the glass has no way to see
+   that the camera did more than notice a difference between frames. Drawn in
+   the same orange, a person box is invisible as a person box. */
 .mj-an-box[data-src="face"] {
 	border-color: rgba(var(--bs-info-rgb), 0.95);
 	background: rgba(var(--bs-info-rgb), 0.10);
+}
+
+.mj-an-box[data-src="person"] {
+	border-color: rgba(var(--bs-success-rgb), 0.95);
+	background: rgba(var(--bs-success-rgb), 0.10);
+	border-style: solid;
 }
 
 /* ── Motion detection: regions on the picture ────────────────────────────
