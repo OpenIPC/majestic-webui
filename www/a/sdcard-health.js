@@ -24,6 +24,10 @@
 
 	function bytes(n) {
 		if (typeof n !== 'number' || !isFinite(n) || n < 0) return '';
+		// TB, because this is also what formats the durable write total, and a
+		// camera at 40 GB a day passes a terabyte in under a month. Without it
+		// the card health line reads "14600 GB", which nobody parses.
+		if (n >= 1099511627776) return (n / 1099511627776).toFixed(n >= 10995116277760 ? 0 : 1) + ' TB';
 		if (n >= 1073741824) return (n / 1073741824).toFixed(n >= 10737418240 ? 0 : 1) + ' GB';
 		if (n >= 1048576) return (n / 1048576).toFixed(0) + ' MB';
 		if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
@@ -194,6 +198,54 @@
 			};
 		}
 		return { kind: 'ok', level: 'ok', text: 'The card is keeping up with the recorder.' };
+	}
+
+	// ------------------------------------------------------------ written ---
+	//
+	// How much this camera has written to THIS card, from
+	// records_card_bytes_written_total -- a total majestic keeps in a file on
+	// the card itself, so it survives a restart and travels with the card.
+	//
+	// NOT a health line, and deliberately kept out of head() for the same
+	// reason provenance is: it is a fact about how hard the card has been
+	// worked, not a finding about it. There is no endurance figure in any
+	// register on an SD card, so there is nothing here to turn into a
+	// percentage or a remaining life, and this module must never invent one.
+	//
+	// The wording carries the two limits the number has, because a reader who
+	// does not know them will draw the wrong conclusion from it:
+	//   - "this camera has written" -- a card that arrives with a year of
+	//     somebody else's footage on it starts from zero here
+	//   - the total is host bytes, which is a LOWER bound on the wear the
+	//     card's flash actually took
+	function written(recorder) {
+		if (!recorder || recorder.absent) return null;
+		var v = recorder.v;
+		var n = num(v, 'records_card_bytes_written_total');
+		// A build that does not publish it gets no line at all rather than an
+		// empty one: this is an extra fact, and its absence says nothing about
+		// the card that the reader needs to hear.
+		if (n === null) return null;
+
+		var since = num(v, 'records_card_start_time_seconds');
+		// 0 is the camera saying it has never had a clock it could believe --
+		// most of these boards have no battery-backed RTC. The total is still
+		// real; only the date it started is unknown, and saying "since 1 January
+		// 1970" would be the module inventing one.
+		var when = (since && since > 0) ? new Date(since * 1000) : null;
+		if (n === 0) {
+			return {
+				kind: 'none', level: 'none',
+				text: 'This camera has not written anything to this card yet.',
+			};
+		}
+		return {
+			kind: 'known', level: 'none',
+			text: 'This camera has written ' + bytes(n) + ' to this card' +
+				(when ? ' since ' + when.toLocaleDateString(undefined, {
+					year: 'numeric', month: 'long', day: 'numeric',
+				}) : '') + '.',
+		};
 	}
 
 	// ------------------------------------------------------------- stores ---
@@ -477,16 +529,21 @@
 		var r = reads(s.scan);
 		// head() is handed the three LINES and nothing else. Provenance is
 		// deliberately not among them: it is a prompt to run a check, not a
-		// finding, and the card it describes may be perfectly genuine.
+		// finding, and the card it describes may be perfectly genuine. Neither
+		// is `written`, for the same reason -- a card that has taken 40 TB is
+		// not thereby a card with a problem, and there is no endurance figure
+		// anywhere on an SD card that could make it one.
 		return {
 			head: head(k, st, r), keeping: k, stores: st, reads: r,
+			written: written(s.recorder),
 			provenance: provenance(s.card), vendor: vendorOf(s.card),
 		};
 	}
 
 	var api = {
 		verdict: verdict, keeping: keeping, stores: stores, reads: reads,
-		provenance: provenance, vendorOf: vendorOf, bytes: bytes,
+		written: written, provenance: provenance, vendorOf: vendorOf,
+		bytes: bytes,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticSdHealth = api;
