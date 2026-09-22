@@ -1850,30 +1850,20 @@
 		// Manual's own row, so the mode can take it off the page whole.
 		toneManual.push(row);
 
-		// What Automatic is doing right now, where the presets are when the
-		// operator is the one driving: the same place either way, because it
-		// answers the same question — what is this picture, and who chose it.
-		if (toneModeRow) {
-			renderAutoStatus(container);
-
-			// The way back. With the camera driving there is nothing else on
-			// this card to touch, and somebody who came to change the picture
-			// should not have to work out that the mode control is what they
-			// want. It is the same move the Manual option makes -- a thing to
-			// press rather than a thing to notice.
-			const act = el('div', 'mj-tone-act');
-			const take = el('button', 'mj-tone-take');
-			take.type = 'button';
-			take.innerHTML = ICON.compare + '<span>Adjust the picture</span>';
-			take.addEventListener('click', () => handOver(autoField));
-			act.appendChild(take);
-			const hint = el('span', 'mj-live-note');
-			hint.textContent = 'Hands you the picture and switches to Manual, ' +
-				'starting from what the camera is holding now.';
-			act.appendChild(hint);
-			container.appendChild(act);
-			toneAutomatic.push(act);
-		}
+		// What Automatic is doing right now, and what it measured, where the
+		// presets are when the operator is the one driving: the same place
+		// either way, because it answers the same question — what is this
+		// picture, and who chose it.
+		//
+		// And nothing else. An earlier revision put an "Adjust the picture"
+		// button under the status, reasoning that somebody who came to change
+		// the picture should get a thing to press rather than a thing to
+		// notice. It called handOver() -- the same function, with the same
+		// argument -- ten pixels below the Manual option that calls it. Two
+		// controls doing one job on one card is not a second affordance, it
+		// is a question about what the difference is; the unlit half of a
+		// two-state control is already the answer.
+		if (toneModeRow) renderAutoStatus(container);
 
 		const status = el('div', 'mj-scene-status');
 		status.innerHTML = '<span class="mj-pip"></span><span></span>';
@@ -1964,6 +1954,23 @@
 		const pip = row.querySelector('.mj-pip');
 		const text = row.querySelector('span:last-child');
 
+		// The measurement the sentence above is a verdict on. Rebuilt rather
+		// than updated in place because the SET of figures changes with the
+		// camera -- a part whose AE will not state its gain publishes no
+		// headroom, ever, and a cell left standing with a stale number in it
+		// is the one outcome worth engineering against here.
+		const figs = el('div', 'mj-tone-figs');
+		figs.hidden = true;
+		toneAutomatic.push(figs);
+		container.appendChild(figs);
+		const paintFigures = (list) => {
+			figs.hidden = !list.length;
+			figs.innerHTML = list.map(f =>
+				'<div class="mj-tone-fig"><span class="mj-tone-fig-k">' +
+				esc(f.label) + '</span><span class="mj-tone-fig-v">' +
+				esc(f.value) + '</span></div>').join('');
+		};
+
 		// The operator's SAVED value for a dotted key, which is the baseline
 		// the controller works from — not what the control currently reads. A
 		// half-dragged slider is not a baseline, and comparing against one
@@ -1982,6 +1989,7 @@
 			// only one where the page does not know.
 			if (!s || !s.ok || !s.tone) {
 				row.hidden = true;
+				paintFigures([]);
 				lastTone = null;
 				return;
 			}
@@ -1989,14 +1997,25 @@
 			// gauges'. A build that predates these metrics can have it
 			// enabled and publish none of them, and "Off" printed beside a
 			// lit Automatic chip is a confident lie.
-			const d = window.MajesticToneCheck.describe(s.tone, saved,
-				toneAutoOn());
-			// `d.on` as well as `d.known`: this row belongs to Automatic, and
-			// the mode already took it off the page in Manual. Without the
-			// second half the next heartbeat puts it back two seconds later,
-			// which is a line about a controller that is not running sitting
-			// under the knobs of the operator who turned it off.
-			row.hidden = !(d.known && d.on);
+			const auto = toneAutoOn();
+			const d = window.MajesticToneCheck.describe(s.tone, saved, auto);
+			// The MODE decides whether this is on the page, and the mode is
+			// the switch -- not `d.on`, which is the gauges' answer and is
+			// true in every state the daemon publishes. Handing over to
+			// Manual pushes the knobs, which puts the controller in PAUSED,
+			// which is a state: so the row came back two seconds later
+			// reading "Paused -- standing aside while you adjust the picture"
+			// under the knobs of the operator who had just taken them. It is
+			// written on every heartbeat, so it has to re-derive this rather
+			// than trust what applyToneMode left behind.
+			row.hidden = !(auto && d.known);
+			// Hidden with the sentence, and empty whenever the sentence is
+			// not a claim about the picture right now: figures() enforces the
+			// second half itself, so a pause empties the row rather than
+			// freezing four numbers under a sentence that says it has
+			// stopped looking.
+			paintFigures(auto && d.known
+				? window.MajesticToneCheck.figures(s.tone, d.measuring) : []);
 			if (!d.known) { lastTone = null; return; }
 			pip.className = 'mj-pip mj-pip-' + d.tone;
 			text.innerHTML = '<b>' + esc(d.head) + '</b> \u2014 ' + esc(d.tail);

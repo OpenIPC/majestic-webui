@@ -2547,7 +2547,7 @@ button.mj-osd-chip,
 .mj-live-strip[hidden],
 .mj-scene-row[hidden],
 .mj-scene-status[hidden],
-.mj-tone-act[hidden] {
+.mj-tone-figs[hidden] {
 	display: none;
 }
 
@@ -2581,37 +2581,42 @@ button.mj-osd-chip,
 	font-weight: 600;
 }
 
-/* The way back out of Automatic. With the camera driving there is nothing
-   else on this card to touch. */
-.mj-tone-act {
+/* The measurement under the verdict. `auto-fit` rather than a fixed four:
+   the set of figures is whatever the camera publishes, and a part that never
+   states its gain publishes three -- which should read as a row of three, not
+   as four with a hole where the fourth would be. */
+.mj-tone-figs {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+	gap: 0.5rem 0.75rem;
+	margin-top: 0.75rem;
+	padding-top: 0.7rem;
+	border-top: 1px solid var(--bs-border-color);
+}
+
+.mj-tone-fig {
 	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 0.4rem 0.8rem;
-	margin-top: 0.8rem;
-}
-
-.mj-tone-take {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.4rem;
-	padding: 0.45rem 0.9rem;
-	border: 0;
-	border-radius: var(--bs-border-radius);
-	background: var(--bs-primary);
-	color: #fff;
-	font-family: inherit;
-	font-size: 0.8125rem;
-	font-weight: 600;
-}
-
-.mj-tone-take:hover {
-	filter: brightness(1.12);
-}
-
-.mj-tone-act .mj-live-note {
-	flex: 1 1 14rem;
+	flex-direction: column;
+	gap: 0.15rem;
 	min-width: 0;
+}
+
+.mj-tone-fig-k {
+	color: var(--bs-tertiary-color);
+	font-size: 0.6875rem;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+/* Pushed to the bottom of its grid cell so the figures sit on one line
+   whatever their labels do. The column this lands in is narrow enough that
+   "Sensor headroom" wraps to two lines and its neighbour does not, and
+   without this the row reads as four figures at three different heights. */
+.mj-tone-fig-v {
+	margin-top: auto;
+	font-size: 0.9375rem;
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
 }
 
 .mj-scene-row {

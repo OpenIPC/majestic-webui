@@ -82,8 +82,11 @@
 	// four knobs and should not read as two different kinds of statement.
 	//
 	// `tone` is for the pip beside it: 'off' grey, 'ok' quiet, 'work' active,
-	// 'warn' for the two standing-down states, which are the ones where the
-	// camera is deliberately NOT doing what the operator switched it on for.
+	// 'warn' where the camera cannot do what the operator switched it on for.
+	// HOLDING is deliberately NOT one of those: it is the controller having
+	// found this scene's limit and stopped at it, which is the feature
+	// working, not failing. Only low light and a sampler that never answers
+	// are states where the answer is "it cannot help you here".
 	// `autoOn` is what the settings page knows about the image.tuning switch:
 	// true, false, or null where it cannot say. It is asked for because an
 	// absent state gauge is NOT evidence that tuning is off — a camera whose
@@ -113,12 +116,6 @@
 		}
 
 		const mv = moved(s, saved);
-		// Read once here rather than in four branches: every sentence below
-		// that mentions a number has to survive that number being absent.
-		const span = s.span, headroom = s.headroom;
-		const clip = [];
-		if (s.clipLo != null && s.clipLo > 0) clip.push(pct(s.clipLo) + ' crushed');
-		if (s.clipHi != null && s.clipHi > 0) clip.push(pct(s.clipHi) + ' blown');
 
 		switch (s.state) {
 		case PAUSED:
@@ -139,29 +136,33 @@
 				tail: 'nothing measurable from the picture yet', moved: mv };
 		case IDLE:
 			return { on: true, known: true, measuring: true, tone: 'ok', head: 'Nothing to do',
-				tail: span == null
-					? 'the picture already fills the range'
-					: 'the picture already spans ' + span + ' of 255',
+				tail: 'the picture already uses the range it has',
 				moved: mv };
 		case WORKING:
-			return { on: true, known: true, measuring: true, tone: 'work', head: 'Lifting the picture',
+			// The moved knobs, when there are any, because they are the one
+			// thing here the figures below do NOT say: the figures describe
+			// the picture, this describes what is being done to it.
+			return { on: true, known: true, measuring: true, tone: 'work', head: 'Widening the picture',
 				tail: mv.length
 					? mv.map(m => m.label + ' ' + m.live).join(', ')
-					: (span == null ? 'reaching for more range'
-						: 'span ' + span + ', reaching for more'),
+					: 'reaching for more range',
 				moved: mv };
 		case HOLDING:
-			return { on: true, known: true, measuring: true, tone: 'warn', head: 'Holding back',
-				tail: clip.length
-					? 'stretching further would clip — ' + clip.join(' and ')
-					: 'stretching further would start clipping',
+			// Reached its limit, which is a GOOD outcome dressed as a bad one
+			// by the old wording: "Holding back -- stretching further would
+			// clip -- 2.1% crushed and 0.3% blown" reads as a fault report,
+			// names a failure mode in jargon, and quotes two numbers that
+			// mean nothing without the budgets they are measured against,
+			// which this page does not have and should not learn. The picture
+			// is as good as this scene allows; the two shares are on the
+			// Shadows and Highlights figures, labelled, for anyone who wants
+			// to see which end ran out first.
+			return { on: true, known: true, measuring: true, tone: 'ok', head: 'At its limit',
+				tail: 'as wide as this scene goes without losing detail',
 				moved: mv };
 		case LOWLIGHT:
 			return { on: true, known: true, measuring: true, tone: 'warn', head: 'Too dark to help',
-				tail: headroom == null
-					? 'the sensor gain is too high to stretch without amplifying noise'
-					: 'the sensor gain leaves ' + headroom +
-						'% of the range, so it has given the picture back',
+				tail: 'the sensor is amplifying, so widening would only add noise',
 				moved: mv };
 		}
 		// A verdict this build does not know. Not silence: the camera is
@@ -171,6 +172,48 @@
 			head: 'Tuning',
 			tail: 'the camera reports a state this page does not know (' +
 				s.state + ')', moved: mv };
+	}
+
+	// The measurement behind the sentence, as figures a person can read.
+	//
+	// The sentence is the verdict and these are the evidence under it, which
+	// is why NO number appears in both: a figure repeated two lines below its
+	// own label is furniture, and the sentence that has to carry it cannot
+	// then be written in plain words. This is also where the two clipping
+	// shares belong -- labelled Shadows and Highlights, beside the range they
+	// are the price of -- rather than inside a sentence as "4.1% crushed".
+	//
+	// `measuring` is the describe() result's own flag and gates the whole
+	// row, because PAUSED freezes every gauge here at its last value: four
+	// numbers under a "standing aside" sentence, each real and none of them
+	// true any more, is the exact failure this subsystem already has a state
+	// for. Absent, not zero, per gauge for the same reason the sample keeps
+	// them null -- a span of 0 is a black picture and a missing span is no
+	// measurement.
+	//
+	// The fourth figure is the controller's HEADROOM, not a sensor gain.
+	// isp_again / isp_dgain are raw vendor numbers -- Q10 on HiSilicon,
+	// something else on Ingenic, and absent on most parts -- so a gain
+	// printed here would be a unit guess that reads as fact on the vendors it
+	// is wrong for. image_tune_headroom is the daemon's own vendor-neutral
+	// answer to the same question, already derived from both gains, and it is
+	// what the controller actually acts on.
+	function figures(s, measuring) {
+		if (!s || !measuring) return [];
+		const out = [];
+		if (s.span != null)
+			out.push({ key: 'span', label: 'Range in use',
+				value: s.span + ' of 255' });
+		if (s.clipLo != null)
+			out.push({ key: 'clipLo', label: 'Shadows',
+				value: pct(s.clipLo) });
+		if (s.clipHi != null)
+			out.push({ key: 'clipHi', label: 'Highlights',
+				value: pct(s.clipHi) });
+		if (s.headroom != null)
+			out.push({ key: 'headroom', label: 'Sensor headroom',
+				value: s.headroom + '%' });
+		return out;
 	}
 
 	// Where the controller's measurement sits on the 0..255 luma axis the
@@ -194,6 +237,7 @@
 
 	const api = {
 		describe: describe,
+		figures: figures,
 		moved: moved,
 		spanBand: spanBand,
 		KNOBS: KNOBS,

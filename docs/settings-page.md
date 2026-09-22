@@ -221,7 +221,16 @@ on one axis, so they are not chips in one row. One control says who is driving;
 the others say what look to apply, and they only exist when the answer to the
 first is "you do".
 
-**Adjust the picture** is the way back, and the order inside `handOver()` is
+**Manual** is the way back, and it is the *only* way back. An earlier revision
+also put an "Adjust the picture" button under the status sentence, reasoning
+that somebody who came to change the picture should get a thing to press
+rather than a thing to notice. It called `handOver()` — the same function,
+with the same argument — ten pixels below the Manual option that calls it.
+Two controls doing one job on one card is not a second affordance, it is a
+question about what the difference is; the unlit half of a two-state control
+is already the answer.
+
+The order inside `handOver()` is
 load-bearing: seed the knobs from what the camera is holding, *then* switch.
 That way the ISP already carries those numbers when the controller lets go and
 the picture does not move as the operator takes it. Switching first and seeding
@@ -234,6 +243,38 @@ entirely. The reading itself is `lastTone`, kept only while the camera is
 actually measuring — paused, those gauges are as frozen as the span beside
 them, and seeding from one would hand over a picture from before the operator
 started.
+
+### The sentence and the figures under it
+
+Automatic renders a verdict and then the measurement it is a verdict on, and
+**no number appears in both**. `describe()` returns the sentence in plain
+words; `figures()` returns the four labelled readings — range in use, shadows,
+highlights, sensor headroom.
+
+The split is not cosmetic. The sentence used to carry the numbers, and the
+state where that mattered most read *"Holding back — stretching further would
+clip — 2.1% crushed and 0.3% blown"*. It was reported, correctly, as useless:
+it reads as a fault report when the camera has in fact reached the best this
+scene allows, it names its failure mode in jargon, and it quotes two shares
+against budgets the page does not hold and should not learn. It is now
+*"At its limit — as wide as this scene goes without losing detail"*, with the
+two shares under it as Shadows and Highlights. A figure repeated two lines
+below its own label is furniture, and the sentence that has to carry one
+cannot be written in plain words.
+
+The fourth figure is the controller's **headroom**, not a sensor gain.
+`isp_again`/`isp_dgain` are raw vendor numbers — Q10 on HiSilicon, another
+scale on Ingenic, absent on most parts — so a gain printed here would be a
+unit guess that reads as fact on the vendors it is wrong for.
+`image_tune_headroom` is the daemon's own vendor-neutral answer to the same
+question, derived from both gains, and it is what the controller acts on.
+
+`figures()` gates itself on `describe()`'s `measuring` flag, so a pause empties
+the row: PAUSED freezes every gauge at the reading taken before the operator
+started, and four real numbers none of which are true any more, under a
+sentence saying the camera has stopped looking, is the exact failure the state
+exists to prevent. Per gauge the rule is the usual one — absent is left out,
+never zeroed — so a part whose AE will not state its gain shows a row of three.
 
 Two traps worth knowing. Every half of this carries an author `display`, which
 beats the UA's `[hidden]` rule whatever the specificity, so each needs its own
