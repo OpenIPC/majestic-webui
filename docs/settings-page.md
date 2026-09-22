@@ -230,19 +230,44 @@ Two controls doing one job on one card is not a second affordance, it is a
 question about what the difference is; the unlit half of a two-state control
 is already the answer.
 
-The order inside `handOver()` is
-load-bearing: seed the knobs from what the camera is holding, *then* switch.
-That way the ISP already carries those numbers when the controller lets go and
-the picture does not move as the operator takes it. Switching first and seeding
-after is a visible jump to the saved values and back. The seeded values stage
-like any other edit — the save bar is what says they are not permanent.
+The order inside `handOver()` is **seed the knobs from what the camera is
+holding, then switch**, so the operator continues from what they were looking at
+rather than jumping to values they never chose. The seeded values stage like any
+other edit — the save bar is what says they are not permanent.
 
-What to seed comes from `MajesticToneCheck.KNOBS`, not from what the strip
-happens to hold: `isp.dehaze` is one of them and it is drawn in another card
-entirely. The reading itself is `lastTone`, kept only while the camera is
-actually measuring — paused, those gauges are as frozen as the span beside
-them, and seeding from one would hand over a picture from before the operator
-started.
+Two things about that ordering are worth being exact on, because the obvious
+reading of it is wrong.
+
+**It is not two network writes.** `setLive` and `setAuto` both dispatch into the
+same 120 ms debounce, so the camera receives *one* `POST /api/v1/image` carrying
+the seeded values *and* `tuning=0`. What preserves the order is the daemon:
+`live_dispatch()` applies the CSC write first and lowers the preview second, in
+that function, in that order. Splitting this into two awaited requests would buy
+nothing the daemon does not already guarantee.
+
+**It seeds three knobs but moves two.** What to seed comes from
+`MajesticToneCheck.KNOBS` rather than from whatever the strip holds, because
+`isp.dehaze` is one of them and is drawn in another card entirely — but dehaze is
+*not* a live key on `/api/v1/image`, since the daemon's dehaze applier re-reads
+the config on purpose. It stages, and reaches the ISP on Save. Meanwhile
+`tonetune_preview(true)` drops the ISP's dehaze to the operator's *saved*
+baseline. So a hand-over on a camera holding a haze correction does move the
+picture in that one respect, with the slider showing the value that puts it back.
+Contrast and saturation do not move.
+
+The reading itself is `lastTone`, kept only while the camera is actually
+measuring — paused, those gauges are as frozen as the span beside them, and
+seeding from one would hand over a picture from before the operator started. It
+is cleared on every mode transition and again as soon as a hand-over consumes it:
+a reading belongs to the Automatic session it was taken in, and Manual → edit →
+Automatic → Manual inside one heartbeat would otherwise let the first session's
+sample write over the edits made in between.
+
+`handOver()` switches to Manual **whether or not it had anything to seed from**.
+No tone gauges on older firmware, a failed poll, or a paused controller all leave
+`lastTone` null; it then falls back to the saved values, which is where Manual
+would have started before any of this existed. Refusing the mode because the page
+could not read the camera would be a control that sometimes does nothing.
 
 ### The sentence and the figures under it
 

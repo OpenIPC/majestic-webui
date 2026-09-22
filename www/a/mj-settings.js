@@ -2137,6 +2137,16 @@
 				if (f && f.control) setLive(f, v);
 			});
 		}
+		// Consumed. Without this the same sample could seed a second
+		// hand-over later, after the operator has edited what it seeded.
+		lastTone = null;
+		// Unconditionally, and that is deliberate: the operator asked for
+		// Manual. A camera whose firmware publishes no tone gauges, a failed
+		// poll, or a controller that is paused all leave nothing to seed
+		// from, and refusing the mode because the page could not read the
+		// camera would be a control that sometimes does nothing. It falls
+		// back to the saved values, which is where Manual would have started
+		// before any of this existed.
 		if (autoField && autoField.control) setAuto(autoField, false);
 	}
 
@@ -2151,6 +2161,13 @@
 	function applyToneMode(auto) {
 		if (auto === toneAuto) return;
 		toneAuto = auto;
+		// A reading belongs to the Automatic session it was taken in. Left
+		// standing across a mode change it can seed a later hand-over from
+		// before the operator's own edits -- Manual, edit, Automatic, Manual
+		// again inside one heartbeat, and the first session's sample writes
+		// over the second session's work. The subscription refills it on the
+		// next measuring heartbeat, which only happens in Automatic anyway.
+		lastTone = null;
 		toneManual.forEach(n => { n.hidden = auto; });
 		toneAutomatic.forEach(n => { n.hidden = !auto; });
 		toneModeAuto.forEach(b => {
