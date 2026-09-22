@@ -2571,6 +2571,19 @@
 			} else if (rowEl) {
 				renderAutoStatus(rowEl.parentNode);
 			}
+			// isp.dehaze is the tuner's third actuator, and it is not drawn in
+			// the tone card: it is an isp.* block and renders with the rest of
+			// that section, in a card further down. The mode still owns it.
+			// An editable haze slider under Automatic is a control for
+			// something a controller is driving -- the whole fault this
+			// section exists to remove, one card away from where it was
+			// fixed. Manual's, so it goes when Manual does.
+			//
+			// Here rather than beside the strip because the rest-cards are
+			// built above this line and not before it.
+			const hazeField = state.fields.find(f => f.key === 'dehaze' && f.p);
+			if (hazeField) toneManual.push(hazeField.p);
+
 			const relock = () => applyToneMode(toneAutoOn());
 			tuning.control.addEventListener('change', relock);
 			// Also on a refresh or a discard, which put the switch back
