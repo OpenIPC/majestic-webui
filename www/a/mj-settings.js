@@ -1795,65 +1795,93 @@
 		// of the four knobs would otherwise get a control that half-works.
 		if (!LIVE_PRESETS.every(p => Object.keys(p.v).every(k => byKey[k]))) return;
 
-		// One row of mutually exclusive modes, Automatic among them: picking
-		// it hands the picture to the camera, and picking any of the others
-		// takes it back and applies that look. Which one is in force is the
-		// lit chip rather than a sentence anywhere.
+		// The mode is NOT one of these chips. Automatic and Indoor are not
+		// alternatives on one axis: one says who is driving, the others say
+		// what look to apply — and a row offering both invites the reading
+		// that the camera is following the scene AND running Outdoor, which
+		// is not a state it has.
 		//
-		// The constraint this exists to hold: every chip stays actionable,
-		// whichever mode is in force. Disabling the ones that do not apply
-		// leaves buttons that look exactly like working buttons and do
-		// nothing when pressed, with the reason available only as prose the
-		// reader has to find and connect — and it forces whatever turns
-		// Automatic on to live elsewhere on the page, so changing your mind
-		// means moving between two controls that disagree. A mode you are
-		// not in is something to press; a dead control is a puzzle.
+		// This row keeps its own rule, which is the right one: every chip in
+		// it stays actionable. That is why the presets are not disabled under
+		// Automatic but taken off the page with the rest of the manual side —
+		// the principle this file already states about the Stock button,
+		// "a control which cannot be used is not left on the page looking as
+		// though it can", applied to the other two controls it owns.
 		const autoField = state.fields.find(f => f.dot === 'image.tuning');
-		const row = el('div', 'mj-scene-row');
 
-		let autoChip = null;
+		// Who is driving, above what they chose. Two options rather than a
+		// switch, because "Automatic / Manual" names both states and a switch
+		// labelled Automatic only names one — and the half you are not in has
+		// to read as somewhere to go, since in Automatic it is the only way
+		// back to the knobs.
 		if (autoField && autoField.control) {
-			autoChip = el('button', 'mj-scene-chip mj-scene-chip-auto');
-			autoChip.type = 'button';
-			autoChip.textContent = 'Automatic';
-			autoChip.title = 'Let the camera follow the scene. It works from ' +
-				'these settings and returns to them.';
-			autoChip.addEventListener('click', () => {
-				if (autoField.control.checked) return;
-				setAuto(autoField, true);
+			const mode = el('div', 'mj-tone-mode');
+			[['Automatic', true], ['Manual', false]].forEach(([label, on]) => {
+				const b = el('button', 'mj-tone-mode-opt');
+				b.type = 'button';
+				b.textContent = label;
+				b.addEventListener('click', () => {
+					if (!!autoField.control.checked === on) return;
+					// Manual takes the picture over, so it starts from what
+					// the camera is holding rather than from the saved
+					// numbers: see handOver().
+					if (on) setAuto(autoField, true); else handOver(autoField);
+				});
+				mode.appendChild(b);
+				(on ? toneModeAuto : toneModeManual).push(b);
 			});
-			row.appendChild(autoChip);
+			container.appendChild(mode);
 		}
+
+		const row = el('div', 'mj-scene-row');
 
 		const chips = LIVE_PRESETS.map(p => {
 			const b = el('button', 'mj-scene-chip');
 			b.type = 'button';
 			b.textContent = p.label;
 			b.addEventListener('click', () => {
-				// Leaving Automatic is part of choosing a look, and doing it
-				// first means the knobs are writable by the time the preset
-				// lands on them.
-				if (autoField && autoField.control && autoField.control.checked)
-					setAuto(autoField, false);
 				Object.keys(p.v).forEach(k => setLive(byKey[k], p.v[k]));
 			});
 			row.appendChild(b);
 			return b;
 		});
 		container.appendChild(row);
-		// Nothing in this row is ever disabled now.
-		toneOwned.chips = [];
-		toneModeRow = !!autoChip;
+		toneModeRow = !!(autoField && autoField.control);
+		// Manual's own row, so the mode can take it off the page whole.
+		toneManual.push(row);
 
-		// What Automatic is doing right now, directly under the chip that
-		// turns it on -- the only place a reader looks after pressing it.
-		if (autoChip) renderAutoStatus(container);
+		// What Automatic is doing right now, where the presets are when the
+		// operator is the one driving: the same place either way, because it
+		// answers the same question — what is this picture, and who chose it.
+		if (toneModeRow) {
+			renderAutoStatus(container);
+
+			// The way back. With the camera driving there is nothing else on
+			// this card to touch, and somebody who came to change the picture
+			// should not have to work out that the mode control is what they
+			// want. It is the same move the Manual option makes -- a thing to
+			// press rather than a thing to notice.
+			const act = el('div', 'mj-tone-act');
+			const take = el('button', 'mj-tone-take');
+			take.type = 'button';
+			take.innerHTML = ICON.compare + '<span>Adjust the picture</span>';
+			take.addEventListener('click', () => handOver(autoField));
+			act.appendChild(take);
+			const hint = el('span', 'mj-live-note');
+			hint.textContent = 'Hands you the picture and switches to Manual, ' +
+				'starting from what the camera is holding now.';
+			act.appendChild(hint);
+			container.appendChild(act);
+			toneAutomatic.push(act);
+		}
 
 		const status = el('div', 'mj-scene-status');
 		status.innerHTML = '<span class="mj-pip"></span><span></span>';
 		container.appendChild(status);
 		const pip = status.querySelector('.mj-pip');
 		const text = status.querySelector('span:last-child');
+		// A claim about the operator's own values, so it belongs to Manual.
+		toneManual.push(status);
 
 		const sync = () => {
 			const auto = !!(autoField && autoField.control &&
@@ -1862,15 +1890,9 @@
 			Object.keys(byKey).forEach(k => { cur[k] = Number(byKey[k].getValue()); });
 			const hit = LIVE_PRESETS.find(p =>
 				Object.keys(p.v).every(k => cur[k] === p.v[k]));
-			if (autoChip) {
-				autoChip.classList.toggle('mj-scene-chip-on', auto);
-				autoChip.setAttribute('aria-pressed', auto ? 'true' : 'false');
-			}
 			chips.forEach((b, i) => {
-				// A preset only reads as in force when the camera is not
-				// running the picture itself. Under Automatic the numbers may
-				// still happen to match Indoor, and lighting it then would
-				// say the operator chose a look they did not.
+				// Under Automatic this row is not on the page at all, so the
+				// only question left is which look the operator picked.
 				const on = !auto && !!hit && LIVE_PRESETS[i].id === hit.id;
 				b.classList.toggle('mj-scene-chip-on', on);
 				b.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -1936,6 +1958,7 @@
 
 		const row = el('div', 'mj-scene-status mj-tone-status');
 		row.hidden = true;
+		toneAutomatic.push(row);
 		row.innerHTML = '<span class="mj-pip"></span><span></span>';
 		container.appendChild(row);
 		const pip = row.querySelector('.mj-pip');
@@ -1959,7 +1982,7 @@
 			// only one where the page does not know.
 			if (!s || !s.ok || !s.tone) {
 				row.hidden = true;
-				paintAutoMarks(null, null);
+				lastTone = null;
 				return;
 			}
 			// Whether the feature is ON is the switch's answer, not the
@@ -1968,20 +1991,20 @@
 			// lit Automatic chip is a confident lie.
 			const d = window.MajesticToneCheck.describe(s.tone, saved,
 				toneAutoOn());
-			row.hidden = !d.known;
-			if (!d.known) { paintAutoMarks(null, null); return; }
+			// `d.on` as well as `d.known`: this row belongs to Automatic, and
+			// the mode already took it off the page in Manual. Without the
+			// second half the next heartbeat puts it back two seconds later,
+			// which is a line about a controller that is not running sitting
+			// under the knobs of the operator who turned it off.
+			row.hidden = !(d.known && d.on);
+			if (!d.known) { lastTone = null; return; }
 			pip.className = 'mj-pip mj-pip-' + d.tone;
 			text.innerHTML = '<b>' + esc(d.head) + '</b> \u2014 ' + esc(d.tail);
-			// Only while the camera is actually measuring. Paused, the four
+			// Kept only while the camera is actually measuring. Paused, the
 			// actuator gauges are as frozen as the span beside them, and
-			// painting them into the locked read-outs would present a
-			// reading from before the operator started as where the camera
-			// is right now.
-			paintAutoMarks(d, d.measuring ? {
-				'image.contrast': s.tone.contrast,
-				'image.luminance': s.tone.luminance,
-				'image.saturation': s.tone.saturation,
-			} : null);
+			// handing those to the take-over button would seed the sliders
+			// from a reading taken before the operator started.
+			lastTone = d.measuring ? s.tone : null;
 		});
 		// mjMetricsSubscribe predates returning an unsubscribe, so it may hand
 		// back nothing; the guard keeps this working either way.
@@ -2000,11 +2023,18 @@
 	// Hidden when it coincides with the thumb, which is most of the time: a
 	// mark permanently under the handle is furniture, and furniture is how a
 	// reader learns to stop looking at something.
-	let autoMarks = [];
+	// The camera's last live reading, which is what a hand-over seeds from.
+	let lastTone = null;
 	// Everything else automatic tuning takes over while it is on: the Scene
 	// chips, the Stock button, and the note that says where the switch is.
-	let toneOwned = { chips: [], buttons: [], notes: [] };
-	let toneLocked = null;
+	// What belongs to each mode, collected as the leaf renders and shown or
+	// hidden whole. Nothing is in both lists -- that is the rule, expressed
+	// as the only data structure that can hold it.
+	let toneManual = [];
+	let toneAutomatic = [];
+	let toneModeAuto = [];
+	let toneModeManual = [];
+	let toneAuto = null;
 	// Whether the Scene row carries the Automatic chip. When it does, the
 	// image.tuning switch is redundant and is hidden.
 	let toneModeRow = false;
@@ -2013,61 +2043,46 @@
 	// of them and stays the operator's throughout — a mode that greys out
 	// controls it does not touch is as misleading as one that leaves live the
 	// ones it does.
-	const DRIVEN = { 'image.contrast': 1, 'image.luminance': 1, 'image.saturation': 1 };
-
-	function mountAutoMark(field, f) {
-		if (!field || !field.control) return;
-		const track = field.control.parentNode;
-		if (!track || !track.classList.contains('mj-live-track')) return;
-		const min = isNum(f.sub.minimum) ? f.sub.minimum : 0;
-		const max = isNum(f.sub.maximum) ? f.sub.maximum : 100;
-		if (max <= min) return;
-		const mark = el('span', 'mj-live-auto');
-		mark.hidden = true;
-		track.appendChild(mark);
-		const row = track.closest('.mj-live-row');
-		// The camera's own number, shown in place of the editable one while
-		// the row is locked. A separate node rather than writing the input:
-		// the input's value is what Save persists and what dirty tracking
-		// compares, and putting a transient reading into it would offer to
-		// save the camera's current mood as the operator's setting.
-		let cam = null;
-		if (row && DRIVEN[f.dot]) {
-			cam = el('span', 'mj-live-cam');
-			cam.hidden = true;
-			const num = row.querySelector('.mj-live-num');
-			if (num) row.insertBefore(cam, num);
-		}
-		autoMarks.push({ dot: f.dot, mark: mark, min: min, max: max,
-			row: row, cam: cam, driven: !!DRIVEN[f.dot] });
-	}
-
-	// Automatic owns the three knobs it drives, so while it is on they stop
-	// being controls and become read-outs. A slider left live under it would
-	// write a real value that the camera walks away from two seconds later,
-	// which is a control that lies; labelling does not fix that. The same
-	// bargain auto-exposure has always made.
+	// The two modes share no controls, so the mode does not dress the page --
+	// it decides which half of it is there.
 	//
-	// Driven from the SWITCH rather than from the metrics gauges, so the
-	// page answers the click at once instead of at the next poll two seconds
+	// AUTOMATIC: what the camera is doing, and the way to take it back.
+	// Nothing to set, because nothing in that mode is the operator's to set.
+	// MANUAL: the presets and the knobs, and no status, because nothing is
+	// running to report on.
+	//
+	// Locking the driven knobs in place was the other way to keep a control
+	// from lying, and it is half a step: this file already says of the Stock
+	// button that "a control which cannot be used is not left on the page
+	// looking as though it can", and a greyed slider with the camera's number
+	// beside it is exactly that -- a control-shaped thing that is not one.
+	// Reported on a camera as "I see both Automatic and Outdoor", which is
+	// the same complaint one control further along.
+	//
+	// Driven from the SWITCH rather than from the metrics gauges, so the page
+	// answers the click at once instead of at the next poll two seconds
 	// later. A mode change that appears to do nothing for two seconds reads
 	// as a mode change that did nothing.
-	function applyToneLock(locked) {
-		if (locked === toneLocked) return;
-		toneLocked = locked;
-		for (const a of autoMarks) {
-			if (!a.driven || !a.row) continue;
-			a.row.classList.toggle('mj-live-locked', locked);
-			a.row.querySelectorAll('.mj-live-input, .mj-live-num, .mj-live-rst')
-				.forEach(n => { n.disabled = locked; });
-			if (a.cam) a.cam.hidden = !locked;
+	// Taking the picture over. Seed the knobs the camera is driving from what
+	// it is actually holding, and only then switch -- in that order the ISP
+	// already carries those numbers when the controller lets go, so the
+	// picture does not move as the operator takes it. Switching first and
+	// seeding after is a visible jump to the saved values and back.
+	//
+	// The seeded values stage like any other edit; the save bar is what says
+	// they are not permanent yet. Without the seed, taking over would hand
+	// back a picture the operator never chose and did not just agree to.
+	function handOver(autoField) {
+		const T = window.MajesticToneCheck;
+		if (T && lastTone) {
+			T.KNOBS.forEach(k => {
+				const v = lastTone[k.gauge];
+				if (v === null || v === undefined) return;
+				const f = state.fields.find(x => x.dot === k.dot);
+				if (f && f.control) setLive(f, v);
+			});
 		}
-		toneOwned.chips.forEach(c => { c.disabled = locked; });
-		// Hidden, not disabled. The whole point of the mode row is that a
-		// control which cannot be used is not left on the page looking as
-		// though it can.
-		toneOwned.buttons.forEach(b => { b.hidden = locked; });
-		toneOwned.notes.forEach(n => { n.hidden = !locked; });
+		if (autoField && autoField.control) setAuto(autoField, false);
 	}
 
 	// The switch's state, read live. Falls back to the saved config for the
@@ -2078,35 +2093,19 @@
 		return toBool(getDotted(state.config, 'image.tuning'));
 	}
 
-	function paintAutoMarks(d, live) {
-		if (!autoMarks.length) return;
-		const by = {};
-		(d && d.moved ? d.moved : []).forEach(m => { by[m.dot] = m; });
-		// The readout is every driven knob's CURRENT value, not only the ones
-		// that differ from the baseline: while the row is locked this number
-		// is the only one on it, so leaving it blank whenever the camera
-		// happens to agree with the saved value would blank a third of the
-		// strip at random.
-		for (const a of autoMarks) {
-			if (a.cam) {
-				const v = live ? live[a.dot] : null;
-				a.cam.textContent = (v == null) ? '—' : String(v);
-			}
-			const m = by[a.dot];
-			// Nothing to show, or a value outside the control's own range —
-			// which would paint outside the track and imply the camera is
-			// somewhere the slider cannot go.
-			if (!m || m.live < a.min || m.live > a.max) {
-				a.mark.hidden = true;
-				a.mark.removeAttribute('title');
-				continue;
-			}
-			a.mark.hidden = false;
-			a.mark.style.left =
-				((m.live - a.min) / (a.max - a.min) * 100).toFixed(3) + '%';
-			a.mark.title = 'Automatic tuning is running this at ' + m.live +
-				'; your saved value is ' + m.base;
-		}
+	function applyToneMode(auto) {
+		if (auto === toneAuto) return;
+		toneAuto = auto;
+		toneManual.forEach(n => { n.hidden = auto; });
+		toneAutomatic.forEach(n => { n.hidden = !auto; });
+		toneModeAuto.forEach(b => {
+			b.classList.toggle('mj-tone-mode-on', auto);
+			b.setAttribute('aria-pressed', auto ? 'true' : 'false');
+		});
+		toneModeManual.forEach(b => {
+			b.classList.toggle('mj-tone-mode-on', !auto);
+			b.setAttribute('aria-pressed', auto ? 'false' : 'true');
+		});
 	}
 
 	// The luma histogram. Everything it needs is already in the browser — the
@@ -2207,9 +2206,12 @@
 		// Rebuilt with the leaf. Left alone, a section switch would leave the
 		// painter writing into marks on a detached track for the rest of the
 		// page's life, and the new ones would never be found.
-		autoMarks = [];
-		toneOwned = { chips: [], buttons: [], notes: [] };
-		toneLocked = null;
+		lastTone = null;
+		toneManual = [];
+		toneAutomatic = [];
+		toneModeAuto = [];
+		toneModeManual = [];
+		toneAuto = null;
 		toneModeRow = false;
 
 		// The only place the leaf names itself — the rail's active item says it
@@ -2345,6 +2347,8 @@
 		// the guarantee stays "a knob and the effect it has, together" while the
 		// picture takes everything left over (#239).
 		const strip = el('div', 'mj-live-strip');
+		// The knobs are Manual's whole reason to exist, so they go with it.
+		toneManual.push(strip);
 		if (hasTone) form.appendChild(strip);
 
 		// The second card carries what is worth having but not worth the
@@ -2428,7 +2432,7 @@
 			if (!field) continue;
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
-			if (isKnob(f)) mountAutoMark(field, f);
+
 		}
 
 		// Hold to compare shows the picture at stock while it is held. At stock
@@ -2467,9 +2471,6 @@
 			rall.title = 'Reset all four to their factory defaults';
 			rall.addEventListener('click', resetLiveAll);
 			foot.appendChild(rall);
-			// Resets the very knobs Automatic is driving, so it goes with
-			// them.
-			toneOwned.buttons.push(rall);
 			strip.appendChild(foot);
 		}
 
@@ -2488,8 +2489,10 @@
 		const toneFields = state.fields.filter(f =>
 			f.schema && f.schema['x-live'] && f.type === 'integer');
 		if (hasTone && toneFields.length) {
+			// "Tone", not "Scene": the group leads with who is driving, and
+			// the presets are one of the two things that can be under that.
 			renderScene(
-				liveGroup(colScene, 'Scene', 'automatic, or a look you pick'),
+				liveGroup(colScene, 'Tone', 'who is driving the picture'),
 				toneFields);
 		}
 
@@ -2568,7 +2571,7 @@
 			} else if (rowEl) {
 				renderAutoStatus(rowEl.parentNode);
 			}
-			const relock = () => applyToneLock(toneAutoOn());
+			const relock = () => applyToneMode(toneAutoOn());
 			tuning.control.addEventListener('change', relock);
 			// Also on a refresh or a discard, which put the switch back
 			// without anybody pressing a chip.

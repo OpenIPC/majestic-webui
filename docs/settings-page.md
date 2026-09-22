@@ -202,3 +202,42 @@ recording and in every other viewer's picture.
   mattering.
 - Change the save URL or batch shape → update both `onSubmit` and the
   server-side handler that consumes it.
+
+## The Live leaf's tone mode
+
+`image.tuning` is a mode, and the two modes **share no controls**. Automatic
+shows what the camera is doing and the way to take it back; Manual shows the
+presets and the knobs and reports no status. Nothing is on the page in both,
+which is the whole of the rule and the reason `toneManual` and `toneAutomatic`
+are two lists rather than one list of things to grey out.
+
+The alternative — leave the driven knobs on the page, disabled, with the
+camera's number beside them — is half a step, and this page already argues
+against it for the Stock button: *a control which cannot be used is not left on
+the page looking as though it can*. A greyed slider is exactly that. It was
+reported on a camera as "I see both Automatic and Outdoor", which is the same
+complaint one control further along: Automatic and Indoor are not alternatives
+on one axis, so they are not chips in one row. One control says who is driving;
+the others say what look to apply, and they only exist when the answer to the
+first is "you do".
+
+**Adjust the picture** is the way back, and the order inside `handOver()` is
+load-bearing: seed the knobs from what the camera is holding, *then* switch.
+That way the ISP already carries those numbers when the controller lets go and
+the picture does not move as the operator takes it. Switching first and seeding
+after is a visible jump to the saved values and back. The seeded values stage
+like any other edit — the save bar is what says they are not permanent.
+
+What to seed comes from `MajesticToneCheck.KNOBS`, not from what the strip
+happens to hold: `isp.dehaze` is one of them and it is drawn in another card
+entirely. The reading itself is `lastTone`, kept only while the camera is
+actually measuring — paused, those gauges are as frozen as the span beside
+them, and seeding from one would hand over a picture from before the operator
+started.
+
+Two traps worth knowing. Every half of this carries an author `display`, which
+beats the UA's `[hidden]` rule whatever the specificity, so each needs its own
+`[hidden] { display: none }` — without them the mode lights up and nothing
+moves. And `renderAutoStatus` sets `row.hidden` on every heartbeat, so it gates
+on `d.on` as well as `d.known`; otherwise the next poll puts the status back two
+seconds after the mode took it away.
