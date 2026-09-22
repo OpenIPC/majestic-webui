@@ -390,6 +390,85 @@ function main() {
 		check('a past month is not a tell', withDate('01/2015') === null);
 	}
 
+	group('how much this camera has written to this card');
+	{
+		// The fourth line. Not a finding, so it must never reach the headline
+		// and must never turn into a percentage: there is no endurance figure
+		// in any register on an SD card to divide by.
+		const w = (over) => H.written(rec(over));
+
+		check('a build that does not publish the durable total gets no line',
+			H.written(rec({})) === null);
+		check('an unanswered heartbeat gets no line', H.written(null) === null);
+		check('a build with no recorder counters at all gets no line',
+			H.written({ absent: true }) === null);
+
+		const fresh = w({ records_card_bytes_written_total: 0, records_card_start_time_seconds: 0 });
+		check('a card nothing has been written to says so',
+			/has not written anything/.test(fresh.text), fresh.text);
+
+		const tb = w({
+			records_card_bytes_written_total: 3743551254528,
+			records_card_start_time_seconds: 1762041600,
+		});
+		check('terabytes are rendered as terabytes, not as four-figure GB',
+			/3\.4 TB/.test(tb.text), tb.text);
+		check('the sentence says who wrote it, because a card can arrive used',
+			/This camera has written/.test(tb.text), tb.text);
+		check('and when the count started', / since /.test(tb.text), tb.text);
+
+		// The whole point of the caveats: this is host bytes from one camera,
+		// so it is a lower bound on the card's wear and cannot be a life
+		// estimate. Anything resembling one is a defect.
+		check('no percentage, no remaining life, no "healthy"',
+			!/%|remaining|life|wear|healthy/i.test(tb.text), tb.text);
+		check('and it is not a verdict about the card', tb.level === 'none');
+
+		// Most of these boards have no battery-backed RTC. 0 is the camera
+		// saying it has never had a clock worth believing, and rendering it as
+		// 1 January 1970 would be the page inventing a date.
+		const noclock = w({
+			records_card_bytes_written_total: 41802354,
+			records_card_start_time_seconds: 0,
+		});
+		check('a camera with no clock still reports the total',
+			/has written/.test(noclock.text), noclock.text);
+		check('but claims no date for it',
+			!/since/.test(noclock.text) && !/1970/.test(noclock.text), noclock.text);
+
+		// A daemon answering nonsense must produce no line rather than a
+		// confident sentence with the number missing out of the middle of it.
+		[Infinity, -Infinity, NaN, -1].forEach(function (bad) {
+			var r = w({ records_card_bytes_written_total: bad, records_card_start_time_seconds: 1762041600 });
+			check('a total of ' + bad + ' is not a reading', r === null,
+				r && r.text);
+		});
+
+		// ...and a start time that is not a second count must not reach
+		// `new Date`, which renders the words "Invalid Date" into the sentence
+		// rather than failing.
+		[Infinity, NaN, -5].forEach(function (bad) {
+			var r = w({ records_card_bytes_written_total: 41802354, records_card_start_time_seconds: bad });
+			check('a start time of ' + bad + ' claims no date',
+				r && !/since/.test(r.text) && !/Invalid/.test(r.text),
+				r && r.text);
+			check('but the total still gets said', r && /has written/.test(r.text),
+				r && r.text);
+		});
+
+		// It rides on verdict() but must not colour it.
+		const v = H.verdict({
+			recorder: rec({
+				records_card_bytes_written_total: 3743551254528,
+				records_card_start_time_seconds: 1762041600,
+			}),
+			probe: clean, scan: readAll,
+		});
+		check('verdict() carries the line', v.written && /3\.4 TB/.test(v.written.text));
+		check('and the headline is still decided by the three findings alone',
+			v.head.level === 'ok', v.head.level + ': ' + v.head.text);
+	}
+
 	done();
 }
 

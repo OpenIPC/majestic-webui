@@ -751,6 +751,14 @@
 					below: '<div data-mj="scan">' + L.scan + '</div>' + scanFindings(d) + scn.note
 						+ (scanErr ? mjNotice('warn', esc(scanErr)) : ''),
 				})
+				// Fourth, and last, because it is the only one of the four that
+				// is not a finding: how hard this camera has worked the card,
+				// not whether anything is wrong with it. Absent entirely on a
+				// build whose majestic does not publish the durable total --
+				// an empty row would suggest a reading that was never taken.
+				+ (v.written
+					? healthLine('Written by this camera', v.written)
+					: '')
 				+ '</div>' : '')
 			+ '</div></div></div>';
 	}
