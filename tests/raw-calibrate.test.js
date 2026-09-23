@@ -37,7 +37,7 @@ function makeCamera(opts) {
 			cam.configPosts.push(body);
 			if (opts.rejectConfig) return Promise.resolve({ ok: false, status: 500 });
 			Object.keys(body.isp).forEach(function (k) {
-				if (body.isp[k] === null) delete cam.config.isp[k];
+				if (body.isp[k] === null) { if (!opts.ignoreNulls) delete cam.config.isp[k]; }
 				else cam.config.isp[k] = body.isp[k];
 			});
 			return Promise.resolve({ ok: true, status: 200 });
@@ -166,6 +166,15 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	check('the save is reported as failed', err !== '', err);
 	check('and the profile is put back at once',
 		cam.profilePosts.some((p) => /restore=1/.test(p.url)));
+
+	group('a camera that ignores the request to clear the matrix does not get a false save');
+
+	cam = makeCamera({ isp: { colorMatrix: 'm', dngColorMatrix: 'd' }, ignoreNulls: true });
+	({ api } = load(cam));
+	err = '';
+	try { await api.persist(INI); } catch (e) { err = e.message; }
+	check('the save is reported as failed', /kept its manual colour matrix/.test(err), err);
+	check('and the profile is put back', cam.profilePosts.some((p) => /restore=1/.test(p.url)));
 
 	group('keeping a profile disarms an older matrix checkpoint too');
 

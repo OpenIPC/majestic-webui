@@ -209,6 +209,15 @@ window.MajesticCalibrate = (function () {
 					 * before the answer arrives must still put it back. */
 					profileWas = was;
 					return setKeys(null, was.dngColorMatrix)
+						/* Read back, as revert() does: firmware that answers
+						 * 200 and ignores a null leaf would leave the old
+						 * matrix over the calibration while reporting a save. */
+						.then(function () { return readKeys(); })
+						.then(function (now) {
+							if (now.colorMatrix !== null)
+								throw new Error('the camera kept its manual colour matrix, which ' +
+									'would hide the saved calibration; the profile was put back.');
+						})
 						.catch(function (err) {
 							return profilePost('?restore=1').catch(function () {})
 								.then(function () { throw err; });
