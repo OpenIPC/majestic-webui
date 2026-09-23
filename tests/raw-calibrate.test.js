@@ -27,11 +27,14 @@ function makeCamera(opts) {
 	};
 	cam.apiFetch = function (url, init) {
 		init = init || {};
-		if (url === '/api/v1/config.json')
+		if (url === '/api/v1/config.json') {
+			if (opts.failReadAfterClear && cam.configPosts.length)
+				return Promise.resolve({ ok: false, status: 500 });
 			return Promise.resolve({
 				ok: true, status: 200,
 				json: () => Promise.resolve(JSON.parse(JSON.stringify(cam.config))),
 			});
+		}
 		if (url === '/api/v1/config') {
 			const body = JSON.parse(init.body);
 			cam.configPosts.push(body);
@@ -43,10 +46,14 @@ function makeCamera(opts) {
 			return Promise.resolve({ ok: true, status: 200 });
 		}
 		if (url.indexOf('/api/v1/isp/profile.ini') === 0) {
-			const text = (t, status) => Promise.resolve({
+			const text = (t, status, disp) => Promise.resolve({
 				ok: (status || 200) < 300, status: status || 200, text: () => Promise.resolve(t),
+				headers: { get: (h) => (/^content-disposition$/i.test(h) ? disp || null : null) },
 			});
-			if (init.method !== 'POST' || opts.oldFirmware) return text(cam.profile);
+			// The GET handler, which older firmware also answers a POST with:
+			// the profile as a download.
+			if (init.method !== 'POST' || opts.oldFirmware)
+				return text(cam.profile, 200, 'attachment; filename="profile.ini"');
 			cam.profilePosts.push({ url: url, body: init.body });
 			if (/restore=1/.test(url)) return text('put back\n');
 			if (/keep=1/.test(url)) return text('kept\n');
@@ -166,6 +173,25 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	check('the save is reported as failed', err !== '', err);
 	check('and the profile is put back at once',
 		cam.profilePosts.some((p) => /restore=1/.test(p.url)));
+
+	group('old firmware echoing a profile that says "written to" is still not a save');
+
+	cam = makeCamera({ oldFirmware: true });
+	cam.profile = '; [x] written to this file by hand\n[section] written to nothing\n';
+	({ api } = load(cam));
+	err = '';
+	try { await api.persist(INI); } catch (e) { err = e.message; }
+	check('the download is recognised for what it is', /cannot save/.test(err), err);
+
+	group('a save that fails after the matrix went puts the matrix back too');
+
+	cam = makeCamera({ isp: { colorMatrix: 'm', dngColorMatrix: 'd' }, failReadAfterClear: true });
+	({ api } = load(cam));
+	err = '';
+	try { await api.persist(INI); } catch (e) { err = e.message; }
+	check('the save is reported as failed', err !== '', err);
+	check('the profile is put back', cam.profilePosts.some((p) => /restore=1/.test(p.url)));
+	check('and so is the manual matrix', cam.config.isp.colorMatrix === 'm', JSON.stringify(cam.config.isp));
 
 	group('a camera that ignores the request to clear the matrix does not get a false save');
 

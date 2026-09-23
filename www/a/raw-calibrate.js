@@ -158,6 +158,13 @@ window.MajesticCalibrate = (function () {
 		}).then(function (r) {
 			return r.text().then(function (t) {
 				if (!r.ok) throw new Error((t || '').trim() || ('The camera answered ' + r.status + '.'));
+				/* Firmware that predates writing a profile answers a POST
+				 * here with its GET handler: the profile itself, as a file
+				 * to download. That is not a save, whatever the profile says. */
+				const disp = r.headers && r.headers.get && r.headers.get('Content-Disposition');
+				if (disp && /attachment/i.test(disp))
+					throw new Error('This camera\'s firmware cannot save into its image ' +
+						'profile; update it to keep a calibration.');
 				return t;
 			});
 		});
@@ -195,7 +202,7 @@ window.MajesticCalibrate = (function () {
 					 * to this route the way it answers a GET -- with the
 					 * profile, and 200. That is not a save, and must not be
 					 * reported as one. */
-					if (!/written to/.test(said))
+					if (!/^\[\w+\] written to \S/m.test(said))
 						throw new Error('This camera\'s firmware cannot save into its image ' +
 							'profile; update it to keep a calibration.');
 					if (was.colorMatrix === null) return;
@@ -219,7 +226,14 @@ window.MajesticCalibrate = (function () {
 									'would hide the saved calibration; the profile was put back.');
 						})
 						.catch(function (err) {
+							/* Undo both halves: the matrix may already be gone
+							 * even though what came after it failed. Each is
+							 * tried whatever the other does. */
 							return profilePost('?restore=1').catch(function () {})
+								.then(function () {
+									return setKeys(was.colorMatrix, was.dngColorMatrix)
+										.catch(function () {});
+								})
 								.then(function () { throw err; });
 						});
 				}).catch(function (err) {
