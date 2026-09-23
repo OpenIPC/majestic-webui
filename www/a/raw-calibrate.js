@@ -177,6 +177,13 @@ window.MajesticCalibrate = (function () {
 	return {
 		holdSeconds: 30,
 		apply: function (solved) {
+			/* One change waiting at a time. A matrix applied under an
+			 * unconfirmed profile, or the other way round, leaves two
+			 * checkpoints that each undo part of the other; the editor
+			 * never asks for that, and this refuses it outright. */
+			if (written === 'profile')
+				return Promise.reject(new Error('The saved profile is still waiting to be kept ' +
+					'or put back.'));
 			return readKeys().then(function (was) {
 				previous = was;
 				written = 'matrix';
@@ -192,6 +199,9 @@ window.MajesticCalibrate = (function () {
 			});
 		},
 		persist: function (ini) {
+			if (previous || written)
+				return Promise.reject(new Error('The last change is still waiting to be kept ' +
+					'or put back.'));
 			return readKeys().then(function (was) {
 				/* Armed before the write, not after it: a camera that takes
 				 * the POST while the page is closing never gets its answer

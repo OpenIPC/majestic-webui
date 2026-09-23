@@ -215,17 +215,20 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	check('the save is reported as failed', /kept its manual colour matrix/.test(err), err);
 	check('and the profile is put back', cam.profilePosts.some((p) => /restore=1/.test(p.url)));
 
-	group('keeping a profile disarms an older matrix checkpoint too');
+	group('one change waits at a time');
 
 	cam = makeCamera({ isp: { colorMatrix: 'old', dngColorMatrix: 'd' } });
-	L = load(cam); api = L.api;
+	({ api } = load(cam));
 	await api.apply(SOLVED);
-	await api.persist(INI);
+	err = '';
+	try { await api.persist(INI); } catch (e) { err = e.message; }
+	check('a profile save is refused while an applied matrix is unconfirmed',
+		/still waiting/.test(err) && cam.profilePosts.length === 0, err);
 	await api.keep();
-	cam.beacons.length = 0;
-	(L.handlers.pagehide || []).forEach((fn) => fn());
-	check('leaving afterwards posts nothing over the kept calibration', cam.beacons.length === 0,
-		JSON.stringify(cam.beacons));
+	await api.persist(INI);
+	err = '';
+	try { await api.apply(SOLVED); } catch (e) { err = e.message; }
+	check('and a matrix apply while a saved profile is unconfirmed', /still waiting/.test(err), err);
 
 	group('the live matrix still works, and still reverts on its own');
 
