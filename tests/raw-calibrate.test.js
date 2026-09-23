@@ -35,6 +35,7 @@ function makeCamera(opts) {
 		if (url === '/api/v1/config') {
 			const body = JSON.parse(init.body);
 			cam.configPosts.push(body);
+			if (opts.rejectConfig) return Promise.resolve({ ok: false, status: 500 });
 			Object.keys(body.isp).forEach(function (k) {
 				if (body.isp[k] === null) delete cam.config.isp[k];
 				else cam.config.isp[k] = body.isp[k];
@@ -50,7 +51,11 @@ function makeCamera(opts) {
 			if (/restore=1/.test(url)) return text('put back\n');
 			if (/keep=1/.test(url)) return text('kept\n');
 			if (opts.refuse) return text('[static_ccm] would be refused (present but unreadable)\n', 400);
-			return text('[static_awb] written to /etc/sensors/iq/imx335.ini and applied\n');
+			// A save the camera takes but whose answer has not come back yet.
+			if (opts.hold) return new Promise(function (res) {
+				cam.release = function () { res(text('[static_awb] written to the profile and applied\n')); };
+			});
+			return text('[static_awb] written to the profile and applied\n');
 		}
 		throw new Error('unexpected url ' + url);
 	};
@@ -138,6 +143,41 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	err = '';
 	try { await api.persist(INI); } catch (e) { err = e.message; }
 	check('and a refusal says what the camera said', /would be refused/.test(err), err);
+
+	group('a page closing mid-save still puts the profile back');
+
+	cam = makeCamera({ hold: true });
+	L = load(cam); api = L.api;
+	const pending = api.persist(INI);
+	for (let i = 0; i < 20 && !cam.release; i++) await new Promise((r) => setImmediate(r));
+	check('the save is on the wire and unanswered', typeof cam.release === 'function');
+	(L.handlers.pagehide || []).forEach((fn) => fn());
+	cam.release();
+	await pending;
+	check('the unload handler knew a profile was being written',
+		cam.beacons.some((b) => /restore=1/.test(b.url)));
+
+	group('a save whose manual matrix cannot be cleared puts the profile back');
+
+	cam = makeCamera({ isp: { colorMatrix: 'm', dngColorMatrix: 'd' }, rejectConfig: true });
+	({ api } = load(cam));
+	err = '';
+	try { await api.persist(INI); } catch (e) { err = e.message; }
+	check('the save is reported as failed', err !== '', err);
+	check('and the profile is put back at once',
+		cam.profilePosts.some((p) => /restore=1/.test(p.url)));
+
+	group('keeping a profile disarms an older matrix checkpoint too');
+
+	cam = makeCamera({ isp: { colorMatrix: 'old', dngColorMatrix: 'd' } });
+	L = load(cam); api = L.api;
+	await api.apply(SOLVED);
+	await api.persist(INI);
+	await api.keep();
+	cam.beacons.length = 0;
+	(L.handlers.pagehide || []).forEach((fn) => fn());
+	check('leaving afterwards posts nothing over the kept calibration', cam.beacons.length === 0,
+		JSON.stringify(cam.beacons));
 
 	group('the live matrix still works, and still reverts on its own');
 

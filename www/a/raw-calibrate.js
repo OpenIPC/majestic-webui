@@ -135,7 +135,7 @@ window.MajesticCalibrate = (function () {
 	/*
 	 * The camera's image profile: the colour calibration it runs across lights
 	 * -- white balance, the curve auto white balance follows, a colour matrix
-	 * per temperature -- as /etc/sensors/iq/<sensor>.ini carries it. Read as
+	 * per temperature -- as the camera's image profile carries it. Read as
 	 * the baseline a calibration is built against, and written back as whole
 	 * sections, which the camera checks before it stores anything and keeps a
 	 * copy to put back.
@@ -182,6 +182,14 @@ window.MajesticCalibrate = (function () {
 		},
 		persist: function (ini) {
 			return readKeys().then(function (was) {
+				/* Armed before the write, not after it: a camera that takes
+				 * the POST while the page is closing never gets its answer
+				 * back, and the unload handler has to know there may be
+				 * something to put back. A restore with nothing written is
+				 * answered 409 and changes nothing. */
+				written = 'profile';
+				profileWas = null;
+				armUnloadRevert();
 				return profilePost('', ini).then(function (said) {
 					/* Firmware that predates writing a profile answers a POST
 					 * to this route the way it answers a GET -- with the
@@ -190,11 +198,22 @@ window.MajesticCalibrate = (function () {
 					if (!/written to/.test(said))
 						throw new Error('This camera\'s firmware cannot save into its image ' +
 							'profile; update it to keep a calibration.');
-					written = 'profile';
-					armUnloadRevert();
-					if (was.colorMatrix === null) { profileWas = null; return; }
-					profileWas = was;
-					return setKeys(null, was.dngColorMatrix);
+					if (was.colorMatrix === null) return;
+					/* The manual matrix goes, or the calibration under it
+					 * would never be seen. If the camera will not let it go,
+					 * the save has not done what it was for: the profile is
+					 * put back at once rather than left for a revert that the
+					 * caller, handed an error, has no reason to ask for. */
+					return setKeys(null, was.dngColorMatrix)
+						.then(function () { profileWas = was; })
+						.catch(function (err) {
+							return profilePost('?restore=1').catch(function () {})
+								.then(function () { throw err; });
+						});
+				}).catch(function (err) {
+					written = null;
+					profileWas = null;
+					throw err;
 				});
 			});
 		},
@@ -223,7 +242,10 @@ window.MajesticCalibrate = (function () {
 		keep: function () {
 			if (written === 'profile') {
 				return profilePost('?keep=1').then(function () {
-					written = null; profileWas = null;
+					/* All of it: a matrix checkpoint still armed from an
+					 * earlier Apply would otherwise be posted by the unload
+					 * handler over the calibration just kept. */
+					written = null; profileWas = null; previous = null;
 				});
 			}
 			previous = null;
