@@ -9,14 +9,19 @@
 <%# The upper layer is read from the root mount, as sbin/updatewebui does, not
     guessed from a path. On the 3.10 out-of-tree "overlayfs" the upperdir is
     /overlay itself, so /overlay/root there is root's home directory, and the
-    old probe charted that 1 KB as if it were the whole overlay (firmware#2470). %>
+    old probe charted that 1 KB as if it were the whole overlay. %>
 <% ovd=$(awk '$2 == "/" && ($3 == "overlay" || $3 == "overlayfs") { n = split($4, o, ","); for (i = 1; i <= n; i++) if (o[i] ~ /^upperdir=/) { print substr(o[i], 10); exit } }' /proc/mounts) %>
 <% [ -n "$ovd" ] && [ -d "$ovd" ] || ovd=/overlay %>
 <% ov_df=$(df -k /overlay 2>/dev/null | awk 'NR==2{printf "%d %d %d",$2,$3,$4}') %>
 <% ov_total=$(echo $ov_df | cut -d' ' -f1) %>
 <% ov_used=$(echo $ov_df | cut -d' ' -f2) %>
 <% ov_avail=$(echo $ov_df | cut -d' ' -f3) %>
-<% ov_cats=$(du -sk "$ovd"/* 2>/dev/null | sort -rn | awk '{n=$2; sub(/.*\//,"",n); printf "%s{\"name\":\"%s\",\"kb\":%d}",(NR>1?",":""),n,$1}') %>
+<%# A top-level name in the upper layer is whatever someone wrote to /, so it is
+    escaped for the JSON string and for the <script> block it lands in: taken
+    whole rather than as $2 (a space would split it), then \ " and < encoded
+    one character at a time, since busybox and gawk disagree on backslashes
+    in a gsub() replacement. %>
+<% ov_cats=$(du -sk "$ovd"/* 2>/dev/null | sort -rn | awk '{n=$0; sub(/^[0-9]+[ \t]+/,"",n); sub(/.*\//,"",n); e=""; for (i = 1; i <= length(n); i++) { c = substr(n, i, 1); if (c == "\\" || c == "\"") e = e "\\" c; else if (c == "<") e = e "\\u003c"; else e = e c }; printf "%s{\"name\":\"%s\",\"kb\":%d}",(NR>1?",":""),e,$1}') %>
 <% sd_rows=$(df -h 2>/dev/null | awk '/mmcblk|\/mnt\/|\/media\/|\/sdcard/{print $6"|"$3" / "$2"|"$5}') %>
 <%# One row per interface that is up and addressed — common.cgi's network_*
     variables describe only the first default route's device, which hides the
