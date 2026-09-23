@@ -204,8 +204,11 @@ window.MajesticCalibrate = (function () {
 					 * the save has not done what it was for: the profile is
 					 * put back at once rather than left for a revert that the
 					 * caller, handed an error, has no reason to ask for. */
+					/* Checkpointed before the request, like the profile: a page
+					 * that closes once the camera has dropped the matrix but
+					 * before the answer arrives must still put it back. */
+					profileWas = was;
 					return setKeys(null, was.dngColorMatrix)
-						.then(function () { profileWas = was; })
 						.catch(function (err) {
 							return profilePost('?restore=1').catch(function () {})
 								.then(function () { throw err; });

@@ -23,7 +23,7 @@ function makeCamera(opts) {
 	const cam = {
 		config: { isp: Object.assign({}, opts.isp) },
 		configPosts: [], profilePosts: [], beacons: [],
-		profile: '[static_awb]\nAutoStaticWb = "483, 256, 256, 465"\n',
+		profile: '[section]\nkey = "1"\n',
 	};
 	cam.apiFetch = function (url, init) {
 		init = init || {};
@@ -50,12 +50,12 @@ function makeCamera(opts) {
 			cam.profilePosts.push({ url: url, body: init.body });
 			if (/restore=1/.test(url)) return text('put back\n');
 			if (/keep=1/.test(url)) return text('kept\n');
-			if (opts.refuse) return text('[static_ccm] would be refused (present but unreadable)\n', 400);
+			if (opts.refuse) return text('[section] would be refused\n', 400);
 			// A save the camera takes but whose answer has not come back yet.
 			if (opts.hold) return new Promise(function (res) {
-				cam.release = function () { res(text('[static_awb] written to the profile and applied\n')); };
+				cam.release = function () { res(text('[section] written to the profile and applied\n')); };
 			});
-			return text('[static_awb] written to the profile and applied\n');
+			return text('[section] written to the profile and applied\n');
 		}
 		throw new Error('unexpected url ' + url);
 	};
@@ -76,7 +76,7 @@ function load(cam) {
 	return { api: sandbox.MajesticCalibrate, handlers: handlers };
 }
 
-const INI = '[static_awb]\nAutoStaticWb = "470, 256, 256, 455"\n';
+const INI = '[section]\nkey = "2"\n';
 const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1], neutral: [0.5, 1, 0.5] };
 
 (async () => {
