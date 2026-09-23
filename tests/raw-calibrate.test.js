@@ -57,6 +57,7 @@ function makeCamera(opts) {
 			cam.profilePosts.push({ url: url, body: init.body });
 			if (/restore=1/.test(url)) return text('put back\n');
 			if (/keep=1/.test(url)) return text('kept\n');
+			if (opts.lostReply) return Promise.reject(new TypeError('network error'));
 			if (opts.refuse) return text('[section] would be refused\n', 400);
 			// A save the camera takes but whose answer has not come back yet.
 			if (opts.hold) return new Promise(function (res) {
@@ -182,6 +183,18 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	err = '';
 	try { await api.persist(INI); } catch (e) { err = e.message; }
 	check('the download is recognised for what it is', /cannot save/.test(err), err);
+
+	group('a save whose reply is lost asks for the profile back; a refused one does not');
+
+	cam = makeCamera({ lostReply: true });
+	({ api } = load(cam));
+	try { await api.persist(INI); } catch (e) { /* expected */ }
+	check('a lost reply is followed by a restore',
+		cam.profilePosts.some((p) => /restore=1/.test(p.url)));
+	cam = makeCamera({ refuse: true });
+	({ api } = load(cam));
+	try { await api.persist(INI); } catch (e) { /* expected */ }
+	check('a refusal is not', !cam.profilePosts.some((p) => /restore=1/.test(p.url)));
 
 	group('a save that fails after the matrix went puts the matrix back too');
 

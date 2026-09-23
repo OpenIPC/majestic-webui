@@ -157,14 +157,18 @@ window.MajesticCalibrate = (function () {
 			body: body || '',
 		}).then(function (r) {
 			return r.text().then(function (t) {
-				if (!r.ok) throw new Error((t || '').trim() || ('The camera answered ' + r.status + '.'));
+				/* An answer, even a refusal, says what the camera did; the
+				 * callers below tell that from no answer at all. */
+				const answered = function (e) { e.answered = true; return e; };
+				if (!r.ok)
+					throw answered(new Error((t || '').trim() || ('The camera answered ' + r.status + '.')));
 				/* Firmware that predates writing a profile answers a POST
 				 * here with its GET handler: the profile itself, as a file
 				 * to download. That is not a save, whatever the profile says. */
 				const disp = r.headers && r.headers.get && r.headers.get('Content-Disposition');
 				if (disp && /attachment/i.test(disp))
-					throw new Error('This camera\'s firmware cannot save into its image ' +
-						'profile; update it to keep a calibration.');
+					throw answered(new Error('This camera\'s firmware cannot save into its image ' +
+						'profile; update it to keep a calibration.'));
 				return t;
 			});
 		});
@@ -202,9 +206,12 @@ window.MajesticCalibrate = (function () {
 					 * to this route the way it answers a GET -- with the
 					 * profile, and 200. That is not a save, and must not be
 					 * reported as one. */
-					if (!/^\[\w+\] written to \S/m.test(said))
-						throw new Error('This camera\'s firmware cannot save into its image ' +
+					if (!/^\[\w+\] written to \S/m.test(said)) {
+						const e = new Error('This camera\'s firmware cannot save into its image ' +
 							'profile; update it to keep a calibration.');
+						e.answered = true;
+						throw e;
+					}
 					if (was.colorMatrix === null) return;
 					/* The manual matrix goes, or the calibration under it
 					 * would never be seen. If the camera will not let it go,
@@ -226,6 +233,7 @@ window.MajesticCalibrate = (function () {
 									'would hide the saved calibration; the profile was put back.');
 						})
 						.catch(function (err) {
+							err.undone = true;
 							/* Undo both halves: the matrix may already be gone
 							 * even though what came after it failed. Each is
 							 * tried whatever the other does. */
@@ -237,9 +245,18 @@ window.MajesticCalibrate = (function () {
 								.then(function () { throw err; });
 						});
 				}).catch(function (err) {
-					written = null;
-					profileWas = null;
-					throw err;
+					/* No answer to the save -- the connection dropped, the reply
+					 * was lost -- is not proof the camera did not write it, so
+					 * the profile is asked back. A camera that answered, with a
+					 * refusal or as old firmware, wrote nothing, and a restore
+					 * then could only undo something older. */
+					const settle = err.answered || err.undone ? Promise.resolve()
+						: profilePost('?restore=1').catch(function () {});
+					return settle.then(function () {
+						written = null;
+						profileWas = null;
+						throw err;
+					});
 				});
 			});
 		},
