@@ -87,6 +87,7 @@ if [ -n "$webui_lpr_base" ]; then
 # not one it discovers in a rejected promise.
 %>
 <script src="/a/raw-plates.js"></script>
+<script src="/a/raw-calibrate.js"></script>
 <script src="/a/raw.js"></script>
 
 <%in p/footer.cgi %>
