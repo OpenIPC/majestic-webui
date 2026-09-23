@@ -6,7 +6,12 @@
 <%in p/header.cgi %>
 
 <% overlay_use=$(df -h /overlay 2>/dev/null | awk 'NR==2{print $3" of "$2" used"}') %>
-<% ovd=/overlay/root; [ -d "$ovd" ] || ovd=/overlay/upper; [ -d "$ovd" ] || ovd=/overlay %>
+<%# The upper layer is read from the root mount, as sbin/updatewebui does, not
+    guessed from a path. On the 3.10 out-of-tree "overlayfs" the upperdir is
+    /overlay itself, so /overlay/root there is root's home directory, and the
+    old probe charted that 1 KB as if it were the whole overlay (firmware#2470). %>
+<% ovd=$(awk '$2 == "/" && ($3 == "overlay" || $3 == "overlayfs") { n = split($4, o, ","); for (i = 1; i <= n; i++) if (o[i] ~ /^upperdir=/) { print substr(o[i], 10); exit } }' /proc/mounts) %>
+<% [ -n "$ovd" ] && [ -d "$ovd" ] || ovd=/overlay %>
 <% ov_df=$(df -k /overlay 2>/dev/null | awk 'NR==2{printf "%d %d %d",$2,$3,$4}') %>
 <% ov_total=$(echo $ov_df | cut -d' ' -f1) %>
 <% ov_used=$(echo $ov_df | cut -d' ' -f2) %>
