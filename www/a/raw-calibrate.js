@@ -292,8 +292,13 @@ window.MajesticCalibrate = (function () {
 		revert: function () {
 			if (written === 'profile') {
 				const keys = profileWas;
-				return profilePost('?restore=1')
-					.then(function () {
+				/* putBack(), not a bare restore: an earlier attempt may have put
+				 * the profile back and then failed on the matrix, and a retry is
+				 * then answered "nothing to put back" -- which is done, not an
+				 * error, and must not stop the matrix being restored. */
+				return putBack()
+					.then(function (ok) {
+						if (!ok) throw new Error('The camera could not be asked for its profile back.');
 						if (!keys) return;
 						return setKeys(keys.colorMatrix, keys.dngColorMatrix)
 							.then(function () { return confirmRestored(keys); });

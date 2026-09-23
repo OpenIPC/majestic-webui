@@ -38,7 +38,7 @@ function makeCamera(opts) {
 		if (url === '/api/v1/config') {
 			const body = JSON.parse(init.body);
 			cam.configPosts.push(body);
-			if (opts.rejectConfig) return Promise.resolve({ ok: false, status: 500 });
+			if (opts.rejectConfig || cam.configDown) return Promise.resolve({ ok: false, status: 500 });
 			Object.keys(body.isp).forEach(function (k) {
 				if (body.isp[k] === null) { if (!opts.ignoreNulls) delete cam.config.isp[k]; }
 				else cam.config.isp[k] = body.isp[k];
@@ -57,7 +57,9 @@ function makeCamera(opts) {
 			cam.profilePosts.push({ url: url, body: init.body });
 			if (/restore=1/.test(url)) {
 				if (opts.restoreDown) return Promise.reject(new TypeError('network error'));
-				if (opts.nothingToRestore) return text('nothing to put back: no earlier copy\n', 409);
+				if (opts.nothingToRestore || (opts.restoreOnce && cam.restored))
+					return text('nothing to put back: no earlier copy\n', 409);
+				cam.restored = true;
 				return text('put back\n');
 			}
 			if (/keep=1/.test(url)) return text('kept\n');
@@ -218,6 +220,21 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 		!/could not be put back/.test(err), err);
 	(L.handlers.pagehide || []).forEach((fn) => fn());
 	check('and leaves nothing armed', cam.beacons.length === 0);
+
+	group('a put-back that fails half way can be tried again');
+
+	cam = makeCamera({ isp: { colorMatrix: 'm', dngColorMatrix: 'd' }, restoreOnce: true });
+	({ api } = load(cam));
+	await api.persist(INI);
+	cam.configDown = true;
+	err = '';
+	try { await api.revert(); } catch (e) { err = e.message; }
+	check('the first put-back fails on the matrix', err !== '' && !('colorMatrix' in cam.config.isp), err);
+	cam.configDown = false;
+	err = '';
+	try { await api.revert(); } catch (e) { err = e.message; }
+	check('and the retry, told the profile is already back, restores the matrix',
+		err === '' && cam.config.isp.colorMatrix === 'm', err || JSON.stringify(cam.config.isp));
 
 	group('a save that fails after the matrix went puts the matrix back too');
 
