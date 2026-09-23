@@ -55,7 +55,11 @@ function makeCamera(opts) {
 			if (init.method !== 'POST' || opts.oldFirmware)
 				return text(cam.profile, 200, 'attachment; filename="profile.ini"');
 			cam.profilePosts.push({ url: url, body: init.body });
-			if (/restore=1/.test(url)) return text('put back\n');
+			if (/restore=1/.test(url)) {
+				if (opts.restoreDown) return Promise.reject(new TypeError('network error'));
+				if (opts.nothingToRestore) return text('nothing to put back: no earlier copy\n', 409);
+				return text('put back\n');
+			}
 			if (/keep=1/.test(url)) return text('kept\n');
 			if (opts.lostReply) return Promise.reject(new TypeError('network error'));
 			if (opts.refuse) return text('[section] would be refused\n', 400);
@@ -195,6 +199,25 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	({ api } = load(cam));
 	try { await api.persist(INI); } catch (e) { /* expected */ }
 	check('a refusal is not', !cam.profilePosts.some((p) => /restore=1/.test(p.url)));
+
+	group('when putting it back fails too, the way back stays armed');
+
+	cam = makeCamera({ lostReply: true, restoreDown: true });
+	L = load(cam); api = L.api;
+	err = '';
+	try { await api.persist(INI); } catch (e) { err = e.message; }
+	check('the caller is told it could not be put back', /could not be put back yet/.test(err), err);
+	(L.handlers.pagehide || []).forEach((fn) => fn());
+	check('and leaving the page still tries', cam.beacons.some((b) => /restore=1/.test(b.url)));
+
+	cam = makeCamera({ lostReply: true, nothingToRestore: true });
+	L = load(cam); api = L.api;
+	err = '';
+	try { await api.persist(INI); } catch (e) { err = e.message; }
+	check('a lost save that the camera says never landed is settled',
+		!/could not be put back/.test(err), err);
+	(L.handlers.pagehide || []).forEach((fn) => fn());
+	check('and leaves nothing armed', cam.beacons.length === 0);
 
 	group('a save that fails after the matrix went puts the matrix back too');
 

@@ -149,6 +149,14 @@ window.MajesticCalibrate = (function () {
 	 * calibration saved underneath one would never be seen. */
 	let profileWas = null;
 
+	/* Ask for the profile back. True when the camera is back as it was:
+	 * restored, or answering that there was nothing to put back (a 409 --
+	 * the write never landed). False when it could not be asked. */
+	function putBack() {
+		return profilePost('?restore=1').then(function () { return true; },
+			function (e) { return !!e.answered && /nothing to put back/.test(e.message); });
+	}
+
 	function profilePost(query, body) {
 		return apiFetch(PROFILE + (query || ''), {
 			method: 'POST',
@@ -246,13 +254,15 @@ window.MajesticCalibrate = (function () {
 							err.undone = true;
 							/* Undo both halves: the matrix may already be gone
 							 * even though what came after it failed. Each is
-							 * tried whatever the other does. */
-							return profilePost('?restore=1').catch(function () {})
-								.then(function () {
-									return setKeys(was.colorMatrix, was.dngColorMatrix)
-										.catch(function () {});
-								})
-								.then(function () { throw err; });
+							 * tried whatever the other does, and whether both
+							 * landed decides what happens to the checkpoint. */
+							return putBack().then(function (ok) {
+								return setKeys(was.colorMatrix, was.dngColorMatrix)
+									.then(function () { return ok; }, function () { return false; });
+							}).then(function (ok) {
+								err.recovered = ok;
+								throw err;
+							});
 						});
 				}).catch(function (err) {
 					/* No answer to the save -- the connection dropped, the reply
@@ -260,11 +270,20 @@ window.MajesticCalibrate = (function () {
 					 * the profile is asked back. A camera that answered, with a
 					 * refusal or as old firmware, wrote nothing, and a restore
 					 * then could only undo something older. */
-					const settle = err.answered || err.undone ? Promise.resolve()
-						: profilePost('?restore=1').catch(function () {});
-					return settle.then(function () {
-						written = null;
-						profileWas = null;
+					const settle = err.answered ? Promise.resolve(true)
+						: err.undone ? Promise.resolve(err.recovered)
+							: putBack();
+					return settle.then(function (recovered) {
+						/* The checkpoint is dropped only once the camera is known
+						 * to be back where it was. Otherwise it stays armed, so
+						 * Put it back -- or leaving the page -- tries again. */
+						if (recovered) {
+							written = null;
+							profileWas = null;
+						} else {
+							err.message += ' The camera could not be put back yet; use Put it ' +
+								'back to try again.';
+						}
 						throw err;
 					});
 				});
