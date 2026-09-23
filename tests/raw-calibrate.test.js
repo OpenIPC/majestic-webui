@@ -62,7 +62,12 @@ function makeCamera(opts) {
 				cam.restored = true;
 				return text('put back\n');
 			}
-			if (/keep=1/.test(url)) return text('kept\n');
+			if (/keep=1/.test(url)) {
+				if (opts.holdKeep) return new Promise(function (res) {
+					cam.releaseKeep = function () { res(text('kept\n')); };
+				});
+				return text('kept\n');
+			}
 			if (opts.lostReply) return Promise.reject(new TypeError('network error'));
 			if (opts.refuse) return text('[section] would be refused\n', 400);
 			// A save the camera takes but whose answer has not come back yet.
@@ -220,6 +225,18 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 		!/could not be put back/.test(err), err);
 	(L.handlers.pagehide || []).forEach((fn) => fn());
 	check('and leaves nothing armed', cam.beacons.length === 0);
+
+	group('leaving while Keep is on its way does not undo it');
+
+	cam = makeCamera({ holdKeep: true });
+	L = load(cam); api = L.api;
+	await api.persist(INI);
+	const keeping = api.keep();
+	for (let i = 0; i < 20 && !cam.releaseKeep; i++) await new Promise((r) => setImmediate(r));
+	(L.handlers.pagehide || []).forEach((fn) => fn());
+	check('no restore races the confirmation', !cam.beacons.some((b) => /restore=1/.test(b.url)));
+	cam.releaseKeep();
+	await keeping;
 
 	group('a put-back that fails half way can be tried again');
 

@@ -101,6 +101,7 @@ window.MajesticCalibrate = (function () {
 		if (unloadArmed) return;
 		unloadArmed = true;
 		window.addEventListener('pagehide', function () {
+			if (confirming) return;
 			if (written === 'profile') {
 				try {
 					fetch(PROFILE + '?restore=1', {
@@ -144,6 +145,9 @@ window.MajesticCalibrate = (function () {
 
 	/* Which of the two was written last, so revert() and keep() answer for it. */
 	let written = null;
+	/* Set while Keep is on its way to the camera: the operator has chosen, and
+	 * leaving the page then must not race a restore against the confirmation. */
+	let confirming = false;
 	/* isp.colorMatrix as it was before a profile was saved, when saving had to
 	 * clear it: a manual matrix is applied over the profile's own, and a
 	 * calibration saved underneath one would never be seen. */
@@ -318,11 +322,17 @@ window.MajesticCalibrate = (function () {
 		 * it kept to put back. */
 		keep: function () {
 			if (written === 'profile') {
+				confirming = true;
 				return profilePost('?keep=1').then(function () {
+					confirming = false;
 					/* All of it: a matrix checkpoint still armed from an
 					 * earlier Apply would otherwise be posted by the unload
 					 * handler over the calibration just kept. */
 					written = null; profileWas = null; previous = null;
+				}, function (err) {
+					/* Not confirmed after all: the way back is armed again. */
+					confirming = false;
+					throw err;
 				});
 			}
 			previous = null;
