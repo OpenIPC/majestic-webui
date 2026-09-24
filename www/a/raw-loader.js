@@ -21,7 +21,7 @@
  */
 window.MajesticRaw = (function () {
 	const BASE = (window.MJ_RAW_BASE ||
-		'https://cdn.jsdelivr.net/gh/OpenIPC/raw-editor@v0.15.0/dist/');
+		'https://cdn.jsdelivr.net/gh/OpenIPC/raw-editor@v0.16.0/dist/');
 	const LOAD_TIMEOUT_MS = 8000;
 
 	// Remembered for the session once the module has failed to arrive. Without
