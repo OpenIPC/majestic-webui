@@ -35,6 +35,45 @@ function load(opts) {
 		Math: Math, isFinite: isFinite, JSON: JSON,
 		setTimeout: setTimeout, clearTimeout: clearTimeout,
 		apiFetch: function (url, init) {
+			// The profile export and the config, which is where the filter
+			// lives at either end.
+			if (url.indexOf('/api/v1/isp/profile.ini') === 0) {
+				if (init && init.method === 'POST') {
+					state.profilePosts = state.profilePosts || [];
+					state.profilePosts.push(init.body);
+					if (opts.profileWriteFails)
+						return Promise.resolve({ ok: false, status: 500 });
+					// Firmware from before profile writes answers a POST with
+					// its GET handler: the profile itself, as a download.
+					return Promise.resolve({ ok: true, status: 200,
+						headers: { get: (h) => (/^content-disposition$/i.test(h) && opts.oldFirmware
+							? 'attachment; filename="profile.ini"' : null) } });
+				}
+				if (opts.noAfSection)
+					return Promise.resolve({ ok: true, status: 200,
+						text: () => Promise.resolve('[static_ccm]\nTotalNum = "3"\n') });
+				return Promise.resolve({ ok: true, status: 200,
+					text: () => Promise.resolve(opts.exportText !== undefined
+						? opts.exportText
+						: '[static_ccm]\nTotalNum = "3"\n\n[static_af]\n' +
+						  'IIR1Gain = "200, 200, -110, 461, -415, 0, 0"\n' +
+						  'IIR1Shift = "6, 0, 1, 0"\n' +
+						  'IIR1Enable = "1, 1, 0"\n' +
+						  'IIR1CoringTh = "15"\n' +
+						  'IIR1CoringSlp = "12"\n' +
+						  'IIR1CoringLmt = "2047"\n') });
+			}
+			if (url === '/api/v1/config.json') {
+				if (opts.snapshotFails)
+					return Promise.resolve({ ok: false, status: 500 });
+				return Promise.resolve({ ok: true, status: 200,
+					json: () => Promise.resolve({ isp: { af: opts.afKeys || {} } }) });
+			}
+			if (url === '/api/v1/config') {
+				state.configPosts = state.configPosts || [];
+				state.configPosts.push(JSON.parse(init.body));
+				return Promise.resolve({ ok: true, status: 200 });
+			}
 			// The capability line, and the moves that follow it.
 			if (url === '/ptz') {
 				state.ptzAsked = (state.ptzAsked || 0) + 1;
@@ -248,6 +287,114 @@ function load(opts) {
 	let moved = false;
 	await api.move('near').then(() => { moved = true; });
 	check('a lens that did move is not reported as a failure', moved);
+
+	group('the filter the camera is running, not the one it is configured with');
+
+	// An unset key is genuinely unset -- the value lives in the firmware or a
+	// sensor profile -- so reading the config would answer "nothing" for a
+	// camera running a perfectly good filter. The export is generated from the
+	// chip, so it says what is actually in force.
+	({ api, state } = load({}));
+	let f = await api.filters();
+	check('the gains come back, negatives intact',
+		f.gain.join(',') === '200,200,-110,461,-415,0,0', f.gain.join(','));
+	check('and the shifts', f.shift.join(',') === '6,0,1,0', f.shift.join(','));
+	check('and which sections are on', f.enable.join(',') === '1,1,0',
+		f.enable.join(','));
+	// Three keys in a profile, one list in the config: the profile names what
+	// the chip names, the config groups what is set together.
+	check('and coring, gathered from its three keys',
+		f.coring.join(',') === '15,12,2047', f.coring.join(','));
+
+	({ api } = load({ noAfSection: true }));
+	msg = '';
+	await api.filters().catch((e) => { msg = e.message; });
+	check('a firmware that reports no filter says so',
+		/does not report its focus filter/.test(msg), msg);
+
+	({ api } = load({ exportText: '[static_af]\nIIR1Gain = "1, 2"\n' }));
+	msg = '';
+	await api.filters().catch((e) => { msg = e.message; });
+	check('and a filter of the wrong shape is refused, not half read',
+		/could not read/.test(msg), msg);
+
+	group('a trial is put back where it was, not to nothing');
+
+	// The keys were unset before the trial, so putting it back has to REMOVE
+	// them: leaving them at the trial value would keep the change the operator
+	// asked to undo.
+	({ api, state } = load({}));
+	await api.applyFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
+		enable: [1, 0, 1], coring: [1, 2, 3] });
+	check('applying writes the four keys', Object.keys(
+		state.configPosts[state.configPosts.length - 1].isp.af).sort().join(',')
+		=== 'iir1Coring,iir1Enable,iir1Gain,iir1Shift',
+		Object.keys(state.configPosts[state.configPosts.length - 1].isp.af).join(','));
+	check('as the camera spells them',
+		state.configPosts[state.configPosts.length - 1].isp.af.iir1Gain === '1,2,3,4,5,6,7',
+		state.configPosts[state.configPosts.length - 1].isp.af.iir1Gain);
+	await api.revertFilters();
+	const back = state.configPosts[state.configPosts.length - 1].isp.af;
+	check('putting it back removes a key that was not there',
+		back.iir1Gain === null && back.iir1Shift === null, JSON.stringify(back));
+
+	// And a camera that HAD one goes back to that, not to nothing.
+	({ api, state } = load({ afKeys: { iir1Gain: '9,9,9,9,9,9,9' } }));
+	await api.applyFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
+		enable: [1, 0, 1], coring: [1, 2, 3] });
+	await api.revertFilters();
+	const back2 = state.configPosts[state.configPosts.length - 1].isp.af;
+	check('and restores one that was', back2.iir1Gain === '9,9,9,9,9,9,9',
+		String(back2.iir1Gain));
+
+	group('keeping writes it where a firmware image can carry it');
+
+	({ api, state } = load({}));
+	await api.keepFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
+		enable: [1, 0, 1], coring: [11, 12, 13] });
+	const ini = (state.profilePosts || [])[0] || '';
+	// The configuration goes with the overlay; the sensor profile is the file
+	// that ships inside an image.
+	check('the sensor profile is written', /\[static_af\]/.test(ini), ini.slice(0, 40));
+	check('with the gains', /IIR1Gain = "1, 2, 3, 4, 5, 6, 7"/.test(ini), ini);
+	check('and coring split back into the three keys the chip names',
+		/IIR1CoringTh = "11"/.test(ini) && /IIR1CoringSlp = "12"/.test(ini) &&
+		/IIR1CoringLmt = "13"/.test(ini), ini);
+
+	// A camera whose profile cannot be written has still kept the filter, and
+	// the countdown has already stood down -- so saying nothing would let an
+	// operator believe it had gone into the image.
+	({ api } = load({ profileWriteFails: true }));
+	msg = '';
+	await api.keepFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
+		enable: [1, 0, 1], coring: [1, 2, 3] }).catch((e) => { msg = e.message; });
+	check('a profile that will not take it says so plainly',
+		/set on this camera/.test(msg) && /firmware image/.test(msg), msg);
+
+	group('nothing is applied that cannot be put back');
+
+	// A read that failed says nothing about what the camera holds. Treating it
+	// as "there was nothing" makes the revert REMOVE keys the operator had set
+	// and this page never saw.
+	({ api, state } = load({ snapshotFails: true }));
+	msg = '';
+	await api.applyFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
+		enable: [1, 0, 1], coring: [1, 2, 3] }).catch((e) => { msg = e.message; });
+	check('a filter is not applied when the camera will not say what it holds',
+		/cannot be put back/.test(msg), msg || '(applied anyway)');
+	check('and nothing was written', (state.configPosts || []).length === 0,
+		String((state.configPosts || []).length));
+
+	group('an older camera does not get to say it saved');
+
+	// That firmware answers a POST here with its GET handler -- the profile as
+	// a file to download. A 200 from that is not a save.
+	({ api } = load({ oldFirmware: true }));
+	msg = '';
+	await api.keepFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
+		enable: [1, 0, 1], coring: [1, 2, 3] }).catch((e) => { msg = e.message; });
+	check('a download answered to a save is not a save',
+		/will not travel/.test(msg) && /update the camera/.test(msg), msg || '(reported saved)');
 
 	done();
 })();
