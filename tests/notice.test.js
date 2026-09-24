@@ -227,6 +227,10 @@ const EXPECTED = [
 	// is said when it does not arrive. It links back to itself because a fresh
 	// page load is the retry.
 	'cgi-bin/raw.cgi raw.cgi "Try again"',
+	// Reloading is the retry for the editor never arriving, exactly as on
+	// raw.cgi. The camera-has-no-AF notice next to it deliberately offers no
+	// action: nothing about asking again gives a part an AF block.
+	'cgi-bin/focus.cgi focus.cgi "Try again"',
 	'cgi-bin/p/header.cgi config.cgi "Configuration file"',
 	'cgi-bin/p/header.cgi network.cgi "Network settings"',
 	'cgi-bin/p/header.cgi network.cgi "Set the MAC address"',
