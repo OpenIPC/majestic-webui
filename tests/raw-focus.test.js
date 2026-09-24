@@ -396,5 +396,40 @@ function load(opts) {
 	check('a download answered to a save is not a save',
 		/will not travel/.test(msg) && /update the camera/.test(msg), msg || '(reported saved)');
 
+	group('the lens and the filter are separate capabilities');
+
+	// They were carried together: no motor meant the whole host object was
+	// replaced with a two-key stub, so a camera that was merely SLOW to say
+	// what its lens could do -- the motor probe has a deadline -- lost the
+	// ability to tune its filter as well.
+	{
+		const src = require('fs').readFileSync(
+			require('path').join(__dirname, '..', 'www', 'a', 'raw.js'), 'utf8');
+		const m = /function focusHost\(statsOk, motorOk\) \{[\s\S]*?\n\t\}/.exec(src);
+		check('raw.js composes the focus host', !!m);
+		const fn = new Function('window', 'return (' + m[0].replace('function focusHost', 'function') + ')');
+		const full = {
+			zones: () => {}, intervalMs: 1, move: () => {}, moveRepeatMs: 1, moveMaxMs: 1,
+			filters: () => {}, applyFilters: () => {}, revertFilters: () => {},
+			keepFilters: () => {}, holdSeconds: 30,
+		};
+		const host = fn({ MajesticFocus: full });
+		check('no motor still carries the filter controls',
+			typeof host(true, false).filters === 'function' &&
+			typeof host(true, false).applyFilters === 'function',
+			Object.keys(host(true, false)).join(','));
+		check('and carries no lens controls',
+			host(true, false).move === undefined, Object.keys(host(true, false)).join(','));
+		check('a motor carries both',
+			typeof host(true, true).move === 'function' &&
+			typeof host(true, true).filters === 'function');
+		const noFilt = Object.assign({}, full);
+		delete noFilt.revertFilters;
+		check('and a host that cannot put a filter back carries none of them',
+			fn({ MajesticFocus: noFilt })(true, true).filters === undefined);
+		check('no statistics, no capability at all',
+			host(false, true) === undefined);
+	}
+
 	done();
 })();
