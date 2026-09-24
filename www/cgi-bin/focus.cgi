@@ -42,7 +42,7 @@ hide_title=1; full_bleed=1
 	</div>
 
 	<h2 class="h5 mt-3">Sharpest zone</h2>
-	<p class="display-6 mb-1" id="focus-plain-peak">&mdash;</p>
+	<p class="h1 mb-1" id="focus-plain-peak">&mdash;</p>
 	<p class="mb-1" id="focus-plain-where"></p>
 	<p class="mb-1 text-secondary" id="focus-plain-counts"></p>
 	<span class="hint text-secondary">Turn the focus until this number stops
