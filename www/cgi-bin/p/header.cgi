@@ -114,10 +114,6 @@ Pragma: no-cache
 							<% fi %>
 							<li><a class="dropdown-item" href="stream-urls.cgi"><% page_label stream-urls %></a></li>
 							<li><a class="dropdown-item" href="raw.cgi"><% page_label raw %></a></li>
-							<!-- Next to Raw because it is the same editor, and above
-							     Config file because aiming a lens is a job someone does
-							     at the camera rather than a setting they edit. -->
-							<li><a class="dropdown-item" href="focus.cgi"><% page_label focus %></a></li>
 							<li><a class="dropdown-item" href="config.cgi"><% page_label config %></a></li>
 						</ul>
 					</li>

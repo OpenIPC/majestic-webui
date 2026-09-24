@@ -30,7 +30,6 @@ page_label() {
 	usb)            printf '%s' "USB" ;;
 	stream-urls)    printf '%s' "Stream URLs" ;;
 	raw)            printf '%s' "Raw" ;;
-	focus)          printf '%s' "Focus" ;;
 	config)         printf '%s' "Config file" ;;
 	# System
 	network)        printf '%s' "Network" ;;
