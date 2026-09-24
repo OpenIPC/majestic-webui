@@ -86,7 +86,7 @@
 			.then(function () { btn.disabled = false; });
 	}
 
-	function mount() {
+	function mount(focusReady) {
 		$('raw-fallback').hidden = true;
 		$('raw-loading').hidden = false;
 		const host = $('raw-editor-host');
@@ -108,6 +108,15 @@
 			 * pinned to the release that reads it. */
 			plates: (window.MajesticPlates && window.MajesticPlates.readerSupported)
 				? window.MajesticPlates : undefined,
+			/* Focus statistics, and only where the camera has any.
+			 *
+			 * Same rule as Plates above, answered from the other end: whether
+			 * a reader exists is a question about this browser, whether an AF
+			 * block exists is a question about the part -- so it is asked, once,
+			 * and the tab is grown on the answer. A camera with no AF loads the
+			 * editor perfectly well, so passing this regardless would grow a
+			 * Focus tab that could only apologise. */
+			focus: focusReady ? window.MajesticFocus : undefined,
 			// The editor covers the navbar, so its Back button is the only way
 			// out of this page. It goes where the nav entry came from.
 			onExit: function () { location.href = 'camera.cgi'; },
@@ -130,7 +139,12 @@
 			fallback(new Error('unsupported-browser'));
 			return;
 		}
-		mount();
+		// Started when raw-focus.js loaded, so this is usually already settled;
+		// it is awaited rather than raced because the Focus tab is created at
+		// mount and cannot be grown afterwards.
+		const ready = (window.MajesticFocus && window.MajesticFocus.ready) ||
+			Promise.resolve(false);
+		ready.then(mount, function () { mount(false); });
 	});
 
 	// Kept reachable for a console poke and so the editor is not garbage from

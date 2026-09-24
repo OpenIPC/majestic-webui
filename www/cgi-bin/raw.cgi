@@ -88,6 +88,7 @@ if [ -n "$webui_lpr_base" ]; then
 %>
 <script src="/a/raw-plates.js"></script>
 <script src="/a/raw-calibrate.js"></script>
+<script src="/a/raw-focus.js"></script>
 <script src="/a/raw.js"></script>
 
 <%in p/footer.cgi %>
