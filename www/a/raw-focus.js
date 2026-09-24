@@ -24,6 +24,73 @@ window.MajesticFocus = (function () {
 	 * An optional tab must not be able to cost the page its main function. */
 	const PROBE_TIMEOUT_MS = 4000;
 
+	/* Hold-to-run, in the motor's own terms.
+	 *
+	 * A move runs until this many milliseconds pass without another command for
+	 * it, so the camera's stop is a deadline rather than an instruction and the
+	 * lens keeps going only while the page keeps asking. HOLD_MS is therefore
+	 * how long it overruns after the button comes up, and REPEAT_MS has to be
+	 * comfortably shorter or the motion stutters as each pulse lapses before the
+	 * next arrives.
+	 *
+	 * Deliberately not isp.autofocus.pulse, which the camera reports and which
+	 * sizes a single operator nudge. Here the value is a timeout, and the
+	 * default 500 ms would leave a lens creeping half a second past the release
+	 * -- on a lens this is overshoot the operator then has to correct. */
+	const HOLD_MS = 400;
+	const REPEAT_MS = 200;
+
+	/*
+	 * One move. `&ms=` rather than a duration glued to the verb: both reach the
+	 * daemon, but www/a/preview-ptz.js already drives this endpoint and one
+	 * encoding for one thing is the point.
+	 *
+	 * THE BODY DECIDES, NOT THE STATUS, and that is not caution -- it is the
+	 * lesson preview-ptz.js already paid for. majestic answers /ptz with a
+	 * BODYLESS 200 when the sensor driver did not come up, and the plugin
+	 * answers `unavailable`, also 200, when the focus port is shut -- the state
+	 * a camera lands in when the motorised-lens setting is toggled without a
+	 * restart. A status check calls both of those a move, and the editor would
+	 * go on holding a button against a lens that never twitched.
+	 */
+	function move(verb) {
+		let url = '/ptz?move=' + encodeURIComponent(verb);
+		if (verb !== 'stop') url += '&ms=' + HOLD_MS;
+		return apiFetch(url, { method: 'POST', credentials: 'same-origin' })
+			.then(function (r) {
+				if (!r.ok) throw new Error('the camera answered ' + r.status);
+				return r.text();
+			})
+			.then(function (body) {
+				const said = (body || '').trim();
+				if (said === 'unavailable')
+					throw new Error('the camera is not driving the lens — restart ' +
+						'majestic to load the motor driver');
+				if (!said)
+					throw new Error('the camera did not answer the move');
+				return said;
+			});
+	}
+
+	/* The lens is asked what it can do, not assumed. `GET /ptz` answers a
+	 * capability line -- actuator, port, state and the verbs this actuator's
+	 * protocol actually carries -- and a camera with no motor plugin answers 404
+	 * instead. Both near and far are required: a control that can only drive one
+	 * way is a trap, because the way back is the one that is missing. */
+	function canMove() {
+		return apiFetch('/ptz', { credentials: 'same-origin' })
+			.then(function (r) {
+				if (!r.ok) return false;
+				return r.text().then(function (line) {
+					const m = /(^|\s)verbs=([^\s]*)/.exec(line || '');
+					if (!m) return false;
+					const verbs = m[2].split(',');
+					return verbs.indexOf('near') >= 0 && verbs.indexOf('far') >= 0;
+				});
+			})
+			.catch(function () { return false; });
+	}
+
 	function zones() {
 		return apiFetch('/api/v1/isp/af-zones.json', { credentials: 'same-origin' })
 			.then(function (r) {
@@ -92,5 +159,18 @@ window.MajesticFocus = (function () {
 		}),
 	]);
 
-	return { zones: zones, intervalMs: INTERVAL_MS, ready: ready };
+	/* Answered alongside the grid probe rather than after it: both are asked at
+	 * load and the editor waits on the pair, so a camera that has a motor but no
+	 * AF statistics still costs one round trip rather than two in series. */
+	const motor = Promise.race([
+		canMove(),
+		new Promise(function (resolve) {
+			setTimeout(function () { resolve(false); }, PROBE_TIMEOUT_MS);
+		}),
+	]);
+
+	return {
+		zones: zones, intervalMs: INTERVAL_MS, ready: ready,
+		move: move, moveRepeatMs: REPEAT_MS, motor: motor,
+	};
 })();

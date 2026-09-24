@@ -86,7 +86,18 @@
 			.then(function () { btn.disabled = false; });
 	}
 
-	function mount(focusReady) {
+	/* What the editor is handed for `focus`, which is not simply the host
+	 * object: the editor decides whether to grow the Near/Far buttons by
+	 * looking for a `move` on it, so a camera with statistics but no motor must
+	 * be handed an object that does not carry one. */
+	function focusHost(statsOk, motorOk) {
+		const f = window.MajesticFocus;
+		if (!statsOk || !f) return undefined;
+		if (motorOk) return f;
+		return { zones: f.zones, intervalMs: f.intervalMs };
+	}
+
+	function mount(focusReady, motorReady) {
 		$('raw-fallback').hidden = true;
 		$('raw-loading').hidden = false;
 		const host = $('raw-editor-host');
@@ -116,7 +127,7 @@
 			 * and the tab is grown on the answer. A camera with no AF loads the
 			 * editor perfectly well, so passing this regardless would grow a
 			 * Focus tab that could only apologise. */
-			focus: focusReady ? window.MajesticFocus : undefined,
+			focus: focusHost(focusReady, motorReady),
 			// The editor covers the navbar, so its Back button is the only way
 			// out of this page. It goes where the nav entry came from.
 			onExit: function () { location.href = 'camera.cgi'; },
@@ -142,9 +153,14 @@
 		// Started when raw-focus.js loaded, so this is usually already settled;
 		// it is awaited rather than raced because the Focus tab is created at
 		// mount and cannot be grown afterwards.
-		const ready = (window.MajesticFocus && window.MajesticFocus.ready) ||
-			Promise.resolve(false);
-		ready.then(mount, function () { mount(false); });
+		const f = window.MajesticFocus;
+		// Both asked at load and awaited together, so a camera answering one
+		// slowly does not add its wait to the other's.
+		Promise.all([
+			(f && f.ready) || Promise.resolve(false),
+			(f && f.motor) || Promise.resolve(false),
+		]).then(function (r) { mount(r[0], r[1]); },
+			function () { mount(false, false); });
 	});
 
 	// Kept reachable for a console poke and so the editor is not garbage from
