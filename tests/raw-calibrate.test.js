@@ -118,6 +118,52 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	check('putting it back asks the camera for its previous profile',
 		cam.profilePosts.length === 2 && /restore=1/.test(cam.profilePosts[1].url));
 
+	group('a section can be patched in without the colour matrix being touched');
+
+	/*
+	 * patchProfile() exists because persist() drops the manual colour matrix
+	 * on its way past -- right for a calibration that would otherwise be
+	 * hidden by one, and destructive for a caller changing some unrelated
+	 * section, which would silently lose the operator's colour settings.
+	 */
+	const DPC = '[ir_static_dpc]\nDpcEnable = "1"\n';
+	cam = makeCamera({ isp: { colorMatrix: '1 0 0 0 1 0 0 0 1', dngColorMatrix: 'x' } });
+	({ api } = load(cam));
+	await api.patchProfile(DPC);
+	check('the section goes to the camera verbatim',
+		cam.profilePosts.length === 1 && cam.profilePosts[0].body === DPC);
+	check('and the colour matrix is left exactly where it was',
+		cam.config.isp.colorMatrix === '1 0 0 0 1 0 0 0 1' && cam.configPosts.length === 0);
+	await api.revert();
+	check('putting it back asks the camera, and touches no keys',
+		cam.profilePosts.length === 2 && /restore=1/.test(cam.profilePosts[1].url) &&
+		cam.configPosts.length === 0);
+
+	cam = makeCamera();
+	({ api } = load(cam));
+	await api.patchProfile(DPC);
+	let refused = null;
+	try { await api.patchProfile(DPC); } catch (e) { refused = e; }
+	check('a second patch is refused while the first is still waiting',
+		!!refused && /kept or put back/.test(refused.message));
+
+	cam = makeCamera({ oldFirmware: true });
+	({ api } = load(cam));
+	let old_ = null;
+	try { await api.patchProfile(DPC); } catch (e) { old_ = e; }
+	check('a camera that answers a POST with the profile is not taken for a save',
+		!!old_ && /instead of saving/.test(old_.message), old_ && old_.message);
+	/*
+	 * And it must leave the way open to try again. The refusal is thrown from
+	 * the fulfillment handler, which a rejection handler passed beside it does
+	 * not see -- so the checkpoint stayed armed and every later patch was
+	 * refused for a change that never happened.
+	 */
+	let again = null;
+	try { await api.patchProfile(DPC); } catch (e) { again = e; }
+	check('and does not lock the profile against a second attempt',
+		!!again && !/kept or put back/.test(again.message), again && again.message);
+
 	group('a manual colour matrix is cleared, or the saved calibration would never be seen');
 
 	cam = makeCamera({ isp: { colorMatrix: '1 0 0 0 1 0 0 0 1', dngColorMatrix: 'x' } });
@@ -155,7 +201,7 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	({ api } = load(cam));
 	let err = '';
 	try { await api.persist(INI); } catch (e) { err = e.message; }
-	check('a 200 carrying the profile back is not a save', /cannot save/.test(err), err);
+	check('a 200 carrying the profile back is not a save', /instead of saving/.test(err), err);
 
 	cam = makeCamera({ refuse: true });
 	({ api } = load(cam));
@@ -193,7 +239,7 @@ const SOLVED = { ccm: [1, 0, 0, 0, 1, 0, 0, 0, 1], colorMatrix: [1, 0, 0, 0, 1, 
 	({ api } = load(cam));
 	err = '';
 	try { await api.persist(INI); } catch (e) { err = e.message; }
-	check('the download is recognised for what it is', /cannot save/.test(err), err);
+	check('the download is recognised for what it is', /instead of saving/.test(err), err);
 
 	group('a save whose reply is lost asks for the profile back; a refused one does not');
 
