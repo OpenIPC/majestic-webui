@@ -1393,7 +1393,19 @@ mark {
    for, so the band does not grow when they dock. Left-aligned, because a band
    centred in the column reads as the full-size picture that failed to shrink. */
 .mj-live-pin.mj-live-pinned {
-	padding-block: 0.5rem;
+	top: 0.5rem;
+}
+
+/* The band's surface is drawn outside its box, not as padding: padding would
+   make the band taller than the picture it replaced wherever the picture does
+   not shrink (a phone, where the column is already narrower than the band's
+   cap), and the spacer cannot give back height it never had, so everything
+   below jumped 16px on pinning. */
+.mj-live-pin.mj-live-pinned::before {
+	content: "";
+	position: absolute;
+	inset: -0.5rem 0 -0.5rem;
+	z-index: -1;
 	background: var(--bs-body-bg);
 	box-shadow: 0 10px 18px -8px rgba(0, 0, 0, 0.45);
 }

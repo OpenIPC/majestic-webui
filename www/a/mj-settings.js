@@ -1373,7 +1373,9 @@
 			}
 			const h = pin.offsetHeight;
 			gap.style.height = Math.max(0, full - h) + 'px';
-			root.style.scrollPaddingTop = h + 'px';
+			// Plus the 0.5rem the band is pinned below the top, and the 0.5rem
+			// of surface it draws under itself.
+			root.style.scrollPaddingTop = 'calc(' + h + 'px + 1rem)';
 		};
 
 		const set = (want) => {
