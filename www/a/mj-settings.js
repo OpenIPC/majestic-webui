@@ -1325,6 +1325,190 @@
 			'</span>';
 	}
 
+	// The picture follows the page down (#580). It is sized to fill the window
+	// above the knob strip, so everything under the deck (ISP / Exposure is 13
+	// fields and 828px at 1440x900) used to be reachable only by scrolling
+	// the picture off the top, and the page is called Live adjustments.
+	//
+	// Once the picture's top reaches the top of the window it stays there and
+	// shrinks as the page scrolls, a pixel of height for each pixel of scroll,
+	// until the band holds 42% of the window; after that the page scrolls
+	// under it. It shrinks WITH the scroll rather than in one step because a
+	// step leaves the height it gave up as an empty strip between the band and
+	// the controls, which then took the next 160px of scrolling to close.
+	//
+	// Nothing below the band moves on its own account. The height the band
+	// gives up goes to a spacer in flow after it, so the document is the same
+	// height at every offset and the offset that decides the band's size never
+	// moves under it. The full height is read while unpinned, and a window
+	// resized while pinned (a phone turned on its side) is measured again for
+	// it: kept, the old figure turned a 1440px window into a 390px one with
+	// the toggle column still beside a 170px picture and 400px of nothing
+	// under the band.
+	//
+	// The runtime toggles stop fitting on the picture's bar as it narrows and
+	// dock (dockRuntime). Where the window leaves room beside the compact
+	// picture they dock BESIDE it, into space the band has anyway; under it
+	// they would add a row partway through the shrink, and the picture would
+	// have to jump smaller to pay for it. Where there is no room — a phone,
+	// where the picture is already as wide as the column — they stay under it,
+	// and the picture is sized to leave them the room.
+	//
+	// Covering what scrolls under it is this design's price, so while pinned
+	// every element of the form but the band's own carries the band's height
+	// as its scroll-margin: a field reached by Tab, by search or by
+	// scrollIntoView stops below the band and not behind it. Not the page's
+	// scroll-padding, which it was at first: that reserves the strip for
+	// everything, the band's own controls included, and they sit inside it
+	// for good — so every press of Night focused a checkbox the browser then
+	// "revealed" by scrolling the page up, a band's height per click, until
+	// the band unpinned.
+	function pinStage(stage, rtMount, dock) {
+		const pin = el('div', 'mj-live-pin');
+		const at = el('div', 'mj-live-pin-at');
+		const gap = el('div', 'mj-live-pin-gap');
+		stage.parentNode.insertBefore(at, stage);
+		at.after(pin);
+		// A move within one task: the media element is back in the document
+		// before the platform would pause a removed one.
+		pin.appendChild(stage);
+		if (rtMount) pin.appendChild(rtMount);
+		pin.after(gap);
+
+		const host = pin.parentNode;
+		// The room the docked toggles need beside the picture: .mj-pin-side
+		// gives the mount this as its minimum width, plus the column gap.
+		const SIDE = 10.5;
+		let pinned = false;
+		let full = 0;
+		let resized = false;
+		let pending = false;
+
+		const rem = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+		const docked = () => !!rtMount && !rtMount.hidden;
+
+		// The size the band would have unpinned, read while it is pinned.
+		// Everything the band changed comes off for one synchronous read and
+		// goes straight back, so nothing is painted in between; the page's
+		// scroll anchoring is off for it, or the browser could move the page
+		// to follow content the band pushed down for no frame at all.
+		//
+		// Whether the toggles sit under the full-size picture is asked of
+		// dockRuntime rather than carried over from before the resize: it is
+		// the one thing a resize is most likely to change (they fit on the
+		// bar at 1440px and not at 390), and a stale answer is a row's height
+		// of gap, or of overlap, under the band. The compact picture has
+		// docked them by now, so when they would dock at full size they are
+		// already in the row being measured; when they would not, it is hidden.
+		const remeasure = () => {
+			const root = document.documentElement;
+			const anchor = root.style.overflowAnchor;
+			const cls = pin.className;
+			const width = stage.style.width;
+			const wasDocked = stage.classList.contains('mj-live-docked');
+			const wasHidden = rtMount ? rtMount.hidden : true;
+			root.style.overflowAnchor = 'none';
+			pin.className = 'mj-live-pin';
+			stage.style.width = '';
+			stage.classList.remove('mj-live-docked');
+			if (rtMount) rtMount.hidden = true;
+			if (rtMount && rtMount.children.length && dock && !dock.fits()) {
+				stage.classList.add('mj-live-docked');
+				rtMount.hidden = false;
+			}
+			full = pin.offsetHeight;
+			pin.className = cls;
+			stage.style.width = width;
+			stage.classList.toggle('mj-live-docked', wasDocked);
+			if (rtMount) rtMount.hidden = wasHidden;
+			root.style.overflowAnchor = anchor;
+		};
+
+		// Beside the picture or under it, judged on the compact size. Made
+		// when a trip down the page begins and again after a resize, and never
+		// by scrolling alone, so the toggles do not change sides partway
+		// through the shrink.
+		const decide = (room, floor) => {
+			pin.classList.toggle('mj-pin-side',
+				room - floor * 16 / 9 >= SIDE * rem() + 12);
+		};
+
+		const unpin = () => {
+			pinned = false;
+			pin.classList.remove('mj-live-pinned', 'mj-pin-side');
+			stage.style.width = '';
+			gap.style.height = '';
+			host.style.removeProperty('--mj-pin-reach');
+		};
+
+		const place = () => {
+			pending = false;
+			// How far past its sticking point the band has been carried: the
+			// sentinel sits where the band's top would be, and the band sticks
+			// at its own `top`.
+			const stick = parseFloat(getComputedStyle(pin).top) || 0;
+			const s = stick - at.getBoundingClientRect().top;
+			if (s <= 0) {
+				if (pinned) unpin();
+				resized = false;
+				full = pin.offsetHeight;
+				return;
+			}
+			const room = pin.clientWidth;
+			if (!pinned) {
+				resized = false;
+				full = pin.offsetHeight;
+				pinned = true;
+				pin.classList.add('mj-live-pinned');
+				decide(room, Math.min(full, Math.round(window.innerHeight * 0.42)));
+			} else if (resized) {
+				resized = false;
+				remeasure();
+				decide(room, Math.min(full, Math.round(window.innerHeight * 0.42)));
+			}
+			const floor = Math.min(full, Math.round(window.innerHeight * 0.42));
+			const side = pin.classList.contains('mj-pin-side');
+			const band = Math.max(floor, full - s);
+			// What of the band the picture may have: all of it beside the
+			// toggles, all but their row under them.
+			const under = !side && docked() ? pin.offsetHeight - stage.offsetHeight : 0;
+			const beside = side && docked() ? SIDE * rem() + 12 : 0;
+			const w = Math.min(room - beside, (band - under) * 16 / 9);
+			stage.style.width = Math.max(0, Math.floor(w)) + 'px';
+			const h = pin.offsetHeight;
+			gap.style.height = Math.max(0, full - h) + 'px';
+			// Plus the 0.5rem the band is pinned below the top, and the 0.5rem
+			// of surface it draws under itself.
+			host.style.setProperty('--mj-pin-reach', 'calc(' + h + 'px + 1rem)');
+		};
+
+		const later = () => {
+			if (pending) return;
+			pending = true;
+			requestAnimationFrame(place);
+		};
+		const onResize = () => {
+			resized = true;
+			later();
+		};
+		window.addEventListener('scroll', later, { passive: true });
+		window.addEventListener('resize', onResize);
+		// Docking and undocking land a frame after the bar is measured, and
+		// the save bar arriving changes the unpinned stage's reserve.
+		let ro = null;
+		if (window.ResizeObserver) {
+			ro = new ResizeObserver(later);
+			ro.observe(pin);
+		}
+		later();
+		return () => {
+			window.removeEventListener('scroll', later);
+			window.removeEventListener('resize', onResize);
+			if (ro) ro.disconnect();
+			host.style.removeProperty('--mj-pin-reach');
+		};
+	}
+
 	// The bar does not wrap any more — wrapping took 42% of a 290px picture on a
 	// 540px phone (#239) — so when it will not fit, the widest group moves off
 	// the picture instead of stacking on top of more of it. The runtime toggles
@@ -1378,6 +1562,22 @@
 		let cost = 0;
 		let docked = false;
 		let pending = false;
+		// Hidden from the start and not only after the first undock: empty,
+		// it still carried its 0.6rem margin, so the first undock moved
+		// everything under the picture up 10px. Pinning (pinStage) docks and
+		// undocks on every trip down the page and back, so that shift landed
+		// the first time the band let go.
+		mount.hidden = true;
+
+		// What the bar needs to hold everything, the toggles included at
+		// their remembered cost.
+		const needed = () => {
+			const extras = movable();
+			if (!docked) cost = widthOf(extras.filter(n => !n.hidden));
+			const rest = [...bar.children].filter(n => !n.hidden && extras.indexOf(n) < 0);
+			return rest.reduce((w, n) => w + n.scrollWidth, 0) +
+				gap * Math.max(0, rest.length - 1) + cost;
+		};
 
 		const place = () => {
 			pending = false;
@@ -1385,11 +1585,7 @@
 			// A stage that has not been laid out yet answers 0 and would dock
 			// everything; the observers below fire again with a real width.
 			if (!room) return;
-			const extras = movable();
-			if (!docked) cost = widthOf(extras.filter(n => !n.hidden));
-			const rest = [...bar.children].filter(n => !n.hidden && extras.indexOf(n) < 0);
-			const need = rest.reduce((w, n) => w + n.scrollWidth, 0) +
-				gap * Math.max(0, rest.length - 1) + cost;
+			const need = needed();
 			// Hysteresis, and it is load-bearing rather than polish: docking
 			// adds a row under the picture, the stage's reserve grows to hold
 			// it (.mj-live-docked) and the stage therefore NARROWS — so the
@@ -1441,10 +1637,18 @@
 		} else {
 			window.addEventListener('resize', later);
 		}
-		return () => {
-			if (mo) mo.disconnect();
-			if (ro) ro.disconnect();
-			else window.removeEventListener('resize', later);
+		return {
+			stop: () => {
+				if (mo) mo.disconnect();
+				if (ro) ro.disconnect();
+				else window.removeEventListener('resize', later);
+			},
+			// Whether the toggles would fit on the bar at its width as laid
+			// out right now, by the rule that docks them. pinStage asks it
+			// with the picture put back to full size for one read, to learn
+			// what the band would be unpinned without the frame this needs
+			// to find out by moving them.
+			fits: () => needed() <= bar.clientWidth,
 		};
 	}
 
@@ -2368,7 +2572,9 @@
 
 			const rtMount = el('div', 'mj-live-rt-mount');
 			form.appendChild(rtMount);
-			state.liveCleanup.push(dockRuntime(preview, rtMount));
+			const dock = dockRuntime(preview, rtMount);
+			state.liveCleanup.push(dock.stop);
+			state.liveCleanup.push(pinStage(preview.stage, rtMount, dock));
 
 			const note = el('p', 'mj-live-hint');
 			note.textContent = 'Night, IR-cut and the lamp are runtime state: pressing one changes ' +

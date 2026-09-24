@@ -1377,6 +1377,80 @@ mark {
 	--mj-pv-reserve: 21rem;
 }
 
+/* The Live leaf's pinned band (mj-settings.js:pinStage, #580). Sticky at all
+   times, so it is already in place on the frame the script notices it got
+   there, and 0.5rem below the top so its surface has room above it. The
+   script sizes the picture while it is pinned; unpinned, this is an unstyled
+   wrapper and the stage sizes itself exactly as before. */
+.mj-live-pin {
+	position: sticky;
+	top: 0.5rem;
+	z-index: 4;
+}
+
+/* The band's surface is drawn outside its box, not as padding: padding would
+   make the band taller than the picture it replaced wherever the picture does
+   not shrink (a phone, where the column is already narrower than the band's
+   cap), and the spacer cannot give back height it never had, so everything
+   below jumped 16px on pinning. */
+.mj-live-pin.mj-live-pinned::before {
+	content: "";
+	position: absolute;
+	inset: -0.5rem 0 -0.5rem;
+	z-index: -1;
+	background: var(--bs-body-bg);
+	box-shadow: 0 10px 18px -8px rgba(0, 0, 0, 0.45);
+}
+
+/* Left-aligned, because a band centred in the column reads as the full-size
+   picture that failed to shrink. */
+.mj-live-pinned .mj-pv-stage {
+	margin-inline: 0 auto;
+}
+
+/* Where the window leaves room, the docked toggles stand in a column beside
+   the picture rather than in a row under it, so docking partway through the
+   shrink adds no height to the band. 10.5rem is the script's SIDE: keep them
+   in step. */
+.mj-live-pinned.mj-pin-side {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+}
+
+.mj-live-pinned.mj-pin-side .mj-pv-stage {
+	flex: none;
+	margin: 0;
+}
+
+.mj-live-pinned.mj-pin-side .mj-live-rt-mount {
+	flex: 1 1 0;
+	min-width: 10.5rem;
+	max-width: 14rem;
+	flex-direction: column;
+	margin-top: 0;
+}
+
+.mj-live-pinned.mj-pin-side .mj-live-rt-mount .mj-hud-rt {
+	flex-direction: column;
+}
+
+.mj-live-pinned.mj-pin-side .mj-live-rt-mount .mj-hrt {
+	justify-content: flex-start;
+}
+
+/* Where a field brought into view must stop: below the band. The property is
+   set on the form only while the band is pinned, and the band's own controls
+   are exempt. They are always on screen, and reserving the strip for them too
+   made each press of a runtime toggle scroll the page up (pinStage). */
+#mj-settings-form * {
+	scroll-margin-top: var(--mj-pin-reach, 0px);
+}
+
+#mj-settings-form .mj-live-pin * {
+	scroll-margin-top: 0;
+}
+
 /* ── the Overlay leaf ────────────────────────────────────────────────────
    Its own reserve, which is what the variable exists for. 17.6rem is the LIVE
    leaf's arithmetic — stage top, 12px, the 76px knob strip, 16px — and this
@@ -2277,6 +2351,16 @@ button.mj-osd-chip,
 
 .mj-live-grp + .mj-live-grp {
 	margin-top: 1.25rem;
+}
+
+/* A deck column's first heading has the column's own padding above it and
+   nothing to be separated from, so the group heading's 1.5rem of air came on
+   top of that: 45px of empty card over Tone, Luma and Orientation. First of
+   TYPE, because the
+   Orientation column opens with the hidden mirror and flip rows, which are
+   <p> and not the group's <div>. */
+.mj-live-col > .mj-live-grp:first-of-type > .mj-live-grp-head {
+	margin-top: 0;
 }
 
 .mj-live-linkbtn {
