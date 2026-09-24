@@ -24,6 +24,53 @@ window.MajesticFocus = (function () {
 	 * An optional tab must not be able to cost the page its main function. */
 	const PROBE_TIMEOUT_MS = 4000;
 
+	/* Hold-to-run, in the motor's own terms.
+	 *
+	 * A move runs until this many milliseconds pass without another command for
+	 * it, so the camera's stop is a deadline rather than an instruction and the
+	 * lens keeps going only while the page keeps asking. HOLD_MS is therefore
+	 * how long it overruns after the button comes up, and REPEAT_MS has to be
+	 * comfortably shorter or the motion stutters as each pulse lapses before the
+	 * next arrives.
+	 *
+	 * Deliberately not isp.autofocus.pulse, which the camera reports and which
+	 * sizes a single operator nudge. Here the value is a timeout, and the
+	 * default 500 ms would leave a lens creeping half a second past the release
+	 * -- on a lens this is overshoot the operator then has to correct. */
+	const HOLD_MS = 400;
+	const REPEAT_MS = 200;
+
+	/* 'stop' is not a move and must never be refused for lack of a motor: it is
+	 * what every release path sends, including the ones that fire while the page
+	 * is being torn down. */
+	function move(verb) {
+		const q = verb === 'stop' ? 'stop' : verb + ':' + HOLD_MS;
+		return apiFetch('/ptz?move=' + encodeURIComponent(q),
+			{ method: 'POST', credentials: 'same-origin' })
+			.then(function (r) {
+				if (!r.ok) throw new Error('the camera answered ' + r.status);
+			});
+	}
+
+	/* The lens is asked what it can do, not assumed. `GET /ptz` answers a
+	 * capability line -- actuator, port, state and the verbs this actuator's
+	 * protocol actually carries -- and a camera with no motor plugin answers 404
+	 * instead. Both near and far are required: a control that can only drive one
+	 * way is a trap, because the way back is the one that is missing. */
+	function canMove() {
+		return apiFetch('/ptz', { credentials: 'same-origin' })
+			.then(function (r) {
+				if (!r.ok) return false;
+				return r.text().then(function (line) {
+					const m = /(^|\s)verbs=([^\s]*)/.exec(line || '');
+					if (!m) return false;
+					const verbs = m[2].split(',');
+					return verbs.indexOf('near') >= 0 && verbs.indexOf('far') >= 0;
+				});
+			})
+			.catch(function () { return false; });
+	}
+
 	function zones() {
 		return apiFetch('/api/v1/isp/af-zones.json', { credentials: 'same-origin' })
 			.then(function (r) {
@@ -92,5 +139,18 @@ window.MajesticFocus = (function () {
 		}),
 	]);
 
-	return { zones: zones, intervalMs: INTERVAL_MS, ready: ready };
+	/* Answered alongside the grid probe rather than after it: both are asked at
+	 * load and the editor waits on the pair, so a camera that has a motor but no
+	 * AF statistics still costs one round trip rather than two in series. */
+	const motor = Promise.race([
+		canMove(),
+		new Promise(function (resolve) {
+			setTimeout(function () { resolve(false); }, PROBE_TIMEOUT_MS);
+		}),
+	]);
+
+	return {
+		zones: zones, intervalMs: INTERVAL_MS, ready: ready,
+		move: move, moveRepeatMs: REPEAT_MS, motor: motor,
+	};
 })();
