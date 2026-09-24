@@ -308,6 +308,23 @@
 				'autoNightGain', 'autoDayGain', 'autoNightDelay', 'autoDayDelay',
 				'minThreshold', 'maxThreshold', 'monitorDelay', 'transitionDelayMs'] },
 		],
+		// The exposure rows of isp, on the Live leaf where they are lifted.
+		//
+		// Headings that are true in both exposure modes, because the rows under
+		// them change meaning with it and a heading does not (#548): "Limits"
+		// would be false the moment the mode reads manual, where the same four
+		// numbers are the values themselves. The rows' own names carry that
+		// now -- the daemon renames them per mode (#582) -- so the heading only
+		// says what they are about.
+		//
+		// Every other isp key is drawn before the first heading rather than
+		// after the last, by the Live leaf and not by the order here: a key
+		// with no group that followed "How it reacts" would read as part of it.
+		isp: [
+			{ id: 'exposure', label: 'Exposure and gain', keys: ['exposure', 'aGain', 'dGain', 'ispGain'] },
+			{ id: 'reacts', label: 'How it reacts', note: 'in automatic mode',
+				keys: ['aeStrategy', 'aeSpeed', 'aeTolerance', 'aeBlackDelay', 'aeWhiteDelay'] },
+		],
 	};
 	function sectionGroups(section) { return SECTION_GROUPS[section] || null; }
 

@@ -235,6 +235,13 @@ fi
 # control, and reproducing one needs a camera with more than one sensor mode.
 %>
 <script src="/a/mj-fps.js"></script>
+<%
+# What a number field the camera runs by itself says while it is empty, and its
+# name in the mode the camera is in (#582). Its own file, and pure, so
+# tests/exposure.test.js can ask it: a placeholder quoting the wrong multiplier
+# is still a placeholder.
+%>
+<script src="/a/mj-exposure.js" defer></script>
 <script src="/a/mj-region.js" defer></script>
 <script src="/a/analytics-overlay.js" defer></script>
 <script src="/a/mj-servers.js" defer></script>

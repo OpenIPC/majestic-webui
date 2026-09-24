@@ -291,6 +291,37 @@ group('Day / Night: every setting is in a heading or on the pin map');
 		'empty: ' + empty.join(', '));
 }
 
+// ── The exposure rows' headings on the Live leaf ───────────────────────────
+//
+// isp's groups are drawn only where their rows are lifted, and the isp page
+// skips a heading whose rows all went to the Live leaf. So the two failures
+// are: a group key the daemon does not lift, which would leave its heading on
+// the isp page with the rest of the group gone; and a key in two groups, drawn
+// under whichever heading came first. Every key here has to be in the shipped
+// schema, too -- the headings were written against it (#582).
+group('ISP: the exposure headings name lifted keys, once each');
+{
+	// The exposure keys as an hi3516ev300 declares them, merged into a copy
+	// rather than into the shared fixture: every assertion above counts what
+	// the image section puts on the Live leaf, and these would join it.
+	const s = clone(SCHEMA);
+	Object.assign(s.properties.isp.properties, JSON.parse(fs.readFileSync(
+		path.join(__dirname, 'fixtures', 'schema-isp-exposure.json'), 'utf8')));
+	const ISP = s.properties.isp.properties;
+	const groups = TREE.sectionGroups('isp');
+	const t = build(s);
+	check('the section has a group map', !!groups && groups.length > 0);
+	check('and every group is named', groups.every(g => g.id && g.label && g.keys.length));
+	const placed = groups.reduce((acc, g) => acc.concat(g.keys), []);
+	const dupes = placed.filter((k, i) => placed.indexOf(k) !== i);
+	check('no key is in two headings', !dupes.length, dupes.join(', '));
+	const missing = placed.filter(k => !(k in ISP));
+	check('every grouped key is in the shipped schema', !missing.length, missing.join(', '));
+	const notLifted = placed.filter(k => !t.lifted().has('isp.' + k));
+	check('every grouped key is lifted to the Live leaf', !notLifted.length, notLifted.join(', '));
+	everyKeyOnce('exposure keys', t, s);
+}
+
 group('a list of objects is one leaf, not one per member');
 {
 	// The destination list is `{type:'array', items:{type:'object', ...}}`, and

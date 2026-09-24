@@ -203,6 +203,47 @@ recording and in every other viewer's picture.
 - Change the save URL or batch shape → update both `onSubmit` and the
   server-side handler that consumes it.
 
+## Rows the camera runs by itself: unit, name per mode, what is in force
+
+The exposure ceilings and the metering knobs (`isp.exposure`, the three gains,
+`isp.aeSpeed` and the rest) are numbers where **empty and 0 both mean "the
+camera decides"**. They used to draw as `0` or as an empty box, which read as
+"off" and "not loaded" respectively and said nothing about what the camera was
+doing (#582). The daemon now annotates them, and `www/a/mj-exposure.js` turns
+the annotations into words:
+
+- **`x-unit`** (`ms`, `×`, `levels`, `frames`) is printed beside the box and in
+  the range under the hint. Frames are also given in seconds at the main
+  stream's rate, and the text names the rate it assumed.
+- **`x-title-when`** gives the field another name while a sibling holds a value,
+  in `visibleWhen`'s spelling. The four ceilings are "Highest analog gain" and so
+  on while auto-exposure spends them, and "Analog gain" in manual, where the same
+  number is the value. The row is renamed as the mode select moves, through
+  `state.repaint`, not after a save.
+- **`x-metric`** names the `/metrics` gauges that read the field `now` and
+  `inForce`, and the `scale` that turns them into the field's unit. The empty
+  box's placeholder is `Auto · <in force>`, and the figure beside the box is
+  `now <reading>`.
+
+Three rules keep this true:
+
+- **The scale is the daemon's.** A gain gauge is Q10 on HiSilicon and something
+  else elsewhere, and this page must not know which. See the tone check's
+  warning about `isp_again` above.
+- **Values in force come from `/metrics`, not from the schema.** The schema is
+  built once. An unset gain resolves to the slow-shutter fallback, and an unset
+  metering knob to the IQ profile's value, which differs between day and night.
+  A schema default would state the day figure all night.
+- **An absent or failed reading says only "Auto".** The heartbeat publishes
+  `{ok:false}` on a failed poll, and the placeholder drops its figure rather
+  than keep a stale one. In the mode `x-title-when` names, it drops it too:
+  there the ceiling auto-exposure works inside is not what runs.
+
+The headings over these rows on the Live leaf ("Exposure and gain", "How it
+reacts") are `SECTION_GROUPS.isp` in `mj-tree.js`. They are worded to stay true
+in both modes. The Live leaf draws every isp key no group names **ahead** of
+the first heading, because after the last one it would read as part of it.
+
 ## The Live leaf's tone mode
 
 `image.tuning` is a mode, and the two modes **share no controls**. Automatic
