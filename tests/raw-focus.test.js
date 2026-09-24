@@ -41,15 +41,22 @@ function load(opts) {
 				if (opts.noMotor) return Promise.resolve({ ok: false, status: 404 });
 				if (opts.ptzHang) return new Promise(function () {});
 				return Promise.resolve({ ok: true, status: 200,
+					// Shaped like a capability line and nobody's actual camera:
+					// a fixture copied off one device reads as that device's
+					// configuration and invites being trusted as a spec.
 					text: () => Promise.resolve(opts.ptzLine !== undefined ? opts.ptzLine
-						: 'actuator=pelco-xm port=/dev/ttyAMA0 speed=115200 pulse=500 ' +
-						  'state=ready verbs=stop,near,far,tele,wide,up,down,left,right') });
+						: 'actuator=example port=/dev/null speed=0 pulse=500 ' +
+						  'state=ready verbs=stop,near,far,tele,wide') });
 			}
 			if (url.indexOf('/ptz?move=') === 0) {
 				state.moves = state.moves || [];
-				state.moves.push({ q: decodeURIComponent(url.split('move=')[1]),
-					method: init && init.method });
-				return Promise.resolve({ ok: true, status: 200 });
+				state.moves.push({ url: url, method: init && init.method,
+					verb: decodeURIComponent((/move=([^&]*)/.exec(url) || [])[1] || ''),
+					ms: (/[?&]ms=(\d+)/.exec(url) || [])[1] });
+				const body = opts.moveBody !== undefined ? opts.moveBody
+					: (url.indexOf('move=stop') >= 0 ? 'stopped' : 'moving');
+				return Promise.resolve({ ok: true, status: 200,
+					text: () => Promise.resolve(body) });
 			}
 			state.asked++;
 			state.lastUrl = url;
@@ -206,16 +213,41 @@ function load(opts) {
 	await api.move('far');
 	await api.move('stop');
 	check('a move POSTs', (state.moves || []).every((m) => m.method === 'POST'));
+	// One encoding for one thing: www/a/preview-ptz.js already drives this
+	// endpoint and sends the duration as its own parameter.
+	check('the verb goes alone and the duration as ms=',
+		state.moves[0].verb === 'near' && !!state.moves[0].ms,
+		state.moves.map((m) => m.url).join(' '));
 	// The camera keeps going only while asked, so the value it carries is a
 	// timeout. Asking again has to arrive before it lapses or the lens stutters.
-	check('and carries a deadline, not the camera default',
-		/^near:\d+$/.test(state.moves[0].q) && /^far:\d+$/.test(state.moves[1].q),
-		state.moves.map((m) => m.q).join(' '));
-	const hold = Number(state.moves[0].q.split(':')[1]);
+	const hold = Number(state.moves[0].ms);
 	check('with the re-ask comfortably inside it',
 		api.moveRepeatMs < hold, api.moveRepeatMs + ' vs ' + hold);
-	check('stop carries no deadline of its own', state.moves[2].q === 'stop',
-		state.moves[2].q);
+	check('stop carries no deadline of its own',
+		state.moves[2].verb === 'stop' && !state.moves[2].ms, state.moves[2].url);
+
+	group('a lens that did not move says so in the body, at status 200');
+
+	// preview-ptz.js records both of these: majestic answers a BODYLESS 200
+	// when the sensor driver did not come up, and the plugin answers
+	// `unavailable` -- also 200 -- when the focus port is shut. A status check
+	// calls each of them a move, and the editor holds a button against a lens
+	// that never twitched.
+	for (const t of [{ moveBody: 'unavailable' }, { moveBody: '' }, { moveBody: '   ' }]) {
+		({ api } = load(t));
+		let failed = false, msg = '';
+		await api.move('near').catch((e) => { failed = true; msg = e.message; });
+		check('refused: ' + JSON.stringify(t), failed, msg || '(resolved)');
+	}
+	({ api } = load({ moveBody: 'unavailable' }));
+	await api.move('near').catch((e) => { msg = e.message; });
+	check('and the shut port says what to do about it',
+		/restart majestic/i.test(msg), msg);
+
+	({ api } = load({}));
+	let moved = false;
+	await api.move('near').then(() => { moved = true; });
+	check('a lens that did move is not reported as a failure', moved);
 
 	done();
 })();

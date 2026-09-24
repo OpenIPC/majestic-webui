@@ -40,15 +40,35 @@ window.MajesticFocus = (function () {
 	const HOLD_MS = 400;
 	const REPEAT_MS = 200;
 
-	/* 'stop' is not a move and must never be refused for lack of a motor: it is
-	 * what every release path sends, including the ones that fire while the page
-	 * is being torn down. */
+	/*
+	 * One move. `&ms=` rather than a duration glued to the verb: both reach the
+	 * daemon, but www/a/preview-ptz.js already drives this endpoint and one
+	 * encoding for one thing is the point.
+	 *
+	 * THE BODY DECIDES, NOT THE STATUS, and that is not caution -- it is the
+	 * lesson preview-ptz.js already paid for. majestic answers /ptz with a
+	 * BODYLESS 200 when the sensor driver did not come up, and the plugin
+	 * answers `unavailable`, also 200, when the focus port is shut -- the state
+	 * a camera lands in when the motorised-lens setting is toggled without a
+	 * restart. A status check calls both of those a move, and the editor would
+	 * go on holding a button against a lens that never twitched.
+	 */
 	function move(verb) {
-		const q = verb === 'stop' ? 'stop' : verb + ':' + HOLD_MS;
-		return apiFetch('/ptz?move=' + encodeURIComponent(q),
-			{ method: 'POST', credentials: 'same-origin' })
+		let url = '/ptz?move=' + encodeURIComponent(verb);
+		if (verb !== 'stop') url += '&ms=' + HOLD_MS;
+		return apiFetch(url, { method: 'POST', credentials: 'same-origin' })
 			.then(function (r) {
 				if (!r.ok) throw new Error('the camera answered ' + r.status);
+				return r.text();
+			})
+			.then(function (body) {
+				const said = (body || '').trim();
+				if (said === 'unavailable')
+					throw new Error('the camera is not driving the lens — restart ' +
+						'majestic to load the motor driver');
+				if (!said)
+					throw new Error('the camera did not answer the move');
+				return said;
 			});
 	}
 
