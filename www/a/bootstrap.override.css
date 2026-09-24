@@ -1377,6 +1377,36 @@ mark {
 	--mj-pv-reserve: 21rem;
 }
 
+/* The Live leaf's pinned band (mj-settings.js:pinStage, #580). Sticky at all
+   times, so it is already at the top of the window on the frame the script
+   notices it got there. Only the pinned class shrinks it and gives it a
+   surface. Unpinned, it is an unstyled wrapper and the stage sizes itself
+   exactly as before. */
+.mj-live-pin {
+	position: sticky;
+	top: 0;
+	z-index: 4;
+}
+
+/* The band is about 42% of the window: the picture plus, when the toggles
+   have docked, their 52px row, which the picture gives up height to make room
+   for, so the band does not grow when they dock. Left-aligned, because a band
+   centred in the column reads as the full-size picture that failed to shrink. */
+.mj-live-pin.mj-live-pinned {
+	padding-block: 0.5rem;
+	background: var(--bs-body-bg);
+	box-shadow: 0 10px 18px -8px rgba(0, 0, 0, 0.45);
+}
+
+.mj-live-pinned .mj-pv-stage {
+	width: min(100%, calc((42dvh - var(--mj-pin-dock, 0rem)) * 1.77778));
+	margin-inline: 0 auto;
+}
+
+.mj-live-pinned .mj-pv-stage.mj-live-docked {
+	--mj-pin-dock: 3.25rem;
+}
+
 /* ── the Overlay leaf ────────────────────────────────────────────────────
    Its own reserve, which is what the variable exists for. 17.6rem is the LIVE
    leaf's arithmetic — stage top, 12px, the 76px knob strip, 16px — and this

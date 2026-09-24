@@ -1325,6 +1325,91 @@
 			'</span>';
 	}
 
+	// The picture follows the page down (#580). It is sized to fill the window
+	// above the knob strip, so everything under the deck (ISP / Exposure is 13
+	// fields and 828px at 1440x900) used to be reachable only by scrolling
+	// the picture off the top, and the page is called Live adjustments.
+	//
+	// Once the picture's top would leave the window it pins there as a band,
+	// shrunk so the band holds about 42% of the window height and leaves the
+	// rest to the controls. The band is the stage AND the docked runtime row:
+	// the compact picture is too narrow for the toggles, so pinning docks them,
+	// and a row that appeared below the band would push the whole form down
+	// 52px at the moment of pinning.
+	//
+	// Nothing below moves when the band pins or unpins. The height it gives up
+	// goes to a spacer in flow after it, so the sentinel that decides pinning
+	// stays where it was: a band that changed the document's height would move
+	// its own sentinel and flip back and forth on the boundary. The full
+	// height is read while unpinned. A window resized while pinned leaves it
+	// stale until the band next unpins, which costs at most a shift of the
+	// content below, never a flip.
+	//
+	// Covering what scrolls under it is this design's price, so the band also
+	// becomes the page's scroll-padding: a field reached by Tab, by search or
+	// by scrollIntoView stops below the band and not behind it.
+	function pinStage(stage, rtMount) {
+		const pin = el('div', 'mj-live-pin');
+		const at = el('div', 'mj-live-pin-at');
+		const gap = el('div', 'mj-live-pin-gap');
+		stage.parentNode.insertBefore(at, stage);
+		at.after(pin);
+		// A move within one task: the media element is back in the document
+		// before the platform would pause a removed one.
+		pin.appendChild(stage);
+		if (rtMount) pin.appendChild(rtMount);
+		pin.after(gap);
+
+		const root = document.documentElement;
+		let pinned = false;
+		let full = 0;
+
+		const fit = () => {
+			if (!pinned) {
+				full = pin.offsetHeight;
+				gap.style.height = '';
+				root.style.scrollPaddingTop = '';
+				return;
+			}
+			const h = pin.offsetHeight;
+			gap.style.height = Math.max(0, full - h) + 'px';
+			root.style.scrollPaddingTop = h + 'px';
+		};
+
+		const set = (want) => {
+			if (want === pinned) return;
+			// Read before the class goes on: this is the last moment the band
+			// has its full size.
+			if (want) full = pin.offsetHeight;
+			pinned = want;
+			pin.classList.toggle('mj-live-pinned', want);
+			fit();
+		};
+
+		// With no IntersectionObserver the picture simply stays where it is,
+		// as it always did.
+		if (!window.IntersectionObserver) return () => {};
+		const io = new IntersectionObserver((entries) => {
+			const e = entries[entries.length - 1];
+			set(!e.isIntersecting && e.boundingClientRect.top < 0);
+		});
+		io.observe(at);
+
+		// The band's height moves after pinning too: docking lands a frame
+		// later, the stream's aspect ratio can change, and the save bar
+		// arriving changes the unpinned stage's reserve.
+		let ro = null;
+		if (window.ResizeObserver) {
+			ro = new ResizeObserver(fit);
+			ro.observe(pin);
+		}
+		return () => {
+			io.disconnect();
+			if (ro) ro.disconnect();
+			root.style.scrollPaddingTop = '';
+		};
+	}
+
 	// The bar does not wrap any more — wrapping took 42% of a 290px picture on a
 	// 540px phone (#239) — so when it will not fit, the widest group moves off
 	// the picture instead of stacking on top of more of it. The runtime toggles
@@ -1378,6 +1463,12 @@
 		let cost = 0;
 		let docked = false;
 		let pending = false;
+		// Hidden from the start and not only after the first undock: empty,
+		// it still carried its 0.6rem margin, so the first undock moved
+		// everything under the picture up 10px. Pinning (pinStage) docks and
+		// undocks on every trip down the page and back, so that shift landed
+		// the first time the band let go.
+		mount.hidden = true;
 
 		const place = () => {
 			pending = false;
@@ -2369,6 +2460,7 @@
 			const rtMount = el('div', 'mj-live-rt-mount');
 			form.appendChild(rtMount);
 			state.liveCleanup.push(dockRuntime(preview, rtMount));
+			state.liveCleanup.push(pinStage(preview.stage, rtMount));
 
 			const note = el('p', 'mj-live-hint');
 			note.textContent = 'Night, IR-cut and the lamp are runtime state: pressing one changes ' +
