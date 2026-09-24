@@ -1378,22 +1378,14 @@ mark {
 }
 
 /* The Live leaf's pinned band (mj-settings.js:pinStage, #580). Sticky at all
-   times, so it is already at the top of the window on the frame the script
-   notices it got there. Only the pinned class shrinks it and gives it a
-   surface. Unpinned, it is an unstyled wrapper and the stage sizes itself
-   exactly as before. */
+   times, so it is already in place on the frame the script notices it got
+   there, and 0.5rem below the top so its surface has room above it. The
+   script sizes the picture while it is pinned; unpinned, this is an unstyled
+   wrapper and the stage sizes itself exactly as before. */
 .mj-live-pin {
 	position: sticky;
-	top: 0;
-	z-index: 4;
-}
-
-/* The band is about 42% of the window: the picture plus, when the toggles
-   have docked, their 52px row, which the picture gives up height to make room
-   for, so the band does not grow when they dock. Left-aligned, because a band
-   centred in the column reads as the full-size picture that failed to shrink. */
-.mj-live-pin.mj-live-pinned {
 	top: 0.5rem;
+	z-index: 4;
 }
 
 /* The band's surface is drawn outside its box, not as padding: padding would
@@ -1410,13 +1402,41 @@ mark {
 	box-shadow: 0 10px 18px -8px rgba(0, 0, 0, 0.45);
 }
 
+/* Left-aligned, because a band centred in the column reads as the full-size
+   picture that failed to shrink. */
 .mj-live-pinned .mj-pv-stage {
-	width: min(100%, calc((42dvh - var(--mj-pin-dock, 0rem)) * 1.77778));
 	margin-inline: 0 auto;
 }
 
-.mj-live-pinned .mj-pv-stage.mj-live-docked {
-	--mj-pin-dock: 3.25rem;
+/* Where the window leaves room, the docked toggles stand in a column beside
+   the picture rather than in a row under it, so docking partway through the
+   shrink adds no height to the band. 10.5rem is the script's SIDE: keep them
+   in step. */
+.mj-live-pinned.mj-pin-side {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+}
+
+.mj-live-pinned.mj-pin-side .mj-pv-stage {
+	flex: none;
+	margin: 0;
+}
+
+.mj-live-pinned.mj-pin-side .mj-live-rt-mount {
+	flex: 1 1 0;
+	min-width: 10.5rem;
+	max-width: 14rem;
+	flex-direction: column;
+	margin-top: 0;
+}
+
+.mj-live-pinned.mj-pin-side .mj-live-rt-mount .mj-hud-rt {
+	flex-direction: column;
+}
+
+.mj-live-pinned.mj-pin-side .mj-live-rt-mount .mj-hrt {
+	justify-content: flex-start;
 }
 
 /* Where a field brought into view must stop: below the band. The property is

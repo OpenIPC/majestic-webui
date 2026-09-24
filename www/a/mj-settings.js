@@ -1330,20 +1330,27 @@
 	// fields and 828px at 1440x900) used to be reachable only by scrolling
 	// the picture off the top, and the page is called Live adjustments.
 	//
-	// Once the picture's top would leave the window it pins there as a band,
-	// shrunk so the band holds about 42% of the window height and leaves the
-	// rest to the controls. The band is the stage AND the docked runtime row:
-	// the compact picture is too narrow for the toggles, so pinning docks them,
-	// and a row that appeared below the band would push the whole form down
-	// 52px at the moment of pinning.
+	// Once the picture's top reaches the top of the window it stays there and
+	// shrinks as the page scrolls, a pixel of height for each pixel of scroll,
+	// until the band holds 42% of the window; after that the page scrolls
+	// under it. It shrinks WITH the scroll rather than in one step because a
+	// step leaves the height it gave up as an empty strip between the band and
+	// the controls, which then took the next 160px of scrolling to close.
 	//
-	// Nothing below moves when the band pins or unpins. The height it gives up
-	// goes to a spacer in flow after it, so the sentinel that decides pinning
-	// stays where it was: a band that changed the document's height would move
-	// its own sentinel and flip back and forth on the boundary. The full
-	// height is read while unpinned. A window resized while pinned leaves it
-	// stale until the band next unpins, which costs at most a shift of the
-	// content below, never a flip.
+	// Nothing below the band moves on its own account. The height the band
+	// gives up goes to a spacer in flow after it, so the document is the same
+	// height at every offset and the offset that decides the band's size never
+	// moves under it. The full height is read while unpinned; a window resized
+	// while pinned leaves it stale until the band next unpins, which costs at
+	// most a shift of the content below.
+	//
+	// The runtime toggles stop fitting on the picture's bar as it narrows and
+	// dock (dockRuntime). Where the window leaves room beside the compact
+	// picture they dock BESIDE it, into space the band has anyway; under it
+	// they would add a row partway through the shrink, and the picture would
+	// have to jump smaller to pay for it. Where there is no room — a phone,
+	// where the picture is already as wide as the column — they stay under it,
+	// and the picture is sized to leave them the room.
 	//
 	// Covering what scrolls under it is this design's price, so while pinned
 	// every element of the form but the band's own carries the band's height
@@ -1367,16 +1374,55 @@
 		pin.after(gap);
 
 		const host = pin.parentNode;
+		// The room the docked toggles need beside the picture: .mj-pin-side
+		// gives the mount this as its minimum width, plus the column gap.
+		const SIDE = 10.5;
 		let pinned = false;
 		let full = 0;
+		let pending = false;
 
-		const fit = () => {
-			if (!pinned) {
+		const rem = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+		const docked = () => !!rtMount && !rtMount.hidden;
+
+		const unpin = () => {
+			pinned = false;
+			pin.classList.remove('mj-live-pinned', 'mj-pin-side');
+			stage.style.width = '';
+			gap.style.height = '';
+			host.style.removeProperty('--mj-pin-reach');
+		};
+
+		const place = () => {
+			pending = false;
+			// How far past its sticking point the band has been carried: the
+			// sentinel sits where the band's top would be, and the band sticks
+			// at its own `top`.
+			const stick = parseFloat(getComputedStyle(pin).top) || 0;
+			const s = stick - at.getBoundingClientRect().top;
+			if (s <= 0) {
+				if (pinned) unpin();
 				full = pin.offsetHeight;
-				gap.style.height = '';
-				host.style.removeProperty('--mj-pin-reach');
 				return;
 			}
+			const room = pin.clientWidth;
+			const floor = Math.min(full, Math.round(window.innerHeight * 0.42));
+			if (!pinned) {
+				full = pin.offsetHeight;
+				pinned = true;
+				pin.classList.add('mj-live-pinned');
+				// Decided once a trip, on the compact size, so the toggles do
+				// not change sides partway through the shrink.
+				pin.classList.toggle('mj-pin-side',
+					room - floor * 16 / 9 >= SIDE * rem() + 12);
+			}
+			const side = pin.classList.contains('mj-pin-side');
+			const band = Math.max(floor, full - s);
+			// What of the band the picture may have: all of it beside the
+			// toggles, all but their row under them.
+			const under = !side && docked() ? pin.offsetHeight - stage.offsetHeight : 0;
+			const beside = side && docked() ? SIDE * rem() + 12 : 0;
+			const w = Math.min(room - beside, (band - under) * 16 / 9);
+			stage.style.width = Math.max(0, Math.floor(w)) + 'px';
 			const h = pin.offsetHeight;
 			gap.style.height = Math.max(0, full - h) + 'px';
 			// Plus the 0.5rem the band is pinned below the top, and the 0.5rem
@@ -1384,35 +1430,24 @@
 			host.style.setProperty('--mj-pin-reach', 'calc(' + h + 'px + 1rem)');
 		};
 
-		const set = (want) => {
-			if (want === pinned) return;
-			// Read before the class goes on: this is the last moment the band
-			// has its full size.
-			if (want) full = pin.offsetHeight;
-			pinned = want;
-			pin.classList.toggle('mj-live-pinned', want);
-			fit();
+		const later = () => {
+			if (pending) return;
+			pending = true;
+			requestAnimationFrame(place);
 		};
-
-		// With no IntersectionObserver the picture simply stays where it is,
-		// as it always did.
-		if (!window.IntersectionObserver) return () => {};
-		const io = new IntersectionObserver((entries) => {
-			const e = entries[entries.length - 1];
-			set(!e.isIntersecting && e.boundingClientRect.top < 0);
-		});
-		io.observe(at);
-
-		// The band's height moves after pinning too: docking lands a frame
-		// later, the stream's aspect ratio can change, and the save bar
-		// arriving changes the unpinned stage's reserve.
+		window.addEventListener('scroll', later, { passive: true });
+		window.addEventListener('resize', later);
+		// Docking and undocking land a frame after the bar is measured, and
+		// the save bar arriving changes the unpinned stage's reserve.
 		let ro = null;
 		if (window.ResizeObserver) {
-			ro = new ResizeObserver(fit);
+			ro = new ResizeObserver(later);
 			ro.observe(pin);
 		}
+		later();
 		return () => {
-			io.disconnect();
+			window.removeEventListener('scroll', later);
+			window.removeEventListener('resize', later);
 			if (ro) ro.disconnect();
 			host.style.removeProperty('--mj-pin-reach');
 		};
