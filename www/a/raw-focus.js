@@ -286,7 +286,17 @@ window.MajesticFocus = (function () {
 	function applyFilters(f) {
 		const first = beforeTrial === null
 			? apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
-				.then(function (r) { return r.ok ? r.json() : {}; })
+				.then(function (r) {
+					/* A read that failed says nothing about what the camera
+					 * holds, and treating it as "nothing" is the expensive
+					 * reading: putting the trial back would then REMOVE keys
+					 * the operator had set and this page never saw. Nothing is
+					 * applied that cannot be undone. */
+					if (!r.ok)
+						throw new Error('the camera would not say what its filter ' +
+							'is set to, and nothing is applied that cannot be put back');
+					return r.json();
+				})
 				.then(function (cfg) {
 					const af = (cfg && cfg.isp && cfg.isp.af) || {};
 					beforeTrial = {};
@@ -352,6 +362,15 @@ window.MajesticFocus = (function () {
 				throw new Error('it is set on this camera, but the sensor ' +
 					'profile could not be written (' + r.status + '), so it ' +
 					'will not travel into a firmware image');
+			/* Firmware that predates writing a profile answers a POST here
+			 * with its GET handler: the profile itself, as a file to download.
+			 * A 200 from that is not a save, and raw-calibrate.js reads the
+			 * same header for the same reason. */
+			const disp = r.headers && r.headers.get && r.headers.get('Content-Disposition');
+			if (disp && /attachment/i.test(disp))
+				throw new Error('it is set on this camera, but this firmware ' +
+					'cannot write its sensor profile, so it will not travel ' +
+					'into a firmware image — update the camera to keep one');
 			beforeTrial = null;
 		});
 	}

@@ -41,8 +41,13 @@ function load(opts) {
 				if (init && init.method === 'POST') {
 					state.profilePosts = state.profilePosts || [];
 					state.profilePosts.push(init.body);
-					return Promise.resolve(opts.profileWriteFails
-						? { ok: false, status: 500 } : { ok: true, status: 200 });
+					if (opts.profileWriteFails)
+						return Promise.resolve({ ok: false, status: 500 });
+					// Firmware from before profile writes answers a POST with
+					// its GET handler: the profile itself, as a download.
+					return Promise.resolve({ ok: true, status: 200,
+						headers: { get: (h) => (/^content-disposition$/i.test(h) && opts.oldFirmware
+							? 'attachment; filename="profile.ini"' : null) } });
 				}
 				if (opts.noAfSection)
 					return Promise.resolve({ ok: true, status: 200,
@@ -59,6 +64,8 @@ function load(opts) {
 						  'IIR1CoringLmt = "2047"\n') });
 			}
 			if (url === '/api/v1/config.json') {
+				if (opts.snapshotFails)
+					return Promise.resolve({ ok: false, status: 500 });
 				return Promise.resolve({ ok: true, status: 200,
 					json: () => Promise.resolve({ isp: { af: opts.afKeys || {} } }) });
 			}
@@ -289,13 +296,15 @@ function load(opts) {
 	// chip, so it says what is actually in force.
 	({ api, state } = load({}));
 	let f = await api.filters();
-	check('the gains come back, negatives intact', f.gain.join(','),
-		'200,200,-110,461,-415,0,0');
-	check('and the shifts', f.shift.join(','), '6,0,1,0');
-	check('and which sections are on', f.enable.join(','), '1,1,0');
+	check('the gains come back, negatives intact',
+		f.gain.join(',') === '200,200,-110,461,-415,0,0', f.gain.join(','));
+	check('and the shifts', f.shift.join(',') === '6,0,1,0', f.shift.join(','));
+	check('and which sections are on', f.enable.join(',') === '1,1,0',
+		f.enable.join(','));
 	// Three keys in a profile, one list in the config: the profile names what
 	// the chip names, the config groups what is set together.
-	check('and coring, gathered from its three keys', f.coring.join(','), '15,12,2047');
+	check('and coring, gathered from its three keys',
+		f.coring.join(',') === '15,12,2047', f.coring.join(','));
 
 	({ api } = load({ noAfSection: true }));
 	msg = '';
@@ -318,10 +327,12 @@ function load(opts) {
 	await api.applyFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
 		enable: [1, 0, 1], coring: [1, 2, 3] });
 	check('applying writes the four keys', Object.keys(
-		state.configPosts[state.configPosts.length - 1].isp.af).sort().join(','),
-		'iir1Coring,iir1Enable,iir1Gain,iir1Shift');
+		state.configPosts[state.configPosts.length - 1].isp.af).sort().join(',')
+		=== 'iir1Coring,iir1Enable,iir1Gain,iir1Shift',
+		Object.keys(state.configPosts[state.configPosts.length - 1].isp.af).join(','));
 	check('as the camera spells them',
-		state.configPosts[state.configPosts.length - 1].isp.af.iir1Gain, '1,2,3,4,5,6,7');
+		state.configPosts[state.configPosts.length - 1].isp.af.iir1Gain === '1,2,3,4,5,6,7',
+		state.configPosts[state.configPosts.length - 1].isp.af.iir1Gain);
 	await api.revertFilters();
 	const back = state.configPosts[state.configPosts.length - 1].isp.af;
 	check('putting it back removes a key that was not there',
@@ -333,7 +344,8 @@ function load(opts) {
 		enable: [1, 0, 1], coring: [1, 2, 3] });
 	await api.revertFilters();
 	const back2 = state.configPosts[state.configPosts.length - 1].isp.af;
-	check('and restores one that was', back2.iir1Gain, '9,9,9,9,9,9,9');
+	check('and restores one that was', back2.iir1Gain === '9,9,9,9,9,9,9',
+		String(back2.iir1Gain));
 
 	group('keeping writes it where a firmware image can carry it');
 
@@ -358,6 +370,31 @@ function load(opts) {
 		enable: [1, 0, 1], coring: [1, 2, 3] }).catch((e) => { msg = e.message; });
 	check('a profile that will not take it says so plainly',
 		/set on this camera/.test(msg) && /firmware image/.test(msg), msg);
+
+	group('nothing is applied that cannot be put back');
+
+	// A read that failed says nothing about what the camera holds. Treating it
+	// as "there was nothing" makes the revert REMOVE keys the operator had set
+	// and this page never saw.
+	({ api, state } = load({ snapshotFails: true }));
+	msg = '';
+	await api.applyFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
+		enable: [1, 0, 1], coring: [1, 2, 3] }).catch((e) => { msg = e.message; });
+	check('a filter is not applied when the camera will not say what it holds',
+		/cannot be put back/.test(msg), msg || '(applied anyway)');
+	check('and nothing was written', (state.configPosts || []).length === 0,
+		String((state.configPosts || []).length));
+
+	group('an older camera does not get to say it saved');
+
+	// That firmware answers a POST here with its GET handler -- the profile as
+	// a file to download. A 200 from that is not a save.
+	({ api } = load({ oldFirmware: true }));
+	msg = '';
+	await api.keepFilters({ gain: [1, 2, 3, 4, 5, 6, 7], shift: [1, 1, 1, 1],
+		enable: [1, 0, 1], coring: [1, 2, 3] }).catch((e) => { msg = e.message; });
+	check('a download answered to a save is not a save',
+		/will not travel/.test(msg) && /update the camera/.test(msg), msg || '(reported saved)');
 
 	done();
 })();
