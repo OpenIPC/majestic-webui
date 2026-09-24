@@ -125,6 +125,28 @@
 		return MajesticRaw.mount(host, {
 			capture: capture,
 			calibrate: window.MajesticCalibrate,
+			/*
+			 * What the camera does about its own stuck pixels.
+			 *
+			 * The same profile the calibration is written into carries the
+			 * defect corrector's switch, so this shares that module's plumbing
+			 * -- one pending change at a time, one unload handler, one way
+			 * back. It patches the section only; persist() next door is for a
+			 * colour calibration and drops the manual colour matrix on its way
+			 * past, which has nothing to do with this and would lose settings
+			 * the operator chose.
+			 *
+			 * Note what is NOT here: a way to send the scan's coordinates. The
+			 * static defect table is refused by the chip on these parts, so
+			 * the only thing on offer is the camera's own automatic corrector.
+			 */
+			sensor: window.MajesticCalibrate && {
+				holdSeconds: 30,
+				profile: function () { return window.MajesticCalibrate.baseline(); },
+				patch: function (ini) { return window.MajesticCalibrate.patchProfile(ini); },
+				revert: function () { return window.MajesticCalibrate.revert(); },
+				keep: function () { return window.MajesticCalibrate.keep(); },
+			},
 			/* Plate reading, and only when there is somewhere to read from.
 			 *
 			 * The models are a fetched download (see lpr-loader.js), so a

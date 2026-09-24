@@ -179,8 +179,8 @@ window.MajesticCalibrate = (function () {
 				 * to download. That is not a save, whatever the profile says. */
 				const disp = r.headers && r.headers.get && r.headers.get('Content-Disposition');
 				if (disp && /attachment/i.test(disp))
-					throw answered(new Error('This camera\'s firmware cannot save into its image ' +
-						'profile; update it to keep a calibration.'));
+					throw answered(new Error('The camera answered with its profile instead of ' +
+						'saving the change.'));
 				return t;
 			});
 		});
@@ -201,6 +201,59 @@ window.MajesticCalibrate = (function () {
 				written = 'matrix';
 				armUnloadRevert();
 				return setKeys(fmt(solved.ccm), fmt(solved.colorMatrix));
+			});
+		},
+		/*
+		 * Write sections into the profile and nothing else.
+		 *
+		 * persist() below is about a colour calibration, and after its POST it
+		 * drops the camera's manual colour matrix -- necessary there, because a
+		 * manual matrix would sit over the calibration and hide it. A caller
+		 * patching some other section has no business losing the operator's
+		 * colour settings, so this is a sibling rather than an argument to it.
+		 *
+		 * Everything that makes the write safe is shared: the one-change-at-a-
+		 * time guard, the unload handler, and the same detection of firmware
+		 * that answers a POST with its GET handler. revert() and keep() need
+		 * no changes -- they already branch on profileWas, which stays null
+		 * here because no colour key was touched.
+		 */
+		patchProfile: function (ini) {
+			if (previous || written)
+				return Promise.reject(new Error('The last change is still waiting to be kept ' +
+					'or put back.'));
+			written = 'profile';
+			profileWas = null;
+			armUnloadRevert();
+			return profilePost('', ini).then(function (said) {
+				/* A 200 that is not an acknowledgement is not a save. Saying
+				 * only what the camera did: the WebUI and majestic ship as one
+				 * image, so there is no version of this the operator could go
+				 * and fetch. */
+				if (!/^\[\w+\] written to \S/m.test(said)) {
+					const e = new Error('The camera did not accept the change to its image ' +
+						'profile.');
+					e.answered = true;
+					throw e;
+				}
+				return said;
+			/*
+			 * .catch, NOT a second argument to .then.
+			 *
+			 * A rejection handler passed beside the fulfillment one does not
+			 * see what the fulfillment one throws -- so the refusal above
+			 * escaped the cleanup below, `written` stayed set, and every later
+			 * patch was refused for a change the caller had been told did not
+			 * happen. One lost answer locked the profile for the session.
+			 */
+			}).catch(function (err) {
+				/* No answer is not proof it did not write, so ask for the
+				 * profile back before standing down. */
+				const settle = err.answered ? Promise.resolve(true) : putBack();
+				return settle.then(function (recovered) {
+					if (recovered) { written = null; profileWas = null; }
+					throw err;
+				});
 			});
 		},
 		baseline: function () {
@@ -229,8 +282,8 @@ window.MajesticCalibrate = (function () {
 					 * profile, and 200. That is not a save, and must not be
 					 * reported as one. */
 					if (!/^\[\w+\] written to \S/m.test(said)) {
-						const e = new Error('This camera\'s firmware cannot save into its image ' +
-							'profile; update it to keep a calibration.');
+						const e = new Error('The camera answered without confirming it had saved ' +
+							'the calibration.');
 						e.answered = true;
 						throw e;
 					}
