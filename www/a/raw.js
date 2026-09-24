@@ -93,8 +93,28 @@
 	function focusHost(statsOk, motorOk) {
 		const f = window.MajesticFocus;
 		if (!statsOk || !f) return undefined;
-		if (motorOk) return f;
-		return { zones: f.zones, intervalMs: f.intervalMs };
+		/* Built up rather than stripped down. Dropping the whole object when
+		 * there is no motor took the filter controls with it -- two unrelated
+		 * capabilities, one of which was answered by a probe with a deadline,
+		 * so a camera that was merely slow to say what its lens could do lost
+		 * the ability to tune its filter as well. Each is carried on its own
+		 * evidence. */
+		const out = { zones: f.zones, intervalMs: f.intervalMs };
+		if (motorOk) {
+			out.move = f.move;
+			out.moveRepeatMs = f.moveRepeatMs;
+			out.moveMaxMs = f.moveMaxMs;
+		}
+		if (typeof f.filters === 'function' &&
+			typeof f.applyFilters === 'function' &&
+			typeof f.revertFilters === 'function') {
+			out.filters = f.filters;
+			out.applyFilters = f.applyFilters;
+			out.revertFilters = f.revertFilters;
+			out.keepFilters = f.keepFilters;
+			out.holdSeconds = f.holdSeconds;
+		}
+		return out;
 	}
 
 	function mount(focusReady, motorReady) {
