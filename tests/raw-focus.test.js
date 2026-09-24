@@ -33,10 +33,18 @@ function load(opts) {
 	const sandbox = {
 		Promise: Promise, Object: Object, Error: Error, Array: Array,
 		Math: Math, isFinite: isFinite, JSON: JSON,
+		setTimeout: setTimeout, clearTimeout: clearTimeout,
 		apiFetch: function (url) {
 			state.asked++;
 			state.lastUrl = url;
 			if (opts.netFail) return Promise.reject(new TypeError('network'));
+			// A socket nobody ever answers: neither resolves nor rejects.
+			if (opts.hang) return new Promise(function () {});
+			if (opts.gridSeq) {
+				const g = opts.gridSeq[Math.min(state.asked - 1, opts.gridSeq.length - 1)];
+				return Promise.resolve({ ok: true, status: 200,
+					json: () => Promise.resolve(g) });
+			}
 			if (opts.status && opts.status !== 200)
 				return Promise.resolve({ ok: false, status: opts.status });
 			return Promise.resolve({
@@ -109,6 +117,30 @@ function load(opts) {
 		await api.ready.catch(() => { threw = true; });
 		check('settles rather than rejects: ' + JSON.stringify(t), !threw);
 	}
+
+	group('an unanswered probe does not cost the page its editor');
+
+	// `ready` is awaited before the editor mounts. A request that hangs neither
+	// resolves nor rejects, so without a deadline the raw page would sit on its
+	// loading line for good -- an optional tab holding up the main function.
+	({ api } = load({ hang: true }));
+	const raced = await Promise.race([
+		api.ready,
+		new Promise((r) => setTimeout(() => r('STILL-PENDING'), 6000)),
+	]);
+	check('it gives up and lets the editor mount without the tab', raced === false,
+		String(raced));
+
+	group('every poll is held to the shape, not just the probe');
+
+	// The probe says this camera HAS a grid. It says nothing about the one
+	// arriving two minutes later.
+	({ api } = load({ gridSeq: [GRID, { rows: 2, cols: 3, zones: [] }] }));
+	check('the probe still passes', (await api.ready) === true);
+	let late = '';
+	await api.zones().catch((e) => { late = e.message; });
+	check('and a later malformed grid is refused rather than forwarded',
+		/shape and contents disagree/.test(late), late || '(resolved)');
 
 	group('the camera\'s own words never reach the operator raw');
 

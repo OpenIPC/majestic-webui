@@ -16,11 +16,29 @@ window.MajesticFocus = (function () {
 	 * much slower makes a lens feel like it is responding late. */
 	const INTERVAL_MS = 700;
 
+	/* A deadline on the one question asked before the editor mounts. A request
+	 * that is refused rejects and a request that is answered resolves, but a
+	 * socket that is simply never answered does neither -- and this promise is
+	 * awaited on the path that mounts the editor, so without a deadline a hung
+	 * connection would hold the raw page on "Loading the editor…" for good.
+	 * An optional tab must not be able to cost the page its main function. */
+	const PROBE_TIMEOUT_MS = 4000;
+
 	function zones() {
 		return apiFetch('/api/v1/isp/af-zones.json', { credentials: 'same-origin' })
 			.then(function (r) {
 				if (!r.ok) throw new Error(explain(r.status));
 				return r.json();
+			})
+			.then(function (g) {
+				/* Every answer, not just the first. The probe establishes that
+				 * this camera HAS a grid; it says nothing about the one arriving
+				 * two minutes later, and a host that advertises a shape has to
+				 * hold to it on every poll or the guarantee is decorative. */
+				if (!usable(g))
+					throw new Error('the camera sent a focus grid whose shape and ' +
+						'contents disagree');
+				return g;
 			});
 	}
 
@@ -67,7 +85,12 @@ window.MajesticFocus = (function () {
 	 * stylesheet still arriving, and is usually settled by the time anything
 	 * waits on it.
 	 */
-	const ready = zones().then(usable).catch(function () { return false; });
+	const ready = Promise.race([
+		zones().then(function () { return true; }, function () { return false; }),
+		new Promise(function (resolve) {
+			setTimeout(function () { resolve(false); }, PROBE_TIMEOUT_MS);
+		}),
+	]);
 
 	return { zones: zones, intervalMs: INTERVAL_MS, ready: ready };
 })();
