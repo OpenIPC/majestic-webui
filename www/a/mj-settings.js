@@ -1345,9 +1345,15 @@
 	// stale until the band next unpins, which costs at most a shift of the
 	// content below, never a flip.
 	//
-	// Covering what scrolls under it is this design's price, so the band also
-	// becomes the page's scroll-padding: a field reached by Tab, by search or
-	// by scrollIntoView stops below the band and not behind it.
+	// Covering what scrolls under it is this design's price, so while pinned
+	// every element of the form but the band's own carries the band's height
+	// as its scroll-margin: a field reached by Tab, by search or by
+	// scrollIntoView stops below the band and not behind it. Not the page's
+	// scroll-padding, which it was at first: that reserves the strip for
+	// everything, the band's own controls included, and they sit inside it
+	// for good — so every press of Night focused a checkbox the browser then
+	// "revealed" by scrolling the page up, a band's height per click, until
+	// the band unpinned.
 	function pinStage(stage, rtMount) {
 		const pin = el('div', 'mj-live-pin');
 		const at = el('div', 'mj-live-pin-at');
@@ -1360,7 +1366,7 @@
 		if (rtMount) pin.appendChild(rtMount);
 		pin.after(gap);
 
-		const root = document.documentElement;
+		const host = pin.parentNode;
 		let pinned = false;
 		let full = 0;
 
@@ -1368,14 +1374,14 @@
 			if (!pinned) {
 				full = pin.offsetHeight;
 				gap.style.height = '';
-				root.style.scrollPaddingTop = '';
+				host.style.removeProperty('--mj-pin-reach');
 				return;
 			}
 			const h = pin.offsetHeight;
 			gap.style.height = Math.max(0, full - h) + 'px';
 			// Plus the 0.5rem the band is pinned below the top, and the 0.5rem
 			// of surface it draws under itself.
-			root.style.scrollPaddingTop = 'calc(' + h + 'px + 1rem)';
+			host.style.setProperty('--mj-pin-reach', 'calc(' + h + 'px + 1rem)');
 		};
 
 		const set = (want) => {
@@ -1408,7 +1414,7 @@
 		return () => {
 			io.disconnect();
 			if (ro) ro.disconnect();
-			root.style.scrollPaddingTop = '';
+			host.style.removeProperty('--mj-pin-reach');
 		};
 	}
 

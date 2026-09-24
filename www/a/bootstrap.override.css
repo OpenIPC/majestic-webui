@@ -1419,6 +1419,18 @@ mark {
 	--mj-pin-dock: 3.25rem;
 }
 
+/* Where a field brought into view must stop: below the band. The property is
+   set on the form only while the band is pinned, and the band's own controls
+   are exempt. They are always on screen, and reserving the strip for them too
+   made each press of a runtime toggle scroll the page up (pinStage). */
+#mj-settings-form * {
+	scroll-margin-top: var(--mj-pin-reach, 0px);
+}
+
+#mj-settings-form .mj-live-pin * {
+	scroll-margin-top: 0;
+}
+
 /* ── the Overlay leaf ────────────────────────────────────────────────────
    Its own reserve, which is what the variable exists for. 17.6rem is the LIVE
    leaf's arithmetic — stage top, 12px, the 76px knob strip, 16px — and this
