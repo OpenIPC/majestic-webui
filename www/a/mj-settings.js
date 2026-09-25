@@ -2851,16 +2851,21 @@
 		if (hasTone) form.appendChild(strip);
 
 		// The second card carries what is worth having but not worth the
-		// picture's height: Scene, Luma and Orientation, side by side rather
-		// than as the 405px two-column block they used to make. Shallow enough
-		// that on a 1080p window the whole panel is on screen again.
+		// picture's height, in two columns: what you set on the left -- Tone,
+		// then Orientation under it -- and what the picture measures on the
+		// right -- Luma, with the tone figures under the histogram they are
+		// readings of. Orientation had a column of its own once, as tall as
+		// Tone's for one row of four buttons; the figures sat two by two in
+		// Tone's narrow column with their labels wrapped and half of every
+		// cell empty.
 		const deck = el('div', 'mj-live-deck');
 		const colScene = el('div', 'mj-live-col mj-live-col-scene');
-		const colLuma = el('div', 'mj-live-col');
-		const colGeo = el('div', 'mj-live-col mj-live-col-geo');
+		const colLuma = el('div', 'mj-live-col mj-live-col-luma');
+		// Filled while the fields are placed (the hidden mirror and flip
+		// checkboxes land here first), and put under Tone once Tone is drawn.
+		const colGeo = el('div', 'mj-live-geo');
 		deck.appendChild(colScene);
 		deck.appendChild(colLuma);
-		deck.appendChild(colGeo);
 		form.appendChild(deck);
 
 		// Under the deck: one card per section, holding what the deck has no
@@ -3091,6 +3096,7 @@
 				liveGroup(colScene, 'Tone', 'automatic or by hand'),
 				toneFields);
 		}
+		colScene.appendChild(colGeo);
 
 		if (preview) {
 			// The group's note slot carries the running mean rather than a
@@ -3100,6 +3106,12 @@
 			const note = lumaBody.parentNode.querySelector('.mj-live-note');
 			if (note) note.className = 'mj-live-note mj-luma-mean';
 			renderLuma(lumaBody, preview);
+			// The tone figures -- range used, lost in shadows and highlights,
+			// light to spare -- are readings of this histogram, so they sit
+			// under it, four across. renderScene built them and still drives
+			// them; only their place changes.
+			const figs = colScene.querySelector('.mj-tone-figs');
+			if (figs) lumaBody.appendChild(figs);
 		}
 
 		if (useGeo) {
@@ -3120,8 +3132,8 @@
 		// stacked. Drop whatever came out empty instead of enumerating the
 		// combinations. colGeo is judged on what is VISIBLE in it: with the pad
 		// mounted it holds the two hidden checkboxes as well, and without the
-		// pad it may hold nothing but them — a cell that renders as a divider
-		// and 15rem of nothing.
+		// pad it may hold nothing but them — a block that renders as a rule and
+		// a gap under Tone with nothing in it.
 		if (!colGeo.querySelector('.mj-live-grp, .mj-live-row:not([hidden])')) {
 			// The hidden fields go with it. They are detached, not destroyed:
 			// state.fields still holds them, and getValue()/Save read the
@@ -9609,8 +9621,18 @@
 	// A button and a body under it. The body is hidden="until-found" rather
 	// than display:none, so the browser's own find-in-page reaches a setting
 	// inside it and opens it on the way (beforematch), the same as the "?"
-	// folds. Returns the body, which is where the group's rows are drawn.
+	// folds.
+	//
+	// It goes UNDER the card's two columns, full width, and holds a pair of
+	// columns of its own, dealt like any other card's when it opens. Inside
+	// the first column it made the whole card one narrow column: the rows
+	// above it fell under SOLO_MAX, and the fold's eleven rows then ran down
+	// that same column when opened. For the same reason the rows above it are
+	// never solo -- they are not a card of a handful of rows, they are the
+	// head of one whose rest is folded. Returns the column the group's rows
+	// are drawn into.
 	function groupFold(box, sec, name) {
+		const outer = box.parentNode;
 		const wrap = el('div', 'mj-grp-fold');
 		const btn = el('button', 'mj-grp-fold-btn');
 		btn.type = 'button';
@@ -9619,14 +9641,20 @@
 		const body = el('div', 'mj-grp-fold-body');
 		body.id = 'mj-fold-' + sec + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 		btn.setAttribute('aria-controls', body.id);
+		const cols = el('div', 'mj-cols');
+		cols.appendChild(el('div', 'mj-col'));
+		cols.appendChild(el('div', 'mj-col'));
+		body.appendChild(cols);
+		state.cols.push(cols);
 		wrap.appendChild(btn);
 		wrap.appendChild(body);
-		box.appendChild(wrap);
+		outer.dataset.solo = 'off';
+		outer.after(wrap);
 		setGroupFold(wrap, false);
 		btn.addEventListener('click', () =>
 			setGroupFold(wrap, btn.getAttribute('aria-expanded') !== 'true'));
 		body.addEventListener('beforematch', () => setGroupFold(wrap, true));
-		return body;
+		return cols.firstElementChild;
 	}
 
 	function setGroupFold(wrap, open) {
@@ -9636,6 +9664,13 @@
 		btn.setAttribute('aria-expanded', String(open));
 		if (open) body.removeAttribute('hidden');
 		else body.setAttribute('hidden', 'until-found');
+		// Shut, the rows measure nothing and were dealt as nothing; open, they
+		// are dealt now that they have a height. Moving them cannot move the
+		// button, which is above them.
+		if (open) {
+			dealCols(body.querySelector(':scope > .mj-cols'));
+			foldHints();
+		}
 	}
 
 	// Opens, never shuts: a fold holding a row that is set away from stock, or
@@ -10011,7 +10046,7 @@
 		// heading would be dealt into two columns while claiming to be under the
 		// limit.
 		const shown = items.filter(it => it.offsetHeight && it.classList.contains('mj-row')).length;
-		const solo = shown <= SOLO_MAX;
+		const solo = box.dataset.solo !== 'off' && shown <= SOLO_MAX;
 		box.classList.toggle('mj-solo', solo);
 		if (solo) {
 			if (b.childElementCount) {

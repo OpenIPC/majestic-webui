@@ -2576,18 +2576,28 @@ button.mj-osd-chip,
 	align-items: center;
 }
 
-/* The deck's second row: Scene, Luma and Orientation side by side rather than
-   the 405px two-column block they used to make. Shallow enough that on a 1080p
-   window the whole panel is on screen again, and the picture never paid for it.
-   Luma takes the slack because a histogram is the one of the three that is
-   worth more the wider it gets. */
+/* The deck's second row, in two columns: what you set on the left (Tone, then
+   Orientation), what the picture measures on the right (Luma, and the tone
+   figures under it). Three columns left Orientation a panel as tall as Tone's
+   for one row of four buttons, and squeezed the figures two by two into Tone's
+   17rem. Luma takes the slack because a histogram is worth more the wider it
+   gets, and its figures want a row of four. */
 .mj-live-col-scene {
-	flex: 0 0 17rem;
+	flex: 0 0 40%;
 }
 
-.mj-live-col-geo {
-	flex: 0 0 15rem;
+.mj-live-col-luma {
 	border-left: 1px solid var(--bs-border-color);
+}
+
+/* Orientation, under Tone in the same column rather than a column each, since
+   each is one short block. Its own heading's rule is the divider. */
+.mj-live-geo {
+	margin-top: 1.25rem;
+}
+
+.mj-live-geo:first-child {
+	margin-top: 0;
 }
 
 .mj-live-grp + .mj-live-grp {
@@ -2596,11 +2606,12 @@ button.mj-osd-chip,
 
 /* A deck column's first heading has the column's own padding above it and
    nothing to be separated from, so the group heading's 1.5rem of air came on
-   top of that: 45px of empty card over Tone, Luma and Orientation. First of
-   TYPE, because the
-   Orientation column opens with the hidden mirror and flip rows, which are
-   <p> and not the group's <div>. */
-.mj-live-col > .mj-live-grp:first-of-type > .mj-live-grp-head {
+   top of that: 45px of empty card over Tone and Luma. First of TYPE, because
+   Orientation's wrapper opens with the hidden mirror and flip rows, which are
+   <p> and not the group's <div>; and that wrapper is the column's first child
+   on a camera with mirror and flip but no Tone. */
+.mj-live-col > .mj-live-grp:first-of-type > .mj-live-grp-head,
+.mj-live-col > .mj-live-geo:first-child > .mj-live-grp:first-of-type > .mj-live-grp-head {
 	margin-top: 0;
 }
 
@@ -2906,13 +2917,14 @@ button.mj-osd-chip,
 	font-weight: 600;
 }
 
-/* The measurement under the verdict. `auto-fit` rather than a fixed four:
-   the set of figures is whatever the camera publishes, and a part that never
-   states its gain publishes three -- which should read as a row of three, not
-   as four with a hole where the fourth would be. */
+/* The measurement under the histogram: one row, however many figures the
+   camera publishes -- a part that never states its gain publishes three, which
+   should read as a row of three, not as four with a hole. Flex rather than an
+   auto-fit grid: each figure starts at its own width, so at full width every
+   label is on one line, and narrower the labels wrap inside a row that stays a
+   row. The grid broke into three and one at 1100px. */
 .mj-tone-figs {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+	display: flex;
 	gap: 0.5rem 0.75rem;
 	margin-top: 0.75rem;
 	padding-top: 0.7rem;
@@ -2921,15 +2933,27 @@ button.mj-osd-chip,
 
 .mj-tone-fig {
 	display: flex;
+	flex: 1 1 auto;
 	flex-direction: column;
 	gap: 0.15rem;
 	min-width: 0;
 }
 
+/* A phone's single column is too narrow for four: two by two. */
+@media (max-width: 575.98px) {
+	.mj-tone-figs {
+		flex-wrap: wrap;
+	}
+
+	.mj-tone-fig {
+		flex-basis: 40%;
+	}
+}
+
 .mj-tone-fig-k {
 	color: var(--bs-tertiary-color);
 	font-size: 0.6875rem;
-	letter-spacing: 0.04em;
+	letter-spacing: 0.02em;
 	text-transform: uppercase;
 }
 
@@ -3205,7 +3229,7 @@ button.mj-osd-chip,
 	}
 
 	.mj-live-col-b,
-	.mj-live-col-geo {
+	.mj-live-col-luma {
 		flex: 1 1 auto;
 		border-left: 0;
 		border-top: 1px solid var(--bs-border-color);

@@ -256,12 +256,16 @@ The order of the isp card on the Picture leaf is `SECTION_GROUPS.isp` in
 1. the two mode switches, with no heading;
 2. Clarity (dehaze);
 3. Exposure and gain;
-4. How it reacts;
-5. For tuning engineers: the external-tuner switch.
+4. For tuning engineers: the external-tuner switch;
+5. How it reacts.
 
 The last three are folded behind **More exposure settings** (`fold` on the
 group, #585): eleven exposure rows under the picture read as the page's
-subject. The fold opens by itself whenever a row in it holds a value away from
+subject. The fold sits under the card's two columns, full width, with a pair
+of columns of its own that is dealt when it opens; the rows above it are never
+dealt solo, since the card is not a handful of rows but the head of a longer
+one. The tuning switch comes before How it reacts so that the cut, taken only
+between headings, balances. The fold opens by itself whenever a row in it holds a value away from
 stock, an unsaved edit or a search hit (`openGroupFolds()`, run from
 `paintStock()`), and never shuts by itself, so a setting in force is never out
 of sight. Picking Manual fills three of those rows and so opens it. The body
