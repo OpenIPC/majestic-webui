@@ -139,7 +139,13 @@
 				head: 'Paused',
 				tail: 'it resumes on its own',
 				// Says nothing about WHY it paused: the state carries no cause,
-				// and it has been seen with nobody adjusting anything (#590).
+				// and the cause is usually not this viewer (#590). Any live
+				// write of the picture holds the controller for a minute --
+				// another open page dragging a knob, or putting the picture
+				// back as that page is left -- and a save pauses it briefly.
+				// A page that loads and leaves without touching anything
+				// sends nothing and pauses nothing; measured on the lab
+				// hi3516ev300.
 				why: 'Automatic tuning is paused and resumes on its own. ' +
 					'Readings from before the pause are not shown.',
 				moved: [] };
