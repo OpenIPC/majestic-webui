@@ -1089,6 +1089,21 @@ pre#output[data-cmd] {
 		scrollbar-gutter: stable;
 		/* room under the last section, so it does not sit flush on the edge */
 		padding-bottom: 0.5rem;
+		/* A pane that scrolls must look like one. Without a mark the list at
+		   900px tall appeared to end at its last visible category, and the
+		   sections under it read as missing (#591). Two shadows are painted on
+		   the pane's edges (scroll) and two covers in the page colour ride with
+		   the content (local): at either end of the list the cover sits over the
+		   shadow and hides it, so a shadow shows only on a side with more to
+		   scroll, and a list short enough to fit shows none at all. */
+		background:
+			linear-gradient(var(--bs-body-bg) 30%, transparent) center top,
+			linear-gradient(transparent, var(--bs-body-bg) 70%) center bottom,
+			radial-gradient(farthest-side at 50% 0, rgba(var(--bs-emphasis-color-rgb), .18), transparent) center top,
+			radial-gradient(farthest-side at 50% 100%, rgba(var(--bs-emphasis-color-rgb), .18), transparent) center bottom;
+		background-repeat: no-repeat;
+		background-size: 100% 2.5rem, 100% 2.5rem, 100% .75rem, 100% .75rem;
+		background-attachment: local, local, scroll, scroll;
 	}
 }
 
