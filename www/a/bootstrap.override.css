@@ -43,8 +43,16 @@
 	color: var(--bs-tertiary-color);
 }
 
+/* A placeholder is an example, so it sits a step back from typed text -- but it
+   has to stay readable. #c2c2d9 is 10.3:1 on the dark input and 1.6:1 on the
+   light one, where it all but disappears; the light theme gets its own at
+   4.5:1. */
 .form-control::placeholder {
 	color: #c2c2d9;
+}
+
+[data-bs-theme=light] .form-control::placeholder {
+	color: #6b7085;
 }
 
 .form-label {
@@ -209,6 +217,70 @@
 
 .number .mj-ctl-in {
 	max-width: 10rem;
+}
+
+/* A number the camera runs by itself when it is empty (mj-exposure.js, #582):
+   the box with its unit, then what the camera is doing now. The box keeps the
+   10rem every number row has, unit included, and the reading sits beside it
+   rather than under it -- it is a figure about this control, not a sentence
+   about the setting, and a line of its own would cost every one of these rows
+   its height. It wraps under the box on a column too narrow for both. */
+.number.mj-exp-row .mj-ctl-in {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.25rem 0.75rem;
+	max-width: none;
+}
+
+/* The box keeps a number row's width and the unit is added to it, not taken
+   out of it: inside a shared 10rem, "frames" left room for "Auto" and cut
+   the figure after it, which is the one part of the placeholder worth reading. */
+.number.mj-exp-row .input-group {
+	flex: 0 0 auto;
+	width: auto;
+	max-width: none;
+	flex-wrap: nowrap;
+}
+
+.number.mj-exp-row .input-group > .form-control {
+	flex: 0 0 8rem;
+	width: 8rem;
+}
+
+/* Here the placeholder is not an example but the reading: "Auto · 32" is what
+   the camera is running (#582). So it takes the theme's secondary text colour
+   -- 8.2:1 dark, 6.5:1 light -- still a step back from a value somebody typed,
+   which is the difference it has to show. */
+.mj-exp-row .form-control::placeholder {
+	color: var(--bs-secondary-color);
+	opacity: 1;
+}
+
+/* A group whose rows act only in one mode, while the camera is in the other:
+   still editable, since a value written now is in place the moment the mode
+   comes back, but set back so the page does not present them as in force. */
+.mj-idle {
+	opacity: 0.5;
+}
+
+.mj-exp-row .mj-unit {
+	min-width: 2.25rem;
+	justify-content: center;
+	font-size: 0.875rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-now {
+	font-size: 0.78125rem;
+	color: var(--bs-secondary-color);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.mj-now b {
+	color: var(--bs-body-color);
+	font-weight: 600;
 }
 
 .select .mj-ctl-in {

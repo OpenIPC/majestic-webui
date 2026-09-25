@@ -291,6 +291,51 @@ group('Day / Night: every setting is in a heading or on the pin map');
 		'empty: ' + empty.join(', '));
 }
 
+// ── The exposure rows' headings on the Live leaf ───────────────────────────
+//
+// isp's groups are drawn only where their rows are lifted, and the isp page
+// skips a heading whose rows all went to the Live leaf. So the two failures
+// are: a group key the daemon does not lift, which would leave its heading on
+// the isp page with the rest of the group gone; and a key in two groups, drawn
+// under whichever heading came first. Every key here has to be in the shipped
+// schema, too -- the headings were written against it (#582).
+group('ISP: the Live leaf headings name lifted keys, once each');
+{
+	// The exposure keys as an hi3516ev300 declares them, merged into a copy
+	// rather than into the shared fixture: every assertion above counts what
+	// the image section puts on the Live leaf, and these would join it.
+	const s = clone(SCHEMA);
+	Object.assign(s.properties.isp.properties, JSON.parse(fs.readFileSync(
+		path.join(__dirname, 'fixtures', 'schema-isp-exposure.json'), 'utf8')));
+	const ISP = s.properties.isp.properties;
+	const groups = TREE.sectionGroups('isp');
+	const t = build(s);
+	check('the section has a group map', !!groups && groups.length > 0);
+	check('every group has an id and keys', groups.every(g => g.id && g.keys.length));
+	check('only the first group goes without a heading',
+		groups.slice(1).every(g => g.label));
+	const placed = groups.reduce((acc, g) => acc.concat(g.keys), []);
+	const dupes = placed.filter((k, i) => placed.indexOf(k) !== i);
+	check('no key is in two headings', !dupes.length, dupes.join(', '));
+	// A lifted isp key named in no group is drawn ahead of the first heading:
+	// it would sit among the two mode switches, which is how the external
+	// tuner switch came to be second on the card.
+	const unnamed = Object.keys(ISP).filter(k => t.lifted().has('isp.' + k) && placed.indexOf(k) < 0);
+	check('every lifted isp key is placed on purpose', !unnamed.length, unnamed.join(', '));
+	const missing = placed.filter(k => !(k in ISP));
+	check('every grouped key is in the shipped schema', !missing.length, missing.join(', '));
+	const notLifted = placed.filter(k => !t.lifted().has('isp.' + k));
+	check('every grouped key is lifted to the Live leaf', !notLifted.length, notLifted.join(', '));
+	// A condition naming a field or a value the schema does not have would
+	// dim a group forever, or never -- and either looks like a design choice.
+	const bad = groups.filter(g => g.activeWhen).filter(g => {
+		const c = ISP[g.activeWhen.field];
+		return !c || !Array.isArray(c.enum) || c.enum.indexOf(g.activeWhen.equals) < 0;
+	}).map(g => g.id);
+	check('every activeWhen names a real mode and value', !bad.length, bad.join(', '));
+	everyKeyOnce('exposure keys', t, s);
+}
+
 group('a list of objects is one leaf, not one per member');
 {
 	// The destination list is `{type:'array', items:{type:'object', ...}}`, and

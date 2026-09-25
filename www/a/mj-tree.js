@@ -308,6 +308,36 @@
 				'autoNightGain', 'autoDayGain', 'autoNightDelay', 'autoDayDelay',
 				'minThreshold', 'maxThreshold', 'monitorDelay', 'transitionDelayMs'] },
 		],
+		// The isp rows lifted onto the Live leaf, in the order an owner needs
+		// them: the two switches that decide everything below, then the
+		// limits, then how auto-exposure moves, then picture processing, and
+		// last the switch only an image-quality engineer with a tuning tool
+		// attached should ever touch. It sat second, straight under Exposure
+		// mode, because schema order put it there.
+		//
+		// Headings that stay true in both exposure modes, because the rows
+		// under them change meaning with it and a heading does not (#548):
+		// "Limits" would be false the moment the mode reads manual, where the
+		// same numbers are the values themselves. The rows' own names carry
+		// that -- the daemon renames them per mode (#582).
+		//
+		// The first group has no label: it orders the two switches ahead of
+		// everything without a heading over them. Every lifted isp key is
+		// named somewhere, because one left out would be drawn ahead of the
+		// first heading -- and tests/tree.test.js says so if it is.
+		isp: [
+			{ id: 'mode', label: '', keys: ['aeMode', 'slowShutter'] },
+			{ id: 'exposure', label: 'Exposure and gain', keys: ['exposure', 'aGain', 'dGain', 'ispGain'] },
+			// `activeWhen` is the note's claim as a condition: the page sets
+			// these rows back while the mode says otherwise. They stay
+			// editable -- the daemon writes them in manual too, so a value is
+			// in place the moment automatic comes back.
+			{ id: 'reacts', label: 'How it reacts', note: 'in automatic mode',
+				activeWhen: { field: 'aeMode', equals: 'auto' },
+				keys: ['meterRect', 'aeStrategy', 'aeSpeed', 'aeTolerance', 'aeBlackDelay', 'aeWhiteDelay'] },
+			{ id: 'picture', label: 'Picture', keys: ['dehaze'] },
+			{ id: 'tuning', label: 'For tuning engineers', keys: ['externalTuner'] },
+		],
 	};
 	function sectionGroups(section) { return SECTION_GROUPS[section] || null; }
 

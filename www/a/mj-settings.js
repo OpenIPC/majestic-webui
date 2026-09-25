@@ -44,6 +44,11 @@
 	// is a page that is merely less helpful rather than one that has lost its
 	// search or grown a control that opens nothing.
 	const HELP = (typeof window === 'object' && window.MajesticHelp) || null;
+	// What a field the camera can run by itself says while nobody has set it,
+	// and its name in the mode the camera is in (#582). Without it the rows
+	// fall back to the plain number box they always were: less informative,
+	// never wrong.
+	const EXP = (typeof window === 'object' && window.MajesticExposure) || null;
 
 	const bootEl = document.getElementById('mj-settings-boot');
 	if (!bootEl) return;
@@ -802,6 +807,23 @@
 		}
 	}
 
+	// The "?" mark's two names, for the field called `desc`. Its own function
+	// because a row can be renamed after mount -- an exposure row takes
+	// another name when the mode changes -- and a mark still announcing the old
+	// one tells a screen-reader user about a setting no longer on screen. The
+	// name in force is re-applied when the mark already carries one.
+	function nameHelpMark(more, desc) {
+		const help = more.dataset.nameKind === 'more';
+		more.dataset.nameOpen = help ? 'Less about ' + desc : 'Shorten the explanation for ' + desc;
+		more.dataset.nameShut = help ? 'More about ' + desc : 'Show the whole explanation for ' + desc;
+		if (more.hasAttribute('aria-label')) {
+			const name = more.getAttribute('aria-expanded') === 'true'
+				? more.dataset.nameOpen : more.dataset.nameShut;
+			more.title = name;
+			more.setAttribute('aria-label', name);
+		}
+	}
+
 	// A fold is open when the reader opened it OR the search found something
 	// inside it. The OR is the whole point: deciding on the hit alone — the
 	// obvious implementation — slams every hand-opened fold shut the moment
@@ -1141,6 +1163,7 @@
 
 		state.fields = [];
 		state.repaint = [];
+		state.expRows = [];
 		state.initial = {};
 		state.cols = [];
 		state.liveSync = [];
@@ -2477,6 +2500,71 @@
 		state.liveCleanup.push(() => { if (typeof off === 'function') off(); });
 	}
 
+	// The rows mj-exposure.js describes read the camera's heartbeat, once for
+	// the whole page. One subscription rather than one per row or per leaf: the
+	// rows are rebuilt on every section switch and state.expRows is emptied
+	// with them, so the subscriber only ever paints what is on screen, and the
+	// heartbeat it rides is polled for the page's life anyway.
+	let expSample = null;
+	let expWatching = false;
+	function watchExp() {
+		if (expWatching || typeof window.mjMetricsSubscribe !== 'function') return;
+		expWatching = true;
+		window.mjMetricsSubscribe((s) => {
+			expSample = s;
+			(state.expRows || []).forEach(r => { if (r.p.isConnected) r.paint(); });
+		});
+	}
+
+	// The rate a frame count is worth seconds at: what the main stream is set
+	// to, else the sensor's own. Said beside the figure, because slow shutter
+	// lowers the real rate at night and a delay in frames grows with it.
+	function streamFps() {
+		const set = Number(getDotted(state.config, 'video0.fps'));
+		if (isNum(set) && set > 0) return set;
+		const fps = ((((state.schema || {}).properties || {}).video0 || {}).properties || {}).fps;
+		return fps && isNum(fps['x-fps-sensor']) && fps['x-fps-sensor'] > 0
+			? fps['x-fps-sensor'] : null;
+	}
+
+	// Name, placeholder and running figure for one of those rows.
+	//
+	// The name follows the mode: in the one x-title-when names the field is the
+	// value itself, and the ceiling auto-exposure works inside is not what
+	// runs, so the placeholder drops the figure rather than quote a limit
+	// nothing is spending. A failed or absent reading says only "Auto": a stale
+	// number is the one thing worse than none (#582).
+	function paintExp(row, siblingValue, onRename) {
+		const { p, control, sub, unit } = row;
+		const title = EXP.titleFor(sub, siblingValue, '');
+		const hl = p.querySelector('.form-label [data-hl]');
+		if (title && hl && hl.dataset.hl !== title) {
+			hl.dataset.hl = title;
+			hl.textContent = title;
+			onRename(title);
+		}
+		const other = !!EXP.matched(sub, siblingValue);
+		const m = sub['x-metric'] || {};
+		const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
+		const inForce = other ? null : EXP.reading(v, m.inForce, m.scale);
+		control.placeholder = EXP.autoText(inForce, unit);
+
+		const out = p.querySelector('.mj-now');
+		if (!out) return;
+		out.textContent = '';
+		if (unit === 'frames') {
+			const n = control.value !== '' ? Number(control.value) : inForce;
+			out.textContent = EXP.delayText(n, streamFps()) || '';
+			return;
+		}
+		const now = EXP.reading(v, m.now, m.scale);
+		if (now === null) return;
+		const b = document.createElement('b');
+		b.textContent = EXP.withUnit(now, unit);
+		out.appendChild(document.createTextNode('now '));
+		out.appendChild(b);
+	}
+
 	function renderLive(form) {
 		const fields = liveFields();
 		// Rebuilt with the leaf. Left alone, a section switch would leave the
@@ -2688,7 +2776,40 @@
 			return cols;
 		}
 
-		for (const f of fields) {
+		// A section with named groups draws its lifted rows under their
+		// headings, in the order the groups are named, with every row no group
+		// names ahead of the first heading -- after the last one it would read
+		// as part of that group. Each section's rows are kept together and in
+		// the order the sections first appear, which is the order their cards
+		// are made in either way.
+		const groupIdx = (f) => {
+			const gs = sectionGroups(f.section);
+			return gs ? gs.findIndex(g => g.keys.indexOf(f.key) >= 0) : -1;
+		};
+		// Within a group, the order the group names its keys in -- which is the
+		// point of naming them: Exposure mode decides what everything under it
+		// means, and schema order put Slow shutter above it.
+		const keyIdx = (f) => {
+			const gi = groupIdx(f);
+			return gi < 0 ? -1 : sectionGroups(f.section)[gi].keys.indexOf(f.key);
+		};
+		const bySec = new Map();
+		fields.forEach((f, i) => {
+			if (!bySec.has(f.section)) bySec.set(f.section, []);
+			bySec.get(f.section).push({ f, i });
+		});
+		const placed = [];
+		bySec.forEach((list) => {
+			list.sort((a, b) => (groupIdx(a.f) - groupIdx(b.f)) ||
+				(keyIdx(a.f) - keyIdx(b.f)) || (a.i - b.i));
+			list.forEach(x => placed.push(x.f));
+		});
+		const headed = new Set();
+		// Groups whose rows act only while a sibling holds one value
+		// (activeWhen in mj-tree.js), and what to set back when it does not.
+		const idle = new Map();
+
+		for (const f of placed) {
 			const geoField = useGeo && (f === mirror || f === flip);
 			// The geometry checkboxes stay real fields — hidden — beside the pad
 			// that replaces them, so Save and dirty tracking never learn any of
@@ -2696,6 +2817,14 @@
 			const box = isKnob(f) ? strip
 				: geoField ? colGeo
 				: restCols(f.section).firstElementChild;
+			const gi = (isKnob(f) || geoField) ? -1 : groupIdx(f);
+			let groupH = null;
+			if (gi >= 0 && !headed.has(f.section + '/' + gi)) {
+				headed.add(f.section + '/' + gi);
+				const g = sectionGroups(f.section)[gi];
+				// An unlabelled group orders its rows and draws no heading.
+				if (g.label) groupH = groupHead(box, g.label, g.note);
+			}
 			// `live` is the STRIP's presentation, not the live-write behaviour:
 			// it swaps the detent slider in and drops the hint, the help, the
 			// range and the x-requires warning, because a knob is four cells of
@@ -2712,10 +2841,39 @@
 				getDotted(state.config, f.dot),
 				{ live: isKnob(f) || geoField, hidden: geoField });
 			if (!field) continue;
+			// Carried on the group's first row, so whatever hides a whole
+			// group's rows can take its heading too (see the dehaze row).
+			if (groupH) field.groupHead = groupH;
+			const gAct = gi >= 0 ? sectionGroups(f.section)[gi] : null;
+			if (gAct && gAct.activeWhen) {
+				const k = f.section + '/' + gi;
+				if (!idle.has(k)) idle.set(k, { section: f.section, when: gAct.activeWhen, els: [] });
+				if (groupH) idle.get(k).els.push(groupH);
+				idle.get(k).els.push(field.p);
+			}
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
 
 		}
+
+		// Set back, not disabled: a value written while the camera is in the
+		// other mode is in place the moment it comes back, and a disabled box
+		// would say it cannot be. The heading's note says which mode they
+		// act in; this makes the page agree with it. An unreadable mode leaves
+		// the rows as they are rather than dimming them on a guess.
+		idle.forEach(({ section, when, els }) => {
+			const d = section + '.' + when.field;
+			const paint = () => {
+				const f = state.fields.find(x => x.dot === d);
+				const v = f ? f.getValue() : getDotted(state.config, d);
+				const off = v !== undefined && v !== null && v !== '' &&
+					String(v) !== String(when.equals);
+				els.forEach(e => e.classList.toggle('mj-idle', off));
+			};
+			state.repaint.push(paint);
+			state.liveSync.push(paint);
+			paint();
+		});
 
 		// Hold to compare shows the picture at stock while it is held. At stock
 		// there is nothing to compare, and a press that changes nothing read as
@@ -2863,8 +3021,11 @@
 			//
 			// Here rather than beside the strip because the rest-cards are
 			// built above this line and not before it.
+			// Its heading goes with it: the row is the whole of its group, and
+			// a heading left standing over a hidden row introduces nothing.
 			const hazeField = state.fields.find(f => f.key === 'dehaze' && f.p);
 			if (hazeField) toneManual.push(hazeField.p);
+			if (hazeField && hazeField.groupHead) toneManual.push(hazeField.groupHead);
 
 			const relock = () => applyToneMode(toneAutoOn());
 			tuning.control.addEventListener('change', relock);
@@ -9251,14 +9412,24 @@
 	// The group head both an object subtree and a flat section's heading use:
 	// micro-caps name and a hairline to the column edge, rather than a 20px
 	// grey <h5> that outweighed every label under it.
-	function head(container, label) {
+	function head(container, label, note) {
 		const h = el('div', 'mj-live-grp-head');
 		const t = el('span', 'mj-cap');
 		t.textContent = label;
 		h.appendChild(t);
 		h.appendChild(el('span', 'mj-live-rule'));
+		if (note) {
+			const n = el('span', 'mj-live-note');
+			n.textContent = note;
+			h.appendChild(n);
+		}
 		container.appendChild(h);
+		return h;
 	}
+
+	// head() under a name renderLive can reach: it has a `head` of its own, the
+	// leaf's title row, which shadows this one inside it.
+	function groupHead(container, label, note) { return head(container, label, note); }
 
 	// The named keys of `props`, in the order they were named.
 	function pick(props, order) {
@@ -9294,8 +9465,14 @@
 				const mine = g.keys.filter(k => keys.indexOf(k) >= 0);
 				// A heading with nothing under it is furniture; a build without
 				// these keys should not grow an empty rule.
-				if (!mine.some(k => !EXCLUDE.has(basePath + '.' + k) && !MAP_DOTS[basePath + '.' + k])) continue;
-				head(container, g.label);
+				// Nor one whose rows are all drawn somewhere else: the isp
+				// groups are lifted onto the Live leaf whole, and on the isp page
+				// their headings would stand over nothing.
+				if (!mine.some(k => {
+					const d = basePath + '.' + k;
+					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !lifted().has(d) && !(skip && skip.has(d));
+				})) continue;
+				if (g.label) head(container, g.label, g.note);
 				renderProps(container, basePath, pick(props, mine), skip, true);
 			}
 			ordered = ordered.filter(k => !named.has(k));
@@ -9728,8 +9905,30 @@
 	function renderField(container, dot, key, sub, eff, opts) {
 		opts = opts || {};
 		const live = !!opts.live;
-		// the field's `title` is the short label; older schemas only had `description`
-		const desc = sub.title || sub.description || key;
+		// A field's sibling as it stands NOW: the control if it is on the page,
+		// else the config it loaded with. What x-title-when is evaluated
+		// against, so a name follows the mode select as it moves, not after a
+		// save.
+		const base = dot.slice(0, dot.lastIndexOf('.'));
+		const siblingValue = (name) => {
+			const d = base + '.' + name;
+			const f = (state.fields || []).find(x => x.dot === d);
+			return f ? f.getValue() : getDotted(state.config, d);
+		};
+		// Rows that carry the daemon's presentation annotations: a unit to print
+		// beside the number, a name per mode, gauges to say what "automatic"
+		// currently is. Only number rows take them.
+		// `sub.type` and not `type`: this runs above that const, and reading it
+		// here is the temporal-dead-zone throw the accessor comment below
+		// describes, which takes every later field on the leaf with it.
+		const expRow = !!(EXP && !live && (sub.type === 'integer' || sub.type === 'number') &&
+			(sub['x-unit'] || sub['x-metric'] || sub['x-title-when']));
+		// the field's `title` is the short label; older schemas only had
+		// `description`. `let`, because a field with x-title-when is renamed
+		// when its mode changes, and the reset's confirm has to use the name the
+		// row is showing.
+		let desc = expRow ? EXP.titleFor(sub, siblingValue, key)
+			: (sub.title || sub.description || key);
 		// live knobs use the short label; everything else uses the title.
 		// data-hl carries the raw text so highlightPanel() can re-mark the label
 		// in place when the search term changes, without re-rendering the control
@@ -10010,6 +10209,35 @@
 				paint();
 			};
 			paint();
+		} else if (expRow) {
+			// A number the camera runs by itself when it is empty. A stored 0
+			// draws empty too: to the daemon both hand the setting back, and a
+			// box reading 0 says "off" to everyone else (#582). The greyed
+			// placeholder says Auto and, where the camera publishes it, what
+			// automatic currently resolves to — painted by paintExp below as
+			// the heartbeat arrives. Typing a number overrides; emptying the box
+			// posts null through clearsToNull, which removes the key.
+			p = el('p', 'number mj-row mj-exp-row');
+			const unit = sub['x-unit'] ? String(sub['x-unit']) : '';
+			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
+			const maxA = isNum(sub.maximum) ? ' max="' + sub.maximum + '"' : '';
+			const stepA = type === 'number' ? ' step="any"' : ' step="1"';
+			const v = isNumish(eff) && !EXP.isAuto(eff) ? String(eff) : '';
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+				'<span class="input-group">' +
+				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA +
+				' value="' + esc(v) + '" placeholder="Auto">' +
+				(unit ? '<span class="input-group-text mj-unit">' + esc(unit) + '</span>' : '') +
+				'</span>' +
+				'<span class="mj-now"></span>';
+			control = p.querySelector('input');
+			// refresh() hands back what the config says, and a 0 there is Auto
+			// here as well, or a save of an untouched row would read as a
+			// change the next time the page looked.
+			control._set = (val) => {
+				control.value = EXP.isAuto(val) ? '' : String(val);
+			};
 		} else if (type === 'integer' || type === 'number') {
 			p = el('p', 'number mj-row');
 			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
@@ -11106,8 +11334,13 @@
 			// already show their bounds via the track and the live value box
 			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
 			const numeric = type === 'integer' || type === 'number';
+			// On a row whose empty box already says Auto, the floor is that
+			// same Auto spelled as 0 and says nothing new; the ceiling, in the
+			// row's own unit, is the part worth reading.
 			const range = (numeric && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
-				? sub.minimum + '–' + sub.maximum : '';
+				? (expRow ? 'up to ' + EXP.withUnit(sub.maximum, sub['x-unit'] || '')
+					: sub.minimum + '–' + sub.maximum)
+				: '';
 			if (sub.hint || range || helpText) {
 				// block-level so it sits on its own line below the control row
 				const hint = el('div', 'hint text-secondary');
@@ -11166,10 +11399,8 @@
 					// clamp hides nothing from a screen reader, which is read
 					// the whole hint either way, so there the mark is a visual
 					// control and its name says so.
-					more.dataset.nameOpen = helpText
-						? 'Less about ' + desc : 'Shorten the explanation for ' + desc;
-					more.dataset.nameShut = helpText
-						? 'More about ' + desc : 'Show the whole explanation for ' + desc;
+					more.dataset.nameKind = helpText ? 'more' : 'whole';
+					nameHelpMark(more, desc);
 					hint.appendChild(more);
 				}
 				p.appendChild(hint);
@@ -11309,6 +11540,39 @@
 		if (pushes) {
 			control.addEventListener('input', pushLive);
 			control.addEventListener('change', pushLive);
+		}
+
+		if (expRow) {
+			const row = { p, control, sub, unit: sub['x-unit'] ? String(sub['x-unit']) : '' };
+			row.paint = () => paintExp(row, siblingValue, (t) => {
+				desc = t;
+				const r = p.querySelector('.mj-reset');
+				if (r) r.setAttribute('aria-label', 'Clear ' + t);
+				const more = p.querySelector('.mj-help');
+				if (more) nameHelpMark(more, t);
+			});
+			// Every edit runs state.repaint, which is what renames the row the
+			// moment the mode select moves; a refresh or a discard fires no
+			// events and runs liveSync instead.
+			(state.repaint = state.repaint || []).push(row.paint);
+			(state.liveSync = state.liveSync || []).push(row.paint);
+			control.addEventListener('input', row.paint);
+			(state.expRows = state.expRows || []).push(row);
+			// The placeholder is all a screen reader says about an empty box,
+			// and it is only half of what the row shows: the running figure
+			// beside it and the hint under it are what a sighted reader acts
+			// on. Pointed at both, so focus reads "Auto · 32", then "now
+			// 31.6×", then the hint. Not aria-live: the figure moves every
+			// two seconds and would talk over everything else.
+			const idBase = dot.replace(/\./g, '-');
+			const now = p.querySelector('.mj-now');
+			const said = [];
+			if (now) { now.id = 'mjn-' + idBase; said.push(now.id); }
+			const ht = p.querySelector('.mj-hint-txt');
+			if (ht) { if (!ht.id) ht.id = 'mjh-' + idBase + '-h'; said.push(ht.id); }
+			if (said.length) control.setAttribute('aria-describedby', said.join(' '));
+			watchExp();
+			row.paint();
 		}
 
 		return { dot, key, schema: sub, type, control, p, getValue, setValue, pushes, setStock };
