@@ -1,7 +1,7 @@
 // The camera picture, as a thing a settings section can embed.
 //
 // camera.cgi shows one section at a time, and more than one of them wants
-// to look at the camera while you change it: the Live adjustments leaf does
+// to look at the camera while you change it: the Picture leaf does
 // today, and the regions a Visual editor draws, the crop a resolution field
 // implies and the masks a privacy section places are all judgements nobody can
 // make against a form. What every one of them needs is the same three things —

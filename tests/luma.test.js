@@ -1,4 +1,4 @@
-// The luma histogram behind the Live adjustments panel.
+// The luma histogram behind the Picture panel.
 //
 // This exists because the subject fails silently. A histogram computed with
 // the wrong coefficients, the wrong bucket edges or the wrong denominator

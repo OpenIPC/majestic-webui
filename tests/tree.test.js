@@ -5,7 +5,7 @@
 // leaf is a row that is not there, and a settings page missing a row looks
 // exactly like a settings page: on 2 September 2026 majestic began flagging
 // the stream bitrate `x-live` (a save applies it without a rebuild), the page
-// read that flag as "the Live adjustments leaf draws this", and Bitrate
+// read that flag as "the Picture leaf draws this", and Bitrate
 // vanished from Main stream and Sub stream. No error, no gap in the layout,
 // nothing in the console — it was found three days later, by accident, while
 // fixing #316 on the same leaf.
