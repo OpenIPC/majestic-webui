@@ -10609,7 +10609,10 @@
 				// than the 10rem a number gets: "Counted by the camera" was
 				// cut to "Counted by th".
 				p.classList.add('mj-named-row');
-				control.style.setProperty('--mj-ph', Math.max(name.length, 6) + 'ch');
+				control.style.setProperty('--mj-ph', (Math.max(name.length, 6) + 2) + 'ch');
+				// Where a phone column still cannot hold it, the whole name is
+				// a touch away, and the hint under the row says it too.
+				control.title = name;
 				const shown = (val) => (val === undefined || val === null || String(val).trim() === ''
 					|| Number(val) === Number(emptySpecial)) ? '' : String(val);
 				control.value = shown(eff);
@@ -10817,10 +10820,11 @@
 				choices.map(c => option(c, cur === c, c.split('/').pop())).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
-				'<span class="input-group">' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>' +
-				'<button type="button" class="btn btn-outline-secondary mj-file-up">Upload…</button>' +
-				'</span>' +
+				// Under the select rather than beside it: on a phone a
+				// button in the same group squeezed the file name to a
+				// few letters.
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-file-up">Upload…</button>' +
 				'<input type="file" class="mj-file-in" hidden' +
 				(files.accept ? ' accept="' + esc(String(files.accept)) + '"' : '') + '>' +
 				'<span class="mj-now mj-file-note"></span>';
@@ -11082,14 +11086,52 @@
 				const cells = el('span', 'mj-tbl-cells');
 				members.forEach(m => {
 					const prop = props[m] || {};
-					const cell = el('label', 'mj-tbl-cell' +
+					const xl = prop.type === 'string' && prop['x-list'] && typeof prop['x-list'] === 'object'
+						? prop['x-list'] : null;
+					const cell = el(xl ? 'span' : 'label', 'mj-tbl-cell' +
 						(prop.type === 'string' && !Array.isArray(prop.enum)
 							? ' mj-tbl-wide' : ''));
 					const name = el('span', 'mj-tbl-name');
 					name.textContent = prop.title || m;
 					cell.appendChild(name);
 					let f;
-					if (Array.isArray(prop.enum)) {
+					if (xl) {
+						// A member holding a fixed number of numbers (the
+						// peer homography's nine): a grid of boxes, joined
+						// into the hidden input the row reads.
+						const cellsSpec = TBL.listCells(xl);
+						const rows = isNum(xl.rows) && xl.rows > 1 ? xl.rows : 1;
+						f = el('input', '');
+						f.type = 'hidden';
+						f.value = v[m] != null ? String(v[m]) : '';
+						const grid = el('span', 'mj-list' + (rows > 1 ? ' mj-list-grid' : ''));
+						if (rows > 1) grid.style.setProperty('--mj-list-cols', String(Math.ceil(cellsSpec.length / rows)));
+						const vals = TBL.parseList(f.value, cellsSpec.length);
+						const boxes = cellsSpec.map((c, i) => {
+							// Text with a number keypad, not a number box: a
+							// calibration figure like -0.000589854 needs the
+							// room a spinner takes, and nobody steps a
+							// homography by one.
+							const b = el('input', 'form-control form-control-sm text-end');
+							b.type = 'text';
+							b.spellcheck = false;
+							b.inputMode = c.integer ? 'numeric' : 'decimal';
+							b.value = vals[i];
+							b.setAttribute('aria-label', (prop.title || m) + ' ' + c.label);
+							b.title = c.label;
+							grid.appendChild(b);
+							return b;
+						});
+						const sync = () => {
+							f.value = TBL.joinList(boxes.map(b => b.value));
+							onChange(row);
+						};
+						boxes.forEach(b => {
+							b.addEventListener('input', sync);
+							b.addEventListener('change', sync);
+						});
+						cell.appendChild(grid);
+					} else if (Array.isArray(prop.enum)) {
 						f = el('select', 'form-select form-select-sm');
 						const cur = v[m] != null ? String(v[m]) : '';
 						const opts = prop.enum.slice();

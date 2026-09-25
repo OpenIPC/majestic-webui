@@ -206,6 +206,15 @@
 	max-width: none;
 }
 
+/* On a phone the column is already narrower than the cap, and a cap that
+   binds there only cuts the chosen option ("Medium · up to 2.5 frames"). */
+@media (max-width: 575.98px) {
+	.select .form-select {
+		max-width: none;
+		padding-left: 0.5rem;
+	}
+}
+
 /* mj-settings rows put the per-field reset on the same line as the control
    (.mj-ctl); the width caps below are on the wrapper rather than on the control
    itself, or a select would stretch to the card edge.
@@ -437,6 +446,29 @@
 .mj-tbl-cell.mj-tbl-wide {
 	flex: 2 1 12rem;
 	max-width: none;
+}
+
+/* A member drawn as a grid of numbers (the peer homography): a row of its
+   own, and cells tight enough that nine calibration figures such as
+   -0.000589854 fit three abreast on a phone. */
+.mj-tbl-cell:has(.mj-list-grid) {
+	flex: 1 0 100%;
+	max-width: none;
+}
+
+.mj-tbl-cell .mj-list-grid {
+	grid-template-columns: repeat(var(--mj-list-cols, 3), minmax(7rem, 1fr));
+	gap: .25rem;
+	max-width: 32rem;
+	/* A matrix stays a matrix: on a column too narrow for three figures the
+	   grid scrolls inside itself rather than cutting each one. */
+	overflow-x: auto;
+}
+
+.mj-tbl-cell .mj-list-grid .form-control {
+	font-size: .8125rem;
+	padding: .2rem .35rem;
+	font-variant-numeric: tabular-nums;
 }
 
 .mj-tbl-name {
@@ -1476,22 +1508,46 @@ mark {
 
 .mj-cols {
 	display: flex;
-	flex-direction: row;
-	align-items: flex-start;
-	gap: 2.5rem;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 0;
 }
 
 /* basis 0 so both columns are the same width whatever they hold, and min-width
    so a long label wraps inside its column instead of widening it */
 .mj-cols > .mj-col {
-	flex: 1 1 0;
+	flex: 0 1 auto;
+	width: 100%;
 	min-width: 0;
 }
 
-/* A divider in the middle of the gutter, as the Live deck has between its two
-   panels. The negative margin puts the rule at the halfway point without taking
-   width off either column, so the two stay equal. */
-@media (min-width: 768px) {
+/* Two columns by the width the CARD has, not the window. The split used to
+   switch on at a 768px viewport, where the rail still takes a quarter of the
+   page: two 180px columns of controls, a packet-size box showing "12" beside
+   its unit, selects cut to their first letters and the page scrolling
+   sideways. The card that holds the columns is the container, and below
+   40rem of it the two stack in document order, as they do on a phone. A
+   browser with no container queries keeps the stack, which is always
+   readable. */
+:has(> .mj-cols) {
+	container-type: inline-size;
+}
+
+@container (min-width: 40rem) {
+	.mj-cols {
+		flex-direction: row;
+		align-items: flex-start;
+		gap: 2.5rem;
+	}
+
+	.mj-cols > .mj-col {
+		flex: 1 1 0;
+		width: auto;
+	}
+
+	/* A divider in the middle of the gutter, as the Live deck has between its
+	   two panels. The negative margin puts the rule at the halfway point
+	   without taking width off either column, so the two stay equal. */
 	.mj-cols > .mj-col + .mj-col {
 		margin-left: -1.25rem;
 		padding-left: 1.25rem;
@@ -1506,20 +1562,6 @@ mark {
 
 	.mj-cols.mj-solo > .mj-col + .mj-col {
 		display: none;
-	}
-}
-
-/* below md the two columns stack, which reads exactly like the single column
-   this used to collapse to: the deal keeps the fields in document order */
-@media (max-width: 767.98px) {
-	.mj-cols {
-		flex-direction: column;
-		gap: 0;
-	}
-
-	.mj-cols > .mj-col {
-		flex: 0 1 auto;
-		width: 100%;
 	}
 }
 
@@ -6542,8 +6584,14 @@ dialog.mj-modal::backdrop {
 	margin-top: 0;
 }
 
-/* Below md the map would push the roles off the card. */
-@media (max-width: 767.98px) {
+/* On a narrow card the map would push the roles off it. By the card's width,
+   not the window's: at a 768px window the settings card is 360px and the
+   row ran 70px past its edge. */
+.mj-ircut {
+	container-type: inline-size;
+}
+
+@container (max-width: 36rem) {
 	.mj-ircut-wire {
 		flex-direction: column;
 	}
