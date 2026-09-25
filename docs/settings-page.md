@@ -235,6 +235,16 @@ the annotations into words:
 - **`x-unit`** (`ms`, `×`, `levels`, `frames`) is printed beside the box and in
   the range under the hint. Frames are also given in seconds at the main
   stream's rate, and the text names the rate it assumed.
+
+**A unit on its own is not Auto.** Every quantity the camera declares carries
+`x-unit` — seconds, %, bytes, KiB, kbit/s, Hz, dB, °, ‰ — and every number
+row prints it: beside the box, in a slider's readout (`25%`, `Auto · 25 fps`),
+beside a number the camera keeps as text (a keyframe interval), and in the
+range under the hint (`1–300 s`). What makes a row "empty means the camera
+decides" is `x-metric` or `x-title-when`, never `x-unit`: tying the two
+together drew a real 0 — a 0 ms amplifier hold, a 0 s pre-roll — as an empty
+Auto box. `EXP.withUnit` writes ×, %, ‰ and ° against the figure and every
+other unit a space apart.
 - **`x-title-when`** gives the field another name while a sibling holds a value,
   in `visibleWhen`'s spelling. The four ceilings are "Highest analog gain" and so
   on while auto-exposure spends them, and "Analog gain" in manual, where the same

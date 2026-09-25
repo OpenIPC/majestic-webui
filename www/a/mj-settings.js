@@ -10212,14 +10212,24 @@
 			const f = (state.fields || []).find(x => x.dot === d);
 			return f ? f.getValue() : getDotted(state.config, d);
 		};
-		// Rows that carry the daemon's presentation annotations: a unit to print
-		// beside the number, a name per mode, gauges to say what "automatic"
-		// currently is. Only number rows take them.
+		// Rows the camera runs by itself when they are empty: it publishes the
+		// value in force (x-metric) or renames the row by mode (x-title-when),
+		// and an empty box reads "Auto · <what it is running>". A unit alone
+		// does not make one: x-unit is only what the number is in, and
+		// treating it as Auto too would draw a real 0 — a 0 ms hold, a 0 s
+		// pre-roll — as an empty box.
 		// `sub.type` and not `type`: this runs above that const, and reading it
 		// here is the temporal-dead-zone throw the accessor comment below
 		// describes, which takes every later field on the leaf with it.
 		const expRow = !!(EXP && !live && (sub.type === 'integer' || sub.type === 'number') &&
-			(sub['x-unit'] || sub['x-metric'] || sub['x-title-when']));
+			(sub['x-metric'] || sub['x-title-when']));
+		// What the number is in, printed beside the box or the slider's
+		// readout rather than inside the title.
+		const unit = sub['x-unit'] ? String(sub['x-unit']) : '';
+		const withUnit = (v) => unit
+			? (EXP ? EXP.withUnit(Number(v), unit) : v + ' ' + unit) : String(v);
+		const unitHtml = unit
+			? '<span class="input-group-text mj-unit">' + esc(unit) + '</span>' : '';
 		// the field's `title` is the short label; older schemas only had
 		// `description`. `let`, because a field with x-title-when is renamed
 		// when its mode changes, and the reset's confirm has to use the name the
@@ -10490,8 +10500,8 @@
 			const paint = () => {
 				show.textContent = !chosen ? UNSET_WORD
 					: (sensorFps !== null && Number(control.value) === 0)
-						? 'Auto · ' + sensorFps
-						: String(control.value);
+						? 'Auto · ' + withUnit(sensorFps)
+						: withUnit(control.value);
 				p.classList.toggle('mj-unset', !chosen);
 			};
 			// Any input is a choice — a drag, a click on the track, an arrow key.
@@ -10515,7 +10525,6 @@
 			// the heartbeat arrives. Typing a number overrides; emptying the box
 			// posts null through clearsToNull, which removes the key.
 			p = el('p', 'number mj-row mj-exp-row');
-			const unit = sub['x-unit'] ? String(sub['x-unit']) : '';
 			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
 			const maxA = isNum(sub.maximum) ? ' max="' + sub.maximum + '"' : '';
 			const stepA = type === 'number' ? ' step="any"' : ' step="1"';
@@ -10525,7 +10534,7 @@
 				'<span class="input-group">' +
 				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA +
 				' value="' + esc(v) + '" placeholder="Auto">' +
-				(unit ? '<span class="input-group-text mj-unit">' + esc(unit) + '</span>' : '') +
+				unitHtml +
 				'</span>' +
 				'<span class="mj-now"></span>';
 			control = p.querySelector('input');
@@ -10550,6 +10559,7 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
 				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA + ' value="' + esc(v) + '">' +
+				unitHtml +
 				'</span>';
 			control = p.querySelector('input');
 		} else if (isResolution) {
@@ -10764,9 +10774,13 @@
 		} else if (type === 'string') {
 			p = el('p', 'string mj-row');
 			const v = eff !== undefined && eff !== null ? String(eff) : '';
+			// A number the camera keeps as text (a keyframe interval of 1.5)
+			// still has a unit to print beside it.
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
-				'<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">';
+				(unit
+					? '<span class="input-group"><input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">' + unitHtml + '</span>'
+					: '<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">');
 			control = p.querySelector('input');
 		} else if (type === 'array' && sub.items && sub.items.type === 'object'
 				&& sub.items.properties && !sub.items.properties.url) {
@@ -11795,7 +11809,8 @@
 			// same Auto spelled as 0 and says nothing new; the ceiling, in the
 			// row's own unit, is the part worth reading.
 			const range = (numeric && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
-				? (expRow ? 'up to ' + EXP.withUnit(sub.maximum, sub['x-unit'] || '')
+				? (expRow ? 'up to ' + EXP.withUnit(sub.maximum, unit)
+					: EXP ? EXP.rangeText(sub.minimum, sub.maximum, unit)
 					: sub.minimum + '–' + sub.maximum)
 				: '';
 			if (sub.hint || range || helpText) {

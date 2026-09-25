@@ -97,4 +97,21 @@ check('and says so without a frame rate too', EXP.delayText(0, null) === 'no del
 check('any other delay is its time', EXP.delayText(8, 25) === '≈ 0.32 s at 25 fps');
 check('an unknown delay is no text', EXP.delayText(null, 25) === null);
 
+group('any unit the camera declares, beside a figure and a range');
+
+// A setting's own bound is printed as declared: a lamp curve floor of 0.2
+// rounded to 0 would say the box refuses what it accepts.
+check('a fraction with a plain unit is not rounded away', EXP.fmt(0.2, '') === '0.2');
+check('a whole number stays whole', EXP.fmt(300, 's') === '300');
+check('counts still round', EXP.fmt(7.6, 'frames') === '8');
+check('a percentage sits against its figure', EXP.withUnit(95, '%') === '95%');
+check('so does a degree', EXP.withUnit(45, '°') === '45°');
+check('and a per-mille', EXP.withUnit(610, '‰') === '610‰');
+check('an abbreviation takes a space', EXP.withUnit(1024, 'KiB') === '1024 KiB');
+check('a range says its unit once', EXP.rangeText(1, 300, 's') === '1–300 s');
+check('a tight unit in a range', EXP.rangeText(0, 100, '%') === '0–100%');
+check('a signed range', EXP.rangeText(-45, 45, '°') === '-45–45°');
+check('a range with no unit is bare', EXP.rangeText(0.2, 4, '') === '0.2–4');
+check('an unbounded end is no range', EXP.rangeText(0, undefined, 's') === '');
+
 done();
