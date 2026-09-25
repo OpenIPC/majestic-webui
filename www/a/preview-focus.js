@@ -23,6 +23,12 @@
  * - The toggle stays hidden until the heartbeat has shown this camera reports
  *   the metric, and unless the browser can make a sound: a "By ear" control
  *   that could never work is the control this tree refuses to draw.
+ * - Part of the picture is the camera's own grid, never a crop of the number.
+ *   The card's Area button borrows the zoom module's rubber band for one drag,
+ *   and what is listened to from then on is the mean over the focus grid's
+ *   cells under that rectangle (focus-area.js), reached through the camera's
+ *   per-stream windows. The button appears only once this camera has answered
+ *   with a usable grid, and a click instead of a drag is the whole frame.
  * - Nothing here is in either test's SRCS list and preview-page.js does not
  *   know it exists, like preview-still.js; a build missing this file leaves
  *   the page as it was.
@@ -35,7 +41,11 @@
 	const nowEl = $('#mj-ear-now'), bestEl = $('#mj-ear-best');
 	const wordEl = $('#mj-ear-word'), resetBtn = $('#mj-ear-reset');
 	const note = $('#mj-ear-note');
+	/* The rectangle's parts are optional: without any of them the mode works
+	 * on the whole frame and the Area button is never shown. */
+	const areaBtn = $('#mj-ear-area'), stage = $('#mj-stage');
 	const Ear = window.MajesticFocusEar;
+	const FA = window.MajesticFocusArea, RGN = window.MajesticRegion;
 	const AC = window.AudioContext || window.webkitAudioContext;
 	if (!ctl || !tog || !card || !nowEl || !bestEl || !wordEl || !resetBtn ||
 		!note || !Ear || typeof AC !== 'function') return;
@@ -263,7 +273,268 @@
 		snd.render(p.events, undefined, p.silent);
 	}
 
+	/* ---- the rectangle ------------------------------------------------ */
+
+	/* Listening to part of the picture. The card's Area button borrows the
+	 * zoom module's rubber band for one drag; the rectangle comes back in the
+	 * shown stream's pixels, travels through the camera's own per-stream
+	 * windows into the ISP frame the focus grid divides, and is snapped to the
+	 * cells whose centres it holds. From then on the poll reads the grid and
+	 * averages those cells (focus-area.js), and an outline on the stage shows
+	 * the cells rather than the drag. A click instead of a drag is the whole
+	 * frame, and so is pressing the button again. The button appears only once
+	 * this session's probe has had a usable grid, and a session that ends drops
+	 * the rectangle, so every session starts on the whole frame. */
+	const ZONES_URL = '/api/v1/isp/af-zones.json';
+	const OSD_URL = '/api/v1/osd';
+	/* The ISP frame, standing in as a stream of its own for mj-region.js. */
+	const GRID_STREAM = -1;
+	const SVG = 'http://www.w3.org/2000/svg';
+	const ZOOM = window.MajesticZoom;
+	const canArea = !!(areaBtn && stage && FA && RGN && ZOOM &&
+		typeof ZOOM.pickRect === 'function' && typeof ZOOM.view === 'function' &&
+		typeof ZOOM.onView === 'function');
+
+	let region = null;      /* { cells, unit }: the cells, and their outline in unit fractions */
+	let grid = null;        /* { rows, cols }, once this session's probe has seen the grid */
+	let geom = null;        /* { at, map, group, declared }, for the stream on screen */
+	let learning = null, geomTried = 0;
+	let picking = null;     /* withdraws the pick in progress */
+	let outline = null, outlineRect = null, placedAt = '';
+	let hintAt = 0, gen = 0;
+
+	/* Which stream is on screen, or null when nobody will say. Null, never 0:
+	 * a map built for the wrong stream lays the rectangle over the wrong cells
+	 * and nothing reports it. */
+	function shownStream() {
+		if (typeof window.MajesticLiveStream !== 'function') return null;
+		const n = window.MajesticLiveStream();
+		return Number.isFinite(n) ? n | 0 : null;
+	}
+
+	/* The map from the ISP frame to the stream on screen, from the camera's
+	 * own per-stream windows. Tagged with the stream it was learnt for: the
+	 * served channel can change without the event the user-selection path
+	 * sends, and a map for the channel just left converts confidently to the
+	 * wrong place. */
+	function learnGeometry() {
+		const at = shownStream();
+		if (at === null) { geom = null; return Promise.resolve(); }
+		return api(OSD_URL, { credentials: 'same-origin' })
+			.then((r) => (r.ok ? r.json() : null))
+			.then((j) => {
+				geom = null;
+				if (!j || !Array.isArray(j.streams) || !Array.isArray(j.group)) return;
+				const gw = j.group[0], gh = j.group[1];
+				let declared = null;
+				for (let i = 0; i < j.streams.length; i++) {
+					const st = j.streams[i];
+					if (st && st.stream === at && Array.isArray(st.frame) &&
+						st.frame[0] > 0 && st.frame[1] > 0)
+						declared = { w: st.frame[0], h: st.frame[1] };
+				}
+				if (!declared) return;
+				const all = j.streams.concat([{ stream: GRID_STREAM, frame: [gw, gh], view: [0, 0, gw, gh] }]);
+				const map = RGN.view(j.group, all, GRID_STREAM, at);
+				if (!map || !map.k || !map.k.x || !map.k.y) return;
+				geom = { at: at, map: map, group: { w: gw, h: gh }, declared: declared };
+			})
+			.catch(() => { geom = null; });
+	}
+	function geometryFresh() {
+		if (!canArea) return Promise.resolve(false);
+		if (geom && geom.at === shownStream()) return Promise.resolve(true);
+		/* Asked again after a failure, but not on every tick: what failed a
+		 * moment ago has not changed. */
+		if (!geom && !learning && Date.now() - geomTried < 2000) return Promise.resolve(false);
+		if (!learning) {
+			geomTried = Date.now();
+			learning = learnGeometry().then(() => { learning = null; return !!geom; });
+		}
+		return learning;
+	}
+
+	/* A note that may be true on every poll, said once in a while. */
+	function hint(text) {
+		const t = performance.now();
+		if (t - hintAt < 4000) return;
+		hintAt = t;
+		say(text, 3000);
+	}
+
+	function setPressed(on) {
+		if (!areaBtn) return;
+		areaBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+		areaBtn.classList.toggle('mj-hud-on', on);
+	}
+
+	/* This session's grid, asked for once at the start. The Area button
+	 * appears only on a usable answer: a camera that serves no grid, or one
+	 * whose shape does not hold, keeps the whole-frame number and no button. */
+	function probeGrid() {
+		if (!canArea) return;
+		const my = gen;
+		api(ZONES_URL, { credentials: 'same-origin', cache: 'no-store' })
+			.then((r) => (r.ok ? r.json() : null))
+			.then((g) => {
+				if (!running || my !== gen) return;
+				if (g && FA.usable(g)) {
+					grid = { rows: g.rows, cols: g.cols };
+					areaBtn.hidden = false;
+				}
+			})
+			.catch(() => { /* no grid this session; the button stays hidden */ });
+	}
+
+	function setRegion(r) {
+		const changed = !!region || !!r;
+		region = r;
+		setPressed(!!r);
+		if (changed && ear) {
+			/* The best from one source means nothing to the other -- and
+			 * neither does a reading of the other already on its way. The
+			 * poll in flight is disowned and a fresh one asks the new
+			 * source, so the first number the reset reducer sees is the new
+			 * source's rather than a whole-frame value seeding the area's
+			 * best. */
+			ear.reset(performance.now());
+			paint({ now: null, best: null, phase: 'listening' });
+			fails = 0;
+			if (running && !paused) {
+				seq++;
+				if (inflight) { try { inflight.abort(); } catch (e) { /* done */ } inflight = null; }
+				if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+				poll();
+			}
+		}
+		place();
+		if (changed) say(r ? 'Listening to the outlined area.' : 'Listening to the whole frame.', 3000);
+	}
+
+	/* Every pick has a token, and a rectangle is applied only under the token
+	 * it was drawn under: a map that lands after the pick was withdrawn, after
+	 * another pick began, or after the mode stopped and started again would
+	 * otherwise install an old drag into a new session. */
+	let pickGen = 0;
+	function cancelPick() {
+		pickGen++;
+		if (picking) { const c = picking; picking = null; c(); }
+		setPressed(!!region);
+	}
+
+	/* The rubber band's answer: a rectangle, or null for a click. */
+	function picked(rect) {
+		picking = null;
+		if (!rect) {
+			const had = !!region;
+			setRegion(null);
+			if (!had) say('Listening to the whole frame.', 3000);
+			return;
+		}
+		/* The rectangle is in the pixels of the stream that was on screen
+		 * when it was drawn, so it is placed only while that is still the
+		 * stream on screen: through another stream's map it would land on
+		 * the wrong cells and nothing would say so. */
+		const tok = pickGen, at = shownStream();
+		geometryFresh().then(() => {
+			if (tok !== pickGen || !running || !grid || at === null || at !== shownStream()) {
+				setPressed(!!region);
+				return;
+			}
+			const g = geom && geom.at === at ? geom : null;
+			const unit = g ? FA.fromShown(rect, { map: g.map, group: g.group, declared: g.declared, decoded: rect.frame }) : null;
+			const cells = unit ? FA.cells(unit, grid.rows, grid.cols) : null;
+			const bounds = cells ? FA.bounds(cells, grid.rows, grid.cols) : null;
+			if (!bounds) {
+				setPressed(!!region);
+				say('Could not place that on the picture. Try again.', 5000);
+				return;
+			}
+			setRegion({ cells: cells, unit: bounds });
+		});
+	}
+
+	function buildOutline() {
+		if (outline || typeof document.createElementNS !== 'function') return;
+		outline = document.createElementNS(SVG, 'svg');
+		outline.setAttribute('class', 'mj-focus-outline');
+		outline.setAttribute('id', 'mj-focus-outline');
+		outline.setAttribute('aria-hidden', 'true');
+		outlineRect = document.createElementNS(SVG, 'rect');
+		outline.appendChild(outlineRect);
+		outline.style.display = 'none';
+		stage.appendChild(outline);
+	}
+
+	/* The cells, on the stage: unit fractions through the map to the shown
+	 * stream's pixels, then through the zoom module's placement. Re-run on
+	 * every view change, so the outline pans and zooms with the picture. */
+	function place() {
+		if (!canArea) return;
+		if (!outline) buildOutline();
+		if (!outline) return;
+		let box = null;
+		if (region && running) {
+			const g = geom && geom.at === shownStream() ? geom : null;
+			if (!g) {
+				/* One placement when the map lands, not one per tick spent
+				 * waiting for it -- and none chained when nothing was asked. */
+				const first = !learning;
+				const p = geometryFresh();
+				if (first && learning) p.then(place);
+			}
+			const v = ZOOM.view();
+			const s = v && g ? FA.toShown(region.unit, { map: g.map, group: g.group, declared: g.declared, decoded: v.frame }) : null;
+			if (s) {
+				box = [v.pic.x + (s.x - v.visible.x) * v.scale, v.pic.y + (s.y - v.visible.y) * v.scale,
+					s.w * v.scale, s.h * v.scale].map((n) => n.toFixed(1));
+			}
+		}
+		if (!box) { outline.style.display = 'none'; placedAt = ''; return; }
+		const key = box.join(' ');
+		if (key !== placedAt) {
+			outlineRect.setAttribute('x', box[0]);
+			outlineRect.setAttribute('y', box[1]);
+			outlineRect.setAttribute('width', box[2]);
+			outlineRect.setAttribute('height', box[3]);
+			placedAt = key;
+		}
+		outline.style.display = '';
+	}
+
 	/* ---- the poll ----------------------------------------------------- */
+
+	/* One reading from whichever source is in force: the whole-frame number,
+	 * or the mean over the rectangle's cells of the grid that number is made
+	 * of. Both answer {v} in the reducer's three values -- a number, null for
+	 * "nothing there", undefined for "could not read this one" -- and the grid
+	 * says so with `area`, because null means different things from the two:
+	 * from the whole frame it is a chip with no statistic; from a rectangle it
+	 * is a rectangle with nothing measurable in it. */
+	function read(init) {
+		/* The selection as it was when this request left, so its answer is
+		 * read against the cells it was asked for, not whatever the button
+		 * has been pressed to since. */
+		const r = region, g = grid;
+		if (!r || !g) {
+			return api(URL, init)
+				.then((res) => (res.ok ? res.text() : Promise.reject(res.status)))
+				.then((text) => ({ v: Ear.readValue(text) }));
+		}
+		return api(ZONES_URL, init)
+			.then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+			.then((z) => {
+				if (!FA.usable(z)) return { v: undefined, area: true };
+				if (z.rows !== g.rows || z.cols !== g.cols) {
+					/* Not the grid the rectangle was laid on. The cells mean
+					 * nothing on this one, so the whole frame it is. */
+					if (region === r) setRegion(null);
+					return { v: undefined, area: true };
+				}
+				const m = FA.measure(z, r.cells);
+				return { v: m ? m.value : undefined, area: true };
+			});
+	}
 
 	function poll() {
 		if (!running || paused) return;
@@ -271,23 +542,31 @@
 		const ac = typeof AbortController === 'function' ? new AbortController() : null;
 		inflight = ac;
 		const deadline = ac ? setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS) : null;
-		api(URL, Object.assign({ credentials: 'same-origin', cache: 'no-store' },
+		read(Object.assign({ credentials: 'same-origin', cache: 'no-store' },
 			ac ? { signal: ac.signal } : {}))
-			.then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
-			.then((text) => {
+			.then((got) => {
 				if (my !== seq || !running) return;
-				const v = Ear.readValue(text);
-				if (v === null) {
-					/* An empty body from a camera that answered: the chip has
-					 * no statistic. Not a failure to retry, a fact. */
-					absent();
-					return;
-				}
+				const v = got.v;
 				if (v === undefined) {
 					/* Something that is not a number -- an error page, a
-					 * proxy's apology. Says nothing about the chip; it is
-					 * this poll that failed, and the next may not. */
+					 * proxy's apology, a grid that lost its shape. Says
+					 * nothing about the chip; it is this poll that failed,
+					 * and the next may not. */
 					fails++;
+					return;
+				}
+				if (v === null) {
+					if (!got.area) {
+						/* An empty body from a camera that answered: the chip
+						 * has no statistic. Not a failure to retry, a fact. */
+						absent();
+						return;
+					}
+					/* Every cell in the rectangle clipped or dark: nothing
+					 * there to measure. Not a reading, so the reducer hears
+					 * silence and says "no reading"; the note says why. */
+					fails = 0;
+					hint('Nothing to measure in that area: too bright or too dark.');
 					return;
 				}
 				fails = 0;
@@ -334,11 +613,16 @@
 		paused = false;
 		fails = 0;
 		cursor = null;
+		gen++;
 		card.hidden = false;
 		paint({ now: null, best: null, phase: 'listening' });
 		poll();
 		schedTimer = setInterval(sched, SCHED_MS);
 		wake();
+		/* The grid and the map, asked for now so the Area button and the
+		 * first drag are not waiting on them. */
+		probeGrid();
+		geometryFresh();
 	}
 
 	function stop() {
@@ -352,6 +636,15 @@
 		quiet(true);
 		ear = null;
 		last = null;
+		/* The rectangle goes with the session: a pick in progress is
+		 * withdrawn, the outline comes down, and the button waits for the next
+		 * session's probe. */
+		cancelPick();
+		region = null;
+		grid = null;
+		setPressed(false);
+		if (areaBtn) areaBtn.hidden = true;
+		place();
 		card.hidden = true;
 		tog.checked = false;
 		release();
@@ -431,6 +724,27 @@
 	 * so the best this sound is measured against is the one the stats panel
 	 * shows. */
 	window.addEventListener('mj-focus-reset', () => { if (ear) ear.reset(performance.now()); });
+	if (canArea) {
+		areaBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			if (picking) { cancelPick(); return; }
+			if (region) { setRegion(null); return; }
+			if (!running || !grid) return;
+			pickGen++;
+			picking = ZOOM.pickRect(picked);
+			if (!picking) { say('Could not start a drag on the picture.', 4000); return; }
+			setPressed(true);
+			say('Drag over the part to listen to. A click keeps the whole frame.', 6000);
+			/* So the map is there by the time the drag ends. */
+			geometryFresh();
+		});
+		ZOOM.onView(place);
+		window.addEventListener('mj-stream-changed', () => {
+			geom = null;
+			geomTried = 0;
+			if (region) geometryFresh().then(place);
+		});
+	}
 	document.addEventListener('visibilitychange', () => {
 		if (document.hidden) pause(); else resume();
 	});
@@ -446,6 +760,10 @@
 			ctxState: ctx ? ctx.state : null,
 			currentTime: ctx ? ctx.currentTime : null,
 			last: last, state: ear ? ear.state() : null,
+			source: region && grid ? 'area' : 'frame',
+			region: region, grid: grid, picking: !!picking,
+			outline: outline && outline.style.display !== 'none'
+				? ['x', 'y', 'width', 'height'].map((a) => +outlineRect.getAttribute(a)) : null,
 		}),
 		/* The sound on a context of the caller's choosing: an offline one
 		 * renders the real code into a buffer a script can count beeps in. */
