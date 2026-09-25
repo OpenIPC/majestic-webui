@@ -5703,8 +5703,15 @@
 			if (r.status === 200) {
 				return r.json().then((j) => { noteRefused(d, j); return 200; }, () => 200);
 			}
+			// Anything else means the picture did NOT move, and saying nothing
+			// made a failed preview look exactly like a setting with no visible
+			// effect. The camera names the key it rejected in a 400's body.
+			if (r.status !== 404) {
+				return r.text().then((t) => { notePreviewFailed(r.status, t); return r.status; },
+					() => { notePreviewFailed(r.status, ''); return r.status; });
+			}
 			return r.status;
-		}, () => 0).then((status) => {
+		}, () => { notePreviewFailed(0, ''); return 0; }).then((status) => {
 			if (status !== 404) return status;
 			liveDoc = false;
 			return postLive(legacyQuery(d)).then(() => status, () => status);
@@ -5714,6 +5721,22 @@
 	// The placement the fields currently describe, as the document to send.
 	// Whole every time: majestic installs a whole placement or none, and a
 	// request naming only half of one would leave the camera to guess the rest.
+	// A preview the camera did not take, said where Save's messages are: the
+	// control has moved and the picture has not, and that is exactly what
+	// this line is for. Named by the row's own words where the camera said
+	// which key it refused.
+	function notePreviewFailed(status, body) {
+		const m = /\b([a-zA-Z0-9]+\.[a-zA-Z0-9.]+)\s*<\/body>/.exec(body || '');
+		const f = m && state.fields.find(x => x.dot === m[1]);
+		const name = f && f.p ? (f.p.querySelector('.form-label') || {}).textContent : '';
+		const why = status === 401 || status === 403
+			? 'the session has expired; reload the page and sign in again'
+			: status === 0 ? 'the camera did not answer'
+			: status === 400 ? 'the camera refused ' + (name ? '"' + name.trim() + '"' : 'a value')
+			: 'the camera answered HTTP ' + status;
+		flashToolbar('Not previewed: ' + why + '. The picture shows the saved settings.');
+	}
+
 	// Mark each live row this camera refused to preview, and unmark the ones it
 	// took. Only rows the document named are judged: an OSD placement answer
 	// says nothing about the exposure rows.
