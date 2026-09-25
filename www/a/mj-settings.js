@@ -2582,6 +2582,24 @@
 			onRename(title);
 		}
 		const other = !!EXP.matched(sub, siblingValue);
+		// In manual, an exposure time with the gain left empty is the one
+		// combination that looks broken: majestic hands an empty field back to
+		// auto-exposure, which raises the gain to hold the brightness, so the
+		// picture does not change and the row seems to do nothing. Said on the
+		// row, while it is true.
+		if (row.dot === 'isp.exposure') {
+			let note = p.querySelector(':scope > .mj-manual-note');
+			const gainEmpty = String(siblingValue('aGain') || '') === '' ||
+				Number(siblingValue('aGain')) === 0;
+			const show = other && gainEmpty;
+			if (show && !note) {
+				note = el('div', 'hint mj-manual-note');
+				note.textContent = 'Analog gain is still automatic, so brightness is held: ' +
+					'set it too to see the exposure change the picture.';
+				p.appendChild(note);
+			}
+			if (note) note.hidden = !show;
+		}
 		const m = sub['x-metric'] || {};
 		const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
 		const inForce = other ? null : EXP.reading(v, m.inForce, m.scale);
@@ -2892,6 +2910,31 @@
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
 
+		}
+
+		// Picking Manual starts from the picture on screen. Manual holds only the
+		// fields that are set, and an empty one keeps following the light --
+		// so without this, switching to Manual and dialling the exposure changed
+		// nothing visible (auto-exposure moved the gain to cancel it). Each
+		// empty field manual holds is filled with what the camera is running
+		// at that moment, as an ordinary edit: it previews, it is dirty, and
+		// Save keeps it or Discard drops it. On the user's change only -- a
+		// refresh or a leaf drawn in manual leaves the boxes as saved. The
+		// sensor digital gain is not among them: manual pins it at 1x.
+		const modeF = state.fields.find(f => f.dot === 'isp.aeMode');
+		if (modeF && EXP) {
+			modeF.control.addEventListener('change', () => {
+				if (modeF.getValue() !== 'manual') return;
+				const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
+				for (const dot of ['isp.exposure', 'isp.aGain', 'isp.ispGain']) {
+					const f = state.fields.find(x => x.dot === dot);
+					if (!f || !f.schema || String(f.getValue()) !== '') continue;
+					const m = f.schema['x-metric'] || {};
+					const now = EXP.reading(v, m.now, m.scale);
+					if (now === null || !(now > 0)) continue;
+					setLive(f, EXP.fmt(now, f.schema['x-unit'] || ''));
+				}
+			});
 		}
 
 		// Set back, not disabled: a value written while the camera is in the
@@ -11629,7 +11672,7 @@
 		}
 
 		if (expRow) {
-			const row = { p, control, sub, unit: sub['x-unit'] ? String(sub['x-unit']) : '' };
+			const row = { p, control, sub, dot, unit: sub['x-unit'] ? String(sub['x-unit']) : '' };
 			row.paint = () => paintExp(row, siblingValue, (t) => {
 				desc = t;
 				const r = p.querySelector('.mj-reset');

@@ -286,6 +286,12 @@ could tell.
   8×, the drop would keep 8× on the picture.
 - **A key the camera refuses** (the reply's `keys`) gets a line under its row
   saying it cannot be shown before Save.
+- **Picking Manual** fills each empty field manual holds (exposure time, analog
+  gain, ISP gain) with the value the camera is running, as an ordinary edit.
+  Manual holds only what is set, and without this, dialling the exposure
+  changed nothing visible, because auto-exposure moved the empty gain to
+  cancel it. While the analog gain is empty in manual, the Exposure time row
+  says so.
 
 ## The Live leaf's tone mode
 
