@@ -326,6 +326,13 @@ group('ISP: the Live leaf headings name lifted keys, once each');
 	check('every grouped key is in the shipped schema', !missing.length, missing.join(', '));
 	const notLifted = placed.filter(k => !t.lifted().has('isp.' + k));
 	check('every grouped key is lifted to the Live leaf', !notLifted.length, notLifted.join(', '));
+	// A condition naming a field or a value the schema does not have would
+	// dim a group forever, or never -- and either looks like a design choice.
+	const bad = groups.filter(g => g.activeWhen).filter(g => {
+		const c = ISP[g.activeWhen.field];
+		return !c || !Array.isArray(c.enum) || c.enum.indexOf(g.activeWhen.equals) < 0;
+	}).map(g => g.id);
+	check('every activeWhen names a real mode and value', !bad.length, bad.join(', '));
 	everyKeyOnce('exposure keys', t, s);
 }
 

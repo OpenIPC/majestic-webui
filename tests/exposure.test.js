@@ -88,5 +88,9 @@ check('no delay at all', EXP.framesToSeconds(0, 25) === '≈ 0 s at 25 fps');
 check('no frame rate, no conversion', EXP.framesToSeconds(8, null) === null);
 check('no frame count, no conversion', EXP.framesToSeconds(null, 25) === null);
 check('a long delay is whole seconds', EXP.framesToSeconds(1000, 25) === '≈ 40 s at 25 fps');
+check('a delay of nothing says so', EXP.delayText(0, 25) === 'no delay');
+check('and says so without a frame rate too', EXP.delayText(0, null) === 'no delay');
+check('any other delay is its time', EXP.delayText(8, 25) === '≈ 0.32 s at 25 fps');
+check('an unknown delay is no text', EXP.delayText(null, 25) === null);
 
 done();

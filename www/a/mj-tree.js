@@ -328,7 +328,12 @@
 		isp: [
 			{ id: 'mode', label: '', keys: ['aeMode', 'slowShutter'] },
 			{ id: 'exposure', label: 'Exposure and gain', keys: ['exposure', 'aGain', 'dGain', 'ispGain'] },
+			// `activeWhen` is the note's claim as a condition: the page sets
+			// these rows back while the mode says otherwise. They stay
+			// editable -- the daemon writes them in manual too, so a value is
+			// in place the moment automatic comes back.
 			{ id: 'reacts', label: 'How it reacts', note: 'in automatic mode',
+				activeWhen: { field: 'aeMode', equals: 'auto' },
 				keys: ['meterRect', 'aeStrategy', 'aeSpeed', 'aeTolerance', 'aeBlackDelay', 'aeWhiteDelay'] },
 			{ id: 'picture', label: 'Picture', keys: ['dehaze'] },
 			{ id: 'tuning', label: 'For tuning engineers', keys: ['externalTuner'] },

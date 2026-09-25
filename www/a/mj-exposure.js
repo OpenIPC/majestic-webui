@@ -101,7 +101,15 @@
 		return '≈ ' + txt + ' s at ' + fps + ' fps';
 	}
 
-	const api = { isAuto, matched, titleFor, reading, fmt, withUnit, autoText, framesToSeconds };
+	// What a delay in frames amounts to, for the figure beside the box. Zero is
+	// "no delay": correct as "≈ 0 s at 25 fps", but that reads as a sum
+	// somebody forgot to finish.
+	function delayText(n, fps) {
+		if (isNum(n) && n === 0) return 'no delay';
+		return framesToSeconds(n, fps);
+	}
+
+	const api = { isAuto, delayText, matched, titleFor, reading, fmt, withUnit, autoText, framesToSeconds };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticExposure = api;
 })();

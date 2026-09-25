@@ -43,8 +43,16 @@
 	color: var(--bs-tertiary-color);
 }
 
+/* A placeholder is an example, so it sits a step back from typed text -- but it
+   has to stay readable. #c2c2d9 is 10.3:1 on the dark input and 1.6:1 on the
+   light one, where it all but disappears; the light theme gets its own at
+   4.5:1. */
 .form-control::placeholder {
 	color: #c2c2d9;
+}
+
+[data-bs-theme=light] .form-control::placeholder {
+	color: #6b7085;
 }
 
 .form-label {
@@ -238,6 +246,22 @@
 .number.mj-exp-row .input-group > .form-control {
 	flex: 0 0 8rem;
 	width: 8rem;
+}
+
+/* Here the placeholder is not an example but the reading: "Auto · 32" is what
+   the camera is running (#582). So it takes the theme's secondary text colour
+   -- 8.2:1 dark, 6.5:1 light -- still a step back from a value somebody typed,
+   which is the difference it has to show. */
+.mj-exp-row .form-control::placeholder {
+	color: var(--bs-secondary-color);
+	opacity: 1;
+}
+
+/* A group whose rows act only in one mode, while the camera is in the other:
+   still editable, since a value written now is in place the moment the mode
+   comes back, but set back so the page does not present them as in force. */
+.mj-idle {
+	opacity: 0.5;
 }
 
 .mj-exp-row .mj-unit {

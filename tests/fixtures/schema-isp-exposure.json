@@ -8,7 +8,7 @@
     "title": "Exposure mode",
     "default": "auto",
     "hint": "Whether the ISP meters the picture or is told the exposure.",
-    "help": "auto: the four settings below are limits auto-exposure works inside. manual: they are the values themselves and nothing follows the light.",
+    "help": "In automatic mode the exposure and gains below are limits auto-exposure works inside. In manual they are the values themselves, and only what is set is held: an exposure or gain left empty goes on following the light. The reaction settings wait for automatic mode.",
     "x-enum-titles": {
       "auto": "Automatic",
       "manual": "Manual"

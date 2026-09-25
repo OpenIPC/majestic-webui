@@ -2537,7 +2537,7 @@
 		out.textContent = '';
 		if (unit === 'frames') {
 			const n = control.value !== '' ? Number(control.value) : inForce;
-			out.textContent = EXP.framesToSeconds(n, streamFps()) || '';
+			out.textContent = EXP.delayText(n, streamFps()) || '';
 			return;
 		}
 		const now = EXP.reading(v, m.now, m.scale);
@@ -2788,6 +2788,9 @@
 			list.forEach(x => placed.push(x.f));
 		});
 		const headed = new Set();
+		// Groups whose rows act only while a sibling holds one value
+		// (activeWhen in mj-tree.js), and what to set back when it does not.
+		const idle = new Map();
 
 		for (const f of placed) {
 			const geoField = useGeo && (f === mirror || f === flip);
@@ -2824,10 +2827,36 @@
 			// Carried on the group's first row, so whatever hides a whole
 			// group's rows can take its heading too (see the dehaze row).
 			if (groupH) field.groupHead = groupH;
+			const gAct = gi >= 0 ? sectionGroups(f.section)[gi] : null;
+			if (gAct && gAct.activeWhen) {
+				const k = f.section + '/' + gi;
+				if (!idle.has(k)) idle.set(k, { section: f.section, when: gAct.activeWhen, els: [] });
+				if (groupH) idle.get(k).els.push(groupH);
+				idle.get(k).els.push(field.p);
+			}
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
 
 		}
+
+		// Set back, not disabled: a value written while the camera is in the
+		// other mode is in place the moment it comes back, and a disabled box
+		// would say it cannot be. The heading's note says which mode they
+		// act in; this makes the page agree with it. An unreadable mode leaves
+		// the rows as they are rather than dimming them on a guess.
+		idle.forEach(({ section, when, els }) => {
+			const d = section + '.' + when.field;
+			const paint = () => {
+				const f = state.fields.find(x => x.dot === d);
+				const v = f ? f.getValue() : getDotted(state.config, d);
+				const off = v !== undefined && v !== null && v !== '' &&
+					String(v) !== String(when.equals);
+				els.forEach(e => e.classList.toggle('mj-idle', off));
+			};
+			state.repaint.push(paint);
+			state.liveSync.push(paint);
+			paint();
+		});
 
 		// Hold to compare shows the picture at stock while it is held. At stock
 		// there is nothing to compare, and a press that changes nothing read as
@@ -11512,6 +11541,19 @@
 			(state.liveSync = state.liveSync || []).push(row.paint);
 			control.addEventListener('input', row.paint);
 			(state.expRows = state.expRows || []).push(row);
+			// The placeholder is all a screen reader says about an empty box,
+			// and it is only half of what the row shows: the running figure
+			// beside it and the hint under it are what a sighted reader acts
+			// on. Pointed at both, so focus reads "Auto · 32", then "now
+			// 31.6×", then the hint. Not aria-live: the figure moves every
+			// two seconds and would talk over everything else.
+			const idBase = dot.replace(/\./g, '-');
+			const now = p.querySelector('.mj-now');
+			const said = [];
+			if (now) { now.id = 'mjn-' + idBase; said.push(now.id); }
+			const ht = p.querySelector('.mj-hint-txt');
+			if (ht) { if (!ht.id) ht.id = 'mjh-' + idBase + '-h'; said.push(ht.id); }
+			if (said.length) control.setAttribute('aria-describedby', said.join(' '));
 			watchExp();
 			row.paint();
 		}
