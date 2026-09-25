@@ -228,6 +228,11 @@
 	function focusReset() {
 		const st = window.MajesticStats;
 		if (st && typeof st.focusReset === 'function') st.focusReset();
+		// Focus by ear measures against the same best, and preview-focus.js
+		// loads after this file: an event rather than a lookup, so the two
+		// cannot disagree about when a scene changed.
+		if (typeof CustomEvent === 'function')
+			window.dispatchEvent(new CustomEvent('mj-focus-reset'));
 	}
 	function afManual(verb) {
 		if (!afState) return;

@@ -160,6 +160,47 @@ It is a separate file for a reason that constrains every addition here:
 > `IDS` lists, and any new module it needs goes into **both** `SRCS` lists ahead
 > of it — the loaders run every file in `SRCS` in order.
 
+### Focus by ear
+
+`focus-ear.js` (the grammar, pure, tested) and `preview-focus.js` (the poll,
+the sound, the card). For an installer on a ladder who cannot read a phone:
+the camera's focus statistic, polled five times a second from
+`/metrics/isp?value=isp_afmetrics` (one number, no auth, answered from the
+daemon's memory in about ten milliseconds), becomes beeps that come faster and
+higher the closer the reading is to the best it has been, a low note when the
+lens has gone past it, and one held tone when it is back on it. Rate and pitch
+run over two decades of the ratio logarithmically, because a focus curve is
+narrow against the lens's travel.
+
+Three rules, each because the obvious alternative lies:
+
+- **The reference is a ratchet with resets, not a window.** A sliding maximum
+  forgets the peak while the installer stands still off it, then holds the tone
+  on a soft lens. The resets are the card's *Start over*, the pad's zoom and
+  Autofocus (through the `mj-focus-reset` event `preview-ptz.js` dispatches from
+  its own `focusReset()`), and an automatic re-base after fifteen seconds under
+  half the best, which is a re-zoom by hand on a ladder where no button is
+  reachable.
+- **A held tone needs a confirmed peak.** The ratio to the best is 1 all the way
+  up a first climb, because the best ratchets with every sample. The tone holds
+  only once the reading has fallen clearly below the best since it was set, and
+  is back within 3% of it, flat, for 1.2 s. A small excess over a confirmed peak
+  is the same peak read better (the smoothed reading lags a moving lens), not a
+  new one; only a clearly higher reading un-confirms it and earns the chime.
+- **Silence is a fact.** No reading for 700 ms silences the sound with a "lost"
+  cue; an empty body means the chip has no statistic and the mode switches
+  itself off with one toast. A negative reading is how some chips spell "no
+  statistic" and reads as absent; zero is a black scene and a reading.
+
+The AudioContext is created inside the toggle's own event, before any await,
+which is what lets a phone sound at all. `navigator.wakeLock` exists only in a
+secure context, so on the plain-http origin most cameras are reached on the
+card says once to turn off auto-lock instead. A hidden tab pauses the poll and
+ramps the sound out; coming back may need a tap on the card on a phone, and the
+card says so. The toggle is unhidden only once the heartbeat has reported the
+metric and only where the browser has Web Audio. Neither file is in the two
+tests' `SRCS` lists; `preview-page.js` does not know they exist.
+
 ## PTZ
 
 `p/motor.cgi` (markup only, hidden) + `preview-ptz.js`, which relocates the

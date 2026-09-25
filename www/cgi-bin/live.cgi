@@ -67,6 +67,12 @@ hide_title=1; full_bleed=1
      preview-zoom.js, which is what tells it. Like preview-roi.js it is in
      neither test's SRCS list: preview-page.js does not know it exists. -->
 <script src="/a/preview-still.js"></script>
+<!-- Focus by ear. The grammar first, a window.Majestic* module the glue
+     checks for like every other; then the glue, which is in neither test's
+     SRCS list -- preview-page.js does not know it exists. After
+     preview-stats.js, whose best it keeps in step with its own. -->
+<script src="/a/focus-ear.js"></script>
+<script src="/a/preview-focus.js"></script>
 <!-- The other camera's picture laid over this one where its calibration
      says it belongs: an outline while Peer is on, the live picture warped
      onto it on a click inside. After preview-zoom.js, whose placement and
