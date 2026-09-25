@@ -138,9 +138,10 @@
 			return { on: true, known: true, measuring: false, tone: 'off',
 				head: 'Paused',
 				tail: 'it resumes on its own',
-				why: 'The camera stands aside while its picture settings are ' +
-					'being changed, so it does not fight the change. Its ' +
-					'readings are from before the pause, so none are shown.',
+				// Says nothing about WHY it paused: the state carries no cause,
+				// and it has been seen with nobody adjusting anything (#590).
+				why: 'Automatic tuning is paused and resumes on its own. ' +
+					'Readings from before the pause are not shown.',
 				moved: [] };
 		case UNAVAILABLE:
 			// On, and has nothing to go on. Said plainly rather than dressed
@@ -182,9 +183,13 @@
 			return { on: true, known: true, measuring: true, tone: 'ok',
 				head: 'As good as this scene gets',
 				tail: 'nothing to do',
+				// The figures are named only when the camera published them:
+				// figures() leaves an absent share out, and a reason pointing
+				// at a figure that is not there sends the reader looking.
 				why: 'Stretching the picture any further would lose detail in the ' +
-					'shadows or the highlights; the figures below show which end ' +
-					'ran out.',
+					'shadows or the highlights' +
+					(s.clipLo != null && s.clipHi != null
+						? '; the figures below show which end ran out.' : '.'),
 				moved: mv };
 		case LOWLIGHT:
 			// The one verdict with something to DO, and the thing to do is
@@ -203,7 +208,10 @@
 		return { on: true, known: true, measuring: false, tone: 'off',
 			head: 'Tuning',
 			tail: 'the camera reports a state this page does not know (' +
-				s.state + ')', why: '', moved: mv };
+				s.state + ')',
+			why: 'The camera is newer than this page\'s description of it; ' +
+				'automatic tuning is still running.',
+			moved: mv };
 	}
 
 	// The measurement behind the sentence, as figures a person can read.

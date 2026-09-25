@@ -317,6 +317,23 @@ group('tone-check: every verdict says what to do, and keeps the why apart (#581)
 		all.every(d => !/\d|255|%/.test(d.head + d.tail)));
 }
 
+group('tone-check: the reasons claim only what the camera said');
+{
+	const S = tc.STATE;
+	const paused = tc.describe({ state: S.PAUSED, headroom: 100, span: 90 }, STOCK, true);
+	// PAUSED carries no cause, and has been seen with nobody adjusting (#590).
+	check('a pause is not explained by an adjustment nobody may be making',
+		!/adjust|chang/i.test(paused.why));
+	const full = tc.describe({ state: S.HOLDING, span: 200, clipLo: 100, clipHi: 50 }, STOCK, true);
+	const bare = tc.describe({ state: S.HOLDING, span: 200, clipLo: null, clipHi: null }, STOCK, true);
+	check('the limit points at the clipping figures when they are shown',
+		/figures/.test(full.why));
+	check('and not when the camera did not publish them', !/figures/.test(bare.why));
+	const unknown = tc.describe({ state: 99, span: 100 }, STOCK, true);
+	check('an unknown state still has a reason, so its "?" never opens empty',
+		!!unknown.why);
+}
+
 group('tone-check: the span band drawn over the histogram');
 
 {

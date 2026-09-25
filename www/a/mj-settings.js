@@ -2321,7 +2321,7 @@
 				pushLive();
 			}
 			row.hidden = !(auto && d.known);
-			why.hidden = !whyOpen || row.hidden;
+			why.hidden = !whyOpen || row.hidden || !d.why;
 			// Hidden with the sentence, and empty whenever the sentence is
 			// not a claim about the picture right now: figures() enforces the
 			// second half itself, so a pause empties the row rather than
