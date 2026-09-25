@@ -78,6 +78,10 @@ check('manual exposure is an exposure time', EXP.titleFor(EXPOSURE, mode('manual
 check('an unreadable mode keeps the declared name',
 	EXP.titleFor(AGAIN, mode(undefined)) === 'Highest analog gain');
 check('a row with no alternatives keeps its title', EXP.titleFor(SPEED, mode('manual')) === 'Reaction speed');
+// Manual pins it at 1x whatever it says, so a value's name there would
+// present an inert control as the one in force.
+check('the sensor digital gain keeps its ceiling name in manual',
+	EXP.titleFor(ISP.dGain, mode('manual')) === 'Highest sensor digital gain');
 check('matched() names the condition only in manual',
 	EXP.matched(AGAIN, mode('manual')) !== null && EXP.matched(AGAIN, mode('auto')) === null);
 

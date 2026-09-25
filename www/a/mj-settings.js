@@ -807,6 +807,23 @@
 		}
 	}
 
+	// The "?" mark's two names, for the field called `desc`. Its own function
+	// because a row can be renamed after mount -- an exposure row takes
+	// another name when the mode changes -- and a mark still announcing the old
+	// one tells a screen-reader user about a setting no longer on screen. The
+	// name in force is re-applied when the mark already carries one.
+	function nameHelpMark(more, desc) {
+		const help = more.dataset.nameKind === 'more';
+		more.dataset.nameOpen = help ? 'Less about ' + desc : 'Shorten the explanation for ' + desc;
+		more.dataset.nameShut = help ? 'More about ' + desc : 'Show the whole explanation for ' + desc;
+		if (more.hasAttribute('aria-label')) {
+			const name = more.getAttribute('aria-expanded') === 'true'
+				? more.dataset.nameOpen : more.dataset.nameShut;
+			more.title = name;
+			more.setAttribute('aria-label', name);
+		}
+	}
+
 	// A fold is open when the reader opened it OR the search found something
 	// inside it. The OR is the whole point: deciding on the hit alone — the
 	// obvious implementation — slams every hand-opened fold shut the moment
@@ -11382,10 +11399,8 @@
 					// clamp hides nothing from a screen reader, which is read
 					// the whole hint either way, so there the mark is a visual
 					// control and its name says so.
-					more.dataset.nameOpen = helpText
-						? 'Less about ' + desc : 'Shorten the explanation for ' + desc;
-					more.dataset.nameShut = helpText
-						? 'More about ' + desc : 'Show the whole explanation for ' + desc;
+					more.dataset.nameKind = helpText ? 'more' : 'whole';
+					nameHelpMark(more, desc);
 					hint.appendChild(more);
 				}
 				p.appendChild(hint);
@@ -11533,6 +11548,8 @@
 				desc = t;
 				const r = p.querySelector('.mj-reset');
 				if (r) r.setAttribute('aria-label', 'Clear ' + t);
+				const more = p.querySelector('.mj-help');
+				if (more) nameHelpMark(more, t);
 			});
 			// Every edit runs state.repaint, which is what renames the row the
 			// moment the mode select moves; a refresh or a discard fires no

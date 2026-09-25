@@ -67,13 +67,6 @@
     "title": "Highest sensor digital gain",
     "minimum": 0.0,
     "maximum": 1024.0,
-    "x-title-when": [
-      {
-        "field": "aeMode",
-        "equals": "manual",
-        "title": "Sensor digital gain"
-      }
-    ],
     "x-unit": "×",
     "hint": "Empty is automatic: 1x while slow shutter is on, and the sensor's own limit with it off, which can be over 100x. In manual mode it does nothing.",
     "help": "Unlike the other two gains this one is a ceiling and never a value. These sensors carry a single combined gain register, so there is no separate digital gain to hold at a figure; measured, a manual setting here leaves the picture and the raw data untouched. Use the analog gain when the exposure mode is manual.",
