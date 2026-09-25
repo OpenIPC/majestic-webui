@@ -37,13 +37,13 @@ That last case is the one to preserve — a mirror is named precisely when the
 public CDN is not wanted, so a typo in the address must not quietly send the
 camera there anyway. `tests/lpr-loader.test.js` covers all three.
 
-`raw-loader.js` is pinned to `raw-editor@v0.12.0`, and the pin is part of the
-feature rather than housekeeping: v0.11.0 was the first release whose
-`mountEditor` reads `plates` at all, v0.11.1 the one whose burst goes through
-`?frames=` instead of asking sixteen times, v0.11.2 the one that warns when
-Develop is set to a demosaic the reader cannot read through, and v0.12.0 the
-one whose Calibrate calls the `baseline()` and `persist()` hooks
-`raw-calibrate.js` provides. None of these is a
-compile error when pinned too low — they are a Plates tab that takes thirteen
-seconds where it should take one, and one that reads a crippled picture in
-silence.
+`raw-loader.js` pins one `raw-editor` release tag, and the pin is part of the
+feature rather than housekeeping: every option the WebUI hands `mountEditor`
+(`plates`, the Calibrate hooks `raw-calibrate.js` provides, `focus` with its
+motor, filter and `liveHref` extras) exists from a particular release on, and a
+release pinned too low ignores the option rather than failing. None of these is
+a compile error — they are a Plates tab that takes thirteen seconds where it
+should take one, a Focus tab that never grows its buttons, or a panel that
+reads a crippled picture in silence. The commit that bumps the pin says which
+release brought what; bump it in the same change that starts relying on a new
+option.

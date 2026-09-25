@@ -429,6 +429,12 @@ function load(opts) {
 			fn({ MajesticFocus: noFilt })(true, true).filters === undefined);
 		check('no statistics, no capability at all',
 			host(false, true) === undefined);
+		// The panel's first sentence sends an owner to the live picture. It is
+		// only said when the host names the page, so the name has to be there
+		// on every camera that gets a tab at all -- motor or not.
+		check('the host names the live page, with or without a motor',
+			host(true, false).liveHref === 'live.cgi' && host(true, true).liveHref === 'live.cgi',
+			String(host(true, false).liveHref));
 	}
 
 	done();
