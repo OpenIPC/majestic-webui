@@ -96,8 +96,21 @@
 	max-width: 66ch;
 	margin-top: 0.35rem;
 	margin-bottom: 0;
-	font-size: 0.78125rem;
+	/* 13px, the smallest size text a person is meant to READ is set in here;
+	   at 12.5px in grey, the help under every field was the hardest text on
+	   the page to make out (#588). */
+	font-size: 0.8125rem;
 	line-height: 1.45;
+}
+
+/* The helpers write hints as `.hint.text-secondary`, and Bootstrap's
+   .text-secondary is the fixed secondary THEME colour, #6c757d, not the
+   secondary TEXT colour — so in the dark theme the help under every field was
+   mid-grey on near-black, about 3.6:1, while the text around it followed the
+   theme. The theme's own secondary text colour is what was meant. !important
+   because the utility it overrides carries one. */
+.hint.text-secondary {
+	color: var(--bs-secondary-color) !important;
 }
 
 .range span.show-value {
@@ -279,7 +292,7 @@
 }
 
 .mj-now {
-	font-size: 0.78125rem;
+	font-size: 0.8125rem;
 	color: var(--bs-secondary-color);
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
@@ -383,6 +396,29 @@ button.mj-help[aria-expanded="true"] {
 	outline-offset: 1px;
 }
 
+/* A 16px mark is a fine thing to see and a poor thing to hit with a finger
+   (#588). Under a coarse pointer the button takes a 44x44 invisible hit area
+   and the mark stays the size it is. The area grows DOWN, not evenly: the hint
+   line sits 0.35rem under the control it explains, so reaching further up
+   would let a tap on the bottom edge of an input open the help instead. Below
+   the mark is only the hint's own text and the row's margin -- measured on the
+   lab hi3516ev300 at 390px, nothing to press there -- and a tap on the hint's
+   text opening the hint's help is the fold doing its job. */
+@media (pointer: coarse) {
+	button.mj-help::after {
+		content: "";
+		position: absolute;
+		top: -0.35rem;
+		right: -0.875rem;
+		bottom: -1.4rem;
+		left: -0.875rem;
+	}
+
+	button.mj-help:not(.mj-hint-fold > .mj-help) {
+		position: relative;
+	}
+}
+
 /* ── a hint with more behind it ─────────────────────────────────────────────
    The "?" is absolutely positioned rather than made a flex item or a float,
    because the box beside it becomes a -webkit-box when it clamps and that
@@ -472,7 +508,7 @@ button.mj-help[aria-expanded="true"] {
 	padding-left: 0.6rem;
 	border-left: 2px solid var(--bs-border-color);
 	color: var(--bs-secondary-color);
-	font-size: 0.78125rem;
+	font-size: 0.8125rem;
 	line-height: 1.45;
 	white-space: pre-line;
 }
@@ -482,7 +518,7 @@ button.mj-help[aria-expanded="true"] {
 	font-weight: 600;
 	letter-spacing: 0.07em;
 	text-transform: uppercase;
-	color: var(--bs-tertiary-color);
+	color: var(--bs-secondary-color);
 }
 
 .mj-state-on {
@@ -812,7 +848,9 @@ pre#output[data-cmd] {
    rather than as labelled controls. */
 .mj-row > .form-label {
 	margin-bottom: 0.3rem;
-	color: var(--bs-tertiary-color);
+	/* Secondary, not tertiary: tertiary is half-strength body colour, and on
+	   11px caps that is below a readable contrast in either theme (#588). */
+	color: var(--bs-secondary-color);
 	font-size: 0.6875rem;
 	font-weight: 600;
 	letter-spacing: 0.07em;
@@ -821,7 +859,7 @@ pre#output[data-cmd] {
 }
 
 .mj-row.mj-dirty > .form-label {
-	color: var(--bs-secondary-color);
+	color: var(--bs-body-color);
 }
 
 /* Where the lifted part of a section went, said once at the top of what is
@@ -880,6 +918,15 @@ pre#output[data-cmd] {
 
 .mj-reset:disabled {
 	opacity: 0.12;
+}
+
+/* 44px under a finger (#588). It sits at the right-hand end of the control's
+   line with nothing after it, so the box can simply grow; the glyph does not. */
+@media (pointer: coarse) {
+	.mj-reset {
+		width: 2.75rem;
+		height: 2.75rem;
+	}
 }
 
 /* Three weights down that rail, because the head's "4 of 17 off stock" names a
@@ -2225,12 +2272,15 @@ button.mj-osd-chip,
 }
 
 /* The lit indicator is the point of the control: it says what the camera is
-   doing, at a glance, from across a room. */
+   doing, at a glance, from across a room. Off is a hollow ring and on a filled,
+   glowing dot, so the two differ in SHAPE as well as colour: at 6px and grey
+   against colour alone they were hard to tell apart (#588). */
 .mj-led {
-	width: 6px;
-	height: 6px;
+	width: 8px;
+	height: 8px;
 	border-radius: 50%;
-	background: #6c727d;
+	background: transparent;
+	box-shadow: inset 0 0 0 1.5px #6c727d;
 	flex: 0 0 auto;
 }
 
@@ -4190,15 +4240,8 @@ button.mj-osd-chip,
 }
 
 /* The indicator is the point of a stateful control: what the camera is doing,
-   readable at a glance without hunting for a pressed-looking button. */
-.mj-led {
-	flex: 0 0 auto;
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: #6c727d;
-}
-
+   readable at a glance without hunting for a pressed-looking button. Its shape
+   is .mj-led above, shared with the settings page's toggles. */
 .mj-tog-in:checked + .mj-tog .mj-led {
 	background: var(--bs-primary);
 	box-shadow: 0 0 8px var(--bs-primary);
