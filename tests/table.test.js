@@ -89,4 +89,16 @@ check('what the camera stores comes back identical',
 check('every cell empty clears the key', T.joinList(['', ' ', '']) === '');
 check('a gap is kept for the camera to refuse', T.joinList(['1', '', '3']) === '1,,3');
 
+group('a text list and a number per row keep what the camera means');
+
+check('servers split on commas', T.splitStrings('stun:a:3478,turn:b:3478').length === 2);
+check('and on whitespace', T.splitStrings('stun:a:3478  turn:b:3478').join('|') === 'stun:a:3478|turn:b:3478');
+check('nothing is no items', T.splitStrings('').length === 0 && T.splitStrings(null).length === 0);
+check('joined with commas, blanks dropped', T.joinStrings(['stun:a', ' ', 'turn:b ']) === 'stun:a,turn:b');
+check('no items is the default', T.joinStrings(['', ' ']) === '');
+// An empty offset box is no shift; a list of no shifts is no list.
+check('an empty box is 0', T.joinRowNumbers(['-10', '', '5']) === '-10,0,5');
+check('trailing zeros drop', T.joinRowNumbers(['-3', '0', '']) === '-3');
+check('all empty is unset', T.joinRowNumbers(['', '']) === '');
+
 done();

@@ -136,10 +136,39 @@
 		return t.join(',');
 	}
 
+	// ---- A list of text items kept comma-joined (x-strings) --------------
+
+	// The items, commas or whitespace between them as the camera reads them.
+	function splitStrings(v) {
+		if (v === null || v === undefined) return [];
+		return String(v).split(/[\s,]+/).filter(function (t) { return t !== ''; });
+	}
+
+	// The items back as the camera stores them; blank rows are dropped, and
+	// no items at all is '' — the camera's own default.
+	function joinStrings(items) {
+		return (items || []).map(function (t) { return String(t).trim(); })
+			.filter(function (t) { return t !== ''; }).join(',');
+	}
+
+	// One number per row of a sibling list (x-row-of), as stored: an empty
+	// box is 0 — no shift, which is what a missing number means to the camera
+	// — and trailing zeros are dropped, so a list nobody filled in is ''.
+	function joinRowNumbers(cells) {
+		const t = (cells || []).map(function (c) {
+			const s = c === null || c === undefined ? '' : String(c).trim();
+			return s === '' ? '0' : s;
+		});
+		while (t.length && Number(t[t.length - 1]) === 0) t.pop();
+		return t.join(',');
+	}
+
 	const api = {
 		cellValue: cellValue, tidy: tidy, normalise: normalise,
 		canon: canon, missing: missing,
 		listCells: listCells, parseList: parseList, joinList: joinList,
+		splitStrings: splitStrings, joinStrings: joinStrings,
+		joinRowNumbers: joinRowNumbers,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticTable = api;

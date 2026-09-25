@@ -126,7 +126,7 @@
 		const map = sub && sub['x-special'];
 		if (!map || typeof map !== 'object') return '';
 		return Object.keys(map)
-			.filter(k => Number.isFinite(Number(k)) && typeof map[k] === 'string')
+			.filter(k => k !== '' && Number.isFinite(Number(k)) && typeof map[k] === 'string')
 			.sort((a, b) => Number(a) - Number(b))
 			.map(k => String(Number(k)) + ': ' + map[k])
 			.join(' · ');

@@ -62,7 +62,10 @@ boot tag.
    | `integer` | else | `<input type="number">` with `min`/`max` |
    | `number` | else | `<input type="number">`, `step` from `x-step` or `any` |
    | `string` | `enum` non-empty | `<select>` of enum values, each shown by its `x-enum-titles` word where the schema gives it one — a map keyed by value, so the option still posts the token |
-   | `string` | `x-choices` (files the camera lists) | `<select>` of those files, plus whatever is configured if it is not one of them |
+   | `string` | `x-files` (a directory the camera keeps these files in) | `<select>` of its files plus whatever is configured, and an Upload… into that directory through `/upload` |
+   | `string` | `x-strings` (text items kept comma-joined) | one row per item, + Add; a text `x-special` ("none") is a switch that sets the rows aside |
+   | `string` | `x-numeric` (one number kept as text) | drawn as the `number` it is, with its bounds, `x-step` and `x-unit` |
+   | `string` | `x-row-of` (one number per row of a sibling array) | hidden; the sibling's rows carry a box each and write the joined list back |
    | `string` | `x-list` (a fixed-length number list kept as text) | one labelled box per number (`mj-table.js`), a grid when `rows` > 1, a switch for a whole 0–1 cell |
    | `string` | `x-secret` or `writeOnly` | `<input type="password">` with a Show checkbox wired **in place** (the global toggle in `main.js` ran at load, long before this form existed) |
    | `string` | else | `<input type="text">` |
@@ -252,7 +255,9 @@ maps a value to a name — 0 on the de-jitter buffer is Passthrough, -1 on
 dehaze is From the image profile, 0 slices is Off. A slider's readout prints
 the name instead of the number, a number box prints it beside itself, and the
 line under the control lists every named value (`0: Passthrough`). An empty
-box is unset and never matches a special 0. Which decides a slider, and the
+box is unset and never matches a special 0 — except on a number box with exactly
+one named value, which draws it the way the Picture page draws Auto: the box
+empty, the name as its placeholder, and emptying the box chooses it. Which decides a slider, and the
 lookup, are `EXP.sliderOf` and `EXP.specialFor` in `mj-exposure.js`.
 - **`x-title-when`** gives the field another name while a sibling holds a value,
   in `visibleWhen`'s spelling. The four ceilings are "Highest analog gain" and so

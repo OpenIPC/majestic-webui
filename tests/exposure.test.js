@@ -128,6 +128,9 @@ check('a field with none says nothing', EXP.specialFor({ type: 'integer' }, 0) =
 check('the list is in value order with units',
 	EXP.specialsText(DEH) === '-1: From the image profile · 0: Off');
 check('the value is bare, not in its unit', EXP.specialsText(JIT) === '0: Passthrough');
+// An empty-string key names an empty value (a size that is off), not 0.
+check('an empty key is not listed as 0',
+	EXP.specialsText({ 'x-special': { '': 'Off' } }) === '');
 
 group('a slider is at most a hundred steps, on the camera\'s grain');
 

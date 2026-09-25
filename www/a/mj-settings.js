@@ -9792,8 +9792,13 @@
 			// map above the form is what edits them, but they stay real fields
 			// so dirty tracking, Save and the per-row reset keep working on them
 			// without knowing a map exists.
+			// A value that belongs on another field's rows (x-row-of: a
+			// quality offset per region of interest) renders hidden the same
+			// way, and that field's rows edit it.
+			const rowOf = sub && sub['x-row-of'] && typeof sub['x-row-of'].field === 'string'
+				&& props[sub['x-row-of'].field];
 			const field = renderField(container, dot, key, sub, eff,
-				MAP_DOTS[dot] ? { hidden: true } : undefined);
+				(MAP_DOTS[dot] || rowOf) ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -10201,6 +10206,13 @@
 	function renderField(container, dot, key, sub, eff, opts) {
 		opts = opts || {};
 		const live = !!opts.live;
+		// One number the camera keeps as text (x-numeric: a font scale of
+		// "1.0") is drawn as the number it is, with the bounds it declares.
+		// What is saved is still the text the control holds.
+		if (sub && sub.type === 'string' && sub['x-numeric'] && typeof sub['x-numeric'] === 'object') {
+			const n = sub['x-numeric'];
+			sub = Object.assign({}, sub, { type: 'number', minimum: n.minimum, maximum: n.maximum });
+		}
 		// A field's sibling as it stands NOW: the control if it is on the page,
 		// else the config it loaded with. What x-title-when is evaluated
 		// against, so a name follows the mode select as it moves, not after a
@@ -10248,8 +10260,9 @@
 		// Files the camera offers for a path field (x-choices): the sensor
 		// configurations, the IQ profiles. Read by the daemon when it builds
 		// the schema, so the page lists exactly what the camera can open.
-		const choices = type === 'string' && Array.isArray(sub['x-choices'])
-			&& sub['x-choices'].length ? sub['x-choices'].map(String) : null;
+		const files = type === 'string' && sub['x-files'] && typeof sub['x-files'] === 'object'
+			&& typeof sub['x-files'].dir === 'string' ? sub['x-files'] : null;
+		const choices = files ? (Array.isArray(files.choices) ? files.choices.map(String) : []) : null;
 		// A fixed-length number list kept as text (x-list): one box per
 		// number, a grid for a matrix.
 		const xlist = type === 'string' && sub['x-list'] && typeof sub['x-list'] === 'object'
@@ -10330,6 +10343,15 @@
 			: (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100
 				? { min: isNum(sub.minimum) ? sub.minimum : 0, max: sub.maximum, step: 1 } : null);
 		const specialOf = (v) => EXP ? EXP.specialFor(sub, v) : '';
+		// A number box with exactly one named value draws it the way the
+		// Picture page draws Auto: the box empty, the name as its placeholder,
+		// and emptying the box is choosing it (the de-jitter buffer's
+		// Passthrough, the speaker's Always powered). Not for a slider, which
+		// cannot be empty and prints the name in its readout instead.
+		const specialKeys = (sub && sub['x-special'] && typeof sub['x-special'] === 'object')
+			? Object.keys(sub['x-special']).filter(k => k !== '' && Number.isFinite(Number(k))) : [];
+		const emptySpecial = (!live && !sliderSpec && !expRow && specialKeys.length === 1
+			&& (sub.type === 'integer' || sub.type === 'number')) ? specialKeys[0] : null;
 
 		if (live && type === 'integer' && isNum(sub.maximum)) {
 			// The detent slider. Its fill runs from the schema's own default to
@@ -10577,8 +10599,17 @@
 				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA + ' value="' + esc(v) + '">' +
 				unitHtml +
 				'</span>' +
-				(sub['x-special'] ? '<span class="mj-now mj-special"></span>' : '');
+				(sub['x-special'] && emptySpecial === null ? '<span class="mj-now mj-special"></span>' : '');
 			control = p.querySelector('input');
+			if (emptySpecial !== null) {
+				const name = specialOf(emptySpecial);
+				control.placeholder = name;
+				const shown = (val) => (val === undefined || val === null || String(val).trim() === ''
+					|| Number(val) === Number(emptySpecial)) ? '' : String(val);
+				control.value = shown(eff);
+				control._get = () => control.value.trim() === '' ? emptySpecial : control.value;
+				control._set = (val) => { control.value = shown(val); };
+			}
 			// A value that names a mode says so beside the box: 0 on the
 			// de-jitter buffer reads "Passthrough", not a buffer of nothing.
 			const said = p.querySelector('.mj-special');
@@ -10629,7 +10660,11 @@
 			// An empty value means "let the firmware decide" for the fields that
 			// document a fallback; elsewhere it is only offered when the field is
 			// already unset, so the UI can show that state without inventing it.
-			const autoLabel = RES_AUTO_LABEL[dot] || (cur ? '' : 'Auto · unset');
+			// A size whose empty value is not Auto but a mode of its own (the
+			// custom-snapshot cap, where empty is off) says so by x-special.
+			const emptyName = sub['x-special'] && typeof sub['x-special'][''] === 'string'
+				? sub['x-special'][''] : '';
+			const autoLabel = emptyName || RES_AUTO_LABEL[dot] || (cur ? '' : 'Auto · unset');
 			const optsHtml = (list, selVal) => (autoLabel
 				? '<option value=""' + (selVal === '' ? ' selected' : '') + '>' + esc(autoLabel) + '</option>'
 				: '') + list.map(o => {
@@ -10760,22 +10795,60 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
-		} else if (choices) {
-			// Whatever is configured stays selectable, as it does for a font:
-			// a sensor can also be named on its own (imx335), and a select
-			// with no such option showed it as the blank Auto — and a save
-			// sent the blank, which put the camera back on autodetect.
-			p = el('p', 'select mj-row mj-wide');
+		} else if (files) {
+			// A file the camera keeps in one directory (x-files): what is
+			// there, whatever is configured even when it is not there, and an
+			// upload into the same place. The upload only puts the file on the
+			// camera; choosing it is still an edit that Save sends.
+			p = el('p', 'select mj-row mj-wide mj-file-row');
 			const cur = eff === undefined || eff === null ? '' : String(eff);
+			const emptyName = sub['x-special'] && typeof sub['x-special'][''] === 'string'
+				? sub['x-special'][''] : 'Auto';
 			const extra = cur !== '' && choices.indexOf(cur) < 0
 				? option(cur, true, cur + (cur.indexOf('/') < 0 ? ' (by name)' : ' (not found)'))
 				: '';
-			const opts = option('', cur === '') + extra +
+			const opts = option('', cur === '', emptyName) + extra +
 				choices.map(c => option(c, cur === c, c.split('/').pop())).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
-				'<select class="form-select" id="' + id + '">' + opts + '</select>';
+				'<span class="input-group">' +
+				'<select class="form-select" id="' + id + '">' + opts + '</select>' +
+				'<button type="button" class="btn btn-outline-secondary mj-file-up">Upload…</button>' +
+				'</span>' +
+				'<input type="file" class="mj-file-in" hidden' +
+				(files.accept ? ' accept="' + esc(String(files.accept)) + '"' : '') + '>' +
+				'<span class="mj-now mj-file-note"></span>';
 			control = p.querySelector('select');
+			const pick = p.querySelector('.mj-file-in');
+			const note = p.querySelector('.mj-file-note');
+			p.querySelector('.mj-file-up').addEventListener('click', () => pick.click());
+			pick.addEventListener('change', () => {
+				const f = pick.files && pick.files[0];
+				pick.value = '';
+				if (!f) return;
+				// A bare file name, into the declared directory and nowhere
+				// else: the name comes from the reader's disk.
+				if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(f.name)) {
+					note.textContent = 'Rename the file to letters, digits, dots, dashes or underscores first.';
+					return;
+				}
+				const dest = files.dir.replace(/\/+$/, '') + '/' + f.name;
+				note.textContent = 'Uploading ' + f.name + '…';
+				apiFetch('/upload', { method: 'POST', headers: { 'File-Location': dest }, body: f })
+					.then(r => {
+						if (!r.ok) throw new Error('HTTP ' + r.status);
+						if (!Array.from(control.options).some(o => o.value === dest)) {
+							const o = document.createElement('option');
+							o.value = dest;
+							o.textContent = f.name;
+							control.appendChild(o);
+						}
+						control.value = dest;
+						control.dispatchEvent(new Event('change', { bubbles: true }));
+						note.textContent = f.name + ' is on the camera. Save to use it.';
+					})
+					.catch(e => { note.textContent = 'The camera did not take ' + f.name + ': ' + e.message; });
+			});
 		} else if (xlist) {
 			// One labelled box per number, from what the camera declares: the
 			// count, each cell's name and range, and a grid for a matrix. A
@@ -10845,6 +10918,69 @@
 				f.addEventListener('input', () => updateDirty());
 				f.addEventListener('change', () => updateDirty());
 			});
+		} else if (type === 'string' && sub['x-strings'] && window.MajesticTable) {
+			// A list of text items the camera keeps comma-joined (x-strings:
+			// the STUN/TURN servers): one row per item. A value that is a mode
+			// rather than a list (x-special: "none" is local network only) is
+			// a switch, and while it is on the rows are set aside, not lost.
+			const TBL = window.MajesticTable;
+			const ph = sub['x-strings'].placeholder ? String(sub['x-strings'].placeholder) : '';
+			const modes = sub['x-special'] && typeof sub['x-special'] === 'object'
+				? Object.keys(sub['x-special']).filter(k => k !== '' && typeof sub['x-special'][k] === 'string') : [];
+			const mode = modes.length ? modes[0] : null;
+			p = el('p', 'string mj-row mj-wide mj-strs-row');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-strs" id="' + id + '">' +
+				(mode ? '<span class="form-check form-switch mj-strs-mode"><input type="checkbox" class="form-check-input" id="' + id + '-mode">' +
+					'<label class="form-check-label" for="' + id + '-mode">' + esc(sub['x-special'][mode]) + '</label></span>' : '') +
+				'<span class="mj-strs-list"></span>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-strs-add">+ Add</button>' +
+				'</span>';
+			control = p.querySelector('.mj-strs');
+			const list = p.querySelector('.mj-strs-list');
+			const addBtn = p.querySelector('.mj-strs-add');
+			const sw = mode ? p.querySelector('.mj-strs-mode input') : null;
+			const addRow = (val) => {
+				const row = el('span', 'input-group input-group-sm mb-1 mj-strs-item');
+				const inp = el('input', 'form-control');
+				inp.type = 'text';
+				inp.spellcheck = false;
+				inp.placeholder = ph;
+				inp.value = val || '';
+				inp.addEventListener('input', () => updateDirty());
+				const del = el('button', 'btn btn-outline-danger');
+				del.type = 'button';
+				del.textContent = '\u00d7';
+				del.setAttribute('aria-label', 'Remove');
+				del.addEventListener('click', () => { row.remove(); updateDirty(); });
+				row.appendChild(inp);
+				row.appendChild(del);
+				list.appendChild(row);
+			};
+			const paintMode = () => {
+				const on = !!(sw && sw.checked);
+				list.hidden = on;
+				addBtn.hidden = on;
+			};
+			control._get = () => (sw && sw.checked) ? mode
+				: TBL.joinStrings(Array.from(list.querySelectorAll('input')).map(i => i.value));
+			control._set = (val) => {
+				list.innerHTML = '';
+				const v = val === undefined || val === null ? '' : String(val).trim();
+				const isMode = mode !== null && v.toLowerCase() === mode.toLowerCase();
+				if (sw) sw.checked = isMode;
+				(isMode ? [] : TBL.splitStrings(v)).forEach(addRow);
+				paintMode();
+			};
+			control._set(eff);
+			addBtn.addEventListener('click', () => {
+				addRow('');
+				const last = list.querySelector('.mj-strs-item:last-child input');
+				if (last) last.focus();
+				updateDirty();
+			});
+			if (sw) sw.addEventListener('change', () => { paintMode(); updateDirty(); });
 		} else if (type === 'string' && (sub['x-secret'] || sub.writeOnly)) {
 			// A secret the camera has asked not to be shown. It is not hidden
 			// from anyone who can read this page — the value came down the same
@@ -11767,10 +11903,37 @@
 			// A plain assignable hook says the same thing without knowing who
 			// is listening, and stays a no-op where nobody is.
 			control._sync = () => {};
-			const onChange = () => { updateDirty(); control._sync(); };
+			// A sibling that holds one number per row (x-row-of: the quality
+			// offset per region) gets a box on each row, and every edit here
+			// writes the joined list back into that hidden field.
+			const parentProps = (() => {
+				let n = state.schema;
+				for (const seg of base.split('.')) n = n && n.properties && n.properties[seg];
+				return (n && n.properties) || {};
+			})();
+			const qpKey = Object.keys(parentProps).find(k => {
+				const r = parentProps[k] && parentProps[k]['x-row-of'];
+				return r && r.field === key;
+			});
+			const qpSpec = qpKey ? parentProps[qpKey]['x-row-of'] : null;
+			const qpDot = qpKey ? base + '.' + qpKey : null;
+			const qpNow = () => {
+				const f = qpDot && (state.fields || []).find(x => x.dot === qpDot);
+				const v = f ? f.getValue() : getDotted(state.config, qpDot);
+				return window.MajesticTable ? window.MajesticTable.splitStrings(v) : [];
+			};
+			const qpPush = () => {
+				if (!qpDot || !window.MajesticTable) return;
+				const f = (state.fields || []).find(x => x.dot === qpDot);
+				if (!f) return;
+				const cells = Array.from(control.querySelectorAll('.mj-array-row .mj-array-qp'))
+					.map(i => i.value.trim());
+				f.setValue(window.MajesticTable.joinRowNumbers(cells));
+			};
+			const onChange = () => { qpPush(); updateDirty(); control._sync(); };
 			const addRow = (val) => {
 				const row = el('div', 'input-group input-group-sm mb-1 mj-array-row');
-				const inp = el('input', 'form-control');
+				const inp = el('input', 'form-control mj-array-rect');
 				inp.type = 'text';
 				inp.placeholder = 'XxYxWxH';
 				inp.value = val || '';
@@ -11781,12 +11944,30 @@
 				del.textContent = '×';
 				del.addEventListener('click', () => { row.remove(); onChange(); });
 				row.appendChild(inp);
+				if (qpSpec) {
+					const idx = control.querySelectorAll('.mj-array-row').length;
+					const lab = el('span', 'input-group-text mj-array-qp-name');
+					lab.textContent = qpSpec.label || qpKey;
+					const qp = el('input', 'form-control text-end mj-array-qp');
+					qp.type = 'number';
+					qp.step = '1';
+					if (isNum(qpSpec.minimum)) qp.min = qpSpec.minimum;
+					if (isNum(qpSpec.maximum)) qp.max = qpSpec.maximum;
+					qp.placeholder = '0';
+					qp.setAttribute('aria-label', qpSpec.label || qpKey);
+					const now = qpNow()[idx];
+					qp.value = now !== undefined && now !== '0' ? now : '';
+					qp.addEventListener('input', onChange);
+					qp.addEventListener('change', onChange);
+					row.appendChild(lab);
+					row.appendChild(qp);
+				}
 				row.appendChild(del);
 				control.appendChild(row);
 				return inp;
 			};
 			control._addRow = addRow;
-			control._rows = () => Array.from(control.querySelectorAll('.mj-array-row input'))
+			control._rows = () => Array.from(control.querySelectorAll('.mj-array-row input.mj-array-rect'))
 				.map(i => i.value.trim()).filter(s => s.length);
 			(Array.isArray(eff) ? eff : (eff ? String(eff).split(/\s*,\s*/) : []))
 				.forEach(x => { if (x) addRow(x); });
@@ -11928,7 +12109,9 @@
 				// The named values ride with the range: "0–500 ms · 0:
 				// Passthrough". Said on a slider too, where there is no range
 				// line, because a name is only discoverable if it is listed.
-				const named = EXP ? EXP.specialsText(sub) : '';
+				const named = emptySpecial !== null
+					? 'Empty: ' + specialOf(emptySpecial)
+					: (EXP ? EXP.specialsText(sub) : '');
 				const tail = [range, named].filter(Boolean).join(' · ');
 				if (tail) txt.appendChild(document.createTextNode(
 					(sub.hint ? ' · ' : '') + tail));
