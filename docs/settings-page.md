@@ -239,10 +239,20 @@ Three rules keep this true:
   than keep a stale one. In the mode `x-title-when` names, it drops it too:
   there the ceiling auto-exposure works inside is not what runs.
 
-The headings over these rows on the Live leaf ("Exposure and gain", "How it
-reacts") are `SECTION_GROUPS.isp` in `mj-tree.js`. They are worded to stay true
-in both modes. The Live leaf draws every isp key no group names **ahead** of
-the first heading, because after the last one it would read as part of it.
+The order of the isp card on the Live leaf is `SECTION_GROUPS.isp` in
+`mj-tree.js`, by how often an owner needs each row:
+
+1. the two mode switches, with no heading;
+2. Exposure and gain;
+3. How it reacts;
+4. Picture;
+5. For tuning engineers: the external-tuner switch.
+
+That switch sat second, straight under Exposure mode, because schema order put
+it there. The headings are worded to stay true in both exposure modes. Every
+lifted isp key has to be named in a group, and `tests/tree.test.js` fails if
+one is not. An unnamed key is drawn ahead of the first heading, because after
+the last one it would read as part of that group.
 
 ## The Live leaf's tone mode
 

@@ -2769,6 +2769,13 @@
 			const gs = sectionGroups(f.section);
 			return gs ? gs.findIndex(g => g.keys.indexOf(f.key) >= 0) : -1;
 		};
+		// Within a group, the order the group names its keys in -- which is the
+		// point of naming them: Exposure mode decides what everything under it
+		// means, and schema order put Slow shutter above it.
+		const keyIdx = (f) => {
+			const gi = groupIdx(f);
+			return gi < 0 ? -1 : sectionGroups(f.section)[gi].keys.indexOf(f.key);
+		};
 		const bySec = new Map();
 		fields.forEach((f, i) => {
 			if (!bySec.has(f.section)) bySec.set(f.section, []);
@@ -2776,7 +2783,8 @@
 		});
 		const placed = [];
 		bySec.forEach((list) => {
-			list.sort((a, b) => (groupIdx(a.f) - groupIdx(b.f)) || (a.i - b.i));
+			list.sort((a, b) => (groupIdx(a.f) - groupIdx(b.f)) ||
+				(keyIdx(a.f) - keyIdx(b.f)) || (a.i - b.i));
 			list.forEach(x => placed.push(x.f));
 		});
 		const headed = new Set();
@@ -2790,10 +2798,12 @@
 				: geoField ? colGeo
 				: restCols(f.section).firstElementChild;
 			const gi = (isKnob(f) || geoField) ? -1 : groupIdx(f);
+			let groupH = null;
 			if (gi >= 0 && !headed.has(f.section + '/' + gi)) {
 				headed.add(f.section + '/' + gi);
 				const g = sectionGroups(f.section)[gi];
-				groupHead(box, g.label, g.note);
+				// An unlabelled group orders its rows and draws no heading.
+				if (g.label) groupH = groupHead(box, g.label, g.note);
 			}
 			// `live` is the STRIP's presentation, not the live-write behaviour:
 			// it swaps the detent slider in and drops the hint, the help, the
@@ -2811,6 +2821,9 @@
 				getDotted(state.config, f.dot),
 				{ live: isKnob(f) || geoField, hidden: geoField });
 			if (!field) continue;
+			// Carried on the group's first row, so whatever hides a whole
+			// group's rows can take its heading too (see the dehaze row).
+			if (groupH) field.groupHead = groupH;
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
 
@@ -2962,8 +2975,11 @@
 			//
 			// Here rather than beside the strip because the rest-cards are
 			// built above this line and not before it.
+			// Its heading goes with it: the row is the whole of its group, and
+			// a heading left standing over a hidden row introduces nothing.
 			const hazeField = state.fields.find(f => f.key === 'dehaze' && f.p);
 			if (hazeField) toneManual.push(hazeField.p);
+			if (hazeField && hazeField.groupHead) toneManual.push(hazeField.groupHead);
 
 			const relock = () => applyToneMode(toneAutoOn());
 			tuning.control.addEventListener('change', relock);
@@ -9362,11 +9378,12 @@
 			h.appendChild(n);
 		}
 		container.appendChild(h);
+		return h;
 	}
 
 	// head() under a name renderLive can reach: it has a `head` of its own, the
 	// leaf's title row, which shadows this one inside it.
-	function groupHead(container, label, note) { head(container, label, note); }
+	function groupHead(container, label, note) { return head(container, label, note); }
 
 	// The named keys of `props`, in the order they were named.
 	function pick(props, order) {
@@ -9409,7 +9426,7 @@
 					const d = basePath + '.' + k;
 					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !lifted().has(d) && !(skip && skip.has(d));
 				})) continue;
-				head(container, g.label, g.note);
+				if (g.label) head(container, g.label, g.note);
 				renderProps(container, basePath, pick(props, mine), skip, true);
 			}
 			ordered = ordered.filter(k => !named.has(k));

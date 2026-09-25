@@ -75,7 +75,7 @@
       }
     ],
     "x-unit": "×",
-    "hint": "A ceiling only: in manual mode it does nothing, and the gain is held at 1x whatever you write here. Empty is automatic.",
+    "hint": "Empty is automatic: 1x while slow shutter is on, and the sensor's own limit with it off, which can be over 100x. In manual mode it does nothing.",
     "help": "Unlike the other two gains this one is a ceiling and never a value. These sensors carry a single combined gain register, so there is no separate digital gain to hold at a figure; measured, a manual setting here leaves the picture and the raw data untouched. Use the analog gain when the exposure mode is manual.",
     "x-metric": {
       "now": "isp_dgain",
@@ -178,6 +178,56 @@
       "inForce": "isp_ae_white_delay",
       "scale": 1.0
     },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "slowShutter": {
+    "enum": [
+      "disabled",
+      "low",
+      "medium",
+      "high"
+    ],
+    "type": "string",
+    "title": "Slow shutter",
+    "default": "medium",
+    "x-enum-titles": {
+      "disabled": "Off · keep the frame rate",
+      "low": "Low · up to 2 frames",
+      "medium": "Medium · up to 2.5 frames",
+      "high": "High · up to 3.3 frames"
+    },
+    "hint": "In the dark, lets one exposure last longer than a frame: a brighter, less noisy picture at a lower frame rate, and more blur on anything moving.",
+    "help": "At 25 fps, low goes down to 12.5 fps, medium to 10 and high to 7.5. A longest exposure set below takes its place. Off keeps the frame rate and brightens with gain alone. It also sets the gain limits used while those are empty: 32x analog, 1x sensor digital and 4x ISP with slow shutter on, the sensor's own limits with it off.",
+    "x-reload": "live",
+    "x-live": true
+  },
+  "dehaze": {
+    "type": "integer",
+    "title": "Dehaze strength",
+    "default": 125,
+    "minimum": -1,
+    "maximum": 255,
+    "hint": "0 disables the block; -1 leaves it to the profile.",
+    "help": "It is a contrast stretch: helpful in haze, and a night scene it was not asked for loses shadow detail to it. -1 hands the block to the IQ profile instead, which is the only way its [dynamic_dehaze] curve can run -- any strength at all forces the manual mode the curve is ignored in. The default is unchanged at 125, so no camera moves without being told to.",
+    "x-reload": "live",
+    "x-live": true
+  },
+  "externalTuner": {
+    "type": "boolean",
+    "title": "External tuner owns the ISP",
+    "default": false,
+    "hint": "Stops majestic writing the ISP so a tuner like PQTools can. For the length of a tuning session, not for normal running.",
+    "help": "The profile's ISO ladders are pushed every ten seconds and automatic tuning moves contrast and dehaze every couple of seconds, so a value written from outside is overwritten before anyone can look at it. While this is on, none of those run and a day/night change does not re-read the profile. Turn it off and the camera takes the picture back on the next tick -- nothing is saved, so read the result out with GET /api/v1/isp/profile.ini before you do.",
+    "x-reload": "live",
+    "x-live": true
+  },
+  "meterRect": {
+    "type": "array",
+    "title": "Metering area",
+    "default": [],
+    "hint": "Where auto-exposure looks, as XxYxWxH. Empty meters the whole picture.",
+    "help": "Use it when the subject is much brighter or darker than its surroundings -- a lit number plate clips at the exposure the rest of a night scene needs. The ISP's window is at least 256x120, so a smaller rectangle is grown around its own centre.",
     "x-reload": "live",
     "x-live": true
   }
