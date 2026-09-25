@@ -265,6 +265,28 @@ lifted isp key has to be named in a group, and `tests/tree.test.js` fails if
 one is not. An unnamed key is drawn ahead of the first heading, because after
 the last one it would read as part of that group.
 
+## What the Live leaf pushes, and how it is taken back
+
+Every live row is previewed through `POST /api/v1/live`, one document by real
+dotted paths (`liveDocOf` in `mj-settings.js`, tested in `tests/live-doc.test.js`).
+It used to be `/api/v1/image`'s query string, which names keys by their last
+segment and knows only the image knobs. The exposure rows were pushed as
+`aGain=4`, the camera answered 200 and dropped them, and nothing on the page
+could tell.
+
+- **Image knobs** go in whole on every push, by value, because the camera
+  applies them as combined settings. A revert sends the saved values.
+- **isp rows** go in only when they differ from what is saved, and once more as
+  `""` when they come back. On the camera an isp preview is an entry in a
+  table read before the config, and `""` empties it. Sending every isp key on
+  every drag would pin the untouched ones, dehaze among them, which the tone
+  controller drives. A revert drops what was previewed; a Save clears the set,
+  because the camera's apply already emptied its table.
+- **An empty exposure box** is Auto, sent as `0`, not as the drop: over a saved
+  8×, the drop would keep 8× on the picture.
+- **A key the camera refuses** (the reply's `keys`) gets a line under its row
+  saying it cannot be shown before Save.
+
 ## The Live leaf's tone mode
 
 `image.tuning` is a mode, and the two modes **share no controls**. Automatic

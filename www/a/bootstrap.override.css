@@ -257,6 +257,13 @@
 	opacity: 1;
 }
 
+/* A live row the camera answered it cannot preview: the control moves, the
+   picture will not until Save, and the row says so rather than leaving the
+   difference to be discovered. */
+.mj-nopreview {
+	font-style: italic;
+}
+
 /* A group whose rows act only in one mode, while the camera is in the other:
    still editable, since a value written now is in place the moment the mode
    comes back, but set back so the page does not present them as in force. */
