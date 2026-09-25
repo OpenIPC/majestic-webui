@@ -228,6 +228,18 @@ printf '%s' \
 			<b class="mj-ear-num" id="mj-ear-now">–</b>
 			<span class="mj-ear-sub">best <b id="mj-ear-best">–</b></span>
 			<span class="mj-ear-word" id="mj-ear-word" role="status"></span>
+			<!-- Part of the picture. Hidden until the camera has answered with
+			     its focus grid; preview-focus.js unhides it. The same icon as
+			     the bar's Area, because it is the same gesture: press, then
+			     drag on the picture. -->
+			<button type="button" class="mj-hud-btn" id="mj-ear-area" aria-pressed="false" hidden
+				title="Listen to part of the picture: press, then drag a rectangle over it. A click instead of a drag keeps the whole frame; pressing again goes back to the whole frame.">
+				<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<rect x="3" y="4.4" width="14" height="11.2" rx="1.2" stroke-dasharray="3 2.2"></rect>
+					<path d="M10 7.6v4.8M7.6 10h4.8"></path>
+				</svg>
+				<span>Area</span>
+			</button>
 			<button type="button" class="mj-hud-btn" id="mj-ear-reset">Start over</button>
 		</div>
 		<p id="mj-ear-note" class="mj-adapt-toast small" role="status" hidden></p>

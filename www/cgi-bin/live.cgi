@@ -72,6 +72,10 @@ hide_title=1; full_bleed=1
      SRCS list -- preview-page.js does not know it exists. After
      preview-stats.js, whose best it keeps in step with its own. -->
 <script src="/a/focus-ear.js"></script>
+<!-- Part of the picture: which cells of the camera's focus grid a rectangle
+     covers, and one number from them. Pure, tested; after mj-region.js, whose
+     map it takes, and before the glue that draws the rectangle. -->
+<script src="/a/focus-area.js"></script>
 <script src="/a/preview-focus.js"></script>
 <!-- The other camera's picture laid over this one where its calibration
      says it belongs: an outline while Peer is on, the live picture warped

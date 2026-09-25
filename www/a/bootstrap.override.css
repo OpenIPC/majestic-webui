@@ -4198,6 +4198,26 @@ button.mj-osd-chip,
 	min-height: 1.2em;
 	color: rgba(255, 255, 255, 0.7);
 }
+.mj-ear-card .mj-hud-btn + .mj-hud-btn {
+	margin-left: 0.35rem;
+}
+/* Focus by ear, on part of the picture: the cells being listened to, drawn on
+   the stage. Below the chip and the toasts like the peer outline, and never a
+   pointer target -- the drag that draws it goes to the stage beneath. */
+.mj-focus-outline {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 4;
+	pointer-events: none;
+	overflow: visible;
+}
+.mj-focus-outline rect {
+	fill: rgba(255, 196, 61, 0.08);
+	stroke: rgba(255, 196, 61, 0.95);
+	stroke-width: 2;
+}
 .mj-ear-card .mj-hud-btn {
 	margin-top: 0.3rem;
 }

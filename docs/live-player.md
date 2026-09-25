@@ -192,6 +192,27 @@ Three rules, each because the obvious alternative lies:
   itself off with one toast. A negative reading is how some chips spell "no
   statistic" and reads as absent; zero is a black scene and a reading.
 
+**Part of the picture.** The card's *Area* button borrows the zoom module's
+rubber band for one drag: `MajesticZoom.pickRect` arms the stage exactly as the
+bar's Area does and hands the rectangle back in the shown stream's pixels
+instead of zooming to it, and a click, Esc or an interrupted gesture hand back
+nothing, which is the whole frame. The rectangle travels through the camera's
+per-stream windows into the ISP frame the focus grid divides (`mj-region.js`'s
+map with the group standing in as a stream of its own, since the statistics are
+taken ahead of every channel's crop) and is snapped to the cells whose centres
+it holds; `focus-area.js` is that arithmetic, pure and tested. From then on the
+poll reads `/api/v1/isp/af-zones.json` and feeds the reducer the mean of those
+cells' blended sums, leaving out cells with a clipped pixel and cells under 15%
+of the grid's median luma, the raw editor's rule. On the lab camera that mean
+over every cell is within a percent of the whole-frame number, so the two
+sources share a scale; a switch between them resets the reducer regardless. An
+outline on the stage shows the cells, not the drag, and follows every pan and
+zoom. A rectangle with nothing measurable in it is `null`, which the reducer
+hears as no reading (silence, "no reading") while the note says why; it is not
+the "no statistic" answer that switches the mode off. The button appears only
+once the session's probe has had a usable grid, and a session that ends drops
+the rectangle, so every session starts on the whole frame.
+
 The AudioContext is created inside the toggle's own event, before any await,
 which is what lets a phone sound at all. `navigator.wakeLock` exists only in a
 secure context, so on the plain-http origin most cameras are reached on the

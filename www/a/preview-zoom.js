@@ -465,18 +465,27 @@
 	let lastType = 'mouse';
 
 	// Zoom-to-area. `armed` is the button's state; `band` is the drag in
-	// progress, in stage coordinates.
+	// progress, in stage coordinates; `picker` is whoever asked for the next
+	// rectangle instead of the zoom -- pickRect(), below.
 	const areaBtn = $('#mj-area'), band = $('#mj-marquee');
-	let armed = false, drawing = null;
+	let armed = false, drawing = null, picker = null;
 
-	function setArmed(on) {
+	function setArmed(on, cb) {
+		const dropped = picker;
 		armed = !!on && !!band;
+		picker = armed && typeof cb === 'function' ? cb : null;
 		drawing = null;
 		if (band) band.hidden = true;
 		stage.classList.toggle('mj-armed', armed);
 		// The checkbox is the control's state, so it is written rather than
 		// asked -- Esc and the end of a drag both disarm without touching it.
-		if (areaBtn && areaBtn.checked !== armed) areaBtn.checked = armed;
+		// Lit for ITS OWN arming only: a rectangle asked for by another control
+		// leaves it dark, or a lit Area would promise a zoom that is not coming.
+		const lit = armed && !picker;
+		if (areaBtn && areaBtn.checked !== lit) areaBtn.checked = lit;
+		// Whoever was waiting for a rectangle and no longer is -- Esc, the Area
+		// button, a later asker -- is told so once, with nothing.
+		if (dropped && dropped !== picker) dropped(null);
 	}
 	if (areaBtn) areaBtn.addEventListener('change', () => setArmed(areaBtn.checked));
 
@@ -574,6 +583,10 @@
 		const b = commit ? bandRect(e) : null;
 		try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
 		drawing = null;
+		// Taken before disarming, which would otherwise answer it with nothing.
+		const asker = picker;
+		picker = null;
+		let rect = null;
 		if (b) {
 			// A rectangle has to be deliberate. Below this it is a slip or a
 			// click, and zooming 40x into a stray 3px drag is the worst
@@ -582,12 +595,25 @@
 			// monitor and a 390px phone.
 			const minW = Math.max(16, stage.clientWidth * 0.02);
 			const minH = Math.max(16, stage.clientHeight * 0.02);
-			if (b.w >= minW && b.h >= minH) zoomToRect(b.x, b.y, b.w, b.h);
+			if (b.w >= minW && b.h >= minH) rect = b;
 		}
 		// One drag, then it disarms itself: a mode you can forget you are in is
 		// the wrong thing to leave over a picture that also steers a camera.
 		setArmed(false);
+		if (asker) asker(rect && frame && placed ? frameRect(rect) : null);
+		else if (rect) zoomToRect(rect.x, rect.y, rect.w, rect.h);
 		return true;
+	}
+
+	// A stage rectangle in the frame's own pixels, with the frame it is part
+	// of -- the same conversion zoomToRect() opens with, for an asker who
+	// wants the rectangle rather than the zoom.
+	function frameRect(b) {
+		return {
+			x: (b.x - ox) / scale, y: (b.y - oy) / scale,
+			w: b.w / scale, h: b.h / scale,
+			frame: { w: frame.w, h: frame.h },
+		};
 	}
 
 	function endPointer(e) {
@@ -681,6 +707,23 @@
 		// Every time that rectangle moves, PANS INCLUDED. A list, unlike
 		// onScale, because that one is already spoken for.
 		onView: function (fn) { if (typeof fn === 'function') onView.push(fn); },
+
+		// The next rectangle the person draws, handed to `fn` instead of
+		// zoomed to: {x, y, w, h} in the frame's own pixels with the frame
+		// alongside, or null for a click, an interrupted gesture, Esc, or the
+		// Area button taking the stage back. Arms the stage exactly as Area
+		// does -- band, crosshair, one drag and it disarms -- without lighting
+		// Area's own LED. Returns a function that withdraws the request without
+		// calling back, or null where there is no band to draw with. Focus by
+		// ear uses it to choose the part of the picture to listen to.
+		pickRect: function (fn) {
+			if (typeof fn !== 'function') return null;
+			setArmed(true, fn);
+			if (!armed) return null;
+			return function () {
+				if (picker === fn) { picker = null; setArmed(false); }
+			};
+		},
 
 		// Called whenever the scale moves for a reason the player does not know
 		// about — a preset, a pinch, a resize. preview-page.js repaints the
