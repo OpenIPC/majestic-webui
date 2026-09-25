@@ -100,6 +100,12 @@
 		 * the ability to tune its filter as well. Each is carried on its own
 		 * evidence. */
 		const out = { zones: f.zones, intervalMs: f.intervalMs };
+		/* Where an owner goes to actually focus the camera. The tab drives the
+		 * lens over a still and exists to tune the filter, and titled Focus it
+		 * read as the place to focus a camera -- so its panel opens by sending
+		 * people to the page whose picture moves. Relative, like every other
+		 * page link here, so it survives a proxy and a rename of the host. */
+		out.liveHref = 'live.cgi';
 		if (motorOk) {
 			out.move = f.move;
 			out.moveRepeatMs = f.moveRepeatMs;
