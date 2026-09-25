@@ -23,13 +23,20 @@
 //      bitrate and the overlay's placement carry it and are drawn on their own
 //      sections like any other key. Placement is this page's decision; the
 //      flag only says what the camera can do.
-//   3. A section the leaf lifts MORE of than it leaves is ABSORBED: its
-//      leftovers are drawn on the Live leaf too, and it has no leaf of its
-//      own. `image` — six of eight keys live — is that section, and what the
-//      old rule left of it was a two-row page whose first line listed the six
-//      settings it did not have, with a Rotate select that is the other half
-//      of the Orientation pad on the leaf it pointed back at (#316). A section
-//      the leaf lifts LESS of keeps its page, and says where the rest went:
+//   3. A section the leaf lifts MORE of than it leaves is ABSORBED, and has no
+//      leaf of its own — provided its leftovers have a HOME (LEFTOVER_HOME):
+//      another section's leaf they are drawn on, under a heading. They are
+//      never drawn on the Live leaf itself. Leftovers are by definition the
+//      keys the camera cannot apply live, and the Live leaf holds only what
+//      changes the picture as it is touched: a control there that waits for
+//      Save and a pipeline reload reads as a control that does nothing. That
+//      is what the quarter turn was — drawn beside the Orientation pad
+//      (#316), its 90° cells staged a value the picture did not show until
+//      Save and "Apply now" (#583). `image` — every key live but Rotate — is
+//      the absorbed section, and Rotate lives on ISP / Exposure. A section
+//      with leftovers and no home is not absorbed: it keeps its page, which
+//      is the safe answer for a key a daemon adds tomorrow. A section the
+//      leaf lifts LESS of keeps its page too, and says where the rest went:
 //      thirty exposure controls do not move house because one went live.
 //   4. A section with nothing left to draw has no leaf.
 //
@@ -38,6 +45,14 @@
 // emitted, where every key landed.
 (() => {
 	'use strict';
+
+	// Where an absorbed section's leftovers are drawn (rule 3): the leaf of
+	// `home`, under a heading called `label`. `image` leaves only Rotate, and
+	// it goes with the picture-pipeline settings that already need Save and a
+	// reload.
+	const LEFTOVER_HOME = {
+		image: { home: 'isp', label: 'Rotation' },
+	};
 
 	// The types the form's renderField actually draws — number/object fall
 	// through its dispatch and return nothing, so they must not make a section
@@ -158,10 +173,23 @@
 			});
 		}
 
-		// Rule 3.
+		// Rule 3. The home has to be a section this schema carries, or the
+		// leftovers would be absorbed into a page that does not exist.
+		function leftoverHome(sec) {
+			const h = LEFTOVER_HOME[sec];
+			return h && props[h.home] && props[h.home].properties ? h : null;
+		}
+
 		function absorbed(sec) {
 			const taken = liveFields().filter(f => f.section === sec).length;
-			return taken > 0 && taken > sectionFields(sec).length;
+			const left = sectionFields(sec).length;
+			return taken > 0 && taken > left && (left === 0 || !!leftoverHome(sec));
+		}
+
+		// The absorbed sections whose leftovers `id`'s leaf draws, after its own.
+		function homedAt(id) {
+			return absorbedSections().filter(s =>
+				sectionFields(s).length && leftoverHome(s).home === id);
 		}
 
 		function absorbedSections() {
@@ -170,8 +198,8 @@
 		}
 
 		// What a leaf draws. The Live leaf has no schema section of its own: it
-		// draws the lifted knobs and, after them, the leftovers of any section it
-		// absorbed. Every other leaf draws its whole section.
+		// draws the lifted keys and nothing else. Every other leaf draws its
+		// whole section, then the leftovers of any section homed on it.
 		function leafFields(id) {
 			if (id === liveId) {
 				// `hint` and `help` are carried here even though the Live leaf
@@ -185,9 +213,9 @@
 				const live = liveFields().map(f =>
 					({ sub: f.sub, dot: f.dot, title: liveLabel(f.key, f.sub),
 						hint: f.sub.hint || '', help: f.sub.help || '' }));
-				return absorbedSections().reduce((acc, s) => acc.concat(sectionFields(s)), live);
+				return live;
 			}
-			return sectionFields(id);
+			return homedAt(id).reduce((acc, s) => acc.concat(sectionFields(s)), sectionFields(id));
 		}
 
 		// The navigable leaves of one group, in rail order: the Live leaf first
@@ -208,6 +236,7 @@
 		return {
 			groups, groupLiveFields, owner, liveFields, lifted, sectionFields,
 			absorbed, absorbedSections, leafFields, leafIds, liveId,
+			leftoverHome, homedAt,
 			custom: () => custom,
 		};
 	}

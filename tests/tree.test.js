@@ -86,16 +86,54 @@ group('the image section is absorbed onto the Live leaf');
 	check('image is absorbed', t.absorbed('image'));
 	check('image has no leaf of its own', !leaves(t).includes('image'));
 	check('the image group leads with the Live leaf', t.leafIds(t.groups()[0]).join() === 'live,isp,nightMode');
-	check('Rotate is drawn on the Live leaf', leafOf(t, 'image.rotate').join() === 'live');
-	check('Automatic tuning is drawn on the Live leaf', leafOf(t, 'image.tuning').join() === 'live');
+	// Rule 3: an absorbed section's leftovers go home, never to the Live leaf.
+	// This fixture predates Automatic tuning being classed live, so it is a
+	// leftover here and goes home with Rotate; on today's daemon it is lifted.
+	check('Rotate is drawn on ISP / Exposure', leafOf(t, 'image.rotate').join() === 'isp');
+	check('a leftover goes home, not to the Live leaf', leafOf(t, 'image.tuning').join() === 'isp');
 	check('mirror and flip are lifted', t.lifted().has('image.mirror') && t.lifted().has('image.flip'));
 	check('the Live leaf lists the knobs first, in deck order',
 		t.leafFields('live').slice(0, 6).map(f => f.dot.split('.').pop()).join() === ORDER.join());
-	check('then the leftovers', t.leafFields('live').slice(6).map(f => f.dot).join() === 'image.rotate,image.tuning');
+	check('and nothing after them', t.leafFields('live').length === 6);
 	check('the leftovers alone are what image still has to draw',
 		t.sectionFields('image').map(f => f.dot).join() === 'image.rotate,image.tuning');
 	check('asked with the lifted keys in, image is all eight', t.sectionFields('image', true).length === 8);
+	check('ISP / Exposure draws them after its own keys',
+		t.leafFields('isp').slice(-2).map(f => f.dot).join() === 'image.rotate,image.tuning');
 	everyKeyOnce('shipped schema', t, SCHEMA);
+}
+
+// The Live leaf is "adjust and watch": every row on it changes the picture as
+// it is touched. A key there that waits for Save and a pipeline reload reads
+// as a control that does nothing -- the quarter turn beside the Orientation
+// pad was exactly that (#583). So the leaf may draw lifted keys and nothing
+// else, on any schema, and a leftover with nowhere to go keeps its section's
+// page rather than landing here.
+group('the Live leaf draws only live keys');
+{
+	for (const [name, schema] of [['shipped schema', SCHEMA], ['current daemon', (() => {
+		const s = clone(SCHEMA);
+		s.properties.image.properties.tuning['x-live'] = true;
+		return s;
+	})()]]) {
+		const t = build(schema);
+		const notLive = t.leafFields('live').filter(f => !t.lifted().has(f.dot)).map(f => f.dot);
+		check(name + ': every row on the Live leaf is live', !notLive.length, notLive.join(', '));
+	}
+	const s = clone(SCHEMA);
+	s.properties.image.properties.tuning['x-live'] = true;
+	const t = build(s);
+	check('current daemon: Rotate is the one image key sent home',
+		t.homedAt('isp').join() === 'image' &&
+		t.sectionFields('image').map(f => f.dot).join() === 'image.rotate');
+	// A section whose leftovers have no home is not absorbed: it keeps a page.
+	const u = clone(s);
+	u.properties.isp = undefined;
+	delete u.properties.isp;
+	const tu = build(u);
+	check('no home, no absorption: the section keeps its page',
+		!tu.absorbed('image') && leaves(tu).includes('image'));
+	everyKeyOnce('no home', tu, u);
 }
 
 // The flattened record is what the search reads, and a tier missing from it is

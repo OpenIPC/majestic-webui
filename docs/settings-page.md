@@ -156,8 +156,19 @@ silently:
 it.** Three rules, pinned by `tests/tree.test.js`: the first group with any
 `x-live` key *owns* the synthetic **Live adjustments** leaf, and those keys are
 **lifted** onto it beside the picture; a section the leaf lifts more of than it
-leaves is **absorbed** and renders its leftovers there with no page of its own; a
-section it lifts less of keeps its page and says where the rest went. `x-live` is
+leaves is **absorbed** and has no page of its own, its leftovers drawn under a
+heading on a **home** leaf (`LEFTOVER_HOME`: `image`'s Rotate on ISP /
+Exposure); a section it lifts less of, or whose leftovers have no home, keeps its
+page and says where the rest went.
+
+**The Live leaf draws only live keys.** Leftovers are by definition what the
+camera cannot apply live, so they are never drawn there. A control on this leaf
+that waits for Save and a pipeline reload reads as a control that does nothing:
+the Orientation pad's 90° cells staged a quarter turn the picture did not show
+until Save and "Apply now", beside a second Rotate select for the same key
+(#583). The pad offers the four orientations mirror and flip reach, and says so
+when a quarter turn set on ISP / Exposure is also in force.
+`tests/tree.test.js` asserts every row on the leaf is lifted. `x-live` is
 the daemon's word for *what the camera can do*; where a control is drawn is this
 page's. Treating the flag as a placement rule silently dropped the Bitrate row
 from Main stream and Sub stream when majestic began flagging
@@ -167,7 +178,7 @@ key of any grouped section lands on no leaf or on two.
 
 Four leaves have hand-written renderers, each with its reasoning beside it in
 `mj-settings.js`: **Live adjustments** (the picture, the lifted knobs, and the
-Orientation group over hidden `mirror`/`flip`/`rotate` fields), **`osd`**
+Orientation group over hidden `mirror`/`flip` fields), **`osd`**
 (`renderOsd`; the camera burns the overlay in, so the live picture is the real
 thing and placing is a round trip — offsets are written as a **percentage** so
 Main and Sub agree, and the template is chips because majestic's specifier switch
