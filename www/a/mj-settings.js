@@ -140,47 +140,42 @@
 		{ id: 'lowlight', label: 'Low light', v: { luminance: 60, contrast: 42, saturation: 38, hue: 50 } },
 	];
 
-	// The eight ways up a picture can be — every quarter turn of the frame, and
-	// the mirror image of each — drawn as the letter F, which the reporter of
-	// #316 asked for back after a spell of arrows: an F is asymmetric both
-	// ways, so each of the eight is a different shape, which is the whole
-	// reason image tooling draws its orientation chart with one. The config
-	// stores three switches — mirror, flip, a quarter turn — that reach twelve
-	// states for these eight pictures; each cell writes one canonical triple,
-	// and the lit cell is worked out from whatever the config holds, so a
-	// camera configured by hand lights the right picture too.
+	// The four ways up a picture that mirror and flip reach, drawn as the
+	// letter F, which the reporter of #316 asked for back after a spell of
+	// arrows: an F is asymmetric both ways, so each is a different shape, which
+	// is the whole reason image tooling draws its orientation chart with one.
 	//
-	// The arithmetic. The sensor mirrors and flips first; the VPSS then turns
-	// the result clockwise. A vertical flip is a mirror plus a half turn, so a
-	// picture is (mirrored k, turned a) with k = mirror + flip mod 2 and
-	// a = turn + 180·flip mod 360. Going back, a half turn is written as
-	// mirror + flip — the sensor does that for free — and everything else as
-	// a mirror and a quarter turn.
+	// Four, not the eight the pad once offered. The other four need a quarter
+	// turn, which the camera cannot apply live: it swaps the stream's width and
+	// height and waits for Save and a pipeline reload, so those cells staged a
+	// value the picture did not show (#583). The Live leaf holds only what
+	// moves the picture as it is pressed; the quarter turn is set under
+	// Rotation on ISP / Exposure, and the pad says so when one is in force.
+	//
+	// The arithmetic. The sensor mirrors and flips; a vertical flip is a
+	// mirror plus a half turn, so a picture is (mirrored k, turned a) with
+	// k = mirror + flip mod 2 and a = 180·flip. Going back, a half turn is
+	// written as mirror + flip, and the rest as a mirror alone.
 	const ORIENT = [
-		{ k: 0, a: 0,   label: 'Normal',      title: 'As the sensor sees it', home: true },
-		{ k: 0, a: 90,  label: '90°',         title: 'Turned a quarter clockwise' },
-		{ k: 0, a: 180, label: '180°',        title: 'Upside down' },
-		{ k: 0, a: 270, label: '270°',        title: 'Turned a quarter anticlockwise' },
-		{ k: 1, a: 0,   label: 'Mirror',      title: 'Mirrored left to right' },
-		{ k: 1, a: 90,  label: 'Mirror 90°',  title: 'Mirrored, then turned a quarter clockwise' },
-		{ k: 1, a: 180, label: 'Flip',        title: 'Flipped top to bottom' },
-		{ k: 1, a: 270, label: 'Mirror 270°', title: 'Mirrored, then turned a quarter anticlockwise' },
+		{ k: 0, a: 0,   label: 'Normal', title: 'As the sensor sees it', home: true },
+		{ k: 0, a: 180, label: '180°',   title: 'Upside down' },
+		{ k: 1, a: 0,   label: 'Mirror', title: 'Mirrored left to right' },
+		{ k: 1, a: 180, label: 'Flip',   title: 'Flipped top to bottom' },
 	];
-	const orientOf = (mirror, flip, turn) =>
-		({ k: ((mirror ? 1 : 0) + (flip ? 1 : 0)) % 2, a: (turn + (flip ? 180 : 0)) % 360 });
+	const orientOf = (mirror, flip) =>
+		({ k: ((mirror ? 1 : 0) + (flip ? 1 : 0)) % 2, a: flip ? 180 : 0 });
 	const configFor = (o) => (o.a === 180
-		? { mirror: o.k === 0, flip: true, turn: 0 }
-		: { mirror: o.k === 1, flip: false, turn: o.a });
+		? { mirror: o.k === 0, flip: true }
+		: { mirror: o.k === 1, flip: false });
 
-	// The glyph: the frame the stream comes back in — portrait after a quarter
-	// turn — and the F put through the same mirror-then-turn as the picture.
+	// The glyph: the frame, and the F put through the same mirror and half
+	// turn as the picture.
 	const GEO_FRAME = '<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>';
-	const GEO_FRAME_TALL = '<rect x="3.5" y="1.5" width="13" height="17" rx="1.8" opacity="0.4"></rect>';
 	function orientSvg(o) {
 		const tf = 'rotate(' + o.a + ' 10 10)' + (o.k ? ' translate(20,0) scale(-1,1)' : '');
 		return '<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" ' +
 			'stroke-width="1.3" stroke-linecap="round" aria-hidden="true">' +
-			(o.a % 180 ? GEO_FRAME_TALL : GEO_FRAME) +
+			GEO_FRAME +
 			'<g transform="' + tf + '"><path d="M7.6 6.8h5.2M7.6 10h3.7M7.6 6.8v6.4" stroke-width="1.7"></path></g>' +
 			'</svg>';
 	}
@@ -1232,6 +1227,17 @@
 			// all rows into the first column; layoutCols() deals the tail over
 			// into the second once applyVisibility() has settled what is on screen
 			renderProps(cols.firstElementChild, sec, props);
+			// The leftovers of an absorbed section whose home is this leaf
+			// (mj-tree.js rule 3) — on this build, image's Rotate on ISP /
+			// Exposure — under their own heading, as the ordinary rows they are:
+			// saved by their own dotted keys, with Save and Apply saying what a
+			// reload costs as they do for every row here. renderProps() already
+			// skips the lifted keys, so only the leftovers are drawn.
+			for (const hs of treeOf().homedAt(sec)) {
+				groupHead(cols.firstElementChild, treeOf().leftoverHome(hs).label);
+				renderProps(cols.firstElementChild, hs,
+					((state.schema.properties || {})[hs] || {}).properties || {});
+			}
 			// The destinations board is the section, not a field in it. Dealt
 			// into one of two columns it gets half the card — which is the
 			// narrow strip the board exists to replace — so it is lifted out
@@ -1931,25 +1937,19 @@
 		}
 	}
 
-	// Mirror, flip and the quarter turn are three switches in the config and
-	// eight pictures to a person, so the group is the eight pictures. The three
-	// fields stay real — hidden — so Save, dirty tracking, the reset arrow and
-	// refresh() never learn that a pad exists. The quarter turn is the one of
-	// them that is not live: a VPSS operation that swaps the stream's width and
-	// height, hence a pipeline reload rather than a knob, and that difference
-	// in cost once decided where it was drawn — on a page of its own, each
-	// page pointing at the other (#316). Which way up the camera is mounted is
-	// one decision, and this is the picture it is judged against; the save bar
-	// that appears on a press says what the press costs, so the group carries
-	// no note. Only the pictures this camera can reach are offered: a build
-	// without a quarter turn has four, in one row, and one whose enum lists a
-	// single turn has six — a cell for a turn the enum lacks would write a
-	// value the hidden select cannot hold, and stage an empty one for Save.
-	function renderOrientation(body, mirrorField, flipField, turn) {
-		const turnField = turn ? turn.field : null;
-		const cells = ORIENT.filter(o => o.a % 180 === 0 || (turn && turn.has.has(String(o.a))));
-		const rows = [el('div', 'mj-geo-row'), el('div', 'mj-geo-row')];
-		const btns = cells.map((o, i) => {
+	// Mirror and flip are two switches in the config and four pictures to a
+	// person, so the group is the four pictures. Both fields stay real —
+	// hidden — so Save, dirty tracking, the reset arrow and refresh() never
+	// learn that a pad exists. Both are live, so a press turns the picture
+	// over as it is pressed, which is the one promise this leaf makes.
+	//
+	// A quarter turn in force is said under the pad rather than offered on it:
+	// it is set on ISP / Exposure (see ORIENT), and without the line the lit
+	// cell would read as the whole of the orientation when the stream is also
+	// turned. Read from the config, so it follows a save there and refresh().
+	function renderOrientation(body, mirrorField, flipField, sec) {
+		const row = el('div', 'mj-geo-row');
+		const btns = ORIENT.map((o) => {
 			const b = el('button', 'mj-geo' + (o.home ? ' mj-geo-home' : ''));
 			b.type = 'button';
 			b.title = o.title;
@@ -1958,28 +1958,32 @@
 				const c = configFor(o);
 				setLive(mirrorField, c.mirror);
 				setLive(flipField, c.flip);
-				if (turnField) setLive(turnField, String(c.turn));
 			});
-			rows[i < 4 ? 0 : 1].appendChild(b);
+			row.appendChild(b);
 			return b;
 		});
-		rows.forEach(r => { if (r.childElementCount) body.appendChild(r); });
+		body.appendChild(row);
+		const turned = el('p', 'mj-live-hint mj-geo-turned');
+		turned.hidden = true;
+		body.appendChild(turned);
 
 		const sync = () => {
-			let turn = 0;
-			if (turnField) {
-				const t = Number(turnField.getValue());
-				if (Number.isFinite(t)) turn = t;
-			}
-			const cur = orientOf(toBool(mirrorField.getValue()), toBool(flipField.getValue()), turn);
-			cells.forEach((o, i) => {
+			const cur = orientOf(toBool(mirrorField.getValue()), toBool(flipField.getValue()));
+			ORIENT.forEach((o, i) => {
 				const on = o.k === cur.k && o.a === cur.a;
 				btns[i].classList.toggle('mj-geo-on', on);
 				btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
 			});
+			const t = Number(getDotted(state.config, sec + '.rotate'));
+			const home = treeOf().leftoverHome(sec);
+			turned.hidden = !home || !(t === 90 || t === 270);
+			if (!turned.hidden) {
+				turned.innerHTML = 'The picture is also turned ' + t + '° clockwise, ' +
+					'set under ' + esc(home.label) + ' on <a href="?tab=' + esc(home.home) +
+					'">' + esc(label(home.home)) + '</a>.';
+			}
 		};
-		[mirrorField, flipField, turnField].forEach(f => {
-			if (!f) return;
+		[mirrorField, flipField].forEach(f => {
 			f.control.addEventListener('input', sync);
 			f.control.addEventListener('change', sync);
 		});
@@ -1987,27 +1991,6 @@
 		// pad has to be told to re-read after a save or a reset.
 		state.liveSync.push(sync);
 		sync();
-	}
-
-	// The quarter turn's field, mounted hidden under the pad — pin-map style —
-	// where the schema has one, handed back with the set of turns its enum
-	// actually lists so the pad offers no other. The enum is deliberately
-	// ["0","90","270"]: 180 is absent because mirror+flip already give it, at
-	// sensor level and for free, which is exactly how configFor() writes it.
-	function mountTurnField(body, sec) {
-		const dot = sec + '.rotate';
-		if (EXCLUDE.has(dot)) return null;
-		const sub = (((state.schema.properties || {})[sec] || {}).properties || {}).rotate;
-		if (!sub || sub.type !== 'string' || !Array.isArray(sub.enum)) return null;
-		// Whole degrees only, and at least one that is not zero: a value the
-		// pad could not turn by would be a cell that draws nothing.
-		const turns = sub.enum.map(String).filter(v => /^\d+$/.test(v));
-		if (!turns.some(v => v !== '0')) return null;
-		const field = renderField(body, dot, 'rotate', sub, getDotted(state.config, dot), { hidden: true });
-		if (!field) return null;
-		state.fields.push(field);
-		state.initial[dot] = field.getValue();
-		return { field, has: new Set(turns) };
 	}
 
 	// Scene presets. Which one is "on" is DERIVED by comparing the current tone
@@ -2914,17 +2897,10 @@
 			strip.appendChild(foot);
 		}
 
-		// Before the Scene row, not after it as this used to be. image.tuning
-		// is one of these leftovers, and the mode row is built out of it --
-		// it cannot pick up a field that does not exist yet. The cards still
-		// land under the deck either way, because the deck was appended long
-		// before any of them.
-		const claimed = new Set(state.fields.map(f => f.dot));
-		for (const sec of absorbedSections()) {
-			if (!sectionFields(sec).some(f => !claimed.has(f.dot))) continue;
-			renderProps(restCols(sec).firstElementChild, sec,
-				((state.schema.properties || {})[sec] || {}).properties || {}, claimed);
-		}
+		// No leftovers pass. An absorbed section's remaining keys are the ones
+		// the camera cannot apply live, and they are drawn on their home leaf
+		// (mj-tree.js rule 3), never here: this leaf holds only what changes
+		// the picture as it is touched (#583).
 
 		const toneFields = state.fields.filter(f =>
 			f.schema && f.schema['x-live'] && f.type === 'integer');
@@ -2951,7 +2927,7 @@
 			const ff = state.fields.find(f => f.dot === flip.dot);
 			if (mf && ff) {
 				const geo = liveGroup(colGeo, 'Orientation', '');
-				renderOrientation(geo, mf, ff, mountTurnField(geo, mirror.section));
+				renderOrientation(geo, mf, ff, mirror.section);
 			}
 		}
 
@@ -2976,12 +2952,9 @@
 		if (!deck.childElementCount) deck.remove();
 		if (hasTone && !strip.querySelector('.mj-live-row')) strip.remove();
 
-		// The leftovers of a section this leaf absorbed — on this build, the
-		// image section's Automatic tuning — as the ordinary rows they would
-		// have been on a page of their own, in a card under the deck. Generic on
-		// purpose: the rows come from the schema, so a key the section grows
-		// tomorrow lands here rather than on a page that no longer exists. What
-		// the deck already claimed (the quarter turns) is skipped by dot.
+		// Automatic tuning: a lifted switch with no instrument of its own, so
+		// the loop above drew it as an ordinary row in the image card under the
+		// deck. The Tone mode row replaces it below.
 		// Last, because the switch it answers for is drawn by the loop above
 		// and there is no row to hang a status line under until there is.
 		// Absent on a build that does not carry the key at all, which is
