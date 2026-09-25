@@ -43,7 +43,7 @@ group('the boot blob: every value goes through one escaper');
 
 	// `label` is $GET_tab and the only one that is not device output; it is
 	// resolved against the schema by the client and is checked below on its own.
-	const escaped = ['boot_soc', 'boot_exclude', 'boot_sensors', 'boot_fonts'];
+	const escaped = ['boot_soc', 'boot_exclude', 'boot_fonts'];
 	escaped.forEach((f) => {
 		const assign = new RegExp('^' + f + '=|' + f + '="\\$\\{' + f, 'm');
 		check(f + ' is built in this file', assign.test(src) ||

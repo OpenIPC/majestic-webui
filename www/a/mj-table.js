@@ -85,9 +85,61 @@
 			.map(function (m) { return (props && props[m] && props[m].title) || m; });
 	}
 
+	// ---- A fixed-length number list kept as text (x-list) ----------------
+	//
+	// "200,200,-110,461,-415,0,0" in the camera's config, seven labelled boxes
+	// on the page. The camera declares the count, each cell's name and range,
+	// and whether they are whole numbers; it refuses a list that breaks any of
+	// it, so what matters here is only that the page never changes a list on
+	// its way through — an untouched row must read back exactly as it came.
+
+	function num(v) { return typeof v === 'number' && Number.isFinite(v); }
+
+	// The cells, one per number. A whole-number cell whose range is exactly
+	// 0 to 1 is a switch.
+	function listCells(xl) {
+		if (!xl || !Array.isArray(xl.labels)) return [];
+		const integer = xl.items === 'integer';
+		const mins = Array.isArray(xl.minimum) ? xl.minimum : [];
+		const maxs = Array.isArray(xl.maximum) ? xl.maximum : [];
+		return xl.labels.map(function (label, i) {
+			const min = num(mins[i]) ? mins[i] : null;
+			const max = num(maxs[i]) ? maxs[i] : null;
+			return {
+				label: String(label), min: min, max: max, integer: integer,
+				bool: integer && min === 0 && max === 1,
+			};
+		});
+	}
+
+	// The stored text as `n` cells, each the number as it was written ('' for
+	// one that is not there). Commas or whitespace between numbers, as the
+	// camera reads them.
+	function parseList(v, n) {
+		const out = [];
+		const parts = (v === null || v === undefined) ? []
+			: String(v).trim().split(/[\s,]+/).filter(function (t) { return t !== ''; });
+		for (let i = 0; i < n; i++) out.push(i < parts.length ? parts[i] : '');
+		return out;
+	}
+
+	// The cells back as the text the camera stores: comma-joined, no spaces,
+	// which is how it writes them. Every cell empty is '' — the key cleared,
+	// the camera's own value standing. A partly filled list keeps its gaps and
+	// goes to the camera as typed, to be refused there rather than guessed at
+	// here.
+	function joinList(cells) {
+		const t = (cells || []).map(function (c) {
+			return c === null || c === undefined ? '' : String(c).trim();
+		});
+		if (t.every(function (c) { return c === ''; })) return '';
+		return t.join(',');
+	}
+
 	const api = {
 		cellValue: cellValue, tidy: tidy, normalise: normalise,
 		canon: canon, missing: missing,
+		listCells: listCells, parseList: parseList, joinList: joinList,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticTable = api;

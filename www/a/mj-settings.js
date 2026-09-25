@@ -62,7 +62,6 @@
 	}
 
 	const EXCLUDE = new Set(boot.exclude || []);
-	const SENSORS = boot.sensors || [];
 	const FONTS = boot.fonts || [];
 	// The part this camera is. Read from the boot blob, which camera.cgi fills
 	// from sysinfo — it used to be read from `window.mjSoc`, a global no file in
@@ -10246,7 +10245,15 @@
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
 		const hasDefault = schemaHasDefault(sub);
-		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
+		// Files the camera offers for a path field (x-choices): the sensor
+		// configurations, the IQ profiles. Read by the daemon when it builds
+		// the schema, so the page lists exactly what the camera can open.
+		const choices = type === 'string' && Array.isArray(sub['x-choices'])
+			&& sub['x-choices'].length ? sub['x-choices'].map(String) : null;
+		// A fixed-length number list kept as text (x-list): one box per
+		// number, a grid for a matrix.
+		const xlist = type === 'string' && sub['x-list'] && typeof sub['x-list'] === 'object'
+			&& window.MajesticTable ? sub['x-list'] : null;
 		const isFontFile = isFontPath(dot) && FONTS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
 		// resolution picker for the video/jpeg size fields: a dropdown of named
@@ -10753,22 +10760,91 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
-		} else if (type === 'string' && isSensorPath) {
+		} else if (choices) {
 			// Whatever is configured stays selectable, as it does for a font:
-			// the camera also takes a sensor by name on its own (imx335), and a
-			// select with no such option showed it as the blank Auto — and a
-			// save sent the blank, which put the camera back on autodetect.
+			// a sensor can also be named on its own (imx335), and a select
+			// with no such option showed it as the blank Auto — and a save
+			// sent the blank, which put the camera back on autodetect.
 			p = el('p', 'select mj-row mj-wide');
 			const cur = eff === undefined || eff === null ? '' : String(eff);
-			const extra = cur !== '' && SENSORS.indexOf(cur) < 0
+			const extra = cur !== '' && choices.indexOf(cur) < 0
 				? option(cur, true, cur + (cur.indexOf('/') < 0 ? ' (by name)' : ' (not found)'))
 				: '';
 			const opts = option('', cur === '') + extra +
-				SENSORS.map(s => option(s, cur === s)).join('');
+				choices.map(c => option(c, cur === c, c.split('/').pop())).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
+		} else if (xlist) {
+			// One labelled box per number, from what the camera declares: the
+			// count, each cell's name and range, and a grid for a matrix. A
+			// whole-number cell that can only be 0 or 1 is a switch. Empty in
+			// every box clears the key (the camera's own value stands); a
+			// partly filled list is sent as typed, for the camera to refuse.
+			const TBL = window.MajesticTable;
+			const cells = TBL.listCells(xlist);
+			const rows = isNum(xlist.rows) && xlist.rows > 1 ? xlist.rows : 1;
+			p = el('p', 'string mj-row mj-wide mj-list-row');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-list' + (rows > 1 ? ' mj-list-grid' : '') + '" id="' + id + '"' +
+				(rows > 1 ? ' style="--mj-list-cols:' + Math.ceil(cells.length / rows) + '"' : '') +
+				'></span>';
+			control = p.querySelector('.mj-list');
+			const boxes = cells.map((c, i) => {
+				const cell = el('label', 'mj-list-cell');
+				const name = el('span', 'mj-list-name');
+				name.textContent = c.label;
+				const f = el('input', c.bool ? 'form-check-input' : 'form-control form-control-sm text-end');
+				if (c.bool) {
+					f.type = 'checkbox';
+				} else {
+					f.type = 'number';
+					f.inputMode = c.integer ? 'numeric' : 'decimal';
+					f.step = c.integer ? '1' : 'any';
+					if (isNum(c.min)) f.min = c.min;
+					if (isNum(c.max)) f.max = c.max;
+				}
+				f.setAttribute('aria-label', (desc || key) + ': ' + c.label);
+				f.dataset.cell = String(i);
+				cell.appendChild(name);
+				cell.appendChild(f);
+				control.appendChild(cell);
+				return f;
+			});
+			control._get = () => TBL.joinList(boxes.map(f =>
+				f.type === 'checkbox' ? (f.checked ? '1' : '0') : f.value));
+			control._set = (val) => {
+				const vals = TBL.parseList(val, cells.length);
+				boxes.forEach((f, i) => {
+					if (f.type === 'checkbox') {
+						f.checked = vals[i] === '1';
+						// Unset is not off: an empty list keeps the value
+						// the camera shipped with, which may well be on.
+						f.indeterminate = vals[i] === '';
+					} else f.value = vals[i];
+				});
+			};
+			control._set(eff);
+			// A list of switches alone has no empty state to clear to, so an
+			// untouched one must not read as a choice: the page sends nothing
+			// until a switch is flipped.
+			if (cells.every(c => c.bool)) {
+				let touched = TBL.parseList(eff, cells.length).some(v => v !== '');
+				const inner = control._get;
+				control._get = () => touched ? inner() : '';
+				const innerSet = control._set;
+				control._set = (val) => {
+					touched = TBL.parseList(val, cells.length).some(v => v !== '');
+					innerSet(val);
+				};
+				boxes.forEach(f => f.addEventListener('change', () => { touched = true; }));
+			}
+			boxes.forEach(f => {
+				f.addEventListener('input', () => updateDirty());
+				f.addEventListener('change', () => updateDirty());
+			});
 		} else if (type === 'string' && (sub['x-secret'] || sub.writeOnly)) {
 			// A secret the camera has asked not to be shown. It is not hidden
 			// from anyone who can read this page — the value came down the same

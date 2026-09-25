@@ -63,4 +63,30 @@ check('a missing required member is named by its title',
 check('a filled one is not', T.missing({ focal: 3 }, ['focal'], props).length === 0);
 check('no required list, nothing missing', T.missing({}, undefined, props).length === 0);
 
+group('a number list the camera declares keeps its shape');
+
+const XL = { items: 'integer', labels: ['Threshold', 'Slope', 'Limit'], minimum: [0, 0, 0], maximum: [2047, 15, 2047] };
+const cells = T.listCells(XL);
+check('one cell per label', cells.length === 3 && cells[1].label === 'Slope');
+check('each cell carries its own range', cells[1].max === 15 && cells[2].max === 2047);
+check('a 0–2047 cell is not a switch', cells[0].bool === false);
+const EN = T.listCells({ items: 'integer', labels: ['1', '2', '3'], minimum: [0, 0, 0], maximum: [1, 1, 1] });
+check('a whole 0–1 cell is a switch', EN.every(c => c.bool));
+check('a decimal 0–1 cell is not',
+	T.listCells({ items: 'number', labels: ['a'], minimum: [0], maximum: [1] })[0].bool === false);
+check('no labels, no cells', T.listCells(null).length === 0);
+
+check('commas', T.parseList('15,12,2047', 3).join('|') === '15|12|2047');
+check('spaces as the camera also reads them', T.parseList(' 15 12  2047 ', 3).join('|') === '15|12|2047');
+check('comma and space together', T.parseList('200, 200, -110', 3).join('|') === '200|200|-110');
+check('unset is every cell empty', T.parseList(undefined, 3).join('|') === '||');
+check('a number is kept as written', T.parseList('0.103686,1e-06', 2).join('|') === '0.103686|1e-06');
+
+// The round trip is the property that matters: an untouched row must not be
+// a change, or Save lights up on a page nobody edited.
+check('what the camera stores comes back identical',
+	T.joinList(T.parseList('200,200,-110,461,-415,0,0', 7)) === '200,200,-110,461,-415,0,0');
+check('every cell empty clears the key', T.joinList(['', ' ', '']) === '');
+check('a gap is kept for the camera to refuse', T.joinList(['1', '', '3']) === '1,,3');
+
 done();

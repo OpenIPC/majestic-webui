@@ -331,6 +331,46 @@
 	max-width: none;
 }
 
+/* A fixed-length number list (a filter's gains, a colour matrix): one
+   labelled box per number, wrapping on a narrow column; a matrix is a grid
+   of its own row length so its rows read as rows. The row takes the column's
+   width rather than a text box's cap. */
+.mj-list-row .mj-ctl-in {
+	max-width: none;
+}
+
+.mj-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .4rem .6rem;
+}
+
+.mj-list.mj-list-grid {
+	display: grid;
+	grid-template-columns: repeat(var(--mj-list-cols, 3), minmax(0, 7rem));
+}
+
+.mj-list-cell {
+	display: flex;
+	flex-direction: column;
+	gap: .15rem;
+	min-width: 4.5rem;
+	max-width: 7rem;
+	flex: 0 1 5.5rem;
+}
+
+.mj-list-name {
+	font-size: .78125rem;
+	color: var(--bs-secondary-color);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mj-list-cell .form-check-input {
+	margin: .35rem 0 0;
+}
+
 /* A list of objects with no address, drawn as a table: one bordered row per
    item, its members as labelled cells that wrap onto more lines rather than
    pushing the page sideways on a phone. A text member gets twice the room of

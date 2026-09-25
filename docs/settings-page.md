@@ -62,7 +62,8 @@ boot tag.
    | `integer` | else | `<input type="number">` with `min`/`max` |
    | `number` | else | `<input type="number">`, `step` from `x-step` or `any` |
    | `string` | `enum` non-empty | `<select>` of enum values, each shown by its `x-enum-titles` word where the schema gives it one — a map keyed by value, so the option still posts the token |
-   | `string` | `dot === "isp.sensorConfig"` and boot `sensors` non-empty | `<select>` of `/etc/sensors/*` paths |
+   | `string` | `x-choices` (files the camera lists) | `<select>` of those files, plus whatever is configured if it is not one of them |
+   | `string` | `x-list` (a fixed-length number list kept as text) | one labelled box per number (`mj-table.js`), a grid when `rows` > 1, a switch for a whole 0–1 cell |
    | `string` | `x-secret` or `writeOnly` | `<input type="password">` with a Show checkbox wired **in place** (the global toggle in `main.js` ran at load, long before this form existed) |
    | `string` | else | `<input type="text">` |
    | `array` | `items` are objects **with** a `url` member | the destinations board (`mj-servers.js`, `mj-outgoing.js`): rows are addresses |

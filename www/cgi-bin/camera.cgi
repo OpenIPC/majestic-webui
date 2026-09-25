@@ -53,14 +53,6 @@ fi
 # the same pads in the same order everywhere.
 boot_soc=$(printf '%s' "$soc" | mj_json_escape)
 
-boot_sensors=""
-if [ -d /etc/sensors ]; then
-	for f in $(find /etc/sensors -maxdepth 1 -type f 2>/dev/null); do
-		e=$(echo -n "$f" | mj_json_escape)
-		boot_sensors="${boot_sensors}${boot_sensors:+,}\"${e}\""
-	done
-fi
-
 # The fonts the camera can draw the overlay with. One face ships with the
 # firmware; the point of listing rather than hardcoding is the ones an owner
 # adds to their own image, which is the only way there are ever two.
@@ -138,7 +130,7 @@ fi
 	</div>
 
 	<div class="col-12 col-md-9" id="mj-settings-form-col">
-		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>]}</script>
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"fonts":[<%= $boot_fonts %>]}</script>
 
 		<%
 		# No page-level heading any more: one section is shown at a time and its
