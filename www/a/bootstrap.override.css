@@ -2606,11 +2606,12 @@ button.mj-osd-chip,
 
 /* A deck column's first heading has the column's own padding above it and
    nothing to be separated from, so the group heading's 1.5rem of air came on
-   top of that: 45px of empty card over Tone, Luma and Orientation. First of
-   TYPE, because the
-   Orientation column opens with the hidden mirror and flip rows, which are
-   <p> and not the group's <div>. */
-.mj-live-col > .mj-live-grp:first-of-type > .mj-live-grp-head {
+   top of that: 45px of empty card over Tone and Luma. First of TYPE, because
+   Orientation's wrapper opens with the hidden mirror and flip rows, which are
+   <p> and not the group's <div>; and that wrapper is the column's first child
+   on a camera with mirror and flip but no Tone. */
+.mj-live-col > .mj-live-grp:first-of-type > .mj-live-grp-head,
+.mj-live-col > .mj-live-geo:first-child > .mj-live-grp:first-of-type > .mj-live-grp-head {
 	margin-top: 0;
 }
 
