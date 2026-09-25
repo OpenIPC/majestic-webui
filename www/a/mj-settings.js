@@ -10604,6 +10604,12 @@
 			if (emptySpecial !== null) {
 				const name = specialOf(emptySpecial);
 				control.placeholder = name;
+				// The name is the reading here, as "Auto · 32" is on the
+				// Picture page, so the box is sized to show all of it rather
+				// than the 10rem a number gets: "Counted by the camera" was
+				// cut to "Counted by th".
+				p.classList.add('mj-named-row');
+				control.style.setProperty('--mj-ph', Math.max(name.length, 6) + 'ch');
 				const shown = (val) => (val === undefined || val === null || String(val).trim() === ''
 					|| Number(val) === Number(emptySpecial)) ? '' : String(val);
 				control.value = shown(eff);

@@ -270,6 +270,30 @@
 	opacity: 1;
 }
 
+/* A number box whose empty value has a name (x-special, one value): the name
+   is its placeholder, drawn like the Auto rows above, and the box grows to
+   hold it rather than cutting it at a number's 10rem. */
+.number.mj-named-row .mj-ctl-in,
+.number.mj-named-row .input-group {
+	max-width: 100%;
+}
+
+.number.mj-named-row .input-group {
+	flex-wrap: nowrap;
+	width: auto;
+}
+
+.number.mj-named-row .input-group > .form-control {
+	flex: 0 1 auto;
+	width: calc(var(--mj-ph, 6ch) + 1.75rem);
+	min-width: 8rem;
+}
+
+.mj-named-row .form-control::placeholder {
+	color: var(--bs-secondary-color);
+	opacity: 1;
+}
+
 /* A live row the camera answered it cannot preview: the control moves, the
    picture will not until Save, and the row says so rather than leaving the
    difference to be discovered. */
