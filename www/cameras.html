@@ -275,7 +275,9 @@
 			})
 				.then(function (r) {
 					if (r.status === 404) throw new Error('This camera does not publish a camera list.');
-					if (!r.ok) throw new Error('The camera list is not available here.');
+					// 204 is the roster refused off the camera's link; it has no
+					// body, so it must not reach r.json() as an empty success.
+					if (!r.ok || r.status === 204) throw new Error('The camera list is not available here.');
 					// Not cleared yet: the deadline has to cover reading the body
 					// too, or a response that stalls after the headers would leave
 					// the page waiting forever.
