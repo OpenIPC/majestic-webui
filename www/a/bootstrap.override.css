@@ -257,6 +257,13 @@
 	opacity: 1;
 }
 
+/* A live row the camera answered it cannot preview: the control moves, the
+   picture will not until Save, and the row says so rather than leaving the
+   difference to be discovered. */
+.mj-nopreview {
+	font-style: italic;
+}
+
 /* A group whose rows act only in one mode, while the camera is in the other:
    still editable, since a value written now is in place the moment the mode
    comes back, but set back so the page does not present them as in force. */
@@ -1458,6 +1465,19 @@ mark {
 	position: sticky;
 	top: 0.5rem;
 	z-index: 4;
+}
+
+/* Everything that scrolls under the pinned band keeps its own z-indexes to
+   itself. Bootstrap lifts a focused control inside an .input-group to z-index
+   5 so its ring clears its neighbours, and against the band's 4 that drew a
+   focused Exposure box on top of the pinned picture as it scrolled past.
+   Raising the band would only move the collision to the next thing that climbs
+   higher; isolating the cards under it ends the race, because nothing inside
+   them can then be compared with the band at all. */
+.mj-live-strip,
+.mj-live-deck,
+.mj-live-rest {
+	isolation: isolate;
 }
 
 /* The band's surface is drawn outside its box, not as padding: padding would

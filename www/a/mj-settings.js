@@ -979,7 +979,16 @@
 	// What one x-live field is worth right now, and what the schema says it
 	// should be. Sliders send their number; booleans send 1/0.
 	function liveValue(f) {
-		return f.type === 'boolean' ? (f.control.checked ? 1 : 0) : f.control.value;
+		if (f.type === 'boolean') return f.control.checked ? 1 : 0;
+		// A list (the metering area) has no .value; its field joins it.
+		if (f.type === 'array') return f.getValue();
+		// An empty exposure box is Auto, which majestic spells 0 for these keys
+		// (#582). Sent as the empty string it would be the preview's DROP and
+		// show the saved value instead -- emptying a box set to 8x would keep
+		// 8x on the picture rather than the automatic limit it asked for.
+		if (f.control.value === '' && f.dot.indexOf('isp.') === 0 &&
+			(f.type === 'number' || f.type === 'integer')) return '0';
+		return f.control.value;
 	}
 
 	function liveDefault(f) {
@@ -988,7 +997,7 @@
 		return f.type === 'boolean' ? (toBool(d) ? 1 : 0) : d;
 	}
 
-	// What the config says this knob is, as /api/v1/image wants it. state.initial
+	// What the config says this knob is, as /api/v1/live wants it. state.initial
 	// is snapshotted from config.json at mount, so it is at once what the
 	// controls will read after a re-render and what the camera has to be put
 	// back to. It holds getValue()'s strings — 'true'/'false' for a switch —
@@ -1032,7 +1041,7 @@
 		// a fast navigation right after a drag would have undone the undo.
 		if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
 		if (!state.fields.length || !liveDrift()) return;
-		postLive(liveQuery(liveSaved));
+		postKnobs(liveDocOf(null));
 	}
 
 	// A reload, or a closed tab, abandons the edit exactly as a section switch
@@ -1057,26 +1066,72 @@
 			if (ev.persisted) return;
 			beaconOsdDrop();
 			if (!state.fields.length || !liveDrift()) return;
-			const q = liveQuery(liveSaved);
-			if (q && navigator.sendBeacon) navigator.sendBeacon('/api/v1/image?' + q);
+			const doc = liveDocOf(null);
+			if (doc && navigator.sendBeacon) {
+				try {
+					navigator.sendBeacon('/api/v1/live', new Blob([JSON.stringify(doc)],
+						{ type: 'application/json' }));
+				} catch (e) { /* the tab is going; there is nothing to report to */ }
+			}
 		};
 		window.addEventListener('pagehide', onHide);
 		return () => window.removeEventListener('pagehide', onHide);
 	}
 
-	// The query string /api/v1/image takes, over ALL the wired-live fields —
-	// sending them together is what lets the backend apply combined settings
-	// (mirror and flip need each other). `valueOf` picks what each field
-	// contributes, so hold-to-compare can post the defaults through the same
-	// builder rather than growing a second copy of it.
-	function liveQuery(valueOf) {
-		const parts = [];
+	// The document /api/v1/live takes, by the fields' real dotted paths.
+	//
+	// The image knobs go in whole, every time, by value: the backend applies
+	// them as combined settings (mirror and flip need each other; the four
+	// colour knobs are one call), and they have no "drop".
+	//
+	// The isp keys go in only when they have something to say. The camera
+	// previews them through a table it reads before the config, and a key named
+	// in a document is a key that table now holds -- so sending all of them on
+	// every drag would pin the untouched ones too, and dehaze among them would
+	// fight the tone controller that drives it. A key goes in with its value
+	// when it differs from what is saved, and ONCE more as the empty "drop" when
+	// it comes back, which empties its entry and hands it back to the config.
+	// `want(f)` is the value the caller wants shown (the control, or the default
+	// for hold-to-compare); `null` means "put everything back".
+	//
+	// It used to be /api/v1/image's query string, which names every key by its
+	// LAST segment and knows the image knobs and nothing else -- so the
+	// exposure rows beside the picture were pushed as `aGain=4` and silently
+	// dropped, and the page believed a picture had moved that never had.
+	const livePreviewed = new Set();
+	function liveDocOf(want) {
+		const doc = {};
+		let any = false;
 		for (const f of state.fields) {
 			if (!isLive(f)) continue;
-			parts.push(encodeURIComponent(f.dot.split('.').pop()) + '=' +
-				encodeURIComponent(valueOf(f)));
+			let v;
+			if (f.dot.indexOf('isp.') !== 0) {
+				v = want ? want(f) : liveSaved(f);
+			} else if (want && !liveIsSaved(f, want)) {
+				livePreviewed.add(f.dot);
+				v = want(f);
+			} else if (livePreviewed.has(f.dot)) {
+				livePreviewed.delete(f.dot);
+				v = '';
+			} else {
+				continue;
+			}
+			setDotted(doc, f.dot, String(v));
+			any = true;
 		}
-		return parts.join('&');
+		return any ? doc : null;
+	}
+
+	// Whether `want` asks for what is already saved. Compared as the control
+	// reads, not as the wire spells it: an Auto box is "" to the control and
+	// "0" on the wire, and a saved Auto must not read as a change.
+	function liveIsSaved(f, want) {
+		if (want === liveValue) return f.getValue() === state.initial[f.dot];
+		return String(want(f)) === String(liveSaved(f));
+	}
+
+	function postKnobs(doc) {
+		return doc ? postLiveJson(doc) : Promise.resolve(true);
 	}
 
 	// Live writes go through mj-queue.js: one in flight, and at most one
@@ -1112,7 +1167,7 @@
 	let liveTimer = null;
 	function pushLive() {
 		if (liveTimer) clearTimeout(liveTimer);
-		liveTimer = setTimeout(() => { liveTimer = null; postLive(liveQuery(liveValue)); }, 120);
+		liveTimer = setTimeout(() => { liveTimer = null; postKnobs(liveDocOf(liveValue)); }, 120);
 	}
 
 	async function load(tab, push) {
@@ -1846,13 +1901,13 @@
 			if (e && e.pointerId != null && btn.setPointerCapture) {
 				try { btn.setPointerCapture(e.pointerId); } catch (_) { /* the guards below still restore */ }
 			}
-			postLive(liveQuery(liveDefault));
+			postKnobs(liveDocOf(liveDefault));
 		};
 		const up = () => {
 			if (!held) return;
 			held = false;
 			btn.classList.remove('mj-hud-on');
-			postLive(liveQuery(liveValue));
+			postKnobs(liveDocOf(liveValue));
 		};
 		btn.addEventListener('pointerdown', down);
 		btn.addEventListener('pointerup', up);
@@ -2527,6 +2582,24 @@
 			onRename(title);
 		}
 		const other = !!EXP.matched(sub, siblingValue);
+		// In manual, an exposure time with the gain left empty is the one
+		// combination that looks broken: majestic hands an empty field back to
+		// auto-exposure, which raises the gain to hold the brightness, so the
+		// picture does not change and the row seems to do nothing. Said on the
+		// row, while it is true.
+		if (row.dot === 'isp.exposure') {
+			let note = p.querySelector(':scope > .mj-manual-note');
+			const gainEmpty = String(siblingValue('aGain') || '') === '' ||
+				Number(siblingValue('aGain')) === 0;
+			const show = other && gainEmpty;
+			if (show && !note) {
+				note = el('div', 'hint mj-manual-note');
+				note.textContent = 'Analog gain is still automatic, so brightness is held: ' +
+					'set it too to see the exposure change the picture.';
+				p.appendChild(note);
+			}
+			if (note) note.hidden = !show;
+		}
 		const m = sub['x-metric'] || {};
 		const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
 		const inForce = other ? null : EXP.reading(v, m.inForce, m.scale);
@@ -2837,6 +2910,31 @@
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
 
+		}
+
+		// Picking Manual starts from the picture on screen. Manual holds only the
+		// fields that are set, and an empty one keeps following the light --
+		// so without this, switching to Manual and dialling the exposure changed
+		// nothing visible (auto-exposure moved the gain to cancel it). Each
+		// empty field manual holds is filled with what the camera is running
+		// at that moment, as an ordinary edit: it previews, it is dirty, and
+		// Save keeps it or Discard drops it. On the user's change only -- a
+		// refresh or a leaf drawn in manual leaves the boxes as saved. The
+		// sensor digital gain is not among them: manual pins it at 1x.
+		const modeF = state.fields.find(f => f.dot === 'isp.aeMode');
+		if (modeF && EXP) {
+			modeF.control.addEventListener('change', () => {
+				if (modeF.getValue() !== 'manual') return;
+				const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
+				for (const dot of ['isp.exposure', 'isp.aGain', 'isp.ispGain']) {
+					const f = state.fields.find(x => x.dot === dot);
+					if (!f || !f.schema || String(f.getValue()) !== '') continue;
+					const m = f.schema['x-metric'] || {};
+					const now = EXP.reading(v, m.now, m.scale);
+					if (now === null || !(now > 0)) continue;
+					setLive(f, EXP.fmt(now, f.schema['x-unit'] || ''));
+				}
+			});
 		}
 
 		// Set back, not disabled: a value written while the camera is in the
@@ -5641,7 +5739,22 @@
 			credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(d),
-		}).then((r) => r.status, () => 0).then((status) => {
+		}).then((r) => {
+			// The reply names the keys this camera could not preview; the rows
+			// they belong to say so, rather than a control that moves and a
+			// picture that does not.
+			if (r.status === 200) {
+				return r.json().then((j) => { noteRefused(d, j); return 200; }, () => 200);
+			}
+			// Anything else means the picture did NOT move, and saying nothing
+			// made a failed preview look exactly like a setting with no visible
+			// effect. The camera names the key it rejected in a 400's body.
+			if (r.status !== 404) {
+				return r.text().then((t) => { notePreviewFailed(r.status, t); return r.status; },
+					() => { notePreviewFailed(r.status, ''); return r.status; });
+			}
+			return r.status;
+		}, () => { notePreviewFailed(0, ''); return 0; }).then((status) => {
 			if (status !== 404) return status;
 			liveDoc = false;
 			return postLive(legacyQuery(d)).then(() => status, () => status);
@@ -5651,6 +5764,49 @@
 	// The placement the fields currently describe, as the document to send.
 	// Whole every time: majestic installs a whole placement or none, and a
 	// request naming only half of one would leave the camera to guess the rest.
+	// A preview the camera did not take, said where Save's messages are: the
+	// control has moved and the picture has not, and that is exactly what
+	// this line is for. Named by the row's own words where the camera said
+	// which key it refused.
+	function notePreviewFailed(status, body) {
+		const m = /\b([a-zA-Z0-9]+\.[a-zA-Z0-9.]+)\s*<\/body>/.exec(body || '');
+		const f = m && state.fields.find(x => x.dot === m[1]);
+		const name = f && f.p ? (f.p.querySelector('.form-label') || {}).textContent : '';
+		const why = status === 401 || status === 403
+			? 'the session has expired; reload the page and sign in again'
+			: status === 0 ? 'the camera did not answer'
+			: status === 400 ? 'the camera refused ' + (name ? '"' + name.trim() + '"' : 'a value')
+			: 'the camera answered HTTP ' + status;
+		flashToolbar('Not previewed: ' + why + '. The picture shows the saved settings.');
+	}
+
+	// Mark each live row this camera refused to preview, and unmark the ones it
+	// took. Only rows the document named are judged: an OSD placement answer
+	// says nothing about the exposure rows.
+	function noteRefused(doc, reply) {
+		const refused = new Set(String((reply && reply.keys) || '')
+			.split(',').map(k => k.trim()).filter(Boolean));
+		const named = (dot) => {
+			let cur = doc;
+			for (const k of dot.split('.')) {
+				if (!cur || typeof cur !== 'object' || !(k in cur)) return false;
+				cur = cur[k];
+			}
+			return true;
+		};
+		for (const f of state.fields) {
+			if (!isLive(f) || !f.p || !named(f.dot)) continue;
+			const no = refused.has(f.dot);
+			let note = f.p.querySelector(':scope > .mj-nopreview');
+			if (no && !note) {
+				note = el('div', 'hint mj-nopreview');
+				note.textContent = 'This camera cannot show it before Save.';
+				f.p.appendChild(note);
+			}
+			if (note) note.hidden = !no;
+		}
+	}
+
 	function placementDoc(held, overlay) {
 		const P = window.MajesticPlace;
 		const anchor = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
@@ -11516,7 +11672,7 @@
 		}
 
 		if (expRow) {
-			const row = { p, control, sub, unit: sub['x-unit'] ? String(sub['x-unit']) : '' };
+			const row = { p, control, sub, dot, unit: sub['x-unit'] ? String(sub['x-unit']) : '' };
 			row.paint = () => paintExp(row, siblingValue, (t) => {
 				desc = t;
 				const r = p.querySelector('.mj-reset');
@@ -11854,6 +12010,16 @@
 			// refresh would let a later discard "revert" the camera to values
 			// that are no longer what was saved (#259).
 			sent.forEach((v, f) => { state.initial[f.dot] = v; });
+			// The camera empties its preview table when it applies the save --
+			// but a preview still queued or on the wire can land AFTER that
+			// apply and put an override back, which would then shadow the value
+			// just saved with nothing left on the page to drop it. So the drops
+			// are sent anyway, through the same queue: they follow any preview
+			// still in flight, and the camera ends on the config whatever the
+			// order the save and the previews arrived in. The pending debounced
+			// push is the save's own value and goes with it.
+			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+			postKnobs(liveDocOf(null));
 			// The drag's override has done its job: the config now says what it
 			// was saying, so it can come off. Left installed it would go on
 			// overriding the saved placement for the life of the daemon, and a
