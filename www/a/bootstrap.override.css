@@ -496,7 +496,10 @@ button.mj-help[aria-expanded="true"] {
  * never heard of until-found now simply keeps it hidden, which is the
  * behaviour without this rule and is not a fault. */
 @supports (content-visibility: hidden) {
-	.mj-help-body[hidden="until-found"] {
+	/* The group fold's body too: the same attribute, the same reboot rule, and
+	   the same silent loss of find-in-page without this. */
+	.mj-help-body[hidden="until-found"],
+	.mj-grp-fold-body[hidden="until-found"] {
 		display: block !important;
 		content-visibility: hidden;
 	}
