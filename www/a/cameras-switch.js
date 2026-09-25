@@ -173,9 +173,12 @@
 			.then(function (r) {
 				// 204 is definitive: we are off the camera's link, and that does
 				// not change while the page is open, so stop the timer rather
-				// than ask every minute for the life of the tab. A 204 has no
-				// body to parse, so it must not reach r.json().
-				if (r.status === 204) { stop(); return null; }
+				// than ask every minute for the life of the tab. A 404 is as
+				// final -- something between us and the camera does not have the
+				// path -- and asking again would print the same console error
+				// every minute. A 204 has no body to parse, so neither may reach
+				// r.json().
+				if (r.status === 204 || r.status === 404) { stop(); return null; }
 				return r.ok ? r.json() : null;
 			})
 			.then(function (data) { build(box, data && data.cameras); })
