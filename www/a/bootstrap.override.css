@@ -397,15 +397,21 @@ button.mj-help[aria-expanded="true"] {
 }
 
 /* A 16px mark is a fine thing to see and a poor thing to hit with a finger
-   (#588). Under a coarse pointer the button takes a larger invisible hit area
-   and the mark stays the size it is. Wider than it is tall on purpose: the
-   hint line sits 0.35rem under the control it explains, so any taller and a
-   tap on the bottom edge of an input would open the help instead. */
+   (#588). Under a coarse pointer the button takes a 44x44 invisible hit area
+   and the mark stays the size it is. The area grows DOWN, not evenly: the hint
+   line sits 0.35rem under the control it explains, so reaching further up
+   would let a tap on the bottom edge of an input open the help instead. Below
+   the mark is only the hint's own text and the row's margin -- measured on the
+   lab hi3516ev300 at 390px, nothing to press there -- and a tap on the hint's
+   text opening the hint's help is the fold doing its job. */
 @media (pointer: coarse) {
 	button.mj-help::after {
 		content: "";
 		position: absolute;
-		inset: -0.35rem -0.75rem;
+		top: -0.35rem;
+		right: -0.875rem;
+		bottom: -1.4rem;
+		left: -0.875rem;
 	}
 
 	button.mj-help:not(.mj-hint-fold > .mj-help) {
