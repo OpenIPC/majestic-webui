@@ -1,6 +1,6 @@
 // Which transport a preview should use, and the memory behind that choice.
 //
-// Two pages need this now — the Preview page and the Live adjustments panel in
+// Two pages need this now — the Preview page and the Picture panel in
 // settings — and the rules are subtle enough that two copies would drift within
 // a release: a legacy key that has to be migrated exactly once, a demotion that
 // expires, a bounded window that rejects clocks running backwards, and the
@@ -233,7 +233,7 @@ window.MajesticTransport = (function () {
 	// it — the same camera watched from a phone and a desk may want different
 	// answers, and neither should overwrite the other.
 	// Per page, not one answer for both. The two are looked at for different
-	// reasons — Preview to watch, Live adjustments to judge an ISP knob while
+	// reasons — Preview to watch, Picture to judge an ISP knob while
 	// dragging it — and someone can reasonably want Main on one and Sub on the
 	// other. `where` is the page asking: 'preview' or 'live'.
 	const STREAM_KEY = 'mj-preview-stream';

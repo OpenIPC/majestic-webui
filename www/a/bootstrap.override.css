@@ -1265,7 +1265,7 @@ mark {
 	height: 1.5rem;
 }
 
-/* ── Live adjustments ───────────────────────────────────────────────────────
+/* ── Picture ────────────────────────────────────────────────────────────────
    The picture is the hero and it owns the column; the deck sits under it. What
    this replaced capped the video at 640px inside a 990px column and put the
    knobs in a card beside it, which left about 60% of the content area empty.
@@ -1587,7 +1587,7 @@ mark {
 	   and the video coming apart (#340): a picture that moves under the hand
 	   costs trust in everything placed on it. Only this leaf pays for
 	   holding still, because only here is the picture a thing you place
-	   against; the Live adjustments leaf keeps the rule above, since on a
+	   against; the Picture leaf keeps the rule above, since on a
 	   1366x768 laptop a permanent reserve would take a sixth off a picture
 	   #239 fought to make big enough to judge by. */
 	--mj-pv-toolbar: 4.95rem;
@@ -3533,7 +3533,7 @@ button.mj-osd-chip,
 
    Taking it from the picture instead is what a stage sized from the viewport
    height invites, and it is wrong wherever the picture is the instrument being
-   judged: on the Live adjustments leaf the video shrank 976x549 -> 887x499 on
+   judged: on the Picture leaf the video shrank 976x549 -> 887x499 on
    a 1512x860 window the moment a knob moved, and grew back on Save. A picture
    that moves under the hand costs trust in everything placed on it, which is
    the same fault the mask editor was reported for in #340.
@@ -4083,7 +4083,7 @@ button.mj-osd-chip,
 }
 
 /* ── on-video chrome ────────────────────────────────────────────────────────
-   The same vocabulary the Live adjustments deck uses — black glass, micro-caps
+   The same vocabulary the Picture deck uses — black glass, micro-caps
    labels, a lit indicator where there is state, stroked 20px icons — so the
    two pages read as one product. Deliberately identical in both themes,
    because the background here is the picture, not the page surface.

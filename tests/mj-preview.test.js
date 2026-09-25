@@ -1,7 +1,7 @@
 // The MajesticPreview stage (www/a/mj-preview.js), mounted and driven.
 //
 // This is the component every settings section that wants a live picture
-// embeds — the Live adjustments leaf, the Motion and Overlay editors, the crop
+// embeds — the Picture leaf, the Motion and Overlay editors, the crop
 // view. Its twin, the Live View page's glue (preview-page.js), is driven end to
 // end by staging.test.js and auto-source.test.js; this file is the equivalent
 // net for the component. What it pins is the wiring that is THIS file's own and

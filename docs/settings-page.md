@@ -154,7 +154,7 @@ silently:
 
 **Where a key is drawn is `mj-tree.js`'s decision, and `x-live` does not make
 it.** Three rules, pinned by `tests/tree.test.js`: the first group with any
-`x-live` key *owns* the synthetic **Live adjustments** leaf, and those keys are
+`x-live` key *owns* the synthetic **Picture** leaf, and those keys are
 **lifted** onto it beside the picture; a section the leaf lifts more of than it
 leaves is **absorbed** and has no page of its own, its leftovers drawn under a
 heading on a **home** leaf (`LEFTOVER_HOME`: `image`'s Rotate on ISP /
@@ -177,7 +177,7 @@ a `tests/tree.test.js` invariant now walks the shipped schema and fails if any
 key of any grouped section lands on no leaf or on two.
 
 Four leaves have hand-written renderers, each with its reasoning beside it in
-`mj-settings.js`: **Live adjustments** (the picture, the lifted knobs, and the
+`mj-settings.js`: **Picture** (the picture, the lifted knobs, and the
 Orientation group over hidden `mirror`/`flip` fields), **`osd`**
 (`renderOsd`; the camera burns the overlay in, so the live picture is the real
 thing and placing is a round trip — offsets are written as a **percentage** so

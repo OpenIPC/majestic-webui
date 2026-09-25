@@ -8,7 +8,7 @@
 // the boot blob, the widget dispatch, save and reset, the column deal and the
 // three tiers of field text.
 //
-// The exceptions are the panels a form row cannot be: Live adjustments, the
+// The exceptions are the panels a form row cannot be: Picture, the
 // Orientation group, the OSD template builder, the motion-region editor, the
 // Pins drawing and the Day / Night pad map and filter hunt. Each replaces
 // several rows, and each does it the same way — the rows it stands for are
@@ -384,7 +384,7 @@
 	// something left to draw — a section the Live leaf absorbed has none.
 	function groupSections(g) {
 		return treeOf().leafIds(g).map(id =>
-			({ id, label: id === LIVE_ID ? 'Live adjustments' : label(id) }));
+			({ id, label: id === LIVE_ID ? 'Picture' : label(id) }));
 	}
 
 	function tree() {
@@ -1368,7 +1368,7 @@
 
 	function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-	// ── The Live adjustments leaf ─────────────────────────────────────────
+	// ── The Picture leaf ─────────────────────────────────────────
 	//
 	// The picture is the hero and it owns the column; everything else is either
 	// overlaid on it or in the deck below, so nothing a control does can move
@@ -1412,7 +1412,7 @@
 	// The picture follows the page down (#580). It is sized to fill the window
 	// above the knob strip, so everything under the deck (ISP / Exposure is 13
 	// fields and 828px at 1440x900) used to be reachable only by scrolling
-	// the picture off the top, and the page is called Live adjustments.
+	// the picture off the top of a page that is about the picture.
 	//
 	// Once the picture's top reaches the top of the window it stays there and
 	// shrinks as the page scrolls, a pixel of height for each pixel of scroll,
@@ -2673,7 +2673,7 @@
 		// group label must not cost the Live leaf its heading.
 		const head = el('div', 'mj-live-head');
 		head.innerHTML =
-			'<h3 class="mj-cap">Live adjustments</h3>' +
+			'<h3 class="mj-cap">Picture</h3>' +
 			'<span class="mj-live-rule"></span>';
 		form.appendChild(head);
 
@@ -3142,7 +3142,7 @@
 	// across two rail entries asked people to hold one in their head while
 	// looking at the other.
 	//
-	// It is laid out as the Live adjustments leaf is, because it is the same
+	// It is laid out as the Picture leaf is, because it is the same
 	// kind of page: a picture you change things against. Head, then the picture,
 	// then the strip for the one knob worth dragging while you watch, then the
 	// deck. And it keeps that leaf's rule about what may sit on the glass —
@@ -7453,8 +7453,8 @@
 			? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1]
 			: names[0];
 		const p = el('p', 'mj-lifted');
-		p.innerHTML = 'On <a href="?tab=' + LIVE_ID + '">Live adjustments</a>, with the ' +
-			'picture: ' + esc(list) + '. They apply as you drag them.';
+		p.innerHTML = 'On the <a href="?tab=' + LIVE_ID + '">Picture</a> page, beside the ' +
+			'preview: ' + esc(list) + '. They apply as you drag them.';
 		return p;
 	}
 
@@ -7849,7 +7849,7 @@
 			result.innerHTML = (out.restored === false
 				? '<b>The filter could not be put back.</b> It is still in the ' +
 				'position the test left it in &mdash; use the IR-cut switch on ' +
-				'Live adjustments to move it back. The test itself found: '
+				'the Picture page to move it back. The test itself found: '
 				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail) +
 				// Said after the verdict, because it explains why the test took
 				// an extra move rather than changing what it found. The camera
@@ -7899,7 +7899,7 @@
 				(e && e.message ? e.message : e) + '. ' +
 				(e && e.moves ? 'It had already started moving the filter, so ' +
 					'that may not be where it was — the picture says which, and ' +
-					'the IR-cut switch on Live adjustments moves it back.'
+					'the IR-cut switch on the Picture page moves it back.'
 					: 'The filter was not moved.');
 			result.hidden = false;
 			// A camera that cannot take a still cannot run this test at all, so
@@ -9693,7 +9693,7 @@
 			saved: (dot) => getDotted(state.config, dot),
 			// withLive, or a live-classified controlling field has no default to
 			// find: sectionFields skips x-live keys unless asked for them, since
-			// the Live adjustments leaf lifts those out of their own sections.
+			// the Picture leaf lifts those out of their own sections.
 			// The lift is about where a control is DRAWN; this is asking the
 			// schema what the key defaults to, and an unresolvable controlling
 			// field makes met() fail open and the warning never draw at all.
@@ -9873,7 +9873,7 @@
 	// here instead — at mount and on resize, never while a row toggles. Showing
 	// or hiding a row then only moves what is under it in its own column, which
 	// is what makes the form predictable to edit.
-	// Every .mj-cols the page put up, not one. The Live adjustments leaf can
+	// Every .mj-cols the page put up, not one. The Picture leaf can
 	// carry more than one card under its deck — a section it lifted keys out of
 	// gets a card of its own — and a box nobody deals keeps all of its rows in
 	// the first column with the second one empty beside it, which is the

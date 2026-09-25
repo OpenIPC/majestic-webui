@@ -86,7 +86,7 @@ hide_title=1; full_bleed=1
      exposure gauges off the heartbeat and the picture off the decoded frame,
      and hands the viewer to the Dashboard when neither has anything in it.
      mj-luma.js is the histogram it measures the frame with, the same one the
-     Live adjustments panel uses; video-check.js is the verdict. Both before it,
+     Picture panel uses; video-check.js is the verdict. Both before it,
      and both guarded, so a build missing either leaves the page as it was. -->
 <script src="/a/mj-luma.js"></script>
 <script src="/a/video-check.js"></script>

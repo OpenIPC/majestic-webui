@@ -2,7 +2,7 @@
 // majestic's schema is drawn on.
 //
 // Everything on that page hangs off this — the rail, the search counts, what
-// each section renders, and what the Live adjustments leaf lifts out of the
+// each section renders, and what the Picture leaf lifts out of the
 // sections to sit beside the picture. It is a module of its own, and tested,
 // because its failures are silent: a key this places nowhere is a row that is
 // simply not there, and a settings page with a row missing looks exactly like
@@ -121,7 +121,7 @@
 		}
 
 		// Only the first such group owns the leaf: the tree keys on section id,
-		// and two "Live adjustments" entries would collide.
+		// and two "Picture" entries would collide.
 		function owner() {
 			return memo('\0owner', () => groups().find(g => groupLiveFields(g).length) || null);
 		}

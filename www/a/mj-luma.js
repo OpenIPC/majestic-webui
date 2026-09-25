@@ -1,4 +1,4 @@
-// Luma histogram for the Live adjustments preview.
+// Luma histogram for the Picture preview.
 //
 // Why the browser and not the camera: the question an installer has while
 // tuning is "am I blowing the sky or crushing the shadows", and the honest
