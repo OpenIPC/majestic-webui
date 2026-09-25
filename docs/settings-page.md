@@ -60,11 +60,20 @@ boot tag.
    | `boolean` | — | Bootstrap form switch (`.form-check.form-switch`) |
    | `integer` | `maximum ≤ 100` | `<input type="range">` + live `.show-value` readout |
    | `integer` | else | `<input type="number">` with `min`/`max` |
+   | `number` | — | `<input type="number" step="any">` with `min`/`max` |
    | `string` | `enum` non-empty | `<select>` of enum values, each shown by its `x-enum-titles` word where the schema gives it one — a map keyed by value, so the option still posts the token |
    | `string` | `dot === "isp.sensorConfig"` and boot `sensors` non-empty | `<select>` of `/etc/sensors/*` paths |
    | `string` | `x-secret` or `writeOnly` | `<input type="password">` with a Show checkbox wired **in place** (the global toggle in `main.js` ran at load, long before this form existed) |
    | `string` | else | `<input type="text">` |
-   | `number`/`array`/`object` | — | skipped |
+   | `array` | `items` are objects **with** a `url` member | the destinations board (`mj-servers.js`, `mj-outgoing.js`): rows are addresses |
+   | `array` | `items` are objects without `url` | a table: one row per item, one labelled cell per member, typed by it (`mj-table.js`) |
+   | `array` | else | one `XxYxWxH` text row per region |
+   | `object` | — | skipped |
+
+   Which board draws an object list is decided by the **shape** `items`
+   declares, never by the key's name. The calibration tables were once drawn by
+   the destinations board, whose canonical form keeps only rows with an
+   address; none of theirs have one, so the first edit posted an empty list.
 
    Each row is `<p class="<type> mj-row">`, and the control and a bare `↺` reset
    share one flex line: `<span class="mj-ctl"><span class="mj-ctl-in">…control…

@@ -294,3 +294,29 @@ pr_compliances:
       the convention in CLAUDE.md — are exempt, because naming the prohibited forms is
       what makes the rule checkable at all. Nothing else in the tree has any reason to
       name a review tool.
+
+  - title: "A settings control is chosen by the schema's shape, never by the key's name"
+    compliance_label: true
+    objective: >
+      The Camera settings page is drawn from /api/v1/config.schema.json, and the
+      control a key gets has to follow from what the schema declares about it: its
+      type, minimum/maximum, enum, x-unit, the members its `items` name. A branch that
+      picks a control because a key is called something serves one key on one build,
+      and the next key with the same shape is drawn wrong with nothing to say so. The
+      calibration tables were drawn by the destinations board for exactly that
+      reason, and the board's rule for which rows to keep deleted all of theirs on
+      the first edit. Reading a unit, a range or a count out of a hint's prose is the
+      same fault from the other side: the prose is for a person, and the schema is
+      where the camera says it in a form the page can act on.
+    success_criteria: >
+      A new or changed control in www/a/mj-settings.js (or a module it dispatches to)
+      is selected by a schema annotation or by the shape of the schema entry. Where
+      the camera does not yet declare what the control needs, the diff asks for the
+      annotation rather than reconstructing it on the page.
+    failure_criteria: >
+      The diff adds a widget choice, unit, bound, step, special value or element
+      count keyed on a dotted key name (`dot === '...'`, a list or map of key names)
+      where a schema annotation carries — or could carry — the same fact; or parses
+      a field's `title`, `hint` or `help` text for a unit, a range, a count or a
+      special value. The key-named branches already in the tree are debt to be
+      retired, not precedent: extending one to another key fails this check.

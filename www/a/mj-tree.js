@@ -54,10 +54,12 @@
 		image: { home: 'isp', label: 'Rotation' },
 	};
 
-	// The types the form's renderField actually draws — number/object fall
-	// through its dispatch and return nothing, so they must not make a section
-	// look non-empty.
-	const RENDERABLE = new Set(['boolean', 'integer', 'string', 'array']);
+	// The types the form's renderField actually draws — an object falls
+	// through its dispatch and returns nothing, so it must not make a section
+	// look non-empty. `number` is drawn (a box with step="any"); leaving it out
+	// here kept every decimal field — the calibration angles, the lamp curve —
+	// on the page but out of search and out of the rail's counts.
+	const RENDERABLE = new Set(['boolean', 'integer', 'number', 'string', 'array']);
 
 	// opts: exclude (dots never drawn), liveOrder (deck order of the lifted
 	// keys, by key), liveId (the Live leaf's id), liveLabel(key, sub) (the

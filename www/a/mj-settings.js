@@ -10721,8 +10721,17 @@
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
 		} else if (type === 'string' && isSensorPath) {
+			// Whatever is configured stays selectable, as it does for a font:
+			// the camera also takes a sensor by name on its own (imx335), and a
+			// select with no such option showed it as the blank Auto — and a
+			// save sent the blank, which put the camera back on autodetect.
 			p = el('p', 'select mj-row mj-wide');
-			const opts = option('', !eff) + SENSORS.map(s => option(s, String(eff) === s)).join('');
+			const cur = eff === undefined || eff === null ? '' : String(eff);
+			const extra = cur !== '' && SENSORS.indexOf(cur) < 0
+				? option(cur, true, cur + (cur.indexOf('/') < 0 ? ' (by name)' : ' (not found)'))
+				: '';
+			const opts = option('', cur === '') + extra +
+				SENSORS.map(s => option(s, cur === s)).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
@@ -10759,6 +10768,157 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">';
 			control = p.querySelector('input');
+		} else if (type === 'array' && sub.items && sub.items.type === 'object'
+				&& sub.items.properties && !sub.items.properties.url) {
+			// A list of objects with no address: plain data, drawn as a table.
+			// One row per item, one labelled cell per member `items` declares,
+			// typed by that member. The board below is for a list whose rows
+			// are addresses; this is everything else — the calibration lens
+			// table, its peers and pairings — which that board used to draw
+			// with every member hidden behind an address it does not have.
+			// What a cell holds and which rows are kept is mj-table.js's
+			// business, tested there.
+			const TBL = (typeof window === 'object' && window.MajesticTable) || null;
+			if (!TBL) return null;
+			const props = sub.items.properties;
+			const required = Array.isArray(sub.items.required) ? sub.items.required : [];
+			const members = Object.keys(props).filter(m => !props[m]['x-hidden']);
+			const maxRows = isNum(sub.maxItems) ? sub.maxItems : Infinity;
+
+			p = el('p', 'array objects mj-wide mj-row mj-tbl-field');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-tbl" id="' + id + '"></span>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-tbl-add">'
+				+ '+ Add row</button>';
+			control = p.querySelector('.mj-tbl');
+			const addBtn = p.querySelector('.mj-tbl-add');
+
+			const readRow = (r) => {
+				const o = {};
+				members.forEach(m => {
+					const f = r.querySelector('[data-member="' + m + '"]');
+					if (!f) return;
+					o[m] = TBL.cellValue((props[m] || {}).type,
+						f.type === 'checkbox' ? f.checked : f.value);
+				});
+				return o;
+			};
+			const rowsOf = () => Array.from(control.querySelectorAll('.mj-tbl-row'))
+				.map(readRow);
+
+			// Advisory: a row missing a required member is still sent, and
+			// the camera is the one to refuse it.
+			const paintRow = (row) => {
+				const note = row.querySelector('.mj-tbl-note');
+				const gone = TBL.missing(readRow(row), required, props);
+				note.textContent = gone.length ? 'Needs ' + gone.join(', ') + '.' : '';
+				note.hidden = gone.length === 0;
+			};
+			const paintAdd = () => {
+				addBtn.disabled =
+					control.querySelectorAll('.mj-tbl-row').length >= maxRows;
+			};
+			const onChange = (row) => { paintRow(row); updateDirty(); };
+
+			const addTblRow = (values) => {
+				const v = values || {};
+				const row = el('span', 'mj-tbl-row');
+				const cells = el('span', 'mj-tbl-cells');
+				members.forEach(m => {
+					const prop = props[m] || {};
+					const cell = el('label', 'mj-tbl-cell' +
+						(prop.type === 'string' && !Array.isArray(prop.enum)
+							? ' mj-tbl-wide' : ''));
+					const name = el('span', 'mj-tbl-name');
+					name.textContent = prop.title || m;
+					cell.appendChild(name);
+					let f;
+					if (Array.isArray(prop.enum)) {
+						f = el('select', 'form-select form-select-sm');
+						const cur = v[m] != null ? String(v[m]) : '';
+						const opts = prop.enum.slice();
+						if (cur !== '' && opts.indexOf(cur) < 0) opts.push(cur);
+						opts.forEach(opt => {
+							const o = document.createElement('option');
+							o.value = opt;
+							o.textContent = enumTitle(prop, opt) || (opt === '' ? 'Default' : opt);
+							f.appendChild(o);
+						});
+						f.value = cur;
+					} else if (prop.type === 'boolean') {
+						f = el('input', 'form-check-input');
+						f.type = 'checkbox';
+						f.checked = v[m] != null
+							? (v[m] !== false && v[m] !== 'false') : prop.default === true;
+					} else {
+						f = el('input', 'form-control form-control-sm');
+						const num = prop.type === 'integer' || prop.type === 'number';
+						f.type = num ? 'number'
+							: (prop['x-secret'] || prop.writeOnly) ? 'password' : 'text';
+						if (num) {
+							f.inputMode = prop.type === 'integer' ? 'numeric' : 'decimal';
+							f.step = prop.type === 'integer' ? '1' : 'any';
+							if (isNum(prop.minimum)) f.min = prop.minimum;
+							if (isNum(prop.maximum)) f.max = prop.maximum;
+						}
+						if (f.type === 'password') { f.autocomplete = 'off'; f.spellcheck = false; }
+						f.value = v[m] != null ? String(v[m]) : '';
+						if (prop['x-placeholder']) f.placeholder = prop['x-placeholder'];
+					}
+					f.setAttribute('data-member', m);
+					f.addEventListener('input', () => onChange(row));
+					f.addEventListener('change', () => onChange(row));
+					cell.appendChild(f);
+					cells.appendChild(cell);
+				});
+				const del = el('button', 'btn btn-sm btn-outline-danger mj-tbl-del');
+				del.type = 'button';
+				del.textContent = '×';
+				del.setAttribute('aria-label', 'Remove this row');
+				del.addEventListener('click', () => { row.remove(); paintAdd(); updateDirty(); });
+				row.appendChild(cells);
+				row.appendChild(del);
+				const note = el('span', 'hint mj-tbl-note');
+				note.hidden = true;
+				row.appendChild(note);
+				control.appendChild(row);
+				paintRow(row);
+				paintAdd();
+				return row;
+			};
+
+			// What each column means, said once under the table rather than
+			// under every cell of every row.
+			const legend = members.filter(m => props[m] && props[m].hint);
+			if (legend.length) {
+				const dl = el('span', 'hint text-secondary mj-tbl-legend');
+				legend.forEach(m => {
+					const line = el('span', 'mj-tbl-legend-line');
+					const b = el('strong', '');
+					b.textContent = (props[m].title || m) + ': ';
+					line.appendChild(b);
+					line.appendChild(document.createTextNode(props[m].hint));
+					dl.appendChild(line);
+				});
+				p.insertBefore(dl, addBtn.nextSibling);
+			}
+
+			control._addRow = addTblRow;
+			control._get = () => TBL.canon(rowsOf());
+			control._set = (val) => {
+				control.querySelectorAll('.mj-tbl-row').forEach(r => r.remove());
+				let arr = val;
+				if (typeof arr === 'string') {
+					try { arr = JSON.parse(arr); } catch (e) { arr = []; }
+				}
+				(Array.isArray(arr) ? arr : []).forEach(x => {
+					if (x && typeof x === 'object') addTblRow(x);
+				});
+				paintAdd();
+			};
+			control._set(eff);
+			addBtn.addEventListener('click', () => { addTblRow({}); updateDirty(); });
 		} else if (type === 'array' && sub.items && sub.items.type === 'object'
 				&& sub.items.properties) {
 			// A list whose items are objects: one editable row per element, with
@@ -10846,9 +11006,9 @@
 			// mj-wide: opt out of the 20rem cap .array carries for the
 			// MultiRect fields, which is half an address.
 			p = el('p', 'array objects mj-wide mj-row mj-dest-board');
-			// No field label. This is the only object array the camera
-			// declares, it is lifted to the top of its own section, and the
-			// section is already headed Outgoing — so a "Destinations" label
+			// No field label. This is the only object array of addresses the
+			// camera declares, it is lifted to the top of its own section, and
+			// the section is already headed Outgoing — so a "Destinations" label
 			// under it was the same word twice, with a rule between them.
 			// Its text still reaches the search through the schema.
 			p.innerHTML =

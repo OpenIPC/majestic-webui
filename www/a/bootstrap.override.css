@@ -331,6 +331,79 @@
 	max-width: none;
 }
 
+/* A list of objects with no address, drawn as a table: one bordered row per
+   item, its members as labelled cells that wrap onto more lines rather than
+   pushing the page sideways on a phone. A text member gets twice the room of
+   a number, because the text ones are names and matrices and the numbers are
+   four or five digits. */
+.mj-tbl {
+	display: flex;
+	flex-direction: column;
+	gap: .5rem;
+}
+
+.mj-tbl-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: .5rem;
+	padding: .6rem .75rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background-color: var(--bs-card-bg);
+}
+
+.mj-tbl-cells {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .5rem .75rem;
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.mj-tbl-cell {
+	display: flex;
+	flex-direction: column;
+	gap: .15rem;
+	flex: 1 1 6rem;
+	min-width: 6rem;
+	max-width: 11rem;
+}
+
+.mj-tbl-cell.mj-tbl-wide {
+	flex: 2 1 12rem;
+	max-width: none;
+}
+
+.mj-tbl-name {
+	font-size: .78125rem;
+	color: var(--bs-secondary-color);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mj-tbl-cell .form-control,
+.mj-tbl-cell .form-select {
+	min-width: 0;
+}
+
+.mj-tbl-del {
+	flex: 0 0 auto;
+}
+
+.mj-tbl-note {
+	flex: 1 0 100%;
+	color: var(--bs-warning-text-emphasis);
+}
+
+.mj-tbl-legend {
+	display: flex;
+	flex-direction: column;
+	gap: .15rem;
+	margin-top: .4rem;
+}
+
 /* A boolean's label is a block above the switch now, like every other type's,
    so the wrapper holds the switch and the lit word and nothing else. */
 .boolean .mj-ctl-in {

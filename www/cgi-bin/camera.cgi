@@ -254,6 +254,7 @@ fi
 <script src="/a/mj-region.js" defer></script>
 <script src="/a/analytics-overlay.js" defer></script>
 <script src="/a/mj-servers.js" defer></script>
+<script src="/a/mj-table.js" defer></script>
 <script src="/a/mj-outgoing.js" defer></script>
 <%
 # Where the overlay sits. Its own file for the same reason the tree is: the
