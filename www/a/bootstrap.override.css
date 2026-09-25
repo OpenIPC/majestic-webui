@@ -4150,6 +4150,34 @@ button.mj-osd-chip,
 	pointer-events: auto;
 }
 
+/* The focus-by-ear readout. Digits big enough to read from the foot of a
+   ladder; tabular, so they do not jitter sideways five times a second. The
+   button keeps its own HUD look. */
+.mj-ear-card {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	cursor: default;
+	padding-right: 0.6rem;
+}
+.mj-ear-num {
+	display: block;
+	font-size: 2.4rem;
+	line-height: 1;
+	font-weight: 600;
+}
+.mj-ear-sub {
+	display: block;
+	color: rgba(255, 255, 255, 0.7);
+}
+.mj-ear-word {
+	display: block;
+	min-height: 1.2em;
+	color: rgba(255, 255, 255, 0.7);
+}
+.mj-ear-card .mj-hud-btn {
+	margin-top: 0.3rem;
+}
+
 .mj-adapt-toast {
 	position: relative;
 	margin: 0;

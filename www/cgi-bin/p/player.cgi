@@ -217,6 +217,20 @@ printf '%s' \
 		     form that lets this camera fetch it. Same surface as the still's
 		     note. -->
 		<p id="mj-peer-note" class="mj-adapt-toast small" role="status" hidden></p>
+		<!-- The focus-by-ear readout (preview-focus.js): the two numbers the
+		     sound encodes, for whoever can look, and the one button the sound
+		     cannot replace. Big digits, because the reader is at arm's length
+		     if there is one. No percentage and no grade: the statistic has no
+		     scale between chips (the Focus note in preview-stats.js). The word
+		     is the live region, not the number, which moves five times a
+		     second. -->
+		<div id="mj-ear-card" class="mj-adapt-toast mj-ear-card small" hidden>
+			<b class="mj-ear-num" id="mj-ear-now">–</b>
+			<span class="mj-ear-sub">best <b id="mj-ear-best">–</b></span>
+			<span class="mj-ear-word" id="mj-ear-word" role="status"></span>
+			<button type="button" class="mj-hud-btn" id="mj-ear-reset">Start over</button>
+		</div>
+		<p id="mj-ear-note" class="mj-adapt-toast small" role="status" hidden></p>
 		<p id="mj-adapt" class="mj-adapt-toast small" role="status" hidden>
 			<span id="mj-adapt-rates" class="mj-adapt-rates"></span>
 			<span id="mj-adapt-why" class="mj-adapt-why"></span>
@@ -427,6 +441,25 @@ printf '%s' \
 				<input type="radio" class="mj-seg-in" name="mj-transport" id="mj-transport-m" autocomplete="off">
 				<label class="mj-seg-lbl" for="mj-transport-m" id="mj-transport-m-lbl"
 					title="Plain buffered playback. A couple of seconds behind, but nothing adapts and nothing negotiates.">MSE</label>
+			</span>
+
+			<!-- Focus by ear (preview-focus.js). Shipped hidden; unhidden only once
+			     the heartbeat has shown this camera measures focus at all, and only
+			     where the browser can make a sound. Hear the lens rather than read
+			     it: beeps come faster and higher the closer the picture is to the
+			     best it has been, a low note says the lens has gone past it, one
+			     held tone says it is back on it. -->
+			<span class="mj-hud mj-tog-wrap" id="mj-ear-ctl" hidden>
+				<input type="checkbox" class="mj-tog-in" id="mj-ear" autocomplete="off">
+				<label class="mj-tog" for="mj-ear"
+					title="Hear the focus while you turn the lens. Beeps come faster and higher as the picture nears the best it has been; a low note means you have gone past it; a held tone means you are back on it. Press Start over after changing zoom.">
+					<span class="mj-led"></span>
+					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M6.5 8.4a3.5 3.5 0 0 1 7 0c0 2.2-2.2 2.6-2.2 4.6a1.6 1.6 0 0 1-3.2 0"></path>
+						<path d="M4 6.4a6.6 6.6 0 0 1 12 0"></path>
+					</svg>
+					<span class="mj-tog-t">By ear</span>
+				</label>
 			</span>
 
 			<span class="mj-hud mj-tog-wrap" id="mj-stats-ctl" hidden>
