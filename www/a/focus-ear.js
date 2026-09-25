@@ -85,15 +85,19 @@
 
 	// The camera's answer to /metrics/isp?value=isp_afmetrics: a bare number,
 	// or the metric line itself on a build that answers that way, or nothing
-	// at all where the chip has no statistic. Nothing is null -- and so is a
-	// negative, which is how some chips spell "no statistic" (-1 was measured
-	// on an hi3518ev200) -- while 0 is a reading: a black scene.
+	// at all where the chip has no statistic. Three answers, kept apart:
+	// a number is a reading (0 included: a black scene); null is ABSENT --
+	// nothing, or a negative, which is how some chips spell "no statistic"
+	// (-1 was measured on an hi3518ev200); undefined is UNREADABLE -- text
+	// that is not a number, an error page, a proxy's apology -- which says
+	// nothing about the chip and must not be taken for absence.
 	function readValue(text) {
-		if (typeof text !== 'string') return null;
+		if (typeof text !== 'string') return undefined;
 		const s = text.trim();
 		if (!s) return null;
 		const n = Number(s.split(/\s+/).pop());
-		if (!Number.isFinite(n) || n < 0) return null;
+		if (!Number.isFinite(n)) return undefined;
+		if (n < 0) return null;
 		return n;
 	}
 
@@ -135,9 +139,22 @@
 			farSince = null;
 		}
 
+		// Start over, a zoom, an autofocus: a new scene, so nothing of the old
+		// one may leak into it -- not the best, not the smoothed reading it
+		// would be blended with, not a freshness or an outage. The first
+		// reading after this is the baseline, on its own.
 		function reset(now) {
-			rebase();
+			ema = null;
+			best = null;
+			peakRef = null;
+			confirmed = false;
+			pastArmed = false;
+			continuous = false;
+			flatSince = null;
+			farSince = null;
 			memory = null;
+			lastAt = null;
+			lostSaid = false;
 			samples = 0;
 			trail = [];
 			last = quiet('listening', null);
@@ -187,7 +204,9 @@
 				confirmed = true;
 				peakRef = best;
 			}
-			const ratio = best > 0 ? clamp(ema / best, 0, 1) : 1;
+			// A best of zero -- a black scene, or a lens cap -- has nothing to
+			// be close to: the far end of the grammar, not the near one.
+			const ratio = best > 0 ? clamp(ema / best, 0, 1) : 0;
 
 			// Far below the best for a long time is not a lens off its peak, it
 			// is a different scene: re-base and start again from here. The
@@ -211,7 +230,7 @@
 				confirmed = true;
 				memory = null;
 			}
-			const r = best > 0 ? clamp(ema / best, 0, 1) : 1;
+			const r = best > 0 ? clamp(ema / best, 0, 1) : 0;
 
 			const slope = slopeOf(now);
 			const flat = samples >= K.MIN_SAMPLES && Math.abs(slope) < K.FLAT_PER_S &&
@@ -292,12 +311,16 @@
 	function plan(out, fromT, toT, cursor) {
 		const c = cursor || { nextBeepAt: null, holding: false };
 		const events = [];
+		// Silence asked for is not the same as a window with no beep in it:
+		// at slow rates most windows hold no beep while one is already
+		// scheduled just past them, and that one must sound. `silent` is the
+		// order to take back whatever was scheduled.
 		if (!out || (out.rate <= 0 && !out.continuous)) {
-			return { events: events, cursor: { nextBeepAt: null, holding: false } };
+			return { events: events, silent: true, cursor: { nextBeepAt: null, holding: false } };
 		}
 		if (out.continuous) {
 			events.push({ kind: 'hold', f: out.pitch });
-			return { events: events, cursor: { nextBeepAt: null, holding: true } };
+			return { events: events, silent: false, cursor: { nextBeepAt: null, holding: true } };
 		}
 		const period = 1 / out.rate;
 		let next = c.nextBeepAt;
@@ -307,7 +330,7 @@
 			events.push({ kind: 'beep', at: next, f: out.pitch, ms: ms });
 			next += period;
 		}
-		return { events: events, cursor: { nextBeepAt: next, holding: false } };
+		return { events: events, silent: false, cursor: { nextBeepAt: next, holding: false } };
 	}
 
 	return { K: K, create: create, readValue: readValue, plan: plan };

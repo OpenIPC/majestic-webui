@@ -48,9 +48,10 @@ const anyHeld = (outs) => outs.some((o) => o.continuous);
 	eq('so does the metric line itself', Ear.readValue('isp_afmetrics 6318\n'), 6318);
 	eq('zero is a reading, a black scene, not absence', Ear.readValue('0'), 0);
 	eq('a negative is how a chip says it has no statistic', Ear.readValue('-1'), null);
-	eq('text is absent', Ear.readValue('abc'), null);
-	eq('and so is Infinity', Ear.readValue('Infinity'), null);
-	eq('and a non-string', Ear.readValue(undefined), null);
+	// Unreadable is not absent: an error page says nothing about the chip.
+	eq('text is unreadable, not absent', Ear.readValue('abc'), undefined);
+	eq('so is Infinity', Ear.readValue('Infinity'), undefined);
+	eq('and a non-string', Ear.readValue(undefined), undefined);
 }
 
 // The everyday sweep: through the peak, hear the low note, turn back, hold.
@@ -151,6 +152,26 @@ const anyHeld = (outs) => outs.some((o) => o.continuous);
 	check('after Start over it does', anyHeld(u.outs), '');
 }
 
+// Start over leaves nothing of the old scene behind: the next reading is the
+// baseline on its own, not blended with the reading before the reset and not
+// measured against the best before it.
+{
+	const ear = Ear.create();
+	const up = bell(81, 10000, 40, 12);
+	let r = run(ear, up, 0);
+	r = run(ear, up.slice(0, 81).reverse().slice(0, 41), r.t);
+	r = run(ear, new Array(15).fill(10000), r.t);
+	check('(setup) held on 10000', anyHeld(r.outs), '');
+	ear.reset(r.t);
+	const first = ear.step(3000, r.t + K.POLL_MS);
+	eq('the first reading after Start over is the reading, unblended', first.now, 3000);
+	eq('and it is the best', first.best, 3000);
+	eq('with nothing of the old best left', ear.state().peakRef, null);
+	eq('and no held tone from before', first.continuous, false);
+	check('and no lost cue for the gap the reset spans',
+		ear.tick(r.t + K.POLL_MS + 100).cue === null, '');
+}
+
 // The automatic re-base: far below the best for long enough is a new scene.
 {
 	const ear = Ear.create();
@@ -201,6 +222,19 @@ const anyHeld = (outs) => outs.some((o) => o.continuous);
 	eq('a higher peak after a confirmed one chimes once', cues(h.outs, 'best'), 1);
 }
 
+// A black scene: zero is a reading, and a best of zero is nothing to be close
+// to. The lens cap comes off, and the first positive reading is the best.
+{
+	const ear = Ear.create();
+	const dark = run(ear, new Array(25).fill(0), 0);
+	const lastDark = dark.outs[dark.outs.length - 1];
+	eq('sustained zeros beep at the slow end', lastDark.rate, K.RATE_LO);
+	eq('and at the low pitch', lastDark.pitch, K.PITCH_LO);
+	eq('with no held tone', lastDark.continuous, false);
+	const lit = run(ear, [400, 800, 1200], dark.t);
+	check('the first light is the best', ear.state().best > 0, 'best=' + ear.state().best);
+}
+
 // Absent and stale.
 {
 	const ear = Ear.create();
@@ -244,7 +278,14 @@ const anyHeld = (outs) => outs.some((o) => o.continuous);
 	eq('and the cursor says so', h.cursor.holding, true);
 	const z = Ear.plan({ rate: 0, pitch: null, continuous: false }, 7, 8, h.cursor);
 	eq('silence plans nothing', z.events.length, 0);
+	eq('and says so, as an order to take back what is scheduled', z.silent, true);
 	eq('and lets go of the hold', z.cursor.holding, false);
+	// A slow train's window with no beep in it is NOT silence: the next beep
+	// is scheduled just past the window and must sound.
+	const slow = Ear.plan({ rate: 1.5, pitch: 700, continuous: false }, 20, 20.15, null);
+	const gap = Ear.plan({ rate: 1.5, pitch: 700, continuous: false }, 20.15, 20.3, slow.cursor);
+	eq('a window between slow beeps plans nothing', gap.events.length, 0);
+	eq('but is not silence', gap.silent, false);
 	const late = Ear.plan(out, 10, 10.5, { nextBeepAt: 3, holding: false });
 	eq('a cursor from the past beeps now rather than catching up', late.events[0].at, 10);
 }

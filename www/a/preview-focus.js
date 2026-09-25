@@ -74,13 +74,20 @@
 	 * heartbeat of the page loading; a later absence is the poll's business,
 	 * not a reason to take the control away mid-session. */
 	if (typeof mjMetricsSubscribe === 'function') {
-		const off = mjMetricsSubscribe((s) => {
+		/* The subscription replays synchronously when a publication already
+		 * exists, so the callback can run before the unsubscribe function has
+		 * been handed back: `off` is assigned after, and called from the
+		 * replay it would not exist yet. */
+		let off = null, seen = false;
+		off = mjMetricsSubscribe((s) => {
 			const v = s && s.ok && s.m && s.m.v ? s.m.v.isp_afmetrics : undefined;
 			if (Number.isFinite(v) && v >= 0) {
 				ctl.hidden = false;
-				off();
+				seen = true;
+				if (off) off();
 			}
 		});
+		if (seen) off();
 	}
 
 	let ctx = null;
@@ -173,8 +180,18 @@
 		 * what keeps a rate change from beeping twice. A held tone glides its
 		 * pitch rather than stepping it. `now` is the clock to measure from,
 		 * the context's own unless a check supplies one. */
-		function render(events, now) {
+		function render(events, now, silent) {
 			const t0 = now !== undefined ? now : actx.currentTime;
+			if (silent) {
+				/* Take back what was scheduled ahead, beeps included: a beep
+				 * planned 150 ms out must not sound after the reading it
+				 * came from was declared stale. */
+				env.gain.cancelScheduledValues(t0);
+				env.gain.setValueAtTime(holding ? BEEP_GAIN : 0, t0);
+				env.gain.linearRampToValueAtTime(0, t0 + 0.02);
+				holding = false;
+				return;
+			}
 			let any = false;
 			for (const e of events) {
 				any = true;
@@ -243,7 +260,7 @@
 		last = out;
 		const p = Ear.plan(out, ctx.currentTime, ctx.currentTime + LOOKAHEAD_S, cursor);
 		cursor = p.cursor;
-		snd.render(p.events);
+		snd.render(p.events, undefined, p.silent);
 	}
 
 	/* ---- the poll ----------------------------------------------------- */
@@ -264,6 +281,13 @@
 					/* An empty body from a camera that answered: the chip has
 					 * no statistic. Not a failure to retry, a fact. */
 					absent();
+					return;
+				}
+				if (v === undefined) {
+					/* Something that is not a number -- an error page, a
+					 * proxy's apology. Says nothing about the chip; it is
+					 * this poll that failed, and the next may not. */
+					fails++;
 					return;
 				}
 				fails = 0;
