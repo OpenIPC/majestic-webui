@@ -354,18 +354,30 @@
 		// everything without a heading over them. Every lifted isp key is
 		// named somewhere, because one left out would be drawn ahead of the
 		// first heading -- and tests/tree.test.js says so if it is.
+		//
+		// `fold` puts a group behind one disclosure of that name, shared by
+		// consecutive groups naming the same one. The Picture page is where an
+		// owner comes for the picture, and eleven exposure rows under it read
+		// as the page's subject (#585): the two switches and dehaze stay out,
+		// the numbers fold. The page opens the fold by itself whenever a row
+		// in it holds a value or an unsaved edit, so nothing in force is ever
+		// out of sight. Folded groups go last, since a fold is one block.
 		isp: [
 			{ id: 'mode', label: '', keys: ['aeMode', 'slowShutter'] },
-			{ id: 'exposure', label: 'Exposure and gain', keys: ['exposure', 'aGain', 'dGain', 'ispGain'] },
+			// Not "Picture": that is the name of the page this card is on.
+			{ id: 'picture', label: 'Clarity', keys: ['dehaze'] },
+			{ id: 'exposure', label: 'Exposure and gain', fold: 'More exposure settings',
+				keys: ['exposure', 'aGain', 'dGain', 'ispGain'] },
 			// `activeWhen` is the note's claim as a condition: the page sets
 			// these rows back while the mode says otherwise. They stay
 			// editable -- the daemon writes them in manual too, so a value is
 			// in place the moment automatic comes back.
 			{ id: 'reacts', label: 'How it reacts', note: 'in automatic mode',
+				fold: 'More exposure settings',
 				activeWhen: { field: 'aeMode', equals: 'auto' },
 				keys: ['meterRect', 'aeStrategy', 'aeSpeed', 'aeTolerance', 'aeBlackDelay', 'aeWhiteDelay'] },
-			{ id: 'picture', label: 'Picture', keys: ['dehaze'] },
-			{ id: 'tuning', label: 'For tuning engineers', keys: ['externalTuner'] },
+			{ id: 'tuning', label: 'For tuning engineers', fold: 'More exposure settings',
+				keys: ['externalTuner'] },
 		],
 	};
 	function sectionGroups(section) { return SECTION_GROUPS[section] || null; }

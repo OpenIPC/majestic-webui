@@ -496,7 +496,10 @@ button.mj-help[aria-expanded="true"] {
  * never heard of until-found now simply keeps it hidden, which is the
  * behaviour without this rule and is not a fault. */
 @supports (content-visibility: hidden) {
-	.mj-help-body[hidden="until-found"] {
+	/* The group fold's body too: the same attribute, the same reboot rule, and
+	   the same silent loss of find-in-page without this. */
+	.mj-help-body[hidden="until-found"],
+	.mj-grp-fold-body[hidden="until-found"] {
 		display: block !important;
 		content-visibility: hidden;
 	}
@@ -969,6 +972,45 @@ pre#output[data-cmd] {
 .mj-row:not(.mj-off-stock):hover .mj-reset,
 .mj-row:not(.mj-off-stock) .mj-ctl:focus-within .mj-reset {
 	visibility: visible;
+}
+
+/* A group fold (#585): the disclosure the Picture page puts its exposure
+   numbers behind. Read as the last line of the card's list, in the weight of a
+   group heading, so it is found where the list seems to end; 44px tall so a
+   finger finds it too. */
+.mj-grp-fold-btn {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	width: 100%;
+	min-height: 2.75rem;
+	margin-top: 0.5rem;
+	padding: 0.5rem 0;
+	border: 0;
+	border-top: 1px solid var(--bs-border-color);
+	background: none;
+	color: var(--bs-secondary-color);
+	font-size: 0.875rem;
+	font-weight: 600;
+	text-align: left;
+}
+
+.mj-grp-fold-btn:hover {
+	color: var(--bs-body-color);
+}
+
+.mj-grp-fold-btn:focus-visible {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+}
+
+/* Named here as well as by the rail's rule: from md up the rail hides its
+   own carets, and this one is not the rail's. */
+.mj-grp-fold-btn .mj-tree-caret {
+	display: block;
+}
+
+.mj-grp-fold-btn[aria-expanded="true"] .mj-tree-caret {
+	transform: rotate(90deg);
 }
 
 /* ── settings navigation tree ───────────────────────────────────────────────

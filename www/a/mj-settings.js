@@ -826,6 +826,7 @@
 	// obvious implementation — slams every hand-opened fold shut the moment
 	// somebody types a character.
 	function revealFolds() {
+		openGroupFolds();
 		document.querySelectorAll('#mj-settings-form .mj-hint-fold').forEach(hint => {
 			const more = hint.querySelector(':scope > .mj-help');
 			if (!more || more.hidden) return;
@@ -2936,16 +2937,25 @@
 		// Groups whose rows act only while a sibling holds one value
 		// (activeWhen in mj-tree.js), and what to set back when it does not.
 		const idle = new Map();
+		// One disclosure per section and fold name (`fold` in mj-tree.js).
+		const folds = new Map();
+		const foldFor = (box, sec, name) => {
+			const k = sec + '/' + name;
+			if (!folds.has(k)) folds.set(k, groupFold(box, sec, name));
+			return folds.get(k);
+		};
 
 		for (const f of placed) {
 			const geoField = useGeo && (f === mirror || f === flip);
 			// The geometry checkboxes stay real fields — hidden — beside the pad
 			// that replaces them, so Save and dirty tracking never learn any of
 			// this happened.
-			const box = isKnob(f) ? strip
+			let box = isKnob(f) ? strip
 				: geoField ? colGeo
 				: restCols(f.section).firstElementChild;
 			const gi = (isKnob(f) || geoField) ? -1 : groupIdx(f);
+			const gDef = gi >= 0 ? sectionGroups(f.section)[gi] : null;
+			if (gDef && gDef.fold) box = foldFor(box, f.section, gDef.fold);
 			let groupH = null;
 			if (gi >= 0 && !headed.has(f.section + '/' + gi)) {
 				headed.add(f.section + '/' + gi);
@@ -9558,6 +9568,7 @@
 	// Measured against the default rather than against the last save, so it goes
 	// on saying "off stock" after Save — it is a fact about the camera.
 	function paintStock() {
+		openGroupFolds();
 		let shown = 0, known = 0, offN = 0;
 		for (const f of state.fields) {
 			if (!f.p || f.p.style.display === 'none' || f.p.hidden) continue;
@@ -9591,6 +9602,56 @@
 			: offN ? offN + ' of ' + shown + ' off stock'
 				: 'all at stock';
 		note.classList.toggle('mj-off-stock', offN > 0);
+	}
+
+	// ── a group fold (#585) ─────────────────────────────────────────────────
+	//
+	// A button and a body under it. The body is hidden="until-found" rather
+	// than display:none, so the browser's own find-in-page reaches a setting
+	// inside it and opens it on the way (beforematch), the same as the "?"
+	// folds. Returns the body, which is where the group's rows are drawn.
+	function groupFold(box, sec, name) {
+		const wrap = el('div', 'mj-grp-fold');
+		const btn = el('button', 'mj-grp-fold-btn');
+		btn.type = 'button';
+		btn.innerHTML = '<span class="mj-tree-caret"></span>';
+		btn.appendChild(document.createTextNode(name));
+		const body = el('div', 'mj-grp-fold-body');
+		body.id = 'mj-fold-' + sec + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+		btn.setAttribute('aria-controls', body.id);
+		wrap.appendChild(btn);
+		wrap.appendChild(body);
+		box.appendChild(wrap);
+		setGroupFold(wrap, false);
+		btn.addEventListener('click', () =>
+			setGroupFold(wrap, btn.getAttribute('aria-expanded') !== 'true'));
+		body.addEventListener('beforematch', () => setGroupFold(wrap, true));
+		return body;
+	}
+
+	function setGroupFold(wrap, open) {
+		const btn = wrap.querySelector(':scope > .mj-grp-fold-btn');
+		const body = wrap.querySelector(':scope > .mj-grp-fold-body');
+		if (!btn || !body) return;
+		btn.setAttribute('aria-expanded', String(open));
+		if (open) body.removeAttribute('hidden');
+		else body.setAttribute('hidden', 'until-found');
+	}
+
+	// Opens, never shuts: a fold holding a row that is set away from stock, or
+	// that has an unsaved edit, or that a search matched, is not allowed to
+	// hide it. Shutting is the reader's own business. Run from paintStock(),
+	// which every edit, save, reset and load already goes through.
+	function openGroupFolds() {
+		document.querySelectorAll('#mj-settings-form .mj-grp-fold').forEach(wrap => {
+			const body = wrap.querySelector(':scope > .mj-grp-fold-body');
+			if (!body || !body.hasAttribute('hidden')) return;
+			const held = state.fields.some(f => f.p && body.contains(f.p) &&
+				(f.getValue() !== state.initial[f.dot] ||
+					String(f.getValue()) !== (f.schema && schemaHasDefault(f.schema)
+						? stockOf(f.schema) : '')));
+			if (held || body.querySelector('mark')) setGroupFold(wrap, true);
+		});
 	}
 
 	function schemaHasDefault(schema) {
