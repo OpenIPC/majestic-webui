@@ -11944,9 +11944,16 @@
 			// refresh would let a later discard "revert" the camera to values
 			// that are no longer what was saved (#259).
 			sent.forEach((v, f) => { state.initial[f.dot] = v; });
-			// The camera dropped every exposure preview when it applied the
-			// save, so there is nothing left for a later revert to drop.
-			livePreviewed.clear();
+			// The camera empties its preview table when it applies the save --
+			// but a preview still queued or on the wire can land AFTER that
+			// apply and put an override back, which would then shadow the value
+			// just saved with nothing left on the page to drop it. So the drops
+			// are sent anyway, through the same queue: they follow any preview
+			// still in flight, and the camera ends on the config whatever the
+			// order the save and the previews arrived in. The pending debounced
+			// push is the save's own value and goes with it.
+			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+			postKnobs(liveDocOf(null));
 			// The drag's override has done its job: the config now says what it
 			// was saying, so it can come off. Left installed it would go on
 			// overriding the saved placement for the life of the daemon, and a
