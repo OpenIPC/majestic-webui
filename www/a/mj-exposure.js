@@ -71,18 +71,88 @@
 	// that matters; milliseconds to three significant figures, because a
 	// daylight exposure lives below one and a night one near a hundred; counts
 	// as whole numbers.
+	//
+	// Any other unit is a setting's own bound or value rather than a reading,
+	// so it is printed as the camera declared it: a whole number as one, a
+	// fraction to four significant figures (a lamp curve of 0.2, a heading of
+	// 12.5°) rather than rounded to a number nobody set.
 	function fmt(v, unit) {
 		if (!isNum(v)) return '';
 		if (unit === '×') return String(Number(v.toFixed(1)));
 		if (unit === 'ms') return String(Number(v.toPrecision(3)));
-		return String(Math.round(v));
+		if (unit === 'levels' || unit === 'frames') return String(Math.round(v));
+		if (Number.isInteger(v)) return String(v);
+		return String(Number(v.toPrecision(4)));
 	}
+
+	// Units written against the figure rather than a space apart, as a
+	// person writes them: 31.6×, 95%, 610‰, 45°. Everything else is a word or
+	// an abbreviation and takes a space: 100 ms, 300 s, 1024 KiB.
+	const TIGHT = { '×': true, '%': true, '‰': true, '°': true };
 
 	// The unit beside a figure in running text: "31.6×" but "100 ms".
 	function withUnit(v, unit) {
 		const n = fmt(v, unit);
 		if (!n || !unit) return n;
-		return unit === '×' ? n + unit : n + ' ' + unit;
+		return TIGHT[unit] ? n + unit : n + ' ' + unit;
+	}
+
+	// A declared range in running text, the unit said once: "1–300 s",
+	// "0–100%", "-45–45°". Empty when either end is not a number.
+	function rangeText(min, max, unit) {
+		if (!isNum(min) || !isNum(max)) return '';
+		return fmt(min, unit) + '–' + withUnit(max, unit || '');
+	}
+
+	// A value of a number field that names a mode rather than a quantity —
+	// 0 on a de-jitter buffer is Passthrough, -1 on dehaze is the image
+	// profile's — as the camera names it in x-special. '' for an ordinary
+	// value, and for text that is not a number: an empty box is unset, not 0.
+	function specialFor(sub, v) {
+		const map = sub && sub['x-special'];
+		if (!map || typeof map !== 'object') return '';
+		if (v === '' || v === null || v === undefined) return '';
+		const n = Number(v);
+		if (!Number.isFinite(n)) return '';
+		const t = map[String(n)];
+		return typeof t === 'string' ? t : '';
+	}
+
+	// Every named value, for the line under the control: "0: Passthrough",
+	// "-1: From the image profile · 0: Off". In value order, so a reader
+	// scanning the range meets them where they sit on it. The bare number,
+	// not the number in its unit: "0 s: 5 s, the default" reads as a sum.
+	function specialsText(sub) {
+		const map = sub && sub['x-special'];
+		if (!map || typeof map !== 'object') return '';
+		return Object.keys(map)
+			.filter(k => k !== '' && Number.isFinite(Number(k)) && typeof map[k] === 'string')
+			.sort((a, b) => Number(a) - Number(b))
+			.map(k => String(Number(k)) + ': ' + map[k])
+			.join(' · ');
+	}
+
+	// Whether a number field is a slider, and its track. A slider is the
+	// control for a range someone can sweep a thumb across and land on the
+	// value they meant: at most a hundred steps. Past that a box is kinder —
+	// one pixel of drag would be several values. The step is the camera's
+	// (x-step) for a decimal, 1 for a whole number, and a decimal with no
+	// declared step is not a slider at all: any grain the page picked would
+	// refuse values the camera accepts.
+	const SLIDER_STEPS = 100;
+	function sliderOf(sub) {
+		if (!sub) return null;
+		const int = sub.type === 'integer';
+		if (!int && sub.type !== 'number') return null;
+		if (!isNum(sub.maximum)) return null;
+		const min = isNum(sub.minimum) ? sub.minimum : (int ? 0 : null);
+		if (min === null) return null;
+		const xs = sub['x-step'];
+		const step = isNum(xs) && xs > 0 ? xs : (int ? 1 : null);
+		if (step === null) return null;
+		const steps = (sub.maximum - min) / step;
+		if (!(steps > 0) || steps > SLIDER_STEPS + 1e-9) return null;
+		return { min: min, max: sub.maximum, step: step };
 	}
 
 	// The placeholder. The unit is not repeated: the row prints it beside the
@@ -109,7 +179,7 @@
 		return framesToSeconds(n, fps);
 	}
 
-	const api = { isAuto, delayText, matched, titleFor, reading, fmt, withUnit, autoText, framesToSeconds };
+	const api = { isAuto, delayText, matched, titleFor, reading, fmt, withUnit, rangeText, specialFor, specialsText, sliderOf, autoText, framesToSeconds };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticExposure = api;
 })();

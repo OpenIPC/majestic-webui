@@ -97,4 +97,55 @@ check('and says so without a frame rate too', EXP.delayText(0, null) === 'no del
 check('any other delay is its time', EXP.delayText(8, 25) === '≈ 0.32 s at 25 fps');
 check('an unknown delay is no text', EXP.delayText(null, 25) === null);
 
+group('any unit the camera declares, beside a figure and a range');
+
+// A setting's own bound is printed as declared: a lamp curve floor of 0.2
+// rounded to 0 would say the box refuses what it accepts.
+check('a fraction with a plain unit is not rounded away', EXP.fmt(0.2, '') === '0.2');
+check('a whole number stays whole', EXP.fmt(300, 's') === '300');
+check('counts still round', EXP.fmt(7.6, 'frames') === '8');
+check('a percentage sits against its figure', EXP.withUnit(95, '%') === '95%');
+check('so does a degree', EXP.withUnit(45, '°') === '45°');
+check('and a per-mille', EXP.withUnit(610, '‰') === '610‰');
+check('an abbreviation takes a space', EXP.withUnit(1024, 'KiB') === '1024 KiB');
+check('a range says its unit once', EXP.rangeText(1, 300, 's') === '1–300 s');
+check('a tight unit in a range', EXP.rangeText(0, 100, '%') === '0–100%');
+check('a signed range', EXP.rangeText(-45, 45, '°') === '-45–45°');
+check('a range with no unit is bare', EXP.rangeText(0.2, 4, '') === '0.2–4');
+check('an unbounded end is no range', EXP.rangeText(0, undefined, 's') === '');
+
+group('a value that names a mode is said by its name');
+
+const JIT = { type: 'integer', minimum: 0, maximum: 500, 'x-unit': 'ms', 'x-special': { '0': 'Passthrough' } };
+const DEH = { type: 'integer', minimum: -1, maximum: 255, 'x-special': { '0': 'Off', '-1': 'From the image profile' } };
+check('0 on the buffer is Passthrough', EXP.specialFor(JIT, '0') === 'Passthrough');
+check('a number compares as a number', EXP.specialFor(JIT, 0) === 'Passthrough');
+check('-1 on dehaze is the profile', EXP.specialFor(DEH, '-1') === 'From the image profile');
+check('an ordinary value has no name', EXP.specialFor(JIT, '60') === '');
+// An empty box is unset, and Number('') is 0 — which would call it Passthrough.
+check('an empty box is not the special 0', EXP.specialFor(JIT, '') === '');
+check('a field with none says nothing', EXP.specialFor({ type: 'integer' }, 0) === '');
+check('the list is in value order with units',
+	EXP.specialsText(DEH) === '-1: From the image profile · 0: Off');
+check('the value is bare, not in its unit', EXP.specialsText(JIT) === '0: Passthrough');
+// An empty-string key names an empty value (a size that is off), not 0.
+check('an empty key is not listed as 0',
+	EXP.specialsText({ 'x-special': { '': 'Off' } }) === '');
+
+group('a slider is at most a hundred steps, on the camera\'s grain');
+
+const sl = (o) => EXP.sliderOf(o);
+check('0–100 whole numbers is a slider', !!sl({ type: 'integer', minimum: 0, maximum: 100 }));
+check('no minimum on a whole number starts at 0',
+	sl({ type: 'integer', maximum: 64 }).min === 0);
+// The OSD position that took -51: bounded now, and a slider.
+check('-16–16 is a slider', !!sl({ type: 'integer', minimum: -16, maximum: 16 }));
+check('0–2000 ms is a box', sl({ type: 'integer', minimum: 0, maximum: 2000 }) === null);
+check('dehaze -1–255 is a box', sl(DEH) === null);
+const G = sl({ type: 'number', minimum: 0.2, maximum: 4, 'x-step': 0.1 });
+check('a lamp curve on a 0.1 step is a slider', !!G && G.step === 0.1 && G.min === 0.2);
+check('a decimal with no step is a box', sl({ type: 'number', minimum: 0, maximum: 90 }) === null);
+check('a whole number with no maximum is a box', sl({ type: 'integer', minimum: 0 }) === null);
+check('text is never a slider', sl({ type: 'string', maximum: 5 }) === null);
+
 done();

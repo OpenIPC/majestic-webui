@@ -62,7 +62,6 @@
 	}
 
 	const EXCLUDE = new Set(boot.exclude || []);
-	const SENSORS = boot.sensors || [];
 	const FONTS = boot.fonts || [];
 	// The part this camera is. Read from the boot blob, which camera.cgi fills
 	// from sysinfo — it used to be read from `window.mjSoc`, a global no file in
@@ -9793,8 +9792,13 @@
 			// map above the form is what edits them, but they stay real fields
 			// so dirty tracking, Save and the per-row reset keep working on them
 			// without knowing a map exists.
+			// A value that belongs on another field's rows (x-row-of: a
+			// quality offset per region of interest) renders hidden the same
+			// way, and that field's rows edit it.
+			const rowOf = sub && sub['x-row-of'] && typeof sub['x-row-of'].field === 'string'
+				&& props[sub['x-row-of'].field];
 			const field = renderField(container, dot, key, sub, eff,
-				MAP_DOTS[dot] ? { hidden: true } : undefined);
+				(MAP_DOTS[dot] || rowOf) ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -10202,6 +10206,13 @@
 	function renderField(container, dot, key, sub, eff, opts) {
 		opts = opts || {};
 		const live = !!opts.live;
+		// One number the camera keeps as text (x-numeric: a font scale of
+		// "1.0") is drawn as the number it is, with the bounds it declares.
+		// What is saved is still the text the control holds.
+		if (sub && sub.type === 'string' && sub['x-numeric'] && typeof sub['x-numeric'] === 'object') {
+			const n = sub['x-numeric'];
+			sub = Object.assign({}, sub, { type: 'number', minimum: n.minimum, maximum: n.maximum });
+		}
 		// A field's sibling as it stands NOW: the control if it is on the page,
 		// else the config it loaded with. What x-title-when is evaluated
 		// against, so a name follows the mode select as it moves, not after a
@@ -10212,14 +10223,24 @@
 			const f = (state.fields || []).find(x => x.dot === d);
 			return f ? f.getValue() : getDotted(state.config, d);
 		};
-		// Rows that carry the daemon's presentation annotations: a unit to print
-		// beside the number, a name per mode, gauges to say what "automatic"
-		// currently is. Only number rows take them.
+		// Rows the camera runs by itself when they are empty: it publishes the
+		// value in force (x-metric) or renames the row by mode (x-title-when),
+		// and an empty box reads "Auto · <what it is running>". A unit alone
+		// does not make one: x-unit is only what the number is in, and
+		// treating it as Auto too would draw a real 0 — a 0 ms hold, a 0 s
+		// pre-roll — as an empty box.
 		// `sub.type` and not `type`: this runs above that const, and reading it
 		// here is the temporal-dead-zone throw the accessor comment below
 		// describes, which takes every later field on the leaf with it.
 		const expRow = !!(EXP && !live && (sub.type === 'integer' || sub.type === 'number') &&
-			(sub['x-unit'] || sub['x-metric'] || sub['x-title-when']));
+			(sub['x-metric'] || sub['x-title-when']));
+		// What the number is in, printed beside the box or the slider's
+		// readout rather than inside the title.
+		const unit = sub['x-unit'] ? String(sub['x-unit']) : '';
+		const withUnit = (v) => unit
+			? (EXP ? EXP.withUnit(Number(v), unit) : v + ' ' + unit) : String(v);
+		const unitHtml = unit
+			? '<span class="input-group-text mj-unit">' + esc(unit) + '</span>' : '';
 		// the field's `title` is the short label; older schemas only had
 		// `description`. `let`, because a field with x-title-when is renamed
 		// when its mode changes, and the reset's confirm has to use the name the
@@ -10236,7 +10257,16 @@
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
 		const hasDefault = schemaHasDefault(sub);
-		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
+		// Files the camera offers for a path field (x-choices): the sensor
+		// configurations, the IQ profiles. Read by the daemon when it builds
+		// the schema, so the page lists exactly what the camera can open.
+		const files = type === 'string' && sub['x-files'] && typeof sub['x-files'] === 'object'
+			&& typeof sub['x-files'].dir === 'string' ? sub['x-files'] : null;
+		const choices = files ? (Array.isArray(files.choices) ? files.choices.map(String) : []) : null;
+		// A fixed-length number list kept as text (x-list): one box per
+		// number, a grid for a matrix.
+		const xlist = type === 'string' && sub['x-list'] && typeof sub['x-list'] === 'object'
+			&& window.MajesticTable ? sub['x-list'] : null;
 		const isFontFile = isFontPath(dot) && FONTS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
 		// resolution picker for the video/jpeg size fields: a dropdown of named
@@ -10305,6 +10335,23 @@
 			? window.MajesticFps.boundFor(sub, siblingSize(dot, 'size'))
 			: null;
 		if (isNum(fpsBound)) sub = Object.assign({}, sub, { maximum: fpsBound });
+		// Whether this number is a slider, and on what track: at most a
+		// hundred steps on the camera's own grain (EXP.sliderOf). A value
+		// with a name of its own (x-special) is said by that name wherever
+		// the row prints its figure.
+		const sliderSpec = EXP ? EXP.sliderOf(sub)
+			: (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100
+				? { min: isNum(sub.minimum) ? sub.minimum : 0, max: sub.maximum, step: 1 } : null);
+		const specialOf = (v) => EXP ? EXP.specialFor(sub, v) : '';
+		// A number box with exactly one named value draws it the way the
+		// Picture page draws Auto: the box empty, the name as its placeholder,
+		// and emptying the box is choosing it (the de-jitter buffer's
+		// Passthrough, the speaker's Always powered). Not for a slider, which
+		// cannot be empty and prints the name in its readout instead.
+		const specialKeys = (sub && sub['x-special'] && typeof sub['x-special'] === 'object')
+			? Object.keys(sub['x-special']).filter(k => k !== '' && Number.isFinite(Number(k))) : [];
+		const emptySpecial = (!live && !sliderSpec && !expRow && specialKeys.length === 1
+			&& (sub.type === 'integer' || sub.type === 'number')) ? specialKeys[0] : null;
 
 		if (live && type === 'integer' && isNum(sub.maximum)) {
 			// The detent slider. Its fill runs from the schema's own default to
@@ -10437,7 +10484,7 @@
 				control._set = (v) => { control.checked = toBool(v); paintState(); };
 				paintState();
 			}
-		} else if (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100) {
+		} else if (sliderSpec) {
 			p = el('p', 'range mj-row' + liveCls);
 			// A frame rate of 0 is this field's own declared default — the
 			// sensor's rate, which the camera names beside it — and a track
@@ -10449,13 +10496,13 @@
 			// schema still puts the default outside its own range.
 			const min = (isNum(sub['x-fps-sensor']) && Number(sub.default) === 0)
 				? 0
-				: (isNum(sub.minimum) ? sub.minimum : 0);
-			const max = sub.maximum;
+				: sliderSpec.min;
+			const max = sliderSpec.max;
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
-				'<input type="range" id="' + id + '" class="form-control form-range" min="' + min + '" max="' + max + '" step="1" value="' + esc(v) + '">' +
+				'<input type="range" id="' + id + '" class="form-control form-range" min="' + min + '" max="' + max + '" step="' + sliderSpec.step + '" value="' + esc(v) + '">' +
 				'<span class="input-group-text show-value"></span>' +
 				'</span>';
 			control = p.querySelector('input');
@@ -10490,8 +10537,8 @@
 			const paint = () => {
 				show.textContent = !chosen ? UNSET_WORD
 					: (sensorFps !== null && Number(control.value) === 0)
-						? 'Auto · ' + sensorFps
-						: String(control.value);
+						? 'Auto · ' + withUnit(sensorFps)
+						: specialOf(control.value) || withUnit(control.value);
 				p.classList.toggle('mj-unset', !chosen);
 			};
 			// Any input is a choice — a drag, a click on the track, an arrow key.
@@ -10515,7 +10562,6 @@
 			// the heartbeat arrives. Typing a number overrides; emptying the box
 			// posts null through clearsToNull, which removes the key.
 			p = el('p', 'number mj-row mj-exp-row');
-			const unit = sub['x-unit'] ? String(sub['x-unit']) : '';
 			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
 			const maxA = isNum(sub.maximum) ? ' max="' + sub.maximum + '"' : '';
 			const stepA = type === 'number' ? ' step="any"' : ' step="1"';
@@ -10525,7 +10571,7 @@
 				'<span class="input-group">' +
 				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA +
 				' value="' + esc(v) + '" placeholder="Auto">' +
-				(unit ? '<span class="input-group-text mj-unit">' + esc(unit) + '</span>' : '') +
+				unitHtml +
 				'</span>' +
 				'<span class="mj-now"></span>';
 			control = p.querySelector('input');
@@ -10544,14 +10590,48 @@
 			// millisecond and daylight is a fraction of one. `any` rather than a
 			// step of our own: the schema says nothing about a grain, and
 			// inventing one would refuse values the camera accepts.
-			const stepA = type === 'number' ? ' step="any"' : ' step="1"';
+			const xStep = isNum(sub['x-step']) && sub['x-step'] > 0 ? sub['x-step'] : null;
+			const stepA = type === 'number' ? ' step="' + (xStep || 'any') + '"' : ' step="1"';
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
 				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA + ' value="' + esc(v) + '">' +
-				'</span>';
+				unitHtml +
+				'</span>' +
+				(sub['x-special'] && emptySpecial === null ? '<span class="mj-now mj-special"></span>' : '');
 			control = p.querySelector('input');
+			if (emptySpecial !== null) {
+				const name = specialOf(emptySpecial);
+				control.placeholder = name;
+				// The name is the reading here, as "Auto · 32" is on the
+				// Picture page, so the box is sized to show all of it rather
+				// than the 10rem a number gets: "Counted by the camera" was
+				// cut to "Counted by th".
+				p.classList.add('mj-named-row');
+				control.style.setProperty('--mj-ph', (Math.max(name.length, 6) + 2) + 'ch');
+				// Where a phone column still cannot hold it, the whole name is
+				// a touch away, and the hint under the row says it too.
+				control.title = name;
+				const shown = (val) => (val === undefined || val === null || String(val).trim() === ''
+					|| Number(val) === Number(emptySpecial)) ? '' : String(val);
+				control.value = shown(eff);
+				control._get = () => control.value.trim() === '' ? emptySpecial : control.value;
+				control._set = (val) => { control.value = shown(val); };
+			}
+			// A value that names a mode says so beside the box: 0 on the
+			// de-jitter buffer reads "Passthrough", not a buffer of nothing.
+			const said = p.querySelector('.mj-special');
+			if (said) {
+				const paintSpecial = () => { said.textContent = specialOf(control.value); };
+				control.addEventListener('input', paintSpecial);
+				control.addEventListener('change', paintSpecial);
+				control._set = (val) => {
+					control.value = val === undefined || val === null ? '' : String(val);
+					paintSpecial();
+				};
+				paintSpecial();
+			}
 		} else if (isResolution) {
 			p = el('p', 'select mj-row mj-wide');
 			const cur = eff !== undefined && eff !== null ? String(eff) : '';
@@ -10589,7 +10669,11 @@
 			// An empty value means "let the firmware decide" for the fields that
 			// document a fallback; elsewhere it is only offered when the field is
 			// already unset, so the UI can show that state without inventing it.
-			const autoLabel = RES_AUTO_LABEL[dot] || (cur ? '' : 'Auto · unset');
+			// A size whose empty value is not Auto but a mode of its own (the
+			// custom-snapshot cap, where empty is off) says so by x-special.
+			const emptyName = sub['x-special'] && typeof sub['x-special'][''] === 'string'
+				? sub['x-special'][''] : '';
+			const autoLabel = emptyName || RES_AUTO_LABEL[dot] || (cur ? '' : 'Auto · unset');
 			const optsHtml = (list, selVal) => (autoLabel
 				? '<option value=""' + (selVal === '' ? ' selected' : '') + '>' + esc(autoLabel) + '</option>'
 				: '') + list.map(o => {
@@ -10720,13 +10804,193 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
-		} else if (type === 'string' && isSensorPath) {
-			p = el('p', 'select mj-row mj-wide');
-			const opts = option('', !eff) + SENSORS.map(s => option(s, String(eff) === s)).join('');
+		} else if (files) {
+			// A file the camera keeps in one directory (x-files): what is
+			// there, whatever is configured even when it is not there, and an
+			// upload into the same place. The upload only puts the file on the
+			// camera; choosing it is still an edit that Save sends.
+			p = el('p', 'select mj-row mj-wide mj-file-row');
+			const cur = eff === undefined || eff === null ? '' : String(eff);
+			const emptyName = sub['x-special'] && typeof sub['x-special'][''] === 'string'
+				? sub['x-special'][''] : 'Auto';
+			const extra = cur !== '' && choices.indexOf(cur) < 0
+				? option(cur, true, cur + (cur.indexOf('/') < 0 ? ' (by name)' : ' (not found)'))
+				: '';
+			const opts = option('', cur === '', emptyName) + extra +
+				choices.map(c => option(c, cur === c, c.split('/').pop())).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
-				'<select class="form-select" id="' + id + '">' + opts + '</select>';
+				'<select class="form-select" id="' + id + '">' + opts + '</select>' +
+				// Under the select rather than beside it: on a phone a
+				// button in the same group squeezed the file name to a
+				// few letters.
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-file-up">Upload…</button>' +
+				'<input type="file" class="mj-file-in" hidden' +
+				(files.accept ? ' accept="' + esc(String(files.accept)) + '"' : '') + '>' +
+				'<span class="mj-now mj-file-note"></span>';
 			control = p.querySelector('select');
+			const pick = p.querySelector('.mj-file-in');
+			const note = p.querySelector('.mj-file-note');
+			p.querySelector('.mj-file-up').addEventListener('click', () => pick.click());
+			pick.addEventListener('change', () => {
+				const f = pick.files && pick.files[0];
+				pick.value = '';
+				if (!f) return;
+				// A bare file name, into the declared directory and nowhere
+				// else: the name comes from the reader's disk.
+				if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(f.name)) {
+					note.textContent = 'Rename the file to letters, digits, dots, dashes or underscores first.';
+					return;
+				}
+				const dest = files.dir.replace(/\/+$/, '') + '/' + f.name;
+				note.textContent = 'Uploading ' + f.name + '…';
+				apiFetch('/upload', { method: 'POST', headers: { 'File-Location': dest }, body: f })
+					.then(r => {
+						if (!r.ok) throw new Error('HTTP ' + r.status);
+						if (!Array.from(control.options).some(o => o.value === dest)) {
+							const o = document.createElement('option');
+							o.value = dest;
+							o.textContent = f.name;
+							control.appendChild(o);
+						}
+						control.value = dest;
+						control.dispatchEvent(new Event('change', { bubbles: true }));
+						note.textContent = f.name + ' is on the camera. Save to use it.';
+					})
+					.catch(e => { note.textContent = 'The camera did not take ' + f.name + ': ' + e.message; });
+			});
+		} else if (xlist) {
+			// One labelled box per number, from what the camera declares: the
+			// count, each cell's name and range, and a grid for a matrix. A
+			// whole-number cell that can only be 0 or 1 is a switch. Empty in
+			// every box clears the key (the camera's own value stands); a
+			// partly filled list is sent as typed, for the camera to refuse.
+			const TBL = window.MajesticTable;
+			const cells = TBL.listCells(xlist);
+			const rows = isNum(xlist.rows) && xlist.rows > 1 ? xlist.rows : 1;
+			p = el('p', 'string mj-row mj-wide mj-list-row');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-list' + (rows > 1 ? ' mj-list-grid' : '') + '" id="' + id + '"' +
+				(rows > 1 ? ' style="--mj-list-cols:' + Math.ceil(cells.length / rows) + '"' : '') +
+				'></span>';
+			control = p.querySelector('.mj-list');
+			const boxes = cells.map((c, i) => {
+				const cell = el('label', 'mj-list-cell');
+				const name = el('span', 'mj-list-name');
+				name.textContent = c.label;
+				const f = el('input', c.bool ? 'form-check-input' : 'form-control form-control-sm text-end');
+				if (c.bool) {
+					f.type = 'checkbox';
+				} else {
+					f.type = 'number';
+					f.inputMode = c.integer ? 'numeric' : 'decimal';
+					f.step = c.integer ? '1' : 'any';
+					if (isNum(c.min)) f.min = c.min;
+					if (isNum(c.max)) f.max = c.max;
+				}
+				f.setAttribute('aria-label', (desc || key) + ': ' + c.label);
+				f.dataset.cell = String(i);
+				cell.appendChild(name);
+				cell.appendChild(f);
+				control.appendChild(cell);
+				return f;
+			});
+			control._get = () => TBL.joinList(boxes.map(f =>
+				f.type === 'checkbox' ? (f.checked ? '1' : '0') : f.value));
+			control._set = (val) => {
+				const vals = TBL.parseList(val, cells.length);
+				boxes.forEach((f, i) => {
+					if (f.type === 'checkbox') {
+						f.checked = vals[i] === '1';
+						// Unset is not off: an empty list keeps the value
+						// the camera shipped with, which may well be on.
+						f.indeterminate = vals[i] === '';
+					} else f.value = vals[i];
+				});
+			};
+			control._set(eff);
+			// A list of switches alone has no empty state to clear to, so an
+			// untouched one must not read as a choice: the page sends nothing
+			// until a switch is flipped.
+			if (cells.every(c => c.bool)) {
+				let touched = TBL.parseList(eff, cells.length).some(v => v !== '');
+				const inner = control._get;
+				control._get = () => touched ? inner() : '';
+				const innerSet = control._set;
+				control._set = (val) => {
+					touched = TBL.parseList(val, cells.length).some(v => v !== '');
+					innerSet(val);
+				};
+				boxes.forEach(f => f.addEventListener('change', () => { touched = true; }));
+			}
+			boxes.forEach(f => {
+				f.addEventListener('input', () => updateDirty());
+				f.addEventListener('change', () => updateDirty());
+			});
+		} else if (type === 'string' && sub['x-strings'] && window.MajesticTable) {
+			// A list of text items the camera keeps comma-joined (x-strings:
+			// the STUN/TURN servers): one row per item. A value that is a mode
+			// rather than a list (x-special: "none" is local network only) is
+			// a switch, and while it is on the rows are set aside, not lost.
+			const TBL = window.MajesticTable;
+			const ph = sub['x-strings'].placeholder ? String(sub['x-strings'].placeholder) : '';
+			const modes = sub['x-special'] && typeof sub['x-special'] === 'object'
+				? Object.keys(sub['x-special']).filter(k => k !== '' && typeof sub['x-special'][k] === 'string') : [];
+			const mode = modes.length ? modes[0] : null;
+			p = el('p', 'string mj-row mj-wide mj-strs-row');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-strs" id="' + id + '">' +
+				(mode ? '<span class="form-check form-switch mj-strs-mode"><input type="checkbox" class="form-check-input" id="' + id + '-mode">' +
+					'<label class="form-check-label" for="' + id + '-mode">' + esc(sub['x-special'][mode]) + '</label></span>' : '') +
+				'<span class="mj-strs-list"></span>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-strs-add">+ Add</button>' +
+				'</span>';
+			control = p.querySelector('.mj-strs');
+			const list = p.querySelector('.mj-strs-list');
+			const addBtn = p.querySelector('.mj-strs-add');
+			const sw = mode ? p.querySelector('.mj-strs-mode input') : null;
+			const addRow = (val) => {
+				const row = el('span', 'input-group input-group-sm mb-1 mj-strs-item');
+				const inp = el('input', 'form-control');
+				inp.type = 'text';
+				inp.spellcheck = false;
+				inp.placeholder = ph;
+				inp.value = val || '';
+				inp.addEventListener('input', () => updateDirty());
+				const del = el('button', 'btn btn-outline-danger');
+				del.type = 'button';
+				del.textContent = '\u00d7';
+				del.setAttribute('aria-label', 'Remove');
+				del.addEventListener('click', () => { row.remove(); updateDirty(); });
+				row.appendChild(inp);
+				row.appendChild(del);
+				list.appendChild(row);
+			};
+			const paintMode = () => {
+				const on = !!(sw && sw.checked);
+				list.hidden = on;
+				addBtn.hidden = on;
+			};
+			control._get = () => (sw && sw.checked) ? mode
+				: TBL.joinStrings(Array.from(list.querySelectorAll('input')).map(i => i.value));
+			control._set = (val) => {
+				list.innerHTML = '';
+				const v = val === undefined || val === null ? '' : String(val).trim();
+				const isMode = mode !== null && v.toLowerCase() === mode.toLowerCase();
+				if (sw) sw.checked = isMode;
+				(isMode ? [] : TBL.splitStrings(v)).forEach(addRow);
+				paintMode();
+			};
+			control._set(eff);
+			addBtn.addEventListener('click', () => {
+				addRow('');
+				const last = list.querySelector('.mj-strs-item:last-child input');
+				if (last) last.focus();
+				updateDirty();
+			});
+			if (sw) sw.addEventListener('change', () => { paintMode(); updateDirty(); });
 		} else if (type === 'string' && (sub['x-secret'] || sub.writeOnly)) {
 			// A secret the camera has asked not to be shown. It is not hidden
 			// from anyone who can read this page — the value came down the same
@@ -10755,10 +11019,203 @@
 		} else if (type === 'string') {
 			p = el('p', 'string mj-row');
 			const v = eff !== undefined && eff !== null ? String(eff) : '';
+			// A number the camera keeps as text (a keyframe interval of 1.5)
+			// still has a unit to print beside it.
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
-				'<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">';
+				(unit
+					? '<span class="input-group"><input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">' + unitHtml + '</span>'
+					: '<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">');
 			control = p.querySelector('input');
+		} else if (type === 'array' && sub.items && sub.items.type === 'object'
+				&& sub.items.properties && !sub.items.properties.url) {
+			// A list of objects with no address: plain data, drawn as a table.
+			// One row per item, one labelled cell per member `items` declares,
+			// typed by that member. The board below is for a list whose rows
+			// are addresses; this is everything else — the calibration lens
+			// table, its peers and pairings — which that board used to draw
+			// with every member hidden behind an address it does not have.
+			// What a cell holds and which rows are kept is mj-table.js's
+			// business, tested there.
+			const TBL = (typeof window === 'object' && window.MajesticTable) || null;
+			if (!TBL) return null;
+			const props = sub.items.properties;
+			const required = Array.isArray(sub.items.required) ? sub.items.required : [];
+			const members = Object.keys(props).filter(m => !props[m]['x-hidden']);
+			const maxRows = isNum(sub.maxItems) ? sub.maxItems : Infinity;
+
+			p = el('p', 'array objects mj-wide mj-row mj-tbl-field');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-tbl" id="' + id + '"></span>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-tbl-add">'
+				+ '+ Add row</button>';
+			control = p.querySelector('.mj-tbl');
+			const addBtn = p.querySelector('.mj-tbl-add');
+
+			const readRow = (r) => {
+				const o = {};
+				members.forEach(m => {
+					const f = r.querySelector('[data-member="' + m + '"]');
+					if (!f) return;
+					o[m] = TBL.cellValue((props[m] || {}).type,
+						f.type === 'checkbox' ? f.checked : f.value);
+				});
+				return o;
+			};
+			const rowsOf = () => Array.from(control.querySelectorAll('.mj-tbl-row'))
+				.map(readRow);
+
+			// Advisory: a row missing a required member is still sent, and
+			// the camera is the one to refuse it.
+			const paintRow = (row) => {
+				const note = row.querySelector('.mj-tbl-note');
+				const gone = TBL.missing(readRow(row), required, props);
+				note.textContent = gone.length ? 'Needs ' + gone.join(', ') + '.' : '';
+				note.hidden = gone.length === 0;
+			};
+			const paintAdd = () => {
+				addBtn.disabled =
+					control.querySelectorAll('.mj-tbl-row').length >= maxRows;
+			};
+			const onChange = (row) => { paintRow(row); updateDirty(); };
+
+			const addTblRow = (values) => {
+				const v = values || {};
+				const row = el('span', 'mj-tbl-row');
+				const cells = el('span', 'mj-tbl-cells');
+				members.forEach(m => {
+					const prop = props[m] || {};
+					const xl = prop.type === 'string' && prop['x-list'] && typeof prop['x-list'] === 'object'
+						? prop['x-list'] : null;
+					const cell = el(xl ? 'span' : 'label', 'mj-tbl-cell' +
+						(prop.type === 'string' && !Array.isArray(prop.enum)
+							? ' mj-tbl-wide' : ''));
+					const name = el('span', 'mj-tbl-name');
+					name.textContent = prop.title || m;
+					cell.appendChild(name);
+					let f;
+					if (xl) {
+						// A member holding a fixed number of numbers (the
+						// peer homography's nine): a grid of boxes, joined
+						// into the hidden input the row reads.
+						const cellsSpec = TBL.listCells(xl);
+						const rows = isNum(xl.rows) && xl.rows > 1 ? xl.rows : 1;
+						f = el('input', '');
+						f.type = 'hidden';
+						f.value = v[m] != null ? String(v[m]) : '';
+						const grid = el('span', 'mj-list' + (rows > 1 ? ' mj-list-grid' : ''));
+						if (rows > 1) grid.style.setProperty('--mj-list-cols', String(Math.ceil(cellsSpec.length / rows)));
+						const vals = TBL.parseList(f.value, cellsSpec.length);
+						const boxes = cellsSpec.map((c, i) => {
+							// Text with a number keypad, not a number box: a
+							// calibration figure like -0.000589854 needs the
+							// room a spinner takes, and nobody steps a
+							// homography by one.
+							const b = el('input', 'form-control form-control-sm text-end');
+							b.type = 'text';
+							b.spellcheck = false;
+							b.inputMode = c.integer ? 'numeric' : 'decimal';
+							b.value = vals[i];
+							b.setAttribute('aria-label', (prop.title || m) + ' ' + c.label);
+							b.title = c.label;
+							grid.appendChild(b);
+							return b;
+						});
+						const sync = () => {
+							f.value = TBL.joinList(boxes.map(b => b.value));
+							onChange(row);
+						};
+						boxes.forEach(b => {
+							b.addEventListener('input', sync);
+							b.addEventListener('change', sync);
+						});
+						cell.appendChild(grid);
+					} else if (Array.isArray(prop.enum)) {
+						f = el('select', 'form-select form-select-sm');
+						const cur = v[m] != null ? String(v[m]) : '';
+						const opts = prop.enum.slice();
+						if (cur !== '' && opts.indexOf(cur) < 0) opts.push(cur);
+						opts.forEach(opt => {
+							const o = document.createElement('option');
+							o.value = opt;
+							o.textContent = enumTitle(prop, opt) || (opt === '' ? 'Default' : opt);
+							f.appendChild(o);
+						});
+						f.value = cur;
+					} else if (prop.type === 'boolean') {
+						f = el('input', 'form-check-input');
+						f.type = 'checkbox';
+						f.checked = v[m] != null
+							? (v[m] !== false && v[m] !== 'false') : prop.default === true;
+					} else {
+						f = el('input', 'form-control form-control-sm');
+						const num = prop.type === 'integer' || prop.type === 'number';
+						f.type = num ? 'number'
+							: (prop['x-secret'] || prop.writeOnly) ? 'password' : 'text';
+						if (num) {
+							f.inputMode = prop.type === 'integer' ? 'numeric' : 'decimal';
+							f.step = prop.type === 'integer' ? '1' : 'any';
+							if (isNum(prop.minimum)) f.min = prop.minimum;
+							if (isNum(prop.maximum)) f.max = prop.maximum;
+						}
+						if (f.type === 'password') { f.autocomplete = 'off'; f.spellcheck = false; }
+						f.value = v[m] != null ? String(v[m]) : '';
+						if (prop['x-placeholder']) f.placeholder = prop['x-placeholder'];
+					}
+					f.setAttribute('data-member', m);
+					f.addEventListener('input', () => onChange(row));
+					f.addEventListener('change', () => onChange(row));
+					cell.appendChild(f);
+					cells.appendChild(cell);
+				});
+				const del = el('button', 'btn btn-sm btn-outline-danger mj-tbl-del');
+				del.type = 'button';
+				del.textContent = '×';
+				del.setAttribute('aria-label', 'Remove this row');
+				del.addEventListener('click', () => { row.remove(); paintAdd(); updateDirty(); });
+				row.appendChild(cells);
+				row.appendChild(del);
+				const note = el('span', 'hint mj-tbl-note');
+				note.hidden = true;
+				row.appendChild(note);
+				control.appendChild(row);
+				paintRow(row);
+				paintAdd();
+				return row;
+			};
+
+			// What each column means, said once under the table rather than
+			// under every cell of every row.
+			const legend = members.filter(m => props[m] && props[m].hint);
+			if (legend.length) {
+				const dl = el('span', 'hint text-secondary mj-tbl-legend');
+				legend.forEach(m => {
+					const line = el('span', 'mj-tbl-legend-line');
+					const b = el('strong', '');
+					b.textContent = (props[m].title || m) + ': ';
+					line.appendChild(b);
+					line.appendChild(document.createTextNode(props[m].hint));
+					dl.appendChild(line);
+				});
+				p.insertBefore(dl, addBtn.nextSibling);
+			}
+
+			control._addRow = addTblRow;
+			control._get = () => TBL.canon(rowsOf());
+			control._set = (val) => {
+				control.querySelectorAll('.mj-tbl-row').forEach(r => r.remove());
+				let arr = val;
+				if (typeof arr === 'string') {
+					try { arr = JSON.parse(arr); } catch (e) { arr = []; }
+				}
+				(Array.isArray(arr) ? arr : []).forEach(x => {
+					if (x && typeof x === 'object') addTblRow(x);
+				});
+				paintAdd();
+			};
+			control._set(eff);
+			addBtn.addEventListener('click', () => { addTblRow({}); updateDirty(); });
 		} else if (type === 'array' && sub.items && sub.items.type === 'object'
 				&& sub.items.properties) {
 			// A list whose items are objects: one editable row per element, with
@@ -10846,9 +11303,9 @@
 			// mj-wide: opt out of the 20rem cap .array carries for the
 			// MultiRect fields, which is half an address.
 			p = el('p', 'array objects mj-wide mj-row mj-dest-board');
-			// No field label. This is the only object array the camera
-			// declares, it is lifted to the top of its own section, and the
-			// section is already headed Outgoing — so a "Destinations" label
+			// No field label. This is the only object array of addresses the
+			// camera declares, it is lifted to the top of its own section, and
+			// the section is already headed Outgoing — so a "Destinations" label
 			// under it was the same word twice, with a rule between them.
 			// Its text still reaches the search through the schema.
 			p.innerHTML =
@@ -11494,10 +11951,37 @@
 			// A plain assignable hook says the same thing without knowing who
 			// is listening, and stays a no-op where nobody is.
 			control._sync = () => {};
-			const onChange = () => { updateDirty(); control._sync(); };
+			// A sibling that holds one number per row (x-row-of: the quality
+			// offset per region) gets a box on each row, and every edit here
+			// writes the joined list back into that hidden field.
+			const parentProps = (() => {
+				let n = state.schema;
+				for (const seg of base.split('.')) n = n && n.properties && n.properties[seg];
+				return (n && n.properties) || {};
+			})();
+			const qpKey = Object.keys(parentProps).find(k => {
+				const r = parentProps[k] && parentProps[k]['x-row-of'];
+				return r && r.field === key;
+			});
+			const qpSpec = qpKey ? parentProps[qpKey]['x-row-of'] : null;
+			const qpDot = qpKey ? base + '.' + qpKey : null;
+			const qpNow = () => {
+				const f = qpDot && (state.fields || []).find(x => x.dot === qpDot);
+				const v = f ? f.getValue() : getDotted(state.config, qpDot);
+				return window.MajesticTable ? window.MajesticTable.splitStrings(v) : [];
+			};
+			const qpPush = () => {
+				if (!qpDot || !window.MajesticTable) return;
+				const f = (state.fields || []).find(x => x.dot === qpDot);
+				if (!f) return;
+				const cells = Array.from(control.querySelectorAll('.mj-array-row .mj-array-qp'))
+					.map(i => i.value.trim());
+				f.setValue(window.MajesticTable.joinRowNumbers(cells));
+			};
+			const onChange = () => { qpPush(); updateDirty(); control._sync(); };
 			const addRow = (val) => {
 				const row = el('div', 'input-group input-group-sm mb-1 mj-array-row');
-				const inp = el('input', 'form-control');
+				const inp = el('input', 'form-control mj-array-rect');
 				inp.type = 'text';
 				inp.placeholder = 'XxYxWxH';
 				inp.value = val || '';
@@ -11508,12 +11992,30 @@
 				del.textContent = '×';
 				del.addEventListener('click', () => { row.remove(); onChange(); });
 				row.appendChild(inp);
+				if (qpSpec) {
+					const idx = control.querySelectorAll('.mj-array-row').length;
+					const lab = el('span', 'input-group-text mj-array-qp-name');
+					lab.textContent = qpSpec.label || qpKey;
+					const qp = el('input', 'form-control text-end mj-array-qp');
+					qp.type = 'number';
+					qp.step = '1';
+					if (isNum(qpSpec.minimum)) qp.min = qpSpec.minimum;
+					if (isNum(qpSpec.maximum)) qp.max = qpSpec.maximum;
+					qp.placeholder = '0';
+					qp.setAttribute('aria-label', qpSpec.label || qpKey);
+					const now = qpNow()[idx];
+					qp.value = now !== undefined && now !== '0' ? now : '';
+					qp.addEventListener('input', onChange);
+					qp.addEventListener('change', onChange);
+					row.appendChild(lab);
+					row.appendChild(qp);
+				}
 				row.appendChild(del);
 				control.appendChild(row);
 				return inp;
 			};
 			control._addRow = addRow;
-			control._rows = () => Array.from(control.querySelectorAll('.mj-array-row input'))
+			control._rows = () => Array.from(control.querySelectorAll('.mj-array-row input.mj-array-rect'))
 				.map(i => i.value.trim()).filter(s => s.length);
 			(Array.isArray(eff) ? eff : (eff ? String(eff).split(/\s*,\s*/) : []))
 				.forEach(x => { if (x) addRow(x); });
@@ -11629,16 +12131,17 @@
 			const helpText = HELP ? HELP.text(sub.help) : '';
 			// only plain number inputs gain a range hint; sliders (max ≤ 100)
 			// already show their bounds via the track and the live value box
-			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
+			const isSlider = !!sliderSpec;
 			const numeric = type === 'integer' || type === 'number';
 			// On a row whose empty box already says Auto, the floor is that
 			// same Auto spelled as 0 and says nothing new; the ceiling, in the
 			// row's own unit, is the part worth reading.
 			const range = (numeric && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
-				? (expRow ? 'up to ' + EXP.withUnit(sub.maximum, sub['x-unit'] || '')
+				? (expRow ? 'up to ' + EXP.withUnit(sub.maximum, unit)
+					: EXP ? EXP.rangeText(sub.minimum, sub.maximum, unit)
 					: sub.minimum + '–' + sub.maximum)
 				: '';
-			if (sub.hint || range || helpText) {
+			if (sub.hint || range || helpText || sub['x-special']) {
 				// block-level so it sits on its own line below the control row
 				const hint = el('div', 'hint text-secondary');
 				const txt = el('span', 'mj-hint-txt');
@@ -11651,8 +12154,15 @@
 				// Outside [data-hl] on purpose: the range is ours, not the
 				// daemon's, and marking it would highlight a number nobody
 				// searched for.
-				if (range) txt.appendChild(document.createTextNode(
-					(sub.hint ? ' · ' : '') + range));
+				// The named values ride with the range: "0–500 ms · 0:
+				// Passthrough". Said on a slider too, where there is no range
+				// line, because a name is only discoverable if it is listed.
+				const named = emptySpecial !== null
+					? 'Empty: ' + specialOf(emptySpecial)
+					: (EXP ? EXP.specialsText(sub) : '');
+				const tail = [range, named].filter(Boolean).join(' · ');
+				if (tail) txt.appendChild(document.createTextNode(
+					(sub.hint ? ' · ' : '') + tail));
 				hint.appendChild(txt);
 
 				// The long text, and the mark that opens it. The mark is built

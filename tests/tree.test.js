@@ -460,4 +460,18 @@ group('a list of objects is one leaf, not one per member');
 		JSON.stringify(plain.leafIds(sys)));
 }
 
+group('a decimal key is on a leaf, so search can find it');
+
+// renderField draws `number` as a box with step="any", but the tree listed it
+// as undrawable, so every decimal field — the calibration angles, the lamp
+// curve — sat on the page and out of search and the rail's counts.
+{
+	const s = clone(SCHEMA);
+	s.properties.nightMode.properties.curveTest = { type: 'number', title: 'Curve', minimum: 0.2, maximum: 4 };
+	const t = build(s);
+	check('a number key is drawn on exactly one leaf',
+		leafOf(t, 'nightMode.curveTest').length === 1);
+	everyKeyOnce('with a number key', t, s);
+}
+
 done();

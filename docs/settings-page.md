@@ -58,13 +58,26 @@ boot tag.
    | `schema.type` | extra condition | widget |
    |---|---|---|
    | `boolean` | — | Bootstrap form switch (`.form-check.form-switch`) |
-   | `integer` | `maximum ≤ 100` | `<input type="range">` + live `.show-value` readout |
+   | `integer`/`number` | at most 100 steps between `minimum` and `maximum`, on `x-step` (1 for a whole number; a decimal needs one) | `<input type="range">` + live `.show-value` readout |
    | `integer` | else | `<input type="number">` with `min`/`max` |
+   | `number` | else | `<input type="number">`, `step` from `x-step` or `any` |
    | `string` | `enum` non-empty | `<select>` of enum values, each shown by its `x-enum-titles` word where the schema gives it one — a map keyed by value, so the option still posts the token |
-   | `string` | `dot === "isp.sensorConfig"` and boot `sensors` non-empty | `<select>` of `/etc/sensors/*` paths |
+   | `string` | `x-files` (a directory the camera keeps these files in) | `<select>` of its files plus whatever is configured, and an Upload… into that directory through `/upload` |
+   | `string` | `x-strings` (text items kept comma-joined) | one row per item, + Add; a text `x-special` ("none") is a switch that sets the rows aside |
+   | `string` | `x-numeric` (one number kept as text) | drawn as the `number` it is, with its bounds, `x-step` and `x-unit` |
+   | `string` | `x-row-of` (one number per row of a sibling array) | hidden; the sibling's rows carry a box each and write the joined list back |
+   | `string` | `x-list` (a fixed-length number list kept as text) | one labelled box per number (`mj-table.js`), a grid when `rows` > 1, a switch for a whole 0–1 cell |
    | `string` | `x-secret` or `writeOnly` | `<input type="password">` with a Show checkbox wired **in place** (the global toggle in `main.js` ran at load, long before this form existed) |
    | `string` | else | `<input type="text">` |
-   | `number`/`array`/`object` | — | skipped |
+   | `array` | `items` are objects **with** a `url` member | the destinations board (`mj-servers.js`, `mj-outgoing.js`): rows are addresses |
+   | `array` | `items` are objects without `url` | a table: one row per item, one labelled cell per member, typed by it (`mj-table.js`) |
+   | `array` | else | one `XxYxWxH` text row per region |
+   | `object` | — | skipped |
+
+   Which board draws an object list is decided by the **shape** `items`
+   declares, never by the key's name. The calibration tables were once drawn by
+   the destinations board, whose canonical form keeps only rows with an
+   address; none of theirs have one, so the first edit posted an empty list.
 
    Each row is `<p class="<type> mj-row">`, and the control and a bare `↺` reset
    share one flex line: `<span class="mj-ctl"><span class="mj-ctl-in">…control…
@@ -226,6 +239,26 @@ the annotations into words:
 - **`x-unit`** (`ms`, `×`, `levels`, `frames`) is printed beside the box and in
   the range under the hint. Frames are also given in seconds at the main
   stream's rate, and the text names the rate it assumed.
+
+**A unit on its own is not Auto.** Every quantity the camera declares carries
+`x-unit` — seconds, %, bytes, KiB, kbit/s, Hz, dB, °, ‰ — and every number
+row prints it: beside the box, in a slider's readout (`25%`, `Auto · 25 fps`),
+beside a number the camera keeps as text (a keyframe interval), and in the
+range under the hint (`1–300 s`). What makes a row "empty means the camera
+decides" is `x-metric` or `x-title-when`, never `x-unit`: tying the two
+together drew a real 0 — a 0 ms amplifier hold, a 0 s pre-roll — as an empty
+Auto box. `EXP.withUnit` writes ×, %, ‰ and ° against the figure and every
+other unit a space apart.
+
+**A value that is a mode, not a quantity, is said by its name.** `x-special`
+maps a value to a name — 0 on the de-jitter buffer is Passthrough, -1 on
+dehaze is From the image profile, 0 slices is Off. A slider's readout prints
+the name instead of the number, a number box prints it beside itself, and the
+line under the control lists every named value (`0: Passthrough`). An empty
+box is unset and never matches a special 0 — except on a number box with exactly
+one named value, which draws it the way the Picture page draws Auto: the box
+empty, the name as its placeholder, and emptying the box chooses it. Which decides a slider, and the
+lookup, are `EXP.sliderOf` and `EXP.specialFor` in `mj-exposure.js`.
 - **`x-title-when`** gives the field another name while a sibling holds a value,
   in `visibleWhen`'s spelling. The four ceilings are "Highest analog gain" and so
   on while auto-exposure spends them, and "Analog gain" in manual, where the same

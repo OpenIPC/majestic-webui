@@ -206,6 +206,15 @@
 	max-width: none;
 }
 
+/* On a phone the column is already narrower than the cap, and a cap that
+   binds there only cuts the chosen option ("Medium · up to 2.5 frames"). */
+@media (max-width: 575.98px) {
+	.select .form-select {
+		max-width: none;
+		padding-left: 0.5rem;
+	}
+}
+
 /* mj-settings rows put the per-field reset on the same line as the control
    (.mj-ctl); the width caps below are on the wrapper rather than on the control
    itself, or a select would stretch to the card edge.
@@ -270,6 +279,30 @@
 	opacity: 1;
 }
 
+/* A number box whose empty value has a name (x-special, one value): the name
+   is its placeholder, drawn like the Auto rows above, and the box grows to
+   hold it rather than cutting it at a number's 10rem. */
+.number.mj-named-row .mj-ctl-in,
+.number.mj-named-row .input-group {
+	max-width: 100%;
+}
+
+.number.mj-named-row .input-group {
+	flex-wrap: nowrap;
+	width: auto;
+}
+
+.number.mj-named-row .input-group > .form-control {
+	flex: 0 1 auto;
+	width: calc(var(--mj-ph, 6ch) + 1.75rem);
+	min-width: 8rem;
+}
+
+.mj-named-row .form-control::placeholder {
+	color: var(--bs-secondary-color);
+	opacity: 1;
+}
+
 /* A live row the camera answered it cannot preview: the control moves, the
    picture will not until Save, and the row says so rather than leaving the
    difference to be discovered. */
@@ -329,6 +362,142 @@
    with the column half empty beside it. Same opt-out .select.mj-wide uses. */
 .array.mj-wide .mj-ctl-in {
 	max-width: none;
+}
+
+/* A fixed-length number list (a filter's gains, a colour matrix): one
+   labelled box per number, wrapping on a narrow column; a matrix is a grid
+   of its own row length so its rows read as rows. The row takes the column's
+   width rather than a text box's cap. */
+.mj-list-row .mj-ctl-in {
+	max-width: none;
+}
+
+.mj-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .4rem .6rem;
+}
+
+.mj-list.mj-list-grid {
+	display: grid;
+	grid-template-columns: repeat(var(--mj-list-cols, 3), minmax(0, 7rem));
+}
+
+.mj-list-cell {
+	display: flex;
+	flex-direction: column;
+	gap: .15rem;
+	min-width: 4.5rem;
+	max-width: 7rem;
+	flex: 0 1 5.5rem;
+}
+
+.mj-list-name {
+	font-size: .78125rem;
+	color: var(--bs-secondary-color);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mj-list-cell .form-check-input {
+	margin: .35rem 0 0;
+}
+
+/* A list of objects with no address, drawn as a table: one bordered row per
+   item, its members as labelled cells that wrap onto more lines rather than
+   pushing the page sideways on a phone. A text member gets twice the room of
+   a number, because the text ones are names and matrices and the numbers are
+   four or five digits. */
+.mj-tbl {
+	display: flex;
+	flex-direction: column;
+	gap: .5rem;
+}
+
+.mj-tbl-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: .5rem;
+	padding: .6rem .75rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: var(--bs-border-radius);
+	background-color: var(--bs-card-bg);
+}
+
+.mj-tbl-cells {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .5rem .75rem;
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.mj-tbl-cell {
+	display: flex;
+	flex-direction: column;
+	gap: .15rem;
+	flex: 1 1 6rem;
+	min-width: 6rem;
+	max-width: 11rem;
+}
+
+.mj-tbl-cell.mj-tbl-wide {
+	flex: 2 1 12rem;
+	max-width: none;
+}
+
+/* A member drawn as a grid of numbers (the peer homography): a row of its
+   own, and cells tight enough that nine calibration figures such as
+   -0.000589854 fit three abreast on a phone. */
+.mj-tbl-cell:has(.mj-list-grid) {
+	flex: 1 0 100%;
+	max-width: none;
+}
+
+.mj-tbl-cell .mj-list-grid {
+	grid-template-columns: repeat(var(--mj-list-cols, 3), minmax(7rem, 1fr));
+	gap: .25rem;
+	max-width: 32rem;
+	/* A matrix stays a matrix: on a column too narrow for three figures the
+	   grid scrolls inside itself rather than cutting each one. */
+	overflow-x: auto;
+}
+
+.mj-tbl-cell .mj-list-grid .form-control {
+	font-size: .8125rem;
+	padding: .2rem .35rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.mj-tbl-name {
+	font-size: .78125rem;
+	color: var(--bs-secondary-color);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mj-tbl-cell .form-control,
+.mj-tbl-cell .form-select {
+	min-width: 0;
+}
+
+.mj-tbl-del {
+	flex: 0 0 auto;
+}
+
+.mj-tbl-note {
+	flex: 1 0 100%;
+	color: var(--bs-warning-text-emphasis);
+}
+
+.mj-tbl-legend {
+	display: flex;
+	flex-direction: column;
+	gap: .15rem;
+	margin-top: .4rem;
 }
 
 /* A boolean's label is a block above the switch now, like every other type's,
@@ -1339,22 +1508,46 @@ mark {
 
 .mj-cols {
 	display: flex;
-	flex-direction: row;
-	align-items: flex-start;
-	gap: 2.5rem;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 0;
 }
 
 /* basis 0 so both columns are the same width whatever they hold, and min-width
    so a long label wraps inside its column instead of widening it */
 .mj-cols > .mj-col {
-	flex: 1 1 0;
+	flex: 0 1 auto;
+	width: 100%;
 	min-width: 0;
 }
 
-/* A divider in the middle of the gutter, as the Live deck has between its two
-   panels. The negative margin puts the rule at the halfway point without taking
-   width off either column, so the two stay equal. */
-@media (min-width: 768px) {
+/* Two columns by the width the CARD has, not the window. The split used to
+   switch on at a 768px viewport, where the rail still takes a quarter of the
+   page: two 180px columns of controls, a packet-size box showing "12" beside
+   its unit, selects cut to their first letters and the page scrolling
+   sideways. The card that holds the columns is the container, and below
+   40rem of it the two stack in document order, as they do on a phone. A
+   browser with no container queries keeps the stack, which is always
+   readable. */
+:has(> .mj-cols) {
+	container-type: inline-size;
+}
+
+@container (min-width: 40rem) {
+	.mj-cols {
+		flex-direction: row;
+		align-items: flex-start;
+		gap: 2.5rem;
+	}
+
+	.mj-cols > .mj-col {
+		flex: 1 1 0;
+		width: auto;
+	}
+
+	/* A divider in the middle of the gutter, as the Live deck has between its
+	   two panels. The negative margin puts the rule at the halfway point
+	   without taking width off either column, so the two stay equal. */
 	.mj-cols > .mj-col + .mj-col {
 		margin-left: -1.25rem;
 		padding-left: 1.25rem;
@@ -1369,20 +1562,6 @@ mark {
 
 	.mj-cols.mj-solo > .mj-col + .mj-col {
 		display: none;
-	}
-}
-
-/* below md the two columns stack, which reads exactly like the single column
-   this used to collapse to: the deal keeps the fields in document order */
-@media (max-width: 767.98px) {
-	.mj-cols {
-		flex-direction: column;
-		gap: 0;
-	}
-
-	.mj-cols > .mj-col {
-		flex: 0 1 auto;
-		width: 100%;
 	}
 }
 
@@ -6405,8 +6584,14 @@ dialog.mj-modal::backdrop {
 	margin-top: 0;
 }
 
-/* Below md the map would push the roles off the card. */
-@media (max-width: 767.98px) {
+/* On a narrow card the map would push the roles off it. By the card's width,
+   not the window's: at a 768px window the settings card is 360px and the
+   row ran 70px past its edge. */
+.mj-ircut {
+	container-type: inline-size;
+}
+
+@container (max-width: 36rem) {
 	.mj-ircut-wire {
 		flex-direction: column;
 	}
