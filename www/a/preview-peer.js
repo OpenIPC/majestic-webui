@@ -946,6 +946,16 @@
 		if (armed) askOutline();
 	});
 
+	/* Is the stage armed for a rectangle: the bar's Area, or a pick on behalf
+	 * of another control? The zoom module marks the stage the same way for
+	 * both; only the checkbox tells them apart, and that is not the question. */
+	function drawArmed() {
+		const area = $('#mj-area');
+		if (area && area.checked) return true;
+		return !!(stage.classList && typeof stage.classList.contains === 'function' &&
+			stage.classList.contains('mj-armed'));
+	}
+
 	function stagePoint(e) {
 		const r = stage.getBoundingClientRect();
 		return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -964,8 +974,10 @@
 		if (!armed) return;
 		if (e.button != null && e.button > 0) return;
 		if (e.target && e.target.closest && e.target.closest(CHROME)) return;
-		const area = $('#mj-area');
-		if (area && area.checked) return;
+		/* The stage's own armed state, not the bar's checkbox: a rectangle
+		 * asked for by another control -- focus by ear's Area -- arms the
+		 * stage the same way and leaves the checkbox dark on purpose. */
+		if (drawArmed()) return;
 		const p = stagePoint(e);
 		if (!inside(p.x, p.y)) return;
 		press = { id: e.pointerId, x: p.x, y: p.y };
@@ -1010,6 +1022,9 @@
 	 * leaves the zoom; the next Esc is the page's. */
 	document.addEventListener('keydown', (e) => {
 		if (e.key !== 'Escape') return;
+		/* A rectangle being drawn is the innermost thing on the stage, and
+		 * Esc is its way out first; the zoom module's own handler takes it. */
+		if (drawArmed()) return;
 		if (O.on || O.pending) { overlayOff(); e.stopPropagation(); return; }
 		if (armed) { setArmed(false); e.stopPropagation(); return; }
 		if (!note.hidden) { clearNote(); e.stopPropagation(); }

@@ -391,16 +391,33 @@
 		region = r;
 		setPressed(!!r);
 		if (changed && ear) {
-			/* The best from one source means nothing to the other. */
+			/* The best from one source means nothing to the other -- and
+			 * neither does a reading of the other already on its way. The
+			 * poll in flight is disowned and a fresh one asks the new
+			 * source, so the first number the reset reducer sees is the new
+			 * source's rather than a whole-frame value seeding the area's
+			 * best. */
 			ear.reset(performance.now());
 			paint({ now: null, best: null, phase: 'listening' });
 			fails = 0;
+			if (running && !paused) {
+				seq++;
+				if (inflight) { try { inflight.abort(); } catch (e) { /* done */ } inflight = null; }
+				if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+				poll();
+			}
 		}
 		place();
 		if (changed) say(r ? 'Listening to the outlined area.' : 'Listening to the whole frame.', 3000);
 	}
 
+	/* Every pick has a token, and a rectangle is applied only under the token
+	 * it was drawn under: a map that lands after the pick was withdrawn, after
+	 * another pick began, or after the mode stopped and started again would
+	 * otherwise install an old drag into a new session. */
+	let pickGen = 0;
 	function cancelPick() {
+		pickGen++;
 		if (picking) { const c = picking; picking = null; c(); }
 		setPressed(!!region);
 	}
@@ -414,9 +431,17 @@
 			if (!had) say('Listening to the whole frame.', 3000);
 			return;
 		}
+		/* The rectangle is in the pixels of the stream that was on screen
+		 * when it was drawn, so it is placed only while that is still the
+		 * stream on screen: through another stream's map it would land on
+		 * the wrong cells and nothing would say so. */
+		const tok = pickGen, at = shownStream();
 		geometryFresh().then(() => {
-			if (!running || !grid) { setPressed(!!region); return; }
-			const g = geom && geom.at === shownStream() ? geom : null;
+			if (tok !== pickGen || !running || !grid || at === null || at !== shownStream()) {
+				setPressed(!!region);
+				return;
+			}
+			const g = geom && geom.at === at ? geom : null;
 			const unit = g ? FA.fromShown(rect, { map: g.map, group: g.group, declared: g.declared, decoded: rect.frame }) : null;
 			const cells = unit ? FA.cells(unit, grid.rows, grid.cols) : null;
 			const bounds = cells ? FA.bounds(cells, grid.rows, grid.cols) : null;
@@ -487,22 +512,26 @@
 	 * from the whole frame it is a chip with no statistic; from a rectangle it
 	 * is a rectangle with nothing measurable in it. */
 	function read(init) {
-		if (!region || !grid) {
+		/* The selection as it was when this request left, so its answer is
+		 * read against the cells it was asked for, not whatever the button
+		 * has been pressed to since. */
+		const r = region, g = grid;
+		if (!r || !g) {
 			return api(URL, init)
-				.then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+				.then((res) => (res.ok ? res.text() : Promise.reject(res.status)))
 				.then((text) => ({ v: Ear.readValue(text) }));
 		}
 		return api(ZONES_URL, init)
-			.then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-			.then((g) => {
-				if (!FA.usable(g)) return { v: undefined, area: true };
-				if (g.rows !== grid.rows || g.cols !== grid.cols) {
+			.then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+			.then((z) => {
+				if (!FA.usable(z)) return { v: undefined, area: true };
+				if (z.rows !== g.rows || z.cols !== g.cols) {
 					/* Not the grid the rectangle was laid on. The cells mean
 					 * nothing on this one, so the whole frame it is. */
-					setRegion(null);
+					if (region === r) setRegion(null);
 					return { v: undefined, area: true };
 				}
-				const m = FA.measure(g, region.cells);
+				const m = FA.measure(z, r.cells);
 				return { v: m ? m.value : undefined, area: true };
 			});
 	}
@@ -701,6 +730,7 @@
 			if (picking) { cancelPick(); return; }
 			if (region) { setRegion(null); return; }
 			if (!running || !grid) return;
+			pickGen++;
 			picking = ZOOM.pickRect(picked);
 			if (!picking) { say('Could not start a drag on the picture.', 4000); return; }
 			setPressed(true);

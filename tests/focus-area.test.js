@@ -79,7 +79,7 @@ group('which cells a rectangle covers: by their centres');
 		A.cells({ x0: 0.9, y0: 0, x1: 1, y1: 0.1 }, 2, 3), { r0: 0, r1: 0, c0: 2, c1: 2 });
 	eq('the bottom-left corner',
 		A.cells({ x0: 0, y0: 0.9, x1: 0.1, y1: 1 }, 2, 3), { r0: 1, r1: 1, c0: 0, c1: 0 });
-	eq('on the lab grid a 2 % square in the middle is one cell',
+	eq('on a 15 x 17 grid a 2 % square in the middle is one cell',
 		A.cells({ x0: 0.5, y0: 0.5, x1: 0.52, y1: 0.52 }, 15, 17), { r0: 7, r1: 7, c0: 8, c1: 8 });
 	eq('and a whole frame is all 255',
 		A.cells({ x0: 0, y0: 0, x1: 1, y1: 1 }, 15, 17), { r0: 0, r1: 14, c0: 0, c1: 16 });

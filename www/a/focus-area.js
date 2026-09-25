@@ -21,8 +21,8 @@
  *
  * The per-cell number is the raw editor's blend of the two second-stage sums,
  * (h2 * 54 + v2 * 10) / 64, whole. Averaged over the covered cells it comes
- * out within a percent of the whole-frame metric on the lab camera, so the two
- * sources are on one scale. Cells with a clipped pixel are left out: a lamp or
+ * out within a percent of the whole-frame metric, measured on a hi3516ev300,
+ * so the two sources are on one scale. Cells with a clipped pixel are left out: a lamp or
  * the sun inside the rectangle pins its cell's sums at the top and the lens
  * stops mattering. So are cells darker than 15 % of the grid's median luma,
  * which measure nothing but noise. The median is the whole grid's, not the

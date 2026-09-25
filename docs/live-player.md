@@ -203,9 +203,11 @@ taken ahead of every channel's crop) and is snapped to the cells whose centres
 it holds; `focus-area.js` is that arithmetic, pure and tested. From then on the
 poll reads `/api/v1/isp/af-zones.json` and feeds the reducer the mean of those
 cells' blended sums, leaving out cells with a clipped pixel and cells under 15%
-of the grid's median luma, the raw editor's rule. On the lab camera that mean
-over every cell is within a percent of the whole-frame number, so the two
-sources share a scale; a switch between them resets the reducer regardless. An
+of the grid's median luma, the raw editor's rule. Measured on a hi3516ev300,
+that mean over every cell is within a percent of the whole-frame number, so the
+two sources share a scale; a switch between them resets the reducer regardless,
+and disowns the poll in flight so the first reading the reset sees is the new
+source's. An
 outline on the stage shows the cells, not the drag, and follows every pan and
 zoom. A rectangle with nothing measurable in it is `null`, which the reducer
 hears as no reading (silence, "no reading") while the note says why; it is not
