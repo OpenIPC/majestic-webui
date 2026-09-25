@@ -100,19 +100,30 @@
 	// describe the picture right now. False while paused and whenever the
 	// state is unknown, because in both the gauges are a reading from some
 	// earlier moment.
+	//
+	// Each verdict is written the way #581 asked: `head` says what the owner is
+	// looking at, `tail` what to do about it -- "nothing" is an answer, and the
+	// common one -- and `why` carries the reason in the camera's terms, which
+	// the page keeps behind a "?" so the first line stays readable. A tail that
+	// explained the mechanism ("the sensor is amplifying, so widening would
+	// only add noise") was accurate and told nobody what to do next.
 	function describe(s, saved, autoOn) {
 		if (!s || s.state == null) {
 			if (autoOn === false)
 				return { on: false, known: true, measuring: false, tone: 'off',
-					head: 'Off', tail: 'the camera is not tuning itself',
+					head: 'Off', tail: 'set the picture with the sliders',
+					why: 'Automatic tuning is switched off, so contrast and haze ' +
+						'correction stay where the sliders put them.',
 					moved: [] };
 			if (autoOn === true)
 				return { on: true, known: false, measuring: false,
 					tone: 'warn', head: 'No answer',
-					tail: 'the camera is not reporting what it is doing',
+					tail: 'reload the page if this lasts',
+					why: 'Automatic tuning is on, but the camera is not reporting ' +
+						'what it is doing.',
 					moved: [] };
 			return { on: false, known: false, measuring: false, tone: 'off',
-				head: '', tail: '', moved: [] };
+				head: '', tail: '', why: '', moved: [] };
 		}
 
 		const mv = moved(s, saved);
@@ -126,26 +137,38 @@
 			// read-outs that claim to be where the camera is now.
 			return { on: true, known: true, measuring: false, tone: 'off',
 				head: 'Paused',
-				tail: 'standing aside while you adjust the picture',
+				tail: 'it resumes on its own',
+				// Says nothing about WHY it paused: the state carries no cause,
+				// and it has been seen with nobody adjusting anything (#590).
+				why: 'Automatic tuning is paused and resumes on its own. ' +
+					'Readings from before the pause are not shown.',
 				moved: [] };
 		case UNAVAILABLE:
 			// On, and has nothing to go on. Said plainly rather than dressed
 			// as calm: a camera whose sampling source never answers sits here
 			// for ever, and "nothing to do" would hide that completely.
 			return { on: true, known: true, measuring: true, tone: 'warn', head: 'No reading',
-				tail: 'nothing measurable from the picture yet', moved: mv };
+				tail: 'if this lasts, check that the video stream is running',
+				why: 'Automatic tuning is on but has nothing measurable from the ' +
+					'picture yet.',
+				moved: mv };
 		case IDLE:
-			return { on: true, known: true, measuring: true, tone: 'ok', head: 'Nothing to do',
-				tail: 'the picture already uses the range it has',
+			return { on: true, known: true, measuring: true, tone: 'ok', head: 'Picture is fine',
+				tail: 'nothing to do',
+				why: 'The picture already uses the brightness range it has, so the ' +
+					'camera is changing nothing.',
 				moved: mv };
 		case WORKING:
 			// The moved knobs, when there are any, because they are the one
 			// thing here the figures below do NOT say: the figures describe
 			// the picture, this describes what is being done to it.
-			return { on: true, known: true, measuring: true, tone: 'work', head: 'Widening the picture',
-				tail: mv.length
-					? mv.map(m => m.label + ' ' + m.live).join(', ')
-					: 'reaching for more range',
+			return { on: true, known: true, measuring: true, tone: 'work',
+				head: 'Improving a flat picture',
+				tail: 'nothing to do',
+				why: 'The camera is widening contrast and haze correction so the ' +
+					'picture uses more of its brightness range' +
+					(mv.length ? ': ' + mv.map(m => m.label + ' ' + m.live).join(', ') +
+						' now.' : '.'),
 				moved: mv };
 		case HOLDING:
 			// Reached its limit, which is a GOOD outcome dressed as a bad one
@@ -157,12 +180,26 @@
 			// is as good as this scene allows; the two shares are on the
 			// Shadows and Highlights figures, labelled, for anyone who wants
 			// to see which end ran out first.
-			return { on: true, known: true, measuring: true, tone: 'ok', head: 'At its limit',
-				tail: 'as wide as this scene goes without losing detail',
+			return { on: true, known: true, measuring: true, tone: 'ok',
+				head: 'As good as this scene gets',
+				tail: 'nothing to do',
+				// The figures are named only when the camera published them:
+				// figures() leaves an absent share out, and a reason pointing
+				// at a figure that is not there sends the reader looking.
+				why: 'Stretching the picture any further would lose detail in the ' +
+					'shadows or the highlights' +
+					(s.clipLo != null && s.clipHi != null
+						? '; the figures below show which end ran out.' : '.'),
 				moved: mv };
 		case LOWLIGHT:
-			return { on: true, known: true, measuring: true, tone: 'warn', head: 'Too dark to help',
-				tail: 'the sensor is amplifying, so widening would only add noise',
+			// The one verdict with something to DO, and the thing to do is
+			// light: the picture has run out of it, and no setting on this
+			// card makes more.
+			return { on: true, known: true, measuring: true, tone: 'warn',
+				head: 'Too dark to improve',
+				tail: 'add light: switch to Night mode or turn on the lamp',
+				why: 'The sensor is already amplifying the picture, so widening ' +
+					'it would only add noise.',
 				moved: mv };
 		}
 		// A verdict this build does not know. Not silence: the camera is
@@ -171,7 +208,10 @@
 		return { on: true, known: true, measuring: false, tone: 'off',
 			head: 'Tuning',
 			tail: 'the camera reports a state this page does not know (' +
-				s.state + ')', moved: mv };
+				s.state + ')',
+			why: 'The camera is newer than this page\'s description of it; ' +
+				'automatic tuning is still running.',
+			moved: mv };
 	}
 
 	// The measurement behind the sentence, as figures a person can read.
@@ -201,17 +241,21 @@
 	function figures(s, measuring) {
 		if (!s || !measuring) return [];
 		const out = [];
+		// Named for what they mean to someone looking at the picture (#581):
+		// "Range in use 84 of 255" was a luma span on a scale nobody reading
+		// it has, and "Sensor headroom" a controller's term for how much light
+		// is left before the sensor starts amplifying.
 		if (s.span != null)
-			out.push({ key: 'span', label: 'Range in use',
-				value: s.span + ' of 255' });
+			out.push({ key: 'span', label: 'Brightness range used',
+				value: Math.round(Math.max(0, Math.min(255, s.span)) / 255 * 100) + '%' });
 		if (s.clipLo != null)
-			out.push({ key: 'clipLo', label: 'Shadows',
+			out.push({ key: 'clipLo', label: 'Lost in shadows',
 				value: pct(s.clipLo) });
 		if (s.clipHi != null)
-			out.push({ key: 'clipHi', label: 'Highlights',
+			out.push({ key: 'clipHi', label: 'Lost in highlights',
 				value: pct(s.clipHi) });
 		if (s.headroom != null)
-			out.push({ key: 'headroom', label: 'Sensor headroom',
+			out.push({ key: 'headroom', label: 'Light to spare',
 				value: s.headroom + '%' });
 		return out;
 	}
