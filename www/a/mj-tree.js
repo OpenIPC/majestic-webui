@@ -368,6 +368,12 @@
 			{ id: 'picture', label: 'Clarity', keys: ['dehaze'] },
 			{ id: 'exposure', label: 'Exposure and gain', fold: 'More exposure settings',
 				keys: ['exposure', 'aGain', 'dGain', 'ispGain'] },
+			// Ahead of How it reacts, not after it: the fold is dealt into two
+			// columns and cut only between headings, and last it left four
+			// rows beside seven -- 560px of column beside 1030. Here it closes
+			// the first column under the gains.
+			{ id: 'tuning', label: 'For tuning engineers', fold: 'More exposure settings',
+				keys: ['externalTuner'] },
 			// `activeWhen` is the note's claim as a condition: the page sets
 			// these rows back while the mode says otherwise. They stay
 			// editable -- the daemon writes them in manual too, so a value is
@@ -376,8 +382,6 @@
 				fold: 'More exposure settings',
 				activeWhen: { field: 'aeMode', equals: 'auto' },
 				keys: ['meterRect', 'aeStrategy', 'aeSpeed', 'aeTolerance', 'aeBlackDelay', 'aeWhiteDelay'] },
-			{ id: 'tuning', label: 'For tuning engineers', fold: 'More exposure settings',
-				keys: ['externalTuner'] },
 		],
 	};
 	function sectionGroups(section) { return SECTION_GROUPS[section] || null; }
