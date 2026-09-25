@@ -250,17 +250,25 @@ Three rules keep this true:
   than keep a stale one. In the mode `x-title-when` names, it drops it too:
   there the ceiling auto-exposure works inside is not what runs.
 
-The order of the isp card on the Live leaf is `SECTION_GROUPS.isp` in
+The order of the isp card on the Picture leaf is `SECTION_GROUPS.isp` in
 `mj-tree.js`, by how often an owner needs each row:
 
 1. the two mode switches, with no heading;
-2. Exposure and gain;
-3. How it reacts;
-4. Picture;
+2. Clarity (dehaze);
+3. Exposure and gain;
+4. How it reacts;
 5. For tuning engineers: the external-tuner switch.
 
-That switch sat second, straight under Exposure mode, because schema order put
-it there. The headings are worded to stay true in both exposure modes. Every
+The last three are folded behind **More exposure settings** (`fold` on the
+group, #585): eleven exposure rows under the picture read as the page's
+subject. The fold opens by itself whenever a row in it holds a value away from
+stock, an unsaved edit or a search hit (`openGroupFolds()`, run from
+`paintStock()`), and never shuts by itself, so a setting in force is never out
+of sight. Picking Manual fills three of those rows and so opens it. The body
+is `hidden="until-found"`, so find-in-page reaches it too.
+
+The tuning switch sat second, straight under Exposure mode, because schema
+order put it there. The headings are worded to stay true in both exposure modes. Every
 lifted isp key has to be named in a group, and `tests/tree.test.js` fails if
 one is not. An unnamed key is drawn ahead of the first heading, because after
 the last one it would read as part of that group.
