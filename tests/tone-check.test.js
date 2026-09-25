@@ -79,7 +79,8 @@ group('tone-check: running and idle');
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
 	}, STOCK, true);
 	check('idle is on', d.on === true);
-	check('idle reads as nothing to do', d.head === 'Nothing to do');
+	check('idle says the picture is fine', d.head === 'Picture is fine');
+	check('and that there is nothing to do', d.tail === 'nothing to do');
 	// The span is a FIGURE, not a clause: figures() prints it under this
 	// sentence with a label, and a number in both places is furniture.
 	check('and leaves the span to the figure row', d.tail.indexOf('195') < 0);
@@ -101,7 +102,7 @@ group('tone-check: working');
 		'image.luminance': 42, 'image.saturation': 50,
 	});
 	const d = tc.describe(s, saved);
-	check('working says it is widening', d.head === 'Widening the picture');
+	check('working says what it is improving', d.head === 'Improving a flat picture');
 	check('working is an active tone', d.tone === 'work');
 	// The two that actually differ from the operator's saved values, and not
 	// the two that match them — a panel that lists all four teaches the
@@ -109,8 +110,11 @@ group('tone-check: working');
 	check('names only the knobs that moved',
 		d.moved.length === 2 &&
 		d.moved.map(m => m.key).sort().join(',') === 'dehaze,saturation');
-	check('the tail names them with their live values',
-		d.tail.indexOf('dehaze 189') >= 0 && d.tail.indexOf('saturation 67') >= 0);
+	// The moved settings are the reason, not the instruction: behind the "?"
+	// (#581), with their live values, while the first line says to leave it.
+	check('the reason names them with their live values',
+		d.why.indexOf('dehaze 189') >= 0 && d.why.indexOf('saturation 67') >= 0);
+	check('and the first line keeps them out of the way', d.tail === 'nothing to do');
 	check('and carries the baseline it compared against',
 		d.moved[0].base === 125 && d.moved[0].live === 189);
 }
@@ -142,10 +146,11 @@ group('tone-check: the two standing-down states');
 		state: 3, headroom: 100, span: 210, clipLo: 40670, clipHi: 6291,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
 	}, STOCK, true);
-	check('holding says it has reached the limit', d.head === 'At its limit');
+	check('holding says it is as good as the scene gets', d.head === 'As good as this scene gets');
 	check('holding is not dressed as a fault', d.tone === 'ok');
-	check('and states it in plain words',
-		d.tail.indexOf('detail') >= 0);
+	check('and that there is nothing to do', d.tail === 'nothing to do');
+	check('with the reason in plain words behind the "?"',
+		d.why.indexOf('detail') >= 0);
 	check('and quotes neither clipping share',
 		d.tail.indexOf('4.1') < 0 && d.tail.indexOf('0.6') < 0 &&
 		d.tail.indexOf('%') < 0);
@@ -155,11 +160,16 @@ group('tone-check: the two standing-down states');
 		state: 4, headroom: 20, span: 96, clipLo: 0, clipHi: 0,
 		dehaze: 125, contrast: 50, luminance: 50, saturation: 50,
 	}, STOCK, true);
-	check('low light says so', d.head === 'Too dark to help');
+	check('low light says so', d.head === 'Too dark to improve');
 	check('low light warns -- it is the state where it cannot help',
 		d.tone === 'warn');
-	check('and says why in words, leaving the number to the figure',
-		d.tail.indexOf('noise') >= 0 && d.tail.indexOf('20%') < 0);
+	// The one state with something to do, and the thing to do is light:
+	// what #581 asked for, "Too dark -- turn on the lamp or Night mode".
+	check('and says what to do about it',
+		/Night mode/.test(d.tail) && /lamp/.test(d.tail));
+	check('with the mechanism behind the "?", not in the first line',
+		d.why.indexOf('noise') >= 0 && d.tail.indexOf('noise') < 0 &&
+		d.tail.indexOf('20%') < 0);
 }
 {
 	const d = tc.describe({
@@ -246,7 +256,8 @@ group('tone-check: the figures under the sentence');
 	check('four gauges, four figures', f.length === 4);
 	check('in the order the picture is read in',
 		f.map(x => x.key).join(',') === 'span,clipLo,clipHi,headroom');
-	check('the range carries its scale', f[0].value === '172 of 255');
+	check('the range is a share of the whole scale, not a luma span',
+		f[0].value === '67%' && f[0].value.indexOf('255') < 0);
 	check('the clipping shares are percentages',
 		f[1].value === '2.1%' && f[2].value === '0.3%');
 	check('headroom is a percentage of the range, not a gain',
@@ -272,7 +283,7 @@ group('tone-check: the figures under the sentence');
 	const f = tc.figures({ state: 1, span: 0, clipLo: 0, clipHi: 0,
 		headroom: 0 }, true);
 	check('a measured zero is printed, not dropped', f.length === 4);
-	check('a black picture reads as a zero range', f[0].value === '0 of 255');
+	check('a black picture reads as a zero range', f[0].value === '0%');
 	check('and no headroom reads as none', f[3].value === '0%');
 }
 {
@@ -287,6 +298,23 @@ group('tone-check: the figures under the sentence');
 }
 {
 	check('no sample, no figures', tc.figures(null, true).length === 0);
+}
+
+group('tone-check: every verdict says what to do, and keeps the why apart (#581)');
+{
+	const base = { headroom: 50, span: 120, clipLo: 0, clipHi: 0,
+		dehaze: 125, contrast: 50, luminance: 50, saturation: 50 };
+	const S = tc.STATE;
+	const all = [S.UNAVAILABLE, S.IDLE, S.WORKING, S.HOLDING, S.LOWLIGHT, S.PAUSED]
+		.map(st => tc.describe(Object.assign({ state: st }, base), STOCK, true))
+		.concat([tc.describe(null, STOCK, true), tc.describe(null, STOCK, false)]);
+	check('every verdict has a first line to act on',
+		all.every(d => d.head && d.tail));
+	check('and a reason for the "?"', all.every(d => typeof d.why === 'string' && d.why));
+	// A first line quoting the camera's scale or a raw share is a reading, not
+	// an instruction; those belong to the figures and the "?".
+	check('no first line carries a raw number or a luma scale',
+		all.every(d => !/\d|255|%/.test(d.head + d.tail)));
 }
 
 group('tone-check: the span band drawn over the histogram');

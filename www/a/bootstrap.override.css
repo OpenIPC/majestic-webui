@@ -2832,6 +2832,20 @@ button.mj-osd-chip,
 	color: var(--bs-tertiary-color);
 }
 
+/* The reason behind the Tone verdict, opened from its "?" (#581). The size and
+   colour of a setting's hint, since it is the same tier of text. */
+.mj-tone-why {
+	margin-top: 0.35rem;
+	font-size: 0.78125rem;
+	line-height: 1.45;
+	color: var(--bs-secondary-color);
+}
+
+.mj-tone-why[hidden],
+.mj-tone-status .mj-help[hidden] {
+	display: none;
+}
+
 .mj-scene-status b {
 	font-weight: 600;
 	color: var(--bs-secondary-color);

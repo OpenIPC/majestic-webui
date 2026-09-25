@@ -362,9 +362,17 @@ could not read the camera would be a control that sometimes does nothing.
 ### The sentence and the figures under it
 
 Automatic renders a verdict and then the measurement it is a verdict on, and
-**no number appears in both**. `describe()` returns the sentence in plain
-words; `figures()` returns the four labelled readings — range in use, shadows,
-highlights, sensor headroom.
+**no number appears in both**. `describe()` returns the sentence as **what you
+see, then what to do** (#581): `head` is the verdict ("Too dark to improve"),
+`tail` the instruction ("add light: switch to Night mode or turn on the lamp"),
+and "nothing to do" is an answer, the usual one. The reason, in the camera's
+terms, is `why`, kept behind a "?" beside the sentence, so the first line stays
+readable. A tail that explained the mechanism ("the sensor is amplifying, so
+widening would only add noise") was accurate and told nobody what to do next.
+`tests/tone-check.test.js` holds every verdict to a head, a tail and a `why`,
+with no raw number or luma scale in the first line. `figures()` returns the
+four labelled readings in the same words: brightness range used, lost in
+shadows, lost in highlights, light to spare.
 
 The split is not cosmetic. The sentence used to carry the numbers, and the
 state where that mattered most read *"Holding back — stretching further would
@@ -372,8 +380,8 @@ clip — 2.1% crushed and 0.3% blown"*. It was reported, correctly, as useless:
 it reads as a fault report when the camera has in fact reached the best this
 scene allows, it names its failure mode in jargon, and it quotes two shares
 against budgets the page does not hold and should not learn. It is now
-*"At its limit — as wide as this scene goes without losing detail"*, with the
-two shares under it as Shadows and Highlights. A figure repeated two lines
+*"As good as this scene gets — nothing to do"*, with the reason behind the "?"
+and the two shares under it as Lost in shadows and Lost in highlights. A figure repeated two lines
 below its own label is furniture, and the sentence that has to carry one
 cannot be written in plain words.
 

@@ -2214,10 +2214,27 @@
 		const row = el('div', 'mj-scene-status mj-tone-status');
 		row.hidden = true;
 		toneAutomatic.push(row);
-		row.innerHTML = '<span class="mj-pip"></span><span></span>';
+		// The verdict and what to do on the line; the reason, in the camera's
+		// terms, behind the "?" (#581) -- the same mark and the same fold the
+		// setting rows use for their longer text.
+		row.innerHTML = '<span class="mj-pip"></span><span class="mj-tone-said"></span>' +
+			'<button type="button" class="mj-help" aria-expanded="false" ' +
+			'aria-controls="mj-tone-why" aria-label="Why">?</button>';
 		container.appendChild(row);
 		const pip = row.querySelector('.mj-pip');
-		const text = row.querySelector('span:last-child');
+		const text = row.querySelector('.mj-tone-said');
+		const whyBtn = row.querySelector('.mj-help');
+		const why = el('div', 'mj-tone-why');
+		why.id = 'mj-tone-why';
+		why.hidden = true;
+		toneAutomatic.push(why);
+		container.appendChild(why);
+		let whyOpen = false;
+		whyBtn.addEventListener('click', () => {
+			whyOpen = !whyOpen;
+			whyBtn.setAttribute('aria-expanded', whyOpen ? 'true' : 'false');
+			why.hidden = !whyOpen || row.hidden;
+		});
 
 		// The measurement the sentence above is a verdict on. Rebuilt rather
 		// than updated in place because the SET of figures changes with the
@@ -2254,6 +2271,7 @@
 			// only one where the page does not know.
 			if (!s || !s.ok || !s.tone) {
 				row.hidden = true;
+				why.hidden = true;
 				paintFigures([]);
 				lastTone = null;
 				return;
@@ -2303,6 +2321,7 @@
 				pushLive();
 			}
 			row.hidden = !(auto && d.known);
+			why.hidden = !whyOpen || row.hidden;
 			// Hidden with the sentence, and empty whenever the sentence is
 			// not a claim about the picture right now: figures() enforces the
 			// second half itself, so a pause empties the row rather than
@@ -2313,6 +2332,8 @@
 			if (!d.known) { lastTone = null; return; }
 			pip.className = 'mj-pip mj-pip-' + d.tone;
 			text.innerHTML = '<b>' + esc(d.head) + '</b> \u2014 ' + esc(d.tail);
+			whyBtn.hidden = !d.why;
+			why.textContent = d.why || '';
 			// Kept only while the camera is actually measuring. Paused, the
 			// actuator gauges are as frozen as the span beside them, and
 			// handing those to the take-over button would seed the sliders
@@ -2468,7 +2489,7 @@
 			'<span class="mj-luma-band" hidden><i></i></span>' +
 			'</div>' +
 			'<div class="mj-luma-read"><span class="mj-luma-verdict"></span>' +
-			'<span class="mj-luma-scale">Y&#8242; 0&#8211;255</span></div>';
+			'<span class="mj-luma-scale">dark &#8594; bright</span></div>';
 		container.appendChild(wrap);
 
 		const pathEl = wrap.querySelector('.mj-luma-path');
@@ -2499,11 +2520,14 @@
 				clipL.hidden = !lo;
 				clipR.hidden = !hi;
 				const parts = [];
-				if (lo) parts.push((r.low * 100).toFixed(1) + '% crushed');
-				if (hi) parts.push((r.high * 100).toFixed(1) + '% blown');
+				// In the words the Tone figures use (#581): "crushed", "blown"
+				// and "clipping" are an image engineer's, and a mean on the
+				// 0-255 luma scale is a number with no scale on screen.
+				if (lo) parts.push((r.low * 100).toFixed(1) + '% lost in shadows');
+				if (hi) parts.push((r.high * 100).toFixed(1) + '% lost in highlights');
 				verdict.className = 'mj-luma-verdict' + (parts.length ? ' mj-luma-warn' : ' mj-luma-ok');
-				verdict.textContent = parts.length ? parts.join(' · ') : 'no clipping';
-				if (meanEl) meanEl.textContent = 'mean ' + Math.round(r.mean);
+				verdict.textContent = parts.length ? parts.join(' · ') : 'no detail lost';
+				if (meanEl) meanEl.textContent = 'average ' + Math.round(r.mean / 255 * 100) + '%';
 			},
 		});
 		// Torn down with the rest of the leaf, so a section change does not
@@ -3006,7 +3030,7 @@
 			// "Tone", not "Scene": the group leads with who is driving, and
 			// the presets are one of the two things that can be under that.
 			renderScene(
-				liveGroup(colScene, 'Tone', 'who is driving the picture'),
+				liveGroup(colScene, 'Tone', 'automatic or by hand'),
 				toneFields);
 		}
 
@@ -3014,7 +3038,7 @@
 			// The group's note slot carries the running mean rather than a
 			// caption — a number that changes is worth more there than a word
 			// that does not.
-			const lumaBody = liveGroup(colLuma, 'Luma', 'mean —');
+			const lumaBody = liveGroup(colLuma, 'Luma', 'average —');
 			const note = lumaBody.parentNode.querySelector('.mj-live-note');
 			if (note) note.className = 'mj-live-note mj-luma-mean';
 			renderLuma(lumaBody, preview);
