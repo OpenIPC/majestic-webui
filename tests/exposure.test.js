@@ -114,4 +114,35 @@ check('a signed range', EXP.rangeText(-45, 45, '°') === '-45–45°');
 check('a range with no unit is bare', EXP.rangeText(0.2, 4, '') === '0.2–4');
 check('an unbounded end is no range', EXP.rangeText(0, undefined, 's') === '');
 
+group('a value that names a mode is said by its name');
+
+const JIT = { type: 'integer', minimum: 0, maximum: 500, 'x-unit': 'ms', 'x-special': { '0': 'Passthrough' } };
+const DEH = { type: 'integer', minimum: -1, maximum: 255, 'x-special': { '0': 'Off', '-1': 'From the image profile' } };
+check('0 on the buffer is Passthrough', EXP.specialFor(JIT, '0') === 'Passthrough');
+check('a number compares as a number', EXP.specialFor(JIT, 0) === 'Passthrough');
+check('-1 on dehaze is the profile', EXP.specialFor(DEH, '-1') === 'From the image profile');
+check('an ordinary value has no name', EXP.specialFor(JIT, '60') === '');
+// An empty box is unset, and Number('') is 0 — which would call it Passthrough.
+check('an empty box is not the special 0', EXP.specialFor(JIT, '') === '');
+check('a field with none says nothing', EXP.specialFor({ type: 'integer' }, 0) === '');
+check('the list is in value order with units',
+	EXP.specialsText(DEH) === '-1: From the image profile · 0: Off');
+check('the value is bare, not in its unit', EXP.specialsText(JIT) === '0: Passthrough');
+
+group('a slider is at most a hundred steps, on the camera\'s grain');
+
+const sl = (o) => EXP.sliderOf(o);
+check('0–100 whole numbers is a slider', !!sl({ type: 'integer', minimum: 0, maximum: 100 }));
+check('no minimum on a whole number starts at 0',
+	sl({ type: 'integer', maximum: 64 }).min === 0);
+// The OSD position that took -51: bounded now, and a slider.
+check('-16–16 is a slider', !!sl({ type: 'integer', minimum: -16, maximum: 16 }));
+check('0–2000 ms is a box', sl({ type: 'integer', minimum: 0, maximum: 2000 }) === null);
+check('dehaze -1–255 is a box', sl(DEH) === null);
+const G = sl({ type: 'number', minimum: 0.2, maximum: 4, 'x-step': 0.1 });
+check('a lamp curve on a 0.1 step is a slider', !!G && G.step === 0.1 && G.min === 0.2);
+check('a decimal with no step is a box', sl({ type: 'number', minimum: 0, maximum: 90 }) === null);
+check('a whole number with no maximum is a box', sl({ type: 'integer', minimum: 0 }) === null);
+check('text is never a slider', sl({ type: 'string', maximum: 5 }) === null);
+
 done();

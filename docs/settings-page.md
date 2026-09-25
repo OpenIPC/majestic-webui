@@ -58,9 +58,9 @@ boot tag.
    | `schema.type` | extra condition | widget |
    |---|---|---|
    | `boolean` | — | Bootstrap form switch (`.form-check.form-switch`) |
-   | `integer` | `maximum ≤ 100` | `<input type="range">` + live `.show-value` readout |
+   | `integer`/`number` | at most 100 steps between `minimum` and `maximum`, on `x-step` (1 for a whole number; a decimal needs one) | `<input type="range">` + live `.show-value` readout |
    | `integer` | else | `<input type="number">` with `min`/`max` |
-   | `number` | — | `<input type="number" step="any">` with `min`/`max` |
+   | `number` | else | `<input type="number">`, `step` from `x-step` or `any` |
    | `string` | `enum` non-empty | `<select>` of enum values, each shown by its `x-enum-titles` word where the schema gives it one — a map keyed by value, so the option still posts the token |
    | `string` | `dot === "isp.sensorConfig"` and boot `sensors` non-empty | `<select>` of `/etc/sensors/*` paths |
    | `string` | `x-secret` or `writeOnly` | `<input type="password">` with a Show checkbox wired **in place** (the global toggle in `main.js` ran at load, long before this form existed) |
@@ -245,6 +245,14 @@ decides" is `x-metric` or `x-title-when`, never `x-unit`: tying the two
 together drew a real 0 — a 0 ms amplifier hold, a 0 s pre-roll — as an empty
 Auto box. `EXP.withUnit` writes ×, %, ‰ and ° against the figure and every
 other unit a space apart.
+
+**A value that is a mode, not a quantity, is said by its name.** `x-special`
+maps a value to a name — 0 on the de-jitter buffer is Passthrough, -1 on
+dehaze is From the image profile, 0 slices is Off. A slider's readout prints
+the name instead of the number, a number box prints it beside itself, and the
+line under the control lists every named value (`0: Passthrough`). An empty
+box is unset and never matches a special 0. Which decides a slider, and the
+lookup, are `EXP.sliderOf` and `EXP.specialFor` in `mj-exposure.js`.
 - **`x-title-when`** gives the field another name while a sibling holds a value,
   in `visibleWhen`'s spelling. The four ceilings are "Highest analog gain" and so
   on while auto-exposure spends them, and "Analog gain" in manual, where the same

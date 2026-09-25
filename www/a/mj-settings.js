@@ -10315,6 +10315,14 @@
 			? window.MajesticFps.boundFor(sub, siblingSize(dot, 'size'))
 			: null;
 		if (isNum(fpsBound)) sub = Object.assign({}, sub, { maximum: fpsBound });
+		// Whether this number is a slider, and on what track: at most a
+		// hundred steps on the camera's own grain (EXP.sliderOf). A value
+		// with a name of its own (x-special) is said by that name wherever
+		// the row prints its figure.
+		const sliderSpec = EXP ? EXP.sliderOf(sub)
+			: (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100
+				? { min: isNum(sub.minimum) ? sub.minimum : 0, max: sub.maximum, step: 1 } : null);
+		const specialOf = (v) => EXP ? EXP.specialFor(sub, v) : '';
 
 		if (live && type === 'integer' && isNum(sub.maximum)) {
 			// The detent slider. Its fill runs from the schema's own default to
@@ -10447,7 +10455,7 @@
 				control._set = (v) => { control.checked = toBool(v); paintState(); };
 				paintState();
 			}
-		} else if (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100) {
+		} else if (sliderSpec) {
 			p = el('p', 'range mj-row' + liveCls);
 			// A frame rate of 0 is this field's own declared default — the
 			// sensor's rate, which the camera names beside it — and a track
@@ -10459,13 +10467,13 @@
 			// schema still puts the default outside its own range.
 			const min = (isNum(sub['x-fps-sensor']) && Number(sub.default) === 0)
 				? 0
-				: (isNum(sub.minimum) ? sub.minimum : 0);
-			const max = sub.maximum;
+				: sliderSpec.min;
+			const max = sliderSpec.max;
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
-				'<input type="range" id="' + id + '" class="form-control form-range" min="' + min + '" max="' + max + '" step="1" value="' + esc(v) + '">' +
+				'<input type="range" id="' + id + '" class="form-control form-range" min="' + min + '" max="' + max + '" step="' + sliderSpec.step + '" value="' + esc(v) + '">' +
 				'<span class="input-group-text show-value"></span>' +
 				'</span>';
 			control = p.querySelector('input');
@@ -10501,7 +10509,7 @@
 				show.textContent = !chosen ? UNSET_WORD
 					: (sensorFps !== null && Number(control.value) === 0)
 						? 'Auto · ' + withUnit(sensorFps)
-						: withUnit(control.value);
+						: specialOf(control.value) || withUnit(control.value);
 				p.classList.toggle('mj-unset', !chosen);
 			};
 			// Any input is a choice — a drag, a click on the track, an arrow key.
@@ -10553,15 +10561,30 @@
 			// millisecond and daylight is a fraction of one. `any` rather than a
 			// step of our own: the schema says nothing about a grain, and
 			// inventing one would refuse values the camera accepts.
-			const stepA = type === 'number' ? ' step="any"' : ' step="1"';
+			const xStep = isNum(sub['x-step']) && sub['x-step'] > 0 ? sub['x-step'] : null;
+			const stepA = type === 'number' ? ' step="' + (xStep || 'any') + '"' : ' step="1"';
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
 				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA + ' value="' + esc(v) + '">' +
 				unitHtml +
-				'</span>';
+				'</span>' +
+				(sub['x-special'] ? '<span class="mj-now mj-special"></span>' : '');
 			control = p.querySelector('input');
+			// A value that names a mode says so beside the box: 0 on the
+			// de-jitter buffer reads "Passthrough", not a buffer of nothing.
+			const said = p.querySelector('.mj-special');
+			if (said) {
+				const paintSpecial = () => { said.textContent = specialOf(control.value); };
+				control.addEventListener('input', paintSpecial);
+				control.addEventListener('change', paintSpecial);
+				control._set = (val) => {
+					control.value = val === undefined || val === null ? '' : String(val);
+					paintSpecial();
+				};
+				paintSpecial();
+			}
 		} else if (isResolution) {
 			p = el('p', 'select mj-row mj-wide');
 			const cur = eff !== undefined && eff !== null ? String(eff) : '';
@@ -11803,7 +11826,7 @@
 			const helpText = HELP ? HELP.text(sub.help) : '';
 			// only plain number inputs gain a range hint; sliders (max ≤ 100)
 			// already show their bounds via the track and the live value box
-			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
+			const isSlider = !!sliderSpec;
 			const numeric = type === 'integer' || type === 'number';
 			// On a row whose empty box already says Auto, the floor is that
 			// same Auto spelled as 0 and says nothing new; the ceiling, in the
@@ -11813,7 +11836,7 @@
 					: EXP ? EXP.rangeText(sub.minimum, sub.maximum, unit)
 					: sub.minimum + '–' + sub.maximum)
 				: '';
-			if (sub.hint || range || helpText) {
+			if (sub.hint || range || helpText || sub['x-special']) {
 				// block-level so it sits on its own line below the control row
 				const hint = el('div', 'hint text-secondary');
 				const txt = el('span', 'mj-hint-txt');
@@ -11826,8 +11849,13 @@
 				// Outside [data-hl] on purpose: the range is ours, not the
 				// daemon's, and marking it would highlight a number nobody
 				// searched for.
-				if (range) txt.appendChild(document.createTextNode(
-					(sub.hint ? ' · ' : '') + range));
+				// The named values ride with the range: "0–500 ms · 0:
+				// Passthrough". Said on a slider too, where there is no range
+				// line, because a name is only discoverable if it is listed.
+				const named = EXP ? EXP.specialsText(sub) : '';
+				const tail = [range, named].filter(Boolean).join(' · ');
+				if (tail) txt.appendChild(document.createTextNode(
+					(sub.hint ? ' · ' : '') + tail));
 				hint.appendChild(txt);
 
 				// The long text, and the mark that opens it. The mark is built
