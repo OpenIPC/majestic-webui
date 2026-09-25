@@ -63,15 +63,18 @@ check('never past the end', RAIL.scrollTopFor(PANE, row(2000), 260, MAX) === MAX
 check('never before the start', RAIL.scrollTopFor(PANE, row(-500), 10, MAX) === 0);
 
 group('whether a pick has to move the page');
-// Below md the rail is stacked ABOVE the form, so a tap always leaves the
-// reader looking at navigation with the fields below the fold (#199).
-check('below md, always', RAIL.revealsForm(false, 110) === true);
-check('below md, even with the column at the top', RAIL.revealsForm(false, 0) === true);
-// From md up the rail is beside the form and moves nothing, so the page is
+// Below md with the tree open, the rail is stacked ABOVE the form, so a tap
+// always leaves the reader looking at navigation with the fields below the
+// fold (#199).
+check('rail open above the form, always', RAIL.revealsForm(false, 110) === true);
+check('rail open above the form, even with the column at the top', RAIL.revealsForm(false, 0) === true);
+// From md up the rail is beside the form, and below md a pick folds it behind
+// its button (#587): either way it is out of the form's way, so the page is
 // corrected only when the column's top edge is off the top of the window —
-// which is what a long section read to the bottom leaves behind.
-check('from md up, when the column is above the window', RAIL.revealsForm(true, -282) === true);
-check('from md up, not when it is already at the top', RAIL.revealsForm(true, 0) === false);
-check('from md up, not when it is in view', RAIL.revealsForm(true, 110) === false);
+// which is what a long section read to the bottom leaves behind. Scrolling a
+// column already in view would only push the fold's button off the screen.
+check('rail out of the way, when the column is above the window', RAIL.revealsForm(true, -282) === true);
+check('rail out of the way, not when it is already at the top', RAIL.revealsForm(true, 0) === false);
+check('rail out of the way, not when it is in view', RAIL.revealsForm(true, 271) === false);
 
 done();

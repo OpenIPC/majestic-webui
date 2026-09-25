@@ -113,8 +113,17 @@ fi
 	# have meant regenerating it.
 	%>
 	<div class="col-12 col-md-3">
-		<div class="sticky-md-top">
+		<div class="sticky-md-top" id="mj-rail">
 			<h2 class="mj-rail-title"><%= $page_title %></h2>
+			<%
+			# Below md the tree folds behind this, so a phone opens on the section
+			# rather than on a screen of menu (#587). Hidden until mj-settings.js
+			# names the section in it: with no JS the tree simply stays open.
+			%>
+			<button type="button" class="mj-rail-toggle" id="mj-rail-toggle" hidden
+				aria-expanded="false" aria-controls="mj-settings-nav">
+				<span class="mj-rail-where"></span><span class="mj-tree-caret"></span>
+			</button>
 			<%
 			# Hidden until mj-settings.js unhides it: with no JS the box would be
 			# a control that silently does nothing.
