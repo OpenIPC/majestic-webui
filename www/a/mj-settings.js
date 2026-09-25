@@ -1357,8 +1357,10 @@
 	// first screen: at 390x844 the title, the search box, every category and
 	// the open group's sections, with the Picture preview starting at the
 	// bottom edge (#587). So there it folds behind one button that says where
-	// you are, and the section comes first. Picking a section folds it again;
-	// a search in progress keeps it open, since the list is the answer. From md
+	// you are, and the section comes first. Picking a section folds it again,
+	// search or no search: the pick is the reader choosing a result, and the
+	// query survives, so one tap brings the same results back for the next
+	// one. What a search keeps open is a page LOADED mid-search. From md
 	// up the rail sits beside the form, and the stylesheet ignores the fold.
 	function railShut(shut) {
 		const rail = document.getElementById('mj-rail');

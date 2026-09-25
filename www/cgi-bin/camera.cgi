@@ -121,7 +121,7 @@ fi
 			# names the section in it: with no JS the tree simply stays open.
 			%>
 			<button type="button" class="mj-rail-toggle" id="mj-rail-toggle" hidden
-				aria-expanded="false" aria-controls="mj-settings-nav">
+				aria-expanded="false" aria-controls="mj-search-wrap mj-settings-nav">
 				<span class="mj-rail-where"></span><span class="mj-tree-caret"></span>
 			</button>
 			<%
