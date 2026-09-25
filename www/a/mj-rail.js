@@ -69,8 +69,13 @@
 	// So it is asked of the geometry rather than of the breakpoint: bring the
 	// column back when its top edge is off the top of the window, and never when
 	// it is already there.
-	function revealsForm(wide, colTop) {
-		return !wide || num(colTop) < 0;
+	//
+	// `clear` is whether the rail is out of the form's way: beside it from md up,
+	// or folded behind its button below md (#587). Folded, the form starts one
+	// button under the title, so the stacked-rail answer would only scroll that
+	// button — the way back to the list — off the top of the screen.
+	function revealsForm(clear, colTop) {
+		return !clear || num(colTop) < 0;
 	}
 
 	function num(v) { return typeof v === 'number' && !isNaN(v) ? v : 0; }

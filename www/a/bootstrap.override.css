@@ -1154,6 +1154,11 @@ pre#output[data-cmd] {
 	}
 }
 
+/* From md up the rail sits beside the form and there is nothing to fold. */
+.mj-rail-toggle {
+	display: none;
+}
+
 /* Below md the rail stops being a rail. It is full width, it is the page's
    primary navigation, and it sits directly under the navbar's own accordion —
    so it should read like that one rather than like a column label (#183).
@@ -1196,6 +1201,43 @@ pre#output[data-cmd] {
 	   search sits in the same list it filters — it should not be smaller. */
 	.mj-search .form-control {
 		font-size: 1rem;
+	}
+
+	/* The fold (#587): one button naming the section you are on, and the search
+	   box and the tree behind it. A 44px row in the tree's own category type,
+	   because it is the first line of that list. */
+	.mj-rail-toggle:not([hidden]) {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		width: 100%;
+		min-height: 2.75rem;
+		margin-bottom: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		border: 1px solid var(--bs-border-color);
+		border-radius: var(--bs-border-radius);
+		background: var(--bs-tertiary-bg);
+		color: var(--bs-body-color);
+		font-size: 1rem;
+		text-align: left;
+	}
+
+	.mj-rail-toggle .mj-tree-caret {
+		transform: rotate(90deg);
+	}
+
+	.mj-rail-toggle[aria-expanded="true"] .mj-tree-caret {
+		transform: rotate(-90deg);
+	}
+
+	.mj-rail-toggle:focus-visible {
+		outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+	}
+
+	#mj-rail.mj-rail-shut > .mj-search,
+	#mj-rail.mj-rail-shut > #mj-settings-nav {
+		display: none;
 	}
 
 	#mj-settings-form-col {

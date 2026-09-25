@@ -287,6 +287,7 @@
 			return;
 		}
 		buildNav();
+		wireRailToggle();
 		publishRailTop();
 		watchRailTop();
 		wireSearch();
@@ -628,9 +629,10 @@
 				// Picking the section that is already open is still a deliberate
 				// pick: below md it means "take me back down to it", and a control
 				// that does nothing at all reads as a dead one.
-				if (newTab === state.sec) { revealSection(byPointer); return; }
+				if (newTab === state.sec) { railShut(true); revealSection(byPointer); return; }
 				// Answering "no" to the prompt is choosing to stay, so nothing moves.
 				if (hasDirty() && !confirm('You have unsaved changes. Discard and switch sections?')) return;
+				railShut(true);
 				// After load(), never inside it: the section has to be in the document
 				// first, and buildNav() — which load() re-runs while a search is
 				// active, resizing the rail *above* the form — has to have finished.
@@ -695,7 +697,7 @@
 		// Without mj-rail.js, the rule this page had before it: travel below md,
 		// and never above it.
 		const move = RAIL
-			? RAIL.revealsForm(WIDE.matches, col.getBoundingClientRect().top)
+			? RAIL.revealsForm(WIDE.matches || railFolded(), col.getBoundingClientRect().top)
 			: !WIDE.matches;
 		if (move) col.scrollIntoView();
 	}
@@ -1349,7 +1351,53 @@
 		updateDirty();
 	}
 
+	// ── the rail on a phone ─────────────────────────────────────────────────
+	//
+	// Below md the rail stacks above the section, and open it was most of the
+	// first screen: at 390x844 the title, the search box, every category and
+	// the open group's sections, with the Picture preview starting at the
+	// bottom edge (#587). So there it folds behind one button that says where
+	// you are, and the section comes first. Picking a section folds it again,
+	// search or no search: the pick is the reader choosing a result, and the
+	// query survives, so one tap brings the same results back for the next
+	// one. What a search keeps open is a page LOADED mid-search. From md
+	// up the rail sits beside the form, and the stylesheet ignores the fold.
+	function railShut(shut) {
+		const rail = document.getElementById('mj-rail');
+		const btn = document.getElementById('mj-rail-toggle');
+		if (!rail || !btn || btn.hidden) return;
+		rail.classList.toggle('mj-rail-shut', shut);
+		btn.setAttribute('aria-expanded', String(!shut));
+	}
+
+	function railFolded() {
+		const rail = document.getElementById('mj-rail');
+		return !!rail && rail.classList.contains('mj-rail-shut');
+	}
+
+	function wireRailToggle() {
+		const btn = document.getElementById('mj-rail-toggle');
+		if (!btn) return;
+		btn.hidden = false;
+		railShut(!state.q.trim());
+		nameRailToggle(state.sec);
+		btn.addEventListener('click', () => {
+			const rail = document.getElementById('mj-rail');
+			railShut(!rail.classList.contains('mj-rail-shut'));
+		});
+	}
+
+	// "Image › Picture": the group and the section, the words the rail uses.
+	function nameRailToggle(sec) {
+		const where = document.querySelector('#mj-rail-toggle .mj-rail-where');
+		if (!where) return;
+		const g = groupOf(sec);
+		const s = g && g.sections.find(x => x.id === sec);
+		where.textContent = g && s ? g.label + ' › ' + s.label : 'Sections';
+	}
+
 	function setActiveNav(tab) {
+		nameRailToggle(tab);
 		let active = null;
 		document.querySelectorAll('#mj-settings-nav .nav-link').forEach(link => {
 			const u = new URL(link.href);
