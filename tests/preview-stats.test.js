@@ -620,8 +620,10 @@ g('MSE tells its own story and remembers the other transport', () => {
 		configuredKbps: 1024, channel: 1 });
 	check('delivered rate is the socket byte delta',
 		env.el('mj-ns-recv').textContent === '1.0 Mbit/s');
-	check('a fresh stall grades struggling',
-		env.el('mj-ns-grade').textContent === 'struggling');
+	check('a fresh stall reads as stalling',
+		env.el('mj-ns-grade').textContent === 'stalling');
+	check('and the socket\'s verdict is about playback, not the link',
+		env.el('mj-ns-gcap').textContent === 'Playback');
 	check('repairs count the re-buffering',
 		env.el('mj-ns-repair').textContent.indexOf('re-buffered 1×') >= 0);
 
@@ -630,13 +632,16 @@ g('MSE tells its own story and remembers the other transport', () => {
 	env.stats.tick({ transport: 'mse', bufferedMs: 900, rxBytes: 300000,
 		totalFrames: 160, droppedFrames: 20, stalls: 1,
 		configuredKbps: 1024, channel: 1 });
-	check('a heavy drop rate grades struggling',
-		env.el('mj-ns-grade').textContent === 'struggling');
+	check('a heavy drop rate says so',
+		env.el('mj-ns-grade').textContent === 'stalling' ||
+		env.el('mj-ns-grade').textContent === 'dropping frames');
 
 	// Back on WebRTC, the MSE figure becomes the comparison.
 	env.stats.reset();
 	env.tickClock(2000);
 	env.stats.tick({ cam: { c2s: '58ms' }, rttMs: 60, transport: 'webrtc' });
+	check('WebRTC names the connection again',
+		env.el('mj-ns-gcap').textContent === 'Your connection');
 	check('the WebRTC view remembers what MSE held',
 		env.el('mj-ns-vs').hidden === false &&
 		env.el('mj-ns-vs').textContent.indexOf('MSE held ≥900 ms') >= 0);
@@ -653,7 +658,7 @@ g('MSE tells its own story and remembers the other transport', () => {
 		totalFrames: 230, droppedFrames: 20, stalls: 1,
 		configuredKbps: 1024, channel: 1 });
 	check('a prior session\'s stall does not brand the new one',
-		env.el('mj-ns-grade').textContent === 'excellent');
+		env.el('mj-ns-grade').textContent === 'smooth');
 });
 
 g('MSE counts the sensor legs once fps is known', () => {
@@ -693,7 +698,151 @@ g('a fresh page never invents a stall', () => {
 	env.stats.tick({ transport: 'mse', bufferedMs: 300, rxBytes: 200000,
 		totalFrames: 130, droppedFrames: 0, stalls: 0,
 		configuredKbps: 1024, channel: 1 });
-	check('zero stalls near page start grade excellent',
+	check('zero stalls near page start read smooth',
+		env.el('mj-ns-grade').textContent === 'smooth');
+});
+
+// Over a WebSocket, TCP hides loss and round trip, so the verdict is built
+// from playback alone. Under "Your connection" it graded a Wi-Fi that WebRTC
+// measured at 6% loss "excellent", one tap from WebRTC calling the same link
+// poor. It names playback now, and never claims "excellent" about a link it
+// cannot see.
+g('a WebSocket feed grades the playback, never the link', () => {
+	const env = boot();
+	for (let i = 0; i < 4; i++) {
+		env.stats.tick({ transport: 'mse', feed: 'websocket', bufferedMs: 400,
+			rxBytes: 100000 * (i + 1), totalFrames: 30 * (i + 1), droppedFrames: 0,
+			stalls: 0, channel: 0 });
+		env.tickClock(1000);
+	}
+	check('the section is Playback', env.el('mj-ns-gcap').textContent === 'Playback');
+	check('a clean socket reads smooth, not excellent',
+		env.el('mj-ns-grade').textContent === 'smooth');
+});
+
+// The data channel sees the link: its sequence counts the frames that never
+// arrived. That share runs the same ladder as WebRTC's packet loss, so one
+// link gets one word on either transport.
+function dcSession(env, missedPerTick, extra) {
+	const dc = { feed: 'datachannel', rttMs: 30, seqGaps: 0, camGaps: 0, late: 0,
+		partsReassembled: 0, queueMs: 0, cam: {}, clock: null, frames: 0, framesMissed: 0 };
+	for (let i = 0; i < 8; i++) {
+		dc.frames += 25 - missedPerTick;
+		dc.framesMissed += missedPerTick;
+		env.stats.tick(Object.assign({ transport: 'mse', feed: 'datachannel',
+			bufferedMs: 400, rxBytes: 100000 * (i + 1), totalFrames: 25 * (i + 1),
+			droppedFrames: 0, stalls: 0, channel: 0, dc: Object.assign({}, dc) }, extra || {}));
+		env.tickClock(1000);
+	}
+}
+
+g('a data-channel feed grades the link on the frames it lost', () => {
+	let env = boot();
+	dcSession(env, 0);
+	check('a clean channel is excellent, like a clean WebRTC link',
+		env.el('mj-ns-grade').textContent === 'excellent');
+	check('and the section names the connection',
+		env.el('mj-ns-gcap').textContent === 'Your connection');
+	check('the loss it stands on is printed',
+		/^lost 0\.0% of frames/.test(env.el('mj-ns-repair').textContent),
+		env.el('mj-ns-repair').textContent);
+
+	// The report: 6% loss, no stall, no dropped frame — graded excellent.
+	env = boot();
+	dcSession(env, 2);   // 2 of 25 frames, 8%
+	check('a lossy channel with smooth playback is poor, not excellent',
+		env.el('mj-ns-grade').textContent === 'poor',
+		env.el('mj-ns-grade').textContent);
+	check('the loss is printed beside it',
+		/^lost 8\.0% of frames/.test(env.el('mj-ns-repair').textContent),
+		env.el('mj-ns-repair').textContent);
+});
+
+// The camera's end of the channel resends what the link drops, so a lossy
+// link arrives whole and late: no hole to count. Measured on an Ingenic T31
+// over Wi-Fi at 3% loss — holes 0, and the camera resending 30% of what it sent. Its
+// dcrtx=/dcsent= keys carry what the sequence cannot — whether the link is
+// lossy, though not how lossy, so they stop at 'struggling'.
+function dcResend(env, rtxPerTick, extra) {
+	const dc = { feed: 'datachannel', rttMs: 30, cam: {}, frames: 0, framesMissed: 0 };
+	let rtx = 0, bytes = 0;
+	for (let i = 0; i < 8; i++) {
+		dc.frames += 25; rtx += rtxPerTick; bytes += 120000;   // 100 packets a tick
+		dc.cam = { dcrtx: String(rtx), dcsent: (25 * (i + 1)) + '/' + bytes };
+		env.stats.tick(Object.assign({ transport: 'mse', feed: 'datachannel',
+			bufferedMs: 400, rxBytes: 100000 * (i + 1), totalFrames: 25 * (i + 1),
+			droppedFrames: 0, stalls: 0, channel: 0, dc: Object.assign({}, dc) }, extra || {}));
+		env.tickClock(1000);
+	}
+}
+
+g('a data channel that arrives whole grades on what the camera resent', () => {
+	let env = boot();
+	dcResend(env, 0);
+	check('no resends, no holes: excellent', env.el('mj-ns-grade').textContent === 'excellent');
+	env = boot();
+	dcResend(env, 30);   // 30 of 100 packets, the 3% loss measurement
+	check('a third resent is struggling even with every frame delivered',
+		env.el('mj-ns-grade').textContent === 'struggling', env.el('mj-ns-grade').textContent);
+	check('the resend share is printed beside it',
+		/camera re-sent 30\.0%/.test(env.el('mj-ns-repair').textContent),
+		env.el('mj-ns-repair').textContent);
+	env = boot();
+	dcResend(env, 3);
+	check('a clean link\'s wobble stays short of struggling', env.el('mj-ns-grade').textContent === 'good');
+});
+
+// A missing reading is not a zero. Before the channel has a round trip and
+// a tick of frames, "excellent" would be the default of absent numbers.
+g('a data channel is not graded before it is measured', () => {
+	const env = boot();
+	const dc = { feed: 'datachannel', rttMs: null, cam: {}, frames: 0, framesMissed: 0 };
+	for (let i = 0; i < 4; i++) {
+		dc.frames += 25;
+		env.stats.tick({ transport: 'mse', feed: 'datachannel', bufferedMs: 400,
+			rxBytes: 100000 * (i + 1), totalFrames: 25 * (i + 1), droppedFrames: 0,
+			stalls: 0, channel: 0, dc: Object.assign({}, dc) });
+		env.tickClock(1000);
+	}
+	check('no round trip, no word about the link', env.el('mj-ns-grade').textContent === '',
+		env.el('mj-ns-grade').textContent);
+	const env2 = boot();
+	env2.stats.tick({ transport: 'mse', feed: 'datachannel', bufferedMs: 400, rxBytes: 1000,
+		totalFrames: 25, droppedFrames: 0, stalls: 0, dc: { feed: 'datachannel', rttMs: 30, cam: {}, frames: 25, framesMissed: 0 } });
+	check('no frame share yet, no loss figure printed',
+		!/lost/.test(env2.el('mj-ns-repair').textContent) && env2.el('mj-ns-grade').textContent === '');
+});
+
+g('a camera that does not report resends is not graded on them', () => {
+	const env = boot();
+	dcSession(env, 0);
+	check('no dcrtx key, no resend claim',
+		env.el('mj-ns-grade').textContent === 'excellent' &&
+		!/re-sent/.test(env.el('mj-ns-repair').textContent));
+});
+
+g('on a data channel, playback trouble can only worsen the link\'s word', () => {
+	const env = boot();
+	const dc = { feed: 'datachannel', rttMs: 30, cam: {}, frames: 0, framesMissed: 0 };
+	env.stats.tick({ transport: 'mse', feed: 'datachannel', bufferedMs: 400, rxBytes: 1000,
+		totalFrames: 25, droppedFrames: 0, stalls: 0, dc: Object.assign({}, dc, { frames: 25 }) });
+	env.tickClock(1000);
+	env.stats.tick({ transport: 'mse', feed: 'datachannel', bufferedMs: 400, rxBytes: 2000,
+		totalFrames: 50, droppedFrames: 0, stalls: 1, dc: Object.assign({}, dc, { frames: 50 }) });
+	check('a stall on a clean channel is struggling',
+		env.el('mj-ns-grade').textContent === 'struggling');
+});
+
+g('a rebuilt channel does not difference against the old one', () => {
+	const env = boot();
+	dcSession(env, 2);
+	check('the old channel was poor', env.el('mj-ns-grade').textContent === 'poor');
+	env.stats.reset();
+	check('reset gives the section its name back',
+		env.el('mj-ns-gcap').textContent === 'Your connection');
+	env.tickClock(1000);
+	dcSession(env, 0);
+	check('the new channel grades on its own frames',
 		env.el('mj-ns-grade').textContent === 'excellent');
 });
 

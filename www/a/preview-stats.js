@@ -56,6 +56,17 @@ window.MajesticStats = (function () {
 	let refreshMs = null;
 	const armed = [];
 	let lossEma = null;
+	// The data-channel feed's loss: the share of frames the channel's
+	// sequence says never arrived, smoothed like lossEma. Frames rather than
+	// packets — a frame is the smallest thing this feed can lose.
+	let frameLossEma = null;
+	// ...and what it costs the camera to keep that share at zero. The camera
+	// end of the channel resends what the link drops, whatever the browser
+	// asked for when it opened it (measured: 3% loss, holes 0, nothing
+	// abandoned), so on a bad link frames still arrive — late, as waiting —
+	// and the resends are where the link shows. Resent packets per packet
+	// sent, from the camera's dcrtx= and dcsent= keys.
+	let resendEma = null;
 	let srG2gEma = null;
 	let srSeenAt = 0;
 	// Each transport's last settled headline, kept ACROSS transport switches
@@ -113,7 +124,7 @@ window.MajesticStats = (function () {
 			'<div class="mj-ns-spark" id="mj-ns-lat-sp"></div>' +
 		'</section>' +
 		'<section class="mj-ns-sec">' +
-			'<div class="mj-ns-cap">Your connection <span class="mj-ns-grade" id="mj-ns-grade"></span></div>' +
+			'<div class="mj-ns-cap"><span id="mj-ns-gcap">Your connection</span> <span class="mj-ns-grade" id="mj-ns-grade"></span></div>' +
 			'<div class="mj-ns-rows">' +
 				'<div class="mj-ns-row" id="mj-ns-r-cap" hidden><span>link can carry</span><b id="mj-ns-cap-est">–</b></div>' +
 				'<div class="mj-ns-row" id="mj-ns-r-set" hidden><span>camera set to</span><b id="mj-ns-set">–</b></div>' +
@@ -237,7 +248,7 @@ window.MajesticStats = (function () {
 			segBuf: g('mj-ns-seg-buf'), segDec: g('mj-ns-seg-dec'),
 			lCam: g('mj-ns-l-cam'), lNet: g('mj-ns-l-net'),
 			lBuf: g('mj-ns-l-buf'), lDec: g('mj-ns-l-dec'),
-			grade: g('mj-ns-grade'), vs: g('mj-ns-vs'),
+			grade: g('mj-ns-grade'), gcap: g('mj-ns-gcap'), vs: g('mj-ns-vs'),
 			legEst: g('mj-ns-leg-est'),
 			rCap: g('mj-ns-r-cap'), capEst: g('mj-ns-cap-est'),
 			rSet: g('mj-ns-r-set'), set: g('mj-ns-set'),
@@ -295,6 +306,24 @@ window.MajesticStats = (function () {
 	// an estimate below twice the delivered rate is a fact about the link,
 	// one above it is the estimator idling — and an adaptation triggered by
 	// an idling estimator is the same false positive one step removed.
+	const RANK = { excellent: 0, good: 1, struggling: 2, poor: 3 };
+
+	// The camera's resend share on a data channel, on its own ladder: it is
+	// not packet loss, and does not scale like it — SCTP resends on reordering
+	// as readily as on loss, and a window at a time once a timer fires.
+	// Measured on an Ingenic T31 over Wi-Fi at 0.5–1 Mbit/s, with netem
+	// loss and jitter on the camera's packets only: a clean link 0–2%; 1% loss (±10 ms jitter) 12–14%; 6% loss (±5 ms) 14–18%;
+	// 3% loss (±20 ms) 25–29%. It separates a clean link from a lossy one
+	// cleanly and says nothing about HOW lossy, so it can take the word to
+	// "struggling" and no further — "poor" is left to evidence that can
+	// weigh it. Null while the camera has not said.
+	function resendGrade(pct) {
+		if (pct == null) return null;
+		if (pct > 5) return ['struggling', WARN];
+		if (pct > 2) return ['good', OK];
+		return ['excellent', OK];
+	}
+
 	function gradeOf(lossPct, rtt, jitterMs, encK, cfgK, rembK, recvK) {
 		// The grade reads the estimate ADAPTATION acts on — the camera-side
 		// remb — not the larger of two estimates: a high idle browser figure
@@ -344,6 +373,10 @@ window.MajesticStats = (function () {
 			nack: s.nack || 0, rtx: parseInt(cam.rtx, 10) || 0,
 			rxBytes: s.rxBytes || 0, totalFrames: totalFrames,
 			droppedFrames: droppedFrames, stalls: s.stalls || 0,
+			dcFrames: dcFeed ? s.dc.frames || 0 : 0,
+			dcMissed: dcFeed ? s.dc.framesMissed || 0 : 0,
+			dcRtx: dcFeed && cam.dcrtx !== undefined ? parseInt(cam.dcrtx, 10) || 0 : null,
+			dcBytes: dcFeed ? parseInt(String(cam.dcsent || '').split('/')[1], 10) || 0 : 0,
 		};
 		// A cumulative counter that went BACKWARDS means the peer connection
 		// was rebuilt under us (preview-webrtc reconnects internally without
@@ -353,10 +386,13 @@ window.MajesticStats = (function () {
 		// decay through the new session's first seconds.
 		if (p && (prevT.packetsReceived < p.packetsReceived ||
 				prevT.jbEmitted < p.jbEmitted ||
-				prevT.rxBytes < p.rxBytes)) {
+				prevT.rxBytes < p.rxBytes || prevT.dcFrames < p.dcFrames ||
+				prevT.dcBytes < p.dcBytes)) {
 			p = null;
 			hold = { buf: null, dec: null };
 			lossEma = null;
+			frameLossEma = null;
+			resendEma = null;
 			srG2gEma = null;
 		}
 		const good = p && dt > 0.25 && dt < 5;
@@ -564,11 +600,23 @@ window.MajesticStats = (function () {
 		// actually emits, what arrives.
 		const remb = parseInt(cam.remb, 10) || 0;
 		const capK = Math.max(s.availKbps || 0, remb);
-		// MSE has no loss counter and no round trip — TCP converts both into
-		// waiting. So the grade reads the two symptoms this transport CAN
-		// show: playback having stalled recently, and the element dropping
-		// frames to catch up.
+		// The buffered players grade on what their feed can see. Over a
+		// WebSocket that is playback only: TCP turns loss and round trip into
+		// waiting, so the two symptoms left are playback having stalled
+		// recently and the element dropping frames to catch up — and a verdict
+		// built from those is about the playback, not the link, so the section
+		// says "Playback" and never "excellent". Under it "Your connection"
+		// graded a Wi-Fi that WebRTC measured at 6% loss excellent, one tap
+		// away from the WebRTC view calling the same link poor.
+		//
+		// The data-channel feed CAN see the link, through the camera: the
+		// camera's end resends what the link drops, so its resend share is
+		// the loss a WebSocket hides — and its sequence numbers still count
+		// any frame that never arrived, and its peer connection measures the
+		// round trip. The worst of those is the connection's word, and
+		// playback trouble can only make it worse.
 		let gr;
+		if (els.gcap) els.gcap.textContent = mse && !dcFeed ? 'Playback' : 'Your connection';
 		if (mse) {
 			if (good && prevT.stalls > p.stalls) lastStallAt = now;
 			const dropRate = good && prevT.totalFrames > p.totalFrames
@@ -581,16 +629,53 @@ window.MajesticStats = (function () {
 			// it never had. Heavy dropping is playback visibly failing, not
 			// "good" — the ladder demotes twice, like the WebRTC grade does.
 			const stalled = lastStallAt > 0 && now - lastStallAt < 10000;
-			gr = stalled || dropRate > 10 ? ['struggling', WARN]
-				: dropRate > 2 ? ['good', OK]
-				: ['excellent', OK];
+			if (dcFeed) {
+				if (good) {
+					const dMiss = Math.max(0, prevT.dcMissed - p.dcMissed);
+					const dGot = Math.max(0, prevT.dcFrames - p.dcFrames);
+					if (dMiss + dGot > 0) {
+						const pct = dMiss / (dMiss + dGot) * 100;
+						frameLossEma = frameLossEma == null ? pct
+							: frameLossEma + (pct - frameLossEma) * 0.3;
+					}
+				}
+				if (good && prevT.dcRtx != null && p.dcRtx != null) {
+					// ~1200 bytes a packet: the channel fills to the path MTU
+					// WebRTC stacks assume, and the figure is a share for a
+					// ladder, not an accounting.
+					const dPk = Math.max(0, prevT.dcBytes - p.dcBytes) / 1200;
+					const dRtx = Math.max(0, prevT.dcRtx - p.dcRtx);
+					if (dPk >= 1) {
+						const pct = Math.min(100, dRtx / dPk * 100);
+						resendEma = resendEma == null ? pct
+							: resendEma + (pct - resendEma) * 0.3;
+					}
+				}
+				// No word about the link until it has been measured: a frame
+				// share needs a tick of frames, and the round trip needs the
+				// channel's candidate pair — before those, "excellent" would
+				// be the zero a missing reading defaults to. Playback trouble
+				// can still speak for itself meanwhile.
+				let link = frameLossEma != null && rttMs != null
+					? gradeOf(frameLossEma, rttMs, 0, 0, 0, 0, 0) : null;
+				const rs = resendGrade(resendEma);
+				if (rs && (!link || RANK[rs[0]] > RANK[link[0]])) link = rs;
+				const play = stalled || dropRate > 10 ? ['struggling', WARN]
+					: dropRate > 2 ? ['good', OK] : null;
+				gr = play && (!link || RANK[play[0]] > RANK[link[0]]) ? play : link;
+			} else {
+				gr = stalled ? ['stalling', WARN]
+					: dropRate > 10 ? ['dropping frames', WARN]
+					: dropRate > 2 ? ['mostly smooth', OK]
+					: ['smooth', OK];
+			}
 		} else {
 			gr = gradeOf(lossEma || 0, s.rttMs || 0, s.jitterMs || 0,
 				parseInt(cam.enc, 10) || 0, s.configuredKbps || 0, remb,
 				s.kbps || 0);
 		}
-		els.grade.textContent = gr[0];
-		els.grade.style.color = gr[1];
+		els.grade.textContent = gr ? gr[0] : '';
+		els.grade.style.color = gr ? gr[1] : '';
 		els.rCap.hidden = !capK;
 		if (capK) {
 			// A saturated link's estimate approximates capacity; an idle
@@ -631,8 +716,15 @@ window.MajesticStats = (function () {
 		// Repairs as rates: recovery working is the good news worth telling.
 		// On MSE there is nothing to repair — TCP already repaired it, and
 		// the price appears as buffering, which is what gets counted.
+		// Over the data channel nothing was repaired — the channel resends
+		// nothing — so what the link lost is printed first, the evidence the
+		// grade above stands on.
 		if (good && mse) {
-			els.repair.textContent = 're-buffered ' + (s.stalls || 0) +
+			els.repair.textContent = (dcFeed ?
+				(frameLossEma != null ? 'lost ' + frameLossEma.toFixed(1) +
+					'% of frames \u00b7 ' : '') +
+				(resendEma != null ? 'camera re-sent ' +
+					resendEma.toFixed(1) + '% \u00b7 ' : '') : '') + 're-buffered ' + (s.stalls || 0) +
 				'\u00d7 \u00b7 frames dropped ' + (prevT.droppedFrames || 0);
 		} else if (good) {
 			const rep = [];
@@ -1030,6 +1122,8 @@ window.MajesticStats = (function () {
 		lastTickAt = 0;
 		hold = { buf: null, dec: null };
 		lossEma = null;
+		frameLossEma = null;
+		resendEma = null;
 		srG2gEma = null;
 		// A stall belongs to the session that stalled; without this a real
 		// stall bled through an MSE→WebRTC→MSE round trip and branded the
@@ -1080,6 +1174,7 @@ window.MajesticStats = (function () {
 			if (el) el.hidden = true;
 		});
 		if (els.grade) els.grade.style.color = '';
+		if (els.gcap) els.gcap.textContent = 'Your connection';
 	}
 
 	function setOpen(o) {

@@ -208,6 +208,16 @@ window.MajesticDataChannel = (function () {
 		let pc = null, dc = null, sig = null, ended = false;
 		let openTimer = null, firstTimer = null, statsTimer = null;
 		let rxBytes = 0, msgs = 0, seqGaps = 0, camGaps = 0, late = 0, lastSeq = 0;
+		// Frames by count, not by event: a hole of five is five frames, and
+		// the stats panel grades the link on the share that never arrived.
+		// Only the LINK's holes count — one the camera flagged is its own
+		// drop, which says nothing about the path. And the channel is
+		// unordered, so a hole may yet be filled: its seqs wait in `holes`,
+		// and a frame that turns up late gives its count back. Bounded, so
+		// a long outage cannot grow it; the oldest hole is simply final.
+		let frames = 0, framesMissed = 0;
+		const holes = new Set();
+		const HOLES_MAX = 256;
 		let idrRequests = 0, lastIdrAt = 0, gotMessage = false;
 		let rttMs = null, cam = {}, camAt = 0, served = null, lastQueueMs = 0, keyframes = 0;
 		const parts = reassembler();
@@ -216,6 +226,7 @@ window.MajesticDataChannel = (function () {
 			const ps = parts.stats();
 			return {
 				feed: 'datachannel', rxBytes: rxBytes, msgs: msgs, keyframes: keyframes,
+				frames: frames, framesMissed: framesMissed,
 				seqGaps: seqGaps, camGaps: camGaps, late: late, idrRequests: idrRequests,
 				partsReassembled: ps.partsReassembled, partsDropped: ps.partsDropped,
 				rttMs: rttMs, queueMs: lastQueueMs, cam: cam, served: served,
@@ -283,11 +294,23 @@ window.MajesticDataChannel = (function () {
 					// frames it sent and this end never saw, and is asked
 					// for — at most every three seconds.
 					seqGaps++;
+					if (!(m.flags & FLAG_GAP)) {
+						framesMissed += m.seq - lastSeq - 1;
+						for (let q = Math.max(lastSeq + 1, m.seq - HOLES_MAX); q < m.seq; q++) holes.add(q);
+						while (holes.size > HOLES_MAX) holes.delete(holes.values().next().value);
+					}
 					meta.gap = true;
 					const now = Date.now();
 					if (!(m.flags & FLAG_GAP) && now - lastIdrAt > IDR_MIN_GAP_MS) { lastIdrAt = now; feed.send('{"request":"idr"}'); }
 				}
-				if (lastSeq && m.seq <= lastSeq) { late++; return; }
+				if (lastSeq && m.seq <= lastSeq) {
+					late++;
+					// Too late for the picture, which moved on to the next
+					// keyframe — but the link delivered it.
+					if (holes.delete(m.seq)) framesMissed--;
+					return;
+				}
+				frames++;
 				lastSeq = m.seq;
 			}
 			if (feed.onmeta) feed.onmeta(meta);
