@@ -759,8 +759,8 @@ g('a data-channel feed grades the link on the frames it lost', () => {
 });
 
 // The camera's end of the channel resends what the link drops, so a lossy
-// link arrives whole and late: no hole to count. Measured on the lab T31 at
-// 3% loss — holes 0, and the camera resending 30% of what it sent. Its
+// link arrives whole and late: no hole to count. Measured on an Ingenic T31
+// over Wi-Fi at 3% loss — holes 0, and the camera resending 30% of what it sent. Its
 // dcrtx=/dcsent= keys carry what the sequence cannot — whether the link is
 // lossy, though not how lossy, so they stop at 'struggling'.
 function dcResend(env, rtxPerTick, extra) {
@@ -790,6 +790,27 @@ g('a data channel that arrives whole grades on what the camera resent', () => {
 	env = boot();
 	dcResend(env, 3);
 	check('a clean link\'s wobble stays short of struggling', env.el('mj-ns-grade').textContent === 'good');
+});
+
+// A missing reading is not a zero. Before the channel has a round trip and
+// a tick of frames, "excellent" would be the default of absent numbers.
+g('a data channel is not graded before it is measured', () => {
+	const env = boot();
+	const dc = { feed: 'datachannel', rttMs: null, cam: {}, frames: 0, framesMissed: 0 };
+	for (let i = 0; i < 4; i++) {
+		dc.frames += 25;
+		env.stats.tick({ transport: 'mse', feed: 'datachannel', bufferedMs: 400,
+			rxBytes: 100000 * (i + 1), totalFrames: 25 * (i + 1), droppedFrames: 0,
+			stalls: 0, channel: 0, dc: Object.assign({}, dc) });
+		env.tickClock(1000);
+	}
+	check('no round trip, no word about the link', env.el('mj-ns-grade').textContent === '',
+		env.el('mj-ns-grade').textContent);
+	const env2 = boot();
+	env2.stats.tick({ transport: 'mse', feed: 'datachannel', bufferedMs: 400, rxBytes: 1000,
+		totalFrames: 25, droppedFrames: 0, stalls: 0, dc: { feed: 'datachannel', rttMs: 30, cam: {}, frames: 25, framesMissed: 0 } });
+	check('no frame share yet, no loss figure printed',
+		!/lost/.test(env2.el('mj-ns-repair').textContent) && env2.el('mj-ns-grade').textContent === '');
 });
 
 g('a camera that does not report resends is not graded on them', () => {

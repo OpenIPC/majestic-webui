@@ -311,8 +311,8 @@ window.MajesticStats = (function () {
 	// The camera's resend share on a data channel, on its own ladder: it is
 	// not packet loss, and does not scale like it — SCTP resends on reordering
 	// as readily as on loss, and a window at a time once a timer fires.
-	// Measured on the lab T31 with netem on the camera's packets: a clean
-	// link 0–2%; 1% loss (±10 ms jitter) 12–14%; 6% loss (±5 ms) 14–18%;
+	// Measured on an Ingenic T31 over Wi-Fi at 0.5–1 Mbit/s, with netem
+	// loss and jitter on the camera's packets only: a clean link 0–2%; 1% loss (±10 ms jitter) 12–14%; 6% loss (±5 ms) 14–18%;
 	// 3% loss (±20 ms) 25–29%. It separates a clean link from a lossy one
 	// cleanly and says nothing about HOW lossy, so it can take the word to
 	// "struggling" and no further — "poor" is left to evidence that can
@@ -651,12 +651,18 @@ window.MajesticStats = (function () {
 							: resendEma + (pct - resendEma) * 0.3;
 					}
 				}
-				let link = gradeOf(frameLossEma || 0, rttMs || 0, 0, 0, 0, 0, 0);
+				// No word about the link until it has been measured: a frame
+				// share needs a tick of frames, and the round trip needs the
+				// channel's candidate pair — before those, "excellent" would
+				// be the zero a missing reading defaults to. Playback trouble
+				// can still speak for itself meanwhile.
+				let link = frameLossEma != null && rttMs != null
+					? gradeOf(frameLossEma, rttMs, 0, 0, 0, 0, 0) : null;
 				const rs = resendGrade(resendEma);
-				if (rs && RANK[rs[0]] > RANK[link[0]]) link = rs;
+				if (rs && (!link || RANK[rs[0]] > RANK[link[0]])) link = rs;
 				const play = stalled || dropRate > 10 ? ['struggling', WARN]
 					: dropRate > 2 ? ['good', OK] : null;
-				gr = play && RANK[play[0]] > RANK[link[0]] ? play : link;
+				gr = play && (!link || RANK[play[0]] > RANK[link[0]]) ? play : link;
 			} else {
 				gr = stalled ? ['stalling', WARN]
 					: dropRate > 10 ? ['dropping frames', WARN]
@@ -668,8 +674,8 @@ window.MajesticStats = (function () {
 				parseInt(cam.enc, 10) || 0, s.configuredKbps || 0, remb,
 				s.kbps || 0);
 		}
-		els.grade.textContent = gr[0];
-		els.grade.style.color = gr[1];
+		els.grade.textContent = gr ? gr[0] : '';
+		els.grade.style.color = gr ? gr[1] : '';
 		els.rCap.hidden = !capK;
 		if (capK) {
 			// A saturated link's estimate approximates capacity; an idle
@@ -714,10 +720,11 @@ window.MajesticStats = (function () {
 		// nothing — so what the link lost is printed first, the evidence the
 		// grade above stands on.
 		if (good && mse) {
-			els.repair.textContent = (dcFeed ? 'lost ' +
-				(frameLossEma != null ? frameLossEma.toFixed(1) : '0.0') +
-				'% of frames \u00b7 ' + (resendEma != null ? 'camera re-sent ' +
-				resendEma.toFixed(1) + '% \u00b7 ' : '') : '') + 're-buffered ' + (s.stalls || 0) +
+			els.repair.textContent = (dcFeed ?
+				(frameLossEma != null ? 'lost ' + frameLossEma.toFixed(1) +
+					'% of frames \u00b7 ' : '') +
+				(resendEma != null ? 'camera re-sent ' +
+					resendEma.toFixed(1) + '% \u00b7 ' : '') : '') + 're-buffered ' + (s.stalls || 0) +
 				'\u00d7 \u00b7 frames dropped ' + (prevT.droppedFrames || 0);
 		} else if (good) {
 			const rep = [];
