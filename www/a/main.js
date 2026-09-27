@@ -1031,6 +1031,51 @@ function initAll() {
 	}
 	wireCopy(document);
 
+	// The on-board camera's RTSP rows are written out by the page, but whether
+	// majestic will answer each one is only known to majestic: the sub stream
+	// needs video1.enabled and the JPEG track jpeg.rtsp, and nothing needs RTSP
+	// at all while rtsp.enabled is off. A row it will refuse used to look
+	// exactly like one that works, and a player handed it reports only that it
+	// cannot open the stream. Such a row is shown as off, with where to switch
+	// it on, and stops offering itself for copying. Left alone when either
+	// answer is missing: no answer is not a reason to call a stream off.
+	const epRtspRows = $$('[data-ep-rtsp]');
+	if (epRtspRows.length && typeof mjSources === 'function')
+		Promise.all([mjSources(), mjConfig()]).then(([list, cfg]) => {
+			const S = window.MajesticSources;
+			// mjConfig() answers a failed fetch with {}, and that is no answer:
+			// without the rtsp section there is no telling whether RTSP is off.
+			if (!S || !list || !mjGet(cfg, 'rtsp')) return;
+			const rtspOff = mjGet(cfg, 'rtsp.enabled') === false;
+			const why = {
+				0: ['the main stream is switched off', 'video0'],
+				1: ['the sub stream is switched off', 'video1'],
+				2: ['JPEG over RTSP is switched off', 'jpeg'],
+			};
+			Array.prototype.forEach.call(epRtspRows, dt => {
+				const id = dt.getAttribute('data-ep-rtsp') | 0;
+				const served = S.rtspServes(list, id);
+				if (!rtspOff && served !== false) return;
+				const [text, tab] = rtspOff ? ['RTSP is switched off', 'rtsp'] : why[id];
+				// A clone carries no click-to-copy listener.
+				const off = dt.cloneNode(true);
+				off.classList.remove('cp2cb');
+				off.classList.add('text-secondary', 'text-decoration-line-through');
+				off.removeAttribute('title');
+				dt.replaceWith(off);
+				const dd = off.nextElementSibling;
+				if (!dd) return;
+				const note = document.createElement('span');
+				note.className = 'd-block small';
+				note.append('Off: ' + text + ' — ');
+				const a = document.createElement('a');
+				a.href = 'camera.cgi?tab=' + tab;
+				a.textContent = 'turn it on';
+				note.append(a, '.');
+				dd.appendChild(note);
+			});
+		});
+
 	// The endpoints of any camera beyond the on-board one. Rendered from
 	// /api/v1/sources rather than written out here: which stream ids exist, and
 	// which of them RTSP will actually answer for, is something only the camera

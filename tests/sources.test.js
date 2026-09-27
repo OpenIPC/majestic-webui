@@ -239,4 +239,29 @@ group('remembering a choice');
 		S.parse('') === null && S.parse('x:y') === null && S.parse(null) === null);
 }
 
+group('which RTSP URLs majestic will answer');
+{
+	// Copied from a camera with the sub stream switched off and jpeg.rtsp at
+	// its default: the sub stream is not in the payload at all, and the JPEG
+	// track is present but not served over RTSP.
+	const onboard = [{ camera: 0, kind: 'sensor', streams: [
+		{ id: 0, subtype: 'main', codec: 'h264', fps: 15, flowing: true,
+			configured: true, present: true, rtsp: true },
+		{ id: 2, subtype: 'mjpeg', codec: 'mjpeg', fps: 5, configured: true,
+			present: true, rtsp: false },
+	] }];
+	check('the main stream is served', S.rtspServes(onboard, 0) === true);
+	check('a switched-off sub stream is not', S.rtspServes(onboard, 1) === false);
+	check('nor is a JPEG track with jpeg.rtsp off', S.rtspServes(onboard, 2) === false);
+	check('no answer is no verdict', S.rtspServes(null, 1) === null);
+	// An empty or malformed reply ({} arrives here as []) names no camera, and
+	// calling every stream off on it would strike out URLs that work.
+	check('a reply that names no camera is no verdict', S.rtspServes([], 0) === null);
+	// A build too old to report the flag says nothing about RTSP.
+	const noFlag = [{ camera: 0, kind: 'sensor', streams: [
+		{ id: 0, subtype: 'main', codec: 'h264', present: true },
+	] }];
+	check('a stream without the flag is no verdict', S.rtspServes(noFlag, 0) === null);
+}
+
 done();
