@@ -240,6 +240,9 @@ const ANSWER_DECLINED = 'v=0\r\nm=application 0 UDP/DTLS/SCTP webrtc-datachannel
 		env.now += 5000;
 		dc.onmessage({ data: header(3, 0x03, 0, 1, 9, 0, bytes('moof9')) });
 		check('a hole the camera flagged asks nothing either', f.stats().seqGaps === 3 && f.stats().camGaps === 2 && env.sock().sent.filter((s) => s.req === 'idr').length === asked);
+		// Seqs 1 2 4 6 7 9 arrived; 3, 5 and 8 did not. Counted in frames,
+		// not holes, so the Live stats grade a share rather than an event.
+		check('frames are counted in and missing', f.stats().frames === 6 && f.stats().framesMissed === 3, JSON.stringify([f.stats().frames, f.stats().framesMissed]));
 		// Late: an older seq after a newer one is dropped.
 		const before = got.length;
 		dc.onmessage({ data: header(3, 0x00, 0, 1, 5, 0, bytes('moof5')) });

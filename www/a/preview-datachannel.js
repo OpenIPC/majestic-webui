@@ -208,6 +208,10 @@ window.MajesticDataChannel = (function () {
 		let pc = null, dc = null, sig = null, ended = false;
 		let openTimer = null, firstTimer = null, statsTimer = null;
 		let rxBytes = 0, msgs = 0, seqGaps = 0, camGaps = 0, late = 0, lastSeq = 0;
+		// Frames by count, not by event: a hole of five is five frames the
+		// link or the camera lost, and the stats panel grades the link on the
+		// share of frames that never arrived.
+		let frames = 0, framesMissed = 0;
 		let idrRequests = 0, lastIdrAt = 0, gotMessage = false;
 		let rttMs = null, cam = {}, camAt = 0, served = null, lastQueueMs = 0, keyframes = 0;
 		const parts = reassembler();
@@ -216,6 +220,7 @@ window.MajesticDataChannel = (function () {
 			const ps = parts.stats();
 			return {
 				feed: 'datachannel', rxBytes: rxBytes, msgs: msgs, keyframes: keyframes,
+				frames: frames, framesMissed: framesMissed,
 				seqGaps: seqGaps, camGaps: camGaps, late: late, idrRequests: idrRequests,
 				partsReassembled: ps.partsReassembled, partsDropped: ps.partsDropped,
 				rttMs: rttMs, queueMs: lastQueueMs, cam: cam, served: served,
@@ -283,11 +288,13 @@ window.MajesticDataChannel = (function () {
 					// frames it sent and this end never saw, and is asked
 					// for — at most every three seconds.
 					seqGaps++;
+					framesMissed += m.seq - lastSeq - 1;
 					meta.gap = true;
 					const now = Date.now();
 					if (!(m.flags & FLAG_GAP) && now - lastIdrAt > IDR_MIN_GAP_MS) { lastIdrAt = now; feed.send('{"request":"idr"}'); }
 				}
 				if (lastSeq && m.seq <= lastSeq) { late++; return; }
+				frames++;
 				lastSeq = m.seq;
 			}
 			if (feed.onmeta) feed.onmeta(meta);
