@@ -16,11 +16,11 @@
 	<div class="col">
 		<% card_head "Video" %>
 		<dl>
-			<dt class="cp2cb">rtsp://<span class="ep-addr"><% esc "$network_address" %></span><span class="ep-rtsp"></span>/stream=0</dt>
+			<dt class="cp2cb" data-ep-rtsp="0">rtsp://<span class="ep-addr"><% esc "$network_address" %></span><span class="ep-rtsp"></span>/stream=0</dt>
 			<dd>RTSP main stream.</dd>
-			<dt class="cp2cb">rtsp://<span class="ep-addr"><% esc "$network_address" %></span><span class="ep-rtsp"></span>/stream=1</dt>
+			<dt class="cp2cb" data-ep-rtsp="1">rtsp://<span class="ep-addr"><% esc "$network_address" %></span><span class="ep-rtsp"></span>/stream=1</dt>
 			<dd>RTSP sub stream.</dd>
-			<dt class="cp2cb">rtsp://<span class="ep-addr"><% esc "$network_address" %></span><span class="ep-rtsp"></span>/stream=2</dt>
+			<dt class="cp2cb" data-ep-rtsp="2">rtsp://<span class="ep-addr"><% esc "$network_address" %></span><span class="ep-rtsp"></span>/stream=2</dt>
 			<dd>RTSP JPEG stream.</dd>
 			<dt class="cp2cb"><span class="ep-ws">ws</span>://<span class="ep-host"><% esc "$network_address" %></span>/ws/video?stream=0</dt>
 			<dd>Low-latency H.264/H.265 main stream (fMP4/MSE, used by the Live page). Append <code>&amp;audio=opus,mp4a.40.2</code> to mux in an audio track for the codecs your player accepts.</dd>

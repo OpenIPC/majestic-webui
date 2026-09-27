@@ -175,9 +175,27 @@
 		return m ? { camera: +m[1], subtype: +m[2] } : null;
 	}
 
+	// Whether majestic will answer RTSP for stream `id`: true, false, or null
+	// when nobody answered and there is nothing to go on.
+	//
+	// The daemon's own `rtsp` flag is the answer — it is the predicate the RTSP
+	// server refuses on, so the page cannot drift from it. A stream id missing
+	// from the list is a stream that is switched off: the sub stream simply
+	// disappears from the payload when video1 is disabled, and majestic answers
+	// its URL with 404.
+	function rtspServes(sources, id) {
+		if (!Array.isArray(sources)) return null;
+		for (const src of sources) {
+			for (const s of streamsOf(src)) {
+				if (s && s.id === id) return !!s.rtsp;
+			}
+		}
+		return false;
+	}
+
 	const api = {
 		watchable, family, subtypeOf, streams, watchableSources, multi,
-		pick, resolve, label, key, parse,
+		pick, resolve, label, key, parse, rtspServes,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticSources = api;
