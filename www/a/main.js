@@ -1043,7 +1043,9 @@ function initAll() {
 	if (epRtspRows.length && typeof mjSources === 'function')
 		Promise.all([mjSources(), mjConfig()]).then(([list, cfg]) => {
 			const S = window.MajesticSources;
-			if (!S || !list) return;
+			// mjConfig() answers a failed fetch with {}, and that is no answer:
+			// without the rtsp section there is no telling whether RTSP is off.
+			if (!S || !list || !mjGet(cfg, 'rtsp')) return;
 			const rtspOff = mjGet(cfg, 'rtsp.enabled') === false;
 			const why = {
 				0: ['the main stream is switched off', 'video0'],
