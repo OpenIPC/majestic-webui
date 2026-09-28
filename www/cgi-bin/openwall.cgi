@@ -56,7 +56,7 @@ fi
 			<% card_head "OpenWall" %>
 			<%# ?ref carries the same word the footer's link to the same site
 			    carries, and for the same reason; p/footer.cgi says what it is. %>
-			<p class="small text-secondary">Share snapshots on the <a href="https://openipc.org/open-wall?ref=webui">Open Wall</a> to help compare image quality across cameras. Also sends your MAC address, chipset, sensor, flash size, firmware version and uptime. With the substream switched on, its picture is sent as well and fills your tile in the wall's grid.</p>
+			<p class="small text-secondary">Share snapshots on the <a href="https://openipc.org/open-wall?ref=webui">Open Wall</a> to help compare image quality across cameras. Also sends your MAC address, chipset, sensor, flash size, firmware version and uptime. With the substream switched on, its picture is sent too whenever the camera can take one, and fills your tile in the wall's grid; otherwise the grid shows your main picture.</p>
 			<form action="<%= $SCRIPT_NAME %>" method="post">
 				<% field_switch "openwall_enabled" "Enable OpenWall" "eval" %>
 				<% group_head "Submission" %>

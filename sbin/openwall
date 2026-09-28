@@ -31,20 +31,31 @@ fi
 # is about half the bytes of the JPEG the encoder would make of the same frame.
 #
 # The second picture is the substream's keyframe, which the wall's grid shows
-# in place of scaling the main one down in every visitor's browser. It is asked
-# for only while the substream is switched on: asked of a stream that is off,
-# the camera holds the request open instead of refusing it, and -T is all that
-# would end it.
-snapshot=/tmp/openwall.heif
-thumb=/tmp/openwall-thumb.heif
-rm -f "$snapshot" "$thumb"
-trap 'rm -f "$snapshot" "$thumb"' EXIT
+# in place of scaling the main one down in every visitor's browser. It is not
+# asked for while the substream is known to be off: asked of a stream that is
+# off, the camera holds the request open instead of refusing it. When the
+# setting cannot be read at all, that is not the same as "off", so the picture
+# is asked for anyway -- -T bounds what a wrong guess costs -- and the upload
+# goes ahead with or without it.
+#
+# Each run works in a directory of its own, so a run that starts before the
+# previous one has finished cannot remove the files that one is uploading.
+workdir=$(mktemp -d /tmp/openwall.XXXXXX) || exit 1
+snapshot="$workdir/main.heif"
+thumb="$workdir/thumb.heif"
+trap 'rm -f "$snapshot" "$thumb"; rmdir "$workdir"' EXIT
 
 wget -q -T 10 localhost/image.heif -O "$snapshot"
 
 . /var/www/cgi-bin/p/majestic.sh
-[ "$(mj_cfg video1.enabled)" = "true" ] &&
-	wget -q -T 10 "localhost/image.heif?stream=1" -O "$thumb"
+substream=$(mj_cfg video1.enabled)
+case $? in
+	0) [ "$substream" = "true" ] && want_thumb=1 ;;
+	1) ;; # no such setting: no substream
+	*) echo "Could not read whether the substream is on; asking for its picture anyway"
+	   want_thumb=1 ;;
+esac
+[ -n "$want_thumb" ] && wget -q -T 10 "localhost/image.heif?stream=1" -O "$thumb"
 
 # -s, not -e: a wget that fails still leaves the file it opened, empty.
 if [ ! -s "$snapshot" ]; then
