@@ -25,18 +25,41 @@ if [ "$openwall_enabled" != "true" ]; then
 	exit 1
 fi
 
-if [ "$openwall_heif" = "true" ]; then
-	snapshot=/tmp/snapshot.heif
-	content_type="image/heif"
-	wget -q -T1 localhost/image.heif -O "$snapshot"
-else
-	snapshot=/tmp/snapshot.jpg
-	content_type="image/jpeg"
-	wget -q -T1 localhost/image.jpg -O "$snapshot"
-fi
+# The picture is the camera's own keyframe in HEIF, never a JPEG. The wall
+# stores what it is sent byte for byte and hands visitors that same keyframe to
+# decode, so what goes up here is exactly what gets shown: at the same size it
+# is about half the bytes of the JPEG the encoder would make of the same frame.
+#
+# The second picture is the substream's keyframe, which the wall's grid shows
+# in place of scaling the main one down in every visitor's browser. It is not
+# asked for while the substream is known to be off: asked of a stream that is
+# off, the camera holds the request open instead of refusing it. When the
+# setting cannot be read at all, that is not the same as "off", so the picture
+# is asked for anyway -- -T bounds what a wrong guess costs -- and the upload
+# goes ahead with or without it.
+#
+# Each run works in a directory of its own, so a run that starts before the
+# previous one has finished cannot remove the files that one is uploading.
+workdir=$(mktemp -d /tmp/openwall.XXXXXX) || exit 1
+snapshot="$workdir/main.heif"
+thumb="$workdir/thumb.heif"
+trap 'rm -f "$snapshot" "$thumb"; rmdir "$workdir"' EXIT
 
-if [ ! -e "$snapshot" ]; then
-	echo "Snapshot file not found"
+wget -q -T 10 localhost/image.heif -O "$snapshot"
+
+. /var/www/cgi-bin/p/majestic.sh
+substream=$(mj_cfg video1.enabled)
+case $? in
+	0) [ "$substream" = "true" ] && want_thumb=1 ;;
+	1) ;; # no such setting: no substream
+	*) echo "Could not read whether the substream is on; asking for its picture anyway"
+	   want_thumb=1 ;;
+esac
+[ -n "$want_thumb" ] && wget -q -T 10 "localhost/image.heif?stream=1" -O "$thumb"
+
+# -s, not -e: a wget that fails still leaves the file it opened, empty.
+if [ ! -s "$snapshot" ]; then
+	echo "Snapshot could not be taken"
 	exit 1
 fi
 
@@ -75,7 +98,8 @@ set -- "$@" -F "soc=${soc}"
 set -- "$@" -F "soc_temperature=${temperature}"
 set -- "$@" -F "streamer=${streamer}"
 set -- "$@" -F "uptime=${uptime}"
-set -- "$@" -F "file=@${snapshot};type=${content_type}"
+set -- "$@" -F "file=@${snapshot};type=image/heif"
+[ -s "$thumb" ] && set -- "$@" -F "thumb=@${thumb};type=image/heif"
 
 # The command line is not echoed. It carries --proxy-user, and this runs from
 # cron, so the credential went wherever that camera sends its cron output. The
