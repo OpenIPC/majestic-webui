@@ -114,11 +114,13 @@ gpio_ok=0
 motor_ok=0
 profile=""
 case "$ptz_control" in
-	# Two Pelco-shaped serial protocols, one verb set, one driver: the camera
-	# holds the port and the WebUI asks it for a verb. This used to exec
-	# /usr/bin/btzoom or /usr/bin/btzoom-xm, which opened the same tty the
-	# camera was already driving for autofocus and raced it for every press.
-	pelco-d|pelco-xm)
+	# Lenses majestic itself drives: the camera holds the wire and the WebUI asks
+	# it for a verb (mj_ptz). Two are Pelco-shaped serial protocols; ms41908 is the
+	# Panasonic MS41908M SPI stepper on the Hi3516A V100 boards, driven off the ISP
+	# by the majestic-af plugin -- no tty, but the same mj_ptz relationship, so the
+	# same action path serves it. This used to exec /usr/bin/btzoom(-xm), which
+	# opened the tty the camera was already driving for autofocus and raced it.
+	pelco-d|pelco-xm|ms41908)
 		mj_ptz > /dev/null 2>&1
 		case $? in
 			0) pelco_ok=1 ;;
