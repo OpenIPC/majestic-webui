@@ -25,18 +25,30 @@ if [ "$openwall_enabled" != "true" ]; then
 	exit 1
 fi
 
-if [ "$openwall_heif" = "true" ]; then
-	snapshot=/tmp/snapshot.heif
-	content_type="image/heif"
-	wget -q -T1 localhost/image.heif -O "$snapshot"
-else
-	snapshot=/tmp/snapshot.jpg
-	content_type="image/jpeg"
-	wget -q -T1 localhost/image.jpg -O "$snapshot"
-fi
+# The picture is the camera's own keyframe in HEIF, never a JPEG. The wall
+# stores what it is sent byte for byte and hands visitors that same keyframe to
+# decode, so what goes up here is exactly what gets shown: at the same size it
+# is about half the bytes of the JPEG the encoder would make of the same frame.
+#
+# The second picture is the substream's keyframe, which the wall's grid shows
+# in place of scaling the main one down in every visitor's browser. It is asked
+# for only while the substream is switched on: asked of a stream that is off,
+# the camera holds the request open instead of refusing it, and -T is all that
+# would end it.
+snapshot=/tmp/openwall.heif
+thumb=/tmp/openwall-thumb.heif
+rm -f "$snapshot" "$thumb"
+trap 'rm -f "$snapshot" "$thumb"' EXIT
 
-if [ ! -e "$snapshot" ]; then
-	echo "Snapshot file not found"
+wget -q -T 10 localhost/image.heif -O "$snapshot"
+
+. /var/www/cgi-bin/p/majestic.sh
+[ "$(mj_cfg video1.enabled)" = "true" ] &&
+	wget -q -T 10 "localhost/image.heif?stream=1" -O "$thumb"
+
+# -s, not -e: a wget that fails still leaves the file it opened, empty.
+if [ ! -s "$snapshot" ]; then
+	echo "Snapshot could not be taken"
 	exit 1
 fi
 
@@ -75,7 +87,8 @@ set -- "$@" -F "soc=${soc}"
 set -- "$@" -F "soc_temperature=${temperature}"
 set -- "$@" -F "streamer=${streamer}"
 set -- "$@" -F "uptime=${uptime}"
-set -- "$@" -F "file=@${snapshot};type=${content_type}"
+set -- "$@" -F "file=@${snapshot};type=image/heif"
+[ -s "$thumb" ] && set -- "$@" -F "thumb=@${thumb};type=image/heif"
 
 # The command line is not echoed. It carries --proxy-user, and this runs from
 # cron, so the credential went wherever that camera sends its cron output. The
