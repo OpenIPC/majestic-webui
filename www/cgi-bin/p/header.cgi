@@ -71,6 +71,7 @@ Pragma: no-cache
 	<script src="/a/update-check.js" defer></script>
 	<script src="/a/storage-verdict.js" defer></script>
 	<script src="/a/storage-check.js" defer></script>
+	<script src="/a/share.js" defer></script>
 </head>
 
 <body id="page-<% attr_escape "$pagename" %>" class="<% attr_escape "$fw_variant" %>">
@@ -209,7 +210,8 @@ Pragma: no-cache
 						</a>
 						<ul aria-labelledby="cam-switch-toggle" class="dropdown-menu dropdown-menu-end" id="cam-switch-menu"></ul>
 					</li>
-					<li class="nav-item nav-push-end"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
+					<li class="nav-item nav-push-end"><a class="nav-link" href="#" id="nav-share" title="Share this camera by link">Share</a></li>
+					<li class="nav-item"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
 				</ul>
 			</div>
 		</div>
