@@ -5,7 +5,7 @@
 'use strict';
 
 const { check, group, done } = require('./assert');
-const { shareRemaining, shareGuest, shareError, SHARE_DURATIONS, SHARE_DEFAULT_TTL } = require('../www/a/share.js');
+const { shareRemaining, shareGuest, shareError, shareReason, SHARE_DURATIONS, SHARE_DEFAULT_TTL } = require('../www/a/share.js');
 
 group('remaining time');
 const now = 1_000_000_000_000;
@@ -29,5 +29,10 @@ check('a week at most, the camera’s cap', Math.max(...SHARE_DURATIONS.map(([s]
 group('errors');
 check('an unset clock is named', /clock/.test(shareError(503)));
 check('a full camera says what to do', /End one/.test(shareError(409)));
+
+group('the camera\u2019s words');
+const page = '<HTML><HEAD>\n<TITLE>500 ended now, but not saved</TITLE>\n</HEAD><BODY>\n<H1>ended now, but not saved</H1>\n</BODY></HTML>\n';
+check('once, without the status code', shareReason(page) === 'ended now, but not saved');
+check('plain text as it is', shareReason('refused') === 'refused');
 
 done();

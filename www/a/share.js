@@ -46,6 +46,13 @@ function shareGuest(win) {
 	}
 }
 
+// The sentence in the camera's error page: its <h1>, which the <title>
+// repeats with the status code in front.
+function shareReason(html) {
+	const m = /<h1>([\s\S]*?)<\/h1>/i.exec(html || '');
+	return (m ? m[1] : (html || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
 // What the camera said, as a sentence for the owner.
 function shareError(status, text) {
 	if (status === 503) return 'The camera’s clock is not set yet, so it cannot tell when a link should end. Try again once it has synchronised.';
@@ -55,7 +62,7 @@ function shareError(status, text) {
 }
 
 if (typeof module !== 'undefined') {
-	module.exports = { shareRemaining, shareGuest, shareError, SHARE_DURATIONS, SHARE_DEFAULT_TTL };
+	module.exports = { shareRemaining, shareGuest, shareError, shareReason, SHARE_DURATIONS, SHARE_DEFAULT_TTL };
 }
 
 if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', () => {
@@ -140,7 +147,10 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 			end.addEventListener('click', async () => {
 				end.disabled = true;
 				const r = await apiFetch('/api/v1/shares?id=' + encodeURIComponent(s.id), { method: 'DELETE' });
-				if (!r.ok && r.status !== 404) showError(shareError(r.status));
+				// 500 is "ended now, but not saved": the camera's own sentence
+				// says what that means, and it is the one worth showing.
+				if (!r.ok && r.status !== 404)
+					showError(shareError(r.status, shareReason(await r.text())));
 				refreshList();
 			});
 			return el('div', { class: 'd-flex align-items-center gap-2 border rounded px-2 py-1' },
@@ -162,7 +172,7 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ ttl: +ttl.value, scope, label: label.value.trim() }),
 			});
-			if (!r.ok) { showError(shareError(r.status, (await r.text()).replace(/<[^>]*>/g, ' ').trim())); return; }
+			if (!r.ok) { showError(shareError(r.status, shareReason(await r.text()))); return; }
 			const s = await r.json();
 			const link = el('input', { class: 'form-control font-monospace', readonly: '', value: s.link });
 			const copy = el('button', { class: 'btn btn-outline-secondary', type: 'button', text: 'Copy' });
