@@ -127,7 +127,11 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 
 	const showError = (text) => { err.textContent = text; err.classList.toggle('d-none', !text); };
 
+	// Only the newest refresh paints: an older reply arriving late would
+	// otherwise put back a list from before the link just made.
+	let generation = 0;
 	async function refreshList() {
+		const mine = ++generation;
 		list.replaceChildren(el('span', { class: 'text-body-secondary', text: 'Loading…' }));
 		let data;
 		try {
@@ -135,9 +139,10 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 			if (!r.ok) throw new Error(shareError(r.status));
 			data = await r.json();
 		} catch (e) {
-			list.replaceChildren(el('span', { class: 'text-danger', text: e.message }));
+			if (mine === generation) list.replaceChildren(el('span', { class: 'text-danger', text: e.message }));
 			return;
 		}
+		if (mine !== generation) return;
 		if (!data.shares.length) {
 			list.replaceChildren(el('span', { class: 'text-body-secondary', text: 'None. Nobody can reach this camera by link.' }));
 			return;
@@ -145,12 +150,20 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 		list.replaceChildren(...data.shares.map((s) => {
 			const end = el('button', { class: 'btn btn-sm btn-outline-danger', type: 'button', text: 'End now' });
 			end.addEventListener('click', async () => {
+				showError('');
 				end.disabled = true;
-				const r = await apiFetch('/api/v1/shares?id=' + encodeURIComponent(s.id), { method: 'DELETE' });
-				// 500 is "ended now, but not saved": the camera's own sentence
-				// says what that means, and it is the one worth showing.
-				if (!r.ok && r.status !== 404)
-					showError(shareError(r.status, shareReason(await r.text())));
+				try {
+					const r = await apiFetch('/api/v1/shares?id=' + encodeURIComponent(s.id), { method: 'DELETE' });
+					// 500 is "ended now, but not saved": the camera's own sentence
+					// says what that means, and it is the one worth showing.
+					if (!r.ok && r.status !== 404) showError(shareError(r.status, shareReason(await r.text())));
+				} catch (e) {
+					// Not known to have ended: say so, and leave the button to
+					// try again with.
+					showError('The camera did not answer. The link may still work; try End now again.');
+					end.disabled = false;
+					return;
+				}
 				refreshList();
 			});
 			return el('div', { class: 'd-flex align-items-center gap-2 border rounded px-2 py-1' },
@@ -164,6 +177,9 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 
 	create.addEventListener('click', async () => {
 		showError('');
+		// A link from an earlier press is not the answer to this one.
+		result.classList.add('d-none');
+		result.replaceChildren();
 		create.disabled = true;
 		try {
 			const scope = scopes.querySelector('input:checked').value;
@@ -177,8 +193,19 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 			const link = el('input', { class: 'form-control font-monospace', readonly: '', value: s.link });
 			const copy = el('button', { class: 'btn btn-outline-secondary', type: 'button', text: 'Copy' });
 			copy.addEventListener('click', async () => {
-				try { await navigator.clipboard.writeText(s.link); copy.textContent = 'Copied'; }
-				catch (e) { link.select(); document.execCommand('copy'); copy.textContent = 'Copied'; }
+				let copied = false;
+				try {
+					await navigator.clipboard.writeText(s.link);
+					copied = true;
+				} catch (e) {
+					link.select();
+					try { copied = document.execCommand('copy'); } catch (e2) { copied = false; }
+				}
+				// Only a copy that happened is reported as one: this link is shown
+				// once, and an owner told it is on the clipboard will close the
+				// dialog on the strength of it.
+				copy.textContent = copied ? 'Copied' : 'Select and copy it';
+				if (!copied) link.select();
 			});
 			result.replaceChildren(
 				el('div', { class: 'alert alert-success py-2 mb-2', text:
