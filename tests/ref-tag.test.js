@@ -95,10 +95,10 @@ for (const file of walk(WWW, [])) {
 group('every openipc.org link in www/ carries the tag');
 {
 	// A scan that finds nothing passes every assertion below it, so the count
-	// is checked first: two links are what the tree has, and a rename or a
-	// rewritten footer that takes one away has to be noticed rather than
-	// quietly reducing this file to a no-op.
-	check('the scan actually found links to tag', links.length >= 2,
+	// is checked first: the Open Wall card's link is what the tree has, and a
+	// rename that takes it away has to be noticed rather than quietly reducing
+	// this file to a no-op.
+	check('the scan actually found links to tag', links.length >= 1,
 		links.length + ' found');
 
 	for (const link of links) {
@@ -108,19 +108,13 @@ group('every openipc.org link in www/ carries the tag');
 	}
 }
 
-group('the two links the footer and the Open Wall card put on screen');
+group('the link the Open Wall card puts on screen');
 {
 	const byFile = (f) => links.filter((l) => l.file === f).map((l) => l.raw);
 
-	const footer = byFile('www/cgi-bin/p/footer.cgi');
-	check('the footer, which every page with chrome renders, links to the site',
-		footer.length === 1, footer.join(' '));
-	check('and it is the front page, tagged', footer[0] === 'https://openipc.org/?ref=webui',
-		footer[0]);
-
 	const wall = byFile('www/cgi-bin/openwall.cgi');
 	check('the Open Wall card links to the wall itself', wall.length === 1, wall.join(' '));
-	check('and it is tagged too', wall[0] === 'https://openipc.org/open-wall?ref=webui',
+	check('and it is tagged', wall[0] === 'https://openipc.org/open-wall?ref=webui',
 		wall[0]);
 }
 
