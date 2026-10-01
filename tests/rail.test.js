@@ -77,4 +77,26 @@ check('rail out of the way, when the column is above the window', RAIL.revealsFo
 check('rail out of the way, not when it is already at the top', RAIL.revealsForm(true, 0) === false);
 check('rail out of the way, not when it is in view', RAIL.revealsForm(true, 271) === false);
 
+group('how much of the window the rail leaves free');
+// Measured in a 1470x830 window: the row starts 109px down the document, and a
+// long section's column ends 1389px down it.
+const ABOVE = 109, H = 830;
+check('at the top of the page, the navbar above it', RAIL.railGap(ABOVE, 109, 1389, H) === 109);
+check('part way through the first scroll, what is left of it', RAIL.railGap(ABOVE, 40, 1320, H) === 40);
+// The reported fault: a stuck rail kept the scroll-0 answer and left 109px empty
+// under the list, so the tree appeared to end where the window cut it.
+check('stuck, nothing', RAIL.railGap(ABOVE, -300, 980, H) === 0);
+// With nothing under the row, the end of the page puts the column's end on the
+// window's, and the list keeps its full height.
+check('stuck, at the end of the page', RAIL.railGap(ABOVE, -549, H, H) === 0);
+check('with a strip under the column, the strip', RAIL.railGap(ABOVE, -549, 782, H) === 48);
+// Never more than the scroll-0 answer, which always fits — a short section must
+// not shrink the rail below what it had, and a column not laid out yet (its end
+// at its top) must not shrink it to nothing.
+check('a short section at the top of the page', RAIL.railGap(ABOVE, 109, 400, H) === 109);
+check('a column not laid out yet', RAIL.railGap(ABOVE, 109, 109, H) === 109);
+check('a short section scrolled to the end of a short page', RAIL.railGap(ABOVE, 9, 300, H) === 109);
+check('rounded to a whole pixel', RAIL.railGap(108.6, 0.4, 900, H) === 0 && RAIL.railGap(ABOVE, 40.4, 1320, H) === 40);
+check('nothing measured is no gap at all', RAIL.railGap(undefined, NaN, undefined, undefined) === 0);
+
 done();

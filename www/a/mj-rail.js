@@ -1,10 +1,10 @@
-// Where the settings rail's list has to sit, and when a pick has to move the
-// page.
+// How much of the window the settings rail may take, where its list has to sit,
+// and when a pick has to move the page.
 //
-// Two decisions, both arithmetic over rectangles, both made every time somebody
-// picks a section. From md up the tree is taller than the pane it lives in, so
-// one of them scrolls that pane and the other decides whether the page has to
-// move at all.
+// Three decisions, all arithmetic over rectangles. From md up the tree is taller
+// than the pane it lives in: one decision sizes that pane to the window as the
+// page scrolls, and the two made every time somebody picks a section scroll the
+// pane and decide whether the page has to move at all.
 //
 // Its own file, and pure, for the reason mj-fps.js and mj-place.js are: both
 // fail SILENTLY and in the same direction. A rail scrolled to the wrong place
@@ -78,9 +78,42 @@
 		return !clear || num(colTop) < 0;
 	}
 
+	// How much of the window the rail must leave free, so that the whole of it —
+	// scrollport included — is on screen at the scroll offset the page is at NOW.
+	//
+	// `above` is how far the rail's column sits from the top of the DOCUMENT
+	// (the navbar, and any banner over the row), `top` and `end` are that
+	// column's top and bottom edges in the window, and `height` is the window's
+	// height. All in px.
+	//
+	// The rail is sticky, so what it has to share the window with changes as the
+	// page scrolls. At the top it sits under the navbar, and the strip the navbar
+	// takes is the gap. Once it has stuck there is nothing above it, and the gap
+	// is nothing. Leaving it at the scroll-0 answer — which the page did — left a
+	// strip of the same height EMPTY under the stuck list, so the tree appeared
+	// to stop at whatever row the window happened to cut at: on a MacBook Air,
+	// with a 1470x830 window, at Record, with Image through Pins under the edge.
+	// A sticky box cannot leave its column, so where the column ends above the
+	// bottom of the window the strip below it is the gap too, or the rail would be
+	// shoved up by it and take the title and the search box off the top of the
+	// screen. The stylesheet takes everything out from under the column so that
+	// strip is nothing at the end of the page as well: when it was 48px of margin
+	// and padding, reaching the end shrank the list and hid its last visible row.
+	//
+	// Never more than `above`. That is the scroll-0 answer, and it is always
+	// enough to keep the rail on screen. It is also what keeps this out of a
+	// loop: the column is stretched to the taller of the rail and the form, so on
+	// a short section its end moves with the rail, and an answer bounded by a
+	// value the rail does not move cannot chase its own tail.
+	function railGap(above, top, end, height) {
+		const cap = Math.max(0, num(above));
+		const gap = Math.max(0, num(top)) + Math.max(0, num(height) - num(end));
+		return Math.round(Math.min(cap, gap));
+	}
+
 	function num(v) { return typeof v === 'number' && !isNaN(v) ? v : 0; }
 
-	const api = { scrollTopFor, revealsForm };
+	const api = { scrollTopFor, revealsForm, railGap };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticRail = api;
 })();

@@ -1311,19 +1311,43 @@ textarea {
    the title and the search box stay put above it — the box that filters the list
    should not be the first thing to leave when the list is scrolled.
 
-   --mj-rail-top is how far the rail sits from the top of the DOCUMENT, published
-   by mj-settings.js, and the subtraction is what keeps the whole scrollport on
-   screen at scroll 0 as well as when the rail is stuck: a cap of a bare 100dvh
-   would hang its own last rows below the fold, which is the fault above in
-   smaller clothes. It is measured rather than written down because what sits
-   above the row is not a constant — 110px from 992 up, 130px at 768 where the
-   navbar's brand line takes another row. The fallback covers the taller of the
-   two, for the first paint and for a rail whose script has not run. */
+   --mj-rail-gap is how much of the window is not the rail's at the offset the
+   page is scrolled to, published by mj-settings.js as the page scrolls. At
+   scroll 0 it is the navbar above the row: a cap of a bare 100dvh would hang the
+   tree's own last rows below the fold, which is the fault above in smaller
+   clothes. Once the rail has stuck it is nothing — keeping the scroll-0 answer
+   there left the same strip empty UNDER the list, so the tree read as ending at
+   whichever row the window cut it at. At the end of the page it is whatever of
+   the window lies below the row. It is measured rather than written down
+   because none of those is a constant — the navbar alone is 110px from 992 up
+   and 130px at 768, where its brand line takes another row. The fallback covers
+   the taller of the two, for the first paint and for a rail whose script has
+   not run. */
+/* And nothing under the row. A sticky box cannot leave its column, so whatever
+   lies below the column at the end of the page is window the rail cannot reach:
+   the row's own margin and main's padding were 48px of it, and reaching the end
+   of the page shrank the list by that much and hid the row the reader had just
+   been looking at. The room under the last setting is the form column's own
+   padding instead, which the rail's column, stretched beside it, reaches too. */
+@media (min-width: 768px) {
+	#page-camera > main {
+		padding-bottom: 0 !important;
+	}
+
+	#page-camera .row:has(> .col-md-3 > #mj-rail) {
+		margin-bottom: 0 !important;
+	}
+
+	#page-camera #mj-settings-form-col {
+		padding-bottom: 3rem;
+	}
+}
+
 @media (min-width: 768px) {
 	#page-camera .row > .col-md-3 > .sticky-md-top {
 		display: flex;
 		flex-direction: column;
-		max-height: calc(100dvh - var(--mj-rail-top, 8.25rem));
+		max-height: calc(100dvh - var(--mj-rail-gap, 8.25rem));
 	}
 
 	#page-camera #mj-settings-nav {

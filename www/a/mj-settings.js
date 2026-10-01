@@ -287,14 +287,15 @@
 		}
 		buildNav();
 		wireRailToggle();
-		publishRailTop();
-		watchRailTop();
+		publishRailGap();
+		watchRailGap();
+		watchRailScroll();
 		wireSearch();
 		watchIrcut();
 		watchRc();
 		// the rail is a tree on >=md and an accordion below it; re-render rather
 		// than try to keep both shapes live at once
-		const onWidth = () => { buildNav(); publishRailTop(); };
+		const onWidth = () => { buildNav(); publishRailGap(); };
 		if (WIDE.addEventListener) WIDE.addEventListener('change', onWidth);
 		else if (WIDE.addListener) WIDE.addListener(onWidth);
 		window.addEventListener('popstate', onPopState);
@@ -307,7 +308,7 @@
 			// foldHints after layoutCols for the same reason it follows it at
 			// mount: the column's width is what decides how many lines a hint
 			// takes, and narrow-to-wide has to give back the cuts it made.
-			rt = setTimeout(() => { layoutCols(); foldHints(); publishRailTop(); }, 120);
+			rt = setTimeout(() => { layoutCols(); foldHints(); publishRailGap(); }, 120);
 		});
 		await load(state.sec, /*push*/ false);
 	}
@@ -482,33 +483,47 @@
 					f.dot.split('.').pop().toLowerCase().includes(q)))).length;
 	}
 
-	// How far the rail sits from the top of the DOCUMENT, handed to the
+	// How much of the window the rail has to leave free, handed to the
 	// stylesheet, which caps the rail at the window less that much so the whole
-	// of it — scrollport included — is on screen whether the page is at the top
-	// or scrolled far enough for the rail to have stuck. Capping at a bare
-	// window height instead would hang the tree's own last rows below the fold,
-	// which is the fault this rail exists to have fixed, in smaller clothes.
+	// of it — scrollport included — is on screen at whatever offset the page is
+	// scrolled to. The arithmetic, and why the answer changes as the page
+	// scrolls, are MajesticRail.railGap's.
 	//
 	// Measured rather than written into the stylesheet because what stands above
 	// the row is not a constant: 110px from 992 up, 130px at 768, and a flash
 	// message or the restart banner adds its own. Read off the COLUMN, never off
 	// the rail: the rail is the sticky one, so once it has stuck its own box is
 	// no longer where the document put it.
-	let railTop = null;
-	function publishRailTop() {
+	let railGap = null;
+	function publishRailGap() {
 		const col = document.querySelector('#page-camera .row > .col-md-3');
-		if (!col) return;
-		const top = Math.round(col.getBoundingClientRect().top + window.scrollY);
-		// Written only when it has actually moved. The observer below fires on
-		// every layout change on the page, and a property whose value the
-		// stylesheet reads is not a free thing to set.
-		if (top === railTop) return;
-		railTop = top;
-		document.documentElement.style.setProperty('--mj-rail-top', top + 'px');
+		if (!col || !window.MajesticRail) return;
+		const r = col.getBoundingClientRect();
+		const top = r.top, end = r.bottom;
+		const gap = window.MajesticRail.railGap(top + window.scrollY, top, end, window.innerHeight);
+		// Written only when it has actually moved. Scrolling and the observer
+		// below both fire far more often than that: once the rail has stuck the
+		// answer is 0 for the rest of the page, and a property the stylesheet
+		// reads is not a free thing to set.
+		if (gap === railGap) return;
+		railGap = gap;
+		document.documentElement.style.setProperty('--mj-rail-gap', gap + 'px');
+	}
+
+	// The answer moves through the first scroll of the page — the strip the
+	// navbar takes going away — and again as the end of the page comes up. A frame at a
+	// time: a wheel delivers scroll events faster than the screen draws.
+	function watchRailScroll() {
+		let queued = false;
+		window.addEventListener('scroll', () => {
+			if (queued) return;
+			queued = true;
+			requestAnimationFrame(() => { queued = false; publishRailGap(); });
+		}, { passive: true });
 	}
 
 	// A banner arriving after the page has loaded moves the row down, and the
-	// offset published above does not know. Then the rail is capped as though it
+	// gap published above does not know. Then the rail is capped as though it
 	// still began where it did, its own last rows hang below the fold, and the
 	// fault this rail exists to have fixed is back one layer down — measured with
 	// the card warning that /a/storage-check.js raises on a heartbeat: the rail's
@@ -519,11 +534,11 @@
 	// so a watcher rather than a list of moments. The body rather than the slots:
 	// a list of the things that can move the row is a second copy of the page's
 	// own structure, and it would be wrong the first time a page grew a third
-	// banner. Everything else it fires for costs one rect and no write at all.
-	function watchRailTop() {
+	// banner. Everything else it fires for costs a few rects and no write at all.
+	function watchRailGap() {
 		if (typeof ResizeObserver !== 'function') return;
 		try {
-			new ResizeObserver(() => publishRailTop()).observe(document.body);
+			new ResizeObserver(() => publishRailGap()).observe(document.body);
 		} catch (e) { /* the resize handler below is the fallback */ }
 	}
 
