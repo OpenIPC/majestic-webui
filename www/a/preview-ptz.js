@@ -42,6 +42,12 @@
 	mount.hidden = false;
 
 	const STEP = 5, TICK_MS = 250;
+	// A held zoom is ONE long continuous move the camera's deadline keeps alive,
+	// re-armed by each tick, not a train of short pulses. Long, because the tick
+	// only has to LAND once to keep zooming for this whole span -- the author
+	// measured a 250 ms ticker leaving a single 500 ms pulse in a 1.2 s hold over
+	// a slow link, which reads exactly as "one step, then holding does nothing".
+	const HOLD_MS = 1500;
 	const DIRS = {
 		ul: [-1, 1], uc: [0, 1], ur: [1, 1],
 		lc: [-1, 0], cc: [0, 0], rc: [1, 0],
@@ -323,11 +329,26 @@
 		holdBtn = btn;
 		holdOwner = owner;
 		holdStart = Date.now();
-		// The press cannot yet know whether it is a tap or a hold, so it sends
-		// the fine step and the ticker takes over. The first coarse tick is
-		// timed to land as that fine pulse expires rather than at the usual
-		// quarter second, or a hold would be a nudge, a stall, then motion.
-		const fine = (btn.dataset.act && btn.dataset.act !== 'stop') ? fineMs : 0;
+		const act = btn.dataset.act;
+		// Zoom is press-to-move: send one LONG continuous move at once and keep
+		// re-arming it while the button is down; the release stops it. There is no
+		// tap/hold guess to make -- a quick tap releases almost immediately and its
+		// own stop cuts the move short, so the amount zoomed tracks how long the
+		// button was held. This is robust where the old fine-pulse-then-ticker was
+		// not: on a slow or lossy link a single tick that lands still zooms for
+		// HOLD_MS instead of one 500 ms step, and there is no ticker-never-started
+		// window that leaves a hold as one nudge.
+		if (act === 'wide' || act === 'tele') {
+			fire(btn, HOLD_MS);
+			holdTimer = setInterval(() => fire(btn, HOLD_MS), TICK_MS);
+			return;
+		}
+		// Focus keeps the fine-pulse-then-ticker model: the press cannot yet know
+		// whether it is a tap or a hold, so it sends the fine step and the ticker
+		// takes over. The first coarse tick is timed to land as that fine pulse
+		// expires rather than at the usual quarter second, or a hold would be a
+		// nudge, a stall, then motion.
+		const fine = (act && act !== 'stop') ? fineMs : 0;
 		fire(btn, fine);
 		holdKick = setTimeout(() => {
 			holdKick = null;
@@ -355,12 +376,14 @@
 		const btn = holdBtn;
 		const heldMs = Date.now() - holdStart;
 		clearHold();
-		// A tap must not be cut short by its own release. The fine pulse is
-		// self-terminating — the camera stops the motor on the deadline that
-		// press armed — so a press shorter than the step sends no stop and the
-		// nudge completes. Anything longer is a sweep, and a sweep has to be
-		// told to stop or the motor runs on to its deadline.
-		if (btn && btn.dataset.act && heldMs >= fineMs) move('stop', 0, true);
+		// Zoom always issued a LONG continuous move (startHold), so every zoom
+		// release must stop it, however brief -- a quick zoom tap is meant to be a
+		// short nudge, and its stop is what makes it one. Focus sent a
+		// self-terminating fine pulse, so there a press shorter than the step sends
+		// no stop and the nudge completes; anything longer is a sweep that has to
+		// be told to stop or the motor runs on to its deadline.
+		const isZoom = btn && (btn.dataset.act === 'wide' || btn.dataset.act === 'tele');
+		if (btn && btn.dataset.act && (isZoom || heldMs >= fineMs)) move('stop', 0, true);
 		// Letting go of a zoom is what books a focus pass: majestic waits for
 		// the wire to go quiet (700 ms) after the move's own deadline and then
 		// runs one. Nothing told the operator that, so a picture that went soft
@@ -424,10 +447,8 @@
 		// like it never converged, from one press of Space on Near.
 		btn.addEventListener('click', e => {
 			if (e.detail !== 0) return;
-			const axis = axisFor(btn.dataset.act);
 			startHold(btn, 'kb');
 			stopHold('kb');
-			void axis;
 		});
 	});
 

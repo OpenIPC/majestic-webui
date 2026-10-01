@@ -1009,8 +1009,16 @@ update_caminfo() {
 				ptz_support="1"; ptz_backend="gpio"
 			fi
 			;;
-		pelco-d|pelco-xm)
-			# Ask the daemon whether it can drive this wire. Its answers are
+		pelco-d|pelco-xm|ms41908)
+			# All three are lenses majestic itself drives -- the two XiongMai
+			# near-Pelco variants over a UART, and the Panasonic MS41908M SPI
+			# stepper on the Hi3516A V100 boards, which has no UART MCU and is
+			# stepped straight off the ISP by the majestic-af plugin. The WebUI
+			# does not touch any of those wires; it asks majestic (mj_ptz) and
+			# POSTs verbs to its /ptz, so the pad is the same for all three and
+			# the axes it renders come from ptz_caps, not the wire.
+			#
+			# Ask the daemon whether it can drive this lens. Its answers are
 			# kept apart the way af_support keeps them apart: a camera that
 			# could not be asked keeps its pad and lets a press report its
 			# own failure, and only a camera that answered "no motorized
