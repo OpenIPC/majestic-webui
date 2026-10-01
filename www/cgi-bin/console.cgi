@@ -18,14 +18,20 @@
 	// injected with an error path, never as <script src> tags that would gate
 	// the page on the CDN (#31), so a camera without internet says so instead
 	// of spinning.
+	//
+	// Each load is bounded by LOAD_MS. A route that blackholes rather than
+	// refusing never fires load or error, and without the bound the page would
+	// say "Loading" for as long as the browser cares to wait.
+	const LOAD_MS = 15000;
 	const CDN = 'https://cdn.jsdelivr.net/npm/';
 
 	function load(src) {
 		return new Promise(res => {
 			const s = document.createElement('script');
 			s.src = src;
-			s.onload = () => res(true);
-			s.onerror = () => res(false);
+			const to = setTimeout(() => res(false), LOAD_MS);
+			s.onload = () => { clearTimeout(to); res(true); };
+			s.onerror = () => { clearTimeout(to); res(false); };
 			document.head.appendChild(s);
 		});
 	}
