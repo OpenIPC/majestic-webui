@@ -502,7 +502,7 @@ function renderTopbar(s) {
 		// warning read out afresh every two seconds for as long as the page
 		// stayed open. (A plain `return` here would be worse than the noise
 		// it saves: this runs inside the heartbeat's one handler, so it
-		// would take memory, day/night and uptime down with it.)
+		// would take memory and day/night down with it.)
 		if (el.textContent !== text) {
 			el.textContent = text;
 			// Colour comes from #clock-drift in bootstrap.override.css, which
@@ -526,10 +526,6 @@ function renderTopbar(s) {
 
 	if (s.memPct != null && $('#pb-memory'))
 		setProgressBar('#pb-memory', Math.round(s.memPct), 'Memory Usage');
-
-	const up = $('#uptime');
-	if (up && s.sysUptimeS != null)
-		up.textContent = 'Uptime: ' + uptimeStr(s.sysUptimeS);
 }
 
 function heartbeat() {
