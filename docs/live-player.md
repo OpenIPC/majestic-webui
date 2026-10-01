@@ -7,9 +7,7 @@ also opens with its own reasoning — read that before changing one.
 `main.js:initAll` runs on `load`: wires `.btn-danger`/`.btn-warning`/`.confirm`
 to `confirm()`, links `input[type=range]` to a sibling `…-show` and hidden input,
 makes external links open in a new tab, and starts the 2 s heartbeat.
-`main.js:runCmd(msg)` streams `/cgi-bin/j/run.cgi` line-by-line via
-`fetch`/`ReadableStream` into a `pre#output` whose `data-cmd` carries the
-base64-encoded command. The heartbeat publishes `null`, never `0`, for a gauge
+The heartbeat publishes `null`, never `0`, for a gauge
 majestic does not emit (`night`/`ircut`/`light`). Sparkline and axis-chart
 primitives live in `www/a/charts.js` — **load it before any consumer.**
 

@@ -12,7 +12,7 @@
 	#
 	# The flag reads as upgrade-specific because /ws/upgrade needed it first, but
 	# what it means to sysupgrade is "majestic is streaming this, leave it
-	# alone", which is just as true of the run.cgi flow. Besides skipping the
+	# alone", which is just as true of this one. Besides skipping the
 	# sysupgrade self-update it gates nothing else, and nothing later in the run
 	# touches majestic: that killall is the only one in the script, and -n
 	# rewrites rootfs_data, not the rootfs majestic runs from. So the log now
@@ -38,7 +38,19 @@
 	#   fact. Dropping it puts the real meter back: one redraw per erase block,
 	#   about five a second, which on a camera whose overlay takes half a minute
 	#   to erase is the difference between progress and a frozen page (#154).
-	c="/usr/sbin/sysupgrade -n --web"
+	#
+	# The reset is the POST to this page, and nothing else runs it. The GET draws
+	# the page; factory-reset.js then POSTs here and reads the response as the
+	# transcript. A fixed command behind a POST, never a command named by the
+	# page: the reset is a mutation, and a GET is what a browser issues on its
+	# own.
+	if [ "$REQUEST_METHOD" = "POST" ]; then
+		printf 'HTTP/1.1 200 OK\nContent-Type: text/plain; charset=UTF-8\nCache-Control: no-store\n\n'
+		cd /tmp || exit 1
+		# stdin from /dev/null: haserl feeds the script to the shell on it.
+		/usr/sbin/sysupgrade -n --web </dev/null 2>&1
+		exit 0
+	fi
 %>
 
 <%in p/header.cgi %>
@@ -48,7 +60,7 @@
 </div>
 <div class="card"><div class="card-body">
 	<% card_head "Progress" %>
-	<pre id="output" class="mb-0" data-cmd="<%= $c %>"></pre>
+	<pre id="output" class="mb-0"></pre>
 </div></div>
 
 <script src="/a/factory-reset.js" defer></script>
