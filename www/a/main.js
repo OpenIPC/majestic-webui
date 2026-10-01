@@ -201,7 +201,7 @@ function setProgressBar(id, value, name) {
 // page has an actual terminal (xterm.js) and needs none of this.
 //
 // Shared by the two pages that stream sysupgrade — update.js over /ws/upgrade
-// and factory-reset.js over j/run.cgi. They render the identical output, so the
+// and factory-reset.js over its own POST response. They render the identical output, so the
 // lesson above only wants learning once.
 function termWriter(el) {
 	// \u001b/\u009b escaped rather than written as the literal ESC and CSI bytes

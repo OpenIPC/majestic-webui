@@ -7,9 +7,7 @@ Small `#!/bin/sh` scripts emitting JSON for the front end. `pulse.cgi` is the
 model for what belongs here at all: it was cut back to the three things majestic
 cannot answer — overlay `df`, `/etc/timezone`, and the camera's own `date %z` —
 once `/metrics` was found to carry the rest. The heartbeat polls `/metrics`
-directly every 2 s and asks `pulse.cgi` only every 15th tick. `run.cgi` streams
-the output of a base64-encoded shell command (`cmd=` for trusted local, `web=`
-adds `timeout 3` for the console page).
+directly every 2 s and asks `pulse.cgi` only every 15th tick.
 
 **`sdcard.cgi` makes the judgement once, server-side.** Two pages read it
 (`a/sdcard.js`, `a/recordings.js`) and they only choose wording; the verdict is

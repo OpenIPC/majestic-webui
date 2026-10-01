@@ -203,7 +203,10 @@ pr_compliances:
       carries on past it, which on the live page means the camera's MJPEG channel where
       the source has one, and the explanation where it does not.
       (2) the terminal — xterm.js, loaded by cgi-bin/console.cgi; without it the console
-      falls back to the one-command-at-a-time runner it ships with.
+      page says the terminal could not be loaded, within a bounded wait, and points at
+      ssh, the camera's other root shell. It ships no second command runner: one was
+      removed, and a page that executes commands without a terminal is not a fallback
+      worth carrying.
       (3) the file editor — CodeMirror, loaded by www/a/files.js; without it the editor
       is a plain textarea, which still opens, edits and saves.
       (4) the raw editor — OpenIPC/raw-editor, pinned, loaded by www/a/raw-loader.js;

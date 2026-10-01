@@ -83,7 +83,7 @@ function makeEnv(o) {
 	const clock = makeClock();
 	const env = { clock, notes: [], status: makeStatusEl(), replaced: null, pings: 0, metricsReads: 0 };
 
-	// The run.cgi stream: chunks the test pushes, then a read that never settles
+	// The factory-reset.cgi POST stream: chunks the test pushes, then a read that never settles
 	// unless the test says otherwise.
 	env.queue = [];
 	let pendingRead = null;
@@ -102,7 +102,7 @@ function makeEnv(o) {
 		return flush();
 	};
 
-	const out = { dataset: { cmd: '/usr/sbin/sysupgrade -n --web' } };
+	const out = {};
 
 	const ctx = {
 		$: (sel) => (sel === '#output' ? out : sel === '#fw-reset-status' ? env.status : null),
@@ -116,7 +116,7 @@ function makeEnv(o) {
 			note: (s) => env.notes.push(s),
 		}),
 		rawFetch: (url) => {
-			if (String(url).indexOf('run.cgi') !== -1)
+			if (String(url).indexOf('factory-reset.cgi') !== -1)
 				return Promise.resolve({ ok: !o.notOk, status: o.notOk ? 401 : 200, body: { getReader: () => reader } });
 			// The uptime read, before the ping counter: it is not a ping, and
 			// counting it would shift every downFor: n the cases below are pinned on.

@@ -265,9 +265,8 @@ done
 # This does NOT ban eval. Several uses are correct and deliberate: an
 # assignment (`eval val=\$$v`) does not word-split its right-hand side, a
 # lookup by a name taken from a fixed in-script list is a lookup and nothing
-# more, and p/common.cgi's ex() and j/run.cgi exist precisely to run a command
-# -- run.cgi IS the root console. What is banned is the three ways a VALUE gets
-# re-parsed.
+# more, and p/common.cgi's ex() exists precisely to run a command. What is
+# banned is the three ways a VALUE gets re-parsed.
 #
 # Each pattern is anchored with ^[^#]* so it reads code and not prose. Stating
 # any of these rules requires naming the construct it forbids, and the first
