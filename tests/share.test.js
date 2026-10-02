@@ -74,6 +74,8 @@ check('an unreadable parent is no level', shareGuestScope({ get parent() { throw
 check('settings guest: the console is not offered', shareRefused('console.cgi', 'admin'));
 check('settings guest: the password page is not offered', shareRefused('access.cgi', 'admin'));
 check('settings guest: with a query string too', shareRefused('network.cgi?x=1', 'admin'));
+check('settings guest: restarting the camera is not offered', shareRefused('restart.cgi', 'admin'));
+check('settings guest: sending pictures out is not offered', shareRefused('openwall.cgi', 'admin'));
 check('settings guest: the settings page is', !shareRefused('camera.cgi', 'admin'));
 check('settings guest: the live page is', !shareRefused('live.cgi', 'admin'));
 check('an unknown level is pruned like settings', shareRefused('console.cgi', null));

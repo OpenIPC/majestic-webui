@@ -53,8 +53,8 @@ const SHARE_DEFAULT_SCOPE = 'view';
 // here is still refused, it is just still offered.
 const SHARE_OWNER_PAGES = [
 	'access.cgi', 'update.cgi', 'backup.cgi', 'logs.cgi', 'console.cgi', 'files.cgi',
-	'network.cgi', 'telegram.cgi', 'ntfy.cgi', 'max.cgi',
-	'vtun.cgi', 'wireguard.cgi', 'proxy.cgi',
+	'network.cgi', 'telegram.cgi', 'ntfy.cgi', 'max.cgi', 'openwall.cgi',
+	'vtun.cgi', 'wireguard.cgi', 'proxy.cgi', 'restart.cgi',
 ];
 
 // "1 h 52 min", "3 d 4 h", "4 min": what is left of a share at `now`.
@@ -131,7 +131,8 @@ function shareGuestScope(win) {
 	}
 }
 
-// Whether a menu link leads to a page a guest at `scope` is refused.
+// Whether a menu entry -- a link's href, or a form's action -- leads to a
+// page a guest at `scope` is refused.
 function shareRefused(href, scope) {
 	if (scope === 'full') return false;
 	const page = String(href || '').split(/[?#]/)[0].split('/').pop();
@@ -173,6 +174,10 @@ function sharePruneGuestMenu(scope) {
 	if (sw) sw.classList.add('d-none');
 	for (const a of document.querySelectorAll('.navbar a.dropdown-item, .navbar a.nav-link')) {
 		if (shareRefused(a.getAttribute('href'), scope)) a.closest('li').classList.add('d-none');
+	}
+	// Restart is a form, not a link: it posts rather than navigates.
+	for (const f of document.querySelectorAll('.navbar form[action]')) {
+		if (shareRefused(f.getAttribute('action'), scope)) f.closest('li').classList.add('d-none');
 	}
 	for (const h of document.querySelectorAll('.navbar .dropdown-header')) {
 		const head = h.closest('li');
