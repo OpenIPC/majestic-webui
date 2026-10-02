@@ -9,7 +9,7 @@
 
 const { check, group, done } = require('./assert');
 const {
-	shareRemaining, shareClock, shareNames, shareSummary, shareGuest, shareGuestScope, shareRefused,
+	shareRemaining, shareClock, shareNames, shareSummary, shareLive, shareGuest, shareGuestScope, shareRefused,
 	shareError, shareReason, SHARE_DURATIONS, SHARE_DEFAULT_TTL, SHARE_SCOPES, SHARE_DEFAULT_SCOPE,
 } = require('../www/a/share.js');
 
@@ -54,6 +54,13 @@ check('the duration does not break across lines',
 	shareSummary({ scope: 'view', expires: at(2026, 9, 3, 14, 0) / 1000 }, noon).endsWith('ends 3\u00a0Oct\u00a014:00 (in\u00a01\u00a0d\u00a02\u00a0h)'));
 check('an unknown level is shown as the camera spells it',
 	shareSummary({ scope: 'odd', expires: noon / 1000 + 60 }, noon).startsWith('odd · '));
+
+group('the navbar count');
+const nowS = noon / 1000;
+check('an ended link is not counted', shareLive([{ expires: nowS - 1 }, { expires: nowS + 60 }], noon).count === 1);
+check('it re-counts when the next one ends', shareLive([{ expires: nowS + 600 }, { expires: nowS + 60 }], noon).next === 60000);
+check('nothing live: no count, nothing to wait for', (({ count, next }) => count === 0 && next === null)(shareLive([{ expires: nowS }], noon)));
+check('an unread list counts nothing', shareLive(null, noon).count === 0);
 
 group('the access offered first');
 check('watch only is the default', SHARE_DEFAULT_SCOPE === 'view' && SHARE_SCOPES.view.label === 'Watch only');

@@ -46,8 +46,8 @@ const SHARE_SCOPES = {
 };
 const SHARE_DEFAULT_SCOPE = 'view';
 
-// The pages a guest below full control is refused, by the camera's own list
-// of what is the owner's (majestic's httpd_shared_path_allowed). Hiding them
+// The pages a guest below full control is refused: the camera answers each
+// of them 403 through a link that is not full control. Hiding them
 // is not the protection -- the camera refuses them whatever the menu shows --
 // it only spares the guest a menu of doors that do not open. A page missing
 // here is still refused, it is just still offered.
@@ -101,6 +101,14 @@ function shareSummary(s, now) {
 	return `${scope} · ends ${keep(shareClock(s.expires, now))} ${keep(`(in ${shareRemaining(s.expires, now)})`)}`;
 }
 
+// The links still running at `now`, and how long until the next of them
+// ends (null when none is running). A list the camera answered can hold a
+// link that has run out since, and that one is not live.
+function shareLive(list, now) {
+	const live = (list || []).filter((s) => s.expires * 1000 > now);
+	return { count: live.length, next: live.length ? Math.min(...live.map((s) => s.expires)) * 1000 - now : null };
+}
+
 // Whether this page is being shown to a share's guest: the share page is the
 // parent, same origin, and announces itself.
 function shareGuest(win) {
@@ -147,7 +155,7 @@ function shareError(status, text) {
 
 if (typeof module !== 'undefined') {
 	module.exports = {
-		shareRemaining, shareClock, shareNames, shareSummary, shareGuest, shareGuestScope, shareRefused,
+		shareRemaining, shareClock, shareNames, shareSummary, shareLive, shareGuest, shareGuestScope, shareRefused,
 		shareError, shareReason, SHARE_DURATIONS, SHARE_DEFAULT_TTL, SHARE_SCOPES, SHARE_DEFAULT_SCOPE,
 	};
 }
@@ -193,22 +201,36 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 		return n;
 	};
 
-	// The navbar item: "Share", or "Share" and the number of live links.
-	const navCount = (n) => {
+	// The navbar item: "Share", or "Share" and the number of live links --
+	// those whose end is still ahead, counted again when the next one runs out,
+	// so a page left open does not go on calling an ended link live. `null` is
+	// a list that could not be read, and shows no count: not zero, and not the
+	// last number either.
+	let navList = null, navTimer = null;
+	const navShow = (list) => {
+		navList = list;
+		clearTimeout(navTimer);
+		navTimer = null;
+		const { count, next } = shareLive(list, Date.now());
 		item.replaceChildren('Share');
-		if (n > 0) {
-			item.append(el('span', { class: 'badge text-bg-warning ms-1 align-middle', text: String(n) }));
-			item.title = n === 1
-				? 'One link is live: someone can open this camera over the Internet.'
-				: `${n} links are live: they can open this camera over the Internet.`;
-		} else {
-			item.title = 'Share this camera by link';
-		}
+		item.title = 'Share this camera by link';
+		if (!count) return;
+		item.append(el('span', { class: 'badge text-bg-warning ms-1 align-middle', text: String(count) }));
+		item.title = count === 1
+			? 'One link is live: someone can open this camera over the Internet.'
+			: `${count} links are live: they can open this camera over the Internet.`;
+		navTimer = setTimeout(() => navShow(navList), next + 1000);
 	};
+
+	// Every read of the list, this first one included, takes a number, and
+	// only the newest may paint: an older reply arriving late would otherwise
+	// put back a count, or a list, from before the link just made or ended.
+	let generation = 0;
+	const first = ++generation;
 	apiFetch('/api/v1/shares')
 		.then((r) => (r.ok ? r.json() : null))
-		.then((d) => { if (d && Array.isArray(d.shares)) navCount(d.shares.length); })
-		.catch(() => {});
+		.then((d) => { if (first === generation) navShow(d && Array.isArray(d.shares) ? d.shares : null); })
+		.catch(() => { if (first === generation) navShow(null); });
 
 	const ttl = el('select', { class: 'form-select', id: 'share-ttl' });
 	for (const [s, label] of SHARE_DURATIONS) {
@@ -306,9 +328,6 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 		}));
 	}
 
-	// Only the newest refresh paints: an older reply arriving late would
-	// otherwise put back a list from before the link just made.
-	let generation = 0;
 	async function refreshList() {
 		const mine = ++generation;
 		if (!shares) list.replaceChildren(el('span', { class: 'text-body-secondary', text: 'Loading…' }));
@@ -320,13 +339,14 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 		} catch (e) {
 			if (mine === generation) {
 				shares = null;
+				navShow(null);
 				list.replaceChildren(el('span', { class: 'text-danger', text: e.message }));
 			}
 			return;
 		}
 		if (mine !== generation) return;
 		shares = data.shares;
-		navCount(shares.length);
+		navShow(shares);
 		paint();
 	}
 
