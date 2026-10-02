@@ -180,10 +180,17 @@ function sharePruneGuestMenu(scope) {
 	for (const f of document.querySelectorAll('.navbar form[action]')) {
 		if (shareRefused(f.getAttribute('action'), scope)) f.closest('li').classList.add('d-none');
 	}
-	// A banner whose one action is a refused page -- the crash report the
-	// owner is asked to look at -- is the owner's, not the guest's.
-	for (const a of document.querySelectorAll('.alert a[href]')) {
-		if (shareRefused(a.getAttribute('href'), scope)) a.closest('.alert').classList.add('d-none');
+	// A banner whose every action is a refused page -- the crash report the
+	// owner is asked to look at -- is the owner's, not the guest's. One that
+	// also offers something the guest may open keeps its words and that
+	// action, and loses only the refused link: the live picture's diagnosis
+	// still explains the fault, and points at the settings, without the logs.
+	for (const box of document.querySelectorAll('.alert')) {
+		const links = [...box.querySelectorAll('a[href]')];
+		const refused = links.filter((a) => shareRefused(a.getAttribute('href'), scope));
+		if (!refused.length) continue;
+		if (refused.length === links.length) box.classList.add('d-none');
+		else for (const a of refused) a.classList.add('d-none');
 	}
 	for (const h of document.querySelectorAll('.navbar .dropdown-header')) {
 		const head = h.closest('li');
