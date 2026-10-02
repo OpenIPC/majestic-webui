@@ -210,7 +210,7 @@ Pragma: no-cache
 						</a>
 						<ul aria-labelledby="cam-switch-toggle" class="dropdown-menu dropdown-menu-end" id="cam-switch-menu"></ul>
 					</li>
-					<li class="nav-item nav-push-end"><a class="nav-link" href="#" id="nav-share" title="Share this camera by link">Share</a></li>
+					<li class="nav-item nav-push-end"><a class="nav-link" data-camera="<% attr_escape "$network_hostname" %>" href="#" id="nav-share" title="Share this camera by link">Share</a></li>
 					<li class="nav-item"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
 				</ul>
 			</div>
