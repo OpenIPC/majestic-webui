@@ -55,6 +55,7 @@ const SHARE_OWNER_PAGES = [
 	'access.cgi', 'update.cgi', 'backup.cgi', 'logs.cgi', 'console.cgi', 'files.cgi',
 	'network.cgi', 'telegram.cgi', 'ntfy.cgi', 'max.cgi', 'openwall.cgi',
 	'vtun.cgi', 'wireguard.cgi', 'proxy.cgi', 'restart.cgi',
+	'time.cgi', 'sdcard.cgi', 'usb.cgi', 'wfb.cgi', 'crashlog.cgi',
 ];
 
 // "1 h 52 min", "3 d 4 h", "4 min": what is left of a share at `now`.
@@ -179,6 +180,11 @@ function sharePruneGuestMenu(scope) {
 	for (const f of document.querySelectorAll('.navbar form[action]')) {
 		if (shareRefused(f.getAttribute('action'), scope)) f.closest('li').classList.add('d-none');
 	}
+	// A banner whose one action is a refused page -- the crash report the
+	// owner is asked to look at -- is the owner's, not the guest's.
+	for (const a of document.querySelectorAll('.alert a[href]')) {
+		if (shareRefused(a.getAttribute('href'), scope)) a.closest('.alert').classList.add('d-none');
+	}
 	for (const h of document.querySelectorAll('.navbar .dropdown-header')) {
 		const head = h.closest('li');
 		let empty = true;
@@ -186,6 +192,12 @@ function sharePruneGuestMenu(scope) {
 			if (!li.classList.contains('d-none') && !li.hidden) { empty = false; break; }
 		}
 		if (empty) head.classList.add('d-none');
+	}
+	// And a whole menu with nothing left in it: a heading the guest can open
+	// onto an empty list is a door to nothing.
+	for (const menu of document.querySelectorAll('.navbar .nav-item.dropdown')) {
+		const left = [...menu.querySelectorAll('.dropdown-item')].some((i) => !i.closest('.d-none') && !i.closest('[hidden]'));
+		if (!left) menu.classList.add('d-none');
 	}
 }
 
