@@ -405,6 +405,48 @@ majestic_reload() {
 	return 0
 }
 
+# crond_tz_sync -- make crond keep time in the zone /etc/TZ names
+#
+# crond reads the time zone once, from the environment it was started with:
+# rcS exports TZ from /etc/TZ before starting it, and nothing tells it about a
+# later change. So after the Time page saves a new zone, every crontab line
+# goes on firing by the old one until the camera reboots -- and crond
+# restarted from anywhere that did not export TZ (a shell, a service script)
+# keeps UTC. A schedule that names a time of day, like the Update page's,
+# means local time only if this holds.
+#
+# Restarted only when it disagrees, read back from crond's own environment,
+# because a restart is not free: anything due in the moment it is down is
+# skipped. The redirections are majestic_reload's: start-stop-daemon
+# backgrounds crond, and a crond still holding this CGI's output pipe would
+# hold the answer open.
+#
+# Fails when crond is not left running under /etc/TZ -- no init script, or a
+# restart that did not take -- so a page promising a local time can say it
+# could not.
+crond_tz_want=""
+crond_tz_ok() {
+	local pid have
+	pid=$(pidof crond 2>/dev/null)
+	pid=${pid%% *}
+	[ -n "$pid" ] || return 1
+	have=$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^TZ=//p')
+	[ "$have" = "$crond_tz_want" ]
+}
+crond_tz_sync() {
+	local i
+	crond_tz_want=$(cat /etc/TZ 2>/dev/null)
+	crond_tz_ok && return 0
+	[ -x /etc/init.d/S60crond ] || return 1
+	TZ="$crond_tz_want" /etc/init.d/S60crond restart </dev/null >/dev/null 2>&1
+	# start-stop-daemon -b returns before crond is necessarily up.
+	for i in 1 2 3; do
+		crond_tz_ok && return 0
+		sleep 1
+	done
+	return 1
+}
+
 log_create() {
 	echo "${1}:${2}" > "$log_file"
 }

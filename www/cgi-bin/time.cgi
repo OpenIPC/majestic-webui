@@ -28,6 +28,10 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				echo "${POST_tz_data}" > /etc/TZ
 				touch /tmp/system-reboot
 			fi
+			# Scheduled jobs follow the new zone now, not after the reboot
+			# the banner asks for. If crond cannot be restarted, that reboot
+			# is what applies it, which the banner already says.
+			crond_tz_sync
 			if [ "$tz_name" != "$POST_tz_name" ]; then
 				echo "${POST_tz_name}" > /etc/timezone
 				touch /tmp/system-reboot

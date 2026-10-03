@@ -1,0 +1,175 @@
+#!/bin/sh
+# Install newer firmware, unattended, at the time the owner chose.
+#
+# Run by crond from the line the Update page writes,
+#
+#     M H * * D /usr/sbin/fw-autoupdate
+#
+# and that line is the whole of the configuration: the page reads the hour and
+# the day back out of it, so there is no second copy of the schedule to fall
+# out of step with the one crond actually obeys.
+#
+# WHY THIS IS NOT JUST `sysupgrade -k -r` IN THE CRONTAB. Measured on an
+# hi3516av300 with sysupgrade 1.0.68, that line would take the camera down
+# every night whether or not there was anything to install:
+#
+#   * sysupgrade stops the camera before it downloads anything. Outside the
+#     WebUI's own --web route it SIGQUITs majestic, then stops crond, ntpd,
+#     klogd and syslogd, and only after that fetches the image.
+#   * it then compares versions, and an identical one is skipped -- but the
+#     run still ends in an unconditional reboot unless -x was passed.
+#
+# So the decision is made here first, with no service touched: the same
+# fw_latest_build / fw_newer pair the Update page and the update notice use
+# (p/firmware.sh), and sysupgrade runs only on a definite yes -- a different
+# revision dated after this camera's. "Could not ask" is not a yes and not a
+# no, and neither is "different but not later": a camera running a branch
+# build newer than anything published must not be flashed back to the last
+# nightly. Both are logged and the night passes.
+#
+# Two upgrades must not run at once. sysupgrade's own lock is a test followed
+# by a touch, not an atomic claim, and it is only taken once sysupgrade has
+# started. So this run claims a lock of its own with mkdir, which is atomic,
+# against a second copy of itself, and checks for sysupgrade's lock and
+# majestic's upgrade marker twice: before asking the network, so a busy camera
+# is not asked, and again immediately before flashing, because the build-list
+# request takes seconds and somebody can press Install on the Update page in
+# the middle of it. What is left is the instant between that second check and
+# sysupgrade taking its lock, and that sysupgrade's own check covers.
+#
+# How sysupgrade is called, and why:
+#
+#   -k -r       kernel and rootfs, as the Install button writes by default.
+#   -z          no self-update. Without it sysupgrade downloads its own newest
+#               script from the firmware repository's master branch and execs
+#               it, as root, unattended. The WebUI's --web route skips that
+#               step too.
+#   --build=ID  the build this script just compared, not whatever is newest by
+#               the time the download starts. What is installed is what was
+#               judged newer.
+#
+# Never -n (wipe the overlay) and never -f (skip validation): an unattended
+# run gets the cautious defaults and nothing an owner would have to opt into.
+#
+# The camera reboots on success, so the record of what happened goes to /etc,
+# not /tmp: the Update page reads it after the reboot and compares the target
+# with what the camera now runs, which is the only proof the install took.
+# Written before sysupgrade starts, and synced, because a successful run never
+# returns here to write anything.
+#
+# crond's time zone is whatever it was started with, so the hour in the line
+# only means local time if crond was started under /etc/TZ. The pages that
+# change either the zone or this schedule restart it that way (crond_tz_sync in
+# p/common.cgi); nothing here second-guesses the clock it was woken by.
+
+PATH=$PATH:/usr/sbin:/usr/bin:/sbin:/bin
+
+FW_SH=/var/www/cgi-bin/p/firmware.sh
+OS_RELEASE=/etc/os-release
+LAST=/etc/webui/fw-autoupdate.last
+LOG=/tmp/fw-autoupdate.log
+# sysupgrade's own lock, and the marker majestic holds while it runs an upgrade
+# for the Update page. Either means somebody is already flashing this camera.
+SYSUPGRADE_LOCK=/tmp/sysupgrade.lock
+MJ_OWNER=/tmp/majestic-upgrade-owner
+SELF_LOCK=/tmp/fw-autoupdate.lock
+
+say() {
+	logger -t fw-autoupdate "$*" 2>/dev/null
+	echo "$*"
+}
+
+# record <result> [target] [exit code]
+#
+# Every value is from a closed set: a result word, a build id that matched
+# fw_latest_build's pattern, a hex revision, digits, and a date. The page reads
+# it back with sed, never by sourcing it.
+#
+# Fails if the record could not be put in place. The caller about to flash
+# checks that: an install with no record of having started leaves the page
+# showing an older result, or none, across the reboot it causes.
+record() {
+	mkdir -p "${LAST%/*}" 2>/dev/null
+	{
+		echo "au_result=\"$1\""
+		# The camera's own zone, whoever started this: crond carries it,
+		# a shell somebody ran this from may not, and the page prints the
+		# time as the camera's.
+		echo "au_when=\"$(TZ=$(cat /etc/TZ 2>/dev/null) date '+%Y-%m-%d %H:%M')\""
+		echo "au_from=\"$installed\""
+		echo "au_target=\"$2\""
+		echo "au_code=\"$3\""
+	} >"$LAST.tmp" 2>/dev/null && mv -f "$LAST.tmp" "$LAST" 2>/dev/null || {
+		rm -f "$LAST.tmp" 2>/dev/null
+		return 1
+	}
+	sync
+}
+
+upgrade_running() {
+	[ -e "$SYSUPGRADE_LOCK" ] || [ -e "$MJ_OWNER" ]
+}
+
+installed=""
+
+if ! mkdir "$SELF_LOCK" 2>/dev/null; then
+	say "another scheduled check is already running; not starting a second"
+	exit 0
+fi
+# Released on every way out except a successful flash, which reboots -- and
+# /tmp does not survive that.
+trap 'rmdir "$SELF_LOCK" 2>/dev/null' EXIT
+
+if upgrade_running; then
+	say "an upgrade is already running on this camera; not starting another"
+	record busy
+	exit 0
+fi
+
+if ! . "$FW_SH" 2>/dev/null; then
+	say "cannot read $FW_SH; nothing checked"
+	exit 1
+fi
+
+inst_ver=$(fw_installed_version "$OS_RELEASE")
+installed=$(fw_sha_of "$inst_ver")
+latest=$(fw_latest_build)
+
+case "$(fw_newer "$inst_ver" "$latest")" in
+true)
+	;;
+false)
+	say "already running $latest, the newest build for this camera"
+	record current "$latest"
+	exit 0
+	;;
+*)
+	# No route, no updater, a manifest that did not answer, a camera that
+	# reports no revision of its own, or a build that is different but not
+	# dated after this camera's. None of them is a reason to flash, and none
+	# of them is evidence of a fault worth naming.
+	say "could not establish whether newer firmware exists${latest:+ ($latest)}; nothing installed"
+	record nocheck "$latest"
+	exit 0
+	;;
+esac
+
+if upgrade_running; then
+	say "an upgrade started while this one was checking; not starting another"
+	record busy "$latest"
+	exit 0
+fi
+if ! record started "$latest"; then
+	say "cannot write $LAST; not installing $latest without a record that it started"
+	exit 1
+fi
+say "installing $latest over $installed"
+sysupgrade -k -r -z --build="$latest" >"$LOG" 2>&1
+rc=$?
+
+# A run that flashed anything does not get here: sysupgrade reboots the camera
+# from inside, on success and on any failure after the flash was touched. So
+# this is a run that stopped first, and the camera is still on the old build.
+say "sysupgrade stopped (exit $rc) without installing $latest; its output is in $LOG"
+record failed "$latest" "$rc"
+exit 1
