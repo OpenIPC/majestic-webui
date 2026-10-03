@@ -336,7 +336,7 @@ let heartbeatTimer = null;
 
 // Every 2 s on the camera's own network; every 10 s for a share's guest. A
 // guest's pages ride one data channel to the camera, and every /metrics reply
-// -- some 13 KB -- queues there ahead of whatever the guest is doing. On a
+// queues there ahead of whatever the guest is doing. On a
 // lossy link a loss in one holds the camera's sending window, and a console's
 // echoes waited behind it: at 6% loss, 31 of 180 slowly typed keys took over
 // 150 ms with the heartbeat running and 10 with it stopped, measured on a
@@ -563,7 +563,9 @@ function heartbeat() {
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
 	if (mjTickN++ % mjHeartbeatTicks(30000) === 0) pulseTick();
-	apiFetch('/metrics', { signal: ctl.signal })
+	// comments=0: the HELP and TYPE lines are 22 of the reply's 30 KB on a
+	// hi3516av300, and parseMetrics skips them unread.
+	apiFetch('/metrics?comments=0', { signal: ctl.signal })
 		.then(r => r.ok ? r.text() : Promise.reject(r.status))
 		.then(text => {
 			mjFails = 0;
