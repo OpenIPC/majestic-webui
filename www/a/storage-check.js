@@ -46,10 +46,10 @@
 	// that cannot be made to go away is one people learn to ignore.
 	let droppedAt = null;
 	// Consecutive samples with a fragment waiting. The banner's early warning
-	// is a claim about a WINDOW, and this is the window: two heartbeats, which
-	// is the shortest thing that is not one sample's noise, and it resets the
-	// moment the queue drains so the banner can take itself down. The
-	// SD-card page counts the same way against the same heartbeat.
+	// is a claim about a WINDOW, and this is the window: about four seconds
+	// (QUEUED_MS), the shortest thing that is not one sample's noise, and it
+	// resets the moment the queue drains so the banner can take itself down.
+	// The SD-card page counts the same way against the same heartbeat.
 	let queuedTicks = 0;
 	// Consecutive heartbeats in which the recorder wrote nothing.
 	//
@@ -64,7 +64,12 @@
 	// for a moment, and a banner that blinks off and back on is read as a bug
 	// rather than as precision.
 	let idleTicks = 0;
-	const IDLE_TICKS = 8;   // ~16 s at the 2 s heartbeat
+	// Thresholds in time, counted in heartbeats at whatever pace they run
+	// (main.js mjHeartbeatTicks); 2 s each where main.js is not there to ask.
+	const beats = (ms) => (typeof mjHeartbeatTicks === 'function'
+		? mjHeartbeatTicks(ms) : Math.max(1, Math.ceil(ms / 2000)));
+	const IDLE_MS = 16000;   // the recorder idle this long before its loss is history
+	const QUEUED_MS = 4000;  // a fragment waiting this long is the early warning
 	let shown = '';          // what the slot is currently saying
 
 	function slot() { return document.getElementById(SLOT); }
@@ -94,8 +99,8 @@
 		// Suppressed, not forgotten: the counter keeps its baseline, so a
 		// recorder that starts writing again reports what it loses from then
 		// on rather than re-announcing what it lost before it paused.
-		const lost = idleTicks >= IDLE_TICKS ? 0 : droppedSeconds();
-		const v = V.of(card, recorder, lost > 0 ? V.duration(lost) : '', where, queuedTicks >= 2);
+		const lost = idleTicks >= beats(IDLE_MS) ? 0 : droppedSeconds();
+		const v = V.of(card, recorder, lost > 0 ? V.duration(lost) : '', where, queuedTicks >= beats(QUEUED_MS));
 		// The Dashboard's SD badge is the other place a dead card was being
 		// drawn green, and it is drawn from df, which cannot see any of this.
 		badge(v);

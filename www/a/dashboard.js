@@ -440,10 +440,18 @@
 		},
 	};
 
-	// How many polls running a chosen measure may say nothing before the page
-	// stops believing in it. At the 2s heartbeat this is about a minute: far
-	// longer than a re-association, far shorter than sitting and watching.
-	const WIFI_LAPSE = 30;
+	// Heartbeats make thresholds in time, whichever pace they run at (main.js
+	// mjHeartbeatTicks); 2 s each where main.js is not there to ask.
+	const beats = (ms) => (typeof mjHeartbeatTicks === 'function'
+		? mjHeartbeatTicks(ms) : Math.max(1, Math.ceil(ms / 2000)));
+	// Failed polls before "not responding" shows: about four seconds' worth,
+	// so one dropped poll does not flap the banner -- two at the 2 s
+	// heartbeat, one at a guest's 10 s, which is already that long unanswered.
+	const failsShown = () => beats(4000);
+	// How long a chosen measure may say nothing before the page stops
+	// believing in it: about a minute, far longer than a re-association, far
+	// shorter than sitting and watching.
+	const WIFI_LAPSE_MS = 60000;
 	let wifiMissing = 0;
 
 	// A level wins the moment one appears, and the choice is otherwise kept —
@@ -529,7 +537,7 @@
 		}
 		const cur = WIFI_SCALE[wifiUnit];
 		wifiMissing = (cur && !(cur.key in v)) ? wifiMissing + 1 : 0;
-		const unit = wifiMeasure(v, wifiUnit, wifiMissing >= WIFI_LAPSE);
+		const unit = wifiMeasure(v, wifiUnit, wifiMissing >= beats(WIFI_LAPSE_MS));
 		if (unit !== wifiUnit) mountWifi(unit);
 		// A KPI tile is a headline number with a unit under a caption. An
 		// adapter that reports no signal reading has no headline to give it,
@@ -711,7 +719,7 @@
 			// With no current data there is no evidence the condition alerts
 			// still hold — clear them rather than presenting the last good
 			// sample's warnings as current next to "not responding".
-			if (s.fails >= 2) {
+			if (s.fails >= failsShown()) {
 				setLumaNote(null);
 				setEncNote(null);
 				renderNoVideo(s);
@@ -722,7 +730,7 @@
 				// findings that needed one.
 				renderIrcut(null);
 			}
-			setAlert('#st-alert-stale', s.fails >= 2);
+			setAlert('#st-alert-stale', s.fails >= failsShown());
 			// No new sample, but time still passes: redraw so the traces age
 			// toward the left edge instead of standing at "now" through an
 			// outage they know nothing about.

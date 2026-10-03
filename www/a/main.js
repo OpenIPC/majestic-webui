@@ -352,6 +352,15 @@ function mjHeartbeatMs(win) {
 	}
 	return HEARTBEAT_MS;
 }
+
+// How many heartbeats make `ms`, at least one. Every threshold a consumer
+// counts in heartbeats is a duration really -- "two failures" meant four
+// seconds, "30 samples" a minute -- and counted in ticks it stretched five
+// times over for a guest. Stated as time and converted here, each one holds
+// at either pace.
+function mjHeartbeatTicks(ms) {
+	return Math.max(1, Math.ceil(ms / mjHeartbeatMs(window)));
+}
 let mjMetricsSubs = [];
 let mjMetricsLast = null;
 let mjPrevSample = null;
@@ -469,8 +478,8 @@ function startHeartbeat() {
 }
 
 // Overlay usage is the one topbar figure /metrics cannot supply. It moves when
-// config is written, not per second, so the slim pulse.cgi is asked every 15th
-// tick (~30s) — fire-and-forget, never chained to the metrics fetch.
+// config is written, not per second, so the slim pulse.cgi is asked about every
+// 30 s — fire-and-forget, never chained to the metrics fetch.
 function pulseTick() {
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
@@ -553,7 +562,7 @@ function heartbeat() {
 	// otherwise stop the heartbeat for the rest of the page's life.
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
-	if (mjTickN++ % 15 === 0) pulseTick();
+	if (mjTickN++ % mjHeartbeatTicks(30000) === 0) pulseTick();
 	apiFetch('/metrics', { signal: ctl.signal })
 		.then(r => r.ok ? r.text() : Promise.reject(r.status))
 		.then(text => {
