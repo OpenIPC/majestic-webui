@@ -44,8 +44,11 @@ TTL_YES=900     # fifteen minutes
 
 json_hdr() { printf 'HTTP/1.1 200 OK\nContent-Type: application/json\nCache-Control: no-store\n\n'; }
 
-installed=$(sed -n 's/^GITHUB_VERSION="\?\([^",]*\).*/\1/p' /etc/os-release 2>/dev/null \
-            | sed -n 's/.*+\([0-9a-f]\{7,\}\).*/\1/p' | head -1)
+# The question and its answer are p/firmware.sh's, shared with the Update page
+# and the scheduled install so the three cannot disagree.
+. "$(dirname "$0")/../p/firmware.sh"
+
+installed=$(fw_installed_sha)
 
 # A half-written cache is not an answer. The file is replaced by rename below,
 # so a reader should never see one — but a crash mid-write, or a cache left by
@@ -74,36 +77,9 @@ if [ -n "$cached" ]; then
     fi
 fi
 
-# Same predicate as the Firmware page, deliberately down to the numbers: a
-# default route must exist, and `sysupgrade` gets the same fifteen seconds. A
-# longer timeout here, or asking without a route, would let this endpoint answer
-# where the page gives up — and two surfaces that disagree is the whole fault
-# this is fixing.
-#
-# The page reads $network_gateway from the shared shell prelude, which is a
-# haserl template this cannot include, so the one line that computes it is
-# repeated here verbatim rather than reimplemented — `ip route`, not
-# /proc/net/route, because a hand-rolled parse of that file is how this check
-# was wrong the first time: `grep -E` does not read \t as a tab, so it saw no
-# default route on a camera that plainly had one and switched the notice off
-# everywhere.
-latest=""
-if [ -n "$(ip route 2>/dev/null | awk '/default/ {print $3}')" ] &&
-   command -v sysupgrade >/dev/null 2>&1; then
-    latest=$(timeout 15 sysupgrade --list-builds 2>/dev/null \
-             | grep -Eo '[A-Za-z0-9._]+-[0-9]{8}-[0-9a-f]+' | head -1)
-fi
-
-latest_sha=$(printf '%s' "$latest" | sed -n 's/.*-\([0-9a-f]\{7,\}\)$/\1/p')
-
-if [ -z "$latest" ] || [ -z "$latest_sha" ] || [ -z "$installed" ]; then
-    newer=null
-else
-    case "$latest_sha" in
-        "$installed"*) newer=false ;;
-        *) case "$installed" in "$latest_sha"*) newer=false ;; *) newer=true ;; esac ;;
-    esac
-fi
+latest=$(fw_latest_build)
+latest_sha=$(fw_build_sha "$latest")
+newer=$(fw_newer "$installed" "$latest_sha")
 
 body=$(printf '{"installed":"%s","latest":"%s","latestSha":"%s","newer":%s}' \
         "$installed" "$latest" "$latest_sha" "$newer")

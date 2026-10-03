@@ -143,7 +143,7 @@ months and omitted about sixty that existed, so it was deleted.)
 | `www/cgi-bin/j/` | small `#!/bin/sh` endpoints emitting JSON or a stream for the front end |
 | `www/a/` | ~80 vanilla-JS modules, plus `bootstrap.min.css` (purged) and `bootstrap.override.css` |
 | `www/*.html` | `index.html`, `cameras.html`, and the two self-contained pages `login.html` and `setup.html` |
-| `sbin/`, `bin/` | camera-side scripts: the installer, the notification senders, `sdscan`, `setnetwork`, `record.sh`, `motion-notify.sh` |
+| `sbin/`, `bin/` | camera-side scripts: the installer, the notification senders, `sdscan`, `setnetwork`, `record.sh`, `motion-notify.sh`, `fw-autoupdate` |
 | `tools/` | build and lint, all of it run by CI |
 | `tests/` | ~86 plain-node tests, one per subject |
 
@@ -380,6 +380,7 @@ The most important file to read before editing anything. It defines:
 | `/etc/webui/{telegram,ntfy,max,proxy,openwall,vtun,wireguard,backup}.conf` | one per extension, sourced as shell |
 | `/etc/network/interfaces.d/{eth0,wlan0}` | written by `sbin/setnetwork`, applied by nothing but the boot script's `ifup` |
 | `/etc/crontabs/root` | extensions add and remove their own lines with `sed -i /name/d` then append |
+| `/etc/webui/fw-autoupdate.last` | what the last scheduled firmware check did, kept in `/etc` because a successful run ends in a reboot; the schedule itself is only the crontab line |
 | `/etc/webui/ircut-scan.json` | the pin scan's journal, written and `sync`ed **before** any register is touched — in `/etc` rather than `/tmp` precisely so it survives the pad that stops the camera answering |
 | `/tmp/webui/` | scratch: sysinfo, schema cache, flash log, signature, scan state, locks |
 | `/tmp/system-reboot` | sentinel; its presence raises the "restart required" banner in `header.cgi` |
