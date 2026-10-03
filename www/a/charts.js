@@ -166,7 +166,11 @@ window.MjCharts = (function () {
 		const W = ch.host.clientWidth;
 		if (!W) return;
 		const cfg = ch.cfg;
-		const win = cfg.win || CHART_WINDOW, gap = cfg.gap || CHART_GAP;
+		// The default hole is a few heartbeats, not a fixed 8 s: a share's
+		// guest is polled every 10 s, and every one of its samples would
+		// otherwise close the segment before it.
+		const beat = typeof mjHeartbeatMs === 'function' ? mjHeartbeatMs(window) / 1000 : 2;
+		const win = cfg.win || CHART_WINDOW, gap = cfg.gap || Math.max(CHART_GAP, 2.5 * beat);
 		const padR = 6, padT = PAD_T, H = cfg.h, XB = X_BAND;
 		const lo = cfg.lo;
 		let hi = cfg.hi;

@@ -718,7 +718,10 @@
 			card: d,
 			probe: d.probe,
 			scan: d.scan,
-			queued: queuedTicks >= 2,
+			// Four seconds of a fragment waiting -- two heartbeats at the 2 s
+			// pace, one at a share guest's 10 s (main.js mjHeartbeatTicks).
+			queued: queuedTicks >= (typeof mjHeartbeatTicks === 'function'
+				? mjHeartbeatTicks(4000) : 2),
 			dropping: dropping,
 		}) : null;
 		const chk = checkControls(d), scn = scanControls(d);

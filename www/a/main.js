@@ -333,6 +333,34 @@ function termWriter(el) {
 // over can still switch the whole thing off (see fw-update.js, issue #120).
 let heartbeatStopped = false;
 let heartbeatTimer = null;
+
+// Every 2 s on the camera's own network; every 10 s for a share's guest. A
+// guest's pages ride one data channel to the camera, and every /metrics reply
+// -- some 13 KB -- queues there ahead of whatever the guest is doing. On a
+// lossy link a loss in one holds the camera's sending window, and a console's
+// echoes waited behind it: at 6% loss, 31 of 180 slowly typed keys took over
+// 150 ms with the heartbeat running and 10 with it stopped, measured on a
+// hi3516av300 through a share link. Rates are computed from the measured
+// interval, so a slower tick reads true, only less often.
+const HEARTBEAT_MS = 2000;
+const HEARTBEAT_GUEST_MS = 10000;
+function mjHeartbeatMs(win) {
+	try {
+		if (win.parent && win.parent !== win && win.parent.__share) return HEARTBEAT_GUEST_MS;
+	} catch (e) {
+		// A parent this page may not read is not the share page.
+	}
+	return HEARTBEAT_MS;
+}
+
+// How many heartbeats make `ms`, at least one. Every threshold a consumer
+// counts in heartbeats is a duration really -- "two failures" meant four
+// seconds, "30 samples" a minute -- and counted in ticks it stretched five
+// times over for a guest. Stated as time and converted here, each one holds
+// at either pace.
+function mjHeartbeatTicks(ms) {
+	return Math.max(1, Math.ceil(ms / mjHeartbeatMs(window)));
+}
 let mjMetricsSubs = [];
 let mjMetricsLast = null;
 let mjPrevSample = null;
@@ -450,8 +478,8 @@ function startHeartbeat() {
 }
 
 // Overlay usage is the one topbar figure /metrics cannot supply. It moves when
-// config is written, not per second, so the slim pulse.cgi is asked every 15th
-// tick (~30s) — fire-and-forget, never chained to the metrics fetch.
+// config is written, not per second, so the slim pulse.cgi is asked about every
+// 30 s — fire-and-forget, never chained to the metrics fetch.
 function pulseTick() {
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
@@ -534,7 +562,7 @@ function heartbeat() {
 	// otherwise stop the heartbeat for the rest of the page's life.
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
-	if (mjTickN++ % 15 === 0) pulseTick();
+	if (mjTickN++ % mjHeartbeatTicks(30000) === 0) pulseTick();
 	apiFetch('/metrics', { signal: ctl.signal })
 		.then(r => r.ok ? r.text() : Promise.reject(r.status))
 		.then(text => {
@@ -654,7 +682,7 @@ function heartbeat() {
 			// were scheduled 2s apart no matter how long the fetch took — they
 			// piled up on exactly the busy camera that could least afford it.
 			if (!heartbeatStopped)
-				heartbeatTimer = setTimeout(heartbeat, 2000);
+				heartbeatTimer = setTimeout(heartbeat, mjHeartbeatMs(window));
 		});
 }
 
