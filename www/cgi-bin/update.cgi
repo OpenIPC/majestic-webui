@@ -11,7 +11,7 @@
 	# the strength of an answer up to six hours old.
 	. ./p/firmware.sh
 
-	# The scheduled install (#623). sbin/fw-autoupdate's header says why it is a
+	# The scheduled install. sbin/fw-autoupdate's header says why it is a
 	# script and not a bare sysupgrade line; this is the part that edits the
 	# schedule and reads back what the last run did.
 	#
@@ -19,7 +19,9 @@
 	# else on the camera holds a copy that could disagree with what crond runs.
 	au_job=/usr/sbin/fw-autoupdate
 	au_tab=/etc/crontabs/root
-	au_line=$(grep " $au_job\$" "$au_tab" 2>/dev/null | head -1)
+	# Comments are skipped: crond runs nothing on a commented-out line, so it
+	# must not turn the switch on.
+	au_line=$(grep -v '^[[:space:]]*#' "$au_tab" 2>/dev/null | grep " $au_job\$" | head -1)
 	au_min=""; au_hour=""; au_day=""; au_foreign=""
 	if [ -n "$au_line" ]; then
 		au_min=$(echo "$au_line" | awk '{print $1}')
@@ -50,14 +52,15 @@
 			m=$(awk 'BEGIN { srand(); print int(rand() * 60) }')
 		fi
 		sed -i "\\# $au_job\$#d" "$au_tab"
-		if [ "$POST_au_enabled" = "true" ]; then
-			echo "$m $h * * $POST_au_day $au_job" >>"$au_tab"
-			msg="Automatic updates are on."
-		else
-			msg="Automatic updates are off."
+		if [ "$POST_au_enabled" != "true" ]; then
+			redirect_to "$SCRIPT_NAME" "success" "Automatic updates are off."
 		fi
-		crond_tz_sync
-		redirect_to "$SCRIPT_NAME" "success" "$msg"
+		echo "$m $h * * $POST_au_day $au_job" >>"$au_tab"
+		# The hour means the camera's local time only if crond keeps it.
+		if ! crond_tz_sync; then
+			redirect_to "$SCRIPT_NAME" "warning" "Automatic updates are on, but the scheduler could not be restarted in this camera's time zone, so the hour may be off until the camera restarts."
+		fi
+		redirect_to "$SCRIPT_NAME" "success" "Automatic updates are on."
 	fi
 
 	# A date a sentence can carry. Every other date on this page is ISO because it
@@ -130,12 +133,14 @@
 	#                     updater, a request that timed out, a manifest that did
 	#                     not parse. Says it could not check, and names no cause.
 	#
-	#   fw_cmp  newer   — both revisions read, and they differ.
-	#           unknown — this camera reports no revision to compare against, so
-	#                     the image is offered (which is what this page has always
-	#                     done) but not called an update. "Firmware X is ready" is
-	#                     a claim about two builds; with one of them unreadable
-	#                     there is nothing to claim.
+	#   fw_cmp  newer   — both revisions read, they differ, and the build on
+	#                     offer is dated after this camera's.
+	#           unknown — the image is offered (which is what this page has
+	#                     always done) but not called an update. "Firmware X is
+	#                     ready" is a claim about two builds, and there is
+	#                     nothing to claim when this camera reports no revision
+	#                     (fw_why noid) or runs a different build that the one
+	#                     on offer is not later than (fw_why notlater).
 	inst_sha=$(fw_sha_of "$fw_build")
 	inst_date=$(echo "$fw_build" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
 	latest_sha=$(fw_build_sha "$ver")
@@ -149,15 +154,18 @@
 		fw_state="offline"
 		fw_sev="info"
 		if [ -z "$network_gateway" ]; then fw_why="noroute"; else fw_why="nocheck"; fi
-	elif [ "$(fw_newer "$inst_sha" "$latest_sha")" = false ]; then
-		fw_state="current"
-		fw_sev="ok"
 	else
-		fw_state="available"
-		if [ -n "$latest_sha" ] && [ -n "$inst_sha" ]; then
-			fw_cmp="newer"; fw_sev="warn"
+		fw_cmp=$(fw_newer "$fw_build" "$ver")
+		if [ "$fw_cmp" = false ]; then
+			fw_state="current"; fw_cmp=""
+			fw_sev="ok"
+		elif [ "$fw_cmp" = true ]; then
+			fw_state="available"; fw_cmp="newer"
+			fw_sev="warn"
 		else
-			fw_cmp="unknown"; fw_sev="info"
+			fw_state="available"; fw_cmp="unknown"
+			fw_sev="info"
+			if [ -n "$inst_sha" ] && [ -n "$latest_sha" ]; then fw_why="notlater"; else fw_why="noid"; fi
 		fi
 	fi
 
@@ -174,7 +182,7 @@
 	au_code=$(au_get au_code)
 	au_took=""
 	if [ "$au_result" = "started" ]; then
-		au_took=$(fw_newer "$inst_sha" "$(fw_build_sha "$au_target")")
+		au_took=$(fw_newer "$fw_build" "$au_target")
 	fi
 
 	au_dayname() {
@@ -250,15 +258,21 @@
 							running <span class="mj-mono"><% esc "${fw_version}-${fw_variant}" %></span><% if [ -n "$inst_date" ]; then %> since <% esc "$inst_date" %><% fi %>.
 						</p>
 					<% elif [ "$fw_state" = "available" ]; then %>
-						<%# The image is offered, but nothing here calls it an update: with no
-						    readable revision on one side there are not two builds to compare. %>
+						<%# The image is offered, but nothing here calls it an update: either
+						    there are not two revisions to compare, or the one on offer is
+						    not dated after what this camera runs. %>
 						<p class="mj-hero-kick">Build available</p>
 						<h3 class="mj-hero-hl">Firmware from <% esc "$(say_date "$fw_date")" %> is available</h3>
 						<p class="mj-hero-sub">
 							<span class="mj-mono"><% esc "$ver" %></span> &middot; built for
-							<% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash. This camera
-							reports no revision of its own, so whether that is newer than what it is
-							running cannot be established here.
+							<% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash.
+							<% if [ "$fw_why" = "notlater" ]; then %>
+								This camera runs a different build<% if [ -n "$inst_date" ]; then %>, from <% esc "$inst_date" %><% fi %>,
+								and this one is not dated after it, so this page does not call it an update.
+							<% else %>
+								This camera reports no revision of its own, so whether that is newer than
+								what it is running cannot be established here.
+							<% fi %>
 						</p>
 					<% elif [ "$fw_state" = "current" ]; then %>
 						<p class="mj-hero-kick">Up to date</p>
@@ -408,7 +422,7 @@
 					</div></div>
 				</div>
 
-				<%# The scheduled install (#623). Its own form, because the switches in
+				<%# The scheduled install. Its own form, because the switches in
 				    the card above are not saved anywhere -- they shape the one upgrade
 				    started from this page -- and a submit must not carry them. The
 				    scheduled run always writes both and never wipes anything, and the
@@ -444,7 +458,7 @@
 								<% if [ -n "$au_foreign" ]; then %>
 									Set by a crontab line this page did not write, <code><% esc "$au_line" %></code>. Saving replaces it.
 								<% elif [ -n "$au_line" ]; then %>
-									<% au_dayname "$au_day" %> at <% printf '%02d:%02d' "$au_hour" "$au_min" %> the camera checks OpenIPC&rsquo;s build list.
+									<% au_dayname "$au_day" %> at <% esc "$(printf '%02d:%02d' "$au_hour" "$au_min")" %> the camera checks OpenIPC&rsquo;s build list.
 								<% else %>
 									When it is on, the camera checks OpenIPC&rsquo;s build list at that time.
 								<% fi %>
@@ -454,11 +468,11 @@
 							<% if [ "$au_result" = "started" ] && [ "$au_took" = "false" ]; then %>
 								<p class="hint mb-0">Updated automatically to <span class="mj-mono"><% esc "$au_target" %></span> on <% esc "$au_when" %>.</p>
 							<% elif [ "$au_result" = "started" ] && [ "$au_took" = "true" ]; then %>
-								<p class="hint text-warning-emphasis mb-0">Started installing <span class="mj-mono"><% esc "$au_target" %></span> on <% esc "$au_when" %>, and this camera is still running <span class="mj-mono"><% esc "$fw_build" %></span>.</p>
+								<p class="hint text-warning mb-0">Started installing <span class="mj-mono"><% esc "$au_target" %></span> on <% esc "$au_when" %>, and this camera is still running <span class="mj-mono"><% esc "$fw_build" %></span>.</p>
 							<% elif [ "$au_result" = "started" ]; then %>
 								<p class="hint mb-0">Started installing <span class="mj-mono"><% esc "$au_target" %></span> on <% esc "$au_when" %>.</p>
 							<% elif [ "$au_result" = "failed" ]; then %>
-								<p class="hint text-warning-emphasis mb-0">On <% esc "$au_when" %> the updater stopped (exit <% esc "$au_code" %>) without installing <span class="mj-mono"><% esc "$au_target" %></span>. The camera kept its firmware.</p>
+								<p class="hint text-warning mb-0">On <% esc "$au_when" %> the updater stopped (exit <% esc "$au_code" %>) without installing <span class="mj-mono"><% esc "$au_target" %></span>. The camera kept its firmware.</p>
 							<% elif [ "$au_result" = "current" ]; then %>
 								<p class="hint mb-0">Last checked <% esc "$au_when" %>: already running the newest build.</p>
 							<% elif [ "$au_result" = "nocheck" ]; then %>

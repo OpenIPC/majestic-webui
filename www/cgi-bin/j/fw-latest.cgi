@@ -5,7 +5,8 @@
 #         "newer":true|false|null}
 #
 # `newer` is null for "cannot tell" — no updater, no network, a manifest that
-# did not answer. Callers must treat null as "say nothing", never as false and
+# did not answer, or a build that differs from this camera's without being
+# dated after it (p/firmware.sh, fw_newer). Callers must treat null as "say nothing", never as false and
 # never as true.
 #
 # WHY THIS EXISTS. The update notice counts what changed in the camera software,
@@ -48,7 +49,8 @@ json_hdr() { printf 'HTTP/1.1 200 OK\nContent-Type: application/json\nCache-Cont
 # and the scheduled install so the three cannot disagree.
 . "$(dirname "$0")/../p/firmware.sh"
 
-installed=$(fw_installed_sha)
+inst_ver=$(fw_installed_version)
+installed=$(fw_sha_of "$inst_ver")
 
 # A half-written cache is not an answer. The file is replaced by rename below,
 # so a reader should never see one — but a crash mid-write, or a cache left by
@@ -79,20 +81,22 @@ fi
 
 latest=$(fw_latest_build)
 latest_sha=$(fw_build_sha "$latest")
-newer=$(fw_newer "$installed" "$latest_sha")
+newer=$(fw_newer "$inst_ver" "$latest")
 
 body=$(printf '{"installed":"%s","latest":"%s","latestSha":"%s","newer":%s}' \
         "$installed" "$latest" "$latest_sha" "$newer")
 
 # Only a real answer is worth caching; an unknown should be retried, not
-# remembered.
+# remembered. "Real" is whether both revisions were read, not whether `newer`
+# came out null: a camera running a build later than the newest published
+# gets null on every ask, and that is a settled answer, not a failed one.
 #
 # Written to a private name and renamed into place, because the notice is on
 # every page and these requests overlap: `> "$CACHE"` truncates the file first
 # and fills it after, so a reader arriving between the two gets an empty or
 # partial body, and the mtime the truncation just set makes it look fresh.
 # rename is atomic, so a reader sees either the old answer or the new one.
-if [ "$newer" != "null" ]; then
+if [ -n "$installed" ] && [ -n "$latest_sha" ]; then
     tmp="$CACHE.$$"
     if printf '%s' "$body" > "$tmp" 2>/dev/null; then
         mv -f "$tmp" "$CACHE" 2>/dev/null || rm -f "$tmp" 2>/dev/null

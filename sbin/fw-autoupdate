@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install newer firmware, unattended, at the time the owner chose (#623).
+# Install newer firmware, unattended, at the time the owner chose.
 #
 # Run by crond from the line the Update page writes,
 #
@@ -21,8 +21,21 @@
 #
 # So the decision is made here first, with no service touched: the same
 # fw_latest_build / fw_newer pair the Update page and the update notice use
-# (p/firmware.sh), and sysupgrade runs only on a definite yes. "Could not ask"
-# is not a yes and not a no; it is logged and the night passes.
+# (p/firmware.sh), and sysupgrade runs only on a definite yes -- a different
+# revision dated after this camera's. "Could not ask" is not a yes and not a
+# no, and neither is "different but not later": a camera running a branch
+# build newer than anything published must not be flashed back to the last
+# nightly. Both are logged and the night passes.
+#
+# Two upgrades must not run at once. sysupgrade's own lock is a test followed
+# by a touch, not an atomic claim, and it is only taken once sysupgrade has
+# started. So this run claims a lock of its own with mkdir, which is atomic,
+# against a second copy of itself, and checks for sysupgrade's lock and
+# majestic's upgrade marker twice: before asking the network, so a busy camera
+# is not asked, and again immediately before flashing, because the build-list
+# request takes seconds and somebody can press Install on the Update page in
+# the middle of it. What is left is the instant between that second check and
+# sysupgrade taking its lock, and that sysupgrade's own check covers.
 #
 # How sysupgrade is called, and why:
 #
@@ -59,6 +72,7 @@ LOG=/tmp/fw-autoupdate.log
 # for the Update page. Either means somebody is already flashing this camera.
 SYSUPGRADE_LOCK=/tmp/sysupgrade.lock
 MJ_OWNER=/tmp/majestic-upgrade-owner
+SELF_LOCK=/tmp/fw-autoupdate.lock
 
 say() {
 	logger -t fw-autoupdate "$*" 2>/dev/null
@@ -70,6 +84,10 @@ say() {
 # Every value is from a closed set: a result word, a build id that matched
 # fw_latest_build's pattern, a hex revision, digits, and a date. The page reads
 # it back with sed, never by sourcing it.
+#
+# Fails if the record could not be put in place. The caller about to flash
+# checks that: an install with no record of having started leaves the page
+# showing an older result, or none, across the reboot it causes.
 record() {
 	mkdir -p "${LAST%/*}" 2>/dev/null
 	{
@@ -81,13 +99,28 @@ record() {
 		echo "au_from=\"$installed\""
 		echo "au_target=\"$2\""
 		echo "au_code=\"$3\""
-	} >"$LAST.tmp" && mv -f "$LAST.tmp" "$LAST"
+	} >"$LAST.tmp" 2>/dev/null && mv -f "$LAST.tmp" "$LAST" 2>/dev/null || {
+		rm -f "$LAST.tmp" 2>/dev/null
+		return 1
+	}
 	sync
+}
+
+upgrade_running() {
+	[ -e "$SYSUPGRADE_LOCK" ] || [ -e "$MJ_OWNER" ]
 }
 
 installed=""
 
-if [ -e "$SYSUPGRADE_LOCK" ] || [ -e "$MJ_OWNER" ]; then
+if ! mkdir "$SELF_LOCK" 2>/dev/null; then
+	say "another scheduled check is already running; not starting a second"
+	exit 0
+fi
+# Released on every way out except a successful flash, which reboots -- and
+# /tmp does not survive that.
+trap 'rmdir "$SELF_LOCK" 2>/dev/null' EXIT
+
+if upgrade_running; then
 	say "an upgrade is already running on this camera; not starting another"
 	record busy
 	exit 0
@@ -98,11 +131,11 @@ if ! . "$FW_SH" 2>/dev/null; then
 	exit 1
 fi
 
-installed=$(fw_installed_sha "$OS_RELEASE")
+inst_ver=$(fw_installed_version "$OS_RELEASE")
+installed=$(fw_sha_of "$inst_ver")
 latest=$(fw_latest_build)
-latest_sha=$(fw_build_sha "$latest")
 
-case "$(fw_newer "$installed" "$latest_sha")" in
+case "$(fw_newer "$inst_ver" "$latest")" in
 true)
 	;;
 false)
@@ -111,17 +144,26 @@ false)
 	exit 0
 	;;
 *)
-	# No route, no updater, a manifest that did not answer, or a camera
-	# that reports no revision of its own. None of them is a reason to
-	# flash, and none of them is evidence of a fault worth naming.
+	# No route, no updater, a manifest that did not answer, a camera that
+	# reports no revision of its own, or a build that is different but not
+	# dated after this camera's. None of them is a reason to flash, and none
+	# of them is evidence of a fault worth naming.
 	say "could not establish whether newer firmware exists${latest:+ ($latest)}; nothing installed"
 	record nocheck "$latest"
 	exit 0
 	;;
 esac
 
+if upgrade_running; then
+	say "an upgrade started while this one was checking; not starting another"
+	record busy "$latest"
+	exit 0
+fi
+if ! record started "$latest"; then
+	say "cannot write $LAST; not installing $latest without a record that it started"
+	exit 1
+fi
 say "installing $latest over $installed"
-record started "$latest"
 sysupgrade -k -r -z --build="$latest" >"$LOG" 2>&1
 rc=$?
 

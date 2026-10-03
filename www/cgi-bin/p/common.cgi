@@ -417,20 +417,34 @@ majestic_reload() {
 #
 # Restarted only when it disagrees, read back from crond's own environment,
 # because a restart is not free: anything due in the moment it is down is
-# skipped.
-# The redirections are majestic_reload's: start-stop-daemon backgrounds crond,
-# and a crond still holding this CGI's output pipe would hold the answer open.
-crond_tz_sync() {
-	local want have pid
-	[ -x /etc/init.d/S60crond ] || return 0
-	want=$(cat /etc/TZ 2>/dev/null)
+# skipped. The redirections are majestic_reload's: start-stop-daemon
+# backgrounds crond, and a crond still holding this CGI's output pipe would
+# hold the answer open.
+#
+# Fails when crond is not left running under /etc/TZ -- no init script, or a
+# restart that did not take -- so a page promising a local time can say it
+# could not.
+crond_tz_want=""
+crond_tz_ok() {
+	local pid have
 	pid=$(pidof crond 2>/dev/null)
 	pid=${pid%% *}
-	if [ -n "$pid" ]; then
-		have=$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^TZ=//p')
-		[ "$have" = "$want" ] && return 0
-	fi
-	TZ="$want" /etc/init.d/S60crond restart </dev/null >/dev/null 2>&1
+	[ -n "$pid" ] || return 1
+	have=$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^TZ=//p')
+	[ "$have" = "$crond_tz_want" ]
+}
+crond_tz_sync() {
+	local i
+	crond_tz_want=$(cat /etc/TZ 2>/dev/null)
+	crond_tz_ok && return 0
+	[ -x /etc/init.d/S60crond ] || return 1
+	TZ="$crond_tz_want" /etc/init.d/S60crond restart </dev/null >/dev/null 2>&1
+	# start-stop-daemon -b returns before crond is necessarily up.
+	for i in 1 2 3; do
+		crond_tz_ok && return 0
+		sleep 1
+	done
+	return 1
 }
 
 log_create() {

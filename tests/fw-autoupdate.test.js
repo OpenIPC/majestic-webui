@@ -1,4 +1,4 @@
-// The scheduled firmware install, and the one decision it must get right (#623).
+// The scheduled firmware install, and the one decision it must get right.
 //
 // sysupgrade stops majestic and reboots the camera whatever it then finds, so
 // the job must call it only on a definite "there is a newer build" -- and get
@@ -27,6 +27,7 @@ const SUBS = [
 	'LOG=/tmp/fw-autoupdate.log',
 	'SYSUPGRADE_LOCK=/tmp/sysupgrade.lock',
 	'MJ_OWNER=/tmp/majestic-upgrade-owner',
+	'SELF_LOCK=/tmp/fw-autoupdate.lock',
 ];
 for (const k of SUBS) {
 	if (src.indexOf(k) < 0) throw new Error(k + ' is gone from sbin/fw-autoupdate; this test is testing nothing');
@@ -35,6 +36,7 @@ for (const k of SUBS) {
 const LIST = (builds, here) => '#!/bin/sh\n' +
 	'case "$*" in\n' +
 	'*--list-builds*)\n' +
+	'\t[ -n "$MJ_RACE" ] && : > "$MJ_RACE"\n' +
 	'\techo "Available builds for hi3516av300_lite (newest first):"\n' +
 	builds.map((b) => `\techo "  ${b === here ? '*' : ' '} ${b}"\n`).join('') +
 	'\texit 0 ;;\n' +
@@ -57,17 +59,23 @@ function run(opts) {
 
 	const osr = path.join(dir, 'os-release');
 	fs.writeFileSync(osr, opts.osRelease !== undefined ? opts.osRelease
-		: 'OPENIPC_VERSION=2.6.10.01\nGITHUB_VERSION="master+67bb2f8, 2026-10-01"\n');
+		: 'OPENIPC_VERSION=2.6.10.01\nGITHUB_VERSION="master+aaaa111, 2026-10-01"\n');
 
 	const lock = path.join(dir, 'sysupgrade.lock');
 	const owner = path.join(dir, 'majestic-upgrade-owner');
+	const self = path.join(dir, 'fw-autoupdate.lock');
 	if (opts.lock) fs.writeFileSync(lock, '');
 	if (opts.owner) fs.writeFileSync(owner, '');
+	if (opts.self) fs.mkdirSync(self);
+	if (opts.readOnlyRecord) {
+		fs.mkdirSync(path.dirname(last));
+		fs.chmodSync(path.dirname(last), 0o555);
+	}
 
 	let s = src;
 	const to = {
 		FW_SH: FW_SH, OS_RELEASE: osr, LAST: last, LOG: path.join(dir, 'log'),
-		SYSUPGRADE_LOCK: lock, MJ_OWNER: owner,
+		SYSUPGRADE_LOCK: lock, MJ_OWNER: owner, SELF_LOCK: self,
 	};
 	for (const k of SUBS) {
 		const name = k.split('=')[0];
@@ -80,6 +88,7 @@ function run(opts) {
 		PATH: bin + ':' + process.env.PATH,
 		MJ_CALLS: calls,
 		MJ_RC: String(opts.rc || 0),
+		MJ_RACE: opts.race ? owner : '',
 	});
 	let status = 0;
 	try {
@@ -90,26 +99,27 @@ function run(opts) {
 	const flashed = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n') : [];
 	const rec = fs.existsSync(last) ? fs.readFileSync(last, 'utf8') : '';
 	const field = (k) => (rec.match(new RegExp('^' + k + '="(.*)"$', 'm')) || [])[1];
-	return { status, flashed, result: field('au_result'), target: field('au_target'), from: field('au_from') };
+	return { status, flashed, result: field('au_result'), target: field('au_target'), from: field('au_from'),
+		selfLockLeft: fs.existsSync(self) && !opts.self };
 }
 
 group('nothing newer: sysupgrade is never asked to flash');
 {
-	const r = run({ builds: ['nightly-20261001-67bb2f8', 'nightly-20260930-e484a42'], here: 'nightly-20261001-67bb2f8' });
+	const r = run({ builds: ['nightly-20261001-aaaa111', 'nightly-20260930-cccc333'], here: 'nightly-20261001-aaaa111' });
 	check('no flash call', r.flashed.length === 0);
 	check('recorded as current', r.result === 'current');
 	check('exits 0', r.status === 0);
 }
 {
 	// The two revisions are abbreviated independently.
-	const r = run({ builds: ['nightly-20261001-67bb2f82fe'],
-		osRelease: 'GITHUB_VERSION="master+67bb2f8, 2026-10-01"\n' });
+	const r = run({ builds: ['nightly-20261001-aaaa111bbb'],
+		osRelease: 'GITHUB_VERSION="master+aaaa111, 2026-10-01"\n' });
 	check('a longer spelling of the same revision is not newer', r.flashed.length === 0 && r.result === 'current');
 }
 
 group('cannot tell: not a yes');
 {
-	const r = run({ builds: ['nightly-20261002-60dabcb'], noRoute: true });
+	const r = run({ builds: ['nightly-20261002-bbbb222'], noRoute: true });
 	check('no route: no flash call', r.flashed.length === 0);
 	check('no route: recorded as nocheck', r.result === 'nocheck');
 }
@@ -118,33 +128,78 @@ group('cannot tell: not a yes');
 	check('empty build list: no flash call', r.flashed.length === 0 && r.result === 'nocheck');
 }
 {
-	const r = run({ builds: ['nightly-20261002-60dabcb'], osRelease: 'OPENIPC_VERSION=2.6.10.01\n' });
+	const r = run({ builds: ['nightly-20261002-bbbb222'], osRelease: 'OPENIPC_VERSION=2.6.10.01\n' });
 	check('a camera with no revision of its own: no flash call', r.flashed.length === 0 && r.result === 'nocheck');
 }
 
 group('another upgrade is running: left alone');
 for (const which of ['lock', 'owner']) {
-	const r = run({ builds: ['nightly-20261002-60dabcb'], [which]: true });
+	const r = run({ builds: ['nightly-20261002-bbbb222'], [which]: true });
 	check(which + ': no flash call', r.flashed.length === 0);
 	check(which + ': recorded as busy', r.result === 'busy');
 }
 
 group('newer: flashed, and flashed the cautious way');
 {
-	const r = run({ builds: ['nightly-20261002-60dabcb', 'nightly-20261001-67bb2f8'], here: 'nightly-20261001-67bb2f8', rc: 1 });
+	const r = run({ builds: ['nightly-20261002-bbbb222', 'nightly-20261001-aaaa111'], here: 'nightly-20261001-aaaa111', rc: 1 });
 	check('exactly one flash call', r.flashed.length === 1);
 	const a = (r.flashed[0] || '').split(' ');
 	check('kernel and rootfs', a.includes('-k') && a.includes('-r'));
 	check('no self-update', a.includes('-z'));
-	check('pinned to the build it compared', a.includes('--build=nightly-20261002-60dabcb'));
+	check('pinned to the build it compared', a.includes('--build=nightly-20261002-bbbb222'));
 	check('never wipes', !a.includes('-n') && !a.some((x) => x.startsWith('--wipe')));
 	check('never forces', !a.includes('-f') && !a.some((x) => x.startsWith('--force')));
 	// The stub returned, which a real flash never does: the record must say it
 	// stopped, not that it started.
 	check('a sysupgrade that returns is recorded as failed', r.result === 'failed');
-	check('with the target', r.target === 'nightly-20261002-60dabcb');
-	check('and the build it started from', r.from === '67bb2f8');
+	check('with the target', r.target === 'nightly-20261002-bbbb222');
+	check('and the build it started from', r.from === 'aaaa111');
 	check('and a non-zero exit', r.status !== 0);
+}
+
+group('different is not newer: never flashed backwards');
+{
+	// A camera on a build later than anything published -- a branch build, a
+	// local one -- must not be "updated" to the last nightly.
+	const r = run({ builds: ['nightly-20261002-bbbb222'],
+		osRelease: 'GITHUB_VERSION="feature+dddd444, 2026-10-05"\n' });
+	check('a camera ahead of the newest build: no flash call', r.flashed.length === 0);
+	check('and it is not called current either', r.result === 'nocheck');
+}
+{
+	const r = run({ builds: ['nightly-20261001-bbbb222'] });
+	check('a different build of the same day: no flash call', r.flashed.length === 0 && r.result === 'nocheck');
+}
+{
+	const r = run({ builds: ['nightly-20261002-bbbb222'], osRelease: 'GITHUB_VERSION="master+aaaa111"\n' });
+	check('an installed build with no date: no flash call', r.flashed.length === 0 && r.result === 'nocheck');
+}
+
+group('an upgrade that starts while this one is checking');
+{
+	const r = run({ builds: ['nightly-20261002-bbbb222'], race: true });
+	check('no flash call', r.flashed.length === 0);
+	check('recorded as busy', r.result === 'busy');
+}
+
+group('a second copy of the job');
+{
+	const r = run({ builds: ['nightly-20261002-bbbb222'], self: true });
+	check('does nothing', r.flashed.length === 0 && r.result === undefined && r.status === 0);
+}
+{
+	const r = run({ builds: ['nightly-20261001-aaaa111'] });
+	check('a run releases its lock on the way out', !r.selfLockLeft);
+}
+
+group('no record, no flash');
+if (process.getuid && process.getuid() === 0) {
+	// root writes through a read-only mode, so the case cannot be staged.
+	check('skipped: running as root', true);
+} else {
+	const r = run({ builds: ['nightly-20261002-bbbb222'], readOnlyRecord: true });
+	check('a record that cannot be written stops the flash', r.flashed.length === 0);
+	check('and fails', r.status !== 0);
 }
 
 done();

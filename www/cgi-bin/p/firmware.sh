@@ -20,9 +20,14 @@ fw_sha_of() {
 	printf '%s\n' "$1" | sed -n 's/.*+\([0-9a-f]\{7,\}\).*/\1/p' | head -1
 }
 
+# fw_installed_version [os-release]   GITHUB_VERSION, the string fw_newer reads
+fw_installed_version() {
+	sed -n 's/^GITHUB_VERSION="\?\([^"]*\)"\?$/\1/p' "${1:-/etc/os-release}" 2>/dev/null | head -1
+}
+
 # fw_installed_sha [os-release]   the revision this camera was built from, or nothing
 fw_installed_sha() {
-	fw_sha_of "$(sed -n 's/^GITHUB_VERSION="\?\([^"]*\)"\?$/\1/p' "${1:-/etc/os-release}" 2>/dev/null)"
+	fw_sha_of "$(fw_installed_version "$1")"
 }
 
 # fw_latest_build   the newest build OpenIPC publishes for this board, or nothing
@@ -50,17 +55,37 @@ fw_build_sha() {
 	printf '%s' "$1" | sed -n 's/.*-\([0-9a-f]\{7,\}\)$/\1/p'
 }
 
-# fw_newer <installed-sha> <latest-sha>   prints true, false or null
+# fw_newer <installed GITHUB_VERSION> <latest build id>   prints true, false or null
 #
-# null is "cannot tell" -- either side unread -- and a caller must treat it as
-# neither yes nor no. A prefix match in both directions, because the two
-# revisions are abbreviated independently and need not be the same length.
+#   false  the two name the same revision: this camera runs the latest build.
+#          A prefix match in both directions, because the two revisions are
+#          abbreviated independently and need not be the same length.
+#   true   different revisions, and the build is dated after the one
+#          installed. Only this may be called an update, and only this lets
+#          the scheduled install flash.
+#   null   anything else -- a side unread, a date missing, or a build that is
+#          different but not later. A camera running something newer than
+#          the newest published (a local or a branch build) lands here, and
+#          so does a second build published the same day; "different" alone
+#          is not "newer", and treating it as newer would have the scheduled
+#          install flash an OLDER image over it. Callers treat null as neither
+#          yes nor no.
 fw_newer() {
-	if [ -z "$1" ] || [ -z "$2" ]; then
+	local isha lsha idate ldate
+	isha=$(fw_sha_of "$1")
+	lsha=$(fw_build_sha "$2")
+	if [ -z "$isha" ] || [ -z "$lsha" ]; then
 		echo null
 		return
 	fi
-	case "$2" in "$1"*) echo false; return ;; esac
-	case "$1" in "$2"*) echo false; return ;; esac
-	echo true
+	case "$lsha" in "$isha"*) echo false; return ;; esac
+	case "$isha" in "$lsha"*) echo false; return ;; esac
+	# "<branch>+<rev>, 2026-10-01" and "nightly-20261002-<rev>"
+	idate=$(printf '%s' "$1" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | tr -d -)
+	ldate=$(printf '%s' "$2" | grep -Eo -- '-[0-9]{8}-' | head -1 | tr -d -)
+	if [ -n "$idate" ] && [ -n "$ldate" ] && [ "$ldate" -gt "$idate" ]; then
+		echo true
+	else
+		echo null
+	fi
 }
