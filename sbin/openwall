@@ -79,7 +79,15 @@ fi
 # and handed the remainder of the upload to the shell, while the proxy user and
 # password were pasted in with no quoting at all. Passed as "$@" the values need
 # no quoting rules: each one reaches curl whole (#547).
-set -- curl --verbose --connect-timeout 100 --max-time 100
+#
+# --location follows a redirect, and --post301/--post302 keep it a POST with
+# the same form: without them curl turns a redirected POST into a GET and the
+# picture is lost on the way. openipc.org sends the networks that cannot reach
+# it intact to a mirror with a 301 -- in Russia the TSPU freezes an upload to
+# it after the first 20-odd kilobytes -- and decides which networks and which
+# mirror itself, so no mirror is named here.
+set -- curl --verbose --connect-timeout 100 --max-time 100 \
+	--location --max-redirs 3 --post301 --post302
 
 if [ "$openwall_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
 	. /etc/webui/proxy.conf
