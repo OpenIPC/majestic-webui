@@ -79,7 +79,14 @@ fi
 # and handed the remainder of the upload to the shell, while the proxy user and
 # password were pasted in with no quoting at all. Passed as "$@" the values need
 # no quoting rules: each one reaches curl whole (#547).
-set -- curl --verbose --connect-timeout 100 --max-time 100
+#
+# --speed-limit/--speed-time end an upload that has stopped moving. In Russia
+# the TSPU freezes a TLS connection to openipc.org's hosting network after the
+# first 20-odd kilobytes: the handshake completes, the picture starts to go up,
+# and then nothing passes in either direction. Without these curl sits out its
+# whole --max-time on a connection that is already dead.
+set -- curl --verbose --connect-timeout 100 --max-time 100 \
+	--speed-limit 1024 --speed-time 15
 
 if [ "$openwall_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
 	. /etc/webui/proxy.conf
@@ -87,7 +94,6 @@ if [ "$openwall_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
 	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
 fi
 
-set -- "$@" --url https://openipc.org/snapshots
 set -- "$@" -F "mac_address=${network_macaddr}"
 set -- "$@" -F "firmware=${fw_version}-${fw_variant:-lite}"
 set -- "$@" -F "flash_size=${flash_size}"
@@ -104,6 +110,18 @@ set -- "$@" -F "file=@${snapshot};type=image/heif"
 # The command line is not echoed. It carries --proxy-user, and this runs from
 # cron, so the credential went wherever that camera sends its cron output. The
 # two notification senders each dropped the same echo for the same reason.
-"$@"
+#
+# openipc.ru is the same wall, proxied from a host inside Russia, so a camera
+# there that cannot reach openipc.org reaches it through the mirror (measured
+# 2026-10-03: every upload that arrived through openipc.ru was stored, while
+# direct uploads from cameras in Russia froze). It is tried only when curl
+# itself fails -- a stall, a refused or dropped connection. An answer from the
+# wall, a 429 for sending too soon included, is the wall's answer wherever it
+# was asked, and is not asked again. A frozen upload never reached the wall,
+# so the second one is not refused as too soon.
+if ! "$@" --url https://openipc.org/snapshots; then
+	echo "Upload to openipc.org failed; sending through openipc.ru"
+	"$@" --url https://openipc.ru/snapshots
+fi
 
 exit 0
