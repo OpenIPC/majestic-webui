@@ -101,6 +101,10 @@ set -- "$@" -F "firmware=${fw_version}-${fw_variant:-lite}"
 set -- "$@" -F "flash_size=${flash_size}"
 set -- "$@" -F "hostname=${network_hostname}"
 set -- "$@" -F "caption=${openwall_caption}"
+# The code from openipc.org/club that links this camera to a club account.
+# Optional on both sides: sent only when there is one, and the site answers an
+# upload the same with or without it.
+[ -n "$openwall_club" ] && set -- "$@" -F "club=${openwall_club}"
 set -- "$@" -F "sensor=${sensor}"
 set -- "$@" -F "soc=${soc}"
 set -- "$@" -F "soc_temperature=${temperature}"
