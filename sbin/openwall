@@ -95,21 +95,24 @@ if [ "$openwall_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
 	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
 fi
 
+# The text parts go as --form-string, which takes a value as it stands. Under
+# -F a value that starts with @ or < names a file for curl to read instead, so
+# a caption typed as `@/etc/shadow` would have uploaded that file in its place.
 set -- "$@" --url https://openipc.org/snapshots
-set -- "$@" -F "mac_address=${network_macaddr}"
-set -- "$@" -F "firmware=${fw_version}-${fw_variant:-lite}"
-set -- "$@" -F "flash_size=${flash_size}"
-set -- "$@" -F "hostname=${network_hostname}"
-set -- "$@" -F "caption=${openwall_caption}"
+set -- "$@" --form-string "mac_address=${network_macaddr}"
+set -- "$@" --form-string "firmware=${fw_version}-${fw_variant:-lite}"
+set -- "$@" --form-string "flash_size=${flash_size}"
+set -- "$@" --form-string "hostname=${network_hostname}"
+set -- "$@" --form-string "caption=${openwall_caption}"
 # The code from openipc.org/club that links this camera to a club account.
 # Optional on both sides: sent only when there is one, and the site answers an
 # upload the same with or without it.
-[ -n "$openwall_club" ] && set -- "$@" -F "club=${openwall_club}"
-set -- "$@" -F "sensor=${sensor}"
-set -- "$@" -F "soc=${soc}"
-set -- "$@" -F "soc_temperature=${temperature}"
-set -- "$@" -F "streamer=${streamer}"
-set -- "$@" -F "uptime=${uptime}"
+[ -n "$openwall_club" ] && set -- "$@" --form-string "club=${openwall_club}"
+set -- "$@" --form-string "sensor=${sensor}"
+set -- "$@" --form-string "soc=${soc}"
+set -- "$@" --form-string "soc_temperature=${temperature}"
+set -- "$@" --form-string "streamer=${streamer}"
+set -- "$@" --form-string "uptime=${uptime}"
 set -- "$@" -F "file=@${snapshot};type=image/heif"
 [ -s "$thumb" ] && set -- "$@" -F "thumb=@${thumb};type=image/heif"
 
