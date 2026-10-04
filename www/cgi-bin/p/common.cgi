@@ -1051,14 +1051,16 @@ update_caminfo() {
 				ptz_support="1"; ptz_backend="gpio"
 			fi
 			;;
-		pelco-d|pelco-xm|ms41908)
-			# All three are lenses majestic itself drives -- the two XiongMai
-			# near-Pelco variants over a UART, and the Panasonic MS41908M SPI
+		pelco-d|pelco-xm|ms41908|gpiostep)
+			# All four are motors majestic itself drives -- the two XiongMai
+			# near-Pelco variants over a UART, the Panasonic MS41908M SPI
 			# stepper on the Hi3516A V100 boards, which has no UART MCU and is
-			# stepped straight off the ISP by the majestic-af plugin. The WebUI
-			# does not touch any of those wires; it asks majestic (mj_ptz) and
-			# POSTs verbs to its /ptz, so the pad is the same for all three and
-			# the axes it renders come from ptz_caps, not the wire.
+			# stepped straight off the ISP by the majestic-af plugin, and a
+			# pan/tilt head of plain GPIO steppers behind the gpiostep kernel
+			# module, which majestic-af drives the same way. The WebUI does not
+			# touch any of those wires; it asks majestic (mj_ptz) and POSTs
+			# verbs to its /ptz, so the pad is the same for all of them and the
+			# axes it renders come from ptz_caps, not the wire.
 			#
 			# Ask the daemon whether it can drive this lens. Its answers are
 			# kept apart the way af_support keeps them apart: a camera that
@@ -1107,6 +1109,10 @@ update_caminfo() {
 		esac
 	done
 	ptz_caps="${ptz_caps# }"
+	# A gpiostep head pans and tilts and has nothing else to drive, so its
+	# full capability is those two: an unset ptz_caps must not draw zoom and
+	# focus buttons that move nothing.
+	[ -z "$ptz_caps" ] && [ "$ptz_control" = gpiostep ] && ptz_caps="pan tilt"
 
 	# Autofocus has NO cached flag here, deliberately, and this comment is the
 	# tombstone of the one that used to be.
