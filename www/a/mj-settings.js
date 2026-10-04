@@ -12534,11 +12534,19 @@
 	// try, so a save that had SUCCEEDED threw a ReferenceError on its way out
 	// and the catch reported "Save failed: Can't find variable: flashToolbar"
 	// over a change the camera had already taken (#273).
-	function flashToolbar(text) {
+	//
+	// `hold` keeps it up with no timer, for a message that stands until the
+	// page replaces it: the wait for a save's rebuild can outlast FLASH_MS (a
+	// reading can start just inside the deadline and take its whole timeout),
+	// and a timer running out mid-wait would take the bar away before the page
+	// has decided whether Apply is owed.
+	function flashToolbar(text, hold) {
 		if (state.flashTimer) clearTimeout(state.flashTimer);
+		state.flashTimer = null;
 		setToolbarMsg(text, 'text-secondary');
 		state.flashPending = true;
 		renderToolbar();
+		if (hold) return;
 		state.flashTimer = setTimeout(() => {
 			state.flashTimer = null;
 			setToolbarMsg('');
@@ -12751,7 +12759,7 @@
 				// The count is all that holds the bar open while the camera is
 				// asked, and the bar is the only place Save's outcome is said.
 				if (rebuildsBefore !== null)
-					flashToolbar('Saved. Waiting for the camera to restart the video streams…');
+					flashToolbar('Saved. Waiting for the camera to restart the video streams…', true);
 				if (await rebuiltSince(rebuildsBefore))
 					flashToolbar('Saved and applied. The video streams restarted to take the change.');
 				else {
@@ -12820,9 +12828,14 @@
 	// The page cannot tell the two kinds of camera apart, so it asks the camera
 	// what happened: the rebuild counter before the save against the counter
 	// after. Any change counts, a drop included — majestic restarting starts
-	// the count again, and a fresh start reads the saved file. A reading taken
-	// straight after the POST was seen to come back before the rebuild had
-	// run; hence the wait. Only a counter SEEN to move removes Apply.
+	// the count again, and a fresh start reads the saved file. Nor does it
+	// matter who asked for the rebuild: one that runs after the save builds
+	// from what the save wrote, so it carries the change — which is all Apply
+	// would have done. What cannot be told apart is a rebuild that finished
+	// between the baseline and the POST, and carried the old configuration;
+	// the baseline is read immediately before the POST to keep that gap as
+	// short as it can be. A reading taken straight after the POST was seen to
+	// come back before the rebuild had run; hence the wait. Only a counter SEEN to move removes Apply.
 	// A camera that could not be asked keeps it, because a redundant Apply costs
 	// one more blink and a missing one costs a change that never takes effect.
 	async function rebuiltSince(before) {
