@@ -2,7 +2,7 @@
 <%in p/common.cgi %>
 <%
 config_file=/etc/webui/openwall.conf
-params="enabled crontab caption interval proxy"
+params="enabled crontab caption club interval proxy"
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	for p in $params; do
@@ -63,6 +63,11 @@ fi
 				<% field_string "openwall_interval" "Interval" "eval" "15 30 60 120" "Minutes between submissions." %>
 				<% field_switch "openwall_crontab" "Add to crontab" "eval" "Send pictures timed by interval." %>
 				<% field_text "openwall_caption" "Caption" "Location or short description." %>
+				<%# The code from openipc.org/club that links this camera to its
+				    owner's club account, for the stars the Open Wall earns. Sent as
+				    its own field, never shown; the site cuts one pasted into the
+				    caption out too, which is how firmware without this field does it. %>
+				<% field_text "openwall_club" "Club code" "From <a href=\"https://openipc.org/club?ref=webui\">openipc.org/club</a>: links this camera to your OpenIPC Club account, which earns stars while it keeps sending pictures. Never shown on the wall." %>
 				<% group_head "Options" %>
 				<% field_switch "openwall_proxy" "Use SOCKS5" "eval" "<a href=\"proxy.cgi\">Configure proxy access.</a>" %>
 				<% button_submit %>
