@@ -12487,11 +12487,15 @@
 	function pendingCost() {
 		const dirty = state.fields.filter(f => f.getValue() !== state.initial[f.dot]);
 		if (!dirty.length) return '';
-		// Save itself never restarts anything: a pipeline-class change is saved
-		// and then owed a reload, which is what Apply does and what the streams
-		// notice. The sentence says so in that order.
+		// Not "after Save, a reload": on a HiSilicon camera the save IS the
+		// reload — the camera rebuilds its pipeline before the POST's effects
+		// can be read back — and a sentence promising a second step that never
+		// comes is a promise the camera breaks in front of the operator. Where
+		// the camera cannot rebuild on a save, Apply does it, and the streams
+		// restart then. Either way this is the change that restarts them, which
+		// is all this sentence claims.
 		return needsPipelineReload(dirty)
-			? 'After Save, a reload restarts the video streams.'
+			? 'This change restarts the video streams.'
 			: 'Save keeps the streams running.';
 	}
 
@@ -12530,11 +12534,19 @@
 	// try, so a save that had SUCCEEDED threw a ReferenceError on its way out
 	// and the catch reported "Save failed: Can't find variable: flashToolbar"
 	// over a change the camera had already taken (#273).
-	function flashToolbar(text) {
+	//
+	// `hold` keeps it up with no timer, for a message that stands until the
+	// page replaces it: the wait for a save's rebuild can outlast FLASH_MS (a
+	// reading can start just inside the deadline and take its whole timeout),
+	// and a timer running out mid-wait would take the bar away before the page
+	// has decided whether Apply is owed.
+	function flashToolbar(text, hold) {
 		if (state.flashTimer) clearTimeout(state.flashTimer);
+		state.flashTimer = null;
 		setToolbarMsg(text, 'text-secondary');
 		state.flashPending = true;
 		renderToolbar();
+		if (hold) return;
 		state.flashTimer = setTimeout(() => {
 			state.flashTimer = null;
 			setToolbarMsg('');
@@ -12681,6 +12693,10 @@
 		// when the toolbar's confirmation helper turned out never to have been
 		// defined: the save landed and the page said "Save failed" (#273).
 		let landed = false;
+		// Read before the POST, because the rebuild it may cause is what the
+		// count is compared against afterwards.
+		const pipeline = needsPipelineReload(dirty);
+		const rebuildsBefore = pipeline ? await pipelineRebuilds() : null;
 		try {
 			if (dirty.length) {
 				const res = await apiFetch('/api/v1/config', {
@@ -12735,12 +12751,22 @@
 					kept.join('; ') + '. The camera is still configured with ' +
 					'them; its firmware may be too old to clear a setting.');
 			// Ask the camera what this cost rather than assuming the worst.
-			// Only a pipeline-class change is still owed a reload; a service
-			// restart or a channel rebuild already happened inside the save,
-			// with the rest of the pipeline left running.
-			if (needsPipelineReload(dirty))
-				state.applyPending = true;
-			else if (appliedInPlace(dirty))
+			// A service restart or a channel rebuild already happened inside
+			// the save, with the rest of the pipeline left running. A
+			// pipeline-class change is owed a reload only if the save did not
+			// already run one — see rebuiltSince for when it does.
+			if (pipeline) {
+				// The count is all that holds the bar open while the camera is
+				// asked, and the bar is the only place Save's outcome is said.
+				if (rebuildsBefore !== null)
+					flashToolbar('Saved. Waiting for the camera to restart the video streams…', true);
+				if (await rebuiltSince(rebuildsBefore))
+					flashToolbar('Saved and applied. The video streams restarted to take the change.');
+				else {
+					state.applyPending = true;
+					setToolbarMsg('');
+				}
+			} else if (appliedInPlace(dirty))
 				flashToolbar(
 					'Saved and applied. The video streams were not interrupted.');
 		} catch (e) {
@@ -12761,6 +12787,65 @@
 			btn.disabled = false;
 			btn.textContent = 'Save Changes';
 			updateDirty();
+		}
+	}
+
+	// How many times the camera has torn its pipeline down and built it again
+	// since majestic started, or null when it could not be asked. Null is "could
+	// not ask", never zero: a zero would let any later reading look like a
+	// rebuild had happened.
+	async function pipelineRebuilds() {
+		const ctl = new AbortController();
+		const t = setTimeout(() => ctl.abort(), 3000);
+		try {
+			const r = await apiFetch('/metrics?comments=0',
+				{ cache: 'no-store', credentials: 'same-origin', signal: ctl.signal });
+			if (!r.ok) return null;
+			const m = /^pipeline_rebuilds_total\s+(\d+)\s*$/m.exec(await r.text());
+			return m ? Number(m[1]) : null;
+		} catch (e) {
+			return null;
+		} finally {
+			clearTimeout(t);
+		}
+	}
+
+	// How long a save is given to show its rebuild. Measured on an
+	// hi3516av300: the counter has moved by the first reading that is not
+	// answered ahead of the rebuild, about a second after the POST.
+	const REBUILD_WAIT_MS = 4000;
+
+	// Did the save just made rebuild the pipeline itself?
+	//
+	// Measured on a HiSilicon camera, a POST /api/v1/config of a
+	// pipeline-class key is followed within about a second by the same rebuild
+	// Apply sends, with no Apply pressed. A resolution saved there is in force
+	// by the time the page could offer Apply, and the operator who was told the
+	// change waits for the button watched it happen on Save instead. A camera
+	// that does not rebuild on a save still needs Apply to bring such a change
+	// into force.
+	//
+	// The page cannot tell the two kinds of camera apart, so it asks the camera
+	// what happened: the rebuild counter before the save against the counter
+	// after. Any change counts, a drop included — majestic restarting starts
+	// the count again, and a fresh start reads the saved file. Nor does it
+	// matter who asked for the rebuild: one that runs after the save builds
+	// from what the save wrote, so it carries the change — which is all Apply
+	// would have done. What cannot be told apart is a rebuild that finished
+	// between the baseline and the POST, and carried the old configuration;
+	// the baseline is read immediately before the POST to keep that gap as
+	// short as it can be. A reading taken straight after the POST was seen to
+	// come back before the rebuild had run; hence the wait. Only a counter SEEN to move removes Apply.
+	// A camera that could not be asked keeps it, because a redundant Apply costs
+	// one more blink and a missing one costs a change that never takes effect.
+	async function rebuiltSince(before) {
+		if (before === null) return false;
+		const deadline = Date.now() + REBUILD_WAIT_MS;
+		for (;;) {
+			const now = await pipelineRebuilds();
+			if (now !== null && now !== before) return true;
+			if (Date.now() >= deadline) return false;
+			await new Promise(res => setTimeout(res, 500));
 		}
 	}
 
