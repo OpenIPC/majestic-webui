@@ -157,6 +157,8 @@ for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
 		pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
 	esac
 done
+# The same default update_caminfo applies: a gpiostep head is pan and tilt.
+[ -z "$ptz_caps" ] && [ "$ptz_control" = gpiostep ] && ptz_caps=" pan tilt"
 
 has_cap() {
 	[ -z "$ptz_caps" ] && return 0

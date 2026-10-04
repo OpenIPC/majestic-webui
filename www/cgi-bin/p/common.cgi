@@ -1109,6 +1109,10 @@ update_caminfo() {
 		esac
 	done
 	ptz_caps="${ptz_caps# }"
+	# A gpiostep head pans and tilts and has nothing else to drive, so its
+	# full capability is those two: an unset ptz_caps must not draw zoom and
+	# focus buttons that move nothing.
+	[ -z "$ptz_caps" ] && [ "$ptz_control" = gpiostep ] && ptz_caps="pan tilt"
 
 	# Autofocus has NO cached flag here, deliberately, and this comment is the
 	# tombstone of the one that used to be.

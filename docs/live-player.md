@@ -243,7 +243,8 @@ pad), or `motor` (`/usr/bin/motor`; profile in
 directions, zoom and focus, each a fixed timed pulse — speaking
 `j/ptz.cgi?act=<verb>` against a **closed whitelist**, because the verb becomes a
 frame on a wire and must never pass through raw. `ptz_caps` narrows the pad to
-the axes the hardware has (`fw_setenv ptz_caps 'zoom focus'`; unset = all),
+the axes the hardware has (`fw_setenv ptz_caps 'zoom focus'`; unset = all, or pan
+and tilt for `gpiostep`),
 sanitised in `update_caminfo`, honoured by `p/motor.cgi` and enforced again in
 `j/ptz.cgi` (`stop` always allowed; stepped backends zero the missing component).
 **Autofocus** is majestic's engine: with `.isp.autofocus.enabled` true and a focus
