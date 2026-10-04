@@ -121,7 +121,14 @@ left running; `pipeline` is the only one the operator is still owed. A bare
 pipeline rebuild, so the page agrees — and anything unrecognised falls there too,
 because a class this page has never heard of is one it cannot claim was carried.
 A save that moved only in-place classes offers no button, because there is no
-action left to take; only something genuinely pipeline-class sets
+action left to take. A pipeline-class save offers one only if the camera did not
+rebuild on the save itself. Measured on a HiSilicon camera, a `POST /api/v1/config`
+of a resolution rebuilds the pipeline within about a second, so a resolution is in force before the page
+could offer the button, and promising it would be promising a step that never
+comes. The page cannot tell backends apart, so it reads `pipeline_rebuilds_total`
+before the save and polls it for a few seconds after (`rebuiltSince()`); only a
+counter seen to move withholds Apply, and a camera that could not be asked keeps
+it. Otherwise it sets
 `state.applyPending` and shows **Apply now** in the sticky bar next to where Save
 just was (a banner at the *top* of the form meant scrolling back up to press it —
 #171). Both buttons follow one rule: each is in the bar only while its own action
