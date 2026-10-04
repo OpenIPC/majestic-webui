@@ -37,20 +37,21 @@
 	fi
 
 	if [ "$REQUEST_METHOD" = "POST" ] && [ "$POST_action" = "autoupdate" ]; then
-		h=${POST_au_hour#0}
+		# The form posts 0..23. "0" is midnight, so no leading zero is
+		# stripped here: ${h#0} turned it into an empty string and refused
+		# 00:00 as no hour at all (#630).
+		h=$POST_au_hour
 		case "$h" in [0-9] | 1[0-9] | 2[0-3]) ;; *)
 			redirect_to "$SCRIPT_NAME" "danger" "Choose the hour the camera should update at." ;;
 		esac
 		case "$POST_au_day" in '*' | [0-6]) ;; *)
 			redirect_to "$SCRIPT_NAME" "danger" "Choose the day the camera should update on." ;;
 		esac
-		# A minute of its own, picked once and then kept: every camera asking
-		# OpenIPC for an image on the stroke of the hour is a load spike for
-		# nothing, and re-saving the form should not move the time it shows.
-		m=$au_min
-		if [ -n "$au_foreign" ] || [ -z "$m" ]; then
-			m=$(awk 'BEGIN { srand(); print int(rand() * 60) }')
-		fi
+		# On the hour, because that is the time the form offers. A minute
+		# picked at random to spread the load turned "03:00" into 03:12 on one
+		# camera and something else on the next (#630); the build list and
+		# the images are served from a CDN that does not need the help.
+		m=0
 		sed -i "\\# $au_job\$#d" "$au_tab"
 		if [ "$POST_au_enabled" != "true" ]; then
 			redirect_to "$SCRIPT_NAME" "success" "Automatic updates are off."
