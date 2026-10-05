@@ -77,6 +77,9 @@ group('the grade weighs interference as well as signal', () => {
 	check('a strong clean cell is good', L.grade(strong)[0] === 'good');
 	const far = { modem_rsrp_dbm: -115 };
 	check('far from the cell is weak coverage', /coverage/.test(L.grade(far)[0]));
+	const both = L.grade({ modem_rsrp_dbm: -115, modem_sinr_db: -8 });
+	check('weak on both counts names both',
+		/little coverage, and interference \(SINR -8 dB\)/.test(both[0]));
 	check('no RSRP grades nothing', L.grade({ modem_sinr_db: 3 }) === null);
 	const noSinr = L.grade({ modem_rsrp_dbm: -80 });
 	check('no SINR is not a clean channel: the grade says it is strength only',

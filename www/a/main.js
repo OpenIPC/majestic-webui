@@ -503,8 +503,10 @@ function mjLteGrade(v) {
 	}
 	const lvl = Math.max(rl, sl);
 	const word = ['good', 'fair', 'weak'][lvl] + (hasSinr ? '' : ' (strength only)');
+	const sinr = ' (SINR ' + v.modem_sinr_db + ' dB)';
 	const why = lvl === 0 ? ''
-		: sl > rl ? ' — interference (SINR ' + v.modem_sinr_db + ' dB)'
+		: sl > rl ? ' — interference' + sinr
+		: lvl === 2 && sl === 2 ? ' — little coverage, and interference' + sinr
 		: lvl === 2 ? ' — little coverage here' : '';
 	return [word + why, ['text-success', 'text-warning', 'text-danger'][lvl], lvl];
 }
