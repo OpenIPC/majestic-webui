@@ -80,5 +80,63 @@
 	const sel = $('#wifi-results');
 	if (sel) sel.addEventListener('change', () => { const i = $('#network_wlan_ssid'); if (sel.value && i) i.value = sel.value; });
 
+	// The Cellular modem card: every row the modem itself answers comes from
+	// majestic's modem_* gauges and modem_info labels on the shared heartbeat,
+	// graded and worded by main.js (mjLteGrade, mjLteState) exactly as the
+	// Dashboard does. A row the modem has not answered keeps its dash rather
+	// than turning into a zero; a failed poll changes nothing on screen.
+	function cellular(s) {
+		if (!s.ok) return;
+		const v = s.m.v, i = s.m.info.modem_info || {};
+		const set = (id, text, cls) => {
+			const el = $('#' + id);
+			if (!el) return;
+			el.textContent = text == null || text === '' ? '–' : text;
+			el.className = cls || '';
+		};
+		const num = (k, unit) => (k in v) ? v[k] + unit : null;
+		const st = mjLteState(v, i);
+		set('cell-state', st ? st[0] : 'majestic reports no modem: it is powered down, or not on USB',
+			'x-small mb-2 ' + (st ? st[1] : 'text-secondary'));
+		const g = mjLteGrade(v);
+		set('cell-rsrp', num('modem_rsrp_dbm', ' dBm') != null
+			? v.modem_rsrp_dbm + ' dBm' + (g ? ' · ' + g[0] : '') : null, g ? g[1] : '');
+		set('cell-rsrq', num('modem_rsrq_db', ' dB'));
+		set('cell-sinr', num('modem_sinr_db', ' dB'));
+		set('cell-rssi', num('modem_rssi_dbm', ' dBm'));
+		set('cell-csq', ('modem_csq' in v) ? v.modem_csq + ' of 31' : null);
+		set('cell-op', i.operator
+			? i.operator + (i.mcc ? ' (' + i.mcc + '/' + i.mnc + ')' : '') : null);
+		set('cell-cell', i.cell
+			? i.cell + (i.tac ? ' · TAC ' + i.tac : '') +
+				('modem_pci' in v ? ' · PCI ' + v.modem_pci : '') +
+				(i.state ? ' · ' + ({ NOCONN: 'idle', CONNECT: 'transferring',
+					SEARCH: 'searching', LIMSRV: 'limited service' }[i.state] ||
+					i.state.toLowerCase()) : '')
+			: null);
+		set('cell-band', ('modem_band' in v)
+			? (i.rat || '') + ' band ' + v.modem_band +
+				('modem_earfcn' in v ? ' · EARFCN ' + v.modem_earfcn : '')
+			: (i.rat || null));
+		set('cell-bearer', ('modem_bearer_active' in v)
+			? (v.modem_bearer_active ? 'active' + (i.bearer_ip ? ', ' + i.bearer_ip : '') : 'none')
+			: null);
+		set('cell-netdev', ('modem_data_connected' in v)
+			? (v.modem_data_connected ? 'connected' : 'not connected — usb0 carries nothing')
+			: null, ('modem_data_connected' in v)
+			? (v.modem_data_connected ? 'text-success' : 'text-danger') : '');
+		set('cell-model', i.model);
+		set('cell-rev', i.revision);
+		set('cell-imei', i.imei);
+		set('cell-sim', i.sim ? i.sim.toLowerCase() : null,
+			i.sim && i.sim !== 'READY' ? 'text-danger' : '');
+		set('cell-iccid', i.iccid);
+		const age = $('#cell-age');
+		if (age) age.textContent = ('modem_reading_age_seconds' in v)
+			? 'Read from the modem ' + Math.round(v.modem_reading_age_seconds) + ' s ago.' : '';
+	}
+	if ($('#cellular') && typeof mjMetricsSubscribe === 'function')
+		mjMetricsSubscribe(cellular);
+
 	toggleStatic();
 })();

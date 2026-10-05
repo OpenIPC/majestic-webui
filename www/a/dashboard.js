@@ -593,6 +593,65 @@
 		if (sub) sub.textContent = parts.join(' · ');
 	}
 
+	// ── cellular modem ──────────────────────────────────────────────────────
+	// The modem_* gauges majestic reads over the modem's AT port; scale, grade
+	// and sentences are main.js's (MJ_LTE_SCALE, mjLteGrade, mjLteState),
+	// shared with the live player and the Network page. Mounted on the first
+	// sample that carries one and hidden again when they go — the modem
+	// powered off, or unplugged.
+	let chLte = null;
+
+	function mountLte() {
+		const sc = MJ_LTE_SCALE;
+		sparks.lte = makeSpark('#spark-lte', C1, null, null);
+		chLte = makeChart('#ch-lte', {
+			h: 110, lo: sc.lo, hi: sc.hi, colors: [C1],
+			bands: [
+				{ from: sc.good, to: sc.hi, color: 'rgba(47,182,115,.07)', label: 'good' },
+				{ from: sc.fair, to: sc.good, color: 'rgba(255,193,7,.06)', label: 'fair' },
+				{ from: sc.lo, to: sc.fair, color: 'rgba(224,84,78,.06)', label: 'weak' },
+			],
+		});
+	}
+
+	function updateLte(s, v) {
+		const st = mjLteState(v, s.m && s.m.info.modem_info);
+		const tile = $('#st-lte-tile'), panel = $('#st-lte-panel');
+		if (panel) panel.hidden = !st;
+		if (!st) {
+			if (tile) tile.hidden = true;
+			return;
+		}
+		if (!chLte) mountLte();
+		const r = (MJ_LTE_SCALE.key in v) ? v[MJ_LTE_SCALE.key] : null;
+		// No headline without a reading: a modem still searching has no RSRP,
+		// and a tile showing a dash under "LTE signal" says nothing true.
+		if (tile) tile.hidden = r == null;
+		const val = $('#st-lte-val'), gr = $('#st-lte-grade'), now = $('#st-lte-now');
+		if (val) val.textContent = r != null ? r : '–';
+		if (now) now.textContent = r != null ? r + ' dBm' : '';
+		const grade = mjLteGrade(v);
+		if (gr) {
+			gr.textContent = '';
+			if (grade) {
+				const d = document.createElement('span');
+				d.className = grade[1]; d.textContent = '● ';
+				gr.appendChild(d);
+				gr.appendChild(document.createTextNode(grade[0]));
+			}
+		}
+		if (r != null) { pushSpark(sparks.lte, r); pushChart(chLte, [r]); }
+		const state = $('#st-lte-state');
+		if (state) { state.textContent = st[0]; state.className = 'x-small ' + st[1]; }
+		const parts = [];
+		if ('modem_rsrq_db' in v) parts.push('RSRQ ' + v.modem_rsrq_db + ' dB');
+		if ('modem_sinr_db' in v) parts.push('SINR ' + v.modem_sinr_db + ' dB');
+		if ('modem_rssi_dbm' in v) parts.push('RSSI ' + v.modem_rssi_dbm + ' dBm');
+		if ('modem_earfcn' in v) parts.push('EARFCN ' + v.modem_earfcn);
+		const sub = $('#st-lte-sub');
+		if (sub) sub.textContent = parts.join(' · ');
+	}
+
 	// ── snapshot tile ───────────────────────────────────────────────────────
 	// /image.jpg polled every 5s — decoded off-screen first so a slow or
 	// failed fetch never blanks the tile, only leaves the last frame standing.
@@ -908,6 +967,7 @@
 		});
 
 		updateWifi(s, v);
+		updateLte(s, v);
 	}
 
 	// One element per value, textContent throughout — these strings come from

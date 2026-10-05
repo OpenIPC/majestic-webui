@@ -170,6 +170,15 @@ done) %>
 		<div class="x-small text-secondary" id="st-wifi-grade"></div>
 		<div id="spark-wifi" class="spark st-tile-spark"></div>
 	</div>
+	<%# The cellular modem's signal, when majestic finds one on USB. RSRP is the
+	    headline, as the level is for Wi-Fi; the grade also weighs SINR, since a
+	    strong cell drowned in interference carries little (dashboard.js). %>
+	<div class="st-panel st-tile" id="st-lte-tile" hidden>
+		<div class="mj-cap">LTE signal</div>
+		<div class="st-val"><span id="st-lte-val">&ndash;</span><span class="st-unit"> dBm</span></div>
+		<div class="x-small text-secondary" id="st-lte-grade"></div>
+		<div id="spark-lte" class="spark st-tile-spark"></div>
+	</div>
 	<div class="st-panel st-tile">
 		<div class="mj-cap">Uptime</div>
 		<div class="st-val-sm" id="st-uptime">&ndash;</div>
@@ -231,6 +240,18 @@ done) %>
 				    coming. %>
 				<div class="x-small text-secondary" id="st-wifi-none" hidden></div>
 				<div class="x-small text-secondary" id="st-wifi-sub"></div>
+			</div>
+			<div class="st-panel st-chartbox" id="st-lte-panel" hidden>
+				<div class="st-chart-head">
+					<span class="mj-cap">LTE signal (RSRP)</span>
+					<span class="st-now" id="st-lte-now"></span>
+				</div>
+				<div class="mj-chart" id="ch-lte"></div>
+				<%# What the modem is doing with that signal: registered where, and
+				    whether the data session reaches usb0. A registered modem that
+				    has not connected its session carries nothing, and says so. %>
+				<div class="x-small" id="st-lte-state"></div>
+				<div class="x-small text-secondary" id="st-lte-sub"></div>
 			</div>
 		</div>
 
