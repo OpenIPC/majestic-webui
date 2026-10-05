@@ -1341,14 +1341,19 @@ function runRest() {
 			/"Camera light"/.test(lampSaid) && !/Drive the /.test(lampSaid),
 			lampSaid);
 		check('a parked lamp on a PWM channel says so too',
-			ic.diagnose({ backlight: 'off', backlightPwmChannel: 'pwm1' },
+			ic.diagnose({ backlight: 'off', irLightPwmChannel: 'pwm1' },
+				null, null)
+				.some(x => x.id === 'light-parked'));
+		check('...and so does one with only a white lamp',
+			ic.diagnose({ backlight: 'off', whiteLightPwmChannel: 'pwm3' },
 				null, null)
 				.some(x => x.id === 'light-parked'));
 		check('a lamp with no wiring at all stays silent',
 			!ic.diagnose({ backlight: 'off' }, null, null)
 				.some(x => x.id === 'light-parked'));
 		check('channel "none" is not wiring',
-			!ic.diagnose({ backlight: 'off', backlightPwmChannel: 'none' },
+			!ic.diagnose({ backlight: 'off', irLightPwmChannel: 'none',
+				whiteLightPwmChannel: 'none' },
 				null, null)
 				.some(x => x.id === 'light-parked'));
 	}

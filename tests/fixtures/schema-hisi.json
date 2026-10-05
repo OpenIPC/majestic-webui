@@ -1158,6 +1158,13 @@
           "title": "Colorless night mode",
           "default": true
         },
+        "colorNight": {
+          "type": "boolean",
+          "title": "Colour night mode",
+          "default": false,
+          "hint": "At night keep the IR-cut filter in and the picture in colour, lit by the white lamp rather than the IR one.",
+          "x-reload": "service:night"
+        },
         "irCut": {
           "type": "string",
           "title": "IR-cut filter",
@@ -1282,16 +1289,28 @@
           "x-reload": "service:night",
           "hint": "Automatic mode only: seconds the scene must stay bright before switching back to day, so headlights and porch lights at night do not flip the camera. Dawn easily outlasts it."
         },
-        "backlightPwmChannel": {
+        "irLightPwmChannel": {
           "enum": [
             "none",
             "pwm1",
             "pwm3"
           ],
           "type": "string",
-          "title": "PWM channel for a dimmable lamp",
+          "title": "PWM channel for the IR lamp",
           "default": "none",
-          "hint": "A lamp on a PWM pad instead of a plain GPIO: pick the channel and the backlight pin is ignored — brightness then follows the ambient light at night, between the minimum and maximum duty below. \"none\" keeps a switched (on/off) lamp on the backlight pin.",
+          "hint": "For an IR lamp on a PWM pad; backlightPin is then ignored. \"none\" leaves the lamp to backlightPin, on/off. A channel on several pads offers each of them.",
+          "x-reload": "service:night"
+        },
+        "whiteLightPwmChannel": {
+          "enum": [
+            "none",
+            "pwm1",
+            "pwm3"
+          ],
+          "type": "string",
+          "title": "PWM channel for the white lamp",
+          "default": "none",
+          "hint": "A visible-light lamp, lit at night instead of the IR one when colorNight is on.",
           "x-reload": "service:night"
         },
         "backlightPwmFreq": {

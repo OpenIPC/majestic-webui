@@ -9354,7 +9354,7 @@
 		// without guessing. The channel is the honest answer then, and it is
 		// still an answer — unlike "not set", which was the bug.
 		function pwmLamp() {
-			const ch = getDotted(state.config, 'nightMode.backlightPwmChannel');
+			const ch = getDotted(state.config, 'nightMode.irLightPwmChannel');
 			if (!ch || ch === 'none') return null;
 			const pads = [];
 			((state.ircutInfo && state.ircutInfo.assigned) || []).forEach((x) => {
@@ -12288,8 +12288,9 @@
 					.some((k) => isNumish(padOf(k)));
 				// A dimmable lamp lives on a PWM channel and may have no pad at
 				// all, so for the lamp that is the other way to be wired.
-				const chan = lamp ? padOf('backlightPwmChannel') : null;
-				const wired = wiredPad || (chan && chan !== 'none');
+				const chans = lamp ? ['irLightPwmChannel', 'whiteLightPwmChannel']
+					.map(padOf) : [];
+				const wired = wiredPad || chans.some((c) => c && c !== 'none');
 				warn.textContent = wired ? '' : (lamp
 					? 'Nothing is connected to the camera light yet — assign its pad on the map above, or a PWM channel below, and this will start to mean something.'
 					: 'Nothing is connected to the IR-cut filter yet — assign its coils on the map above, and this will start to mean something.');
