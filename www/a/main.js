@@ -402,14 +402,29 @@ function mjMetricsPublish(s) {
 	mjMetricsSubs.slice().forEach(fn => { try { fn(s); } catch (e) {} });
 }
 
-// Prometheus text → { v, cpuTotal, cpuIdle, rx, tx }. `v` maps every unlabelled
-// metric to its number; of the labelled families only cpu and net are wanted,
-// summed over their labels — the rest (task_seconds, node_uname_info) are
+// Prometheus text → { v, info, cpuTotal, cpuIdle, rx, tx }. `v` maps every
+// unlabelled metric to its number; of the labelled families only cpu and net
+// are wanted, summed over their labels, and the `*_info` families, whose
+// labels ARE the reading — `info.modem_info` is the cellular modem's model,
+// SIM and serving cell, text no gauge can carry. The rest (task_seconds) are
 // skipped unread. First write wins on a duplicated name: majestic on Ingenic
 // emits isp_exptime twice, canonical ISP block first, so first-wins reads the
 // same value before and after the daemon-side fix.
 function parseMetrics(text) {
-	const m = { v: Object.create(null), cpuTotal: 0, cpuIdle: 0, rx: 0, tx: 0 };
+	// `a="x",b="y\"z"` → { a: 'x', b: 'y"z' }, undoing the exposition
+	// format's three escapes. Inside rather than beside parseMetrics so the
+	// tests that lift the parser out of this file lift it whole. The values
+	// are device text -- a modem's operator name -- kept as strings and only
+	// ever put on a page through textContent.
+	function parseLabels(ls) {
+		const out = Object.create(null);
+		const re = /([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"/g;
+		let mt;
+		while ((mt = re.exec(ls)))
+			out[mt[1]] = mt[2].replace(/\\(.)/g, (_, c) => c === 'n' ? '\n' : c);
+		return out;
+	}
+	const m = { v: Object.create(null), info: Object.create(null), cpuTotal: 0, cpuIdle: 0, rx: 0, tx: 0 };
 	const lines = text.split('\n');
 	for (let i = 0; i < lines.length; i++) {
 		const ln = lines[i];
@@ -430,6 +445,10 @@ function parseMetrics(text) {
 				if (key.indexOf('device="lo"') < 0) m.rx += val;
 			} else if (key.startsWith('node_network_transmit_bytes_total')) {
 				if (key.indexOf('device="lo"') < 0) m.tx += val;
+			} else {
+				const b = key.indexOf('{'), fam = key.slice(0, b);
+				if (fam.endsWith('_info') && !(fam in m.info))
+					m.info[fam] = parseLabels(key.slice(b + 1, key.lastIndexOf('}')));
 			}
 			continue;
 		}
@@ -452,6 +471,76 @@ function parseMetrics(text) {
 		v.node_memory_MemAvailable_bytes > v.node_memory_MemTotal_bytes)
 		v.node_memory_MemAvailable_bytes = v.node_memory_MemTotal_bytes;
 	return m;
+}
+
+// The cellular modem, read by majestic over its AT port: modem_* gauges and the
+// modem_info labels. One scale and one set of sentences for the three places
+// that show it -- Dashboard, the live player's radio section, the Network
+// page -- because a grade written three times is three grades.
+//
+// RSRP is the headline (signal from the cell), but it is not the grade on its
+// own: a cell heard at -95 dBm under SINR -5 dB is strong and unusable, and an
+// RSRP-only "fair" for it would point at coverage when the trouble is
+// interference. So the grade is the worse of the two, and says which one set
+// it.
+const MJ_LTE_SCALE = {
+	key: 'modem_rsrp_dbm', lo: -125, hi: -70, good: -90, fair: -105,
+	sinrGood: 13, sinrFair: 0,
+};
+
+function mjLteGrade(v) {
+	const sc = MJ_LTE_SCALE;
+	if (!(sc.key in v)) return null;
+	const r = v[sc.key];
+	const rl = r >= sc.good ? 0 : r >= sc.fair ? 1 : 2;
+	// No SINR is not a clean channel: the grade is then the signal's alone,
+	// and says so rather than passing for the full judgement.
+	const hasSinr = 'modem_sinr_db' in v;
+	let sl = 0;
+	if (hasSinr) {
+		const n = v.modem_sinr_db;
+		sl = n >= sc.sinrGood ? 0 : n >= sc.sinrFair ? 1 : 2;
+	}
+	const lvl = Math.max(rl, sl);
+	const word = ['good', 'fair', 'weak'][lvl] + (hasSinr ? '' : ' (strength only)');
+	const sinr = ' (SINR ' + v.modem_sinr_db + ' dB)';
+	const why = lvl === 0 ? ''
+		: sl > rl ? ' — interference' + sinr
+		: lvl === 2 && sl === 2 ? ' — little coverage, and interference' + sinr
+		: lvl === 2 ? ' — little coverage here' : '';
+	return [word + why, ['text-success', 'text-warning', 'text-danger'][lvl], lvl];
+}
+
+// What the modem is doing, as [sentence, class]; null where majestic reports
+// no modem. Registration and the data session are separate facts and kept
+// apart: a modem registered on a cell, holding an address from the network,
+// whose session is not connected to usb0 carries nothing -- that state was
+// met in the field and is the one this sentence most has to get right.
+function mjLteState(v, info) {
+	if (!('modem_reading_age_seconds' in v)) return null;
+	// majestic withholds the readings once they are a minute old, so an old
+	// age normally arrives alone; it is checked first all the same, so that
+	// a stale reading can never be worded as a live one.
+	const age = v.modem_reading_age_seconds;
+	if (age > 60)
+		return ['The modem has not answered for ' + Math.round(age) + ' s', 'text-warning'];
+	const i = info || {};
+	if (i.sim && i.sim !== 'READY')
+		return ['SIM: ' + i.sim.toLowerCase(), 'text-danger'];
+	if (!('modem_registered' in v)) return ['Waiting for the modem', 'text-secondary'];
+	if (!v.modem_registered)
+		return ['Not registered on a network' +
+			(i.state === 'SEARCH' ? ' — searching for a cell'
+				: i.state === 'LIMSRV' ? ' — limited service: the SIM is refused here' : ''),
+			'text-danger'];
+	const on = 'On ' + (i.operator || 'the network') +
+		(i.rat ? ' · ' + i.rat : '') + ('modem_band' in v ? ' band ' + v.modem_band : '');
+	if (!('modem_data_connected' in v)) return [on, 'text-secondary'];
+	if (!v.modem_data_connected)
+		return [on + ' · no data session on usb0' +
+			(v.modem_bearer_active ? ' (the network gave it ' + (i.bearer_ip || 'an address') + ')' : ''),
+			'text-danger'];
+	return [on + ' · data on usb0', 'text-success'];
 }
 
 function uptimeStr(s) {

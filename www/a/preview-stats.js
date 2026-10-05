@@ -29,7 +29,7 @@ window.MajesticStats = (function () {
 	const GRID = 'rgba(255,255,255,.14)';
 
 	let els = null;
-	let latSpark = null, bwChart = null, rssiSpark = null, fvSpark = null;
+	let latSpark = null, bwChart = null, rssiSpark = null, lteSpark = null, fvSpark = null;
 	let open = false;
 	// Per-destination egress, asked for only while somebody is looking. See
 	// the block above outPoll().
@@ -140,11 +140,16 @@ window.MajesticStats = (function () {
 		'<section class="mj-ns-sec" id="mj-ns-radio" hidden>' +
 			'<div class="mj-ns-cap">Camera radio</div>' +
 			'<div class="mj-ns-rows">' +
-				'<div class="mj-ns-row"><span>Wi-Fi signal</span><b id="mj-ns-wifi">–</b></div>' +
+				'<div class="mj-ns-row" id="mj-ns-r-wifi"><span>Wi-Fi signal</span><b id="mj-ns-wifi">–</b></div>' +
 				'<div class="mj-ns-row" id="mj-ns-r-wrate" hidden><span>radio link speed</span><b id="mj-ns-wrate">–</b></div>' +
 				'<div class="mj-ns-row" id="mj-ns-r-wretr" hidden><span>radio retries</span><b id="mj-ns-wretr">–</b></div>' +
 			'</div>' +
 			'<div class="mj-ns-spark" id="mj-ns-rssi-sp"></div>' +
+			'<div class="mj-ns-rows" id="mj-ns-lte" hidden>' +
+				'<div class="mj-ns-row"><span>LTE signal</span><b id="mj-ns-lte-sig">–</b></div>' +
+				'<div class="mj-ns-row"><span>cellular</span><b id="mj-ns-lte-st">–</b></div>' +
+			'</div>' +
+			'<div class="mj-ns-spark" id="mj-ns-lte-sp" hidden></div>' +
 		'</section>' +
 		// Focus. A TREND, never a score: the ISP's focus statistic has no
 		// common scale — the repo's own Ingenic fixture reads 1198384 where
@@ -254,7 +259,10 @@ window.MajesticStats = (function () {
 			rSet: g('mj-ns-r-set'), set: g('mj-ns-set'),
 			send: g('mj-ns-send'), recv: g('mj-ns-recv'),
 			repair: g('mj-ns-repair'),
-			radio: g('mj-ns-radio'), wifi: g('mj-ns-wifi'),
+			radio: g('mj-ns-radio'), rWifi: g('mj-ns-r-wifi'), wifi: g('mj-ns-wifi'),
+			rssiSp: g('mj-ns-rssi-sp'),
+			lte: g('mj-ns-lte'), lteSig: g('mj-ns-lte-sig'), lteSt: g('mj-ns-lte-st'),
+			lteSp: g('mj-ns-lte-sp'),
 			rWrate: g('mj-ns-r-wrate'), wrate: g('mj-ns-wrate'),
 			rWretr: g('mj-ns-r-wretr'), wretr: g('mj-ns-wretr'),
 			focus: g('mj-ns-focus'), fv: g('mj-ns-fv'), fvMax: g('mj-ns-fvmax'),
@@ -264,6 +272,10 @@ window.MajesticStats = (function () {
 		const MC = window.MjCharts;
 		latSpark = MC.makeSpark(g('mj-ns-lat-sp'), C1, 0, null, 120);
 		rssiSpark = MC.makeSpark(g('mj-ns-rssi-sp'), C1, -90, -30, 60);
+		// The modem's scale and sentences are main.js's; a page that runs the
+		// player without it simply has no cellular rows.
+		if (typeof MJ_LTE_SCALE === 'object')
+			lteSpark = MC.makeSpark(g('mj-ns-lte-sp'), C1, MJ_LTE_SCALE.lo, MJ_LTE_SCALE.hi, 60);
 		// Auto-scaled at BOTH ends (lo and hi null): the focus statistic has no
 		// common scale across vendors, so pinning either end would be inventing
 		// a floor or a ceiling this camera never had.
@@ -1044,7 +1056,37 @@ window.MajesticStats = (function () {
 		const hasWifi = ['wifi_rssi_dbm', 'wifi_link_quality_ratio',
 			'wifi_bitrate_mbps', 'wifi_retries_total',
 			'wifi_missed_beacons_total'].some((k) => k in v);
-		els.radio.hidden = !hasWifi;
+		// The cellular modem shares the section: it is the camera's other
+		// radio, and the one a camera on a mast is most likely to be using.
+		// Grade and sentence are main.js's, the same the Dashboard shows.
+		const lteSt = lteSpark && typeof mjLteState === 'function'
+			? mjLteState(v, s.m.info && s.m.info.modem_info) : null;
+		els.radio.hidden = !hasWifi && !lteSt;
+		els.rWifi.hidden = !hasWifi;
+		els.rssiSp.hidden = !hasWifi;
+		els.lte.hidden = els.lteSp.hidden = !lteSt;
+		if (lteSt) {
+			const lr = ('modem_rsrp_dbm' in v) ? v.modem_rsrp_dbm : null;
+			const lg = mjLteGrade(v);
+			// The glass is narrow, so the rows carry words, as the Wi-Fi one
+			// does: the grade without its reason, and the state cut to what
+			// changes the picture. The Dashboard and the Network page have
+			// the sentences.
+			els.lteSig.textContent = lr != null
+				? lr + ' dBm' + (lg ? ' · ' + lg[0].split(' — ')[0] : '') : '–';
+			els.lteSig.style.color = lg ? [OK, WARN, BAD][lg[2]] : '';
+			const li = s.m.info.modem_info || {};
+			els.lteSt.textContent = li.sim && li.sim !== 'READY'
+				? 'SIM ' + li.sim.toLowerCase()
+				: !('modem_registered' in v) ? lteSt[0]
+				: !v.modem_registered ? 'not registered'
+				: v.modem_data_connected === 0 ? 'no data session'
+				: (li.operator || 'registered') +
+					('modem_band' in v ? ' · band ' + v.modem_band : '');
+			els.lteSt.style.color = { 'text-success': '', 'text-danger': BAD,
+				'text-warning': WARN }[lteSt[1]] || '';
+			if (lr != null) window.MjCharts.pushSpark(lteSpark, lr);
+		}
 		if (hasWifi) {
 			const r = ('wifi_rssi_dbm' in v) ? v.wifi_rssi_dbm : null;
 			const q = ('wifi_link_quality_ratio' in v)

@@ -20,12 +20,16 @@ network_wlan_ssid=""
 network_wlan_password=""
 network_adapter=""
 network_fallback=""
+modem_power=""
+modem_apn=""
 while IFS="=" read -r _k _v; do
 	case "$_k" in
 		wlanssid) network_wlan_ssid=$_v ;;
 		wlanpass) network_wlan_password=$_v ;;
 		wlandev) network_adapter=$_v ;;
 		netaddr_fallback) network_fallback=$_v ;;
+		modem) modem_power=$_v ;;
+		modem_apn) modem_apn=$_v ;;
 	esac
 done <<EOF
 $(fw_printenv 2>/dev/null)
@@ -748,6 +752,71 @@ fi
 	<div class="col-12 mj-save"><% button_submit %></div>
 	</div>
 </form>
+
+<%# The cellular modem: majestic reads it over its AT port and publishes it in
+    /metrics, so everything the modem says about itself -- hardware, SIM, cell,
+    signal, data session -- is filled in by network.js from the heartbeat, the
+    same sample the Dashboard draws from. What the camera knows and majestic
+    does not -- the address on usb0, the route, the resolvers, the switches in
+    the U-Boot environment -- is read here. Shown wherever there is a modem
+    interface or a modem setting; a camera with neither gets no card. %>
+<%
+cell_addr=$(ip -4 addr show dev usb0 2>/dev/null | awk '$1 == "inet" { print $2; exit }')
+cell_gw=$(ip -4 route show default dev usb0 2>/dev/null | awk '{ for (n = 1; n < NF; n++) if ($n == "via") { print $(n + 1); exit } }')
+cell_metric=$(ip -4 route show default dev usb0 2>/dev/null | awk '{ for (n = 1; n < NF; n++) if ($n == "metric") { print $(n + 1); exit } }')
+# Which interface the kernel would send internet traffic out of right now:
+# asking it beats re-deriving its choice from metrics and link states.
+cell_via=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (n = 1; n < NF; n++) if ($n == "dev") { print $(n + 1); exit } }')
+cell_dns=$(awk '$1 == "nameserver" { printf "%s%s", s, $2; s = ", " }' /etc/resolv.conf 2>/dev/null)
+%>
+<% if [ -d /sys/class/net/usb0 ] || [ -n "$modem_power$modem_apn" ] || adapter_is_modem; then %>
+<div class="row g-4 mt-0">
+<div class="col-12">
+<div class="card" id="cellular"><div class="card-body">
+	<% card_head "Cellular modem" "usb0" %>
+	<p id="cell-state" class="x-small mb-2 text-secondary">Waiting for the modem&hellip;</p>
+	<div class="row g-4">
+		<div class="col-12 col-md-6 col-lg-4">
+			<% group_head "Signal" %>
+			<dl class="small list mb-0">
+				<dt>RSRP</dt><dd id="cell-rsrp">&ndash;</dd>
+				<dt>RSRQ</dt><dd id="cell-rsrq">&ndash;</dd>
+				<dt>SINR</dt><dd id="cell-sinr">&ndash;</dd>
+				<dt>RSSI</dt><dd id="cell-rssi">&ndash;</dd>
+				<dt>CSQ</dt><dd id="cell-csq">&ndash;</dd>
+			</dl>
+		</div>
+		<div class="col-12 col-md-6 col-lg-4">
+			<% group_head "Network" %>
+			<dl class="small list mb-0">
+				<dt>Operator</dt><dd id="cell-op">&ndash;</dd>
+				<dt>Cell</dt><dd id="cell-cell">&ndash;</dd>
+				<dt>Band</dt><dd id="cell-band">&ndash;</dd>
+				<dt>Data session</dt><dd id="cell-bearer">&ndash;</dd>
+				<dt>On usb0</dt><dd id="cell-netdev">&ndash;</dd>
+				<dt>usb0 address</dt><dd><% esc "${cell_addr:-none}" %><% [ -n "$cell_gw" ] && printf ' <span class="x-small text-secondary">via %s%s</span>' "$(esc "$cell_gw")" "$([ -n "$cell_metric" ] && esc ", metric $cell_metric")" %></dd>
+				<dt>Internet via</dt><dd><% esc "${cell_via:-no route}" %></dd>
+				<dt>Resolvers</dt><dd class="text-break"><% esc "${cell_dns:-none}" %></dd>
+			</dl>
+		</div>
+		<div class="col-12 col-md-6 col-lg-4">
+			<% group_head "Hardware" %>
+			<dl class="small list mb-0">
+				<dt>Model</dt><dd id="cell-model">&ndash;</dd>
+				<dt>Firmware</dt><dd class="text-break" id="cell-rev">&ndash;</dd>
+				<dt>IMEI</dt><dd id="cell-imei">&ndash;</dd>
+				<dt>SIM</dt><dd id="cell-sim">&ndash;</dd>
+				<dt>ICCID</dt><dd class="text-break" id="cell-iccid">&ndash;</dd>
+				<dt>APN</dt><dd><% if [ -n "$modem_apn" ]; then esc "$modem_apn"; else printf 'the network&rsquo;s default'; fi %></dd>
+				<% if [ "$modem_power" = "off" ]; then %><dt>Power</dt><dd class="text-warning">turned off in the firmware environment</dd><% fi %>
+			</dl>
+		</div>
+	</div>
+	<p class="x-small text-secondary mb-0 mt-2" id="cell-age"></p>
+</div></div>
+</div>
+</div>
+<% fi %>
 
 <div class="row g-4 mt-0">
 <div class="col-12 col-lg-6">
