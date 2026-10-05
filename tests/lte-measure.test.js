@@ -10,7 +10,7 @@
 // What must hold:
 //   * "registered" and "data on usb0" are different sentences, and the one
 //     for a registered modem with no data session says so in red — the
-//     confident green "On t2" for that state is exactly the lie to prevent;
+//     confident green "On ExampleNet" for that state is exactly the lie to prevent;
 //   * the grade weighs SINR as well as RSRP: -100 dBm under SINR -5 dB is not
 //     "fair", it is weak, and it says interference rather than coverage;
 //   * a reading the modem did not give is not graded at all, and a modem that
@@ -48,8 +48,9 @@ const v = m.v, info = m.info.modem_info;
 group('modem_info labels come through parseMetrics', () => {
 	check('the family is kept', !!info);
 	check('model', info.model === 'EC200A');
-	check('operator', info.operator === 't2');
-	check('bearer address', info.bearer_ip === '10.54.165.165');
+	check('operator', info.operator === 'ExampleNet');
+	check('bearer address', info.bearer_ip === '192.0.2.10');
+	check('no IMEI or ICCID: /metrics answers without a login', !('imei' in info) && !('iccid' in info));
 	check('usb0 bytes still count towards the Network chart', m.rx === 18234 && m.tx === 9120);
 	const q = L.parse('modem_info{operator="Tele \\"2\\" \\\\ RU"} 1\n');
 	check('escaped quotes and backslashes are undone', q.info.modem_info.operator === 'Tele "2" \\ RU');
@@ -58,9 +59,9 @@ group('modem_info labels come through parseMetrics', () => {
 group('a registered modem with no data session says so', () => {
 	const st = L.state(v, info);
 	check('it is a warning, not a success', st[1] === 'text-danger');
-	check('it names the operator and band', /On t2 · LTE band 7/.test(st[0]));
+	check('it names the operator and band', /On ExampleNet · LTE band 7/.test(st[0]));
 	check('it says usb0 has no session', /no data session on usb0/.test(st[0]));
-	check('it says the network did give an address', /10\.54\.165\.165/.test(st[0]));
+	check('it says the network did give an address', /192\.0\.2\.10/.test(st[0]));
 	const ok = Object.assign({}, v, { modem_data_connected: 1 });
 	const st2 = L.state(ok, info);
 	check('connected reads as data on usb0', st2[1] === 'text-success' && /data on usb0$/.test(st2[0]));
@@ -77,6 +78,9 @@ group('the grade weighs interference as well as signal', () => {
 	const far = { modem_rsrp_dbm: -115 };
 	check('far from the cell is weak coverage', /coverage/.test(L.grade(far)[0]));
 	check('no RSRP grades nothing', L.grade({ modem_sinr_db: 3 }) === null);
+	const noSinr = L.grade({ modem_rsrp_dbm: -80 });
+	check('no SINR is not a clean channel: the grade says it is strength only',
+		noSinr[0] === 'good (strength only)');
 	check('the bands span the grade edges',
 		L.S.lo < L.S.fair && L.S.fair < L.S.good && L.S.good < L.S.hi);
 });
@@ -86,6 +90,9 @@ group('absent, searching and silent modems', () => {
 	const silent = L.state({ modem_reading_age_seconds: 130 }, undefined);
 	check('a modem that stopped answering says for how long',
 		silent && /not answered for 130 s/.test(silent[0]));
+	const old = L.state(Object.assign({}, v, { modem_reading_age_seconds: 90 }), info);
+	check('an old reading is never worded as live, gauges or not',
+		/not answered for 90 s/.test(old[0]) && old[1] === 'text-warning');
 	const searching = L.state({ modem_reading_age_seconds: 3, modem_registered: 0 },
 		{ state: 'SEARCH', sim: 'READY' });
 	check('not registered is red and says it is searching',

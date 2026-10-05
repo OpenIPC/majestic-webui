@@ -1,7 +1,7 @@
 node_network_receive_bytes_total{device="usb0"} 18234
 node_network_transmit_bytes_total{device="usb0"} 9120
 modem_reading_age_seconds 4
-modem_info{model="EC200A",revision="EC200AEUV1HAR02A06M16",imei="860000000000001",iccid="89000000000000000001",sim="READY",operator="t2",rat="LTE",state="NOCONN",mcc="250",mnc="20",cell="1A2B3C4",tac="0F0F",bearer_ip="10.54.165.165"} 1
+modem_info{model="EC200A",revision="EC200AEUV1HAR02A06M16",sim="READY",operator="ExampleNet",rat="LTE",state="NOCONN",mcc="001",mnc="01",cell="1A2B3C4",tac="0F0F",bearer_ip="192.0.2.10"} 1
 modem_registered 1
 modem_bearer_active 1
 modem_data_connected 0

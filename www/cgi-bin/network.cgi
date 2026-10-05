@@ -769,12 +769,12 @@ cell_metric=$(ip -4 route show default dev usb0 2>/dev/null | awk '{ for (n = 1;
 cell_via=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (n = 1; n < NF; n++) if ($n == "dev") { print $(n + 1); exit } }')
 cell_dns=$(awk '$1 == "nameserver" { printf "%s%s", s, $2; s = ", " }' /etc/resolv.conf 2>/dev/null)
 %>
-<% if [ -d /sys/class/net/usb0 ] || [ -n "$modem_power$modem_apn" ]; then %>
+<% if [ -d /sys/class/net/usb0 ] || [ -n "$modem_power$modem_apn" ] || adapter_is_modem; then %>
 <div class="row g-4 mt-0">
 <div class="col-12">
 <div class="card" id="cellular"><div class="card-body">
 	<% card_head "Cellular modem" "usb0" %>
-	<p class="x-small mb-2 text-secondary" id="cell-state">Waiting for the modem&hellip;</p>
+	<p id="cell-state" class="x-small mb-2 text-secondary">Waiting for the modem&hellip;</p>
 	<div class="row g-4">
 		<div class="col-12 col-md-6 col-lg-4">
 			<% group_head "Signal" %>

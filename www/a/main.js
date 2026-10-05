@@ -493,13 +493,16 @@ function mjLteGrade(v) {
 	if (!(sc.key in v)) return null;
 	const r = v[sc.key];
 	const rl = r >= sc.good ? 0 : r >= sc.fair ? 1 : 2;
+	// No SINR is not a clean channel: the grade is then the signal's alone,
+	// and says so rather than passing for the full judgement.
+	const hasSinr = 'modem_sinr_db' in v;
 	let sl = 0;
-	if ('modem_sinr_db' in v) {
+	if (hasSinr) {
 		const n = v.modem_sinr_db;
 		sl = n >= sc.sinrGood ? 0 : n >= sc.sinrFair ? 1 : 2;
 	}
 	const lvl = Math.max(rl, sl);
-	const word = ['good', 'fair', 'weak'][lvl];
+	const word = ['good', 'fair', 'weak'][lvl] + (hasSinr ? '' : ' (strength only)');
 	const why = lvl === 0 ? ''
 		: sl > rl ? ' — interference (SINR ' + v.modem_sinr_db + ' dB)'
 		: lvl === 2 ? ' — little coverage here' : '';
@@ -513,8 +516,11 @@ function mjLteGrade(v) {
 // met in the field and is the one this sentence most has to get right.
 function mjLteState(v, info) {
 	if (!('modem_reading_age_seconds' in v)) return null;
+	// majestic withholds the readings once they are a minute old, so an old
+	// age normally arrives alone; it is checked first all the same, so that
+	// a stale reading can never be worded as a live one.
 	const age = v.modem_reading_age_seconds;
-	if (!('modem_registered' in v) && !('modem_rsrp_dbm' in v) && age > 60)
+	if (age > 60)
 		return ['The modem has not answered for ' + Math.round(age) + ' s', 'text-warning'];
 	const i = info || {};
 	if (i.sim && i.sim !== 'READY')

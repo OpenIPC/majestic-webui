@@ -84,53 +84,90 @@
 	// majestic's modem_* gauges and modem_info labels on the shared heartbeat,
 	// graded and worded by main.js (mjLteGrade, mjLteState) exactly as the
 	// Dashboard does. A row the modem has not answered keeps its dash rather
-	// than turning into a zero; a failed poll changes nothing on screen.
+	// than turning into a zero. The IMEI and the SIM's ICCID are not in
+	// /metrics, which answers without a login: they come from
+	// /api/v1/modem, which does not.
+	const cellSet = (id, text, cls) => {
+		const el = $('#' + id);
+		if (!el) return;
+		// The markup's own classes (text-break on the long ones) stay; only
+		// the state colour is swapped.
+		if (el.dataset.base === undefined) el.dataset.base = el.className;
+		el.textContent = text == null || text === '' ? '–' : text;
+		el.className = (el.dataset.base + ' ' + (cls || '')).trim();
+	};
+	const cellState = (text, cls) => {
+		const el = $('#cell-state');
+		if (!el) return;
+		el.textContent = text;
+		el.className = 'x-small mb-2 ' + cls;
+	};
+	let cellIdAt = 0, cellIdDone = false;
+	function cellIdentity() {
+		// Asked again until both are known: a modem read for the first time,
+		// or one without a SIM yet, answers with nulls.
+		if (cellIdDone || Date.now() - cellIdAt < 30000) return;
+		cellIdAt = Date.now();
+		apiFetch('/api/v1/modem', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.json() : null)
+			.then(d => {
+				if (!d) return;
+				cellSet('cell-imei', d.imei);
+				cellSet('cell-iccid', d.iccid);
+				cellIdDone = !!(d.imei && d.iccid);
+			})
+			.catch(() => {});
+	}
 	function cellular(s) {
-		if (!s.ok) return;
+		// A failed poll proves nothing about the modem, but the rows below
+		// are no longer current either, and a green "data on usb0" left
+		// standing would say they were. Two failures, as the banner waits.
+		if (!s.ok) {
+			if (s.fails >= 2)
+				cellState('The camera is not answering — the readings below are the last ones received',
+					'text-warning');
+			return;
+		}
 		const v = s.m.v, i = s.m.info.modem_info || {};
-		const set = (id, text, cls) => {
-			const el = $('#' + id);
-			if (!el) return;
-			el.textContent = text == null || text === '' ? '–' : text;
-			el.className = cls || '';
-		};
 		const num = (k, unit) => (k in v) ? v[k] + unit : null;
 		const st = mjLteState(v, i);
-		set('cell-state', st ? st[0] : 'majestic reports no modem: it is powered down, or not on USB',
-			'x-small mb-2 ' + (st ? st[1] : 'text-secondary'));
+		// No modem gauges is what majestic says when it finds no modem it
+		// knows on USB -- which is not the same as no modem.
+		cellState(st ? st[0]
+			: 'majestic reads no modem on USB: it is powered down, unplugged, or a model majestic does not read',
+			st ? st[1] : 'text-secondary');
+		if (st) cellIdentity();
 		const g = mjLteGrade(v);
-		set('cell-rsrp', num('modem_rsrp_dbm', ' dBm') != null
+		cellSet('cell-rsrp', num('modem_rsrp_dbm', ' dBm') != null
 			? v.modem_rsrp_dbm + ' dBm' + (g ? ' · ' + g[0] : '') : null, g ? g[1] : '');
-		set('cell-rsrq', num('modem_rsrq_db', ' dB'));
-		set('cell-sinr', num('modem_sinr_db', ' dB'));
-		set('cell-rssi', num('modem_rssi_dbm', ' dBm'));
-		set('cell-csq', ('modem_csq' in v) ? v.modem_csq + ' of 31' : null);
-		set('cell-op', i.operator
+		cellSet('cell-rsrq', num('modem_rsrq_db', ' dB'));
+		cellSet('cell-sinr', num('modem_sinr_db', ' dB'));
+		cellSet('cell-rssi', num('modem_rssi_dbm', ' dBm'));
+		cellSet('cell-csq', ('modem_csq' in v) ? v.modem_csq + ' of 31' : null);
+		cellSet('cell-op', i.operator
 			? i.operator + (i.mcc ? ' (' + i.mcc + '/' + i.mnc + ')' : '') : null);
-		set('cell-cell', i.cell
+		cellSet('cell-cell', i.cell
 			? i.cell + (i.tac ? ' · TAC ' + i.tac : '') +
 				('modem_pci' in v ? ' · PCI ' + v.modem_pci : '') +
 				(i.state ? ' · ' + ({ NOCONN: 'idle', CONNECT: 'transferring',
 					SEARCH: 'searching', LIMSRV: 'limited service' }[i.state] ||
 					i.state.toLowerCase()) : '')
 			: null);
-		set('cell-band', ('modem_band' in v)
+		cellSet('cell-band', ('modem_band' in v)
 			? (i.rat || '') + ' band ' + v.modem_band +
 				('modem_earfcn' in v ? ' · EARFCN ' + v.modem_earfcn : '')
 			: (i.rat || null));
-		set('cell-bearer', ('modem_bearer_active' in v)
+		cellSet('cell-bearer', ('modem_bearer_active' in v)
 			? (v.modem_bearer_active ? 'active' + (i.bearer_ip ? ', ' + i.bearer_ip : '') : 'none')
 			: null);
-		set('cell-netdev', ('modem_data_connected' in v)
+		cellSet('cell-netdev', ('modem_data_connected' in v)
 			? (v.modem_data_connected ? 'connected' : 'not connected — usb0 carries nothing')
 			: null, ('modem_data_connected' in v)
 			? (v.modem_data_connected ? 'text-success' : 'text-danger') : '');
-		set('cell-model', i.model);
-		set('cell-rev', i.revision);
-		set('cell-imei', i.imei);
-		set('cell-sim', i.sim ? i.sim.toLowerCase() : null,
+		cellSet('cell-model', i.model);
+		cellSet('cell-rev', i.revision);
+		cellSet('cell-sim', i.sim ? i.sim.toLowerCase() : null,
 			i.sim && i.sim !== 'READY' ? 'text-danger' : '');
-		set('cell-iccid', i.iccid);
 		const age = $('#cell-age');
 		if (age) age.textContent = ('modem_reading_age_seconds' in v)
 			? 'Read from the modem ' + Math.round(v.modem_reading_age_seconds) + ' s ago.' : '';

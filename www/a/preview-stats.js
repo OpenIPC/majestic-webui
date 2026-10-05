@@ -1076,7 +1076,9 @@ window.MajesticStats = (function () {
 				? lr + ' dBm' + (lg ? ' · ' + lg[0].split(' — ')[0] : '') : '–';
 			els.lteSig.style.color = lg ? [OK, WARN, BAD][lg[2]] : '';
 			const li = s.m.info.modem_info || {};
-			els.lteSt.textContent = !('modem_registered' in v) ? lteSt[0]
+			els.lteSt.textContent = li.sim && li.sim !== 'READY'
+				? 'SIM ' + li.sim.toLowerCase()
+				: !('modem_registered' in v) ? lteSt[0]
 				: !v.modem_registered ? 'not registered'
 				: v.modem_data_connected === 0 ? 'no data session'
 				: (li.operator || 'registered') +
