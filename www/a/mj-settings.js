@@ -9353,9 +9353,17 @@
 		// which of them the channel took is not something this page can tell
 		// without guessing. The channel is the honest answer then, and it is
 		// still an answer — unlike "not set", which was the bug.
+		//
+		// A board may have two lamps, IR and white, each on its own channel,
+		// and the camera reports both pads under this one role. Either is a
+		// lamp on the map; with both, the channels are named and no single
+		// pad is claimed, since which pad is which is again a guess.
 		function pwmLamp() {
-			const ch = getDotted(state.config, 'nightMode.backlightPwmChannel');
-			if (!ch || ch === 'none') return null;
+			const chans = [['IR', 'irLightPwmChannel'],
+				['white', 'whiteLightPwmChannel']]
+				.map(([name, k]) => [name, getDotted(state.config, 'nightMode.' + k)])
+				.filter(([, ch]) => ch && ch !== 'none');
+			if (!chans.length) return null;
 			const pads = [];
 			((state.ircutInfo && state.ircutInfo.assigned) || []).forEach((x) => {
 				// Deduplicated, because a lamp pin left set to the pad the
@@ -9366,8 +9374,12 @@
 				}
 			});
 			return {
-				channel: String(ch),
-				pin: pads.length === 1 ? pads[0] : undefined,
+				channel: chans.length === 1 ? String(chans[0][1])
+					: chans.map(([name, ch]) => name + ' on ' + ch).join(', '),
+				hint: chans.length === 1 ? 'dimmable, on ' + chans[0][1]
+					: 'dimmable: ' + chans.map(([name, ch]) => name + ' on ' + ch)
+						.join(', '),
+				pin: chans.length === 1 && pads.length === 1 ? pads[0] : undefined,
 			};
 		}
 
@@ -9399,7 +9411,7 @@
 				t.appendChild(l);
 				const h = el('em');
 				h.textContent = lamp
-					? 'dimmable, on ' + lamp.channel
+					? lamp.hint
 					: r.hint;
 				t.appendChild(h);
 				row.appendChild(t);
@@ -12288,8 +12300,9 @@
 					.some((k) => isNumish(padOf(k)));
 				// A dimmable lamp lives on a PWM channel and may have no pad at
 				// all, so for the lamp that is the other way to be wired.
-				const chan = lamp ? padOf('backlightPwmChannel') : null;
-				const wired = wiredPad || (chan && chan !== 'none');
+				const chans = lamp ? ['irLightPwmChannel', 'whiteLightPwmChannel']
+					.map(padOf) : [];
+				const wired = wiredPad || chans.some((c) => c && c !== 'none');
 				warn.textContent = wired ? '' : (lamp
 					? 'Nothing is connected to the camera light yet — assign its pad on the map above, or a PWM channel below, and this will start to mean something.'
 					: 'Nothing is connected to the IR-cut filter yet — assign its coils on the map above, and this will start to mean something.');

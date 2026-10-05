@@ -285,7 +285,7 @@
 			// It reads better here too: what night looks like is a plainer
 			// question than what the thresholds are, and Colorless night mode is
 			// asked for far more often than any number below it.
-			{ id: 'picture', label: 'Night picture', keys: ['colorToGray', 'overrideDrc'] },
+			{ id: 'picture', label: 'Night picture', keys: ['colorToGray', 'colorNight', 'overrideDrc'] },
 			// What is left to the lamp once its own control is above: the
 			// channel, rate, duty, curve and highlight backoff of a dimmable
 			// one, on a build that has them. On one that has not, the heading
@@ -312,7 +312,7 @@
 			// Night picture above: what the camera DOES first, the numbers
 			// that time it last.
 			{ id: 'lamp', label: 'Dimmable lamp', keys: [
-				'backlightPwmChannel', 'backlightPwmFreq',
+				'irLightPwmChannel', 'whiteLightPwmChannel', 'backlightPwmFreq',
 				'backlightPwmMin', 'backlightPwmMax',
 				'backlightPwmGamma', 'backlightHighlightPct'] },
 			// The numbers that decide when, kept as a heading of their own rather

@@ -537,8 +537,9 @@
 		// The lamp's own mode, same shape as the filter's: wiring kept,
 		// nothing driven, said once as an observation.
 		if (mode(nm.backlight) === 'off' &&
-			(has(nm.backlightPin) || (nm.backlightPwmChannel &&
-				nm.backlightPwmChannel !== 'none'))) {
+			(has(nm.backlightPin) ||
+				[nm.irLightPwmChannel, nm.whiteLightPwmChannel]
+					.some((c) => c && c !== 'none'))) {
 			out.push({
 				id: 'light-parked', level: 'info',
 				title: 'The camera light is switched off',
