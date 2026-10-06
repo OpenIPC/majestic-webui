@@ -127,3 +127,20 @@ entry is not exclusive, where `setup.html` picks one language by precedence
 because it can display only one agreement. **Hiding is not access control**: the
 page answers a direct link exactly as before, which is what a bookmark and the
 webhook URLs depend on.
+
+**SMS reach Telegram through `sbin/sms-forward`**, switched on from the SMS page
+rather than the Telegram page: Telegram's page owns the bot and the chat, the
+SMS page only says whether messages go there. Cron runs it every minute and it
+hands each message to `sbin/telegram --text`, which sends stdin through
+`sendMessage` as a file field (`text=<file`), so nothing in a message is ever an
+argument. What makes a message *new* is the modem's own read flag — listing the
+unread ones marks them read in the same hold of the port — so there is no record
+of what was forwarded to drift from the modem. That makes the SMS page a
+competitor: its own listing marks everything read, so `j/sms.cgi` runs
+`sms-forward --collect` first, which queues without sending, because a send to a
+Telegram the camera cannot reach takes curl's whole timeout and the page would
+wait for it. The queue is `/tmp/sms-forward`; what Telegram refuses is retried the
+next minute, and what is still unsent at a reboot is lost from Telegram but stays
+on the SIM. The camera decodes PDUs in awk, a second decoder beside
+`www/a/sms-pdu.js`; `tests/sms-forward.test.js` runs it under busybox as well and
+holds both to the same text.

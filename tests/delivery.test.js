@@ -205,9 +205,9 @@ function rewrite(src, subs, out) {
 // Asynchronous, and it has to be: the server below lives in this process, so
 // a synchronous exec would block the event loop that is meant to answer the
 // request the script is making, and the two would wait for each other.
-function run(script, args) {
+function run(script, args, input) {
 	return new Promise((resolve) => {
-		execFile('sh', [script].concat(args || []), {
+		const child = execFile('sh', [script].concat(args || []), {
 			encoding: 'utf8',
 			timeout: 20000,
 			env: Object.assign({}, process.env, { PATH: bin + ':' + process.env.PATH }),
@@ -218,6 +218,10 @@ function run(script, args) {
 				stderr: stderr || '',
 			});
 		});
+		// Most of these scripts never read stdin and may exit before the
+		// write lands; the EPIPE that follows is not a failure of theirs.
+		child.stdin.on('error', () => {});
+		child.stdin.end(input || '');
 	});
 }
 
@@ -375,6 +379,35 @@ server.listen(0, '127.0.0.1', async () => {
 		const r = await run(telegram, [clip]);
 		check('exits non-zero', r.status !== 0, 'status ' + r.status);
 		check('shows what the API said', r.stdout.includes('Unauthorized'), r.stdout.slice(0, 80));
+	}
+
+	// What sms-forward hands over: a message on stdin, sent as text. Not a
+	// picture with a caption -- the message is the whole of it -- and the
+	// text goes in as a file, so quotes, newlines and Cyrillic arrive as
+	// typed rather than as whatever an argument list made of them.
+	group('telegram — a text, from stdin');
+	{
+		reset();
+		const msg = 'SMS from t2.ru to lab-cam\n\n"Баланс" 0.00 руб; $HOME `id`';
+		const r = await run(telegram, ['--text'], msg);
+		const req = sent[0] || {};
+		check('posts to sendMessage', req.url === '/botBOTTOKEN/sendMessage', req.url);
+		check('the text arrives as sent', !!req.parts && req.parts.text &&
+			req.parts.text.body.toString() === msg,
+			req.parts && req.parts.text && req.parts.text.body.toString());
+		check('names the chat', !!req.parts && req.parts.chat_id &&
+			req.parts.chat_id.body.toString() === '-100123');
+		check('no caption, no picture', !!req.parts && !req.parts.caption && !req.parts.photo);
+		check('fetched no still', stills.length === 0, stills.join(','));
+		check('exits 0 on 200', r.status === 0, 'status ' + r.status);
+	}
+
+	group('telegram — an empty text is not sent');
+	{
+		reset();
+		const r = await run(telegram, ['--text'], '');
+		check('nothing posted', sent.length === 0, sent.length);
+		check('exits non-zero', r.status !== 0, 'status ' + r.status);
 	}
 
 	group('ntfy — a still, with no argument');

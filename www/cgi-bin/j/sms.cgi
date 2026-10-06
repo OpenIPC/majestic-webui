@@ -77,6 +77,13 @@ mems() {
 
 case "$act" in
 list)
+	# Listing marks every message read, and read is how sms-forward knows a
+	# message is not new. Collect first, or a message this page showed before
+	# cron came round would never reach Telegram; cron does the sending.
+	[ -e /etc/webui/sms.conf ] && . /etc/webui/sms.conf
+	if [ "$sms_forward" = "telegram" ] && ! sms-forward --collect >/dev/null 2>&1; then
+		reply 1 "new messages could not be taken for Telegram yet, so they are not listed; try again in a minute" ""
+	fi
 	set -- "AT+CMGF=0"
 	for m in $(mems); do set -- "$@" "AT+CPMS=\"$m\"" "AT+CMGL=4"; done
 	[ $# -gt 1 ] || reply 1 "the modem lists no SMS storage" ""
