@@ -33,7 +33,13 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 	esac
 else
 	editor_file="$GET_f"
-	if [ ! -f "$editor_file" ]; then
+	# majestic's file is absent whenever the camera runs on its defaults --
+	# the firmware ships none, and Reset to defaults removes it. That is an
+	# empty list of changes, not a missing file: open it empty, and saving
+	# creates it.
+	if [ "$editor_file" = "$(get_config)" ] && [ ! -e "$editor_file" ]; then
+		:
+	elif [ ! -f "$editor_file" ]; then
 		log_create "danger" "File not found!"
 	elif [ -n "$editor_file" ]; then
 		# 2>/dev/null: the path is whatever GET_f said, and a regular file can
