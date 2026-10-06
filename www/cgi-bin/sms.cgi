@@ -33,8 +33,10 @@ fi
 
 [ -e "$config_file" ] && . "$config_file"
 [ -e /etc/webui/telegram.conf ] && . /etc/webui/telegram.conf
+# Ready means able to send: the sender installed, as the Telegram page asks
+# too, and switched on with somewhere to send to.
 tg_ready=false
-[ "$telegram_enabled" = "true" ] && [ -n "$telegram_token" ] && [ -n "$telegram_channel" ] && tg_ready=true
+[ -x /usr/sbin/telegram ] && [ "$telegram_enabled" = "true" ] && [ -n "$telegram_token" ] && [ -n "$telegram_channel" ] && tg_ready=true
 %>
 <%in p/header.cgi %>
 

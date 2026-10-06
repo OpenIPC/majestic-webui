@@ -62,9 +62,10 @@ function deliver(o) {
 		ud = S.pack7(s, head);
 		udl = Math.ceil(head.length * 8 / 7) + s.length;
 	}
+	if (o.dcs !== undefined) dcs = o.dcs;
 	const fo = 0x04 | (o.total ? 0x40 : 0);
-	// 2026-10-06 09:15:00, UTC+3
-	const scts = [0x62, 0x01, 0x60, 0x90, 0x51, 0x00, 0x21];
+	// 2026-10-06 09:15:00, UTC+3, unless the case says otherwise.
+	const scts = o.scts || [0x62, 0x01, 0x60, 0x90, 0x51, 0x00, 0x21];
 	return '00' + hex([fo].concat(oa, [0x00, dcs], scts, [udl], ud));
 }
 
@@ -104,7 +105,7 @@ fs.mkdirSync(bin);
 fs.writeFileSync(path.join(bin, 'modem-at'), `#!/bin/sh
 case "$*" in
 *"AT+CPMS=?"*) echo '+CPMS: ("ME"),("ME"),("ME")'; echo OK ;;
-*"AT+CMGL=0"*) echo called >> "$MJ_DIR/modem.log"; cat "$MJ_DIR/first" ;;
+*"AT+CMGL=0"*) echo called >> "$MJ_DIR/modem.log"; cat "$MJ_DIR/first"; [ -e "$MJ_DIR/fail" ] && exit 3 ;;
 *) echo again >> "$MJ_DIR/modem.log"; cat "$MJ_DIR/again" ;;
 esac
 `, { mode: 0o755 });
@@ -245,6 +246,57 @@ function suite(name, shell, pathPrefix, host) {
 		run(d);
 		const sent = sentTexts(d);
 		check('cron sends it', sent.length === 1 && sent[0].endsWith('\n\nseen on the page first'));
+	}
+
+	group(name + ': an old message that shares the reference');
+	{
+		const d = fresh();
+		// Part 1 of today's message is new; part 2 on the SIM is from a
+		// message a month ago that the sender numbered the same.
+		const now1 = deliver({ from: 'T2', alpha: true, text: 'Balance low. ', ref: 5, total: 2, seq: 1 });
+		const old2 = deliver({ from: 'T2', alpha: true, text: 'Welcome!', ref: 5, total: 2, seq: 2, scts: [0x62, 0x90, 0x60, 0x90, 0x51, 0x00, 0x21] });
+		fs.writeFileSync(path.join(d, 'first'), transcript([[1, now1]], [[0, old2], [1, now1]]));
+		fs.writeFileSync(path.join(d, 'again'), transcript(null, [[0, old2], [1, now1]]));
+		run(d);
+		const sent = sentTexts(d);
+		check('the old part is not joined', sent[0] && !sent[0].includes('Welcome'), sent[0]);
+		check('it is a gap instead', sent[0] && sent[0].includes('(1 of 2 parts did not arrive)'));
+	}
+
+	group(name + ': what cannot be read is said, not garbled');
+	{
+		const d = fresh();
+		const comp = deliver({ from: '+15550100', text: 'zzzzzzzz', dcs: 0x20 });
+		const cut = deliver({ from: '+15550100', text: 'a message that loses its end' }).slice(0, -8);
+		fs.writeFileSync(path.join(d, 'first'), transcript([[0, comp], [1, cut]], [[0, comp], [1, cut]]));
+		run(d);
+		const sent = sentTexts(d).join('\n');
+		check('compressed', sent.includes('[a compressed message, which this camera cannot read]'), sent);
+		check('cut short', sent.includes('[cut short]'), sent);
+	}
+
+	group(name + ': two collections in one second');
+	{
+		const d = fresh();
+		fs.writeFileSync(path.join(d, 'refuse'), '');
+		const a = deliver({ from: '+15550100', text: 'first' });
+		const b = deliver({ from: '+15550100', text: 'second' });
+		fs.writeFileSync(path.join(d, 'first'), transcript([[0, a]], [[0, a]]));
+		run(d, ['--collect']);
+		fs.writeFileSync(path.join(d, 'first'), transcript([[1, b]], [[0, a], [1, b]]));
+		run(d, ['--collect']);
+		check('both kept', fs.readdirSync(queue).length === 2, fs.readdirSync(queue).join(' '));
+	}
+
+	group(name + ': a collection that could not ask');
+	{
+		const d = fresh();
+		const p = deliver({ from: '+15550100', text: 'half-read' });
+		fs.writeFileSync(path.join(d, 'first'), transcript([[0, p]], [[0, p]]));
+		fs.writeFileSync(path.join(d, 'fail'), '');
+		const r = run(d, ['--collect']);
+		check('says so, so the page does not list', r.status !== 0, 'status ' + r.status);
+		check('keeps what it did read', fs.readdirSync(queue).length === 1);
 	}
 
 	group(name + ': switched off');
