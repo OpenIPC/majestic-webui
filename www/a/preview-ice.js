@@ -51,6 +51,13 @@ window.MajesticIce = (function () {
 		// Candidates that arrived while a restart offer was outstanding, or
 		// while its answer was being applied; null while nothing is.
 		let held = null;
+		// Which attempt is current, and the offer work of the last one. An
+		// attempt that outlives its 15 s (a createOffer or setLocalDescription
+		// that is slow to settle) must not go on to set a description or send
+		// an offer once a later attempt has started, or the Nth answer stops
+		// being the Nth offer's. Each step checks the generation, and a new
+		// attempt waits for the previous one's work before it starts its own.
+		let gen = 0, work = Promise.resolve();
 
 		function clear() {
 			clearTimeout(grace); grace = null;
@@ -74,20 +81,24 @@ window.MajesticIce = (function () {
 			// caught closing.
 			if (tries >= ATTEMPTS || !sig || !sig.live()) { giveUp(); return; }
 			tries++;
+			const my = ++gen;
+			const live = function () { return !dead && my === gen && o.pc() === pc; };
 			timer = setTimeout(expire, ATTEMPT_MS);
-			try { if (pc.restartIce) pc.restartIce(); } catch (e) {}
-			pc.createOffer({ iceRestart: true })
-				.then(function (offer) {
-					if (dead || o.pc() !== pc) return;
+			work = work.then(function () {
+				if (!live()) return;
+				try { if (pc.restartIce) pc.restartIce(); } catch (e) {}
+				return pc.createOffer({ iceRestart: true }).then(function (offer) {
+					if (!live()) return;
 					return pc.setLocalDescription(offer).then(function () {
-						if (dead || o.pc() !== pc) return;
+						if (!live()) return;
 						const s = o.sig();
 						if (s && s.send('offer', pc.localDescription.sdp)) {
 							sent++;
 							if (!held) held = [];
 						}
 					});
-				})
+				});
+			})
 				// Nothing to report: the attempt's timer is still running, and
 				// it either tries again or gives up.
 				.catch(function () {});
@@ -162,6 +173,24 @@ window.MajesticIce = (function () {
 			return !dead && !!pc && !up(pc.iceConnectionState);
 		}
 
+		// Whether a restart offer is out and unanswered. The camera answers
+		// an offer with an answer or an error, in order, so an error now is
+		// its reply to the restart, not to the session's first offer.
+		function restarting() {
+			return !dead && sent > seen;
+		}
+
+		// The camera refused the restart (an error in reply to its offer).
+		// That says nothing lasting about this browser or this camera — the
+		// session it refused had been playing — so it ends as a lost path
+		// does, through the caller's reconnect, and never as a refusal of the
+		// session itself.
+		function refused() {
+			if (dead) return;
+			seen++;
+			giveUp();
+		}
+
 		function stop() {
 			dead = true;
 			clear();
@@ -170,7 +199,8 @@ window.MajesticIce = (function () {
 
 		return {
 			state: state, answer: answer, candidate: candidate,
-			recovering: recovering, stop: stop,
+			recovering: recovering, restarting: restarting, refused: refused,
+			stop: stop,
 		};
 	}
 

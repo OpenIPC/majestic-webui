@@ -677,11 +677,16 @@ window.MajesticWebRTC = (function () {
 					iceDown = true;
 				} else if (iceDown && R && R.up(s)) {
 					// The chip said "reconnecting" and nothing else would
-					// rewrite it: the codec and size are unchanged, so the
-					// next poll would not announce them. Forgetting them
-					// makes it.
+					// rewrite it: the poll announces the codec and size only
+					// when they change, and after a restart they have not.
+					// So report the recovery the way a session coming up is
+					// reported, and the picture it has, whatever the stats
+					// go on to say.
 					iceDown = false;
-					lastCodec = '';
+					if (gotMedia) {
+						onState('playing', lastCodec);
+						if (lastW && lastH) onCodec(lastCodec, lastCodec, lastW, lastH);
+					}
 				}
 				if (restart) restart.state(s);
 			};
@@ -820,6 +825,13 @@ window.MajesticWebRTC = (function () {
 				},
 				error: function (text) {
 					if (!current(my)) return;
+					// Its reply to a restart offer, on a session that was
+					// playing: a lost path, reconnected, not a reason to
+					// change transport.
+					if (restart && restart.restarting()) {
+						restart.refused();
+						return;
+					}
 					// The camera could not answer. Much the commonest cause is
 					// a profile this browser will not take — see
 					// docs/webrtc-browser-interop.md — and MSE has no such

@@ -394,7 +394,12 @@ window.MajesticDataChannel = (function () {
 			stats: function (line) { cam = S.parseCam(line); camAt = Date.now(); },
 			served: function (m) { served = m; },
 			busy: function () { finish('busy'); },
-			error: function () { finish('refused'); },
+			// A refused restart ends a feed that was working, which is not
+			// the refusal that is remembered for six hours.
+			error: function () {
+				if (restart && restart.restarting()) restart.refused();
+				else finish('refused');
+			},
 			closed: function () { finish(feed.readyState === 1 ? 'closed' : 'signal-closed'); },
 			close: function () { finish(feed.readyState === 1 ? 'closed' : 'signal-closed'); },
 		}, { origin: opts.origin, session: opts.session });

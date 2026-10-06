@@ -19,7 +19,7 @@ const A = (f) => path.join(__dirname, '..', 'www', 'a', f);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function load(files) {
-	const env = { sockets: [], pcs: [], now: 0, states: [], bytes: 0 };
+	const env = { sockets: [], pcs: [], now: 0, states: [], codecs: [], bytes: 0, slow: [], store: {} };
 	let seq = 0, pending = [];
 
 	function WebSocket(url) {
@@ -52,10 +52,15 @@ function load(files) {
 		this.offers.push(o || null);
 		return Promise.resolve({ type: 'offer', sdp: 'offer' + this.offers.length });
 	};
+	// With env.holdSld set, a description is applied only when the test
+	// releases it: the slow setLocalDescription a 15 s attempt can outlive.
 	P.setLocalDescription = function (d) {
-		this.localDescription = d;
-		this.signalingState = 'have-local-offer';
-		return Promise.resolve();
+		const apply = () => {
+			this.localDescription = d;
+			this.signalingState = 'have-local-offer';
+		};
+		if (!env.holdSld) { apply(); return Promise.resolve(); }
+		return new Promise((r) => env.slow.push(() => { apply(); r(); }));
 	};
 	P.setRemoteDescription = function (d) {
 		this.remotes.push(d.sdp);
@@ -66,7 +71,8 @@ function load(files) {
 	P.getStats = function () {
 		const b = env.bytes;
 		return Promise.resolve({
-			forEach(fn) { fn({ type: 'inbound-rtp', kind: 'video', bytesReceived: b }); },
+			// A size and no codec entry, as a browser may report it.
+			forEach(fn) { fn({ type: 'inbound-rtp', kind: 'video', bytesReceived: b, frameWidth: 1920, frameHeight: 1080 }); },
 		});
 	};
 	P.close = function () { this.closed = true; };
@@ -91,7 +97,11 @@ function load(files) {
 		setInterval: (fn, ms) => add(fn, ms, ms),
 		clearInterval: cancel,
 		console, JSON, Promise, Date: { now: () => env.now },
-		localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+		localStorage: {
+			getItem: (k) => (k in env.store ? env.store[k] : null),
+			setItem: (k, v) => { env.store[k] = String(v); },
+			removeItem: (k) => { delete env.store[k]; },
+		},
 		TextDecoder, TextEncoder, Uint8Array, DataView, ArrayBuffer, Set,
 	};
 	ctx.globalThis = ctx;
@@ -132,7 +142,10 @@ async function playing() {
 		muted: true, volume: 1, srcObject: null, paused: false,
 		play: () => Promise.resolve(), addEventListener() {}, removeEventListener() {},
 	};
-	env.player = env.win.MajesticWebRTC.attach(video, { onState: (s) => env.states.push(s) });
+	env.player = env.win.MajesticWebRTC.attach(video, {
+		onState: (s) => env.states.push(s),
+		onCodec: (c, cs, w, h) => env.codecs.push([env.states.length, w, h]),
+	});
 	await sleep(5);
 	env.reply({ reply: 'answer', data: 'answer1' });
 	await sleep(1);
@@ -305,6 +318,69 @@ async function flow(env, ms) {
 		check('and nothing offered afterwards', env.offers().length === 1);
 	}
 
+	group('webrtc: a refused restart is a reconnect, not a change of transport');
+	{
+		const env = await playing();
+		const pc = env.pc();
+		pc.ice('failed');
+		await sleep(2);
+		check('restart offered', env.offers().length === 2);
+		env.reply({ reply: 'error', data: 'no restart here' });
+		await sleep(1);
+		check('no fallback reported', !env.states.includes('fallback'), env.states.join());
+		check('the session is retired', pc.closed);
+		await env.tick(1000);
+		check('and a new one opened, as a lost path does', env.sockets.length === 2 && env.pcs.length === 2);
+		env.player.destroy();
+
+		// The session's first offer refused is what it always was.
+		const env2 = load(WEBRTC);
+		const states = [];
+		const video = { muted: true, play: () => Promise.resolve(), addEventListener() {}, removeEventListener() {} };
+		const p = env2.win.MajesticWebRTC.attach(video, { onState: (s) => states.push(s) });
+		await sleep(5);
+		env2.reply({ reply: 'error', data: 'profile' });
+		check('a refused first offer still changes transport', states.includes('fallback'));
+		p.destroy();
+	}
+
+	group('webrtc: an attempt that outlives its 15 s sends nothing');
+	{
+		const env = await playing();
+		const pc = env.pc();
+		env.holdSld = true;
+		pc.ice('failed');
+		await sleep(2);
+		check('the first attempt is setting its description', env.slow.length === 1 && pc.offers.length === 2);
+		await env.tick(15000);
+		check('the second does not offer over it', pc.offers.length === 2 && env.offers().length === 1);
+		env.holdSld = false;
+		env.slow.shift()();
+		await sleep(3);
+		check('the superseded attempt sends nothing; the current one offers once', env.offers().length === 2 && pc.offers.length === 3);
+		env.reply({ reply: 'answer', data: 'for-second' });
+		await sleep(2);
+		check('and its answer is the one applied', pc.remotes[pc.remotes.length - 1] === 'for-second');
+		env.player.destroy();
+	}
+
+	group('webrtc: a recovery repaints the chip with nothing changed');
+	{
+		const env = await playing();
+		const pc = env.pc();
+		check('the size was announced once', env.codecs.length === 1);
+		pc.ice('disconnected');
+		await env.tick(2100);
+		const err = env.states.lastIndexOf('error');
+		env.reply({ reply: 'answer', data: 'answer2' });
+		pc.ice('connected');
+		await flow(env, 3000);
+		check('playing is reported after the error', env.states.lastIndexOf('playing') > err, env.states.join());
+		const after = env.codecs.filter((c) => c[0] > err);
+		check('with the same picture, though the stats changed nothing', after.length === 1 && after[0][1] === 1920 && after[0][2] === 1080, JSON.stringify(env.codecs));
+		env.player.destroy();
+	}
+
 	group('feed: a working channel restarts ICE instead of ending');
 	{
 		const env = load(FEED);
@@ -333,6 +409,28 @@ async function flow(env, ms) {
 		await env.tick(30001);
 		check('two attempts that fail end it as a working feed ends', closes.length === 1 && closes[0] === 'closed' && pc.closed);
 		check('and nothing durable is remembered', env.win.MajesticTransport && !env.win.MajesticDataChannel.durable('closed'));
+	}
+
+	group('feed: a refused restart is not remembered');
+	{
+		const env = load(FEED);
+		const f = env.win.MajesticDataChannel.open({ stream: 0 });
+		const closes = [];
+		f.onclose = (e) => closes.push(e.reason);
+		await sleep(5);
+		env.reply({ reply: 'answer', data: 'v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n' });
+		await sleep(1);
+		const pc = env.pc();
+		pc.ice('connected');
+		pc.dc.readyState = 'open';
+		pc.dc.onopen();
+		const msg = new Uint8Array(20); msg[0] = 0xA5; msg[1] = 1; msg[2] = 3; msg[7] = 1; msg[11] = 1;
+		pc.dc.onmessage({ data: msg.buffer });
+		pc.ice('failed');
+		await sleep(2);
+		env.reply({ reply: 'error', data: 'no restart here' });
+		check('ends as a working feed ends, not as refused', closes.length === 1 && closes[0] === 'closed');
+		check('so this browser is not demoted for hours', !env.store['mj-feed-auto']);
 	}
 
 	group('feed: ICE failing before anything arrived is still ice-failed');
