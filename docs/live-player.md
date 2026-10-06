@@ -62,6 +62,16 @@ does **not** share that markup — its live tab is built client-side by
   while the playhead is not advancing; the lag a pipeline runs at is learned from
   its first movement and only drift beyond it is cut; a start refused autoplay
   does not get its waiting learned as pipeline lag.
+- **A dead network path is mended before it is replaced** (`preview-ice.js`,
+  one copy for the WebRTC player and the data-channel feed). Once a session
+  has played, ICE `disconnected` for over 2 s, or `failed`, sends an ICE
+  restart offer on the signalling socket already open; the camera keeps DTLS,
+  the track and the decoder, and asks for a keyframe when the new path is up.
+  Two attempts of 15 s each, then the reconnect that ran before. The camera
+  answers every offer in order, so an answer to an offer a later attempt
+  superseded is counted out and dropped. **Any watchdog on frames not
+  advancing stands down while ICE is not up**: a stall there is the restart's
+  to mend, and retiring the session tears it down mid-restart.
 
 ## The Live page
 

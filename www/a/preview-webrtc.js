@@ -49,6 +49,9 @@ window.MajesticWebRTC = (function () {
 	// data-channel feed. Resolved at every use rather than captured, the way
 	// the chain resolves its rules: a test may install it after this file.
 	const S = () => window.MajesticSignal;
+	// ICE restart (preview-ice.js), resolved the same way. Without it a dead
+	// path is a new session, as it always was.
+	const I = () => window.MajesticIce;
 
 	function attach(video, opts) {
 		opts = opts || {};
@@ -69,6 +72,9 @@ window.MajesticWebRTC = (function () {
 		// `sig` is the signalling handle (preview-signal.js) for the current
 		// attempt; every handler it was opened with is bound to that attempt.
 		let pc = null, sig = null, statsTimer = null, signalTimer = null;
+		// The current peer connection's restarter, and whether ICE has left
+		// connected since the picture last had it.
+		let restart = null, iceDown = false;
 		// Autoplay refused on a fresh document load with no user activation (Opera
 		// for Android, majestic-webui#317): the muted picture is ready but paused,
 		// and play() is never retried, so nothing shows until an in-app navigation
@@ -342,7 +348,14 @@ window.MajesticWebRTC = (function () {
 					clearTimeout(signalTimer);
 					onState('playing', codec);
 				}
-				if (gotMedia) {
+				if (gotMedia && restart && restart.recovering()) {
+					// Frames stop while the path is down, and that is the
+					// restart's to mend: retiring the session here would tear
+					// it down halfway through a restart that was about to
+					// bring the same picture back. Counted afresh once ICE is
+					// up again.
+					stalledMs = 0;
+				} else if (gotMedia) {
 					// The no-signal watchdog was disarmed when the first bytes
 					// arrived and nothing else is watching, so this is what
 					// notices a stream that stops. Retire the attempt on a
@@ -519,6 +532,8 @@ window.MajesticWebRTC = (function () {
 
 		function teardownPc() {
 			clearInterval(statsTimer); statsTimer = null;
+			if (restart) { restart.stop(); restart = null; }
+			iceDown = false;
 			if (pc) {
 				try {
 					pc.ontrack = null;
@@ -637,11 +652,43 @@ window.MajesticWebRTC = (function () {
 			pc.onicecandidate = function (ev) {
 				if (ev.candidate) send('candidate', ev.candidate.candidate);
 			};
+			const R = I();
+			restart = R ? R.restarter({
+				pc: function () { return current(my) ? pc : null; },
+				sig: function () { return current(my) ? sig : null; },
+				played: function () { return gotMedia; },
+				lost: function () {
+					if (!current(my)) return;
+					lastFailure = 'the network path to the camera was lost';
+					reconnect();
+				},
+			}) : null;
 			pc.oniceconnectionstatechange = function () {
 				if (!pc || !current(my)) return;
 				const s = pc.iceConnectionState;
-				if (s === 'failed' || s === 'closed') reconnect();
-				else if (s === 'disconnected') onState('error');
+				// A session that never played, or a page without the
+				// restarter, has nothing to mend: a new session, as before.
+				if (s === 'closed' || (s === 'failed' && (!gotMedia || !restart))) {
+					reconnect();
+					return;
+				}
+				if (s === 'disconnected' || s === 'failed') {
+					if (!iceDown) onState('error');
+					iceDown = true;
+				} else if (iceDown && R && R.up(s)) {
+					// The chip said "reconnecting" and nothing else would
+					// rewrite it: the poll announces the codec and size only
+					// when they change, and after a restart they have not.
+					// So report the recovery the way a session coming up is
+					// reported, and the picture it has, whatever the stats
+					// go on to say.
+					iceDown = false;
+					if (gotMedia) {
+						onState('playing', lastCodec);
+						if (lastW && lastH) onCodec(lastCodec, lastCodec, lastW, lastH);
+					}
+				}
+				if (restart) restart.state(s);
 			};
 
 			gotMedia = false;
@@ -672,6 +719,9 @@ window.MajesticWebRTC = (function () {
 				},
 				answer: function (sdp) {
 					if (!current(my)) return;
+					// An ICE restart's answer, applied or dropped there; the
+					// audio and talkback checks below are the first answer's.
+					if (restart && restart.answer(sdp)) return;
 					pc.setRemoteDescription({ type: 'answer', sdp: sdp })
 						.then(function () {
 							if (!current(my)) return;
@@ -720,6 +770,10 @@ window.MajesticWebRTC = (function () {
 				},
 				candidate: function (line, mid) {
 					if (!current(my)) return;
+					// Held while a restart's answer is outstanding: those
+					// belong to the new generation, and are added once it is
+					// applied.
+					if (restart && restart.candidate(line, mid)) return;
 					// Handed over without waiting for the answer to be applied,
 					// which is safe rather than sloppy: addIceCandidate chains
 					// onto the same operations queue as setRemoteDescription,
@@ -771,6 +825,13 @@ window.MajesticWebRTC = (function () {
 				},
 				error: function (text) {
 					if (!current(my)) return;
+					// Its reply to a restart offer, on a session that was
+					// playing: a lost path, reconnected, not a reason to
+					// change transport.
+					if (restart && restart.restarting()) {
+						restart.refused();
+						return;
+					}
 					// The camera could not answer. Much the commonest cause is
 					// a profile this browser will not take — see
 					// docs/webrtc-browser-interop.md — and MSE has no such
