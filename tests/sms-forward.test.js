@@ -269,17 +269,20 @@ suite('sh + awk', ['sh'], '', 'lab-cam');
 
 let busybox = '';
 try { busybox = execFileSync('sh', ['-c', 'command -v busybox'], { encoding: 'utf8' }).trim(); } catch (e) { /* none */ }
-if (busybox) {
+// Builds differ: Ubuntu's has no flock. Only the applets this one carries
+// stand in; awk is the one that matters, and without it there is no point.
+const applets = busybox ? execFileSync(busybox, ['--list'], { encoding: 'utf8' }).split('\n') : [];
+if (busybox && applets.includes('awk')) {
 	const bb = path.join(tmp, 'bb');
 	fs.mkdirSync(bb);
 	for (const applet of ['awk', 'sed', 'mktemp', 'flock', 'timeout', 'tr', 'grep', 'cat', 'ls', 'mv', 'rm', 'mkdir', 'date', 'wc']) {
-		fs.symlinkSync(busybox, path.join(bb, applet));
+		if (applets.includes(applet)) fs.symlinkSync(busybox, path.join(bb, applet));
 	}
 	// busybox sh may run its own hostname applet ahead of PATH.
 	const host = execFileSync(busybox, ['sh', '-c', 'PATH=' + bin + ':$PATH hostname -s'], { encoding: 'utf8' }).trim();
 	suite('busybox', [busybox, 'sh'], bb + ':', host);
 } else {
-	console.log('(no busybox on this machine: the camera\'s awk is not covered here)');
+	console.log('(no busybox awk on this machine: the camera\'s awk is not covered here)');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
