@@ -33,6 +33,7 @@ page_label() {
 	config)         printf '%s' "Config file" ;;
 	# System
 	network)        printf '%s' "Network" ;;
+	sms)            printf '%s' "SMS" ;;
 	time)           printf '%s' "Time" ;;
 	access)         printf '%s' "Access" ;;
 	update)         printf '%s' "Update" ;;
@@ -72,7 +73,7 @@ page_menu() {
 	case "$1" in
 	camera|usb|stream-urls|raw|config)
 		printf '%s' "Camera" ;;
-	network|time|access|update|backup|logs|console|files|sdcard)
+	network|sms|time|access|update|backup|logs|console|files|sdcard)
 		printf '%s' "System" ;;
 	openwall|telegram|ntfy|max|vtun|wireguard|proxy)
 		printf '%s' "Services" ;;

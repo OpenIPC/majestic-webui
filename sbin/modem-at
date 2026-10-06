@@ -1,0 +1,197 @@
+#!/bin/sh
+# modem-at -- send AT commands to a cellular modem and print what it answers.
+#
+#   modem-at port                       print the AT port, or fail
+#   modem-at [-t SECS] [-w PREFIX] CMD...
+#
+# Every CMD is sent in order inside one hold of the port. Before each reply
+# the transcript carries "=> CMD", written here rather than echoed by the
+# modem, so a reader can tell which command a line answers whether the modem
+# echoes (ATE1) or not. A reply ends at the modem's final result -- OK, ERROR,
+# +CME ERROR, +CMS ERROR -- or after SECS (default 5) without a line. -w keeps
+# reading after the LAST command's OK until a line starting with PREFIX
+# arrives: a USSD answer comes after its OK, from the network, seconds later.
+#
+# A CMD of the form PDU:<len>:<hex> is an SMS: AT+CMGS=<len>, the PDU at the
+# modem's ">" prompt, Ctrl-Z, and the +CMGS reply.
+#
+# Exit status: 0 every command answered OK; 1 no AT port; 2 the port stayed
+# busy; 3 a command answered with an error or not at all.
+#
+# Only standard 3GPP commands pass through here from the web UI (27.005 for
+# SMS, 27.007 for USSD), so this is the same for every modem and every
+# operator. Which tty is the AT port is the one thing that differs per modem,
+# and port() works it out from what the kernel already knows.
+#
+# The port is shared. The modem's init script and majestic's metrics poller
+# both talk to it, and all three hold an exclusive flock on LOCK around every
+# exchange, so a reply is never read by the side that did not ask for it.
+# majestic gives up its turn after 5 s rather than wait, so holding the port
+# for a USSD answer costs at most a gap in the modem graphs.
+#
+# Settings the commands change are put back before the port is let go. The
+# web UI switches SMS to PDU mode, the storage being read and the character
+# set; the init script and majestic read replies that depend on all three
+# (AT+COPS? names the operator in the current character set).
+
+LOCK=/var/lock/modem-at
+CR=$(printf '\r')
+
+# USB modems whose AT port is not named "AT" in their interface string,
+# as vid:pid:interface. Most are found without this.
+KNOWN="2c7c:6005:3 2c7c:0125:2 2c7c:0121:2 2c7c:0306:2"
+
+tty_of() {
+	for t in "$1"/ttyUSB* "$1"/tty/ttyACM*; do
+		[ -e "$t" ] && { echo "/dev/${t##*/}"; return 0; }
+	done
+	return 1
+}
+
+# Which tty is the AT port, from the most deliberate answer to the least:
+# the firmware environment, the interface's own name, the table above, and
+# last of all asking every serial port for an OK.
+port() {
+	p=$(fw_printenv -n modem_at 2>/dev/null)
+	[ -n "$p" ] && [ -c "$p" ] && { echo "$p"; return 0; }
+
+	for i in /sys/bus/usb/devices/*:*; do
+		[ -r "$i/interface" ] || continue
+		grep -qw AT "$i/interface" 2>/dev/null || continue
+		tty_of "$i" && return 0
+	done
+
+	for k in $KNOWN; do
+		for d in /sys/bus/usb/devices/*; do
+			[ -r "$d/idVendor" ] || continue
+			[ "$(cat "$d/idVendor"):$(cat "$d/idProduct")" = "${k%:*}" ] || continue
+			tty_of "$d:1.${k##*:}" && return 0
+		done
+	done
+
+	for t in /dev/ttyUSB* /dev/ttyACM*; do
+		[ -c "$t" ] || continue
+		reply=$(
+			timeout 5 flock 9 || exit
+			stty -F "$t" 115200 raw -echo 2>/dev/null
+			{ printf 'AT\r\n' >&3; timeout 1 cat <&3; } 3<>"$t" 2>/dev/null
+		9>"$LOCK")
+		case "$reply" in *OK*) echo "$t"; return 0 ;; esac
+	done
+	return 1
+}
+
+# Read one reply from fd 3 up to its final result. Prints the lines, \r
+# stripped, empty lines and the modem's echo of CMD dropped.
+reply() {
+	cmd=$1 wait=$2 secs=$3 final=""
+	while IFS= read -r -t "$secs" line <&3; do
+		while [ "${line%"$CR"}" != "$line" ]; do line=${line%"$CR"}; done
+		[ -n "$line" ] || continue
+		[ "$line" = "$cmd" ] && continue
+		echo "$line"
+		if [ -n "$final" ]; then
+			case "$line" in "$wait"*) return 0 ;; esac
+			continue
+		fi
+		case "$line" in
+		OK)
+			[ -n "$wait" ] || return 0
+			final=1
+			;;
+		ERROR|"+CME ERROR"*|"+CMS ERROR"*|"NO CARRIER")
+			return 3
+			;;
+		esac
+	done
+	echo "(no answer in ${secs}s)"
+	return 3
+}
+
+# AT+CMGS: the modem answers the command with a "> " prompt and no newline,
+# so it is read a character at a time up to the ">".
+send_pdu() {
+	len=${1%%:*} hex=${1#*:}
+	echo "=> AT+CMGS=$len"
+	printf 'AT+CMGS=%s\r' "$len" >&3
+	n=0
+	while [ $n -lt 64 ]; do
+		IFS= read -r -n 1 -t 5 c <&3 || { echo "(no prompt)"; return 3; }
+		[ "$c" = ">" ] && break
+		n=$((n + 1))
+	done
+	printf '%s\032' "$hex" >&3
+	reply "" "" 60
+}
+
+query() {
+	printf '%s\r\n' "$1" >&3
+	reply "$1" "" 2 | sed -n "s/^$2: *//p"
+}
+
+exchange() {
+	stty -F "$PORT" 115200 raw -echo 2>/dev/null
+	{
+		# Put back what the commands change, read before they change it.
+		restore=""
+		case "$*" in *AT+CMGF=*)
+			v=$(query "AT+CMGF?" "+CMGF")
+			[ -n "$v" ] && restore="$restore AT+CMGF=$v" ;;
+		esac
+		case "$*" in *AT+CSCS=*)
+			v=$(query "AT+CSCS?" "+CSCS")
+			[ -n "$v" ] && restore="$restore AT+CSCS=$v" ;;
+		esac
+		case "$*" in *AT+CPMS=*)
+			v=$(query "AT+CPMS?" "+CPMS" | awk -F, '{ print $1 "," $4 "," $7 }')
+			[ -n "$v" ] && restore="$restore AT+CPMS=$v" ;;
+		esac
+
+		rc=0 n=$#
+		for cmd; do
+			n=$((n - 1))
+			case "$cmd" in
+			PDU:*)
+				send_pdu "${cmd#PDU:}" || rc=3
+				;;
+			*)
+				echo "=> $cmd"
+				printf '%s\r\n' "$cmd" >&3
+				w=""; [ $n -eq 0 ] && w=$WAIT
+				reply "$cmd" "$w" "$SECS" || { rc=3; break; }
+				;;
+			esac
+		done
+
+		for cmd in $restore; do
+			printf '%s\r\n' "$cmd" >&3
+			reply "$cmd" "" 2 >/dev/null
+		done
+		exit $rc
+	} 3<>"$PORT"
+}
+
+if [ "$1" = "port" ]; then
+	port
+	exit
+fi
+
+SECS=5 WAIT=""
+while getopts t:w: o; do
+	case $o in
+	t) SECS=$OPTARG ;;
+	w) WAIT=$OPTARG ;;
+	*) exit 64 ;;
+	esac
+done
+shift $((OPTIND - 1))
+[ $# -gt 0 ] || { echo "usage: modem-at port | modem-at [-t secs] [-w prefix] CMD..." >&2; exit 64; }
+
+PORT=$(port) || { echo "no AT port found" >&2; exit 1; }
+(
+	# Long enough to outlast the longest hold anyone takes: a USSD answer.
+	# busybox flock has no -w; the lock belongs to the open file, so a child
+	# taking it under timeout holds it for this shell too.
+	timeout 40 flock 9 || { echo "the modem's port is busy" >&2; exit 2; }
+	exchange "$@"
+) 9>"$LOCK"
