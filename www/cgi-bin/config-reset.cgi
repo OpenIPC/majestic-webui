@@ -3,9 +3,12 @@
 <%
 # Put every majestic setting back to its default.
 #
-# The path still arrives in ?f= because that is the link config.cgi
-# writes, but it is checked against the one file this page offers rather
-# than used as given.
+# POST only, from the button on config.cgi. A GET is what a browser issues on
+# its own -- a prefetch, a restored tab, an old bookmark -- and must not wipe
+# every setting, so it is sent to the page holding the button instead.
+#
+# The path still arrives in f, but it is checked against the one file this
+# page offers rather than used as given.
 #
 # majestic's file holds only what differs from its built-in defaults, and the
 # firmware ships no copy of it, so a reset is removing the file. With nothing
@@ -13,9 +16,10 @@
 # copy away and leaves no whiteout behind.
 config=$(get_config)
 
-[ "$GET_f" = "$config" ] || set_error_flag "Nothing to reset."
+[ "$REQUEST_METHOD" = "POST" ] || redirect_to "config.cgi"
+[ "$POST_f" = "$config" ] || set_error_flag "Nothing to reset."
 [ -n "$error" ] && redirect_back
-[ -e "$config" ] || redirect_back "info" "Majestic is already running on its defaults."
+[ -e "$config" ] || redirect_back "info" "No setting is saved, so every one is already at its default."
 
 rm -f "$config"
 sync
