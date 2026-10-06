@@ -205,7 +205,7 @@ window.MajesticDataChannel = (function () {
 			close: function () { finish(null); },
 			stats: stats,
 		};
-		let pc = null, dc = null, sig = null, ended = false;
+		let pc = null, dc = null, sig = null, ended = false, restart = null;
 		let openTimer = null, firstTimer = null, statsTimer = null;
 		let rxBytes = 0, msgs = 0, seqGaps = 0, camGaps = 0, late = 0, lastSeq = 0;
 		// Frames by count, not by event: a hole of five is five frames, and
@@ -240,6 +240,7 @@ window.MajesticDataChannel = (function () {
 			if (ended) return;
 			ended = true;
 			clearTimeout(openTimer); clearTimeout(firstTimer); clearInterval(statsTimer);
+			if (restart) { restart.stop(); restart = null; }
 			if (dc) { try { dc.onopen = dc.onmessage = dc.onclose = dc.onerror = null; dc.close(); } catch (e) {} dc = null; }
 			if (pc) { try { pc.onicecandidate = pc.oniceconnectionstatechange = null; pc.close(); } catch (e) {} pc = null; }
 			if (sig) { sig.close(); sig = null; }
@@ -344,10 +345,26 @@ window.MajesticDataChannel = (function () {
 		dc.onclose = function () { finish('closed'); };
 		dc.onerror = function () {};
 		pc.onicecandidate = function (ev) { if (ev.candidate && sig) sig.send('candidate', ev.candidate.candidate); };
+		// A path that dies under a feed that has carried something is
+		// restarted on this peer connection (preview-ice.js): the channel
+		// rides the same DTLS association and survives it. Two attempts that
+		// do not bring it back end the feed as any other ending of a working
+		// one does, and the consumer goes to the socket.
+		const R = window.MajesticIce;
+		restart = R ? R.restarter({
+			pc: function () { return ended ? null : pc; },
+			sig: function () { return ended ? null : sig; },
+			played: function () { return gotMessage; },
+			lost: function () { finish('closed'); },
+		}) : null;
 		pc.oniceconnectionstatechange = function () {
 			if (!pc) return;
 			const s = pc.iceConnectionState;
-			if (s === 'failed' || s === 'closed') finish(feed.readyState === 1 ? 'closed' : 'ice-failed');
+			if (s === 'closed' || (s === 'failed' && (!gotMessage || !restart))) {
+				finish(feed.readyState === 1 ? 'closed' : 'ice-failed');
+				return;
+			}
+			if (restart) restart.state(s);
 		};
 		openTimer = setTimeout(function () { finish('timeout'); }, OPEN_TIMEOUT_MS);
 
@@ -364,11 +381,14 @@ window.MajesticDataChannel = (function () {
 			},
 			answer: function (sdp) {
 				if (ended) return;
+				// A restart's answer, applied or dropped there.
+				if (restart && restart.answer(sdp)) return;
 				if (sdpDeclined(sdp)) { finish('declined'); return; }
 				pc.setRemoteDescription({ type: 'answer', sdp: sdp }).catch(function () { finish('refused'); });
 			},
 			candidate: function (line, mid) {
 				if (ended) return;
+				if (restart && restart.candidate(line, mid)) return;
 				pc.addIceCandidate({ candidate: line, sdpMid: mid }).catch(function () {});
 			},
 			stats: function (line) { cam = S.parseCam(line); camAt = Date.now(); },
