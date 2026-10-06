@@ -813,6 +813,7 @@ cell_dns=$(awk '$1 == "nameserver" { printf "%s%s", s, $2; s = ", " }' /etc/reso
 		</div>
 	</div>
 	<p class="x-small text-secondary mb-0 mt-2" id="cell-age"></p>
+	<p class="x-small mb-0 mt-1"><a href="sms.cgi">Messages, balance and packages</a> &mdash; what the operator has sent to the SIM, and its short codes.</p>
 </div></div>
 </div>
 </div>
