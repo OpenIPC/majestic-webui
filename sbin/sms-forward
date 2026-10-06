@@ -1,0 +1,278 @@
+#!/bin/sh
+# sms-forward -- send the cellular modem's new SMS to Telegram.
+#
+#   sms-forward            forward what has arrived since the last run
+#   sms-forward --collect  take what has arrived into the queue, send nothing
+#   sms-forward --decode   read a modem-at transcript on stdin, print the
+#                          messages it holds (for the tests, and for a person
+#                          finding out what the modem has)
+#
+# Run from cron every minute while the switch on the SMS page is on, and with
+# --collect by j/sms.cgi before it lists the messages. The page only collects:
+# a send can take Telegram's whole timeout when the camera has no route to it,
+# and the page would hang for as long. Cron sends what it collected a minute
+# later at most.
+#
+# "New" is the modem's own idea of it: a message stored as received-unread.
+# Listing those (AT+CMGL=0) is also what marks them read, inside the same hold
+# of the port, so there is no record of what was forwarded to keep in step with
+# the modem -- the modem is the record. That is also why the SMS page runs this
+# before it lists anything: its own listing marks everything read, and a message
+# the page read first would never be forwarded.
+#
+# A message that arrives in several parts is forwarded once, whole. A part that
+# has not landed yet is waited for once, briefly; one still missing after that
+# is marked as a gap in the text rather than held back forever.
+#
+# What Telegram refused waits in $QUEUE and is tried again on the next run. The
+# queue is in /tmp, so a message that could not be sent before a reboot is
+# lost from Telegram -- it is still on the SIM, readable on the SMS page.
+#
+# Decoding follows 3GPP TS 23.040 and 23.038, as www/a/sms-pdu.js does for the
+# page; tests/sms-forward.test.js holds the two to the same answers.
+
+LOCK=/var/lock/sms-forward
+QUEUE=/tmp/sms-forward
+
+# awk does the PDUs. LC_ALL=C makes %c write the byte it is given in every awk,
+# which is how the UTF-8 below is assembled; gawk in a UTF-8 locale would
+# encode each byte again.
+decode() {
+	LC_ALL=C awk -v host="$1" -v outdir="$2" '
+	BEGIN {
+		split("64 163 36 165 232 233 249 236 242 199 10 216 248 13 197 229 916 95 934 915 " \
+			"923 937 928 936 931 920 926 27 198 230 223 201 32 33 34 35 164 37 38 39 40 " \
+			"41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 161 65 " \
+			"66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 " \
+			"196 214 209 220 167 191 97 98 99 100 101 102 103 104 105 106 107 108 109 " \
+			"110 111 112 113 114 115 116 117 118 119 120 121 122 228 246 241 252 224", t, " ")
+		for (i = 1; i <= 128; i++) GSM[i - 1] = t[i] + 0
+		EXT[10] = 12; EXT[20] = 94; EXT[40] = 123; EXT[41] = 125; EXT[47] = 92
+		EXT[60] = 91; EXT[61] = 126; EXT[62] = 93; EXT[64] = 124; EXT[101] = 8364
+		HEX = "0123456789ABCDEF"
+	}
+
+	function utf8(c) {
+		if (c < 128) return sprintf("%c", c)
+		if (c < 2048) return sprintf("%c%c", 192 + int(c / 64), 128 + c % 64)
+		if (c < 65536) return sprintf("%c%c%c", 224 + int(c / 4096), 128 + int(c / 64) % 64, 128 + c % 64)
+		return sprintf("%c%c%c%c", 240 + int(c / 262144), 128 + int(c / 4096) % 64, 128 + int(c / 64) % 64, 128 + c % 64)
+	}
+
+	# Octet i of the PDU, counting from 0; -1 past the end.
+	function oct(i) {
+		if (i < 0 || i >= NB) return -1
+		return (index(HEX, substr(P, 2 * i + 1, 1)) - 1) * 16 + index(HEX, substr(P, 2 * i + 2, 1)) - 1
+	}
+
+	# count septets packed from octet `at`, the first `skip` of them dropped:
+	# a user-data header plus its fill bits is a whole number of septets.
+	function gsm7(at, count, skip,   s, i, bit, o, sh, v, e) {
+		s = ""
+		e = 0
+		for (i = 0; i < count; i++) {
+			bit = 7 * i
+			o = at + int(bit / 8)
+			sh = bit % 8
+			if (oct(o) < 0) break
+			v = rshift(oct(o), sh)
+			if (sh > 1 && oct(o + 1) >= 0) v = or(v, lshift(oct(o + 1), 8 - sh))
+			v = and(v, 127)
+			if (i < skip) continue
+			if (e) { s = s utf8(v in EXT ? EXT[v] : 32); e = 0; continue }
+			if (v == 27) { e = 1; continue }
+			s = s utf8(GSM[v])
+		}
+		return s
+	}
+
+	# UTF-16BE, surrogate pairs joined into one character.
+	function ucs2(from, to,   s, i, c, d) {
+		s = ""
+		for (i = from; i + 1 < to; i += 2) {
+			c = oct(i) * 256 + oct(i + 1)
+			if (c >= 55296 && c <= 56319 && i + 3 < to) {
+				d = oct(i + 2) * 256 + oct(i + 3)
+				if (d >= 56320 && d <= 57343) { c = 65536 + (c - 55296) * 1024 + (d - 56320); i += 2 }
+			}
+			if (c > 0) s = s utf8(c)
+		}
+		return s
+	}
+
+	function semi(o) { return sprintf("%d%d", o % 16, int(o / 16)) }
+
+	# One SMS-DELIVER. Sets D_addr, D_time, D_text, D_ref, D_total, D_seq;
+	# returns 0 for anything else (a stored outgoing message, a report).
+	function deliver(pdu,   at, fo, len, toa, n, i, dcs, udl, hl, h, iei, il, a, z, q) {
+		P = toupper(pdu)
+		NB = int(length(P) / 2)
+		if (P !~ /^[0-9A-F]+$/ || NB < 12) return 0
+		at = oct(0) + 1
+		fo = oct(at++)
+		if (and(fo, 3) != 0) return 0
+		len = oct(at); toa = oct(at + 1)
+		n = int((len + 1) / 2)
+		if (and(toa, 112) == 80) {
+			D_addr = gsm7(at + 2, int(len * 4 / 7), 0)
+		} else {
+			D_addr = ""
+			for (i = 0; i < n; i++) D_addr = D_addr semi(oct(at + 2 + i))
+			D_addr = substr(D_addr, 1, len)
+			if (and(toa, 112) == 16) D_addr = "+" D_addr
+		}
+		at += 2 + n + 1
+		dcs = oct(at++)
+		z = oct(at + 6)
+		q = and(z, 7) * 10 + int(z / 16)
+		D_time = sprintf("20%s-%s-%s %s:%s %s%02d:%02d", semi(oct(at)), semi(oct(at + 1)), semi(oct(at + 2)),
+			semi(oct(at + 3)), semi(oct(at + 4)), and(z, 8) ? "-" : "+", int(q / 4), (q % 4) * 15)
+		at += 7
+		udl = oct(at++)
+		hl = 0; D_ref = ""; D_total = 1; D_seq = 1
+		if (and(fo, 64)) {
+			hl = oct(at) + 1
+			for (h = at + 1; h < at + hl; h += 2 + il) {
+				iei = oct(h); il = oct(h + 1)
+				if (iei == 0 && il == 3) { D_ref = oct(h + 2); D_total = oct(h + 3); D_seq = oct(h + 4) }
+				if (iei == 8 && il == 4) { D_ref = oct(h + 2) * 256 + oct(h + 3); D_total = oct(h + 4); D_seq = oct(h + 5) }
+			}
+		}
+		# The alphabet a DCS selects: bits 3..2 in the general groups, bit 2
+		# in group F, UCS2 for group E, GSM 7-bit for the rest.
+		a = "gsm7"
+		if (and(dcs, 192) == 0 || and(dcs, 192) == 64) {
+			if (and(rshift(dcs, 2), 3) == 1) a = "8bit"
+			if (and(rshift(dcs, 2), 3) == 2) a = "ucs2"
+		} else if (and(dcs, 240) == 240) {
+			if (and(dcs, 4)) a = "8bit"
+		} else if (and(dcs, 240) == 224) a = "ucs2"
+		if (a == "gsm7") D_text = gsm7(at, udl, int((hl * 8 + 6) / 7))
+		else if (a == "ucs2") D_text = ucs2(at + hl, at + udl)
+		else D_text = "[binary message, " (udl - hl) " bytes]"
+		return 1
+	}
+
+	# The transcript: "=> AT+CPMS=..." names the storage, "=> AT+CMGL=0"
+	# lists what was unread (and is therefore new), "=> AT+CMGL=4" lists
+	# everything, for the parts of a message that arrived on an earlier run.
+	/^=> AT\+CPMS="[A-Z][A-Z]"/ { mem = substr($0, 13, 2); next }
+	/^=> AT\+CMGL=0/ { phase = "new"; next }
+	/^=> AT\+CMGL=4/ { phase = "all"; next }
+	/^=> / { phase = ""; next }
+	/^\+CMGL: / {
+		split(substr($0, 8), f, ",")
+		loc = mem "." (f[1] + 0)
+		if (phase == "new") NEW[loc] = 1
+		want = (phase != "")
+		next
+	}
+	want {
+		want = 0
+		if (!deliver($0)) next
+		key = (D_ref == "" || D_total < 2) ? "one " loc : (D_addr "|" D_ref "|" D_total)
+		if (!(key in FROM)) { order[++ng] = key; FROM[key] = D_addr; WHEN[key] = D_time; TOTAL[key] = D_total }
+		if (D_time < WHEN[key]) WHEN[key] = D_time
+		if (!((key, D_seq) in PART)) PART[key, D_seq] = D_text
+		if (loc in NEW) FRESH[key] = 1
+	}
+
+	END {
+		for (g = 1; g <= ng; g++) {
+			key = order[g]
+			if (!(key in FRESH)) continue
+			text = ""; missing = 0
+			for (s = 1; s <= TOTAL[key]; s++) {
+				if ((key, s) in PART) text = text PART[key, s]
+				else { text = text " [...] "; missing++ }
+			}
+			msg = "SMS from " FROM[key] " to " host ", " WHEN[key] "\n\n" text
+			if (missing) msg = msg "\n\n(" missing " of " TOTAL[key] " parts did not arrive)"
+			if (outdir == "") { printf "%s\n\f\n", msg; continue }
+			# The arrival time and the part count in the name: a message
+			# waiting for its last part is not mistaken for a new one.
+			out = outdir "/" ++nf
+			printf "%s", msg > out
+			close(out)
+			if (missing) incomplete++
+		}
+		if (outdir != "") print incomplete + 0
+	}'
+}
+
+storages() {
+	modem-at "AT+CPMS=?" 2>/dev/null | sed -n 's/^+CPMS: *(\([^)]*\)).*/\1/p' | tr -d '"' | tr ',' '\n' |
+		grep -xE 'SM|ME'
+}
+
+# One hold of the port: the unread messages of every storage (marking them
+# read), then everything, so a part that came on an earlier run can be joined.
+# `listing all` leaves the unread ones alone: the second look, after a wait.
+listing() {
+	what=$1
+	set -- "AT+CMGF=0"
+	if [ "$what" != "all" ]; then
+		for m in $MEMS; do set -- "$@" "AT+CPMS=\"$m\"" "AT+CMGL=0"; done
+	fi
+	for m in $MEMS; do set -- "$@" "AT+CPMS=\"$m\"" "AT+CMGL=4"; done
+	modem-at -t 10 "$@" 2>/dev/null
+}
+
+if [ "$1" = "--decode" ]; then
+	decode "$(hostname -s 2>/dev/null)" ""
+	exit
+fi
+
+collect_only=""
+[ "$1" = "--collect" ] && collect_only=1
+
+[ -e /etc/webui/sms.conf ] && . /etc/webui/sms.conf
+[ "$sms_forward" = "telegram" ] || exit 0
+
+(
+	# Cron and the SMS page may both start a run; the second waits for the
+	# first rather than racing it for the same unread messages.
+	timeout 60 flock 9 || exit 1
+
+	mkdir -p -m 700 "$QUEUE" || exit 1
+	work=$(mktemp -d /tmp/sms-forward.XXXXXX) || exit 1
+	trap 'rm -rf "$work"' EXIT INT TERM
+
+	MEMS=$(storages)
+	if [ -n "$MEMS" ]; then
+		first=$(listing)
+		# The new set is decided by the first listing; a second one, after a
+		# wait for a missing part, only adds the parts that arrived since.
+		incomplete=$(printf '%s\n' "$first" | decode "$(hostname -s)" "$work")
+		if [ "${incomplete:-0}" -gt 0 ]; then
+			sleep 20
+			rm -f "$work"/*
+			again=$(listing all)
+			incomplete=$(printf '%s\n%s\n' "$first" "$again" | decode "$(hostname -s)" "$work")
+		fi
+		stamp=$(date +%s)
+		for f in "$work"/*; do
+			[ -f "$f" ] || continue
+			mv "$f" "$QUEUE/$stamp-${f##*/}"
+			queued=$((queued + 1))
+		done
+	fi
+	[ -n "$collect_only" ] && exit 0
+
+	sent=0 failed=0
+	for f in "$QUEUE"/*; do
+		[ -f "$f" ] || continue
+		if telegram --text < "$f" >/dev/null 2>&1; then
+			rm -f "$f"
+			sent=$((sent + 1))
+		else
+			failed=$((failed + 1))
+			# The same reason will refuse the rest; try them all next run.
+			break
+		fi
+	done
+	# Said when something happened, not every minute that Telegram stays
+	# out of reach.
+	[ $((sent + ${queued:-0})) -gt 0 ] && logger -t sms-forward "forwarded $sent, $(ls "$QUEUE" | wc -l) waiting"
+	exit 0
+) 9>"$LOCK"

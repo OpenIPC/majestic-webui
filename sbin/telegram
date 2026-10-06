@@ -50,6 +50,12 @@ case "$1" in
 	mode=image
 	shift
 	;;
+--text)
+	# A message rather than a picture, read from stdin: what sms-forward
+	# hands over. Never the caption -- the text is the whole of it.
+	mode=text
+	shift
+	;;
 esac
 
 # A clip of one's own: how many seconds of it, clamped.
@@ -73,7 +79,13 @@ filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
 #
 # The file belongs to whoever called, so it is never put in the workdir and
 # never removed -- the trap above only takes away what this script created.
-if [ -n "$1" ]; then
+if [ "$mode" = "text" ]; then
+	cat > "$workdir/text"
+	if [ ! -s "$workdir/text" ]; then
+		echo "Nothing to send"
+		exit 1
+	fi
+elif [ -n "$1" ]; then
 	snapshot=$1
 	if [ ! -s "$snapshot" ]; then
 		echo "Nothing to send: $snapshot"
@@ -192,7 +204,13 @@ fi
 #
 # The method now picks the endpoint and the file field into variables, because
 # the URL is one argument rather than the tail of a string being appended to.
-if [ "$telegram_document" = "true" ] || [ "${snapshot##*.}" = "heif" ]; then
+# A message goes in as a file too: `text=<file` is curl reading the field's
+# value from it, so the text is never an argument and has no length limit
+# but Telegram's own.
+if [ "$mode" = "text" ]; then
+	method=sendMessage
+	set -- "$@" -F "text=<$workdir/text"
+elif [ "$telegram_document" = "true" ] || [ "${snapshot##*.}" = "heif" ]; then
 	method=sendDocument
 	set -- "$@" -F "document=@${snapshot}"
 elif [ "${snapshot##*.}" = "mp4" ]; then
@@ -202,7 +220,7 @@ else
 	method=sendPhoto
 	set -- "$@" -F "photo=@${snapshot}"
 fi
-set -- "$@" -F "caption=${telegram_message}"
+[ "$mode" = "text" ] || set -- "$@" -F "caption=${telegram_message}"
 set -- "$@" --url "https://api.telegram.org/bot${telegram_token}/${method}"
 
 # The response body still goes to stdout for anyone running this by hand or out
