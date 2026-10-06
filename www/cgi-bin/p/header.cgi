@@ -306,10 +306,6 @@ if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ]; } && [ "$pagename"
 <% notice danger "<b>This camera's MAC address is a placeholder</b> &mdash; <code>$(esc "$network_macaddr")</code> is one of the addresses a bootloader hands out when the camera's own was never set, and two cameras carrying it on one network will collide. $mac_advice" '<a class="btn btn-sm btn-primary" href="network.cgi#mac">Set the MAC address</a>' %>
 <% fi %>
 
-<% if [ ! -e $(get_config) ]; then %>
-<% notice danger '<b>No camera configuration found</b> &mdash; there is no settings file for the camera to read.' '<a class="btn btn-sm btn-primary" href="config.cgi">Configuration file</a>' %>
-<% fi %>
-
 <%# Warning rather than danger: it reports something you asked for and have not
     finished, not something broken. The button keeps btn-danger because main.js
     hangs the confirmation prompt off that class -- restyling it would quietly
