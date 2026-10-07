@@ -176,6 +176,10 @@ lower=/rom
 # unknown or missing value reads as a standard build, the same default
 # buildroot has.
 variant=$(sed -n 's/^BUILD_OPTION=//p' /etc/os-release 2>/dev/null | tr -d '"')
+# OpenIPC/builder renamed the fpv variant wfbng, after the wfb-ng it carries;
+# it gets the same files, and the firmware's majestic-webui.mk treats the two
+# names alike.
+[ "$variant" = wfbng ] && variant=fpv
 
 tmp=$(mktemp -d) || die "cannot create a temporary directory"
 # The staged directory holds the script this shell is reading, which on Linux
