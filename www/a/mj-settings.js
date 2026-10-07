@@ -1014,6 +1014,17 @@
 		return f.type === 'boolean' ? (toBool(d) ? 1 : 0) : d;
 	}
 
+	// What hold-to-compare shows a knob at: stock, except the way up. Mirror
+	// and flip are how the camera is mounted, not how the picture looks, and a
+	// camera hung upside down has them saved on -- so "stock" for it was the
+	// scene upside down, flashed on every press, with the brightness it was
+	// meant to show beside the point. Reset-all keeps them for the same reason
+	// (TONE_KEYS, below).
+	function liveStock(f) {
+		if (f.key === 'mirror' || f.key === 'flip') return liveValue(f);
+		return liveDefault(f);
+	}
+
 	// What the config says this knob is, as /api/v1/live wants it. state.initial
 	// is snapshotted from config.json at mount, so it is at once what the
 	// controls will read after a re-render and what the camera has to be put
@@ -1952,25 +1963,45 @@
 	// restore is guarded on every way a press can end, not just pointerup. If
 	// the browser dies mid-hold the camera stays at stock; the form is still
 	// dirty, so Save puts it right.
+	//
+	// A tap is the usual first try, and on a phone it shows nothing: the label
+	// is hidden there, and the stream runs most of a second behind the press,
+	// so a quarter-second tap has ended before its own picture arrives. A press
+	// that short raises the label as a bubble instead, which is the one thing
+	// the title attribute could never do on a screen with no hover.
+	const COMPARE_TAP_MS = 500;
 	function wireCompare(btn) {
 		if (!btn) return;
 		let held = false;
+		let downAt = 0;
+		let tipTimer = null;
+		const tip = () => {
+			const lbl = btn.querySelector('span');
+			if (!lbl || getComputedStyle(lbl).display !== 'none') return;
+			btn.dataset.tip = lbl.textContent;
+			btn.classList.add('mj-cmp-tip');
+			clearTimeout(tipTimer);
+			tipTimer = setTimeout(() => btn.classList.remove('mj-cmp-tip'), 2000);
+		};
 		const down = (e) => {
 			if (held || btn.disabled) return;
 			held = true;
+			downAt = Date.now();
+			btn.classList.remove('mj-cmp-tip');
 			btn.classList.add('mj-hud-on');
 			// A queued push would land 120 ms later and undo the comparison.
 			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
 			if (e && e.pointerId != null && btn.setPointerCapture) {
 				try { btn.setPointerCapture(e.pointerId); } catch (_) { /* the guards below still restore */ }
 			}
-			postKnobs(liveDocOf(liveDefault));
+			postKnobs(liveDocOf(liveStock));
 		};
 		const up = () => {
 			if (!held) return;
 			held = false;
 			btn.classList.remove('mj-hud-on');
 			postKnobs(liveDocOf(liveValue));
+			if (Date.now() - downAt < COMPARE_TAP_MS) tip();
 		};
 		btn.addEventListener('pointerdown', down);
 		btn.addEventListener('pointerup', up);
@@ -1993,6 +2024,7 @@
 		state.liveCleanup.push(() => {
 			document.removeEventListener('visibilitychange', up);
 			window.removeEventListener('blur', up);
+			clearTimeout(tipTimer);
 			up();
 		});
 	}
@@ -3064,9 +3096,8 @@
 		// edit and after a refresh, the same way the pad re-reads its fields.
 		if (cmpBtn) {
 			const syncCompare = () => {
-				const off = state.fields.some(f => isLive(f) && f.schema &&
-					f.schema.default !== undefined &&
-					String(liveValue(f)) !== String(liveDefault(f)));
+				const off = state.fields.some(f => isLive(f) &&
+					String(liveValue(f)) !== String(liveStock(f)));
 				cmpBtn.disabled = !off;
 				cmpBtn.title = off
 					? 'Hold to see the picture at stock; release to come back'

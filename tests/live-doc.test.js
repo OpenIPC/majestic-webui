@@ -27,13 +27,15 @@ const code = [
 	slice('\tfunction setDotted(obj, dot, val) {'),
 	slice('\tfunction toBool(v) {'),
 	slice('\tfunction liveValue(f) {'),
+	slice('\tfunction liveDefault(f) {'),
+	slice('\tfunction liveStock(f) {'),
 	slice('\tfunction liveSaved(f) {'),
 	slice('\tfunction liveDocOf(want) {'),
 	slice('\tfunction liveIsSaved(f, want) {'),
 ].join('\n');
 // liveDocOf is preceded by the Set it keeps, which the slice starts after.
 const make = new Function('state', 'isLive', 'const livePreviewed = new Set();\n' + code +
-	'\nreturn { liveDocOf, liveValue, livePreviewed };');
+	'\nreturn { liveDocOf, liveValue, liveStock, livePreviewed };');
 
 // A leaf as the page holds it: two image knobs, and exposure rows -- one
 // changed, one on Auto over a saved value, one untouched, the metering area,
@@ -99,6 +101,32 @@ group('a revert puts the image knobs back and drops what was previewed');
 	check('the previewed rows are dropped', d.isp.exposure === '' && d.isp.meterRect === '');
 	check('a row never previewed is left alone', !('aeSpeed' in d.isp) && !('dehaze' in d.isp));
 	check('and after the revert nothing is left to drop', L.livePreviewed.size === 0);
+}
+
+// Hold to compare shows stock, but not the way up: a camera mounted upside
+// down has mirror and flip saved on, and comparing its brightness against the
+// scene turned over is no comparison at all.
+group('hold to compare leaves the orientation where it is');
+{
+	const st = (dot, key, type, value, initial, def) => {
+		const f = field(dot, type, value, initial);
+		f.key = key;
+		f.schema = { default: def };
+		return f;
+	};
+	const G = {
+		luminance: st('image.luminance', 'luminance', 'integer', '85', '50', 50),
+		mirror: st('image.mirror', 'mirror', 'boolean', true, 'true', false),
+		flip: st('image.flip', 'flip', 'boolean', true, 'true', false),
+	};
+	const gs = Object.values(G);
+	const gst = { fields: gs, initial: {} };
+	gs.forEach(f => { gst.initial[f.dot] = f.init; });
+	const M = make(gst, (f) => !!f.pushes);
+	const d = M.liveDocOf(M.liveStock);
+	check('a picture knob goes to stock', d.image.luminance === '50');
+	check('mirror stays as the camera is mounted', d.image.mirror === '1');
+	check('flip stays as the camera is mounted', d.image.flip === '1');
 }
 
 group('nothing live, nothing to send');
