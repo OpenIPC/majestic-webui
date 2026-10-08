@@ -13,19 +13,24 @@
 #
 # A chip is as big as the furthest partition end on it, so that is what this
 # measures, per chip, and adds the chips. The kernel gives each partition's
-# offset in sysfs; the 3.x kernels some boards still run do not, and there the
-# offsets are rebuilt from the mtdparts= the kernel itself parsed them from.
-# Only with neither does it fall back to the sum, which is exact for the
+# offset in sysfs, and an entry without one beside partitions that have it is
+# a whole chip (a partitioned master), so it starts at 0. The 3.x kernels some
+# boards still run give no offsets at all, and a chip whose sysfs entry links
+# no device cannot be told from its neighbour; both are rebuilt from the
+# mtdparts= the kernel itself parsed the layout from. Only with no offsets and
+# no usable mtdparts does it fall back to the sum, which is exact for the
 # ordinary end-to-end layout and is all that is left to go on.
 
 # flash_bytes [sysroot]   total flash in bytes, or nothing when there is none
 #
 # sysroot prefixes /sys and /proc, for tests/flash-size.test.js.
 flash_bytes() {
-	local root="$1" d i=0 off chip
-	while [ -d "$root/sys/class/mtd/mtd$i" ]; do
-		d="$root/sys/class/mtd/mtd$i"
-		i=$((i + 1))
+	local root="$1" d n off chip
+	# Every mtdN there is, in number order -- not mtd0 upward until the first
+	# gap, which a device removed at runtime leaves -- and not the mtdNro twins.
+	for d in "$root"/sys/class/mtd/mtd*; do
+		n=${d##*/mtd}
+		case "$n" in "" | *[!0-9]*) continue ;; esac
 		case "$(cat "$d/type" 2>/dev/null)" in
 			nor | nand | mlc-nand) ;;
 			*) continue ;;
@@ -33,8 +38,8 @@ flash_bytes() {
 		off=$(cat "$d/offset" 2>/dev/null)
 		chip=-
 		[ -e "$d/device" ] && chip=$(readlink -f "$d/device")
-		printf '%s %s %s\n' "${chip:--}" "${off:--}" "$(cat "$d/size")"
-	done | awk -v cmdline="$(cat "$root/proc/cmdline" 2>/dev/null)" '
+		printf '%s %s %s %s\n' "$n" "${chip:--}" "${off:--}" "$(cat "$d/size")"
+	done | sort -n | awk -v cmdline="$(cat "$root/proc/cmdline" 2>/dev/null)" '
 		# memparse: decimal or 0x hex, then an optional k/m/g
 		function num(s,   n, m, c, i) {
 			m = 1
@@ -79,14 +84,24 @@ flash_bytes() {
 			}
 			return k == NR
 		}
-		{ chip[NR] = $1; off[NR] = $2; size[NR] = $3; if ($2 == "-") nooff = 1 }
+		{
+			chip[NR] = $2; off[NR] = $3; size[NR] = $4
+			if ($3 != "-") hasoff = 1
+			if ($2 == "-") nochip = 1
+		}
 		END {
 			if (!NR) exit
-			if (nooff && !rebuild()) {
-				for (i = 1; i <= NR; i++) total += size[i]
-				print total
-				exit
+			if ((!hasoff || nochip) && !rebuild()) {
+				if (!hasoff) {
+					for (i = 1; i <= NR; i++) total += size[i]
+					print total
+					exit
+				}
+				# Offsets, but no way to tell the chips apart: one chip.
 			}
+			# Beside partitions that have an offset, an entry without one is
+			# the whole chip.
+			if (hasoff) for (i = 1; i <= NR; i++) if (off[i] == "-") off[i] = 0
 			for (i = 1; i <= NR; i++)
 				if (off[i] + size[i] > end[chip[i]]) end[chip[i]] = off[i] + size[i]
 			for (c in end) total += end[c]

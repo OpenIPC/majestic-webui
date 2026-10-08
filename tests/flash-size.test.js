@@ -18,19 +18,22 @@ const { check, group, done } = require('./assert');
 const SH = path.join(__dirname, '..', 'www', 'cgi-bin', 'p', 'flash.sh');
 const K = 1024, M = 1024 * 1024;
 
-// parts: [{ type, size, offset?, chip? }]; an entry of null is an mtdNro-like
-// directory with no type file.
+// parts: [{ type, size, offset?, chip? }]. null is a directory with no type
+// file, 'gap' is a number with no directory at all, and chip: false is an entry
+// with no device link.
 function tree(parts, cmdline) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'flash-'));
 	const mtd = path.join(root, 'sys', 'class', 'mtd');
 	fs.mkdirSync(mtd, { recursive: true });
 	parts.forEach((p, i) => {
+		if (p === 'gap') return;
 		const d = path.join(mtd, 'mtd' + i);
 		fs.mkdirSync(d);
 		if (!p) return;
 		fs.writeFileSync(path.join(d, 'type'), p.type + '\n');
 		fs.writeFileSync(path.join(d, 'size'), p.size + '\n');
 		if (p.offset !== undefined) fs.writeFileSync(path.join(d, 'offset'), p.offset + '\n');
+		if (p.chip === false) return;
 		const chip = path.join(root, 'devices', p.chip || 'hisi_spi_nor.0');
 		fs.mkdirSync(chip, { recursive: true });
 		fs.symlinkSync(chip, path.join(d, 'device'));
@@ -56,6 +59,8 @@ function tiled(list, extra) {
 	});
 }
 
+const strip = (list) => list.map(({ offset, ...p }) => p);
+
 group('offsets in sysfs');
 // The lab hi3516av300: 32 MB NOR, ultimate layout.
 const av300 = [['boot', 256 * K], ['env', 64 * K], ['kernel', 3072 * K], ['rootfs', 24576 * K], ['rootfs_data', 4800 * K]];
@@ -80,8 +85,32 @@ check('a partition that is not flash is not counted', bytes(tree(ram)) === Strin
 
 check('no flash at all says nothing, not zero', bytes(tree([])) === '');
 
+// A partitioned master: the whole chip as an entry of its own, with no offset
+// file, beside partitions that have one.
+const master = [{ type: 'nor', size: 16 * M }].concat(tiled([['boot', 1 * M], ['rest', 15 * M]]));
+check('a whole-chip entry without an offset is not counted on top', bytes(tree(master)) === String(16 * M));
+
+const gapped = tiled(av300);
+gapped.splice(2, 0, 'gap');
+check('a gap in the numbering does not end the scan', bytes(tree(gapped)) === String(32 * M));
+check('nor does a missing mtd0', bytes(tree(['gap'].concat(tiled(av300)))) === String(32 * M));
+// Eleven 1 MB partitions and a span over all of them as mtd11. Read in glob
+// order, mtd11 would be paired with the fourth partition on the command line.
+const many = strip(tiled(Array.from({ length: 11 }, (_, i) => ['p' + i, 1 * M])));
+many.push({ type: 'nor', size: 11 * M });
+check('mtd10 and up are paired with mtdparts in number order',
+	bytes(tree(many, 'mtdparts=sfc:' + Array.from({ length: 11 }, (_, i) => '1M(p' + i + ')').join(',') + ',11M@0(all)')) === String(11 * M));
+
+group('no device links');
+const unlinked = (list) => list.map((p) => Object.assign({}, p, { chip: false }));
+const nor8 = tiled([['boot', 256 * K], ['env', 64 * K], ['rest', 7872 * K]]);
+const nand = tiled([['ubi', 128 * M]], { type: 'nand' });
+check('two chips are told apart by mtdparts',
+	bytes(tree(unlinked(nor8.concat(nand)), 'mtdparts=sfc:256k(boot),64k(env),-(rest);nand:-(ubi)')) === String(136 * M));
+check('without mtdparts they are taken as one chip, not summed',
+	bytes(tree(unlinked(sixteen))) === String(16 * M));
+
 group('no offsets in sysfs (3.x kernels)');
-const strip = (list) => list.map(({ offset, ...p }) => p);
 check('rebuilt from mtdparts, "-" taking the rest',
 	bytes(tree(strip(tiled(av300)),
 		'mem=64M console=ttyAMA0,115200 mtdparts=hi_sfc:256k(boot),64k(env),3072k(kernel),24576k(rootfs),-(rootfs_data)')) === String(32 * M));
