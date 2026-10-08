@@ -184,6 +184,16 @@ focus_label="Focus"
 	<% fi %>
 	<span class="mj-ptz-void"></span>
 </div>
+<!-- How fast the pad pans and tilts, for a motor driver that keeps a speed (a
+     gpiostep head). Hidden here and revealed by preview-ptz.js only when
+     GET /ptz says " speeds=": every other lens has one speed, and a slider that
+     changed nothing would be a lie. Pan and tilt only; zoom and focus run at
+     the lens's own rate. -->
+<div id="mj-ptz-speed" class="mj-ptz-speed" hidden>
+	<label for="mj-ptz-speed-in" class="mj-ptz-group">Speed</label>
+	<input type="range" id="mj-ptz-speed-in" min="10" max="100" step="10" value="100"
+		aria-label="Pan and tilt speed, percent of the fastest">
+</div>
 <% fi %>
 <% else %>
 <% if has_cap pan || has_cap tilt; then %>
@@ -254,4 +264,5 @@ focus_label="Focus"
      degrades rather than breaks if this one is missing — the pad still drives
      the lens, it just stops narrating the autofocus. -->
 <script src="/a/af-state.js"></script>
+<script src="/a/ptz-speed.js"></script>
 <script src="/a/preview-ptz.js"></script>
