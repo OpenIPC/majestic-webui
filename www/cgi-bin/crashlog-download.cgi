@@ -43,6 +43,7 @@ fi
 # for good. Clears the overlay bundle and the live pstore ring together.
 if [ "$REQUEST_METHOD" = "POST" ] && [ "$POST_action" = "dismiss" ]; then
 	rm -f "$CRASH/pending" "$CRASH/failsafe" "$CRASH/crash.tar.gz" "$CRASH/sent" 2>/dev/null
+	rm -rf "$CRASH/older" 2>/dev/null
 	rm -f /sys/fs/pstore/dmesg-* 2>/dev/null
 	redirect_to "dashboard.cgi"
 	exit 0

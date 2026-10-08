@@ -30,12 +30,18 @@ const ANSWER = (code, title, compact) => {
 		.replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
 };
 
-// A crash log as the firmware packs it: a gzipped tar of pstore records.
-function record(cam, text) {
+// A crash log as the firmware packs it: a gzipped tar of pstore records, and
+// the firmware's meta.json when it is given one.
+function record(cam, text, meta, where) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crashlog-rec-'));
 	fs.writeFileSync(path.join(dir, 'dmesg-ramoops-0'), text);
-	execFileSync('sh', ['-c', 'tar -cf - -C "$1" dmesg-ramoops-0 | gzip > "$2"', 'sh', dir, path.join(cam.crash, 'crash.tar.gz')]);
+	if (meta) fs.writeFileSync(path.join(dir, 'meta.json'), meta);
+	const out = where || path.join(cam.crash, 'crash.tar.gz');
+	fs.mkdirSync(path.dirname(out), { recursive: true });
+	execFileSync('sh', ['-c', 'tar -cf - -C "$1" . | gzip > "$2"', 'sh', dir, out]);
 }
+const older = (cam, name, text, meta) => record(cam, text, meta, path.join(cam.crash, 'older', name + '.tar.gz'));
+const metas = (cam) => fs.existsSync(cam.calls + '.meta') ? fs.readFileSync(cam.calls + '.meta', 'utf8').split('\n').filter(Boolean) : [];
 
 function camera() {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crashlog-send-'));
@@ -47,7 +53,8 @@ function camera() {
 	fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\n' +
 		'out=; prev=\n' +
 		'for a in "$@"; do printf "%s\\n" "$a" >> "$CALLS"; [ "$prev" = --output ] && out=$a; prev=$a\n' +
-		'  case "$a" in bundle=@*) f=${a#bundle=@}; f=${f%%;*}; gzip -dc "$f" | tar -tf - | sed "s#^\\./##" | grep -v "^$" | sort | tr "\\n" " " >> "$CALLS.list"; echo >> "$CALLS.list" ;; esac\n' +
+		'  case "$a" in bundle=@*) f=${a#bundle=@}; f=${f%%;*}; gzip -dc "$f" | tar -tf - | sed "s#^\\./##" | grep -v "^$" | sort | tr "\\n" " " >> "$CALLS.list"; echo >> "$CALLS.list" ;;\n' +
+		'  "meta=<"*) cat "${a#meta=<}" >> "$CALLS.meta"; echo >> "$CALLS.meta" ;; esac\n' +
 		'done\n' +
 		'echo "--" >> "$CALLS"\n' +
 		'printf "%s" "$ANSWER" > "$out"\n' +
@@ -101,6 +108,7 @@ group('pressing Send');
 	check('it says where the crash was filed', r.rc === 0 && r.out === 'Sent to openipc.org: NULL pointer dereference in example_handler');
 	check('the log goes as the file part bundle', args.includes('-F') && /;type=application\/gzip$/.test(args.find((a) => a.startsWith('bundle=@')) || ''));
 	check('and holds the kernel\'s records', lists(cam)[0] === 'dmesg-ramoops-0');
+	check('with no meta.json, no meta goes', metas(cam).length === 0);
 	check('a value starting with @ goes as text, never as a file to read',
 		args[args.indexOf('sensor=@/etc/shadow') - 1] === '--form-string');
 	check('the chip goes too', args.includes('soc=gk7205v300'));
@@ -196,6 +204,51 @@ group('a boot loop with no kernel log');
 	fs.writeFileSync(path.join(cam.crash, 'failsafe'), 'reason=bootlimit\nutc=0\n');
 	const r = send(cam);
 	check('with a kernel log too, both go in one archive', r.rc === 0 && lists(cam)[0] === 'dmesg-ramoops-0 failsafe');
+}
+
+group('earlier crashes the firmware kept');
+{
+	const cam = camera();
+	record(cam, 'the latest', '{"soc":"latest"}');
+	older(cam, '20260101000000', 'the first', '{"soc":"first"}');
+	older(cam, '20260102000000', 'the second');
+	const r = send(cam);
+	check('Send sends the latest and every earlier one', r.rc === 0 && calls(cam).length === 3 &&
+		/^Sent to openipc.org: .*Earlier crashes sent: 2\.$/.test(r.out));
+	check('the firmware\'s meta.json goes as the meta field, read from the file',
+		metas(cam).includes('{"soc":"latest"}') && metas(cam).includes('{"soc":"first"}') && metas(cam).length === 2);
+	check('each earlier crash is noted beside it',
+		/^signature=0123456789ab$/m.test(fs.readFileSync(path.join(cam.crash, 'older', '20260101000000.tar.gz.sent'), 'utf8')) &&
+		fs.existsSync(path.join(cam.crash, 'older', '20260102000000.tar.gz.sent')));
+	fs.writeFileSync(cam.conf, 'crashlog_auto=true\n');
+	send(cam, ['--auto']);
+	check('and none of them goes twice', calls(cam).length === 3);
+
+	// The firmware moved the latest under older/ when another crash came: the
+	// latest is the new one, and the moved one has no note of its own yet.
+	fs.renameSync(path.join(cam.crash, 'crash.tar.gz'), path.join(cam.crash, 'older', '20260103000000.tar.gz'));
+	fs.unlinkSync(path.join(cam.crash, 'older', '20260101000000.tar.gz')); // dropped past the cap
+	record(cam, 'the newest');
+	send(cam, ['--auto']);
+	check('cron sends the new latest and the moved one', calls(cam).length === 5);
+	check('a note whose crash the firmware dropped goes with it', !fs.existsSync(path.join(cam.crash, 'older', '20260101000000.tar.gz.sent')));
+}
+{
+	const cam = camera();
+	fs.writeFileSync(cam.conf, 'crashlog_auto=true\n');
+	older(cam, '20260101000000', 'only an earlier one');
+	const r = send(cam, ['--auto']);
+	check('with only earlier crashes on record, cron sends them', r.rc === 0 && calls(cam).length === 1);
+}
+{
+	const cam = camera();
+	record(cam, 'the latest');
+	older(cam, '20260101000000', 'an earlier one');
+	const r = send(cam, [], { CODE: '429' });
+	check('one that is refused is said, and the rest were tried', r.rc === 1 && calls(cam).length === 2 &&
+		/Earlier crashes not sent: 1 \(openipc.org did not take the crash \(HTTP 429\): the daily limit is reached\)\.$/.test(r.out));
+	check('and nothing refused is noted as sent',
+		sent(cam) === '' && !fs.existsSync(path.join(cam.crash, 'older', '20260101000000.tar.gz.sent')));
 }
 {
 	const cam = camera();
