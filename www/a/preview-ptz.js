@@ -39,6 +39,32 @@
 	if (!mount || (!pad && !fn)) return;
 	if (fn) { mount.appendChild(fn); fn.hidden = false; }
 	if (pad) { mount.appendChild(pad); pad.hidden = false; }
+	// The speed control waits, hidden, until the camera says its motor keeps a
+	// speed (ptz-speed.js). Asked once at mount, with the same bare GET /ptz the
+	// capability line is always read with; no answer leaves it hidden, so every
+	// move goes out exactly as before. The value is a per-browser convenience.
+	const speedBox = $('#mj-ptz-speed'), speedIn = $('#mj-ptz-speed-in');
+	const PS = window.MajesticPtzSpeed;
+	if (speedBox && speedIn && PS) {
+		try {
+			const v = localStorage.getItem('mj-ptz-speed');
+			if (v) speedIn.value = v;
+		} catch (e) { /* storage blocked: start at the top speed */ }
+		speedIn.addEventListener('change', () => {
+			try { localStorage.setItem('mj-ptz-speed', speedIn.value); } catch (e) { /* ignore */ }
+		});
+		apiFetch('/ptz', { credentials: 'same-origin' })
+			.then(r => (r.ok ? r.text() : ''))
+			.then(t => {
+				if (!PS.offered(t)) return;
+				mount.appendChild(speedBox);
+				speedBox.hidden = false;
+			})
+			.catch(() => {});
+	}
+	function speedQuery(verb) {
+		return PS && speedBox && !speedBox.hidden && speedIn ? PS.query(verb, speedIn.value) : '';
+	}
 	mount.hidden = false;
 
 	const STEP = 5, TICK_MS = 250;
@@ -126,6 +152,7 @@
 	function move(verb, ms, isStop) {
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
+		url += speedQuery(verb);
 		if (!isStop && outstanding >= 3) return;
 		outstanding++;
 		apiFetch(url, { method: 'POST', credentials: 'same-origin' })
