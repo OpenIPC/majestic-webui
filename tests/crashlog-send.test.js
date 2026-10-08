@@ -158,6 +158,21 @@ group('one sender at a time');
 	check('cron steps aside, quietly', quiet.rc === 0 && quiet.out === '' && calls(cam).length === 0);
 	check('the button says the crash is going already', pressed.rc === 1 && /being sent already/.test(pressed.out));
 }
+{
+	// A build without flock: the lock is a directory naming its holder.
+	const cam = camera();
+	record(cam, 'a crash');
+	const noflock = { CRASHLOG_FLOCK: 'no-such-flock' };
+	const lockdir = path.join(cam.dir, 'lock.d');
+	fs.mkdirSync(lockdir);
+	fs.writeFileSync(path.join(lockdir, 'pid'), String(process.pid)); // alive: this test
+	const pressed = send(cam, [], noflock);
+	check('without flock, a live holder still keeps a second sender out', pressed.rc === 1 && calls(cam).length === 0);
+	fs.writeFileSync(path.join(lockdir, 'pid'), '999999'); // a run that was killed
+	const after = send(cam, [], noflock);
+	check('and a dead one does not lock sending out for good', after.rc === 0 && calls(cam).length === 1);
+	check('the lock goes with the run', !fs.existsSync(lockdir));
+}
 
 group('a note that cannot be kept');
 {

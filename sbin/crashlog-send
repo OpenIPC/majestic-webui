@@ -28,6 +28,7 @@ CRASH=${CRASHLOG_DIR:-/etc/crash}
 CONF=${CRASHLOG_CONF:-/etc/webui/crashlog.conf}
 URL=${CRASHLOG_URL:-https://openipc.org/api/v1/crashes}
 LOCK=${CRASHLOG_LOCK:-/tmp/crashlog-send.lock}
+FLOCK=${CRASHLOG_FLOCK:-flock}
 [ -e "$CONF" ] && . "$CONF"
 
 auto=
@@ -35,14 +36,33 @@ auto=
 
 # One sender at a time: the owner pressing Send while cron's run is on its way
 # would otherwise post the same crash twice, both having read "not sent" before
-# either wrote that it was. The check below is made under the lock. Without
-# flock there is no lock, and a race the lock was for -- not a sender that
-# refuses every crash.
-exec 9>"$LOCK"
-if command -v flock >/dev/null 2>&1 && ! flock -n 9; then
+# either wrote that it was. The check below is made under the lock: flock's,
+# released by the kernel when this process ends however it ends, or where a
+# build has no flock, a directory holding the holder's pid, taken over when
+# that process is gone so a killed run cannot lock sending out for good.
+busy() {
 	[ -n "$auto" ] && exit 0
 	echo "This crash is being sent already. Look again in a minute."
 	exit 1
+}
+held=
+cleanup() {
+	[ -n "$workdir" ] && rm -rf "$workdir"
+	[ -n "$held" ] && rm -rf "$held"
+}
+trap cleanup EXIT
+if command -v "$FLOCK" >/dev/null 2>&1; then
+	exec 9>"$LOCK"
+	"$FLOCK" -n 9 || busy
+else
+	if ! mkdir "$LOCK.d" 2>/dev/null; then
+		holder=$(cat "$LOCK.d/pid" 2>/dev/null)
+		[ -n "$holder" ] && kill -0 "$holder" 2>/dev/null && busy
+		rm -rf "$LOCK.d"
+		mkdir "$LOCK.d" 2>/dev/null || busy
+	fi
+	held=$LOCK.d
+	echo $$ > "$LOCK.d/pid"
 fi
 
 if [ ! -s "$CRASH/crash.tar.gz" ] && [ ! -f "$CRASH/failsafe" ]; then
@@ -62,7 +82,6 @@ if [ -n "$auto" ]; then
 fi
 
 workdir=$(mktemp -d /tmp/crashlog.XXXXXX) || exit 1
-trap 'rm -rf "$workdir"' EXIT
 
 # Everything on record goes, in one archive: the kernel's log when the firmware
 # kept one, and its note of a fall into failsafe when there is one -- a boot
