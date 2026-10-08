@@ -5,7 +5,9 @@ that configure them.
 
 Each extension is a CGI for the form plus a sbin script invoked by cron or
 webhook: `telegram.cgi` ↔ `sbin/telegram`, `ntfy.cgi` ↔ `bin/ntfy.sh`,
-`max.cgi` ↔ `sbin/max`, `openwall.cgi` ↔ `sbin/openwall`, plus `wireguard.cgi`,
+`max.cgi` ↔ `sbin/max`, `openwall.cgi` ↔ `sbin/openwall`,
+`crashlog.cgi` ↔ `sbin/crashlog-send` (a crash the camera recovered from, to
+openipc.org; its form posts to `crashlog-download.cgi`), plus `wireguard.cgi`,
 `vtun.cgi`, `proxy.cgi` and `backup-create.cgi`. The CGI defines a `params` list,
 loops `POST_<name>` into shell vars, validates, rewrites its single
 `/etc/webui/<name>.conf`, and `sed -i /<name>/d /etc/crontabs/root` before

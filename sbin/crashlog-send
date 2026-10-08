@@ -1,0 +1,226 @@
+#!/bin/sh
+# Send the crash this camera recovered from to openipc.org, where crashes from
+# every camera are filed by bug and ranked, so the bug gets fixed
+# (https://openipc.org/crashes).
+#
+#   crashlog-send          send it now -- the Send button on the crash report
+#   crashlog-send --auto   send it if the owner asked for crashes to go on
+#                          their own and this one has not gone yet (cron)
+#
+# What goes: the crash log the firmware kept (the kernel's own log of the
+# crash, the same file the page's Download gives), the MAC, chip, sensor,
+# firmware and majestic version. The site replaces the MAC and every address
+# in the log with hashes before anyone reads it. Nothing else: no picture, no
+# settings, no password.
+#
+# Nothing is sent without the owner: the button is a person pressing it, and
+# --auto does nothing unless they turned automatic sending on.
+#
+# The answer is kept in $CRASH/sent -- which bug it was filed under and where
+# to read about it -- so the page can say so, and --auto does not send the
+# same crash twice. It names the crash it was for by its md5 -- busybox has
+# md5sum where it may lack sha256sum, and telling two files apart is all it
+# is for. The firmware keeps only the latest crash, so after another one the
+# file on record is a different crash, and the note about the last one must
+# not stop it going. Dismiss removes it with the crash.
+
+CRASH=${CRASHLOG_DIR:-/etc/crash}
+CONF=${CRASHLOG_CONF:-/etc/webui/crashlog.conf}
+URL=${CRASHLOG_URL:-https://openipc.org/api/v1/crashes}
+LOCK=${CRASHLOG_LOCK:-/tmp/crashlog-send.lock}
+FLOCK=${CRASHLOG_FLOCK:-flock}
+[ -e "$CONF" ] && . "$CONF"
+
+auto=
+[ "$1" = "--auto" ] && auto=1
+
+# One sender at a time: the owner pressing Send while cron's run is on its way
+# would otherwise post the same crash twice, both having read "not sent" before
+# either wrote that it was. The check below is made under the lock: flock's,
+# released by the kernel when this process ends however it ends, or where a
+# build has no flock, a directory holding the holder's pid, taken over when
+# that process is gone so a killed run cannot lock sending out for good.
+busy() {
+	[ -n "$auto" ] && exit 0
+	echo "This crash is being sent already. Look again in a minute."
+	exit 1
+}
+held=
+cleanup() {
+	[ -n "$workdir" ] && rm -rf "$workdir"
+	[ -n "$held" ] && rm -rf "$held"
+}
+trap cleanup EXIT
+if command -v "$FLOCK" >/dev/null 2>&1; then
+	exec 9>"$LOCK"
+	"$FLOCK" -n 9 || busy
+else
+	if ! mkdir "$LOCK.d" 2>/dev/null; then
+		holder=$(cat "$LOCK.d/pid" 2>/dev/null)
+		[ -n "$holder" ] && kill -0 "$holder" 2>/dev/null && busy
+		rm -rf "$LOCK.d"
+		mkdir "$LOCK.d" 2>/dev/null || busy
+	fi
+	held=$LOCK.d
+	echo $$ > "$LOCK.d/pid"
+fi
+
+if [ ! -s "$CRASH/crash.tar.gz" ] && [ ! -f "$CRASH/failsafe" ]; then
+	[ -n "$auto" ] && exit 0
+	echo "There is no crash on record to send."
+	exit 1
+fi
+
+# What is on record now: the crash log, and the failsafe note beside it.
+current=$(cat "$CRASH/crash.tar.gz" "$CRASH/failsafe" 2>/dev/null | md5sum | cut -d' ' -f1)
+
+if [ -n "$auto" ]; then
+	# Quiet: cron runs this every few minutes on every camera that opted in,
+	# and nothing to send is the usual answer.
+	[ "$crashlog_auto" = "true" ] || exit 0
+	[ "$(sed -n 's/^bundle=//p' "$CRASH/sent" 2>/dev/null)" = "$current" ] && exit 0
+fi
+
+workdir=$(mktemp -d /tmp/crashlog.XXXXXX) || exit 1
+
+# Everything on record goes, in one archive: the kernel's log when the firmware
+# kept one, and its note of a fall into failsafe when there is one -- a boot
+# loop is a crash too, and the worst kind, whether or not a panic came first.
+# The checksum above is of exactly these two files.
+mkdir "$workdir/records" || exit 1
+if [ -s "$CRASH/crash.tar.gz" ]; then
+	# busybox tar has no -z here: through gzip, and each step checked on its
+	# own, because a pipeline's status is its last command's.
+	gzip -dc "$CRASH/crash.tar.gz" > "$workdir/kernel.tar" &&
+		tar -xf "$workdir/kernel.tar" -C "$workdir/records" || {
+		echo "The crash log could not be read."
+		exit 1
+	}
+fi
+if [ -f "$CRASH/failsafe" ]; then
+	cp "$CRASH/failsafe" "$workdir/records/failsafe" || {
+		echo "The failsafe note could not be read."
+		exit 1
+	}
+fi
+bundle=$workdir/crash.tar.gz
+tar -cf "$workdir/crash.tar" -C "$workdir/records" . && gzip -c "$workdir/crash.tar" > "$bundle" || {
+	echo "The crash could not be packed."
+	exit 1
+}
+
+fw_variant=$(grep "BUILD_OPTION" /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
+fw_version=$(grep "OPENIPC_VERSION" /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
+network_interface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
+network_macaddr=
+[ -n "$network_interface" ] && network_macaddr=$(cat "/sys/class/net/${network_interface}/address" 2>/dev/null)
+if [ "$(ipcinfo -v 2>/dev/null)" = "sigmastar" ]; then
+	soc=$(fw_printenv -n soc 2>/dev/null)
+else
+	soc=$(ipcinfo --chip-name 2>/dev/null)
+fi
+sensor=$(fw_printenv -n sensor 2>/dev/null)
+mj_version=$(/usr/bin/majestic -v 2>/dev/null | head -n 1)
+
+# An argument list, never a command line handed to eval, and the text parts as
+# --form-string, which takes a value as it stands: under -F a value starting
+# with @ or < names a file for curl to read in its place. The same reasons as
+# sbin/openwall (#547), and the same redirect rules: openipc.org sends the
+# networks that cannot reach it intact to a mirror with a 301, and a POST must
+# stay a POST on the way.
+set -- curl --silent --show-error --connect-timeout 30 --max-time 60 \
+	--location --max-redirs 3 --post301 --post302 \
+	--output "$workdir/answer" --write-out '%{http_code}'
+
+if [ "$crashlog_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
+	. /etc/webui/proxy.conf
+	set -- "$@" --socks5-hostname "${socks5_host}:${socks5_port}"
+	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
+fi
+
+set -- "$@" --url "$URL"
+set -- "$@" -F "bundle=@${bundle};type=application/gzip"
+[ -n "$network_macaddr" ] && set -- "$@" --form-string "mac=${network_macaddr}"
+[ -n "$fw_version" ] && set -- "$@" --form-string "firmware=${fw_version}-${fw_variant:-lite}"
+[ -n "$mj_version" ] && set -- "$@" --form-string "majestic=${mj_version}"
+[ -n "$soc" ] && set -- "$@" --form-string "soc=${soc}"
+[ -n "$sensor" ] && set -- "$@" --form-string "sensor=${sensor}"
+
+# Not echoed: it can carry --proxy-user, and --auto runs from cron.
+http=$("$@")
+rc=$?
+
+# The answer is JSON. There is no JSON reader on the camera, and only flat
+# string values are read out of it, wherever they sit -- one key a line or all
+# of them on one -- with \" and \\ inside a value undone, and the \u003c,
+# \u003e, \u0026 a JSON encoder writes for < > & put back.
+value() {
+	awk -v key="\"$1\"" '
+		{ text = text $0 "\n" }
+		END {
+			at = index(text, key)
+			if (!at) exit
+			rest = substr(text, at + length(key))
+			sub(/^[ \t\n]*:[ \t\n]*/, "", rest)
+			if (substr(rest, 1, 1) != "\"") exit
+			out = ""
+			for (i = 2; i <= length(rest); i++) {
+				c = substr(rest, i, 1)
+				if (c == "\\") {
+					i++
+					c = substr(rest, i, 1)
+					if (c == "u") {
+						u = tolower(substr(rest, i + 1, 4))
+						i += 4
+						c = u == "003c" ? "<" : u == "003e" ? ">" : u == "0026" ? "&" : u == "0027" ? "'\''" : "?"
+					} else if (c == "n") c = " "
+					out = out c
+					continue
+				}
+				if (c == "\"") break
+				out = out c
+			}
+			print out
+		}' "$workdir/answer" 2>/dev/null
+}
+
+if [ "$rc" -ne 0 ]; then
+	echo "openipc.org could not be reached (curl exit ${rc}). Try again later."
+	exit 1
+fi
+case "$http" in
+200 | 201)
+	signature=$(value signature)
+	link=$(value url)
+	title=$(value title)
+	if [ -z "$signature" ]; then
+		echo "openipc.org answered ${http} but did not say where the crash was filed."
+		exit 1
+	fi
+	# Written aside and moved into place, and checked: a note that did not land
+	# leaves cron sending this crash again, so the owner is told it did not.
+	if ! {
+		echo "bundle=${current}"
+		echo "utc=$(date -u '+%Y-%m-%d %H:%M:%S')"
+		echo "id=$(value id)"
+		echo "signature=${signature}"
+		echo "url=${link}"
+		echo "title=${title}"
+	} > "$CRASH/sent.new" || ! mv -f "$CRASH/sent.new" "$CRASH/sent"; then
+		rm -f "$CRASH/sent.new"
+		echo "openipc.org took the crash, but this camera could not note that it was sent: ${title}"
+		exit 1
+	fi
+	if [ "$http" = 200 ]; then
+		echo "openipc.org already had this crash: ${title}"
+	else
+		echo "Sent to openipc.org: ${title}"
+	fi
+	exit 0
+	;;
+*)
+	reason=$(value error)
+	echo "openipc.org did not take the crash (HTTP ${http})${reason:+: ${reason}}"
+	exit 1
+	;;
+esac
