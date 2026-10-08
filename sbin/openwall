@@ -1,7 +1,8 @@
 #!/bin/sh
 [ -e "/etc/webui/openwall.conf" ] && . /etc/webui/openwall.conf
 
-flash_size=$(awk '{sum+=sprintf("0x%s", $2);} END{print sum/1048576;}' /proc/mtd)
+. /var/www/cgi-bin/p/flash.sh
+flash_size=$(flash_bytes | awk '{print $1/1048576}')
 fw_variant=$(grep "BUILD_OPTION" /etc/os-release | cut -d= -f2 | tr -d '"')
 fw_version=$(grep "OPENIPC_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
 
