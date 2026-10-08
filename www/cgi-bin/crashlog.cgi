@@ -42,14 +42,17 @@ done
 	<div class="col-12 col-lg-8">
 		<div class="card mb-4"><div class="card-body">
 			<% card_head "Crash report" %>
-			<% if [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ]; then %>
+			<% if [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ] || [ "$older_kept" -gt 0 ]; then %>
 			<% if [ -n "$sent_utc" ]; then %>
-			<p class="small text-secondary">This camera recovered from a crash, and it was sent to
-				openipc.org on <% esc "$sent_utc" %> UTC.</p>
-			<% else %>
-			<p class="small text-secondary">This camera recovered from a crash. Nothing has been sent
-				anywhere: send it to OpenIPC and it is filed with the same crash from other cameras, so the bug
+			<p class="small text-secondary">This camera recovered from a crash, and the latest one was
+				sent to openipc.org on <% esc "$sent_utc" %> UTC.</p>
+			<% elif [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ]; then %>
+			<p class="small text-secondary">This camera recovered from a crash. The latest one has not
+				been sent: send it to OpenIPC and it is filed with the same crash from other cameras, so the bug
 				can be found and fixed.</p>
+			<% else %>
+			<p class="small text-secondary">This camera recovered from crashes earlier, kept until you
+				dismiss them.</p>
 			<% fi %>
 			<dl class="row small mb-3">
 				<% if [ -n "$crash_utc" ]; then %>
@@ -66,7 +69,7 @@ done
 				<% fi %>
 				<% if [ "$older_kept" -gt 0 ]; then %>
 				<dt class="col-sm-3 text-secondary">Earlier crashes</dt>
-				<dd class="col-sm-9"><%= $older_kept %> kept since the last Dismiss<% if [ "$older_unsent" -gt 0 ]; then %>, <%= $older_unsent %> not sent yet<% else %>, all sent<% fi %></dd>
+				<dd class="col-sm-9"><% esc "$older_kept" %> kept since the last Dismiss<% if [ "$older_unsent" -gt 0 ]; then %>, <% esc "$older_unsent" %> not sent yet<% else %>, all sent<% fi %></dd>
 				<% fi %>
 			</dl>
 			<div class="d-flex gap-2 flex-wrap align-items-center">

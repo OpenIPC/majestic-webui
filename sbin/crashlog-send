@@ -162,6 +162,7 @@ value() {
 # (#547), and the same redirect rules: openipc.org sends the networks that
 # cannot reach it intact to a mirror with a 301, and a POST must stay a POST.
 post() {
+	failed=
 	rm -f "$workdir/answer"
 	set -- curl --silent --show-error --connect-timeout 30 --max-time 60 \
 		--location --max-redirs 3 --post301 --post302 \
@@ -228,28 +229,27 @@ status=0
 # not a panic came first. The checksum above is of exactly these two files.
 if [ -n "$have_current" ] && [ -z "$current_sent" ]; then
 	mkdir "$workdir/records" || exit 1
-	if [ -s "$CRASH/crash.tar.gz" ]; then
-		# busybox tar has no -z here: through gzip, and each step checked on
-		# its own, because a pipeline's status is its last command's.
-		gzip -dc "$CRASH/crash.tar.gz" > "$workdir/kernel.tar" &&
-			tar -xf "$workdir/kernel.tar" -C "$workdir/records" || {
-			echo "The crash log could not be read."
-			exit 1
-		}
+	# busybox tar has no -z here: through gzip, and each step checked on its
+	# own, because a pipeline's status is its last command's. A latest crash
+	# that cannot be read is said, and the earlier ones are still tried: one
+	# bad file must not hold back the rest.
+	packed=
+	if [ -s "$CRASH/crash.tar.gz" ] && ! { gzip -dc "$CRASH/crash.tar.gz" > "$workdir/kernel.tar" &&
+		tar -xf "$workdir/kernel.tar" -C "$workdir/records"; }; then
+		said="The latest crash log could not be read."
+	elif [ -f "$CRASH/failsafe" ] && ! cp "$CRASH/failsafe" "$workdir/records/failsafe"; then
+		said="The failsafe note could not be read."
+	elif ! { tar -cf "$workdir/crash.tar" -C "$workdir/records" . && gzip -c "$workdir/crash.tar" > "$workdir/crash.tar.gz"; }; then
+		said="The latest crash could not be packed."
+	else
+		packed=1
 	fi
-	if [ -f "$CRASH/failsafe" ]; then
-		cp "$CRASH/failsafe" "$workdir/records/failsafe" || {
-			echo "The failsafe note could not be read."
-			exit 1
-		}
-	fi
-	tar -cf "$workdir/crash.tar" -C "$workdir/records" . && gzip -c "$workdir/crash.tar" > "$workdir/crash.tar.gz" || {
-		echo "The crash could not be packed."
-		exit 1
-	}
+	[ -n "$packed" ] || status=1
 	meta=
 	[ -s "$workdir/records/meta.json" ] && meta=$workdir/records/meta.json
-	if post "$workdir/crash.tar.gz" "$meta"; then
+	if [ -z "$packed" ]; then
+		:
+	elif post "$workdir/crash.tar.gz" "$meta"; then
 		if ! note "$CRASH/sent" "$current"; then
 			said="openipc.org took the crash, but this camera could not note that it was sent: ${title}"
 			status=1
@@ -278,12 +278,16 @@ for f in $older; do
 		[ -s "$workdir/old/meta.json" ]; then
 		meta=$workdir/old/meta.json
 	fi
-	if post "$f" "$meta" && note "$f.sent" "$(md5sum < "$f" | cut -d' ' -f1)"; then
-		sent_older=$((sent_older + 1))
-	else
+	if ! post "$f" "$meta"; then
 		held_older=$((held_older + 1))
-		held_why=${failed:-this camera could not note that it was sent}
+		held_why=$failed
 		status=1
+	elif ! note "$f.sent" "$(md5sum < "$f" | cut -d' ' -f1)"; then
+		held_older=$((held_older + 1))
+		held_why="openipc.org took it, but this camera could not note that it was sent"
+		status=1
+	else
+		sent_older=$((sent_older + 1))
 	fi
 done
 if [ "$sent_older" -gt 0 ]; then
@@ -293,5 +297,7 @@ if [ "$held_older" -gt 0 ]; then
 	said="${said:+$said }Earlier crashes not sent: ${held_older} (${held_why})."
 fi
 
+# A Send pressed for crashes cron sent meanwhile says so, rather than nothing.
+[ -n "$said" ] || said="These crashes were already sent to openipc.org."
 echo "$said"
 exit "$status"

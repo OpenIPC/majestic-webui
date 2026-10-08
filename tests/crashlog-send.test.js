@@ -256,4 +256,34 @@ group('earlier crashes the firmware kept');
 	check('with nothing on record, Send says so', r.rc === 1 && r.out === 'There is no crash on record to send.' && calls(cam).length === 0);
 }
 
+group('what the review found');
+{
+	const cam = camera();
+	fs.writeFileSync(path.join(cam.crash, 'crash.tar.gz'), 'not an archive');
+	older(cam, '20260101000000', 'an earlier one');
+	const r = send(cam);
+	check('a latest crash that cannot be read does not hold back the earlier ones',
+		r.rc === 1 && calls(cam).length === 1 && /^The latest crash log could not be read\. Earlier crashes sent: 1\.$/.test(r.out));
+}
+{
+	const cam = camera();
+	record(cam, 'sent by cron meanwhile');
+	send(cam);
+	const r = send(cam);
+	check('a Send for crashes already sent says so, not nothing', r.rc === 0 && r.out === 'These crashes were already sent to openipc.org.' && calls(cam).length === 1);
+}
+{
+	// The camera before it was refused, so a stale reason was lying about;
+	// this one is taken, and its trouble is its note.
+	const cam = camera();
+	record(cam, 'refused first');
+	send(cam, [], { CODE: '429' });
+	older(cam, '20260102000000', 'taken, but its note cannot be written');
+	fs.mkdirSync(path.join(cam.crash, 'older', '20260102000000.tar.gz.sent.new'));
+	const r = send(cam);
+	check('a note that cannot be written is reported as that, not as a stale refusal',
+		r.rc === 1 && /Earlier crashes not sent: 1 \(openipc.org took it, but this camera could not note that it was sent\)\.$/.test(r.out) &&
+		!/HTTP 429/.test(r.out));
+}
+
 done();
