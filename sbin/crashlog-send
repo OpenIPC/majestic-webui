@@ -27,10 +27,23 @@
 CRASH=${CRASHLOG_DIR:-/etc/crash}
 CONF=${CRASHLOG_CONF:-/etc/webui/crashlog.conf}
 URL=${CRASHLOG_URL:-https://openipc.org/api/v1/crashes}
+LOCK=${CRASHLOG_LOCK:-/tmp/crashlog-send.lock}
 [ -e "$CONF" ] && . "$CONF"
 
 auto=
 [ "$1" = "--auto" ] && auto=1
+
+# One sender at a time: the owner pressing Send while cron's run is on its way
+# would otherwise post the same crash twice, both having read "not sent" before
+# either wrote that it was. The check below is made under the lock. Without
+# flock there is no lock, and a race the lock was for -- not a sender that
+# refuses every crash.
+exec 9>"$LOCK"
+if command -v flock >/dev/null 2>&1 && ! flock -n 9; then
+	[ -n "$auto" ] && exit 0
+	echo "This crash is being sent already. Look again in a minute."
+	exit 1
+fi
 
 if [ ! -s "$CRASH/crash.tar.gz" ] && [ ! -f "$CRASH/failsafe" ]; then
 	[ -n "$auto" ] && exit 0
@@ -51,19 +64,31 @@ fi
 workdir=$(mktemp -d /tmp/crashlog.XXXXXX) || exit 1
 trap 'rm -rf "$workdir"' EXIT
 
-# The kernel's log when the firmware kept one. A camera that fell into failsafe
-# without a kernel panic has only the firmware's note of it, which is sent
-# alone: a boot loop is a crash too, and the worst kind.
+# Everything on record goes, in one archive: the kernel's log when the firmware
+# kept one, and its note of a fall into failsafe when there is one -- a boot
+# loop is a crash too, and the worst kind, whether or not a panic came first.
+# The checksum above is of exactly these two files.
+mkdir "$workdir/records" || exit 1
 if [ -s "$CRASH/crash.tar.gz" ]; then
-	bundle=$CRASH/crash.tar.gz
-else
-	bundle=$workdir/failsafe.tar.gz
-	# busybox tar has no -z here: compress through gzip.
-	tar -cf - -C "$CRASH" failsafe | gzip > "$bundle" || {
-		echo "The failsafe note could not be packed."
+	# busybox tar has no -z here: through gzip, and each step checked on its
+	# own, because a pipeline's status is its last command's.
+	gzip -dc "$CRASH/crash.tar.gz" > "$workdir/kernel.tar" &&
+		tar -xf "$workdir/kernel.tar" -C "$workdir/records" || {
+		echo "The crash log could not be read."
 		exit 1
 	}
 fi
+if [ -f "$CRASH/failsafe" ]; then
+	cp "$CRASH/failsafe" "$workdir/records/failsafe" || {
+		echo "The failsafe note could not be read."
+		exit 1
+	}
+fi
+bundle=$workdir/crash.tar.gz
+tar -cf "$workdir/crash.tar" -C "$workdir/records" . && gzip -c "$workdir/crash.tar" > "$bundle" || {
+	echo "The crash could not be packed."
+	exit 1
+}
 
 fw_variant=$(grep "BUILD_OPTION" /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
 fw_version=$(grep "OPENIPC_VERSION" /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
@@ -106,10 +131,38 @@ set -- "$@" -F "bundle=@${bundle};type=application/gzip"
 http=$("$@")
 rc=$?
 
-# The answer is JSON, one key a line. There is no JSON reader on the camera,
-# and only flat string values are read out of it.
+# The answer is JSON. There is no JSON reader on the camera, and only flat
+# string values are read out of it, wherever they sit -- one key a line or all
+# of them on one -- with \" and \\ inside a value undone, and the \u003c,
+# \u003e, \u0026 a JSON encoder writes for < > & put back.
 value() {
-	sed -n "s/^ *\"$1\": *\"\\(.*\\)\",\\{0,1\\}\$/\\1/p" "$workdir/answer" 2>/dev/null | head -n 1 | sed 's/\\"/"/g'
+	awk -v key="\"$1\"" '
+		{ text = text $0 "\n" }
+		END {
+			at = index(text, key)
+			if (!at) exit
+			rest = substr(text, at + length(key))
+			sub(/^[ \t\n]*:[ \t\n]*/, "", rest)
+			if (substr(rest, 1, 1) != "\"") exit
+			out = ""
+			for (i = 2; i <= length(rest); i++) {
+				c = substr(rest, i, 1)
+				if (c == "\\") {
+					i++
+					c = substr(rest, i, 1)
+					if (c == "u") {
+						u = tolower(substr(rest, i + 1, 4))
+						i += 4
+						c = u == "003c" ? "<" : u == "003e" ? ">" : u == "0026" ? "&" : u == "0027" ? "'\''" : "?"
+					} else if (c == "n") c = " "
+					out = out c
+					continue
+				}
+				if (c == "\"") break
+				out = out c
+			}
+			print out
+		}' "$workdir/answer" 2>/dev/null
 }
 
 if [ "$rc" -ne 0 ]; then
@@ -125,14 +178,20 @@ case "$http" in
 		echo "openipc.org answered ${http} but did not say where the crash was filed."
 		exit 1
 	fi
-	{
+	# Written aside and moved into place, and checked: a note that did not land
+	# leaves cron sending this crash again, so the owner is told it did not.
+	if ! {
 		echo "bundle=${current}"
 		echo "utc=$(date -u '+%Y-%m-%d %H:%M:%S')"
 		echo "id=$(value id)"
 		echo "signature=${signature}"
 		echo "url=${link}"
 		echo "title=${title}"
-	} > "$CRASH/sent"
+	} > "$CRASH/sent.new" || ! mv -f "$CRASH/sent.new" "$CRASH/sent"; then
+		rm -f "$CRASH/sent.new"
+		echo "openipc.org took the crash, but this camera could not note that it was sent: ${title}"
+		exit 1
+	fi
 	if [ "$http" = 200 ]; then
 		echo "openipc.org already had this crash: ${title}"
 	else

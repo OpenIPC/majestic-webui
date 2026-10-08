@@ -58,7 +58,7 @@ case "$sent_url" in https://*) ;; *) sent_url= ;; esac
 				<% fi %>
 			</dl>
 			<div class="d-flex gap-2 flex-wrap align-items-center">
-				<% if [ -z "$sent_utc" ]; then %>
+				<% if [ -z "$sent_utc" ] && { [ -s "$CRASH/crash.tar.gz" ] || [ -f "$CRASH/failsafe" ]; }; then %>
 				<form method="post" action="crashlog-download.cgi" class="d-inline m-0">
 					<input type="hidden" name="action" value="send">
 					<button type="submit" class="btn btn-primary">Send to OpenIPC</button>

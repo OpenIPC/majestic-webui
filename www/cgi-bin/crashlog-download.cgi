@@ -11,12 +11,14 @@ CRASH=/etc/crash
 config_file=/etc/webui/crashlog.conf
 
 # Send -- the owner pressing the button, for this crash. sbin/crashlog-send
-# says what it did in one sentence, which is what the page shows.
+# says what it did in one sentence, which is what the page shows -- escaped,
+# because the sentence carries what openipc.org answered and a notice is
+# rendered as markup.
 if [ "$REQUEST_METHOD" = "POST" ] && [ "$POST_action" = "send" ]; then
 	if said=$(/usr/sbin/crashlog-send 2>&1); then
-		redirect_to "crashlog.cgi" "success" "$said"
+		redirect_to "crashlog.cgi" "success" "$(esc "$said")"
 	fi
-	redirect_to "crashlog.cgi" "danger" "${said:-The crash could not be sent.}"
+	redirect_to "crashlog.cgi" "danger" "$(esc "${said:-The crash could not be sent.}")"
 fi
 
 # Sending on its own -- the owner's standing yes, kept until they take it back.
