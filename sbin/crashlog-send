@@ -114,7 +114,17 @@ else
 	soc=$(ipcinfo --chip-name 2>/dev/null)
 fi
 sensor=$(fw_printenv -n sensor 2>/dev/null)
-mj_version=$(/usr/bin/majestic -v 2>/dev/null | head -n 1)
+# majestic's version, asked only of a daemon that has been up a while: a
+# second majestic started while the daemon is starting -- even for -v --
+# stopped it in two tries of three on a gk7205v300, and cron, which starts
+# before majestic does, can run this at that moment. Up less than 30 seconds,
+# or not up at all, and the version is left out rather than asked for.
+mj_version=
+mj_pid=$(pidof majestic 2>/dev/null | cut -d' ' -f1)
+if [ -n "$mj_pid" ]; then
+	mj_age=$(awk -v up="$(cut -d' ' -f1 /proc/uptime)" '{ print int(up - $22 / 100) }' "/proc/$mj_pid/stat" 2>/dev/null)
+	[ "${mj_age:-0}" -ge 30 ] && mj_version=$(/usr/bin/majestic -v 2>/dev/null | head -n 1)
+fi
 
 # The answer is JSON. There is no JSON reader on the camera, and only flat
 # string values are read out of it, wherever they sit -- one key a line or all
