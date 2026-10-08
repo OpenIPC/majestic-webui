@@ -226,9 +226,10 @@ Pragma: no-cache
 <%
 # A camera that recovered from a crash raises it on every page until the owner
 # looks: the firmware leaves /etc/crash/pending (a preserved kernel log) or
-# /etc/crash/failsafe (a boot-failure fall-back) and this links to the report.
+# /etc/crash/failsafe (a boot-failure fall-back), and keeps earlier crashes
+# under /etc/crash/older until they are dismissed; this links to the report.
 # Suppressed on the report page itself, which says the same thing in full.
-if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ]; } && [ "$pagename" != "crashlog" ]; then %>
+if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ] || [ -d /etc/crash/older ]; } && [ "$pagename" != "crashlog" ]; then %>
 	<div class="container mt-3">
 		<div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0" role="alert">
 			<span><strong>This camera recovered from a crash.</strong> Open the crash report.</span>

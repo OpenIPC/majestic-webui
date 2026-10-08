@@ -27,6 +27,14 @@ if [ "$(sed -n 's/^bundle=//p' "$CRASH/sent" 2>/dev/null)" = "$crash_sum" ]; the
 	sent_utc=$(sed -n 's/^utc=//p' "$CRASH/sent")
 fi
 case "$sent_url" in https://*) ;; *) sent_url= ;; esac
+# The earlier crashes the firmware kept because nobody had dismissed them, and
+# how many of those are still to go.
+older_kept=0 older_unsent=0
+for f in "$CRASH/older"/*.tar.gz; do
+	[ -s "$f" ] || continue
+	older_kept=$((older_kept + 1))
+	[ -s "$f.sent" ] || older_unsent=$((older_unsent + 1))
+done
 [ -e /etc/webui/crashlog.conf ] && include /etc/webui/crashlog.conf
 %>
 
@@ -34,14 +42,17 @@ case "$sent_url" in https://*) ;; *) sent_url= ;; esac
 	<div class="col-12 col-lg-8">
 		<div class="card mb-4"><div class="card-body">
 			<% card_head "Crash report" %>
-			<% if [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ]; then %>
+			<% if [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ] || [ "$older_kept" -gt 0 ]; then %>
 			<% if [ -n "$sent_utc" ]; then %>
-			<p class="small text-secondary">This camera recovered from a crash, and it was sent to
-				openipc.org on <% esc "$sent_utc" %> UTC.</p>
-			<% else %>
-			<p class="small text-secondary">This camera recovered from a crash. Nothing has been sent
-				anywhere: send it to OpenIPC and it is filed with the same crash from other cameras, so the bug
+			<p class="small text-secondary">This camera recovered from a crash, and the latest one was
+				sent to openipc.org on <% esc "$sent_utc" %> UTC.</p>
+			<% elif [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ]; then %>
+			<p class="small text-secondary">This camera recovered from a crash. The latest one has not
+				been sent: send it to OpenIPC and it is filed with the same crash from other cameras, so the bug
 				can be found and fixed.</p>
+			<% else %>
+			<p class="small text-secondary">This camera recovered from crashes earlier, kept until you
+				dismiss them.</p>
 			<% fi %>
 			<dl class="row small mb-3">
 				<% if [ -n "$crash_utc" ]; then %>
@@ -56,9 +67,13 @@ case "$sent_url" in https://*) ;; *) sent_url= ;; esac
 				<dt class="col-sm-3 text-secondary">Kernel log</dt>
 				<dd class="col-sm-9"><% esc "$crash_records" %> pstore record(s), <% esc "$crash_bytes" %> bytes compressed</dd>
 				<% fi %>
+				<% if [ "$older_kept" -gt 0 ]; then %>
+				<dt class="col-sm-3 text-secondary">Earlier crashes</dt>
+				<dd class="col-sm-9"><% esc "$older_kept" %> kept since the last Dismiss<% if [ "$older_unsent" -gt 0 ]; then %>, <% esc "$older_unsent" %> not sent yet<% else %>, all sent<% fi %></dd>
+				<% fi %>
 			</dl>
 			<div class="d-flex gap-2 flex-wrap align-items-center">
-				<% if [ -z "$sent_utc" ] && { [ -s "$CRASH/crash.tar.gz" ] || [ -f "$CRASH/failsafe" ]; }; then %>
+				<% if { [ -z "$sent_utc" ] && { [ -s "$CRASH/crash.tar.gz" ] || [ -f "$CRASH/failsafe" ]; }; } || [ "$older_unsent" -gt 0 ]; then %>
 				<form method="post" action="crashlog-download.cgi" class="d-inline m-0">
 					<input type="hidden" name="action" value="send">
 					<button type="submit" class="btn btn-primary">Send to OpenIPC</button>
