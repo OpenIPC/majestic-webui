@@ -1,0 +1,148 @@
+#!/bin/sh
+# Send the crash this camera recovered from to openipc.org, where crashes from
+# every camera are filed by bug and ranked, so the bug gets fixed
+# (https://openipc.org/crashes).
+#
+#   crashlog-send          send it now -- the Send button on the crash report
+#   crashlog-send --auto   send it if the owner asked for crashes to go on
+#                          their own and this one has not gone yet (cron)
+#
+# What goes: the crash log the firmware kept (the kernel's own log of the
+# crash, the same file the page's Download gives), the MAC, chip, sensor,
+# firmware and majestic version. The site replaces the MAC and every address
+# in the log with hashes before anyone reads it. Nothing else: no picture, no
+# settings, no password.
+#
+# Nothing is sent without the owner: the button is a person pressing it, and
+# --auto does nothing unless they turned automatic sending on.
+#
+# The answer is kept in $CRASH/sent -- which bug it was filed under and where
+# to read about it -- so the page can say so, and --auto does not send the
+# same crash twice. It names the crash it was for by its md5 -- busybox has
+# md5sum where it may lack sha256sum, and telling two files apart is all it
+# is for. The firmware keeps only the latest crash, so after another one the
+# file on record is a different crash, and the note about the last one must
+# not stop it going. Dismiss removes it with the crash.
+
+CRASH=${CRASHLOG_DIR:-/etc/crash}
+CONF=${CRASHLOG_CONF:-/etc/webui/crashlog.conf}
+URL=${CRASHLOG_URL:-https://openipc.org/api/v1/crashes}
+[ -e "$CONF" ] && . "$CONF"
+
+auto=
+[ "$1" = "--auto" ] && auto=1
+
+if [ ! -s "$CRASH/crash.tar.gz" ] && [ ! -f "$CRASH/failsafe" ]; then
+	[ -n "$auto" ] && exit 0
+	echo "There is no crash on record to send."
+	exit 1
+fi
+
+# What is on record now: the crash log, and the failsafe note beside it.
+current=$(cat "$CRASH/crash.tar.gz" "$CRASH/failsafe" 2>/dev/null | md5sum | cut -d' ' -f1)
+
+if [ -n "$auto" ]; then
+	# Quiet: cron runs this every few minutes on every camera that opted in,
+	# and nothing to send is the usual answer.
+	[ "$crashlog_auto" = "true" ] || exit 0
+	[ "$(sed -n 's/^bundle=//p' "$CRASH/sent" 2>/dev/null)" = "$current" ] && exit 0
+fi
+
+workdir=$(mktemp -d /tmp/crashlog.XXXXXX) || exit 1
+trap 'rm -rf "$workdir"' EXIT
+
+# The kernel's log when the firmware kept one. A camera that fell into failsafe
+# without a kernel panic has only the firmware's note of it, which is sent
+# alone: a boot loop is a crash too, and the worst kind.
+if [ -s "$CRASH/crash.tar.gz" ]; then
+	bundle=$CRASH/crash.tar.gz
+else
+	bundle=$workdir/failsafe.tar.gz
+	# busybox tar has no -z here: compress through gzip.
+	tar -cf - -C "$CRASH" failsafe | gzip > "$bundle" || {
+		echo "The failsafe note could not be packed."
+		exit 1
+	}
+fi
+
+fw_variant=$(grep "BUILD_OPTION" /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
+fw_version=$(grep "OPENIPC_VERSION" /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
+network_interface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
+network_macaddr=
+[ -n "$network_interface" ] && network_macaddr=$(cat "/sys/class/net/${network_interface}/address" 2>/dev/null)
+if [ "$(ipcinfo -v 2>/dev/null)" = "sigmastar" ]; then
+	soc=$(fw_printenv -n soc 2>/dev/null)
+else
+	soc=$(ipcinfo --chip-name 2>/dev/null)
+fi
+sensor=$(fw_printenv -n sensor 2>/dev/null)
+mj_version=$(/usr/bin/majestic -v 2>/dev/null | head -n 1)
+
+# An argument list, never a command line handed to eval, and the text parts as
+# --form-string, which takes a value as it stands: under -F a value starting
+# with @ or < names a file for curl to read in its place. The same reasons as
+# sbin/openwall (#547), and the same redirect rules: openipc.org sends the
+# networks that cannot reach it intact to a mirror with a 301, and a POST must
+# stay a POST on the way.
+set -- curl --silent --show-error --connect-timeout 30 --max-time 60 \
+	--location --max-redirs 3 --post301 --post302 \
+	--output "$workdir/answer" --write-out '%{http_code}'
+
+if [ "$crashlog_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
+	. /etc/webui/proxy.conf
+	set -- "$@" --socks5-hostname "${socks5_host}:${socks5_port}"
+	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
+fi
+
+set -- "$@" --url "$URL"
+set -- "$@" -F "bundle=@${bundle};type=application/gzip"
+[ -n "$network_macaddr" ] && set -- "$@" --form-string "mac=${network_macaddr}"
+[ -n "$fw_version" ] && set -- "$@" --form-string "firmware=${fw_version}-${fw_variant:-lite}"
+[ -n "$mj_version" ] && set -- "$@" --form-string "majestic=${mj_version}"
+[ -n "$soc" ] && set -- "$@" --form-string "soc=${soc}"
+[ -n "$sensor" ] && set -- "$@" --form-string "sensor=${sensor}"
+
+# Not echoed: it can carry --proxy-user, and --auto runs from cron.
+http=$("$@")
+rc=$?
+
+# The answer is JSON, one key a line. There is no JSON reader on the camera,
+# and only flat string values are read out of it.
+value() {
+	sed -n "s/^ *\"$1\": *\"\\(.*\\)\",\\{0,1\\}\$/\\1/p" "$workdir/answer" 2>/dev/null | head -n 1 | sed 's/\\"/"/g'
+}
+
+if [ "$rc" -ne 0 ]; then
+	echo "openipc.org could not be reached (curl exit ${rc}). Try again later."
+	exit 1
+fi
+case "$http" in
+200 | 201)
+	signature=$(value signature)
+	link=$(value url)
+	title=$(value title)
+	if [ -z "$signature" ]; then
+		echo "openipc.org answered ${http} but did not say where the crash was filed."
+		exit 1
+	fi
+	{
+		echo "bundle=${current}"
+		echo "utc=$(date -u '+%Y-%m-%d %H:%M:%S')"
+		echo "id=$(value id)"
+		echo "signature=${signature}"
+		echo "url=${link}"
+		echo "title=${title}"
+	} > "$CRASH/sent"
+	if [ "$http" = 200 ]; then
+		echo "openipc.org already had this crash: ${title}"
+	else
+		echo "Sent to openipc.org: ${title}"
+	fi
+	exit 0
+	;;
+*)
+	reason=$(value error)
+	echo "openipc.org did not take the crash (HTTP ${http})${reason:+: ${reason}}"
+	exit 1
+	;;
+esac
