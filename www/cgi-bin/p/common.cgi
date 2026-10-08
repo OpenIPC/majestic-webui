@@ -16,6 +16,7 @@ IFS_ORIG=$IFS
 # block, so the parser would end the block on it and the page would fail with
 # "Missing" that same tag, several hundred lines later.)
 . ./p/majestic.sh
+. ./p/flash.sh
 
 # card_head "title" "note"
 #
@@ -966,8 +967,7 @@ t_value() {
 
 update_caminfo() {
 	flash_type=$(ipcinfo --flash-type)
-	mtd_size=$(grep -E "nor|nand" $(ls /sys/class/mtd/mtd*/type) | sed -E "s|type.+|size|g")
-	flash_size=$(awk '{sum+=$1} END{print sum/1024/1024}' $mtd_size)
+	flash_size=$(flash_bytes | awk '{print $1/1048576}')
 
 	sensor=$(fw_printenv -n sensor)
 	[ -z "$sensor" ] && sensor="unknown"

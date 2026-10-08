@@ -323,7 +323,9 @@ done) %>
 		<div class="st-panel">
 			<div class="mj-cap mb-2">Storage</div>
 			<dl class="small list mb-2">
-				<dt>Flash</dt><dd><% esc "$flash_size" %> MB <span class="text-secondary"><% esc "$flash_type" %></span></dd>
+				<% if [ -n "$flash_size" ]; then %>
+					<dt>Flash</dt><dd><% esc "$flash_size" %> MB <span class="text-secondary"><% esc "$flash_type" %></span></dd>
+				<% fi %>
 			</dl>
 			<div class="d-flex justify-content-between x-small mb-1">
 				<span class="fw-semibold">Overlay</span><span class="text-secondary"><% esc "${overlay_use:-n/a}" %></span>
