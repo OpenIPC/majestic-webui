@@ -146,15 +146,17 @@ window.MajesticVideo = (function () {
 		// moved), whether the next advance is the first since a seek, and
 		// whether play() has been refused since the pipeline was built.
 		let lagFloor = 0, lagLearn = true, lastCt = null, playRefused = false;
-		// The catch-up rule's memory (catchUp): the buffer this pipeline is
-		// drained down to; whether a catch-up is running; and, for the running
+		// The catch-up rule's memory (catchUp): whether a catch-up is running;
+		// whether this pipeline was found unable to drain; and, for the running
 		// one, the smallest lag it has reached, and the playhead and smallest
 		// lag at the start of the current progress window.
-		let catchTarget = CATCHUP_TARGET, catching = false;
+		let catching = false, catchOff = false;
 		let catchMin = 0, markCt = 0, markMin = 0;
-		// How far the buffer's end moves per fragment, smoothed: a frame's
-		// duration, or a batch's (APPEND_BATCH).
-		let lastEnd = 0, fragDur = 0;
+		// How far the buffer's end moves per append, smoothed: a frame's
+		// duration, or a batch's (APPEND_BATCH) -- the step the buffer grows
+		// by. Appends are counted as they complete, so two that land between
+		// two looks are averaged rather than taken for one long fragment.
+		let lastEnd = 0, fragDur = 0, appendPending = false, appendsDone = 0;
 
 		const mseOk = !!MSImpl;
 		// ManagedMediaSource only accepts appends while it is "streaming"; it
@@ -184,6 +186,11 @@ window.MajesticVideo = (function () {
 			}
 			flushAppend();
 		}
+		function onUpdateEnd() {
+			// remove() (trim) ends in 'updateend' too, and moves no end.
+			if (appendPending) { appendPending = false; appendsDone++; }
+			pump();
+		}
 		function flushAppend() {
 			if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = null; }
 			if (!sb || sb.updating || !queue.length || !mmsStreaming) return;
@@ -200,7 +207,7 @@ window.MajesticVideo = (function () {
 			// Consume only on a clean append: appendBuffer throws synchronously
 			// only on quota or a bad SourceBuffer state, and trim() frees the quota
 			// so the next pump retries the same fragments rather than dropping them.
-			try { sb.appendBuffer(buf); queue.splice(0, n); }
+			try { sb.appendBuffer(buf); queue.splice(0, n); appendPending = true; }
 			catch (e) { trim(); }
 		}
 		function trim() {
@@ -301,8 +308,8 @@ window.MajesticVideo = (function () {
 			// The lag floor describes the pipeline being torn down; the next
 			// one learns its own.
 			lagFloor = 0; lagLearn = true; lastCt = null; playRefused = false;
-			catchTarget = CATCHUP_TARGET; catching = false; setRate(1);
-			lastEnd = 0; fragDur = 0;
+			catching = false; catchOff = false; setRate(1);
+			lastEnd = 0; fragDur = 0; appendPending = false; appendsDone = 0;
 			// A redundant init may have armed this for a moov that never arrived
 			// (the socket dropped first). Clear it, or the next connection's real
 			// init segment would be dropped and playback could not start.
@@ -492,7 +499,7 @@ window.MajesticVideo = (function () {
 				// the whole point of the channel. The socket loses nothing,
 				// so its timeline stays as the camera wrote it.
 				try { sb.mode = feed === 'datachannel' ? 'sequence' : 'segments'; } catch (e) {}
-				sb.addEventListener('updateend', pump);
+				sb.addEventListener('updateend', onUpdateEnd);
 				started = true;
 				onState('playing', info.codec);
 				pump();
@@ -561,11 +568,14 @@ window.MajesticVideo = (function () {
 				const start = video.buffered.start(0);
 				const end = video.buffered.end(video.buffered.length - 1);
 				const ct = video.currentTime;
-				if (end > lastEnd && lastEnd > 0) {
-					const d = end - lastEnd;
-					fragDur = fragDur ? fragDur * 0.9 + d * 0.1 : d;
+				if (end > lastEnd) {
+					if (lastEnd > 0 && appendsDone > 0) {
+						const d = (end - lastEnd) / appendsDone;
+						fragDur = fragDur ? fragDur * 0.9 + d * 0.1 : d;
+					}
+					lastEnd = end;
+					appendsDone = 0;
 				}
-				lastEnd = end;
 				if (ct < start || ct > end + 0.25) { seekLive(start, end); return; }
 				const moving = lastCt !== null && ct > lastCt + 0.001;
 				lastCt = ct;
@@ -579,7 +589,9 @@ window.MajesticVideo = (function () {
 			} catch (e) {}
 		}
 		function seekLive(start, end) {
-			catching = false;
+			// A seek starts the pipeline's lag over, so catch-up gets to judge
+			// it afresh.
+			catching = false; catchOff = false;
 			setRate(1);
 			video.currentTime = Math.max(start, end - 0.1);
 			// Read back rather than assumed: the browser may clamp it, and the
@@ -602,10 +614,11 @@ window.MajesticVideo = (function () {
 		// told by progress, not by 'waiting': Chromium fires 'waiting' for
 		// every brief underrun of a thin buffer (hundreds a minute) and shows
 		// the frames all the same. When a window of CATCHUP_WINDOW seconds of
-		// playback has not shortened the lag by CATCHUP_PROGRESS, the smallest
-		// lag reached becomes this pipeline's target and catch-up stops: a T31
-		// under a hardware decoder, 1.7 s behind by necessity, plays 2 s
-		// slightly fast and is then left alone.
+		// playback has not shortened the lag by CATCHUP_PROGRESS, catch-up is
+		// off for this pipeline until it is rebuilt or seeked -- however its lag
+		// moves afterwards, a pipeline that could not be drained once is not
+		// tried again: a T31 under a hardware decoder, 1.7 s behind by
+		// necessity, plays 2 s slightly fast and is then left alone.
 		//
 		// A catch-up starts only when more than one fragment's worth is
 		// buffered beyond the target. With frames longer than the target -- 5M
@@ -615,7 +628,7 @@ window.MajesticVideo = (function () {
 		// held 66.7 ms exactly.
 		function catchUp(lag, ct) {
 			if (!catching) {
-				if (lag > catchTarget + Math.max(CATCHUP_SLACK, fragDur)) {
+				if (!catchOff && lag > CATCHUP_TARGET + Math.max(CATCHUP_SLACK, fragDur)) {
 					catching = true;
 					catchMin = markMin = lag;
 					markCt = ct;
@@ -623,7 +636,7 @@ window.MajesticVideo = (function () {
 				}
 				return;
 			}
-			if (lag <= catchTarget) {
+			if (lag <= CATCHUP_TARGET) {
 				catching = false;
 				setRate(1);
 				return;
@@ -631,8 +644,8 @@ window.MajesticVideo = (function () {
 			if (lag < catchMin) catchMin = lag;
 			if (ct - markCt < CATCHUP_WINDOW) return;
 			if (markMin - catchMin < CATCHUP_PROGRESS) {
-				catchTarget = Math.max(catchTarget, catchMin);
 				catching = false;
+				catchOff = true;
 				setRate(1);
 				return;
 			}

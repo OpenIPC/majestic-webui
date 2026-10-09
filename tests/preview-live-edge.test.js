@@ -69,8 +69,13 @@ function load(opts) {
 			readyState: 'open', listeners: {},
 			addEventListener(ev, fn) { ms.listeners[ev] = fn; },
 			addSourceBuffer() {
-				return { updating: false, mode: '', buffered: { length: 0 },
-					addEventListener() {}, appendBuffer() {}, remove() {}, abort() {} };
+				// An append completes on the next turn, as a browser's does,
+				// and says so with 'updateend'.
+				const sb = { updating: false, mode: '', buffered: { length: 0 }, onend: [],
+					addEventListener(ev, fn) { if (ev === 'updateend') sb.onend.push(fn); },
+					appendBuffer() { setTimeout(() => sb.onend.forEach((fn) => fn()), 0); },
+					remove() {}, abort() {} };
+				return sb;
 			},
 			removeSourceBuffer() {}, endOfStream() {},
 		};
@@ -236,8 +241,15 @@ function load(opts) {
 		const tried = env.fastFrags;
 		await env.frags(100);
 		check('and never again', env.fastFrags === tried, env.fastFrags + ' vs ' + tried);
+		// A late burst puts more in the buffer: still a pipeline that could
+		// not be drained, so still not tried.
+		env.hold = true;
+		await env.frags(5);
+		env.hold = false;
+		await env.frags(40);
+		check('not even after its lag grew', env.fastFrags === tried, env.fastFrags + ' vs ' + tried);
 		check('never seeked', env.seeks.length === 0, JSON.stringify(env.seeks));
-		check('playing 2 s behind', +(env.end - env.ct).toFixed(2) === 2, (env.end - env.ct).toFixed(2));
+		check('playing 2.5 s behind, as the burst left it', +(env.end - env.ct).toFixed(2) === 2.5, (env.end - env.ct).toFixed(2));
 	}
 
 	group('a rebuild does not inherit a catch-up');
