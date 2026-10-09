@@ -3623,6 +3623,15 @@ button.mj-osd-chip,
 	border-style: solid;
 }
 
+/* The person the head is following (ptz.track): drawn over the detector's own
+   box for the same person, so it is the heavier line and carries no fill --
+   the detector's box under it still shows through. */
+.mj-an-box[data-src="track"] {
+	border: 2px solid rgba(var(--bs-danger-rgb), 0.95);
+	background: transparent;
+	z-index: 1;
+}
+
 /* ── Motion detection: regions on the picture ────────────────────────────
    What replaced the Visual editor's iframe. Everything here lives inside
    mj-preview.js's stage — the rectangles and the drag catcher on its overlay
@@ -4908,6 +4917,13 @@ button.mj-osd-chip,
 	border: 1px solid rgba(255, 255, 255, 0.09);
 	border-radius: var(--bs-border-radius);
 	backdrop-filter: blur(10px);
+}
+
+.mj-ptz-follow {
+	padding: 6px 8px;
+	font-size: 0.75rem;
+	color: #fff;
+	white-space: nowrap;
 }
 
 .mj-ptz-speed input[type="range"] {
