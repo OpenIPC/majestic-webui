@@ -62,6 +62,35 @@
 			})
 			.catch(() => {});
 	}
+	// Follow, the same way: hidden until the camera says its motor counts steps
+	// and its detector is on (ptz-follow.js). The switch is the camera's
+	// setting, ptz.track, not a per-browser one: what it shows is read back
+	// from the config, and a write the camera refused puts it back.
+	const followBox = $('#mj-ptz-follow'), followIn = $('#mj-ptz-follow-in');
+	const PF = window.MajesticPtzFollow;
+	if (followBox && followIn && PF) {
+		Promise.all([
+			apiFetch('/ptz', { credentials: 'same-origin' }).then(r => (r.ok ? r.text() : '')),
+			typeof mjConfig === 'function' ? mjConfig() : Promise.resolve({}),
+		]).then(([caps, cfg]) => {
+			if (!PF.offered(caps, cfg)) return;
+			followIn.checked = PF.on(cfg);
+			mount.appendChild(followBox);
+			followBox.hidden = false;
+		}).catch(() => {});
+		followIn.addEventListener('change', () => {
+			const want = followIn.checked;
+			followIn.disabled = true;
+			apiFetch('/api/v1/config', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: PF.body(want),
+			}).then(r => { if (!r.ok) followIn.checked = !want; })
+				.catch(() => { followIn.checked = !want; })
+				.then(() => { followIn.disabled = false; });
+		});
+	}
 	function speedQuery(verb) {
 		return PS && speedBox && !speedBox.hidden && speedIn ? PS.query(verb, speedIn.value) : '';
 	}
