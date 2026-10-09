@@ -27,6 +27,16 @@ eq('off when false', F.on({ ptz: { track: false } }), false);
 eq('off when absent', F.on({}), false);
 eq('a string "true" is not on', F.on({ ptz: { track: 'true' } }), false);
 
+// A fresh read decides both, so a change made elsewhere shows: the detector
+// switched off hides the switch, and another operator's setting is what it shows.
+const v1 = F.view(HEAD, { npuDetect: { enabled: true }, ptz: { track: true } });
+eq('a fresh read: shown and on', v1.show && v1.on, true);
+const v2 = F.view(HEAD, { npuDetect: { enabled: false }, ptz: { track: true } });
+eq('the detector switched off elsewhere: hidden', v2.show, false);
+eq('and a hidden switch is never shown as on', v2.on, false);
+const v3 = F.view(HEAD, { npuDetect: { enabled: true }, ptz: { track: false } });
+eq('switched off by another operator: shown, off', v3.show && !v3.on, true);
+
 eq('switching on writes the one key', F.body(true), '{"ptz":{"track":true}}');
 eq('switching off writes false, not a removal', F.body(false), '{"ptz":{"track":false}}');
 

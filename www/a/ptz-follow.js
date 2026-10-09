@@ -7,7 +7,8 @@
 // a setting that does nothing, so the pad does not offer it.
 //
 // Pure: no DOM, no fetch. `preview-ptz.js` asks whether to show the toggle,
-// what it shows now, and what to POST to /api/v1/config to change it.
+// what it shows now (view(), on every fresh read of the camera), and what to
+// POST to /api/v1/config to change it.
 (function (root, factory) {
 	const api = factory();
 	root.MajesticPtzFollow = api;
@@ -28,9 +29,15 @@
 		return !!(cfg && cfg.ptz && cfg.ptz.track === true);
 	}
 
+	// Both at once, for a fresh read: whether to show the switch, and how.
+	function view(caps, cfg) {
+		const show = offered(caps, cfg);
+		return { show: show, on: show && on(cfg) };
+	}
+
 	function body(want) {
 		return JSON.stringify({ ptz: { track: !!want } });
 	}
 
-	return { offered: offered, on: on, body: body };
+	return { offered: offered, on: on, view: view, body: body };
 });
