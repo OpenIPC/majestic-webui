@@ -47,6 +47,19 @@ window.MajesticVideo = (function () {
 	// player seeks it back to the live edge. A budget for DRIFT, not a
 	// latency: see syncLive() for why the two are not the same thing.
 	const LIVE_EDGE = 1.0;
+	// Below that budget, the excess is drained by playing slightly fast rather
+	// than by seeking: see catchUp(). CATCHUP_TARGET is how much buffer ahead
+	// of the playhead is left alone; catch-up starts a fragment's duration (at
+	// least CATCHUP_SLACK) above it, so a frame arriving does not by itself
+	// start one.
+	const CATCHUP_TARGET = 0.04;
+	const CATCHUP_SLACK = 0.01;
+	const CATCHUP_RATE = 1.1;
+	// A catch-up that has not shortened the lag by CATCHUP_PROGRESS over
+	// CATCHUP_WINDOW seconds of playback is draining a pipeline that needs
+	// what it holds; at CATCHUP_RATE a drainable one sheds ~0.2 s in that time.
+	const CATCHUP_WINDOW = 2.0;
+	const CATCHUP_PROGRESS = 0.02;
 
 	// Audio is opt-in per connection: the camera only encodes it while someone
 	// is listening, so unmuting reconnects with &audio=<what this browser can
@@ -133,6 +146,15 @@ window.MajesticVideo = (function () {
 		// moved), whether the next advance is the first since a seek, and
 		// whether play() has been refused since the pipeline was built.
 		let lagFloor = 0, lagLearn = true, lastCt = null, playRefused = false;
+		// The catch-up rule's memory (catchUp): the buffer this pipeline is
+		// drained down to; whether a catch-up is running; and, for the running
+		// one, the smallest lag it has reached, and the playhead and smallest
+		// lag at the start of the current progress window.
+		let catchTarget = CATCHUP_TARGET, catching = false;
+		let catchMin = 0, markCt = 0, markMin = 0;
+		// How far the buffer's end moves per fragment, smoothed: a frame's
+		// duration, or a batch's (APPEND_BATCH).
+		let lastEnd = 0, fragDur = 0;
 
 		const mseOk = !!MSImpl;
 		// ManagedMediaSource only accepts appends while it is "streaming"; it
@@ -279,6 +301,8 @@ window.MajesticVideo = (function () {
 			// The lag floor describes the pipeline being torn down; the next
 			// one learns its own.
 			lagFloor = 0; lagLearn = true; lastCt = null; playRefused = false;
+			catchTarget = CATCHUP_TARGET; catching = false; setRate(1);
+			lastEnd = 0; fragDur = 0;
 			// A redundant init may have armed this for a moov that never arrived
 			// (the socket dropped first). Clear it, or the next connection's real
 			// init segment would be dropped and playback could not start.
@@ -537,6 +561,11 @@ window.MajesticVideo = (function () {
 				const start = video.buffered.start(0);
 				const end = video.buffered.end(video.buffered.length - 1);
 				const ct = video.currentTime;
+				if (end > lastEnd && lastEnd > 0) {
+					const d = end - lastEnd;
+					fragDur = fragDur ? fragDur * 0.9 + d * 0.1 : d;
+				}
+				lastEnd = end;
 				if (ct < start || ct > end + 0.25) { seekLive(start, end); return; }
 				const moving = lastCt !== null && ct > lastCt + 0.001;
 				lastCt = ct;
@@ -546,14 +575,72 @@ window.MajesticVideo = (function () {
 				else if (lag < lagFloor) lagFloor = lag;
 				if (playRefused) { playRefused = false; lagFloor = 0; }
 				if (lag - lagFloor > LIVE_EDGE) seekLive(start, end);
+				else catchUp(lag, ct);
 			} catch (e) {}
 		}
 		function seekLive(start, end) {
+			catching = false;
+			setRate(1);
 			video.currentTime = Math.max(start, end - 0.1);
 			// Read back rather than assumed: the browser may clamp it, and the
 			// jump itself must not count as the playhead advancing.
 			lastCt = video.currentTime;
 			lagLearn = true;
+		}
+
+		// Drain what the start left in the buffer, by playing slightly fast.
+		//
+		// The floor syncLive() learns is the gap at the first frame on screen,
+		// and that is mostly how much had been appended by the time play() got
+		// going, not what the decoder needs. At 1x nothing ever drains it, so
+		// every frame was shown that much later than WebRTC shows it (#644).
+		// Playing at CATCHUP_RATE while more than CATCHUP_TARGET is buffered
+		// drains it with no seek -- a seek is a blackout (see syncLive()), a
+		// rate change is not.
+		//
+		// A pipeline that really needs the lag cannot be drained, and that is
+		// told by progress, not by 'waiting': Chromium fires 'waiting' for
+		// every brief underrun of a thin buffer (hundreds a minute) and shows
+		// the frames all the same. When a window of CATCHUP_WINDOW seconds of
+		// playback has not shortened the lag by CATCHUP_PROGRESS, the smallest
+		// lag reached becomes this pipeline's target and catch-up stops: a T31
+		// under a hardware decoder, 1.7 s behind by necessity, plays 2 s
+		// slightly fast and is then left alone.
+		//
+		// A catch-up starts only when more than one fragment's worth is
+		// buffered beyond the target. With frames longer than the target -- 5M
+		// at 15 fps is 67 ms a frame -- every arrival would otherwise start
+		// one, the playhead would run dry just before each next frame, and the
+		// picture would judder: measured, intervals of up to 115 ms where 1x
+		// held 66.7 ms exactly.
+		function catchUp(lag, ct) {
+			if (!catching) {
+				if (lag > catchTarget + Math.max(CATCHUP_SLACK, fragDur)) {
+					catching = true;
+					catchMin = markMin = lag;
+					markCt = ct;
+					setRate(CATCHUP_RATE);
+				}
+				return;
+			}
+			if (lag <= catchTarget) {
+				catching = false;
+				setRate(1);
+				return;
+			}
+			if (lag < catchMin) catchMin = lag;
+			if (ct - markCt < CATCHUP_WINDOW) return;
+			if (markMin - catchMin < CATCHUP_PROGRESS) {
+				catchTarget = Math.max(catchTarget, catchMin);
+				catching = false;
+				setRate(1);
+				return;
+			}
+			markCt = ct;
+			markMin = catchMin;
+		}
+		function setRate(r) {
+			try { if (video.playbackRate !== r) video.playbackRate = r; } catch (e) {}
 		}
 
 		// A fragment that starts with a producer reference time (the camera's
