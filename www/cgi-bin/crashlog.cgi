@@ -164,8 +164,9 @@ mj_stopped=
 				and the camera's MAC address, chip, sensor, firmware and Majestic version. openipc.org replaces
 				the MAC and every IP address in the log with hashes, and only OpenIPC's maintainers read the log;
 				a crash of majestic's own also carries a slice of majestic's memory at the moment it crashed, which
-				can hold what it was handling: only OpenIPC's maintainers can read it, and openipc.org deletes it
-				once it has made the backtrace from it;
+				can hold what it was handling, and the last lines it logged before it: only OpenIPC's maintainers
+				read them, openipc.org hashes the addresses and drops passwords in the log as it does in the
+				kernel's, and deletes the memory once it has made the backtrace from it;
 				<a href="https://openipc.org/crashes?ref=webui">the list of crashes</a> shows only which code
 				crashed and on which chips. No picture, no settings file and no password file is sent; what
 				majestic held in memory when it crashed is the one thing that can carry anything, which is why only
