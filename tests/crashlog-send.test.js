@@ -294,8 +294,8 @@ group("majestic's own crashes");
 		Buffer.concat([Buffer.from('MJCD\x01\x00\x01\x00HDR signal=11\n'), Buffer.alloc(64, n)]));
 	const osRelease = (cam) => {
 		const f = path.join(cam.dir, 'os-release');
-		fs.writeFileSync(f, 'OPENIPC_VERSION=2.6.10.05\nBUILD_OPTION=lite\nGITHUB_VERSION="master+988f385, 2026-10-05"\n' +
-			'BUILD_ID=nightly-20261005-988f385\nBUILD_PLATFORM=gk7205v300_lite\n');
+		fs.writeFileSync(f, 'OPENIPC_VERSION=2.6.10.05\nBUILD_OPTION=lite\nGITHUB_VERSION="master+0000000, 2026-01-01"\n' +
+			'BUILD_ID=nightly-20260101-0000000\nBUILD_PLATFORM=gk7205v300_lite\n');
 		return f;
 	};
 	const mjSent = (cam) => fs.existsSync(path.join(cam.crash, 'majestic.sent')) ?
@@ -310,7 +310,7 @@ group("majestic's own crashes");
 		lists(cam)[0] === 'majestic.dump meta.json' && lists(cam)[1] === 'majestic.dump meta.json');
 	check('and says so', r.out === "majestic's crashes sent to openipc.org: 2.");
 	const meta = JSON.parse(metas(cam)[0] || '{}');
-	check('with the build openipc.org reads the libraries from', meta.firmware && meta.firmware.build_id === 'nightly-20261005-988f385' &&
+	check('with the build openipc.org reads the libraries from', meta.firmware && meta.firmware.build_id === 'nightly-20260101-0000000' &&
 		meta.firmware.platform === 'gk7205v300_lite' && meta.soc === 'gk7205v300');
 	check('each noted by its checksum', mjSent(cam).length === 2 && mjSent(cam).every((l) => /^[0-9a-f]{32} /.test(l)));
 

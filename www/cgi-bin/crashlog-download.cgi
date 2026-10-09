@@ -73,9 +73,11 @@ if [ "$GET_get" = "log" ] && [ -s "$CRASH/crash.tar.gz" ]; then
 	exit 0
 fi
 
-# majestic's latest crash, as it wrote it: what /club takes from an owner who
-# would rather send it from there.
-if [ "$GET_get" = "majestic" ] && [ -s "$CRASH/majestic.dump" ]; then
+# A crash of majestic's, as it wrote it -- the latest, or with which=1 the one
+# before: what /club takes from an owner who would rather send it from there.
+mj_file=$CRASH/majestic.dump
+[ "$GET_which" = "1" ] && mj_file=$CRASH/majestic.dump.1
+if [ "$GET_get" = "majestic" ] && [ -s "$mj_file" ]; then
 	fn="majestic_${network_address}_"`date +%Y-%m-%d_%H-%M-%S`".dump"
 	echo "Content-type: application/octet-stream"
 	echo "Content-Transfer-Encoding: binary"
@@ -83,7 +85,7 @@ if [ "$GET_get" = "majestic" ] && [ -s "$CRASH/majestic.dump" ]; then
 	echo "Pragma: no-cache"
 	echo "Content-Disposition: attachment; filename=$fn"
 	echo
-	cat "$CRASH/majestic.dump"
+	cat "$mj_file"
 	exit 0
 fi
 

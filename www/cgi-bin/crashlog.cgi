@@ -61,6 +61,10 @@ for f in "$CRASH/majestic.dump" "$CRASH/majestic.dump.1"; do
 	grep -q "^$(md5sum < "$f" | cut -d' ' -f1) " "$CRASH/majestic.sent" 2>/dev/null || mj_unsent=$((mj_unsent + 1))
 done
 mj_loop_utc=$(sed -n 's/^utc=//p' "$CRASH/majestic.loop" 2>/dev/null)
+# The note says the firmware stopped restarting it; it is true only while
+# majestic is not running again.
+mj_stopped=
+[ -f "$CRASH/majestic.loop" ] && ! pidof majestic >/dev/null 2>&1 && mj_stopped=1
 %>
 
 <div class="row g-4">
@@ -68,16 +72,21 @@ mj_loop_utc=$(sed -n 's/^utc=//p' "$CRASH/majestic.loop" 2>/dev/null)
 		<div class="card mb-4"><div class="card-body">
 			<% card_head "Crash report" %>
 			<% if [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ] || [ "$older_kept" -gt 0 ] || [ "$mj_dumps" -gt 0 ] || [ -f "$CRASH/majestic.loop" ]; then %>
-			<% if [ -n "$sent_utc" ]; then %>
+			<% if [ "$mj_unsent" -gt 0 ]; then %>
+			<p class="small text-secondary">majestic, the streamer, crashed<% if [ -n "$mj_stopped" ]; then %> again and again,
+				and was stopped<% fi %>. Its crash has not been sent: send it to OpenIPC and it is filed with the same
+				crash from other cameras, so the bug can be found and fixed.</p>
+			<% elif [ -n "$sent_utc" ]; then %>
 			<p class="small text-secondary">This camera recovered from a crash, and the latest one was
 				sent to openipc.org on <% esc "$sent_utc" %> UTC.</p>
 			<% elif [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ]; then %>
 			<p class="small text-secondary">This camera recovered from a crash. The latest one has not
 				been sent: send it to OpenIPC and it is filed with the same crash from other cameras, so the bug
 				can be found and fixed.</p>
+			<% elif [ -n "$mj_stopped" ]; then %>
+			<p class="small text-secondary">majestic, the streamer, kept crashing and was stopped.</p>
 			<% elif [ "$mj_dumps" -gt 0 ] || [ -f "$CRASH/majestic.loop" ]; then %>
-			<p class="small text-secondary">majestic, the streamer, crashed. Send it to OpenIPC and it is
-				filed with the same crash from other cameras, so the bug can be found and fixed.</p>
+			<p class="small text-secondary">majestic, the streamer, crashed, and its crashes were sent.</p>
 			<% else %>
 			<p class="small text-secondary">This camera recovered from crashes earlier, kept until you
 				dismiss them.</p>
@@ -101,9 +110,10 @@ mj_loop_utc=$(sed -n 's/^utc=//p' "$CRASH/majestic.loop" 2>/dev/null)
 					mj_wall=$(mj_field "$f" wall)
 					mj_ver=$(mj_field "$f" version) %>
 				<dt class="col-sm-3 text-secondary">majestic crashed</dt>
-				<dd class="col-sm-9"><% esc "$mj_sig" %><% if [ -n "$mj_wall" ]; then %>, <% esc "$(mj_when "$mj_wall")" %> UTC<% fi %><% if [ -n "$mj_ver" ]; then %>, version <% esc "$mj_ver" %><% fi %></dd>
+				<dd class="col-sm-9"><% esc "$mj_sig" %><% if [ -n "$mj_wall" ]; then %>, <% esc "$(mj_when "$mj_wall")" %> UTC<% fi %><% if [ -n "$mj_ver" ]; then %>, version <% esc "$mj_ver" %><% fi %>
+					&middot; <a href="crashlog-download.cgi?get=majestic<% [ "$f" = "$CRASH/majestic.dump.1" ] && echo -n '&amp;which=1' %>">download</a></dd>
 				<% done %>
-				<% if [ -f "$CRASH/majestic.loop" ]; then %>
+				<% if [ -n "$mj_stopped" ]; then %>
 				<dt class="col-sm-3 text-secondary">Stopped</dt>
 				<dd class="col-sm-9">majestic kept crashing<% if [ -n "$mj_loop_utc" ]; then %> until <% esc "$mj_loop_utc" %> UTC<% fi %>
 					and is no longer restarted: there is no video until it is started again, or the camera rebooted.</dd>
@@ -132,9 +142,6 @@ mj_loop_utc=$(sed -n 's/^utc=//p' "$CRASH/majestic.loop" 2>/dev/null)
 				else %>
 				<span class="small text-secondary">The crash log is no longer available.</span>
 				<% fi %>
-				<% if [ -s "$CRASH/majestic.dump" ]; then %>
-				<a class="btn btn-outline-primary" href="crashlog-download.cgi?get=majestic">Download majestic's crash</a>
-				<% fi %>
 				<form method="post" action="crashlog-download.cgi" class="d-inline m-0">
 					<input type="hidden" name="action" value="dismiss">
 					<button type="submit" class="btn btn-outline-secondary">Dismiss</button>
@@ -160,7 +167,9 @@ mj_loop_utc=$(sed -n 's/^utc=//p' "$CRASH/majestic.loop" 2>/dev/null)
 				can hold what it was handling: only OpenIPC's maintainers can read it, and openipc.org deletes it
 				once it has made the backtrace from it;
 				<a href="https://openipc.org/crashes?ref=webui">the list of crashes</a> shows only which code
-				crashed and on which chips. No picture, settings or password is sent. A camera linked to your
+				crashed and on which chips. No picture, no settings file and no password file is sent; what
+				majestic held in memory when it crashed is the one thing that can carry anything, which is why only
+				the maintainers read it and it is deleted once used. A camera linked to your
 				<a href="https://openipc.org/club?ref=webui">OpenIPC Club</a> account on the OpenWall page
 				earns you stars for the crashes it sends.</p>
 			<form action="crashlog-download.cgi" method="post">

@@ -236,7 +236,7 @@ if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ] || [ -d /etc/crash/
 	[ -f /etc/crash/majestic.dump.1 ] || [ -f /etc/crash/majestic.loop ]; } && [ "$pagename" != "crashlog" ]; then %>
 	<div class="container mt-3">
 		<div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0" role="alert">
-			<% if [ -f /etc/crash/majestic.loop ]; then %>
+			<% if [ -f /etc/crash/majestic.loop ] && ! pidof majestic >/dev/null 2>&1; then %>
 			<span><strong>majestic kept crashing and was stopped: there is no video.</strong> Open the crash report.</span>
 			<% else %>
 			<span><strong>This camera recovered from a crash.</strong> Open the crash report.</span>
