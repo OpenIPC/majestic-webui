@@ -286,4 +286,57 @@ group('what the review found');
 		!/HTTP 429/.test(r.out));
 }
 
+group("majestic's own crashes");
+{
+	// A dump as majestic writes it: a header of text, then memory. The sender
+	// reads none of it; it only has to be the file that goes.
+	const dump = (cam, name, n) => fs.writeFileSync(path.join(cam.crash, name),
+		Buffer.concat([Buffer.from('MJCD\x01\x00\x01\x00HDR signal=11\n'), Buffer.alloc(64, n)]));
+	const osRelease = (cam) => {
+		const f = path.join(cam.dir, 'os-release');
+		fs.writeFileSync(f, 'OPENIPC_VERSION=2.6.10.05\nBUILD_OPTION=lite\nGITHUB_VERSION="master+988f385, 2026-10-05"\n' +
+			'BUILD_ID=nightly-20261005-988f385\nBUILD_PLATFORM=gk7205v300_lite\n');
+		return f;
+	};
+	const mjSent = (cam) => fs.existsSync(path.join(cam.crash, 'majestic.sent')) ?
+		fs.readFileSync(path.join(cam.crash, 'majestic.sent'), 'utf8').split('\n').filter(Boolean) : [];
+
+	const cam = camera();
+	dump(cam, 'majestic.dump', 1);
+	dump(cam, 'majestic.dump.1', 2);
+	const env = { CRASHLOG_OS_RELEASE: osRelease(cam), TITLE: 'SIGSEGV (NULL pointer)' };
+	let r = send(cam, [], env);
+	check('Send sends both dumps, each a bundle of its own', r.rc === 0 && calls(cam).length === 2 &&
+		lists(cam)[0] === 'majestic.dump meta.json' && lists(cam)[1] === 'majestic.dump meta.json');
+	check('and says so', r.out === "majestic's crashes sent to openipc.org: 2.");
+	const meta = JSON.parse(metas(cam)[0] || '{}');
+	check('with the build openipc.org reads the libraries from', meta.firmware && meta.firmware.build_id === 'nightly-20261005-988f385' &&
+		meta.firmware.platform === 'gk7205v300_lite' && meta.soc === 'gk7205v300');
+	check('each noted by its checksum', mjSent(cam).length === 2 && mjSent(cam).every((l) => /^[0-9a-f]{32} /.test(l)));
+
+	r = send(cam, [], env);
+	check('sent once: Send again sends nothing', calls(cam).length === 2 && r.out === 'These crashes were already sent to openipc.org.');
+
+	// majestic crashes again: it renames the dump to .1 and writes a new one.
+	fs.renameSync(path.join(cam.crash, 'majestic.dump'), path.join(cam.crash, 'majestic.dump.1'));
+	dump(cam, 'majestic.dump', 3);
+	r = send(cam, [], env);
+	check('after the next crash, only the new dump goes', calls(cam).length === 3 && r.out === "majestic's crash sent to openipc.org: SIGSEGV (NULL pointer).");
+	check('and the note of the one majestic dropped goes', mjSent(cam).length === 2);
+}
+{
+	// The owner's yes to sending on its own covers the kernel's logs; a dump,
+	// which holds majestic's memory, needs its own.
+	const cam = camera();
+	fs.writeFileSync(path.join(cam.crash, 'majestic.dump'), Buffer.from('MJCD\x01\x00\x01\x00'));
+	fs.writeFileSync(cam.conf, 'crashlog_auto=true\n');
+	let r = send(cam, ['--auto']);
+	check('--auto does not send a dump on the yes for logs alone', r.rc === 0 && calls(cam).length === 0);
+	fs.writeFileSync(cam.conf, 'crashlog_auto=true\ncrashlog_majestic=true\n');
+	r = send(cam, ['--auto']);
+	check('with the second yes it does', r.rc === 0 && calls(cam).length === 1);
+	r = send(cam, ['--auto']);
+	check('once', calls(cam).length === 1);
+}
+
 done();

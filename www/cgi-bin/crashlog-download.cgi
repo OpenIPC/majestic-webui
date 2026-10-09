@@ -26,9 +26,11 @@ fi
 # minutes; the sender sends only one it has not sent already.
 if [ "$REQUEST_METHOD" = "POST" ] && [ "$POST_action" = "auto" ]; then
 	[ "$POST_crashlog_auto" = "true" ] || POST_crashlog_auto=false
+	[ "$POST_crashlog_majestic" = "true" ] || POST_crashlog_majestic=false
 	[ "$POST_crashlog_proxy" = "true" ] || POST_crashlog_proxy=false
 	{
 		conf_write crashlog_auto "$POST_crashlog_auto"
+		conf_write crashlog_majestic "$POST_crashlog_majestic"
 		conf_write crashlog_proxy "$POST_crashlog_proxy"
 	} > "$config_file"
 	sed -i '\#/usr/sbin/crashlog-send#d' /etc/crontabs/root
@@ -51,6 +53,7 @@ if [ "$REQUEST_METHOD" = "POST" ] && [ "$POST_action" = "dismiss" ]; then
 		redirect_to "crashlog.cgi" "warning" "A crash is being sent to openipc.org right now. Dismiss it in a minute."
 	fi
 	rm -f "$CRASH/pending" "$CRASH/failsafe" "$CRASH/crash.tar.gz" "$CRASH/sent" 2>/dev/null
+	rm -f "$CRASH/majestic.dump" "$CRASH/majestic.dump.1" "$CRASH/majestic.sent" "$CRASH/majestic.loop" 2>/dev/null
 	rm -rf "$CRASH/older" 2>/dev/null
 	rm -f /sys/fs/pstore/dmesg-* 2>/dev/null
 	redirect_to "dashboard.cgi"
@@ -67,6 +70,20 @@ if [ "$GET_get" = "log" ] && [ -s "$CRASH/crash.tar.gz" ]; then
 	echo "Content-Disposition: attachment; filename=$fn"
 	echo
 	cat "$CRASH/crash.tar.gz"
+	exit 0
+fi
+
+# majestic's latest crash, as it wrote it: what /club takes from an owner who
+# would rather send it from there.
+if [ "$GET_get" = "majestic" ] && [ -s "$CRASH/majestic.dump" ]; then
+	fn="majestic_${network_address}_"`date +%Y-%m-%d_%H-%M-%S`".dump"
+	echo "Content-type: application/octet-stream"
+	echo "Content-Transfer-Encoding: binary"
+	echo "Cache-Control: no-store"
+	echo "Pragma: no-cache"
+	echo "Content-Disposition: attachment; filename=$fn"
+	echo
+	cat "$CRASH/majestic.dump"
 	exit 0
 fi
 

@@ -227,12 +227,20 @@ Pragma: no-cache
 # A camera that recovered from a crash raises it on every page until the owner
 # looks: the firmware leaves /etc/crash/pending (a preserved kernel log) or
 # /etc/crash/failsafe (a boot-failure fall-back), and keeps earlier crashes
-# under /etc/crash/older until they are dismissed; this links to the report.
+# under /etc/crash/older until they are dismissed; majestic leaves
+# /etc/crash/majestic.dump when it dies of a signal, and the firmware
+# /etc/crash/majestic.loop when it stopped restarting it. This links to the
+# report.
 # Suppressed on the report page itself, which says the same thing in full.
-if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ] || [ -d /etc/crash/older ]; } && [ "$pagename" != "crashlog" ]; then %>
+if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ] || [ -d /etc/crash/older ] || [ -f /etc/crash/majestic.dump ] ||
+	[ -f /etc/crash/majestic.dump.1 ] || [ -f /etc/crash/majestic.loop ]; } && [ "$pagename" != "crashlog" ]; then %>
 	<div class="container mt-3">
 		<div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0" role="alert">
+			<% if [ -f /etc/crash/majestic.loop ]; then %>
+			<span><strong>majestic kept crashing and was stopped: there is no video.</strong> Open the crash report.</span>
+			<% else %>
 			<span><strong>This camera recovered from a crash.</strong> Open the crash report.</span>
+			<% fi %>
 			<a class="btn btn-sm btn-warning" href="crashlog.cgi">View crash report</a>
 		</div>
 	</div>
