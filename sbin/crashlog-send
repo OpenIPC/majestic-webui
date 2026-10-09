@@ -18,7 +18,8 @@
 #
 # majestic's own crashes go too: the dump it leaves when it dies of a signal
 # (majestic.dump, and the one before as majestic.dump.1) -- its registers, a
-# slice of its memory at that moment and what it had loaded -- each with a
+# slice of its memory at that moment, what it had loaded and the last lines
+# it logged -- each with a
 # note of the firmware build it ran on, from which openipc.org reads the
 # camera's libraries. Only OpenIPC's maintainers read them, and the slice of
 # memory is deleted once the site has made the backtrace. --auto sends them
