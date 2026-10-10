@@ -233,27 +233,28 @@ Pragma: no-cache
 # the report.
 # A crash already sent to openipc.org -- by Send, or on its own -- raises
 # nothing: sending is what the banner asks for, and with sending on its own the
-# owner would otherwise have to Dismiss every crash cron had already sent. The
-# notes are sbin/crashlog-send's: $CRASH/sent names the crash on record by its
-# md5, older/<name>.sent sits beside an earlier one, majestic.sent holds the
-# dumps' checksums. A pending note whose log is gone matches no note, so it
-# stays until dismissed, as before. majestic stopped is raised however it was
-# sent: there is no video until someone acts.
+# owner would otherwise have to Dismiss every crash cron had already sent.
+# Which crashes are sent is sbin/crashlog-send's to say, from its own notes
+# (--unsent). That reads every dump through md5sum, so its answer is kept in
+# /tmp against a listing of /etc/crash, and asked again only when a file there
+# changed. majestic stopped is raised however it was sent: there is no video
+# until someone acts.
 # Suppressed on the report page itself, which says the same thing in full.
 crash_banner() {
-	local f
+	local key
 	[ -f /etc/crash/majestic.loop ] && ! pidof majestic >/dev/null 2>&1 && return 0
-	if [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ] || [ -s /etc/crash/crash.tar.gz ]; then
-		[ "$(sed -n 's/^bundle=//p' /etc/crash/sent 2>/dev/null)" = \
-			"$(cat /etc/crash/crash.tar.gz /etc/crash/failsafe 2>/dev/null | md5sum | cut -d' ' -f1)" ] || return 0
+	key=$(ls -ln --full-time /etc/crash /etc/crash/older 2>/dev/null)
+	[ -n "$key" ] || { /usr/sbin/crashlog-send --unsent; return; }
+	key=$(echo "$key" | md5sum | cut -d' ' -f1)
+	case "$(cat /tmp/crashlog-banner 2>/dev/null)" in
+	"$key yes") return 0 ;;
+	"$key no") return 1 ;;
+	esac
+	if /usr/sbin/crashlog-send --unsent; then
+		echo "$key yes" > /tmp/crashlog-banner
+		return 0
 	fi
-	for f in /etc/crash/older/*.tar.gz; do
-		[ -s "$f" ] && [ ! -s "$f.sent" ] && return 0
-	done
-	for f in /etc/crash/majestic.dump /etc/crash/majestic.dump.1; do
-		[ -s "$f" ] || continue
-		grep -q "^$(md5sum < "$f" | cut -d' ' -f1) " /etc/crash/majestic.sent 2>/dev/null || return 0
-	done
+	echo "$key no" > /tmp/crashlog-banner
 	return 1
 }
 if [ "$pagename" != "crashlog" ] && [ -d /etc/crash ] && crash_banner; then %>
