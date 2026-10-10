@@ -6,6 +6,8 @@
 #   crashlog-send          send them now -- the Send button on the crash report
 #   crashlog-send --auto   send them if the owner asked for crashes to go on
 #                          their own, those not gone yet (cron)
+#   crashlog-send --unsent exit 0 if a crash on record has not been sent yet,
+#                          1 if not; sends nothing (the banner on every page)
 #
 # What goes: each crash log the firmware kept (the kernel's own log of the
 # crash, as Download gives it, and the firmware's note of what was running
@@ -48,6 +50,28 @@ FLOCK=${CRASHLOG_FLOCK:-flock}
 
 auto=
 [ "$1" = "--auto" ] && auto=1
+
+# --unsent: whether the owner still has a crash to do something about, which is
+# what the banner on every page asks. Read only: no lock, nothing sent, no note
+# touched. The crash on record counts as the report page shows it, by its
+# pending or failsafe note; a pending note whose log is gone cannot be sent and
+# counts until Dismiss. majestic's dumps count whether or not --auto would send
+# them.
+if [ "$1" = "--unsent" ]; then
+	if [ -f "$CRASH/pending" ] || [ -f "$CRASH/failsafe" ]; then
+		{ [ -s "$CRASH/crash.tar.gz" ] || [ -f "$CRASH/failsafe" ]; } || exit 0
+		[ "$(sed -n 's/^bundle=//p' "$CRASH/sent" 2>/dev/null)" = \
+			"$(cat "$CRASH/crash.tar.gz" "$CRASH/failsafe" 2>/dev/null | md5sum | cut -d' ' -f1)" ] || exit 0
+	fi
+	for f in "$CRASH/older"/*.tar.gz; do
+		[ -s "$f" ] && [ ! -s "$f.sent" ] && exit 0
+	done
+	for f in "$CRASH/majestic.dump" "$CRASH/majestic.dump.1"; do
+		[ -s "$f" ] || continue
+		grep -q "^$(md5sum < "$f" | cut -d' ' -f1) " "$CRASH/majestic.sent" 2>/dev/null || exit 0
+	done
+	exit 1
+fi
 
 # One sender at a time: the owner pressing Send while cron's run is on its way
 # would otherwise post the same crash twice, both having read "not sent" before

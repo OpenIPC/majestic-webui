@@ -339,4 +339,45 @@ group("majestic's own crashes");
 	check('once', calls(cam).length === 1);
 }
 
+group('the banner: is anything left to send');
+{
+	// Every page asks --unsent whether to raise the crash banner. Wrong one way,
+	// the banner stays up after cron sent everything and only Dismiss takes it
+	// down; wrong the other, a crash nobody sent raises nothing.
+	const unsent = (cam) => send(cam, ['--unsent']).rc;
+	const md5 = (f) => require('crypto').createHash('md5').update(fs.readFileSync(f)).digest('hex');
+	let cam = camera();
+	check('nothing on record: nothing to raise', unsent(cam) === 1);
+	record(cam, 'a crash');
+	fs.writeFileSync(path.join(cam.crash, 'pending'), 'utc=x\n');
+	check('a crash not sent raises it', unsent(cam) === 0);
+	check('asking sends nothing', calls(cam).length === 0);
+	send(cam);
+	check('sent, it does not', unsent(cam) === 1);
+	older(cam, 'crash-1', 'an earlier crash');
+	check('an earlier crash not sent raises it', unsent(cam) === 0);
+	fs.writeFileSync(path.join(cam.crash, 'older', 'crash-1.tar.gz.sent'), 'bundle=x\n');
+	check('sent, it does not', unsent(cam) === 1);
+
+	cam = camera();
+	fs.writeFileSync(path.join(cam.crash, 'pending'), 'utc=x\n');
+	check('a pending note whose log is gone raises it until Dismiss', unsent(cam) === 0);
+	fs.writeFileSync(path.join(cam.crash, 'sent'), 'bundle=' + require('crypto').createHash('md5').update('').digest('hex') + '\n');
+	check('even beside a note for an empty crash', unsent(cam) === 0);
+
+	cam = camera();
+	record(cam, 'a log with no pending note');
+	check('a log the report page does not show raises nothing', unsent(cam) === 1);
+
+	cam = camera();
+	const d = path.join(cam.crash, 'majestic.dump');
+	fs.writeFileSync(d, Buffer.from('MJCD\x01\x00\x01\x00HDR signal=11\n'));
+	check("majestic's dump not sent raises it", unsent(cam) === 0);
+	fs.writeFileSync(path.join(cam.crash, 'majestic.sent'), md5(d) + ' 2026-10-10 17:42:08 SIGSEGV\n');
+	check('sent, it does not', unsent(cam) === 1);
+	fs.renameSync(d, d + '.1');
+	fs.writeFileSync(d, Buffer.from('MJCD\x01\x00\x01\x00HDR signal=6\n'));
+	check('the next dump, not sent, raises it again', unsent(cam) === 0);
+}
+
 done();

@@ -225,15 +225,39 @@ Pragma: no-cache
 
 <%
 # A camera that recovered from a crash raises it on every page until the owner
-# looks: the firmware leaves /etc/crash/pending (a preserved kernel log) or
-# /etc/crash/failsafe (a boot-failure fall-back), and keeps earlier crashes
-# under /etc/crash/older until they are dismissed; majestic leaves
-# /etc/crash/majestic.dump when it dies of a signal, and the firmware
-# /etc/crash/majestic.loop when it stopped restarting it. This links to the
-# report.
+# has done something about it: the firmware leaves /etc/crash/pending (a
+# preserved kernel log) or /etc/crash/failsafe (a boot-failure fall-back), and
+# keeps earlier crashes under /etc/crash/older until they are dismissed;
+# majestic leaves /etc/crash/majestic.dump when it dies of a signal, and the
+# firmware /etc/crash/majestic.loop when it stopped restarting it. This links to
+# the report.
+# A crash already sent to openipc.org -- by Send, or on its own -- raises
+# nothing: sending is what the banner asks for, and with sending on its own the
+# owner would otherwise have to Dismiss every crash cron had already sent.
+# Which crashes are sent is sbin/crashlog-send's to say, from its own notes
+# (--unsent). That reads every dump through md5sum, so its answer is kept in
+# /tmp against a listing of /etc/crash, and asked again only when a file there
+# changed. majestic stopped is raised however it was sent: there is no video
+# until someone acts.
 # Suppressed on the report page itself, which says the same thing in full.
-if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ] || [ -d /etc/crash/older ] || [ -f /etc/crash/majestic.dump ] ||
-	[ -f /etc/crash/majestic.dump.1 ] || [ -f /etc/crash/majestic.loop ]; } && [ "$pagename" != "crashlog" ]; then %>
+crash_banner() {
+	local key
+	[ -f /etc/crash/majestic.loop ] && ! pidof majestic >/dev/null 2>&1 && return 0
+	key=$(ls -ln --full-time /etc/crash /etc/crash/older 2>/dev/null)
+	[ -n "$key" ] || { /usr/sbin/crashlog-send --unsent; return; }
+	key=$(echo "$key" | md5sum | cut -d' ' -f1)
+	case "$(cat /tmp/crashlog-banner 2>/dev/null)" in
+	"$key yes") return 0 ;;
+	"$key no") return 1 ;;
+	esac
+	if /usr/sbin/crashlog-send --unsent; then
+		echo "$key yes" > /tmp/crashlog-banner
+		return 0
+	fi
+	echo "$key no" > /tmp/crashlog-banner
+	return 1
+}
+if [ "$pagename" != "crashlog" ] && [ -d /etc/crash ] && crash_banner; then %>
 	<div class="container mt-3">
 		<div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0" role="alert">
 			<% if [ -f /etc/crash/majestic.loop ] && ! pidof majestic >/dev/null 2>&1; then %>
