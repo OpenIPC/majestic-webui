@@ -225,15 +225,38 @@ Pragma: no-cache
 
 <%
 # A camera that recovered from a crash raises it on every page until the owner
-# looks: the firmware leaves /etc/crash/pending (a preserved kernel log) or
-# /etc/crash/failsafe (a boot-failure fall-back), and keeps earlier crashes
-# under /etc/crash/older until they are dismissed; majestic leaves
-# /etc/crash/majestic.dump when it dies of a signal, and the firmware
-# /etc/crash/majestic.loop when it stopped restarting it. This links to the
-# report.
+# has done something about it: the firmware leaves /etc/crash/pending (a
+# preserved kernel log) or /etc/crash/failsafe (a boot-failure fall-back), and
+# keeps earlier crashes under /etc/crash/older until they are dismissed;
+# majestic leaves /etc/crash/majestic.dump when it dies of a signal, and the
+# firmware /etc/crash/majestic.loop when it stopped restarting it. This links to
+# the report.
+# A crash already sent to openipc.org -- by Send, or on its own -- raises
+# nothing: sending is what the banner asks for, and with sending on its own the
+# owner would otherwise have to Dismiss every crash cron had already sent. The
+# notes are sbin/crashlog-send's: $CRASH/sent names the crash on record by its
+# md5, older/<name>.sent sits beside an earlier one, majestic.sent holds the
+# dumps' checksums. A pending note whose log is gone matches no note, so it
+# stays until dismissed, as before. majestic stopped is raised however it was
+# sent: there is no video until someone acts.
 # Suppressed on the report page itself, which says the same thing in full.
-if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ] || [ -d /etc/crash/older ] || [ -f /etc/crash/majestic.dump ] ||
-	[ -f /etc/crash/majestic.dump.1 ] || [ -f /etc/crash/majestic.loop ]; } && [ "$pagename" != "crashlog" ]; then %>
+crash_banner() {
+	local f
+	[ -f /etc/crash/majestic.loop ] && ! pidof majestic >/dev/null 2>&1 && return 0
+	if [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ] || [ -s /etc/crash/crash.tar.gz ]; then
+		[ "$(sed -n 's/^bundle=//p' /etc/crash/sent 2>/dev/null)" = \
+			"$(cat /etc/crash/crash.tar.gz /etc/crash/failsafe 2>/dev/null | md5sum | cut -d' ' -f1)" ] || return 0
+	fi
+	for f in /etc/crash/older/*.tar.gz; do
+		[ -s "$f" ] && [ ! -s "$f.sent" ] && return 0
+	done
+	for f in /etc/crash/majestic.dump /etc/crash/majestic.dump.1; do
+		[ -s "$f" ] || continue
+		grep -q "^$(md5sum < "$f" | cut -d' ' -f1) " /etc/crash/majestic.sent 2>/dev/null || return 0
+	done
+	return 1
+}
+if [ "$pagename" != "crashlog" ] && [ -d /etc/crash ] && crash_banner; then %>
 	<div class="container mt-3">
 		<div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0" role="alert">
 			<% if [ -f /etc/crash/majestic.loop ] && ! pidof majestic >/dev/null 2>&1; then %>
