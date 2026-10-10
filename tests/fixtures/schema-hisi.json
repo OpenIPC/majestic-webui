@@ -80,6 +80,23 @@
           "default": "disabled",
           "hint": "Match your mains frequency (50/60 Hz) to remove the rolling banding seen under artificial light."
         },
+        "wdrMode": {
+          "enum": [
+            "none",
+            "always",
+            "day"
+          ],
+          "type": "string",
+          "title": "Wide dynamic range (WDR)",
+          "default": "none",
+          "x-enum-titles": {
+            "none": "Off",
+            "always": "On",
+            "day": "Daytime only"
+          },
+          "hint": "For bright windows and doorways: shadows and highlights both keep detail, at a lower frame rate. Daytime only goes back to normal at night.",
+          "help": "The sensor takes a long and a short exposure of every frame and the camera merges them. In a dim scene there is no bright part to keep, and the merge only flattens the picture and adds noise, which is why Daytime only exists. A change rebuilds the video pipeline: the picture stops for about a second and a half, and RTSP clients reconnect — with Daytime only, at every day/night switch as well."
+        },
         "drc": {
           "type": "integer",
           "title": "Dynamic range compression"
