@@ -3977,6 +3977,33 @@ button.mj-osd-chip,
    the only thing that emits .mj-stage, and live.cgi is its only caller.
    camera.cgi's Live section builds its own stage client-side out of
    .mj-pv-media, which is why none of this reaches it. */
+/* A long press on the stage is a hold -- a pan held on the pad, a zoom held
+   on Tele -- and never a request to select text. iOS Safari read it as one:
+   it honours only the prefixed user-select, so the pad's unprefixed rule did
+   nothing there, and a held arrow selected the nearest words it could find
+   (the chip's "H265 1920x1080") and raised Copy / Look Up over the pad, which
+   then took no more presses. The same reflex as Hold to compare (#316), for
+   the whole stage, because the selection jumps to whatever text is nearest
+   the finger, not to the button under it. The callout is iOS's long-press
+   menu (Save Image on the MJPEG still). */
+.mj-stage {
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+
+/* Fields on the stage -- the password a peer camera asks for -- stay fields:
+   an inherited user-select: none can leave an iOS input untypeable, and the
+   callout is the menu a long press on a field raises to Paste a saved
+   password. */
+.mj-stage input,
+.mj-stage textarea,
+.mj-stage select {
+	-webkit-user-select: text;
+	user-select: text;
+	-webkit-touch-callout: default;
+}
+
 .mj-stage {
 	position: relative;
 	background: #000;
@@ -5057,7 +5084,9 @@ button.mj-osd-chip,
 	background: transparent;
 	color: #c8ccd6;
 	touch-action: none;
+	-webkit-user-select: none;
 	user-select: none;
+	-webkit-touch-callout: none;
 }
 
 /* Zoom and focus carry the verb they send. Held is a real state here: the motor
