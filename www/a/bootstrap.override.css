@@ -3603,24 +3603,50 @@ button.mj-osd-chip,
 	transition: opacity 120ms linear;
 }
 
-/* Classified detections get their own colour, so a face is not read as motion
-   and the reverse. Everything a detector has not classified stays the warning
-   hue above.
+/* Classified detections are coloured by what they are, not by which detector
+   spoke, so a person is the same green whether the NPU or the CPU found them.
+   Everything unclassified -- motion -- stays the warning hue above, and a
+   classified box is drawn solid where motion is not, so the two differ by
+   more than hue.
 
-   Giving each classifier a hue is not decoration. Motion fires on anything that
-   changed — headlights, rain, a branch — while these two say what the thing is,
+   Giving each class a hue is not decoration. Motion fires on anything that
+   changed — headlights, rain, a branch — while these say what the thing is,
    and a viewer who cannot tell the two apart on the glass has no way to see
    that the camera did more than notice a difference between frames. Drawn in
    the same orange, a person box is invisible as a person box. */
-.mj-an-box[data-src="face"] {
-	border-color: rgba(var(--bs-info-rgb), 0.95);
-	background: rgba(var(--bs-info-rgb), 0.10);
+.mj-an-box[data-cls] {
+	border-style: solid;
 }
 
+/* Firmware from before object detection names its classifiers by source, and
+   a box from one that carries no class number still deserves its colour. */
+.mj-an-box[data-src="face"],
 .mj-an-box[data-src="person"] {
+	border-style: solid;
+}
+
+.mj-an-box[data-src="person"],
+.mj-an-box[data-cls="human"] {
 	border-color: rgba(var(--bs-success-rgb), 0.95);
 	background: rgba(var(--bs-success-rgb), 0.10);
-	border-style: solid;
+}
+
+.mj-an-box[data-cls="vehicle"] {
+	border-color: rgba(var(--bs-primary-rgb), 0.95);
+	background: rgba(var(--bs-primary-rgb), 0.10);
+}
+
+/* Bootstrap's pink carries no -rgb token; the same value in both themes,
+   because the ground is the picture, not the page. */
+.mj-an-box[data-cls="animal"] {
+	border-color: rgba(214, 51, 132, 0.95);
+	background: rgba(214, 51, 132, 0.10);
+}
+
+.mj-an-box[data-src="face"],
+.mj-an-box[data-cls="face"] {
+	border-color: rgba(var(--bs-info-rgb), 0.95);
+	background: rgba(var(--bs-info-rgb), 0.10);
 }
 
 /* The person the head is following (ptz.track): drawn over the detector's own

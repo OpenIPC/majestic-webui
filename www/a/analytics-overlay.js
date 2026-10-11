@@ -38,6 +38,18 @@
 	// worse than no box.
 	const STALE_MS = 5000;
 
+	// What a box is, by the bus's class number (ONVIF tt:ClassType order), as
+	// the word the stylesheet colours it by. Only these words ever reach the
+	// attribute: an unknown or unclassified box gets none and keeps the
+	// source's colour.
+	const CLASS_NAMES = { 1: 'human', 2: 'vehicle', 3: 'face', 4: 'animal' };
+
+	function className(cls) {
+		// A number only: as an object key, the string '1' would find human too.
+		if (typeof cls !== 'number' || !Number.isInteger(cls)) return '';
+		return Object.prototype.hasOwnProperty.call(CLASS_NAMES, cls) ? CLASS_NAMES[cls] : '';
+	}
+
 	// --- the store: no DOM, so the tests can reach it ---------------------
 
 	function store() {
@@ -160,6 +172,8 @@
 				const el = document.createElement('div');
 				el.className = 'mj-an-box';
 				el.dataset.src = String(b.src);
+				const cls = className(b.cls);
+				if (cls) el.dataset.cls = cls;
 				el.style.left = box.x.toFixed(1) + 'px';
 				el.style.top = box.y.toFixed(1) + 'px';
 				el.style.width = box.w.toFixed(1) + 'px';
@@ -211,7 +225,7 @@
 		};
 	}
 
-	const api = { store: store, mount: mount,
+	const api = { store: store, mount: mount, className: className,
 		LINGER_MS: LINGER_MS, STALE_MS: STALE_MS };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticAnalytics = api;
