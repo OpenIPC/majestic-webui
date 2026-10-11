@@ -98,3 +98,46 @@ What the daemon's endpoint guarantees, and anything touching pads must preserve:
   before any pad is touched, written to a temp file and renamed rather than
   truncated in place; a pair whose journal says it began before this boot and
   never finished is refused outright.
+
+## The sun: `sun-place.js`, `sun-panel.js`, `tz-places.js`
+
+`nightMode.switchBy` lets automatic day/night ask something other than the
+picture: the sun's height, two set times, or the picture with no day allowed in
+the dark hours. `nightMode.whiteLight` lets the white lamp follow the sun too.
+The panel under *Switch day and night by* is where the sun's two settings are
+made, and what reaches beyond its own header is this:
+
+- **An angle, chosen on a strip.** The angles (`sunNightAngle`, `sunDayAngle`)
+  are drawn hidden and driven by `setValue`, the pin map's pattern. So are
+  `calibration.latitude`/`longitude`, though they belong to another section: the
+  save batch is built by dotted path, and nothing on the page compares a field's
+  section with the one on screen. One Save carries both sections.
+- **The page computes no time.** Every time on the strip comes from the camera,
+  `GET /api/v1/sun[?lat=&lon=]`, in the camera's own time zone, which need not
+  be the browser's. A place typed but not saved is asked about too, so the times
+  follow the typing. The endpoint is owner-only, since it answers where the
+  camera stands.
+- **A night the sun does not reach is said, never left blank.** The case is a
+  camera told "night at nautical dusk" in Moscow in June: it looks set up and
+  never goes to night. The panel names it in words and draws the unreached lines
+  struck through. The sentence is pure (`tonight()`), and
+  `tests/sun-panel.test.js` holds it to the cases, because it reads just as
+  confidently when it picks the wrong line.
+- **No place, no sun choices.** While neither the saved config nor the page
+  holds a place, *The sun* and *Picture, no day in the dark hours* are greyed
+  out (and the white lamp's *Follows the sun*), unless one of them is already
+  what the camera runs.
+- **Where the camera is comes from the owner.** Over plain HTTP the browser will
+  not give the page a location. So it is typed, or pasted from a map link that
+  `sun-place.js` reads by each host's own convention: Yandex writes longitude
+  first, and a Google place link carries both the pin and the view. Every
+  misreading of a link is silent, which is why `tests/sun-place.test.js` exists.
+  The camera's time zone offers its city as a first guess. The table is
+  generated from tzdata by `tools/harvest-tz-places.js`, fetched only when the
+  guess is offered, and the guess is staged like any edit, never saved by
+  itself.
+- **The live line.** The monitor line under Automatic day/night reads sources 5
+  (the sun) and 6 (set times) from `night_mode_source`. It says why the picture
+  is deciding when the sun or the clock handed back (`night_sun_state`), and
+  when the dark hours are refusing a day (`night_window_closed`,
+  `night_days_refused_total`). A gauge the camera did not publish adds nothing.

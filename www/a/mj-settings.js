@@ -1255,6 +1255,12 @@
 		// writing into a row that is no longer in the document
 		state.reqUpdaters = [];
 		state.legacyBox = null;
+		// The sun panel likewise: it asks the camera about the place on a
+		// timer, and a save on another section would otherwise still sync it.
+		if (state.sunPanel) {
+			state.sunPanel.destroy();
+			state.sunPanel = null;
+		}
 		// Same reason as legacyBox above: a save re-asks the soundcheck's gate
 		// through this reference, and every section that is not Audio has to
 		// leave it empty or that ask lands on a node no longer in the document.
@@ -1339,6 +1345,7 @@
 			// switch is dealt with everything else and the hidden set is
 			// already settled when the cut is chosen.
 			if (sec === 'nightMode') mountLegacy(cols.firstElementChild);
+			if (sec === 'nightMode') mountSun(cols.firstElementChild);
 		}
 
 		// Save and Apply share this bar, and each is present only while its own
@@ -8076,6 +8083,13 @@
 	((TREE && TREE.mapDriven('nightMode')) || []).forEach((k) => {
 		MAP_DOTS['nightMode.' + k] = 1;
 	});
+	// The two sun angles are drawn on the twilight strip (sun-panel.js)
+	// rather than as two bare sliders, and render hidden the way the pins do.
+	// Only when the strip's module is on the page: without it they are
+	// ordinary rows, never rows nothing can reach.
+	const SUN_DOTS = (typeof window.MajesticSunPanel === 'object' &&
+		typeof window.MajesticSunPlace === 'object')
+		? { 'nightMode.sunNightAngle': 1, 'nightMode.sunDayAngle': 1 } : {};
 
 	function pinField(key) {
 		return state.fields.filter((f) => f.dot === 'nightMode.' + key)[0];
@@ -8183,6 +8197,69 @@
 		return rows.reduce((first, row) =>
 			(row.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
 				? row : first);
+	}
+
+	// The sun panel (sun-panel.js) under the Switch-by row: where the camera
+	// is, and the twilight strip for the two angles. calibration.latitude and
+	// longitude belong to another section and are drawn hidden here, so the
+	// panel stages them like any edit and one Save carries them with the
+	// nightMode keys -- the batch is built by dotted path, and nothing on this
+	// page compares a field's section with the one on screen.
+	let tzPlaces = null;
+	function mountSun(container) {
+		const SUNP = window.MajesticSunPanel, PLACE = window.MajesticSunPlace;
+		if (state.sunPanel) {
+			state.sunPanel.destroy();
+			state.sunPanel = null;
+		}
+		if (!SUNP || !PLACE) return;
+		const byF = state.fields.find((x) => x.dot === 'nightMode.switchBy');
+		if (!byF || !byF.p) return;
+		const props = state.schema.properties || {};
+		const cal = props.calibration && props.calibration.properties;
+		['latitude', 'longitude'].forEach((k) => {
+			const dot = 'calibration.' + k;
+			if (!cal || !cal[k] || EXCLUDE.has(dot) || state.fields.some((x) => x.dot === dot)) return;
+			const field = renderField(container, dot, k, cal[k], getDotted(state.config, dot), { hidden: true });
+			if (field) {
+				state.fields.push(field);
+				state.initial[dot] = field.getValue();
+			}
+		});
+		const nm = (props.nightMode && props.nightMode.properties) || {};
+		const sx = (k) => (nm[k] && nm[k]['x-special']) || {};
+		state.sunPanel = SUNP.mount({
+			anchor: byF.p,
+			field: (dot) => state.fields.find((x) => x.dot === dot) || null,
+			set: (dot, v) => {
+				const fl = state.fields.find((x) => x.dot === dot);
+				if (!fl) return;
+				fl.setValue(v);
+				runVisibility();
+				updateDirty();
+			},
+			// Asked of the camera every time, with the place on the page:
+			// the times are in the camera's time zone and the arithmetic is
+			// the camera's. A refused or failed ask is no report -- the panel
+			// then says nothing about tonight rather than something stale.
+			report: (lat, lon) => fetch('/api/v1/sun' +
+				(lat === null ? '' : '?lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon)),
+			{ credentials: 'same-origin' })
+				.then((r) => (r.ok ? r.json() : null)).catch(() => null),
+			zone: boot.tz || '',
+			initial: (dot) => state.initial[dot],
+			// Sixteen kilobytes nobody needs until a guess is offered, and
+			// fetched once per page however often the section is drawn.
+			places: () => tzPlaces || (tzPlaces = new Promise((resolve) => {
+				const s = document.createElement('script');
+				s.src = '/a/tz-places.js';
+				s.onload = () => resolve(window.MajesticTzPlaces || null);
+				s.onerror = () => resolve(null);
+				document.head.appendChild(s);
+			})),
+			P: PLACE,
+			names: { night: sx('sunNightAngle'), day: sx('sunDayAngle') },
+		});
 	}
 
 	function mountLegacy(container) {
@@ -8293,7 +8370,10 @@
 	// night_mode_source, as the endpoint documents it: 0 manual, 1 GPIO
 	// sensor, 2 gain thresholds, 3 ADC, 4 automatic. 0 is nothing deciding,
 	// which is not a verdict about any of these, so it marks nothing.
-	const MECH_OF_SRC = { 1: 'sensor', 2: 'thresholds', 3: 'adc', 4: 'auto' };
+	// 5 (the sun) and 6 (set times) are automatic mode asking something other
+	// than the picture, and handing back to it whenever they cannot answer, so
+	// the automatic rows stay in use and only the thresholds are outranked.
+	const MECH_OF_SRC = { 1: 'sensor', 2: 'thresholds', 3: 'adc', 4: 'auto', 5: 'auto', 6: 'auto' };
 	// One line each. The finding at the top of the section carries the
 	// explanation and the way out; repeating a paragraph under every ignored
 	// control is the wall of text the reporter of #325 objected to in the same
@@ -9826,7 +9906,7 @@
 				// their headings would stand over nothing.
 				if (!mine.some(k => {
 					const d = basePath + '.' + k;
-					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !lifted().has(d) && !(skip && skip.has(d));
+					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !SUN_DOTS[d] && !lifted().has(d) && !(skip && skip.has(d));
 				})) continue;
 				if (g.label) head(container, g.label, g.note);
 				renderProps(container, basePath, pick(props, mine), skip, true);
@@ -9858,7 +9938,7 @@
 			const rowOf = sub && sub['x-row-of'] && typeof sub['x-row-of'].field === 'string'
 				&& props[sub['x-row-of'].field];
 			const field = renderField(container, dot, key, sub, eff,
-				(MAP_DOTS[dot] || rowOf) ? { hidden: true } : undefined);
+				(MAP_DOTS[dot] || SUN_DOTS[dot] || rowOf) ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -13029,6 +13109,7 @@
 		// from greying the button for the rest of the visit.
 		state.ircutNoSnap = null;
 		syncLegacy();
+		if (state.sunPanel) state.sunPanel.sync();
 		syncTestBtn();
 		// The soundcheck's gate reads the two audio switches, which are fields
 		// on this very page — so a save that turns one on has to hand the panel

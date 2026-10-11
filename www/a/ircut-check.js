@@ -1449,6 +1449,51 @@
 		return s < 90 ? s + ' s' : Math.round(s / 60) + ' min';
 	}
 
+	// A wait that can run to hours: "40 s", "25 min", "3 h 10 min".
+	function spanWord(s) {
+		if (s < 90) return s + ' s';
+		const m = Math.round(s / 60);
+		if (m < 90) return m + ' min';
+		return Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+	}
+
+	// Why the picture is deciding when the camera was told to ask the sun or
+	// the clock -- they hand back whenever they cannot answer, and a page
+	// that only said "automatic" would read as the setting not having taken.
+	// The reasons are night_sun_state's; the clock's one reason is the clock.
+	function handBackNote(nm, v) {
+		const by = nm.switchBy;
+		if (by === 'sun') {
+			const st = v.night_sun_state;
+			const why = st === 1 ? 'where the camera is has not been said'
+				: st === 2 ? 'the camera\'s clock is not set yet'
+					: st === 3 ? 'it does not get down to the night angle here tonight'
+						: st === 4 ? 'it does not get up to the day angle here today'
+							: null;
+			return why ? ' The sun is not deciding: ' + why + ', so the picture does.' : '';
+		}
+		if (by === 'clock') {
+			return ' The set times are not deciding — the camera\'s clock is not set ' +
+				'yet, or they do not read as times — so the picture does.';
+		}
+		return '';
+	}
+
+	// Under the two NEAR choices: the picture decides, but not a day in the
+	// dark hours. Absent gauges say nothing -- the window is then unknown, not
+	// open.
+	// Said only at night: the window refuses a switch TO day, so a camera
+	// still in day under street lights is not being held by it. The count
+	// runs from when the camera started, and says so -- not "tonight".
+	function windowNote(v, inNight) {
+		if (v.night_window_closed !== 1 || inNight !== true) return '';
+		const n = v.night_days_refused_total;
+		return ' No day until the window around dawn opens' +
+			(typeof n === 'number' && n > 0
+				? ' — refused ' + n + (n === 1 ? ' time' : ' times') + ' since the camera started.'
+				: '.');
+	}
+
 	function probeNote(p) {
 		if (!p) return '';
 		if (p.verdict === PROBE_UNREADABLE) {
@@ -1589,7 +1634,8 @@
 			return {
 				mode: 'auto', chart: true,
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
-				marks: marks, line: line + lampNote + probeNote(probe),
+				marks: marks,
+				line: line + windowNote(v, inNight) + lampNote + probeNote(probe) + handBackNote(nm, v),
 				unit: 'x',
 			};
 		}
@@ -1644,6 +1690,34 @@
 					lampNote + probeNote(probeState(v)),
 				unit: '',
 			};
+		}
+
+		// The sun or the set times, deciding on their own: no reading of the
+		// scene to plot, so a sentence -- which, and when the next switch is,
+		// from the camera's own countdowns. A countdown the camera did not
+		// publish (a white night, a polar day) is left out, not guessed.
+		if (src === 5) {
+			const e = v.night_sun_elevation_millidegrees;
+			// No countdown when day or night is itself unknown: "night in 3 h"
+			// would assert the day the sentence left unsaid.
+			const next = inNight === true ? v.night_sun_next_day_seconds
+				: inNight === false ? v.night_sun_next_night_seconds : null;
+			const where = typeof e === 'number'
+				? ': it is ' + Math.abs(Math.round(e / 100) / 10) + '° ' +
+					(e < 0 ? 'below' : 'above') + ' the horizon'
+				: '';
+			return say('sun', modeWord + 'The sun decides' + where + '.' +
+				(typeof next === 'number' && next >= 0
+					? (inNight ? ' Day again in ' : ' Night in ') + spanWord(next) + '.'
+					: '') + lampNote);
+		}
+		if (src === 6) {
+			const next = inNight === true ? v.night_clock_next_day_seconds
+				: inNight === false ? v.night_clock_next_night_seconds : null;
+			return say('clock', modeWord + 'The set times decide.' +
+				(typeof next === 'number' && next >= 0
+					? (inNight ? ' Day again in ' : ' Night in ') + spanWord(next) + '.'
+					: '') + lampNote);
 		}
 
 		// A wired photocell is the one door with no reading behind it: the pad

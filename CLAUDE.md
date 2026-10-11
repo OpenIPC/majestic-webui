@@ -149,9 +149,9 @@ months and omitted about sixty that existed, so it was deleted.)
 
 Names in `www/a/` say what a module serves: `preview-*.js` the live player,
 `mj-*.js` the settings page and its shared components, `ircut-*.js` the
-Day/Night machinery, `sdcard-*.js`/`recordings*.js` storage, `mp4*.js` with
-`mjcrypto.js`/`reckeys.js` encrypted recordings, and `<page>.js` the page of that
-name.
+Day/Night machinery and `sun-*.js` the sun's half of it, `sdcard-*.js`/
+`recordings*.js` storage, `mp4*.js` with `mjcrypto.js`/`reckeys.js` encrypted
+recordings, and `<page>.js` the page of that name.
 
 **Most modules are not described anywhere but in themselves, by design.** Each
 one opens with a comment saying what it is for, what it refuses to do and why —

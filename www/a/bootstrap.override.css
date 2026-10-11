@@ -9739,3 +9739,120 @@ body > main > .container > form > .mj-foot {
 	line-height: 1.7;
 	color: var(--bs-secondary-color);
 }
+
+/* ── The sun on Day / Night (sun-panel.js) ─────────────────────────────────
+   The twilight strip runs from the sun 6° up at the left to 12° down at the
+   right, banded the way the twilight diagram is: day, civil, nautical. The
+   bands are fixed colours rather than theme tokens because they ARE the sky's
+   colours, read the same in either theme; everything written on or under the
+   strip takes the theme's text colours. Positions are percentages the module
+   sets from the angle, so nothing here knows a number of degrees. */
+.mj-sun {
+	margin: 0 0 0.75rem;
+}
+.mj-sun-strip-box[hidden] {
+	display: none;
+}
+.mj-sun-strip {
+	position: relative;
+	height: 1.75rem;
+	margin: 0.5rem 0 0;
+	border-radius: 0.375rem;
+	overflow: visible;
+}
+.mj-sun-band {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+}
+.mj-sun-day {
+	left: 0;
+	width: 33.333%;
+	background: #a9d2f3;
+	border-radius: 0.375rem 0 0 0.375rem;
+}
+.mj-sun-civil {
+	left: 33.333%;
+	width: 33.334%;
+	background: #5b86bd;
+}
+.mj-sun-nautical {
+	left: 66.667%;
+	width: 33.333%;
+	background: #263d63;
+	border-radius: 0 0.375rem 0.375rem 0;
+}
+/* The two chosen lines, and the sun where it is now. */
+.mj-sun-pick {
+	position: absolute;
+	top: -0.25rem;
+	bottom: -0.25rem;
+	width: 3px;
+	margin-left: -1.5px;
+	background: #f5a623;
+	border-radius: 2px;
+}
+.mj-sun-pick-day {
+	background: #ffd56b;
+}
+.mj-sun-pick[hidden],
+.mj-sun-now[hidden] {
+	display: none;
+}
+.mj-sun-now {
+	position: absolute;
+	top: 50%;
+	width: 0.75rem;
+	height: 0.75rem;
+	margin: -0.375rem 0 0 -0.375rem;
+	border-radius: 50%;
+	background: #ffcc33;
+	box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+/* The named lines, with tonight's times under each. Each label is
+   right-aligned to its own line over the band before it -- the band that
+   line ends -- so each has a third of the strip and the three cannot run
+   into one another at phone width, where two lines 6° apart are a few dozen
+   pixels apart. */
+.mj-sun-marks {
+	position: relative;
+	height: 2.6rem;
+	margin: 0.2rem 0 0.25rem;
+	font-size: 0.8rem;
+	line-height: 1.2;
+}
+.mj-sun-mark {
+	position: absolute;
+	top: 0;
+	width: 33.333%;
+	padding-right: 0.3rem;
+	text-align: right;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--bs-body-color);
+	border-right: 1px solid var(--bs-secondary-color);
+}
+.mj-sun-mark-name,
+.mj-sun-mark-time {
+	display: block;
+}
+.mj-sun-mark-time {
+	color: var(--bs-secondary-color);
+}
+/* A line the sun does not reach tonight is drawn missing, not blank: the
+   sentence under the strip says why. */
+.mj-sun-mark-missing {
+	opacity: 0.55;
+	text-decoration: line-through;
+}
+.mj-sun-sentence {
+	margin-top: 0.25rem;
+}
+.mj-sun-guess {
+	display: block;
+	text-align: left;
+}
+.mj-sun-guess[hidden] {
+	display: none;
+}

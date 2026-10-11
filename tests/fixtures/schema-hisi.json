@@ -1306,6 +1306,136 @@
           "x-reload": "service:night",
           "hint": "Automatic mode only: seconds the scene must stay bright before switching back to day, so headlights and porch lights at night do not flip the camera. Dawn easily outlasts it."
         },
+        "switchBy": {
+          "enum": [
+            "picture",
+            "sun",
+            "pictureNearSun",
+            "clock",
+            "pictureNearClock"
+          ],
+          "type": "string",
+          "title": "Switch day and night by",
+          "default": "picture",
+          "x-reload": "service:night",
+          "hint": "The sun and set times need the clock, and the sun the latitude and longitude; until they have them, and on any night the sun never reaches its angle, the picture decides.",
+          "x-enum-titles": {
+            "picture": "The picture",
+            "sun": "The sun",
+            "pictureNearSun": "Picture, no day in the dark hours",
+            "clock": "Set times",
+            "pictureNearClock": "Picture, no day between the times"
+          }
+        },
+        "sunNightAngle": {
+          "minimum": -12,
+          "maximum": 6,
+          "type": "integer",
+          "title": "Sun angle that means night",
+          "default": -6,
+          "x-reload": "service:night",
+          "hint": "Night once the sun is this far below the horizon. Needs the latitude and longitude.",
+          "x-unit": "°",
+          "x-special": {
+            "0": "Sunset",
+            "-6": "Civil dusk",
+            "-12": "Nautical dusk"
+          }
+        },
+        "sunDayAngle": {
+          "minimum": -12,
+          "maximum": 6,
+          "type": "integer",
+          "title": "Sun angle that means day again",
+          "x-reload": "service:night",
+          "hint": "Day again once the sun is back up to this. Empty: the same angle as night.",
+          "x-unit": "°",
+          "x-special": {
+            "0": "Sunrise",
+            "-6": "Civil dawn",
+            "-12": "Nautical dawn"
+          }
+        },
+        "nightFrom": {
+          "type": "string",
+          "title": "Night from",
+          "default": "20:00",
+          "x-reload": "service:night",
+          "hint": "24-hour time, as 20:30.",
+          "visibleWhen": {
+            "field": "switchBy",
+            "in": [
+              "clock",
+              "pictureNearClock"
+            ]
+          }
+        },
+        "dayFrom": {
+          "type": "string",
+          "title": "Day from",
+          "default": "07:00",
+          "x-reload": "service:night",
+          "hint": "24-hour time, as 07:00.",
+          "visibleWhen": {
+            "field": "switchBy",
+            "in": [
+              "clock",
+              "pictureNearClock"
+            ]
+          }
+        },
+        "windowMinutes": {
+          "minimum": 10,
+          "maximum": 360,
+          "type": "integer",
+          "title": "Time either side of dusk and dawn",
+          "default": 120,
+          "x-reload": "service:night",
+          "hint": "How long after dusk, and before dawn, the picture may still bring day. Between the two it cannot, so the camera's own lamp cannot.",
+          "x-unit": "min",
+          "visibleWhen": {
+            "field": "switchBy",
+            "in": [
+              "pictureNearSun",
+              "pictureNearClock"
+            ]
+          }
+        },
+        "whiteLight": {
+          "enum": [
+            "auto",
+            "motion",
+            "sun",
+            "manual",
+            "off"
+          ],
+          "type": "string",
+          "title": "White light",
+          "default": "auto",
+          "x-reload": "service:night",
+          "hint": "With colour night mode on, the picture is in colour while the white light is lit and grey under the infrared light otherwise.",
+          "x-enum-titles": {
+            "auto": "Follows day/night",
+            "motion": "On movement at night",
+            "sun": "Follows the sun",
+            "manual": "Manual",
+            "off": "Off"
+          }
+        },
+        "whiteHoldSec": {
+          "minimum": 5,
+          "maximum": 600,
+          "type": "integer",
+          "title": "White light stays on for",
+          "default": 60,
+          "x-reload": "service:night",
+          "hint": "After the last movement, before the white light goes out.",
+          "x-unit": "s",
+          "visibleWhen": {
+            "field": "whiteLight",
+            "equals": "motion"
+          }
+        },
         "irLightPwmChannel": {
           "enum": [
             "none",
