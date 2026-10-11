@@ -30,6 +30,38 @@
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), note = $('#mj-note');
+	// Inside a share, the picture's state goes into the guest's diagnostics
+	// every five seconds: a guest who says the camera is slow is most often
+	// watching a picture that is late, and the copied report should say so
+	// without the Stats panel. How late it is at each stage -- frames waiting
+	// in the camera's queue, the capture-to-arrival lag, what the player sits
+	// on -- and what the link lost. Nothing outside a share.
+	const PICTURE_EVERY_MS = 5000;
+	let pictureAt = 0, pictureRx = null;
+	const pictureTrace = (s) => {
+		const S = window.MajesticSignal;
+		if (!s || !S || !S.shareTrace) return;
+		const now = Date.now();
+		if (now - pictureAt < PICTURE_EVERY_MS) return;
+		const dc = s.dc || null;
+		const rx = s.rxBytes != null ? s.rxBytes : (dc ? dc.rxBytes : null);
+		const kbps = rx != null && pictureRx != null && pictureAt
+			? Math.round((rx - pictureRx) * 8 / (now - pictureAt)) : (s.kbps != null ? s.kbps : null);
+		pictureAt = now;
+		pictureRx = rx;
+		const parts = [(s.transport || '?') + (s.feed ? '/' + s.feed : '')];
+		if (s.width) parts.push(s.width + 'x' + s.height);
+		if (kbps != null) parts.push(kbps + ' kbps');
+		if (s.bufferedMs != null) parts.push('player holds ' + Math.round(s.bufferedMs) + ' ms');
+		if (s.lag && s.lag.n) parts.push('capture→arrival p50 ' + Math.round(s.lag.p50) + ' / p95 ' + Math.round(s.lag.p95) + ' ms');
+		if (dc && dc.queueMs) parts.push('camera queue ' + Math.round(dc.queueMs) + ' ms');
+		const rtt = s.rttMs != null ? s.rttMs : (dc ? dc.rttMs : null);
+		if (rtt != null) parts.push('rtt ' + rtt + ' ms');
+		if (dc && dc.frames) parts.push('frames lost ' + dc.framesMissed + '/' + (dc.frames + dc.framesMissed));
+		if (s.stalls) parts.push('stalls ' + s.stalls);
+		if (s.droppedFrames) parts.push('dropped ' + s.droppedFrames + '/' + s.totalFrames);
+		S.shareTrace('picture', parts.join(' · '));
+	};
 	// Whether the chip is describing a playing stream or saying what is wrong.
 	// On a small stage the description travels with the control bar and the
 	// trouble stays on screen (bootstrap.override.css, .mj-chip-info).
@@ -1431,6 +1463,7 @@
 				}
 			},
 			onStats: (s) => {
+				pictureTrace(s);
 				// The buffered players may carry their bytes over a WebRTC
 				// data channel rather than the WebSocket (preview-datachannel.js).
 				// The chip does not change — the transport is still the
