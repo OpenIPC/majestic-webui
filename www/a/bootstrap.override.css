@@ -4946,8 +4946,8 @@ button.mj-osd-chip,
 
 /* The fold (preview-ptz.js): on a small stage the pads wait behind one button,
    a pad button's glass and a little more than its size, in the corner they
-   open from. Open, it stays at the top of the column with a cross in it. A
-   stage large enough for the pads never shows it. */
+   open from. Open, it stays where it was, at the foot of the column, with a
+   cross in it. A stage large enough for the pads never shows it. */
 .mj-ptz-fold {
 	display: none;
 	align-items: center;
@@ -4970,6 +4970,17 @@ button.mj-osd-chip,
 .mj-ptz.mj-ptz-folded .mj-ptz-fold-close,
 .mj-ptz:not(.mj-ptz-folded) .mj-ptz-fold-open {
 	display: none;
+}
+
+/* A short stage cannot hold the column at all -- 192px of landscape phone
+   against 355px of zoom/focus cluster, pad and fold -- so there the open pads
+   stand side by side, the fold last, and the row is as tall as its tallest
+   cluster. The stage is wide there for the same reason it is short. */
+@media (max-height: 480px) {
+	.mj-ptz.mj-ptz-foldable {
+		flex-direction: row;
+		align-items: flex-end;
+	}
 }
 
 .mj-ptz-fold:focus-visible {

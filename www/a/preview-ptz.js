@@ -117,6 +117,12 @@
 	// at the top of the column to fold it back. Whether it is open is
 	// remembered per browser, so whoever does steer opens it once. A window
 	// large enough for the pad never folds it and shows no button.
+	//
+	// LAST in the column, so at its foot: where the stage is too short for the
+	// open column (a phone in landscape: 192px of stage, 355px of Pelco
+	// cluster) the stylesheet's clamp keeps the bottom on screen and lets the
+	// top run under the navbar. At the top, the button that closes the pads
+	// went there with it, and the open state is remembered.
 	const SMALL = '(max-width: 575.98px), (max-height: 480px)';
 	const small = window.matchMedia ? window.matchMedia(SMALL) : null;
 	const fold = document.createElement('button');
@@ -144,7 +150,7 @@
 		try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch (e) { /* ignore */ }
 		applyFold();
 	});
-	mount.insertBefore(fold, mount.firstChild);
+	mount.appendChild(fold);
 	applyFold();
 	if (small) {
 		if (small.addEventListener) small.addEventListener('change', applyFold);
