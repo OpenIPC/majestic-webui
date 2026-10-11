@@ -57,8 +57,8 @@
 			.then(r => (r.ok ? r.text() : ''))
 			.then(t => {
 				if (!PS.offered(t)) return;
-				mount.appendChild(speedBox);
 				speedBox.hidden = false;
+				placeExtras();
 			})
 			.catch(() => {});
 	}
@@ -84,8 +84,9 @@
 				if (gen !== followGen || followIn.disabled) return;
 				const v = PF.view(caps, cfg);
 				followIn.checked = v.on;
-				if (v.show && followBox.parentNode !== mount) mount.appendChild(followBox);
 				followBox.hidden = !v.show;
+				if (v.show) placeExtras();
+				else showGear();
 			}).catch(() => { /* no answer: leave it as it was */ });
 		};
 		followRefresh();
@@ -136,10 +137,86 @@
 	const OPEN_KEY = 'mj-ptz-open';
 	let open = false;
 	try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch (e) { /* ignore */ }
+	// Speed and Follow are settings of the pad, not controls on it: on a small
+	// stage they wait behind a gear, in a popover beside the column, so the
+	// open pad is the arrows alone -- four stacked panels covered half a phone
+	// (measured on an iPhone). On a larger stage they sit in the
+	// column as before.
+	const gear = document.createElement('button');
+	gear.type = 'button';
+	gear.className = 'mj-ptz-gear';
+	gear.hidden = true;
+	gear.setAttribute('aria-label', 'Pan and tilt settings');
+	gear.title = 'Pan and tilt settings';
+	gear.setAttribute('aria-expanded', 'false');
+	gear.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" ' +
+		'stroke-width="1.5" stroke-linecap="round" aria-hidden="true">' +
+		'<path d="M3.5 6h6M13.5 6h3M3.5 14h3M10.5 14h6"></path>' +
+		'<circle cx="11.5" cy="6" r="2"></circle><circle cx="8.5" cy="14" r="2"></circle></svg>';
+	const more = document.createElement('div');
+	more.className = 'mj-ptz-more';
+	more.id = 'mj-ptz-more';
+	more.hidden = true;
+	gear.setAttribute('aria-controls', more.id);
+	const head = document.createElement('div');
+	head.className = 'mj-ptz-head';
+	// The Pelco pad's top corners are empty cells: the gear and the fold go
+	// there and the open pad is no taller than its arrows. The eight-way pad
+	// has diagonals in them, so there the two sit in a strip at its foot.
+	const corners = !!(pad && pad.children.length > 2 &&
+		pad.children[0].classList.contains('mj-ptz-void') &&
+		pad.children[2].classList.contains('mj-ptz-void'));
+	const isSmall = () => !!(small && small.matches);
+	const hasExtras = () => !!((speedBox && !speedBox.hidden && speedBox.isConnected) ||
+		(followBox && !followBox.hidden && followBox.isConnected));
+	const popOpen = (on) => {
+		more.hidden = !on;
+		gear.setAttribute('aria-expanded', String(on));
+		gear.classList.toggle('mj-ptz-gear-on', on);
+	};
+	function showGear() {
+		gear.hidden = !(isSmall() && open && hasExtras());
+		if (gear.hidden) popOpen(false);
+	}
+	// Speed and Follow to where they belong at this size, and the gear shown
+	// only when the popover would hold something.
+	function placeExtras() {
+		const home = isSmall() ? more : mount;
+		for (const box of [speedBox, followBox]) {
+			if (!box || box.hidden) continue;
+			if (box.parentNode !== home) {
+				if (home === mount) mount.insertBefore(box, fold.parentNode === mount ? fold : null);
+				else home.appendChild(box);
+			}
+		}
+		showGear();
+	}
+	gear.addEventListener('click', (e) => { e.stopPropagation(); popOpen(more.hidden); });
+	document.addEventListener('pointerdown', (e) => {
+		if (!more.hidden && !more.contains(e.target) && e.target !== gear && !gear.contains(e.target)) popOpen(false);
+	});
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && !more.hidden) { popOpen(false); gear.focus(); }
+	});
+	mount.appendChild(more);
 	const applyFold = () => {
 		const folded = !!(small && small.matches) && !open;
 		mount.classList.toggle('mj-ptz-folded', folded);
 		mount.classList.toggle('mj-ptz-foldable', !!(small && small.matches));
+		// Where the fold and the gear stand: folded, the fold alone in the
+		// mount; open on a small stage, in the pad's corners or the strip.
+		if (!isSmall() || folded) {
+			mount.appendChild(fold);
+		} else if (corners) {
+			pad.appendChild(gear);
+			pad.appendChild(fold);
+		} else {
+			head.appendChild(gear);
+			head.appendChild(fold);
+			mount.appendChild(head);
+		}
+		if (folded) popOpen(false);
+		showGear();
 		fold.setAttribute('aria-expanded', String(!folded));
 		const say = folded ? 'Show camera controls' : 'Hide camera controls';
 		fold.setAttribute('aria-label', say);
@@ -152,6 +229,10 @@
 	});
 	mount.appendChild(fold);
 	applyFold();
+	if (small) {
+		if (small.addEventListener) small.addEventListener('change', placeExtras);
+		else if (small.addListener) small.addListener(placeExtras);
+	}
 	if (small) {
 		if (small.addEventListener) small.addEventListener('change', applyFold);
 		else if (small.addListener) small.addListener(applyFold);
@@ -541,8 +622,8 @@
 	mount.addEventListener('selectstart', e => e.preventDefault());
 	mount.addEventListener('contextmenu', e => e.preventDefault());
 
-	// The fold button is the mount's own, not a move.
-	mount.querySelectorAll('button:not(.mj-ptz-fold)').forEach(btn => {
+	// The fold and the gear are the mount's own, not moves.
+	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear)').forEach(btn => {
 		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco
@@ -550,6 +631,10 @@
 			btn.addEventListener('click', () => { stopHold(null); fire(btn); });
 			return;
 		}
+		// iOS starts its long-press selection gesture from touchstart, before
+		// any pointer event can refuse it; a held arrow must never be one.
+		// Pointer events still fire, so the hold below is unaffected.
+		btn.addEventListener('touchstart', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
 		btn.addEventListener('pointerdown', e => {
 			e.preventDefault();
 			// Capture keeps pointerup coming to this button however far the
