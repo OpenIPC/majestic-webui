@@ -37,7 +37,7 @@
 	// in the camera's queue, the capture-to-arrival lag, what the player sits
 	// on -- and what the link lost. Nothing outside a share.
 	const PICTURE_EVERY_MS = 5000;
-	let pictureAt = 0, pictureRx = null;
+	let pictureAt = 0, pictureRx = null, pictureJb = null;
 	const pictureTrace = (s) => {
 		const S = window.MajesticSignal;
 		if (!s || !S || !S.shareTrace) return;
@@ -49,9 +49,23 @@
 			? Math.round((rx - pictureRx) * 8 / (now - pictureAt)) : (s.kbps != null ? s.kbps : null);
 		pictureAt = now;
 		pictureRx = rx;
-		const parts = [(s.transport || '?') + (s.feed ? '/' + s.feed : '')];
-		if (s.width) parts.push(s.width + 'x' + s.height);
+		// WebRTC's sample names no transport: it is the one with a jitter buffer.
+		const webrtc = !s.transport && s.jbEmitted != null;
+		const parts = [(s.transport || (webrtc ? 'webrtc' : '?')) + (s.feed ? '/' + s.feed : '')];
+		if (s.width) parts.push(s.width + 'x' + s.height + (s.fps ? ' ' + Math.round(s.fps) + ' fps' : ''));
 		if (kbps != null) parts.push(kbps + ' kbps');
+		// WebRTC's lateness at the receiver: the jitter buffer's mean wait over
+		// these five seconds, from the cumulative counters.
+		if (webrtc) {
+			const prev = pictureJb;
+			pictureJb = { d: s.jbDelay, n: s.jbEmitted, lost: s.packetsLost || 0, got: s.packetsReceived || 0 };
+			if (prev && pictureJb.n > prev.n) parts.push('jitter buffer ' + Math.round((pictureJb.d - prev.d) / (pictureJb.n - prev.n) * 1000) + ' ms');
+			if (prev && pictureJb.got > prev.got) {
+				const lost = pictureJb.lost - prev.lost, got = pictureJb.got - prev.got;
+				parts.push('packets lost ' + lost + '/' + (lost + got));
+			}
+			if (s.nack) parts.push('nack ' + s.nack);
+		}
 		if (s.bufferedMs != null) parts.push('player holds ' + Math.round(s.bufferedMs) + ' ms');
 		if (s.lag && s.lag.n) parts.push('capture→arrival p50 ' + Math.round(s.lag.p50) + ' / p95 ' + Math.round(s.lag.p95) + ' ms');
 		if (dc && dc.queueMs) parts.push('camera queue ' + Math.round(dc.queueMs) + ' ms');
@@ -60,6 +74,7 @@
 		if (dc && dc.frames) parts.push('frames lost ' + dc.framesMissed + '/' + (dc.frames + dc.framesMissed));
 		if (s.stalls) parts.push('stalls ' + s.stalls);
 		if (s.droppedFrames) parts.push('dropped ' + s.droppedFrames + '/' + s.totalFrames);
+		if (s.framesDropped) parts.push('dropped ' + s.framesDropped + '/' + (s.framesDecoded + s.framesDropped));
 		S.shareTrace('picture', parts.join(' · '));
 	};
 	// Whether the chip is describing a playing stream or saying what is wrong.
