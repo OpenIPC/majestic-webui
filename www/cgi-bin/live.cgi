@@ -92,6 +92,7 @@ hide_title=1; full_bleed=1
 <script src="/a/mj-preview.js"></script>
 <script src="/a/preview-peer.js"></script>
 <script src="/a/preview-hero.js"></script>
+<script src="/a/preview-bar-sheet.js"></script>
 <!-- Is the camera seeing anything? Nothing the player can answer — a camera on
      the wrong sensor driver plays perfectly and plays black — so this reads the
      exposure gauges off the heartbeat and the picture off the decoded frame,

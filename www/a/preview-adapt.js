@@ -90,6 +90,9 @@ window.MajesticAdapt = (function () {
 		arrow.textContent = (up ? '↗ ' : '↘ ') + fmt(toK);
 		ratesEl.appendChild(arrow);
 		whyEl.textContent = why;
+		// Kept as the toast's title too: on a small stage the sentence is not
+		// shown (bootstrap.override.css), only the rates.
+		el.title = why;
 		// A new step replaces whatever was showing, pin included: the pin
 		// held the old news, and this is news.
 		pinned = false;

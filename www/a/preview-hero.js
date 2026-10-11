@@ -250,7 +250,7 @@
 		if (e.pointerType !== 'touch') return;
 		touching++;
 		if (touching > 1) tapId = null;
-		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-toasts, #mj-tap-play')) return;
+		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-toasts, #mj-tap-play, .mj-more-sheet')) return;
 		if (touching > 1) return;
 		tapId = e.pointerId;
 		tapX = e.clientX;
