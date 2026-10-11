@@ -523,15 +523,41 @@
 		lastType = e.pointerType;
 		if (e.button != null && e.button > 0) return;
 		if (e.target.closest && e.target.closest(CHROME)) return;
-		// A rectangle belongs to the pointer that began it. A second finger
+		// A rectangle belongs to the pointer that began it. A second pointer
 		// arriving mid-drag is not a new origin, and it must not start a pan
-		// either.
-		if (drawing) return;
+		// either -- except a second FINGER, which says the first one was never
+		// drawing. Two fingers cannot land in the same instant, so the first is
+		// always alone long enough to start a band, and in Fit that turned
+		// every spread into a rectangle traced by whichever finger touched
+		// first: the view jumped to some part of the picture off to one side,
+		// while the same spread on a picture already zoomed in was a pinch.
+		// The band is dropped and both fingers go to the pinch below. Armed
+		// stays armed, and a pending pickRect() stays pending: this drag was
+		// not a rectangle, which is not the same as the asker giving up.
+		if (drawing) {
+			if (drawing.type !== 'touch' || e.pointerType !== 'touch') return;
+			const first = drawing;
+			drawing = null;
+			if (band) band.hidden = true;
+			pts.set(first.id, { x: first.cx, y: first.cy });
+			pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+			pinchDist = 0;
+			return;
+		}
 
-		// Armed, or simply nothing to pan: either way the drag draws.
-		if (armed || stage.classList.contains('mj-drawable')) {
+		// Armed, or simply nothing to pan: either way the drag draws -- unless
+		// a finger is already down, in which case this one joins it. A pinch
+		// squeezed back to Fit leaves the picture drawable under a finger
+		// still resting on it, and the next one down is that pinch resuming.
+		if (!pts.size && (armed || stage.classList.contains('mj-drawable'))) {
 			const r = stage.getBoundingClientRect();
-			drawing = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
+			drawing = {
+				id: e.pointerId, type: e.pointerType,
+				x: e.clientX - r.left, y: e.clientY - r.top,
+				// Where the finger is now, in client pixels, for the pinch a
+				// second finger turns this into.
+				cx: e.clientX, cy: e.clientY,
+			};
 			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
 			return;
 		}
@@ -547,7 +573,13 @@
 	stage.addEventListener('pointermove', (e) => {
 		if (drawing) {
 			if (e.pointerId !== drawing.id) return;
+			drawing.cx = e.clientX; drawing.cy = e.clientY;
 			const b = bandRect(e);
+			// On touch the band waits until it is a rectangle at all. The
+			// first finger of a pinch is alone for a moment and usually
+			// moves, and a band that flickers up under it before the second
+			// finger takes the gesture over says a box was being drawn.
+			if (drawing.type === 'touch' && band.hidden && !deliberate(b)) return;
 			band.hidden = false;
 			band.style.left = b.x + 'px';
 			band.style.top = b.y + 'px';
@@ -574,6 +606,15 @@
 		panBy(dx, dy);
 	});
 
+	// A rectangle has to be deliberate. Below this it is a slip or a click,
+	// and zooming 40x into a stray 3px drag is the worst possible answer to
+	// one. The floor is a share of the stage with an absolute minimum, so it
+	// means the same thing on a 2560px monitor and a 390px phone.
+	function deliberate(b) {
+		return b.w >= Math.max(16, stage.clientWidth * 0.02)
+			&& b.h >= Math.max(16, stage.clientHeight * 0.02);
+	}
+
 	// `commit` is false for pointercancel: the browser took the gesture away —
 	// a system edge swipe, a device rotation, another element capturing the
 	// pointer — and a gesture that was interrupted is not a gesture that was
@@ -588,14 +629,7 @@
 		picker = null;
 		let rect = null;
 		if (b) {
-			// A rectangle has to be deliberate. Below this it is a slip or a
-			// click, and zooming 40x into a stray 3px drag is the worst
-			// possible answer to one. The floor is a share of the stage with
-			// an absolute minimum, so it means the same thing on a 2560px
-			// monitor and a 390px phone.
-			const minW = Math.max(16, stage.clientWidth * 0.02);
-			const minH = Math.max(16, stage.clientHeight * 0.02);
-			if (b.w >= minW && b.h >= minH) rect = b;
+			if (deliberate(b)) rect = b;
 		}
 		// One drag, then it disarms itself: a mode you can forget you are in is
 		// the wrong thing to leave over a picture that also steers a camera.
