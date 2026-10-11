@@ -53,6 +53,15 @@ fi
 # the same pads in the same order everywhere.
 boot_soc=$(printf '%s' "$soc" | mj_json_escape)
 
+# The camera's time zone, as the Time page set it. The Day / Night page offers
+# the city it is named after as a first guess at where the camera is, for the
+# sun -- a browser on plain HTTP will not give the page a location itself.
+# Control characters out first: mj_json_escape escapes what can end the
+# script block, not a newline, and /etc/timezone is written by a form -- a zone
+# name with a line break in it would leave the blob unparseable and the whole
+# settings page undrawn. No zone name has one.
+boot_tz=$(printf '%s' "$tz_name" | tr -d '\000-\037' | mj_json_escape)
+
 # The fonts the camera can draw the overlay with. One face ships with the
 # firmware; the point of listing rather than hardcoding is the ones an owner
 # adds to their own image, which is the only way there are ever two.
@@ -130,7 +139,7 @@ fi
 	</div>
 
 	<div class="col-12 col-md-9" id="mj-settings-form-col">
-		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"fonts":[<%= $boot_fonts %>]}</script>
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","tz":"<%= $boot_tz %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"fonts":[<%= $boot_fonts %>]}</script>
 
 		<%
 		# No page-level heading any more: one section is shown at a time and its
@@ -197,6 +206,13 @@ fi
 <script src="/a/ircut-scan.js" defer></script>
 <script src="/a/pin-sweep.js" defer></script>
 <script src="/a/pin-hunt.js" defer></script>
+<%
+# The sun on the Day / Night page: reading a place out of what an owner
+# pastes, and the twilight strip that chooses the angle. The zone table
+# (tz-places.js) is not listed: it is fetched only when a guess is asked for.
+%>
+<script src="/a/sun-place.js" defer></script>
+<script src="/a/sun-panel.js" defer></script>
 <%
 # The pins page: the chip on the board, drawn from the pad table the camera
 # reports at /api/v1/pinmux. Its own file, and pure where it can be, so

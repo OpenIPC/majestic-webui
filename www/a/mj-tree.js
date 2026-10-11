@@ -270,7 +270,22 @@
 			// day/night" is contradicted by the row under it the moment that row
 			// reads manual or off (#548). Next to "Automatic day/night" the
 			// relationship is read off the rows, which can say either answer.
-			{ id: 'switching', label: 'Switching', keys: ['lightMonitor', 'irCut', 'backlight'] },
+			//
+			// What automatic mode switches ON sits straight under the switch
+			// that turns it on, with the rows only some of its choices use --
+			// the set times, the window -- under it; the daemon's visibleWhen
+			// shows each only for the choices it belongs to, which is why they
+			// are not a heading of their own: in the default mode every one of
+			// them is hidden, and a heading over nothing is furniture. The two
+			// sun angles are here too, drawn hidden and edited on the twilight
+			// strip sun-panel.js mounts under Switch day and night by. The white
+			// lamp's mode goes beside the other lamp's, since it is the same
+			// question asked of the other lamp.
+			{
+				id: 'switching', label: 'Switching', keys: ['lightMonitor', 'switchBy',
+					'nightFrom', 'dayFrom', 'windowMinutes', 'sunNightAngle', 'sunDayAngle',
+					'irCut', 'backlight', 'whiteLight', 'whiteHoldSec'],
+			},
 			// Second, and the position is load-bearing rather than editorial.
 			// The cut is taken at the best heading boundary there is, so the
 			// ORDER of the groups decides which boundaries exist: with these two

@@ -846,7 +846,7 @@
 		// absent on daemons that predate night_mode_source, and unsaid for 0
 		// (manual is the absence of a decider, not a decider).
 		const srcWord = ['', ' · sensor pin', ' · thresholds', ' · ADC',
-			' · auto'][v.night_mode_source] || '';
+			' · auto', ' · sun', ' · set times'][v.night_mode_source] || '';
 		// 2 is the camera saying it is deciding on the legacy thresholds. Asked
 		// of the gauge rather than of the config, because the gauge is the
 		// camera's own verdict about what it is actually running.

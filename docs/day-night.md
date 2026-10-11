@@ -98,3 +98,60 @@ What the daemon's endpoint guarantees, and anything touching pads must preserve:
   before any pad is touched, written to a temp file and renamed rather than
   truncated in place; a pair whose journal says it began before this boot and
   never finished is refused outright.
+
+## The sun: `sun-place.js`, `sun-panel.js`, `tz-places.js`
+
+`nightMode.switchBy` lets automatic day/night ask something other than the
+picture: the sun's height, two set times, or the picture with no day allowed in
+the dark hours. `nightMode.whiteLight` lets the white lamp follow the sun too.
+The panel under *Switch day and night by* is where the sun's two settings are
+made, and what reaches beyond its own header is this:
+
+- **Chosen by what the schema says, never by name.** The two angles carry
+  `x-twilight` (`night`, `day`). The strip's range is their minimum and maximum,
+  and its named lines are their `x-special` values. The place is the pair
+  carrying `x-geo` (`latitude`, `longitude`). The module is handed those fields
+  and knows no key.
+- **An angle, chosen on a strip.** The angle rows are drawn hidden and driven
+  by `setValue`, the pin map's pattern. They are hidden only where the section
+  has a night line for the strip to edit; anywhere else they are ordinary rows.
+  The place fields are drawn hidden too, though they belong to another section:
+  the save batch is built by dotted path, and nothing on the page compares a
+  field's section with the one on screen. One Save carries both sections.
+- **The page computes no time.** Every time on the strip comes from the camera,
+  `GET /api/v1/sun[?lat=&lon=]`, in the camera's own time zone, which need not
+  be the browser's. A place typed but not saved is asked about too, so the times
+  follow the typing. The endpoint is owner-only, since it answers where the
+  camera stands.
+- **A night the sun does not reach is said, never left blank.** The case is a
+  camera told "night at nautical dusk" in Moscow in June: it looks set up and
+  never goes to night. The panel names it in words and draws the unreached lines
+  struck through. The sentence is pure (`tonight()`), and
+  `tests/sun-panel.test.js` holds it to the cases, because it reads just as
+  confidently when it picks the wrong line.
+- **No place, no sun choices.** The camera marks the choices that need a place
+  with `x-enum-requires`, and the page holds those back generically, for any
+  select (`paintEnumHolds()`), with the reason under the row. A choice the field
+  holds now, or was saved with, is never held back. The strip itself shows
+  while the angles' own `visibleWhen` holds; it is an `any` of the switching
+  and the white lamp, since either can ask the sun.
+- **A reply is believed only as far as it goes.** A reply with no `place` or
+  `clock` flag, or without the times or the lowest sun a sentence needs, is
+  said nothing about. A new place empties the strip until the camera has
+  answered for it. Text that does not read as a place stages nothing and puts
+  back what is saved. Clearing the box stages 0, 0, which is the camera's own
+  "not said".
+- **Where the camera is comes from the owner.** Over plain HTTP the browser will
+  not give the page a location. So it is typed, or pasted from a map link that
+  `sun-place.js` reads by each host's own convention: Yandex writes longitude
+  first, and a Google place link carries both the pin and the view. Every
+  misreading of a link is silent, which is why `tests/sun-place.test.js` exists.
+  The camera's time zone offers its city as a first guess. The table is
+  generated from tzdata by `tools/harvest-tz-places.js`, fetched only when the
+  guess is offered, and the guess is staged like any edit, never saved by
+  itself.
+- **The live line.** The monitor line under Automatic day/night reads sources 5
+  (the sun) and 6 (set times) from `night_mode_source`. It says why the picture
+  is deciding when the sun or the clock handed back (`night_sun_state`), and
+  when the dark hours are refusing a day (`night_window_closed`,
+  `night_days_refused_total`). A gauge the camera did not publish adds nothing.
