@@ -15,7 +15,7 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'www', 'a', 'preview-
 	{ filename: 'preview-bar-sheet.js' });
 const B = sandbox.window.MajesticBarSheet;
 
-const all = ['mj-view-ctl', 'mj-detail-ctl', 'mj-area-ctl', 'mj-peer-ctl', 'mj-audio-ctl', 'mj-talk-ctl',
+const all = ['mj-view-ctl', 'mj-detail-ctl', 'mj-area-ctl', 'mj-peer-ctl', 'mj-source', 'mj-audio-ctl', 'mj-talk-ctl',
 	'mj-transport-ctl', 'mj-ear-ctl', 'mj-stats-ctl'];
 
 group('a small stage');
@@ -23,6 +23,7 @@ group('a small stage');
 	const p = B.plan(all, {}, true);
 	check('the tuning groups move', p.moved.join() === B.SHEET.join());
 	check('View stays in the bar', p.moved.indexOf('mj-view-ctl') < 0);
+	check('a second source\'s chooser moves', p.moved.indexOf('mj-source') >= 0);
 	check('in the bar\'s own order', p.moved.indexOf('mj-detail-ctl') < p.moved.indexOf('mj-stats-ctl'));
 	check('More is offered', p.more === true);
 }

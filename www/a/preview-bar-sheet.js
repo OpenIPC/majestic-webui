@@ -13,7 +13,9 @@ window.MajesticBarSheet = (function () {
 	'use strict';
 
 	// The groups that leave the bar on a small stage, in the bar's own order.
-	const SHEET = ['mj-detail-ctl', 'mj-area-ctl', 'mj-peer-ctl', 'mj-audio-ctl', 'mj-talk-ctl',
+	// The Source chooser (a second sensor, a USB webcam) is among them: beside
+	// the stream it is what made the row wrap on a camera that has one.
+	const SHEET = ['mj-detail-ctl', 'mj-area-ctl', 'mj-peer-ctl', 'mj-source', 'mj-audio-ctl', 'mj-talk-ctl',
 		'mj-transport-ctl', 'mj-ear-ctl', 'mj-stats-ctl'];
 	const SMALL = '(max-width: 575.98px), (max-height: 480px)';
 
