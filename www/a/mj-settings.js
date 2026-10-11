@@ -10442,6 +10442,19 @@
 			const n = sub['x-numeric'];
 			sub = Object.assign({}, sub, { type: 'number', minimum: n.minimum, maximum: n.maximum });
 		}
+		// The NETIP password is kept as the hash XMEye/CMS clients send, and
+		// the schema names it for what is stored ("Hash of password"). The
+		// owner knows the password, not the hash, so the row takes the
+		// password and saves its hash (netip-hash.js); its name and hint say
+		// what to type. Without the module the row stays the schema's.
+		const netipHash = dot === 'netip.password' && sub && sub.type === 'string'
+			&& window.NetipHash ? window.NetipHash : null;
+		if (netipHash) {
+			sub = Object.assign({}, sub, {
+				title: 'Password',
+				hint: 'What XMEye and CMS clients sign in with. The camera keeps only its hash.',
+			});
+		}
 		// A field's sibling as it stands NOW: the control if it is on the page,
 		// else the config it loaded with. What x-title-when is evaluated
 		// against, so a name follows the mode select as it moves, not after a
@@ -11220,6 +11233,36 @@
 				updateDirty();
 			});
 			if (sw) sw.addEventListener('change', () => { paintMode(); updateDirty(); });
+		} else if (netipHash) {
+			// The box is only ever the password being typed. What the camera
+			// holds is a hash nobody can type back, so it is kept aside and
+			// never put in the box: an untouched row reads as that hash, which
+			// keeps it clean and is what a save sends for it, and a typed
+			// password reads as its hash. The placeholder says whether one is
+			// set. Clearing the setting is ↺, which goes through _set.
+			p = el('p', 'string password mj-row');
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+				'<div class="input-group">' +
+				'<input type="password" id="' + id + '" class="form-control"' +
+				' autocomplete="new-password" spellcheck="false">' +
+				'<div class="input-group-text"><input class="form-check-input mt-0" type="checkbox"' +
+				' data-for="' + id + '" aria-label="Show"></div>' +
+				'</div>';
+			control = p.querySelector('input[type=password]');
+			const eye = p.querySelector('input[type=checkbox]');
+			if (eye) eye.addEventListener('change', () => {
+				control.type = eye.checked ? 'text' : 'password';
+			});
+			let stored = '';
+			control._get = () => control.value !== '' ? netipHash.hash(control.value) : stored;
+			control._set = (v) => {
+				stored = v !== undefined && v !== null ? String(v) : '';
+				control.value = '';
+				control.placeholder = stored !== ''
+					? 'Set — type a new one to replace it' : 'Not set';
+			};
+			control._set(eff);
 		} else if (type === 'string' && (sub['x-secret'] || sub.writeOnly)) {
 			// A secret the camera has asked not to be shown. It is not hidden
 			// from anyone who can read this page — the value came down the same
