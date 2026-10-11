@@ -273,6 +273,12 @@ fi
 %>
 <script src="/a/mj-place.js" defer></script>
 <script src="/a/mj-queue.js" defer></script>
+<%
+# The NETIP password is stored as the hash its clients send, so the page hashes
+# what the owner types. Its own file so tests/netip-hash.test.js can pin it: a
+# wrong hash saves without complaint and only shows as a refused client.
+%>
+<script src="/a/netip-hash.js" defer></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>
