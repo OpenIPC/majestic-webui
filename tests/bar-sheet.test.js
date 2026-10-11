@@ -48,6 +48,15 @@ group('Snapshot, beside Fullscreen');
 	check('a larger stage keeps it', B.plan(all, {}, false, true).snap === false);
 }
 
+group('the list');
+{
+	const rows = [];
+	for (const sec of B.SECTIONS) for (const r of sec[1]) rows.push(r[0]);
+	check('every group that moves has a row to go to', B.SHEET.every((id) => rows.indexOf(id) >= 0));
+	check('every row has a name and a line', B.SECTIONS.every((sec) => sec[1].every((r) => r[1] && r[2])));
+	check('Snapshot and the bitrate switch have rows', rows.indexOf('mj-snap-row') >= 0 && rows.indexOf('mj-adapt-row') >= 0);
+}
+
 group('a larger stage');
 {
 	const p = B.plan(all, {}, false);

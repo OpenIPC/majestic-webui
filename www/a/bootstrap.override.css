@@ -4533,12 +4533,169 @@ dialog.mj-more-sheet::backdrop {
 
 .mj-more-body {
 	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
+	flex-direction: column;
+	gap: 0.75rem;
 }
 
-.mj-more-body > [hidden] {
+/* The list: sections, and rows of a name, one line on what it does, and the
+   control, which keeps its wiring but not its chip -- the row is the chip. */
+.mj-more-sec[hidden],
+.mj-more-row[hidden] {
 	display: none !important;
+}
+
+.mj-more-cap {
+	margin: 0 0 0.25rem;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: rgba(230, 232, 238, 0.5);
+}
+
+.mj-more-row {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	min-height: 3rem;
+	padding: 0.4rem 0;
+	border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.mj-more-words {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+}
+
+.mj-more-name {
+	font-size: 0.9375rem;
+	color: #e6e8ee;
+}
+
+.mj-more-line {
+	font-size: 0.75rem;
+	line-height: 1.35;
+	color: rgba(230, 232, 238, 0.6);
+}
+
+.mj-more-slot {
+	flex: none;
+}
+
+.mj-more-slot .mj-hud {
+	background: none;
+	border: 0;
+	padding: 0;
+	box-shadow: none;
+	backdrop-filter: none;
+}
+
+/* A toggle in the list is a switch: the label's light, icon and word go, the
+   row says what it is. */
+.mj-more-slot .mj-tog,
+.mj-more-switch {
+	position: relative;
+	display: inline-block;
+	width: 2.75rem;
+	height: 1.625rem;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.16);
+	cursor: pointer;
+}
+
+.mj-more-slot .mj-tog > * {
+	display: none;
+}
+
+/* The bar's touch rules make a toggle a 44 px square; in the list the
+   switch is drawn 44 x 26 in the middle of that 44 px target, its wrapper. */
+.mj-more-slot .mj-tog-wrap .mj-tog {
+	display: inline-block;
+	width: 2.75rem;
+	height: 1.625rem;
+	min-width: 0;
+	min-height: 0;
+	padding: 0;
+	vertical-align: middle;
+}
+
+.mj-more-slot .mj-tog-wrap {
+	display: inline-flex;
+	align-items: center;
+	min-height: 2.75rem;
+}
+
+.mj-more-slot .mj-tog::after,
+.mj-more-knob::after {
+	content: "";
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: calc(1.625rem - 6px);
+	height: calc(1.625rem - 6px);
+	border-radius: 50%;
+	background: #fff;
+	transition: transform 0.15s ease;
+}
+
+.mj-more-slot .mj-tog-in:checked + .mj-tog,
+.mj-more-switch input:checked + .mj-more-knob {
+	background: var(--bs-primary);
+}
+
+/* The list's own switch: the span after its input is the track. */
+.mj-more-knob {
+	position: absolute;
+	inset: 0;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.16);
+	pointer-events: none;
+}
+
+.mj-more-slot .mj-tog-in:checked + .mj-tog::after,
+.mj-more-switch input:checked + .mj-more-knob::after {
+	transform: translateX(calc(2.75rem - 1.625rem));
+}
+
+.mj-more-switch input {
+	position: absolute;
+	opacity: 0;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	cursor: pointer;
+}
+
+.mj-more-slot .mj-tog-in:focus-visible + .mj-tog,
+.mj-more-switch:focus-within {
+	outline: 2px solid #fff;
+	outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mj-more-slot .mj-tog::after,
+	.mj-more-knob::after {
+		transition: none;
+	}
+}
+
+/* Fill screen (preview-bar-sheet.js): where the page cannot go fullscreen --
+   an iPhone -- the navbar and the banners step aside and the stage, sized to
+   the viewport by its column, takes the screen. */
+body.mj-fill > .navbar,
+body.mj-fill main.mj-fullbleed > :not(.mj-player) {
+	display: none !important;
+}
+
+.mj-fill-btn[aria-pressed="true"] {
+	color: #fff;
+	background: rgba(255, 255, 255, 0.16);
 }
 
 /* The focus-by-ear readout. Digits big enough to read from the foot of a
@@ -5193,6 +5350,91 @@ dialog.mj-more-sheet::backdrop {
 
 .mj-ptz-more[hidden] {
 	display: none;
+}
+
+/* The handle the pad is moved by (preview-ptz.js): the Pelco pad's centre
+   cell, or a square of the fold's glass where the pad has a centre of its
+   own. */
+.mj-ptz-grip {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: transparent;
+	color: #c8ccd6;
+	cursor: grab;
+	touch-action: none;
+}
+
+.mj-ptz > .mj-ptz-grip,
+.mj-ptz-head > .mj-ptz-grip {
+	width: 2.75rem;
+	height: 2.75rem;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
+}
+
+.mj-ptz-grip:focus-visible {
+	outline: 2px solid #fff;
+	outline-offset: 2px;
+}
+
+.mj-ptz.mj-ptz-dragging {
+	opacity: 0.85;
+	cursor: grabbing;
+}
+
+/* The corner it was put in. Bottom right is where it always stood; the top
+   corners start below the chip, the left ones mirror the right. */
+.mj-stage.mj-ptz-bl .mj-ptz,
+.mj-stage.mj-ptz-tl .mj-ptz {
+	right: auto;
+	left: 0.5rem;
+	align-items: flex-start;
+}
+
+.mj-stage.mj-ptz-tl .mj-ptz,
+.mj-stage.mj-ptz-tr .mj-ptz {
+	bottom: auto;
+	top: calc(var(--mj-pic-top, 0px) + var(--mj-chip-h, 1.75rem) + 1rem);
+}
+
+.mj-stage.mj-ptz-bl .mj-ptz-more,
+.mj-stage.mj-ptz-tl .mj-ptz-more {
+	right: auto;
+	left: calc(100% + 6px);
+}
+
+.mj-stage.mj-ptz-tl .mj-ptz-more,
+.mj-stage.mj-ptz-tr .mj-ptz-more {
+	bottom: auto;
+	top: 0;
+}
+
+/* The bar keeps out of the pad's column only where the pad stands beside
+   it, at the bottom -- on the left when the pad is there. */
+.mj-stage.mj-ptz-beside.mj-ptz-tl .mj-bar,
+.mj-stage.mj-ptz-beside.mj-ptz-tr .mj-bar {
+	padding-right: 0.75rem;
+}
+
+.mj-stage.mj-ptz-beside.mj-ptz-bl .mj-bar {
+	padding-right: 0.75rem;
+	padding-left: calc(var(--mj-ptz-w, 9rem) + 1rem);
+}
+
+/* On a small stage the toasts take the side the pad is not on. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-stage.mj-ptz-tl .mj-toasts,
+	.mj-stage.mj-ptz-bl .mj-toasts {
+		left: auto;
+		right: calc(var(--mj-pic-right, 0px) + 0.5rem);
+		align-items: flex-end;
+	}
 }
 
 .mj-ptz.mj-ptz-folded > :not(.mj-ptz-fold),
