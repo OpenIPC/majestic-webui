@@ -51,14 +51,19 @@
 	// dead zone (the head stands still), else the verb and how far out the
 	// finger is, 0 at the dead zone's edge to 1 at `radius` and beyond.
 	// `prev` is the verb sent last, kept while the finger stays near its sector.
+	// `pan: false` or `tilt: false` is a head without that axis: the finger's
+	// movement along it counts for nothing, and there are no diagonals.
 	function aim(dx, dy, opts) {
 		const o = opts || {};
 		const radius = o.radius > 0 ? o.radius : 40;
 		const dead = o.dead >= 0 && o.dead < radius ? o.dead : radius * 0.2;
+		const pan = o.pan !== false, tilt = o.tilt !== false;
+		if (!pan) dx = 0;
+		if (!tilt) dy = 0;
 		const dist = Math.hypot(dx, dy);
 		if (!(dist > dead)) return null;
 		const angle = Math.atan2(-dy, dx) * 180 / Math.PI;
-		const set = o.diagonals ? ALL : AXES;
+		const set = o.diagonals && pan && tilt ? ALL : AXES;
 		const half = 180 / set.length;
 		let verb = null;
 		if (o.prev && set.indexOf(o.prev) >= 0 && apart(angle, CENTRE[o.prev]) <= half + HYSTERESIS) {

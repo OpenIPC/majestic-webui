@@ -45,6 +45,10 @@ const a60 = [Math.cos(60 * Math.PI / 180) * 30, -Math.sin(60 * Math.PI / 180) * 
 eq('four-way: 60 degrees after right is up', at(a60[0], a60[1], { prev: 'right' }).verb, 'up');
 eq('across the 180 line left stays left', at(-30, 2, { prev: 'left' }).verb, 'left');
 
+eq('a pan-only head reads only the sideways part', at(20, -30, { tilt: false, diagonals: true }).verb, 'right');
+eq('straight up on a pan-only head is still', at(2, -30, { tilt: false }), null);
+eq('a tilt-only head reads only the upright part', at(-30, 20, { pan: false, diagonals: true }).verb, 'down');
+eq('sideways on a tilt-only head is still', at(-30, 3, { pan: false }), null);
 eq('the dead zone edge is 0 of the way', Math.round(at(8.0001, 0).frac * 100), 0);
 eq('the rim is all the way', at(40, 0).frac, 1);
 eq('beyond the rim is still all the way', at(90, 0).frac, 1);

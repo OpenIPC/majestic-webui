@@ -45,10 +45,19 @@
 	// move goes out exactly as before. The value is a per-browser convenience.
 	const speedBox = $('#mj-ptz-speed'), speedIn = $('#mj-ptz-speed-in');
 	const PS = window.MajesticPtzSpeed;
-	// The capability line, asked once: the speed control and the stick both
-	// read it. No answer reads as the empty line, which offers nothing.
-	const capsP = apiFetch('/ptz', { credentials: 'same-origin' })
-		.then(r => (r.ok ? r.text() : ''), () => '');
+	// The capability line: the speed control and the stick both read it. A
+	// failed ask is not a line that offers nothing -- it rejects, and is asked
+	// again the next time someone wants it (caps()), rather than leaving the
+	// stick on four slow directions for the life of the page.
+	let capsP = null;
+	const caps = () => {
+		if (!capsP) {
+			capsP = apiFetch('/ptz', { credentials: 'same-origin' })
+				.then(r => (r.ok ? r.text() : Promise.reject(r.status)));
+			capsP.catch(() => { capsP = null; });
+		}
+		return capsP;
+	};
 	if (speedBox && speedIn && PS) {
 		try {
 			const v = localStorage.getItem('mj-ptz-speed');
@@ -57,7 +66,7 @@
 		speedIn.addEventListener('change', () => {
 			try { localStorage.setItem('mj-ptz-speed', speedIn.value); } catch (e) { /* ignore */ }
 		});
-		capsP.then(t => {
+		caps().then(t => {
 			if (!PS.offered(t)) return;
 			speedBox.hidden = false;
 			placeExtras();
@@ -797,10 +806,23 @@
 	// part of the stick too. A quick tap on an arrow is still a nudge: the
 	// first move of a press is the fine pulse, as a held arrow's is.
 	if (stick) {
-		let diag = false, speeds = false;
-		capsP.then((t) => { diag = PK.diagonals(t); speeds = !!(PS && PS.offered(t)); });
+		// Until the camera has said, four directions at the pad's speed; a
+		// press asks again if it has not.
+		let diag = false, speeds = false, known = false;
+		const learn = () => {
+			if (known) return;
+			caps().then((t) => {
+				diag = PK.diagonals(t);
+				speeds = !!(PS && PS.offered(t));
+				known = true;
+			}, () => {});
+		};
+		learn();
 		const arrows = {};
 		pad.querySelectorAll('[data-act]').forEach((b) => { arrows[b.dataset.act] = b; });
+		// The axes this head has are the arrows its pad drew: a pan-only head
+		// has empty cells where up and down would be.
+		const hasPan = !!(arrows.left || arrows.right), hasTilt = !!(arrows.up || arrows.down);
 		let s = null;
 		// The arrows a verb is made of, lit while the head turns that way.
 		const light = (verb) => {
@@ -816,7 +838,7 @@
 			const dx = e.clientX - s.cx, dy = e.clientY - s.cy;
 			const d = Math.hypot(dx, dy), k = d > s.r ? s.r / d : 1;
 			knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
-			const a = PK.aim(dx, dy, { radius: s.r, dead: s.r * 0.22, diagonals: diag, prev: s.verb });
+			const a = PK.aim(dx, dy, { radius: s.r, dead: s.r * 0.22, diagonals: diag, prev: s.verb, pan: hasPan, tilt: hasTilt });
 			const verb = a ? a.verb : null;
 			const pct = a && speeds ? PK.pct(a.frac, topPct()) : null;
 			if (verb === s.verb && pct === s.pct) return;
@@ -825,8 +847,12 @@
 			s.pct = pct;
 			light(verb);
 			if (!verb) {
-				// Back on the centre: still, and ready to go again.
-				if (was && s.long) move('stop', 0, true);
+				// Back on the centre: still, and ready to go again -- the fine
+				// pulse included, which would otherwise run out its time.
+				if (was) {
+					move('stop', 0, true);
+					s.long = true;   // a release from here is not a tap
+				}
 				return;
 			}
 			if (s.first) { send(); return; }
@@ -860,6 +886,7 @@
 			e.preventDefault();
 			letGo();
 			stopHold(null);
+			learn();
 			try { pad.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
 			// The rim is where the arrows are: measured, since the pad's size
 			// is the stylesheet's and changes with the screen.
