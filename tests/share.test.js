@@ -11,6 +11,7 @@ const { check, group, done } = require('./assert');
 const {
 	shareRemaining, shareClock, shareNames, shareSummary, shareLive, shareGuest, shareGuestScope, shareRefused,
 	shareError, shareReason, SHARE_DURATIONS, SHARE_DEFAULT_TTL, SHARE_SCOPES, SHARE_DEFAULT_SCOPE,
+	shareFirstTime, shareLiveFolded, SHARE_SEEN_KEY,
 } = require('../www/a/share.js');
 
 group('remaining time');
@@ -97,5 +98,20 @@ group('the camera\u2019s words');
 const page = '<HTML><HEAD>\n<TITLE>500 ended now, but not saved</TITLE>\n</HEAD><BODY>\n<H1>ended now, but not saved</H1>\n</BODY></HTML>\n';
 check('once, without the status code', shareReason(page) === 'ended now, but not saved');
 check('plain text as it is', shareReason('refused') === 'refused');
+
+group('the explanation, once');
+// Open on a first visit only. Storage that cannot be read must not make every
+// visit a first one: that would bring back the paragraph read every time.
+check('never shared from this browser: open', shareFirstTime((k) => (k === SHARE_SEEN_KEY ? null : 'x')) === true);
+check('shared before: folded', shareFirstTime(() => '1') === false);
+check('storage refused: folded, not open every time', shareFirstTime(() => { throw new Error('denied'); }) === false);
+
+group('the dialog says little');
+check('only full control is a warning', Object.entries(SHARE_SCOPES).every(([k, v]) => !!v.warn === (k === 'full')));
+check('full control names what it hands over', /console/.test(SHARE_SCOPES.full.hint) && /firmware/.test(SHARE_SCOPES.full.hint));
+check('every level has a short name for the control', Object.values(SHARE_SCOPES).every((x) => x.short && x.short.length <= 12));
+check('duration names fit a chip', SHARE_DURATIONS.every(([, l]) => l.length <= 6));
+check('three live links stay open', shareLiveFolded(3) === false);
+check('four fold behind their heading', shareLiveFolded(4) === true);
 
 done();
