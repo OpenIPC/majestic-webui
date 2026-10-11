@@ -5581,6 +5581,42 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	color: rgba(255, 255, 255, 0.55);
 }
 
+/* The stick (preview-ptz.js): the Pelco pad's centre is its knob, where the
+   thumb starts, and it follows the finger while it steers. The arrows the
+   head is turning towards light up. */
+.mj-ptz-stick {
+	position: relative;
+	touch-action: none;
+}
+
+.mj-ptz-knob {
+	align-self: center;
+	justify-self: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.16);
+	box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.5);
+	pointer-events: none;
+	transition: transform 0.15s ease-out;
+}
+
+.mj-ptz-sticking .mj-ptz-knob {
+	background: rgba(255, 255, 255, 0.42);
+	transition: none;
+}
+
+.mj-ptz-btn.mj-ptz-on {
+	background: rgba(255, 255, 255, 0.22);
+	color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mj-ptz-knob {
+		transition: none;
+	}
+}
+
 .mj-ptz-btn:hover,
 .mj-ptz-fnbtn:hover {
 	background: rgba(255, 255, 255, 0.1);
