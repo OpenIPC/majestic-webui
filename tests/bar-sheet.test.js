@@ -37,6 +37,16 @@ group('what the camera has');
 	check('a group the page lacks is not moved', B.plan(['mj-stats-ctl'], {}, true).moved.join() === 'mj-stats-ctl');
 }
 
+group('Snapshot, beside Fullscreen');
+{
+	check('a phone with Fullscreen: Snapshot moves', B.plan(all, {}, true, true).snap === true);
+	check('a phone without it (iOS): Snapshot stays', B.plan(all, {}, true, false).snap === false);
+	const hidden = {};
+	for (const id of B.SHEET) hidden[id] = true;
+	check('Snapshot alone is worth a More', B.plan(all, hidden, true, true).more === true);
+	check('a larger stage keeps it', B.plan(all, {}, false, true).snap === false);
+}
+
 group('a larger stage');
 {
 	const p = B.plan(all, {}, false);

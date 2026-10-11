@@ -21,10 +21,15 @@ window.MajesticBarSheet = (function () {
 	// sheet's groups that are present, and More only when one of them is not
 	// hidden -- a camera without audio, talk or a peer has fewer, and a sheet
 	// of nothing is a button that opens nothing.
-	function plan(present, hidden, small) {
+	//
+	// Snapshot joins them where Fullscreen is offered too: three icons beside
+	// View and the stream do not fit a 390 px phone, and Fullscreen is the one
+	// a phone needs at hand. Without Fullscreen (iOS) Snapshot stays.
+	function plan(present, hidden, small, fullscreen) {
 		const moved = small ? SHEET.filter((id) => present.indexOf(id) >= 0) : [];
-		const more = moved.some((id) => !hidden[id]);
-		return { moved: moved, more: more };
+		const snap = !!(small && fullscreen);
+		const more = snap || moved.some((id) => !hidden[id]);
+		return { moved: moved, more: more, snap: snap };
 	}
 
 	function wire() {
@@ -59,6 +64,13 @@ window.MajesticBarSheet = (function () {
 		head.append(title, close);
 		const body = document.createElement('div');
 		body.className = 'mj-more-body';
+		// Snapshot, when it moves, stands in a group of its own in the sheet.
+		const snap = document.getElementById('mj-snap');
+		const fsBtn = document.getElementById('mj-fs');
+		const snapHome = snap ? document.createComment(' mj-snap ') : null;
+		if (snap) snap.parentNode.insertBefore(snapHome, snap);
+		const snapGroup = document.createElement('span');
+		snapGroup.className = 'mj-hud mj-ico-wrap';
 		sheet.append(head, body);
 		// In the document, not the stage: the stage's own gestures -- pan,
 		// pinch, drawing an Area, pressing a peer -- skip the bar's controls
@@ -87,7 +99,7 @@ window.MajesticBarSheet = (function () {
 		const apply = () => {
 			const hidden = {};
 			for (const g of groups) hidden[g.id] = g.hidden;
-			const p = plan(groups.map((g) => g.id), hidden, small.matches);
+			const p = plan(groups.map((g) => g.id), hidden, small.matches, !!(fsBtn && !fsBtn.hidden));
 			for (const g of groups) {
 				const into = p.moved.indexOf(g.id) >= 0;
 				if (into && g.parentNode !== body) body.appendChild(g);
@@ -96,6 +108,14 @@ window.MajesticBarSheet = (function () {
 					m.parentNode.insertBefore(g, m.nextSibling);
 				}
 			}
+			if (snap) {
+				if (p.snap && snap.parentNode !== snapGroup) { snapGroup.appendChild(snap); body.appendChild(snapGroup); }
+				else if (!p.snap && snap.parentNode === snapGroup) {
+					snapHome.parentNode.insertBefore(snap, snapHome.nextSibling);
+					snapGroup.remove();
+				}
+			}
+			snapGroup.hidden = !snap || snap.hidden;
 			btn.hidden = !p.more;
 			if (!p.more && sheet.open) sheet.close();
 		};
@@ -118,6 +138,8 @@ window.MajesticBarSheet = (function () {
 		if (typeof MutationObserver === 'function') {
 			const mo = new MutationObserver(apply);
 			for (const g of groups) mo.observe(g, { attributes: true, attributeFilter: ['hidden'] });
+			if (fsBtn) mo.observe(fsBtn, { attributes: true, attributeFilter: ['hidden'] });
+			if (snap) mo.observe(snap, { attributes: true, attributeFilter: ['hidden'] });
 		}
 	}
 
