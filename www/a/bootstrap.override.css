@@ -4789,8 +4789,7 @@ button.mj-osd-chip,
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.mj-bar,
-	.mj-stage .mj-chip.mj-chip-info {
+	.mj-bar {
 		transition: none;
 	}
 }
@@ -4805,7 +4804,6 @@ button.mj-osd-chip,
 @media (max-width: 575.98px), (max-height: 480px) {
 	.mj-stage .mj-chip.mj-chip-info {
 		opacity: 0;
-		transition: opacity 0.25s ease;
 	}
 
 	.mj-stage.mj-show .mj-chip.mj-chip-info {
@@ -4819,9 +4817,18 @@ button.mj-osd-chip,
 	}
 }
 
+/* Focus in the bar, as a class rather than :has(): preview-hero.js sets it, so
+   a browser without :has() keeps the chip with the bar for keyboard users too. */
 @media (max-width: 575.98px), (max-height: 480px) {
-	.mj-stage:has(.mj-bar:focus-within) .mj-chip.mj-chip-info {
+	.mj-stage.mj-bar-focus .mj-chip.mj-chip-info {
 		opacity: 1;
+	}
+}
+
+@media (max-width: 575.98px) and (prefers-reduced-motion: no-preference),
+	(max-height: 480px) and (prefers-reduced-motion: no-preference) {
+	.mj-stage .mj-chip.mj-chip-info {
+		transition: opacity 0.25s ease;
 	}
 }
 

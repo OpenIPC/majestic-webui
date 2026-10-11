@@ -117,6 +117,12 @@
 
 	const stage = $('#mj-stage'), bar = $('#mj-bar');
 	if (!stage || !bar) return;
+	// Focus anywhere in the bar, mirrored onto the stage for the chip that comes
+	// and goes with the bar on a small stage. A class rather than :has(), which
+	// not every browser this page meets understands.
+	const barFocus = () => stage.classList.toggle('mj-bar-focus', bar.contains(document.activeElement));
+	bar.addEventListener('focusin', barFocus);
+	bar.addEventListener('focusout', () => setTimeout(barFocus, 0));
 
 	// --- The bar and the PTZ pad share the bottom of the stage, and this is what
 	// keeps them off each other. Both used to be placed against constants — the
