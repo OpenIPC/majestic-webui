@@ -110,15 +110,45 @@ window.MajesticSignal = (function () {
 		return m ? parseInt(m[1], 10) : -1;
 	}
 
+	// The share page this page runs inside, if any: a share's guest sees the
+	// camera's pages in a frame of the share page, which announces itself as
+	// window.__share (the website's sharerelay shell.js). Same origin; anything
+	// else -- no parent, a parent this page may not read -- is not a share.
+	function shareOf(win) {
+		try {
+			const p = win && win.parent;
+			return p && p !== win && p.__share ? p.__share : null;
+		} catch (e) { return null; }
+	}
+
 	// The ICE servers a caller was given: a list, or a function returning one
 	// (the page fetches the camera's list and the first attach can win the
 	// race against it, so it is read at every open rather than once).
-	function iceOf(opts) {
+	//
+	// Inside a share the share's own servers go first: they carry the relay's
+	// TURN with this share's credentials, which the camera's list lacks. With
+	// the camera's alone a guest off a direct path -- a phone on 4G behind
+	// carrier NAT -- had every peer connection sit in checking until the player
+	// fell back to MSE through the tunnel (majestic#994).
+	function iceOf(opts, win) {
+		let own = [];
 		try {
 			const v = typeof opts.iceServers === 'function' ? opts.iceServers() : opts.iceServers;
-			return v || [];
-		} catch (e) { return []; }
+			own = v || [];
+		} catch (e) { own = []; }
+		const share = shareOf(win === undefined ? (typeof window !== 'undefined' ? window : null) : win);
+		const theirs = share && Array.isArray(share.ice) ? share.ice : [];
+		return theirs.length ? theirs.concat(own) : own;
 	}
 
-	return { open: open, url: url, endpoint: endpoint, parseCam: parseCam, sdpPort: sdpPort, iceOf: iceOf };
+	// A line in the share's diagnostics, when this page runs inside a share:
+	// what the guest copies when the picture does not come. Nothing otherwise.
+	function shareTrace(what, detail, win) {
+		const share = shareOf(win === undefined ? (typeof window !== 'undefined' ? window : null) : win);
+		if (!share || typeof share.trace !== 'function') return;
+		try { share.trace(what, detail); } catch (e) { /* the share page's, not ours */ }
+	}
+
+	return { open: open, url: url, endpoint: endpoint, parseCam: parseCam, sdpPort: sdpPort, iceOf: iceOf,
+		shareTrace: shareTrace };
 })();
