@@ -534,6 +534,13 @@
 	const isSingle = btn => btn.dataset.dir === 'cc' ||
 		btn.dataset.act === 'stop' || btn.dataset.act === 'af';
 
+	// A held button is not a long press on a page: no selection may start
+	// from it (WebKit fires selectstart even where the stylesheet already
+	// refused one, on older iOS) and no context menu -- Android's long-press
+	// menu and a right click both came up over a button being held.
+	mount.addEventListener('selectstart', e => e.preventDefault());
+	mount.addEventListener('contextmenu', e => e.preventDefault());
+
 	// The fold button is the mount's own, not a move.
 	mount.querySelectorAll('button:not(.mj-ptz-fold)').forEach(btn => {
 		if (isSingle(btn)) {
