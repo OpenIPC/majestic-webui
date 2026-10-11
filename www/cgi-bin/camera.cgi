@@ -56,7 +56,11 @@ boot_soc=$(printf '%s' "$soc" | mj_json_escape)
 # The camera's time zone, as the Time page set it. The Day / Night page offers
 # the city it is named after as a first guess at where the camera is, for the
 # sun -- a browser on plain HTTP will not give the page a location itself.
-boot_tz=$(printf '%s' "$tz_name" | mj_json_escape)
+# Control characters out first: mj_json_escape escapes what can end the
+# script block, not a newline, and /etc/timezone is written by a form -- a zone
+# name with a line break in it would leave the blob unparseable and the whole
+# settings page undrawn. No zone name has one.
+boot_tz=$(printf '%s' "$tz_name" | tr -d '\000-\037' | mj_json_escape)
 
 # The fonts the camera can draw the overlay with. One face ships with the
 # firmware; the point of listing rather than hardcoding is the ones an owner

@@ -266,6 +266,14 @@ box is unset and never matches a special 0 — except on a number box with exact
 one named value, which draws it the way the Picture page draws Auto: the box
 empty, the name as its placeholder, and emptying the box chooses it. Which decides a slider, and the
 lookup, are `EXP.sliderOf` and `EXP.specialFor` in `mj-exposure.js`.
+- **`visibleWhen` with `any`** shows a row while any one of several sibling
+  conditions holds, in the same shape `x-requires` uses for a row two settings
+  can each call for. A page that knows only `field` shows the row, so a schema
+  newer than the page never hides one.
+- **`x-enum-requires`** maps an enum value to an `x-requires`-shaped
+  requirement. `paintEnumHolds()` disables that one option while the
+  requirement is unmet, and says why under the row. It never disables the
+  value the field holds or was saved with.
 - **`x-title-when`** gives the field another name while a sibling holds a value,
   in `visibleWhen`'s spelling. The four ceilings are "Highest analog gain" and so
   on while auto-exposure spends them, and "Analog gain" in manual, where the same

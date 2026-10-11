@@ -107,11 +107,17 @@ the dark hours. `nightMode.whiteLight` lets the white lamp follow the sun too.
 The panel under *Switch day and night by* is where the sun's two settings are
 made, and what reaches beyond its own header is this:
 
-- **An angle, chosen on a strip.** The angles (`sunNightAngle`, `sunDayAngle`)
-  are drawn hidden and driven by `setValue`, the pin map's pattern. So are
-  `calibration.latitude`/`longitude`, though they belong to another section: the
-  save batch is built by dotted path, and nothing on the page compares a field's
-  section with the one on screen. One Save carries both sections.
+- **Chosen by what the schema says, never by name.** The two angles carry
+  `x-twilight` (`night`, `day`). The strip's range is their minimum and maximum,
+  and its named lines are their `x-special` values. The place is the pair
+  carrying `x-geo` (`latitude`, `longitude`). The module is handed those fields
+  and knows no key.
+- **An angle, chosen on a strip.** The angle rows are drawn hidden and driven
+  by `setValue`, the pin map's pattern. They are hidden only where the section
+  has a night line for the strip to edit; anywhere else they are ordinary rows.
+  The place fields are drawn hidden too, though they belong to another section:
+  the save batch is built by dotted path, and nothing on the page compares a
+  field's section with the one on screen. One Save carries both sections.
 - **The page computes no time.** Every time on the strip comes from the camera,
   `GET /api/v1/sun[?lat=&lon=]`, in the camera's own time zone, which need not
   be the browser's. A place typed but not saved is asked about too, so the times
@@ -123,10 +129,18 @@ made, and what reaches beyond its own header is this:
   struck through. The sentence is pure (`tonight()`), and
   `tests/sun-panel.test.js` holds it to the cases, because it reads just as
   confidently when it picks the wrong line.
-- **No place, no sun choices.** While neither the saved config nor the page
-  holds a place, *The sun* and *Picture, no day in the dark hours* are greyed
-  out (and the white lamp's *Follows the sun*), unless one of them is already
-  what the camera runs.
+- **No place, no sun choices.** The camera marks the choices that need a place
+  with `x-enum-requires`, and the page holds those back generically, for any
+  select (`paintEnumHolds()`), with the reason under the row. A choice the field
+  holds now, or was saved with, is never held back. The strip itself shows
+  while the angles' own `visibleWhen` holds; it is an `any` of the switching
+  and the white lamp, since either can ask the sun.
+- **A reply is believed only as far as it goes.** A reply with no `place` or
+  `clock` flag, or without the times or the lowest sun a sentence needs, is
+  said nothing about. A new place empties the strip until the camera has
+  answered for it. Text that does not read as a place stages nothing and puts
+  back what is saved. Clearing the box stages 0, 0, which is the camera's own
+  "not said".
 - **Where the camera is comes from the owner.** Over plain HTTP the browser will
   not give the page a location. So it is typed, or pasted from a map link that
   `sun-place.js` reads by each host's own convention: Yandex writes longitude

@@ -2,82 +2,106 @@
 // that means night, and what that comes to tonight.
 //
 // The camera can switch day and night by the sun's height instead of by the
-// picture (nightMode.switchBy), and light its white lamp by it
-// (nightMode.whiteLight: sun). Both are set as an ANGLE, because a given
-// depression of the sun is about the same light everywhere while "sunset plus
-// half an hour" is nearly night in one place and broad daylight in another.
-// An angle is a poor thing to ask anybody for as a bare number, so it is
-// chosen on a strip drawn like the twilight diagram -- day, civil, nautical --
-// with tonight's time under each named line.
+// picture, and light its white lamp by it. Both are set as an ANGLE, because a
+// given depression of the sun is about the same light everywhere while "sunset
+// plus half an hour" is nearly night in one place and broad daylight in
+// another. An angle is a poor thing to ask anybody for as a bare number, so it
+// is chosen on a strip drawn like the twilight diagram, with tonight's time
+// under each named line.
+//
+// Everything about which controls these are comes from the schema, never from
+// a key's name: the two angles say which line of twilight they are
+// (`x-twilight`), the strip's range is their minimum and maximum, its named
+// lines are their `x-special` values, they are shown by their own
+// `visibleWhen`, and the place is the pair of fields that say which axis they
+// are (`x-geo`). The page hands those fields in; this module does not know a
+// single key.
 //
 // What this refuses to do:
 //
 // - Compute a time. Every time on it comes from the camera (GET /api/v1/sun),
 //   in the camera's own time zone, which is not necessarily the browser's. A
 //   place typed but not yet saved is asked about too, so the times move as it
-//   is typed.
-// - Say anything about a night it cannot know. With no place, no clock, or a
-//   night the sun does not reach the chosen line, it says which, in words --
-//   most of all the white night: a camera told "night at nautical dusk" in
-//   Moscow in June otherwise looks set up and never goes to night, and the
-//   page is the only place that can warn about it before it happens.
-// - Save anything. It drives four ordinary fields that are on the page but
-//   hidden -- the two angles and calibration.latitude/longitude -- through
-//   setValue, so Save, dirty tracking and the per-row reset work on them
-//   exactly as on every other row (the nightMode pin map's pattern). A guess
-//   at the place from the time zone is staged like any edit, never saved by
-//   itself.
+//   is typed -- and while a new answer is on its way, the old one is not shown
+//   as though it were about the new place.
+// - Say anything about a night it cannot know. With no place, no clock, a
+//   reply missing what it needs, or a night the sun does not reach the chosen
+//   line, it says which, in words, or nothing -- most of all the white night: a
+//   camera told "night at nautical dusk" in Moscow in June otherwise looks set
+//   up and never goes to night, and the page is the only place that can warn
+//   about it before it happens.
+// - Save anything. It drives ordinary fields that are on the page but hidden,
+//   through setValue, so Save, dirty tracking and the per-row reset work on
+//   them exactly as on every other row (the nightMode pin map's pattern). A
+//   guess at the place from the time zone is staged like any edit, never saved
+//   by itself; text that does not read as a place stages nothing, and puts
+//   back what was there.
 (function () {
 	'use strict';
-
-	const TOP = 6, BOTTOM = -12;          // the strip's range, as the schema's
-	const NAMED = [0, -6, -12];           // the lines drawn and timed
-	const SUN_MODES = ['sun', 'pictureNearSun'];
-
-	// Where on the strip an angle sits, as a percentage from its left (day)
-	// end to its right (night) end.
-	function at(angle) {
-		return (TOP - angle) / (TOP - BOTTOM) * 100;
-	}
 
 	function angleWords(a) {
 		if (a === 0) return 'the horizon';
 		return Math.abs(a) + '° ' + (a < 0 ? 'below' : 'above') + ' the horizon';
 	}
 
-	// Whether anything on this camera asks the sun.
-	function sunUsed(switchBy, whiteLight) {
-		return SUN_MODES.indexOf(switchBy) >= 0 || whiteLight === 'sun';
+	// The strip's scale, from the night angle's schema entry: its range and
+	// its named lines (x-special), highest first. Null when the schema does not
+	// give a usable range -- then there is no strip to draw, and the rows stay
+	// ordinary rows.
+	function scale(schema) {
+		const top = schema && Number(schema.maximum);
+		const bottom = schema && Number(schema.minimum);
+		if (!Number.isFinite(top) || !Number.isFinite(bottom) || top <= bottom) return null;
+		const lines = Object.keys((schema && schema['x-special']) || {})
+			.map(Number).filter((a) => Number.isFinite(a) && a < top && a >= bottom)
+			.sort((a, b) => b - a);
+		return { top: top, bottom: bottom, lines: lines };
+	}
+
+	// Where on the strip an angle sits, as a percentage from its left (day)
+	// end to its right (night) end.
+	function at(sc, angle) {
+		return (sc.top - angle) / (sc.top - sc.bottom) * 100;
 	}
 
 	function lineAt(report, angle) {
-		const lines = (report && report.lines) || [];
+		const lines = report && Array.isArray(report.lines) ? report.lines : [];
 		for (let i = 0; i < lines.length; i++) {
-			if (lines[i].angle === angle) return lines[i];
+			if (lines[i] && lines[i].angle === angle) return lines[i];
 		}
 		return null;
 	}
+
+	const isTime = (v) => typeof v === 'string' && /^\d\d:\d\d$/.test(v);
 
 	// What tonight comes to, from the camera's report, for a night angle and
 	// a day angle. Pure: it is the sentence the strip stands under, and a
 	// sentence reads as confidently when it picks the wrong line as when it
 	// picks the right one (tests/sun-panel.test.js).
 	//
+	// A reply is believed only as far as it goes. `place` and `clock` must be
+	// booleans; a verdict that the sun does not reach a line needs the day's
+	// lowest (or highest) reading to say so; and "night from" needs the times.
+	// Anything short of that is state 'unknown' with no sentence, because a
+	// failed or half-read reply is not a fact about the sky.
+	//
 	// `names` maps an angle to its name on each side ({night:{-6:'Civil
-	// dusk'}, day:{-6:'Civil dawn'}}), from the schema's x-special.
-	function tonight(report, nightDeg, dayDeg, names) {
+	// dusk'}, day:{-6:'Civil dawn'}}), and `lines` lists the named angles.
+	function tonight(report, nightDeg, dayDeg, names, lines) {
 		names = names || { night: {}, day: {} };
-		const marks = NAMED.map((a) => {
+		const marks = (lines || []).map((a) => {
 			const l = lineAt(report, a);
 			return {
 				angle: a,
-				at: at(a),
 				name: names.night[a] || angleWords(a),
-				dusk: l ? l.dusk : null,
-				dawn: l ? l.dawn : null,
+				dusk: l && isTime(l.dusk) ? l.dusk : null,
+				dawn: l && isTime(l.dawn) ? l.dawn : null,
 			};
 		});
-		if (!report) return { state: 'unknown', marks: marks, sentence: '' };
+		const unknown = { state: 'unknown', marks: marks, sentence: '' };
+		if (!report || typeof report.place !== 'boolean' || typeof report.clock !== 'boolean') {
+			return unknown;
+		}
 		if (!report.place) {
 			return {
 				state: 'place', marks: marks,
@@ -96,25 +120,26 @@
 		const d = lineAt(report, Math.round(day));
 		const lowest = typeof report.lowest === 'number' ? report.lowest : null;
 		const highest = typeof report.highest === 'number' ? report.highest : null;
-		if (!n || (!n.dusk && !n.dawn && lowest !== null && lowest >= nightDeg)) {
+		if (lowest !== null && lowest >= nightDeg) {
 			return {
 				state: 'no-night', marks: marks,
 				sentence: 'Tonight the sun here does not go down to ' + angleWords(+nightDeg) +
-					(lowest !== null ? ' — it gets no lower than ' + angleWords(Math.round(lowest)) : '') +
+					' — it gets no lower than ' + angleWords(Math.round(lowest)) +
 					' — so tonight the picture decides.',
 			};
 		}
-		if (!d || (!d.dawn && highest !== null && highest < day)) {
+		if (highest !== null && highest < day) {
 			return {
 				state: 'no-day', marks: marks,
 				sentence: 'The sun here does not get up to ' + angleWords(day) +
 					' today, so the picture decides when day comes.',
 			};
 		}
+		if (!n || !d || !isTime(n.dusk) || !isTime(d.dawn)) return unknown;
 		return {
 			state: 'ok', marks: marks,
 			dusk: n.dusk, dawn: d.dawn,
-			sentence: 'Tonight: night from ' + (n.dusk || '—') + ', day again from ' + (d.dawn || '—') + '.',
+			sentence: 'Tonight: night from ' + n.dusk + ', day again from ' + d.dawn + '.',
 		};
 	}
 
@@ -126,27 +151,31 @@
 	}
 
 	// The panel. `o` is what the settings page lends it:
-	//   anchor     the row it is inserted after
-	//   field(dot) the page's field object for a dotted key, or null
-	//   set(dot,v) stage a value the way an edit would
+	//   night, day   the two angle fields (x-twilight), day may be null
+	//   lat, lon     the two place fields (x-geo), either may be null
+	//   set(f, v)    stage a value on a field the way an edit would
+	//   initial(f)   the value a field was saved with
+	//   visible()    whether the angles' own visibleWhen holds just now
+	//   onChange(fn) call fn after any edit on the page
 	//   report(lat, lon) -> Promise of /api/v1/sun's answer, or null
-	//   zone       the camera's time zone name, for the guess
-	//   places()   -> Promise of the zone table, loaded only when asked for
-	//   P          window.MajesticSunPlace
-	//   names      {night:{angle:name}, day:{angle:name}}
+	//   zone         the camera's time zone name, for the guess
+	//   places()     -> Promise of the zone table, fetched only when asked for
+	//   P            window.MajesticSunPlace
 	function mount(o) {
 		const P = o.P;
-		const f = (k) => o.field(k);
-		const lat = f('calibration.latitude'), lon = f('calibration.longitude');
-		const nightF = f('nightMode.sunNightAngle'), dayF = f('nightMode.sunDayAngle');
-		const byF = f('nightMode.switchBy'), whiteF = f('nightMode.whiteLight');
-		const monF = f('nightMode.lightMonitor');
-		if (!nightF) return null;
+		const nightF = o.night, dayF = o.day, lat = o.lat, lon = o.lon;
+		const sc = nightF && scale(nightF.schema);
+		if (!sc || !nightF.p || !nightF.p.parentNode) return null;
+		const names = {
+			night: (nightF.schema && nightF.schema['x-special']) || {},
+			day: (dayF && dayF.schema && dayF.schema['x-special']) || {},
+		};
 
 		const root = el('div', 'mj-sun');
 
-		// Where the camera is. Always shown: it is the first thing the sun
-		// needs, and an owner choosing "The sun" must be able to find it.
+		// Where the camera is. Shown whenever the place fields are there,
+		// whatever is chosen: it is what the sun choices wait for, and an owner
+		// who finds them held back has to be able to find this.
 		let placeBox = null, placeNote = null, guessBtn = null;
 		if (lat && lon) {
 			const row = el('p', 'string mj-row mj-sun-place');
@@ -169,21 +198,20 @@
 			root.appendChild(row);
 		}
 
-		// A choice of what to switch by does nothing while nothing switches.
-		// Said here, only while it is true: the schema cannot scope a note to
-		// "any choice but the picture", and one under the row on every camera
-		// with the monitor off would be a note nobody reads.
-		const monNote = el('div', 'hint mj-requires mj-sun-monitor-note');
-		monNote.hidden = true;
-		monNote.textContent = 'Automatic day/night is off, so nothing switches yet — ' +
-			'this choice takes effect once it is on.';
-		root.appendChild(monNote);
-
-		// The strip.
+		// The strip: one band per stretch between named lines, banded the way
+		// the twilight diagram is.
 		const stripBox = el('div', 'mj-sun-strip-box');
 		const strip = el('div', 'mj-sun-strip');
 		strip.setAttribute('aria-hidden', 'true');
-		['day', 'civil', 'nautical'].forEach((b) => strip.appendChild(el('span', 'mj-sun-band mj-sun-' + b)));
+		const edges = [sc.top].concat(sc.lines).concat(sc.lines.indexOf(sc.bottom) >= 0 ? [] : [sc.bottom]);
+		const bands = el('span', 'mj-sun-bands');
+		for (let i = 0; i + 1 < edges.length; i++) {
+			const band = el('span', 'mj-sun-band mj-sun-band-' + Math.min(i, 3));
+			band.style.left = at(sc, edges[i]) + '%';
+			band.style.width = (at(sc, edges[i + 1]) - at(sc, edges[i])) + '%';
+			bands.appendChild(band);
+		}
+		strip.appendChild(bands);
 		const nowMark = el('span', 'mj-sun-now');
 		nowMark.title = 'Where the sun is now';
 		strip.appendChild(nowMark);
@@ -196,13 +224,14 @@
 		const marksRow = el('div', 'mj-sun-marks');
 		stripBox.appendChild(marksRow);
 
-		// Two sliders on the strip's own scale: left is the sun high, right
-		// is the sun low, so the value is the angle negated.
+		// Sliders on the strip's own scale: left is the sun high, right is the
+		// sun low, so the value is the angle negated.
 		function slider(label, id) {
 			const p = el('p', 'range mj-row mj-sun-slider');
 			p.innerHTML = '<label class="form-label" for="' + id + '">' + label + '</label>' +
 				'<span class="mj-ctl"><span class="mj-ctl-in">' +
-				'<input type="range" class="form-range" id="' + id + '" min="' + (-TOP) + '" max="' + (-BOTTOM) + '" step="1">' +
+				'<input type="range" class="form-range" id="' + id + '" min="' + (-sc.top) +
+				'" max="' + (-sc.bottom) + '" step="1">' +
 				'<span class="show-value"></span></span></span>';
 			stripBox.appendChild(p);
 			return { p: p, input: p.querySelector('input'), out: p.querySelector('.show-value') };
@@ -222,9 +251,10 @@
 		stripBox.appendChild(sentence);
 		root.appendChild(stripBox);
 
-		o.anchor.parentNode.insertBefore(root, o.anchor.nextSibling);
+		// Where the hidden angle rows are, so the panel sits where they would.
+		nightF.p.parentNode.insertBefore(root, nightF.p);
 
-		let report = null, asked = '', timer = null, reportSeq = 0, guessAsked = false;
+		let report = null, asked = null, timer = null, reportSeq = 0, guessAsked = false;
 
 		const num = (fld) => {
 			const v = fld ? fld.getValue() : '';
@@ -234,37 +264,25 @@
 			const a = num(lat), b = num(lon);
 			return a === null || b === null || (a === 0 && b === 0) ? null : { lat: a, lon: b };
 		};
+		const fallback = () => {
+			const d = nightF.schema && Number(nightF.schema.default);
+			return Number.isFinite(d) ? d : sc.lines[0] !== undefined ? sc.lines[0] : sc.bottom;
+		};
 		const nightDeg = () => {
 			const v = num(nightF);
-			return v === null ? -6 : v;
+			return v === null ? fallback() : v;
 		};
 		const dayDeg = () => num(dayF);
-		const by = () => (byF ? byF.getValue() : 'picture');
-		const white = () => (whiteF ? whiteF.getValue() : 'auto');
 
-		function nameOf(a, side) {
-			return (o.names[side] && o.names[side][a]) || angleWords(a);
-		}
-		// "Civil dusk, 6° below the horizon"; an unnamed line by its angle.
 		function readout(a, side) {
-			const n = o.names[side] && o.names[side][a];
+			const n = names[side] && names[side][a];
 			return n ? n + ', ' + angleWords(a) : angleWords(a);
 		}
 
-		// The sun choices need a place. Disabled, with the reason, while there
-		// is none -- unless one of them is what the camera is set to now or
-		// was saved with, which is taken away from nobody: moving off a saved
-		// choice must not make it impossible to come back to.
-		function gateChoices(hasPlace) {
-			[[byF, SUN_MODES], [whiteF, ['sun']]].forEach(([fld, modes]) => {
-				if (!fld || !fld.control || !fld.control.options) return;
-				const saved = o.initial ? o.initial(fld.dot) : undefined;
-				Array.prototype.forEach.call(fld.control.options, (op) => {
-					if (modes.indexOf(op.value) < 0) return;
-					op.disabled = !hasPlace && op.value !== fld.getValue() && op.value !== saved;
-					op.title = op.disabled ? 'Say where the camera is first' : '';
-				});
-			});
+		function showPlaceNote(text) {
+			if (!placeNote) return;
+			placeNote.hidden = !text;
+			placeNote.textContent = text || '';
 		}
 
 		function paintPlace() {
@@ -272,15 +290,12 @@
 			const p = place();
 			if (document.activeElement !== placeBox) {
 				placeBox.value = P.formatPlace(p);
-				// The box now shows what is staged, so a complaint about
-				// what was typed before no longer describes it.
-				if (placeNote.dataset.err) {
-					placeNote.dataset.err = '';
-					placeNote.hidden = true;
-				}
+				// The box now shows what is staged, so a complaint about what
+				// was typed before no longer describes it.
+				showPlaceNote('');
 			}
-			// The zone's table is wanted only while there is no place to
-			// show, and is fetched at most once (the page keeps the promise).
+			// The zone's table is wanted only while there is no place to show,
+			// and is fetched at most once (the page keeps the promise).
 			if (!p && !o.guess && o.zone && o.places && !guessAsked) {
 				guessAsked = true;
 				o.places().then((table) => {
@@ -300,57 +315,50 @@
 			const same = dd === null;
 			nightS.input.value = String(-nd);
 			nightS.out.textContent = readout(nd, 'night');
-			nightMark.style.left = at(nd) + '%';
+			nightMark.style.left = at(sc, nd) + '%';
 			if (dayS) {
 				sameBox.checked = same;
 				dayS.p.hidden = same;
 				const d = same ? nd : Math.max(dd, nd);
 				dayS.input.value = String(-d);
 				dayS.out.textContent = readout(d, 'day');
-				dayMark.style.left = at(d) + '%';
+				dayMark.style.left = at(sc, d) + '%';
 				dayMark.hidden = same;
 			}
-			const t = tonight(report, nd, same ? null : dd, o.names);
+			const t = tonight(report, nd, same ? null : dd, names, sc.lines);
+			const known = t.state !== 'unknown' && t.state !== 'place' && t.state !== 'clock';
 			marksRow.textContent = '';
-			t.marks.forEach((m) => {
+			t.marks.forEach((m, i) => {
 				const reached = !!(m.dusk || m.dawn);
-				const box = el('span', 'mj-sun-mark' + (report && report.place && report.clock && !reached ? ' mj-sun-mark-missing' : ''));
+				const box = el('span', 'mj-sun-mark' + (known && !reached ? ' mj-sun-mark-missing' : ''));
 				// Right-aligned to its own line, over the band before it, so
-				// each label has a third of the strip and none can run into
-				// the next however narrow the column is.
-				box.style.right = (100 - m.at) + '%';
-				box.appendChild(el('span', 'mj-sun-mark-name', nameOf(m.angle, 'night')));
+				// each label has its band's width and none can run into the next
+				// however narrow the column is.
+				const from = i === 0 ? sc.top : sc.lines[i - 1];
+				box.style.right = (100 - at(sc, m.angle)) + '%';
+				box.style.width = (at(sc, m.angle) - at(sc, from)) + '%';
+				box.appendChild(el('span', 'mj-sun-mark-name', m.name));
 				box.appendChild(el('span', 'mj-sun-mark-time',
-					!report || !report.place || !report.clock ? '' :
-						reached ? (m.dusk || '—') + ' · ' + (m.dawn || '—') : 'not tonight'));
+					!known ? '' : reached ? (m.dusk || '—') + ' · ' + (m.dawn || '—') : 'not tonight'));
 				marksRow.appendChild(box);
 			});
-			const showNow = report && typeof report.elevation === 'number' &&
-				report.elevation <= TOP && report.elevation >= BOTTOM;
+			const e = report && typeof report.elevation === 'number' ? report.elevation : null;
+			const showNow = known && e !== null && e <= sc.top && e >= sc.bottom;
 			nowMark.hidden = !showNow;
-			if (showNow) nowMark.style.left = at(report.elevation) + '%';
+			if (showNow) nowMark.style.left = at(sc, e) + '%';
 			sentence.textContent = t.sentence;
 			sentence.classList.toggle('mj-requires', t.state !== 'ok' && t.state !== 'unknown');
 		}
 
 		function paint() {
-			const used = sunUsed(by(), white());
-			if (monF) {
-				const m = monF.getValue();
-				monNote.hidden = by() === 'picture' || m === true || String(m) === 'true';
-			}
-			stripBox.hidden = !used;
-			gateChoices(!!place());
+			stripBox.hidden = !o.visible();
 			paintPlace();
-			if (placeNote && !placeNote.dataset.err) {
-				// The reason a sun choice is greyed out, said once, here.
-				placeNote.hidden = !!place() || !used;
-				placeNote.textContent = 'The sun choices need this.';
-			}
 			paintStrip();
 		}
 
-		// Ask the camera about the place on the page -- saved or not.
+		// Ask the camera about the place on the page -- saved or not. No place
+		// on the page is asked about AS no place (0, 0 is the camera's own "not
+		// said"), never as the saved one.
 		function ask() {
 			const p = place();
 			const key = p ? p.lat + ',' + p.lon : '';
@@ -360,10 +368,7 @@
 			}
 			asked = key;
 			const mine = ++reportSeq;
-			// No place on the page is asked about AS no place (0, 0 is the
-			// camera's own "not said"), never as the saved one: an owner who
-			// has just emptied the box must not see the times it had.
-			const none = lat && lon;
+			const none = !!(lat && lon);
 			o.report(p ? p.lat : none ? 0 : null, p ? p.lon : none ? 0 : null).then((r) => {
 				if (mine !== reportSeq) return; // a newer place was asked about
 				report = r;
@@ -371,26 +376,42 @@
 			});
 		}
 
+		// A new place makes the answer in hand an answer about somewhere else:
+		// it goes at once, and the strip says nothing until the new one lands.
+		function forget() {
+			report = null;
+			asked = null;
+			reportSeq++;
+		}
+
 		if (placeBox) {
 			placeBox.addEventListener('input', () => {
 				const s = placeBox.value.trim();
 				const p = P.parsePlace(s);
-				placeNote.dataset.err = '';
+				clearTimeout(timer);
 				if (!s) {
-					o.set('calibration.latitude', '');
-					o.set('calibration.longitude', '');
+					// Cleared: back to the camera's own "not said".
+					o.set(lat, '0');
+					o.set(lon, '0');
+					showPlaceNote('');
 				} else if (p) {
-					o.set('calibration.latitude', String(p.lat));
-					o.set('calibration.longitude', String(p.lon));
+					o.set(lat, String(p.lat));
+					o.set(lon, String(p.lon));
+					showPlaceNote('');
 				} else {
-					placeNote.dataset.err = '1';
-					placeNote.hidden = false;
-					placeNote.textContent = 'Not a place this can read: two numbers, latitude first, or a map link.';
+					// Not a place: nothing new is staged, and what was staged
+					// before goes back to what is saved, so Save cannot carry
+					// an earlier half-typed place the box no longer shows.
+					o.set(lat, o.initial(lat));
+					o.set(lon, o.initial(lon));
+					forget();
+					paintStrip();
+					showPlaceNote('Not a place this can read: two numbers, latitude first, or a map link.');
 					return;
 				}
-				clearTimeout(timer);
+				forget();
+				paintStrip();
 				timer = setTimeout(ask, 400);
-				paint();
 			});
 			placeBox.addEventListener('blur', paintPlace);
 		}
@@ -398,36 +419,34 @@
 			guessBtn.addEventListener('click', () => {
 				const g = o.guess;
 				if (!g) return;
-				placeNote.dataset.err = '';
-				placeNote.hidden = true;
-				o.set('calibration.latitude', String(g.lat));
-				o.set('calibration.longitude', String(g.lon));
+				showPlaceNote('');
+				o.set(lat, String(g.lat));
+				o.set(lon, String(g.lon));
 				placeBox.value = P.formatPlace(g);
+				forget();
 				ask();
 			});
 		}
 		nightS.input.addEventListener('input', () => {
 			const nd = -(+nightS.input.value);
-			o.set('nightMode.sunNightAngle', String(nd));
+			o.set(nightF, String(nd));
 			// A day line under the new night line is not a band; it follows.
 			const dd = dayDeg();
-			if (dd !== null && dd < nd) o.set('nightMode.sunDayAngle', String(nd));
+			if (dayF && dd !== null && dd < nd) o.set(dayF, String(nd));
 			paint();
 		});
 		if (dayS) {
 			sameBox.addEventListener('change', () => {
-				o.set('nightMode.sunDayAngle', sameBox.checked ? '' : String(nightDeg()));
+				o.set(dayF, sameBox.checked ? '' : String(nightDeg()));
 				paint();
 			});
 			dayS.input.addEventListener('input', () => {
 				const d = Math.max(-(+dayS.input.value), nightDeg());
-				o.set('nightMode.sunDayAngle', String(d));
+				o.set(dayF, String(d));
 				paint();
 			});
 		}
-		[byF, whiteF, monF].forEach((fld) => {
-			if (fld && fld.control) fld.control.addEventListener('change', paint);
-		});
+		const off = o.onChange(paint);
 
 		ask();
 		// Tonight's times move; a page left open overnight should not keep
@@ -439,18 +458,22 @@
 				clearInterval(refresh);
 				return;
 			}
-			asked = '';
+			asked = null;
 			ask();
 		}, 600000);
 
 		return {
 			// After a save or a reset the fields hold new values: draw them.
-			sync: () => { ask(); },
-			destroy: () => { clearInterval(refresh); clearTimeout(timer); },
+			sync: () => { asked = null; ask(); },
+			destroy: () => {
+				clearInterval(refresh);
+				clearTimeout(timer);
+				if (typeof off === 'function') off();
+			},
 		};
 	}
 
-	const api = { mount: mount, tonight: tonight, sunUsed: sunUsed, at: at, angleWords: angleWords };
+	const api = { mount: mount, tonight: tonight, scale: scale, at: at, angleWords: angleWords };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticSunPanel = api;
 })();

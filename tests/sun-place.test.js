@@ -77,6 +77,13 @@ group('nothing ambiguous becomes a place');
 	// neither is a place anybody chose.
 	'https://www.google.com/maps/dir/Moscow/Tver/@56.30,36.50,9z/data=!4m2!4m1!3e0',
 	'https://www.google.com/maps/search/cafe/@55.75,37.61,14z',
+	// A search whose query leads with coordinates is still a search.
+	'https://www.google.com/maps/search/cafe/?query=55.75%2C37.61%20cafe',
+	// A Yandex route: two places and a view between them.
+	'https://yandex.ru/maps/?ll=37.0000%2C56.3000&mode=routes&rtext=55.75%2C37.61~56.85%2C35.90',
+	// Minutes or seconds of 60 or more are no place at all.
+	"55°75'N 37°00'E",
+	"55°45'60\"N 37°37'02\"E",
 ].forEach((s) => {
 	const p = P.parsePlace(s);
 	check(JSON.stringify(s) + ' is no place', p === null, show(p));

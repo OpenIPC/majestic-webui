@@ -1325,6 +1325,34 @@
             "pictureNearSun": "Picture, no day in the dark hours",
             "clock": "Set times",
             "pictureNearClock": "Picture, no day between the times"
+          },
+          "x-enum-requires": {
+            "sun": {
+              "any": [
+                {
+                  "field": "calibration.latitude",
+                  "notEquals": "0"
+                },
+                {
+                  "field": "calibration.longitude",
+                  "notEquals": "0"
+                }
+              ],
+              "message": "Needs where the camera is: its latitude and longitude."
+            },
+            "pictureNearSun": {
+              "any": [
+                {
+                  "field": "calibration.latitude",
+                  "notEquals": "0"
+                },
+                {
+                  "field": "calibration.longitude",
+                  "notEquals": "0"
+                }
+              ],
+              "message": "Needs where the camera is: its latitude and longitude."
+            }
           }
         },
         "sunNightAngle": {
@@ -1340,6 +1368,24 @@
             "0": "Sunset",
             "-6": "Civil dusk",
             "-12": "Nautical dusk"
+          },
+          "x-twilight": "night",
+          "visibleWhen": {
+            "any": [
+              {
+                "field": "switchBy",
+                "in": [
+                  "sun",
+                  "pictureNearSun"
+                ]
+              },
+              {
+                "field": "whiteLight",
+                "in": [
+                  "sun"
+                ]
+              }
+            ]
           }
         },
         "sunDayAngle": {
@@ -1354,6 +1400,24 @@
             "0": "Sunrise",
             "-6": "Civil dawn",
             "-12": "Nautical dawn"
+          },
+          "x-twilight": "day",
+          "visibleWhen": {
+            "any": [
+              {
+                "field": "switchBy",
+                "in": [
+                  "sun",
+                  "pictureNearSun"
+                ]
+              },
+              {
+                "field": "whiteLight",
+                "in": [
+                  "sun"
+                ]
+              }
+            ]
           }
         },
         "nightFrom": {
@@ -1420,6 +1484,21 @@
             "sun": "Follows the sun",
             "manual": "Manual",
             "off": "Off"
+          },
+          "x-enum-requires": {
+            "sun": {
+              "any": [
+                {
+                  "field": "calibration.latitude",
+                  "notEquals": "0"
+                },
+                {
+                  "field": "calibration.longitude",
+                  "notEquals": "0"
+                }
+              ],
+              "message": "Needs where the camera is: its latitude and longitude."
+            }
           }
         },
         "whiteHoldSec": {

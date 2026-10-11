@@ -375,19 +375,32 @@
 	// saved config and then the schema default for sections that are not
 	// rendered. Reading only the config made the count disagree with the page
 	// as soon as someone touched a controller.
+	// A visibleWhen is one condition on a sibling (`field`), or a list of
+	// them any one of which shows the row (`any`) -- the shape x-requires
+	// already speaks, for a row two settings can each call for. Anything
+	// else shows the row: a schema newer than this page must never hide one.
+	function visConds(vw) {
+		if (!vw) return [];
+		if (vw.field) return [vw];
+		return Array.isArray(vw.any) ? vw.any.filter((c) => c && c.field) : [];
+	}
+
 	function fieldVisible(f) {
 		const vw = f.sub && f.sub.visibleWhen;
-		if (!vw || !vw.field) return true;
+		const conds = visConds(vw);
+		if (!conds.length) return true;
 		const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
-		const sibDot = parent + '.' + vw.field;
-		const mounted = (state.fields || []).find(x => x.dot === sibDot);
-		if (mounted) return visMatches(vw, mounted.getValue());
-		let v = getDotted(state.config, sibDot);
-		if (v === undefined) {
-			const sib = sectionFields(f.dot.split('.')[0]).find(x => x.dot === sibDot);
-			v = sib && sib.sub ? sib.sub.default : undefined;
-		}
-		return visMatches(vw, v);
+		return conds.some((c) => {
+			const sibDot = parent + '.' + c.field;
+			const mounted = (state.fields || []).find(x => x.dot === sibDot);
+			if (mounted) return visMatches(c, mounted.getValue());
+			let v = getDotted(state.config, sibDot);
+			if (v === undefined) {
+				const sib = sectionFields(f.dot.split('.')[0]).find(x => x.dot === sibDot);
+				v = sib && sib.sub ? sib.sub.default : undefined;
+			}
+			return visMatches(c, v);
+		});
 	}
 
 	// The navigable leaves of one group, in the order the rail lists them: the
@@ -1363,6 +1376,7 @@
 		document.getElementById('mj-apply-btn').addEventListener('click', applyReload);
 
 		applyVisibility();
+		paintEnumHolds();
 		layoutCols();
 		paintStock();
 		// Paints from whatever the heartbeat has already published; the
@@ -8083,13 +8097,22 @@
 	((TREE && TREE.mapDriven('nightMode')) || []).forEach((k) => {
 		MAP_DOTS['nightMode.' + k] = 1;
 	});
-	// The two sun angles are drawn on the twilight strip (sun-panel.js)
-	// rather than as two bare sliders, and render hidden the way the pins do.
-	// Only when the strip's module is on the page: without it they are
-	// ordinary rows, never rows nothing can reach.
-	const SUN_DOTS = (typeof window.MajesticSunPanel === 'object' &&
-		typeof window.MajesticSunPlace === 'object')
-		? { 'nightMode.sunNightAngle': 1, 'nightMode.sunDayAngle': 1 } : {};
+	// Angles the schema marks as lines of twilight (x-twilight) are drawn on
+	// the strip sun-panel.js mounts rather than as bare sliders, and render
+	// hidden the way the pins do. Only where the strip can actually be drawn:
+	// its modules are on the page, and the section carries the night line the
+	// strip is built around -- otherwise they are ordinary rows, never rows
+	// nothing can reach.
+	const SUN_MODULES = typeof window.MajesticSunPanel === 'object' &&
+		typeof window.MajesticSunPlace === 'object';
+	function twilightHidden(dot, sub) {
+		if (!SUN_MODULES || !sub || !sub['x-twilight']) return false;
+		const section = dot.slice(0, dot.lastIndexOf('.'));
+		const props = getDotted(state.schema.properties, section.split('.').join('.properties.'));
+		const own = (props && props.properties) || {};
+		return Object.keys(own).some((k) => own[k] && own[k]['x-twilight'] === 'night' &&
+			!EXCLUDE.has(section + '.' + k) && !!window.MajesticSunPanel.scale(own[k]));
+	}
 
 	function pinField(key) {
 		return state.fields.filter((f) => f.dot === 'nightMode.' + key)[0];
@@ -8199,12 +8222,14 @@
 				? row : first);
 	}
 
-	// The sun panel (sun-panel.js) under the Switch-by row: where the camera
-	// is, and the twilight strip for the two angles. calibration.latitude and
-	// longitude belong to another section and are drawn hidden here, so the
-	// panel stages them like any edit and one Save carries them with the
-	// nightMode keys -- the batch is built by dotted path, and nothing on this
-	// page compares a field's section with the one on screen.
+	// The sun panel (sun-panel.js), where the twilight angles' hidden rows
+	// are: where the camera is, and the strip that edits the two angles.
+	// Every field it drives is found by what the schema says it is -- a line
+	// of twilight (x-twilight), an axis of the camera's place (x-geo) -- never
+	// by its name. The place belongs to another section and is drawn hidden
+	// here, so the panel stages it like any edit and one Save carries it with
+	// the rest: the batch is built by dotted path, and nothing on this page
+	// compares a field's section with the one on screen.
 	let tzPlaces = null;
 	function mountSun(container) {
 		const SUNP = window.MajesticSunPanel, PLACE = window.MajesticSunPlace;
@@ -8213,30 +8238,51 @@
 			state.sunPanel = null;
 		}
 		if (!SUNP || !PLACE) return;
-		const byF = state.fields.find((x) => x.dot === 'nightMode.switchBy');
-		if (!byF || !byF.p) return;
+		const tw = (line) => state.fields.find((x) => x.schema && x.schema['x-twilight'] === line) || null;
+		const night = tw('night');
+		if (!night || !night.p) return;
+		const geo = {};
 		const props = state.schema.properties || {};
-		const cal = props.calibration && props.calibration.properties;
-		['latitude', 'longitude'].forEach((k) => {
-			const dot = 'calibration.' + k;
-			if (!cal || !cal[k] || EXCLUDE.has(dot) || state.fields.some((x) => x.dot === dot)) return;
-			const field = renderField(container, dot, k, cal[k], getDotted(state.config, dot), { hidden: true });
-			if (field) {
-				state.fields.push(field);
-				state.initial[dot] = field.getValue();
-			}
+		Object.keys(props).forEach((sec) => {
+			const own = (props[sec] && props[sec].properties) || {};
+			Object.keys(own).forEach((k) => {
+				const axis = own[k] && own[k]['x-geo'];
+				if (axis !== 'latitude' && axis !== 'longitude') return;
+				const dot = sec + '.' + k;
+				if (EXCLUDE.has(dot)) return;
+				let field = state.fields.find((x) => x.dot === dot);
+				if (!field) {
+					field = renderField(container, dot, k, own[k], getDotted(state.config, dot), { hidden: true });
+					if (!field) return;
+					state.fields.push(field);
+					state.initial[dot] = field.getValue();
+				}
+				geo[axis] = field;
+			});
 		});
-		const nm = (props.nightMode && props.nightMode.properties) || {};
-		const sx = (k) => (nm[k] && nm[k]['x-special']) || {};
+		const form = $('#mj-settings-form');
 		state.sunPanel = SUNP.mount({
-			anchor: byF.p,
-			field: (dot) => state.fields.find((x) => x.dot === dot) || null,
-			set: (dot, v) => {
-				const fl = state.fields.find((x) => x.dot === dot);
-				if (!fl) return;
-				fl.setValue(v);
+			night: night,
+			day: tw('day'),
+			lat: geo.latitude || null,
+			lon: geo.longitude || null,
+			set: (field, v) => {
+				if (!field) return;
+				field.setValue(v);
 				runVisibility();
 				updateDirty();
+			},
+			initial: (field) => state.initial[field.dot],
+			visible: () => fieldVisible({ sub: night.schema, dot: night.dot }),
+			onChange: (fn) => {
+				if (!form) return null;
+				const h = () => fn();
+				form.addEventListener('input', h);
+				form.addEventListener('change', h);
+				return () => {
+					form.removeEventListener('input', h);
+					form.removeEventListener('change', h);
+				};
 			},
 			// Asked of the camera every time, with the place on the page:
 			// the times are in the camera's time zone and the arithmetic is
@@ -8247,7 +8293,6 @@
 			{ credentials: 'same-origin' })
 				.then((r) => (r.ok ? r.json() : null)).catch(() => null),
 			zone: boot.tz || '',
-			initial: (dot) => state.initial[dot],
 			// Sixteen kilobytes nobody needs until a guess is offered, and
 			// fetched once per page however often the section is drawn.
 			places: () => tzPlaces || (tzPlaces = new Promise((resolve) => {
@@ -8258,7 +8303,6 @@
 				document.head.appendChild(s);
 			})),
 			P: PLACE,
-			names: { night: sx('sunNightAngle'), day: sx('sunDayAngle') },
 		});
 	}
 
@@ -9906,7 +9950,7 @@
 				// their headings would stand over nothing.
 				if (!mine.some(k => {
 					const d = basePath + '.' + k;
-					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !SUN_DOTS[d] && !lifted().has(d) && !(skip && skip.has(d));
+					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !twilightHidden(d, props[k]) && !lifted().has(d) && !(skip && skip.has(d));
 				})) continue;
 				if (g.label) head(container, g.label, g.note);
 				renderProps(container, basePath, pick(props, mine), skip, true);
@@ -9938,7 +9982,7 @@
 			const rowOf = sub && sub['x-row-of'] && typeof sub['x-row-of'].field === 'string'
 				&& props[sub['x-row-of'].field];
 			const field = renderField(container, dot, key, sub, eff,
-				(MAP_DOTS[dot] || SUN_DOTS[dot] || rowOf) ? { hidden: true } : undefined);
+				(MAP_DOTS[dot] || twilightHidden(dot, sub) || rowOf) ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -9998,17 +10042,25 @@
 		const byDot = {};
 		for (const f of state.fields) byDot[f.dot] = f;
 		for (const f of state.fields) {
-			const vw = f.schema && f.schema.visibleWhen;
-			if (!vw || !vw.field) continue;
+			const conds = visConds(f.schema && f.schema.visibleWhen);
+			if (!conds.length) continue;
 			const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
-			const ctrl = byDot[parent + '.' + vw.field];
-			if (!ctrl) continue;
-			const update = () => { f.p.style.display = visMatches(vw, ctrl.getValue()) ? '' : 'none'; };
-			ctrl.control.addEventListener('change', update);
-			ctrl.control.addEventListener('input', update);
+			const ctrls = conds.map((c) => ({ c: c, ctrl: byDot[parent + '.' + c.field] }))
+				.filter((x) => x.ctrl);
+			if (!ctrls.length) continue;
+			// A row hidden for the strip (x-twilight) stays hidden whatever its
+			// rule says: the strip is what shows for it.
+			if (f.p.hidden) continue;
+			const update = () => {
+				f.p.style.display = ctrls.some((x) => visMatches(x.c, x.ctrl.getValue())) ? '' : 'none';
+			};
+			ctrls.forEach((x) => {
+				x.ctrl.control.addEventListener('change', update);
+				x.ctrl.control.addEventListener('input', update);
+				controllers.add(x.ctrl);
+			});
 			state.visUpdaters.push(update);
 			update();
-			controllers.add(ctrl);
 		}
 		// A frame-rate bound that depends on the chosen resolution has to move
 		// with it. Same shape as the visibleWhen pass above — find the sibling,
@@ -10141,8 +10193,45 @@
 		}
 	}
 
+	// Choices the schema says can do nothing until something else is set
+	// (x-enum-requires, in x-requires' own vocabulary) are held back while it
+	// is not, with the reason under the row -- rather than accepted and then
+	// explained. Never the choice the field holds now or was saved with: that
+	// is taken away from nobody, and moving off a saved choice must not make
+	// it impossible to come back to.
+	function paintEnumHolds() {
+		(state.fields || []).forEach((f) => {
+			const map = f.schema && f.schema['x-enum-requires'];
+			if (!map || !f.control || !f.control.options || !f.p) return;
+			const cur = String(f.getValue()), saved = String(state.initial[f.dot]);
+			const held = [];
+			let why = '';
+			Array.prototype.forEach.call(f.control.options, (op) => {
+				const req = map[op.value];
+				const msg = req ? reqNotice(req, () => f.getValue()) : '';
+				op.disabled = !!msg && op.value !== cur && op.value !== saved;
+				op.title = op.disabled ? msg : '';
+				if (op.disabled) {
+					held.push(op.textContent);
+					why = why || msg;
+				}
+			});
+			let note = f.p.querySelector('.mj-enum-held');
+			if (!held.length) {
+				if (note) note.remove();
+				return;
+			}
+			if (!note) {
+				note = el('div', 'hint mj-requires mj-enum-held');
+				f.p.appendChild(note);
+			}
+			note.textContent = held.join(', ') + ': ' + why;
+		});
+	}
+
 	function runVisibility() {
 		(state.visUpdaters || []).forEach(u => u());
+		paintEnumHolds();
 		// a saved edit can have met or broken a requirement on this page
 		(state.reqUpdaters || []).forEach(u => u.paint());
 		// what is on screen just changed, and the head counts what is on screen
@@ -12527,6 +12616,10 @@
 	}
 
 	function updateDirty() {
+		// A staged edit can meet or break what a held-back choice is waiting
+		// for -- typing a place frees the sun choices -- so they are repainted
+		// with every edit, not only when a row shows or hides.
+		paintEnumHolds();
 		let n = 0;
 		for (const f of state.fields) {
 			const d = f.getValue() !== state.initial[f.dot];

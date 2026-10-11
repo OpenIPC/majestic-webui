@@ -62,8 +62,11 @@
 			return grab(url.pathname, new RegExp('^' + NUM + ',' + NUM));
 		}
 
-		// Yandex: ll, pt and whatshere[point] are all longitude,latitude.
+		// Yandex: ll, pt and whatshere[point] are all longitude,latitude. A
+		// route (mode=routes, rtext) is two places and a view between them,
+		// none of which anybody chose as where the camera is.
 		if (/(^|\.)yandex\.[a-z.]+$/.test(host) || /(^|\.)ya\.ru$/.test(host)) {
+			if (q.get('mode') === 'routes' || q.has('rtext')) return null;
 			for (const k of ['pt', 'whatshere[point]', 'll']) {
 				const v = q.get(k);
 				if (v) {
@@ -90,14 +93,16 @@
 		// place's own pin (!3d lat !4d lon) is the place; @lat,lon is only
 		// where the view is centred, and the two differ whenever the map was
 		// panned after the pin was dropped.
-		const pinned = grab(all, new RegExp('!3d' + NUM + '!4d' + NUM)) ||
-			['q', 'query', 'll', 'sll', 'daddr', 'destination'].reduce((found, k) =>
-				found || grab(q.get(k) || '', new RegExp('^' + NUM + ',\\s*' + NUM)), null);
-		if (pinned) return pinned;
-		// The view is a place only on a map of one: a route's or a search's
-		// view is centred between its ends, which is nowhere anybody chose.
+		const pin = grab(all, new RegExp('!3d' + NUM + '!4d' + NUM));
+		if (pin) return pin;
+		// A route or a search is not one place: its view is centred between
+		// its ends, and its query is what was searched for, which can lead
+		// with coordinates and still mean "cafes near here". Only a pin
+		// dropped on it, above, is somebody's choice.
 		if (/^\/maps\/(dir|search)\//.test(url.pathname)) return null;
-		return grab(all, new RegExp('@' + NUM + ',' + NUM));
+		return ['q', 'query', 'll', 'sll', 'daddr', 'destination'].reduce((found, k) =>
+			found || grab(q.get(k) || '', new RegExp('^' + NUM + ',\\s*' + NUM + '$')), null) ||
+			grab(all, new RegExp('@' + NUM + ',' + NUM));
 	}
 
 	// 55°45'21"N 37°37'04"E, N55.75 E37.62, 33.87 S, 151.21 E. Each half
@@ -121,8 +126,11 @@
 		while ((m = re.exec(s)) !== null) {
 			const h = (lead ? m[1] : m[4]).toUpperCase();
 			const d = lead ? m.slice(2, 5) : m.slice(1, 4);
-			const v = parseFloat(d[0]) + (parseFloat(d[1]) || 0) / 60 +
-				(parseFloat(d[2]) || 0) / 3600;
+			const mi = parseFloat(d[1]) || 0, se = parseFloat(d[2]) || 0;
+			// 75 minutes is not a typo to be carried into the next degree:
+			// it is no place, and saying so beats a camera a degree away.
+			if (mi >= 60 || se >= 60) return null;
+			const v = parseFloat(d[0]) + mi / 60 + se / 3600;
 			found.push({ h: h, v: h === 'S' || h === 'W' ? -v : v });
 		}
 		if (found.length !== 2) return null;
