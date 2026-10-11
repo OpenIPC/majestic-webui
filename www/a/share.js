@@ -502,11 +502,13 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 			try { localStorage.setItem(SHARE_SEEN_KEY, '1'); } catch (e) { /* a convenience */ }
 			readyLead.textContent = note ? `Send this link to ${note}` : 'Send this link to whoever it is for';
 			readyLink.value = s.link;
-			// What the camera answered, where it said; what was asked for where not.
-			readyWhat.textContent = shareSummary({
-				scope: s.scope || scope,
-				expires: s.expires || Math.floor(Date.now() / 1000) + ttl,
-			}, Date.now());
+			// Only what the camera answered: it states the link's access and end
+			// with the link. An answer without them shows neither, rather than
+			// what was asked for and the browser's clock passed off as the
+			// camera's; the live list above has the camera's own once it loads.
+			const known = typeof s.scope === 'string' && s.scope && Number.isFinite(s.expires) && s.expires > 0;
+			readyWhat.textContent = known ? shareSummary(s, Date.now()) : '';
+			readyWhat.classList.toggle('d-none', !known);
 			copy.textContent = 'Copy';
 			copy.classList.remove('btn-success');
 			copy.classList.add('btn-primary');
