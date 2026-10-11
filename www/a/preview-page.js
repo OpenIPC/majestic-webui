@@ -30,6 +30,10 @@
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), note = $('#mj-note');
+	// Whether the chip is describing a playing stream or saying what is wrong.
+	// On a small stage the description travels with the control bar and the
+	// trouble stays on screen (bootstrap.override.css, .mj-chip-info).
+	const chipInfo = (on) => { if (badge && badge.classList) badge.classList.toggle('mj-chip-info', on); };
 	const tapPlay = $('#mj-tap-play');
 	const snapshot = $('#mj-snapshot');
 	// Bumped on every poster paint and on hide, so a frame that finishes reading
@@ -275,6 +279,7 @@
 		fellBack = null;
 		hideStageMsg('fallback');
 		if (badge) badge.textContent = 'no signal';
+		chipInfo(false);
 	}
 	// The end of the chain: both transports are gone and what is left is the
 	// camera's JPEG channel, or nothing at all. Saying so takes more than a
@@ -358,6 +363,7 @@
 		if (noteAct) noteAct.hidden = !!mjpegStreamOf(camera) || jpegOn;
 		if (note) note.style.display = '';
 		if (badge) badge.textContent = 'unavailable';
+		chipInfo(false);
 		holdingFallback = 'note';
 		// Neither transport is carrying the picture, so neither is lit. It is
 		// also what makes the retry work: with the group cleared, pressing the
@@ -389,6 +395,7 @@
 		// of the chain and is held by the swap like any other player, so
 		// arriving here means there was no picture to keep.
 		if (badge) badge.textContent = 'retrying…';
+		chipInfo(false);
 		attachPlayer(kind === undefined ? wantWebRTC() : kind);
 	}
 
@@ -783,6 +790,7 @@
 			(fps ? ' · ' + Math.round(fps) + ' fps' : '') +
 			(pct ? ' · ' + pct + '%' : '') +
 			servedNote() + roiNote();
+		chipInfo(true);
 		// Its height is what the toast stack hangs off, and a caption that wraps
 		// to a second line has just changed it. Its WIDTH decides nothing about
 		// placement any more (#302).
@@ -1230,6 +1238,7 @@
 			// attempt, and the chip has to go on describing the stage.
 			else if (badge && !holdingFallback) {
 				badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
+				chipInfo(false);
 			}
 		},
 	});

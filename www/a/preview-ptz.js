@@ -109,6 +109,47 @@
 	function speedQuery(verb) {
 		return PS && speedBox && !speedBox.hidden && speedIn ? PS.query(verb, speedIn.value) : '';
 	}
+	// Folded on a small stage. The pad is about 140px square and the zoom/focus
+	// cluster as tall again, so on a phone they covered a sixth of the picture or
+	// more for somebody who came to look at it -- and a share's guest, who rarely
+	// steers at all, met that before anything else. Behind one button there, the
+	// same size as a pad button and in the same corner; open, the button stays
+	// at the top of the column to fold it back. Whether it is open is
+	// remembered per browser, so whoever does steer opens it once. A window
+	// large enough for the pad never folds it and shows no button.
+	const SMALL = '(max-width: 575.98px), (max-height: 480px)';
+	const small = window.matchMedia ? window.matchMedia(SMALL) : null;
+	const fold = document.createElement('button');
+	fold.type = 'button';
+	fold.className = 'mj-ptz-fold';
+	fold.innerHTML = '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" ' +
+		'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+		'<path class="mj-ptz-fold-open" d="M10 2.5v15M2.5 10h15M7.5 5 10 2.5 12.5 5M7.5 15l2.5 2.5 2.5-2.5' +
+		'M5 7.5 2.5 10 5 12.5M15 7.5l2.5 2.5-2.5 2.5"></path>' +
+		'<path class="mj-ptz-fold-close" d="M5 5l10 10M15 5 5 15"></path></svg>';
+	const OPEN_KEY = 'mj-ptz-open';
+	let open = false;
+	try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch (e) { /* ignore */ }
+	const applyFold = () => {
+		const folded = !!(small && small.matches) && !open;
+		mount.classList.toggle('mj-ptz-folded', folded);
+		mount.classList.toggle('mj-ptz-foldable', !!(small && small.matches));
+		fold.setAttribute('aria-expanded', String(!folded));
+		const say = folded ? 'Show camera controls' : 'Hide camera controls';
+		fold.setAttribute('aria-label', say);
+		fold.title = say;
+	};
+	fold.addEventListener('click', () => {
+		open = mount.classList.contains('mj-ptz-folded');
+		try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch (e) { /* ignore */ }
+		applyFold();
+	});
+	mount.insertBefore(fold, mount.firstChild);
+	applyFold();
+	if (small) {
+		if (small.addEventListener) small.addEventListener('change', applyFold);
+		else if (small.addListener) small.addListener(applyFold);
+	}
 	mount.hidden = false;
 
 	const STEP = 5, TICK_MS = 250;
@@ -487,7 +528,8 @@
 	const isSingle = btn => btn.dataset.dir === 'cc' ||
 		btn.dataset.act === 'stop' || btn.dataset.act === 'af';
 
-	mount.querySelectorAll('button').forEach(btn => {
+	// The fold button is the mount's own, not a move.
+	mount.querySelectorAll('button:not(.mj-ptz-fold)').forEach(btn => {
 		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco
