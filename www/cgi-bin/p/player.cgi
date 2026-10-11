@@ -246,7 +246,7 @@ printf '%s' \
 		<p id="mj-adapt" class="mj-adapt-toast small" role="status" hidden>
 			<span id="mj-adapt-rates" class="mj-adapt-rates"></span>
 			<span id="mj-adapt-why" class="mj-adapt-why"></span>
-			<button type="button" class="mj-adapt-close" aria-label="Dismiss">×</button>
+			<button type="button" class="mj-adapt-close" aria-label="Stop showing bitrate changes" title="Stop showing bitrate changes">×</button>
 		</p>
 		<!-- The served-channel message (preview-page.js): why the channel the
 		     viewer picked is not the one playing, from the camera's own

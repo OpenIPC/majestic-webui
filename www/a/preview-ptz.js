@@ -167,6 +167,8 @@
 		pad.children[0].classList.contains('mj-ptz-void') &&
 		pad.children[2].classList.contains('mj-ptz-void'));
 	const isSmall = () => !!(small && small.matches);
+	// Its bottom-left cell, for a handle that has no centre to take.
+	const gripCorner = !!(pad && pad.children.length > 6 && pad.children[6].classList.contains('mj-ptz-void'));
 	const hasExtras = () => !!((speedBox && !speedBox.hidden && speedBox.isConnected) ||
 		(followBox && !followBox.hidden && followBox.isConnected));
 	const popOpen = (on) => {
@@ -199,6 +201,76 @@
 		if (e.key === 'Escape' && !more.hidden) { popOpen(false); gear.focus(); }
 	});
 	mount.appendChild(more);
+
+	// ---- moving the pad --------------------------------------------------
+	//
+	// The pad covers a corner of the picture, and what is in that corner is
+	// sometimes what the operator came to see. It moves: dragged by its
+	// handle anywhere on the stage, it settles in the nearest corner, and the
+	// corner is remembered per browser. The Pelco pad's centre was Stop, which
+	// nothing needs -- every hold already stops on release -- so its handle
+	// takes that place; the eight-way pad keeps its Centre (home) and has its
+	// handle in the strip with the gear and the fold.
+	const CORNERS = ['br', 'bl', 'tl', 'tr'];
+	const CORNER_KEY = 'mj-ptz-corner';
+	const grip = document.createElement('button');
+	grip.type = 'button';
+	grip.className = 'mj-ptz-grip';
+	grip.setAttribute('aria-label', 'Move the pad to another corner');
+	grip.title = 'Drag to move the pad';
+	grip.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="currentColor" aria-hidden="true">' +
+		'<circle cx="7" cy="5" r="1.4"></circle><circle cx="13" cy="5" r="1.4"></circle>' +
+		'<circle cx="7" cy="10" r="1.4"></circle><circle cx="13" cy="10" r="1.4"></circle>' +
+		'<circle cx="7" cy="15" r="1.4"></circle><circle cx="13" cy="15" r="1.4"></circle></svg>';
+	const stopBtn = pad ? pad.querySelector('[data-act="stop"]') : null;
+	if (stopBtn) stopBtn.replaceWith(grip);
+	const gripInPad = !!stopBtn;
+	let corner = 'br';
+	try { if (CORNERS.indexOf(localStorage.getItem(CORNER_KEY)) >= 0) corner = localStorage.getItem(CORNER_KEY); } catch (e) { /* ignore */ }
+	const setCorner = (c) => {
+		corner = c;
+		for (const k of CORNERS) stage.classList.toggle('mj-ptz-' + k, k === c && c !== 'br');
+		try { localStorage.setItem(CORNER_KEY, c); } catch (e) { /* ignore */ }
+		window.dispatchEvent(new Event('resize'));
+	};
+	setCorner(corner);
+	let drag = null;
+	grip.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+	grip.addEventListener('pointerdown', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		try { grip.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+		drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+		mount.classList.add('mj-ptz-dragging');
+	});
+	grip.addEventListener('pointermove', (e) => {
+		if (!drag || e.pointerId !== drag.id) return;
+		const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+		if (Math.abs(dx) + Math.abs(dy) > 6) drag.moved = true;
+		mount.style.transform = `translate(${dx}px, ${dy}px)`;
+	});
+	const endDrag = (e) => {
+		if (!drag || e.pointerId !== drag.id) return;
+		const moved = drag.moved;
+		drag = null;
+		mount.classList.remove('mj-ptz-dragging');
+		if (moved) {
+			const m = mount.getBoundingClientRect(), st = stage.getBoundingClientRect();
+			const cx = m.left + m.width / 2 - st.left, cy = m.top + m.height / 2 - st.top;
+			mount.style.transform = '';
+			setCorner((cy < st.height / 2 ? 't' : 'b') + (cx < st.width / 2 ? 'l' : 'r'));
+		} else {
+			mount.style.transform = '';
+		}
+	};
+	grip.addEventListener('pointerup', endDrag);
+	grip.addEventListener('pointercancel', endDrag);
+	// From the keyboard: Enter or Space takes it round the corners.
+	grip.addEventListener('click', (e) => {
+		if (e.detail !== 0) return;
+		setCorner(CORNERS[(CORNERS.indexOf(corner) + 1) % CORNERS.length]);
+	});
+
 	const applyFold = () => {
 		const folded = !!(small && small.matches) && !open;
 		mount.classList.toggle('mj-ptz-folded', folded);
@@ -207,11 +279,22 @@
 		// mount; open on a small stage, in the pad's corners or the strip.
 		if (!isSmall() || folded) {
 			mount.appendChild(fold);
+			// The handle where the Pelco pad has none of its own: first in the
+			// column on a large stage.
+			if (!gripInPad) mount.insertBefore(grip, mount.firstChild);
 		} else if (corners) {
 			pad.appendChild(gear);
 			pad.appendChild(fold);
+			// A pad with empty corners but no Stop of its own (an eight-way
+			// pad missing its diagonals): the handle takes the bottom-left
+			// corner where that is empty too, else the strip below.
+			if (!gripInPad) {
+				if (gripCorner) pad.appendChild(grip);
+				else { head.appendChild(grip); mount.appendChild(head); }
+			}
 		} else {
 			head.appendChild(gear);
+			if (!gripInPad) head.appendChild(grip);
 			head.appendChild(fold);
 			mount.appendChild(head);
 		}
@@ -623,7 +706,7 @@
 	mount.addEventListener('contextmenu', e => e.preventDefault());
 
 	// The fold and the gear are the mount's own, not moves.
-	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear)').forEach(btn => {
+	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip)').forEach(btn => {
 		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco
