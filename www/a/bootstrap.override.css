@@ -4708,6 +4708,14 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	background: rgba(255, 255, 255, 0.16);
 }
 
+/* On a phone the Fill button is the fullscreen button (it asks for the real
+   thing too, where the browser grants it): one of them, not two. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-bar-phonefs #mj-fs {
+		display: none !important;
+	}
+}
+
 /* The focus-by-ear readout. Digits big enough to read from the foot of a
    ladder; tabular, so they do not jitter sideways five times a second. The
    button keeps its own HUD look. */
@@ -5335,7 +5343,7 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 }
 
 /* A handle in the bottom-left cell (a pad with no centre of its own). */
-.mj-ptz-pad > .mj-ptz-grip {
+.mj-ptz-pad > .mj-ptz-grip.mj-ptz-grip-corner {
 	position: absolute;
 	left: 3px;
 	bottom: 3px;

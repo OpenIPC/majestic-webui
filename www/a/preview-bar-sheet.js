@@ -74,9 +74,14 @@ window.MajesticBarSheet = (function () {
 	const ICON_MORE = '<svg viewBox="0 0 20 20" width="20" height="20" fill="currentColor" aria-hidden="true">' +
 		'<circle cx="4.5" cy="10" r="1.6"></circle><circle cx="10" cy="10" r="1.6"></circle>' +
 		'<circle cx="15.5" cy="10" r="1.6"></circle></svg>';
+	// The fullscreen button's own corners (player.cgi's #mj-fs): on a phone
+	// this is the fullscreen button, and it should look like one.
 	const ICON_FILL = '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" ' +
-		'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-		'<path d="M7.5 3H3v4.5M12.5 3H17v4.5M7.5 17H3v-4.5M12.5 17H17v-4.5M6 10h8M10 6v8"></path></svg>';
+		'stroke-width="1.5" stroke-linecap="round" aria-hidden="true">' +
+		'<path d="M3 7.4V3h4.4M16.9 7.4V3h-4.4M3 12.6V17h4.4M16.9 12.6V17h-4.4"></path></svg>';
+	const ICON_UNFILL = '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" ' +
+		'stroke-width="1.5" stroke-linecap="round" aria-hidden="true">' +
+		'<path d="M7.4 3v4.4H3M12.6 3v4.4H17M7.4 17v-4.4H3M12.6 17v-4.4H17"></path></svg>';
 	const ICON_CLOSE = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" ' +
 		'stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"></path></svg>';
 
@@ -99,25 +104,56 @@ window.MajesticBarSheet = (function () {
 		const fill = el('button', 'mj-hud-ico mj-fill-btn');
 		fill.type = 'button';
 		fill.hidden = true;
-		fill.innerHTML = ICON_FILL;
+		// Real fullscreen where the browser grants it (Android, iPad), on top of
+		// filling the page: the page's own fill always happens, so the button
+		// does something on an iPhone, whose Safari may say fullscreen is
+		// there and then not grant it.
+		const realFs = !!(stage.requestFullscreen && document.fullscreenEnabled);
+		let wentReal = false;
+		let reapply = null; // apply(), once it exists: the button's place follows the fill
 		const setFill = (on) => {
 			document.body.classList.toggle('mj-fill', on);
 			fill.setAttribute('aria-pressed', String(on));
-			const say = on ? 'Leave fill screen' : 'Fill the screen';
+			fill.innerHTML = on ? ICON_UNFILL : ICON_FILL;
+			const say = on ? 'Exit fullscreen' : 'Fullscreen';
 			fill.setAttribute('aria-label', say);
 			fill.title = say;
+			if (on && realFs && !document.fullscreenElement) {
+				try {
+					// Tapped off again before the browser answered: leave the
+					// fullscreen it grants late, rather than sit in it with the
+					// button saying otherwise.
+					stage.requestFullscreen().then(() => {
+						if (document.body.classList.contains('mj-fill')) wentReal = true;
+						else document.exitFullscreen().catch(() => {});
+					}, () => {});
+				} catch (e) { /* the fill stands */ }
+			} else if (!on && document.fullscreenElement) {
+				wentReal = false;
+				try { document.exitFullscreen().catch(() => {}); } catch (e) { /* ignore */ }
+			}
 			const s = share();
 			if (s && typeof s.fill === 'function') { try { s.fill(on); } catch (e) { /* the share page's */ } }
+			if (reapply) reapply();
 			// The stage changed size: the picture and the chrome re-measure.
 			window.dispatchEvent(new Event('resize'));
 		};
 		setFill(false);
 		fill.addEventListener('click', (e) => { e.stopPropagation(); setFill(!document.body.classList.contains('mj-fill')); });
+		// Leaving real fullscreen the browser's way (Back, a swipe) leaves the
+		// fill too: one state, not two to undo.
+		document.addEventListener('fullscreenchange', () => {
+			if (!document.fullscreenElement && wentReal) {
+				wentReal = false;
+				if (document.body.classList.contains('mj-fill')) setFill(false);
+			}
+		});
 		document.addEventListener('keydown', (e) => {
 			if (e.key === 'Escape' && document.body.classList.contains('mj-fill') && !sheet.open) setFill(false);
 		});
-		// Shown where real fullscreen is not: the two are one button's job.
-		const fillWanted = () => !(fsBtn && !fsBtn.hidden && document.fullscreenEnabled);
+		// On a phone this button is the fullscreen button; the bar's own
+		// #mj-fs is hidden there by CSS (.mj-bar-phonefs), so there is one.
+		bar.classList.add('mj-bar-phonefs');
 
 		// ---- the list ------------------------------------------------------
 		const sheet = document.createElement('dialog');
@@ -194,11 +230,13 @@ window.MajesticBarSheet = (function () {
 		if (icons) icons.append(fill, btn); else bar.append(fill, btn);
 
 		const apply = () => {
-			fill.hidden = !(small.matches && fillWanted());
-			if (fill.hidden && document.body.classList.contains('mj-fill')) setFill(false);
+			// Kept while filled: fullscreen can itself take a short landscape
+			// screen past the phone size, and dropping out of it then would
+			// undo the tap that asked for it. The button stays to leave by.
+			fill.hidden = !small.matches && !document.body.classList.contains('mj-fill');
 			const hidden = {};
 			for (const g of groups) hidden[g.id] = g.hidden;
-			const third = !!((fsBtn && !fsBtn.hidden) || !fill.hidden);
+			const third = !!((!small.matches && fsBtn && !fsBtn.hidden) || !fill.hidden);
 			const p = plan(groups.map((g) => g.id), hidden, small.matches, third);
 			for (const g of groups) {
 				const into = p.moved.indexOf(g.id) >= 0;
@@ -242,6 +280,7 @@ window.MajesticBarSheet = (function () {
 		// A tap on the backdrop -- the dialog itself, outside its body -- closes.
 		sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
 
+		reapply = apply;
 		apply();
 		if (small.addEventListener) small.addEventListener('change', apply);
 		else if (small.addListener) small.addListener(apply);

@@ -289,7 +289,7 @@
 			// pad missing its diagonals): the handle takes the bottom-left
 			// corner where that is empty too, else the strip below.
 			if (!gripInPad) {
-				if (gripCorner) pad.appendChild(grip);
+				if (gripCorner) { grip.classList.add('mj-ptz-grip-corner'); pad.appendChild(grip); }
 				else { head.appendChild(grip); mount.appendChild(head); }
 			}
 		} else {

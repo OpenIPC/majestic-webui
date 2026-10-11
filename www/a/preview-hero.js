@@ -268,6 +268,9 @@
 			show(4000);
 		}
 	});
+	// Up for a few seconds when the page opens, so a first look at it shows
+	// the controls exist; after that a tap brings them back.
+	show(5000);
 	stage.addEventListener('pointercancel', e => {
 		if (e.pointerType === 'touch') touching = Math.max(0, touching - 1);
 		if (e.pointerId === tapId) tapId = null;
