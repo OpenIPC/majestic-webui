@@ -1,3 +1,9 @@
+<%
+    _ptz_ctrl=$(fw_printenv -n ptz_control 2>/dev/null)
+%>
+<script>
+    window.ptzControl = "<%= $_ptz_ctrl %>";
+</script>
 <!-- PTZ pad(s). Emitted after the player (p/player.cgi has already closed the
      stage by the time this include runs) and hidden: preview-ptz.js relocates
      everything into the stage's #mj-ptz mount and unhides it, so a failed
