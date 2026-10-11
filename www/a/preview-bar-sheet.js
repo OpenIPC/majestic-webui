@@ -110,6 +110,7 @@ window.MajesticBarSheet = (function () {
 		// there and then not grant it.
 		const realFs = !!(stage.requestFullscreen && document.fullscreenEnabled);
 		let wentReal = false;
+		let reapply = null; // apply(), once it exists: the button's place follows the fill
 		const setFill = (on) => {
 			document.body.classList.toggle('mj-fill', on);
 			fill.setAttribute('aria-pressed', String(on));
@@ -119,7 +120,13 @@ window.MajesticBarSheet = (function () {
 			fill.title = say;
 			if (on && realFs && !document.fullscreenElement) {
 				try {
-					stage.requestFullscreen().then(() => { wentReal = true; }, () => {});
+					// Tapped off again before the browser answered: leave the
+					// fullscreen it grants late, rather than sit in it with the
+					// button saying otherwise.
+					stage.requestFullscreen().then(() => {
+						if (document.body.classList.contains('mj-fill')) wentReal = true;
+						else document.exitFullscreen().catch(() => {});
+					}, () => {});
 				} catch (e) { /* the fill stands */ }
 			} else if (!on && document.fullscreenElement) {
 				wentReal = false;
@@ -127,6 +134,7 @@ window.MajesticBarSheet = (function () {
 			}
 			const s = share();
 			if (s && typeof s.fill === 'function') { try { s.fill(on); } catch (e) { /* the share page's */ } }
+			if (reapply) reapply();
 			// The stage changed size: the picture and the chrome re-measure.
 			window.dispatchEvent(new Event('resize'));
 		};
@@ -222,8 +230,10 @@ window.MajesticBarSheet = (function () {
 		if (icons) icons.append(fill, btn); else bar.append(fill, btn);
 
 		const apply = () => {
-			fill.hidden = !small.matches;
-			if (fill.hidden && document.body.classList.contains('mj-fill')) setFill(false);
+			// Kept while filled: fullscreen can itself take a short landscape
+			// screen past the phone size, and dropping out of it then would
+			// undo the tap that asked for it. The button stays to leave by.
+			fill.hidden = !small.matches && !document.body.classList.contains('mj-fill');
 			const hidden = {};
 			for (const g of groups) hidden[g.id] = g.hidden;
 			const third = !!((!small.matches && fsBtn && !fsBtn.hidden) || !fill.hidden);
@@ -270,6 +280,7 @@ window.MajesticBarSheet = (function () {
 		// A tap on the backdrop -- the dialog itself, outside its body -- closes.
 		sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
 
+		reapply = apply;
 		apply();
 		if (small.addEventListener) small.addEventListener('change', apply);
 		else if (small.addListener) small.addListener(apply);
