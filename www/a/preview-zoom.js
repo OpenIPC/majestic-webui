@@ -546,10 +546,13 @@
 		}
 
 		// Armed, or simply nothing to pan: either way the drag draws -- unless
-		// a finger is already down, in which case this one joins it. A pinch
-		// squeezed back to Fit leaves the picture drawable under a finger
-		// still resting on it, and the next one down is that pinch resuming.
-		if (!pts.size && (armed || stage.classList.contains('mj-drawable'))) {
+		// this is a finger and another is already down, in which case it joins
+		// it. A pinch squeezed back to Fit leaves the picture drawable under a
+		// finger still resting on it, and the next one down is that pinch
+		// resuming. Only a finger: a pen or a mouse pressed beside a resting
+		// hand is not half of a pinch, and with Area armed it came to draw.
+		const joins = pts.size > 0 && e.pointerType === 'touch';
+		if (!joins && (armed || stage.classList.contains('mj-drawable'))) {
 			const r = stage.getBoundingClientRect();
 			drawing = {
 				id: e.pointerId, type: e.pointerType,
