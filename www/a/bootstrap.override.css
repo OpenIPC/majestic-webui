@@ -5026,6 +5026,29 @@ dialog.mj-more-sheet::backdrop {
 	padding-right: calc(var(--mj-ptz-w, 9rem) + 1rem);
 }
 
+/* On a small stage the bar is one row: View, the stream and the icons, a
+   little tighter, and View without 1:1 -- on a phone two fingers zoom the
+   picture to real pixels and past them, which is what 1:1 is for on a
+   desktop, and the three of them did not fit 390 px beside the stream.
+   After the bar's own rules, which have the same specificity. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-bar {
+		gap: 0.35rem;
+		padding-left: 0.5rem;
+		padding-right: 0.5rem;
+	}
+
+	.mj-bar .mj-seg-lbl {
+		padding-left: 0.45rem;
+		padding-right: 0.45rem;
+	}
+
+	.mj-bar label[for="mj-view-one"] {
+		display: none;
+	}
+}
+
+
 /* Both pads are one glass panel with the buttons inside it, rather than a
    scatter of individually-tinted squares: the cluster reads as one control,
    and the picture shows through one edge instead of nine. */

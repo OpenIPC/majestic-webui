@@ -60,7 +60,12 @@ window.MajesticBarSheet = (function () {
 		const body = document.createElement('div');
 		body.className = 'mj-more-body';
 		sheet.append(head, body);
-		stage.appendChild(sheet);
+		// In the document, not the stage: the stage's own gestures -- pan,
+		// pinch, drawing an Area, pressing a peer -- skip the bar's controls
+		// by their place in .mj-bar, and a control moved under the stage
+		// would be read as a touch on the picture. Out here none of them
+		// sees it. A modal dialog is drawn on top whatever its parent.
+		document.body.appendChild(sheet);
 
 		const btn = document.createElement('button');
 		btn.type = 'button';
