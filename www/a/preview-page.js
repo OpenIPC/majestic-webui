@@ -37,7 +37,7 @@
 	// in the camera's queue, the capture-to-arrival lag, what the player sits
 	// on -- and what the link lost. Nothing outside a share.
 	const PICTURE_EVERY_MS = 5000;
-	let pictureAt = 0, pictureRx = null, pictureJb = null;
+	let pictureAt = 0, pictureRx = null, pictureJb = null, pictureOf = '';
 	const pictureTrace = (s) => {
 		const S = window.MajesticSignal;
 		if (!s || !S || !S.shareTrace) return;
@@ -45,7 +45,11 @@
 		if (now - pictureAt < PICTURE_EVERY_MS) return;
 		const dc = s.dc || null;
 		const rx = s.rxBytes != null ? s.rxBytes : (dc ? dc.rxBytes : null);
-		const kbps = rx != null && pictureRx != null && pictureAt
+		// A new player starts its counters over: no rate, and no jitter-buffer
+		// average, across the switch.
+		const of = (s.transport || 'webrtc') + '/' + (s.feed || '');
+		if (of !== pictureOf) { pictureOf = of; pictureRx = null; pictureJb = null; }
+		const kbps = rx != null && pictureRx != null && pictureAt && rx >= pictureRx
 			? Math.round((rx - pictureRx) * 8 / (now - pictureAt)) : (s.kbps != null ? s.kbps : null);
 		pictureAt = now;
 		pictureRx = rx;
@@ -57,7 +61,7 @@
 		// WebRTC's lateness at the receiver: the jitter buffer's mean wait over
 		// these five seconds, from the cumulative counters.
 		if (webrtc) {
-			const prev = pictureJb;
+			const prev = pictureJb && s.jbEmitted >= pictureJb.n ? pictureJb : null;
 			pictureJb = { d: s.jbDelay, n: s.jbEmitted, lost: s.packetsLost || 0, got: s.packetsReceived || 0 };
 			if (prev && pictureJb.n > prev.n) parts.push('jitter buffer ' + Math.round((pictureJb.d - prev.d) / (pictureJb.n - prev.n) * 1000) + ' ms');
 			if (prev && pictureJb.got > prev.got) {
@@ -67,11 +71,16 @@
 			if (s.nack) parts.push('nack ' + s.nack);
 		}
 		if (s.bufferedMs != null) parts.push('player holds ' + Math.round(s.bufferedMs) + ' ms');
-		if (s.lag && s.lag.n) parts.push('capture→arrival p50 ' + Math.round(s.lag.p50) + ' / p95 ' + Math.round(s.lag.p95) + ' ms');
+		// The buffered players measure capture to arrival; the software
+		// player, capture to paint.
+		if (s.lag && s.lag.n) parts.push((s.transport === 'wasm' ? 'capture→paint' : 'capture→arrival') +
+			' p50 ' + Math.round(s.lag.p50) + ' / p95 ' + Math.round(s.lag.p95) + ' ms');
 		if (dc && dc.queueMs) parts.push('camera queue ' + Math.round(dc.queueMs) + ' ms');
 		const rtt = s.rttMs != null ? s.rttMs : (dc ? dc.rttMs : null);
 		if (rtt != null) parts.push('rtt ' + rtt + ' ms');
-		if (dc && dc.frames) parts.push('frames lost ' + dc.framesMissed + '/' + (dc.frames + dc.framesMissed));
+		// Missing so far, not lost: on an unordered channel a late frame can
+		// still fill its hole.
+		if (dc && dc.frames) parts.push('frames missing ' + dc.framesMissed + '/' + (dc.frames + dc.framesMissed));
 		if (s.stalls) parts.push('stalls ' + s.stalls);
 		if (s.droppedFrames) parts.push('dropped ' + s.droppedFrames + '/' + s.totalFrames);
 		if (s.framesDropped) parts.push('dropped ' + s.framesDropped + '/' + (s.framesDecoded + s.framesDropped));
@@ -1478,7 +1487,6 @@
 				}
 			},
 			onStats: (s) => {
-				pictureTrace(s);
 				// The buffered players may carry their bytes over a WebRTC
 				// data channel rather than the WebSocket (preview-datachannel.js).
 				// The chip does not change — the transport is still the
@@ -1493,6 +1501,9 @@
 						: base;
 				}
 				if (!isLive()) return;
+				// Only the player on screen: one staged behind it is not the
+				// picture the guest is watching.
+				pictureTrace(s);
 				if (s.transport === 'wasm') {
 					softwareNote(s);
 					// Sustained software playback refills the retry budget so the
