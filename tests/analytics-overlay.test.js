@@ -145,4 +145,19 @@ group('nothing is drawn while the camera still owes an answer');
 	check('not answered yet is NOT ready', ready(undefined) === false);
 }
 
+// Boxes are coloured by what they are. The attribute gets only the four
+// known words; anything else -- unclassified motion, a class number this page
+// does not know, a string off the socket -- gets none.
+{
+	const C = A.className;
+	check('a person is human', C(1) === 'human');
+	check('a vehicle is vehicle', C(2) === 'vehicle');
+	check('a face is face', C(3) === 'face');
+	check('an animal is animal', C(4) === 'animal');
+	check('unclassified gets no class', C(0) === '');
+	check('other gets no class', C(5) === '');
+	check('a string off the socket gets none', C('" onload="x') === '');
+	check('an inherited key is not a class', C('toString') === '');
+}
+
 done();

@@ -1,10 +1,11 @@
 // Follow a person with the pan/tilt head (ptz.track), as the pad offers it.
 //
-// The camera turns the head toward the person its NPU detector sees, in counted
-// steps. That needs two things the page can ask about: a motor that counts
-// steps (the capability line, `GET /ptz`, carries " steps=") and the detector
-// switched on (npuDetect.enabled). With either missing the toggle would switch
-// a setting that does nothing, so the pad does not offer it.
+// The camera turns the head toward the person its object detector sees, in
+// counted steps. That needs two things the page can ask about: a motor that
+// counts steps (the capability line, `GET /ptz`, carries " steps=") and the
+// detector switched on and reporting people (objectDetect.enabled, and
+// objectDetect.people not off). With either missing the toggle would switch a
+// setting that does nothing, so the pad does not offer it.
 //
 // Pure: no DOM, no fetch. `preview-ptz.js` asks whether to show the toggle,
 // what it shows now (view(), on every fresh read of the camera), and what to
@@ -22,7 +23,8 @@
 	}
 
 	function offered(caps, cfg) {
-		return counts(caps) && !!(cfg && cfg.npuDetect && cfg.npuDetect.enabled === true);
+		const od = cfg && cfg.objectDetect;
+		return counts(caps) && !!(od && od.enabled === true && od.people !== false);
 	}
 
 	function on(cfg) {
