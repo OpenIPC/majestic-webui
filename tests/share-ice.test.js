@@ -1,7 +1,7 @@
 // Which ICE servers a peer connection gets (preview-signal.js iceOf), and
 // where the player's story goes (shareTrace). Both fail silently: a guest of a
 // share given the camera's list alone, off a direct path, sees the picture
-// fall back to MSE through the tunnel and nothing says why (majestic#994); a
+// fall back to MSE through the tunnel and nothing says why; a
 // trace that goes nowhere leaves the guest's diagnostics without the player.
 'use strict';
 

@@ -112,8 +112,8 @@ window.MajesticSignal = (function () {
 
 	// The share page this page runs inside, if any: a share's guest sees the
 	// camera's pages in a frame of the share page, which announces itself as
-	// window.__share (the website's sharerelay shell.js). Same origin; anything
-	// else -- no parent, a parent this page may not read -- is not a share.
+	// window.__share. Same origin; anything else -- no parent, a parent this
+	// page may not read -- is not a share.
 	function shareOf(win) {
 		try {
 			const p = win && win.parent;
@@ -129,7 +129,7 @@ window.MajesticSignal = (function () {
 	// TURN with this share's credentials, which the camera's list lacks. With
 	// the camera's alone a guest off a direct path -- a phone on 4G behind
 	// carrier NAT -- had every peer connection sit in checking until the player
-	// fell back to MSE through the tunnel (majestic#994).
+	// fell back to MSE through the tunnel.
 	function iceOf(opts, win) {
 		let own = [];
 		try {
