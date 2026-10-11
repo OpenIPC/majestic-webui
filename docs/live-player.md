@@ -104,7 +104,10 @@ viewer's back the way a failed transport does).
   exclusive by construction; the stylesheet reads them for the cursor and the
   pointer handler for the gesture. In Fit a drag draws a zoom rectangle with no
   control to visit first; zooming in makes the next drag pan, and the cursor
-  changing at that moment is the disclosure.
+  changing at that moment is the disclosure. **A second finger makes it a
+  pinch**, whichever of the two the first finger had started: a spread on a
+  phone always lands one finger first, and reading that finger as a rectangle
+  made the same gesture zoom to a box in Fit and pinch everywhere else.
 - **Zoom to an area** (`#mj-area`) arms one drag, for drawing while the picture
   *is* pannable. `zoomToRect()` converts to **frame** coordinates before changing
   the scale, since stage pixels mean nothing across that change; a drag under
