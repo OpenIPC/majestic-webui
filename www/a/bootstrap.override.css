@@ -3993,12 +3993,15 @@ button.mj-osd-chip,
 }
 
 /* Fields on the stage -- the password a peer camera asks for -- stay fields:
-   an inherited user-select: none can leave an iOS input untypeable. */
+   an inherited user-select: none can leave an iOS input untypeable, and the
+   callout is the menu a long press on a field raises to Paste a saved
+   password. */
 .mj-stage input,
 .mj-stage textarea,
 .mj-stage select {
 	-webkit-user-select: text;
 	user-select: text;
+	-webkit-touch-callout: default;
 }
 
 .mj-stage {
