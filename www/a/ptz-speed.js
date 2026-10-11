@@ -15,8 +15,9 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 	'use strict';
 
-	// Speeds apply to pan and tilt: a zoom or focus motor is never driven at one.
-	const PAN_TILT = { up: 1, down: 1, left: 1, right: 1 };
+	// Speeds apply to pan and tilt, the diagonals included: a zoom or focus motor
+	// is never driven at one.
+	const PAN_TILT = { up: 1, down: 1, left: 1, right: 1, upleft: 1, upright: 1, downleft: 1, downright: 1 };
 
 	// Does the capability line offer a speed? The token, not a substring: the
 	// serial lenses' line carries "speed=<baud>", which is not this.

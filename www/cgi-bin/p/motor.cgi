@@ -277,5 +277,6 @@ focus_label="Focus"
      the lens, it just stops narrating the autofocus. -->
 <script src="/a/af-state.js"></script>
 <script src="/a/ptz-speed.js"></script>
+<script src="/a/ptz-stick.js"></script>
 <script src="/a/ptz-follow.js"></script>
 <script src="/a/preview-ptz.js"></script>
