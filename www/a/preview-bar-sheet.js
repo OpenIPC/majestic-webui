@@ -202,7 +202,14 @@ window.MajesticBarSheet = (function () {
 			const p = plan(groups.map((g) => g.id), hidden, small.matches, third);
 			for (const g of groups) {
 				const into = p.moved.indexOf(g.id) >= 0;
-				if (into && g.parentNode !== slots.get(g.id)) slots.get(g.id).append(g);
+				if (into && g.parentNode !== slots.get(g.id)) {
+					slots.get(g.id).append(g);
+					// The switch shows no words of its own in the list: its
+					// input is named after the row, for whoever hears it.
+					for (const inp of g.querySelectorAll('input')) {
+						if (!inp.getAttribute('aria-label')) inp.setAttribute('aria-label', rows.get(g.id).querySelector('.mj-more-name').textContent);
+					}
+				}
 				else if (!into && g.parentNode === slots.get(g.id)) home(g);
 				rows.get(g.id).hidden = !into || g.hidden;
 			}
@@ -220,8 +227,16 @@ window.MajesticBarSheet = (function () {
 			e.stopPropagation();
 			if (sheet.open) { sheet.close(); return; }
 			try { sheet.showModal(); } catch (err) { sheet.setAttribute('open', ''); }
+			// The bar stays up while the list is open, and goes back to what
+			// it was when the list closes.
+			forcedShow = !stage.classList.contains('mj-show');
 			stage.classList.add('mj-show');
 			sheet.dispatchEvent(new Event('toggle'));
+		});
+		let forcedShow = false;
+		sheet.addEventListener('close', () => {
+			if (forcedShow) stage.classList.remove('mj-show');
+			forcedShow = false;
 		});
 		close.addEventListener('click', () => sheet.close());
 		// A tap on the backdrop -- the dialog itself, outside its body -- closes.

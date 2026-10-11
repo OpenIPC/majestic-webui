@@ -167,6 +167,8 @@
 		pad.children[0].classList.contains('mj-ptz-void') &&
 		pad.children[2].classList.contains('mj-ptz-void'));
 	const isSmall = () => !!(small && small.matches);
+	// Its bottom-left cell, for a handle that has no centre to take.
+	const gripCorner = !!(pad && pad.children.length > 6 && pad.children[6].classList.contains('mj-ptz-void'));
 	const hasExtras = () => !!((speedBox && !speedBox.hidden && speedBox.isConnected) ||
 		(followBox && !followBox.hidden && followBox.isConnected));
 	const popOpen = (on) => {
@@ -283,6 +285,13 @@
 		} else if (corners) {
 			pad.appendChild(gear);
 			pad.appendChild(fold);
+			// A pad with empty corners but no Stop of its own (an eight-way
+			// pad missing its diagonals): the handle takes the bottom-left
+			// corner where that is empty too, else the strip below.
+			if (!gripInPad) {
+				if (gripCorner) pad.appendChild(grip);
+				else { head.appendChild(grip); mount.appendChild(head); }
+			}
 		} else {
 			head.appendChild(gear);
 			if (!gripInPad) head.appendChild(grip);

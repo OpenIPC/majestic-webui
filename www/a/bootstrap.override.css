@@ -4609,8 +4609,18 @@ dialog.mj-more-sheet::backdrop {
 	cursor: pointer;
 }
 
-.mj-more-slot .mj-tog > * {
+.mj-more-slot .mj-tog > :not(.mj-tog-t) {
 	display: none;
+}
+
+/* The word stays for a screen reader, out of sight. */
+.mj-more-slot .mj-tog-t {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
 }
 
 /* The bar's touch rules make a toggle a 44 px square; in the list the
@@ -5324,6 +5334,15 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	right: 3px;
 }
 
+/* A handle in the bottom-left cell (a pad with no centre of its own). */
+.mj-ptz-pad > .mj-ptz-grip {
+	position: absolute;
+	left: 3px;
+	bottom: 3px;
+	width: 2.625rem;
+	height: 2.625rem;
+}
+
 .mj-ptz-pad > .mj-ptz-gear {
 	left: 3px;
 }
@@ -5400,7 +5419,10 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 .mj-stage.mj-ptz-tl .mj-ptz,
 .mj-stage.mj-ptz-tr .mj-ptz {
 	bottom: auto;
-	top: calc(var(--mj-pic-top, 0px) + var(--mj-chip-h, 1.75rem) + 1rem);
+	/* Below the chip, but never so low the pad runs off the stage: a short
+	   landscape stage pulls it up, as the bottom rule's clamp does. */
+	top: max(0.5rem, min(calc(var(--mj-pic-top, 0px) + var(--mj-chip-h, 1.75rem) + 1rem),
+		calc(100% - var(--mj-ptz-h, 0px) - 0.5rem)));
 }
 
 .mj-stage.mj-ptz-bl .mj-ptz-more,

@@ -42,10 +42,16 @@ window.MajesticAdapt = (function () {
 	// picture). Per browser; the More sheet's "Bitrate notices" switch turns
 	// them back on (preview-bar-sheet.js).
 	const OFF_KEY = 'mj-adapt-off';
+	// This page's own copy, so a browser that refuses storage still keeps the
+	// choice for as long as the page is open; storage carries it further.
+	let on_ = null;
 	function enabled() {
-		try { return localStorage.getItem(OFF_KEY) !== '1'; } catch (e) { return true; }
+		if (on_ !== null) return on_;
+		try { on_ = localStorage.getItem(OFF_KEY) !== '1'; } catch (e) { on_ = true; }
+		return on_;
 	}
 	function setEnabled(on) {
+		on_ = !!on;
 		try {
 			if (on) localStorage.removeItem(OFF_KEY); else localStorage.setItem(OFF_KEY, '1');
 		} catch (e) { /* storage refused: the setting lasts this page */ }
