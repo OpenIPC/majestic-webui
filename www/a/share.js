@@ -18,9 +18,9 @@
 'use strict';
 
 const SHARE_DURATIONS = [
-	[3600, '1 hour'],
-	[7200, '2 hours'],
-	[8 * 3600, '8 hours'],
+	[3600, '1 h'],
+	[7200, '2 h'],
+	[8 * 3600, '8 h'],
 	[86400, '1 day'],
 	[3 * 86400, '3 days'],
 	[7 * 86400, '7 days'],
@@ -30,20 +30,52 @@ const SHARE_DEFAULT_TTL = 7200;
 // The access a link carries, as the owner chooses it. Watch only is the
 // default: the common case is someone who should see the picture, and the
 // level that can change the camera should be picked on purpose, not left on.
+// `label` is how a live link names its access; `short` is the dialog's
+// segmented control, three across a phone. Only the chosen level's hint is
+// shown, and full control's is a warning: it says so where the choice is
+// made rather than in a block of its own below it.
 const SHARE_SCOPES = {
 	view: {
 		label: 'Watch only',
+		short: 'Watch only',
 		hint: 'The live picture. Nothing on the camera can be changed.',
 	},
 	admin: {
 		label: 'Watch and change settings',
+		short: 'Settings',
 		hint: 'The camera’s pages and settings, but not its password, firmware, network, console or files. What they change stays changed after the link ends.',
 	},
 	full: {
 		label: 'Full control',
-		hint: 'Everything you can do.',
+		short: 'Full control',
+		hint: 'Everything you can do: the console, firmware and files. Whoever holds the link has it until the link ends.',
+		warn: true,
 	},
 };
+
+// Where the dialog notes that this browser has made a link before. The
+// explanation of what a link is stands open until then and folds to one line
+// after: an owner who shares every day has read it.
+const SHARE_SEEN_KEY = 'mj-share-seen';
+
+// Whether the explanation should stand open: only when the note is known to
+// be absent. Storage that cannot be read is not a first visit -- it would
+// otherwise be one on every visit, which is the repetition this replaces --
+// and the explanation is one click away either way.
+function shareFirstTime(read) {
+	try {
+		return read(SHARE_SEEN_KEY) === null;
+	} catch (e) {
+		return false;
+	}
+}
+
+// More live links than this fold behind their heading, so the form below
+// them stays where the hand expects it.
+const SHARE_LIVE_OPEN_MAX = 3;
+function shareLiveFolded(count) {
+	return count > SHARE_LIVE_OPEN_MAX;
+}
 const SHARE_DEFAULT_SCOPE = 'view';
 
 // The pages a guest below full control is refused: the camera answers each
@@ -159,6 +191,7 @@ if (typeof module !== 'undefined') {
 	module.exports = {
 		shareRemaining, shareClock, shareNames, shareSummary, shareLive, shareGuest, shareGuestScope, shareRefused,
 		shareError, shareReason, SHARE_DURATIONS, SHARE_DEFAULT_TTL, SHARE_SCOPES, SHARE_DEFAULT_SCOPE,
+		shareFirstTime, shareLiveFolded, SHARE_SEEN_KEY,
 	};
 }
 
@@ -256,74 +289,141 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 		.then((d) => { if (first === generation) navShow(d && Array.isArray(d.shares) ? d.shares : null); })
 		.catch(() => { if (first === generation) navShow(null); });
 
-	const ttl = el('select', { class: 'form-select', id: 'share-ttl' });
-	for (const [s, label] of SHARE_DURATIONS) {
-		const o = el('option', { value: String(s), text: label });
-		if (s === SHARE_DEFAULT_TTL) o.selected = true;
-		ttl.append(o);
-	}
-	const scopes = el('div', { class: 'd-flex flex-column gap-2' });
-	for (const [k, { label, hint }] of Object.entries(SHARE_SCOPES)) {
-		const id = 'share-scope-' + k;
-		const r = el('input', { class: 'form-check-input', type: 'radio', name: 'share-scope', id, value: k, 'aria-describedby': id + '-hint' });
-		if (k === SHARE_DEFAULT_SCOPE) r.checked = true;
-		scopes.append(el('div', { class: 'form-check' }, r,
-			el('label', { class: 'form-check-label', for: id, text: label }),
-			el('div', { class: 'small text-body-secondary', id: id + '-hint', text: hint })));
-	}
-	const fullWarn = el('div', { class: 'alert alert-warning py-2 mb-0 d-none', text:
-		'Full control includes the console, firmware and files: whoever holds the link can do anything you can, until it ends.' });
+	// The dialog is two views that take turns rather than one column: the form,
+	// and the link it made. Stacked, the link landed under the form -- on a
+	// MacBook Air's 830px window, below the dialog's own edge, in a body that
+	// scrolled without a scrollbar -- and it is the one thing the owner came
+	// for and the one thing shown only once.
+	const radios = (name, cls, items, checked) => items.map(([value, text]) => {
+		const id = `share-${name}-${value}`;
+		const r = el('input', { class: 'mj-seg-in', type: 'radio', name: 'share-' + name, id, value: String(value) });
+		if (value === checked) r.checked = true;
+		return [r, el('label', { class: cls, for: id, text })];
+	}).flat();
+
+	const scopeIds = Object.keys(SHARE_SCOPES);
+	const scopes = el('div', { class: 'mj-seg mj-share-seg', role: 'radiogroup', 'aria-labelledby': 'share-scope-cap' },
+		...radios('scope', 'mj-seg-lbl', scopeIds.map((k) => [k, SHARE_SCOPES[k].short]), SHARE_DEFAULT_SCOPE));
+	const hint = el('div', { class: 'mj-share-hint', id: 'share-scope-hint', 'aria-live': 'polite' });
+	for (const r of scopes.querySelectorAll('input')) r.setAttribute('aria-describedby', 'share-scope-hint');
+	const ttls = el('div', { class: 'mj-share-chips', role: 'radiogroup', 'aria-labelledby': 'share-ttl-cap' },
+		...radios('ttl', 'mj-share-chip', SHARE_DURATIONS, SHARE_DEFAULT_TTL));
 	const label = el('input', { class: 'form-control', id: 'share-label', maxlength: '64', placeholder: 'Who is it for? (optional)' });
-	const create = el('button', { class: 'btn btn-primary', type: 'button', text: 'Create link' });
-	const err = el('div', { class: 'alert alert-danger py-2 mb-0 d-none' });
-	const result = el('div', { class: 'd-none' });
-	const list = el('div', { class: 'd-flex flex-column gap-2' });
+	// Not "straight to the camera": a guest behind a strict NAT is relayed.
+	// What holds either way is that the relay carries only encrypted traffic,
+	// and that no password goes anywhere.
+	const about = el('details', { class: 'mj-share-about' },
+		el('summary', { text: 'Anyone with the link can open this camera until it ends.' }),
+		el('p', { text: 'Over the Internet, until the link ends or you end it. What they see is encrypted between their browser and the camera, and your password is never shared.' }));
+	const err = el('div', { class: 'alert alert-danger py-2 mb-0 d-none', role: 'alert' });
+
+	const liveCap = el('button', { class: 'mj-cap mj-share-live-cap', type: 'button', 'aria-expanded': 'true', 'aria-controls': 'share-live-list' });
+	const list = el('div', { class: 'd-flex flex-column gap-2', id: 'share-live-list' });
+	const live = el('div', { class: 'd-flex flex-column gap-1 d-none' }, liveCap, list);
+
+	const create = el('button', { class: 'btn btn-primary mj-share-go', type: 'button' });
+
+	const compose = el('div', { class: 'mj-share-view' },
+		el('div', { class: 'modal-body mj-share-body' },
+			live,
+			el('div', { class: 'd-flex flex-column gap-1' },
+				el('span', { class: 'mj-cap', id: 'share-scope-cap', text: 'They can' }), scopes, hint),
+			el('div', { class: 'd-flex flex-column gap-1' },
+				el('span', { class: 'mj-cap', id: 'share-ttl-cap', text: 'For' }), ttls),
+			el('div', { class: 'd-flex flex-column gap-1' },
+				el('label', { class: 'mj-cap', for: 'share-label', text: 'Note' }), label),
+			about, err),
+		el('div', { class: 'modal-footer' }, create));
+
+	const readyLead = el('span', { class: 'fw-semibold' });
+	const okMark = el('span', { class: 'mj-share-ok', 'aria-hidden': 'true' });
+	okMark.innerHTML = '<svg viewBox="0 0 20 20" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+		'stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="8"></circle><path d="M6.5 10.2 9 12.6l4.5-5"></path></svg>';
+	const readyLink = el('input', { class: 'form-control font-monospace mj-share-link', readonly: '', 'aria-label': 'Link' });
+	const copy = el('button', { class: 'btn btn-primary mj-share-copy', type: 'button', text: 'Copy' });
+	const readyWhat = el('div', { class: 'small text-body-secondary' });
+	const another = el('button', { class: 'btn btn-outline-secondary', type: 'button', text: 'Create another' });
+	const doneBtn = el('button', { class: 'btn btn-primary', type: 'button', text: 'Done' });
+	const ready = el('div', { class: 'mj-share-view', hidden: '' },
+		el('div', { class: 'modal-body mj-share-body' },
+			el('div', { class: 'd-flex align-items-center gap-2' },
+				okMark, readyLead),
+			el('div', { class: 'mj-share-linkrow' }, readyLink, copy),
+			readyWhat,
+			el('div', { class: 'small text-body-secondary', text: 'Shown only now: the camera keeps no copy it could show again.' })),
+		el('div', { class: 'modal-footer' }, another, doneBtn));
 
 	// Named, because the camera switcher makes "this camera" ambiguous: the
 	// owner may have several open, and a link to the wrong one is a link to
 	// somebody's other room.
 	const camera = item.dataset.camera;
-	const dlg = el('dialog', { class: 'mj-modal', id: 'share-dlg' },
-		el('div', { class: 'modal-header' },
-			el('h5', { class: 'modal-title text-truncate', text: camera ? `Share ${camera}` : 'Share this camera' }),
+	const composeTitle = camera ? `Share ${camera}` : 'Share this camera';
+	const title = el('h5', { class: 'modal-title text-truncate', text: composeTitle });
+	const dlg = el('dialog', { class: 'mj-modal mj-share', id: 'share-dlg', 'aria-labelledby': 'share-dlg-title' },
+		el('div', { class: 'modal-header' }, title,
 			el('button', { class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Close' })),
-		el('div', { class: 'modal-body d-flex flex-column gap-3' },
-			// Not "straight to the camera": a guest behind a strict NAT is
-			// relayed. What holds either way is that the relay carries only
-			// encrypted traffic, and that no password goes anywhere.
-			el('p', { class: 'mb-0 text-body-secondary', text:
-				'Anyone with the link can open this camera over the Internet until the link ends or you end it. What they see is encrypted between their browser and the camera, and your password is never shared.' }),
-			el('div', {}, el('label', { class: 'form-label mj-cap', for: 'share-ttl', text: 'For' }), ttl),
-			el('div', {}, el('span', { class: 'form-label mj-cap d-block', text: 'They can' }), scopes),
-			fullWarn,
-			el('div', {}, el('label', { class: 'form-label mj-cap', for: 'share-label', text: 'Note' }), label),
-			el('div', {}, create),
-			err, result,
-			el('div', {}, el('span', { class: 'form-label mj-cap d-block', text: 'Active links' }), list)));
+		compose, ready);
+	title.id = 'share-dlg-title';
 	document.body.append(dlg);
 
-	for (const r of scopes.querySelectorAll('input')) {
-		r.addEventListener('change', () => fullWarn.classList.toggle('d-none', r.value !== 'full' || !r.checked));
-	}
+	const pickedScope = () => scopes.querySelector('input:checked').value;
+	const showScope = () => {
+		const s = SHARE_SCOPES[pickedScope()];
+		hint.textContent = s.hint;
+		hint.classList.toggle('mj-share-warn', !!s.warn);
+		create.textContent = s.warn ? 'Create full-control link' : 'Create link';
+	};
+	for (const r of scopes.querySelectorAll('input')) r.addEventListener('change', showScope);
+	showScope();
 
-	const showError = (text) => { err.textContent = text; err.classList.toggle('d-none', !text); };
+	const showError = (text) => {
+		err.textContent = text;
+		err.classList.toggle('d-none', !text);
+		if (text && err.scrollIntoView) err.scrollIntoView({ block: 'nearest' });
+	};
+
+	const show = (view) => {
+		compose.hidden = view !== 'compose';
+		ready.hidden = view !== 'ready';
+		title.textContent = view === 'ready' ? 'Link ready' : composeTitle;
+	};
+
+	// Folded when there are many, until the owner opens them; the choice holds
+	// while the dialog is open.
+	let liveOpen = null;
+	liveCap.addEventListener('click', () => {
+		liveOpen = liveCap.getAttribute('aria-expanded') !== 'true';
+		liveCap.setAttribute('aria-expanded', String(liveOpen));
+		list.classList.toggle('d-none', !liveOpen);
+	});
+	const liveHead = (text, foldable) => {
+		liveCap.textContent = text;
+		liveCap.disabled = !foldable;
+		const open = foldable ? (liveOpen === null ? false : liveOpen) : true;
+		liveCap.setAttribute('aria-expanded', String(open));
+		// A class, not `hidden`: the list is d-flex, whose !important display
+		// outranks the attribute, and a folded list stayed open.
+		list.classList.toggle('d-none', !open);
+	};
 
 	// The last list the camera gave, so the clock can move the times on
-	// without asking again; and how many End nows are still waiting on an
-	// answer, during which the clock leaves the list alone rather than give a
-	// pressed button back.
+	// without asking again; and how many Ends are still waiting on an answer,
+	// during which the clock leaves the list alone rather than give a pressed
+	// button back.
 	let shares = null;
 	let ending = 0;
 
 	function paint() {
 		const now = Date.now();
-		if (!shares.length) {
-			list.replaceChildren(el('span', { class: 'text-body-secondary', text: 'None. Nobody can reach this camera by link.' }));
-			return;
-		}
-		const names = shareNames(shares, now);
-		list.replaceChildren(...shares.map((s, i) => {
-			const end = el('button', { class: 'btn btn-sm btn-outline-danger flex-shrink-0', type: 'button', text: 'End now' });
+		const running = shares.filter((s) => s.expires * 1000 > now);
+		// None: nothing to say here. The navbar has no count either, and the
+		// form below is what the dialog is for.
+		live.classList.toggle('d-none', !running.length);
+		if (!running.length) { list.replaceChildren(); return; }
+		liveHead(`Live now · ${running.length}`, shareLiveFolded(running.length));
+		const names = shareNames(running, now);
+		list.replaceChildren(...running.map((s, i) => {
+			const end = el('button', { class: 'btn btn-sm btn-outline-danger flex-shrink-0 mj-share-end', type: 'button', text: 'End', 'aria-label': 'End ' + names[i] });
 			end.addEventListener('click', async () => {
 				showError('');
 				end.disabled = true;
@@ -336,7 +436,7 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 				} catch (e) {
 					// Not known to have ended: say so, and leave the button to
 					// try again with.
-					showError('The camera did not answer. The link may still work; try End now again.');
+					showError('The camera did not answer. The link may still work; try End again.');
 					end.disabled = false;
 					return;
 				} finally {
@@ -344,17 +444,18 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 				}
 				refreshList();
 			});
-			return el('div', { class: 'd-flex align-items-center gap-2 border rounded px-2 py-1' },
+			// Full control reads in the warning colour wherever it is listed.
+			const warn = SHARE_SCOPES[s.scope] && SHARE_SCOPES[s.scope].warn;
+			const what = el('div', { class: warn ? 'small mj-share-warn' : 'small text-body-secondary', text: shareSummary(s, now) });
+			return el('div', { class: 'd-flex align-items-center gap-2 border rounded ps-3 pe-2 py-2' },
 				el('div', { class: 'flex-grow-1', style: 'min-width:0' },
-					el('div', { class: 'fw-semibold text-truncate', text: names[i] }),
-					el('div', { class: 'small text-body-secondary', text: shareSummary(s, now) })),
+					el('div', { class: 'fw-semibold text-truncate', text: names[i] }), what),
 				end);
 		}));
 	}
 
 	async function refreshList() {
 		const mine = ++generation;
-		if (!shares) list.replaceChildren(el('span', { class: 'text-body-secondary', text: 'Loading…' }));
 		let data;
 		try {
 			const r = await apiFetch('/api/v1/shares');
@@ -362,9 +463,12 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 			data = await r.json();
 		} catch (e) {
 			if (mine === generation) {
+				// Could not ask is not "none": the heading stays, with why.
 				shares = null;
 				navShow(null);
-				list.replaceChildren(el('span', { class: 'text-danger', text: e.message }));
+				live.classList.remove('d-none');
+				liveHead('Live now', false);
+				list.replaceChildren(el('span', { class: 'text-danger small', text: e.message }));
 			}
 			return;
 		}
@@ -379,44 +483,36 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 	let tick = null;
 	dlg.addEventListener('close', () => { clearInterval(tick); tick = null; });
 
+	const readSeen = (k) => localStorage.getItem(k);
+
 	create.addEventListener('click', async () => {
 		showError('');
-		// A link from an earlier press is not the answer to this one.
-		result.classList.add('d-none');
-		result.replaceChildren();
 		create.disabled = true;
 		try {
-			const scope = scopes.querySelector('input:checked').value;
+			const scope = pickedScope();
+			const ttl = +ttls.querySelector('input:checked').value;
+			const note = label.value.trim();
 			const r = await apiFetch('/api/v1/shares', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ ttl: +ttl.value, scope, label: label.value.trim() }),
+				body: JSON.stringify({ ttl, scope, label: note }),
 			});
 			if (!r.ok) { showError(shareError(r.status, shareReason(await r.text()))); return; }
 			const s = await r.json();
-			const link = el('input', { class: 'form-control font-monospace', readonly: '', value: s.link, 'aria-label': 'Link' });
-			const copy = el('button', { class: 'btn btn-outline-secondary', type: 'button', text: 'Copy' });
-			copy.addEventListener('click', async () => {
-				let copied = false;
-				try {
-					await navigator.clipboard.writeText(s.link);
-					copied = true;
-				} catch (e) {
-					link.select();
-					try { copied = document.execCommand('copy'); } catch (e2) { copied = false; }
-				}
-				// Only a copy that happened is reported as one: this link is shown
-				// once, and an owner told it is on the clipboard will close the
-				// dialog on the strength of it.
-				copy.textContent = copied ? 'Copied' : 'Select and copy it';
-				if (!copied) link.select();
-			});
-			result.replaceChildren(
-				el('div', { class: 'alert alert-success py-2 mb-2', text:
-					'Send this link to the person you are sharing with. It is shown only now: the camera keeps no copy it could show again.' }),
-				el('div', { class: 'input-group' }, link, copy));
-			result.classList.remove('d-none');
+			try { localStorage.setItem(SHARE_SEEN_KEY, '1'); } catch (e) { /* a convenience */ }
+			readyLead.textContent = note ? `Send this link to ${note}` : 'Send this link to whoever it is for';
+			readyLink.value = s.link;
+			// What the camera answered, where it said; what was asked for where not.
+			readyWhat.textContent = shareSummary({
+				scope: s.scope || scope,
+				expires: s.expires || Math.floor(Date.now() / 1000) + ttl,
+			}, Date.now());
+			copy.textContent = 'Copy';
+			copy.classList.remove('btn-success');
+			copy.classList.add('btn-primary');
 			label.value = '';
+			show('ready');
+			copy.focus();
 			refreshList();
 		} catch (e) {
 			showError(e.message);
@@ -425,11 +521,37 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
 		}
 	});
 
+	copy.addEventListener('click', async () => {
+		let copied = false;
+		try {
+			await navigator.clipboard.writeText(readyLink.value);
+			copied = true;
+		} catch (e) {
+			readyLink.select();
+			try { copied = document.execCommand('copy'); } catch (e2) { copied = false; }
+		}
+		// Only a copy that happened is reported as one: this link is shown
+		// once, and an owner told it is on the clipboard will close the
+		// dialog on the strength of it.
+		copy.textContent = copied ? 'Copied' : 'Select and copy it';
+		copy.classList.toggle('btn-success', copied);
+		copy.classList.toggle('btn-primary', !copied);
+		if (!copied) readyLink.select();
+	});
+	readyLink.addEventListener('focus', () => readyLink.select());
+
+	another.addEventListener('click', () => {
+		show('compose');
+		scopes.querySelector('input:checked').focus();
+	});
+	doneBtn.addEventListener('click', () => bootstrap.Modal.getOrCreateInstance(dlg).hide());
+
 	item.addEventListener('click', (ev) => {
 		ev.preventDefault();
-		result.classList.add('d-none');
-		result.replaceChildren();
 		showError('');
+		show('compose');
+		about.open = shareFirstTime(readSeen);
+		liveOpen = null;
 		bootstrap.Modal.getOrCreateInstance(dlg).show();
 		refreshList();
 		clearInterval(tick);
