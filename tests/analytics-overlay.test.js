@@ -158,6 +158,8 @@ group('nothing is drawn while the camera still owes an answer');
 	check('other gets no class', C(5) === '');
 	check('a string off the socket gets none', C('" onload="x') === '');
 	check('an inherited key is not a class', C('toString') === '');
+	check('a numeric string is not a class number', C('1') === '');
+	check('a fraction is not a class number', C(1.5) === '');
 }
 
 done();

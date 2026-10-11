@@ -45,6 +45,8 @@
 	const CLASS_NAMES = { 1: 'human', 2: 'vehicle', 3: 'face', 4: 'animal' };
 
 	function className(cls) {
+		// A number only: as an object key, the string '1' would find human too.
+		if (typeof cls !== 'number' || !Number.isInteger(cls)) return '';
 		return Object.prototype.hasOwnProperty.call(CLASS_NAMES, cls) ? CLASS_NAMES[cls] : '';
 	}
 

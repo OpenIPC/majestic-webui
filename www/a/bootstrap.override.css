@@ -3618,6 +3618,14 @@ button.mj-osd-chip,
 	border-style: solid;
 }
 
+/* Firmware from before object detection names its classifiers by source, and
+   a box from one that carries no class number still deserves its colour. */
+.mj-an-box[data-src="face"],
+.mj-an-box[data-src="person"] {
+	border-style: solid;
+}
+
+.mj-an-box[data-src="person"],
 .mj-an-box[data-cls="human"] {
 	border-color: rgba(var(--bs-success-rgb), 0.95);
 	background: rgba(var(--bs-success-rgb), 0.10);
@@ -3635,6 +3643,7 @@ button.mj-osd-chip,
 	background: rgba(214, 51, 132, 0.10);
 }
 
+.mj-an-box[data-src="face"],
 .mj-an-box[data-cls="face"] {
 	border-color: rgba(var(--bs-info-rgb), 0.95);
 	background: rgba(var(--bs-info-rgb), 0.10);
