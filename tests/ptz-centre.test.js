@@ -24,6 +24,11 @@ eq('lower right is right and down', C.plan(0.75, 0.75, F).moves, [{ verb: 'right
 eq('mirrored, right of the picture is left of the head', C.plan(0.75, 0.5, F, { mirror: true }).moves, [{ verb: 'left', steps: 34 }]);
 eq('flipped, the top of the picture is down for the head', C.plan(0.5, 0.25, F, { flip: true }).moves, [{ verb: 'down', steps: 16 }]);
 eq('steps are signed for the ring', [C.plan(0.25, 0.75, F).pan, C.plan(0.25, 0.75, F).tilt], [-34, -16]);
+eq('to the middle of what is on screen, not of the frame', C.plan(0.9, 0.5, F, { tx: 0.7, ty: 0.5 }).moves, [{ verb: 'right', steps: 27 }]);
+eq('a point already at the middle on screen needs nothing', C.plan(0.7, 0.4, F, { tx: 0.7, ty: 0.4 }).moves, []);
+eq('a target off the frame is the frame middle', C.plan(1, 0.5, F, { tx: 3 }).moves, [{ verb: 'right', steps: 67 }]);
+eq('a pan-only head is not asked to tilt', C.plan(0.75, 0.1, F, { tilt: false }).moves, [{ verb: 'right', steps: 34 }]);
+eq('a tilt-only head is not asked to pan', C.plan(0.75, 0.1, F, { pan: false }).moves, [{ verb: 'up', steps: 25 }]);
 eq('the time is the two axes in turn', C.plan(1, 0, F).ms, 67 * 16 + 31 * 24);
 
 done();

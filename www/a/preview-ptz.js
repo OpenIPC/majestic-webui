@@ -897,23 +897,58 @@
 	// double-click is this, and Fit/Fill stays in the bar.
 	const PC = window.MajesticPtzCentre;
 	if (stage && PC && pad && pad.querySelector('[data-act]')) {
-		let frame = null;
-		let turn = { mirror: false, flip: false, sideways: false };
+		// Neither is assumed: until the camera has said how many steps make a
+		// frame and how its picture is turned, a double-tap does nothing (and
+		// asks again). A picture taken for upright that is mirrored would send
+		// the head away from the point.
+		// A line in the toast stack. Not `say`: that is the autofocus line's,
+		// and a block-level function of the same name would replace it.
+		const tell = (text, ms) => {
+			const box = $('#mj-toasts');
+			if (!box) return;
+			const p = document.createElement('p');
+			p.className = 'mj-adapt-toast small';
+			p.setAttribute('role', 'status');
+			p.textContent = text;
+			p.addEventListener('click', () => p.remove());
+			box.appendChild(p);
+			setTimeout(() => p.remove(), ms || 6000);
+		};
+		// Said once per browser, when it first becomes possible: a gesture
+		// nobody is told about is one nobody finds.
+		const HINT_KEY = 'mj-ptz-centre-hint';
+		const hint = () => {
+			let seen = false;
+			try { seen = localStorage.getItem(HINT_KEY) === '1'; } catch (e) { /* show it */ }
+			if (seen) return;
+			try { localStorage.setItem(HINT_KEY, '1'); } catch (e) { /* once a page then */ }
+			tell('Double-tap the picture to turn the camera to that spot.', 8000);
+		};
+		let frame = null, turn = null;
+		const ready = () => !!(frame && turn && !turn.sideways);
 		const learnFrame = () => caps().then((t) => {
-			const had = frame;
 			frame = PC.frame(t);
-			if (frame && !had) hint();
+			if (ready()) hint();
 		}, () => {});
-		learnFrame();
-		if (typeof mjConfig === 'function') {
+		const learnTurn = () => {
+			if (typeof mjConfig !== 'function') return;
 			mjConfig().then((c) => {
-				const im = (c && c.image) || {};
+				// A failed read resolves {}: no image section is a camera not
+				// heard from, not one that is upright.
+				const im = c && c.image;
+				if (!im || typeof im !== 'object') return;
 				const r = Number(im.rotate);
 				// On its side the picture's across is the head's tilt; the
 				// frame measured upright would aim it wrong, so it stays off.
 				turn = { mirror: im.mirror === true, flip: im.flip === true, sideways: r === 90 || r === 270 };
+				if (ready()) hint();
 			}, () => {});
-		}
+		};
+		learnFrame();
+		learnTurn();
+		// The axes this head has are the arrows its pad drew.
+		const hasPan = !!pad.querySelector('[data-act="left"],[data-act="right"]');
+		const hasTilt = !!pad.querySelector('[data-act="up"],[data-act="down"]');
 		const OVER = '.mj-bar, .mj-ptz, #mj-stats, #mj-toasts, #mj-tap-play, .mj-more-sheet';
 		const media = () => {
 			for (const m of stage.querySelectorAll('.mj-stage-media')) {
@@ -936,32 +971,69 @@
 				el.style.transform = `translate(${cx - x}px, ${cy - y}px)`;
 				el.classList.add('mj-centre-going');
 			}));
-			setTimeout(() => {
+			let gone = false;
+			const fade = () => {
+				if (gone) return;
+				gone = true;
 				el.style.transitionDuration = '0ms, 400ms';
 				el.classList.add('mj-centre-done');
 				setTimeout(() => el.remove(), 450);
-			}, (still ? 600 : glide) + 150);
+			};
+			setTimeout(fade, (still ? 600 : glide) + 150);
+			// The camera refused, or never answered: the ring says so where it
+			// stands, rather than finishing a journey the head is not making.
+			return {
+				fail: () => {
+					el.classList.add('mj-centre-failed');
+					el.style.transitionDuration = '0ms';
+					el.style.transform = getComputedStyle(el).transform;
+					setTimeout(fade, 500);
+				},
+			};
 		};
 		// Where the point is in the frame: the media element is the whole
 		// frame as drawn, the letterbox, a Fill crop and a zoom included.
+		//
+		// The point goes to the middle of what is on screen -- the stage --
+		// which in Fill or a zoom is not the middle of the frame: moved to the
+		// frame's middle it could land off screen.
 		const centreAt = (x, y) => {
 			if (!frame) { learnFrame(); return false; }
+			if (!turn) { learnTurn(); return false; }
 			if (turn.sideways) return false;
+			// Not before the picture is laid out: until then the media box is
+			// the stage's own, not a frame.
+			const Z = window.MajesticZoom;
+			if (!(Z && typeof Z.view === 'function' && Z.view())) return false;
 			const m = media();
 			if (!m) return false;
 			const r = m.getBoundingClientRect();
 			const nx = (x - r.left) / r.width, ny = (y - r.top) / r.height;
 			if (!(nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1)) return false;
-			const p = PC.plan(nx, ny, frame, turn);
+			const st = stage.getBoundingClientRect();
+			let vx = st.left + st.width / 2, vy = st.top + st.height / 2;
+			// A middle off the frame (it cannot be, laid out, but) falls back to
+			// the frame's own, as plan() does.
+			if (!(vx >= r.left && vx <= r.right)) vx = r.left + r.width / 2;
+			if (!(vy >= r.top && vy <= r.bottom)) vy = r.top + r.height / 2;
+			const p = PC.plan(nx, ny, frame, {
+				mirror: turn.mirror, flip: turn.flip, pan: hasPan, tilt: hasTilt,
+				tx: (vx - r.left) / r.width, ty: (vy - r.top) / r.height,
+			});
 			if (!p.moves.length) return true;
 			stopHold(null);
+			const shown = ring(x, y, p.pan ? vx : x, p.tilt ? vy : y, p.ms);
 			// Both at once: the head runs a pan count and a tilt count
-			// together, whichever lands first.
-			for (const mv of p.moves) {
+			// together. Either refused -- or the lens driver absent, which
+			// answers 200 'unavailable' -- and the ring stops where it is.
+			Promise.all(p.moves.map((mv) =>
 				apiFetch('/ptz?move=' + mv.verb + '&steps=' + mv.steps, { method: 'POST', credentials: 'same-origin' })
-					.catch(() => {});
-			}
-			ring(x, y, r.left + r.width / 2, r.top + r.height / 2, p.ms);
+					.then((res) => (res.ok ? res.text() : Promise.reject(res.status)))
+					.then((t) => { if (t.trim() === 'unavailable') throw new Error('unavailable'); })
+			)).catch(() => {
+				shown.fail();
+				tell('The camera did not turn. Try again.');
+			});
 			return true;
 		};
 		// The pointer's double-click, ahead of preview-zoom.js's Fit/Fill
@@ -1004,23 +1076,6 @@
 		};
 		stage.addEventListener('pointerup', up);
 		stage.addEventListener('pointercancel', up);
-		// Said once per browser, when it first becomes possible: a gesture
-		// nobody is told about is one nobody finds.
-		const HINT_KEY = 'mj-ptz-centre-hint';
-		function hint() {
-			const box = $('#mj-toasts');
-			let seen = false;
-			try { seen = localStorage.getItem(HINT_KEY) === '1'; } catch (e) { /* show it */ }
-			if (!box || seen) return;
-			try { localStorage.setItem(HINT_KEY, '1'); } catch (e) { /* once a page then */ }
-			const p = document.createElement('p');
-			p.className = 'mj-adapt-toast small';
-			p.setAttribute('role', 'status');
-			p.textContent = 'Double-tap the picture to turn the camera to that spot.';
-			p.addEventListener('click', () => p.remove());
-			box.appendChild(p);
-			setTimeout(() => p.remove(), 8000);
-		}
 	}
 
 	// A hold must not outlive the page's attention: keyup and pointerup never

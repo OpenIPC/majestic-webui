@@ -4,8 +4,8 @@
 //
 // It is one counted move per axis -- no speed to choose and no stop that a
 // slow link could lose -- so it needs a motor that counts its steps and knows
-// how many make a frame of the picture: `frame=WxH` on the capability line
-// (majestic-af, from the board's gpiostep.conf).
+// how many make a frame of the picture: `frame=WxH` on GET /ptz's capability
+// line, next to `steps=`.
 //
 // Pure: no DOM, no fetch. `preview-ptz.js` asks it what the camera offers and
 // what to send for a point.
@@ -25,19 +25,24 @@
 		return w > 0 && h > 0 ? { w: w, h: h } : null;
 	}
 
-	// What centres the point `nx`, `ny` (0..1 across and down the frame):
-	// the steps per axis (pan + right, tilt + up), the moves that make them,
-	// and about how long the head takes. `mount` is how the picture is turned
-	// over: a mirrored picture's right is the head's left, a flipped one's up
-	// its down. A point within half a step of the middle needs no move on that
-	// axis.
-	function plan(nx, ny, f, mount) {
-		const o = mount || {};
+	// What brings the point `nx`, `ny` (0..1 across and down the frame) to
+	// `tx`, `ty` -- the middle of what is on screen, which in Fill or a zoom is
+	// not the middle of the frame; 0.5, 0.5 when not given: the steps per axis
+	// (pan + right, tilt + up), the moves that make them, and about how long
+	// the head takes. `mirror` and `flip` are how the picture is turned over:
+	// a mirrored picture's right is the head's left, a flipped one's up its
+	// down. `pan: false` or `tilt: false` is a head without that axis, which
+	// is not asked to turn it. A point within half a step needs no move on
+	// that axis.
+	function plan(nx, ny, f, opts) {
+		const o = opts || {};
+		const tx = o.tx >= 0 && o.tx <= 1 ? o.tx : 0.5;
+		const ty = o.ty >= 0 && o.ty <= 1 ? o.ty : 0.5;
 		// Rounded away from the middle alike both ways: Math.round takes -33.5
 		// to -33 and 33.5 to 34, a step short to the left and down only.
 		const even = (v) => (v < 0 ? -Math.round(-v) : Math.round(v));
-		let pan = even((nx - 0.5) * f.w);
-		let tilt = even((0.5 - ny) * f.h);
+		let pan = o.pan === false ? 0 : even((nx - tx) * f.w);
+		let tilt = o.tilt === false ? 0 : even((ty - ny) * f.h);
 		if (o.mirror) pan = -pan;
 		if (o.flip) tilt = -tilt;
 		pan = pan || 0;

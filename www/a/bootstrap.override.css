@@ -5653,6 +5653,12 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	opacity: 0;
 }
 
+/* The camera refused the move, or never answered: the ring stops where it
+   is, in the colour of a refusal, and goes. */
+.mj-centre-ring.mj-centre-failed {
+	border-color: #ff8a8a;
+}
+
 .mj-ptz-btn.mj-ptz-on {
 	background: rgba(255, 255, 255, 0.22);
 	color: #fff;
