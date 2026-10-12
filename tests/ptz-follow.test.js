@@ -9,10 +9,15 @@ const eq = (name, got, want) => check(name, got === want, 'got ' + JSON.stringif
 const F = require('../www/a/ptz-follow.js');
 
 const HEAD = 'actuator=gpiostep pulse=500 state=ready verbs=stop,up,down,left,right speeds=1-100 steps=1';
-const NPU = { npuDetect: { enabled: true } };
+const NPU = { objectDetect: { enabled: true } };
 
 eq('a counting head with the detector on offers it', F.offered(HEAD, NPU), true);
-eq('the detector off: not offered', F.offered(HEAD, { npuDetect: { enabled: false } }), false);
+eq('the detector off: not offered', F.offered(HEAD, { objectDetect: { enabled: false } }), false);
+eq('people not reported: not offered',
+	F.offered(HEAD, { objectDetect: { enabled: true, people: false } }), false);
+eq('people explicitly on: offered',
+	F.offered(HEAD, { objectDetect: { enabled: true, people: true } }), true);
+eq('the old npuDetect section is not the detector', F.offered(HEAD, { npuDetect: { enabled: true } }), false);
 eq('no detector section: not offered', F.offered(HEAD, {}), false);
 eq('no config at all: not offered', F.offered(HEAD, undefined), false);
 eq('an older plugin (no steps=): not offered',
@@ -29,12 +34,12 @@ eq('a string "true" is not on', F.on({ ptz: { track: 'true' } }), false);
 
 // A fresh read decides both, so a change made elsewhere shows: the detector
 // switched off hides the switch, and another operator's setting is what it shows.
-const v1 = F.view(HEAD, { npuDetect: { enabled: true }, ptz: { track: true } });
+const v1 = F.view(HEAD, { objectDetect: { enabled: true }, ptz: { track: true } });
 eq('a fresh read: shown and on', v1.show && v1.on, true);
-const v2 = F.view(HEAD, { npuDetect: { enabled: false }, ptz: { track: true } });
+const v2 = F.view(HEAD, { objectDetect: { enabled: false }, ptz: { track: true } });
 eq('the detector switched off elsewhere: hidden', v2.show, false);
 eq('and a hidden switch is never shown as on', v2.on, false);
-const v3 = F.view(HEAD, { npuDetect: { enabled: true }, ptz: { track: false } });
+const v3 = F.view(HEAD, { objectDetect: { enabled: true }, ptz: { track: false } });
 eq('switched off by another operator: shown, off', v3.show && !v3.on, true);
 
 eq('switching on writes the one key', F.body(true), '{"ptz":{"track":true}}');

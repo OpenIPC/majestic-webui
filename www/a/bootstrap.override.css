@@ -3603,24 +3603,50 @@ button.mj-osd-chip,
 	transition: opacity 120ms linear;
 }
 
-/* Classified detections get their own colour, so a face is not read as motion
-   and the reverse. Everything a detector has not classified stays the warning
-   hue above.
+/* Classified detections are coloured by what they are, not by which detector
+   spoke, so a person is the same green whether the NPU or the CPU found them.
+   Everything unclassified -- motion -- stays the warning hue above, and a
+   classified box is drawn solid where motion is not, so the two differ by
+   more than hue.
 
-   Giving each classifier a hue is not decoration. Motion fires on anything that
-   changed — headlights, rain, a branch — while these two say what the thing is,
+   Giving each class a hue is not decoration. Motion fires on anything that
+   changed — headlights, rain, a branch — while these say what the thing is,
    and a viewer who cannot tell the two apart on the glass has no way to see
    that the camera did more than notice a difference between frames. Drawn in
    the same orange, a person box is invisible as a person box. */
-.mj-an-box[data-src="face"] {
-	border-color: rgba(var(--bs-info-rgb), 0.95);
-	background: rgba(var(--bs-info-rgb), 0.10);
+.mj-an-box[data-cls] {
+	border-style: solid;
 }
 
+/* Firmware from before object detection names its classifiers by source, and
+   a box from one that carries no class number still deserves its colour. */
+.mj-an-box[data-src="face"],
 .mj-an-box[data-src="person"] {
+	border-style: solid;
+}
+
+.mj-an-box[data-src="person"],
+.mj-an-box[data-cls="human"] {
 	border-color: rgba(var(--bs-success-rgb), 0.95);
 	background: rgba(var(--bs-success-rgb), 0.10);
-	border-style: solid;
+}
+
+.mj-an-box[data-cls="vehicle"] {
+	border-color: rgba(var(--bs-primary-rgb), 0.95);
+	background: rgba(var(--bs-primary-rgb), 0.10);
+}
+
+/* Bootstrap's pink carries no -rgb token; the same value in both themes,
+   because the ground is the picture, not the page. */
+.mj-an-box[data-cls="animal"] {
+	border-color: rgba(214, 51, 132, 0.95);
+	background: rgba(214, 51, 132, 0.10);
+}
+
+.mj-an-box[data-src="face"],
+.mj-an-box[data-cls="face"] {
+	border-color: rgba(var(--bs-info-rgb), 0.95);
+	background: rgba(var(--bs-info-rgb), 0.10);
 }
 
 /* The person the head is following (ptz.track): drawn over the detector's own
@@ -3977,6 +4003,36 @@ button.mj-osd-chip,
    the only thing that emits .mj-stage, and live.cgi is its only caller.
    camera.cgi's Live section builds its own stage client-side out of
    .mj-pv-media, which is why none of this reaches it. */
+/* A long press on the stage is a hold -- a pan held on the pad, a zoom held
+   on Tele -- and never a request to select text. iOS Safari read it as one:
+   it honours only the prefixed user-select, so the pad's unprefixed rule did
+   nothing there, and a held arrow selected the nearest words it could find
+   (the chip's "H265 1920x1080") and raised Copy / Look Up over the pad, which
+   then took no more presses. The same reflex as Hold to compare (#316), for
+   the whole Live page, because the selection jumps to whatever text is
+   nearest the finger, not to the button under it: with the stage alone
+   covered it went to the navbar instead and selected its "ultimate". The
+   callout is iOS's long-press menu (Save Image on the MJPEG still). The
+   page is the picture and its controls; nothing on it is text to copy. */
+#page-live {
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+}
+
+/* Fields on the page -- the password a peer camera asks for -- stay fields:
+   an inherited user-select: none can leave an iOS input untypeable, and the
+   callout is the menu a long press on a field raises to Paste a saved
+   password. */
+#page-live input,
+#page-live textarea,
+#page-live select,
+#page-live [contenteditable] {
+	-webkit-user-select: text;
+	user-select: text;
+	-webkit-touch-callout: default;
+}
+
 .mj-stage {
 	position: relative;
 	background: #000;
@@ -4414,6 +4470,252 @@ button.mj-osd-chip,
 	pointer-events: auto;
 }
 
+/* On a small stage the toasts stand at the left, out of the pad's column
+   (they were under it on a phone), and the adaptation toast says its rates
+   only: the sentence explaining them is its title. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-toasts {
+		right: auto;
+		left: calc(var(--mj-pic-left, 0px) + 0.5rem);
+		align-items: flex-start;
+		max-width: calc(100% - var(--mj-ptz-w, 0px) - 1.5rem);
+	}
+
+	#mj-adapt-why {
+		display: none;
+	}
+}
+
+/* The Live bar's ⋯ More and the sheet it opens (preview-bar-sheet.js): on a
+   small stage the bar keeps View, the stream and the icons, and the rest
+   is here, from the bottom, in the bar's own glass. */
+.mj-more-btn[hidden] {
+	display: none;
+}
+
+dialog.mj-more-sheet {
+	position: fixed;
+	inset: auto 0 0 0;
+	margin: 0;
+	width: 100%;
+	max-width: 100%;
+	max-height: 70vh;
+	overflow-y: auto;
+	padding: 0.75rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+	border: 0;
+	border-top: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: 0.75rem 0.75rem 0 0;
+	background: rgba(13, 15, 20, 0.94);
+	color: #e6e8ee;
+	backdrop-filter: blur(10px);
+	-webkit-user-select: none;
+	user-select: none;
+}
+
+dialog.mj-more-sheet::backdrop {
+	background: rgba(0, 0, 0, 0.35);
+}
+
+.mj-more-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 0.5rem;
+}
+
+.mj-more-title {
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: rgba(230, 232, 238, 0.6);
+}
+
+.mj-more-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+/* The list: sections, and rows of a name, one line on what it does, and the
+   control, which keeps its wiring but not its chip -- the row is the chip. */
+.mj-more-sec[hidden],
+.mj-more-row[hidden] {
+	display: none !important;
+}
+
+.mj-more-cap {
+	margin: 0 0 0.25rem;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: rgba(230, 232, 238, 0.5);
+}
+
+.mj-more-row {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	min-height: 3rem;
+	padding: 0.4rem 0;
+	border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.mj-more-words {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+}
+
+.mj-more-name {
+	font-size: 0.9375rem;
+	color: #e6e8ee;
+}
+
+.mj-more-line {
+	font-size: 0.75rem;
+	line-height: 1.35;
+	color: rgba(230, 232, 238, 0.6);
+}
+
+.mj-more-slot {
+	flex: none;
+}
+
+.mj-more-slot .mj-hud {
+	background: none;
+	border: 0;
+	padding: 0;
+	box-shadow: none;
+	backdrop-filter: none;
+}
+
+/* A toggle in the list is a switch: the label's light, icon and word go, the
+   row says what it is. */
+.mj-more-slot .mj-tog,
+.mj-more-switch {
+	position: relative;
+	display: inline-block;
+	width: 2.75rem;
+	height: 1.625rem;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.16);
+	cursor: pointer;
+}
+
+.mj-more-slot .mj-tog > :not(.mj-tog-t) {
+	display: none;
+}
+
+/* The word stays for a screen reader, out of sight. */
+.mj-more-slot .mj-tog-t {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+}
+
+/* The bar's touch rules make a toggle a 44 px square; in the list the
+   switch is drawn 44 x 26 in the middle of that 44 px target, its wrapper. */
+.mj-more-slot .mj-tog-wrap .mj-tog {
+	display: inline-block;
+	width: 2.75rem;
+	height: 1.625rem;
+	min-width: 0;
+	min-height: 0;
+	padding: 0;
+	vertical-align: middle;
+}
+
+.mj-more-slot .mj-tog-wrap {
+	display: inline-flex;
+	align-items: center;
+	min-height: 2.75rem;
+}
+
+.mj-more-slot .mj-tog::after,
+.mj-more-knob::after {
+	content: "";
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: calc(1.625rem - 6px);
+	height: calc(1.625rem - 6px);
+	border-radius: 50%;
+	background: #fff;
+	transition: transform 0.15s ease;
+}
+
+.mj-more-slot .mj-tog-in:checked + .mj-tog,
+.mj-more-switch input:checked + .mj-more-knob {
+	background: var(--bs-primary);
+}
+
+/* The list's own switch: the span after its input is the track. */
+.mj-more-knob {
+	position: absolute;
+	inset: 0;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.16);
+	pointer-events: none;
+}
+
+.mj-more-slot .mj-tog-in:checked + .mj-tog::after,
+.mj-more-switch input:checked + .mj-more-knob::after {
+	transform: translateX(calc(2.75rem - 1.625rem));
+}
+
+.mj-more-switch input {
+	position: absolute;
+	opacity: 0;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	cursor: pointer;
+}
+
+.mj-more-slot .mj-tog-in:focus-visible + .mj-tog,
+.mj-more-switch:focus-within {
+	outline: 2px solid #fff;
+	outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mj-more-slot .mj-tog::after,
+	.mj-more-knob::after {
+		transition: none;
+	}
+}
+
+/* Fill screen (preview-bar-sheet.js): where the page cannot go fullscreen --
+   an iPhone -- the navbar and the banners step aside and the stage, sized to
+   the viewport by its column, takes the screen. */
+body.mj-fill > .navbar,
+body.mj-fill main.mj-fullbleed > :not(.mj-player) {
+	display: none !important;
+}
+
+.mj-fill-btn[aria-pressed="true"] {
+	color: #fff;
+	background: rgba(255, 255, 255, 0.16);
+}
+
+/* On a phone the Fill button is the fullscreen button (it asks for the real
+   thing too, where the browser grants it): one of them, not two. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-bar-phonefs #mj-fs {
+		display: none !important;
+	}
+}
+
 /* The focus-by-ear readout. Digits big enough to read from the foot of a
    ladder; tabular, so they do not jitter sideways five times a second. The
    button keeps its own HUD look. */
@@ -4794,6 +5096,44 @@ button.mj-osd-chip,
 	}
 }
 
+/* The chip, on a small stage, describes the stream only while the bar is up:
+   "H265 1920x1080 · 20 fps · 36%" is for whoever is tuning the picture, and on
+   a phone it sat over the picture for everybody else. It comes and goes with
+   the bar -- a tap, a hover, focus in the bar -- and only while it is
+   describing (.mj-chip-info, preview-page.js): "connecting…", "no signal" and
+   "reconnecting…" stay on screen, because they are why the picture is not
+   there. Opacity, not display: the toasts hang off its measured height. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-stage .mj-chip.mj-chip-info {
+		opacity: 0;
+	}
+
+	.mj-stage.mj-show .mj-chip.mj-chip-info {
+		opacity: 1;
+	}
+}
+
+@media (max-width: 575.98px) and (hover: hover), (max-height: 480px) and (hover: hover) {
+	.mj-stage:hover .mj-chip.mj-chip-info {
+		opacity: 1;
+	}
+}
+
+/* Focus in the bar, as a class rather than :has(): preview-hero.js sets it, so
+   a browser without :has() keeps the chip with the bar for keyboard users too. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-stage.mj-bar-focus .mj-chip.mj-chip-info {
+		opacity: 1;
+	}
+}
+
+@media (max-width: 575.98px) and (prefers-reduced-motion: no-preference),
+	(max-height: 480px) and (prefers-reduced-motion: no-preference) {
+	.mj-stage .mj-chip.mj-chip-info {
+		transition: opacity 0.25s ease;
+	}
+}
+
 /* On a phone the control groups do not fit one bar row — measured at 390px the
    six groups this camera shows want 855px against a 366px lane — so the bar
    wraps onto as many rows as it needs, which is what it already does at every
@@ -4887,6 +5227,29 @@ button.mj-osd-chip,
 	padding-right: calc(var(--mj-ptz-w, 9rem) + 1rem);
 }
 
+/* On a small stage the bar is one row: View, the stream and the icons, a
+   little tighter, and View without 1:1 -- on a phone two fingers zoom the
+   picture to real pixels and past them, which is what 1:1 is for on a
+   desktop, and the three of them did not fit 390 px beside the stream.
+   After the bar's own rules, which have the same specificity. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-bar {
+		gap: 0.35rem;
+		padding-left: 0.5rem;
+		padding-right: 0.5rem;
+	}
+
+	.mj-bar .mj-seg-lbl {
+		padding-left: 0.45rem;
+		padding-right: 0.45rem;
+	}
+
+	.mj-bar label[for="mj-view-one"] {
+		display: none;
+	}
+}
+
+
 /* Both pads are one glass panel with the buttons inside it, rather than a
    scatter of individually-tinted squares: the cluster reads as one control,
    and the picture shows through one edge instead of nine. */
@@ -4904,6 +5267,226 @@ button.mj-osd-chip,
 .mj-ptz-pad {
 	grid-template-columns: repeat(3, 2.625rem);
 	grid-auto-rows: 2.625rem;
+}
+
+/* The fold (preview-ptz.js): on a small stage the pads wait behind one button,
+   a pad button's glass and a little more than its size, in the corner they
+   open from. Open, it stays where it was, at the foot of the column, with a
+   cross in it. A stage large enough for the pads never shows it. */
+.mj-ptz-fold {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	width: 2.75rem;
+	height: 2.75rem;
+	padding: 0;
+	color: #c8ccd6;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
+}
+
+.mj-ptz.mj-ptz-foldable .mj-ptz-fold {
+	display: flex;
+}
+
+/* The gear: the pad's settings, Speed and Follow, behind one button on a
+   small stage (preview-ptz.js). The fold's look. */
+.mj-ptz-gear {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	width: 2.75rem;
+	height: 2.75rem;
+	padding: 0;
+	color: #c8ccd6;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
+}
+
+.mj-ptz.mj-ptz-foldable .mj-ptz-gear:not([hidden]) {
+	display: flex;
+}
+
+.mj-ptz-gear.mj-ptz-gear-on {
+	color: #fff;
+	background: rgba(255, 255, 255, 0.16);
+}
+
+.mj-ptz-gear:focus-visible {
+	outline: 2px solid #fff;
+	outline-offset: 2px;
+}
+
+/* On the Pelco pad the two take its empty top corners: a cell each, no
+   glass of their own, and the open pad is no taller than its arrows. */
+.mj-ptz-pad {
+	position: relative;
+}
+
+.mj-ptz-pad > .mj-ptz-fold,
+.mj-ptz-pad > .mj-ptz-gear {
+	position: absolute;
+	top: 3px;
+	width: 2.625rem;
+	height: 2.625rem;
+	background: transparent;
+	border: 0;
+	backdrop-filter: none;
+}
+
+.mj-ptz-pad > .mj-ptz-fold {
+	right: 3px;
+}
+
+/* A handle in the bottom-left cell (a pad with no centre of its own). */
+.mj-ptz-pad > .mj-ptz-grip.mj-ptz-grip-corner {
+	position: absolute;
+	left: 3px;
+	bottom: 3px;
+	width: 2.625rem;
+	height: 2.625rem;
+}
+
+.mj-ptz-pad > .mj-ptz-gear {
+	left: 3px;
+}
+
+/* The eight-way pad has no empty corner: the two stand in a strip at its
+   foot instead, side by side. */
+.mj-ptz-head {
+	display: flex;
+	gap: 6px;
+	justify-content: flex-end;
+}
+
+/* The popover, beside the column rather than under it, so opening it adds
+   nothing to the height the bar has to clear. */
+.mj-ptz-more {
+	position: absolute;
+	right: calc(100% + 6px);
+	bottom: 0;
+	z-index: 8;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.mj-ptz-more[hidden] {
+	display: none;
+}
+
+/* The handle the pad is moved by (preview-ptz.js): the Pelco pad's centre
+   cell, or a square of the fold's glass where the pad has a centre of its
+   own. */
+.mj-ptz-grip {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: var(--bs-border-radius-sm);
+	background: transparent;
+	color: #c8ccd6;
+	cursor: grab;
+	touch-action: none;
+}
+
+.mj-ptz > .mj-ptz-grip,
+.mj-ptz-head > .mj-ptz-grip {
+	width: 2.75rem;
+	height: 2.75rem;
+	background: rgba(13, 15, 20, 0.72);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	border-radius: var(--bs-border-radius);
+	backdrop-filter: blur(10px);
+}
+
+.mj-ptz-grip:focus-visible {
+	outline: 2px solid #fff;
+	outline-offset: 2px;
+}
+
+.mj-ptz.mj-ptz-dragging {
+	opacity: 0.85;
+	cursor: grabbing;
+}
+
+/* The corner it was put in. Bottom right is where it always stood; the top
+   corners start below the chip, the left ones mirror the right. */
+.mj-stage.mj-ptz-bl .mj-ptz,
+.mj-stage.mj-ptz-tl .mj-ptz {
+	right: auto;
+	left: 0.5rem;
+	align-items: flex-start;
+}
+
+.mj-stage.mj-ptz-tl .mj-ptz,
+.mj-stage.mj-ptz-tr .mj-ptz {
+	bottom: auto;
+	/* Below the chip, but never so low the pad runs off the stage: a short
+	   landscape stage pulls it up, as the bottom rule's clamp does. */
+	top: max(0.5rem, min(calc(var(--mj-pic-top, 0px) + var(--mj-chip-h, 1.75rem) + 1rem),
+		calc(100% - var(--mj-ptz-h, 0px) - 0.5rem)));
+}
+
+.mj-stage.mj-ptz-bl .mj-ptz-more,
+.mj-stage.mj-ptz-tl .mj-ptz-more {
+	right: auto;
+	left: calc(100% + 6px);
+}
+
+.mj-stage.mj-ptz-tl .mj-ptz-more,
+.mj-stage.mj-ptz-tr .mj-ptz-more {
+	bottom: auto;
+	top: 0;
+}
+
+/* The bar keeps out of the pad's column only where the pad stands beside
+   it, at the bottom -- on the left when the pad is there. */
+.mj-stage.mj-ptz-beside.mj-ptz-tl .mj-bar,
+.mj-stage.mj-ptz-beside.mj-ptz-tr .mj-bar {
+	padding-right: 0.75rem;
+}
+
+.mj-stage.mj-ptz-beside.mj-ptz-bl .mj-bar {
+	padding-right: 0.75rem;
+	padding-left: calc(var(--mj-ptz-w, 9rem) + 1rem);
+}
+
+/* On a small stage the toasts take the side the pad is not on. */
+@media (max-width: 575.98px), (max-height: 480px) {
+	.mj-stage.mj-ptz-tl .mj-toasts,
+	.mj-stage.mj-ptz-bl .mj-toasts {
+		left: auto;
+		right: calc(var(--mj-pic-right, 0px) + 0.5rem);
+		align-items: flex-end;
+	}
+}
+
+.mj-ptz.mj-ptz-folded > :not(.mj-ptz-fold),
+.mj-ptz.mj-ptz-folded .mj-ptz-fold-close,
+.mj-ptz:not(.mj-ptz-folded) .mj-ptz-fold-open {
+	display: none;
+}
+
+/* A short stage cannot hold the column at all -- 192px of landscape phone
+   against 355px of zoom/focus cluster, pad and fold -- so there the open pads
+   stand side by side, the fold last, and the row is as tall as its tallest
+   cluster. The stage is wide there for the same reason it is short. */
+@media (max-height: 480px) {
+	.mj-ptz.mj-ptz-foldable {
+		flex-direction: row;
+		align-items: flex-end;
+	}
+}
+
+.mj-ptz-fold:focus-visible {
+	outline: 2px solid #fff;
+	outline-offset: 2px;
 }
 
 /* The pan/tilt speed, one glass panel like the pads, as wide as the pad above. */
@@ -4975,7 +5558,9 @@ button.mj-osd-chip,
 	background: transparent;
 	color: #c8ccd6;
 	touch-action: none;
+	-webkit-user-select: none;
 	user-select: none;
+	-webkit-touch-callout: none;
 }
 
 /* Zoom and focus carry the verb they send. Held is a real state here: the motor
@@ -4994,6 +5579,42 @@ button.mj-osd-chip,
 
 .mj-ptz-stop {
 	color: rgba(255, 255, 255, 0.55);
+}
+
+/* The stick (preview-ptz.js): the Pelco pad's centre is its knob, where the
+   thumb starts, and it follows the finger while it steers. The arrows the
+   head is turning towards light up. */
+.mj-ptz-stick {
+	position: relative;
+	touch-action: none;
+}
+
+.mj-ptz-knob {
+	align-self: center;
+	justify-self: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.16);
+	box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.5);
+	pointer-events: none;
+	transition: transform 0.15s ease-out;
+}
+
+.mj-ptz-sticking .mj-ptz-knob {
+	background: rgba(255, 255, 255, 0.42);
+	transition: none;
+}
+
+.mj-ptz-btn.mj-ptz-on {
+	background: rgba(255, 255, 255, 0.22);
+	color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mj-ptz-knob {
+		transition: none;
+	}
 }
 
 .mj-ptz-btn:hover,
@@ -6025,6 +6646,213 @@ dialog.mj-modal[open] {
    the same 50% black Bootstrap's own backdrop used in both themes. */
 dialog.mj-modal::backdrop {
 	background: rgba(0, 0, 0, 0.5);
+}
+
+/* The Share dialog (share.js): two views that take turns, the form and the
+   link it made, each a body that scrolls between a header and a footer that
+   do not. Stacked in one column the link landed below the dialog's edge on a
+   MacBook Air window, in a body that scrolled with no scrollbar to say so. */
+#share-dlg {
+	overflow: hidden;
+}
+
+.mj-share-view {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.mj-share-view[hidden] {
+	display: none;
+}
+
+.mj-share .modal-header,
+.mj-share .modal-footer {
+	flex: none;
+}
+
+.mj-share .modal-footer .btn {
+	min-height: 2.75rem;
+	padding-inline: 1.25rem;
+}
+
+/* The body says it scrolls: a shade at whichever edge has more beyond it.
+   Two covers that travel with the content (local) hide two shades that stay
+   at the edges (scroll), so a shade shows only where a cover has scrolled
+   away -- no script, and nothing at all when everything fits. macOS hides
+   scrollbars until a scroll starts, so without this the body looked finished
+   at its edge. */
+.mj-share-body {
+	display: flex;
+	flex-direction: column;
+	gap: 1.125rem;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	background:
+		linear-gradient(var(--bs-body-bg) 30%, rgba(var(--bs-body-bg-rgb), 0)) center top / 100% 2.5rem no-repeat local,
+		linear-gradient(rgba(var(--bs-body-bg-rgb), 0), var(--bs-body-bg) 70%) center bottom / 100% 2.5rem no-repeat local,
+		radial-gradient(farthest-side at 50% 0, rgba(var(--bs-body-color-rgb), 0.24), rgba(var(--bs-body-color-rgb), 0)) center top / 100% 0.875rem no-repeat scroll,
+		radial-gradient(farthest-side at 50% 100%, rgba(var(--bs-body-color-rgb), 0.24), rgba(var(--bs-body-color-rgb), 0)) center bottom / 100% 0.875rem no-repeat scroll;
+	background-color: var(--bs-body-bg);
+}
+
+/* Access: the stream picker's segmented radios, three equal cells across the
+   dialog. Only the chosen level's sentence is shown, under it. */
+.mj-share-seg {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	width: 100%;
+	padding: 3px;
+	border-radius: var(--bs-border-radius-lg);
+}
+
+.mj-share-seg .mj-seg-lbl {
+	justify-content: center;
+	min-height: 2.5rem;
+	font-size: 0.8125rem;
+	line-height: 1.2;
+	text-align: center;
+	white-space: normal;
+}
+
+.mj-share-seg #share-scope-full:checked + .mj-seg-lbl {
+	background: #b3611e;
+}
+
+.mj-share-hint {
+	font-size: 0.75rem;
+	line-height: 1.45;
+	color: var(--bs-secondary-color);
+}
+
+.mj-share-warn {
+	color: var(--bs-warning-text-emphasis);
+}
+
+/* Duration: six chips, radios underneath. */
+.mj-share-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.375rem;
+}
+
+.mj-share-chip {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 2.25rem;
+	margin: 0;
+	padding: 0 0.875rem;
+	border: 1px solid var(--bs-border-color);
+	border-radius: 999px;
+	color: var(--bs-secondary-color);
+	font-size: 0.8125rem;
+	cursor: pointer;
+}
+
+.mj-share-chip:hover {
+	border-color: var(--bs-secondary-color);
+	color: var(--bs-body-color);
+}
+
+.mj-seg-in:checked + .mj-share-chip {
+	border-color: var(--bs-primary);
+	background: rgba(var(--bs-primary-rgb), 0.18);
+	color: var(--bs-emphasis-color);
+	font-weight: 600;
+}
+
+.mj-seg-in:focus-visible + .mj-share-chip {
+	outline: var(--bs-focus-ring-width) solid var(--bs-focus-ring-color);
+}
+
+/* The live links' heading folds them when there are many; with few it is a
+   heading that does nothing, and draws no chevron. */
+.mj-share-live-cap {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	align-self: flex-start;
+	min-height: 2rem;
+	padding: 0;
+	border: 0;
+	background: none;
+}
+
+.mj-share-live-cap:disabled {
+	cursor: default;
+}
+
+.mj-share-live-cap:not(:disabled)::after {
+	content: "";
+	width: 0.4rem;
+	height: 0.4rem;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: translateY(-2px) rotate(45deg);
+}
+
+.mj-share-live-cap[aria-expanded="true"]:not(:disabled)::after {
+	transform: translateY(2px) rotate(-135deg);
+}
+
+.mj-share-about {
+	font-size: 0.8125rem;
+	color: var(--bs-secondary-color);
+}
+
+.mj-share-about summary {
+	cursor: pointer;
+}
+
+.mj-share-about p {
+	margin: 0.5rem 0 0;
+	line-height: 1.55;
+}
+
+.mj-share-linkrow {
+	display: flex;
+	gap: 0.5rem;
+}
+
+.mj-share-link {
+	min-height: 3rem;
+	font-size: 0.875rem;
+}
+
+.mj-share-copy {
+	min-width: 6.5rem;
+	font-weight: 600;
+}
+
+.mj-share-ok {
+	display: inline-flex;
+	color: var(--bs-success-text-emphasis);
+}
+
+/* A phone: fingers, not a pointer. The chips line up three by two, the link
+   takes the width with Copy under it, and the footer's buttons share it. */
+@media (max-width: 575.98px) {
+	.mj-share-chips {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	.mj-share-chip,
+	.mj-share-seg .mj-seg-lbl {
+		min-height: 2.75rem;
+	}
+
+	.mj-share-linkrow {
+		flex-direction: column;
+	}
+
+	.mj-share .modal-footer > .btn {
+		flex: 1 1 auto;
+		white-space: nowrap;
+	}
 }
 
 /* ── Dashboard (dashboard.cgi) ─────────────────────────────────────────────────
@@ -9420,4 +10248,123 @@ body > main > .container > form > .mj-foot {
 	font-size: 0.8125rem;
 	line-height: 1.7;
 	color: var(--bs-secondary-color);
+}
+
+/* ── The sun on Day / Night (sun-panel.js) ─────────────────────────────────
+   The twilight strip runs from the sun 6° up at the left to 12° down at the
+   right, banded the way the twilight diagram is: day, civil, nautical. The
+   bands are fixed colours rather than theme tokens because they ARE the sky's
+   colours, read the same in either theme; everything written on or under the
+   strip takes the theme's text colours. Positions and widths are percentages
+   the module sets from the angles the camera declares, so nothing here knows
+   a number of degrees. */
+.mj-sun {
+	margin: 0 0 0.75rem;
+}
+.mj-sun-strip-box[hidden] {
+	display: none;
+}
+.mj-sun-strip {
+	position: relative;
+	height: 1.75rem;
+	margin: 0.5rem 0 0;
+	border-radius: 0.375rem;
+	overflow: visible;
+}
+.mj-sun-band {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+}
+/* One band per stretch between named lines, highest sun first; where each
+   starts and how wide it is comes from the angles the camera declares. */
+.mj-sun-bands {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	border-radius: 0.375rem;
+}
+.mj-sun-band-0 {
+	background: #a9d2f3;
+}
+.mj-sun-band-1 {
+	background: #5b86bd;
+}
+.mj-sun-band-2 {
+	background: #263d63;
+}
+.mj-sun-band-3 {
+	background: #141f33;
+}
+/* The two chosen lines, and the sun where it is now. */
+.mj-sun-pick {
+	position: absolute;
+	top: -0.25rem;
+	bottom: -0.25rem;
+	width: 3px;
+	margin-left: -1.5px;
+	background: #f5a623;
+	border-radius: 2px;
+}
+.mj-sun-pick-day {
+	background: #ffd56b;
+}
+.mj-sun-pick[hidden],
+.mj-sun-now[hidden] {
+	display: none;
+}
+.mj-sun-now {
+	position: absolute;
+	top: 50%;
+	width: 0.75rem;
+	height: 0.75rem;
+	margin: -0.375rem 0 0 -0.375rem;
+	border-radius: 50%;
+	background: #ffcc33;
+	box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+/* The named lines, with tonight's times under each. Each label is
+   right-aligned to its own line over the band before it -- the band that
+   line ends -- and as wide as that band, so none can run into the next at
+   phone width, where two lines 6° apart are a few dozen pixels apart. */
+.mj-sun-marks {
+	position: relative;
+	height: 2.6rem;
+	margin: 0.2rem 0 0.25rem;
+	font-size: 0.8rem;
+	line-height: 1.2;
+}
+.mj-sun-mark {
+	position: absolute;
+	top: 0;
+	padding-right: 0.3rem;
+	text-align: right;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--bs-body-color);
+	border-right: 1px solid var(--bs-secondary-color);
+}
+.mj-sun-mark-name,
+.mj-sun-mark-time {
+	display: block;
+}
+.mj-sun-mark-time {
+	color: var(--bs-secondary-color);
+}
+/* A line the sun does not reach tonight is drawn missing, not blank: the
+   sentence under the strip says why. */
+.mj-sun-mark-missing {
+	opacity: 0.55;
+	text-decoration: line-through;
+}
+.mj-sun-sentence {
+	margin-top: 0.25rem;
+}
+.mj-sun-guess {
+	display: block;
+	text-align: left;
+}
+.mj-sun-guess[hidden] {
+	display: none;
 }

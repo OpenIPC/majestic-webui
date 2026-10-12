@@ -55,7 +55,13 @@ window.MajesticWebRTC = (function () {
 
 	function attach(video, opts) {
 		opts = opts || {};
-		const onState = opts.onState || function () {};
+		const onStateOwn = opts.onState || function () {};
+		// A share's guest copies the share page's diagnostics, not this
+		// page's: where the player gave up goes there too.
+		const onState = function (state, why) {
+			if (state === 'fallback') S().shareTrace('player fell back', why || '');
+			return onStateOwn.apply(this, arguments);
+		};
 		const onCodec = opts.onCodec || function () {};
 		const onAudio = opts.onAudio || function () {};
 		// Talkback state, and the per-second measurement feed behind the stats
@@ -572,6 +578,9 @@ window.MajesticWebRTC = (function () {
 			// fetch, and a reconnect should use the answer once it lands
 			// instead of repeating the empty list it started with.
 			const ice = S().iceOf(opts);
+			S().shareTrace('player ice servers', ice.map(function (x) {
+				return [].concat(x.urls).map(function (u) { return String(u).split(':')[0]; }).join('+');
+			}).join(' '));
 
 			try {
 				pc = new RTCPeerConnection({ iceServers: ice });
@@ -666,6 +675,7 @@ window.MajesticWebRTC = (function () {
 			pc.oniceconnectionstatechange = function () {
 				if (!pc || !current(my)) return;
 				const s = pc.iceConnectionState;
+				S().shareTrace('player ice', s);
 				// A session that never played, or a page without the
 				// restarter, has nothing to mend: a new session, as before.
 				if (s === 'closed' || (s === 'failed' && (!gotMedia || !restart))) {

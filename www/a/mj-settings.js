@@ -375,19 +375,32 @@
 	// saved config and then the schema default for sections that are not
 	// rendered. Reading only the config made the count disagree with the page
 	// as soon as someone touched a controller.
+	// A visibleWhen is one condition on a sibling (`field`), or a list of
+	// them any one of which shows the row (`any`) -- the shape x-requires
+	// already speaks, for a row two settings can each call for. Anything
+	// else shows the row: a schema newer than this page must never hide one.
+	function visConds(vw) {
+		if (!vw) return [];
+		if (vw.field) return [vw];
+		return Array.isArray(vw.any) ? vw.any.filter((c) => c && c.field) : [];
+	}
+
 	function fieldVisible(f) {
 		const vw = f.sub && f.sub.visibleWhen;
-		if (!vw || !vw.field) return true;
+		const conds = visConds(vw);
+		if (!conds.length) return true;
 		const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
-		const sibDot = parent + '.' + vw.field;
-		const mounted = (state.fields || []).find(x => x.dot === sibDot);
-		if (mounted) return visMatches(vw, mounted.getValue());
-		let v = getDotted(state.config, sibDot);
-		if (v === undefined) {
-			const sib = sectionFields(f.dot.split('.')[0]).find(x => x.dot === sibDot);
-			v = sib && sib.sub ? sib.sub.default : undefined;
-		}
-		return visMatches(vw, v);
+		return conds.some((c) => {
+			const sibDot = parent + '.' + c.field;
+			const mounted = (state.fields || []).find(x => x.dot === sibDot);
+			if (mounted) return visMatches(c, mounted.getValue());
+			let v = getDotted(state.config, sibDot);
+			if (v === undefined) {
+				const sib = sectionFields(f.dot.split('.')[0]).find(x => x.dot === sibDot);
+				v = sib && sib.sub ? sib.sub.default : undefined;
+			}
+			return visMatches(c, v);
+		});
 	}
 
 	// The navigable leaves of one group, in the order the rail lists them: the
@@ -1255,6 +1268,12 @@
 		// writing into a row that is no longer in the document
 		state.reqUpdaters = [];
 		state.legacyBox = null;
+		// The sun panel likewise: it asks the camera about the place on a
+		// timer, and a save on another section would otherwise still sync it.
+		if (state.sunPanel) {
+			state.sunPanel.destroy();
+			state.sunPanel = null;
+		}
 		// Same reason as legacyBox above: a save re-asks the soundcheck's gate
 		// through this reference, and every section that is not Audio has to
 		// leave it empty or that ask lands on a node no longer in the document.
@@ -1339,6 +1358,7 @@
 			// switch is dealt with everything else and the hidden set is
 			// already settled when the cut is chosen.
 			if (sec === 'nightMode') mountLegacy(cols.firstElementChild);
+			if (sec === 'nightMode') mountSun(cols.firstElementChild);
 		}
 
 		// Save and Apply share this bar, and each is present only while its own
@@ -1356,6 +1376,7 @@
 		document.getElementById('mj-apply-btn').addEventListener('click', applyReload);
 
 		applyVisibility();
+		paintEnumHolds();
 		layoutCols();
 		paintStock();
 		// Paints from whatever the heartbeat has already published; the
@@ -8076,6 +8097,22 @@
 	((TREE && TREE.mapDriven('nightMode')) || []).forEach((k) => {
 		MAP_DOTS['nightMode.' + k] = 1;
 	});
+	// Angles the schema marks as lines of twilight (x-twilight) are drawn on
+	// the strip sun-panel.js mounts rather than as bare sliders, and render
+	// hidden the way the pins do. Only where the strip can actually be drawn:
+	// its modules are on the page, and the section carries the night line the
+	// strip is built around -- otherwise they are ordinary rows, never rows
+	// nothing can reach.
+	const SUN_MODULES = typeof window.MajesticSunPanel === 'object' &&
+		typeof window.MajesticSunPlace === 'object';
+	function twilightHidden(dot, sub) {
+		if (!SUN_MODULES || !sub || !sub['x-twilight']) return false;
+		const section = dot.slice(0, dot.lastIndexOf('.'));
+		const props = getDotted(state.schema.properties, section.split('.').join('.properties.'));
+		const own = (props && props.properties) || {};
+		return Object.keys(own).some((k) => own[k] && own[k]['x-twilight'] === 'night' &&
+			!EXCLUDE.has(section + '.' + k) && !!window.MajesticSunPanel.scale(own[k]));
+	}
 
 	function pinField(key) {
 		return state.fields.filter((f) => f.dot === 'nightMode.' + key)[0];
@@ -8183,6 +8220,90 @@
 		return rows.reduce((first, row) =>
 			(row.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
 				? row : first);
+	}
+
+	// The sun panel (sun-panel.js), where the twilight angles' hidden rows
+	// are: where the camera is, and the strip that edits the two angles.
+	// Every field it drives is found by what the schema says it is -- a line
+	// of twilight (x-twilight), an axis of the camera's place (x-geo) -- never
+	// by its name. The place belongs to another section and is drawn hidden
+	// here, so the panel stages it like any edit and one Save carries it with
+	// the rest: the batch is built by dotted path, and nothing on this page
+	// compares a field's section with the one on screen.
+	let tzPlaces = null;
+	function mountSun(container) {
+		const SUNP = window.MajesticSunPanel, PLACE = window.MajesticSunPlace;
+		if (state.sunPanel) {
+			state.sunPanel.destroy();
+			state.sunPanel = null;
+		}
+		if (!SUNP || !PLACE) return;
+		const tw = (line) => state.fields.find((x) => x.schema && x.schema['x-twilight'] === line) || null;
+		const night = tw('night');
+		if (!night || !night.p) return;
+		const geo = {};
+		const props = state.schema.properties || {};
+		Object.keys(props).forEach((sec) => {
+			const own = (props[sec] && props[sec].properties) || {};
+			Object.keys(own).forEach((k) => {
+				const axis = own[k] && own[k]['x-geo'];
+				if (axis !== 'latitude' && axis !== 'longitude') return;
+				const dot = sec + '.' + k;
+				if (EXCLUDE.has(dot)) return;
+				let field = state.fields.find((x) => x.dot === dot);
+				if (!field) {
+					field = renderField(container, dot, k, own[k], getDotted(state.config, dot), { hidden: true });
+					if (!field) return;
+					state.fields.push(field);
+					state.initial[dot] = field.getValue();
+				}
+				geo[axis] = field;
+			});
+		});
+		const form = $('#mj-settings-form');
+		state.sunPanel = SUNP.mount({
+			night: night,
+			day: tw('day'),
+			lat: geo.latitude || null,
+			lon: geo.longitude || null,
+			set: (field, v) => {
+				if (!field) return;
+				field.setValue(v);
+				runVisibility();
+				updateDirty();
+			},
+			initial: (field) => state.initial[field.dot],
+			visible: () => fieldVisible({ sub: night.schema, dot: night.dot }),
+			onChange: (fn) => {
+				if (!form) return null;
+				const h = () => fn();
+				form.addEventListener('input', h);
+				form.addEventListener('change', h);
+				return () => {
+					form.removeEventListener('input', h);
+					form.removeEventListener('change', h);
+				};
+			},
+			// Asked of the camera every time, with the place on the page:
+			// the times are in the camera's time zone and the arithmetic is
+			// the camera's. A refused or failed ask is no report -- the panel
+			// then says nothing about tonight rather than something stale.
+			report: (lat, lon) => fetch('/api/v1/sun' +
+				(lat === null ? '' : '?lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon)),
+			{ credentials: 'same-origin' })
+				.then((r) => (r.ok ? r.json() : null)).catch(() => null),
+			zone: boot.tz || '',
+			// Sixteen kilobytes nobody needs until a guess is offered, and
+			// fetched once per page however often the section is drawn.
+			places: () => tzPlaces || (tzPlaces = new Promise((resolve) => {
+				const s = document.createElement('script');
+				s.src = '/a/tz-places.js';
+				s.onload = () => resolve(window.MajesticTzPlaces || null);
+				s.onerror = () => resolve(null);
+				document.head.appendChild(s);
+			})),
+			P: PLACE,
+		});
 	}
 
 	function mountLegacy(container) {
@@ -8293,7 +8414,10 @@
 	// night_mode_source, as the endpoint documents it: 0 manual, 1 GPIO
 	// sensor, 2 gain thresholds, 3 ADC, 4 automatic. 0 is nothing deciding,
 	// which is not a verdict about any of these, so it marks nothing.
-	const MECH_OF_SRC = { 1: 'sensor', 2: 'thresholds', 3: 'adc', 4: 'auto' };
+	// 5 (the sun) and 6 (set times) are automatic mode asking something other
+	// than the picture, and handing back to it whenever they cannot answer, so
+	// the automatic rows stay in use and only the thresholds are outranked.
+	const MECH_OF_SRC = { 1: 'sensor', 2: 'thresholds', 3: 'adc', 4: 'auto', 5: 'auto', 6: 'auto' };
 	// One line each. The finding at the top of the section carries the
 	// explanation and the way out; repeating a paragraph under every ignored
 	// control is the wall of text the reporter of #325 objected to in the same
@@ -9826,7 +9950,7 @@
 				// their headings would stand over nothing.
 				if (!mine.some(k => {
 					const d = basePath + '.' + k;
-					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !lifted().has(d) && !(skip && skip.has(d));
+					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !twilightHidden(d, props[k]) && !lifted().has(d) && !(skip && skip.has(d));
 				})) continue;
 				if (g.label) head(container, g.label, g.note);
 				renderProps(container, basePath, pick(props, mine), skip, true);
@@ -9858,7 +9982,7 @@
 			const rowOf = sub && sub['x-row-of'] && typeof sub['x-row-of'].field === 'string'
 				&& props[sub['x-row-of'].field];
 			const field = renderField(container, dot, key, sub, eff,
-				(MAP_DOTS[dot] || rowOf) ? { hidden: true } : undefined);
+				(MAP_DOTS[dot] || twilightHidden(dot, sub) || rowOf) ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -9918,17 +10042,25 @@
 		const byDot = {};
 		for (const f of state.fields) byDot[f.dot] = f;
 		for (const f of state.fields) {
-			const vw = f.schema && f.schema.visibleWhen;
-			if (!vw || !vw.field) continue;
+			const conds = visConds(f.schema && f.schema.visibleWhen);
+			if (!conds.length) continue;
 			const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
-			const ctrl = byDot[parent + '.' + vw.field];
-			if (!ctrl) continue;
-			const update = () => { f.p.style.display = visMatches(vw, ctrl.getValue()) ? '' : 'none'; };
-			ctrl.control.addEventListener('change', update);
-			ctrl.control.addEventListener('input', update);
+			const ctrls = conds.map((c) => ({ c: c, ctrl: byDot[parent + '.' + c.field] }))
+				.filter((x) => x.ctrl);
+			if (!ctrls.length) continue;
+			// A row hidden for the strip (x-twilight) stays hidden whatever its
+			// rule says: the strip is what shows for it.
+			if (f.p.hidden) continue;
+			const update = () => {
+				f.p.style.display = ctrls.some((x) => visMatches(x.c, x.ctrl.getValue())) ? '' : 'none';
+			};
+			ctrls.forEach((x) => {
+				x.ctrl.control.addEventListener('change', update);
+				x.ctrl.control.addEventListener('input', update);
+				controllers.add(x.ctrl);
+			});
 			state.visUpdaters.push(update);
 			update();
-			controllers.add(ctrl);
 		}
 		// A frame-rate bound that depends on the chosen resolution has to move
 		// with it. Same shape as the visibleWhen pass above — find the sibling,
@@ -10061,8 +10193,45 @@
 		}
 	}
 
+	// Choices the schema says can do nothing until something else is set
+	// (x-enum-requires, in x-requires' own vocabulary) are held back while it
+	// is not, with the reason under the row -- rather than accepted and then
+	// explained. Never the choice the field holds now or was saved with: that
+	// is taken away from nobody, and moving off a saved choice must not make
+	// it impossible to come back to.
+	function paintEnumHolds() {
+		(state.fields || []).forEach((f) => {
+			const map = f.schema && f.schema['x-enum-requires'];
+			if (!map || !f.control || !f.control.options || !f.p) return;
+			const cur = String(f.getValue()), saved = String(state.initial[f.dot]);
+			const held = [];
+			let why = '';
+			Array.prototype.forEach.call(f.control.options, (op) => {
+				const req = map[op.value];
+				const msg = req ? reqNotice(req, () => f.getValue()) : '';
+				op.disabled = !!msg && op.value !== cur && op.value !== saved;
+				op.title = op.disabled ? msg : '';
+				if (op.disabled) {
+					held.push(op.textContent);
+					why = why || msg;
+				}
+			});
+			let note = f.p.querySelector('.mj-enum-held');
+			if (!held.length) {
+				if (note) note.remove();
+				return;
+			}
+			if (!note) {
+				note = el('div', 'hint mj-requires mj-enum-held');
+				f.p.appendChild(note);
+			}
+			note.textContent = held.join(', ') + ': ' + why;
+		});
+	}
+
 	function runVisibility() {
 		(state.visUpdaters || []).forEach(u => u());
+		paintEnumHolds();
 		// a saved edit can have met or broken a requirement on this page
 		(state.reqUpdaters || []).forEach(u => u.paint());
 		// what is on screen just changed, and the head counts what is on screen
@@ -10272,6 +10441,19 @@
 		if (sub && sub.type === 'string' && sub['x-numeric'] && typeof sub['x-numeric'] === 'object') {
 			const n = sub['x-numeric'];
 			sub = Object.assign({}, sub, { type: 'number', minimum: n.minimum, maximum: n.maximum });
+		}
+		// The NETIP password is kept as the hash XMEye/CMS clients send, and
+		// the schema names it for what is stored ("Hash of password"). The
+		// owner knows the password, not the hash, so the row takes the
+		// password and saves its hash (netip-hash.js); its name and hint say
+		// what to type. Without the module the row stays the schema's.
+		const netipHash = dot === 'netip.password' && sub && sub.type === 'string'
+			&& window.NetipHash ? window.NetipHash : null;
+		if (netipHash) {
+			sub = Object.assign({}, sub, {
+				title: 'Password',
+				hint: 'What XMEye and CMS clients sign in with. The camera keeps only its hash.',
+			});
 		}
 		// A field's sibling as it stands NOW: the control if it is on the page,
 		// else the config it loaded with. What x-title-when is evaluated
@@ -11051,6 +11233,36 @@
 				updateDirty();
 			});
 			if (sw) sw.addEventListener('change', () => { paintMode(); updateDirty(); });
+		} else if (netipHash) {
+			// The box is only ever the password being typed. What the camera
+			// holds is a hash nobody can type back, so it is kept aside and
+			// never put in the box: an untouched row reads as that hash, which
+			// keeps it clean and is what a save sends for it, and a typed
+			// password reads as its hash. The placeholder says whether one is
+			// set. Clearing the setting is ↺, which goes through _set.
+			p = el('p', 'string password mj-row');
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+				'<div class="input-group">' +
+				'<input type="password" id="' + id + '" class="form-control"' +
+				' autocomplete="new-password" spellcheck="false">' +
+				'<div class="input-group-text"><input class="form-check-input mt-0" type="checkbox"' +
+				' data-for="' + id + '" aria-label="Show"></div>' +
+				'</div>';
+			control = p.querySelector('input[type=password]');
+			const eye = p.querySelector('input[type=checkbox]');
+			if (eye) eye.addEventListener('change', () => {
+				control.type = eye.checked ? 'text' : 'password';
+			});
+			let stored = '';
+			control._get = () => control.value !== '' ? netipHash.hash(control.value) : stored;
+			control._set = (v) => {
+				stored = v !== undefined && v !== null ? String(v) : '';
+				control.value = '';
+				control.placeholder = stored !== ''
+					? 'Set — type a new one to replace it' : 'Not set';
+			};
+			control._set(eff);
 		} else if (type === 'string' && (sub['x-secret'] || sub.writeOnly)) {
 			// A secret the camera has asked not to be shown. It is not hidden
 			// from anyone who can read this page — the value came down the same
@@ -12447,6 +12659,10 @@
 	}
 
 	function updateDirty() {
+		// A staged edit can meet or break what a held-back choice is waiting
+		// for -- typing a place frees the sun choices -- so they are repainted
+		// with every edit, not only when a row shows or hides.
+		paintEnumHolds();
 		let n = 0;
 		for (const f of state.fields) {
 			const d = f.getValue() !== state.initial[f.dot];
@@ -13029,6 +13245,7 @@
 		// from greying the button for the rest of the visit.
 		state.ircutNoSnap = null;
 		syncLegacy();
+		if (state.sunPanel) state.sunPanel.sync();
 		syncTestBtn();
 		// The soundcheck's gate reads the two audio switches, which are fields
 		// on this very page — so a save that turns one on has to hand the panel

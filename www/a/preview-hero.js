@@ -117,6 +117,12 @@
 
 	const stage = $('#mj-stage'), bar = $('#mj-bar');
 	if (!stage || !bar) return;
+	// Focus anywhere in the bar, mirrored onto the stage for the chip that comes
+	// and goes with the bar on a small stage. A class rather than :has(), which
+	// not every browser this page meets understands.
+	const barFocus = () => stage.classList.toggle('mj-bar-focus', bar.contains(document.activeElement));
+	bar.addEventListener('focusin', barFocus);
+	bar.addEventListener('focusout', () => setTimeout(barFocus, 0));
 
 	// --- The bar and the PTZ pad share the bottom of the stage, and this is what
 	// keeps them off each other. Both used to be placed against constants — the
@@ -244,7 +250,7 @@
 		if (e.pointerType !== 'touch') return;
 		touching++;
 		if (touching > 1) tapId = null;
-		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-toasts, #mj-tap-play')) return;
+		if (e.target.closest('.mj-bar, .mj-ptz, #mj-stats, #mj-toasts, #mj-tap-play, .mj-more-sheet')) return;
 		if (touching > 1) return;
 		tapId = e.pointerId;
 		tapX = e.clientX;
@@ -262,6 +268,9 @@
 			show(4000);
 		}
 	});
+	// Up for a few seconds when the page opens, so a first look at it shows
+	// the controls exist; after that a tap brings them back.
+	show(5000);
 	stage.addEventListener('pointercancel', e => {
 		if (e.pointerType === 'touch') touching = Math.max(0, touching - 1);
 		if (e.pointerId === tapId) tapId = null;

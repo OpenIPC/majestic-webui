@@ -45,6 +45,19 @@
 	// move goes out exactly as before. The value is a per-browser convenience.
 	const speedBox = $('#mj-ptz-speed'), speedIn = $('#mj-ptz-speed-in');
 	const PS = window.MajesticPtzSpeed;
+	// The capability line: the speed control and the stick both read it. A
+	// failed ask is not a line that offers nothing -- it rejects, and is asked
+	// again the next time someone wants it (caps()), rather than leaving the
+	// stick on four slow directions for the life of the page.
+	let capsP = null;
+	const caps = () => {
+		if (!capsP) {
+			capsP = apiFetch('/ptz', { credentials: 'same-origin' })
+				.then(r => (r.ok ? r.text() : Promise.reject(r.status)));
+			capsP.catch(() => { capsP = null; });
+		}
+		return capsP;
+	};
 	if (speedBox && speedIn && PS) {
 		try {
 			const v = localStorage.getItem('mj-ptz-speed');
@@ -53,14 +66,11 @@
 		speedIn.addEventListener('change', () => {
 			try { localStorage.setItem('mj-ptz-speed', speedIn.value); } catch (e) { /* ignore */ }
 		});
-		apiFetch('/ptz', { credentials: 'same-origin' })
-			.then(r => (r.ok ? r.text() : ''))
-			.then(t => {
-				if (!PS.offered(t)) return;
-				mount.appendChild(speedBox);
-				speedBox.hidden = false;
-			})
-			.catch(() => {});
+		caps().then(t => {
+			if (!PS.offered(t)) return;
+			speedBox.hidden = false;
+			placeExtras();
+		}).catch(() => {});
 	}
 	// Follow, the same way: hidden until the camera says its motor counts steps
 	// and its detector is on (ptz-follow.js). The switch is the camera's
@@ -84,8 +94,9 @@
 				if (gen !== followGen || followIn.disabled) return;
 				const v = PF.view(caps, cfg);
 				followIn.checked = v.on;
-				if (v.show && followBox.parentNode !== mount) mount.appendChild(followBox);
 				followBox.hidden = !v.show;
+				if (v.show) placeExtras();
+				else showGear();
 			}).catch(() => { /* no answer: leave it as it was */ });
 		};
 		followRefresh();
@@ -108,6 +119,223 @@
 	}
 	function speedQuery(verb) {
 		return PS && speedBox && !speedBox.hidden && speedIn ? PS.query(verb, speedIn.value) : '';
+	}
+	// Folded on a small stage. The pad is about 140px square and the zoom/focus
+	// cluster as tall again, so on a phone they covered a sixth of the picture or
+	// more for somebody who came to look at it -- and a share's guest, who rarely
+	// steers at all, met that before anything else. Behind one button there, the
+	// same size as a pad button and in the same corner; open, the button stays
+	// at the top of the column to fold it back. Whether it is open is
+	// remembered per browser, so whoever does steer opens it once. A window
+	// large enough for the pad never folds it and shows no button.
+	//
+	// LAST in the column, so at its foot: where the stage is too short for the
+	// open column (a phone in landscape: 192px of stage, 355px of Pelco
+	// cluster) the stylesheet's clamp keeps the bottom on screen and lets the
+	// top run under the navbar. At the top, the button that closes the pads
+	// went there with it, and the open state is remembered.
+	const SMALL = '(max-width: 575.98px), (max-height: 480px)';
+	const small = window.matchMedia ? window.matchMedia(SMALL) : null;
+	const fold = document.createElement('button');
+	fold.type = 'button';
+	fold.className = 'mj-ptz-fold';
+	fold.innerHTML = '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" ' +
+		'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+		'<path class="mj-ptz-fold-open" d="M10 2.5v15M2.5 10h15M7.5 5 10 2.5 12.5 5M7.5 15l2.5 2.5 2.5-2.5' +
+		'M5 7.5 2.5 10 5 12.5M15 7.5l2.5 2.5-2.5 2.5"></path>' +
+		'<path class="mj-ptz-fold-close" d="M5 5l10 10M15 5 5 15"></path></svg>';
+	const OPEN_KEY = 'mj-ptz-open';
+	let open = false;
+	try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch (e) { /* ignore */ }
+	// Speed and Follow are settings of the pad, not controls on it: on a small
+	// stage they wait behind a gear, in a popover beside the column, so the
+	// open pad is the arrows alone -- four stacked panels covered half a phone
+	// (measured on an iPhone). On a larger stage they sit in the
+	// column as before.
+	const gear = document.createElement('button');
+	gear.type = 'button';
+	gear.className = 'mj-ptz-gear';
+	gear.hidden = true;
+	gear.setAttribute('aria-label', 'Pan and tilt settings');
+	gear.title = 'Pan and tilt settings';
+	gear.setAttribute('aria-expanded', 'false');
+	gear.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" ' +
+		'stroke-width="1.5" stroke-linecap="round" aria-hidden="true">' +
+		'<path d="M3.5 6h6M13.5 6h3M3.5 14h3M10.5 14h6"></path>' +
+		'<circle cx="11.5" cy="6" r="2"></circle><circle cx="8.5" cy="14" r="2"></circle></svg>';
+	const more = document.createElement('div');
+	more.className = 'mj-ptz-more';
+	more.id = 'mj-ptz-more';
+	more.hidden = true;
+	gear.setAttribute('aria-controls', more.id);
+	const head = document.createElement('div');
+	head.className = 'mj-ptz-head';
+	// The Pelco pad's top corners are empty cells: the gear and the fold go
+	// there and the open pad is no taller than its arrows. The eight-way pad
+	// has diagonals in them, so there the two sit in a strip at its foot.
+	const corners = !!(pad && pad.children.length > 2 &&
+		pad.children[0].classList.contains('mj-ptz-void') &&
+		pad.children[2].classList.contains('mj-ptz-void'));
+	const isSmall = () => !!(small && small.matches);
+	// Its bottom-left cell, for a handle that has no centre to take.
+	const gripCorner = !!(pad && pad.children.length > 6 && pad.children[6].classList.contains('mj-ptz-void'));
+	const hasExtras = () => !!((speedBox && !speedBox.hidden && speedBox.isConnected) ||
+		(followBox && !followBox.hidden && followBox.isConnected));
+	const popOpen = (on) => {
+		more.hidden = !on;
+		gear.setAttribute('aria-expanded', String(on));
+		gear.classList.toggle('mj-ptz-gear-on', on);
+	};
+	function showGear() {
+		gear.hidden = !(isSmall() && open && hasExtras());
+		if (gear.hidden) popOpen(false);
+	}
+	// Speed and Follow to where they belong at this size, and the gear shown
+	// only when the popover would hold something.
+	function placeExtras() {
+		const home = isSmall() ? more : mount;
+		for (const box of [speedBox, followBox]) {
+			if (!box || box.hidden) continue;
+			if (box.parentNode !== home) {
+				if (home === mount) mount.insertBefore(box, fold.parentNode === mount ? fold : null);
+				else home.appendChild(box);
+			}
+		}
+		showGear();
+	}
+	gear.addEventListener('click', (e) => { e.stopPropagation(); popOpen(more.hidden); });
+	document.addEventListener('pointerdown', (e) => {
+		if (!more.hidden && !more.contains(e.target) && e.target !== gear && !gear.contains(e.target)) popOpen(false);
+	});
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape' && !more.hidden) { popOpen(false); gear.focus(); }
+	});
+	mount.appendChild(more);
+
+	// ---- moving the pad --------------------------------------------------
+	//
+	// The pad covers a corner of the picture, and what is in that corner is
+	// sometimes what the operator came to see. It moves: dragged by its
+	// handle anywhere on the stage, it settles in the nearest corner, and the
+	// corner is remembered per browser. The Pelco pad's centre was Stop, which
+	// nothing needs -- every hold already stops on release -- and is the
+	// stick's knob now (below), so its handle takes the empty bottom-left
+	// corner; the eight-way pad keeps its Centre (home) and has its handle in
+	// the strip with the gear and the fold.
+	const CORNERS = ['br', 'bl', 'tl', 'tr'];
+	const CORNER_KEY = 'mj-ptz-corner';
+	const grip = document.createElement('button');
+	grip.type = 'button';
+	grip.className = 'mj-ptz-grip';
+	grip.setAttribute('aria-label', 'Move the pad to another corner');
+	grip.title = 'Drag to move the pad';
+	grip.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="currentColor" aria-hidden="true">' +
+		'<circle cx="7" cy="5" r="1.4"></circle><circle cx="13" cy="5" r="1.4"></circle>' +
+		'<circle cx="7" cy="10" r="1.4"></circle><circle cx="13" cy="10" r="1.4"></circle>' +
+		'<circle cx="7" cy="15" r="1.4"></circle><circle cx="13" cy="15" r="1.4"></circle></svg>';
+	const stopBtn = pad ? pad.querySelector('[data-act="stop"]') : null;
+	const PK = window.MajesticPtzStick;
+	const stick = !!(stopBtn && PK);
+	const knob = document.createElement('span');
+	knob.className = 'mj-ptz-knob';
+	knob.setAttribute('aria-hidden', 'true');
+	if (stopBtn) stopBtn.replaceWith(stick ? knob : grip);
+	if (stick) pad.classList.add('mj-ptz-stick');
+	const gripInPad = !!stopBtn && !stick;
+	let corner = 'br';
+	try { if (CORNERS.indexOf(localStorage.getItem(CORNER_KEY)) >= 0) corner = localStorage.getItem(CORNER_KEY); } catch (e) { /* ignore */ }
+	const setCorner = (c) => {
+		corner = c;
+		for (const k of CORNERS) stage.classList.toggle('mj-ptz-' + k, k === c && c !== 'br');
+		try { localStorage.setItem(CORNER_KEY, c); } catch (e) { /* ignore */ }
+		window.dispatchEvent(new Event('resize'));
+	};
+	setCorner(corner);
+	let drag = null;
+	grip.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+	grip.addEventListener('pointerdown', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		try { grip.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+		drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+		mount.classList.add('mj-ptz-dragging');
+	});
+	grip.addEventListener('pointermove', (e) => {
+		if (!drag || e.pointerId !== drag.id) return;
+		const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+		if (Math.abs(dx) + Math.abs(dy) > 6) drag.moved = true;
+		mount.style.transform = `translate(${dx}px, ${dy}px)`;
+	});
+	const endDrag = (e) => {
+		if (!drag || e.pointerId !== drag.id) return;
+		const moved = drag.moved;
+		drag = null;
+		mount.classList.remove('mj-ptz-dragging');
+		if (moved) {
+			const m = mount.getBoundingClientRect(), st = stage.getBoundingClientRect();
+			const cx = m.left + m.width / 2 - st.left, cy = m.top + m.height / 2 - st.top;
+			mount.style.transform = '';
+			setCorner((cy < st.height / 2 ? 't' : 'b') + (cx < st.width / 2 ? 'l' : 'r'));
+		} else {
+			mount.style.transform = '';
+		}
+	};
+	grip.addEventListener('pointerup', endDrag);
+	grip.addEventListener('pointercancel', endDrag);
+	// From the keyboard: Enter or Space takes it round the corners.
+	grip.addEventListener('click', (e) => {
+		if (e.detail !== 0) return;
+		setCorner(CORNERS[(CORNERS.indexOf(corner) + 1) % CORNERS.length]);
+	});
+
+	const applyFold = () => {
+		const folded = !!(small && small.matches) && !open;
+		mount.classList.toggle('mj-ptz-folded', folded);
+		mount.classList.toggle('mj-ptz-foldable', !!(small && small.matches));
+		// Where the fold and the gear stand: folded, the fold alone in the
+		// mount; open on a small stage, in the pad's corners or the strip.
+		if (!isSmall() || folded) {
+			mount.appendChild(fold);
+			// The handle where the Pelco pad has none of its own: first in the
+			// column on a large stage.
+			if (!gripInPad) mount.insertBefore(grip, mount.firstChild);
+		} else if (corners) {
+			pad.appendChild(gear);
+			pad.appendChild(fold);
+			// A pad with empty corners but no Stop of its own (an eight-way
+			// pad missing its diagonals): the handle takes the bottom-left
+			// corner where that is empty too, else the strip below.
+			if (!gripInPad) {
+				if (gripCorner) { grip.classList.add('mj-ptz-grip-corner'); pad.appendChild(grip); }
+				else { head.appendChild(grip); mount.appendChild(head); }
+			}
+		} else {
+			head.appendChild(gear);
+			if (!gripInPad) head.appendChild(grip);
+			head.appendChild(fold);
+			mount.appendChild(head);
+		}
+		if (folded) popOpen(false);
+		showGear();
+		fold.setAttribute('aria-expanded', String(!folded));
+		const say = folded ? 'Show camera controls' : 'Hide camera controls';
+		fold.setAttribute('aria-label', say);
+		fold.title = say;
+	};
+	fold.addEventListener('click', () => {
+		open = mount.classList.contains('mj-ptz-folded');
+		try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch (e) { /* ignore */ }
+		applyFold();
+	});
+	mount.appendChild(fold);
+	applyFold();
+	if (small) {
+		if (small.addEventListener) small.addEventListener('change', placeExtras);
+		else if (small.addListener) small.addListener(placeExtras);
+	}
+	if (small) {
+		if (small.addEventListener) small.addEventListener('change', applyFold);
+		else if (small.addListener) small.addListener(applyFold);
 	}
 	mount.hidden = false;
 
@@ -490,7 +718,15 @@
 	const isSingle = btn => btn.dataset.dir === 'cc' ||
 		btn.dataset.act === 'stop' || btn.dataset.act === 'af';
 
-	mount.querySelectorAll('button').forEach(btn => {
+	// A held button is not a long press on a page: no selection may start
+	// from it (WebKit fires selectstart even where the stylesheet already
+	// refused one, on older iOS) and no context menu -- Android's long-press
+	// menu and a right click both came up over a button being held.
+	mount.addEventListener('selectstart', e => e.preventDefault());
+	mount.addEventListener('contextmenu', e => e.preventDefault());
+
+	// The fold and the gear are the mount's own, not moves.
+	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip)').forEach(btn => {
 		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco
@@ -498,15 +734,23 @@
 			btn.addEventListener('click', () => { stopHold(null); fire(btn); });
 			return;
 		}
-		btn.addEventListener('pointerdown', e => {
-			e.preventDefault();
-			// Capture keeps pointerup coming to this button however far the
-			// finger or cursor wanders mid-hold.
-			try { btn.setPointerCapture(e.pointerId); } catch (err) {}
-			startHold(btn, 'p' + e.pointerId);
-		});
-		btn.addEventListener('pointerup', e => stopHold('p' + e.pointerId));
-		btn.addEventListener('pointercancel', e => stopHold('p' + e.pointerId));
+		// The stick's arrows are the stick's: a finger on one is a thumb on
+		// the stick (below), and only the keyboard presses them as buttons.
+		if (!(stick && pad.contains(btn))) {
+			// iOS starts its long-press selection gesture from touchstart, before
+			// any pointer event can refuse it; a held arrow must never be one.
+			// Pointer events still fire, so the hold below is unaffected.
+			btn.addEventListener('touchstart', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+			btn.addEventListener('pointerdown', e => {
+				e.preventDefault();
+				// Capture keeps pointerup coming to this button however far the
+				// finger or cursor wanders mid-hold.
+				try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+				startHold(btn, 'p' + e.pointerId);
+			});
+			btn.addEventListener('pointerup', e => stopHold('p' + e.pointerId));
+			btn.addEventListener('pointercancel', e => stopHold('p' + e.pointerId));
+		}
 		// Enter/Space on a focused button: a single step or pulse, so the
 		// keyboard can nudge precisely; sweeping is what the stage-level
 		// arrows are for.
@@ -552,6 +796,117 @@
 			if (KEYS[e.key]) stopHold('k' + e.key);
 		});
 	}
+	// ---- the stick -------------------------------------------------------
+	//
+	// On the Pelco pad a finger anywhere on the arrows is a thumb on a stick:
+	// the head turns towards it for as long as it is down and follows it as it
+	// slides, so steering round means sliding, not lifting the finger to press
+	// another arrow. Near the centre is slow and the rim fast, where the motor
+	// keeps a speed (ptz-stick.js); back on the centre it stands still. The
+	// diagonals go where the camera lists them, and the corners of the plus are
+	// part of the stick too. A quick tap on an arrow is still a nudge: the
+	// first move of a press is the fine pulse, as a held arrow's is.
+	if (stick) {
+		// Until the camera has said, four directions at the pad's speed; a
+		// press asks again if it has not.
+		let diag = false, speeds = false, known = false;
+		const learn = () => {
+			if (known) return;
+			caps().then((t) => {
+				diag = PK.diagonals(t);
+				speeds = !!(PS && PS.offered(t));
+				known = true;
+			}, () => {});
+		};
+		learn();
+		const arrows = {};
+		pad.querySelectorAll('[data-act]').forEach((b) => { arrows[b.dataset.act] = b; });
+		// The axes this head has are the arrows its pad drew: a pan-only head
+		// has empty cells where up and down would be.
+		const hasPan = !!(arrows.left || arrows.right), hasTilt = !!(arrows.up || arrows.down);
+		let s = null;
+		// The arrows a verb is made of, lit while the head turns that way.
+		const light = (verb) => {
+			for (const k in arrows) arrows[k].classList.toggle('mj-ptz-on', !!verb && verb.indexOf(k) >= 0);
+		};
+		const topPct = () => (speedBox && !speedBox.hidden && speedIn ? +speedIn.value : 100);
+		const send = (ms) => {
+			if (!s || !s.verb) return;
+			if (!ms) s.long = true;
+			move(s.verb, ms, false, s.pct);
+		};
+		const steer = (e) => {
+			const dx = e.clientX - s.cx, dy = e.clientY - s.cy;
+			const d = Math.hypot(dx, dy), k = d > s.r ? s.r / d : 1;
+			knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
+			const a = PK.aim(dx, dy, { radius: s.r, dead: s.r * 0.22, diagonals: diag, prev: s.verb, pan: hasPan, tilt: hasTilt });
+			const verb = a ? a.verb : null;
+			const pct = a && speeds ? PK.pct(a.frac, topPct()) : null;
+			if (verb === s.verb && pct === s.pct) return;
+			const was = s.verb;
+			s.verb = verb;
+			s.pct = pct;
+			light(verb);
+			if (!verb) {
+				// Back on the centre: still, and ready to go again -- the fine
+				// pulse included, which would otherwise run out its time.
+				if (was) {
+					move('stop', 0, true);
+					s.long = true;   // a release from here is not a tap
+				}
+				return;
+			}
+			if (s.first) { send(); return; }
+			s.first = Date.now();
+			send(fineMs);
+			s.kick = setTimeout(() => {
+				if (!s) return;
+				s.kick = null;
+				send();
+				s.timer = setInterval(() => send(), TICK_MS);
+			}, fineMs);
+		};
+		const letGo = (e) => {
+			if (!s || (e && e.pointerId !== s.id)) return;
+			clearTimeout(s.kick);
+			clearInterval(s.timer);
+			// A tap shorter than the fine pulse is a nudge, and the pulse ends
+			// it; anything longer was a sweep and is told to stop.
+			if (s.verb && (s.long || Date.now() - s.first >= fineMs)) move('stop', 0, true);
+			s = null;
+			knob.style.transform = '';
+			pad.classList.remove('mj-ptz-sticking');
+			light(null);
+		};
+		// The settings, the fold and the handle are buttons on the pad, not
+		// part of the stick.
+		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip'));
+		pad.addEventListener('touchstart', (e) => { if (!own(e.target) && e.cancelable) e.preventDefault(); }, { passive: false });
+		pad.addEventListener('pointerdown', (e) => {
+			if (own(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;
+			e.preventDefault();
+			letGo();
+			stopHold(null);
+			learn();
+			try { pad.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+			// The rim is where the arrows are: measured, since the pad's size
+			// is the stylesheet's and changes with the screen.
+			const kb = knob.getBoundingClientRect();
+			const cx = kb.left + kb.width / 2, cy = kb.top + kb.height / 2;
+			const ref = arrows.right || arrows.up;
+			const rb = ref ? ref.getBoundingClientRect() : null;
+			const r = rb ? Math.max(24, Math.hypot(rb.left + rb.width / 2 - cx, rb.top + rb.height / 2 - cy)) : 44;
+			s = { id: e.pointerId, cx: cx, cy: cy, r: r, verb: null, pct: null, first: 0, long: false, kick: null, timer: null };
+			pad.classList.add('mj-ptz-sticking');
+			steer(e);
+		});
+		pad.addEventListener('pointermove', (e) => { if (s && e.pointerId === s.id) steer(e); });
+		pad.addEventListener('pointerup', letGo);
+		pad.addEventListener('pointercancel', letGo);
+		window.addEventListener('blur', () => letGo());
+		document.addEventListener('visibilitychange', () => { if (document.hidden) letGo(); });
+	}
+
 	// A hold must not outlive the page's attention: keyup and pointerup never
 	// arrive in a window that lost focus mid-hold.
 	window.addEventListener('blur', () => stopHold(null));

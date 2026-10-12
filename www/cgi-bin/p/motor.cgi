@@ -200,9 +200,10 @@ focus_label="Focus"
 	<input type="range" id="mj-ptz-speed-in" min="10" max="100" step="10" value="100"
 		aria-label="Pan and tilt speed, percent of the fastest">
 </div>
-<!-- Follow a person (ptz.track): the head turns toward whoever the NPU detector
-     sees. Revealed by preview-ptz.js only when GET /ptz says " steps=" (a motor
-     that counts) and npuDetect is on (ptz-follow.js); anywhere else it would
+<!-- Follow a person (ptz.track): the head turns toward whoever the object
+     detector sees. Revealed by preview-ptz.js only when GET /ptz says " steps="
+     (a motor that counts) and objectDetect is on and reporting people
+     (ptz-follow.js); anywhere else it would
      switch a setting that does nothing. A press on the pad pauses following
      on the camera for ptz.trackResumeSec. -->
 <div id="mj-ptz-follow" class="mj-ptz-speed mj-ptz-follow" hidden>
@@ -282,5 +283,6 @@ focus_label="Focus"
      the lens, it just stops narrating the autofocus. -->
 <script src="/a/af-state.js"></script>
 <script src="/a/ptz-speed.js"></script>
+<script src="/a/ptz-stick.js"></script>
 <script src="/a/ptz-follow.js"></script>
 <script src="/a/preview-ptz.js"></script>

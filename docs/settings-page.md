@@ -67,6 +67,7 @@ boot tag.
    | `string` | `x-numeric` (one number kept as text) | drawn as the `number` it is, with its bounds, `x-step` and `x-unit` |
    | `string` | `x-row-of` (one number per row of a sibling array) | hidden; the sibling's rows carry a box each and write the joined list back |
    | `string` | `x-list` (a fixed-length number list kept as text) | one labelled box per number (`mj-table.js`), a grid when `rows` > 1, a switch for a whole 0–1 cell |
+   | `string` | the key is `netip.password` | a password box that saves the **hash** XMEye/CMS clients send (`netip-hash.js`), retitled "Password". The stored hash is held aside and never shown, so the box is only ever what the owner typed and an untouched row stays clean |
    | `string` | `x-secret` or `writeOnly` | `<input type="password">` with a Show checkbox wired **in place** (the global toggle in `main.js` ran at load, long before this form existed) |
    | `string` | else | `<input type="text">` |
    | `array` | `items` are objects **with** a `url` member | the destinations board (`mj-servers.js`, `mj-outgoing.js`): rows are addresses |
@@ -266,6 +267,14 @@ box is unset and never matches a special 0 — except on a number box with exact
 one named value, which draws it the way the Picture page draws Auto: the box
 empty, the name as its placeholder, and emptying the box chooses it. Which decides a slider, and the
 lookup, are `EXP.sliderOf` and `EXP.specialFor` in `mj-exposure.js`.
+- **`visibleWhen` with `any`** shows a row while any one of several sibling
+  conditions holds, in the same shape `x-requires` uses for a row two settings
+  can each call for. A page that knows only `field` shows the row, so a schema
+  newer than the page never hides one.
+- **`x-enum-requires`** maps an enum value to an `x-requires`-shaped
+  requirement. `paintEnumHolds()` disables that one option while the
+  requirement is unmet, and says why under the row. It never disables the
+  value the field holds or was saved with.
 - **`x-title-when`** gives the field another name while a sibling holds a value,
   in `visibleWhen`'s spelling. The four ceilings are "Highest analog gain" and so
   on while auto-exposure spends them, and "Analog gain" in manual, where the same

@@ -22,6 +22,7 @@ eq('an empty answer offers none', S.offered(''), false);
 eq('full speed sends nothing extra', S.query('left', 100), '');
 eq('a slower pan sends its speed', S.query('left', 40), '&speed=40');
 eq('tilt too', S.query('down', 10), '&speed=10');
+eq('a diagonal too', S.query('upleft', 50), '&speed=50');
 eq('rounded to a whole percent', S.query('up', 33.6), '&speed=34');
 eq('never below 1', S.query('right', 0), '&speed=1');
 eq('zoom carries no speed', S.query('tele', 40), '');

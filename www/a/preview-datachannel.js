@@ -188,6 +188,7 @@ window.MajesticDataChannel = (function () {
 		opts = opts || {};
 		const stream = opts.stream | 0;
 		const S = window.MajesticSignal;
+		const trace = function (what, detail) { if (S.shareTrace) S.shareTrace(what, detail); };
 		const feed = {
 			readyState: 0, binaryType: 'arraybuffer',
 			onopen: null, onmessage: null, onmeta: null, onclose: null, onerror: null,
@@ -247,6 +248,9 @@ window.MajesticDataChannel = (function () {
 			const was = feed.readyState;
 			feed.readyState = 3;
 			if (reason === null) return;
+			// Inside a share, where the feed went goes in the guest's report
+			// too: the player moves on to the socket feed without a word.
+			trace('data-channel feed ended', reason);
 			demote(reason);
 			if (was !== 1 && feed.onerror) { try { feed.onerror({ reason: reason }); } catch (e) {} }
 			if (feed.onclose) { try { feed.onclose({ code: 4000, reason: reason, wasClean: false }); } catch (e) {} }
@@ -325,8 +329,12 @@ window.MajesticDataChannel = (function () {
 			}
 		}
 
+		const ice = S.iceOf(opts);
+		trace('data-channel feed ice servers', ice.map(function (x) {
+			return [].concat(x.urls).map(function (u) { return String(u).split(':')[0]; }).join('+');
+		}).join(' '));
 		try {
-			pc = new window.RTCPeerConnection({ iceServers: S.iceOf(opts) });
+			pc = new window.RTCPeerConnection({ iceServers: ice });
 			dc = pc.createDataChannel('video', { negotiated: true, id: 0, ordered: false, maxRetransmits: 0 });
 		} catch (e) {
 			setTimeout(function () { finish('refused'); }, 0);
@@ -360,6 +368,7 @@ window.MajesticDataChannel = (function () {
 		pc.oniceconnectionstatechange = function () {
 			if (!pc) return;
 			const s = pc.iceConnectionState;
+			trace('data-channel feed ice', s);
 			if (s === 'closed' || (s === 'failed' && (!gotMessage || !restart))) {
 				finish(feed.readyState === 1 ? 'closed' : 'ice-failed');
 				return;

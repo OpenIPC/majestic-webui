@@ -37,6 +37,26 @@ window.MajesticAdapt = (function () {
 	// no real channel equals, so the first tick always adopts silently.
 	let last = 0, chan = null;
 	let hideTimer = null, pinned = false, wired = false;
+	// Its × means "don't tell me again": a viewer who closed one did not want
+	// the next one either (asked for on a phone, where each change covered the
+	// picture). Per browser; the More sheet's "Bitrate notices" switch turns
+	// them back on (preview-bar-sheet.js).
+	const OFF_KEY = 'mj-adapt-off';
+	// This page's own copy, so a browser that refuses storage still keeps the
+	// choice for as long as the page is open; storage carries it further.
+	let on_ = null;
+	function enabled() {
+		if (on_ !== null) return on_;
+		try { on_ = localStorage.getItem(OFF_KEY) !== '1'; } catch (e) { on_ = true; }
+		return on_;
+	}
+	function setEnabled(on) {
+		on_ = !!on;
+		try {
+			if (on) localStorage.removeItem(OFF_KEY); else localStorage.setItem(OFF_KEY, '1');
+		} catch (e) { /* storage refused: the setting lasts this page */ }
+		if (!on) hide();
+	}
 
 	function fmt(kbps) {
 		return kbps >= 1000
@@ -58,7 +78,10 @@ window.MajesticAdapt = (function () {
 		el.addEventListener('focusin', pin);
 		el.addEventListener('click', function (ev) {
 			ev.stopPropagation();
-			hide();
+			// The × stops them for good; a click on the text only closes
+			// this one.
+			if (ev.target.closest && ev.target.closest('button')) setEnabled(false);
+			else hide();
 		});
 	}
 
@@ -82,7 +105,7 @@ window.MajesticAdapt = (function () {
 	}
 
 	function show(fromK, toK, why, up) {
-		if (!el || !ratesEl || !whyEl) return;
+		if (!el || !ratesEl || !whyEl || !enabled()) return;
 		ratesEl.innerHTML = '';
 		ratesEl.appendChild(document.createTextNode(fmt(fromK) + ' '));
 		const arrow = document.createElement('span');
@@ -90,6 +113,9 @@ window.MajesticAdapt = (function () {
 		arrow.textContent = (up ? '↗ ' : '↘ ') + fmt(toK);
 		ratesEl.appendChild(arrow);
 		whyEl.textContent = why;
+		// Kept as the toast's title too: on a small stage the sentence is not
+		// shown (bootstrap.override.css), only the rates.
+		el.title = why;
 		// A new step replaces whatever was showing, pin included: the pin
 		// held the old news, and this is news.
 		pinned = false;
@@ -172,5 +198,5 @@ window.MajesticAdapt = (function () {
 		hide();
 	}
 
-	return { tick: tick, reset: reset };
+	return { tick: tick, reset: reset, enabled: enabled, setEnabled: setEnabled };
 })();

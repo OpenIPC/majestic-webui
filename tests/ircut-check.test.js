@@ -801,6 +801,61 @@ function runRest() {
 				.some(x => x.id === 'threshold-half'));
 	}
 
+	group('monitorView: the sun and the set times');
+	{
+		// Neither has a reading of the scene to plot, so the whole of what the
+		// panel can say is who decides and when the next switch is -- and a
+		// countdown the camera did not publish must not turn into one.
+		const sun = ic.monitorView({ lightMonitor: true, switchBy: 'sun' }, {
+			night_mode_source: 5, night_enabled: 1,
+			night_sun_elevation_millidegrees: -23400, night_sun_next_day_seconds: 15811,
+		});
+		check('the sun decides, and is drawn as a sentence', sun.mode === 'sun' && !sun.chart, sun.mode);
+		check('where it is, below the horizon', /23\.4° below the horizon/.test(sun.line), sun.line);
+		check('day again in hours, not hundreds of minutes', /Day again in 4 h 24 min/.test(sun.line), sun.line);
+
+		const white = ic.monitorView({ lightMonitor: true, switchBy: 'sun' }, {
+			night_mode_source: 5, night_enabled: 0, night_sun_elevation_millidegrees: 4100,
+		});
+		check('a night that does not come within the lookahead is not given a time',
+			!/Night in/.test(white.line) && /4\.1° above/.test(white.line), white.line);
+
+		const clock = ic.monitorView({ lightMonitor: true, switchBy: 'clock' }, {
+			night_mode_source: 6, night_enabled: 0, night_clock_next_night_seconds: 3546,
+		});
+		check('the set times decide', clock.mode === 'clock' && /Night in 59 min/.test(clock.line), clock.line);
+		const unsure = ic.monitorView({ lightMonitor: true, switchBy: 'sun' }, {
+			night_mode_source: 5, night_sun_elevation_millidegrees: -23400,
+			night_sun_next_day_seconds: 15811, night_sun_next_night_seconds: 60000,
+		}).line;
+		check('no countdown when day or night is itself unknown', !/ in \d/.test(unsure), unsure);
+	}
+
+	group('monitorView: the picture, when the sun or the clock hands back');
+	{
+		const handed = (st) => ic.monitorView({ lightMonitor: true, switchBy: 'sun' }, {
+			night_mode_source: 4, night_enabled: 0, night_auto_gain_milli: 1500,
+			night_sun_state: st,
+		}).line;
+		check('no place is said', /has not been said/.test(handed(1)), handed(1));
+		check('no clock is said', /clock is not set/.test(handed(2)), handed(2));
+		check('a night the sun does not reach is said', /does not get down/.test(handed(3)), handed(3));
+		check('a sun that could answer adds nothing', !/sun is not deciding/.test(handed(0)), handed(0));
+
+		const gated = (closed, n) => ic.monitorView({ lightMonitor: true, switchBy: 'pictureNearSun' }, {
+			night_mode_source: 4, night_enabled: 1, night_auto_gain_milli: 1100,
+			night_window_closed: closed, night_days_refused_total: n,
+		}).line;
+		check('a closed window is said, with the count since start', /No day until the window around dawn opens — refused 5 times since the camera started/.test(gated(1, 5)), gated(1, 5));
+		const byDay = ic.monitorView({ lightMonitor: true, switchBy: 'pictureNearSun' }, {
+			night_mode_source: 4, night_enabled: 0, night_auto_gain_milli: 1100,
+			night_window_closed: 1, night_days_refused_total: 5,
+		}).line;
+		check('a camera still in day is not being held by the window', !/window/.test(byDay), byDay);
+		check('an open window says nothing', !/window/.test(gated(0, 5)), gated(0, 5));
+		check('an absent window gauge says nothing either', !/window/.test(gated(undefined, undefined)));
+	}
+
 	group('monitorView: automatic mode says what night is waiting for');
 	{
 		// Uncalibrated, night is not decided by gain at all — it waits for the
