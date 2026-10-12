@@ -11268,9 +11268,14 @@
 			const none = p.querySelector('#' + id + '-none');
 			const EMPTY = netipHash.hash('');
 			let stored = '';
+			// What was typed is set aside while the switch is on, not lost:
+			// switching it back off is "never mind", and must not leave the
+			// row reading as the stored hash with the new password gone.
+			let typed = '';
 			const paintNone = () => {
 				control.disabled = none.checked;
-				if (none.checked) control.value = '';
+				if (none.checked) { typed = control.value || typed; control.value = ''; }
+				else if (typed !== '') { control.value = typed; typed = ''; }
 				control.placeholder = none.checked ? ''
 					: stored !== '' && stored !== EMPTY ? 'Set — type a new one to replace it' : 'Not set';
 			};
@@ -11280,6 +11285,7 @@
 			control._set = (v) => {
 				stored = v !== undefined && v !== null ? String(v) : '';
 				control.value = '';
+				typed = '';
 				none.checked = stored === EMPTY;
 				paintNone();
 			};
