@@ -151,7 +151,14 @@ done
 # everything in sbin/ and bin/. Measured, 165 KB of 300 KB -- more than the
 # templates gave -- and every stripped script parses to the same syntax tree
 # as its source.
-node tools/strip-cgi-comments.js "$PKG/www" "$PKG/sbin" "$PKG/bin"
+#
+# Only the directories the copy step above actually staged: sbin/ and bin/ are
+# optional there, and a path the stripper cannot stat stops the build.
+set -- "$PKG/www"
+for d in sbin bin; do
+	if [ -d "$PKG/$d" ]; then set -- "$@" "$PKG/$d"; fi
+done
+node tools/strip-cgi-comments.js "$@"
 
 # ...and refuse to build a payload that still carries any.
 #
