@@ -38,24 +38,45 @@
 		const o = opts || {};
 		const tx = o.tx >= 0 && o.tx <= 1 ? o.tx : 0.5;
 		const ty = o.ty >= 0 && o.ty <= 1 ? o.ty : 0.5;
-		// Rounded away from the middle alike both ways: Math.round takes -33.5
+		return build((nx - tx) * f.w, (ty - ny) * f.h, o);
+	}
+
+	// What moving the picture by `dx`, `dy` -- fractions of the frame as
+	// drawn, + right and down -- asks of the head: the content under the
+	// finger follows it, as a map does, so a drag to the right turns the head
+	// left and a drag down turns it up. Not held to the frame: a drag past its
+	// edge is still that far. Same shape and options as plan().
+	function drag(dx, dy, f, opts) {
+		return build(-dx * f.w, dy * f.h, opts || {});
+	}
+
+	// The steps (pan + right, tilt + up), the moves that make them, and about
+	// how long the head takes, from the wanted turn in steps. `mirror` and
+	// `flip` are how the picture is turned over: a mirrored picture's right is
+	// the head's left, a flipped one's up its down. `pan: false` or
+	// `tilt: false` is a head without that axis, which is not asked to turn it.
+	// Within half a step of nothing is nothing; one move is at most MAX steps.
+	const MAX = 1000;
+	function build(p, t, o) {
+		// Rounded away from nothing alike both ways: Math.round takes -33.5
 		// to -33 and 33.5 to 34, a step short to the left and down only.
 		const even = (v) => (v < 0 ? -Math.round(-v) : Math.round(v));
-		let pan = o.pan === false ? 0 : even((nx - tx) * f.w);
-		let tilt = o.tilt === false ? 0 : even((ty - ny) * f.h);
+		const cap = (v) => Math.max(-MAX, Math.min(MAX, v));
+		let pan = o.pan === false ? 0 : cap(even(p));
+		let tilt = o.tilt === false ? 0 : cap(even(t));
 		if (o.mirror) pan = -pan;
 		if (o.flip) tilt = -tilt;
 		pan = pan || 0;
 		tilt = tilt || 0;
 		const moves = [];
-		if (pan) moves.push({ verb: pan > 0 ? 'right' : 'left', steps: Math.min(Math.abs(pan), 1000) });
-		if (tilt) moves.push({ verb: tilt > 0 ? 'up' : 'down', steps: Math.min(Math.abs(tilt), 1000) });
-		// How long, for the ring that shows where the head is going: a
-		// gpiostep head's pan step is 16 ms and its tilt step 24 ms at the top
-		// rate, and the two axes take turns. A guide, not a promise.
+		if (pan) moves.push({ verb: pan > 0 ? 'right' : 'left', steps: Math.abs(pan) });
+		if (tilt) moves.push({ verb: tilt > 0 ? 'up' : 'down', steps: Math.abs(tilt) });
+		// How long, for what shows where the head is going: a gpiostep head's
+		// pan step is 16 ms and its tilt step 24 ms at the top rate, and the
+		// two axes take turns. A guide, not a promise.
 		const ms = Math.abs(pan) * 16 + Math.abs(tilt) * 24;
 		return { pan: pan, tilt: tilt, moves: moves, ms: ms };
 	}
 
-	return { frame: frame, plan: plan };
+	return { frame: frame, plan: plan, drag: drag, MAX: MAX };
 });

@@ -916,39 +916,71 @@
 		};
 		// Said once per browser, when it first becomes possible: a gesture
 		// nobody is told about is one nobody finds.
-		const HINT_KEY = 'mj-ptz-centre-hint';
+		const HINT_KEY = 'mj-ptz-steer-hint';
 		const hint = () => {
 			let seen = false;
 			try { seen = localStorage.getItem(HINT_KEY) === '1'; } catch (e) { /* show it */ }
 			if (seen) return;
 			try { localStorage.setItem(HINT_KEY, '1'); } catch (e) { /* once a page then */ }
-			tell('Double-tap the picture to turn the camera to that spot.', 8000);
+			tell('Drag the picture to turn the camera; double-tap to centre a spot.', 8000);
 		};
 		let frame = null, turn = null;
 		const ready = () => !!(frame && turn && !turn.sideways);
+		// A read that failed is asked again, a little later each time, and at
+		// the next touch of the picture: a camera that did not answer at load
+		// is not one without the gestures for the life of the page.
+		const AGAIN_MS = [2000, 5000, 15000, 30000, 60000];
+		let again = 0, againTimer = null;
+		const retry = () => {
+			if (againTimer || again >= AGAIN_MS.length) return;
+			againTimer = setTimeout(() => {
+				againTimer = null;
+				again++;
+				if (!frame) learnFrame();
+				if (!turn) learnTurn();
+			}, AGAIN_MS[again]);
+		};
 		const learnFrame = () => caps().then((t) => {
 			frame = PC.frame(t);
-			if (ready()) hint();
-		}, () => {});
+			if (ready()) arrive();
+		}, retry);
 		const learnTurn = () => {
 			if (typeof mjConfig !== 'function') return;
 			mjConfig().then((c) => {
 				// A failed read resolves {}: no image section is a camera not
 				// heard from, not one that is upright.
 				const im = c && c.image;
-				if (!im || typeof im !== 'object') return;
+				if (!im || typeof im !== 'object') { retry(); return; }
 				const r = Number(im.rotate);
 				// On its side the picture's across is the head's tilt; the
 				// frame measured upright would aim it wrong, so it stays off.
 				turn = { mirror: im.mirror === true, flip: im.flip === true, sideways: r === 90 || r === 270 };
-				if (ready()) hint();
+				if (ready()) arrive();
 			}, () => {});
 		};
 		learnFrame();
 		learnTurn();
+		stage.addEventListener('pointerdown', () => {
+			if (ready()) return;
+			if (!frame) learnFrame();
+			if (!turn) learnTurn();
+		}, true);
+		// A picture standing still is not the live one: the uncompressed still
+		// over it, or the snapshot under tap-to-play. Neither a drag nor a
+		// double-tap turns the head for a picture that would not show the turn.
+		const visible = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
+		const paused = () => stage.classList.contains('mj-stilled') || visible('#mj-snapshot') || visible('#mj-tap-play');
 		// The axes this head has are the arrows its pad drew.
 		const hasPan = !!pad.querySelector('[data-act="left"],[data-act="right"]');
 		const hasTilt = !!pad.querySelector('[data-act="up"],[data-act="down"]');
+		// One counted move per axis, both at once: the head runs a pan count
+		// and a tilt count together. Rejects when either is refused -- or the
+		// lens driver is absent, which answers 200 'unavailable'.
+		const sendSteps = (moves) => Promise.all(moves.map((mv) =>
+			apiFetch('/ptz?move=' + mv.verb + '&steps=' + mv.steps, { method: 'POST', credentials: 'same-origin' })
+				.then((res) => (res.ok ? res.text() : Promise.reject(res.status)))
+				.then((t) => { if (t.trim() === 'unavailable') throw new Error('unavailable'); })
+		));
 		const OVER = '.mj-bar, .mj-ptz, #mj-stats, #mj-toasts, #mj-tap-play, .mj-more-sheet';
 		const media = () => {
 			for (const m of stage.querySelectorAll('.mj-stage-media')) {
@@ -1000,7 +1032,7 @@
 		const centreAt = (x, y) => {
 			if (!frame) { learnFrame(); return false; }
 			if (!turn) { learnTurn(); return false; }
-			if (turn.sideways) return false;
+			if (turn.sideways || paused()) return false;
 			// Not before the picture is laid out: until then the media box is
 			// the stage's own, not a frame.
 			const Z = window.MajesticZoom;
@@ -1026,15 +1058,121 @@
 			// Both at once: the head runs a pan count and a tilt count
 			// together. Either refused -- or the lens driver absent, which
 			// answers 200 'unavailable' -- and the ring stops where it is.
-			Promise.all(p.moves.map((mv) =>
-				apiFetch('/ptz?move=' + mv.verb + '&steps=' + mv.steps, { method: 'POST', credentials: 'same-origin' })
-					.then((res) => (res.ok ? res.text() : Promise.reject(res.status)))
-					.then((t) => { if (t.trim() === 'unavailable') throw new Error('unavailable'); })
-			)).catch(() => {
+			sendSteps(p.moves).catch(() => {
 				shown.fail();
 				tell('The camera did not turn. Try again.');
 			});
 			return true;
+		};
+
+		// ---- drag the picture to steer ---------------------------------
+		//
+		// In Fit and Fill a drag on the picture is handed here (preview-zoom's
+		// setSteer()). The picture slides under the finger at once, showing
+		// where the head will end up; on release the head turns that far, one
+		// counted move per axis, and the picture eases back as the live one
+		// arrives where the slide left it. Nothing is held and nothing has to
+		// be stopped, so a slow link costs only the wait. Like a map: the
+		// content under the finger follows it.
+		const SLIDE_MIN = 8;   // px: under it the press was a tap (the bar, a double-tap)
+		const reduced = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+		let slideTimer = null;
+		// The picture's offset, eased over `ms` (0: at once). The inline
+		// transition is taken off once it is done: preview-zoom eases the
+		// media's own position, and a transition left here would replace it.
+		const slide = (dx, dy, ms) => {
+			clearTimeout(slideTimer);
+			for (const m of stage.querySelectorAll('.mj-stage-media')) {
+				m.style.transition = ms ? 'transform ' + ms + 'ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none';
+				m.style.transform = dx || dy ? 'translate(' + dx + 'px, ' + dy + 'px)' : '';
+			}
+			if (!dx && !dy) {
+				slideTimer = setTimeout(() => {
+					for (const m of stage.querySelectorAll('.mj-stage-media')) m.style.transition = '';
+				}, ms + 50);
+			}
+		};
+		let held = null;
+		// Which drag is the latest: an earlier one's ease back and its answer
+		// leave a newer drag's picture alone.
+		let steerGen = 0;
+		const steerer = {
+			wants: (e) => {
+				if (e.target.closest && e.target.closest(OVER)) return false;
+				const Z = window.MajesticZoom;
+				return ready() && !paused() && !!media() && !!(Z && typeof Z.view === 'function' && Z.view());
+			},
+			start: (e) => {
+				steerGen++;
+				held = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, dx: 0, dy: 0, on: false,
+					r: media().getBoundingClientRect() };
+			},
+			move: (e) => {
+				if (!held) return;
+				held.lx = e.clientX;
+				held.ly = e.clientY;
+				let dx = hasPan ? e.clientX - held.x : 0, dy = hasTilt ? e.clientY - held.y : 0;
+				if (!held.on) {
+					if (Math.hypot(e.clientX - held.x, e.clientY - held.y) <= SLIDE_MIN) return;
+					held.on = true;
+					stage.classList.add('mj-steering');
+					stopHold(null);
+				}
+				// No further than one move can turn the head.
+				const mx = PC.MAX / frame.w * held.r.width, my = PC.MAX / frame.h * held.r.height;
+				dx = Math.max(-mx, Math.min(mx, dx));
+				dy = Math.max(-my, Math.min(my, dy));
+				held.dx = dx;
+				held.dy = dy;
+				slide(dx, dy, 0);
+			},
+			end: (e, commit) => {
+				const d = held;
+				held = null;
+				stage.classList.remove('mj-steering');
+				if (!d || !d.on) return;
+				const p = commit ? PC.drag(d.dx / d.r.width, d.dy / d.r.height, frame, {
+					mirror: turn.mirror, flip: turn.flip, pan: hasPan, tilt: hasTilt,
+				}) : null;
+				if (!p || !p.moves.length) { slide(0, 0, 200); return; }
+				// Held where it was let go for a moment -- the move is on its
+				// way -- then eased back over about the head's time.
+				const glide = Math.max(250, Math.min(p.ms, 4000));
+				const still = reduced();
+				const g = steerGen;
+				const mine = () => g === steerGen && !held;
+				const back = setTimeout(() => { if (mine()) slide(0, 0, still ? 0 : glide); }, still ? glide : 150);
+				sendSteps(p.moves).catch(() => {
+					clearTimeout(back);
+					if (mine()) slide(0, 0, 200);
+					tell('The camera did not turn. Try again.');
+				});
+			},
+			cancel: () => {
+				const d = held;
+				held = null;
+				stage.classList.remove('mj-steering');
+				if (d && d.on) slide(0, 0, 200);
+				return d ? { x: d.lx, y: d.ly } : null;
+			},
+		};
+		// Once the camera has said how far a frame is and how its picture is
+		// turned: the hint, and the drag.
+		//
+		// preview-zoom.js loads after this file, and the camera's answers can
+		// land while the browser is still fetching it: then the drag is handed
+		// over once the document has loaded, not dropped.
+		const register = () => {
+			const Z = window.MajesticZoom;
+			if (!Z || typeof Z.setSteer !== 'function') return false;
+			Z.setSteer(steerer);
+			return true;
+		};
+		const arrive = () => {
+			hint();
+			if (register()) return;
+			if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', register, { once: true });
+			else setTimeout(register, 0);
 		};
 		// The pointer's double-click, ahead of preview-zoom.js's Fit/Fill
 		// toggle (capture on the stage runs first), and only when it centred.
@@ -1066,7 +1204,9 @@
 			down = null;
 			if (!d || e.pointerId !== d.id || e.type === 'pointercancel') return;
 			const now = Date.now();
-			if (now - d.t > 300 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10) { prev = null; return; }
+			// The same bound the drag starts at: past it the press was a steer,
+			// and it is no half of a double-tap.
+			if (now - d.t > 300 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > SLIDE_MIN) { prev = null; return; }
 			if (prev && now - prev.t < 400 && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 40) {
 				prev = null;
 				centreAt(e.clientX, e.clientY);

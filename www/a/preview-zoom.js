@@ -203,10 +203,26 @@
 	// happen, drag a box round it, and you are on it, no control to visit
 	// first. Where the picture DOES overflow the drag is the pan, and the Area
 	// button is how you ask for a rectangle instead.
+	//
+	// A third, on a camera that turns: in Fit and Fill the drag steers it
+	// (setSteer(), preview-ptz.js) -- the picture slides under the finger and
+	// the head follows on release -- and neither a pan of a Fill crop nor a
+	// box drawn without Area is what it does there. Zoomed in, the drag pans
+	// the zoomed picture as ever, and Area still draws.
+	let affordance = null;
 	function setAffordance(sw, sh, picW, picH) {
+		affordance = [sw, sh, picW, picH];
 		const pannable = picW > sw + 1 || picH > sh + 1;
-		stage.classList.toggle('mj-pannable', pannable);
-		stage.classList.toggle('mj-drawable', placed && !pannable);
+		const steerable = steers();
+		// A view that stops steering -- 1:1, a zoom -- ends a steer under way:
+		// called off, picture back, nothing sent.
+		if (steering && !steerable) {
+			steering = null;
+			if (steer) steer.cancel();
+		}
+		stage.classList.toggle('mj-steerable', steerable);
+		stage.classList.toggle('mj-pannable', pannable && !steerable);
+		stage.classList.toggle('mj-drawable', placed && !pannable && !steerable);
 	}
 
 	function layout() {
@@ -464,6 +480,13 @@
 	let pinchDist = 0, pinchX = 0, pinchY = 0;
 	let lastType = 'mouse';
 
+	// The steer: whoever turns the camera with a drag (setSteer()), and the
+	// pointer doing it now.
+	let steer = null, steering = null;
+	function steers() {
+		return !!(steer && placed && (mode === 'fit' || mode === 'fill'));
+	}
+
 	// Zoom-to-area. `armed` is the button's state; `band` is the drag in
 	// progress, in stage coordinates; `picker` is whoever asked for the next
 	// rectangle instead of the zoom -- pickRect(), below.
@@ -544,6 +567,27 @@
 			pinchDist = 0;
 			return;
 		}
+		// The same for a steer: a second finger says it was a pinch all
+		// along. The steer is called off -- the picture goes back, nothing is
+		// sent -- and both fingers go to the pinch.
+		if (steering) {
+			if (steering.type !== 'touch' || e.pointerType !== 'touch') return;
+			const id = steering.id;
+			steering = null;
+			const at = steer.cancel() || {};
+			pts.set(id, { x: at.x, y: at.y });
+			pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+			pinchDist = 0;
+			return;
+		}
+		// One pointer on a picture in Fit or Fill, on a camera that turns:
+		// the steer's, if it wants it.
+		if (!armed && pts.size === 0 && steers() && steer.wants(e)) {
+			steering = { id: e.pointerId, type: e.pointerType };
+			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+			steer.start(e);
+			return;
+		}
 
 		// Armed, or simply nothing to pan: either way the drag draws -- unless
 		// this is a finger and another is already down, in which case it joins
@@ -574,6 +618,10 @@
 	});
 
 	stage.addEventListener('pointermove', (e) => {
+		if (steering) {
+			if (e.pointerId === steering.id) steer.move(e);
+			return;
+		}
 		if (drawing) {
 			if (e.pointerId !== drawing.id) return;
 			drawing.cx = e.clientX; drawing.cy = e.clientY;
@@ -661,8 +709,21 @@
 			try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
 		}
 	}
-	stage.addEventListener('pointerup', (e) => { if (!finishDraw(e, true)) endPointer(e); });
-	stage.addEventListener('pointercancel', (e) => { if (!finishDraw(e, false)) endPointer(e); });
+	// The steer's pointer ends the steer: lifted, it is sent; taken away by
+	// the browser (pointercancel), it is not.
+	function finishSteer(e, commit) {
+		if (!steering || e.pointerId !== steering.id) return false;
+		steering = null;
+		try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
+		steer.end(e, commit);
+		return true;
+	}
+	stage.addEventListener('pointerup', (e) => {
+		if (!finishSteer(e, true) && !finishDraw(e, true)) endPointer(e);
+	});
+	stage.addEventListener('pointercancel', (e) => {
+		if (!finishSteer(e, false) && !finishDraw(e, false)) endPointer(e);
+	});
 
 	// The wheel zooms, about the pointer. It used to pan the overflowing axis,
 	// which is what a Mac trackpad's two fingers want -- but a mouse wheel is
@@ -724,6 +785,18 @@
 	window.MajesticZoom = {
 		// The stream's real pixel size, from the player's codec report.
 		setFrame: setFrame,
+
+		// Who turns the camera with a drag in Fit and Fill, or null for no
+		// one: { wants(e), start(e), move(e), end(e, commit), cancel() }.
+		// wants() is asked at the press and may decline it; cancel() answers
+		// where the pointer last was, {x, y} in client pixels, for the pinch
+		// a second finger turns the steer into.
+		setSteer: function (h) {
+			if (steering && steer) steer.cancel();
+			steering = null;
+			steer = h && typeof h.wants === 'function' ? h : null;
+			if (affordance) setAffordance.apply(null, affordance);
+		},
 
 		// How far in a zoom may go beyond 3x native: a function answering a
 		// scale in the frame's own terms (or 0), read at every zoom; null to

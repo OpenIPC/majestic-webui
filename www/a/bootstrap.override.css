@@ -4130,6 +4130,14 @@ button.mj-osd-chip,
 	cursor: grabbing;
 }
 
+/* On a camera that turns, a drag in Fit and Fill steers it (preview-ptz.js):
+   the picture is held, as a pan's would be. The closed hand while it moves is
+   .mj-steering's. */
+.mj-stage.mj-steerable,
+.mj-stage.mj-steerable .mj-stage-media {
+	cursor: grab;
+}
+
 /* Zoom to an area: a crosshair while the Area button is armed, and also
    wherever the picture has nothing to pan — Fit, and Fill on a camera whose
    shape matches the window. A drag there was doing nothing at all, which is

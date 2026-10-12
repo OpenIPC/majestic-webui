@@ -31,4 +31,16 @@ eq('a pan-only head is not asked to tilt', C.plan(0.75, 0.1, F, { tilt: false })
 eq('a tilt-only head is not asked to pan', C.plan(0.75, 0.1, F, { pan: false }).moves, [{ verb: 'up', steps: 25 }]);
 eq('the time is the two axes in turn', C.plan(1, 0, F).ms, 67 * 16 + 31 * 24);
 
+// Drag: the content under the finger follows it, as a map does.
+eq('a drag right turns the head left', C.drag(0.25, 0, F).moves, [{ verb: 'left', steps: 34 }]);
+eq('a drag down turns it up', C.drag(0, 1 / 6, F).moves, [{ verb: 'up', steps: 10 }]);
+eq('a drag up-left turns it right and down', C.drag(-0.25, -0.25, F).moves, [{ verb: 'right', steps: 34 }, { verb: 'down', steps: 16 }]);
+eq('a drag past the frame is still that far', C.drag(-1.5, 0, F).moves, [{ verb: 'right', steps: 201 }]);
+eq('mirrored, a drag right turns it right', C.drag(0.25, 0, F, { mirror: true }).moves, [{ verb: 'right', steps: 34 }]);
+eq('flipped, a drag down turns it down', C.drag(0, 1 / 6, F, { flip: true }).moves, [{ verb: 'down', steps: 10 }]);
+eq('a pan-only head drags only across', C.drag(0.25, 0.25, F, { tilt: false }).moves, [{ verb: 'left', steps: 34 }]);
+eq('under half a step is nothing', C.drag(0.003, -0.007, F).moves, []);
+eq('one move is at most MAX steps', C.drag(-20, 0, F).moves, [{ verb: 'right', steps: C.MAX }]);
+eq('the pan is capped with it, for the preview', C.drag(-20, 0, F).pan, C.MAX);
+
 done();
