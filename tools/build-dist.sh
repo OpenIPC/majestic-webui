@@ -146,7 +146,12 @@ done
 # of 297 KB, and on the Live page 17 KB of the 32 KB a browser is sent EVERY
 # time somebody opens it -- uncompressed, because a CGI reply comes back
 # chunked with no Content-Encoding however the request asks for one.
-node tools/strip-cgi-comments.js "$PKG/www"
+#
+# ...and out of the plain shell scripts: the j/*.cgi endpoints, p/*.sh, and
+# everything in sbin/ and bin/. Measured, 165 KB of 300 KB -- more than the
+# templates gave -- and every stripped script parses to the same syntax tree
+# as its source.
+node tools/strip-cgi-comments.js "$PKG/www" "$PKG/sbin" "$PKG/bin"
 
 # ...and refuse to build a payload that still carries any.
 #
