@@ -5415,6 +5415,32 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	cursor: grabbing;
 }
 
+/* The controls over the picture are not the picture. Without a cursor of
+   their own they took the stage's -- the crosshair of Fit and Area, the hand
+   of a picture to pan -- and promised a zoom box or a pan over the PTZ pad,
+   the bar and the stats. Their buttons keep their own. */
+#mj-ptz,
+#mj-bar,
+#mj-stats {
+	cursor: default;
+}
+
+/* The stick is held: an open hand over it, a closed one while it steers --
+   over the whole stage, since the pointer leaves the pad mid-drag and stays
+   the stick's. The handle is held the same way; Bootstrap's pointer on every
+   enabled button outranked its own. */
+.mj-ptz-stick,
+.mj-ptz-stick .mj-ptz-btn:not(:disabled),
+.mj-ptz .mj-ptz-grip:not(:disabled) {
+	cursor: grab;
+}
+
+.mj-stage.mj-steering,
+.mj-stage.mj-steering *,
+.mj-ptz.mj-ptz-dragging .mj-ptz-grip {
+	cursor: grabbing !important;
+}
+
 /* The corner it was put in. Bottom right is where it always stood; the top
    corners start below the chip, the left ones mirror the right. */
 .mj-stage.mj-ptz-bl .mj-ptz,
