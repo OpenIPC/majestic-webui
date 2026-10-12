@@ -123,10 +123,12 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownSystem" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Setup</h6></li>
 							<li><a class="dropdown-item" href="network.cgi"><% page_label network %></a></li>
-							<!-- A cellular modem's messages and short codes. Shown where there
-							     is a serial port a modem could answer on; the page itself
-							     says so when that port turns out not to be one. -->
-							<% if [ -n "$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null)" ]; then %>
+							<!-- A cellular modem's messages and short codes. Shown where the
+							     firmware carries the page -- it is a build option, for boards
+							     with a modem -- and there is a serial port a modem could answer
+							     on; the page itself says so when that port turns out not to be
+							     one. -->
+							<% if [ -x /usr/sbin/modem-at ] && [ -n "$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null)" ]; then %>
 								<li><a class="dropdown-item" href="sms.cgi"><% page_label sms %></a></li>
 							<% fi %>
 							<li><a class="dropdown-item" href="time.cgi"><% page_label time %></a></li>
