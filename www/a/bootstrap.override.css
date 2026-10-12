@@ -5632,6 +5632,27 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	transition: none;
 }
 
+/* Centre on a point (preview-ptz.js): a ring where the picture was tapped,
+   gliding to the middle of the picture as the head turns there, then gone. */
+.mj-centre-ring {
+	position: absolute;
+	z-index: 5;
+	width: 2.75rem;
+	height: 2.75rem;
+	margin: -1.375rem 0 0 -1.375rem;
+	border: 2px solid rgba(255, 255, 255, 0.9);
+	border-radius: 50%;
+	box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35), inset 0 0 0 2px rgba(0, 0, 0, 0.25);
+	pointer-events: none;
+	opacity: 1;
+	transition-property: transform, opacity;
+	transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1), ease-out;
+}
+
+.mj-centre-ring.mj-centre-done {
+	opacity: 0;
+}
+
 .mj-ptz-btn.mj-ptz-on {
 	background: rgba(255, 255, 255, 0.22);
 	color: #fff;

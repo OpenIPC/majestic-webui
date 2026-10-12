@@ -886,6 +886,143 @@
 		document.addEventListener('visibilitychange', () => { if (document.hidden) letGo(); });
 	}
 
+	// ---- centre on a point -------------------------------------------------
+	//
+	// Double-tap (or double-click) a point of the picture and the head turns
+	// to put it in the middle (ptz-centre.js): one counted move per axis, so
+	// nothing to hold and nothing to stop, however slow the link. A ring at
+	// the point glides to the middle of the picture over about the time the
+	// head takes, so what was asked is on screen before the picture catches
+	// up. Only where the camera says how many steps make a frame; there the
+	// double-click is this, and Fit/Fill stays in the bar.
+	const PC = window.MajesticPtzCentre;
+	if (stage && PC && pad && pad.querySelector('[data-act]')) {
+		let frame = null;
+		let turn = { mirror: false, flip: false, sideways: false };
+		const learnFrame = () => caps().then((t) => {
+			const had = frame;
+			frame = PC.frame(t);
+			if (frame && !had) hint();
+		}, () => {});
+		learnFrame();
+		if (typeof mjConfig === 'function') {
+			mjConfig().then((c) => {
+				const im = (c && c.image) || {};
+				const r = Number(im.rotate);
+				// On its side the picture's across is the head's tilt; the
+				// frame measured upright would aim it wrong, so it stays off.
+				turn = { mirror: im.mirror === true, flip: im.flip === true, sideways: r === 90 || r === 270 };
+			}, () => {});
+		}
+		const OVER = '.mj-bar, .mj-ptz, #mj-stats, #mj-toasts, #mj-tap-play, .mj-more-sheet';
+		const media = () => {
+			for (const m of stage.querySelectorAll('.mj-stage-media')) {
+				if (!m.hidden && m.getBoundingClientRect().width > 0) return m;
+			}
+			return null;
+		};
+		const ring = (x, y, cx, cy, ms) => {
+			const st = stage.getBoundingClientRect();
+			const el = document.createElement('div');
+			el.className = 'mj-centre-ring';
+			el.setAttribute('aria-hidden', 'true');
+			el.style.left = (x - st.left) + 'px';
+			el.style.top = (y - st.top) + 'px';
+			stage.appendChild(el);
+			const glide = Math.max(250, Math.min(ms, 4000));
+			const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+			el.style.transitionDuration = still ? '0ms' : glide + 'ms';
+			requestAnimationFrame(() => requestAnimationFrame(() => {
+				el.style.transform = `translate(${cx - x}px, ${cy - y}px)`;
+				el.classList.add('mj-centre-going');
+			}));
+			setTimeout(() => {
+				el.style.transitionDuration = '0ms, 400ms';
+				el.classList.add('mj-centre-done');
+				setTimeout(() => el.remove(), 450);
+			}, (still ? 600 : glide) + 150);
+		};
+		// Where the point is in the frame: the media element is the whole
+		// frame as drawn, the letterbox, a Fill crop and a zoom included.
+		const centreAt = (x, y) => {
+			if (!frame) { learnFrame(); return false; }
+			if (turn.sideways) return false;
+			const m = media();
+			if (!m) return false;
+			const r = m.getBoundingClientRect();
+			const nx = (x - r.left) / r.width, ny = (y - r.top) / r.height;
+			if (!(nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1)) return false;
+			const p = PC.plan(nx, ny, frame, turn);
+			if (!p.moves.length) return true;
+			stopHold(null);
+			// Both at once: the head runs a pan count and a tilt count
+			// together, whichever lands first.
+			for (const mv of p.moves) {
+				apiFetch('/ptz?move=' + mv.verb + '&steps=' + mv.steps, { method: 'POST', credentials: 'same-origin' })
+					.catch(() => {});
+			}
+			ring(x, y, r.left + r.width / 2, r.top + r.height / 2, p.ms);
+			return true;
+		};
+		// The pointer's double-click, ahead of preview-zoom.js's Fit/Fill
+		// toggle (capture on the stage runs first), and only when it centred.
+		let lastTouch = 0;
+		stage.addEventListener('dblclick', (e) => {
+			if (Date.now() - lastTouch < 800) return;
+			if (e.target.closest && e.target.closest(OVER)) return;
+			if (centreAt(e.clientX, e.clientY)) {
+				e.preventDefault();
+				e.stopImmediatePropagation();
+			}
+		}, true);
+		// A finger's double-tap: two short taps close together. The first has
+		// already shown (or hidden) the bar and the second puts it back, so
+		// the bar ends as it was. A second finger makes it a pinch, not a tap.
+		let down = null, prev = null, fingers = 0;
+		stage.addEventListener('pointerdown', (e) => {
+			if (e.pointerType !== 'touch') return;
+			lastTouch = Date.now();
+			fingers++;
+			down = fingers === 1 && !(e.target.closest && e.target.closest(OVER))
+				? { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() } : null;
+			if (fingers > 1) prev = null;
+		});
+		const up = (e) => {
+			if (e.pointerType !== 'touch') return;
+			fingers = Math.max(0, fingers - 1);
+			const d = down;
+			down = null;
+			if (!d || e.pointerId !== d.id || e.type === 'pointercancel') return;
+			const now = Date.now();
+			if (now - d.t > 300 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10) { prev = null; return; }
+			if (prev && now - prev.t < 400 && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 40) {
+				prev = null;
+				centreAt(e.clientX, e.clientY);
+				return;
+			}
+			prev = { x: e.clientX, y: e.clientY, t: now };
+		};
+		stage.addEventListener('pointerup', up);
+		stage.addEventListener('pointercancel', up);
+		// Said once per browser, when it first becomes possible: a gesture
+		// nobody is told about is one nobody finds.
+		const HINT_KEY = 'mj-ptz-centre-hint';
+		function hint() {
+			const box = $('#mj-toasts');
+			let seen = false;
+			try { seen = localStorage.getItem(HINT_KEY) === '1'; } catch (e) { /* show it */ }
+			if (!box || seen) return;
+			try { localStorage.setItem(HINT_KEY, '1'); } catch (e) { /* once a page then */ }
+			const p = document.createElement('p');
+			p.className = 'mj-adapt-toast small';
+			p.setAttribute('role', 'status');
+			p.textContent = 'Double-tap the picture to turn the camera to that spot.';
+			p.addEventListener('click', () => p.remove());
+			box.appendChild(p);
+			setTimeout(() => p.remove(), 8000);
+		}
+	}
+
 	// A hold must not outlive the page's attention: keyup and pointerup never
 	// arrive in a window that lost focus mid-hold.
 	window.addEventListener('blur', () => stopHold(null));
