@@ -67,7 +67,7 @@ boot tag.
    | `string` | `x-numeric` (one number kept as text) | drawn as the `number` it is, with its bounds, `x-step` and `x-unit` |
    | `string` | `x-row-of` (one number per row of a sibling array) | hidden; the sibling's rows carry a box each and write the joined list back |
    | `string` | `x-list` (a fixed-length number list kept as text) | one labelled box per number (`mj-table.js`), a grid when `rows` > 1, a switch for a whole 0–1 cell |
-   | `string` | the key is `netip.password` | a password box that saves the **hash** XMEye/CMS clients send (`netip-hash.js`), retitled "Password". The stored hash is held aside and never shown, so the box is only ever what the owner typed and an untouched row stays clean |
+   | `string` | the key is `netip.password` | a password box that saves the **hash** XMEye/CMS clients send (`netip-hash.js`), retitled "Password". The stored hash is held aside and never shown, so the box is only ever what the owner typed and an untouched row stays clean. Because an empty box means "keep it", the empty password is a **No password** switch saving the hash of nothing — clients send that hash, while an empty *setting* is majestic refusing everyone |
    | `string` | `x-secret` or `writeOnly` | `<input type="password">` with a Show checkbox wired **in place** (the global toggle in `main.js` ran at load, long before this form existed) |
    | `string` | else | `<input type="text">` |
    | `array` | `items` are objects **with** a `url` member | the destinations board (`mj-servers.js`, `mj-outgoing.js`): rows are addresses |

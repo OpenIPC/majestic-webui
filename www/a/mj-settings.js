@@ -10452,7 +10452,8 @@
 		if (netipHash) {
 			sub = Object.assign({}, sub, {
 				title: 'Password',
-				hint: 'What XMEye and CMS clients sign in with. The camera keeps only its hash.',
+				hint: 'What XMEye and CMS clients sign in with. The camera keeps only its hash. '
+					+ 'With No password, any of them that can reach the camera signs in with the username alone.',
 			});
 		}
 		// A field's sibling as it stands NOW: the control if it is on the page,
@@ -11240,6 +11241,14 @@
 			// keeps it clean and is what a save sends for it, and a typed
 			// password reads as its hash. The placeholder says whether one is
 			// set. Clearing the setting is ↺, which goes through _set.
+			//
+			// An empty box therefore cannot also mean "the password is empty",
+			// and a client signing in with no password still sends a hash —
+			// the hash of nothing, which is not an empty setting: an empty
+			// setting is majestic refusing everyone. So the empty password is
+			// its own switch, saving that hash (OpenIPC/majestic#344).
+			// Switching it off with nothing typed goes back to not set, the
+			// direction that lets nobody in.
 			p = el('p', 'string password mj-row');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
@@ -11248,20 +11257,39 @@
 				' autocomplete="new-password" spellcheck="false">' +
 				'<div class="input-group-text"><input class="form-check-input mt-0" type="checkbox"' +
 				' data-for="' + id + '" aria-label="Show"></div>' +
-				'</div>';
+				'</div>' +
+				'<span class="form-check form-switch mt-1"><input type="checkbox" class="form-check-input" id="' + id + '-none">' +
+				'<label class="form-check-label" for="' + id + '-none">No password</label></span>';
 			control = p.querySelector('input[type=password]');
-			const eye = p.querySelector('input[type=checkbox]');
+			const eye = p.querySelector('input[data-for]');
 			if (eye) eye.addEventListener('change', () => {
 				control.type = eye.checked ? 'text' : 'password';
 			});
+			const none = p.querySelector('#' + id + '-none');
+			const EMPTY = netipHash.hash('');
 			let stored = '';
-			control._get = () => control.value !== '' ? netipHash.hash(control.value) : stored;
+			// What was typed is set aside while the switch is on, not lost:
+			// switching it back off is "never mind", and must not leave the
+			// row reading as the stored hash with the new password gone.
+			let typed = '';
+			const paintNone = () => {
+				control.disabled = none.checked;
+				if (none.checked) { typed = control.value || typed; control.value = ''; }
+				else if (typed !== '') { control.value = typed; typed = ''; }
+				control.placeholder = none.checked ? ''
+					: stored !== '' && stored !== EMPTY ? 'Set — type a new one to replace it' : 'Not set';
+			};
+			control._get = () => none.checked ? EMPTY
+				: control.value !== '' ? netipHash.hash(control.value)
+				: stored === EMPTY ? '' : stored;
 			control._set = (v) => {
 				stored = v !== undefined && v !== null ? String(v) : '';
 				control.value = '';
-				control.placeholder = stored !== ''
-					? 'Set — type a new one to replace it' : 'Not set';
+				typed = '';
+				none.checked = stored === EMPTY;
+				paintNone();
 			};
+			none.addEventListener('change', () => { paintNone(); updateDirty(); });
 			control._set(eff);
 		} else if (type === 'string' && (sub['x-secret'] || sub.writeOnly)) {
 			// A secret the camera has asked not to be shown. It is not hidden
