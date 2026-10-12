@@ -192,13 +192,14 @@
 	// the ticker, is the problem, and piling on cannot help. `stop` is never
 	// bounded and never dropped — a stop that vanished leaves a motor running
 	// to its deadline, which is the one failure with a physical cost.
-	let outstanding = 0;
-	function move(verb, ms, isStop) {
+    // `pct`, when given, is this move's own speed (the stick's), in place of
+    // the speed control's.
+    function move(verb, ms, isStop, pct) {
         let endpoint = (window.ptzControl === 'anjoy') ? '/cgi-bin/j/ptz.cgi' : '/ptz';
         let url = endpoint + '?move=' + encodeURIComponent(verb);
-		// let url = '/ptz?move=' + encodeURIComponent(verb);
-        // let url = '/cgi-bin/j/ptz.cgi?move=' + encodeURIComponent(verb);
-		if (ms) url += '&ms=' + ms;
+        if (ms) url += '&ms=' + ms;
+        url += pct != null && PS ? PS.query(verb, pct) : speedQuery(verb);
+        if (!isStop && outstanding >= 3) return;
 		url += speedQuery(verb);
 		if (!isStop && outstanding >= 3) return;
 		outstanding++;
