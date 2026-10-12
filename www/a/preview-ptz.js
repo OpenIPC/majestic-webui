@@ -201,8 +201,6 @@
 		if (ms) url += '&ms=' + ms;
 		url += pct != null && PS ? PS.query(verb, pct) : speedQuery(verb);
 		if (!isStop && outstanding >= 3) return;
-		url += speedQuery(verb);
-		if (!isStop && outstanding >= 3) return;
 		outstanding++;
 		apiFetch(url, { method: 'POST', credentials: 'same-origin' })
 			// The body decides, not the status. majestic answers /ptz with a
