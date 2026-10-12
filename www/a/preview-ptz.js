@@ -56,9 +56,9 @@
 		return capsP;
 	};
 	// Follow, the same way: hidden until the camera says its motor counts steps
-	// and its detector is on (ptz-follow.js). The switch is the camera's
-	// setting, ptz.track, not a per-browser one, and another operator (or the
-	// detector being switched off) can change it while this page is open. So
+	// and that it can detect something to follow (ptz-follow.js). The switch
+	// is the camera's setting, ptz.track, not a per-browser one, and another
+	// operator can change it while this page is open. So
 	// it is read fresh -- never the page-lifetime mjConfig() copy -- at mount,
 	// whenever the page comes back into view, and after each write, and both
 	// whether it shows and how it is set follow what came back.

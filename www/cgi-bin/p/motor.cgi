@@ -184,16 +184,16 @@ focus_label="Focus"
 	<% fi %>
 	<span class="mj-ptz-void"></span>
 </div>
-<!-- Follow a person (ptz.track): the head turns toward whoever the object
-     detector sees. Revealed by preview-ptz.js only when GET /ptz says " steps="
-     (a motor that counts) and objectDetect is on and reporting people
-     (ptz-follow.js); anywhere else it would
-     switch a setting that does nothing. A press on the pad pauses following
-     on the camera for ptz.trackResumeSec. -->
+<!-- Follow (ptz.track): the head turns toward what the object detector
+     sees, of the classes chosen on the PTZ settings tab. Revealed by
+     preview-ptz.js only when GET /ptz says " steps=" (a motor that counts)
+     and " follow=" (something to follow with; ptz-follow.js); anywhere else
+     it would switch a setting that does nothing. A press on the pad pauses
+     following on the camera for ptz.trackResumeSec. -->
 <div id="mj-ptz-follow" class="mj-ptz-speed mj-ptz-follow" hidden>
 	<div class="form-check form-switch m-0">
 		<input class="form-check-input" type="checkbox" role="switch" id="mj-ptz-follow-in">
-		<label class="form-check-label" for="mj-ptz-follow-in">Follow person</label>
+		<label class="form-check-label" for="mj-ptz-follow-in">Follow</label>
 	</div>
 </div>
 <% fi %>
