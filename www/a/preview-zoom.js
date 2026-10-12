@@ -214,6 +214,12 @@
 		affordance = [sw, sh, picW, picH];
 		const pannable = picW > sw + 1 || picH > sh + 1;
 		const steerable = steers();
+		// A view that stops steering -- 1:1, a zoom -- ends a steer under way:
+		// called off, picture back, nothing sent.
+		if (steering && !steerable) {
+			steering = null;
+			if (steer) steer.cancel();
+		}
 		stage.classList.toggle('mj-steerable', steerable);
 		stage.classList.toggle('mj-pannable', pannable && !steerable);
 		stage.classList.toggle('mj-drawable', placed && !pannable && !steerable);

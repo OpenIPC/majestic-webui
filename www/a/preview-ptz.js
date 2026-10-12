@@ -926,17 +926,31 @@
 		};
 		let frame = null, turn = null;
 		const ready = () => !!(frame && turn && !turn.sideways);
+		// A read that failed is asked again, a little later each time, and at
+		// the next touch of the picture: a camera that did not answer at load
+		// is not one without the gestures for the life of the page.
+		const AGAIN_MS = [2000, 5000, 15000, 30000, 60000];
+		let again = 0, againTimer = null;
+		const retry = () => {
+			if (againTimer || again >= AGAIN_MS.length) return;
+			againTimer = setTimeout(() => {
+				againTimer = null;
+				again++;
+				if (!frame) learnFrame();
+				if (!turn) learnTurn();
+			}, AGAIN_MS[again]);
+		};
 		const learnFrame = () => caps().then((t) => {
 			frame = PC.frame(t);
 			if (ready()) arrive();
-		}, () => {});
+		}, retry);
 		const learnTurn = () => {
 			if (typeof mjConfig !== 'function') return;
 			mjConfig().then((c) => {
 				// A failed read resolves {}: no image section is a camera not
 				// heard from, not one that is upright.
 				const im = c && c.image;
-				if (!im || typeof im !== 'object') return;
+				if (!im || typeof im !== 'object') { retry(); return; }
 				const r = Number(im.rotate);
 				// On its side the picture's across is the head's tilt; the
 				// frame measured upright would aim it wrong, so it stays off.
@@ -946,6 +960,16 @@
 		};
 		learnFrame();
 		learnTurn();
+		stage.addEventListener('pointerdown', () => {
+			if (ready()) return;
+			if (!frame) learnFrame();
+			if (!turn) learnTurn();
+		}, true);
+		// A picture standing still is not the live one: the uncompressed still
+		// over it, or the snapshot under tap-to-play. Neither a drag nor a
+		// double-tap turns the head for a picture that would not show the turn.
+		const visible = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
+		const paused = () => stage.classList.contains('mj-stilled') || visible('#mj-snapshot') || visible('#mj-tap-play');
 		// The axes this head has are the arrows its pad drew.
 		const hasPan = !!pad.querySelector('[data-act="left"],[data-act="right"]');
 		const hasTilt = !!pad.querySelector('[data-act="up"],[data-act="down"]');
@@ -1008,7 +1032,7 @@
 		const centreAt = (x, y) => {
 			if (!frame) { learnFrame(); return false; }
 			if (!turn) { learnTurn(); return false; }
-			if (turn.sideways) return false;
+			if (turn.sideways || paused()) return false;
 			// Not before the picture is laid out: until then the media box is
 			// the stage's own, not a frame.
 			const Z = window.MajesticZoom;
@@ -1069,13 +1093,17 @@
 			}
 		};
 		let held = null;
+		// Which drag is the latest: an earlier one's ease back and its answer
+		// leave a newer drag's picture alone.
+		let steerGen = 0;
 		const steerer = {
 			wants: (e) => {
 				if (e.target.closest && e.target.closest(OVER)) return false;
 				const Z = window.MajesticZoom;
-				return ready() && !!media() && !!(Z && typeof Z.view === 'function' && Z.view());
+				return ready() && !paused() && !!media() && !!(Z && typeof Z.view === 'function' && Z.view());
 			},
 			start: (e) => {
+				steerGen++;
 				held = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, dx: 0, dy: 0, on: false,
 					r: media().getBoundingClientRect() };
 			},
@@ -1111,10 +1139,12 @@
 				// way -- then eased back over about the head's time.
 				const glide = Math.max(250, Math.min(p.ms, 4000));
 				const still = reduced();
-				const back = setTimeout(() => slide(0, 0, still ? 0 : glide), still ? glide : 150);
+				const g = steerGen;
+				const mine = () => g === steerGen && !held;
+				const back = setTimeout(() => { if (mine()) slide(0, 0, still ? 0 : glide); }, still ? glide : 150);
 				sendSteps(p.moves).catch(() => {
 					clearTimeout(back);
-					slide(0, 0, 200);
+					if (mine()) slide(0, 0, 200);
 					tell('The camera did not turn. Try again.');
 				});
 			},
@@ -1174,7 +1204,9 @@
 			down = null;
 			if (!d || e.pointerId !== d.id || e.type === 'pointercancel') return;
 			const now = Date.now();
-			if (now - d.t > 300 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10) { prev = null; return; }
+			// The same bound the drag starts at: past it the press was a steer,
+			// and it is no half of a double-tap.
+			if (now - d.t > 300 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > SLIDE_MIN) { prev = null; return; }
 			if (prev && now - prev.t < 400 && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 40) {
 				prev = null;
 				centreAt(e.clientX, e.clientY);
