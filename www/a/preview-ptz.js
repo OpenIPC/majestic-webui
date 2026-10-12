@@ -853,6 +853,7 @@
 			s = null;
 			knob.style.transform = '';
 			pad.classList.remove('mj-ptz-sticking');
+			if (stage) stage.classList.remove('mj-steering');
 			light(null);
 		};
 		// The settings, the fold and the handle are buttons on the pad, not
@@ -875,6 +876,7 @@
 			const r = rb ? Math.max(24, Math.hypot(rb.left + rb.width / 2 - cx, rb.top + rb.height / 2 - cy)) : 44;
 			s = { id: e.pointerId, cx: cx, cy: cy, r: r, verb: null, pct: null, first: 0, long: false, kick: null, timer: null };
 			pad.classList.add('mj-ptz-sticking');
+			if (stage) stage.classList.add('mj-steering');
 			steer(e);
 		});
 		pad.addEventListener('pointermove', (e) => { if (s && e.pointerId === s.id) steer(e); });
