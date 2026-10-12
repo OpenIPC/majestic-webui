@@ -972,14 +972,14 @@
 				el.classList.add('mj-centre-going');
 			}));
 			let gone = false;
-			const fade = () => {
+			const vanish = () => {
 				if (gone) return;
 				gone = true;
 				el.style.transitionDuration = '0ms, 400ms';
 				el.classList.add('mj-centre-done');
 				setTimeout(() => el.remove(), 450);
 			};
-			setTimeout(fade, (still ? 600 : glide) + 150);
+			setTimeout(vanish, (still ? 600 : glide) + 150);
 			// The camera refused, or never answered: the ring says so where it
 			// stands, rather than finishing a journey the head is not making.
 			return {
@@ -987,7 +987,7 @@
 					el.classList.add('mj-centre-failed');
 					el.style.transitionDuration = '0ms';
 					el.style.transform = getComputedStyle(el).transform;
-					setTimeout(fade, 500);
+					setTimeout(vanish, 500);
 				},
 			};
 		};
