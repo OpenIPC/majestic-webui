@@ -164,6 +164,26 @@ adapter_is_modem() {
 	grep -qF "\"$network_adapter\"" /etc/wireless/modem 2>/dev/null
 }
 
+# What the installed S40network does with eth0 beside a wireless adapter. Read
+# from the script itself, because updatewebui puts this page on firmware of any
+# age. OpenIPC/firmware#2572: while no Wi-Fi network is saved, eth0 keeps DHCP
+# from its file. OpenIPC/firmware#2573: once one is, eth0 and wlan0 both come
+# up from their files, the cable preferred -- unless `netmode wifi` asks for
+# the older Wi-Fi-only layout, where eth0 sits on the fixed fallback address.
+env_wlanssid=$(fw_printenv -n wlanssid 2>/dev/null)
+env_netmode=$(fw_printenv -n netmode 2>/dev/null)
+fw_s40_has() {
+	grep -qF "$1" /etc/init.d/S40network 2>/dev/null
+}
+eth0_beside_wifi() {
+	[ -e /sys/class/net/eth0 ] || return 1
+	if [ -z "$env_wlanssid" ]; then
+		fw_s40_has 'fw_printenv -n wlanssid'
+	else
+		[ "$env_netmode" != wifi ] && fw_s40_has 'start_dual'
+	fi
+}
+
 iface_is_booted() {
 	if [ -z "$network_adapter" ]; then
 		[ "$1" = "eth0" ]
@@ -175,7 +195,20 @@ iface_is_booted() {
 	# NEITHER of the two interfaces this page edits comes up from its file, and
 	# saying wlan0 does would promise a restart that changes nothing.
 	adapter_is_modem && return 1
+	[ "$1" = "eth0" ] && { eth0_beside_wifi; return; }
 	[ "$1" = "wlan0" ]
+}
+
+# A change sbin/netapply is holding open, waiting for proof the camera can
+# still be reached on it before it is kept. Sets pending_token and
+# pending_phase (applying, then applied).
+netapply_pending() {
+	local p
+	p=$(cat /tmp/netapply.pending 2>/dev/null) || return 1
+	set -- $p
+	pending_token=$2
+	pending_phase=$4
+	[ -n "$1" ] && kill -0 "$1" 2>/dev/null
 }
 
 # The interface the camera is on. The default route names it when there is
@@ -316,6 +349,22 @@ for i in $network_list; do
 	net_pending "$i" && any_pending=1
 done
 net_read "$edit_iface"
+
+# The browser arriving with the token -- at the new address, or over a
+# connection the change did not touch -- is the proof netapply waits for.
+# Hex only: it becomes part of a file name.
+if [ -n "$GET_confirm" ]; then
+	case "$GET_confirm" in *[!0-9a-f]*) GET_confirm="" ;; esac
+fi
+if [ -n "$GET_confirm" ]; then
+	if netapply_pending && [ "$pending_token" = "$GET_confirm" ] && [ "$pending_phase" = "applied" ]; then
+		touch "/tmp/netapply.ok.$GET_confirm"
+		redirect_to "network.cgi?iface=${edit_iface}" "success" "Network settings kept."
+	elif grep -qxF "$GET_confirm" /tmp/netapply.rolledback 2>/dev/null; then
+		redirect_to "network.cgi?iface=${edit_iface}" "danger" \
+			"That change was not confirmed in time, so the previous settings were put back."
+	fi
+fi
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
@@ -537,11 +586,52 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				done
 				printf '%s\n' "$log_line" >> /tmp/webui.log
 
+				# Applied now rather than at the next restart, wherever the
+				# firmware brings this interface up from its file: sbin/netapply
+				# bounces it once this answer has reached the browser, and puts
+				# the old stanza back unless the camera is shown to be reachable
+				# on the new one. A reboot used to be the only way to change an
+				# address. New Wi-Fi credentials still wait for the restart: they
+				# live in the environment, which netapply does not roll back.
+				apply_now=""
+				if iface_is_booted "$edit_iface" && command -v netapply >/dev/null 2>&1; then
+					apply_now=1
+					if [ "$edit_iface" = "wlan0" ] &&
+						{ [ "$network_wlan_ssid" != "$env_wlanssid" ] ||
+						[ "$network_wlan_password" != "$(fw_printenv -n wlanpass 2>/dev/null)" ]; }; then
+						apply_now=""
+					fi
+				fi
+				if [ -n "$apply_now" ]; then
+					netapply_pending && redirect_back "warning" \
+						"The last network change is still waiting to be confirmed. Try again once it has been kept or put back."
+					backup="/tmp/netapply.backup.$edit_iface"
+					cp -f "/etc/network/interfaces.d/$edit_iface" "$backup" 2>/dev/null ||
+						cp -f "/rom/etc/network/interfaces.d/$edit_iface" "$backup" 2>/dev/null ||
+						apply_now=""
+				fi
+
 				# setnetwork refuses on its own checks and says why on stdout;
 				# its status used to be dropped, so a refused save was
 				# reported as a save.
 				if ! out=$(setnetwork "$@" 2>&1); then
+					rm -f "$backup"
 					redirect_back "danger" "Network settings were not saved: $(esc "$out")"
+				fi
+
+				if [ -n "$apply_now" ]; then
+					token=$(tr -dc 'a-f0-9' < /dev/urandom | head -c 16)
+					setsid netapply "$edit_iface" "$token" "$backup" "$network_mode" </dev/null >/dev/null 2>&1 &
+					# The page that answers must find the change pending.
+					i=0
+					while [ $i -lt 20 ] && ! { netapply_pending && [ "$pending_token" = "$token" ]; }; do
+						i=$((i + 1))
+						usleep 100000
+					done
+					to=""
+					[ "$network_mode" = "static" ] && to=$network_address
+					redirect_to "network.cgi?iface=${edit_iface}&applying=${token}&to=${to}" "success" \
+						"Network settings saved. Applying them now."
 				fi
 
 				update_caminfo
@@ -577,7 +667,10 @@ fi
 # The header reads network_gateway for its no-default-route banner, and that
 # is a statement about the kernel; so the banner it does draw for the pending
 # save is asked for by name, and the form's variables are filled in below it.
-[ -n "$any_pending" ] && restart_pending=1
+# Not while netapply is applying a change: the file and the kernel differ for
+# the seconds before it takes effect, and a restart is exactly what the change
+# no longer needs.
+[ -n "$any_pending" ] && ! netapply_pending && restart_pending=1
 
 # This page draws its own title, because the interface switcher sits on the
 # same line as it. Without this the header prints one too and the page opens
@@ -683,6 +776,32 @@ fi
 		<span><% esc "${now_macaddr:-—}" %></span>
 	</span>
 </div>
+
+<%# A change netapply is holding open. The browser is on the interface being
+    changed when it reached the camera at that interface's address -- then a
+    new fixed address is where it must go next; otherwise nothing it relies on
+    is moving, and confirming over the same connection is enough. Without
+    script the text says what to do, and the link carries the token. %>
+<% if [ -n "$GET_applying" ] && netapply_pending && [ "$pending_token" = "$GET_applying" ]; then
+	applying_to=""
+	echo "$GET_to" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && applying_to=$GET_to
+	applying_same=""
+	[ "${HTTP_HOST%%:*}" = "$now_address" ] && applying_same=1
+	keep="network.cgi?iface=${edit_iface}&confirm=${pending_token}"
+	applying_acts="<a class=\"btn btn-sm btn-outline-secondary\" href=\"${keep}\">Keep these settings</a>"
+	if [ -n "$applying_same" ] && [ -n "$applying_to" ] && [ "$applying_to" != "$now_address" ]; then
+		applying_text="<b>The camera is moving to $(esc "$applying_to").</b> Open <a href=\"http://${applying_to}/cgi-bin/${keep}\">http://$(esc "$applying_to")/</a> within 90 seconds to keep the new settings; otherwise the camera goes back to the previous ones by itself."
+		# The button would point at the address being left.
+		applying_acts=""
+	elif [ -n "$applying_same" ] && [ -z "$applying_to" ]; then
+		applying_text="<b>The camera is asking for an address by DHCP.</b> It keeps the change once it has one, and goes back to the previous settings if none comes within 30 seconds. If the address changes, your router shows the new one."
+	else
+		applying_text="<b>Applying the new settings.</b> They are kept once this page can reach the camera again; otherwise the previous ones come back within 90 seconds."
+	fi %>
+<div id="net-applying" data-token="<% attr_escape "$pending_token" %>" data-to="<% attr_escape "$applying_to" %>" data-same="<%= $applying_same %>" data-iface="<% attr_escape "$edit_iface" %>">
+	<% notice warn "$applying_text" "$applying_acts" %>
+</div>
+<% fi %>
 
 <%# The form's cards are dealt into equal columns sized to how many there are
     -- three on a wireless interface, two on a wired one -- so the row fills
