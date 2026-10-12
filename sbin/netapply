@@ -1,0 +1,156 @@
+#!/bin/sh
+# netapply IFACE TOKEN BACKUP MODE
+#
+# Puts an interface's saved stanza into effect now, and keeps it only if the
+# camera is shown to be reachable on it; otherwise puts the stanza it replaced
+# back. network.cgi starts this, detached, after setnetwork has written the
+# new /etc/network/interfaces.d/IFACE and BACKUP holds the old one.
+#
+# Saving used to change nothing until a reboot (the firmware reads the stanzas
+# only at boot), which is a reboot to change an address. Applying at once has
+# its own trap: the page that asked for the change is served over the
+# interface being changed, so a mistyped address or gateway would cut the
+# owner off with nothing on the camera to notice. Hence the round trip:
+#
+#   MODE static -- the browser is sent to the new address with TOKEN, and only
+#                  an authenticated request carrying it (network.cgi?confirm=)
+#                  keeps the change. Nothing within WAIT seconds: rolled back.
+#   MODE dhcp   -- there is no address to send the browser to, so the lease
+#                  itself is the proof: a default route through IFACE keeps
+#                  the change. An address alone is not one -- udhcpc's
+#                  leasefail puts `ipaddr` on an interface with no lease.
+#                  A confirmation keeps it too.
+#
+# Until it is kept the new stanza lives in $NEW, and the file the firmware
+# boots from holds the old one. A camera cut off by a bad address is most often
+# power-cycled by its owner, and it has to come back on the settings that
+# worked -- as it does if this is killed, whatever kills it.
+#
+# One change at a time: PENDING names the run in progress -- "pid token iface
+# phase". network.cgi creates it, refusing to if it exists, with the phase
+# `starting`; this takes it over, or gives up if it is not that record. The
+# phase is `applying` until the new stanza is in effect and `applied` after: a
+# confirmation counts only once it is `applied`, because before then the
+# connection the page is on proves nothing about the new settings. DONE holds
+# the last run's "token outcome": kept, unsaved (kept, but the file could not
+# be written, so the next boot brings back the old one) or rolledback.
+
+iface=$1
+token=$2
+backup=$3
+mode=$4
+
+IFDIR=${NETAPPLY_IFDIR:-/etc/network/interfaces.d}
+RUN=${NETAPPLY_RUN:-/tmp}
+VARRUN=${NETAPPLY_VARRUN:-/var/run}
+PENDING=$RUN/netapply.pending
+DONE=$RUN/netapply.done
+NEW=$RUN/netapply.new.$iface
+WAIT=${NETAPPLY_WAIT:-90}
+WAIT_DHCP=${NETAPPLY_WAIT_DHCP:-30}
+# Long enough for the page answering the save to reach the browser over the
+# link about to be bounced.
+DELAY=${NETAPPLY_DELAY:-4}
+
+[ -n "$iface" ] && [ -n "$token" ] && [ -f "$backup" ] || exit 1
+set -- $(cat "$PENDING" 2>/dev/null)
+[ "$2" = "$token" ] && [ "$4" = starting ] || exit 1
+
+log() {
+	logger -t netapply "$*"
+	echo "$(date '+%F %T') netapply: $*" >> "$RUN/webui.log"
+}
+
+# Down by the stanza that brought the interface up ($1), up by $2, or by the
+# file the firmware reads when there is no $2. ifdown reads the CURRENT file to
+# know how to stop an interface: taking a DHCP eth0 to a fixed address by the
+# new one ran the static teardown and left the old udhcpc running, to renew
+# the lease over the address that had just been typed in. The routes go with
+# it whatever ifdown managed, so that a default route through the interface
+# afterwards is the new settings' and not one the old ones left.
+apply() {
+	ifdown -i "$1" -f "$iface" >/dev/null 2>&1
+	stop_dhcp
+	ip -4 route flush dev "$iface" >/dev/null 2>&1
+	if [ -n "$2" ]; then
+		ifup -i "$2" "$iface" >/dev/null 2>&1
+	else
+		ifup "$iface" >/dev/null 2>&1
+	fi
+}
+
+# A udhcpc for this interface that ifdown did not stop -- and only a udhcpc:
+# the pid in the file can have been reused by anything since.
+stop_dhcp() {
+	local pid comm
+	pid=$(cat "$VARRUN/udhcpc.$iface.pid" 2>/dev/null) || return 0
+	comm=
+	read -r comm 2>/dev/null < "/proc/$pid/comm"
+	[ "$comm" = udhcpc ] && kill "$pid" 2>/dev/null
+	return 0
+}
+
+leased() {
+	ip -4 route show dev "$iface" 2>/dev/null | grep -q '^default'
+}
+
+finish() {
+	echo "$token $1" > "$DONE"
+	rm -f "$NEW" "$PENDING" "$RUN/netapply.ok.$token"
+	exit 0
+}
+
+# Stopped before the new stanza was touched, there is nothing to undo.
+applied=
+rollback() {
+	log "$1: putting the previous $iface settings back"
+	[ -n "$applied" ] && apply "$NEW"
+	finish rolledback
+}
+
+# The new stanza out of the boot path, the old one back into it.
+if ! { cp -f "$IFDIR/$iface" "$NEW" &&
+	cp -f "$backup" "$IFDIR/$iface.netapply" &&
+	mv -f "$IFDIR/$iface.netapply" "$IFDIR/$iface"; }; then
+	log "could not stage the new $iface settings; they take effect at the next restart"
+	rm -f "$NEW" "$IFDIR/$iface.netapply" "$backup" "$PENDING"
+	exit 1
+fi
+rm -f "$backup"
+
+trap '' HUP
+echo "$$ $token $iface applying" > "$PENDING"
+trap 'rollback "stopped"' TERM INT
+sleep "$DELAY"
+log "applying the $mode settings saved for $iface"
+rm -f "$RUN/netapply.ok.$token"
+applied=1
+apply "$IFDIR/$iface" "$NEW" || rollback "ifup refused the new $iface settings"
+echo "$$ $token $iface applied" > "$PENDING"
+
+limit=$WAIT
+[ "$mode" = dhcp ] && limit=$WAIT_DHCP
+kept=
+i=0
+while [ "$i" -lt "$limit" ]; do
+	if [ -e "$RUN/netapply.ok.$token" ]; then
+		kept=confirmed
+		break
+	fi
+	if [ "$mode" = dhcp ] && leased; then
+		kept=leased
+		break
+	fi
+	sleep 1
+	i=$((i + 1))
+done
+
+[ -n "$kept" ] || rollback "no confirmation for $iface within $limit s"
+trap '' TERM INT
+if cp -f "$NEW" "$IFDIR/$iface.netapply" && mv -f "$IFDIR/$iface.netapply" "$IFDIR/$iface"; then
+	log "kept the new $iface settings ($kept)"
+	finish kept
+fi
+rm -f "$IFDIR/$iface.netapply"
+log "kept the new $iface settings ($kept), but could not save them; the next restart brings back the previous ones"
+finish unsaved
