@@ -39,13 +39,10 @@
 	if (!mount || (!pad && !fn)) return;
 	if (fn) { mount.appendChild(fn); fn.hidden = false; }
 	if (pad) { mount.appendChild(pad); pad.hidden = false; }
-	// The speed control waits, hidden, until the camera says its motor keeps a
-	// speed (ptz-speed.js). Asked once at mount, with the same bare GET /ptz the
-	// capability line is always read with; no answer leaves it hidden, so every
-	// move goes out exactly as before. The value is a per-browser convenience.
-	const speedBox = $('#mj-ptz-speed'), speedIn = $('#mj-ptz-speed-in');
+	// There is no speed control: on the stick, how far the thumb goes is the
+	// speed (ptz-stick.js), and anything else moves at the motor's own rate.
 	const PS = window.MajesticPtzSpeed;
-	// The capability line: the speed control and the stick both read it. A
+	// The capability line: the stick and Follow read it. A
 	// failed ask is not a line that offers nothing -- it rejects, and is asked
 	// again the next time someone wants it (caps()), rather than leaving the
 	// stick on four slow directions for the life of the page.
@@ -58,20 +55,6 @@
 		}
 		return capsP;
 	};
-	if (speedBox && speedIn && PS) {
-		try {
-			const v = localStorage.getItem('mj-ptz-speed');
-			if (v) speedIn.value = v;
-		} catch (e) { /* storage blocked: start at the top speed */ }
-		speedIn.addEventListener('change', () => {
-			try { localStorage.setItem('mj-ptz-speed', speedIn.value); } catch (e) { /* ignore */ }
-		});
-		caps().then(t => {
-			if (!PS.offered(t)) return;
-			speedBox.hidden = false;
-			placeExtras();
-		}).catch(() => {});
-	}
 	// Follow, the same way: hidden until the camera says its motor counts steps
 	// and its detector is on (ptz-follow.js). The switch is the camera's
 	// setting, ptz.track, not a per-browser one, and another operator (or the
@@ -117,9 +100,6 @@
 				.then(() => { followIn.disabled = false; followRefresh(); });
 		});
 	}
-	function speedQuery(verb) {
-		return PS && speedBox && !speedBox.hidden && speedIn ? PS.query(verb, speedIn.value) : '';
-	}
 	// Folded on a small stage. The pad is about 140px square and the zoom/focus
 	// cluster as tall again, so on a phone they covered a sixth of the picture or
 	// more for somebody who came to look at it -- and a share's guest, who rarely
@@ -147,10 +127,10 @@
 	const OPEN_KEY = 'mj-ptz-open';
 	let open = false;
 	try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch (e) { /* ignore */ }
-	// Speed and Follow are settings of the pad, not controls on it: on a small
-	// stage they wait behind a gear, in a popover beside the column, so the
+	// Follow is a setting of the pad, not a control on it: on a small
+	// stage it waits behind a gear, in a popover beside the column, so the
 	// open pad is the arrows alone -- four stacked panels covered half a phone
-	// (measured on an iPhone). On a larger stage they sit in the
+	// (measured on an iPhone). On a larger stage it sits in the
 	// column as before.
 	const gear = document.createElement('button');
 	gear.type = 'button';
@@ -179,8 +159,7 @@
 	const isSmall = () => !!(small && small.matches);
 	// Its bottom-left cell, for a handle that has no centre to take.
 	const gripCorner = !!(pad && pad.children.length > 6 && pad.children[6].classList.contains('mj-ptz-void'));
-	const hasExtras = () => !!((speedBox && !speedBox.hidden && speedBox.isConnected) ||
-		(followBox && !followBox.hidden && followBox.isConnected));
+	const hasExtras = () => !!(followBox && !followBox.hidden && followBox.isConnected);
 	const popOpen = (on) => {
 		more.hidden = !on;
 		gear.setAttribute('aria-expanded', String(on));
@@ -190,11 +169,11 @@
 		gear.hidden = !(isSmall() && open && hasExtras());
 		if (gear.hidden) popOpen(false);
 	}
-	// Speed and Follow to where they belong at this size, and the gear shown
+	// Follow to where it belongs at this size, and the gear shown
 	// only when the popover would hold something.
 	function placeExtras() {
 		const home = isSmall() ? more : mount;
-		for (const box of [speedBox, followBox]) {
+		for (const box of [followBox]) {
 			if (!box || box.hidden) continue;
 			if (box.parentNode !== home) {
 				if (home === mount) mount.insertBefore(box, fold.parentNode === mount ? fold : null);
@@ -421,12 +400,12 @@
 	// bounded and never dropped — a stop that vanished leaves a motor running
 	// to its deadline, which is the one failure with a physical cost.
 	let outstanding = 0;
-	// `pct`, when given, is this move's own speed (the stick's), in place of
-	// the speed control's.
+	// `pct`, when given, is this move's speed (the stick's); without it the
+	// motor runs at its own rate.
 	function move(verb, ms, isStop, pct) {
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
-		url += pct != null && PS ? PS.query(verb, pct) : speedQuery(verb);
+		if (pct != null && PS) url += PS.query(verb, pct);
 		if (!isStop && outstanding >= 3) return;
 		outstanding++;
 		apiFetch(url, { method: 'POST', credentials: 'same-origin' })
@@ -828,7 +807,6 @@
 		const light = (verb) => {
 			for (const k in arrows) arrows[k].classList.toggle('mj-ptz-on', !!verb && verb.indexOf(k) >= 0);
 		};
-		const topPct = () => (speedBox && !speedBox.hidden && speedIn ? +speedIn.value : 100);
 		const send = (ms) => {
 			if (!s || !s.verb) return;
 			if (!ms) s.long = true;
@@ -840,7 +818,7 @@
 			knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
 			const a = PK.aim(dx, dy, { radius: s.r, dead: s.r * 0.22, diagonals: diag, prev: s.verb, pan: hasPan, tilt: hasTilt });
 			const verb = a ? a.verb : null;
-			const pct = a && speeds ? PK.pct(a.frac, topPct()) : null;
+			const pct = a && speeds ? PK.pct(a.frac) : null;
 			if (verb === s.verb && pct === s.pct) return;
 			const was = s.verb;
 			s.verb = verb;
