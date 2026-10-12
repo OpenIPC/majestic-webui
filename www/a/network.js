@@ -193,17 +193,27 @@
 		} else {
 			// Nothing this page relies on is moving -- or a DHCP lease that
 			// may well keep the address -- so ask over this connection, and
-			// confirm once the change is in effect. A failed request is the
-			// link bouncing, not an answer: ask again.
-			let tries = 0;
+			// confirm once the change is in effect; every answer after that
+			// is an outcome, which the confirm URL puts into words. A failed
+			// request is the link bouncing, not an answer: ask again. But a
+			// page reached by name cannot tell from the name whether it is on
+			// the interface being changed, and when it was, the address
+			// behind the name has gone: after a run of failures with a new
+			// fixed address to go to, it is followed there.
+			let tries = 0, fails = 0;
+			const moving = /^(\d{1,3}\.){3}\d{1,3}$/.test(to) && to !== location.hostname;
 			const ask = () => fetch('/cgi-bin/j/netapply.cgi?token=' + tok, { cache: 'no-store' })
 				.then((r) => r.json())
 				.then((j) => {
-					if (j.state === 'waiting' || j.state === 'rolledback') location.href = back('');
-					else if (j.state === 'done') location.href = 'network.cgi?iface=' + encodeURIComponent(iface);
-					else later();
+					fails = 0;
+					if (j.state === 'applying') later();
+					else if (j.state === 'unknown' || j.state === 'bad') location.href = 'network.cgi?iface=' + encodeURIComponent(iface);
+					else location.href = back('');
 				})
-				.catch(later);
+				.catch(() => {
+					if (moving && ++fails >= 4) location.href = back(location.protocol + '//' + to + (location.port ? ':' + location.port : ''));
+					else later();
+				});
 			const later = () => { if (++tries < 60) setTimeout(ask, 2000); };
 			setTimeout(ask, 3000);
 		}

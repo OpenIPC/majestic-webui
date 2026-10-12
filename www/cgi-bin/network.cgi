@@ -166,10 +166,11 @@ adapter_is_modem() {
 
 # What the installed S40network does with eth0 beside a wireless adapter. Read
 # from the script itself, because updatewebui puts this page on firmware of any
-# age. OpenIPC/firmware#2572: while no Wi-Fi network is saved, eth0 keeps DHCP
-# from its file. OpenIPC/firmware#2573: once one is, eth0 and wlan0 both come
-# up from their files, the cable preferred -- unless `netmode wifi` asks for
-# the older Wi-Fi-only layout, where eth0 sits on the fixed fallback address.
+# age. Newer firmware keeps eth0 on DHCP from its file while no Wi-Fi network
+# is saved, and once one is brings eth0 and wlan0 both up from their files,
+# the cable preferred -- unless `netmode wifi` asks for the older Wi-Fi-only
+# layout, where eth0 sits on the fixed fallback address. Older firmware parks
+# eth0 on that fixed address as soon as there is a wireless adapter.
 env_wlanssid=$(fw_printenv -n wlanssid 2>/dev/null)
 env_netmode=$(fw_printenv -n netmode 2>/dev/null)
 fw_s40_has() {
@@ -200,15 +201,51 @@ iface_is_booted() {
 }
 
 # A change sbin/netapply is holding open, waiting for proof the camera can
-# still be reached on it before it is kept. Sets pending_token and
-# pending_phase (applying, then applied).
+# still be reached on it before it is kept. Sets pending_token, pending_iface
+# and pending_phase (starting, applying, then applied). pending_dead is set
+# when the record is there and its process is not: a worker that was killed,
+# which leaves the file the camera boots from on the previous settings.
 netapply_pending() {
 	local p
+	pending_token=""; pending_iface=""; pending_phase=""; pending_dead=""
 	p=$(cat /tmp/netapply.pending 2>/dev/null) || return 1
 	set -- $p
 	pending_token=$2
+	pending_iface=$3
 	pending_phase=$4
-	[ -n "$1" ] && kill -0 "$1" 2>/dev/null
+	[ -n "$1" ] && kill -0 "$1" 2>/dev/null && return 0
+	pending_dead=1
+	return 1
+}
+
+# Takes the one-change-at-a-time record, atomically: noclobber creates it only
+# if it is not there, so of two saves at once only one gets it. A record whose
+# process is gone is left from a worker that was killed, and is cleared.
+netapply_hold() {
+	netapply_pending
+	[ -n "$pending_dead" ] && rm -f /tmp/netapply.pending
+	(set -C; echo "$$ $1 $2 starting" > /tmp/netapply.pending) 2>/dev/null
+}
+
+# "token outcome" of the last change netapply finished, for TOKEN ($1).
+netapply_outcome() {
+	local t o
+	read -r t o 2>/dev/null < /tmp/netapply.done
+	[ "$t" = "$1" ] && outcome=$o
+}
+
+# What the page tells the owner a finished change came to.
+netapply_report() {
+	case "$1" in
+		kept)
+			redirect_to "network.cgi?iface=${edit_iface}" "success" "Network settings kept." ;;
+		unsaved)
+			redirect_to "network.cgi?iface=${edit_iface}" "warning" \
+				"The new network settings are in effect, but they could not be saved, so the camera goes back to the previous ones when it restarts. The log has the reason." ;;
+		rolledback)
+			redirect_to "network.cgi?iface=${edit_iface}" "danger" \
+				"That change was not confirmed in time, so the previous settings were put back." ;;
+	esac
 }
 
 # The interface the camera is on. The default route names it when there is
@@ -259,6 +296,11 @@ done
 # under Diagnostics (OpenIPC/majestic#311).
 net_read() {
 	local f="/etc/network/interfaces.d/$1"
+	# While netapply holds a change open the file keeps the previous stanza
+	# -- the one the camera comes back on if it restarts -- and the stanza
+	# being tried is beside it.
+	netapply_pending && [ "$pending_iface" = "$1" ] && [ -f "/tmp/netapply.new.$1" ] &&
+		f="/tmp/netapply.new.$1"
 	# This interface's own hardware address. sysinfo's network_macaddr is the
 	# DEFAULT ROUTE's, which is a different interface as soon as there are two
 	# -- the eth0 tab was printing wlan0's address under eth0's name.
@@ -356,13 +398,25 @@ net_read "$edit_iface"
 if [ -n "$GET_confirm" ]; then
 	case "$GET_confirm" in *[!0-9a-f]*) GET_confirm="" ;; esac
 fi
+# Reaching this URL is the proof, so the request that does is what confirms;
+# the answer waits for netapply to say what it did with it, since the window
+# can close between the two.
 if [ -n "$GET_confirm" ]; then
+	outcome=""
 	if netapply_pending && [ "$pending_token" = "$GET_confirm" ] && [ "$pending_phase" = "applied" ]; then
 		touch "/tmp/netapply.ok.$GET_confirm"
-		redirect_to "network.cgi?iface=${edit_iface}" "success" "Network settings kept."
-	elif grep -qxF "$GET_confirm" /tmp/netapply.rolledback 2>/dev/null; then
+		i=0
+		while [ $i -lt 30 ] && ! netapply_outcome "$GET_confirm"; do
+			i=$((i + 1))
+			usleep 100000
+		done
+	else
+		netapply_outcome "$GET_confirm"
+	fi
+	netapply_report "$outcome"
+	if [ "$pending_token" = "$GET_confirm" ] && [ -n "$pending_dead" ]; then
 		redirect_to "network.cgi?iface=${edit_iface}" "danger" \
-			"That change was not confirmed in time, so the previous settings were put back."
+			"Applying that change was interrupted. The previous settings are the saved ones, and the camera comes back on them when it restarts."
 	fi
 fi
 
@@ -487,6 +541,8 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			;;
 
 		reset)
+			netapply_pending && redirect_back "warning" \
+				"A network change is waiting to be confirmed. Reset once it has been kept or put back."
 			# The firmware's set is staged beside the directory and swapped in
 			# only once every copy succeeded, so a copy that fails -- the
 			# overlay full, say -- leaves what was there rather than a camera
@@ -603,35 +659,45 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 					fi
 				fi
 				if [ -n "$apply_now" ]; then
-					netapply_pending && redirect_back "warning" \
+					token=$(tr -dc 'a-f0-9' < /dev/urandom | head -c 16)
+					netapply_hold "$token" "$edit_iface" || redirect_back "warning" \
 						"The last network change is still waiting to be confirmed. Try again once it has been kept or put back."
 					backup="/tmp/netapply.backup.$edit_iface"
-					cp -f "/etc/network/interfaces.d/$edit_iface" "$backup" 2>/dev/null ||
-						cp -f "/rom/etc/network/interfaces.d/$edit_iface" "$backup" 2>/dev/null ||
+					if ! { cp -f "/etc/network/interfaces.d/$edit_iface" "$backup" 2>/dev/null ||
+						cp -f "/rom/etc/network/interfaces.d/$edit_iface" "$backup" 2>/dev/null; }; then
+						rm -f /tmp/netapply.pending
 						apply_now=""
+					fi
 				fi
 
 				# setnetwork refuses on its own checks and says why on stdout;
 				# its status used to be dropped, so a refused save was
 				# reported as a save.
 				if ! out=$(setnetwork "$@" 2>&1); then
-					rm -f "$backup"
+					[ -n "$apply_now" ] && rm -f "$backup" /tmp/netapply.pending
 					redirect_back "danger" "Network settings were not saved: $(esc "$out")"
 				fi
 
 				if [ -n "$apply_now" ]; then
-					token=$(tr -dc 'a-f0-9' < /dev/urandom | head -c 16)
 					setsid netapply "$edit_iface" "$token" "$backup" "$network_mode" </dev/null >/dev/null 2>&1 &
-					# The page that answers must find the change pending.
+					# The page that answers must find the change pending, and
+					# a worker that did not take the record over within two
+					# seconds is not applying anything: the save then stands
+					# as a save, for the next restart, and the record goes so
+					# that a worker starting late finds it gone and gives up.
 					i=0
-					while [ $i -lt 20 ] && ! { netapply_pending && [ "$pending_token" = "$token" ]; }; do
+					while [ $i -lt 20 ] && ! { netapply_pending && [ "$pending_token" = "$token" ] && [ "$pending_phase" != "starting" ]; }; do
 						i=$((i + 1))
 						usleep 100000
 					done
-					to=""
-					[ "$network_mode" = "static" ] && to=$network_address
-					redirect_to "network.cgi?iface=${edit_iface}&applying=${token}&to=${to}" "success" \
-						"Network settings saved. Applying them now."
+					if [ "$pending_token" = "$token" ] && [ "$pending_phase" != "starting" ] && [ -z "$pending_dead" ]; then
+						to=""
+						[ "$network_mode" = "static" ] && to=$network_address
+						redirect_to "network.cgi?iface=${edit_iface}&applying=${token}&to=${to}" "success" \
+							"Network settings saved. Applying them now."
+					fi
+					[ "$pending_token" = "$token" ] && [ "$pending_phase" = "starting" ] && rm -f /tmp/netapply.pending
+					rm -f "$backup"
 				fi
 
 				update_caminfo
@@ -788,9 +854,15 @@ fi
 	applying_same=""
 	[ "${HTTP_HOST%%:*}" = "$now_address" ] && applying_same=1
 	keep="network.cgi?iface=${edit_iface}&confirm=${pending_token}"
-	applying_acts="<a class=\"btn btn-sm btn-outline-secondary\" href=\"${keep}\">Keep these settings</a>"
+	applying_acts="<a class=\"btn btn-sm btn-outline-secondary\" href=\"$(attr_escape "$keep")\">Keep these settings</a>"
+	# Scheme-relative, and on the port this page came in on, so the link
+	# reaches the same server at the new address.
+	applying_port=""
+	case "$HTTP_HOST" in
+		*:*) case "${HTTP_HOST##*:}" in '' | *[!0-9]*) ;; *) applying_port=":${HTTP_HOST##*:}" ;; esac ;;
+	esac
 	if [ -n "$applying_same" ] && [ -n "$applying_to" ] && [ "$applying_to" != "$now_address" ]; then
-		applying_text="<b>The camera is moving to $(esc "$applying_to").</b> Open <a href=\"http://${applying_to}/cgi-bin/${keep}\">http://$(esc "$applying_to")/</a> within 90 seconds to keep the new settings; otherwise the camera goes back to the previous ones by itself."
+		applying_text="<b>The camera is moving to $(esc "$applying_to").</b> Open <a href=\"$(attr_escape "//${applying_to}${applying_port}/cgi-bin/${keep}")\">$(esc "${applying_to}${applying_port}")</a> within 90 seconds to keep the new settings; otherwise the camera goes back to the previous ones by itself."
 		# The button would point at the address being left.
 		applying_acts=""
 	elif [ -n "$applying_same" ] && [ -z "$applying_to" ]; then
