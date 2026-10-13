@@ -532,7 +532,7 @@
 	// (a `preempted` from days ago) as its own generation's starting point.
 	//
 	// And whether there IS a reply is the capability answer. majestic 404s
-	// /autofocus and /ptz outright when isp.autofocus.enabled is off, so a
+	// /autofocus and /ptz outright when ptz.enabled is off, so a
 	// definite 404 withdraws the control and the focus caption stays plain. An
 	// answer promotes the caption to "Manual focus", because now there is
 	// something automatic to contrast it with. Anything else — a timeout, a
@@ -558,7 +558,7 @@
 	// A tap is a nudge, a hold is a sweep — the same split Axis's optics API
 	// makes with ±smallStep and ±bigStep, and the reason manual focus on a
 	// 500 ms step is unusable for anything delicate. The COARSE step is the
-	// operator's own isp.autofocus.pulse: send no duration and the camera uses
+	// operator's own ptz.pulse: send no duration and the camera uses
 	// it, so anyone who tuned that keeps exactly what they tuned. The FINE step
 	// is a fifth of it, floored at the key's own minimum. No new setting, and
 	// nothing in localStorage — the camera already stores this, and a step that
@@ -566,8 +566,7 @@
 	let fineMs = 100;
 	if (typeof mjConfig === 'function') {
 		mjConfig().then((c) => {
-			const af = c && c.isp && c.isp.autofocus;
-			const n = parseInt(af && af.pulse, 10);
+			const n = parseInt(c && c.ptz && c.ptz.pulse, 10);
 			if (n >= 50) fineMs = Math.max(50, Math.round(n / 5));
 		}, () => {});
 	}

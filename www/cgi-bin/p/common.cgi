@@ -1123,7 +1123,7 @@ update_caminfo() {
 	#
 	# `af_support` combined two facts with very different lifetimes: whether
 	# this board has a motor and a focus axis (U-Boot, effectively permanent)
-	# and whether majestic's engine is switched on (isp.autofocus.enabled,
+	# and whether majestic's engine is switched on (ptz.enabled,
 	# changed from the settings page whenever anybody likes). The whole file is
 	# invalidated by caminfo_stale(), which compares majestic's pid and start
 	# time -- and saving a config key is a SIGHUP reload, not a restart, so the
