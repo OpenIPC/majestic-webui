@@ -17,6 +17,10 @@
 
 	let range = 'today';
 	let live = null; // the last answer from /api/v1/counting, or null
+	// Whether the camera follows people: true, false, or null for not known.
+	// Following keeps a person still in the picture, and lines and zones are
+	// places in it, so the counts stay at zero with nothing else to say why.
+	let follows = null;
 	let hist = null;
 	let timer = null;
 
@@ -63,6 +67,8 @@
 			note('info', 'Counting is off. <a href="camera.cgi?tab=counting">Turn it on and draw a line or a zone</a> to start counting.');
 		else if (s === 'empty')
 			note('info', 'Counting is on, but there is nothing to count yet. <a href="camera.cgi?tab=counting">Draw a line or a zone</a>.');
+		else if (follows === true)
+			note('warn', 'The camera follows people, so it keeps them in the same place in the picture and they never cross a line. <a href="camera.cgi?tab=ptz">Turn Follow off</a> to count.');
 		else note('', '');
 		return s;
 	}
@@ -339,11 +345,15 @@
 		clearTimeout(timer);
 		const now = Math.floor(Date.now() / 1000);
 		const p = period(now);
-		const [l, h] = await Promise.all([
+		const [l, h, f] = await Promise.all([
 			getJSON('/api/v1/counting'),
 			getJSON('/api/v1/counting/history?from=' + p.from + '&to=' + p.to + '&step=' + p.step),
+			getJSON('/api/v1/get?key=ptz.track'),
 		]);
 		live = l;
+		// A camera with no pan/tilt head has no such key, and a failed ask is
+		// no answer: only a plain true says the camera follows.
+		follows = f === true ? true : f === false ? false : null;
 		// A history that failed to load keeps the last one on screen rather
 		// than replacing it with an empty period -- which would read as a
 		// day with nobody in it.

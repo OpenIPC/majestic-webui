@@ -4580,10 +4580,18 @@
 		refreshOsdRects().then(() => repaint());
 
 		const enabled = state.fields.find(f => f.dot === 'counting.enabled');
+		// Following keeps a person in the same place in the picture, and lines
+		// and zones are places in the picture: a camera that follows counts
+		// almost nobody crossing anything, and nothing else on this page would
+		// say why.
+		const follows = () => String(getDotted(state.config, 'ptz.track')) === 'true';
 		const paintNote = () => {
 			const off = enabled && enabled.getValue() === 'false';
-			note.textContent = off ? 'Counting is off — lines and zones are saved, not used.' : '';
-			note.classList.toggle('mj-md-warn', !!off);
+			note.textContent = off ? 'Counting is off — lines and zones are saved, not used.'
+				: follows() ? 'The camera follows people, so it keeps them still in the picture — ' +
+					'turn Follow off for lines and zones to count.'
+				: '';
+			note.classList.toggle('mj-md-warn', !!off || follows());
 		};
 		if (enabled) {
 			enabled.control.addEventListener('change', paintNote);
