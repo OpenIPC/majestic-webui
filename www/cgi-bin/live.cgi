@@ -29,7 +29,7 @@ hide_title=1; full_bleed=1
      second copy under the picture was the only body text on the page. -->
 
 <%in p/player.cgi %>
-<% if [ -n "$ptz_support" ] && [ -f p/motor.cgi ]; then %>
+<% if [ -n "$ptz_support" ]; then %>
 	<%in p/motor.cgi %>
 <% fi %>
 

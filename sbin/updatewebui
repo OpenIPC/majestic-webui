@@ -360,10 +360,23 @@ build_plan() {
 					;;
 				www/a/preview-ptz.js | www/a/ptz-stick.js | www/a/ptz-centre.js | \
 				www/a/ptz-follow.js | www/a/ptz-speed.js | www/a/af-state.js | \
-				www/cgi-bin/p/motor.cgi | www/cgi-bin/j/ptz.cgi)
+				www/cgi-bin/j/ptz.cgi)
 					if [ "$ptz" != 1 ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue
+					fi
+					;;
+				www/cgi-bin/p/motor.cgi)
+					# Never absent, only emptied: live.cgi pulls it in
+					# with <%in %>, which haserl opens while parsing the
+					# page, before any shell around it runs, so a missing
+					# file breaks the Live page whatever ptz_control says.
+					# The firmware ships the same empty stub, so on such an
+					# image this matches /rom and writes nothing.
+					if [ "$ptz" != 1 ]; then
+						: >"$tmp/motor.cgi.stub"
+						chmod "$(stat -c %a "$s")" "$tmp/motor.cgi.stub"
+						s=$tmp/motor.cgi.stub
 					fi
 					;;
 				esac
