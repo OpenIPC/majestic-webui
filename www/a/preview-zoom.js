@@ -260,13 +260,17 @@
 	}
 
 	// Free zoom is bounded by what is worth looking at. Out: no further than
-	// the whole frame, or native when the frame is smaller than the stage --
-	// past either it is only black. In: 3x native, EXCEPT that Fill itself can
+	// the whole frame fitting the stage -- past that it is only black. Not
+	// native when the frame is smaller than the stage, which this used to be:
+	// a 704x576 substream then shrank to a postage stamp on a large monitor,
+	// while the main stream stopped at the stage. Except from 1:1, which is
+	// below Fit on such a frame by choice: there the floor is native, or the
+	// first notch out would enlarge the picture to Fit. In: 3x native, EXCEPT that Fill itself can
 	// need more than that (a 704x576 substream on a 1440p monitor is 364%), and
 	// a bound below the preset in force would drag the picture back the moment
 	// you touched it. Not `kFill * 3`: that read the enlargement Fill already
 	// needed as the thing to triple, and offered 1092% on that substream.
-	function zoomFloor(kFit) { return Math.min(kFit, 1); }
+	function zoomFloor(kFit) { return lastPreset === 'one' ? Math.min(kFit, 1) : kFit; }
 	// And a caller can raise the ceiling. The peer overlay does, while another
 	// camera's picture sits on this one: 3x of THAT picture's pixels is then
 	// what is worth looking at, and it can be a dozen times this frame's. The
