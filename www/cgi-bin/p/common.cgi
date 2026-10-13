@@ -1158,7 +1158,17 @@ update_caminfo() {
 		tz_name="Etc/GMT"; echo "$tz_name" > /etc/timezone
 	fi
 
-	local variables="flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
+	# Whether this majestic has counting at all: a property of the binary, so
+	# it lives here, re-read whenever majestic is (caminfo_stale). Whether it
+	# is switched ON is configuration, and the Counting page asks for that
+	# itself. mj_cfg answers 1 for a key the daemon does not have, and 2 for a
+	# daemon that could not be asked -- which is not "no", so it leaves the
+	# entry out only until the next look rather than claiming the camera cannot
+	# count.
+	counting_support=""
+	mj_cfg counting.enabled >/dev/null && counting_support="1"
+
+	local variables="counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file}

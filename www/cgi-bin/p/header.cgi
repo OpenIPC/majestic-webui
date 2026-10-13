@@ -99,6 +99,12 @@ Pragma: no-cache
 					<% if [ -e /dev/mmcblk0 ]; then %>
 						<li class="nav-item"><a class="nav-link" href="recordings.cgi"><% page_label recordings %></a></li>
 					<% fi %>
+					<!-- On a camera whose majestic counts at all: one without
+					     object detection has no counting section, and the page
+					     would only ever say it cannot count. -->
+					<% if [ -n "$counting_support" ]; then %>
+						<li class="nav-item"><a class="nav-link" href="counting.cgi"><% page_label counting %></a></li>
+					<% fi %>
 					<li class="nav-item dropdown">
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownCamera" role="button">Camera</a>
 						<ul aria-labelledby="dropdownCamera" class="dropdown-menu">

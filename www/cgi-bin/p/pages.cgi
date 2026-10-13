@@ -25,6 +25,7 @@ page_label() {
 	dashboard)      printf '%s' "Dashboard" ;;
 	live)           printf '%s' "Live" ;;
 	recordings)     printf '%s' "Recordings" ;;
+	counting)       printf '%s' "Counting" ;;
 	# Camera
 	camera)         printf '%s' "Settings" ;;
 	usb)            printf '%s' "USB" ;;

@@ -10429,3 +10429,77 @@ body > main > .container > form > .mj-foot {
 .mj-sun-guess[hidden] {
 	display: none;
 }
+
+/* ── Counting (counting.cgi, a/counting.js) ─────────────────────────────── */
+#page-counting .ct-axis {
+	fill: var(--bs-secondary-color);
+	font-size: 10px;
+}
+/* A slot the camera did not count: hatched, with no bars, and keyed "not
+   counted", so it cannot be read as a slot in which nobody came. The fill is
+   the pattern a/counting.js draws; the stripes are the border colour, which
+   stands off the card on both themes. */
+#page-counting .ct-hatch {
+	fill: var(--bs-border-color);
+}
+#page-counting .ct-key {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.9rem;
+	margin-top: 0.25rem;
+}
+#page-counting .ct-key-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+#page-counting .ct-swatch {
+	display: inline-block;
+	width: 0.7rem;
+	height: 0.7rem;
+	border-radius: 2px;
+}
+#page-counting .ct-swatch-none {
+	background: repeating-linear-gradient(45deg, var(--bs-border-color) 0 2px, transparent 2px 4px);
+	border: 1px solid var(--bs-border-color);
+}
+#page-counting .ct-dwell {
+	display: grid;
+	gap: 0.3rem;
+	margin-top: 0.4rem;
+	max-width: 36rem;
+}
+#page-counting .ct-dwell-row {
+	display: grid;
+	grid-template-columns: 8rem 1fr 3rem;
+	align-items: center;
+	gap: 0.6rem;
+}
+#page-counting .ct-dwell-bar {
+	height: 0.6rem;
+	background: var(--bs-secondary-bg);
+	border-radius: 3px;
+	overflow: hidden;
+}
+#page-counting .ct-dwell-fill {
+	display: block;
+	height: 100%;
+	background: var(--st-c3);
+}
+#page-counting .ct-dwell-n {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+#page-counting .ct-event {
+	display: flex;
+	gap: 0.75rem;
+	padding: 0.2rem 0;
+	border-bottom: 1px solid var(--bs-border-color);
+}
+#page-counting .ct-event:last-child {
+	border-bottom: 0;
+}
+#page-counting .ct-event-t {
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
