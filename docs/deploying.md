@@ -69,9 +69,12 @@ building at all, and a script that installs itself is always one release behind.
 pattern file — busybox reads it as *match everything*, GNU as match nothing —
 which is how these manifest lists get filtered. And the **variant** file set:
 `BUILD_OPTION` in `/etc/os-release`, kept in step with the fixup lists in
-buildroot's `majestic-webui.mk`, means a standard build gets no
-`wfb.cgi`/`p/fpv_common.cgi` and an FPV build no `telegram`/`openwall`, and a
-stale overlay copy of a skipped file is pruned rather than reinstalled. The SMS
+buildroot's `majestic-webui.mk`, means an FPV build gets no
+`telegram`/`max`/`openwall`, and a stale overlay copy of a skipped file is
+pruned rather than reinstalled. The FPV page itself (`wfb.cgi`, its old name
+`fpv-wfb.cgi`, `p/fpv_common.cgi`, `a/wfb.js`) is an option,
+`BR2_PACKAGE_MAJESTIC_WEBUI_FPV`, defaulting on for the fpv and wfbng variants;
+the installer's witness is `/rom/var/www/cgi-bin/p/fpv_common.cgi`. The SMS
 page and its two scripts (`sms.cgi`, `j/sms.cgi`, `a/sms.js`, `a/sms-pdu.js`,
 `sms-forward`, `modem-at`) follow a build **option** rather than a variant —
 `BR2_PACKAGE_MAJESTIC_WEBUI_SMS`, set by the device profiles of boards with a

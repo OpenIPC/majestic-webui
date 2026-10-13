@@ -10,10 +10,14 @@ variables and does **not** read `j/locale.cgi` — that file is read by
 `camera.cgi`, `p/player.cgi` and `www/a/preview-page.js`, and nothing else, so
 editing it will not move an FPV label.
 
-The FPV-specific code is exactly two files: `p/fpv_common.cgi`, its own
-`yaml_get_value`/`yaml_set_value` helpers, included by `wfb.cgi` only; and
+The FPV-specific code is exactly three files: `p/fpv_common.cgi`, its own
+`yaml_get_value`/`yaml_set_value` helpers, included by `wfb.cgi` only;
 `wfb.cgi` itself, WFB-NG wireless settings with legacy `wfb.conf` ↔ YAML
-compatibility. `wfb.cgi` is not linked from any navigation and is reachable only
+compatibility; and `a/wfb.js`, its script. They ship only on an image built with
+the FPV page (`BR2_PACKAGE_MAJESTIC_WEBUI_FPV`, on by default for the fpv and
+wfbng variants), and `sbin/updatewebui` installs them only where `/rom` carries
+`p/fpv_common.cgi`. Nothing `<%in`-includes `wfb.cgi`, so unlike `p/motor.cgi`
+it can simply be absent. `wfb.cgi` is not linked from any navigation and is reachable only
 by URL — the FPV nav was never built, and the files that implied one were removed
 rather than left to suggest a code path that never existed. Git history has them.
 

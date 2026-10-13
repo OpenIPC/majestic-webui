@@ -122,9 +122,9 @@ Notes:
 
   Only the files meant for this firmware's variant (BUILD_OPTION in
   /etc/os-release) are installed, mirroring what the firmware itself ships:
-  a standard build gets no FPV pages, an FPV build no notifier helpers.
-  The SMS page is installed only where the firmware image carries it, and
-  the PTZ controls only where it carries a motor driver.
+  an FPV build gets no notifier helpers. The FPV and SMS pages are installed
+  only where the firmware image carries them, and the PTZ controls only where
+  it carries a motor driver.
 EOF
 }
 
@@ -191,6 +191,14 @@ variant=$(sed -n 's/^BUILD_OPTION=//p' /etc/os-release 2>/dev/null | tr -d '"')
 # overlay the root is the earlier install itself, and it keeps what it has.
 sms=0
 [ -e "$lower/usr/sbin/modem-at" ] && sms=1
+
+# The FPV settings page is a build option too, on by default for the fpv and
+# wfbng variants but settable by a profile either way, so BUILD_OPTION is no
+# longer the whole answer. The image carries p/fpv_common.cgi exactly when it
+# carries the page -- under either of the page's two names -- so that is the
+# witness.
+fpv=0
+[ -e "$lower/var/www/cgi-bin/p/fpv_common.cgi" ] && fpv=1
 
 # The PTZ controls follow the motor drivers the same way: firmware keeps them
 # only where gpio-motors or the majestic-af plugin is built in, and those are
@@ -341,8 +349,9 @@ build_plan() {
 				sbin/$scr_name-fetch)
 					d=$root/$scr_name
 					;;
-				www/cgi-bin/wfb.cgi | www/cgi-bin/fpv-wfb.cgi | www/cgi-bin/p/fpv_common.cgi)
-					if [ "$variant" != fpv ]; then
+				www/cgi-bin/wfb.cgi | www/cgi-bin/fpv-wfb.cgi | www/cgi-bin/p/fpv_common.cgi | \
+				www/a/wfb.js)
+					if [ "$fpv" != 1 ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue
 					fi
