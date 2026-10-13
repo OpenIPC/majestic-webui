@@ -270,7 +270,7 @@ the axes the hardware has (`fw_setenv ptz_caps 'zoom focus'`; unset = all, or pa
 and tilt for `gpiostep`),
 sanitised in `update_caminfo`, honoured by `p/motor.cgi` and enforced again in
 `j/ptz.cgi` (`stop` always allowed; stepped backends zero the missing component).
-**Autofocus** is majestic's engine: with `.isp.autofocus.enabled` true and a focus
+**Autofocus** is majestic's engine: with `.ptz.enabled` true and a focus
 axis, `update_caminfo` sets `af_support`, the pelco pad grows an **AF** button,
 and `j/ptz.cgi` maps it to `GET /autofocus`.
 
@@ -287,7 +287,7 @@ themselves. A Pelco camera needs `fw_setenv ptz_control pelco-d` (or `pelco-xm`)
 answers 503 and the pad says so rather than claiming the camera has no PTZ —
 `mj_ptz` keeps *could not ask* apart from a statement about the hardware, the way
 `mj_cfg` does. A held button is one continuous move, not a train of pulses: each
-request re-arms the camera's auto-stop deadline (`isp.autofocus.pulse`, default
+request re-arms the camera's auto-stop deadline (`ptz.pulse`, default
 500 ms) and the release sends `act=stop`, with the motor stopping on that
 deadline anyway if the release never arrives.
 
