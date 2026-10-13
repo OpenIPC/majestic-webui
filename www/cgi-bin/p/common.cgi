@@ -1093,6 +1093,10 @@ update_caminfo() {
 			;;
 		# "none", unset and anything unrecognised all land here: no pad.
 	esac
+	# The controls themselves ship only on an image with a motor driver; one
+	# without carries p/motor.cgi as an empty stub, and has nothing to draw a
+	# pad with whatever ptz_control says.
+	[ -s /var/www/cgi-bin/p/motor.cgi ] || { ptz_support=""; ptz_backend=""; ptz_reason=""; }
 
 	# ptz_caps declares which axes the hardware actually has, in the same
 	# declarative U-Boot family as the rest (#227): fw_setenv ptz_caps

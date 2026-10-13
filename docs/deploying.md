@@ -79,4 +79,10 @@ cellular modem — and a camera cannot read its build options, so the installer
 asks the image instead: they are installed only where `/rom/usr/sbin/modem-at`
 exists. A camera flashed before the option existed has none there, and loses
 the page on its next install until it is reflashed with an image that asks for
-it.
+it. The PTZ controls (`a/preview-ptz.js`, `a/ptz-{stick,centre,follow,speed}.js`,
+`a/af-state.js`, `j/ptz.cgi`, and `p/motor.cgi` — installed **empty** rather
+than skipped, since haserl's `<%in %>` fails on a missing file) work the same
+way with `BR2_PACKAGE_MAJESTIC_WEBUI_PTZ`, which defaults on wherever the image has a
+motor driver; the installer's witness is `/rom/usr/bin/gpio-motors`,
+`/rom/usr/lib/majestic-af.so` or `/rom/usr/bin/motor`. Unlike SMS this needs no reflash: every image
+that could ever move a motor already carries one of the two.

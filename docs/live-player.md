@@ -237,6 +237,16 @@ tests' `SRCS` lists; `preview-page.js` does not know they exist.
 
 ## PTZ
 
+**Only an image with a motor driver carries any of this.** Firmware leaves the
+PTZ files out unless gpio-motors or the majestic-af plugin is built in, and
+`sbin/updatewebui` follows the image (`docs/deploying.md`). `p/motor.cgi` is
+the exception: it is **emptied, never removed**, because `live.cgi` pulls it in
+with `<%in %>`, which haserl opens while parsing the page, before any shell
+around it runs — a missing file is a "Unable to open file" error on the Live
+page whatever `ptz_control` says. `common.cgi` treats an empty `p/motor.cgi`
+as no PTZ, so such an image draws no pad, and no longer says "add the
+majestic-af package", which it could not use.
+
 `p/motor.cgi` (markup only, hidden) + `preview-ptz.js`, which relocates the
 pad(s) into the stage's `#mj-ptz` mount: Pointer Events with capture for
 press-and-hold, arrow keys only while the stage itself has focus (the bar's
