@@ -153,6 +153,13 @@ group('the wheel zooms a small substream out no further than Fit');
 	ok(t.Z.scalePct() === 250, 'wheeling out stops at Fit (' + t.Z.scalePct() + '%)');
 	t.radio('one');
 	ok(t.Z.scalePct() === 100, 'and 1:1 still gives native pixels');
+	t.stage.fire('wheel', { deltaY: 500, clientX: 1280, clientY: 720 });
+	ok(t.Z.scalePct() === 100, 'a notch out from 1:1 does not enlarge it to Fit (' + t.Z.scalePct() + '%)');
+	t.stage.fire('wheel', { deltaY: -50, clientX: 1280, clientY: 720 });
+	const z = t.Z.scalePct();
+	ok(z > 100 && z < 250, 'a notch in from 1:1 grows from native, not to Fit (' + z + '%)');
+	t.stage.fire('wheel', { deltaY: 500, clientX: 1280, clientY: 720 });
+	ok(t.Z.scalePct() === 100, 'and back out stops at native');
 }
 
 group('one finger in Fit still draws a rectangle');
