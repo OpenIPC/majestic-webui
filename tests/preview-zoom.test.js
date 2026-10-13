@@ -137,6 +137,24 @@ group('a spread from Fit is a pinch');
 	ok(t.Z.scalePct() === fit && t.drawable(), 'squeezing back lands on Fit');
 }
 
+group('the wheel zooms a small substream out no further than Fit');
+{
+	// OpenIPC/majestic#342: a 704x576 substream on a 1440p window. Fit is
+	// 250% there, and the floor used to be native, so wheeling out shrank the
+	// picture to a 704x576 box in the middle of the window.
+	const t = boot();
+	t.stage.clientWidth = 2560;
+	t.stage.clientHeight = 1440;
+	t.Z.setFrame(704, 576);
+	t.radio('fit');
+	ok(t.Z.scalePct() === 250, 'Fit fills the window height, at 250%');
+	for (let i = 0; i < 20; i++)
+		t.stage.fire('wheel', { deltaY: 500, clientX: 1280, clientY: 720 });
+	ok(t.Z.scalePct() === 250, 'wheeling out stops at Fit (' + t.Z.scalePct() + '%)');
+	t.radio('one');
+	ok(t.Z.scalePct() === 100, 'and 1:1 still gives native pixels');
+}
+
 group('one finger in Fit still draws a rectangle');
 {
 	const t = boot();
