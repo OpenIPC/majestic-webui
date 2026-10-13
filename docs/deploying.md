@@ -83,6 +83,6 @@ it. The PTZ controls (`a/preview-ptz.js`, `a/ptz-{stick,centre,follow,speed}.js`
 `a/af-state.js`, `j/ptz.cgi`, and `p/motor.cgi` — installed **empty** rather
 than skipped, since haserl's `<%in %>` fails on a missing file) work the same
 way with `BR2_PACKAGE_MAJESTIC_WEBUI_PTZ`, which defaults on wherever the image has a
-motor driver; the installer's witness is `/rom/usr/bin/gpio-motors` or
-`/rom/usr/lib/majestic-af.so`. Unlike SMS this needs no reflash: every image
+motor driver; the installer's witness is `/rom/usr/bin/gpio-motors`,
+`/rom/usr/lib/majestic-af.so` or `/rom/usr/bin/motor`. Unlike SMS this needs no reflash: every image
 that could ever move a motor already carries one of the two.

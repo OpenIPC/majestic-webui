@@ -193,10 +193,12 @@ sms=0
 [ -e "$lower/usr/sbin/modem-at" ] && sms=1
 
 # The PTZ controls follow the motor drivers the same way: firmware keeps them
-# only where gpio-motors or the majestic-af plugin is built in, and those two
-# are what moves a motor at all, so they are the witness here too.
+# only where gpio-motors or the majestic-af plugin is built in, and those are
+# what moves a motor, so they are the witness here too -- with /usr/bin/motor,
+# the third backend's helper, which no package installs but a board may.
 ptz=0
-{ [ -e "$lower/usr/bin/gpio-motors" ] || [ -e "$lower/usr/lib/majestic-af.so" ]; } && ptz=1
+{ [ -e "$lower/usr/bin/gpio-motors" ] || [ -e "$lower/usr/lib/majestic-af.so" ] ||
+	[ -e "$lower/usr/bin/motor" ]; } && ptz=1
 
 tmp=$(mktemp -d) || die "cannot create a temporary directory"
 # The staged directory holds the script this shell is reading, which on Linux
