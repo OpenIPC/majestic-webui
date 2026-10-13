@@ -123,7 +123,8 @@ Notes:
   Only the files meant for this firmware's variant (BUILD_OPTION in
   /etc/os-release) are installed, mirroring what the firmware itself ships:
   a standard build gets no FPV pages, an FPV build no notifier helpers.
-  The SMS page is installed only where the firmware image carries it.
+  The SMS page is installed only where the firmware image carries it, and
+  the PTZ controls only where it carries a motor driver.
 EOF
 }
 
@@ -190,6 +191,12 @@ variant=$(sed -n 's/^BUILD_OPTION=//p' /etc/os-release 2>/dev/null | tr -d '"')
 # overlay the root is the earlier install itself, and it keeps what it has.
 sms=0
 [ -e "$lower/usr/sbin/modem-at" ] && sms=1
+
+# The PTZ controls follow the motor drivers the same way: firmware keeps them
+# only where gpio-motors or the majestic-af plugin is built in, and those two
+# are what moves a motor at all, so they are the witness here too.
+ptz=0
+{ [ -e "$lower/usr/bin/gpio-motors" ] || [ -e "$lower/usr/lib/majestic-af.so" ]; } && ptz=1
 
 tmp=$(mktemp -d) || die "cannot create a temporary directory"
 # The staged directory holds the script this shell is reading, which on Linux
@@ -347,6 +354,14 @@ build_plan() {
 				www/cgi-bin/sms.cgi | www/cgi-bin/j/sms.cgi | www/a/sms.js | \
 				www/a/sms-pdu.js | sbin/sms-forward | sbin/modem-at)
 					if [ "$sms" != 1 ]; then
+						echo "$d" >>"$tmp/skipped"
+						continue
+					fi
+					;;
+				www/a/preview-ptz.js | www/a/ptz-stick.js | www/a/ptz-centre.js | \
+				www/a/ptz-follow.js | www/a/ptz-speed.js | www/a/af-state.js | \
+				www/cgi-bin/p/motor.cgi | www/cgi-bin/j/ptz.cgi)
+					if [ "$ptz" != 1 ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue
 					fi
