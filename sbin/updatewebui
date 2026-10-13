@@ -694,11 +694,22 @@ write_version() {
 # Forwarding is switched on by a line the SMS page writes into root's crontab,
 # and nothing else would ever take it out again. Left behind on a camera whose
 # SMS files are skipped, it would run a missing script once a minute.
+#
+# Only that exact line goes, never anything else that happens to mention the
+# script. And only once the install has gone through: run earlier, a failed
+# install would leave the old page in place with its forwarding switched off.
+# A crontab that cannot be edited is an error rather than a footnote, because
+# the script the line runs is already gone.
 drop_sms_cron() {
 	[ "$sms" = 1 ] && return 0
-	grep -q sms-forward /etc/crontabs/root 2>/dev/null || return 0
-	sed -i /sms-forward/d /etc/crontabs/root &&
+	grep -qxF '* * * * * /usr/sbin/sms-forward' /etc/crontabs/root 2>/dev/null || return 0
+	if sed -i '/^\* \* \* \* \* \/usr\/sbin\/sms-forward$/d' /etc/crontabs/root; then
 		echo "Removed SMS forwarding from root's crontab: this firmware carries no SMS page"
+		return 0
+	fi
+	echo "$scr_name: could not remove the SMS forwarding line from /etc/crontabs/root;" >&2
+	echo "$scr_name: it now runs a script this firmware does not carry. Delete it by hand." >&2
+	return 1
 }
 
 do_install() {
@@ -706,7 +717,6 @@ do_install() {
 	build_plan
 	report_plan
 	[ "$dry_run" = 1 ] && exit 0
-	drop_sms_cron
 	if [ ! -s "$tmp/write" ] && [ ! -s "$tmp/drop" ] && [ ! -s "$tmp/prune" ]; then
 		echo
 		echo "Already up to date."
@@ -716,6 +726,7 @@ do_install() {
 		# the Dashboard should show what is actually installed.
 		write_version
 		rm -f /tmp/webui/sysinfo.txt
+		drop_sms_cron || exit 1
 		return 0
 	fi
 	echo
@@ -748,6 +759,7 @@ do_install() {
 		fi
 	done
 	verify_view "$tmp/want" "$tmp/gone"
+	drop_sms_cron || exit 1
 }
 
 # The one place a directory ever leaves the upper layer. rmdir there muddles
