@@ -1290,6 +1290,8 @@
 			renderOsd(form);
 		} else if (sec === 'motionDetect') {
 			renderMotion(form);
+		} else if (sec === 'counting') {
+			renderCounting(form);
 		} else {
 			const card = el('div', 'card');
 			const body = el('div', 'card-body');
@@ -3490,67 +3492,18 @@
 		paintNote();
 	}
 
-	// The region editor: rectangles on the picture, the list beside it, and one
-	// mode that turns a drag into a new region.
+	// The geometry of a picture on the preview's stage, for an editor that
+	// draws main-stream coordinates on it: the region editor below, and the
+	// counting lines. One copy, so two editors on one picture cannot disagree
+	// about where it is.
 	//
-	// Returns its repaint function, which renderMotion hands to the stage's
-	// onFrame — the geometry below cannot be computed until a frame has said how
-	// big it is.
-	// `words` is the whole of what differs between the two callers. Motion
-	// regions say where to watch; privacy masks are burned into the stream. Same
-	// control, different sentence beside it — sharing the sentence would be the
-	// one thing that must not be shared.
-	//
-	// `words.gated` says the caller decides when a drag draws (the Overlay leaf
-	// has two things you can place on one picture, so it owns that choice); the
-	// Motion leaf leaves it ungated and the picture is drawable throughout.
-	function mountRegions(preview, field, listBox, noteEl, words) {
-		words = words || {};
-		const W = {
-			one: words.one || '1 region',
-			many: words.many || ' regions',
-			draw: words.draw || 'Draw regions',
-			drawHint: words.drawHint || 'Drag a rectangle on the picture',
-			empty: words.empty ||
-				'No regions — the whole picture is watched. Drag one on the picture to watch part of it instead.',
-			clearAsk: words.clearAsk ||
-				'Remove every region? The whole picture will be watched.',
-			clearLabel: words.clearLabel || 'Clear all',
-			base: words.base ||
-				'Regions are stored in the main stream’s pixels, and this camera has ' +
-				'no main resolution set. Switch the picture to Main to draw them.',
-			// The singular noun the row verdicts build their sentences from,
-			// and the two things a rectangle the camera cannot use is failing
-			// to do. Kept as words rather than as a boolean, because "watches"
-			// and "hides" are not the same promise and the whole reason these
-			// two callers share a control is that only the sentences differ.
-			thing: words.thing || 'region',
-			deadSome: words.deadSome ||
-				'A region with no area, or one outside the picture, is saved but never watched.',
-			deadAll: words.deadAll ||
-				'None of these regions watches anything, so nothing will be detected: ' +
-				'detection is limited to the regions listed and does not fall back to ' +
-				'the whole picture.',
-			space: words.space || 'Coordinates are main-stream pixels',
-		};
-		// Ungated callers are always live; a gated one starts off and is turned
-		// on by the caller's own mode control.
-		let active = !words.gated;
-		const ctl = field.control;
-
-		// ── coordinates ───────────────────────────────────────────────────
-		//
-		// Regions are stored in the MAIN stream's pixels, which is what
-		// majestic.yaml holds and what the old editor computed against
-		// video0.size. The picture on screen may be the sub stream — a different
-		// resolution of the same field of view — so the mapping goes through
-		// fractions of the frame rather than through either size directly.
-		//
-		// video0.size can also be unset, meaning "sensor native", which the
-		// config does not spell out. Then the only honest base is the frame
-		// itself, and only while the frame IS the main stream; on the sub
-		// stream there is nothing to scale by and the editor says so instead of
-		// drawing rectangles in the wrong places.
+	// Regions are stored in the MAIN stream's pixels, which is what
+	// majestic.yaml holds. The picture on screen may be the sub stream -- a
+	// different resolution of the same field of view -- so the mapping goes
+	// through the camera's own report of how the streams sit on the sensor
+	// (camRects, from /api/v1/osd) where it has given one.
+	function stageGeom(preview) {
+		const RGN = window.MajesticRegion;
 		function base() {
 			// The camera's own word for the main stream's size, where it has
 			// given one. It is not always video0.size: a crop on the main
@@ -3618,6 +3571,74 @@
 			const s = Math.min(w / f.w, h / f.h);
 			return { x: (w - f.w * s) / 2, y: (h - f.h * s) / 2, w: f.w * s, h: f.h * s };
 		}
+		return { base: base, camView: camView, geom: geom, pic: pic };
+	}
+
+	// The region editor: rectangles on the picture, the list beside it, and one
+	// mode that turns a drag into a new region.
+	//
+	// Returns its repaint function, which renderMotion hands to the stage's
+	// onFrame — the geometry below cannot be computed until a frame has said how
+	// big it is.
+	// `words` is the whole of what differs between the two callers. Motion
+	// regions say where to watch; privacy masks are burned into the stream. Same
+	// control, different sentence beside it — sharing the sentence would be the
+	// one thing that must not be shared.
+	//
+	// `words.gated` says the caller decides when a drag draws (the Overlay leaf
+	// has two things you can place on one picture, so it owns that choice); the
+	// Motion leaf leaves it ungated and the picture is drawable throughout.
+	function mountRegions(preview, field, listBox, noteEl, words) {
+		words = words || {};
+		const W = {
+			one: words.one || '1 region',
+			many: words.many || ' regions',
+			draw: words.draw || 'Draw regions',
+			drawHint: words.drawHint || 'Drag a rectangle on the picture',
+			empty: words.empty ||
+				'No regions — the whole picture is watched. Drag one on the picture to watch part of it instead.',
+			clearAsk: words.clearAsk ||
+				'Remove every region? The whole picture will be watched.',
+			clearLabel: words.clearLabel || 'Clear all',
+			base: words.base ||
+				'Regions are stored in the main stream’s pixels, and this camera has ' +
+				'no main resolution set. Switch the picture to Main to draw them.',
+			// The singular noun the row verdicts build their sentences from,
+			// and the two things a rectangle the camera cannot use is failing
+			// to do. Kept as words rather than as a boolean, because "watches"
+			// and "hides" are not the same promise and the whole reason these
+			// two callers share a control is that only the sentences differ.
+			thing: words.thing || 'region',
+			deadSome: words.deadSome ||
+				'A region with no area, or one outside the picture, is saved but never watched.',
+			deadAll: words.deadAll ||
+				'None of these regions watches anything, so nothing will be detected: ' +
+				'detection is limited to the regions listed and does not fall back to ' +
+				'the whole picture.',
+			space: words.space || 'Coordinates are main-stream pixels',
+		};
+		// Ungated callers are always live; a gated one starts off and is turned
+		// on by the caller's own mode control.
+		let active = !words.gated;
+		const ctl = field.control;
+
+		// ── coordinates ───────────────────────────────────────────────────
+		//
+		// Regions are stored in the MAIN stream's pixels, which is what
+		// majestic.yaml holds and what the old editor computed against
+		// video0.size. The picture on screen may be the sub stream — a different
+		// resolution of the same field of view — so the mapping goes through
+		// fractions of the frame rather than through either size directly.
+		//
+		// video0.size can also be unset, meaning "sensor native", which the
+		// config does not spell out. Then the only honest base is the frame
+		// itself, and only while the frame IS the main stream; on the sub
+		// stream there is nothing to scale by and the editor says so instead of
+		// drawing rectangles in the wrong places.
+		// Where everything on the picture is, shared with the line editor so
+		// the two cannot disagree about it (stageGeom, above).
+		const SG = stageGeom(preview);
+		const base = SG.base, camView = SG.camView, geom = SG.geom, pic = SG.pic;
 
 		// The geometry verdicts live in mj-region.js, away from the DOM, because
 		// every branch of them renders a confident-looking chip and only a
@@ -4446,6 +4467,367 @@
 		};
 	}
 
+
+	// ── The Counting leaf ─────────────────────────────────────────────────
+	//
+	// Lines to count crossings of and zones to count who is in, both drawn on
+	// the live picture, beside the switches for what is counted. The same
+	// kind of page as the Motion leaf, and the zones ARE its regions: the same
+	// editor, gated, because this picture has two things a drag can draw and
+	// the Draw switch says which one it is for.
+	function renderCounting(form) {
+		const fields = sectionFields('counting');
+		const head = el('div', 'mj-live-head');
+		head.innerHTML = '<h3 class="mj-cap">' + esc(label('counting')) + '</h3>' +
+			'<span class="mj-live-rule"></span>';
+		const note = el('span', 'mj-live-note');
+		head.appendChild(note);
+		form.appendChild(head);
+
+		let repaint = () => {};
+		const preview = window.MajesticPreview &&
+			window.MajesticPreview.mount(form, {
+				config: () => state.config,
+				where: 'counting',
+				onFrame: () => repaint(),
+			});
+		state.preview = preview;
+
+		const deck = el('div', 'mj-live-deck');
+		const colDraw = el('div', 'mj-live-col');
+		const colWhat = el('div', 'mj-live-col mj-live-col-b');
+		deck.appendChild(colDraw);
+		deck.appendChild(colWhat);
+		form.appendChild(deck);
+
+		const lineBody = liveGroup(colDraw, 'Lines', 'none');
+		const lineNote = lineBody.parentNode.querySelector('.mj-live-note');
+		const zoneBody = liveGroup(colDraw, 'Zones', 'none');
+		const zoneNote = zoneBody.parentNode.querySelector('.mj-live-note');
+		const whatBody = liveGroup(colWhat, 'Counting', '');
+
+		let linesField = null, zonesField = null;
+		for (const f of fields) {
+			const isLines = f.dot === 'counting.lines', isZones = f.dot === 'counting.zones';
+			const box = isLines ? lineBody : isZones ? zoneBody : whatBody;
+			const field = renderField(box, f.dot, f.key, f.sub, getDotted(state.config, f.dot),
+				isLines || isZones ? { hidden: true } : undefined);
+			if (!field) continue;
+			state.fields.push(field);
+			state.initial[f.dot] = field.getValue();
+			if (isLines) linesField = field;
+			if (isZones) zonesField = field;
+		}
+
+		const can = preview && window.MajesticRegion && window.MajesticLine;
+		if (!can) {
+			for (const f of [linesField, zonesField]) if (f) f.p.hidden = false;
+			const p = el('p', 'mj-live-hint');
+			p.textContent = (preview ? 'The line and zone editor could not be loaded'
+				: 'The preview could not be loaded') +
+				', so lines and zones can only be given as coordinates here.';
+			colDraw.appendChild(p);
+			return;
+		}
+
+		// What a drag on the picture draws. One at a time, because a press on
+		// empty picture has to mean one thing.
+		const sw = el('div', 'btn-group btn-group-sm mj-ct-mode');
+		sw.setAttribute('role', 'group');
+		sw.setAttribute('aria-label', 'Draw on the picture');
+		const modes = {};
+		for (const [k, t] of [['lines', 'Draw lines'], ['zones', 'Draw zones']]) {
+			const b = el('button', 'btn btn-outline-primary');
+			b.type = 'button';
+			b.textContent = t;
+			b.addEventListener('click', () => setMode(k));
+			sw.appendChild(b);
+			modes[k] = b;
+		}
+		colDraw.insertBefore(sw, colDraw.firstChild);
+
+		const zones = zonesField ? mountRegions(preview, zonesField, zoneBody, zoneNote, {
+			gated: true,
+			one: '1 zone',
+			many: ' zones',
+			draw: 'Draw zones',
+			drawHint: 'Drag a rectangle on the picture',
+			empty: 'No zones. Drag one on the picture to count who is in it.',
+			clearAsk: 'Remove every zone?',
+			thing: 'zone',
+			deadSome: 'A zone with no area, or one outside the picture, is saved but counts no one.',
+			deadAll: 'None of these zones can count anyone: each has no area or is outside the picture.',
+			base: 'Zones are stored in the main stream’s pixels, and this camera has ' +
+				'no main resolution set. Switch the picture to Main to draw them.',
+		}) : null;
+		const lines = linesField ? mountLines(preview, linesField, lineBody, lineNote) : null;
+
+		let mode = 'lines';
+		function setMode(m) {
+			mode = m;
+			for (const k in modes) {
+				modes[k].classList.toggle('active', k === m);
+				modes[k].setAttribute('aria-pressed', k === m ? 'true' : 'false');
+			}
+			if (zones) zones.setActive(m === 'zones');
+			if (lines) lines.setActive(m === 'lines');
+		}
+		setMode(lines ? 'lines' : 'zones');
+		repaint = () => {
+			if (zones) zones.repaint();
+			if (lines) lines.repaint();
+		};
+		refreshOsdRects().then(() => repaint());
+
+		const enabled = state.fields.find(f => f.dot === 'counting.enabled');
+		const paintNote = () => {
+			const off = enabled && enabled.getValue() === 'false';
+			note.textContent = off ? 'Counting is off — lines and zones are saved, not used.' : '';
+			note.classList.toggle('mj-md-warn', !!off);
+		};
+		if (enabled) {
+			enabled.control.addEventListener('change', paintNote);
+			state.liveSync.push(paintNote);
+		}
+		paintNote();
+	}
+
+	// The line editor: counting lines on the picture, each with an arrow into
+	// its "in" side, and the list of them beside it. The field is the
+	// camera's one string ("[name:]x1,y1,x2,y2;..."), hidden, and every edit
+	// rewrites it whole through MajesticLine -- which never writes a string
+	// the camera would refuse, because the camera refuses ALL the lines over
+	// one bad entry and says so nowhere but its log.
+	function mountLines(preview, field, listBox, noteEl) {
+		const LN = window.MajesticLine;
+		const SG = stageGeom(preview);
+		const SVG = 'http://www.w3.org/2000/svg';
+		let active = false;
+		let sel = -1;
+		let gesture = null;
+
+		// The model is the field: read back from it on every paint, written to
+		// it on every edit, so Save, dirty tracking and reset see one value.
+		const read = () => LN.parse(field.getValue()) || [];
+		const unreadable = () => LN.parse(field.getValue()) === null;
+		function write(list) {
+			field.setValue(LN.format(list));
+			field.control.dispatchEvent(new Event('input', { bubbles: true }));
+			field.control.dispatchEvent(new Event('change', { bubbles: true }));
+			updateDirty();
+			paint();
+		}
+
+		const catcher = el('div', 'mj-md-catch');
+		preview.overlay.appendChild(catcher);
+		const svg = document.createElementNS(SVG, 'svg');
+		svg.setAttribute('class', 'mj-ct-svg');
+		preview.overlay.appendChild(svg);
+
+		const list = el('div', 'mj-ct-lines');
+		listBox.appendChild(list);
+		const warn = el('p', 'mj-live-hint mj-md-warn');
+		warn.hidden = true;
+		listBox.appendChild(warn);
+
+		function mk(tag, attrs, parent) {
+			const e = document.createElementNS(SVG, tag);
+			for (const k in attrs) e.setAttribute(k, attrs[k]);
+			(parent || svg).appendChild(e);
+			return e;
+		}
+
+		function paint() {
+			const g = SG.geom();
+			const ls = read();
+			while (svg.firstChild) svg.removeChild(svg.firstChild);
+			const usable = !!g && active;
+			catcher.hidden = !usable;
+			svg.style.pointerEvents = active ? '' : 'none';
+			preview.stage.classList.toggle('mj-md-armed', usable);
+			if (g) {
+				const defs = mk('defs', {});
+				const m = mk('marker', { id: 'mj-ct-arrow', viewBox: '0 0 10 10', refX: '6', refY: '5',
+					markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' }, defs);
+				mk('path', { d: 'M0,0 L10,5 L0,10 z', class: 'mj-ct-arrowhead' }, m);
+				ls.forEach((l, i) => {
+					const x1 = g.sx(l.x1), y1 = g.sy(l.y1), x2 = g.sx(l.x2), y2 = g.sy(l.y2);
+					const grp = mk('g', { class: 'mj-ct-line' + (i === sel ? ' mj-ct-sel' : '') +
+						(LN.verdict(l, SG.base()) ? ' mj-ct-dead' : '') });
+					mk('line', { x1, y1, x2, y2, class: 'mj-ct-hit' }, grp).dataset.i = i;
+					mk('line', { x1, y1, x2, y2, class: 'mj-ct-stroke' }, grp);
+					const a = LN.inArrow({ x1, y1, x2, y2 }, 28);
+					mk('line', { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, class: 'mj-ct-in',
+						'marker-end': 'url(#mj-ct-arrow)' }, grp);
+					const t = mk('text', { x: a.x2 + 4, y: a.y2 + 4, class: 'mj-ct-label' }, grp);
+					t.textContent = l.name + ' · in';
+					for (const [end, cx, cy] of [[1, x1, y1], [2, x2, y2]]) {
+						const h = mk('circle', { cx, cy, r: 7, class: 'mj-ct-grip' }, grp);
+						h.dataset.i = i;
+						h.dataset.end = end;
+					}
+				});
+			}
+			paintList(ls);
+		}
+
+		function paintList(ls) {
+			list.textContent = '';
+			const bad = unreadable();
+			warn.hidden = !bad;
+			warn.textContent = bad
+				? 'The camera cannot read these lines, so it counts none of them. Draw them again, or clear them.'
+				: '';
+			if (noteEl) noteEl.textContent = bad ? '' : ls.length === 1 ? '1 line' : (ls.length || 'none') + (ls.length ? ' lines' : '');
+			if (!ls.length && !bad) {
+				const p = el('p', 'mj-live-hint');
+				p.textContent = 'No lines. Choose Draw lines and drag one across where people walk.';
+				list.appendChild(p);
+			}
+			ls.forEach((l, i) => {
+				const row = el('div', 'mj-ct-row' + (i === sel ? ' mj-ct-sel' : ''));
+				const name = el('input', 'form-control form-control-sm mj-ct-name');
+				name.value = l.name;
+				name.setAttribute('aria-label', 'Name of line ' + (i + 1));
+				name.addEventListener('change', () => {
+					const v = name.value.trim();
+					const ls2 = read();
+					if (!ls2[i]) return;
+					if (v && LN.NAME.test(v)) {
+						ls2[i].name = v;
+						ls2[i].named = true;
+						write(ls2);
+					} else {
+						name.value = ls2[i].name;
+						name.title = 'Letters, digits, - and _ only';
+					}
+				});
+				row.appendChild(name);
+				const co = el('span', 'small text-secondary mj-ct-co');
+				co.textContent = [l.x1, l.y1, l.x2, l.y2].map((v) => Math.round(v)).join(', ');
+				row.appendChild(co);
+				const flip = el('button', 'btn btn-sm btn-outline-secondary');
+				flip.type = 'button';
+				flip.textContent = 'Swap in/out';
+				flip.addEventListener('click', () => {
+					const ls2 = read();
+					ls2[i] = LN.flip(ls2[i]);
+					write(ls2);
+				});
+				row.appendChild(flip);
+				const del = el('button', 'btn btn-sm btn-outline-danger');
+				del.type = 'button';
+				del.textContent = 'Remove';
+				del.addEventListener('click', () => {
+					const ls2 = read();
+					ls2.splice(i, 1);
+					sel = -1;
+					write(ls2);
+				});
+				row.appendChild(del);
+				const v = LN.verdict(l, SG.base());
+				if (v) {
+					const why = el('div', 'small mj-md-bad mj-ct-why');
+					why.textContent = v;
+					row.appendChild(why);
+				}
+				row.addEventListener('mouseenter', () => { sel = i; paint(); });
+				list.appendChild(row);
+			});
+			if (bad) {
+				const clr = el('button', 'btn btn-sm btn-outline-danger');
+				clr.type = 'button';
+				clr.textContent = 'Clear the lines';
+				clr.addEventListener('click', () => write([]));
+				list.appendChild(clr);
+			}
+		}
+
+		function at(e) {
+			const r = preview.overlay.getBoundingClientRect();
+			return { x: e.clientX - r.left, y: e.clientY - r.top };
+		}
+
+		function begin(e) {
+			if (!active || e.button > 0) return;
+			const g = SG.geom();
+			if (!g || unreadable()) return;
+			const p = at(e);
+			const t = e.target;
+			const ls = read();
+			if (t && t.dataset && t.dataset.end) {
+				gesture = { kind: 'end', i: +t.dataset.i, end: +t.dataset.end, ls };
+			} else if (t && t.dataset && t.dataset.i !== undefined && t.classList.contains('mj-ct-hit')) {
+				gesture = { kind: 'move', i: +t.dataset.i, from: p, orig: Object.assign({}, ls[+t.dataset.i]), ls };
+			} else {
+				if (ls.length >= 8) return;
+				const x = g.mx(p.x), y = g.my(p.y);
+				ls.push({ name: 'line' + (ls.length + 1), named: false, x1: x, y1: y, x2: x, y2: y });
+				gesture = { kind: 'new', i: ls.length - 1, end: 2, ls };
+			}
+			sel = gesture.i;
+			e.currentTarget.setPointerCapture(e.pointerId);
+			e.preventDefault();
+		}
+
+		function move(e) {
+			if (!gesture) return;
+			const g = SG.geom();
+			if (!g) return;
+			const p = at(e);
+			const l = gesture.ls[gesture.i];
+			if (gesture.kind === 'move') {
+				const dx = g.dx(p.x - gesture.from.x), dy = g.dy(p.y - gesture.from.y);
+				l.x1 = gesture.orig.x1 + dx; l.y1 = gesture.orig.y1 + dy;
+				l.x2 = gesture.orig.x2 + dx; l.y2 = gesture.orig.y2 + dy;
+			} else if (gesture.end === 1) {
+				l.x1 = g.mx(p.x); l.y1 = g.my(p.y);
+			} else {
+				l.x2 = g.mx(p.x); l.y2 = g.my(p.y);
+			}
+			// Drawn from the gesture's own copy until it is let go, so a drag
+			// is one edit to the field rather than one per pointermove.
+			field.setValue(LN.format(gesture.ls));
+			paint();
+		}
+
+		function finish() {
+			if (!gesture) return;
+			const ls = gesture.ls;
+			const l = ls[gesture.i];
+			// A press that did not draw is not a line.
+			if (gesture.kind === 'new' && Math.hypot(l.x2 - l.x1, l.y2 - l.y1) < 8) ls.splice(gesture.i, 1);
+			gesture = null;
+			write(ls);
+		}
+
+		for (const t of [catcher, svg]) {
+			t.addEventListener('pointerdown', begin);
+			t.addEventListener('pointermove', move);
+			t.addEventListener('pointerup', finish);
+			t.addEventListener('pointercancel', finish);
+		}
+		const ro = window.ResizeObserver ? new ResizeObserver(() => paint()) : null;
+		if (ro) ro.observe(preview.stage);
+		state.liveCleanup.push(() => {
+			if (ro) ro.disconnect();
+			catcher.remove();
+			svg.remove();
+			preview.stage.classList.remove('mj-md-armed');
+		});
+		// Someone typing in the hidden field cannot happen, but a reset can.
+		field.control.addEventListener('input', () => { if (!gesture) paint(); });
+		paint();
+		return {
+			repaint: paint,
+			setActive: (on) => {
+				if (active === !!on) return;
+				active = !!on;
+				if (!active) sel = -1;
+				paint();
+			},
+		};
+	}
 
 	// ── The Overlay leaf ──────────────────────────────────────────────────
 	//

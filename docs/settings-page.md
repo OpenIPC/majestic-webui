@@ -197,7 +197,7 @@ from Main stream and Sub stream when majestic began flagging
 a `tests/tree.test.js` invariant now walks the shipped schema and fails if any
 key of any grouped section lands on no leaf or on two.
 
-Four leaves have hand-written renderers, each with its reasoning beside it in
+Five leaves have hand-written renderers, each with its reasoning beside it in
 `mj-settings.js`: **Picture** (the picture, the lifted knobs, and the
 Orientation group over hidden `mirror`/`flip` fields), **`osd`**
 (`renderOsd`; the camera burns the overlay in, so the live picture is the real
@@ -205,12 +205,21 @@ thing and placing is a round trip — offsets are written as a **percentage** so
 Main and Sub agree, and the template is chips because majestic's specifier switch
 returns 0 for an unknown code and silently truncates the rest of the line),
 **`motionDetect`** (`renderMotion`, which absorbed the Visual editor, so
-`?tab=roi` redirects here rather than 404ing), and **`nightMode`** (the pin map
-above its fields). `mountRegions` is shared by the motion and privacy-mask
-editors, parameterised by a `words` object and a `gated` flag; what is
-deliberately not shared is what the rectangles mean — a motion region says where
-to watch, a privacy mask is burned into the stream and is therefore in the
-recording and in every other viewer's picture.
+`?tab=roi` redirects here rather than 404ing), **`counting`** (`renderCounting`:
+lines and zones on the live picture over hidden `lines`/`zones` fields, with a
+Draw lines / Draw zones switch because one drag can only mean one of them), and
+**`nightMode`** (the pin map above its fields). `mountRegions` is shared by the
+motion, privacy-mask and counting-zone editors, parameterised by a `words`
+object and a `gated` flag; what is deliberately not shared is what the
+rectangles mean — a motion region says where to watch, a privacy mask is burned
+into the stream and is therefore in the recording and in every other viewer's
+picture, a zone is where people are counted. `stageGeom` is the one mapping
+between main-stream pixels and the picture on screen, shared by `mountRegions`
+and `mountLines` (the counting lines) so two editors on one picture cannot
+disagree about where it is. `mj-line.js` is the lines' pure half: majestic
+refuses the whole lines string over one bad entry, silently, so the editor
+writes only what it parses, and the arrow into each line's "in" side is a sign
+convention that is tested rather than eyeballed.
 
 **When you'd touch this code:**
 

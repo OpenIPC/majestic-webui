@@ -261,6 +261,7 @@ fi
 %>
 <script src="/a/mj-exposure.js" defer></script>
 <script src="/a/mj-region.js" defer></script>
+<script src="/a/mj-line.js" defer></script>
 <script src="/a/analytics-overlay.js" defer></script>
 <script src="/a/mj-servers.js" defer></script>
 <script src="/a/mj-table.js" defer></script>
