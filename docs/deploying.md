@@ -71,4 +71,12 @@ which is how these manifest lists get filtered. And the **variant** file set:
 `BUILD_OPTION` in `/etc/os-release`, kept in step with the fixup lists in
 buildroot's `majestic-webui.mk`, means a standard build gets no
 `wfb.cgi`/`p/fpv_common.cgi` and an FPV build no `telegram`/`openwall`, and a
-stale overlay copy of a skipped file is pruned rather than reinstalled.
+stale overlay copy of a skipped file is pruned rather than reinstalled. The SMS
+page and its two scripts (`sms.cgi`, `j/sms.cgi`, `a/sms.js`, `a/sms-pdu.js`,
+`sms-forward`, `modem-at`) follow a build **option** rather than a variant —
+`BR2_PACKAGE_MAJESTIC_WEBUI_SMS`, set by the device profiles of boards with a
+cellular modem — and a camera cannot read its build options, so the installer
+asks the image instead: they are installed only where `/rom/usr/sbin/modem-at`
+exists. A camera flashed before the option existed has none there, and loses
+the page on its next install until it is reflashed with an image that asks for
+it.

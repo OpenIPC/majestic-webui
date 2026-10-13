@@ -123,6 +123,7 @@ Notes:
   Only the files meant for this firmware's variant (BUILD_OPTION in
   /etc/os-release) are installed, mirroring what the firmware itself ships:
   a standard build gets no FPV pages, an FPV build no notifier helpers.
+  The SMS page is installed only where the firmware image carries it.
 EOF
 }
 
@@ -180,6 +181,15 @@ variant=$(sed -n 's/^BUILD_OPTION=//p' /etc/os-release 2>/dev/null | tr -d '"')
 # it gets the same files, and the firmware's majestic-webui.mk treats the two
 # names alike.
 [ "$variant" = wfbng ] && variant=fpv
+
+# The SMS page and its two scripts are a build option, set by the device
+# profiles of boards with a cellular modem, and a camera cannot read its own
+# build options -- but the image records the answer, because a build without
+# them has no /usr/sbin/modem-at. So what the image carries decides, and an
+# update never puts SMS back on a camera whose firmware left it out. With no
+# overlay the root is the earlier install itself, and it keeps what it has.
+sms=0
+[ -e "$lower/usr/sbin/modem-at" ] && sms=1
 
 tmp=$(mktemp -d) || die "cannot create a temporary directory"
 # The staged directory holds the script this shell is reading, which on Linux
@@ -288,8 +298,9 @@ build_plan() {
 				# does not. Mirror the fixup lists in buildroot's
 				# majestic-webui.mk (kept in step with them): a standard
 				# build strips the FPV pages, an FPV build strips the
-				# notifier helpers. A skipped path never enters keep, so
-				# a stale overlay copy of it is pruned below.
+				# notifier helpers, and only a build that asked for SMS
+				# keeps it (see $sms). A skipped path never enters keep,
+				# so a stale overlay copy of it is pruned below.
 				#
 				# fpv-wfb.cgi is the pre-rename name of wfb.cgi. Both
 				# are listed so this script installs an older tree and
@@ -329,6 +340,13 @@ build_plan() {
 					;;
 				sbin/telegram | sbin/max | sbin/openwall)
 					if [ "$variant" = fpv ]; then
+						echo "$d" >>"$tmp/skipped"
+						continue
+					fi
+					;;
+				www/cgi-bin/sms.cgi | www/cgi-bin/j/sms.cgi | www/a/sms.js | \
+				www/a/sms-pdu.js | sbin/sms-forward | sbin/modem-at)
+					if [ "$sms" != 1 ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue
 					fi
@@ -476,7 +494,7 @@ report_plan() {
 		echo "  $(count "$tmp/drop") overlay copy(ies) to drop, the firmware's own file already matches"
 	echo "  $(count "$tmp/prune") stale entry(ies) to remove"
 	[ -s "$tmp/skipped" ] &&
-		echo "  $(count "$tmp/skipped") file(s) for another firmware variant, skipped"
+		echo "  $(count "$tmp/skipped") file(s) this firmware leaves out, skipped"
 	[ -s "$tmp/newdirs" ] &&
 		echo "  $(count "$tmp/newdirs") director(ies) to create"
 	if [ -s "$tmp/local" ]; then
@@ -673,6 +691,27 @@ write_version() {
 		echo "$scr_name: could not record the deployed version in $STATE_DIR/webui.version" >&2
 }
 
+# Forwarding is switched on by a line the SMS page writes into root's crontab,
+# and nothing else would ever take it out again. Left behind on a camera whose
+# SMS files are skipped, it would run a missing script once a minute.
+#
+# Only that exact line goes, never anything else that happens to mention the
+# script. And only once the install has gone through: run earlier, a failed
+# install would leave the old page in place with its forwarding switched off.
+# A crontab that cannot be edited is an error rather than a footnote, because
+# the script the line runs is already gone.
+drop_sms_cron() {
+	[ "$sms" = 1 ] && return 0
+	grep -qxF '* * * * * /usr/sbin/sms-forward' /etc/crontabs/root 2>/dev/null || return 0
+	if sed -i '/^\* \* \* \* \* \/usr\/sbin\/sms-forward$/d' /etc/crontabs/root; then
+		echo "Removed SMS forwarding from root's crontab: this firmware carries no SMS page"
+		return 0
+	fi
+	echo "$scr_name: could not remove the SMS forwarding line from /etc/crontabs/root;" >&2
+	echo "$scr_name: it now runs a script this firmware does not carry. Delete it by hand." >&2
+	return 1
+}
+
 do_install() {
 	fetch_tree
 	build_plan
@@ -687,6 +726,7 @@ do_install() {
 		# the Dashboard should show what is actually installed.
 		write_version
 		rm -f /tmp/webui/sysinfo.txt
+		drop_sms_cron || exit 1
 		return 0
 	fi
 	echo
@@ -719,6 +759,7 @@ do_install() {
 		fi
 	done
 	verify_view "$tmp/want" "$tmp/gone"
+	drop_sms_cron || exit 1
 }
 
 # The one place a directory ever leaves the upper layer. rmdir there muddles
