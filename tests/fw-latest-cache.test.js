@@ -31,11 +31,18 @@ for (const k of SUBS) {
 const MINE = 'GITHUB_VERSION="master+aaaa111, 2026-10-01"\n';
 const NO_REV = 'GITHUB_VERSION="local+build, 2026-10-01"\n';
 
+// Every camera made below is removed when the run ends, however it ends.
+const made = [];
+process.on('exit', () => {
+	for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+});
+
 // One camera: a directory laid out as the CGI expects to find p/firmware.sh,
 // and a stub sysupgrade that records each ask. `builds` empty is the check that
 // came back with nothing, which is what a camera with no internet gets.
 function camera(osRelease) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fw-latest-cache-'));
+	made.push(dir);
 	const bin = path.join(dir, 'bin');
 	fs.mkdirSync(bin);
 	fs.mkdirSync(path.join(dir, 'j'));
@@ -140,6 +147,20 @@ group('one check at a time');
 	const a = c.get();
 	check('a lock left by a killed check is taken over', c.asks === 1 && a.newer === true, JSON.stringify(a));
 	check('and released', !fs.existsSync(c.busy));
+}
+{
+	// A stale lock this request fails to take: another got there first. Stood
+	// in for here by one rmdir cannot remove, so the second mkdir fails exactly
+	// as it does when the race is lost.
+	const c = camera(MINE);
+	c.builds(['nightly-20261002-bbbb222']);
+	fs.mkdirSync(c.busy);
+	fs.writeFileSync(path.join(c.busy, 'held'), '');
+	c.age(c.busy, 120);
+	const a = c.get();
+	check('a stale lock lost to another request starts no second check', c.asks === 0 && a.newer === null,
+		c.asks + ' ' + JSON.stringify(a));
+	check('and leaves the winner\'s lock where it is', fs.existsSync(path.join(c.busy, 'held')));
 }
 
 done();

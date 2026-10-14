@@ -100,16 +100,22 @@ fi
 #
 # mkdir, because it either creates the directory or fails, in one step. A lock
 # left by a check that was killed is recognised by its age -- no check lives
-# past its 15 seconds -- and taken over.
+# past its 15 seconds -- and taken over, but only by a request whose own mkdir
+# then succeeds: two arriving at the same stale lock race for it like any
+# other, and the loser answers "cannot tell" rather than checking alongside.
+# What is left is the instant between reading a stale lock's age and removing
+# it, in which another request may already have retaken it; at worst that runs
+# two checks once, each still bounded by its 15 seconds.
+unsure() {
+    json_hdr
+    printf '{"installed":"%s","latest":"","latestSha":"","newer":null}' "$installed"
+    exit 0
+}
 if ! mkdir "$BUSY" 2>/dev/null; then
     held=$(( $(date +%s) - $(date -r "$BUSY" +%s 2>/dev/null || echo 0) ))
-    if [ "$held" -ge 0 ] && [ "$held" -lt 60 ]; then
-        json_hdr
-        printf '{"installed":"%s","latest":"","latestSha":"","newer":null}' "$installed"
-        exit 0
-    fi
+    [ "$held" -ge 0 ] && [ "$held" -lt 60 ] && unsure
     rmdir "$BUSY" 2>/dev/null
-    mkdir "$BUSY" 2>/dev/null
+    mkdir "$BUSY" 2>/dev/null || unsure
 fi
 
 latest=$(fw_latest_build)
