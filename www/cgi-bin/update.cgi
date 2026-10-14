@@ -271,9 +271,10 @@
 				<div class="mj-hero-txt">
 					<% if [ "$fw_state" = "checking" ]; then %>
 						<%# Two texts, one shown. The second is for update.js to swap in when
-						    it gets no answer from update.cgi?part=offer at all: that is this
-						    page failing to reach the camera, not the camera failing to reach
-						    OpenIPC, and it is the only one of the two it can know. %>
+						    update.cgi?part=offer brings back no blocks: a timeout, an error
+						    status, a body that is something else. What failed is not known
+						    -- the camera may have answered with anything -- so it names no
+						    cause, only that there is no result. %>
 						<div data-fw-asking>
 							<p class="mj-hero-kick">Checking</p>
 							<h3 class="mj-hero-hl">Looking for new firmware&hellip;</h3>
@@ -287,8 +288,9 @@
 							<p class="mj-hero-kick">Not checked</p>
 							<h3 class="mj-hero-hl">Couldn&rsquo;t check for new firmware</h3>
 							<p class="mj-hero-sub">
-								This page got no answer from the camera while it was checking. Try
-								again, or install an image from a file.
+								The check did not bring a result back to this page, so nothing here
+								says whether there is newer firmware. Try again, or install an image
+								from a file.
 							</p>
 						</div>
 					<% elif [ "$fw_state" = "available" ] && [ "$fw_cmp" = "newer" ]; then %>
@@ -475,9 +477,18 @@
 <%
 	# The answer, without the page around it. Nothing above has written a
 	# byte yet, so the header is this request's to send.
+	#
+	# A flash that started after the page was drawn ran no check, and the
+	# blocks would read that as one that came back empty -- "nothing on the
+	# camera has changed", over a camera writing its flash. So it is not drawn:
+	# the marker sends update.js back for a page, which attaches to the flash.
 	if [ -n "$fw_part" ]; then
 		printf 'Content-type: text/html; charset=UTF-8\nCache-Control: no-store\n\n'
-		fw_head; fw_wide; fw_ifback; fw_railfile
+		if [ -n "$fw_active" ]; then
+			printf '<div data-fw-active></div>\n'
+		else
+			fw_head; fw_wide; fw_ifback; fw_railfile
+		fi
 		exit 0
 	fi
 %>

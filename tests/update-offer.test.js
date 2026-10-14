@@ -116,7 +116,9 @@ function offerDoc(state) {
 }
 
 // Loads update.js on a page drawn `checking`, with `answer` deciding what the
-// offer request gets: a state name, 'reject', 'login' or a status number.
+// offer request gets: a state name, a status number, 'reject', 'login' (a body
+// with no offer in it), 'active' (a flash under way), 'hang' (never settles) or
+// 'late' (settles when calls.release() is called).
 function load(answer, opts) {
 	opts = opts || {};
 	const page = el('body', {}, [
@@ -138,7 +140,7 @@ function load(answer, opts) {
 	page.querySelector('#fw_rootfs').checked = true;
 	if (opts.chosen) page.querySelector('#fw-file').files = opts.chosen;
 
-	const calls = { offer: [], feed: 0, confirm: [] };
+	const calls = { offer: [], feed: 0, confirm: [], timers: [], reloaded: 0 };
 	let ws = null;
 	function WebSocket() { ws = this; this.sent = []; }
 	WebSocket.prototype.send = function (m) { this.sent.push(m); };
@@ -146,10 +148,13 @@ function load(answer, opts) {
 	const ctx = {
 		console, JSON, Object, Set, Date, Math, isNaN, isFinite, String, Number,
 		Array, Promise, RegExp, Error, TextDecoder, Uint8Array, AbortController,
-		setTimeout: () => 0, clearTimeout: () => {},
+		// Timers are held, not run: a test fires them when it wants the 25
+		// seconds to have passed.
+		setTimeout: (fn) => { calls.timers.push(fn); return calls.timers.length; },
+		clearTimeout: () => {},
 		setInterval: () => 0, clearInterval: () => {},
 		performance: { now: () => 0 },
-		location: { protocol: 'http:', host: 'cam', reload() {} },
+		location: { protocol: 'http:', host: 'cam', reload() { calls.reloaded++; } },
 		WebSocket: WebSocket,
 		confirm: (q) => { calls.confirm.push(q); return opts.confirm !== false; },
 		window: {
@@ -176,8 +181,17 @@ function load(answer, opts) {
 		apiFetch: (url) => {
 			calls.offer.push(url);
 			if (answer === 'reject') return Promise.reject(new Error('aborted'));
+			// Never settles: the browser without AbortController, whose request
+			// the timer cannot cancel.
+			if (answer === 'hang') return new Promise(() => {});
+			// Settles when the test says so, carrying an offer.
+			if (answer === 'late') {
+				return new Promise((res) => { calls.release = () =>
+					res({ ok: true, status: 200, text: () => Promise.resolve('available') }); });
+			}
 			if (typeof answer === 'number') return Promise.resolve({ ok: false, status: answer });
-			const body = answer === 'login' ? 'LOGIN' : answer;
+			const body = answer === 'login' ? 'LOGIN'
+				: answer === 'active' ? '<div data-fw-active></div>' : answer;
 			return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(body) });
 		},
 		rawFetch: () => Promise.reject(new Error('not used here')),
@@ -250,6 +264,40 @@ const settle = () => new Promise((r) => setImmediate(r));
 		check('Try again asks again', r.calls.offer.length === 2, r.calls.offer.length);
 		check('and says it is checking while it does',
 			!r.page.querySelector('[data-fw-asking]').hidden && r.page.querySelector('#fw-recheck').hidden);
+	}
+
+	group('the check that never comes back');
+	{
+		// The window here has no AbortController, as an older browser has none:
+		// the timer is all there is.
+		const r = load('hang');
+		await settle();
+		check('still checking before the time is up',
+			!r.page.querySelector('[data-fw-asking]').hidden);
+		r.calls.timers.forEach((fn) => fn());
+		check('the timer alone ends it, without an abort to deliver',
+			r.page.querySelector('[data-fw-asking]').hidden &&
+			!r.page.querySelector('#fw-recheck').hidden);
+	}
+	{
+		const r = load('late');
+		await settle();
+		r.calls.timers.forEach((fn) => fn());
+		r.calls.release();
+		await settle();
+		check('an answer after the timeout does not paint over the fallback',
+			r.page.querySelector('#fw-head').dataset.fwState === 'checking' &&
+			!r.page.querySelector('#fw-recheck').hidden);
+	}
+
+	group('a flash this page did not start');
+	{
+		const r = load('active');
+		await settle();
+		check('the page is fetched again, to attach to it', r.calls.reloaded === 1, r.calls.reloaded);
+		check('and no hero is drawn over it saying nothing has changed',
+			r.page.querySelector('#fw-head').dataset.fwState === 'checking' &&
+			r.page.querySelector('#fw-recheck').hidden);
 	}
 
 	group('the file route, open while the check runs');

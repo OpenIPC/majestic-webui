@@ -1059,20 +1059,36 @@
 		if (failed) failed.hidden = true;
 		if (again) { again.hidden = true; again.disabled = true; }
 
+		// Each ask has a number, and only the newest one that has not timed out
+		// may change the page. The timer gives up on its own rather than through
+		// the abort, which a browser without AbortController never delivers --
+		// and an answer that then arrives anyway is ignored rather than painted
+		// over the fallback, as is one overtaken by Try again.
+		const n = ++asked;
+		const mine = () => n === asked && !busy();
 		const ctl = ('AbortController' in window) ? new AbortController() : null;
-		const timer = setTimeout(() => ctl && ctl.abort(), OFFER_TIMEOUT_MS);
+		const timer = setTimeout(() => {
+			if (ctl) ctl.abort();
+			if (mine()) { asked++; unasked(); }
+		}, OFFER_TIMEOUT_MS);
 		return apiFetch('update.cgi?part=offer',
 			{ cache: 'no-store', signal: ctl ? ctl.signal : undefined })
 			.then(r => r.ok ? r.text() : Promise.reject(r.status))
 			.then(html => {
-				// A flash started from the file card while this was in flight
-				// owns the page now; an answer arriving under it is not news.
-				if (busy()) return;
+				// busy(): a flash started from the file card while this was in
+				// flight owns the page now; an answer arriving under it is not news.
+				if (!mine()) return;
+				// A flash this page did not start -- the scheduled install, another
+				// tab -- began after the page was drawn. The offer has no blocks
+				// for that; a fresh page attaches to it, as any page drawn during
+				// one does.
+				if (/data-fw-active/.test(html)) { location.reload(); return; }
 				if (swapOffer(html)) loadChanges(); else unasked();
 			})
-			.catch(() => { if (!busy()) unasked(); })
+			.catch(() => { if (mine()) unasked(); })
 			.then(() => clearTimeout(timer));
 	}
+	let asked = 0;
 
 	// Whether #fw-controls has given way to a flash: showProgress hides it.
 	function busy() {
