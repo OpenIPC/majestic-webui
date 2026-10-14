@@ -151,7 +151,10 @@ function start(opts) {
 		// attachToRunning() already opened the socket at load; it sends no frame.
 		ws.onopen(ws);
 	} else {
-		els['fw-install-github']._on.click[0]({ preventDefault() {} });
+		// Install is delegated from #fw-controls, because the hero it sits in is
+		// replaced once the build check answers; the click arrives there.
+		els['fw-controls']._on.click[0]({ target: { closest: () => els['fw-install-github'] },
+			preventDefault() {} });
 		ws.onopen(ws);
 	}
 
