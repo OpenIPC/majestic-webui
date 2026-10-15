@@ -29,7 +29,12 @@ hide_title=1; full_bleed=1
      second copy under the picture was the only body text on the page. -->
 
 <%in p/player.cgi %>
-<% if [ -n "$ptz_support" ]; then %>
+<!-- The `:` is what keeps this an if. An image with no motor driver carries
+     p/motor.cgi as an empty stub, and an empty include leaves haserl handing
+     sh `then fi` -- a syntax error that ends the page right here, every
+     preview script below it included, so Live renders a stage with no
+     player. tools/lint-templates.sh checks the templates with the stub in. -->
+<% if [ -n "$ptz_support" ]; then : %>
 	<%in p/motor.cgi %>
 <% fi %>
 
