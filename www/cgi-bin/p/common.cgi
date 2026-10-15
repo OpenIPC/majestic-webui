@@ -1163,16 +1163,17 @@ update_caminfo() {
 	# is switched ON is configuration, and the Counting page asks for that
 	# itself. mj_cfg answers 1 for a key the daemon does not have, and 2 for a
 	# daemon that could not be asked -- which is not "no": that is recorded as
-	# "ask", and caminfo_stale treats it as stale, so the next page asks again
-	# rather than the entry staying hidden until majestic restarts.
+	# "ask", and recheck_counting asks again later rather than the entry
+	# staying hidden until majestic restarts.
 	counting_support=""
+	counting_asked=""
 	mj_cfg counting.enabled >/dev/null
 	case $? in
 		0) counting_support="1" ;;
-		2) counting_support="ask" ;;
+		2) counting_support="ask"; counting_asked=$(date +%s) ;;
 	esac
 
-	local variables="counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
+	local variables="counting_asked counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file}
@@ -1259,9 +1260,6 @@ read_starttime() {
 }
 
 caminfo_stale() {
-	# An answer majestic could not give yet (see counting_support) is asked
-	# again rather than kept.
-	[ "$counting_support" = ask ] && return 0
 	# The path every page takes.
 	if [ -n "$mj_pid" ] && [ -n "$mj_started" ]; then
 		local comm=""
@@ -1281,11 +1279,37 @@ caminfo_stale() {
 	pidof majestic >/dev/null 2>&1
 }
 
+# An answer majestic could not give yet (counting_support "ask") is asked
+# again: that one key, rewritten in place, and at most once a minute. Not the
+# whole record on every page -- a daemon that is down, or a build that answers
+# 401 to the camera itself, would otherwise cost the full rebuild and a curl
+# that can wait 2 s on each page of the UI somebody is using to fix it.
+recheck_counting() {
+	[ "$counting_support" = ask ] || return 0
+	local now age tmp
+	now=$(date +%s)
+	age=$(( now - ${counting_asked:-0} ))
+	[ "$age" -ge 0 ] && [ "$age" -lt 60 ] && return 0
+	mj_cfg counting.enabled >/dev/null
+	case $? in
+		0) counting_support="1" ;;
+		1) counting_support="" ;;
+	esac
+	counting_asked=$now
+	tmp="${sysinfo_file}.$$"
+	{
+		grep -v -e '^counting_support=' -e '^counting_asked=' "$sysinfo_file"
+		conf_write counting_support "$counting_support"
+		conf_write counting_asked "$counting_asked"
+	} > "$tmp" 2>/dev/null && mv -f "$tmp" "$sysinfo_file" || rm -f "$tmp"
+}
+
 include $sysinfo_file
 if [ ! -f $sysinfo_file ] || caminfo_stale; then
 	update_caminfo
 fi
 include $sysinfo_file
+recheck_counting
 
 pagename=$(basename "$SCRIPT_NAME")
 pagename="${pagename%%.*}"

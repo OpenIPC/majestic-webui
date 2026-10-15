@@ -4680,7 +4680,11 @@
 			while (svg.firstChild) svg.removeChild(svg.firstChild);
 			const usable = !!g && active;
 			catcher.hidden = !usable;
-			svg.style.pointerEvents = active ? '' : 'none';
+			// Off, the lines stay on the picture but take no press at all:
+			// their hit strokes and grips declare pointer-events of their
+			// own, which the root's 'none' does not reach, and a press on one
+			// would land in an editor that ignores it instead of the zones'.
+			svg.classList.toggle('mj-ct-off', !active);
 			preview.stage.classList.toggle('mj-md-armed', usable);
 			if (g) {
 				const defs = mk('defs', {});
@@ -4807,6 +4811,8 @@
 				ls.push({ name: 'line' + (ls.length + 1), named: false, x1: x, y1: y, x2: x, y2: y });
 				gesture = { kind: 'new', i: ls.length - 1, end: 2, ls };
 			}
+			// What the field held before, for a gesture the browser takes back.
+			gesture.before = field.getValue();
 			sel = gesture.i;
 			e.currentTarget.setPointerCapture(e.pointerId);
 			e.preventDefault();
@@ -4843,11 +4849,22 @@
 			write(ls);
 		}
 
+		// A gesture the browser cancels (a scroll or a system gesture took the
+		// touch) was not let go where it ended: the field goes back to what
+		// it held, and nothing is edited.
+		function cancel() {
+			if (!gesture) return;
+			const before = gesture.before;
+			gesture = null;
+			field.setValue(before);
+			paint();
+		}
+
 		for (const t of [catcher, svg]) {
 			t.addEventListener('pointerdown', begin);
 			t.addEventListener('pointermove', move);
 			t.addEventListener('pointerup', finish);
-			t.addEventListener('pointercancel', finish);
+			t.addEventListener('pointercancel', cancel);
 		}
 		const ro = window.ResizeObserver ? new ResizeObserver(() => paint()) : null;
 		if (ro) ro.observe(preview.stage);

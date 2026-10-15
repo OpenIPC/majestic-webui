@@ -397,22 +397,37 @@
 		// still the ones it was counted under.
 		if (h) hist = h;
 		const fresh = !!h;
-		if (paintState() === 'on' && hist) {
-			if (!D.sameLayout(hist, live)) {
-				// Old counts under new names would be the wrong numbers
-				// stated as right ones; better none until the camera answers.
-				$('#ct-kpis').textContent = '';
-				$('#ct-stamp').textContent = 'the lines or zones changed — waiting for their history';
-			} else {
-				const list = D.slots(hist, p.from, p.to, now);
-				paintTiles(list);
-				paintCharts(list);
-				paintDwell(list);
-				$('#ct-stamp').textContent = fresh ? 'updated ' + new Date().toLocaleTimeString() : 'history not updated — retrying';
+		// The next poll is armed whatever painting does: one answer the page
+		// cannot draw must not be the last one it asks for.
+		try {
+			if (paintState() === 'on') {
+				if (!hist) {
+					clearPeriod('history not available — retrying');
+				} else if (!D.sameLayout(hist, live)) {
+					// Old counts under new lines would be the wrong numbers
+					// stated as right ones; better none until the camera answers.
+					clearPeriod('the lines or zones changed — waiting for their history');
+				} else {
+					const list = D.slots(hist, p.from, p.to, now);
+					paintTiles(list);
+					paintCharts(list);
+					paintDwell(list);
+					$('#ct-stamp').textContent = fresh ? 'updated ' + new Date().toLocaleTimeString() : 'history not updated — retrying';
+				}
+				paintEvents();
 			}
-			paintEvents();
+		} finally {
+			if (mine === gen) timer = setTimeout(load, POLL_MS);
 		}
-		timer = setTimeout(load, POLL_MS);
+	}
+
+	// Nothing of a period on screen but what is said about it: the figures,
+	// charts and coverage of another period, or of other lines, are not this
+	// one's.
+	function clearPeriod(msg) {
+		for (const id of ['#ct-kpis', '#ct-lines', '#ct-zones', '#ct-dwell']) $(id).textContent = '';
+		$('#ct-cover').hidden = true;
+		$('#ct-stamp').textContent = msg;
 	}
 
 	$$('[data-range]').forEach((b) => {
@@ -423,6 +438,7 @@
 				o.setAttribute('aria-pressed', o === b ? 'true' : 'false');
 			});
 			hist = null;
+			clearPeriod('loading…');
 			load();
 		});
 	});

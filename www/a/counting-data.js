@@ -48,6 +48,18 @@
 		return Math.floor(d.getTime() / 1000);
 	}
 
+	// Whether a bucket carries every reading it should, each a number: a line
+	// with no `in`, a zone that is null, or a dwell that is not a list of
+	// counts is not a reading of them, and a bucket missing one is treated as
+	// not counted rather than drawn with zeroes where the gaps are.
+	const num = (v) => typeof v === 'number' && isFinite(v) && v >= 0;
+	function wellFormed(b) {
+		return Array.isArray(b.lines) && Array.isArray(b.zones) &&
+			b.lines.every((l) => l && typeof l === 'object' && num(l.in) && num(l.out)) &&
+			b.zones.every((z) => z && typeof z === 'object' && num(z.entered) && num(z.peak) &&
+				num(z.mean) && Array.isArray(z.dwell) && z.dwell.every(num));
+	}
+
 	// Every slot from `from` to `to` (unix seconds), each matched to the bucket
 	// the camera returned for it, or marked as not counted.
 	//
@@ -69,7 +81,7 @@
 			const b = by.get(t);
 			// A bucket that does not carry its lines and zones is not a
 			// reading of them: drawn, its gaps would read as zeroes.
-			if (!b || !Array.isArray(b.lines) || !Array.isArray(b.zones)) {
+			if (!b || !wellFormed(b)) {
 				out.push({ t: t, state: 'none' });
 			} else {
 				// The slot still running is only as long as it has been so
@@ -190,11 +202,13 @@
 
 	// Whether a history answer was counted under the lines and zones the live
 	// answer now has: the camera's buckets are by position, so a history kept
-	// from before the lines were redrawn would put old counts under new names.
+	// from before the lines were redrawn would put old counts under new names
+	// -- or under the same name, moved or turned round. Both answers carry the
+	// camera's `rules`, which covers names, positions and direction; without
+	// it on either side, nothing says they match.
 	function sameLayout(hist, live) {
-		const names = (a) => (Array.isArray(a) ? a.map((x) => (x && x.name !== undefined ? x.name : x)).join('|') : null);
-		return !!hist && !!live && names(hist.lines) === names(live.lines) &&
-			names(hist.zones) === names(live.zones);
+		return !!hist && !!live && typeof hist.rules === 'string' && hist.rules !== '' &&
+			hist.rules === live.rules;
 	}
 
 	// Whether the camera follows people: Follow switched on, AND a head that

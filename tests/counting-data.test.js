@@ -85,10 +85,28 @@ group('a partial answer is unknown, not a state');
 
 group('history from other lines is not shown under these');
 {
-	const live = { lines: [{ name: 'door' }], zones: [{ name: 'zone1' }] };
-	check('same', D.sameLayout({ lines: ['door'], zones: ['zone1'] }, live));
-	check('a line renamed', !D.sameLayout({ lines: ['gate'], zones: ['zone1'] }, live));
+	const live = { rules: '5c1e07a2', lines: [{ name: 'door' }], zones: [{ name: 'zone1' }] };
+	check('same', D.sameLayout({ rules: '5c1e07a2', lines: ['door'], zones: ['zone1'] }, live));
+	// The camera's `rules` covers position and direction, which names do not.
+	check('the same names under other rules (a line turned round)',
+		!D.sameLayout({ rules: '0badf00d', lines: ['door'], zones: ['zone1'] }, live));
+	check('no rules on the history', !D.sameLayout({ lines: ['door'], zones: ['zone1'] }, live));
+	check('no rules on the live answer', !D.sameLayout({ rules: '5c1e07a2' }, { lines: [], zones: [] }));
 	check('no history', !D.sameLayout(null, live));
+}
+
+group('a bucket with a malformed reading is not counted');
+{
+	const Z = { entered: 1, peak: 1, mean: 0.5, dwell: [1, 0, 0, 0, 0, 0, 0, 0] };
+	const one = (b) => D.slots({ step: 'hour', buckets: [Object.assign({ t: H, covered: 3600 }, b)] }, H, H + 3599, H + 7200)[0];
+	check('a good bucket counts', one({ lines: [{ in: 1, out: 2 }], zones: [Z] }).state === 'full');
+	check('a null line', one({ lines: [null], zones: [] }).state === 'none');
+	check('a line without out', one({ lines: [{ in: 1 }], zones: [] }).state === 'none');
+	check('a null zone', one({ lines: [], zones: [null] }).state === 'none');
+	check('a dwell that is not a list', one({ lines: [], zones: [Object.assign({}, Z, { dwell: 3 })] }).state === 'none');
+	check('a dwell with a non-number', one({ lines: [], zones: [Object.assign({}, Z, { dwell: [1, 'x'] })] }).state === 'none');
+	const t = D.totals([one({ lines: [null], zones: [null] })], 1, 1);
+	check('and the totals do not trip over it', t.known === 0);
 }
 
 group('follow needs a head that can follow');

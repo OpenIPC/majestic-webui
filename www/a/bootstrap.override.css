@@ -10515,6 +10515,10 @@ body > main > .container > form > .mj-foot {
 	height: 100%;
 	overflow: visible;
 }
+.mj-ct-svg.mj-ct-off,
+.mj-ct-svg.mj-ct-off * {
+	pointer-events: none;
+}
 .mj-ct-hit {
 	stroke: transparent;
 	stroke-width: 16;
