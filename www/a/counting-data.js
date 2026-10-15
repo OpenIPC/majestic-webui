@@ -206,18 +206,24 @@
 	// -- or under the same name, moved or turned round. Both answers carry the
 	// camera's `rules`, which covers names, positions and direction; without
 	// it on either side, nothing says they match.
+	//   'same'     both name the same rules
+	//   'differ'   both name rules, and they are not the same
+	//   'unknown'  one of them does not say
 	function sameLayout(hist, live) {
-		return !!hist && !!live && typeof hist.rules === 'string' && hist.rules !== '' &&
-			hist.rules === live.rules;
+		const r = (x) => (x && typeof x.rules === 'string' && x.rules !== '' ? x.rules : null);
+		const a = r(hist), b = r(live);
+		if (a === null || b === null) return 'unknown';
+		return a === b ? 'same' : 'differ';
 	}
 
 	// Whether the camera follows people: Follow switched on, AND a head that
-	// can do it -- a motor that counts steps and classes to follow on its
-	// capability line (GET /ptz), as the PTZ pad itself requires. A stale
-	// ptz.track on a camera with no such head follows nobody.
-	function canFollow(track, caps) {
-		return track === true && typeof caps === 'string' &&
-			/(^|\s)steps=\d+(\s|$)/.test(caps) && /(^|\s)follow=[a-z]+(,[a-z]+)*(\s|$)/.test(caps);
+	// can do it -- the PTZ pad's own test (ptz-follow.js `offered`), not a
+	// copy of it. A stale ptz.track on a camera with no such head follows
+	// nobody, and a WebUI built without the PTZ pages has no head to drive.
+	function canFollow(track, caps, follow) {
+		const F = follow || (typeof module === 'object' && module.exports
+			? require('./ptz-follow.js') : (typeof self !== 'undefined' && self.MajesticPtzFollow));
+		return track === true && !!F && F.offered(caps);
 	}
 
 	const api = {

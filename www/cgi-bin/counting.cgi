@@ -46,6 +46,9 @@
 	</div>
 </div>
 
+<%# The PTZ pad's follow test, shared; absent on a build without the PTZ
+    pages, where nothing follows. %>
+<% [ -f /var/www/a/ptz-follow.js ] && echo '<script src="/a/ptz-follow.js" defer></script>' %>
 <script src="/a/counting-data.js" defer></script>
 <script src="/a/counting.js" defer></script>
 

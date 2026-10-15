@@ -52,6 +52,9 @@
 			const p = rest.split(',').map((t) => t.trim());
 			if (p.length !== 4 || p.some((t) => !/^-?[0-9]+(\.[0-9]+)?$/.test(t))) return null;
 			const n = p.map(Number);
+			// A digit string long enough is Infinity, which format() would
+			// write back as a token the camera refuses with every line.
+			if (!n.every(isFinite)) return null;
 			out.push({
 				name: name || 'line' + (out.length + 1),
 				named: name !== null,

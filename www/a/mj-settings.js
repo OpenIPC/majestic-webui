@@ -4528,6 +4528,12 @@
 			if (isLines) { linesField = field; lineShapes = sh; }
 			if (isZones) { zonesField = field; zoneShapes = sh; }
 		}
+		// A group, and a Draw button, only for what the camera declared:
+		// one with no field would say "none" about a value shown elsewhere,
+		// and its button would switch to an editor that does not exist.
+		if (!linesField) lineBody.parentNode.hidden = true;
+		if (!zonesField) zoneBody.parentNode.hidden = true;
+		if (!linesField && !zonesField) return;
 
 		const can = preview && window.MajesticRegion && window.MajesticLine;
 		if (!can) {
@@ -4546,7 +4552,11 @@
 		sw.setAttribute('role', 'group');
 		sw.setAttribute('aria-label', 'Draw on the picture');
 		const modes = {};
-		for (const [k, t] of [['lines', 'Draw lines'], ['zones', 'Draw zones']]) {
+		const kinds = [['lines', 'Draw lines', linesField], ['zones', 'Draw zones', zonesField]]
+			.filter((x) => x[2]);
+		// With one kind there is nothing to choose between.
+		sw.hidden = kinds.length < 2;
+		for (const [k, t] of kinds) {
 			const b = el('button', 'btn btn-outline-primary');
 			b.type = 'button';
 			b.textContent = t;
@@ -4597,12 +4607,11 @@
 		// almost nobody crossing anything, and nothing else on this page would
 		// say why. Only where the head can follow, though -- a motor that
 		// counts steps and classes to follow on GET /ptz, the test the PTZ pad
-		// makes before it offers the switch; a stale ptz.track on a camera
-		// without such a head follows nobody.
+		// makes before it offers the switch (ptz-follow.js, shared); a stale
+		// ptz.track on a camera without such a head follows nobody.
 		let caps = null;
 		const follows = () => String(getDotted(state.config, 'ptz.track')) === 'true' &&
-			typeof caps === 'string' && /(^|\s)steps=\d+(\s|$)/.test(caps) &&
-			/(^|\s)follow=[a-z]+(,[a-z]+)*(\s|$)/.test(caps);
+			!!window.MajesticPtzFollow && window.MajesticPtzFollow.offered(caps);
 		apiFetch('/ptz', { cache: 'no-store' })
 			.then(r => (r.ok ? r.text() : null)).catch(() => null)
 			.then(t => { caps = t; paintNote(); });
@@ -4685,7 +4694,10 @@
 			// own, which the root's 'none' does not reach, and a press on one
 			// would land in an editor that ignores it instead of the zones'.
 			svg.classList.toggle('mj-ct-off', !active);
-			preview.stage.classList.toggle('mj-md-armed', usable);
+			// Only ever set here: the zone editor shares the class and owns
+			// clearing it, and a line editor that cleared it on every paint
+			// took the crosshair from Draw zones.
+			if (usable) preview.stage.classList.add('mj-md-armed');
 			if (g) {
 				const defs = mk('defs', {});
 				const m = mk('marker', { id: 'mj-ct-arrow', viewBox: '0 0 10 10', refX: '6', refY: '5',

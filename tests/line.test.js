@@ -28,6 +28,7 @@ group('the camera\'s string, in and out');
 	check('a name the metrics cannot carry is refused', L.parse('front door:1,2,3,4', SP) === null);
 	check('nine lines is refused', L.parse(Array(9).fill('0,0,100,100').join(';'), SP) === null);
 	check('an empty name is refused', L.parse(':1,2,3,4') === null);
+	check('a coordinate too large to be a number is refused', L.parse('1' + '0'.repeat(400) + ',2,3,4') === null);
 	check('a drag\'s fractions are written whole', L.format([{ x1: 1.4, y1: 2.6, x2: 3, y2: 4, named: false }]) === '1,3,3,4');
 }
 

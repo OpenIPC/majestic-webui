@@ -86,13 +86,14 @@ group('a partial answer is unknown, not a state');
 group('history from other lines is not shown under these');
 {
 	const live = { rules: '5c1e07a2', lines: [{ name: 'door' }], zones: [{ name: 'zone1' }] };
-	check('same', D.sameLayout({ rules: '5c1e07a2', lines: ['door'], zones: ['zone1'] }, live));
+	check('same', D.sameLayout({ rules: '5c1e07a2', lines: ['door'], zones: ['zone1'] }, live) === 'same');
 	// The camera's `rules` covers position and direction, which names do not.
 	check('the same names under other rules (a line turned round)',
-		!D.sameLayout({ rules: '0badf00d', lines: ['door'], zones: ['zone1'] }, live));
-	check('no rules on the history', !D.sameLayout({ lines: ['door'], zones: ['zone1'] }, live));
-	check('no rules on the live answer', !D.sameLayout({ rules: '5c1e07a2' }, { lines: [], zones: [] }));
-	check('no history', !D.sameLayout(null, live));
+		D.sameLayout({ rules: '0badf00d', lines: ['door'], zones: ['zone1'] }, live) === 'differ');
+	// Not saying is not "changed".
+	check('no rules on the history', D.sameLayout({ lines: ['door'], zones: ['zone1'] }, live) === 'unknown');
+	check('no rules on the live answer', D.sameLayout({ rules: '5c1e07a2' }, { lines: [], zones: [] }) === 'unknown');
+	check('no history', D.sameLayout(null, live) === 'unknown');
 }
 
 group('a bucket with a malformed reading is not counted');
@@ -116,6 +117,8 @@ group('follow needs a head that can follow');
 	check('on, nothing to follow with', !D.canFollow(true, 'pan tilt steps=4096'));
 	check('off', !D.canFollow(false, 'pan tilt steps=4096 follow=people'));
 	check('no capability line', !D.canFollow(true, null));
+	// The PTZ pad's rule, not a copy: whatever it says goes.
+	check('the pad\'s test decides', !D.canFollow(true, 'pan tilt steps=4096 follow=people', { offered: () => false }));
 }
 
 group('a fully counted slot is nearly all of it');

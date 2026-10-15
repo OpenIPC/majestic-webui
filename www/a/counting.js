@@ -359,8 +359,12 @@
 			const w = eventWords(e);
 			if (!w) continue;
 			const li = el('li', 'ct-event small');
-			li.appendChild(el('span', 'ct-event-t text-secondary',
-				new Date(e.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })));
+			// `t` is wall-clock milliseconds (majestic docs/counting.md); one
+			// that is not a time gets no time rather than 1970's.
+			const at = typeof e.t === 'number' && isFinite(e.t) && e.t > 0
+				? new Date(e.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+				: '–';
+			li.appendChild(el('span', 'ct-event-t text-secondary', at));
 			li.appendChild(el('span', e.kind === 'dwell' ? 'ct-event-w text-warning-emphasis' : 'ct-event-w', w));
 			box.appendChild(li);
 		}
@@ -403,10 +407,13 @@
 			if (paintState() === 'on') {
 				if (!hist) {
 					clearPeriod('history not available — retrying');
-				} else if (!D.sameLayout(hist, live)) {
+				} else if (D.sameLayout(hist, live) !== 'same') {
 					// Old counts under new lines would be the wrong numbers
-					// stated as right ones; better none until the camera answers.
-					clearPeriod('the lines or zones changed — waiting for their history');
+					// stated as right ones; better none until the camera
+					// answers -- and "changed" only when the camera says so.
+					clearPeriod(D.sameLayout(hist, live) === 'differ'
+						? 'the lines or zones changed — waiting for their history'
+						: 'the camera does not say which lines this history was counted under');
 				} else {
 					const list = D.slots(hist, p.from, p.to, now);
 					paintTiles(list);
