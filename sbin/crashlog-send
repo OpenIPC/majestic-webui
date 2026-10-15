@@ -288,6 +288,11 @@ status=0
 # log when the firmware kept one, and its note of a fall into failsafe when
 # there is one -- a boot loop is a crash too, and the worst kind, whether or
 # not a panic came first. The checksum above is of exactly these two files.
+# With the note comes the failed boot's own log, when the firmware kept one
+# (failsafe-rescue, from the pstore pmsg ring), as syslog -- unless the kernel
+# log already brought the log of the boot that oopsed under that name. It is
+# not in the checksum: it is written with the note, which already tells one
+# fall from the next.
 if [ -n "$have_current" ] && [ -z "$current_sent" ]; then
 	mkdir "$workdir/records" || exit 1
 	# busybox tar has no -z here: through gzip, and each step checked on its
@@ -300,6 +305,9 @@ if [ -n "$have_current" ] && [ -z "$current_sent" ]; then
 		said="The latest crash log could not be read."
 	elif [ -f "$CRASH/failsafe" ] && ! cp "$CRASH/failsafe" "$workdir/records/failsafe"; then
 		said="The failsafe note could not be read."
+	elif [ -s "$CRASH/failsafe.log" ] && [ ! -e "$workdir/records/syslog" ] &&
+		! cp "$CRASH/failsafe.log" "$workdir/records/syslog"; then
+		said="The failed boot's log could not be read."
 	elif ! { tar -cf "$workdir/crash.tar" -C "$workdir/records" . && gzip -c "$workdir/crash.tar" > "$workdir/crash.tar.gz"; }; then
 		said="The latest crash could not be packed."
 	else

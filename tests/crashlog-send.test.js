@@ -206,6 +206,23 @@ group('a boot loop with no kernel log');
 	check('with a kernel log too, both go in one archive', r.rc === 0 && lists(cam)[0] === 'dmesg-ramoops-0 failsafe');
 }
 
+group('a boot loop with the failed boot\'s log');
+{
+	const cam = camera();
+	fs.writeFileSync(path.join(cam.crash, 'failsafe'), 'reason=bootlimit\nutc=0\n');
+	fs.writeFileSync(path.join(cam.crash, 'failsafe.log'), 'majestic[812]: the pipeline did not start\n');
+	const r = send(cam);
+	check('the log goes with the note, as syslog', r.rc === 0 && lists(cam)[0] === 'failsafe syslog');
+}
+{
+	const cam = camera();
+	record(cam, 'a panic, then a boot loop');
+	fs.writeFileSync(path.join(cam.crash, 'failsafe'), 'reason=bootlimit\nutc=0\n');
+	fs.writeFileSync(path.join(cam.crash, 'failsafe.log'), 'the failed boot\n');
+	const r = send(cam);
+	check('beside a kernel log too', r.rc === 0 && lists(cam)[0] === 'dmesg-ramoops-0 failsafe syslog');
+}
+
 group('earlier crashes the firmware kept');
 {
 	const cam = camera();

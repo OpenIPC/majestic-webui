@@ -52,7 +52,7 @@ if [ "$REQUEST_METHOD" = "POST" ] && [ "$POST_action" = "dismiss" ]; then
 	elif [ -d /tmp/crashlog-send.lock.d ] && kill -0 "$(cat /tmp/crashlog-send.lock.d/pid 2>/dev/null)" 2>/dev/null; then
 		redirect_to "crashlog.cgi" "warning" "A crash is being sent to openipc.org right now. Dismiss it in a minute."
 	fi
-	rm -f "$CRASH/pending" "$CRASH/failsafe" "$CRASH/crash.tar.gz" "$CRASH/sent" 2>/dev/null
+	rm -f "$CRASH/pending" "$CRASH/failsafe" "$CRASH/failsafe.log" "$CRASH/crash.tar.gz" "$CRASH/sent" 2>/dev/null
 	rm -f "$CRASH/majestic.dump" "$CRASH/majestic.dump.1" "$CRASH/majestic.sent" "$CRASH/majestic.loop" 2>/dev/null
 	rm -rf "$CRASH/older" 2>/dev/null
 	rm -f /sys/fs/pstore/dmesg-* 2>/dev/null
