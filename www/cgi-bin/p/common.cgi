@@ -1162,11 +1162,15 @@ update_caminfo() {
 	# it lives here, re-read whenever majestic is (caminfo_stale). Whether it
 	# is switched ON is configuration, and the Counting page asks for that
 	# itself. mj_cfg answers 1 for a key the daemon does not have, and 2 for a
-	# daemon that could not be asked -- which is not "no", so it leaves the
-	# entry out only until the next look rather than claiming the camera cannot
-	# count.
+	# daemon that could not be asked -- which is not "no": that is recorded as
+	# "ask", and caminfo_stale treats it as stale, so the next page asks again
+	# rather than the entry staying hidden until majestic restarts.
 	counting_support=""
-	mj_cfg counting.enabled >/dev/null && counting_support="1"
+	mj_cfg counting.enabled >/dev/null
+	case $? in
+		0) counting_support="1" ;;
+		2) counting_support="ask" ;;
+	esac
 
 	local variables="counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
@@ -1255,6 +1259,9 @@ read_starttime() {
 }
 
 caminfo_stale() {
+	# An answer majestic could not give yet (see counting_support) is asked
+	# again rather than kept.
+	[ "$counting_support" = ask ] && return 0
 	# The path every page takes.
 	if [ -n "$mj_pid" ] && [ -n "$mj_started" ]; then
 		local comm=""

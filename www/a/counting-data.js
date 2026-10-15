@@ -14,6 +14,22 @@
 	'use strict';
 
 	const HOUR = 3600;
+	// How much of a slot has to have been counted for it to be drawn as
+	// counted: not all of it, because the camera counts in whole seconds of
+	// analysed frames and the slot still running is measured against a clock
+	// a beat ahead of the camera's -- but close enough that a gap of more than
+	// a minute in an hour is drawn as one.
+	const FULL = 0.98;
+
+	// The local midnight `days` calendar days before the one at or before
+	// `t`: a daylight-saving change makes one of those days 23 or 25 hours
+	// long, and stepping back by 86400 seconds would land beside midnight.
+	function daysBack(t, days) {
+		const d = new Date(t * 1000);
+		d.setHours(0, 0, 0, 0);
+		d.setDate(d.getDate() - days);
+		return Math.floor(d.getTime() / 1000);
+	}
 
 	// The local midnight at or before unix second `t`, as the camera's own
 	// `step=day` buckets are: the start of the calendar day, which on a
@@ -51,20 +67,24 @@
 		for (let guard = 0; t <= to && guard < 2000; guard++) {
 			const end = nextSlot(t, step);
 			const b = by.get(t);
-			if (!b) {
+			// A bucket that does not carry its lines and zones is not a
+			// reading of them: drawn, its gaps would read as zeroes.
+			if (!b || !Array.isArray(b.lines) || !Array.isArray(b.zones)) {
 				out.push({ t: t, state: 'none' });
 			} else {
 				// The slot still running is only as long as it has been so
 				// far; an hour that started twenty minutes ago and was counted
 				// for all twenty is a full one.
 				const span = Math.max(1, Math.min(end, now || end) - t);
+				// No coverage figure is no evidence the slot was counted: the
+				// numbers beside it cannot be told from a slot nobody watched.
 				const covered = Math.max(0, +b.covered || 0);
 				out.push({
 					t: t,
-					state: covered >= span * 0.95 ? 'full' : covered > 0 ? 'part' : 'none',
+					state: covered >= span * FULL ? 'full' : covered > 0 ? 'part' : 'none',
 					covered: covered,
-					lines: Array.isArray(b.lines) ? b.lines : [],
-					zones: Array.isArray(b.zones) ? b.zones : [],
+					lines: b.lines,
+					zones: b.zones,
 				});
 			}
 			t = end;
@@ -112,7 +132,7 @@
 			total += span;
 			if (s.state !== 'none') counted += Math.min(span, s.covered || 0);
 		}
-		if (!total || counted >= total * 0.95) return null;
+		if (!total || counted >= total * FULL) return null;
 		if (!counted) return 'not counted';
 		const unit = step === 'hour' ? HOUR : 86400;
 		const of = Math.max(1, Math.round(total / unit));
@@ -160,10 +180,30 @@
 	//   'empty'     it is on and has no lines and no zones
 	//   'on'
 	function state(live) {
-		if (!live || typeof live !== 'object') return 'unknown';
+		if (!live || typeof live !== 'object' || typeof live.enabled !== 'boolean')
+			return 'unknown';
 		if (!live.enabled) return 'off';
-		const n = (live.lines || []).length + (live.zones || []).length;
-		return n ? 'on' : 'empty';
+		// On, but not saying what it counts, is not "nothing to count".
+		if (!Array.isArray(live.lines) || !Array.isArray(live.zones)) return 'unknown';
+		return live.lines.length + live.zones.length ? 'on' : 'empty';
+	}
+
+	// Whether a history answer was counted under the lines and zones the live
+	// answer now has: the camera's buckets are by position, so a history kept
+	// from before the lines were redrawn would put old counts under new names.
+	function sameLayout(hist, live) {
+		const names = (a) => (Array.isArray(a) ? a.map((x) => (x && x.name !== undefined ? x.name : x)).join('|') : null);
+		return !!hist && !!live && names(hist.lines) === names(live.lines) &&
+			names(hist.zones) === names(live.zones);
+	}
+
+	// Whether the camera follows people: Follow switched on, AND a head that
+	// can do it -- a motor that counts steps and classes to follow on its
+	// capability line (GET /ptz), as the PTZ pad itself requires. A stale
+	// ptz.track on a camera with no such head follows nobody.
+	function canFollow(track, caps) {
+		return track === true && typeof caps === 'string' &&
+			/(^|\s)steps=\d+(\s|$)/.test(caps) && /(^|\s)follow=[a-z]+(,[a-z]+)*(\s|$)/.test(caps);
 	}
 
 	const api = {
@@ -173,7 +213,10 @@
 		medianBin: medianBin,
 		state: state,
 		dayStart: dayStart,
+		daysBack: daysBack,
 		coverage: coverage,
+		sameLayout: sameLayout,
+		canFollow: canFollow,
 	};
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MjCountingData = api;

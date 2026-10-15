@@ -75,6 +75,44 @@ group('a tile says how much of the period was counted');
 	check('nothing counted says so', D.coverage(none, 'hour', now) === 'not counted');
 }
 
+group('a partial answer is unknown, not a state');
+{
+	check('enabled missing', D.state({ lines: [], zones: [] }) === 'unknown');
+	check('on, but no lines or zones said', D.state({ enabled: true }) === 'unknown');
+	const s = D.slots({ step: 'hour', buckets: [{ t: H, covered: 3600 }] }, H, H + 3599, H + 7200);
+	check('a bucket without its readings is not counted', s[0].state === 'none');
+}
+
+group('history from other lines is not shown under these');
+{
+	const live = { lines: [{ name: 'door' }], zones: [{ name: 'zone1' }] };
+	check('same', D.sameLayout({ lines: ['door'], zones: ['zone1'] }, live));
+	check('a line renamed', !D.sameLayout({ lines: ['gate'], zones: ['zone1'] }, live));
+	check('no history', !D.sameLayout(null, live));
+}
+
+group('follow needs a head that can follow');
+{
+	check('on, with steps and classes', D.canFollow(true, 'pan tilt steps=4096 follow=people'));
+	check('on, no stepping motor', !D.canFollow(true, 'pan tilt follow=people'));
+	check('on, nothing to follow with', !D.canFollow(true, 'pan tilt steps=4096'));
+	check('off', !D.canFollow(false, 'pan tilt steps=4096 follow=people'));
+	check('no capability line', !D.canFollow(true, null));
+}
+
+group('a fully counted slot is nearly all of it');
+{
+	const s = D.slots({ step: 'hour', buckets: [{ t: H, covered: 3420, lines: [], zones: [] }] }, H, H + 3599, H + 7200);
+	check('57 of 60 minutes is part of an hour', s[0].state === 'part');
+}
+
+group('days back are calendar days');
+{
+	const t = D.daysBack(H, 6);
+	check('local midnight', new Date(t * 1000).getHours() === 0);
+	check('six days before', Math.round((D.dayStart(H) - t) / 86400) === 6);
+}
+
 group('days are local days');
 {
 	const s = D.slots({ step: 'day', buckets: [] }, H, H + 3 * 86400, H + 4 * 86400);

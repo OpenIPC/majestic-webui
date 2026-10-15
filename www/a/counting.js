@@ -31,9 +31,12 @@
 		return e;
 	}
 
+	// Through the tree's apiFetch: it says who is asking, so an expired
+	// session is a trip to the login page rather than Safari's credentials
+	// dialog, or a 401 read here as a camera that stopped answering.
 	async function getJSON(url) {
 		try {
-			const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+			const r = await apiFetch(url, { cache: 'no-store' });
 			if (!r.ok) return null;
 			return await r.json();
 		} catch (e) {
@@ -41,11 +44,25 @@
 		}
 	}
 
+	async function getText(url) {
+		try {
+			const r = await apiFetch(url, { cache: 'no-store' });
+			return r.ok ? await r.text() : null;
+		} catch (e) {
+			return null;
+		}
+	}
+
+	// What the camera says, as words, or a dash where it said nothing:
+	// "undefined people" is not a reading.
+	const word = (v, fallback) => (typeof v === 'string' && v ? v : fallback);
+	const num = (v) => (typeof v === 'number' && isFinite(v) ? String(v) : '–');
+
 	function period(now) {
 		const today = D.dayStart(now);
 		if (range === 'today') return { from: today, to: now, step: 'hour' };
 		const days = range === 'week' ? 7 : 30;
-		return { from: today - (days - 1) * 86400, to: now, step: 'day' };
+		return { from: D.daysBack(now, days - 1), to: now, step: 'day' };
 	}
 
 	// ── what there is to show ────────────────────────────────────────────
@@ -102,14 +119,17 @@
 		// Nothing counted in the period is "no data", never 0.
 		const n = (v) => (tot.known ? String(v) : '–');
 		lines.forEach((l, i) => {
-			box.appendChild(tile(l.name + ' · in', n(tot.lines[i].in), '', when));
-			box.appendChild(tile(l.name + ' · out', n(tot.lines[i].out), '', when));
+			const name = word(l && l.name, 'line ' + (i + 1));
+			box.appendChild(tile(name + ' · in', n(tot.lines[i].in), '', when));
+			box.appendChild(tile(name + ' · out', n(tot.lines[i].out), '', when));
 		});
 		zones.forEach((z, i) => {
-			box.appendChild(tile(z.name + ' · now', String(z.occupancy), z.occupancy === 1 ? 'person' : 'people',
+			const name = word(z && z.name, 'zone ' + (i + 1));
+			const occ = z && z.occupancy;
+			box.appendChild(tile(name + ' · now', num(occ), occ === 1 ? 'person' : 'people',
 				'at most ' + n(tot.zones[i].peak) + ' at once ' + when));
 			const med = tot.known ? D.medianBin(tot.zones[i].dwell, hist && hist.dwellEdges) : null;
-			box.appendChild(tile(z.name + ' · typical stay', med || '–', '',
+			box.appendChild(tile(name + ' · typical stay', med || '–', '',
 				tot.known ? tot.zones[i].entered + ' visits ' + when : 'not counted ' + when));
 		});
 	}
@@ -246,7 +266,7 @@
 		const lbox = $('#ct-lines');
 		lbox.textContent = '';
 		lines.forEach((l, i) => {
-			if (lines.length > 1) lbox.appendChild(el('div', 'small fw-semibold mt-2', l.name));
+			if (lines.length > 1) lbox.appendChild(el('div', 'small fw-semibold mt-2', word(l && l.name, 'line ' + (i + 1))));
 			const h = el('div');
 			lbox.appendChild(h);
 			bars(h, list, step, [{ name: 'in', color: C1 }, { name: 'out', color: C2 }],
@@ -257,7 +277,7 @@
 		const zbox = $('#ct-zones');
 		zbox.textContent = '';
 		zones.forEach((z, i) => {
-			if (zones.length > 1) zbox.appendChild(el('div', 'small fw-semibold mt-2', z.name));
+			if (zones.length > 1) zbox.appendChild(el('div', 'small fw-semibold mt-2', word(z && z.name, 'zone ' + (i + 1))));
 			const h = el('div');
 			zbox.appendChild(h);
 			bars(h, list, step, [{ name: 'on average', color: C3 }, { name: 'most at once', color: C4 }],
@@ -276,7 +296,7 @@
 		zones.forEach((z, i) => {
 			const d = tot.zones[i].dwell;
 			const n = d.reduce((a, b) => a + (b || 0), 0);
-			if (zones.length > 1) box.appendChild(el('div', 'small fw-semibold mt-2', z.name));
+			if (zones.length > 1) box.appendChild(el('div', 'small fw-semibold mt-2', word(z && z.name, 'zone ' + (i + 1))));
 			if (!tot.known) {
 				box.appendChild(el('div', 'small text-secondary', 'Not counted in this period.'));
 				return;
@@ -309,13 +329,16 @@
 	}
 
 	function eventWords(e) {
+		if (!e || typeof e !== 'object') return null;
 		const who = e.cls === 'vehicle' ? 'A vehicle' : 'Someone';
+		const line = word(e.line, 'a line'), zone = word(e.zone, 'a zone');
+		const stay = typeof e.dwellMs === 'number' ? fmtStay(e.dwellMs) : null;
 		switch (e.kind) {
-		case 'in': return who + ' went in at ' + e.line;
-		case 'out': return who + ' went out at ' + e.line;
-		case 'enter': return who + ' entered ' + e.zone;
-		case 'exit': return who + ' left ' + e.zone + ' after ' + fmtStay(e.dwellMs || 0);
-		case 'dwell': return who + ' has been in ' + e.zone + ' for ' + fmtStay(e.dwellMs || 0);
+		case 'in': return who + ' went in at ' + line;
+		case 'out': return who + ' went out at ' + line;
+		case 'enter': return who + ' entered ' + zone;
+		case 'exit': return who + ' left ' + zone + (stay ? ' after ' + stay : '');
+		case 'dwell': return who + ' has been in ' + zone + (stay ? ' for ' + stay : ' too long');
 		default: return null;
 		}
 	}
@@ -323,7 +346,11 @@
 	function paintEvents() {
 		const box = $('#ct-events');
 		box.textContent = '';
-		const evs = (live.events || []).slice(-12).reverse();
+		if (!Array.isArray(live.events)) {
+			box.appendChild(el('li', 'small text-secondary', 'The camera did not say what happened lately.'));
+			return;
+		}
+		const evs = live.events.slice(-12).reverse();
 		if (!evs.length) {
 			box.appendChild(el('li', 'small text-secondary', 'Nothing yet since the camera started counting.'));
 			return;
@@ -341,30 +368,49 @@
 
 	// ── the loop ─────────────────────────────────────────────────────────
 
+	// One load at a time in effect: a range click or a resize starts a new
+	// one while the last is still waiting on the camera, and only the newest
+	// may paint or arm the next poll. Without the generation, a slow answer
+	// for Today could land after the one for 7 days and draw under the wrong
+	// button, and every overlap left a second 5-second loop running.
+	let gen = 0;
 	async function load() {
+		const mine = ++gen;
 		clearTimeout(timer);
+		timer = null;
 		const now = Math.floor(Date.now() / 1000);
 		const p = period(now);
-		const [l, h, f] = await Promise.all([
+		const [l, h, track, caps] = await Promise.all([
 			getJSON('/api/v1/counting'),
 			getJSON('/api/v1/counting/history?from=' + p.from + '&to=' + p.to + '&step=' + p.step),
 			getJSON('/api/v1/get?key=ptz.track'),
+			getText('/ptz'),
 		]);
+		if (mine !== gen) return;
 		live = l;
-		// A camera with no pan/tilt head has no such key, and a failed ask is
-		// no answer: only a plain true says the camera follows.
-		follows = f === true ? true : f === false ? false : null;
+		// Following counts only where the head can follow -- the same test
+		// the PTZ pad makes before it offers the switch.
+		follows = D.canFollow(track, caps);
 		// A history that failed to load keeps the last one on screen rather
 		// than replacing it with an empty period -- which would read as a
-		// day with nobody in it.
+		// day with nobody in it -- but only while the lines and zones are
+		// still the ones it was counted under.
 		if (h) hist = h;
+		const fresh = !!h;
 		if (paintState() === 'on' && hist) {
-			const list = D.slots(hist, p.from, p.to, now);
-			paintTiles(list);
-			paintCharts(list);
-			paintDwell(list);
+			if (!D.sameLayout(hist, live)) {
+				// Old counts under new names would be the wrong numbers
+				// stated as right ones; better none until the camera answers.
+				$('#ct-kpis').textContent = '';
+				$('#ct-stamp').textContent = 'the lines or zones changed — waiting for their history';
+			} else {
+				const list = D.slots(hist, p.from, p.to, now);
+				paintTiles(list);
+				paintCharts(list);
+				paintDwell(list);
+				$('#ct-stamp').textContent = fresh ? 'updated ' + new Date().toLocaleTimeString() : 'history not updated — retrying';
+			}
 			paintEvents();
-			$('#ct-stamp').textContent = h ? 'updated ' + new Date().toLocaleTimeString() : 'history not updated — retrying';
 		}
 		timer = setTimeout(load, POLL_MS);
 	}

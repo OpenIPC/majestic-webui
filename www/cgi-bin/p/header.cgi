@@ -110,7 +110,7 @@ Pragma: no-cache
 							     (BR2_PACKAGE_MAJESTIC_WEBUI_COUNTING) has nothing to link to.
 							     Under Camera rather than on the bar: the bar is for the
 							     pages everyone opens. -->
-							<% if [ -n "$counting_support" ] && [ -f /var/www/cgi-bin/counting.cgi ]; then %>
+							<% if [ "$counting_support" = 1 ] && [ -f /var/www/cgi-bin/counting.cgi ]; then %>
 								<li><a class="dropdown-item" href="counting.cgi"><% page_label counting %></a></li>
 							<% fi %>
 							<!-- Only where the USB port can actually be switched. Same

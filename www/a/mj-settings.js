@@ -4583,8 +4583,17 @@
 		// Following keeps a person in the same place in the picture, and lines
 		// and zones are places in the picture: a camera that follows counts
 		// almost nobody crossing anything, and nothing else on this page would
-		// say why.
-		const follows = () => String(getDotted(state.config, 'ptz.track')) === 'true';
+		// say why. Only where the head can follow, though -- a motor that
+		// counts steps and classes to follow on GET /ptz, the test the PTZ pad
+		// makes before it offers the switch; a stale ptz.track on a camera
+		// without such a head follows nobody.
+		let caps = null;
+		const follows = () => String(getDotted(state.config, 'ptz.track')) === 'true' &&
+			typeof caps === 'string' && /(^|\s)steps=\d+(\s|$)/.test(caps) &&
+			/(^|\s)follow=[a-z]+(,[a-z]+)*(\s|$)/.test(caps);
+		apiFetch('/ptz', { cache: 'no-store' })
+			.then(r => (r.ok ? r.text() : null)).catch(() => null)
+			.then(t => { caps = t; paintNote(); });
 		const paintNote = () => {
 			const off = enabled && enabled.getValue() === 'false';
 			note.textContent = off ? 'Counting is off — lines and zones are saved, not used.'
@@ -4645,7 +4654,15 @@
 			return e;
 		}
 
+		// The picture and the list are painted apart: hovering a row only has
+		// to light its line, and rebuilding the list under a pointer threw
+		// away a name being typed and a click on Swap or Remove mid-press.
 		function paint() {
+			paintSvg();
+			paintList(read());
+		}
+
+		function paintSvg() {
 			const g = SG.geom();
 			const ls = read();
 			while (svg.firstChild) svg.removeChild(svg.firstChild);
@@ -4676,7 +4693,12 @@
 					}
 				});
 			}
-			paintList(ls);
+		}
+
+		function select(i) {
+			sel = i;
+			paintSvg();
+			list.querySelectorAll('.mj-ct-row').forEach((r, k) => r.classList.toggle('mj-ct-sel', k === i));
 		}
 
 		function paintList(ls) {
@@ -4739,7 +4761,7 @@
 					why.textContent = v;
 					row.appendChild(why);
 				}
-				row.addEventListener('mouseenter', () => { sel = i; paint(); });
+				row.addEventListener('mouseenter', () => select(i));
 				list.appendChild(row);
 			});
 			if (bad) {
