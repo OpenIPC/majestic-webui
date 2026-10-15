@@ -122,9 +122,9 @@ Notes:
 
   Only the files meant for this firmware's variant (BUILD_OPTION in
   /etc/os-release) are installed, mirroring what the firmware itself ships:
-  an FPV build gets no notifier helpers. The FPV and SMS pages are installed
-  only where the firmware image carries them, and the PTZ controls only where
-  it carries a motor driver.
+  an FPV build gets no notifier helpers. The FPV, SMS and Counting pages are
+  installed only where the firmware image carries them, and the PTZ controls
+  only where it carries a motor driver.
 EOF
 }
 
@@ -207,6 +207,13 @@ fpv=0
 ptz=0
 { [ -e "$lower/usr/bin/gpio-motors" ] || [ -e "$lower/usr/lib/majestic-af.so" ] ||
 	[ -e "$lower/usr/bin/motor" ]; } && ptz=1
+
+# The Counting page is a build option as well, on by default where the image
+# carries an object-detection model (xmnpu-models for the NPU, cpu-models for
+# the CPU) -- counting runs on that detector's boxes, so an image without one
+# has nothing to count with. The page is its own witness, as the FPV page is.
+counting=0
+[ -e "$lower/var/www/cgi-bin/counting.cgi" ] && counting=1
 
 tmp=$(mktemp -d) || die "cannot create a temporary directory"
 # The staged directory holds the script this shell is reading, which on Linux
@@ -365,6 +372,12 @@ build_plan() {
 				www/cgi-bin/sms.cgi | www/cgi-bin/j/sms.cgi | www/a/sms.js | \
 				www/a/sms-pdu.js | sbin/sms-forward | sbin/modem-at)
 					if [ "$sms" != 1 ]; then
+						echo "$d" >>"$tmp/skipped"
+						continue
+					fi
+					;;
+				www/cgi-bin/counting.cgi | www/a/counting.js | www/a/counting-data.js)
+					if [ "$counting" != 1 ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue
 					fi

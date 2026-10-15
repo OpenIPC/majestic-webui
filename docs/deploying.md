@@ -88,4 +88,13 @@ than skipped, since haserl's `<%in %>` fails on a missing file) work the same
 way with `BR2_PACKAGE_MAJESTIC_WEBUI_PTZ`, which defaults on wherever the image has a
 motor driver; the installer's witness is `/rom/usr/bin/gpio-motors`,
 `/rom/usr/lib/majestic-af.so` or `/rom/usr/bin/motor`. Unlike SMS this needs no reflash: every image
-that could ever move a motor already carries one of the two.
+that could ever move a motor already carries one of the two. The Counting page
+(`counting.cgi`, `a/counting.js`, `a/counting-data.js`) follows
+`BR2_PACKAGE_MAJESTIC_WEBUI_COUNTING`, which defaults on wherever the image
+carries an object-detection model (`xmnpu-models` or `cpu-models`): counting
+runs on the detector's boxes. The page is its own witness,
+`/rom/var/www/cgi-bin/counting.cgi`; like SMS, a camera flashed before the option
+existed gets it back only from an image that carries it. The lines-and-zones
+editor on the Settings page is not part of the option: it is drawn only where
+majestic has a counting section, and `a/mj-line.js` is a few kilobytes of the
+settings page itself.
