@@ -103,11 +103,14 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownCamera" role="button">Camera</a>
 						<ul aria-labelledby="dropdownCamera" class="dropdown-menu">
 							<li><a class="dropdown-item" href="camera.cgi"><% page_label camera %></a></li>
-							<!-- On a camera whose majestic counts at all: one without
-							     object detection has no counting section, and the page
-							     would only ever say it cannot count. Under Camera rather
-							     than on the bar: the bar is for the pages everyone opens. -->
-							<% if [ -n "$counting_support" ]; then %>
+							<!-- On a camera whose majestic counts at all, and whose
+							     firmware carries the page: one without object detection
+							     has no counting section, and the page would only ever say
+							     it cannot count; a build without the page option
+							     (BR2_PACKAGE_MAJESTIC_WEBUI_COUNTING) has nothing to link to.
+							     Under Camera rather than on the bar: the bar is for the
+							     pages everyone opens. -->
+							<% if [ -n "$counting_support" ] && [ -f /var/www/cgi-bin/counting.cgi ]; then %>
 								<li><a class="dropdown-item" href="counting.cgi"><% page_label counting %></a></li>
 							<% fi %>
 							<!-- Only where the USB port can actually be switched. Same
