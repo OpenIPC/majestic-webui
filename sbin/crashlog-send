@@ -289,7 +289,7 @@ status=0
 # there is one -- a boot loop is a crash too, and the worst kind, whether or
 # not a panic came first. The checksum above is of exactly these two files.
 # With the note comes the failed boot's own log, when the firmware kept one
-# (failsafe-rescue, from the pstore pmsg ring), as syslog -- unless the kernel
+# (from the pstore pmsg ring, as it fell into failsafe), as syslog -- unless the kernel
 # log already brought the log of the boot that oopsed under that name. It is
 # not in the checksum: it is written with the note, which already tells one
 # fall from the next.
