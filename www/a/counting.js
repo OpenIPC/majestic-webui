@@ -136,11 +136,14 @@
 
 	// ── charts ───────────────────────────────────────────────────────────
 
+	// The camera's hours are whole unix hours, so in a half-hour or 45-minute
+	// time zone they start at :30 or :45 on the browser's clock; such a slot
+	// says its minutes rather than reading as the hour before.
 	function label(t, step) {
 		const d = new Date(t * 1000);
-		return step === 'hour'
-			? String(d.getHours()).padStart(2, '0')
-			: d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+		if (step !== 'hour') return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+		const h = String(d.getHours()).padStart(2, '0');
+		return d.getMinutes() ? h + ':' + String(d.getMinutes()).padStart(2, '0') : h;
 	}
 
 	function slotTitle(s, step) {

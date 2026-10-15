@@ -4511,8 +4511,14 @@
 
 		// The drawing editors are chosen by what the camera declares about a
 		// field (x-shapes), and take its limits from there too.
-		const shapes = (f) => (f.sub && f.sub['x-shapes'] && typeof f.sub['x-shapes'] === 'object'
-			&& f.sub.type === 'string' ? f.sub['x-shapes'] : null);
+		// Lines are one string; rects are the array of "XxYxWxH" strings a
+		// MultiRect field is, which is what the region editor drives.
+		const shapes = (f) => {
+			const sh = f.sub && f.sub['x-shapes'];
+			if (!sh || typeof sh !== 'object') return null;
+			const want = sh.kind === 'lines' ? 'string' : sh.kind === 'rects' ? 'array' : null;
+			return want && f.sub.type === want ? sh : null;
+		};
 		let linesField = null, zonesField = null, lineShapes = null, zoneShapes = null;
 		for (const f of fields) {
 			const sh = shapes(f);
@@ -4599,7 +4605,21 @@
 			if (zones) zones.repaint();
 			if (lines) lines.repaint();
 		};
-		refreshOsdRects().then(() => repaint());
+		// A reset or a fresh read of the config sets the hidden fields without
+		// an input event; the picture and the lists follow them here.
+		state.liveSync.push(() => repaint());
+		// Where the picture is on the stage. Without it nothing can be drawn,
+		// so a failed ask is asked again while this leaf is up -- not only
+		// on the next frame, which a stalled preview may never deliver. A 404
+		// (the camera cannot say) is final, and refreshOsdRects records it.
+		let mounted = true;
+		state.liveCleanup.push(() => { mounted = false; });
+		const askRects = (n) => refreshOsdRects().catch(() => {}).then(() => {
+			if (!mounted) return;
+			repaint();
+			if (camRects.ok && !camRects.known && n < 10) setTimeout(() => askRects(n + 1), 3000);
+		});
+		askRects(0);
 
 		const enabled = state.fields.find(f => f.dot === 'counting.enabled');
 		// Following keeps a person in the same place in the picture, and lines
@@ -4807,7 +4827,9 @@
 		}
 
 		function begin(e) {
-			if (!active || e.button > 0) return;
+			// One gesture at a time: a second finger neither starts another
+			// nor takes over this one.
+			if (!active || e.button > 0 || gesture) return;
 			const g = SG.geom();
 			if (!g || unreadable()) return;
 			const p = at(e);
@@ -4825,13 +4847,14 @@
 			}
 			// What the field held before, for a gesture the browser takes back.
 			gesture.before = field.getValue();
+			gesture.id = e.pointerId;
 			sel = gesture.i;
 			e.currentTarget.setPointerCapture(e.pointerId);
 			e.preventDefault();
 		}
 
 		function move(e) {
-			if (!gesture) return;
+			if (!gesture || e.pointerId !== gesture.id) return;
 			const g = SG.geom();
 			if (!g) return;
 			const p = at(e);
@@ -4851,8 +4874,8 @@
 			paint();
 		}
 
-		function finish() {
-			if (!gesture) return;
+		function finish(e) {
+			if (!gesture || e.pointerId !== gesture.id) return;
 			const ls = gesture.ls;
 			const l = ls[gesture.i];
 			// A press that did not draw is not a line.
@@ -4864,8 +4887,8 @@
 		// A gesture the browser cancels (a scroll or a system gesture took the
 		// touch) was not let go where it ended: the field goes back to what
 		// it held, and nothing is edited.
-		function cancel() {
-			if (!gesture) return;
+		function cancel(e) {
+			if (!gesture || e.pointerId !== gesture.id) return;
 			const before = gesture.before;
 			gesture = null;
 			field.setValue(before);
