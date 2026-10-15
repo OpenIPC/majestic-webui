@@ -73,6 +73,19 @@ if [ "$GET_get" = "log" ] && [ -s "$CRASH/crash.tar.gz" ]; then
 	exit 0
 fi
 
+# The failed boot's system log the firmware kept with a fall into failsafe:
+# what Send uploads beside the note, so the owner can read it first.
+if [ "$GET_get" = "failsafe-log" ] && [ -s "$CRASH/failsafe.log" ]; then
+	fn="failsafe_${network_address}_"`date +%Y-%m-%d_%H-%M-%S`".log"
+	echo "Content-type: text/plain; charset=utf-8"
+	echo "Cache-Control: no-store"
+	echo "Pragma: no-cache"
+	echo "Content-Disposition: attachment; filename=$fn"
+	echo
+	cat "$CRASH/failsafe.log"
+	exit 0
+fi
+
 # A crash of majestic's, as it wrote it -- the latest, or with which=1 the one
 # before: what /club takes from an owner who would rather send it from there.
 mj_file=$CRASH/majestic.dump
