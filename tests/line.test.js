@@ -13,6 +13,8 @@ const { check, group, done } = require('./assert');
 
 const L = require(path.join(__dirname, '..', 'www', 'a', 'mj-line.js'));
 const MAIN = { w: 1920, h: 1080 };
+// What the camera declares for counting.lines in its schema (x-shapes).
+const SP = L.spec({ kind: 'lines', maxItems: 8, namePattern: '^[A-Za-z0-9_-]{1,31}$' });
 
 group('the camera\'s string, in and out');
 {
@@ -23,9 +25,22 @@ group('the camera\'s string, in and out');
 	check('round trip', L.format(l) === 'door:860,620,1260,620;10,20,30,40');
 	check('empty is no lines', Array.isArray(L.parse('')) && L.parse('').length === 0);
 	check('three numbers is refused', L.parse('1,2,3') === null);
-	check('a name the metrics cannot carry is refused', L.parse('front door:1,2,3,4') === null);
-	check('nine lines is refused', L.parse(Array(9).fill('0,0,100,100').join(';')) === null);
+	check('a name the metrics cannot carry is refused', L.parse('front door:1,2,3,4', SP) === null);
+	check('nine lines is refused', L.parse(Array(9).fill('0,0,100,100').join(';'), SP) === null);
+	check('an empty name is refused', L.parse(':1,2,3,4') === null);
 	check('a drag\'s fractions are written whole', L.format([{ x1: 1.4, y1: 2.6, x2: 3, y2: 4, named: false }]) === '1,3,3,4');
+}
+
+group('the rules are the camera\'s, from its schema');
+{
+	const none = L.spec(undefined);
+	check('nothing declared: no cap and no name rule', none.max === 0 && none.name === null);
+	check('nothing declared: a ninth line is not refused here', L.parse(Array(9).fill('0,0,100,100').join(';'), none).length === 9);
+	check('a declared cap is kept', L.spec({ maxItems: 3 }).max === 3);
+	check('a cap that is not a whole number is no cap', L.spec({ maxItems: '3' }).max === 0);
+	check('a pattern that does not compile is no rule', L.spec({ namePattern: '(' }).name === null);
+	check('a declared pattern judges a name', L.nameOk(SP, 'door') && !L.nameOk(SP, 'front door'));
+	check('a bad name is the verdict', /name/.test(L.verdict({ name: 'a b', x1: 0, y1: 540, x2: 1920, y2: 540 }, MAIN, SP)));
 }
 
 group('the in arrow points to the left of first to second');

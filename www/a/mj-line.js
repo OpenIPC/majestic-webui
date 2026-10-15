@@ -15,15 +15,28 @@
 (function () {
 	'use strict';
 
-	// A name labels the camera's metrics, so it is what Prometheus allows in
-	// a label value without escaping, and what majestic accepts.
-	const NAME = /^[A-Za-z0-9_-]{1,31}$/;
+	// What the camera accepts, from the field's schema (`x-shapes`): how many
+	// lines it reads and the pattern a name must match. Either may be absent,
+	// and then nothing is checked against it here -- the rule is the camera's
+	// to declare, not this page's to remember.
+	//   { max: N | 0, name: RegExp | null }
+	function spec(shapes) {
+		const s = shapes && typeof shapes === 'object' ? shapes : {};
+		let name = null;
+		if (typeof s.namePattern === 'string') {
+			try { name = new RegExp(s.namePattern); } catch (e) { name = null; }
+		}
+		const max = Number.isInteger(s.maxItems) && s.maxItems > 0 ? s.maxItems : 0;
+		return { max: max, name: name };
+	}
+	const nameOk = (sp, n) => !(sp && sp.name) || sp.name.test(n);
 
 	// The camera's string to lines: [{name, x1, y1, x2, y2, named}], or null
-	// for a string the camera would refuse. An unnamed entry gets the name
-	// the camera gives it, line<N>, and `named: false` so writing it back
-	// does not turn the camera's default into a name somebody chose.
-	function parse(s) {
+	// for a string the camera would refuse under `sp` (from spec()). An
+	// unnamed entry gets the name the camera gives it, line<N>, and
+	// `named: false` so writing it back does not turn the camera's default
+	// into a name somebody chose.
+	function parse(s, sp) {
 		const out = [];
 		const text = String(s == null ? '' : s);
 		for (const raw of text.split(';')) {
@@ -34,7 +47,7 @@
 			if (colon >= 0) {
 				name = e.slice(0, colon);
 				rest = e.slice(colon + 1);
-				if (!NAME.test(name)) return null;
+				if (!name || !nameOk(sp, name)) return null;
 			}
 			const p = rest.split(',').map((t) => t.trim());
 			if (p.length !== 4 || p.some((t) => !/^-?[0-9]+(\.[0-9]+)?$/.test(t))) return null;
@@ -45,7 +58,7 @@
 				x1: n[0], y1: n[1], x2: n[2], y2: n[3],
 			});
 		}
-		if (out.length > 8) return null;
+		if (sp && sp.max && out.length > sp.max) return null;
 		return out;
 	}
 
@@ -61,12 +74,13 @@
 	}
 
 	// What the camera will do with one line, against the main stream's size
-	// `b` ({w, h}, or null when it is not known): null when it counts, else
-	// the sentence for why it does not. A line too short to cross, or one with
-	// no part inside the picture, is stored and never counts anything.
-	function verdict(l, b) {
+	// `b` ({w, h}, or null when it is not known) and its rules `sp`: null when
+	// it counts, else the sentence for why it does not. A line too short to
+	// cross, or one with no part inside the picture, is stored and never
+	// counts anything.
+	function verdict(l, b, sp) {
 		if (!l) return 'This line is not one the camera can read.';
-		if (!NAME.test(l.name)) return 'Its name can only have letters, digits, - and _.';
+		if (!nameOk(sp, l.name)) return 'The camera does not take this name.';
 		const len = Math.hypot(l.x2 - l.x1, l.y2 - l.y1);
 		if (len < 8) return 'This line is too short for anyone to cross it.';
 		if (b && b.w && b.h) {
@@ -110,7 +124,7 @@
 		return Object.assign({}, l, { x1: l.x2, y1: l.y2, x2: l.x1, y2: l.y1 });
 	}
 
-	const api = { parse: parse, format: format, verdict: verdict, inArrow: inArrow, flip: flip, NAME: NAME };
+	const api = { spec: spec, nameOk: nameOk, parse: parse, format: format, verdict: verdict, inArrow: inArrow, flip: flip };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticLine = api;
 })();

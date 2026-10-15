@@ -3616,6 +3616,7 @@
 				'detection is limited to the regions listed and does not fall back to ' +
 				'the whole picture.',
 			space: words.space || 'Coordinates are main-stream pixels',
+			max: words.max || 0,
 		};
 		// Ungated callers are always live; a gated one starts off and is turned
 		// on by the caller's own mode control.
@@ -4262,6 +4263,8 @@
 				// Empty picture. A press here is also how you put a selection down,
 				// which is what makes the grips and the delete button transient.
 				select(-1);
+				// As many as the camera reads, and no more: past that it drops them.
+				if (W.max && list().length >= W.max) return;
 				gesture = { kind: 'new', id: e.pointerId, from: at(e), moved: false };
 			}
 			if (!gesture.orig && gesture.kind !== 'new') { gesture = null; return; }
@@ -4506,17 +4509,24 @@
 		const zoneNote = zoneBody.parentNode.querySelector('.mj-live-note');
 		const whatBody = liveGroup(colWhat, 'Counting', '');
 
-		let linesField = null, zonesField = null;
+		// The drawing editors are chosen by what the camera declares about a
+		// field (x-shapes), and take its limits from there too.
+		const shapes = (f) => (f.sub && f.sub['x-shapes'] && typeof f.sub['x-shapes'] === 'object'
+			&& f.sub.type === 'string' ? f.sub['x-shapes'] : null);
+		let linesField = null, zonesField = null, lineShapes = null, zoneShapes = null;
 		for (const f of fields) {
-			const isLines = f.dot === 'counting.lines', isZones = f.dot === 'counting.zones';
+			const sh = shapes(f);
+			// One of each: a second field of a kind keeps its text box.
+			const isLines = !!sh && sh.kind === 'lines' && !linesField;
+			const isZones = !!sh && sh.kind === 'rects' && !zonesField;
 			const box = isLines ? lineBody : isZones ? zoneBody : whatBody;
 			const field = renderField(box, f.dot, f.key, f.sub, getDotted(state.config, f.dot),
 				isLines || isZones ? { hidden: true } : undefined);
 			if (!field) continue;
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
-			if (isLines) linesField = field;
-			if (isZones) zonesField = field;
+			if (isLines) { linesField = field; lineShapes = sh; }
+			if (isZones) { zonesField = field; zoneShapes = sh; }
 		}
 
 		const can = preview && window.MajesticRegion && window.MajesticLine;
@@ -4548,6 +4558,7 @@
 
 		const zones = zonesField ? mountRegions(preview, zonesField, zoneBody, zoneNote, {
 			gated: true,
+			max: Number.isInteger(zoneShapes.maxItems) && zoneShapes.maxItems > 0 ? zoneShapes.maxItems : 0,
 			one: '1 zone',
 			many: ' zones',
 			draw: 'Draw zones',
@@ -4560,7 +4571,8 @@
 			base: 'Zones are stored in the main stream’s pixels, and this camera has ' +
 				'no main resolution set. Switch the picture to Main to draw them.',
 		}) : null;
-		const lines = linesField ? mountLines(preview, linesField, lineBody, lineNote) : null;
+		const lines = linesField ? mountLines(preview, linesField, lineBody, lineNote,
+			window.MajesticLine.spec(lineShapes)) : null;
 
 		let mode = 'lines';
 		function setMode(m) {
@@ -4615,7 +4627,7 @@
 	// rewrites it whole through MajesticLine -- which never writes a string
 	// the camera would refuse, because the camera refuses ALL the lines over
 	// one bad entry and says so nowhere but its log.
-	function mountLines(preview, field, listBox, noteEl) {
+	function mountLines(preview, field, listBox, noteEl, sp) {
 		const LN = window.MajesticLine;
 		const SG = stageGeom(preview);
 		const SVG = 'http://www.w3.org/2000/svg';
@@ -4625,8 +4637,8 @@
 
 		// The model is the field: read back from it on every paint, written to
 		// it on every edit, so Save, dirty tracking and reset see one value.
-		const read = () => LN.parse(field.getValue()) || [];
-		const unreadable = () => LN.parse(field.getValue()) === null;
+		const read = () => LN.parse(field.getValue(), sp) || [];
+		const unreadable = () => LN.parse(field.getValue(), sp) === null;
 		function write(list) {
 			field.setValue(LN.format(list));
 			field.control.dispatchEvent(new Event('input', { bubbles: true }));
@@ -4678,7 +4690,7 @@
 				ls.forEach((l, i) => {
 					const x1 = g.sx(l.x1), y1 = g.sy(l.y1), x2 = g.sx(l.x2), y2 = g.sy(l.y2);
 					const grp = mk('g', { class: 'mj-ct-line' + (i === sel ? ' mj-ct-sel' : '') +
-						(LN.verdict(l, SG.base()) ? ' mj-ct-dead' : '') });
+						(LN.verdict(l, SG.base(), sp) ? ' mj-ct-dead' : '') });
 					mk('line', { x1, y1, x2, y2, class: 'mj-ct-hit' }, grp).dataset.i = i;
 					mk('line', { x1, y1, x2, y2, class: 'mj-ct-stroke' }, grp);
 					const a = LN.inArrow({ x1, y1, x2, y2 }, 28);
@@ -4723,13 +4735,13 @@
 					const v = name.value.trim();
 					const ls2 = read();
 					if (!ls2[i]) return;
-					if (v && LN.NAME.test(v)) {
+					if (v && v.indexOf(';') < 0 && v.indexOf(':') < 0 && LN.nameOk(sp, v)) {
 						ls2[i].name = v;
 						ls2[i].named = true;
 						write(ls2);
 					} else {
 						name.value = ls2[i].name;
-						name.title = 'Letters, digits, - and _ only';
+						name.title = 'The camera does not take this name';
 					}
 				});
 				row.appendChild(name);
@@ -4755,7 +4767,7 @@
 					write(ls2);
 				});
 				row.appendChild(del);
-				const v = LN.verdict(l, SG.base());
+				const v = LN.verdict(l, SG.base(), sp);
 				if (v) {
 					const why = el('div', 'small mj-md-bad mj-ct-why');
 					why.textContent = v;
@@ -4790,7 +4802,7 @@
 			} else if (t && t.dataset && t.dataset.i !== undefined && t.classList.contains('mj-ct-hit')) {
 				gesture = { kind: 'move', i: +t.dataset.i, from: p, orig: Object.assign({}, ls[+t.dataset.i]), ls };
 			} else {
-				if (ls.length >= 8) return;
+				if (sp.max && ls.length >= sp.max) return;
 				const x = g.mx(p.x), y = g.my(p.y);
 				ls.push({ name: 'line' + (ls.length + 1), named: false, x1: x, y1: y, x2: x, y2: y });
 				gesture = { kind: 'new', i: ls.length - 1, end: 2, ls };

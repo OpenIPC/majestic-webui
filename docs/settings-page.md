@@ -206,8 +206,9 @@ Main and Sub agree, and the template is chips because majestic's specifier switc
 returns 0 for an unknown code and silently truncates the rest of the line),
 **`motionDetect`** (`renderMotion`, which absorbed the Visual editor, so
 `?tab=roi` redirects here rather than 404ing), **`counting`** (`renderCounting`:
-lines and zones on the live picture over hidden `lines`/`zones` fields, with a
-Draw lines / Draw zones switch because one drag can only mean one of them), and
+lines and zones on the live picture over the hidden fields whose `x-shapes`
+declares `kind` `lines` or `rects`, never picked by key name, with a Draw lines /
+Draw zones switch because one drag can only mean one of them), and
 **`nightMode`** (the pin map above its fields). `mountRegions` is shared by the
 motion, privacy-mask and counting-zone editors, parameterised by a `words`
 object and a `gated` flag; what is deliberately not shared is what the
@@ -218,7 +219,8 @@ between main-stream pixels and the picture on screen, shared by `mountRegions`
 and `mountLines` (the counting lines) so two editors on one picture cannot
 disagree about where it is. `mj-line.js` is the lines' pure half: majestic
 refuses the whole lines string over one bad entry, silently, so the editor
-writes only what it parses, and the arrow into each line's "in" side is a sign
+writes only what it parses -- under the camera's own `x-shapes` `maxItems`
+and `namePattern`, which the page checks against and never restates -- and the arrow into each line's "in" side is a sign
 convention that is tested rather than eyeballed.
 
 **When you'd touch this code:**
