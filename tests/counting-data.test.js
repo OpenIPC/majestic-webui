@@ -83,6 +83,25 @@ group('a partial answer is unknown, not a state');
 	check('a bucket without its readings is not counted', s[0].state === 'none');
 }
 
+group('a partial period is never rounded up to all of it');
+{
+	const one = D.slots({ step: 'hour', buckets: [{ t: H, covered: 31 * 60, lines: [], zones: [] }] }, H, H + 3599, H + 7200);
+	check('31 minutes of one hour', D.coverage(one, 'hour', H + 7200) === 'counted for 31 min of 1 hour');
+	const now = H + 13 * 3600;
+	const most = D.slots({ step: 'hour', buckets: Array.from({ length: 13 }, (_, i) => ({ t: H + i * 3600, covered: i === 12 ? 1800 : 3600, lines: [], zones: [] })) }, H, now, now);
+	check('12 and a half of 13 hours is not 13 of 13', !/ 13 of 13/.test(D.coverage(most, 'hour', now)));
+}
+
+group('the camera\'s day is matched to the browser\'s whatever their zones');
+{
+	// A camera day bucket that starts 5 hours after the browser's midnight.
+	const d0 = D.dayStart(H), d1 = D.daysBack(d0, -1);
+	const s = D.slots({ step: 'day', buckets: [{ t: d0 + 5 * 3600, covered: 86400, lines: [{ in: 4, out: 2 }], zones: [] }] },
+		d0, d1 + 86399, d1 + 86400 * 2);
+	check('the bucket lands in the day that holds it', s[0].state !== 'none' && s[0].lines[0].in === 4);
+	check('and only there', s[1].state === 'none');
+}
+
 group('history from other lines is not shown under these');
 {
 	const live = { rules: '5c1e07a2', lines: [{ name: 'door' }], zones: [{ name: 'zone1' }] };

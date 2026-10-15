@@ -41,7 +41,10 @@ group('the rules are the camera\'s, from its schema');
 	check('a cap that is not a whole number is no cap', L.spec({ maxItems: '3' }).max === 0);
 	check('a pattern that does not compile is no rule', L.spec({ namePattern: '(' }).name === null);
 	check('a declared pattern judges a name', L.nameOk(SP, 'door') && !L.nameOk(SP, 'front door'));
-	check('a bad name is the verdict', /name/.test(L.verdict({ name: 'a b', x1: 0, y1: 540, x2: 1920, y2: 540 }, MAIN, SP)));
+	const strict = L.spec({ namePattern: '^door[0-9]$' });
+	check('an unnamed line is not judged by the name rule', L.verdict({ name: 'line1', named: false, x1: 0, y1: 540, x2: 1920, y2: 540 }, MAIN, strict) === null);
+	check('a named one is', /name/.test(L.verdict({ name: 'line1', named: true, x1: 0, y1: 540, x2: 1920, y2: 540 }, MAIN, strict)));
+	check('a bad name is the verdict', /name/.test(L.verdict({ name: 'a b', named: true, x1: 0, y1: 540, x2: 1920, y2: 540 }, MAIN, SP)));
 }
 
 group('the in arrow points to the left of first to second');

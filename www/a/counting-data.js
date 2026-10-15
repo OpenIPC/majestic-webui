@@ -71,14 +71,24 @@
 	// counted for ten minutes is not 3 people that hour.
 	function slots(history, from, to, now) {
 		const step = history && history.step === 'day' ? 'day' : 'hour';
-		const by = new Map();
-		for (const b of (history && history.buckets) || [])
-			if (b && typeof b.t === 'number') by.set(b.t, b);
+		// Each bucket goes to the slot that holds its start, not to one whose
+		// start equals it: the camera's days (and, in a half-hour time zone,
+		// its hours) begin at the camera's midnight, which is the browser's
+		// only when both keep the same time zone. Matched by key, a camera
+		// viewed from another zone would have every day "not counted".
+		const buckets = ((history && history.buckets) || [])
+			.filter((b) => b && typeof b.t === 'number' && isFinite(b.t))
+			.sort((a, b) => a.t - b.t);
+		let k = 0;
 		const out = [];
 		let t = step === 'day' ? dayStart(from) : Math.floor(from / HOUR) * HOUR;
 		for (let guard = 0; t <= to && guard < 2000; guard++) {
 			const end = nextSlot(t, step);
-			const b = by.get(t);
+			while (k < buckets.length && buckets[k].t < t) k++;
+			// One bucket a slot: a second in the same slot (two camera days
+			// across a daylight-saving change) is left out, not added in.
+			const b = k < buckets.length && buckets[k].t < end ? buckets[k] : null;
+			while (k < buckets.length && buckets[k].t < end) k++;
 			// A bucket that does not carry its lines and zones is not a
 			// reading of them: drawn, its gaps would read as zeroes.
 			if (!b || !wellFormed(b)) {
@@ -148,10 +158,18 @@
 		if (!counted) return 'not counted';
 		const unit = step === 'hour' ? HOUR : 86400;
 		const of = Math.max(1, Math.round(total / unit));
-		const n = Math.round(counted / unit);
+		// Partial is never rounded up to all of it: "1 of 1 hour" for 31
+		// minutes of one is the claim this sentence exists to avoid. Where
+		// whole units would say that, or say nothing, the next smaller unit
+		// is used.
 		const word = step === 'hour' ? 'hour' : 'day';
-		if (n < 1) return 'counted for ' + Math.max(1, Math.round(counted / 60)) + ' min of ' + of + ' ' + word + (of === 1 ? '' : 's');
-		return 'counted for ' + n + ' of ' + of + ' ' + word + (of === 1 ? '' : 's');
+		const ofWords = of + ' ' + word + (of === 1 ? '' : 's');
+		const whole = Math.floor(counted / unit);
+		if (whole < 1 || whole >= of) {
+			const small = step === 'hour' ? 60 : HOUR, sw = step === 'hour' ? 'min' : 'h';
+			return 'counted for ' + Math.max(1, Math.floor(counted / small)) + ' ' + sw + ' of ' + ofWords;
+		}
+		return 'counted for ' + whole + ' of ' + ofWords;
 	}
 
 	function fmtSecs(s) {

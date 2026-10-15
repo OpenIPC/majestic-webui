@@ -83,7 +83,9 @@
 	// counts anything.
 	function verdict(l, b, sp) {
 		if (!l) return 'This line is not one the camera can read.';
-		if (!nameOk(sp, l.name)) return 'The camera does not take this name.';
+		// Only a name somebody gave: an unnamed line is written without one,
+		// and the line<N> it is shown as is the camera's, not a name to judge.
+		if (l.named && !nameOk(sp, l.name)) return 'The camera does not take this name.';
 		const len = Math.hypot(l.x2 - l.x1, l.y2 - l.y1);
 		if (len < 8) return 'This line is too short for anyone to cross it.';
 		if (b && b.w && b.h) {

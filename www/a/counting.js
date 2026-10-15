@@ -355,12 +355,15 @@
 			box.appendChild(el('li', 'small text-secondary', 'Nothing yet since the camera started counting.'));
 			return;
 		}
+		let shown = 0;
 		for (const e of evs) {
 			const w = eventWords(e);
 			if (!w) continue;
+			shown++;
 			const li = el('li', 'ct-event small');
-			// `t` is wall-clock milliseconds (majestic docs/counting.md); one
-			// that is not a time gets no time rather than 1970's.
+			// `t` is the wall-clock time in milliseconds, as GET
+			// /api/v1/counting reports it; one that is not a time gets none
+			// rather than 1970's.
 			const at = typeof e.t === 'number' && isFinite(e.t) && e.t > 0
 				? new Date(e.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 				: '–';
@@ -368,6 +371,8 @@
 			li.appendChild(el('span', e.kind === 'dwell' ? 'ct-event-w text-warning-emphasis' : 'ct-event-w', w));
 			box.appendChild(li);
 		}
+		// Events the page cannot read are not "nothing happened".
+		if (!shown) box.appendChild(el('li', 'small text-secondary', 'The latest events are of a kind this page cannot show.'));
 	}
 
 	// ── the loop ─────────────────────────────────────────────────────────

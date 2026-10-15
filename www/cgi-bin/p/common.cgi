@@ -1176,7 +1176,7 @@ update_caminfo() {
 	local variables="counting_asked counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
-	rm -f ${sysinfo_file}
+	rm -f ${sysinfo_file} "$counting_file"
 
 	# Through shq, because this file is SOURCED on every request and several of
 	# these values come off the device or out of a form. The line this replaced
@@ -1207,6 +1207,9 @@ mj_bin_file=/usr/bin/majestic
 log_file=/tmp/webui/logfile.txt
 signature_file=/tmp/webui/signature.txt
 sysinfo_file=/tmp/webui/sysinfo.txt
+# recheck_counting's answer, kept beside the record rather than in it, so the
+# one-key re-ask never rewrites the file a full rebuild may be writing.
+counting_file=/tmp/webui/counting.txt
 
 [ ! -d /etc/webui ] && mkdir -p /etc/webui
 [ ! -d /tmp/webui ] && mkdir -p /tmp/webui
@@ -1280,7 +1283,7 @@ caminfo_stale() {
 }
 
 # An answer majestic could not give yet (counting_support "ask") is asked
-# again: that one key, rewritten in place, and at most once a minute. Not the
+# again: that one key, in its own file, and at most once a minute. Not the
 # whole record on every page -- a daemon that is down, or a build that answers
 # 401 to the camera itself, would otherwise cost the full rebuild and a curl
 # that can wait 2 s on each page of the UI somebody is using to fix it.
@@ -1296,12 +1299,13 @@ recheck_counting() {
 		1) counting_support="" ;;
 	esac
 	counting_asked=$now
-	tmp="${sysinfo_file}.$$"
+	# Whole, then renamed into place: a reader sees the old file or the new
+	# one. update_caminfo removes it, so a rebuild's own answer stands.
+	tmp="${counting_file}.$$"
 	{
-		grep -v -e '^counting_support=' -e '^counting_asked=' "$sysinfo_file"
 		conf_write counting_support "$counting_support"
 		conf_write counting_asked "$counting_asked"
-	} > "$tmp" 2>/dev/null && mv -f "$tmp" "$sysinfo_file" || rm -f "$tmp"
+	} > "$tmp" 2>/dev/null && mv -f "$tmp" "$counting_file" || rm -f "$tmp"
 }
 
 include $sysinfo_file
@@ -1309,6 +1313,7 @@ if [ ! -f $sysinfo_file ] || caminfo_stale; then
 	update_caminfo
 fi
 include $sysinfo_file
+include "$counting_file"
 recheck_counting
 
 pagename=$(basename "$SCRIPT_NAME")
