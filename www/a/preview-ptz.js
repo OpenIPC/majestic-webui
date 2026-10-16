@@ -92,7 +92,11 @@
 					turn = t;
 					lay();
 					return turn;
-				}, (e) => { turn = null; return Promise.reject(e); })
+				})
+				// Any read that did not end in a reading forgets the last one:
+				// the picture may have been turned since, and that is what the
+				// read was asked to find out.
+				.catch((e) => { turn = null; return Promise.reject(e); })
 				.finally(() => { turnP = null; });
 		}
 		return turnP;
