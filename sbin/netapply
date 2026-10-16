@@ -15,6 +15,11 @@
 #   MODE static -- the browser is sent to the new address with TOKEN, and only
 #                  an authenticated request carrying it (network.cgi?confirm=)
 #                  keeps the change. Nothing within WAIT seconds: rolled back.
+#                  The new address is a new origin to the browser, holding no
+#                  session, so that request is preceded by a sign-in there --
+#                  WAIT has to leave room for typing a password a password
+#                  manager does not offer at an address it has never seen
+#                  (#690). network.cgi passes it, because its notice states it.
 #   MODE dhcp   -- there is no address to send the browser to, so the lease
 #                  itself is the proof: a default route through IFACE keeps
 #                  the change. An address alone is not one -- udhcpc's
@@ -46,7 +51,7 @@ VARRUN=${NETAPPLY_VARRUN:-/var/run}
 PENDING=$RUN/netapply.pending
 DONE=$RUN/netapply.done
 NEW=$RUN/netapply.new.$iface
-WAIT=${NETAPPLY_WAIT:-90}
+WAIT=${NETAPPLY_WAIT:-180}
 WAIT_DHCP=${NETAPPLY_WAIT_DHCP:-30}
 # Long enough for the page answering the save to reach the browser over the
 # link about to be bounced.
