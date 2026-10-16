@@ -175,6 +175,17 @@
 	if ($('#cellular') && typeof mjMetricsSubscribe === 'function')
 		mjMetricsSubscribe(cellular);
 
+	// Addresses as four octets (ip-octets.js, #695). The text fields stay in
+	// the form and are what is posted, so this is presentation too: without
+	// it, or for a value that is not IPv4, they are the plain boxes they were.
+	// A resolver may be IPv6, so pasting one there turns that field back into
+	// text rather than being refused.
+	const IO = window.MajesticIpOctets;
+	if (IO) {
+		['network_address', 'network_netmask', 'network_gateway', 'network_fallback'].forEach((id) => IO.mount($('#' + id)));
+		IO.mount($('#network_nameserver'), { textOk: true });
+	}
+
 	toggleStatic();
 
 	// A change sbin/netapply is holding open (network.cgi's #net-applying). It
