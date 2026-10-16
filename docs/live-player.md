@@ -291,6 +291,23 @@ request re-arms the camera's auto-stop deadline (`ptz.pulse`, default
 500 ms) and the release sends `act=stop`, with the motor stopping on that
 deadline anyway if the release never arrives.
 
+**Every direction on the Live page is a direction on the picture**, and
+`ptz-orient.js` is the one place that turns it into the head's (#691). That
+covers the arrows, the arrow keys, the stick, double-tap and drag. The motors
+know nothing of `image.mirror`, `image.flip` or `image.rotate`, so a camera hung
+upside down and set upright by mirror and flip used to turn its head away from
+every arrow, and a picture on its side panned when the arrow said tilt. The
+camera mirrors and flips at the sensor and turns the picture clockwise
+afterwards. This was measured on an hi3516av300: with a quarter turn in force,
+a mirror shows as the picture turned top to bottom. So the module undoes the turn
+first. `preview-ptz.js` applies it in `move()` (serial verbs, before the speed
+is picked) and `fire()` (stepped `h`/`v`), and the centre/drag plans take it as
+`turn`. The orientation is read fresh from `/api/v1/config.json` rather than
+taken from `mjConfig()`, and read again whenever the page comes back into view,
+because mirror and flip are set on the Settings page, often in another tab.
+Until it has been read, the arrows treat the picture as upright, which is what
+they always did. The gestures on the picture wait for the reading.
+
 To render either pad without hardware: set the env vars, `touch`+`chmod +x` a
 fake binary for the stepped backends, then remove `/tmp/webui/sysinfo.txt`.
 
