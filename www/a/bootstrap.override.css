@@ -8764,6 +8764,41 @@ a.mj-seg-lbl.active {
 	font-size: 0.8125rem;
 }
 
+/* An address as four octets (ip-octets.js). The boxes share the row the text
+   field had, with the dots between them in the field's own colour, and each
+   is wide enough for 255 and no wider. A number over 255, or a box left empty
+   in an address otherwise filled, is marked on the box itself. */
+.mj-ip4 {
+	display: flex;
+	align-items: center;
+	gap: 0.125rem;
+	max-width: 15rem;
+}
+
+.mj-ip4 .mj-ip4-in {
+	flex: 1 1 0;
+	min-width: 0;
+	padding-left: 0.25rem;
+	padding-right: 0.25rem;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+
+.mj-ip4-dot {
+	flex: none;
+	color: var(--bs-secondary-color);
+	font-weight: 600;
+}
+
+.mj-ip4 .mj-ip4-bad,
+.mj-ip4 .mj-ip4-bad:focus {
+	border-color: var(--bs-danger);
+}
+
+.mj-ip4 .mj-ip4-bad:focus {
+	box-shadow: 0 0 0 0.25rem rgba(var(--bs-danger-rgb), 0.25);
+}
+
 .mj-card-note {
 	max-width: 66ch;
 	margin: 0.5rem 0 0.9rem;

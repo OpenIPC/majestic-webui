@@ -1194,6 +1194,7 @@ cell_dns=$(awk '$1 == "nameserver" { printf "%s%s", s, $2; s = ", " }' /etc/reso
 </div>
 </div>
 
+<script src="/a/ip-octets.js" defer></script>
 <script src="/a/network.js" defer></script>
 
 <%in p/footer.cgi %>
