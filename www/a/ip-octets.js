@@ -16,7 +16,7 @@
 //
 // A value that is not an IPv4 address is left as text: a resolver can be an
 // IPv6 one, and four boxes cannot hold it. For the same reason a field that
-// allows it turns back into text when one is pasted.
+// allows it turns back into text when one is pasted or typed.
 //
 // The pure half (split, join, problem, next) is exported for
 // tests/ip-octets.test.js; mount() is the browser's.
@@ -111,7 +111,12 @@
 		// typed; a box left empty in an address otherwise begun only once the
 		// caret has left all four, so the box being filled in is not called
 		// wrong for being empty.
+		// Gone once the field is text again: a check still queued from the
+		// box the caret just left must not write the boxes' value over what
+		// is now being typed into the field itself.
+		let gone = false;
 		const sync = () => {
+			if (gone) return;
 			input.value = join(parts());
 			// A read-only field is a reading (Automatic), not something the
 			// save is waiting on: an address half-typed under Manual must not
@@ -137,6 +142,7 @@
 		};
 		// Back to text, keeping the value: a resolver given as IPv6.
 		const toText = (v) => {
+			gone = true;
 			wrap.remove();
 			input.hidden = false;
 			delete input.dataset.octets;
@@ -144,6 +150,7 @@
 			input.value = v;
 			input.dispatchEvent(new Event('input', { bubbles: true }));
 			input.focus();
+			try { input.setSelectionRange(v.length, v.length); } catch (e) { /* not a text box */ }
 		};
 
 		boxes.forEach((b, i) => {
@@ -158,6 +165,19 @@
 			b.addEventListener('keydown', (e) => {
 				if (e.ctrlKey || e.metaKey || e.altKey) return;
 				const at = b.selectionStart, to = b.selectionEnd;
+				// An IPv6 address being typed, where text is allowed: a colon
+				// or a hex letter is no part of IPv4, so the field turns back
+				// into text with what was typed in it. Digits typed so far are
+				// the start of that address, run together as typed (the boxes
+				// moved on after three); a whole IPv4 address already there is
+				// kept as it was written, to be edited as text.
+				if (o.textOk && !b.readOnly && /^[:a-fA-F]$/.test(e.key)) {
+					e.preventDefault();
+					const p = parts();
+					const whole = p.every((x) => x !== '') && problem(p) === '';
+					toText((whole ? join(p) : p.join('')) + e.key);
+					return;
+				}
 				if (e.key === '.' || e.key === ' ' || e.key === ',') {
 					e.preventDefault();
 					if (b.value !== '' && i < 3) go(i + 1, 'all');
