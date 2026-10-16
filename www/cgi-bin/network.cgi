@@ -233,9 +233,12 @@ netapply_hold() {
 # typed by hand, since a password manager has nothing saved for it either.
 # Ninety seconds, less the ten the page waits before it follows the camera,
 # was too little: the change rolled back under the sign-in form, and the
-# restart that came next brought back DHCP (#690). Passed to netapply, so the
-# notice below and the rollback cannot disagree.
+# restart that came next brought back DHCP (#690). A DHCP change has no
+# address to sign in at -- its lease is the proof -- so it keeps the short
+# window. Both are passed to netapply, so the notice below and the rollback
+# cannot disagree.
 netapply_wait=180
+netapply_wait_dhcp=30
 
 # "token outcome" of the last change netapply finished, for TOKEN ($1).
 netapply_outcome() {
@@ -689,7 +692,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				fi
 
 				if [ -n "$apply_now" ]; then
-					NETAPPLY_WAIT=$netapply_wait setsid netapply "$edit_iface" "$token" "$backup" "$network_mode" </dev/null >/dev/null 2>&1 &
+					NETAPPLY_WAIT=$netapply_wait NETAPPLY_WAIT_DHCP=$netapply_wait_dhcp setsid netapply "$edit_iface" "$token" "$backup" "$network_mode" </dev/null >/dev/null 2>&1 &
 					# The page that answers must find the change pending, and
 					# a worker that did not take the record over within two
 					# seconds is not applying anything: the save then stands
@@ -871,14 +874,27 @@ fi
 	case "$HTTP_HOST" in
 		*:*) case "${HTTP_HOST##*:}" in '' | *[!0-9]*) ;; *) applying_port=":${HTTP_HOST##*:}" ;; esac ;;
 	esac
+	# The deadline is the one netapply is counting down, which depends on the
+	# mode of the stanza it is trying -- read from that stanza, not inferred
+	# from the query string, which a page viewed over the other interface
+	# does not carry a reliable answer in.
+	applying_mode=$(awk '$1 == "iface" { print $4; exit }' "/tmp/netapply.new.$pending_iface" 2>/dev/null)
+	if [ "$applying_mode" = "dhcp" ]; then
+		applying_wait="$netapply_wait_dhcp seconds"
+	else
+		applying_wait="$((netapply_wait / 60)) minutes"
+	fi
 	if [ -n "$applying_same" ] && [ -n "$applying_to" ] && [ "$applying_to" != "$now_address" ]; then
-		applying_text="<b>The camera is moving to $(esc "$applying_to").</b> This page follows it to <a href=\"$(attr_escape "//${applying_to}${applying_port}/cgi-bin/${keep}")\">$(esc "${applying_to}${applying_port}")</a> in a few seconds, where the camera asks you to sign in again. Signing in there is what keeps the new settings: if nobody does within $((netapply_wait / 60)) minutes, the camera goes back to the previous ones by itself."
+		applying_text="<b>The camera is moving to $(esc "$applying_to").</b> This page follows it to <a href=\"$(attr_escape "//${applying_to}${applying_port}/cgi-bin/${keep}")\">$(esc "${applying_to}${applying_port}")</a> in a few seconds, where the camera asks you to sign in again. Signing in there is what keeps the new settings: if nobody does within ${applying_wait}, the camera goes back to the previous ones by itself."
 		# The button would point at the address being left.
 		applying_acts=""
 	elif [ -n "$applying_same" ] && [ -z "$applying_to" ]; then
-		applying_text="<b>The camera is asking for an address by DHCP.</b> It keeps the change once it has one, and goes back to the previous settings if none comes within 30 seconds. If the address changes, your router shows the new one."
+		applying_text="<b>The camera is asking for an address by DHCP.</b> It keeps the change once it has one, and goes back to the previous settings if none comes within ${applying_wait}. If the address changes, your router shows the new one."
 	else
-		applying_text="<b>Applying the new settings.</b> They are kept once this page can reach the camera again; otherwise the previous ones come back within $((netapply_wait / 60)) minutes. If the page moves to the new address, sign in again there: that is what keeps them."
+		applying_text="<b>Applying the new settings.</b> They are kept once this page can reach the camera again; otherwise the previous ones come back within ${applying_wait}."
+		# Only a fixed address gives the page somewhere new to follow the
+		# camera to.
+		[ "$applying_mode" = "dhcp" ] || applying_text="$applying_text If the page moves to the new address, sign in again there: that is what keeps them."
 	fi %>
 <div id="net-applying" data-token="<% attr_escape "$pending_token" %>" data-to="<% attr_escape "$applying_to" %>" data-same="<%= $applying_same %>" data-iface="<% attr_escape "$edit_iface" %>">
 	<% notice warn "$applying_text" "$applying_acts" %>

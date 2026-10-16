@@ -114,7 +114,7 @@
 			</svg>
 		</h1>
 		<div class="alert" id="err" role="alert"></div>
-		<div class="note" id="netkeep" hidden>The camera has just moved to this address. Sign in to keep its new network settings &mdash; until someone does, it goes back to the previous ones by itself after a few minutes.</div>
+		<div class="note" id="netkeep" hidden>If a change to the camera's network settings brought you here, signing in is what keeps it. Until someone does, the camera goes back to its previous settings by itself after a few minutes.</div>
 		<label for="username">Username</label>
 		<input id="username" name="username" value="root" autocapitalize="none" autocomplete="username" spellcheck="false">
 		<label for="password">Password</label>
@@ -153,7 +153,10 @@
 			// to the camera's new address, which holds no session: the sign-in
 			// was made at the old one. Signing in here is the confirmation, and
 			// a form that said nothing of that let the change roll back under it
-			// and the next restart bring back the old address (#690).
+			// and the next restart bring back the old address (#690). Worded as
+			// a condition: this page cannot ask whether the token is still
+			// pending, and a link revisited after the change was settled
+			// carries the same shape.
 			if (/^\/cgi-bin\/network\.cgi\?(.*&)?confirm=[0-9a-f]+(&|$)/.test(safeNext())) {
 				document.getElementById('netkeep').hidden = false;
 			}
