@@ -383,7 +383,8 @@ build_plan() {
 					fi
 					;;
 				www/a/preview-ptz.js | www/a/ptz-stick.js | www/a/ptz-centre.js | \
-				www/a/ptz-follow.js | www/a/ptz-speed.js | www/a/af-state.js | \
+				www/a/ptz-follow.js | www/a/ptz-speed.js | www/a/ptz-orient.js | \
+				www/a/af-state.js | \
 				www/cgi-bin/j/ptz.cgi)
 					if [ "$ptz" != 1 ]; then
 						echo "$d" >>"$tmp/skipped"

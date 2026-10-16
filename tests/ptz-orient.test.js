@@ -12,9 +12,16 @@ const O = require('../www/a/ptz-orient.js');
 
 eq('no image section is no reading', O.of(undefined), null);
 eq('an empty fetch is no reading', O.of(null), null);
-eq('defaults are upright', O.of({}), { mirror: false, flip: false, rotate: 0 });
-eq('the rotation arrives as a string', O.of({ rotate: '270', mirror: true }), { mirror: true, flip: false, rotate: 270 });
-eq('a rotation the camera does not offer is none', O.of({ rotate: '45' }).rotate, 0);
+eq('the camera\'s defaults are upright', O.of({ mirror: false, flip: false, rotate: '0' }), { mirror: false, flip: false, rotate: 0 });
+eq('the rotation arrives as a string', O.of({ rotate: '270', mirror: true, flip: false }), { mirror: true, flip: false, rotate: 270 });
+// config.json carries all three at their defaults, so a missing one is a
+// reading that went wrong, not an upright picture.
+eq('a section missing a key is no reading', O.of({ mirror: true, rotate: '0' }), null);
+eq('an empty section is no reading', O.of({}), null);
+eq('a key not of its type is no reading', O.of({ mirror: 'true', flip: false, rotate: '0' }), null);
+eq('a rotation the camera does not offer is no reading', O.of({ mirror: false, flip: false, rotate: '45' }), null);
+eq('zoom and focus are not directions', ['tele', 'near', 'stop', 'af', 'constructor'].map(O.direction), [false, false, false, false, false]);
+eq('the arrows and diagonals are', ['up', 'downleft'].map(O.direction), [true, true]);
 
 const up = { mirror: false, flip: false, rotate: 0 };
 eq('upright, right is right', O.verb('right', up), 'right');

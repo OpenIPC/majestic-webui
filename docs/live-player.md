@@ -305,8 +305,13 @@ is picked) and `fire()` (stepped `h`/`v`), and the centre/drag plans take it as
 `turn`. The orientation is read fresh from `/api/v1/config.json` rather than
 taken from `mjConfig()`, and read again whenever the page comes back into view,
 because mirror and flip are set on the Settings page, often in another tab.
-Until it has been read, the arrows treat the picture as upright, which is what
-they always did. The gestures on the picture wait for the reading.
+**Not known is not upright.** Until the orientation has been read, and after a
+read fails, a direction press is not sent: it asks for the orientation again,
+and the next press moves the head. Stop, zoom and focus never wait. A
+config.json image section that is missing a key is no reading, because the
+camera always reports all three. A pan-only or tilt-only head on a picture
+lying on its side has its pair of arrows moved to the other axis (`lay()`),
+because there its pan moves the picture up and down.
 
 To render either pad without hardware: set the env vars, `touch`+`chmod +x` a
 fake binary for the stepped backends, then remove `/tmp/webui/sysinfo.txt`.

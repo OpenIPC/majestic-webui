@@ -39,6 +39,16 @@
 	if (!mount || (!pad && !fn)) return;
 	if (fn) { mount.appendChild(fn); fn.hidden = false; }
 	if (pad) { mount.appendChild(pad); pad.hidden = false; }
+	// The pad's nine cells in the grid's order, as drawn, before anything here
+	// replaces the middle one or adds controls of its own. The axes the head
+	// has are the arrows the camera drew: a pan-only head has empty cells
+	// where up and down would be. Read once, here, because lay() below moves
+	// a lone pair of arrows onto the other axis.
+	const slots = pad ? Array.from(pad.children) : [];
+	const AXIS_SEL = { pan: '[data-act="left"],[data-act="right"],[data-dir="lc"],[data-dir="rc"]',
+		tilt: '[data-act="up"],[data-act="down"],[data-dir="uc"],[data-dir="dc"]' };
+	const headPan = !!(pad && pad.querySelector(AXIS_SEL.pan));
+	const headTilt = !!(pad && pad.querySelector(AXIS_SEL.tilt));
 	// There is no speed control: on the stick, how far the thumb goes is the
 	// speed (ptz-stick.js), and anything else moves at the motor's own rate.
 	const PS = window.MajesticPtzSpeed;
@@ -60,28 +70,77 @@
 	// and a mirrored, upside-down or sideways picture's right is not the
 	// head's (#691). Read fresh, never the page-lifetime mjConfig() copy:
 	// mirror and flip are set on the Settings page, so a change made there in
-	// another tab is read when this one comes back into view. Until it has
-	// been read the arrows send what they always did, the picture taken as
-	// upright; the gestures on the picture wait for it (below).
+	// another tab is read when this one comes back into view.
+	//
+	// Not known is not upright. Until it has been read, and after a read that
+	// failed, a direction is not sent: it asks again instead, and the press
+	// after the answer moves the head. Sending the upright guess turned a
+	// mirrored camera's head away from the arrow pressed, which is the fault
+	// this exists for. Stop, zoom and focus are not directions and never wait.
+	// One read at a time: a second asker is given the one under way.
 	const PO = window.MajesticPtzOrient;
-	let turn = null, turnGen = 0;
+	let turn = null, turnP = null;
 	const learnTurn = () => {
-		const gen = ++turnGen;
-		return apiFetch('/api/v1/config.json', { credentials: 'same-origin', cache: 'no-store' })
-			.then(r => (r.ok ? r.json() : Promise.reject(r.status)))
-			.then((c) => {
-				// No image section is a camera not heard from, not one that is
-				// upright: it rejects, and is asked again.
-				const t = PO ? PO.of(c && c.image) : null;
-				if (!t) return Promise.reject(new Error('no image section'));
-				if (gen === turnGen) turn = t;
-				return turn;
-			});
+		if (!turnP) {
+			turnP = apiFetch('/api/v1/config.json', { credentials: 'same-origin', cache: 'no-store' })
+				.then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+				.then((c) => {
+					// A missing or malformed image section is a camera not heard
+					// from, not one that is upright.
+					const t = PO ? PO.of(c && c.image) : null;
+					if (!t) return Promise.reject(new Error('no orientation'));
+					turn = t;
+					lay();
+					return turn;
+				}, (e) => { turn = null; return Promise.reject(e); })
+				.finally(() => { turnP = null; });
+		}
+		return turnP;
 	};
+	// A direction can go to the head only once the picture's turn is known.
+	const steerable = () => {
+		if (!PO || turn) return true;
+		learnTurn().catch(() => {});
+		return false;
+	};
+	// The picture's axes the head can follow.
+	const screenAxes = () => (PO ? PO.axes(headPan, headTilt, turn) : { across: headPan, down: headTilt });
+
+	// The arrows sit on the picture's axes the head can follow. A head with
+	// both axes needs nothing moved; a pan-only or tilt-only head on a picture
+	// lying on its side has its pair moved to the other axis, because there
+	// its pan moves the picture up and down. Left in place, the left and right
+	// arrows asked a pan-only head to tilt.
+	const LOOK = {
+		up: { dir: 'uc', label: 'Tilt up', d: 'M5.4 12.4 10 7.6l4.6 4.8' },
+		down: { dir: 'dc', label: 'Tilt down', d: 'M5.4 7.6 10 12.4l4.6-4.8' },
+		left: { dir: 'lc', label: 'Pan left', d: 'M12.4 5.4 7.6 10l4.8 4.6' },
+		right: { dir: 'rc', label: 'Pan right', d: 'M7.6 5.4 12.4 10l-4.8 4.6' },
+	};
+	const SLOT = { up: 1, left: 3, right: 5, down: 7 };
+	function lay() {
+		if (!pad || slots.length !== 9 || headPan === headTilt || !turn) return;
+		const want = screenAxes().across ? ['left', 'right'] : ['up', 'down'];
+		const had = want[0] === 'left' ? ['up', 'down'] : ['left', 'right'];
+		if (!slots[SLOT[had[0]]].matches('.mj-ptz-btn')) return;   // already there
+		had.forEach((from, i) => {
+			const to = want[i], a = SLOT[from], b = SLOT[to];
+			const btn = slots[a], gap = slots[b];
+			const m = document.createComment('');
+			btn.replaceWith(m);
+			gap.replaceWith(btn);
+			m.replaceWith(gap);
+			slots[a] = gap;
+			slots[b] = btn;
+			if (btn.dataset.act) btn.dataset.act = to;
+			else btn.dataset.dir = LOOK[to].dir;
+			btn.setAttribute('aria-label', LOOK[to].label);
+			const path = btn.querySelector('path');
+			if (path) path.setAttribute('d', LOOK[to].d);
+		});
+	}
 	learnTurn().catch(() => {});
 	document.addEventListener('visibilitychange', () => { if (!document.hidden) learnTurn().catch(() => {}); });
-	// The picture's axes the head can follow, from the arrows its pad drew.
-	const screenAxes = (pan, tilt) => (PO ? PO.axes(pan, tilt, turn) : { across: pan, down: tilt });
 	// Follow, the same way: hidden until the camera says its motor counts steps
 	// and that it can detect something to follow (ptz-follow.js). The switch
 	// is the camera's setting, ptz.track, not a per-browser one, and another
@@ -432,7 +491,10 @@
 	function move(verb, ms, isStop, pct) {
 		// The picture's direction to the head's, before the speed is picked:
 		// on its side, the picture's across is the head's tilt.
-		if (PO) verb = PO.verb(verb, turn);
+		if (PO && PO.direction(verb)) {
+			if (!steerable()) return;
+			verb = PO.verb(verb, turn);
+		}
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
 		if (pct != null && PS) url += PS.query(verb, pct);
@@ -630,6 +692,8 @@
 		}
 		const d = DIRS[btn.dataset.dir];
 		if (!d) return;
+		// The centre is home, not a direction, and never waits.
+		if ((d[0] || d[1]) && !steerable()) return;
 		const h = PO ? PO.vec(d[0], d[1], turn) : { x: d[0], y: d[1] };
 		req('h=' + h.x * STEP + '&v=' + h.y * STEP);
 	}
@@ -828,14 +892,16 @@
 			}, () => {});
 		};
 		learn();
-		const arrows = {};
-		pad.querySelectorAll('[data-act]').forEach((b) => { arrows[b.dataset.act] = b; });
-		// The axes this head has are the arrows its pad drew: a pan-only head
-		// has empty cells where up and down would be.
-		const hasPan = !!(arrows.left || arrows.right), hasTilt = !!(arrows.up || arrows.down);
+		// The arrows by direction, read each time: lay() can move them.
+		const arrowsNow = () => {
+			const a = {};
+			pad.querySelectorAll('[data-act]').forEach((b) => { a[b.dataset.act] = b; });
+			return a;
+		};
 		let s = null;
 		// The arrows a verb is made of, lit while the head turns that way.
 		const light = (verb) => {
+			const arrows = arrowsNow();
 			for (const k in arrows) arrows[k].classList.toggle('mj-ptz-on', !!verb && verb.indexOf(k) >= 0);
 		};
 		const send = (ms) => {
@@ -847,7 +913,7 @@
 			const dx = e.clientX - s.cx, dy = e.clientY - s.cy;
 			const d = Math.hypot(dx, dy), k = d > s.r ? s.r / d : 1;
 			knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
-			const ax = screenAxes(hasPan, hasTilt);
+			const ax = screenAxes();
 			const a = PK.aim(dx, dy, { radius: s.r, dead: s.r * 0.22, diagonals: diag, prev: s.verb, pan: ax.across, tilt: ax.down });
 			const verb = a ? a.verb : null;
 			const pct = a && speeds ? PK.pct(a.frac) : null;
@@ -903,6 +969,7 @@
 			// is the stylesheet's and changes with the screen.
 			const kb = knob.getBoundingClientRect();
 			const cx = kb.left + kb.width / 2, cy = kb.top + kb.height / 2;
+			const arrows = arrowsNow();
 			const ref = arrows.right || arrows.up;
 			const rb = ref ? ref.getBoundingClientRect() : null;
 			const r = rb ? Math.max(24, Math.hypot(rb.left + rb.width / 2 - cx, rb.top + rb.height / 2 - cy)) : 44;
@@ -989,9 +1056,7 @@
 		// double-tap turns the head for a picture that would not show the turn.
 		const visible = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
 		const paused = () => stage.classList.contains('mj-stilled') || visible('#mj-snapshot') || visible('#mj-tap-play');
-		// The axes this head has are the arrows its pad drew.
-		const hasPan = !!pad.querySelector('[data-act="left"],[data-act="right"]');
-		const hasTilt = !!pad.querySelector('[data-act="up"],[data-act="down"]');
+		const hasPan = headPan, hasTilt = headTilt;
 		// One counted move per axis, both at once: the head runs a pan count
 		// and a tilt count together. Rejects when either is refused -- or the
 		// lens driver is absent, which answers 200 'unavailable'.
@@ -1134,7 +1199,7 @@
 				if (!held) return;
 				held.lx = e.clientX;
 				held.ly = e.clientY;
-				const ax = screenAxes(hasPan, hasTilt);
+				const ax = screenAxes();
 				let dx = ax.across ? e.clientX - held.x : 0, dy = ax.down ? e.clientY - held.y : 0;
 				if (!held.on) {
 					if (Math.hypot(e.clientX - held.x, e.clientY - held.y) <= SLIDE_MIN) return;

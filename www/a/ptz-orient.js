@@ -25,14 +25,16 @@
 	// The camera's image section, as /api/v1/config.json gives it, read into
 	// how the picture is turned -- or null, for a reading that is not one: no
 	// image section is a camera not heard from, not one that is upright.
+	//
+	// The camera's config.json carries all three whether set or at their
+	// defaults, so one that is missing, or not of its type, is a reading that
+	// went wrong -- never upright by default.
 	function of(image) {
 		if (!image || typeof image !== 'object') return null;
-		const r = Number(image.rotate);
-		return {
-			mirror: image.mirror === true,
-			flip: image.flip === true,
-			rotate: r === 90 || r === 180 || r === 270 ? r : 0,
-		};
+		if (typeof image.mirror !== 'boolean' || typeof image.flip !== 'boolean') return null;
+		const r = String(image.rotate);
+		if (['0', '90', '180', '270'].indexOf(r) < 0) return null;
+		return { mirror: image.mirror, flip: image.flip, rotate: +r };
 	}
 
 	// The head's direction for one on the picture. The picture is the sensor's
@@ -55,6 +57,9 @@
 		right: [1, 0], upright: [1, 1], up: [0, 1], upleft: [-1, 1],
 		left: [-1, 0], downleft: [-1, -1], down: [0, -1], downright: [1, -1],
 	};
+	// Is this verb a direction, rather than zoom, focus, stop or autofocus?
+	const direction = (v) => Object.prototype.hasOwnProperty.call(VEC, v);
+
 	// The head's verb for one on the picture. Anything that is not a
 	// direction -- zoom, focus, stop, autofocus -- passes as it came.
 	function verb(v, t) {
@@ -72,5 +77,5 @@
 		return side ? { across: tilt, down: pan } : { across: pan, down: tilt };
 	}
 
-	return { of: of, vec: vec, verb: verb, axes: axes };
+	return { of: of, vec: vec, verb: verb, direction: direction, axes: axes };
 });
