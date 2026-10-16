@@ -113,6 +113,8 @@ conns() {
 	cat "$PROC/tcp" "$PROC/tcp6" 2>/dev/null | awk '
 		function v4(a) {
 			if (length(a) == 8) return a
+			# The wildcard a dual-stack listener is bound to.
+			if (a == "00000000000000000000000000000000") return "00000000"
 			if (length(a) == 32 && substr(a, 1, 24) == "0000000000000000FFFF0000") return substr(a, 25)
 			return ""
 		}
@@ -131,10 +133,22 @@ hex4() {
 	printf '%02X%02X%02X%02X' "$4" "$3" "$2" "$1"
 }
 
-# A new connection from one of CLIENTS to the new address that got through
-# its handshake: established, or anything a completed one ends in. A SYN
-# that arrived proves nothing -- the answer to it is what a wrong gateway
-# loses. SEEN are the ones already there when the address went up.
+# Who is talking to the camera, as "client:port" -- the remote address and
+# the camera's own port it came in on. Inbound only: a socket whose local port
+# something listens on. The camera's own outbound connections, to a broker or
+# a server somewhere, name a peer that was never the owner's browser.
+clients_now() {
+	conns | awk '
+		$1 == "0A" { split($2, l, ":"); listen[l[2]] = 1; next }
+		$1 == "01" { split($2, l, ":"); split($3, r, ":"); if (r[1] !~ /7F$/) est[r[1] ":" l[2]] = 1 }
+		END { for (k in est) { split(k, x, ":"); if (x[2] in listen) print k } }' | sort -u | tr '\n' ' '
+}
+
+# A new connection to the new address, from one of CLIENTS and on the port it
+# was using, that got through its handshake: established, or anything a
+# completed one ends in. A SYN that arrived proves nothing -- the answer to
+# it is what a wrong gateway loses. SEEN are the ones that were there when
+# the new settings came up, so everything else was answered through them.
 reached() {
 	[ -n "$addr" ] && [ -n "$clients" ] || return 1
 	conns | awk -v a="$addr" -v c="$clients" -v s="$seen" '
@@ -142,7 +156,7 @@ reached() {
 			n = split(s, x, " "); for (i = 1; i <= n; i++) old[x[i]] = 1 }
 		$1 ~ /^(01|04|05|06|08|09|0B)$/ {
 			split($2, l, ":"); split($3, r, ":")
-			if (l[1] == a && (r[1] in ok) && !($3 in old)) { f = 1; exit }
+			if (l[1] == a && ((r[1] ":" l[2]) in ok) && !($3 in old)) { f = 1; exit }
 		}
 		END { exit !f }'
 }
@@ -175,9 +189,9 @@ if ! { cp -f "$IFDIR/$iface" "$NEW" &&
 fi
 rm -f "$backup"
 
-# Who is talking to the camera now, while the save that started this is
-# still being answered: established connections from anywhere but loopback.
-clients=$(conns | awk '$1 == "01" { split($3, r, ":"); if (r[1] !~ /7F$/) print r[1] }' | sort -u | tr '\n' ' ')
+# Taken while the save that started this is still being answered, so the
+# browser that made it is among them.
+clients=$(clients_now)
 addr=
 if [ "$mode" = static ]; then
 	addr=$(awk '$1 == "address" { print $2; exit }' "$NEW" 2>/dev/null)
@@ -191,12 +205,13 @@ sleep "$DELAY"
 log "applying the $mode settings saved for $iface"
 rm -f "$RUN/netapply.ok.$token"
 applied=1
-# Taken before the address goes up, so that a connection which was already
-# there -- a new address that is the old one, with only the gateway changed --
-# does not count as reaching it.
+apply "$IFDIR/$iface" "$NEW" || rollback "ifup refused the new $iface settings"
+# Taken once the new settings are up, so that only a handshake answered
+# through them counts. When the new address is the old one with only the
+# gateway changed, the connections already open to it were made under the
+# old settings -- including any opened in the moment before the bounce.
 seen=
 [ -n "$addr" ] && seen=$(conns | awk -v a="$addr" '{ split($2, l, ":"); if (l[1] == a) print $3 }' | tr '\n' ' ')
-apply "$IFDIR/$iface" "$NEW" || rollback "ifup refused the new $iface settings"
 echo "$$ $token $iface applied" > "$PENDING"
 
 limit=$WAIT

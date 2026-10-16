@@ -49,14 +49,19 @@ function sandbox(token) {
 // [state, local, remote] with dotted IPv4 and a port; tcp6 rows are written
 // v4-mapped, the way an IPv4 browser shows up on majestic's dual-stack port.
 const hex4 = (ip) => ip.split('.').reverse().map((o) => (+o).toString(16).padStart(2, '0')).join('').toUpperCase();
-const hexEnd = (ep) => { const [ip, port] = ep.split(':'); return [ip, (+port).toString(16).padStart(4, '0').toUpperCase()]; };
+const hexEnd = (ep) => {
+	const i = ep.lastIndexOf(':');
+	return [ep.slice(0, i), (+ep.slice(i + 1)).toString(16).padStart(4, '0').toUpperCase()];
+};
 function sockets(d, v4, v6) {
 	const row = (i, [st, l, r], six) => {
 		const [li, lp] = hexEnd(l), [ri, rp] = hexEnd(r);
-		const a = (ip) => (six ? '0000000000000000FFFF0000' : '') + hex4(ip);
+		const a = (ip) => (ip === '::' ? '0'.repeat(32) : (six ? '0000000000000000FFFF0000' : '') + hex4(ip));
 		return `   ${i}: ${a(li)}:${lp} ${a(ri)}:${rp} ${st} 00000000:00000000 00:00000000 00000000     0        0 1 1 0 100 0 0 10 0`;
 	};
 	const head = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
+	// majestic's listener, dual-stack as on a camera, bound to the wildcard.
+	v6 = [['0A', ':::80', ':::0']].concat(v6);
 	fs.writeFileSync(path.join(d, 'proc', 'tcp'), [head].concat(v4.map((x, i) => row(i, x, false))).join('\n') + '\n');
 	fs.writeFileSync(path.join(d, 'proc', 'tcp6'), [head].concat(v6.map((x, i) => row(i, x, true))).join('\n') + '\n');
 }
@@ -152,6 +157,17 @@ async function suite(shell) {
 	await exit;
 	check(label + ': a SYN that arrived, answered by nothing that got back, proves nothing',
 		boot(d) === OLD && outcome(d) === 'ac03 rolledback', outcome(d));
+
+	// The camera's own outbound connection names a peer, not a browser: that
+	// peer later reaching the new address says nothing about its owner.
+	d = sandbox('ac05');
+	sockets(d, [], [['01', OLDADDR + ':80', BROWSER + ':40000'], ['01', OLDADDR + ':41000', '10.0.0.7:443']]);
+	exit = run(shell, d, 'static', 'ac05');
+	await until(() => phase(d) === 'applied', 3000);
+	sockets(d, [], [['06', NEWADDR + ':80', '10.0.0.7:40100']]);
+	await exit;
+	check(label + ': a peer the camera itself had dialled out to proves nothing',
+		boot(d) === OLD && outcome(d) === 'ac05 rolledback', outcome(d));
 
 	// The new address can be the old one with only the gateway changed: the
 	// connections already open to it were made under the old settings.
