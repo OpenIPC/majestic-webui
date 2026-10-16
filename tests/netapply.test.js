@@ -24,7 +24,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function sandbox(token) {
 	const d = fs.mkdtempSync(path.join(os.tmpdir(), 'netapply-'));
-	for (const sub of ['bin', 'ifdir', 'run', 'varrun']) fs.mkdirSync(path.join(d, sub));
+	for (const sub of ['bin', 'ifdir', 'run', 'varrun', 'proc']) fs.mkdirSync(path.join(d, sub));
+	sockets(d, [], []);
 	const stub = (name, body) => {
 		const f = path.join(d, 'bin', name);
 		fs.writeFileSync(f, '#!/bin/sh\n' + body + '\n');
@@ -44,12 +45,29 @@ function sandbox(token) {
 	return d;
 }
 
+// The kernel's socket tables, as /proc/net/tcp and tcp6 spell them. Rows are
+// [state, local, remote] with dotted IPv4 and a port; tcp6 rows are written
+// v4-mapped, the way an IPv4 browser shows up on majestic's dual-stack port.
+const hex4 = (ip) => ip.split('.').reverse().map((o) => (+o).toString(16).padStart(2, '0')).join('').toUpperCase();
+const hexEnd = (ep) => { const [ip, port] = ep.split(':'); return [ip, (+port).toString(16).padStart(4, '0').toUpperCase()]; };
+function sockets(d, v4, v6) {
+	const row = (i, [st, l, r], six) => {
+		const [li, lp] = hexEnd(l), [ri, rp] = hexEnd(r);
+		const a = (ip) => (six ? '0000000000000000FFFF0000' : '') + hex4(ip);
+		return `   ${i}: ${a(li)}:${lp} ${a(ri)}:${rp} ${st} 00000000:00000000 00:00000000 00000000     0        0 1 1 0 100 0 0 10 0`;
+	};
+	const head = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
+	fs.writeFileSync(path.join(d, 'proc', 'tcp'), [head].concat(v4.map((x, i) => row(i, x, false))).join('\n') + '\n');
+	fs.writeFileSync(path.join(d, 'proc', 'tcp6'), [head].concat(v6.map((x, i) => row(i, x, true))).join('\n') + '\n');
+}
+
 function run(shell, d, mode, token) {
 	const env = Object.assign({}, process.env, {
 		PATH: path.join(d, 'bin') + ':' + process.env.PATH,
 		NETAPPLY_IFDIR: path.join(d, 'ifdir'),
 		NETAPPLY_RUN: path.join(d, 'run'),
 		NETAPPLY_VARRUN: path.join(d, 'varrun'),
+		NETAPPLY_PROC: path.join(d, 'proc'),
 		NETAPPLY_WAIT: '3',
 		NETAPPLY_WAIT_DHCP: '3',
 		NETAPPLY_DELAY: '1',
@@ -102,6 +120,46 @@ async function suite(shell) {
 	await exit;
 	check(label + ': a confirmation from before the change was applied does not count',
 		boot(d) === OLD && outcome(d) === 'cc33 rolledback');
+
+	// The browser that saved the change is on the old address; reaching the
+	// new one -- even only its sign-in page, a connection now closed -- keeps
+	// the change with no confirmation request at all (#690).
+	const BROWSER = '10.0.0.5', OLDADDR = '192.0.2.10', NEWADDR = '192.0.2.99';
+	d = sandbox('ac01');
+	sockets(d, [], [['01', OLDADDR + ':80', BROWSER + ':40000']]);
+	exit = run(shell, d, 'static', 'ac01');
+	await until(() => phase(d) === 'applied', 3000);
+	sockets(d, [], [['06', NEWADDR + ':80', BROWSER + ':40100']]);
+	await exit;
+	check(label + ': the saving browser reaching the new address keeps the change',
+		boot(d).includes(NEWADDR) && outcome(d) === 'ac01 kept' &&
+		/kept the new eth0 settings \(reached\)/.test(read(path.join(d, 'calls')) || ''), outcome(d));
+
+	d = sandbox('ac02');
+	sockets(d, [['01', OLDADDR + ':80', BROWSER + ':40000']], []);
+	exit = run(shell, d, 'static', 'ac02');
+	await until(() => phase(d) === 'applied', 3000);
+	sockets(d, [['01', NEWADDR + ':80', '10.0.0.6:40100']], []);
+	await exit;
+	check(label + ': a client that was not talking to the camera proves nothing',
+		boot(d) === OLD && outcome(d) === 'ac02 rolledback', outcome(d));
+
+	d = sandbox('ac03');
+	sockets(d, [], [['01', OLDADDR + ':80', BROWSER + ':40000']]);
+	exit = run(shell, d, 'static', 'ac03');
+	await until(() => phase(d) === 'applied', 3000);
+	sockets(d, [], [['03', NEWADDR + ':80', BROWSER + ':40100']]);
+	await exit;
+	check(label + ': a SYN that arrived, answered by nothing that got back, proves nothing',
+		boot(d) === OLD && outcome(d) === 'ac03 rolledback', outcome(d));
+
+	// The new address can be the old one with only the gateway changed: the
+	// connections already open to it were made under the old settings.
+	d = sandbox('ac04');
+	sockets(d, [], [['01', NEWADDR + ':80', BROWSER + ':40000']]);
+	await run(shell, d, 'static', 'ac04');
+	check(label + ': a connection that was already open to the address does not count',
+		boot(d) === OLD && outcome(d) === 'ac04 rolledback', outcome(d));
 
 	d = sandbox('dd44');
 	fs.writeFileSync(path.join(d, 'leased'), '');
