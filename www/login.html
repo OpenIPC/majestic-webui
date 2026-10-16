@@ -75,6 +75,11 @@
 			border: 1px solid #842029; border-radius: .5rem; font-size: .875rem;
 		}
 		.alert.show { display: block; }
+		.note {
+			margin-bottom: 1rem; padding: .6rem .75rem;
+			background: #332701; color: #ffda6a;
+			border: 1px solid #997404; border-radius: .5rem; font-size: .875rem;
+		}
 		/* Held back until the already-signed-in probe below has had its say, so a
 		   browser that arrives here holding a good session never paints a sign-in
 		   form it is about to be redirected away from. Current majestic decides
@@ -109,6 +114,7 @@
 			</svg>
 		</h1>
 		<div class="alert" id="err" role="alert"></div>
+		<div class="note" id="netkeep" hidden>The camera has just moved to this address. Sign in to keep its new network settings &mdash; until someone does, it goes back to the previous ones by itself after a few minutes.</div>
 		<label for="username">Username</label>
 		<input id="username" name="username" value="root" autocapitalize="none" autocomplete="username" spellcheck="false">
 		<label for="password">Password</label>
@@ -141,6 +147,15 @@
 					return '/cgi-bin/live.cgi';
 				}
 				return raw;
+			}
+
+			// A network change waiting for its confirmation sends the browser
+			// to the camera's new address, which holds no session: the sign-in
+			// was made at the old one. Signing in here is the confirmation, and
+			// a form that said nothing of that let the change roll back under it
+			// and the next restart bring back the old address (#690).
+			if (/^\/cgi-bin\/network\.cgi\?(.*&)?confirm=[0-9a-f]+(&|$)/.test(safeNext())) {
+				document.getElementById('netkeep').hidden = false;
 			}
 
 			function fail(msg) {
