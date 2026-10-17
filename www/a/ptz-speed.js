@@ -25,14 +25,20 @@
 		return typeof caps === 'string' && / speeds=\d+-\d+(\s|$)/.test(' ' + caps);
 	}
 
-	// What a move of `verb` adds to its query at `pct` percent: nothing at the
-	// top rate (100) or for a verb that has no speed, so the request is the one
-	// every camera already understands; otherwise "&speed=<n>", n whole, 1..99.
+	// What a move of `verb` adds to its query at `pct` percent: nothing for a
+	// verb that has no speed, otherwise "&speed=<n>", n whole, 1..100. Only
+	// asked where the camera offers speeds, so it always understands one.
+	//
+	// The top rate is sent as 100, not left out. Left out, a move runs at the
+	// motor's own rate, and that is a different thing: a gpiostep head's own is
+	// the rate its owner set, a Pelco-D dome's was the speed byte 0 -- the stop
+	// end of its range -- so the stick at its rim, where it is meant to be
+	// fastest, barely turned a speed dome at all (#691).
 	function query(verb, pct) {
 		if (!PAN_TILT[verb]) return '';
 		const n = Math.round(Number(pct));
-		if (!isFinite(n) || n >= 100) return '';
-		return '&speed=' + (n < 1 ? 1 : n);
+		if (!isFinite(n)) return '';
+		return '&speed=' + Math.max(1, Math.min(100, n));
 	}
 
 	return { offered: offered, query: query };
