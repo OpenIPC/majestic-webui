@@ -133,6 +133,14 @@ window.MajesticVideo = (function () {
 		// audio the outgoing one already had. See preview-swap.js.
 		let wantAudio = !!opts.audio;
 		let volume = opts.volume === undefined ? 1 : opts.volume;
+		// No picture to carry: no video channel is turned on
+		// (OpenIPC/majestic#349), and the camera answers /ws/video with the
+		// audio alone -- but only a socket that asks for audio, so this one
+		// always does. Listening is then the element's mute, not a reconnect:
+		// without the audio there is no session at all.
+		const audioOnly = !!opts.audioOnly && !!audioPrefs;
+		let listening = !!opts.audio;
+		if (audioOnly) wantAudio = true;
 		// Player-lifetime counters for the stats panel, deliberately NOT
 		// reset on the internal reconnects: the panel differences them and
 		// treats a regression as "the session was rebuilt".
@@ -410,6 +418,7 @@ window.MajesticVideo = (function () {
 			// a mic that is off or not producing. Report it either way so the
 			// page can say so rather than leave a dead unmute button.
 			onAudio(wantAudio ? (info.audioCodec || null) : null);
+			if (audioOnly) video.muted = !listening;
 			// We asked for audio and got a video-only stream: stop wanting it, so
 			// state stays consistent with the (now video-only) connection and a
 			// later unmute actually flips wantAudio and reconnects rather than
@@ -852,6 +861,13 @@ window.MajesticVideo = (function () {
 		// called from a click, or autoplay policy blocks unmuted playback.
 		function setAudio(on) {
 			on = !!on && !!audioPrefs;
+			if (audioOnly) {
+				// From the click, so the browser lets the sound play.
+				listening = on;
+				video.muted = !on;
+				if (on) video.play().catch(function () {});
+				return;
+			}
 			if (on === wantAudio) return;
 			wantAudio = on;
 			video.muted = !on;

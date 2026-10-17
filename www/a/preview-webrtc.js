@@ -191,6 +191,14 @@ window.MajesticWebRTC = (function () {
 		// that had just proved itself, blanking the picture — the very flicker
 		// staging exists to remove.
 		let wantAudio = !!opts.audio;
+		// No picture to carry: the camera has no video channel turned on
+		// (OpenIPC/majestic#349), so the session is the microphone alone. The
+		// audio is always negotiated then, and listening is the element's
+		// mute rather than a renegotiation -- there is nothing else this
+		// session could be, and nothing to fall back to without it.
+		const audioOnly = !!opts.audioOnly;
+		let listening = !!opts.audio;
+		if (audioOnly) wantAudio = true;
 		let volume = opts.volume === undefined ? 1 : opts.volume;
 		let lastCodec = '', lastW = 0, lastH = 0;
 
@@ -314,6 +322,12 @@ window.MajesticWebRTC = (function () {
 					if (r.type === 'inbound-rtp' && r.kind === 'audio') {
 						s.audioKbps = rate(r.bytesReceived || 0, rateAudioBytes);
 						rateAudioBytes = r.bytesReceived || 0;
+						// With no picture the sound is the media: it is what
+						// says the session is alive, and what a stall is.
+						if (audioOnly) {
+							bytes = r.bytesReceived || 0;
+							codec = 'opus';
+						}
 					} else if (r.type === 'outbound-rtp' && r.kind === 'audio') {
 						// This browser's microphone, as the browser counts it.
 						// The camera's audio-in counter is the other half: one
@@ -594,7 +608,7 @@ window.MajesticWebRTC = (function () {
 			// has the camera encode for nobody — the same reasoning as the MSE
 			// path's opt-in, arrived at from the other end.
 			try {
-				pc.addTransceiver('video', { direction: 'recvonly' });
+				if (!audioOnly) pc.addTransceiver('video', { direction: 'recvonly' });
 				if (wantMic && micTrack) {
 					// One section carrying both directions, not two: the camera
 					// answers a single audio m-line.
@@ -609,7 +623,7 @@ window.MajesticWebRTC = (function () {
 
 			pc.ontrack = function (ev) {
 				if (ev.streams && ev.streams[0]) video.srcObject = ev.streams[0];
-				video.muted = !wantAudio;
+				video.muted = audioOnly ? !listening : !wantAudio;
 				try { video.volume = volume; } catch (e) {}
 				// The play() promise cannot be trusted to report an autoplay
 				// refusal (Opera resolves it without playing, #317), so watch the
@@ -642,6 +656,15 @@ window.MajesticWebRTC = (function () {
 						return;
 					}
 					if (!err || err.name !== 'NotAllowedError') return;
+					// The sound is all there is, so it is not given up: muted,
+					// it plays, and the next click is what lets it be heard.
+					if (audioOnly) {
+						listening = false;
+						video.muted = true;
+						video.play().catch(function () {});
+						onAudio('opus');
+						return;
+					}
 					onAudio(null);
 					// Renegotiate rather than just muting. The audio
 					// transceiver is only ever added when wantAudio is set,
@@ -811,7 +834,8 @@ window.MajesticWebRTC = (function () {
 					// nothing. Adopted, that re-pick is a real renegotiation —
 					// and a mid-session reconnect re-requests the channel that
 					// actually worked instead of replaying the fallback.
-					if (typeof m.channel === 'number') {
+					// -1 is a session with no channel at all: audio alone.
+					if (typeof m.channel === 'number' && m.channel >= 0) {
 						stream = m.channel | 0;
 						onServed({
 							channel: m.channel | 0,
@@ -940,6 +964,14 @@ window.MajesticWebRTC = (function () {
 		// same one Main/Sub already takes.
 		function setAudio(on) {
 			on = !!on;
+			if (audioOnly) {
+				// The track is already here; only the element was muted. From
+				// the click, so the browser lets the sound play.
+				listening = on;
+				video.muted = !on;
+				if (on) video.play().catch(function () {});
+				return;
+			}
 			if (on === wantAudio) return;
 			wantAudio = on;
 			video.muted = !on;

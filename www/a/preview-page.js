@@ -586,6 +586,14 @@
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
+	// No video channel is turned on, and the microphone is: the camera serves
+	// its sound alone (OpenIPC/majestic#349), so the players open for audio,
+	// and the control that lets it be heard is shown whatever the stage holds.
+	// From the configuration, at the same point the stream is chosen.
+	let audioOnly = false;
+	const soundOnly = cfg => mjGet(cfg, 'video0.enabled') === false &&
+		mjGet(cfg, 'video1.enabled') === false &&
+		mjGet(cfg, 'audio.enabled') === true;
 	// Which SOURCE is on screen, and what the camera said about it.
 	//
 	// `stream` above stays a subtype (0 main, 1 sub), because that is what the
@@ -681,7 +689,9 @@
 	function startingRung() {
 		const S = window.MajesticSources;
 		const info = curStreamInfo();
-		if (info && S && S.family(info) === 'multipart') {
+		// The sound is on the main stream's id, whatever the source list says
+		// is left: MJPEG carries no audio.
+		if (!audioOnly && info && S && S.family(info) === 'multipart') {
 			return 'multipart';
 		}
 		return wantWebRTC();
@@ -1134,7 +1144,7 @@
 				// MJPEG stream per camera and no subtype to choose between.
 				{ stream: wireStream(), camera: camera,
 					iceServers: () => ice,
-					audio: audioOn, volume: vol },
+					audio: audioOn, volume: vol, audioOnly: audioOnly },
 				handlersFor(id, onState))),
 		onPromoted: (kind, proven) => {
 			// A different picture is taking the stage, so any tap invitation the
@@ -1324,7 +1334,7 @@
 		// reaches this and only one of them is a button.
 		const S = window.MajesticSources;
 		const info = curStreamInfo();
-		if (want !== 'multipart' && info && S &&
+		if (!audioOnly && want !== 'multipart' && info && S &&
 			S.family(info) === 'multipart') {
 			want = 'multipart';
 		}
@@ -1417,6 +1427,12 @@
 		return {
 			onState: (s, d) => {
 				onState(s, d);
+				// With no picture there is no codec or size to report, so
+				// the chip would say "connecting…" over sound that is
+				// playing. It says what is.
+				if (audioOnly && s === 'playing' && isLive() && badge) {
+					badge.textContent = 'Sound only';
+				}
 				// After the swap has judged the state: 'playing' is what
 				// promotes a trial, so this is the first moment isLive() can
 				// have flipped.
@@ -1699,6 +1715,9 @@
 		// accommodates what the source can serve. Recording the choice here is
 		// what keeps the two apart with one line rather than four.
 		wantSubtype = stream;
+		// With no channel on, the list offers only MJPEG, and the sound is
+		// asked for on the main stream's id: nothing to accommodate.
+		if (audioOnly) return moved;
 		const S = window.MajesticSources;
 		const src = srcOf(camera);
 		const p = (S && src) ? S.pick(src, stream) : null;
@@ -1796,6 +1815,7 @@
 		Promise.all([mjConfig(), sourcesReady]),
 		new Promise(done => setTimeout(() => done(null), CONFIG_WAIT_MS)),
 	]).then(answers => {
+		if (answers) audioOnly = soundOnly(answers[0]);
 		if (answers) chooseSub(answers[0]); else attachedBlind = true;
 		syncStreamControls();
 		attachPlayer(startingRung());
@@ -1806,6 +1826,13 @@
 	// default is helpful; overriding a decision is not.
 	mjConfig().then(cfg => {
 		if (!attachedBlind) return;
+		// A camera with no picture opened blind asked for a stream that is
+		// not there; open it again for the sound it does have.
+		if (soundOnly(cfg) && !audioOnly) {
+			audioOnly = true;
+			attachPlayer(startingRung());
+			return;
+		}
 		// The stream, unless the person has since chosen one themselves:
 		// correcting a default is helpful, overriding a decision is not.
 		const moved = !userPickedStream && chooseSub(cfg);
