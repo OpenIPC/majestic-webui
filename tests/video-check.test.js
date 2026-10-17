@@ -137,14 +137,14 @@ group('what it does say');
 	check('and with no sound it sends the viewer to fix it', !!off && off.conclusive === true);
 
 	// The microphone still works with both channels off, and the Live page
-	// plays it (OpenIPC/majestic#349). The same finding, but nothing to leave
+	// plays it. The same finding, but nothing to leave
 	// the page over.
 	const sound = vc.diagnose(
 		{ video0: { enabled: false }, video1: { enabled: false }, audio: { enabled: true } },
 		sample(LIT), { blindS: 0, blind: false }, null);
 	check('with the microphone on it is still said', !!sound && sound.code === 'off');
 	check('but as a note, not a redirect', !!sound && sound.conclusive === false);
-	check('that names the sound', !!sound && /microphone is live/.test(sound.detail));
+	check('that names the sound', !!sound && /sound alone/.test(sound.detail));
 	check('and still points at the video settings',
 		!!sound && /tab=video0/.test(sound.act.href));
 	const soundOff = vc.diagnose(

@@ -587,7 +587,7 @@
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
 	// No video channel is turned on, and the microphone is: the camera serves
-	// its sound alone (OpenIPC/majestic#349), so the players open for audio,
+	// its sound alone, so the players open for audio,
 	// and the control that lets it be heard is shown whatever the stage holds.
 	// From the configuration, at the same point the stream is chosen.
 	let audioOnly = false;
@@ -1446,6 +1446,9 @@
 				}
 			},
 			onCodec: (codec, cs, w, h) => {
+				// No picture: the chip says "Sound only", and a video
+				// formatter handed a null codec and no size would replace it.
+				if (audioOnly) return;
 				const m = { codec: codec, w: w, h: h };
 				if (!isLive()) { heldMedia = m; return; }
 				applyMedia(m);

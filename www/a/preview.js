@@ -133,9 +133,9 @@ window.MajesticVideo = (function () {
 		// audio the outgoing one already had. See preview-swap.js.
 		let wantAudio = !!opts.audio;
 		let volume = opts.volume === undefined ? 1 : opts.volume;
-		// No picture to carry: no video channel is turned on
-		// (OpenIPC/majestic#349), and the camera answers /ws/video with the
-		// audio alone -- but only a socket that asks for audio, so this one
+		// No picture to carry: no video channel is turned on, and the
+		// camera answers /ws/video with the audio alone -- but only a socket
+		// that asks for audio, so this one
 		// always does. Listening is then the element's mute, not a reconnect:
 		// without the audio there is no session at all.
 		const audioOnly = !!opts.audioOnly && !!audioPrefs;

@@ -1362,7 +1362,7 @@
 	}
 
 	// The audio track's codec, for a clip that has no video at all: one
-	// recorded with every video channel off (OpenIPC/majestic#349). Asked only
+	// recorded with every video channel off. Asked only
 	// when codecFromHeader() found nothing, so a clip with a picture is
 	// described exactly as before.
 	function audioFromHeader(u8) {

@@ -191,8 +191,8 @@ window.MajesticWebRTC = (function () {
 		// that had just proved itself, blanking the picture — the very flicker
 		// staging exists to remove.
 		let wantAudio = !!opts.audio;
-		// No picture to carry: the camera has no video channel turned on
-		// (OpenIPC/majestic#349), so the session is the microphone alone. The
+		// No picture to carry: the camera has no video channel turned on,
+		// so the session is the microphone alone. The
 		// audio is always negotiated then, and listening is the element's
 		// mute rather than a renegotiation -- there is nothing else this
 		// session could be, and nothing to fall back to without it.
@@ -324,8 +324,8 @@ window.MajesticWebRTC = (function () {
 						rateAudioBytes = r.bytesReceived || 0;
 						// With no picture the sound is the media: it is what
 						// says the session is alive, and what a stall is.
-						if (audioOnly) {
-							bytes = r.bytesReceived || 0;
+						if (audioOnly && typeof r.bytesReceived === 'number') {
+							bytes = r.bytesReceived;
 							codec = 'opus';
 						}
 					} else if (r.type === 'outbound-rtp' && r.kind === 'audio') {
@@ -656,13 +656,11 @@ window.MajesticWebRTC = (function () {
 						return;
 					}
 					if (!err || err.name !== 'NotAllowedError') return;
-					// The sound is all there is, so it is not given up: muted,
-					// it plays, and the next click is what lets it be heard.
+					// The sound is all there is, so it is not given up, and the
+					// control is left saying what the viewer chose: the next
+					// gesture anywhere on the page starts it, unmuted.
 					if (audioOnly) {
-						listening = false;
-						video.muted = true;
-						video.play().catch(function () {});
-						onAudio('opus');
+						playOnGesture(video, function () { return current(my); });
 						return;
 					}
 					onAudio(null);
