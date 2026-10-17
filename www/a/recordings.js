@@ -896,7 +896,10 @@
 			}
 
 			const codec = codecFromHeader(clearHead);
-			const mime = 'video/mp4; codecs="' + (codec || 'avc1.42E01E') + '"';
+			const audioOnly = codec ? null : audioFromHeader(clearHead);
+			const mime = audioOnly
+				? 'audio/mp4; codecs="' + audioOnly + '"'
+				: 'video/mp4; codecs="' + (codec || 'avc1.42E01E') + '"';
 
 			// An unplayable codec does not raise `error` on a <video>: H.265
 			// parses, reports a duration and then sits at videoWidth 0 forever.
@@ -1354,6 +1357,21 @@
 				}
 				return t + '.42E01E';
 			}
+		}
+		return null;
+	}
+
+	// The audio track's codec, for a clip that has no video at all: one
+	// recorded with every video channel off. Asked only
+	// when codecFromHeader() found nothing, so a clip with a picture is
+	// described exactly as before.
+	function audioFromHeader(u8) {
+		const moov = IDX.findBox(u8, 0, u8.length, 'moov');
+		if (!moov) return null;
+		for (let i = moov[0] + 8; i < moov[1] - 4; i++) {
+			const t = fourcc(u8, i);
+			if (t === 'Opus') return 'opus';
+			if (t === 'mp4a') return 'mp4a.40.2';
 		}
 		return null;
 	}
