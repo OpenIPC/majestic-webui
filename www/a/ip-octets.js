@@ -69,7 +69,6 @@
 		const start = split(input.value);
 		if (!start) return null;
 		input.dataset.octets = '1';
-		const hint = split(input.placeholder || '') || ['', '', '', ''];
 		const label = input.id && document.querySelector('label[for="' + input.id + '"]');
 		const name = label ? label.textContent.trim() : 'Address';
 
@@ -93,7 +92,6 @@
 			b.autocomplete = 'off';
 			b.maxLength = 3;
 			b.value = start[i];
-			b.placeholder = hint[i];
 			b.setAttribute('aria-label', name + ', part ' + (i + 1) + ' of 4');
 			if (i === 0 && input.id) b.id = input.id + '_o1';
 			boxes.push(b);
@@ -212,13 +210,18 @@
 			b.addEventListener('focusout', () => setTimeout(sync, 0));
 		});
 
-		// Read-only follows the field it stands for: the page sets it there
-		// (Automatic), and the boxes are what is on screen.
+		// Read-only and the placeholder follow the field the boxes stand for:
+		// the page sets them there (Automatic, and Manual's examples), and the
+		// boxes are what is on screen.
 		const follow = () => {
-			boxes.forEach((b) => { b.readOnly = input.readOnly; });
+			const hintNow = split(input.placeholder || '') || ['', '', '', ''];
+			boxes.forEach((b, k) => {
+				b.readOnly = input.readOnly;
+				b.placeholder = hintNow[k];
+			});
 			sync();
 		};
-		new MutationObserver(follow).observe(input, { attributes: true, attributeFilter: ['readonly'] });
+		new MutationObserver(follow).observe(input, { attributes: true, attributeFilter: ['readonly', 'placeholder'] });
 		follow();
 		return { boxes: boxes, sync: sync };
 	}

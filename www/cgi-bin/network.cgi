@@ -776,10 +776,26 @@ if [ -z "$error" ]; then
 		network_gateway=$cfg_gateway
 		network_nameserver=$cfg_nameserver
 	else
-		network_address=$now_address
-		network_netmask=$now_netmask
-		network_gateway=$now_gateway
-		network_nameserver=$now_nameserver
+		# A link-local address is not a lease. It is what the camera gives
+		# itself when no DHCP server answered (169.254.0.0/16, from the
+		# firmware's leasefail), and carried into the fields it became the
+		# starting point for Manual: a 255.255.0.0 mask, no router (#690).
+		case "$now_address" in
+			169.254.*)
+				# Emptied, not left alone: sysinfo has already set these to
+				# the address in use.
+				network_address=""
+				network_netmask=""
+				network_gateway=""
+				network_nameserver=""
+				;;
+			*)
+				network_address=$now_address
+				network_netmask=$now_netmask
+				network_gateway=$now_gateway
+				network_nameserver=$now_nameserver
+				;;
+		esac
 	fi
 fi
 

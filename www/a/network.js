@@ -19,13 +19,25 @@
 	// than disabled, because a disabled input is dropped from the submission
 	// and skipped by the keyboard, and neither is true of a value the page is
 	// showing you on purpose.
+	// What a typical home network looks like, shown under Manual as an example
+	// in an empty field and never as a value: nothing here is saved unless it
+	// is typed. Not under Automatic, where the fields are what the router
+	// handed out and grey text in them would read as an answer it gave (#690).
+	const EXAMPLE = {
+		network_netmask: '255.255.255.0',
+		network_gateway: '192.168.1.1',
+		network_nameserver: '192.168.1.1',
+	};
+
 	function toggleStatic() {
 		const on = auto && auto.checked;
 		const grid = $('.mj-ip-grid');
 		if (grid) grid.classList.toggle('is-auto', on);
 		['network_address', 'network_netmask', 'network_gateway', 'network_nameserver'].forEach(id => {
 			const inp = $('#' + id);
-			if (inp) inp.readOnly = on;
+			if (!inp) return;
+			inp.readOnly = on;
+			if (EXAMPLE[id]) inp.placeholder = on ? '' : EXAMPLE[id];
 		});
 		const note = $('#ip-auto-note');
 		if (note) note.hidden = !on;
