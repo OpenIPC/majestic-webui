@@ -9,6 +9,18 @@
 	# exists so the banner on every other page can be cheap; this page is where
 	# somebody has come to act, and it must not offer — or withhold — an image on
 	# the strength of an answer up to six hours old.
+	#
+	# Live, but not while the page waits. The ask is a round trip to OpenIPC
+	# through sysupgrade — three seconds on a good day, and up to its 15-second
+	# bound on a camera with a route and no internet — and the page used to
+	# render nothing until it came back (#683). So the page is drawn first with
+	# the offer in a "checking" state, and update.js asks this same file again
+	# as update.cgi?part=offer, which runs the check and returns only the blocks
+	# that depend on its answer (the fw_* functions below). One file, so the
+	# words cannot drift apart between the two. Two cases still answer in place,
+	# because both are instant and a "checking" that flashes past is noise: no
+	# default route (fw_latest_build returns at once), and a flash under way (no
+	# check at all, see fw_active).
 	. ./p/firmware.sh
 
 	# The scheduled install. sbin/fw-autoupdate's header says why it is a
@@ -99,7 +111,18 @@
 	# Skip the network-touching build check while a flash is under way: the page
 	# goes straight to the progress view, so there is nothing to offer, and
 	# `sysupgrade --list-builds` would only add load to a camera mid-upgrade.
-	if [ -n "$fw_active" ]; then ver=""; else ver=$(fw_latest_build); fi
+	#
+	# fw_part is set only on the request update.js makes once the page is up.
+	fw_part=""
+	[ "$GET_part" = "offer" ] && fw_part=offer
+	fw_checking=""
+	if [ -n "$fw_active" ]; then
+		ver=""
+	elif [ -z "$fw_part" ] && fw_has_route; then
+		ver=""; fw_checking=1
+	else
+		ver=$(fw_latest_build)
+	fi
 	if [ -n "$ver" ]; then
 		# nightly-20260717-027aae1 -> 2026-07-17
 		fw_date=$(echo "$ver" | grep -Eo '[0-9]{8}' | head -1 | sed -E 's/(....)(..)(..)/\1-\2-\3/')
@@ -151,7 +174,12 @@
 	# image this camera cannot be compared against is not a warning, and a check
 	# that did not happen is not a fault.
 	fw_sev=""
-	if [ -z "$ver" ]; then
+	if [ -n "$fw_checking" ]; then
+		# Not a state of the camera's, a state of this page: the answer is on
+		# its way. update.js replaces every block that reads it.
+		fw_state="checking"
+		fw_sev="info"
+	elif [ -z "$ver" ]; then
 		fw_state="offline"
 		fw_sev="info"
 		if [ -z "$network_gateway" ]; then fw_why="noroute"; else fw_why="nocheck"; fi
@@ -207,25 +235,14 @@
 	fw_kernel="true"
 	fw_rootfs="true"
 %>
-<%in p/header.cgi %>
-
-<h2 class="mj-rail-title mj-page-title"><%= $page_title %></h2>
-
-<%# Where update.js reports what a flash is doing. Above everything and outside
-    #fw-controls, because it also carries the two refusals that happen BEFORE a
-    flash starts — nothing selected to write, no file chosen — and those must not
-    land in a block that is still hidden. %>
-<div id="fw-status" role="status" aria-live="polite"></div>
-
-<%# Set when the camera is holding upgrade mode (the marker file checked above).
-    update.js reads data-active and reattaches to /ws/upgrade instead of offering
-    a fresh upgrade, so a page reloaded mid-flash shows the live transcript and
-    the "do not power off" warning again rather than a bare Update card. Always
-    present so the reader is `$('#fw-inflight')`, never a missing node. %>
-<div id="fw-inflight" hidden data-active="<% attr_escape "$fw_active" %>"></div>
-
-<div id="fw-controls">
-
+<%# Everything that depends on the build check, one function per block, so the
+    page and update.cgi?part=offer render it from the same source. Each block's
+    root carries data-fw-part, the name update.js swaps it by; a state with
+    nothing to show still renders an empty hidden root, so there is always a
+    node to replace. Nothing may stand between these tags but the one newline
+    haserl drops after each: anything else is output, and here that comes
+    before the HTTP header. %>
+<% fw_head() { %>
 	<%# The page's one decision, first on the page: what is on offer, what it is
 	    worth, and the button. Everything below it is detail for somebody who has
 	    already decided or wants to know more.
@@ -234,7 +251,7 @@
 	    and 28px mark: a banner is a thing you close, and this is the page. The
 	    data attributes are what the header's notice slot carries elsewhere —
 	    update.js needs them here because this page renders no slot. %>
-	<div id="fw-head" class="card mj-hero-card mj-sev-<% esc "$fw_sev" %>"
+	<div id="fw-head" data-fw-part="head" class="card mj-hero-card mj-sev-<% esc "$fw_sev" %>"
 	     data-mj-version="<% attr_escape "$mj_version" %>"
 	     data-soc-vendor="<% attr_escape "$soc_vendor" %>"
 	     data-fw-state="<% attr_escape "$fw_state" %>"
@@ -245,12 +262,38 @@
 					<svg class="mj-hero-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
 				<% elif [ "$fw_state" = "current" ]; then %>
 					<svg class="mj-hero-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/><path d="m8 12 2.6 2.6L16 9.5"/></svg>
+				<% elif [ "$fw_state" = "checking" ]; then %>
+					<svg class="mj-hero-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/><path d="M12 7v5l3 2"/></svg>
 				<% else %>
 					<svg class="mj-hero-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.3 8.1A5 5 0 0 1 16.6 8.9a4 4 0 0 1 2.6 6.8"/><path d="M15 18H6.5a4.5 4.5 0 0 1-1.6-8.7"/><path d="M3 3l18 18"/></svg>
 				<% fi %>
 
 				<div class="mj-hero-txt">
-					<% if [ "$fw_state" = "available" ] && [ "$fw_cmp" = "newer" ]; then %>
+					<% if [ "$fw_state" = "checking" ]; then %>
+						<%# Two texts, one shown. The second is for update.js to swap in when
+						    update.cgi?part=offer brings back no blocks: a timeout, an error
+						    status, a body that is something else. What failed is not known
+						    -- the camera may have answered with anything -- so it names no
+						    cause, only that there is no result. %>
+						<div data-fw-asking>
+							<p class="mj-hero-kick">Checking</p>
+							<h3 class="mj-hero-hl">Looking for new firmware&hellip;</h3>
+							<p class="mj-hero-sub">
+								The camera is asking OpenIPC&rsquo;s build list what has been published for
+								<% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash. This can take a few seconds,
+								and up to fifteen when the internet is out of reach.
+							</p>
+						</div>
+						<div data-fw-unasked hidden>
+							<p class="mj-hero-kick">Not checked</p>
+							<h3 class="mj-hero-hl">Couldn&rsquo;t check for new firmware</h3>
+							<p class="mj-hero-sub">
+								The check did not bring a result back to this page, so nothing here
+								says whether there is newer firmware. Try again, or install an image
+								from a file.
+							</p>
+						</div>
+					<% elif [ "$fw_state" = "available" ] && [ "$fw_cmp" = "newer" ]; then %>
 						<p class="mj-hero-kick">Update available</p>
 						<h3 class="mj-hero-hl">Firmware from <% esc "$(say_date "$fw_date")" %> is ready</h3>
 						<p class="mj-hero-sub">
@@ -328,6 +371,10 @@
 					<div class="mj-hero-act">
 						<a href="network.cgi" class="btn btn-outline-secondary">Check network settings</a>
 					</div>
+				<% elif [ "$fw_state" = "checking" ]; then %>
+					<div class="mj-hero-act">
+						<button id="fw-recheck" type="button" class="btn btn-outline-secondary" hidden>Try again</button>
+					</div>
 				<% fi %>
 			</div>
 		</div>
@@ -343,9 +390,8 @@
 			<% fi %>
 		</div>
 	</div>
-
-	<div class="row g-4 mt-0 mj-fw-cols">
-
+<% } %>
+<% fw_wide() { %>
 		<%# The wide column. With an image on offer it is the changelog, which the
 		    browser fetches; with none it is the file route, which is then the only
 		    way to update at all. Either way it is the thing a reader came to read,
@@ -355,7 +401,7 @@
 		    widens the rail when it stays that way — an empty two-thirds beside a
 		    narrow rail is the dead margin this layout exists to remove. %>
 		<% if [ "$fw_state" = "offline" ]; then %>
-			<div class="col-12 col-lg-7 mj-fw-wide">
+			<div class="col-12 col-lg-7 mj-fw-wide" data-fw-part="wide">
 				<div class="card h-100"><div class="card-body d-flex flex-column">
 					<% card_head "Install from a file" "the only route from here" %>
 					<p class="hint text-secondary">On a machine that does have internet, download the image for
@@ -374,13 +420,102 @@
 				</div></div>
 			</div>
 		<% else %>
-			<div id="fw-news" class="col-12 col-lg-7 mj-fw-wide" hidden>
+			<div id="fw-news" class="col-12 col-lg-7 mj-fw-wide" data-fw-part="wide" hidden>
 				<div class="card"><div class="card-body">
 					<% card_head "What&rsquo;s new" "since your build" %>
 					<div id="fw-news-body"></div>
 				</div></div>
 			</div>
 		<% fi %>
+<% } %>
+<% fw_ifback() { %>
+				<% if [ "$fw_state" = "available" ]; then %>
+					<%# The question somebody asks with a finger over Install. It is
+					    answered here rather than after the fact, because after the
+					    fact this page is not reachable. %>
+					<div class="col-12" data-fw-part="ifback">
+						<div class="card h-100"><div class="card-body">
+							<% card_head "If it does not come back" %>
+							<p class="hint text-secondary">The camera stops answering while it writes and returns in about
+								two minutes. If it has not returned after five, power it off and on
+								once, then reload this page.</p>
+						</div></div>
+					</div>
+				<% else %>
+					<div class="col-12" data-fw-part="ifback" hidden></div>
+				<% fi %>
+<% } %>
+<% fw_railfile() { %>
+				<% if [ "$fw_state" != "offline" ]; then %>
+					<%# From a file, at the weight it is actually used at: last in the
+					    rail, one line and a way in. It is not a second half of a pair
+					    of equal choices — almost nobody arrives here with a .tgz —
+					    and presenting it as one is what made the download route hard
+					    to find. The button stays btn-sm even once a file is chosen:
+					    size carries the hierarchy, so it can be the real action
+					    without competing with Install. %>
+					<div class="col-12" data-fw-part="railfile">
+						<div class="card h-100"><div class="card-body">
+							<% card_head "Install from a file" %>
+							<p class="hint text-secondary mb-3">Have a <code>.tgz</code> image on your computer? Use it instead of downloading.</p>
+							<p class="string mj-row mb-0">
+								<label for="fw-file" class="form-label">Image</label>
+								<span class="mj-ctl"><span class="mj-ctl-in">
+									<input id="fw-file" type="file" accept=".tgz,.gz" class="form-control form-control-sm">
+								</span></span>
+							</p>
+							<div class="mj-foot mt-3">
+								<span class="mj-foot-note">Same reboot, same caution.</span>
+								<button id="fw-install-upload" type="button" class="btn btn-sm btn-primary">Install this file</button>
+							</div>
+						</div></div>
+					</div>
+				<% else %>
+					<div class="col-12" data-fw-part="railfile" hidden></div>
+				<% fi %>
+<% } %>
+<%
+	# The answer, without the page around it. Nothing above has written a
+	# byte yet, so the header is this request's to send.
+	#
+	# A flash that started after the page was drawn ran no check, and the
+	# blocks would read that as one that came back empty -- "nothing on the
+	# camera has changed", over a camera writing its flash. So it is not drawn:
+	# the marker sends update.js back for a page, which attaches to the flash.
+	if [ -n "$fw_part" ]; then
+		printf 'Content-type: text/html; charset=UTF-8\nCache-Control: no-store\n\n'
+		if [ -n "$fw_active" ]; then
+			printf '<div data-fw-active></div>\n'
+		else
+			fw_head; fw_wide; fw_ifback; fw_railfile
+		fi
+		exit 0
+	fi
+%>
+<%in p/header.cgi %>
+
+<h2 class="mj-rail-title mj-page-title"><%= $page_title %></h2>
+
+<%# Where update.js reports what a flash is doing. Above everything and outside
+    #fw-controls, because it also carries the two refusals that happen BEFORE a
+    flash starts — nothing selected to write, no file chosen — and those must not
+    land in a block that is still hidden. %>
+<div id="fw-status" role="status" aria-live="polite"></div>
+
+<%# Set when the camera is holding upgrade mode (the marker file checked above).
+    update.js reads data-active and reattaches to /ws/upgrade instead of offering
+    a fresh upgrade, so a page reloaded mid-flash shows the live transcript and
+    the "do not power off" warning again rather than a bare Update card. Always
+    present so the reader is `$('#fw-inflight')`, never a missing node. %>
+<div id="fw-inflight" hidden data-active="<% attr_escape "$fw_active" %>"></div>
+
+<div id="fw-controls">
+
+	<% fw_head %>
+
+	<div class="row g-4 mt-0 mj-fw-cols">
+
+		<% fw_wide %>
 
 		<div class="col-12 col-lg-5 mj-fw-rail">
 			<div class="row g-4">
@@ -486,45 +621,9 @@
 					</div></div>
 				</div>
 
-				<% if [ "$fw_state" = "available" ]; then %>
-					<%# The question somebody asks with a finger over Install. It is
-					    answered here rather than after the fact, because after the
-					    fact this page is not reachable. %>
-					<div class="col-12">
-						<div class="card h-100"><div class="card-body">
-							<% card_head "If it does not come back" %>
-							<p class="hint text-secondary">The camera stops answering while it writes and returns in about
-								two minutes. If it has not returned after five, power it off and on
-								once, then reload this page.</p>
-						</div></div>
-					</div>
-				<% fi %>
+				<% fw_ifback %>
 
-				<% if [ "$fw_state" != "offline" ]; then %>
-					<%# From a file, at the weight it is actually used at: last in the
-					    rail, one line and a way in. It is not a second half of a pair
-					    of equal choices — almost nobody arrives here with a .tgz —
-					    and presenting it as one is what made the download route hard
-					    to find. The button stays btn-sm even once a file is chosen:
-					    size carries the hierarchy, so it can be the real action
-					    without competing with Install. %>
-					<div class="col-12">
-						<div class="card h-100"><div class="card-body">
-							<% card_head "Install from a file" %>
-							<p class="hint text-secondary mb-3">Have a <code>.tgz</code> image on your computer? Use it instead of downloading.</p>
-							<p class="string mj-row mb-0">
-								<label for="fw-file" class="form-label">Image</label>
-								<span class="mj-ctl"><span class="mj-ctl-in">
-									<input id="fw-file" type="file" accept=".tgz,.gz" class="form-control form-control-sm">
-								</span></span>
-							</p>
-							<div class="mj-foot mt-3">
-								<span class="mj-foot-note">Same reboot, same caution.</span>
-								<button id="fw-install-upload" type="button" class="btn btn-sm btn-primary">Install this file</button>
-							</div>
-						</div></div>
-					</div>
-				<% fi %>
+				<% fw_railfile %>
 
 			</div>
 		</div>

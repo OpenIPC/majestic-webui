@@ -1004,9 +1004,103 @@
 			.then(() => clearTimeout(timer));
 	}
 
+	// The offer, asked once the page is already up. update.cgi draws the blocks
+	// that depend on the build check in a "checking" state and leaves the check
+	// to this second request, update.cgi?part=offer, which runs it live and
+	// returns those blocks rendered from the same template functions (#683).
+	// Each comes back under the data-fw-part name of the node it replaces.
+	//
+	// The bound is above the camera's own: fw_latest_build gives up at 15
+	// seconds, so an answer later than this is not coming. Running out is this
+	// page failing to reach the camera, which is all the fallback text says.
+	const OFFER_TIMEOUT_MS = 25000;
+
+	function swapOffer(html) {
+		const doc = new DOMParser().parseFromString(html, 'text/html');
+		const parts = doc.querySelectorAll('[data-fw-part]');
+		// A body with none of the blocks in it is not an answer: a login page,
+		// a redirect to Access, an error page. Treated as no answer at all.
+		if (!parts.length) return false;
+		// The file route is open while the check runs, so somebody may have
+		// chosen an image already. A block drawn the same either way is left
+		// alone, and when the image picker moves (no image on offer makes it
+		// the wide card) the chosen file moves with it.
+		const was = $('#fw-file');
+		const chosen = was && was.files && was.files.length ? was.files : null;
+		for (const part of parts) {
+			const here = document.querySelector('[data-fw-part="' + part.dataset.fwPart + '"]');
+			if (here && here.outerHTML !== part.outerHTML) here.replaceWith(document.importNode(part, true));
+		}
+		const now = $('#fw-file');
+		if (chosen && now && now !== was) {
+			try { now.files = chosen; } catch (e) { /* an older browser: pick it again */ }
+		}
+		return true;
+	}
+
+	function unasked() {
+		const head = $('#fw-head');
+		if (!head) return;
+		const asking = head.querySelector('[data-fw-asking]');
+		const failed = head.querySelector('[data-fw-unasked]');
+		const again = $('#fw-recheck');
+		if (asking) asking.hidden = true;
+		if (failed) failed.hidden = false;
+		if (again) { again.hidden = false; again.disabled = false; }
+	}
+
+	function askOffer() {
+		const head = $('#fw-head');
+		if (!head || head.dataset.fwState !== 'checking') return;
+		const asking = head.querySelector('[data-fw-asking]');
+		const failed = head.querySelector('[data-fw-unasked]');
+		const again = $('#fw-recheck');
+		if (asking) asking.hidden = false;
+		if (failed) failed.hidden = true;
+		if (again) { again.hidden = true; again.disabled = true; }
+
+		// Each ask has a number, and only the newest one that has not timed out
+		// may change the page. The timer gives up on its own rather than through
+		// the abort, which a browser without AbortController never delivers --
+		// and an answer that then arrives anyway is ignored rather than painted
+		// over the fallback, as is one overtaken by Try again.
+		const n = ++asked;
+		const mine = () => n === asked && !busy();
+		const ctl = ('AbortController' in window) ? new AbortController() : null;
+		const timer = setTimeout(() => {
+			if (ctl) ctl.abort();
+			if (mine()) { asked++; unasked(); }
+		}, OFFER_TIMEOUT_MS);
+		return apiFetch('update.cgi?part=offer',
+			{ cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+			.then(r => r.ok ? r.text() : Promise.reject(r.status))
+			.then(html => {
+				// busy(): a flash started from the file card while this was in
+				// flight owns the page now; an answer arriving under it is not news.
+				if (!mine()) return;
+				// A flash this page did not start -- the scheduled install, another
+				// tab -- began after the page was drawn. The offer has no blocks
+				// for that; a fresh page attaches to it, as any page drawn during
+				// one does.
+				if (/data-fw-active/.test(html)) { location.reload(); return; }
+				if (swapOffer(html)) loadChanges(); else unasked();
+			})
+			.catch(() => { if (mine()) unasked(); })
+			.then(() => clearTimeout(timer));
+	}
+	let asked = 0;
+
+	// Whether #fw-controls has given way to a flash: showProgress hides it.
+	function busy() {
+		const c = $('#fw-controls');
+		return !!c && c.style.display === 'none';
+	}
+
 	// fw-changes.js is deferred and this file is not, so it has not run yet:
 	// deferred scripts execute after the document is parsed and before this
-	// event, which is the earliest moment window.MajesticChanges exists.
+	// event, which is the earliest moment window.MajesticChanges exists. On a
+	// page still checking, loadChanges finds no image on offer and does nothing;
+	// askOffer runs it again once there is an answer.
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', loadChanges);
 	} else {
@@ -1021,22 +1115,34 @@
 	// it already exists. See attachToRunning.
 	const inflight = $('#fw-inflight');
 	if (inflight && inflight.dataset.active === '1') attachToRunning();
+	else askOffer();
 
-	const g = $('#fw-install-github');
-	if (g) g.addEventListener('click', e => {
-		e.preventDefault();
-		// Asked here rather than through main.js's .btn-danger/.confirm hook: that
-		// one wires on `load`, and this listener is registered while the document
-		// is still parsing, so it would run first and the question would arrive
-		// after the flash had already begun.
-		const ask = g.dataset.confirm;
-		if (ask && !confirm(ask)) return;
-		startUpgrade('github', g.dataset.force === '1');
+	// Delegated from #fw-controls rather than bound to the buttons, because
+	// askOffer replaces the blocks they live in: a listener on the node drawn
+	// while checking would be on a node no longer in the page.
+	const controls = $('#fw-controls');
+	if (controls) controls.addEventListener('click', e => {
+		const t = e.target.closest('button');
+		if (!t) return;
+		if (t.id === 'fw-install-github') {
+			e.preventDefault();
+			// Asked here rather than through main.js's .btn-danger/.confirm hook:
+			// that one wires on `load`, and this listener is registered while the
+			// document is still parsing, so it would run first and the question
+			// would arrive after the flash had already begun.
+			const ask = t.dataset.confirm;
+			if (ask && !confirm(ask)) return;
+			startUpgrade('github', t.dataset.force === '1');
+		} else if (t.id === 'fw-install-upload') {
+			e.preventDefault();
+			upload();
+		} else if (t.id === 'fw-recheck') {
+			e.preventDefault();
+			askOffer();
+		}
 	});
 
-	const u = $('#fw-install-upload');
-	if (u) u.addEventListener('click', async e => {
-		e.preventDefault();
+	async function upload() {
 		const f = $('#fw-file').files[0];
 		if (!f) { status('danger', 'Choose a firmware .tgz first.'); return; }
 		showProgress(params('/tmp/firmware.tgz', false));
@@ -1050,5 +1156,5 @@
 			status('danger', 'Upload error: ' + err);
 			resumeHeartbeat();
 		}
-	});
+	}
 })();

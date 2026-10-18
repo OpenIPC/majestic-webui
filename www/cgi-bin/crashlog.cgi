@@ -100,6 +100,11 @@ mj_stopped=
 				<dt class="col-sm-3 text-secondary">Failsafe</dt>
 				<dd class="col-sm-9">entered <% esc "$fs_utc" %> UTC after repeated boot failure</dd>
 				<% fi %>
+				<% if [ -s "$CRASH/failsafe.log" ]; then %>
+				<dt class="col-sm-3 text-secondary">Failed boot's log</dt>
+				<dd class="col-sm-9"><% esc "$(wc -l < "$CRASH/failsafe.log" | tr -d ' ')" %> lines, sent with it
+					&middot; <a href="crashlog-download.cgi?get=failsafe-log">download</a></dd>
+				<% fi %>
 				<% if [ -n "$crash_records" ]; then %>
 				<dt class="col-sm-3 text-secondary">Kernel log</dt>
 				<dd class="col-sm-9"><% esc "$crash_records" %> pstore record(s), <% esc "$crash_bytes" %> bytes compressed</dd>
@@ -161,8 +166,11 @@ mj_stopped=
 			<%# ?ref carries the same word the footer's link to the same site
 			    carries; p/footer.cgi says what it is. %>
 			<p class="small text-secondary">What is sent: the kernel's log of the crash, as Download gives it,
-				and the camera's MAC address, chip, sensor, firmware and Majestic version. openipc.org replaces
-				the MAC and every IP address in the log with hashes, and only OpenIPC's maintainers read the log;
+				and the camera's MAC address, chip, sensor, firmware and Majestic version. Where the firmware
+				kept it, the system log of the boot that crashed or fell into failsafe goes too &mdash; the kernel's
+				messages and those of majestic and the camera's services, which can name the networks, servers and
+				clients it dealt with; it is in Download, or the failed boot's own download above. openipc.org replaces
+				the MAC and every IP address in the logs with hashes, and only OpenIPC's maintainers read them;
 				a crash of majestic's own also carries a slice of majestic's memory at the moment it crashed, which
 				can hold what it was handling, and, where its firmware records them, the last lines it logged
 				before it: only OpenIPC's maintainers

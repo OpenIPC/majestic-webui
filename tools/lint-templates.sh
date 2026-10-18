@@ -80,6 +80,43 @@ if ! (
 	echo "lint: could not enter www/cgi-bin, templates unchecked" >> "$FAILS"
 fi
 
+# --- 1b. syntax with the empty stubs in -----------------------------------
+# An image without a motor driver ships p/motor.cgi EMPTY (sbin/updatewebui,
+# and a firmware build with BR2_PACKAGE_MAJESTIC_WEBUI_PTZ off), never the
+# file in this tree.
+# An empty include is not neutral: as the only thing between `then %>` and
+# `<% fi %>` it hands sh `then fi`, a syntax error, and the page stops being
+# emitted there. Live lost its whole player that way on every no-PTZ image,
+# while the pass above stayed green because it only ever sees the full file.
+# So every template that includes a stub is checked a second time against a
+# copy of the tree with the stub emptied, the way a camera has it.
+STUBS='p/motor.cgi'
+STUBTREE=$(mktemp -d) || exit 1
+trap 'rm -f "$FAILS" "$SEEN"; rm -rf "$STUBTREE"' EXIT
+if ! (
+	cp -R www/cgi-bin/. "$STUBTREE" || exit 1
+	cd "$STUBTREE" || exit 1
+	for s in $STUBS; do
+		[ -e "$s" ] || { echo "lint: stub $s is not in the tree" >> "$FAILS"; continue; }
+		: > "$s"
+	done
+	for s in $STUBS; do
+		grep -l "<%in $s %>" $(find . -name '*.cgi' | sort) /dev/null
+	done | sed 's|^\./||' | sort -u | while IFS= read -r f; do
+		echo "e" >> "$SEEN"
+		if ! out=$(haserl -d "$f" < /dev/null 2>&1); then
+			printf 'www/cgi-bin/%s (empty stubs): haserl: %s\n' "$f" "$(printf '%s' "$out" | tail -1)" >> "$FAILS"
+			continue
+		fi
+		if ! err=$(printf '%s\n' "$out" | sh -n 2>&1); then
+			printf 'www/cgi-bin/%s (empty stubs): %s\n' "$f" "$err" >> "$FAILS"
+		fi
+	done
+	exit 0
+); then
+	echo "lint: could not copy www/cgi-bin, empty-stub check did not run" >> "$FAILS"
+fi
+
 # --- 2. escaping ------------------------------------------------------------
 # CLAUDE.md: "Never <%= $userInput %> for anything that came from POST_/GET_."
 # <%= %> is sugar for echo, so request data goes to the page verbatim — an
@@ -301,16 +338,18 @@ if grep -rnE '^[^#]*=\\"\$.*>>[[:space:]]*"?\$config_file' www sbin bin 2>/dev/n
 fi
 
 ntpl=$(grep -c '^t$' "$SEEN")
+nstub=$(grep -c '^e$' "$SEEN")
 nsh=$(grep -c '^s$' "$SEEN")
 
 # Nothing to check is a broken selector, not a clean tree — the repo always has
 # both kinds of file. Without this, a find or shebang test that stopped matching
 # would report a confident pass over zero files.
 [ "$ntpl" -gt 0 ] || echo "lint: no haserl templates matched, selection is broken" >> "$FAILS"
+[ "$nstub" -gt 0 ] || echo "lint: no template includes a stub, selection is broken" >> "$FAILS"
 [ "$nsh" -gt 0 ] || echo "lint: no shell scripts matched, selection is broken" >> "$FAILS"
 
 if [ -s "$FAILS" ]; then
 	cat "$FAILS"
 	exit 1
 fi
-echo "ok: $ntpl haserl templates, $nsh shell scripts"
+echo "ok: $ntpl haserl templates ($nstub again with empty stubs), $nsh shell scripts"

@@ -122,7 +122,9 @@ Notes:
 
   Only the files meant for this firmware's variant (BUILD_OPTION in
   /etc/os-release) are installed, mirroring what the firmware itself ships:
-  a standard build gets no FPV pages, an FPV build no notifier helpers.
+  an FPV build gets no notifier helpers. The FPV, SMS and Counting pages are
+  installed only where the firmware image carries them, and the PTZ controls
+  only where it carries a motor driver.
 EOF
 }
 
@@ -180,6 +182,38 @@ variant=$(sed -n 's/^BUILD_OPTION=//p' /etc/os-release 2>/dev/null | tr -d '"')
 # it gets the same files, and the firmware's majestic-webui.mk treats the two
 # names alike.
 [ "$variant" = wfbng ] && variant=fpv
+
+# The SMS page and its two scripts are a build option, set by the device
+# profiles of boards with a cellular modem, and a camera cannot read its own
+# build options -- but the image records the answer, because a build without
+# them has no /usr/sbin/modem-at. So what the image carries decides, and an
+# update never puts SMS back on a camera whose firmware left it out. With no
+# overlay the root is the earlier install itself, and it keeps what it has.
+sms=0
+[ -e "$lower/usr/sbin/modem-at" ] && sms=1
+
+# The FPV settings page is a build option too, on by default for the fpv and
+# wfbng variants but settable by a profile either way, so BUILD_OPTION is no
+# longer the whole answer. The image carries p/fpv_common.cgi exactly when it
+# carries the page -- under either of the page's two names -- so that is the
+# witness.
+fpv=0
+[ -e "$lower/var/www/cgi-bin/p/fpv_common.cgi" ] && fpv=1
+
+# The PTZ controls follow the motor drivers the same way: firmware keeps them
+# only where gpio-motors or the majestic-af plugin is built in, and those are
+# what moves a motor, so they are the witness here too -- with /usr/bin/motor,
+# the third backend's helper, which no package installs but a board may.
+ptz=0
+{ [ -e "$lower/usr/bin/gpio-motors" ] || [ -e "$lower/usr/lib/majestic-af.so" ] ||
+	[ -e "$lower/usr/bin/motor" ]; } && ptz=1
+
+# The Counting page is a build option as well, on by default where the image
+# carries an object-detection model (xmnpu-models for the NPU, cpu-models for
+# the CPU) -- counting runs on that detector's boxes, so an image without one
+# has nothing to count with. The page is its own witness, as the FPV page is.
+counting=0
+[ -e "$lower/var/www/cgi-bin/counting.cgi" ] && counting=1
 
 tmp=$(mktemp -d) || die "cannot create a temporary directory"
 # The staged directory holds the script this shell is reading, which on Linux
@@ -288,8 +322,9 @@ build_plan() {
 				# does not. Mirror the fixup lists in buildroot's
 				# majestic-webui.mk (kept in step with them): a standard
 				# build strips the FPV pages, an FPV build strips the
-				# notifier helpers. A skipped path never enters keep, so
-				# a stale overlay copy of it is pruned below.
+				# notifier helpers, and only a build that asked for SMS
+				# keeps it (see $sms). A skipped path never enters keep,
+				# so a stale overlay copy of it is pruned below.
 				#
 				# fpv-wfb.cgi is the pre-rename name of wfb.cgi. Both
 				# are listed so this script installs an older tree and
@@ -321,8 +356,9 @@ build_plan() {
 				sbin/$scr_name-fetch)
 					d=$root/$scr_name
 					;;
-				www/cgi-bin/wfb.cgi | www/cgi-bin/fpv-wfb.cgi | www/cgi-bin/p/fpv_common.cgi)
-					if [ "$variant" != fpv ]; then
+				www/cgi-bin/wfb.cgi | www/cgi-bin/fpv-wfb.cgi | www/cgi-bin/p/fpv_common.cgi | \
+				www/a/wfb.js)
+					if [ "$fpv" != 1 ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue
 					fi
@@ -331,6 +367,41 @@ build_plan() {
 					if [ "$variant" = fpv ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue
+					fi
+					;;
+				www/cgi-bin/sms.cgi | www/cgi-bin/j/sms.cgi | www/a/sms.js | \
+				www/a/sms-pdu.js | sbin/sms-forward | sbin/modem-at)
+					if [ "$sms" != 1 ]; then
+						echo "$d" >>"$tmp/skipped"
+						continue
+					fi
+					;;
+				www/cgi-bin/counting.cgi | www/a/counting.js | www/a/counting-data.js)
+					if [ "$counting" != 1 ]; then
+						echo "$d" >>"$tmp/skipped"
+						continue
+					fi
+					;;
+				www/a/preview-ptz.js | www/a/ptz-stick.js | www/a/ptz-centre.js | \
+				www/a/ptz-follow.js | www/a/ptz-speed.js | www/a/ptz-orient.js | \
+				www/a/af-state.js | \
+				www/cgi-bin/j/ptz.cgi)
+					if [ "$ptz" != 1 ]; then
+						echo "$d" >>"$tmp/skipped"
+						continue
+					fi
+					;;
+				www/cgi-bin/p/motor.cgi)
+					# Never absent, only emptied: live.cgi pulls it in
+					# with <%in %>, which haserl opens while parsing the
+					# page, before any shell around it runs, so a missing
+					# file breaks the Live page whatever ptz_control says.
+					# The firmware ships the same empty stub, so on such an
+					# image this matches /rom and writes nothing.
+					if [ "$ptz" != 1 ]; then
+						: >"$tmp/motor.cgi.stub"
+						chmod "$(stat -c %a "$s")" "$tmp/motor.cgi.stub"
+						s=$tmp/motor.cgi.stub
 					fi
 					;;
 				esac
@@ -476,7 +547,7 @@ report_plan() {
 		echo "  $(count "$tmp/drop") overlay copy(ies) to drop, the firmware's own file already matches"
 	echo "  $(count "$tmp/prune") stale entry(ies) to remove"
 	[ -s "$tmp/skipped" ] &&
-		echo "  $(count "$tmp/skipped") file(s) for another firmware variant, skipped"
+		echo "  $(count "$tmp/skipped") file(s) this firmware leaves out, skipped"
 	[ -s "$tmp/newdirs" ] &&
 		echo "  $(count "$tmp/newdirs") director(ies) to create"
 	if [ -s "$tmp/local" ]; then
@@ -673,6 +744,27 @@ write_version() {
 		echo "$scr_name: could not record the deployed version in $STATE_DIR/webui.version" >&2
 }
 
+# Forwarding is switched on by a line the SMS page writes into root's crontab,
+# and nothing else would ever take it out again. Left behind on a camera whose
+# SMS files are skipped, it would run a missing script once a minute.
+#
+# Only that exact line goes, never anything else that happens to mention the
+# script. And only once the install has gone through: run earlier, a failed
+# install would leave the old page in place with its forwarding switched off.
+# A crontab that cannot be edited is an error rather than a footnote, because
+# the script the line runs is already gone.
+drop_sms_cron() {
+	[ "$sms" = 1 ] && return 0
+	grep -qxF '* * * * * /usr/sbin/sms-forward' /etc/crontabs/root 2>/dev/null || return 0
+	if sed -i '/^\* \* \* \* \* \/usr\/sbin\/sms-forward$/d' /etc/crontabs/root; then
+		echo "Removed SMS forwarding from root's crontab: this firmware carries no SMS page"
+		return 0
+	fi
+	echo "$scr_name: could not remove the SMS forwarding line from /etc/crontabs/root;" >&2
+	echo "$scr_name: it now runs a script this firmware does not carry. Delete it by hand." >&2
+	return 1
+}
+
 do_install() {
 	fetch_tree
 	build_plan
@@ -687,6 +779,7 @@ do_install() {
 		# the Dashboard should show what is actually installed.
 		write_version
 		rm -f /tmp/webui/sysinfo.txt
+		drop_sms_cron || exit 1
 		return 0
 	fi
 	echo
@@ -719,6 +812,7 @@ do_install() {
 		fi
 	done
 	verify_view "$tmp/want" "$tmp/gone"
+	drop_sms_cron || exit 1
 }
 
 # The one place a directory ever leaves the upper layer. rmdir there muddles

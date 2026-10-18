@@ -30,6 +30,15 @@ fw_installed_sha() {
 	fw_sha_of "$(fw_installed_version "$1")"
 }
 
+# fw_has_route   whether there is a default route to ask over
+#
+# `ip route`, not /proc/net/route: a hand-rolled parse of that file is how this
+# check was wrong the first time -- `grep -E` does not read \t as a tab, so it
+# saw no default route on a camera that plainly had one.
+fw_has_route() {
+	[ -n "$(ip route 2>/dev/null | awk '/default/ {print $3}')" ]
+}
+
 # fw_latest_build   the newest build OpenIPC publishes for this board, or nothing
 #
 # Through sysupgrade, the same updater the Install button drives over
@@ -39,15 +48,29 @@ fw_installed_sha() {
 # not defeated by one (#44, #121).
 #
 # A default route must exist, and `timeout` bounds the ask, so a dead network
-# cannot hang a page. `ip route`, not /proc/net/route: a hand-rolled parse of
-# that file is how this check was wrong the first time -- `grep -E` does not
-# read \t as a tab, so it saw no default route on a camera that plainly had
-# one.
+# cannot hang a caller for longer than that.
+#
+# The answer goes through a file, never a pipe. busybox `timeout` kills
+# sysupgrade and nothing it started, and the curl it is blocked in (30s to
+# connect, 60s in all) inherits its stdout. A pipe stays open until the last
+# writer goes, so the caller waited for that curl and the 15 seconds bounded
+# nothing: a camera with a route and no internet held the Update page for as
+# long as curl took to give up (#683). A file has no reader to keep waiting.
+#
+# A caller killed mid-check leaves its file behind, and a trap cannot be set
+# here to stop that: this is sourced, and a trap belongs to the whole shell --
+# sbin/fw-autoupdate's EXIT trap releases its lock, and one set here would
+# replace it. So each check sweeps away what the killed ones left instead. Any
+# file older than a minute is one: no check lives past its 15 seconds.
 fw_latest_build() {
-	[ -n "$(ip route 2>/dev/null | awk '/default/ {print $3}')" ] || return 0
+	local out
+	fw_has_route || return 0
 	command -v sysupgrade >/dev/null 2>&1 || return 0
-	timeout 15 sysupgrade --list-builds 2>/dev/null |
-		grep -Eo '[A-Za-z0-9._]+-[0-9]{8}-[0-9a-f]+' | head -1
+	find /tmp -maxdepth 1 -name 'fw-builds.*' -mmin +1 -exec rm -f {} + 2>/dev/null
+	out=$(mktemp /tmp/fw-builds.XXXXXX 2>/dev/null) || return 0
+	timeout 15 sysupgrade --list-builds >"$out" 2>/dev/null
+	grep -Eo '[A-Za-z0-9._]+-[0-9]{8}-[0-9a-f]+' "$out" | head -1
+	rm -f "$out"
 }
 
 # fw_build_sha <build-id>   nightly-20260717-027aae1 -> 027aae1

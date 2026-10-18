@@ -134,6 +134,23 @@ group('what it does say');
 	const offBooting = vc.diagnose({ video0: { enabled: false }, video1: { enabled: false } },
 		sample(LIT, { up: 2 }), { blindS: 0, blind: false }, null);
 	check('and the boot grace does not delay it', !!offBooting && offBooting.code === 'off');
+	check('and with no sound it sends the viewer to fix it', !!off && off.conclusive === true);
+
+	// The microphone still works with both channels off, and the Live page
+	// plays it. The same finding, but nothing to leave
+	// the page over.
+	const sound = vc.diagnose(
+		{ video0: { enabled: false }, video1: { enabled: false }, audio: { enabled: true } },
+		sample(LIT), { blindS: 0, blind: false }, null);
+	check('with the microphone on it is still said', !!sound && sound.code === 'off');
+	check('but as a note, not a redirect', !!sound && sound.conclusive === false);
+	check('that names the sound', !!sound && /sound alone/.test(sound.detail));
+	check('and still points at the video settings',
+		!!sound && /tab=video0/.test(sound.act.href));
+	const soundOff = vc.diagnose(
+		{ video0: { enabled: false }, video1: { enabled: false }, audio: { enabled: false } },
+		sample(LIT), { blindS: 0, blind: false }, null);
+	check('a microphone that is off changes nothing', !!soundOff && soundOff.conclusive === true);
 
 	const st = vc.tracker();
 	const stall = vc.diagnose(BOTH_ON, sample({ venc_empty_frames_run: 40 }),

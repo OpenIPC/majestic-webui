@@ -1,5 +1,5 @@
 // The dist build's comment stripper, which is also the gate that refuses to
-// ship one (check-no-comments.js tests `stripCgi(src) === src`).
+// ship one (check-no-comments.js tests `stripFile(src) === src`).
 //
 // Every failure mode here is silent in the direction that matters. Stripping
 // too little costs bytes and nobody notices. Stripping too MUCH edits a shell
@@ -14,7 +14,7 @@
 const path = require('path');
 const fs = require('fs');
 const { check, group, done } = require('./assert');
-const { stripCgi } = require('../tools/strip-cgi-comments.js');
+const { stripCgi, stripFile, isShellScript } = require('../tools/strip-cgi-comments.js');
 
 const S = (src) => stripCgi(src, '<test>');
 
@@ -92,17 +92,58 @@ threw = false;
 try { S('<% x=1'); } catch (e) { threw = /never closed/.test(e.message); }
 check('unclosed <% throws', threw);
 
+group('strip-cgi-comments: plain scripts');
+
+const F = (src, name) => stripFile(src, name || 'j/x.cgi');
+
+// The fault this group exists for: a j/*.cgi has no <%, so it was read as a
+// template with no code in it and came back byte for byte, comments and all --
+// and the gate, asking the same function, agreed.
+check('a #!/bin/sh .cgi loses its comments',
+	F('#!/bin/sh\n# gone\necho "{}"\n') === '#!/bin/sh\necho "{}"\n');
+
+check('so does an extensionless script in sbin/',
+	F('#!/bin/sh\n# gone\nx=1\n', 'sbin/telegram') === '#!/bin/sh\nx=1\n');
+
+check('and a sourced .sh library',
+	F('#!/bin/sh\n# gone\nf() { :; }\n', 'p/majestic.sh') === '#!/bin/sh\nf() { :; }\n');
+
+// In a script a heredoc writes a message, a reply or a file; <!-- there is data.
+check('a script\'s heredoc body is left whole, <!-- included',
+	F('#!/bin/sh\ncat <<EOF\n<!-- keep -->\n#keep\nEOF\n').includes('<!-- keep -->\n#keep'));
+
+// After a trailing backslash, the comment is what ends the command; lifting it
+// out would run the next line as its argument.
+check('a comment after a continued line stays',
+	F('#!/bin/sh\nrm -f a \\\n# stop\nreboot\n') === '#!/bin/sh\nrm -f a \\\n# stop\nreboot\n');
+
+check('a data file in j/ is untouched',
+	F('mj_audio=Audio\n', 'j/locale.cgi') === 'mj_audio=Audio\n');
+
+check('a haserl template is still a template',
+	F('#!/usr/bin/haserl\n<%\n# gone\n%>\n<!-- gone -->\n', 'x.cgi') === '#!/usr/bin/haserl\n<%\n%>\n');
+
+check('shebang recognition',
+	isShellScript('#!/bin/sh\n') && isShellScript('#!/bin/sh -e\n') &&
+	isShellScript('#!/bin/ash') && !isShellScript('#!/usr/bin/haserl\n') &&
+	!isShellScript('#!/usr/bin/env node\n') && !isShellScript('# not one\n'));
+
 group('strip-cgi-comments: idempotent, and real files survive it');
 
-const dir = path.join(__dirname, '..', 'www', 'cgi-bin');
+const root = path.join(__dirname, '..');
 const files = [];
+const scripts = [];
 (function walk(d) {
 	for (const e of fs.readdirSync(d, { withFileTypes: true })) {
 		const p = path.join(d, e.name);
 		if (e.isDirectory()) walk(p);
 		else if (p.endsWith('.cgi')) files.push(p);
+		else if (p.endsWith('.sh')) scripts.push(p);
 	}
-})(dir);
+})(path.join(root, 'www', 'cgi-bin'));
+for (const d of ['sbin', 'bin']) {
+	for (const n of fs.readdirSync(path.join(root, d))) scripts.push(path.join(root, d, n));
+}
 
 check('found the templates', files.length > 50, `${files.length} found`);
 
@@ -110,12 +151,22 @@ let stable = 0;
 let shrank = 0;
 for (const f of files) {
 	const src = fs.readFileSync(f, 'utf8');
-	const once = stripCgi(src, f);
-	if (stripCgi(once, f) === once) stable++;
+	const once = stripFile(src, f);
+	if (stripFile(once, f) === once) stable++;
 	if (once.length < src.length) shrank++;
 }
 check('stripping twice changes nothing the second time', stable === files.length,
 	`${stable}/${files.length}`);
 check('it actually removes something', shrank > 0, `${shrank} files shrank`);
+
+// Every script that ships is one the build now edits, so every one of them must
+// be recognised as a script -- one that is not ships its comments silently.
+const missed = scripts.filter((f) => {
+	const src = fs.readFileSync(f, 'utf8');
+	return !isShellScript(src) || stripFile(src, f) === src;
+});
+check('every script in sbin/, bin/ and p/*.sh is recognised and stripped',
+	scripts.length > 15 && !missed.length,
+	missed.length ? missed.map((f) => path.relative(root, f)).join(', ') : `${scripts.length} found`);
 
 done();

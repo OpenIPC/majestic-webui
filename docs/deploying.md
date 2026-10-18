@@ -69,6 +69,32 @@ building at all, and a script that installs itself is always one release behind.
 pattern file — busybox reads it as *match everything*, GNU as match nothing —
 which is how these manifest lists get filtered. And the **variant** file set:
 `BUILD_OPTION` in `/etc/os-release`, kept in step with the fixup lists in
-buildroot's `majestic-webui.mk`, means a standard build gets no
-`wfb.cgi`/`p/fpv_common.cgi` and an FPV build no `telegram`/`openwall`, and a
-stale overlay copy of a skipped file is pruned rather than reinstalled.
+buildroot's `majestic-webui.mk`, means an FPV build gets no
+`telegram`/`max`/`openwall`, and a stale overlay copy of a skipped file is
+pruned rather than reinstalled. The FPV page itself (`wfb.cgi`, its old name
+`fpv-wfb.cgi`, `p/fpv_common.cgi`, `a/wfb.js`) is an option,
+`BR2_PACKAGE_MAJESTIC_WEBUI_FPV`, defaulting on for the fpv and wfbng variants;
+the installer's witness is `/rom/var/www/cgi-bin/p/fpv_common.cgi`. The SMS
+page and its two scripts (`sms.cgi`, `j/sms.cgi`, `a/sms.js`, `a/sms-pdu.js`,
+`sms-forward`, `modem-at`) follow a build **option** rather than a variant —
+`BR2_PACKAGE_MAJESTIC_WEBUI_SMS`, set by the device profiles of boards with a
+cellular modem — and a camera cannot read its build options, so the installer
+asks the image instead: they are installed only where `/rom/usr/sbin/modem-at`
+exists. A camera flashed before the option existed has none there, and loses
+the page on its next install until it is reflashed with an image that asks for
+it. The PTZ controls (`a/preview-ptz.js`, `a/ptz-{stick,centre,follow,speed}.js`,
+`a/af-state.js`, `j/ptz.cgi`, and `p/motor.cgi` — installed **empty** rather
+than skipped, since haserl's `<%in %>` fails on a missing file) work the same
+way with `BR2_PACKAGE_MAJESTIC_WEBUI_PTZ`, which defaults on wherever the image has a
+motor driver; the installer's witness is `/rom/usr/bin/gpio-motors`,
+`/rom/usr/lib/majestic-af.so` or `/rom/usr/bin/motor`. Unlike SMS this needs no reflash: every image
+that could ever move a motor already carries one of the two. The Counting page
+(`counting.cgi`, `a/counting.js`, `a/counting-data.js`) follows
+`BR2_PACKAGE_MAJESTIC_WEBUI_COUNTING`, which defaults on wherever the image
+carries an object-detection model (`xmnpu-models` or `cpu-models`): counting
+runs on the detector's boxes. The page is its own witness,
+`/rom/var/www/cgi-bin/counting.cgi`; like SMS, a camera flashed before the option
+existed gets it back only from an image that carries it. The lines-and-zones
+editor on the Settings page is not part of the option: it is drawn only where
+majestic has a counting section, and `a/mj-line.js` is a few kilobytes of the
+settings page itself.

@@ -190,26 +190,16 @@ focus_label="Focus"
 	<% fi %>
 	<span class="mj-ptz-void"></span>
 </div>
-<!-- How fast the pad pans and tilts, for a motor driver that keeps a speed (a
-     gpiostep head). Hidden here and revealed by preview-ptz.js only when
-     GET /ptz says " speeds=": every other lens has one speed, and a slider that
-     changed nothing would be a lie. Pan and tilt only; zoom and focus run at
-     the lens's own rate. -->
-<div id="mj-ptz-speed" class="mj-ptz-speed" hidden>
-	<label for="mj-ptz-speed-in" class="mj-ptz-group">Speed</label>
-	<input type="range" id="mj-ptz-speed-in" min="10" max="100" step="10" value="100"
-		aria-label="Pan and tilt speed, percent of the fastest">
-</div>
-<!-- Follow a person (ptz.track): the head turns toward whoever the object
-     detector sees. Revealed by preview-ptz.js only when GET /ptz says " steps="
-     (a motor that counts) and objectDetect is on and reporting people
-     (ptz-follow.js); anywhere else it would
-     switch a setting that does nothing. A press on the pad pauses following
-     on the camera for ptz.trackResumeSec. -->
+<!-- Follow (ptz.track): the head turns toward what the object detector
+     sees, of the classes chosen on the PTZ settings tab. Revealed by
+     preview-ptz.js only when GET /ptz says " steps=" (a motor that counts)
+     and " follow=" (something to follow with; ptz-follow.js); anywhere else
+     it would switch a setting that does nothing. A press on the pad pauses
+     following on the camera for ptz.trackResumeSec. -->
 <div id="mj-ptz-follow" class="mj-ptz-speed mj-ptz-follow" hidden>
 	<div class="form-check form-switch m-0">
 		<input class="form-check-input" type="checkbox" role="switch" id="mj-ptz-follow-in">
-		<label class="form-check-label" for="mj-ptz-follow-in">Follow person</label>
+		<label class="form-check-label" for="mj-ptz-follow-in">Follow</label>
 	</div>
 </div>
 <% fi %>
@@ -284,5 +274,7 @@ focus_label="Focus"
 <script src="/a/af-state.js"></script>
 <script src="/a/ptz-speed.js"></script>
 <script src="/a/ptz-stick.js"></script>
+<script src="/a/ptz-orient.js"></script>
+<script src="/a/ptz-centre.js"></script>
 <script src="/a/ptz-follow.js"></script>
 <script src="/a/preview-ptz.js"></script>

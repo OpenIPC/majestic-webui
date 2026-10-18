@@ -79,16 +79,25 @@
 		return { verb: verb, frac: frac };
 	}
 
-	// The speed, in percent, for a finger `frac` of the way out with the pad's
-	// own speed setting at `max`: from a third of it near the centre up to all
-	// of it at the rim, in steps of ten, so a finger that wavers a little does
-	// not send a new request for every pixel.
-	function pct(frac, max) {
-		const top = max > 0 && max <= 100 ? max : 100;
+	// The speed, in percent, for a finger `frac` of the way out. There is no
+	// speed setting: how far the thumb goes is the speed, as the surveillance
+	// clients' virtual joysticks do it (Avigilon, Senstar, Bosch). The curve is
+	// an RC radio's expo -- gentle near the centre, where aiming is fine work,
+	// steep towards the rim -- and the rim itself, where the arrows are, is the
+	// whole speed. It lands on a few levels only, so a finger that wavers a
+	// little does not send a new request for every pixel. The slowest level is
+	// as slow as a motor goes: a gpiostep head runs no slower than about ten
+	// steps a second, and a tap is still the one-step nudge below that.
+	const LEVELS = [10, 15, 20, 30, 45, 65, 85, 100];
+	const RIM = 0.85;
+	function pct(frac) {
 		const f = Math.max(0, Math.min(1, Number(frac) || 0));
-		const p = Math.round(top * (1 / 3 + f * 2 / 3) / 10) * 10;
-		return Math.max(10, Math.min(top, p));
+		if (f >= RIM) return 100;
+		const want = 10 + 90 * Math.pow(f / RIM, 2);
+		let best = LEVELS[0];
+		for (const l of LEVELS) if (Math.abs(l - want) < Math.abs(best - want)) best = l;
+		return best;
 	}
 
-	return { verbs: verbs, diagonals: diagonals, aim: aim, pct: pct, CENTRE: CENTRE };
+	return { verbs: verbs, diagonals: diagonals, aim: aim, pct: pct, CENTRE: CENTRE, LEVELS: LEVELS };
 });

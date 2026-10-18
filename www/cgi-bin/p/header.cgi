@@ -103,6 +103,16 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownCamera" role="button">Camera</a>
 						<ul aria-labelledby="dropdownCamera" class="dropdown-menu">
 							<li><a class="dropdown-item" href="camera.cgi"><% page_label camera %></a></li>
+							<!-- On a camera whose majestic counts at all, and whose
+							     firmware carries the page: one without object detection
+							     has no counting section, and the page would only ever say
+							     it cannot count; a build without the page option
+							     (BR2_PACKAGE_MAJESTIC_WEBUI_COUNTING) has nothing to link to.
+							     Under Camera rather than on the bar: the bar is for the
+							     pages everyone opens. -->
+							<% if [ "$counting_support" = 1 ] && [ -f /var/www/cgi-bin/counting.cgi ]; then %>
+								<li><a class="dropdown-item" href="counting.cgi"><% page_label counting %></a></li>
+							<% fi %>
 							<!-- Only where the USB port can actually be switched. Same
 							     shape as the SD Card guard: a camera whose port is
 							     soldered to one role has nothing to choose, and the
@@ -123,10 +133,12 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownSystem" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Setup</h6></li>
 							<li><a class="dropdown-item" href="network.cgi"><% page_label network %></a></li>
-							<!-- A cellular modem's messages and short codes. Shown where there
-							     is a serial port a modem could answer on; the page itself
-							     says so when that port turns out not to be one. -->
-							<% if [ -n "$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null)" ]; then %>
+							<!-- A cellular modem's messages and short codes. Shown where the
+							     firmware carries the page -- it is a build option, for boards
+							     with a modem -- and there is a serial port a modem could answer
+							     on; the page itself says so when that port turns out not to be
+							     one. -->
+							<% if [ -x /usr/sbin/modem-at ] && [ -n "$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null)" ]; then %>
 								<li><a class="dropdown-item" href="sms.cgi"><% page_label sms %></a></li>
 							<% fi %>
 							<li><a class="dropdown-item" href="time.cgi"><% page_label time %></a></li>

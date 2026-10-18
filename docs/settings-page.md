@@ -67,7 +67,7 @@ boot tag.
    | `string` | `x-numeric` (one number kept as text) | drawn as the `number` it is, with its bounds, `x-step` and `x-unit` |
    | `string` | `x-row-of` (one number per row of a sibling array) | hidden; the sibling's rows carry a box each and write the joined list back |
    | `string` | `x-list` (a fixed-length number list kept as text) | one labelled box per number (`mj-table.js`), a grid when `rows` > 1, a switch for a whole 0–1 cell |
-   | `string` | the key is `netip.password` | a password box that saves the **hash** XMEye/CMS clients send (`netip-hash.js`), retitled "Password". The stored hash is held aside and never shown, so the box is only ever what the owner typed and an untouched row stays clean |
+   | `string` | the key is `netip.password` | a password box that saves the **hash** XMEye/CMS clients send (`netip-hash.js`), retitled "Password". The stored hash is held aside and never shown, so the box is only ever what the owner typed and an untouched row stays clean. Because an empty box means "keep it", the empty password is a **No password** switch saving the hash of nothing — clients send that hash, while an empty *setting* is majestic refusing everyone |
    | `string` | `x-secret` or `writeOnly` | `<input type="password">` with a Show checkbox wired **in place** (the global toggle in `main.js` ran at load, long before this form existed) |
    | `string` | else | `<input type="text">` |
    | `array` | `items` are objects **with** a `url` member | the destinations board (`mj-servers.js`, `mj-outgoing.js`): rows are addresses |
@@ -197,7 +197,7 @@ from Main stream and Sub stream when majestic began flagging
 a `tests/tree.test.js` invariant now walks the shipped schema and fails if any
 key of any grouped section lands on no leaf or on two.
 
-Four leaves have hand-written renderers, each with its reasoning beside it in
+Five leaves have hand-written renderers, each with its reasoning beside it in
 `mj-settings.js`: **Picture** (the picture, the lifted knobs, and the
 Orientation group over hidden `mirror`/`flip` fields), **`osd`**
 (`renderOsd`; the camera burns the overlay in, so the live picture is the real
@@ -205,12 +205,23 @@ thing and placing is a round trip — offsets are written as a **percentage** so
 Main and Sub agree, and the template is chips because majestic's specifier switch
 returns 0 for an unknown code and silently truncates the rest of the line),
 **`motionDetect`** (`renderMotion`, which absorbed the Visual editor, so
-`?tab=roi` redirects here rather than 404ing), and **`nightMode`** (the pin map
-above its fields). `mountRegions` is shared by the motion and privacy-mask
-editors, parameterised by a `words` object and a `gated` flag; what is
-deliberately not shared is what the rectangles mean — a motion region says where
-to watch, a privacy mask is burned into the stream and is therefore in the
-recording and in every other viewer's picture.
+`?tab=roi` redirects here rather than 404ing), **`counting`** (`renderCounting`:
+lines and zones on the live picture over the hidden fields whose `x-shapes`
+declares `kind` `lines` or `rects`, never picked by key name, with a Draw lines /
+Draw zones switch because one drag can only mean one of them), and
+**`nightMode`** (the pin map above its fields). `mountRegions` is shared by the
+motion, privacy-mask and counting-zone editors, parameterised by a `words`
+object and a `gated` flag; what is deliberately not shared is what the
+rectangles mean — a motion region says where to watch, a privacy mask is burned
+into the stream and is therefore in the recording and in every other viewer's
+picture, a zone is where people are counted. `stageGeom` is the one mapping
+between main-stream pixels and the picture on screen, shared by `mountRegions`
+and `mountLines` (the counting lines) so two editors on one picture cannot
+disagree about where it is. `mj-line.js` is the lines' pure half: majestic
+refuses the whole lines string over one bad entry, silently, so the editor
+writes only what it parses -- under the camera's own `x-shapes` `maxItems`
+and `namePattern`, which the page checks against and never restates -- and the arrow into each line's "in" side is a sign
+convention that is tested rather than eyeballed.
 
 **When you'd touch this code:**
 

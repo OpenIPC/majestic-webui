@@ -33,7 +33,7 @@ window.MajesticFocus = (function () {
 	 * comfortably shorter or the motion stutters as each pulse lapses before the
 	 * next arrives.
 	 *
-	 * Deliberately not isp.autofocus.pulse, which the camera reports and which
+	 * Deliberately not ptz.pulse, which the camera reports and which
 	 * sizes a single operator nudge. Here the value is a timeout, and the
 	 * default 500 ms would leave a lens creeping half a second past the release
 	 * -- on a lens this is overshoot the operator then has to correct. */

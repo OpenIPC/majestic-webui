@@ -130,6 +130,13 @@ because it can display only one agreement. **Hiding is not access control**: the
 page answers a direct link exactly as before, which is what a bookmark and the
 webhook URLs depend on.
 
+**The SMS page ships only on boards with a cellular modem.** It is a firmware
+build option, `BR2_PACKAGE_MAJESTIC_WEBUI_SMS=y` in a device profile's
+defconfig, and `sbin/updatewebui` installs it only over an image that carries
+it (`docs/deploying.md`). The nav entry and the Network page's link to it test
+for `/usr/sbin/modem-at`, so a build without the page links to nothing; an
+install that skips it also takes the forwarding line out of root's crontab.
+
 **SMS reach Telegram through `sbin/sms-forward`**, switched on from the SMS page
 rather than the Telegram page: Telegram's page owns the bot and the chat, the
 SMS page only says whether messages go there. Cron runs it every minute and it

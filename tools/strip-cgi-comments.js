@@ -2,8 +2,9 @@
 'use strict';
 
 /*
- * Remove editor-facing comments from haserl .cgi templates, for the dist build
- * only. The source in git keeps every word; the camera gets none of them.
+ * Remove editor-facing comments from haserl .cgi templates and from the plain
+ * shell scripts that ship beside them, for the dist build only. The source in
+ * git keeps every word; the camera gets none of them.
  *
  * Why this is not `html-minifier --remove-comments`: a .cgi here is haserl, and
  * a .cgi is three languages at once. Literal HTML between the tags, shell
@@ -115,7 +116,11 @@ function scanShellLine(line, quote) {
 	return { quote: q, heredocs };
 }
 
-function stripShell(code, where) {
+/* `html` says whether a heredoc body is markup headed for a browser. It is in a
+ * template, where what a heredoc writes is the page; in a plain script it is a
+ * message, a JSON reply or a config file, and a `<!--` there is data. */
+function stripShell(code, where, html) {
+	if (html === undefined) html = true;
 	const lines = code.split('\n');
 	const out = [];
 	let quote = null;
@@ -127,7 +132,7 @@ function stripShell(code, where) {
 	let body = [];
 	const flushBody = () => {
 		if (body.length) {
-			out.push(stripHtmlComments(body.join('\n')));
+			out.push(html ? stripHtmlComments(body.join('\n')) : body.join('\n'));
 			body = [];
 		}
 	};
@@ -143,7 +148,10 @@ function stripShell(code, where) {
 			}
 			continue;
 		}
-		if (!quote && /^[ \t]*#/.test(line)) continue;
+		/* Not after a continued line: there the comment is what ENDS the
+		 * command, and lifting it out would join the next line onto it. */
+		const continued = out.length && /(^|[^\\])(\\\\)*\\$/.test(out[out.length - 1]);
+		if (!quote && !continued && /^[ \t]*#/.test(line)) continue;
 		out.push(line);
 		const r = scanShellLine(line, quote);
 		quote = r.quote;
@@ -194,6 +202,38 @@ function stripCgi(src, where) {
 		}
 		i = k + 2;
 	}
+}
+
+/* A plain shell script: sbin/, bin/, p/*.sh, and the j/*.cgi endpoints, which
+ * are .cgi by name only -- majestic execs them and they print JSON. They have
+ * no `<%`, so stripCgi reads the whole file as literal markup and finds nothing
+ * to take, which is how 66 KB of comments in j/ shipped past the gate built to
+ * stop them. The shebang is the one `#` line that is not a comment. */
+const SH_SHEBANG = /^#![ \t]*\S*\/(?:ash|sh)(?:\s|$)/;
+
+function isShellScript(src) {
+	return SH_SHEBANG.test(src.slice(0, src.indexOf('\n') + 1 || src.length));
+}
+
+function stripScript(src, where) {
+	where = where || '<input>';
+	const nl = src.indexOf('\n');
+	if (SH_SHEBANG.test(src) && nl !== -1) {
+		return src.slice(0, nl + 1) + stripShell(src.slice(nl + 1), where, false);
+	}
+	return stripShell(src, where, false);
+}
+
+/* What the build does to one file of the payload, decided by the file rather
+ * than by the directory it was found in: a template is a template wherever it
+ * sits, and a .cgi that is really a script is a script. Anything else -- the
+ * locale table in j/, which is data -- comes back untouched. Exported so the
+ * gate in check-no-comments.js asks the same question of the same file. */
+function stripFile(src, name) {
+	const sh = isShellScript(src);
+	if (name.endsWith('.cgi') && (!sh || src.indexOf('<%') !== -1)) return stripCgi(src, name);
+	if (sh || name.endsWith('.sh')) return stripScript(src, name);
+	return src;
 }
 
 /* The lines of a .cgi that are actually shell CODE: inside a code block, not a
@@ -255,20 +295,31 @@ function shellLines(src, where) {
 	}
 }
 
-module.exports = { stripCgi, stripShell, stripHtmlComments, shellLines };
+module.exports = { stripCgi, stripShell, stripScript, stripFile, isShellScript, stripHtmlComments, shellLines };
 
 if (require.main === module) {
 	const fs = require('fs');
 	const path = require('path');
 	const args = process.argv.slice(2);
 	if (!args.length) {
-		console.error('usage: strip-cgi-comments.js <dir>|<file.cgi>...');
+		console.error('usage: strip-cgi-comments.js <dir>|<file>...');
 		process.exit(2);
 	}
 	/* A directory is walked here rather than by find|xargs in the caller: one
 	 * node process instead of a startup per file, no dependence on how xargs
 	 * decides to batch (which would print a summary per batch), and the same
-	 * interface check-no-comments.js takes. */
+	 * interface check-no-comments.js takes.
+	 *
+	 * Templates by name; scripts by name or by shebang, since most of sbin/
+	 * has no extension at all. */
+	const isPayloadShell = (q) => {
+		if (q.endsWith('.cgi') || q.endsWith('.sh')) return true;
+		const fd = fs.openSync(q, 'r');
+		const head = Buffer.alloc(64);
+		const n = fs.readSync(fd, head, 0, 64, 0);
+		fs.closeSync(fd);
+		return isShellScript(head.toString('utf8', 0, n));
+	};
 	const files = [];
 	for (const a of args) {
 		if (fs.statSync(a).isDirectory()) {
@@ -276,7 +327,7 @@ if (require.main === module) {
 				for (const e of fs.readdirSync(d, { withFileTypes: true })) {
 					const q = path.join(d, e.name);
 					if (e.isDirectory()) walk(q);
-					else if (q.endsWith('.cgi')) files.push(q);
+					else if (isPayloadShell(q)) files.push(q);
 				}
 			})(a);
 		} else {
@@ -284,14 +335,14 @@ if (require.main === module) {
 		}
 	}
 	if (!files.length) {
-		console.error('strip-cgi-comments: no .cgi files found -- selection is broken');
+		console.error('strip-cgi-comments: no templates or scripts found -- selection is broken');
 		process.exit(1);
 	}
 	let before = 0;
 	let after = 0;
 	for (const f of files) {
 		const src = fs.readFileSync(f, 'utf8');
-		const stripped = stripCgi(src, f);
+		const stripped = stripFile(src, f);
 		before += Buffer.byteLength(src);
 		after += Buffer.byteLength(stripped);
 		fs.writeFileSync(f, stripped);

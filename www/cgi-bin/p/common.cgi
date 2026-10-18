@@ -1101,6 +1101,10 @@ update_caminfo() {
         	;;
 		# "none", unset and anything unrecognised all land here: no pad.
 	esac
+	# The controls themselves ship only on an image with a motor driver; one
+	# without carries p/motor.cgi as an empty stub, and has nothing to draw a
+	# pad with whatever ptz_control says.
+	[ -s /var/www/cgi-bin/p/motor.cgi ] || { ptz_support=""; ptz_backend=""; ptz_reason=""; }
 
 	# ptz_caps declares which axes the hardware actually has, in the same
 	# declarative U-Boot family as the rest (#227): fw_setenv ptz_caps
@@ -1127,7 +1131,7 @@ update_caminfo() {
 	#
 	# `af_support` combined two facts with very different lifetimes: whether
 	# this board has a motor and a focus axis (U-Boot, effectively permanent)
-	# and whether majestic's engine is switched on (isp.autofocus.enabled,
+	# and whether majestic's engine is switched on (ptz.enabled,
 	# changed from the settings page whenever anybody likes). The whole file is
 	# invalidated by caminfo_stale(), which compares majestic's pid and start
 	# time -- and saving a config key is a SIGHUP reload, not a restart, so the
@@ -1162,10 +1166,25 @@ update_caminfo() {
 		tz_name="Etc/GMT"; echo "$tz_name" > /etc/timezone
 	fi
 
-	local variables="flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
+	# Whether this majestic has counting at all: a property of the binary, so
+	# it lives here, re-read whenever majestic is (caminfo_stale). Whether it
+	# is switched ON is configuration, and the Counting page asks for that
+	# itself. mj_cfg answers 1 for a key the daemon does not have, and 2 for a
+	# daemon that could not be asked -- which is not "no": that is recorded as
+	# "ask", and recheck_counting asks again later rather than the entry
+	# staying hidden until majestic restarts.
+	counting_support=""
+	counting_asked=""
+	mj_cfg counting.enabled >/dev/null
+	case $? in
+		0) counting_support="1" ;;
+		2) counting_support="ask"; counting_asked=$(date +%s) ;;
+	esac
+
+	local variables="counting_asked counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
-	rm -f ${sysinfo_file}
+	rm -f ${sysinfo_file} "$counting_file"
 
 	# Through shq, because this file is SOURCED on every request and several of
 	# these values come off the device or out of a form. The line this replaced
@@ -1196,6 +1215,9 @@ mj_bin_file=/usr/bin/majestic
 log_file=/tmp/webui/logfile.txt
 signature_file=/tmp/webui/signature.txt
 sysinfo_file=/tmp/webui/sysinfo.txt
+# recheck_counting's answer, kept beside the record rather than in it, so the
+# one-key re-ask never rewrites the file a full rebuild may be writing.
+counting_file=/tmp/webui/counting.txt
 
 [ ! -d /etc/webui ] && mkdir -p /etc/webui
 [ ! -d /tmp/webui ] && mkdir -p /tmp/webui
@@ -1268,11 +1290,39 @@ caminfo_stale() {
 	pidof majestic >/dev/null 2>&1
 }
 
+# An answer majestic could not give yet (counting_support "ask") is asked
+# again: that one key, in its own file, and at most once a minute. Not the
+# whole record on every page -- a daemon that is down, or a build that answers
+# 401 to the camera itself, would otherwise cost the full rebuild and a curl
+# that can wait 2 s on each page of the UI somebody is using to fix it.
+recheck_counting() {
+	[ "$counting_support" = ask ] || return 0
+	local now age tmp
+	now=$(date +%s)
+	age=$(( now - ${counting_asked:-0} ))
+	[ "$age" -ge 0 ] && [ "$age" -lt 60 ] && return 0
+	mj_cfg counting.enabled >/dev/null
+	case $? in
+		0) counting_support="1" ;;
+		1) counting_support="" ;;
+	esac
+	counting_asked=$now
+	# Whole, then renamed into place: a reader sees the old file or the new
+	# one. update_caminfo removes it, so a rebuild's own answer stands.
+	tmp="${counting_file}.$$"
+	{
+		conf_write counting_support "$counting_support"
+		conf_write counting_asked "$counting_asked"
+	} > "$tmp" 2>/dev/null && mv -f "$tmp" "$counting_file" || rm -f "$tmp"
+}
+
 include $sysinfo_file
 if [ ! -f $sysinfo_file ] || caminfo_stale; then
 	update_caminfo
 fi
 include $sysinfo_file
+include "$counting_file"
+recheck_counting
 
 pagename=$(basename "$SCRIPT_NAME")
 pagename="${pagename%%.*}"

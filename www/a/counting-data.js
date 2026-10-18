@@ -1,0 +1,261 @@
+// What the Counting page makes of majestic's counting answers, kept away from
+// the DOM so it can be tested.
+//
+// The one thing this must never do is turn "not counted" into "nobody came".
+// The camera's history (GET /api/v1/counting/history) lists only the hours it
+// has: an hour the camera was off, had no card and had restarted since, or ran
+// under other lines is simply missing from the answer, and an hour that was
+// counted for ten minutes says so in `covered`. A chart that filled the gaps
+// with zeroes would draw a closed shop on a day the camera was unplugged, and
+// nothing on screen could tell the two apart. So every slot of the requested
+// range comes back as one of three things -- counted, partly counted, or not
+// counted -- and only the first two carry numbers.
+(function () {
+	'use strict';
+
+	const HOUR = 3600;
+	// How much of a slot has to have been counted for it to be drawn as
+	// counted: not all of it, because the camera counts in whole seconds of
+	// analysed frames and the slot still running is measured against a clock
+	// a beat ahead of the camera's -- but close enough that a gap of more than
+	// a minute in an hour is drawn as one.
+	const FULL = 0.98;
+
+	// The local midnight `days` calendar days before the one at or before
+	// `t`: a daylight-saving change makes one of those days 23 or 25 hours
+	// long, and stepping back by 86400 seconds would land beside midnight.
+	function daysBack(t, days) {
+		const d = new Date(t * 1000);
+		d.setHours(0, 0, 0, 0);
+		d.setDate(d.getDate() - days);
+		return Math.floor(d.getTime() / 1000);
+	}
+
+	// The local midnight at or before unix second `t`, as the camera's own
+	// `step=day` buckets are: the start of the calendar day, which on a
+	// daylight-saving change is not 24 hours from the one before.
+	function dayStart(t) {
+		const d = new Date(t * 1000);
+		d.setHours(0, 0, 0, 0);
+		return Math.floor(d.getTime() / 1000);
+	}
+
+	function nextSlot(t, step) {
+		if (step === 'hour') return t + HOUR;
+		const d = new Date(t * 1000);
+		d.setDate(d.getDate() + 1);
+		d.setHours(0, 0, 0, 0);
+		return Math.floor(d.getTime() / 1000);
+	}
+
+	// Whether a bucket carries every reading it should, each a number: a line
+	// with no `in`, a zone that is null, or a dwell that is not a list of
+	// counts is not a reading of them, and a bucket missing one is treated as
+	// not counted rather than drawn with zeroes where the gaps are.
+	const num = (v) => typeof v === 'number' && isFinite(v) && v >= 0;
+	function wellFormed(b) {
+		return Array.isArray(b.lines) && Array.isArray(b.zones) &&
+			b.lines.every((l) => l && typeof l === 'object' && num(l.in) && num(l.out)) &&
+			b.zones.every((z) => z && typeof z === 'object' && num(z.entered) && num(z.peak) &&
+				num(z.mean) && Array.isArray(z.dwell) && z.dwell.every(num));
+	}
+
+	// Every slot from `from` to `to` (unix seconds), each matched to the bucket
+	// the camera returned for it, or marked as not counted.
+	//
+	//   { t, state: 'none' }                       no data for this slot
+	//   { t, state: 'part'|'full', covered, lines, zones }
+	//
+	// `full` is a slot counted for all of its length, `part` one counted for
+	// some of it; the page draws the difference, because 3 people in an hour
+	// counted for ten minutes is not 3 people that hour.
+	function slots(history, from, to, now) {
+		const step = history && history.step === 'day' ? 'day' : 'hour';
+		// Each bucket goes to the slot that holds its start, not to one whose
+		// start equals it: the camera's days (and, in a half-hour time zone,
+		// its hours) begin at the camera's midnight, which is the browser's
+		// only when both keep the same time zone. Matched by key, a camera
+		// viewed from another zone would have every day "not counted".
+		const buckets = ((history && history.buckets) || [])
+			.filter((b) => b && typeof b.t === 'number' && isFinite(b.t))
+			.sort((a, b) => a.t - b.t);
+		let k = 0;
+		const out = [];
+		let t = step === 'day' ? dayStart(from) : Math.floor(from / HOUR) * HOUR;
+		for (let guard = 0; t <= to && guard < 2000; guard++) {
+			const end = nextSlot(t, step);
+			while (k < buckets.length && buckets[k].t < t) k++;
+			// One bucket a slot: a second in the same slot (two camera days
+			// across a daylight-saving change) is left out, not added in.
+			const b = k < buckets.length && buckets[k].t < end ? buckets[k] : null;
+			while (k < buckets.length && buckets[k].t < end) k++;
+			// A bucket that does not carry its lines and zones is not a
+			// reading of them: drawn, its gaps would read as zeroes.
+			if (!b || !wellFormed(b)) {
+				out.push({ t: t, state: 'none' });
+			} else {
+				// The slot still running is only as long as it has been so
+				// far; an hour that started twenty minutes ago and was counted
+				// for all twenty is a full one.
+				const span = Math.max(1, Math.min(end, now || end) - t);
+				// No coverage figure is no evidence the slot was counted: the
+				// numbers beside it cannot be told from a slot nobody watched.
+				const covered = Math.max(0, +b.covered || 0);
+				out.push({
+					t: t,
+					state: covered >= span * FULL ? 'full' : covered > 0 ? 'part' : 'none',
+					covered: covered,
+					lines: b.lines,
+					zones: b.zones,
+				});
+			}
+			t = end;
+		}
+		return out;
+	}
+
+	// Sums over the slots that were counted. `known` is how many of them there
+	// were; with none, the totals are not zero, they are unknown, and the
+	// caller says so rather than printing a 0.
+	function totals(list, nLines, nZones) {
+		const r = {
+			known: 0,
+			lines: Array.from({ length: nLines }, () => ({ in: 0, out: 0 })),
+			zones: Array.from({ length: nZones }, () => ({ entered: 0, peak: 0, dwell: [] })),
+		};
+		for (const s of list) {
+			if (s.state === 'none') continue;
+			r.known++;
+			s.lines.forEach((l, i) => {
+				if (!r.lines[i]) return;
+				r.lines[i].in += +l.in || 0;
+				r.lines[i].out += +l.out || 0;
+			});
+			s.zones.forEach((z, i) => {
+				const o = r.zones[i];
+				if (!o) return;
+				o.entered += +z.entered || 0;
+				o.peak = Math.max(o.peak, +z.peak || 0);
+				(z.dwell || []).forEach((n, k) => { o.dwell[k] = (o.dwell[k] || 0) + (+n || 0); });
+			});
+		}
+		return r;
+	}
+
+	// How much of the period was counted, in words for a tile: null when all
+	// of it was, so a fully counted period says nothing extra. "0 today" over a
+	// day the camera counted for ten minutes of is the same wrong answer as a
+	// gap drawn as zero, told in a number instead of a bar.
+	function coverage(list, step, now) {
+		let counted = 0, total = 0;
+		for (const s of list) {
+			const end = step === 'hour' ? s.t + HOUR : nextSlot(s.t, 'day');
+			const span = Math.max(0, Math.min(end, now || end) - s.t);
+			total += span;
+			if (s.state !== 'none') counted += Math.min(span, s.covered || 0);
+		}
+		if (!total || counted >= total * FULL) return null;
+		if (!counted) return 'not counted';
+		const unit = step === 'hour' ? HOUR : 86400;
+		const of = Math.max(1, Math.round(total / unit));
+		// Partial is never rounded up to all of it: "1 of 1 hour" for 31
+		// minutes of one is the claim this sentence exists to avoid. Where
+		// whole units would say that, or say nothing, the next smaller unit
+		// is used.
+		const word = step === 'hour' ? 'hour' : 'day';
+		const ofWords = of + ' ' + word + (of === 1 ? '' : 's');
+		const whole = Math.floor(counted / unit);
+		if (whole < 1 || whole >= of) {
+			const small = step === 'hour' ? 60 : HOUR, sw = step === 'hour' ? 'min' : 'h';
+			return 'counted for ' + Math.max(1, Math.floor(counted / small)) + ' ' + sw + ' of ' + ofWords;
+		}
+		return 'counted for ' + whole + ' of ' + ofWords;
+	}
+
+	function fmtSecs(s) {
+		if (s < 60) return s + ' s';
+		if (s < 3600) return Math.round(s / 60) + ' min';
+		return Math.round(s / 360) / 10 + ' h';
+	}
+
+	// The dwell histogram's bins, in words: "under 10 s", "10 s – 30 s", …,
+	// "over 30 min".
+	function dwellBins(edges) {
+		const e = Array.isArray(edges) ? edges : [];
+		if (!e.length) return [];
+		const out = ['under ' + fmtSecs(e[0])];
+		for (let i = 1; i < e.length; i++) out.push(fmtSecs(e[i - 1]) + ' – ' + fmtSecs(e[i]));
+		out.push('over ' + fmtSecs(e[e.length - 1]));
+		return out;
+	}
+
+	// The middle stay, from a histogram: the bin that holds the median, as
+	// words. Null with no stays at all -- "no one stayed" and "nobody was
+	// counted" are both "no median", and the caller knows which.
+	function medianBin(dwell, edges) {
+		const n = dwell.reduce((a, b) => a + (b || 0), 0);
+		if (!n) return null;
+		let acc = 0;
+		const words = dwellBins(edges);
+		for (let i = 0; i < dwell.length; i++) {
+			acc += dwell[i] || 0;
+			if (acc * 2 >= n) return words[i] || null;
+		}
+		return null;
+	}
+
+	// What GET /api/v1/counting says about whether there is anything to show:
+	//   'unknown'   the camera could not be asked (a failed fetch is no answer)
+	//   'off'       counting is switched off
+	//   'empty'     it is on and has no lines and no zones
+	//   'on'
+	function state(live) {
+		if (!live || typeof live !== 'object' || typeof live.enabled !== 'boolean')
+			return 'unknown';
+		if (!live.enabled) return 'off';
+		// On, but not saying what it counts, is not "nothing to count".
+		if (!Array.isArray(live.lines) || !Array.isArray(live.zones)) return 'unknown';
+		return live.lines.length + live.zones.length ? 'on' : 'empty';
+	}
+
+	// Whether a history answer was counted under the lines and zones the live
+	// answer now has: the camera's buckets are by position, so a history kept
+	// from before the lines were redrawn would put old counts under new names
+	// -- or under the same name, moved or turned round. Both answers carry the
+	// camera's `rules`, which covers names, positions and direction; without
+	// it on either side, nothing says they match.
+	//   'same'     both name the same rules
+	//   'differ'   both name rules, and they are not the same
+	//   'unknown'  one of them does not say
+	function sameLayout(hist, live) {
+		const r = (x) => (x && typeof x.rules === 'string' && x.rules !== '' ? x.rules : null);
+		const a = r(hist), b = r(live);
+		if (a === null || b === null) return 'unknown';
+		return a === b ? 'same' : 'differ';
+	}
+
+	// Whether the camera follows people: Follow switched on, AND a head that
+	// can do it -- the PTZ pad's own test (ptz-follow.js `offered`), not a
+	// copy of it. A stale ptz.track on a camera with no such head follows
+	// nobody, and a WebUI built without the PTZ pages has no head to drive.
+	function canFollow(track, caps, follow) {
+		const F = follow || (typeof module === 'object' && module.exports
+			? require('./ptz-follow.js') : (typeof self !== 'undefined' && self.MajesticPtzFollow));
+		return track === true && !!F && F.offered(caps);
+	}
+
+	const api = {
+		slots: slots,
+		totals: totals,
+		dwellBins: dwellBins,
+		medianBin: medianBin,
+		state: state,
+		dayStart: dayStart,
+		daysBack: daysBack,
+		coverage: coverage,
+		sameLayout: sameLayout,
+		canFollow: canFollow,
+	};
+	if (typeof module === 'object' && module.exports) module.exports = api;
+	if (typeof window === 'object') window.MjCountingData = api;
+})();

@@ -237,6 +237,16 @@ tests' `SRCS` lists; `preview-page.js` does not know they exist.
 
 ## PTZ
 
+**Only an image with a motor driver carries any of this.** Firmware leaves the
+PTZ files out unless gpio-motors or the majestic-af plugin is built in, and
+`sbin/updatewebui` follows the image (`docs/deploying.md`). `p/motor.cgi` is
+the exception: it is **emptied, never removed**, because `live.cgi` pulls it in
+with `<%in %>`, which haserl opens while parsing the page, before any shell
+around it runs — a missing file is a "Unable to open file" error on the Live
+page whatever `ptz_control` says. `common.cgi` treats an empty `p/motor.cgi`
+as no PTZ, so such an image draws no pad, and no longer says "add the
+majestic-af package", which it could not use.
+
 `p/motor.cgi` (markup only, hidden) + `preview-ptz.js`, which relocates the
 pad(s) into the stage's `#mj-ptz` mount: Pointer Events with capture for
 press-and-hold, arrow keys only while the stage itself has focus (the bar's
@@ -260,7 +270,7 @@ the axes the hardware has (`fw_setenv ptz_caps 'zoom focus'`; unset = all, or pa
 and tilt for `gpiostep`),
 sanitised in `update_caminfo`, honoured by `p/motor.cgi` and enforced again in
 `j/ptz.cgi` (`stop` always allowed; stepped backends zero the missing component).
-**Autofocus** is majestic's engine: with `.isp.autofocus.enabled` true and a focus
+**Autofocus** is majestic's engine: with `.ptz.enabled` true and a focus
 axis, `update_caminfo` sets `af_support`, the pelco pad grows an **AF** button,
 and `j/ptz.cgi` maps it to `GET /autofocus`.
 
@@ -277,9 +287,31 @@ themselves. A Pelco camera needs `fw_setenv ptz_control pelco-d` (or `pelco-xm`)
 answers 503 and the pad says so rather than claiming the camera has no PTZ —
 `mj_ptz` keeps *could not ask* apart from a statement about the hardware, the way
 `mj_cfg` does. A held button is one continuous move, not a train of pulses: each
-request re-arms the camera's auto-stop deadline (`isp.autofocus.pulse`, default
+request re-arms the camera's auto-stop deadline (`ptz.pulse`, default
 500 ms) and the release sends `act=stop`, with the motor stopping on that
 deadline anyway if the release never arrives.
+
+**Every direction on the Live page is a direction on the picture**, and
+`ptz-orient.js` is the one place that turns it into the head's (#691). That
+covers the arrows, the arrow keys, the stick, double-tap and drag. The motors
+know nothing of `image.mirror`, `image.flip` or `image.rotate`, so a camera hung
+upside down and set upright by mirror and flip used to turn its head away from
+every arrow, and a picture on its side panned when the arrow said tilt. The
+camera mirrors and flips at the sensor and turns the picture clockwise
+afterwards. This was measured on an hi3516av300: with a quarter turn in force,
+a mirror shows as the picture turned top to bottom. So the module undoes the turn
+first. `preview-ptz.js` applies it in `move()` (serial verbs, before the speed
+is picked) and `fire()` (stepped `h`/`v`), and the centre/drag plans take it as
+`turn`. The orientation is read fresh from `/api/v1/config.json` rather than
+taken from `mjConfig()`, and read again whenever the page comes back into view,
+because mirror and flip are set on the Settings page, often in another tab.
+**Not known is not upright.** Until the orientation has been read, and after a
+read fails, a direction press is not sent: it asks for the orientation again,
+and the next press moves the head. Stop, zoom and focus never wait. A
+config.json image section that is missing a key is no reading, because the
+camera always reports all three. A pan-only or tilt-only head on a picture
+lying on its side has its pair of arrows moved to the other axis (`lay()`),
+because there its pan moves the picture up and down.
 
 To render either pad without hardware: set the env vars, `touch`+`chmod +x` a
 fake binary for the stepped backends, then remove `/tmp/webui/sysinfo.txt`.

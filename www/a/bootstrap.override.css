@@ -4130,6 +4130,14 @@ button.mj-osd-chip,
 	cursor: grabbing;
 }
 
+/* On a camera that turns, a drag in Fit and Fill steers it (preview-ptz.js):
+   the picture is held, as a pan's would be. The closed hand while it moves is
+   .mj-steering's. */
+.mj-stage.mj-steerable,
+.mj-stage.mj-steerable .mj-stage-media {
+	cursor: grab;
+}
+
 /* Zoom to an area: a crosshair while the Area button is armed, and also
    wherever the picture has nothing to pan — Fit, and Fill on a camera whose
    shape matches the window. A drag there was doing nothing at all, which is
@@ -5415,6 +5423,32 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	cursor: grabbing;
 }
 
+/* The controls over the picture are not the picture. Without a cursor of
+   their own they took the stage's -- the crosshair of Fit and Area, the hand
+   of a picture to pan -- and promised a zoom box or a pan over the PTZ pad,
+   the bar and the stats. Their buttons keep their own. */
+#mj-ptz,
+#mj-bar,
+#mj-stats {
+	cursor: default;
+}
+
+/* The stick is held: an open hand over it, a closed one while it steers --
+   over the whole stage, since the pointer leaves the pad mid-drag and stays
+   the stick's. The handle is held the same way; Bootstrap's pointer on every
+   enabled button outranked its own. */
+.mj-ptz-stick,
+.mj-ptz-stick .mj-ptz-btn:not(:disabled),
+.mj-ptz .mj-ptz-grip:not(:disabled) {
+	cursor: grab;
+}
+
+.mj-stage.mj-steering,
+.mj-stage.mj-steering *,
+.mj-ptz.mj-ptz-dragging .mj-ptz-grip {
+	cursor: grabbing !important;
+}
+
 /* The corner it was put in. Bottom right is where it always stood; the top
    corners start below the chip, the left ones mirror the right. */
 .mj-stage.mj-ptz-bl .mj-ptz,
@@ -5604,6 +5638,33 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 .mj-ptz-sticking .mj-ptz-knob {
 	background: rgba(255, 255, 255, 0.42);
 	transition: none;
+}
+
+/* Centre on a point (preview-ptz.js): a ring where the picture was tapped,
+   gliding to the middle of the picture as the head turns there, then gone. */
+.mj-centre-ring {
+	position: absolute;
+	z-index: 5;
+	width: 2.75rem;
+	height: 2.75rem;
+	margin: -1.375rem 0 0 -1.375rem;
+	border: 2px solid rgba(255, 255, 255, 0.9);
+	border-radius: 50%;
+	box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35), inset 0 0 0 2px rgba(0, 0, 0, 0.25);
+	pointer-events: none;
+	opacity: 1;
+	transition-property: transform, opacity;
+	transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1), ease-out;
+}
+
+.mj-centre-ring.mj-centre-done {
+	opacity: 0;
+}
+
+/* The camera refused the move, or never answered: the ring stops where it
+   is, in the colour of a refusal, and goes. */
+.mj-centre-ring.mj-centre-failed {
+	border-color: #ff8a8a;
 }
 
 .mj-ptz-btn.mj-ptz-on {
@@ -8703,6 +8764,41 @@ a.mj-seg-lbl.active {
 	font-size: 0.8125rem;
 }
 
+/* An address as four octets (ip-octets.js). The boxes share the row the text
+   field had, with the dots between them in the field's own colour, and each
+   is wide enough for 255 and no wider. A number over 255, or a box left empty
+   in an address otherwise filled, is marked on the box itself. */
+.mj-ip4 {
+	display: flex;
+	align-items: center;
+	gap: 0.125rem;
+	max-width: 15rem;
+}
+
+.mj-ip4 .mj-ip4-in {
+	flex: 1 1 0;
+	min-width: 0;
+	padding-left: 0.25rem;
+	padding-right: 0.25rem;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+
+.mj-ip4-dot {
+	flex: none;
+	color: var(--bs-secondary-color);
+	font-weight: 600;
+}
+
+.mj-ip4 .mj-ip4-bad,
+.mj-ip4 .mj-ip4-bad:focus {
+	border-color: var(--bs-danger);
+}
+
+.mj-ip4 .mj-ip4-bad:focus {
+	box-shadow: 0 0 0 0.25rem rgba(var(--bs-danger-rgb), 0.25);
+}
+
 .mj-card-note {
 	max-width: 66ch;
 	margin: 0.5rem 0 0.9rem;
@@ -10367,4 +10463,170 @@ body > main > .container > form > .mj-foot {
 }
 .mj-sun-guess[hidden] {
 	display: none;
+}
+
+/* ── Counting (counting.cgi, a/counting.js) ─────────────────────────────── */
+#page-counting .ct-axis {
+	fill: var(--bs-secondary-color);
+	font-size: 10px;
+}
+/* A slot the camera did not count: hatched, with no bars, and keyed "not
+   counted", so it cannot be read as a slot in which nobody came. The fill is
+   the pattern a/counting.js draws; the stripes are the border colour, which
+   stands off the card on both themes. */
+#page-counting .ct-hatch {
+	fill: var(--bs-border-color);
+}
+#page-counting .ct-key {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.9rem;
+	margin-top: 0.25rem;
+}
+#page-counting .ct-key-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+#page-counting .ct-swatch {
+	display: inline-block;
+	width: 0.7rem;
+	height: 0.7rem;
+	border-radius: 2px;
+}
+#page-counting .ct-swatch-none {
+	background: repeating-linear-gradient(45deg, var(--bs-border-color) 0 2px, transparent 2px 4px);
+	border: 1px solid var(--bs-border-color);
+}
+#page-counting .ct-dwell {
+	display: grid;
+	gap: 0.3rem;
+	margin-top: 0.4rem;
+	max-width: 36rem;
+}
+#page-counting .ct-dwell-row {
+	display: grid;
+	grid-template-columns: 8rem 1fr 3rem;
+	align-items: center;
+	gap: 0.6rem;
+}
+#page-counting .ct-dwell-bar {
+	height: 0.6rem;
+	background: var(--bs-secondary-bg);
+	border-radius: 3px;
+	overflow: hidden;
+}
+#page-counting .ct-dwell-fill {
+	display: block;
+	height: 100%;
+	background: var(--st-c3);
+}
+#page-counting .ct-dwell-n {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+#page-counting .ct-event {
+	display: flex;
+	gap: 0.75rem;
+	padding: 0.2rem 0;
+	border-bottom: 1px solid var(--bs-border-color);
+}
+#page-counting .ct-event:last-child {
+	border-bottom: 0;
+}
+#page-counting .ct-event-t {
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+/* ── Counting lines on the picture (mj-settings.js:mountLines) ──────────────
+   An SVG over the stage, the same box as the region layer. Lines take the
+   pointer only on their wide invisible hit stroke and their end grips, so a
+   press beside a line still reaches the catcher and draws a new one. */
+.mj-ct-svg {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+.mj-ct-svg.mj-ct-off,
+.mj-ct-svg.mj-ct-off * {
+	pointer-events: none;
+}
+.mj-ct-hit {
+	stroke: transparent;
+	stroke-width: 16;
+	pointer-events: stroke;
+	cursor: move;
+	touch-action: none;
+}
+.mj-ct-stroke {
+	stroke: rgba(var(--bs-primary-rgb), 0.95);
+	stroke-width: 3;
+	pointer-events: none;
+}
+.mj-ct-in {
+	stroke: #f5b301;
+	stroke-width: 2.5;
+	pointer-events: none;
+}
+.mj-ct-arrowhead {
+	fill: #f5b301;
+}
+.mj-ct-label {
+	fill: #fff;
+	font-size: 12px;
+	paint-order: stroke;
+	stroke: rgba(0, 0, 0, 0.65);
+	stroke-width: 3px;
+	pointer-events: none;
+}
+.mj-ct-grip {
+	fill: #fff;
+	stroke: rgba(var(--bs-primary-rgb), 0.95);
+	stroke-width: 2;
+	pointer-events: all;
+	cursor: grab;
+	touch-action: none;
+	opacity: 0;
+}
+.mj-ct-sel .mj-ct-grip,
+.mj-ct-line:hover .mj-ct-grip {
+	opacity: 1;
+}
+.mj-ct-sel .mj-ct-stroke {
+	stroke-width: 4;
+}
+.mj-ct-dead .mj-ct-stroke {
+	stroke: var(--bs-danger);
+	stroke-dasharray: 6 4;
+}
+.mj-ct-mode {
+	margin-bottom: 0.75rem;
+}
+.mj-ct-lines {
+	display: grid;
+	gap: 0.4rem;
+}
+.mj-ct-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.25rem 0.35rem;
+	border-radius: var(--bs-border-radius);
+}
+.mj-ct-row.mj-ct-sel {
+	background: var(--bs-tertiary-bg);
+}
+.mj-ct-name {
+	width: 9rem;
+}
+.mj-ct-co {
+	font-variant-numeric: tabular-nums;
+	margin-right: auto;
+}
+.mj-ct-why {
+	flex-basis: 100%;
 }

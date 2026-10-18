@@ -23,8 +23,8 @@ check('the fox sentence',
 group('the Sofia hash a client sends');
 
 const vectors = [
-	// The page never sends this one — an empty box keeps what is stored —
-	// but it is the shortest input MD5 has.
+	// What a client sends for an empty password, so what the row's No
+	// password switch saves. An empty box keeps what is stored instead.
 	['', 'tlJwpbo6'],
 	['correct horse', 'sX6rDLaa'],
 	['admin', '6QNMIQGe'],

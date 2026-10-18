@@ -190,7 +190,7 @@ has_cap() {
 # attempt report its own failure; only a camera that answered and said no
 # withdraws it.
 af_configured() {
-	_af=$(mj_cfg isp.autofocus.enabled)
+	_af=$(mj_cfg ptz.enabled)
 	case $? in
 		0) [ "$_af" = "true" ] ;;
 		1) return 1 ;;
