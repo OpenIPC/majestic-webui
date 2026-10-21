@@ -89,8 +89,12 @@
 			.then(function (r) { return r.ok ? r.json() : null; })
 			.then(function (c) {
 				const n = c && c.nightMode;
+				/* Parked in all three spellings ircut-check.js reads as off: an
+				 * unquoted `off` in a hand-edited file arrives as false. */
+				const parked = n && (n.irCut === 'off' || n.irCut === false ||
+					n.irCut === 'false');
 				return !!n && Number.isInteger(n.irCutPin1) &&
-					Number.isInteger(n.irCutPin2) && n.irCut !== 'off';
+					Number.isInteger(n.irCutPin2) && !parked;
 			}, function () { return false; }),
 		new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 4000); }),
 	]);
