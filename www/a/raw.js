@@ -49,6 +49,63 @@
 	}
 
 
+	/*
+	 * Dust on the sensor glass: the camera measures, the editor shows it.
+	 *
+	 * Each call answers with the camera's JSON or throws a sentence the editor
+	 * shows as it is. The camera says why it refused in the status line, so
+	 * that is passed on where it says something; the codes it uses for things
+	 * an operator can act on get a sentence of their own.
+	 */
+	const DUST = '/api/v1/optics/dust';
+
+	function dustCall(url, method) {
+		return apiFetch(url, { method: method || 'GET', credentials: 'same-origin' })
+			.then(function (r) {
+				if (r.ok) return r.status === 204 ? null : r.json();
+				const why = (r.statusText || '').trim();
+				if (r.status === 404 && url.indexOf('compare') >= 0)
+					throw new Error('No "before" has been saved on this camera yet. ' +
+						'Save one, clean the glass, then compare.');
+				if (r.status === 409)
+					throw new Error('The saved "before" was measured differently' +
+						(why ? ' (' + why.replace(/^The baseline was /, '').toLowerCase() + ')' : '') +
+						'. Save a new one before cleaning.');
+				if (r.status === 503)
+					throw new Error((why ? why + '. ' : 'The camera is busy. ') +
+						'Wait a moment and ask again.');
+				throw new Error(why || ('The camera answered ' + r.status + '.'));
+			});
+	}
+
+	/* Which glass? moves the IR-cut filter, so it is offered only where there
+	 * is a filter this camera drives: both pads configured and not parked. The
+	 * configuration leaves out a pad nobody set, which is what makes absent
+	 * mean "not wired" rather than "not answered". Asked at load, with the same
+	 * deadline the focus probes have, and a camera that does not answer simply
+	 * goes without the button. */
+	const filterMovable = Promise.race([
+		apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
+			.then(function (r) { return r.ok ? r.json() : null; })
+			.then(function (c) {
+				const n = c && c.nightMode;
+				return !!n && Number.isInteger(n.irCutPin1) &&
+					Number.isInteger(n.irCutPin2) && n.irCut !== 'off';
+			}, function () { return false; }),
+		new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 4000); }),
+	]);
+
+	function dustHost(movable) {
+		const out = {
+			measure: function () { return dustCall(DUST); },
+			save: function () { return dustCall(DUST, 'POST'); },
+			compare: function () { return dustCall(DUST + '?compare=1'); },
+			forget: function () { return dustCall(DUST, 'DELETE'); },
+		};
+		if (movable) out.sites = function () { return dustCall(DUST + '/sites', 'POST'); };
+		return out;
+	}
+
 	/* The editor could not be fetched. Say so once, and still offer the frame:
 	 * a camera with no route out can capture and save perfectly well, it just
 	 * cannot develop. */
@@ -123,7 +180,7 @@
 		return out;
 	}
 
-	function mount(focusReady, motorReady) {
+	function mount(focusReady, motorReady, movable) {
 		$('raw-fallback').hidden = true;
 		$('raw-loading').hidden = false;
 		const host = $('raw-editor-host');
@@ -176,6 +233,10 @@
 			 * editor perfectly well, so passing this regardless would grow a
 			 * Focus tab that could only apologise. */
 			focus: focusHost(focusReady, motorReady),
+			/* Dust on the sensor glass. Offered on every camera that reaches
+			 * this page: the camera measures on raw where it can and on its
+			 * picture otherwise, and says plainly when it can do neither. */
+			dust: dustHost(movable),
 			// The editor covers the navbar, so its Back button is the only way
 			// out of this page. It goes where the nav entry came from.
 			onExit: function () { location.href = 'camera.cgi'; },
@@ -207,8 +268,9 @@
 		Promise.all([
 			(f && f.ready) || Promise.resolve(false),
 			(f && f.motor) || Promise.resolve(false),
-		]).then(function (r) { mount(r[0], r[1]); },
-			function () { mount(false, false); });
+			filterMovable,
+		]).then(function (r) { mount(r[0], r[1], r[2]); },
+			function () { mount(false, false, false); });
 	});
 
 	// Kept reachable for a console poke and so the editor is not garbage from
