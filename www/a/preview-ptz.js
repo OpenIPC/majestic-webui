@@ -190,6 +190,111 @@
 				.then(() => { followIn.disabled = false; followRefresh(); });
 		});
 	}
+	// Presets, the head's stored positions (ptz-presets.js): hidden unless the
+	// camera says the head has them (" presets=1-N"). The list is the camera's
+	// own rows of names, read fresh -- another operator may store or forget one
+	// while this page is open -- at mount, when the page comes back into view,
+	// and after each command. Go, Save and Delete are single presses: a preset
+	// is a place to go, not a move to hold.
+	const presetBox = $('#mj-ptz-presets'), presetSel = $('#mj-ptz-preset-sel');
+	const PP = window.MajesticPtzPresets;
+	if (presetBox && presetSel && PP) {
+		let presetGen = 0, presetMax = 0, presetCfg = null, presetWant = null;
+		const NEW = 'new';
+		const presetRefresh = () => {
+			const gen = ++presetGen;
+			// A failed read is no answer, not a head without presets: the box
+			// stays as it was rather than vanishing on one dropped request.
+			return Promise.all([
+				apiFetch('/ptz', { credentials: 'same-origin', cache: 'no-store' })
+					.then(r => (r.ok ? r.text() : Promise.reject(r.status))),
+				apiFetch('/api/v1/config.json', { credentials: 'same-origin', cache: 'no-store' })
+					.then(r => (r.ok ? r.json() : Promise.reject(r.status))),
+			]).then(([caps, cfg]) => {
+				if (gen !== presetGen) return;
+				presetMax = PP.offered(caps);
+				presetCfg = cfg;
+				presetBox.hidden = !presetMax;
+				if (!presetMax) { showGear(); return; }
+				const keep = presetWant || presetSel.value;
+				presetWant = null;
+				presetSel.replaceChildren();
+				for (const p of PP.list(cfg, presetMax)) {
+					const o = document.createElement('option');
+					o.value = String(p.number);
+					o.textContent = p.name;
+					presetSel.appendChild(o);
+				}
+				const o = document.createElement('option');
+				o.value = NEW;
+				o.textContent = 'New preset\u2026';
+				presetSel.appendChild(o);
+				if ([...presetSel.options].some(x => x.value === keep)) presetSel.value = keep;
+				placeExtras();
+			}).catch(() => { /* no answer: leave it as it was */ });
+		};
+		// One command at a time: the buttons are off until the camera has
+		// answered and the list is read back, so two quick "New preset" saves
+		// cannot both pick the same free number. A held move is stopped first
+		// and its stop answered before the preset goes out -- a stop that
+		// arrived second would halt the head on its way to the preset.
+		const presetBtns = presetBox.querySelectorAll('[data-preset]');
+		const presetBusy = (on) => presetBtns.forEach(b => { b.disabled = on; });
+		const presetSend = (op, n, name, want) => {
+			presetBusy(true);
+			return Promise.resolve(stopHold(null)).catch(() => {})
+				.then(() => apiFetch(PP.query(op, n, name), { method: 'POST', credentials: 'same-origin' }))
+				.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+				// The body decides, as in move(): a bodyless 200 is a camera
+				// whose sensor driver did not come up, not a stored preset.
+				.then(t => {
+					const body = t.trim();
+					if (body === 'unavailable') say(LENS_SHUT);
+					else if (!body) return Promise.reject(new Error('empty'));
+					else if (want) presetWant = want;
+				})
+				.catch(() => say('The camera did not take the preset command.', true))
+				.then(() => presetRefresh())
+				.catch(() => {})
+				.then(() => presetBusy(false));
+		};
+		presetBtns.forEach(btn => btn.addEventListener('click', () => {
+			const op = btn.dataset.preset, sel = presetSel.value;
+			if (!sel) return;
+			const label = presetSel.selectedOptions[0] ? presetSel.selectedOptions[0].textContent : '';
+			if (op === 'go') {
+				if (sel !== NEW) presetSend('go', Number(sel));
+				return;
+			}
+			if (op === 'set') {
+				if (sel === NEW) {
+					const n = PP.freeNumber(presetCfg, presetMax);
+					if (!n) { say('Every preset the head offers is in use: delete one first.', true); return; }
+					const name = prompt('Name for this position', 'Preset ' + n);
+					if (name === null) return;
+					presetSend('set', n, name, String(n));
+					return;
+				}
+				const n = Number(sel);
+				const ask = n === 1
+					? 'Store where the head is now as Home? The head returns there by itself after a while.'
+					: 'Store where the head is now as \u201c' + label + '\u201d?';
+				if (confirm(ask)) presetSend('set', n, '');
+				return;
+			}
+			if (op === 'clear' && sel !== NEW) {
+				const n = Number(sel);
+				const ask = n === 1
+					? 'Forget Home? The head may have no position to return to.'
+					: 'Forget \u201c' + label + '\u201d?';
+				if (confirm(ask)) presetSend('clear', n);
+			}
+		}));
+		presetRefresh();
+		document.addEventListener('visibilitychange', () => {
+			if (document.visibilityState === 'visible') presetRefresh();
+		});
+	}
 	// Folded on a small stage. The pad is about 140px square and the zoom/focus
 	// cluster as tall again, so on a phone they covered a sixth of the picture or
 	// more for somebody who came to look at it -- and a share's guest, who rarely
@@ -249,7 +354,7 @@
 	const isSmall = () => !!(small && small.matches);
 	// Its bottom-left cell, for a handle that has no centre to take.
 	const gripCorner = !!(pad && pad.children.length > 6 && pad.children[6].classList.contains('mj-ptz-void'));
-	const hasExtras = () => !!(followBox && !followBox.hidden && followBox.isConnected);
+	const hasExtras = () => [followBox, $('#mj-ptz-presets')].some(b => !!(b && !b.hidden && b.isConnected));
 	const popOpen = (on) => {
 		more.hidden = !on;
 		gear.setAttribute('aria-expanded', String(on));
@@ -263,7 +368,7 @@
 	// only when the popover would hold something.
 	function placeExtras() {
 		const home = isSmall() ? more : mount;
-		for (const box of [followBox]) {
+		for (const box of [followBox, $('#mj-ptz-presets')]) {
 			if (!box || box.hidden) continue;
 			if (box.parentNode !== home) {
 				if (home === mount) mount.insertBefore(box, fold.parentNode === mount ? fold : null);
@@ -504,7 +609,7 @@
 		if (pct != null && PS) url += PS.query(verb, pct);
 		if (!isStop && outstanding >= 3) return;
 		outstanding++;
-		apiFetch(url, { method: 'POST', credentials: 'same-origin' })
+		return apiFetch(url, { method: 'POST', credentials: 'same-origin' })
 			// The body decides, not the status. majestic answers /ptz with a
 			// BODYLESS 200 when the sensor driver did not come up, and the
 			// plugin answers `unavailable` — also 200 — when the focus port is
@@ -762,7 +867,8 @@
 		// no stop and the nudge completes; anything longer is a sweep that has to
 		// be told to stop or the motor runs on to its deadline.
 		const isZoom = btn && (btn.dataset.act === 'wide' || btn.dataset.act === 'tele');
-		if (btn && btn.dataset.act && (isZoom || heldMs >= fineMs)) move('stop', 0, true);
+		let stopped;
+		if (btn && btn.dataset.act && (isZoom || heldMs >= fineMs)) stopped = move('stop', 0, true);
 		// Letting go of a zoom is what books a focus pass: majestic waits for
 		// the wire to go quiet (700 ms) after the move's own deadline and then
 		// runs one. Nothing told the operator that, so a picture that went soft
@@ -785,6 +891,7 @@
 			}
 		}
 		if (afState) { afState.release(); }
+		return stopped;
 	}
 
 	// The centre is a single press on both pads: the stepped backends call it
@@ -803,7 +910,7 @@
 	mount.addEventListener('contextmenu', e => e.preventDefault());
 
 	// The fold and the gear are the mount's own, not moves.
-	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip)').forEach(btn => {
+	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip):not([data-preset])').forEach(btn => {
 		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco

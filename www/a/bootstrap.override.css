@@ -5543,6 +5543,39 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	white-space: nowrap;
 }
 
+/* Presets: the head's stored positions, picked from a list and sent with one
+   press each. Same glass as Follow under the pad. */
+.mj-ptz-presets {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 6px;
+}
+
+.mj-ptz-preset-sel {
+	width: 100%;
+	font-size: 0.75rem;
+	color: #fff;
+	background: rgba(255, 255, 255, 0.08);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-radius: var(--bs-border-radius-sm);
+}
+
+.mj-ptz-preset-sel option {
+	color: initial;
+}
+
+.mj-ptz-preset-row {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 2px;
+}
+
+.mj-ptz-preset-btn {
+	height: 1.75rem;
+	font-size: 0.6875rem;
+}
+
 .mj-ptz-speed input[type="range"] {
 	width: 100%;
 	accent-color: var(--bs-primary);
