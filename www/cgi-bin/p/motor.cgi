@@ -196,6 +196,19 @@ focus_label="Focus"
 		<label class="form-check-label" for="mj-ptz-follow-in">Follow</label>
 	</div>
 </div>
+<!-- Presets: the head's stored positions (OpenIPC/majestic-af#37). Revealed by
+     preview-ptz.js only when GET /ptz says " presets=1-N" (ptz-presets.js):
+     a head without stored positions has nothing to go to. The list is the
+     camera's rows of names; Home is preset 1, the position the head returns
+     to by itself. Its buttons are single presses, never held moves. -->
+<div id="mj-ptz-presets" class="mj-ptz-speed mj-ptz-presets" role="group" aria-label="Presets" hidden>
+	<select id="mj-ptz-preset-sel" class="mj-ptz-preset-sel" aria-label="Preset"></select>
+	<div class="mj-ptz-preset-row">
+		<button type="button" class="mj-ptz-fnbtn mj-ptz-preset-btn" data-preset="go" title="Go to this preset">Go</button>
+		<button type="button" class="mj-ptz-fnbtn mj-ptz-preset-btn" data-preset="set" title="Store where the head is now, as this preset or as a new one">Save</button>
+		<button type="button" class="mj-ptz-fnbtn mj-ptz-preset-btn" data-preset="clear" title="Forget this preset">Delete</button>
+	</div>
+</div>
 <% fi %>
 <% else %>
 <% if has_cap pan || has_cap tilt; then %>
@@ -271,4 +284,5 @@ focus_label="Focus"
 <script src="/a/ptz-orient.js"></script>
 <script src="/a/ptz-centre.js"></script>
 <script src="/a/ptz-follow.js"></script>
+<script src="/a/ptz-presets.js"></script>
 <script src="/a/preview-ptz.js"></script>

@@ -190,6 +190,90 @@
 				.then(() => { followIn.disabled = false; followRefresh(); });
 		});
 	}
+	// Presets, the head's stored positions (ptz-presets.js): hidden unless the
+	// camera says the head has them (" presets=1-N"). The list is the camera's
+	// own rows of names, read fresh -- another operator may store or forget one
+	// while this page is open -- at mount, when the page comes back into view,
+	// and after each command. Go, Save and Delete are single presses: a preset
+	// is a place to go, not a move to hold.
+	const presetBox = $('#mj-ptz-presets'), presetSel = $('#mj-ptz-preset-sel');
+	const PP = window.MajesticPtzPresets;
+	if (presetBox && presetSel && PP) {
+		let presetGen = 0, presetMax = 0, presetCfg = null;
+		const NEW = 'new';
+		const presetRefresh = () => {
+			const gen = ++presetGen;
+			Promise.all([
+				apiFetch('/ptz', { credentials: 'same-origin', cache: 'no-store' })
+					.then(r => (r.ok ? r.text() : '')),
+				apiFetch('/api/v1/config.json', { credentials: 'same-origin', cache: 'no-store' })
+					.then(r => (r.ok ? r.json() : Promise.reject(r.status))),
+			]).then(([caps, cfg]) => {
+				if (gen !== presetGen) return;
+				presetMax = PP.offered(caps);
+				presetCfg = cfg;
+				presetBox.hidden = !presetMax;
+				if (!presetMax) { showGear(); return; }
+				const keep = presetSel.value;
+				presetSel.replaceChildren();
+				for (const p of PP.list(cfg, presetMax)) {
+					const o = document.createElement('option');
+					o.value = String(p.number);
+					o.textContent = p.name;
+					presetSel.appendChild(o);
+				}
+				const o = document.createElement('option');
+				o.value = NEW;
+				o.textContent = 'New preset\u2026';
+				presetSel.appendChild(o);
+				if ([...presetSel.options].some(x => x.value === keep)) presetSel.value = keep;
+				placeExtras();
+			}).catch(() => { /* no answer: leave it as it was */ });
+		};
+		const presetSend = (op, n, name) => {
+			stopHold(null);
+			return apiFetch(PP.query(op, n, name), { method: 'POST', credentials: 'same-origin' })
+				.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+				.then(t => { if (t.trim() === 'unavailable') say(LENS_SHUT); })
+				.catch(() => say('The camera did not take the preset command.', true))
+				.then(presetRefresh);
+		};
+		presetBox.querySelectorAll('[data-preset]').forEach(btn => btn.addEventListener('click', () => {
+			const op = btn.dataset.preset, sel = presetSel.value;
+			const label = presetSel.selectedOptions[0] ? presetSel.selectedOptions[0].textContent : '';
+			if (op === 'go') {
+				if (sel !== NEW) presetSend('go', Number(sel));
+				return;
+			}
+			if (op === 'set') {
+				if (sel === NEW) {
+					const n = PP.freeNumber(presetCfg, presetMax);
+					if (!n) { say('Every preset the head offers is in use: delete one first.', true); return; }
+					const name = prompt('Name for this position', 'Preset ' + n);
+					if (name === null) return;
+					presetSend('set', n, name).then(() => { presetSel.value = String(n); });
+					return;
+				}
+				const n = Number(sel);
+				const ask = n === 1
+					? 'Store where the head is now as Home? The head returns there by itself after a while.'
+					: 'Store where the head is now as \u201c' + label + '\u201d?';
+				if (confirm(ask)) presetSend('set', n, '');
+				return;
+			}
+			if (op === 'clear' && sel !== NEW) {
+				const n = Number(sel);
+				const ask = n === 1
+					? 'Forget Home? The head may have no position to return to.'
+					: 'Forget \u201c' + label + '\u201d?';
+				if (confirm(ask)) presetSend('clear', n);
+			}
+		}));
+		presetRefresh();
+		document.addEventListener('visibilitychange', () => {
+			if (document.visibilityState === 'visible') presetRefresh();
+		});
+	}
 	// Folded on a small stage. The pad is about 140px square and the zoom/focus
 	// cluster as tall again, so on a phone they covered a sixth of the picture or
 	// more for somebody who came to look at it -- and a share's guest, who rarely
@@ -249,7 +333,7 @@
 	const isSmall = () => !!(small && small.matches);
 	// Its bottom-left cell, for a handle that has no centre to take.
 	const gripCorner = !!(pad && pad.children.length > 6 && pad.children[6].classList.contains('mj-ptz-void'));
-	const hasExtras = () => !!(followBox && !followBox.hidden && followBox.isConnected);
+	const hasExtras = () => [followBox, $('#mj-ptz-presets')].some(b => !!(b && !b.hidden && b.isConnected));
 	const popOpen = (on) => {
 		more.hidden = !on;
 		gear.setAttribute('aria-expanded', String(on));
@@ -263,7 +347,7 @@
 	// only when the popover would hold something.
 	function placeExtras() {
 		const home = isSmall() ? more : mount;
-		for (const box of [followBox]) {
+		for (const box of [followBox, $('#mj-ptz-presets')]) {
 			if (!box || box.hidden) continue;
 			if (box.parentNode !== home) {
 				if (home === mount) mount.insertBefore(box, fold.parentNode === mount ? fold : null);
@@ -803,7 +887,7 @@
 	mount.addEventListener('contextmenu', e => e.preventDefault());
 
 	// The fold and the gear are the mount's own, not moves.
-	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip)').forEach(btn => {
+	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip):not([data-preset])').forEach(btn => {
 		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco

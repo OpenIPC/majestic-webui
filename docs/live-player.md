@@ -313,6 +313,18 @@ camera always reports all three. A pan-only or tilt-only head on a picture
 lying on its side has its pair of arrows moved to the other axis (`lay()`),
 because there its pan moves the picture up and down.
 
+**Presets** (OpenIPC/majestic-af#37, `ptz-presets.js`) are the head's own
+stored positions. The box under the pad shows only when `GET /ptz` carries
+` presets=1-N`, which the plugin adds for a head that stores them. Pelco-D
+cannot list what a head holds, so the list is majestic's rows of names,
+`ptz.presets` in config.json, read fresh at mount, when the page comes back into
+view and after every command, because another operator may change them.
+Preset 1 is always listed as Home: on the bases this was written for, the head
+returns there by itself. Go, Save and Delete are single presses, sent as
+`POST /ptz?preset=N&action=go|set|clear[&name=]`, and not holds. A go-to
+releases any hold first. "New preset…" stores the head's current position under
+the lowest unnamed number from 2 upwards.
+
 To render either pad without hardware: set the env vars, `touch`+`chmod +x` a
 fake binary for the stepped backends, then remove `/tmp/webui/sysinfo.txt`.
 
