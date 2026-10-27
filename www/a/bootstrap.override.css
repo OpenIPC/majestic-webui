@@ -5544,7 +5544,7 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 }
 
 /* Presets: the head's stored positions, picked from a list and sent with one
-   press each (OpenIPC/majestic-af#37). Same glass as Follow under the pad. */
+   press each. Same glass as Follow under the pad. */
 .mj-ptz-presets {
 	display: flex;
 	flex-direction: column;

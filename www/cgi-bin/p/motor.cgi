@@ -196,7 +196,7 @@ focus_label="Focus"
 		<label class="form-check-label" for="mj-ptz-follow-in">Follow</label>
 	</div>
 </div>
-<!-- Presets: the head's stored positions (OpenIPC/majestic-af#37). Revealed by
+<!-- Presets: the head's stored positions. Revealed by
      preview-ptz.js only when GET /ptz says " presets=1-N" (ptz-presets.js):
      a head without stored positions has nothing to go to. The list is the
      camera's rows of names; Home is preset 1, the position the head returns

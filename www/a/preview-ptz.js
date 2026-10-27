@@ -199,13 +199,15 @@
 	const presetBox = $('#mj-ptz-presets'), presetSel = $('#mj-ptz-preset-sel');
 	const PP = window.MajesticPtzPresets;
 	if (presetBox && presetSel && PP) {
-		let presetGen = 0, presetMax = 0, presetCfg = null;
+		let presetGen = 0, presetMax = 0, presetCfg = null, presetWant = null;
 		const NEW = 'new';
 		const presetRefresh = () => {
 			const gen = ++presetGen;
-			Promise.all([
+			// A failed read is no answer, not a head without presets: the box
+			// stays as it was rather than vanishing on one dropped request.
+			return Promise.all([
 				apiFetch('/ptz', { credentials: 'same-origin', cache: 'no-store' })
-					.then(r => (r.ok ? r.text() : '')),
+					.then(r => (r.ok ? r.text() : Promise.reject(r.status))),
 				apiFetch('/api/v1/config.json', { credentials: 'same-origin', cache: 'no-store' })
 					.then(r => (r.ok ? r.json() : Promise.reject(r.status))),
 			]).then(([caps, cfg]) => {
@@ -214,7 +216,8 @@
 				presetCfg = cfg;
 				presetBox.hidden = !presetMax;
 				if (!presetMax) { showGear(); return; }
-				const keep = presetSel.value;
+				const keep = presetWant || presetSel.value;
+				presetWant = null;
 				presetSel.replaceChildren();
 				for (const p of PP.list(cfg, presetMax)) {
 					const o = document.createElement('option');
@@ -230,16 +233,34 @@
 				placeExtras();
 			}).catch(() => { /* no answer: leave it as it was */ });
 		};
-		const presetSend = (op, n, name) => {
-			stopHold(null);
-			return apiFetch(PP.query(op, n, name), { method: 'POST', credentials: 'same-origin' })
+		// One command at a time: the buttons are off until the camera has
+		// answered and the list is read back, so two quick "New preset" saves
+		// cannot both pick the same free number. A held move is stopped first
+		// and its stop answered before the preset goes out -- a stop that
+		// arrived second would halt the head on its way to the preset.
+		const presetBtns = presetBox.querySelectorAll('[data-preset]');
+		const presetBusy = (on) => presetBtns.forEach(b => { b.disabled = on; });
+		const presetSend = (op, n, name, want) => {
+			presetBusy(true);
+			return Promise.resolve(stopHold(null)).catch(() => {})
+				.then(() => apiFetch(PP.query(op, n, name), { method: 'POST', credentials: 'same-origin' }))
 				.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
-				.then(t => { if (t.trim() === 'unavailable') say(LENS_SHUT); })
+				// The body decides, as in move(): a bodyless 200 is a camera
+				// whose sensor driver did not come up, not a stored preset.
+				.then(t => {
+					const body = t.trim();
+					if (body === 'unavailable') say(LENS_SHUT);
+					else if (!body) return Promise.reject(new Error('empty'));
+					else if (want) presetWant = want;
+				})
 				.catch(() => say('The camera did not take the preset command.', true))
-				.then(presetRefresh);
+				.then(() => presetRefresh())
+				.catch(() => {})
+				.then(() => presetBusy(false));
 		};
-		presetBox.querySelectorAll('[data-preset]').forEach(btn => btn.addEventListener('click', () => {
+		presetBtns.forEach(btn => btn.addEventListener('click', () => {
 			const op = btn.dataset.preset, sel = presetSel.value;
+			if (!sel) return;
 			const label = presetSel.selectedOptions[0] ? presetSel.selectedOptions[0].textContent : '';
 			if (op === 'go') {
 				if (sel !== NEW) presetSend('go', Number(sel));
@@ -251,7 +272,7 @@
 					if (!n) { say('Every preset the head offers is in use: delete one first.', true); return; }
 					const name = prompt('Name for this position', 'Preset ' + n);
 					if (name === null) return;
-					presetSend('set', n, name).then(() => { presetSel.value = String(n); });
+					presetSend('set', n, name, String(n));
 					return;
 				}
 				const n = Number(sel);
@@ -588,7 +609,7 @@
 		if (pct != null && PS) url += PS.query(verb, pct);
 		if (!isStop && outstanding >= 3) return;
 		outstanding++;
-		apiFetch(url, { method: 'POST', credentials: 'same-origin' })
+		return apiFetch(url, { method: 'POST', credentials: 'same-origin' })
 			// The body decides, not the status. majestic answers /ptz with a
 			// BODYLESS 200 when the sensor driver did not come up, and the
 			// plugin answers `unavailable` — also 200 — when the focus port is
@@ -846,7 +867,8 @@
 		// no stop and the nudge completes; anything longer is a sweep that has to
 		// be told to stop or the motor runs on to its deadline.
 		const isZoom = btn && (btn.dataset.act === 'wide' || btn.dataset.act === 'tele');
-		if (btn && btn.dataset.act && (isZoom || heldMs >= fineMs)) move('stop', 0, true);
+		let stopped;
+		if (btn && btn.dataset.act && (isZoom || heldMs >= fineMs)) stopped = move('stop', 0, true);
 		// Letting go of a zoom is what books a focus pass: majestic waits for
 		// the wire to go quiet (700 ms) after the move's own deadline and then
 		// runs one. Nothing told the operator that, so a picture that went soft
@@ -869,6 +891,7 @@
 			}
 		}
 		if (afState) { afState.release(); }
+		return stopped;
 	}
 
 	// The centre is a single press on both pads: the stepped backends call it

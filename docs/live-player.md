@@ -313,7 +313,7 @@ camera always reports all three. A pan-only or tilt-only head on a picture
 lying on its side has its pair of arrows moved to the other axis (`lay()`),
 because there its pan moves the picture up and down.
 
-**Presets** (OpenIPC/majestic-af#37, `ptz-presets.js`) are the head's own
+**Presets** (`ptz-presets.js`) are the head's own
 stored positions. The box under the pad shows only when `GET /ptz` carries
 ` presets=1-N`, which the plugin adds for a head that stores them. Pelco-D
 cannot list what a head holds, so the list is majestic's rows of names,
