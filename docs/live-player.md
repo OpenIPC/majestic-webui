@@ -326,7 +326,7 @@ releases any hold first. "New preset…" stores the head's current position unde
 the lowest unnamed number from 2 upwards.
 
 **A save stores first and asks afterwards.** Such a base drives itself home a few
-seconds after the last move (OpenIPC/firmware#2385), so a dialog shown before
+seconds after the last move, so a dialog shown before
 the save stored Home instead of the position on screen. "New preset…" stores at
 once, then asks for a name. The name goes into `ptz.presets` through
 `/api/v1/config` (`PP.renamed`), not through another `set`, which would store

@@ -260,14 +260,20 @@
 		};
 		// A name given after the save, written into the configuration: the
 		// head is not told again (see PP.renamed).
+		// The rows are read again just before the write, not taken from the
+		// list the dialog was opened over: another operator may have stored
+		// or deleted a preset meanwhile, and the write replaces the whole list.
 		const presetRename = (n, name) => {
 			presetBusy(true);
-			return apiFetch('/api/v1/config', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				credentials: 'same-origin',
-				body: PP.renamed(presetCfg, n, name),
-			}).then(r => { if (!r.ok) say('The preset is stored, but its name was not saved.', true); })
+			return apiFetch('/api/v1/config.json', { credentials: 'same-origin', cache: 'no-store' })
+				.then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+				.then(cfg => apiFetch('/api/v1/config', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'same-origin',
+					body: PP.renamed(cfg, n, name),
+				}))
+				.then(r => { if (!r.ok) say('The preset is stored, but its name was not saved.', true); })
 				.catch(() => say('The preset is stored, but its name was not saved.', true))
 				.then(() => presetRefresh().catch(() => {}))
 				.then(() => presetBusy(false));
