@@ -4983,7 +4983,7 @@
 		{ id: 'hostname', label: 'Hostname',
 			opts: [{ fmt: '%{hostname}', shows: 'the camera\u2019s name', token: 'hostname' }] },
 		{ id: 'ip', label: 'IP address',
-			opts: [{ fmt: '%{ip}', shows: '192.168.1.10', token: 'ip' }] },
+			opts: [{ fmt: '%{ip}', shows: '203.0.113.10', token: 'ip' }] },
 		{ id: 'uptime', label: 'Uptime',
 			opts: [{ fmt: '%{uptime}', shows: '3d 04:12', token: 'uptime' }] },
 		// A value from outside: a file a script writes, or one sent over HTTP.
@@ -8035,9 +8035,19 @@
 					m.appendChild(b);
 				});
 				const hint = el('p', 'mj-tpl-mi-hint');
-				hint.textContent = DIALECT.tokens
-					? 'Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms. Your value shows /tmp/osd/value, or what is sent to /api/v1/osd/text/value; change the name in the line below.'
-					: 'Zoom needs a motorised lens; without one the camera prints x?.';
+				// Only about the chips this camera was offered: telling an
+				// older camera's owner how to use a chip it does not have
+				// sends them looking for it.
+				const has = id => OSD_PARTS.some(p => p.id === id);
+				const words = [];
+				if (has('zoom') && has('exposure'))
+					words.push('Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms.');
+				else if (has('zoom'))
+					words.push('Zoom needs a motorised lens; without one the camera prints x?.');
+				if (has('own'))
+					words.push('Your value shows /tmp/osd/value, or what is sent to /api/v1/osd/text/value; change the name in the line below.');
+				hint.textContent = words.join(' ');
+				hint.hidden = !words.length;
 				m.appendChild(hint);
 				add.appendChild(m);
 			});
