@@ -4938,15 +4938,17 @@
 	//
 	// Two things can be placed on one picture, so the bar carries a Text/Masks
 	// switch rather than letting a drag guess which was meant.
-	// Only what the camera can actually print. An unrecognised code does not
-	// error and does not print — majestic's specifier switch falls through to
-	// `return 0`, which SILENTLY TRUNCATES the rest of the line, so a person who
-	// copies a template off a forum gets an overlay that is half missing with
-	// nothing anywhere saying why. That is what the chips exist to prevent, and
-	// it is why the raw box below them refuses an unknown code rather than
-	// letting the camera swallow it.
-	const OSD_CODES = 'aAhbBcCedDFgGHIjmMnprRsStTuUWVwxXyYzZf@$%';
-	const OSD_PARTS = [
+	// Only what the camera can actually print. The clock is strftime letters;
+	// the camera's readings are %{name} tokens on a camera that has them, and
+	// letters on one from before (mj-osd-codes.js says which). An unrecognised
+	// code does not error: a newer camera prints it as written, an older one
+	// stops the line there. The chips cannot produce one, and the raw box below
+	// them names it before it reaches the camera.
+	//
+	// An option marked `tokens` exists only where the camera reads %{...};
+	// one marked `legacy` only where it does not.
+	const OSD_CODES = (typeof window === 'object' && window.MajesticOsdCodes) || null;
+	const OSD_PARTS_ALL = [
 		{ id: 'date', label: 'Date', hint: 'formats',
 			opts: [
 				{ fmt: '%d.%m.%Y', shows: '02.09.2026' },
@@ -4958,13 +4960,25 @@
 			opts: [
 				{ fmt: '%H:%M:%S', shows: '18:08:12' },
 				{ fmt: '%H:%M', shows: '18:08' },
+				{ fmt: '%H:%M:%S.%{ms}', shows: '18:08:12.345', tokens: true },
+				{ fmt: '%H:%M:%S.%f', shows: '18:08:12.345', legacy: true },
 				{ fmt: '%I:%M %p', shows: '06:08 PM' },
 			] },
-		// Live lens magnification. Offered only where there is a lens to report
-		// it: on a camera with no focus motor it prints nothing at all, and a
-		// chip that is always blank is worse than no chip.
+		// The chip's own temperature sensor, in whole degrees.
+		{ id: 'temp', label: 'Temperature',
+			opts: [
+				{ fmt: '%{temp}', shows: '64\u00b0C', tokens: true },
+				{ fmt: '%{temp:F}', shows: '147\u00b0F', tokens: true },
+			] },
+		// The shutter AE is holding. Where the camera cannot say, it prints --ms.
+		{ id: 'exposure', label: 'Shutter',
+			opts: [{ fmt: '%{exposure}', shows: '33.3ms', tokens: true }] },
+		// Live lens magnification; x? on a camera with no zoom lens to report it.
 		{ id: 'zoom', label: 'Zoom', needs: 'focus',
-			opts: [{ fmt: '%@', shows: 'x3.2' }] },
+			opts: [
+				{ fmt: '%{zoom}', shows: 'x3.2', tokens: true },
+				{ fmt: '%@', shows: 'x3.2', legacy: true },
+			] },
 		{ id: 'text', label: 'Text', free: true },
 		// Whitespace is a piece too. It arrives as a literal like any other,
 		// but "Text ␣" is a poor name for the thing holding two words apart,
@@ -4976,6 +4990,14 @@
 				{ fmt: '      ', shows: 'six' },
 			] },
 	];
+
+	// The parts this camera can print: the options of its own spelling, and no
+	// part left with none to offer.
+	function osdParts(d) {
+		return OSD_PARTS_ALL.map(p => p.opts
+			? Object.assign({}, p, { opts: p.opts.filter(o => d.tokens ? !o.legacy : !o.tokens) })
+			: p).filter(p => !p.opts || p.opts.length);
+	}
 
 	function renderOsd(form) {
 		const all = sectionFields('osd', true);
@@ -7790,16 +7812,13 @@
 
 	// The overlay's text, as pieces you can pick up.
 	//
-	// The template is a printf-ish string and it fails in the worst possible
-	// way: majestic's specifier switch returns 0 for anything it does not know,
-	// and the caller stops there — so ONE wrong letter silently truncates the
-	// rest of the line, with no error and no clue. Measured on an hi3516av300,
-	// `AT %@ END` printed `AT`. Somebody who copied that off a forum sees half
-	// an overlay and has nowhere to look.
+	// The template is a printf-ish string, and a wrong code in it is printed
+	// as written: `AT %q END` puts "%q" on the picture where a value was meant.
+	// Somebody who copied that off a forum sees the code and not why.
 	//
 	// So the chips are not a friendlier skin over the string. They are the only
-	// version of this control that cannot produce a code the camera will choke
-	// on. The string stays underneath — it is how you learn what the chips did,
+	// version of this control that cannot produce a code the camera does not
+	// know. The string stays underneath — it is how you learn what the chips did,
 	// and how an expert pastes one in — but editing it directly is checked
 	// before it reaches the camera.
 	function buildTemplate(container, field) {
@@ -7817,31 +7836,15 @@
 		let parts = [];
 		let open = -1;
 
-		// Longest match first, or %H:%M would eat the front of %H:%M:%S and
-		// leave `:%S` as literal text.
+		// What this camera's template field says it reads decides the chips on
+		// offer and what the raw box flags.
+		const DIALECT = OSD_CODES.dialect(field.schema);
+		const OSD_PARTS = osdParts(DIALECT);
 		const KNOWN = [];
 		OSD_PARTS.forEach((p) => {
 			(p.opts || []).forEach(o => KNOWN.push({ id: p.id, fmt: o.fmt, shows: o.shows }));
 		});
-		KNOWN.sort((a, b) => b.fmt.length - a.fmt.length);
-
-		function parse(t) {
-			const out = [];
-			let i = 0, lit = '';
-			const flush = () => {
-				if (!lit) return;
-				// A run of nothing but spaces is a Gap; anything else is words.
-				out.push(/^\s+$/.test(lit) ? { id: 'gap', fmt: lit } : { id: 'text', text: lit });
-				lit = '';
-			};
-			while (i < t.length) {
-				const hit = KNOWN.find(k => t.startsWith(k.fmt, i));
-				if (hit) { flush(); out.push({ id: hit.id, fmt: hit.fmt }); i += hit.fmt.length; }
-				else { lit += t[i]; i++; }
-			}
-			flush();
-			return out;
-		}
+		const parse = t => OSD_CODES.parse(t, KNOWN);
 		const serialize = () => parts.map(p => p.id === 'text' ? p.text : p.fmt).join('');
 
 		function commit() {
@@ -7850,16 +7853,8 @@
 			draw();
 		}
 
-		// Anything the camera cannot print, named before it can swallow the rest
-		// of the line.
-		function unknownCodes(t) {
-			const bad = [];
-			String(t).replace(/%[-_0]?(.)/g, (m, c) => {
-				if (OSD_CODES.indexOf(c) < 0) bad.push('%' + c);
-				return m;
-			});
-			return bad;
-		}
+		// Anything the camera cannot print, named before it reaches the picture.
+		const unknownCodes = t => OSD_CODES.unknownCodes(t, DIALECT);
 
 		function drawRaw() {
 			const t = serialize();
@@ -7886,7 +7881,7 @@
 				const w = el('p', 'mj-live-hint mj-md-warn');
 				w.textContent = bad.join(', ') + (bad.length === 1 ? ' is not a code this camera knows' :
 					' are not codes this camera knows') +
-					' — it prints nothing from there on, so the rest of the line disappears.';
+					' — ' + OSD_CODES.unknownEffect(DIALECT, bad.length > 1) + '.';
 				raw.appendChild(w);
 			}
 		}
@@ -8024,7 +8019,9 @@
 					m.appendChild(b);
 				});
 				const hint = el('p', 'mj-tpl-mi-hint');
-				hint.textContent = 'Zoom needs a motorised lens; without one the camera prints nothing for it.';
+				hint.textContent = DIALECT.tokens
+					? 'Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms.'
+					: 'Zoom needs a motorised lens; without one the camera prints x?.';
 				m.appendChild(hint);
 				add.appendChild(m);
 			});

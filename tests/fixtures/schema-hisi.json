@@ -789,7 +789,7 @@
           "type": "string",
           "title": "Template",
           "default": "%d.%m.%Y %H:%M:%S",
-          "hint": "strftime date/time format, e.g. %d.%m.%Y %H:%M:%S. Extras: %f milliseconds, %@ lens zoom magnification (e.g. x3.2).",
+          "hint": "strftime, e.g. %d.%m.%Y %H:%M:%S, plus readings: %{temp}, %{ms}, %{exposure}, %{zoom}, %{meter:name}, %{drums:name}.",
           "x-reload": "live",
           "x-live": true
         },
