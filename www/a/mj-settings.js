@@ -4939,14 +4939,16 @@
 	// Two things can be placed on one picture, so the bar carries a Text/Masks
 	// switch rather than letting a drag guess which was meant.
 	// Only what the camera can actually print. The clock is strftime letters;
-	// the camera's readings are %{name} tokens, with an optional :arg. An
-	// unrecognised code does not error: the camera prints it as written, so a
-	// person who copies a template off a forum gets "%q" on the picture where
-	// they expected a value. The chips cannot produce one, and the raw box
-	// below them names it before it reaches the camera.
-	const OSD_CODES = 'aAhbBcCedDFgGHIjmMnprRsStTuUWVwxXyYzZ%';
-	const OSD_TOKENS = ['temp', 'ms', 'exposure', 'zoom', 'meter', 'drums'];
-	const OSD_PARTS = [
+	// the camera's readings are %{name} tokens on a camera that has them, and
+	// letters on one from before (mj-osd-codes.js says which). An unrecognised
+	// code does not error: a newer camera prints it as written, an older one
+	// stops the line there. The chips cannot produce one, and the raw box below
+	// them names it before it reaches the camera.
+	//
+	// An option marked `tokens` exists only where the camera reads %{...};
+	// one marked `legacy` only where it does not.
+	const OSD_CODES = (typeof window === 'object' && window.MajesticOsdCodes) || null;
+	const OSD_PARTS_ALL = [
 		{ id: 'date', label: 'Date', hint: 'formats',
 			opts: [
 				{ fmt: '%d.%m.%Y', shows: '02.09.2026' },
@@ -4958,21 +4960,25 @@
 			opts: [
 				{ fmt: '%H:%M:%S', shows: '18:08:12' },
 				{ fmt: '%H:%M', shows: '18:08' },
-				{ fmt: '%H:%M:%S.%{ms}', shows: '18:08:12.345' },
+				{ fmt: '%H:%M:%S.%{ms}', shows: '18:08:12.345', tokens: true },
+				{ fmt: '%H:%M:%S.%f', shows: '18:08:12.345', legacy: true },
 				{ fmt: '%I:%M %p', shows: '06:08 PM' },
 			] },
 		// The chip's own temperature sensor, in whole degrees.
 		{ id: 'temp', label: 'Temperature',
 			opts: [
-				{ fmt: '%{temp}', shows: '64\u00b0C' },
-				{ fmt: '%{temp:F}', shows: '147\u00b0F' },
+				{ fmt: '%{temp}', shows: '64\u00b0C', tokens: true },
+				{ fmt: '%{temp:F}', shows: '147\u00b0F', tokens: true },
 			] },
 		// The shutter AE is holding. Where the camera cannot say, it prints --ms.
 		{ id: 'exposure', label: 'Shutter',
-			opts: [{ fmt: '%{exposure}', shows: '33.3ms' }] },
+			opts: [{ fmt: '%{exposure}', shows: '33.3ms', tokens: true }] },
 		// Live lens magnification; x? on a camera with no zoom lens to report it.
 		{ id: 'zoom', label: 'Zoom', needs: 'focus',
-			opts: [{ fmt: '%{zoom}', shows: 'x3.2' }] },
+			opts: [
+				{ fmt: '%{zoom}', shows: 'x3.2', tokens: true },
+				{ fmt: '%@', shows: 'x3.2', legacy: true },
+			] },
 		{ id: 'text', label: 'Text', free: true },
 		// Whitespace is a piece too. It arrives as a literal like any other,
 		// but "Text ␣" is a poor name for the thing holding two words apart,
@@ -4984,6 +4990,14 @@
 				{ fmt: '      ', shows: 'six' },
 			] },
 	];
+
+	// The parts this camera can print: the options of its own spelling, and no
+	// part left with none to offer.
+	function osdParts(d) {
+		return OSD_PARTS_ALL.map(p => p.opts
+			? Object.assign({}, p, { opts: p.opts.filter(o => d.tokens ? !o.legacy : !o.tokens) })
+			: p).filter(p => !p.opts || p.opts.length);
+	}
 
 	function renderOsd(form) {
 		const all = sectionFields('osd', true);
@@ -7822,31 +7836,15 @@
 		let parts = [];
 		let open = -1;
 
-		// Longest match first, or %H:%M would eat the front of %H:%M:%S and
-		// leave `:%S` as literal text.
+		// What this camera's template field says it reads decides the chips on
+		// offer and what the raw box flags.
+		const DIALECT = OSD_CODES.dialect(field.schema);
+		const OSD_PARTS = osdParts(DIALECT);
 		const KNOWN = [];
 		OSD_PARTS.forEach((p) => {
 			(p.opts || []).forEach(o => KNOWN.push({ id: p.id, fmt: o.fmt, shows: o.shows }));
 		});
-		KNOWN.sort((a, b) => b.fmt.length - a.fmt.length);
-
-		function parse(t) {
-			const out = [];
-			let i = 0, lit = '';
-			const flush = () => {
-				if (!lit) return;
-				// A run of nothing but spaces is a Gap; anything else is words.
-				out.push(/^\s+$/.test(lit) ? { id: 'gap', fmt: lit } : { id: 'text', text: lit });
-				lit = '';
-			};
-			while (i < t.length) {
-				const hit = KNOWN.find(k => t.startsWith(k.fmt, i));
-				if (hit) { flush(); out.push({ id: hit.id, fmt: hit.fmt }); i += hit.fmt.length; }
-				else { lit += t[i]; i++; }
-			}
-			flush();
-			return out;
-		}
+		const parse = t => OSD_CODES.parse(t, KNOWN);
 		const serialize = () => parts.map(p => p.id === 'text' ? p.text : p.fmt).join('');
 
 		function commit() {
@@ -7855,21 +7853,8 @@
 			draw();
 		}
 
-		// Anything the camera cannot print, named before it can swallow the rest
-		// of the line.
-		function unknownCodes(t) {
-			const bad = [];
-			// %% first, so "%%{temp}" is the text it says
-			String(t).replace(/%%|%\{([^}:]*)(?::[^}]*)?\}|%[-_0]?(.)/g, (m, name, c) => {
-				if (name !== undefined) {
-					if (OSD_TOKENS.indexOf(name) < 0) bad.push(m);
-				} else if (c !== undefined && OSD_CODES.indexOf(c) < 0) {
-					bad.push('%' + c);
-				}
-				return m;
-			});
-			return bad;
-		}
+		// Anything the camera cannot print, named before it reaches the picture.
+		const unknownCodes = t => OSD_CODES.unknownCodes(t, DIALECT);
 
 		function drawRaw() {
 			const t = serialize();
@@ -7896,7 +7881,7 @@
 				const w = el('p', 'mj-live-hint mj-md-warn');
 				w.textContent = bad.join(', ') + (bad.length === 1 ? ' is not a code this camera knows' :
 					' are not codes this camera knows') +
-					' — the camera prints it as written, not as a value.';
+					' — ' + OSD_CODES.unknownEffect(DIALECT) + '.';
 				raw.appendChild(w);
 			}
 		}
@@ -8034,7 +8019,9 @@
 					m.appendChild(b);
 				});
 				const hint = el('p', 'mj-tpl-mi-hint');
-				hint.textContent = 'Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms.';
+				hint.textContent = DIALECT.tokens
+					? 'Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms.'
+					: 'Zoom needs a motorised lens; without one the camera prints x?.';
 				m.appendChild(hint);
 				add.appendChild(m);
 			});

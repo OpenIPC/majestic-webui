@@ -260,6 +260,12 @@ fi
 # is still a placeholder.
 %>
 <script src="/a/mj-exposure.js" defer></script>
+<%
+# Which spelling of the OSD template's codes this camera reads, and what it
+# does with one it does not know. Its own file, and pure, so
+# tests/osd-codes.test.js can ask it.
+%>
+<script src="/a/mj-osd-codes.js" defer></script>
 <script src="/a/mj-region.js" defer></script>
 <script src="/a/mj-line.js" defer></script>
 <% [ -f /var/www/a/ptz-follow.js ] && echo '<script src="/a/ptz-follow.js" defer></script>' %>
