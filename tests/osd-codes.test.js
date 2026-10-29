@@ -41,8 +41,10 @@ check('a %% is text, so a token after it is not checked', same(C.unknownCodes('1
 check('the retired letters are named', same(C.unknownCodes('%f %@ %$', NEW), ['%f', '%@', '%$']));
 check('an unknown token and letter are named', same(C.unknownCodes('%{tmp} %q', NEW), ['%{tmp}', '%q']));
 check('an unclosed token is named', same(C.unknownCodes('%{temp', NEW), ['%{']));
-check('flags on a known letter pass', same(C.unknownCodes('%-d %_H %0M', NEW), []));
-check('it says the camera prints the code', /as written/.test(C.unknownEffect(NEW)));
+check('flags on a known letter pass', same(C.unknownCodes('%-d %_H %0M %4Y %Ey', NEW), []));
+check('an unknown letter is named as typed', same(C.unknownCodes('%5q %-q %Eq', NEW), ['%5q', '%-q', '%Eq']));
+check('it says the camera prints the code', /prints it as written/.test(C.unknownEffect(NEW)));
+check('and the codes, for more than one', /prints them as written/.test(C.unknownEffect(NEW, true)));
 
 group('a camera from before them');
 check('its letters pass', same(C.unknownCodes('%H:%M:%S.%f %@ %$', OLD), []));

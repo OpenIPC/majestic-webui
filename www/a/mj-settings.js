@@ -7881,7 +7881,7 @@
 				const w = el('p', 'mj-live-hint mj-md-warn');
 				w.textContent = bad.join(', ') + (bad.length === 1 ? ' is not a code this camera knows' :
 					' are not codes this camera knows') +
-					' — ' + OSD_CODES.unknownEffect(DIALECT) + '.';
+					' — ' + OSD_CODES.unknownEffect(DIALECT, bad.length > 1) + '.';
 				raw.appendChild(w);
 			}
 		}

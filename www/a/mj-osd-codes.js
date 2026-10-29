@@ -34,11 +34,12 @@
 		const names = d.tokens ? TOKENS : d.meter ? ['meter', 'drums'] : [];
 		const bad = [];
 		// %% first, so "%%{temp}" is the text it says
-		String(t).replace(/%%|%\{([^}:]*)(?::[^}]*)?\}|%[-_0]?(.)/g, (m, name, c) => {
+		// a letter's flag, width and E/O modifier are part of what was typed
+		String(t).replace(/%%|%\{([^}:]*)(?::[^}]*)?\}|%[-_0+]?\d*[EO]?(.)/g, (m, name, c) => {
 			if (name !== undefined) {
 				if (names.indexOf(name) < 0) bad.push(m);
 			} else if (c !== undefined && letters.indexOf(c) < 0) {
-				bad.push('%' + c);
+				bad.push(m);
 			}
 			return m;
 		});
@@ -46,8 +47,8 @@
 	}
 
 	// What the camera does with a code it does not know, for the warning.
-	function unknownEffect(d) {
-		return d.tokens ? 'the camera prints it as written, not as a value'
+	function unknownEffect(d, many) {
+		return d.tokens ? 'the camera prints ' + (many ? 'them' : 'it') + ' as written, not as a value'
 			: 'it prints nothing from there on, so the rest of the line disappears';
 	}
 
