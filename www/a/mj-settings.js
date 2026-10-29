@@ -4945,8 +4945,8 @@
 	// stops the line there. The chips cannot produce one, and the raw box below
 	// them names it before it reaches the camera.
 	//
-	// An option marked `tokens` exists only where the camera reads %{...};
-	// one marked `legacy` only where it does not.
+	// An option with a `token` is offered only where the camera names that
+	// token; one marked `legacy` only where it reads no %{...} at all.
 	const OSD_CODES = (typeof window === 'object' && window.MajesticOsdCodes) || null;
 	const OSD_PARTS_ALL = [
 		{ id: 'date', label: 'Date', hint: 'formats',
@@ -4960,24 +4960,39 @@
 			opts: [
 				{ fmt: '%H:%M:%S', shows: '18:08:12' },
 				{ fmt: '%H:%M', shows: '18:08' },
-				{ fmt: '%H:%M:%S.%{ms}', shows: '18:08:12.345', tokens: true },
+				{ fmt: '%H:%M:%S.%{ms}', shows: '18:08:12.345', token: 'ms' },
 				{ fmt: '%H:%M:%S.%f', shows: '18:08:12.345', legacy: true },
 				{ fmt: '%I:%M %p', shows: '06:08 PM' },
 			] },
 		// The chip's own temperature sensor, in whole degrees.
 		{ id: 'temp', label: 'Temperature',
 			opts: [
-				{ fmt: '%{temp}', shows: '64\u00b0C', tokens: true },
-				{ fmt: '%{temp:F}', shows: '147\u00b0F', tokens: true },
+				{ fmt: '%{temp}', shows: '64\u00b0C', token: 'temp' },
+				{ fmt: '%{temp:F}', shows: '147\u00b0F', token: 'temp' },
 			] },
 		// The shutter AE is holding. Where the camera cannot say, it prints --ms.
 		{ id: 'exposure', label: 'Shutter',
-			opts: [{ fmt: '%{exposure}', shows: '33.3ms', tokens: true }] },
+			opts: [{ fmt: '%{exposure}', shows: '33.3ms', token: 'exposure' }] },
 		// Live lens magnification; x? on a camera with no zoom lens to report it.
 		{ id: 'zoom', label: 'Zoom', needs: 'focus',
 			opts: [
-				{ fmt: '%{zoom}', shows: 'x3.2', tokens: true },
+				{ fmt: '%{zoom}', shows: 'x3.2', token: 'zoom' },
 				{ fmt: '%@', shows: 'x3.2', legacy: true },
+			] },
+		// The camera's own name, address and time since boot.
+		{ id: 'hostname', label: 'Hostname',
+			opts: [{ fmt: '%{hostname}', shows: 'the camera\u2019s name', token: 'hostname' }] },
+		{ id: 'ip', label: 'IP address',
+			opts: [{ fmt: '%{ip}', shows: '192.168.1.10', token: 'ip' }] },
+		{ id: 'uptime', label: 'Uptime',
+			opts: [{ fmt: '%{uptime}', shows: '3d 04:12', token: 'uptime' }] },
+		// A value from outside: a file a script writes, or one sent over HTTP.
+		// The name is the owner's; the chip puts a placeholder in, and the
+		// raw line below is where it is changed.
+		{ id: 'own', label: 'Your value',
+			opts: [
+				{ fmt: '%{file:/tmp/osd/value}', shows: 'a file', token: 'file' },
+				{ fmt: '%{text:value}', shows: 'sent over HTTP', token: 'text' },
 			] },
 		{ id: 'text', label: 'Text', free: true },
 		// Whitespace is a piece too. It arrives as a literal like any other,
@@ -4995,7 +5010,8 @@
 	// part left with none to offer.
 	function osdParts(d) {
 		return OSD_PARTS_ALL.map(p => p.opts
-			? Object.assign({}, p, { opts: p.opts.filter(o => d.tokens ? !o.legacy : !o.tokens) })
+			? Object.assign({}, p, { opts: p.opts.filter(o => o.legacy ? !d.tokens
+				: !o.token || (d.tokens && d.names.indexOf(o.token) >= 0)) })
 			: p).filter(p => !p.opts || p.opts.length);
 	}
 
@@ -8020,7 +8036,7 @@
 				});
 				const hint = el('p', 'mj-tpl-mi-hint');
 				hint.textContent = DIALECT.tokens
-					? 'Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms.'
+					? 'Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms. Your value shows /tmp/osd/value, or what is sent to /api/v1/osd/text/value; change the name in the line below.'
 					: 'Zoom needs a motorised lens; without one the camera prints x?.';
 				m.appendChild(hint);
 				add.appendChild(m);

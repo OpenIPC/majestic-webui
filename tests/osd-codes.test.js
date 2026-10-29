@@ -25,6 +25,8 @@ function templateSchema(o) {
 }
 const NEW = C.dialect(templateSchema(HISI));
 const OLD = C.dialect({ hint: 'strftime date/time format, e.g. %d.%m.%Y %H:%M:%S. Extras: %f milliseconds, %@ lens zoom magnification (e.g. x3.2).' });
+// the firmware before outside values: %{temp} and the readings, no more
+const TEMP_ERA = C.dialect({ hint: 'strftime, e.g. %d.%m.%Y %H:%M:%S, plus readings: %{temp}, %{ms}, %{exposure}, %{zoom}, %{meter:name}, %{drums:name}.' });
 const METER = C.dialect({ hint: 'strftime, e.g. %d.%m.%Y %H:%M:%S. Extras: %f ms, %@ zoom, %{meter:name} a meter\'s reading.' });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -33,6 +35,9 @@ check('the fixture camera reads %{...}', NEW.tokens && NEW.meter);
 check('an older camera reads letters', !OLD.tokens && !OLD.meter);
 check('one with meters but no other tokens', !METER.tokens && METER.meter);
 check('no schema at all is the older camera', !C.dialect(undefined).tokens);
+check('the names come from the camera, hint and help together',
+	['temp', 'ms', 'exposure', 'zoom', 'meter', 'drums', 'hostname', 'ip', 'uptime', 'file', 'text']
+		.every(n => NEW.names.indexOf(n) >= 0));
 
 group('a camera with the tokens');
 check('the clock and every reading pass',
@@ -45,6 +50,14 @@ check('flags on a known letter pass', same(C.unknownCodes('%-d %_H %0M %4Y %Ey',
 check('an unknown letter is named as typed', same(C.unknownCodes('%5q %-q %Eq', NEW), ['%5q', '%-q', '%Eq']));
 check('it says the camera prints the code', /prints it as written/.test(C.unknownEffect(NEW)));
 check('and the codes, for more than one', /prints them as written/.test(C.unknownEffect(NEW, true)));
+
+check('outside values and system readings pass',
+	same(C.unknownCodes('%{hostname} %{ip} up %{uptime} T=%{file:/tmp/osd/t} W=%{text:scale}', NEW), []));
+
+group('a camera with %{temp} but not outside values');
+check('its readings pass', same(C.unknownCodes('%{temp} %{ms} %{zoom}', TEMP_ERA), []));
+check('the newer tokens are named', same(C.unknownCodes('%{hostname} %{file:/x}', TEMP_ERA),
+	['%{hostname}', '%{file:/x}']));
 
 group('a camera from before them');
 check('its letters pass', same(C.unknownCodes('%H:%M:%S.%f %@ %$', OLD), []));
