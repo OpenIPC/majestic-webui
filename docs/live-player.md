@@ -325,6 +325,15 @@ returns there by itself. Go, Save and Delete are single presses, sent as
 releases any hold first. "New preset…" stores the head's current position under
 the lowest unnamed number from 2 upwards.
 
+**A save stores first and asks afterwards.** Such a base drives itself home a few
+seconds after the last move (OpenIPC/firmware#2385), so a dialog shown before
+the save stored Home instead of the position on screen. "New preset…" stores at
+once, then asks for a name. The name goes into `ptz.presets` through
+`/api/v1/config` (`PP.renamed`), not through another `set`, which would store
+wherever the head has gone since. Saving over an existing preset needs no
+confirmation, except for Home. Go and Save sit side by side with Delete beneath
+them, because three buttons in a row did not fit the pad's width.
+
 To render either pad without hardware: set the env vars, `touch`+`chmod +x` a
 fake binary for the stepped backends, then remove `/tmp/webui/sysinfo.txt`.
 

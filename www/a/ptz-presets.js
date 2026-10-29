@@ -8,6 +8,9 @@
 // ({number, name}); those are what the pad lists. Preset 1 is listed as Home:
 // on the bases this was written for it is the position the head returns to by
 // itself, so it is always there to go to, and storing over it is confirmed.
+// Every other save is immediate: such a base drives itself home seconds after
+// the last move, so a dialog before the save stored Home instead. A new
+// preset is named after it is stored, through the configuration (renamed).
 //
 // Pure: no DOM, no fetch. `preview-ptz.js` asks how many the head offers, what
 // to list, which number a new one takes, and what to POST to /ptz.
@@ -61,5 +64,38 @@
 		return q;
 	}
 
-	return { offered: offered, list: list, freeNumber: freeNumber, query: query };
+	// A name as the camera keeps it: no control characters, and at most 63
+	// UTF-8 bytes, cut between characters -- the rule /ptz applies, here for a
+	// name that goes in through the configuration instead.
+	function cleanName(name) {
+		const s = String(name == null ? '' : name).replace(/[\u0000-\u001f\u007f]/g, '').trim();
+		const enc = new TextEncoder();
+		let out = '', bytes = 0;
+		for (const ch of s) {
+			const b = enc.encode(ch).length;
+			if (bytes + b > 63) break;
+			out += ch;
+			bytes += b;
+		}
+		return out;
+	}
+
+	// The configuration body that renames preset n and keeps every other row as
+	// it is. A rename touches no motor: the head may be anywhere by now (a base
+	// that drives itself home is back there seconds after a save), and storing
+	// again to rename would store that position instead.
+	function renamed(cfg, n, name) {
+		const rows = cfg && cfg.ptz && Array.isArray(cfg.ptz.presets) ? cfg.ptz.presets : [];
+		const label = cleanName(name) || 'Preset ' + n;
+		let found = false;
+		const out = rows.map(r => {
+			if (!found && r && r.number === n) { found = true; return { number: n, name: label }; }
+			return r;
+		});
+		if (!found) out.push({ number: n, name: label });
+		return JSON.stringify({ ptz: { presets: out } });
+	}
+
+	return { offered: offered, list: list, freeNumber: freeNumber, query: query,
+		cleanName: cleanName, renamed: renamed };
 });

@@ -249,13 +249,27 @@
 				// whose sensor driver did not come up, not a stored preset.
 				.then(t => {
 					const body = t.trim();
-					if (body === 'unavailable') say(LENS_SHUT);
-					else if (!body) return Promise.reject(new Error('empty'));
-					else if (want) presetWant = want;
+					if (body === 'unavailable') { say(LENS_SHUT); return false; }
+					if (!body) return Promise.reject(new Error('empty'));
+					if (want) presetWant = want;
+					return true;
 				})
-				.catch(() => say('The camera did not take the preset command.', true))
-				.then(() => presetRefresh())
-				.catch(() => {})
+				.catch(() => { say('The camera did not take the preset command.', true); return false; })
+				.then(ok => presetRefresh().catch(() => {}).then(() => ok))
+				.then(ok => { presetBusy(false); return ok; });
+		};
+		// A name given after the save, written into the configuration: the
+		// head is not told again (see PP.renamed).
+		const presetRename = (n, name) => {
+			presetBusy(true);
+			return apiFetch('/api/v1/config', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: PP.renamed(presetCfg, n, name),
+			}).then(r => { if (!r.ok) say('The preset is stored, but its name was not saved.', true); })
+				.catch(() => say('The preset is stored, but its name was not saved.', true))
+				.then(() => presetRefresh().catch(() => {}))
 				.then(() => presetBusy(false));
 		};
 		presetBtns.forEach(btn => btn.addEventListener('click', () => {
@@ -267,19 +281,26 @@
 				return;
 			}
 			if (op === 'set') {
+				// Stored first, asked after: a base that drives itself home a
+				// few seconds after the last move is already on its way there
+				// while a dialog waits.
 				if (sel === NEW) {
 					const n = PP.freeNumber(presetCfg, presetMax);
 					if (!n) { say('Every preset the head offers is in use: delete one first.', true); return; }
-					const name = prompt('Name for this position', 'Preset ' + n);
-					if (name === null) return;
-					presetSend('set', n, name, String(n));
+					presetSend('set', n, '', String(n)).then(ok => {
+						if (!ok) return;
+						const name = prompt('Stored as preset ' + n + '. Name it:', 'Preset ' + n);
+						if (name !== null && PP.cleanName(name) && PP.cleanName(name) !== 'Preset ' + n)
+							presetRename(n, name);
+					});
 					return;
 				}
 				const n = Number(sel);
-				const ask = n === 1
-					? 'Store where the head is now as Home? The head returns there by itself after a while.'
-					: 'Store where the head is now as \u201c' + label + '\u201d?';
-				if (confirm(ask)) presetSend('set', n, '');
+				// Home alone asks: it is where the base returns by itself, so
+				// storing over it moves that for good.
+				if (n === 1 && !confirm('Store where the head is now as Home? The head returns there by itself after a while.'))
+					return;
+				presetSend('set', n, '');
 				return;
 			}
 			if (op === 'clear' && sel !== NEW) {
