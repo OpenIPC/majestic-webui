@@ -30,4 +30,14 @@ eq('set with a name, encoded', P.query('set', 7, ' Gate & yard '), '/ptz?preset=
 eq('set without a name keeps the camera\'s', P.query('set', 7, ''), '/ptz?preset=7&action=set');
 eq('clear', P.query('clear', 7), '/ptz?preset=7&action=clear');
 
+eq('a name loses its control characters and edge space', P.cleanName(' Gate\u0001\u007f yard '), 'Gate yard');
+eq('a name is cut to 63 bytes between characters', Buffer.byteLength(P.cleanName('\u0416'.repeat(40))), 62);
+eq('no name', P.cleanName(null), '');
+
+eq('a rename replaces that row and keeps the rest as they are',
+	JSON.parse(P.renamed(cfg, 2, 'Door')).ptz.presets,
+	[{ number: 5, name: 'Gate' }, { number: 2, name: 'Door' }, { number: 40, name: 'Far' }, { number: 5, name: 'dup' }]);
+eq('a rename of a number with no row adds one', JSON.parse(P.renamed({}, 3, 'Yard')), { ptz: { presets: [{ number: 3, name: 'Yard' }] } });
+eq('an empty name is the number\'s', JSON.parse(P.renamed({}, 3, '  ')).ptz.presets[0].name, 'Preset 3');
+
 done();

@@ -5565,15 +5565,22 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	color: initial;
 }
 
+/* Go and Save side by side, Delete under them across both: three in a row
+   did not fit the pad's width, and Delete fell outside the box. */
 .mj-ptz-preset-row {
 	display: grid;
-	grid-template-columns: repeat(3, 1fr);
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 2px;
 }
 
 .mj-ptz-preset-btn {
+	min-width: 0;
 	height: 1.75rem;
 	font-size: 0.6875rem;
+}
+
+.mj-ptz-preset-btn[data-preset="clear"] {
+	grid-column: span 2;
 }
 
 .mj-ptz-speed input[type="range"] {
