@@ -9,29 +9,37 @@
 //
 // A page served by one camera can be talking to a firmware of another age, so
 // which of the two it is comes from the camera itself: the template field's
-// hint names %{temp} where the tokens exist. Its own file, and pure, so
-// tests/osd-codes.test.js can ask it.
+// hint names %{temp} where the tokens exist, and its hint and help together
+// name every token that camera has. The page takes the list from there rather
+// than keeping its own, so a token added on the camera needs nothing here.
+// Its own file, and pure, so tests/osd-codes.test.js can ask it.
 (function () {
 	'use strict';
 
 	const CLOCK = 'aAhbBcCedDFgGHIjmMnprRsStTuUWVwxXyYzZ%';
-	const TOKENS = ['temp', 'ms', 'exposure', 'zoom', 'meter', 'drums'];
 
-	// Which spelling the camera reads, from the template field's schema.
+	// Which spelling the camera reads, and the token names it has, from the
+	// template field's schema.
 	function dialect(schema) {
 		const s = schema || {};
 		const text = String(s.hint || '') + ' ' + String(s.help || '');
+		const names = [];
+		text.replace(/%\{([A-Za-z_]+)/g, (m, n) => {
+			if (names.indexOf(n) < 0) names.push(n);
+			return m;
+		});
 		return {
-			tokens: text.includes('%{temp}'),
+			tokens: names.indexOf('temp') >= 0,
 			// %{meter} came before the rest of the tokens
-			meter: text.includes('%{meter'),
+			meter: names.indexOf('meter') >= 0,
+			names,
 		};
 	}
 
 	// The codes in `t` the camera does not know, as written.
 	function unknownCodes(t, d) {
 		const letters = d.tokens ? CLOCK : CLOCK + 'f@$';
-		const names = d.tokens ? TOKENS : d.meter ? ['meter', 'drums'] : [];
+		const names = d.tokens ? d.names : d.meter ? ['meter', 'drums'] : [];
 		const bad = [];
 		// %% first, so "%%{temp}" is the text it says
 		// a letter's flag, width and E/O modifier are part of what was typed
@@ -76,7 +84,7 @@
 		return out;
 	}
 
-	const api = { CLOCK, TOKENS, dialect, unknownCodes, unknownEffect, parse };
+	const api = { CLOCK, dialect, unknownCodes, unknownEffect, parse };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticOsdCodes = api;
 })();

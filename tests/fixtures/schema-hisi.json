@@ -789,7 +789,8 @@
           "type": "string",
           "title": "Template",
           "default": "%d.%m.%Y %H:%M:%S",
-          "hint": "strftime, e.g. %d.%m.%Y %H:%M:%S, plus readings: %{temp}, %{ms}, %{exposure}, %{zoom}, %{meter:name}, %{drums:name}.",
+          "hint": "strftime, e.g. %d.%m.%Y %H:%M:%S, plus readings such as %{temp}, %{hostname}, %{ip}, %{uptime}, and your own: %{file:/path}, %{text:name}.",
+          "help": "%{temp} is the chip's temperature in whole degrees, %{temp:F} in Fahrenheit. %{ms} is the milliseconds of the clock, and redraws the line every frame. %{exposure} is the shutter AE is holding, %{zoom} the lens magnification. %{hostname}, %{ip} and %{uptime} are the camera's name, its address and the time since boot. %{file:/path} is the first line of a file anyone may read, redrawn the moment the file changes; %{text:name} is the value last sent with PUT /api/v1/osd/text/name, kept in memory only. %{meter:name} is a meter's reading, and %{drums:name} at the start of a line draws its drums over the meter. A code the camera does not know is printed as written.",
           "x-reload": "live",
           "x-live": true
         },
