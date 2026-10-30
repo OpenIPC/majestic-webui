@@ -1246,6 +1246,13 @@ function runRest() {
 			adcHi.marks[0].v === 40 && adcHi.marks[0].label === 'night' &&
 			adcHi.marks[1].v === 120 && adcHi.marks[1].label === 'day',
 			JSON.stringify(adcHi.marks));
+		// The legend says the side in words (OpenIPC/majestic#359), and the
+		// side follows the rule, not the name: whichever state the lower rule
+		// names lies below it, in either sense of the pad.
+		check('the lower rule\'s state lies below it and the upper\'s above, either way round',
+			adc.marks[0].side === 'below' && adc.marks[1].side === 'above' &&
+			adcHi.marks[0].side === 'below' && adcHi.marks[1].side === 'above',
+			JSON.stringify([adc.marks, adcHi.marks]));
 		check('...and the sentence reverses with it',
 			/reads high in daylight, so night is below the lower threshold/
 				.test(adcHi.line), adcHi.line);

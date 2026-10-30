@@ -1562,9 +1562,12 @@
 			// as the gain rose. Only a threshold that EXISTS gets a line — an
 			// automatic camera with no night gain set has no night level to
 			// draw, and the sentence says so instead.
-			const marks = [{ v: dayG, color: '#2fb673', label: 'day' }];
+			// `side` is where the state lies against its rule, which the
+			// legend says in words: day at or under the day gain, night from
+			// the night gain up.
+			const marks = [{ v: dayG, color: '#2fb673', label: 'day', side: 'below' }];
 			if (nightG !== null) {
-				marks.push({ v: nightG, color: '#e0a020', label: 'night' });
+				marks.push({ v: nightG, color: '#e0a020', label: 'night', side: 'above' });
 			}
 			const gm = v.night_auto_gain_milli;
 			const pend = v.night_auto_pending;
@@ -1658,8 +1661,8 @@
 				has(nm.minThreshold) && has(nm.maxThreshold))) {
 			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
 			const marks = [];
-			if (lo !== null) marks.push({ v: lo, color: '#2fb673', label: 'day' });
-			if (hi !== null) marks.push({ v: hi, color: '#e0a020', label: 'night' });
+			if (lo !== null) marks.push({ v: lo, color: '#2fb673', label: 'day', side: 'below' });
+			if (hi !== null) marks.push({ v: hi, color: '#e0a020', label: 'night', side: 'above' });
 			// Why there is no countdown here, said where the countdown would
 			// have been: a threshold monitor switches on the first check that
 			// lands past a threshold, with no dwell to serve out, while
@@ -1742,13 +1745,16 @@
 			const bright = on(nm.adcInvert);
 			const DAY = '#2fb673', NIGHT = '#e0a020';
 			const marks = [];
+			// Whichever state it names, the lower threshold's lies below it
+			// and the upper one's above: that is what makes the gap between
+			// them a band where neither switch fires.
 			if (lo !== null) {
 				marks.push({ v: lo, color: bright ? NIGHT : DAY,
-					label: bright ? 'night' : 'day' });
+					label: bright ? 'night' : 'day', side: 'below' });
 			}
 			if (hi !== null) {
 				marks.push({ v: hi, color: bright ? DAY : NIGHT,
-					label: bright ? 'day' : 'night' });
+					label: bright ? 'day' : 'night', side: 'above' });
 			}
 			// Same period and same absent countdown as the gain pair: one
 			// comparison per check, no dwell to serve out. majestic floors an
