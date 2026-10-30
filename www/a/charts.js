@@ -344,8 +344,12 @@ window.MjCharts = (function () {
 			// without reading it off the axis (OpenIPC/majestic#359). On the
 			// filled area as well as the 2px stroke, which is too thin a
 			// target to find with a pointer.
-			let last = null;
-			for (let i = n - 1; i >= 0 && last == null; i--) last = pts[i].v[si];
+			//
+			// Only the newest sample is "now", and only while it is fresh: a
+			// poll that came back with no reading pushed null, and an older
+			// value still on screen is history, not the current reading.
+			const newest = n ? pts[n - 1] : null;
+			const last = newest && tNow - newest.t <= gap ? newest.v[si] : null;
 			const tip = last == null ? '' : '<title>now ' + fmt(last) + '</title>';
 			if (cfg.colors.length === 1)
 				s += '<path d="' + area + '" fill="' + cfg.colors[0] + '1A">' + tip + '</path>';
@@ -360,21 +364,28 @@ window.MjCharts = (function () {
 		// alone leaves the reader to guess which side of its line it is on.
 		// `side` is the caller's, because only the caller knows which way its
 		// comparison runs; a mark without one is named with its level alone.
+		//
+		// Entries wrap onto a further row rather than run off a narrow host,
+		// and the reservation made at creation (one row) is corrected to the
+		// rows actually drawn, so the box below the chart does not move twice.
 		const legend = legendMarks(cfg);
 		let svgH = padT + H + XB;
 		if (legend.length) {
-			const ly = svgH + LEGEND_H - 4;
-			let lx = padL;
+			let row = 0, lx = padL;
 			legend.forEach(m => {
 				const text = m.label + (m.side ? ' ' + m.side + ' ' : ' ') + fmt(m.v);
+				// The text's own width, at the monospace advance the gutter
+				// above is sized with.
+				const w = 14 + Math.ceil(text.length * 6.1);
+				if (lx > padL && lx + w > W - padR) { row++; lx = padL; }
+				const ly = svgH + (row + 1) * LEGEND_H - 4;
 				s += '<rect x="' + lx + '" y="' + (ly - 8) + '" width="10" height="8" fill="' +
 					(m.color || grid) + '"/>';
 				s += '<text x="' + (lx + 14) + '" y="' + ly + '">' + text + '</text>';
-				// Advance by the text's own width, at the monospace advance the
-				// gutter above is sized with.
-				lx += 14 + Math.ceil(text.length * 6.1) + 12;
+				lx += w + 12;
 			});
-			svgH += LEGEND_H;
+			svgH += (row + 1) * LEGEND_H;
+			ch.host.style.minHeight = svgH + 'px';
 		}
 		ch.host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + svgH +
 			'" width="' + W + '" height="' + svgH + '">' + s + '</svg>';

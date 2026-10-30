@@ -368,6 +368,27 @@ group('a threshold is named under the plot, with its side, and the reading is on
 	check('the newest reading is on the trace as a hover title',
 		(svg.match(/<title>now 743<\/title>/g) || []).length === 2, svg);
 
+	// Review on #708: on a narrow host the second entry ran past the edge of
+	// the viewBox, and a poll that came back empty left the previous value
+	// titled "now".
+	const narrow = makeHost(150);
+	const ch3 = MC.makeChart(narrow, cfg);
+	clock.t += 2; MC.pushChart(ch3, [741]);
+	const n3 = narrow.innerHTML;
+	const xs = (n3.match(/<text x="([\d.]+)" y="[\d.]+">(day|night) /g) || [])
+		.map(t => parseFloat(t.match(/x="([\d.]+)"/)[1]));
+	const ys = (n3.match(/<text x="[\d.]+" y="([\d.]+)">(day|night) /g) || [])
+		.map(t => parseFloat(t.match(/y="([\d.]+)"/)[1]));
+	check('a narrow chart wraps the legend instead of running off its edge',
+		xs.length === 2 && xs[0] === xs[1] && ys[1] > ys[0], n3);
+	const h3 = parseFloat((n3.match(/height="([\d.]+)"/) || [])[1]);
+	check('...and reserves the height of the rows it drew',
+		narrow.style.minHeight === h3 + 'px' && h3 === 129 + 2 * 16,
+		narrow.style.minHeight + ' vs ' + h3);
+	clock.t += 2; MC.pushChart(ch, [null]);
+	check('a poll with no reading leaves nothing titled "now"',
+		!/<title>now /.test(host.innerHTML), host.innerHTML);
+
 	// A chart with no named threshold draws exactly what it drew before: no
 	// legend row, no reserved height for one.
 	const plain = makeHost(400);
