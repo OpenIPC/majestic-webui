@@ -125,7 +125,18 @@ window.MjCharts = (function () {
 	const PAD_T = 5;  // headroom above the top gridline
 	const X_BAND = 14; // the "-2 min / now" strip below the plot
 	const LBL_H = 12;  // one line of band-label text: the spacing labels keep
-	function chartHeight(cfg) { return PAD_T + cfg.h + X_BAND; }
+	const LEGEND_H = 16; // the row under the plot that names the thresholds
+	// Threshold names live in a legend row under the plot rather than beside
+	// their rules (OpenIPC/majestic#359). Beside the rule, a name sat ABOVE
+	// it whatever the rule meant, so "day" on the lower of a day/night pair
+	// was printed in the band between the two -- on the side where it is not
+	// day -- and read as the two names swapped; and two thresholds a few
+	// counts apart put their names on the same pixel. Only a chart that has a
+	// named threshold pays for the row.
+	function legendMarks(cfg) { return (cfg.marks || []).filter(m => m.label); }
+	function chartHeight(cfg) {
+		return PAD_T + cfg.h + X_BAND + (legendMarks(cfg).length ? LEGEND_H : 0);
+	}
 	function makeChart(sel, cfg) {
 		const host = typeof sel === 'string' ? $(sel) : sel;
 		if (!host) return null;
@@ -291,14 +302,6 @@ window.MjCharts = (function () {
 			s += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' +
 				(padL + plotW) + '" y2="' + y.toFixed(1) + '" stroke="' +
 				(m.color || grid) + '" stroke-width="1" stroke-dasharray="3 3"/>';
-			if (m.label) {
-				// Above the rule where there is room for it, below where the
-				// rule is at the very top of the plot.
-				const above = y - 4 >= padT + 8;
-				s += '<text x="' + (padL + plotW - 4) + '" y="' +
-					place(above ? y - 4 : y + 10).toFixed(1) +
-					'" text-anchor="end" opacity="0.9">' + m.label + '</text>';
-			}
 		});
 		if (cfg.ref && cfg.ref.v > lo && cfg.ref.v < hi) {
 			const y = Y(cfg.ref.v);
@@ -336,15 +339,45 @@ window.MjCharts = (function () {
 			}
 			close();
 			if (!line) continue;
+			// The newest reading, said on hover: the trace shows where the
+			// value is against the thresholds, and this says what it is
+			// without reading it off the axis (OpenIPC/majestic#359). On the
+			// filled area as well as the 2px stroke, which is too thin a
+			// target to find with a pointer.
+			let last = null;
+			for (let i = n - 1; i >= 0 && last == null; i--) last = pts[i].v[si];
+			const tip = last == null ? '' : '<title>now ' + fmt(last) + '</title>';
 			if (cfg.colors.length === 1)
-				s += '<path d="' + area + '" fill="' + cfg.colors[0] + '1A"/>';
+				s += '<path d="' + area + '" fill="' + cfg.colors[0] + '1A">' + tip + '</path>';
 			s += '<path d="' + line + '" fill="none" stroke="' + cfg.colors[si] +
-				'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+				'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">' +
+				tip + '</path>';
 		}
 		s += '<text x="' + padL + '" y="' + (padT + H + XB - 2) + '">' + spanLabel(win) + '</text>';
 		s += '<text x="' + (padL + plotW) + '" y="' + (padT + H + XB - 2) + '" text-anchor="end">now</text>';
-		ch.host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + (padT + H + XB) +
-			'" width="' + W + '" height="' + (padT + H + XB) + '">' + s + '</svg>';
+		// The legend: a swatch in the rule's colour, then what the rule means
+		// -- "day below 600" -- with the side said in words, since a name
+		// alone leaves the reader to guess which side of its line it is on.
+		// `side` is the caller's, because only the caller knows which way its
+		// comparison runs; a mark without one is named with its level alone.
+		const legend = legendMarks(cfg);
+		let svgH = padT + H + XB;
+		if (legend.length) {
+			const ly = svgH + LEGEND_H - 4;
+			let lx = padL;
+			legend.forEach(m => {
+				const text = m.label + (m.side ? ' ' + m.side + ' ' : ' ') + fmt(m.v);
+				s += '<rect x="' + lx + '" y="' + (ly - 8) + '" width="10" height="8" fill="' +
+					(m.color || grid) + '"/>';
+				s += '<text x="' + (lx + 14) + '" y="' + ly + '">' + text + '</text>';
+				// Advance by the text's own width, at the monospace advance the
+				// gutter above is sized with.
+				lx += 14 + Math.ceil(text.length * 6.1) + 12;
+			});
+			svgH += LEGEND_H;
+		}
+		ch.host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + svgH +
+			'" width="' + W + '" height="' + svgH + '">' + s + '</svg>';
 	}
 	function renderAll() { charts.forEach(renderChart); }
 

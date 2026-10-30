@@ -334,4 +334,48 @@ group('a band is what the value is compared against, so the scale has to fit it'
 		'top tick ' + Math.max.apply(null, t2));
 }
 
+// OpenIPC/majestic#359, on the reporter's own numbers: a photocell on the
+// LSADC reading 982 in the dark and 417 in daylight, day below 600 and night
+// above 900. The names were drawn ABOVE each rule, so "day" sat in the band
+// between the two -- where it is not day -- and read as the names swapped;
+// two rules close together put their names on one pixel; and the reading
+// itself could only be estimated off the axis.
+group('a threshold is named under the plot, with its side, and the reading is on hover');
+{
+	const { MC, clock } = boot();
+	const marks = [
+		{ v: 600, color: '#2fb673', label: 'day', side: 'below' },
+		{ v: 900, color: '#e0a020', label: 'night', side: 'above' },
+	];
+	const cfg = { h: 110, lo: 0, hi: null, colors: ['#000'], marks: marks };
+	const host = makeHost(400);
+	const ch = MC.makeChart(host, cfg);
+	for (let i = 0; i < 3; i++) { clock.t = i * 2; MC.pushChart(ch, [741 + i]); }
+	const svg = host.innerHTML;
+	check('each threshold is named with the side its state is on',
+		/>day below 600</.test(svg) && />night above 900</.test(svg), svg);
+	check('...behind a swatch in its rule\'s colour',
+		/<rect[^>]*fill="#2fb673"/.test(svg) && /<rect[^>]*fill="#e0a020"/.test(svg));
+	check('...and no longer beside the rule, where it read as the other one',
+		!/>day</.test(svg) && !/>night</.test(svg));
+	const legendY = (svg.match(/<text x="[\d.]+" y="([\d.]+)">day below/) || [])[1];
+	const nowY = (svg.match(/y="([\d.]+)" text-anchor="end">now</) || [])[1];
+	check('the legend sits under the time axis',
+		parseFloat(legendY) > parseFloat(nowY), legendY + ' vs ' + nowY);
+	const h = (svg.match(/height="([\d.]+)"/) || [])[1];
+	check('the reserved height is the drawn height, legend included',
+		host.style.minHeight === h + 'px', host.style.minHeight + ' vs ' + h);
+	check('the newest reading is on the trace as a hover title',
+		(svg.match(/<title>now 743<\/title>/g) || []).length === 2, svg);
+
+	// A chart with no named threshold draws exactly what it drew before: no
+	// legend row, no reserved height for one.
+	const plain = makeHost(400);
+	const ch2 = MC.makeChart(plain, { h: 110, lo: 0, hi: null, colors: ['#000'] });
+	clock.t += 2; MC.pushChart(ch2, [5]);
+	check('and a chart without thresholds keeps its old height',
+		/height="129"/.test(plain.innerHTML) && plain.style.minHeight === '129px',
+		plain.style.minHeight);
+}
+
 done();
