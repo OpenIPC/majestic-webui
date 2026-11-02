@@ -7843,6 +7843,15 @@
 
 		const row = el('div', 'mj-tpl-row');
 		wrap.appendChild(row);
+		// The pieces on offer, in flow under the row rather than floating over
+		// it. This builder lives in the overlay panel, and the panel scrolls: a
+		// list positioned on top of it is cut off at the panel's edge, which on
+		// a phone left one piece of a dozen showing (#709). It is also taller
+		// than the panel once every reading is offered, so there is no place
+		// for a floating one to fit anyway.
+		const menu = el('div', 'mj-tpl-menu');
+		menu.hidden = true;
+		wrap.appendChild(menu);
 		const opts = el('div', 'mj-tpl-opts');
 		opts.hidden = true;
 		wrap.appendChild(opts);
@@ -7851,6 +7860,9 @@
 
 		let parts = [];
 		let open = -1;
+		// Kept here rather than read off the DOM, so redrawing the chips (a
+		// drag, a removal, a save) does not shut a list somebody is reading.
+		let adding = false;
 
 		// What this camera's template field says it reads decides the chips on
 		// offer and what the raw box flags.
@@ -7966,7 +7978,14 @@
 			const d = dragging;
 			dragging = null;
 			row.querySelectorAll('.mj-tpl-caret').forEach(c => c.remove());
-			if (!d.moved || d.to === undefined) { open = open === d.i ? -1 : d.i; drawOpts(); return; }
+			if (!d.moved || d.to === undefined) {
+				open = open === d.i ? -1 : d.i;
+				// One thing open under the row: a piece's choices or the list.
+				if (open >= 0) setAdding(false);
+				drawChips();
+				drawOpts();
+				return;
+			}
 			let to = d.to;
 			if (to > d.i) to -= 1;
 			if (to === d.i) { drawChips(); return; }
@@ -8011,47 +8030,70 @@
 				row.appendChild(chip);
 			});
 
-			const add = el('span', 'mj-tpl-chip mj-tpl-add');
+			const add = el('button', 'mj-tpl-chip mj-tpl-add' + (adding ? ' mj-tpl-sel' : ''));
+			add.type = 'button';
+			add.setAttribute('aria-expanded', adding ? 'true' : 'false');
 			add.innerHTML = ICON.plus + '<span>Add</span>';
-			add.addEventListener('click', () => {
-				const menu = row.querySelector('.mj-tpl-menu');
-				if (menu) { menu.remove(); return; }
-				const m = el('div', 'mj-tpl-menu');
-				OSD_PARTS.forEach((def) => {
-					const b = el('button', 'mj-tpl-mi');
-					b.type = 'button';
-					b.innerHTML = '<span>' + esc(def.label) + '</span>' +
-						'<span class="mj-tpl-mi-s">' + esc(def.free ? 'your own words'
-							: def.id === 'gap' ? 'space between'
-							: (def.opts[0] || {}).shows || '') + '</span>';
-					b.addEventListener('click', () => {
-						parts.push(def.free ? { id: 'text', text: ' ' }
-							: { id: def.id, fmt: def.opts[0].fmt });
-						open = parts.length - 1;
-						m.remove();
-						commit();
-						drawOpts();
-					});
-					m.appendChild(b);
-				});
-				const hint = el('p', 'mj-tpl-mi-hint');
-				// Only about the chips this camera was offered: telling an
-				// older camera's owner how to use a chip it does not have
-				// sends them looking for it.
-				const has = id => OSD_PARTS.some(p => p.id === id);
-				const words = [];
-				if (has('zoom') && has('exposure'))
-					words.push('Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms.');
-				else if (has('zoom'))
-					words.push('Zoom needs a motorised lens; without one the camera prints x?.');
-				if (has('own'))
-					words.push('Your value shows /tmp/osd/value, or what is sent to /api/v1/osd/text/value; change the name in the line below.');
-				hint.textContent = words.join(' ');
-				hint.hidden = !words.length;
-				m.appendChild(hint);
-				add.appendChild(m);
-			});
+			add.addEventListener('click', () => { setAdding(!adding); focusAdd(); });
 			row.appendChild(add);
+		}
+
+		function setAdding(v) {
+			adding = v;
+			if (adding && open >= 0) { open = -1; drawOpts(); }
+			menu.hidden = !adding;
+			drawChips();
+			// A short panel scrolls; bring the list into it rather than leave
+			// it opening below the fold of a box that does not look scrollable.
+			if (adding && menu.scrollIntoView) menu.scrollIntoView({ block: 'nearest' });
+		}
+
+		function drawMenu() {
+			OSD_PARTS.forEach((def) => {
+				const b = el('button', 'mj-tpl-mi');
+				b.type = 'button';
+				b.innerHTML = '<span>' + esc(def.label) + '</span>' +
+					'<span class="mj-tpl-mi-s">' + esc(def.free ? 'your own words'
+						: def.id === 'gap' ? 'space between'
+						: (def.opts[0] || {}).shows || '') + '</span>';
+				b.addEventListener('click', () => {
+					parts.push(def.free ? { id: 'text', text: ' ' }
+						: { id: def.id, fmt: def.opts[0].fmt });
+					open = parts.length - 1;
+					adding = false;
+					menu.hidden = true;
+					commit();
+				});
+				menu.appendChild(b);
+			});
+			const hint = el('p', 'mj-tpl-mi-hint');
+			// Only about the chips this camera was offered: telling an
+			// older camera's owner how to use a chip it does not have
+			// sends them looking for it.
+			const has = id => OSD_PARTS.some(p => p.id === id);
+			const words = [];
+			if (has('zoom') && has('exposure'))
+				words.push('Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms.');
+			else if (has('zoom'))
+				words.push('Zoom needs a motorised lens; without one the camera prints x?.');
+			if (has('own'))
+				words.push('Your value shows /tmp/osd/value, or what is sent to /api/v1/osd/text/value; change the name in the line below.');
+			hint.textContent = words.join(' ');
+			hint.hidden = !words.length;
+			menu.appendChild(hint);
+			wrap.addEventListener('keydown', (e) => {
+				if (e.key !== 'Escape' || !adding) return;
+				e.stopPropagation();
+				setAdding(false);
+				focusAdd();
+			});
+		}
+
+		// The redraw replaces the button that was pressed; keep the keyboard
+		// where it was, without undoing the scroll that brought the list in.
+		function focusAdd() {
+			const a = row.querySelector('.mj-tpl-add');
+			if (a) a.focus({ preventScroll: true });
 		}
 
 		function draw() { drawChips(); drawOpts(); drawRaw(); }
@@ -8067,6 +8109,7 @@
 		field.control.addEventListener('input', () => { parts = parse(field.getValue() || ''); draw(); });
 		field.control.addEventListener('change', () => { parts = parse(field.getValue() || ''); draw(); });
 		state.liveSync.push(reload);
+		drawMenu();
 		reload();
 	}
 
