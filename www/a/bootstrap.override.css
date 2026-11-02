@@ -7838,10 +7838,11 @@ dialog.mj-modal::backdrop {
 }
 
 .mj-tpl-add {
-	position: relative;
 	border-style: dashed;
 	background: transparent;
 	color: var(--bs-secondary);
+	font: inherit;
+	font-size: 0.8125rem;
 	cursor: pointer;
 }
 
@@ -7853,18 +7854,14 @@ dialog.mj-modal::backdrop {
 	background: var(--bs-primary);
 }
 
+/* In flow under the row, not floating over it: the overlay panel scrolls, so
+   anything positioned on top of it is cut off at its edge (#709). */
 .mj-tpl-menu {
-	position: absolute;
-	top: calc(100% + 6px);
-	left: 0;
-	z-index: 5;
-	min-width: 13rem;
 	display: flex;
 	flex-direction: column;
 	border: 1px solid var(--bs-border-color);
 	border-radius: var(--bs-border-radius);
 	background: var(--bs-tertiary-bg);
-	box-shadow: var(--bs-box-shadow-lg);
 	overflow: hidden;
 }
 
