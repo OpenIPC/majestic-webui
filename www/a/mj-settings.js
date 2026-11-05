@@ -9957,21 +9957,26 @@
 		// camera is the one that enforces it and the one that remembers it
 		// across the reboot that may have caused it. The hunt holds a copy of
 		// its own and takes this one too, or it would go on working from the
-		// list it was mounted with.
-		const rereadPads = () => apiFetch('/api/v1/gpio', { credentials: 'same-origin' })
-			// A refusal has a JSON body too, and painting the map from it would
-			// replace a real pad list with an error object -- every pad quietly
-			// unknown, on the drawing somebody reads to decide what is safe to
-			// drive.
-			.then((r) => r.ok ? r.json()
-				: Promise.reject(new Error('HTTP ' + r.status)))
-			.then((fresh) => {
-				if (state.ircutMap !== map) return;
-				state.ircutInfo = fresh;
-				map.reinfo(fresh);
-				if (state.ircutHunt) state.ircutHunt.reinfo(fresh);
-			})
-			.catch(() => { /* the pads keep the state the camera has */ });
+		// list it was mounted with. Only the newest read is believed: two
+		// presses make two reads, and the older can arrive second.
+		let padReads = 0;
+		const rereadPads = () => {
+			const read = ++padReads;
+			return apiFetch('/api/v1/gpio', { credentials: 'same-origin' })
+				// A refusal has a JSON body too, and painting the map from it would
+				// replace a real pad list with an error object -- every pad quietly
+				// unknown, on the drawing somebody reads to decide what is safe to
+				// drive.
+				.then((r) => r.ok ? r.json()
+					: Promise.reject(new Error('HTTP ' + r.status)))
+				.then((fresh) => {
+					if (state.ircutMap !== map || read !== padReads) return;
+					state.ircutInfo = fresh;
+					map.reinfo(fresh);
+					if (state.ircutHunt) state.ircutHunt.reinfo(fresh);
+				})
+				.catch(() => { /* the pads keep the state the camera has */ });
+		};
 		const hunting = window.MajesticPinHunt;
 		const map = window.MajesticIrcutMap.mount(host, {
 			info: info,
@@ -9987,7 +9992,10 @@
 			// shows afterwards comes from the re-read rather than the reply,
 			// so it is what the camera holds, whichever way the press went.
 			onAvoid: hunting ? (pin, on) => {
-				hunting.avoid(pin, on).then(rereadPads, rereadPads);
+				const hunt = state.ircutHunt;
+				if (hunt) hunt.hold(true);
+				hunting.avoid(pin, on).then(rereadPads, rereadPads)
+					.then(() => { if (hunt) hunt.hold(false); });
 			} : undefined,
 		});
 		// Leaving the section while this fetch was in flight means the panel

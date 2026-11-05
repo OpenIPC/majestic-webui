@@ -42,7 +42,8 @@ usually a configuration rather than a wire. What reaches beyond those files:
   week holding pins from a board no longer on the desk. The hunt keeps its own
   copy of the pad list, so a host that changes the list must hand it the fresh
   answer through the mount's `reinfo`, or the sweep goes on skipping a pad the
-  owner has just allowed.
+  owner has just allowed. `hold` keeps Start from running in the gap before that
+  answer arrives.
 - **The test refuses to run while the pin map has unsaved wiring**, and the check
   hangs off `updateDirty()` — the funnel every settings edit goes through — not
   off the map's own `onChange`, because the pin fields stay editable directly on
