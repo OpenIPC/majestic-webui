@@ -90,9 +90,9 @@
 		const v = S.resumeVerdict(info, scanProgress(), total);
 		if (!v) return;
 
-		const pins = (v.pins || []).map(Number).filter((n) => !isNaN(n));
-		const both = pins.length > 1;
-		const named = both ? 'pins ' + esc(pins.join(' and ')) : 'pin ' + esc(String(pins[0]));
+		const pads = (v.pins || []).map(Number).filter((n) => !isNaN(n));
+		const both = pads.length > 1;
+		const named = both ? 'pins ' + esc(pads.join(' and ')) : 'pin ' + esc(String(pads[0]));
 
 		host.hidden = false;
 		host.className = HOST_CLASS;
@@ -151,10 +151,16 @@
 				const p = scanProgress();
 				if (p) { p.inflight = null; scanRemember(p); }
 				if (act !== 'avoid') { go(); return; }
-				Promise.all(pins.map((n) => scanAvoid(n, true)))
+				Promise.all(pads.map((n) => scanAvoid(n, true)))
 					.then(() => FETCH('/api/v1/gpio', { credentials: 'same-origin' }))
 					.then((r) => r.json())
-					.then((fresh) => { state.info = fresh; openScan(fresh); })
+					.then((fresh) => {
+						state.info = fresh;
+						openScan(fresh);
+						// The drawing beside this card reads the same list, and
+						// it is where somebody looks for the pad struck out.
+						if (pins.changed) pins.changed();
+					})
 					.catch(() => go());
 			});
 		});
@@ -1210,6 +1216,17 @@
 		return {
 			stop: () => { stopped = true; },
 			open: () => { if (state.info) openScan(state.info); },
+			// A fresh answer from the camera, for a change made outside this
+			// file: the map beside the hunt rules pads in and out, and a list
+			// read at mount would go on skipping a pad the owner has just
+			// allowed, with nothing on screen to say so. A card waiting to be
+			// started shows what it will try, so it is redrawn. A sweep under
+			// way keeps its list; the camera refuses a pad excluded mid-run.
+			reinfo: (fresh) => {
+				if (!fresh) return;
+				state.info = fresh;
+				if (host.querySelector('#mj-scan-go')) openScan(fresh);
+			},
 			// Null when the sweep may run. A sentence when it may not, which
 			// is a fact about the camera rather than about this section: the
 			// kernel would not say who holds which pad, so nothing here will
@@ -1218,7 +1235,7 @@
 		};
 	}
 
-	const api = { mount: mount };
+	const api = { mount: mount, avoid: scanAvoid };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticPinHunt = api;
 })();

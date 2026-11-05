@@ -9952,6 +9952,27 @@
 		}
 
 		state.ircutInfo = info;
+		// Read the pads again after anything changes them. The list is the
+		// camera's, so this re-reads rather than patching a local copy -- the
+		// camera is the one that enforces it and the one that remembers it
+		// across the reboot that may have caused it. The hunt holds a copy of
+		// its own and takes this one too, or it would go on working from the
+		// list it was mounted with.
+		const rereadPads = () => apiFetch('/api/v1/gpio', { credentials: 'same-origin' })
+			// A refusal has a JSON body too, and painting the map from it would
+			// replace a real pad list with an error object -- every pad quietly
+			// unknown, on the drawing somebody reads to decide what is safe to
+			// drive.
+			.then((r) => r.ok ? r.json()
+				: Promise.reject(new Error('HTTP ' + r.status)))
+			.then((fresh) => {
+				if (state.ircutMap !== map) return;
+				state.ircutInfo = fresh;
+				map.reinfo(fresh);
+				if (state.ircutHunt) state.ircutHunt.reinfo(fresh);
+			})
+			.catch(() => { /* the pads keep the state the camera has */ });
+		const hunting = window.MajesticPinHunt;
 		const map = window.MajesticIrcutMap.mount(host, {
 			info: info,
 			assign: currentAssign(),
@@ -9962,26 +9983,12 @@
 			pwmLamp: !!pwmLamp(),
 			soc: SOC + (info.banks ? (SOC ? ' · ' : '') + info.banks.length + ' banks' : ''),
 			onChange: (a) => { pushAssign(a); paintRoles(); },
-			// Ruling a pad out of the scan, from the pad itself. The list is
-			// the camera's, so this re-reads rather than patching a local copy
-			// — the camera is the one that enforces it and the one that
-			// remembers it across the reboot that may have caused it.
-			onAvoid: (pin, on) => {
-				scanAvoid(pin, on)
-					.then(() => apiFetch('/api/v1/gpio', { credentials: 'same-origin' }))
-					// A refusal has a JSON body too, and painting the map from
-					// it would replace a real pad list with an error object --
-					// every pad quietly unknown, on the drawing somebody reads
-					// to decide what is safe to drive.
-					.then((r) => r.ok ? r.json()
-						: Promise.reject(new Error('HTTP ' + r.status)))
-					.then((fresh) => {
-						if (state.ircutMap !== map) return;
-						state.ircutInfo = fresh;
-						map.reinfo(fresh);
-					})
-					.catch(() => { /* the pad keeps the state the camera has */ });
-			},
+			// Ruling a pad out of the scan, from the pad itself. What the map
+			// shows afterwards comes from the re-read rather than the reply,
+			// so it is what the camera holds, whichever way the press went.
+			onAvoid: hunting ? (pin, on) => {
+				hunting.avoid(pin, on).then(rereadPads, rereadPads);
+			} : undefined,
 		});
 		// Leaving the section while this fetch was in flight means the panel
 		// this map belongs to is already gone; mounting it now would strand a
@@ -10215,17 +10222,7 @@
 					// already looking at.
 					sweep: (a, b) => { if (state.ircutMap === map) map.sweep(a, b); },
 					select: (pin) => { if (state.ircutMap === map) map.select(pin); },
-					changed: () => {
-						apiFetch('/api/v1/gpio', { credentials: 'same-origin' })
-							.then((r) => r.ok ? r.json()
-								: Promise.reject(new Error('HTTP ' + r.status)))
-							.then((fresh) => {
-								if (state.ircutMap !== map) return;
-								state.ircutInfo = fresh;
-								map.reinfo(fresh);
-							})
-							.catch(() => { /* the pads keep what the camera has */ });
-					},
+					changed: rereadPads,
 					// A find made HERE has nowhere to travel to. It is staged
 					// through the same path the map's own edits take, so the
 					// save bar and the dirty tracking pick it up and nothing

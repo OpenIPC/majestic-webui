@@ -178,7 +178,8 @@ there rather than in this file:
 ### CI — `.github/workflows/check.yml`, every PR
 
 Four jobs: `npm run build:dist` (the real release minification, so a construct
-terser chokes on cannot reach master), `npm test`, `tools/lint-templates.sh`
+terser chokes on cannot reach master) with `tools/lint-undeclared.js` after it,
+`npm test`, `tools/lint-templates.sh`
 (needs `haserl`), and a PurgeCSS regeneration that fails the PR when the
 committed `bootstrap.min.css` is stale. CI is the authority on whether a change
 passes — push the branch and read its answer rather than re-running the jobs

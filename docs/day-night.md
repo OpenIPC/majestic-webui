@@ -39,7 +39,10 @@ usually a configuration rather than a wire. What reaches beyond those files:
   A find made on Day / Night is staged through the host's `pins.use`; only one
   made on the Pins page has to cross in `sessionStorage`, and it must stay
   session-scoped — a proposal that outlived the tab would raise a save bar next
-  week holding pins from a board no longer on the desk.
+  week holding pins from a board no longer on the desk. The hunt keeps its own
+  copy of the pad list, so a host that changes the list must hand it the fresh
+  answer through the mount's `reinfo`, or the sweep goes on skipping a pad the
+  owner has just allowed.
 - **The test refuses to run while the pin map has unsaved wiring**, and the check
   hangs off `updateDirty()` — the funnel every settings edit goes through — not
   off the map's own `onChange`, because the pin fields stay editable directly on
