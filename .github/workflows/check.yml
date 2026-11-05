@@ -35,6 +35,7 @@ jobs:
           node-version: '20'
       - run: npm ci
       - run: npm run build:dist
+      - run: node tools/lint-undeclared.js
 
   # The suite in tests/ ran nowhere: check.yml gated the minification and
   # dist.yml the release, and `npm test` was left to whoever remembered it

@@ -90,9 +90,9 @@
 		const v = S.resumeVerdict(info, scanProgress(), total);
 		if (!v) return;
 
-		const pins = (v.pins || []).map(Number).filter((n) => !isNaN(n));
-		const both = pins.length > 1;
-		const named = both ? 'pins ' + esc(pins.join(' and ')) : 'pin ' + esc(String(pins[0]));
+		const pads = (v.pins || []).map(Number).filter((n) => !isNaN(n));
+		const both = pads.length > 1;
+		const named = both ? 'pins ' + esc(pads.join(' and ')) : 'pin ' + esc(String(pads[0]));
 
 		host.hidden = false;
 		host.className = HOST_CLASS;
@@ -123,7 +123,7 @@
 			'<div class="mj-live-grp-head"><span class="mj-cap">Find the day/night ' +
 			'filter</span><span class="mj-live-rule"></span></div>' +
 			'<div class="alert ' + cls + ' py-2 px-3 mb-2 small">' + body + '</div>' +
-			'<div class="d-flex gap-2 align-items-center">' +
+			'<div class="d-flex gap-2 align-items-center" data-resume>' +
 			acts.map((a) => '<button type="button" class="btn btn-' + a[1] +
 				' btn-sm" data-do="' + a[2] + '">' + a[0] + '</button>').join('') +
 			'</div>';
@@ -151,10 +151,14 @@
 				const p = scanProgress();
 				if (p) { p.inflight = null; scanRemember(p); }
 				if (act !== 'avoid') { go(); return; }
-				Promise.all(pins.map((n) => scanAvoid(n, true)))
-					.then(() => FETCH('/api/v1/gpio', { credentials: 'same-origin' }))
-					.then((r) => r.json())
-					.then((fresh) => { state.info = fresh; openScan(fresh); })
+				// The host hears first: the drawing beside this card reads the
+				// same list, and on the Pins page hearing about it replaces
+				// this whole section, so a card opened before it would be
+				// thrown away with the host it was drawn in.
+				Promise.all(pads.map((n) => scanAvoid(n, true)))
+					.then(() => (pins.changed ? pins.changed() : null))
+					.then(() => refreshInfo())
+					.then((fresh) => openScan(fresh))
 					.catch(() => go());
 			});
 		});
@@ -471,6 +475,7 @@
 			'<button type="button" class="btn btn-primary btn-sm" id="mj-scan-go">Start</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-no">Cancel</button>' +
 			'</div>';
+		host.querySelector('#mj-scan-go').disabled = state.held > 0;
 		host.querySelector('#mj-scan-n').textContent =
 			(todo.length === list.length
 				? list.length + ' pairs to try'
@@ -1146,7 +1151,7 @@
 	// select(pin) to open one pin's own controls, and changed() for when the
 	// camera's answer has moved under it.
 	const state = { info: null, range: null, soc: '', host: null, pins: null,
-		only: null };
+		only: null, held: 0 };
 	// Filter-only, i.e. mounted beside the wiring it is looking for rather than
 	// on the page about the chip. It changes three things and nothing else:
 	// which doors are offered, where a find lands, and which page a refusal
@@ -1187,6 +1192,8 @@
 		state.soc = opts.soc || '';
 		state.info = opts.info || null;
 		state.only = opts.only || null;
+		state.held = 0;
+		const gen = generation;
 		pins = opts.pins || {};
 		if (!SCAN() || !state.info) return;
 
@@ -1210,6 +1217,31 @@
 		return {
 			stop: () => { stopped = true; },
 			open: () => { if (state.info) openScan(state.info); },
+			// A fresh answer from the camera, for a change made outside this
+			// file: the map beside the hunt rules pads in and out, and a list
+			// read at mount would go on skipping a pad the owner has just
+			// allowed, with nothing on screen to say so. A card waiting to be
+			// started, or to be resumed, shows a count taken from that list,
+			// so it is redrawn. A sweep under way keeps its list; the camera
+			// refuses a pad excluded mid-run.
+			reinfo: (fresh) => {
+				if (!fresh) return;
+				state.info = fresh;
+				if (host.querySelector('#mj-scan-go')) openScan(fresh);
+				else if (host.querySelector('[data-resume]')) resumeCard(fresh);
+			},
+			// Start waits while the host is changing the list. A sweep takes
+			// its pairs when it starts and keeps them, so one started in the
+			// moment between a press on the map and the camera's new answer
+			// would skip the pad just allowed. Counted, because two presses
+			// can overlap, and tied to this mount, because the answer to a
+			// press can arrive after the section has been drawn again.
+			hold: (on) => {
+				if (gen !== generation) return;
+				state.held = Math.max(0, state.held + (on ? 1 : -1));
+				const go = host.querySelector('#mj-scan-go');
+				if (go) go.disabled = state.held > 0;
+			},
 			// Null when the sweep may run. A sentence when it may not, which
 			// is a fact about the camera rather than about this section: the
 			// kernel would not say who holds which pad, so nothing here will
@@ -1218,7 +1250,7 @@
 		};
 	}
 
-	const api = { mount: mount };
+	const api = { mount: mount, avoid: scanAvoid };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticPinHunt = api;
 })();

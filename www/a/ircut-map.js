@@ -309,10 +309,9 @@
 				t1.textContent = av ? 'Allow the scan to try it' : 'Don\u2019t try this one';
 				a.appendChild(t1);
 				const tick = el('em');
-				// A pad the camera went down on is reported, not offered back:
-				// the owner did not choose it and undoing it is not a
-				// preference. Saying so beats a control that silently does
-				// nothing.
+				// A pad the camera went down on is offered back like any other,
+				// as the hunt's own list does with its "try it again". The tick
+				// says why it is there, so the press is an informed one.
 				tick.textContent = av ? esc0(av) : '';
 				a.appendChild(tick);
 				a.addEventListener('click', () => opts.onAvoid(pin, !av));
