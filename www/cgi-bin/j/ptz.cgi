@@ -91,7 +91,8 @@ for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 	case "$param" in
 		h=*) HORIZONTAL="${param#*=}" ;;
 		v=*) VERTICAL="${param#*=}" ;;
-		act=*) ACTION="${param#*=}" ;;
+		act=*|move=*) ACTION="${param#*=}" ;;
+        ms=*) MS="${param#*=}" ;;
 	esac
 done
 
@@ -144,6 +145,13 @@ case "$ptz_control" in
 		profile=$(fw_printenv -n ptz_profile 2>/dev/null)
 		[ -n "$profile" ] || profile=$(fw_printenv -n ptz 2>/dev/null)
 		[ -x /usr/bin/motor ] && [ -n "$profile" ] && motor_ok=1
+		;;
+	anjoy)
+		if [ -x /usr/bin/anjoy-motor ]; then
+			pelco_ok=1
+		else
+			pelco_why="The anjoy-motor binary was not found at /usr/bin/anjoy-motor."
+		fi
 		;;
 esac
 
@@ -201,6 +209,29 @@ af_enabled() {
 }
 
 if [ -n "$ACTION" ]; then
+	if [ "$ptz_control" = "anjoy" ]; then
+		 tty_dev=$(fw_printenv -n ptz_tty 2>/dev/null)
+		[ -n "$tty_dev" ] || tty_dev="/dev/ttyS2" 
+        # Convert milliseconds to seconds for anjoy-motor -t (default to 0.5s)
+        t_arg="0.5"
+        [ -n "$MS" ] && t_arg=$(awk "BEGIN {print $MS / 500}" 2>/dev/null || echo "0.5")
+		case "$ACTION" in
+			up)    /usr/bin/anjoy-motor -D "$tty_dev" -d U -t "$t_arg" ;;
+			down)  /usr/bin/anjoy-motor -D "$tty_dev" -d D -t "$t_arg" ;;
+			left)  /usr/bin/anjoy-motor -D "$tty_dev" -d L -t "$t_arg" ;;
+			right) /usr/bin/anjoy-motor -D "$tty_dev" -d R -t "$t_arg" ;;
+			tele)  /usr/bin/anjoy-motor -D "$tty_dev" -d u -t "$t_arg" ;; # Zoom In
+			wide)  /usr/bin/anjoy-motor -D "$tty_dev" -d d -t "$t_arg" ;; # Zoom Out
+			near)  /usr/bin/anjoy-motor -D "$tty_dev" -d l -t "$t_arg" ;; # Focus Near
+			far)   /usr/bin/anjoy-motor -D "$tty_dev" -d r -t "$t_arg" ;; # Focus Far
+			stop)  /usr/bin/anjoy-motor -D "$tty_dev" -d s ;;
+			*)
+				echo "Unknown PTZ action."
+				exit 1
+			;;
+		esac
+		exit 0
+	fi
 	# Autofocus is majestic's engine, not a pelco verb: the daemon reads the
 	# ISP's focus statistic and drives the same motor it drives for the pad.
 	# The request stays open while the pass runs — request lifetime is how the
