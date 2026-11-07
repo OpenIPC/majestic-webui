@@ -45,6 +45,13 @@ group('only a viewer\'s pick the camera could not hand this peer is walked');
 	check('the sentence names the channel asked for',
 		/Main stream/.test(walkSentence(sub)), walkSentence(sub));
 	check('and the transport carrying it', /MSE/.test(walkSentence(sub)));
+	check('the MSE rung is named when asked for by name',
+		/MSE/.test(walkSentence(sub, 'mse')));
+	check('the software rung says software, not MSE',
+		/software/.test(walkSentence(sub, 'wasm')) &&
+		!/MSE/.test(walkSentence(sub, 'wasm')), walkSentence(sub, 'wasm'));
+	check('and still names the channel',
+		/Main stream/.test(walkSentence(sub, 'wasm')));
 }
 
 function walkEnv(asked) {
@@ -87,6 +94,35 @@ group('a failed trial carries on, and a walk that runs out takes the reply');
 	check('running out is the walk\'s to settle', e.w.exhausted() === true);
 	check('with the reply it held', e.settled[0] === SUBST);
 	check('and nothing is left to leave', e.w.leave() === false);
+}
+
+group('the same reply again does not restart a walk under way');
+{
+	const e = walkEnv(true);
+	e.w.offer(SUBST);
+	check('a repeat is still the walk\'s',
+		e.w.offer({ channel: 1, requested: 0, reason: 'undecodable' }) === true);
+	check('and starts nothing', e.rungs.join() === 'mse', e.rungs.join());
+	e.w.failed('mse', 'undecodable h265');
+	e.w.offer({ channel: 1, requested: 0, reason: 'undecodable' });
+	check('nor once the chain has moved on', e.rungs.join() === 'mse', e.rungs.join());
+	check('the rung that arrives answers the walk', e.w.promoted('wasm') === SUBST);
+}
+{
+	const e = walkEnv(true);
+	e.w.offer(SUBST);
+	e.w.offer({ channel: 0, requested: 1, reason: 'undecodable' });
+	check('a different substitution is a walk of its own',
+		e.rungs.join() === 'mse,mse', e.rungs.join());
+	check('and the rung answers that one', e.w.promoted('mse').requested === 1);
+}
+{
+	const e = walkEnv(true);
+	e.w.offer(SUBST);
+	e.w.leave();
+	e.w.offer(SUBST);
+	check('after leaving, the same reply walks again',
+		e.rungs.join() === 'mse,mse', e.rungs.join());
 }
 
 group('with no walk in hand the caller\'s own paths are untouched');

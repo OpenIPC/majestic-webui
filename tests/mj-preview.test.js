@@ -432,6 +432,40 @@ function ui(rec) {
 			u.msgWhy.textContent);
 	}
 
+	group('the software decoder taking over says why too');
+	{
+		const env = load({ preferred: 'webrtc', chosenStream: 0 });
+		const rec = env.mount();
+		const u = ui(rec);
+		env.made[0].say('playing');
+		env.made[0].opts.onServed(SUBST);
+		env.made[1].say('mjpeg', 'undecodable h265');
+		env.made[2].say('playing');
+		check('the toast is up', u.msg.hidden === false);
+		check('and names software, not MSE',
+			/software/.test(u.msgWhy.textContent) &&
+			!/MSE/.test(u.msgWhy.textContent), u.msgWhy.textContent);
+	}
+
+	group('the same reply again leaves the trial being judged alone');
+	{
+		const env = load({ preferred: 'webrtc', chosenStream: 0 });
+		env.mount();
+		const live = env.made[0];
+		live.say('playing');
+		live.opts.onServed(SUBST);
+		const trial = env.made[1];
+		live.opts.onServed(SUBST);
+		check('no second trial', env.made.length === 2,
+			env.made.map((p) => p.kind).join());
+		check('the first is not killed', trial.destroyed === false);
+		trial.say('mjpeg', 'undecodable h265');
+		live.opts.onServed(SUBST);
+		check('nor is the walk taken back up from MSE',
+			env.made.length === 3 && env.made[2].kind === 'wasm',
+			env.made.map((p) => p.kind).join());
+	}
+
 	group('a walk that runs out leaves the substitute and says so');
 	{
 		const env = load({ preferred: 'webrtc', chosenStream: 0, wasmOk: false });

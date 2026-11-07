@@ -1165,6 +1165,23 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 		check('the decoder takes over', live.destroyed === true);
 	}
 
+	group('the same reply again leaves the Live page\'s trial alone');
+	{
+		const env = await pressedMain('webrtc', true);
+		const live = env.made[0];
+		live.opts.onServed(SUBST);
+		const trial = env.made[1];
+		live.opts.onServed(SUBST);
+		check('no second trial', env.made.length === 2,
+			env.made.map((p) => p.kind).join());
+		check('the first is not killed', trial.destroyed === false);
+		trial.say('mjpeg', 'undecodable h265');
+		live.opts.onServed(SUBST);
+		check('nor is the walk taken back up from MSE',
+			env.made.length === 3 && env.made[2].kind === 'wasm',
+			env.made.map((p) => p.kind).join());
+	}
+
 	group('a walk that runs out ends where the mismatch rule always did');
 	{
 		const env = await pressedMain();

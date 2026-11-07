@@ -60,7 +60,8 @@ does **not** share that markup — its live tab is built client-side by
   the browser can play was unreachable by pressing it. `MajesticServed.walker()`
   stages MSE for the channel asked for, with the substitute on screen, and a
   failed trial carries on to the software rung, which a dropped trial otherwise
-  would not, because the swap has a live player to keep. Only a press or a
+  would not, because the swap has a live player to keep. The same reply delivered
+  again during the walk changes nothing. Only a press or a
   remembered pick: Auto, a default nobody chose and the peer overlay take the
   camera's answer. A chain that runs out ends where the mismatch rule above
   would have, radios moved and the reason said. Pressing WebRTC while on that

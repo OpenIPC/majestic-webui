@@ -505,10 +505,10 @@ window.MajesticPreview = (function () {
 				const walked = walk && walk.promoted(kind);
 				if (kind === 'webrtc') flushServed();
 				else resetServed();
-				// After the reset, which clears the toast. The software rung's
-				// sentence is the Live page's alone; here the rung is enough.
-				if (walked && kind === 'mse' && servedWhy && servedEl) {
-					servedWhy.textContent = window.MajesticServed.walkSentence(walked);
+				// After the reset, which clears the toast. Either rung says so:
+				// nothing else on this stage names the transport it landed on.
+				if (walked && kind !== 'webrtc' && servedWhy && servedEl) {
+					servedWhy.textContent = window.MajesticServed.walkSentence(walked, kind);
 					servedEl.hidden = false;
 				}
 				// Only on a promotion a picture earned. The unproven case is

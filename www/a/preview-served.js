@@ -97,11 +97,16 @@ window.MajesticServed = (function () {
 			info.channel !== info.requested;
 	}
 
-	// What the viewer is told once the buffered player carries the channel. The
-	// software rung says its own piece, which is about the decoder.
-	function walkSentence(info) {
-		return 'This browser’s WebRTC can’t decode the ' +
-			(info.requested === 0 ? 'Main' : 'Sub') +
+	// What the viewer is told once a rung carries the channel. The Live page asks
+	// only for MSE, because its software note is already on screen by then; the
+	// settings preview has no such note and asks for both.
+	function walkSentence(info, kind) {
+		const name = info.requested === 0 ? 'Main' : 'Sub';
+		if (kind === 'wasm') {
+			return 'This browser can’t decode the ' + name +
+				' stream’s format, so the page is decoding it in software.';
+		}
+		return 'This browser’s WebRTC can’t decode the ' + name +
 			' stream’s format — playing it over MSE, with more delay.';
 	}
 
@@ -121,6 +126,13 @@ window.MajesticServed = (function () {
 		return {
 			offer: function (info) {
 				if (!walks(info, opts.asked())) return false;
+				// A reconnect or audio renegotiation re-delivers the same reply.
+				// Starting again would kill the trial being judged, or a software
+				// retry waiting its turn, and go back to a rung that already failed.
+				if (held !== null && held.channel === info.channel &&
+					held.requested === info.requested) {
+					return true;
+				}
 				held = info;
 				carried = false;
 				opts.start('mse');
