@@ -392,6 +392,143 @@ function ui(rec) {
 		check('a match to the viewer\'s own ask hides the toast', u.msg.hidden === true);
 	}
 
+	// A pick the camera substituted (#713). The rule is preview-served.js's and
+	// the Live page's half is in staging.test.js; this is the second wiring of
+	// it, where a mistake reads as a settings panel that shows the wrong channel.
+	const SUBST = { channel: 1, requested: 0, reason: 'undecodable' };
+
+	group('a pick WebRTC substituted is walked here too');
+	{
+		const env = load({ preferred: 'webrtc', chosenStream: 0 });
+		const rec = env.mount();
+		const u = ui(rec);
+		const live = env.made[0];
+		live.say('playing');
+		live.opts.onServed(SUBST);
+		check('MSE is tried', env.made.length === 2 && env.made[1].kind === 'mse',
+			env.made.map((p) => p.kind).join());
+		check('the substitute keeps the stage', live.destroyed === false);
+		check('the radio keeps the ask', u.radios[0].checked === true);
+		env.made[1].say('mjpeg', 'undecodable h265');
+		check('a dropped trial carries on to the software rung',
+			env.made.length === 3 && env.made[2].kind === 'wasm',
+			env.made.map((p) => p.kind).join());
+		env.made[2].say('playing');
+		check('the decoder takes over', live.destroyed === true);
+		check('nothing was demoted', env.demoted === false);
+		check('and nothing was chosen', env.chosen === undefined, String(env.chosen));
+	}
+
+	group('MSE taking over says why');
+	{
+		const env = load({ preferred: 'webrtc', chosenStream: 0 });
+		const rec = env.mount();
+		const u = ui(rec);
+		env.made[0].say('playing');
+		env.made[0].opts.onServed(SUBST);
+		env.made[1].say('playing');
+		check('the toast is up', u.msg.hidden === false);
+		check('and names the transport', /MSE/.test(u.msgWhy.textContent),
+			u.msgWhy.textContent);
+	}
+
+	group('the software decoder taking over says why too');
+	{
+		const env = load({ preferred: 'webrtc', chosenStream: 0 });
+		const rec = env.mount();
+		const u = ui(rec);
+		env.made[0].say('playing');
+		env.made[0].opts.onServed(SUBST);
+		env.made[1].say('mjpeg', 'undecodable h265');
+		env.made[2].say('playing');
+		check('the toast is up', u.msg.hidden === false);
+		check('and names software, not MSE',
+			/software/.test(u.msgWhy.textContent) &&
+			!/MSE/.test(u.msgWhy.textContent), u.msgWhy.textContent);
+	}
+
+	group('the same reply again leaves the trial being judged alone');
+	{
+		const env = load({ preferred: 'webrtc', chosenStream: 0 });
+		env.mount();
+		const live = env.made[0];
+		live.say('playing');
+		live.opts.onServed(SUBST);
+		const trial = env.made[1];
+		live.opts.onServed(SUBST);
+		check('no second trial', env.made.length === 2,
+			env.made.map((p) => p.kind).join());
+		check('the first is not killed', trial.destroyed === false);
+		trial.say('mjpeg', 'undecodable h265');
+		live.opts.onServed(SUBST);
+		check('nor is the walk taken back up from MSE',
+			env.made.length === 3 && env.made[2].kind === 'wasm',
+			env.made.map((p) => p.kind).join());
+	}
+
+	group('a walk that runs out leaves the substitute and says so');
+	{
+		const env = load({ preferred: 'webrtc', chosenStream: 0, wasmOk: false });
+		const rec = env.mount();
+		const u = ui(rec);
+		const live = env.made[0];
+		live.say('playing');
+		live.opts.onServed(SUBST);
+		env.made[1].say('mjpeg', 'undecodable h265');
+		check('nothing was lost', rec.lost.length === 0, rec.lost.join());
+		check('the substitute survives', live.destroyed === false);
+		check('the radios follow it', u.radios[1].checked === true);
+		check('and the reason is said', u.msg.hidden === false &&
+			/decode/.test(u.msgWhy.textContent), u.msgWhy.textContent);
+	}
+
+	group('leaving the channel goes back to the preferred transport');
+	{
+		const env = load({ preferred: 'webrtc', chosenStream: 0,
+			config: { 'video1.enabled': true } });
+		const rec = env.mount();
+		env.made[0].say('playing');
+		env.made[0].opts.onServed(SUBST);
+		const mse = env.made[1];
+		mse.say('playing');
+		ui(rec).radios[1].fire('click');
+		check('WebRTC is tried again', env.made.length === 3 &&
+			env.made[2].kind === 'webrtc', env.made.map((p) => p.kind).join());
+		check('MSE was not retargeted', mse.streamSet === null, String(mse.streamSet));
+	}
+
+	group('a stage with no picker follows the camera, as its caller expects');
+	{
+		// The peer overlay chooses by rule and treats the served channel as the
+		// answer; a walk would hand it a transport it did not ask for.
+		const env = load({ preferred: 'webrtc', chosenStream: 0 });
+		env.mount({ picker: false });
+		env.made[0].say('playing');
+		env.made[0].opts.onServed(SUBST);
+		check('no rung is staged', env.made.length === 1, 'made=' + env.made.length);
+	}
+
+	group('a channel nobody chose is not walked');
+	{
+		const env = load({ preferred: 'webrtc' });
+		const rec = env.mount();
+		env.made[0].say('playing');
+		env.made[0].opts.onServed(SUBST);
+		check('no rung is staged', env.made.length === 1, 'made=' + env.made.length);
+		check('the radios follow the camera', ui(rec).radios[1].checked === true);
+	}
+
+	group('a press makes the channel the viewer\'s, in this same mount');
+	{
+		const env = load({ preferred: 'webrtc' });
+		const rec = env.mount();
+		env.made[0].say('playing');
+		ui(rec).radios[0].fire('click');
+		env.made[0].opts.onServed(SUBST);
+		check('MSE is tried', env.made.length === 2 && env.made[1].kind === 'mse',
+			env.made.map((p) => p.kind).join());
+	}
+
 	group('the frame contract: adopt once live, forget on a channel change');
 	{
 		const env = load({ preferred: 'mse' });

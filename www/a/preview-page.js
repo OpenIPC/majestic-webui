@@ -210,10 +210,26 @@
 	// declared further down: every callback runs at failure time, never at
 	// construction.
 	const chain = window.MajesticChain.make({
-		start: (token) => attachPlayer(token),
+		start: (token) => attachRung(token),
 		starting: () => startingRung(),
 		codecFor: () => cfgCodec[stream ? 1 : 0],
-		onExhausted: (kind, detail) => fallThrough(kind, detail),
+		onExhausted: (kind, detail) => {
+			// A walk that ran out leaves a working picture on screen, the
+			// camera's substitute, and that is not this page's floor to replace.
+			// Only while it is still working: a substitute that died during the
+			// walk is an ordinary end of the chain.
+			if (walk && swap.playing() === 'webrtc' && walk.exhausted()) return;
+			fallThrough(kind, detail);
+		},
+	});
+	// The viewer's pick that WebRTC substituted, walked down the chain for that
+	// channel instead (#713). The rule and the state are preview-served.js's.
+	const walk = window.MajesticServed && window.MajesticServed.walker({
+		asked: () => !autoOn &&
+			(userPickedStream || MajesticTransport.chosenStream('preview') !== null),
+		start: (rung) => attachRung(rung),
+		next: (kind, why) => chain.next(kind, why),
+		settle: (info) => applyServed(info),
 	});
 	// The tap-to-play invitation over a picture parked waiting for a gesture
 	// (#317). Shown on the live player's 'gesture' state and hidden on 'resumed';
@@ -993,6 +1009,18 @@
 		}
 		setChip();
 	}
+	// The picture stays the camera's substitute until a rung replaces it, so the
+	// chip has to go on naming that: servedCh moves, and nothing else does.
+	function walkServed(info) {
+		if (camera !== 0 || !walk || info.requested !== (stream ? 1 : 0)) {
+			return false;
+		}
+		const wasCh = servedCh;
+		servedCh = info.channel;
+		if (walk.offer(info)) { setChip(); return true; }
+		servedCh = wasCh;
+		return false;
+	}
 	// Talkback is deliberately NOT carried across a transport switch or a
 	// reattach. Everything else here is a preference; this one holds a live
 	// microphone, and silently reopening it because the page rebuilt a player
@@ -1175,7 +1203,13 @@
 			// it. That is harmless only because the canvas is opaque and later
 			// in DOM order, which is not a thing to rely on.
 			hideOtherKind(kind);
+			const walked = walk && walk.promoted(kind);
 			settle();
+			// After settle(), which clears the slot for any non-WebRTC session.
+			// The software rung has its own disclosure, about the decoder.
+			if (walked && kind === 'mse') {
+				showStageMsg('served', window.MajesticServed.walkSentence(walked));
+			}
 			// Only when this promotion means a picture. Holding the fallback,
 			// an unproven one is just the swap saying it had nothing of its
 			// own in the way — and showing the empty video element for it
@@ -1211,6 +1245,14 @@
 			// erasing the demotion the WebRTC refusal had recorded a moment
 			// earlier. showFallback() unlights both radios straight after, so
 			// nothing on screen said so; the storage was wrong for good (#269).
+			// A walk's trial is not the viewer's: the transport group goes on
+			// describing the picture on screen, nothing is written to storage,
+			// and the walk carries on rather than stopping here.
+			if (kind !== 'webrtc' && walk && swap.playing() === 'webrtc' &&
+				walk.failed(kind, why)) {
+				reflectTransport('webrtc');
+				return;
+			}
 			if (kind === 'webrtc') {
 				reflectTransport('mse');
 				// The reason first, because it is the news, then the standing
@@ -1314,7 +1356,14 @@
 	// MSE for the fourth.
 	const MajesticVideoImpl = (kind) => MajesticTransport.impl(kind);
 
+	// Every attach but the ones a walk makes: whatever asked for this one, it
+	// replaces the session the walk was for.
 	function attachPlayer(kind) {
+		if (walk) walk.leave();
+		attachRung(kind);
+	}
+
+	function attachRung(kind) {
 		// Any fresh attach supersedes a pending software-rung retry: it belongs
 		// to a session that is being replaced, and firing it now would stage a
 		// wasm player over the new one. The chain cancels for the attaches it
@@ -1455,6 +1504,11 @@
 			},
 			onServed: (info) => {
 				if (!isLive()) { heldServed = info; return; }
+				// Straight from a session on screen, and only from there. A held
+				// reply answers a trial, and a trial over WebRTC is someone
+				// pressing WebRTC: they get what WebRTC can give, and the toast
+				// saying so, rather than being thrown back to where they were.
+				if (walkServed(info)) return;
 				applyServed(info);
 			},
 			// null means we asked for audio and the camera had none to give (mic
@@ -1941,6 +1995,12 @@
 		// nothing, since one MJPEG stream serves every channel of a camera. So
 		// ask the whole chain again instead.
 		if (liveKind === 'multipart' && fellToMultipart) {
+			attachPlayer(startingRung());
+			return;
+		}
+		// Left the channel a walk was for: the next one starts over from the
+		// viewer's own transport, which the walk never changed.
+		if (walk && walk.leave()) {
 			attachPlayer(startingRung());
 			return;
 		}

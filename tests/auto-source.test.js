@@ -436,7 +436,9 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		// The viewer asked for Main; the camera answered with Sub and said
 		// why. The controls follow reality — without re-entering the stream
 		// switch or overwriting the remembered preference — and the message
-		// carries the reason (#240).
+		// carries the reason (#240). `unavailable`, because an `undecodable`
+		// answer to a viewer's pick is walked down the chain first and only
+		// ends here if nothing can play it (#713, in staging.test.js).
 		const env = load({
 			main: '1920x1080', sub: '1920x1080', picked: 0,
 			transport: 'webrtc',
@@ -447,13 +449,13 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 			'stream=' + live.opts.stream);
 		live.say('playing');
 		live.opts.onCodec('h264', 'h264', 1920, 1080);
-		live.opts.onServed({ channel: 1, requested: 0, reason: 'undecodable' });
+		live.opts.onServed({ channel: 1, requested: 0, reason: 'unavailable' });
 		check('the Sub radio is now the checked one',
 			env.el('mj-stream-1').checked === true &&
 			env.el('mj-stream-0').checked === false);
 		check('the message is shown', env.el('mj-served').hidden === false);
 		check('and names the cause',
-			env.el('mj-served-why').textContent.indexOf('decode') !== -1,
+			env.el('mj-served-why').textContent.indexOf('available') !== -1,
 			env.el('mj-served-why').textContent);
 		check('the player was not re-cut', live.streamSet === null,
 			'streamSet=' + live.streamSet);
@@ -480,7 +482,7 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		// the message.
 		env.el('mj-served').fire('click');
 		check('a click dismisses it', env.el('mj-served').hidden === true);
-		live.opts.onServed({ channel: 1, requested: 0, reason: 'undecodable' });
+		live.opts.onServed({ channel: 1, requested: 0, reason: 'unavailable' });
 		check('the same answer does not re-show it',
 			env.el('mj-served').hidden === true);
 		live.opts.onServed({ channel: 1, requested: 1, reason: '' });
@@ -493,7 +495,7 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		env.el('mj-stream-0').fire('change');
 		check('re-picking reaches the player', live.streamSet === 0,
 			'streamSet=' + live.streamSet);
-		live.opts.onServed({ channel: 1, requested: 0, reason: 'undecodable' });
+		live.opts.onServed({ channel: 1, requested: 0, reason: 'unavailable' });
 		check('a repeated fallback after a re-pick is news again',
 			env.el('mj-served').hidden === false);
 	}
@@ -520,6 +522,24 @@ const tick = (n) => new Promise((r) => setTimeout(r, n || 60));
 		check('the chip names what is actually served',
 			/ · Main stream$/.test(env.el('mj-badge').textContent),
 			env.el('mj-badge').textContent);
+	}
+
+	group('Auto does not walk a channel it chose itself (#713)');
+	{
+		// It has no claim against the camera's answer: nobody pressed anything,
+		// and a slower transport is no way to honour a choice about picture size.
+		const env = load({
+			box: [320, 180], main: '1920x1080', sub: '640x360',
+			picked: 'auto', transport: 'webrtc',
+		});
+		await tick();
+		const live = env.made[0];
+		live.say('playing');
+		const before = env.made.length;
+		live.opts.onServed({ channel: 0, requested: 1, reason: 'undecodable' });
+		check('no rung is staged', env.made.length === before,
+			'made=' + env.made.length);
+		check('Auto stays checked', env.el('mj-stream-auto').checked === true);
 	}
 
 	done();
