@@ -1104,6 +1104,173 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 	}
 
 
+	// --- a pick the camera substituted (#713) ---
+	//
+	// Main on H.265, Sub on H.264, and a browser whose WebRTC has no H.265: the
+	// camera succeeds with the other channel, so nothing fails and the chain
+	// never ran. Every wrong answer here is a good picture of the wrong channel,
+	// or a preference quietly written for someone who never made it.
+	const SUBST = { channel: 1, requested: 0, reason: 'undecodable' };
+	async function pressedMain(transport, wasmOk) {
+		const env = load(transport || 'webrtc', undefined, 0, wasmOk);
+		await tick();
+		env.made[0].say('playing');
+		env.el('mj-stream-0').checked = true;
+		env.el('mj-stream-0').fire('click');
+		env.el('mj-served').hidden = true;
+		return env;
+	}
+
+	group('a pick WebRTC substituted is staged over MSE, substitute on screen');
+	{
+		const env = await pressedMain();
+		const live = env.made[0];
+		live.opts.onServed(SUBST);
+		check('MSE is tried', env.made.length === 2 && env.made[1].kind === 'mse',
+			env.made.map((p) => p.kind).join());
+		check('for the channel asked for', env.made[1].opts.stream === 0,
+			String(env.made[1].opts.stream));
+		check('the substitute keeps the stage', live.destroyed === false);
+		check('the radio keeps the ask', env.el('mj-stream-0').checked === true &&
+			env.el('mj-stream-1').checked === false);
+		check('and nothing is said yet', env.el('mj-served').hidden === true);
+
+		env.made[1].say('playing');
+		check('MSE takes over once it has a picture', live.destroyed === true);
+		check('MSE is lit', env.el('mj-transport-m').checked === true);
+		check('the viewer is told why',
+			env.el('mj-served').hidden === false &&
+			/MSE/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+		check('no transport was chosen for them', env.chosen === undefined,
+			String(env.chosen));
+		check('and nothing was demoted', env.demoted === undefined);
+	}
+
+	group('a browser that cannot decode it over MSE either reaches the decoder');
+	{
+		const env = await pressedMain('webrtc', true);
+		const live = env.made[0];
+		live.opts.onServed(SUBST);
+		env.made[1].say('mjpeg', 'undecodable h265');
+		check('the dropped trial carries on to the software rung',
+			env.made.length === 3 && env.made[2].kind === 'wasm',
+			env.made.map((p) => p.kind).join());
+		check('the substitute is still up', live.destroyed === false);
+		check('WebRTC stays lit, it is what is carrying the picture',
+			env.el('mj-transport-w').checked === true);
+		check('and it is not written down as a choice', env.chosen === undefined,
+			String(env.chosen));
+		env.made[2].say('playing');
+		check('the decoder takes over', live.destroyed === true);
+	}
+
+	group('a walk that runs out ends where the mismatch rule always did');
+	{
+		const env = await pressedMain();
+		const live = env.made[0];
+		live.opts.onServed(SUBST);
+		env.made[1].say('mjpeg', 'undecodable h265');
+		check('the substitute survives', live.destroyed === false);
+		check('no MJPEG, no note: there is a picture',
+			env.made.length === 2 && env.el('live-mjpeg').src === '',
+			env.made.map((p) => p.kind).join());
+		check('the radios follow it', env.el('mj-stream-1').checked === true &&
+			env.el('mj-stream-0').checked === false);
+		check('and the reason is said',
+			env.el('mj-served').hidden === false &&
+			/decode/.test(env.el('mj-served-why').textContent),
+			env.el('mj-served-why').textContent);
+		check('no choice recorded', env.chosen === undefined, String(env.chosen));
+		live.opts.onServed({ channel: 1, requested: 1, reason: '' });
+		check('a reopen answered with the substitute starts nothing',
+			env.made.length === 2, 'made=' + env.made.length);
+	}
+
+	group('a substitution nobody pressed for is not walked');
+	{
+		const env = load('webrtc');
+		await tick();
+		const live = env.made[0];
+		live.say('playing');
+		live.opts.onServed(SUBST);
+		check('no rung is staged', env.made.length === 1, 'made=' + env.made.length);
+		check('the camera\u2019s answer stands', env.el('mj-stream-1').checked === true);
+	}
+
+	group('pressing WebRTC gets what WebRTC can give');
+	{
+		// A trial's reply is held, and it is a reply to that press. Walking it
+		// would throw the viewer straight back to the transport they just left.
+		const env = await pressedMain();
+		env.made[0].opts.onServed(SUBST);
+		env.made[1].say('playing');
+		pickWebRTC(env);
+		const trial = env.made[2];
+		check('WebRTC is on trial', trial.kind === 'webrtc', trial.kind);
+		trial.opts.onServed(SUBST);
+		trial.say('playing');
+		check('no walk follows', env.made.length === 3, 'made=' + env.made.length);
+		check('the radios follow what it served',
+			env.el('mj-stream-1').checked === true);
+	}
+
+	group('leaving the channel goes back to the viewer\'s own transport');
+	{
+		const env = await pressedMain();
+		env.made[0].opts.onServed(SUBST);
+		const mse = env.made[1];
+		mse.say('playing');
+		env.el('mj-stream-1').checked = true;
+		env.el('mj-stream-0').checked = false;
+		env.el('mj-stream-1').fire('change');
+		check('WebRTC is tried again', env.made.length === 3 &&
+			env.made[2].kind === 'webrtc', env.made.map((p) => p.kind).join());
+		check('on the new channel', env.made[2].opts.stream === 1,
+			String(env.made[2].opts.stream));
+		check('MSE was not retargeted', mse.streamSet === null, String(mse.streamSet));
+		check('and holds the stage until then', mse.destroyed === false);
+	}
+
+	group('a channel press during the walk replaces its trial');
+	{
+		const env = await pressedMain();
+		env.made[0].opts.onServed(SUBST);
+		const trial = env.made[1];
+		env.el('mj-stream-1').checked = true;
+		env.el('mj-stream-1').fire('change');
+		check('the trial is gone', trial.destroyed === true);
+		check('and it was promoted onto nothing', env.made[2].kind === 'webrtc',
+			env.made[2].kind);
+		env.made[2].say('playing');
+		check('no walk\'s toast follows', env.el('mj-served').hidden === true);
+	}
+
+	group('a transport pressed during the walk is the viewer\'s, not the walk\'s');
+	{
+		const env = await pressedMain();
+		env.made[0].opts.onServed(SUBST);
+		attachAs(env, 'mse');
+		const mine = env.made[env.made.length - 1];
+		check('their own attempt replaces the walk\'s', env.made[1].destroyed === true);
+		mine.say('playing');
+		check('and is not explained as something done to them',
+			env.el('mj-served').hidden === true,
+			env.el('mj-served-why').textContent);
+	}
+
+	group('a walk does not take a dead substitute for a picture');
+	{
+		const env = await pressedMain();
+		const live = env.made[0];
+		live.opts.onServed(SUBST);
+		live.say('fallback', 'stalled');
+		const last = env.made[env.made.length - 1];
+		last.say('mjpeg', 'undecodable h265');
+		check('the chain ends on the note, not on the frozen frame',
+			env.el('mj-note').style.display === '');
+	}
+
 	// --- more than one source ---
 	//
 	// A camera is not always one camera: majestic can carry a second sensor or

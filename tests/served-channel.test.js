@@ -25,6 +25,94 @@ vm.runInContext(
 const decide = ctx.window.MajesticServed.decide;
 const make = ctx.window.MajesticServed.make;
 const holder = ctx.window.MajesticServed.holder;
+const walks = ctx.window.MajesticServed.walks;
+const walkSentence = ctx.window.MajesticServed.walkSentence;
+const walker = ctx.window.MajesticServed.walker;
+
+// ── a pick the camera substituted (#713) ─────────────────────────────────────
+
+group('only a viewer\'s pick the camera could not hand this peer is walked');
+{
+	const sub = { channel: 1, requested: 0, reason: 'undecodable' };
+	check('a pick answered with undecodable is', walks(sub, true) === true);
+	check('nobody\'s pick is not', walks(sub, false) === false);
+	check('unavailable has nothing to carry over any transport',
+		walks({ channel: 1, requested: 0, reason: 'unavailable' }, true) === false);
+	check('a match is not a substitution',
+		walks({ channel: 1, requested: 1, reason: 'undecodable' }, true) === false);
+	check('a channel stated without a request cannot be judged',
+		walks({ channel: 1, requested: null, reason: 'undecodable' }, true) === false);
+	check('the sentence names the channel asked for',
+		/Main stream/.test(walkSentence(sub)), walkSentence(sub));
+	check('and the transport carrying it', /MSE/.test(walkSentence(sub)));
+}
+
+function walkEnv(asked) {
+	const env = { rungs: [], next: [], settled: [] };
+	env.w = walker({
+		asked: () => asked,
+		start: (r) => env.rungs.push(r),
+		next: (k, why) => env.next.push(k + ':' + why),
+		settle: (i) => env.settled.push(i),
+	});
+	return env;
+}
+const SUBST = { channel: 1, requested: 0, reason: 'undecodable' };
+
+group('the walk starts at MSE and ends when a rung takes the stage');
+{
+	const e = walkEnv(true);
+	check('an unwalkable reply is left to the caller',
+		e.w.offer({ channel: 1, requested: 0, reason: 'unavailable' }) === false);
+	check('and starts nothing', e.rungs.length === 0);
+	check('a walkable one is taken', e.w.offer(SUBST) === true);
+	check('from MSE', e.rungs.join() === 'mse', e.rungs.join());
+	check('the rung hands back the reply it answers',
+		e.w.promoted('mse') === SUBST);
+	check('a later failure is no longer the walk\'s',
+		e.w.failed('mse', 'x') === false && e.next.length === 0);
+	check('nor is the end of the chain', e.w.exhausted() === false);
+	check('leaving says the transport was the walk\'s', e.w.leave() === true);
+	check('once', e.w.leave() === false);
+}
+
+group('a failed trial carries on, and a walk that runs out takes the reply');
+{
+	const e = walkEnv(true);
+	e.w.offer(SUBST);
+	check('the trial\'s failure goes on down the chain',
+		e.w.failed('mse', 'undecodable h265') === true);
+	check('with the rung and the reason', e.next.join() === 'mse:undecodable h265',
+		e.next.join());
+	check('running out is the walk\'s to settle', e.w.exhausted() === true);
+	check('with the reply it held', e.settled[0] === SUBST);
+	check('and nothing is left to leave', e.w.leave() === false);
+}
+
+group('with no walk in hand the caller\'s own paths are untouched');
+{
+	const e = walkEnv(false);
+	check('nobody\'s pick is not taken', e.w.offer(SUBST) === false);
+	check('a failure stays the caller\'s', e.w.failed('mse', 'x') === false);
+	check('so does the end of the chain', e.w.exhausted() === false);
+	check('no reply to hand back', e.w.promoted('mse') === null);
+}
+
+group('WebRTC taking the stage is not a walked rung');
+{
+	const e = walkEnv(true);
+	e.w.offer(SUBST);
+	e.w.promoted('webrtc');
+	check('so there is no other transport to go back from', e.w.leave() === false);
+}
+
+group('a walk abandoned before its rung arrives leaves nothing behind');
+{
+	const e = walkEnv(true);
+	e.w.offer(SUBST);
+	check('leaving reports it', e.w.leave() === true);
+	check('and a promotion after it answers nothing', e.w.promoted('mse') === null);
+}
 
 // ── the pure decision ───────────────────────────────────────────────────────
 

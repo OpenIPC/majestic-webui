@@ -226,7 +226,24 @@ window.MajesticPreview = (function () {
 			start: (kind) => swap.start(kind),
 			starting: () => window.MajesticTransport.preferred(),
 			codecFor: () => get(stream ? 'video1.codec' : 'video0.codec'),
-			onExhausted: (kind, detail) => lost(detail),
+			onExhausted: (kind, detail) => {
+				// A walk that ran out leaves the camera's substitute playing,
+				// which is a picture rather than something lost.
+				if (walk && swap.playing() === 'webrtc' && walk.exhausted()) return;
+				lost(detail);
+			},
+		});
+		// The viewer's pick that WebRTC substituted, walked down the chain for
+		// that channel instead (#713). The rule and the state are
+		// preview-served.js's. A stage with no picker has no viewer's pick: its
+		// caller chooses the channel by rule and judges the served one itself.
+		let viewerPicked = opts.picker !== false &&
+			(remembered === 0 || remembered === 1);
+		const walk = window.MajesticServed && window.MajesticServed.walker({
+			asked: () => viewerPicked,
+			start: (rung) => swap.start(rung),
+			next: (kind, why) => chain.next(kind, why),
+			settle: (info) => { if (served) served.apply(info); },
 		});
 		let frame = null;
 		// Bumped whenever the picture stops being what it was — a channel
@@ -420,6 +437,13 @@ window.MajesticPreview = (function () {
 					// reply must not move the radios for a session that may fail.
 					onServed: (info) => {
 						if (!heldReply) return;
+						// From the session on screen only. A trial's reply is
+						// someone having pressed for that transport, as on the
+						// Live page, and is held the ordinary way.
+						if (walk && swap.isLive(attachId) &&
+							info.requested === stream && walk.offer(info)) {
+							return;
+						}
 						heldReply.hold(attachId, info);
 						flushServed();
 					},
@@ -478,14 +502,27 @@ window.MajesticPreview = (function () {
 				// served channel is moot — MSE and the software rung subscribe
 				// to the exact number they are given — so a prior mismatch's
 				// message is stale and cleared.
+				const walked = walk && walk.promoted(kind);
 				if (kind === 'webrtc') flushServed();
 				else resetServed();
+				// After the reset, which clears the toast. The software rung's
+				// sentence is the Live page's alone; here the rung is enough.
+				if (walked && kind === 'mse' && servedWhy && servedEl) {
+					servedWhy.textContent = window.MajesticServed.walkSentence(walked);
+					servedEl.hidden = false;
+				}
 				// Only on a promotion a picture earned. The unproven case is
 				// announced by onLive('playing') below instead, which is where
 				// a first attach reports the same news once it is true.
 				if (proven) announcePlaying(kind);
 			},
 			onFailed: (kind, why, state) => {
+				// A walk's trial: the substitute is still playing, so the swap
+				// stops here unless told to carry on.
+				if (kind !== 'webrtc' && walk && swap.playing() === 'webrtc' &&
+					walk.failed(kind, why)) {
+					return;
+				}
 				// 'fallback' is durable and worth remembering; 'busy' says the
 				// camera is full, which it will not be for long. The rule lives
 				// in one place now, asked here and by the live-player branch
@@ -645,6 +682,7 @@ window.MajesticPreview = (function () {
 				// no change event and is still an answer worth remembering.
 				input.addEventListener('click', () => {
 					window.MajesticTransport.chooseStream(where, n);
+					viewerPicked = true;
 					// Not `if (n === stream) return` any more: with the chain
 					// out there is nothing on screen, and pressing the channel
 					// already selected is the only retry this stage offers.
@@ -720,7 +758,10 @@ window.MajesticPreview = (function () {
 				forgetFrame();
 				announced = null;
 			}
-			if (exhausted) {
+			// Left the channel a walk was for: start over from the viewer's own
+			// transport, which the walk never changed.
+			const walked = walk && walk.leave();
+			if (exhausted || walked) {
 				exhausted = false;
 				hideAlert();
 				swap.start(window.MajesticTransport.preferred());

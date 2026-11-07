@@ -10,6 +10,17 @@
 // remembers what has already been said and turns each reply into the caller's
 // own effects — moving its radios, wording its message — because those differ
 // between the two pages while the rule does not.
+//
+// A substitution is not always the answer to take. The camera can only answer
+// for WebRTC: it serves the other channel because that is all it can give this
+// peer over this transport, and it cannot know that /ws/video would carry the
+// channel asked for to a browser that decodes it there, or to the software
+// decoder. With the same codec on both channels it refuses instead, that refusal
+// walks the fallback chain, and the viewer gets their channel; with different
+// codecs it succeeds, nothing fails, and a channel this browser can play could
+// not be reached by pressing it (#713). So a pick the viewer made is walked down
+// the chain for that channel, and the substitute stays on screen until something
+// replaces it — or for good, moved to and said as before, if nothing can.
 window.MajesticServed = (function () {
 	'use strict';
 
@@ -72,6 +83,80 @@ window.MajesticServed = (function () {
 		return { servedCh: servedCh, wanted: info.requested, key: key,
 			adopt: servedCh, message: key !== shownKey ? info : null,
 			hide: false };
+	}
+
+	// Whether a reply is one to walk rather than accept. Only `undecodable`: an
+	// `unavailable` channel has nothing to carry over any transport. Only for a
+	// viewer's own pick (`asked`): Auto, a default nobody chose and a caller
+	// choosing channels by rule all got a picture they have no claim against,
+	// and the camera's answer is better for them than a slower transport.
+	function walks(info, asked) {
+		return !!asked && info.reason === 'undecodable' &&
+			(info.channel === 0 || info.channel === 1) &&
+			(info.requested === 0 || info.requested === 1) &&
+			info.channel !== info.requested;
+	}
+
+	// What the viewer is told once the buffered player carries the channel. The
+	// software rung says its own piece, which is about the decoder.
+	function walkSentence(info) {
+		return 'This browser’s WebRTC can’t decode the ' +
+			(info.requested === 0 ? 'Main' : 'Sub') +
+			' stream’s format — playing it over MSE, with more delay.';
+	}
+
+	// The walk's state, which both pages wire to their own swap. opts:
+	//   asked()         is the channel on screen the viewer's own pick?
+	//   start(rung)     stage this rung as a trial; WebRTC stays on screen.
+	//   next(kind, why) the chain's next(): a failed trial carries on down it.
+	//   settle(info)    nothing could replace the substitute: take the reply as
+	//                   if it had never been walked.
+	//
+	// The transport the viewer prefers is not touched, and neither is the record
+	// of a demotion: WebRTC is working here, for the other channel, and leaving
+	// this one goes back to it. leave() is how a caller finds that out.
+	function walker(opts) {
+		let held = null;      // the reply being walked, until the walk ends
+		let carried = false;  // a rung the walk reached is on screen
+		return {
+			offer: function (info) {
+				if (!walks(info, opts.asked())) return false;
+				held = info;
+				carried = false;
+				opts.start('mse');
+				return true;
+			},
+			// A trial dropped. With WebRTC still playing, the swap counts that as
+			// the end of the matter, which would stop the walk at MSE on the
+			// browsers the software rung exists for.
+			failed: function (kind, why) {
+				if (held === null) return false;
+				opts.next(kind, why);
+				return true;
+			},
+			exhausted: function () {
+				if (held === null) return false;
+				const info = held;
+				held = null;
+				opts.settle(info);
+				return true;
+			},
+			// A rung took the stage. Returns the reply it answers, or null.
+			promoted: function (kind) {
+				const info = held;
+				held = null;
+				carried = info !== null && kind !== 'webrtc';
+				return info;
+			},
+			// Forget the walk. True if there was one to forget, which is the
+			// caller's cue that the transport on screen is not the preferred one.
+			leave: function () {
+				const was = held !== null || carried;
+				held = null;
+				carried = false;
+				return was;
+			},
+		};
 	}
 
 	// A stateful applier: it owns servedCh / wanted / shownKey and turns a reply
@@ -162,5 +247,8 @@ window.MajesticServed = (function () {
 		};
 	}
 
-	return { decide: decide, make: make, holder: holder };
+	return {
+		decide: decide, make: make, holder: holder,
+		walks: walks, walkSentence: walkSentence, walker: walker,
+	};
 })();

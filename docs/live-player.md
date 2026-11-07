@@ -53,6 +53,20 @@ does **not** share that markup — its live tab is built client-side by
   `goToStream()` must not re-enter and the remembered preference must stay the
   viewer's own. In Auto nothing moves: nothing was betrayed, and the chip is the
   disclosure.
+- **A substitution for the viewer's own pick is walked, not accepted** (#713).
+  The camera answers for WebRTC alone, so `reason: undecodable` says nothing about
+  `/ws/video`. With one codec on both channels it refuses, and the refusal walks
+  the chain; with two, it succeeds and nothing fails, so without this a channel
+  the browser can play was unreachable by pressing it. `MajesticServed.walker()`
+  stages MSE for the channel asked for, with the substitute on screen, and a
+  failed trial carries on to the software rung, which a dropped trial otherwise
+  would not, because the swap has a live player to keep. Only a press or a
+  remembered pick: Auto, a default nobody chose and the peer overlay take the
+  camera's answer. A chain that runs out ends where the mismatch rule above
+  would have, radios moved and the reason said. Pressing WebRTC while on that
+  channel is a request for what WebRTC can give, so a trial's held reply is
+  never walked. Nothing is stored — no preference, no demotion, since WebRTC
+  works for the other channel — and leaving the channel goes back to it.
 - **The MSE player seeks for drift, never for lag** (`syncLive` in `preview.js`).
   Seeking whenever the buffer ran ahead of the playhead read a decoder's own
   output delay as latency to cut — Chrome's hardware H.264 path takes its reorder
