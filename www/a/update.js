@@ -1,7 +1,9 @@
 // Firmware update over the robust /ws/upgrade WebSocket.
-// majestic stops video (frees RAM), streams download+verify here, then is
-// killed at the flash step; the page switches to "rebooting", polls until the
-// camera returns, and then checks the version it came back on — sysupgrade
+// majestic stops video (frees RAM) and streams download+verify here until the
+// updater hands PID 1 to a RAM root, which ends majestic and this socket. From
+// there the flash log is only on the updater's own follower, which takes over
+// port 80, so the page reads it from there (see pollBack). Once the camera has
+// really restarted the page checks the version it came back on — sysupgrade
 // reboots on failure too, so coming back is not by itself evidence of anything.
 // A local .tgz is first POSTed to /upload, then flashed via sysupgrade
 // --archive. Vanilla JS; `$` is the querySelector helper from main.js.
@@ -19,7 +21,7 @@
 	// both run before the flash, so listing them meant sawFlash was already true
 	// before the download even started, and the "may have failed" diagnosis below
 	// was unreachable for the whole life of the feature (issue #120).
-	const flashMarker = /Protected: flashing|Stopping web server before flashing|Kernel updated|RootFS updated/i;
+	const flashMarker = /Protected: flashing|Stopping web server before flashing|Flashing from RAM|Kernel updated|RootFS updated/i;
 	let sawFlash = false;
 
 	// sysupgrade's die() prints "<reason> Aborting.". For a failure before the
@@ -59,6 +61,23 @@
 	const incompleteMarker = /Upgrade did not complete/i;
 	const videoLostMarker = /video could not be restarted/i;
 
+	// sysupgrade saying, ahead of time, that this socket is about to end. Both
+	// are sticky for the reason sawReboot is.
+	//
+	// logLost: a small camera stops majestic to free memory before the download,
+	// so the socket ends with the whole run still ahead of it and nothing past
+	// this line is visible until the flash starts.
+	// sawHandoff: the flash phase is moving to the RAM root, and with PID 1 going
+	// too every process on the camera ends. The socket closing after this is the
+	// plan working. "Moving" as well as "Handing", because the kill can beat the
+	// second one to the socket; measured both ways on one camera.
+	// handoffFailed: PID 1 did not take it. The updater reboots with nothing
+	// written, and this is the only place that fact is ever stated.
+	const logLostMarker = /This page loses the log here/i;
+	const handoffMarker = /Handing PID 1 over to the RAM root|Moving the flash phase into RAM/i;
+	const handoffFailedMarker = /PID 1 did not hand over/i;
+	let logLost = false, sawHandoff = false, handoffFailed = false;
+
 	// The refusals the camera answers with when it will not start the upgrade at
 	// all. Nothing is spawned on those paths, so there is no transcript: this one
 	// line is the whole of the output there will ever be, which is exactly the
@@ -85,9 +104,11 @@
 	// has no done-marker of its own; the reboot rule below is what closes it.
 	const PHASES = [
 		{ step: 'download', done: /Received and unpacked/i },
-		{ step: 'verify', done: /Protected: flashing|Stopping web server before flashing/i },
-		{ step: 'kernel', done: /Kernel updated/i },
-		{ step: 'rootfs', done: /RootFS updated/i },
+		{ step: 'verify', done: /Protected: flashing|Stopping web server before flashing|Flashing from RAM/i },
+		// The split NOR layout writes kernel and rootfs as one image and reports
+		// that once.
+		{ step: 'kernel', done: /Kernel updated|Firmware updated/i },
+		{ step: 'rootfs', done: /RootFS updated|Firmware updated/i },
 		{ step: 'overlay', done: null },
 		{ step: 'reboot', done: null },
 	];
@@ -248,6 +269,33 @@
 		// the run ending: the reboot, or an abort.
 	}
 
+	// The follower turns every \r into \n so a browser can show it, which would
+	// lay each of flashcp's redraws out as a line of its own: thousands of them
+	// over one partition. Put the carriage returns back before the meter lines so
+	// the pane shows them as the socket's log does. Whole lines only -- a meter
+	// the network split would otherwise be redrawn twice -- and a new pass starts
+	// a new line, so the 100% of the one before stays readable.
+	function meterRedraws() {
+		const METER_LINE = /^(Erasing block|Writing kb|Verifying kb):|^(Erasing) +\d+ +Kibyte/;
+		let tail = '', pass = '';
+		return chunk => {
+			const lines = (tail + chunk).split('\n');
+			tail = lines.pop();
+			let out = '';
+			for (const line of lines) {
+				const m = METER_LINE.exec(line);
+				const now = m ? (m[1] || m[2]) : '';
+				if (now) {
+					out += (pass && pass !== now ? '\n' : '\r') + line;
+				} else {
+					out += (pass ? '\n' : '') + line + '\n';
+				}
+				pass = now;
+			}
+			return out;
+		};
+	}
+
 	function paintPhases() {
 		const list = $('#fw-steps');
 		if (!list) return;
@@ -268,6 +316,16 @@
 		let moved = false;
 		for (const p of PHASES) {
 			if (p.done && !seen[p.step] && p.done.test(recent)) { seen[p.step] = true; moved = true; }
+		}
+		// A step is behind us once any later one has been reported. The socket can
+		// end before "Received and unpacked" and the follower only starts at the
+		// flash, so a run can see "Kernel updated" without ever seeing the download
+		// finish -- and the first step left unseen is the one painted as current.
+		let later = false;
+		for (let i = PHASES.length - 1; i >= 0; i--) {
+			const step = PHASES[i].step;
+			if (later && !seen[step]) { seen[step] = true; moved = true; }
+			if (seen[step]) later = true;
 		}
 		// Whatever the log says, a reboot announcement means every write that was
 		// going to happen has happened.
@@ -355,9 +413,11 @@
 		// either behind it the reboot is a fact about the run. With neither, a
 		// socket that closed is a socket that closed, and the note claiming
 		// otherwise was the whole of what the reporter of #474 had to go on.
-		term.note(sawFlash || sawReboot
-			? '--- connection to the camera ended here; it is rebooting ---'
-			: '--- connection to the camera ended here ---');
+		term.note(sawHandoff && !sawReboot
+			? '--- majestic has gone; the flash carries on from RAM ---'
+			: sawFlash || sawReboot
+				? '--- connection to the camera ended here; it is rebooting ---'
+				: '--- connection to the camera ended here ---');
 	}
 
 	// Nothing more is coming, and the CAMERA is what said so. Every ending it
@@ -432,9 +492,15 @@
 		// sentence in front of it stops asserting a reboot (#478).
 		status('warning', noop
 			? 'Already up to date — waiting for the camera to come back…'
-			: (sawFlash || sawReboot || reattached)
-				? 'Waiting for the camera to reboot — do not power off…'
-				: 'The connection ended before any flash was reported — waiting in case the camera reboots anyway. Do not power off…');
+			: handoffFailed
+				? 'The camera could not start writing and is rebooting. Nothing was written — waiting for it to come back…'
+				: sawHandoff && !sawReboot
+					? 'The camera is writing its flash from RAM and cannot report progress on this connection. It restarts by itself when done — do not power off…'
+					: logLost
+						? 'The camera stopped its web server to free memory for this update, so there is no log until the flash starts. It restarts by itself when done — do not power off…'
+						: (sawFlash || sawReboot || reattached)
+							? 'Waiting for the camera to reboot — do not power off…'
+							: 'The connection ended before any flash was reported — waiting in case the camera reboots anyway. Do not power off…');
 		pollBack();
 	}
 
@@ -453,10 +519,13 @@
 		if (!sawFlash && flashMarker.test(recent)) sawFlash = true;
 		if (!noop && noopMarker.test(recent)) noop = true;
 		if (!sawReboot && rebootMarker.test(recent)) sawReboot = true;
+		if (!logLost && logLostMarker.test(recent)) logLost = true;
+		if (!sawHandoff && handoffMarker.test(recent)) sawHandoff = true;
+		if (!handoffFailed && handoffFailedMarker.test(recent)) handoffFailed = true;
 		trackPhases(chunk);
 		// Said out loud by sysupgrade immediately before it reboots, so there is
 		// nothing left to wait for.
-		if (sawReboot) beginPollBack();
+		if (sawReboot || handoffFailed) beginPollBack();
 		if (!aborted && abortMarker.test(recent)) {
 			aborted = true;
 			if (sawFlash) {
@@ -546,6 +615,9 @@
 	function resetRunState() {
 		sawFlash = false;
 		sawReboot = false;
+		logLost = false;
+		sawHandoff = false;
+		handoffFailed = false;
 		aborted = false;
 		recent = '';
 		meterTail = '';
@@ -734,6 +806,14 @@
 	// too, so down-then-up is exactly what a failed upgrade looks like as well
 	// (issue #120, t31x — "the page refreshes, but the firmware is not updated").
 	async function confirmUpgrade() {
+		// The updater said so before it rebooted, so there is no version to ask
+		// about, and asking would only meet the sign-in the reboot has just caused
+		// and send the reader away from the log that explains this. The heartbeat
+		// stays off for the same reason: its first 401 would do the same.
+		if (handoffFailed) {
+			status('danger', 'The camera could not hand over to its flash phase, so nothing was written and it is still on the firmware it started with. See the log below, then try again.');
+			return;
+		}
 		status('warning', 'Camera is back — checking the installed version…');
 		// It answers / as soon as majestic is up, which can be before the CGI is
 		// ready, so give the version a few tries before settling for "unknown".
@@ -839,17 +919,69 @@
 	// UNREACHABLE and come back, or tell us its uptime is younger than this run —
 	// and then confirmUpgrade checks what it came back as.
 	function pollBack() {
+		let followed = false;
+		// The open log stream's abort, while there is one, and when it was last
+		// worth asking whether port 80 is still the follower.
+		let following = null, askedAt = 0;
+		// Returns { up } or, for the first answer from the updater's own log
+		// follower, { res, ctl } with the response left open to be read.
+		//
+		// "/" is one of the few paths majestic serves without auth, so any answer
+		// at all — including a 401 — means majestic is back. With one exception.
+		// A flash run from the RAM root puts a follower of its log on port 80 once
+		// majestic is gone, and it answers every path with a text/plain stream
+		// that never ends. majestic never answers "/" in text/plain. Taken for the
+		// camera, that follower reads as "back" in the middle of the flash.
+		//
+		// Every other answer is aborted the moment its headers are in. The follower
+		// runs a process chain per connection for as long as the connection stays
+		// open, on a camera short of RAM with its flash half erased.
+		// rawFetch all the same: it costs nothing, and it leaves no bare same-origin
+		// fetch in this file for the next reader to copy.
 		function ping() {
 			const ctl = new AbortController();
 			const to = setTimeout(() => ctl.abort(), 2500);
-			// Only reachability is asked here, and "/" is one of the few paths
-			// majestic serves without auth, so any answer at all — including a 401
-			// a future build might start sending — means the camera is back.
-			// rawFetch all the same: it costs nothing, and it leaves no bare
-			// same-origin fetch in this file for the next reader to copy.
 			return rawFetch('/?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal })
-				.then(() => { clearTimeout(to); return true; })
-				.catch(() => { clearTimeout(to); return false; });
+				.then(r => {
+					clearTimeout(to);
+					const follower = /^text\/plain/i.test(r.headers.get('content-type') || '');
+					if (follower && !followed) { followed = true; return { res: r, ctl }; }
+					ctl.abort();
+					return { up: !follower, follower };
+				})
+				.catch(() => { clearTimeout(to); return { up: false }; });
+		}
+		// Read the flash log through the same path as the socket's, so the
+		// transcript, the steps and the meter carry on as if nothing had changed.
+		// One stream for the whole run: the follower replays from the top on every
+		// connection, and each one costs the camera processes.
+		//
+		// Ending it is this side's job. `reboot -f` sends no FIN, so a read on a
+		// camera that has rebooted waits for the new system to reset the connection,
+		// about 30s later. The reboot announcement ends it, and otherwise tick()
+		// does on finding port 80 is no longer the follower. Silence alone proves
+		// nothing: the split NOR layout writes its whole image without a word for
+		// minutes, and closing on that lost the end of the log.
+		async function followLog(res, ctl) {
+			following = ctl;
+			// The reading left over is the download's, not this write's.
+			hideMeter();
+			status('warning', 'Writing the flash from RAM — do not power off…');
+			const decode = new TextDecoder('utf-8');
+			const restore = meterRedraws();
+			try {
+				const reader = res.body.getReader();
+				while (!sawReboot && !over) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					append(restore(decode.decode(value, { stream: true })));
+				}
+			} catch (err) { /* aborted, or the camera went */ }
+			following = null;
+			ctl.abort();
+			if (!over) status('warning', sawReboot
+				? 'Camera is rebooting — waiting for it to come back…'
+				: 'The flash log stopped — waiting for the camera to come back. Do not power off…');
 		}
 		let downSeen = false, tries = 0;
 		const DOWN_TRIES = 160;   // ~8 min: silent download (≤2 min) + verify + flash + reboot
@@ -859,9 +991,33 @@
 		// leave the page sitting on a camera that finished in seconds.
 		const downTries = noop ? 20 : DOWN_TRIES;   // ~60s when nothing is being written
 		async function tick() {
-			const up = await ping();
+			// A log that is moving is the answer. Each ping starts a process chain
+			// on the camera, so a silent one is only asked about now and then.
+			if (following && performance.now() - Math.max(lastData, askedAt) < QUIET_MS) {
+				setTimeout(tick, 3000);
+				return;
+			}
+			askedAt = performance.now();
+			const answer = await ping();
+			if (over) return;
+			if (answer.res) {
+				// majestic is gone and the camera has not rebooted: down, and not
+				// yet up.
+				downSeen = true; tries = 0;
+				followLog(answer.res, answer.ctl);
+				setTimeout(tick, 3000);
+				return;
+			}
+			// Port 80 is something else now, so the stream is talking to nothing.
+			if (following && !answer.follower) following.abort();
+			const up = answer.up;
 			if (!downSeen) {
-				if (!up) { downSeen = true; tries = 0; status('warning', 'Camera is rebooting — waiting for it to come back…'); }
+				if (!up) {
+					downSeen = true; tries = 0;
+					// With either of these the status already says what is happening,
+					// and it is not a reboot yet: the download and the flash are ahead.
+					if (sawReboot || (!logLost && !sawHandoff)) status('warning', 'Camera is rebooting — waiting for it to come back…');
+				}
 				// It is answering, which is either "has not rebooted yet" or "already
 				// finished and came back while we were not looking". Ask it directly,
 				// but not on every tick — a camera mid-flash should be disturbed as

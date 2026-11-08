@@ -146,11 +146,20 @@
 	// again and has simply forgotten us, which is exactly what a wiped overlay
 	// leaves behind — so it counts as up, and the navigation that follows will
 	// collect the login page on its own.
+	//
+	// Except a text/plain answer, which majestic never gives for "/". That is
+	// the updater's log follower, serving port 80 from a RAM root mid-wipe, and
+	// its stream never ends -- so the request is aborted whatever it answered,
+	// because a connection left open is a process chain left running there.
 	function ping() {
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 2500);
 		return rawFetch('/?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal })
-			.then(() => { clearTimeout(to); return true; })
+			.then(r => {
+				clearTimeout(to);
+				ctl.abort();
+				return !/^text\/plain/i.test(r.headers.get('content-type') || '');
+			})
 			.catch(() => { clearTimeout(to); return false; });
 	}
 
