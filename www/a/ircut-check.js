@@ -469,10 +469,11 @@
 		//
 		// A sensor pin is the case the switch cannot cover: it outranks BOTH
 		// on-screen sets, and nothing else on the page mentions it. The ADC
-		// pad (src 3) outranks them the same way and is named separately: it
-		// is a different mechanism with no key on this page, so telling its
-		// owner to clear the daylight sensor pin would send them to a control
-		// that is not the one deciding.
+		// pad (src 3) outranks automatic mode too and is named separately: it
+		// is a different mechanism, switched by its own control, so telling
+		// its owner to clear the daylight sensor pin would send them to a
+		// control that is not the one deciding. It does not outrank the
+		// thresholds: its reading is what they are compared against.
 		if (monitor && sample && (sample.src === 1 || sample.src === 3)) {
 			const byAdc = sample.src === 3;
 			// What is named has to be what is actually there. The first cut of
@@ -484,7 +485,11 @@
 			const AUTO_KEYS = ['autoNightGain', 'autoDayGain',
 				'autoNightDelay', 'autoDayDelay'];
 			const autoSet = AUTO_KEYS.some((k) => has(nm[k]));
-			const thrSet = has(nm.minThreshold) && has(nm.maxThreshold);
+			// The ADC reading is compared against the day and night
+			// thresholds, so under it they are the settings deciding, not
+			// ones being ignored: naming them told the owner of a working
+			// photocell to clear the very levels it switches at.
+			const thrSet = !byAdc && has(nm.minThreshold) && has(nm.maxThreshold);
 			const shadowed = [];
 			if (autoSet) shadowed.push('the automatic gain multiples and delays');
 			if (thrSet) shadowed.push('the day and night thresholds');
@@ -510,7 +515,8 @@
 						' set but ignored' +
 						(autoSet ? ', which is why no countdown appears' : '') +
 						'.' + (byAdc
-							? ' The pad it reads is not configured on this page.'
+							? ' Turning off reading the light level from the ADC ' +
+								'hands day/night back to the settings here.'
 							: ' Clearing the daylight sensor pin on the wiring ' +
 								'map hands day/night back to the settings here.'),
 					fix: 'nightMode',
