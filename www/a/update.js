@@ -278,7 +278,7 @@
 	function meterRedraws() {
 		const METER_LINE = /^(Erasing block|Writing kb|Verifying kb):|^(Erasing) +\d+ +Kibyte/;
 		let tail = '', pass = '';
-		return chunk => {
+		const convert = chunk => {
 			const lines = (tail + chunk).split('\n');
 			tail = lines.pop();
 			let out = '';
@@ -294,6 +294,17 @@
 			}
 			return out;
 		};
+		// The text held back when the stream stops mid-line. It may be the last
+		// thing the camera said, so it is shown rather than dropped.
+		convert.flush = () => {
+			const rest = tail;
+			tail = '';
+			if (!rest) return '';
+			const out = (pass ? '\n' : '') + rest;
+			pass = '';
+			return out;
+		};
+		return convert;
 	}
 
 	function paintPhases() {
@@ -413,7 +424,7 @@
 		// either behind it the reboot is a fact about the run. With neither, a
 		// socket that closed is a socket that closed, and the note claiming
 		// otherwise was the whole of what the reporter of #474 had to go on.
-		term.note(sawHandoff && !sawReboot
+		term.note(sawHandoff && !sawReboot && !handoffFailed
 			? '--- majestic has gone; the flash carries on from RAM ---'
 			: sawFlash || sawReboot
 				? '--- connection to the camera ended here; it is rebooting ---'
@@ -919,12 +930,20 @@
 	// UNREACHABLE and come back, or tell us its uptime is younger than this run —
 	// and then confirmUpgrade checks what it came back as.
 	function pollBack() {
-		let followed = false;
 		// The open log stream's abort, while there is one, and when it was last
 		// worth asking whether port 80 is still the follower.
 		let following = null, askedAt = 0;
-		// Returns { up } or, for the first answer from the updater's own log
-		// follower, { res, ctl } with the response left open to be read.
+		// Bytes of the follower's log already shown, and whether the watch that
+		// reads it is still running.
+		let shown = 0, watching = true;
+		function endWatch() {
+			watching = false;
+			if (following) following.abort();
+		}
+		const restore = meterRedraws();
+		// Returns { up, follower } or, when the updater's own log follower answers
+		// and nothing is reading it, also { res, ctl } with the response left open
+		// to be read.
 		//
 		// "/" is one of the few paths majestic serves without auth, so any answer
 		// at all — including a 401 — means majestic is back. With one exception.
@@ -945,7 +964,7 @@
 				.then(r => {
 					clearTimeout(to);
 					const follower = /^text\/plain/i.test(r.headers.get('content-type') || '');
-					if (follower && !followed) { followed = true; return { res: r, ctl }; }
+					if (follower && !following && !sawReboot) return { res: r, ctl, up: false, follower };
 					ctl.abort();
 					return { up: !follower, follower };
 				})
@@ -953,33 +972,42 @@
 		}
 		// Read the flash log through the same path as the socket's, so the
 		// transcript, the steps and the meter carry on as if nothing had changed.
-		// One stream for the whole run: the follower replays from the top on every
-		// connection, and each one costs the camera processes.
+		// One stream at a time, since each costs the camera processes. A connection
+		// that drops while the follower is still there is opened again, and as the
+		// follower replays from the top on every connection, what has been shown
+		// already is skipped by its length.
 		//
 		// Ending it is this side's job. `reboot -f` sends no FIN, so a read on a
 		// camera that has rebooted waits for the new system to reset the connection,
 		// about 30s later. The reboot announcement ends it, and otherwise tick()
 		// does on finding port 80 is no longer the follower. Silence alone proves
 		// nothing: the split NOR layout writes its whole image without a word for
-		// minutes, and closing on that lost the end of the log.
+		// minutes, and the end of the log comes after that.
 		async function followLog(res, ctl) {
 			following = ctl;
 			// The reading left over is the download's, not this write's.
 			hideMeter();
 			status('warning', 'Writing the flash from RAM — do not power off…');
 			const decode = new TextDecoder('utf-8');
-			const restore = meterRedraws();
+			let skip = shown;
 			try {
 				const reader = res.body.getReader();
 				while (!sawReboot && !over) {
 					const { done, value } = await reader.read();
 					if (done) break;
-					append(restore(decode.decode(value, { stream: true })));
+					if (skip >= value.length) { skip -= value.length; continue; }
+					const fresh = value.subarray(skip);
+					skip = 0;
+					shown += fresh.length;
+					append(restore(decode.decode(fresh, { stream: true })));
 				}
 			} catch (err) { /* aborted, or the camera went */ }
 			following = null;
 			ctl.abort();
-			if (!over) status('warning', sawReboot
+			if (over) return;
+			const rest = restore(decode.decode()) + restore.flush();
+			if (rest) append(rest);
+			if (watching) status('warning', sawReboot
 				? 'Camera is rebooting — waiting for it to come back…'
 				: 'The flash log stopped — waiting for the camera to come back. Do not power off…');
 		}
@@ -1003,10 +1031,8 @@
 			if (answer.res) {
 				// majestic is gone and the camera has not rebooted: down, and not
 				// yet up.
-				downSeen = true; tries = 0;
+				if (!downSeen) { downSeen = true; tries = 0; }
 				followLog(answer.res, answer.ctl);
-				setTimeout(tick, 3000);
-				return;
 			}
 			// Port 80 is something else now, so the stream is talking to nothing.
 			if (following && !answer.follower) following.abort();
@@ -1033,8 +1059,8 @@
 					return;
 				}
 			} else {
-				if (up) { confirmUpgrade(); return; }
-				if (++tries > UP_TRIES) { status('danger', 'The camera has not returned. Check it manually.'); resumeHeartbeat(); return; }
+				if (up) { endWatch(); confirmUpgrade(); return; }
+				if (++tries > UP_TRIES) { endWatch(); status('danger', 'The camera has not returned. Check it manually.'); resumeHeartbeat(); return; }
 			}
 			setTimeout(tick, 3000);
 		}

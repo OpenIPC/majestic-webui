@@ -2,11 +2,9 @@
 //
 // majestic is gone from that moment, and port 80 belongs to the updater's own
 // log follower, which answers every path with a 200 text/plain stream that does
-// not end. All of it fails silently and by sounding certain: the page took that
-// follower for the rebooted camera and reported "Camera is back online" more
-// than two minutes before the camera rebooted, with the steps frozen where the
-// socket died. Reaching it takes a real flash, so what the page must conclude
-// from each answer is pinned here.
+// not end. Taken for the rebooted camera it reads as a finished upgrade while
+// the flash is running, and nothing on the page looks wrong. Reaching it takes a
+// real flash, so what the page must conclude from each answer is pinned here.
 'use strict';
 
 const fs = require('fs');
@@ -47,6 +45,10 @@ function makeStream(signal) {
 	return {
 		push(text) {
 			const item = { done: false, value: new TextEncoder().encode(text) };
+			if (waiting) { waiting.resolve(item); waiting = null; } else queue.push(item);
+		},
+		end() {
+			const item = { done: true };
 			if (waiting) { waiting.resolve(item); waiting = null; } else queue.push(item);
 		},
 		reader: {
@@ -166,7 +168,8 @@ function start(answer) {
 			await r.settle();
 			return r;
 		},
-		async push(text) { env.streams[0].push(text); await r.settle(); return r; },
+		async push(text, n = 0) { env.streams[n].push(text); await r.settle(); return r; },
+		async end(n = 0) { env.streams[n].end(); await r.settle(); return r; },
 	};
 	return r;
 }
@@ -256,6 +259,53 @@ const camera = (n) => (i) => (i < n ? 'follower' : 'camera');
 		check('and the camera answering ends the watch', r.env.versionReads === 1, 'reads=' + r.env.versionReads);
 	}
 
+	group('a stream that stops mid-line');
+	{
+		const r = start(camera(99)).feed(HANDOFF).close();
+		await r.settle();
+		await r.push('Firmware updated\n\nUnconditional reboot');
+		await r.end();
+		check('its last words still count', /Camera is rebooting/.test(r.status()), r.status());
+		check('and are in the log', /Unconditional reboot/.test(r.env.written), JSON.stringify(r.env.written));
+	}
+
+	group('a connection lost while the follower is still there');
+	{
+		const r = start(camera(99)).feed(HANDOFF).close();
+		await r.settle();
+		r.env.written = '';
+		await r.push('one\ntwo\nhalf');
+		await r.end();
+		await r.advance(3000);
+		check('the log is opened again', r.env.readers === 2, 'readers=' + r.env.readers);
+		await r.push('one\n', 1);
+		await r.push('two\nhalf and the rest\nFirmware updated\n', 1);
+		check('and carries on where it stopped, with nothing repeated',
+			r.env.written === 'one\ntwo\nhalf and the rest\nFirmware updated\n', JSON.stringify(r.env.written));
+		check('while the first connection is closed', r.env.pings[0].signal.aborted);
+	}
+	{
+		// Every connection ending at once must not keep the watch alive forever.
+		const r = start(camera(9999)).feed(HANDOFF).close();
+		await r.settle();
+		for (let i = 0; i < 210 && !/has not returned/.test(r.status()); i++) {
+			await r.end(r.env.streams.length - 1);
+			await r.advance(3000);
+		}
+		check('a connection that keeps dropping still ends the watch',
+			/has not returned/.test(r.status()), r.status());
+	}
+
+	group('the watch ending while the log is open');
+	{
+		const r = start(camera(9999)).feed(HANDOFF).close();
+		await r.settle();
+		await r.advance(3200000);
+		check('giving up says so', /has not returned/.test(r.status()), r.status());
+		check('and is not overwritten by the stream closing', /alert-danger/.test(r.cls()), r.cls());
+		check('and leaves no connection open', r.env.pings.every((p) => p.signal.aborted));
+	}
+
 	group('the meter under a flash it did not measure');
 	{
 		const r = start(camera(99)).feed('12%\n', HANDOFF);
@@ -324,6 +374,8 @@ const camera = (n) => (i) => (i < n ? 'follower' : 'camera');
 		check('in the updater\'s terms', /could not hand over/.test(r.status()) && /nothing was written/.test(r.status()), r.status());
 		check('without going to the version check that needs a sign-in', r.env.versionReads === 0);
 		check('leaving the page on the log', r.env.location.href === undefined, r.env.location.href);
+		check('and the transcript does not say the flash went on',
+			!r.env.notes.some((n) => /carries on/.test(n)), JSON.stringify(r.env.notes));
 	}
 
 	done();
