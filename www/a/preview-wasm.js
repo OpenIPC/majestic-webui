@@ -36,7 +36,7 @@ window.MajesticWasm = (function () {
 	// MJ_WASM_BASE overrides it, for a development build or an operator who
 	// would rather host it themselves.
 	const BASE = (window.MJ_WASM_BASE ||
-		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.2.0/dist/');
+		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.2.1/dist/');
 	// The channel feed (preview-datachannel.js), when the camera has one:
 	// the worker is asked to run in its feed mode and this page owns the
 	// transport — a data channel cannot be created in, or transferred into,
