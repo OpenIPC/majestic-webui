@@ -468,13 +468,19 @@
 		// to clear the very settings they had just chosen (#325).
 		//
 		// A sensor pin is the case the switch cannot cover: it outranks BOTH
-		// on-screen sets, and nothing else on the page mentions it. The ADC
-		// pad (src 3) outranks them the same way and is named separately: it
-		// is a different mechanism with no key on this page, so telling its
-		// owner to clear the daylight sensor pin would send them to a control
-		// that is not the one deciding.
-		if (monitor && sample && (sample.src === 1 || sample.src === 3)) {
-			const byAdc = sample.src === 3;
+		// on-screen sets, and nothing else on the page mentions it.
+		//
+		// The ADC pad (src 3) is NOT that case, though it used to be handled
+		// as one. The camera reads the ADC only with both thresholds set —
+		// they are what its reading is compared against — so an ADC camera is
+		// a threshold camera in other units: the Legacy switch is on, the
+		// automatic controls are off the page, and src 2's reasoning above
+		// holds word for word. Treated like the pin, it called the very levels
+		// the photocell switches at "set but ignored" (OpenIPC/majestic#367),
+		// and with those left out it went on naming automatic rows nobody can
+		// see, and promised that turning the ADC off would hand day/night to
+		// them — when it hands it to the same pair, read as sensor gain.
+		if (monitor && sample && sample.src === 1) {
 			// What is named has to be what is actually there. The first cut of
 			// this said "the automatic gain multiples and the delays beside
 			// them" whatever was set, on a path that could fire with no
@@ -500,27 +506,23 @@
 					id: 'mech-shadowed',
 					level: deliberate ? 'warning' : 'info',
 					title: 'Some of these settings are not being used',
-					detail: (byAdc
-						? 'This camera is switching on an analog voltage ' +
-							'reading, and it decides before anything else ' +
-							'here does. '
-						: 'A daylight sensor is wired, and it decides ' +
-							'before anything else here does. ') +
+					detail: 'A daylight sensor is wired, and it decides ' +
+						'before anything else here does. ' +
 						'That leaves ' + shadowed.join(' and ') +
 						' set but ignored' +
 						(autoSet ? ', which is why no countdown appears' : '') +
-						'.' + (byAdc
-							? ' The pad it reads is not configured on this page.'
-							: ' Clearing the daylight sensor pin on the wiring ' +
-								'map hands day/night back to the settings here.'),
+						'. Clearing the daylight sensor pin on the wiring ' +
+						'map hands day/night back to the settings here.',
 					fix: 'nightMode',
 				});
 			}
 		}
 
-		// Thresholds are compared against isp_again, so min must sit BELOW max
-		// to leave a band the camera can idle in. Equal is not "no hysteresis
-		// but workable" — it is the same gain deciding both directions.
+		// Thresholds are compared against isp_again — or, with the light level
+		// read from the ADC, against the ADC reading — so min must sit BELOW
+		// max to leave a band the camera can idle in, whichever way the pad
+		// runs. Equal is not "no hysteresis but workable" — it is the same
+		// reading deciding both directions.
 		const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
 		if (lo !== null && hi !== null && lo >= hi) {
 			out.push({

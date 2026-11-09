@@ -8983,7 +8983,10 @@
 			// An empty control misleads nobody; only a filled-in one that is
 			// being ignored needs saying.
 			const v = f.getValue();
-			const set = decides && mech !== decides &&
+			// The ADC reading is compared against the thresholds, so they are
+			// in use whenever it decides.
+			const inUse = mech === decides || (decides === 'adc' && mech === 'thresholds');
+			const set = decides && !inUse &&
 				String(v === undefined || v === null ? '' : v) !== '';
 			if (!set) {
 				if (note) note.remove();
