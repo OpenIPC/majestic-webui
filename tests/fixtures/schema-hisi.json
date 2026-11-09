@@ -1228,6 +1228,19 @@
           "x-reload": "service:night",
           "hint": "For a board whose lamp driver is active-low. Covers a PWM lamp too."
         },
+        "whiteLightPin": {
+          "type": "integer",
+          "title": "GPIO pin for the white lamp",
+          "x-reload": "service:night",
+          "hint": "A white lamp switched on and off, for a board whose white lamp is not on a PWM pad. Ignored while whiteLightPwmChannel is set."
+        },
+        "whiteLightInvert": {
+          "type": "boolean",
+          "title": "White lamp is inverted",
+          "default": false,
+          "x-reload": "service:night",
+          "hint": "For a white lamp whose driver is active-low (whiteLightPin only)."
+        },
         "overrideDrc": {
           "type": "integer",
           "title": "DRC value in night mode",

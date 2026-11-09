@@ -304,6 +304,16 @@ group('Day / Night: every setting is in a heading or on the pin map');
 	const bothWays = placed.filter(k => onMap.indexOf(k) >= 0);
 	check('and none is both a row and drawn by the map', !bothWays.length, bothWays.join(', '));
 
+	// The pin map draws its roles, and the polarity chips on them, out of
+	// these hidden fields: a role whose key or invert is missing from the list
+	// would be drawn on the map AND as a row.
+	const MAP = require(path.join(__dirname, '..', 'www', 'a', 'ircut-map.js'));
+	const roleKeys = MAP.ROLES.reduce((acc, r) =>
+		acc.concat([r.key], r.polarity ? [r.polarity.invert] : []), []);
+	const offMap = roleKeys.filter(k => onMap.indexOf(k) < 0);
+	check('every pin-map role and its polarity are map-driven', !offMap.length,
+		'not hidden: ' + offMap.join(', '));
+
 	const known = new Set(placed.concat(onMap));
 	const orphans = Object.keys(NM).filter(k => !known.has(k));
 	check('every key in the shipped schema is accounted for', !orphans.length,

@@ -15,7 +15,7 @@ const path = require('path');
 const { check, group, done } = require('./assert');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'www', 'a', 'mj-settings.js'), 'utf8');
-const head = '\t\tfunction pwmLamp() {';
+const head = '\t\tfunction pwmLamp(only) {';
 const from = SRC.indexOf(head);
 if (from < 0) throw new Error('pwmLamp not found in mj-settings.js');
 const code = SRC.slice(from, SRC.indexOf('\n\t\t}\n', from) + 4);
@@ -23,9 +23,10 @@ const code = SRC.slice(from, SRC.indexOf('\n\t\t}\n', from) + 4);
 function getDotted(obj, dot) {
 	return dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
 }
-function lamp(nightMode, assigned) {
+function lamp(nightMode, assigned, only) {
 	const state = { config: { nightMode }, ircutInfo: { assigned: assigned || [] } };
-	return new Function('state', 'getDotted', code + '\nreturn pwmLamp();')(state, getDotted);
+	return new Function('state', 'getDotted', 'only',
+		code + '\nreturn pwmLamp(only);')(state, getDotted, only);
 }
 const pad = (pin) => ({ role: 'backlightPin', pin });
 
@@ -48,6 +49,25 @@ group('two lamps');
 	check('both are named', both && /IR on pwm8/.test(both.hint) &&
 		/white on pwm9/.test(both.hint), both);
 	check('...and no single pad is claimed for the two', both && both.pin === undefined, both);
+}
+
+// Each lamp's own row (the night illuminator's and the white light's) asks
+// about its own channel. A white lamp on a channel is not the IR lamp, and a
+// whiteLightPin left beside the white channel is ignored by the camera, so
+// the white row is the channel, not that pin.
+group('one lamp per row');
+{
+	const whiteOnly = { whiteLightPwmChannel: 'pwm9' };
+	check('a white channel is not the IR lamp', lamp(whiteOnly, [pad(55)], 'IR') === null);
+	const w = lamp(whiteOnly, [pad(55)], 'white');
+	check('...it is the white light, on its pad', w && w.channel === 'pwm9' && w.pin === 55, w);
+
+	const both = { irLightPwmChannel: 'pwm8', whiteLightPwmChannel: 'pwm9' };
+	const ir = lamp(both, [pad(56), pad(55)], 'IR');
+	check('with two, each row names its own channel', ir && ir.hint === 'dimmable, on pwm8', ir);
+	check('...and claims no pad, since which is which is a guess', ir && ir.pin === undefined, ir);
+	const wb = lamp(both, [pad(56), pad(55)], 'white');
+	check('...the white row too', wb && wb.hint === 'dimmable, on pwm9' && wb.pin === undefined, wb);
 }
 
 group('no lamp');

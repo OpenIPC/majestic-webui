@@ -404,14 +404,15 @@
 	function sectionGroups(section) { return SECTION_GROUPS[section] || null; }
 
 	// Keys a section draws through a control of its own rather than as a row:
-	// Day / Night's four pads and the three polarity switches that belong to
+	// Day / Night's five pads and the four polarity switches that belong to
 	// them are edited on the pin map. They are still real fields — rendered
 	// hidden, so Save, dirty tracking and the per-row reset never learn a map
 	// exists — which is why they are named here rather than excluded. Naming
 	// them beside the groups keeps one answer to "where is this key drawn".
 	const SECTION_MAP_DRIVEN = {
 		nightMode: ['irCutPin1', 'irCutPin2', 'backlightPin', 'lightSensorPin',
-			'irCutSingleInvert', 'backlightInvert', 'lightSensorInvert'],
+			'whiteLightPin', 'irCutSingleInvert', 'backlightInvert',
+			'lightSensorInvert', 'whiteLightInvert'],
 	};
 	function mapDriven(section) { return SECTION_MAP_DRIVEN[section] || []; }
 
