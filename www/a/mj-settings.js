@@ -10077,11 +10077,17 @@
 		// and the camera reports both pads under this one role. Either is a
 		// lamp on the map; with both, the channels are named and no single
 		// pad is claimed, since which pad is which is again a guess.
-		function pwmLamp() {
+		//
+		// `only` ('IR' or 'white') asks about one lamp, for its own row: the
+		// night illuminator's row is the IR channel's, and the white light's
+		// row is the white channel's, which also makes a whiteLightPin left
+		// beside it read as the channel it is ignored for. Without it, any
+		// lamp on a channel -- which is what makes a pad nobody's to pick.
+		function pwmLamp(only) {
 			const chans = [['IR', 'irLightPwmChannel'],
 				['white', 'whiteLightPwmChannel']]
 				.map(([name, k]) => [name, getDotted(state.config, 'nightMode.' + k)])
-				.filter(([, ch]) => ch && ch !== 'none');
+				.filter(([name, ch]) => ch && ch !== 'none' && (!only || name === only));
 			if (!chans.length) return null;
 			const pads = [];
 			((state.ircutInfo && state.ircutInfo.assigned) || []).forEach((x) => {
@@ -10118,7 +10124,8 @@
 				// beside a selected channel is ignored by the camera, so
 				// letting it suppress this would show a dimmable lamp as an
 				// ordinary switched one and name a pad nothing drives.
-				const lamp = r.key === 'backlightPin' ? pwmLamp() : null;
+				const lamp = r.key === 'backlightPin' ? pwmLamp('IR')
+					: r.key === 'whiteLightPin' ? pwmLamp('white') : null;
 				const set = a[r.key] !== undefined || !!lamp;
 				if (!set) row.classList.add('mj-ircut-role-unset');
 				const dot = el('span', 'mj-ircut-rdot');
