@@ -1594,19 +1594,17 @@ function runRest() {
 		// Nothing filled in, nothing being ignored, nothing to say.
 		check('automatic mode deciding says nothing',
 			!said(both, 4));
-		// src 3 is the ADC pad, a different mechanism with a switch of its
-		// own. It shared the sensor-pin sentence, which was merely loose
-		// until the advice became concrete — at which point it sent the owner
-		// of an ADC camera to clear a pin that is not what is deciding.
-		check('the ADC source is covered too', !!said(both, 3));
-		check('and named as a voltage reading, not as a wired sensor',
-			/analog voltage reading/.test(said(both, 3).detail) &&
-			!/daylight sensor is wired/.test(said(both, 3).detail),
-			said(both, 3).detail);
-		check('and is not told to clear a pin that is not deciding',
-			!/wiring map/.test(said(both, 3).detail) &&
-			/reading the light level from the ADC/.test(said(both, 3).detail.replace(/\s+/g, ' ')),
-			said(both, 3).detail);
+		// src 3 is the ADC pad, and the camera reads it only with both
+		// thresholds set: they are what its reading is compared against. So
+		// an ADC camera is a threshold camera in the ADC's units — the Legacy
+		// switch is on and the automatic rows are off the page, exactly as
+		// for src 2. It used to be treated like the pin, which first called
+		// the levels a working photocell switches at "ignored"
+		// (OpenIPC/majestic#367), then named hidden automatic rows and said
+		// turning the ADC off would hand day/night to them, when it hands it
+		// to the same pair read as gain.
+		check('the ADC deciding is left to the Legacy switch as well',
+			!said(both, 3), said(both, 3) && said(both, 3).detail);
 		// A camera that has not reported a source is not accused of anything.
 		check('an unknown source says nothing either', !said(both, null));
 
@@ -1623,16 +1621,8 @@ function runRest() {
 			said(thrOnly, 1).detail);
 		check('and the countdown clause is only spoken about automatic mode',
 			!/no countdown/.test(said(thrOnly, 1).detail));
-		// The ADC reading is compared against the threshold pair, so under the
-		// ADC the pair is what decides. Calling it ignored told the owner of a
-		// working photocell to clear the levels it switches at.
 		check('under the ADC a threshold pair alone is not reported as ignored',
 			!said(thrOnly, 3));
-		check('under the ADC only the automatic settings are named',
-			/gain multiples and delays set but ignored/
-				.test(said(both, 3).detail.replace(/\s+/g, ' ')) &&
-			!/thresholds/.test(said(both, 3).detail),
-			said(both, 3).detail);
 		check('both shadowed sets are named together',
 			/gain multiples and delays and the day and night thresholds/
 				.test(said(both, 1).detail.replace(/\s+/g, ' ')),
