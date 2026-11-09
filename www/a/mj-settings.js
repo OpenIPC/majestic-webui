@@ -8613,13 +8613,14 @@
 		});
 	}
 
-	// The four wiring pins, by the name majestic's config gives them. Numbers
+	// The wiring pins, by the name majestic's config gives them. Numbers
 	// are plain running integers everywhere in the UI — the same 11 that goes
 	// into nightMode.irCutPin1 and the same 11 the wiki's GPIO table lists. The
 	// kernel's bank_pin spelling is deliberately never shown: a second
 	// numbering nobody can map onto the one they have to type is worse than the
 	// harder one alone.
-	const PIN_KEYS = ['irCutPin1', 'irCutPin2', 'backlightPin', 'lightSensorPin'];
+	const PIN_KEYS = ['irCutPin1', 'irCutPin2', 'backlightPin', 'lightSensorPin',
+		'whiteLightPin'];
 	const PIN_DOTS = {};
 	PIN_KEYS.forEach((k) => { PIN_DOTS['nightMode.' + k] = 1; });
 
@@ -8632,6 +8633,7 @@
 		irCutPin1: 'irCutSingleInvert',
 		backlightPin: 'backlightInvert',
 		lightSensorPin: 'lightSensorInvert',
+		whiteLightPin: 'whiteLightInvert',
 	};
 	// Derived from mj-tree's list rather than restated here, so the invariant
 	// in tests/tree.test.js is checking the set this page actually hides.

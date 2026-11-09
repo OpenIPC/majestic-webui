@@ -57,8 +57,10 @@
 		};
 	}
 
-	// The four things a pad can be. Colours are the dashboard's validated
-	// series set, so a pad and its row in the list always agree.
+	// The five things a pad can be. The first four colours are the dashboard's
+	// validated series set, so a pad and its row in the list always agree; the
+	// white light's is a fifth hue checked the same way (contrast on both card
+	// surfaces, and separation from the four under deuteranopia).
 	const ROLES = [
 		// Which coil is which is majestic's to say, not ours, and it is the
 		// opposite of what reads naturally from the key names. With BOTH coils
@@ -103,6 +105,12 @@
 			polarity: { invert: 'backlightInvert', on: 'lamp on = HIGH', off: 'lamp on = LOW' } },
 		{ key: 'lightSensorPin', label: 'Daylight sensor', hint: 'photocell that says when it is dark', color: '#8a5cd8',
 			polarity: { invert: 'lightSensorInvert', on: 'dark = HIGH', off: 'dark = LOW' } },
+		// A second lamp beside the night illuminator, switched on and off
+		// (nightMode.whiteLightPin): what lights a colour night, or what
+		// whiteLight turns on for movement, a sighting or by hand. A white lamp
+		// on a PWM channel is configured as a channel and is not a pad here.
+		{ key: 'whiteLightPin', label: 'White light', hint: 'a white lamp beside the night illuminator', color: '#c2417a',
+			polarity: { invert: 'whiteLightInvert', on: 'lamp on = HIGH', off: 'lamp on = LOW' } },
 	];
 	const byKey = {};
 	ROLES.forEach((r) => { byKey[r.key] = r; });
@@ -123,7 +131,7 @@
 		let sel = null;
 		let sweeping = null; /* {a, b} while a pair is being driven */
 
-		// Pads with an owner that is not one of our four roles.
+		// Pads with an owner that is not one of our roles.
 		//
 		// Two different claims, and only one of them is real ownership.
 		// /sys/kernel/debug/gpio names who holds each line: a DRIVER holds
@@ -134,7 +142,7 @@
 		// camera out of the pad a rescan needs most.
 		//
 		// The roles here are the ones majestic and U-Boot assign OUTSIDE this
-		// section. The four Day / Night roles are excluded because they are
+		// section. The Day / Night roles are excluded because they are
 		// drawn as roles, in their own colours; these have no row of their own
 		// on this page, so without a word here their pads would read as free
 		// to anyone picking one.
