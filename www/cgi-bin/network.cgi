@@ -185,6 +185,13 @@ eth0_beside_wifi() {
 	fi
 }
 
+# eth0 on the dual layout once a Wi-Fi network is saved: up from boot, but
+# its file is read only when a cable arrives. Every other interface the boot
+# script reads, it reads at boot. Only meaningful where iface_is_booted holds.
+waits_for_cable() {
+	[ "$1" = "eth0" ] && [ -n "$network_adapter" ] && [ -n "$env_wlanssid" ]
+}
+
 iface_is_booted() {
 	if [ -z "$network_adapter" ]; then
 		[ "$1" = "eth0" ]
@@ -381,19 +388,20 @@ net_read() {
 # ever while the kernel holds the static fallback, and judging that difference
 # raised a restart banner that no restart could clear.
 #
-# Nor is an interface with no link and nothing on it. There is no reading to
-# hold the file against: with Wi-Fi and Ethernet both in use, the firmware
-# raises eth0 and waits for a cable before it reads eth0's file at all, so a
-# camera booted on Wi-Fi with the cable out has eth0 up, dark and empty --
-# and boots straight back into that state, which kept the banner up through
-# every restart the banner asked for (#720). The cable arriving is what applies
-# the file, not a restart. A fixed address stays on a dark interface, so one
-# that has an address is still judged; so are the wireless credentials below,
-# which a wrong password leaves dark and which a restart does apply.
+# Nor is eth0 waiting for a cable with nothing on it. With Wi-Fi and Ethernet
+# both in use, the firmware raises eth0 and reads its file only once a cable
+# arrives, so a camera booted on Wi-Fi with the cable out has eth0 up, dark
+# and empty -- and boots straight back into that state, which kept the banner
+# up through every restart the banner asked for (#720). The cable arriving is
+# what applies the file, not a restart. Narrowly that: a fixed address stays
+# on a dark interface, so one that has an address is still judged, and an
+# interface the boot script reads AT boot -- Wi-Fi among them -- is judged
+# however dark it is, since its file has had its chance and a restart gives
+# it another. The wireless credentials below are judged either way.
 net_pending() {
 	iface_is_booted "$1" || return 1
 	[ -n "$cfg_mode" ] || return 1
-	if [ -z "$now_mode" ] && [ "$now_carrier" = "0" ]; then
+	if waits_for_cable "$1" && [ -z "$now_mode" ] && [ "$now_carrier" = "0" ]; then
 		:
 	elif [ "$cfg_mode" != "$now_mode" ]; then
 		return 0
@@ -753,7 +761,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 					msg="$msg They are stored, but the camera does not bring $(iface_word "$edit_iface") up from this file."
 				elif net_pending "$edit_iface"; then
 					msg="$msg They take effect when the camera restarts."
-				elif [ -z "$now_mode" ] && [ "$now_carrier" = "0" ]; then
+				elif waits_for_cable "$edit_iface" && [ -z "$now_mode" ] && [ "$now_carrier" = "0" ]; then
 					msg="$msg They take effect when $(iface_word "$edit_iface") is connected."
 				fi
 				redirect_to "network.cgi?iface=${edit_iface}" "success" "$msg"

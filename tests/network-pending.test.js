@@ -42,7 +42,7 @@ check('net_pending is found in network.cgi', fn !== null);
 // Every reading net_read leaves behind, as an interface that is up, on DHCP,
 // and doing what its file says.
 const BASE = {
-	booted: 1,
+	booted: 1, cable: 1,
 	cfg_mode: 'dhcp', now_mode: 'dhcp', now_carrier: '1',
 	cfg_address: '', now_address: '192.0.2.20',
 	cfg_netmask: '', now_netmask: '255.255.255.0',
@@ -55,7 +55,7 @@ function pending(iface, over) {
 	const v = Object.assign({}, BASE, over);
 	const env = { PATH: BIN + ':' + process.env.PATH };
 	for (const k of Object.keys(v)) env[k] = String(v[k]);
-	const script = `iface_is_booted() { [ -n "$booted" ]; }\n${fn}\nnet_pending "$1" && echo yes || echo no`;
+	const script = `iface_is_booted() { [ -n "$booted" ]; }\nwaits_for_cable() { [ "$1" = eth0 ] && [ -n "$cable" ]; }\n${fn}\nnet_pending "$1" && echo yes || echo no`;
 	const r = spawnSync('sh', ['-c', script, 'sh', iface], { env, encoding: 'utf8' });
 	return r.stdout.trim();
 }
@@ -76,6 +76,13 @@ if (fn) {
 		pending('eth0', { cfg_mode: 'static', cfg_address: '192.0.2.31', cfg_netmask: '255.255.255.0',
 			cfg_gateway: '192.0.2.1', cfg_nameserver: '192.0.2.1', now_mode: 'static', now_carrier: '0' }) === 'yes');
 
+	check('eth0 dark and empty where the boot script read it at boot: still judged',
+		pending('eth0', Object.assign({}, dark, { cable: '' })) === 'yes');
+	check('wlan0 dark and empty is still judged: its file was read at boot',
+		pending('wlan0', dark) === 'yes');
+	check('wlan0 dark, empty, with no supplicant file to read credentials from: still judged',
+		pending('wlan0', Object.assign({}, dark, { network_wlan_ssid: 'home', now_ssid: '', now_psk: '' })) === 'yes');
+
 	group('what it judged before is unchanged');
 	check('DHCP in the file and in the kernel: no banner', pending('eth0', {}) === 'no');
 	check('file says static, kernel holds a lease: banner',
@@ -87,7 +94,9 @@ if (fn) {
 	group('wireless credentials are judged even on a dark link');
 	// A wrong password leaves wlan0 dark, and the right one takes effect on
 	// the restart -- so the dark-link exemption must not swallow this check.
-	const wifi = Object.assign({}, dark, { network_wlan_ssid: 'home', network_wlan_password: 'secret', now_ssid: 'home', now_psk: 'abc123' });
+	// As the boot script leaves it: udhcpc is running whether or not the
+	// access point lets it in, so the mode reads DHCP with nothing leased.
+	const wifi = Object.assign({}, dark, { now_mode: 'dhcp', network_wlan_ssid: 'home', network_wlan_password: 'secret', now_ssid: 'home', now_psk: 'abc123' });
 	check('the saved network is the one in use: no banner', pending('wlan0', wifi) === 'no');
 	check('a new network name saved while wlan0 has no access point: banner',
 		pending('wlan0', Object.assign({}, wifi, { network_wlan_ssid: 'other' })) === 'yes');
