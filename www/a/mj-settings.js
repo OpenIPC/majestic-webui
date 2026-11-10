@@ -1871,9 +1871,10 @@
 				: v === 'manual' ? 'manual' : 'auto';
 		};
 		const ircutMode = modeOf('irCut'), lightMode = modeOf('backlight');
-		// A white lamp beside the night's own (OpenIPC/firmware#2758: IR on 14, white on 13,
-		// and one Lamp switch for the two). It is somebody's to switch here
-		// only under whiteLight: manual; every other mode drives it itself.
+		// A white lamp beside the night's own -- an IR lamp on backlightPin
+		// and a white one on its own pin or PWM channel, which one Lamp switch
+		// cannot tell apart. It is somebody's to switch here only under
+		// whiteLight: manual; every other mode drives it itself.
 		const pwmSet = (v) => active(v) && v !== 'none' && v !== '';
 		const whiteWired = active(getDotted(state.config, 'nightMode.whiteLightPin'))
 			|| pwmSet(getDotted(state.config, 'nightMode.whiteLightPwmChannel'));
@@ -1947,8 +1948,9 @@
 			lbl('toggle-ircut').title = 'On: the IR-cut filter is out of the light path (night). '
 				+ 'Off: it is in, for daytime colour.';
 		if (!light.disabled && lbl('toggle-light'))
-			lbl('toggle-light').title = 'The night illuminator on GPIO '
-				+ getDotted(state.config, 'nightMode.backlightPin') + '.';
+			lbl('toggle-light').title = whiteWired
+				? 'The night illuminator, usually the infrared one. The white lamp is the White switch.'
+				: 'The night illuminator.';
 		if (white) {
 			white.disabled = !whiteManual;
 			const wl = lbl('toggle-white');
@@ -1990,6 +1992,10 @@
 		// (measured on an SSC377QE). A gauge that is absent -- the white lamp
 		// where it is the colour night's own -- leaves its switch alone.
 		let gen = 0;
+		// The white lamp's last state the camera confirmed, to put back when a
+		// click is not confirmed: a checkbox has already flipped by the time
+		// the handler runs. null until a reading arrives.
+		let whiteSeen = null;
 		const readGauges = () => {
 			const mine = ++gen;
 			const want = [['night_enabled', night], ['ircut_enabled', ircut],
@@ -2005,7 +2011,9 @@
 						if (m) seen[m[1]] = Number(m[2]);
 					});
 					want.forEach(([n, el2]) => {
-						if (n in seen && !isNaN(seen[n])) el2.checked = seen[n] > 0;
+						if (!(n in seen) || isNaN(seen[n])) return;
+						el2.checked = seen[n] > 0;
+						if (el2 === white) whiteSeen = el2.checked;
 					});
 				})
 				.catch(() => {});
@@ -2034,15 +2042,23 @@
 				.then(r => r.json()).then(data => { light.checked = data; })
 				.catch(() => {});
 		});
-		// -1 is the camera saying there is no white lamp it may switch: the
-		// switch keeps what the gauge last said rather than showing it off.
+		// A POST, unlike the older switches beside it: this one moves
+		// hardware, and a GET can be replayed by a prefetch or a restored tab.
+		// -1 is the camera saying there is no white lamp it may switch; that
+		// and a failed request put back the last confirmed state, or the
+		// state before the click when nothing was ever confirmed.
 		if (white) white.addEventListener('click', () => {
-			apiFetch('/night/white', { credentials: 'same-origin' })
-				.then(r => r.json()).then(data => {
-					if (data >= 0) white.checked = data > 0;
-					else readGauges();
+			const before = whiteSeen != null ? whiteSeen : !white.checked;
+			const undo = () => { white.checked = before; readGauges(); };
+			apiFetch('/night/white', { method: 'POST', credentials: 'same-origin' })
+				.then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+				.then(data => {
+					if (typeof data === 'number' && data >= 0) {
+						white.checked = data > 0;
+						whiteSeen = white.checked;
+					} else undo();
 				})
-				.catch(() => {});
+				.catch(undo);
 		});
 	}
 
