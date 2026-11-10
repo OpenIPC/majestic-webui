@@ -34,7 +34,7 @@ const IDS = [
 	'mj-talk', 'mj-talk-ctl', 'mj-talk-lbl', 'mj-talk-t', 'mj-transport-w',
 	'mj-transport-m', 'mj-transport-m-lbl', 'mj-transport-ctl', 'mj-transport-lbl',
 	'mj-vol', 'mj-player', 'mj-stage', 'mj-tap-play', 'mj-snapshot',
-	'toggle-ircut', 'toggle-light', 'toggle-night',
+	'toggle-ircut', 'toggle-light', 'toggle-night', 'toggle-white',
 ];
 
 // Ask the page for a transport directly, bypassing the (now disabled) radio —

@@ -1502,6 +1502,12 @@
 			one('toggle-night', ICON.night, 'Night') +
 			one('toggle-ircut', ICON.ircut, 'IR&#8209;cut') +
 			one('toggle-light', ICON.lamp, 'Lamp', 'mj-hrt-amber') +
+			// The white lamp has a switch of its own only where it is a lamp
+			// of its own: a pin or a PWM channel beside backlightPin. Hidden
+			// until wireRuntime() has read the config and found one; no
+			// wrapper, because the group is a flex row of input+label pairs.
+			one('toggle-white', ICON.lamp, 'White', 'mj-hrt-amber')
+				.replace('<label ', '<label hidden ') +
 			'</span>' +
 			// A sentence in a bar that cannot wrap: on the picture it truncates
 			// with the title carrying the rest, and below md dockRuntime moves
@@ -1849,6 +1855,7 @@
 		const lbl = id => root.querySelector('label[for="' + id + '"]');
 		const night = byId('toggle-night'), ircut = byId('toggle-ircut');
 		const light = byId('toggle-light'), lightmon = byId('mj-lightmon');
+		const white = byId('toggle-white');
 		if (!night) return;
 		const active = v => v !== false && v != null;
 		const lm = active(getDotted(state.config, 'nightMode.lightMonitor'));
@@ -1864,6 +1871,17 @@
 				: v === 'manual' ? 'manual' : 'auto';
 		};
 		const ircutMode = modeOf('irCut'), lightMode = modeOf('backlight');
+		// A white lamp beside the night's own (OpenIPC/firmware#2758: IR on 14, white on 13,
+		// and one Lamp switch for the two). It is somebody's to switch here
+		// only under whiteLight: manual; every other mode drives it itself.
+		const pwmSet = (v) => active(v) && v !== 'none' && v !== '';
+		const whiteWired = active(getDotted(state.config, 'nightMode.whiteLightPin'))
+			|| pwmSet(getDotted(state.config, 'nightMode.whiteLightPwmChannel'));
+		const whiteModeRaw = getDotted(state.config, 'nightMode.whiteLight');
+		const whiteMode = (whiteModeRaw === false || whiteModeRaw === 'false')
+			? 'off' : (whiteModeRaw || 'auto');
+		const whiteManual = whiteWired && whiteMode === 'manual';
+		if (white && lbl('toggle-white')) lbl('toggle-white').hidden = !whiteWired;
 		// Distinct from off: an actuator that does not follow dusk is still
 		// the daemon's to drive, and the switch below still moves it, which is
 		// the whole point of that mode.
@@ -1895,7 +1913,7 @@
 			// off is not the operator's to move either, so keeping the group
 			// open for it shows three dead switches — which is the thing the
 			// sentence above replaced.
-			if (ircutMode !== 'manual' && lightMode !== 'manual') {
+			if (ircutMode !== 'manual' && lightMode !== 'manual' && !whiteManual) {
 				const grp = root.querySelector('.mj-hud-rt');
 				if (grp) grp.hidden = true;
 				return;
@@ -1923,6 +1941,23 @@
 		// the actuator is deliberately parked, or that the monitor has it —
 		// rather than just refusing.
 		const MON = 'Automatic day/night is driving this one.';
+		// Which way is "on" is not obvious for a filter: on is the night
+		// position, out of the light path, and a daylight picture turns pink.
+		if (!ircut.disabled && lbl('toggle-ircut'))
+			lbl('toggle-ircut').title = 'On: the IR-cut filter is out of the light path (night). '
+				+ 'Off: it is in, for daytime colour.';
+		if (!light.disabled && lbl('toggle-light'))
+			lbl('toggle-light').title = 'The night illuminator on GPIO '
+				+ getDotted(state.config, 'nightMode.backlightPin') + '.';
+		if (white) {
+			white.disabled = !whiteManual;
+			const wl = lbl('toggle-white');
+			if (wl) wl.title = whiteManual ? 'The white lamp.'
+				: whiteMode === 'auto'
+					? 'The white lamp lights a colour night by itself. Set White light to manual in Day / Night settings to switch it here.'
+					: 'The white lamp follows its White light mode (' + whiteMode
+						+ '). Set it to manual in Day / Night settings to switch it here.';
+		}
 		if (night.disabled && lbl('toggle-night'))
 			lbl('toggle-night').title = MON;
 		if (ircut.disabled && lbl('toggle-ircut'))
@@ -1946,18 +1981,34 @@
 		// them now: the one at mount and one after every toggle. Responses can
 		// land in any order, and an older one assigning last would put the
 		// pre-toggle reading back on the switch.
+		//
+		// One read of the whole night group, parsed here, rather than one
+		// `?value=` query per switch. That query finds the first occurrence of
+		// the name anywhere in the text, which is the `# HELP` line, and takes
+		// the first digit after it: night_white_light's help mentions a
+		// number, so the white switch read lit whatever the lamp was doing
+		// (measured on an SSC377QE). A gauge that is absent -- the white lamp
+		// where it is the colour night's own -- leaves its switch alone.
 		let gen = 0;
 		const readGauges = () => {
 			const mine = ++gen;
-			[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
-				apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
-					.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
-					.then(v => {
-						if (mine !== gen) return;
-						const num = Number(String(v).trim());
-						if (String(v).trim() !== '' && !isNaN(num)) el2.checked = num > 0;
-					})
-					.catch(() => {}));
+			const want = [['night_enabled', night], ['ircut_enabled', ircut],
+				['light_enabled', light]]
+				.concat(white && whiteWired ? [['night_white_light', white]] : []);
+			apiFetch('/metrics/night', { credentials: 'same-origin' })
+				.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+				.then(body => {
+					if (mine !== gen) return;
+					const seen = {};
+					String(body).split('\n').forEach((line) => {
+						const m = /^([A-Za-z_][A-Za-z0-9_]*)\s+(-?[0-9.]+)\s*$/.exec(line);
+						if (m) seen[m[1]] = Number(m[2]);
+					});
+					want.forEach(([n, el2]) => {
+						if (n in seen && !isNaN(seen[n])) el2.checked = seen[n] > 0;
+					});
+				})
+				.catch(() => {});
 		};
 		readGauges();
 
@@ -1981,6 +2032,16 @@
 		light.addEventListener('click', () => {
 			apiFetch('/night/light', { credentials: 'same-origin' })
 				.then(r => r.json()).then(data => { light.checked = data; })
+				.catch(() => {});
+		});
+		// -1 is the camera saying there is no white lamp it may switch: the
+		// switch keeps what the gauge last said rather than showing it off.
+		if (white) white.addEventListener('click', () => {
+			apiFetch('/night/white', { credentials: 'same-origin' })
+				.then(r => r.json()).then(data => {
+					if (data >= 0) white.checked = data > 0;
+					else readGauges();
+				})
 				.catch(() => {});
 		});
 	}
