@@ -212,12 +212,16 @@
 		return axis === 'zoom' || axis === 'pan' || axis === 'tilt';
 	}
 
-	function watchAf() {
-		afWatchUntil = Date.now() + 10000;
+	function watchAf(durationMs) {
+		afWatchUntil = Date.now() + (durationMs || 10000);
 		afSeenRunning = false;
 		clearTimeout(afHideTimer);
 		if (!afPollTimer) afPollTimer = setTimeout(pollAf, 100);
 	}
+	document.addEventListener('mj-ptz-move', e => {
+		const ms = e && e.detail && e.detail.durationMs ? Number(e.detail.durationMs) : 12000;
+		watchAf(ms);
+	});
 
 	const STEP = 5, TICK_MS = 250;
 	const PULSE_MS = {
@@ -364,12 +368,14 @@
 			if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
 			const elapsed = performance.now() - holdStarted;
 			releaseAxis = axisFor(btn.dataset.act);
+			const dir = btn.dataset.act || '';
 			const minimum = releaseAxis === 'focus' ? PULSE_MS.focus :
 			                releaseAxis === 'zoom' ? 500 : PULSE_MS.motor;
+			const actualMs = Math.round(Math.min(PULSE_MS.maximum, Math.max(minimum, elapsed)));
 			const finish = () => {
 				releaseTimer = null;
 				const axis = releaseAxis;
-				req('act=stop&axis=' + axis, 'stop');
+				req('act=stop&axis=' + axis + '&moved_dir=' + encodeURIComponent(dir) + '&moved_ms=' + actualMs, 'stop');
 				if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
 					if (shouldWatchAfAfter(axis)) watchAf();
 					if (axis === 'zoom') {
@@ -468,8 +474,10 @@
 			} else if (axis === 'focus') {
 				setTimeout(pollAf, 300);
 			} else if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
+				const pulseMs = axis === 'zoom' ? 500 : PULSE_MS.motor;
+				const dir = btn.dataset.act || '';
 				setTimeout(() => {
-					req('act=stop&axis=' + axis, 'stop');
+					req('act=stop&axis=' + axis + '&moved_dir=' + encodeURIComponent(dir) + '&moved_ms=' + pulseMs, 'stop');
 					if (shouldWatchAfAfter(axis)) watchAf();
 					if (axis === 'zoom') fetchZoom();
 				}, axis === 'zoom' ? 520 : PULSE_MS.motor + 20);

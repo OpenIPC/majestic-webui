@@ -88,7 +88,7 @@ has_cap() {
 	     focus motor off the ISP's focus statistic. The icon is the focus
 	     bracket family with a filled subject: the camera choosing the
 	     distance itself. af_support already implies the focus axis. -->
-	<button type="button" class="mj-ptz-fnbtn" data-act="af" aria-label="Autofocus" title="Autofocus (one shot)" style="grid-column: span 2;">
+	<button type="button" class="mj-ptz-fnbtn" data-act="af" aria-label="Autofocus" title="Autofocus (one shot)">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
 			<circle cx="10" cy="10" r="2.2" fill="currentColor" stroke="none"></circle>
@@ -221,3 +221,6 @@ has_cap() {
 <% fi %>
 <script src="/a/preview-ptz.js"></script>
 <script src="/a/preview-af-peaks.js"></script>
+<script src="/a/preview-ptz-presets.js"></script>
+<script src="/a/preview-scene-modes.js"></script>
+<script src="/a/preview-box-ptz.js"></script>

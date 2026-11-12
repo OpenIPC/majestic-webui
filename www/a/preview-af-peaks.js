@@ -30,6 +30,8 @@
 
 	const style = document.createElement('style');
 	style.textContent = [
+		'.mj-ptz-fn{grid-template-columns:repeat(2,calc((7.875rem + 2px)/2))!important}',
+		'.mj-ptz-fnbtn{min-width:0!important;padding:.45rem .2rem .4rem!important;font-size:.58rem!important;letter-spacing:.04em!important;white-space:nowrap}',
 		'.mj-afp-modal{position:fixed;inset:0;z-index:1060;background:rgba(8,10,14,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:12px;color:#e9ecef;font-family:inherit}',
 		'.mj-afp-modal[hidden]{display:none}',
 		'.mj-afp-box{width:min(960px,100%);max-height:90vh;display:flex;flex-direction:column;background:rgba(18,21,28,.96);border:1px solid rgba(255,255,255,.14);border-radius:10px;box-shadow:0 20px 50px rgba(0,0,0,.6);overflow:hidden}',
@@ -64,8 +66,6 @@
 	const peaksBtn = document.createElement('button');
 	peaksBtn.type = 'button';
 	peaksBtn.className = 'mj-ptz-fnbtn';
-	peaksBtn.style.gridColumn = 'span 2';
-	peaksBtn.hidden = true;
 	peaksBtn.setAttribute('aria-label', 'Autofocus peak gallery');
 	peaksBtn.title = 'View & select autofocus candidate peaks';
 	peaksBtn.innerHTML =
@@ -75,6 +75,7 @@
 		'</svg><span>AF Peaks</span>';
 
 	const afBtn = fn.querySelector('[data-act="af"]');
+	if (afBtn) afBtn.style.gridColumn = '';
 	if (afBtn && afBtn.nextSibling) fn.insertBefore(peaksBtn, afBtn.nextSibling);
 	else fn.appendChild(peaksBtn);
 
@@ -132,7 +133,6 @@
 		const count = data && Array.isArray(data.candidates) ? data.candidates.length : 0;
 		const span = peaksBtn.querySelector('span');
 		if (span) span.textContent = count > 1 ? 'AF Peaks (' + count + ')' : 'AF Peaks';
-		peaksBtn.hidden = count < 2;
 	}
 
 	function explainCandidate(c, byteRank, fvRank, minBytes, maxBytes, count) {

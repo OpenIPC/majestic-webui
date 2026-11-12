@@ -3817,7 +3817,7 @@ button.mj-osd-chip,
 
 /* Zoom over focus, two columns, each row under a caption naming the pair. */
 .mj-ptz-fn {
-	grid-template-columns: repeat(2, 1fr);
+	grid-template-columns: repeat(2, calc((7.875rem + 2px) / 2));
 }
 
 .mj-ptz-group {
@@ -3859,13 +3859,14 @@ button.mj-osd-chip,
 .mj-ptz-fnbtn {
 	flex-direction: column;
 	gap: 3px;
-	min-width: 3.875rem;
-	padding: 0.5rem 0.6rem 0.45rem;
+	min-width: 0;
+	padding: 0.45rem 0.2rem 0.4rem;
 	color: #b9bec9;
-	font-size: 0.625rem;
+	font-size: 0.58rem;
 	font-weight: 600;
-	letter-spacing: 0.07em;
+	letter-spacing: 0.04em;
 	text-transform: uppercase;
+	white-space: nowrap;
 }
 
 .mj-ptz-stop {

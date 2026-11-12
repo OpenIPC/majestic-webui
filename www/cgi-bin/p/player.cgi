@@ -82,8 +82,8 @@ printf '%s' \
 		     One element cannot do that: MSE drives it through src and WebRTC
 		     through srcObject, so the incoming player would have to evict the
 		     outgoing one before anybody knows whether it works. -->
-		<video id="live-video" class="mj-stage-media" autoplay muted playsinline></video>
-		<video id="live-video-b" class="mj-stage-media" autoplay muted playsinline style="display:none"></video>
+		<video id="live-video" class="mj-stage-media" autoplay muted playsinline disablePictureInPicture></video>
+		<video id="live-video-b" class="mj-stage-media" autoplay muted playsinline disablePictureInPicture style="display:none"></video>
 		<!-- The software-decode rung paints here instead. Two, for the same
 		     reason the videos are two: a trial has to prove itself on an idle
 		     element before it takes the stage. Hidden to start with, because

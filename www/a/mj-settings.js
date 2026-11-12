@@ -1102,6 +1102,18 @@
 		preferenceNumber(cols.lastElementChild, 'Maximum hold time',
 			'Maximum movement from one held control, in milliseconds.',
 			PREF.holdMs, 5000, 500, 10000);
+		preferenceNumber(cols.firstElementChild, 'Box PTZ pan full-width scale (ms)',
+			'Pan travel time across 100% frame width at 1× zoom for click-and-drag Box PTZ.',
+			'openipc.motor.boxPanScaleMs', 10600, 500, 30000);
+		preferenceNumber(cols.firstElementChild, 'Box PTZ tilt full-height scale (ms)',
+			'Tilt travel time across 100% frame height at 1× zoom for click-and-drag Box PTZ.',
+			'openipc.motor.boxTiltScaleMs', 6400, 500, 20000);
+		preferenceSelect(cols.firstElementChild, 'Invert Box PTZ pan direction',
+			'Flip horizontal direction when centering a dragged box.',
+			'openipc.motor.boxInvertPan', [['0', 'Normal'], ['1', 'Inverted']], '0');
+		preferenceSelect(cols.firstElementChild, 'Invert Box PTZ tilt direction',
+			'Flip vertical direction when centering a dragged box.',
+			'openipc.motor.boxInvertTilt', [['0', 'Normal'], ['1', 'Inverted']], '0');
 		renderDeviceControls(form);
 	}
 
