@@ -94,13 +94,19 @@
 
 		const cur = stateData.current || {};
 		if (info) {
-			info.textContent = 'Exp ' + (cur.exposure === 0 ? 'Auto' : cur.exposure) +
-				' · Bri ' + (cur.luminance ?? 50) + ' · Con ' + (cur.contrast ?? 50);
+			const expTxt = cur.exposure === 0 ? 'Auto'
+				: (typeof cur.exposure === 'number' ? cur.exposure : '—');
+			const briTxt = typeof cur.luminance === 'number' ? cur.luminance : '—';
+			const conTxt = typeof cur.contrast === 'number' ? cur.contrast : '—';
+			info.textContent = 'Exp ' + expTxt + ' · Bri ' + briTxt + ' · Con ' + conTxt;
 		}
 
 		(stateData.scenes || []).forEach(s => {
+			const hasCurrent = typeof cur.exposure === 'number' &&
+				typeof cur.luminance === 'number' &&
+				typeof cur.contrast === 'number';
 			const isActive = stateData.active === s.id ||
-				(!stateData.active && cur.exposure === s.exposure && cur.luminance === s.luminance && cur.contrast === s.contrast);
+				(!stateData.active && hasCurrent && cur.exposure === s.exposure && cur.luminance === s.luminance && cur.contrast === s.contrast);
 			const card = document.createElement('div');
 			card.className = 'mj-sc-card' + (isActive ? ' active' : '');
 			const expLabel = s.exposure === 0 ? 'Auto' : s.exposure;
@@ -147,12 +153,16 @@
 			image: { luminance: Number(s.luminance), contrast: Number(s.contrast) }
 		});
 		const headers = { 'Content-Type': 'application/json' };
+		const checkOk = r => {
+			if (!r || !r.ok) throw new Error('Scene request failed');
+			return r;
+		};
 		return Promise.all([
 			apiFetch('/api/v1/image?luminance=' + encodeURIComponent(s.luminance) + '&contrast=' + encodeURIComponent(s.contrast), {
 				method: 'POST', credentials: 'same-origin'
-			}).catch(() => {}),
-			apiFetch('/api/v1/live', { method: 'POST', credentials: 'same-origin', headers, body: payload }).catch(() => {}),
-			apiFetch('/api/v1/config', { method: 'POST', credentials: 'same-origin', headers, body: payload }).catch(() => {})
+			}).then(checkOk),
+			apiFetch('/api/v1/live', { method: 'POST', credentials: 'same-origin', headers, body: payload }).then(checkOk),
+			apiFetch('/api/v1/config', { method: 'POST', credentials: 'same-origin', headers, body: payload }).then(checkOk)
 		]).then(() => {
 			if (s.run_af) {
 				setTimeout(() => {

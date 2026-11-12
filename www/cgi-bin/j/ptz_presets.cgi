@@ -5,12 +5,8 @@
 # Tracks dead-reckoned open-loop pan/tilt position in /etc/ptz_pos.conf
 # (stored on persistent /etc flash so it survives reboots).
 
-echo "Content-Type: application/json"
-echo "Cache-Control: no-store, no-cache, must-revalidate"
-echo ""
-
 PRESETS_FILE="/etc/ptz_presets.tsv"
-POS_FILE="/etc/ptz_pos.conf"
+POS_FILE="/tmp/ptz_pos.conf"
 
 if [ ! -f "$PRESETS_FILE" ]; then
 	touch "$PRESETS_FILE" 2>/dev/null
@@ -21,6 +17,8 @@ read_pos() {
 	TILT_MS=0
 	if [ -f "$POS_FILE" ]; then
 		. "$POS_FILE" 2>/dev/null
+	elif [ -f /etc/ptz_pos.conf ]; then
+		. /etc/ptz_pos.conf 2>/dev/null
 	fi
 	case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
 	case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
@@ -42,7 +40,14 @@ get_current_mag() {
 	if [ -z "$z" ] && [ -f /etc/majestic-af.zoom ]; then
 		z=$(head -n 1 /etc/majestic-af.zoom 2>/dev/null | tr -d '\r\n ')
 	fi
-	echo "${z:-1.0}"
+	case "$z" in
+		''|*[!0-9.]*) echo "" ;;
+		*) echo "$z" ;;
+	esac
+}
+
+motor_service_ready() {
+	[ -x /usr/bin/motors-cli ] && [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]
 }
 
 send_pelco_preset_cmd() {
@@ -64,12 +69,13 @@ drive_axis_ms() {
 		else
 			drv_chunk="$drv_rem"
 		fi
-		/usr/bin/motors-cli --socket /run/motorsd.sock "$drv_dir" "$drv_chunk" >/dev/null 2>&1
+		/usr/bin/motors-cli --socket /run/motorsd.sock "$drv_dir" "$drv_chunk" >/dev/null 2>&1 || return 1
 		drv_rem=$((drv_rem - drv_chunk))
 		if [ "$drv_rem" -ge 30 ]; then
 			usleep 100000 2>/dev/null || sleep 1
 		fi
 	done
+	return 0
 }
 
 restore_zoom_and_af() {
@@ -92,7 +98,7 @@ restore_zoom_and_af() {
 			pabs=$((0 - dpan))
 		fi
 		if [ "$pabs" -ge 30 ]; then
-			drive_axis_ms "$pdir" "$pabs"
+			drive_axis_ms "$pdir" "$pabs" || return 1
 			usleep 120000 2>/dev/null || true
 		fi
 	fi
@@ -107,18 +113,19 @@ restore_zoom_and_af() {
 			tabs=$((0 - dtilt))
 		fi
 		if [ "$tabs" -ge 30 ]; then
-			drive_axis_ms "$tdir" "$tabs"
+			drive_axis_ms "$tdir" "$tabs" || return 1
 			usleep 120000 2>/dev/null || true
 		fi
 	fi
 
 	# 3. Closed-loop optical zoom restoration
-	if [ "$zoom_restore" = "1" ] && [ -n "$target_mag" ]; then
+	if [ "$zoom_restore" = "1" ] && [ -n "$target_mag" ] && [ "$target_mag" != "null" ]; then
 		step=0
 		prev_mag=""
 		stall=0
 		while [ "$step" -lt 20 ]; do
 			cur_mag=$(get_current_mag)
+			[ -n "$cur_mag" ] || break
 			if [ "$cur_mag" = "$prev_mag" ]; then
 				stall=$((stall + 1))
 				[ "$stall" -ge 6 ] && break
@@ -161,25 +168,30 @@ restore_zoom_and_af() {
 	fi
 }
 
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/ /g' | tr -d '\r\n'
+}
+
 emit_list() {
 	extra_msg="$1"
 	cur_mag=$(get_current_mag)
 	read_pos
-	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s' "$cur_mag" "$PAN_MS" "$TILT_MS"
+	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS"
 	if [ -n "$extra_msg" ]; then
-		printf ',"message":"%s"' "$extra_msg"
+		esc_msg=$(json_escape "$extra_msg")
+		printf ',"message":"%s"' "$esc_msg"
 	fi
 	printf ',"presets":['
 	first=1
 	if [ -f "$PRESETS_FILE" ]; then
 		while IFS='|' read -r pid pname pmag paf pzoom ppan ptilt; do
 			[ -z "$pid" ] && continue
-			[ -z "$pmag" ] && pmag="1.0"
+			[ -z "$pmag" ] && pmag="null"
 			[ -z "$paf" ] && paf="1"
 			[ -z "$pzoom" ] && pzoom="1"
 			case "$ppan" in ''|*[!0-9-]*) ppan=0 ;; esac
 			case "$ptilt" in ''|*[!0-9-]*) ptilt=0 ;; esac
-			esc_name=$(printf '%s' "$pname" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/ /g' | tr -d '\r\n')
+			esc_name=$(json_escape "$pname")
 			if [ "$first" -eq 0 ]; then
 				printf ','
 			fi
@@ -219,6 +231,20 @@ for param in $(echo "$RAW_QS" | tr '&' ' '); do
 	esac
 done
 
+if [ "$ACT" != "list" ] && [ "$REQUEST_METHOD" != "POST" ]; then
+	echo "HTTP/1.1 405 Method Not Allowed"
+	echo "Allow: POST"
+	echo "Content-Type: application/json"
+	echo "Cache-Control: no-store"
+	echo ""
+	echo '{"ok":false,"error":"Use POST for preset actions"}'
+	exit 1
+fi
+
+echo "Content-Type: application/json"
+echo "Cache-Control: no-store, no-cache, must-revalidate"
+echo ""
+
 case "$ACT" in
 	save)
 		if [ -z "$ID" ] || [ "$ID" -lt 1 ] || [ "$ID" -gt 32 ]; then
@@ -241,14 +267,16 @@ case "$ACT" in
 			case "$IN_TILT" in ''|*[!0-9-]*) ;; *) SAVE_TILT="$IN_TILT" ;; esac
 		fi
 
-		send_pelco_preset_cmd 3 "$ID"
+		if motor_service_ready; then
+			send_pelco_preset_cmd 3 "$ID"
+		fi
 
 		grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
 		echo "${ID}|${CLEAN_NAME}|${CUR_MAG}|${RUN_AF}|${ZOOM_RESTORE}|${SAVE_PAN}|${SAVE_TILT}" >> "${PRESETS_FILE}.tmp"
 		sort -t'|' -k1,1n "${PRESETS_FILE}.tmp" > "$PRESETS_FILE"
 		rm -f "${PRESETS_FILE}.tmp"
 
-		emit_list "Saved '${CLEAN_NAME}' (Pan ${SAVE_PAN}ms, Tilt ${SAVE_TILT}ms, Zoom ${CUR_MAG}x)"
+		emit_list "Saved '${CLEAN_NAME}' (Pan ${SAVE_PAN}ms, Tilt ${SAVE_TILT}ms, Zoom ${CUR_MAG:-unknown}x)"
 		;;
 
 	zero)
@@ -261,6 +289,15 @@ case "$ACT" in
 			echo '{"ok":false,"error":"Invalid preset ID"}'
 			exit 0
 		fi
+		if ! motor_service_ready; then
+			echo '{"ok":false,"error":"Motor service is unavailable"}'
+			exit 0
+		fi
+		if ! mkdir /tmp/ptz_job.lock 2>/dev/null; then
+			echo '{"ok":false,"error":"Another PTZ move is in progress"}'
+			exit 0
+		fi
+		trap 'rmdir /tmp/ptz_job.lock 2>/dev/null || true' EXIT
 		ROW=$(grep "^${ID}|" "$PRESETS_FILE" | head -n 1)
 		if [ -n "$ROW" ]; then
 			IFS='|' read -r pid pname pmag paf pzoom ppan ptilt <<EOF
@@ -271,11 +308,12 @@ EOF
 			read_pos
 			DPAN=$((ppan - PAN_MS))
 			DTILT=$((ptilt - TILT_MS))
-			write_pos "$ppan" "$ptilt"
-			(
-				restore_zoom_and_af "$pmag" "$paf" "$pzoom" "$DPAN" "$DTILT"
-			) >/dev/null 2>&1 &
-			emit_list "Moving to '${pname}' (dPan=${DPAN}ms, dTilt=${DTILT}ms)"
+			if restore_zoom_and_af "$pmag" "$paf" "$pzoom" "$DPAN" "$DTILT"; then
+				write_pos "$ppan" "$ptilt"
+				emit_list "Moved to '${pname}' (dPan=${DPAN}ms, dTilt=${DTILT}ms)"
+			else
+				echo '{"ok":false,"error":"Motor move failed"}'
+			fi
 		else
 			echo '{"ok":false,"error":"Preset not found"}'
 		fi
@@ -283,7 +321,9 @@ EOF
 
 	delete)
 		if [ -n "$ID" ] && [ -f "$PRESETS_FILE" ]; then
-			send_pelco_preset_cmd 5 "$ID"
+			if motor_service_ready; then
+				send_pelco_preset_cmd 5 "$ID"
+			fi
 			grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
 			mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
 		fi

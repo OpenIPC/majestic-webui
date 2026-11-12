@@ -364,14 +364,21 @@
 		});
 	});
 
+	let watchTimer = null;
+	function scheduleWatch(ms) {
+		if (watchTimer) clearTimeout(watchTimer);
+		watchTimer = setTimeout(pollAfWatch, ms);
+	}
+
 	function pollAfWatch() {
+		watchTimer = null;
 		apiFetch('/autofocus/status', { credentials: 'same-origin', cache: 'no-store' })
 			.then(r => r.ok ? r.text() : '')
 			.then(s => {
 				const st = s.trim();
 				if (st.startsWith('running')) {
 					afRunning = true;
-					setTimeout(pollAfWatch, 400);
+					scheduleWatch(400);
 					return;
 				}
 				if (afRunning && st.startsWith('done')) {
@@ -380,13 +387,15 @@
 					const shouldOpen = userClickedAf;
 					userClickedAf = false;
 					fetchCandidates(shouldOpen);
+					scheduleWatch(2000);
 					return;
 				}
 				afRunning = false;
+				scheduleWatch(2000);
 			})
-			.catch(() => {});
+			.catch(() => scheduleWatch(2000));
 	}
 
 	fetchCandidates(false);
-	setInterval(pollAfWatch, 2000);
+	scheduleWatch(2000);
 })();

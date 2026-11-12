@@ -848,7 +848,7 @@
 		select.addEventListener('change', () => setPreference(key, select.value));
 		row.appendChild(lab);
 		row.appendChild(select);
-		const note = el('div', 'form-text');
+		const note = el('div', 'small text-muted mt-1');
 		note.textContent = hint;
 		row.appendChild(note);
 		container.appendChild(row);
@@ -876,7 +876,7 @@
 		});
 		row.appendChild(lab);
 		row.appendChild(input);
-		const note = el('div', 'form-text');
+		const note = el('div', 'small text-muted mt-1');
 		note.textContent = hint;
 		row.appendChild(note);
 		container.appendChild(row);
@@ -894,7 +894,9 @@
 	}
 
 	function renderAfTriggers(form) {
+		const prevCols = state.cols;
 		const cols = settingsCard(form, 'Autofocus triggers & schedule');
+		state.cols = prevCols;
 		const left = cols.firstElementChild;
 		const right = cols.lastElementChild;
 
@@ -914,7 +916,7 @@
 			row.appendChild(lab);
 			row.appendChild(sel);
 			if (hintText) {
-				const note = el('div', 'form-text');
+				const note = el('div', 'small text-muted mt-1');
 				note.textContent = hintText;
 				row.appendChild(note);
 			}
@@ -1009,7 +1011,13 @@
 		schedCtl.sel.addEventListener('change', updateSchedVis);
 		updateSchedVis();
 
+		let triggersLoaded = false;
+		const triggerInputs = [modeCtl.sel, ircutCtl.sel, schedCtl.sel, hourCtl.sel, dayCtl.sel, saveBtn];
+		triggerInputs.forEach(c => { c.disabled = true; });
+		statusNote.textContent = 'Loading trigger settings…';
+
 		async function saveTriggers() {
+			if (!triggersLoaded) return;
 			saveBtn.disabled = true;
 			statusNote.textContent = 'Saving trigger settings…';
 			const q = [
@@ -1045,13 +1053,18 @@
 			runBtn.disabled = true;
 			statusNote.textContent = 'Starting autofocus pass…';
 			try {
-				await apiFetch('/cgi-bin/j/ptz.cgi?act=af', {
+				const r = await apiFetch('/cgi-bin/j/ptz.cgi?act=af', {
 					method: 'POST',
 					credentials: 'same-origin',
 				});
-				statusNote.textContent = 'Autofocus pass completed.';
+				const text = (await r.text()).trim();
+				if (!r.ok || /not available|failed|did not answer|busy|error/i.test(text)) {
+					statusNote.textContent = text || 'Autofocus pass failed.';
+				} else {
+					statusNote.textContent = text || 'Autofocus pass completed.';
+				}
 			} catch (e) {
-				statusNote.textContent = 'Autofocus triggered.';
+				statusNote.textContent = 'Failed to trigger autofocus.';
 			} finally {
 				runBtn.disabled = false;
 			}
@@ -1060,15 +1073,23 @@
 		apiFetch('/cgi-bin/j/af_triggers.cgi', { credentials: 'same-origin' })
 			.then(r => r.ok ? r.json() : null)
 			.then(d => {
-				if (!d || !d.ok) return;
+				if (!d || !d.ok) {
+					statusNote.textContent = 'Failed to load current trigger settings from camera.';
+					return;
+				}
 				if (d.trigger_mode) modeCtl.sel.value = d.trigger_mode;
 				ircutCtl.sel.value = d.on_ircut ? '1' : '0';
 				if (d.schedule) schedCtl.sel.value = d.schedule;
 				if (d.schedule_hour != null) hourCtl.sel.value = String(d.schedule_hour);
 				if (d.schedule_day != null) dayCtl.sel.value = String(d.schedule_day);
+				triggersLoaded = true;
+				triggerInputs.forEach(c => { c.disabled = false; });
 				updateSchedVis();
+				statusNote.textContent = '';
 			})
-			.catch(() => {});
+			.catch(() => {
+				statusNote.textContent = 'Failed to load current trigger settings from camera.';
+			});
 	}
 
 	function renderMotorControls(form) {
@@ -1204,7 +1225,7 @@
 		});
 		row.appendChild(button);
 		if (control.description) {
-			const note = el('div', 'form-text');
+			const note = el('div', 'small text-muted mt-1');
 			note.textContent = control.description;
 			row.appendChild(note);
 		}

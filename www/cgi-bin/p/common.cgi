@@ -630,7 +630,11 @@ update_caminfo() {
 	ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 	case "$ptz_control" in
 		motorsd|anjoy)
-			ptz_support="1"; ptz_backend="pelco"
+			if [ -S /run/motorsd.sock ] && [ -x /usr/bin/motorsctl ]; then
+				ptz_support="1"; ptz_backend="pelco"
+			else
+				ptz_reason="Motor service (motorsd) is not running."
+			fi
 			;;
 		gpio)
 			# The binary AND a pin list: gpio-motors without pins errors on

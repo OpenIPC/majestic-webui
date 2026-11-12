@@ -83,7 +83,7 @@ has_cap() {
 		<span>Far</span>
 	</button>
 	<% fi %>
-	<% if has_cap focus; then %>
+	<% if [ "$af_support" = 1 ]; then %>
 	<!-- One-shot contrast autofocus: majestic's engine drives the same
 	     focus motor off the ISP's focus statistic. The icon is the focus
 	     bracket family with a filled subject: the camera choosing the
@@ -96,7 +96,7 @@ has_cap() {
 		<span>AF</span>
 	</button>
 	<% fi %>
-	<% if has_cap iris; then %>
+	<% case " $ptz_caps " in *" iris "*) %>
 	<span id="mj-ptz-iris-label" class="mj-ptz-group">Iris</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="close" aria-label="Iris close" title="Close iris">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -110,7 +110,7 @@ has_cap() {
 		</svg>
 		<span>Open</span>
 	</button>
-	<% fi %>
+	<% ;; esac %>
 </div>
 <% fi %>
 <% if has_cap pan || has_cap tilt; then %>

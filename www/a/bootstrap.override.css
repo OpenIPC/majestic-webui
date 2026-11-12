@@ -3675,8 +3675,8 @@ button.mj-osd-chip,
 	gap: 0.5rem;
 	padding: 2rem 0.75rem 0.5rem;
 	background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
-	opacity: 1;
-	pointer-events: auto;
+	opacity: 0;
+	pointer-events: none;
 	transition: opacity 0.25s ease;
 }
 

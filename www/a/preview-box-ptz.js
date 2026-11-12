@@ -86,7 +86,7 @@
 	});
 
 	let activeCleanup = null;
-	let currentMag = 1.0;
+	let currentMag = null;
 
 	function refreshCurrentMag() {
 		return apiFetch('/cgi-bin/j/box_ptz.cgi', { credentials: 'same-origin', cache: 'no-store' })
@@ -94,10 +94,15 @@
 			.then(d => {
 				if (d && typeof d.current_mag === 'number' && d.current_mag >= 1.0) {
 					currentMag = d.current_mag;
+				} else {
+					currentMag = null;
 				}
 				return currentMag;
 			})
-			.catch(() => currentMag);
+			.catch(() => {
+				currentMag = null;
+				return null;
+			});
 	}
 
 	function computeZoomFactor(spanW, spanH, centerOnly) {
@@ -137,16 +142,19 @@
 
 	function executeMove(dx, dy, targetMag, doAf) {
 		const sc = getScales();
-		const q = [
+		const params = [
 			'dx=' + dx.toFixed(4),
 			'dy=' + dy.toFixed(4),
-			'target_mag=' + Number(targetMag).toFixed(1),
 			'pan_scale=' + sc.panScale,
 			'tilt_scale=' + sc.tiltScale,
 			'inv_pan=' + sc.invPan,
 			'inv_tilt=' + sc.invTilt,
 			'af=' + (doAf ? '1' : '0')
-		].join('&');
+		];
+		if (typeof targetMag === 'number' && Number.isFinite(targetMag) && targetMag >= 1.0) {
+			params.push('target_mag=' + targetMag.toFixed(1));
+		}
+		const q = params.join('&');
 
 		setBtnState(boxBtn, '#198754', 'Moving…');
 		document.dispatchEvent(new CustomEvent('mj-ptz-move', { detail: { durationMs: 14000 } }));
@@ -197,8 +205,8 @@
 			'  <span style="font-size:.72rem;color:#adb5bd">57×</span>' +
 			'</div>' +
 			'<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-			'  <button type="button" class="btn btn-sm btn-success flex-grow-1" data-bp="go">Move &amp; Zoom</button>' +
-			'  <button type="button" class="btn btn-sm btn-outline-info" data-bp="center" title="Center Pan/Tilt without changing zoom">Center Only</button>' +
+			'  <button type="button" class="btn btn-sm" style="flex:1;background:#198754;border-color:#198754;color:#fff" data-bp="go">Move &amp; Zoom</button>' +
+			'  <button type="button" class="btn btn-sm btn-outline-secondary" style="border-color:#0dcaf0;color:#0dcaf0" data-bp="center" title="Center Pan/Tilt without changing zoom">Center Only</button>' +
 			'  <button type="button" class="btn btn-sm btn-outline-secondary" data-bp="cancel">Cancel</button>' +
 			'</div>';
 		stage.appendChild(pop);
@@ -238,7 +246,7 @@
 	}
 
 	function startBoxDrag() {
-		refreshCurrentMag();
+		const magReady = refreshCurrentMag();
 		const overlay = document.createElement('div');
 		overlay.style.cssText = 'position:absolute;inset:0;z-index:30;cursor:crosshair;touch-action:none';
 		const band = document.createElement('div');
@@ -293,10 +301,12 @@
 			const tTxt = Math.abs(dyPct) < 2 ? 'Tilt 0' : 'Tilt ' + (dyPct > 0 ? 'D' : 'U') + Math.abs(dyPct) + '%';
 			if (w < 14 && h < 14) {
 				badge.textContent = pTxt + ' · ' + tTxt + ' (Center only)';
-			} else {
+			} else if (currentMag != null) {
 				const zf = computeZoomFactor(w / Math.max(1, mRect.width), h / Math.max(1, mRect.height), false);
 				const tgtMag = Math.min(57.0, currentMag * zf);
 				badge.textContent = pTxt + ' · ' + tTxt + ' · Est ' + tgtMag.toFixed(1) + '×';
+			} else {
+				badge.textContent = pTxt + ' · ' + tTxt;
 			}
 		});
 		overlay.addEventListener('pointerup', e => {
@@ -313,15 +323,22 @@
 
 			const centerOnly = (w < 14 && h < 14);
 			const zf = computeZoomFactor(w / Math.max(1, mRect.width), h / Math.max(1, mRect.height), centerOnly);
-			const suggestedMag = centerOnly ? currentMag : Math.min(57.0, currentMag * zf);
 			const mx = (rect.left + x) - mRect.left;
 			const my = (rect.top + y) - mRect.top;
-			showZoomConfirm({
+			const boxSpec = {
 				x: mx, y: my,
 				w: Math.max(w, 12), h: Math.max(h, 12),
 				stageBox: { x: x, y: y, w: Math.max(w, 12), h: Math.max(h, 12) },
 				frame: { w: mRect.width, h: mRect.height }
-			}, suggestedMag);
+			};
+			magReady.then(mag => {
+				if (mag == null) {
+					showBanner('Current zoom magnification unavailable', 3000);
+					return;
+				}
+				const suggestedMag = centerOnly ? mag : Math.min(57.0, mag * zf);
+				showZoomConfirm(boxSpec, suggestedMag);
+			});
 		});
 	}
 
@@ -338,6 +355,8 @@
 		let step = 1;
 		let dx1 = 0;
 		let dy1 = 0;
+		let calPanMs = 0;
+		let calTiltMs = 0;
 		let waiting = false;
 
 		function cleanup() {
@@ -372,6 +391,8 @@
 				executeMove(dx1, dy1, currentMag, false).then(d => {
 					const panMs = d && typeof d.pan_ms === 'number' ? d.pan_ms : 350;
 					const tiltMs = d && typeof d.tilt_ms === 'number' ? d.tilt_ms : 350;
+					calPanMs = panMs;
+					calTiltMs = tiltMs;
 					const waitMs = Math.max(1600, panMs + tiltMs + 900);
 					setTimeout(() => {
 						waiting = false;
@@ -390,7 +411,10 @@
 				if (Math.abs(dx1) >= 0.04) {
 					const movedX = dx1 - dx2;
 					if ((movedX * dx1) > 0 && Math.abs(movedX) >= 0.02) {
-						newP = Math.round(Math.min(30000, Math.max(1000, sc.panScale * (dx1 / movedX))));
+						const ratioP = calPanMs > 100
+							? Math.max(0.2, ((calPanMs * (dx1 / movedX)) - 100) / Math.max(1, calPanMs - 100))
+							: (dx1 / movedX);
+						newP = Math.round(Math.min(30000, Math.max(1000, sc.panScale * ratioP)));
 						localStorage.setItem('openipc.motor.boxPanScaleMs', String(newP));
 						updated.push('Pan ' + sc.panScale + '→' + newP + 'ms');
 					}
@@ -398,7 +422,10 @@
 				if (Math.abs(dy1) >= 0.04) {
 					const movedY = dy1 - dy2;
 					if ((movedY * dy1) > 0 && Math.abs(movedY) >= 0.02) {
-						newT = Math.round(Math.min(20000, Math.max(1000, sc.tiltScale * (dy1 / movedY))));
+						const ratioT = calTiltMs > 100
+							? Math.max(0.2, ((calTiltMs * (dy1 / movedY)) - 100) / Math.max(1, calTiltMs - 100))
+							: (dy1 / movedY);
+						newT = Math.round(Math.min(20000, Math.max(1000, sc.tiltScale * ratioT)));
 						localStorage.setItem('openipc.motor.boxTiltScaleMs', String(newT));
 						updated.push('Tilt ' + sc.tiltScale + '→' + newT + 'ms');
 					}

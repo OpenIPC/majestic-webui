@@ -31,12 +31,10 @@ install_watcher() {
 CONF="/etc/af_triggers.conf"
 STATE_FILE="/tmp/af_night_state"
 
-TRIGGER_MODE="ptz"
 ON_IRCUT="1"
 if [ -f "$CONF" ]; then
 	while IFS='=' read -r k v; do
 		case "$k" in
-			trigger_mode) TRIGGER_MODE="$v" ;;
 			on_ircut) ON_IRCUT="$v" ;;
 		esac
 	done < "$CONF"
@@ -61,9 +59,16 @@ case "$1" in
 		;;
 	--watch|*)
 		[ "$ON_IRCUT" = "1" ] || exit 0
-		g23=$(cat /sys/class/gpio/gpio23/value 2>/dev/null)
-		g24=$(cat /sys/class/gpio/gpio24/value 2>/dev/null)
-		cur="${g23:-x}:${g24:-x}"
+		ircut_pins=$(fw_printenv -n ircut 2>/dev/null)
+		[ -n "$ircut_pins" ] || exit 0
+		cur=""
+		for pin in $ircut_pins; do
+			pin_num=${pin#[!0-9]*}
+			[ -r "/sys/class/gpio/gpio${pin_num}/value" ] || continue
+			v=$(cat "/sys/class/gpio/gpio${pin_num}/value" 2>/dev/null)
+			cur="${cur}:${v:-x}"
+		done
+		[ -n "$cur" ] || exit 0
 		if [ ! -f "$STATE_FILE" ]; then
 			echo "$cur" > "$STATE_FILE"
 			exit 0

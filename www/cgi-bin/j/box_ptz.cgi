@@ -6,13 +6,15 @@
 # followed by an automatic focus pass.
 # Also updates /etc/ptz_pos.conf so Presets stay synchronized.
 
-POS_FILE="/etc/ptz_pos.conf"
+POS_FILE="/tmp/ptz_pos.conf"
 
 read_pos() {
 	PAN_MS=0
 	TILT_MS=0
 	if [ -f "$POS_FILE" ]; then
 		. "$POS_FILE" 2>/dev/null
+	elif [ -f /etc/ptz_pos.conf ]; then
+		. /etc/ptz_pos.conf 2>/dev/null
 	fi
 	case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
 	case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
@@ -30,7 +32,14 @@ get_current_mag() {
 	if [ -z "$z" ] && [ -f /etc/majestic-af.zoom ]; then
 		z=$(head -n 1 /etc/majestic-af.zoom 2>/dev/null | tr -d '\r\n ')
 	fi
-	echo "${z:-1.0}"
+	case "$z" in
+		''|*[!0-9.]*) echo "" ;;
+		*) echo "$z" ;;
+	esac
+}
+
+motor_service_ready() {
+	[ -x /usr/bin/motors-cli ] && [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]
 }
 
 drive_axis_ms() {
@@ -42,12 +51,13 @@ drive_axis_ms() {
 		else
 			drv_chunk="$drv_rem"
 		fi
-		/usr/bin/motors-cli --socket /run/motorsd.sock "$drv_dir" "$drv_chunk" >/dev/null 2>&1
+		/usr/bin/motors-cli --socket /run/motorsd.sock "$drv_dir" "$drv_chunk" >/dev/null 2>&1 || return 1
 		drv_rem=$((drv_rem - drv_chunk))
 		if [ "$drv_rem" -ge 30 ]; then
 			usleep 80000 2>/dev/null || sleep 1
 		fi
 	done
+	return 0
 }
 
 if [ "$REQUEST_METHOD" != "POST" ]; then
@@ -56,9 +66,26 @@ if [ "$REQUEST_METHOD" != "POST" ]; then
 	echo "Content-Type: application/json
 Cache-Control: no-store
 
-{\"ok\":true,\"current_mag\":$cur_mag,\"pos_pan_ms\":$PAN_MS,\"pos_tilt_ms\":$TILT_MS}"
+{\"ok\":true,\"current_mag\":${cur_mag:-null},\"pos_pan_ms\":$PAN_MS,\"pos_tilt_ms\":$TILT_MS}"
 	exit 0
 fi
+
+if ! motor_service_ready; then
+	echo "Content-Type: application/json
+Cache-Control: no-store
+
+{\"ok\":false,\"error\":\"Motor service is unavailable\"}"
+	exit 0
+fi
+
+if ! mkdir /tmp/ptz_job.lock 2>/dev/null; then
+	echo "Content-Type: application/json
+Cache-Control: no-store
+
+{\"ok\":false,\"error\":\"Another PTZ move is in progress\"}"
+	exit 0
+fi
+trap 'rmdir /tmp/ptz_job.lock 2>/dev/null || true' EXIT
 
 DX="0"
 DY="0"
@@ -93,6 +120,13 @@ echo "$TILT_SCALE" | grep -qE '^[0-9]{2,5}$' || TILT_SCALE="6400"
 [ "$DO_AF" = "0" ] || DO_AF="1"
 
 cur_mag=$(get_current_mag)
+if [ -z "$cur_mag" ]; then
+	echo "Content-Type: application/json
+Cache-Control: no-store
+
+{\"ok\":false,\"error\":\"Current zoom magnification is unavailable\"}"
+	exit 0
+fi
 
 plan=$(awk -v dx="$DX" -v dy="$DY" -v zf="$ZOOM_FACTOR" -v req_tmag="$TARGET_MAG" \
 	-v mag="$cur_mag" -v pscale="$PAN_SCALE" -v tscale="$TILT_SCALE" \
@@ -155,18 +189,17 @@ if [ "$tdir" = "up" ] && [ "$tms" -gt 0 ]; then
 elif [ "$tdir" = "down" ] && [ "$tms" -gt 0 ]; then
 	TILT_MS=$((TILT_MS - tms))
 fi
-write_pos "$PAN_MS" "$TILT_MS"
 
 run_box_ptz() {
 	/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1
 	usleep 100000 2>/dev/null || true
 
 	if [ "$pms" -gt 0 ] && [ "$pdir" != "none" ]; then
-		drive_axis_ms "$pdir" "$pms"
+		drive_axis_ms "$pdir" "$pms" || return 1
 		usleep 120000 2>/dev/null || sleep 1
 	fi
 	if [ "$tms" -gt 0 ] && [ "$tdir" != "none" ]; then
-		drive_axis_ms "$tdir" "$tms"
+		drive_axis_ms "$tdir" "$tms" || return 1
 		usleep 120000 2>/dev/null || sleep 1
 	fi
 
@@ -176,6 +209,7 @@ run_box_ptz() {
 	stall=0
 	while [ "$step" -lt 20 ]; do
 		now_mag=$(get_current_mag)
+		[ -n "$now_mag" ] || break
 		if [ "$now_mag" = "$prev_mag" ]; then
 			stall=$((stall + 1))
 			[ "$stall" -ge 6 ] && break
@@ -212,7 +246,14 @@ run_box_ptz() {
 	fi
 }
 
-run_box_ptz >/dev/null 2>&1 &
+run_box_ptz >/dev/null 2>&1 || {
+	echo "Content-Type: application/json
+Cache-Control: no-store
+
+{\"ok\":false,\"error\":\"Motor move failed\"}"
+	exit 0
+}
+write_pos "$PAN_MS" "$TILT_MS"
 
 echo "Content-Type: application/json
 Cache-Control: no-store

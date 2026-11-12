@@ -67,9 +67,9 @@ done
 # zero, same as j/time.cgi's pattern.
 echo "$HORIZONTAL" | grep -qE '^-?[0-9]{1,2}$' || HORIZONTAL=0
 echo "$VERTICAL" | grep -qE '^-?[0-9]{1,2}$' || VERTICAL=0
-echo "$DURATION_MS" | grep -qE '^[0-9]{1,4}$' || DURATION_MS=""
+echo "$DURATION_MS" | grep -qE '^[0-9]{1,5}$' || DURATION_MS=""
 if [ -n "$DURATION_MS" ] &&
-	{ [ "$DURATION_MS" -lt 1 ] || [ "$DURATION_MS" -gt 5000 ]; }; then
+	{ [ "$DURATION_MS" -lt 1 ] || [ "$DURATION_MS" -gt 10000 ]; }; then
 	DURATION_MS=""
 fi
 
@@ -136,6 +136,7 @@ case "$ptz_control" in
 			# verb reachable and let the attempt report its own failure.
 			*) pelco_ok=1 ;;
 		esac
+		[ "$pelco_ok" = 1 ] || [ "$service_ok" != 1 ] || pelco_ok=1
 		;;
 	gpio)
 		# Binary AND a pin list (either name — the binary reads ptz_gpio
@@ -252,7 +253,12 @@ if [ -n "$ACTION" ]; then
 				case "$ACTION" in
 					wide|tele) has_cap zoom || ACTION="" ;;
 					near|far) has_cap focus || ACTION="" ;;
-					open|close) has_cap iris || ACTION="" ;;
+					open|close)
+						case " $ptz_caps " in
+							*" iris "*) ;;
+							*) [ "$ptz_control" = "motorsd" ] || [ "$ptz_control" = "anjoy" ] || ACTION="" ;;
+						esac
+						;;
 					up|down) has_cap tilt || ACTION="" ;;
 					left|right) has_cap pan || ACTION="" ;;
 				esac
@@ -270,16 +276,25 @@ if [ -n "$ACTION" ]; then
 				# lock file.
 				if [ -n "$DURATION_MS" ] && [ "$ACTION" != "stop" ]; then
 					out=$(mj_ptz "$ACTION:$DURATION_MS")
+					rc=$?
+					if [ "$rc" -ne 0 ] && [ "$service_ok" != 1 ]; then
+						out=$(mj_ptz "$ACTION")
+						rc=$?
+					fi
 				else
 					out=$(mj_ptz "$ACTION")
-					if [ "$ACTION" = "stop" ] && [ -n "$MOVED_DIR" ] && [ -n "$MOVED_MS" ]; then
+					rc=$?
+					if [ "$rc" -eq 0 ] && [ "$out" != "unavailable" ] &&
+						[ "$ACTION" = "stop" ] && [ -n "$MOVED_DIR" ] && [ -n "$MOVED_MS" ]; then
 						case "$MOVED_MS" in
 							''|*[!0-9]*) ;;
 							*)
 								if [ "$MOVED_MS" -ge 1 ] && [ "$MOVED_MS" -le 15000 ]; then
 									PAN_MS=0
 									TILT_MS=0
-									if [ -f /etc/ptz_pos.conf ]; then
+									if [ -f /tmp/ptz_pos.conf ]; then
+										. /tmp/ptz_pos.conf 2>/dev/null
+									elif [ -f /etc/ptz_pos.conf ]; then
 										. /etc/ptz_pos.conf 2>/dev/null
 									fi
 									case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
@@ -290,13 +305,12 @@ if [ -n "$ACTION" ]; then
 										up)    TILT_MS=$((TILT_MS + MOVED_MS)) ;;
 										down)  TILT_MS=$((TILT_MS - MOVED_MS)) ;;
 									esac
-									printf "PAN_MS=%s\nTILT_MS=%s\n" "$PAN_MS" "$TILT_MS" > /etc/ptz_pos.conf.tmp && mv /etc/ptz_pos.conf.tmp /etc/ptz_pos.conf
+									printf "PAN_MS=%s\nTILT_MS=%s\n" "$PAN_MS" "$TILT_MS" > /tmp/ptz_pos.conf.tmp && mv /tmp/ptz_pos.conf.tmp /tmp/ptz_pos.conf
 								fi
 								;;
 						esac
 					fi
 				fi
-				rc=$?
 				if { [ "$rc" -ne 0 ] || [ "$out" = "unavailable" ]; } &&
 					[ "$service_ok" = 1 ] && [ -x /usr/bin/motors-cli ]; then
 					/usr/bin/motors-cli --socket /run/motorsd.sock "$ACTION" "$DURATION_MS"

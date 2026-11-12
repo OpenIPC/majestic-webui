@@ -52,7 +52,7 @@
 	modal.hidden = true;
 
 	let slotOptions = '';
-	for (let i = 1; i <= 16; i++) {
+	for (let i = 1; i <= 32; i++) {
 		slotOptions += '<option value="' + i + '">Slot #' + i + '</option>';
 	}
 
@@ -108,7 +108,7 @@
 
 	function nextFreeSlot() {
 		const used = new Set(presets.map(p => Number(p.id)));
-		for (let i = 1; i <= 16; i++) {
+		for (let i = 1; i <= 32; i++) {
 			if (!used.has(i)) return i;
 		}
 		return 1;
@@ -119,7 +119,9 @@
 		const magSpan = modal.querySelector('[data-pr="curmag"]');
 		const posLabel = modal.querySelector('[data-pr="poslabel"]');
 		const subEl = modal.querySelector('[data-pr="sub"]');
-		const magStr = Number(currentMag || 1).toFixed(1) + '×';
+		const magStr = (typeof currentMag === 'number' && Number.isFinite(currentMag) && currentMag >= 1.0)
+			? currentMag.toFixed(1) + '×'
+			: '—';
 		if (magSpan) magSpan.textContent = magStr;
 		if (posLabel) {
 			posLabel.innerHTML = 'Tracked Position (persisted across reboots): <strong>' +
@@ -140,7 +142,7 @@
 			const card = document.createElement('div');
 			card.className = 'mj-pr-card';
 			const badges = [];
-			if (p.zoom_restore) badges.push('Zoom ' + Number(p.mag || 1).toFixed(1) + '×');
+			if (p.zoom_restore && typeof p.mag === 'number' && Number.isFinite(p.mag)) badges.push('Zoom ' + p.mag.toFixed(1) + '×');
 			if (p.run_af) badges.push('Auto-AF');
 			const ptText = fmtAxis('Pan', p.pan_ms) + ' · ' + fmtAxis('Tilt', p.tilt_ms);
 

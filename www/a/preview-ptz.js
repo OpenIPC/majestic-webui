@@ -58,11 +58,14 @@
 	}
 	function updateZoomLabel(mag) {
 		const el = $('#mj-ptz-zoom-label');
-		if (el && Number.isFinite(mag) && mag >= 1.0) {
+		if (!el) return;
+		if (Number.isFinite(mag) && mag >= 1.0) {
 			const clamped = Math.min(Math.max(mag, 1.0), 100.0);
 			const formatted = clamped >= 10.0 ? clamped.toFixed(0) : clamped.toFixed(1);
 			el.textContent = 'Zoom ' + formatted + '×';
 			try { localStorage.setItem('openipc.zoom.lastMag', formatted); } catch (e) {}
+		} else {
+			el.textContent = 'Zoom';
 		}
 	}
 	let lastFv = null;
@@ -117,12 +120,11 @@
 			.then(r => r.ok ? r.text() : '')
 			.then(t => {
 				const mag = parseLiveMag(t);
-				if (mag != null) updateZoomLabel(mag);
+				updateZoomLabel(mag);
 			})
-			.catch(() => {});
+			.catch(() => updateZoomLabel(null));
 	}
-	const savedZoom = parseFloat(stored('openipc.zoom.lastMag', ''));
-	if (Number.isFinite(savedZoom) && savedZoom >= 1.0) updateZoomLabel(savedZoom);
+	updateZoomLabel(null);
 	updateIrisLabel();
 	updateXyLabel();
 	fetchZoom();
@@ -323,7 +325,9 @@
 		if (releaseTimer) {
 			clearTimeout(releaseTimer);
 			releaseTimer = null;
-			req('act=stop&axis=' + releaseAxis, 'stop');
+			if (releaseAxis && releaseAxis !== axisFor(btn.dataset.act)) {
+				req('act=stop&axis=' + releaseAxis, 'stop');
+			}
 			releaseAxis = null;
 		}
 		if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
@@ -473,7 +477,8 @@
 				updateXyLabel();
 			} else if (axis === 'focus') {
 				setTimeout(pollAf, 300);
-			} else if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
+			}
+			if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
 				const pulseMs = axis === 'zoom' ? 500 : PULSE_MS.motor;
 				const dir = btn.dataset.act || '';
 				setTimeout(() => {
