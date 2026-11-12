@@ -292,6 +292,7 @@ if [ -n "$ACTION" ]; then
 								if [ "$MOVED_MS" -ge 1 ] && [ "$MOVED_MS" -le 15000 ]; then
 									PAN_MS=0
 									TILT_MS=0
+									FOCUS_MS=0
 									if [ -f /tmp/ptz_pos.conf ]; then
 										. /tmp/ptz_pos.conf 2>/dev/null
 									elif [ -f /etc/ptz_pos.conf ]; then
@@ -299,13 +300,16 @@ if [ -n "$ACTION" ]; then
 									fi
 									case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
 									case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
+									case "$FOCUS_MS" in ''|*[!0-9-]*) FOCUS_MS=0 ;; esac
 									case "$MOVED_DIR" in
 										right) PAN_MS=$((PAN_MS + MOVED_MS)) ;;
 										left)  PAN_MS=$((PAN_MS - MOVED_MS)) ;;
 										up)    TILT_MS=$((TILT_MS + MOVED_MS)) ;;
 										down)  TILT_MS=$((TILT_MS - MOVED_MS)) ;;
+										far)   FOCUS_MS=$((FOCUS_MS + MOVED_MS)) ;;
+										near)  FOCUS_MS=$((FOCUS_MS - MOVED_MS)) ;;
 									esac
-									printf "PAN_MS=%s\nTILT_MS=%s\n" "$PAN_MS" "$TILT_MS" > /tmp/ptz_pos.conf.tmp && mv /tmp/ptz_pos.conf.tmp /tmp/ptz_pos.conf
+									printf "PAN_MS=%s\nTILT_MS=%s\nFOCUS_MS=%s\n" "$PAN_MS" "$TILT_MS" "$FOCUS_MS" > /tmp/ptz_pos.conf.tmp && mv /tmp/ptz_pos.conf.tmp /tmp/ptz_pos.conf
 								fi
 								;;
 						esac

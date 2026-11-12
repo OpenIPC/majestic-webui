@@ -15,6 +15,7 @@ fi
 read_pos() {
 	PAN_MS=0
 	TILT_MS=0
+	FOCUS_MS=0
 	if [ -f "$POS_FILE" ]; then
 		. "$POS_FILE" 2>/dev/null
 	elif [ -f /etc/ptz_pos.conf ]; then
@@ -22,10 +23,11 @@ read_pos() {
 	fi
 	case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
 	case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
+	case "$FOCUS_MS" in ''|*[!0-9-]*) FOCUS_MS=0 ;; esac
 }
 
 write_pos() {
-	printf "PAN_MS=%s\nTILT_MS=%s\n" "$1" "$2" > "${POS_FILE}.tmp" && mv "${POS_FILE}.tmp" "$POS_FILE"
+	printf "PAN_MS=%s\nTILT_MS=%s\nFOCUS_MS=%s\n" "$1" "$2" "${3:-0}" > "${POS_FILE}.tmp" && mv "${POS_FILE}.tmp" "$POS_FILE"
 }
 
 urldecode() {
@@ -84,6 +86,7 @@ restore_zoom_and_af() {
 	zoom_restore="$3"
 	dpan="$4"
 	dtilt="$5"
+	dfocus="$6"
 
 	/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1
 	usleep 120000 2>/dev/null || true
@@ -164,7 +167,22 @@ restore_zoom_and_af() {
 		done
 	fi
 
-	# 4. Trigger autofocus if configured for this preset
+	# 4. Drive Focus delta if saved
+	if [ -n "$dfocus" ] && [ "$dfocus" -ne 0 ] 2>/dev/null; then
+		if [ "$dfocus" -gt 0 ]; then
+			fdir="far"
+			fabs="$dfocus"
+		else
+			fdir="near"
+			fabs=$((0 - dfocus))
+		fi
+		if [ "$fabs" -ge 30 ]; then
+			drive_axis_ms "$fdir" "$fabs" || return 1
+			usleep 120000 2>/dev/null || true
+		fi
+	fi
+
+	# 5. Trigger autofocus if configured for this preset
 	if [ "$run_af" = "1" ]; then
 		usleep 250000 2>/dev/null || sleep 1
 		curl -s -m 2 "http://127.0.0.1/autofocus" >/dev/null 2>&1
@@ -179,7 +197,7 @@ emit_list() {
 	extra_msg="$1"
 	cur_mag=$(get_current_mag)
 	read_pos
-	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS"
+	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS" "$FOCUS_MS"
 	if [ -n "$extra_msg" ]; then
 		esc_msg=$(json_escape "$extra_msg")
 		printf ',"message":"%s"' "$esc_msg"
@@ -187,20 +205,21 @@ emit_list() {
 	printf ',"presets":['
 	first=1
 	if [ -f "$PRESETS_FILE" ]; then
-		while IFS='|' read -r pid pname pmag paf pzoom ppan ptilt; do
+		while IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus; do
 			[ -z "$pid" ] && continue
 			[ -z "$pmag" ] && pmag="null"
 			[ -z "$paf" ] && paf="1"
 			[ -z "$pzoom" ] && pzoom="1"
 			case "$ppan" in ''|*[!0-9-]*) ppan=0 ;; esac
 			case "$ptilt" in ''|*[!0-9-]*) ptilt=0 ;; esac
+			case "$pfocus" in ''|*[!0-9-]*) pfocus="null" ;; esac
 			esc_name=$(json_escape "$pname")
 			if [ "$first" -eq 0 ]; then
 				printf ','
 			fi
 			first=0
-			printf '{"id":%s,"name":"%s","mag":%s,"run_af":%s,"zoom_restore":%s,"pan_ms":%s,"tilt_ms":%s}' \
-				"$pid" "$esc_name" "$pmag" "$paf" "$pzoom" "$ppan" "$ptilt"
+			printf '{"id":%s,"name":"%s","mag":%s,"run_af":%s,"zoom_restore":%s,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s}' \
+				"$pid" "$esc_name" "$pmag" "$paf" "$pzoom" "$ppan" "$ptilt" "$pfocus"
 		done < "$PRESETS_FILE"
 	fi
 	printf ']}\n'
@@ -221,6 +240,7 @@ RUN_AF="1"
 ZOOM_RESTORE="1"
 IN_PAN=""
 IN_TILT=""
+IN_FOCUS=""
 
 for param in $(echo "$RAW_QS" | tr '&' ' '); do
 	case "$param" in
@@ -231,6 +251,7 @@ for param in $(echo "$RAW_QS" | tr '&' ' '); do
 		zoom_restore=*) ZOOM_RESTORE=$(echo "${param#*=}" | tr -cd '0-1') ;;
 		pan_ms=*) IN_PAN=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		tilt_ms=*) IN_TILT=$(echo "${param#*=}" | tr -cd '0-9-') ;;
+		focus_ms=*) IN_FOCUS=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 	esac
 done
 
@@ -263,11 +284,15 @@ case "$ACT" in
 		read_pos
 		SAVE_PAN="$PAN_MS"
 		SAVE_TILT="$TILT_MS"
+		SAVE_FOCUS="$FOCUS_MS"
 		if [ -n "$IN_PAN" ]; then
 			case "$IN_PAN" in ''|*[!0-9-]*) ;; *) SAVE_PAN="$IN_PAN" ;; esac
 		fi
 		if [ -n "$IN_TILT" ]; then
 			case "$IN_TILT" in ''|*[!0-9-]*) ;; *) SAVE_TILT="$IN_TILT" ;; esac
+		fi
+		if [ -n "$IN_FOCUS" ]; then
+			case "$IN_FOCUS" in ''|*[!0-9-]*) ;; *) SAVE_FOCUS="$IN_FOCUS" ;; esac
 		fi
 
 		if motor_service_ready; then
@@ -275,16 +300,16 @@ case "$ACT" in
 		fi
 
 		grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
-		echo "${ID}|${CLEAN_NAME}|${CUR_MAG}|${RUN_AF}|${ZOOM_RESTORE}|${SAVE_PAN}|${SAVE_TILT}" >> "${PRESETS_FILE}.tmp"
+		echo "${ID}|${CLEAN_NAME}|${CUR_MAG}|${RUN_AF}|${ZOOM_RESTORE}|${SAVE_PAN}|${SAVE_TILT}|${SAVE_FOCUS}" >> "${PRESETS_FILE}.tmp"
 		sort -t'|' -k1,1n "${PRESETS_FILE}.tmp" > "$PRESETS_FILE"
 		rm -f "${PRESETS_FILE}.tmp"
 
-		emit_list "Saved '${CLEAN_NAME}' (Pan ${SAVE_PAN}ms, Tilt ${SAVE_TILT}ms, Zoom ${CUR_MAG:-unknown}x)"
+		emit_list "Saved '${CLEAN_NAME}' (Pan ${SAVE_PAN}ms, Tilt ${SAVE_TILT}ms, Focus ${SAVE_FOCUS}ms, Zoom ${CUR_MAG:-unknown}x)"
 		;;
 
 	zero)
-		write_pos 0 0
-		emit_list "Current camera direction set as Pan/Tilt origin (0, 0)"
+		write_pos 0 0 0
+		emit_list "Current camera direction set as Pan/Tilt/Focus origin (0, 0, 0)"
 		;;
 
 	goto)
@@ -303,16 +328,23 @@ case "$ACT" in
 		trap 'rmdir /tmp/ptz_job.lock 2>/dev/null || true' EXIT
 		ROW=$(grep "^${ID}|" "$PRESETS_FILE" | head -n 1)
 		if [ -n "$ROW" ]; then
-			IFS='|' read -r pid pname pmag paf pzoom ppan ptilt <<EOF
+			IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
 $ROW
 EOF
 			case "$ppan" in ''|*[!0-9-]*) ppan=0 ;; esac
 			case "$ptilt" in ''|*[!0-9-]*) ptilt=0 ;; esac
+			case "$pfocus" in ''|*[!0-9-]*) pfocus="" ;; esac
 			read_pos
 			DPAN=$((ppan - PAN_MS))
 			DTILT=$((ptilt - TILT_MS))
-			if restore_zoom_and_af "$pmag" "$paf" "$pzoom" "$DPAN" "$DTILT"; then
-				write_pos "$ppan" "$ptilt"
+			DFOCUS=""
+			NEW_FOCUS="$FOCUS_MS"
+			if [ -n "$pfocus" ]; then
+				DFOCUS=$((pfocus - FOCUS_MS))
+				NEW_FOCUS="$pfocus"
+			fi
+			if restore_zoom_and_af "$pmag" "$paf" "$pzoom" "$DPAN" "$DTILT" "$DFOCUS"; then
+				write_pos "$ppan" "$ptilt" "$NEW_FOCUS"
 				emit_list "Moved to '${pname}' (dPan=${DPAN}ms, dTilt=${DTILT}ms)"
 			else
 				echo '{"ok":false,"error":"Motor move failed"}'

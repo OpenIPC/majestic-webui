@@ -478,14 +478,14 @@
 			} else if (axis === 'focus') {
 				setTimeout(pollAf, 300);
 			}
-			if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
-				const pulseMs = axis === 'zoom' ? 500 : PULSE_MS.motor;
+			if (axis === 'zoom' || axis === 'pan' || axis === 'tilt' || axis === 'focus') {
+				const pulseMs = axis === 'zoom' ? 500 : axis === 'focus' ? PULSE_MS.focus : PULSE_MS.motor;
 				const dir = btn.dataset.act || '';
 				setTimeout(() => {
 					req('act=stop&axis=' + axis + '&moved_dir=' + encodeURIComponent(dir) + '&moved_ms=' + pulseMs, 'stop');
-					if (shouldWatchAfAfter(axis)) watchAf();
+					if (axis !== 'focus' && shouldWatchAfAfter(axis)) watchAf();
 					if (axis === 'zoom') fetchZoom();
-				}, axis === 'zoom' ? 520 : PULSE_MS.motor + 20);
+				}, axis === 'zoom' ? 520 : pulseMs + 20);
 			}
 			fire(btn, axis === 'focus' ? PULSE_MS.focus :
 			          axis === 'zoom' ? 500 : PULSE_MS.motor);

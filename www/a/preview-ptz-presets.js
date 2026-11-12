@@ -93,11 +93,14 @@
 	let currentMag = 1.0;
 	let currentPan = 0;
 	let currentTilt = 0;
+	let currentFocus = 0;
 	let busy = false;
 
 	function fmtAxis(prefix, ms) {
 		if (typeof ms !== 'number' || Number.isNaN(ms) || ms === 0) return prefix + ' 0';
-		const dir = prefix === 'Pan' ? (ms > 0 ? 'R' : 'L') : (ms > 0 ? 'U' : 'D');
+		const dir = prefix === 'Pan' ? (ms > 0 ? 'R' : 'L')
+			: prefix === 'Tilt' ? (ms > 0 ? 'U' : 'D')
+			: (ms > 0 ? 'F' : 'N');
 		return prefix + ' ' + dir + Math.abs(ms) + 'ms';
 	}
 
@@ -124,8 +127,8 @@
 			: '—';
 		if (magSpan) magSpan.textContent = magStr;
 		if (posLabel) {
-			posLabel.innerHTML = 'Tracked Position (persisted across reboots): <strong>' +
-				fmtAxis('Pan', currentPan) + ' · ' + fmtAxis('Tilt', currentTilt) + ' · Zoom ' + magStr + '</strong>';
+			posLabel.innerHTML = 'Tracked Position: <strong>' +
+				fmtAxis('Pan', currentPan) + ' · ' + fmtAxis('Tilt', currentTilt) + ' · ' + fmtAxis('Focus', currentFocus) + ' · Zoom ' + magStr + '</strong>';
 		}
 		if (subEl && msg) subEl.textContent = msg;
 		list.innerHTML = '';
@@ -144,7 +147,8 @@
 			const badges = [];
 			if (p.zoom_restore && typeof p.mag === 'number' && Number.isFinite(p.mag)) badges.push('Zoom ' + p.mag.toFixed(1) + '×');
 			if (p.run_af) badges.push('Auto-AF');
-			const ptText = fmtAxis('Pan', p.pan_ms) + ' · ' + fmtAxis('Tilt', p.tilt_ms);
+			const ptText = fmtAxis('Pan', p.pan_ms) + ' · ' + fmtAxis('Tilt', p.tilt_ms) +
+				(typeof p.focus_ms === 'number' ? ' · ' + fmtAxis('Focus', p.focus_ms) : '');
 
 			card.innerHTML =
 				'<div class="mj-pr-card-top">' +
@@ -178,6 +182,7 @@
 		if (typeof d.current_mag === 'number') currentMag = d.current_mag;
 		if (typeof d.pan_ms === 'number') currentPan = d.pan_ms;
 		if (typeof d.tilt_ms === 'number') currentTilt = d.tilt_ms;
+		if (typeof d.focus_ms === 'number') currentFocus = d.focus_ms;
 		updateBtnCount();
 		if (pickNextSlot) {
 			modal.querySelector('[data-pr="slot"]').value = String(nextFreeSlot());

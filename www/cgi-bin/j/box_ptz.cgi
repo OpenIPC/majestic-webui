@@ -11,6 +11,7 @@ POS_FILE="/tmp/ptz_pos.conf"
 read_pos() {
 	PAN_MS=0
 	TILT_MS=0
+	FOCUS_MS=0
 	if [ -f "$POS_FILE" ]; then
 		. "$POS_FILE" 2>/dev/null
 	elif [ -f /etc/ptz_pos.conf ]; then
@@ -18,10 +19,11 @@ read_pos() {
 	fi
 	case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
 	case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
+	case "$FOCUS_MS" in ''|*[!0-9-]*) FOCUS_MS=0 ;; esac
 }
 
 write_pos() {
-	printf "PAN_MS=%s\nTILT_MS=%s\n" "$1" "$2" > "${POS_FILE}.tmp" && mv "${POS_FILE}.tmp" "$POS_FILE"
+	printf "PAN_MS=%s\nTILT_MS=%s\nFOCUS_MS=%s\n" "$1" "$2" "${3:-$FOCUS_MS}" > "${POS_FILE}.tmp" && mv "${POS_FILE}.tmp" "$POS_FILE"
 }
 
 get_current_mag() {
