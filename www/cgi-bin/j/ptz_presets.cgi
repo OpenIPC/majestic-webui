@@ -35,7 +35,10 @@ urldecode() {
 }
 
 get_current_mag() {
-	z=$(curl -s -m 1 "http://127.0.0.1/zoom" 2>/dev/null | sed -n 's/.*mag=\([0-9.]*\).*/\1/p')
+	z=""
+	if [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]; then
+		z=$(/usr/bin/motorsctl --socket /run/motorsd.sock '{"version":1,"id":"mag","op":"status"}' 2>/dev/null | sed -n 's/.*"zoom_magnification":[[:space:]]*\([0-9.]*\).*/\1/p')
+	fi
 	if [ -z "$z" ] && [ -f /etc/majestic-af.zoom ]; then
 		z=$(head -n 1 /etc/majestic-af.zoom 2>/dev/null | tr -d '\r\n ')
 	fi
@@ -76,8 +79,7 @@ restore_zoom_and_af() {
 	dpan="$4"
 	dtilt="$5"
 
-	# Release any active majestic ptz_client lease first so motors-cli is never blocked
-	curl -s -m 2 -X POST "http://127.0.0.1/ptz?move=stop" >/dev/null 2>&1
+	/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1
 	usleep 120000 2>/dev/null || true
 
 	# 1. Drive Pan delta if needed

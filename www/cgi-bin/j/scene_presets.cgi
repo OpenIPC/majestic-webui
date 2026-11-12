@@ -25,29 +25,12 @@ EOF
 }
 
 apply_scene_values() {
-	exp="$1"
-	lum="$2"
-	con="$3"
 	irc="$4"
-	af="$5"
 
-	# 1. Apply live image adjustments immediately
-	curl -s -m 2 -X POST "http://127.0.0.1/api/v1/image?luminance=${lum}&contrast=${con}" >/dev/null 2>&1
-
-	# 2. Apply and persist isp.exposure + image.luminance + image.contrast via /api/v1/live and /api/v1/config
-	payload="{\"isp\":{\"exposure\":${exp}},\"image\":{\"luminance\":${lum},\"contrast\":${con}}}"
-	curl -s -m 2 -X POST -H "Content-Type: application/json" -d "$payload" "http://127.0.0.1/api/v1/live" >/dev/null 2>&1
-	curl -s -m 2 -X POST -H "Content-Type: application/json" -d "$payload" "http://127.0.0.1/api/v1/config" >/dev/null 2>&1
-
-	# 3. Optional IR-Cut switch
+	# Optional IR-Cut switch via motorsd
 	if [ "$irc" = "day" ] || [ "$irc" = "night" ]; then
 		/usr/bin/motorsctl --socket /run/motorsd.sock \
 			"{\"version\":1,\"id\":\"scene-ircut\",\"op\":\"command\",\"name\":\"ircut\",\"value\":\"$irc\"}" >/dev/null 2>&1
-	fi
-
-	# 4. Optional refocus after exposure settles
-	if [ "$af" = "1" ]; then
-		( sleep 2; curl -s -m 2 "http://127.0.0.1/autofocus" >/dev/null 2>&1 ) >/dev/null 2>&1 &
 	fi
 }
 
@@ -128,19 +111,13 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 	esac
 fi
 
-cur_exp=$(curl -s -m 1 "http://127.0.0.1/api/v1/get?key=isp.exposure" 2>/dev/null | tr -d '\r\n ')
-cur_lum=$(curl -s -m 1 "http://127.0.0.1/api/v1/get?key=image.luminance" 2>/dev/null | tr -d '\r\n ')
-cur_con=$(curl -s -m 1 "http://127.0.0.1/api/v1/get?key=image.contrast" 2>/dev/null | tr -d '\r\n ')
-echo "$cur_exp" | grep -qE '^[0-9]+$' || cur_exp=200
-echo "$cur_lum" | grep -qE '^[0-9]+$' || cur_lum=50
-echo "$cur_con" | grep -qE '^[0-9]+$' || cur_con=50
 active_id=$(cat "$ACTIVE_FILE" 2>/dev/null | tr -d '\r\n ')
 
 echo "HTTP/1.1 200 OK
 Content-type: application/json; charset=UTF-8
 Cache-Control: no-store
 
-{\"ok\":true,\"active\":\"${active_id}\",\"current\":{\"exposure\":${cur_exp},\"luminance\":${cur_lum},\"contrast\":${cur_con}},\"scenes\":["
+{\"ok\":true,\"active\":\"${active_id}\",\"scenes\":["
 
 first=1
 while IFS='|' read -r sid sname sexp slum scon sirc saf sdesc; do

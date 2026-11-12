@@ -370,7 +370,9 @@
 				setBtnState(calBtn, '#d97706', 'Moving…');
 				showBanner('Moving camera to clicked object… please wait');
 				executeMove(dx1, dy1, currentMag, false).then(d => {
-					const waitMs = Math.max(1600, ((d && d.pan_ms) || 0) + ((d && d.tilt_ms) || 0) + 900);
+					const panMs = d && typeof d.pan_ms === 'number' ? d.pan_ms : 350;
+					const tiltMs = d && typeof d.tilt_ms === 'number' ? d.tilt_ms : 350;
+					const waitMs = Math.max(1600, panMs + tiltMs + 900);
 					setTimeout(() => {
 						waiting = false;
 						setBtnState(calBtn, '#0d6efd', 'Step 2/2');

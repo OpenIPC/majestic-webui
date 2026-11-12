@@ -96,10 +96,9 @@
 	let busy = false;
 
 	function fmtAxis(prefix, ms) {
-		const n = Number(ms || 0);
-		if (!n) return prefix + ' 0';
-		const dir = prefix === 'Pan' ? (n > 0 ? 'R' : 'L') : (n > 0 ? 'U' : 'D');
-		return prefix + ' ' + dir + Math.abs(n) + 'ms';
+		if (typeof ms !== 'number' || Number.isNaN(ms) || ms === 0) return prefix + ' 0';
+		const dir = prefix === 'Pan' ? (ms > 0 ? 'R' : 'L') : (ms > 0 ? 'U' : 'D');
+		return prefix + ' ' + dir + Math.abs(ms) + 'ms';
 	}
 
 	function updateBtnCount() {

@@ -126,16 +126,56 @@
 		});
 	}
 
-	function loadScenes(syncInputs) {
-		return apiFetch('/cgi-bin/j/scene_presets.cgi', { credentials: 'same-origin', cache: 'no-store' })
+	function fetchCurrentConfig() {
+		return apiFetch('/api/v1/config.json', { credentials: 'same-origin', cache: 'no-store' })
 			.then(r => r.ok ? r.json() : null)
-			.then(d => {
+			.then(cfg => {
+				if (!cfg) return null;
+				return {
+					exposure: cfg.isp && typeof cfg.isp.exposure === 'number' ? cfg.isp.exposure : null,
+					luminance: cfg.image && typeof cfg.image.luminance === 'number' ? cfg.image.luminance : null,
+					contrast: cfg.image && typeof cfg.image.contrast === 'number' ? cfg.image.contrast : null
+				};
+			})
+			.catch(() => null);
+	}
+
+	function applyDaemonScene(s) {
+		if (!s) return Promise.resolve();
+		const payload = JSON.stringify({
+			isp: { exposure: Number(s.exposure) },
+			image: { luminance: Number(s.luminance), contrast: Number(s.contrast) }
+		});
+		const headers = { 'Content-Type': 'application/json' };
+		return Promise.all([
+			apiFetch('/api/v1/image?luminance=' + encodeURIComponent(s.luminance) + '&contrast=' + encodeURIComponent(s.contrast), {
+				method: 'POST', credentials: 'same-origin'
+			}).catch(() => {}),
+			apiFetch('/api/v1/live', { method: 'POST', credentials: 'same-origin', headers, body: payload }).catch(() => {}),
+			apiFetch('/api/v1/config', { method: 'POST', credentials: 'same-origin', headers, body: payload }).catch(() => {})
+		]).then(() => {
+			if (s.run_af) {
+				setTimeout(() => {
+					apiFetch('/cgi-bin/j/ptz.cgi?act=af', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+				}, 2000);
+			}
+		});
+	}
+
+	function loadScenes(syncInputs) {
+		return Promise.all([
+			apiFetch('/cgi-bin/j/scene_presets.cgi', { credentials: 'same-origin', cache: 'no-store' })
+				.then(r => r.ok ? r.json() : null),
+			fetchCurrentConfig()
+		])
+			.then(([d, cur]) => {
 				if (!d || !d.ok) return;
+				if (cur) d.current = cur;
 				stateData = d;
 				if (syncInputs && d.current) {
-					modal.querySelector('[data-sc="exp"]').value = String(d.current.exposure ?? 200);
-					modal.querySelector('[data-sc="lum"]').value = String(d.current.luminance ?? 50);
-					modal.querySelector('[data-sc="con"]').value = String(d.current.contrast ?? 50);
+					if (d.current.exposure != null) modal.querySelector('[data-sc="exp"]').value = String(d.current.exposure);
+					if (d.current.luminance != null) modal.querySelector('[data-sc="lum"]').value = String(d.current.luminance);
+					if (d.current.contrast != null) modal.querySelector('[data-sc="con"]').value = String(d.current.contrast);
 				}
 				if (!modal.hidden) renderModal();
 			})
@@ -145,13 +185,19 @@
 	function applyScene(id) {
 		if (busy) return;
 		busy = true;
-		apiFetch('/cgi-bin/j/scene_presets.cgi?act=apply&id=' + encodeURIComponent(id), {
-			method: 'POST',
-			credentials: 'same-origin'
-		})
-			.then(r => r.ok ? r.json() : null)
-			.then(d => {
+		const target = stateData && Array.isArray(stateData.scenes)
+			? stateData.scenes.find(x => x.id === id)
+			: null;
+		Promise.all([
+			applyDaemonScene(target),
+			apiFetch('/cgi-bin/j/scene_presets.cgi?act=apply&id=' + encodeURIComponent(id), {
+				method: 'POST',
+				credentials: 'same-origin'
+			}).then(r => r.ok ? r.json() : null)
+		])
+			.then(([, d]) => {
 				if (d && d.ok) {
+					if (target) d.current = { exposure: target.exposure, luminance: target.luminance, contrast: target.contrast };
 					stateData = d;
 					renderModal();
 				}
@@ -170,6 +216,7 @@
 		const irc = modal.querySelector('[data-sc="irc"]').value;
 		const af = modal.querySelector('[data-sc="af"]').checked ? '1' : '0';
 		busy = true;
+		const customObj = { exposure: Number(exp), luminance: Number(lum), contrast: Number(con), run_af: af === '1' };
 		const q = [
 			'act=save',
 			'name=' + encodeURIComponent(name),
@@ -179,10 +226,14 @@
 			'ircut=' + encodeURIComponent(irc),
 			'run_af=' + af
 		].join('&');
-		apiFetch('/cgi-bin/j/scene_presets.cgi?' + q, { method: 'POST', credentials: 'same-origin' })
-			.then(r => r.ok ? r.json() : null)
-			.then(d => {
+		Promise.all([
+			applyDaemonScene(customObj),
+			apiFetch('/cgi-bin/j/scene_presets.cgi?' + q, { method: 'POST', credentials: 'same-origin' })
+				.then(r => r.ok ? r.json() : null)
+		])
+			.then(([, d]) => {
 				if (d && d.ok) {
+					d.current = { exposure: customObj.exposure, luminance: customObj.luminance, contrast: customObj.contrast };
 					stateData = d;
 					nameEl.value = '';
 					renderModal();

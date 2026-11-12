@@ -61,11 +61,9 @@ case "$1" in
 		;;
 	--watch|*)
 		[ "$ON_IRCUT" = "1" ] || exit 0
-		metrics=$(curl -s -m 2 "http://127.0.0.1/metrics" 2>/dev/null)
-		[ -n "$metrics" ] || exit 0
-		night=$(echo "$metrics" | awk '/^night_enabled /{print $2; exit}')
-		pic=$(echo "$metrics" | awk '/^picture_night /{print $2; exit}')
-		cur="${night:-0}:${pic:-0}"
+		g23=$(cat /sys/class/gpio/gpio23/value 2>/dev/null)
+		g24=$(cat /sys/class/gpio/gpio24/value 2>/dev/null)
+		cur="${g23:-x}:${g24:-x}"
 		if [ ! -f "$STATE_FILE" ]; then
 			echo "$cur" > "$STATE_FILE"
 			exit 0
