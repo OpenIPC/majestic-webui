@@ -953,6 +953,17 @@
 			]
 		);
 
+		const fastAfCtl = makeSelectRow(
+			left,
+			'af-trig-fast',
+			'AF sweep mode',
+			'Fast mode uses a single FV sweep and skips JPEG candidate verification to save time.',
+			[
+				['0', 'Standard (2-way sweep & JPEG peak verify)'],
+				['1', 'Fast (single sweep, skip JPEG verify)'],
+			]
+		);
+
 		const schedCtl = makeSelectRow(
 			right,
 			'af-trig-sched',
@@ -1017,7 +1028,7 @@
 		updateSchedVis();
 
 		let triggersLoaded = false;
-		const triggerInputs = [modeCtl.sel, ircutCtl.sel, schedCtl.sel, hourCtl.sel, dayCtl.sel, saveBtn];
+		const triggerInputs = [modeCtl.sel, ircutCtl.sel, fastAfCtl.sel, schedCtl.sel, hourCtl.sel, dayCtl.sel, saveBtn];
 		triggerInputs.forEach(c => { c.disabled = true; });
 		statusNote.textContent = 'Loading trigger settings…';
 
@@ -1028,6 +1039,7 @@
 			const q = [
 				'trigger_mode=' + encodeURIComponent(modeCtl.sel.value),
 				'on_ircut=' + encodeURIComponent(ircutCtl.sel.value),
+				'fast_af=' + encodeURIComponent(fastAfCtl.sel.value),
 				'schedule=' + encodeURIComponent(schedCtl.sel.value),
 				'schedule_hour=' + encodeURIComponent(hourCtl.sel.value),
 				'schedule_day=' + encodeURIComponent(dayCtl.sel.value),
@@ -1050,6 +1062,7 @@
 		saveBtn.addEventListener('click', saveTriggers);
 		modeCtl.sel.addEventListener('change', saveTriggers);
 		ircutCtl.sel.addEventListener('change', saveTriggers);
+		fastAfCtl.sel.addEventListener('change', saveTriggers);
 		schedCtl.sel.addEventListener('change', saveTriggers);
 		hourCtl.sel.addEventListener('change', saveTriggers);
 		dayCtl.sel.addEventListener('change', saveTriggers);
@@ -1084,6 +1097,7 @@
 				}
 				if (d.trigger_mode) modeCtl.sel.value = d.trigger_mode;
 				ircutCtl.sel.value = d.on_ircut ? '1' : '0';
+				fastAfCtl.sel.value = d.fast_af ? '1' : '0';
 				if (d.schedule) schedCtl.sel.value = d.schedule;
 				if (d.schedule_hour != null) hourCtl.sel.value = String(d.schedule_hour);
 				if (d.schedule_day != null) dayCtl.sel.value = String(d.schedule_day);

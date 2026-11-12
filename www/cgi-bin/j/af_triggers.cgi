@@ -12,6 +12,7 @@ load_conf() {
 	SCHEDULE="off"
 	SCHEDULE_HOUR="3"
 	SCHEDULE_DAY="0"
+	FAST_AF="0"
 	if [ -f "$CONF" ]; then
 		while IFS='=' read -r k v; do
 			case "$k" in
@@ -20,6 +21,7 @@ load_conf() {
 				schedule) SCHEDULE="$v" ;;
 				schedule_hour) SCHEDULE_HOUR="$v" ;;
 				schedule_day) SCHEDULE_DAY="$v" ;;
+				fast_af) FAST_AF="$v" ;;
 			esac
 		done < "$CONF"
 	fi
@@ -147,6 +149,13 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 					SCHEDULE_DAY="$v"
 				fi
 				;;
+			fast_af=*)
+				v="${param#*=}"
+				case "$v" in
+					1|true) FAST_AF="1" ;;
+					0|false) FAST_AF="0" ;;
+				esac
+				;;
 		esac
 	done
 
@@ -156,15 +165,17 @@ on_ircut=$ON_IRCUT
 schedule=$SCHEDULE
 schedule_hour=$SCHEDULE_HOUR
 schedule_day=$SCHEDULE_DAY
+fast_af=$FAST_AF
 EOF
 	mv "${CONF}.tmp" "$CONF"
 	sync_cron
 fi
 
 [ "$ON_IRCUT" = "1" ] && ircut_json="true" || ircut_json="false"
+[ "$FAST_AF" = "1" ] && fast_json="true" || fast_json="false"
 
 echo "HTTP/1.1 200 OK
 Content-type: application/json; charset=UTF-8
 Cache-Control: no-store
 
-{\"ok\":true,\"trigger_mode\":\"$TRIGGER_MODE\",\"on_ircut\":$ircut_json,\"schedule\":\"$SCHEDULE\",\"schedule_hour\":$SCHEDULE_HOUR,\"schedule_day\":$SCHEDULE_DAY}"
+{\"ok\":true,\"trigger_mode\":\"$TRIGGER_MODE\",\"on_ircut\":$ircut_json,\"schedule\":\"$SCHEDULE\",\"schedule_hour\":$SCHEDULE_HOUR,\"schedule_day\":$SCHEDULE_DAY,\"fast_af\":$fast_json}"
