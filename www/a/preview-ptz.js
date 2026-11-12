@@ -199,6 +199,19 @@
 	pollAf();
 	setInterval(() => { if (!afPollTimer && !afSeenRunning) pollAf(); }, 3000);
 
+	let afTriggerMode = 'ptz';
+	apiFetch('/cgi-bin/j/af_triggers.cgi', { credentials: 'same-origin' })
+		.then(r => r.ok ? r.json() : null)
+		.then(d => { if (d && d.trigger_mode) afTriggerMode = d.trigger_mode; })
+		.catch(() => {});
+
+	function shouldWatchAfAfter(axis) {
+		if (afTriggerMode === 'manual') return false;
+		if (afTriggerMode === 'zoom_only') return axis === 'zoom';
+		if (afTriggerMode === 'pan_tilt_only') return axis === 'pan' || axis === 'tilt';
+		return axis === 'zoom' || axis === 'pan' || axis === 'tilt';
+	}
+
 	function watchAf() {
 		afWatchUntil = Date.now() + 10000;
 		afSeenRunning = false;
@@ -358,7 +371,7 @@
 				const axis = releaseAxis;
 				req('act=stop&axis=' + axis, 'stop');
 				if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
-					watchAf();
+					if (shouldWatchAfAfter(axis)) watchAf();
 					if (axis === 'zoom') {
 						setTimeout(fetchZoom, 300);
 						setTimeout(fetchZoom, 800);
@@ -457,7 +470,7 @@
 			} else if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
 				setTimeout(() => {
 					req('act=stop&axis=' + axis, 'stop');
-					watchAf();
+					if (shouldWatchAfAfter(axis)) watchAf();
 					if (axis === 'zoom') fetchZoom();
 				}, axis === 'zoom' ? 520 : PULSE_MS.motor + 20);
 			}

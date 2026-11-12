@@ -890,6 +890,185 @@
 		preferenceSelect(cols.lastElementChild, 'AF overlay',
 			'This choice applies to this browser.', PREF.overlay,
 			[['active', 'During AF'], ['off', 'Off']], 'active');
+		renderAfTriggers(form);
+	}
+
+	function renderAfTriggers(form) {
+		const cols = settingsCard(form, 'Autofocus triggers & schedule');
+		const left = cols.firstElementChild;
+		const right = cols.lastElementChild;
+
+		function makeSelectRow(container, id, labelText, hintText, options) {
+			const row = el('div', 'mb-3');
+			const lab = el('label', 'form-label');
+			lab.htmlFor = id;
+			lab.textContent = labelText;
+			const sel = el('select', 'form-select');
+			sel.id = id;
+			for (const [val, text] of options) {
+				const opt = el('option');
+				opt.value = String(val);
+				opt.textContent = text;
+				sel.appendChild(opt);
+			}
+			row.appendChild(lab);
+			row.appendChild(sel);
+			if (hintText) {
+				const note = el('div', 'form-text');
+				note.textContent = hintText;
+				row.appendChild(note);
+			}
+			container.appendChild(row);
+			return { row, sel };
+		}
+
+		const modeCtl = makeSelectRow(
+			left,
+			'af-trig-mode',
+			'Refocus after PTZ movement',
+			'Choose which camera movements automatically trigger an autofocus pass once the motor stops.',
+			[
+				['ptz', 'After Pan, Tilt & Zoom (PTZ)'],
+				['zoom_only', 'After Zoom only (Wide / Tele)'],
+				['pan_tilt_only', 'After Pan / Tilt only'],
+				['manual', 'Manual only (AF button or schedule)'],
+			]
+		);
+
+		const ircutCtl = makeSelectRow(
+			left,
+			'af-trig-ircut',
+			'Refocus on IR-cut / Day-Night switch',
+			'Infrared light focuses at a slightly different plane than visible light. Automatically refocuses after switching between Day and Night.',
+			[
+				['1', 'Enabled'],
+				['0', 'Disabled'],
+			]
+		);
+
+		const schedCtl = makeSelectRow(
+			right,
+			'af-trig-sched',
+			'Scheduled periodic refocus',
+			'Runs in the background on the camera via cron even when no browser is open.',
+			[
+				['off', 'Off'],
+				['hourly', 'Hourly (every hour at :00)'],
+				['daily', 'Daily'],
+				['weekly', 'Weekly'],
+			]
+		);
+
+		const hourOptions = [];
+		for (let h = 0; h < 24; h++) {
+			const hh = (h < 10 ? '0' : '') + h + ':00';
+			hourOptions.push([String(h), hh]);
+		}
+		const hourCtl = makeSelectRow(
+			right,
+			'af-trig-hour',
+			'Scheduled time (camera clock)',
+			'Hour of day for Daily or Weekly refocus.',
+			hourOptions
+		);
+
+		const dayCtl = makeSelectRow(
+			right,
+			'af-trig-day',
+			'Scheduled day of week',
+			'Day of week for Weekly refocus.',
+			[
+				['0', 'Sunday'],
+				['1', 'Monday'],
+				['2', 'Tuesday'],
+				['3', 'Wednesday'],
+				['4', 'Thursday'],
+				['5', 'Friday'],
+				['6', 'Saturday'],
+			]
+		);
+
+		const actionRow = el('div', 'd-flex gap-2 align-items-center mt-2');
+		const saveBtn = el('button', 'btn btn-primary');
+		saveBtn.type = 'button';
+		saveBtn.textContent = 'Save trigger settings';
+		const runBtn = el('button', 'btn btn-outline-secondary');
+		runBtn.type = 'button';
+		runBtn.textContent = 'Run AF now';
+		const statusNote = el('div', 'form-text mt-2');
+		actionRow.appendChild(saveBtn);
+		actionRow.appendChild(runBtn);
+		right.appendChild(actionRow);
+		right.appendChild(statusNote);
+
+		function updateSchedVis() {
+			const s = schedCtl.sel.value;
+			hourCtl.row.hidden = (s !== 'daily' && s !== 'weekly');
+			dayCtl.row.hidden = (s !== 'weekly');
+		}
+		schedCtl.sel.addEventListener('change', updateSchedVis);
+		updateSchedVis();
+
+		async function saveTriggers() {
+			saveBtn.disabled = true;
+			statusNote.textContent = 'Saving trigger settings…';
+			const q = [
+				'trigger_mode=' + encodeURIComponent(modeCtl.sel.value),
+				'on_ircut=' + encodeURIComponent(ircutCtl.sel.value),
+				'schedule=' + encodeURIComponent(schedCtl.sel.value),
+				'schedule_hour=' + encodeURIComponent(hourCtl.sel.value),
+				'schedule_day=' + encodeURIComponent(dayCtl.sel.value),
+			].join('&');
+			try {
+				const r = await apiFetch('/cgi-bin/j/af_triggers.cgi?' + q, {
+					method: 'POST',
+					credentials: 'same-origin',
+				});
+				const d = await r.json();
+				if (!d || !d.ok) throw new Error();
+				statusNote.textContent = 'Saved autofocus triggers & schedule to camera.';
+			} catch (e) {
+				statusNote.textContent = 'Failed to save trigger settings.';
+			} finally {
+				saveBtn.disabled = false;
+			}
+		}
+
+		saveBtn.addEventListener('click', saveTriggers);
+		modeCtl.sel.addEventListener('change', saveTriggers);
+		ircutCtl.sel.addEventListener('change', saveTriggers);
+		schedCtl.sel.addEventListener('change', saveTriggers);
+		hourCtl.sel.addEventListener('change', saveTriggers);
+		dayCtl.sel.addEventListener('change', saveTriggers);
+
+		runBtn.addEventListener('click', async () => {
+			runBtn.disabled = true;
+			statusNote.textContent = 'Starting autofocus pass…';
+			try {
+				await apiFetch('/cgi-bin/j/ptz.cgi?act=af', {
+					method: 'POST',
+					credentials: 'same-origin',
+				});
+				statusNote.textContent = 'Autofocus pass completed.';
+			} catch (e) {
+				statusNote.textContent = 'Autofocus triggered.';
+			} finally {
+				runBtn.disabled = false;
+			}
+		});
+
+		apiFetch('/cgi-bin/j/af_triggers.cgi', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.json() : null)
+			.then(d => {
+				if (!d || !d.ok) return;
+				if (d.trigger_mode) modeCtl.sel.value = d.trigger_mode;
+				ircutCtl.sel.value = d.on_ircut ? '1' : '0';
+				if (d.schedule) schedCtl.sel.value = d.schedule;
+				if (d.schedule_hour != null) hourCtl.sel.value = String(d.schedule_hour);
+				if (d.schedule_day != null) dayCtl.sel.value = String(d.schedule_day);
+				updateSchedVis();
+			})
+			.catch(() => {});
 	}
 
 	function renderMotorControls(form) {

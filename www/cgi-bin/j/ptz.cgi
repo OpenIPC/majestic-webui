@@ -91,6 +91,9 @@ if [ -n "$COMMAND" ]; then
 		echo "Invalid or unavailable motor command."
 		exit 1
 	fi
+	if [ "$COMMAND" = "ircut" ] && [ -x /usr/bin/af-trigger-check ]; then
+		/usr/bin/af-trigger-check --ircut-event >/dev/null 2>&1 &
+	fi
 	if [ -n "$VALUE" ]; then
 		echo "$VALUE" | grep -qE '^[A-Za-z0-9_-]{1,64}$' || {
 			echo "Invalid motor command value."
