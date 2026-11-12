@@ -75,10 +75,9 @@
 		}
 		const subOk = mjGet(cfg, 'video1.enabled') === true;
 		subAvailable = subOk;
-		if (subOk) $('#mj-sub').hidden = false;
-		// Auto only where there are two streams to choose between: with one
-		// encoder configured there is nothing for it to decide.
-		if (subOk && autoLbl) autoLbl.hidden = false;
+		if ($('#mj-sub')) $('#mj-sub').hidden = !subOk;
+		if (s1) s1.disabled = !subOk;
+		if (autoLbl) autoLbl.hidden = !subOk;
 		if (autoCtl) {
 			autoCtl.disabled = !subOk;
 			// A camera with one stream has nothing for Auto to decide, so a

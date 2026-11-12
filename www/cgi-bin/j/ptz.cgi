@@ -119,7 +119,7 @@ case "$ptz_control" in
 	# holds the port and the WebUI asks it for a verb. This used to exec
 	# /usr/bin/btzoom or /usr/bin/btzoom-xm, which opened the same tty the
 	# camera was already driving for autofocus and raced it for every press.
-	pelco-d|pelco-xm)
+	pelco-d|pelco-xm|motorsd|anjoy)
 		mj_ptz > /dev/null 2>&1
 		case $? in
 			0) pelco_ok=1 ;;
@@ -152,7 +152,7 @@ esac
 ptz_caps=""
 for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
 	case "$cap" in
-		pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
+		pan|tilt|zoom|focus|iris) ptz_caps="$ptz_caps $cap" ;;
 	esac
 done
 
@@ -239,12 +239,13 @@ if [ -n "$ACTION" ]; then
 	fi
 	if [ "$pelco_ok" = 1 ]; then
 		case "$ACTION" in
-			up|down|left|right|stop|wide|tele|near|far)
+			up|down|left|right|stop|wide|tele|near|far|open|close)
 				# stop is always allowed — a caps change must never take
 				# away the one verb that halts a motor already moving.
 				case "$ACTION" in
 					wide|tele) has_cap zoom || ACTION="" ;;
 					near|far) has_cap focus || ACTION="" ;;
+					open|close) has_cap iris || ACTION="" ;;
 					up|down) has_cap tilt || ACTION="" ;;
 					left|right) has_cap pan || ACTION="" ;;
 				esac
@@ -266,6 +267,11 @@ if [ -n "$ACTION" ]; then
 					out=$(mj_ptz "$ACTION")
 				fi
 				rc=$?
+				if { [ "$rc" -ne 0 ] || [ "$out" = "unavailable" ]; } &&
+					[ "$service_ok" = 1 ] && [ -x /usr/bin/motors-cli ]; then
+					/usr/bin/motors-cli --socket /run/motorsd.sock "$ACTION" "$DURATION_MS"
+					exit $?
+				fi
 				[ -n "$out" ] && echo "$out"
 				exit $rc
 				;;

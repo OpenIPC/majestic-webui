@@ -40,8 +40,8 @@ has_cap() {
 }
 %>
 <% if [ "$ptz_backend" = "pelco" ]; then %>
-<% if has_cap zoom || has_cap focus; then %>
-<div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom and focus" hidden>
+<% if has_cap zoom || has_cap focus || has_cap iris; then %>
+<div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom, focus and iris" hidden>
 	<!-- Why the buttons below will not move anything. Set when the camera
 	     declares a motorized lens (ptz_control) but majestic has no motor
 	     driver to serve it, which is one install away and worth saying: the
@@ -52,7 +52,7 @@ has_cap() {
 	<p class="small" role="status"><%= $ptz_reason %></p>
 	<% fi %>
 	<% if has_cap zoom; then %>
-	<span class="mj-ptz-group">Zoom</span>
+	<span id="mj-ptz-zoom-label" class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
 			<circle cx="8.8" cy="8.8" r="5.6"></circle><path d="M12.9 12.9 17 17M6.4 8.8h4.8"></path>
@@ -67,7 +67,7 @@ has_cap() {
 	</button>
 	<% fi %>
 	<% if has_cap focus; then %>
-	<span class="mj-ptz-group">Focus</span>
+	<span id="mj-ptz-focus-label" class="mj-ptz-group">Focus</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="near" aria-label="Focus near" title="Pull focus nearer">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
@@ -83,12 +83,12 @@ has_cap() {
 		<span>Far</span>
 	</button>
 	<% fi %>
-	<% if [ -n "$af_support" ]; then %>
+	<% if has_cap focus; then %>
 	<!-- One-shot contrast autofocus: majestic's engine drives the same
 	     focus motor off the ISP's focus statistic. The icon is the focus
 	     bracket family with a filled subject: the camera choosing the
 	     distance itself. af_support already implies the focus axis. -->
-	<button type="button" class="mj-ptz-fnbtn" data-act="af" aria-label="Autofocus" title="Autofocus (one shot)">
+	<button type="button" class="mj-ptz-fnbtn" data-act="af" aria-label="Autofocus" title="Autofocus (one shot)" style="grid-column: span 2;">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
 			<circle cx="10" cy="10" r="2.2" fill="currentColor" stroke="none"></circle>
@@ -96,10 +96,26 @@ has_cap() {
 		<span>AF</span>
 	</button>
 	<% fi %>
+	<% if has_cap iris; then %>
+	<span id="mj-ptz-iris-label" class="mj-ptz-group">Iris</span>
+	<button type="button" class="mj-ptz-fnbtn" data-act="close" aria-label="Iris close" title="Close iris">
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="10" cy="10" r="7"></circle><path d="M10 3v4M15 6l-3.5 2M17 11.5l-3.8-1.2M13 16.5l-2-3.5M7 17v-4M4.5 13l3.5-2M3 8.5l3.8 1.2M7 3.5l2 3.5"></path>
+		</svg>
+		<span>Close</span>
+	</button>
+	<button type="button" class="mj-ptz-fnbtn" data-act="open" aria-label="Iris open" title="Open iris">
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="10" cy="10" r="7"></circle><circle cx="10" cy="10" r="3.2"></circle>
+		</svg>
+		<span>Open</span>
+	</button>
+	<% fi %>
 </div>
 <% fi %>
 <% if has_cap pan || has_cap tilt; then %>
 <div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
+	<span id="mj-ptz-xy-label" class="mj-ptz-group" style="grid-column: span 3;">Pan / Tilt</span>
 	<span class="mj-ptz-void"></span>
 	<% if has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-act="up" aria-label="Tilt up">
@@ -140,6 +156,7 @@ has_cap() {
 <% else %>
 <% if has_cap pan || has_cap tilt; then %>
 <div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
+	<span id="mj-ptz-xy-label-alt" class="mj-ptz-group" style="grid-column: span 3;">Pan / Tilt</span>
 	<% if has_cap pan && has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="ul" aria-label="Pan up-left">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.6 12.6V6.6h6"></path></svg>

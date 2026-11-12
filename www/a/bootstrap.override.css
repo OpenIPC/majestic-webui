@@ -3024,6 +3024,10 @@ button.mj-osd-chip,
 /* The two overlays that scroll inside themselves — the bar sideways on a
    phone, the stats panel down — take their gestures back from the stage. */
 .mj-bar,
+.mj-stats-overlay {
+	touch-action: auto;
+}
+
 /* Autofocus status is browser-only stage chrome. */
 .mj-af-overlay {
 	position: absolute;
@@ -3051,10 +3055,6 @@ button.mj-osd-chip,
 
 .mj-af-overlay[data-state="failed"] {
 	border-color: rgba(255, 171, 64, 0.65);
-}
-
-.mj-stats-overlay {
-	touch-action: auto;
 }
 
 /* Grab-to-pan, and only while there is something to pan to: a cursor that
@@ -3675,8 +3675,8 @@ button.mj-osd-chip,
 	gap: 0.5rem;
 	padding: 2rem 0.75rem 0.5rem;
 	background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
-	opacity: 0;
-	pointer-events: none;
+	opacity: 1;
+	pointer-events: auto;
 	transition: opacity 0.25s ease;
 }
 
@@ -3824,10 +3824,15 @@ button.mj-osd-chip,
 	grid-column: span 2;
 	padding: 0.2rem 0 0.05rem;
 	text-align: center;
-	font-size: 0.5625rem;
-	letter-spacing: 0.1em;
+	font-size: 0.75rem;
+	font-weight: normal;
+	letter-spacing: 0.08em;
 	text-transform: uppercase;
-	color: rgba(255, 255, 255, 0.4);
+	color: #adb5bd;
+}
+
+.mj-ptz-pad > .mj-ptz-group {
+	grid-column: span 3;
 }
 
 /* The empty corners of the Pelco plus-shape — grid cells, not buttons, so
@@ -3874,7 +3879,8 @@ button.mj-osd-chip,
 }
 
 .mj-ptz-btn:active,
-.mj-ptz-fnbtn:active {
+.mj-ptz-fnbtn:active,
+.mj-ptz-fnbtn.active {
 	background: rgba(255, 255, 255, 0.22);
 	color: #fff;
 }
