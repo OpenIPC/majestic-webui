@@ -384,7 +384,9 @@
 				if (afRunning && st.startsWith('done')) {
 					afRunning = false;
 					positionShifted = false;
-					const shouldOpen = userClickedAf;
+					let autoMode = 'manual';
+					try { autoMode = localStorage.getItem('openipc.af.peaksAutoOpen') || 'manual'; } catch (e) {}
+					const shouldOpen = autoMode === 'always' || (autoMode === 'manual' && userClickedAf);
 					userClickedAf = false;
 					fetchCandidates(shouldOpen);
 					scheduleWatch(2000);

@@ -221,6 +221,7 @@
 	const MOTOR_ID = 'motorControls';
 	const PREF = {
 		overlay: 'openipc.af.overlay',
+		peaksAutoOpen: 'openipc.af.peaksAutoOpen',
 		controls: 'openipc.motor.controls',
 		focusMs: 'openipc.motor.focusClickMs',
 		moveMs: 'openipc.motor.moveClickMs',
@@ -890,6 +891,10 @@
 		preferenceSelect(cols.lastElementChild, 'AF overlay',
 			'This choice applies to this browser.', PREF.overlay,
 			[['active', 'During AF'], ['off', 'Off']], 'active');
+		preferenceSelect(cols.lastElementChild, 'AF Peaks popup',
+			'Controls whether the AF candidate peaks gallery opens automatically after autofocus finishes.',
+			PREF.peaksAutoOpen,
+			[['manual', 'After AF button'], ['always', 'After any AF'], ['off', 'Disabled']], 'manual');
 		renderAfTriggers(form);
 	}
 
