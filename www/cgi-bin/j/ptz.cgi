@@ -45,6 +45,8 @@ DURATION_MS=""
 DESCRIBE=""
 COMMAND=""
 VALUE=""
+MOVED_DIR=""
+MOVED_MS=""
 for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 	case "$param" in
 		h=*) HORIZONTAL="${param#*=}" ;;
@@ -54,6 +56,8 @@ for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 		describe=*) DESCRIBE="${param#*=}" ;;
 		command=*) COMMAND="${param#*=}" ;;
 		value=*) VALUE="${param#*=}" ;;
+		moved_dir=*) MOVED_DIR="${param#*=}" ;;
+		moved_ms=*) MOVED_MS="${param#*=}" ;;
 	esac
 done
 
@@ -268,6 +272,29 @@ if [ -n "$ACTION" ]; then
 					out=$(mj_ptz "$ACTION:$DURATION_MS")
 				else
 					out=$(mj_ptz "$ACTION")
+					if [ "$ACTION" = "stop" ] && [ -n "$MOVED_DIR" ] && [ -n "$MOVED_MS" ]; then
+						case "$MOVED_MS" in
+							''|*[!0-9]*) ;;
+							*)
+								if [ "$MOVED_MS" -ge 1 ] && [ "$MOVED_MS" -le 15000 ]; then
+									PAN_MS=0
+									TILT_MS=0
+									if [ -f /etc/ptz_pos.conf ]; then
+										. /etc/ptz_pos.conf 2>/dev/null
+									fi
+									case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
+									case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
+									case "$MOVED_DIR" in
+										right) PAN_MS=$((PAN_MS + MOVED_MS)) ;;
+										left)  PAN_MS=$((PAN_MS - MOVED_MS)) ;;
+										up)    TILT_MS=$((TILT_MS + MOVED_MS)) ;;
+										down)  TILT_MS=$((TILT_MS - MOVED_MS)) ;;
+									esac
+									printf "PAN_MS=%s\nTILT_MS=%s\n" "$PAN_MS" "$TILT_MS" > /etc/ptz_pos.conf.tmp && mv /etc/ptz_pos.conf.tmp /etc/ptz_pos.conf
+								fi
+								;;
+						esac
+					fi
 				fi
 				rc=$?
 				if { [ "$rc" -ne 0 ] || [ "$out" = "unavailable" ]; } &&
