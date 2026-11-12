@@ -312,6 +312,27 @@ case "$ACT" in
 		emit_list "Current camera direction set as Pan/Tilt/Focus origin (0, 0, 0)"
 		;;
 
+	toggle_af)
+		if [ -z "$ID" ] || [ "$ID" -lt 1 ] || [ "$ID" -gt 32 ]; then
+			echo '{"ok":false,"error":"Invalid preset ID"}'
+			exit 0
+		fi
+		ROW=$(grep "^${ID}|" "$PRESETS_FILE" | head -n 1)
+		if [ -z "$ROW" ]; then
+			echo '{"ok":false,"error":"Preset not found"}'
+			exit 0
+		fi
+		IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
+$ROW
+EOF
+		[ "$paf" = "1" ] && new_af="0" || new_af="1"
+		grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
+		echo "${pid}|${pname}|${pmag}|${new_af}|${pzoom:-1}|${ppan}|${ptilt}|${pfocus}" >> "${PRESETS_FILE}.tmp"
+		sort -t'|' -k1,1n "${PRESETS_FILE}.tmp" > "$PRESETS_FILE"
+		rm -f "${PRESETS_FILE}.tmp"
+		emit_list ""
+		;;
+
 	goto)
 		if [ -z "$ID" ] || [ "$ID" -lt 1 ] || [ "$ID" -gt 32 ]; then
 			echo '{"ok":false,"error":"Invalid preset ID"}'

@@ -76,7 +76,7 @@
 		'      <button type="button" class="mj-pr-btn primary" data-pr="save">Save Current View</button>' +
 		'      <div class="mj-pr-opts">' +
 		'        <label><input type="checkbox" data-pr="zoom" checked> Restore optical zoom (<span data-pr="curmag">1.0×</span>)</label>' +
-		'        <label><input type="checkbox" data-pr="af" checked> Autofocus on arrival</label>' +
+		'        <label><input type="checkbox" data-pr="af"> Autofocus on arrival</label>' +
 		'      </div>' +
 		'    </div>' +
 		'    <div class="mj-pr-list" data-pr="list"></div>' +
@@ -158,13 +158,17 @@
 				'<div class="mj-pr-meta">' + ptText + '<br>' + (badges.join(' · ') || 'Pan/Tilt only') + '</div>' +
 				'<div class="mj-pr-card-actions">' +
 				'  <button type="button" class="mj-pr-btn primary" style="flex:1" data-go="' + p.id + '">Go to View</button>' +
-				'  <button type="button" class="mj-pr-btn" data-upd="' + p.id + '" title="Update this preset with current camera Pan/Tilt/Zoom">Set Here</button>' +
+				'  <button type="button" class="mj-pr-btn" data-af="' + p.id + '" title="Toggle Autofocus on arrival">' + (p.run_af ? 'AF: On' : 'AF: Off') + '</button>' +
+				'  <button type="button" class="mj-pr-btn" data-upd="' + p.id + '" title="Update this preset with current camera Pan/Tilt/Focus/Zoom">Set Here</button>' +
 				'  <button type="button" class="mj-pr-btn danger" data-del="' + p.id + '" title="Delete preset">✕</button>' +
 				'</div>';
 			card.querySelector('.mj-pr-name').textContent = p.name;
 
 			card.querySelector('[data-go]').addEventListener('click', () => {
 				callPreset(p.id);
+			});
+			card.querySelector('[data-af]').addEventListener('click', () => {
+				togglePresetAf(p.id);
 			});
 			card.querySelector('[data-upd]').addEventListener('click', () => {
 				updatePresetHere(p);
@@ -256,6 +260,19 @@
 		})
 			.then(r => r.ok ? r.json() : null)
 			.then(d => applyData(d, true))
+			.catch(() => {})
+			.finally(() => { busy = false; });
+	}
+
+	function togglePresetAf(id) {
+		if (busy) return;
+		busy = true;
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=toggle_af&id=' + encodeURIComponent(id), {
+			method: 'POST',
+			credentials: 'same-origin'
+		})
+			.then(r => r.ok ? r.json() : null)
+			.then(d => applyData(d, false))
 			.catch(() => {})
 			.finally(() => { busy = false; });
 	}
