@@ -220,3 +220,4 @@ has_cap() {
 <% fi %>
 <% fi %>
 <script src="/a/preview-ptz.js"></script>
+<script src="/a/preview-af-peaks.js"></script>
