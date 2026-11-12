@@ -123,7 +123,7 @@ restore_zoom_and_af() {
 		step=0
 		prev_mag=""
 		stall=0
-		while [ "$step" -lt 20 ]; do
+		while [ "$step" -lt 30 ]; do
 			cur_mag=$(get_current_mag)
 			[ -n "$cur_mag" ] || break
 			if [ "$cur_mag" = "$prev_mag" ]; then
@@ -134,21 +134,24 @@ restore_zoom_and_af() {
 			fi
 			prev_mag="$cur_mag"
 
-			cmd=$(awk -v cur="$cur_mag" -v tgt="$target_mag" 'BEGIN {
+			cmd=$(awk -v cur="$cur_mag" -v tgt="$target_mag" -v stall="$stall" 'BEGIN {
 				diff = tgt - cur;
 				adiff = (diff < 0) ? -diff : diff;
-				if (tgt <= 1.15 && cur <= 1.15) { print "done 0"; exit; }
-				if (tgt >= 56.5 && cur >= 56.5) { print "done 0"; exit; }
-				if (adiff < 0.8) {
-					print "done 0";
+				if (tgt <= 1.15) {
+					if (cur <= 1.15) { print "done 0"; exit; }
+				} else if (tgt >= 56.5) {
+					if (cur >= 56.5) { print "done 0"; exit; }
 				} else {
-					dir = (diff > 0) ? "tele" : "wide";
-					rate = (cur < 12.0 || tgt < 12.0) ? 105 : 60;
-					ms = int(adiff * rate);
-					if (ms < 160) ms = 160;
-					if (ms > 2500) ms = 2500;
-					print dir " " ms;
+					tol = (tgt > 15.0) ? 0.8 : 0.4;
+					if (adiff < tol) { print "done 0"; exit; }
 				}
+				dir = (diff > 0) ? "tele" : "wide";
+				rate = (cur < 6.0 || tgt < 6.0) ? 250 : ((cur < 15.0 || tgt < 15.0) ? 140 : 60);
+				ms = int(adiff * rate * (1.0 + stall * 0.5));
+				min_ms = (tgt <= 1.15 && cur > 1.5) ? 450 : 200;
+				if (ms < min_ms) ms = min_ms;
+				if (ms > 2500) ms = 2500;
+				print dir " " ms;
 			}')
 			zdir="${cmd%% *}"
 			zms="${cmd#* }"

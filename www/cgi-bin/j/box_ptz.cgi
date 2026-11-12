@@ -207,7 +207,7 @@ run_box_ptz() {
 	step=0
 	prev_mag=""
 	stall=0
-	while [ "$step" -lt 20 ]; do
+	while [ "$step" -lt 30 ]; do
 		now_mag=$(get_current_mag)
 		[ -n "$now_mag" ] || break
 		if [ "$now_mag" = "$prev_mag" ]; then
@@ -218,16 +218,22 @@ run_box_ptz() {
 		fi
 		prev_mag="$now_mag"
 
-		zcmd=$(awk -v cur="$now_mag" -v tgt="$tmag" 'BEGIN {
+		zcmd=$(awk -v cur="$now_mag" -v tgt="$tmag" -v stall="$stall" 'BEGIN {
 			d = tgt - cur;
 			ad = (d < 0) ? -d : d;
-			if (tgt <= 1.15 && cur <= 1.15) { print "done 0"; exit; }
-			if (tgt >= 56.5 && cur >= 56.5) { print "done 0"; exit; }
-			if (ad <= 0.8) { print "done 0"; exit; }
+			if (tgt <= 1.15) {
+				if (cur <= 1.15) { print "done 0"; exit; }
+			} else if (tgt >= 56.5) {
+				if (cur >= 56.5) { print "done 0"; exit; }
+			} else {
+				tol = (tgt > 15.0) ? 0.8 : 0.4;
+				if (ad <= tol) { print "done 0"; exit; }
+			}
 			dir = (d > 0) ? "tele" : "wide";
-			rate = (cur < 12.0 || tgt < 12.0) ? 105 : 60;
-			ms = int(ad * rate);
-			if (ms < 160) ms = 160;
+			rate = (cur < 6.0 || tgt < 6.0) ? 250 : ((cur < 15.0 || tgt < 15.0) ? 140 : 60);
+			ms = int(ad * rate * (1.0 + stall * 0.5));
+			min_ms = (tgt <= 1.15 && cur > 1.5) ? 450 : 200;
+			if (ms < min_ms) ms = min_ms;
 			if (ms > 2500) ms = 2500;
 			print dir " " ms;
 		}')
