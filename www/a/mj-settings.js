@@ -274,6 +274,16 @@
 	// named to it.
 	const PINS_ID = 'pins';
 	const ROI_DOT = 'motionDetect.roi';
+	const AF_ID = 'autofocus';
+	const MOTOR_ID = 'motorControls';
+	const PREF = {
+		overlay: 'openipc.af.overlay',
+		peaksAutoOpen: 'openipc.af.peaksAutoOpen',
+		controls: 'openipc.motor.controls',
+		focusMs: 'openipc.motor.focusClickMs',
+		moveMs: 'openipc.motor.moveClickMs',
+		holdMs: 'openipc.motor.maxHoldMs',
+	};
 	// matches the col-md-3 stacking point: below it the rail is full width and
 	// the categories collapse to an accordion
 	const WIDE = window.matchMedia('(min-width: 768px)');
@@ -324,6 +334,8 @@
 	}
 
 	function label(key) {
+		if (key === AF_ID) return 'Autofocus';
+		if (key === MOTOR_ID) return 'Motor controls';
 		return (boot.labels && boot.labels[key]) ||
 			(key ? key.charAt(0).toUpperCase() + key.slice(1) : key);
 	}
@@ -349,6 +361,9 @@
 			state.tree = TREE.build(state.schema, {
 				exclude: EXCLUDE, liveOrder: LIVE_ORDER, liveId: LIVE_ID, liveLabel,
 				custom: [PINS_ID],
+				extracted: [{ id: AF_ID, from: 'isp.autofocus' }],
+				customGroups: [{ id: 'motor', label: 'Motors',
+					sections: [AF_ID, MOTOR_ID], customLeaves: [MOTOR_ID] }],
 			});
 			state.tree.schema = state.schema;
 		}
@@ -1217,6 +1232,459 @@
 		liveTimer = setTimeout(() => { liveTimer = null; postKnobs(liveDocOf(liveValue)); }, 120);
 	}
 
+	function preference(key, fallback) {
+		try {
+			const value = localStorage.getItem(key);
+			return value == null ? fallback : value;
+		} catch (e) {
+			return fallback;
+		}
+	}
+
+	function setPreference(key, value) {
+		try { localStorage.setItem(key, value); } catch (e) {}
+	}
+
+	function settingsCard(form, title) {
+		const card = el('div', 'card');
+		const body = el('div', 'card-body');
+		const head = el('div', 'mj-live-head');
+		const h = el('h3', 'mj-cap');
+		h.textContent = title;
+		head.appendChild(h);
+		head.appendChild(el('span', 'mj-live-rule'));
+		body.appendChild(head);
+		const cols = el('div', 'mj-cols');
+		cols.appendChild(el('div', 'mj-col'));
+		cols.appendChild(el('div', 'mj-col'));
+		body.appendChild(cols);
+		card.appendChild(body);
+		form.appendChild(card);
+		state.cols = cols;
+		return cols;
+	}
+
+	function preferenceSelect(container, title, hint, key, choices, fallback) {
+		const row = el('div', 'mb-3');
+		const id = 'pref-' + key.replace(/[^a-z0-9]+/gi, '-');
+		const lab = el('label', 'form-label');
+		lab.htmlFor = id;
+		lab.textContent = title;
+		const select = el('select', 'form-select');
+		select.id = id;
+		for (const choice of choices) {
+			const option = el('option');
+			option.value = choice[0];
+			option.textContent = choice[1];
+			select.appendChild(option);
+		}
+		select.value = preference(key, fallback);
+		select.addEventListener('change', () => setPreference(key, select.value));
+		row.appendChild(lab);
+		row.appendChild(select);
+		const note = el('div', 'small text-muted mt-1');
+		note.textContent = hint;
+		row.appendChild(note);
+		container.appendChild(row);
+	}
+
+	function preferenceNumber(container, title, hint, key, fallback, min, max) {
+		const row = el('div', 'mb-3');
+		const id = 'pref-' + key.replace(/[^a-z0-9]+/gi, '-');
+		const lab = el('label', 'form-label');
+		lab.htmlFor = id;
+		lab.textContent = title;
+		const input = el('input', 'form-control');
+		input.id = id;
+		input.type = 'number';
+		input.min = String(min);
+		input.max = String(max);
+		input.step = '10';
+		input.value = preference(key, String(fallback));
+		input.addEventListener('change', () => {
+			let value = parseInt(input.value, 10);
+			if (!Number.isFinite(value)) value = fallback;
+			value = Math.max(min, Math.min(max, value));
+			input.value = String(value);
+			setPreference(key, String(value));
+		});
+		row.appendChild(lab);
+		row.appendChild(input);
+		const note = el('div', 'small text-muted mt-1');
+		note.textContent = hint;
+		row.appendChild(note);
+		container.appendChild(row);
+	}
+
+	function renderAutofocus(form) {
+		const cols = settingsCard(form, 'Autofocus');
+		const isp = (state.schema.properties || {}).isp || {};
+		const af = (isp.properties || {}).autofocus || {};
+		renderProps(cols.firstElementChild, 'isp.autofocus', af.properties || {});
+		preferenceSelect(cols.lastElementChild, 'AF overlay',
+			'This choice applies to this browser.', PREF.overlay,
+			[['active', 'During AF'], ['off', 'Off']], 'active');
+		preferenceSelect(cols.lastElementChild, 'AF Peaks popup',
+			'Controls whether the AF candidate peaks gallery opens automatically after autofocus finishes.',
+			PREF.peaksAutoOpen,
+			[['manual', 'After AF button'], ['always', 'After any AF'], ['off', 'Disabled']], 'manual');
+		renderAfTriggers(form);
+	}
+
+	function renderAfTriggers(form) {
+		const prevCols = state.cols;
+		const cols = settingsCard(form, 'Autofocus triggers & schedule');
+		state.cols = prevCols;
+		const left = cols.firstElementChild;
+		const right = cols.lastElementChild;
+
+		function makeSelectRow(container, id, labelText, hintText, options) {
+			const row = el('div', 'mb-3');
+			const lab = el('label', 'form-label');
+			lab.htmlFor = id;
+			lab.textContent = labelText;
+			const sel = el('select', 'form-select');
+			sel.id = id;
+			for (const [val, text] of options) {
+				const opt = el('option');
+				opt.value = String(val);
+				opt.textContent = text;
+				sel.appendChild(opt);
+			}
+			row.appendChild(lab);
+			row.appendChild(sel);
+			if (hintText) {
+				const note = el('div', 'small text-muted mt-1');
+				note.textContent = hintText;
+				row.appendChild(note);
+			}
+			container.appendChild(row);
+			return { row, sel };
+		}
+
+		const modeCtl = makeSelectRow(
+			left,
+			'af-trig-mode',
+			'AF status overlay after PTZ',
+			'Choose which PTZ movements poll AF status and display the overlay once the motor stops.',
+			[
+				['ptz', 'After Pan, Tilt & Zoom (PTZ)'],
+				['zoom_only', 'After Zoom only (Wide / Tele)'],
+				['pan_tilt_only', 'After Pan / Tilt only'],
+				['manual', 'Manual only (no auto-polling after PTZ)'],
+			]
+		);
+
+		const ircutCtl = makeSelectRow(
+			left,
+			'af-trig-ircut',
+			'Refocus on IR-cut / Day-Night switch',
+			'Infrared light focuses at a slightly different plane than visible light. Automatically refocuses after switching between Day and Night.',
+			[
+				['1', 'Enabled'],
+				['0', 'Disabled'],
+			]
+		);
+
+		const fastAfCtl = makeSelectRow(
+			left,
+			'af-trig-fast',
+			'AF sweep mode',
+			'Fast mode uses a single FV sweep and skips JPEG candidate verification to save time (hides AF Peaks button).',
+			[
+				['0', 'Standard (2-way sweep & JPEG peak verify)'],
+				['1', 'Fast (single sweep, skip JPEG verify)'],
+			]
+		);
+
+		const schedCtl = makeSelectRow(
+			right,
+			'af-trig-sched',
+			'Scheduled periodic refocus',
+			'Runs in the background on the camera via cron even when no browser is open.',
+			[
+				['off', 'Off'],
+				['hourly', 'Hourly (every hour at :00)'],
+				['daily', 'Daily'],
+				['weekly', 'Weekly'],
+			]
+		);
+
+		const hourOptions = [];
+		for (let h = 0; h < 24; h++) {
+			const hh = (h < 10 ? '0' : '') + h + ':00';
+			hourOptions.push([String(h), hh]);
+		}
+		const hourCtl = makeSelectRow(
+			right,
+			'af-trig-hour',
+			'Scheduled time (camera clock)',
+			'Hour of day for Daily or Weekly refocus.',
+			hourOptions
+		);
+
+		const dayCtl = makeSelectRow(
+			right,
+			'af-trig-day',
+			'Scheduled day of week',
+			'Day of week for Weekly refocus.',
+			[
+				['0', 'Sunday'],
+				['1', 'Monday'],
+				['2', 'Tuesday'],
+				['3', 'Wednesday'],
+				['4', 'Thursday'],
+				['5', 'Friday'],
+				['6', 'Saturday'],
+			]
+		);
+
+		const actionRow = el('div', 'd-flex gap-2 align-items-center mt-2');
+		const saveBtn = el('button', 'btn btn-primary');
+		saveBtn.type = 'button';
+		saveBtn.textContent = 'Save trigger settings';
+		const runBtn = el('button', 'btn btn-outline-secondary');
+		runBtn.type = 'button';
+		runBtn.textContent = 'Run AF now';
+		const statusNote = el('div', 'small text-muted mt-2');
+		actionRow.appendChild(saveBtn);
+		actionRow.appendChild(runBtn);
+		right.appendChild(actionRow);
+		right.appendChild(statusNote);
+
+		function updateSchedVis() {
+			const s = schedCtl.sel.value;
+			hourCtl.row.hidden = (s !== 'daily' && s !== 'weekly');
+			dayCtl.row.hidden = (s !== 'weekly');
+		}
+		schedCtl.sel.addEventListener('change', updateSchedVis);
+		updateSchedVis();
+
+		let triggersLoaded = false;
+		const triggerInputs = [modeCtl.sel, ircutCtl.sel, fastAfCtl.sel, schedCtl.sel, hourCtl.sel, dayCtl.sel, saveBtn];
+		triggerInputs.forEach(c => { c.disabled = true; });
+		statusNote.textContent = 'Loading trigger settings…';
+
+		async function saveTriggers() {
+			if (!triggersLoaded) return;
+			saveBtn.disabled = true;
+			statusNote.textContent = 'Saving trigger settings…';
+			const q = [
+				'trigger_mode=' + encodeURIComponent(modeCtl.sel.value),
+				'on_ircut=' + encodeURIComponent(ircutCtl.sel.value),
+				'fast_af=' + encodeURIComponent(fastAfCtl.sel.value),
+				'schedule=' + encodeURIComponent(schedCtl.sel.value),
+				'schedule_hour=' + encodeURIComponent(hourCtl.sel.value),
+				'schedule_day=' + encodeURIComponent(dayCtl.sel.value),
+			].join('&');
+			try {
+				const r = await apiFetch('/cgi-bin/j/af_triggers.cgi?' + q, {
+					method: 'POST',
+					credentials: 'same-origin',
+				});
+				const d = await r.json();
+				if (!d || !d.ok) throw new Error();
+				statusNote.textContent = 'Saved autofocus triggers & schedule to camera.';
+			} catch (e) {
+				statusNote.textContent = 'Failed to save trigger settings.';
+			} finally {
+				saveBtn.disabled = false;
+			}
+		}
+
+		saveBtn.addEventListener('click', saveTriggers);
+		modeCtl.sel.addEventListener('change', saveTriggers);
+		ircutCtl.sel.addEventListener('change', saveTriggers);
+		fastAfCtl.sel.addEventListener('change', saveTriggers);
+		schedCtl.sel.addEventListener('change', saveTriggers);
+		hourCtl.sel.addEventListener('change', saveTriggers);
+		dayCtl.sel.addEventListener('change', saveTriggers);
+
+		runBtn.addEventListener('click', async () => {
+			runBtn.disabled = true;
+			statusNote.textContent = 'Starting autofocus pass…';
+			try {
+				const r = await apiFetch('/cgi-bin/j/ptz.cgi?act=af', {
+					method: 'POST',
+					credentials: 'same-origin',
+				});
+				const text = (await r.text()).trim();
+				if (!r.ok || /not available|failed|did not answer|busy|error/i.test(text)) {
+					statusNote.textContent = text || 'Autofocus pass failed.';
+				} else {
+					statusNote.textContent = text || 'Autofocus pass completed.';
+				}
+			} catch (e) {
+				statusNote.textContent = 'Failed to trigger autofocus.';
+			} finally {
+				runBtn.disabled = false;
+			}
+		});
+
+		apiFetch('/cgi-bin/j/af_triggers.cgi', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.json() : null)
+			.then(d => {
+				if (!d || !d.ok) {
+					statusNote.textContent = 'Failed to load current trigger settings from camera.';
+					return;
+				}
+				if (d.trigger_mode) modeCtl.sel.value = d.trigger_mode;
+				ircutCtl.sel.value = d.on_ircut ? '1' : '0';
+				fastAfCtl.sel.value = d.fast_af ? '1' : '0';
+				if (d.schedule) schedCtl.sel.value = d.schedule;
+				if (d.schedule_hour != null) hourCtl.sel.value = String(d.schedule_hour);
+				if (d.schedule_day != null) dayCtl.sel.value = String(d.schedule_day);
+				triggersLoaded = true;
+				triggerInputs.forEach(c => { c.disabled = false; });
+				updateSchedVis();
+				statusNote.textContent = '';
+			})
+			.catch(() => {
+				statusNote.textContent = 'Failed to load current trigger settings from camera.';
+			});
+	}
+
+	function renderMotorControls(form) {
+		const cols = settingsCard(form, 'Motor controls');
+		const status = el('div');
+		const motor = boot.motor || {};
+		const rows = [
+			['Service', motor.available ? 'Available' : 'Not detected'],
+			['Backend', motor.backend || 'None'],
+			['Axes', motor.axes || 'None'],
+			['Autofocus', motor.af ? 'Available' : 'Not detected'],
+		];
+		for (const item of rows) {
+			const p = el('p', 'mb-2');
+			const name = el('strong');
+			name.textContent = item[0] + ': ';
+			p.appendChild(name);
+			p.appendChild(document.createTextNode(item[1]));
+			status.appendChild(p);
+		}
+		cols.firstElementChild.appendChild(status);
+		preferenceSelect(cols.lastElementChild, 'Show motor controls',
+			'This choice applies to this browser and does not disable the motor service.',
+			PREF.controls, [['auto', 'Automatic'], ['hidden', 'Hidden']], 'auto');
+		preferenceNumber(cols.lastElementChild, 'Focus click time',
+			'Movement from one short focus click, in milliseconds.',
+			PREF.focusMs, 70, 20, 1000);
+		preferenceNumber(cols.lastElementChild, 'Movement click time',
+			'Movement from one short pan, tilt, or zoom click, in milliseconds.',
+			PREF.moveMs, 150, 20, 1000);
+		preferenceNumber(cols.lastElementChild, 'Maximum hold time',
+			'Maximum movement from one held control, in milliseconds.',
+			PREF.holdMs, 5000, 500, 10000);
+		preferenceNumber(cols.firstElementChild, 'Box PTZ pan full-width scale (ms)',
+			'Pan travel time across 100% frame width at 1× zoom for click-and-drag Box PTZ.',
+			'openipc.motor.boxPanScaleMs', 10600, 500, 30000);
+		preferenceNumber(cols.firstElementChild, 'Box PTZ tilt full-height scale (ms)',
+			'Tilt travel time across 100% frame height at 1× zoom for click-and-drag Box PTZ.',
+			'openipc.motor.boxTiltScaleMs', 6400, 500, 20000);
+		preferenceSelect(cols.firstElementChild, 'Invert Box PTZ pan direction',
+			'Flip horizontal direction when centering a dragged box.',
+			'openipc.motor.boxInvertPan', [['0', 'Normal'], ['1', 'Inverted']], '0');
+		preferenceSelect(cols.firstElementChild, 'Invert Box PTZ tilt direction',
+			'Flip vertical direction when centering a dragged box.',
+			'openipc.motor.boxInvertTilt', [['0', 'Normal'], ['1', 'Inverted']], '0');
+		renderDeviceControls(form);
+	}
+
+	async function renderDeviceControls(form) {
+		if (!(boot.motor || {}).available) return;
+		let description;
+		try {
+			const response = await apiFetch('/cgi-bin/j/ptz.cgi?describe=1', {
+				credentials: 'same-origin',
+			});
+			description = await response.json();
+			if (!description.ok) return;
+		} catch (e) { return; }
+		if (state.sec !== MOTOR_ID) return;
+
+		const controls = new Map((description.controls || []).map(item => [item.id, item]));
+		if (!controls.size) return;
+		const cols = settingsCard(form, description.label || 'Device settings');
+		(description.menus || []).forEach((menu, menuIndex) => {
+			const column = cols.children[menuIndex % 2];
+			const heading = el('h4', 'h6 mt-2 mb-3');
+			heading.textContent = menu.label || menu.id;
+			column.appendChild(heading);
+			(menu.items || []).forEach(id => {
+				if (id.indexOf('__') === 0) return;
+				const control = controls.get(id);
+				if (control) renderDeviceControl(column, control);
+			});
+		});
+	}
+
+	function renderDeviceControl(container, control) {
+		const row = el('div', 'mb-3');
+		const label = el('label', 'form-label');
+		label.textContent = control.label || control.name;
+		row.appendChild(label);
+		let input = null;
+		if (control.type === 'number') {
+			input = el('input', 'form-control');
+			input.type = 'number';
+			if (control.min !== undefined) input.min = String(control.min);
+			if (control.max !== undefined) input.max = String(control.max);
+			if (control.step !== undefined) input.step = String(control.step);
+			input.value = control.default !== undefined ? String(control.default) : '';
+			row.appendChild(input);
+		} else if (control.type === 'choice' || control.type === 'toggle') {
+			input = el('select', 'form-select');
+			(control.options || []).forEach(item => {
+				const option = el('option');
+				option.value = item.value;
+				option.textContent = item.label || item.value;
+				input.appendChild(option);
+			});
+			if (control.default !== undefined) input.value = String(control.default);
+			row.appendChild(input);
+		}
+		const button = el('button', 'btn btn-outline-primary mt-2');
+		button.type = 'button';
+		button.textContent = control.type === 'action' ? (control.label || 'Run') : 'Apply';
+		const result = el('div', 'small text-muted');
+		button.addEventListener('click', async () => {
+			const warning = control.warning || control.description;
+			if (control.confirm && !window.confirm(warning || 'Run this command?')) return;
+			if (control.type === 'number') {
+				const value = Number(input.value);
+				const below = control.min !== undefined && value < Number(control.min);
+				const above = control.max !== undefined && value > Number(control.max);
+				if (!Number.isFinite(value) || below || above) {
+					result.textContent = 'Enter a value in the allowed range.';
+					return;
+				}
+			}
+			button.disabled = true;
+			result.textContent = 'Sending…';
+			let query = 'command=' + encodeURIComponent(control.name);
+			if (input) query += '&value=' + encodeURIComponent(input.value);
+			try {
+				const response = await apiFetch('/cgi-bin/j/ptz.cgi?' + query, {
+					method: 'POST',
+					credentials: 'same-origin',
+				});
+				const body = await response.text();
+				if (!body.includes('"ok":true')) throw new Error();
+				result.textContent = 'Command sent. The camera does not report this value.';
+			} catch (e) {
+				result.textContent = 'Command failed.';
+			} finally { button.disabled = false; }
+		});
+		row.appendChild(button);
+		if (control.description) {
+			const note = el('div', 'small text-muted mt-1');
+			note.textContent = control.description;
+			row.appendChild(note);
+		}
+		row.appendChild(result);
+		container.appendChild(row);
+	}
+
 	async function load(tab, push) {
 		const form = document.getElementById('mj-settings-form');
 		if (!form) return;
@@ -1284,6 +1752,10 @@
 		// down the left as a single strip of controls.
 		if (sec === LIVE_ID) {
 			renderLive(form);
+		} else if (sec === AF_ID) {
+			renderAutofocus(form);
+		} else if (sec === MOTOR_ID) {
+			renderMotorControls(form);
 		} else if (sec === PINS_ID) {
 			renderPins(form);
 		} else if (sec === 'osd') {
@@ -1336,7 +1808,8 @@
 			const props = ((state.schema.properties || {})[sec] || {}).properties || {};
 			// all rows into the first column; layoutCols() deals the tail over
 			// into the second once applyVisibility() has settled what is on screen
-			renderProps(cols.firstElementChild, sec, props);
+			const moved = sec === 'isp' ? new Set(['isp.autofocus']) : undefined;
+			renderProps(cols.firstElementChild, sec, props, moved);
 			// The leftovers of an absorbed section whose home is this leaf
 			// (mj-tree.js rule 3) — on this build, image's Rotate on ISP /
 			// Exposure — under their own heading, as the ordinary rows they are:

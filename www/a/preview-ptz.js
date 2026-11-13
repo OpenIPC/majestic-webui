@@ -19,24 +19,25 @@
 (function () {
 	const pad = $('#mj-ptz-pad'), fn = $('#mj-ptz-fn');
 	const mount = $('#mj-ptz'), stage = $('#mj-stage');
-	// The reason the pads will not move anything, when there is one, joins the
-	// toast stack — it is a sentence, and everything below is a grid of 40px
-	// buttons. Independent of the mount: the stack bounds its own width and
-	// sits under the chip, so this shows whether or not a pad does.
+	function stored(name, fallback) {
+		try {
+			const value = localStorage.getItem(name);
+			return value == null ? fallback : value;
+		} catch (e) { return fallback; }
+	}
+	function storedMs(name, fallback, min, max) {
+		const value = parseInt(stored(name, String(fallback)), 10);
+		return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+	}
 	const why = $('#mj-ptz-why'), toasts = $('#mj-toasts');
 	if (why && toasts) { toasts.appendChild(why); why.hidden = false; }
-	// The autofocus line joins the same stack, and for the same reason the
-	// sentence above does — but it stays `hidden`, because it has nothing to
-	// say until a pass this page started or booked is under way. Left where
-	// haserl emitted it, it renders BELOW the video instead of over it: the
-	// pads are emitted after the player and relocated, and this is emitted with
-	// them.
 	const afLine = $('#mj-af-say');
 	if (afLine && toasts) toasts.appendChild(afLine);
 	// Either piece may be absent on its own: ptz_caps can leave a camera
 	// with only the zoom/focus group (an XM zoom block has no pan/tilt) —
 	// the pad must not be the thing the whole mount hinges on.
 	if (!mount || (!pad && !fn)) return;
+	if (stored('openipc.motor.controls', 'auto') === 'hidden') return;
 	if (fn) { mount.appendChild(fn); fn.hidden = false; }
 	if (pad) { mount.appendChild(pad); pad.hidden = false; }
 	// The pad's nine cells in the grid's order, as drawn, before anything here
@@ -87,7 +88,8 @@
 				.then((c) => {
 					// A missing or malformed image section is a camera not heard
 					// from, not one that is upright.
-					const t = PO ? PO.of(c && c.image) : null;
+					const img = c && c.image;
+					const t = PO ? PO.of(img && img.rotate === undefined ? { mirror: false, flip: false, rotate: '0' } : img) : null;
 					if (!t) return Promise.reject(new Error('no orientation'));
 					turn = t;
 					lay();
@@ -102,6 +104,7 @@
 		return turnP;
 	};
 	// A direction can go to the head only once the picture's turn is known.
+	learnTurn().catch(() => {});
 	const steerable = () => {
 		if (!PO || turn) return true;
 		learnTurn().catch(() => {});
@@ -347,8 +350,11 @@
 		'M5 7.5 2.5 10 5 12.5M15 7.5l2.5 2.5-2.5 2.5"></path>' +
 		'<path class="mj-ptz-fold-close" d="M5 5l10 10M15 5 5 15"></path></svg>';
 	const OPEN_KEY = 'mj-ptz-open';
-	let open = false;
-	try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch (e) { /* ignore */ }
+	let open = !(small && small.matches);
+	try {
+		const saved = localStorage.getItem(OPEN_KEY);
+		if (saved === '1' || saved === '0') open = saved === '1';
+	} catch (e) { /* ignore */ }
 	// Follow is a setting of the pad, not a control on it: on a small
 	// stage it waits behind a gear, in a popover beside the column, so the
 	// open pad is the arrows alone -- four stacked panels covered half a phone
@@ -437,10 +443,8 @@
 	const stopBtn = pad ? pad.querySelector('[data-act="stop"]') : null;
 	const PK = window.MajesticPtzStick;
 	const stick = !!(stopBtn && PK);
-	const knob = document.createElement('span');
-	knob.className = 'mj-ptz-knob';
-	knob.setAttribute('aria-hidden', 'true');
-	if (stopBtn) stopBtn.replaceWith(stick ? knob : grip);
+	const knob = stopBtn || document.createElement('span');
+	if (stopBtn && !stick) stopBtn.replaceWith(grip);
 	if (stick) pad.classList.add('mj-ptz-stick');
 	const gripInPad = !!stopBtn && !stick;
 	let corner = 'br';
@@ -490,18 +494,18 @@
 	});
 
 	const applyFold = () => {
-		const folded = !!(small && small.matches) && !open;
+		const folded = !open;
 		mount.classList.toggle('mj-ptz-folded', folded);
-		mount.classList.toggle('mj-ptz-foldable', !!(small && small.matches));
+		mount.classList.toggle('mj-ptz-foldable', true);
 		// Where the fold and the gear stand: folded, the fold alone in the
 		// mount; open on a small stage, in the pad's corners or the strip.
-		if (!isSmall() || folded) {
+		if (folded) {
 			mount.appendChild(fold);
 			// The handle where the Pelco pad has none of its own: first in the
 			// column on a large stage.
 			if (!gripInPad) mount.insertBefore(grip, mount.firstChild);
 		} else if (corners) {
-			pad.appendChild(gear);
+			if (isSmall()) pad.appendChild(gear);
 			pad.appendChild(fold);
 			// A pad with empty corners but no Stop of its own (an eight-way
 			// pad missing its diagonals): the handle takes the bottom-left
@@ -523,9 +527,14 @@
 		fold.setAttribute('aria-label', say);
 		fold.title = say;
 	};
-	fold.addEventListener('click', () => {
+	fold.addEventListener('pointerdown', (e) => {
+		e.stopPropagation();
+	});
+	fold.addEventListener('click', (e) => {
+		e.stopPropagation();
+		e.preventDefault();
 		open = mount.classList.contains('mj-ptz-folded');
-		try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch (e) { /* ignore */ }
+		try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch (err) { /* ignore */ }
 		applyFold();
 	});
 	mount.appendChild(fold);
@@ -540,46 +549,295 @@
 	}
 	mount.hidden = false;
 
+	let afOverlay = null, afPollTimer = null, afHideTimer = null;
+	let afSeenRunning = false, afWatchUntil = 0;
+	function showAf(text, state) {
+		if (stored('openipc.af.overlay', 'active') === 'off') return;
+		if (!afOverlay) {
+			afOverlay = document.createElement('div');
+			afOverlay.className = 'mj-af-overlay';
+			afOverlay.setAttribute('role', 'status');
+			afOverlay.setAttribute('aria-live', 'polite');
+			stage.appendChild(afOverlay);
+		}
+		afOverlay.textContent = text;
+		afOverlay.dataset.state = state || 'running';
+		afOverlay.hidden = false;
+	}
+	function hideAfLater() {
+		clearTimeout(afHideTimer);
+		afHideTimer = setTimeout(() => { if (afOverlay) afOverlay.hidden = true; }, 2000);
+	}
+	let currentZoomMag = 1.0;
+	try {
+		const savedMag = parseFloat(localStorage.getItem('openipc.zoom.lastMag'));
+		if (isFinite(savedMag) && savedMag >= 1.0) currentZoomMag = savedMag;
+	} catch (e) {}
+	let baseSpeedPct = 100;
+	let zoomScaleOn = true;
+	try {
+		const savedSpd = parseInt(localStorage.getItem('openipc.ptz.speedPct'), 10);
+		if (isFinite(savedSpd) && savedSpd >= 20 && savedSpd <= 100) baseSpeedPct = savedSpd;
+		if (localStorage.getItem('openipc.ptz.zoomScale') === '0') zoomScaleOn = false;
+	} catch (e) {}
+	function effectiveSpeedScale() {
+		const zScale = (zoomScaleOn && currentZoomMag > 1.0)
+			? Math.max(0.04, Math.min(1.0, 1.0 / Math.pow(currentZoomMag, 0.72)))
+			: 1.0;
+		return (baseSpeedPct / 100) * zScale;
+	}
+	let spdLabelEl = null;
+	let spdMinusBtn = null;
+	let spdPlusBtn = null;
+	function refreshSpeedLabel() {
+		if (!spdLabelEl) return;
+		const eff = Math.max(4, Math.round(effectiveSpeedScale() * 100));
+		spdLabelEl.textContent = zoomScaleOn && eff !== baseSpeedPct ? `${eff}/${baseSpeedPct}%` : `${baseSpeedPct}%`;
+		spdLabelEl.title = `PTZ speed ${baseSpeedPct}%` +
+			(zoomScaleOn ? ` · Zoom-scaled ${eff}% (click to toggle auto zoom scale)` : ' · Zoom scaling off (click to enable)');
+		spdLabelEl.style.opacity = zoomScaleOn ? '1' : '0.65';
+		if (spdMinusBtn) {
+			spdMinusBtn.disabled = baseSpeedPct <= 20;
+			spdMinusBtn.style.opacity = spdMinusBtn.disabled ? '0.35' : '1';
+		}
+		if (spdPlusBtn) {
+			spdPlusBtn.disabled = baseSpeedPct >= 100;
+			spdPlusBtn.style.opacity = spdPlusBtn.disabled ? '0.35' : '1';
+		}
+	}
+
+	function updateZoomLabel(mag) {
+		const el = $('#mj-ptz-zoom-label');
+		if (!el) return;
+		if (Number.isFinite(mag) && mag >= 1.0) {
+			const clamped = Math.min(Math.max(mag, 1.0), 100.0);
+			currentZoomMag = clamped;
+			const formatted = clamped >= 10.0 ? clamped.toFixed(0) : clamped.toFixed(1);
+			el.textContent = 'Zoom ' + formatted + '×';
+			try { localStorage.setItem('openipc.zoom.lastMag', formatted); } catch (e) {}
+			refreshSpeedLabel();
+		} else {
+			el.textContent = 'Zoom';
+		}
+	}
+	let lastFv = null;
+	function updateFocusLabel(fv, isRunning, manualDir) {
+		const el = $('#mj-ptz-focus-label');
+		if (!el) return;
+		if (fv != null && fv !== '' && fv !== '0') lastFv = fv;
+		if (isRunning) {
+			el.textContent = 'Focus AF…' + (lastFv ? ' (' + lastFv + ')' : '');
+		} else if (manualDir) {
+			el.textContent = 'Focus ' + manualDir + (lastFv ? ' (' + lastFv + ')' : '');
+		} else if (lastFv) {
+			el.textContent = 'Focus FV ' + lastFv;
+		} else {
+			el.textContent = 'Focus';
+		}
+	}
+	let irisJog = 0;
+	function updateIrisLabel(state) {
+		const el = $('#mj-ptz-iris-label');
+		if (!el) return;
+		if (state) {
+			el.textContent = 'Iris ' + state;
+		} else if (irisJog !== 0) {
+			el.textContent = 'Iris (' + (irisJog > 0 ? '+' : '') + irisJog + ')';
+		} else {
+			el.textContent = 'Iris';
+		}
+	}
+	let panJog = 0, tiltJog = 0;
+	function updateXyLabel(state) {
+		const els = [$('#mj-ptz-xy-label'), $('#mj-ptz-xy-label-alt')];
+		els.forEach(el => {
+			if (!el) return;
+			el.style.whiteSpace = 'pre-line';
+			if (state) {
+				el.textContent = state;
+			} else {
+				el.textContent = 'Pan/Tilt\n(X: ' + panJog.toFixed(1) + ' Y: ' + tiltJog.toFixed(1) + ')';
+			}
+		});
+	}
+	function trackPanTilt(verb, label, step) {
+		if (!verb) return;
+		const delta = typeof step === 'number' && step > 0 ? step : 0.2;
+		if (verb.indexOf('left') >= 0) panJog -= delta;
+		if (verb.indexOf('right') >= 0) panJog += delta;
+		if (verb.indexOf('up') >= 0) tiltJog += delta;
+		if (verb.indexOf('down') >= 0) tiltJog -= delta;
+		updateXyLabel(label || null);
+	}
+
+	function parseLiveMag(str) {
+		if (!str) return null;
+		const live = /(?:^| )live_mag=([0-9.]+)/.exec(str);
+		if (live) return +live[1];
+		const matches = [...str.matchAll(/(?:^| )mag=([0-9.]+)/g)];
+		return matches.length ? +matches[matches.length - 1][1] : null;
+	}
+	function fetchZoom() {
+		apiFetch('/zoom', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.text() : '')
+			.then(t => {
+				const mag = parseLiveMag(t);
+				updateZoomLabel(mag);
+			})
+			.catch(() => updateZoomLabel(null));
+	}
+	updateZoomLabel(null);
+	updateIrisLabel();
+	updateXyLabel();
+	fetchZoom();
+
+	function pollAf() {
+		afPollTimer = null;
+		apiFetch('/autofocus/status', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.text() : Promise.reject())
+			.then(body => {
+				const status = body.trim();
+				const currentMag = parseLiveMag(status);
+				const liveMagMatch = /(?:^| )live_mag=([0-9.]+)/.exec(status);
+				if (liveMagMatch) updateZoomLabel(+liveMagMatch[1]);
+				else fetchZoom();
+
+				const fvMatch = status.match(/(?:^| )metric_fv=(\d+)/) || status.match(/(?:^| )fv=(\d+)/);
+				const currentFv = fvMatch ? fvMatch[1] : null;
+
+				const running = status.match(/^running(?: step=([^ ]+) fv=(\d+) peak=(\d+))?/);
+				if (running) {
+					afSeenRunning = true;
+					updateFocusLabel(currentFv, true);
+					const step = running[1] ? running[1].replace(/-/g, ' ') : 'starting';
+					const metric = running[2] && running[2] !== '0' ? ' · FV ' + running[2] : '';
+					const peak = running[3] && running[3] !== '0' ? ' · peak ' + running[3] : '';
+					showAf('AF · ' + step + metric + peak, 'running');
+					afPollTimer = setTimeout(pollAf, 250);
+					return;
+				}
+
+				updateFocusLabel(currentFv, false);
+
+				if (afSeenRunning) {
+					afSeenRunning = false;
+					const done = status.match(/^done fv=(\d+) peak=(\d+)/);
+					if (done) {
+						const magStr = currentMag != null ? ' · ' + currentMag.toFixed(1) + '×' : '';
+						showAf('AF done' + magStr + ' · FV ' + done[1] + ' · peak ' + done[2], 'done');
+					}
+					else if (/^preempted(?: |$)/.test(status)) {
+						// Zoom preempts the old AF pass before it starts a new one.
+						// Do not present that expected handoff as an AF failure.
+						if (Date.now() < afWatchUntil) {
+							if (afOverlay) afOverlay.hidden = true;
+							afPollTimer = setTimeout(pollAf, 250);
+							return;
+						}
+						showAf('AF stopped', 'stopped');
+					}
+					else if (/^idle(?: |$)/.test(status) || /^cancelled(?: |$)/.test(status)) {
+						if (afOverlay) afOverlay.hidden = true;
+						return;
+					}
+					else showAf('AF · ' + (status || 'status unavailable'), 'failed');
+					hideAfLater();
+					return;
+				}
+
+				if (status.startsWith('idle') && afOverlay && !afOverlay.hidden) {
+					afOverlay.hidden = true;
+				} else if (afOverlay && !afOverlay.hidden && !afSeenRunning) {
+					hideAfLater();
+				}
+
+				// A zoom pulse starts AF only after its motor request completes.
+				// Ignore the previous pass result during that short gap.
+				if (Date.now() < afWatchUntil) afPollTimer = setTimeout(pollAf, 250);
+			})
+			.catch(() => {
+				fetchZoom();
+				if (Date.now() < afWatchUntil || afSeenRunning)
+					afPollTimer = setTimeout(pollAf, 500);
+			});
+	}
+	pollAf();
+	setInterval(() => { if (!afPollTimer && !afSeenRunning) pollAf(); }, 3000);
+
+	let afTriggerMode = 'ptz';
+	apiFetch('/cgi-bin/j/af_triggers.cgi', { credentials: 'same-origin' })
+		.then(r => r.ok ? r.json() : null)
+		.then(d => { if (d && d.trigger_mode) afTriggerMode = d.trigger_mode; })
+		.catch(() => {});
+
+	function shouldWatchAfAfter(axis) {
+		if (afTriggerMode === 'manual') return false;
+		if (afTriggerMode === 'zoom_only') return axis === 'zoom';
+		if (afTriggerMode === 'pan_tilt_only') return axis === 'pan' || axis === 'tilt';
+		return axis === 'zoom' || axis === 'pan' || axis === 'tilt';
+	}
+
+	function watchAf(durationMs) {
+		afWatchUntil = Date.now() + (durationMs || 10000);
+		afSeenRunning = false;
+		clearTimeout(afHideTimer);
+		if (!afPollTimer) afPollTimer = setTimeout(pollAf, 100);
+	}
+	document.addEventListener('mj-ptz-move', e => {
+		const ms = e && e.detail && e.detail.durationMs ? Number(e.detail.durationMs) : 12000;
+		watchAf(ms);
+	});
+
 	const STEP = 5, TICK_MS = 250;
-	// A held zoom is ONE long continuous move the camera's deadline keeps alive,
-	// re-armed by each tick, not a train of short pulses. Long, because the tick
-	// only has to LAND once to keep zooming for this whole span -- the author
-	// measured a 250 ms ticker leaving a single 500 ms pulse in a 1.2 s hold over
-	// a slow link, which reads exactly as "one step, then holding does nothing".
+	const PULSE_MS = {
+		focus: storedMs('openipc.motor.focusClickMs', 70, 20, 1000),
+		motor: storedMs('openipc.motor.moveClickMs', 150, 20, 1000),
+		maximum: storedMs('openipc.motor.maxHoldMs', 5000, 500, 10000),
+	};
 	const HOLD_MS = 1500;
 	const DIRS = {
 		ul: [-1, 1], uc: [0, 1], ur: [1, 1],
 		lc: [-1, 0], cc: [0, 0], rc: [1, 0],
 		dl: [-1, -1], dc: [0, -1], dr: [1, -1],
 	};
-	let inflight = false, holdTimer = null, queuedStop = null;
-	// Which input owns the current hold, and which button it is driving. A
-	// release only ends the hold it started: two fingers on the pad, or an
-	// arrow pressed while another is still down, used to let the older one's
-	// release stop the newer one's move — harmless while every press was a
-	// self-terminating pulse, not harmless now that a release stops a motor.
+	let inflight = false, activeKind = null, activeAbort = null, activeTimeout = null;
+	let queuedCommand = null, holdTimer = null, queuedStop = null;
 	let holdBtn = null, holdOwner = null, holdKick = null, holdStart = 0;
 
-	// One request in flight at a time — a hold does not queue moves behind a
-	// slow camera, it just measures out what the camera keeps up with. For
-	// Pelco each tick re-arms the camera's auto-stop deadline, so the motor
-	// runs continuously while the button is down rather than in steps. The
-	// one press that must NOT be droppable is stop: a move is under way when
-	// it is sent, and a stop that vanished would leave the motor running
-	// until its deadline — so it queues, and goes out the moment the current
-	// request answers. apiFetch rather than fetch: a lapsed session redirects
-	// to the login page instead of 401ing invisibly at 4 Hz.
-	function req(query, isStop) {
+	// Keep one normal request in flight. A manual move can cancel the AF HTTP
+	// request and wait behind it. Axis stop requests use separate connections,
+	// so pointer release does not wait behind the active movement request.
+	// apiFetch also sends an expired session to the login page.
+	function req(query, kind) {
+		// A release must stop its axis while the movement request is open.
+		// Use a second connection because the service accepts an authorized
+		// stop independently of the current lease owner.
+		if (kind === 'stop') {
+			apiFetch('/cgi-bin/j/ptz.cgi?' + query,
+				{ method: 'POST', credentials: 'same-origin' })
+				.then(r => r.text()).catch(() => {});
+			return;
+		}
 		if (inflight) {
-			if (isStop) queuedStop = query;
+			if (activeKind === 'af') {
+				queuedCommand = { query, kind };
+				if (activeKind === 'af' && activeAbort) activeAbort.abort();
+			}
 			return;
 		}
 		inflight = true;
-		// POST, always: every request this makes moves a motor or steps a
-		// pad, and the endpoint refuses anything else. A GET would be
-		// issuable by any page the operator happens to have open.
-		apiFetch('/cgi-bin/j/ptz.cgi?' + query,
-			{ method: 'POST', credentials: 'same-origin' })
+		activeKind = kind;
+		activeAbort = new AbortController();
+		// A movement is limited to five seconds. Do not let a lost CGI reply
+		// disable this pad for the rest of the page session. AF has its own
+		// longer server-side wait budget.
+		activeTimeout = setTimeout(() => activeAbort && activeAbort.abort(),
+			kind === 'af' ? 65000 : 8000);
+		apiFetch('/cgi-bin/j/ptz.cgi?' + query, {
+			method: 'POST',
+			credentials: 'same-origin',
+			signal: activeAbort.signal,
+		})
 			// The body, not just the headers: j/ptz.cgi answers 200 before it
 			// does anything, so the headers arrive in milliseconds. Reading
 			// to the end of the body is what keeps one request in flight at
@@ -588,10 +846,14 @@
 			.then(r => r.text())
 			.catch(() => {})
 			.finally(() => {
+				clearTimeout(activeTimeout);
+				activeTimeout = null;
 				inflight = false;
-				const q = queuedStop;
-				queuedStop = null;
-				if (q) req(q, true);
+				activeKind = null;
+				activeAbort = null;
+				const next = queuedCommand;
+				queuedCommand = null;
+				if (next) req(next.query, next.kind);
 			});
 	}
 
@@ -622,6 +884,34 @@
 	// bounded and never dropped — a stop that vanished leaves a motor running
 	// to its deadline, which is the one failure with a physical cost.
 	let outstanding = 0;
+	let pendingTrackPan = 0, pendingTrackTilt = 0, pendingTrackFocus = 0, trackFlushTimer = 0, activeTrack = null;
+	function flushTrackPos() {
+		clearTimeout(trackFlushTimer);
+		trackFlushTimer = 0;
+		const dp = Math.round(pendingTrackPan);
+		const dt = Math.round(pendingTrackTilt);
+		const df = Math.round(pendingTrackFocus);
+		if (!dp && !dt && !df) return;
+		pendingTrackPan = 0;
+		pendingTrackTilt = 0;
+		pendingTrackFocus = 0;
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=track&pan_ms=' + dp + '&tilt_ms=' + dt + '&focus_ms=' + df, {
+			method: 'POST',
+			credentials: 'same-origin'
+		}).catch(() => {});
+	}
+	function scheduleTrackFlush() {
+		if (trackFlushTimer) clearTimeout(trackFlushTimer);
+		trackFlushTimer = setTimeout(flushTrackPos, 200);
+	}
+	function commitActiveTrack() {
+		if (!activeTrack) return;
+		const elapsed = Math.max(30, Math.min(Date.now() - activeTrack.startMs, 5000));
+		pendingTrackPan += activeTrack.dp * elapsed * activeTrack.scale;
+		pendingTrackTilt += activeTrack.dt * elapsed * activeTrack.scale;
+		pendingTrackFocus += (activeTrack.df || 0) * elapsed;
+		activeTrack = null;
+	}
 	// `pct`, when given, is this move's speed (the stick's); without it the
 	// motor runs at its own rate.
 	function move(verb, ms, isStop, pct) {
@@ -631,10 +921,52 @@
 			if (!steerable()) return;
 			verb = PO.verb(verb, turn);
 		}
+		if (!isStop && /^(?:up|down|left|right|upleft|upright|downleft|downright)$/.test(verb)) {
+			const sc = effectiveSpeedScale();
+			pct = Math.max(4, Math.round((pct != null ? pct : 100) * sc));
+			if (ms && sc < 1.0) ms = Math.max(25, Math.round(ms * Math.max(0.08, sc)));
+			const dp = verb.indexOf('right') >= 0 ? 1 : (verb.indexOf('left') >= 0 ? -1 : 0);
+			const dt = verb.indexOf('up') >= 0 ? 1 : (verb.indexOf('down') >= 0 ? -1 : 0);
+			const spdScale = pct / 100;
+			if (ms > 0) {
+				commitActiveTrack();
+				pendingTrackPan += dp * ms * spdScale;
+				pendingTrackTilt += dt * ms * spdScale;
+				scheduleTrackFlush();
+			} else {
+				if (!activeTrack || activeTrack.dp !== dp || activeTrack.dt !== dt || activeTrack.df) {
+					commitActiveTrack();
+					activeTrack = { dp, dt, df: 0, startMs: Date.now(), scale: spdScale };
+				} else {
+					activeTrack.scale = spdScale;
+				}
+			}
+		} else if (!isStop && (verb === 'near' || verb === 'far')) {
+			const df = verb === 'far' ? 1 : -1;
+			if (ms > 0) {
+				commitActiveTrack();
+				pendingTrackFocus += df * ms;
+				scheduleTrackFlush();
+			} else {
+				if (!activeTrack || activeTrack.df !== df) {
+					commitActiveTrack();
+					activeTrack = { dp: 0, dt: 0, df, startMs: Date.now(), scale: 1 };
+				}
+			}
+		} else if (isStop) {
+			commitActiveTrack();
+			flushTrackPos();
+		}
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
 		if (pct != null && PS) url += PS.query(verb, pct);
+		if (!isStop && /^(?:up|down|left|right)$/.test(verb) && pct != null && pct < 100) {
+			url = '/cgi-bin/j/ptz.cgi?act=' + encodeURIComponent(verb) + '&ms=' + (ms || 250) + '&speed=' + pct;
+		}
 		if (!isStop && outstanding >= 3) return;
+		if (!isStop && /(?:left|right|up|down|wide|tele)/.test(verb)) {
+			try { window.dispatchEvent(new CustomEvent('mj:ptz-moved', { detail: { verb } })); } catch (e) {}
+		}
 		outstanding++;
 		return apiFetch(url, { method: 'POST', credentials: 'same-origin' })
 			// The body decides, not the status. majestic answers /ptz with a
@@ -800,27 +1132,27 @@
 	}
 
 	// What one press of this button means, from its own dataset.
+	function axisFor(action) {
+		if (action === 'left' || action === 'right') return 'pan';
+		if (action === 'up' || action === 'down') return 'tilt';
+		if (action === 'wide' || action === 'tele') return 'zoom';
+		if (action === 'near' || action === 'far') return 'focus';
+		if (action === 'open' || action === 'close') return 'iris';
+		return 'all';
+	}
 	function fire(btn, ms) {
 		if (btn.dataset.act) {
 			const act = btn.dataset.act;
-			// Autofocus is not a move and must not take the lease. j/ptz.cgi
-			// used to hold its HTTP request open for the whole pass — 60 polls
-			// of `sleep 1` plus a `curl -m 2` each, so up to about three
-			// minutes of a held connection — and because `req` allows one
-			// request in flight, every Near/Far/Wide/Tele press during that
-			// window was silently dropped. The camera would have preempted
-			// happily; the browser never asked it to. Triggering directly and
-			// watching the status is what ends that, rather than a longer
-			// timeout somewhere.
-			if (act === 'af') { triggerAf(); focusReset(); return; }
+			if (act === 'af') { watchAf(); triggerAf(); focusReset(); return; }
+			if (act === 'stop' || act === 'near' || act === 'far') {
+				afWatchUntil = 0;
+				afSeenRunning = false;
+				if (afOverlay) afOverlay.hidden = true;
+			}
 			move(act, ms, act === 'stop');
 			if (act === 'wide' || act === 'tele') {
 				zoomTouched = true;
 				focusReset();
-				// A zoom preempts a running pass exactly as a focus nudge does,
-				// so the reducer has to know this page caused it. Without this
-				// the interruption read as a stranger's and the operator was
-				// told autofocus "was interrupted" by their own zoom.
 				afManual(act);
 			}
 			else if (act === 'near' || act === 'far') afManual(act);
@@ -828,37 +1160,29 @@
 		}
 		const d = DIRS[btn.dataset.dir];
 		if (!d) return;
-		// The centre is home, not a direction, and never waits.
 		if ((d[0] || d[1]) && !steerable()) return;
 		const h = PO ? PO.vec(d[0], d[1], turn) : { x: d[0], y: d[1] };
 		req('h=' + h.x * STEP + '&v=' + h.y * STEP);
 	}
 	function startHold(btn, owner) {
-		// Supersede whatever was held without sending a stop: the new verb is
-		// going out in the same breath and would override it anyway.
 		clearHold();
 		holdBtn = btn;
 		holdOwner = owner;
 		holdStart = Date.now();
 		const act = btn.dataset.act;
-		// Zoom is press-to-move: send one LONG continuous move at once and keep
-		// re-arming it while the button is down; the release stops it. There is no
-		// tap/hold guess to make -- a quick tap releases almost immediately and its
-		// own stop cuts the move short, so the amount zoomed tracks how long the
-		// button was held. This is robust where the old fine-pulse-then-ticker was
-		// not: on a slow or lossy link a single tick that lands still zooms for
-		// HOLD_MS instead of one 500 ms step, and there is no ticker-never-started
-		// window that leaves a hold as one nudge.
+		if (act === 'open') updateIrisLabel('Open…');
+		else if (act === 'close') updateIrisLabel('Close…');
+		else if (act === 'near') updateFocusLabel(lastFv, false, 'Near…');
+		else if (act === 'far') updateFocusLabel(lastFv, false, 'Far…');
+		else if (act === 'left') trackPanTilt('left', 'Pan Left…');
+		else if (act === 'right') trackPanTilt('right', 'Pan Right…');
+		else if (act === 'up') trackPanTilt('up', 'Tilt Up…');
+		else if (act === 'down') trackPanTilt('down', 'Tilt Down…');
 		if (act === 'wide' || act === 'tele') {
 			fire(btn, HOLD_MS);
 			holdTimer = setInterval(() => fire(btn, HOLD_MS), TICK_MS);
 			return;
 		}
-		// Focus keeps the fine-pulse-then-ticker model: the press cannot yet know
-		// whether it is a tap or a hold, so it sends the fine step and the ticker
-		// takes over. The first coarse tick is timed to land as that fine pulse
-		// expires rather than at the usual quarter second, or a hold would be a
-		// nudge, a stall, then motion.
 		const fine = (act && act !== 'stop') ? fineMs : 0;
 		fire(btn, fine);
 		holdKick = setTimeout(() => {
@@ -873,46 +1197,44 @@
 		holdBtn = null;
 		holdOwner = null;
 	}
-	// Releasing a Pelco button has to say so. The camera runs the motor until
-	// a deadline it re-arms on every request, which is what lets a hold be one
-	// continuous move instead of a train of 500 ms steps — but it also means
-	// the motor keeps going for that long after the last tick unless the
-	// release is sent. (It stops by itself either way: that deadline is what
-	// makes a closed tab or a dropped link safe.) The stepped backends move by
-	// a fixed step per request and have nothing to stop.
-	// `owner` names the input letting go; null means "whatever is held, stop"
-	// (the Stop button, losing the window, the tab going away).
 	function stopHold(owner) {
 		if (owner != null && owner !== holdOwner) return;
 		const btn = holdBtn;
 		const heldMs = Date.now() - holdStart;
 		clearHold();
-		// Zoom always issued a LONG continuous move (startHold), so every zoom
-		// release must stop it, however brief -- a quick zoom tap is meant to be a
-		// short nudge, and its stop is what makes it one. Focus sent a
-		// self-terminating fine pulse, so there a press shorter than the step sends
-		// no stop and the nudge completes; anything longer is a sweep that has to
-		// be told to stop or the motor runs on to its deadline.
 		const isZoom = btn && (btn.dataset.act === 'wide' || btn.dataset.act === 'tele');
 		let stopped;
 		if (btn && btn.dataset.act && (isZoom || heldMs >= fineMs)) stopped = move('stop', 0, true);
-		// Letting go of a zoom is what books a focus pass: majestic waits for
-		// the wire to go quiet (700 ms) after the move's own deadline and then
-		// runs one. Nothing told the operator that, so a picture that went soft
-		// and re-sharpened a second after they stopped touching anything read
-		// as the camera misbehaving. Arm the watch here and it announces
-		// itself.
+		if (btn && btn.dataset.act) {
+			const act = btn.dataset.act;
+			const axis = axisFor(act);
+			const trackedMs = Math.round(Math.min(PULSE_MS.maximum, Math.max(axis === 'focus' ? PULSE_MS.focus : PULSE_MS.motor, heldMs)));
+			if (axis === 'pan' || axis === 'tilt' || axis === 'focus') {
+				apiFetch('/cgi-bin/j/ptz.cgi?act=stop&axis=' + axis, {
+					method: 'POST',
+					credentials: 'same-origin'
+				}).catch(() => {});
+			}
+			if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
+				if (shouldWatchAfAfter(axis)) watchAf();
+				if (axis === 'zoom') {
+					setTimeout(fetchZoom, 300);
+					setTimeout(fetchZoom, 800);
+				}
+			} else if (axis === 'focus') {
+				setTimeout(pollAf, 300);
+				setTimeout(pollAf, 800);
+			} else if (axis === 'iris') {
+				if (act === 'open') irisJog++;
+				else if (act === 'close') irisJog--;
+				updateIrisLabel();
+			}
+			updateXyLabel();
+		}
 		if (btn && zoomTouched &&
 			(btn.dataset.act === 'wide' || btn.dataset.act === 'tele')) {
 			zoomTouched = false;
 			if (afState && afSay) {
-				// Armed synchronously, on the release itself. It used to read
-				// the status first and arm in the callback, which let a slow
-				// answer land after the operator had pressed Autofocus and
-				// relabel their own pass as an automatic one. Nothing needed
-				// that round trip: passing no status keeps the baseline the
-				// mount probe recorded, which is the same thing the trigger
-				// does.
 				afState.zoomReleased(undefined, Date.now());
 				afTick(1200);
 			}
@@ -929,51 +1251,86 @@
 	const isSingle = btn => btn.dataset.dir === 'cc' ||
 		btn.dataset.act === 'stop' || btn.dataset.act === 'af';
 
-	// A held button is not a long press on a page: no selection may start
-	// from it (WebKit fires selectstart even where the stylesheet already
-	// refused one, on older iOS) and no context menu -- Android's long-press
-	// menu and a right click both came up over a button being held.
+	mount.addEventListener('pointerdown', e => e.stopPropagation());
+	mount.addEventListener('pointerup', e => e.stopPropagation());
+	mount.addEventListener('click', e => e.stopPropagation());
+	mount.addEventListener('dblclick', e => e.stopPropagation());
 	mount.addEventListener('selectstart', e => e.preventDefault());
-	mount.addEventListener('contextmenu', e => e.preventDefault());
+	mount.addEventListener('contextmenu', e => { e.stopPropagation(); e.preventDefault(); });
 
 	// The fold and the gear are the mount's own, not moves.
-	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip):not([data-preset])').forEach(btn => {
+	if (pad) {
+		const spdRow = document.createElement('div');
+		spdRow.className = 'mj-ptz-spd';
+		spdRow.style.cssText = 'grid-column:span 3;display:flex;align-items:center;justify-content:space-between;gap:2px;padding:2px 2px 0;border-top:1px solid rgba(255,255,255,.08);margin-top:2px;';
+		const mkSpdBtn = (txt, title, delta) => {
+			const b = document.createElement('button');
+			b.type = 'button';
+			b.className = 'mj-ptz-btn mj-ptz-spd';
+			b.style.cssText = 'width:1.75rem;height:1.45rem;font-size:.8rem;font-weight:700;line-height:1;';
+			b.textContent = txt;
+			b.title = title;
+			b.setAttribute('aria-label', title);
+			b.addEventListener('pointerdown', e => e.stopPropagation());
+			b.addEventListener('click', e => {
+				e.stopPropagation();
+				baseSpeedPct = Math.max(20, Math.min(100, baseSpeedPct + delta));
+				try { localStorage.setItem('openipc.ptz.speedPct', String(baseSpeedPct)); } catch (err) {}
+				refreshSpeedLabel();
+			});
+			return b;
+		};
+		spdLabelEl = document.createElement('button');
+		spdLabelEl.type = 'button';
+		spdLabelEl.className = 'mj-ptz-btn mj-ptz-spd';
+		spdLabelEl.style.cssText = 'flex:1;height:1.45rem;font-size:.66rem;font-weight:600;padding:0 2px;';
+		spdLabelEl.addEventListener('pointerdown', e => e.stopPropagation());
+		spdLabelEl.addEventListener('click', e => {
+			e.stopPropagation();
+			zoomScaleOn = !zoomScaleOn;
+			try { localStorage.setItem('openipc.ptz.zoomScale', zoomScaleOn ? '1' : '0'); } catch (err) {}
+			refreshSpeedLabel();
+		});
+		spdMinusBtn = mkSpdBtn('−', 'Decrease PTZ speed', -20);
+		spdPlusBtn = mkSpdBtn('+', 'Increase PTZ speed', 20);
+		spdRow.appendChild(spdMinusBtn);
+		spdRow.appendChild(spdLabelEl);
+		spdRow.appendChild(spdPlusBtn);
+		pad.appendChild(spdRow);
+		refreshSpeedLabel();
+	}
+
+	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip):not(.mj-ptz-spd):not([data-preset])').forEach(btn => {
 		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco
 			// the request itself is the un-droppable kind.
-			btn.addEventListener('click', () => { stopHold(null); fire(btn); });
+			btn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				if (btn.dataset.act === 'stop' || btn.dataset.dir === 'cc') {
+					panJog = 0;
+					tiltJog = 0;
+					updateXyLabel();
+				}
+				stopHold(null);
+				fire(btn);
+			});
 			return;
 		}
 		// The stick's arrows are the stick's: a finger on one is a thumb on
 		// the stick (below), and only the keyboard presses them as buttons.
 		if (!(stick && pad.contains(btn))) {
-			// iOS starts its long-press selection gesture from touchstart, before
-			// any pointer event can refuse it; a held arrow must never be one.
-			// Pointer events still fire, so the hold below is unaffected.
 			btn.addEventListener('touchstart', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
 			btn.addEventListener('pointerdown', e => {
+				e.stopPropagation();
 				e.preventDefault();
-				// Capture keeps pointerup coming to this button however far the
-				// finger or cursor wanders mid-hold.
 				try { btn.setPointerCapture(e.pointerId); } catch (err) {}
 				startHold(btn, 'p' + e.pointerId);
 			});
-			btn.addEventListener('pointerup', e => stopHold('p' + e.pointerId));
-			btn.addEventListener('pointercancel', e => stopHold('p' + e.pointerId));
+			btn.addEventListener('pointerup', e => { e.stopPropagation(); stopHold('p' + e.pointerId); });
+			btn.addEventListener('pointercancel', e => { e.stopPropagation(); stopHold('p' + e.pointerId); });
 		}
-		// Enter/Space on a focused button: a single step or pulse, so the
-		// keyboard can nudge precisely; sweeping is what the stage-level
-		// arrows are for.
-		//
-		// It goes through the same press-and-release pair as a pointer rather
-		// than calling fire() alone, because everything that has to happen when
-		// a lens button comes UP lives in stopHold(): the autofocus watch a zoom
-		// books, and the release of the flag that tells the status reducer a
-		// button is down. A keyboard nudge that only fired left that flag set
-		// for the life of the page, and from then on the reducer deferred every
-		// reading and no pass ever reported a result — an autofocus that looked
-		// like it never converged, from one press of Space on Near.
 		btn.addEventListener('click', e => {
 			if (e.detail !== 0) return;
 			startHold(btn, 'kb');
@@ -1045,6 +1402,7 @@
 		const send = (ms) => {
 			if (!s || !s.verb) return;
 			if (!ms) s.long = true;
+			trackPanTilt(s.verb, null, ms ? ms / 500 : 0.5);
 			move(s.verb, ms, false, s.pct);
 		};
 		const steer = (e) => {
@@ -1091,10 +1449,11 @@
 			pad.classList.remove('mj-ptz-sticking');
 			if (stage) stage.classList.remove('mj-steering');
 			light(null);
+			updateXyLabel();
 		};
 		// The settings, the fold and the handle are buttons on the pad, not
 		// part of the stick.
-		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip'));
+		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip, .mj-ptz-stop, .mj-ptz-spd'));
 		pad.addEventListener('touchstart', (e) => { if (!own(e.target) && e.cancelable) e.preventDefault(); }, { passive: false });
 		pad.addEventListener('pointerdown', (e) => {
 			if (own(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;

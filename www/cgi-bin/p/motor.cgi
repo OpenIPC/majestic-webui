@@ -16,8 +16,8 @@
      nothing about focus, in a typeface nobody controls. They are inline SVG
      on a 20px grid now, the same set the rest of the stage uses.
 
-     Zoom and focus also gained the words they send. A magnifier is read by
-     everybody, so zoom keeps its icon and adds WIDE/TELE; focus has no glyph
+     Zoom and focus also gained direct labels. A magnifier is read by
+     everybody, so zoom keeps its icon and adds IN/OUT; focus has no glyph
      anyone decodes — photography's flower and mountain mean close-up and
      landscape MODES on a stills camera, not "pull focus nearer" on a moving
      lens — so NEAR and FAR carry it, with the icon holding only the idea of
@@ -81,21 +81,21 @@ focus_label="Focus"
 <% if has_cap focus; then %>
 <p id="mj-af-say" class="mj-adapt-toast mj-ptz-why small" role="status" aria-live="polite" hidden></p>
 <% fi %>
-<% if has_cap zoom || has_cap focus; then %>
-<div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom and focus" hidden>
+<% if has_cap zoom || has_cap focus || has_cap iris; then %>
+<div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom, focus and iris" hidden>
 	<% if has_cap zoom; then %>
-	<span class="mj-ptz-group">Zoom</span>
+	<span id="mj-ptz-zoom-label" class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
 			<circle cx="8.8" cy="8.8" r="5.6"></circle><path d="M12.9 12.9 17 17M6.4 8.8h4.8"></path>
 		</svg>
-		<span>Wide</span>
+		<span>Out</span>
 	</button>
 	<button type="button" class="mj-ptz-fnbtn" data-act="tele" aria-label="Zoom in" title="Zoom in (tele)">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
 			<circle cx="8.8" cy="8.8" r="5.6"></circle><path d="M12.9 12.9 17 17M6.4 8.8h4.8M8.8 6.4v4.8"></path>
 		</svg>
-		<span>Tele</span>
+		<span>In</span>
 	</button>
 	<% fi %>
 	<% if has_cap focus; then %>
@@ -144,10 +144,26 @@ focus_label="Focus"
 		<span>Autofocus</span>
 	</button>
 	<% fi %>
+	<% case " $ptz_caps " in *" iris "*) %>
+	<span id="mj-ptz-iris-label" class="mj-ptz-group">Iris</span>
+	<button type="button" class="mj-ptz-fnbtn" data-act="close" aria-label="Iris close" title="Close iris">
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="10" cy="10" r="7"></circle><path d="M10 3v4M15 6l-3.5 2M17 11.5l-3.8-1.2M13 16.5l-2-3.5M7 17v-4M4.5 13l3.5-2M3 8.5l3.8 1.2M7 3.5l2 3.5"></path>
+		</svg>
+		<span>Close</span>
+	</button>
+	<button type="button" class="mj-ptz-fnbtn" data-act="open" aria-label="Iris open" title="Open iris">
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="10" cy="10" r="7"></circle><circle cx="10" cy="10" r="3.2"></circle>
+		</svg>
+		<span>Open</span>
+	</button>
+	<% ;; esac %>
 </div>
 <% fi %>
 <% if has_cap pan || has_cap tilt; then %>
 <div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
+	<span id="mj-ptz-xy-label" class="mj-ptz-group" style="grid-column: span 3;">Pan / Tilt</span>
 	<span class="mj-ptz-void"></span>
 	<% if has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-act="up" aria-label="Tilt up">
@@ -165,7 +181,7 @@ focus_label="Focus"
 	<span class="mj-ptz-void"></span>
 	<% fi %>
 	<button type="button" class="mj-ptz-btn mj-ptz-stop" data-act="stop" aria-label="Stop" title="Stop">
-		<svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="1.4" fill="currentColor"></rect></svg>
+		<svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="2.2" fill="currentColor"></rect></svg>
 	</button>
 	<% if has_cap pan; then %>
 	<button type="button" class="mj-ptz-btn" data-act="right" aria-label="Pan right">
@@ -213,6 +229,7 @@ focus_label="Focus"
 <% else %>
 <% if has_cap pan || has_cap tilt; then %>
 <div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
+	<span id="mj-ptz-xy-label-alt" class="mj-ptz-group" style="grid-column: span 3;">Pan / Tilt</span>
 	<% if has_cap pan && has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="ul" aria-label="Pan up-left">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.6 12.6V6.6h6"></path></svg>
@@ -286,3 +303,6 @@ focus_label="Focus"
 <script src="/a/ptz-follow.js"></script>
 <script src="/a/ptz-presets.js"></script>
 <script src="/a/preview-ptz.js"></script>
+<script src="/a/preview-af-peaks.js"></script>
+<script src="/a/preview-ptz-presets.js"></script>
+<script src="/a/preview-box-ptz.js"></script>

@@ -37,6 +37,48 @@
 			return function () { document.removeEventListener('fullscreenchange', onChange); };
 		},
 
+		wirePip: function (stage, btn) {
+			if (!stage || !btn || !document.pictureInPictureEnabled ||
+				typeof HTMLVideoElement === 'undefined' ||
+				typeof HTMLVideoElement.prototype.requestPictureInPicture !== 'function') return null;
+			btn.hidden = false;
+			const activeVideo = () => {
+				const vids = stage.querySelectorAll('video.mj-stage-media');
+				for (const v of vids) {
+					if (v.style.display !== 'none' && (v.srcObject || v.currentSrc || v.readyState > 0)) return v;
+				}
+				return vids[0] || null;
+			};
+			btn.addEventListener('click', () => {
+				if (document.pictureInPictureElement) {
+					document.exitPictureInPicture().catch(() => {});
+					return;
+				}
+				const v = activeVideo();
+				if (!v || !v.requestPictureInPicture) return;
+				v.disablePictureInPicture = false;
+				v.requestPictureInPicture().catch(() => {
+					v.disablePictureInPicture = true;
+				});
+			});
+			const onChange = () => {
+				const on = !!document.pictureInPictureElement;
+				if (!on) {
+					stage.querySelectorAll('video.mj-stage-media').forEach(v => {
+						v.disablePictureInPicture = true;
+					});
+				}
+				btn.setAttribute('aria-label', on ? 'Exit Picture-in-Picture' : 'Picture-in-Picture');
+				btn.title = on ? 'Exit Picture-in-Picture' : 'Picture-in-Picture';
+			};
+			document.addEventListener('enterpictureinpicture', onChange);
+			document.addEventListener('leavepictureinpicture', onChange);
+			return function () {
+				document.removeEventListener('enterpictureinpicture', onChange);
+				document.removeEventListener('leavepictureinpicture', onChange);
+			};
+		},
+
 		// Snapshot: the camera's own /image.jpg, not a capture of the <video> —
 		// full sensor resolution, whatever size the player happens to be drawn
 		// at. That endpoint is the JPEG channel, so the button only appears when
@@ -277,6 +319,7 @@
 	});
 
 	window.MajesticHero.wireFullscreen(stage, $('#mj-fs'));
+	window.MajesticHero.wirePip(stage, $('#mj-pip'));
 	// Which camera the Live page is showing, if it is showing one at all. A
 	// getter rather than a value: the page can change source under this at any
 	// time, and a snapshot of the camera that WAS on screen is the bug this

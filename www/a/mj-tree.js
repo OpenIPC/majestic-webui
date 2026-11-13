@@ -77,6 +77,8 @@
 		// rather than special-cased, because the rule that drops an empty
 		// section is the right rule and this is the exception to it.
 		const custom = opts.custom instanceof Set ? opts.custom : new Set(opts.custom || []);
+		const extracted = opts.extracted || [];
+		const customGroups = opts.customGroups || [];
 		const props = (schema && schema.properties) || {};
 		const cache = {};
 		// The whole-tree answers share this cache with the per-section ones, so
@@ -99,8 +101,26 @@
 					const secs = (g.sections || []).filter(s => props[s] && props[s].properties);
 					if (secs.length) out.push({ id: g.id, label: g.label, sections: secs });
 				}
+				for (const g of customGroups) {
+					const customLeaves = g.customLeaves || [];
+					const secs = (g.sections || []).filter(s =>
+						extracted.some(x => x.id === s && schemaAt(x.from)) || customLeaves.includes(s));
+					if (secs.length) out.push({ id: g.id, label: g.label, sections: secs,
+						customLeaves: customLeaves });
+				}
 				return out;
 			});
+		}
+
+		function extraction(id) { return extracted.find(x => x.id === id); }
+
+		function schemaAt(path) {
+			let node = schema;
+			for (const part of path.split('.')) {
+				const properties = node && node.properties;
+				node = properties && properties[part];
+			}
+			return node;
 		}
 
 		// A group's x-live keys, in the deck's display order.
@@ -147,10 +167,12 @@
 		function sectionFields(section, withLifted) {
 			return memo(section + (withLifted ? '\0all' : ''), () => {
 				const out = [];
+				const own = extraction(section);
 				const walk = (basePath, p) => {
 					for (const key of Object.keys(p)) {
 						const dot = basePath + '.' + key;
 						if (exclude.has(dot)) continue;
+						if (!own && extracted.some(x => x.from === dot)) continue;
 						const sub = p[key];
 						if (!sub) continue;
 						// A key the camera declares but has superseded: still in
@@ -169,8 +191,9 @@
 							hint: sub.hint || '', help: sub.help || '' });
 					}
 				};
-				const p = (props[section] || {}).properties;
-				if (p) walk(section, p);
+				const source = own ? schemaAt(own.from) : props[section];
+				const p = source && source.properties;
+				if (p) walk(own ? own.from : section, p);
 				return out;
 			});
 		}
@@ -225,6 +248,13 @@
 		// draw — rule 4.
 		function leafIds(group) {
 			const out = [];
+			if (group && group.customLeaves) {
+				for (const section of group.sections) {
+					if (group.customLeaves.includes(section) || leafFields(section).length)
+						out.push(section);
+				}
+				return out;
+			}
 			const o = owner();
 			if (o && group && o.id === group.id) out.push(liveId);
 			for (const s of (group && group.sections) || []) {

@@ -1041,6 +1041,13 @@ update_caminfo() {
 	ptz_support=""; ptz_backend=""; ptz_reason=""
 	ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 	case "$ptz_control" in
+		motorsd|anjoy)
+			if [ -S /run/motorsd.sock ] && [ -x /usr/bin/motorsctl ]; then
+				ptz_support="1"; ptz_backend="pelco"
+			else
+				ptz_reason="Motor service (motorsd) is not running."
+			fi
+			;;
 		gpio)
 			# The binary AND a pin list: gpio-motors without pins errors on
 			# every press, and the pad must not render what cannot work. The
@@ -1109,7 +1116,7 @@ update_caminfo() {
 	local cap
 	for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
 		case "$cap" in
-			pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
+			pan|tilt|zoom|focus|iris) ptz_caps="$ptz_caps $cap" ;;
 		esac
 	done
 	ptz_caps="${ptz_caps# }"
