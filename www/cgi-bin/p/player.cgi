@@ -82,8 +82,8 @@ printf '%s' \
 		     One element cannot do that: MSE drives it through src and WebRTC
 		     through srcObject, so the incoming player would have to evict the
 		     outgoing one before anybody knows whether it works. -->
-		<video id="live-video" class="mj-stage-media" autoplay muted playsinline disablePictureInPicture></video>
-		<video id="live-video-b" class="mj-stage-media" autoplay muted playsinline disablePictureInPicture style="display:none"></video>
+		<video id="live-video" class="mj-stage-media" autoplay muted playsinline></video>
+		<video id="live-video-b" class="mj-stage-media" autoplay muted playsinline style="display:none"></video>
 		<!-- The software-decode rung paints here instead. Two, for the same
 		     reason the videos are two: a trial has to prove itself on an idle
 		     element before it takes the stage. Hidden to start with, because
@@ -492,6 +492,13 @@ printf '%s' \
 					<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
 						<path d="M2.6 6.6h3.2l1.5-2.1h5.4l1.5 2.1h3.2v9H2.6z" stroke-linejoin="round"></path>
 						<circle cx="10" cy="10.6" r="3.1"></circle>
+					</svg>
+				</button>
+				<button type="button" class="mj-hud-ico" id="mj-pip" hidden
+					title="Picture-in-Picture" aria-label="Picture-in-Picture">
+					<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+						<rect x="2.6" y="3.8" width="14.8" height="12.4" rx="1.6"></rect>
+						<rect x="9.6" y="9.2" width="6.2" height="4.8" rx="0.9" fill="currentColor"></rect>
 					</svg>
 				</button>
 				<button type="button" class="mj-hud-ico" id="mj-fs" hidden
